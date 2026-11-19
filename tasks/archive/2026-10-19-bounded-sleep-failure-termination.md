@@ -1,0 +1,83 @@
+# Bounded sleep-failure runtime termination
+
+## Problem
+
+Failed final snapshots currently leave idle workspaces billed indefinitely when exact Git recovery cannot be verified. Raphaël explicitly superseded preservation-blocked behavior: after bounded retries terminate runtime, retain chat and backups, disclose possible loss, and continue fresh from transcript.
+
+## Research
+
+- `session-sleep-episode.ts`: three failures or 15 minutes before fallback; absolute ceiling nine.
+- `session-sleep-fallback.ts`: existing idleness, claim, runtime identity and ProjectData guards; currently blocks missing Git objects.
+- `session-sleep-teardown.ts`: shared idempotent stop, workspace deletion and warm-node handoff.
+- `session-sleep-candidates.ts`: old terminal_failed rows are excluded except stop reconciliation.
+- `absolute-lifetime-preservation.ts`: separately stops requesting sleep after preservation hold, leaving compute live.
+- Restore/finalization gates assume complete or degraded snapshots. Transcript-only fallback must remain wakeable without claiming exact restore.
+- Fresh production read 23:16Z: motivating workspace/node already absent from D1; agent completed 23:02Z. Partial snapshot remains. Parent asked for preceding cleanup evidence; no incident mutation performed here.
+
+## Implementation checklist
+
+- [x] Retain existing configurable full-snapshot budgets; exhausted fallback releases idle runtime without exact Git recovery.
+- [x] Keep transcript, successful backups, honest durable degraded-recovery notice and fresh continuation.
+- [x] Converge legacy preservation-blocked states via lifecycle controls.
+- [x] Keep action-time idleness, wake/runtime guards, ownership and co-tenant isolation.
+- [x] Retry failed stops/deletions and preserve warm-node retention.
+- [x] Update absolute-lifetime behavior and stale docs/notices.
+- [x] Regression tests cover complete task through failed snapshot/termination/deletion, retries, activity races, co-tenants and full snapshot recovery.
+- [ ] Validate lint/typecheck/test/build and local specialist reviews.
+- [ ] Coordinate staging, validate real lifecycle and remove paid fixtures.
+- [ ] PR, CI, best-effort CodeRabbit, merge, production deploy/minimal smoke and incident status to parent.
+
+## Acceptance
+
+Runtime resources are actually removed after bounded snapshot failure, including no-Git cases. Conversations and existing backups are retained. No exact restore promise without verified recovery. Wakes and active work prevent stale teardown; unrelated tenants and intentional warm nodes survive. Lifecycle retries converge across restarts. Staging evidence and production smoke accompany release.
+
+## References
+
+Task 01M5B6WMMD6RV7Z737XSZCSBN9; parent 01M5B3SYXRWTC4HB7KQDT8DRX9. Rules 14, 25, 32, 53, 58, 61; existing bounded fallback integration fixture.
+
+## Durable progress (2026-10-19 23:29 UTC)
+
+Implementation now releases idle compute without exact Git recovery, retains artifacts, normalizes transcript-only sleep metadata, returns unavailable restore instead of claiming exact restore, and starts Instant continuation fresh with saved contract and scoped MCP. Legacy preservation blocks rearm through normal ownership/idleness/claim gates. External stop failures keep retrying. Runtime-changed intents remain fenced and reconcile notices separately. Absolute-lifetime continues requesting guarded cleanup.
+
+Focused regression: 8 files /247 tests PASS (bounded fallback vertical slice, lifecycle, sleep service, episode, sleep sweep, absolute-lifetime, Instant recovery state machine and SQLite helper). Full repository checks previously interrupted by workspace replacement; rerun bounded/sequentially before release. Local review found Instant point/start-race/expiry guards and old stopping missing metadata; addressed, final review pending. Documentation/configuration review in progress.
+
+No PR or staging deployment yet. Shared-sessions task01M59TN50JX53TPVXV0VTAN5JV reserves staging until~23:50UTC; await release. Production23:16Z motivating node/workspace absent D1 before implementation, agent completed23:02; parent asked for provider removal evidence. Chat4caf0202-5601-4db6-9767-30cfd33864b4; new runtime01M5B7SHQRT9Q03X7PNV70NTM9. No production mutation performed. `.do-state.md` and /tmp logs lost on workspace replacement; this task progress supplements local state.
+
+23:34 additional acceptance evidence: bounded integration now63/63 PASS, including real guarded ProjectData stopped-chat transition (conversation stays stopped while no-Git legacy runtime cleans up) and provider-node cleanup retry composition. Discrimination against main: new no-Git test fails as expected because old implementation produces terminal_failed rather than sleeping. Root lint13/13 and typecheck19/19 PASS; root tests still running. Specialist Cloudflare/security and docs/env/constitution PASS; final test-completion followup pending after stopped-chat test.
+
+23:39 selector refinement: historical blocked snapshots with no matching current workspace are excluded before the bounded page. Two regressions cover removed/replaced runtimes; bounded suite65/65 PASS. Lifecycle specialist re-reviewed this refinement PASS. Test-completion reviewer PASS after stopped-chat regression. Root build9/9 PASS, lint13/13 PASS, typecheck19/19 PASS; full root tests and format debt check ongoing. Candidate batch remains configurable10, wall budget20s; newly admitted legacy blocks add one guarded D1 rearm and use the existing bounded background lifecycle I/O, never a full-node destruction shortcut.
+
+23:41 action-boundary regression PASS: work beginning while the degraded notice is persisted prevents the external stop; the durable stopping claim later converges without another snapshot when work ends. Full bounded file now66 scenarios (65 earlier pass + focused new case pass); final full API run will exercise together. No source change for this test. All specialist reviews complete PASS; release gates still pending.
+
+### Final ownership review refinement
+
+- Legacy failed/no-deadline rows and rearmable historical preservation blocks remain owned by the guarded sleep path, rather than being released to older orphan/failed-task cleanup first. Existing finite in-flight age bound remains.
+- Shared SQL/JS classification validates fallback metadata consistently; rearm retains recorded failure counts.
+- Regression validation: predicate and bounded-fallback integration suites 144/144 passed. API typecheck passed; independent lifecycle/security reviewer PASS after malformed-record parity fixes.
+
+### Full-suite reconciliation
+
+- Replaced older preservation-block assertions with actual runtime removal or durable retry after an explicitly unconfirmed stop.
+- Preserved concurrency tests; added claim-time episode-budget recheck so a callback resetting a selected episode cannot trigger stale fallback teardown.
+- Legacy failed/no-deadline pre-episode rows carry forward actual recorded attempts; a nine-attempt row performs no new capture and reports nine failures honestly.
+- Focused lifecycle suites125/125 PASS; independent final lifecycle/security PASS. Full API suite rerunning after initial broad run exposed stale expectations (other20root tasks passed).
+
+### Staging findings and final correction (2026-10-20)
+
+Staging deployment39345094176 succeeded. Real completed VM fixture with missing Git HEAD reached three snapshot failures, then guarded scheduler fallback at00:46:22 with null recovery point, retained HOME backup/transcript, honest loss notice. Physical workspace deletion confirmed00:51:26; normal owner node deletion completed00:52:11 with strict provider proof. Other normal snapshots and intentional warm retention verified. Original production incident had already been removed through owner lifecycle at23:02:24 before this change; retained provider-proof event confirms it, no production reconciliation mutation needed.
+
+Instant fallback stopped compute but staging fresh continuation exposed cleanupTaskRun deleting its logical identity. Narrow correction preserves committed unexpired fallback identities with workspace/node/user/project/generation verification; malformed/unconfirmed/replaced records remain destructive. Real SQLite regression fails on old source, passes with correction; independent lifecycle/security review PASS. Final candidate staging redeploy and fresh Instant continuation validation remain pending; all paid test resources currently off. Chats/backups retained, two temporary test profiles await cleanup. No PR or production rollout yet.
+
+### Final staging acceptance (02:04 UTC)
+
+Final deployment39353262799 succeeded at04e73ca4b including workflow smoke. Fresh Instant fixture completed three recognized-repository/missing-HEAD capture failures with HOME backup retained. Normal scheduler slept it02:01:22 with null recovery point, truthful transcript-only notice, and both logical workspace/node sleeping (not deleted). One new UI follow-up02:02:34 read instructions/transcript, returned the original marker, verified a valid fresh HEAD, and returned idle without replaying the fault. ACP identity changed from01a156fb-78f2-7ea1-97d5-207cbb09ccd0 to01a1570c-0701-7081-9f59-655b1b8578bc. Normal full-snapshot Sleep returned200 at02:03:39; D1 confirms sleeping/available/none with HOME+WIP retained. Both temporary profiles deleted normally; conversations/backups preserved. No test VM remains; final paid inventory confirms zero active nodes; dashboard/projects/settings navigation passed with zero page errors. Desktop continuation screenshot reviewed.
+
+Release gates pending: PR exact-head CI, best-effort CodeRabbit request/wait, merge, production deployment and minimal smoke. Implementation, tests, independent reviews and changed live behavior now pass.
+
+### PR quality reconciliation
+
+PR2382 CI found identical force/non-force snapshot-status branches; simplified to the same single five-status array without changing behavior. Independent lifecycle review PASS and focused lifecycle/bounded regressions pass. A separate merged-main web clock assertion failed18-vs19-minute rounding; owner notified, no sleep-runtime failure indicated. Final candidate staging deployment/smoke and fresh exact-head CI will cover the simplification before merge.
+
+### CodeRabbit review correction
+
+Review5580242397 found stopping-retry promotion stored a fixed trigger and raw lifecycle error. Promotion now derives and stores the actual existing-budget trigger and sanitizes the error through the shared redactor before persistence or notice publication; identity/capture/claim/CAS guards are unchanged. Two real SQLite regressions reproduced incorrect trigger and synthetic token/control-character disclosure on old source, then passed with the fix. Four relevant suites149/149 pass; independent adversarial lifecycle/security review PASS. Updated CI, staging deploy/smoke/navigation and incremental review window remain release gates.

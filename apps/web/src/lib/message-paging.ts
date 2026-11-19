@@ -12,11 +12,17 @@ import {
   compareMessagePositions,
   DEFAULT_CHAT_DELTA_MAX_PAGES,
   DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES,
+  DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
   DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
   formatMessageCursor,
 } from '@simple-agent-manager/shared';
 
-import { type ChatMessageResponse, type ChatSessionDetailResponse, getChatSession } from './api';
+import {
+  type ChatMessageResponse,
+  type ChatSessionDetailResponse,
+  getChatSession,
+  listChatMessages,
+} from './api';
 import { isPersistedMessage, mergeMessages } from './merge-messages';
 
 const CHAT_DELTA_MAX_PAGES =
@@ -25,6 +31,19 @@ const CHAT_DELTA_MAX_PAGES =
 const CHAT_LOAD_UNTIL_MAX_PAGES =
   Number.parseInt(import.meta.env.VITE_CHAT_LOAD_UNTIL_MAX_PAGES || '', 10) ||
   DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES;
+
+/** Mutation snapshots replace loaded cards; positional pages alone introduce rows. */
+function replaceLoadedTools(
+  messages: ChatMessageResponse[],
+  changes: readonly ChatMessageResponse[]
+) {
+  const loadedIds = new Set(messages.map((message) => message.id));
+  return mergeMessages(
+    messages,
+    changes.filter((message) => loadedIds.has(message.id)),
+    'append'
+  );
+}
 
 /** Cursor for the newest persisted message in `messages`, if one is loaded. */
 export function newestPersistedCursor(
@@ -36,6 +55,15 @@ export function newestPersistedCursor(
     if (cursor) return cursor;
   }
   return undefined;
+}
+
+/** Include the cached tail: a canonical message can grow without moving its cursor. */
+function tailRefreshCursor(messages: readonly ChatMessageResponse[]): string | undefined {
+  const tail = newestPersistedMessage(messages);
+  if (!tail) return undefined;
+  // Positive persisted sequences leave room for a lower bound. Overlap is
+  // deduplicated by ID; later pages continue from their exact final position.
+  return formatMessageCursor({ ...tail, sequence: tail.sequence - 1 });
 }
 
 /** Cursor for the oldest persisted message in `messages`, if one is loaded. */
@@ -83,25 +111,114 @@ export async function refreshCachedTranscript(
   cached: ChatSessionDetailResponse,
   signal?: AbortSignal
 ): Promise<ChatSessionDetailResponse | null> {
-  let after = newestPersistedCursor(cached.messages);
+  const after = tailRefreshCursor(cached.messages);
   if (!after) return null;
-  let page = await getChatSession(projectId, sessionId, { signal, after });
-  const newer = [...page.messages];
-  for (let pages = 1; page.hasMore; pages++) {
-    const next = newestPersistedCursor(page.messages);
-    if (pages >= CHAT_DELTA_MAX_PAGES || !next || next === after) {
-      throw new Error(`Message refresh for session ${sessionId} stopped after ${pages} pages`);
-    }
-    after = next;
-    page = await getChatSession(projectId, sessionId, { signal, after });
-    newer.push(...page.messages);
+  const { last, newer } = await readForward(sessionId, after, (cursor) =>
+    getChatSession(projectId, sessionId, {
+      signal,
+      after: cursor,
+      afterToolRevision: cached.toolChanges?.revision,
+    })
+  );
+  if (last.toolChanges?.resetRequired) {
+    const fresh = await fetchNewestPage(projectId, sessionId, signal);
+    return {
+      ...fresh,
+      toolChanges: { ...last.toolChanges, messages: fresh.toolChanges?.messages ?? [] },
+    };
   }
   return {
-    ...page,
-    messages: mergeMessages(cached.messages, newer, 'append'),
+    ...last,
+    messages: replaceLoadedTools(
+      mergeMessages(cached.messages, newer, 'append'),
+      last.toolChanges?.messages ?? []
+    ),
     // The refresh read forward to the newest row; `hasMore` still describes older history.
     hasMore: cached.hasMore,
   };
+}
+
+/**
+ * Every message persisted after the newest persisted row in `loaded`, oldest first, read
+ * through the messages-only route: for a caller that needs rows, not the session or state
+ * snapshot. Reads the newest page when `loaded` holds no persisted row.
+ */
+export async function readMessagesAfter(
+  projectId: string,
+  sessionId: string,
+  loaded: readonly ChatMessageResponse[],
+  signal?: AbortSignal,
+  afterToolRevision = 0
+): Promise<{
+  messages: ChatMessageResponse[];
+  resetRequired: boolean;
+  toolChanges?: ChatSessionDetailResponse['toolChanges'];
+  hasMore?: boolean;
+}> {
+  const after = tailRefreshCursor(loaded);
+  if (!after) {
+    const fresh = await fetchNewestPage(projectId, sessionId, signal);
+    return {
+      messages: fresh.messages,
+      resetRequired: true,
+      toolChanges: fresh.toolChanges,
+      hasMore: fresh.hasMore,
+    };
+  }
+  const { newer, last } = await readForward(sessionId, after, (cursor) =>
+    listChatMessages(projectId, sessionId, {
+      after: cursor,
+      afterToolRevision,
+      limit: DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
+      signal,
+    })
+  );
+  if (last.toolChanges?.resetRequired) {
+    const fresh = await fetchNewestPage(projectId, sessionId, signal);
+    return {
+      messages: fresh.messages,
+      resetRequired: true,
+      toolChanges: fresh.toolChanges,
+      hasMore: fresh.hasMore,
+    };
+  }
+  return {
+    messages: mergeMessages(
+      newer,
+      (last.toolChanges?.messages ?? []).filter((message) =>
+        loaded.some((row) => row.id === message.id)
+      ),
+      'append'
+    ),
+    resetRequired: false,
+    toolChanges: last.toolChanges,
+  };
+}
+
+/**
+ * Reads page after page forward from `after` until the server has nothing newer.
+ *
+ * Throws rather than returning a partial range: a caller that stopped halfway would anchor
+ * its next read past the rows it never read.
+ */
+async function readForward<Page extends { messages: ChatMessageResponse[]; hasMore: boolean }>(
+  sessionId: string,
+  after: string,
+  readPage: (after: string) => Promise<Page>
+): Promise<{ last: Page; newer: ChatMessageResponse[] }> {
+  let cursor = after;
+  let page = await readPage(cursor);
+  const newer = [...page.messages];
+  for (let pages = 1; page.hasMore; pages++) {
+    const next = newestPersistedCursor(page.messages);
+    if (pages >= CHAT_DELTA_MAX_PAGES || !next || next === cursor) {
+      throw new Error(`Message refresh for session ${sessionId} stopped after ${pages} pages`);
+    }
+    cursor = next;
+    page = await readPage(cursor);
+    newer.push(...page.messages);
+  }
+  return { last: page, newer };
 }
 
 function oldestPersistedMessage(
@@ -136,6 +253,16 @@ export async function mergeRecentWindowOrRefresh(
   recent: ChatSessionDetailResponse,
   signal?: AbortSignal
 ): Promise<ChatSessionDetailResponse> {
+  if (
+    recent.toolChanges?.resetRequired ||
+    (current.toolChanges?.revision ?? 0) < (recent.toolChanges?.floor ?? 0)
+  ) {
+    const fresh = await fetchNewestPage(projectId, sessionId, signal);
+    return {
+      ...fresh,
+      toolChanges: { ...(fresh.toolChanges ?? { revision: 0, messages: [] }), resetRequired: true },
+    };
+  }
   const currentNewest = newestPersistedMessage(current.messages);
   const recentOldest = oldestPersistedMessage(recent.messages);
   if (currentNewest && recentOldest && compareMessagePositions(currentNewest, recentOldest) < 0) {
@@ -143,7 +270,10 @@ export async function mergeRecentWindowOrRefresh(
     if (refreshed) {
       return {
         ...recent,
-        messages: mergeMessages(refreshed.messages, recent.messages, 'append'),
+        messages: replaceLoadedTools(
+          mergeMessages(refreshed.messages, recent.messages, 'append'),
+          recent.toolChanges?.messages ?? []
+        ),
         hasMore: refreshed.hasMore,
       };
     }
@@ -151,7 +281,10 @@ export async function mergeRecentWindowOrRefresh(
 
   return {
     ...recent,
-    messages: mergeMessages(current.messages, recent.messages, 'replace'),
+    messages: replaceLoadedTools(
+      mergeMessages(current.messages, recent.messages, 'replace'),
+      recent.toolChanges?.messages ?? []
+    ),
     hasMore: current.hasMore,
   };
 }

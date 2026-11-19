@@ -1,9 +1,6 @@
 import type {
   ListWebhookDeliveriesResponse,
   WebhookDeliveryOutcome,
-  WebhookTriggerConfig,
-  WebhookTriggerConfigInput,
-  WebhookTriggerFilter,
 } from '@simple-agent-manager/shared';
 import { and, desc, eq, lt, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -14,12 +11,12 @@ import { maybeJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
 import { ensureTaskRunnerStarted } from './task-runner-do';
 import { getWebhookTriggerLimits } from './webhook-trigger-config';
+import { toWebhookRuntimeConfig, type WebhookRuntimeConfig } from './webhook-trigger-config-rows';
 import {
   generateWebhookToken,
   getWebhookTokenLastFour,
   hashWebhookToken,
 } from './webhook-trigger-crypto';
-import { normalizeIncludedHeaders } from './webhook-trigger-payload';
 
 export interface WebhookTokenMaterial {
   token: string;
@@ -31,52 +28,7 @@ export interface WebhookTokenMaterial {
 export interface ResolvedWebhookTrigger {
   trigger: schema.TriggerRow;
   projectName: string;
-  config: WebhookTriggerConfig;
-}
-
-function parseFilters(value: string): WebhookTriggerFilter[] {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed) ? (parsed as WebhookTriggerFilter[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function parseHeaders(value: string): string[] {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed) && parsed.every((item) => typeof item === 'string')
-      ? normalizeIncludedHeaders(parsed)
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-export function toWebhookTriggerConfig(row: schema.WebhookTriggerConfigRow): WebhookTriggerConfig {
-  return {
-    sourceLabel: row.sourceLabel,
-    filterMode: row.filterMode === 'any' ? 'any' : 'all',
-    filters: parseFilters(row.filtersJson),
-    includedHeaders: parseHeaders(row.includedHeadersJson),
-    tokenLastFour: row.tokenLastFour,
-    tokenCreatedAt: row.tokenCreatedAt,
-    tokenRotatedAt: row.tokenRotatedAt,
-  };
-}
-
-export function mergeWebhookConfig(
-  current: WebhookTriggerConfig,
-  patch: WebhookTriggerConfigInput
-): WebhookTriggerConfigInput {
-  return {
-    sourceLabel:
-      patch.sourceLabel === undefined ? (current.sourceLabel ?? undefined) : patch.sourceLabel,
-    filterMode: patch.filterMode ?? current.filterMode,
-    filters: patch.filters ?? current.filters,
-    includedHeaders: patch.includedHeaders ?? current.includedHeaders,
-  };
+  config: WebhookRuntimeConfig;
 }
 
 export async function createWebhookTokenMaterial(secret: string): Promise<WebhookTokenMaterial> {
@@ -86,36 +38,6 @@ export async function createWebhookTokenMaterial(secret: string): Promise<Webhoo
     tokenHash: await hashWebhookToken(token, secret),
     tokenLastFour: getWebhookTokenLastFour(token),
     createdAt: new Date().toISOString(),
-  };
-}
-
-export function webhookConfigValues(
-  triggerId: string,
-  config: WebhookTriggerConfigInput,
-  token: WebhookTokenMaterial
-): schema.NewWebhookTriggerConfigRow {
-  return {
-    triggerId,
-    tokenHash: token.tokenHash,
-    tokenLastFour: token.tokenLastFour,
-    tokenCreatedAt: token.createdAt,
-    sourceLabel: config.sourceLabel?.trim() || null,
-    filterMode: config.filterMode ?? 'all',
-    filtersJson: JSON.stringify(config.filters ?? []),
-    includedHeadersJson: JSON.stringify(normalizeIncludedHeaders(config.includedHeaders ?? [])),
-  };
-}
-
-export function webhookConfigUpdateValues(
-  config: WebhookTriggerConfigInput,
-  updatedAt: string
-): Partial<schema.NewWebhookTriggerConfigRow> {
-  return {
-    sourceLabel: config.sourceLabel?.trim() || null,
-    filterMode: config.filterMode ?? 'all',
-    filtersJson: JSON.stringify(config.filters ?? []),
-    includedHeadersJson: JSON.stringify(normalizeIncludedHeaders(config.includedHeaders ?? [])),
-    updatedAt,
   };
 }
 
@@ -134,10 +56,16 @@ export async function findWebhookTriggerByToken(
     .from(schema.webhookTriggerConfigs)
     .innerJoin(schema.triggers, eq(schema.webhookTriggerConfigs.triggerId, schema.triggers.id))
     .innerJoin(schema.projects, eq(schema.triggers.projectId, schema.projects.id))
-    .where(eq(schema.webhookTriggerConfigs.tokenHash, tokenHash))
+    .where(
+      and(
+        eq(schema.webhookTriggerConfigs.tokenHash, tokenHash),
+        // A signed automation's token was never shown to anyone; the shared address refuses it.
+        eq(schema.webhookTriggerConfigs.verificationScheme, 'sam_bearer')
+      )
+    )
     .get();
 
-  return row ? { ...row, config: toWebhookTriggerConfig(row.config) } : null;
+  return row ? { ...row, config: toWebhookRuntimeConfig(row.config) } : null;
 }
 
 export async function rotateWebhookToken(
@@ -151,7 +79,7 @@ export async function rotateWebhookToken(
        SET token_hash = ?, token_last_four = ?, token_created_at = ?, token_rotated_at = ?, updated_at = ?,
            claim_id = NULL, claim_expires_at = NULL, claim_user_id = NULL,
            claim_workspace_id = NULL, claim_session_id = NULL
-     WHERE trigger_id = ?
+     WHERE trigger_id = ? AND verification_scheme = 'sam_bearer'
        AND EXISTS (SELECT 1 FROM triggers WHERE id = ? AND project_id = ? AND source_type = 'webhook')`
   )
     .bind(
@@ -174,13 +102,24 @@ export interface CreateWebhookDeliveryInput {
   requestFingerprint: string;
   bodyBytes: number;
   receivedAt: string;
+  /**
+   * Also refuse a body this automation has already taken as an event under a different key.
+   * Set when the sender's event ID arrives in a header: a header is not covered by the
+   * signature, so without this a captured signed request could be replayed with a fresh ID.
+   */
+  requireNewBody?: boolean;
 }
+
+/** Outcomes that mean a call's body was taken as an event (not refused, not a repeat). */
+const BODY_TAKEN_OUTCOMES = "'processing', 'queued', 'accepted', 'filtered', 'inactive', 'dropped'";
 
 export type WebhookDeliveryReservation =
   | { disposition: 'reserved'; id: string; processingToken: string; retry: boolean }
   | { disposition: 'duplicate'; id: string; executionId?: string }
   | { disposition: 'failed'; id: string; executionId: string }
-  | { disposition: 'in_flight'; id: string };
+  | { disposition: 'in_flight'; id: string }
+  /** `requireNewBody`: the body was already taken under a different event ID. Nothing recorded. */
+  | { disposition: 'body_reused' };
 
 interface ProcessingDelivery {
   id: string;
@@ -337,10 +276,17 @@ export async function createWebhookDelivery(
       getWebhookTriggerLimits(env).deliveryRetentionDays * 86_400_000
   ).toISOString();
   const result = await env.DATABASE.prepare(
+    // One statement, so the body check and the reservation cannot be separated by another
+    // request: D1 runs statements one at a time.
     `INSERT OR IGNORE INTO webhook_deliveries
       (id, trigger_id, idempotency_key_hash, request_fingerprint, outcome, http_status,
        body_bytes, processing_token, processing_heartbeat_at, received_at, expires_at)
-     VALUES (?, ?, ?, ?, 'processing', 0, ?, ?, ?, ?, ?)`
+     SELECT ?, ?, ?, ?, 'processing', 0, ?, ?, ?, ?, ?
+      WHERE ? = 0 OR NOT EXISTS (
+        SELECT 1 FROM webhook_deliveries seen
+         WHERE seen.trigger_id = ? AND seen.request_fingerprint = ?
+           AND seen.outcome IN (${BODY_TAKEN_OUTCOMES})
+           AND (seen.idempotency_key_hash IS NULL OR seen.idempotency_key_hash != ?))`
   )
     .bind(
       id,
@@ -351,7 +297,11 @@ export async function createWebhookDelivery(
       processingToken,
       input.receivedAt,
       input.receivedAt,
-      expiresAt
+      expiresAt,
+      input.requireNewBody ? 1 : 0,
+      input.triggerId,
+      input.requestFingerprint,
+      input.idempotencyKeyHash ?? ''
     )
     .run();
 
@@ -376,10 +326,18 @@ export async function createWebhookDelivery(
       processingToken: string | null;
       processingHeartbeatAt: string | null;
     }>();
-  if (!duplicate) throw new Error('Webhook delivery deduplication failed');
+  // No row under this key: with `requireNewBody` the body was already taken under another key.
+  // That is not a retry of this event, so it is not reported as a duplicate; the caller refuses
+  // it visibly. Without `requireNewBody` nothing explains the ignored insert.
+  if (!duplicate) {
+    if (input.requireNewBody) return { disposition: 'body_reused' };
+    throw new Error('Webhook delivery deduplication failed');
+  }
 
   if (duplicate.request_fingerprint === input.requestFingerprint) {
-    if (duplicate.outcome === 'internal_error') {
+    // A full waiting line refused the event without starting anything, so the sender's retry
+    // of the same event may be taken once there is room, exactly like a failed attempt.
+    if (duplicate.outcome === 'internal_error' || duplicate.outcome === 'queue_full') {
       if (duplicate.executionId) {
         const linkedTask = await findLinkedWebhookTask(env, duplicate.executionId);
         if (await isLinkedExecutionDurable(env, linkedTask)) {

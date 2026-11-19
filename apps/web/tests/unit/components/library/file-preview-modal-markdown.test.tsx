@@ -1,10 +1,28 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FilePreviewModal } from '../../../../src/components/library/FilePreviewModal';
 import type { FileWithTags } from '../../../../src/components/library/types';
 import { FILE_PREVIEW_LOAD_MAX_BYTES } from '../../../../src/lib/file-utils';
+import { renderWithPreviewProviders as render } from '../../../helpers/preview-providers';
+
+// The file preview reads the linked-work query, which is scoped by the signed-in identity.
+// `AuthContext` is module-private, so the hook is mocked rather than the provider mounted.
+vi.mock('../../../../src/components/AuthProvider', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../../src/components/AuthProvider')>()),
+  useAuth: () => ({ user: { id: 'user-preview' }, isSuperadmin: false, isLoading: false }),
+}));
+
+// Nothing is linked in these tests, so the provenance strip renders nothing and the preview's
+// own behaviour is what is under test. `file-linked-work.test.tsx` covers the strip itself.
+vi.mock('../../../../src/lib/api/links', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../../src/lib/api/links')>()),
+  getLibraryFileLinks: vi.fn().mockResolvedValue({
+    sessions: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+    ideas: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+  }),
+}));
 
 // Mock mermaid to avoid DOM rendering issues in test env
 vi.mock('mermaid', () => ({
@@ -296,18 +314,16 @@ describe('FilePreviewModal — HTML', () => {
   beforeEach(() => {
     // Default: every request resolves to a freshly-minted signed preview URL. Individual tests
     // override with mockResolvedValueOnce where call ordering matters.
-    fetchSpy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockImplementation((input: RequestInfo | URL) =>
-        Promise.resolve(
-          String(input).includes('/interactive-preview-url')
-            ? mintResponse('https://preview.example.com/p/signed/index.html')
-            : new Response(HTML_CONTENT, {
-                status: 200,
-                headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-              })
-        )
-      );
+    fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) =>
+      Promise.resolve(
+        String(input).includes('/interactive-preview-url')
+          ? mintResponse('https://preview.example.com/p/signed/index.html')
+          : new Response(HTML_CONTENT, {
+              status: 200,
+              headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+            })
+      )
+    );
   });
 
   afterEach(() => {

@@ -1,23 +1,8 @@
-import type {
-  CredentialProvider,
-  Project,
-  UpdateProjectRequest,
-} from '@simple-agent-manager/shared';
-import {
-  DEFAULT_NODE_WARM_TIMEOUT_MS,
-  MAX_NODE_IDLE_TIMEOUT_MS,
-  MIN_NODE_IDLE_TIMEOUT_MS,
-  PROVIDER_DEFAULT_LOCATIONS,
-  PROVIDER_LABELS,
-  PROVIDER_LOCATIONS,
-  SCALING_PARAMS,
-  type ScalingParamMeta,
-} from '@simple-agent-manager/shared';
+import type { Project, UpdateProjectRequest } from '@simple-agent-manager/shared';
+import { SCALING_PARAMS, type ScalingParamMeta } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 
-import { useCredentials } from '../hooks/useCredentials';
-import { useQueryScope } from '../hooks/useQueryScope';
 import { useToast } from '../hooks/useToast';
 import { updateProject } from '../lib/api';
 
@@ -106,24 +91,6 @@ export function ScalingSettings({
   reload: () => Promise<void>;
 }) {
   const toast = useToast();
-  const nodeIdleTimeoutId = useId();
-
-  // Provider & Location state
-  const [selectedProvider, setSelectedProvider] = useState<CredentialProvider | null>(
-    project.defaultProvider ?? null
-  );
-  const [selectedLocation, setSelectedLocation] = useState<string | null>(
-    project.defaultLocation ?? null
-  );
-  // Derived from the shared credentials query rather than a local mount fetch — this
-  // is the same list the settings pages and workspace creation already load.
-  const queryScope = useQueryScope();
-  const { credentials } = useCredentials(queryScope);
-  const configuredProviders = useMemo<CredentialProvider[]>(
-    () => [...new Set(credentials.filter((c) => c.connected).map((c) => c.provider))],
-    [credentials]
-  );
-  const [savingLocation, setSavingLocation] = useState(false);
 
   // Scaling params state
   const [scalingValues, setScalingValues] = useState<Record<string, number | null>>(() => {
@@ -133,45 +100,21 @@ export function ScalingSettings({
     }
     return initial;
   });
-  const [nodeIdleTimeoutMs, setNodeIdleTimeoutMs] = useState<number | null>(
-    project.nodeIdleTimeoutMs ?? null
-  );
   const [savingScaling, setSavingScaling] = useState(false);
-
 
   // Sync from project prop
   useEffect(() => {
-    setSelectedProvider(project.defaultProvider ?? null);
-    setSelectedLocation(project.defaultLocation ?? null);
     const updated: Record<string, number | null> = {};
     for (const p of SCALING_PARAMS) {
       updated[p.key] = (project[p.key as keyof Project] as number | null) ?? null;
     }
     setScalingValues(updated);
-    setNodeIdleTimeoutMs(project.nodeIdleTimeoutMs ?? null);
   }, [project]);
-
-  const handleSaveProviderLocation = useCallback(async () => {
-    setSavingLocation(true);
-    try {
-      await updateProject(projectId, {
-        defaultProvider: selectedProvider,
-        defaultLocation: selectedLocation,
-      });
-      await reload();
-      toast.success('Provider & location saved');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save');
-    } finally {
-      setSavingLocation(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
-  }, [projectId, selectedProvider, selectedLocation, reload]);
 
   const handleSaveScaling = useCallback(async () => {
     setSavingScaling(true);
     try {
-      const update: UpdateProjectRequest = { ...scalingValues, nodeIdleTimeoutMs };
+      const update: UpdateProjectRequest = { ...scalingValues };
       await updateProject(projectId, update);
       await reload();
       toast.success('Scaling settings saved');
@@ -181,9 +124,7 @@ export function ScalingSettings({
       setSavingScaling(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
-  }, [projectId, scalingValues, nodeIdleTimeoutMs, reload]);
-
-  const locations = selectedProvider ? (PROVIDER_LOCATIONS[selectedProvider] ?? []) : [];
+  }, [projectId, scalingValues, reload]);
 
   // Task limit params
   const taskParams = SCALING_PARAMS.filter((p) =>
@@ -197,11 +138,7 @@ export function ScalingSettings({
   );
   // Node scheduling params
   const nodeParams = SCALING_PARAMS.filter((p) =>
-    [
-      'warmNodeTimeoutMs',
-      'nodeCpuThresholdPercent',
-      'nodeMemoryThresholdPercent',
-    ].includes(p.key)
+    ['warmNodeTimeoutMs', 'nodeCpuThresholdPercent', 'nodeMemoryThresholdPercent'].includes(p.key)
   );
 
   return (
@@ -212,67 +149,6 @@ export function ScalingSettings({
           Override platform defaults for this project. Empty fields use the platform default shown
           as placeholder.
         </p>
-      </div>
-
-      {/* Provider & Location */}
-      <div className="grid gap-3">
-        <h3 className="sam-type-card-title m-0 text-fg-primary">Provider & Location</h3>
-        <div className="flex gap-3 flex-wrap">
-          <div className="flex-1 min-w-[140px]">
-            <label htmlFor="scaling-provider" className="block text-xs text-fg-muted mb-0.5">
-              Default Provider
-            </label>
-            <select
-              id="scaling-provider"
-              value={selectedProvider ?? ''}
-              onChange={(e) => {
-                const p = (e.target.value || null) as CredentialProvider | null;
-                setSelectedProvider(p);
-                // Reset location when provider changes
-                if (p) {
-                  setSelectedLocation(PROVIDER_DEFAULT_LOCATIONS[p] ?? null);
-                } else {
-                  setSelectedLocation(null);
-                }
-              }}
-              className="w-full py-1.5 px-2 border border-border-default rounded-sm bg-inset text-fg-primary text-xs"
-            >
-              <option value="">System picks</option>
-              {configuredProviders.map((p) => (
-                <option key={p} value={p}>
-                  {PROVIDER_LABELS[p] ?? p}
-                </option>
-              ))}
-            </select>
-          </div>
-          {selectedProvider && locations.length > 0 && (
-            <div className="flex-1 min-w-[140px]">
-              <label htmlFor="scaling-location" className="block text-xs text-fg-muted mb-0.5">
-                Default Location
-              </label>
-              <select
-                id="scaling-location"
-                value={selectedLocation ?? ''}
-                onChange={(e) => setSelectedLocation(e.target.value || null)}
-                className="w-full py-1.5 px-2 border border-border-default rounded-sm bg-inset text-fg-primary text-xs"
-              >
-                {locations.map((loc) => (
-                  <option key={loc.id} value={loc.id}>
-                    {loc.name}, {loc.country}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={handleSaveProviderLocation}
-          disabled={savingLocation}
-        >
-          {savingLocation ? 'Saving...' : 'Save Provider & Location'}
-        </Button>
       </div>
 
       {/* Task Limits */}
@@ -301,40 +177,6 @@ export function ScalingSettings({
             disabled={savingScaling}
           />
         ))}
-        {/* Node Idle Timeout — existing dead column, now wired up */}
-        <div className="flex items-center gap-2">
-          <label htmlFor={nodeIdleTimeoutId} className="text-xs text-fg-muted flex-1 min-w-0">
-            Node Idle Timeout
-          </label>
-          <input
-            id={nodeIdleTimeoutId}
-            type="number"
-            min={MIN_NODE_IDLE_TIMEOUT_MS}
-            max={MAX_NODE_IDLE_TIMEOUT_MS}
-            placeholder={formatMs(DEFAULT_NODE_WARM_TIMEOUT_MS)}
-            value={nodeIdleTimeoutMs ?? ''}
-            onChange={(e) => {
-              const raw = e.target.value;
-              setNodeIdleTimeoutMs(raw === '' ? null : Number(raw));
-            }}
-            disabled={savingScaling}
-            className="w-24 py-1 px-2 border border-border-default rounded-sm bg-inset text-fg-primary text-xs font-[inherit] tabular-nums text-right"
-          />
-          {nodeIdleTimeoutMs != null && (
-            <>
-              <span className="text-xs text-fg-muted min-w-[3rem]">
-                {formatMs(nodeIdleTimeoutMs)}
-              </span>
-              <button
-                type="button"
-                onClick={() => setNodeIdleTimeoutMs(null)}
-                className="text-xs text-fg-muted hover:text-fg-primary underline"
-              >
-                Reset
-              </button>
-            </>
-          )}
-        </div>
       </div>
 
       <Button variant="primary" size="sm" onClick={handleSaveScaling} disabled={savingScaling}>

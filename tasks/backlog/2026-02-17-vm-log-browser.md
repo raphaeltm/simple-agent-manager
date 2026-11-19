@@ -1,5 +1,12 @@
 # VM Log Browser: Unified Log Aggregation, Tailing, and Browsing
 
+> **Reconciliation 2026-10-26:** Still open: no merge since 10-12 touched redaction, devcontainer
+> output capture or log-list performance; #2332 (`faaf861ba`) redacts only `exec_with_secrets`
+> output, not node logs. Pointer fixes: the routes are now
+> `packages/vm-agent/internal/server/server.go:1189-1190`, the journald and Docker log-driver config
+> is `packages/cloud-init/src/template.ts:731-757`, and the devcontainer output dropped on success
+> is `packages/vm-agent/internal/bootstrap/bootstrap.go:1050-1054`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** the node log viewer (PR #173, 5abe2516d, spec `specs/020-node-observability`),

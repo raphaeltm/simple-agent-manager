@@ -5,7 +5,728 @@ description: User-facing SAM changes from the latest development cycles, with pr
 
 This page summarizes recent changes that affect how people use SAM. Use it as a quick orientation when returning to the product after a week away, then follow the linked guides for the full workflow.
 
-## This cycle: 29 September – 6 October 2026
+## This cycle: 10 – 17 November 2026
+
+### For everyone
+
+- **One Inbox for everything waiting on you.** Questions, permission requests, secrets,
+  approvals, reviews and tasks from every project are in one list, with **Inbox** in the navigation
+  and an inbox icon where the notification bell was. Answer from the item, with the answer buttons
+  pinned at the bottom; the next item opens with a one-line receipt. **Archive** closes an item,
+  with a few seconds to **Undo**. Other notifications are under **Updates**.
+  → [Inbox](/docs/guides/inbox/)
+- **SAM tells you when something of yours fails.** A task that couldn't start or stopped before
+  finishing, a chat that couldn't wake, a sleep that may have lost work, an automation that keeps
+  failing and an answer that never reached its agent each file a **Problem** in your Inbox, with the
+  fix as its button (**Retry**, **Wake the chat**, **Resume**). It closes by itself once the thing
+  recovers. → [Problems SAM files for you](/docs/guides/inbox/#problems-sam-files-for-you)
+- **Permission requests, forms and sign-in links now notify you**, and open in your Inbox, so you
+  no longer have to watch a chat to see that its agent is waiting.
+  → [When the agent needs you](/docs/guides/chat-features/#when-the-agent-needs-you)
+- **Agents can hand you a task or ask for a review.** Work only a person can do, such as adding a
+  production secret, arrives as a **Task**; something to evaluate arrives as a **Review** with
+  **Looks good**. To give a teammate a task, ask the agent to assign it to them.
+  → [Tasks for people](/docs/guides/inbox/#tasks-for-people)
+- **Agents put their answers in your Inbox.** When you ask an agent for something, its answer or
+  finished work arrives as a **Result**: the outcome in one plain sentence, then the details.
+  **Got it** closes it without waking the agent; **Reply** sends it your reply while it is still
+  running (after it finishes, **Open chat** takes Reply's place). Every item now comes with brief,
+  easy-to-read context, formatted with lists and bold where it helps. Agents are told
+  nobody reads their chat, to file only what is worth your time, and to file nothing for routine
+  runs or work another agent handed out. The content-free "Agent finished — your turn" update is
+  gone. → [What agents file](/docs/guides/inbox/#what-agents-file)
+- **Projects open on their Overview.** Opening a project shows **Needs you** (the first items of its
+  Inbox) above what is running, this week's numbers, budgets, automations and recent work, with a
+  task box that starts work without leaving the page. Chat is one tap away: **Chat** in the project
+  navigation, or the **Chat** button in the phone app bar.
+  → [Project Overview](/docs/guides/project-overview/)
+- **Insights shows how work moves.** A new project page: the median time from idea to merged pull
+  request, how often CI passes first try, how long questions wait for a person, why runs stopped,
+  flaky checks. **Agent setups** compares profiles, skills or models by how often their runs merge
+  without rework, and **Accounts** shows which accounts carried the work and when they ran out.
+  → [Insights](/docs/guides/insights/)
+- **Every task has a receipt.** **Receipt** in the chat's tool rail shows how the run ended, where
+  its time went, whether its first push passed CI, and its tokens per model, with an estimated cost
+  for runs on an API key. → [Run Receipt](/docs/guides/chat-features/#run-receipt)
+- **Run one chat on another account.** When you have several accounts for an agent, **To** says
+  which one a new chat will run on (for example **on Work Max**); select it to pick another for this
+  chat only. A chat's details show the account it ran on, why, and what it actually ran with (model,
+  effort, permissions, skill). → [Using another account for one chat](/docs/guides/agents/#using-another-account-for-one-chat)
+- **Agents ask for secrets in the chat.** A card with a secure field lets you save an API key or
+  token the agent needs; the agent never sees the value. Codex chats show the card too.
+  → [Let the agent ask you for a secret](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret)
+- **Decide which policies every agent reads.** On **Agent Context → Policies**, set a policy to
+  **On demand** so agents get only its title until a task matches it, and see how many characters
+  your pinned policies add to every session. → [Agent Context](/docs/guides/agent-context/)
+- **Connect Slack, or any service that signs its webhooks.** A webhook automation can verify Slack
+  or HMAC signatures, so a mention of your Slack app can start an agent.
+  → [Webhook triggers](/docs/guides/webhook-triggers/)
+- **The compute pool decides the cloud and region.** Projects and agent profiles no longer have
+  provider and location settings. The pool editor lists machines by region, lets you switch a whole
+  cloud account off, and adds nothing on its own.
+  → [Compute pools](/docs/guides/compute-pools/)
+- **Comments you quoted are highlighted** in the chat and in Library files; click one to open its
+  thread. → [Collaboration](/docs/guides/collaboration/)
+- **A task waiting for a usage limit can be cancelled**, or started anyway by its owner, from the
+  chat. → [Waiting for a provider limit reset](/docs/guides/session-troubleshooting/#waiting-for-a-provider-limit-reset)
+
+Also changed this week:
+
+- **The manual "create workspace" screen is gone.** Workspaces come from chats; its old address
+  opens **Nodes**. → [Workspaces](/docs/guides/creating-workspaces/)
+- **Google Cloud nodes hold more workspaces**: boot disks grow with the machine (20 GB per vCPU,
+  50 GB minimum), and a regional quota refusal skips only that region and machine family.
+  → [A task skipped a region](/docs/guides/google-cloud/#a-task-skipped-a-region-or-failed-with-quota--exceeded)
+- **A pool whose machine list failed to refresh says so** and keeps working from the list it last
+  read. → [Pool states](/docs/guides/compute-pools/#pool-states-and-what-to-do-about-them)
+- **Codex runs your repository's hooks** in SAM sessions. → [OpenAI Codex](/docs/guides/agents/#openai-codex)
+- **The sign-in page waits for your instance** to say which sign-in options it has, instead of
+  briefly showing a GitHub button that might not work.
+- **A task waiting on a usage limit is no longer failed as "stuck"** when the limit resets.
+- **A VM chat whose sleep saved no recovery point wakes again.** Every wake of such a chat used to
+  fail; the agent now starts fresh in a new workspace and rebuilds its context from the transcript.
+  → [Continue from the transcript](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot)
+
+### For self-hosters & admins
+
+Which release brought what, if you update a self-hosted instance:
+
+- **v2026.11.10**: pool region rows and account switches, the optional VM Cloudflare Tunnel
+  transport, the sign-in page waiting for its options.
+- **v2026.11.12**: signed webhooks, agent secret requests, Cloudflare Tunnel hardening, provider-limit
+  **Cancel task** / **Start anyway**, agent sign-in to test instances.
+- **v2026.11.13**: session details configuration, secret cards for Codex.
+- **v2026.11.14**: per-chat account choice, comment quote highlights, deploys wait for container
+  rollout, portable deployment build contexts.
+- **v2026.11.15**: setup closes on owned installs, Admin Integrations source labels and **Clear**,
+  Google Cloud boot disk sizing and quota handling.
+- **v2026.11.16**: the Inbox in the web app, the Project Overview, Cloudflare Container deployment
+  builds, container image reuse, the provisioning attempt deadline.
+- **The next release after v2026.11.16** (not yet tagged when this was written): Overview as the
+  landing page, Problems, agent inbox tools and tasks for people, Insights (Flow, Agent setups,
+  Accounts), run receipts, Health & cost, Pinned / On demand policies, Codex repository hooks.
+
+Also for admins:
+
+- **Check that your setup is closed.** After you sign in as the first superadmin, `/api/setup/status`
+  should answer `410`. → [Verification](/docs/guides/self-hosting/#verification)
+- **Admin → Health & cost** shows what the installation's machines and Cloudflare account cost, with
+  a daily Cloudflare estimate (needs **Account Analytics → Read** on the Worker's token).
+  **Admin → Analytics** no longer has the funnel, geography and retention views.
+  → [Health & cost](/docs/guides/admin-settings/#health--cost)
+- **Admin is grouped** into **People**, **Platform**, **Spend and health** and **Operations**;
+  Settings is under **Platform**. A stored setting that is no longer valid is flagged, and the
+  others still load.
+- **Admin → Integrations** shows where each value comes from (stored in SAM, the Worker environment,
+  or not configured) and can **Clear** a stored one.
+- **Optional VM tunnels**: set `VM_AGENT_TRANSPORT=cloudflare-tunnel` and grant the token
+  **Cloudflare One Connector: cloudflared → Edit** to have new VMs connect outbound only.
+  → [Self-hosting](/docs/guides/self-hosting/)
+- **Deploys wait for container rollouts** to finish, and skip rebuilding container images that did
+  not change. → [Deploys wait for container rollout](/docs/guides/self-hosting/#deploys-wait-for-container-rollout)
+- **Installations without Workers AI** hide the microphone and the agent model settings instead of
+  offering controls that fail. → [AI models for agents](/docs/guides/ai-models-for-agents/#for-administrators)
+- **New Admin Settings** include the inbox's limits and timings (`inbox.*`), on-demand policy
+  budgets (`instructions.*`), the provisioning attempt deadline
+  (`operations.nodeProvisioningAttemptDeadlineMs`), Google Cloud boot disks
+  (`gcpCatalog.bootDiskGbPerVcpu`, `gcpCatalog.bootDiskMinGb`) and the deployment build executor
+  (`deployments.buildExecutor`). → [Admin settings](/docs/guides/admin-settings/)
+
+Nothing needs doing when you update: every new permission and setting above is optional.
+
+### Model changes
+
+- **Claude Sonnet 4.5** is marked deprecated and **retires on 30 November 2026**: move profiles off
+  it.
+- Added **Mistral Large 4** and **Z.ai GLM 5.3 Flash** for Vibe (**Mistral Large 3** is now
+  **Mistral Large (latest)**), **Gemini 4 Carbon** and **Hydrogen** for Gemini CLI, and for OpenCode
+  Gemini 4 Carbon and Hydrogen, Claude Fable 5.2, Muse Ember 1.0, Qwen4 Max and several free
+  models; **Crouton Alpha** was removed. → [Choosing a model](/docs/guides/agents/#choosing-a-model)
+
+## Previous cycle: 3 – 10 November 2026
+
+### For everyone
+
+- **Claude Fable 5.2.** Anthropic's newest frontier model (1M-token context) is selectable for
+  Claude Code in an agent profile and through the SAM AI proxy. Sessions that start after the
+  update run a Claude Code version that supports it. → [Agent profiles](/docs/guides/agents/#agent-profiles)
+- **Install your own SAM from the browser.** The installer signs in with Cloudflare, builds a
+  complete SAM in your account in about half an hour, then hands you a setup link, and later offers
+  updates. No GitHub fork or secrets to copy. The hosted installer's Cloudflare sign-in isn't open
+  to everyone yet, so check the guide first.
+  → [Install SAM with the installer](/docs/guides/installer/)
+- **SAM sets you up on your first visit.** It asks only what your instance leaves open (where agents
+  should work, where your code should live), connects your agent, creates your first project and
+  its first profile, and opens the chat. **Complete Setup** in the sidebar picks it up again.
+  → [Let SAM set you up](/docs/quickstart/#2-let-sam-set-you-up)
+- **Projects without GitHub.** Where your instance offers it, **Let SAM keep it** creates a Git
+  repository for a new project in your Cloudflare account. The Dashboard's button is now **New
+  Project**. → [Quickstart](/docs/quickstart/#4-add-a-repository)
+- **Sign in with an emailed code**, where your instance can send email: **Email me a sign-in code**,
+  then the 6-digit code. It works for accounts that already exist.
+  → [Sign in](/docs/quickstart/#1-sign-in)
+- **See how much is left before you pick a profile.** A ring around each profile in the new-chat
+  picker shows the usage left on its account, words appear when it's low or out, used-up profiles
+  fold into **Out for now**, and SAM can offer a profile on another account with room. The
+  **Profiles** page shows each profile's resources and usage in one table.
+  → [Usage limits](/docs/guides/agents/#usage-limits)
+- **Change the model or effort for one chat** under **Chat options** (the sliders button by **To**),
+  without editing the profile. → [Choosing a profile for a new chat](/docs/guides/agents/#choosing-a-profile-for-a-new-chat)
+- **Steer a busy agent.** While Claude Code, Codex or OpenCode works, your message tries to join its
+  current turn by default; tap the **Steer** chip to **Queue** it for after the turn instead. A
+  message with files always queues, and if the agent can't take it mid-turn it is sent next; the
+  label under the message says which happened.
+  → [Sending a message while the agent works](/docs/guides/chat-features/#sending-a-message-while-the-agent-works)
+- **A new look for chat**, with glass panes over a dark green background. Agent replies no longer
+  sit in bubbles, the session list puts **Needs attention** first, then **Awake**, **Sleeping** and
+  **History**, and on a phone the header is one row (tap the title for the chat's details) and a
+  button hides everything but the conversation.
+  → [The chat header](/docs/guides/chat-features/#the-chat-header),
+  [Switching between chats](/docs/guides/chat-features/#switching-between-chats)
+- **Messages SAM adds to a chat are one-line notices** you can expand, and an agent's
+  `request_human_input` question appears in the conversation as a card you can answer there.
+  → [Messages from SAM](/docs/guides/chat-features/#messages-from-sam)
+- **Check attachments before you send.** Attachments show as preview cards; tap one to see the image,
+  video or text, and any file name is accepted (it is renamed to safe characters).
+  → [Attach files to a message](/docs/guides/chat-features/#attach-files-to-a-message)
+- **Google Antigravity** joins the agents, with Gemini models and a Gemini API key.
+  → [Google Antigravity](/docs/guides/agents/#google-antigravity)
+- **See your machines and what runs on them.** The **Nodes** page names each machine by its
+  hardware and shows each session's live CPU and memory against what SAM set aside, and the new
+  **Map** shows how your projects, chats and machines connect.
+  → [What each machine is using](/docs/guides/compute-pools/#what-each-machine-is-using),
+  [Account Map](/docs/guides/account-map/)
+- **Choose which cloud account a pool tries first.** With **Provider order**, SAM starts new machines
+  on the first account and falls back to the next when one can't (out of capacity or quota).
+  → [Provider order](/docs/guides/compute-pools/#provider-order)
+
+Also changed this week:
+
+- **Stopping a workspace takes seconds**, not around half an hour.
+- **A wake that stopped partway now ends** with "The last wake attempt stopped without finishing"
+  instead of showing that it's waking for ever; send a message to try again.
+  → [Wake failed](/docs/guides/session-troubleshooting/#wake-failed)
+- **The default disk is 15 GB** (it was 40 GB). Set **Disk (GB)** for large builds.
+  → [Machine sizing](/docs/guides/creating-workspaces/#machine-sizing)
+- **Finished chats go to sleep sooner.** A VM chat whose agent has done no work for 15 minutes now
+  sleeps, even though the agent still checks in with SAM (Instant chats keep their one-hour idle
+  window), and work the agent left running in the background keeps it awake for up to two hours.
+  → [Sleep and wake](/docs/guides/instant-sessions/#sleep-and-wake)
+- **New machines aren't refused for being busy setting up,** and work goes to the reusable machine
+  with the shortest setup queue. A fresh machine no longer fails its own first task.
+- **Codex runs without its apps and plugins** unless you turn them on in its config file, and a
+  Codex chat on a pinned account keeps refreshing that account, not your default.
+  → [OpenAI Codex](/docs/guides/agents/#openai-codex)
+- **Another agent's words never appear as yours.** Messages between agents, and prompts an agent
+  scheduled, arrive as notices from SAM. → [Scheduled actions](/docs/guides/scheduled-actions/)
+- **Agents see fewer, grouped SAM tools** (`ideas_read`, `tasks_read` and so on, with a `method`).
+  The old tool names still work, so existing skills and instructions keep running.
+  → [MCP tools](/docs/guides/agents/#mcp-tools)
+- **Hosted trials have ended.** Old `/try` links say so and point to self-hosting.
+
+### For self-hosters & admins
+
+Which release brought what, if you update a self-hosted instance:
+
+- **v2026.11.04**: workspace stop in seconds, lifecycle latency monitoring, the first Operations
+  debugger tools.
+- **v2026.11.05**: SAM Glass chat, live steering, the Nodes page, Operations approvals in chat.
+- **v2026.11.06**: Google Antigravity, the Account Map, event delivery steers by default.
+- **v2026.11.07**: Profiles page usage, provider-limit **Resume task**, bounded automatic sleep.
+- **v2026.11.08**: Chat options, provider order and fallback (API), the Google Cloud live catalog,
+  grouped MCP tools, SAM notice rows.
+- **v2026.11.08.1**: the installer with prebuilt release artifacts, usage left in the new-chat
+  picker, one memory policy for placement.
+- **v2026.11.09**: the provider order editor, the 15 GB disk default, hosted trials removed,
+  hardened deployment publishing.
+- **v2026.11.10**: the new first-run setup and onboarding, email sign-in, SAM-hosted repositories
+  during onboarding, Claude Fable 5.2 (it also brought the first items of the next cycle: pool region
+  rows, the optional VM tunnel transport and the sign-in page change).
+
+Also for admins:
+
+- **Operations debugger tools** let agents in the Operations project read across the fleet and ask
+  to run approved actions, which superadmins approve on a card in the chat or in **Admin →
+  Approvals** (new notification type **Approval Needed**). Off until you set
+  `operations.debuggerTools`. → [Operations debugger tools](/docs/guides/admin-settings/#operations-debugger-tools)
+- **Hosted trials are gone**: **Admin → Trials** and `trials.enabled` are removed, and the deploy
+  deletes the `TRIAL_CLAIM_TOKEN_SECRET` and `ANTHROPIC_API_KEY_TRIAL` secrets and drops every
+  `TRIAL_*` variable.
+- **New Admin Settings** include stale agent turns (`operations.sessionStaleTurnNoWorkMinutes`),
+  placement replans (`operations.workspacePlacementMaxRejections`), deployment publish jobs
+  (`deployments.publishJobStallMs`, `deployments.publishJobDeadlineMs`) and Google Cloud machine
+  types (`gcpCatalog.machineTypes`). → [Admin settings](/docs/guides/admin-settings/)
+- **Workspace credentials now end with the workspace**: a stopped, sleeping or deleted workspace's
+  AI proxy and MCP tokens are refused, and a restarted workspace gets new ones. Upgrade very old VM
+  agents before restarting their workspaces. → [Security](/docs/architecture/security/)
+- **Refresh your VM agents** to get the deployment publish fencing.
+  → [Publish-agent rollout compatibility](/docs/guides/app-deployments/#publish-agent-rollout-compatibility)
+
+### Model changes
+
+- Added **GPT-6.1 Terra** for Codex and **Gemini 4 Argon** for OpenCode.
+- **Gemini 2.5 Pro and Flash** are marked deprecated and route to newer models on 1 December 2026.
+- **Vibe GLM 5.2** was removed; **Mistral Medium 3.5** moved to a **Legacy (Deprecated)** group.
+  → [Choosing a model](/docs/guides/agents/#choosing-a-model)
+
+## Earlier: 27 October – 3 November 2026
+
+### For everyone
+
+- **Choose which account each project and profile runs on.** Accounts you already connected can now
+  be used anywhere: pin one to several projects with **Use in projects…** on its card in **Settings →
+  Agents**, or pick it from a project's **Accounts** tab with **Use another account here**. **Make
+  default** switches your default without signing in again, and a profile's **Account** section (or
+  **Use in profiles…** on a card) runs one profile on a different account. Your choices only ever
+  change your own work, even in a shared project. → [Common account tasks](/docs/guides/agents/#common-account-tasks)
+- **Subscription sign-in from a project.** The project's **Accounts** tab offers the same guided
+  Claude Code and Codex sign-in as your settings. The account it connects starts out used only by
+  that project, and you can pin it to others later. Any member of a shared project can pin their own account there.
+  → [Using another account in one project](/docs/guides/agents/#using-another-account-in-one-project)
+- **Clearer Claude sign-in failures.** An incomplete code, a code from an older sign-in tab, a
+  rejected code, a timeout and a network problem each say what happened, with **Try again**.
+  → [Connecting a subscription with guided sign-in](/docs/guides/agents/#connecting-a-subscription-with-guided-sign-in)
+- **Read an agent's whole question from a notification.** **Read question & context** opens the full
+  question with the messages before it, and you can answer it right there.
+  → [Inbox](/docs/guides/inbox/) (the question reader was replaced by the Inbox on 2026-11-16)
+- **A waking chat says why it is waiting**, for example that the cloud provider is out of capacity or
+  your account is at its server limit, and when SAM tries next.
+  → [Recovery is in progress](/docs/guides/session-troubleshooting/#recovery-is-in-progress)
+- **Remove a node SAM can't delete.** If SAM can't prove which cloud account owns a server and you
+  already deleted it in the provider's console, **I already deleted this server** on the node's page
+  removes the node. → [A node won't go away](/docs/guides/session-troubleshooting/#a-node-wont-go-away)
+- **Stopped machines no longer stay billed indefinitely.** A stopped workspace machine whose cleanup
+  stays blocked is retired after 30 minutes, unless something on it still needs it, and the node
+  shows **Cleanup blocked since…** with the reason meanwhile.
+  → [A node won't go away](/docs/guides/session-troubleshooting/#a-node-wont-go-away)
+- **A pause that didn't finish stays visible.** A deployment whose pause stopped partway says **Pause
+  didn't finish** and offers **Pause again**, instead of claiming it's paused.
+  → [If pausing doesn't finish](/docs/guides/app-deployments/#if-pausing-doesnt-finish)
+
+Also changed this week:
+
+- **OpenCode is now v2.2.5**, and OpenCode chats on Gemini models work with SAM's tools instead of
+  failing every prompt. → [OpenCode](/docs/guides/agents/#opencode)
+- **A machine at 80% disk takes no new work** (it was 90%), so SAM may start a new machine instead.
+  → [Compute pools troubleshooting](/docs/guides/compute-pools/#troubleshooting)
+
+### For self-hosters & admins
+
+Which release brought what, if you update a self-hosted instance:
+
+- **v2026.10.28**: the 80% disk limit.
+- **v2026.10.29**: deployment teardown recovery, the GitHub webhook change, eviction recovery settings.
+- **v2026.10.30**: one accounts experience, Claude sign-in fixes.
+- **v2026.10.31**: project sign-in, stranded VM retirement, API Worker tracing, read deadlines,
+  `include=recent`.
+- **v2026.11.01**: existing accounts in projects, OpenCode v2.2.5, Gemini tool schemas.
+- **v2026.11.02**: **Make default**, profile accounts, the question reader.
+- **The first release after v2026.11.02**: **I already deleted this server** and the wake wait
+  reasons.
+
+- **API Worker tracing is on at 100% sampling.** From 1 December 2026, Cloudflare counts stored
+  traces toward your account's observability allowances, so decide on a sampling rate before then.
+  → [API Worker tracing](/docs/guides/self-hosting/#api-worker-tracing)
+- **New Admin Settings**: blocked VM cleanup (`operations.nodeCleanupBlockedRetirementMs` and two
+  alert intervals), eviction recovery retries, and **Read deadlines** (`performance.*`). A node SAM
+  keeps because it can't prove who owns it shows up in **Admin → Errors**.
+  → [Blocked VM cleanup](/docs/guides/admin-settings/#blocked-vm-cleanup)
+- **A failed GitHub webhook now fails** instead of being acknowledged and lost. GitHub doesn't retry
+  it, so after an outage use **Redeliver** in the GitHub App's webhook log.
+  → [Triggers](/docs/guides/triggers/)
+- **API change:** `GET /api/projects/:id` returns empty `recentSessions` and `recentActivity` unless
+  you add `?include=recent`. → [API reference](/docs/reference/api/)
+
+Database migrations run in the deploy pipeline, and there are no new secrets.
+
+## Earlier: 20 – 27 October 2026
+
+### For everyone
+
+- **Accounts, organized by agent and by cloud.** **Settings → Agents** shows each agent's accounts
+  (your default, pinned to a project, or unattached) above its defaults, and **Settings →
+  Infrastructure** does the same for cloud accounts. The **Cloud Provider** and **Connections** tabs
+  are gone (old links redirect), and the raw credential records stay under **Settings → Advanced**; a
+  project's **Connections** tab is now **Accounts**.
+  → [Connecting Agent Accounts](/docs/guides/agents/#connecting-agent-accounts)
+- **One Automation page.** **Automation** in the project navigation replaced the separate **Events**
+  and **Triggers** pages. It shows what needs your attention first, what's coming up, every
+  automation in plain words ("When X → do Y"), workflows, recent runs, and what agents are waiting
+  for. **New automation** sets one up in four steps; old links still work.
+  → [Automation](/docs/guides/scheduled-actions/)
+- **Ideas follow their work.** An idea's state now comes from the chats and pull requests working on
+  it: **In progress**, **In review**, **Merged**, and so on. The Ideas list opens on **Needs you**, with
+  each question, stopped run or merged pull request and its next step as a button. Each idea has a
+  page with the plan, its work, notes from people and agents, and related files. **Start work**
+  replaces **Execute**: pick who works on it and add a note. → [Ideas](/docs/guides/ideas/)
+- **See what a chat is connected to.** **Related** in the tool rail lists the ideas, library files
+  and pull requests a chat touched, pull requests show their state and checks, the header shows
+  **Working on** with the idea's name, and a library file says which chat uploaded it.
+  → [Related Work](/docs/guides/chat-features/#related-work)
+- **Pick who does the work before you type.** A new chat shows your recent profiles as cards under
+  **Who should take this?**, and **To** above the message box opens every profile, with ones you
+  never pick hidden on request. A skill now only changes what it sets, so the profile's agent runs
+  unless the skill picks one (skills saved before 21 October may still set one).
+  → [Choosing a profile for a new chat](/docs/guides/agents/#choosing-a-profile-for-a-new-chat)
+- **Read a comment where it was made.** Opening a chat comment from the **Comments** page, or from
+  a comment or mention notification, shows the conversation opened on the words the comment is
+  about, highlighted, with the thread beside it on a desktop or in a sheet on a phone.
+  → [Read a comment in its conversation](/docs/guides/collaboration/#read-a-comment-in-its-conversation)
+- **Workflows you can follow.** Ask an agent to plan multi-step work as a workflow, including steps
+  that wait for an event such as CI finishing, and follow each run under **Automation → Workflows**.
+  → [Workflows](/docs/guides/workflows/)
+- **Busy GitHub automations queue events** (since 27 October). An event that arrives while a GitHub
+  automation is busy waits its turn instead of being skipped, and **Keep issue and PR follow-ups in
+  one chat** sends a new comment on an issue to the chat already working on it.
+  → [When a GitHub trigger is busy](/docs/guides/triggers/#when-a-github-trigger-is-busy)
+- **Agents can call other AI models.** Agents can call Cloudflare-hosted models while they work, for
+  example asking a decision model a yes/no question or transcribing a recording, within a monthly
+  limit you set in project settings. → [AI models for agents](/docs/guides/ai-models-for-agents/)
+- **A clearer Deployments page.** Each environment is one page: what's running in one sentence,
+  problems with their fixes, recent deploys with the steps the server reported, then settings,
+  addresses, saved data, and Pause or Delete. **Ask an agent** opens a chat with the request already
+  written. → [App Deployments](/docs/guides/app-deployments/)
+- **A private SAM assistant (preview).** Turn on **SAM assistant** at the top of **Settings**, then ask
+  what needs your attention, or have it start, follow up on, or stop work in a project. Stopping work
+  or answering an agent waits for your confirmation, and its answers count toward your AI usage.
+  → [SAM Assistant](/docs/guides/sam-assistant/)
+- **Your AI app can do more with SAM.** Through the Connector, Claude or ChatGPT can read an agent's
+  whole replies, follow a whole team of agents, schedule work, read coordination channels, and
+  interrupt an agent without stopping its chat. Refresh SAM in the app's connector settings to see
+  the new tools. → [Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/)
+- **Use a short-lived identity instead of a stored key.** An agent can run a command with a SAM-signed
+  token that a service such as Vault, AWS or Google Cloud is set up to trust.
+  → [Workload identity](/docs/guides/workload-identity/)
+- **Workspaces moved under Infrastructure.** **Infrastructure** in the main navigation opens the
+  Nodes page, where each machine lists its workspaces; the Workspaces page is gone.
+  → [Using a Workspace Directly](/docs/guides/creating-workspaces/#using-a-workspace-directly)
+
+Also changed this week:
+
+- **Project setup sets the project's default agent**, which automations and tasks without a profile
+  use; change it in **Project Settings → Agents → Default Agent Type**.
+- **Agents can wake less often for busy channels.** Ask an agent to follow a channel "at most every
+  10 minutes" and later messages arrive together.
+  → [Messages between agents](/docs/guides/agents/#messages-between-agents)
+- **A deployment stuck after a failed placement recovers** (since 22 October): ask an agent to deploy
+  again, or Pause then Start.
+  → [Recovering from a failed release](/docs/guides/app-deployments/#recovering-from-a-failed-release)
+- **Agents get the idea they're working on**, and can look up the chats, files and pull requests
+  linked to it.
+
+### For self-hosters & admins
+
+Releases: Automation, the SAM assistant and Connector interrupt in **v2026.10.21**; the new-chat
+picker and skill fix, workflows, the Infrastructure navigation and SAM's live answers in
+**v2026.10.22**; AI models for agents, deployment recovery and setup's default agent in
+**v2026.10.23**; the comment reader, linked work, pull request tracking, workload identity, the
+Deployments page and agent email in **v2026.10.24**; the idea page, Start work and derived idea
+states in **v2026.10.25**; the Connector's whole messages, schedules and channels, wake intervals
+and the model list in **v2026.10.26**. The GitHub trigger queue and agent email's DNS approval come
+in the first release after v2026.10.26.
+
+- **Agent email (preview).** Give the deploy token **Zone Settings**, **Email Routing Rules** and
+  **Email Sending** edit permissions, deploy, then turn it on in **Admin → Integrations → Agent
+  email**, approving any change to your main domain's DNS.
+  → [Turn on agent email](/docs/guides/email-triggers/#turn-on-agent-email-admins)
+- **AI models for agents** are billed to your Cloudflare account, up to $5 per project a month by
+  default ($50 at most); `aiModels.enabled` in **Admin → Settings** turns them off.
+  → [AI models for agents](/docs/guides/ai-models-for-agents/)
+- **SAM assistant** is off until each person turns it on; setting `operations.samOperatorDisabled` to
+  **Enabled** turns it off for everyone. It uses `SAM_MODEL`; the current default is DeepSeek V4.1
+  Flash 1017 on Workers AI. See the [current assistant configuration](/docs/guides/sam-assistant/#for-self-hosters).
+- **Workload identity** tokens come from `https://api.<your-domain>/oidc`, which the services that
+  trust them must be able to reach. Their lifetime is `operations.workloadIdentityTokenTtlSeconds`
+  (5 minutes).
+- **Existing GitHub automations start queueing** busy events (50 events, 24 hours each). The most a
+  trigger can set is an **Admin → Settings → Operations** limit (1,000 events, 30 days).
+- **New Admin Settings groups**: Chat, AI models, Email, and Operations limits for workflows, linked
+  work, pull request tracking, the GitHub queue, workload identity and the SAM assistant.
+  → [Admin Settings](/docs/guides/admin-settings/)
+
+Database migrations run in the deploy pipeline, and there are no new secrets.
+
+### Model changes
+
+Codex's older models are relabelled: **GPT-5.5 (API key only)** and **GPT-5.2 (Deprecated for
+ChatGPT sign-in)** are now under **GPT-5.5 / 5.2 (Legacy)**, and **GPT-5.4** and **GPT-5.4 Mini** say
+**(API key only)**: they don't work with a ChatGPT subscription. In OpenCode, Zen adds **Muse Wonder**
+and **Flint 40B Free** and drops **LongCat 2.5 Preview Free**, **DeepSeek V4 Flash Vision Exp**,
+**Space Bunny Free** and **Claude Sonnet 4**; Go adds **Iceman Contributor Free**, **Gemini 4
+Argon**, **Kimi K3.1 Pro** and **MiniMax M3.1 Flash** and drops **LongCat 2.5 Preview Free**,
+**Space Bunny** and **Gemini 4 Argon Contributor**. Mistral Vibe's **Z.ai GLM 5.2** retires on
+31 October 2026. A profile set to a model that left the list keeps it as a custom model, so choose
+again if the provider no longer offers it. See [Choosing a model](/docs/guides/agents/#choosing-a-model).
+
+## Earlier: 13 – 20 October 2026
+
+### For everyone
+
+- **Work on a chat together.** Anyone in a project can now comment on any message in any chat and
+  @mention a teammate, and whoever can drive the chat can send a comment on to its agent. The person
+  who started a chat can share it with a teammate for 5 minutes to an hour, so they can drive it while
+  you're away, on your accounts.
+  → [Work together in a chat](/docs/guides/collaboration/#work-together-in-a-chat)
+- **Ask the agent for a pull request.** SAM no longer commits, pushes, or opens pull requests for you
+  at the end of a turn or a task: the agent does, when it's told to. Say "…and open a pull request"
+  in your message, or put it in a profile's **System Prompt (append)**. A Task's agent is still told
+  to push its branch before it finishes.
+  → [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands)
+- **A usage limit pauses the work instead of failing it.** When Claude Code or Codex hits its plan's
+  limit mid-task, or a provider's rate limit says when it resets, on your own subscription or key (or
+  a project credential), the chat says **Waiting for provider limit reset at…**, rests (usually
+  asleep), and carries on by itself after the reset (unless it ends up **Blocked**).
+  → [Waiting for a provider limit reset](/docs/guides/session-troubleshooting/#waiting-for-a-provider-limit-reset)
+- **A workspace whose snapshots keep failing is shut down instead of left running.** After three
+  failed attempts or 15 minutes, SAM stops the idle workspace and says in the chat what was kept.
+  Changes that no successful snapshot saved can be lost, so push work you want to keep. Send a
+  message to carry on in a fresh workspace. (Until 20 October, a session with no safe recovery point
+  kept its workspace running.)
+  → [SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot)
+- **Fork straight from an archived or expired chat.** Its message box becomes a **Fork** box: type
+  what's next, and a new chat starts with the old one's recent history.
+  → [Fork an archived or expired chat](/docs/guides/chat-features/#fork-an-archived-or-expired-chat)
+- **Attach files to a sleeping chat.** Files wait until you send, and are delivered once the chat has
+  woken. Pasting 4,000 characters or more makes a text file, and you can send files with no message.
+  → [Attach Files to a Message](/docs/guides/chat-features/#attach-files-to-a-message)
+- **Secret variables stay out of the agent's shell.** A variable marked **Secret** now shows as a
+  placeholder, and the agent runs commands that need it with `exec_with_secrets`.
+  → [Run commands with secrets](/docs/guides/secret-execution/)
+- **A plainer compute pool page.** Your pool reads as one sentence plus the machines it allows, and
+  editing is one row per machine type with a chip per region. → [Compute Pools](/docs/guides/compute-pools/)
+- **Model changes** for Claude Code, OpenCode, and Gemini CLI. → [Model changes](#model-changes-1)
+
+Also changed this week:
+
+- **Some VM chats stuck on "SAM spent the wake retry budget for this sleep snapshot." wake again.**
+  If an earlier failed wake had left the chat tied to a deleted workspace, sending a message now
+  wakes it (since 19 October). → [Wake failed](/docs/guides/session-troubleshooting/#wake-failed)
+- **An agent moved off a VM that ran short of memory carries on in a Chat too**, not only in a
+  Task, if it was in the middle of something.
+- **An answered permission card stays where it was asked**, instead of following you to the bottom of
+  the chat.
+- **Empty machines are released.** A VM SAM provisioned that has no workspace left now always gets
+  its warm window and is then deleted, instead of sometimes running until someone noticed.
+- **Git in a workspace copes with short SAM outages**, and losing access to a repository takes
+  effect on the next Git command. → [`git push` or `gh` can't authenticate](/docs/guides/session-troubleshooting/#git-push-or-gh-cant-authenticate)
+- **A GitHub event whose run fails to start is retried** for about two hours, and **Redeliver** in
+  GitHub never starts a second run. → [When a trigger runs](/docs/guides/triggers/#when-a-trigger-runs)
+- **Agents can take over a pull request they didn't open** and record that they're responsible for
+  it, which other agents can look up.
+  → [Pull requests an agent takes over](/docs/guides/agents/#pull-requests-an-agent-takes-over)
+- **Agents waiting on CI use exact event names** (`check_suite.completed` + `workflow_run.completed` by default, with the full commit SHA; `check_run.completed` is opt-in for early per-job failure);
+  bare names like `check_run` never matched.
+
+### For self-hosters & admins
+
+**Update to v2026.10.17 or later.** Cloudflare's R2 API now rejects the CORS request that releases
+up to v2026.10.16 send, so their deploys stop at **Configure R2 CORS**
+([Troubleshooting](/docs/guides/self-hosting/#deploy-fails-at-configure-r2-cors-http-400-code-10029)).
+Shared chats, comments on teammates' chats, and the shut-down of workspaces whose snapshots keep
+failing come in v2026.10.20.
+
+- **Plan to update forward, not roll back.** Once v2026.10.18 or later has deployed, deploying an
+  older release fails with "Deployed Durable Object migration tag "v22" is not present…". If a
+  release misbehaves, update to a newer one.
+  → [Update forward, not back](/docs/guides/self-hosting/#option-a-update-self-hosted-instance-workflow-recommended)
+- **Admin → Settings** (from v2026.10.17) lets superadmins change sign-in providers, Connector
+  limits, trials, and background jobs without redeploying, and collaboration limits from
+  v2026.10.20. A value saved
+  there wins over its GitHub Environment variable, so once someone saves, for example, the Connector
+  switch, `CONNECTOR_ENABLED` no longer applies, and the `trials:enabled` KV switch only counts while
+  no trials value is saved. → [Admin Settings](/docs/guides/admin-settings/)
+- **Agents, not SAM, open pull requests, when asked** (from v2026.10.17). The GitHub App that self-hosted
+  SAM creates can only read pull requests, so give it **Pull requests: Read and write** if you want
+  agents to open them. VMs already running when you update keep publishing the old way until they're
+  replaced. → [Let agents open pull requests](/docs/guides/self-hosting/#let-agents-open-pull-requests)
+- **Empty VMs are cleaned up** (from v2026.10.17): an empty managed VM is gone within about an hour.
+  The grace period before SAM catches a missed one is `NODE_EMPTY_WARM_HANDOFF_GRACE_MS` (30 minutes).
+- **Secret variables are placeholders** (from v2026.10.14) for agents started after you update;
+  `exec_with_secrets` needs nodes started after it.
+- **Durable Object storage for MCP rate limits and workspace boot logs** (v2026.10.18; this
+  migration is why you can't roll back). Your instance keeps using KV for them until someone runs the
+  **Reliability Storage Activation** workflow, and nothing breaks if nobody does.
+- **New optional settings**, all with working defaults: GitHub trigger delivery retries
+  ([`GITHUB_TRIGGER_RECOVERY_*`](/docs/reference/configuration/#github-trigger-delivery-recovery),
+  set as `GH_TRIGGER_RECOVERY_*`), chat attachment limits
+  ([`ATTACHMENT_*`](/docs/reference/configuration/#chat-attachments)), and archived-fork history
+  (`ARCHIVED_FORK_HISTORY_MAX_CHARS`). The VM agent also has new defaults for Git credential retries
+  (`GIT_TOKEN_*`, `GIT_CREDENTIAL_TIMEOUT`) and secret execution (`SECRET_EXEC_*`), but SAM doesn't
+  pass these to the machines it starts, so the defaults apply (see
+  [VM Agent configuration](/docs/reference/vm-agent/#configuration)).
+
+There are no new secrets or Cloudflare token permissions, and the new database migrations run in the
+deploy pipeline.
+
+### Work together in a chat
+
+Until now, only the person who started a chat could comment in it, and nobody else could steer its
+agent. Now any project member can select **Comment** under a message, @mention a teammate (who gets a
+**Mention** notification), and, if they can drive the chat, choose **Send to agent** so the comment
+reaches the agent, labelled with who sent it.
+
+To hand a chat over for a while, its owner selects **Share** in the tool rail, picks a teammate and
+5, 10, 30, or 60 minutes, and confirms that the chat keeps running on the owner's accounts. The teammate gets a
+notification, sees how long they have above the message box, and can message the agent (with files),
+answer it, schedule messages, look through the repository's files and changes read-only, and
+interrupt, sleep or archive the chat until the time is up or the owner revokes it. See
+[Work together in a chat](/docs/guides/collaboration/#work-together-in-a-chat).
+
+### SAM leaves publishing to the agent
+
+Until 16 October, after every turn that ended without an error, SAM itself committed a Task's
+changes, pushed its branch, and opened a pull request. Now nothing is published unless the agent
+does it. SAM still creates the Task's `sam/…` branch and checks it out, tells a Task's agent to push
+it before reporting the task complete, and keeps unpushed changes in the sleep snapshot for seven
+days (unless snapshots keep failing; see above). Whether there's a pull request is up to you: ask for one. The completion notification links
+one when the agent reports it. See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands).
+
+### Model changes
+
+Claude Code's list no longer shows separate "(1M context)" entries for **Claude Opus 4.8** and
+**Claude Opus 4.7**: the regular entries are now labelled **(1M context)**, because those models have
+it natively. If a profile used one of the removed entries, choose its model again. OpenCode's
+built-in lists now match what OpenCode offers: on Zen, **Exo Free**, **Step 5 Preview Free**, **Ling
+3.1 Flash Free**, **Ling 3.0 Flash Fin Free**, and **Muse Spark 1.3 Free** are gone and **Beam Free**,
+**DeepSeek V4.1 Flash Free**, **Gemini 4 Argon**, **GLM-5.3-Flash Free**, and **Nemotron 3.5 Super VL
+Free** are new; on Go, **DeepSeek V4 Flash**, **DeepSeek V4 Flash Vision Exp**, **MiniMax-M2.7**,
+**Grok 4.6**, and **Step 5 Preview Free** are gone and **Beam Free**, **Step 5 Preview**, and
+**Gemini 4 Argon Contributor** are new. Gemini CLI's 2.5 models are now listed as legacy. A profile
+set to a model that left the list keeps it as a custom model, so choose again if OpenCode no longer
+offers it. See [Choosing a model](/docs/guides/agents/#choosing-a-model).
+
+## Earlier: 6 – 13 October 2026
+
+### For everyone
+
+- **Use SAM from Claude and ChatGPT.** Connect the AI app you already use to SAM, then ask it what
+  needs your attention, start a chat in a project, reply to one, or answer an agent that's waiting
+  for you, without opening SAM. → [Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/)
+- **Agents can set up automation for you.** Ask an agent to create a schedule, GitHub, or webhook
+  trigger, and it appears on the project's **Automation** page like one you made yourself.
+  → [Triggers](/docs/guides/triggers/#ask-an-agent-to-set-one-up)
+- **A chat wakes up as it went to sleep.** A chat started since 7 October wakes with the agent,
+  model, and permission mode it started with, and can still ask you for approval if it could before.
+  A **Task** stays a Task after a wake.
+  → [After a chat wakes from sleep](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
+- **Fork and Retry open instantly.** Fork no longer waits for an AI summary: the new chat is
+  pre-filled with the old session's IDs, and its agent reads the original conversation itself.
+  Retry pre-fills the original request. → [Conversation Forking](/docs/guides/chat-features/#conversation-forking)
+- **An expired chat says so.** A chat that slept longer than its saved workspace is kept shows
+  **Expired** and offers **Fork conversation** (since 16 October, a **Fork** box where the message
+  box was), instead of failing when you try to wake it.
+  → [Expired saved workspace](/docs/guides/session-troubleshooting/#expired-saved-workspace)
+- **A failed wake keeps the chat asleep.** If a VM chat can't wake, it goes back to sleep on the
+  same task and you can try again, instead of the task failing. → [Wake failed](/docs/guides/session-troubleshooting/#wake-failed)
+- **SAM can once again move a session off a VM that runs short of memory.** The chat shows
+  **Sleeping** for a moment and wakes on another machine with its files. These moves had been
+  failing since 9 October.
+  → [SAM moved the session to another machine](/docs/guides/session-troubleshooting/#sam-moved-the-session-to-another-machine)
+- **New models.** Claude Haiku 5.5, and more OpenCode models. → [New models](#new-models)
+- **A guide to the command line.** Install the `sam` CLI, sign in, and start, follow, and reply to
+  work from a terminal or a script. → [SAM CLI](/docs/guides/cli/)
+
+Also changed this week:
+
+- **Archive works on sleeping VM chats.** It used to fail with "Task cannot be closed from status
+  'sleeping'".
+- **Sleeping Instant chats can be woken for the full seven days**, instead of only about four
+  hours, and **Stop** and **Archive** finish reliably on them.
+- **Long tasks that keep making progress are no longer stopped after eight hours.** They run until
+  SAM's inactivity check or the 24-hour limit.
+- **A new VM that fails to start gets another chance.** SAM retries its certificate and setup steps,
+  then replaces the VM once, instead of failing the task on the first error.
+- **Messages and events reach sleeping chats.** Wakes triggered by another agent's message, a
+  scheduled action, or an event no longer fail at random, arrive as soon as the chat is ready, and
+  one pending event no longer silences a chat for a day.
+- **A sleep that can't finish ends visibly.** If SAM can't confirm a workspace stopped, the chat
+  says so and ends, instead of promising a wake it couldn't guarantee.
+  → [SAM could not finish putting the session to sleep](/docs/guides/session-troubleshooting/#sam-could-not-finish-putting-the-session-to-sleep)
+- **Claude usage chips work.** Readings from many Claude Pro and Max credentials were being dropped,
+  and the rest showed one limit without a percentage. The chip now shows the five-hour and weekly
+  limits. → [Usage Limits](/docs/guides/agents/#usage-limits)
+- **Messages between agents arrive as a notice from SAM.** The recipient's chat shows a SAM notice
+  written for its agent, which you don't need to answer, and the conversation between the two
+  agents is under the project's **Automation** → **Behind the scenes** → **Channels**. → [Messages between agents](/docs/guides/agents/#messages-between-agents)
+- **A new Chat you start on a VM no longer waits** for another workspace on the same machine to
+  finish building.
+- **Messages with `@` and a word failed from 9 to 14 October.** A message with an email address
+  (`bob@example.com`), a package name (`@types/node`), or a decorator (`@dataclass`) was refused
+  with **Agent profile not found** unless the word named one of your agent profiles. Fixed on 14
+  October: an `@` that doesn't name a profile is now ordinary text.
+  → [Agent profile not found](/docs/guides/session-troubleshooting/#agent-profile-not-found-when-you-send-a-message)
+- **Resource history is no longer counted twice when a workspace re-sends it.** The duplicate
+  inflated the totals agents read with `get_resource_history` (now `sessions_read` method `resource_history`) and could drop that stretch's detail
+  from the **Resources** panel. Sessions recorded before the fix keep the inflated totals and gaps.
+
+### For self-hosters & admins
+
+Update to v2026.10.15 or later: two regressions affect the releases in between.
+
+- **Memory-pressure moves:** v2026.10.09 to v2026.10.12 can't move a session off a VM that runs
+  short of memory. Fixed in v2026.10.13, which is also the first release in which a
+  [sleep that can't finish](/docs/guides/session-troubleshooting/#sam-could-not-finish-putting-the-session-to-sleep)
+  ends visibly.
+- **`@` messages:** v2026.10.10 to v2026.10.14 refuse messages with `@` and a word, as described
+  above. Fixed in v2026.10.15.
+
+There are no new secrets or Cloudflare token permissions; the new database migrations run in the
+deploy pipeline, and the deploy creates the Connector's storage.
+
+- **Variables marked Secret are no longer in the agent's shell** (from v2026.10.14). In a workspace
+  started after you update, the agent sees a placeholder instead of the value and runs commands that
+  need it with `exec_with_secrets`, which only nodes started after the update support.
+  → [Run commands with secrets](/docs/guides/secret-execution/)
+- **The SAM Connector is on after you update** (from v2026.10.10). To keep it off, switch off
+  **Enable Connector** in **Admin → Integrations → Connector**, or set the `CONNECTOR_ENABLED`
+  GitHub Environment variable to `false` before you deploy (from v2026.10.17, the variable only
+  applies while no value is saved in the app). Claude's and ChatGPT's servers must be
+  able to reach your API, so a Cloudflare Access login wall or a WAF challenge in front of it stops
+  connections. → [Self-hosted installations](/docs/guides/sam-connector/#self-hosted-installations)
+- **Chats started before v2026.10.08 wake in Manual.** They have no recorded settings, so they wake
+  asking for approval before changing anything (Codex agents never ask). If you haven't
+  [turned agent requests on](/docs/guides/self-hosting/#let-agents-ask-in-chat), those requests are
+  refused, so tell people to fork such a chat rather than keep using it.
+- **Pending accounts are held back everywhere.** With signup approval on, an account waiting for
+  approval can no longer use the SAM and project agent chats, manage API tokens, or open workspaces
+  in the browser. → [Signup approval](/docs/guides/self-hosting/#signup-approval)
+- **Keep anonymous trials off.** Every trial visitor runs under one shared account and can land on
+  the same machine as another visitor, so per-user isolation doesn't separate them. (Anonymous
+  trials were removed entirely in November 2026.)
+  → [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access)
+- **About 180 Worker variables left `wrangler.toml`.** They only repeated SAM's built-in defaults,
+  so nothing changes when you deploy. If your fork edited one of those lines, syncing will conflict
+  there; keep your value as described in [Worker Variables](/docs/reference/configuration/#worker-variables).
+- **Superadmins hear when archiving stops.** When a project's archive circuit breaker opens, every
+  active superadmin gets an **Operational Failure** notification linking to **Admin → Storage**, and
+  the hourly storage measurement runs again.
+  → [Storage and archive circuit breakers](/docs/guides/self-hosting/#storage-and-archive-circuit-breakers)
+- **Agent messages travel over channels on every install.** The checked-in `wrangler.toml` turns on
+  `AGENT_MESSAGE_CHANNELS_ENABLED`, unless your GitHub Environment sets it to `false`.
+- **Removed:** `ACP_TASK_PROMPT_TIMEOUT` (long tasks now end only through the inactivity check or
+  the 24-hour limit). If you set it, you can delete it.
+- **New optional settings**, with working defaults, for retrying a VM that fails to start
+  (`ORIGIN_CA_RETRY_*`, `ORIGIN_CA_REQUEST_TIMEOUT_MS`, `CLOUD_INIT_*`,
+  `TASK_RUNNER_BOOT_MAX_REPLACEMENTS`, `TASK_RUNNER_FIRST_HEARTBEAT_TIMEOUT_MS`; see
+  [Fresh VM boot recovery](/docs/reference/configuration/#fresh-vm-boot-recovery)) and for the
+  Connector (`CONNECTOR_*`; see [SAM Connector](/docs/reference/configuration/#sam-connector)).
+- **The Pulumi state repair workflow no longer prints raw state.** Its export shows resource counts
+  and URNs only. If you ran it before v2026.10.07, delete those workflow runs: their summaries show
+  the start of the raw state, which can include generated keys.
+
+### New models
+
+Profiles can now use **Claude Haiku 5.5 (1M context)** with Claude Code, and with OpenCode Zen and
+OpenCode Go. SAM's built-in OpenCode list, which profiles pick from, also adds **Exo Free**,
+**Step 5 Preview Free**, and **Mistral Large 4** on Zen and **Step 5 Preview Free** on Go; on Go,
+**Space Bunny Free** is now **Space Bunny**, and Zen's **Fledge Alpha Free** is gone. (**Settings →
+Agents** loads OpenCode's list live from models.dev.) Gemini CLI's **Gemini 3.7 Flash** is marked
+deprecated: Google routes it to 3.8. A profile already set to a model that left the list keeps it,
+shown as a custom model, so if a profile uses **Fledge Alpha Free**, or **Space Bunny Free** on
+OpenCode Go, choose its model again: OpenCode no longer lists those IDs. See
+[Choosing a model](/docs/guides/agents/#choosing-a-model).
+
+## Earlier cycle: 29 September – 6 October 2026
 
 ### For everyone
 
@@ -42,7 +763,7 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
   stopping an old chat no longer moves it to the top.
   → [Switching Between Chats](/docs/guides/chat-features/#switching-between-chats)
 - **New models.** OpenAI **GPT-6.1 Sol** with Codex, **Claude Sonnet 5.5**, **Gemini 3 Flash
-  Preview**, and more OpenCode Zen models. → [New models](#new-models)
+  Preview**, and more OpenCode Zen models. → [New models](#new-models-1)
 
 Also changed this week:
 
@@ -84,7 +805,7 @@ installations alike.
    ([Updating an existing instance](/docs/guides/self-hosting/#updating-an-existing-self-hosted-instance)).
    v2026.10.05 is the first where Claude Code agents with no mode set start in Bypass Permissions; on
    v2026.10.01 to v2026.10.04 they ask, and with requests off are refused every time. The check-in cap, usage chips, the Codex upgrade for GPT-6.1 Sol, and sleeping
-   tasks on Active Tasks arrive in the release after v2026.10.05.
+   tasks on Active Tasks arrive in v2026.10.06.
 3. **If you left requests off, find the saved modes that will be refused** — in profiles, skills,
    projects' **Agent Overrides**, and users' **Settings → Agents**, where saving on a release before
    v2026.10.05 stored the old always-ask default, now shown as **Manual**.
@@ -172,7 +893,7 @@ OpenCode Zen. SAM also upgraded the Codex it
 installs, so a profile set to GPT-6.1 Sol starts instead of being rejected. See
 [Choosing a model](/docs/guides/agents/#choosing-a-model).
 
-## Previous cycle: 23–29 September 2026
+## Earlier cycle: 23–29 September 2026
 
 ### For everyone
 
@@ -250,7 +971,7 @@ and disk alone — see [Compute Pools](/docs/guides/compute-pools/).
   `AI_PROXY_ALLOWED_MODELS`. → [Admin AI Allowances](/docs/reference/api/#admin-ai-allowances)
 - **Spending on summaries and voice is capped.** Fork/Retry summaries (30 per hour) and voice
   transcription (30 per minute) are rate-limited per user: `RATE_LIMIT_SESSION_SUMMARIZE`,
-  `RATE_LIMIT_TRANSCRIBE`. (Since 8 October, Fork and Retry no longer generate summaries, so
+  `RATE_LIMIT_TRANSCRIBE`. (Since 9 October, Fork and Retry no longer generate summaries, so
   `RATE_LIMIT_SESSION_SUMMARIZE` is gone.)
 - **Setup stops echoing secrets.** Saving the `/setup` wizard no longer returns the platform secrets
   in its response.
@@ -385,8 +1106,8 @@ If a model you want isn't in the list yet, type its ID — see
 | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | **Sessions show what they used**            | A **Resources** panel with CPU, memory, and I/O history for a session — including whether it was killed for running out of memory — that outlives the machine.                                                                      | Session tool rail → **Resources**; [Session Resource History](/docs/guides/session-resources/)               |
 | **Long tool runs stop burying the chat**    | A run of consecutive tool calls folds into one card reading "N tool calls". Tap to expand; failures are counted in the text.                                                                                                        | Project chat and workspace chat; [Tool Activity Cards](/docs/guides/chat-features/#tool-activity-cards)      |
-| **Events sit next to the conversation**     | The old "Events & schedules" header link became an **Events** button in the session tool rail that opens a drawer over the chat. The project Events page gained counts, state colours, empty states, and self-refreshing schedules. | Session tool rail → **Events**; Project → **Events**                                                         |
-| **Sleeping chats are searchable**           | An agent asked to search the project now finds work in sessions that are asleep, not just ones that were stopped — which is most of your recent work.                                                                               | `search_messages` (agent tool); not the chat-list search box                                                 |
+| **Events sit next to the conversation**     | The old "Events & schedules" header link became an **Events** button in the session tool rail that opens a drawer over the chat. The project Events page gained counts, state colours, empty states, and self-refreshing schedules. | Session tool rail → **Events** and Project → **Events** (both **Automation** since 20 October)               |
+| **Sleeping chats are searchable**           | An agent asked to search the project now finds work in sessions that are asleep, not just ones that were stopped — which is most of your recent work.                                                                               | `search_messages` (agent tool; now `sessions_read` method `search`); not the chat-list search box            |
 | **Wake puts you back on the same commit**   | A woken session restores the exact saved Git checkout — commit, branch, upstream, working tree, index, and clean local-only commits — or reports degraded recovery instead of quietly continuing somewhere else.                    | Any sleeping session                                                                                         |
 | **One pool, two placement strategies**      | A compute pool now orders workspace machines and app-deployment machines separately, with a cap on how many nodes **Spread** may open per user.                                                                                     | Project → Settings → **Infrastructure**; [Compute Pools](/docs/guides/compute-pools/#the-four-policy-fields) |
 | **Deployment size comes from the manifest** | The CPU and memory limits in your Compose services decide which machine a deployment lands on. Environment names do not.                                                                                                            | [App Deployments](/docs/guides/app-deployments/)                                                             |
@@ -439,7 +1160,7 @@ schedules refresh themselves every 30 seconds while you are looking at them, sta
 colour-coded consistently with the admin inspector, and each empty section explains what would
 appear there instead of looking like a failed load.
 
-See [Scheduled actions and event watches](/docs/guides/scheduled-actions/).
+Both became **Automation** on 20 October 2026; see [Automation](/docs/guides/scheduled-actions/).
 
 ### Search reaches sleeping sessions
 
@@ -539,7 +1260,7 @@ See [Self-Hosting → Storage and archive circuit breakers](/docs/guides/self-ho
 | **Report an issue in-app**            | A **Report** button in the session tool rail, and a **Report this issue** link on the crash screen. You choose whether to attach technical context.                                                           | Session tool rail; crash screen                                                       |
 | **Sessions survive runtime teardown** | Sleeping Instant and VM sessions wake from a seven-day snapshot instead of losing harness context or uncommitted work.                                                                                        | Project chat                                                                          |
 | **Starting a chat is durable**        | Closing the tab while a chat is starting no longer strands it — the launch finishes server-side.                                                                                                              | Project chat                                                                          |
-| **Work lands on its own branch**      | Task workspaces start checked out on the task's `sam/…` output branch, and SAM refuses to auto-push to your default branch.                                                                                   | Any task or chat-started work                                                         |
+| **Work lands on its own branch**      | Task workspaces start checked out on the task's `sam/…` output branch, and publication is agent-directed.                                                                                                     | Submitted tasks and agent-dispatched work                                             |
 | **Codex has its tools on Instant**    | Codex sessions on the Instant runtime now get SAM's MCP tools instead of silently starting without them.                                                                                                      | Any Codex profile                                                                     |
 | **Library cards always render**       | A document an agent shares renders as a rich card no matter which agent sent it.                                                                                                                              | Project chat timeline                                                                 |
 | **Machines come from a compute pool** | Workspaces are provisioned from the exact provider instance types your compute pool allows, and work states what it needs in vCPU, memory, and disk instead of a small/medium/large label.                    | Project → Settings → **Infrastructure**; [Compute Pools](/docs/guides/compute-pools/) |
@@ -593,9 +1314,9 @@ See [Compute Pools](/docs/guides/compute-pools/).
 
 ### Agent work lands on its own branch
 
-Task workspaces are now checked out on the task's `sam/…` output branch from the moment they're created — cloned from your default branch, then switched. An agent that never thinks about branching still produces a reviewable branch and a PR.
+Task workspaces are now checked out on the task's `sam/…` output branch from the moment they're created — cloned from your default branch, then switched. This gives the agent a branch to work on; creating that branch does not publish changes or open a pull request. Ask the agent to commit, push and open a PR when you want to publish.
 
-SAM also **refuses to auto-push a completed task while the workspace is still on your default branch**. The work stays committed locally and the push is blocked with an explanation, rather than landing unreviewed changes on `main` (and potentially triggering a deploy). The guard covers SAM's own auto-commit path, not an agent running `git push` itself — keep your branch protection rules.
+Since 16 October, SAM no longer stages, commits, pushes or creates pull requests at turn end or task completion ([SAM leaves publishing to the agent](#sam-leaves-publishing-to-the-agent)). Agents publish explicitly; independent sleep snapshots preserve supported workspace files and local commits. Keep repository branch protection rules for agent-directed pushes.
 
 See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands).
 
@@ -619,7 +1340,7 @@ Before anything reaches the model, SAM strips user IDs, IP addresses, user-agent
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
 | Guided subscription sign-in      | Connect Claude Code or OpenAI Codex to your Claude Max/Pro or ChatGPT subscription with a browser sign-in — no terminal, no token paste. | **Settings → Connections**             |
 | More cloud providers             | Bring your own Vultr, DigitalOcean, UpCloud, or Infomaniak account, alongside Hetzner, Scaleway, and Google Cloud.                       | **Settings → Connections**             |
-| Claude Fable 5.1                 | Pick Anthropic's newest frontier model (1M-token context) when you configure an agent profile.                                           | Agent profile model picker             |
+| Claude Fable 5.1                 | Pick Anthropic's Fable 5.1 frontier model (1M-token context) when you configure an agent profile.                                        | Agent profile model picker             |
 | Markdown previews in the library | Markdown an agent saves to a project now renders inline instead of downloading as a file.                                                | Project chat & library                 |
 | Shared projects & roles          | Invite teammates with a link, approve access requests, and share profiles, skills, and secrets. Approved teammates join as admins.       | Project **Settings → Access**          |
 | Credential attribution           | A **Credentials** indicator shows which shared work runs on personal keys versus project credentials.                                    | Project navigation (shared projects)   |
@@ -627,8 +1348,8 @@ Before anything reaches the model, SAM strips user IDs, IP addresses, user-agent
 | Project Files                    | Inspect a branch's file tree and diff without opening a VM.                                                                              | Project **Files** tab                  |
 | Forkable, task-backed chats      | Any chat can be forked, archived, and tracked with task lifecycle behavior.                                                              | Project chat sessions                  |
 | Focus Mode sidebars              | Collapse navigation and session sidebars for more room while chatting.                                                                   | Project chat (desktop)                 |
-| GitHub event triggers            | GitHub issues, comments, pull requests, and pushes can start SAM work.                                                                   | Project **Triggers** page              |
-| Generic webhook triggers         | Any external service can start SAM work by sending an authenticated JSON webhook.                                                        | Project **Triggers** page              |
+| GitHub event triggers            | GitHub issues, comments, pull requests, and pushes can start SAM work.                                                                   | Project **Automation** page            |
+| Generic webhook triggers         | Any external service can start SAM work by sending an authenticated JSON webhook.                                                        | Project **Automation** page            |
 | GCP for provisioning             | Connect Google Cloud with Workload Identity Federation or a service-account JSON key to provision VMs.                                   | **Settings → Connections**             |
 | Deployment custom domains        | Attach your own subdomain to a deployed app; SAM verifies DNS and activates the route without a full redeploy.                           | Deployment environment **Domains** tab |
 | Cleaner injected system context  | SAM-injected bootstrap/context messages are collapsed so the chat reads like user-agent conversation.                                    | Chat timeline                          |
@@ -737,7 +1458,7 @@ The intended mental model:
 
 Project triggers now run from three sources: schedules (cron), GitHub events, and authenticated webhooks. A project can start agent work when matching GitHub issues, issue comments, pull requests, or pushes arrive — or when any external service sends an authenticated JSON webhook to SAM. See [Webhook Triggers](/docs/guides/webhook-triggers/) for the webhook source.
 
-For GitHub events specifically, use this from the project **Triggers** page:
+For GitHub events specifically, use this from the project **Triggers** page (now **Automation**):
 
 1. Create a trigger.
 2. Choose a GitHub event type.

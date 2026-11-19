@@ -32,8 +32,11 @@ export function PageLayout({
 }: PageLayoutProps) {
   const mwClass = maxWidthClasses[maxWidth];
 
+  // The app shell's content pane is the page surface (frosted glass), so the page paints no
+  // background of its own and fills the pane rather than one screen height: a screen-tall
+  // opaque canvas ended partway down a long page and showed as a seam once scrolled.
   return (
-    <div className={`min-h-screen bg-canvas ${compact ? 'flex flex-col' : ''}`}>
+    <div className={`w-full min-w-0 flex-1 ${compact ? 'flex flex-col' : ''}`}>
       <main
         className={`${mwClass} mx-auto ${compact ? 'flex flex-col flex-1 min-h-0' : ''}`}
         style={compact ? compactPaddingStyle : mainPaddingStyle}

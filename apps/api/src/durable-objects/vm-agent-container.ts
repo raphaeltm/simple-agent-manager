@@ -9,6 +9,7 @@ import { maybeJsonRecord } from '../lib/runtime-validation';
 import { getCfContainerCreateWorkspaceTimeoutMs } from '../services/cf-container-timeouts';
 import { commitContainerWakeFromSleep } from '../services/container-wake-commit';
 import { loadInstantRestoreWorkspace } from '../services/instant-restore-workspace';
+import { instantTranscriptFallbackStart } from '../services/instant-transcript-fallback';
 import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
 import {
   findSessionRecoverySourceTaskGuardRefusal,
@@ -18,6 +19,10 @@ import {
 import { prepareSessionRestoreMcp } from '../services/session-restore-mcp';
 import { assertSessionRuntimeContractCapability } from '../services/session-runtime-contract';
 import { signalSessionWakeReadyBestEffort } from '../services/session-wake-ready';
+import {
+  DEFAULT_CF_CONTAINER_VM_AGENT_PORT,
+  resolveVmAgentContainerPort,
+} from '../services/vm-agent-container-port';
 import {
   ACTIVE_WORK_KEY,
   type ActiveWorkRuntime,
@@ -129,8 +134,8 @@ function revokedSourceTaskResponse(): Response {
 }
 
 export class VmAgentContainer extends Container<Env> {
-  defaultPort = 8080;
-  requiredPorts = [8080];
+  defaultPort = DEFAULT_CF_CONTAINER_VM_AGENT_PORT;
+  requiredPorts = [DEFAULT_CF_CONTAINER_VM_AGENT_PORT];
   sleepAfter = DEFAULT_CF_CONTAINER_SLEEP_AFTER;
   enableInternet = true;
 
@@ -139,14 +144,8 @@ export class VmAgentContainer extends Container<Env> {
 
   constructor(ctx: DurableObjectState<Record<string, never>>, env: Env) {
     super(ctx, env);
-    const configuredPort = Number.parseInt(
-      env.CF_CONTAINER_VM_AGENT_PORT || env.SANDBOX_VM_AGENT_PORT || '',
-      10
-    );
-    if (Number.isFinite(configuredPort) && configuredPort > 0) {
-      this.defaultPort = configuredPort;
-      this.requiredPorts = [configuredPort];
-    }
+    this.defaultPort = resolveVmAgentContainerPort(env);
+    this.requiredPorts = [this.defaultPort];
     this.sleepAfter =
       env.CF_CONTAINER_SLEEP_AFTER || env.SANDBOX_SLEEP_AFTER || DEFAULT_CF_CONTAINER_SLEEP_AFTER;
   }
@@ -877,7 +876,11 @@ export class VmAgentContainer extends Container<Env> {
     const target = toRuntimeRecoveryTarget(config, context);
 
     try {
-      const nodeCallbackToken = await signNodeCallbackToken(config.nodeId, this.env);
+      // The generations persistRuntimeRecovering rotated for this runtime: the previous
+      // container's node and workspace tokens stop authenticating once it committed.
+      const nodeCallbackToken = await signNodeCallbackToken(config.nodeId, this.env, {
+        callbackGeneration: context.nodeCallbackGeneration,
+      });
       await this.assertSourceTaskGuard(sourceTaskGuard);
       await this.startRuntime(config, { nodeCallbackToken });
     } catch (error) {
@@ -897,7 +900,9 @@ export class VmAgentContainer extends Container<Env> {
     let restoreMcp: Awaited<ReturnType<typeof prepareSessionRestoreMcp>> | undefined;
     let retainRestoreMcp = false;
     try {
-      const workspaceCallbackToken = await signCallbackToken(config.workspaceId, this.env);
+      const workspaceCallbackToken = await signCallbackToken(config.workspaceId, this.env, {
+        callbackGeneration: context.workspaceCallbackGeneration,
+      });
       const { token } = await signNodeManagementToken(
         context.userId,
         config.nodeId,
@@ -963,6 +968,7 @@ export class VmAgentContainer extends Container<Env> {
         chatSessionId: context.chatSessionId,
         agentSessionId: context.agentSessionId,
         runtimeContract: context.runtimeContract,
+        callbackGeneration: context.workspaceCallbackGeneration,
       });
       // A fresh Instant process has no session MCP map or SQLite credentials.
       // Reuse authenticated session creation without starting a new agent context.
@@ -993,43 +999,82 @@ export class VmAgentContainer extends Container<Env> {
       if (!createResponse.ok) {
         return this.degradeRecovery(restoring, 'restore_http', target, createResponse.status);
       }
-      const restoreUrl = new URL(
-        `http://localhost:${config.vmAgentPort}/workspaces/${config.workspaceId}/agent-sessions/${context.agentSessionId}/restore`
-      );
-      await this.assertSourceTaskGuard(sourceTaskGuard);
-      const restoreResponse = await this.containerFetch(
-        new Request(restoreUrl.toString(), {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            'X-SAM-Node-Id': config.nodeId,
-            'X-SAM-Workspace-Id': config.workspaceId,
-          },
-          body: JSON.stringify({
-            chatSessionId: context.chatSessionId,
-            runtime: 'cf-container',
-            agentType: context.agentType,
-            runtimeContract: context.runtimeContract,
-            workspaceCallbackToken,
+      const freshStart = await instantTranscriptFallbackStart(this.env, {
+        workspaceId: config.workspaceId,
+        nodeId: config.nodeId,
+        projectId: config.projectId,
+        userId: context.userId,
+        chatSessionId: context.chatSessionId,
+        agentSessionId: context.agentSessionId,
+        startedAt: recovery.startedAt,
+        contract: context.runtimeContract,
+        mcpServers: restoreMcp.mcpServers,
+      });
+      if (freshStart) {
+        const started = await this.withLifecycleLock(async () => {
+          const lifecycle = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
+          if (lifecycle === 'stopping' || lifecycle === 'stopped') return null;
+          await this.assertSourceTaskGuard(sourceTaskGuard);
+          return this.containerFetch(
+            new Request(
+              `http://localhost:${config.vmAgentPort}/workspaces/${config.workspaceId}/agent-sessions/${context.agentSessionId}/start`,
+              {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                  'X-SAM-Node-Id': config.nodeId,
+                  'X-SAM-Workspace-Id': config.workspaceId,
+                },
+                body: JSON.stringify(freshStart),
+                signal: AbortSignal.timeout(this.getRuntimeSettings().portReadyTimeoutMs),
+              }
+            ),
+            config.vmAgentPort
+          );
+        });
+        if (!started) return stoppedRecoveryResult();
+        if (!started.ok)
+          return this.degradeRecovery(restoring, 'restore_http', target, started.status);
+      } else {
+        const restoreUrl = new URL(
+          `http://localhost:${config.vmAgentPort}/workspaces/${config.workspaceId}/agent-sessions/${context.agentSessionId}/restore`
+        );
+        await this.assertSourceTaskGuard(sourceTaskGuard);
+        const restoreResponse = await this.containerFetch(
+          new Request(restoreUrl.toString(), {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+              'X-SAM-Node-Id': config.nodeId,
+              'X-SAM-Workspace-Id': config.workspaceId,
+            },
+            body: JSON.stringify({
+              chatSessionId: context.chatSessionId,
+              runtime: 'cf-container',
+              agentType: context.agentType,
+              runtimeContract: context.runtimeContract,
+              workspaceCallbackToken,
+            }),
           }),
-        }),
-        config.vmAgentPort
-      );
-      const restoreBody = await restoreResponse.text().catch(() => '');
-      if (!restoreResponse.ok) {
-        return this.degradeRecovery(restoring, 'restore_http', target, restoreResponse.status);
-      }
-      let restoreStatus = '';
-      try {
-        const parsedRaw = JSON.parse(restoreBody) as unknown;
-        const parsed = maybeJsonRecord(parsedRaw);
-        restoreStatus = parsed && typeof parsed.status === 'string' ? parsed.status : '';
-      } catch {
-        // An explicit restored status is required before D1 can become running.
-      }
-      if (restoreStatus !== 'restored') {
-        return this.degradeRecovery(restoring, 'restore_status', target);
+          config.vmAgentPort
+        );
+        const restoreBody = await restoreResponse.text().catch(() => '');
+        if (!restoreResponse.ok) {
+          return this.degradeRecovery(restoring, 'restore_http', target, restoreResponse.status);
+        }
+        let restoreStatus = '';
+        try {
+          const parsedRaw = JSON.parse(restoreBody) as unknown;
+          const parsed = maybeJsonRecord(parsedRaw);
+          restoreStatus = parsed && typeof parsed.status === 'string' ? parsed.status : '';
+        } catch {
+          // An explicit restored status is required before D1 can become running.
+        }
+        if (restoreStatus !== 'restored') {
+          return this.degradeRecovery(restoring, 'restore_status', target);
+        }
       }
 
       await this.assertSourceTaskGuard(sourceTaskGuard);

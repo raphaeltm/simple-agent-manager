@@ -1,0 +1,28 @@
+# Staging event-wait verification
+
+Runtime build `064f51efa` deployed by staging workflow [39700925586](https://github.com/raphaeltm/simple-agent-manager/actions/runs/39700925586), including the staging smoke gate. Fixture API calls used `exec_with_secrets` with `SAM_PLAYWRIGHT_PRIMARY_USER`; no credential is stored here.
+
+## Confirmed observations
+
+- Run `e205b2b3-6a40-4443-89b4-1d8729ed89ae`: an unrelated `workflow.step.completed` event did not satisfy a `workflow.step.failed` filter. The wait failed with `Event wait timed out`; its dependent agent step was `blocked` with `Blocked: absent did not succeed`, and no dependent task was created. The controller had already finished.
+- Run `a03ec723-2fd7-4f6b-ad87-49f35e7fa082`: its wait timed out at 01:14:08 UTC. The producer agent finished at 01:15:18 UTC after VM startup delay; the late event did not turn the failed wait into a match. Its dependent agent step was blocked.
+- Revised wait-only fixture: trigger run `9281a50a-7327-491d-b201-ee1eff84f6a3` registered at 01:22:55 UTC and timed out at 01:26:19 UTC. Its run entered `needs_attention` at 01:26:20 UTC. Correlated run `6b0a157b-9122-44ad-bb3a-5eb454cb93b8` registered at 01:22:56 UTC with exact filter `sam.workflow` / `workflow.run.needs_attention` / subject `workflow_run:9281a50a-7327-491d-b201-ee1eff84f6a3`; its dependent wait was still awaiting prerequisites at the last successful authenticated read (01:30:47 UTC). Its own deadline is 01:37:56 UTC.
+- Controllers `01M5GJ6XEGA772608H8VHBWQQM` and `01M5GJVH546BEPPNF0TA3CXC0H` and producer task `01M5GJE7QYWZTED0SN3143CXYY` completed. The three fixture workspaces and three nodes received supported DELETE HTTP 200 by 01:23:54 UTC. Authenticated API showed zero workspaces and zero active fixture nodes; four unrelated pre-existing sleeping nodes remained.
+
+The backend Workers integration suite covers duplicate admission, restart replay, registration and deadline races, event visibility, and dependent progression. A focused Workers test also passes the complete internal path from a timed-out workflow through its source outbox, ProjectData admission, correlated match and dependent registration. The fixture attempt ended at its agreed 01:45 UTC cutoff with no active test task or VM. Token-login returned HTTP 429 at 01:35, 01:40 and 01:44 UTC; the route allows 20 logins per client IP per clock hour.
+
+The 02:00 read-only audit found that the correlated wait timed out at 01:38:03 UTC and blocked its dependent. Its ProjectData subscription had `lastMatchedAt: null`. Read-only Cloudflare D1 inspection found the trigger's `workflow.run.needs_attention` source-outbox intent `01M5GKEQ49E283D9B5XE8AYRJ6` still pending with `attempt_count: 0`, so the canonical event had not been admitted before the wait deadline. The staging Worker had its expected five-minute cron and runtime controls enabled, but 24 older workflow source-outbox rows were retryable failures. Sampled errors were `ProjectEventSourceAdmissionTimeoutError` after 0–157 ms, indicating the late cron sweep exhausted its admission time budget. The implementation now attempts admission immediately after each transactionally recorded workflow state change and retains the source outbox as the retry path. The targeted verification below exercised the fix.
+
+## Targeted verification after the fix
+
+Staging deployment [39709998475](https://github.com/raphaeltm/simple-agent-manager/actions/runs/39709998475) passed for runtime commit `fd26aff85`, including smoke tests. A single controller task `01M5GQAJH3S726M679GH23A8J8` created two wait-only runs; it completed before the waits resolved. Its workspace `01M5GQHRDG3FA1GAZM328AGZX2` and node `01M5GQAWVXGTPX36EZHQ9YKZZJ` were deleted through supported API, both HTTP 200 by 02:41 UTC.
+
+- Trigger run `f689d861-f916-43c9-b62a-ff5f99d0e9f1` timed out and entered `needs_attention` at 02:42:16 UTC. D1 source-outbox intent `01M5GQSR87RBXB728P4Q4YMVSW` for `workflow.run.needs_attention` was `admitted` with one attempt by 02:42:17 UTC, producing canonical ProjectData event `df5ee394-c035-4e22-9a3e-b7ce94009d93`.
+- Correlated run `07d505ac-5121-4f4a-9fe2-0f7a0521954c` completed its `signal` wait at 02:42:49 UTC, before its 02:43:35 deadline, with that exact matched event ID. Its dependent `advanced` wait began listening at 02:42:51 with `taskId` and `sessionId` null, then failed once with `Event wait timed out` at 02:43:57. The run entered `needs_attention`.
+- Independent authenticated reads at 02:43 and 02:44 showed the same matched event ID and one `signal.completed` and `advanced.running` activity entry. The final read showed zero workspaces and only four unrelated pre-existing sleeping nodes. No fixture VM remained.
+
+The forced duplicate-delivery, lost acknowledgement, registration and timeout races are covered by real Workers/D1/ProjectData integration tests. Staging verified the stable read/reconciliation outcome without injecting disruptive duplicate deliveries or restarting shared Durable Objects.
+
+## Fixture and cleanup references
+
+The local fixture scripts submitted each controller once through `POST /api/projects/:projectId/tasks/submit`, using managed `SAM_PLAYWRIGHT_PRIMARY_USER` only within `exec_with_secrets`. Read-only scripts used the same managed credential for workflow/resource/event inspection and managed `CF_TOKEN`/`CF_ACCOUNT_ID` for Cloudflare D1 and Worker schedule queries. Cleanup used supported `DELETE /api/workspaces/:id` and `DELETE /api/nodes/:id`; every fixture-owned deletion returned HTTP 200. The scripts remain local to the staging workspace so they cannot be mistaken for reusable product tooling or run again from the PR.

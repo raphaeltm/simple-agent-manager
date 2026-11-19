@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { storeMcpToken } from '../../src/services/mcp-token';
 import { hashWebhookToken } from '../../src/services/webhook-trigger-crypto';
-import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
+import { seedInstallation, seedMcpTokenWorkspace, seedProject, seedUser } from './helpers/seed-d1';
 
 interface Created {
   id: string;
@@ -33,6 +33,7 @@ async function setup(suffix: string) {
     chatSessionId: `${suffix}-chat`,
     createdAt: now,
   };
+  await seedMcpTokenWorkspace(identity.workspaceId, userId, projectId);
   await storeMcpToken(env.KV, token, identity);
   const input = {
     name: `Webhook ${suffix}`,
@@ -148,12 +149,36 @@ describe('MCP webhook one-time claims', () => {
     await env.KV.delete(`mcp:${s.token}`);
     expect((await redeem(c.webhookClaim.claimUrl, s.token)).status).toBe(401);
     await storeMcpToken(env.KV, s.token, s.identity);
+    const setMembership = (status: string) =>
+      env.DATABASE.prepare(
+        'UPDATE project_members SET status = ? WHERE project_id = ? AND user_id = ?'
+      )
+        .bind(status, s.projectId, s.userId)
+        .run();
+    // A suspended membership is refused at the token lifecycle gate without consuming the
+    // claim, and without revoking the token: reinstating the member makes it work again.
+    await setMembership('suspended');
+    expect((await redeem(c.webhookClaim.claimUrl, s.token)).status).toBe(401);
+    expect(await env.KV.get(`mcp:${s.token}`)).not.toBeNull();
+    await setMembership('active');
+    expect((await redeem(c.webhookClaim.claimUrl, s.token)).status).toBe(200);
+  });
+  it('revokes the token of a member removed from the project without consuming the claim', async () => {
+    const s = await setup('removed');
+    const c = requireCreated(await create(s.token, s.input));
     await env.DATABASE.prepare(
-      "UPDATE project_members SET status = 'suspended' WHERE project_id = ? AND user_id = ?"
+      "UPDATE project_members SET status = 'removed' WHERE project_id = ? AND user_id = ?"
     )
       .bind(s.projectId, s.userId)
       .run();
-    expect((await redeem(c.webhookClaim.claimUrl, s.token)).status).toBe(404);
+    expect((await redeem(c.webhookClaim.claimUrl, s.token)).status).toBe(401);
+    expect(await env.KV.get(`mcp:${s.token}`)).toBeNull();
+    const pending = await env.DATABASE.prepare(
+      'SELECT claim_id FROM webhook_trigger_configs WHERE trigger_id = ?'
+    )
+      .bind(c.id)
+      .first<{ claim_id: string | null }>();
+    expect(pending?.claim_id).not.toBeNull();
   });
   it('rotation and deletion revoke pending claims', async () => {
     const s = await setup('rotate');

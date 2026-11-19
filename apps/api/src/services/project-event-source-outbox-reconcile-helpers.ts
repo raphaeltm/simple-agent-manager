@@ -118,32 +118,26 @@ export async function selectCandidateIds(
   for (const state of ['pending', 'retryable_failed'] as const) {
     if (ids.length >= limit) break;
     const rows = await env.DATABASE.prepare(
-      `SELECT id FROM (
-         SELECT id, expires_at, attempt_count, max_attempts
-           FROM project_event_source_outbox
-          WHERE state = ? AND next_attempt_at <= ?
-          ORDER BY next_attempt_at, id
-          LIMIT ?
-       )
-       WHERE expires_at > ? AND attempt_count < max_attempts`
+      `SELECT id FROM project_event_source_outbox
+        WHERE state = ? AND next_attempt_at <= ?
+          AND expires_at > ? AND attempt_count < max_attempts
+        ORDER BY next_attempt_at, id
+        LIMIT ?`
     )
-      .bind(state, nowIso, limit - ids.length, nowIso)
+      .bind(state, nowIso, nowIso, limit - ids.length)
       .all<{ id: string }>();
     ids.push(...(rows.results ?? []).map((row) => row.id));
   }
   if (ids.length < limit) {
     const rows = await env.DATABASE.prepare(
-      `SELECT id FROM (
-         SELECT id, expires_at, attempt_count, max_attempts
-           FROM project_event_source_outbox
-          WHERE state = 'processing' AND processing_lease_expires_at IS NOT NULL
-            AND processing_lease_expires_at <= ?
-          ORDER BY processing_lease_expires_at, id
-          LIMIT ?
-       )
-       WHERE expires_at > ? AND attempt_count < max_attempts`
+      `SELECT id FROM project_event_source_outbox
+        WHERE state = 'processing' AND processing_lease_expires_at IS NOT NULL
+          AND processing_lease_expires_at <= ?
+          AND expires_at > ? AND attempt_count < max_attempts
+        ORDER BY processing_lease_expires_at, id
+        LIMIT ?`
     )
-      .bind(nowIso, limit - ids.length, nowIso)
+      .bind(nowIso, nowIso, limit - ids.length)
       .all<{ id: string }>();
     ids.push(...(rows.results ?? []).map((row) => row.id));
   }

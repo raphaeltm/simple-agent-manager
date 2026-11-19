@@ -309,6 +309,7 @@ function sanitizeEventSummary(
     occurredAt: event.occurredAt,
     receivedAt: event.receivedAt,
     matchId: event.matchId,
+    matchedAt: event.matchedAt,
     payloadRefAvailable: event.payloadRefAvailable,
     delivery: event.delivery,
   };

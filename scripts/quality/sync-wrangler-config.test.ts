@@ -8,18 +8,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   assertWorkerTextBindingLimit,
   checkTailWorkerExists,
+  CLOUDFLARE_STANDARD_WORKER_TEXT_BINDING_MAX,
   CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT,
+  containerImageOverrides,
   countWorkerTextBindings,
   detectArtifactsAvailable,
   encodeWorkflowCommandData,
   ensureTomlMap,
   generateApiWorkerEnv,
+  getApiWorkerVars,
   listEnvironmentVarOverrides,
   reportEnvironmentVarOverrides,
   resolveArtifactsBindingEnabled,
   writeDeploymentMarkers,
 } from '../deploy/sync-wrangler-config.js';
 import type { PulumiOutputs, WranglerToml } from '../deploy/types.js';
+import { OMITTED_WORKER_VAR_DEFAULTS } from '../deploy/worker-var-defaults.js';
+import environmentVariables from './fixtures/github-environment-variables-2026-10-11.json';
+import bindingAudit from './fixtures/worker-var-binding-audit-2026-10-11.json';
+
+/** Inputs the deploy workflow derives itself rather than reading from the GitHub Environment. */
+const WORKFLOW_DERIVED_ENV = { VM_AGENT_REQUIRED_VERSION: 'vm-agent-tree-0123456789abcdef' };
 
 const outputs: PulumiOutputs = {
   d1DatabaseId: 'd1-id',
@@ -69,6 +78,61 @@ afterEach(() => {
 });
 
 describe('sync wrangler config', () => {
+  it.each(['staging', 'prod'] as const)(
+    'emits persisted native traces without changing logs for %s',
+    (environment) => {
+      vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+      const checkedIn = TOML.parse(
+        readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
+      ) as WranglerToml;
+      const generated = generateApiWorkerEnv(checkedIn, outputs, environment, false, false, null);
+      const serialized = TOML.parse(
+        TOML.stringify({ env: { [environment]: generated } } as TOML.JsonMap)
+      );
+      expect((serialized.env as TOML.JsonMap)[environment]).toMatchObject({
+        observability: {
+          enabled: true,
+          redact_query_string: true,
+          traces: { enabled: true, head_sampling_rate: 1, persist: true },
+          logs: { invocation_logs: true, head_sampling_rate: 1 },
+        },
+      });
+    }
+  );
+
+  it.each(['staging', 'prod'] as const)(
+    'preserves native trace overrides for %s',
+    (environment) => {
+      vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+      for (const traces of [
+        { head_sampling_rate: 0.05 },
+        { head_sampling_rate: 0 },
+        { enabled: false },
+        { persist: false, destinations: ['external-traces'] },
+      ]) {
+        const generated = generateApiWorkerEnv(
+          { observability: { enabled: true, redact_query_string: false, traces } },
+          outputs,
+          environment,
+          false,
+          false,
+          null
+        );
+        expect(generated.observability?.redact_query_string).toBe(true);
+        expect(generated.observability?.traces).toEqual({
+          enabled: true,
+          head_sampling_rate: 1,
+          persist: true,
+          ...traces,
+        });
+        expect(generated.observability?.logs).toEqual({
+          invocation_logs: true,
+          head_sampling_rate: 1,
+        });
+      }
+    }
+  );
+
   it('keeps the checked-in staging Worker under the text-binding guard', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
     const checkedIn = TOML.parse(
@@ -78,6 +142,86 @@ describe('sync wrangler config', () => {
     const generated = generateApiWorkerEnv(checkedIn, outputs, 'staging', false, false, null);
     expect(countWorkerTextBindings(generated)).toBeLessThanOrEqual(
       CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT
+    );
+  });
+
+  it('deploys digest-pinned prebuilt images in place of Dockerfiles, and rejects anything else', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    const checkedIn = TOML.parse(
+      readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
+    ) as WranglerToml;
+    const reference = `registry.cloudflare.com/${'f'.repeat(32)}/s123abc-api-prod-sandboxdo-prebuilt@sha256:${'b'.repeat(64)}`;
+    vi.stubEnv('SAM_CONTAINER_IMAGE_OVERRIDES', JSON.stringify({ SandboxDO: reference }));
+    const generated = generateApiWorkerEnv(checkedIn, outputs, 'prod', false, false, null);
+    const images = Object.fromEntries(
+      (generated.containers ?? []).map((container) => [container.class_name, container.image])
+    );
+    expect(images.SandboxDO).toBe(reference);
+    // A class without an override still builds its Dockerfile.
+    expect(images.VmAgentContainer).toBe('./Dockerfile.vm-agent-container');
+    for (const bad of [
+      { SandboxDO: 'docker.io/library/busybox:latest' },
+      { SandboxDO: reference.replace(/@sha256:.*/, ':latest') },
+      { 'bad-class': reference },
+    ])
+      expect(() => containerImageOverrides(JSON.stringify(bad))).toThrow();
+    expect(() => containerImageOverrides('[]')).toThrow();
+    expect(containerImageOverrides('')).toEqual({});
+  });
+
+  it('keeps a self-hosted install under the standard account text-binding limit', () => {
+    // Installer deploys run without SAM's GitHub Environment overrides on accounts with the
+    // standard limit; every secret configure-secrets.sh can set is counted.
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    const checkedIn = TOML.parse(
+      readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
+    ) as WranglerToml;
+    const generated = generateApiWorkerEnv(checkedIn, outputs, 'prod', false, false, null);
+    expect(countWorkerTextBindings(generated)).toBeLessThanOrEqual(
+      CLOUDFLARE_STANDARD_WORKER_TEXT_BINDING_MAX
+    );
+  });
+
+  it.each(['staging', 'prod'] as const)(
+    'preserves Reliability C bindings for %s',
+    (environment) => {
+      vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+      vi.stubEnv('MCP_RATE_COUNTER_CUTOVER_AT', '1800000000');
+      vi.stubEnv('BOOT_LOG_STORAGE_CUTOVER_AT', '1800000000');
+      const checkedIn = TOML.parse(
+        readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
+      ) as WranglerToml;
+      const generated = generateApiWorkerEnv(checkedIn, outputs, environment, false, false, null);
+      expect(generated.vars).not.toHaveProperty('MCP_RATE_COUNTER_CUTOVER_AT');
+      expect(generated.vars).not.toHaveProperty('BOOT_LOG_STORAGE_CUTOVER_AT');
+      expect(generated.durable_objects?.bindings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'MCP_RATE_COUNTER', class_name: 'McpRateCounter' }),
+          expect.objectContaining({ name: 'WORKSPACE_BOOT_LOG', class_name: 'WorkspaceBootLog' }),
+        ])
+      );
+      expect(checkedIn.migrations).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            tag: 'v22',
+            new_sqlite_classes: ['McpRateCounter', 'WorkspaceBootLog'],
+          }),
+        ])
+      );
+    }
+  );
+
+  it('omits the default SAM model binding and forwards a logged explicit override', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 'sam-test');
+    vi.stubEnv('SAM_MODEL', 'claude-sonnet-5');
+    const info = vi.spyOn(console, 'log').mockImplementation(() => {});
+    expect(getApiWorkerVars({}, outputs, 'prod', 'analytics-dataset', true).SAM_MODEL).toBe(
+      'claude-sonnet-5'
+    );
+    expect(info.mock.calls.flat().join(' ')).toContain('SAM_MODEL');
+    vi.stubEnv('SAM_MODEL', '');
+    expect(getApiWorkerVars({}, outputs, 'prod', 'analytics-dataset', true)).not.toHaveProperty(
+      'SAM_MODEL'
     );
   });
 
@@ -172,7 +316,7 @@ describe('sync wrangler config', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
     vi.stubEnv('PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED', 'false');
     vi.stubEnv('PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS', '10');
-    vi.stubEnv('PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS', '3600000');
+    vi.stubEnv('SESSION_SLEEP_AFTER_MS', '600000');
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const topLevel: WranglerToml = {
       vars: {
@@ -187,7 +331,7 @@ describe('sync wrangler config', () => {
     expect(envConfig.vars).toMatchObject({
       PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'false',
       PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '10',
-      PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS: '3600000',
+      SESSION_SLEEP_AFTER_MS: '600000',
     });
     // ...but it is now visible in the deploy log, and only when it actually differs.
     const lines = log.mock.calls.map((call) => call.map(String).join(' '));
@@ -199,10 +343,10 @@ describe('sync wrangler config', () => {
     expect(lines.filter((line) => line.includes('PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS'))).toEqual(
       []
     );
-    // A var absent from wrangler.toml is an addition, not an override.
-    expect(
-      lines.filter((line) => line.includes('PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS'))
-    ).toEqual([]);
+    // A var absent from wrangler.toml and from the recorded code defaults is an addition, not an
+    // override. (An omitted var's override is reported against its recorded default; see below.)
+    expect(Object.keys(OMITTED_WORKER_VAR_DEFAULTS)).not.toContain('SESSION_SLEEP_AFTER_MS');
+    expect(lines.filter((line) => line.includes('SESSION_SLEEP_AFTER_MS'))).toEqual([]);
     expect(
       listEnvironmentVarOverrides({ A: 'true', B: 'same' }, { A: 'false', B: 'same', C: 'added' })
     ).toEqual([{ name: 'A', checkedIn: 'true', override: 'false' }]);
@@ -367,6 +511,26 @@ describe('sync wrangler config', () => {
     }
     expect(agreedLines).toEqual([]);
     expect(existsSync(summaryPath)).toBe(false);
+  });
+
+  it('ships the agent email send binding and Worker name only when this deploy prepared agent email', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    const checkedIn = TOML.parse(
+      readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
+    ) as WranglerToml;
+
+    const off = generateApiWorkerEnv(checkedIn, outputs, 'staging', false, false, null);
+    const on = generateApiWorkerEnv(checkedIn, outputs, 'staging', false, false, null, true);
+
+    expect(off.send_email).toBeUndefined();
+    expect(off.vars?.AGENT_EMAIL_WORKER_NAME).toBeUndefined();
+    expect(on.send_email).toEqual([{ name: 'AGENT_EMAIL' }]);
+    // The admin setup points the agent@ routing rule at this exact script.
+    expect(on.vars?.AGENT_EMAIL_WORKER_NAME).toBe(on.name);
+    expect(on.name).toBe('s123abc-api-staging');
+    // Never declared at the top level, so Wrangler cannot warn about a top-level binding
+    // that a generated environment omits.
+    expect(checkedIn.send_email).toBeUndefined();
   });
 
   it('propagates the top-level CPU limit into generated deployment environments', () => {
@@ -871,6 +1035,22 @@ describe('sync wrangler config', () => {
     expect(String(envConfig.vars?.SETUP_TOKEN).length).toBeGreaterThan(20);
   });
 
+  it('masks the setup token in GitHub Actions before wrangler can print it', () => {
+    // wrangler deploy prints every plain-text var, and the deploy job echoes that output into a
+    // public log. On 2026-11-12 a token read from that log took over production's /setup.
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('GITHUB_ACTIONS', 'true');
+    const written: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      written.push(String(chunk));
+      return true;
+    });
+
+    const envConfig = generateApiWorkerEnv({}, outputs, 'prod', false, false, null);
+
+    expect(written).toContain(`::add-mask::${String(envConfig.vars?.SETUP_TOKEN)}\n`);
+  });
+
   it('includes SETUP_FORCE only when explicitly requested', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 
@@ -1038,6 +1218,21 @@ it('forwards optional CLI receipt limits without adding default bindings', () =>
   });
 });
 
+it('forwards empty-node warm handoff grace without adding a default binding', () => {
+  vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+  const checkedIn = TOML.parse(
+    readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf8')
+  ) as WranglerToml;
+  vi.stubEnv('NODE_EMPTY_WARM_HANDOFF_GRACE_MS', '');
+  const baseline = generateApiWorkerEnv(checkedIn, outputs, 'staging', false, false, null);
+  expect(baseline.vars?.NODE_EMPTY_WARM_HANDOFF_GRACE_MS).toBeUndefined();
+  vi.stubEnv('NODE_EMPTY_WARM_HANDOFF_GRACE_MS', '3600000');
+  for (const environment of ['staging', 'production']) {
+    const configured = generateApiWorkerEnv(checkedIn, outputs, environment, false, false, null);
+    expect(configured.vars?.NODE_EMPTY_WARM_HANDOFF_GRACE_MS).toBe('3600000');
+  }
+});
+
 describe('Connector deployment overrides', () => {
   it('carries optional bounds and policy settings without seeding unused bindings', () => {
     vi.stubEnv('RESOURCE_PREFIX', 'connector-test');
@@ -1055,5 +1250,296 @@ describe('Connector deployment overrides', () => {
     expect(
       generateApiWorkerEnv({}, outputs, 'staging', false, false, null).vars
     ).not.toHaveProperty('CONNECTOR_ENABLED');
+  });
+});
+
+describe('Worker vars omitted because they equal the code default', () => {
+  // The real per-environment inputs: the GitHub Environment variables the deploy workflow passes
+  // through `${{ vars.NAME }}` into both Sync Wrangler Config steps, plus the agent release it
+  // derives itself. Names the generator does not forward (BASE_DOMAIN, RESOURCE_PREFIX,
+  // CODEX_SETUP_TERMINAL_ENABLED, ...) stay in the fixture on purpose: an input the Worker ignores
+  // must stay ignored.
+  //
+  // A self-hosted install sets only its deployment identity (BASE_DOMAIN, RESOURCE_PREFIX; see the
+  // self-hosting guide), so each forwarded var falls back to wrangler.toml, the generator's own
+  // default (CF_CONTAINER_ENABLED) or the code default. Its input blanks every other name the
+  // hosted Environments set, so a value left in the shell cannot stand in for one; the generator
+  // ignores empty values.
+  const NO_ENVIRONMENT_VARIABLES = Object.fromEntries(
+    [
+      ...Object.keys(environmentVariables.staging.variables),
+      ...Object.keys(environmentVariables.production.variables),
+    ].map((name) => [name, ''])
+  );
+  const ENVIRONMENT_INPUTS = {
+    staging: {
+      stack: environmentVariables.staging.stack,
+      env: { ...environmentVariables.staging.variables, ...WORKFLOW_DERIVED_ENV },
+    },
+    production: {
+      stack: environmentVariables.production.stack,
+      env: { ...environmentVariables.production.variables, ...WORKFLOW_DERIVED_ENV },
+    },
+    'self-hosted': {
+      stack: 'prod',
+      env: {
+        ...NO_ENVIRONMENT_VARIABLES,
+        BASE_DOMAIN: 'example.com',
+        RESOURCE_PREFIX: 's123abc',
+        ...WORKFLOW_DERIVED_ENV,
+      },
+    },
+  } as const;
+
+  const has = (vars: Record<string, string>, name: string): boolean =>
+    Object.prototype.hasOwnProperty.call(vars, name);
+
+  function readCheckedInWrangler(): WranglerToml {
+    return TOML.parse(
+      readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
+    ) as WranglerToml;
+  }
+
+  function stubEnvironment(environment: keyof typeof ENVIRONMENT_INPUTS): string {
+    const input = ENVIRONMENT_INPUTS[environment];
+    for (const [name, value] of Object.entries(input.env)) vi.stubEnv(name, value);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    return input.stack;
+  }
+
+  /**
+   * The Worker vars the generator builds, before the deploy guard runs: a reconstruction that puts
+   * every recorded default back may exceed the guard, and only the real config has to pass it.
+   */
+  function varsFor(environment: keyof typeof ENVIRONMENT_INPUTS, topLevel: WranglerToml) {
+    const stack = stubEnvironment(environment);
+    const vars = getApiWorkerVars(topLevel, outputs, stack, 'analytics-dataset', true);
+    // A fresh setup token is minted per generation; it is the one value that may never match.
+    const comparable: Record<string, string> = { ...vars };
+    delete comparable.SETUP_TOKEN;
+    return comparable;
+  }
+
+  const RETIRED_WITH_ANONYMOUS_TRIALS = [
+    'TRIAL_MONTHLY_CAP',
+    'TRIAL_WORKSPACE_TTL_MS',
+    'TRIAL_ANONYMOUS_USER_ID',
+    'TRIAL_EXPIRE_BATCH_SIZE',
+    'TRIAL_CLEANUP_BATCH_SIZE',
+    'TRIAL_CLEANUP_DEADLINE_MS',
+    'TRIAL_NODE_DELETION_LOCK_STALE_MS',
+    'TRIAL_AGENT_TYPE_STAGING',
+    'TRIAL_AGENT_TYPE_PRODUCTION',
+    'TRIAL_DEFAULT_WORKSPACE_PROFILE',
+    'TRIALS_ENABLED_KV_KEY',
+  ] as const;
+  // The busy-build placement wait it bounded was removed (2026-11-08): a busy node is now ranked by
+  // its startup backlog instead of waited on, so nothing reads the timeout.
+  const RETIRED_WITH_BUSY_BUILD_WAIT = ['VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS'] as const;
+  // A question's window moved to the admin setting `inbox.questionTimeoutMinutes` with inbox
+  // slice G (2026-11-16): questions are D1 `asks` rows, and nothing reads the variable.
+  const RETIRED_WITH_QUESTION_ASKS = ['HUMAN_INPUT_TIMEOUT_MS'] as const;
+  const RETIRED_VARS: readonly string[] = [
+    ...RETIRED_WITH_ANONYMOUS_TRIALS,
+    ...RETIRED_WITH_BUSY_BUILD_WAIT,
+    ...RETIRED_WITH_QUESTION_ASKS,
+  ];
+
+  it('pins original bindings to retained values, deliberate retunes or proven runtime defaults', () => {
+    const current = readCheckedInWrangler().vars ?? {};
+    // Approved 2026-11-14 archive throughput tuning. Preserve the dated audit snapshot;
+    // These retained bindings intentionally differ from that historical baseline.
+    const retuned: Record<string, string> = {
+      // Replace the assistant model before Cloudflare retires GLM 5.3 Flash (2026-11-20).
+      SAM_MODEL: '@cf/deepseek-ai/deepseek-v4.1-flash-1017',
+      PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '6000000',
+      PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS: '540000',
+    };
+    // Vars whose only consumer was deleted later (the anonymous-trial product, the busy-build
+    // wait; both 2026-11-08) are dead too: nothing reads them, so they are neither retained nor
+    // recorded as defaults.
+    const dead = new Set([...bindingAudit.removedDead, ...RETIRED_VARS]);
+    expect(Object.keys(bindingAudit.variables)).toHaveLength(283);
+    for (const [name, value] of Object.entries(bindingAudit.variables)) {
+      if (has(current, name)) {
+        expect(current[name], name).toBe(retuned[name] ?? value);
+      } else if (dead.has(name)) {
+        expect(OMITTED_WORKER_VAR_DEFAULTS, name).not.toHaveProperty(name);
+      } else {
+        expect(OMITTED_WORKER_VAR_DEFAULTS[name], name).toBe(retuned[name] ?? value);
+      }
+    }
+    expect(bindingAudit.removedDead).toEqual([
+      'ACTIVITY_RETENTION_DAYS',
+      'TRIAL_DATA_RETENTION_HOURS',
+    ]);
+  });
+
+  for (const environment of Object.keys(ENVIRONMENT_INPUTS) as Array<
+    keyof typeof ENVIRONMENT_INPUTS
+  >) {
+    it(`resolves every ${environment} var exactly as shipping the recorded defaults would`, () => {
+      const checkedIn = readCheckedInWrangler();
+      const overrides = ENVIRONMENT_INPUTS[environment].env as Record<string, string>;
+      // "Before": preserved original bindings plus defaults omitted in the prior reduction.
+      // The baseline pin above prevents the current config/record from masking historical drift.
+      const before = varsFor(environment, {
+        ...checkedIn,
+        vars: {
+          ...OMITTED_WORKER_VAR_DEFAULTS,
+          ...Object.fromEntries(
+            Object.entries(bindingAudit.variables).filter(
+              ([name]) => !bindingAudit.removedDead.includes(name) && !RETIRED_VARS.includes(name)
+            )
+          ),
+          ...checkedIn.vars,
+          // Deliberate retirement migration, independently pinned above.
+          SAM_MODEL: OMITTED_WORKER_VAR_DEFAULTS.SAM_MODEL,
+        },
+      });
+      const after = varsFor(environment, checkedIn);
+
+      // Every var still emitted keeps its exact value, so nothing the generator derives or forwards
+      // depended on an omitted entry.
+      for (const name of Object.keys(after)) expect(after[name], name).toBe(before[name]);
+      // Every var no longer emitted is a recorded one that used to ship exactly as recorded (not
+      // overwritten or derived by the generator), so the Worker now falls back to the code default
+      // where it used to read that same value. That the code default IS the recorded value is
+      // proven against the production resolvers in
+      // `apps/api/tests/unit/config/omitted-worker-var-defaults.test.ts`, not here.
+      for (const name of Object.keys(before).filter((n) => !has(after, n))) {
+        expect(has(OMITTED_WORKER_VAR_DEFAULTS, name), name).toBe(true);
+        expect(before[name], name).toBe(OMITTED_WORKER_VAR_DEFAULTS[name]);
+      }
+      // Every GitHub Environment override the generator forwards still ships verbatim.
+      const isOverridden = (name: string): boolean =>
+        has(overrides, name) && overrides[name] !== '';
+      for (const name of Object.keys(before).filter(isOverridden)) {
+        expect(after[name], name).toBe(before[name]);
+      }
+      // Liveness beside the equality: the omitted defaults really are gone from the generated
+      // config, so the comparison above is not passing because nothing was omitted.
+      const omittedAndNotOverridden = Object.keys(OMITTED_WORKER_VAR_DEFAULTS).filter(
+        (name) => !isOverridden(name)
+      );
+      expect(omittedAndNotOverridden.length).toBeGreaterThan(0);
+      for (const name of omittedAndNotOverridden) expect(after, name).not.toHaveProperty(name);
+      expect(Object.keys(after)).toHaveLength(
+        Object.keys(before).length - omittedAndNotOverridden.length
+      );
+    });
+  }
+
+  // CI fails this far below the deploy guard, so the next batch of [vars] is caught in review with
+  // time left to clean up, instead of by a failed production deploy. ~40 bindings is about two months
+  // of the growth measured before the 2026-10-11 cleanup (net +0.6 vars/day).
+  const TEXT_BINDING_EARLY_WARNING_MARGIN = 40;
+
+  for (const environment of Object.keys(ENVIRONMENT_INPUTS) as Array<
+    keyof typeof ENVIRONMENT_INPUTS
+  >) {
+    it(`keeps the generated ${environment} Worker well under the text-binding guard`, () => {
+      // The real generator path, deploy guard included.
+      const generated = generateApiWorkerEnv(
+        readCheckedInWrangler(),
+        outputs,
+        stubEnvironment(environment),
+        true,
+        true,
+        null
+      );
+      const textBindings = countWorkerTextBindings(generated);
+      expect(textBindings).toBeLessThanOrEqual(
+        CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT - TEXT_BINDING_EARLY_WARNING_MARGIN
+      );
+    });
+  }
+
+  it('does not let wrangler.toml [vars] re-add a var recorded as an omitted default', () => {
+    // A recorded name back in [vars] either restates the default (a wasted binding) or overrides it
+    // (then the record is stale and the override report compares against the wrong value).
+    const vars = readCheckedInWrangler().vars ?? {};
+    expect(
+      Object.keys(OMITTED_WORKER_VAR_DEFAULTS).filter((name) =>
+        Object.prototype.hasOwnProperty.call(vars, name)
+      )
+    ).toEqual([]);
+  });
+
+  it('reports an override of an omitted var against its recorded code default', () => {
+    // Omitting a var from wrangler.toml must not hide its GitHub Environment override from the
+    // deploy log (`.claude/rules/70`): the comparison base becomes the recorded code default.
+    expect(
+      listEnvironmentVarOverrides(
+        { KEPT: 'true' },
+        { KEPT: 'false', OMITTED: '5', OMITTED_SAME: '7', ADDED: 'x' },
+        { OMITTED: '9', OMITTED_SAME: '7' }
+      )
+    ).toEqual([
+      { name: 'KEPT', checkedIn: 'true', override: 'false' },
+      { name: 'OMITTED', checkedIn: '9', checkedInSource: 'code default', override: '5' },
+    ]);
+
+    const lines: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(' '));
+    });
+    try {
+      reportEnvironmentVarOverrides([
+        { name: 'OMITTED', checkedIn: '9', checkedInSource: 'code default', override: '5' },
+      ]);
+    } finally {
+      log.mockRestore();
+    }
+    expect(lines).toEqual(['  Environment override: OMITTED="5" replaces code default "9"']);
+  });
+});
+
+describe('dedicated Compose builder deployment settings', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it('mirrors actual class capacity into admission and supports instance sizing overrides', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('DEPLOY_BUILDER_MAX_INSTANCES', '4');
+    vi.stubEnv('DEPLOY_BUILDER_INSTANCE_TYPE', 'standard-3');
+    const generated = generateApiWorkerEnv(
+      {
+        containers: [
+          {
+            class_name: 'ComposeBuilderContainer',
+            image: './Dockerfile.compose-builder',
+            instance_type: 'standard-4',
+            max_instances: 6,
+          },
+        ],
+      },
+      outputs,
+      'staging',
+      false,
+      false,
+      null
+    );
+    expect(generated.containers).toEqual([
+      {
+        class_name: 'ComposeBuilderContainer',
+        image: './Dockerfile.compose-builder',
+        instance_type: 'standard-3',
+        max_instances: 4,
+      },
+    ]);
+    expect(generated.vars?.DEPLOY_BUILDER_CLASS_MAX_INSTANCES).toBe('4');
+  });
+  it('fails closed on an invalid builder instance type', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('DEPLOY_BUILDER_INSTANCE_TYPE', 'typo');
+    expect(() =>
+      generateApiWorkerEnv(
+        { containers: [{ class_name: 'ComposeBuilderContainer', image: 'image' }] },
+        outputs,
+        'staging',
+        false,
+        false,
+        null
+      )
+    ).toThrow('DEPLOY_BUILDER_INSTANCE_TYPE');
   });
 });

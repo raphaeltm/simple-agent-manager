@@ -8,14 +8,14 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import {
+  evaluateWorkspaceReservationCapacity,
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
 import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_RATE_LIMITS } from '../../../src/middleware/rate-limit';
 import { getRuntimeLimits } from '../../../src/services/limits';
-import {
-  evaluateWorkspaceReservationCapacity,
-  resolveWorkspaceAdmissionPolicy,
-} from '../../../src/services/workspace-resource-capacity';
 
 // =============================================================================
 // getRuntimeLimits — behavioral tests for all 15 configurable limits
@@ -246,7 +246,7 @@ describe('DEFAULT_RATE_LIMITS', () => {
 // =============================================================================
 
 describe('task submit — configurable MAX_TASK_MESSAGE_LENGTH', () => {
-  const submitSource = readFileSync(resolve(process.cwd(), 'src/services/submit-task.ts'), 'utf8');
+  const submitSource = readFileSync(resolve(process.cwd(), 'src/services/submit-task-implementation.ts'), 'utf8');
 
   it('reads max message length from MAX_TASK_MESSAGE_LENGTH env var', () => {
     expect(submitSource).toContain('env.MAX_TASK_MESSAGE_LENGTH');
@@ -278,10 +278,9 @@ describe('task submit — configurable MAX_TASK_MESSAGE_LENGTH', () => {
 // =============================================================================
 
 describe('workspace messages — configurable MAX_MESSAGES_PER_BATCH', () => {
-  const runtimeSource = readFileSync(
-    resolve(process.cwd(), 'src/routes/workspaces/runtime.ts'),
-    'utf8'
-  );
+  const runtimeSource = ['runtime-message-helpers.ts', 'runtime-messages.ts']
+    .map((file) => readFileSync(resolve(process.cwd(), 'src/routes/workspaces', file), 'utf8'))
+    .join('\n');
 
   it('reads batch limit from MAX_MESSAGES_PER_BATCH env var', () => {
     expect(runtimeSource).toContain('env.MAX_MESSAGES_PER_BATCH');
@@ -306,10 +305,9 @@ describe('workspace messages — configurable MAX_MESSAGES_PER_BATCH', () => {
 // =============================================================================
 
 describe('workspace messages — configurable MAX_MESSAGES_PAYLOAD_BYTES', () => {
-  const runtimeSource = readFileSync(
-    resolve(process.cwd(), 'src/routes/workspaces/runtime.ts'),
-    'utf8'
-  );
+  const runtimeSource = ['runtime-message-helpers.ts', 'runtime-messages.ts']
+    .map((file) => readFileSync(resolve(process.cwd(), 'src/routes/workspaces', file), 'utf8'))
+    .join('\n');
 
   it('reads payload size limit from MAX_MESSAGES_PAYLOAD_BYTES env var', () => {
     expect(runtimeSource).toContain('c.env.MAX_MESSAGES_PAYLOAD_BYTES');
@@ -322,8 +320,8 @@ describe('workspace messages — configurable MAX_MESSAGES_PAYLOAD_BYTES', () =>
     );
   });
 
-  it('uses configurable maxPayloadBytes in the comparison', () => {
-    expect(runtimeSource).toContain('contentLength > maxPayloadBytes');
+  it('enforces the configurable maxPayloadBytes while reading the body', () => {
+    expect(runtimeSource).toContain('readRequestBodyWithLimit(c.req.raw, maxPayloadBytes)');
   });
 });
 

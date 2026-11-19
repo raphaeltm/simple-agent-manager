@@ -50,12 +50,12 @@ Only candidates classified OPEN or PARTIAL proceed to Step 2.
 
 Pull candidates from all four tiers. Higher tiers override lower ones on conflict.
 
-1. **Human intent (highest authority).** Anything the user said this session; SAM `list_policies`
-   (hard gates unless explicitly a preference); `search_knowledge` for relevant entities
+1. **Human intent (highest authority).** Anything the user said this session; SAM `policies_read` method `list`
+   (hard gates unless explicitly a preference); `knowledge_read` method `search` for relevant entities
    (`User`, `Architecture`, `CodeQuality`, `BusinessStrategy`, surface names).
 2. **Production reality.** Incidents, crashes, error spikes, analytics anomalies; CI/staging health
    (`gh run list`); open PRs (`gh pr list`) and failing checks; anything broken for real users.
-3. **Curated backlog.** SAM `list_ideas`; `tasks/backlog/*.md`. (These feed Step 0 for reconciliation.)
+3. **Curated backlog.** SAM `ideas_read` method `list`; `tasks/backlog/*.md`. (These feed Step 0 for reconciliation.)
 4. **Strategic direction.** CLAUDE.md "Recent Changes" and SAM project knowledge/ideas (strategy docs are intentionally not kept in this public repo).
 
 ---
@@ -83,7 +83,7 @@ Produce:
 1. **Ranked shortlist of actually-open work.** For each item: one-line scope, impact/effort/evidence,
    and the Step-0 verification that proves it's still open (the commit/PR you checked, or "no match found").
 2. **Stale-board cleanup list.** Separately list every candidate found SHIPPED in Step 0, with the
-   merged PR/commit, so its idea/task status can be corrected (use SAM `update_idea` / move the task file).
+   merged PR/commit, so its idea/task status can be corrected (use SAM `ideas_write` method `update` / move the task file).
 3. **One recommended next action** with a one-sentence justification.
 
 ---
@@ -92,7 +92,7 @@ Produce:
 
 - Idea `priority` values are inconsistent (seen 0–70 with no shared scale) — treat as a weak hint only.
   Severity tags in titles and the Step-0 reconciliation carry far more signal than the numeric field.
-- `search_knowledge` can fail with `LIKE or GLOB pattern too complex: SQLITE_ERROR` — fall back to
-  `list_ideas` / `list_policies` and note the known backlog bug.
+- `knowledge_read` method `search` can fail with `LIKE or GLOB pattern too complex: SQLITE_ERROR` — fall back to
+  `ideas_read` method `list` / `policies_read` method `list` and note the known backlog bug.
 - This skill is **read-only by default.** Do not create tasks, ideas, or PRs unless the user asks —
   correcting stale idea status (Step 3) is fine since it only reconciles the board with reality.

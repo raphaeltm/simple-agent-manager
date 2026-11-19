@@ -16,6 +16,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/workspace/vm-agent/internal/auth"
+	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/config"
 )
 
@@ -28,12 +29,29 @@ func TestHandleGitCredentialRequiresCallbackAuth(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/git-credential", nil)
+	req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-123", nil)
 	rec := httptest.NewRecorder()
 	s.handleGitCredential(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+}
+
+func TestHandleGitCredentialRequiresExplicitWorkspaceID(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{config: &config.Config{
+		WorkspaceID:   "ws-primary",
+		CallbackToken: "callback-token",
+	}}
+	req := httptest.NewRequest(http.MethodGet, "/git-credential", nil)
+	req.Header.Set("Authorization", "Bearer callback-token")
+	rec := httptest.NewRecorder()
+	s.handleGitCredential(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without an explicit workspace id, got %d", rec.Code)
 	}
 }
 
@@ -64,7 +82,7 @@ func TestHandleGitCredentialSuccess(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/git-credential", nil)
+	req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-123", nil)
 	req.Header.Set("Authorization", "Bearer callback-token")
 
 	rec := httptest.NewRecorder()
@@ -146,7 +164,7 @@ func TestHandleGitCredentialRespectsRequestedHostProvider(t *testing.T) {
 				},
 			}
 
-			req := httptest.NewRequest(http.MethodGet, "/git-credential?host="+tc.queryHost, nil)
+			req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-123&protocol=https&host="+tc.queryHost, nil)
 			req.Header.Set("Authorization", "Bearer callback-token")
 
 			rec := httptest.NewRecorder()
@@ -435,232 +453,7 @@ func TestHandleGitCredentialGitLabResponseFailClosed(t *testing.T) {
 	}
 }
 
-// newGitLabMRTestServer builds the Server and WorkspaceRuntime shared by the
-// tryCreateGitLabMergeRequest tests, wired to the given TLS test API acting as
-// both control plane (token vending) and GitLab host.
-func newGitLabMRTestServer(api *httptest.Server) (*Server, *WorkspaceRuntime) {
-	s := &Server{
-		config: &config.Config{
-			ControlPlaneURL: api.URL,
-		},
-		httpClient: api.Client(),
-		workspaces: map[string]*WorkspaceRuntime{
-			"ws-gitlab": {
-				ID:            "ws-gitlab",
-				CallbackToken: "gitlab-callback-token",
-			},
-		},
-	}
-	runtime := &WorkspaceRuntime{
-		ID:             "ws-gitlab",
-		Branch:         "main",
-		RepoProvider:   "gitlab",
-		RepositoryHost: strings.TrimPrefix(api.URL, "https://"),
-		RepositoryPath: "group/project",
-	}
-	return s, runtime
-}
-
-func TestTryCreateGitLabMergeRequestUsesWorkspaceToken(t *testing.T) {
-	t.Parallel()
-
-	var sawTokenRequest atomic.Bool
-	var sawMergeRequest atomic.Bool
-	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/workspaces/ws-gitlab/git-token":
-			sawTokenRequest.Store(true)
-			if r.Method != http.MethodPost {
-				t.Fatalf("expected token POST, got %s", r.Method)
-			}
-			if r.Header.Get("Authorization") != "Bearer gitlab-callback-token" {
-				t.Fatalf("unexpected token Authorization header: %q", r.Header.Get("Authorization"))
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"provider":"gitlab","token":"gl_token","expiresAt":null}`))
-		case strings.Contains(r.RequestURI, "/api/v4/projects/group%2Fproject/merge_requests"):
-			sawMergeRequest.Store(true)
-			if r.Method != http.MethodPost {
-				t.Fatalf("expected MR POST, got %s", r.Method)
-			}
-			if r.Header.Get("Authorization") != "Bearer gl_token" {
-				t.Fatalf("unexpected MR Authorization header: %q", r.Header.Get("Authorization"))
-			}
-			if err := r.ParseForm(); err != nil {
-				t.Fatalf("parse MR form: %v", err)
-			}
-			if r.Form.Get("source_branch") != "sam/feature" {
-				t.Fatalf("unexpected source_branch: %q", r.Form.Get("source_branch"))
-			}
-			if r.Form.Get("target_branch") != "main" {
-				t.Fatalf("unexpected target_branch: %q", r.Form.Get("target_branch"))
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"web_url":"https://gitlab.example/group/project/-/merge_requests/7","iid":7}`))
-		default:
-			t.Fatalf("unexpected request: %s %s", r.Method, r.RequestURI)
-		}
-	}))
-	defer api.Close()
-
-	s, runtime := newGitLabMRTestServer(api)
-
-	mrURL, iid := s.tryCreateGitLabMergeRequest(runtime, "sam/feature")
-
-	if mrURL != "https://gitlab.example/group/project/-/merge_requests/7" {
-		t.Fatalf("unexpected MR URL: %q", mrURL)
-	}
-	if iid != 7 {
-		t.Fatalf("unexpected MR iid: %d", iid)
-	}
-	if !sawTokenRequest.Load() {
-		t.Fatal("expected token request")
-	}
-	if !sawMergeRequest.Load() {
-		t.Fatal("expected merge request")
-	}
-}
-
-// TestTryCreateGitLabMergeRequestFallsBackToExistingOn409 verifies that when
-// GitLab rejects the MR create with 409 (an MR already exists for the source
-// branch), the agent looks up the existing open MR and returns its URL/IID
-// instead of reporting a failure.
-func TestTryCreateGitLabMergeRequestFallsBackToExistingOn409(t *testing.T) {
-	t.Parallel()
-
-	var sawCreateAttempt atomic.Bool
-	var sawLookup atomic.Bool
-	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/workspaces/ws-gitlab/git-token":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"provider":"gitlab","token":"gl_token","expiresAt":null}`))
-		case strings.Contains(r.RequestURI, "/api/v4/projects/group%2Fproject/merge_requests") && r.Method == http.MethodPost:
-			sawCreateAttempt.Store(true)
-			w.WriteHeader(http.StatusConflict)
-			_, _ = w.Write([]byte(`{"message":["Another open merge request already exists for this source branch"]}`))
-		case strings.Contains(r.RequestURI, "/api/v4/projects/group%2Fproject/merge_requests") && r.Method == http.MethodGet:
-			sawLookup.Store(true)
-			if r.Header.Get("Authorization") != "Bearer gl_token" {
-				t.Fatalf("unexpected lookup Authorization header: %q", r.Header.Get("Authorization"))
-			}
-			q := r.URL.Query()
-			if q.Get("state") != "opened" {
-				t.Fatalf("unexpected state param: %q", q.Get("state"))
-			}
-			if q.Get("source_branch") != "sam/feature" {
-				t.Fatalf("unexpected source_branch param: %q", q.Get("source_branch"))
-			}
-			if q.Get("target_branch") != "main" {
-				t.Fatalf("unexpected target_branch param: %q", q.Get("target_branch"))
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`[{"web_url":"https://gitlab.example/group/project/-/merge_requests/9","iid":9}]`))
-		default:
-			t.Fatalf("unexpected request: %s %s", r.Method, r.RequestURI)
-		}
-	}))
-	defer api.Close()
-
-	s, runtime := newGitLabMRTestServer(api)
-
-	mrURL, iid := s.tryCreateGitLabMergeRequest(runtime, "sam/feature")
-
-	if mrURL != "https://gitlab.example/group/project/-/merge_requests/9" {
-		t.Fatalf("unexpected MR URL: %q", mrURL)
-	}
-	if iid != 9 {
-		t.Fatalf("unexpected MR iid: %d", iid)
-	}
-	if !sawCreateAttempt.Load() {
-		t.Fatal("expected MR create attempt")
-	}
-	if !sawLookup.Load() {
-		t.Fatal("expected existing-MR lookup after 409")
-	}
-}
-
-func TestHandleGitCredentialAllowsLocalExchangeWithoutCallbackBearer(t *testing.T) {
-	t.Parallel()
-
-	var requestedAuth string
-	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestedAuth = r.Header.Get("Authorization")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"token":"ghs_test_token","expiresAt":"2026-01-01T00:00:00Z"}`))
-	}))
-	defer controlPlane.Close()
-
-	s := &Server{
-		config: &config.Config{
-			ControlPlaneURL: controlPlane.URL,
-			WorkspaceID:     "ws-123",
-			CallbackToken:   "callback-token",
-		},
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/git-credential", nil)
-	req.RemoteAddr = "172.17.0.2:52144"
-
-	rec := httptest.NewRecorder()
-	s.handleGitCredential(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if requestedAuth != "Bearer callback-token" {
-		t.Fatalf("expected VM agent to use in-memory callback token, got %q", requestedAuth)
-	}
-	if got := rec.Body.String(); !strings.Contains(got, "password=ghs_test_token") {
-		t.Fatalf("expected credential response, got:\n%s", got)
-	}
-}
-
-// TestHandleGitCredentialAllowsLocalExchangeForRegisteredSecondaryWorkspace
-// verifies that a bearerless loopback request for a SECONDARY workspace that is
-// registered in the runtime map is authorized and exchanges using that
-// workspace's own callback token. All workspaces running on the node are treated
-// equally — there is no longer a primary-only gate.
-func TestHandleGitCredentialAllowsLocalExchangeForRegisteredSecondaryWorkspace(t *testing.T) {
-	t.Parallel()
-
-	var requestedPath string
-	var requestedAuth string
-	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestedPath = r.URL.Path
-		requestedAuth = r.Header.Get("Authorization")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"token":"ghs_secondary_token","expiresAt":"2026-01-01T00:00:00Z"}`))
-	}))
-	defer controlPlane.Close()
-
-	s := newTwoWorkspaceGitCredentialServer(controlPlane.URL)
-
-	req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-secondary", nil)
-	req.RemoteAddr = "172.17.0.2:52144"
-
-	rec := httptest.NewRecorder()
-	s.handleGitCredential(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if requestedPath != "/api/workspaces/ws-secondary/git-token" {
-		t.Fatalf("expected exchange for ws-secondary, got path %q", requestedPath)
-	}
-	if requestedAuth != "Bearer secondary-callback-token" {
-		t.Fatalf("expected secondary workspace callback token, got %q", requestedAuth)
-	}
-	if got := rec.Body.String(); !strings.Contains(got, "password=ghs_secondary_token") {
-		t.Fatalf("expected credential response, got:\n%s", got)
-	}
-}
-
-// TestHandleGitCredentialRejectsLocalExchangeForUnregisteredWorkspace verifies
-// that a bearerless loopback request for a workspace id that is NOT registered
-// on the node (not primary, not in the runtime map) is rejected with 401 and
-// never reaches the control plane.
-func TestHandleGitCredentialRejectsLocalExchangeForUnregisteredWorkspace(t *testing.T) {
+func TestHandleGitCredentialRejectsBearerlessPrivatePeer(t *testing.T) {
 	t.Parallel()
 
 	var controlPlaneCalled atomic.Bool
@@ -671,10 +464,8 @@ func TestHandleGitCredentialRejectsLocalExchangeForUnregisteredWorkspace(t *test
 	defer controlPlane.Close()
 
 	s := newTwoWorkspaceGitCredentialServer(controlPlane.URL)
-
-	req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-unknown", nil)
+	req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-secondary", nil)
 	req.RemoteAddr = "172.17.0.2:52144"
-
 	rec := httptest.NewRecorder()
 	s.handleGitCredential(rec, req)
 
@@ -682,7 +473,83 @@ func TestHandleGitCredentialRejectsLocalExchangeForUnregisteredWorkspace(t *test
 		t.Fatalf("expected 401, got %d", rec.Code)
 	}
 	if controlPlaneCalled.Load() {
-		t.Fatal("control plane should not be called for an unregistered workspace")
+		t.Fatal("bearerless private peer must not reach the control plane")
+	}
+}
+
+// A helper bearer is scoped to the workspace whose isolated helper contains it:
+// presenting the primary workspace's bearer while naming a secondary workspace
+// must fail before the node substitutes any callback token.
+func TestHandleGitCredentialExchangeTokenIsWorkspaceBound(t *testing.T) {
+	primaryToken, err := bootstrap.NewGitCredentialExchangeToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bootstrap.InstallGitCredentialExchange("ws-primary", primaryToken); err != nil {
+		t.Fatal(err)
+	}
+	secondaryToken, err := bootstrap.NewGitCredentialExchangeToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bootstrap.InstallGitCredentialExchange("ws-secondary", secondaryToken); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = bootstrap.RemoveCredentialHelperFromHost("ws-primary")
+		_ = bootstrap.RemoveCredentialHelperFromHost("ws-secondary")
+	})
+
+	var requestedPath string
+	var requestedAuth string
+	var controlPlaneCalls atomic.Int32
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		controlPlaneCalls.Add(1)
+		requestedPath = r.URL.Path
+		requestedAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"token":"ghs_secondary_token","expiresAt":"2026-01-01T00:00:00Z"}`))
+	}))
+	defer controlPlane.Close()
+
+	s := newTwoWorkspaceGitCredentialServer(controlPlane.URL)
+	primaryCallbackAttack := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-secondary", nil)
+	primaryCallbackAttack.RemoteAddr = "172.17.0.3:52144" // a sibling devcontainer on the node bridge
+	primaryCallbackAttack.Header.Set("Authorization", "Bearer primary-callback-token")
+	primaryCallbackAttackRec := httptest.NewRecorder()
+	s.handleGitCredential(primaryCallbackAttackRec, primaryCallbackAttack)
+	if primaryCallbackAttackRec.Code != http.StatusUnauthorized {
+		t.Fatalf("cross-workspace callback status = %d, want 401", primaryCallbackAttackRec.Code)
+	}
+	if controlPlaneCalls.Load() != 0 {
+		t.Fatal("cross-workspace callback must not reach the control plane")
+	}
+
+	attack := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-secondary", nil)
+	attack.RemoteAddr = "172.17.0.3:52144" // a sibling devcontainer on the node bridge
+	attack.Header.Set("Authorization", "Bearer "+primaryToken)
+	attackRec := httptest.NewRecorder()
+	s.handleGitCredential(attackRec, attack)
+	if attackRec.Code != http.StatusUnauthorized {
+		t.Fatalf("cross-workspace exchange status = %d, want 401", attackRec.Code)
+	}
+	if controlPlaneCalls.Load() != 0 {
+		t.Fatal("cross-workspace exchange must not reach the control plane")
+	}
+
+	legitimate := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-secondary", nil)
+	legitimate.RemoteAddr = "172.17.0.3:52144" // a sibling devcontainer on the node bridge
+	legitimate.Header.Set("Authorization", "Bearer "+secondaryToken)
+	legitimateRec := httptest.NewRecorder()
+	s.handleGitCredential(legitimateRec, legitimate)
+	if legitimateRec.Code != http.StatusOK {
+		t.Fatalf("matching workspace exchange status = %d, want 200", legitimateRec.Code)
+	}
+	if requestedPath != "/api/workspaces/ws-secondary/git-token" {
+		t.Fatalf("expected exchange for ws-secondary, got path %q", requestedPath)
+	}
+	if requestedAuth != "Bearer secondary-callback-token" {
+		t.Fatalf("exchange bearer was forwarded instead of callback token: %q", requestedAuth)
 	}
 }
 
@@ -747,7 +614,7 @@ func TestHandleGitCredentialControlPlaneFailure(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/git-credential", nil)
+	req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-123", nil)
 	req.Header.Set("Authorization", "Bearer callback-token")
 
 	rec := httptest.NewRecorder()

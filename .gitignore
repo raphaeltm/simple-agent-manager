@@ -10,6 +10,8 @@ build/
 # Test coverage
 coverage/
 packages/cli/coverage.out
+# Vitest blob reports written by sharded CI test runs (`--reporter=blob`)
+.vitest-reports/
 **/test-results/
 **/storybook-static/
 
@@ -54,6 +56,9 @@ pnpm-debug.log*
 *.temp
 .cache/
 
+# Local /do workflow checkpoint; retained by workspace recovery, never committed.
+.do-state.md
+
 # Codex local state. CODEX_HOME points at the repo's .codex/ (see
 # .devcontainer/devcontainer.json) so the project-scoped config survives container
 # rebuilds. Codex ALSO writes mutable runtime state here — sqlite DBs
@@ -62,8 +67,12 @@ pnpm-debug.log*
 # committed. Ignore ALL of .codex/ and track ONLY the config we author by hand.
 .codex/*
 !.codex/config.toml
+# Repository hook scripts named by config.toml (see scripts/quality/README.md, "Codex hooks").
+!.codex/hooks/
 # Playwright audit screenshots write under apps/web cwd, not the repo root
 **/.codex/tmp/
+# Throwaway Playwright specs, e.g. blog UI captures (apps/www/src/content/CLAUDE.md)
+apps/web/tests/playwright/*.local.spec.ts
 
 # Ephemeral agent scratch space — screenshots, debug dumps, downloads, notes.
 # Anything that should NOT be committed goes in .tmp/ (see .tmp/README.md).
@@ -87,3 +96,20 @@ pnpm-debug.log*
 
 # Playwright run artifacts
 apps/web/test-results/
+
+# Standalone installer deployment state
+apps/installer/.wrangler-deploy.json
+apps/installer/.dev.vars
+
+# Compiled shared installer scene (generated before dev/build/deploy)
+apps/installer/public/scene/
+apps/installer/src/maintenance-brand.generated.ts
+
+# Installer build-time brand/static output
+apps/installer/site-static/
+apps/installer/.astro/
+apps/installer/public/fonts/
+apps/installer/public/brand-icon.png
+apps/installer/public/sam-head.png
+apps/installer/public/theme-init.js
+packages/ui/.astro/

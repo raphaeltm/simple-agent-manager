@@ -1,4 +1,5 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
+import { compareMessagePositions, parseMessageCursor } from '@simple-agent-manager/shared';
 
 import { assertNoOverflow, screenshot } from './audit-helpers';
 
@@ -15,8 +16,7 @@ import { assertNoOverflow, screenshot } from './audit-helpers';
 
 const PROJECT_ID = 'proj-switch-audit';
 const USER = { id: 'user-switch-audit', name: 'Audit User', email: 'audit@example.com' };
-// Relative to the real clock: the session list files chats idle for hours under a
-// collapsed "Older" group, and these must read as recent.
+// Relative to the real clock, so relative times in the session list read as recent.
 const NOW = Date.now();
 const REFRESH_DELAY_MS = 4_000;
 const LONG_URL =
@@ -59,6 +59,7 @@ function chatSession(id: string, topic: string, messageCount: number, status = '
     isIdle: false,
     agentCompletedAt: null,
     agentSessionId: null,
+    viewerAccess: 'owner',
   };
 }
 
@@ -136,8 +137,10 @@ const TRANSCRIPTS: Record<string, Row[]> = {
       transcript(session.id, 12, (n) => `${session.topic} — message ${n}`),
     ])
   ),
-  [ARCHIVED.id]: transcript(ARCHIVED.id, ARCHIVED.messageCount, (n) =>
-    `Archived conversation message ${n}`
+  [ARCHIVED.id]: transcript(
+    ARCHIVED.id,
+    ARCHIVED.messageCount,
+    (n) => `Archived conversation message ${n}`
   ),
 };
 
@@ -163,8 +166,12 @@ interface DetailRequest {
   after: string | null;
 }
 
-function cursorIndex(rows: Row[], cursor: string): number {
-  return rows.findIndex((row) => cursor.endsWith(`"${row.id}"]`));
+function cursorComparison(row: Row, cursor: string): number {
+  const position = parseMessageCursor(cursor);
+  if (position === null) throw new Error('Invalid mock transcript cursor');
+  return typeof position === 'number'
+    ? row.createdAt - position
+    : compareMessagePositions(row, position);
 }
 
 /** Serves one session-detail request the way the API pages a transcript. */
@@ -177,11 +184,13 @@ function detailPage(sessionId: string, params: URLSearchParams) {
   let messages: Row[];
   let hasMore: boolean;
   if (after) {
-    const start = cursorIndex(rows, after) + 1;
-    messages = rows.slice(start, start + 5_000);
-    hasMore = start + 5_000 < rows.length;
+    const newer = rows.filter((row) => cursorComparison(row, after) > 0);
+    messages = newer.slice(0, 5_000);
+    hasMore = messages.length < newer.length;
   } else {
-    const end = before ? cursorIndex(rows, before) : rows.length;
+    const end = before
+      ? rows.filter((row) => cursorComparison(row, before) < 0).length
+      : rows.length;
     const start = Math.max(0, end - limit);
     messages = rows.slice(start, end);
     hasMore = start > 0;
@@ -215,7 +224,6 @@ async function setupApi(page: Page, detailRequests: DetailRequest[]) {
       return respond({ notifications: [], unreadCount: 0, nextCursor: null });
     }
     if (path === '/api/credentials') return respond([{ provider: 'hetzner', status: 'valid' }]);
-    if (path === '/api/trial/status') return respond({ available: false });
     if (path === '/api/agents') return respond({ agents: [] });
     if (path === '/api/github/installations') return respond([]);
     if (path === '/api/report-issue/config') return respond({ enabled: true });
@@ -264,19 +272,25 @@ function isMobile(page: Page): boolean {
   return (page.viewportSize()?.width ?? 1280) < 768;
 }
 
+/** Unfolds History, where stopped chats such as the fillers and the wordy chat live. */
+async function openHistory(list: ReturnType<Page['getByRole']>) {
+  const history = list.getByRole('button', { name: /^History/ });
+  if ((await history.getAttribute('aria-expanded')) === 'false') await history.click();
+  await expect(history).toHaveAttribute('aria-expanded', 'true');
+}
+
 /** Picks a chat the way a user does on this viewport: the sidebar, or the chat-list drawer. */
 async function selectChat(page: Page, topic: string) {
   if (isMobile(page)) {
-    await page.getByRole('button', { name: 'Open chat list' }).click();
+    await page.getByRole('button', { name: /^Open chat list/ }).click();
     const drawer = page.getByRole('dialog', { name: 'Chat sessions' });
+    await openHistory(drawer);
     await drawer.getByText(topic, { exact: false }).first().click();
     await expect(drawer).toHaveCount(0);
   } else {
-    await page
-      .getByRole('navigation', { name: 'Chat sessions' })
-      .getByText(topic, { exact: false })
-      .first()
-      .click();
+    const list = page.getByRole('navigation', { name: 'Chat sessions' });
+    await openHistory(list);
+    await list.getByText(topic, { exact: false }).first().click();
   }
 }
 
@@ -356,9 +370,29 @@ test.describe('project chat — instant switching audit', () => {
     // once. Give its debounced callback ample time: nothing older may load until
     // the reader asks for it.
     await page.waitForTimeout(1_500);
-    expect(requests.filter((r) => r.sessionId === TOOLS.id)).toEqual([
+    const opened = requests.filter((r) => r.sessionId === TOOLS.id);
+    expect(opened.filter((r) => r.before !== null)).toHaveLength(0);
+    expect(opened.filter((r) => r.after === null)).toEqual([
       { sessionId: TOOLS.id, limit: '500', before: null, after: null },
     ]);
+    // Revisiting a cached chat triggers catch-up deterministically, including
+    // the cached tail so streamed content can grow without moving its cursor.
+    await selectChat(page, EMPTY.topic);
+    await expect(page.getByText('Waiting for messages...')).toBeVisible();
+    await selectChat(page, TOOLS.topic);
+    await expect
+      .poll(() => requests.filter((r) => r.sessionId === TOOLS.id && r.after).length)
+      .toBeGreaterThan(0);
+    const newest = TRANSCRIPTS[TOOLS.id]!.at(-1)!;
+    const newestCursor = JSON.stringify([newest.createdAt, newest.sequence - 1, newest.id]);
+    for (const refresh of requests.filter((r) => r.sessionId === TOOLS.id && r.after !== null)) {
+      expect(refresh).toEqual({
+        sessionId: TOOLS.id,
+        limit: null,
+        before: null,
+        after: newestCursor,
+      });
+    }
 
     await page.getByRole('button', { name: 'Load earlier messages' }).click();
     await expect(conversation(page).getByText('Tool run checkpoint 500:')).toBeVisible();
@@ -379,7 +413,9 @@ test.describe('project chat — instant switching audit', () => {
       timeout: 15_000,
     });
     await page
-      .getByRole('button', { name: /1 unresolved comment/i })
+      .getByRole('button', {
+        name: isMobile(page) ? /1 unresolved comment/i : 'Open comment threads — 1 unresolved',
+      })
       .first()
       .click();
     await expect(
@@ -404,8 +440,9 @@ test.describe('project chat — instant switching audit', () => {
         .click();
       await page.getByRole('button', { name: /show in conversation/i }).click();
     } else {
+      // The commented message is not loaded yet, so the rail cannot name it.
       await page
-        .getByRole('button', { name: `Show message ${LONG.id}-m10 in conversation` })
+        .getByRole('button', { name: 'Show an earlier message in the conversation' })
         .click();
     }
     await expect(conversation(page).getByText('Long chat message 10:')).toBeInViewport({
@@ -429,14 +466,16 @@ test.describe('project chat — instant switching audit', () => {
 
     // Many sessions in the list, long titles included.
     if (isMobile(page)) {
-      await page.getByRole('button', { name: 'Open chat list' }).click();
+      await page.getByRole('button', { name: /^Open chat list/ }).click();
       const drawer = page.getByRole('dialog', { name: 'Chat sessions' });
+      await openHistory(drawer);
       await expect(drawer.getByText('Filler chat 32:', { exact: false })).toBeAttached();
       await assertNoOverflow(page);
       await screenshot(page, `project-chat-switching-session-list-${viewport}`);
       await page.keyboard.press('Escape');
       await expect(drawer).toHaveCount(0);
     } else {
+      await openHistory(page.getByRole('navigation', { name: 'Chat sessions' }));
       await screenshot(page, `project-chat-switching-session-list-${viewport}`);
     }
 
@@ -471,7 +510,7 @@ test.describe('project chat — instant switching audit', () => {
     await screenshot(page, `project-chat-switching-cached-return-${viewport}`);
   });
 
-  test('a recent archive-maintenance timestamp does not put an old chat in Recent', async ({
+  test('a recent archive-maintenance timestamp does not move an old chat up History', async ({
     page,
   }, testInfo) => {
     await setupApi(page, []);
@@ -486,9 +525,9 @@ test.describe('project chat — instant switching audit', () => {
       sessionList = page.getByRole('dialog', { name: 'Chat sessions' });
     }
 
-    const olderToggle = sessionList.getByRole('button', { name: 'Older (1)' });
-    await expect(olderToggle).toBeVisible();
-    await olderToggle.click();
+    const historyToggle = sessionList.getByRole('button', { name: /^History/ });
+    await expect(historyToggle).toBeVisible();
+    await historyToggle.click();
     const listViewport = isMobile(page)
       ? sessionList.getByRole('navigation', { name: 'Chat sessions' })
       : sessionList;

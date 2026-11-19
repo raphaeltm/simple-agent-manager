@@ -1,7 +1,7 @@
+import { runProjectEventWakeMaterializationBatch } from '@simple-agent-manager/project-data/internal/do/project-events';
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { expect } from 'vitest';
 
-import { runProjectEventWakeMaterializationBatch } from '../../../src/durable-objects/project-data/project-events';
 import type { Env } from '../../../src/env';
 import { storeMcpToken } from '../../../src/services/mcp-token';
 import type { ProjectDataTestDouble } from '../support/expected-error-doubles';

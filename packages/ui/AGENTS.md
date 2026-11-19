@@ -14,6 +14,20 @@ Design system tokens and shared UI components for the control plane app. Provide
 | `src/primitives/` | Layout primitives (Container, PageLayout, Typography) |
 | `src/hooks/` | Shared UI hooks |
 | `src/styles.css` | Base styles imported by consumers |
+| `src/glass/glass.css` | Glass v2 material (`.sam-glass`, `--chrome`, `--slab`, `--quiet`, `-rim`, `-sheen`, `-live`), plus `.sam-void`, `.sam-well`, `.sam-raised`, shared by the app and the marketing site; follows `[data-ui-theme]` and `html[data-theme]` |
+| `src/tokens/sam-glass.css` | SAM Glass app tokens: people colours, counts, nav glow, pane radii and gutter (both themes) |
+| `src/glass/node-field.ts` | Framework-agnostic canvas renderer of SAM's node/workspace network as lit glass tiles (`createGlassNodeField`); `field-model.ts` holds its pure geometry and lifecycle |
+| `src/components/GlassNodeField.tsx` | React wrapper for the node field (decorative background) |
+
+## SAM Glass
+
+The app's visual language: glass panes over a dark green void. Guide: `docs/guides/sam-glass-design-system.md`. Rule: `.claude/rules/80-sam-glass.md`. Build recipe: the `sam-glass` skill.
+
+- Surfaces are glass (`.sam-glass .sam-glass-rim`, `--slab`, `--quiet`); elements on them (buttons, avatars, chips, counts, inputs) are solid or wells.
+- One live blur at a time (`.sam-glass-live` on a single overlay).
+- People colours (`--sam-person-*`) mean who; amber means waiting on you.
+- New components go in `src/components/` with a story; the table of components to build is in the guide.
+- Built: `Pane` (`paneClassName()`), `IconButton`, `Count`, `Chip` (`chipClassName()`), `PersonAvatar`/`AvatarStack` (`personSlotFor()`), `SegmentedControl`, `NavItem`/`NavLabel`, `SearchField`, and the `accent`/`raised` `Button` variants. Stories live under "SAM Glass/" in Storybook.
 
 ## Commands
 
@@ -34,7 +48,30 @@ pnpm --filter @simple-agent-manager/ui lint        # ESLint
 
 ## Gotchas
 
+- Glass and the node field are exported as source subpaths (`./glass.css`, `./glass/node-field`) so the Astro marketing site can import them without React. The marketing site's CI and deploy workflows watch `src/glass/**` and `package.json`.
+- The package barrel re-exports only the renderer's types. `GlassNodeField` imports the renderer when it mounts, so app routes that never show the field never download it; do not add a static `export *` of `glass/node-field` to `src/index.ts`.
+- Three glass vocabularies exist on purpose: the app's utility glass (`.glass-chrome`, `.glass-surface`, `.glass-modal` in `apps/web/src/index.css`, tokens `--sam-glass-*` in `theme.css`) for app chrome and overlays; the marketing site's older `--glass-*` tokens in `apps/www/src/styles/global.css`, still used by its inner pages; and Glass v2 here (`.sam-glass*`, `--sam-glass-v2-*`) for brand surfaces lit by a light source (marketing homepage, app sign-in). Use v2 for new brand-forward surfaces; do not mix vocabularies on one element.
+- `glass.css` material rules use `:where()` (zero specificity) so consumer layout and surface rules win; the rim/sheen pseudo-elements need a positioned host. The app imports it into `@layer components` so Tailwind utilities can still override it.
+- The node field paints one settled frame under `prefers-reduced-motion`, pauses offscreen and in hidden tabs, caps at 30fps, and is a no-op without a 2D canvas context (jsdom).
+
 - UI changes here trigger mandatory Playwright visual audit on mobile (375px) + desktop (1280px) per rule 17
 - Tailwind v4 uses `@tailwindcss/vite` plugin — config is in the consumer's vite config, not a `tailwind.config.js`
 - This is a peer-dependency package — consumers must provide React 19+, lucide-react, react-router, tailwindcss
 - Token values drive the entire app's visual appearance — changes here cascade everywhere
+
+<!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->
+
+## Rules for this directory
+
+Read the rules whose scope covers the files you will change before editing. Claude Code
+loads them by itself on file access; other harnesses must open them.
+
+- `.claude/rules/04-ui-standards.md`: UI Standards
+- `.claude/rules/17-ui-visual-testing.md`: Mandatory Playwright Visual Testing for UI Changes
+- `.claude/rules/37-prototype-development.md`: Prototype Development
+- `.claude/rules/56-clipped-overflow-is-invisible-to-document-checks.md`: Horizontal Overflow Inside `overflow-x-hidden` Is Invisible to Document-Level Checks
+- `.claude/rules/64-unstable-prop-identity-remounts-subtrees.md`: An Object Literal in a Render Body Can Remount an Entire Subtree
+- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
+- `.claude/rules/80-sam-glass.md`: SAM Glass
+
+<!-- END GENERATED RULE INDEX -->

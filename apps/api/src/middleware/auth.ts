@@ -1,10 +1,16 @@
 import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
 import type { Context, MiddlewareHandler, Next } from 'hono';
 
-import { createAuth } from '../auth';
+import type { createAuth } from '../auth';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
+import {
+  isAgentSignInSession,
+  isPastHardExpiry,
+  sessionHardExpiry,
+} from '../services/agent-sign-in/session-cap';
+import { withAuthReadDeadline } from '../services/read-auth-session';
 import {
   assertUserAllowedBySignupApproval,
   assertUserNotSuspended,
@@ -28,6 +34,14 @@ export interface AuthContext {
     id: string | null;
     token: string | null;
     expiresAt: Date;
+    /**
+     * Created by agent sign-in through workload identity (services/agent-sign-in/). Such a
+     * session has a hard lifetime and must not mint longer-lived credentials; see
+     * `rejectAgentSignInSession`.
+     */
+    agentSignIn: boolean;
+    /** The agent sign-in session's hard expiry; null for an ordinary session. */
+    hardExpiresAt: Date | null;
   };
 }
 
@@ -40,14 +54,15 @@ declare module 'hono' {
      * request (`.claude/rules/02` "Unconditional Account-Denial Gates").
      */
     signupApprovalRequired: boolean;
+    signupApprovalRead: Promise<{ value: boolean } | { error: unknown }>;
   }
 }
 
 /**
  * Resolve the status of an authenticated session user.
  *
- * `'system'` is the status of internal sentinel rows (e.g. system_anonymous_trials,
- * seeded by migration 0043). It is an input:false additionalField — only migrations
+ * `'system'` is the status of internal sentinel rows (e.g. the system user
+ * `SYSTEM_USER_ID`, seeded by migration 0043). It is an input:false additionalField — only migrations
  * ever write it — so a real, OAuth-authenticated request must never carry it. If we
  * see it on a live session it is an anomaly (a sentinel row was somehow logged in, or
  * a row was mislabeled), so we log it and fall back to the least-privileged status
@@ -62,6 +77,11 @@ function resolveSessionStatus(rawStatus: unknown, userId: string): UserStatus {
     return 'pending';
   }
   return rawStatus as UserStatus;
+}
+
+function hardExpiryDate(sessionRecord: unknown): Date | null {
+  const ms = sessionHardExpiry(sessionRecord);
+  return ms === null ? null : new Date(ms);
 }
 
 type AuthSession = NonNullable<
@@ -95,6 +115,8 @@ function buildAuthContext(session: AuthSession): AuthContext {
           ? sessionRecord.token
           : null,
       expiresAt: session.session.expiresAt,
+      agentSignIn: isAgentSignInSession(sessionRecord),
+      hardExpiresAt: hardExpiryDate(sessionRecord),
     },
   };
 }
@@ -122,19 +144,25 @@ function buildAuthContext(session: AuthSession): AuthContext {
 export function requireAuth(): MiddlewareHandler<{ Bindings: Env }> {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     if (!c.get('auth')) {
-      const auth = await createAuth(c.env);
-      const session = await auth.api.getSession({
-        headers: c.req.raw.headers,
-        query: { disableCookieCache: true },
-      });
-
-      if (!session?.user) {
+      // One fresh approval read overlaps auth configuration and session lookup. Nested
+      // routers reuse this request's result; no cross-request approval cache is introduced.
+      const approval = isSignupApprovalRequired(c.env).then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error })
+      );
+      const session = await withAuthReadDeadline(c.env, c.req.raw, (auth) =>
+        auth.api.getSession({
+          headers: c.req.raw.headers,
+          query: { disableCookieCache: true },
+        })
+      );
+      if (!session?.user || isPastHardExpiry(session.session)) {
         throw errors.unauthorized('Authentication required');
       }
-
       const authContext = buildAuthContext(session);
       assertUserNotSuspended(authContext.user);
       c.set('auth', authContext);
+      c.set('signupApprovalRead', approval);
     }
 
     await next();
@@ -149,13 +177,14 @@ export function requireAuth(): MiddlewareHandler<{ Bindings: Env }> {
 export function optionalAuth(): MiddlewareHandler<{ Bindings: Env }> {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     try {
-      const auth = await createAuth(c.env);
-      const session = await auth.api.getSession({
-        headers: c.req.raw.headers,
-        query: { disableCookieCache: true },
-      });
+      const session = await withAuthReadDeadline(c.env, c.req.raw, (auth) =>
+        auth.api.getSession({
+          headers: c.req.raw.headers,
+          query: { disableCookieCache: true },
+        })
+      );
 
-      if (session?.user) {
+      if (session?.user && !isPastHardExpiry(session.session)) {
         const authContext = buildAuthContext(session);
         assertUserNotSuspended(authContext.user);
         c.set('auth', authContext);
@@ -166,6 +195,44 @@ export function optionalAuth(): MiddlewareHandler<{ Bindings: Env }> {
 
     await next();
   };
+}
+
+/**
+ * Refuse a session created by agent sign-in through workload identity. Apply to every route that
+ * mints a credential or grants access which outlives the session (personal access tokens,
+ * device-flow approval, OAuth consent, webhook credentials, project invites and access approvals,
+ * account approval and roles): otherwise a one-hour agent session could make itself lasting.
+ * Must be used AFTER requireAuth(). No I/O: the marker comes back with the session.
+ */
+export function rejectAgentSignInSession(): MiddlewareHandler<{ Bindings: Env }> {
+  return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    assertNotAgentSignInSession(c);
+    await next();
+  };
+}
+
+/**
+ * The latest instant a credential minted for this request may stay valid: an agent sign-in
+ * session's hard expiry, so a token it mints (terminal, port access, node management, local
+ * forward) dies with it. Undefined for an ordinary session, whose tokens keep their own lifetime.
+ */
+export function credentialNotAfter(c: Context<{ Bindings: Env }>): Date | undefined {
+  const auth = c.get('auth');
+  return auth?.session.hardExpiresAt ?? undefined;
+}
+
+/** The check behind `rejectAgentSignInSession`, for handlers that refuse only some requests. */
+export function assertNotAgentSignInSession(c: Context<{ Bindings: Env }>): void {
+  const auth = c.get('auth');
+  if (!auth) throw errors.unauthorized('Authentication required');
+  if (!auth.session.agentSignIn) return;
+  log.warn('agent_sign_in.credential_mint_refused', {
+    userId: auth.user.id,
+    sessionId: auth.session.id,
+    path: new URL(c.req.url).pathname,
+    action: 'rejected',
+  });
+  throw errors.forbidden('Agent sign-in sessions cannot create credentials or grant access');
 }
 
 /**
@@ -188,7 +255,12 @@ export function requireApproved(): MiddlewareHandler<{ Bindings: Env }> {
     // still evaluated on every pass.
     let required = c.get('signupApprovalRequired');
     if (required === undefined) {
-      required = await isSignupApprovalRequired(c.env);
+      const read = c.get('signupApprovalRead');
+      if (read) {
+        const result = await read;
+        if ('error' in result) throw result.error;
+        required = result.value;
+      } else required = await isSignupApprovalRequired(c.env);
       c.set('signupApprovalRequired', required);
     }
 

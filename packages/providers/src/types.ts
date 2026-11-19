@@ -1,5 +1,9 @@
 import type { ProviderInstanceOffering, VMSize } from '@simple-agent-manager/shared';
 
+import type { GcpCatalogOptions } from './gcp';
+import type { GcpBootDiskPolicy } from './gcp-boot-disk';
+import type { ProviderVmDeletionRequests } from './vm-deletion';
+
 /**
  * Configuration for creating a VM.
  * Contains ONLY non-secret operational parameters.
@@ -277,7 +281,7 @@ export interface ProviderRequestContext {
  * Cloud provider interface.
  * Implementations handle VM lifecycle through their respective cloud APIs.
  */
-export interface Provider {
+export interface Provider extends ProviderVmDeletionRequests {
   /** Provider identifier matching CredentialProvider type */
   readonly name: string;
 
@@ -312,6 +316,12 @@ export interface Provider {
 
   /** Get VM by ID. Returns null if not found (no throw). */
   getVM(id: string, context?: ProviderRequestContext): Promise<VMInstance | null>;
+
+  /**
+   * Get VM by ID with observed native hardware, for providers whose `getVM` and `listVMs` omit
+   * it (GCP). Optional: callers fall back to `getVM`. Returns null if not found (no throw).
+   */
+  getObservedVM?(id: string, context?: ProviderRequestContext): Promise<VMInstance | null>;
 
   /** List VMs with optional label-based filtering */
   listVMs(labels?: Record<string, string>, context?: ProviderRequestContext): Promise<VMInstance[]>;
@@ -424,6 +434,8 @@ export interface InfomaniakProviderConfig {
   requestTimeoutMs?: number;
   ipPollTimeoutMs?: number;
   ipPollIntervalMs?: number;
+  /** Boot volume GB for new VMs (admin setting `infomaniak.bootVolumeGb`); see infomaniak-boot-volume.ts. */
+  bootVolumeSizeGb?: number;
   logger?: ProviderLogger;
 }
 
@@ -489,7 +501,8 @@ export interface GcpProviderConfig {
   defaultZone?: string;
   imageFamily?: string;
   imageProject?: string;
-  diskSizeGb?: number;
+  /** Boot disk sizing (`gcp-boot-disk.ts`); defaults to 20 GB per vCPU with a 50 GB floor. */
+  bootDiskPolicy?: GcpBootDiskPolicy;
   timeoutMs?: number;
   operationPollTimeoutMs?: number;
   /** Source CIDR ranges allowed by the GCP VPC firewall rule for VM agent ingress. */
@@ -500,6 +513,8 @@ export interface GcpProviderConfig {
   appRouteSourceRanges?: readonly string[];
   /** TCP ports allowed by the GCP VPC firewall rule for public app-route ingress. */
   appRoutePorts?: readonly string[];
+  /** Live catalog inputs; without them `listInstanceOfferings` returns the static table. */
+  catalog?: GcpCatalogOptions;
 }
 
 /**
@@ -516,13 +531,7 @@ export type ProviderErrorCategory =
   | 'unknown';
 
 export type ProviderErrorContextValue =
-  | string
-  | number
-  | boolean
-  | null
-  | undefined
-  | ProviderErrorContext
-  | ProviderErrorContextValue[];
+  string | number | boolean | null | undefined | ProviderErrorContext | ProviderErrorContextValue[];
 
 export interface ProviderErrorContext {
   [key: string]: ProviderErrorContextValue;

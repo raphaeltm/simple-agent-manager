@@ -52,9 +52,7 @@ export type ProjectEventDisplayData = {
 
 export type ProjectEventJsonPrimitive = string | number | boolean | null;
 export type ProjectEventJsonValue =
-  | ProjectEventJsonPrimitive
-  | ProjectEventJsonValue[]
-  | { [key: string]: ProjectEventJsonValue };
+  ProjectEventJsonPrimitive | ProjectEventJsonValue[] | { [key: string]: ProjectEventJsonValue };
 export type ProjectEventMetadata = { [key: string]: ProjectEventJsonValue };
 
 export type ProjectEventRecordState = 'recorded' | 'conflicted';
@@ -107,18 +105,26 @@ export type AdmitProjectEventInput = {
   receivedAt?: number;
 };
 
-export type ProjectEventAdmissionOutcome = 'created' | 'duplicate_replay' | 'conflict';
+export type ProjectEventAdmissionOutcome =
+  'created' | 'duplicate_replay' | 'conflict' | 'skipped_no_subscriber';
 
-export type ProjectEventAdmissionResult = {
-  outcome: ProjectEventAdmissionOutcome;
-  event: ProjectEventRecord;
-  matches: ProjectEventMatchRecord[];
-  conflict?: {
-    deliveryKey: string;
-    existingFingerprint: string;
-    incomingFingerprint: string;
-  };
-};
+export type ProjectEventAdmissionResult =
+  | {
+      outcome: 'skipped_no_subscriber';
+      event: null;
+      matches: [];
+      conflict?: never;
+    }
+  | {
+      outcome: Exclude<ProjectEventAdmissionOutcome, 'skipped_no_subscriber'>;
+      event: ProjectEventRecord;
+      matches: ProjectEventMatchRecord[];
+      conflict?: {
+        deliveryKey: string;
+        existingFingerprint: string;
+        incomingFingerprint: string;
+      };
+    };
 
 export const PROJECT_EVENT_SUBSCRIPTION_OWNER_TYPES = [
   'human',
@@ -147,6 +153,14 @@ export const PROJECT_EVENT_REQUESTED_DELIVERY_MODES = [
 
 export type ProjectEventRequestedDeliveryMode =
   (typeof PROJECT_EVENT_REQUESTED_DELIVERY_MODES)[number];
+
+/**
+ * The delivery a subscription gets when its creator does not choose one, and the one SAM uses
+ * for agent-message notices: add the batch to the target chat's running turn without stopping
+ * it, or wake an idle or sleeping chat with an ordinary prompt.
+ */
+export const DEFAULT_PROJECT_EVENT_REQUESTED_DELIVERY =
+  'runtime_steer' as const satisfies ProjectEventRequestedDeliveryMode;
 
 export const PROJECT_EVENT_RESOLVED_DELIVERY_MODES = [
   'record_only',
@@ -325,6 +339,11 @@ export type ProjectEventSubscriptionRecord = {
   cancelledBy: ProjectEventSubscriptionOwner | null;
   cancelReason: string | null;
   lastMatchedAt: number | null;
+  /**
+   * Shortest time between two wakes of the target chat, in milliseconds, already raised to the
+   * platform wake cooldown. Null means the platform cooldown alone. ProjectData always sets it.
+   */
+  minWakeIntervalMs?: number | null;
 };
 
 export type ProjectEventSubscriptionMutationResult = {
@@ -343,6 +362,12 @@ export type CreateProjectEventSubscriptionInput = {
   ownerTaskId?: string | null;
   reason?: string | null;
   expiresAt?: number | null;
+  /**
+   * Wake the target chat at most once per this many milliseconds; events in between are bundled
+   * into the next wake. Only for subscriptions that wake the chat. Omit or null for the platform
+   * cooldown.
+   */
+  minWakeIntervalMs?: number | null;
 };
 
 export type ListProjectEventSubscriptionsInput = {
@@ -383,11 +408,7 @@ export type ProjectEventSubscriptionListResult = {
 };
 
 export type ProjectEventMatchState =
-  | 'matched'
-  | 'batch_created'
-  | 'recorded_not_injected'
-  | 'expired'
-  | 'cancelled';
+  'matched' | 'batch_created' | 'recorded_not_injected' | 'expired' | 'cancelled';
 
 export type ProjectEventMatchRecord = {
   id: string;
@@ -534,6 +555,7 @@ export type ProjectEventSubscriptionEventSummary = Pick<
   | 'receivedAt'
 > & {
   matchId: string;
+  matchedAt: number;
   payloadRefAvailable: boolean;
   delivery: ProjectEventPullDeliveryInfo;
 };
@@ -689,6 +711,17 @@ export type GetProjectEventRecentStatusInput = {
 };
 
 export type ProjectEventRecentStatus = {
+  /** Volatile isolate-local counters, not durable history or complete billing coverage. */
+  admission?: {
+    windowStart: number;
+    windowEnd: number;
+    skipUnsubscribedGitHubCi: boolean;
+    counts: Record<
+      string,
+      { calls: number; created: number; duplicate: number; conflict: number; skipped: number }
+    >;
+    overflowCalls: number;
+  };
   projectId: string;
   events: ProjectEventRecord[];
   matches: ProjectEventMatchRecord[];

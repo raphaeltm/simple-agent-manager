@@ -14,6 +14,9 @@ var errWorkspaceMetadataUnavailable = errors.New("workspace metadata is unavaila
 // newer than the in-memory lifecycle state after a failed or interrupted stop.
 func (s *Server) refreshWorkspaceEvictionState(runtime *WorkspaceRuntime) (WorkspaceRuntime, error) {
 	snapshot := s.snapshotWorkspaceRuntime(runtime)
+	if err := s.requireNoWorkspaceDeletion(snapshot.ID); err != nil {
+		return snapshot, err
+	}
 	if snapshot.MetadataUnavailable {
 		return snapshot, errWorkspaceMetadataUnavailable
 	}

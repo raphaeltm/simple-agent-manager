@@ -21,6 +21,12 @@
  * availability (see `listSessionsFromIndex`).
  */
 import { DEFAULT_SESSION_INDEX_MAX_STALENESS_MS } from '@simple-agent-manager/shared';
+import {
+  type AskAttentionSummary,
+  openWakeErrorForChat,
+  preferAttention,
+  readOpenQuestionAttention,
+} from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
@@ -30,10 +36,7 @@ const log = createModuleLogger('session_summary_index');
 
 /** Why a read could not be served from D1 — surfaced for observability. */
 export type SessionIndexMissReason =
-  | 'no_coverage'
-  | 'incomplete_coverage'
-  | 'stale_coverage'
-  | 'index_error';
+  'no_coverage' | 'incomplete_coverage' | 'stale_coverage' | 'index_error';
 
 export interface SessionIndexResult {
   sessions: Record<string, unknown>[];
@@ -48,6 +51,46 @@ export interface SessionIndexQuery {
   offset: number;
   /** Restricts to sessions this user created (the sidebar's `scope=my`). */
   createdByUserId: string | null;
+  /** Also return in-scope live sessions the page left out (see `LIVE_SESSION_STATUSES`). */
+  includeLive?: boolean;
+}
+
+/**
+ * Statuses a session can still be resumed or acted on from: awake (working or idle) and
+ * sleeping. The chat sidebar groups by state, so it needs every one of these in scope, not
+ * just those whose last message happens to fall in the newest page.
+ */
+export const LIVE_SESSION_STATUSES = ['active', 'sleeping'] as const;
+
+/**
+ * Whether a list read should add the live sessions its page left out. Only a first page of
+ * an unfiltered list: a status filter already selects what it wants, and later pages would
+ * repeat rows the first one returned.
+ */
+export function shouldIncludeLive(query: {
+  includeLive?: boolean;
+  status: string | null;
+  offset: number;
+}): boolean {
+  return Boolean(query.includeLive) && query.status === null && query.offset === 0;
+}
+
+/**
+ * Append `extra` rows whose id is not already in `page`, in their own order. The page keeps
+ * its position and `total`/`hasMore` keep describing it.
+ */
+export function appendMissingSessions(
+  page: Record<string, unknown>[],
+  extra: Record<string, unknown>[]
+): Record<string, unknown>[] {
+  const seen = new Set(page.map((session) => session.id));
+  const merged = [...page];
+  for (const session of extra) {
+    if (seen.has(session.id)) continue;
+    seen.add(session.id);
+    merged.push(session);
+  }
+  return merged;
 }
 
 export function resolveMaxStalenessMs(env: Env): number {
@@ -67,6 +110,11 @@ const AttentionSummarySchema = v.object({
   expiresAt: v.nullable(v.number()),
   reason: v.nullable(v.string()),
   options: v.array(v.string()),
+  // Added for the inbox (`getAttentionSummary`); absent on rows synced before it.
+  source: v.optional(v.nullable(v.string())),
+  category: v.optional(v.nullable(v.string())),
+  interactionId: v.optional(v.nullable(v.string())),
+  interactionKind: v.optional(v.nullable(v.string())),
 });
 
 /**
@@ -213,33 +261,121 @@ async function readIndex(
   }
 
   const whereClause = conditions.join(' AND ');
+  const columns = `id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
+                started_at, last_message_at, ended_at, created_at, updated_at, agent_completed_at, attention_json`;
+  const recency = 'ORDER BY COALESCE(last_message_at, created_at, started_at) DESC, id DESC';
+
+  // Live sessions the recency page may have left out. Skipped when the project has no
+  // more sessions than fit on the page: the page already holds every one of them.
+  const readLive = shouldIncludeLive(query) && coverage.session_count > query.limit;
+  const liveStatusBinds = LIVE_SESSION_STATUSES.map(() => '?').join(', ');
+
+  async function readLiveRows(): Promise<D1Result<Record<string, unknown>> | null> {
+    try {
+      return await db
+        .prepare(
+          `SELECT ${columns} FROM (
+             SELECT ${columns}, ROW_NUMBER() OVER (
+               PARTITION BY status, (attention_json IS NOT NULL OR ${OPEN_QUESTION_EXISTS})
+               ORDER BY COALESCE(last_message_at, created_at, started_at) DESC, id DESC
+             ) AS status_rank
+             FROM session_summaries
+             WHERE ${whereClause} AND status IN (${liveStatusBinds})
+           )
+           WHERE status_rank <= ?
+           ${recency}`
+        )
+        // The first bind is the open-question expiry clock (`OPEN_QUESTION_EXISTS`).
+        .bind(Date.now(), ...params, ...LIVE_SESSION_STATUSES, query.limit)
+        .all<Record<string, unknown>>();
+    } catch (err) {
+      log.warn('session_index.live_read_failed', {
+        projectId: query.projectId,
+        error: String(err),
+      });
+      return null;
+    }
+  }
 
   // Independent once coverage has been validated, so they go out together rather
-  // than paying two sequential D1 hops.
-  const [countRow, page] = await Promise.all([
+  // than paying sequential D1 hops. The live read ranks each status by recency and
+  // caps each at the page limit, so a long tail of sleeping chats cannot crowd out
+  // awake ones. Sessions carrying an attention marker are ranked in their own group,
+  // so newer quiet chats cannot crowd out an older one that is waiting on a person. It is an extra on top of the page: if it fails, serve the page without
+  // it rather than turning a good index read into a Durable Object fallback.
+  // Open questions live in D1 `asks` (inbox slice G), not in `attention_json`; one indexed read
+  // for the project, merged into each chat's attention below.
+  const [countRow, page, live, questions] = await Promise.all([
     db
       .prepare(`SELECT COUNT(*) as cnt FROM session_summaries WHERE ${whereClause}`)
       .bind(...params)
       .first<{ cnt: number }>(),
     db
       .prepare(
-        `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
-                started_at, last_message_at, ended_at, created_at, updated_at, agent_completed_at, attention_json
-         FROM session_summaries
-         WHERE ${whereClause}
-         ORDER BY COALESCE(last_message_at, created_at, started_at) DESC, id DESC
-         LIMIT ? OFFSET ?`
+        `SELECT ${columns} FROM session_summaries WHERE ${whereClause} ${recency} LIMIT ? OFFSET ?`
       )
       .bind(...params, query.limit, query.offset)
       .all<Record<string, unknown>>(),
+    readLive ? readLiveRows() : null,
+    readOpenQuestionAttention(db, {
+      projectId: query.projectId,
+      assigneeUserId: query.createdByUserId ?? null,
+      now: Date.now(),
+    }),
   ]);
 
   const total = countRow?.cnt ?? 0;
   const rows = page.results ?? [];
+  const sessions = withQuestionAttention(mapIndexRows(env, query.projectId, rows), questions);
+  const liveSessions = live
+    ? withQuestionAttention(mapIndexRows(env, query.projectId, live.results ?? []), questions)
+    : [];
 
-  // Per-row isolation (.claude/rules/50): one row that fails the schema — a
-  // legacy shape, a NULL where the schema wants a number — must degrade to "that
-  // row is missing" and never throw the whole list into a 500.
+  // Mirrors the DO: `rows.length` is the raw SQL-fetched count, so post-fetch
+  // skips cannot make `hasMore` claim the window reached the end when it did not.
+  const hasMore = query.offset + rows.length < total;
+
+  return { result: { sessions: appendMissingSessions(sessions, liveSessions), total, hasMore } };
+}
+
+/**
+ * A chat holds an open, unexpired question (inbox slice G) or an open wake failure (slice E) in
+ * D1 `asks`. Correlated on the row being ranked; `idx_asks_open_question` answers the first arm
+ * and the unique `(project_id, dedupe_key)` index seeks the second by the chat's exact key.
+ */
+const OPEN_QUESTION_EXISTS = `(EXISTS (
+  SELECT 1 FROM asks a
+   WHERE a.project_id = session_summaries.project_id AND a.source_session_id = session_summaries.id
+     AND a.kind = 'question' AND a.status = 'open' AND a.blocking = 1
+     AND (a.expires_at IS NULL OR a.expires_at > ?)) OR EXISTS (
+  SELECT 1 FROM asks w
+   WHERE w.project_id = session_summaries.project_id
+     AND ${openWakeErrorForChat('w', 'session_summaries.id')}))`;
+
+/** Each chat's attention with its open question merged in, as the ProjectData read does. */
+function withQuestionAttention(
+  sessions: Record<string, unknown>[],
+  questions: ReadonlyMap<string, AskAttentionSummary>
+): Record<string, unknown>[] {
+  if (questions.size === 0) return sessions;
+  return sessions.map((session) => {
+    const question = typeof session.id === 'string' ? questions.get(session.id) : undefined;
+    return question
+      ? { ...session, attention: preferAttention(session.attention, question) }
+      : session;
+  });
+}
+
+/**
+ * Map index rows with per-row isolation (.claude/rules/50): one row that fails the schema
+ * — a legacy shape, a NULL where the schema wants a number — must degrade to "that row is
+ * missing" and never throw the whole list into a 500.
+ */
+function mapIndexRows(
+  env: Env,
+  projectId: string,
+  rows: Record<string, unknown>[]
+): Record<string, unknown>[] {
   const sessions: Record<string, unknown>[] = [];
   let skipped = 0;
   for (const raw of rows) {
@@ -248,7 +384,7 @@ async function readIndex(
     } catch (err) {
       skipped++;
       log.warn('session_index.row_skipped', {
-        projectId: query.projectId,
+        projectId,
         rowId: typeof raw.id === 'string' ? raw.id : null,
         error: String(err),
       });
@@ -257,16 +393,11 @@ async function readIndex(
 
   if (skipped > 0) {
     log.warn('session_index.list_degraded', {
-      projectId: query.projectId,
+      projectId,
       fetched: rows.length,
       returned: sessions.length,
       skipped,
     });
   }
-
-  // Mirrors the DO: `rows.length` is the raw SQL-fetched count, so post-fetch
-  // skips cannot make `hasMore` claim the window reached the end when it did not.
-  const hasMore = query.offset + rows.length < total;
-
-  return { result: { sessions, total, hasMore } };
+  return sessions;
 }

@@ -1,0 +1,31 @@
+{
+  "exit": 1,
+  "failed": 4,
+  "failures": [
+    {
+      "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+      "messages": [
+        "Error: Native SAM work did not drain\n    at Timeout.<anonymous> (/workspaces/simple-agent-manager/apps/api/tests/workers/sam-session-do.test.ts:85:45)\n    at listOnTimeout (node:internal/timers:685:17)\n    at processTimers (node:internal/timers:618:7)"
+      ]
+    },
+    {
+      "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+      "messages": [
+        "Error: Native SAM runtime failed teardown; refusing reuse\n    at /workspaces/simple-agent-manager/apps/api/tests/workers/sam-session-do.test.ts:103:32\n    at file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at wrapper (file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:722:10)\n    at file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)\n    at file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:2621:52\n    at run (file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:1150:20)\n    at limiterFn (file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:1162:59)\n    at runHook (file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:2620:10)"
+      ]
+    },
+    {
+      "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+      "messages": [
+        "Error: Native SAM runtime failed teardown; refusing reuse\n    at /workspaces/simple-agent-manager/apps/api/tests/workers/sam-session-do.test.ts:103:32\n    at file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at wrapper (file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:722:10)\n    at file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)\n    at file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:2621:52\n    at run (file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:1150:20)\n    at limiterFn (file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:1162:59)\n    at runHook (file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:2620:10)"
+      ]
+    },
+    {
+      "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+      "messages": [
+        "Error: Native SAM runtime failed teardown; refusing reuse\n    at /workspaces/simple-agent-manager/apps/api/tests/workers/sam-session-do.test.ts:103:32\n    at file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at wrapper (file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:722:10)\n    at file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)\n    at file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:2621:52\n    at run (file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:1150:20)\n    at limiterFn (file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:1162:59)\n    at runHook (file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:2620:10)"
+      ]
+    }
+  ],
+  "restoredSha256": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9"
+}

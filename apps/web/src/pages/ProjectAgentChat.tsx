@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useParams } from 'react-router';
 
 import { useAgentChat } from '../hooks/useAgentChat';
+import { usePlatformCapabilities } from '../hooks/usePlatformCapabilities';
 import { API_URL } from '../lib/api/client';
 import { useProjectContext } from './ProjectContext';
 import { glass, glow, MessageBubble } from './sam-prototype/components';
@@ -26,6 +27,7 @@ export function ProjectAgentChat() {
   const { setInputValue: setChatInputValue } = chat;
 
   const agentLabel = project?.name ?? 'Project Agent';
+  const { speechToText } = usePlatformCapabilities();
 
   // WebGL fluid background
   useWebGLBackground(canvasRef, amplitudeRef);
@@ -38,7 +40,7 @@ export function ProjectAgentChat() {
       (text: string) => {
         setChatInputValue((prev: string) => (prev ? `${prev} ${text}` : text));
       },
-      [setChatInputValue],
+      [setChatInputValue]
     ),
   });
 
@@ -89,11 +91,7 @@ export function ProjectAgentChat() {
   return (
     <div className="flex flex-col h-full relative overflow-hidden">
       {/* WebGL background canvas */}
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 w-full h-full"
-        style={{ zIndex: 0 }}
-      />
+      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ zIndex: 0 }} />
 
       {/* Blur + dim overlay */}
       <div
@@ -134,8 +132,15 @@ export function ProjectAgentChat() {
           aria-label="Conversation"
         >
           {chat.isLoadingHistory ? (
-            <div className="flex items-center justify-center py-8" role="status" aria-label="Loading conversation history">
-              <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'rgba(60, 180, 120, 0.5)' }} />
+            <div
+              className="flex items-center justify-center py-8"
+              role="status"
+              aria-label="Loading conversation history"
+            >
+              <Loader2
+                className="w-5 h-5 animate-spin"
+                style={{ color: 'rgba(60, 180, 120, 0.5)' }}
+              />
             </div>
           ) : chat.messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-4">
@@ -151,7 +156,8 @@ export function ProjectAgentChat() {
               <div className="text-center max-w-sm">
                 <h2 className="text-base font-semibold text-white/80 mb-1">{agentLabel}</h2>
                 <p className="text-sm text-white/40 leading-relaxed">
-                  Your project&apos;s AI tech lead. Ask about tasks, codebase, knowledge, CI status, or dispatch work to coding agents.
+                  Your project&apos;s AI tech lead. Ask about tasks, codebase, knowledge, CI status,
+                  or dispatch work to coding agents.
                 </p>
               </div>
             </div>
@@ -167,7 +173,9 @@ export function ProjectAgentChat() {
         <div className="shrink-0 px-4 pt-2 pb-4">
           {/* Voice error message */}
           {voice.errorMsg && (
-            <div role="alert" className="text-xs text-red-400/80 text-center mb-2">{voice.errorMsg}</div>
+            <div role="alert" className="text-xs text-red-400/80 text-center mb-2">
+              {voice.errorMsg}
+            </div>
           )}
           {/* Recording indicator */}
           {voice.state === 'recording' && (
@@ -198,9 +206,7 @@ export function ProjectAgentChat() {
                 }
               }}
               placeholder={
-                voice.state === 'recording'
-                  ? 'Speak now...'
-                  : `Ask ${agentLabel} anything...`
+                voice.state === 'recording' ? 'Speak now...' : `Ask ${agentLabel} anything...`
               }
               aria-label={`Message ${agentLabel}`}
               aria-multiline="true"
@@ -213,31 +219,33 @@ export function ProjectAgentChat() {
                 } as React.CSSProperties
               }
             />
-            {/* Mic button */}
-            <button
-              type="button"
-              onClick={voice.toggle}
-              disabled={voice.state === 'processing'}
-              aria-label={
-                voice.state === 'recording'
-                  ? 'Stop recording'
-                  : voice.state === 'processing'
-                    ? 'Transcribing audio...'
-                    : voice.state === 'error'
-                      ? 'Voice input error — try again'
-                      : 'Start voice input'
-              }
-              className="p-3 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center"
-              style={micButtonStyle}
-            >
-              {voice.state === 'recording' ? (
-                <Square className="w-4 h-4" aria-hidden="true" />
-              ) : voice.state === 'processing' ? (
-                <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Mic className="w-4 h-4" aria-hidden="true" />
-              )}
-            </button>
+            {/* Mic button: voice input needs the installation's speech-to-text service */}
+            {speechToText && (
+              <button
+                type="button"
+                onClick={voice.toggle}
+                disabled={voice.state === 'processing'}
+                aria-label={
+                  voice.state === 'recording'
+                    ? 'Stop recording'
+                    : voice.state === 'processing'
+                      ? 'Transcribing audio...'
+                      : voice.state === 'error'
+                        ? 'Voice input error — try again'
+                        : 'Start voice input'
+                }
+                className="p-3 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center"
+                style={micButtonStyle}
+              >
+                {voice.state === 'recording' ? (
+                  <Square className="w-4 h-4" aria-hidden="true" />
+                ) : voice.state === 'processing' ? (
+                  <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Mic className="w-4 h-4" aria-hidden="true" />
+                )}
+              </button>
+            )}
             {/* Send button */}
             <button
               type="button"

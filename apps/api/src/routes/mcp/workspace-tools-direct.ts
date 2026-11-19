@@ -14,7 +14,6 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
-import { runWorkspaceOperation } from '../../operations/workspace-adapter';
 import { listAgentActivityTasks } from '../../services/agent-activity';
 import {
   getMcpLimits,
@@ -25,31 +24,56 @@ import {
   jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
-import { requireWorkspace } from './workspace-tools';
+import { runWorkspaceOperation } from './workspace-operation-adapter';
 
 // ─── Configurable defaults (Constitution Principle XI) ──────────────────────
 
-/** Timeout for DNS check calls. Override via WORKSPACE_TOOL_DNS_TIMEOUT_MS. */
-const DEFAULT_DNS_CHECK_TIMEOUT_MS = 10_000;
 /** Max size (bytes) for diagnostic data in report_environment_issue. Override via WORKSPACE_TOOL_DIAGNOSTIC_MAX_BYTES. */
 const DEFAULT_DIAGNOSTIC_MAX_BYTES = 4096;
 
-function getDnsCheckTimeout(env: Env): number {
-  return parsePositiveInt(env.WORKSPACE_TOOL_DNS_TIMEOUT_MS, DEFAULT_DNS_CHECK_TIMEOUT_MS);
+// ─── Category A: Handled directly in sam-mcp ────────────────────────────────
+
+function optionalFilterValue(field: string, normalize: (value: string) => string = (s) => s) {
+  return v.optional(
+    v.nullable(
+      v.pipe(
+        v.string(`${field} must be a string`),
+        v.trim(),
+        v.transform(normalize),
+        v.nonEmpty(`${field} must be a non-empty string`)
+      )
+    )
+  );
 }
 
-// ─── Category A: Handled directly in sam-mcp ────────────────────────────────
+const ListProjectAgentsArgsSchema = v.object({
+  prHeadBranch: optionalFilterValue('prHeadBranch'),
+  // Stored PR URLs are canonical (no trailing slash); tolerate one on input.
+  prUrl: optionalFilterValue('prUrl', (url) => url.replace(/\/+$/, '')),
+});
 
 export async function handleListProjectAgents(
   requestId: string | number | null,
+  params: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env
 ): Promise<JsonRpcResponse> {
+  // A malformed filter must fail loudly: ignoring it would list every agent,
+  // which a caller checking PR ownership would read as an answer.
+  const parsed = v.safeParse(ListProjectAgentsArgsSchema, params);
+  if (!parsed.success) {
+    return jsonRpcError(requestId, INVALID_PARAMS, parsed.issues[0].message);
+  }
+  const prHeadBranch = parsed.output.prHeadBranch ?? undefined;
+  const prUrl = parsed.output.prUrl ?? undefined;
+  const filter = prHeadBranch || prUrl ? { prHeadBranch, prUrl } : null;
+
   try {
     const tasks = await listAgentActivityTasks(env, {
       projectId: tokenData.projectId,
       activeOnly: true,
       excludeTaskId: tokenData.taskId,
+      ...(filter ? { ownsPullRequest: { headBranch: prHeadBranch, url: prUrl } } : {}),
     });
 
     const agents = tasks.map((t) => ({
@@ -58,13 +82,16 @@ export async function handleListProjectAgents(
       status: t.status,
       state: t.agentActivityState,
       branch: t.outputBranch,
+      workspaceBranch: t.workspaceBranch,
+      outputPrUrl: t.outputPrUrl,
       workspaceId: t.workspaceId,
     }));
 
+    // Echoing the applied filter lets the caller tell "no owners" apart from a
+    // server that ignored the arguments.
+    const result = { totalAgents: agents.length, agents, ...(filter ? { filter } : {}) };
     return jsonRpcSuccess(requestId, {
-      content: [
-        { type: 'text', text: JSON.stringify({ totalAgents: agents.length, agents }, null, 2) },
-      ],
+      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
     });
   } catch (e) {
     return jsonRpcError(
@@ -325,75 +352,6 @@ export async function handleReportEnvironmentIssue(
             status: 'report_failed',
             note: 'Issue was logged but storage failed',
           }),
-        },
-      ],
-    });
-  }
-}
-
-// ─── Category C: Handled in Worker (no VM agent needed) ─────────────────────
-
-export async function handleCheckDnsStatus(
-  requestId: string | number | null,
-  tokenData: McpTokenData,
-  env: Env
-): Promise<JsonRpcResponse> {
-  const err = requireWorkspace(requestId, tokenData);
-  if (err) return err;
-
-  const workspaceUrl = `https://ws-${tokenData.workspaceId}.${env.BASE_DOMAIN}`;
-  const hostname = `ws-${tokenData.workspaceId}.${env.BASE_DOMAIN}`;
-  const dnsTimeoutMs = getDnsCheckTimeout(env);
-
-  try {
-    // Try to fetch the workspace URL to check DNS + TLS in one call.
-    // Note: this only confirms Cloudflare edge reachability, not VM agent health.
-    const res = await fetch(workspaceUrl, {
-      method: 'HEAD',
-      signal: AbortSignal.timeout(dnsTimeoutMs),
-    });
-
-    return jsonRpcSuccess(requestId, {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              hostname,
-              workspaceUrl,
-              dnsResolved: true,
-              tlsValid: true,
-              httpStatus: res.status,
-              note: 'Confirms Cloudflare edge reachability. Does not verify VM agent health.',
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    });
-  } catch (e) {
-    // Distinguish TLS errors from DNS/network errors
-    const errorMsg = e instanceof Error ? e.message : String(e);
-    const isTlsError =
-      errorMsg.includes('SSL') || errorMsg.includes('TLS') || errorMsg.includes('certificate');
-
-    return jsonRpcSuccess(requestId, {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              hostname,
-              workspaceUrl,
-              dnsResolved: isTlsError, // TLS error means DNS resolved but cert failed
-              tlsValid: false,
-              status: isTlsError ? 'tls_error' : 'dns_not_resolved',
-              error: errorMsg,
-            },
-            null,
-            2
-          ),
         },
       ],
     });

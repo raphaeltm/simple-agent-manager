@@ -826,7 +826,7 @@ func TestCompleteSnapshotSendsPreparedGeneration(t *testing.T) {
 		Artifacts:     map[string]snapshotArtifact{},
 		CreatedAt:     time.Now().UTC().Format(time.RFC3339),
 	}
-	if err := s.completeSnapshot(context.Background(), "workspace-1", "agent-1", "chat-1", "vm", "generation-1", "callback-token", manifest); err != nil {
+	if err := s.completeSnapshot(context.Background(), "workspace-1", "agent-1", "chat-1", "vm", "generation-1", "callback-token", manifest, false); err != nil {
 		t.Fatal(err)
 	}
 }

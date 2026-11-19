@@ -11,6 +11,10 @@ export type NodeStatus =
   | 'sleeping'
   | 'stopping'
   | 'stopped'
+  /** Claimed by the node cleanup sweep or manual deletion while the VM is torn down. */
+  | 'destroying'
+  /** A deployment node whose last environment was deleted; moves to `deleted` or `error`. */
+  | 'deleting'
   | 'deleted'
   | 'error';
 
@@ -54,12 +58,19 @@ export type NodeClass = 'managed' | 'user-owned';
  *   ingress and vm-agent serves plain HTTP on loopback. Tunnel presence ⇒ skip A-record backfill.
  * Null for nodes (e.g. cf-container) where transport is implicit.
  */
-export type NodeTransport = 'vm-public-dns' | 'cloudflare-tunnel';
+export type NodeTransport = 'vm-public-dns' | 'cloudflare-tunnel' | 'reverse-tunnel';
 
 /** Runtime type guard for {@link NodeClass}. Unknown/legacy values are treated as not user-owned. */
 export function isNodeClass(value: unknown): value is NodeClass {
   return value === 'managed' || value === 'user-owned';
 }
+
+/**
+ * Node statuses after which a node no longer accrues compute time. For these the node's end time
+ * is its `updated_at` (`getNodeEndedAt`, apps/api `node-usage-calculation.ts`). One list for
+ * metering, quotas and Admin Health & cost.
+ */
+export const NODE_BILLING_ENDED_STATUSES = ['destroyed', 'destroying', 'deleted', 'error'] as const;
 
 /** True only for enrolled BYO machines. Any unknown/absent value is treated as managed (safe default). */
 export function isUserOwnedNodeClass(value: unknown): boolean {
@@ -116,14 +127,29 @@ export interface Node {
   updatedAt: string;
 }
 
+/** One workspace container's memory from the node heartbeat (container mode only). */
+export interface NodeWorkspaceMemoryMetric {
+  workspaceId: string;
+  memoryUsageBytes: number;
+  memoryLimitBytes?: number;
+  memoryPercent?: number;
+  containerId?: string;
+  containerName?: string;
+  collectedAt?: string;
+}
+
 /** Lightweight metrics from node heartbeat (stored in D1) */
 export interface NodeMetrics {
   cpuLoadAvg1?: number;
   memoryPercent?: number;
   diskPercent?: number;
+  /** Live per-workspace memory; refreshed by each heartbeat, no history kept. */
+  workspaceMemory?: NodeWorkspaceMemoryMetric[];
 }
 
 export interface NodeResponse {
+  cleanupBlockedSince?: string | null;
+  cleanupBlockedReason?: string | null;
   id: string;
   name: string;
   status: NodeStatus;
@@ -174,6 +200,12 @@ export interface NodeResponse {
 
 /** Full system info from on-demand VM Agent endpoint */
 export interface NodeSystemInfo {
+  /** Uncached process-local publish command attempts; absent on older agents. */
+  publishExecution?: {
+    processIncarnation: string;
+    composeBuildAttempts: number;
+    dockerSaveAttempts: number;
+  };
   cpu: {
     loadAvg1: number;
     loadAvg5: number;
@@ -370,14 +402,7 @@ export interface DetectedPort {
 }
 
 export type WorkspacePortsState =
-  | 'ready'
-  | 'not_ready'
-  | 'sleeping'
-  | 'stopped'
-  | 'evicted'
-  | 'deleted'
-  | 'gone'
-  | 'error';
+  'ready' | 'not_ready' | 'sleeping' | 'stopped' | 'evicted' | 'deleted' | 'gone' | 'error';
 
 /** Response from GET /workspaces/{id}/ports on the VM agent. */
 export interface PortsResponse {
@@ -510,13 +535,7 @@ export interface NodeContainerListResponse {
 
 /** Machine-readable container state */
 export type ContainerState =
-  | 'running'
-  | 'exited'
-  | 'paused'
-  | 'created'
-  | 'restarting'
-  | 'removing'
-  | 'dead';
+  'running' | 'exited' | 'paused' | 'created' | 'restarting' | 'removing' | 'dead';
 
 /** Container info with full state and metrics */
 export interface ContainerInfo {

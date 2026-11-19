@@ -84,7 +84,6 @@ function makeState(): TaskRunnerState {
     lastStepAt: NOW,
     provisioningStartedAt: null,
     agentReadyStartedAt: null,
-    workspaceReadyStartedAt: null,
     workspaceDispatchStartedAt: null,
     workspaceDispatchAttempts: 0,
     workspaceDispatchLastAttemptAt: null,

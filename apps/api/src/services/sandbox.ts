@@ -37,7 +37,8 @@ export async function getSandboxInstance(env: Env, sandboxId: string) {
   }
 }
 
-async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+/** Reject with `message` if `promise` has not settled within `ms`. The loser is abandoned, not cancelled. */
+export async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
@@ -54,17 +55,19 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, message: string):
 export async function destroySandboxInstance(
   env: Env,
   sandboxId: string,
-  detail: { nodeId?: string; workspaceId?: string; sandboxId?: string } = {}
+  detail: { nodeId?: string; workspaceId?: string; sandboxId?: string } = {},
+  options: { timeoutMs?: number | null } = {}
 ): Promise<void> {
-  const config = getSandboxConfig(env);
+  const timeoutMs =
+    options.timeoutMs === undefined ? getSandboxConfig(env).execTimeoutMs : options.timeoutMs;
   const sandbox = await getSandboxInstance(env, sandboxId);
-  await runSandboxPhase('destroy', { sandboxId, ...detail }, () =>
-    withTimeout(
-      sandbox.destroy(),
-      config.execTimeoutMs,
-      `Sandbox destroy timed out after ${config.execTimeoutMs}ms`
-    )
-  );
+  await runSandboxPhase('destroy', { sandboxId, ...detail }, () => {
+    const destruction = sandbox.destroy();
+    // A caller tracking the original SDK flight owns its deadline: a timeout here
+    // would hide work still running after this helper's promise rejected.
+    if (timeoutMs === null) return destruction;
+    return withTimeout(destruction, timeoutMs, `Sandbox destroy timed out after ${timeoutMs}ms`);
+  });
 }
 
 export function shellQuote(value: string): string {

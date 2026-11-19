@@ -1,6 +1,12 @@
 import { expect, type Page, test } from '@playwright/test';
 
-import { assertNoOverflow, makeMockUser, screenshot, setupAuditRoutes } from './audit-helpers';
+import {
+  assertNoClippedOverflow,
+  assertNoOverflow,
+  makeMockUser,
+  screenshot,
+  setupAuditRoutes,
+} from './audit-helpers';
 
 const MOCK_USER = makeMockUser({
   userId: 'owner-user',
@@ -21,8 +27,6 @@ function makeProject(overrides: Record<string, unknown> = {}) {
     installationId: 'inst-1',
     defaultVmSize: null,
     defaultAgentType: null,
-    defaultProvider: null,
-    defaultLocation: null,
     workspaceIdleTimeoutMs: null,
     nodeIdleTimeoutMs: null,
     taskExecutionTimeoutMs: null,
@@ -202,11 +206,13 @@ const normalOffboardingPreview = {
     offboardingResource('node', 'node-1', 'Workspace node for feature branch'),
     offboardingResource('deployment_environment', 'deploy-1', 'Production deployment'),
   ],
+  personalProfilePinCount: 3,
 };
 
 const longOffboardingPreview = {
   ...normalOffboardingPreview,
   offboardingPlanId: 'off-long',
+  personalProfilePinCount: 0,
   resources: [
     offboardingResource(
       'trigger',
@@ -248,6 +254,7 @@ const emptyOffboardingPreview = {
     blockingTeardown: 0,
   },
   resources: [],
+  personalProfilePinCount: 1,
 };
 
 const manyOffboardingPreview = {
@@ -256,7 +263,11 @@ const manyOffboardingPreview = {
   resources: Array.from({ length: 18 }, (_, index) => {
     const kinds = ['trigger', 'task_tree', 'node', 'deployment_environment'];
     const kind = kinds[index % kinds.length]!;
-    return offboardingResource(kind, `${kind}-${index + 1}`, `${kind.replace('_', ' ')} ${index + 1}`);
+    return offboardingResource(
+      kind,
+      `${kind}-${index + 1}`,
+      `${kind.replace('_', ' ')} ${index + 1}`
+    );
   }),
 };
 
@@ -282,7 +293,8 @@ async function setupMocks(
     if (path === '/api/agents') return respond(200, { agents: [] });
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
     if (path === '/api/providers/catalog') return respond(200, { catalogs: [] });
-    if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/notifications'))
+      return respond(200, { notifications: [], unreadCount: 0 });
     if (path.startsWith('/api/github')) return respond(200, []);
     if (path === '/api/credentials/resolution-status') return respond(200, { consumers: [] });
     if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
@@ -397,6 +409,9 @@ test.describe('Project members settings — visual audit', () => {
     await setupMocks(page, { offboardingPreview: normalOffboardingPreview });
     await openRemoveMember(page);
     await expect(page.getByText('Running tasks')).toBeVisible();
+    await expect(page.getByTestId('offboarding-profile-pins')).toContainText(
+      'Their own account choices on 3 of this project’s profiles will be removed.'
+    );
     await screenshot(page, 'project-members-offboarding-normal');
     await assertNoOverflow(page);
   });
@@ -405,6 +420,7 @@ test.describe('Project members settings — visual audit', () => {
     await setupMocks(page, { offboardingPreview: longOffboardingPreview });
     await openRemoveMember(page);
     await expect(page.getByText(/Extremely long scheduled workflow name/)).toBeVisible();
+    await expect(page.getByTestId('offboarding-profile-pins')).toBeHidden();
     await screenshot(page, 'project-members-offboarding-long-text');
     await assertNoOverflow(page);
   });
@@ -413,6 +429,9 @@ test.describe('Project members settings — visual audit', () => {
     await setupMocks(page, { offboardingPreview: emptyOffboardingPreview });
     await openRemoveMember(page);
     await expect(page.getByText(/removed cleanly/i)).toBeVisible();
+    await expect(page.getByTestId('offboarding-profile-pins')).toContainText(
+      'Their own account choice on 1 of this project’s profiles will be removed.'
+    );
     await screenshot(page, 'project-members-offboarding-empty');
     await assertNoOverflow(page);
   });
@@ -449,3 +468,24 @@ test.describe('Project members settings — visual audit', () => {
     await assertNoOverflow(page);
   });
 });
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`account linking missing-token member warning ${theme}`, async ({ page }) => {
+    await page.addInitScript((value) => localStorage.setItem('sam-theme', value), theme);
+    await setupMocks(page, {
+      members: { ...normalMembers, accessRequests: [accessRequest('long', 'missing-token')] },
+    });
+    await page.route('**/src/**', (route) => route.continue());
+    await page.goto('/projects/proj-members-1/settings/access');
+    await expect(
+      page.getByText('they connect GitHub to their SAM account', { exact: false })
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeEnabled();
+    await page
+      .getByText('they connect GitHub to their SAM account', { exact: false })
+      .scrollIntoViewIfNeeded();
+    await screenshot(page, `account-linking-member-warning-${theme}`);
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+  });
+}

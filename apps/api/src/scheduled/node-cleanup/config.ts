@@ -1,8 +1,14 @@
 import {
+  DEFAULT_CLEANUP_OWNERSHIP_ALERT_INTERVAL_MS,
+  DEFAULT_CLEANUP_REFUSAL_WARN_AFTER_MS,
   DEFAULT_MAX_AUTO_NODE_LIFETIME_MS,
   DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS,
+  DEFAULT_NODE_CLEANUP_BLOCKED_RETIREMENT_MS,
   DEFAULT_NODE_CLEANUP_FAILURE_BACKOFF_MS,
   DEFAULT_NODE_CLEANUP_SWEEP_LIMIT,
+  DEFAULT_NODE_EMPTY_WARM_HANDOFF_GRACE_MS,
+  DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS,
+  DEFAULT_NODE_PROVIDER_DELETION_REQUEST_TIMEOUT_MS,
   DEFAULT_NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS,
   DEFAULT_NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS,
   DEFAULT_NODE_WARM_GRACE_PERIOD_MS,
@@ -45,11 +51,16 @@ export interface CleanupConfig {
   absoluteMaxLifetimeMs: number;
   orphanGracePeriodMs: number;
   workspaceIdleTimeoutMs: number;
+  /** Idle grace before an empty, never-warmed managed node is handed to NodeLifecycle. */
+  emptyNodeWarmHandoffGraceMs: number;
   stoppedTtlMs: number;
   nodeSweepLimit: number;
   workspaceSweepLimit: number;
   cfContainerSweepLimit: number;
   failureBackoffMs: number;
+  blockedRetirementMs: number;
+  refusalWarnAfterMs: number;
+  ownershipAlertIntervalMs: number;
   unhealthyDrainAfterMs: number;
   unhealthyReleaseAfterMs: number;
   unhealthyFleetMaxFraction: number;
@@ -60,6 +71,13 @@ export interface CleanupConfig {
   agentTimeoutMs: number;
   stoppedHandoffSweepBudgetMs: number;
   stoppedHandoffRequestTimeoutMs: number;
+  /**
+   * Per-candidate budget of a two-phase teardown attempt (start the provider deletion, or read
+   * its record). Admin setting `operations.nodeProviderDeletionRequestTimeoutMs`.
+   */
+  providerDeletionRequestTimeoutMs: number;
+  /** Admin setting `operations.nodeProviderDeletionConfirmMaxMs`. */
+  providerDeletionConfirmMaxMs: number;
 }
 
 /**
@@ -147,6 +165,10 @@ function buildCleanupConfig(env: Env): CleanupConfig {
       env.NODE_WORKSPACE_IDLE_TIMEOUT_MS ?? env.NODE_ORPHAN_IDLE_TIMEOUT_MS,
       DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS
     ),
+    emptyNodeWarmHandoffGraceMs: parseMs(
+      env.NODE_EMPTY_WARM_HANDOFF_GRACE_MS,
+      DEFAULT_NODE_EMPTY_WARM_HANDOFF_GRACE_MS
+    ),
     stoppedTtlMs: parseMs(env.WORKSPACE_STOPPED_TTL_MS, DEFAULT_WORKSPACE_STOPPED_TTL_MS),
     nodeSweepLimit: parsePositiveInt(
       env.NODE_CLEANUP_SWEEP_LIMIT,
@@ -160,6 +182,9 @@ function buildCleanupConfig(env: Env): CleanupConfig {
       env.CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT,
       DEFAULT_CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT
     ),
+    blockedRetirementMs: DEFAULT_NODE_CLEANUP_BLOCKED_RETIREMENT_MS,
+    refusalWarnAfterMs: DEFAULT_CLEANUP_REFUSAL_WARN_AFTER_MS,
+    ownershipAlertIntervalMs: DEFAULT_CLEANUP_OWNERSHIP_ALERT_INTERVAL_MS,
     failureBackoffMs: parseMs(
       env.NODE_CLEANUP_FAILURE_BACKOFF_MS,
       DEFAULT_NODE_CLEANUP_FAILURE_BACKOFF_MS
@@ -173,5 +198,23 @@ function buildCleanupConfig(env: Env): CleanupConfig {
       env.NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS,
       DEFAULT_NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS
     ),
+    // Admin settings; `runNodeCleanupSweep` replaces these defaults with the resolved values.
+    providerDeletionRequestTimeoutMs: DEFAULT_NODE_PROVIDER_DELETION_REQUEST_TIMEOUT_MS,
+    providerDeletionConfirmMaxMs: DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS,
   };
+}
+
+/**
+ * The least sweep budget worth starting a teardown attempt with: a third of the per-attempt
+ * budget (5 s at the 15 s default; a GCP request measured ~3-8 s, a confirmation ~0.4 s), and
+ * never more than half the phase budget. An attempt started with less would almost surely hit its
+ * deadline and be recorded as a failure the node did not earn, so the candidate waits for the next
+ * tick instead. The half-budget cap keeps a short phase budget, or a long per-attempt budget, from
+ * leaving no room to start any attempt at all (the remaining time is always below the full budget).
+ */
+export function minimumTeardownAttemptMs(config: CleanupConfig): number {
+  return Math.min(
+    Math.ceil(config.providerDeletionRequestTimeoutMs / 3),
+    Math.floor(config.stoppedHandoffSweepBudgetMs / 2)
+  );
 }

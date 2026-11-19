@@ -1,9 +1,15 @@
+import {
+  CLOUDFLARE_BUILD_DELETION_CONFLICT,
+  isCloudflareBuildDeletionConflict,
+} from '@simple-agent-manager/app-deployment';
 import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import type { Env } from '../env';
-import { d1CauseCode, isFailedQueryError } from '../lib/d1-error-code';
+import { clientIpFromHeaders } from '../lib/client-ip';
+import { d1CauseCode, d1ErrorCategory, isFailedQueryError } from '../lib/d1-error-code';
 import { log, serializeError } from '../lib/logger';
+import { getTaskSubmitOperation } from '../lib/task-submit-diagnostics';
 import { GcpApiError, sanitizeGcpError } from '../services/gcp-errors';
 import { persistError, redactSensitiveData } from '../services/observability';
 import { AppError } from './error';
@@ -60,13 +66,17 @@ function scheduleErrorPersistence(
     const identifiers = requestIdentifiers(c);
     const auth = c.get('auth') as { user?: { id?: string } } | undefined;
     const causeCode = d1CauseCode(err);
+    const d1Category = d1ErrorCategory(err);
+    const failingOperation = getTaskSubmitOperation(err);
     const failedQuery = isFailedQueryError(err);
     const safe = redactSensitiveData({
       message: failedQuery ? 'Failed query: [REDACTED]' : err.message || 'Unhandled API error',
-      stack: failedQuery ? null : err.stack ?? null,
+      stack: failedQuery ? null : (err.stack ?? null),
       context: {
         requestId,
+        ...(failingOperation ? { failingOperation } : {}),
         ...(causeCode ? { causeCode } : {}),
+        ...(d1Category ? { d1Category } : {}),
         path: new URL(c.req.url).pathname,
         method: c.req.method,
         status,
@@ -86,7 +96,7 @@ function scheduleErrorPersistence(
         workspaceId: identifiers.workspaceId ?? null,
         taskId: identifiers.taskId ?? null,
         sessionId: identifiers.sessionId ?? null,
-        ipAddress: c.req.header('CF-Connecting-IP') ?? null,
+        ipAddress: clientIpFromHeaders((name) => c.req.header(name)) ?? null,
         userAgent: c.req.header('User-Agent') ?? null,
       },
       c.env
@@ -116,7 +126,10 @@ export function handleAppError(err: Error, c: AppContext): Response {
   let status: number;
   let body: Record<string, unknown>;
 
-  if (err instanceof AppError) {
+  if (isCloudflareBuildDeletionConflict(err)) {
+    status = 409;
+    body = { error: 'CONFLICT', message: CLOUDFLARE_BUILD_DELETION_CONFLICT };
+  } else if (err instanceof AppError) {
     status = err.statusCode;
     body = { ...err.toJSON() };
   } else if (err instanceof GcpApiError) {
@@ -140,7 +153,15 @@ export function handleAppError(err: Error, c: AppContext): Response {
   }
 
   const requestId = crypto.randomUUID();
-  log.error('request_error', { requestId, status, ...serializeError(err) });
+  const failingOperation = getTaskSubmitOperation(err);
+  const d1Category = d1ErrorCategory(err);
+  log.error('request_error', {
+    requestId,
+    status,
+    ...(failingOperation ? { failingOperation } : {}),
+    ...(d1Category ? { d1Category } : {}),
+    ...serializeError(err),
+  });
   scheduleErrorPersistence(c, err, status, requestId);
   return c.json({ ...body, requestId }, status as ContentfulStatusCode);
 }

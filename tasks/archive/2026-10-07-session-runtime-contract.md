@@ -47,7 +47,7 @@ Migration collision reconciled before first contract deployment: webhook PR2260 
 
 PR2261 head83e91c943 CI37610510567 completed SUCCESS: API Test, Durable Object Workers, Go unit/integration/E2E/smoke, lint/typecheck/build and required preflight/specialist gates. Full local other workspace tests passed 19 turbo tasks, including web336files/4023tests. Final bounded API suite11512 tests passed after correcting two fixture expectations; independent focused54-test rerun passed. Go full suite and targeted server/ACP race suites passed.
 
-Local full Workers suite completed1342/1343 passing with one unrelated existing randomized expected-order assertion; isolated credential file four tests passed and full CI Workers passed. Follow-up evidence is tracked in `tasks/backlog/2026-10-07-credential-limits-randomized-order-assertion.md`. No production change added for that flake.
+Local full Workers suite completed1342/1343 passing with one unrelated existing randomized expected-order assertion; isolated credential file four tests passed and full CI Workers passed. Follow-up evidence is tracked in `tasks/archive/2026-10-07-credential-limits-randomized-order-assertion.md`. No production change added for that flake.
 
 Independent Go/security, Cloudflare/constitution/docs and test-engineer reviews passed. Completion preflight found no implementation gaps but remains WARN until live acceptance is complete; task is not archived. Supplementary Cloudflare/security review also passed the temporary flag-only automation, kept on a separate staging branch and excluded from this PR.
 

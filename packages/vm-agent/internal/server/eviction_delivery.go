@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/resourcemon"
 )
@@ -46,7 +47,19 @@ func (s *Server) prepareWorkspaceEvictionStop(ctx context.Context, target resour
 	if err := s.writeWorkspaceMetadata(runtime); err != nil {
 		return err
 	}
-	delivery := s.workspaceEvictionDelivery(resourcemon.EvictionResult{Target: target})
+	// The controller stops a container only after its pre-stop capture succeeded, so the
+	// intent records that. A reconciled intent must not report the snapshot as missing.
+	delivery := s.workspaceEvictionDelivery(resourcemon.EvictionResult{Target: target, SnapshotCaptured: true})
+	// Capture before Docker stop and before finishLocalWorkspaceEviction clears activity.
+	// Retain the admission fence once the durable intent owns this runtime.
+	committed := false
+	interrupted, rollbackAdmission := s.prepareWorkspaceEvictionHosts(target.WorkspaceID)
+	delivery.InterruptedWork = interrupted
+	defer func() {
+		if !committed {
+			rollbackAdmission()
+		}
+	}()
 	if delivery.ProjectID == "" {
 		return fmt.Errorf("workspace project identity unavailable; refusing eviction without a recoverable callback")
 	}
@@ -59,7 +72,46 @@ func (s *Server) prepareWorkspaceEvictionStop(ctx context.Context, target resour
 	if !applied {
 		return fmt.Errorf("eviction generation changed before stop intent")
 	}
+	committed = true
 	return nil
+}
+
+// prepareWorkspaceEvictionHosts fences every host sharing the stopped container.
+// Lifecycle ownership prevents a replacement workspace while the stop is prepared.
+func (s *Server) prepareWorkspaceEvictionHosts(workspaceID string) (*bool, func()) {
+	var rollbacks []func()
+	// A container stop kills every session in this workspace, regardless of which
+	// session supplied the snapshot identity. Fence them all before the intent.
+	allIdle, anyActive := true, false
+	var hosts []*acp.SessionHost
+	s.sessionHostMu.Lock()
+	for key, host := range s.sessionHosts {
+		if !strings.HasPrefix(key, workspaceID+":") || host == nil {
+			continue
+		}
+		hosts = append(hosts, host)
+	}
+	s.sessionHostMu.Unlock()
+	// Host locks are independent of the node-wide map lock.
+	for _, host := range hosts {
+		interrupted, rollback := host.PrepareEviction()
+		rollbacks = append(rollbacks, rollback)
+		if interrupted == nil {
+			allIdle = false
+		} else if *interrupted {
+			anyActive = true
+		}
+	}
+	// Active work dominates unknown state; false requires proof from every host.
+	var interrupted *bool
+	if anyActive || (allIdle && len(rollbacks) > 0) {
+		interrupted = &anyActive
+	}
+	return interrupted, func() {
+		for i := len(rollbacks) - 1; i >= 0; i-- {
+			rollbacks[i]()
+		}
+	}
 }
 
 // Reconcile a write-ahead intent after an interrupted/failed Docker stop. The
@@ -73,6 +125,9 @@ func (s *Server) reconcilePendingEvictionStop(ctx context.Context, delivery *per
 		return false, err
 	}
 	defer lock.Unlock()
+	if s.isEvictionFinalizing(delivery.WorkspaceID) {
+		return false, errWorkspaceEvicting
+	}
 	meta, err := s.store.GetWorkspaceMetadata(delivery.WorkspaceID)
 	if err != nil {
 		return false, err
@@ -87,7 +142,21 @@ func (s *Server) reconcilePendingEvictionStop(ctx context.Context, delivery *per
 	if currentID != "" && !dockerContainerIdentityMatches(currentID, delivery.ContainerID) {
 		return false, fmt.Errorf("pending eviction container no longer current")
 	}
+	// Close host admission before collecting hosts, including retry attempts.
+	// A failed attempt reopens admission; successful teardown stops every host.
+	s.markEvictionFinalizing(delivery.WorkspaceID)
+	defer s.clearEvictionFinalizing(delivery.WorkspaceID)
 	if currentID != "" {
+		// A prior fence may have expired while this intent waited for retry.
+		interrupted, rollback := s.prepareWorkspaceEvictionHosts(delivery.WorkspaceID)
+		if interrupted != nil && *interrupted {
+			delivery.InterruptedWork = interrupted
+		}
+		applied, err := s.store.RecordWorkspaceEviction(ctx, *delivery)
+		if err != nil || !applied {
+			rollback()
+			return !applied && err == nil, err
+		}
 		if err := s.stopEvictionContainer(ctx, delivery.ContainerID); err != nil {
 			return false, err
 		}
@@ -164,6 +233,11 @@ func (s *Server) deliverPendingWorkspaceEvictionAt(parent context.Context, id st
 	if err != nil || delivery == nil {
 		return err
 	}
+	if !delivery.ContainerStopped && s.isEvictionFinalizing(delivery.WorkspaceID) {
+		// This agent is still finishing the eviction (stop, then final capture). It records
+		// the eviction, which makes this row due again, and delivers it itself.
+		return nil
+	}
 	if !delivery.ContainerStopped {
 		obsolete, reconcileErr := s.reconcilePendingEvictionStop(ctx, delivery)
 		if reconcileErr != nil {
@@ -200,7 +274,8 @@ func (s *Server) sendWorkspaceEvictionDelivery(ctx context.Context, delivery per
 		SnapshotCaptured   bool   `json:"snapshotCaptured"`
 		ContainerStopped   bool   `json:"containerStopped"`
 		EvictionGeneration string `json:"evictionGeneration,omitempty"`
-	}{delivery.NodeID, delivery.WorkspaceID, delivery.Reason, delivery.SnapshotCaptured, delivery.ContainerStopped, delivery.Generation}
+		InterruptedWork    *bool  `json:"interruptedWork,omitempty"`
+	}{delivery.NodeID, delivery.WorkspaceID, delivery.Reason, delivery.SnapshotCaptured, delivery.ContainerStopped, delivery.Generation, delivery.InterruptedWork}
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return false, err

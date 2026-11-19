@@ -1,0 +1,366 @@
+---
+/**
+ * 02 Logo: the lockup on a stage with toggleable clear-space guides, the three forms, the
+ * grounds it may sit on, minimum sizes, and a grid of misuses rendered from the real mark.
+ */
+import Lockup from './Lockup.astro';
+import SectionHead from './SectionHead.astro';
+
+const forms = [
+  {
+    title: 'Full lockup',
+    body: 'The default. Mascot, SAM and the sub-line. Use it whenever there is room: headers, banners, slides, social images.',
+    min: 'Minimum 160 px wide',
+  },
+  {
+    title: 'Compact lockup',
+    body: 'Mascot and SAM only, for places too small for the sub-line to be read.',
+    min: 'Minimum 80 px wide',
+  },
+  {
+    title: 'App icon',
+    body: 'The mascot on a Tile Green square with rounded corners. Favicons, avatars and profile pictures.',
+    min: 'Minimum 16 px',
+  },
+];
+
+const misuses = [
+  { kind: 'recolour', label: 'Do not recolour the hair.' },
+  { kind: 'stretch', label: 'Do not stretch or squash the mark.' },
+  { kind: 'rotate', label: 'Do not rotate or tilt it.' },
+  { kind: 'glow', label: 'Do not add glows, outlines or heavy shadows.' },
+  { kind: 'busy', label: 'Do not place it on busy, low-contrast grounds.' },
+  { kind: 'retired', label: 'Do not use the retired play-arrow mark.' },
+];
+---
+
+<section id="logo" class="bg-section" aria-labelledby="logo-title">
+  <div class="container">
+    <SectionHead id="logo" title="One mascot, one lockup">
+      The green-haired mascot is SAM. It has no face on purpose: it stands in for whoever is doing
+      the work. Pair it with the Chillax wordmark, and spell out the full name whenever there is
+      room, because "SAM" alone does not say what the product does.
+    </SectionHead>
+
+    <div class="bg-logo-stage sam-glass sam-glass-rim" id="logo-stage" data-reveal="scale">
+      <span class="bg-logo-frame">
+        <span class="g g--t" aria-hidden="true">x</span>
+        <span class="g g--l" aria-hidden="true">x</span>
+        <span class="g g--r" aria-hidden="true">x</span>
+        <span class="g g--b" aria-hidden="true">x</span>
+        <Lockup class="bg-logo-main" />
+      </span>
+      <button class="bg-logo-toggle sam-btn sam-btn--glass sam-btn--sm" type="button" data-toggle="logo-stage" aria-pressed="false">
+        Show clear space
+      </button>
+      <p class="bg-logo-note">Clear space on every side: <strong>x</strong>, the height of the "S" in SAM.</p>
+    </div>
+
+    <div class="bg-forms">
+      {forms.map((form, index) => (
+        <article class="bg-card sam-glass sam-glass-rim" data-reveal style={`--i:${index}`}>
+          <div class="bg-form-preview">
+            {index === 0 && <Lockup size="1.15rem" />}
+            {index === 1 && <Lockup variant="compact" size="1.4rem" />}
+            {index === 2 && <img class="bg-form-icon" src="/favicon.png" width="1024" height="1024" alt="SAM app icon" />}
+          </div>
+          <h3>{form.title}</h3>
+          <p>{form.body}</p>
+          <p class="bg-form-min">{form.min}</p>
+        </article>
+      ))}
+    </div>
+
+    <h3 class="bg-sub">Grounds</h3>
+    <div class="bg-grounds">
+      <figure class="bg-ground bg-ground--dark" data-reveal="wipe">
+        <Lockup tone="on-dark" size="1.3rem" />
+        <figcaption>Preferred: Night or the void</figcaption>
+      </figure>
+      <figure class="bg-ground bg-ground--light" data-reveal="wipe" style="--i:1">
+        <Lockup tone="on-light" size="1.3rem" />
+        <figcaption>Paper, for print and light mode</figcaption>
+      </figure>
+      <figure class="bg-ground bg-ground--tile" data-reveal="wipe" style="--i:2">
+        <Lockup tone="on-dark" size="1.3rem" />
+        <figcaption>Tile Green, for avatars and banners</figcaption>
+      </figure>
+    </div>
+
+    <h3 class="bg-sub">Please don't</h3>
+    <ul class="bg-misuse">
+      {misuses.map((misuse, index) => (
+        <li data-reveal style={`--i:${index % 3}`}>
+          <div class:list={['bg-misuse-art', `bg-misuse-art--${misuse.kind}`]} aria-hidden="true">
+            {misuse.kind === 'retired' ? (
+              <svg viewBox="0 0 64 40" width="96" height="60"><path d="M8 6 L30 20 L8 34 Z" fill="#22c55e"/><rect x="36" y="27" width="20" height="5" rx="2.5" fill="#22c55e"/></svg>
+            ) : (
+              <Lockup variant="compact" tone="on-dark" size="1.1rem" />
+            )}
+            <span class="bg-misuse-x">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+            </span>
+          </div>
+          <p>{misuse.label}</p>
+        </li>
+      ))}
+    </ul>
+  </div>
+</section>
+
+<style>
+  /* --- Stage with clear-space guides --- */
+  .bg-logo-stage {
+    position: relative;
+    display: grid;
+    place-items: center;
+    min-height: 420px;
+    padding: 72px 24px 96px;
+    border-radius: 28px;
+    overflow: hidden;
+  }
+
+  /* x = the cap height of "S" (about 1.1em of the lockup's type size). The frame pads the
+     lockup by x on every side; the guides draw that padding when switched on. */
+  .bg-logo-frame {
+    --x: 1.1em;
+    position: relative;
+    display: inline-block;
+    padding: var(--x);
+    font-size: clamp(1.2rem, 5vw, 3.4rem);
+    border-radius: 6px;
+    outline: 1px dashed transparent;
+    transition:
+      outline-color 0.4s ease,
+      background-color 0.4s ease;
+  }
+
+  .bg-logo-frame :global(.lockup) {
+    outline: 1px solid transparent;
+    transition: outline-color 0.4s ease;
+  }
+
+  .bg-logo-stage[data-on] .bg-logo-frame {
+    outline-color: rgb(134 204 0 / 0.75);
+    background-color: rgb(134 204 0 / 0.07);
+  }
+
+  .bg-logo-stage[data-on] .bg-logo-frame :global(.lockup) {
+    outline-color: rgb(134 204 0 / 0.45);
+  }
+
+  .bg-logo-frame .g {
+    position: absolute;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1;
+    color: #86cc00;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+  }
+
+  html[data-theme='light'] .bg-logo-frame .g {
+    color: #3f5c00;
+  }
+
+  .bg-logo-stage[data-on] .bg-logo-frame .g {
+    opacity: 1;
+  }
+
+  .g--t {
+    top: calc(var(--x) / 2);
+    left: 50%;
+    translate: -50% -50%;
+  }
+
+  .g--b {
+    bottom: calc(var(--x) / 2);
+    left: 50%;
+    translate: -50% 50%;
+  }
+
+  .g--l {
+    left: calc(var(--x) / 2);
+    top: 50%;
+    translate: -50% -50%;
+  }
+
+  .g--r {
+    right: calc(var(--x) / 2);
+    top: 50%;
+    translate: 50% -50%;
+  }
+
+  .bg-logo-toggle {
+    position: absolute;
+    left: 20px;
+    bottom: 20px;
+  }
+
+  .bg-logo-note {
+    position: absolute;
+    right: 24px;
+    bottom: 26px;
+    display: none;
+    font-size: 0.875rem;
+    color: var(--color-fg-muted);
+  }
+
+  @media (min-width: 768px) {
+    .bg-logo-note {
+      display: block;
+    }
+  }
+
+  /* --- Forms --- */
+  .bg-forms {
+    display: grid;
+    gap: 16px;
+    margin-top: 16px;
+  }
+
+  @media (min-width: 900px) {
+    .bg-forms {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  .bg-form-preview {
+    display: grid;
+    place-items: center;
+    height: 150px;
+    margin-bottom: 20px;
+    border-radius: var(--radius-lg);
+  }
+
+  .bg-form-icon {
+    width: 88px;
+    border-radius: 22%;
+    box-shadow: 0 18px 40px -16px rgb(0 0 0 / 0.6);
+  }
+
+  .bg-form-min {
+    margin-top: 12px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+  }
+
+  /* --- Grounds --- */
+  .bg-grounds {
+    display: grid;
+    gap: 16px;
+  }
+
+  @media (min-width: 900px) {
+    .bg-grounds {
+      grid-template-columns: 1.4fr 1fr 1fr;
+    }
+  }
+
+  .bg-ground {
+    display: grid;
+    place-items: center;
+    gap: 28px;
+    min-height: 240px;
+    padding: 32px 20px 20px;
+    border-radius: var(--radius-xl);
+  }
+
+  .bg-ground figcaption {
+    justify-self: start;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+  }
+
+  .bg-ground--dark {
+    background: radial-gradient(ellipse at 50% 40%, #010302 30%, #0b1110 100%);
+    color: #9fb7ae;
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.06);
+  }
+
+  .bg-ground--light {
+    background: #f8fbf8;
+    color: #45584f;
+    box-shadow: inset 0 0 0 1px rgb(17 39 29 / 0.12);
+  }
+
+  .bg-ground--tile {
+    background: #004222;
+    color: #c8e6d4;
+  }
+
+  /* --- Misuse grid --- */
+  .bg-misuse {
+    display: grid;
+    gap: 16px;
+    list-style: none;
+  }
+
+  @media (min-width: 640px) {
+    .bg-misuse {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .bg-misuse {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  .bg-misuse p {
+    margin-top: 12px;
+    color: var(--color-fg-muted);
+    font-size: 0.9375rem;
+  }
+
+  .bg-misuse-art {
+    position: relative;
+    display: grid;
+    place-items: center;
+    height: 168px;
+    border-radius: var(--radius-lg);
+    background: #0b1110;
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.06);
+    overflow: hidden;
+  }
+
+  .bg-misuse-art--recolour :global(.lockup) {
+    filter: hue-rotate(150deg) saturate(1.6);
+  }
+
+  .bg-misuse-art--stretch :global(.lockup) {
+    transform: scale(1.7, 0.7);
+  }
+
+  .bg-misuse-art--rotate :global(.lockup) {
+    transform: rotate(-18deg);
+  }
+
+  .bg-misuse-art--glow :global(.lockup) {
+    filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 14px #22c55e) drop-shadow(0 0 30px #bcfc54);
+  }
+
+  .bg-misuse-art--busy {
+    background:
+      repeating-linear-gradient(45deg, #86cc00 0 10px, #22c55e 10px 20px, #f59e0b 20px 30px);
+  }
+
+  .bg-misuse-art--retired svg {
+    opacity: 0.9;
+  }
+
+  .bg-misuse-x {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    color: #1a0505;
+    background: #f87171;
+    box-shadow: 0 0 0 3px #0b1110;
+  }
+</style>

@@ -52,8 +52,8 @@ CORS_PAYLOAD=$(cat <<CORSEOF
         "methods": ["PUT"],
         "headers": ["*"]
       },
-      "exposed_headers": ["ETag"],
-      "max_age_seconds": 3600
+      "exposeHeaders": ["ETag"],
+      "maxAgeSeconds": 3600
     }
   ]
 }

@@ -1,4 +1,4 @@
-import type { GitHubInstallation, ProjectDetailResponse } from '@simple-agent-manager/shared';
+import type { ProjectDetailResponse } from '@simple-agent-manager/shared';
 import { Alert, PageLayout, Spinner } from '@simple-agent-manager/ui';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo } from 'react';
@@ -6,12 +6,16 @@ import { Outlet, useLocation, useParams } from 'react-router';
 
 import { useAppShell } from '../components/AppShell';
 import { useAuth } from '../components/AuthProvider';
+import { LoadingPane } from '../components/LoadingPane';
 import { useIsMobile } from '../hooks/useIsMobile';
 import {
-  githubInstallationsQueryOptions,
+  mcpConnectionsQueryOptions,
   projectDetailQueryOptions,
   projectQueryKeys,
+  projectRuntimeConfigQueryOptions,
 } from '../lib/query-options';
+import { isFullBleedRoute, isProjectChatRoute } from '../lib/shell-routes';
+import { ChatLoadingLayout } from './project-chat/ChatLoadingLayout';
 import { ProjectContext } from './ProjectContext';
 
 export function Project() {
@@ -26,15 +30,7 @@ export function Project() {
     ...projectDetailQueryOptions(queryScope, projectId ?? ''),
     enabled: Boolean(projectId && queryScope),
   });
-  const installationsQuery = useQuery({
-    ...githubInstallationsQueryOptions(queryScope),
-    enabled: Boolean(queryScope),
-  });
   const project = (projectQuery.data ?? null) as ProjectDetailResponse | null;
-  const installations = useMemo(
-    () => (installationsQuery.data ?? []) as GitHubInstallation[],
-    [installationsQuery.data]
-  );
   const refetchProject = projectQuery.refetch;
   const projectLoading = Boolean(projectId) && projectQuery.isPending && project === null;
   const error =
@@ -46,8 +42,21 @@ export function Project() {
           : null
       : null;
 
-  // Chat routes get a full-bleed layout (no PageLayout wrapper)
-  const isChatRoute = /\/(chat|agent)(\/|$)/.test(location.pathname);
+  // Chat routes, and the comment reader (a conversation with its own scroller), get a
+  // full-bleed layout (no PageLayout wrapper)
+  const isChatRoute = isFullBleedRoute(location.pathname);
+
+  const isSettingsRoute = /\/settings(?:\/|$)/.test(location.pathname);
+  const independentSettings = /\/settings\/(runtime|deploy)(?:\/|$)/.test(location.pathname);
+  useEffect(() => {
+    if (!projectId || !queryScope || !isSettingsRoute) return;
+    void import('./ProjectSettings').catch(() => undefined);
+    if (/\/settings\/runtime\/?$/.test(location.pathname)) {
+      void queryClient.prefetchQuery(projectRuntimeConfigQueryOptions(queryScope, projectId));
+      void queryClient.prefetchQuery(mcpConnectionsQueryOptions(queryScope, projectId));
+    }
+  }, [isSettingsRoute, location.pathname, projectId, queryClient, queryScope]);
+  const renderSettingsWhileLoading = independentSettings && projectLoading;
 
   const loadProject = useCallback(async () => {
     await Promise.all([
@@ -70,10 +79,9 @@ export function Project() {
     () => ({
       projectId: projectId ?? '',
       project,
-      installations,
       reload: loadProject,
     }),
-    [projectId, project, installations, loadProject]
+    [projectId, project, loadProject]
   );
 
   if (!projectId) {
@@ -91,10 +99,13 @@ export function Project() {
     return (
       <div className="flex-1 min-h-0 flex flex-col">
         {projectLoading ? (
-          <div className="flex items-center justify-center flex-1 gap-2">
-            <Spinner size="md" />
-            <span className="text-fg-muted text-sm">Loading project...</span>
-          </div>
+          // Only the chat has a chats pane to reserve; the agent chat and comment reader
+          // centre their loading state across the full width.
+          isProjectChatRoute(location.pathname) ? (
+            <ChatLoadingLayout testId="project-loading" />
+          ) : (
+            <LoadingPane testId="project-loading" />
+          )
         ) : !project ? (
           <div className="p-4">
             <Alert variant="error">{error ?? 'Project not found.'}</Alert>
@@ -129,12 +140,12 @@ export function Project() {
             : { padding: 'var(--sam-space-8) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }
         }
       >
-        {projectLoading ? (
+        {projectLoading && !renderSettingsWhileLoading ? (
           <div className="flex items-center gap-2 mt-4">
             <Spinner size="md" />
             <span>Loading project...</span>
           </div>
-        ) : !project ? (
+        ) : !project && !renderSettingsWhileLoading ? (
           <div className="mt-4">
             <Alert variant="error">{error ?? 'Project not found.'}</Alert>
           </div>

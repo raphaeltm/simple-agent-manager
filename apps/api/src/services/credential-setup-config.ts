@@ -1,9 +1,44 @@
 /**
  * Configuration readers for guided agent-credential setup
- * (Cloudflare Sandbox). All values are env-configurable with a `DEFAULT_*`
+ * (Cloudflare Sandbox). Values use environment or admin settings with a `DEFAULT_*`
  * constant fallback (Constitution Principle XI — no hardcoded limits/timeouts).
  */
 import type { Env } from '../env';
+import { resolveAdminSetting } from './admin-settings';
+import {
+  DEFAULT_SETUP_SESSION_CLEANUP_RECOVERY_STEP_TIMEOUT_MS,
+  DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS,
+} from './admin-settings-credential-setup-definitions';
+
+export { DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS } from './admin-settings-credential-setup-definitions';
+
+/** Only recovery pays this cached settings read; inline teardown retains the interactive timeout. */
+export async function getSetupSessionCleanupRecoveryStepTimeoutMs(env: Env): Promise<number> {
+  const value = await resolveAdminSetting(env, 'credentialSetup.cleanupRecoveryStepTimeoutMs');
+  return typeof value === 'number' ? value : DEFAULT_SETUP_SESSION_CLEANUP_RECOVERY_STEP_TIMEOUT_MS;
+}
+
+export interface SetupSessionCleanupRecoveryConfig {
+  stepTimeoutMs: number;
+  maxAttempts: number;
+}
+
+/** Recovery-only: both settings share the existing override cache/in-flight read. */
+export async function getSetupSessionCleanupRecoveryConfig(
+  env: Env
+): Promise<SetupSessionCleanupRecoveryConfig> {
+  const [stepTimeoutMs, maxAttempts] = await Promise.all([
+    getSetupSessionCleanupRecoveryStepTimeoutMs(env),
+    resolveAdminSetting(env, 'credentialSetup.cleanupRecoveryMaxAttempts'),
+  ]);
+  return {
+    stepTimeoutMs,
+    maxAttempts:
+      typeof maxAttempts === 'number'
+        ? maxAttempts
+        : DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS,
+  };
+}
 
 /** Concurrency sub-cap for simultaneous setup sessions (below the Sandbox container max_instances). */
 export const DEFAULT_MAX_CONCURRENT_SETUP_SESSIONS = 2;
@@ -25,6 +60,15 @@ export const DEFAULT_CLAUDE_SETUP_OUTPUT_BUFFER_BYTES = 32_768;
 export const DEFAULT_CLAUDE_VERIFICATION_CODE_MAX_LENGTH = 1_024;
 export const DEFAULT_CLAUDE_SETUP_ERROR_DETAIL_MAX_LENGTH = 160;
 export const DEFAULT_CLAUDE_OAUTH_TOKEN_MAX_LENGTH = 8_192;
+/**
+ * The message `@cloudflare/sandbox` puts on its own permanent container start failure
+ * (HTTP 500 from `containerFetch`: no such image, no matching container application,
+ * out of memory, too many subprocesses). The SDK does not retry it, and the session
+ * reports it as `sandbox_runtime_unavailable`. Pinned against the installed SDK by
+ * tests/unit/durable-objects/credential-setup-session-teardown.test.ts.
+ */
+export const SANDBOX_PERMANENT_STARTUP_MESSAGE =
+  'Container failed to start due to a permanent error. Check your container configuration.';
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(raw ?? '', 10);
@@ -110,11 +154,7 @@ export const ACTIVE_SETUP_STATUSES = [
 ] as const;
 
 export type SetupSessionStatus =
-  | (typeof ACTIVE_SETUP_STATUSES)[number]
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'expired';
+  (typeof ACTIVE_SETUP_STATUSES)[number] | 'completed' | 'failed' | 'cancelled' | 'expired';
 
 export function isTerminalSetupStatus(status: string): boolean {
   return (

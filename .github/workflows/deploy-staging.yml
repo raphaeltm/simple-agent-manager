@@ -3,19 +3,90 @@ name: Deploy Staging
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: 'Staging installation to deploy and lease: staging (sammy.party) or staging2 (sammy2.party). Both use the staging credentials.'
+        type: string
+        default: staging
+      sam_task_id:
+        description: 'SAM task holding the live verification slot (optional)'
+        type: string
+      lease_action:
+        description: 'deploy (queue, then deploy and hold), reserve (queue only), acquire (queue, then hold without deploying), release (give up hold or place)'
+        type: choice
+        options: [deploy, reserve, acquire, release]
+        default: deploy
+      lease_hold_minutes:
+        description: 'Live verification hold in minutes (default/cap from environment variables)'
+        type: string
+      performance_audit:
+        description: 'Run bounded admin/Runtime browser timings and screenshots with the staging smoke account'
+        type: boolean
+        default: false
+      performance_audit_only:
+        description: 'Audit the current staging deployment without redeploying (requires performance_audit)'
+        type: boolean
+        default: false
+      activation_only:
+        description: 'Run C storage activation on the already deployed candidate; skip deployment'
+        type: boolean
+        default: false
+      activation_expected_sha:
+        description: 'Exact deployed candidate SHA for C activation'
+        type: string
+      activation_expected_version:
+        description: 'Expected live Cloudflare Worker version at 100%'
+        type: string
+      activation_cutover_at:
+        description: 'Future aligned Unix second; retain on retries'
+        type: string
+      activation_publish:
+        description: 'Publish immutable activation; false is read-only preflight'
+        type: boolean
+        default: false
+      activation_verify_workspace_id:
+        description: 'Optional own release workspace ID for fixed read-only DO evidence (publish must be false)'
+        type: string
+      activation_verify_rate_identity:
+        description: 'Optional own release MCP identity for fixed read-only DO evidence'
+        type: string
+      use_shared_engine:
+        description: 'Opt in to shared-engine deployment for staging equivalence verification'
+        required: false
+        type: boolean
+        default: false
       dry_run:
         description: 'Preview changes without applying'
         required: false
         type: boolean
         default: false
+      agent_email_dns_audit:
+        description: 'Verify provider preserves merged SPF, then restore staging DNS'
+        type: boolean
+        default: false
+      github_trigger_audit:
+        description: 'Run one bounded signed GitHub-trigger staging admission audit'
+        required: false
+        type: boolean
+        default: false
+      github_trigger_audit_send_only:
+        description: 'Send the prepared audit fixture on the already deployed candidate; skip deployment'
+        required: false
+        type: boolean
+        default: false
+      github_trigger_audit_fixture:
+        description: 'Nonsecret prepared fixture JSON; no tokens or signatures'
+        required: false
+        type: string
 
-# Only one staging deployment at a time; queue (don't cancel) concurrent requests
-concurrency:
-  group: deploy-staging
-  cancel-in-progress: false
+# No workflow-level concurrency group: GitHub keeps one pending run per group and cancels the
+# previous pending run, which silently lost waiting agents their place. The `queue` job records
+# places outside any group; only runs that hold the lease, have their turn, or have something to
+# release enter the serialized `lease` job (group staging-lease-<installation>; deliberately not
+# the deploy-<installation> name older workflow copies use, so their runs cannot displace an
+# entitled pending run), and mutating jobs share staging-apply-<installation>. See scripts/deploy/staging-lease-queue.mjs.
 
 env:
-  PLAYWRIGHT_VERSION: 1.59.1
+  PLAYWRIGHT_VERSION: 1.65.0
 
 permissions:
   contents: read
@@ -23,10 +94,114 @@ permissions:
   id-token: none
 
 jobs:
+  # Records this branch's place in the queue. Deliberately outside every concurrency group: a
+  # reservation is an append-only record, so no later dispatch can cancel it. Refuses here, with
+  # the queue in the run summary, when it is not this branch's turn.
+  queue:
+    runs-on: ubuntu-24.04
+    # Every installation this workflow may target runs with the staging credentials, so the
+    # lease jobs never enter another Environment (the installation is validated in the first
+    # step against scripts/deploy/staging-installations.mjs).
+    environment: staging
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      deployments: write
+      id-token: none
+    outputs:
+      proceed: ${{ steps.queue.outputs.proceed }}
+      checked_at: ${{ steps.queue.outputs.checked_at }}
+      credential_environment: ${{ steps.target.outputs.credential_environment }}
+      installation: ${{ steps.target.outputs.installation }}
+      base_domain: ${{ steps.target.outputs.base_domain }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The lease is keyed by installation. A secondary installation (staging2) has no GitHub
+      # Environment secrets of its own: its jobs run with the environment the allowlist names
+      # (scripts/deploy/staging-installations.mjs), whose AGENT_SIGN_IN_TRUST_STAGING2 secret is its
+      # sign-in trust, and it is deployed to its own domain, stack and prefix.
+      - name: Resolve installation target
+        id: target
+        env:
+          INSTALLATION: ${{ inputs.environment || 'staging' }}
+          PRIMARY_BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+        run: node scripts/deploy/staging-installations.mjs workflow-target
+      # A branch that adds a Durable Object migration tag main lacks would leave primary staging
+      # ahead of main (migrations only move forward), so every main-based deploy there fails the
+      # migration preflight until it merges. Refused before a place is reserved; use staging2.
+      - name: Keep new Durable Object migrations off primary staging
+        if: ${{ (inputs.environment || 'staging') == 'staging' && (inputs.lease_action == 'deploy' || inputs.lease_action == '') && !inputs.github_trigger_audit_send_only && !inputs.activation_only && !inputs.performance_audit_only }}
+        env:
+          LEASE_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+          LEASE_ACTION: ${{ inputs.lease_action || 'deploy' }}
+        run: node scripts/deploy/staging-migration-guard.mjs
+      - name: Reserve a place or confirm this branch's turn
+        id: queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEASE_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+          LEASE_ACTION: ${{ inputs.lease_action || 'deploy' }}
+          LEASE_PRIMARY_ONLY_AUDIT: ${{ inputs.activation_only || inputs.agent_email_dns_audit || inputs.github_trigger_audit }}
+          SAM_TASK_ID: ${{ inputs.sam_task_id }}
+          LEASE_HOLD_MINUTES: ${{ inputs.lease_hold_minutes }}
+          LEASE_DEFAULT_HOLD_MINUTES: ${{ vars.STAGING_LEASE_DEFAULT_HOLD_MINUTES || '30' }}
+          LEASE_MAX_HOLD_MINUTES: ${{ vars.STAGING_LEASE_MAX_HOLD_MINUTES || '120' }}
+          LEASE_GRACE_MINUTES: ${{ vars.STAGING_LEASE_GRACE_MINUTES || '10' }}
+          LEASE_RESERVATION_MINUTES: ${{ vars.STAGING_LEASE_RESERVATION_MINUTES || '480' }}
+          # Acquire-only holds do not need a deploy-time allowance.
+          LEASE_EXPECTED_DEPLOY_MINUTES: ${{ inputs.lease_action == 'acquire' && '0' || vars.STAGING_LEASE_EXPECTED_DEPLOY_MINUTES || '30' }}
+        run: node scripts/deploy/staging-lease.mjs queue
+
+  # Serialized per installation. Only runs that hold the lease, have their turn, or have something
+  # to release get here, so a pending run in this group can only be displaced by another run of a
+  # branch that is itself the holder or in the queue.
+  lease:
+    needs: queue
+    if: ${{ needs.queue.outputs.proceed == 'true' }}
+    runs-on: ubuntu-24.04
+    environment: staging
+    timeout-minutes: 2
+    concurrency:
+      group: staging-lease-${{ inputs.environment || 'staging' }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      deployments: write
+      id-token: none
+    outputs:
+      credential_environment: ${{ needs.queue.outputs.credential_environment }}
+      installation: ${{ needs.queue.outputs.installation }}
+      base_domain: ${{ needs.queue.outputs.base_domain }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Acquire, renew or release the verification lease
+        env:
+          LEASE_TURN_CHECKED_AT: ${{ needs.queue.outputs.checked_at }}
+          GH_TOKEN: ${{ github.token }}
+          LEASE_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+          LEASE_ACTION: ${{ inputs.lease_action || 'deploy' }}
+          LEASE_PRIMARY_ONLY_AUDIT: ${{ inputs.activation_only || inputs.agent_email_dns_audit || inputs.github_trigger_audit }}
+          SAM_TASK_ID: ${{ inputs.sam_task_id }}
+          LEASE_HOLD_MINUTES: ${{ inputs.lease_hold_minutes }}
+          LEASE_DEFAULT_HOLD_MINUTES: ${{ vars.STAGING_LEASE_DEFAULT_HOLD_MINUTES || '30' }}
+          LEASE_MAX_HOLD_MINUTES: ${{ vars.STAGING_LEASE_MAX_HOLD_MINUTES || '120' }}
+          LEASE_GRACE_MINUTES: ${{ vars.STAGING_LEASE_GRACE_MINUTES || '10' }}
+          LEASE_RESERVATION_MINUTES: ${{ vars.STAGING_LEASE_RESERVATION_MINUTES || '480' }}
+          # Acquire-only holds do not need a deploy-time allowance.
+          LEASE_EXPECTED_DEPLOY_MINUTES: ${{ inputs.lease_action == 'acquire' && '0' || vars.STAGING_LEASE_EXPECTED_DEPLOY_MINUTES || '30' }}
+        run: node scripts/deploy/staging-lease.mjs lease
+
   deploy:
+    needs: lease
+    if: ${{ (inputs.lease_action == 'deploy' || inputs.lease_action == '') && !inputs.github_trigger_audit_send_only && !inputs.activation_only && !inputs.performance_audit_only }}
+    concurrency:
+      group: staging-apply-${{ inputs.environment || 'staging' }}
+      cancel-in-progress: false
     uses: ./.github/workflows/deploy-reusable.yml
     with:
-      environment: staging
+      environment: ${{ needs.lease.outputs.credential_environment }}
+      installation: ${{ needs.lease.outputs.installation }}
+      use_shared_engine: ${{ inputs.use_shared_engine || false }}
       skip_agent: false # Required: staging VMs need the agent binary in R2
       dry_run: ${{ inputs.dry_run || false }}
     secrets: inherit
@@ -35,37 +210,151 @@ jobs:
   # Requires SMOKE_TEST_TOKEN secret in the staging environment.
   # Skipped if the token is not configured (new deployments before token setup).
   smoke-tests:
-    needs: deploy
-    if: ${{ !inputs.dry_run }}
-    runs-on: ubuntu-latest
-    environment: staging
+    needs: [lease, deploy]
+    if: ${{ always() && needs.lease.result == 'success' && (inputs.lease_action == 'deploy' || inputs.lease_action == '') && !inputs.activation_only && !inputs.dry_run && (needs.deploy.result == 'success' || (inputs.performance_audit && inputs.performance_audit_only) || (inputs.github_trigger_audit && inputs.github_trigger_audit_send_only)) }}
+    # Pinned: Playwright cannot install Chromium on ubuntu-26.04 (ubuntu-latest since 2026-11-14).
+    # Unpin with tasks/backlog/2026-11-15-vm-agent-reproducible-build-across-runners.md follow-ups.
+    runs-on: ubuntu-24.04
+    environment: ${{ needs.lease.outputs.credential_environment }}
     env:
-      SMOKE_TEST_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
-      SMOKE_TEST_URL: https://app.${{ vars.BASE_DOMAIN }}
-      SMOKE_TEST_API_URL: https://api.${{ vars.BASE_DOMAIN }}
+      SMOKE_TEST_TOKEN: ${{ !inputs.github_trigger_audit_send_only && secrets.SMOKE_TEST_TOKEN || '' }}
+      SMOKE_TEST_URL: https://app.${{ needs.lease.outputs.base_domain }}
+      SMOKE_TEST_API_URL: https://api.${{ needs.lease.outputs.base_domain }}
+      SAM_PERFORMANCE_AUDIT: ${{ inputs.performance_audit && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
 
       - name: Install Playwright
+        if: ${{ !inputs.github_trigger_audit_send_only }}
         run: |
           mkdir -p /tmp/pw && cd /tmp/pw
           npm init -y > /dev/null 2>&1
           npm install --ignore-scripts "@playwright/test@${PLAYWRIGHT_VERSION}"
-          npx playwright install chromium
+          node node_modules/@playwright/test/cli.js install chromium
           mkdir -p $GITHUB_WORKSPACE/node_modules/.bin
           ln -sf /tmp/pw/node_modules/@playwright $GITHUB_WORKSPACE/node_modules/@playwright
           ln -sf /tmp/pw/node_modules/playwright $GITHUB_WORKSPACE/node_modules/playwright
           ln -sf /tmp/pw/node_modules/playwright-core $GITHUB_WORKSPACE/node_modules/playwright-core
           ln -sf /tmp/pw/node_modules/.bin/playwright $GITHUB_WORKSPACE/node_modules/.bin/playwright
 
+      - name: Require credentials for an explicit performance audit
+        if: ${{ inputs.performance_audit && env.SMOKE_TEST_TOKEN == '' }}
+        run: |
+          echo '::error::SMOKE_TEST_TOKEN is required for the requested staging performance audit'
+          exit 1
+
+      # Deploys never register the smoke token on a secondary installation: that needs the
+      # installation's ENCRYPTION_KEY in the runner (policy 795e72a6). Where it was registered by
+      # earlier deploys or by hand it works; where the installation refuses it, skip with a warning.
+      # The token goes from the GitHub secret straight to the request body on stdin.
+      - name: Check smoke token on a secondary installation
+        id: smoke_token
+        # `installation` is empty for the primary installation (workflowTargetFor), so this never
+        # runs there: on the primary a refused token must fail the smoke tests, not skip them.
+        if: ${{ needs.lease.outputs.installation != '' && !inputs.github_trigger_audit_send_only && env.SMOKE_TEST_TOKEN != '' }}
+        run: |
+          status="$(node -e 'process.stdout.write(JSON.stringify({ token: process.env.SMOKE_TEST_TOKEN }))' |
+            curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' \
+              --data-binary @- "$SMOKE_TEST_API_URL/api/auth/token-login")" || status="request failed"
+          # Only a refusal skips: any other failure (5xx, network) still runs the tests, which then
+          # report the broken installation.
+          if [ "$status" = "401" ]; then
+            echo "::warning::The smoke token is not registered on $INSTALLATION; smoke tests skipped (see 'Two Staging Installations')."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Smoke token check on $INSTALLATION: HTTP $status"
+          fi
+        env:
+          INSTALLATION: ${{ needs.lease.outputs.installation }}
+
       - name: Run smoke tests
-        if: ${{ env.SMOKE_TEST_TOKEN != '' }}
-        run: npx playwright test --config=tests/smoke/playwright.config.ts
+        if: ${{ !inputs.github_trigger_audit_send_only && !inputs.performance_audit_only && env.SMOKE_TEST_TOKEN != '' && steps.smoke_token.outputs.skip != 'true' }}
+        run: node node_modules/@playwright/test/cli.js test --config=tests/smoke/playwright.config.ts
+
+      - name: Run current-deployment performance audit only
+        if: ${{ inputs.performance_audit && inputs.performance_audit_only && env.SMOKE_TEST_TOKEN != '' && steps.smoke_token.outputs.skip != 'true' }}
+        run: node node_modules/@playwright/test/cli.js test --config=tests/smoke/playwright.config.ts admin-runtime-performance.spec.ts
+
+      - name: Upload bounded performance audit
+        if: ${{ always() && inputs.performance_audit && steps.smoke_token.outputs.skip != 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: admin-runtime-performance-${{ github.run_id }}
+          if-no-files-found: error
+          path: .codex/tmp/smoke-test-results/**/performance/
+          retention-days: 7
 
       - name: Skip notice (no token configured)
-        if: ${{ env.SMOKE_TEST_TOKEN == '' }}
+        if: ${{ !inputs.github_trigger_audit_send_only && env.SMOKE_TEST_TOKEN == '' }}
         run: echo "⚠ Smoke tests skipped — SMOKE_TEST_TOKEN not configured in staging environment secrets"
+
+      - name: Send prepared signed GitHub trigger fixture (opt-in)
+        if: ${{ inputs.github_trigger_audit && inputs.github_trigger_audit_send_only }}
+        env:
+          GH_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET }}
+          GH_APP_ID: ${{ secrets.GH_APP_ID }}
+          GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          GITHUB_TRIGGER_AUDIT_FIXTURE: ${{ inputs.github_trigger_audit_fixture }}
+        run: node scripts/e2e/github-trigger-staging.mjs --phase=send
+
+  storage-activation:
+    needs: lease
+    # Primary installation only (also refused in the lease preflight).
+    if: ${{ (inputs.lease_action == 'deploy' || inputs.lease_action == '') && inputs.activation_only && needs.lease.outputs.installation == '' }}
+    concurrency:
+      group: staging-apply-${{ inputs.environment || 'staging' }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    environment: ${{ needs.lease.outputs.credential_environment }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - name: Verify candidate and activate storage
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          DEPLOY_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+          EXPECTED_SHA: ${{ inputs.activation_expected_sha }}
+          EXPECTED_VERSION: ${{ inputs.activation_expected_version }}
+          CUTOVER_AT: ${{ inputs.activation_cutover_at }}
+          PUBLISH_ACTIVATION: ${{ inputs.activation_publish }}
+          VERIFY_WORKSPACE_ID: ${{ inputs.activation_verify_workspace_id }}
+          VERIFY_RATE_IDENTITY: ${{ inputs.activation_verify_rate_identity }}
+        run: node scripts/deploy/reliability-storage-activation.mjs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
+        with:
+          name: reliability-storage-activation-staging
+          path: reliability-storage-activation.json
+          if-no-files-found: ignore
+
+  agent-email-dns-audit:
+    needs: [lease, deploy]
+    # Primary installation only (also refused in the lease preflight).
+    if: ${{ (inputs.lease_action == 'deploy' || inputs.lease_action == '') && inputs.agent_email_dns_audit && !inputs.dry_run && needs.lease.outputs.installation == '' }}
+    concurrency:
+      group: staging-apply-${{ inputs.environment || 'staging' }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    environment: ${{ needs.lease.outputs.credential_environment }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - name: Verify merged SPF compatibility and restore original DNS
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          DEPLOY_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+        run: node scripts/e2e/agent-email-dns-staging.mjs

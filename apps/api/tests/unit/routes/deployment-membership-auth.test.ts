@@ -36,9 +36,7 @@ const nodes = {
 };
 
 type Condition =
-  | { op: 'eq'; col: unknown; val: unknown }
-  | { op: 'and'; conds: Condition[] }
-  | undefined;
+  { op: 'eq'; col: unknown; val: unknown } | { op: 'and'; conds: Condition[] } | undefined;
 
 interface ProjectRow {
   id: string;
@@ -79,7 +77,8 @@ let memberRows: ProjectMemberRow[] = [];
 let environmentRows: EnvironmentRow[] = [];
 let nodeRows: NodeRow[] = [];
 
-vi.mock('drizzle-orm', () => ({
+vi.mock('drizzle-orm', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('drizzle-orm')>()),
   and: (...conds: Condition[]) => ({ op: 'and', conds }),
   eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
 }));
@@ -109,6 +108,7 @@ vi.mock('../../../src/services/deployment-control', () => ({
 }));
 
 vi.mock('../../../src/services/deployment-environment-summary', () => ({
+  listRoutedCustomDomainHostnames: vi.fn(async () => new Map<string, string[]>()),
   buildDeploymentEnvironmentResponse: vi.fn(async (_db, _env, row: EnvironmentRow) => ({
     id: row.id,
     projectId: row.projectId,
@@ -130,6 +130,12 @@ vi.mock('../../../src/services/deployment-volumes', () => ({
 
 vi.mock('../../../src/services/dns', () => ({
   cleanupAppRouteDNSRecords: vi.fn(async () => 0),
+}));
+
+// This suite isolates membership authorization; actual teardown SQL and strict
+// provider behavior are exercised by deployment-environment-lifecycle-vertical.
+vi.mock('../../../src/services/deployment-node-cleanup', () => ({
+  cleanupDeploymentNode: vi.fn(async () => ({ nodeDeleted: false, warnings: [] })),
 }));
 
 vi.mock('../../../src/services/nodes', () => ({
@@ -230,6 +236,16 @@ function createMockDb() {
   return {
     select: vi.fn(() => ({
       from: vi.fn((table: unknown) => ({
+        innerJoin: vi.fn(() => ({
+          where: (condition: Condition) => ({
+            limit: async () =>
+              (selectRows(projects, condition) as ProjectRow[]).flatMap((project) =>
+                (selectRows(projectMembers, condition) as ProjectMemberRow[])
+                  .filter((membership) => membership.projectId === project.id)
+                  .map((membership) => ({ project, membership }))
+              ),
+          }),
+        })),
         where: vi.fn((condition: Condition) => ({
           limit: vi.fn(async () => selectRows(table, condition)),
           orderBy: vi.fn(async () => selectRows(table, condition)),

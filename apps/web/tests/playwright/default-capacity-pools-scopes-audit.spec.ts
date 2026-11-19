@@ -1,22 +1,18 @@
-import { mkdirSync } from 'node:fs';
-import { resolve } from 'node:path';
-
 import { expect, type Page, test } from '@playwright/test';
 
 import {
   applyMockCapacityDefaultsUpdate,
+  assertNoClippedOverflow,
   assertNoOverflow,
   getProjectSuffix,
   jsonResponse,
   makeMockUser,
   screenshot,
   screenshotNearHeading,
-  screenshotSectionNearHeading,
   setupAuditRoutes,
 } from './audit-helpers';
 
 const TIMESTAMP = '2026-08-28T00:00:00.000Z';
-const SCREENSHOT_DIR = '../../.codex/tmp/playwright-screenshots';
 const EXPENSIVE_HETZNER_GPU_SKU =
   'bare-metal-gpu-ultra-long-provider-native-instance-name-2026-08-stress-row';
 const LONG_MARKER =
@@ -47,8 +43,6 @@ const MOCK_PROJECT = {
   repository: 'acme/provider-native-compute-pool-project',
   defaultBranch: 'main',
   defaultVmSize: null,
-  defaultProvider: 'hetzner',
-  defaultLocation: 'fsn1',
   workspaceIdleTimeoutMs: null,
   status: 'active',
   createdAt: TIMESTAMP,
@@ -181,6 +175,9 @@ function capacitySummary(scope: PoolScope) {
       deploymentStrategy: 'smallest-fit',
       exhaustionPolicy: 'queue',
       maxNodes: 3,
+      // The server always sends these; the editor must not depend on them being absent.
+      sourceOrder: null,
+      excludedSourceIds: [],
       createdAt: TIMESTAMP,
       updatedAt: TIMESTAMP,
     },
@@ -382,6 +379,13 @@ async function setupCommonMocks(page: Page, authUser: unknown, catalogScope: Poo
     if (path === '/api/agents') return respond(200, { agents: [] });
     if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
     if (path === '/api/credentials') return respond(200, []);
+    if (path === '/api/cc/credentials') return respond(200, { credentials: [] });
+    if (path === '/api/cc/configurations') return respond(200, { configurations: [] });
+    if (path === '/api/cc/attachments' || path === '/api/cc/profile-attachments') {
+      return respond(200, { attachments: [] });
+    }
+    if (path === '/api/credentials/resolution-status') return respond(200, { consumers: [] });
+    if (path === '/api/credentials/limits') return respond(200, { credentials: [] });
     if (path.startsWith('/api/github')) return respond(200, []);
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
     if (path === '/api/providers/catalog') {
@@ -471,27 +475,64 @@ async function setupProjectPoolMocks(page: Page) {
   );
 }
 
-async function expectStressedDefaultPool(page: Page, heading: string, scope: PoolScope) {
-  const summary = capacitySummary(scope);
-  const excludedCount = summary.candidates.length - summary.activeCandidateCount;
-  await expect(page.getByRole('heading', { name: heading })).toBeVisible({ timeout: 20_000 });
+const POOL_HEADINGS: Record<PoolScope, string> = {
+  project: 'Project compute pool',
+  user: 'Your compute pool',
+  installation: 'Shared compute pool',
+};
+
+/** Rows SAM can place on: picked machines × regions of accounts that are on. */
+function pickedRowCount(scope: PoolScope) {
+  return new Set(
+    capacitySummary(scope)
+      .candidates.filter((candidate) => candidate.status === 'active')
+      .map(
+        (candidate) =>
+          `${candidate.capacitySourceId}|${candidate.providerInstanceType}|${candidate.location}`
+      )
+  ).size;
+}
+
+/** The control for a row, in whichever layout (table or list) the viewport shows. */
+function visibleButton(page: Page, name: string) {
+  return page.getByRole('button', { name, exact: true }).filter({ visible: true }).first();
+}
+
+const ACCOUNTS_HEADINGS: Record<PoolScope, string> = {
+  project: "In this project's pool",
+  user: 'In your pool',
+  installation: 'In the shared pool',
+};
+const EMPTY_TITLES: Record<PoolScope, string> = {
+  project: "This project's pool is empty, so only Instant sessions can run.",
+  user: 'Your pool is empty, so only Instant sessions can run.',
+  installation:
+    'The shared pool is empty, so only Instant sessions can run, for everyone who uses it.',
+};
+
+async function expectStressedDefaultPool(page: Page, scope: PoolScope) {
+  await expect(page.getByRole('heading', { name: POOL_HEADINGS[scope] })).toBeVisible({
+    timeout: 20_000,
+  });
   await expect(
-    page.getByText(
-      new RegExp(`${summary.activeCandidateCount} allowed · ${excludedCount} not selected/removed`)
-    )
+    page.getByRole('heading', { name: ACCOUNTS_HEADINGS[scope], exact: true })
   ).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Available machines', exact: true })
+  ).toBeVisible();
+  await expect(page.getByText(`Ready · ${pickedRowCount(scope)} in pool`)).toBeVisible();
+  // The hostile region label (unicode, emoji, markup) renders as wrapped text.
   await expect(
     page
-      .getByText(EXPENSIVE_HETZNER_GPU_SKU)
+      .getByText(new RegExp(`region-with-a-deliberately-long-location-name-${scope}`))
+      .filter({ visible: true })
       .first()
   ).toBeVisible();
-  await expect(page.getByText('Not selected').first()).toBeVisible();
-  await expect(
-    page.getByText(new RegExp(`region-with-a-deliberately-long-location-name-${scope}`))
-  ).toBeVisible();
-  await expect(page.getByText(/\+\d+ more provider\/region groups/)).toHaveCount(0);
+  // Internal references and legacy size names never render.
+  await expect(page.getByText(/credentials:|platform_credentials:/)).toHaveCount(0);
   await expect(page.getByText(/Hidden outside this settings context/i)).toHaveCount(0);
-  await expect(page.getByText(/Installation defaults require/i)).toHaveCount(0);
+  await expect(page.getByText(/\b(small|medium|large)\b/)).toHaveCount(0);
+  await assertNoOverflow(page);
 }
 
 async function screenshotDefaultPoolScope(
@@ -502,156 +543,176 @@ async function screenshotDefaultPoolScope(
 ) {
   await screenshot(page, `${namePrefix}-${suffix}`);
   await screenshotNearHeading(page, heading, `${namePrefix}-focused-${suffix}`);
-  await screenshotNearHeading(page, 'Active Sources', `${namePrefix}-details-${suffix}`);
+  await screenshotNearHeading(page, 'Available machines', `${namePrefix}-details-${suffix}`);
 }
 
-async function removeAshHilCandidates(
-  page: Page,
-  editHeading: string,
-  screenshotName: string,
-  scope: PoolScope
-) {
-  const initialSummary = capacitySummary(scope);
-  const expectedAllowedAfterSave = initialSummary.activeCandidateCount - 1;
-  const expectedExcludedAfterSave = initialSummary.candidates.length + 1 - expectedAllowedAfterSave;
-
-  await page.getByRole('button', { name: 'Edit' }).click();
-  await expect(page.getByRole('heading', { name: editHeading })).toBeVisible();
-  await page.getByRole('spinbutton', { name: /Maximum nodes/ }).fill('5');
-  await expect(
-    page.getByRole('heading', { name: 'Not selected or removed instances' })
-  ).toBeVisible();
-  await page.getByRole('button', { name: /Remove Hetzner nbg1 cx33/ }).click();
-  await page.getByRole('button', { name: /Remove Hetzner hel1 cx43/ }).click();
-  await screenshotNearHeading(page, editHeading, screenshotName);
-  await page.getByLabel('Filter provider').selectOption('hetzner');
-  await page.getByLabel('Filter region or location').fill('fsn1');
-  await page.getByLabel('Minimum vCPU').fill('48');
-  await page.getByLabel('Minimum RAM in GB').fill('192');
-  await page.getByLabel('Maximum monthly price').fill('1500');
-  await page.getByLabel('Filter availability').selectOption('available');
-  await expect(page.getByText('1 matching offering across 1 region.')).toBeVisible();
-  await expect(
-    page
-      .getByText(EXPENSIVE_HETZNER_GPU_SKU)
-      .first()
-  ).toBeVisible();
-  await expect(page.getByText('€1036.00/mo').first()).toBeVisible();
-  await expect(page.getByText('Not selected').first()).toBeVisible();
-  await expect(
-    page.getByRole('button', {
-      name: /Add Hetzner fsn1 bare-metal-gpu-ultra-long-provider-native-instance-name/,
-    })
-  ).toBeVisible();
-  await screenshotCatalogOfferingCard(
-    page,
-    EXPENSIVE_HETZNER_GPU_SKU,
-    `${screenshotName}-catalog-expensive-card-not-selected`
-  );
-  await screenshotSectionNearHeading(
-    page,
-    'Catalog filters',
-    `${screenshotName}-catalog-expensive-not-selected`
-  );
-  await page.getByLabel('Minimum vCPU').fill('32');
-  await page.getByLabel('Minimum RAM in GB').fill('64');
-  await page.getByLabel('Maximum monthly price').fill('250');
-  await page.getByLabel('Filter availability').selectOption('available');
-  await expect(page.getByText('1 matching offering across 1 region.')).toBeVisible();
-  await expect(page.getByText('cpx62-catalog-only-live-api-extra').first()).toBeVisible();
-  await screenshotSectionNearHeading(
-    page,
-    'Catalog filters',
-    `${screenshotName}-catalog-filters-available`
-  );
+/**
+ * Captures the machine rows themselves, which sit below the filters. When the desktop table is
+ * showing, it must fit its pane: a table that scrolls sideways hides the Add/Remove buttons.
+ */
+async function screenshotMachineRows(page: Page, name: string) {
   await page
-    .getByRole('button', { name: /Add Hetzner fsn1 cpx62-catalog-only-live-api-extra/ })
-    .click();
-  await expect(page.getByRole('button', { name: 'Pending add' })).toBeVisible();
-  await screenshotSectionNearHeading(
-    page,
-    'Catalog filters',
-    `${screenshotName}-catalog-pending-add`
-  );
-  await page.getByLabel('Filter provider').selectOption('hetzner');
-  await page.getByLabel('Filter region or location').fill('ash');
-  await page.getByLabel('Minimum vCPU').fill('4');
-  await page.getByLabel('Minimum RAM in GB').fill('8');
-  await page.getByLabel('Maximum monthly price').fill('250');
-  await page.getByLabel('Filter availability').selectOption('unavailable');
-  await expect(page.getByText('1 matching offering across 1 region.')).toBeVisible();
-  await expect(page.getByText('temporarily unavailable').first()).toBeVisible();
-  await screenshotSectionNearHeading(
-    page,
-    'Catalog filters',
-    `${screenshotName}-catalog-filters-unavailable`
-  );
-  await expect(page.getByRole('button', { name: /Add Hetzner ash cpx31/ })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Unavailable' }).first()).toBeDisabled();
-
-  await page.getByLabel('Filter region or location').fill('hil');
-  await page.getByLabel('Minimum vCPU').fill('8');
-  await page.getByLabel('Minimum RAM in GB').fill('32');
-  await page.getByLabel('Maximum monthly price').fill('250');
-  await page.getByLabel('Filter availability').selectOption('stale');
-  await expect(page.getByText('1 matching offering across 1 region.')).toBeVisible();
-  await expect(page.getByText('Stale catalog data').first()).toBeVisible();
-  await screenshotSectionNearHeading(
-    page,
-    'Catalog filters',
-    `${screenshotName}-catalog-filters-stale`
-  );
-  await expect(page.getByRole('button', { name: /Add Hetzner hil ccx33/ })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Stale' }).first()).toBeDisabled();
-  await page
-    .getByRole('heading', { name: 'Add instances from catalog' })
-    .evaluate((element) => element.scrollIntoView({ block: 'start', inline: 'nearest' }));
-  await screenshotNearHeading(
-    page,
-    'Add instances from catalog',
-    `${screenshotName}-catalog-results`
-  );
-  await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(
-    page.getByText(
-      new RegExp(
-        `${expectedAllowedAfterSave} allowed · ${expectedExcludedAfterSave} not selected/removed`
-      )
-    )
-  ).toBeVisible();
-  await expect(
-    page.getByRole('heading', { name: 'Not selected or removed instances' })
-  ).toBeVisible();
-  await expect(page.getByText(/Hetzner · Ashburn \(ash\)/).first()).toBeVisible();
-  await expect(page.getByText(/Hetzner · Hillsboro \(hil\)/).first()).toBeVisible();
-  await assertNoOverflow(page);
-}
-
-async function screenshotCatalogOfferingCard(page: Page, sku: string, name: string) {
-  const viewport = page.viewportSize();
-  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
-  const screenshotDir = resolve(process.cwd(), SCREENSHOT_DIR);
-  mkdirSync(screenshotDir, { recursive: true });
-  const card = page
-    .getByRole('button', { name: new RegExp(`^Add (?!back\\b).*${escapeRegExp(sku)}`) })
+    .getByText(/^\d+ of \d+ rows$/)
     .first()
-    .locator('xpath=ancestor::article[1]')
-    .first();
-  await card.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(600);
-  await card.screenshot({
-    path: `${screenshotDir}/${name}${suffix}.png`,
-  });
+    .evaluate((element) => element.scrollIntoView({ block: 'start' }));
+  const table = page.locator('table').filter({ visible: true });
+  if ((await table.count()) > 0) {
+    const fit = await table.first().evaluate((element) => {
+      const wrapper = element.parentElement as HTMLElement;
+      const action = element.querySelector('tbody tr td:last-child button');
+      const wrapperBox = wrapper.getBoundingClientRect();
+      const actionBox = action?.getBoundingClientRect();
+      return {
+        overflow: wrapper.scrollWidth - wrapper.clientWidth,
+        actionRight: actionBox ? actionBox.right : 0,
+        wrapperRight: wrapperBox.right,
+      };
+    });
+    expect(fit.overflow).toBeLessThanOrEqual(1);
+    expect(fit.actionRight).toBeGreaterThan(0);
+    expect(fit.actionRight).toBeLessThanOrEqual(fit.wrapperRight + 1);
+  }
+  await screenshot(page, name);
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+async function editStressedPool(page: Page, scope: PoolScope, screenshotName: string) {
+  // Pool settings live in a disclosure under the machine list.
+  await page.getByText('How SAM uses machines', { exact: true }).click();
+  await page.getByLabel('Placing agents').selectOption('spread');
+  await page.getByLabel(/^Machine limit/).fill('5');
+  // The machine limit's longer help makes its grid row taller; the dropdown beside it
+  // must keep the same height as the other dropdowns instead of stretching.
+  const selectHeights = await Promise.all(
+    ['Placing agents', 'If the provider is out of capacity', 'App deployments'].map(
+      async (label) => (await page.getByLabel(label, { exact: true }).boundingBox())?.height ?? 0
+    )
+  );
+  expect(Math.min(...selectHeights)).toBeGreaterThan(0);
+  expect(Math.max(...selectHeights) - Math.min(...selectHeights)).toBeLessThanOrEqual(1);
+
+  // Remove a picked region, add a catalog-only machine and a second account's machine.
+  await visibleButton(page, 'Remove cx33 in Nuremberg').click();
+  await visibleButton(page, 'Add cpx62-catalog-only-live-api-extra in Falkenstein').click();
+  await page.getByRole('textbox', { name: 'Search machines' }).fill('bare-metal');
+  await expect(
+    page.getByText(EXPENSIVE_HETZNER_GPU_SKU).filter({ visible: true }).first()
+  ).toBeVisible();
+  await screenshotNearHeading(page, 'Available machines', `${screenshotName}-search`);
+  await screenshotMachineRows(page, `${screenshotName}-search-rows`);
+  await page.getByRole('textbox', { name: 'Search machines' }).fill('');
+  await assertNoOverflow(page);
+
+  // Unavailable machines are hidden until asked for, and cannot be added.
+  await page.getByLabel('Hide unavailable').uncheck();
+  await expect(
+    page.getByText('Temporarily unavailable').filter({ visible: true }).first()
+  ).toBeVisible();
+  await page.getByLabel('Hide unavailable').check();
+
+  // Switching the account off keeps its machines but empties the pool: the Instant warning shows.
+  const hetznerSwitch = page.getByRole('switch', { name: /^Use Hetzner/ }).first();
+  await hetznerSwitch.click();
+  await expect(page.getByText('Empty · Instant sessions only')).toBeVisible();
+  await expect(page.getByText(EMPTY_TITLES[scope])).toBeVisible();
+  await expect(page.getByText(/machines? kept, not used$/).first()).toBeVisible();
+  await assertNoOverflow(page);
+  await screenshotNearHeading(page, ACCOUNTS_HEADINGS[scope], `${screenshotName}-account-off`);
+  await page
+    .getByRole('switch', { name: /^Use Hetzner/ })
+    .first()
+    .click();
+  await expect(page.getByText(/^Ready · \d+ in pool$/)).toBeVisible();
+  await screenshotNearHeading(page, ACCOUNTS_HEADINGS[scope], `${screenshotName}-accounts`);
+  await screenshotNearHeading(page, 'Available machines', screenshotName);
+  await screenshotMachineRows(page, `${screenshotName}-rows`);
+
+  await visibleButton(page, 'Save changes').click();
+  await expect(page.getByRole('button', { name: 'Save changes' })).toHaveCount(0);
+  await expect(
+    page.getByText('cpx62-catalog-only-live-api-extra').filter({ visible: true }).first()
+  ).toBeVisible();
+  await assertNoOverflow(page);
 }
 
 test.describe('Default capacity pool scope surfaces', () => {
   // Each scope exercises filters, membership edits, persistence, and multiple
   // screenshots; the shared single-screen timeout is too short for this flow.
   test.setTimeout(120_000);
+
+  for (const scope of ['project', 'user', 'installation'] as const) {
+    for (const theme of ['dark', 'light'] as const) {
+      test(`${scope} failed refresh keeps the stressed ready pool usable in ${theme} theme`, async ({
+        page,
+      }) => {
+        await page.addInitScript((value) => localStorage.setItem('sam-theme', value), theme);
+        if (scope === 'project') await setupProjectPoolMocks(page);
+        else if (scope === 'user') await setupUserPoolMocks(page);
+        else await setupInstallationPoolMocks(page);
+        let refreshCalls = 0;
+        const responseBody = defaultsResponse(scope);
+        const selected = responseBody.effective as typeof responseBody.effective & {
+          diagnostics: string[];
+        };
+        selected.diagnostics = [
+          'catalog-refresh-failed',
+          '<script>unsafe provider diagnostic</script>',
+        ];
+        const endpoint =
+          scope === 'project'
+            ? `/api/projects/${MOCK_PROJECT.id}/capacity-pools/defaults`
+            : scope === 'installation'
+              ? '/api/admin/capacity-pools/defaults'
+              : '/api/capacity-pools/defaults';
+        await page.route(`**${endpoint}**`, (route) => {
+          if (route.request().method() === 'POST') {
+            refreshCalls++;
+            selected.diagnostics = [];
+          }
+          return jsonResponse(route, 200, responseBody);
+        });
+        const path =
+          scope === 'project'
+            ? `/projects/${MOCK_PROJECT.id}/settings/infrastructure`
+            : scope === 'installation'
+              ? '/admin/infrastructure'
+              : '/settings/infrastructure';
+        await page.goto(path);
+        await expectStressedDefaultPool(page, scope);
+        await expect(page.locator('html')).toHaveAttribute(
+          'data-ui-theme',
+          theme === 'dark' ? 'sam' : 'sam-light'
+        );
+        const panel = page.getByRole('region', { name: POOL_HEADINGS[scope], exact: true });
+        const notice = panel.getByRole('alert');
+        await expect(notice).toHaveText(
+          'Machine list refresh failed. Check the connected cloud accounts, then select Refresh to retry.'
+        );
+        await expect(page.getByText(/unsafe provider diagnostic/)).toHaveCount(0);
+        const refresh = panel.getByRole('button', { name: 'Refresh machine list' });
+        await expect(refresh).toHaveCount(1);
+        await expect(refresh).toBeEnabled();
+        const account = panel.getByRole('switch', { name: /^Use .+ in this pool$/ }).first();
+        await expect(account).toBeEnabled();
+        await assertNoClippedOverflow(page);
+        // Align the actual changed panel at the top of its scroll pane. Leaving an already
+        // visible heading near the viewport bottom can crop the retained-ready status.
+        await panel
+          .getByRole('heading', { name: POOL_HEADINGS[scope], exact: true })
+          .evaluate((heading) => heading.scrollIntoView({ block: 'start' }));
+        await screenshotNearHeading(
+          page,
+          POOL_HEADINGS[scope],
+          `catalog-refresh-failed-${scope}-${theme}`
+        );
+        await refresh.click();
+        await expect(notice).toHaveCount(0);
+        expect(refreshCalls).toBe(1);
+        await expect(account).toBeEnabled();
+        await expect(panel.getByText(`Ready · ${pickedRowCount(scope)} in pool`)).toBeVisible();
+        await assertNoOverflow(page);
+      });
+    }
+  }
 
   test('project settings surface renders stressed project default pool without overflow', async ({
     page,
@@ -660,19 +721,14 @@ test.describe('Default capacity pool scope surfaces', () => {
     await page.goto(`/projects/${MOCK_PROJECT.id}/settings/infrastructure`);
 
     const suffix = getProjectSuffix(testInfo.project.name);
-    await expectStressedDefaultPool(page, 'Project Infrastructure Compute Pool', 'project');
+    await expectStressedDefaultPool(page, 'project');
     await screenshotDefaultPoolScope(
       page,
-      'Project Infrastructure Compute Pool',
+      POOL_HEADINGS.project,
       'default-capacity-pools-project',
       suffix
     );
-    await removeAshHilCandidates(
-      page,
-      'Edit project default',
-      `default-capacity-pools-project-edit-${suffix}`,
-      'project'
-    );
+    await editStressedPool(page, 'project', `default-capacity-pools-project-edit-${suffix}`);
   });
 
   test('user settings surface renders stressed user default pool without overflow', async ({
@@ -682,18 +738,188 @@ test.describe('Default capacity pool scope surfaces', () => {
     await page.goto('/settings/infrastructure');
 
     const suffix = getProjectSuffix(testInfo.project.name);
-    await expectStressedDefaultPool(page, 'Your Infrastructure Compute Pool', 'user');
+    await expectStressedDefaultPool(page, 'user');
     await screenshotDefaultPoolScope(
       page,
-      'Your Infrastructure Compute Pool',
+      POOL_HEADINGS.user,
       'default-capacity-pools-user',
       suffix
     );
-    await removeAshHilCandidates(
+    await editStressedPool(page, 'user', `default-capacity-pools-user-edit-${suffix}`);
+  });
+
+  for (const scenario of [
+    {
+      name: 'installation default exceeds every machine',
+      minVcpu: 8,
+      minMemoryGb: 16,
+      unavailable: false,
+      disabledSource: false,
+    },
+    {
+      name: 'unavailable fitting machine',
+      minVcpu: 2,
+      minMemoryGb: 4,
+      unavailable: true,
+      disabledSource: false,
+    },
+    {
+      name: 'disabled fitting source',
+      minVcpu: 2,
+      minMemoryGb: 4,
+      unavailable: false,
+      disabledSource: true,
+    },
+  ]) {
+    test(`personal shared pool warns: ${scenario.name}`, async ({ page }, testInfo) => {
+      await setupCommonMocks(page, user, 'installation');
+      // A live undersized candidate plus a fitting active candidate absent from the latest catalog.
+      const body = {
+        ...defaultsResponse('installation'),
+        placementSettings: {
+          version: 1,
+          sourceGeneration: 7,
+          legacyWorkloadAdapterVersion: 1,
+          selectionWeights: { priority: 1, price: 1, fit: 1, capacity: 1, candidateOrder: 1 },
+          rolloutCohortPercent: 100,
+          source: {
+            legacyWorkloadMapping: 'default',
+            platformDefaults: 'persisted',
+            selection: 'default',
+          },
+          resourceDefaults: {
+            legacyWorkloadMapping: {},
+            platformDefaults: {
+              minVcpu: scenario.minVcpu,
+              minMemoryGb: scenario.minMemoryGb,
+              minDiskGb: 40,
+              exclusiveNode: false,
+            },
+          },
+          hostMemoryReserveMb: 1024,
+        },
+      };
+      if (scenario.unavailable || scenario.disabledSource) {
+        body.effective.candidates = body.effective.candidates
+          .slice(0, 2)
+          .map((candidate, index) => ({
+            ...candidate,
+            status: 'active',
+            providerInstanceType: index === 0 ? 'cx23' : 'cx33',
+            providerInstanceVcpuCount: index === 0 ? 2 : 4,
+            providerInstanceMemoryMb: index === 0 ? 4096 : 8192,
+            providerInstanceDiskGb: 80,
+            catalogAvailability:
+              scenario.unavailable && index === 1 ? 'last-known-unavailable' : 'available',
+            capacitySourceId:
+              scenario.disabledSource && index === 1
+                ? 'disabled-fitting-source'
+                : candidate.capacitySourceId,
+            providerInstanceCatalogSource: 'api',
+          }));
+      }
+      if (scenario.disabledSource) {
+        body.effective.sources.push({
+          ...body.effective.sources[0]!,
+          id: 'disabled-fitting-source',
+          status: 'disabled',
+        });
+      }
+      await page.route('**/api/capacity-pools/defaults*', (route) =>
+        jsonResponse(route, 200, body)
+      );
+      await page.goto('/settings/infrastructure');
+
+      const warning = page.getByText(/No allowed machine can run a default workspace/);
+      await expect(warning).toBeVisible();
+      await expect(warning).toContainText(
+        `It needs ${scenario.minVcpu} vCPU, ${scenario.minMemoryGb} GB of memory and 40 GB of disk`
+      );
+      await expect(warning).toContainText(
+        `at least ${scenario.minVcpu} vCPU, ${scenario.minMemoryGb + 1} GB of memory and 40 GB of disk`
+      );
+      await expect(page.getByText(/Your work uses the shared compute pool/)).toBeVisible();
+      await assertNoOverflow(page);
+      await screenshotNearHeading(
+        page,
+        POOL_HEADINGS.user,
+        `default-capacity-pools-${scenario.name.replaceAll(' ', '-')}-fit-warning-${getProjectSuffix(testInfo.project.name)}`,
+        { outputDir: '../../.tmp/l15/unavailable-fit-screenshots' }
+      );
+      await warning.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: testInfo.outputPath('unavailable-fit-warning.png') });
+    });
+  }
+
+  test('ordinary user on the shared pool sees the fit warning from its safe summary', async ({
+    page,
+  }, testInfo) => {
+    await setupCommonMocks(page, user, 'user');
+    // An ordinary user gets no installation metadata: only the safe summary's machine sizes.
+    const body = {
+      ...defaultsResponse('user'),
+      effective: null,
+      effectiveScope: null,
+      defaults: defaultsResponse('user').defaults.map((item) => ({ ...item, summary: null })),
+      effectiveSummary: {
+        scope: 'installation',
+        state: 'configured-ready',
+        strategy: 'balanced',
+        exhaustionPolicy: 'queue',
+        availableCandidateCount: 2,
+        nativeOfferings: [
+          {
+            provider: 'hetzner',
+            location: 'fsn1',
+            providerInstanceType: 'cx23',
+            displayName: 'cx23',
+            vcpu: 2,
+            memoryMb: 4096,
+            diskGb: 40,
+            price: '€3.99/mo',
+          },
+          {
+            provider: 'hetzner',
+            location: `region-${LONG_MARKER}`,
+            providerInstanceType: EXPENSIVE_HETZNER_GPU_SKU,
+            displayName: 'gpu',
+            vcpu: 4,
+            memoryMb: 4096,
+            diskGb: 40,
+            price: null,
+          },
+        ],
+      },
+      placementSettings: {
+        version: 1,
+        sourceGeneration: 7,
+        legacyWorkloadAdapterVersion: 1,
+        selectionWeights: { priority: 1, price: 1, fit: 1, capacity: 1, candidateOrder: 1 },
+        rolloutCohortPercent: 100,
+        source: {
+          legacyWorkloadMapping: 'default',
+          platformDefaults: 'default',
+          selection: 'default',
+        },
+        resourceDefaults: {
+          legacyWorkloadMapping: {},
+          platformDefaults: { minVcpu: 2, minMemoryGb: 4, minDiskGb: 15, exclusiveNode: false },
+        },
+        hostMemoryReserveMb: 1024,
+      },
+    };
+    await page.route('**/api/capacity-pools/defaults*', (route) => jsonResponse(route, 200, body));
+    await page.goto('/settings/infrastructure');
+
+    await expect(page.getByText("You're using shared machines")).toBeVisible();
+    await expect(page.getByText(/No allowed machine can run a default workspace/)).toContainText(
+      'at least 2 vCPU, 5 GB of memory and 15 GB of disk'
+    );
+    await assertNoOverflow(page);
+    await page.getByText(/No allowed machine can run a default workspace/).scrollIntoViewIfNeeded();
+    await screenshot(
       page,
-      'Edit user default',
-      `default-capacity-pools-user-edit-${suffix}`,
-      'user'
+      `default-capacity-pools-user-shared-fit-warning-${getProjectSuffix(testInfo.project.name)}`
     );
   });
 
@@ -704,22 +930,17 @@ test.describe('Default capacity pool scope surfaces', () => {
     await page.goto('/admin/infrastructure');
 
     const suffix = getProjectSuffix(testInfo.project.name);
-    await expectStressedDefaultPool(
-      page,
-      'Installation Infrastructure Compute Pool',
-      'installation'
-    );
+    await expectStressedDefaultPool(page, 'installation');
     await screenshotDefaultPoolScope(
       page,
-      'Installation Infrastructure Compute Pool',
+      POOL_HEADINGS.installation,
       'default-capacity-pools-installation',
       suffix
     );
-    await removeAshHilCandidates(
+    await editStressedPool(
       page,
-      'Edit installation default',
-      `default-capacity-pools-installation-edit-${suffix}`,
-      'installation'
+      'installation',
+      `default-capacity-pools-installation-edit-${suffix}`
     );
   });
 });

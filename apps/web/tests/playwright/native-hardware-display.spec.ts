@@ -18,7 +18,7 @@ test.afterEach(async ({ page }, testInfo) => {
 });
 
 const surfaces = [
-  'node-card',
+  'node-pane',
   'node-detail',
   'workspace-card',
   'workspace-sidebar',
@@ -137,6 +137,7 @@ for (const surface of surfaces) {
             dailyUsage: { inputTokens: 0, outputTokens: 0 },
             effectiveLimits: { dailyInputTokenLimit: 500000, dailyOutputTokenLimit: 200000 },
             monthCostUsd: 0,
+            monthlyCostCap: { available: true, ceilingUsd: null, effectiveCapUsd: null },
             utilization: { dailyInputPercent: 0, dailyOutputPercent: 0, monthlyCostPercent: null },
             exceeded: false,
           };
@@ -158,6 +159,8 @@ for (const surface of surfaces) {
       } else if ((surface === 'usage' || surface === 'admin-usage') && scenario === 'empty') {
         await expect(page.getByText(/No (active nodes|nodes this period)/i)).toBeVisible();
       } else {
+        // The Nodes page keeps the full hardware breakdown under "Advanced".
+        if (surface === 'node-pane') await page.getByText('Advanced', { exact: true }).click();
         await expect(page.getByLabel('Hardware details').first()).toBeVisible();
         await expect(page.getByLabel('Hardware details').first()).toHaveCSS('display', 'grid');
         if (scenario === 'legacy')

@@ -37,7 +37,10 @@ import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireProjectCapability } from '../../middleware/project-auth';
+import {
+  OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY,
+  requireProjectCapability,
+} from '../../middleware/project-auth';
 import { rateLimitCredentialUpdate } from '../../middleware/rate-limit';
 import { CreateCredentialSchema, jsonValidator, SaveAgentCredentialSchema } from '../../schemas';
 import { saveAgentCredentialForUser } from '../../services/agent-credential-save';
@@ -49,6 +52,7 @@ import {
 } from '../../services/composable-credentials/compute-sync';
 import { decrypt, encrypt } from '../../services/encryption';
 import { getTimeoutMs } from '../../services/fetch-timeout';
+import { deleteGcpApiHealthSafely } from '../../services/gcp-api-health';
 import { serializeCredentialToken } from '../../services/provider-credentials';
 import {
   CredentialValidator,
@@ -399,7 +403,7 @@ projectCredentialsRoutes.delete('/:id/cloud-credentials/:provider', async (c) =>
   }
 
   const providerName = provider as CredentialProvider;
-  await db
+  const deleted = await db
     .delete(schema.credentials)
     .where(
       and(
@@ -417,6 +421,9 @@ projectCredentialsRoutes.delete('/:id/cloud-credentials/:provider', async (c) =>
     provider: providerName,
   });
   await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'project', userId, projectId });
+  if (providerName === 'gcp') {
+    for (const row of deleted) await deleteGcpApiHealthSafely(c.env, row.id);
+  }
 
   return c.json({ success: true });
 });
@@ -436,7 +443,7 @@ projectCredentialsRoutes.put(
     const projectId = c.req.param('id');
     const db = drizzle(c.env.DATABASE, { schema });
 
-    await requireProjectCapability(db, projectId, userId, 'secret:write');
+    await requireProjectCapability(db, projectId, userId, OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY);
 
     const body = c.req.valid('json');
     const credential = body.credential;
@@ -507,7 +514,7 @@ projectCredentialsRoutes.delete('/:id/credentials/:agentType/:credentialKind', a
   const credentialKind = c.req.param('credentialKind') as CredentialKind;
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireProjectCapability(db, projectId, userId, 'secret:write');
+  await requireProjectCapability(db, projectId, userId, OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY);
 
   if (!isValidAgentType(agentType)) {
     throw errors.badRequest('Invalid agent type');

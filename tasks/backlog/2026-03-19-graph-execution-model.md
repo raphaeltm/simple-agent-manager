@@ -1,5 +1,14 @@
 # Graph-Based Task Execution Model
 
+> **Reconciliation 2026-10-26:** Graph visualization shipped for workflow runs only. #2404
+> (`2585626df`) added agent-submitted, validated DAG workflow runs on the mission orchestrator
+> (`start_workflow_run`), and #2405 (`6d882363c`) draws them as a graph
+> (`apps/web/src/pages/automation/workflows/run-graph.tsx`); missions built with `dispatch_task` and
+> `add_dependency` still have no graph view. Still open: no plan-approval step, and the
+> `MissionBudgetConfig` fields beyond `maxActiveTasks` are still unreferenced in `apps/api/src`
+> (#2404 added no budget behavior). The `scheduling.ts` pointers below moved by +20 (e.g.
+> `maxActiveTasks` is now `:349-357`).
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** the GraphRunner design below is superseded by the shipped Missions and

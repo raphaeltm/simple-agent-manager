@@ -54,8 +54,30 @@ export const DEFAULT_GCP_IMAGE_FAMILY = 'ubuntu-2404-lts-amd64';
 /** Default GCP image project. Override via GCP_IMAGE_PROJECT env var. */
 export const DEFAULT_GCP_IMAGE_PROJECT = 'ubuntu-os-cloud';
 
-/** Default GCP disk size in GB. Override via GCP_DISK_SIZE_GB env var. */
-export const DEFAULT_GCP_DISK_SIZE_GB = 50;
+/**
+ * GCP boot disk policy defaults: max(minGb, gbPerVcpu x vCPUs), bounded by the floor and max.
+ * Admin-editable as `gcpCatalog.bootDiskGbPerVcpu` and `gcpCatalog.bootDiskMinGb`; applied by
+ * `gcpBootDiskSizeGb()` in packages/providers/src/gcp-boot-disk.ts.
+ */
+export const DEFAULT_GCP_BOOT_DISK_GB_PER_VCPU = 20;
+export const DEFAULT_GCP_BOOT_DISK_MIN_GB = 50;
+/** Smallest boot disk the Ubuntu images SAM boots accept. */
+export const GCP_BOOT_DISK_FLOOR_GB = 10;
+/** Persistent Disk allows far more for one disk; this bounds a typo in the admin setting. */
+export const GCP_BOOT_DISK_MAX_GB = 4_096;
+
+/**
+ * Infomaniak boot volume size. Infomaniak flavors carry a small local root disk (20 GB on the
+ * default flavors), which devcontainer builds fill, so SAM boots Infomaniak VMs from a Cinder
+ * volume of this size instead. Admin-editable as `infomaniak.bootVolumeGb`; applied by
+ * `InfomaniakProvider` (packages/providers/src/infomaniak-boot-volume.ts) to the catalog and to
+ * new VMs. Running VMs keep the disk they were created with.
+ */
+export const DEFAULT_INFOMANIAK_BOOT_VOLUME_GB = 80;
+/** Smallest boot volume SAM creates: the size of the flavor root disk it replaces. */
+export const INFOMANIAK_BOOT_VOLUME_MIN_GB = 20;
+/** Bounds a typo in the admin setting; Cinder allows larger volumes. */
+export const INFOMANIAK_BOOT_VOLUME_MAX_GB = 4_096;
 
 /** Default GCP WIF pool ID. Override via GCP_WIF_POOL_ID env var. */
 export const DEFAULT_GCP_WIF_POOL_ID = 'sam-pool';
@@ -86,3 +108,9 @@ export const DEFAULT_GCP_STS_SCOPE = 'https://www.googleapis.com/auth/cloud-plat
 
 /** Default scopes for GCP SA impersonation (comma-separated). Override via GCP_SA_IMPERSONATION_SCOPES env var. */
 export const DEFAULT_GCP_SA_IMPERSONATION_SCOPES = 'https://www.googleapis.com/auth/compute';
+
+/**
+ * The only scope requested for reading Google's public Compute Engine price list (Cloud Billing
+ * Catalog). Minted for that call alone, so provisioning tokens never carry a billing scope.
+ */
+export const GCP_PRICE_CATALOG_SCOPE = 'https://www.googleapis.com/auth/cloud-billing.readonly';

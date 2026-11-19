@@ -1,5 +1,12 @@
 # Split Oversized Files (Pre-Existing Tech Debt)
 
+> **Reconciliation 2026-10-26:** No file was split. Line counts now: `bootstrap.go` 3,306,
+> `session_host.go` 810 (back over 800, mostly #2332 `faaf861ba`, so it stays in `EXEMPT_FILES`),
+> vm-agent `server/server.go` 1,697 (#2363 `bde4f9821` removed the platform publication code),
+> `gateway.go` 1,443, vm-agent `server/workspaces.go` 2,259, `apps/api/src/index.ts` 986,
+> `stuck-tasks.ts` 1,762 and `sync-wrangler-config.ts` 1,358; `MultiTerminal.tsx` (825) and
+> `useAcpSession.ts` (831) are unchanged.
+
 > **Reconciliation 2026-09-30:** still open, and most files grew. Line counts now (when filed):
 > `bootstrap.go` 3,297 (2,236), `session_host.go` 744 (2,207), vm-agent `server/server.go` 2,003
 > (1,287), `gateway.go` 1,408 (1,081), vm-agent `server/workspaces.go` 2,201 (1,067),
@@ -31,3 +38,7 @@
 - [ ] All imports still resolve (barrel re-exports where needed)
 - [ ] All tests pass after splitting
 - [ ] File removed from allowlist in `scripts/quality/check-file-sizes.ts`
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. `index.ts` is done. Still open: `bootstrap.go` 3,474, vm-agent `server.go` 1,681, `gateway.go` 1,395, `workspaces.go` 2,275, `stuck-tasks.ts` 1,794, `sync-wrangler-config.ts` 1,403, `MultiTerminal.tsx` 825, `useAcpSession.ts` 831. `session_host.go` (794) is still exempt. Evidence: #2714; `apps/api/src/index.ts` 986→548 lines and removed from `EXEMPT_FILES` (`scripts/quality/check-file-sizes.ts:33-45`).

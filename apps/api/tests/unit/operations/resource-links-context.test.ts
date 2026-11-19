@@ -1,0 +1,406 @@
+import Database from 'better-sqlite3';
+import { describe, expect, it, vi } from 'vitest';
+
+const snapshot = vi.hoisted(() => vi.fn());
+const prStates = vi.hoisted(() => vi.fn().mockResolvedValue({}));
+vi.mock('../../../src/services/project-data', () => ({ getResourceLinkSnapshot: snapshot }));
+vi.mock('@simple-agent-manager/operations/internal/pull-request-core', async (importActual) => ({
+  ...(await importActual<
+    typeof import('@simple-agent-manager/operations/internal/pull-request-core')
+  >()),
+  getPullRequestStates: prStates,
+}));
+vi.mock('../../../src/services/admin-settings', () => ({
+  resolveAdminSettingDetailsMany: vi
+    .fn()
+    .mockResolvedValue([
+      { value: 300000 },
+      { value: 100 },
+      { value: 100 },
+      { value: 100000 },
+      { value: 1 },
+      { value: 500 },
+    ]),
+}));
+
+import { getIdeaContext, getSessionContext } from '@simple-agent-manager/operations';
+import { getLinkSnapshot, recordLink } from '@simple-agent-manager/project-data/internal/do/links';
+import { MIGRATIONS } from '@simple-agent-manager/project-data/internal/do/migrations';
+
+import type { Env } from '../../../src/env';
+import { operationDeps } from '../../../src/operation-ports';
+import { resolveAdminSettingDetailsMany } from '../../../src/services/admin-settings';
+import { createSqlStorage } from '../durable-objects/sql-storage-test-utils';
+
+function d1Database(db: Database.Database): D1Database {
+  const prepare = (query: string) => ({
+    bind: (...args: unknown[]) => ({
+      query,
+      args,
+      first: async () => db.prepare(query).get(...args) ?? null,
+    }),
+  });
+  const client = {
+    prepare,
+    batch: async (statements: Array<{ query: string; args: unknown[] }>) =>
+      statements.map((s) => {
+        if (s.args.length > 100) throw new Error('D1 bound-parameter limit exceeded');
+        return { success: true, results: db.prepare(s.query).all(...s.args) };
+      }),
+  };
+  return client as unknown as D1Database;
+}
+
+describe('idea linked context', () => {
+  it('rejects an ordinary task as an idea context', async () => {
+    const db = new Database(':memory:');
+    try {
+      db.exec(`CREATE TABLE tasks(id TEXT PRIMARY KEY,project_id TEXT,title TEXT,status TEXT,
+          is_idea INTEGER NOT NULL DEFAULT 0,
+          chat_session_id TEXT,output_pr_url TEXT);
+        CREATE TABLE project_files(id TEXT PRIMARY KEY,project_id TEXT,filename TEXT,directory TEXT);
+        CREATE TABLE task_pull_request_associations(task_id TEXT,project_id TEXT,pr_url TEXT);
+        CREATE TABLE projects(id TEXT PRIMARY KEY,repository TEXT);
+        INSERT INTO tasks VALUES ('ordinary','p','Ordinary task','ready',0,NULL,NULL);
+        INSERT INTO projects VALUES ('p','o/r');`);
+      snapshot.mockResolvedValueOnce({
+        exists: true,
+        links: [],
+        sessions: [],
+        totals: { sessions: 0, strongSessions: 0, ideas: 0, files: 0, prs: 0 },
+      });
+      await expect(
+        getIdeaContext(operationDeps({ DATABASE: d1Database(db) } as Env), 'p', 'ordinary')
+      ).rejects.toThrow('Resource');
+    } finally {
+      db.close();
+    }
+  });
+  /**
+   * The attack case only `is_idea = 1` can refuse, with its owner control beside it.
+   *
+   * `POST /api/projects/:projectId/tasks` creates every ordinary task in `draft`, so the old
+   * `status = 'draft'` definition read an undispatched task as an idea — listing another
+   * member's unstarted work and, through the status route, letting it be marked done.
+   */
+  it('rejects an undispatched ordinary task as an idea context, and still reads a real idea', async () => {
+    const db = new Database(':memory:');
+    try {
+      db.exec(`CREATE TABLE tasks(id TEXT PRIMARY KEY,project_id TEXT,title TEXT,status TEXT,
+          is_idea INTEGER NOT NULL DEFAULT 0,
+          chat_session_id TEXT,output_pr_url TEXT);
+        CREATE TABLE project_files(id TEXT PRIMARY KEY,project_id TEXT,filename TEXT,directory TEXT);
+        CREATE TABLE task_pull_request_associations(task_id TEXT,project_id TEXT,pr_url TEXT);
+        CREATE TABLE projects(id TEXT PRIMARY KEY,repository TEXT);
+        INSERT INTO tasks VALUES
+          ('ordinary-draft','p','Undispatched task','draft',0,NULL,NULL),
+          ('real-idea','p','A real idea','draft',1,NULL,NULL),
+          ('done-idea','p','A finished idea','completed',1,NULL,NULL);
+        INSERT INTO projects VALUES ('p','o/r');`);
+      const emptySnapshot = {
+        exists: true,
+        links: [],
+        sessions: [],
+        totals: { sessions: 0, strongSessions: 0, ideas: 0, files: 0, prs: 0 },
+      };
+      snapshot.mockResolvedValue(emptySnapshot);
+
+      await expect(
+        getIdeaContext(operationDeps({ DATABASE: d1Database(db) } as Env), 'p', 'ordinary-draft')
+      ).rejects.toThrow('Resource');
+      // Owner controls: a draft idea and a FINISHED idea both still read. The finished one is
+      // `completed`, which is otherwise an ordinary done task, so only the flag identifies it.
+      await expect(
+        getIdeaContext(operationDeps({ DATABASE: d1Database(db) } as Env), 'p', 'real-idea')
+      ).resolves.toMatchObject({ sessions: { items: [] } });
+      await expect(
+        getIdeaContext(operationDeps({ DATABASE: d1Database(db) } as Env), 'p', 'done-idea')
+      ).resolves.toMatchObject({ sessions: { items: [] } });
+    } finally {
+      snapshot.mockReset();
+      db.close();
+    }
+  });
+
+  /**
+   * A chat's linked context must keep showing an idea after someone marks it done.
+   *
+   * Under the old definition "done" removed the row from every idea read, so the chat that
+   * did the work lost its link to the thing it was working on. The flag is what brings it
+   * back, and an ordinary completed task in the same project is the control.
+   */
+  it('shows a completed idea in a chat’s linked context, and never an ordinary completed task', async () => {
+    const db = new Database(':memory:');
+    try {
+      const sql = createSqlStorage(db);
+      db.exec(`CREATE TABLE chat_sessions(id TEXT PRIMARY KEY,topic TEXT,status TEXT,
+          updated_at INTEGER,task_id TEXT);
+        CREATE TABLE chat_session_ideas(session_id TEXT,task_id TEXT,context TEXT,created_at INTEGER);
+        CREATE TABLE tasks(id TEXT PRIMARY KEY,project_id TEXT,title TEXT,status TEXT,
+          is_idea INTEGER NOT NULL DEFAULT 0,
+          chat_session_id TEXT,output_pr_url TEXT);
+        CREATE TABLE project_files(id TEXT PRIMARY KEY,project_id TEXT,filename TEXT,directory TEXT);
+        CREATE TABLE task_pull_request_associations(task_id TEXT,project_id TEXT,pr_url TEXT);
+        CREATE TABLE projects(id TEXT PRIMARY KEY,repository TEXT);
+        INSERT INTO chat_sessions VALUES ('s1','Shipping it','active',100,'work-1');
+        INSERT INTO tasks VALUES
+          ('shipped-idea','p','Retry webhooks','completed',1,NULL,NULL),
+          ('work-1','p','The work','completed',0,'s1',NULL);
+        INSERT INTO projects VALUES ('p','o/r');`);
+      MIGRATIONS.find((m) => m.name === '067-resource-links')?.run(sql);
+      const limits = {
+        touchIntervalMs: 0,
+        weakPerTarget: 100,
+        weakCleanupBatchSize: 100,
+        projectCap: 1000,
+        storageHighWaterBytes: 1000000,
+      };
+      for (const targetId of ['shipped-idea', 'work-1']) {
+        recordLink(
+          sql,
+          {
+            sourceKind: 'session',
+            sourceId: 's1',
+            targetKind: 'idea',
+            targetId,
+            relation: 'works_on',
+            origin: 'explicit',
+            context: null,
+          },
+          limits,
+          0,
+          10
+        );
+      }
+      snapshot.mockImplementation(
+        async (_env: Env, _project: string, kind: 'idea' | 'session', id: string, cap: number) =>
+          getLinkSnapshot(sql, kind, id, cap)
+      );
+
+      const context = await getSessionContext(
+        operationDeps({ DATABASE: d1Database(db) } as Env),
+        'p',
+        's1'
+      );
+      expect(context.ideas.items.map((idea) => idea.ideaId)).toEqual(['shipped-idea']);
+      expect(context.ideas.items[0]?.status).toBe('completed');
+    } finally {
+      snapshot.mockReset();
+      db.close();
+    }
+  });
+
+  it('resolves more than 100 linked files without exceeding D1 parameter limits', async () => {
+    const db = new Database(':memory:');
+    try {
+      db.exec(`CREATE TABLE tasks(id TEXT PRIMARY KEY,project_id TEXT,title TEXT,status TEXT,
+          is_idea INTEGER NOT NULL DEFAULT 0,
+          chat_session_id TEXT,output_pr_url TEXT);
+        CREATE TABLE project_files(id TEXT PRIMARY KEY,project_id TEXT,filename TEXT,directory TEXT);
+        CREATE TABLE task_pull_request_associations(task_id TEXT,project_id TEXT,pr_url TEXT);
+        CREATE TABLE projects(id TEXT PRIMARY KEY,repository TEXT);
+        INSERT INTO tasks VALUES ('idea1','p','Feature','draft',1,NULL,NULL);
+        INSERT INTO projects VALUES ('p','o/r');`);
+      const ids = Array.from({ length: 120 }, (_, index) => `file-${index}`);
+      const insert = db.prepare("INSERT INTO project_files VALUES (? ,'p',?,'/')");
+      for (const id of ids) insert.run(id, `${id}.md`);
+      snapshot.mockResolvedValueOnce({
+        exists: true,
+        links: ids.map((id, index) => ({
+          sourceKind: 'idea',
+          sourceId: 'idea1',
+          targetKind: 'file',
+          targetId: id,
+          relation: 'linked',
+          origin: 'explicit',
+          context: null,
+          firstAt: index,
+          lastAt: index,
+          hitCount: 1,
+        })),
+        sessions: [],
+        totals: { sessions: 0, strongSessions: 0, ideas: 0, files: 120, prs: 0 },
+      });
+      vi.mocked(resolveAdminSettingDetailsMany).mockResolvedValueOnce([
+        { value: 300000 },
+        { value: 100 },
+        { value: 100 },
+        { value: 100000 },
+        { value: 150 },
+        { value: 500 },
+      ] as never);
+      const context = await getIdeaContext(
+        operationDeps({ DATABASE: d1Database(db) } as Env),
+        'p',
+        'idea1'
+      );
+      expect(context.files.items).toHaveLength(120);
+      expect(context.files.total).toBe(120);
+    } finally {
+      db.close();
+    }
+  });
+  it('includes strong session assets, excludes read-only session assets, and discloses caps', async () => {
+    const db = new Database(':memory:');
+    try {
+      const sql = createSqlStorage(db);
+      db.exec(`CREATE TABLE chat_sessions(id TEXT PRIMARY KEY,topic TEXT,status TEXT,
+        updated_at INTEGER,task_id TEXT);
+        CREATE TABLE chat_session_ideas(session_id TEXT,task_id TEXT,context TEXT,created_at INTEGER);
+        CREATE TABLE tasks(id TEXT PRIMARY KEY,project_id TEXT,title TEXT,status TEXT,
+          is_idea INTEGER NOT NULL DEFAULT 0,
+          chat_session_id TEXT,output_pr_url TEXT);
+        CREATE TABLE project_files(id TEXT PRIMARY KEY,project_id TEXT,filename TEXT,directory TEXT);
+        CREATE TABLE task_pull_request_associations(task_id TEXT,project_id TEXT,pr_url TEXT);
+        CREATE TABLE projects(id TEXT PRIMARY KEY,repository TEXT);
+        INSERT INTO chat_sessions VALUES ('s1','Work','active',100,'t1'),
+          ('s2','Research','active',90,'t2');
+        INSERT INTO tasks VALUES
+          ('idea1','p','Feature','draft',1,NULL,NULL),('idea2','p','Related','draft',1,NULL,NULL),
+          ('ordinary','p','Ordinary task','ready',0,NULL,NULL),
+          -- Also a draft, and not an idea: the row only the is_idea flag can tell apart.
+          ('ordinary-draft','p','Undispatched task','draft',0,NULL,NULL),
+          ('t1','p','Task 1','in_progress',0,'s1','https://github.com/o/r/pull/1'),
+          ('t2','p','Task 2','in_progress',0,'s2','https://github.com/o/r/pull/2');
+        INSERT INTO project_files VALUES
+          ('f1','p','one.md','/'),('f2','p','two.md','/'),('f3','p','three.md','/');
+        INSERT INTO projects VALUES ('p','o/r');`);
+      db.exec(`INSERT INTO task_pull_request_associations VALUES
+        ('t1','p','https://github.com/O/R/pull/1/'),
+        ('t1','p','https://github.com/other/repo/pull/99');`);
+      MIGRATIONS.find((m) => m.name === '067-resource-links')?.run(sql);
+      const limits = {
+        touchIntervalMs: 0,
+        weakPerTarget: 100,
+        weakCleanupBatchSize: 100,
+        projectCap: 1000,
+        storageHighWaterBytes: 1000000,
+      };
+      const add = (
+        sourceKind: 'session' | 'idea',
+        sourceId: string,
+        targetKind: 'idea' | 'file',
+        targetId: string,
+        relation: 'works_on' | 'read' | 'uploaded' | 'linked' | 'related',
+        at: number
+      ) =>
+        recordLink(
+          sql,
+          {
+            sourceKind,
+            sourceId,
+            targetKind,
+            targetId,
+            relation,
+            origin: 'explicit',
+            context: null,
+          },
+          limits,
+          0,
+          at
+        );
+      add('session', 's1', 'idea', 'idea1', 'works_on', 10);
+      add('session', 's2', 'idea', 'idea1', 'read', 9);
+      add('session', 's1', 'file', 'f1', 'uploaded', 8);
+      add('session', 's2', 'file', 'f2', 'uploaded', 7);
+      add('idea', 'idea1', 'file', 'f3', 'linked', 6);
+      add('idea', 'idea1', 'idea', 'idea2', 'related', 5);
+      // Simulate a pre-existing legacy row that labeled an ordinary task as an idea.
+      add('idea', 'idea1', 'idea', 'ordinary', 'related', 5);
+      recordLink(
+        sql,
+        {
+          sourceKind: 'idea',
+          sourceId: 'idea1',
+          targetKind: 'pr',
+          targetId: 'https://github.com/o/r/pull/1',
+          relation: 'linked',
+          origin: 'explicit',
+          context: null,
+        },
+        limits,
+        0,
+        4
+      );
+      snapshot.mockImplementation(
+        async (_env: Env, _project: string, kind: 'idea' | 'session', id: string, cap: number) =>
+          getLinkSnapshot(sql, kind, id, cap)
+      );
+      const prState = {
+        state: 'merged',
+        isDraft: false,
+        title: 'Merged pull request',
+        checksState: 'success',
+        mergedAt: '2026-10-24T00:00:00Z',
+        updatedAt: '2026-10-24T00:00:00Z',
+        stale: false,
+      };
+      prStates.mockResolvedValue({ 'https://github.com/o/r/pull/1': prState });
+      const context = await getIdeaContext(
+        operationDeps({ DATABASE: d1Database(db) } as Env),
+        'p',
+        'idea1'
+      );
+      expect(context.sessions.total).toBe(2);
+      expect(context.sessions.truncated).toBe(true);
+      expect(context.files.total).toBe(2);
+      expect(context.files.items.map((f) => f.fileId)).toEqual(['f1']);
+      expect(context.pullRequests.items.map((pr) => pr.number)).toEqual([1]);
+      expect(context.pullRequests.items[0]?.url).toBe('https://github.com/o/r/pull/1');
+      expect(context.pullRequests.items[0]?.state).toEqual(prState);
+      expect(prStates).toHaveBeenCalledWith(
+        expect.objectContaining({ env: expect.anything() }),
+        'p',
+        [expect.objectContaining({ url: 'https://github.com/o/r/pull/1' })]
+      );
+      const sessionContext = await getSessionContext(
+        operationDeps({ DATABASE: d1Database(db) } as Env),
+        'p',
+        's1'
+      );
+      expect(sessionContext.pullRequests.items[0]?.state).toEqual(prState);
+      prStates.mockRejectedValueOnce(new Error('D1 unavailable'));
+      const degraded = await getIdeaContext(
+        operationDeps({ DATABASE: d1Database(db) } as Env),
+        'p',
+        'idea1'
+      );
+      expect(degraded.pullRequests.items[0]?.state).toBeNull();
+      expect(context.pullRequests.total).toBe(1);
+      expect(context.pullRequests.totalIsLowerBound).toBe(false);
+      expect(context.relatedIdeas.items.map((i) => i.ideaId)).toEqual(['idea2']);
+      expect(context.relatedIdeas.total).toBe(1);
+      expect(context.relatedIdeas.totalIsLowerBound).toBe(true);
+      vi.mocked(resolveAdminSettingDetailsMany).mockResolvedValueOnce([
+        { value: 300000 },
+        { value: 100 },
+        { value: 100 },
+        { value: 100000 },
+        { value: 3 },
+        { value: 500 },
+      ] as never);
+      const allRelatedRows = await getIdeaContext(
+        operationDeps({ DATABASE: d1Database(db) } as Env),
+        'p',
+        'idea1'
+      );
+      expect(allRelatedRows.relatedIdeas.items.map((idea) => idea.ideaId)).toEqual(['idea2']);
+      expect(allRelatedRows.relatedIdeas.total).toBe(1);
+      expect(allRelatedRows.relatedIdeas.totalIsLowerBound).toBe(false);
+      sql.exec(`INSERT INTO chat_sessions VALUES ('s3','Older work','active',80,'t3')`);
+      db.exec(`INSERT INTO tasks VALUES
+        ('t3','p','Task 3','in_progress',0,'s3','https://github.com/o/r/pull/3')`);
+      add('session', 's3', 'idea', 'idea1', 'works_on', 1);
+      const incomplete = await getIdeaContext(
+        operationDeps({ DATABASE: d1Database(db) } as Env),
+        'p',
+        'idea1'
+      );
+      expect(incomplete.pullRequests.totalIsLowerBound).toBe(true);
+      expect(incomplete.pullRequests.truncated).toBe(true);
+      expect(incomplete.pullRequests.total).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+});

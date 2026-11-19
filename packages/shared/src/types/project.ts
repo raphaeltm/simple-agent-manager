@@ -1,9 +1,9 @@
 import type { AgentType } from '../agents';
 import type { ActivityEvent } from './activity';
 import type { AgentPermissionMode } from './agent-settings';
+import type { ProjectRuntimeEnvVarProvenance } from './runtime-secret-requests';
 import type { ChatSession } from './session';
 import type { TaskStatus } from './task';
-import type { CredentialProvider } from './user';
 import type { VMSize, WorkspaceProfile, WorkspaceResponse } from './workspace';
 
 // =============================================================================
@@ -48,8 +48,6 @@ export interface Project {
   defaultWorkspaceProfile?: WorkspaceProfile | null;
   /** Default devcontainer config name. null = auto-discover default. */
   defaultDevcontainerConfigName?: string | null;
-  defaultProvider?: CredentialProvider | null;
-  defaultLocation?: string | null;
   /** Per-agent-type model + permission mode overrides.
    *  Resolution chain: task explicit > agent profile > project.agentDefaults[agentType] > user agent_settings > platform default. */
   agentDefaults?: ProjectAgentDefaults | null;
@@ -132,8 +130,6 @@ export interface UpdateProjectRequest {
   defaultWorkspaceProfile?: WorkspaceProfile | null;
   /** Default devcontainer config name. null = reset to auto-discover. */
   defaultDevcontainerConfigName?: string | null;
-  defaultProvider?: CredentialProvider | null;
-  defaultLocation?: string | null;
   /** Per-agent-type model + permission mode overrides.
    *  null = clear all project-level agent defaults. */
   agentDefaults?: ProjectAgentDefaults | null;
@@ -151,7 +147,7 @@ export interface UpdateProjectRequest {
   maxTriggers?: number | null;
 }
 
-export interface ProjectRuntimeEnvVarResponse {
+export interface ProjectRuntimeEnvVarResponse extends Partial<ProjectRuntimeEnvVarProvenance> {
   key: string;
   value: string | null;
   isSecret: boolean;
@@ -201,10 +197,7 @@ export interface ListProjectsResponse {
  *  - `app-not-installed`: the GitHub App is no longer installed on the repo's owner.
  *  - `unsupported-url`: a discovered submodule URL could not be parsed as a GitHub repo. */
 export type ProjectRepositoryStatus =
-  | 'active'
-  | 'access-revoked'
-  | 'app-not-installed'
-  | 'unsupported-url';
+  'active' | 'access-revoked' | 'app-not-installed' | 'unsupported-url';
 
 /** An additional repository granted to a project's workspace tokens.
  *  The primary project repository is always included implicitly and is not
@@ -358,16 +351,10 @@ export interface ProjectOwnershipTransferResponse {
 
 export type ProjectMemberOffboardingPlanStatus = 'preview' | 'applied' | 'expired';
 export type ProjectMemberOffboardingResourceKind =
-  | 'trigger'
-  | 'task_tree'
-  | 'node'
-  | 'deployment_environment'
-  | 'project_attachment';
+  'trigger' | 'task_tree' | 'node' | 'deployment_environment' | 'project_attachment';
 export type ProjectMemberOffboardingCredentialSource = 'user' | 'project' | 'platform' | 'unknown';
 export type ProjectMemberOffboardingAction =
-  | 'reattach_to_project'
-  | 'break_and_flag'
-  | 'defer_removal';
+  'reattach_to_project' | 'break_and_flag' | 'defer_removal';
 export type ProjectMemberOffboardingResourceStatus = 'pending' | 'applied' | 'skipped';
 
 export interface ProjectMemberOffboardingResourcePreview {
@@ -398,6 +385,11 @@ export interface ProjectMemberOffboardingPreviewResponse {
     blockingTeardown: number;
   };
   resources: ProjectMemberOffboardingResourcePreview[];
+  /**
+   * The member's private account choices on this project's profiles. They need no
+   * decision and are deleted when the member is removed.
+   */
+  personalProfilePinCount: number;
 }
 
 export interface ProjectMemberOffboardingApplyActionSelection {
@@ -427,6 +419,8 @@ export interface ProjectMemberOffboardingApplyResponse {
   status: ProjectMemberStatus;
   appliedAt: string;
   resourceResults: ProjectMemberOffboardingResourceResult[];
+  /** Personal profile pins on this project's profiles deleted with the membership. */
+  removedProfilePinCount: number;
 }
 
 export type CredentialAttributionConsumerKind = 'agent' | 'compute';
@@ -493,11 +487,7 @@ export interface ProjectInvitePreviewResponse {
     repoProvider: RepoProvider;
   };
   membershipStatus:
-    | 'active-member'
-    | 'pending-request'
-    | 'approved-request'
-    | 'denied-request'
-    | 'can-request';
+    'active-member' | 'pending-request' | 'approved-request' | 'denied-request' | 'can-request';
   accessRequest: ProjectAccessRequestResponse | null;
 }
 

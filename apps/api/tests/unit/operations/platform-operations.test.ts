@@ -1,10 +1,6 @@
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import * as schema from '../../../src/db/schema';
-import type { Env } from '../../../src/env';
-import { OperationError, operationErrorHttpStatus } from '../../../src/operations/errors';
-import { getPlatformOperationLimits } from '../../../src/operations/limits';
+import type { Actor, OperationContext } from '@simple-agent-manager/operations';
+import { OperationError, operationErrorHttpStatus } from '@simple-agent-manager/operations';
+import { getPlatformOperationLimits } from '@simple-agent-manager/operations';
 import {
   samChatRead,
   samChatsSearch,
@@ -16,11 +12,17 @@ import {
   samProfilesList,
   samTaskGet,
   samTasksList,
-} from '../../../src/operations/platform-operations';
-import { operationInputJsonSchema, operations } from '../../../src/operations/registry';
-import type { Actor, OperationContext } from '../../../src/operations/types';
-import { runWorkspaceOperation } from '../../../src/operations/workspace-adapter';
+} from '@simple-agent-manager/operations';
+import { operationInputJsonSchema, operations } from '@simple-agent-manager/operations';
+import { UNTRUSTED_TEXT_GUIDANCE, untrustedTextBlock } from '@simple-agent-manager/operations';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
+import type { Env } from '../../../src/env';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { getMcpLimits } from '../../../src/routes/mcp/_helpers';
+import { runWorkspaceOperation } from '../../../src/routes/mcp/workspace-operation-adapter';
 import { handleGetPeerAgentOutput } from '../../../src/routes/mcp/workspace-tools-direct';
 import type { McpTokenData } from '../../../src/services/mcp-token';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -40,6 +42,19 @@ vi.mock('../../../src/services/project-data', async (importOriginal) => {
     searchKnowledgeObservations: vi.fn().mockResolvedValue([]),
   };
 });
+vi.mock('@simple-agent-manager/operations/internal/agent-linked-context', () => ({
+  getAgentLinkedContext: vi.fn().mockResolvedValue({
+    kind: 'idea',
+    id: 'idea-owner',
+    sessions: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+    files: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+    pullRequests: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+    relatedIdeas: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+    recentUpdates: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+    untrustedContent: true,
+    untrustedTextGuidance: 'mock guidance',
+  }),
+}));
 
 const projectId = 'project-owner';
 const otherProjectId = 'project-other';
@@ -66,7 +81,12 @@ describe('shared platform operation authorization on real SQLite', () => {
   let requestId = 0;
 
   function ctx(userId = ownerId, workspaceProjectId = projectId): OperationContext {
-    return { env, actor: actor(userId, workspaceProjectId), requestId: String(++requestId) };
+    return {
+      env,
+      ports: createOperationPorts(env),
+      actor: actor(userId, workspaceProjectId),
+      requestId: String(++requestId),
+    };
   }
 
   beforeEach(() => {
@@ -89,7 +109,7 @@ describe('shared platform operation authorization on real SQLite', () => {
     member.run(otherProjectId, ownerId, 'owner', 'active');
     sqlite
       .prepare(
-        'INSERT INTO tasks (id, project_id, user_id, title, description, status, priority, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO tasks (id, project_id, user_id, title, description, status, is_idea, priority, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)'
       )
       .run(
         'idea-owner',
@@ -104,7 +124,7 @@ describe('shared platform operation authorization on real SQLite', () => {
       );
     sqlite
       .prepare(
-        'INSERT INTO tasks (id, project_id, user_id, title, description, status, priority, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO tasks (id, project_id, user_id, title, description, status, is_idea, priority, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)'
       )
       .run(
         'idea-other',
@@ -203,12 +223,12 @@ describe('shared platform operation authorization on real SQLite', () => {
   });
 
   it('records an idea status change without inventing a reason', async () => {
-    await samIdeaUpdate.run(ctx(), { projectId, ideaId: 'idea-owner', status: 'ready' });
+    await samIdeaUpdate.run(ctx(), { projectId, ideaId: 'idea-owner', status: 'completed' });
     expect(
       sqlite
         .prepare('SELECT from_status, to_status, reason FROM task_status_events WHERE task_id = ?')
         .get('idea-owner')
-    ).toEqual({ from_status: 'draft', to_status: 'ready', reason: null });
+    ).toEqual({ from_status: 'draft', to_status: 'completed', reason: null });
   });
 
   it('rejects non-finite numeric input before reaching storage', async () => {
@@ -390,6 +410,9 @@ describe('shared platform operation authorization on real SQLite', () => {
                     },
                   ],
                   count: 1,
+                  // Workspace agents learn whether the page was complete (rule 65).
+                  hasMore: false,
+                  nextCursor: null,
                 },
                 null,
                 2
@@ -418,13 +441,49 @@ describe('shared platform operation authorization on real SQLite', () => {
               text: JSON.stringify(
                 {
                   ideaId: 'idea-owner',
-                  title: 'Owner idea',
-                  content: 'Content',
+                  title: untrustedTextBlock({
+                    kind: 'idea title',
+                    text: 'Owner idea',
+                    maxLength: 200,
+                  }).text,
+                  titleTruncated: false,
+                  content: untrustedTextBlock({ kind: 'idea', text: 'Content', maxLength: 65536 })
+                    .text,
+                  contentTruncated: false,
+                  contentOffset: 0,
+                  nextContentOffset: null,
                   contentLength: 7,
                   priority: 0,
                   status: 'draft',
                   createdAt: '2026-10-09',
                   updatedAt: '2026-10-09',
+                  related: {
+                    kind: 'idea',
+                    id: 'idea-owner',
+                    sessions: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+                    files: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+                    pullRequests: {
+                      items: [],
+                      total: 0,
+                      truncated: false,
+                      totalIsLowerBound: false,
+                    },
+                    relatedIdeas: {
+                      items: [],
+                      total: 0,
+                      truncated: false,
+                      totalIsLowerBound: false,
+                    },
+                    recentUpdates: {
+                      items: [],
+                      total: 0,
+                      truncated: false,
+                      totalIsLowerBound: false,
+                    },
+                    untrustedContent: true,
+                    untrustedTextGuidance: 'mock guidance',
+                  },
+                  untrustedTextGuidance: UNTRUSTED_TEXT_GUIDANCE,
                 },
                 null,
                 2
@@ -525,16 +584,19 @@ describe('operation registry contract', () => {
     expect(platform.taskDetailRecentMessageLimit).toBe(7);
     expect(platform.messageSearchLimit).toBe(11);
   });
-  it('exports eighteen stable operations and JSON Schema inputs', () => {
+  it('exports stable operations and JSON Schema inputs', () => {
     expect(operations.map((operation) => operation.name)).toEqual([
       'sam_task_get',
       'sam_tasks_list',
       'sam_chat_read',
+      'sam_chat_message_get',
       'sam_chats_search',
       'sam_ideas_search',
       'sam_idea_get',
+      'sam_linked_context_get',
       'sam_idea_create',
       'sam_idea_update',
+      'sam_idea_updates_list',
       'sam_knowledge_search',
       'sam_profiles_list',
       'sam_projects_list',
@@ -545,6 +607,31 @@ describe('operation registry contract', () => {
       'sam_chat_send',
       'sam_agent_answer',
       'sam_work_stop',
+      'sam_inbox_list',
+      'sam_inbox_count',
+      'sam_inbox_item_get',
+      'sam_inbox_answer',
+      'sam_inbox_archive',
+      'sam_chat_interrupt',
+      'sam_chat_status',
+      'sam_chat_delivery_get',
+      'sam_chat_interactions',
+      'sam_work_changes',
+      'sam_chat_jobs_list',
+      'sam_operation_get',
+      'sam_team_status',
+      'sam_schedules_list',
+      'sam_schedule_get',
+      'sam_schedule_create',
+      'sam_schedule_update',
+      'sam_schedule_cancel',
+      'sam_channels_list',
+      'sam_channel_history',
+      'sam_channel_get',
+      'sam_channel_subscription_cancel',
+      'sam_usage_get',
+      'sam_run_receipt',
+      'sam_project_insights',
     ]);
     expect(operationInputJsonSchema(samTaskGet)).toMatchObject({
       type: 'object',

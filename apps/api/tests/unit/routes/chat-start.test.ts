@@ -1,5 +1,6 @@
+import Database from 'better-sqlite3';
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 
@@ -27,6 +28,17 @@ const mocks = vi.hoisted(() => ({
   runtime: {
     resolveWorkspaceRuntime: vi.fn(),
   },
+  runAccount: {
+    validateRunAgentConfiguration: vi.fn(),
+  },
+}));
+
+/** The idea store this route validates against; seeded per test with real SQLite. */
+const ideaDb = vi.hoisted(() => ({
+  current: null as {
+    prepare: (sql: string) => { get: (...args: unknown[]) => unknown };
+    close: () => void;
+  } | null,
 }));
 
 vi.mock('drizzle-orm/d1', () => ({ drizzle: mocks.drizzle }));
@@ -43,6 +55,9 @@ vi.mock('../../../src/services/instant-session', () => mocks.instant);
 vi.mock('../../../src/services/mention-enrichment', () => mocks.mention);
 vi.mock('../../../src/services/skills', () => mocks.skills);
 vi.mock('../../../src/services/workspace-runtime', () => mocks.runtime);
+// The validator's own behaviour runs on real SQL in task-submit-run-account.test.ts; here only
+// the route's use of it is under test: called with the resolved agent, before any insert.
+vi.mock('../../../src/services/run-agent-configuration', () => mocks.runAccount);
 
 import { chatStartRoutes } from '../../../src/routes/chat-start';
 
@@ -51,11 +66,38 @@ const ROUTE_PATH = '/api/projects/:projectId/sessions';
 const REQUEST_PATH = '/api/projects/project-1/sessions/start';
 
 function makeEnv(): Env {
+  const sqlite = ideaDb.current;
   return {
-    DATABASE: {} as never,
+    DATABASE: (sqlite
+      ? {
+          prepare: (sql: string) => ({
+            bind: (...args: unknown[]) => ({
+              first: async () => sqlite.prepare(sql).get(...args) ?? null,
+            }),
+          }),
+        }
+      : {}) as never,
     DEFAULT_TASK_AGENT_TYPE: 'opencode',
     MAX_TASK_MESSAGE_LENGTH: '16000',
   } as Env;
+}
+
+/** Real SQL, so the project predicate in the idea gate is actually evaluated. */
+function seedIdeas(): void {
+  const sqlite = new Database(':memory:');
+  // `is_idea` is the idea discriminator (program decision 16, migration 0207). NOT NULL
+  // DEFAULT 0 in the real schema, so the fixture carries it rather than relying on a default.
+  sqlite.exec(
+    `CREATE TABLE tasks(id TEXT PRIMARY KEY, project_id TEXT, title TEXT, status TEXT,
+       is_idea INTEGER NOT NULL DEFAULT 0)`
+  );
+  const insert = sqlite.prepare('INSERT INTO tasks VALUES (?, ?, ?, ?, ?)');
+  insert.run('idea-open', 'project-1', 'Retry failed webhook deliveries', 'draft', 1);
+  insert.run('idea-done', 'project-1', 'Already shipped', 'completed', 1);
+  insert.run('idea-foreign', 'project-2', 'Another project idea', 'draft', 1);
+  // Draft, same project, not an idea — the row only `is_idea` can tell apart from `idea-open`.
+  insert.run('task-ordinary-draft', 'project-1', 'An ordinary task', 'draft', 0);
+  ideaDb.current = sqlite;
 }
 
 function makeApp() {
@@ -83,6 +125,10 @@ describe('chatStartRoutes', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.runAccount.validateRunAgentConfiguration.mockImplementation(
+      async (_db: unknown, { configurationId }: { configurationId?: string | null }) =>
+        configurationId?.trim() || null
+    );
     mocks.drizzle.mockReturnValue(db);
     mocks.auth.getUserId.mockReturnValue('user-1');
     mocks.projectAuth.requireProjectCapability.mockResolvedValue({
@@ -162,8 +208,12 @@ describe('chatStartRoutes', () => {
     );
   });
 
-  it('keeps a fork on the direct cf-container path with lineage and inherited attribution', async () => {
-    const parentDb = {
+  function parentTaskDb(parent: {
+    userId: string;
+    credentialAttributionUserId: string;
+    credentialAttributionSource: string;
+  }) {
+    return {
       ...db,
       select: vi.fn(() => ({
         from: vi.fn(() => ({
@@ -172,21 +222,20 @@ describe('chatStartRoutes', () => {
               {
                 id: 'parent-task',
                 projectId: 'project-1',
-                userId: 'source-user',
                 parentTaskId: null,
-                credentialAttributionUserId: 'source-user',
                 credentialAttributionProjectId: null,
-                credentialAttributionSource: 'platform',
+                ...parent,
               },
             ]),
           })),
         })),
       })),
     };
-    mocks.drizzle.mockReturnValueOnce(parentDb);
-    const app = makeApp();
+  }
 
-    const res = await app.request(
+  async function forkParent(parentDb: ReturnType<typeof parentTaskDb>) {
+    mocks.drizzle.mockReturnValueOnce(parentDb);
+    return makeApp().request(
       `${BASE_URL}${REQUEST_PATH}`,
       {
         method: 'POST',
@@ -200,12 +249,22 @@ describe('chatStartRoutes', () => {
       },
       makeEnv()
     );
+  }
+
+  it('keeps a fork of your own task on the direct cf-container path with lineage and inherited attribution', async () => {
+    const parentDb = parentTaskDb({
+      userId: 'user-1',
+      credentialAttributionUserId: 'user-1',
+      credentialAttributionSource: 'platform',
+    });
+
+    const res = await forkParent(parentDb);
 
     expect(res.status).toBe(202);
     expect(parentDb.insert.mock.results[0]?.value.values).toHaveBeenCalledWith(
       expect.objectContaining({
         parentTaskId: 'parent-task',
-        credentialAttributionUserId: 'source-user',
+        credentialAttributionUserId: 'user-1',
         credentialAttributionSource: 'platform',
       })
     );
@@ -217,6 +276,25 @@ describe('chatStartRoutes', () => {
         contextSummary: ['## Fork Context', 'Source summary'].join(String.fromCharCode(10)),
       })
     );
+  });
+
+  it('bills the caller, never the parent owner, when forking a teammate task (gap G5)', async () => {
+    const parentDb = parentTaskDb({
+      userId: 'source-user',
+      credentialAttributionUserId: 'source-user',
+      credentialAttributionSource: 'platform',
+    });
+
+    const res = await forkParent(parentDb);
+
+    expect(res.status).toBe(202);
+    const inserted = parentDb.insert.mock.results[0]?.value.values.mock.calls[0]?.[0];
+    expect(inserted).toMatchObject({
+      parentTaskId: 'parent-task',
+      credentialAttributionUserId: 'user-1',
+      credentialAttributionSource: 'user',
+    });
+    expect(inserted.credentialAttributionUserId).not.toBe('source-user');
   });
 
   it('returns conflict when the selected runtime resolves to vm', async () => {
@@ -238,5 +316,213 @@ describe('chatStartRoutes', () => {
 
     expect(res.status).toBe(409);
     expect(mocks.instant.acceptInstantSession).not.toHaveBeenCalled();
+  });
+
+  describe('sourceIdeaId', () => {
+    beforeEach(() => seedIdeas());
+    afterEach(() => {
+      ideaDb.current?.close();
+      ideaDb.current = null;
+    });
+
+    function start(body: Record<string, unknown>) {
+      return makeApp().request(
+        `${BASE_URL}${REQUEST_PATH}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: 'hello', agentProfileId: 'profile-1', ...body }),
+        },
+        makeEnv()
+      );
+    }
+
+    // The link itself is written inside `acceptInstantSession`
+    // (instant-session-idea-link.test.ts). What this route owes it is a validated id.
+    it('passes a validated open idea through to the Instant acceptance', async () => {
+      const res = await start({ sourceIdeaId: 'idea-open' });
+      expect(res.status).toBe(202);
+      expect(mocks.instant.acceptInstantSession).toHaveBeenCalledWith(
+        db,
+        expect.anything(),
+        expect.objectContaining({ sourceIdeaId: 'idea-open' })
+      );
+    });
+
+    it('passes null when the start did not come from an idea', async () => {
+      const res = await start({});
+      expect(res.status).toBe(202);
+      expect(mocks.instant.acceptInstantSession.mock.calls[0]?.[2]).toMatchObject({
+        sourceIdeaId: null,
+      });
+    });
+
+    it('404s an idea from another project before anything is created', async () => {
+      const res = await start({ sourceIdeaId: 'idea-foreign' });
+      expect(res.status).toBe(404);
+      expect(mocks.instant.acceptInstantSession).not.toHaveBeenCalled();
+      expect(db.insert).not.toHaveBeenCalled();
+    });
+
+    /*
+     * The case the OLD definition would have let through. `idea-foreign` is excluded by its
+     * project and there was no same-project non-idea case at all, so nothing here could tell
+     * `status = 'draft'` from `is_idea = 1`. This row is draft, in THIS project, differing
+     * only in the flag — and the gate runs before any effects, so nothing may be created.
+     */
+    it('404s an ordinary DRAFT task in this project, which only the flag excludes', async () => {
+      const res = await start({ sourceIdeaId: 'task-ordinary-draft' });
+      expect(res.status).toBe(404);
+      expect(mocks.instant.acceptInstantSession).not.toHaveBeenCalled();
+      expect(db.insert).not.toHaveBeenCalled();
+
+      // Owner control: a real idea on the same path is accepted, so the refusal is the flag
+      // rather than the route refusing everything.
+      const accepted = await start({ sourceIdeaId: 'idea-open' });
+      expect(accepted.status).toBe(202);
+      expect(mocks.instant.acceptInstantSession).toHaveBeenCalled();
+    });
+
+    // The Instant counterpart of the VM path's "no orphaned queued task": a link failure
+    // inside `acceptInstantSession` must reach the route's failure handling and stop,
+    // never schedule the launch that gives the agent its first prompt.
+    it('does not launch the agent when acceptance fails on the idea link', async () => {
+      mocks.instant.acceptInstantSession.mockImplementation(() =>
+        Promise.reject(new Error('Could not link this chat to the idea'))
+      );
+      const res = await start({ sourceIdeaId: 'idea-open' });
+      expect(res.status).toBe(500);
+      expect(mocks.instant.continueInstantSessionLaunch).not.toHaveBeenCalled();
+      // Liveness: the task row WAS created, so this is the failure path and not a
+      // rejection that happened before anything was written.
+      expect(db.insert).toHaveBeenCalled();
+    });
+
+    it('409s a done idea before anything is created', async () => {
+      const res = await start({ sourceIdeaId: 'idea-done' });
+      expect(res.status).toBe(409);
+      expect(await res.json<{ message: string }>()).toMatchObject({
+        message: expect.stringMatching(/idea is done/i),
+      });
+      expect(mocks.instant.acceptInstantSession).not.toHaveBeenCalled();
+      expect(db.insert).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('per-chat model and effort', () => {
+    async function startWith(overrides: Record<string, unknown>) {
+      return makeApp().request(
+        `${BASE_URL}${REQUEST_PATH}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: 'hello', agentProfileId: 'profile-1', ...overrides }),
+        },
+        makeEnv()
+      );
+    }
+
+    function launchedOverrides() {
+      return mocks.instant.acceptInstantSession.mock.calls[0]![2].overrides as Record<
+        string,
+        unknown
+      >;
+    }
+
+    it('launches with the chat model and effort, keeping the profile permission mode', async () => {
+      const res = await startWith({ model: ' claude-opus-5-5 ', effort: 'max' });
+      expect(res.status).toBe(202);
+      expect(launchedOverrides()).toEqual({
+        model: 'claude-opus-5-5',
+        effort: 'max',
+        permissionMode: 'acceptEdits',
+      });
+      // The same overrides reach the background launch, not just acceptance.
+      expect(mocks.instant.continueInstantSessionLaunch.mock.calls[0]![2].overrides).toEqual(
+        launchedOverrides()
+      );
+    });
+
+    it('inherits the profile model and effort when none is chosen', async () => {
+      const res = await startWith({ model: '', effort: null });
+      expect(res.status).toBe(202);
+      expect(launchedOverrides()).toMatchObject({
+        model: 'claude-sonnet-4-5-20250929',
+        effort: 'auto',
+      });
+    });
+
+    it('rejects an effort the resolved agent cannot run before creating anything', async () => {
+      const opencodeProfile = {
+        profileId: 'profile-1',
+        skillId: null,
+        agentType: 'opencode',
+        model: null,
+        effort: 'auto',
+        permissionMode: null,
+        provider: null,
+        runtime: 'cf-container',
+        systemPromptAppend: null,
+      };
+      mocks.skills.resolveSkillProfile.mockResolvedValue(opencodeProfile);
+      const res = await startWith({ effort: 'high' });
+      expect(res.status).toBe(400);
+      expect(await res.json<{ message: string }>()).toMatchObject({
+        message: "Effort 'high' is not supported for agent type 'opencode'",
+      });
+      expect(db.insert).not.toHaveBeenCalled();
+      expect(mocks.instant.acceptInstantSession).not.toHaveBeenCalled();
+
+      // Owner-path control: the same OpenCode profile starts with an effort it supports.
+      const ok = await startWith({ effort: 'auto' });
+      expect(ok.status).toBe(202);
+      expect(launchedOverrides()).toMatchObject({ effort: 'auto' });
+    });
+  });
+
+  describe('account chosen for this chat', () => {
+    function start(overrides: Record<string, unknown>) {
+      return makeApp().request(
+        `${BASE_URL}${REQUEST_PATH}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: 'hello', agentProfileId: 'profile-1', ...overrides }),
+        },
+        makeEnv()
+      );
+    }
+
+    function insertedTask() {
+      return db.insert.mock.results[0]?.value.values.mock.calls[0]?.[0] as Record<string, unknown>;
+    }
+
+    it('checks the account against the resolved agent and stores it on the task', async () => {
+      const res = await start({ agentConfigurationId: 'cfg-work-max' });
+      expect(res.status).toBe(202);
+      expect(mocks.runAccount.validateRunAgentConfiguration).toHaveBeenCalledWith(db, {
+        userId: 'user-1',
+        configurationId: 'cfg-work-max',
+        agentType: 'claude-code',
+      });
+      expect(insertedTask()).toMatchObject({ agentConfigurationId: 'cfg-work-max' });
+    });
+
+    it('control: no choice stores null', async () => {
+      const res = await start({});
+      expect(res.status).toBe(202);
+      expect(insertedTask()).toMatchObject({ agentConfigurationId: null });
+    });
+
+    it('a refused account creates nothing', async () => {
+      const { errors } = await import('../../../src/middleware/error');
+      mocks.runAccount.validateRunAgentConfiguration.mockRejectedValueOnce(
+        errors.badRequest('That account is paused. Choose another account for this chat.')
+      );
+      const res = await start({ agentConfigurationId: 'cfg-paused' });
+      expect(res.status).toBe(400);
+      expect(db.insert).not.toHaveBeenCalled();
+      expect(mocks.instant.acceptInstantSession).not.toHaveBeenCalled();
+    });
   });
 });

@@ -31,6 +31,8 @@ describe('D1 retention sweeps', () => {
       schema.deploymentReleaseEvents,
       schema.sessionSnapshots,
       schema.tasks,
+      // Read by the snapshot-expiry sweep to leave archived and fenced sessions alone.
+      schema.projectDataSessionLocations,
     ]);
     env = {
       DATABASE: createSqliteD1(sqlite),

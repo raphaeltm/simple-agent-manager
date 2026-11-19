@@ -1,0 +1,74 @@
+name: Reliability Storage Activation
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        type: choice
+        options: [staging, production]
+      expected_sha:
+        description: 'Exact successfully deployed commit SHA'
+        required: true
+        type: string
+      expected_version:
+        description: 'Expected live Cloudflare Worker version at 100%'
+        required: true
+        type: string
+      cutover_at:
+        description: 'Future Unix second aligned with the live MCP window (same value on retries)'
+        required: true
+        type: string
+      publish:
+        description: 'Publish once after recorded quiet-window and release gates; false is read-only preflight'
+        required: true
+        type: boolean
+        default: false
+
+      verify_workspace_id:
+        description: 'Optional own release workspace ID for fixed read-only DO evidence (publish must be false)'
+        type: string
+      verify_rate_identity:
+        description: 'Optional own release MCP identity for fixed read-only DO evidence'
+        type: string
+
+permissions:
+  contents: read
+
+# Shares the ordinary deployment lock; activation never cancels a deployment.
+concurrency:
+  group: ${{ inputs.environment == 'production' && 'deploy-production' || 'deploy-staging' }}
+  cancel-in-progress: false
+
+jobs:
+  activate:
+    if: ${{ inputs.environment == 'staging' || github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - name: Verify live candidate and publish immutable activation
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          CUTOVER_AT: ${{ inputs.cutover_at }}
+          PUBLISH_ACTIVATION: ${{ inputs.publish }}
+          VERIFY_WORKSPACE_ID: ${{ inputs.verify_workspace_id }}
+          VERIFY_RATE_IDENTITY: ${{ inputs.verify_rate_identity }}
+        run: node scripts/deploy/reliability-storage-activation.mjs
+      - name: Retain nonsecret readback evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: reliability-storage-activation-${{ inputs.environment }}
+          path: reliability-storage-activation.json
+          if-no-files-found: ignore

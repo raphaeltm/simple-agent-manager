@@ -1,10 +1,14 @@
+import type { MessageClass } from './mailbox';
 import type {
   CreateProjectEventSubscriptionInput,
   ProjectEventAdmissionResult,
   ProjectEventAgentVisibility,
+  ProjectEventDeliveryPreference,
   ProjectEventJsonValue,
   ProjectEventRecord,
   ProjectEventSubscriptionMutationResult,
+  ProjectEventSubscriptionOwner,
+  ProjectEventSubscriptionState,
 } from './project-events';
 
 /** Reserved provenance. Agent input is always evidence, never wake instructions. */
@@ -16,6 +20,13 @@ export const PROJECT_EVENT_CHANNEL_TYPE = 'agent.channel.published';
  * messaging tools publish here; generic `publish_channel_event` rejects it.
  */
 export const AGENT_MESSAGE_CHANNEL_PREFIX = 'agent-dm.';
+
+/**
+ * First name after every `agent-dm.<hex>` pair channel. Only SAM creates names with that prefix
+ * (generic publish and follow reject it), and they are lowercase hex, so all of them sort below
+ * this name: a name-ordered catalog read that starts here skips the whole range in one request.
+ */
+export const DIRECT_CHANNEL_RANGE_END = `${AGENT_MESSAGE_CHANNEL_PREFIX}g`;
 
 export type ProjectEventChannelActor = {
   userId: string;
@@ -40,7 +51,10 @@ export type PublishProjectEventChannelInput = {
   actor: ProjectEventChannelActor;
 };
 
-export type PublishProjectEventChannelResult = ProjectEventAdmissionResult & {
+export type PublishProjectEventChannelResult = Exclude<
+  ProjectEventAdmissionResult,
+  { outcome: 'skipped_no_subscriber' }
+> & {
   channel: ProjectEventChannel;
   sequence: number;
 };
@@ -97,8 +111,12 @@ export type CatchUpProjectEventChannelInput = {
   limit?: number | null;
 };
 
-/** Ordinary message classes carried over agent message channels. Urgent classes keep stop-and-deliver. */
-export type AgentChannelMessageClass = 'notify' | 'deliver';
+/**
+ * Every agent message travels over its pair channel, whatever its class (constitution XV): the
+ * recipient only ever gets a SAM notice naming the event. An urgent class makes that notice
+ * stop-and-deliver instead of joining or following the running turn.
+ */
+export type AgentChannelMessageClass = MessageClass;
 
 export type AgentChannelMessageParticipant = {
   taskId: string;
@@ -129,4 +147,29 @@ export type SendAgentChannelMessageResult = {
   senderSubscriptionId: string | null;
   /** Managed subscriptions this send retired (could no longer wake, or idle and over the share). */
   retiredSubscriptionIds: string[];
+};
+
+/** Read-only metadata for filters matching canonical channel publications; not read receipts. */
+export type ProjectEventChannelSubscriber = {
+  subscriptionId: string;
+  owner: ProjectEventSubscriptionOwner;
+  target: NonNullable<ProjectEventDeliveryPreference['target']>;
+  state: ProjectEventSubscriptionState;
+  expiresAt: number | null;
+  createdAt: number;
+};
+
+export type ListProjectEventChannelSubscribersInput = {
+  projectId: string;
+  channel: string;
+  state?: ProjectEventSubscriptionState | 'any';
+  cursor?: string;
+  limit?: number;
+};
+
+export type ProjectEventChannelSubscriberList = {
+  channel: string;
+  subscribers: ProjectEventChannelSubscriber[];
+  hasMore: boolean;
+  nextCursor: string | null;
 };

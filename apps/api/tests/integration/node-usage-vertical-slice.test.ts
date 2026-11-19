@@ -61,12 +61,12 @@ function createDb() {
       provider_instance_price_monthly_cents INTEGER,
       provider_instance_price_hourly_micros INTEGER,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL, callback_generation TEXT
     );
 
     CREATE TABLE workspaces (
       id TEXT PRIMARY KEY,
-      node_id TEXT REFERENCES nodes(id)
+      node_id TEXT REFERENCES nodes(id), callback_generation TEXT
     );
 
     CREATE TABLE user_quotas (

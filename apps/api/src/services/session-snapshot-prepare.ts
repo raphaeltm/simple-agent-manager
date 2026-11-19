@@ -40,6 +40,7 @@ export async function prepareSessionSnapshot(
   const now = new Date();
   const expiresAt = snapshotExpiry(now, config.ttlDays);
   const generation = ulid();
+  const cleanupIdentityJson = await snapshotCleanupIdentity(db, input, generation);
   const keys = {
     home: buildSessionSnapshotR2Key(env, input.chatSessionId, generation, 'home'),
     wip: buildSessionSnapshotR2Key(env, input.chatSessionId, generation, 'wip'),
@@ -76,6 +77,7 @@ export async function prepareSessionSnapshot(
     baseCommit: null,
     expiresAt,
     runtimeContractJson,
+    cleanupIdentityJson,
     manifestJson: null,
     restoreStatus: null,
     restoreMessage: null,
@@ -138,6 +140,7 @@ export async function prepareSessionSnapshot(
           agentSessionId: input.agentSessionId,
           runtime: input.runtime,
           runtimeContractJson,
+          cleanupIdentityJson,
           captureGeneration: generation,
           captureError: null,
           authorizedHomeBytes: null,
@@ -231,6 +234,7 @@ export async function ensureSessionSnapshotForSleep(
   const runtimeContractJson = await snapshotRuntimeContract(db, input);
   const now = new Date();
   const placeholderGeneration = ulid();
+  const cleanupIdentityJson = await snapshotCleanupIdentity(db, input, placeholderGeneration);
   const row = {
     id: ulid(),
     projectId: input.projectId,
@@ -243,6 +247,7 @@ export async function ensureSessionSnapshotForSleep(
     status: 'pending',
     degradation: 'none',
     runtimeContractJson,
+    cleanupIdentityJson,
     manifestR2Key: buildSessionSnapshotR2Key(
       env,
       input.chatSessionId,
@@ -305,4 +310,40 @@ async function snapshotRuntimeContract(
     )
     .get();
   return row?.runtimeContractJson ?? null;
+}
+
+/** Capture immutable source identity; old checkpoints cannot authorize a successor's cleanup. */
+async function snapshotCleanupIdentity(
+  db: Db,
+  input: PrepareSessionSnapshotInput,
+  snapshotGeneration: string
+): Promise<string | null> {
+  const row = await db
+    .select({
+      nodeId: schema.workspaces.nodeId,
+      workspaceGeneration: schema.workspaces.evictionGeneration,
+      nodeRuntimeIncarnationId: schema.nodes.runtimeIncarnationId,
+      nodeUserId: schema.nodes.userId,
+      userId: schema.workspaces.userId,
+    })
+    .from(schema.workspaces)
+    .innerJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
+    .where(eq(schema.workspaces.id, input.workspaceId))
+    .get();
+  if (
+    !row ||
+    row.nodeId !== input.nodeId ||
+    row.userId !== input.userId ||
+    row.nodeUserId !== input.userId ||
+    !row.nodeRuntimeIncarnationId
+  )
+    return null;
+  return JSON.stringify({
+    snapshotGeneration,
+    workspaceId: input.workspaceId,
+    nodeId: row.nodeId,
+    userId: row.userId,
+    workspaceGeneration: row.workspaceGeneration ?? '',
+    nodeRuntimeIncarnationId: row.nodeRuntimeIncarnationId,
+  });
 }

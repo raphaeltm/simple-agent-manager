@@ -2,7 +2,7 @@
  * Integration tests for handleGitHubEventForTriggers.
  *
  * These tests mock D1 and trigger admission at the boundary to verify:
- * - Delivery deduplication
+ * - Routing decisions (durable intake/dedup is covered by signed ingress integration)
  * - Feature flag gating
  * - Non-matching events do not start tasks
  * - Matching events reach the submission boundary with correct payloads
@@ -11,8 +11,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock trigger admission before importing the handler. Success-path tests invoke
 // the supplied renderPrompt callback so the production context/renderer wiring runs.
-vi.mock('../../../src/services/trigger-admission', () => ({
-  admitAndSubmitTriggerExecution: vi.fn().mockResolvedValue({
+vi.mock('../../../src/services/github-trigger-queue', async (original) => ({
+  ...await original<typeof import('../../../src/services/github-trigger-queue')>(),
+  acceptGitHubTriggerExecution: vi.fn().mockResolvedValue({
     outcome: 'submitted',
     executionId: 'execution-123',
     taskId: 'task-123',
@@ -22,7 +23,7 @@ vi.mock('../../../src/services/trigger-admission', () => ({
 }));
 
 import { handleGitHubEventForTriggers } from '../../../src/services/github-trigger-handler';
-import { admitAndSubmitTriggerExecution } from '../../../src/services/trigger-admission';
+import { acceptGitHubTriggerExecution } from '../../../src/services/github-trigger-queue';
 
 // ---------------------------------------------------------------------------
 // D1 Mock Infrastructure
@@ -38,7 +39,7 @@ function createMockD1(tables: Record<string, MockRow[]> = {}) {
   const mockStmt = {
     bind: vi.fn().mockReturnThis(),
     run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
-    all: vi.fn().mockResolvedValue({ results: [] }),
+    all: vi.fn().mockResolvedValue({ success: true, results: [] }),
     first: vi.fn().mockResolvedValue(null),
     raw: vi.fn().mockResolvedValue([]),
   };
@@ -79,7 +80,7 @@ function makeIssuesPayload(action: string = 'labeled') {
   return {
     action,
     sender: { login: 'contributor', type: 'User' },
-    repository: { full_name: 'org/repo', default_branch: 'main' },
+    repository: { id: 9876, full_name: 'org/repo', default_branch: 'main' },
     installation: { id: 12345 },
     issue: {
       number: 10,
@@ -109,7 +110,7 @@ describe('handleGitHubEventForTriggers', () => {
     });
     expect(result.processed).toBe(false);
     expect(result.reason).toBe('unsupported_event_type:star');
-    expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
+    expect(acceptGitHubTriggerExecution).not.toHaveBeenCalled();
   });
 
   it('returns feature_disabled when neither override nor webhook secret is configured', async () => {
@@ -125,7 +126,7 @@ describe('handleGitHubEventForTriggers', () => {
     expect(result.processed).toBe(false);
     expect(result.reason).toBe('feature_disabled');
     expect(result.matchedTriggers).toBe(0);
-    expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
+    expect(acceptGitHubTriggerExecution).not.toHaveBeenCalled();
   });
 
   it('returns feature_disabled when flag is explicitly "false"', async () => {
@@ -149,23 +150,7 @@ describe('handleGitHubEventForTriggers', () => {
     });
     expect(result.processed).toBe(false);
     expect(result.reason).toBe('unsupported_event_type:star');
-    expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
-  });
-
-  // --- Delivery deduplication ---
-  it('deduplicates deliveries when INSERT OR IGNORE returns 0 changes', async () => {
-    const { env, mockStmt } = createMockEnv();
-    // Simulate the INSERT OR IGNORE returning 0 changes (duplicate)
-    mockStmt.run.mockResolvedValueOnce({ meta: { changes: 0 } });
-
-    const result = await handleGitHubEventForTriggers(env, {
-      deliveryId: 'already-processed',
-      eventType: 'issues',
-      payload: makeIssuesPayload(),
-    });
-    expect(result.processed).toBe(false);
-    expect(result.reason).toBe('duplicate');
-    expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
+    expect(acceptGitHubTriggerExecution).not.toHaveBeenCalled();
   });
 
   // --- No repository in payload ---
@@ -180,8 +165,8 @@ describe('handleGitHubEventForTriggers', () => {
       payload: { action: 'opened', sender: { login: 'user' } },
     });
     expect(result.processed).toBe(false);
-    expect(result.reason).toBe('no_repository');
-    expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
+    expect(result.reason).toBe('invalid_scope');
+    expect(acceptGitHubTriggerExecution).not.toHaveBeenCalled();
   });
 
   it('admits issues events with a stale stored commandPrefix and renders them as plain text', async () => {
@@ -236,7 +221,7 @@ describe('handleGitHubEventForTriggers', () => {
       ]);
 
     let renderedPrompt = '';
-    vi.mocked(admitAndSubmitTriggerExecution).mockImplementationOnce(async (_env, input) => {
+    vi.mocked(acceptGitHubTriggerExecution).mockImplementationOnce(async (_env, input) => {
       renderedPrompt = input.renderPrompt('execution-123', 1);
       return {
         outcome: 'submitted',
@@ -264,7 +249,7 @@ describe('handleGitHubEventForTriggers', () => {
       deliveryId: 'delivery-matched',
       matchedTriggers: 1,
     });
-    expect(admitAndSubmitTriggerExecution).toHaveBeenCalledOnce();
+    expect(acceptGitHubTriggerExecution).toHaveBeenCalledOnce();
     expect(renderedPrompt).toBe(`Body: ${issueBody}`);
     expect(renderedPrompt).not.toContain('&quot;');
     expect(renderedPrompt).not.toContain('[object Object]');
@@ -323,6 +308,6 @@ describe('handleGitHubEventForTriggers', () => {
       deliveryId: 'delivery-malformed-filters',
       matchedTriggers: 0,
     });
-    expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
+    expect(acceptGitHubTriggerExecution).not.toHaveBeenCalled();
   });
 });

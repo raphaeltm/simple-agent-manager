@@ -91,7 +91,6 @@ vi.mock('../../../src/services/project-data', () => ({
   getMessages: mocks.getMessages,
   getSession: mocks.getSession,
   getSessionState: vi.fn(),
-  linkSessionIdea: vi.fn(),
   listAcpSessions: vi.fn().mockResolvedValue({ sessions: [], total: 0 }),
   listCommentThreads: mocks.listCommentThreads,
   listSessionIdeas: vi.fn().mockResolvedValue({ ideas: [] }),
@@ -101,7 +100,6 @@ vi.mock('../../../src/services/project-data', () => ({
   releaseAttentionAnswer: vi.fn(),
   resetIdleCleanup: vi.fn(),
   stopSession: mocks.stopSession,
-  unlinkSessionIdea: vi.fn(),
   updateCommentThreadStatus: mocks.updateCommentThreadStatus,
 }));
 vi.mock('../../../src/services/workspace-cleanup', () => ({
@@ -218,6 +216,7 @@ describe('chat comment routes', () => {
       quote: null,
       clientMutationId: 'thread-key',
       actor: { kind: 'human', id: 'user-1', name: 'Ada' },
+      mentions: [],
     });
 
     const replyResponse = await createApp().request(
@@ -236,6 +235,7 @@ describe('chat comment routes', () => {
       body: 'Reply',
       clientMutationId: 'reply-key',
       actor: { kind: 'human', id: 'user-1', name: 'Ada' },
+      mentions: [],
     });
   });
 

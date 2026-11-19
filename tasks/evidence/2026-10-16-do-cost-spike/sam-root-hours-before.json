@@ -1,0 +1,53 @@
+{
+  "data": {
+    "viewer": {
+      "accounts": [
+        {
+          "durableObjectsPeriodicGroups": [
+            {
+              "dimensions": {
+                "datetimeHour": "2026-10-16T12:00:00Z"
+              },
+              "sum": {
+                "duration": 320.40431603199994,
+                "rowsRead": 274556666,
+                "rowsWritten": 107436
+              }
+            },
+            {
+              "dimensions": {
+                "datetimeHour": "2026-10-16T13:00:00Z"
+              },
+              "sum": {
+                "duration": 255.43130291199998,
+                "rowsRead": 165354593,
+                "rowsWritten": 70931
+              }
+            },
+            {
+              "dimensions": {
+                "datetimeHour": "2026-10-16T14:00:00Z"
+              },
+              "sum": {
+                "duration": 317.01665830400003,
+                "rowsRead": 183464752,
+                "rowsWritten": 102211
+              }
+            },
+            {
+              "dimensions": {
+                "datetimeHour": "2026-10-16T15:00:00Z"
+              },
+              "sum": {
+                "duration": 317.588842112,
+                "rowsRead": 125472016,
+                "rowsWritten": 108425
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "errors": null
+}

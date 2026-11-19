@@ -1,5 +1,10 @@
 # Compute Lifecycle Test Coverage Gaps
 
+> **Reconciliation 2026-10-26:** #2360 (`239de5913`) removed the project "Node Idle Timeout"
+> control because no `apps/api` code acts on `nodeIdleTimeoutMs`; the PATCH route still validates
+> and stores it (`apps/api/src/routes/projects/project-update.ts:210-219`). Gap 4 now covers only
+> the workspace timeout save (`ProjectSettings.tsx:283`). Gaps 2-4 are still open.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

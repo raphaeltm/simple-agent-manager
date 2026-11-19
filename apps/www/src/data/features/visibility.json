@@ -39,7 +39,7 @@
     },
     {
       "headline": "Never miss a decision point",
-      "body": "Notifications are categorized by type — task completions, errors, progress updates, sessions ended, PRs created, and moments where agents need human input. Filter to focus on what matters.",
+      "body": "Notifications are categorized by type — task completions, errors, progress updates, sessions ended, and moments where agents need human input. Filter to focus on what matters.",
       "screenshot": {
         "src": "/images/features/sam-notifications-feed.png",
         "alt": "Project notifications feed with filter chips for All, Task Complete, Needs Input, Error, Progress, Session Ended, PR Created, and Operational Failure, listing nine notifications with several unread",

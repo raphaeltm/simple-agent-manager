@@ -12,6 +12,19 @@ import { errors } from '../middleware/error';
 
 type ChatDb = ReturnType<typeof drizzle<typeof schema>>;
 
+/**
+ * Which workspace rows still bridge a chat session to a runtime: running, recovering or
+ * sleeping, plus a cf-container workspace in `error`, which its container DO can still recover.
+ * The one definition for the owner's session routes and the Operations actions
+ * (`services/operations-actions/targets.ts`). Expects `nodes` joined on `workspaces.node_id`.
+ */
+export function liveSessionWorkspaceCondition() {
+  return or(
+    inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping']),
+    and(eq(schema.nodes.runtime, 'cf-container'), eq(schema.workspaces.status, 'error'))
+  );
+}
+
 export interface ChatWorkspaceRuntime {
   id: string;
   nodeId: string | null;
@@ -44,10 +57,7 @@ export async function resolveLiveWorkspaceForSession(
         eq(schema.workspaces.chatSessionId, sessionId),
         eq(schema.workspaces.projectId, projectId),
         eq(schema.workspaces.userId, userId),
-        or(
-          inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping']),
-          and(eq(schema.nodes.runtime, 'cf-container'), eq(schema.workspaces.status, 'error'))
-        )
+        liveSessionWorkspaceCondition()
       )
     )
     .limit(1);

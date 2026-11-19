@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { HARD_EXPIRES_AT_FIELD, isPastHardExpiry } from './agent-sign-in/session-cap';
 import type { TerminalTokenPayload } from './jwt';
 import { assertUserAllowedBySignupApproval, isSignupApprovalRequired } from './signup-approval';
 
@@ -44,6 +45,7 @@ export async function assertTerminalTokenSessionLive(
       sessionId: schema.sessions.id,
       userId: schema.sessions.userId,
       expiresAt: schema.sessions.expiresAt,
+      hardExpiresAt: schema.sessions.hardExpiresAt,
       userRole: schema.users.role,
       userStatus: schema.users.status,
     })
@@ -72,6 +74,16 @@ export async function assertTerminalTokenSessionLive(
       workspaceId: payload.workspace,
       userId: payload.subject,
       expiresAt,
+      action: 'rejected',
+    });
+    throw new Error('Terminal token auth session expired');
+  }
+  // An agent sign-in session also has a hard lifetime the refresh clamp keeps `expires_at` under;
+  // check it here too, as requireAuth does, so the terminal token never outlives it.
+  if (isPastHardExpiry({ [HARD_EXPIRES_AT_FIELD]: row.hardExpiresAt })) {
+    log.warn('terminal_token.session_hard_expired', {
+      workspaceId: payload.workspace,
+      userId: payload.subject,
       action: 'rejected',
     });
     throw new Error('Terminal token auth session expired');

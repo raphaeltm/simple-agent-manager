@@ -1,4 +1,8 @@
 import {
+  copyBackProjectDataArchiveMigration,
+  runScopedProjectDataArchiveCanary,
+} from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
+import {
   createExecutionContext,
   env,
   runInDurableObject,
@@ -8,10 +12,6 @@ import { describe, expect, it } from 'vitest';
 
 import type { Env as WorkerEnv } from '../../src/env';
 import worker from '../../src/index';
-import {
-  copyBackProjectDataArchiveMigration,
-  runScopedProjectDataArchiveCanary,
-} from '../../src/scheduled/project-data-archive-sharding';
 import * as projectDataService from '../../src/services/project-data';
 import {
   countTargetMessages,
@@ -20,7 +20,13 @@ import {
   seedMessages,
   withArchiveEnv,
 } from './helpers/archive-fixtures';
-import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
+import {
+  seedInstallation,
+  seedNode,
+  seedProject,
+  seedUser,
+  seedWorkspace,
+} from './helpers/seed-d1';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 const testEnv = env as unknown as WorkerEnv;
 const OWNER = 'compact-archive-owner';
@@ -140,6 +146,10 @@ describe('compact R2 archive rollout', () => {
         .toArray()
     );
     const mcpToken = crypto.randomUUID();
+    // MCP authentication requires the token's workspace to be active on a live node.
+    const mcpWorkspaceId = `compact-archive-ws-${mcpToken}`;
+    await seedNode(`${mcpWorkspaceId}-node`, OWNER);
+    await seedWorkspace(mcpWorkspaceId, `${mcpWorkspaceId}-node`, OWNER, { projectId });
     await env.KV.put(
       `mcp:${mcpToken}`,
       JSON.stringify({
@@ -148,7 +158,7 @@ describe('compact R2 archive rollout', () => {
         taskMode: 'conversation',
         projectId,
         userId: OWNER,
-        workspaceId: '',
+        workspaceId: mcpWorkspaceId,
         chatSessionId: sessionId,
         createdAt: new Date().toISOString(),
       }),
@@ -180,6 +190,36 @@ describe('compact R2 archive rollout', () => {
       return JSON.parse(body.result.content[0]!.text);
     };
     let originalMcp: unknown;
+    let originalContext: unknown;
+    /**
+     * The Comments page reader's window around one message, identical whether the transcript
+     * is in the root object, a compact R2 archive, or copied back. Roles alternate, so every
+     * row is one displayed message: two each side of row 100.
+     */
+    const verifyCommentContext = async () => {
+      const ids = seedMessages(201).map((message) => message.messageId);
+      const context = await projectDataService.getMessageContextWindow(
+        testEnv,
+        projectId,
+        sessionId,
+        { messageId: String(ids[100]), messagesEachSide: 2, maxRows: 50, compact: false }
+      );
+      expect(context).toMatchObject({ found: true, hasMoreBefore: true, hasMoreAfter: true });
+      expect(context.messages.map((message) => message.id)).toEqual(ids.slice(98, 103));
+      // Compact mode, as the route reads it: tool output stripped to a size, in every store.
+      const toolContext = await projectDataService.getMessageContextWindow(
+        testEnv,
+        projectId,
+        sessionId,
+        { messageId: String(ids[199]), messagesEachSide: 1, maxRows: 10, compact: true }
+      );
+      const toolRow = toolContext.messages.find((message) => message.id === ids[199]);
+      expect(toolRow?.toolMetadata).toMatchObject({ contentSize: expect.any(Number) });
+      expect(toolRow?.toolMetadata).not.toHaveProperty('content');
+      const both = { context, toolContext };
+      if (originalContext === undefined) originalContext = both;
+      else expect(both).toEqual(originalContext);
+    };
     const verifyMcpReads = async () => {
       const history = await mcpRead('get_session_messages', { projectId, sessionId, limit: 300 });
       const scoped = await mcpRead('search_messages', { sessionId, query: 'payload', limit: 20 });
@@ -195,6 +235,7 @@ describe('compact R2 archive rollout', () => {
     };
     const verifyToolsAndSearch = async () => {
       await verifyMcpReads();
+      await verifyCommentContext();
       expect(
         await projectDataService.getMessageCount(testEnv, projectId, sessionId, ['tool'])
       ).toBe(2);
@@ -429,7 +470,7 @@ describe('compact R2 archive rollout', () => {
 
   it('shares an atomic durable allowance across concurrent attempts, retries and UTC windows', async () => {
     const { reserveArchiveWrites, ARCHIVE_BUDGET_WINDOW_MS } =
-      await import('../../src/project-data-archive/write-budget');
+      await import('@simple-agent-manager/project-data/internal/archive/write-budget');
     await env.DATABASE.prepare('DELETE FROM project_data_archive_write_budget').run();
     const now = Date.now();
     const results = await Promise.all(
@@ -475,9 +516,11 @@ describe('compact R2 archive rollout', () => {
 
 describe('compact archive SQL cost measurement', () => {
   it('reduces measured target writes for the same consolidated streaming transcript', async () => {
-    const archive = await import('../../src/durable-objects/project-data/archive-sharding');
-    const { writeCompactChunk } = await import('../../src/project-data-archive/compact-r2');
-    const { PROJECT_DATA_ARCHIVE_TABLES } = await import('../../src/project-data-archive/contract');
+    const archive = await import('@simple-agent-manager/project-data/internal/do/archive-sharding');
+    const { writeCompactChunk } =
+      await import('@simple-agent-manager/project-data/internal/archive/compact-r2');
+    const { PROJECT_DATA_ARCHIVE_TABLES } =
+      await import('@simple-agent-manager/project-data/internal/archive/contract');
     const measurements: number[] = [];
     for (const storageFormat of ['sqlite-v1', 'r2-gzip-v1'] as const) {
       const projectId = `compact-cost-${crypto.randomUUID()}`;
@@ -571,7 +614,8 @@ describe('compact archive SQL cost measurement', () => {
 
 describe('compact archive concurrent mutation fencing', () => {
   it('serializes duplicate chunk commits across R2 awaits before abandoning a partial target', async () => {
-    const { writeCompactChunk } = await import('../../src/project-data-archive/compact-r2');
+    const { writeCompactChunk } =
+      await import('@simple-agent-manager/project-data/internal/archive/compact-r2');
     const projectId = `compact-concurrency-${crypto.randomUUID()}`;
     const { source, sessionId, base, target } = await prepareCompactArchiveTarget(
       projectId,
@@ -662,8 +706,10 @@ describe('compact archive concurrent mutation fencing', () => {
   });
 
   it('rolls back source rows and routing anchors together before exact retry', async () => {
-    const { writeCompactChunk } = await import('../../src/project-data-archive/compact-r2');
-    const { PROJECT_DATA_ARCHIVE_TABLES } = await import('../../src/project-data-archive/contract');
+    const { writeCompactChunk } =
+      await import('@simple-agent-manager/project-data/internal/archive/compact-r2');
+    const { PROJECT_DATA_ARCHIVE_TABLES } =
+      await import('@simple-agent-manager/project-data/internal/archive/contract');
     const projectId = `compact-finalize-rollback-${crypto.randomUUID()}`;
     const { source, sessionId, base, prepared, target } = await prepareCompactArchiveTarget(
       projectId,
@@ -744,10 +790,19 @@ describe('compact archive concurrent mutation fencing', () => {
       })
     ).toEqual({ messages: 3, intentState: 'recovery_manifest_persisted', archiveState: null });
 
+    // The flip deletes nothing; the rows are reclaimed afterwards in bounded pages.
     expect(await source.archiveSourceFinalizeDelete(finalizeInput)).toMatchObject({
       idempotent: false,
-      messagesDeleted: 3,
+      messagesDeleted: 0,
     });
+    expect(
+      await source.archiveSourceReclaimPage({
+        projectId,
+        sessionId,
+        migrationId: base.migrationId,
+        maxRows: 500,
+      })
+    ).toMatchObject({ messagesDeleted: 3, remaining: false });
     expect(
       await runInDurableObject(source, async (_instance, state) => ({
         messages: state.storage.sql
@@ -768,7 +823,7 @@ describe('compact archive concurrent mutation fencing', () => {
 });
 
 describe('compact coordinator restart and contention', () => {
-  it('retains its journaled format and write admission after interruption before target creation', async () => {
+  it('retains its journaled format and its one reservation after interruption before target creation', async () => {
     await env.DATABASE.prepare('DELETE FROM project_data_archive_write_budget').run();
     const projectId = `compact-resume-${crypto.randomUUID()}`;
     const { sessionId } = await seedTerminalSessionWithMessages(projectId, 10, true);
@@ -815,7 +870,13 @@ describe('compact coordinator restart and contention', () => {
       .bind(projectId)
       .first();
     expect(journal).toMatchObject({ storage_format: 'r2-gzip-v1', state: 'failed' });
-    const paused = await runScopedProjectDataArchiveCanary(
+    // The migration reserved its whole estimate when it was journaled, so resuming it does not
+    // charge the allowance again: a zero allowance pauses admission of NEW migrations only. It
+    // also keeps the format it was journaled with, although compact is now disabled.
+    const reservedBefore = await env.DATABASE.prepare(
+      `SELECT reserved_writes FROM project_data_archive_write_budget WHERE id = 'global'`
+    ).first<{ reserved_writes: number }>();
+    const resumed = await runScopedProjectDataArchiveCanary(
       {
         ...base,
         PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'false',
@@ -823,12 +884,11 @@ describe('compact coordinator restart and contention', () => {
       },
       args
     );
-    expect(paused.stats).toMatchObject({ migrated: 0, failed: 0, budgetDeferred: 1 });
-    const resumed = await runScopedProjectDataArchiveCanary(
-      { ...base, PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'false' },
-      args
-    );
-    expect(resumed.stats).toMatchObject({ migrated: 1, failed: 0 });
+    expect(resumed.stats).toMatchObject({ migrated: 1, failed: 0, budgetDeferred: 0 });
+    const reservedAfter = await env.DATABASE.prepare(
+      `SELECT reserved_writes FROM project_data_archive_write_budget WHERE id = 'global'`
+    ).first<{ reserved_writes: number }>();
+    expect(reservedAfter?.reserved_writes).toBe(reservedBefore?.reserved_writes);
     const location = await readLocation(projectId, sessionId);
     if (!location) throw new Error('Missing location');
     expect(await countTargetMessages(location.owner_name, sessionId)).toBe(0);
@@ -844,7 +904,7 @@ describe('compact coordinator restart and contention', () => {
 
   it('releases only unused same-session contender reservations, exactly once and never across days', async () => {
     const { releaseUnusedArchiveReservation, reserveArchiveWrites, ARCHIVE_BUDGET_WINDOW_MS } =
-      await import('../../src/project-data-archive/write-budget');
+      await import('@simple-agent-manager/project-data/internal/archive/write-budget');
     const projectId = `compact-contention-${crypto.randomUUID()}`;
     const { source, sessionId } = await seedTerminalSessionWithMessages(projectId, 10, true);
     await env.DATABASE.prepare('DELETE FROM project_data_archive_write_budget').run();

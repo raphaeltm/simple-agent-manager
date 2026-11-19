@@ -1,3 +1,4 @@
+import type { CommentMention } from '@simple-agent-manager/shared';
 import { useMemo } from 'react';
 
 import type { MessageCommentAction } from '../../lib/api/comments';
@@ -23,7 +24,7 @@ export function ProjectMessageViewDrawers({
   commentItems,
   commentsLoading,
   viewerId,
-  canWriteSession,
+  canSendToAgent,
   onCloseComments,
   onJump,
   onReply,
@@ -45,10 +46,16 @@ export function ProjectMessageViewDrawers({
   commentItems: CommentInboxItem[];
   commentsLoading: boolean;
   viewerId: string | null;
-  canWriteSession: boolean;
+  /** Session owner or grantee: the only viewers offered Send to agent. */
+  canSendToAgent: boolean;
   onCloseComments: () => void;
   onJump: (target: TimelineJumpTarget) => void;
-  onReply: (threadId: string, body: string, action: MessageCommentAction) => Promise<unknown>;
+  onReply: (
+    threadId: string,
+    body: string,
+    action: MessageCommentAction,
+    mentions: CommentMention[]
+  ) => Promise<unknown>;
   onResolve: (threadId: string) => Promise<unknown>;
   onReopen: (threadId: string) => Promise<unknown>;
   onSendToAgent: (threadId: string) => Promise<unknown>;
@@ -80,12 +87,13 @@ export function ProjectMessageViewDrawers({
           items={commentItems}
           loading={commentsLoading}
           viewerId={viewerId}
+          mentionProjectId={projectId}
           onClose={onCloseComments}
           onJump={onJump}
           onReply={onReply}
           onResolve={onResolve}
           onReopen={onReopen}
-          onSendToAgent={canWriteSession ? onSendToAgent : undefined}
+          onSendToAgent={canSendToAgent ? onSendToAgent : undefined}
         />
       )}
     </>

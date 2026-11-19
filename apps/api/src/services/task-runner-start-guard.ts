@@ -50,7 +50,12 @@ interface CreatorAuthorityRow {
 
 function assertCreatorAuthority(sourceKind: string, row: CreatorAuthorityRow | null): void {
   // Every reserved source requires the creator's current task:write membership.
-  if (sourceKind !== 'trigger' && sourceKind !== 'schedule' && sourceKind !== 'standing_watch')
+  if (
+    sourceKind !== 'trigger' &&
+    sourceKind !== 'schedule' &&
+    sourceKind !== 'standing_watch' &&
+    sourceKind !== 'workflow'
+  )
     return;
   if (
     !row ||
@@ -62,7 +67,9 @@ function assertCreatorAuthority(sourceKind: string, row: CreatorAuthorityRow | n
     throw new TaskRunnerCreatorAuthorityRevokedError(
       sourceKind === 'trigger'
         ? 'Trigger execution principal is not a current project member with task execution access; reattach or disable the trigger'
-        : 'Scheduled task creator no longer has active project task:write authority'
+        : sourceKind === 'workflow'
+          ? 'Workflow owner no longer has active project task:write authority; restore project access and submit a new workflow run'
+          : 'Scheduled task creator no longer has active project task:write authority'
     );
   }
 }
@@ -73,7 +80,12 @@ export async function assertReservedTaskCreatorAuthority(
   projectId: string,
   userId: string
 ): Promise<void> {
-  if (sourceKind !== 'trigger' && sourceKind !== 'schedule' && sourceKind !== 'standing_watch')
+  if (
+    sourceKind !== 'trigger' &&
+    sourceKind !== 'schedule' &&
+    sourceKind !== 'standing_watch' &&
+    sourceKind !== 'workflow'
+  )
     return;
   const row = await env.DATABASE.prepare(
     `SELECT u.status AS creator_status, m.status AS member_status, m.role AS member_role
@@ -224,7 +236,7 @@ async function readReservedSubmissionAuthority(
   env: Env,
   guard: TaskRunnerReservedSubmissionGuard
 ): Promise<ReservedSubmissionAuthorityRow | null> {
-  return env.DATABASE.prepare(
+  const row = await env.DATABASE.prepare(
     `SELECT t.status, t.project_id, t.user_id, t.chat_session_id,
             c.intent_fingerprint, c.chat_session_id AS checkpoint_chat_session_id,
             r.reason AS revocation_reason, c.source_kind,
@@ -243,6 +255,24 @@ async function readReservedSubmissionAuthority(
   )
     .bind(guard.taskId, guard.projectId, guard.userId)
     .first<ReservedSubmissionAuthorityRow>();
+  if (row?.source_kind === 'workflow' && row.status !== 'in_progress') {
+    const step = await env.DATABASE.prepare(
+      `SELECT s.state, m.status, m.workflow_deadline_at
+      FROM mission_steps s JOIN missions m ON m.id = s.mission_id
+      WHERE s.task_id = ? AND m.project_id = ? AND m.user_id = ?`
+    )
+      .bind(guard.taskId, guard.projectId, guard.userId)
+      .first<{ state: string; status: string; workflow_deadline_at: number }>();
+    if (
+      !step ||
+      !['starting', 'running'].includes(step.state) ||
+      step.status !== 'active' ||
+      step.workflow_deadline_at <= Date.now()
+    ) {
+      revoked('Workflow step is no longer authorized to start');
+    }
+  }
+  return row;
 }
 
 function assertReservedSubmissionAuthorityRow(

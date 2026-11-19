@@ -6,6 +6,10 @@ user-invocable: false
 
 # SAM Environment Variable Reference
 
+## Installer first-owner binding
+
+`BOOTSTRAP_OWNER_EMAIL` is an optional API Worker secret set by the user-owned installer before public login. Only the matching provider-verified email can establish the first administrator; leave unset for ordinary installations. Preserve it during routine updates. It is distinct from `SETUP_TOKEN` (a plain-text var masked in deploy logs, accepted only until setup completes or an active superadmin exists), which authorizes provider configuration rather than user login.
+
 ## GitHub Environment Secrets (GitHub Settings -> Environments -> production)
 
 Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB_*`.
@@ -20,7 +24,9 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Variable | `D1_SESSION_MODE`                                  | No (default: `first-primary`; `disabled` pins reads to primary)    |
 | Variable | `D1_MIGRATION_CHURNING_TABLES`                     | No (may narrow the reviewed built-in retention/expiry table list)  |
 | Variable | `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | No (default: `50`; range: 0–100)                                   |
-| Secret   | `CF_API_TOKEN`                                     | Yes (requires Account → SSL and Certificates → Edit for Origin CA) |
+| Variable | `D1_MIGRATION_READ_ATTEMPTS`                       | No (default: `3`; range: 1–5; verification reads only)             |
+| Variable | `D1_MIGRATION_READ_RETRY_DELAY_MS`                 | No (default: `10000`; range: 0–60000)                              |
+| Secret   | `CF_API_TOKEN`                                     | Yes (requires Account → SSL and Certificates → Edit for Origin CA; optional Account Analytics → Read for Admin Analytics and the Cloudflare cost snapshot) |
 | Secret   | `CF_ACCOUNT_ID`                                    | Yes                                                                |
 | Secret   | `CF_ZONE_ID`                                       | Yes                                                                |
 | Secret   | `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`          | No (falls back to `CF_API_TOKEN`)                                  |
@@ -34,6 +40,7 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Secret   | `GH_APP_PRIVATE_KEY`                               | Yes                                                                |
 | Secret   | `GH_APP_SLUG`                                      | Yes                                                                |
 | Secret   | `GH_WEBHOOK_SECRET`                                | Yes when GitHub App webhooks are active                            |
+| Secret   | `AGENT_SIGN_IN_TRUST`                              | No (test instances only: JSON trust config for agent sign-in through workload identity; unset => off and the Worker secret is deleted on deploy; see `apps/www/src/content/docs/docs/guides/agent-sign-in.md`) |
 | Secret   | `ENCRYPTION_KEY`                                   | No (auto-generated)                                                |
 | Secret   | `JWT_PRIVATE_KEY`                                  | No (auto-generated)                                                |
 | Secret   | `JWT_PUBLIC_KEY`                                   | No (auto-generated)                                                |
@@ -42,10 +49,9 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Secret   | `VAPID_PRIVATE_KEY`                                | No (auto-generated; override only)                                 |
 | Secret   | `VAPID_PUBLIC_KEY`                                 | No (derived during deploy; override only)                          |
 | Secret   | `VAPID_SUBJECT`                                    | No (generated contact URI; override only)                          |
-| Secret   | `TRIAL_CLAIM_TOKEN_SECRET`                         | No (auto-generated)                                                |
 | Variable | `ORIGIN_CA_CERT_VALIDITY_DAYS`                     | No (default: 7)                                                    |
 
-`D1_MIGRATION_CHURNING_TABLES` is a comma-separated `<binding>.<table>` subset of the reviewed defaults: `DATABASE.deployment_releases`, `DATABASE.github_webhook_deliveries`, `DATABASE.project_files`, `DATABASE.registry_credential_rate_limits`, `DATABASE.session_snapshots`, `DATABASE.sessions`, `DATABASE.trial_waitlist`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. It may narrow but cannot expand this list; unset uses all reviewed defaults. `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` accepts `0`–`100`; a decrease exactly at the configured limit is accepted and a larger decrease blocks.
+`D1_MIGRATION_CHURNING_TABLES` is a comma-separated `<binding>.<table>` subset of the reviewed defaults: `DATABASE.deployment_releases`, `DATABASE.diagnostic_reconciliation_state`, `DATABASE.github_trigger_inbox`, `DATABASE.github_webhook_deliveries`, `DATABASE.project_files`, `DATABASE.registry_credential_rate_limits`, `DATABASE.session_snapshots`, `DATABASE.sessions`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.vm_provisioning_leases`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. It may narrow but cannot expand this list; unset uses all reviewed defaults. `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` accepts `0`–`100`; a decrease exactly at the configured limit is accepted and a larger decrease blocks.
 
 `ORIGIN_CA_CERT` and `ORIGIN_CA_KEY` are legacy rotation inputs for nodes provisioned before per-node Origin CA CSR signing. They are not required for new node provisioning.
 
@@ -65,7 +71,62 @@ Use `GH_WEBHOOK_SECRET` in GitHub Actions because secret names cannot start with
 
 ## API Worker Runtime Environment Variables
 
-See `apps/api/.env.example` for the full list. Key variables:
+See `apps/api/.env.example` for the full list. Key variables are listed below.
+
+### Private SAM assistant runtime controls
+
+Use the typed **Operations** admin settings below for live configuration. All eight are non-secret settings stored in D1. User opt-in is a separate per-user setting and defaults to off; clearing the installation switch never enables SAM for a user.
+
+| Admin setting key                            | Default    | Permitted range and meaning                                                                                                         |
+| -------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `operations.samOperatorDisabled`             | `false`    | Boolean; disables assistant turns/actions installation-wide while preserving saved user preferences.                                |
+| `operations.samOperatorWatchLifetimeMs`      | `86400000` | Integer `1`–`2147483647`; own-work observation lifetime in milliseconds (24 hours). Expiry does not cancel the project task.        |
+| `operations.samOperatorEventPageSize`        | `25`       | Integer `1`–`25`; maximum watches per scan, events per watch, and visible work cards.                                               |
+| `operations.samOperatorWorkRefreshMs`        | `30000`    | Integer `1000`–`2147483647`; durable own-work refresh cadence in milliseconds, separate from browser refresh.                       |
+| `operations.samOperatorWatchRetryLimit`      | `3`        | Integer `1`–`25`; consecutive failed watch refreshes before updates stop. Successful pulls or requested follow-ups reset the count. |
+| `operations.samOperatorStreamFlushMs`        | `80`       | Integer `16`–`2000`; milliseconds between live updates while the assistant answers.                                                 |
+| `operations.samOperatorStreamHeartbeatMs`    | `15000`    | Integer `1000`–`120000`; keep-alive interval on a live answer stream.                                                               |
+| `operations.samOperatorStreamMaxSubscribers` | `4`        | Integer `1`–`20`; browser tabs that can follow one answer live at the same time.                                                    |
+
+Operations debugger tools (`apps/api/src/services/operations-access.ts`):
+
+| Admin setting key               | Default | Meaning                                                                                                         |
+| ------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------- |
+| `operations.debuggerTools`      | `off`   | `off` / `read` / `read_ask` / `read_auto_safe`; gate for `ops_*` MCP tools in the Operations project. No cache. |
+| `operations.auditRetentionDays` | `90`    | Integer `1`–`3650`; days `operations_audit_log` rows are kept (daily `0 3 * * *` purge).                        |
+
+Read-tool limits for the `ops_*` tools (`apps/api/src/services/fleet-ops/settings-definitions.ts`, resolved once per call by `resolveFleetOpsSettings`): `operations.debugPackageRetentionDays` (7), `operations.debugPackageMaxBytes` (20 MiB, max 32 MiB), `operations.debugPackagePurgeBatchSize` (50 per batch, max 90), `operations.debugPackagePurgeDeadlineMs` (20000), `operations.debugPackageCapturesPerHour` (20), `operations.opsAnomalyEmptyNodeGraceMs` (900000), `operations.opsAnomalyTerminalTaskGraceMs` (900000), `operations.opsAnomalyIdleTaskMinutes` (60), `operations.opsAnomalyDestroyingNodeHours` (6), `operations.opsAnomalyLookbackHours` (24), `operations.opsAnomalyMaxPerClass` (25), `operations.opsNodeLogMaxLines` (200), `operations.opsNodeLogMaxBytes` (65536), `operations.opsTimelineMaxEvents` (200), `operations.opsTimelinePerSourceLimit` (100), `operations.opsTimelineDefaultWindowHours` (168), `operations.opsTimelineFanoutLimit` (2), `operations.opsEntityGraphRowCap` (25), `operations.opsWorkerLogDefaultWindowMinutes` (60), `operations.opsListMaxRows` (100), `operations.opsTextFieldMaxLength` (2000). Defaults, ranges and meanings: public docs `guides/admin-settings.md#read-tool-limits`.
+
+Each refresh selects at most 25 watches and reads at most 25 events per watch: at most 325 caller D1 reads, 75 cold ProjectData RPCs, and 625 local event-reference inserts, plus fixed alarm setup. A work-card read performs at most 75 D1 reads. Each watch persists its next check and charges an attempt before I/O; the alarm uses the earliest watch deadline. Failed watches defer until that deadline and stop after the retry limit, with a visible update warning. The watch lifetime also stops observation independently; neither condition cancels project work.
+
+Admin setting overrides take precedence over registry defaults. The disabled setting is read without the normal settings cache before effects and fails closed when settings storage is unavailable. These controls use the typed settings registry only; no Worker bindings or deployment variables are needed.
+
+Sources: `apps/api/src/services/operator-settings.ts`, `admin-settings-registry.ts`, and `apps/api/src/durable-objects/sam-session/operator/work.ts`.
+
+The assistant reuses existing `SAM_MODEL` (code default `@cf/deepseek-ai/deepseek-v4.1-flash-1017` in `resolveSamConfig`; omitted from Wrangler bindings unless explicitly overridden through the GitHub Environment variable `SAM_MODEL`; this model requires the Workers Paid plan or prepaid AI Gateway credits, like the rest of SAM), context/window, tool-result and model-step limits from `resolveSamConfig`, plus `SAM_LLM_TIMEOUT_MS` (operator fallback `120000`). Operator turn admission uses `SAM_MESSAGE_MAX_LENGTH` with a `16000`-character fallback; legacy subtask-message readers can have a different fallback. No new provider API key is required specifically for enabling the assistant: it uses the installation's supported platform AI configuration and usage gate.
+
+### How Worker variables are set
+
+`scripts/deploy/sync-wrangler-config.ts` (`getApiWorkerVars`) builds each deployed API Worker's
+plain-text variables from, in order:
+
+1. Top-level `[vars]` in `apps/api/wrangler.toml`. It holds only values that differ from the code
+   default, because every entry is a Worker text binding and Cloudflare caps them per Worker
+   (`assertWorkerTextBindingLimit` fails the deploy above 340, counting vars plus every
+   `set_worker_secret` name in `configure-secrets.sh`).
+2. Values the deploy derives itself (`BASE_DOMAIN`, `VERSION`, `R2_BUCKET_NAME`, `SAM_INSTALLATION_ID`,
+   `ENVIRONMENT`, `SETUP_TOKEN`, ...), which replace any checked-in value.
+3. GitHub Environment variables whose names are in the `getOptionalProcessEnvVars` list and that the
+   deploy workflow forwards (both "Sync Wrangler Config" steps in `deploy-reusable.yml`). A non-empty
+   value replaces the checked-in value or adds the binding.
+
+A variable that ships no binding runs with its code default. The values `[vars]` omits because they
+equal the code default are recorded in `OMITTED_WORKER_VAR_DEFAULTS`
+(`scripts/deploy/worker-var-defaults.ts`); `apps/api/tests/unit/config/omitted-worker-var-defaults.test.ts`
+proves each one matches the real read path, and the deploy log reports an Environment override of an
+omitted var against that recorded default. Defaults below are code defaults unless marked "shipped".
+To run a deployment with a different value, add the var to `[vars]` (and delete it from the record),
+or set a GitHub Environment variable when the name is forwarded. See `.claude/rules/07-env-and-urls.md`.
 
 ### Core
 
@@ -101,7 +162,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS` — Maximum replacement-VM wake attempts before the sleeping session becomes unavailable (default: `3`)
 - `SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS` — How long a spent wake-attempt burst stays spent (default: `900000`)
 - `SESSION_RECOVERY_LINEAGE_MAX_DEPTH` — Wake→wake links followed back to the conversation's first run when deciding whether a wake must stay in its original location (default: `256`)
-- `SESSION_SLEEP_AFTER_MS` — Runtime-neutral idle time before automatic VM-session sleep; completed and failed tasks queue sleep immediately and drain for this long past the agent's last turn report (default: `900000`)
+- `SESSION_SLEEP_AFTER_MS` — Runtime-neutral idle time before automatic VM-session sleep; completed and failed tasks queue sleep immediately and drain for this long past the agent's last real work (default: `900000`)
 - `FAILED_TASK_PRESERVATION_MAX_WAIT_MS` — Longest a failed task's runtime waits for its work-preservation sleep, from the latest of the failure, an in-place wake and the agent's current turn start, before the sweep tears it down with a chat notice (default: `28800000`)
 - `SESSION_SLEEP_SWEEP_BATCH_SIZE` — Maximum due VM sleeps atomically claimed by one scheduled sweep (default: `10`)
 - `SESSION_SLEEP_RETRY_DELAY_MS` — Delay after a fail-closed automatic sleep attempt (default: `300000`)
@@ -110,7 +171,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS` — Time since the sleep episode began (with at least one failure) before the transcript-and-Git fallback is tried (default: `900000`, 15 min)
 - `SESSION_SLEEP_CLAIM_LEASE_MS` — Reclaim timeout for an interrupted automatic-sleep claim (default: `600000`)
 - `HARNESS_BACKGROUND_WORK_LEASE_MS` — Finite sleep-protection lease renewed by normalized harness background-work lifecycle signals (default: `300000`)
-- `HARNESS_BACKGROUND_WORK_MAX_DURATION_MS` — Absolute ceiling, measured from the last harness lifecycle progress edge, on how long background work may defer sleep (default: `1800000`)
+- `HARNESS_BACKGROUND_WORK_MAX_DURATION_MS` — Absolute ceiling, measured from the last real session work (foreground work or harness lifecycle progress), on how long background work may defer sleep (default: `7200000`)
 - `ACP_ACTIVITY_ADMISSION_ENABLED` — Enables Worker-side admission control/coalescing for redundant intermediate ACP activity callbacks (default: `true`)
 - `ACP_ACTIVITY_COALESCE_WINDOW_MS` — Minimum interval between redundant intermediate ProjectData activity writes, and the first retry delay for a coalesced report whose flush hit a retryable ProjectData failure (including a CPU-limit reset or lost connection); each further retry doubles, capped at `ACP_ACTIVITY_COALESCE_TTL_MS`. Transitions and terminal/error reports bypass it (default: `2000`)
 - `ACP_ACTIVITY_COALESCE_TTL_MS` — Maximum lifetime for a coalesced activity report before eviction leaves convergence to probe-backed reconciliation (default: `60000`)
@@ -186,6 +247,8 @@ Activity coalescing and binding caches are per Worker isolate. Delayed flushes c
 - `NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS` — Maximum destroying-state residence before DO self-cleanup (default: `86400000`)
 - `NODE_WORKSPACE_IDLE_TIMEOUT_MS` — Last-workspace-activity window before an auto-provisioned workspace-role node with no active workspaces is destroy-eligible (default: `1800000`; resolved in `apps/api/src/scheduled/node-cleanup/config.ts` and enforced by `claimNodeForCleanup()` in `shared.ts`)
 - `NODE_ORPHAN_IDLE_TIMEOUT_MS` — Legacy alias for `NODE_WORKSPACE_IDLE_TIMEOUT_MS` when the primary variable is unset (resolved in `apps/api/src/scheduled/node-cleanup/config.ts`)
+- `NODE_EMPTY_WARM_HANDOFF_GRACE_MS` — Last-workspace-activity grace before the cleanup sweep hands a running, healthy managed workspace VM with no live workspace and no `warm_since` to NodeLifecycle; the normal warm timeout then applies (default: `1800000`; resolved in `apps/api/src/scheduled/node-cleanup/config.ts`, used by `sweepEmptyNodeWarmHandoff()`). Read with a code default only; not a `wrangler.toml` var
+- `ORPHANED_WORKSPACE_GRACE_PERIOD_MS` — Grace before the cleanup sweep stops a task workspace in `creating`, `running`, or `recovery` whose task is terminal, measured from both workspace creation and the latest terminal task's end (`completed_at`, then its latest genuine matching terminal status event; conservative `updated_at` fallback if no history exists; default: `600000`; `sweepOrphanedWorkspaces()` in `apps/api/src/scheduled/node-cleanup/workspace-phases.ts`)
 - `NODE_CLEANUP_FAILURE_BACKOFF_MS` — Failed cleanup-candidate exclusion window (default: `3600000`)
 - `NODE_UNHEALTHY_DRAIN_AFTER_MS` — Node-heartbeat silence before the managed VM cleanup sweep requests session sleep and posts a chat notice (default: `600000`)
 - `NODE_UNHEALTHY_RELEASE_AFTER_MS` — Node-heartbeat silence before strict provider deletion is attempted, including with active workspaces (default: `1800000`; must exceed the drain threshold)
@@ -200,10 +263,11 @@ Activity coalescing and binding caches are per Worker isolate. Delayed flushes c
 - `WORKSPACE_RESOURCE_TIMELINE_MAX_CHUNKS` — Max chunks the session resource timeline lists; older ones are disclosed as omitted (default: `1000`)
 - `WORKSPACE_RESOURCE_ROLLUP_BUCKET_MS` / `WORKSPACE_RESOURCE_ROLLUP_MAX_BUCKETS` — Per-chunk rollup bucket width computed on upload, and the bucket cap that widens it (defaults: `60000` / `60`)
 - `WORKSPACE_IDLE_TIMEOUT_MS` — Installation default for how long an active chat session's workspace can go without messages or terminal activity before ProjectData retires it, once its runtime is conclusively dead; the project Workspace Idle Timeout setting overrides it (default: `7200000`)
-- `WORKSPACE_IDLE_BACKOFF_BASE_MS` — First retry delay after a ProjectData workspace-idle check finds an idle workspace it cannot retire yet: inconclusive task candidates, a live or unprovable runtime, a missing project identity, or a failed check (default: `600000`; `apps/api/src/durable-objects/project-data/workspace-idle-timeouts.ts`)
+- `WORKSPACE_IDLE_BACKOFF_BASE_MS` — First retry delay after a ProjectData workspace-idle check finds an idle workspace it cannot retire yet: inconclusive task candidates, a live or unprovable runtime, a missing project identity, or a failed check (default: `600000`; `packages/project-data/src/do/workspace-idle-timeouts.ts`)
 - `WORKSPACE_IDLE_BACKOFF_MAX_MS` — Maximum workspace-idle retry delay; the delay doubles from the base and resets on new activity or when the session wakes (default: `21600000`)
 - `DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS` — Minimum re-arm delay for completed diagnosis steps (default: `1000`)
 - `ORCHESTRATOR_ZERO_TASK_GRACE_MS` — Grace before a zero-task mission terminalizes (default: `600000`)
+- Mission cancellation bounds use `orchestrator.cancellation*` runtime settings under Admin Settings → Operations; they are not environment variables.
 - `ORCHESTRATOR_MAX_MISSION_LIFETIME_MS` — Mission lifetime backstop (default: `86400000`)
 - `ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS` — ProjectData D1 reconciliation backstop interval for active parent waits (default: `30000`)
 - `ORCHESTRATOR_WAIT_MAX_CHILDREN` — Maximum same-project task IDs selected by one durable wait (default: `20`, hard ceiling: `90`)
@@ -275,7 +339,7 @@ Activity coalescing and binding caches are per Worker isolate. Delayed flushes c
 - `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ERROR_MAX_LENGTH` — Character ceiling for a persisted preflight failure diagnostic (default: `1000`)
 
 Implementation of the storage-safety, cleanup and preflight behavior documented above:
-`resolveStorageSafetyConfig()` (`apps/api/src/durable-objects/project-data/storage-safety.ts`)
+`resolveStorageSafetyConfig()` (`packages/project-data/src/do/storage-safety.ts`)
 validates every value and fails closed on a malformed one;
 `runProjectDataToolPayloadCleanup()` / `scanToolPayloadCleanupBatch()`
 (`.../tool-payload-cleanup.ts`) apply the row/byte/wall-time and approved-plan budgets;
@@ -284,7 +348,7 @@ manual slice, its fingerprint and its cooldown;
 `measureProjectDataStorageReliefSlice()` (`.../storage-relief-measurement.ts`) owns the
 read-only measurement, cursor and byte/deadline bounds; and
 `runProjectDataStorageReliefPreflight()`
-(`apps/api/src/scheduled/project-data-storage-relief-preflight.ts`) owns the lease, the
+(`packages/project-data/src/scheduled/project-data-storage-relief-preflight.ts`) owns the lease, the
 per-slice and per-run admission budgets, and the verified R2 manifest writes.
 
 - `PROJECT_DATA_MATERIALIZATION_PAGE_ROWS` — Tokens read into memory by one chat-search materialization `SELECT`, bounding Durable Object isolate memory (default: `500`)
@@ -299,7 +363,7 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_ROWS` — Maximum grouped message rows deleted by one grouped/FTS canary slice (default: `1000`)
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_BYTES` — Maximum grouped message content bytes deleted by one grouped/FTS canary slice (default: `4194304`)
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_MIN_SESSION_AGE_DAYS` — Minimum terminal-session age before grouped/FTS derived rows may be cleaned (default: `7`)
-- `PROJECT_DATA_GROUPED_FTS_CLEANUP_RECHECK_MS` — Delay before the next grouped/FTS cleanup slice when more candidates remain; also the back-off after an overload/reset error, measured from when the error was recorded (default: `300000`)
+- `PROJECT_DATA_GROUPED_FTS_CLEANUP_RECHECK_MS` — Delay before the next grouped/FTS cleanup slice when more candidates remain; also the back-off after an overload/reset error, measured from when the error was recorded (default: `86400000`, shipped: `300000`)
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS` — Soft wall-clock budget for one grouped/FTS cleanup slice (default: `5000`)
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO` — Refuses grouped/FTS cleanup writes when the object is too close to the configured storage limit (default: `0.98`)
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES` — Stops grouped/FTS cleanup if a slice deletes rows but `databaseSize` does not drop by at least this many bytes (default: `1`)
@@ -314,22 +378,22 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS` — Delay before the next terminal event-log cleanup alarm batch when more candidates remain (default: `86400000`, daily)
 - `PROJECT_DATA_ARCHIVE_SHARDING_ENABLED` — Production-disabled switch for exact archive read routing (default: disabled)
 - `PROJECT_DATA_ARCHIVE_COMPACT_ENABLED` — Write new archives as compact SQLite + compressed R2; existing formats remain readable. Default: `false`.
-- `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` — Installation-wide daily allowance of ESTIMATE UNITS (not billed rows) for compact migration attempts; 0 pauses admission. Also the source of the per-candidate selection ceiling, so lowering it automatically narrows which sessions a sweep selects (default: `250000`, shipped: `2400000`, tripled with the cadence on 2026-09-27). Migrations/day ceiling is `allowance / (1000 + factor x units-per-session)`; check it against the sweep cadence, because whichever is smaller is what actually runs. The GitHub `production` Environment pins this var, so change it there in lockstep.
+- `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` — Installation-wide daily allowance of ESTIMATE UNITS (not billed rows) for compact migrations, reserved once per migration when it is journaled; 0 pauses admission of new migrations (in-flight ones continue; set `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED` false for a hard stop). Also the only source of the unscoped per-candidate selection ceiling, so lowering it automatically narrows which sessions a sweep selects (default: `250000`, shipped: `2400000`, tripled with the cadence on 2026-09-27). Migrations/day ceiling is `allowance / (1000 + factor x units-per-session)`; check it against the sweep cadence, because whichever is smaller is what actually runs. The GitHub `production` Environment pins this var, so change it there in lockstep.
 - `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` — Safety multiplier on the row inventory `estimateArchiveWrites` already counts (rows, archived tool payloads, grouped rows, 512-byte units of grouped FTS text, source deletion included) — not an independent amplification factor. Default: `32`, shipped: `2`. Production measurement 2026-09-14: ~65,001 estimated writes per migration from two budget samples an hour apart (~8,000 inventory units at the then-shipped factor 8), against 5,950-9,823 DO rows actually billed across four isolated ticks, so billed/unit spans 0.74-1.23 and 2 exceeds the worst case by ~63%. The previous 8 capped the sweep at 12 migrations/day when its hourly cadence allowed 24. Small sample; re-measure before retuning.
 - `PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS` — R2 I/O deadline shared across each compact read/export/seal operation, or one chunk write, in milliseconds. Default: `10000`.
 - `PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS` — Unused reservation receipt retention; minimum one UTC budget day. Default: `604800000` (7 days).
 - `PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT` — Maximum expired receipts removed per unused release; zero disables cleanup. Default: `100`.
 - `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED` — Separate production-disabled switch for the unscoped scheduled archive-sharding sweep; enabling exact routing alone does not run global migration (default: disabled)
-- `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` — Persisted cadence gate between unscoped scheduled archive-sharding sweeps; the Worker scheduled handler wakes every five minutes and claims the cadence row only when it is due. The code fallback is daily; the checked-in `wrangler.toml` ships 18 minutes, which lands a claim on the fourth five-minute tick (occasionally the fifth when the archive step starts over two minutes earlier than at the previous claim). Each claim can migrate zero or more sessions (usually one, because a real candidate outlasts the `PROJECT_DATA_ARCHIVE_WALL_TIME_MS` gate checked between candidates), subject to the per-sweep session and message budgets and the daily write budget, so cadence alone does not set the drain rate (default: `86400000`, shipped: `1080000`)
+- `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` — Persisted cadence gate between unscoped scheduled archive-sharding sweeps; the Worker scheduled handler wakes every five minutes and claims the cadence row only when it is due. The code fallback is daily; the checked-in `wrangler.toml` ships 18 minutes, which lands a claim on the fourth five-minute tick (occasionally the fifth when the archive step starts over two minutes earlier than at the previous claim). Each claim works until `PROJECT_DATA_ARCHIVE_WALL_TIME_MS` (checked between candidates and inside a migration, which pauses and resumes next claim) or the session slots run out, subject to the daily write budget, so cadence alone does not set the drain rate (default: `86400000`, shipped: `1080000`)
 - `PROJECT_DATA_ARCHIVE_SHARD_COUNT` — Deterministic archive-shard fanout used when assigning terminal sessions to ProjectData archive Durable Objects (default: `128`)
 - `PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS` — Maximum projects selected by one archive-sharding cron pass (default: `1`)
-- `PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS` — Hard ceiling on sessions (in-flight plus new candidates) one archive-sharding pass may FENCE and process; a candidate the write budget refuses opens no fence and consumes no slot (default: `10`, shipped: `8`)
-- `PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET` — Cumulative `session_summaries.message_count` of NEW candidates one pass may journal, largest first. An upper bound only: the per-candidate ceiling is the smaller of this and the ceiling derived from `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` (default: `20000`, shipped: `10000`)
-- `PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT` — Assumed percentage by which a session's write estimate exceeds its `message_count` (archived tool payloads, grouped rows, FTS units); reserved as headroom when deriving the selection ceiling from the daily allowance (default: `100`, shipped: `100`)
-- `PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH` — Spare candidates read beyond the pass's session slots, so a candidate the daily write budget refuses can descend to a smaller one instead of ending the pass with nothing migrated (default: `4`, shipped: `4`)
-- `PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS` — Consecutive sweeps that may migrate nothing because every candidate exceeded the whole daily allowance before the cadence row reports `partial` instead of `succeeded`; an exhausted daily pool is normal backpressure and is not counted (default: `3`, shipped: `3`)
+- `PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS` — Hard ceiling on sessions (in-flight plus new candidates) one archive-sharding pass may FENCE and process; a candidate the write budget refuses opens no fence and consumes no slot (default: `10`, shipped: `50`)
+- `PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET` — Cumulative `session_summaries.message_count` the operator-scoped canary packs into one run, and its SQL ceiling for unnamed sessions. The unscoped sweep no longer uses it (since 2026-11-13 its only per-candidate ceiling is the one derived from `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET`) (default: `20000`, shipped: `10000`)
+- `PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT` — Assumed percentage by which a session's write estimate exceeds its `message_count` (archived tool payloads, grouped rows, FTS units); reserved as headroom when deriving the selection ceiling from the daily allowance (default: `100`)
+- `PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH` — Spare candidates read beyond the pass's session slots, so a candidate the daily write budget refuses can descend to a smaller one instead of ending the pass with nothing migrated (default: `4`)
+- `PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS` — Consecutive sweeps that may migrate nothing because every candidate exceeded the whole daily allowance before the cadence row reports `partial` instead of `succeeded`; an exhausted daily pool is normal backpressure and is not counted (default: `3`)
 - `PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS` — Minimum terminal-session age before archive-sharding may consider a session (default: `604800000`)
-- `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS` — How long a session the root object refused at prepare (a pre-copy eligibility invariant such as `active_session_state`, recorded as a `frozen`/`precopy_refused` journal with the location returned to `root`) stays out of unscoped sweep selection; an operator canary that names the session bypasses it; values below `60000` fall back to the default so a stray value cannot disable the anti-thrash window (default: `604800000`)
+- `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS` — How long a session the root object refused at prepare (a pre-copy eligibility invariant such as `active_session_state`, recorded as a `frozen`/`precopy_refused` journal with the location returned to `root`) stays out of unscoped sweep selection; flip refusals that unwind a copied session leave the same marker; an operator canary that names the session bypasses it; values below `60000` fall back to the default so a stray value cannot disable the anti-thrash window (default: `86400000`)
 - `PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS` — Minimum age of a `failed` archive journal before an unscoped sweep reclaims it, so `PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS` spans hours rather than consecutive cadence ticks; `0` disables the delay and a session-scoped canary bypasses it (default: `3600000`)
 - `PROJECT_DATA_ARCHIVE_CHUNK_ROWS` — Maximum rows exported in one archive chunk (default: `500`)
 - `PROJECT_DATA_ARCHIVE_CHUNK_BYTES` — Maximum bytes exported in one archive chunk, clamped below Cloudflare's 32MiB RPC ceiling (default: `16777216`)
@@ -391,14 +455,14 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_EVENT_WATCH_COOLDOWN_MIN_MS` — Minimum time between standing watch executions (default: `60000`)
 - `PROJECT_EVENT_WATCH_MAX_EXECUTIONS` — Maximum configurable executions per standing watch (default: `100`)
 - `PROJECT_EVENT_WATCH_MAX_CONCURRENT` — Maximum configurable concurrent actions per standing watch (default: `3`)
-- `PROJECT_EVENT_WAKE_ENABLED` — Enables same-chat ProjectData event wake materialization for v2 `existing_session_prompt` and `runtime_interrupt` subscriptions; unset or `false` leaves event delivery pull-only (default: `false`)
+- `PROJECT_EVENT_WAKE_ENABLED` — Enables same-chat ProjectData event wake materialization for v2 `runtime_steer` (the default), `existing_session_prompt` and `runtime_interrupt` subscriptions; unset or `false` leaves event delivery pull-only (default: `false`)
 - `PROJECT_EVENT_WAKE_MATERIALIZATION_MIN_ALARM_DELAY_MS` — Minimum delay before a ProjectData alarm retries wake materialization after due matches are present (default: `1000`)
 - `PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_BASE_MS` — Initial persisted backoff for a failed event-wake materialization or retention alarm phase (default: `5000`)
 - `PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_MAX_MS` — Maximum persisted backoff for repeated event-wake materialization or retention alarm failures (default: `300000`)
 - `PROJECT_EVENT_WAKE_PROMPT_TTL_MS` — Hard lifetime for queued same-chat event wake prompts before physical delivery is rejected; also bounds how long an undelivered wake holds its chat (default: `86400000`)
 - `PROJECT_EVENT_WAKE_READ_GRACE_MS` — Read/ack grace retained on accepted event-wake batches after natural subscription expiry (default: `86400000`)
 - `PROJECT_EVENT_WAKE_TARGET_COOLDOWN_MS` — Delay before retrying an event wake for a chat whose transcript or project mailbox is at capacity. A chat with an undelivered wake is skipped until that wake is accepted, without this cooldown (default: `30000`)
-- `PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS` — Per-subscription cooldown after a wake batch is queued (default: `30000`)
+- `PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS` — Per-subscription cooldown after a wake batch is queued, and the smallest `minWakeIntervalSeconds` an agent can choose; a longer agent-chosen interval replaces it for that subscription (default: `30000`)
 - `PROJECT_EVENT_WAKE_SUBSCRIPTION_LIFETIME_MS` — Maximum delivery lifetime for an event subscription from creation (default: `86400000`)
 - `PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION` — Maximum wake deliveries per subscription over its lifetime (default: `50`)
 - `PROJECT_EVENT_CHANNEL_MAX_CHANNELS` — Maximum catalog generations per project (default: `128`)
@@ -420,8 +484,7 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_EVENT_RETENTION_BATCH_ROWS` — Maximum old rows pruned per event-subscription retention category per pass (default: `500`)
 
 Absent operational brake keys and KV read errors mean enabled. This fail-open
-behavior preserves availability and intentionally differs from the fail-closed
-trials entitlement switch.
+behavior preserves availability.
 
 GitHub Environment variables for the scheduled Durable Object monitor:
 
@@ -438,7 +501,7 @@ by the read-only cron-liveness check.
 
 ### Human Input and Web Push
 
-- `HUMAN_INPUT_TIMEOUT_MS` — Initial needs-input response window (default: `7200000`)
+- The question window is the admin setting `inbox.questionTimeoutMinutes` (slice G); the three `HUMAN_INPUT_*` variables below apply only to questions asked before it, held as attention markers
 - `HUMAN_INPUT_ESCALATION_FRACTIONS` — Comma-separated reminder points within the initial window (default: `0.25,0.75`)
 - `HUMAN_INPUT_UNDELIVERED_GRACE_MS` — Extension when no push delivery was confirmed (default: `7200000`)
 - `HUMAN_INPUT_MAX_WAIT_MS` — Hard maximum needs-input marker lifetime (default: `86400000`)
@@ -460,7 +523,7 @@ by the read-only cron-liveness check.
 
 - `DEVCONTAINER_CACHE_ENABLED` — Enables opportunistic devcontainer image caching
 - `DEVCONTAINER_CACHE_REGISTRY_HOST` — Managed registry host (default: `registry.cloudflare.com`)
-- `DEVCONTAINER_CACHE_REPOSITORY_PREFIX` — Prefix for generated cache repository names
+- `DEVCONTAINER_CACHE_REPOSITORY_PREFIX` — Prefix for generated cache repository names (default: empty, shipped: `sam-`; changing it orphans existing cache images)
 - `DEVCONTAINER_CACHE_CREDENTIAL_EXPIRATION_MINUTES` — TTL for short-lived registry credentials minted by the API
 
 ### Google OAuth and GCP
@@ -470,7 +533,7 @@ by the read-only cron-liveness check.
 - `GCP_WIF_POOL_ID`, `GCP_WIF_PROVIDER_ID`, `GCP_SERVICE_ACCOUNT_ID` — Default identifiers used by WIF setup.
 - `GCP_SERVICE_ACCOUNT_JSON_MAX_BYTES` — Maximum UTF-8 service-account JSON upload/paste size (default: `65536`).
 - `GCP_DEFAULT_ZONE` — Default Compute zone (default: `us-central1-a`).
-- `GCP_IMAGE_FAMILY`, `GCP_IMAGE_PROJECT`, `GCP_DISK_SIZE_GB` — Compute VM image and disk defaults.
+- `GCP_IMAGE_FAMILY`, `GCP_IMAGE_PROJECT` — Compute VM image defaults. Boot disk size is not an env var: it is the admin settings `gcpCatalog.bootDiskGbPerVcpu` (default 20) and `gcpCatalog.bootDiskMinGb` (default 50).
 - `GCP_TOKEN_CACHE_TTL_SECONDS` — Maximum short-lived access-token cache TTL (default: `3300`; capped by the provider-returned expiry).
 - `GCP_IDENTITY_TOKEN_EXPIRY_SECONDS` — WIF SAM identity-token lifetime (default: `600`).
 - `GCP_OPERATION_POLL_TIMEOUT_MS` — GCP asynchronous operation timeout (default: `300000`).
@@ -493,7 +556,6 @@ by the read-only cron-liveness check.
 - `VM_ADMISSION_LEASE_TTL_MS` — Fenced VM provisioning claim lease duration (default: `1200000`)
 - `VM_ADMISSION_RETRY_MIN_MS` / `VM_ADMISSION_RETRY_MAX_MS` — Bounds for retrying tasks waiting on VM capacity (defaults: `15000` / `60000`)
 - `VM_ADMISSION_WAIT_TIMEOUT_MS` — Maximum visible wait for VM capacity before failing the task (default: `7200000`)
-- `VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS` — Maximum bounded wait for an otherwise-eligible reusable VM node whose only blocker is an active workspace build queue (default: `1200000`)
 - `VM_ADMISSION_PROVIDER_COOLDOWN_MS` — Cooldown after provider/account capacity errors such as Hetzner server limits (default: `600000`)
 - `VM_ADMISSION_WAKE_BATCH_SIZE` — Maximum waiting TaskRunner DOs nudged by one capacity event (default: `25`)
 - `VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH` — Maximum provider diagnostic message persisted on admission/capacity rows (default: `500`)
@@ -530,8 +592,8 @@ by the read-only cron-liveness check.
 - `CHAT_SESSION_MESSAGE_LIMIT` — Default page size for chat session message REST responses when no limit is requested — used by the 3s poll and load-more (default: 500)
 - `CHAT_SESSION_MESSAGE_MAX` — Ceiling any chat session message request is clamped to; the project chat opens on the newest page, pages older history in, and never requests it (default: 50000)
 - `CHAT_SESSION_DELTA_MESSAGE_LIMIT` — Default page size for forward-cursor chat delta fetches after the newest cached browser message (default: 5000)
-- `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT` — Default result count for the `get_archived_tool_payloads` MCP tool (default: 10)
-- `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX` — Maximum result count accepted by the `get_archived_tool_payloads` MCP tool (default: 50)
+- `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT` — Default result count for the `sessions_read` method `tool_payloads` MCP tool (default: 10)
+- `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX` — Maximum result count accepted by the `sessions_read` method `tool_payloads` MCP tool (default: 50)
 - `SEARCH_QUERY_MAX_LENGTH` — Maximum total UTF-8 bytes retained from idea, task, knowledge, and message search input as a DoS guard; responses disclose truncation (default: `4096`)
 - `SEARCH_QUERY_MAX_TERM_LENGTH` — Maximum LIKE-safe UTF-8 bytes retained per search term; higher values clamp to SQLite's safe pattern ceiling (default: `48`)
 - `SEARCH_QUERY_MAX_TERMS` — Maximum whitespace-delimited terms retained from those search inputs; higher values clamp to the safe D1 parameter ceiling and responses disclose truncation (default: `40`)
@@ -572,14 +634,15 @@ by the read-only cron-liveness check.
 - `TERMINAL_SESSION_RECONCILE_BATCH_SIZE` — Maximum active ProjectData `chat_sessions` candidates reconciled per project per 5-minute sweep (default: 25; capped at 200)
 - `TERMINAL_SESSION_SUMMARY_RECONCILE_BATCH_SIZE` — Maximum active D1 `session_summaries` candidates reconciled globally per 5-minute sweep (default: 25; capped at 200)
 - `TERMINAL_SESSION_RECONCILE_DEFER_MS` — Retry delay for live-head, snapshot-protected, or temporarily ineligible terminal-session ledger candidates (default: 3600000; capped at 86400000)
-- `TASK_RUN_ABSOLUTE_CEILING_MS` — Absolute runaway-cost ceiling that fails even a demonstrably live task (default: 86400000 / 24h). Aged from the current runtime generation (`workspaces.created_at`), not `tasks.started_at`. Skipped when no runtime generation is allocated or the chat session holds a restorable sleep record; a sleep that is only in flight defers it for at most `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS`
-- `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS` — Longest the absolute ceiling defers to a sleep still in flight (scheduled, capturing, stopping or retrying) once passed, measured on runtime-generation age so sleep retries cannot renew it; keep it above `SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS` (default: 3600000 / 1h)
+- `TASK_RUN_ABSOLUTE_CEILING_MS` — Absolute runaway-cost ceiling that first queues conversation sleep within the bounded grace, then fails runtimes unable to sleep, even a demonstrably live task (default: 86400000 / 24h). Aged from the current runtime generation (`workspaces.created_at`), not `tasks.started_at`. Skipped when no runtime generation is allocated or the chat session holds a restorable sleep record; a sleep that is only in flight defers it for at most `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS`
+- `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS` — Longest the absolute ceiling allows a conversation sleep request or defers to a sleep still in flight (scheduled, capturing, stopping or retrying) once passed, measured on runtime-generation age so sleep retries cannot renew it; keep it above `SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS` (default: 3600000 / 1h)
 - `SESSION_ACTIVITY_STALE_THRESHOLD_MS` — Threshold before stale working activity is checked against authoritative SessionHost inventory (default: 300000)
 - `NODE_HEARTBEAT_STALE_SECONDS` — Staleness threshold for node health
 - `TASK_LIVENESS_PROBE_TIMEOUT_MS` — Per-candidate timeout for ACP and Instant lifecycle probes used by ProjectData heartbeat deferral, idle cleanup, and stuck-task reconciliation; timeout is inconclusive (default: 5000)
+- `PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS` — Background prompt target/recovery preparation and owner-approved recovery repair wait budget, also used for VM submit/receipt calls (default: `5000`). Owner repair timeout retains the pending consent/claim; late completion stays fenced and cannot acknowledge the timed-out sweep.
 - `TASK_LIVENESS_MAX_ACP_SESSIONS` — Maximum task-scoped ACP sessions inspected per liveness probe (default: 5)
 - `TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS` — Timeout for stale-VM-node health probes used by ProjectData idle cleanup and stuck-task reconciliation; a timeout is inconclusive and preserves the task/workspace (default: 5000)
-- `NODE_PROVISIONING_REQUEST_TIMEOUT_MS` — Durable direct provisioning allocation/reconciliation request budget, also used for background readiness and workspace dispatch (default: 5000).
+- `NODE_PROVISIONING_REQUEST_TIMEOUT_MS` — Durable direct provisioning per-request budget for Cloudflare calls during allocation/reconciliation, also used for background readiness and workspace dispatch (default: 5000). The attempt's cancellation budget is the admin setting `operations.nodeProvisioningAttemptDeadlineMs` (default 60000, range 5000–180000, never below this value); it cuts pre-create steps and the node DNS record only, not a started create, its publish, readiness or dispatch.
 - `NODE_PROVISIONING_RETRY_INTERVAL_MS` — Delay between durable direct provisioning attempts (default: 30000).
 - `NODE_PROVISIONING_MAX_AGE_MS` — Maximum age of a durable direct provisioning intent before retries stop (default: 900000 / 15 min).
 - `NODE_PROVISIONING_MAX_ATTEMPTS` — Maximum durable direct provisioning attempts before retries stop (default: 30). Either allocation age or attempt exhaustion starts a separate bounded diagnostic publication phase using the same retry interval and attempt limit. The age limit applies only to allocation/reconciliation; the unresolved intent is retained. Empty provider inventory never authorizes another create or proves cleanup. All four `NODE_PROVISIONING_*` overrides are optional positive integers; invalid or unset values use their defaults.
@@ -595,7 +658,7 @@ by the read-only cron-liveness check.
 - `TASK_RUNNER_WORKSPACE_DISPATCH_TIMEOUT_MS` — Max wait for VM-agent workspace dispatch acknowledgement (default: 600000)
 - `TASK_RUNNER_WORKSPACE_DISPATCH_BASE_DELAY_MS` — Base delay for workspace dispatch retry backoff (default: 30000)
 - `TASK_RUNNER_WORKSPACE_DISPATCH_MAX_DELAY_MS` — Maximum delay for workspace dispatch retry backoff (default: 120000)
-- `TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS` — Max wait for workspace-ready callback (default: 1800000)
+- `TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS` — Max time from a workspace's build start (the VM agent taking the node's build slot) to its ready callback (default: 1800000). Time queued for the slot is governed by the `operations.workspaceBuildQueueTimeoutMinutes` admin setting
 - `TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS` — D1 poll interval during the TaskRunner workspace-ready step (default: 30000)
 - `TASK_RUNNER_PROVISION_POLL_INTERVAL_MS` — TaskRunner provision status poll interval (default: 10000)
 - `TASK_RUNNER_PROVISION_TIMEOUT_MS` — Max time for TaskRunner node provisioning before permanent failure (default: 900000)
@@ -692,23 +755,14 @@ by the read-only cron-liveness check.
 - `WEBHOOK_DELIVERY_DEFAULT_PAGE_SIZE` — Default delivery-history page size (default: `25`)
 - `WEBHOOK_DELIVERY_MAX_PAGE_SIZE` — Maximum delivery-history page size (default: `100`)
 - `WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS` — Recovery lease for processing deliveries without a submitted task (default: `300`)
-- `MAX_TRIGGERS_PER_PROJECT` — Platform default trigger cap per project (default: `20`). Editable per project in the Settings → Scaling & Scheduling → Task Limits field; a `NULL` `projects.max_triggers` falls back to this env default.
+- `MAX_TRIGGERS_PER_PROJECT` — Platform default trigger cap per project (default: `20`, shipped: `10`). Editable per project in the Settings → Scaling & Scheduling → Task Limits field; a `NULL` `projects.max_triggers` falls back to this env default.
 
-### Trial Onboarding (`/try` flow)
+### Retired: Trial Onboarding
 
-Trial configuration is currently sourced from `apps/api/.env.example` and `apps/api/src/env.ts`. Summary:
-
-- `TRIAL_CLAIM_TOKEN_SECRET` — Worker secret; HMAC key for trial cookies (auto-provisioned by Pulumi)
-- `TRIAL_MONTHLY_CAP`, `TRIAL_WORKSPACE_TTL_MS`, `TRIAL_DATA_RETENTION_HOURS` — Global cap + lifetimes
-- `TRIAL_ANONYMOUS_USER_ID`, `TRIAL_ANONYMOUS_INSTALLATION_ID` — Sentinel rows for pre-claim ownership
-- `TRIAL_AGENT_TYPE_STAGING`, `TRIAL_AGENT_TYPE_PRODUCTION`, `TRIAL_DEFAULT_WORKSPACE_PROFILE` — Agent + profile selection
-- `TRIALS_ENABLED_KV_KEY`, `TRIAL_KILL_SWITCH_CACHE_MS` — Kill switch
-- `TRIAL_EXPIRE_BATCH_SIZE`, `TRIAL_CLEANUP_BATCH_SIZE`, `TRIAL_CLEANUP_DEADLINE_MS`, `TRIAL_NODE_DELETION_LOCK_STALE_MS` — Expired-trial cron cleanup bounds and stale deletion-lock retry
-- `TRIAL_ORCHESTRATOR_OVERALL_TIMEOUT_MS`, `TRIAL_ORCHESTRATOR_STEP_MAX_RETRIES`, `TRIAL_ORCHESTRATOR_RETRY_BASE_DELAY_MS`, `TRIAL_ORCHESTRATOR_RETRY_MAX_DELAY_MS` — Orchestrator retry budget
-- `TRIAL_ORCHESTRATOR_NODE_READY_TIMEOUT_MS`, `TRIAL_ORCHESTRATOR_AGENT_READY_TIMEOUT_MS`, `TRIAL_ORCHESTRATOR_WORKSPACE_READY_TIMEOUT_MS`, `TRIAL_ORCHESTRATOR_WORKSPACE_READY_POLL_INTERVAL_MS` — Step-level timeouts
-- `TRIAL_VM_SIZE`, `TRIAL_VM_LOCATION` — VM overrides for trial workspaces
-- `TRIAL_GITHUB_TIMEOUT_MS` — Per-request timeout for the default-branch probe (`fetchDefaultBranch`); falls back to `main` on timeout/404/error
-- `TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS`, `TRIAL_KNOWLEDGE_MAX_EVENTS` — Fast-path knowledge probe tunables
+The anonymous-trial product and every `TRIAL_*` variable were removed in November 2026. `/api/trial/*`
+answers `410 Gone`. The migration-seeded system user and placeholder installation rows remain
+(`SYSTEM_USER_ID` / `SYSTEM_INSTALLATION_ID` in `packages/shared/src/system-ids.ts`) and are not
+configurable.
 
 ## VM Agent Environment Variables
 
@@ -718,11 +772,35 @@ Trial configuration is currently sourced from `apps/api/.env.example` and `apps/
 
 ### Workspace Builds
 
+- `BUILD_CONTEXT_MAX_ACTIVE_PER_WORKSPACE` — VM-agent/Instant process environment limit on concurrent context collection and upload per workspace (default `1`; nonpositive values fall back to the default). Excess probes receive 409 immediately; they are not queued or retried and normal node builds continue. At the 2 GiB default bundle limit this permits at most 2 GiB of compressed spool per workspace; increasing concurrency multiplies that bound.
+- `BUILD_CONTEXT_CALLBACK_MAX_ATTEMPTS` / `BUILD_CONTEXT_CALLBACK_RETRY_DELAY` — VM-agent/Instant init and complete callbacks use bounded attempts (default `3`) with cancellable delay (`5s`). Retry transport failures, incomplete init JSON and HTTP 502/503/504; other errors including 409 remain failures. Each attempt uses `HTTP_CALLBACK_TIMEOUT` inside the overall publish context. Nonpositive retry settings fall back to defaults. Exact committed owner/attempt/key/size/SHA receipts are idempotent without timestamp/history changes; canceled/terminal jobs cannot be replayed.
+
+- `DEPLOY_PUBLISH_HEARTBEAT_INTERVAL` — VM publish-job heartbeat interval (default `1m`), independent of slow Docker build/save/upload progress. Each callback is bounded by `HTTP_CALLBACK_TIMEOUT`; API stall recovery starts only after a heartbeat has been recorded. Keep the API stall setting above interval plus callback/network grace. The API default deadline is `30m`, above the VM `DEPLOY_BUILD_PUBLISH_TIMEOUT` default `20m`; operators increasing the VM timeout must also raise the API deadline.
+
 - `WORKSPACE_BUILD_QUEUE_DEPTH` — Concurrent devcontainer build slots per workspace VM (default: `1`, supported range: `1` through `16`). Generated cloud-init passes this from the Worker env to newly provisioned VM Agent systemd services. Invalid values do not enable additional build slots and fall back to the default one-slot behavior.
+
+### Physical Workspace Deletion and Image-transfer Scratch
+
+- `NODE_USER_ID` / `NODE_RUNTIME_INCARNATION_ID` — Generated node owner and boot identity. Strict physical workspace deletion fails closed when either is missing; legacy nodes do not supply physical deletion proof.
+- `WORKSPACE_DELETION_RETRY_INTERVAL` — Go duration between bounded local retries of persisted deletion intents (default: `1m`). Retries resume the same exact operation under the workspace lifecycle lock. Unknown resources are never adopted based on age or status.
+- `WORKSPACE_DELETION_ATTEMPT_TIMEOUT` — Maximum Go duration for one deletion attempt, inline or retried (default: `30s`). This is the only per-attempt bound on the filesystem walk; an interrupted walk remains pending and resumes through the same intent. The deletion endpoint also uses it to bound the wait for the workspace lifecycle lock, then starts a fresh attempt timer once the lock is held.
+- `WORKSPACE_DELETION_BATCH_SIZE` — Retry intents processed per local retry pass (default: `32`).
+- `WORKSPACE_DELETION_TOMBSTONE_RETENTION` — Retention for finalized local deletion receipts (default: `168h`). Bounded pruning never removes unfinished deletion intents. Ownership records are removed only after verified completion.
+- `SAM_IMAGE_TRANSFER_SCRATCH_DIR` — Dedicated private image archive directory (default: `$TMPDIR/sam-image-transfers`, using the OS temporary directory when `TMPDIR` is unset). Only marked operations created by SAM's publish/deploy image transfers are candidates; previous unmarked temporary directories are preserved. The root must be private and owned by the agent user; ancestors must be root/agent-owned and not group/other-writable unless sticky. Unsafe custom roots and `TMPDIR` ancestors are rejected before creation.
+- `SAM_IMAGE_TRANSFER_SCRATCH_DRY_RUN` — Report candidates without deleting crash leftovers (default: `true`). Normal successful operations still remove their own scratch files while holding their lease.
+- `SAM_IMAGE_TRANSFER_SCRATCH_RETENTION` — Minimum Go duration before an abandoned marked transfer becomes a candidate (default: `24h`). A held operation lease always protects active exports, uploads, downloads and image loads regardless of age.
+- `SAM_IMAGE_TRANSFER_SCRATCH_MAX_ENTRIES` / `SAM_IMAGE_TRANSFER_SCRATCH_MAX_FILES` — Directory and per-operation file inspection bounds (defaults: `64` / `128`). The directory iterator continues across cycles.
+- `SAM_IMAGE_TRANSFER_SCRATCH_MAX_RECLAIM_BYTES` — Per-sweep candidate/reclaim byte budget (default: `1073741824`). An operation larger than the remaining budget is preserved in full.
+
+Scratch variables are read by the VM agent process; malformed values disable its scratch sweep. Workspace data, snapshot archives, user caches, nested Docker volumes, Docker build cache and deployment/rollback images are outside this sweep. Symlinks, hard links, mounts, nested directories and unknown files are protected.
 
 ### Git Operations
 
-- `GIT_CREDENTIAL_TIMEOUT` — Go duration for credential-helper callbacks to the local VM agent, such as `5s` or `1750ms` (default: `5s`)
+- `GIT_TOKEN_TIMEOUT` — total control-plane Git credential exchange budget, including retries (default: `25s`); caller cancellation/deadlines take precedence.
+- `GIT_TOKEN_ATTEMPT_TIMEOUT` — per-attempt HTTP budget (default: `10s`); shared transport also bounds response headers to `10s`.
+- `GIT_TOKEN_MAX_ATTEMPTS` — maximum attempts including the initial request (default: `3`, maximum: `10`).
+- `GIT_TOKEN_RETRY_DELAY` — initial exponential retry delay (default: `500ms`), capped by the total budget. Transport failures, interrupted bodies, HTTP 408/429/5xx retry; other 4xx and invalid responses fail immediately. Telemetry reports category/status/attempt counts without remote bodies or credential-bearing URLs.
+- `GIT_CREDENTIAL_TIMEOUT` — Go duration for credential-helper callbacks to the local VM agent, such as `30s` or `1750ms` (default: `30s`). Validation requires `GIT_TOKEN_ATTEMPT_TIMEOUT <= GIT_TOKEN_TIMEOUT < GIT_CREDENTIAL_TIMEOUT`, the attempt budget no greater than the shared 10s header deadline, and `GIT_TOKEN_RETRY_DELAY < GIT_TOKEN_TIMEOUT`. Inverted configurations fail startup with the relevant variable names; lower overrides must adjust all dependent budgets. Existing devcontainer helpers retain their rendered deadline until reinstalled/recreated; verify the installed script during rollout, not just the agent version.
 - `GIT_EXEC_TIMEOUT` — Timeout for git commands via docker exec (default: 30s)
 - `GIT_WORKTREE_TIMEOUT` — Timeout for git worktree create/remove (default: 30s)
 - `WORKTREE_CACHE_TTL` — Cache duration for parsed `git worktree list` results (default: 5s)
@@ -745,6 +823,10 @@ The agent renews each workspace callback token after a successful node heartbeat
 - `WORKSPACE_CALLBACK_TOKEN_RENEWAL_TIMEOUT` — Timeout for one renewal request (default: `15s`)
 - `WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_INITIAL` — First backoff after a transient renewal failure (default: `1m`)
 - `WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_MAX` — Backoff ceiling, also the wait after a "not yet due" answer (default: `30m`)
+- `MCP_TOKEN_ROTATION_TIMEOUT` — Timeout for one SAM MCP token exchange after a restart or rebuild delivered a new workspace credential (default: `10s`)
+- `MCP_TOKEN_ROTATION_MAX_ATTEMPTS` — Attempts per SAM MCP token on transient failures (default: `3`, capped at `10`)
+- `MCP_TOKEN_ROTATION_RETRY_DELAY` — First backoff between exchange attempts, doubling per attempt (default: `1s`)
+- `MCP_TOKEN_ROTATION_BUDGET` — Total time the exchange pass may delay provisioning (default: `1m`)
 - `MSG_AUTH_RENEWAL_WAIT` — How long chat-message delivery may stay paused on a rejected (401) workspace token before the pause is reported as an error (default: `15m`). Held messages are kept either way.
 
 ### File Operations
@@ -836,6 +918,11 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS` — Grace period passed to `docker stop --time` during eviction, in seconds (default: 10)
 - `DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS` — Durable callback backoff cap, in seconds (default: 300). Retry eligibility also respects the complete operation lease (default: 60 seconds), which can exceed the cap; delivery is heartbeat-paced
 - `DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS` — Deadline for resolving a pressured Docker container to a workspace before eviction, in seconds (default: 5)
+- `EVICTION_FINAL_SNAPSHOT_TIMEOUT_SECONDS` — VM-agent deadline for the post-stop final eviction capture (default `300`); on timeout the pre-stop capture is kept
+- `EVICTION_PARK_TIMEOUT` — VM-agent bound (Go duration, default `15m`) on how long a pending eviction owns an agent exit before the session host applies ordinary crash handling; must strictly exceed `2.5 × DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS + EVICTION_FINAL_SNAPSHOT_TIMEOUT_SECONDS + SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT + HTTP_CALLBACK_TIMEOUT` in consistent duration units (`360s` with defaults), otherwise loading/validation rejects it; zero uses the default and negative values are rejected (`armEvictionParkDeadlineLocked` in `packages/vm-agent/internal/acp/session_host_eviction.go`)
+- `SNAPSHOT_HELPER_MEMORY_LIMIT` — `docker --memory` for a stopped-workspace snapshot helper (default `1g`)
+- `SNAPSHOT_HELPER_PIDS_LIMIT` — `docker --pids-limit` for a stopped-workspace snapshot helper (default `256`)
+- `SNAPSHOT_HELPER_MIN_FREE_BYTES` — free space kept on the Docker root after committing a source's writable layer (default `1073741824`)
 
 ### Repeated agent check-ins
 
@@ -881,11 +968,55 @@ OAuth public endpoints additionally use `CONNECTOR_OAUTH_REQUEST_MAX_BYTES` (163
 
 Connector protocol overrides (optional GitHub environment variables are forwarded by both deployment sync steps; omitted values use runtime defaults):
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `CONNECTOR_REQUEST_MAX_BYTES` | 262144 | MCP request body bound |
-| `CONNECTOR_CLIENT_NAME_MAX_LENGTH` | 200 | Dynamic registration name length |
-| `CONNECTOR_REDIRECT_URI_MAX_COUNT` | 10 | Dynamic registration redirect count |
-| `CONNECTOR_INBOX_SESSION_LIMIT` | 5 | Maximum session/interaction-store fanout per inbox page |
+| Variable                           | Default | Purpose                                                 |
+| ---------------------------------- | ------- | ------------------------------------------------------- |
+| `CONNECTOR_REQUEST_MAX_BYTES`      | 262144  | MCP request body bound                                  |
+| `CONNECTOR_CLIENT_NAME_MAX_LENGTH` | 200     | Dynamic registration name length                        |
+| `CONNECTOR_REDIRECT_URI_MAX_COUNT` | 10      | Dynamic registration redirect count                     |
+| `CONNECTOR_INBOX_SESSION_LIMIT`    | 5       | Maximum session/interaction-store fanout per inbox page |
 
 `CONNECTOR_REGISTRATION_PER_IP_PER_HOUR` is a shared-egress abuse bound, not a user quota. Operators serving many clients behind vendor/NAT egress should size this and the atomic `CONNECTOR_REGISTRATION_GLOBAL_PER_HOUR` backstop for expected connection volume. All `CONNECTOR_*` environment fallbacks are forwarded into deployed Workers when explicitly configured; Admin settings remain higher-priority overrides.
+
+### Managed secret command execution (VM Agent)
+
+The `exec_with_secrets` job supervisor reads these VM-agent process environment overrides (not Worker bindings):
+
+| Variable                         | Default   | Purpose                                                            |
+| -------------------------------- | --------- | ------------------------------------------------------------------ |
+| `SECRET_EXEC_TIMEOUT_MS`         | `600000`  | Default command deadline                                           |
+| `SECRET_EXEC_MAX_TIMEOUT_MS`     | `3600000` | Maximum caller deadline                                            |
+| `SECRET_EXEC_OUTPUT_BYTES`       | `65536`   | Returned/persisted bytes per output stream                         |
+| `SECRET_EXEC_MAX_ACTIVE`         | `8`       | Concurrent secret execution jobs per VM-agent process              |
+| `SECRET_EXEC_BODY_BYTES`         | `1048576` | Private start request body limit                                   |
+| `SECRET_EXEC_TRANSPORT_GRACE_MS` | `2000`    | Additional host transport cleanup grace after in-container cleanup |
+| `SECRET_EXEC_GRACE_MS`           | `1000`    | TERM-to-KILL grace for the in-container process group              |
+
+Positive integer values override defaults. These are local VM-agent service/container configuration; generated cloud-init does not forward additional Worker variables for them. Existing `WORKSPACE_TOOL_TIMEOUT_MS` bounds start/status/cancel transport calls, not the accepted job lifetime. Project/profile/skill managed `isSecret` env values are placeholders in fresh ordinary delivery. Harness credentials and runtime secret files retain existing paths.
+
+## Durable GitHub trigger recovery
+
+Optional Worker variables; GitHub Environment configuration variables use the corresponding `GH_TRIGGER_RECOVERY_*` names. The reusable deployment workflow maps these to `GITHUB_TRIGGER_RECOVERY_*` Worker variables in both sync/deploy phases. GitHub reserves the `GITHUB_` prefix for configuration variables as well as secrets; no secrets are added.
+
+| Variable                                       | Default      | Purpose                                                                                            |
+| ---------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------- |
+| `GITHUB_TRIGGER_RECOVERY_MAX_WALL_TIME_MS`     | `20000`      | Serial background processing budget checked between candidates; one submission may finish after it |
+| `GITHUB_TRIGGER_RECOVERY_LEASE_MS`             | `60000`      | Processing lease; overlapping retries reuse one execution                                          |
+| `GITHUB_TRIGGER_RECOVERY_RETRY_BASE_MS`        | `30000`      | Initial retry backoff                                                                              |
+| `GITHUB_TRIGGER_RECOVERY_RETRY_MAX_MS`         | `900000`     | Maximum exponential backoff (at least base)                                                        |
+| `GITHUB_TRIGGER_RECOVERY_MAX_ATTEMPTS`         | `12`         | Automatic attempt budget including crashed claims                                                  |
+| `GITHUB_TRIGGER_RECOVERY_BATCH_SIZE`           | `25`         | Maximum recovery/expiry/retention rows per sweep                                                   |
+| `GITHUB_TRIGGER_RECOVERY_PAYLOAD_MAX_BYTES`    | `262144`     | Maximum verified trigger intake payload bytes                                                      |
+| `GITHUB_TRIGGER_RECOVERY_PAYLOAD_RETENTION_MS` | `86400000`   | Pending payload expiry threshold (cleanup may lag)                                                 |
+| `GITHUB_TRIGGER_RECOVERY_DEDUP_RETENTION_MS`   | `7776000000` | Dedup tombstone/audit age; at least payload retention                                              |
+
+Signed supported GitHub trigger events are stored before ACK. Intake storage failure returns non-success. Existing cron retries with exponential backoff and execution-derived task identities; kill switches continue to apply. Payloads are erased on completion/exhaustion and when the payload age budget is reached and bounded cleanup processes the row. Tombstones protect against same-ID replay during the configured dedup window; events replayed after retention are outside that guarantee. Old pre-upgrade audit IDs are never automatically replayed. Recovery cannot restore historical payloads that were never retained.
+
+Payload expiry and tombstone purge run in bounded batches on enabled cron ticks; backlog or a disabled operational loop can delay actual deletion beyond the configured age threshold.
+
+Recovery submissions run in one serial `waitUntil` loop so other operational sweeps are not delayed. Exhausted attempts/expired payloads use the existing throttled superadmin notification path with safe generic metadata.
+
+Archived chat Fork context: `ARCHIVED_FORK_HISTORY_MAX_CHARS` bounds retained human/assistant historical text (default `24000`), and `SAM_SESSION_MESSAGES_MAX_LIMIT` bounds the newest transcript page (default `200`). History is redacted before truncation; omitted text is disclosed.
+
+### External workload identity
+
+- `operations.workloadIdentityTokenTtlSeconds` — runtime Admin Settings → Operations control (not an environment variable) for exec_with_secrets OIDC lifetime; default `300`, allowed integer range `1`–`600`. Invalid values reject issuance. No additional keys; uses the installation RSA key under the distinct `/oidc` issuer.

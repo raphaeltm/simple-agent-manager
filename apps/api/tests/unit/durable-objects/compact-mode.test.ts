@@ -9,14 +9,14 @@
  * - contentSize accurately reflects UTF-8 byte count
  * - parseChatMessageRowCompact produces compact output
  */
-import { describe, expect, it } from 'vitest';
-
-import { getMessageToolContent } from '../../../src/durable-objects/project-data/messages';
+import { UNTRUSTED_TEXT_GUIDANCE } from '@simple-agent-manager/operations';
+import { getMessageToolContent } from '@simple-agent-manager/project-data/internal/do/messages';
 import {
   parseChatMessageRow,
   parseChatMessageRowCompact,
   stripToolMetadataContent,
-} from '../../../src/durable-objects/project-data/row-schemas';
+} from '@simple-agent-manager/project-data/internal/do/row-schemas';
+import { describe, expect, it } from 'vitest';
 
 describe('stripToolMetadataContent', () => {
   it('strips content array and adds contentSize', () => {
@@ -205,6 +205,135 @@ describe('stripToolMetadataContent', () => {
     expect(result.content).toBeUndefined();
     expect(result.contentSize).toBeGreaterThan(0);
     expect(result.rawOutput).toBeUndefined();
+  });
+});
+
+describe('stripToolMetadataContent — Operations approval card', () => {
+  const approvalId = '01M6NBQ7Z2W8X3Y4V5T6S7R8P9';
+  // The text `runOpsActTool` returns for ops_request_action: the untrusted envelope plus the
+  // public approval, with agent-written reason and evidence.
+  const resultText = JSON.stringify({
+    untrustedContent: true,
+    untrustedTextGuidance: UNTRUSTED_TEXT_GUIDANCE,
+    approval: {
+      id: approvalId,
+      action: 'delete_node',
+      targetType: 'node',
+      targetId: 'node-1',
+      reason: 'Agent-written reason that must not be persisted again',
+      evidenceSummary: 'agent evidence',
+      status: 'pending',
+    },
+    next: 'A superadmin was asked to approve this.',
+  });
+
+  it('keeps only the approval ID for the Claude tool name', () => {
+    const result = stripToolMetadataContent({
+      toolCallId: 'tc-approval',
+      title: 'mcp__sam-mcp__ops_request_action',
+      toolName: 'mcp__sam-mcp__ops_request_action',
+      status: 'completed',
+      content: [{ type: 'content', content: { type: 'text', text: resultText } }],
+    }) as Record<string, unknown>;
+
+    expect(result.content).toBeUndefined();
+    const rawOutput = result.rawOutput as Array<{ type: string; text: string }>;
+    expect(rawOutput).toEqual([
+      { type: 'text', text: JSON.stringify({ approval: { id: approvalId } }) },
+    ]);
+  });
+
+  it('matches the Codex <server>/<tool> title with no toolName', () => {
+    const result = stripToolMetadataContent({
+      toolCallId: 'tc-approval',
+      title: 'sam-mcp/ops_request_action',
+      status: 'completed',
+      content: [{ type: 'content', text: resultText }],
+    }) as Record<string, unknown>;
+
+    expect(JSON.parse((result.rawOutput as Array<{ text: string }>)[0]!.text)).toEqual({
+      approval: { id: approvalId },
+    });
+  });
+
+  it('keeps nothing for a failed request or another Operations tool', () => {
+    const failed = stripToolMetadataContent({
+      toolCallId: 'tc-approval',
+      title: 'mcp__sam-mcp__ops_request_action',
+      status: 'failed',
+      content: [{ type: 'content', text: 'action must be one of: …' }],
+    }) as Record<string, unknown>;
+    expect(failed.rawOutput).toBeUndefined();
+    expect(failed.contentSize).toBeGreaterThan(0);
+
+    const execute = stripToolMetadataContent({
+      toolCallId: 'tc-execute',
+      title: 'mcp__sam-mcp__ops_execute_action',
+      status: 'completed',
+      content: [{ type: 'content', text: resultText }],
+    }) as Record<string, unknown>;
+    expect(execute.rawOutput).toBeUndefined();
+  });
+});
+
+describe('stripToolMetadataContent — human input card', () => {
+  // The text handleRequestHumanInput returns for request_human_input.
+  const resultText = JSON.stringify({
+    message: 'Human input request recorded. Notification delivery has been scheduled.',
+    humanInputRequest: { id: 'marker-1', sessionId: 'session-1' },
+    notificationScheduled: true,
+  });
+
+  it('keeps only the marker reference for the Claude tool name', () => {
+    const result = stripToolMetadataContent({
+      toolCallId: 'tc-ask',
+      title: 'mcp__sam-mcp__request_human_input',
+      toolName: 'mcp__sam-mcp__request_human_input',
+      status: 'completed',
+      content: [{ type: 'content', content: { type: 'text', text: resultText } }],
+    }) as Record<string, unknown>;
+
+    expect(result.content).toBeUndefined();
+    expect(result.rawOutput).toEqual([
+      {
+        type: 'text',
+        text: JSON.stringify({ humanInputRequest: { id: 'marker-1', sessionId: 'session-1' } }),
+      },
+    ]);
+  });
+
+  it('matches the Codex <server>/<tool> title with no toolName', () => {
+    const result = stripToolMetadataContent({
+      toolCallId: 'tc-ask',
+      title: 'sam-mcp/request_human_input',
+      status: 'completed',
+      content: [{ type: 'content', text: resultText }],
+    }) as Record<string, unknown>;
+
+    expect(JSON.parse((result.rawOutput as Array<{ text: string }>)[0]!.text)).toEqual({
+      humanInputRequest: { id: 'marker-1', sessionId: 'session-1' },
+    });
+  });
+
+  it('keeps nothing for the legacy plain-text result or a reference without a session', () => {
+    const legacy = stripToolMetadataContent({
+      toolCallId: 'tc-ask',
+      title: 'mcp__sam-mcp__request_human_input',
+      status: 'completed',
+      content: [{ type: 'content', text: 'Human input request recorded.' }],
+    }) as Record<string, unknown>;
+    expect(legacy.rawOutput).toBeUndefined();
+    expect(legacy.contentSize).toBeGreaterThan(0);
+
+    const noSession = stripToolMetadataContent({
+      toolCallId: 'tc-ask',
+      title: 'mcp__sam-mcp__request_human_input',
+      status: 'completed',
+      content: [
+        { type: 'content', text: JSON.stringify({ humanInputRequest: { id: 'marker-1' } }) },
+      ],
+    }) as Record<string, unknown>;
+    expect(noSession.rawOutput).toBeUndefined();
   });
 });
 
@@ -400,5 +529,102 @@ describe('compact vs full mode payload size comparison', () => {
     // Compact mode should be at least 80% smaller for content-heavy rows
     const reduction = 1 - compactSize / fullSize;
     expect(reduction).toBeGreaterThan(0.8);
+  });
+});
+
+describe('stripToolMetadataContent — secret request card', () => {
+  // The text handleRequestSecret returns for request_secret. Names only; never a value.
+  const resultText = JSON.stringify({
+    message: 'Secret request recorded.',
+    secretRequest: { id: 'req-1', sessionId: 'session-1', name: 'STRIPE_API_KEY' },
+  });
+
+  it('keeps only the request ID for the Claude and Codex tool names', () => {
+    for (const title of ['mcp__sam-mcp__request_secret', 'sam-mcp/request_secret']) {
+      const result = stripToolMetadataContent({
+        toolCallId: 'tc-secret',
+        title,
+        status: 'completed',
+        content: [{ type: 'content', text: resultText }],
+      }) as Record<string, unknown>;
+      expect(JSON.parse((result.rawOutput as Array<{ text: string }>)[0]!.text)).toEqual({
+        secretRequest: { id: 'req-1' },
+      });
+    }
+  });
+
+  it('keeps the Codex result row content when the row names no tool', () => {
+    // Codex's completed update carries only toolCallId + status; the result JSON is the row's own
+    // content. Compact mode cannot match a card payload without a tool name, so the web recovers
+    // the request ID from `content` by toolCallId (typed-card-cross-harness.test.ts). This pins
+    // that compact history keeps that content column.
+    const row = parseChatMessageRowCompact({
+      id: 'msg-codex-result',
+      session_id: 'session-1',
+      role: 'tool',
+      content: resultText,
+      tool_metadata: JSON.stringify({
+        toolCallId: 'call_codex',
+        status: 'completed',
+        content: [{ type: 'content', content: { type: 'text', text: resultText } }],
+      }),
+      created_at: 1_794_492_918_886,
+      sequence: 3,
+    });
+    const meta = row.toolMetadata as Record<string, unknown>;
+    expect(meta.rawOutput).toBeUndefined();
+    expect(meta.content).toBeUndefined();
+    expect(meta.contentSize).toBeGreaterThan(0);
+    expect(JSON.parse(row.content)).toMatchObject({ secretRequest: { id: 'req-1' } });
+  });
+
+  it('keeps nothing for a failed request', () => {
+    const failed = stripToolMetadataContent({
+      toolCallId: 'tc-secret',
+      title: 'mcp__sam-mcp__request_secret',
+      status: 'failed',
+      content: [{ type: 'content', text: 'reason is required' }],
+    }) as Record<string, unknown>;
+    expect(failed.rawOutput).toBeUndefined();
+  });
+});
+
+describe('stripToolMetadataContent — inbox item card (inbox_write)', () => {
+  const strip = (title: string, text: string) =>
+    stripToolMetadataContent({
+      toolCallId: 'tc-inbox',
+      title,
+      status: 'completed',
+      content: [{ type: 'content', text }],
+    }) as Record<string, unknown>;
+  const kept = (result: Record<string, unknown>) =>
+    result.rawOutput === undefined
+      ? undefined
+      : JSON.parse((result.rawOutput as Array<{ text: string }>)[0]!.text);
+
+  it('keeps only the item reference of an ask or a review, for the Claude and Codex tool names', () => {
+    for (const kind of ['question', 'review']) {
+      const text = JSON.stringify({
+        message: 'Filed in the person’s inbox.',
+        inboxItem: { ref: 'ask:01ASK', id: '01ASK', sessionId: 'session-1', kind, blocking: false },
+        created: true,
+        similar: [{ ref: 'ask:01OTHER', kind: 'question', title: 'Other', match: 'title' }],
+      });
+      for (const title of ['mcp__sam-mcp__inbox_write', 'sam-mcp/inbox_write']) {
+        expect(kept(strip(title, text))).toEqual({
+          inboxItem: { ref: 'ask:01ASK', sessionId: 'session-1' },
+        });
+      }
+    }
+  });
+
+  it('keeps no card payload for an update or cancel, a non-ask ref, or a missing chat', () => {
+    for (const text of [
+      JSON.stringify({ ref: 'ask:01ASK', status: 'cancelled' }),
+      JSON.stringify({ inboxItem: { ref: 'secret:01X', sessionId: 'session-1' } }),
+      JSON.stringify({ inboxItem: { ref: 'ask:01ASK' } }),
+    ]) {
+      expect(kept(strip('mcp__sam-mcp__inbox_write', text))).toBeUndefined();
+    }
   });
 });

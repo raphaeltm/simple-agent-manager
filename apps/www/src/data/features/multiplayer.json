@@ -1,8 +1,8 @@
 {
   "slug": "multiplayer",
-  "label": "Multiplayer Projects",
-  "title": "Work on projects.\nNot alone.",
-  "subtitle": "Invite teammates with a link, approve access requests, and share agent profiles, skills, and project files. See who is running what, and whose keys are paying for it.",
+  "label": "Team Projects",
+  "title": "Your whole team's agents in one project",
+  "subtitle": "Everyone shares the project's agent settings and skills, and can follow anyone's session.",
   "summary": "Invite your team into a project, share profiles and skills, and see whose keys pay for shared automation.",
   "highlights": [
     "Any member creates an invite link; an owner or admin approves each request",

@@ -58,7 +58,7 @@ function createCredentialD1() {
       user_id TEXT,
       chat_session_id TEXT,
       node_id TEXT,
-      status TEXT
+      status TEXT, callback_generation TEXT
     );
     CREATE TABLE agent_sessions (
       id TEXT PRIMARY KEY,
@@ -171,7 +171,9 @@ describe('ACP usage callback real JWT authorization', () => {
   it('accepts a real signed workspace callback token and rejects a forged workspace token', async () => {
     const { sqlite, env } = createCredentialD1();
     seedProjectData();
-    const validToken = await signCallbackToken('workspace-1', env as never);
+    const validToken = await signCallbackToken('workspace-1', env as never, {
+      callbackGeneration: null,
+    });
 
     await expect(
       handleAcpUsageCallback(makeContext(env, validToken), {
@@ -195,7 +197,9 @@ describe('ACP usage callback real JWT authorization', () => {
     expect(projectDataService.admitProjectEvent).toHaveBeenCalledTimes(1);
 
     vi.mocked(projectDataService.admitProjectEvent).mockClear();
-    const otherWorkspaceToken = await signCallbackToken('workspace-2', env as never);
+    const otherWorkspaceToken = await signCallbackToken('workspace-2', env as never, {
+      callbackGeneration: null,
+    });
     await expect(
       handleAcpUsageCallback(makeContext(env, otherWorkspaceToken), {
         projectId: 'project-1',

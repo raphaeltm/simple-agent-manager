@@ -49,41 +49,33 @@ function makeState(): TaskRunnerState {
     workspaceDispatchLastAttemptAt: null,
     workspaceDispatchLastError: null,
     workspaceDispatchAckedAt: Date.now() - 20 * 60 * 1000,
-    workspaceReadyStartedAt: Date.now() - 20 * 60 * 1000,
     completed: false,
   };
 }
 
 describe('TaskRunner build-started callback handling', () => {
-  it('resets workspace-ready timeout from the build-started callback', async () => {
+  it('wakes the ready step without writing a clock of its own', async () => {
+    // The deadline is measured from the durable workspaces.build_started_at the callback route
+    // recorded (`workspace-creating-deadline.ts`); a duplicate notification must not move it.
     const { TaskRunner } = await import('../../../src/durable-objects/task-runner');
     const state = makeState();
-    const put = vi.fn(async (_key: string, value: TaskRunnerState) => {
-      Object.assign(state, value);
-    });
+    const before = structuredClone(state);
+    const put = vi.fn();
     const setAlarm = vi.fn(async () => undefined);
     const runner = Object.create(TaskRunner.prototype) as TaskRunner & {
       ctx: { storage: { put: typeof put; setAlarm: typeof setAlarm } };
       getState: () => Promise<TaskRunnerState>;
     };
-    const storage = {
-      put,
-      setAlarm,
-      get: async () => structuredClone(state),
-      transaction: async <T>(callback: (transaction: DurableObjectTransaction) => Promise<T>) =>
-        callback(storage as unknown as DurableObjectTransaction),
-    };
-    runner.ctx = { storage };
-    // D1 is only read when a newer wake attempt refuses the write; this one is current.
+    runner.ctx = { storage: { put, setAlarm } };
     Object.assign(runner, { env: { DATABASE: {} as D1Database } });
     runner.getState = vi.fn(async () => state);
 
-    const before = state.workspaceReadyStartedAt;
+    await runner.notifyWorkspaceBuildStarted('ws-1');
     await runner.notifyWorkspaceBuildStarted('ws-1');
 
-    expect(state.workspaceReadyStartedAt).toBeGreaterThan(before ?? 0);
-    expect(put).toHaveBeenCalledWith('state', state);
-    expect(setAlarm).toHaveBeenCalled();
+    expect(put).not.toHaveBeenCalled();
+    expect(state).toEqual(before);
+    expect(setAlarm).toHaveBeenCalledTimes(2);
   }, 15_000);
 
   it('ignores build-started callbacks for a different workspace', async () => {

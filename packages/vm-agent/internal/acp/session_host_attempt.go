@@ -12,8 +12,18 @@ import (
 // Implementations must return quickly; notification runs asynchronously.
 type PromptTerminalObserver func(stopReason string, promptErr error)
 
+// PromptCompletionContext is immutable categorical attribution captured before release.
+type PromptCompletionContext struct {
+	AgentSessionID       string
+	CredentialGeneration int64
+	PromptAttemptID      uint64
+	StartedAt            int64
+}
+
 type promptAttempt struct {
-	id uint64
+	id                   uint64
+	credentialGeneration int64
+	credentialReference  string
 	// ctx is the exact outgoing Prompt attempt lifetime. The ACP SDK creates
 	// inbound RequestPermission contexts from the connection instead, so nested
 	// permission work must explicitly inherit this context.
@@ -33,6 +43,7 @@ type promptAttempt struct {
 	checkpointOwned     bool
 	observer            PromptTerminalObserver
 	checkpointRequested atomic.Bool
+	guardedCancel       atomic.Bool // guarded stop/process monitor owns terminal activity
 }
 
 type checkpointRolloverEpisode struct {
@@ -86,6 +97,65 @@ func (e *checkpointRolloverEpisode) completeStrictResume(h *SessionHost, result 
 	}
 	e.completeLocked(result, false)
 	return result, true
+}
+
+// completeEviction supersedes checkpoint ownership only for a committed eviction.
+func (a *promptAttempt) completeEviction(h *SessionHost) bool {
+	a.terminalMu.Lock()
+	if a.terminal {
+		a.terminalMu.Unlock()
+		return false
+	}
+	a.checkpointOwned = false
+	a.terminal = true
+	a.terminalMu.Unlock()
+	a.publishCompletion(h, EvictedStopReason, errWorkspaceEvicted, nil)
+	return true
+}
+
+func (e *checkpointRolloverEpisode) completeEviction(h *SessionHost) bool {
+	e.decisionMu.Lock()
+	defer e.decisionMu.Unlock()
+	won := e.attempt.completeEviction(h)
+	e.completeLocked(CheckpointRolloverResult{State: "superseded", ACPSessionID: e.sessionID}, true)
+	return won
+}
+
+// supersedeIfSettled resolves a checkpoint caller after another terminal owner won.
+func (e *checkpointRolloverEpisode) supersedeIfSettled(h *SessionHost, stopped bool) bool {
+	e.decisionMu.Lock()
+	defer e.decisionMu.Unlock()
+	if !stopped && !e.attempt.isTerminal() {
+		return false
+	}
+	if stopped {
+		if !e.attempt.completeCheckpoint(h, "cancelled", context.Canceled) {
+			e.attempt.complete(h, "cancelled", context.Canceled)
+		}
+	}
+	e.completeLocked(CheckpointRolloverResult{State: "superseded", ACPSessionID: e.sessionID}, true)
+	return true
+}
+
+// completeFailure orders a checkpoint verdict against committed eviction.
+func (e *checkpointRolloverEpisode) completeFailure(h *SessionHost, result CheckpointRolloverResult, cause error, owned bool) bool {
+	e.decisionMu.Lock()
+	defer e.decisionMu.Unlock()
+	if e.terminal.Load() {
+		return false
+	}
+	var won bool
+	if owned {
+		won = e.attempt.completeCheckpoint(h, fatalErrorStopReason, cause)
+	} else {
+		won = e.attempt.complete(h, fatalErrorStopReason, cause)
+	}
+	if !won {
+		e.completeLocked(CheckpointRolloverResult{State: "superseded", ACPSessionID: e.sessionID}, true)
+		return false
+	}
+	e.completeLocked(result, true)
+	return true
 }
 
 func (a *promptAttempt) complete(h *SessionHost, stopReason string, promptErr error) bool {
@@ -146,12 +216,15 @@ func (a *promptAttempt) publishCompletion(h *SessionHost, stopReason string, pro
 	// Release the admission gate before publishing the terminal status. The
 	// public AcceptPrompt path also requires HostReady, so the intermediate
 	// prompting/starting/error status cannot admit a new prompt.
+	completion := PromptCompletionContext{AgentSessionID: h.config.SessionID, CredentialGeneration: a.credentialGeneration, PromptAttemptID: a.id, StartedAt: a.startedAt.UnixMilli()}
 	h.releasePrompt(a)
 	if finalize != nil {
 		finalize()
 	}
 	close(a.done)
-	if cb := h.config.OnPromptComplete; cb != nil {
+	if cb := h.config.OnPromptCompleteWithContext; cb != nil {
+		go cb(stopReason, promptErr, completion)
+	} else if cb := h.config.OnPromptComplete; cb != nil {
 		go cb(stopReason, promptErr)
 	}
 	if a.observer != nil {

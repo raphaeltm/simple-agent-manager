@@ -7,7 +7,10 @@ const PERIODS = [
   { value: '90d', label: '90d' },
 ];
 
-export const PeriodSelector: FC<{ value: string; onChange: (v: string) => void }> = ({ value, onChange }) => (
+export const PeriodSelector: FC<{ value: string; onChange: (v: string) => void }> = ({
+  value,
+  onChange,
+}) => (
   <div className="flex gap-1" role="group" aria-label="Time period">
     {PERIODS.map((p) => (
       <button

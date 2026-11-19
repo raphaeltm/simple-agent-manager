@@ -204,11 +204,11 @@ describe('ChatTimelineDrawer', () => {
     expect(dialog.getAttribute('aria-label')).toBe('Session timeline');
   });
 
-  it('renders backdrop with aria-hidden="true"', () => {
+  it('renders a presentational backdrop that assistive tech skips', () => {
     render(<ChatTimelineDrawer {...defaultProps} />);
     const dialog = screen.getByRole('dialog');
-    // Backdrop is the sibling before the dialog panel
+    // Backdrop is the sibling before the dialog panel (the SAM Glass scrim)
     const backdrop = dialog.previousElementSibling;
-    expect(backdrop?.getAttribute('aria-hidden')).toBe('true');
+    expect(backdrop?.getAttribute('role')).toBe('presentation');
   });
 });

@@ -25,10 +25,18 @@ function seedWorkspace(id = WORKSPACE_ID): void {
   sqlite
     .prepare(
       `INSERT INTO workspaces
-        (id, project_id, user_id, name, repository, branch, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'org/repo', 'main', 'running', ?, ?)`
+        (id, project_id, user_id, name, repository, branch, status, chat_session_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'org/repo', 'main', 'running', ?, ?, ?)`
     )
-    .run(id, PROJECT_ID, USER_ID, `workspace-${id}`, iso(-60 * 60 * 1000), iso(-5 * 60 * 1000));
+    .run(
+      id,
+      PROJECT_ID,
+      USER_ID,
+      `workspace-${id}`,
+      CHAT_SESSION_ID,
+      iso(-60 * 60 * 1000),
+      iso(-5 * 60 * 1000)
+    );
 }
 
 function seedRecoveryTask(

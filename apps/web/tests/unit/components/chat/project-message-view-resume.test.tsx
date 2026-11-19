@@ -48,7 +48,8 @@ const commentApiMocks = vi.hoisted(() => ({
 
 vi.mock('../../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../../src/lib/api')>()),
-  resumeAgentSession: (...args: unknown[]) => mockResumeAgentSession(...args),
+  // The project chat resumes through the session-scoped route, which a grantee can use too.
+  resumeChatSessionAgent: (...args: unknown[]) => mockResumeAgentSession(...args),
   resetIdleTimer: (...args: unknown[]) => mockResetIdleTimer(...args),
   getChatSession: (...args: unknown[]) => mockGetChatSession(...args),
   getWorkspace: (...args: unknown[]) => mockGetWorkspace(...args),
@@ -170,6 +171,10 @@ function makeSessionResponse(overrides: Record<string, unknown> = {}) {
     stoppedAt: null,
     messageCount: 1,
     task: null,
+    // The server says who the viewer is on every detail response; these tests drive the
+    // owner's view.
+    isMine: true,
+    viewerAccess: 'owner',
     ...overrides,
   };
 }
@@ -235,7 +240,7 @@ describe('ProjectMessageView — auto-resume', () => {
     expect(screen.queryByRole('dialog', { name: 'Archive conversation?' })).toBeNull();
   });
 
-  it('calls resumeAgentSession when sending follow-up to idle session', async () => {
+  it('resumes the agent through the session route when sending follow-up to idle session', async () => {
     render(<ProjectMessageView projectId={PROJECT_ID} sessionId={SESSION_ID} />);
 
     // Wait for initial load
@@ -249,7 +254,7 @@ describe('ProjectMessageView — auto-resume', () => {
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
 
     await waitFor(() => {
-      expect(mockResumeAgentSession).toHaveBeenCalledWith(WORKSPACE_ID, AGENT_SESSION_ID);
+      expect(mockResumeAgentSession).toHaveBeenCalledWith(PROJECT_ID, SESSION_ID, AGENT_SESSION_ID);
     });
   });
 
@@ -380,7 +385,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
     await waitForAutoResumeDelay();
 
     await waitFor(() => {
-      expect(mockResumeAgentSession).toHaveBeenCalledWith(WORKSPACE_ID, AGENT_SESSION_ID);
+      expect(mockResumeAgentSession).toHaveBeenCalledWith(PROJECT_ID, SESSION_ID, AGENT_SESSION_ID);
     });
   });
 
@@ -726,7 +731,7 @@ describe('ProjectMessageView — delivery/resume failure UX', () => {
     });
   });
 
-  it('UX3: a terminal RUNTIME_STOPPED failure terminates the session and disables the composer', async () => {
+  it('UX3: a terminal RUNTIME_STOPPED failure archives the chat and offers Fork instead of Send', async () => {
     mockSendFollowUpPrompt.mockRejectedValue(
       new ApiClientError('RUNTIME_STOPPED', 'The Instant runtime has stopped.', 410)
     );
@@ -735,9 +740,10 @@ describe('ProjectMessageView — delivery/resume failure UX', () => {
     await waitFor(() => expect(mockGetChatSession).toHaveBeenCalled());
     await sendMessage('are you still there?');
 
-    // The existing terminated presentation takes over…
-    await screen.findByText('This session has ended.');
-    // …the composer is gone (disabled)…
+    // The archived presentation offers a fresh Fork; the old runtime stays stopped.
+    await screen.findByPlaceholderText('Write a prompt to fork this archived chat...');
+    expect(screen.getByRole('button', { name: 'Fork', exact: true })).toBeDisabled();
+    // Sending to the stopped runtime remains unavailable.
     expect(screen.queryByPlaceholderText(/send a message/i)).not.toBeInTheDocument();
     // …and there is no dismissible retry banner inviting futile retries.
     expect(screen.queryByRole('button', { name: /^dismiss$/i })).not.toBeInTheDocument();

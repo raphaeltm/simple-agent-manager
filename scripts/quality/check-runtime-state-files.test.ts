@@ -76,15 +76,18 @@ describe('runtime state Git contract', () => {
     const repo = makeGitRepo();
     for (const path of runtimePaths) writeState(repo, path);
     expect(runCheck(repo).status).toBe(0);
-    expect(git(repo, 'ls-files', '--others', '--exclude-standard').trim().split('\n')).toEqual(
-      runtimePaths
-    );
+    expect(git(repo, 'ls-files', '--others', '--exclude-standard').trim().split('\n')).toEqual([
+      '.workflow-state.md',
+    ]);
 
     const env = { ...process.env, GIT_INDEX_FILE: join(repo, '.git', 'snapshot-index') };
     const snapshotGit = (...args: string[]) =>
       execFileSync('git', args, { cwd: repo, env, encoding: 'utf8' }).trim();
     snapshotGit('read-tree', 'HEAD');
     snapshotGit('add', '--all');
+    // Local workflow checkpoints may be ignored for publication; an explicit
+    // synthetic snapshot still retains them without touching the real index.
+    snapshotGit('add', '--force', '--', ...runtimePaths);
     const tree = snapshotGit('write-tree');
     for (const path of runtimePaths) {
       expect(git(repo, 'show', `${tree}:${path}`)).toBe(`durable state for ${path}\n`);
@@ -104,7 +107,7 @@ describe('runtime state Git contract', () => {
     (path) => {
       const repo = makeGitRepo();
       writeState(repo, path);
-      git(repo, 'add', '--', path);
+      git(repo, 'add', '--force', '--', path);
       const staged = runCheck(repo);
       expect(staged.status).toBe(1);
       expect(staged.stderr).toContain(`- ${path}`);
@@ -118,7 +121,7 @@ describe('runtime state Git contract', () => {
   it('allows staged removal of accidentally committed state', () => {
     const repo = makeGitRepo();
     writeState(repo, runtimePaths[0]);
-    git(repo, 'add', '--', runtimePaths[0]);
+    git(repo, 'add', '--force', '--', runtimePaths[0]);
     git(repo, 'commit', '-m', 'accidental runtime state');
     git(repo, 'rm', '--cached', '--', runtimePaths[0]);
     expect(runCheck(repo).status).toBe(0);

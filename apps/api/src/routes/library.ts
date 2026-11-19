@@ -12,6 +12,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { requireTrustedWriteOrigin } from '../lib/browser-write-origin';
 import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
@@ -21,7 +22,6 @@ import {
   downloadFile,
   getDownloadTimeoutMs,
   getFile,
-  getUploadMaxBytes,
   listDirectories,
   listFiles,
   moveFile,
@@ -31,54 +31,40 @@ import {
   validateDirectory,
   validateFilename,
 } from '../services/file-library';
-import { getMaxSearchLength } from '../services/file-library-config';
 import {
   contentDispositionFilename,
   downloadContentType,
   hasPreviewableContent,
   isInlinePreviewable,
+  parseByteRange,
   previewHeaders,
 } from '../services/file-serving-policy';
+import {
+  assertDebugPackageVisibleTo,
+  debugPackageListOptions,
+  isDebugPackageDirectory,
+  userMayReadDebugPackages,
+} from '../services/fleet-ops/debug-package-access';
 import {
   getPreviewHostname,
   getPreviewUrlTtlSeconds,
   mintPreviewPath,
 } from '../services/interactive-preview';
+import { loadLibraryDownload } from '../services/library-memory';
+import { getEncryptionKey, requireParam, validateSearchLength } from './library-route-helpers';
+import { withLibraryUpload } from './library-upload-request';
 
 const libraryRoutes = new Hono<{ Bindings: Env }>();
-
-// ---------------------------------------------------------------------------
-// Helper: get encryption key
-// ---------------------------------------------------------------------------
-
-function validateSearchLength(search: string | undefined, env: Env): void {
-  if (search && search.length > getMaxSearchLength(env)) {
-    throw errors.badRequest(
-      `Search query exceeds maximum length of ${getMaxSearchLength(env)} characters`
-    );
-  }
-}
-
-function getEncryptionKey(env: Env): string {
-  const key = env.LIBRARY_ENCRYPTION_KEY ?? env.ENCRYPTION_KEY;
-  if (!key) {
-    throw errors.internal('Encryption key not configured');
-  }
-  return key;
-}
-
-function requireParam(value: string | undefined, name: string): string {
-  if (!value) {
-    throw errors.badRequest(`Missing required parameter: ${name}`);
-  }
-  return value;
-}
 
 // ---------------------------------------------------------------------------
 // POST /upload — multipart file upload
 // ---------------------------------------------------------------------------
 
-libraryRoutes.post('/upload', requireAuth(), requireApproved(), async (c) => {
+// Multipart is a CORS-simple request, so a same-site workspace page could post it with the
+// session cookie and no preflight. See lib/browser-write-origin.ts.
+const uploadOrigin = requireTrustedWriteOrigin('library upload');
+
+libraryRoutes.post('/upload', requireAuth(), requireApproved(), uploadOrigin, async (c) => {
   const auth = getAuth(c);
   const userId = auth.user.id;
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
@@ -86,66 +72,37 @@ libraryRoutes.post('/upload', requireAuth(), requireApproved(), async (c) => {
 
   await requireProjectCapability(db, projectId, userId, 'project:update');
 
-  // Parse multipart form data
-  let formData: Record<string, string | File>;
-  try {
-    formData = await c.req.parseBody();
-  } catch {
-    throw errors.badRequest('Failed to parse multipart form data');
-  }
+  return withLibraryUpload(c.req.raw, c.env, async (upload) => {
+    const { filename, mimeType, description, directory, data } = upload;
+    validateFilename(filename, c.env);
+    const tags = upload.tags
+      ?.split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const encryptionKey = getEncryptionKey(c.env);
 
-  const file = formData['file'];
-  if (!(file instanceof File)) {
-    throw errors.badRequest('Missing "file" field in multipart form data');
-  }
+    const result = await uploadFile(
+      db,
+      c.env.R2,
+      encryptionKey,
+      c.env,
+      projectId,
+      userId,
+      filename,
+      mimeType,
+      data,
+      {
+        description,
+        tags,
+        // A browser upload has user provenance. Agent/task identities must come from
+        // authenticated server context, never from multipart fields supplied by a client.
+        uploadSource: 'user',
+        directory,
+      }
+    );
 
-  // Check file size before reading
-  const maxBytes = getUploadMaxBytes(c.env);
-  if (file.size > maxBytes) {
-    throw errors.badRequest(`File exceeds maximum size of ${maxBytes} bytes`);
-  }
-
-  const filename = (formData['filename'] as string) || file.name || 'unnamed';
-  validateFilename(filename, c.env);
-
-  const mimeType = (formData['mimeType'] as string) || file.type || 'application/octet-stream';
-  const description = formData['description'] as string | undefined;
-  const tagsRaw = formData['tags'] as string | undefined;
-  const tags = tagsRaw
-    ? tagsRaw
-        .split(',')
-        .map((t) => t.trim())
-        .filter(Boolean)
-    : undefined;
-  const uploadSource = (formData['uploadSource'] as string) || 'user';
-  const uploadSessionId = formData['uploadSessionId'] as string | undefined;
-  const uploadTaskId = formData['uploadTaskId'] as string | undefined;
-  const directory = formData['directory'] as string | undefined;
-
-  const data = await file.arrayBuffer();
-  const encryptionKey = getEncryptionKey(c.env);
-
-  const result = await uploadFile(
-    db,
-    c.env.R2,
-    encryptionKey,
-    c.env,
-    projectId,
-    userId,
-    filename,
-    mimeType,
-    data,
-    {
-      description,
-      tags,
-      uploadSource: uploadSource === 'agent' ? 'agent' : 'user',
-      uploadSessionId,
-      uploadTaskId,
-      directory,
-    }
-  );
-
-  return c.json(result, 201);
+    return c.json(result, 201);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -161,42 +118,26 @@ libraryRoutes.put('/:fileId/replace', requireAuth(), requireApproved(), async (c
 
   await requireProjectCapability(db, projectId, userId, 'project:update');
 
-  let formData: Record<string, string | File>;
-  try {
-    formData = await c.req.parseBody();
-  } catch {
-    throw errors.badRequest('Failed to parse multipart form data');
-  }
+  return withLibraryUpload(c.req.raw, c.env, async ({ filename, mimeType, description, data }) => {
+    validateFilename(filename, c.env);
+    const encryptionKey = getEncryptionKey(c.env);
 
-  const file = formData['file'];
-  if (!(file instanceof File)) {
-    throw errors.badRequest('Missing "file" field in multipart form data');
-  }
+    const result = await replaceFile(
+      db,
+      c.env.R2,
+      encryptionKey,
+      c.env,
+      projectId,
+      fileId,
+      userId,
+      filename,
+      mimeType,
+      data,
+      { description }
+    );
 
-  const filename = (formData['filename'] as string) || file.name || 'unnamed';
-  validateFilename(filename, c.env);
-
-  const mimeType = (formData['mimeType'] as string) || file.type || 'application/octet-stream';
-  const description = formData['description'] as string | undefined;
-
-  const data = await file.arrayBuffer();
-  const encryptionKey = getEncryptionKey(c.env);
-
-  const result = await replaceFile(
-    db,
-    c.env.R2,
-    encryptionKey,
-    c.env,
-    projectId,
-    fileId,
-    userId,
-    filename,
-    mimeType,
-    data,
-    { description }
-  );
-
-  return c.json(result, 200);
+    return c.json(result, 200);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -232,7 +173,14 @@ libraryRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
     limit: query['limit'] ? parseInt(query['limit'], 10) : undefined,
   };
 
-  const result = await listFiles(db, c.env, projectId, filters);
+  const mayReadDebugPackages = userMayReadDebugPackages(auth.user.role);
+  const result = await listFiles(
+    db,
+    c.env,
+    projectId,
+    filters,
+    debugPackageListOptions(mayReadDebugPackages)
+  );
   return c.json(result, 200);
 });
 
@@ -254,8 +202,11 @@ libraryRoutes.get('/directories', requireAuth(), requireApproved(), async (c) =>
   const search = c.req.query('search') || undefined;
   validateSearchLength(search, c.env);
   const directories = await listDirectories(db, projectId, parentDirectory, c.env, search);
+  const visible = userMayReadDebugPackages(auth.user.role)
+    ? directories
+    : directories.filter((d) => !isDebugPackageDirectory(`${d.path.replace(/\/$/, '')}/`));
 
-  return c.json({ directories }, 200);
+  return c.json({ directories: visible }, 200);
 });
 
 // ---------------------------------------------------------------------------
@@ -272,6 +223,7 @@ libraryRoutes.get('/:fileId', requireAuth(), requireApproved(), async (c) => {
   await requireProjectAccess(db, projectId, userId);
 
   const result = await getFile(db, projectId, fileId);
+  assertDebugPackageVisibleTo(auth.user.role, result.file.directory);
   return c.json(result, 200);
 });
 
@@ -288,26 +240,35 @@ libraryRoutes.get('/:fileId/download', requireAuth(), requireApproved(), async (
 
   await requireProjectAccess(db, projectId, userId);
 
+  // Stored size bounds the plaintext, so small downloads share the memory budget.
+  const { file: stored } = await getFile(db, projectId, fileId);
+  assertDebugPackageVisibleTo(auth.user.role, stored.directory);
   const encryptionKey = getEncryptionKey(c.env);
   const timeoutMs = getDownloadTimeoutMs(c.env);
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-  const { data, file } = await Promise.race([
-    downloadFile(db, c.env.R2, encryptionKey, projectId, fileId),
-    new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(() => reject(errors.internal('Download timed out')), timeoutMs);
-    }),
-  ]).finally(() => clearTimeout(timeoutHandle));
-
-  return new Response(data, {
-    status: 200,
-    headers: {
+  const owned = await loadLibraryDownload(
+    () => downloadFile(db, c.env.R2, encryptionKey, projectId, fileId, stored.sizeBytes),
+    timeoutMs,
+    stored.sizeBytes
+  );
+  try {
+    const { data, file } = owned.value;
+    assertDebugPackageVisibleTo(auth.user.role, file.directory);
+    const headers = {
       'Content-Type': downloadContentType(file.mimeType),
       'Content-Length': String(data.byteLength),
       'Content-Disposition': `attachment; filename="${contentDispositionFilename(file.filename)}"`,
       'Cache-Control': 'private, no-store',
       'X-Content-Type-Options': 'nosniff',
-    },
-  });
+    };
+    if (c.req.method === 'HEAD') {
+      owned.dispose();
+      return new Response(null, { status: 200, headers });
+    }
+    return new Response(owned.stream(), { status: 200, headers });
+  } catch (error) {
+    owned.dispose();
+    throw error;
+  }
 });
 
 libraryRoutes.post(
@@ -370,6 +331,7 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
   // inline-previewable (rejected here) — so no extension-sniffed HTML/SVG is
   // ever served in a way the browser would execute.
   const { file } = await getFile(db, projectId, fileId);
+  assertDebugPackageVisibleTo(auth.user.role, file.directory);
   const effectiveMime = resolveEffectiveMimeType(file.mimeType, file.filename);
   if (!isInlinePreviewable(effectiveMime)) {
     throw errors.badRequest('File type is not supported for inline preview');
@@ -386,29 +348,46 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
 
   const encryptionKey = getEncryptionKey(c.env);
   const timeoutMs = getDownloadTimeoutMs(c.env);
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-  const { data } = await Promise.race([
-    downloadFile(db, c.env.R2, encryptionKey, projectId, fileId),
-    new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(() => reject(errors.internal('Preview timed out')), timeoutMs);
-    }),
-  ]).finally(() => clearTimeout(timeoutHandle));
-  if (!hasPreviewableContent(effectiveMime, data)) {
-    throw errors.badRequest('File type is not supported for inline preview');
-  }
+  // Stored size bounds the plaintext, so small previews share the memory budget.
+  const owned = await loadLibraryDownload(
+    () => downloadFile(db, c.env.R2, encryptionKey, projectId, fileId, file.sizeBytes),
+    timeoutMs,
+    file.sizeBytes
+  );
+  try {
+    const { data } = owned.value;
+    if (!hasPreviewableContent(effectiveMime, data)) {
+      throw errors.badRequest('File type is not supported for inline preview');
+    }
 
-  const { contentType, contentSecurityPolicy } = previewHeaders(effectiveMime, c.env);
-  return new Response(data, {
-    status: 200,
-    headers: {
+    const { contentType, contentSecurityPolicy } = previewHeaders(effectiveMime, c.env);
+    const headers: Record<string, string> = {
       'Content-Type': contentType,
-      'Content-Length': String(data.byteLength),
       'Content-Disposition': `inline; filename="${contentDispositionFilename(file.filename)}"`,
       'Cache-Control': 'private, no-store',
       'X-Content-Type-Options': 'nosniff',
       'Content-Security-Policy': contentSecurityPolicy,
-    },
-  });
+      'Accept-Ranges': 'bytes',
+    };
+    const range = parseByteRange(c.req.header('Range'), data.byteLength);
+    if (range === 'unsatisfiable') {
+      headers['Content-Range'] = `bytes */${data.byteLength}`;
+      owned.dispose();
+      return new Response(null, { status: 416, headers });
+    }
+    const start = range ? range.start : 0;
+    const end = range ? range.end + 1 : data.byteLength;
+    headers['Content-Length'] = String(end - start);
+    if (range) headers['Content-Range'] = `bytes ${range.start}-${range.end}/${data.byteLength}`;
+    if (c.req.method === 'HEAD') {
+      owned.dispose();
+      return new Response(null, { status: range ? 206 : 200, headers });
+    }
+    return new Response(owned.stream(start, end), { status: range ? 206 : 200, headers });
+  } catch (error) {
+    owned.dispose();
+    throw error;
+  }
 });
 
 // ---------------------------------------------------------------------------

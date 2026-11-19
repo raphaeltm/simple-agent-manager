@@ -11,6 +11,7 @@ import { toTaskResponse } from '../../lib/mappers';
 import { requireRouteParam } from '../../lib/route-helpers';
 import { errors } from '../../middleware/error';
 import { jsonValidator, UpdateTaskStatusSchema } from '../../schemas';
+import { fileTaskFailure } from '../../services/inbox/system-errors';
 import { verifyCallbackToken } from '../../services/jwt';
 import * as notificationService from '../../services/notification';
 import * as projectDataService from '../../services/project-data';
@@ -18,6 +19,7 @@ import {
   isLifecycleTaskStatus,
   recordTaskLifecycleEventBestEffort,
 } from '../../services/project-lifecycle-events';
+import { retireTaskCancellationPrompts } from '../../services/task-cancellation-prompts';
 import {
   canTransitionTaskStatus,
   getAllowedTaskTransitions,
@@ -41,22 +43,13 @@ import {
   setTaskStatus,
   updateTaskExecutionStepFromCallback,
 } from './_helpers';
+import * as callbackPr from './callback-pull-request';
+import { handleProviderLimitCallback } from './provider-limit-callback';
 
 /**
- * Task callback route — mounted BEFORE projectsRoutes in index.ts
- * to avoid the blanket requireAuth() middleware that validates browser session
- * cookies (not callback JWTs).
- *
- * Auth: Callback JWT via Bearer token, verified inline with verifyCallbackToken().
- *
- * This is the FOURTH instance of the Hono middleware scope leak fix pattern:
- * - 2026-03-12: workspace callback routes (post-mortem exists)
- * - 2026-03-25: deployment identity token route (post-mortem exists)
- * - 2026-03-25: node ACP heartbeat route (post-mortem exists)
- * - 2026-05-12: task callback route (this fix)
- *
- * See: .claude/rules/06-api-patterns.md (Hono middleware scoping)
- * See: docs/notes/2026-05-12-task-callback-middleware-leak-postmortem.md
+ * Task callbacks use workspace JWTs, not browser cookies. Mount this route before
+ * projectsRoutes to avoid its blanket requireAuth() middleware scope leak.
+ * See .claude/rules/06-api-patterns.md and the 2026-05-12 callback postmortem.
  */
 const taskCallbackRoute = new Hono<{ Bindings: Env }>();
 
@@ -99,6 +92,11 @@ taskCallbackRoute.post(
     const revalidateWorkspace = () =>
       assertWorkspaceCallbackIdentityCurrent(c.env, workspaceSnapshot, 'task_status');
 
+    if (!body.toStatus) {
+      const handled = await handleProviderLimitCallback(c.env, task, body, revalidateWorkspace);
+      if (handled) return c.json(toTaskResponse(handled));
+    }
+
     // --- Execution-step-only update (no status transition) ---
     // When executionStep is provided without toStatus, update the step and
     // optionally persist gitPushResult outputs without changing task status.
@@ -140,10 +138,27 @@ taskCallbackRoute.post(
         stepUpdate.outputPrUrl = body.outputPrUrl?.trim() || null;
       }
 
+      const projectRepository = await callbackPr.prepareCallbackPullRequest(
+        db,
+        projectId,
+        task,
+        body.gitPushResult,
+        stepUpdate
+      );
+
       const refreshed = await updateTaskExecutionStepFromCallback(db, task, stepUpdate, {
         env: c.env,
         expected: workspaceSnapshot,
       });
+
+      await callbackPr.storeCallbackPullRequest(
+        c.env,
+        projectId,
+        taskId,
+        projectRepository,
+        stepUpdate.outputPrUrl,
+        revalidateWorkspace
+      );
 
       // Record activity event for execution step update
       c.executionCtx.waitUntil(
@@ -161,7 +176,7 @@ taskCallbackRoute.post(
             {
               title: task.title,
               executionStep: body.executionStep,
-              pushed: body.gitPushResult?.pushed ?? false,
+              ...(body.gitPushResult ? { pushed: body.gitPushResult.pushed } : {}),
             }
           );
         })().catch((e) => {
@@ -237,7 +252,7 @@ taskCallbackRoute.post(
               taskId,
               {
                 title: task.title,
-                pushed: body.gitPushResult?.pushed ?? false,
+                ...(body.gitPushResult ? { pushed: body.gitPushResult.pushed } : {}),
                 branchName: body.gitPushResult?.branchName ?? null,
                 prUrl: body.gitPushResult?.prUrl ?? null,
               }
@@ -254,6 +269,10 @@ taskCallbackRoute.post(
       const blocked = await computeBlockedForTask(db, task.id);
       return c.json(toTaskResponse(refreshed, blocked));
     }
+
+    // Delayed old-agent errors cannot terminalize a task after its verified sleep.
+    if (task.status === 'sleeping' && body.toStatus === 'failed')
+      return c.json(toTaskResponse(task));
 
     // --- Standard status transition ---
     if (!isTaskStatus(body.toStatus)) {
@@ -281,10 +300,7 @@ taskCallbackRoute.post(
       return c.json(toTaskResponse(task, blocked));
     }
 
-    if (
-      task.status === body.toStatus &&
-      callbackTerminalStatus
-    ) {
+    if (task.status === body.toStatus && callbackTerminalStatus) {
       await revalidateWorkspace();
       await cleanupTerminalTaskResourcesOrThrow(c.env, taskId, {
         status: callbackTerminalStatus,
@@ -353,6 +369,16 @@ taskCallbackRoute.post(
       }
     }
 
+    if (body.toStatus === 'failed') {
+      const handled = await handleProviderLimitCallback(c.env, task, body, revalidateWorkspace);
+      if (handled) return c.json(toTaskResponse(handled));
+    }
+
+    const prUpdate = await callbackPr.prepareStatusCallbackPullRequest(db, projectId, task, body);
+    if (body.toStatus === 'cancelled') {
+      await retireTaskCancellationPrompts(c.env, task, revalidateWorkspace);
+      await revalidateWorkspace();
+    }
     const updatedTask = await setTaskStatus(
       db,
       task,
@@ -364,10 +390,12 @@ taskCallbackRoute.post(
         outputSummary: body.outputSummary,
         outputBranch: body.outputBranch,
         outputPrUrl: body.outputPrUrl,
+        ...prUpdate.options,
         errorMessage: body.errorMessage,
         callbackFence: { env: c.env, expected: workspaceSnapshot },
       }
     );
+    await prUpdate.store(c.env, taskId, revalidateWorkspace);
 
     const lifecycleStatus = body.toStatus;
     if (task.status !== lifecycleStatus && isLifecycleTaskStatus(lifecycleStatus)) {
@@ -453,6 +481,11 @@ taskCallbackRoute.post(
                 outputBranch: updatedTask.outputBranch,
               });
             } else if (body.toStatus === 'failed') {
+              // File the inbox error item first so the notification opens it (slice E). Filing
+              // never throws; a normal ending files nothing and keeps the chat link.
+              const filed = await fileTaskFailure(c.env, projectId, taskId);
+              // The sweep filed it first and already told the person: one notification per item.
+              if (filed && !filed.created) return;
               await notificationService.notifyTaskFailed(c.env, task.userId, {
                 projectId,
                 projectName,
@@ -460,6 +493,7 @@ taskCallbackRoute.post(
                 taskTitle: task.title,
                 errorMessage: body.errorMessage,
                 sessionId,
+                inboxRef: filed?.ref ?? null,
               });
             }
           })().catch((e) => {

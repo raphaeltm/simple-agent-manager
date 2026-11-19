@@ -1,20 +1,35 @@
 import { drizzle } from 'drizzle-orm/d1';
 
+import { createDeploymentPublishJobPorts } from '../app-deployment-ports/publish-jobs';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { runAgentEmailRecovery } from '../services/agent-email/recovery';
+import { CAPACITY_POOL_CONTINUATION_CRON } from '../services/capacity-pool-refresh-defaults';
+import { drainCloudflareBuilds } from '../services/cloudflare-build-executor';
 import { reconcileDiagnosisRuns } from '../services/diagnosis-runner';
 import { reconcileDiagnosticIncidents } from '../services/diagnostic-incident-reconciliation';
+import { refreshGcpPriceTableIfDue } from '../services/gcp-price-table';
+import { runGitHubTriggerRecovery } from '../services/github-trigger-recovery';
+import { runInboxAutomationErrorSweep } from '../services/inbox/automation-errors';
+import { runInboxAskSweep } from '../services/inbox/sweep';
+import { runInboxSystemErrorSweep } from '../services/inbox/system-errors';
+import { runLifecycleLatencyWatchdog } from '../services/lifecycle-latency';
+import { runNodeTunnelCleanupSweep } from '../services/node-tunnel-cleanup';
 import { isOperationalLoopEnabled } from '../services/operational-kill-switch';
+import { runRuntimeSecretRequestSweep } from '../services/runtime-secret-request-maintenance';
 import { checkProvisioningTimeouts } from '../services/timeout';
 import { migrateOrphanedWorkspaces } from '../services/workspace-migration';
 import { runWorkspaceResourceHistoryCleanup } from '../services/workspace-resource-history';
-import { runAnalyticsForwardJob } from './analytics-forward';
+import { runScheduledCapacityPoolContinuations } from './capacity-pool-continuation';
 import { runScheduledCapacityPoolReconciliation } from './capacity-pool-reconciliation';
 import { runScheduledComposeImageArtifactCleanup } from './compose-image-artifact-cleanup';
 import { runComputeUsageCleanup } from './compute-usage-cleanup';
 import { runCronTriggerSweep } from './cron-triggers';
 import { runScheduledDeploymentReleaseRetention } from './d1-retention';
+import { DAILY_CRON, scheduleDailyJobs } from './daily-jobs';
+import { runDeploymentNodeCleanup } from './deployment-node-cleanup';
+import { runDeploymentPublishJobSweep } from './deployment-publish-jobs';
 import { notifyFailedSweeps } from './failed-sweep-notifications';
 import { runIncidentTriggerSweep } from './incident-triggers';
 import { runNodeCleanupSweep } from './node-cleanup';
@@ -30,15 +45,14 @@ import { runSessionSleepSweep } from './session-sleep';
 import { runSessionSleepLifecycleRepair } from './session-sleep-lifecycle-repair';
 import { runScheduledSessionSnapshotPurge } from './session-snapshot-purge';
 import { runSessionTaskReconciliation } from './session-task-reconciliation';
+import { runDeadWakeClaimReconciliation } from './session-wake-claim-reconciliation';
 import { runSetupSessionSweep } from './setup-session-sweep';
 import { recoverStuckTasks } from './stuck-tasks';
 import { createSweepIsolator } from './sweep-isolation';
 import { runTerminalNodeLifecycleRepair } from './terminal-node-lifecycle-repair';
 import { runTerminalSessionLedgerReconciliation } from './terminal-session-ledger-reconciliation';
-import { runTrialExpireSweep } from './trial-expire';
-import { runTrialRolloverAudit } from './trial-rollover';
-import { runTrialWaitlistCleanup } from './trial-waitlist-cleanup';
 import { runTriggerExecutionCleanup } from './trigger-execution-cleanup';
+import { runWorkspaceEvictionRecovery } from './workspace-eviction-recovery';
 
 /** Cloudflare scheduled entry point. Special cron jobs are not part of the operational sweep brake. */
 export async function scheduled(
@@ -46,72 +60,48 @@ export async function scheduled(
   env: Env,
   ctx: ExecutionContext
 ): Promise<void> {
-  const rolloverCron = env.TRIAL_CRON_ROLLOVER_CRON ?? '0 5 1 * *';
-  const waitlistCleanupCron = env.TRIAL_CRON_WAITLIST_CLEANUP ?? '0 4 * * *';
-
-  const isDailyForward = controller.cron === '0 3 * * *';
+  if (controller.cron === CAPACITY_POOL_CONTINUATION_CRON) {
+    const type = 'capacity-pool-continuation';
+    log.info('cron.started', { cron: controller.cron, type });
+    const continuationSweeps = createSweepIsolator(env);
+    const result = await continuationSweeps.isolate('capacity_pool_continuation', async () => {
+      if (!(await isOperationalLoopEnabled(env, 'cron'))) {
+        log.info('cron.skipped_disabled', { cron: controller.cron, type, switch: 'cron' });
+        return { resumed: 0, failed: 0, skipped: true };
+      }
+      return { ...(await runScheduledCapacityPoolContinuations(env)), skipped: false };
+    });
+    const failedSweeps = continuationSweeps.failedSweeps();
+    log.info('cron.completed', {
+      cron: controller.cron,
+      type,
+      resumed: result?.resumed ?? null,
+      failed: result?.failed ?? 1,
+      skipped: result?.skipped ?? false,
+      failedSweeps,
+    });
+    if (failedSweeps.length > 0) {
+      await notifyFailedSweeps(env, failedSweeps).catch(() => {
+        log.error('cron.failed_sweep_notification_failed', { type });
+      });
+    }
+    return;
+  }
+  const isDailyForward = controller.cron === DAILY_CRON;
   const isMonthlyCostAggregation = isHourlyPlatformMaintenanceCron(controller.cron);
-  const isTrialRollover = controller.cron === rolloverCron;
-  const isTrialWaitlistCleanup = controller.cron === waitlistCleanupCron;
 
   const cronType = isDailyForward
     ? 'daily-forward'
     : isMonthlyCostAggregation
       ? 'monthly-cost-aggregation'
-      : isTrialRollover
-        ? 'trial-rollover'
-        : isTrialWaitlistCleanup
-          ? 'trial-waitlist-cleanup'
-          : 'sweep';
+      : 'sweep';
 
   log.info('cron.started', { cron: controller.cron, type: cronType });
 
   if (scheduleHourlyPlatformMaintenance(controller.cron, env, ctx.waitUntil.bind(ctx))) return;
 
   if (isDailyForward) {
-    ctx.waitUntil(
-      (async () => {
-        const forward = await runAnalyticsForwardJob(env);
-        log.info('cron.completed', {
-          cron: controller.cron,
-          type: 'daily-forward',
-          forwardEnabled: forward.enabled,
-          forwardEventsQueried: forward.eventsQueried,
-          forwardSegmentSent: forward.segment.sent,
-          forwardGA4Sent: forward.ga4.sent,
-          forwardCursorUpdated: forward.cursorUpdated,
-        });
-      })()
-    );
-    return;
-  }
-
-  if (isTrialRollover) {
-    ctx.waitUntil(
-      (async () => {
-        const rollover = await runTrialRolloverAudit(env);
-        log.info('cron.completed', {
-          cron: controller.cron,
-          type: 'trial-rollover',
-          trialRolloverMonthKey: rollover.monthKey,
-          trialRolloverPruned: rollover.pruned,
-        });
-      })()
-    );
-    return;
-  }
-
-  if (isTrialWaitlistCleanup) {
-    ctx.waitUntil(
-      (async () => {
-        const waitlist = await runTrialWaitlistCleanup(env);
-        log.info('cron.completed', {
-          cron: controller.cron,
-          type: 'trial-waitlist-cleanup',
-          trialWaitlistPurged: waitlist.purged,
-        });
-      })()
-    );
+    scheduleDailyJobs(env, controller.cron, ctx.waitUntil.bind(ctx));
     return;
   }
 
@@ -122,6 +112,16 @@ export async function scheduled(
 
   // Every sweep is isolated so one failure cannot suppress later recovery work.
   const sweeps = createSweepIsolator(env);
+  await sweeps.isolate('deployment_publish_jobs', () =>
+    runDeploymentPublishJobSweep(env, createDeploymentPublishJobPorts(env), ctx.waitUntil.bind(ctx))
+  );
+  await sweeps.isolate('cloudflare_build_drain', () => drainCloudflareBuilds(env));
+  const githubTriggerRecovery = await sweeps.isolate('github_trigger_recovery', () =>
+    runGitHubTriggerRecovery(env, ctx.waitUntil.bind(ctx))
+  );
+  const agentEmailRecovery = await sweeps.isolate('agent_email_recovery', () =>
+    runAgentEmailRecovery(env, ctx.waitUntil.bind(ctx))
+  );
   const diagnosisRecovery = await sweeps.isolate('diagnosis_reconcile', () =>
     reconcileDiagnosisRuns(env)
   );
@@ -140,13 +140,36 @@ export async function scheduled(
   const sessionSleepLifecycleRepair = await sweeps.isolate('session_sleep_lifecycle_repair', () =>
     runSessionSleepLifecycleRepair(env, new Date())
   );
+  const evictionRecovery = await sweeps.isolate('workspace_eviction_recovery', () =>
+    runWorkspaceEvictionRecovery(env, ctx.waitUntil.bind(ctx))
+  );
+  const deadWakeClaims = await sweeps.isolate('dead_wake_claim_reconciliation', () =>
+    runDeadWakeClaimReconciliation(env, ctx.waitUntil.bind(ctx))
+  );
   const nodeCleanup = await sweeps.isolate('node_cleanup', () => runNodeCleanupSweep(env));
+  await sweeps.isolate('deployment_node_cleanup', () =>
+    runDeploymentNodeCleanup(env, ctx.waitUntil.bind(ctx))
+  );
   const terminalNodeLifecycleRepair = await sweeps.isolate('terminal_node_lifecycle_repair', () =>
     runTerminalNodeLifecycleRepair(env)
   );
-  const providerOrphans = await sweeps.isolate('provider_orphan_reconciliation', () =>
-    runProviderOrphanReconciliation(env)
+  // After node teardown: releases tunnels of incarnations torn down this tick and retries
+  // any pending Cloudflare tunnel/DNS deletion (services/node-tunnel-cleanup.ts).
+  const nodeTunnelCleanup = await sweeps.isolate('node_tunnel_cleanup', () =>
+    runNodeTunnelCleanupSweep(env)
   );
+  let providerOrphans: Awaited<ReturnType<typeof runProviderOrphanReconciliation>> | undefined;
+  await sweeps.isolate('provider_orphan_reconciliation', async () => {
+    const result = await runProviderOrphanReconciliation(env);
+    providerOrphans = result;
+    // Platform-account and infrastructure failures fail the sweep through the durable path,
+    // keeping partial-success counters. Failures confined to one user/project account are
+    // `accountErrors`: logged per account, they do not fail the platform sweep.
+    if (result.errors > 0) {
+      throw new Error(`Provider orphan reconciliation encountered ${result.errors} errors`);
+    }
+    return result;
+  });
   const capacityPools = await sweeps.isolate('capacity_pool_reconciliation', () =>
     runScheduledCapacityPoolReconciliation(env)
   );
@@ -154,11 +177,30 @@ export async function scheduled(
     runObservabilityPurge(env)
   );
   const cronTriggers = await sweeps.isolate('cron_triggers', () => runCronTriggerSweep(env));
+  const lifecycleLatency = await sweeps.isolate('lifecycle_latency_watchdog', () =>
+    runLifecycleLatencyWatchdog(env)
+  );
   const incidentTriggers = await sweeps.isolate('incident_triggers', () =>
     runIncidentTriggerSweep(env)
   );
   const triggerCleanup = await sweeps.isolate('trigger_execution_cleanup', () =>
     runTriggerExecutionCleanup(env)
+  );
+  // Two indexed reads per idle tick; work is capped by secrets.expirySweepBatchSize.
+  const secretRequestSweep = await sweeps.isolate('runtime_secret_request_sweep', () =>
+    runRuntimeSecretRequestSweep(env)
+  );
+  // Two indexed reads per idle tick; work is capped by inbox.sweepBatchSize.
+  const inboxAskSweep = await sweeps.isolate('inbox_ask_sweep', () => runInboxAskSweep(env));
+  // One indexed scan of recently failed tasks plus one UPDATE per idle tick; filings capped by
+  // inbox.errorSweepBatchSize (`services/inbox/system-errors.ts`).
+  const inboxSystemErrorSweep = await sweeps.isolate('inbox_system_error_sweep', () =>
+    runInboxSystemErrorSweep(env)
+  );
+  // Failing or auto-paused automations: bounded by inbox.errorSweepBatchSize
+  // (`services/inbox/automation-errors.ts`).
+  const inboxAutomationErrorSweep = await sweeps.isolate('inbox_automation_error_sweep', () =>
+    runInboxAutomationErrorSweep(env)
   );
   const sessionTaskRepair = await sweeps.isolate('session_task_reconciliation', () =>
     runSessionTaskReconciliation(env)
@@ -190,7 +232,25 @@ export async function scheduled(
   const computeUsageClosed = await sweeps.isolate('compute_usage_cleanup', () =>
     runComputeUsageCleanup(env)
   );
-  const trialExpire = await sweeps.isolate('trial_expire', () => runTrialExpireSweep(env));
+
+  // After the lifecycle sweeps on purpose. When due (about once a day, or once per retry
+  // interval while it keeps failing) it downloads Google's price list under
+  // gcpCatalog.priceRefreshBudgetMs (default 90 s); on other ticks it costs one KV read. Earlier
+  // in the chain that budget would delay session_sleep (`.claude/rules/47`). Catalogs pick up a
+  // refreshed table on their next build.
+  // A refresh where every credential failed and at least one failure was a genuine fault throws
+  // here so it reaches failed-sweep notifications; its backoff was already recorded, so the next
+  // tick still waits. Failures that are owner-fixable states of a user's Google project (Cloud
+  // Billing API off) are shown on that credential instead, not raised to operators.
+  const gcpPriceTable = await sweeps.isolate('gcp_price_table', async () => {
+    const result = await refreshGcpPriceTableIfDue(env);
+    if (result.status === 'failed' && result.faults > 0) {
+      throw new Error(
+        `GCP price refresh failed for ${result.attempts} credential(s), ${result.faults} with a fault`
+      );
+    }
+    return result;
+  });
 
   // Runs after every lifecycle sweep on purpose. When its persisted cadence is due it copies
   // whole terminal sessions between ProjectData objects under PROJECT_DATA_ARCHIVE_WALL_TIME_MS
@@ -236,6 +296,8 @@ export async function scheduled(
     diagnosticIncidentsDeleted: incidentRecovery?.deleted,
     diagnosticIncidentMetadataRepaired: incidentRecovery?.incidentMetadataRepaired,
     provisioningTimedOut: timedOut,
+    lifecycleLatencyAlerted: lifecycleLatency?.alerted,
+    lifecycleLatencyDeferred: lifecycleLatency?.deferred,
     workspacesMigrated: migrated,
     sleepLifecycleRepairSelected: sessionSleepLifecycleRepair?.selected,
     sleepLifecycleRepairRepaired: sessionSleepLifecycleRepair?.repaired,
@@ -245,15 +307,23 @@ export async function scheduled(
     staleNodesDestroyed: nodeCleanup?.staleDestroyed,
     lifetimeNodesDestroyed: nodeCleanup?.lifetimeDestroyed,
     lifetimeNodesSkipped: nodeCleanup?.lifetimeSkipped,
+    providerDeletionsRequested: nodeCleanup?.providerDeletionsRequested,
+    providerDeletionsPending: nodeCleanup?.providerDeletionsPending,
     nodeCleanupErrors: nodeCleanup?.errors,
+    nodeTunnelsReleased: nodeTunnelCleanup?.released,
+    nodeTunnelCleanupsAttempted: nodeTunnelCleanup?.attempted,
+    nodeTunnelsCleaned: nodeTunnelCleanup?.cleaned,
     orphanedWorkspacesFlagged: nodeCleanup?.orphanedWorkspacesFlagged,
     orphanedNodesDestroyed: nodeCleanup?.orphanedNodesDestroyed,
     orphanedNodesSkipped: nodeCleanup?.orphanedNodesSkipped,
+    emptyNodesHandedToWarm: nodeCleanup?.emptyNodesHandedToWarm,
+    emptyNodesHandoffSkipped: nodeCleanup?.emptyNodesHandoffSkipped,
     stoppedWorkspacesQueued: nodeCleanup?.stoppedWorkspacesQueued,
     stoppedWorkspacesDeleted: nodeCleanup?.stoppedWorkspacesDeleted,
     cfContainersDestroyed: nodeCleanup?.cfContainersDestroyed,
     providerOrphansScanned: providerOrphans?.scanned,
     providerOrphansDestroyed: providerOrphans?.destroyed,
+    providerOrphansDeletionRequested: providerOrphans?.deletionRequested,
     providerOrphansSkippedUnlabeled: providerOrphans?.skippedUnlabeled,
     providerOrphansSkippedForeignManaged: providerOrphans?.skippedForeignManaged,
     providerOrphansSkippedForeignEnvironment: providerOrphans?.skippedForeignEnv,
@@ -266,12 +336,14 @@ export async function scheduled(
     providerOrphansSkippedAmbiguousClaim: providerOrphans?.skippedAmbiguousClaim,
     providerOrphanSkipReason: providerOrphans?.skipReason,
     providerOrphanErrors: providerOrphans?.errors,
+    providerOrphanAccountErrors: providerOrphans?.accountErrors,
     capacityPoolInstallationEnsured: capacityPools?.installationEnsured,
     capacityPoolUsersEnsured: capacityPools?.usersEnsured,
     capacityPoolProjectsEnsured: capacityPools?.projectsEnsured,
     capacityPoolReconciliationSkipped: capacityPools?.skipped,
     capacityPoolReconciliationSkipReason: capacityPools?.skipReason,
     capacityPoolReconciliationNextEligibleAt: capacityPools?.nextEligibleAt,
+    gcpPriceTableStatus: gcpPriceTable?.status,
     stuckTasksFailedQueued: stuckTasks?.failedQueued,
     stuckTasksFailedDelegated: stuckTasks?.failedDelegated,
     stuckTasksFailedInProgress: stuckTasks?.failedInProgress,
@@ -280,6 +352,10 @@ export async function scheduled(
     stuckTaskDoHealthChecked: stuckTasks?.doHealthChecked,
     observabilityPurgedByAge: observabilityPurge?.deletedByAge,
     observabilityPurgedByCount: observabilityPurge?.deletedByCount,
+    evictionRecovery,
+    deadWakeClaims,
+    githubTriggerRecovery,
+    agentEmailRecovery,
     cronTriggersChecked: cronTriggers?.checked,
     cronTriggersFired: cronTriggers?.fired,
     cronTriggersSkipped: cronTriggers?.skipped,
@@ -300,6 +376,15 @@ export async function scheduled(
     projectEventSourceOutboxAdmitted: triggerCleanup?.projectEventSourceOutboxAdmitted,
     credentialLimitWindowsPurged: triggerCleanup?.credentialLimitWindowsPurged,
     triggerExecCleanupErrors: triggerCleanup?.errors,
+    secretRequestsExpired: secretRequestSweep?.expired,
+    secretRequestAgentsNotified: secretRequestSweep?.agentsNotified,
+    secretRequestNoticesRetried: secretRequestSweep?.noticesRetried,
+    inboxAsksExpired: inboxAskSweep?.expired,
+    inboxAskNoticesRetried: inboxAskSweep?.noticesRetried,
+    inboxSystemErrorsFiled: inboxSystemErrorSweep?.filed,
+    inboxSystemErrorsClosed: inboxSystemErrorSweep?.closed,
+    inboxAutomationErrorsFiled: inboxAutomationErrorSweep?.filed,
+    inboxAutomationErrorsClosed: inboxAutomationErrorSweep?.closed,
     sessionTaskRepairScanned: sessionTaskRepair?.scanned,
     sessionTaskRepairRepaired: sessionTaskRepair?.repaired,
     sessionTaskRepairReused: sessionTaskRepair?.reused,
@@ -355,6 +440,21 @@ export async function scheduled(
     projectDataArchiveShardingFailed: projectDataArchiveSharding?.failed,
     projectDataArchiveShardingChunksCopied: projectDataArchiveSharding?.chunksCopied,
     projectDataArchiveShardingRowsCopied: projectDataArchiveSharding?.rowsCopied,
+    projectDataArchiveShardingStopReason: projectDataArchiveSharding?.stopReason,
+    projectDataArchiveShardingYielded: projectDataArchiveSharding?.yielded,
+    projectDataArchiveShardingBudgetWindowExhausted:
+      projectDataArchiveSharding?.budgetWindowExhausted,
+    projectDataArchiveShardingBudgetUnaffordable: projectDataArchiveSharding?.budgetUnaffordable,
+    projectDataArchiveShardingReclaimedRows: projectDataArchiveSharding?.reclaimedRows,
+    projectDataArchiveShardingVerifiedChunks: projectDataArchiveSharding?.verifiedChunks,
+    projectDataArchiveShardingStoragePressureMinUsageRatio:
+      projectDataArchiveSharding?.storagePressureMinUsageRatio,
+    projectDataArchiveShardingStoragePressureHeldSessions:
+      projectDataArchiveSharding?.storagePressureHeldSessions,
+    projectDataArchiveShardingStoragePressureHeldProjects:
+      projectDataArchiveSharding?.storagePressureHeldProjects,
+    projectDataArchiveShardingStoragePressureHeldMessages:
+      projectDataArchiveSharding?.storagePressureHeldMessages,
     sessionSleepSelected: sessionSleep?.selected,
     sessionSleepReconciled: sessionSleep?.reconciled,
     sessionSleepClaimed: sessionSleep?.claimed,
@@ -393,11 +493,6 @@ export async function scheduled(
     composeArtifactCleanupDeletedBytes: composeArtifactCleanup?.deletedBytes,
     composeArtifactCleanupErrors: composeArtifactCleanup?.errors,
     computeUsageOrphansClosed: computeUsageClosed,
-    trialExpired: trialExpire?.expired,
-    trialProjectsLinked: trialExpire?.projectsLinked,
-    trialWorkspacesDeleted: trialExpire?.workspacesDeleted,
-    trialNodesDeleted: trialExpire?.nodesDeleted,
-    trialCleanupErrors: trialExpire?.cleanupErrors,
     setupSessionsSwept: setupSessionSweep?.toreDown,
     setupSessionOrphansForced: setupSessionSweep?.orphansForced,
     setupSessionSweepErrors: setupSessionSweep?.errors,

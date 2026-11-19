@@ -34,28 +34,34 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     ],
   },
   {
-    filePath: 'apps/api/src/services/submit-task.ts',
+    filePath: 'apps/api/src/services/submit-vm-task.ts',
     table: 'tasks',
-    owner: 'submitTaskImplementation',
-    role: 'shared user task submission service',
+    owner: 'submitVmTask',
+    role: 'VM task submission after shared input validation',
     canonicalService: 'resolveTaskStartPlacement -> startTaskRunnerDO',
     requiredEvidence: CANONICAL_TASK_START,
   },
   {
-    filePath: 'apps/api/src/routes/mcp/dispatch-tool.ts',
+    filePath: 'apps/api/src/routes/mcp/dispatch-task-storage.ts',
     table: 'tasks',
-    owner: 'handleDispatchTask',
-    role: 'MCP dispatch route adapter',
-    canonicalService: 'resolveTaskStartPlacement -> startTaskRunnerDO',
-    requiredEvidence: CANONICAL_TASK_START,
+    owner: 'insertDispatchedTask',
+    role: 'atomic task persistence; callers inventoried as allocation entrypoints',
+    canonicalService: 'canonical placement -> insertDispatchedTask -> startTaskRunnerDO',
+    requiredEvidence: [
+      { kind: 'export', name: 'insertDispatchedTask' },
+      { kind: 'call', name: 'prepare' },
+    ],
   },
   {
-    filePath: 'apps/api/src/routes/mcp/orchestration-tools.ts',
+    filePath: 'apps/api/src/routes/mcp/orchestration-retry-storage.ts',
     table: 'tasks',
-    owner: 'handleRetrySubtask',
-    role: 'MCP orchestration retry adapter',
-    canonicalService: 'resolveTaskStartPlacement -> startTaskRunnerDO',
-    requiredEvidence: CANONICAL_TASK_START,
+    owner: 'insertMcpRetriedTask',
+    role: 'atomic task persistence; callers inventoried as allocation entrypoints',
+    canonicalService: 'canonical placement -> insertMcpRetriedTask -> startTaskRunnerDO',
+    requiredEvidence: [
+      { kind: 'export', name: 'insertMcpRetriedTask' },
+      { kind: 'call', name: 'run' },
+    ],
   },
   {
     filePath: 'apps/api/src/services/reserved-task-submission-storage.ts',
@@ -70,12 +76,15 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     ],
   },
   {
-    filePath: 'apps/api/src/durable-objects/sam-session/tools/dispatch-task.ts',
+    filePath: 'apps/api/src/durable-objects/sam-session/tools/dispatch-task-storage.ts',
     table: 'tasks',
-    owner: 'dispatchTask',
-    role: 'SAM session dispatch tool adapter',
-    canonicalService: 'resolveTaskStartPlacement -> startTaskRunnerDO',
-    requiredEvidence: CANONICAL_TASK_START,
+    owner: 'insertSamDispatchedTask',
+    role: 'atomic task persistence; callers inventoried as allocation entrypoints',
+    canonicalService: 'canonical placement -> insertSamDispatchedTask -> startTaskRunnerDO',
+    requiredEvidence: [
+      { kind: 'export', name: 'insertSamDispatchedTask' },
+      { kind: 'call', name: 'prepare' },
+    ],
   },
   {
     filePath: 'apps/api/src/durable-objects/sam-session/tools/retry-subtask.ts',
@@ -119,7 +128,7 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     canonicalService: 'explicit chat-start task adapter',
   },
   {
-    filePath: 'apps/api/src/operations/idea-core.ts',
+    filePath: 'packages/operations/src/idea-core.ts',
     table: 'tasks',
     owner: 'prepareIdeaCreate',
     role: 'shared idea task materialization operation',
@@ -133,7 +142,7 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     canonicalService: 'explicit idea adapter',
   },
   {
-    filePath: 'apps/api/src/services/debug-agent.ts',
+    filePath: 'apps/api/src/services/debug-agent-runs.ts',
     table: 'tasks',
     owner: 'saveDebugDiagnosisAsIdea',
     role: 'debug diagnosis task adapter',
@@ -152,13 +161,6 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     owner: 'upsertUserReportIncident',
     role: 'platform feedback incident task adapter',
     canonicalService: 'explicit feedback adapter',
-  },
-  {
-    filePath: 'apps/api/src/services/trial/trial-runner.ts',
-    table: 'tasks',
-    owner: 'startDiscoveryAgent',
-    role: 'trial orchestration task adapter',
-    canonicalService: 'explicit trial runtime adapter',
   },
   {
     filePath: 'apps/api/src/services/session-task-repair.ts',
@@ -222,6 +224,39 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
 
 export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInventoryEntry[] = [
   {
+    filePath: 'apps/api/src/routes/mcp/dispatch-tool.ts',
+    owner: 'handleDispatchTask',
+    entrypoint: 'insertDispatchedTask',
+    scope: 'route',
+    role: 'task dispatch',
+    admission:
+      'canonical placement and credential attribution precede atomic task persistence and runtime start',
+    status: 'role-adapter',
+    requiredEvidence: CANONICAL_TASK_START,
+  },
+  {
+    filePath: 'apps/api/src/routes/mcp/orchestration-tools.ts',
+    owner: 'handleRetrySubtask',
+    entrypoint: 'insertMcpRetriedTask',
+    scope: 'route',
+    role: 'task dispatch',
+    admission:
+      'canonical placement and credential attribution precede atomic task persistence and runtime start',
+    status: 'role-adapter',
+    requiredEvidence: CANONICAL_TASK_START,
+  },
+  {
+    filePath: 'apps/api/src/durable-objects/sam-session/tools/dispatch-task.ts',
+    owner: 'dispatchTask',
+    entrypoint: 'insertSamDispatchedTask',
+    scope: 'service',
+    role: 'task dispatch',
+    admission:
+      'canonical placement and credential attribution precede atomic task persistence and runtime start',
+    status: 'role-adapter',
+    requiredEvidence: CANONICAL_TASK_START,
+  },
+  {
     filePath: 'apps/api/src/services/node-provisioning.ts',
     owner: 'provisionNode',
     entrypoint: 'createVM',
@@ -243,16 +278,6 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     role: 'workspace',
     admission:
       'direct workspace route delegates its final atomic reservation to the canonical capacity and authority boundary',
-    status: 'canonical',
-  },
-  {
-    filePath: 'apps/api/src/durable-objects/trial-orchestrator/steps.ts',
-    owner: 'handleWorkspaceCreation',
-    entrypoint: 'reserveWorkspacePlacement',
-    scope: 'trial-orchestrator',
-    role: 'trial',
-    admission:
-      'trial workspace creation delegates its final atomic reservation to the canonical capacity and authority boundary',
     status: 'canonical',
   },
   {
@@ -289,7 +314,7 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     status: 'canonical',
   },
   {
-    filePath: 'apps/api/src/durable-objects/task-runner/workspace-steps.ts',
+    filePath: 'apps/api/src/durable-objects/task-runner/workspace-dispatch-step.ts',
     owner: 'createWorkspaceOnVmAgent',
     entrypoint: 'createWorkspaceOnNode',
     scope: 'task-runner',
@@ -441,34 +466,6 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     scope: 'service',
     role: 'instant',
     admission: 'runtime creation for an already accepted instant session',
-    status: 'runtime-dispatch',
-  },
-  {
-    filePath: 'apps/api/src/durable-objects/trial-orchestrator/steps.ts',
-    owner: 'handleNodeProvisioning',
-    entrypoint: 'createNodeRecord',
-    scope: 'trial-orchestrator',
-    role: 'trial',
-    admission:
-      'single-node-per-trial state guard on the platform credential; no capacity-pool selection or admission lease',
-    status: 'runtime-adapter',
-  },
-  {
-    filePath: 'apps/api/src/durable-objects/trial-orchestrator/steps.ts',
-    owner: 'handleNodeProvisioning',
-    entrypoint: 'provisionNode',
-    scope: 'trial-orchestrator',
-    role: 'trial',
-    admission: 'paid provisioning of the trial node created above',
-    status: 'runtime-adapter',
-  },
-  {
-    filePath: 'apps/api/src/durable-objects/trial-orchestrator/steps.ts',
-    owner: 'handleWorkspaceCreation',
-    entrypoint: 'createWorkspaceOnNode',
-    scope: 'trial-orchestrator',
-    role: 'trial',
-    admission: 'runtime creation for the trial workspace row reserved in the same step',
     status: 'runtime-dispatch',
   },
 ] as const;

@@ -5,8 +5,15 @@ import { Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { log } from '../../lib/logger';
 import { toWorkspaceResponse } from '../../lib/mappers';
-import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
+import {
+  assertNotAgentSignInSession,
+  credentialNotAfter,
+  getUserId,
+  requireApproved,
+  requireAuth,
+} from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import {
   jsonValidator,
@@ -101,7 +108,14 @@ crudRoutes.get('/:id', requireAuth(), requireApproved(), async (c) => {
 
   if (workspace.status === 'creating') {
     const { getBootLogs } = await import('../../services/boot-log');
-    response.bootLogs = await getBootLogs(c.env.KV, workspace.id);
+    try {
+      response.bootLogs = await getBootLogs(c.env.KV, workspace.id, c.env);
+    } catch (error) {
+      log.warn('workspace.boot_logs_read_failed', {
+        workspaceId: workspace.id,
+        errorType: error instanceof Error ? 'Error' : typeof error,
+      });
+    }
   }
 
   return c.json(response);
@@ -123,7 +137,10 @@ crudRoutes.get('/:id/port-access', requireAuth(), requireApproved(), async (c) =
   // Verify ownership
   await getOwnedWorkspace(db, workspaceId, userId);
 
-  const token = await signPortAccessToken(userId, workspaceId, port, c.env);
+  // An agent sign-in session's port access ends with the session (the cookie holds this JWT).
+  const token = await signPortAccessToken(userId, workspaceId, port, c.env, {
+    notAfter: credentialNotAfter(c),
+  });
   const portUrl = `https://ws-${workspaceId.toLowerCase()}--${port}.${c.env.BASE_DOMAIN}/?port_token=${encodeURIComponent(token)}`;
 
   // Return JSON when client prefers it (CLI), redirect otherwise (browser)
@@ -211,6 +228,9 @@ crudRoutes.patch(
     const userId = getUserId(c);
     const workspaceId = c.req.param('id');
     const body = c.req.valid('json');
+    // Public ports need no credential at all until someone turns them off, so an agent sign-in
+    // session may close them but not open them.
+    if (body.enabled) assertNotAgentSignInSession(c);
     const db = drizzle(c.env.DATABASE, { schema });
 
     await getOwnedWorkspace(db, workspaceId, userId);

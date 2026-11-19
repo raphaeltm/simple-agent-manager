@@ -10,12 +10,13 @@ import { pathToFileURL } from 'node:url';
 
 const claudeDir = process.env.CLAUDE_ACP_PACKAGE_DIR;
 const codexDir = process.env.CODEX_ACP_PACKAGE_DIR;
-for (const [dir, version] of [[claudeDir, '0.81.2'], [codexDir, '2.1.1']]) {
+for (const [dir, version] of [[claudeDir, '0.102.0'], [codexDir, '2.1.1']]) {
   assert.ok(dir && isAbsolute(dir) && statSync(dir).isDirectory(), 'installed adapter path required');
   assert.equal(JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).version, version);
 }
 
 const { ClaudeAcpAgent } = await import(pathToFileURL(join(claudeDir, 'dist/lib.js')).href);
+const { SessionBackgroundWork } = await import(pathToFileURL(join(claudeDir, 'dist/background-work.js')).href);
 const requests = [];
 const agent = new ClaudeAcpAgent({
   createElicitation: async (request) => { requests.push(request); return { action: 'accept' }; },
@@ -26,9 +27,10 @@ const forwarded = await agent.handleMcpElicitation('pinned-session', { form: fal
   remoteRequest, { signal: new AbortController().signal });
 assert.deepEqual(requests[0], { ...remoteRequest, sessionId: 'pinned-session' });
 assert.equal(forwarded.action, 'accept');
+// Since 0.102.0 an unsupported mode settles as `cancel` (no user choice), not `decline`.
 const refused = await agent.handleMcpElicitation('pinned-session', { form: false, url: false })(
   remoteRequest, { signal: new AbortController().signal });
-assert.equal(refused.action, 'decline');
+assert.equal(refused.action, 'cancel');
 assert.equal(requests.length, 1);
 const cancelled = new AbortController();
 cancelled.abort();
@@ -110,7 +112,9 @@ try {
   serviceAgent.clientCapabilities = { elicitation: { url: {} } };
   const session = { query, cancelController: new AbortController(), turnQueue: [],
     liveBackgroundTasks: new Map(), taskState: new Map(), emittedToolCalls: new Set(),
-    orphanCommands: new Map(), pendingEmptyInterruptionDiagnosticCommands: new Map() };
+    orphanCommands: new Map(), pendingEmptyInterruptionDiagnosticCommands: new Map(),
+    background: new SessionBackgroundWork('fixture', false), nativeSubagentsByTaskId: new Map(),
+    nativeSubagentTaskIdByToolUseId: new Map(), nativeSubagentParentByToolUseId: new Map() };
   serviceAgent.sessions.fixture = session;
   void serviceAgent.runConsumer(session, { sessionId: 'fixture' });
   const result = await serviceAgent.handleMcpElicitation('fixture', { form: false, url: true })(

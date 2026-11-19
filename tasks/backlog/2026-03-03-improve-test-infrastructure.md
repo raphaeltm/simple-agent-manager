@@ -1,5 +1,12 @@
 # Improve Test Infrastructure and Patterns
 
+> **Reconciliation 2026-10-26:** No merge since 10-12 changed the open scope; thresholds are still
+> api 45/40/44/45 and web 53/49/46/55. Pointer fixes: `pnpm test:coverage` is
+> `.github/workflows/ci.yml:387` and Go `-race` is `:815,836`; the NodeLifecycle warm → alarm →
+> destroying test is now `node-lifecycle-do.test.ts:590` (#2305, `51a0acc90`). #2439 added a shared
+> typed idea fixture (`apps/web/tests/test-utils/idea-fixtures.ts`), not the
+> workspace/node/project/task factories.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

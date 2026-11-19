@@ -14,7 +14,7 @@
     "declarationMap": false,
     "noEmit": true,
     "outDir": "dist",
-    "rootDir": ".",
+    "rootDir": "../..",
     "types": ["node"],
     "paths": {
       "@/*": ["./*"]

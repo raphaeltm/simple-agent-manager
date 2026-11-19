@@ -1,32 +1,62 @@
 import type { CredentialProvider } from '@simple-agent-manager/shared';
 
+import { markProviderCreateNotDispatched } from './create-dispatch';
+import { pollGcpOperation } from './gcp-api';
+import {
+  applyGcpBootDiskPolicy,
+  DEFAULT_GCP_BOOT_DISK_POLICY,
+  type GcpBootDiskPolicy,
+  gcpBootDiskSizeGb,
+  gcpMachineTypeNamedVcpus,
+} from './gcp-boot-disk';
+import { fetchGcpMachineTypes, gcpOfferingsFromMachineTypes } from './gcp-catalog';
+import {
+  deleteGcpInstance,
+  type GcpDeletionScope,
+  gcpInstanceZone,
+  getGcpInstanceDeletionStatus,
+  requestGcpInstanceDeletion,
+} from './gcp-deletion';
+import { ensureGcpFirewallRules } from './gcp-firewall';
+import {
+  findGcpInstanceByIdOrName,
+  getGcpInstanceInZone,
+  listGcpInstances,
+} from './gcp-instance-lookup';
 import {
   COMPUTE_API_BASE,
   DEFAULT_GCP_AGENT_PORTS,
   DEFAULT_GCP_APP_ROUTE_PORTS,
   DEFAULT_GCP_APP_ROUTE_SOURCE_RANGES,
   DEFAULT_GCP_FIREWALL_SOURCE_RANGES,
-  DEFAULT_GCP_MAX_LIST_PAGES,
   GCP_LOCATIONS,
   GCP_VOLUME_CAPABILITIES,
   type GcpTokenProvider,
   LOCATION_METADATA,
-  SAM_AGENT_FIREWALL_RULE_NAME,
-  SAM_APP_ROUTE_FIREWALL_RULE_NAME,
   SAM_DEPLOYMENT_APP_ROUTE_NETWORK_TAG,
   SAM_NETWORK_TAG,
   SIZE_MAP,
+  withGcpErrorCategory,
 } from './gcp-metadata';
-import { gcpInstanceToVM, resolveGcpSourceImage } from './gcp-native-instance';
-import { getProviderCatalogOfferings } from './instance-offerings';
-import { resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
 import {
-  providerDelay,
+  gcpBootDisk,
+  gcpInstanceToObservedVM,
+  gcpInstanceToVM,
+  resolveGcpSourceImage,
+} from './gcp-native-instance';
+import type { GcpPriceTable } from './gcp-pricing';
+import { getProviderCatalogOfferings } from './instance-offerings';
+import {
+  type NativeVMConfigSource,
+  resolveVMConfigWithLegacySizeAdapter,
+} from './native-vm-config';
+import {
   providerFetch,
   rethrowIfProviderRequestAborted,
   throwIfProviderRequestAborted,
 } from './provider-fetch';
 import type {
+  NativeVMConfig,
   Provider,
   ProviderOfferingListOptions,
   ProviderRequestContext,
@@ -41,14 +71,14 @@ import type {
   VolumeResizeConfig,
 } from './types';
 import { ProviderError } from './types';
-import {
-  type GcpInstancePayload,
-  parseProviderJson,
-  validateGcpAggregatedInstances,
-  validateGcpInstance,
-  validateGcpInstancesList,
-  validateGcpOperation,
-} from './validation';
+import { parseProviderJson } from './validation';
+import { type GcpInstancePayload, validateGcpOperation } from './validation-gcp';
+import type {
+  VmDeletionRequestOptions,
+  VmDeletionRequestResult,
+  VmDeletionStatus,
+  VmDeletionTicket,
+} from './vm-deletion';
 
 export type { GcpTokenProvider } from './gcp-metadata';
 export {
@@ -60,6 +90,14 @@ export {
   DEFAULT_GCP_MAX_LIST_PAGES,
   GCP_LOCATIONS,
 } from './gcp-metadata';
+
+/** Live catalog inputs. Without them `listInstanceOfferings` returns the static table. */
+export interface GcpCatalogOptions {
+  /** Exact machine type names to offer (admin-editable). */
+  machineTypes: readonly string[];
+  /** Current list prices; null or a rejection leaves offerings unpriced. */
+  priceTable?: () => Promise<GcpPriceTable | null>;
+}
 
 /**
  * GCP Compute Engine provider.
@@ -82,16 +120,21 @@ export class GcpProvider implements Provider {
     defaultZone?: string,
     private readonly imageFamily: string = 'ubuntu-2404-lts-amd64',
     private readonly imageProject: string = 'ubuntu-os-cloud',
-    private readonly diskSizeGb: number = 50,
+    private readonly bootDiskPolicy: GcpBootDiskPolicy = DEFAULT_GCP_BOOT_DISK_POLICY,
     private readonly timeoutMs: number = 30_000,
     private readonly operationPollTimeoutMs: number = 5 * 60 * 1000,
     private readonly firewallSourceRanges: readonly string[] = DEFAULT_GCP_FIREWALL_SOURCE_RANGES,
     private readonly agentPorts: readonly string[] = DEFAULT_GCP_AGENT_PORTS,
     private readonly appRouteSourceRanges: readonly string[] = DEFAULT_GCP_APP_ROUTE_SOURCE_RANGES,
-    private readonly appRoutePorts: readonly string[] = DEFAULT_GCP_APP_ROUTE_PORTS
+    private readonly appRoutePorts: readonly string[] = DEFAULT_GCP_APP_ROUTE_PORTS,
+    private readonly catalog?: GcpCatalogOptions
   ) {
     this.defaultLocation = defaultZone || 'us-central1-a';
+    this.instanceOfferingApiBacked = catalog !== undefined;
   }
+
+  /** True when this instance was built with a live catalog (`GcpCatalogOptions`). */
+  readonly instanceOfferingApiBacked: boolean;
 
   private async authHeaders(context?: ProviderRequestContext): Promise<Record<string, string>> {
     throwIfProviderRequestAborted(context);
@@ -107,186 +150,59 @@ export class GcpProvider implements Provider {
     return `${COMPUTE_API_BASE}/projects/${this.projectId}`;
   }
 
-  /**
-   * Poll a zonal operation until it completes or times out.
-   */
-  private async pollOperation(
+  /** Request scope for the shared helpers in `gcp-api.ts`, `gcp-firewall.ts` and `gcp-deletion.ts`. */
+  private get api(): GcpDeletionScope {
+    return {
+      projectId: this.projectId,
+      zones: this.locations,
+      defaultZone: this.defaultLocation,
+      projectUrl: this.projectUrl(),
+      timeoutMs: this.timeoutMs,
+      operationPollTimeoutMs: this.operationPollTimeoutMs,
+      authHeaders: (context) => this.authHeaders(context),
+    };
+  }
+
+  private pollOperation(
     zone: string,
     operationName: string,
     context?: ProviderRequestContext
   ): Promise<void> {
-    const deadline = Date.now() + this.operationPollTimeoutMs;
-    let delayMs = 1000;
-    const maxDelayMs = 30_000;
-
-    while (Date.now() < deadline) {
-      throwIfProviderRequestAborted(context);
-      const headers = await this.authHeaders(context);
-      const url = `${this.projectUrl()}/zones/${zone}/operations/${operationName}`;
-      const res = await providerFetch('gcp', url, { headers }, this.timeoutMs, undefined, context);
-      throwIfProviderRequestAborted(context);
-      const op = validateGcpOperation(
-        await parseProviderJson(res, 'gcp', 'pollOperation'),
-        'pollOperation'
-      );
-      throwIfProviderRequestAborted(context);
-
-      if (op.status === 'DONE') {
-        if (op.error?.errors?.length) {
-          const errMsg = op.error.errors.map((e) => `${e.code}: ${e.message}`).join('; ');
-          throw new ProviderError('gcp', undefined, `GCP operation failed: ${errMsg}`);
-        }
-        return;
-      }
-
-      await providerDelay(delayMs, context);
-      delayMs = Math.min(delayMs * 2, maxDelayMs);
-    }
-
-    throw new ProviderError(
-      'gcp',
-      undefined,
-      `GCP operation timed out after ${this.operationPollTimeoutMs}ms`
-    );
-  }
-
-  private async ensureFirewallRule(
-    name: string,
-    ports: readonly string[],
-    sourceRanges: readonly string[],
-    description: string,
-    targetTag: string,
-    context?: ProviderRequestContext
-  ): Promise<void> {
-    throwIfProviderRequestAborted(context);
-    const headers = await this.authHeaders(context);
-    const url = `${this.projectUrl()}/global/firewalls`;
-
-    try {
-      const res = await providerFetch(
-        'gcp',
-        url,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(
-            this.buildFirewallRuleBody(name, ports, sourceRanges, description, targetTag)
-          ),
-        },
-        this.timeoutMs,
-        undefined,
-        context
-      );
-      throwIfProviderRequestAborted(context);
-      const op = validateGcpOperation(
-        await parseProviderJson(res, 'gcp', 'ensureFirewallRule'),
-        'ensureFirewallRule',
-        { requireName: true }
-      );
-      throwIfProviderRequestAborted(context);
-      // Firewall operations are global, poll via global operations endpoint
-      await this.pollGlobalOperation(op.name, context);
-    } catch (err) {
-      rethrowIfProviderRequestAborted(err, context);
-      // 409 = already exists — that's fine
-      if (err instanceof ProviderError && err.statusCode === 409) return;
-      throw err;
-    }
-  }
-
-  private buildFirewallRuleBody(
-    name: string,
-    ports: readonly string[],
-    sourceRanges: readonly string[],
-    description: string,
-    targetTag: string
-  ) {
-    return {
-      name,
-      network: `${this.projectUrl()}/global/networks/default`,
-      direction: 'INGRESS',
-      priority: 1000,
-      targetTags: [targetTag],
-      allowed: [{ IPProtocol: 'tcp', ports: [...ports] }],
-      sourceRanges: [...sourceRanges],
-      description,
-    };
-  }
-
-  /**
-   * Ensure firewall rules for both Cloudflare-routed VM-agent traffic and
-   * direct public app-route traffic served by Caddy.
-   */
-  private async ensureFirewallRules(context?: ProviderRequestContext): Promise<void> {
-    await this.ensureFirewallRule(
-      SAM_AGENT_FIREWALL_RULE_NAME,
-      this.agentPorts,
-      this.firewallSourceRanges,
-      'Allow configured inbound access to SAM VM agent (managed by Simple Agent Manager)',
-      SAM_NETWORK_TAG,
+    return pollGcpOperation(
+      this.api,
+      `${this.projectUrl()}/zones/${zone}/operations/${operationName}`,
+      { validationContext: 'pollOperation', timeoutSubject: 'GCP operation' },
       context
-    );
-    throwIfProviderRequestAborted(context);
-    await this.ensureFirewallRule(
-      SAM_APP_ROUTE_FIREWALL_RULE_NAME,
-      this.appRoutePorts,
-      this.appRouteSourceRanges,
-      'Allow public HTTP/HTTPS access to SAM deployment app routes (managed by Simple Agent Manager)',
-      SAM_DEPLOYMENT_APP_ROUTE_NETWORK_TAG,
-      context
-    );
-  }
-
-  /**
-   * Poll a global operation (used for firewall rules which are not zone-scoped).
-   */
-  private async pollGlobalOperation(
-    operationName: string,
-    context?: ProviderRequestContext
-  ): Promise<void> {
-    const deadline = Date.now() + this.operationPollTimeoutMs;
-    let delayMs = 1000;
-    const maxDelayMs = 30_000;
-
-    while (Date.now() < deadline) {
-      throwIfProviderRequestAborted(context);
-      const headers = await this.authHeaders(context);
-      const url = `${this.projectUrl()}/global/operations/${operationName}`;
-      const res = await providerFetch('gcp', url, { headers }, this.timeoutMs, undefined, context);
-      throwIfProviderRequestAborted(context);
-      const op = validateGcpOperation(
-        await parseProviderJson(res, 'gcp', 'pollGlobalOperation'),
-        'pollGlobalOperation'
-      );
-      throwIfProviderRequestAborted(context);
-
-      if (op.status === 'DONE') {
-        if (op.error?.errors?.length) {
-          const errMsg = op.error.errors.map((e) => `${e.code}: ${e.message}`).join('; ');
-          throw new ProviderError('gcp', undefined, `GCP operation failed: ${errMsg}`);
-        }
-        return;
-      }
-
-      await providerDelay(delayMs, context);
-      delayMs = Math.min(delayMs * 2, maxDelayMs);
-    }
-
-    throw new ProviderError(
-      'gcp',
-      undefined,
-      `GCP global operation timed out after ${this.operationPollTimeoutMs}ms`
     );
   }
 
   async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
+    const dispatch = { sent: false };
+    try {
+      return await this.createVMUnclassified(config, context, dispatch);
+    } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
+      // Assign the category at construction (rule 72) so a zone stockout reaches the TaskRunner
+      // as `transient_capacity` and descends the pool's fallback chain instead of failing.
+      const classified = withGcpErrorCategory(err);
+      // Config, token exchange and firewall ensure run before the insert: a failure there
+      // proves no VM was requested, so a durable allocation may create again.
+      throw dispatch.sent ? classified : markProviderCreateNotDispatched(classified);
+    }
+  }
+
+  private async createVMUnclassified(
+    config: VMConfig,
+    context: ProviderRequestContext | undefined,
+    dispatch: { sent: boolean }
+  ): Promise<VMInstance> {
     throwIfProviderRequestAborted(context);
     const nativeConfig = resolveVMConfigWithLegacySizeAdapter(config, {
       providerName: this.name,
       defaultLocation: this.defaultLocation,
       legacySizes: this.sizes,
       defaultImage: this.imageFamily,
-      defaultBootDiskSizeGb: this.diskSizeGb,
+      defaultBootDiskSizeGb: (resolved, source) => this.defaultBootDiskSizeGb(resolved, source),
       minBootDiskSizeGb: 10,
       legacyBootDiskSizeAuthority: 'provider-default',
     });
@@ -294,7 +210,16 @@ export class GcpProvider implements Provider {
     const headers = await this.authHeaders(context);
 
     // Ensure firewall rules exist before creating VM
-    await this.ensureFirewallRules(context);
+    await ensureGcpFirewallRules(
+      this.api,
+      {
+        agentSourceRanges: this.firewallSourceRanges,
+        agentPorts: this.agentPorts,
+        appRouteSourceRanges: this.appRouteSourceRanges,
+        appRoutePorts: this.appRoutePorts,
+      },
+      context
+    );
     throwIfProviderRequestAborted(context);
 
     const networkTags = [SAM_NETWORK_TAG];
@@ -313,17 +238,14 @@ export class GcpProvider implements Provider {
         items: networkTags,
       },
       disks: [
-        {
-          boot: true,
-          autoDelete: true,
-          initializeParams: {
-            sourceImage: resolveGcpSourceImage(
-              nativeConfig.image ?? this.imageFamily,
-              this.imageProject
-            ),
-            diskSizeGb: String(nativeConfig.bootDiskSizeGb ?? this.diskSizeGb),
-          },
-        },
+        gcpBootDisk(
+          zone,
+          nativeConfig.instanceType,
+          resolveGcpSourceImage(nativeConfig.image ?? this.imageFamily, this.imageProject),
+          // Resolution always sets bootDiskSizeGb (the default above is a function that returns
+          // a number); the fallback only narrows the optional type.
+          nativeConfig.bootDiskSizeGb ?? this.defaultBootDiskSizeGb(nativeConfig, 'native')
+        ),
       ],
       networkInterfaces: [
         {
@@ -348,6 +270,7 @@ export class GcpProvider implements Provider {
     };
 
     const url = `${this.projectUrl()}/zones/${zone}/instances`;
+    dispatch.sent = true;
     const res = await providerFetch(
       'gcp',
       url,
@@ -368,8 +291,9 @@ export class GcpProvider implements Provider {
     throwIfProviderRequestAborted(context);
     await this.pollOperation(zone, op.name, context);
 
-    // Fetch the created instance to get its details
-    const instance = await this.getVM(config.name, context);
+    // Read the created instance from the zone it was created in, never by name project-wide.
+    const created = await getGcpInstanceInZone(this.api, zone, config.name, context);
+    const instance = created ? await gcpInstanceToObservedVM(this.api, created, context) : null;
     if (!instance) {
       throw new ProviderError(
         'gcp',
@@ -381,122 +305,71 @@ export class GcpProvider implements Provider {
   }
 
   async deleteVM(id: string, context?: ProviderRequestContext): Promise<void> {
-    throwIfProviderRequestAborted(context);
-    // GCP uses name-based lookups, so we need to find the zone
-    const instance = await this.findInstanceByIdOrName(id, context);
-    if (!instance) return; // Idempotent — already deleted
+    await deleteGcpInstance(this.api, id, context);
+  }
 
-    const zone = this.extractZone(instance.machineType);
-    const headers = await this.authHeaders(context);
-    const url = `${this.projectUrl()}/zones/${zone}/instances/${instance.name}`;
+  async requestVMDeletion(
+    id: string,
+    context?: ProviderRequestContext,
+    options?: VmDeletionRequestOptions
+  ): Promise<VmDeletionRequestResult> {
+    return await requestGcpInstanceDeletion(this.api, id, context, options);
+  }
 
-    try {
-      const res = await providerFetch(
-        'gcp',
-        url,
-        { method: 'DELETE', headers },
-        this.timeoutMs,
-        undefined,
-        context
-      );
-      throwIfProviderRequestAborted(context);
-      const op = validateGcpOperation(await parseProviderJson(res, 'gcp', 'deleteVM'), 'deleteVM', {
-        requireName: true,
-      });
-      throwIfProviderRequestAborted(context);
-      await this.pollOperation(zone, op.name, context);
-    } catch (err) {
-      rethrowIfProviderRequestAborted(err, context);
-      if (err instanceof ProviderError && err.statusCode === 404) return;
-      throw err;
-    }
+  async getVMDeletionStatus(
+    ticket: VmDeletionTicket,
+    context?: ProviderRequestContext
+  ): Promise<VmDeletionStatus> {
+    return await getGcpInstanceDeletionStatus(this.api, ticket, context);
   }
 
   async getVM(id: string, context?: ProviderRequestContext): Promise<VMInstance | null> {
     throwIfProviderRequestAborted(context);
     const instance = await this.findInstanceByIdOrName(id, context);
     if (!instance) return null;
+    // No machine type lookup: getVM callers check existence and ownership (deletion, orphan
+    // reconciliation), never observed hardware. Allocation recovery uses getObservedVM.
     return gcpInstanceToVM(instance);
+  }
+
+  async getObservedVM(id: string, context?: ProviderRequestContext): Promise<VMInstance | null> {
+    throwIfProviderRequestAborted(context);
+    const instance = await this.findInstanceByIdOrName(id, context);
+    if (!instance) return null;
+    // Durable allocation recovery adopts a VM whose create response was cut off and verifies
+    // its native hardware against the persisted plan (apps/api node-allocation-recovery.ts).
+    return gcpInstanceToObservedVM(this.api, instance, context);
   }
 
   async listVMs(
     labels?: Record<string, string>,
     context?: ProviderRequestContext
   ): Promise<VMInstance[]> {
-    throwIfProviderRequestAborted(context);
-    const headers = await this.authHeaders(context);
-    const results: VMInstance[] = [];
-
-    // Build filter from labels
-    const filters: string[] = ['labels.sam-managed=true'];
-    if (labels) {
-      for (const [key, value] of Object.entries(labels)) {
-        filters.push(`labels.${key}=${value}`);
-      }
-    }
-    const filterStr = filters.join(' ');
-
-    // Query all configured zones
-    for (const zone of this.locations) {
-      throwIfProviderRequestAborted(context);
-      try {
-        await this.fetchPaginatedGcpInstances(
-          `${this.projectUrl()}/zones/${zone}/instances`,
-          new URLSearchParams({ filter: filterStr }),
-          headers,
-          `listVMs.${zone}`,
-          (data) => {
-            results.push(...(data.items || []).map((i) => gcpInstanceToVM(i)));
-          },
-          context
-        );
-      } catch (err) {
-        rethrowIfProviderRequestAborted(err, context);
-        if (this.isToleratedZoneListError(err)) continue;
-        throw new ProviderError(
-          'gcp',
-          err instanceof ProviderError ? err.statusCode : undefined,
-          `GCP zone ${zone} list failed: ${err instanceof Error ? err.message : String(err)}`,
-          { cause: err instanceof Error ? err : undefined }
-        );
-      }
-    }
-
-    return results;
+    return listGcpInstances(this.api, labels, context);
   }
 
   async powerOff(id: string, context?: ProviderRequestContext): Promise<void> {
-    throwIfProviderRequestAborted(context);
-    const instance = await this.findInstanceByIdOrName(id, context);
-    if (!instance) throw new ProviderError('gcp', 404, `VM ${id} not found`);
-
-    const zone = this.extractZone(instance.machineType);
-    const headers = await this.authHeaders(context);
-    const url = `${this.projectUrl()}/zones/${zone}/instances/${instance.name}/stop`;
-    const res = await providerFetch(
-      'gcp',
-      url,
-      { method: 'POST', headers },
-      this.timeoutMs,
-      undefined,
-      context
-    );
-    throwIfProviderRequestAborted(context);
-    const op = validateGcpOperation(await parseProviderJson(res, 'gcp', 'powerOff'), 'powerOff', {
-      requireName: true,
-    });
-    throwIfProviderRequestAborted(context);
-    await this.pollOperation(zone, op.name, context);
+    await this.runInstanceAction(id, 'stop', 'powerOff', context);
   }
 
   async powerOn(id: string, context?: ProviderRequestContext): Promise<void> {
+    await this.runInstanceAction(id, 'start', 'powerOn', context);
+  }
+
+  /** POST `stop`/`start` on the instance and wait for the operation. */
+  private async runInstanceAction(
+    id: string,
+    action: 'stop' | 'start',
+    validationContext: 'powerOff' | 'powerOn',
+    context?: ProviderRequestContext
+  ): Promise<void> {
     throwIfProviderRequestAborted(context);
     const instance = await this.findInstanceByIdOrName(id, context);
     if (!instance) throw new ProviderError('gcp', 404, `VM ${id} not found`);
 
-    const zone = this.extractZone(instance.machineType);
+    const zone = gcpInstanceZone(instance, this.defaultLocation);
     const headers = await this.authHeaders(context);
-    const url = `${this.projectUrl()}/zones/${zone}/instances/${instance.name}/start`;
+    const url = `${this.projectUrl()}/zones/${zone}/instances/${instance.name}/${action}`;
     const res = await providerFetch(
       'gcp',
       url,
@@ -506,9 +379,11 @@ export class GcpProvider implements Provider {
       context
     );
     throwIfProviderRequestAborted(context);
-    const op = validateGcpOperation(await parseProviderJson(res, 'gcp', 'powerOn'), 'powerOn', {
-      requireName: true,
-    });
+    const op = validateGcpOperation(
+      await parseProviderJson(res, 'gcp', validationContext),
+      validationContext,
+      { requireName: true }
+    );
     throwIfProviderRequestAborted(context);
     await this.pollOperation(zone, op.name, context);
   }
@@ -524,15 +399,71 @@ export class GcpProvider implements Provider {
   }
 
   async listInstanceOfferings(
-    _options?: ProviderOfferingListOptions,
+    options?: ProviderOfferingListOptions,
     context?: ProviderRequestContext
   ) {
     throwIfProviderRequestAborted(context);
-    return getProviderCatalogOfferings(
-      this.name as CredentialProvider,
-      this.locations,
-      this.locationMetadata
+    if (options?.preferApi === false || !this.catalog) return this.staticOfferings();
+    try {
+      const [types, priceTable] = await Promise.all([
+        fetchGcpMachineTypes(this.api, this.catalog.machineTypes, context),
+        this.loadPriceTable(),
+      ]);
+      throwIfProviderRequestAborted(context);
+      return gcpOfferingsFromMachineTypes(types, priceTable, {
+        bootDiskPolicy: this.bootDiskPolicy,
+        lastSeenAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
+      if (options?.allowStaticFallback === false) throw err;
+      return this.staticOfferings();
+    }
+  }
+
+  private staticOfferings() {
+    return applyGcpBootDiskPolicy(
+      getProviderCatalogOfferings(
+        this.name as CredentialProvider,
+        this.locations,
+        this.locationMetadata
+      ),
+      this.bootDiskPolicy
     );
+  }
+
+  /**
+   * Boot disk for a VM whose request names no `bootDiskSizeGb`. A pool plan is a native request
+   * carrying the candidate's disk as `resources.diskGb`; that is what the catalog advertised and
+   * what the node row records, so the VM is created at exactly that size. Any other request gets
+   * the policy size for the machine's vCPUs (`gcp-boot-disk.ts`), the same size the catalog
+   * advertises for that machine type.
+   */
+  private defaultBootDiskSizeGb(
+    resolved: Pick<NativeVMConfig, 'instanceType' | 'resources'>,
+    source: NativeVMConfigSource
+  ): number {
+    const plannedDiskGb = resolved.resources?.diskGb;
+    if (
+      source === 'native' &&
+      typeof plannedDiskGb === 'number' &&
+      Number.isInteger(plannedDiskGb) &&
+      plannedDiskGb > 0
+    ) {
+      return plannedDiskGb;
+    }
+    const vcpus = resolved.resources?.vcpuCount ?? gcpMachineTypeNamedVcpus(resolved.instanceType);
+    return gcpBootDiskSizeGb(vcpus, this.bootDiskPolicy);
+  }
+
+  /** Prices are optional: an unavailable table leaves offerings unpriced, never fails them. */
+  private async loadPriceTable(): Promise<GcpPriceTable | null> {
+    if (!this.catalog?.priceTable) return null;
+    try {
+      return await this.catalog.priceTable();
+    } catch {
+      return null;
+    }
   }
 
   async createVolume(
@@ -591,190 +522,11 @@ export class GcpProvider implements Provider {
   /**
    * Find a GCP instance by numeric ID or name across all configured zones.
    */
-  private async findInstanceByIdOrName(
+  private findInstanceByIdOrName(
     idOrName: string,
     context?: ProviderRequestContext
   ): Promise<GcpInstancePayload | null> {
-    throwIfProviderRequestAborted(context);
-    const headers = await this.authHeaders(context);
-    const namedInstance = await this.findNamedInstance(idOrName, headers, context);
-    if (namedInstance) return namedInstance;
-    return await this.findAggregatedInstance(idOrName, headers, context);
-  }
-
-  private async findNamedInstance(
-    idOrName: string,
-    headers: Record<string, string>,
-    context?: ProviderRequestContext
-  ): Promise<GcpInstancePayload | null> {
-    for (const zone of this.locations) {
-      throwIfProviderRequestAborted(context);
-      try {
-        const url = `${this.projectUrl()}/zones/${zone}/instances/${idOrName}`;
-        const res = await providerFetch(
-          'gcp',
-          url,
-          { headers },
-          this.timeoutMs,
-          undefined,
-          context
-        );
-        throwIfProviderRequestAborted(context);
-        const instance = validateGcpInstance(
-          await parseProviderJson(res, 'gcp', `findInstanceByIdOrName.${zone}`),
-          `findInstanceByIdOrName.${zone}`
-        );
-        throwIfProviderRequestAborted(context);
-        return instance;
-      } catch (err) {
-        rethrowIfProviderRequestAborted(err, context);
-        if (err instanceof ProviderError && err.statusCode === 404) continue;
-        throw err;
-      }
-    }
-    return null;
-  }
-
-  private async findAggregatedInstance(
-    idOrName: string,
-    headers: Record<string, string>,
-    context?: ProviderRequestContext
-  ): Promise<GcpInstancePayload | null> {
-    try {
-      const filterStr = `labels.sam-managed=true`;
-      let found: GcpInstancePayload | null = null;
-      await this.fetchPaginatedGcpAggregatedInstances(
-        `${COMPUTE_API_BASE}/projects/${this.projectId}/aggregated/instances`,
-        new URLSearchParams({ filter: filterStr }),
-        headers,
-        'findInstanceByIdOrName.aggregated',
-        (data) => {
-          if (found || !data.items) return;
-          for (const scopeData of Object.values(data.items)) {
-            for (const instance of scopeData.instances || []) {
-              if (instance.id === idOrName || instance.name === idOrName) {
-                found = instance;
-                return true;
-              }
-            }
-          }
-        },
-        context
-      );
-      if (found) return found;
-    } catch (err) {
-      rethrowIfProviderRequestAborted(err, context);
-      throw new ProviderError(
-        'gcp',
-        err instanceof ProviderError ? err.statusCode : undefined,
-        `GCP aggregated instance lookup failed for ${idOrName}: ${err instanceof Error ? err.message : String(err)}`,
-        { cause: err instanceof Error ? err : undefined }
-      );
-    }
-
-    return null;
-  }
-
-  private async fetchPaginatedGcpInstances(
-    baseUrl: string,
-    baseParams: URLSearchParams,
-    headers: Record<string, string>,
-    context: string,
-    handlePage: (data: { items?: GcpInstancePayload[]; nextPageToken?: string }) => boolean | void,
-    requestContext?: ProviderRequestContext
-  ): Promise<void> {
-    await this.fetchPaginatedGcpList(
-      baseUrl,
-      baseParams,
-      headers,
-      context,
-      async (payload) => {
-        const data = validateGcpInstancesList(payload, context);
-        const stop = handlePage(data);
-        return { nextPageToken: data.nextPageToken, stop: stop === true };
-      },
-      requestContext
-    );
-  }
-
-  private async fetchPaginatedGcpAggregatedInstances(
-    baseUrl: string,
-    baseParams: URLSearchParams,
-    headers: Record<string, string>,
-    context: string,
-    handlePage: (data: {
-      items?: Record<string, { instances?: GcpInstancePayload[] }>;
-      nextPageToken?: string;
-    }) => boolean | void,
-    requestContext?: ProviderRequestContext
-  ): Promise<void> {
-    await this.fetchPaginatedGcpList(
-      baseUrl,
-      baseParams,
-      headers,
-      context,
-      async (payload) => {
-        const data = validateGcpAggregatedInstances(payload, context);
-        const stop = handlePage(data);
-        return { nextPageToken: data.nextPageToken, stop: stop === true };
-      },
-      requestContext
-    );
-  }
-
-  private async fetchPaginatedGcpList(
-    baseUrl: string,
-    baseParams: URLSearchParams,
-    headers: Record<string, string>,
-    context: string,
-    handlePage: (payload: unknown) => Promise<{ nextPageToken?: string; stop?: boolean }>,
-    requestContext?: ProviderRequestContext
-  ): Promise<void> {
-    const seenTokens = new Set<string>();
-    let pageToken: string | undefined;
-
-    for (let pageCount = 0; pageCount < DEFAULT_GCP_MAX_LIST_PAGES; pageCount += 1) {
-      throwIfProviderRequestAborted(requestContext);
-      const params = new URLSearchParams(baseParams);
-      if (pageToken) params.set('pageToken', pageToken);
-      const res = await providerFetch(
-        'gcp',
-        `${baseUrl}?${params.toString()}`,
-        { headers },
-        this.timeoutMs,
-        undefined,
-        requestContext
-      );
-      throwIfProviderRequestAborted(requestContext);
-      const result = await handlePage(await parseProviderJson(res, 'gcp', context));
-      throwIfProviderRequestAborted(requestContext);
-      if (result.stop || !result.nextPageToken) return;
-      if (seenTokens.has(result.nextPageToken)) {
-        throw new ProviderError(
-          'gcp',
-          undefined,
-          `GCP ${context} pagination repeated nextPageToken`,
-          {
-            category: 'invalid_config',
-          }
-        );
-      }
-      seenTokens.add(result.nextPageToken);
-      pageToken = result.nextPageToken;
-    }
-
-    throw new ProviderError(
-      'gcp',
-      undefined,
-      `GCP ${context} exceeded ${DEFAULT_GCP_MAX_LIST_PAGES} pages`,
-      {
-        category: 'invalid_config',
-      }
-    );
-  }
-
-  private isToleratedZoneListError(err: unknown): boolean {
-    return err instanceof ProviderError && (err.statusCode === 404 || err.statusCode === 503);
+    return findGcpInstanceByIdOrName(this.api, this.locations, idOrName, context);
   }
 
   private unsupportedVolumeOperation(operation: string): ProviderError {
@@ -784,11 +536,5 @@ export class GcpProvider implements Provider {
       `GCP provider does not support volume operation ${operation}`,
       { category: 'invalid_config' }
     );
-  }
-
-  /** Extract zone from a machineType URL like zones/us-central1-a/machineTypes/e2-standard-2 */
-  private extractZone(machineType: string): string {
-    const match = machineType.match(/zones\/([^/]+)/);
-    return match?.[1] || this.defaultLocation;
   }
 }

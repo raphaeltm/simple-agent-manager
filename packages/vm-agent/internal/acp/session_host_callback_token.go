@@ -20,7 +20,9 @@ func (h *SessionHost) callbackToken() string {
 // SetCallbackToken replaces the workspace callback token used by this host's
 // later control-plane calls. Empty tokens are ignored. An agent process that is
 // already running keeps the credentials it was started with (for example the
-// platform AI proxy key); it picks up the new token on its next (re)start.
+// platform AI proxy key); it picks up the new token on its next (re)start, which
+// a workspace credential rotation forces through
+// RestartAgentProcessForCredentialRotation.
 func (h *SessionHost) SetCallbackToken(token string) {
 	if token = strings.TrimSpace(token); token != "" {
 		h.renewedCallbackToken.Store(token)

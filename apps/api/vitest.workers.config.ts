@@ -36,9 +36,9 @@ export default defineConfig({
         __dirname,
         './tests/workers/support/cloudflare-sandbox-stub.ts'
       ),
-      // src/index.ts eagerly registers TTS routes, but these Worker/DO tests do
-      // not exercise TTS. Avoid pulling Mastra's Node CLI/filesystem graph into
-      // workerd during collection; the stub throws if a test crosses the seam.
+      // Native SAM tests exercise real Mastra; this pool's stub rejects accidental use.
+      '@mastra/core/llm': resolve(__dirname, './tests/workers/support/mastra-agent-stub.ts'),
+      '@mastra/core/tools': resolve(__dirname, './tests/workers/support/mastra-agent-stub.ts'),
       '@mastra/core/agent': resolve(__dirname, './tests/workers/support/mastra-agent-stub.ts'),
     },
   },
@@ -53,28 +53,22 @@ export default defineConfig({
       miniflare: {
         // 2024-04-03+ required for DO RPC (calling methods directly on stubs)
         compatibilityDate: '2024-04-03',
-        compatibilityFlags: ['nodejs_compat'],
+        // Match the deployed flag: legacy tracking reports caught stream failures too early.
+        compatibilityFlags: ['nodejs_compat', 'unhandled_rejection_after_microtask_checkpoint'],
         d1Databases: ['DATABASE', 'OBSERVABILITY_DATABASE'],
         kvNamespaces: ['KV', 'OAUTH_KV'],
         r2Buckets: ['R2', 'PROJECT_DATA_ARCHIVE_R2'],
-        durableObjects: {
+        durableObjects: withReliabilityStorageObjects({
+          LEGACY_MESSAGE_STORAGE_FIXTURE: {
+            className: 'LegacyMessageStorageFixture',
+            useSQLite: true,
+          },
           PROJECT_DATA: {
             className: 'ProjectDataTestDouble',
             useSQLite: true,
           },
           ADMIN_LOGS: {
             className: 'AdminLogs',
-          },
-          TRIAL_COUNTER: {
-            className: 'TrialCounter',
-            useSQLite: true,
-          },
-          TRIAL_EVENT_BUS: {
-            className: 'TrialEventBus',
-          },
-          TRIAL_ORCHESTRATOR: {
-            className: 'TrialOrchestrator',
-            useSQLite: true,
           },
           SAM_SESSION: {
             className: 'SamSession',
@@ -115,7 +109,7 @@ export default defineConfig({
             className: 'VmAgentContainerTestDouble',
             useSQLite: true,
           },
-        },
+        }),
         bindings: {
           BASE_DOMAIN: 'test.example.com',
           VERSION: '0.1.0-test',
@@ -129,14 +123,10 @@ export default defineConfig({
           MAX_SESSIONS_PER_PROJECT: '1000',
           MAX_MESSAGES_PER_SESSION: '100000',
           MESSAGE_SIZE_THRESHOLD: '102400',
-          ACTIVITY_RETENTION_DAYS: '90',
+          // Activity retention has no runtime binding; preserve reviewed fixture locations below.
           SESSION_IDLE_TIMEOUT_MINUTES: '60',
           DO_SUMMARY_SYNC_DEBOUNCE_MS: '5000',
           NODE_HEARTBEAT_STALE_SECONDS: '180',
-          TRIAL_CLAIM_TOKEN_SECRET: 'test-trial-secret-do-not-use-in-production',
-          TRIAL_SSE_HEARTBEAT_MS: '60000',
-          TRIAL_SSE_POLL_TIMEOUT_MS: '500',
-          TRIAL_SSE_MAX_DURATION_MS: '5000',
           NODE_WARM_TIMEOUT_MS: '5000',
           WORKSPACE_STOPPED_TTL_MS: '3000',
           ENCRYPTION_KEY: 'SK4ihJazAK3GIWUQcM6nZ1odR6KQHrqRAVSp6HdPxrg=',
@@ -151,6 +141,10 @@ export default defineConfig({
   test: {
     globals: true,
     include: ['tests/workers/**/*.test.ts'],
+    // Executed by vitest.sam-runtime.config.ts in the same test:workers command.
+    // Loaded inline (not as top-of-file imports) so the reviewed test-key lines above keep
+    // their line numbers; scripts/quality/gitleaks-reviewed-baseline.json pins them.
+    exclude: (await import('./tests/workers/support/native-runtime-suites')).NATIVE_RUNTIME_SUITES,
     setupFiles: ['./tests/workers/setup-d1-migrations.ts'],
     provide: {
       D1_MIGRATIONS_JSON: JSON.stringify(d1Migrations),
@@ -164,5 +158,28 @@ export default defineConfig({
     // CI must exercise the suite deterministically instead of starting dozens
     // of runtimes concurrently and losing the pool to worker exits.
     fileParallelism: false,
+    // Files run one at a time, so a shard's wall time is the sum of its files.
+    // `--shard=i/n` splits by measured per-file time (tests/workers/shard-timings.json)
+    // instead of by path hash. See tests/workers/support/shard-plan.ts.
+    sequence: {
+      sequencer: (await import('./tests/workers/support/timing-balanced-sequencer')).default,
+    },
+  },
+  // Test-only producer bridge. This constant is absent from production builds.
+  define: {
+    __PROVIDER_LIMIT_CALLBACKS__: process.env.TEST_PROVIDER_LIMIT_CALLBACK_OUTPUT
+      ? await (
+          await import('node:fs/promises')
+        ).readFile(process.env.TEST_PROVIDER_LIMIT_CALLBACK_OUTPUT, 'utf8')
+      : 'null',
   },
 });
+
+/** Keep Reliability C test registrations together while retaining the base DO fixtures. */
+function withReliabilityStorageObjects<T extends Record<string, unknown>>(existing: T) {
+  return {
+    ...existing,
+    MCP_RATE_COUNTER: { className: 'McpRateCounter', useSQLite: true },
+    WORKSPACE_BOOT_LOG: { className: 'WorkspaceBootLog', useSQLite: true },
+  };
+}

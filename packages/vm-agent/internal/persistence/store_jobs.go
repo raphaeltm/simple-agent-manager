@@ -137,7 +137,7 @@ func (s *Store) AddJobEvent(jobID string, event JobEventRecord) error {
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if _, err := s.db.Exec(
-		`UPDATE vm_jobs SET current_step = ?, updated_at = ? WHERE id = ?`,
+		`UPDATE vm_jobs SET current_step = coalesce(nullif(?, ''), current_step), updated_at = ? WHERE id = ?`,
 		event.CurrentStep, now, jobID,
 	); err != nil {
 		return fmt.Errorf("touch vm job after event: %w", err)

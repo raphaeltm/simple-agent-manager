@@ -1,5 +1,12 @@
 # System Reliability and Maintainability Hardening
 
+> **Reconciliation 2026-10-26:** #2304 (`980cef76c`) added a typed admin-settings registry with
+> defaults, validation and audited overrides for runtime tunables
+> (`apps/api/src/services/admin-settings-registry.ts`) and a CI ratchet on new `Env` scalars
+> (`pnpm quality:runtime-tunables`). `Env` is not split (`env.ts` is 1,584 lines). Pointers moved:
+> the subdomain proxies are `apps/api/src/index.ts:208-698` (file now 986 lines), `VM_AGENT_PORT` is
+> read at `:602` and the wrangler binding check is `.github/workflows/ci.yml:600`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**
@@ -71,3 +78,7 @@ Key issues identified:
 3. **Proxy Refactoring**: Move proxy logic to a middleware and verify with integration tests.
 4. **Async Migration**: Refactor one provisioning flow (e.g., Workspace Creation) to be fully async via Durable Objects before applying the pattern globally.
 5. **Validation**: Ensure all existing E2E and unit tests pass; add new tests for the configuration service and async state machine.
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. The subdomain-proxy extraction from `index.ts` is done. Still open: the `Env` split (`env.ts` is 1,461 lines), VM agent `/health` states, and consistent error codes. Evidence: #2714; `apps/api/src/routes/workspace-subdomain-proxy.ts` (new); `apps/api/src/index.ts` now 548 lines.

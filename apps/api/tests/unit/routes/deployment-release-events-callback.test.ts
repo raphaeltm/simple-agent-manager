@@ -95,7 +95,7 @@ describe('deployment release events callback route', () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true });
-    expect(mockVerifyCallbackToken).toHaveBeenCalledWith('node-token', expect.anything());
+    expect(mockVerifyCallbackToken).toHaveBeenCalledWith('node-token', expect.anything(), { expectedScope: 'node' });
     expect(insertedEvents).toHaveLength(1);
     expect(insertedEvents[0]).toMatchObject({
       projectId: 'proj-1',

@@ -28,7 +28,7 @@ export async function markIdle(
   env: Env,
   nodeId: string,
   userId: string,
-  warmTimeoutOverrideMs?: number | null,
+  warmTimeoutOverrideMs?: number | null
 ): Promise<NodeLifecycleState> {
   const stub = getStub(env, nodeId);
   return stub.markIdle(nodeId, userId, warmTimeoutOverrideMs);
@@ -38,10 +38,7 @@ export async function markIdle(
  * Mark a node as active. Called when a new workspace starts.
  * Cancels any pending warm timeout alarm.
  */
-export async function markActive(
-  env: Env,
-  nodeId: string
-): Promise<NodeLifecycleState> {
+export async function markActive(env: Env, nodeId: string): Promise<NodeLifecycleState> {
   const stub = getStub(env, nodeId);
   return stub.markActive();
 }
@@ -62,23 +59,25 @@ export async function tryClaim(
 /**
  * Get the current lifecycle state of a node.
  */
-export async function getStatus(
-  env: Env,
-  nodeId: string
-): Promise<NodeLifecycleState> {
+export async function getStatus(env: Env, nodeId: string): Promise<NodeLifecycleState> {
   const stub = getStub(env, nodeId);
   return stub.getStatus();
+}
+
+/** Whether a durable workspace deletion is queued or mid-attempt on this node. */
+export async function getWorkspaceDeletionAttemptState(
+  env: Env,
+  nodeId: string,
+  workspaceId: string
+): Promise<{ pending: boolean; attemptStarted: boolean }> {
+  return getStub(env, nodeId).getWorkspaceDeletionAttemptState(workspaceId);
 }
 
 /**
  * Clear lifecycle state after an explicit API deletion. The DO reconciles the
  * deleted/terminal D1 row through its bounded destroying handler.
  */
-export async function finalizeDeletion(
-  env: Env,
-  nodeId: string,
-  userId: string
-): Promise<void> {
+export async function finalizeDeletion(env: Env, nodeId: string, userId: string): Promise<void> {
   const stub = getStub(env, nodeId);
   await stub.finalizeDeletion(nodeId, userId);
 }

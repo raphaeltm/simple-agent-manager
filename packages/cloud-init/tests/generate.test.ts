@@ -625,6 +625,29 @@ describe('slice CPU shares', () => {
 });
 
 describe('generateCloudInit', () => {
+  it('preserves physical-cleanup owner and incarnation fences in parsed systemd config', () => {
+    const parsed = YAML.parse(
+      generateCloudInit(
+        baseVariables({
+          nodeUserId: 'user-123',
+          nodeRuntimeIncarnationId: 'boot-456',
+        })
+      )
+    ) as { write_files: CloudInitWriteFile[] };
+    const unit = parsed.write_files.find((file) => file.path.endsWith('/vm-agent.service'));
+    expect(unit?.content).toContain('Environment=NODE_USER_ID=user-123');
+    expect(unit?.content).toContain('Environment=NODE_RUNTIME_INCARNATION_ID=boot-456');
+  });
+
+  it.each(['nodeUserId', 'nodeRuntimeIncarnationId'] as const)(
+    'rejects unsafe %s before YAML generation',
+    (field) => {
+      expect(() =>
+        generateCloudInit(baseVariables({ [field]: 'bad\nEnvironment=OTHER=value' }))
+      ).toThrow(field);
+    }
+  );
+
   describe('existing variable substitution (regression)', () => {
     it('substitutes all required variables', () => {
       const config = generateCloudInit(baseVariables());
@@ -884,7 +907,7 @@ describe('generateCloudInit', () => {
         (f: { path: string }) => f.path === '/usr/local/sbin/sam-configure-docker-memory.sh'
       );
 
-      expect(headroomScript.content).toContain('RESERVE_MB="512"');
+      expect(headroomScript.content).toContain('RESERVE_MB="1024"');
       expect(headroomScript.content).toContain('sam-workload.slice.d/50-headroom.conf');
     });
 
@@ -1055,80 +1078,77 @@ describe('generateCloudInit', () => {
       );
     });
 
-    it('rejects unsafe or unproven cgroup states', () => {
-      const cases: Array<{
-        name: string;
-        options: Parameters<typeof runVerifyWorkloadCgroupScript>[0];
-        stderr: string;
-      }> = [
-        {
-          name: 'missing cgroup v2 entry',
-          options: { procCgroupContent: '1:name=systemd:/sam.slice/sam-workload.slice\n' },
-          stderr: 'has no cgroup v2 entry',
-        },
-        {
-          name: 'wrong ancestor',
-          options: { cgroupPath: '/system.slice/docker-abc.scope' },
-          stderr: 'outside sam.slice',
-        },
-        {
-          name: 'missing workload cap',
-          options: { memoryMax: null },
-          stderr: 'missing cgroup memory.max',
-        },
-        {
-          name: 'infinite workload cap',
-          options: { memoryMax: 'max' },
-          stderr: 'sam-workload.slice cgroup memory.max expected',
-        },
-        {
-          name: 'wrong workload cap',
-          options: { memoryMax: '1073741824' },
-          stderr: 'sam-workload.slice cgroup memory.max expected 1610612736 bytes',
-        },
-        {
-          name: 'infinite workload systemd cap',
-          options: { workloadMemoryMax: 'infinity' },
-          stderr: 'sam-workload.slice MemoryMax expected',
-        },
-        {
-          name: 'wrong effective workload systemd cap',
-          options: { workloadEffectiveMemoryMax: '1073741824' },
-          stderr: 'sam-workload.slice EffectiveMemoryMax expected 1610612736 bytes',
-        },
-        {
-          name: 'zero parent minimum',
-          options: { samMemoryMin: '0' },
-          stderr: 'sam.slice cgroup memory.min expected at least 268435456 bytes',
-        },
-        {
-          name: 'zero infra minimum',
-          options: { infraMemoryMin: '0' },
-          stderr: 'sam-infra.slice cgroup memory.min expected at least 268435456 bytes',
-        },
-        {
-          name: 'small host',
-          options: { totalMb: 1023 },
-          stderr: 'SAM workload MemoryMax is not enforceable',
-        },
-        {
-          name: 'docker inspect failure',
-          options: { dockerFails: true },
-          stderr: 'docker inspect failed',
-        },
-        {
-          name: 'systemctl failure',
-          options: { systemctlFails: true },
-          stderr: 'systemctl show failed',
-        },
-      ];
+    // Each independent shell scenario gets the normal per-test timeout.
+    it.each<{
+      name: string;
+      options: Parameters<typeof runVerifyWorkloadCgroupScript>[0];
+      stderr: string;
+    }>([
+      {
+        name: 'missing cgroup v2 entry',
+        options: { procCgroupContent: '1:name=systemd:/sam.slice/sam-workload.slice\n' },
+        stderr: 'has no cgroup v2 entry',
+      },
+      {
+        name: 'wrong ancestor',
+        options: { cgroupPath: '/system.slice/docker-abc.scope' },
+        stderr: 'outside sam.slice',
+      },
+      {
+        name: 'missing workload cap',
+        options: { memoryMax: null },
+        stderr: 'missing cgroup memory.max',
+      },
+      {
+        name: 'infinite workload cap',
+        options: { memoryMax: 'max' },
+        stderr: 'sam-workload.slice cgroup memory.max expected',
+      },
+      {
+        name: 'wrong workload cap',
+        options: { memoryMax: '1073741824' },
+        stderr: 'sam-workload.slice cgroup memory.max expected 1610612736 bytes',
+      },
+      {
+        name: 'infinite workload systemd cap',
+        options: { workloadMemoryMax: 'infinity' },
+        stderr: 'sam-workload.slice MemoryMax expected',
+      },
+      {
+        name: 'wrong effective workload systemd cap',
+        options: { workloadEffectiveMemoryMax: '1073741824' },
+        stderr: 'sam-workload.slice EffectiveMemoryMax expected 1610612736 bytes',
+      },
+      {
+        name: 'zero parent minimum',
+        options: { samMemoryMin: '0' },
+        stderr: 'sam.slice cgroup memory.min expected at least 268435456 bytes',
+      },
+      {
+        name: 'zero infra minimum',
+        options: { infraMemoryMin: '0' },
+        stderr: 'sam-infra.slice cgroup memory.min expected at least 268435456 bytes',
+      },
+      {
+        name: 'small host',
+        options: { totalMb: 1023 },
+        stderr: 'SAM workload MemoryMax is not enforceable',
+      },
+      {
+        name: 'docker inspect failure',
+        options: { dockerFails: true },
+        stderr: 'docker inspect failed',
+      },
+      {
+        name: 'systemctl failure',
+        options: { systemctlFails: true },
+        stderr: 'systemctl show failed',
+      },
+    ])('rejects unsafe or unproven cgroup states: $name', (testCase) => {
+      const { result } = runVerifyWorkloadCgroupScript(testCase.options);
 
-      for (const testCase of cases) {
-        const { result } = runVerifyWorkloadCgroupScript(testCase.options);
-
-        expect(result.status, testCase.name).not.toBe(0);
-        expect(result.stderr, testCase.name).toContain(testCase.stderr);
-      }
+      expect(result.status, testCase.name).not.toBe(0);
+      expect(result.stderr, testCase.name).toContain(testCase.stderr);
     });
   });
 
@@ -1168,7 +1188,9 @@ describe('generateCloudInit', () => {
       expect(originCaBlock).toContain('openssl genrsa -out "$TLS_KEY_PATH" 2048');
       expect(originCaBlock).toContain('chmod 600 "$TLS_KEY_PATH"');
       expect(originCaBlock).toContain('openssl req -new -key "$TLS_KEY_PATH"');
-      expect(originCaBlock).toContain('Authorization: Bearer cb-token-abc');
+      // The token is read from its 0600 file rather than repeated in user-data.
+      expect(originCaBlock).toContain('Authorization: Bearer $(cat /etc/sam/callback-token)');
+      expect(originCaBlock).not.toContain('cb-token-abc');
       expect(originCaBlock).toContain('--data-binary "@$TLS_CSR_PATH"');
       expect(parsed.runcmd.indexOf(originCaBlock)).toBeLessThan(
         parsed.runcmd.findIndex(

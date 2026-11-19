@@ -6,11 +6,10 @@ import {
   isKnownModel,
   parseCompose,
 } from '../src/index';
-import { parseTrialEvent } from '../src/trial';
 
 // ---------------------------------------------------------------------------
 // Representative Compose document — multi-service stack with x-sam extensions.
-// Mirrors the kind of input parseCompose() handles on the trial onboarding path.
+// Mirrors the kind of input parseCompose() handles on the deployment path.
 // ---------------------------------------------------------------------------
 const COMPOSE_YAML = `
 services:
@@ -74,31 +73,6 @@ describe('compose-parser', () => {
 
   bench('parseCompose - minimal single service', () => {
     parseCompose(SMALL_COMPOSE_YAML);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Trial SSE event validation (valibot discriminated union).
-// ---------------------------------------------------------------------------
-const TRIAL_EVENTS: unknown[] = [
-  {
-    type: 'trial.started',
-    trialId: 't1',
-    projectId: 'p1',
-    repoUrl: 'https://github.com/a/b',
-    startedAt: 1,
-  },
-  { type: 'trial.progress', stage: 'Cloning repo', progress: 0.25, at: 2 },
-  { type: 'trial.agent_activity', role: 'tool', text: 'reading file', toolName: 'fs.read', at: 3 },
-  { type: 'trial.idea', ideaId: 'i1', title: 'Add tests', summary: 'Increase coverage', at: 4 },
-  { type: 'trial.ready', projectId: 'p1', workspaceUrl: 'https://example.com', at: 5 },
-];
-
-describe('trial events', () => {
-  bench('parseTrialEvent - mixed event stream', () => {
-    for (const event of TRIAL_EVENTS) {
-      parseTrialEvent(event);
-    }
   });
 });
 

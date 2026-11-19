@@ -422,3 +422,30 @@ describe('expired saved workspace', () => {
     ).toBe('sleeping');
   });
 });
+
+describe('ATTENTION_WINDOW_MS', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  async function windowWith(value: string | undefined): Promise<number> {
+    vi.resetModules();
+    vi.stubEnv('VITE_ATTENTION_WINDOW_MS', value);
+    const mod = await import('../../../src/lib/chat-session-utils');
+    vi.unstubAllEnvs();
+    return mod.ATTENTION_WINDOW_MS;
+  }
+
+  it('defaults to 24 hours', async () => {
+    expect(await windowWith(undefined)).toBe(DAY_MS);
+  });
+
+  it('uses a valid override', async () => {
+    expect(await windowWith('3600000')).toBe(3_600_000);
+  });
+
+  it.each(['not-a-number', '', '0', '-5'])(
+    'falls back to 24 hours for a malformed override %j, so the section is never emptied',
+    async (value) => {
+      expect(await windowWith(value)).toBe(DAY_MS);
+    }
+  );
+});

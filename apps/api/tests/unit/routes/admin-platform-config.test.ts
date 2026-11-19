@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,9 +8,19 @@ import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { generateEncryptionKey } from '../../../src/services/encryption';
 import { getGitLabOAuthConfig } from '../../../src/services/platform-config';
+import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 vi.mock('../../../src/middleware/auth', () => ({
-  requireAuth: () => async (_c: any, next: any) => next(),
+  requireAuth: () => async (c: any, next: any) => {
+    c.set('auth', {
+      user: {
+        id: 'superadmin-1',
+        role: c.req.header('X-Test-Role') ?? 'user',
+        status: c.req.header('X-Test-Status') ?? 'active',
+      },
+    });
+    await next();
+  },
   requireApproved: () => async (_c: any, next: any) => next(),
   requireSuperadmin: () => async (c: any, next: any) => {
     if (c.req.header('X-Test-Role') !== 'superadmin') {
@@ -21,52 +33,15 @@ vi.mock('../../../src/middleware/auth', () => ({
 
 const { adminPlatformConfigRoutes } = await import('../../../src/routes/admin-platform-config');
 
-interface SqliteD1Result {
-  meta: { changes: number };
-  results?: unknown[];
-}
-
-function createD1(sqlite: Database.Database): D1Database {
-  return {
-    prepare(sql: string) {
-      const statement = sqlite.prepare(sql);
-      let bindings: unknown[] = [];
-      return {
-        bind(...values: unknown[]) {
-          bindings = values;
-          return this;
-        },
-        async first<T>() {
-          return statement.get(...bindings) as T | null;
-        },
-        async all<T>() {
-          return { results: statement.all(...bindings) as T[] };
-        },
-        async run(): Promise<SqliteD1Result> {
-          const result = statement.run(...bindings);
-          return { meta: { changes: result.changes } };
-        },
-      };
-    },
-    async batch(statements: D1PreparedStatement[]) {
-      sqlite.exec('BEGIN');
-      const results: D1Result[] = [];
-      try {
-        for (const statement of statements) results.push(await statement.run());
-        sqlite.exec('COMMIT');
-        return results;
-      } catch (err) {
-        sqlite.exec('ROLLBACK');
-        throw err;
-      }
-    },
-  } as unknown as D1Database;
-}
-
 function createEnv(overrides: Partial<Env> = {}): Env {
   const sqlite = new Database(':memory:');
   sqlite.exec(`
-    CREATE TABLE users (id TEXT PRIMARY KEY);
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      role TEXT NOT NULL DEFAULT 'user',
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at INTEGER NOT NULL DEFAULT 0
+    );
     INSERT INTO users (id) VALUES ('system_anonymous_trials'), ('superadmin-1'), ('owner-1');
     CREATE TABLE projects (
       id TEXT PRIMARY KEY,
@@ -109,8 +84,15 @@ function createEnv(overrides: Partial<Env> = {}): Env {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
+  sqlite.exec(
+    readFileSync(
+      new URL('../../../src/db/migrations/0196_admin_settings.sql', import.meta.url),
+      'utf8'
+    )
+  );
   return {
-    DATABASE: createD1(sqlite),
+    KV: { get: async () => null },
+    DATABASE: createSqliteD1(sqlite),
     BASE_DOMAIN: 'example.com',
     ENCRYPTION_KEY: generateEncryptionKey(),
     ...overrides,
@@ -133,6 +115,32 @@ describe('admin platform config routes', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
+
+  it.each(['pending', 'suspended'])(
+    'rejects %s superadmins before migrated configuration writes',
+    async (status) => {
+      const env = createEnv();
+      const res = await createApp().request(
+        '/api/admin/platform-config',
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Test-Role': 'superadmin',
+            'X-Test-Status': status,
+          },
+          body: JSON.stringify({
+            config: { github: { clientId: 'blocked-client', clientSecret: 'blocked-secret' } },
+          }),
+        },
+        env
+      );
+      expect(res.status).toBe(403);
+      expect(
+        await env.DATABASE.prepare('SELECT count(*) AS n FROM admin_settings_audit').first()
+      ).toEqual({ n: 0 });
+    }
+  );
 
   it('persists GitLab OAuth config through the superadmin runtime config endpoint', async () => {
     const env = createEnv();
@@ -161,7 +169,7 @@ describe('admin platform config routes', () => {
     await expect(res.json()).resolves.toMatchObject({
       status: {
         integrations: {
-          gitlabOAuth: { configured: true, label: 'set here' },
+          gitlabOAuth: { configured: true, label: 'stored in SAM' },
         },
       },
     });
@@ -197,6 +205,8 @@ describe('admin platform config routes', () => {
       apiBaseUrl: 'https://gitlab.admin.example.com/api/v4',
       clientId: 'gitlab-admin-client',
       clientSecret: 'gitlab-admin-secret',
+      // A self-managed host saved at runtime cannot vouch for emails.
+      identityTrusted: false,
     });
   });
 
@@ -281,7 +291,7 @@ describe('admin platform config routes', () => {
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
-        body: JSON.stringify({ config: { googleInfrastructure: { remove: true } } }),
+        body: JSON.stringify({ config: { clear: ['googleInfrastructureOAuth'] } }),
       },
       env
     );
@@ -411,7 +421,7 @@ describe('admin platform config routes', () => {
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toMatchObject({
       error: 'BAD_REQUEST',
-      message: 'Feedback project must exist and be a project you can access',
+      message: 'Operations project must exist and be a project you can access',
     });
   });
 

@@ -11,7 +11,12 @@ import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 
 import type { Env } from '../../../src/env';
-import { getGitHubOAuthConfig, getGitLabOAuthConfig, getGoogleLoginOAuthConfig } from '../../../src/services/platform-config';
+import {
+  getGitHubOAuthConfig,
+  getGitLabOAuthConfig,
+  getGoogleLoginOAuthConfig,
+} from '../../../src/services/platform-config';
+import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
 
 function createApp() {
   const app = new Hono<{ Bindings: Env }>();
@@ -27,10 +32,15 @@ function createApp() {
   return app;
 }
 
-async function get(env: Partial<Env>) {
-  const res = await createApp().request('/api/config/login-providers', {}, env as Env);
-  expect(res.status).toBe(200);
-  return (await res.json()) as { github: boolean; google: boolean; gitlab: boolean };
+async function get(overrides: Partial<Env>) {
+  const fixture = createAdminSettingsEnv(overrides);
+  try {
+    const res = await createApp().request('/api/config/login-providers', {}, fixture.env);
+    expect(res.status).toBe(200);
+    return (await res.json()) as { github: boolean; google: boolean; gitlab: boolean };
+  } finally {
+    fixture.sqlite.close();
+  }
 }
 
 describe('GET /api/config/login-providers', () => {
@@ -39,9 +49,11 @@ describe('GET /api/config/login-providers', () => {
   });
 
   it('reports github true when GitHub OAuth is configured', async () => {
-    expect(
-      await get({ GITHUB_CLIENT_ID: 'gh-id', GITHUB_CLIENT_SECRET: 'gh-secret' })
-    ).toEqual({ github: true, google: false, gitlab: false });
+    expect(await get({ GITHUB_CLIENT_ID: 'gh-id', GITHUB_CLIENT_SECRET: 'gh-secret' })).toEqual({
+      github: true,
+      google: false,
+      gitlab: false,
+    });
   });
 
   it('reports google true from the LOGIN client env vars', async () => {

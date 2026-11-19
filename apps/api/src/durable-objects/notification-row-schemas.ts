@@ -1,11 +1,12 @@
 /**
  * Valibot schemas and validated mappers for Notification DO SQLite row parsing.
  */
-import type {
-  NotificationResponse,
-  NotificationType,
-  NotificationUrgency,
-  WebPushSubscriptionResponse,
+import {
+  NOTIFICATION_TYPES,
+  type NotificationResponse,
+  type NotificationType,
+  type NotificationUrgency,
+  type WebPushSubscriptionResponse,
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
@@ -15,15 +16,9 @@ import { parseRow } from './project-data/row-schemas';
 // Notification row schemas
 // =============================================================================
 
-const NotificationTypeSchema = v.picklist([
-  'task_complete',
-  'needs_input',
-  'error',
-  'progress',
-  'session_ended',
-  'pr_created',
-  'cron_failure',
-]);
+// Derived from the shared list so a new notification type can never be written by
+// createNotification and then fail to parse on read-back.
+const NotificationTypeSchema = v.picklist(NOTIFICATION_TYPES);
 
 const NotificationUrgencySchema = v.picklist(['high', 'medium', 'low']);
 

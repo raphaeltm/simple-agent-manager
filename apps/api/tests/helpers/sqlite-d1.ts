@@ -1,6 +1,13 @@
+import { readFileSync } from 'node:fs';
+
 import type Database from 'better-sqlite3';
 import { is } from 'drizzle-orm';
 import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core';
+
+/** Execute the shipped migration, so behavioral tests validate actual SQL constraints. */
+export function applySqliteMigration(sqlite: Database.Database, migration: URL): void {
+  sqlite.exec(readFileSync(migration, 'utf8'));
+}
 
 interface ExecutableStatement {
   run(): Promise<unknown>;
@@ -59,6 +66,26 @@ export function createAllSchemaTables(
   createSchemaTables(sqlite, tables);
 }
 
+/**
+ * Create the schema's declared plain-column indexes, which `createSchemaTables` omits. Use it
+ * for query-plan tests: production D1 has no planner statistics, so a secondary index the
+ * fixture lacks can win a plan that the fixture never sees. Expression indexes are skipped and
+ * partial indexes lose their WHERE clause, so this set is a superset of production's.
+ */
+export function createDeclaredIndexes(sqlite: Database.Database, tables: SQLiteTable[]): void {
+  for (const table of tables) {
+    const config = getTableConfig(table);
+    for (const index of config.indexes) {
+      const names = index.config.columns.map((column) => (column as { name?: unknown }).name);
+      if (!names.every((name): name is string => typeof name === 'string')) continue;
+      sqlite.exec(
+        `CREATE ${index.config.unique ? 'UNIQUE ' : ''}INDEX IF NOT EXISTS "${index.config.name}" ` +
+          `ON "${config.name}" (${names.map((name) => `"${name}"`).join(', ')})`
+      );
+    }
+  }
+}
+
 /** Faithful D1 boundary adapter backed by a real in-memory SQLite engine. */
 export function createSqliteD1(sqlite: Database.Database): D1Database {
   const normalize = (params: unknown[]) =>
@@ -101,8 +128,7 @@ export function createSqliteD1(sqlite: Database.Database): D1Database {
           .all(...normalize(params)),
       first: async (column?: string) => {
         const row = sqlite.prepare(sql).get(...normalize(params)) as
-          | Record<string, unknown>
-          | undefined;
+          Record<string, unknown> | undefined;
         return column === undefined ? (row ?? null) : (row?.[column] ?? null);
       },
     };
@@ -177,16 +203,23 @@ export function createSqliteD1WithBindLimit(
   } as unknown as D1Database;
 }
 
-/** Small stateful KV boundary fake that preserves JSON get/put semantics. */
+/**
+ * Small stateful KV boundary fake that preserves JSON get/put semantics. Like KV, `get` takes
+ * the value type either as a string or as `{ type }`.
+ */
 export function createMemoryKv(): KVNamespace {
   const values = new Map<string, string>();
   return {
-    get: async (key: string, type?: string) => {
+    get: async (key: string, options?: string | { type?: string }) => {
+      const type = typeof options === 'string' ? options : options?.type;
       const value = values.get(key) ?? null;
       return type === 'json' && value !== null ? JSON.parse(value) : value;
     },
     put: async (key: string, value: string) => {
       values.set(key, value);
+    },
+    delete: async (key: string) => {
+      values.delete(key);
     },
   } as unknown as KVNamespace;
 }

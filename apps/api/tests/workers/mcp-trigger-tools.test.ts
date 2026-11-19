@@ -1,9 +1,14 @@
+import {
+  DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
+} from '@simple-agent-manager/shared';
 import { env, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import { storeMcpToken } from '../../src/services/mcp-token';
 import {
   seedInstallation,
+  seedMcpTokenWorkspace,
   seedProject,
   seedTrigger,
   seedTriggerExecution,
@@ -15,7 +20,14 @@ interface JsonRpcToolResponse {
   id: string;
   result?: {
     content?: Array<{ type: string; text: string }>;
-    tools?: Array<{ name: string }>;
+    tools?: Array<{
+      name: string;
+      inputSchema: {
+        properties: {
+          githubConfig?: { additionalProperties: boolean; properties: Record<string, unknown> };
+        };
+      };
+    }>;
   };
   error?: {
     code: number;
@@ -59,6 +71,7 @@ async function seedProjectGraph(suffix: string): Promise<{ userId: string; proje
 }
 
 async function storeToken(token: string, projectId: string, userId: string): Promise<void> {
+  await seedMcpTokenWorkspace(`${token}-workspace`, userId, projectId);
   await storeMcpToken(env.KV, token, {
     taskId: `${token}-task`,
     projectId,
@@ -155,6 +168,22 @@ describe('MCP trigger management tools', () => {
     expect(toolNames).toContain('create_trigger');
     expect(toolNames).toContain('update_trigger');
     expect(toolNames).toContain('delete_trigger');
+    for (const name of ['create_trigger', 'update_trigger']) {
+      const config = response.result?.tools?.find((tool) => tool.name === name)?.inputSchema
+        .properties.githubConfig;
+      expect(config?.additionalProperties).toBe(false);
+      expect(config?.properties.queueMaxPending).not.toHaveProperty('maximum');
+      expect(config?.properties.queueTtlSeconds).not.toHaveProperty('maximum');
+      expect(config?.properties.subjectAffinity).toMatchObject({ type: 'boolean' });
+      expect(config?.properties.queueMaxPending).toMatchObject({
+        type: 'integer',
+        minimum: 1,
+      });
+      expect(config?.properties.queueTtlSeconds).toMatchObject({
+        type: 'integer',
+        minimum: 1,
+      });
+    }
   });
 
   it('dispatches list_triggers with project scoping and filters', async () => {
@@ -270,6 +299,9 @@ describe('MCP trigger management tools', () => {
     expect(updated.githubConfig).toEqual({
       eventType: 'pull_request',
       filters: { branches: ['main'], ignoreDrafts: true },
+      subjectAffinity: false,
+      queueMaxPending: DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+      queueTtlSeconds: DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
     });
     expect(
       (await callMcpTool(token, 'update_trigger', { triggerId, cronExpression: '0 9 * * *' })).error

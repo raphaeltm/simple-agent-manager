@@ -1,0 +1,11 @@
+# Phase-0 measured Docker29.9.3 / Compose5.7.0 / Buildx0.38.2.
+# Keep the reviewed digest: root DinD with overlayfs, not rootless or vfs.
+# Rootful DinD is required by the measured recipe. The isolated, one-job
+# Cloudflare microVM is the trust boundary; no broad credential is delivered.
+FROM docker.io/library/docker@sha256:7bf70dcb85c822e3fa6f2d332143e474b99147b9d7b39102b0cfe8b04a7dd61b
+COPY container-artifacts/sam-builder-linux-amd64 /usr/local/bin/sam-builder
+COPY container-entrypoints/compose-builder.sh /usr/local/bin/compose-builder
+RUN chmod 0755 /usr/local/bin/sam-builder /usr/local/bin/compose-builder
+EXPOSE 8080
+# docker-init reaps orphaned children and forwards termination to the Go supervisor.
+ENTRYPOINT ["docker-init", "--", "/usr/local/bin/compose-builder"]

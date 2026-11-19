@@ -1,9 +1,9 @@
 import type { AgentProfile } from '@simple-agent-manager/shared';
-import { render, screen, waitFor,within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ProfileFormDialog } from '../../../src/components/agent-profiles/ProfileFormDialog';
 import { ProfileList } from '../../../src/components/agent-profiles/ProfileList';
@@ -13,18 +13,22 @@ import { ToastProvider } from '../../../src/hooks/useToast';
 // Mock the profile runtime API so ProfileRuntimeSection doesn't make real requests
 vi.mock('../../../src/lib/api', () => ({
   getProviderCatalog: vi.fn().mockResolvedValue({
-    catalogs: [{
-      provider: 'hetzner',
-      defaultLocation: 'fsn1',
-      locations: [{ id: 'fsn1', name: 'Falkenstein', country: 'DE' }],
-      sizes: {
-        small: { type: 'cx22', price: '€4.35/mo', vcpu: 2, ramGb: 4, storageGb: 40 },
-        medium: { type: 'cx32', price: '€7.69/mo', vcpu: 4, ramGb: 8, storageGb: 80 },
-        large: { type: 'cx42', price: '€15.18/mo', vcpu: 8, ramGb: 16, storageGb: 160 },
+    catalogs: [
+      {
+        provider: 'hetzner',
+        defaultLocation: 'fsn1',
+        locations: [{ id: 'fsn1', name: 'Falkenstein', country: 'DE' }],
+        sizes: {
+          small: { type: 'cx22', price: '€4.35/mo', vcpu: 2, ramGb: 4, storageGb: 40 },
+          medium: { type: 'cx32', price: '€7.69/mo', vcpu: 4, ramGb: 8, storageGb: 80 },
+          large: { type: 'cx42', price: '€15.18/mo', vcpu: 8, ramGb: 16, storageGb: 160 },
+        },
       },
-    }],
+    ],
   }),
-  getProject: vi.fn().mockResolvedValue({ id: 'proj-test-1', defaultProvider: 'hetzner', defaultLocation: 'fsn1' }),
+  getProject: vi
+    .fn()
+    .mockResolvedValue({ id: 'proj-test-1', defaultProvider: 'hetzner', defaultLocation: 'fsn1' }),
   getProfileRuntimeConfig: vi.fn().mockResolvedValue({ envVars: [], files: [] }),
   upsertProfileRuntimeEnvVar: vi.fn().mockResolvedValue({ envVars: [], files: [] }),
   deleteProfileRuntimeEnvVar: vi.fn().mockResolvedValue({ envVars: [], files: [] }),
@@ -32,7 +36,37 @@ vi.mock('../../../src/lib/api', () => ({
   deleteProfileRuntimeFile: vi.fn().mockResolvedValue({ envVars: [], files: [] }),
 }));
 
-function Wrapper({ children, initialEntries = ['/'] }: { children: ReactNode; initialEntries?: string[] }) {
+// AgentModelAccessField fetches via useQuery/useQueryScope, which need a
+// QueryClientProvider and AuthProvider this file's `Wrapper` doesn't set up —
+// this suite isn't about agent model calls, so stub the field the same way
+// the `lib/api` mock above keeps ProfileRuntimeSection from making requests.
+// The Account section owns its account queries and has its own tests
+// (tests/unit/components/accounts/account-profiles.test.tsx).
+const accountSectionMock = vi.hoisted(() => ({
+  ProfileAccountFormSection: vi.fn(() => <div data-testid="profile-account-form-section" />),
+}));
+vi.mock(
+  '../../../src/components/agent-profiles/ProfileAccountFormSection',
+  () => accountSectionMock
+);
+// The list's usage column reads the account queries; its own vertical-slice test
+// (tests/unit/components/accounts/profile-list-usage.test.tsx) covers it.
+vi.mock('../../../src/components/agent-profiles/useProfileBudgets', () => ({
+  useProfileBudgets: () => null,
+}));
+vi.mock('../../../src/components/agent-models/AgentModelAccessField', () => ({
+  AgentModelAccessField: ({ value }: { value: string[] | null }) => (
+    <div data-testid="agent-model-access-field">{value ? value.join(',') : 'inherit'}</div>
+  ),
+}));
+
+function Wrapper({
+  children,
+  initialEntries = ['/'],
+}: {
+  children: ReactNode;
+  initialEntries?: string[];
+}) {
   return (
     <MemoryRouter initialEntries={initialEntries}>
       <ToastProvider>{children}</ToastProvider>
@@ -70,9 +104,25 @@ const makeProfile = (overrides: Partial<AgentProfile> = {}): AgentProfile => ({
 });
 
 const PROFILES: AgentProfile[] = [
-  makeProfile({ id: 'prof-1', name: 'Fast Implementer', model: 'claude-sonnet-4-5-20250929', isBuiltin: false }),
-  makeProfile({ id: 'prof-2', name: 'Deep Planner', model: 'claude-opus-4-6', effort: 'xhigh', isBuiltin: false }),
-  makeProfile({ id: 'prof-builtin', name: 'default', model: 'claude-sonnet-4-5-20250929', isBuiltin: true }),
+  makeProfile({
+    id: 'prof-1',
+    name: 'Fast Implementer',
+    model: 'claude-sonnet-4-5-20250929',
+    isBuiltin: false,
+  }),
+  makeProfile({
+    id: 'prof-2',
+    name: 'Deep Planner',
+    model: 'claude-opus-4-6',
+    effort: 'xhigh',
+    isBuiltin: false,
+  }),
+  makeProfile({
+    id: 'prof-builtin',
+    name: 'default',
+    model: 'claude-sonnet-4-5-20250929',
+    isBuiltin: true,
+  }),
 ];
 
 // ---------------------------------------------------------------------------
@@ -81,17 +131,13 @@ const PROFILES: AgentProfile[] = [
 
 describe('ProfileSelector', () => {
   it('renders "Default (no profile)" as the initial option', () => {
-    render(
-      <ProfileSelector profiles={PROFILES} selectedProfileId={null} onChange={vi.fn()} />,
-    );
+    render(<ProfileSelector profiles={PROFILES} selectedProfileId={null} onChange={vi.fn()} />);
     const select = screen.getByLabelText('Agent profile');
     expect(select).toHaveValue('');
   });
 
   it('renders all profiles as options', () => {
-    render(
-      <ProfileSelector profiles={PROFILES} selectedProfileId={null} onChange={vi.fn()} />,
-    );
+    render(<ProfileSelector profiles={PROFILES} selectedProfileId={null} onChange={vi.fn()} />);
     const select = screen.getByLabelText('Agent profile');
     const options = within(select).getAllByRole('option');
     // Default + 3 profiles = 4 options
@@ -102,18 +148,14 @@ describe('ProfileSelector', () => {
   });
 
   it('shows model info in option text', () => {
-    render(
-      <ProfileSelector profiles={PROFILES} selectedProfileId={null} onChange={vi.fn()} />,
-    );
+    render(<ProfileSelector profiles={PROFILES} selectedProfileId={null} onChange={vi.fn()} />);
     const select = screen.getByLabelText('Agent profile');
     const options = within(select).getAllByRole('option');
     expect(options[1]?.textContent).toContain('claude-sonnet');
   });
 
   it('shows non-default effort in option text', () => {
-    render(
-      <ProfileSelector profiles={PROFILES} selectedProfileId={null} onChange={vi.fn()} />,
-    );
+    render(<ProfileSelector profiles={PROFILES} selectedProfileId={null} onChange={vi.fn()} />);
     const select = screen.getByLabelText('Agent profile');
     const options = within(select).getAllByRole('option');
     expect(options[2]?.textContent).toContain('xhigh');
@@ -121,9 +163,7 @@ describe('ProfileSelector', () => {
   });
 
   it('shows "(built-in)" suffix for built-in profiles', () => {
-    render(
-      <ProfileSelector profiles={PROFILES} selectedProfileId={null} onChange={vi.fn()} />,
-    );
+    render(<ProfileSelector profiles={PROFILES} selectedProfileId={null} onChange={vi.fn()} />);
     const select = screen.getByLabelText('Agent profile');
     const options = within(select).getAllByRole('option');
     expect(options[3]?.textContent).toContain('(built-in)');
@@ -133,9 +173,7 @@ describe('ProfileSelector', () => {
   it('calls onChange with profile id when user selects a profile', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(
-      <ProfileSelector profiles={PROFILES} selectedProfileId={null} onChange={onChange} />,
-    );
+    render(<ProfileSelector profiles={PROFILES} selectedProfileId={null} onChange={onChange} />);
     const select = screen.getByLabelText('Agent profile');
     await user.selectOptions(select, 'prof-2');
     expect(onChange).toHaveBeenCalledWith('prof-2');
@@ -144,25 +182,21 @@ describe('ProfileSelector', () => {
   it('calls onChange with null when user selects "Default"', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(
-      <ProfileSelector profiles={PROFILES} selectedProfileId="prof-1" onChange={onChange} />,
-    );
+    render(<ProfileSelector profiles={PROFILES} selectedProfileId="prof-1" onChange={onChange} />);
     const select = screen.getByLabelText('Agent profile');
     await user.selectOptions(select, '');
     expect(onChange).toHaveBeenCalledWith(null);
   });
 
   it('reflects the selected profile id', () => {
-    render(
-      <ProfileSelector profiles={PROFILES} selectedProfileId="prof-2" onChange={vi.fn()} />,
-    );
+    render(<ProfileSelector profiles={PROFILES} selectedProfileId="prof-2" onChange={vi.fn()} />);
     const select = screen.getByLabelText('Agent profile');
     expect(select).toHaveValue('prof-2');
   });
 
   it('can be disabled', () => {
     render(
-      <ProfileSelector profiles={PROFILES} selectedProfileId={null} onChange={vi.fn()} disabled />,
+      <ProfileSelector profiles={PROFILES} selectedProfileId={null} onChange={vi.fn()} disabled />
     );
     expect(screen.getByLabelText('Agent profile')).toBeDisabled();
   });
@@ -171,6 +205,15 @@ describe('ProfileSelector', () => {
 // ---------------------------------------------------------------------------
 // ProfileList
 // ---------------------------------------------------------------------------
+
+async function chooseAction(
+  user: ReturnType<typeof userEvent.setup>,
+  profileName: string,
+  action: 'Edit' | 'Delete'
+) {
+  await user.click(screen.getByLabelText(`Actions for ${profileName}`));
+  await user.click(screen.getByRole('menuitem', { name: action }));
+}
 
 describe('ProfileList', () => {
   const defaultProps = {
@@ -205,7 +248,9 @@ describe('ProfileList', () => {
   });
 
   it('shows error message when there is an error', () => {
-    render(<ProfileList {...defaultProps} error="Failed to load" profiles={[]} />, { wrapper: Wrapper });
+    render(<ProfileList {...defaultProps} error="Failed to load" profiles={[]} />, {
+      wrapper: Wrapper,
+    });
     expect(screen.getByText('Failed to load')).toBeInTheDocument();
   });
 
@@ -214,12 +259,20 @@ describe('ProfileList', () => {
     expect(screen.getByText(/no profiles yet/i)).toBeInTheDocument();
   });
 
-  it('shows edit/delete buttons for all profiles including built-in', () => {
+  it('shows an actions menu with edit and delete for every profile including built-in', async () => {
+    const user = userEvent.setup();
     render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
-    const editButtons = screen.getAllByLabelText(/^Edit /);
-    expect(editButtons).toHaveLength(3); // All profiles including built-in
-    const deleteButtons = screen.getAllByLabelText(/^Delete /);
-    expect(deleteButtons).toHaveLength(3);
+    expect(screen.getAllByLabelText(/^Actions for /)).toHaveLength(3);
+    await user.click(screen.getByLabelText('Actions for default'));
+    expect(screen.getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+  });
+
+  it('opens the edit dialog when the profile name is clicked', async () => {
+    const user = userEvent.setup();
+    render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
+    await user.click(screen.getByRole('button', { name: 'Fast Implementer' }));
+    expect(screen.getByText('Edit Profile')).toBeInTheDocument();
   });
 
   it('opens create dialog when New Profile is clicked', async () => {
@@ -232,21 +285,21 @@ describe('ProfileList', () => {
   it('opens edit dialog when edit button is clicked', async () => {
     const user = userEvent.setup();
     render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
-    await user.click(screen.getByLabelText('Edit Fast Implementer'));
+    await chooseAction(user, 'Fast Implementer', 'Edit');
     expect(screen.getByText('Edit Profile')).toBeInTheDocument();
   });
 
   it('opens edit dialog for built-in profile', async () => {
     const user = userEvent.setup();
     render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
-    await user.click(screen.getByLabelText('Edit default'));
+    await chooseAction(user, 'default', 'Edit');
     expect(screen.getByText('Edit Profile')).toBeInTheDocument();
   });
 
   it('shows delete confirmation when delete button is clicked', async () => {
     const user = userEvent.setup();
     render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
-    await user.click(screen.getByLabelText('Delete Fast Implementer'));
+    await chooseAction(user, 'Fast Implementer', 'Delete');
     expect(screen.getByText('Confirm')).toBeInTheDocument();
     expect(screen.getByText('Cancel')).toBeInTheDocument();
   });
@@ -255,7 +308,7 @@ describe('ProfileList', () => {
     const user = userEvent.setup();
     const onDelete = vi.fn().mockResolvedValue(undefined);
     render(<ProfileList {...defaultProps} onDeleteProfile={onDelete} />, { wrapper: Wrapper });
-    await user.click(screen.getByLabelText('Delete default'));
+    await chooseAction(user, 'default', 'Delete');
     await user.click(screen.getByLabelText('Confirm delete default'));
     expect(onDelete).toHaveBeenCalledWith('prof-builtin');
   });
@@ -264,7 +317,7 @@ describe('ProfileList', () => {
     const user = userEvent.setup();
     const onDelete = vi.fn().mockResolvedValue(undefined);
     render(<ProfileList {...defaultProps} onDeleteProfile={onDelete} />, { wrapper: Wrapper });
-    await user.click(screen.getByLabelText('Delete Fast Implementer'));
+    await chooseAction(user, 'Fast Implementer', 'Delete');
     await user.click(screen.getByText('Confirm'));
     expect(onDelete).toHaveBeenCalledWith('prof-1');
   });
@@ -273,23 +326,24 @@ describe('ProfileList', () => {
     const user = userEvent.setup();
     const onDelete = vi.fn().mockResolvedValue(undefined);
     render(<ProfileList {...defaultProps} onDeleteProfile={onDelete} />, { wrapper: Wrapper });
-    await user.click(screen.getByLabelText('Delete Fast Implementer'));
+    await chooseAction(user, 'Fast Implementer', 'Delete');
     await user.click(screen.getByText('Cancel'));
     expect(onDelete).not.toHaveBeenCalled();
   });
 
-  it('shows profile metadata: agent type, model, permission mode', () => {
+  it('shows profile metadata: agent, model, effort, permission mode', () => {
     render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
-    expect(screen.getAllByText('claude-code').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Claude Code').length).toBeGreaterThan(0);
     expect(screen.getAllByText('claude-sonnet-4-5-20250929').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('acceptEdits').length).toBeGreaterThan(0);
+    expect(screen.getByText('Extra high effort')).toBeInTheDocument();
+    expect(screen.getAllByText('Accept Edits').length).toBeGreaterThan(0);
   });
 
   it('shows delete error in role="alert" when onDeleteProfile rejects', async () => {
     const user = userEvent.setup();
     const onDelete = vi.fn().mockRejectedValue(new Error('Cannot delete: in use'));
     render(<ProfileList {...defaultProps} onDeleteProfile={onDelete} />, { wrapper: Wrapper });
-    await user.click(screen.getByLabelText('Delete Fast Implementer'));
+    await chooseAction(user, 'Fast Implementer', 'Delete');
     await user.click(screen.getByText('Confirm'));
     await screen.findByRole('alert');
     expect(screen.getByRole('alert')).toHaveTextContent('Cannot delete: in use');
@@ -306,9 +360,7 @@ describe('ProfileList', () => {
     // Submit
     await user.click(screen.getByText('Create Profile'));
     await waitFor(() => {
-      expect(onCreate).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'New Prof' }),
-      );
+      expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ name: 'New Prof' }));
     });
   });
 
@@ -316,7 +368,7 @@ describe('ProfileList', () => {
     const user = userEvent.setup();
     const onUpdate = vi.fn().mockResolvedValue(makeProfile());
     render(<ProfileList {...defaultProps} onUpdateProfile={onUpdate} />, { wrapper: Wrapper });
-    await user.click(screen.getByLabelText('Edit Fast Implementer'));
+    await chooseAction(user, 'Fast Implementer', 'Edit');
     // Name should be pre-filled
     const nameInput = screen.getByDisplayValue('Fast Implementer');
     expect(nameInput).toBeInTheDocument();
@@ -325,17 +377,16 @@ describe('ProfileList', () => {
     await user.type(nameInput, 'Renamed');
     await user.click(screen.getByText('Save Changes'));
     await waitFor(() => {
-      expect(onUpdate).toHaveBeenCalledWith(
-        'prof-1',
-        expect.objectContaining({ name: 'Renamed' }),
-      );
+      expect(onUpdate).toHaveBeenCalledWith('prof-1', expect.objectContaining({ name: 'Renamed' }));
     });
   });
 
   describe('URL-driven edit modal', () => {
     it('opens edit dialog when ?edit=<profileId> is in the URL', () => {
       render(<ProfileList {...defaultProps} />, {
-        wrapper: ({ children }) => <Wrapper initialEntries={['/profiles?edit=prof-1']}>{children}</Wrapper>,
+        wrapper: ({ children }) => (
+          <Wrapper initialEntries={['/profiles?edit=prof-1']}>{children}</Wrapper>
+        ),
       });
       expect(screen.getByText('Edit Profile')).toBeInTheDocument();
       expect(screen.getByDisplayValue('Fast Implementer')).toBeInTheDocument();
@@ -343,7 +394,9 @@ describe('ProfileList', () => {
 
     it('opens create dialog when ?edit=new is in the URL', () => {
       render(<ProfileList {...defaultProps} />, {
-        wrapper: ({ children }) => <Wrapper initialEntries={['/profiles?edit=new']}>{children}</Wrapper>,
+        wrapper: ({ children }) => (
+          <Wrapper initialEntries={['/profiles?edit=new']}>{children}</Wrapper>
+        ),
       });
       expect(screen.getByText('Create Agent Profile')).toBeInTheDocument();
     });
@@ -371,7 +424,13 @@ describe('ProfileFormDialog', () => {
   it('shows validation error when name is empty on submit', async () => {
     const user = userEvent.setup();
     render(
-      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} projectId="proj-test-1" />, { wrapper: Wrapper },
+      <ProfileFormDialog
+        isOpen={true}
+        onClose={defaultOnClose}
+        onSave={defaultOnSave}
+        projectId="proj-test-1"
+      />,
+      { wrapper: Wrapper }
     );
     await user.click(screen.getByText('Create Profile'));
     expect(screen.getByRole('alert')).toHaveTextContent('Profile name is required');
@@ -381,7 +440,13 @@ describe('ProfileFormDialog', () => {
   it('shows validation error when name is only whitespace', async () => {
     const user = userEvent.setup();
     render(
-      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} projectId="proj-test-1" />, { wrapper: Wrapper },
+      <ProfileFormDialog
+        isOpen={true}
+        onClose={defaultOnClose}
+        onSave={defaultOnSave}
+        projectId="proj-test-1"
+      />,
+      { wrapper: Wrapper }
     );
     const nameInput = screen.getByPlaceholderText('e.g. Fast Implementer');
     await user.type(nameInput, '   ');
@@ -393,7 +458,13 @@ describe('ProfileFormDialog', () => {
   it('saves workload resource overrides without selecting a legacy VM size', async () => {
     const user = userEvent.setup();
     render(
-      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} projectId="proj-test-1" />, { wrapper: Wrapper },
+      <ProfileFormDialog
+        isOpen={true}
+        onClose={defaultOnClose}
+        onSave={defaultOnSave}
+        projectId="proj-test-1"
+      />,
+      { wrapper: Wrapper }
     );
     await user.type(screen.getByPlaceholderText('e.g. Fast Implementer'), 'Custom resources');
     await user.click(screen.getByText('Infrastructure'));
@@ -403,16 +474,28 @@ describe('ProfileFormDialog', () => {
     await waitFor(() => expect(defaultOnSave).toHaveBeenCalledOnce());
     const payload = defaultOnSave.mock.calls[0]?.[0];
     expect(payload.vmSizeOverride).toBeNull();
-    expect(JSON.parse(payload.resourceRequirementsJson)).toMatchObject({ minVcpu: 2.5, minMemoryGb: 6 });
+    expect(JSON.parse(payload.resourceRequirementsJson)).toMatchObject({
+      minVcpu: 2.5,
+      minMemoryGb: 6,
+    });
   });
 
   it('calls onSave with correct payload in create mode', async () => {
     const user = userEvent.setup();
     render(
-      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} projectId="proj-test-1" />, { wrapper: Wrapper },
+      <ProfileFormDialog
+        isOpen={true}
+        onClose={defaultOnClose}
+        onSave={defaultOnSave}
+        projectId="proj-test-1"
+      />,
+      { wrapper: Wrapper }
     );
     await user.type(screen.getByPlaceholderText('e.g. Fast Implementer'), 'Test Profile');
-    await user.type(screen.getByPlaceholderText('What this profile is for...'), 'A test');
+    await user.type(
+      screen.getByPlaceholderText('What this profile is for. Shown on new-chat cards.'),
+      'A test'
+    );
     await user.click(screen.getByText('Create Profile'));
     await waitFor(() => {
       expect(defaultOnSave).toHaveBeenCalledWith(
@@ -423,7 +506,7 @@ describe('ProfileFormDialog', () => {
           maxTurns: null,
           timeoutMinutes: null,
           vmSizeOverride: null,
-        }),
+        })
       );
     });
   });
@@ -431,7 +514,13 @@ describe('ProfileFormDialog', () => {
   it('saves instant runtime with lightweight conversation settings', async () => {
     const user = userEvent.setup();
     render(
-      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} projectId="proj-test-1" />, { wrapper: Wrapper },
+      <ProfileFormDialog
+        isOpen={true}
+        onClose={defaultOnClose}
+        onSave={defaultOnSave}
+        projectId="proj-test-1"
+      />,
+      { wrapper: Wrapper }
     );
     await user.type(screen.getByPlaceholderText('e.g. Fast Implementer'), 'Instant Chat');
     await user.click(screen.getByText('Infrastructure'));
@@ -445,15 +534,56 @@ describe('ProfileFormDialog', () => {
           vmSizeOverride: null,
           workspaceProfile: 'lightweight',
           taskMode: 'conversation',
-        }),
+        })
       );
     });
   });
 
-  it('pre-populates fields in edit mode', () => {
-    const profile = makeProfile({ name: 'My Profile', description: 'desc', model: 'claude-opus-4-6', effort: 'xhigh', maxTurns: 5 });
+  it('lets an Instant profile switch its runtime back to a Cloud VM', async () => {
+    // CodeRabbit caught a split of this dialog that disabled the whole Infrastructure block for
+    // Instant profiles, locking the Runtime select itself.
+    const user = userEvent.setup();
     render(
-      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} profile={profile} projectId="proj-test-1" />, { wrapper: Wrapper },
+      <ProfileFormDialog
+        isOpen={true}
+        onClose={defaultOnClose}
+        onSave={defaultOnSave}
+        profile={makeProfile({ name: 'Instant Chat', runtime: 'cf-container' })}
+        projectId="proj-test-1"
+      />,
+      { wrapper: Wrapper }
+    );
+    await user.click(screen.getByText('Infrastructure'));
+    const runtimeSelect = screen.getByLabelText('Runtime');
+    expect(runtimeSelect).toBeEnabled();
+    // The settings an Instant container fixes stay locked while it is selected.
+    expect(screen.getByLabelText('Task Mode')).toBeDisabled();
+
+    await user.selectOptions(runtimeSelect, 'vm');
+    expect(screen.getByLabelText('Task Mode')).toBeEnabled();
+    await user.click(screen.getByText('Save Changes'));
+    await waitFor(() => {
+      expect(defaultOnSave).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'vm' }));
+    });
+  });
+
+  it('pre-populates fields in edit mode', () => {
+    const profile = makeProfile({
+      name: 'My Profile',
+      description: 'desc',
+      model: 'claude-opus-4-6',
+      effort: 'xhigh',
+      maxTurns: 5,
+    });
+    render(
+      <ProfileFormDialog
+        isOpen={true}
+        onClose={defaultOnClose}
+        onSave={defaultOnSave}
+        profile={profile}
+        projectId="proj-test-1"
+      />,
+      { wrapper: Wrapper }
     );
     expect(screen.getByDisplayValue('My Profile')).toBeInTheDocument();
     expect(screen.getByDisplayValue('desc')).toBeInTheDocument();
@@ -461,12 +591,38 @@ describe('ProfileFormDialog', () => {
     expect(screen.getByDisplayValue('Claude Opus 4.6 (claude-opus-4-6)')).toBeInTheDocument();
     expect(screen.getByLabelText('Effort')).toHaveValue('xhigh');
     expect(screen.getByDisplayValue('5')).toBeInTheDocument();
+    // Edit mode offers my account choice for this profile, wired to the profile.
+    expect(screen.getByTestId('profile-account-form-section')).toBeInTheDocument();
+    expect(accountSectionMock.ProfileAccountFormSection).toHaveBeenCalledWith(
+      expect.objectContaining({ profile, projectId: 'proj-test-1' }),
+      undefined
+    );
+  });
+
+  it('create mode has no account choice (the profile does not exist yet)', () => {
+    render(
+      <ProfileFormDialog
+        isOpen={true}
+        onClose={defaultOnClose}
+        onSave={defaultOnSave}
+        projectId="proj-test-1"
+      />,
+      { wrapper: Wrapper }
+    );
+    expect(screen.queryByTestId('profile-account-form-section')).toBeNull();
   });
 
   it('does not offer max effort for OpenAI Codex profiles', () => {
     const profile = makeProfile({ agentType: 'openai-codex', model: 'gpt-5.5', effort: 'high' });
     render(
-      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} profile={profile} projectId="proj-test-1" />, { wrapper: Wrapper },
+      <ProfileFormDialog
+        isOpen={true}
+        onClose={defaultOnClose}
+        onSave={defaultOnSave}
+        profile={profile}
+        projectId="proj-test-1"
+      />,
+      { wrapper: Wrapper }
     );
 
     const effortSelect = screen.getByLabelText('Effort');
@@ -478,7 +634,14 @@ describe('ProfileFormDialog', () => {
     const user = userEvent.setup();
     const profile = makeProfile({ agentType: 'openai-codex', model: 'gpt-6-sol' });
     render(
-      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} profile={profile} projectId="proj-test-1" />, { wrapper: Wrapper },
+      <ProfileFormDialog
+        isOpen={true}
+        onClose={defaultOnClose}
+        onSave={defaultOnSave}
+        profile={profile}
+        projectId="proj-test-1"
+      />,
+      { wrapper: Wrapper }
     );
 
     await user.click(screen.getByLabelText('Model'));
@@ -491,7 +654,13 @@ describe('ProfileFormDialog', () => {
     const user = userEvent.setup();
     const failingSave = vi.fn().mockRejectedValue(new Error('Server error'));
     render(
-      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={failingSave} projectId="proj-test-1" />, { wrapper: Wrapper },
+      <ProfileFormDialog
+        isOpen={true}
+        onClose={defaultOnClose}
+        onSave={failingSave}
+        projectId="proj-test-1"
+      />,
+      { wrapper: Wrapper }
     );
     await user.type(screen.getByPlaceholderText('e.g. Fast Implementer'), 'Test');
     await user.click(screen.getByText('Create Profile'));
@@ -504,7 +673,13 @@ describe('ProfileFormDialog', () => {
   it('calls onClose when Cancel is clicked without saving', async () => {
     const user = userEvent.setup();
     render(
-      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} projectId="proj-test-1" />, { wrapper: Wrapper },
+      <ProfileFormDialog
+        isOpen={true}
+        onClose={defaultOnClose}
+        onSave={defaultOnSave}
+        projectId="proj-test-1"
+      />,
+      { wrapper: Wrapper }
     );
     await user.click(screen.getByText('Cancel'));
     expect(defaultOnClose).toHaveBeenCalled();
@@ -514,7 +689,13 @@ describe('ProfileFormDialog', () => {
   it('parses numeric fields correctly', async () => {
     const user = userEvent.setup();
     render(
-      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} projectId="proj-test-1" />, { wrapper: Wrapper },
+      <ProfileFormDialog
+        isOpen={true}
+        onClose={defaultOnClose}
+        onSave={defaultOnSave}
+        projectId="proj-test-1"
+      />,
+      { wrapper: Wrapper }
     );
     await user.type(screen.getByPlaceholderText('e.g. Fast Implementer'), 'Numeric Test');
     // Set max turns and timeout
@@ -529,7 +710,7 @@ describe('ProfileFormDialog', () => {
           name: 'Numeric Test',
           maxTurns: 10,
           timeoutMinutes: 30,
-        }),
+        })
       );
     });
   });

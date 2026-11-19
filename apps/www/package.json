@@ -17,18 +17,23 @@
     "build": "pnpm build:assets && astro build",
     "preview": "astro preview",
     "check:links": "python3 scripts/check-doc-links.py",
-    "optimize:features": "tsx scripts/optimize-feature-images.ts"
+    "optimize:features": "tsx scripts/optimize-feature-images.ts",
+    "compress:screenshots": "tsx scripts/compress-screenshots.ts",
+    "build:brand-lockups": "tsx scripts/build-brand-lockups.ts",
+    "build:brand-captures": "tsx scripts/build-brand-captures.ts"
   },
   "dependencies": {
     "@astrojs/sitemap": "3.7.4",
     "@astrojs/starlight": "0.40.0",
+    "@expressive-code/plugin-line-numbers": "0.43.1",
+    "@simple-agent-manager/ui": "workspace:*",
     "astro": "6.4.8",
     "mermaid": "11.14.0"
   },
   "devDependencies": {
     "@astrojs/check": "catalog:",
-    "@axe-core/playwright": "4.12.1",
-    "@playwright/test": "1.62.1",
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.65.0",
     "@vitest/coverage-v8": "catalog:",
     "esbuild": "0.28.1",
     "sharp": "0.35.5",

@@ -39,15 +39,19 @@ func TestUpsertWorkspaceRuntimeNoOptsPreservesLightweight(t *testing.T) {
 		callSites     []string
 		status        string
 		callbackToken string
+		attach        bool
 	}{
 		{
-			name: "status refresh on websocket connect",
+			// The attach shape: upsertWorkspaceRuntimeForAttach supplies only a
+			// create-time status, so an existing runtime keeps its status too
+			// (workspace_attach_status_test.go covers that through the handlers).
+			name: "attach upsert on websocket connect",
 			callSites: []string{
-				"agent_ws.go:72 handleAgentWS",
-				"websocket.go:196 handleTerminalWS",
-				"websocket.go:337 handleMultiTerminalWS",
+				"agent_ws.go handleAgentWS",
+				"websocket.go handleTerminalWS",
+				"websocket.go handleMultiTerminalWS",
 			},
-			status: "running",
+			attach: true,
 		},
 		{
 			name: "callback-token persist on restore",
@@ -78,7 +82,12 @@ func TestUpsertWorkspaceRuntimeNoOptsPreservesLightweight(t *testing.T) {
 				t.Fatal("precondition: expected Lightweight=true after create")
 			}
 
-			after := s.upsertWorkspaceRuntime("WS_LIGHT", "", "", tc.status, tc.callbackToken)
+			var after *WorkspaceRuntime
+			if tc.attach {
+				after = s.upsertWorkspaceRuntimeForAttach("WS_LIGHT")
+			} else {
+				after = s.upsertWorkspaceRuntime("WS_LIGHT", "", "", tc.status, tc.callbackToken)
+			}
 			if !after.Lightweight {
 				t.Error("no-opts upsert cleared Lightweight")
 			}

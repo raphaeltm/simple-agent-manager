@@ -3,11 +3,11 @@
     "agentType": "claude-code",
     "method": "npm",
     "package": "@agentclientprotocol/claude-agent-acp",
-    "version": "0.81.2",
+    "version": "0.102.0",
     "bin": "claude-agent-acp",
     "npmCompanion": {
       "package": "@anthropic-ai/claude-code",
-      "version": "2.1.281"
+      "version": "2.1.321"
     }
   },
   {
@@ -29,6 +29,17 @@
     "bin": "gemini"
   },
   {
+    "agentType": "google-antigravity",
+    "method": "binary-archive",
+    "package": "agy-acp-server",
+    "version": "1.4.5",
+    "bin": "agy-acp",
+    "assets": {
+      "linux-x86_64": "923923a0d7dc8073f66cc6f78647a3107e3a7ee2b7e1a24df8b3927b5188013b",
+      "linux-arm64": "7d64246633ae094f67e3bbcd2d679e89048f91346d5339313336e7483f40f056"
+    }
+  },
+  {
     "agentType": "mistral-vibe",
     "method": "uv-tool",
     "package": "mistral-vibe",
@@ -38,10 +49,17 @@
   },
   {
     "agentType": "opencode",
-    "method": "npm",
-    "package": "opencode-ai",
-    "version": "1.18.32",
-    "bin": "opencode"
+    "method": "github-release",
+    "package": "opencode",
+    "version": "2.2.5-sam-s1",
+    "bin": "opencode",
+    "repository": "raphaeltm/simple-agent-manager",
+    "assets": {
+      "linux-x64-baseline": "3547aad5f40c4dd701423b7566875eb232948192762ab4300db94f17a7d8586e",
+      "linux-x64-baseline-musl": "28d84822ce270d830c1db79a43d82f4631c16e56124b0daaacc7377170074d0c",
+      "linux-arm64": "b1850c2332f2352b8e2b2a9fda76d7854756151a62879f2c8e266420ea710a81",
+      "linux-arm64-musl": "b0337cff62d5b755969609da3a3bd52024fc3084dfcacca176610290fc775b16"
+    }
   },
   {
     "agentType": "amp",

@@ -6,7 +6,7 @@
 /** Default LLM model for SAM agent loop.
  * Must be an active model present in PLATFORM_AI_MODELS (claude-sonnet-4-20250514
  * was retired by Anthropic on 2026-06-15 and silently broke this default). */
-export const DEFAULT_SAM_MODEL = 'claude-sonnet-5';
+export const DEFAULT_SAM_MODEL = '@cf/deepseek-ai/deepseek-v4.1-flash-1017';
 
 /** Max output tokens per LLM turn. */
 export const DEFAULT_SAM_MAX_TOKENS = 4096;
@@ -84,17 +84,27 @@ export function resolveSamConfig(env: Record<string, string | undefined>): SamCo
     maxTokens: parseInt(env.SAM_MAX_TOKENS || '', 10) || DEFAULT_SAM_MAX_TOKENS,
     maxTurns: parseInt(env.SAM_MAX_TURNS || '', 10) || DEFAULT_SAM_MAX_TURNS,
     rateLimitRpm: parseInt(env.SAM_RATE_LIMIT_RPM || '', 10) || DEFAULT_SAM_RATE_LIMIT_RPM,
-    rateLimitWindowSeconds: parseInt(env.SAM_RATE_LIMIT_WINDOW_SECONDS || '', 10) || DEFAULT_SAM_RATE_LIMIT_WINDOW_SECONDS,
-    maxConversations: parseInt(env.SAM_MAX_CONVERSATIONS || '', 10) || DEFAULT_SAM_MAX_CONVERSATIONS,
-    maxMessagesPerConversation: parseInt(env.SAM_MAX_MESSAGES_PER_CONVERSATION || '', 10) || DEFAULT_SAM_MAX_MESSAGES_PER_CONVERSATION,
-    contextWindow: parseInt(env.SAM_CONVERSATION_CONTEXT_WINDOW || '', 10) || DEFAULT_SAM_CONVERSATION_CONTEXT_WINDOW,
+    rateLimitWindowSeconds:
+      parseInt(env.SAM_RATE_LIMIT_WINDOW_SECONDS || '', 10) ||
+      DEFAULT_SAM_RATE_LIMIT_WINDOW_SECONDS,
+    maxConversations:
+      parseInt(env.SAM_MAX_CONVERSATIONS || '', 10) || DEFAULT_SAM_MAX_CONVERSATIONS,
+    maxMessagesPerConversation:
+      parseInt(env.SAM_MAX_MESSAGES_PER_CONVERSATION || '', 10) ||
+      DEFAULT_SAM_MAX_MESSAGES_PER_CONVERSATION,
+    contextWindow:
+      parseInt(env.SAM_CONVERSATION_CONTEXT_WINDOW || '', 10) ||
+      DEFAULT_SAM_CONVERSATION_CONTEXT_WINDOW,
     aigSource: env.SAM_AIG_SOURCE || DEFAULT_SAM_AIG_SOURCE,
     systemPromptAppend: env.SAM_SYSTEM_PROMPT_APPEND || '',
     ftsEnabled: env.SAM_FTS_ENABLED !== 'false',
     searchLimit: parseInt(env.SAM_SEARCH_LIMIT || '', 10) || DEFAULT_SAM_SEARCH_LIMIT,
     searchMaxLimit: parseInt(env.SAM_SEARCH_MAX_LIMIT || '', 10) || DEFAULT_SAM_SEARCH_MAX_LIMIT,
-    historyLoadLimit: parseInt(env.SAM_HISTORY_LOAD_LIMIT || '', 10) || DEFAULT_SAM_HISTORY_LOAD_LIMIT,
-    maxToolResultBytes: parseInt(env.SAM_MAX_TOOL_RESULT_BYTES || '', 10) || DEFAULT_SAM_MAX_TOOL_RESULT_BYTES,
-    maxRequestBodyBytes: parseInt(env.SAM_MAX_REQUEST_BODY_BYTES || '', 10) || DEFAULT_SAM_MAX_REQUEST_BODY_BYTES,
+    historyLoadLimit:
+      parseInt(env.SAM_HISTORY_LOAD_LIMIT || '', 10) || DEFAULT_SAM_HISTORY_LOAD_LIMIT,
+    maxToolResultBytes:
+      parseInt(env.SAM_MAX_TOOL_RESULT_BYTES || '', 10) || DEFAULT_SAM_MAX_TOOL_RESULT_BYTES,
+    maxRequestBodyBytes:
+      parseInt(env.SAM_MAX_REQUEST_BODY_BYTES || '', 10) || DEFAULT_SAM_MAX_REQUEST_BODY_BYTES,
   };
 }

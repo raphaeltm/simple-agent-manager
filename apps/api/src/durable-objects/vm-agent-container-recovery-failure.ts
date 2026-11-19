@@ -39,7 +39,7 @@ export async function persistRuntimeRecoveryFailed(
   const statements: D1PreparedStatement[] = [
     env.DATABASE.prepare(
       `UPDATE nodes
-       SET status = 'error', health_status = 'unhealthy', error_message = ?, updated_at = ?
+       SET cleanup_blocked_since = NULL, cleanup_blocked_reason = NULL, cleanup_blocked_alerted_at = NULL, status = 'error', health_status = 'unhealthy', error_message = ?, updated_at = ?
        WHERE id = ?
          AND user_id = ?
          AND runtime = 'cf-container'

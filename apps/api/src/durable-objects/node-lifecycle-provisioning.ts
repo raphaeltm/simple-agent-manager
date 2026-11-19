@@ -12,11 +12,12 @@ import {
 } from '../services/direct-workspace-creation';
 import { NodeAllocationUncertainError } from '../services/node-allocation-recovery';
 import { provisionNode } from '../services/node-provisioning';
+import { releaseDurableTunnelBeforeVm } from '../services/node-provisioning-predicates';
 import { persistError } from '../services/observability';
-import {
-  taskStatusIsNonTerminalSql,
-  TERMINAL_STATUS_VALUES,
-} from '../services/task-status';
+import { taskStatusIsNonTerminalSql, TERMINAL_STATUS_VALUES } from '../services/task-status';
+import { confirmUnassignedWorkspaceAbsence } from '../services/unassigned-workspace-deletion';
+import type { WorkspaceDeletionIdentity } from '../services/workspace-deletion';
+import { attemptDeadlineMs, logAttemptFailure } from './node-lifecycle-provisioning-attempt';
 
 export const DIRECT_PROVISIONING_KEY = 'direct-provisioning:v1';
 export const DEFAULT_NODE_PROVISIONING_REQUEST_TIMEOUT_MS = 5_000;
@@ -30,6 +31,12 @@ export interface DirectProvisioningIntent {
   incarnationId: string;
   createdAt: number;
   allocationComplete?: boolean;
+  /**
+   * Set (durably, before the POST) when an attempt is about to send the provider create.
+   * `false` proves no attempt ever sent one, so a resumed attempt may create instead of
+   * reconciling. Absent on intents persisted before this field: treated as "may have created".
+   */
+  providerCreateRequested?: boolean;
   nextAttemptAt: number | null;
   attempts: number;
   status: 'pending' | 'reporting' | 'complete' | 'failed' | 'unresolved';
@@ -47,6 +54,25 @@ function positive(value: string | undefined, fallback: number): number {
 export class NodeLifecycleProvisioning {
   private lock: Promise<unknown> = Promise.resolve();
   private inFlight = false;
+  async confirmUnassignedDeletion(expected: WorkspaceDeletionIdentity): Promise<boolean> {
+    return this.withLock(async () => {
+      if (this.inFlight) return false;
+      const intent = await this.ctx.storage.get<DirectProvisioningIntent>(DIRECT_PROVISIONING_KEY);
+      if (!intent) return false;
+      try {
+        if (!(await confirmUnassignedWorkspaceAbsence(this.env, expected, intent))) return false;
+      } catch (error) {
+        log.warn('workspace_deletion.unassigned_absence_unconfirmed', {
+          workspaceId: expected.workspaceId,
+          errorType: error instanceof Error ? error.name : 'UnknownError',
+        });
+        return false;
+      }
+      // Terminal intent remains sealed: start cannot replace it, and alarm cannot replay it.
+      await this.ctx.storage.deleteAlarm();
+      return true;
+    });
+  }
   constructor(
     private readonly ctx: DurableObjectState,
     private readonly env: Env
@@ -84,6 +110,7 @@ export class NodeLifecycleProvisioning {
         initialIncarnationId: node.runtime_incarnation_id,
         incarnationId: crypto.randomUUID(),
         createdAt: Date.now(),
+        providerCreateRequested: false,
         nextAttemptAt: Date.now(),
         attempts: 0,
         status: 'pending',
@@ -171,11 +198,7 @@ export class NodeLifecycleProvisioning {
       DEFAULT_NODE_PROVISIONING_REQUEST_TIMEOUT_MS
     );
     const controller = new AbortController();
-    const timer = setTimeout(
-      () =>
-        controller.abort(new NodeAllocationUncertainError('Provisioning request deadline elapsed')),
-      timeout
-    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const { input } = intent;
       const workspaceInput = input.workspace;
@@ -187,6 +210,16 @@ export class NodeLifecycleProvisioning {
         await this.finish(intent, 'failed', 'Node no longer exists or belongs to this intent');
         return;
       }
+      // Each Cloudflare request keeps `timeout` (CF_API_TIMEOUT_MS below); the attempt has its own
+      // admin-set budget. What it does and does not cut: node-lifecycle-provisioning-attempt.ts.
+      const deadlineMs = await attemptDeadlineMs(this.env, node, intent, timeout);
+      timer = setTimeout(
+        () =>
+          controller.abort(
+            new NodeAllocationUncertainError('Provisioning request deadline elapsed')
+          ),
+        deadlineMs
+      );
       const mustAllocate = !input.workspace || input.workspace.mustProvisionNode;
       if (
         mustAllocate &&
@@ -215,6 +248,9 @@ export class NodeLifecycleProvisioning {
               createdAt: intent.createdAt,
               initialIncarnationId: intent.initialIncarnationId,
               incarnationId: intent.incarnationId,
+              providerCreateRequested: intent.providerCreateRequested,
+              markProviderCreateRequested: () => this.recordCreateRequested(intent, true),
+              clearProviderCreateRequested: () => this.recordCreateRequested(intent, false),
             },
             authorityProjectId: input.workspace?.placement.projectId,
             assertExternalMutationAuthority: workspaceInput
@@ -254,7 +290,7 @@ export class NodeLifecycleProvisioning {
         }
       }
       // Provider work has its own deadline. Readiness/dispatch each use the shorter background tier.
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       const continuationEnv = {
         ...this.env,
         CF_API_TIMEOUT_MS: String(timeout),
@@ -271,6 +307,7 @@ export class NodeLifecycleProvisioning {
         ));
       if (completed) await this.finish(intent, 'complete', null);
     } catch (error) {
+      logAttemptFailure(intent, error);
       await this.withLock(async () => {
         const current =
           await this.ctx.storage.get<DirectProvisioningIntent>(DIRECT_PROVISIONING_KEY);
@@ -280,8 +317,27 @@ export class NodeLifecycleProvisioning {
         await this.ctx.storage.put(DIRECT_PROVISIONING_KEY, current);
       });
     } finally {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
     }
+  }
+
+  /**
+   * Record, before the create POST, that a VM may exist (`true`); withdraw it once the provider
+   * proved the request was never sent (`false`). Fenced on the attempt; throws when superseded.
+   */
+  private async recordCreateRequested(intent: DirectProvisioningIntent, requested: boolean) {
+    await this.withLock(async () => {
+      const current = await this.ctx.storage.get<DirectProvisioningIntent>(DIRECT_PROVISIONING_KEY);
+      if (!current || current.attempts !== intent.attempts || current.status !== 'pending') {
+        throw new NodeAllocationUncertainError(
+          'Provisioning attempt was superseded before its provider create record changed'
+        );
+      }
+      if (current.providerCreateRequested !== requested) {
+        current.providerCreateRequested = requested;
+        await this.ctx.storage.put(DIRECT_PROVISIONING_KEY, current);
+      }
+    });
   }
 
   private async finish(
@@ -289,9 +345,10 @@ export class NodeLifecycleProvisioning {
     status: 'complete' | 'failed',
     message: string | null
   ): Promise<void> {
-    await this.withLock(async () => {
+    const ended = await this.withLock(async () => {
       const current = await this.ctx.storage.get<DirectProvisioningIntent>(DIRECT_PROVISIONING_KEY);
-      if (!current || current.attempts !== intent.attempts || current.status !== 'pending') return;
+      if (!current || current.attempts !== intent.attempts || current.status !== 'pending')
+        return null;
       await this.ctx.storage.put(DIRECT_PROVISIONING_KEY, {
         ...current,
         status,
@@ -299,7 +356,9 @@ export class NodeLifecycleProvisioning {
         lastError: message,
       });
       await this.ctx.storage.deleteAlarm();
+      return current;
     });
+    if (ended && status === 'failed') await releaseDurableTunnelBeforeVm(this.env, ended);
   }
 
   private async publishExhaustion(intent: DirectProvisioningIntent): Promise<void> {
@@ -413,6 +472,7 @@ export class NodeLifecycleProvisioning {
           .run();
       }
     }
+    await releaseDurableTunnelBeforeVm(this.env, intent);
     await persistError(
       this.env.OBSERVABILITY_DATABASE,
       {

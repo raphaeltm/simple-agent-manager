@@ -37,7 +37,6 @@ const MOCK_PROJECT = {
   githubInstallationId: 'inst-theme-1',
   defaultVmSize: 'medium',
   defaultAgentType: 'openai-codex',
-  defaultProvider: 'hetzner',
   workspaceIdleTimeoutMs: null,
   nodeIdleTimeoutMs: null,
   createdAt: '2026-06-06T09:00:00.000Z',
@@ -284,9 +283,10 @@ async function setupMocks(page: Page) {
     if (path === '/api/nodes/node-theme-1/events') return fulfill(route, MOCK_NODE_EVENTS);
     if (path === '/api/nodes/node-theme-1/system-info') return fulfill(route, MOCK_SYSTEM_INFO);
     if (path === '/api/providers/catalog') return fulfill(route, { catalogs: [] });
-    if (path === '/api/trial/status') return fulfill(route, { available: false });
     if (path === '/api/agents') return fulfill(route, { agents: [] });
     if (path === '/api/github/installations') return fulfill(route, []);
+    if (path === '/api/credentials') return fulfill(route, []);
+    if (path === '/api/credentials/agent') return fulfill(route, { credentials: [] });
 
     return fulfill(route, {});
   });

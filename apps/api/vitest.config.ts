@@ -8,13 +8,17 @@ export default defineConfig({
   resolve: {
     alias: {
       'cloudflare:workers': resolve(__dirname, 'tests/mocks/cloudflare-workers.ts'),
+      'cloudflare:sockets': resolve(__dirname, 'tests/mocks/cloudflare-sockets.ts'),
       '@cloudflare/containers': resolve(__dirname, 'tests/mocks/cloudflare-containers.ts'),
     },
   },
   test: {
     // Transform this Workers-only dependency so its runtime import uses the test alias.
-    server: { deps: { inline: ['@cloudflare/workers-oauth-provider'] } },
+    server: {
+      deps: { inline: ['@cloudflare/workers-oauth-provider', /@cloudflare\/containers\//] },
+    },
     globals: true,
+    setupFiles: ['./tests/setup/project-data-ports.ts', './tests/setup/repo-hosting-ports.ts'],
     include: ['tests/**/*.test.ts'],
     exclude: ['tests/workers/**'],
     coverage: coverageConfig(['src/**/*.ts'], {

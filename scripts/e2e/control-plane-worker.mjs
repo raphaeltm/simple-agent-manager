@@ -29,6 +29,16 @@ export default {
       return jsonResponse({ lastAgentKeyRequest, lastAgentSettingsRequest, lastGitTokenRequest });
     }
 
+    if (
+      request.method === 'GET' &&
+      url.pathname === `/api/workspaces/${workspaceId}/runtime-assets`
+    ) {
+      if (request.headers.get('authorization') !== `Bearer ${callbackToken}`) {
+        return jsonResponse({ error: 'unauthorized', message: 'Invalid callback token' }, 401);
+      }
+      return jsonResponse({ envVars: [], files: [] });
+    }
+
     if (request.method === 'POST' && url.pathname === `/api/workspaces/${workspaceId}/agent-key`) {
       const auth = request.headers.get('authorization') ?? '';
 

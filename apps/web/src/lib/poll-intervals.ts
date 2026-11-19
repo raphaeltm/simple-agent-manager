@@ -41,6 +41,126 @@ function resolveRatio(raw: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : fallback;
 }
 
+/**
+ * Automation page refresh for one-time schedules and watches (the states that change on their
+ * own: a schedule comes due, a watch fires). Triggers and runs refresh on focus and after edits.
+ */
+export const DEFAULT_AUTOMATION_POLL_MS = 30_000;
+export const AUTOMATION_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_AUTOMATION_POLL_MS,
+  DEFAULT_AUTOMATION_POLL_MS
+);
+
+/**
+ * Project Overview backstop refresh. Running now is pushed (the project socket's session events
+ * invalidate the read), so this only reconciles what no event announces: a merged pull request,
+ * an idea updated elsewhere, a missed socket frame.
+ */
+export const DEFAULT_PROJECT_OVERVIEW_POLL_MS = 60_000;
+export const PROJECT_OVERVIEW_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_PROJECT_OVERVIEW_POLL_MS,
+  DEFAULT_PROJECT_OVERVIEW_POLL_MS
+);
+
+/**
+ * Refresh of an open Run receipt while its run is still live. A finished run's receipt does not
+ * change, so it is not polled; TanStack pauses polling on a hidden tab.
+ */
+export const DEFAULT_RUN_RECEIPT_POLL_MS = 60_000;
+export const RUN_RECEIPT_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_RUN_RECEIPT_POLL_MS,
+  DEFAULT_RUN_RECEIPT_POLL_MS
+);
+
+/**
+ * Refresh for an open workflow run while it is active, so a step finishing or starting shows
+ * without a reload. Finished runs do not change and are not polled.
+ */
+export const DEFAULT_WORKFLOW_RUN_POLL_MS = 10_000;
+export const WORKFLOW_RUN_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_WORKFLOW_RUN_POLL_MS,
+  DEFAULT_WORKFLOW_RUN_POLL_MS
+);
+
+/**
+ * Deployments refresh while something is changing on its own: a deploy or Start in progress,
+ * a pause, or a new domain waiting for DNS. Steps and statuses move without a reload.
+ */
+export const DEFAULT_DEPLOYMENTS_ACTIVE_POLL_MS = 5_000;
+export const DEPLOYMENTS_ACTIVE_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_DEPLOYMENTS_ACTIVE_POLL_MS,
+  DEFAULT_DEPLOYMENTS_ACTIVE_POLL_MS
+);
+
+/** Deployments refresh when nothing is changing: catches agent deploys and server check-ins. */
+export const DEFAULT_DEPLOYMENTS_IDLE_POLL_MS = 30_000;
+export const DEPLOYMENTS_IDLE_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_DEPLOYMENTS_IDLE_POLL_MS,
+  DEFAULT_DEPLOYMENTS_IDLE_POLL_MS
+);
+
+/** Private SAM preference/availability refresh, including changes from another tab. */
+export const DEFAULT_SAM_SETTINGS_POLL_MS = 10_000;
+export const SAM_SETTINGS_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_SAM_SETTINGS_POLL_MS,
+  DEFAULT_SAM_SETTINGS_POLL_MS
+);
+
+/** Private SAM refresh while a turn, action, or tracked project task remains active. */
+export const DEFAULT_SAM_ACTIVE_POLL_MS = 2_000;
+export const SAM_ACTIVE_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_SAM_ACTIVE_POLL_MS,
+  DEFAULT_SAM_ACTIVE_POLL_MS
+);
+
+/**
+ * Safety-net refresh while the running turn's live stream is connected. The stream
+ * pushes progress and triggers a refresh when a step settles, so polling can relax.
+ */
+export const DEFAULT_SAM_STREAMING_POLL_MS = 15_000;
+export const SAM_STREAMING_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_SAM_STREAMING_POLL_MS,
+  DEFAULT_SAM_STREAMING_POLL_MS
+);
+
+/** Delay before reopening a dropped live stream; grows linearly with each attempt. */
+export const DEFAULT_SAM_STREAM_RECONNECT_MS = 1_500;
+export const SAM_STREAM_RECONNECT_MS = resolveIntervalMs(
+  import.meta.env.VITE_SAM_STREAM_RECONNECT_MS,
+  DEFAULT_SAM_STREAM_RECONNECT_MS
+);
+
+/** Reconnect attempts per turn before the page relies on polling alone. */
+export const DEFAULT_SAM_STREAM_MAX_RECONNECTS = 5;
+export const SAM_STREAM_MAX_RECONNECTS = resolvePositiveInteger(
+  import.meta.env.VITE_SAM_STREAM_MAX_RECONNECTS,
+  DEFAULT_SAM_STREAM_MAX_RECONNECTS
+);
+
+/**
+ * Ideas list refresh. An idea's state is derived from its linked work, so it changes without
+ * anyone touching the page: a chat starts, a pull request opens, an agent asks something.
+ */
+export const DEFAULT_IDEAS_POLL_MS = 30_000;
+export const IDEAS_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_IDEAS_POLL_MS,
+  DEFAULT_IDEAS_POLL_MS
+);
+
+/**
+ * One idea's page (its derived state and its updates timeline).
+ *
+ * The same cadence as the list rather than a faster one: each read costs a ProjectData
+ * Durable Object request, and DO requests are already the account's second-largest billed
+ * line (`pnpm quality:cloudflare-cost`, rule 76). Half a minute is well inside the "two
+ * minutes later it says In progress" the design promises.
+ */
+export const DEFAULT_IDEA_DETAIL_POLL_MS = 30_000;
+export const IDEA_DETAIL_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_IDEA_DETAIL_POLL_MS,
+  DEFAULT_IDEA_DETAIL_POLL_MS
+);
+
 /** Node detail refresh (node record + its workspace list). */
 const DEFAULT_NODE_DETAIL_POLL_MS = 10_000;
 export const NODE_DETAIL_POLL_MS = resolveIntervalMs(
@@ -118,7 +238,24 @@ export const NODE_LIST_POLL_MS = resolveIntervalMs(
   DEFAULT_NODE_LIST_POLL_MS
 );
 
-/** Workspace list refresh on the `/workspaces` and `/nodes` pages. */
+/**
+ * Per-session CPU and memory history on the `/nodes` page. History arrives from VM agents
+ * in 15-minute batches and live memory rides on the node list poll, so this can be slow.
+ */
+const DEFAULT_NODE_RESOURCE_USAGE_POLL_MS = 30_000;
+export const NODE_RESOURCE_USAGE_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_NODE_RESOURCE_USAGE_POLL_MS,
+  DEFAULT_NODE_RESOURCE_USAGE_POLL_MS
+);
+
+/** Re-render tick on the `/nodes` page so ages and live-memory freshness stay current. */
+const DEFAULT_NODE_PAGE_CLOCK_TICK_MS = 30_000;
+export const NODE_PAGE_CLOCK_TICK_MS = resolveIntervalMs(
+  import.meta.env.VITE_NODE_PAGE_CLOCK_TICK_MS,
+  DEFAULT_NODE_PAGE_CLOCK_TICK_MS
+);
+
+/** Workspace list refresh on the `/nodes` page. */
 const DEFAULT_WORKSPACE_LIST_POLL_MS = 10_000;
 export const WORKSPACE_LIST_POLL_MS = resolveIntervalMs(
   import.meta.env.VITE_WORKSPACE_LIST_POLL_MS,

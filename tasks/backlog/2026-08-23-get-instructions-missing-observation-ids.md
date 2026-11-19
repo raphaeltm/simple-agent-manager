@@ -1,5 +1,12 @@
 # `get_instructions` asks agents to maintain knowledge they cannot address
 
+> **Reconciliation 2026-10-26:** Still open; no observation id is rendered. Pointer fixes: the
+> mapper that drops `id` is now `routes/mcp/instruction-tools.ts:199-204` (shifted by #2430,
+> `2a8f6d58b`). `formatKnowledgeDirectives` and the instruction text are in
+> `routes/mcp/instruction-formatting.ts:160` and `:268-273` (moved by #2213 before the last run).
+> The ranked query is `getAllHighConfidenceKnowledge` (`project-data/knowledge.ts:487`, `SELECT o.*`
+> at `:503`), not `knowledge.ts:390`.
+
 **Discovered during**: task 01M0QHHVEQY11VC37Y29B6GGY4 (R1 — remove duplicated structured
 arrays from `get_instructions`), 2026-08-23.
 

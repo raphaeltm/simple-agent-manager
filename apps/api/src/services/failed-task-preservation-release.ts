@@ -123,13 +123,9 @@ async function abandonFailedTaskPreservation(
 }
 
 /**
- * Called by the sleep sweep after a failed or given-up sleep attempt. Acts once the
- * sleep lifecycle has given up (`isSessionSleepExhausted`): the bounded sleep-failure
- * episode ended blocked without a recovery point it could fall back to
- * (`session-sleep-episode.ts`), or a legacy row spent its budget. A failure still
- * inside the episode is left alone — the episode itself may yet sleep the runtime
- * through the transcript-and-Git fallback, which preserves more than this release.
- * Completed tasks keep the pre-existing behaviour. Returns true when it released.
+ * Release failed-task preservation only after a truly terminal sleep intent.
+ * Legacy failures and rearmable preservation blocks remain owned by guarded
+ * sleep teardown, including when no exact recovery point exists.
  */
 export async function releaseExhaustedFailedTaskPreservation(
   env: Env,

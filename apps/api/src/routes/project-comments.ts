@@ -15,6 +15,7 @@
  * a VM-agent callback, so .claude/rules/34 does not apply. The handler still
  * asserts the caller's project capability explicitly before touching data.
  */
+import { TASK_READABLE_SQL } from '@simple-agent-manager/operations';
 import type { ProjectCommentListResponse } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -46,9 +47,25 @@ projectCommentRoutes.get('/', async (c) => {
   await requireProjectCapability(db, projectId, userId, 'task:read');
 
   try {
+    const status = parseCommentStatus(c.req.query('status'));
+    const limit = parsePositiveIntegerQuery('limit', c.req.query('limit'));
+
+    // Task visibility is viewer-specific and lives in D1. Resolve it before the Durable Object
+    // ranks or counts candidates, otherwise private task activity can alter pagination metadata
+    // and consume the capped page even when its bodies are filtered later.
+    const readableTaskRows = await c.env.DATABASE.prepare(
+      `SELECT a.id, a.title FROM asks a
+        WHERE a.project_id = ? AND a.kind = 'task' AND ${TASK_READABLE_SQL}`
+    )
+      .bind(projectId, userId, userId)
+      .all<{ id: string; title: string }>();
+    const readableItems = readableTaskRows.results ?? [];
+    const readable = new Set(readableItems.map((item) => item.id));
+
     const inbox = await projectDataService.listProjectCommentInbox(c.env, projectId, {
-      status: parseCommentStatus(c.req.query('status')),
-      limit: parsePositiveIntegerQuery('limit', c.req.query('limit')),
+      status,
+      limit,
+      readableInboxItemIds: [...readable],
     });
 
     // Filenames live in D1, not in the Durable Object, so they are resolved
@@ -66,9 +83,22 @@ projectCommentRoutes.get('/', async (c) => {
             columns: { id: true, filename: true },
           });
 
+    // Defence in depth: the DO already excludes unreadable task threads before ranking and
+    // counting, and the route still refuses to return a body or title it did not authorize.
+    const itemThreads = inbox.inboxItemThreads ?? [];
+    const returnedItemIds = new Set(itemThreads.map((thread) => thread.itemId));
+
     const response: ProjectCommentListResponse = {
       messageThreads: inbox.messageThreads,
       fileThreads: inbox.fileThreads,
+      inboxItemThreads: itemThreads.filter((thread) => readable.has(thread.itemId)),
+      inboxItems: readableItems
+        .filter((item) => returnedItemIds.has(item.id))
+        .map((item) => ({
+          ref: `ask:${item.id}`,
+          id: item.id,
+          title: item.title,
+        })),
       sessions: inbox.sessions,
       files,
       hasMore: inbox.hasMore,

@@ -15,6 +15,14 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import { runCloudflareRuntimePhase } from './cloudflare-runtime-phase';
+import { resolveVmAgentContainerPort } from './vm-agent-container-port';
+
+/**
+ * Marks a request that SAM relayed to the vm-agent. The vm-agent never grants
+ * peer-address (loopback) trust to a relayed request. Must match
+ * `proxiedRequestHeader` in packages/vm-agent/internal/server/proxy_guard.go.
+ */
+export const SAM_PROXIED_REQUEST_HEADER = 'X-SAM-Proxied-Request';
 
 export interface VmAgentContainerConfig {
   enabled: boolean;
@@ -25,13 +33,19 @@ export interface VmAgentContainerConfig {
 export function getVmAgentContainerConfig(env: Env): VmAgentContainerConfig {
   return {
     enabled: (env.CF_CONTAINER_ENABLED ?? env.SANDBOX_ENABLED) === 'true',
-    vmAgentPort: Number.parseInt(
-      env.CF_CONTAINER_VM_AGENT_PORT || env.SANDBOX_VM_AGENT_PORT || '8080',
-      10
-    ),
+    vmAgentPort: resolveVmAgentContainerPort(env),
     sleepAfter:
       env.CF_CONTAINER_SLEEP_AFTER || env.SANDBOX_SLEEP_AFTER || DEFAULT_CF_CONTAINER_SLEEP_AFTER,
   };
+}
+
+/**
+ * Whether this deployment can start Instant (Cloudflare Container) workspaces: the runtime
+ * is on and the container binding exists. Instant needs no cloud account, so onboarding asks
+ * for one only when this is false.
+ */
+export function isInstantRuntimeAvailable(env: Env): boolean {
+  return getVmAgentContainerConfig(env).enabled && Boolean(env.VM_AGENT_CONTAINER);
 }
 
 export function requireVmAgentContainer(env: Env): void {

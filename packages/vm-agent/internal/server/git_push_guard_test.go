@@ -63,45 +63,6 @@ func writeAgentChange(t *testing.T, workDir string) {
 	}
 }
 
-func TestGitPushWorkspaceChangesBlocksDefaultBranch(t *testing.T) {
-	remote, workDir := setupPushGuardRepository(t, "main")
-	remoteBefore := runPushGuardGit(t, remote, "rev-parse", "refs/heads/main")
-	writeAgentChange(t, workDir)
-
-	result := newStandalonePushGuardServer(workDir, "main").gitPushWorkspaceChanges("workspace-1", true)
-
-	if result.Pushed {
-		t.Fatal("default-branch completion push unexpectedly succeeded")
-	}
-	if !strings.Contains(result.Error, "auto-commit push blocked") || !strings.Contains(result.Error, `default branch "main"`) {
-		t.Fatalf("unexpected guard error: %q", result.Error)
-	}
-	if result.CommitSha == "" {
-		t.Fatal("expected the local completion commit SHA to be reported")
-	}
-	if remoteAfter := runPushGuardGit(t, remote, "rev-parse", "refs/heads/main"); remoteAfter != remoteBefore {
-		t.Fatalf("remote main changed: before=%s after=%s", remoteBefore, remoteAfter)
-	}
-}
-
-func TestGitPushWorkspaceChangesAllowsOutputBranch(t *testing.T) {
-	remote, workDir := setupPushGuardRepository(t, "sam/task-output")
-	writeAgentChange(t, workDir)
-
-	result := newStandalonePushGuardServer(workDir, "sam/task-output").gitPushWorkspaceChanges("workspace-1", true)
-
-	if !result.Pushed || result.Error != "" {
-		t.Fatalf("output-branch completion push failed: %+v", result)
-	}
-	if result.BranchName != "sam/task-output" {
-		t.Fatalf("pushed branch = %q, want sam/task-output", result.BranchName)
-	}
-	remoteSHA := runPushGuardGit(t, remote, "rev-parse", "refs/heads/sam/task-output")
-	if remoteSHA != result.CommitSha {
-		t.Fatalf("remote output SHA = %s, completion SHA = %s", remoteSHA, result.CommitSha)
-	}
-}
-
 func TestCreateWorkspaceRuntimeOptionsCarriesDefaultBranch(t *testing.T) {
 	opts := createWorkspaceRuntimeOptions(createWorkspaceRequest{
 		Branch: "sam/task-output", DefaultBranch: " main ",

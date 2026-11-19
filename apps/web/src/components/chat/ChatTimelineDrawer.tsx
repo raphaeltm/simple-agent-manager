@@ -5,13 +5,13 @@ import {
   TimelineSeparator,
   TimelineStem,
 } from '@simple-agent-manager/ui';
-import { AlignLeft, Check, Clock, MessageSquareQuote, X } from 'lucide-react';
+import { AlignLeft, Check, Clock, MessageSquareQuote } from 'lucide-react';
 import { useCallback, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import { Virtuoso } from 'react-virtuoso';
 
 import { COMMENT_BUCKET_COLORS } from '../project-message-view/comments/comment-inbox';
 import type { TimelineEntry, TimelineJumpTarget } from '../project-message-view/timeline-types';
+import { GlassSheet, GlassSheetHeader } from '../shell/GlassSheet';
 import { useDialogFocusTrap } from './useDialogFocusTrap';
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -65,52 +65,36 @@ export function ChatTimelineDrawer({
     [entries, onJump]
   );
 
-  return createPortal(
-    <>
-      {/* Backdrop — visible only on desktop */}
-      <div
-        className="hidden md:block fixed inset-0 glass-backdrop-dim z-40"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-
-      {/* Panel */}
-      <div
-        className="glass-panel-container glass-composited fixed z-50 glass-modal rounded-l-[20px] rounded-r-none border-y-0 border-r-0 flex flex-col shadow-xl overflow-hidden
-          inset-0
-          md:inset-y-0 md:left-auto md:right-0 md:w-[min(400px,50vw)]
-          before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,rgba(34,197,94,0.55)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"
-        ref={panelRef}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Session timeline"
-      >
-        {/* Header */}
-        <header className="flex items-center gap-2 px-3 py-2 border-b border-border-default shrink-0 min-h-[44px]">
-          <Clock size={16} className="text-fg-muted shrink-0" />
-          <h2 className="text-sm font-medium text-fg-primary flex-1 min-w-0">Timeline</h2>
-
+  return (
+    <GlassSheet
+      label="Session timeline"
+      panelRef={panelRef}
+      onBackdropClick={onClose}
+      backdrop="desktop"
+      mobile="full"
+      widthClassName="w-full md:w-[min(400px,50vw)]"
+      zClassName="z-50"
+      backdropZClassName="z-40"
+      animated={false}
+    >
+      <GlassSheetHeader
+        icon={<Clock size={20} strokeWidth={1.75} />}
+        title="Timeline"
+        onClose={onClose}
+        closeLabel="Close timeline"
+        actions={
           <Button
-            variant="ghost"
+            variant={showContext ? 'raised' : 'ghost'}
             size="sm"
             onClick={onToggleContext}
             aria-pressed={showContext}
-            className={showContext ? 'text-fg-primary' : 'text-fg-muted'}
+            className={showContext ? 'text-fg-primary' : 'border-0 text-fg-muted'}
           >
             <AlignLeft size={14} className="mr-1" />
             Context
           </Button>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded hover:bg-bg-hover text-fg-muted hover:text-fg-primary transition-colors"
-            aria-label="Close timeline"
-          >
-            <X size={16} />
-          </button>
-        </header>
+        }
+      />
 
         {/* Body */}
         <div className="flex-1 min-h-0 px-3">
@@ -142,9 +126,7 @@ export function ChatTimelineDrawer({
             </div>
           )}
         </div>
-      </div>
-    </>,
-    document.body
+    </GlassSheet>
   );
 }
 
@@ -194,7 +176,7 @@ function renderTimelineEntryContent(entry: TimelineEntry, onJump: (target: Timel
         <TimelineItem dot={{ color: DOT_COLOR_USER }}>
           <button
             type="button"
-            className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+            className="w-full text-left py-1.5 px-1 rounded-[10px] hover:bg-[var(--sam-glass-v2-raised)] transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
             onClick={() => onJump({ messageId: entry.messageId, timestamp: entry.timestamp })}
           >
             <div className="text-xs text-fg-muted mb-0.5">{formatTime(entry.timestamp)}</div>
@@ -217,7 +199,7 @@ function renderTimelineEntryContent(entry: TimelineEntry, onJump: (target: Timel
             type="button"
             aria-label={`Jump to the message ${entry.actorName} commented on`}
             data-timeline-comment-id={entry.threadId}
-            className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+            className="w-full text-left py-1.5 px-1 rounded-[10px] hover:bg-[var(--sam-glass-v2-raised)] transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
             onClick={() => onJump({ messageId: entry.messageId, timestamp: entry.timestamp })}
           >
             <div className="text-xs text-fg-muted mb-0.5">{formatTime(entry.timestamp)}</div>
@@ -256,7 +238,7 @@ function renderTimelineEntryContent(entry: TimelineEntry, onJump: (target: Timel
           <button
             type="button"
             aria-label={`Jump to conversation near status update: ${entry.title}`}
-            className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+            className="w-full text-left py-1.5 px-1 rounded-[10px] hover:bg-[var(--sam-glass-v2-raised)] transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
             onClick={() => onJump({ timestamp: entry.timestamp })}
           >
             <div className="text-xs text-fg-muted mb-0.5">{formatTime(entry.timestamp)}</div>
@@ -279,7 +261,7 @@ function renderTimelineEntryContent(entry: TimelineEntry, onJump: (target: Timel
           <button
             type="button"
             aria-label={`Jump to conversation near activity: ${entry.title}`}
-            className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+            className="w-full text-left py-1.5 px-1 rounded-[10px] hover:bg-[var(--sam-glass-v2-raised)] transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
             onClick={() => onJump({ timestamp: entry.timestamp })}
           >
             <div className="text-xs text-fg-muted mb-0.5">{formatTime(entry.timestamp)}</div>

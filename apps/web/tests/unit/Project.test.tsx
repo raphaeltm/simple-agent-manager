@@ -27,11 +27,15 @@ vi.mock('../../src/lib/auth', () => ({
 }));
 
 const mockGetProject = vi.fn();
+const mockRuntime = vi.fn();
+const mockMcp = vi.fn();
 const mockListGitHubInstallations = vi.fn();
 
 // Mock API calls
 vi.mock('../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/lib/api')>()),
+  getProjectRuntimeConfig: (...args: unknown[]) => mockRuntime(...args),
+  listMcpConnections: (...args: unknown[]) => mockMcp(...args),
   getProject: (...args: unknown[]) => mockGetProject(...args),
   listGitHubInstallations: (...args: unknown[]) => mockListGitHubInstallations(...args),
 }));
@@ -63,12 +67,16 @@ function renderProject(path = '/projects/proj-1/overview') {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/projects/:id" element={<Project />}>
+          <Route
+            path="settings/runtime"
+            element={<div data-testid="runtime-content">Runtime</div>}
+          />
           <Route path="overview" element={<div data-testid="overview-content">Overview</div>} />
           <Route path="chat" element={<div data-testid="chat-content">Chat</div>} />
           <Route path="chat/:sessionId" element={<div data-testid="chat-session">Session</div>} />
         </Route>
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
@@ -137,12 +145,16 @@ describe('Project reload (stale-while-revalidate)', () => {
     function ReloadChildWithUnmountTracking() {
       const { reload } = useProjectContext();
       useEffect(() => {
-        return () => { unmountSpy(); };
+        return () => {
+          unmountSpy();
+        };
       }, []);
       return (
         <div>
           <div data-testid="child-content">I am mounted</div>
-          <button data-testid="reload-btn" onClick={() => void reload()}>Reload</button>
+          <button data-testid="reload-btn" onClick={() => void reload()}>
+            Reload
+          </button>
         </div>
       );
     }
@@ -154,10 +166,14 @@ describe('Project reload (stale-while-revalidate)', () => {
       <MemoryRouter initialEntries={['/projects/proj-1/overview']}>
         <Routes>
           <Route path="/projects/:id" element={<Project />}>
+            <Route
+              path="settings/runtime"
+              element={<div data-testid="runtime-content">Runtime</div>}
+            />
             <Route path="overview" element={<ReloadChildWithUnmountTracking />} />
           </Route>
         </Routes>
-      </MemoryRouter>,
+      </MemoryRouter>
     );
 
     // Wait for initial load
@@ -168,7 +184,10 @@ describe('Project reload (stale-while-revalidate)', () => {
     // Set up a deferred reload response so we can assert the child
     // stays mounted while the reload is in flight
     mockGetProject.mockImplementationOnce(
-      () => new Promise((resolve) => { resolveReload = resolve; })
+      () =>
+        new Promise((resolve) => {
+          resolveReload = resolve;
+        })
     );
 
     // Trigger reload
@@ -198,7 +217,9 @@ describe('Project reload (stale-while-revalidate)', () => {
       return (
         <div>
           <div data-testid="stale-child-content">Cached project content</div>
-          <button data-testid="failed-reload-btn" onClick={() => void reload()}>Reload</button>
+          <button data-testid="failed-reload-btn" onClick={() => void reload()}>
+            Reload
+          </button>
         </div>
       );
     }
@@ -207,10 +228,14 @@ describe('Project reload (stale-while-revalidate)', () => {
       <MemoryRouter initialEntries={['/projects/proj-1/overview']}>
         <Routes>
           <Route path="/projects/:id" element={<Project />}>
+            <Route
+              path="settings/runtime"
+              element={<div data-testid="runtime-content">Runtime</div>}
+            />
             <Route path="overview" element={<ReloadChild />} />
           </Route>
         </Routes>
-      </MemoryRouter>,
+      </MemoryRouter>
     );
 
     await findByTestId('stale-child-content');
@@ -223,4 +248,25 @@ describe('Project reload (stale-while-revalidate)', () => {
     expect(getByTestId('stale-child-content')).toHaveTextContent('Cached project content');
     expect(queryByRole('alert')).not.toBeInTheDocument();
   });
+});
+
+it('starts Runtime and MCP reads and renders the tab before project detail resolves', async () => {
+  let resolveDetail!: (value: ProjectDetailResponse) => void;
+  mockGetProject.mockReturnValue(
+    new Promise((resolve) => {
+      resolveDetail = resolve;
+    })
+  );
+  mockRuntime.mockResolvedValue({ envVars: [], files: [] });
+  mockMcp.mockResolvedValue([]);
+  renderProject('/projects/proj-1/settings/runtime');
+  expect(await screen.findByTestId('runtime-content')).toBeInTheDocument();
+  await waitFor(() => {
+    expect(mockRuntime).toHaveBeenCalledTimes(1);
+    expect(mockMcp).toHaveBeenCalledTimes(1);
+  });
+  expect(mockListGitHubInstallations).not.toHaveBeenCalled();
+  expect(screen.queryByText('Loading project...')).not.toBeInTheDocument();
+  await act(async () => resolveDetail(defaultProject));
+  expect(screen.getByTestId('runtime-content')).toBeInTheDocument();
 });

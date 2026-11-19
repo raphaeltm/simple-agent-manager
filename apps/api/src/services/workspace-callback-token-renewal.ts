@@ -152,8 +152,11 @@ export async function renewWorkspaceCallbackToken(
   }
 
   const generationIssuedAtSeconds = callbackTokenGenerationIssuedAtSeconds(workspaceToken);
+  // The renewed token stays in the generation the presented token proved current, so a
+  // renewal racing a rotation yields a token the new generation already rejects.
   const token = await signCallbackToken(workspaceId, env, {
     generationIssuedAtSeconds: generationIssuedAtSeconds ?? undefined,
+    callbackGeneration: workspacePayload.callbackGeneration,
   });
 
   // Rule 49: re-read the workspace incarnation at the secret-delivery boundary, so a

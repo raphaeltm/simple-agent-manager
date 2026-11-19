@@ -1,30 +1,26 @@
 /**
  * MCP tool definitions — project awareness tools (read-only queries for tasks, sessions, messages).
  */
+import { TASK_STATUSES } from '@simple-agent-manager/shared';
+
+const TASK_PAGE_CURSOR = {
+  type: 'string',
+  description: 'nextCursor from the previous response, to fetch the next page.',
+} as const;
 
 export const PROJECT_AWARENESS_TOOLS = [
   // ─── Project awareness tools (read-only) ──────────────────────────────
   {
     name: 'list_tasks',
     description:
-      'List tasks in your project. Useful for understanding what other work exists, avoiding duplicates, or finding context from completed tasks. Your own task is excluded by default.',
+      'List tasks in your project, most recently updated first. Useful for understanding what other work exists, avoiding duplicates, or finding context from completed tasks. Your own task is excluded by default. When hasMore is true, pass nextCursor as cursor to read the next page.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         status: {
           type: 'string',
-          description:
-            'Filter by task status (draft, queued, in_progress, delegated, awaiting_followup, completed, failed, cancelled). Omit for all statuses.',
-          enum: [
-            'draft',
-            'queued',
-            'in_progress',
-            'delegated',
-            'awaiting_followup',
-            'completed',
-            'failed',
-            'cancelled',
-          ],
+          description: 'Filter by task status. Omit for all statuses.',
+          enum: [...TASK_STATUSES],
         },
         include_own: {
           type: 'boolean',
@@ -34,6 +30,7 @@ export const PROJECT_AWARENESS_TOOLS = [
           type: 'number',
           description: 'Max results to return (default: 10, max: 50)',
         },
+        cursor: TASK_PAGE_CURSOR,
       },
       additionalProperties: false,
     },
@@ -41,7 +38,7 @@ export const PROJECT_AWARENESS_TOOLS = [
   {
     name: 'get_task_details',
     description:
-      'Get full details of a specific task in your project, including its description, output summary, output branch, PR URL, structured completion evidence, and the chat sessionId once the session exists (Instant dispatches create it asynchronously).',
+      'Get full details of a specific task in your project, including its description, output summary, output branch, PR URL, structured completion evidence, and the chat sessionId (for an Instant dispatch, the session becomes readable when background session creation completes).',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -57,7 +54,7 @@ export const PROJECT_AWARENESS_TOOLS = [
   {
     name: 'search_tasks',
     description:
-      'Search tasks in your project by keyword. Searches both title and description fields, requiring every retained term to match. Queries beyond the server-configured guardrails are truncated; the response reports queryTruncated, the effective query, and queryLimits.',
+      'Search tasks in your project by keyword. Searches both title and description fields, requiring every retained term to match. Queries beyond the server-configured guardrails are truncated; the response reports queryTruncated, the effective query, and queryLimits. When hasMore is true, pass nextCursor as cursor to read the next page.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -69,21 +66,13 @@ export const PROJECT_AWARENESS_TOOLS = [
         status: {
           type: 'string',
           description: 'Filter by task status. Omit for all statuses.',
-          enum: [
-            'draft',
-            'queued',
-            'in_progress',
-            'delegated',
-            'awaiting_followup',
-            'completed',
-            'failed',
-            'cancelled',
-          ],
+          enum: [...TASK_STATUSES],
         },
         limit: {
           type: 'number',
           description: 'Max results to return (default: 10, max: 20)',
         },
+        cursor: TASK_PAGE_CURSOR,
       },
       required: ['query'],
       additionalProperties: false,
@@ -151,14 +140,24 @@ export const PROJECT_AWARENESS_TOOLS = [
           description: 'Optional session ID to retrieve archived tool payloads from.',
         },
         startTime: {
-          type: ['number', 'string'],
-          description:
-            'Optional inclusive lower bound for message created time, as epoch milliseconds or an ISO timestamp.',
+          anyOf: [
+            {
+              type: 'number',
+              description:
+                'Optional inclusive lower bound for message created time, as epoch milliseconds or an ISO timestamp.',
+            },
+            { type: 'string' },
+          ],
         },
         endTime: {
-          type: ['number', 'string'],
-          description:
-            'Optional inclusive upper bound for message created time, as epoch milliseconds or an ISO timestamp.',
+          anyOf: [
+            {
+              type: 'number',
+              description:
+                'Optional inclusive upper bound for message created time, as epoch milliseconds or an ISO timestamp.',
+            },
+            { type: 'string' },
+          ],
         },
         limit: {
           type: 'number',

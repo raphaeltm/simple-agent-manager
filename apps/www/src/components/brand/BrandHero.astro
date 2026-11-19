@@ -1,0 +1,325 @@
+---
+/**
+ * Brand guide hero. Back to front: the glass node floor (one still frame, never animated on
+ * its own), a giant outlined "SAM" that drifts with scroll, the copy, and a stack of icon
+ * tiles that leans toward the pointer and separates as the page scrolls.
+ */
+const titleWords = ['How', 'SAM', 'looks,', 'sounds', 'and', 'moves'];
+const chips = [
+  { label: '#16a34a', depth: 1.4, at: 'left:-6%;top:14%' },
+  { label: 'Chillax 600', depth: 2.2, at: 'right:-6%;top:-3%' },
+  { label: 'Glide · 900 ms', depth: 1.8, at: 'right:-4%;bottom:6%' },
+];
+---
+
+<section class="bg-hero" data-progress="leave" aria-labelledby="bg-hero-title">
+  <div class="bg-hero-floor" data-hero-floor aria-hidden="true"></div>
+  <div class="bg-hero-ghost" aria-hidden="true" data-word="SAM"></div>
+
+  <div class="container bg-hero-inner">
+    <div class="bg-hero-copy">
+      <p class="bg-hero-badge hero-badge sam-glass sam-glass--chrome sam-glass-rim" data-reveal>
+        <span class="badge-dot"></span>
+        Brand and style guide · v1 · November 2026
+      </p>
+      <h1 id="bg-hero-title" class="bg-hero-title bg-words">
+        {titleWords.map((word, index) => (
+          <Fragment>
+            <span class="w"><span style={`--w:${index + 2}`} class:list={{ 'gradient-text': word === 'SAM' }}>{word}</span></span>{index < titleWords.length - 1 ? ' ' : ''}
+          </Fragment>
+        ))}
+      </h1>
+      <p class="bg-hero-lede" data-reveal style="--i:4">
+        The rules for anything with the SAM name on it: a slide, a social post, a screenshot, a
+        new screen in the app. Start here, copy what you need, and keep it simple.
+      </p>
+      <div class="bg-hero-actions" data-reveal style="--i:6">
+        <a class="sam-btn sam-btn--primary" href="#assets">Get the assets</a>
+        <a class="sam-btn sam-btn--glass" href="#voice">Read the writing rules</a>
+      </div>
+    </div>
+
+    <div class="bg-hero-stage" data-tilt aria-hidden="true">
+      <div class="bg-tile bg-tile--back"></div>
+      <div class="bg-tile bg-tile--glass sam-glass sam-glass-rim"></div>
+      <div class="bg-tile bg-tile--front sam-glass-rim">
+        <img src="/images/sam-head.png" width="1024" height="1024" alt="" />
+      </div>
+      {chips.map((chip, index) => (
+        <span
+          class="bg-hero-chip sam-glass sam-glass--chrome sam-glass-rim"
+          style={`--d:${chip.depth};${chip.at};--c:${index}`}
+        >{chip.label}</span>
+      ))}
+    </div>
+  </div>
+
+  <a class="bg-hero-scroll" href="#contents">
+    <span>Scroll</span>
+    <span class="bg-hero-scroll-line" aria-hidden="true"></span>
+  </a>
+</section>
+
+<script>
+  import { createGlassNodeField } from '@simple-agent-manager/ui/glass/node-field';
+
+  const floor = document.querySelector<HTMLElement>('[data-hero-floor]');
+  if (floor) {
+    // A still frame: the node floor is texture here, not a story, so it never animates.
+    const field = createGlassNodeField(floor, {
+      mode: 'floor',
+      seed: 7,
+      density: 0.16,
+      pitch: 60,
+      vanishX: 0.5,
+      horizonY: 0.5,
+      reducedMotion: true,
+    });
+    field.start();
+  }
+</script>
+
+<style>
+  .bg-hero {
+    position: relative;
+    display: grid;
+    align-items: center;
+    min-height: 100svh;
+    padding: calc(var(--header-height) + 48px) 0 96px;
+    overflow: clip;
+    isolation: isolate;
+  }
+
+  .bg-hero-floor {
+    position: absolute;
+    inset: 30% 0 0;
+    z-index: -2;
+    opacity: 0.75;
+    -webkit-mask: linear-gradient(to bottom, transparent, #000 30%, #000 75%, transparent);
+    mask: linear-gradient(to bottom, transparent, #000 30%, #000 75%, transparent);
+  }
+
+  .bg-hero-ghost {
+    position: absolute;
+    left: 50%;
+    top: 46%;
+    z-index: -1;
+    font-family: var(--font-display);
+    font-size: clamp(12rem, 42vw, 40rem);
+    font-weight: 700;
+    line-height: 0.8;
+    letter-spacing: -0.04em;
+    white-space: nowrap;
+    color: transparent;
+    -webkit-text-stroke: 1px rgb(134 204 0 / 0.16);
+    transform: translate3d(-50%, -50%, 0);
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .bg-hero-ghost::before {
+    content: attr(data-word);
+  }
+
+  html[data-theme='light'] .bg-hero-ghost {
+    -webkit-text-stroke-color: rgb(21 128 61 / 0.18);
+  }
+
+  :global(html.bg-motion) .bg-hero-ghost {
+    transform: translate3d(calc(-50% - var(--p, 0) * 30vw), -50%, 0);
+  }
+
+  .bg-hero-inner {
+    display: grid;
+    gap: 56px;
+    align-items: center;
+  }
+
+  @media (min-width: 960px) {
+    .bg-hero-inner {
+      grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+    }
+  }
+
+  .bg-hero-copy {
+    display: grid;
+    gap: 24px;
+    justify-items: start;
+  }
+
+  .bg-hero-title {
+    font-family: var(--font-display);
+    font-size: clamp(2.75rem, 7.4vw, 6rem);
+    font-weight: 600;
+    line-height: 0.98;
+    letter-spacing: -0.045em;
+    text-wrap: balance;
+  }
+
+  .bg-hero-lede {
+    max-width: 540px;
+    font-size: 1.1875rem;
+    line-height: 1.65;
+    color: var(--color-fg-muted);
+  }
+
+  .bg-hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  /* --- Tile stack --- */
+  .bg-hero-stage {
+    --tx: 0;
+    --ty: 0;
+    position: relative;
+    width: min(78vw, 400px);
+    aspect-ratio: 1;
+    justify-self: center;
+    perspective: 1200px;
+  }
+
+  .bg-tile {
+    position: absolute;
+    inset: 0;
+    border-radius: 22%;
+    transform:
+      translate3d(calc(var(--tx) * var(--depth) * 40px), calc(var(--ty) * var(--depth) * 40px), 0)
+      rotateX(calc(var(--ty) * -10deg)) rotateY(calc(var(--tx) * 12deg));
+  }
+
+  .bg-tile--back {
+    --depth: 0.4;
+    inset: 12% -10% -10% 12%;
+    background: linear-gradient(140deg, #16a34a, #004222 70%);
+    opacity: 0.55;
+  }
+
+  .bg-tile--glass {
+    --depth: 0.8;
+    inset: 5% -4% -4% 5%;
+  }
+
+  .bg-tile--front {
+    --depth: 1.2;
+    display: grid;
+    place-items: center;
+    background:
+      radial-gradient(circle at 50% 30%, rgb(134 204 0 / 0.22), transparent 60%),
+      #004222;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.18),
+      0 40px 80px -30px rgb(0 0 0 / 0.7),
+      0 30px 90px -40px rgb(34 197 94 / 0.2);
+  }
+
+  .bg-tile--front img {
+    width: 76%;
+    filter: drop-shadow(0 18px 24px rgb(0 0 0 / 0.35));
+  }
+
+  /* Scroll pulls the layers apart, like an exploded drawing. */
+  :global(html.bg-motion) .bg-tile--back {
+    translate: calc(var(--p, 0) * 60px) calc(var(--p, 0) * 90px);
+  }
+
+  :global(html.bg-motion) .bg-tile--glass {
+    translate: calc(var(--p, 0) * 30px) calc(var(--p, 0) * 45px);
+  }
+
+  :global(html.bg-motion) .bg-tile--front {
+    translate: calc(var(--p, 0) * -20px) calc(var(--p, 0) * -40px);
+  }
+
+  .bg-hero-chip {
+    position: absolute;
+    z-index: 2;
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    white-space: nowrap;
+    color: var(--color-fg-primary);
+    transform: translate3d(calc(var(--tx) * var(--d) * 46px), calc(var(--ty) * var(--d) * 46px), 0);
+  }
+
+  :global(html.bg-motion) .bg-hero-chip {
+    animation: bg-chip-in 0.9s var(--ease-spring) both;
+    animation-delay: calc(700ms + var(--c) * 140ms);
+  }
+
+  @keyframes bg-chip-in {
+    from {
+      opacity: 0;
+      scale: 0.6;
+    }
+  }
+
+  :global(html.bg-motion) .bg-tile {
+    animation: bg-tile-in 1.3s var(--ease-glide) both;
+  }
+
+  :global(html.bg-motion) .bg-tile--glass {
+    animation-delay: 120ms;
+  }
+
+  :global(html.bg-motion) .bg-tile--front {
+    animation-delay: 240ms;
+  }
+
+  @keyframes bg-tile-in {
+    from {
+      opacity: 0;
+      translate: 120px 40px;
+    }
+  }
+
+  /* --- Scroll cue --- */
+  .bg-hero-scroll {
+    position: absolute;
+    left: 50%;
+    bottom: 28px;
+    display: none;
+    justify-items: center;
+    gap: 10px;
+    transform: translateX(-50%);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-fg-muted);
+  }
+
+  @media (min-width: 768px) and (min-height: 760px) {
+    .bg-hero-scroll {
+      display: grid;
+    }
+  }
+
+  .bg-hero-scroll-line {
+    width: 1px;
+    height: 44px;
+    background: linear-gradient(to bottom, var(--color-accent-strong), transparent);
+    transform-origin: top;
+  }
+
+  :global(html.bg-motion) .bg-hero-scroll-line {
+    animation: bg-scroll-line 1.6s var(--ease-glide) 1.4s 2 both;
+  }
+
+  @keyframes bg-scroll-line {
+    0% {
+      scale: 1 0;
+    }
+    60% {
+      scale: 1 1;
+      opacity: 1;
+    }
+    100% {
+      scale: 1 1;
+      opacity: 0.3;
+    }
+  }
+
+</style>

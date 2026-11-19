@@ -1,15 +1,11 @@
 /**
- * Behavioral tests for the two public-ish trial status concepts.
+ * `routes/trial.ts` behaviour.
  *
- * Anonymous GET /api/trial/status verifies:
- *   - Happy path: enabled=true, remaining = cap - count, resetsAt = next month
- *   - Cap exhausted: remaining = 0 (clamped), enabled still reflects kill-switch
- *   - Cap = 0 (unlimited): remaining = Number.MAX_SAFE_INTEGER
- *   - Kill-switch off: enabled=false
- *   - DO failure: enabled=false, remaining=0 (fail-closed fallback)
+ * Authenticated GET /api/trial-status reports current-user platform compute
+ * eligibility (installation platform credential + AI proxy), budget and usage.
  *
- * Authenticated GET /api/trial-status verifies current-user platform trial
- * eligibility, budget, and usage response semantics.
+ * Every `/api/trial/*` path belonged to the retired anonymous-trial product and
+ * now answers 410 Gone for every method without touching any binding.
  */
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -31,113 +27,71 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => 'user-1',
 }));
 
-const { getTrialStatusMock, isTrialsEnabledMock } = vi.hoisted(() => ({
+const { getTrialStatusMock } = vi.hoisted(() => ({
   getTrialStatusMock: vi.fn(),
-  isTrialsEnabledMock: vi.fn(),
-}));
-
-vi.mock('../../../src/services/trial/kill-switch', () => ({
-  isTrialsEnabled: isTrialsEnabledMock,
 }));
 
 vi.mock('../../../src/services/platform-trial', () => ({
   getTrialStatus: getTrialStatusMock,
 }));
 
-const { publicTrialStatusRoutes } = await import('../../../src/routes/trial/status');
 const { trialRoutes } = await import('../../../src/routes/trial');
 
-function makeEnv(options: {
-  doGet?: (key: string) => Promise<{ monthKey: string; count: number }>;
-  cap?: string;
-}): Env {
-  return {
-    TRIAL_MONTHLY_CAP: options.cap,
-    TRIAL_COUNTER: {
-      idFromName: vi.fn(() => 'do-id'),
-      get: vi.fn(() => ({
-        get: options.doGet ?? vi.fn(async (key: string) => ({ monthKey: key, count: 0 })),
-      })),
+/** An Env whose every binding access fails the test: retired routes must not read any. */
+function untouchableEnv(): { env: Env; touched: string[] } {
+  const touched: string[] = [];
+  const env = new Proxy({} as Env, {
+    get(_target, property) {
+      if (typeof property === 'string') touched.push(property);
+      return undefined;
     },
-  } as unknown as Env;
+  });
+  return { env, touched };
 }
 
-function makeApp(env: Env) {
-  const app = new Hono<{ Bindings: Env }>();
-  app.route('/api/trial', publicTrialStatusRoutes);
-  return { app, env };
-}
-
-async function getStatus(app: Hono<{ Bindings: Env }>, env: Env) {
-  return app.fetch(new Request('https://api.test/api/trial/status'), env);
-}
-
-describe('anonymous GET /api/trial/status monthly-cap snapshot', () => {
+describe('retired anonymous-trial endpoints under /api/trial', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('returns enabled + remaining computed from cap and DO count', async () => {
-    isTrialsEnabledMock.mockResolvedValue(true);
-    const doGet = vi.fn().mockResolvedValue({ monthKey: '2026-04', count: 500 });
-    const { app, env } = makeApp(makeEnv({ doGet, cap: '1500' }));
+  const RETIRED: Array<[method: string, path: string]> = [
+    ['POST', '/api/trial/create'],
+    ['POST', '/api/trial/claim'],
+    ['GET', '/api/trial/status'],
+    ['POST', '/api/trial/waitlist'],
+    ['GET', '/api/trial/trial_01ABC/events'],
+    ['GET', '/api/trial'],
+    ['DELETE', '/api/trial/anything/else'],
+  ];
 
-    const res = await getStatus(app, env);
+  it.each(RETIRED)('%s %s answers 410 Gone without reading any binding', async (method, path) => {
+    const app = new Hono<{ Bindings: Env }>();
+    app.route('/api', trialRoutes);
+    const { env, touched } = untouchableEnv();
+
+    const res = await app.fetch(
+      new Request(`https://api.test${path}`, {
+        method,
+        headers: { 'content-type': 'application/json', cookie: 'sam_trial_claim=stale' },
+        body: method === 'GET' ? undefined : JSON.stringify({ repoUrl: 'https://github.com/a/b' }),
+      }),
+      env
+    );
+
+    expect(res.status).toBe(410);
+    await expect(res.json()).resolves.toMatchObject({ error: 'GONE' });
+    expect(res.headers.get('set-cookie')).toBeNull();
+    expect(touched).toEqual([]);
+    expect(getTrialStatusMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps /api/trial-status (platform availability) distinct from the retired prefix', async () => {
+    getTrialStatusMock.mockResolvedValue({ available: false });
+    const app = new Hono<{ Bindings: Env }>();
+    app.route('/api', trialRoutes);
+    const res = await app.fetch(new Request('https://api.test/api/trial-status'), {} as Env);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      enabled: boolean;
-      remaining: number;
-      resetsAt: string;
-    };
-    expect(body.enabled).toBe(true);
-    expect(body.remaining).toBe(1000);
-    expect(body.resetsAt).toMatch(/^\d{4}-\d{2}-01$/);
-  });
-
-  it('clamps remaining to 0 when cap is exhausted', async () => {
-    isTrialsEnabledMock.mockResolvedValue(true);
-    const doGet = vi.fn().mockResolvedValue({ monthKey: '2026-04', count: 1500 });
-    const { app, env } = makeApp(makeEnv({ doGet, cap: '1500' }));
-
-    const res = await getStatus(app, env);
-    const body = (await res.json()) as { remaining: number };
-    expect(body.remaining).toBe(0);
-  });
-
-  it('returns MAX_SAFE_INTEGER when cap=0 (unlimited)', async () => {
-    isTrialsEnabledMock.mockResolvedValue(true);
-    const doGet = vi.fn().mockResolvedValue({ monthKey: '2026-04', count: 42 });
-    const { app, env } = makeApp(makeEnv({ doGet, cap: '0' }));
-
-    const res = await getStatus(app, env);
-    const body = (await res.json()) as { remaining: number };
-    expect(body.remaining).toBe(Number.MAX_SAFE_INTEGER);
-  });
-
-  it('returns enabled=false when kill-switch is off', async () => {
-    isTrialsEnabledMock.mockResolvedValue(false);
-    const { app, env } = makeApp(makeEnv({}));
-
-    const res = await getStatus(app, env);
-    const body = (await res.json()) as { enabled: boolean };
-    expect(body.enabled).toBe(false);
-  });
-
-  it('fails closed (enabled=false, remaining=0) when DO throws', async () => {
-    isTrialsEnabledMock.mockResolvedValue(true);
-    const doGet = vi.fn().mockRejectedValue(new Error('DO unreachable'));
-    const { app, env } = makeApp(makeEnv({ doGet }));
-
-    const res = await getStatus(app, env);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      enabled: boolean;
-      remaining: number;
-      resetsAt: string;
-    };
-    expect(body.enabled).toBe(false);
-    expect(body.remaining).toBe(0);
-    expect(body.resetsAt).toMatch(/^\d{4}-\d{2}-01$/);
+    expect(getTrialStatusMock).toHaveBeenCalledOnce();
   });
 });
 

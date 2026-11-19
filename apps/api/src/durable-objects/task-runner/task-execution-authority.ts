@@ -6,7 +6,9 @@ import { parseMs } from '../../scheduled/node-cleanup/config';
 import { TASK_EXECUTION_STATUSES } from '../../services/task-status';
 import { releaseVmProvisioningLease } from '../../services/vm-admission-control';
 import { boundedWarmPlacementClaimGuardSql } from '../../services/warm-placement-claims';
-import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../../services/workspace-resource-capacity';
+import {
+  ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL,
+} from '../../services/workspace-reservation-usage';
 import { putTaskRunnerState } from './attempt-storage';
 import type { StartTaskInput, TaskRunnerContext, TaskRunnerState } from './types';
 

@@ -55,7 +55,7 @@ type BodyShapeFacts = {
 
 export interface GenericWebhookProjectEventInput {
   trigger: schema.TriggerRow;
-  config: WebhookTriggerConfig;
+  config: Pick<WebhookTriggerConfig, 'sourceLabel'>;
   projectName: string;
   deliveryId: string;
   outcome: WebhookDeliveryOutcome;
@@ -64,6 +64,8 @@ export interface GenericWebhookProjectEventInput {
   headers: Record<string, string>;
   executionId?: string | null;
   sequenceNumber?: number | null;
+  /** Why a call was refused, for `rejected`. A fixed code, never request content. */
+  reason?: string | null;
 }
 
 const encoder = new TextEncoder();
@@ -205,6 +207,7 @@ function buildMetadata(
         ? boundedString(input.executionId, limits.maxFilterStringBytes)
         : null,
       sequenceNumber: input.sequenceNumber ?? null,
+      ...(input.reason ? { reason: boundedString(input.reason, limits.maxFilterStringBytes) } : {}),
       request: {
         ...summarizeHeaderShape(input),
         ...shape,
@@ -228,6 +231,7 @@ function buildMetadata(
       id: input.executionId ? boundedString(input.executionId, limits.maxFilterStringBytes) : null,
       sequenceNumber: input.sequenceNumber ?? null,
     },
+    ...(input.reason ? { reason: boundedString(input.reason, limits.maxFilterStringBytes) } : {}),
     request: {
       ...summarizeHeaderShape(input),
       ...shape,

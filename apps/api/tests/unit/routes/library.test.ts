@@ -1,7 +1,7 @@
 /**
  * Tests for project file library routes.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockUploadFile = vi.hoisted(() => vi.fn());
 const mockReplaceFile = vi.hoisted(() => vi.fn());
@@ -18,6 +18,9 @@ const mockGetListMaxPageSize = vi.hoisted(() => vi.fn().mockReturnValue(200));
 const mockValidateFilename = vi.hoisted(() => vi.fn());
 const mockValidateDirectory = vi.hoisted(() => vi.fn((dir: string) => dir));
 
+// Role the mocked getAuth reports. The raw debug package tests switch it to superadmin
+// to check that only superadmins see /debug-packages/ files.
+const authRole = vi.hoisted(() => ({ value: 'user' }));
 // Mock auth middleware
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
@@ -27,7 +30,7 @@ vi.mock('../../../src/middleware/auth', () => ({
       id: 'test-user-id',
       email: 'test@example.com',
       name: 'Test',
-      role: 'user',
+      role: authRole.value,
       status: 'active',
     },
   }),
@@ -46,15 +49,12 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: vi.fn().mockReturnValue({}),
 }));
 vi.mock('../../../src/db/schema', () => ({}));
-vi.mock('../../../src/lib/logger', () => ({
-  log: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
-}));
 vi.mock('../../../src/services/file-library', () => ({
   uploadFile: mockUploadFile,
   replaceFile: mockReplaceFile,
   listFiles: mockListFiles,
   getFile: mockGetFile,
-  downloadFile: mockDownloadFile,
+  downloadFile: (...args: unknown[]) => copyDownload(...args),
   deleteFile: mockDeleteFile,
   updateTags: mockUpdateTags,
   listDirectories: mockListDirectories,
@@ -83,6 +83,30 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
   } as Env;
 }
 
+vi.mock('../../../src/services/admin-settings', () => ({
+  resolveAdminSettingDetailsMany: vi.fn(async () =>
+    [50 * 1024 * 1024, 64 * 1024, 16, 8192, 120_000].map((value) => ({ value }))
+  ),
+}));
+
+// Hoisted by Vitest; declared below the fixtures to keep their line numbers stable.
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
+  log: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+}));
+
+// A download transfers ownership to its response. Fixtures remain reusable across calls.
+async function copyDownload(...args: unknown[]) {
+  const result = await mockDownloadFile(...args);
+  return { ...result, data: result.data.slice(0) };
+}
+
+const responses = new Set<Response>();
+afterEach(async () => {
+  await Promise.all([...responses].map((response) => response.body?.cancel().catch(() => {})));
+  responses.clear();
+});
+
 /** The only origin allowed to frame a preview: the app, never the API itself. */
 const FRAME_ANCESTORS = 'frame-ancestors https://app.test.example.com';
 
@@ -96,6 +120,12 @@ function makeApp(env: Env) {
     return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
   });
   app.route('/projects/:projectId/library', libraryRoutes);
+  const fetch = app.fetch;
+  app.fetch = async (...args: Parameters<typeof fetch>) => {
+    const response = await fetch(...args);
+    responses.add(response);
+    return response;
+  };
   return { app, env };
 }
 
@@ -103,9 +133,101 @@ describe('library routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetDownloadTimeoutMs.mockReturnValue(60000);
+    authRole.value = 'user';
+  });
+
+  // Raw node debug packages (policy a35180d5): only superadmins see them in the app.
+  describe('raw debug packages under /debug-packages/', () => {
+    const pkg = {
+      id: 'pkg-1',
+      filename: 'p.tar.gz',
+      directory: '/debug-packages/NODE1/',
+      mimeType: 'application/gzip',
+      sizeBytes: 3,
+    };
+    const get = async (path: string) => {
+      const { app, env } = makeApp(makeEnv());
+      return app.fetch(new Request(`${BASE_URL}/projects/test-project-id/library${path}`), env);
+    };
+
+    it('hides them from a member’s listing and directory tree, but not from a superadmin’s', async () => {
+      mockListFiles.mockResolvedValue({ files: [], cursor: null });
+      mockListDirectories.mockResolvedValue([
+        { path: '/debug-packages/', name: 'debug-packages', fileCount: 1 },
+        { path: '/docs/', name: 'docs', fileCount: 2 },
+      ]);
+
+      expect((await get('')).status).toBe(200);
+      const memberDirs = (await (await get('/directories')).json()) as {
+        directories: Array<{ path: string }>;
+      };
+      expect(mockListFiles.mock.calls[0]?.[4]).toEqual({
+        excludeDirectoryPrefix: '/debug-packages/',
+      });
+      expect(memberDirs.directories.map((d) => d.path)).toEqual(['/docs/']);
+
+      authRole.value = 'superadmin';
+      await get('');
+      const adminDirs = (await (await get('/directories')).json()) as {
+        directories: Array<{ path: string }>;
+      };
+      expect(mockListFiles.mock.calls[1]?.[4]).toEqual({});
+      expect(adminDirs.directories.map((d) => d.path)).toEqual(['/debug-packages/', '/docs/']);
+    });
+
+    it('answers not found to a member for metadata, download and preview', async () => {
+      mockGetFile.mockResolvedValue({ file: pkg, tags: [] });
+      mockDownloadFile.mockResolvedValue({ data: new Uint8Array([1, 2, 3]).buffer, file: pkg });
+
+      for (const path of ['/pkg-1', '/pkg-1/download', '/pkg-1/preview']) {
+        expect((await get(path)).status, path).toBe(404);
+      }
+    });
+
+    it('serves metadata and download to a superadmin', async () => {
+      authRole.value = 'superadmin';
+      mockGetFile.mockResolvedValue({ file: pkg, tags: [] });
+      mockDownloadFile.mockResolvedValue({ data: new Uint8Array([1, 2, 3]).buffer, file: pkg });
+
+      expect((await get('/pkg-1')).status).toBe(200);
+      expect((await get('/pkg-1/download')).status).toBe(200);
+    });
   });
 
   describe('POST /upload', () => {
+    it('ignores forged agent provenance on a human upload', async () => {
+      mockUploadFile.mockResolvedValue({ id: 'file-123' });
+      mockGetUploadMaxBytes.mockReturnValue(1024);
+      const { app, env } = makeApp(makeEnv());
+      const formData = new FormData();
+      formData.append('file', new File(['hello'], 'report.txt'));
+      formData.append('uploadSource', 'agent');
+      formData.append('uploadSessionId', 'foreign-session');
+      formData.append('uploadTaskId', 'foreign-task');
+      const response = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/upload`, {
+          method: 'POST',
+          body: formData,
+        }),
+        env
+      );
+      expect(response.status).toBe(201);
+      expect(mockUploadFile).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        'test-project-id',
+        'test-user-id',
+        'report.txt',
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ uploadSource: 'user' })
+      );
+      const options = mockUploadFile.mock.calls[0]?.[9] as Record<string, unknown>;
+      expect(options).not.toHaveProperty('uploadSessionId');
+      expect(options).not.toHaveProperty('uploadTaskId');
+    });
     it('returns 201 on successful upload', async () => {
       const mockFile = {
         id: 'file-123',
@@ -126,6 +248,10 @@ describe('library routes', () => {
       const res = await app.fetch(
         new Request(`${BASE_URL}/projects/test-project-id/library/upload`, {
           method: 'POST',
+          headers: {
+            Origin: 'https://app.test.example.com',
+            'Sec-Fetch-Site': 'same-site',
+          },
           body: formData,
         }),
         env
@@ -134,6 +260,27 @@ describe('library routes', () => {
       expect(res.status).toBe(201);
       const json = (await res.json()) as Record<string, unknown>;
       expect(json['id']).toBe('file-123');
+    });
+
+    it('rejects a same-site workspace upload before persistence', async () => {
+      const { app, env } = makeApp(makeEnv());
+      const formData = new FormData();
+      formData.append('file', new File(['forged'], 'forged.txt'));
+
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/upload`, {
+          method: 'POST',
+          headers: {
+            Origin: 'https://ws-attacker--3000.test.example.com',
+            'Sec-Fetch-Site': 'same-site',
+          },
+          body: formData,
+        }),
+        env
+      );
+
+      expect(res.status).toBe(403);
+      expect(mockUploadFile).not.toHaveBeenCalled();
     });
 
     it('returns 400 when file field is missing', async () => {
@@ -237,7 +384,8 @@ describe('library routes', () => {
           tags: ['design', 'api'],
           mimeType: 'image/',
           limit: 10,
-        })
+        }),
+        { excludeDirectoryPrefix: '/debug-packages/' }
       );
     });
   });
@@ -418,6 +566,79 @@ describe('library routes', () => {
         `default-src 'none'; style-src 'unsafe-inline'; ${FRAME_ANCESTORS}`
       );
       expect(res.headers.get('X-Frame-Options')).toBeNull();
+    });
+
+    describe('video', () => {
+      const bytes = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+      const fetchPreview = (headers?: Record<string, string>) => {
+        mockGetFile.mockResolvedValue({
+          // Stored as octet-stream, as cf-container agent uploads are: the .mp4 name recovers it.
+          file: { filename: 'demo.mp4', mimeType: 'application/octet-stream', sizeBytes: 10 },
+          tags: [],
+        });
+        mockDownloadFile.mockResolvedValue({
+          data: bytes.slice().buffer,
+          file: { filename: 'demo.mp4', mimeType: 'application/octet-stream', sizeBytes: 10 },
+          metadata: {},
+        });
+        const { app, env } = makeApp(makeEnv());
+        return app.fetch(
+          new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`, { headers }),
+          env
+        );
+      };
+
+      it('serves the whole video inline and advertises byte ranges', async () => {
+        const res = await fetchPreview();
+        expect(res.status).toBe(200);
+        expect(res.headers.get('Content-Type')).toBe('video/mp4');
+        expect(res.headers.get('Accept-Ranges')).toBe('bytes');
+        expect(res.headers.get('Content-Length')).toBe('10');
+        expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+        expect(res.headers.get('Content-Security-Policy')).toBe(
+          `default-src 'none'; style-src 'unsafe-inline'; ${FRAME_ANCESTORS}`
+        );
+        expect(new Uint8Array(await res.arrayBuffer())).toEqual(bytes);
+      });
+
+      it('answers a byte range with 206 and only those bytes', async () => {
+        const res = await fetchPreview({ Range: 'bytes=2-4' });
+        expect(res.status).toBe(206);
+        expect(res.headers.get('Content-Range')).toBe('bytes 2-4/10');
+        expect(res.headers.get('Content-Length')).toBe('3');
+        expect(Array.from(new Uint8Array(await res.arrayBuffer()))).toEqual([2, 3, 4]);
+      });
+
+      it('answers an open-ended and a suffix range', async () => {
+        const open = await fetchPreview({ Range: 'bytes=7-' });
+        expect(open.status).toBe(206);
+        expect(open.headers.get('Content-Range')).toBe('bytes 7-9/10');
+        await open.body?.cancel();
+        const suffix = await fetchPreview({ Range: 'bytes=-2' });
+        expect(suffix.headers.get('Content-Range')).toBe('bytes 8-9/10');
+        expect(Array.from(new Uint8Array(await suffix.arrayBuffer()))).toEqual([8, 9]);
+      });
+
+      it('clamps a range past the end to the last byte', async () => {
+        const res = await fetchPreview({ Range: 'bytes=5-500' });
+        expect(res.status).toBe(206);
+        expect(res.headers.get('Content-Range')).toBe('bytes 5-9/10');
+      });
+
+      it('answers 416 for a range starting past the end', async () => {
+        const res = await fetchPreview({ Range: 'bytes=10-' });
+        expect(res.status).toBe(416);
+        expect(res.headers.get('Content-Range')).toBe('bytes */10');
+      });
+
+      it('sends the whole body for several ranges or a malformed header', async () => {
+        for (const range of ['bytes=0-1,4-5', 'items=0-1', 'bytes=5-2']) {
+          const res = await fetchPreview({ Range: range });
+          expect(res.status).toBe(200);
+          expect(res.headers.get('Content-Length')).toBe('10');
+          await res.body?.cancel();
+        }
+      });
     });
 
     it('returns inline headers for PDF', async () => {

@@ -28,7 +28,8 @@ export interface ReservedTaskSubmissionIdentities {
   initialStatusEventId: string;
 }
 
-export type ReservedTaskSubmissionSourceKind = 'trigger' | 'schedule' | 'standing_watch';
+export type ReservedTaskSubmissionSourceKind =
+  'trigger' | 'schedule' | 'standing_watch' | 'workflow';
 
 export interface ReservedTaskSubmissionSourceProvenance {
   kind: ReservedTaskSubmissionSourceKind;
@@ -58,12 +59,21 @@ export interface ReservedTaskSubmissionInput {
   vmSizeOverride: string | null;
   resourceRequirementsJson?: string | null;
   source: ReservedTaskSubmissionSourceProvenance;
+  workflow?: {
+    missionId: string;
+    stepKey: string;
+    expectedProfileJson: string;
+    expectedProjectJson: string;
+    parentTaskId: string;
+    dispatchDepth: number;
+    maxPerTask: number;
+    maxActivePerProject: number;
+    credentialAttribution: { userId: string; projectId: string | null; source: CredentialSource };
+  };
 }
 
 export type ReservedTaskSubmissionStartState =
-  | 'started'
-  | 'already_started'
-  | 'confirmed_after_lost_ack';
+  'started' | 'already_started' | 'confirmed_after_lost_ack';
 
 export type ReservedTaskSubmissionConflictReason =
   | 'invalid_input'

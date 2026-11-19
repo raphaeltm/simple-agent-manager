@@ -241,4 +241,86 @@ describe('Skill Routes', () => {
     expect(deleteRes.status).toBe(200);
     await expect(deleteRes.json()).resolves.toEqual({ success: true });
   });
+
+  it('passes a blank agentType through to the service, which stores it as no override', async () => {
+    mocks.createSkill.mockResolvedValueOnce(makeSkill({ id: 'skill-new', agentType: null }));
+    mocks.updateSkill.mockResolvedValueOnce(makeSkill({ agentType: null }));
+
+    const createRes = await app.request(
+      REQUEST_PATH,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Review', agentType: '' }),
+      },
+      makeEnv()
+    );
+    expect(createRes.status).toBe(201);
+    expect(mocks.createSkill).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-1',
+      'user-1',
+      expect.objectContaining({ name: 'Review', agentType: '' }),
+      expect.anything()
+    );
+
+    const patchRes = await app.request(
+      `${REQUEST_PATH}/skill-1`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentType: '' }),
+      },
+      makeEnv()
+    );
+    expect(patchRes.status).toBe(200);
+    expect(mocks.updateSkill).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-1',
+      'skill-1',
+      'user-1',
+      expect.objectContaining({ agentType: '' })
+    );
+  });
+
+  it('accepts agentType: null so a skill can leave the agent to the chosen profile', async () => {
+    mocks.createSkill.mockResolvedValueOnce(makeSkill({ id: 'skill-new', agentType: null }));
+    mocks.updateSkill.mockResolvedValueOnce(makeSkill({ agentType: null }));
+
+    const createRes = await app.request(
+      REQUEST_PATH,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Review', agentType: null }),
+      },
+      makeEnv()
+    );
+    expect(createRes.status).toBe(201);
+    expect(mocks.createSkill).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-1',
+      'user-1',
+      expect.objectContaining({ name: 'Review', agentType: null }),
+      expect.anything()
+    );
+
+    const patchRes = await app.request(
+      `${REQUEST_PATH}/skill-1`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentType: null }),
+      },
+      makeEnv()
+    );
+    expect(patchRes.status).toBe(200);
+    expect(mocks.updateSkill).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-1',
+      'skill-1',
+      'user-1',
+      expect.objectContaining({ agentType: null })
+    );
+  });
 });

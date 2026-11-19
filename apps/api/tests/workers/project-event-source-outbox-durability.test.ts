@@ -1,7 +1,7 @@
+import type { AdmitProjectEventInput } from '@simple-agent-manager/project-data/internal/do/project-events';
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import type { AdmitProjectEventInput } from '../../src/durable-objects/project-data/project-events';
 import type { Env } from '../../src/env';
 import * as projectDataService from '../../src/services/project-data';
 import {
@@ -588,7 +588,7 @@ describe('Project event source outbox durability on migrated D1', () => {
     expect(await outboxRow(`${projectId}-legacy-null-terminal-worker`)).toBeNull();
   });
 
-  it('bounds expired and exhausted history before due candidate admission', async () => {
+  it('recovers a committed source intent before crowded cleanup and older retryable history', async () => {
     const { projectId } = await seedProjectGraph('history');
     const expiredAt = new Date(NOW.getTime() - 60_000).toISOString();
     const future = new Date(NOW.getTime() + 60_000).toISOString();
@@ -640,10 +640,39 @@ describe('Project event source outbox durability on migrated D1', () => {
       now: NOW,
     }).run();
 
-    const stats = await reconcileProjectEventSourceOutbox(testEnv, { limit: 10, now: NOW });
+    // The insert above represents a source transaction that committed before
+    // the Worker stopped, so no immediate admission is called. Older
+    // retryable rows and expired history must not prevent cron recovery.
+    for (let i = 0; i < 4; i += 1) {
+      await projectEventSourceOutboxInsertStatement(
+        testEnv,
+        eventInput(projectId, `history-retry-${i}`),
+        { id: `${projectId}-history-retry-${i}-intent`, now: NOW }
+      ).run();
+      await env.DATABASE.prepare(
+        `UPDATE project_event_source_outbox SET state = 'retryable_failed',
+            attempt_count = 1, next_attempt_at = ? WHERE id = ?`
+      )
+        .bind(NOW.toISOString(), `${projectId}-history-retry-${i}-intent`)
+        .run();
+    }
 
-    expect(stats).toMatchObject({ expired: 10, permanentFailed: 0, attempted: 0, admitted: 0 });
-    expect(await outboxRow(`${projectId}-history-due-intent`)).toMatchObject({ state: 'pending' });
+    const stats = await reconcileProjectEventSourceOutbox(testEnv, { limit: 2, now: NOW });
+
+    expect(stats).toMatchObject({ expired: 0, attempted: 1, admitted: 1 });
+    expect(await outboxRow(`${projectId}-history-due-intent`)).toMatchObject({ state: 'admitted' });
+    expect(await outboxRow(`${projectId}-history-retry-0-intent`)).toMatchObject({
+      state: 'retryable_failed',
+    });
+    expect(await projectDataService.getProjectEventRecentStatus(testEnv, projectId)).toMatchObject({
+      events: [expect.objectContaining({ eventType: 'task.completed' })],
+    });
+
+    const nextSweep = await reconcileProjectEventSourceOutbox(testEnv, { limit: 10, now: NOW });
+    expect(nextSweep).toMatchObject({ expired: 2, admitted: 4 });
+    expect(await outboxRow(`${projectId}-history-retry-0-intent`)).toMatchObject({
+      state: 'admitted',
+    });
   });
 
   it('reclaims terminal rows after the configured retention horizon', async () => {

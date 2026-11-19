@@ -1,8 +1,4 @@
-import type {
-  AgentHostStatus,
-  AgentSession,
-  WorktreeInfo,
-} from '@simple-agent-manager/shared';
+import type { AgentHostStatus, AgentSession, WorktreeInfo } from '@simple-agent-manager/shared';
 import type { MultiTerminalSessionSnapshot } from '@simple-agent-manager/terminal';
 
 import type { GitStatusData } from '../../lib/api';

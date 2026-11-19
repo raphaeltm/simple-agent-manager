@@ -4,8 +4,6 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import agentInstallManifest from '../../../../packages/shared/src/agent-install-manifest.json';
-
 const apiPackageRoot = join(fileURLToPath(new URL('.', import.meta.url)), '../..');
 const apiRoot = join(apiPackageRoot, 'src');
 
@@ -17,8 +15,15 @@ function readPackage(relPath: string): string {
   return readFileSync(join(apiPackageRoot, relPath), 'utf8');
 }
 
+// The install manifest is JSON data shared with scripts and the Go agent. Read it as data rather
+// than importing it: the worker may import packages only through their public entry points
+// (eslint.config.mjs, worker modularization boundary 2).
+function readAgentInstallManifest(): unknown {
+  return JSON.parse(readPackage('../../packages/shared/src/agent-install-manifest.json'));
+}
+
 function getPinnedAgentPackage(agentType: string): string {
-  const manifest = agentInstallManifest as Array<{
+  const manifest = readAgentInstallManifest() as Array<{
     agentType: string;
     package: string;
     version: string;
@@ -31,7 +36,7 @@ function getPinnedAgentPackage(agentType: string): string {
 }
 
 function getPinnedAgentNpmCompanion(agentType: string): string {
-  const manifest = agentInstallManifest as Array<{
+  const manifest = readAgentInstallManifest() as Array<{
     agentType: string;
     npmCompanion?: {
       package: string;
@@ -48,7 +53,7 @@ function getPinnedAgentNpmCompanion(agentType: string): string {
 describe('cf-container runtime spike contracts', () => {
   it('adds a non-null node runtime discriminator without changing workspace node_id', () => {
     const migration = read('db/migrations/0088_node_runtime.sql');
-    const schema = read('db/schema.ts');
+    const schema = read('../../../packages/worker-core/src/schema.ts');
 
     expect(migration).toContain("ALTER TABLE nodes ADD COLUMN runtime TEXT NOT NULL DEFAULT 'vm'");
     expect(schema).toContain("runtime: text('runtime').notNull().default('vm')");
@@ -56,7 +61,8 @@ describe('cf-container runtime spike contracts', () => {
   });
 
   it('routes cf-container workspace hostnames through the raw Container binding behind the kill switch', () => {
-    const index = read('index.ts');
+    // The ws-* proxy moved out of index.ts (rule 18).
+    const index = read('routes/workspace-subdomain-proxy.ts');
     const containerService = read('services/vm-agent-container.ts');
 
     expect(index).toContain("nodeRuntime === 'cf-container'");
@@ -76,12 +82,15 @@ describe('cf-container runtime spike contracts', () => {
   it('routes Worker-to-vm-agent service calls through raw Container for cf-container nodes only', () => {
     const nodeAgent = read('services/node-agent.ts');
     const workspaceTools = read('routes/mcp/workspace-tools.ts');
-    const libraryTools = read('routes/mcp/library-tools.ts');
+    // Library tools and agent model calls share the workspace file-transfer service.
+    const workspaceFileTransfer = read('services/workspace-file-transfer.ts');
     const projectFiles = read('routes/projects/files.ts');
     const localForward = read('routes/workspaces/local-forward.ts');
     const nodesRoute = read('routes/nodes/diagnostics.ts');
 
-    expect(nodeAgent).toContain("node?.runtime !== 'cf-container'");
+    // The route seam (services/node-agent-route.ts) maps runtime 'cf-container' to the container.
+    expect(nodeAgent).toContain('resolveNodeAgentRoute(env, nodeId, node)');
+    expect(nodeAgent).toContain("route.kind !== 'container'");
     expect(nodeAgent).toContain('getVmAgentContainerConfig(env)');
     expect(nodeAgent).toContain('!env.VM_AGENT_CONTAINER');
     expect(nodeAgent).toContain('fetchVmAgentContainer(');
@@ -94,8 +103,8 @@ describe('cf-container runtime spike contracts', () => {
     );
     expect(workspaceTools).toContain("import { fetchNodeAgent } from '../../services/node-agent'");
     expect(workspaceTools).toContain('fetchNodeAgent(nodeId, env, vmUrl, fetchOpts, timeoutMs)');
-    expect(libraryTools).toContain("import { fetchNodeAgent } from '../../services/node-agent'");
-    expect(libraryTools).toContain('fetchNodeAgent(');
+    expect(workspaceFileTransfer).toContain("import { fetchNodeAgent } from './node-agent'");
+    expect(workspaceFileTransfer).toContain('fetchNodeAgent(');
     expect(projectFiles).toContain("import { fetchNodeAgent } from '../../services/node-agent'");
     expect(projectFiles).toContain('fetchNodeAgent(');
     expect(localForward).toContain(
@@ -127,8 +136,8 @@ describe('cf-container runtime spike contracts', () => {
     expect(launcher).toContain("runContainerPhase('launch'");
     expect(launcher).not.toContain('nohup env');
     expect(launcher).toContain("runtime: 'cf-container'");
-    expect(launcher).toContain('signNodeCallbackToken');
-    expect(launcher).toContain('signCallbackToken');
+    expect(launcher).toContain('signCurrentNodeCallbackToken');
+    expect(launcher).toContain('signCurrentWorkspaceCallbackToken');
     expect(launcher).toContain('createWorkspaceOnNode');
     expect(launcher).toContain('startSamAwareAgentSession');
     const bootstrap = read('services/agent-session-bootstrap.ts');

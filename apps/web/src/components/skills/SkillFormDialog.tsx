@@ -5,8 +5,9 @@ import type {
   UpdateSkillRequest,
 } from '@simple-agent-manager/shared';
 import { Button, Dialog, Input } from '@simple-agent-manager/ui';
-import { type FC, useEffect, useState } from 'react';
+import { type FC, useEffect, useMemo, useRef, useState } from 'react';
 
+import { AgentModelAccessField } from '../agent-models/AgentModelAccessField';
 import {
   deserializeResourceRequirements,
   EMPTY_RESOURCE_STATE,
@@ -49,12 +50,31 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
   const [resourceReqs, setResourceReqs] = useState<ResourceRequirementsFormState>({
     ...EMPTY_RESOURCE_STATE,
   });
+  const [agentModels, setAgentModels] = useState<string[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resourceErrors, setResourceErrors] = useState<ResourceValidationErrors>({});
 
+  /**
+   * Populate the form once per (open, skill id) — deliberately NOT keyed on
+   * the `skill` object, mirroring `ProfileFormDialog`'s exact fix for the
+   * same hazard (see its comment there for the full rationale). `SkillList`
+   * recomputes the `editingSkill` passed in here via `.find()` over a fresh
+   * `skills` array on every refetch, so a background list refresh hands this
+   * dialog a brand-new `skill` object with identical content. Keying the
+   * populate effect on that object's identity re-ran every `setX(skill.…)`
+   * below and silently reverted in-progress edits — including a Save just
+   * completed inside the nested AI-models picker.
+   */
+  const skillRef = useRef(skill);
+  useEffect(() => {
+    skillRef.current = skill;
+  }, [skill]);
+  const skillId = skill?.id ?? null;
+
   useEffect(() => {
     if (!isOpen) return;
+    const skill = skillRef.current;
     setName(skill?.name ?? '');
     setDescription(skill?.description ?? '');
     setDefaultProfileId(skill?.defaultProfileId ?? '');
@@ -62,9 +82,17 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
     setVmSizeOverride(skill?.vmSizeOverride ?? '');
     setTaskMode(skill?.taskMode ?? 'task');
     setResourceReqs(deserializeResourceRequirements(skill?.resourceRequirementsJson));
+    setAgentModels(skill?.agentModels ?? null);
     setResourceErrors({});
     setError(null);
-  }, [isOpen, skill]);
+  }, [isOpen, skillId]);
+
+  /** The chosen default profile's own override, so "Inherit" can check it before falling back to the project. */
+  const fallbackProfile = useMemo(() => {
+    if (!defaultProfileId) return null;
+    const match = profiles.find((profile) => profile.id === defaultProfileId);
+    return match ? { name: match.name, agentModels: match.agentModels } : null;
+  }, [defaultProfileId, profiles]);
 
   const handleSubmit = async () => {
     const trimmedName = name.trim();
@@ -89,6 +117,7 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
         vmSizeOverride: vmSizeOverride || null,
         taskMode: taskMode || 'task',
         resourceRequirementsJson: serializeResourceRequirements(resourceReqs),
+        agentModels,
       });
       onClose();
     } catch (err) {
@@ -193,12 +222,23 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
           </div>
           <ResourceRequirementsInput
             value={resourceReqs}
-            onChange={(next) => { setResourceReqs(next); setResourceErrors({}); }}
+            onChange={(next) => {
+              setResourceReqs(next);
+              setResourceErrors({});
+            }}
             onClearLegacy={() => setVmSizeOverride('')}
             disabled={saving}
             legacyVmSize={vmSizeOverride}
             inheritLabel="profile default"
             errors={resourceErrors}
+          />
+          <AgentModelAccessField
+            projectId={projectId}
+            ownerLabel="skill"
+            value={agentModels}
+            onChange={setAgentModels}
+            disabled={saving}
+            fallbackProfile={fallbackProfile}
           />
         </div>
 

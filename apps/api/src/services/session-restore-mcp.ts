@@ -17,6 +17,8 @@ export async function prepareSessionRestoreMcp(
     chatSessionId: string;
     agentSessionId: string;
     runtimeContract: SessionRuntimeContract | null;
+    /** The woken runtime's credential generation (rotated by `persistRuntimeRecovering`). */
+    callbackGeneration: string | null;
   }
 ) {
   const contract = input.runtimeContract;
@@ -38,6 +40,7 @@ export async function prepareSessionRestoreMcp(
         workspaceId: input.workspaceId,
         chatSessionId: input.chatSessionId,
         agentSessionId: input.agentSessionId,
+        callbackGeneration: input.callbackGeneration,
         createdAt: new Date().toISOString(),
       },
       env

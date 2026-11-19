@@ -5,6 +5,7 @@ import {
   hasNodeHealthEvent,
   recordNodeHealthEvent,
 } from '../../services/node-health';
+import { captureNodeLogsOnUnhealthy } from '../../services/node-log-capture';
 import {
   listStrandedNodeTasks,
   terminalizeStrandedNodeTasks,
@@ -290,6 +291,8 @@ async function processUnhealthyCandidate(
     result: NodeCleanupResult;
     boundaries: UnhealthyNodeBoundaries;
     fleetLoss: boolean;
+    /** Nodes that just turned unhealthy; their black box captures run after the loop. */
+    turnedUnhealthy: Array<{ id: string; userId: string }>;
   }
 ): Promise<void> {
   const { config, result, boundaries, fleetLoss } = context;
@@ -315,6 +318,9 @@ async function processUnhealthyCandidate(
     .run();
   if ((observed.meta.changes ?? 0) !== 1) return;
   await record(env, node, health, 'node_heartbeat_missing', nowIso);
+  if (health === 'unhealthy' && node.health_status !== 'unhealthy') {
+    context.turnedUnhealthy.push({ id: node.id, userId: node.user_id });
+  }
   const fleetEscalationDue =
     now.getTime() - Date.parse(episode) >=
     config.unhealthyReleaseAfterMs + config.unhealthyDrainAfterMs;
@@ -386,6 +392,7 @@ export async function sweepUnhealthyNodes(
     (fleet?.total ?? 0) >= config.unhealthyFleetMinNodes &&
     (fleet?.silent ?? 0) / (fleet?.total ?? 1) >= config.unhealthyFleetMaxFraction;
 
+  const turnedUnhealthy: Array<{ id: string; userId: string }> = [];
   for (const node of candidates.results) {
     try {
       await processUnhealthyCandidate(db, env, node, now, {
@@ -393,6 +400,7 @@ export async function sweepUnhealthyNodes(
         result,
         boundaries,
         fleetLoss,
+        turnedUnhealthy,
       });
     } catch (error) {
       result.errors++;
@@ -402,4 +410,7 @@ export async function sweepUnhealthyNodes(
       });
     }
   }
+  // Black box recorder: concurrent and individually time-bounded, so the sweep waits at most
+  // one capture timeout however many nodes turned unhealthy this tick (rule 47).
+  if (turnedUnhealthy.length) await captureNodeLogsOnUnhealthy(env, turnedUnhealthy);
 }

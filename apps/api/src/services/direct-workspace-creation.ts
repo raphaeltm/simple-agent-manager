@@ -7,13 +7,13 @@ import type { Env } from '../env';
 import { scheduleWorkspaceCreateOnNode } from '../routes/workspaces/_helpers';
 import { startComputeTrackingForNode } from '../routes/workspaces/workspace-create-helpers';
 import { waitForNodeAgentReady } from './node-agent';
+import { resolvePlacementAdmissionPolicy } from './node-lifetime-admission';
 import {
   assertDirectWorkspaceProvisioningAuthority,
   cleanupFreshProvisioningNode,
   type FreshProvisioningNodeCleanupResult,
 } from './provisioning-authority';
 import { attachPrecreatedWorkspacePlacement } from './workspace-placement';
-import { resolveWorkspaceAdmissionPolicy } from './workspace-resource-capacity';
 
 export interface DirectWorkspaceCreationInput {
   placement: Parameters<typeof attachPrecreatedWorkspacePlacement>[1];
@@ -67,7 +67,7 @@ export async function continueDirectWorkspaceCreation(
     displayName: placement.displayName,
     normalizedDisplayName: placement.normalizedDisplayName,
   };
-  const admissionPolicy = resolveWorkspaceAdmissionPolicy(env);
+  const admissionPolicy = await resolvePlacementAdmissionPolicy(env);
   const assertDirectWorkspaceDispatchAuthority = () =>
     assertDirectCreationAuthority(env, input, true);
 

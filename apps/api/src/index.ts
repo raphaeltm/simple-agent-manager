@@ -1,3 +1,12 @@
+// Configure @simple-agent-manager/repo-hosting's ports before any route or Durable Object can use it.
+import './repo-hosting-wiring';
+
+export { McpRateCounter } from './durable-objects/mcp-rate-counter';
+export { WorkspaceBootLog } from './durable-objects/workspace-boot-log';
+// SDK 0.3.7 requires this helper when reconstructing a running Container.
+// Builders register no outbound interceptors, so their network traffic stays direct.
+export { ContainerProxy } from '@cloudflare/containers';
+import { adminAgentEmailRoutes } from './routes/admin-agent-email';
 import { cliOperationReceiptRoutes } from './routes/cli-operation-receipts';
 import { cliProjectMetadataRoutes } from './routes/cli-project-metadata';
 import { projectScheduleRoutes } from './routes/project-schedules';
@@ -15,32 +24,25 @@ export { InteractionStore } from './durable-objects/interaction-store';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
 export { NotificationService } from './durable-objects/notification';
 export { ProjectAgent } from './durable-objects/project-agent';
-export { ProjectData } from './durable-objects/project-data';
 export { ProjectOrchestrator } from './durable-objects/project-orchestrator';
 export { SamSession } from './durable-objects/sam-session';
 export { SetupSessionPool } from './durable-objects/setup-session-pool';
 export { TaskRunner } from './durable-objects/task-runner';
-export { TrialCounter } from './durable-objects/trial-counter';
-export { TrialEventBus } from './durable-objects/trial-event-bus';
-export { TrialOrchestrator } from './durable-objects/trial-orchestrator';
+export { ProjectData } from './project-data-wiring';
+// Inert tombstones: wrangler migrations v7-v9 created these classes for the retired
+// anonymous-trial product, so they must stay exported (see durable-objects/retired-trial.ts).
+export { TrialCounter, TrialEventBus, TrialOrchestrator } from './durable-objects/retired-trial';
 export { VmAgentContainer } from './durable-objects/vm-agent-container';
 export type { Env } from './env';
 export { Sandbox as SandboxDO } from '@cloudflare/sandbox';
 
-import type { WorkspaceStatus } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
-import { createAuth } from './auth';
-import * as schema from './db/schema';
 import type { Env } from './env';
 import { applyCacheHeaders } from './lib/cache-headers';
 import { withRequestScopedD1Bindings } from './lib/d1-session';
-import { log, serializeError } from './lib/logger';
 import { resolvePagesProxyTarget } from './lib/pages-proxy';
-import { parseWorkspaceSubdomain } from './lib/workspace-subdomain';
 import { analyticsMiddleware } from './middleware/analytics';
 import { apiCors } from './middleware/api-cors';
 import { handleAppError } from './middleware/app-error-handler';
@@ -57,24 +59,29 @@ import { adminCcBackfillRoutes } from './routes/admin-cc-backfill';
 import { adminCostRoutes } from './routes/admin-costs';
 import { adminGithubInstallationLeakSweepRoutes } from './routes/admin-github-installation-leak-sweep';
 import { adminGithubRepoIdBackfillRoutes } from './routes/admin-github-repo-id-backfill';
+import { adminHealthCostRoutes } from './routes/admin-health-cost';
+import { adminOperationsApprovalRoutes } from './routes/admin-operations-approvals';
 import { adminPlatformConfigRoutes } from './routes/admin-platform-config';
 import { adminPlatformCredentialRoutes } from './routes/admin-platform-credentials';
 import { adminProjectEventRoutes } from './routes/admin-project-events';
 import { adminQuotaRoutes } from './routes/admin-quotas';
 import { adminRuntimeControlRoutes } from './routes/admin-runtime-controls';
 import { adminSandboxRoutes } from './routes/admin-sandbox';
-import { adminTrialsRoutes } from './routes/admin-trials';
+import { adminSettingsRoutes } from './routes/admin-settings';
 import { adminUsageRoutes } from './routes/admin-usage';
 import { agentRoutes } from './routes/agent';
 import { agentCredentialSetupSessionsRoutes } from './routes/agent-credential-setup-sessions';
+import { agentModelCatalogRoutes, projectAgentModelRoutes } from './routes/agent-models';
 import { agentProfileRoutes } from './routes/agent-profiles';
 import { agentSettingsRoutes } from './routes/agent-settings';
+import { agentSignInRoutes } from './routes/agent-sign-in';
 import { agentsCatalogRoutes } from './routes/agents-catalog';
 import { aiProxyRoutes } from './routes/ai-proxy';
 import { aiProxyAnthropicRoutes } from './routes/ai-proxy-anthropic';
 import { aiProxyPassthroughRoutes } from './routes/ai-proxy-passthrough';
 import { analyticsIngestRoutes } from './routes/analytics-ingest';
 import { apiTokenRoutes } from './routes/api-tokens';
+import { artifactsConfigRoutes } from './routes/artifacts-config';
 import { authRoutes } from './routes/auth';
 import { bootstrapRoutes } from './routes/bootstrap';
 import { cachedCommandRoutes } from './routes/cached-commands';
@@ -106,6 +113,10 @@ import { gcpRoutes } from './routes/gcp';
 import { githubRoutes } from './routes/github';
 import { gitlabRoutes } from './routes/gitlab';
 import { googleAuthRoutes } from './routes/google-auth';
+import { ideaUpdateRoutes } from './routes/idea-updates';
+import { ideaRoutes } from './routes/ideas';
+import { inboxRoutes, projectInboxRoutes } from './routes/inbox';
+import { projectInboxTaskRoutes } from './routes/inbox-tasks';
 import {
   handleInteractivePreviewRequest,
   isInteractivePreviewRequest,
@@ -125,6 +136,7 @@ import { notificationRoutes } from './routes/notifications';
 import { observabilityIngestRoutes } from './routes/observability-ingest';
 import { orchestratorRoutes } from './routes/orchestrator';
 import { ownerSessionSnapshotRoutes } from './routes/owner-session-snapshots';
+import { platformCapabilitiesRoutes } from './routes/platform-capabilities';
 import { policyRoutes } from './routes/policies';
 import { profileRuntimeRoutes } from './routes/profile-runtime';
 import { projectAgentRoutes } from './routes/project-agent';
@@ -136,10 +148,13 @@ import {
 } from './routes/project-deployment';
 import { projectEventChannelRoutes } from './routes/project-event-channels';
 import { projectEventSubscriptionRoutes } from './routes/project-event-subscriptions';
+import { projectInsightsRoutes } from './routes/project-insights';
+import { projectOverviewRoutes } from './routes/project-overview';
 import { projectsRoutes } from './routes/projects';
 import { acpInteractionCallbackRoute } from './routes/projects/acp-interaction-callback';
 import { agentActivityCallbackRoute } from './routes/projects/agent-activity-callback';
 import { agentUsageCallbackRoute } from './routes/projects/agent-usage-callback';
+import { buildContextCallbackRoute } from './routes/projects/build-context-callback';
 import { buildStartedCallbackRoute } from './routes/projects/build-started-callback';
 import { composeImageArtifactsCallbackRoute } from './routes/projects/compose-image-artifacts-callback';
 import { composePublishReleaseCallbackRoute } from './routes/projects/compose-publish-release-callback';
@@ -151,6 +166,7 @@ import { workspaceResourceHistoryCallbackRoute } from './routes/projects/workspa
 import { providersRoutes } from './routes/providers';
 import { reportIssueRoutes } from './routes/report-issue';
 import { resolutionStatusRoute } from './routes/resolution-status';
+import { resourceLinkRoutes } from './routes/resource-links';
 import { samRoutes } from './routes/sam';
 import { setupRoutes } from './routes/setup';
 import { skillRuntimeRoutes } from './routes/skill-runtime';
@@ -159,25 +175,20 @@ import { taskCallbackRoute, tasksRoutes } from './routes/tasks';
 import { terminalRoutes } from './routes/terminal';
 import { transcribeRoutes } from './routes/transcribe';
 import { trialRoutes } from './routes/trial';
-import { trialOnboardingRoutes } from './routes/trial/index';
 import { triggerWebhookRoutes } from './routes/trigger-webhooks';
+import { signedTriggerWebhookRoutes } from './routes/trigger-webhooks-signed';
 import { triggersRoutes } from './routes/triggers';
 import { ttsRoutes } from './routes/tts';
 import { uiGovernanceRoutes } from './routes/ui-governance';
 import { usageRoutes } from './routes/usage';
+import { workflowRoutes } from './routes/workflows';
+import { workspaceSubdomainProxy } from './routes/workspace-subdomain-proxy';
 import { workspacesRoutes } from './routes/workspaces';
-import {
-  isExpectedWorkspacePortsUpstreamUnavailable,
-  isWorkspacePortsListRequest,
-  workspacePortsReadinessPayload,
-  workspacePortsStateForStatus,
-} from './routes/workspaces/ports-readiness';
 import { scheduled } from './scheduled/handler';
-import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
-import { assertUserNotSuspended } from './services/signup-approval';
-import { recordNodeRoutingMetric } from './services/telemetry';
-import { assertTerminalTokenSessionLive } from './services/terminal-token-liveness';
-import { fetchVmAgentContainer, getVmAgentContainerConfig } from './services/vm-agent-container';
+import { handleInboundAgentEmail } from './services/agent-email/inbound';
+import { agentEmailConfig } from './services/agent-email/setup-state';
+import { isAgentSignInEnabled } from './services/agent-sign-in/config';
+import { isInstantRuntimeAvailable } from './services/vm-agent-container';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -195,7 +206,8 @@ app.use('*', async (c, next) => {
   await next();
 });
 
-// Proxy non-API subdomains to their respective Cloudflare Pages deployments.
+// Proxy non-API subdomains to their respective Cloudflare Pages deployments (or, on a
+// self-hosted deployment with an ASSETS binding, serve app.* from the Worker's assets).
 // The Worker wildcard route *.{domain}/* intercepts ALL subdomains, so we must
 // proxy app.* and www.* requests to Pages before any other middleware runs.
 // The apex domain is redirected to www.* for the marketing site.
@@ -211,7 +223,15 @@ app.use('*', async (c, next) => {
     baseDomain,
     appPagesProjectName: c.env.PAGES_PROJECT_NAME,
     wwwPagesProjectName: c.env.WWW_PAGES_PROJECT_NAME,
+    hasWebAssets: Boolean(c.env.ASSETS),
   });
+
+  // Self-hosted deployments bind the apps/web build as ASSETS and serve app.* from it.
+  // Cloudflare deployments have no ASSETS binding and keep proxying to Pages. (`c.env.ASSETS` is
+  // re-checked only so TypeScript narrows the optional binding.)
+  if (pagesTarget.type === 'assets' && c.env.ASSETS) {
+    return c.env.ASSETS.fetch(c.req.raw);
+  }
 
   if (pagesTarget.type === 'missing-config') {
     return c.text(pagesTarget.message, 503);
@@ -232,460 +252,8 @@ app.use('*', async (c, next) => {
   await next();
 });
 
-// Proxy requests for workspace subdomains (ws-{id}.*) to the VM agent.
-// The wildcard DNS *.{domain} routes through this Worker, so we must proxy
-// workspace requests to the actual VM running the agent on the configured port.
-// vm-{id} DNS records are orange-clouded; CF edge terminates TLS and re-encrypts
-// to the VM agent's Origin CA cert. This handles both HTTP and WebSocket requests.
-app.use('*', async (c, next) => {
-  const url = new URL(c.req.url);
-  const hostname = url.hostname;
-  const baseDomain = c.env?.BASE_DOMAIN || '';
-
-  // Parse workspace ID and optional port from subdomain.
-  const parsed = parseWorkspaceSubdomain(hostname, baseDomain);
-  if (!parsed) {
-    await next();
-    return;
-  }
-  if ('error' in parsed) {
-    log.info('ws_proxy_invalid_subdomain', { hostname, reason: parsed.error });
-    return c.json({ error: 'INVALID_WORKSPACE', message: 'Invalid workspace subdomain' }, 400);
-  }
-  const { workspaceId, targetPort } = parsed;
-
-  // --- Port-access authentication (cookie + token handshake) ---
-  // For port-specific subdomains (ws-{id}--{port}), check the port-access cookie
-  // and ?port_token= query param BEFORE the normal session/terminal-token paths.
-  // This is necessary because BetterAuth cookies are scoped to api.{BASE_DOMAIN}
-  // and are NOT sent to ws-{id}--{port}.{BASE_DOMAIN} subdomains.
-  let userId: string | null = null;
-  let portAccessRedirect: Response | null = null;
-  let publicPortAccess = false;
-
-  if (targetPort !== null) {
-    // 5a: Check sam_port_access cookie (subsequent requests)
-    const cookieHeader = c.req.raw.headers.get('cookie') || '';
-    const cookieMatch = cookieHeader.match(/(?:^|;\s*)sam_port_access=([^\s;]+)/);
-    if (cookieMatch?.[1]) {
-      try {
-        const payload = await verifyPortAccessToken(cookieMatch[1], c.env);
-        if (payload.workspace === workspaceId && payload.port === targetPort) {
-          userId = payload.subject;
-        }
-      } catch {
-        // Cookie expired or invalid — fall through to token check
-      }
-    }
-
-    // 5b: Check ?port_token= query param (initial request from expose_port URL)
-    if (!userId) {
-      const portToken = url.searchParams.get('port_token');
-      if (portToken) {
-        try {
-          const payload = await verifyPortAccessToken(portToken, c.env);
-          if (payload.workspace === workspaceId && payload.port === targetPort) {
-            // Set cookie and 302 redirect to strip token from URL
-            const cookieMaxAge = c.env.PORT_ACCESS_COOKIE_MAX_AGE_SECONDS
-              ? parseInt(c.env.PORT_ACCESS_COOKIE_MAX_AGE_SECONDS, 10)
-              : 14400;
-            const redirectUrl = new URL(url.toString());
-            redirectUrl.searchParams.delete('port_token');
-            portAccessRedirect = new Response(null, {
-              status: 302,
-              headers: {
-                Location: redirectUrl.toString(),
-                'Set-Cookie': `sam_port_access=${portToken}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${cookieMaxAge}`,
-                'Cache-Control': 'no-store',
-                'Referrer-Policy': 'no-referrer',
-              },
-            });
-            userId = payload.subject;
-          }
-        } catch (err) {
-          log.warn('ws_proxy_port_token_rejected', {
-            workspaceId,
-            targetPort,
-            ...serializeError(err),
-          });
-        }
-      }
-    }
-
-    if (!userId) {
-      const db = drizzle(c.env.DATABASE, { schema });
-      const publicWorkspace = await db
-        .select({
-          userId: schema.workspaces.userId,
-          portsPublicEnabled: schema.workspaces.portsPublicEnabled,
-        })
-        .from(schema.workspaces)
-        .where(eq(schema.workspaces.id, workspaceId))
-        .get();
-
-      if (publicWorkspace?.portsPublicEnabled) {
-        userId = publicWorkspace.userId;
-        publicPortAccess = true;
-      }
-    }
-
-    // 5f: HTML error page for expired/invalid port access
-    if (!userId) {
-      return new Response(
-        `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Session expired</title>
-<style>body{font-family:system-ui,sans-serif;max-width:480px;margin:80px auto;padding:0 20px;color:#333}
-h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;font-size:0.9em}</style>
-</head><body>
-<h1>Session expired</h1>
-<p>Your access to this port has expired or is invalid.</p>
-<p>Ask the agent to run <code>expose_port</code> again for a fresh link.</p>
-</body></html>`,
-        {
-          status: 401,
-          headers: {
-            'Content-Type': 'text/html; charset=utf-8',
-            'Cache-Control': 'no-store',
-            'X-Content-Type-Options': 'nosniff',
-          },
-        }
-      );
-    }
-
-    // Return the 302 redirect after we confirm the DB lookup passes below
-    // (moved after DB check to ensure ownership is validated first)
-  }
-
-  // --- Standard session/terminal-token authentication (non-port or fallback) ---
-  if (!userId) {
-    const auth = await createAuth(c.env);
-    const session = await auth.api.getSession({
-      headers: c.req.raw.headers,
-      query: { disableCookieCache: true },
-    });
-    if (session?.user) {
-      assertUserNotSuspended(session.user);
-      userId = session.user.id;
-    }
-  }
-
-  if (!userId) {
-    const token = url.searchParams.get('token');
-    if (!token) {
-      return c.json({ error: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
-    }
-
-    try {
-      const payload = await verifyTerminalToken(token, c.env);
-      if (payload.workspace !== workspaceId || payload.subject === 'port-proxy') {
-        return c.json({ error: 'UNAUTHORIZED', message: 'Invalid workspace token' }, 401);
-      }
-      await assertTerminalTokenSessionLive(c.env, payload);
-      userId = payload.subject;
-    } catch (err) {
-      log.warn('ws_proxy_terminal_token_rejected', {
-        workspaceId,
-        ...serializeError(err),
-      });
-      return c.json({ error: 'UNAUTHORIZED', message: 'Invalid workspace token' }, 401);
-    }
-  }
-
-  // Look up workspace routing metadata from D1.
-  const db = drizzle(c.env.DATABASE, { schema });
-  const workspace = await db
-    .select({
-      nodeId: schema.workspaces.nodeId,
-      status: schema.workspaces.status,
-    })
-    .from(schema.workspaces)
-    .where(and(eq(schema.workspaces.id, workspaceId), eq(schema.workspaces.userId, userId)))
-    .get();
-
-  const portsListRequest = isWorkspacePortsListRequest(c.req.raw.method, url.pathname, workspaceId);
-  if (!workspace) {
-    if (portsListRequest) {
-      return c.json(workspacePortsReadinessPayload('gone', null, 'Workspace not found', false));
-    }
-    return c.json({ error: 'NOT_FOUND', message: 'Workspace not found' }, 404);
-  }
-
-  const workspaceStatus = workspace.status as WorkspaceStatus;
-  const nodeRuntime = workspace.nodeId
-    ? ((
-        await db
-          .select({ runtime: schema.nodes.runtime })
-          .from(schema.nodes)
-          .where(eq(schema.nodes.id, workspace.nodeId))
-          .get()
-      )?.runtime ?? 'vm')
-    : 'vm';
-
-  if (workspaceStatus !== 'running' && workspaceStatus !== 'recovery') {
-    // Allow boot-log WebSocket during creation for real-time streaming
-    if (workspaceStatus === 'creating' && url.pathname === '/boot-log/ws') {
-      // Fall through to proxy
-    } else if (portsListRequest) {
-      const state = workspacePortsStateForStatus(workspaceStatus);
-      return c.json(
-        workspacePortsReadinessPayload(
-          state,
-          workspaceStatus,
-          `Workspace is ${workspaceStatus}`,
-          state === 'not_ready'
-        )
-      );
-    } else {
-      return c.json({ error: 'NOT_READY', message: `Workspace is ${workspaceStatus}` }, 503);
-    }
-  }
-
-  // 5b continued: Return the 302 redirect now that ownership is verified.
-  // This ensures the cookie is only set after the D1 ownership check passes.
-  if (portAccessRedirect) {
-    return portAccessRedirect;
-  }
-
-  if (nodeRuntime === 'cf-container') {
-    const containerConfig = getVmAgentContainerConfig(c.env);
-    if (!containerConfig.enabled) {
-      return c.json(
-        { error: 'CF_CONTAINER_DISABLED', message: 'Container workspace runtime is disabled' },
-        503
-      );
-    }
-    if (!c.env.VM_AGENT_CONTAINER) {
-      return c.json(
-        { error: 'CF_CONTAINER_UNAVAILABLE', message: 'VM agent container binding is unavailable' },
-        503
-      );
-    }
-
-    const containerId = workspace.nodeId || workspaceId;
-    const vmAgentPort = containerConfig.vmAgentPort;
-    const containerUrl = new URL(`http://localhost:${vmAgentPort}`);
-    containerUrl.pathname = url.pathname;
-    containerUrl.search = url.search;
-
-    if (targetPort !== null) {
-      const subPath = url.pathname === '/' ? '' : url.pathname;
-      containerUrl.pathname = `/workspaces/${workspaceId}/ports/${targetPort}${subPath}`;
-      containerUrl.searchParams.delete('port_token');
-      try {
-        const { token } = await signTerminalToken('port-proxy', workspaceId, c.env);
-        containerUrl.searchParams.set('token', token);
-      } catch (err) {
-        log.error('cf_container_port_proxy_token_error', {
-          workspaceId,
-          ...serializeError(err),
-        });
-        return c.json(
-          { error: 'TOKEN_ERROR', message: 'Failed to generate port proxy token' },
-          500
-        );
-      }
-    }
-
-    const headers = new Headers(c.req.raw.headers);
-    headers.delete('x-sam-node-id');
-    headers.delete('x-sam-workspace-id');
-    headers.delete('x-forwarded-host');
-    headers.set('X-SAM-Node-Id', workspace.nodeId || workspaceId);
-    headers.set('X-SAM-Workspace-Id', workspaceId);
-    headers.set('X-Forwarded-Host', hostname);
-    headers.set('X-Forwarded-Proto', 'https');
-
-    log.info('ws_proxy_cf_container_route', {
-      workspaceId,
-      nodeId: containerId,
-      containerId,
-      vmAgentPort,
-      targetPort,
-      publicPortAccess,
-      method: c.req.raw.method,
-      path: url.pathname,
-    });
-    recordNodeRoutingMetric(
-      {
-        metric: 'ws_proxy_route',
-        nodeId: containerId,
-        workspaceId,
-      },
-      c.env
-    );
-
-    const containerRequest = new Request(containerUrl.toString(), {
-      method: c.req.raw.method,
-      headers,
-      body: c.req.raw.body,
-      // @ts-expect-error — Cloudflare Workers support duplex for streaming request bodies
-      duplex: c.req.raw.body ? 'half' : undefined,
-    });
-    let response: Response;
-    try {
-      response = await fetchVmAgentContainer(c.env, containerId, containerRequest, vmAgentPort);
-    } catch (err) {
-      if (portsListRequest) {
-        return c.json(
-          workspacePortsReadinessPayload(
-            'not_ready',
-            workspaceStatus,
-            'Workspace ports are not ready',
-            true,
-            { runtime: 'cf-container', reason: 'fetch_exception' }
-          ),
-          202
-        );
-      }
-      throw err;
-    }
-
-    if (portsListRequest && isExpectedWorkspacePortsUpstreamUnavailable(response.status)) {
-      return c.json(
-        workspacePortsReadinessPayload(
-          'not_ready',
-          workspaceStatus,
-          'Workspace ports are not ready',
-          true,
-          { runtime: 'cf-container', upstreamStatus: response.status }
-        ),
-        202
-      );
-    }
-
-    if (targetPort !== null) {
-      const responseHeaders = new Headers(response.headers);
-      responseHeaders.delete('set-cookie');
-      return new Response(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: responseHeaders,
-      });
-    }
-    return response;
-  }
-
-  // Proxy to the VM agent via its proxied (orange-clouded) backend hostname.
-  // Cloudflare Workers cannot fetch IP addresses directly (Error 1003),
-  // so we use the {id}.vm.{domain} hostname. The two-level subdomain bypasses
-  // the wildcard Worker route *.{domain}/* (which only matches one level).
-  const routedNodeId = (workspace.nodeId || workspaceId).toLowerCase();
-  const backendHostname = `${routedNodeId}.vm.${baseDomain}`;
-  log.info('ws_proxy_route', {
-    workspaceId,
-    nodeId: workspace.nodeId || workspaceId,
-    backendHostname,
-    targetPort,
-    publicPortAccess,
-    method: c.req.raw.method,
-    path: url.pathname,
-  });
-  recordNodeRoutingMetric(
-    {
-      metric: 'ws_proxy_route',
-      nodeId: workspace.nodeId || workspaceId,
-      workspaceId,
-    },
-    c.env
-  );
-  const vmAgentProtocol = c.env.VM_AGENT_PROTOCOL || 'https';
-  const vmAgentPort = c.env.VM_AGENT_PORT || '8443';
-  const vmUrl = new URL(`${vmAgentProtocol}://${backendHostname}:${vmAgentPort}`);
-  vmUrl.pathname = url.pathname;
-  vmUrl.search = url.search;
-
-  // Route port-specific requests to the VM agent's port proxy endpoint.
-  // ws-{id}--3000.example.com/foo → {backend}/workspaces/{id}/ports/3000/foo
-  if (targetPort !== null) {
-    const subPath = url.pathname === '/' ? '' : url.pathname;
-    vmUrl.pathname = `/workspaces/${workspaceId}/ports/${targetPort}${subPath}`;
-
-    // Strip port_token from the proxied URL (it was already validated above).
-    vmUrl.searchParams.delete('port_token');
-
-    // Inject a workspace-scoped JWT so the VM agent can authenticate this request.
-    // Port-forwarded URLs are accessed directly by browsers which have no pre-existing
-    // workspace session cookie or token. The Worker is a trusted intermediary that has
-    // already validated the workspace exists and is running.
-    try {
-      const { token } = await signTerminalToken('port-proxy', workspaceId, c.env);
-      vmUrl.searchParams.set('token', token);
-    } catch (err) {
-      log.error('port_proxy_token_error', {
-        workspaceId,
-        ...serializeError(err),
-      });
-      return c.json({ error: 'TOKEN_ERROR', message: 'Failed to generate port proxy token' }, 500);
-    }
-  }
-
-  // Strip client-supplied routing headers and inject trusted routing context.
-  const headers = new Headers(c.req.raw.headers);
-  headers.delete('x-sam-node-id');
-  headers.delete('x-sam-workspace-id');
-  headers.delete('x-forwarded-host');
-  headers.set('X-SAM-Node-Id', workspace.nodeId || workspaceId);
-  headers.set('X-SAM-Workspace-Id', workspaceId);
-
-  // Preserve the original client-facing hostname (e.g., ws-abc123--3000.example.com)
-  // so the VM agent can forward it to container services. The fetch() to the VM agent
-  // rewrites the Host header to the VM hostname for Cloudflare edge routing, losing
-  // the original. X-Forwarded-Proto is always https since clients connect via CF edge.
-  headers.set('X-Forwarded-Host', hostname);
-  headers.set('X-Forwarded-Proto', 'https');
-
-  let response: Response;
-  try {
-    response = await fetch(vmUrl.toString(), {
-      method: c.req.raw.method,
-      headers,
-      body: c.req.raw.body,
-      // @ts-expect-error — Cloudflare Workers support duplex for streaming request bodies
-      duplex: c.req.raw.body ? 'half' : undefined,
-    });
-  } catch (err) {
-    if (portsListRequest) {
-      return c.json(
-        workspacePortsReadinessPayload(
-          'not_ready',
-          workspaceStatus,
-          'Workspace ports are not ready',
-          true,
-          { runtime: 'vm', reason: 'fetch_exception' }
-        ),
-        202
-      );
-    }
-    throw err;
-  }
-
-  if (portsListRequest && isExpectedWorkspacePortsUpstreamUnavailable(response.status)) {
-    return c.json(
-      workspacePortsReadinessPayload(
-        'not_ready',
-        workspaceStatus,
-        'Workspace ports are not ready',
-        true,
-        { runtime: 'vm', upstreamStatus: response.status }
-      ),
-      202
-    );
-  }
-
-  // 5e: Strip Set-Cookie headers from container responses on port-proxy path.
-  // Prevents a malicious container app from overwriting the sam_port_access cookie.
-  if (targetPort !== null) {
-    const headers = new Headers(response.headers);
-    headers.delete('set-cookie');
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers,
-    });
-  }
-
-  return response;
-});
+// Proxy requests for workspace subdomains (ws-{id}.*) to the VM agent (routes/workspace-subdomain-proxy.ts).
+app.use('*', workspaceSubdomainProxy);
 
 app.use('*', requestLoggingMiddleware());
 
@@ -715,9 +283,20 @@ app.get('/health', (c) => {
 });
 
 // Public config — exposes feature flags the UI needs before auth
-app.get('/api/config/artifacts-enabled', (c) => {
+app.route('/api/config', artifactsConfigRoutes);
+
+app.route('/api/config', platformCapabilitiesRoutes);
+
+// Public config — whether agents can run on Instant (Cloudflare Containers) with no cloud account.
+app.get('/api/config/instant-runtime', (c) => {
   applyCacheHeaders(c, 'public-config');
-  return c.json({ enabled: c.env.ARTIFACTS_ENABLED === 'true' && !!c.env.ARTIFACTS });
+  return c.json({ enabled: isInstantRuntimeAvailable(c.env) });
+});
+
+// Public config — whether this deployment can receive and send agent email (preview).
+app.get('/api/config/agent-email', async (c) => {
+  applyCacheHeaders(c, 'public-config');
+  return c.json(await agentEmailConfig(c.env));
 });
 
 // The VAPID public key is runtime configuration: deploy-generated keys do not
@@ -730,7 +309,8 @@ app.get('/api/config/vapid-public-key', (c) => {
 
 // Public config — which login providers are configured, so the login surfaces
 // only render a provider button when that provider is actually usable. Google
-// here means the LOGIN client (getGoogleLoginOAuthConfig), never the infra/GCP one.
+// here means the LOGIN client (getGoogleLoginOAuthConfig), never the infra/GCP one. Email
+// means this deployment can send sign-in codes (services/email-sign-in.ts).
 app.get('/api/config/login-providers', async (c) => {
   const { getGitHubOAuthConfig, getGitLabOAuthConfig, getGoogleLoginOAuthConfig } =
     await import('./services/platform-config');
@@ -739,8 +319,17 @@ app.get('/api/config/login-providers', async (c) => {
     getGoogleLoginOAuthConfig(c.env),
     getGitLabOAuthConfig(c.env),
   ]);
+  const { emailSignInAvailable } = await import('./services/email-sign-in');
   applyCacheHeaders(c, 'public-config');
-  return c.json({ github: github !== null, google: google !== null, gitlab: gitlab !== null });
+  return c.json({
+    github: github !== null,
+    google: google !== null,
+    gitlab: gitlab !== null,
+    email: emailSignInAvailable(c.env),
+    // Shown on the sign-in page so anyone using the instance can tell it accepts agent
+    // sign-in. A boolean only: the trusted issuer and allowlists are not published.
+    agentSignIn: isAgentSignInEnabled(c.env),
+  });
 });
 
 // JWKS endpoint (must be at root level)
@@ -762,12 +351,29 @@ app.get('/.well-known/openid-configuration', async (c) => {
   return c.json(discovery);
 });
 
+// External workload identities have their own issuer; internal SAM JWTs keep theirs.
+app.get('/oidc/.well-known/openid-configuration', async (c) => {
+  const { getWorkloadDiscovery } = await import('./services/workload-identity-token');
+  c.header('Cache-Control', 'public, max-age=3600');
+  c.header('X-Content-Type-Options', 'nosniff');
+  return c.json(getWorkloadDiscovery(c.env));
+});
+app.get('/oidc/.well-known/jwks.json', async (c) => {
+  const { getWorkloadJWKS } = await import('./services/workload-identity-token');
+  c.header('Cache-Control', 'public, max-age=3600');
+  c.header('X-Content-Type-Options', 'nosniff');
+  return c.json(await getWorkloadJWKS(c.env));
+});
+
 // API routes — codex refresh and smoke test routes registered before BetterAuth catch-all.
 // codexRefreshRoutes uses workspace callback token auth (query param), not session auth.
 // apiTokenRoutes uses dedicated API token auth, not session auth.
 // Both must be mounted before authRoutes to avoid BetterAuth's wildcard catch-all.
 app.route('/api/auth', codexRefreshRoutes);
 app.route('/api/auth', apiTokenRoutes);
+// Agent sign-in through workload identity. Steps aside (falls through) when AGENT_SIGN_IN_TRUST
+// is not configured, so the path then answers exactly as an unknown /api/auth route.
+app.route('/api/auth', agentSignInRoutes);
 app.route('/api/auth', deviceFlowRoutes);
 app.route('/api/auth', authRoutes);
 app.route('/api/setup', setupRoutes);
@@ -804,6 +410,8 @@ app.route('/api/cli', cliRoutes);
 app.route('/api/chats', chatsRoutes);
 app.route('/api/t', analyticsIngestRoutes);
 app.route('/api/webhooks', triggerWebhookRoutes);
+// Signed senders (Slack, HMAC) cannot present SAM's token: POST /api/webhooks/in/:triggerId.
+app.route('/api/webhooks', signedTriggerWebhookRoutes);
 // ORDERING IS CRITICAL: Routes using callback JWT auth MUST be mounted before
 // projectsRoutes. projectsRoutes has use('/*', requireAuth()) which leaks to
 // all siblings at the same base path — mounting these routes first causes them
@@ -821,9 +429,16 @@ app.route('/api/projects', registryPushCredentialsCallbackRoute); // Must be bef
 app.route('/api/projects', composeImageArtifactsCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', composePublishReleaseCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', deploymentPublishJobCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
+app.route('/api/projects', buildContextCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', workspaceEvictionCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', workspaceResourceHistoryCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', projectsRoutes);
+app.route('/api/projects/:projectId/ideas', ideaRoutes);
+app.route('/api/projects/:projectId/overview', projectOverviewRoutes);
+app.route('/api/projects/:projectId/insights', projectInsightsRoutes);
+app.route('/api/projects/:projectId/inbox', projectInboxRoutes);
+// Human tasks (inbox slice H1): steps, comments, claim, reassign, done, reopen.
+app.route('/api/projects/:projectId/inbox', projectInboxTaskRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/operation-receipts', cliOperationReceiptRoutes);
 app.route('/api/projects/:projectId/cli', cliProjectMetadataRoutes);
@@ -831,6 +446,7 @@ app.route('/api/projects/:projectId/sessions', chatStartRoutes);
 // Human-owner retained exports are independent of workspace callback JWT routes.
 app.route('/api/projects/:projectId/sessions', ownerSessionSnapshotRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
+app.route('/api/projects/:projectId/ideas', ideaUpdateRoutes);
 app.route('/api/projects/:projectId/comments', projectCommentRoutes);
 app.route('/api/projects/:projectId/event-subscriptions', projectEventSubscriptionRoutes);
 app.route('/api/projects/:projectId/schedules', projectScheduleRoutes);
@@ -839,16 +455,19 @@ app.route('/api/projects/:projectId/event-channels', projectEventChannelRoutes);
 app.route('/api/projects/:projectId/cached-commands', cachedCommandRoutes);
 app.route('/api/projects/:projectId/activity', activityRoutes);
 app.route('/api/projects/:projectId/library', libraryRoutes);
+app.route('/api/projects/:projectId', resourceLinkRoutes);
 app.route('/api/projects/:projectId/library', libraryCommentRoutes);
 app.route('/api/projects/:projectId/agent-profiles/:profileId/runtime', profileRuntimeRoutes);
 app.route('/api/projects/:projectId/agent-profiles', agentProfileRoutes);
 app.route('/api/projects/:projectId/skills/:skillId/runtime', skillRuntimeRoutes);
 app.route('/api/projects/:projectId/skills', skillRoutes);
+app.route('/api/projects/:projectId/agent-models', projectAgentModelRoutes);
 app.route('/api/projects/:projectId/mcp-connections', projectMcpConnectionRoutes);
 app.route('/api/projects/:projectId/triggers', triggersRoutes);
 app.route('/api/projects/:projectId/knowledge', knowledgeRoutes);
 app.route('/api/projects/:projectId/mailbox', mailboxRoutes);
 app.route('/api/projects/:projectId/missions', missionRoutes);
+app.route('/api/projects/:projectId/workflows', workflowRoutes);
 app.route('/api/projects/:projectId/orchestrator', orchestratorRoutes);
 app.route('/api/projects/:projectId/policies', policyRoutes);
 app.route('/api/projects/:projectId/agent', projectAgentRoutes);
@@ -869,24 +488,28 @@ app.route('/api/admin/analytics/ai-usage', adminAiUsageRoutes);
 app.route('/api/admin/platform-config', adminPlatformConfigRoutes);
 app.route('/api/admin/platform-credentials', adminPlatformCredentialRoutes);
 app.route('/api/admin/project-events', adminProjectEventRoutes);
-app.route('/api/admin/trials', adminTrialsRoutes);
 app.route('/api/admin/quotas', adminQuotaRoutes);
+app.route('/api/admin/agent-email', adminAgentEmailRoutes);
 app.route('/api/admin/runtime-controls', adminRuntimeControlRoutes);
+app.route('/api/admin/operations/approvals', adminOperationsApprovalRoutes);
+app.route('/api/admin/settings', adminSettingsRoutes);
 app.route('/api/admin/usage', adminUsageRoutes);
 app.route('/api/admin/costs', adminCostRoutes);
+app.route('/api/admin/health-cost', adminHealthCostRoutes);
 app.route('/api/admin/cc-backfill', adminCcBackfillRoutes);
 app.route('/api/admin/github-repo-id-backfill', adminGithubRepoIdBackfillRoutes);
 app.route('/api/admin/github-installation-leak-sweep', adminGithubInstallationLeakSweepRoutes);
 app.route('/api/admin/sandbox', adminSandboxRoutes);
 app.route('/api/admin/ai-allowance', adminAiAllowanceRoutes);
 app.route('/api/usage', usageRoutes);
+app.route('/api/agent-models', agentModelCatalogRoutes);
 app.route('/api/report-issue', reportIssueRoutes);
 app.route('/api/account-map', accountMapRoutes);
 app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/sam', samRoutes);
 app.route('/api/notifications', notificationRoutes);
+app.route('/api/inbox', inboxRoutes);
 app.route('/api', trialRoutes);
-app.route('/api/trial', trialOnboardingRoutes);
 app.route('/api/gcp', gcpRoutes);
 app.route('/ai/v1', aiProxyRoutes);
 app.route('/ai/anthropic/v1', aiProxyAnthropicRoutes);
@@ -942,4 +565,11 @@ export default {
   fetch: (request: Request, env: Env, ctx: ExecutionContext) =>
     app.fetch(request, withRequestScopedD1Bindings(env), ctx),
   scheduled,
+  // Email Routing deliveries for agent email triggers (preview). Raw bindings, like
+  // `scheduled`: it is not a browser request.
+  email: async (message: ForwardableEmailMessage, env: Env) => {
+    await handleInboundAgentEmail(message, env);
+  },
 };
+
+export { ComposeBuilderContainer } from './durable-objects/compose-builder-container';

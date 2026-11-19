@@ -9,6 +9,7 @@
 
 import type { CreateNotificationRequest, NotificationResponse } from '@simple-agent-manager/shared';
 import {
+  classifyFailure,
   type HumanInputCategory,
   MAX_NOTIFICATION_BODY_LENGTH,
   MAX_NOTIFICATION_TITLE_LENGTH,
@@ -71,7 +72,7 @@ function getStub(env: NotificationEnv, userId: string): DurableObjectStub<Notifi
  * when a sessionId is available.
  *
  * Returns a frontend-relative path consumed exclusively by the React app
- * via `navigate(notification.actionUrl)` in NotificationCenter. MUST NOT
+ * via `navigate(notification.actionUrl)` in the inbox Updates list (`InboxUpdatesList`). MUST NOT
  * be used for server-side redirects, web push click_action, or external
  * integrations — those require absolute `https://app.${BASE_DOMAIN}/...` URLs.
  *
@@ -83,6 +84,14 @@ export function buildActionUrl(projectId: string, sessionId?: string | null): st
     return `/projects/${projectId}/chat/${sessionId}`;
   }
   return `/projects/${projectId}`;
+}
+
+/**
+ * Relative URL of one inbox item (the project inbox page, `?item=<ref>`). Same-origin relative,
+ * like `buildActionUrl`; the ref is URL-encoded.
+ */
+export function buildInboxItemActionUrl(projectId: string, ref: string): string {
+  return `/projects/${projectId}/inbox?item=${encodeURIComponent(ref)}`;
 }
 
 /**
@@ -168,17 +177,23 @@ export async function notifyTaskFailed(
     taskTitle: string;
     errorMessage?: string | null;
     sessionId?: string | null;
+    /** The task's inbox error item, when one was filed: the notification opens it. */
+    inboxRef?: string | null;
   }
 ): Promise<void> {
   await sendNotification(env, userId, {
     type: 'error',
     urgency: NOTIFICATION_TYPE_URGENCY.error ?? 'high',
     title: `Task failed: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH)}`,
-    body: opts.errorMessage ?? 'Task encountered an error',
+    // The classified plain sentence, never the agent's raw error text (it can carry command
+    // fragments, URLs or echoed tokens, and the push body shows on a lock screen).
+    body: classifyFailure(opts.errorMessage).explanation,
     projectId: opts.projectId,
     taskId: opts.taskId,
     sessionId: opts.sessionId,
-    actionUrl: buildActionUrl(opts.projectId, opts.sessionId),
+    actionUrl: opts.inboxRef
+      ? buildInboxItemActionUrl(opts.projectId, opts.inboxRef)
+      : buildActionUrl(opts.projectId, opts.sessionId),
     metadata: {
       projectName: opts.projectName,
     },
@@ -186,33 +201,32 @@ export async function notifyTaskFailed(
 }
 
 /**
- * Emit a "session_ended" notification when an agent finishes a chat turn.
+ * Emit the notification for a newly filed system error inbox item (slice E): `error` for a
+ * failed task, chat wake or answer delivery, `cron_failure` for a failing automation. Title and
+ * body are the item's own sanitized sentences; the link opens the item.
  */
-export async function notifySessionEnded(
+export async function notifySystemError(
   env: NotificationEnv,
   userId: string,
   opts: ProjectNotificationOpts & {
-    sessionId?: string | null;
+    type: 'error' | 'cron_failure';
+    ref: string;
+    title: string;
+    body: string;
     taskId?: string | null;
-    taskTitle?: string | null;
+    sessionId?: string | null;
   }
 ): Promise<void> {
-  const title = opts.taskTitle
-    ? `Agent finished: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH)}`
-    : 'Agent finished — your turn';
-
   await sendNotification(env, userId, {
-    type: 'session_ended',
-    urgency: NOTIFICATION_TYPE_URGENCY.session_ended ?? 'medium',
-    title,
-    body: 'The agent has completed its turn. You can continue the conversation.',
+    type: opts.type,
+    urgency: NOTIFICATION_TYPE_URGENCY[opts.type] ?? 'high',
+    title: truncate(opts.title, MAX_NOTIFICATION_TITLE_LENGTH),
+    body: truncate(opts.body, MAX_NOTIFICATION_BODY_LENGTH),
     projectId: opts.projectId,
-    taskId: opts.taskId,
-    sessionId: opts.sessionId,
-    actionUrl: buildActionUrl(opts.projectId, opts.sessionId),
-    metadata: {
-      projectName: opts.projectName,
-    },
+    taskId: opts.taskId ?? null,
+    sessionId: opts.sessionId ?? null,
+    actionUrl: buildInboxItemActionUrl(opts.projectId, opts.ref),
+    metadata: { projectName: opts.projectName, inboxRef: opts.ref },
   });
 }
 
@@ -261,28 +275,101 @@ export async function notifyNeedsInput(
     options?: string[] | null;
     sessionId?: string | null;
     attentionMarkerId: string;
+    /** The ask's inbox item, when it has one: the notification opens it. */
+    inboxRef?: string | null;
+    /** Overrides the category label ("Review" for an inbox review item). */
+    label?: string;
+    /** Replaces "<label> needed" ("Result ready" for an inbox result item). */
+    heading?: string;
+    /** An inbox item's kind; notifications of different kinds are never merged. */
+    inboxKind?: 'review' | 'result';
   }
 ): Promise<NotificationResponse> {
-  const categoryLabel = opts.category
-    ? opts.category.charAt(0).toUpperCase() + opts.category.slice(1).replaceAll('_', ' ')
-    : 'Input';
+  const categoryLabel =
+    opts.label ??
+    (opts.category
+      ? opts.category.charAt(0).toUpperCase() + opts.category.slice(1).replaceAll('_', ' ')
+      : 'Input');
+  const heading = opts.heading ?? `${categoryLabel} needed`;
 
   return sendNotification(env, userId, {
     type: 'needs_input',
     urgency: NOTIFICATION_TYPE_URGENCY.needs_input ?? 'high',
-    title: `${categoryLabel} needed: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH_NEEDS_INPUT)}`,
+    title: `${heading}: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH_NEEDS_INPUT)}`,
     body: truncate(opts.context, MAX_NOTIFICATION_BODY_LENGTH),
     projectId: opts.projectId,
     taskId: opts.taskId,
     sessionId: opts.sessionId,
-    actionUrl: buildActionUrl(opts.projectId, opts.sessionId),
+    actionUrl: opts.inboxRef
+      ? buildInboxItemActionUrl(opts.projectId, opts.inboxRef)
+      : buildActionUrl(opts.projectId, opts.sessionId),
     metadata: {
       projectName: opts.projectName,
       category: opts.category ?? null,
       options: opts.options ?? null,
       attentionMarkerId: opts.attentionMarkerId,
+      ...(opts.inboxKind ? { inboxKind: opts.inboxKind } : {}),
     },
   });
+}
+
+/** How long the once-per-request claim for an ACP interaction notification is held. */
+const INTERACTION_NOTIFICATION_DEDUP_MS = 7 * 24 * 60 * 60 * 1000;
+
+const INTERACTION_COPY: Record<'permission' | 'form' | 'url', { title: string; body: string }> = {
+  permission: {
+    title: 'Permission needed',
+    body: 'The agent is waiting for you to allow or deny what it wants to do next.',
+  },
+  form: { title: 'Input needed', body: 'The agent is waiting for you to fill in a short form.' },
+  url: { title: 'Link to open', body: 'The agent is waiting for you to open a link.' },
+};
+
+/**
+ * Emit the "needs_input" notification for an ACP permission, form or URL request (inbox slice
+ * E): the same high-urgency notification a question sends, once per request (claimed in the
+ * Notification DO), linking the request's inbox item. The body never carries the tool call or
+ * command the agent asked about.
+ */
+export async function notifyInteractionRequested(
+  env: NotificationEnv,
+  userId: string,
+  opts: ProjectNotificationOpts & {
+    interactionId: string;
+    interactionKind: string;
+    sessionId: string;
+    taskId: string | null;
+    topic: string | null;
+    inboxRef: string;
+  }
+): Promise<boolean> {
+  const kind =
+    opts.interactionKind === 'form' || opts.interactionKind === 'url'
+      ? opts.interactionKind
+      : 'permission';
+  const copy = INTERACTION_COPY[kind];
+  const title = opts.topic ? `${copy.title}: ${opts.topic}` : copy.title;
+  return sendNotificationOnce(
+    env,
+    userId,
+    `acp-interaction:${opts.interactionId}`,
+    Date.now() + INTERACTION_NOTIFICATION_DEDUP_MS,
+    {
+      type: 'needs_input',
+      urgency: NOTIFICATION_TYPE_URGENCY.needs_input ?? 'high',
+      title: truncate(title, MAX_NOTIFICATION_TITLE_LENGTH_NEEDS_INPUT),
+      body: copy.body,
+      projectId: opts.projectId,
+      taskId: opts.taskId,
+      sessionId: opts.sessionId,
+      actionUrl: buildInboxItemActionUrl(opts.projectId, opts.inboxRef),
+      metadata: {
+        projectName: opts.projectName,
+        interactionKind: kind,
+        inboxRef: opts.inboxRef,
+      },
+    }
+  );
 }
 
 /**

@@ -85,7 +85,9 @@ vi.mock('../../src/middleware/auth', () => ({
   requireApproved: () => vi.fn(),
 }));
 
-vi.mock('../../src/middleware/error', () => ({
+// Keep the real AppError: auth's module graph defines RateLimitError from it at load time.
+vi.mock('../../src/middleware/error', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/middleware/error')>()),
   errors: {
     notFound: (msg: string) => {
       const err = new Error(msg) as Error & { statusCode: number; error: string };
@@ -120,6 +122,11 @@ vi.mock('../../src/routes/credentials', () => ({
   getDecryptedCredential: vi.fn().mockResolvedValue(null),
 }));
 
+// Profile pins are covered by tests/integration/profile-account-pins-capability.test.ts.
+vi.mock('../../src/services/composable-credentials/profile-context', () => ({
+  resolveSessionProfileCredentialContext: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock('../../src/schemas', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/schemas')>();
   return {
@@ -145,7 +152,8 @@ vi.mock('../../src/schemas', async (importOriginal) => {
   };
 });
 
-vi.mock('../../src/routes/workspaces/_helpers', () => ({
+vi.mock('../../src/routes/workspaces/_helpers', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/routes/workspaces/_helpers')>()),
   assertWorkspaceAcceptsCallback: vi.fn(async (_env: unknown, workspace: unknown) => workspace),
   assertWorkspaceCallbackResourceById: vi.fn(async () => ({
     workspaceId: 'test-workspace',
@@ -155,6 +163,7 @@ vi.mock('../../src/routes/workspaces/_helpers', () => ({
     status: 'running',
     nodeId: 'node1',
     nodeStatus: 'running',
+    callbackGeneration: null,
     ...(mockDbLimit()[0] ?? {}),
   })),
   assertWorkspaceCallbackIdentityCurrent: vi.fn(async (_env: unknown, workspace: unknown) =>
@@ -204,10 +213,6 @@ vi.mock('../../src/services/provider-credentials', () => ({
   extractScalewaySecretKey: vi.fn(),
 }));
 
-vi.mock('../../src/services/trial/bridge', () => ({
-  bridgeAgentActivity: vi.fn(),
-}));
-
 vi.mock('../../src/lib/route-helpers', () => ({
   parsePositiveInt: (val: string | undefined, def: number) => {
     if (!val) return def;
@@ -236,6 +241,8 @@ const mockEnv = {
   DATABASE: {} as D1Database,
   KV: { get: (...args: unknown[]) => mockKvGet(...args), put: vi.fn() },
   AI_PROXY_ENABLED: 'true',
+  AI_GATEWAY_ID: 'gateway',
+  CF_ACCOUNT_ID: 'account',
   BASE_DOMAIN: 'example.com',
   JWT_PUBLIC_KEY: 'key',
   ENCRYPTION_KEY: 'test-key',
@@ -307,7 +314,11 @@ beforeEach(async () => {
   mockKvGet.mockReset();
   queryCount = 0;
   mockKvGet.mockResolvedValue(null);
-  const attribution = await createAgentCredentialAttributionFixture('test-workspace', 'user1');
+  const attribution = await createAgentCredentialAttributionFixture('test-workspace', 'user1', {
+    nodeId: 'node1',
+    projectId: 'proj1',
+    chatSessionId: 'session1',
+  });
   attributionSqlite = attribution.sqlite;
   mockEnv.DATABASE = attribution.database;
 });
@@ -315,6 +326,23 @@ beforeEach(async () => {
 afterEach(() => attributionSqlite?.close());
 
 describe('runtime.ts always-proxy', () => {
+  it.each(['claude-code', 'openai-codex', 'opencode'])(
+    'returns 404 for unproxied custom-baseURL %s credential, never the key',
+    async (agentType) => {
+      mockWorkspaceOnly();
+      mockGetDecryptedAgentKey.mockResolvedValueOnce({
+        credential: 'custom-private-key',
+        credentialKind: 'api-key',
+        credentialSource: 'user',
+        baseUrl: 'https://custom.example.com/v1',
+        providerDialect: agentType === 'claude-code' ? 'anthropic' : 'openai-compatible',
+      });
+      const response = await postAgentKey(agentType, { AI_PROXY_ENABLED: 'false' });
+      expect(response.status).toBe(404);
+      expect(await response.text()).not.toContain('custom-private-key');
+    }
+  );
+
   it('authenticates message persistence before reading or validating the JSON body', async () => {
     const authError = Object.assign(new Error('Unauthorized'), {
       statusCode: 401,

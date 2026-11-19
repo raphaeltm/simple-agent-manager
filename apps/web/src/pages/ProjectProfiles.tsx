@@ -6,14 +6,8 @@ import { useProjectContext } from './ProjectContext';
 export function ProjectProfiles() {
   const { projectId } = useProjectContext();
   const queryScope = useQueryScope();
-  const {
-    profiles,
-    loading,
-    error,
-    createProfile,
-    updateProfile,
-    deleteProfile,
-  } = useAgentProfiles(projectId, queryScope);
+  const { profiles, loading, error, createProfile, updateProfile, deleteProfile } =
+    useAgentProfiles(projectId, queryScope);
 
   return (
     <div className="w-full min-w-0 max-w-3xl mx-auto px-4 py-6">

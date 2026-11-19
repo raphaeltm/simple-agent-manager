@@ -1,5 +1,16 @@
 # Staging session-task reconciliation repair failures
 
+> **Reconciliation 2026-10-12:** The insert failure is fixed, but staging has not converged. #2279
+> (`78bb75e0a`) resolves the workspace inside the repair INSERT, so a deleted workspace becomes
+> NULL instead of a foreign-key failure (`apps/api/src/services/session-task-repair.ts:121-124`;
+> Workers test `apps/api/tests/workers/session-task-repair-reconciliation.test.ts:23`), and
+> production went from 23 taskless summaries to 0
+> (`tasks/archive/2026-10-08-production-error-noise.md:53`).
+> Read-only staging D1 on 2026-10-12 still has 139 summaries with `task_id IS NULL`. All 25 in the
+> sweep's batch (newest first) already have a `legacy-session-repair` task whose summary was never
+> linked to it, so every run gets the same 25. Still open: find which step after the task insert
+> fails on staging, then prove a second sweep converges and the residual falls.
+
 ## Problem
 
 The staging `*/5` scheduled sweep completes successfully, but its legacy taskless

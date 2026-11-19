@@ -15,18 +15,23 @@ import { eq } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { preservedVmRetirementActivitySql } from '../../services/preserved-vm-retirement';
 import { prepareAbsoluteLifetimeRelease } from './absolute-lifetime-preservation';
+import { selectMaxLifetimeCandidates } from './max-lifetime-candidates';
+export {
+  sweepDestroyingHandoffNodes,
+  sweepProviderDeletionConfirmations,
+  sweepStoppedHandoffNodes,
+} from './handoff-phases';
 import {
   boundedWarmPlacementClaimGuardSql,
   type CleanupConfig,
   type CleanupDb,
-  cleanupNodeProvenanceSql,
   destroyNodeForCleanup,
   getNodeWorkspaceIdleThresholdIso,
   LAST_WORKSPACE_ACTIVITY_SQL,
   markNodeCleanupBackoff,
   type NodeCleanupResult,
-  sleepingContainerRetentionGuardSql,
 } from './shared';
 
 /**
@@ -144,43 +149,21 @@ export async function sweepMaxLifetimeNodes(
   const absoluteThreshold = new Date(now.getTime() - config.absoluteMaxLifetimeMs).toISOString();
   const idleThreshold = getNodeWorkspaceIdleThresholdIso(now, config);
 
-  const candidates = await env.DATABASE.prepare(
-    `SELECT n.id, n.user_id, n.status, n.created_at, n.runtime_incarnation_id,
-            COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
-            ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
-     FROM nodes n
-     LEFT JOIN workspaces w ON w.node_id = n.id
-     WHERE n.status NOT IN ('stopped', 'destroying', 'deleted')
-       AND n.node_role = 'workspace'
-       AND n.node_class != 'user-owned'
-       AND EXISTS (
-         SELECT 1 FROM tasks t
-         WHERE t.auto_provisioned_node_id = n.id
-       )
-       AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
-       ${boundedWarmPlacementClaimGuardSql('n.id')}
-       ${sleepingContainerRetentionGuardSql('n')}
-       AND n.created_at < ?
-     GROUP BY n.id, n.user_id, n.status, n.created_at
-     ORDER BY active_ws_count ASC, n.created_at ASC
-     LIMIT ?`
-  )
-    .bind(now.toISOString(), idleThreshold, lifetimeThreshold, config.nodeSweepLimit)
-    .all<{
-      id: string;
-      user_id: string;
-      status: string;
-      created_at: string;
-      runtime_incarnation_id: string | null;
-      active_ws_count: number;
-      last_activity: string;
-    }>();
+  const candidates = await selectMaxLifetimeCandidates(env, now, config, {
+    lifetimeThreshold,
+    absoluteThreshold,
+    idleThreshold,
+  });
 
-  for (const node of candidates.results) {
+  for (const node of candidates) {
     const pastAbsoluteCeiling = node.created_at < absoluteThreshold;
     const workspacesIdle = node.last_activity < idleThreshold;
 
-    if (node.active_ws_count > 0 && !workspacesIdle) {
+    // Past the absolute ceiling, recent activity no longer exempts the node: every session on it
+    // must sleep, busy or not (policy a3780107, option (a)). `prepareAbsoluteLifetimeRelease`
+    // queues the sleeps; the sweep sleeps each as soon as its turn ends and force-stops any turn
+    // still running after `operations.nodeLifetimeForceSleepAfterMs`.
+    if (node.active_ws_count > 0 && !workspacesIdle && !pastAbsoluteCeiling) {
       // Recent workspace activity means the hardware is still within the bounded
       // reuse/placement window even if the task has already aged past max lifetime.
       log.info('node_cleanup.max_lifetime_skipped_recent_workspace_activity', {
@@ -271,162 +254,6 @@ export async function sweepMaxLifetimeNodes(
   }
 }
 
-type HandoffCleanupStatus = 'stopped' | 'destroying';
-
-interface HandoffCleanupOptions {
-  status: HandoffCleanupStatus;
-  skippedActiveLogEvent: string;
-  logEvent: string;
-  failureLogEvent: string;
-  successMessage: string;
-  failureMessagePrefix: string;
-  recoveryType: string;
-  failureRecoveryType: string;
-}
-
-async function sweepManagedHandoffNodes(
-  db: CleanupDb,
-  env: Env,
-  now: Date,
-  config: CleanupConfig,
-  result: NodeCleanupResult,
-  options: HandoffCleanupOptions
-): Promise<void> {
-  const sweepDeadlineMs = Date.now() + config.stoppedHandoffSweepBudgetMs;
-  const workspaceIdleThreshold = getNodeWorkspaceIdleThresholdIso(now, config);
-  const candidates = await env.DATABASE.prepare(
-    `SELECT n.id, n.user_id, n.status, n.created_at,
-            COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
-            ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
-     FROM nodes n
-     LEFT JOIN workspaces w ON w.node_id = n.id
-     WHERE n.status = ?
-       AND n.node_role = 'workspace'
-       AND n.node_class != 'user-owned'
-       AND ${cleanupNodeProvenanceSql('n')}
-       AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
-       AND NOT EXISTS (
-         SELECT 1 FROM workspaces active_workspace
-         WHERE active_workspace.node_id = n.id
-           AND active_workspace.status IN ('running', 'creating', 'recovery')
-       )
-       ${boundedWarmPlacementClaimGuardSql('n.id')}
-     GROUP BY n.id, n.user_id, n.status, n.created_at
-     HAVING ${LAST_WORKSPACE_ACTIVITY_SQL} < ?
-     ORDER BY last_activity ASC
-     LIMIT ?`
-  )
-    .bind(
-      options.status,
-      now.toISOString(),
-      workspaceIdleThreshold,
-      workspaceIdleThreshold,
-      config.nodeSweepLimit
-    )
-    .all<{
-      id: string;
-      user_id: string;
-      status: string;
-      created_at: string;
-      active_ws_count: number;
-      last_activity: string;
-    }>();
-
-  for (const node of candidates.results) {
-    if (Date.now() >= sweepDeadlineMs) break;
-    if (node.active_ws_count > 0) {
-      log.warn(options.skippedActiveLogEvent, {
-        nodeId: node.id,
-        userId: node.user_id,
-        activeWorkspaces: node.active_ws_count,
-        lastWorkspaceActivity: node.last_activity,
-      });
-      result.lifetimeSkipped++;
-      continue;
-    }
-
-    const destroyed = await destroyNodeForCleanup(db, env, now.toISOString(), node, {
-      logEvent: options.logEvent,
-      requestDeadlineMs: Math.min(
-        sweepDeadlineMs,
-        Date.now() + config.stoppedHandoffRequestTimeoutMs
-      ),
-      failureLogEvent: options.failureLogEvent,
-      successMessage: options.successMessage,
-      failureMessagePrefix: options.failureMessagePrefix,
-      recoveryType: options.recoveryType,
-      failureRecoveryType: options.failureRecoveryType,
-      failureBackoffMs: config.failureBackoffMs,
-      workspaceIdleThresholdIso: workspaceIdleThreshold,
-      context: {
-        createdAt: node.created_at,
-        lastWorkspaceActivity: node.last_activity,
-        workspaceIdleTimeoutMs: config.workspaceIdleTimeoutMs,
-      },
-    });
-
-    if (destroyed === 'destroyed') {
-      result.lifetimeDestroyed++;
-    } else if (destroyed === 'skipped') {
-      result.lifetimeSkipped++;
-    } else {
-      result.errors++;
-    }
-  }
-}
-
-/**
- * Phase 3 — nodes the NodeLifecycle DO alarm stopped but never destroyed.
- *
- * The DO cannot destroy cloud infrastructure (credentials are encrypted in D1 and
- * need worker context), so it hands off by writing `status='stopped'`.
- */
-export async function sweepStoppedHandoffNodes(
-  db: CleanupDb,
-  env: Env,
-  now: Date,
-  config: CleanupConfig,
-  result: NodeCleanupResult
-): Promise<void> {
-  await sweepManagedHandoffNodes(db, env, now, config, result, {
-    status: 'stopped',
-    skippedActiveLogEvent: 'node_cleanup.stopped_handoff_skipped_active_workspaces',
-    logEvent: 'node_cleanup.destroying_stopped_handoff',
-    failureLogEvent: 'node_cleanup.stopped_handoff_destroy_failed',
-    successMessage: 'Destroyed stopped managed node left by NodeLifecycle alarm',
-    failureMessagePrefix: 'Failed to destroy stopped handoff node',
-    recoveryType: 'stopped_node_handoff_cleanup',
-    failureRecoveryType: 'stopped_node_handoff_cleanup_failure',
-  });
-}
-
-/**
- * Phase 3b — stale nodes already claimed for destruction.
- *
- * A provider allocation can fail after SAM has claimed the node as `destroying`
- * but before any provider instance ID is written. In that state there is no
- * provider-side VM to delete, and the hourly sweep must be able to write the
- * same terminal runtime proof the rest of cleanup requires.
- */
-export async function sweepDestroyingHandoffNodes(
-  db: CleanupDb,
-  env: Env,
-  now: Date,
-  config: CleanupConfig,
-  result: NodeCleanupResult
-): Promise<void> {
-  await sweepManagedHandoffNodes(db, env, now, config, result, {
-    status: 'destroying',
-    skippedActiveLogEvent: 'node_cleanup.destroying_handoff_skipped_active_workspaces',
-    logEvent: 'node_cleanup.destroying_stale_handoff',
-    failureLogEvent: 'node_cleanup.destroying_handoff_destroy_failed',
-    successMessage: 'Destroyed managed node left in destroying handoff',
-    failureMessagePrefix: 'Failed to destroy stale destroying handoff node',
-    recoveryType: 'destroying_node_handoff_cleanup',
-    failureRecoveryType: 'destroying_node_handoff_cleanup_failure',
-  });
-}
-
 /**
  * Phase 4 — incompatible managed VM nodes after a vm-agent rollout.
  *
@@ -452,7 +279,7 @@ export async function sweepIncompatibleVmAgentNodes(
   const candidates = await env.DATABASE.prepare(
     `SELECT n.id, n.user_id, n.status, n.created_at, n.agent_version,
             COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
-            ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
+            COALESCE(MAX(${preservedVmRetirementActivitySql('w')}), n.created_at) as last_activity
      FROM nodes n
      LEFT JOIN workspaces w ON w.node_id = n.id
      WHERE n.status = 'running'
@@ -472,8 +299,8 @@ export async function sweepIncompatibleVmAgentNodes(
            AND aw.status IN ('running', 'creating', 'recovery')
        )
      GROUP BY n.id, n.user_id, n.status, n.created_at, n.agent_version
-     HAVING ${LAST_WORKSPACE_ACTIVITY_SQL} < ?
-     ORDER BY last_activity ASC
+     HAVING COALESCE(MAX(${preservedVmRetirementActivitySql('w')}), n.created_at) < ?
+     ORDER BY n.cleanup_blocked_since IS NULL, n.cleanup_blocked_since ASC, last_activity ASC
      LIMIT ?`
   )
     .bind(
@@ -493,7 +320,9 @@ export async function sweepIncompatibleVmAgentNodes(
       last_activity: string;
     }>();
 
+  const preservedVmBudget = { remainingSources: config.workspaceSweepLimit };
   for (const node of candidates.results) {
+    if (preservedVmBudget.remainingSources <= 0) break;
     if (node.active_ws_count > 0) {
       log.info('node_cleanup.incompatible_vm_agent_skipped_active_workspaces', {
         nodeId: node.id,
@@ -507,6 +336,9 @@ export async function sweepIncompatibleVmAgentNodes(
     }
 
     const destroyed = await destroyNodeForCleanup(db, env, now.toISOString(), node, {
+      preservedVmBudget,
+      blockedRetirementMs: config.blockedRetirementMs,
+      refusalWarnAfterMs: config.refusalWarnAfterMs,
       logEvent: 'node_cleanup.destroying_incompatible_vm_agent',
       failureLogEvent: 'node_cleanup.incompatible_vm_agent_destroy_failed',
       successMessage: 'Destroyed idle node running incompatible VM agent build',
@@ -580,7 +412,7 @@ export async function sweepIdleOrphanNodes(
        )
      GROUP BY n.id, n.user_id, n.status, n.created_at, n.warm_since
      HAVING ${LAST_WORKSPACE_ACTIVITY_SQL} < ?
-     ORDER BY last_activity ASC
+     ORDER BY n.cleanup_blocked_since IS NULL, n.cleanup_blocked_since ASC, last_activity ASC
      LIMIT ?`
   )
     .bind(now.toISOString(), idleThreshold, idleThreshold, idleThreshold, config.nodeSweepLimit)

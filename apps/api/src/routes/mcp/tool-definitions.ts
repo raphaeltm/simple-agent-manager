@@ -1,4 +1,7 @@
+import { AGENT_EMAIL_TOOLS } from './tool-definitions-agent-email-tools';
 import { PROJECT_SCHEDULE_TOOLS } from './tool-definitions-project-schedule-tools';
+import { SECRET_EXEC_TOOLS, SECRET_REQUEST_TOOLS } from './tool-definitions-secret-exec';
+import { WORKFLOW_TOOLS } from './tool-definitions-workflow-tools';
 /**
  * MCP tool definitions — the schema for all tools exposed via the MCP server.
  *
@@ -6,13 +9,15 @@ import { PROJECT_SCHEDULE_TOOLS } from './tool-definitions-project-schedule-tool
  * See the individual files for the full schema of each group:
  *   - tool-definitions-task-tools.ts          (task lifecycle, dispatch, notifications)
  *   - tool-definitions-project-awareness.ts   (list/get/search tasks, sessions, messages)
+ *   - tool-definitions-insights-tools.ts      (project_insights: Insights numbers for agents)
  *   - tool-definitions-session-idea-tools.ts  (session management, idea CRUD, linking)
  *   - tool-definitions-workspace-tools.ts     (workspace info, env, CI, cost, onboarding)
  *   - tool-definitions-library-tools.ts       (project file library)
  *   - tool-definitions-orchestration-tools.ts (agent-to-agent communication & control)
  *   - tool-definitions-comment-tools.ts       (message comment threads)
  *   - tool-definitions-trigger-tools.ts       (trigger management — cron automation)
- *   - tool-definitions-incident-tools.ts      (private feedback incident backlog)
+ *   - tool-definitions-incident-tools.ts      (private Operations-project incident backlog)
+ *   - tool-definitions-operations-tools.ts    (Operations-project debugger tools)
  *   - tool-definitions-event-subscription-tools.ts (ProjectData event subscriptions)
  *   - tool-definitions-project-event-tools.ts (ProjectData event retrieval + ack)
  */
@@ -20,11 +25,13 @@ import { PROJECT_SCHEDULE_TOOLS } from './tool-definitions-project-schedule-tool
 export { COMMENT_TOOLS } from './tool-definitions-comment-tools';
 export { DEPLOYMENT_TOOLS } from './tool-definitions-deployment-tools';
 export { PROJECT_EVENT_SUBSCRIPTION_TOOLS } from './tool-definitions-event-subscription-tools';
+export { INBOX_TOOLS } from './tool-definitions-inbox-tools';
 export { INCIDENT_TOOLS } from './tool-definitions-incident-tools';
 export { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
 export { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
 export { LIBRARY_TOOLS } from './tool-definitions-library-tools';
 export { MISSION_TOOLS } from './tool-definitions-mission-tools';
+export { OPERATIONS_TOOLS } from './tool-definitions-operations-tools';
 export { ORCHESTRATION_TOOLS } from './tool-definitions-orchestration-tools';
 export { ORCHESTRATOR_LIFECYCLE_TOOLS } from './tool-definitions-orchestrator-tools';
 export { POLICY_TOOLS } from './tool-definitions-policy-tools';
@@ -37,14 +44,18 @@ export { TASK_LIFECYCLE_TOOLS } from './tool-definitions-task-tools';
 export { TRIGGER_TOOLS } from './tool-definitions-trigger-tools';
 export { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';
 
+import { AGENT_MODEL_TOOLS } from './tool-definitions-agent-model-tools';
 import { COMMENT_TOOLS } from './tool-definitions-comment-tools';
 import { DEPLOYMENT_TOOLS } from './tool-definitions-deployment-tools';
 import { PROJECT_EVENT_SUBSCRIPTION_TOOLS } from './tool-definitions-event-subscription-tools';
+import { INBOX_TOOLS } from './tool-definitions-inbox-tools';
 import { INCIDENT_TOOLS } from './tool-definitions-incident-tools';
+import { INSIGHTS_TOOLS } from './tool-definitions-insights-tools';
 import { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
 import { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
 import { LIBRARY_TOOLS } from './tool-definitions-library-tools';
 import { MISSION_TOOLS } from './tool-definitions-mission-tools';
+import { OPERATIONS_TOOLS } from './tool-definitions-operations-tools';
 import { ORCHESTRATION_TOOLS } from './tool-definitions-orchestration-tools';
 import { ORCHESTRATOR_LIFECYCLE_TOOLS } from './tool-definitions-orchestrator-tools';
 import { POLICY_TOOLS } from './tool-definitions-policy-tools';
@@ -59,10 +70,16 @@ import { TRIGGER_TOOLS } from './tool-definitions-trigger-tools';
 import { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';
 
 export const MCP_TOOLS = [
+  ...WORKFLOW_TOOLS,
+  ...SECRET_EXEC_TOOLS,
+  ...SECRET_REQUEST_TOOLS,
   ...TASK_LIFECYCLE_TOOLS,
+  ...INBOX_TOOLS,
   ...PROJECT_AWARENESS_TOOLS,
+  ...INSIGHTS_TOOLS,
   ...SESSION_IDEA_TOOLS,
   ...WORKSPACE_TOOLS,
+  ...AGENT_MODEL_TOOLS,
   ...DEPLOYMENT_TOOLS,
   ...LIBRARY_TOOLS,
   ...ORCHESTRATION_TOOLS,
@@ -73,7 +90,9 @@ export const MCP_TOOLS = [
   ...PROJECT_SCHEDULE_TOOLS,
   ...PROJECT_EVENT_TOOLS,
   ...TRIGGER_TOOLS,
+  ...AGENT_EMAIL_TOOLS,
   ...INCIDENT_TOOLS,
+  ...OPERATIONS_TOOLS,
   ...PROFILE_TOOLS,
   ...SKILL_TOOLS,
   ...KNOWLEDGE_TOOLS,

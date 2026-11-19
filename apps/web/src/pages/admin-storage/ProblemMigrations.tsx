@@ -62,9 +62,7 @@ function MigrationCard({
             {migration.migrationId}
           </dd>
           <dt className="text-fg-muted">Session</dt>
-          <dd className="m-0 break-all font-mono text-xs text-fg-primary">
-            {migration.sessionId}
-          </dd>
+          <dd className="m-0 break-all font-mono text-xs text-fg-primary">{migration.sessionId}</dd>
           {migration.errorCode && (
             <>
               <dt className="text-fg-muted">Error code</dt>
@@ -124,9 +122,7 @@ export function ProblemMigrations() {
     mutationFn: (input: { projectId: string; migrationId: string; reason: string }) =>
       abandonAdminProjectDataArchiveMigration(input.projectId, input.migrationId, input.reason),
     onSuccess: async () => {
-      toast.success(
-        `Migration ${target?.migrationId} abandoned for ${target?.projectId}`
-      );
+      toast.success(`Migration ${target?.migrationId} abandoned for ${target?.projectId}`);
       setTarget(null);
       setReason('');
       await queryClient.invalidateQueries({
@@ -173,11 +169,7 @@ export function ProblemMigrations() {
           <p className="m-0 text-sm text-fg-muted">No problem migrations.</p>
         )}
         {migrations.map((migration) => (
-          <MigrationCard
-            key={migration.migrationId}
-            migration={migration}
-            onAbandon={openDialog}
-          />
+          <MigrationCard key={migration.migrationId} migration={migration} onAbandon={openDialog} />
         ))}
         {migrationsQuery.data && migrations.length >= migrationsQuery.data.limit && (
           <p className="m-0 text-xs text-fg-muted">
@@ -217,15 +209,13 @@ export function ProblemMigrations() {
               Abandon migration
             </h2>
             <p className="m-0 break-words text-sm text-fg-muted">
-              This drops the partial shard copy, returns the session to root, and freezes the journal
-              as <span className="font-semibold text-fg-primary">operator_abandoned</span>. The
-              session will be eligible for the sweep again.
+              This drops the partial shard copy, returns the session to root, and freezes the
+              journal as <span className="font-semibold text-fg-primary">operator_abandoned</span>.
+              The session will be eligible for the sweep again.
             </p>
             <dl className="m-0 grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
               <dt className="text-fg-muted">Project</dt>
-              <dd className="m-0 break-words font-semibold text-fg-primary">
-                {target.projectId}
-              </dd>
+              <dd className="m-0 break-words font-semibold text-fg-primary">{target.projectId}</dd>
               <dt className="text-fg-muted">Migration</dt>
               <dd className="m-0 break-all font-mono text-xs text-fg-primary">
                 {target.migrationId}

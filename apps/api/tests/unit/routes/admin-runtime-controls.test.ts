@@ -1,12 +1,24 @@
+import type Database from 'better-sqlite3';
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
+import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
 import { createMemoryKv } from '../../helpers/sqlite-d1';
 
 vi.mock('../../../src/middleware/auth', () => ({
-  requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
+  requireAuth: () =>
+    vi.fn((c: any, next: () => Promise<void>) => {
+      c.set('auth', {
+        user: {
+          id: 'admin',
+          role: c.req.header('x-test-role') ?? 'superadmin',
+          status: c.req.header('x-test-status') ?? 'active',
+        },
+      });
+      return next();
+    }),
   requireApproved: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
   requireSuperadmin: () =>
     vi.fn(
@@ -27,8 +39,21 @@ const { adminRuntimeControlRoutes } = await import('../../../src/routes/admin-ru
 const { __resetOperationalKillSwitchCacheForTest } =
   await import('../../../src/services/operational-kill-switch');
 
+const databases: Database.Database[] = [];
+afterEach(() => {
+  databases.splice(0).forEach((db) => db.close());
+});
+
 function createApp() {
   const app = new Hono<{ Bindings: Env }>();
+  app.use('*', async (c, next) => {
+    if (!c.env.DATABASE) {
+      const instance = createAdminSettingsEnv(c.env);
+      databases.push(instance.sqlite);
+      Object.assign(c.env, instance.env);
+    }
+    await next();
+  });
   // Pre-existing tests never exercised a thrown AppError path (only the
   // hand-rolled 403 response and, later, jsonValidator's own direct 400
   // response), so this app had no onError — thrown errors.badRequest(...)
@@ -87,12 +112,10 @@ describe('admin runtime controls', () => {
       cronSweepsEnabled: false,
       doAlarmsEnabled: false,
     });
-    expect(values).toEqual(
-      new Map([
-        ['control-loops:cron-enabled', 'false'],
-        ['control-loops:alarms-enabled', 'false'],
-      ])
-    );
+    expect(values.size).toBe(0);
+    expect(
+      await env.DATABASE.prepare('SELECT revision FROM admin_settings_revision').first()
+    ).toMatchObject({ revision: 1 });
   });
 
   it('rejects a non-superadmin before reading either switch', async () => {
@@ -176,3 +199,26 @@ describe('admin runtime controls', () => {
     expect(putSpy).not.toHaveBeenCalled();
   });
 });
+
+for (const status of ['pending', 'suspended']) {
+  it(`blocks ${status} superadmins before settings mutation`, async () => {
+    const env = {} as Env;
+    const response = await createApp().request(
+      '/api/admin/runtime-controls',
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-test-role': 'superadmin',
+          'x-test-status': status,
+        },
+        body: JSON.stringify({ cronSweepsEnabled: false }),
+      },
+      env
+    );
+    expect(response.status).toBe(403);
+    expect(
+      await env.DATABASE.prepare('SELECT revision FROM admin_settings_revision').first()
+    ).toMatchObject({ revision: 0 });
+  });
+}

@@ -1,4 +1,4 @@
-import { Spinner } from '@simple-agent-manager/ui';
+import { LoadingPane } from './LoadingPane';
 
 const DEFAULT_ROUTE_FALLBACK_REVEAL_DELAY_MS = 180;
 
@@ -34,17 +34,16 @@ const REVEAL_DELAY_MS =
  *
  * Per `.claude/rules/48-stale-while-revalidate-ui.md` this is scoped per route, so it
  * replaces only the route slot — the AppShell chrome and any parent layout stay mounted.
+ * It is a {@link LoadingPane}, centred in that slot like every other page loading state.
  */
 export function RouteFallback() {
   return (
-    <div
-      className="sam-route-fallback flex items-center justify-center w-full min-w-0 py-16"
-      data-testid="route-fallback"
+    <LoadingPane
+      className="sam-route-fallback"
+      testId="route-fallback"
       style={{
         animation: `sam-char-fade-in 200ms ease-out ${REVEAL_DELAY_MS}ms both`,
       }}
-    >
-      <Spinner size="lg" />
-    </div>
+    />
   );
 }

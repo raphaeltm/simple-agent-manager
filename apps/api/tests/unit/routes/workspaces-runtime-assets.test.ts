@@ -21,6 +21,7 @@ vi.mock('../../../src/middleware/auth', () => ({
 vi.mock('../../../src/services/jwt', () => ({
   verifyCallbackToken: mocks.verifyCallbackToken,
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
 }));
 vi.mock('../../../src/services/workspace-runtime-assets', () => ({
   getWorkspaceRuntimeAssets: mocks.getWorkspaceRuntimeAssets,

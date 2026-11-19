@@ -38,13 +38,6 @@ interface DeploymentProvisioningAuthorityInput {
   releaseId?: string;
 }
 
-interface TrialProvisioningAuthorityInput {
-  trialId: string;
-  projectId: string;
-  userId: string;
-  nowMs?: number;
-}
-
 interface RelayProvisioningAuthorityInput {
   userId: string;
   projectId: string | null;
@@ -141,6 +134,23 @@ export async function assertDirectWorkspaceProvisioningAuthority(
   );
 }
 
+/**
+ * Paid-boundary check for a fresh deployment node. `provisionNode` runs it
+ * before and after `createVM`, and `provisionDeploymentNode` runs it again once
+ * provisioning returns.
+ *
+ * Environment status must be one that wants a node:
+ * - `active`: a release placement, including one that recovers an `error`
+ *   environment (`linkEnvironmentToNode` moves `error` to `active` in the
+ *   write that links this node; see deployment-environment-state.ts).
+ * - `starting`: Start, which sets it before calling `provisionDeploymentNode`.
+ * `error` is refused: admission has already moved a recovering environment
+ * out of it, so `error` here means a failure was recorded after the link.
+ * `stopping`, `stopped` and `deleting` belong to the Stop and Delete paths and
+ * must never buy a server. The admitted set is deliberately the set the node
+ * heartbeat advertises (`routes/node-lifecycle.ts`) and `environmentCanServeRoutes`
+ * serves: a node bought for any other status would never receive a release.
+ */
 export async function assertDeploymentProvisioningAuthority(
   env: Env,
   input: DeploymentProvisioningAuthorityInput
@@ -170,7 +180,7 @@ export async function assertDeploymentProvisioningAuthority(
             : ''
         }
         AND de.project_id = ?
-        AND de.status = 'active'
+        AND de.status IN ('active', 'starting')
         AND de.node_id = ?
         AND de.provider IS ?
         AND de.location IS ?
@@ -206,34 +216,6 @@ export async function assertDeploymentProvisioningAuthority(
       input.providerInstanceArchitecture,
     ],
     'Deployment provisioning authority is no longer current'
-  );
-}
-
-export async function assertTrialProvisioningAuthority(
-  env: Env,
-  input: TrialProvisioningAuthorityInput
-): Promise<void> {
-  await requireAuthority(
-    env,
-    `SELECT 1 AS ok
-       FROM trials t
-       JOIN projects p
-         ON p.id = t.project_id
-        AND p.user_id = ?
-       JOIN project_members pm
-         ON pm.project_id = p.id
-         AND pm.user_id = ?
-         AND pm.status = 'active'
-         AND pm.removed_at IS NULL
-         AND ${projectMemberCapabilitySql('workspace:write')}
-      WHERE t.id = ?
-        AND t.project_id = ?
-        AND t.status = 'pending'
-        AND t.claimed_by_user_id IS NULL
-        AND t.expires_at > ?
-      LIMIT 1`,
-    [input.userId, input.userId, input.trialId, input.projectId, input.nowMs ?? Date.now()],
-    'Trial provisioning authority is no longer current'
   );
 }
 

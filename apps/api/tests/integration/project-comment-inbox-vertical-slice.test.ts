@@ -6,6 +6,7 @@
  * The only stubs are the genuine system boundaries:
  *   - D1 `project_files`, seeded for two projects so the filename lookup's
  *     `project_id` predicate is actually exercised;
+ *   - D1 task visibility, empty in these non-task scenarios;
  *   - the ProjectData RPC hop, which delegates straight into the real
  *     project-comment-inbox module against that project's own SQLite.
  *
@@ -56,11 +57,11 @@ vi.mock('../../src/middleware/project-auth', () => ({
 
 vi.mock('../../src/services/project-data', async () => {
   const contracts = await vi.importActual<
-    typeof import('../../src/durable-objects/project-data/comment-contracts')
-  >('../../src/durable-objects/project-data/comment-contracts');
+    typeof import('@simple-agent-manager/project-data/internal/do/comment-contracts')
+  >('@simple-agent-manager/project-data/internal/do/comment-contracts');
   const inbox = await vi.importActual<
-    typeof import('../../src/durable-objects/project-data/project-comment-inbox')
-  >('../../src/durable-objects/project-data/project-comment-inbox');
+    typeof import('@simple-agent-manager/project-data/internal/do/project-comment-inbox')
+  >('@simple-agent-manager/project-data/internal/do/project-comment-inbox');
 
   const sqlFor = (projectId: string): SqlStorage => {
     const storage = harness.storages.get(projectId);
@@ -75,9 +76,10 @@ vi.mock('../../src/services/project-data', async () => {
   };
 });
 
-import { runMigrations } from '../../src/durable-objects/migrations';
-import * as comments from '../../src/durable-objects/project-data/comments';
-import * as fileComments from '../../src/durable-objects/project-data/library-file-comments';
+import * as comments from '@simple-agent-manager/project-data/internal/do/comments';
+import * as fileComments from '@simple-agent-manager/project-data/internal/do/library-file-comments';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+
 import { projectCommentRoutes } from '../../src/routes/project-comments';
 
 const HUMAN = { kind: 'human' as const, id: 'user-1', name: 'Ada' };
@@ -95,10 +97,15 @@ function createApp() {
 }
 
 function get(projectId: string, query = '') {
+  const database = {
+    prepare: () => ({
+      bind: () => ({ all: async () => ({ results: [] }) }),
+    }),
+  };
   return createApp().request(
     `https://api.test/api/projects/${projectId}/comments${query}`,
     { method: 'GET' },
-    { DATABASE: {} } as Env
+    { DATABASE: database } as unknown as Env
   );
 }
 

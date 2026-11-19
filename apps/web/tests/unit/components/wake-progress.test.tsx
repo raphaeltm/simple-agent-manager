@@ -13,7 +13,10 @@ import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { useWakeProgress } from '../../../src/components/project-message-view/useWakeProgress';
-import { WakeProgressBanner } from '../../../src/components/project-message-view/WakeProgressBanner';
+import {
+  WakeProgressBanner,
+  wakeProgressLabel,
+} from '../../../src/components/project-message-view/WakeProgressBanner';
 import type { SessionStateSnapshot } from '../../../src/lib/api';
 
 function snapshot(overrides: Partial<SessionStateSnapshot>): SessionStateSnapshot {
@@ -165,6 +168,185 @@ describe('useWakeProgress', () => {
     expect(result.current.isWaking).toBe(true);
   });
 
+  // The same chat can wake, go back to sleep and wake again while the tab stays open.
+  // The settled latch used to clear only on a session switch, so every update of the
+  // second wake was dropped (state-machine audit D8). It is now per wake attempt.
+  it('shows a second wake of the same chat (a new wake attempt)', () => {
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'agent_session', wakeAttemptId: 'A' })
+      );
+    });
+    act(() => {
+      result.current.applyWakeProgress({ recoveryStatus: 'restored', wakePhase: null });
+    });
+    expect(result.current.isWaking).toBe(false);
+
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'node_selection', wakeAttemptId: 'B' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(true);
+    // The new wake starts its own phase sequence; the old wake's later phase does not
+    // hold it back.
+    expect(result.current.wakePhase).toBe('node_selection');
+  });
+
+  it('keeps the latch for a stale snapshot of the wake that already settled', () => {
+    // Control for the re-arm: same attempt id as the settled wake → stale, dropped.
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'agent_session', wakeAttemptId: 'A' })
+      );
+    });
+    act(() => {
+      result.current.applyWakeProgress({ recoveryStatus: 'restored', wakePhase: null });
+    });
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'workspace_ready', wakeAttemptId: 'A' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(false);
+  });
+
+  it('re-arms for the next wake when only pushes named the settled attempt', () => {
+    // A tab that saw the first wake only over the socket: no snapshot ever named its
+    // attempt, so the push must, or the latch holds an unknown attempt forever.
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.applyWakeProgress({
+        recoveryStatus: 'waking',
+        wakePhase: 'agent_session',
+        wakeAttemptId: '01A',
+      });
+    });
+    expect(result.current.isWaking).toBe(true);
+    act(() => {
+      result.current.applyWakeProgress({
+        recoveryStatus: 'restored',
+        wakePhase: null,
+        wakeAttemptId: '01A',
+      });
+    });
+    expect(result.current.isWaking).toBe(false);
+
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'node_selection', wakeAttemptId: '01B' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(true);
+    expect(result.current.wakePhase).toBe('node_selection');
+  });
+
+  it('keeps the latch for a stale snapshot of a wake that settled by push', () => {
+    // Control for the case above: the same attempt, still reported waking, is stale.
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.applyWakeProgress({
+        recoveryStatus: 'restored',
+        wakePhase: null,
+        wakeAttemptId: '01A',
+      });
+    });
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'workspace_ready', wakeAttemptId: '01A' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(false);
+  });
+
+  it('starts a newer attempt from its own phase when the older one never settled', () => {
+    // The older wake's restore was never seen, so no latch is set; its later phase must
+    // not make the newer wake's earlier phases look like they go backwards.
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'agent_session', wakeAttemptId: '01A' })
+      );
+    });
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'node_selection', wakeAttemptId: '01B' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(true);
+    expect(result.current.wakePhase).toBe('node_selection');
+  });
+
+  it('ignores a late terminal snapshot of an older attempt during the next wake', () => {
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'node_selection', wakeAttemptId: '01B' })
+      );
+    });
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'restored', wakePhase: null, wakeAttemptId: '01A' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(true);
+    expect(result.current.wakePhase).toBe('node_selection');
+  });
+
+  it('does not let a stale snapshot relabel the current wake', () => {
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({
+          recoveryStatus: 'waking',
+          wakePhase: 'waiting_for_node_capacity',
+          wakeAttemptId: '01B',
+          waitReason: 'provider_transient_capacity',
+          waitRetryAt: null,
+        })
+      );
+    });
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'node_selection', wakeAttemptId: '01A' })
+      );
+    });
+
+    expect(result.current.wakeWait?.reason).toBe('provider_transient_capacity');
+  });
+
+  it('keeps the latch when the settled wake had no attempt id', () => {
+    // Without an id on the settled side nothing proves the next snapshot is a new wake;
+    // a stale banner is worse than a missing one, so the latch holds.
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.applyWakeProgress({ recoveryStatus: 'restored', wakePhase: null });
+    });
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'workspace_ready', wakeAttemptId: 'X' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(false);
+  });
+
   it('does not carry a wake across a session switch', () => {
     // Discriminating: without the sessionId reset effect, switching conversations
     // paints the previous one's banner over the new one.
@@ -248,5 +430,141 @@ describe('WakeProgressBanner', () => {
 
     rerender(<WakeProgressBanner wakePhase="workspace_ready" elapsed={<span>4m 10s</span>} />);
     expect(screen.getByText('4m 10s')).toBeInTheDocument();
+  });
+});
+
+describe('wake wait reasons (production 2026-11-02: one label hid three causes)', () => {
+  it('names why the wake is waiting and keeps it across a pushed phase', () => {
+    const { result } = renderHook(() => useWakeProgress('s1'));
+    act(() =>
+      result.current.hydrateWakeProgress(
+        snapshot({
+          recoveryStatus: 'waking',
+          wakePhase: 'waiting_for_node_capacity',
+          waitReason: 'provider_transient_capacity',
+          waitRetryAt: '2099-01-01T00:00:00.000Z',
+        })
+      )
+    );
+    expect(result.current.wakeWait).toEqual({
+      reason: 'provider_transient_capacity',
+      retryAt: '2099-01-01T00:00:00.000Z',
+    });
+
+    // A pushed delta carries no reason; it must not erase the polled one.
+    act(() =>
+      result.current.applyWakeProgress({
+        recoveryStatus: 'waking',
+        wakePhase: 'waiting_for_node_capacity',
+      })
+    );
+    expect(result.current.wakeWait?.reason).toBe('provider_transient_capacity');
+
+    // The next poll without a reason clears it.
+    act(() =>
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'node_provisioning' })
+      )
+    );
+    expect(result.current.wakeWait).toBeNull();
+  });
+
+  it('does not open the banner from a reason alone', () => {
+    const { result } = renderHook(() => useWakeProgress('s1'));
+    act(() =>
+      result.current.hydrateWakeProgress(snapshot({ waitReason: 'previous_workspace_cleanup' }))
+    );
+    expect(result.current.isWaking).toBe(false);
+    expect(result.current.wakeWait?.reason).toBe('previous_workspace_cleanup');
+  });
+
+  it('labels the reason instead of the generic capacity phase', () => {
+    const now = Date.parse('2026-11-02T08:40:00.000Z');
+    expect(wakeProgressLabel('waiting_for_node_capacity', null, now)).toBe(
+      'Waiting for server capacity...'
+    );
+    expect(
+      wakeProgressLabel(
+        'waiting_for_node_capacity',
+        { reason: 'compatible_node_provisioning', retryAt: null },
+        now
+      )
+    ).toBe('Waiting for a new server to finish starting...');
+    const withRetry = wakeProgressLabel(
+      'waiting_for_node_capacity',
+      { reason: 'provider_transient_capacity', retryAt: '2026-11-02T08:52:00.000Z' },
+      now
+    );
+    expect(withRetry).toMatch(
+      /^Your cloud provider has no capacity right now\. Retrying\.\.\. Next try at .+\.$/
+    );
+    // A retry time already in the past is not a promise worth showing.
+    expect(
+      wakeProgressLabel(
+        'waiting_for_node_capacity',
+        { reason: 'provider_transient_capacity', retryAt: '2026-11-02T08:30:00.000Z' },
+        now
+      )
+    ).toBe('Your cloud provider has no capacity right now. Retrying...');
+  });
+
+  it('drops a polled reason the moment a pushed phase moves past it', () => {
+    // CodeRabbit on #2494: the poll set "no capacity", then a push reported the
+    // wake provisioning. The banner kept the old cause until the next poll.
+    const { result } = renderHook(() => useWakeProgress('s1'));
+    act(() =>
+      result.current.hydrateWakeProgress(
+        snapshot({
+          recoveryStatus: 'waking',
+          wakePhase: 'waiting_for_node_capacity',
+          waitReason: 'provider_transient_capacity',
+          waitRetryAt: null,
+        })
+      )
+    );
+    act(() =>
+      result.current.applyWakeProgress({ recoveryStatus: 'waking', wakePhase: 'node_provisioning' })
+    );
+    render(
+      <WakeProgressBanner wakePhase={result.current.wakePhase} wakeWait={result.current.wakeWait} />
+    );
+    expect(screen.getByTestId('wake-progress-label').textContent).toBe('Provisioning a server...');
+  });
+
+  it('shows the previous-workspace reason only before the wake has a phase', () => {
+    const wait = { reason: 'previous_workspace_cleanup' as const, retryAt: null };
+    expect(wakeProgressLabel(null, wait)).toBe(
+      'Waiting for the previous workspace to finish shutting down...'
+    );
+    expect(wakeProgressLabel('node_provisioning', wait)).toBe('Provisioning a server...');
+  });
+
+  it('forgets the reason when the wake settles', () => {
+    const { result } = renderHook(() => useWakeProgress('s1'));
+    act(() =>
+      result.current.hydrateWakeProgress(
+        snapshot({
+          recoveryStatus: 'waking',
+          wakePhase: 'waiting_for_node_capacity',
+          waitReason: 'user_node_limit',
+        })
+      )
+    );
+    act(() =>
+      result.current.applyWakeProgress({ recoveryStatus: 'restored', wakePhase: 'running' })
+    );
+    expect(result.current.wakeWait).toBeNull();
+  });
+
+  it('renders the reason in the live region', () => {
+    render(
+      <WakeProgressBanner
+        wakePhase={null}
+        wakeWait={{ reason: 'previous_workspace_cleanup', retryAt: null }}
+      />
+    );
+    expect(screen.getByTestId('wake-progress-label')).toHaveTextContent(
+      'Waiting for the previous workspace to finish shutting down...'
+    );
   });
 });

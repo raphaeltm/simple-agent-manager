@@ -1,9 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  failTask,
-  transitionToInProgress,
-} from '../../../src/durable-objects/task-runner/state-machine';
+import { transitionToInProgress } from '../../../src/durable-objects/task-runner/in-progress-transition';
+import { failTask } from '../../../src/durable-objects/task-runner/state-machine';
 import type {
   TaskRunnerContext,
   TaskRunnerState,
@@ -143,6 +141,10 @@ function createD1Database(
   options: { onFailureStatusRead?: (task: TaskRow) => void } = {}
 ) {
   return {
+    // A wake's commit runs with its receipt stamp as one transaction (`transitionToInProgress`).
+    batch: vi.fn(async (statements: Array<{ run: () => Promise<unknown> }>) =>
+      Promise.all(statements.map((statement) => statement.run()))
+    ),
     prepare: vi.fn((sql: string) => ({
       bind: (...params: unknown[]) => ({
         first: async () => {
@@ -271,7 +273,6 @@ function makeState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState {
     lastStepAt: Date.parse('2026-06-29T10:00:00.000Z'),
     provisioningStartedAt: null,
     agentReadyStartedAt: null,
-    workspaceReadyStartedAt: null,
     workspaceDispatchStartedAt: null,
     workspaceDispatchAttempts: 0,
     workspaceDispatchLastAttemptAt: null,
@@ -400,6 +401,7 @@ describe('transitionToInProgress', () => {
       config: {
         ...makeState().config,
         resumeSnapshotChatSessionId: 'chat-session-1',
+        recoveryAttemptId: '01WAKEATTEMPT',
       },
     });
 
@@ -412,6 +414,8 @@ describe('transitionToInProgress', () => {
       recoveryStatus: 'restored',
       // No phase on a settled wake — a step here would render as stale progress.
       wakePhase: null,
+      // The client's settled latch keys on the attempt; a push-only tab learns it here.
+      wakeAttemptId: '01WAKEATTEMPT',
     });
   });
 

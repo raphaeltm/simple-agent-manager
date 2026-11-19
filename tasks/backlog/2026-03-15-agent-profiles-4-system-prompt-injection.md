@@ -1,5 +1,12 @@
 # Agent Profiles — Phase 4: System Prompt Injection via ACP
 
+> **Reconciliation 2026-10-26:** Still open. `session_host.go:buildAgentCommand()` does not exist;
+> launch commands come from `getAgentCommandInfo()`
+> (`packages/vm-agent/internal/acp/gateway.go:1009`). Since #577 the profile's `systemPromptAppend`
+> is appended to the visible first prompt
+> (`apps/api/src/services/agent-bootstrap-prompt.ts:30-32`, `routes/chat-start.ts:53-60`), and #2337
+> (`8fedc6c5b`) extended that to forked chats; nothing passes it as a hidden system prompt.
+
 **Created**: 2026-03-15
 **Depends on**: Phase 2 (Task Runner Integration)
 **Blocks**: Nothing (final in series)

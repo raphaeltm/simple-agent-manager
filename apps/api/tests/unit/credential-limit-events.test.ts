@@ -2,15 +2,15 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { runMigrations } from '../../src/durable-objects/migrations';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   admitProjectEvent as admitProjectDataEvent,
   createProjectEventSubscription,
-} from '../../src/durable-objects/project-data/project-events';
-import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
+} from '@simple-agent-manager/project-data/internal/do/project-events';
+import type { Env as ProjectDataEnv } from '@simple-agent-manager/project-data/internal/do/types';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { log } from '../../src/lib/logger';
 import {
   type AcpUsageCallbackReport,
@@ -121,7 +121,7 @@ function createCredentialD1(overrides: Partial<TestEnv> = {}) {
       user_id TEXT,
       chat_session_id TEXT,
       node_id TEXT,
-      status TEXT
+      status TEXT, callback_generation TEXT
     );
     CREATE TABLE agent_sessions (
       id TEXT PRIMARY KEY,

@@ -1,16 +1,31 @@
-import { DEFAULT_WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH } from '@simple-agent-manager/shared';
+import {
+  CHAT_BINDING_RELEASE_TOLERANT_SQL,
+  sameOwnership,
+  sameOwnershipExceptTerminalNode,
+  workspaceDeletionIdentityLogContext,
+} from './workspace-deletion-identity';
+export { workspaceDeletionIdentityLogContext } from './workspace-deletion-identity';
 
+import type { NodeLifecycle } from '../durable-objects/node-lifecycle';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { deleteWorkspaceOnNode, NodeAgentHttpError } from './node-agent';
+import { deleteWorkspaceOnNode } from './node-agent';
 import { stopNodeResources } from './node-resource-lifecycle';
+import {
+  boundedDiagnostic,
+  deletionFailureDiagnostic,
+  deletionFailureLogFields,
+  WORKSPACE_DELETION_DIAGNOSTIC_PREFIX,
+} from './workspace-deletion-diagnostics';
+import { automaticDeletionPreservationExpiresAt } from './workspace-deletion-preservation';
 import type { FinalizeWorkspaceLifecycleClosureResult } from './workspace-lifecycle-finalizer';
 import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
 
-export const WORKSPACE_DELETION_DIAGNOSTIC_PREFIX = 'Workspace deletion unconfirmed';
+export { WORKSPACE_DELETION_DIAGNOSTIC_PREFIX } from './workspace-deletion-diagnostics';
 
 export interface WorkspaceDeletionIdentity {
   workspaceId: string;
+  workspaceGeneration?: string | null;
   nodeId: string | null;
   nodeUserId: string | null;
   nodeRuntime: string | null;
@@ -25,32 +40,6 @@ export interface WorkspaceDeletionSnapshot extends WorkspaceDeletionIdentity {
   status: string;
   runtimeDeletionConfirmedAt: string | null;
   runtimeDeletionProof: WorkspaceDeletionProof | null;
-}
-
-export function workspaceDeletionIdentityLogContext(
-  expected: WorkspaceDeletionIdentity,
-  current: WorkspaceDeletionIdentity | null
-): Record<string, string | null> {
-  return {
-    expectedWorkspaceId: expected.workspaceId,
-    currentWorkspaceId: current?.workspaceId ?? null,
-    expectedUserId: expected.userId,
-    currentUserId: current?.userId ?? null,
-    expectedProjectId: expected.projectId,
-    currentProjectId: current?.projectId ?? null,
-    expectedChatSessionId: expected.chatSessionId,
-    currentChatSessionId: current?.chatSessionId ?? null,
-    expectedNodeId: expected.nodeId,
-    currentNodeId: current?.nodeId ?? null,
-    expectedNodeUserId: expected.nodeUserId,
-    currentNodeUserId: current?.nodeUserId ?? null,
-    expectedNodeRuntime: expected.nodeRuntime,
-    currentNodeRuntime: current?.nodeRuntime ?? null,
-    expectedNodeProviderInstanceId: expected.nodeProviderInstanceId,
-    currentNodeProviderInstanceId: current?.nodeProviderInstanceId ?? null,
-    expectedNodeRuntimeIncarnationId: expected.nodeRuntimeIncarnationId,
-    currentNodeRuntimeIncarnationId: current?.nodeRuntimeIncarnationId ?? null,
-  };
 }
 
 export type WorkspaceDeletionProof =
@@ -99,61 +88,6 @@ class WorkspaceDeletionFenceError extends Error {
   }
 }
 
-function nullableEqual(left: string | null, right: string | null): boolean {
-  return left === right;
-}
-
-function sameOwnership(
-  current: WorkspaceDeletionIdentity,
-  expected: WorkspaceDeletionIdentity
-): boolean {
-  return (
-    current.workspaceId === expected.workspaceId &&
-    current.userId === expected.userId &&
-    nullableEqual(current.projectId, expected.projectId) &&
-    nullableEqual(current.chatSessionId, expected.chatSessionId) &&
-    nullableEqual(current.nodeId, expected.nodeId) &&
-    nullableEqual(current.nodeUserId, expected.nodeUserId) &&
-    nullableEqual(current.nodeRuntime, expected.nodeRuntime) &&
-    nullableEqual(current.nodeProviderInstanceId, expected.nodeProviderInstanceId) &&
-    nullableEqual(current.nodeRuntimeIncarnationId, expected.nodeRuntimeIncarnationId)
-  );
-}
-
-function sameOwnershipExceptTerminalNode(
-  current: WorkspaceDeletionIdentity,
-  expected: WorkspaceDeletionIdentity
-): boolean {
-  return (
-    current.workspaceId === expected.workspaceId &&
-    current.userId === expected.userId &&
-    nullableEqual(current.projectId, expected.projectId) &&
-    nullableEqual(current.chatSessionId, expected.chatSessionId) &&
-    (current.nodeId === null ||
-      (nullableEqual(current.nodeId, expected.nodeId) &&
-        nullableEqual(current.nodeUserId, expected.nodeUserId) &&
-        nullableEqual(current.nodeRuntime, expected.nodeRuntime) &&
-        nullableEqual(current.nodeProviderInstanceId, expected.nodeProviderInstanceId) &&
-        nullableEqual(current.nodeRuntimeIncarnationId, expected.nodeRuntimeIncarnationId)))
-  );
-}
-
-function diagnosticMaxLength(env: Env): number {
-  const parsed = Number.parseInt(env.WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH ?? '', 10);
-  return Number.isInteger(parsed) && parsed > 0
-    ? parsed
-    : DEFAULT_WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH;
-}
-
-function boundedDiagnostic(env: Env, value: string): string {
-  const sanitized = value
-    .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
-    .replace(/\b(token|secret|password)\s*[:=]\s*\S+/gi, '$1=[redacted]')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return sanitized.slice(0, diagnosticMaxLength(env));
-}
-
 function isWorkspaceDeletionProof(value: string | null): value is WorkspaceDeletionProof {
   return (
     value === 'vm_agent_confirmed' ||
@@ -199,22 +133,6 @@ function fencedDeletionOutcome(
   return { status: 'fenced', reason };
 }
 
-function deletionFailureDiagnostic(env: Env, attempt: number, error: unknown): string {
-  const errorName = error instanceof Error ? error.name : 'UnknownError';
-  const message = error instanceof Error ? error.message : String(error);
-  const statusMatch = /(?:HTTP|status)\s+(\d{3})/i.exec(message);
-  let category = 'request_failed';
-  if (/timeout|timed out|abort/i.test(`${errorName} ${message}`)) {
-    category = 'request_timeout';
-  } else if (statusMatch?.[1]) {
-    category = `http_status_${statusMatch[1]}`;
-  }
-  return boundedDiagnostic(
-    env,
-    `${WORKSPACE_DELETION_DIAGNOSTIC_PREFIX}: VM attempt ${attempt} (${errorName}: ${category})`
-  );
-}
-
 async function loadWorkspaceDeletionRow(
   database: D1Database,
   workspaceId: string
@@ -223,6 +141,7 @@ async function loadWorkspaceDeletionRow(
     .prepare(
       `SELECT w.id AS workspaceId,
               w.node_id AS nodeId,
+              w.eviction_generation AS workspaceGeneration,
               n.user_id AS nodeUserId,
               n.runtime AS nodeRuntime,
               n.provider_instance_id AS nodeProviderInstanceId,
@@ -243,7 +162,7 @@ async function loadWorkspaceDeletionRow(
   return row ?? null;
 }
 
-async function terminalNodeProof(
+export async function terminalNodeProof(
   database: D1Database,
   expected: WorkspaceDeletionIdentity
 ): Promise<WorkspaceDeletionProof | null> {
@@ -284,8 +203,9 @@ async function persistDeletionDiagnostic(
         WHERE id = ?
           AND user_id = ?
           AND project_id IS ?
-          AND chat_session_id IS ?
+          AND ${CHAT_BINDING_RELEASE_TOLERANT_SQL}
           AND node_id IS ?
+          AND eviction_generation IS ?
           AND (
             ? IS NULL OR EXISTS (
               SELECT 1 FROM nodes n
@@ -306,6 +226,7 @@ async function persistDeletionDiagnostic(
       expected.projectId,
       expected.chatSessionId,
       expected.nodeId,
+      expected.workspaceGeneration ?? null,
       expected.nodeId,
       expected.nodeUserId,
       expected.nodeRuntime,
@@ -322,15 +243,18 @@ async function claimDeletionTransition(
   attempt: number
 ): Promise<boolean> {
   const statusPredicate =
-    mode === 'automatic' ? "AND status IN ('stopped', 'sleeping', 'stopping', 'deleted')" : '';
+    mode === 'automatic'
+      ? "AND status IN ('stopped', 'sleeping', 'stopping', 'deleted', 'evicted')"
+      : '';
   const result = await env.DATABASE.prepare(
     `UPDATE workspaces
           SET status = 'stopping', error_message = ?, updated_at = ?
         WHERE id = ?
           AND user_id = ?
           AND project_id IS ?
-          AND chat_session_id IS ?
+          AND ${CHAT_BINDING_RELEASE_TOLERANT_SQL}
           AND node_id IS ?
+          AND eviction_generation IS ?
           AND (
             ? IS NULL OR EXISTS (
               SELECT 1 FROM nodes n
@@ -355,6 +279,7 @@ async function claimDeletionTransition(
       expected.projectId,
       expected.chatSessionId,
       expected.nodeId,
+      expected.workspaceGeneration ?? null,
       expected.nodeId,
       expected.nodeUserId,
       expected.nodeRuntime,
@@ -486,8 +411,9 @@ async function finalizeConfirmedDeletion(
       WHERE id = ?
         AND user_id = ?
         AND project_id IS ?
-        AND chat_session_id IS ?
+        AND ${CHAT_BINDING_RELEASE_TOLERANT_SQL}
         AND node_id IS ?
+          AND eviction_generation IS ?
         AND status = ?
         AND (
           ? IS NULL OR EXISTS (
@@ -509,6 +435,7 @@ async function finalizeConfirmedDeletion(
       current.projectId,
       current.chatSessionId,
       current.nodeId,
+      expected.workspaceGeneration ?? null,
       current.status,
       current.nodeId,
       expected.nodeUserId,
@@ -608,11 +535,42 @@ function deletionTargetIsReady(
   return current?.status === 'stopping' && sameOwnership(current, expected);
 }
 
+async function requireAutomaticPreservation(
+  options: AttemptWorkspaceDeletionOptions
+): Promise<string | undefined> {
+  if (options.mode === 'explicit') return undefined;
+  const expiresAt = await automaticDeletionPreservationExpiresAt(options.env, options.expected);
+  if (!expiresAt)
+    throw new Error('Automatic deletion requires verified preservation of the exact runtime');
+  return expiresAt;
+}
+
+async function automaticPreservationFailure(
+  options: AttemptWorkspaceDeletionOptions
+): Promise<Extract<WorkspaceDeletionOutcome, { status: 'retry' }> | null> {
+  try {
+    await requireAutomaticPreservation(options);
+    return null;
+  } catch {
+    return {
+      status: 'retry',
+      reason: 'preservation_unconfirmed',
+      diagnostic: 'Workspace deletion unconfirmed: exact runtime preservation unavailable',
+    };
+  }
+}
+
 async function requestWorkspaceDeletion(
   options: AttemptWorkspaceDeletionOptions
 ): Promise<WorkspaceDeletionProof | Extract<WorkspaceDeletionOutcome, { status: 'retry' }>> {
   const { env, expected, attempt, requestTimeoutMs } = options;
   if (!expected.nodeId) {
+    if (options.mode === 'explicit') {
+      const stub = env.NODE_LIFECYCLE.get(
+        env.NODE_LIFECYCLE.idFromName(`workspace-create:${expected.workspaceId}`)
+      ) as DurableObjectStub<NodeLifecycle>;
+      if (await stub.confirmUnassignedWorkspaceDeletion(expected)) return 'node_runtime_terminated';
+    }
     const diagnostic = boundedDiagnostic(
       env,
       `Runtime deletion unconfirmed after attempt ${attempt} (node assignment unavailable)`
@@ -621,15 +579,36 @@ async function requestWorkspaceDeletion(
     return { status: 'retry', reason: 'runtime_deletion_unconfirmed', diagnostic };
   }
 
+  if (!expected.nodeRuntimeIncarnationId || expected.nodeUserId !== expected.userId) {
+    throw new Error('Deletion requires known node incarnation and owner');
+  }
+
   if (expected.nodeRuntime === 'cf-container') {
     const node = await env.DATABASE.prepare('SELECT status FROM nodes WHERE id = ?')
       .bind(expected.nodeId)
       .first<{ status: string }>();
-    if (node && node.status !== 'running') {
-      // Proxying to a sleeping container wakes it, but recovery cannot admit the
-      // stopping workspace we just claimed. Destroy through the container DO.
+    if (node) {
+      // An Instant workspace is its container, so destroying the container through its DO
+      // is the physical deletion, awake or asleep. Proxying to a sleeping container wakes it,
+      // and recovery cannot admit the stopping workspace we just claimed. Proxying to an awake
+      // one cannot succeed either: the standalone agent is launched without NODE_USER_ID or
+      // NODE_RUNTIME_INCARNATION_ID (`VmAgentContainer` launch env), so its physical-deletion
+      // route always answers 409 "node deletion ownership or incarnation mismatch" (staging
+      // 2026-11-08: archiving an awake Instant chat returned 409 on every attempt).
       await requireDeletionTargetAtBoundary(env, expected);
+      await requireAutomaticPreservation(options);
+      // An Instant workspace is never evicted, so its generation is NULL. NULL is the exact
+      // incarnation here, as in every other deletion identity check (`IS ?`), not a missing
+      // value. Requiring a string made every slept Instant deletion throw (staging 2026-11-08).
       await stopNodeResources(expected.nodeId, expected.userId, env, {
+        workspaceDeletion: {
+          workspaceId: expected.workspaceId,
+          workspaceGeneration: expected.workspaceGeneration ?? null,
+          beforeDestroy: async () => {
+            await requireDeletionTargetAtBoundary(env, expected);
+            await requireAutomaticPreservation(options);
+          },
+        },
         expectedRuntime: {
           userId: expected.nodeUserId ?? expected.userId,
           runtime: expected.nodeRuntime,
@@ -643,19 +622,23 @@ async function requestWorkspaceDeletion(
     }
   }
 
-  try {
-    await deleteWorkspaceOnNode(expected.nodeId, expected.workspaceId, env, expected.userId, {
-      requestTimeoutMs,
-      beforeExternalMutation: async () => {
-        await requireDeletionTargetAtBoundary(env, expected);
-      },
-    });
-  } catch (error) {
-    // The VM agent's workspace-specific 404 means the exact runtime is already
-    // absent and is therefore an idempotent deletion confirmation. DNS loop-back
-    // 404s are converted to a different error in node-agent.
-    if (!(error instanceof NodeAgentHttpError) || error.statusCode !== 404) throw error;
-  }
+  const preservationExpiresAt = await requireAutomaticPreservation(options);
+  await deleteWorkspaceOnNode(expected.nodeId, expected.workspaceId, env, expected.userId, {
+    deletionMode: options.mode,
+    preservationExpiresAt,
+    identity: {
+      workspaceId: expected.workspaceId,
+      nodeId: expected.nodeId,
+      userId: expected.userId,
+      nodeRuntimeIncarnationId: expected.nodeRuntimeIncarnationId,
+      workspaceGeneration: expected.workspaceGeneration ?? '',
+    },
+    requestTimeoutMs,
+    beforeExternalMutation: async () => {
+      await requireDeletionTargetAtBoundary(env, expected);
+      await requireAutomaticPreservation(options);
+    },
+  });
   return 'vm_agent_confirmed';
 }
 
@@ -691,6 +674,7 @@ async function classifyWorkspaceDeletionError(
     attempt,
     source,
     diagnostic,
+    ...deletionFailureLogFields(env, error),
     action: 'retry',
   });
   return { status: 'retry', reason: 'runtime_deletion_unconfirmed', diagnostic };
@@ -709,6 +693,9 @@ export async function attemptWorkspaceDeletion(
   const proofBeforeRequest = await terminalNodeProof(env.DATABASE, expected);
   const earlyOutcome = await resolveDeletionBeforeClaim(options, initial, proofBeforeRequest);
   if (earlyOutcome) return earlyOutcome;
+
+  const preservationFailure = await automaticPreservationFailure(options);
+  if (preservationFailure) return preservationFailure;
 
   const claimed = await claimDeletionTransition(env, expected, mode, attempt);
   if (!claimed) {
@@ -744,6 +731,7 @@ export async function loadWorkspaceDeletionSnapshot(
   if (!workspace) return null;
   return {
     workspaceId: workspace.workspaceId,
+    workspaceGeneration: workspace.workspaceGeneration,
     nodeId: workspace.nodeId,
     nodeUserId: workspace.nodeUserId,
     nodeRuntime: workspace.nodeRuntime,
@@ -766,6 +754,7 @@ export async function loadWorkspaceDeletionIdentity(
   if (!workspace) return null;
   return {
     workspaceId: workspace.workspaceId,
+    workspaceGeneration: workspace.workspaceGeneration,
     nodeId: workspace.nodeId,
     nodeUserId: workspace.nodeUserId,
     nodeRuntime: workspace.nodeRuntime,

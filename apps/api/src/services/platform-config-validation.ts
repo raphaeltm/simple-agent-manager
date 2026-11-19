@@ -6,6 +6,7 @@ import { createModuleLogger } from '../lib/logger';
 import { parseWithSchema } from '../lib/runtime-validation';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import type { PlatformIntegrationInput, ResolvedPlatformConfig } from './platform-config';
+import { INTEGRATION_GROUP_TITLES, integrationGroupHasValues } from './platform-config-groups';
 
 const log = createModuleLogger('platform-config-validation');
 
@@ -183,13 +184,13 @@ export async function validatePlatformIntegrationInput(
     : null;
   const hasInfrastructureClientId = infrastructureClientId !== null;
   const hasInfrastructureClientSecret = infrastructureClientSecret !== null;
-  if (googleInfrastructure.remove && (hasInfrastructureClientId || hasInfrastructureClientSecret)) {
-    errors.push('Google infrastructure OAuth removal cannot include replacement values');
-  } else if (
-    !googleInfrastructure.remove &&
-    hasInfrastructureClientId !== hasInfrastructureClientSecret
-  ) {
+  if (hasInfrastructureClientId !== hasInfrastructureClientSecret) {
     errors.push('Google infrastructure OAuth client id and secret must be provided together');
+  }
+  for (const group of input.clear ?? []) {
+    if (integrationGroupHasValues(input, group)) {
+      errors.push(`${INTEGRATION_GROUP_TITLES[group]} cannot be cleared and set in the same save`);
+    }
   }
   if (infrastructureClientId !== null) {
     validateOAuthClientId(infrastructureClientId, 'Google infrastructure', errors);
@@ -248,9 +249,15 @@ export async function validatePlatformIntegrationInput(
   return { ok: errors.length === 0, errors };
 }
 
+/**
+ * Setup completes once somebody can sign in: an OAuth login provider, or email sign-in codes
+ * when the deployment can send email (`services/email-sign-in.ts`).
+ */
 export function validateSetupCanComplete(
-  config: ResolvedPlatformConfig
+  config: ResolvedPlatformConfig,
+  options: { emailSignIn: boolean } = { emailSignIn: false }
 ): PlatformConfigValidationResult {
+  if (options.emailSignIn) return { ok: true, errors: [] };
   const hasGitHub = Boolean(config.github.clientId.value && config.github.clientSecret.value);
   const hasGoogle = Boolean(config.google.clientId.value && config.google.clientSecret.value);
   const hasGitLab = Boolean(

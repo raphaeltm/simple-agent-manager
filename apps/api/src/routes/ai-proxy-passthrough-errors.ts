@@ -1,3 +1,5 @@
+import { type MonthlyCostCapCheck,monthlyCostCapMessage } from '@simple-agent-manager/ai-proxy';
+
 import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
 
 function jsonErrorHeaders(headers?: HeadersInit): Headers {
@@ -37,7 +39,8 @@ export function openaiError(
 }
 
 export function anthropicUsageGateError(
-  reason: 'daily-token-budget' | 'monthly-cost-cap'
+  reason: 'daily-token-budget' | 'monthly-cost-cap',
+  cap?: MonthlyCostCapCheck
 ): Response {
   if (reason === 'daily-token-budget') {
     return anthropicError(
@@ -47,21 +50,16 @@ export function anthropicUsageGateError(
     );
   }
 
-  return anthropicError(
-    'Monthly cost cap exceeded. Adjust your cap in Settings > Usage.',
-    'rate_limit_error',
-    429
-  );
+  return anthropicError(monthlyCostCapMessage(cap), 'rate_limit_error', 429);
 }
 
-export function openaiUsageGateError(reason: 'daily-token-budget' | 'monthly-cost-cap'): Response {
+export function openaiUsageGateError(
+  reason: 'daily-token-budget' | 'monthly-cost-cap',
+  cap?: MonthlyCostCapCheck
+): Response {
   if (reason === 'daily-token-budget') {
     return openaiError('Daily token budget exceeded.', 'rate_limit_error', 429);
   }
 
-  return openaiError(
-    'Monthly cost cap exceeded. Adjust your cap in Settings > Usage.',
-    'rate_limit_error',
-    429
-  );
+  return openaiError(monthlyCostCapMessage(cap), 'rate_limit_error', 429);
 }

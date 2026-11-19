@@ -124,7 +124,7 @@ func (p *AcceptedPrompt) Run() {
 	// snapshot lets finishPromptWithError still begin LoadSession recovery.
 	recovery := h.captureCrashRecoveryPrerequisites()
 	h.markPromptStarted(p.attempt, p.request.sessionID, len(p.request.blocks), p.viewerID)
-	resp, err := h.promptWithTransientRetry(p.ctx, p.request, p.attempt.startedAt)
+	resp, err := h.promptWithTransientRetry(p.ctx, p.request, p.attempt.startedAt, credentialAttribution{CredentialReference: p.attempt.credentialReference, CredentialGeneration: p.attempt.credentialGeneration})
 
 	if !h.isPromptActive(p.attempt.id) {
 		return
@@ -147,6 +147,7 @@ func (h *SessionHost) promptWithTransientRetry(
 	promptCtx context.Context,
 	promptReq preparedPromptRequest,
 	startedAt time.Time,
+	accepted ...credentialAttribution,
 ) (acpsdk.PromptResponse, error) {
 	// Retrying is limited to hard Prompt() errors before an ACP response is
 	// accepted. User-message persistence and synthetic broadcasts happen once
@@ -178,7 +179,7 @@ func (h *SessionHost) promptWithTransientRetry(
 		if err == nil {
 			return resp, nil
 		}
-		if !h.shouldRetryPromptError(promptCtx, err, attempt, totalAttempts) {
+		if !h.shouldRetryPromptError(promptCtx, err, attempt, totalAttempts, accepted...) {
 			return resp, err
 		}
 
@@ -189,75 +190,6 @@ func (h *SessionHost) promptWithTransientRetry(
 		delay = nextPromptRetryDelay(delay, maxDelay)
 	}
 	return resp, err
-}
-
-func (h *SessionHost) shouldRetryPromptError(promptCtx context.Context, err error, attempt, totalAttempts int) bool {
-	if attempt >= totalAttempts {
-		return false
-	}
-	if err == nil || promptCtx.Err() != nil {
-		return false
-	}
-	if isCrashPromptError(err) {
-		return false
-	}
-	return isTransientProviderPromptError(err)
-}
-
-func (h *SessionHost) sleepBeforePromptRetry(ctx context.Context, delay time.Duration) error {
-	if h.config.PromptRetrySleeper != nil {
-		return h.config.PromptRetrySleeper(ctx, delay)
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
-func (h *SessionHost) reportPromptRetry(
-	sessionID acpsdk.SessionId,
-	attempt, totalAttempts int,
-	delay time.Duration,
-	startedAt time.Time,
-	err error,
-) {
-	errText := redactAgentDiagnosticText(err.Error())
-	retryAttempt := attempt + 1
-	maxRetries := totalAttempts - 1
-	detail := map[string]interface{}{
-		"acpSessionId":  string(sessionID),
-		"failedAttempt": attempt,
-		"retryAttempt":  retryAttempt,
-		"totalAttempts": totalAttempts,
-		"maxRetries":    maxRetries,
-		"delay":         delay.String(),
-		"duration":      time.Since(startedAt).String(),
-		"error":         errText,
-	}
-	slog.Warn("ACP Prompt transient provider error; retrying",
-		"attempt", attempt,
-		"retryAttempt", retryAttempt,
-		"totalAttempts", totalAttempts,
-		"delay", delay,
-		"error", errText,
-	)
-	h.reportLifecycle("warn", "ACP Prompt transient provider error; retrying", detail)
-	h.reportEvent("warn", "agent_session.prompt_retry", "Retrying ACP prompt after transient provider error", detail)
-}
-
-func nextPromptRetryDelay(current, maxDelay time.Duration) time.Duration {
-	if current <= 0 {
-		current = DefaultPromptRetryInitialDelay
-	}
-	next := current * 2
-	if next < current || next > maxDelay {
-		return maxDelay
-	}
-	return next
 }
 
 func isTransientProviderPromptError(err error) bool {
@@ -521,6 +453,21 @@ func (h *SessionHost) markPromptStarted(attempt *promptAttempt, sessionID acpsdk
 	h.reportLifecycle("info", "ACP Prompt started", fields)
 }
 
+// Guarded cancellation stops a captured process. Its monitor owns runtime
+// activity even when local SDK completion arrives after restart. Never publish
+// idle or overwrite that owner's status from this cancelled attempt.
+func (h *SessionHost) markPromptDoneForAttempt(attempt *promptAttempt) {
+	if attempt.guardedCancel.Load() {
+		h.promptMu.Lock()
+		if h.promptAttempt == attempt {
+			h.stopPromptActivityRereport()
+		}
+		h.promptMu.Unlock()
+		return
+	}
+	h.markPromptDone()
+}
+
 // markPromptDone is the single turn-end hook shared by normal completion,
 // cancellation, and error (see finishPrompt / finishPromptCancelled /
 // finishPromptAttemptWithError).
@@ -580,7 +527,15 @@ func (h *SessionHost) finishPrompt(
 	err error,
 	cancelRequested bool,
 ) {
+	if err == nil {
+		// A cancelled turn still spent the tokens its response reports.
+		h.recordPromptTokenUsage(resp)
+	}
 	if cancelRequested {
+		if err == nil {
+			// Codex reports its tokens only through the rollout probe.
+			h.scheduleProviderUsageProbe()
+		}
 		h.finishPromptCancelled(attempt, reqID, info)
 		return
 	}
@@ -588,7 +543,7 @@ func (h *SessionHost) finishPrompt(
 		h.finishPromptAttemptWithError(attempt, promptCtx, reqID, info, err)
 		return
 	}
-	if !attempt.completeWith(h, string(resp.StopReason), nil, h.markPromptDone) {
+	if !attempt.completeWith(h, string(resp.StopReason), nil, func() { h.markPromptDoneForAttempt(attempt) }) {
 		return
 	}
 
@@ -605,20 +560,19 @@ func (h *SessionHost) finishPrompt(
 	h.scheduleProviderUsageProbe()
 }
 
-func (h *SessionHost) finishPromptCancelled(attempt *promptAttempt, reqID json.RawMessage, info promptStartInfo) {
-	if !attempt.completeWith(h, "cancelled", context.Canceled, h.markPromptDone) {
-		return
-	}
-	slog.Info("ACP: Prompt cancelled", "promptId", attempt.id)
-	h.reportLifecycle("info", "ACP Prompt cancelled", attempt.logFields(map[string]interface{}{
-		"duration": time.Since(info.startedAt).String(),
-		"promptId": attempt.id,
-	}))
-	h.broadcastMessage(h.marshalJSONRPCError(reqID, -32800, "Prompt cancelled"))
+func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {
+	h.evictionDecisionMu.Lock()
+	defer h.evictionDecisionMu.Unlock()
+	h.finishPromptAttemptWithErrorLocked(attempt, promptCtx, reqID, info, err)
 }
 
-func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {
+func (h *SessionHost) finishPromptAttemptWithErrorLocked(attempt *promptAttempt, promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {
 	if errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
+		if h.parkPromptCrashForEviction("prompt_deadline", func() {
+			h.finishPromptAttemptWithError(attempt, promptCtx, reqID, info, err)
+		}, attempt) {
+			return
+		}
 		errMsg := "Prompt cancelled (context deadline exceeded)"
 		if info.timeout > 0 {
 			errMsg = fmt.Sprintf("Prompt timed out after %s", info.timeout)
@@ -638,6 +592,13 @@ func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promp
 	}
 
 	if isCrashPromptError(err) && !errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
+		// An eviction's docker stop disconnects the agent before the stop returns.
+		// That disconnect is the eviction, not a crash: no recovery, no verdict.
+		if h.parkPromptCrashForEviction("prompt_disconnected", func() {
+			h.finishPromptAttemptWithError(attempt, promptCtx, reqID, info, err)
+		}, attempt) {
+			return
+		}
 		agentType, stderr, proc, missing, _, ok := h.beginCrashRecoveryWithPrerequisites(reqID, info.viewerID, info.recovery)
 		if ok {
 			slog.Warn("ACP Prompt failed because agent disconnected; deferring to crash recovery", "error", err, "agentType", agentType)
@@ -657,6 +618,11 @@ func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promp
 		return
 	}
 
+	if limit := h.promptProviderLimit(err, credentialAttribution{CredentialReference: attempt.credentialReference, CredentialGeneration: attempt.credentialGeneration}); limit != nil {
+		limit.PromptAttemptID = attempt.id
+		limit.CredentialGeneration = attempt.credentialGeneration
+		err = limit
+	}
 	errMsg := "agent_prompt_failed"
 	if reasonCode := ClassifyPromptError(err); reasonCode != "" {
 		errMsg = reasonCode
@@ -668,13 +634,24 @@ func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promp
 			errMsg = "Prompt cancelled (context deadline exceeded)"
 		}
 	}
-	slog.Warn("ACP Prompt failed (non-fatal)", "reason", errMsg)
-	h.reportLifecycle("warn", "ACP Prompt failed", map[string]interface{}{
+	fields := map[string]interface{}{
 		"error":    errMsg,
 		"duration": time.Since(info.startedAt).String(),
-	})
+	}
+	// An unclassified failure used to report only agent_prompt_failed, so the
+	// 2026-10-31 Vertex rejection of a sam-mcp tool schema was visible only in the
+	// node journal. Carry the agent's own error, redacted and bounded, so platform
+	// logs say why. Classified failures keep the bare code (ClassifyPromptFailure).
+	logArgs := []any{"reason", errMsg}
+	if errMsg == "agent_prompt_failed" {
+		detail := promptFailureDetail(err)
+		fields["detail"] = detail
+		logArgs = append(logArgs, "detail", detail)
+	}
+	slog.Warn("ACP Prompt failed (non-fatal)", logArgs...)
+	h.reportLifecycle("warn", "ACP Prompt failed", fields)
 	h.broadcastMessage(h.marshalJSONRPCError(reqID, -32603, errMsg))
-	attempt.completeWith(h, "error", err, h.markPromptDone)
+	attempt.completeWith(h, "error", err, func() { h.markPromptDoneForAttempt(attempt) })
 }
 
 // finishPromptWithError preserves the focused-test seam used by the crash
@@ -689,6 +666,10 @@ func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID jso
 			startedAt: info.startedAt,
 			done:      make(chan struct{}),
 			rpcDone:   make(chan struct{}),
+		}
+		if attr, ok := h.credentialAttributionSnapshot(); ok {
+			attempt.credentialGeneration = attr.CredentialGeneration
+			attempt.credentialReference = attr.CredentialReference
 		}
 		h.promptAttempt = attempt
 	}

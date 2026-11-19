@@ -3,9 +3,12 @@ import { Hono } from 'hono';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
+import { clientIpFromHeaders } from '../lib/client-ip';
 import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { AppError, errors } from '../middleware/error';
 import { parseOptionalBody } from '../schemas/_validator';
+import { bootstrapOwnerEmail } from '../services/bootstrap-owner';
+import { emailSignInReadiness } from '../services/email-sign-in';
 import {
   completeSetupWithConfig,
   getPlatformConfigStatus,
@@ -13,13 +16,13 @@ import {
   isSetupTokenConfigured,
   type PlatformIntegrationInput,
   previewPlatformIntegrationConfig,
-  savePlatformIntegrationConfig,
   verifySetupToken,
 } from '../services/platform-config';
 import {
   validatePlatformIntegrationInput,
   validateSetupCanComplete,
 } from '../services/platform-config-validation';
+import { requestWaitUntil, scheduleSecurityAlert } from '../services/security-alerts';
 
 const setupRoutes = new Hono<{ Bindings: Env }>();
 type SetupContext = Context<{ Bindings: Env }>;
@@ -33,13 +36,14 @@ const SetupRequestBodySchema = v.object({
   config: v.optional(v.unknown()),
 });
 
+/**
+ * The rate-limit bucket for setup-token attempts. Cloudflare's edge sets CF-Connecting-IP and
+ * overwrites any client copy; X-Forwarded-For and User-Agent are whatever the caller sends, so
+ * rotating them would hand out a fresh attempt budget per request. Requests without the header
+ * (never the case behind Cloudflare) share one bucket.
+ */
 function clientIdentifier(c: SetupContext): string {
-  return (
-    c.req.header('CF-Connecting-IP') ??
-    c.req.header('X-Forwarded-For') ??
-    c.req.header('User-Agent') ??
-    'unknown'
-  );
+  return clientIpFromHeaders((name) => c.req.header(name)) ?? 'unknown';
 }
 
 function setupClosed(): AppError {
@@ -97,6 +101,17 @@ async function parseSetupBody(c: SetupContext): Promise<{
   };
 }
 
+/** What the first-run screens need beyond the integration status. Token-gated by the callers. */
+async function signInSummary(env: Env) {
+  const readiness = await emailSignInReadiness(env);
+  return {
+    email: readiness !== 'unavailable',
+    /** False while Cloudflare is still verifying the sending domain: ask the owner to wait. */
+    emailReady: readiness === 'ready',
+    ownerEmail: bootstrapOwnerEmail(env) || null,
+  };
+}
+
 async function assertSetupOpen(env: Env): Promise<void> {
   if (await isSetupCompleted(env)) {
     throw setupClosed();
@@ -131,21 +146,11 @@ setupRoutes.post('/verify', async (c) => {
   await assertSetupOpen(c.env);
   const { token } = await parseSetupBody(c);
   await assertSetupToken(c.env, token, clientIdentifier(c));
-  return c.json({ ok: true, status: await getPlatformConfigStatus(c.env) });
-});
-
-setupRoutes.put('/config', async (c) => {
-  await assertSetupOpen(c.env);
-  const { token, config } = await parseSetupBody(c);
-  await assertSetupToken(c.env, token, clientIdentifier(c));
-
-  const validation = await validatePlatformIntegrationInput(c.env, config);
-  if (!validation.ok) {
-    throw errors.badRequest('Platform configuration is invalid', { errors: validation.errors });
-  }
-
-  await savePlatformIntegrationConfig(c.env, config);
-  return c.json({ status: await getPlatformConfigStatus(c.env) });
+  const [status, signIn] = await Promise.all([
+    getPlatformConfigStatus(c.env),
+    signInSummary(c.env),
+  ]);
+  return c.json({ ok: true, status, signIn });
 });
 
 setupRoutes.post('/complete', async (c) => {
@@ -159,11 +164,14 @@ setupRoutes.post('/complete', async (c) => {
   }
 
   const preview = await previewPlatformIntegrationConfig(c.env, config);
-  const completion = validateSetupCanComplete(preview);
+  const completion = validateSetupCanComplete(preview, {
+    emailSignIn: (await emailSignInReadiness(c.env)) === 'ready',
+  });
   if (!completion.ok) {
     throw errors.badRequest('Setup cannot be completed', { errors: completion.errors });
   }
-  await completeSetupWithConfig(c.env, config);
+  const changes = await completeSetupWithConfig(c.env, config);
+  scheduleSecurityAlert(c.env, requestWaitUntil(c), { kind: 'setup-completed', changes });
   return c.json({ completed: true, status: await getPlatformConfigStatus(c.env) });
 });
 

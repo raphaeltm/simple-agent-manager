@@ -39,7 +39,6 @@ const MOCK_PROJECT = {
   githubInstallationId: 'inst-1',
   defaultVmSize: null,
   defaultAgentType: null,
-  defaultProvider: null,
   workspaceIdleTimeoutMs: null,
   nodeIdleTimeoutMs: null,
   createdAt: '2026-01-01T00:00:00Z',
@@ -47,14 +46,14 @@ const MOCK_PROJECT = {
 };
 
 const NOW = Date.now();
-const STALE_TIME = NOW - (4 * 60 * 60 * 1000);
+const STALE_TIME = NOW - 4 * 60 * 60 * 1000;
 
 function makeSession(
   id: string,
   taskId: string,
   topic: string,
   status = 'active',
-  lastMessageAt = NOW - 30000,
+  lastMessageAt = NOW - 30000
 ) {
   return {
     id,
@@ -77,7 +76,7 @@ function makeTask(
   title: string,
   parentTaskId: string | null,
   status = 'pending',
-  triggeredBy = parentTaskId ? 'mcp' : 'user',
+  triggeredBy = parentTaskId ? 'mcp' : 'user'
 ) {
   return {
     id,
@@ -114,10 +113,10 @@ const NORMAL_TASKS = [
 // root -> L1 -> L2 -> L3 -> L4 -> L5 -> L6 (the deepest one gets the badge)
 // ---------------------------------------------------------------------------
 const DEEP_SESSIONS = Array.from({ length: 7 }, (_, i) =>
-  makeSession(`s-deep-${i}`, `t-deep-${i}`, `Level ${i} session`),
+  makeSession(`s-deep-${i}`, `t-deep-${i}`, `Level ${i} session`)
 );
 const DEEP_TASKS = Array.from({ length: 7 }, (_, i) =>
-  makeTask(`t-deep-${i}`, `Level ${i} task`, i === 0 ? null : `t-deep-${i - 1}`, 'pending'),
+  makeTask(`t-deep-${i}`, `Level ${i} task`, i === 0 ? null : `t-deep-${i - 1}`, 'pending')
 );
 
 // ---------------------------------------------------------------------------
@@ -137,7 +136,7 @@ const STALE_ANCESTOR_TASKS = [
 ];
 
 // ---------------------------------------------------------------------------
-// Scenario: stale parent/child hierarchy in the Older bucket.
+// Scenario: stopped parent/child hierarchy in the folded History section.
 // This is the exact visual path that lost the hierarchy button.
 // ---------------------------------------------------------------------------
 const STALE_HIERARCHY_SESSIONS = [
@@ -146,14 +145,14 @@ const STALE_HIERARCHY_SESSIONS = [
     't-stale-parent',
     'Completed parent dispatch with a deliberately long title that wraps cleanly inside the older chat sidebar without pushing action buttons off canvas',
     'stopped',
-    STALE_TIME,
+    STALE_TIME
   ),
   makeSession(
     's-stale-child',
     't-stale-child',
-    'MCP child dispatch with symbols <>& and enough extra words to stress the compact hierarchy row controls in the Older bucket',
+    'MCP child dispatch with symbols <>& and enough extra words to stress the compact hierarchy row controls in the History section',
     'stopped',
-    STALE_TIME + 1000,
+    STALE_TIME + 1000
   ),
 ];
 const STALE_HIERARCHY_TASKS = [
@@ -174,7 +173,8 @@ async function setupApiMocks(page: Page, fixture: Fixture) {
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
-    if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/notifications'))
+      return respond(200, { notifications: [], unreadCount: 0 });
     if (path.startsWith('/api/credentials')) return respond(200, []);
     if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
     if (path.startsWith('/api/github/installations')) return respond(200, []);
@@ -223,7 +223,7 @@ async function screenshot(page: Page, name: string) {
 
 async function assertNoOverflow(page: Page) {
   const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth,
+    () => document.documentElement.scrollWidth > window.innerWidth
   );
   expect(overflow).toBe(false);
 }
@@ -250,17 +250,14 @@ async function openMobileSidebar(page: Page) {
 
 /** Assert that at least one of the expected session topics renders in the DOM. */
 async function assertSessionVisible(page: Page, topic: string) {
-  const visible = await page.evaluate(
-    (t: string) => document.body.innerText.includes(t),
-    topic,
-  );
+  const visible = await page.evaluate((t: string) => document.body.innerText.includes(t), topic);
   expect(visible, `expected session topic "${topic}" to be visible`).toBe(true);
 }
 
-async function expandOlderBucket(page: Page) {
-  const olderButton = page.getByRole('button', { name: /Older \(/ });
-  await expect(olderButton).toBeVisible();
-  await olderButton.click();
+async function expandHistorySection(page: Page) {
+  const historyButton = page.getByRole('button', { name: /^History/ });
+  await expect(historyButton).toBeVisible();
+  await historyButton.click();
   await page.waitForTimeout(500);
 }
 
@@ -273,7 +270,7 @@ async function assertHierarchyButtonOpensModal(page: Page) {
 
 async function verifyNormalHierarchyFlow(page: Page, screenshotName: string, openSidebar = false) {
   await setupApiMocks(page, { sessions: NORMAL_SESSIONS, tasks: NORMAL_TASKS });
-  await page.goto('/projects/proj-1');
+  await page.goto('/projects/proj-1/chat');
   await page.waitForTimeout(1500);
   await assertChatPageRendered(page);
   if (openSidebar) {
@@ -286,7 +283,7 @@ async function verifyNormalHierarchyFlow(page: Page, screenshotName: string, ope
 
 async function verifyDeepHierarchyFlow(page: Page, screenshotName: string, openSidebar = false) {
   await setupApiMocks(page, { sessions: DEEP_SESSIONS, tasks: DEEP_TASKS });
-  await page.goto('/projects/proj-1');
+  await page.goto('/projects/proj-1/chat');
   await page.waitForTimeout(1500);
   await assertChatPageRendered(page);
   if (openSidebar) {
@@ -297,15 +294,15 @@ async function verifyDeepHierarchyFlow(page: Page, screenshotName: string, openS
   await screenshot(page, screenshotName);
 }
 
-async function verifyOlderHierarchyFlow(page: Page, screenshotName: string, openSidebar = false) {
+async function verifyHistoryHierarchyFlow(page: Page, screenshotName: string, openSidebar = false) {
   await setupApiMocks(page, { sessions: STALE_HIERARCHY_SESSIONS, tasks: STALE_HIERARCHY_TASKS });
-  await page.goto('/projects/proj-1');
+  await page.goto('/projects/proj-1/chat');
   await page.waitForTimeout(1500);
   await assertChatPageRendered(page);
   if (openSidebar) {
     await openMobileSidebar(page);
   }
-  await expandOlderBucket(page);
+  await expandHistorySection(page);
   await assertSessionVisible(page, 'MCP child dispatch');
   await assertHierarchyButtonOpensModal(page);
   await assertNoOverflow(page);
@@ -320,7 +317,7 @@ test.describe('Nested session sidebar — Mobile', () => {
   test.beforeEach(({ browserName }, testInfo) => {
     test.skip(
       testInfo.project.name.includes('Desktop'),
-      `Mobile audit skipped for ${testInfo.project.name} on ${browserName}`,
+      `Mobile audit skipped for ${testInfo.project.name} on ${browserName}`
     );
   });
 
@@ -334,20 +331,22 @@ test.describe('Nested session sidebar — Mobile', () => {
 
   test('stopped ancestors of deep child surface as context anchors', async ({ page }) => {
     await setupApiMocks(page, { sessions: STALE_ANCESTOR_SESSIONS, tasks: STALE_ANCESTOR_TASKS });
-    await page.goto('/projects/proj-1');
+    await page.goto('/projects/proj-1/chat');
     await page.waitForTimeout(1500);
     await assertChatPageRendered(page);
     await openMobileSidebar(page);
     // The original bug: deep child's stopped ancestors were never surfaced.
     // Verifies the root stopped ancestor renders as a context anchor, which
-    // is what restores lineage navigation to the deep child.
+    // is what restores lineage navigation to the deep child. Stopped chats
+    // live in History, folded by default.
+    await expandHistorySection(page);
     await assertSessionVisible(page, 'Original investigation');
     await assertNoOverflow(page);
     await screenshot(page, 'nested-sidebar-stale-ancestor-mobile');
   });
 
-  test('Older bucket stale hierarchy button renders and opens modal', async ({ page }) => {
-    await verifyOlderHierarchyFlow(page, 'nested-sidebar-stale-hierarchy-mobile', true);
+  test('History section stale hierarchy button renders and opens modal', async ({ page }) => {
+    await verifyHistoryHierarchyFlow(page, 'nested-sidebar-stale-hierarchy-mobile', true);
   });
 });
 
@@ -360,7 +359,7 @@ test.describe('Nested session sidebar — Desktop', () => {
   test.beforeEach(({ browserName }, testInfo) => {
     test.skip(
       !testInfo.project.name.includes('Desktop'),
-      `Desktop audit skipped for ${testInfo.project.name} on ${browserName}`,
+      `Desktop audit skipped for ${testInfo.project.name} on ${browserName}`
     );
   });
 
@@ -372,8 +371,8 @@ test.describe('Nested session sidebar — Desktop', () => {
     await verifyDeepHierarchyFlow(page, 'nested-sidebar-deep-desktop');
   });
 
-  test('Older bucket stale hierarchy button renders and opens modal', async ({ page }) => {
-    await verifyOlderHierarchyFlow(page, 'nested-sidebar-stale-hierarchy-desktop');
+  test('History section stale hierarchy button renders and opens modal', async ({ page }) => {
+    await verifyHistoryHierarchyFlow(page, 'nested-sidebar-stale-hierarchy-desktop');
   });
 });
 
@@ -390,11 +389,23 @@ test('Connector provenance in session sidebar remains user-initiated', async ({ 
   }));
   const sessions = NORMAL_SESSIONS.map((session, i) => ({ ...session, task: tasks[i] }));
   await setupApiMocks(page, { tasks, sessions });
-  await page.goto('/projects/proj-1');
-  await expect(page.getByRole('button', { name: 'Project settings' })).toBeVisible();
+  await page.goto('/projects/proj-1/chat');
+  // Ready: the project chat's new-chat page has rendered.
+  await expect(page.getByText('What do you want to build?')).toBeVisible();
   await openMobileSidebar(page);
-  await expect(page.getByTitle(`Created via ${connectorClientName}`).first()).toBeVisible();
+  // Provenance reads "Task via <app>" on the meta line, under the title.
+  const provenance = page.getByTestId('session-connector').first();
+  await expect(provenance).toBeVisible();
+  await expect(provenance).toContainText('via Claude Research');
+  await expect(page.getByTitle(`Task started from ${connectorClientName}`).first()).toBeVisible();
   await assertNoOverflow(page);
+  // The provenance sits below the title, so the long name cannot push anything on the title line.
+  const titleBox = await page
+    .getByText('Implement authentication', { exact: true })
+    .first()
+    .boundingBox();
+  const provenanceBox = await provenance.boundingBox();
+  expect(provenanceBox!.y).toBeGreaterThan(titleBox!.y + titleBox!.height - 1);
   expect(
     await page
       .getByText('Implement authentication', { exact: true })

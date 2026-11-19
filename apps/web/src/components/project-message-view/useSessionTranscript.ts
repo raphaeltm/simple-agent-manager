@@ -1,17 +1,20 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { ChatMessageAppend } from '@simple-agent-manager/shared';
+import { hashKey, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
 import type { ChatMessageResponse, ChatSessionDetailResponse } from '../../lib/api';
 import { getChatSession } from '../../lib/api';
-import { mergeMessages } from '../../lib/merge-messages';
+import { applyMessageAppend, mergeMessages } from '../../lib/merge-messages';
 import {
   fetchHistoryUntil,
   historyReaches,
   type HistoryTarget,
   mergeRecentWindowOrRefresh,
   oldestPersistedCursor,
+  readMessagesAfter,
 } from '../../lib/message-paging';
+import { takeRoutePrefetchedTranscript } from '../../lib/project-route-prefetch';
 import {
   chatQueryKeys,
   chatSessionMessagesQueryOptions,
@@ -38,8 +41,25 @@ export interface SessionTranscript {
   firstItemIndex: number;
   /** Adds live rows (socket deliveries, optimistic sends) in transcript order. */
   appendMessages: (incoming: ChatMessageResponse[]) => void;
-  /** Merges a newest-window response, draining any gap to the loaded tail first. */
-  mergeRecentWindow: (recent: ChatSessionDetailResponse, signal?: AbortSignal) => Promise<void>;
+  /** False asks the socket to recover a missing base or revision gap through REST. */
+  appendMessageContent: (append: ChatMessageAppend) => boolean;
+  /** Merges server-reported fields into one loaded row's tool metadata (delivery state). */
+  patchMessageMetadata: (messageId: string, patch: Record<string, unknown>) => void;
+  /**
+   * Reads and adds every row persisted after the newest loaded one (the socket subscribed).
+   * `afterReadsSettle` runs once no transcript read is in flight, for other state to re-read.
+   */
+  catchUpTail: (afterReadsSettle?: () => void) => void;
+  /**
+   * Merges a newest-window response, draining any gap to the loaded tail first. When
+   * `isCurrent` says the read was overtaken while it merged, its rows still land but its
+   * session and state snapshots do not overwrite newer ones.
+   */
+  mergeRecentWindow: (
+    recent: ChatSessionDetailResponse,
+    signal?: AbortSignal,
+    isCurrent?: () => boolean
+  ) => Promise<void>;
   /** Loads the next page of older history. */
   loadMore: () => Promise<void>;
   /** Loads older pages until `target` is loaded or history runs out. */
@@ -64,12 +84,19 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
     [projectId, queryScope, sessionId]
   );
 
+  const options = chatSessionMessagesQueryOptions(queryScope, projectId, sessionId);
+  // Read once per open, so a later render cannot change how this open reconciles.
+  const [routePrefetched] = useState(() =>
+    takeRoutePrefetchedTranscript(hashKey(options.queryKey))
+  );
   const query = useQuery({
-    ...chatSessionMessagesQueryOptions(queryScope, projectId, sessionId),
+    ...options,
     enabled: Boolean(queryScope && projectId && sessionId),
     // Opening a chat always reconciles its cached copy with the server, however
-    // fresh the cache is: a message persisted while it was closed must appear.
-    refetchOnMount: 'always',
+    // fresh the cache is: a message persisted while it was closed must appear. The
+    // exception is the open a route prefetch just read the transcript for; it
+    // reconciles only once that read has gone stale.
+    refetchOnMount: routePrefetched ? true : 'always',
   });
   const detail = query.data;
   const messages = detail?.messages ?? NO_MESSAGES;
@@ -85,9 +112,15 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
     [queryClient, queryKey]
   );
 
+  // Ids of rows added live while a subscribe read waits for a read already in flight; see
+  // `catchUpTail`.
+  const addedLiveRef = useRef<Set<string> | null>(null);
+
   /** Adds live rows (socket deliveries, optimistic sends) in transcript order. */
   const appendMessages = useCallback(
     (incoming: ChatMessageResponse[]) => {
+      const addedLive = addedLiveRef.current;
+      if (addedLive) for (const message of incoming) addedLive.add(message.id);
       queryClient.setQueryData<ChatSessionDetailResponse>(
         queryKey,
         (current) =>
@@ -97,13 +130,106 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
     [queryClient, queryKey]
   );
 
+  const patchMessageMetadata = useCallback(
+    (messageId: string, patch: Record<string, unknown>) => {
+      queryClient.setQueryData<ChatSessionDetailResponse>(queryKey, (current) => {
+        if (!current?.messages.some((message) => message.id === messageId)) return current;
+        return {
+          ...current,
+          messages: current.messages.map((message) =>
+            message.id === messageId
+              ? { ...message, toolMetadata: { ...(message.toolMetadata ?? {}), ...patch } }
+              : message
+          ),
+        };
+      });
+    },
+    [queryClient, queryKey]
+  );
+
+  const appendMessageContent = useCallback(
+    (append: ChatMessageAppend): boolean => {
+      const current = readDetail();
+      if (!current) return false;
+      const result = applyMessageAppend(current.messages, append);
+      if (result.needsCatchUp) return false;
+      queryClient.setQueryData<ChatSessionDetailResponse>(queryKey, {
+        ...current,
+        messages: result.messages,
+      });
+      return true;
+    },
+    [queryClient, queryKey, readDetail]
+  );
+
+  /**
+   * For a socket that just subscribed: reads the rows persisted after the transcript's last
+   * read and before the subscription. They reached no socket, and once a newer live row lands,
+   * no read from the newest row would find them again.
+   *
+   * A read already in flight (the mount refresh, started before the socket opened) is awaited,
+   * and this one resumes from the newest row a read returned instead of reading that range
+   * twice. Rows added live in the meantime are newer than the gap, so they never set the
+   * cursor. Messages only, through the messages-only route; the session and state snapshots
+   * stay with the reads that own them, and `afterReadsSettle` is the point where a caller can
+   * re-read one of them without a read in flight landing an older snapshot on top.
+   */
+  const catchUpTail = useCallback(
+    (afterReadsSettle?: () => void) => {
+      const addedLive = new Set<string>();
+      addedLiveRef.current = addedLive;
+      const inFlight = queryClient.getQueryCache().find({ queryKey, exact: true })?.promise;
+      // A failed or cancelled read still leaves a transcript to resume from.
+      const readsSettled = Promise.resolve(inFlight).catch(() => undefined);
+      if (afterReadsSettle) {
+        void readsSettled.then(afterReadsSettle).catch((err: unknown) => {
+          console.warn('Failed to re-read session state after the chat socket opened', err);
+        });
+      }
+      void readsSettled
+        .then(async () => {
+          const loaded = readDetail();
+          if (!loaded) return;
+          const read = loaded.messages.filter((message) => !addedLive.has(message.id));
+          const found = await readMessagesAfter(
+            projectId,
+            sessionId,
+            read,
+            undefined,
+            loaded.toolChanges?.revision
+          );
+          if (found.messages.length === 0 && !found.resetRequired) return;
+          queryClient.setQueryData<ChatSessionDetailResponse>(
+            queryKey,
+            (current) =>
+              current && {
+                ...current,
+                toolChanges: found.toolChanges,
+                hasMore: found.resetRequired ? (found.hasMore ?? true) : current.hasMore,
+                messages: found.resetRequired
+                  ? found.messages
+                  : mergeMessages(current.messages, found.messages, 'append'),
+              }
+          );
+        })
+        .catch((err: unknown) => {
+          // Best effort: a reconnect catch-up or the fallback poll reads the newest window again.
+          console.warn('Failed to read messages persisted before the chat socket opened', err);
+        })
+        .finally(() => {
+          if (addedLiveRef.current === addedLive) addedLiveRef.current = null;
+        });
+    },
+    [projectId, queryClient, queryKey, readDetail, sessionId]
+  );
+
   /**
    * Merges a newest-window response (fallback poll, reconnect catch-up). A window
    * that no longer reaches back to the loaded tail drains the gap forward first,
    * so the transcript never keeps a hole.
    */
   const mergeRecentWindow = useCallback(
-    async (recent: ChatSessionDetailResponse, signal?: AbortSignal) => {
+    async (recent: ChatSessionDetailResponse, signal?: AbortSignal, isCurrent?: () => boolean) => {
       const current = readDetail() ?? { ...recent, messages: NO_MESSAGES };
       const merged = await mergeRecentWindowOrRefresh(
         projectId,
@@ -116,16 +242,20 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
         // Rows written while the window merged (a socket row, a send, an older
         // page) are in neither of its inputs; keep them.
         const merging = new Set(current.messages.map((message) => message.id));
+        if (merged.toolChanges?.resetRequired) return merged;
         const arrived = latest?.messages.filter((message) => !merging.has(message.id)) ?? [];
+        // Checked here, after every await: an overtaken read keeps the newer snapshots.
+        const overtaken = latest && isCurrent ? !isCurrent() : false;
         return {
           ...(latest ?? merged),
-          ...merged,
-          messages:
-            arrived.length > 0
-              ? mergeMessages(merged.messages, arrived, 'append')
-              : merged.messages,
+          ...(overtaken ? { hasMore: merged.hasMore } : merged),
+          messages: mergeMessages(
+            merged.messages,
+            [...(latest?.messages ?? []), ...arrived],
+            'append'
+          ),
           // A window that carries no state snapshot must not erase the last known one.
-          state: merged.state ?? latest?.state ?? null,
+          state: overtaken ? (latest?.state ?? null) : (merged.state ?? latest?.state ?? null),
         };
       });
     },
@@ -207,6 +337,9 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
     loadingMore: olderLoadsInFlight > 0,
     firstItemIndex,
     appendMessages,
+    appendMessageContent,
+    patchMessageMetadata,
+    catchUpTail,
     mergeRecentWindow,
     loadMore,
     loadUntil,

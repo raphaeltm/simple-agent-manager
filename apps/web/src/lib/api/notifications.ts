@@ -1,4 +1,5 @@
 import type {
+  HumanInputCategory,
   ListNotificationsResponse,
   NotificationPreferencesResponse,
   NotificationType,
@@ -29,16 +30,8 @@ export async function listNotifications(opts?: {
   return request<ListNotificationsResponse>(`/api/notifications${qs ? `?${qs}` : ''}`);
 }
 
-export async function getNotificationUnreadCount(): Promise<{ count: number }> {
-  return request<{ count: number }>('/api/notifications/unread-count');
-}
-
 export async function markNotificationRead(id: string): Promise<void> {
   await request('/api/notifications/' + encodeURIComponent(id) + '/read', { method: 'POST' });
-}
-
-export async function markAllNotificationsRead(): Promise<void> {
-  await request('/api/notifications/read-all', { method: 'POST' });
 }
 
 export async function dismissNotification(id: string): Promise<void> {
@@ -89,4 +82,35 @@ export async function listWebPushSubscriptions(): Promise<WebPushSubscriptionsRe
 export function getNotificationWsUrl(): string {
   const base = API_URL.replace(/^http/, 'ws');
   return `${base}/api/notifications/ws`;
+}
+
+export interface AttentionRequestContext {
+  request: {
+    id: string;
+    reason: string | null;
+    options: string[];
+    /** `request_human_input` category, or null when the agent gave none. */
+    category: HumanInputCategory | null;
+    createdAt: number;
+    resolvedAt: number | null;
+    resolvedAnswer: string | null;
+    expired: boolean;
+    canAnswer: boolean;
+  };
+  session: { id: string; topic: string | null };
+  messages: (import('./sessions').ChatMessageResponse & { truncated?: boolean })[];
+}
+
+/** Full saved question independent of whichever chat page is currently loaded. */
+export async function getAttentionRequestContext(
+  projectId: string,
+  sessionId: string,
+  markerId: string,
+  context: boolean,
+  signal?: AbortSignal
+): Promise<AttentionRequestContext> {
+  return request<AttentionRequestContext>(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/attention/${encodeURIComponent(markerId)}${context ? '?context=true' : ''}`,
+    signal ? { signal } : {}
+  );
 }

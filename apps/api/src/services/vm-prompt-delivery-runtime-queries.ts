@@ -28,6 +28,13 @@ import type {
 
 const log = createModuleLogger('vm_prompt_delivery_adapter');
 
+/** Runs the caller's pre-side-effect authority check, if it supplied one. */
+export async function runSideEffectGuard(input: {
+  beforeSideEffect?: () => Promise<PromptDeliveryResult | null>;
+}): Promise<PromptDeliveryResult | null> {
+  return input.beforeSideEffect ? input.beforeSideEffect() : null;
+}
+
 export function httpStatus(error: unknown): number | null {
   if (error instanceof NodeAgentHttpError) return error.statusCode;
   const message = error instanceof Error ? error.message : String(error);
@@ -59,7 +66,8 @@ export async function getDeliveryCapabilities(
   env: Env,
   target: VmPromptDeliveryTarget,
   requestTimeoutMs: number,
-  sourceTaskGuard?: VmPromptDeliverySourceTaskGuard
+  sourceTaskGuard?: VmPromptDeliverySourceTaskGuard,
+  noWakeContainer = false
 ): Promise<VmPromptDeliveryCapabilities | null> {
   try {
     const raw = await nodeAgentRequest(
@@ -74,6 +82,7 @@ export async function getDeliveryCapabilities(
         // A read-only probe can outlive the preparation budget while wake converges.
         // Its timeout is not evidence of an interrupted prompt or a failed runtime.
         recoverContainerOnTimeout: false,
+        noWakeContainer,
         ...(sourceTaskGuard ? { sourceTaskGuard } : {}),
       }
     );
@@ -118,6 +127,9 @@ export async function lookupDeliveryReceipt(
         userId: target.userId,
         workspaceId: target.workspaceId,
         requestTimeoutMs,
+        // A receipt observes a prior delivery; it never authorizes activation or recovery.
+        noWakeContainer: true,
+        recoverContainerOnTimeout: false,
         ...(sourceTaskGuard ? { sourceTaskGuard } : {}),
       }
     );

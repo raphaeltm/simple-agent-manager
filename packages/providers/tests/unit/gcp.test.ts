@@ -308,6 +308,73 @@ describe('GcpProvider', () => {
       expect(body.metadata.items[0].value).toBe('#cloud-config\nruncmd: []');
     });
 
+    it('reads the created VM from its creation zone, never a same-name VM elsewhere', async () => {
+      const requested: string[] = [];
+      globalThis.fetch = vi.fn(async (url: string, init: RequestInit = {}) => {
+        const target = String(url);
+        requested.push(`${init.method ?? 'GET'} ${target}`);
+        if (target.endsWith('/zones/northamerica-northeast2-b/instances/node-zonal')) {
+          return new Response(
+            JSON.stringify(
+              gcpInstance({
+                id: 'created',
+                name: 'node-zonal',
+                machineType: 'zones/northamerica-northeast2-b/machineTypes/e2-medium',
+              })
+            )
+          );
+        }
+        if (target.includes('/instances/node-zonal') || target.includes('/aggregated/')) {
+          // A same-name VM in another zone (possible under zonal DNS).
+          return new Response(JSON.stringify(gcpInstance({ id: 'other', name: 'node-zonal' })));
+        }
+        return successfulCreateResponse(target, init);
+      });
+
+      const vm = await provider.createVM({
+        name: 'node-zonal',
+        size: 'small',
+        location: 'northamerica-northeast2-b',
+        userData: '#cloud-config',
+      });
+
+      expect(vm.id).toBe('created');
+      const lookups = requested.filter((r) => r.startsWith('GET ') && r.includes('node-zonal'));
+      expect(lookups).toEqual([
+        'GET https://compute.googleapis.com/compute/v1/projects/test-project/zones/northamerica-northeast2-b/instances/node-zonal',
+      ]);
+    });
+
+    it('does not fall back to a project-wide lookup when the creation zone has no such VM', async () => {
+      const mockFetch = vi.fn(async (url: string, init: RequestInit = {}) => {
+        const target = String(url);
+        if (target.endsWith('/zones/us-central1-a/instances/node-missing')) {
+          return new Response(JSON.stringify({ error: { code: 404 } }), { status: 404 });
+        }
+        if (target.includes('/aggregated/')) {
+          return new Response(
+            JSON.stringify({
+              items: { 'zones/us-east1-b': { instances: [gcpInstance({ name: 'node-missing' })] } },
+            })
+          );
+        }
+        return successfulCreateResponse(target, init);
+      });
+      globalThis.fetch = mockFetch;
+
+      await expect(
+        provider.createVM({
+          name: 'node-missing',
+          size: 'small',
+          location: 'us-central1-a',
+          userData: '#cloud-config',
+        })
+      ).rejects.toThrow('VM node-missing created but not found after polling');
+      expect(mockFetch.mock.calls.some(([url]) => String(url).includes('/aggregated/'))).toBe(
+        false
+      );
+    });
+
     it('uses config.instanceType as the concrete machineType when provided', async () => {
       let capturedBody: string | undefined;
       globalThis.fetch = vi.fn(async (url: string, init: RequestInit = {}) => {
@@ -572,189 +639,137 @@ describe('GcpProvider', () => {
   });
 
   describe('listVMs', () => {
-    it('should tolerate explicit unavailable or missing zones', async () => {
-      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
-        if (url.includes('/zones/us-central1-a/')) {
-          return new Response(
-            JSON.stringify({
-              items: [
-                {
-                  id: '1',
-                  name: 'vm-1',
-                  status: 'RUNNING',
-                  machineType: 'zones/us-central1-a/machineTypes/e2-medium',
-                  creationTimestamp: '2026-03-18T00:00:00Z',
-                  networkInterfaces: [{ accessConfigs: [{ natIP: testIpv4(1, 2, 3, 4) }] }],
-                  labels: { 'sam-managed': 'true' },
-                },
-              ],
-            })
-          );
-        }
-        if (url.includes('/zones/us-east1-b/')) {
-          return new Response(JSON.stringify({ error: { message: 'Zone unavailable' } }), {
-            status: 503,
-          });
-        }
-        return new Response(JSON.stringify({ error: { message: 'Zone not found' } }), {
-          status: 404,
-        });
-      });
+    const aggregated = (items: Record<string, unknown>, nextPageToken?: string) =>
+      new Response(JSON.stringify({ items, ...(nextPageToken ? { nextPageToken } : {}) }));
 
-      const result = await provider.listVMs();
-
-      expect(result).toHaveLength(1);
-      expect(result[0]?.id).toBe('1');
-    });
-
-    it('follows GCP zonal nextPageToken and preserves filters', async () => {
+    it('lists every zone in one aggregated call, including zones outside the labelled list', async () => {
       const mockFetch = vi.fn().mockImplementation(async (url: string) => {
-        if (url.includes('/zones/us-central1-a/instances')) {
-          const parsed = new URL(url);
-          expect(parsed.searchParams.get('filter')).toContain('labels.sam-managed=true');
-          expect(parsed.searchParams.get('filter')).toContain('labels.env=production');
-          expect(parsed.searchParams.get('filter')).toContain('labels.installation=0123456789abcdef0123456789abcdef');
-          if (!parsed.searchParams.has('pageToken')) {
-            return new Response(
-              JSON.stringify({
-                items: [gcpInstance({ id: '1', name: 'page-1' })],
-                nextPageToken: 'token-2',
-              })
-            );
-          }
-          expect(parsed.searchParams.get('pageToken')).toBe('token-2');
-          return new Response(
-            JSON.stringify({
-              items: [gcpInstance({ id: '2', name: 'page-2' })],
-            })
-          );
-        }
-        return new Response(JSON.stringify({ error: { message: 'Zone not found' } }), {
-          status: 404,
+        expect(url).toContain('/projects/test-project/aggregated/instances?');
+        return aggregated({
+          'zones/us-central1-a': { instances: [gcpInstance({ id: '1', name: 'vm-1' })] },
+          'zones/northamerica-northeast2-b': {
+            instances: [
+              gcpInstance({
+                id: '2',
+                name: 'vm-2',
+                machineType: 'zones/northamerica-northeast2-b/machineTypes/e2-medium',
+              }),
+            ],
+          },
+          'zones/us-east1-b': {
+            warning: { code: 'NO_RESULTS_ON_PAGE', message: 'There are no results for scope' },
+          },
         });
       });
       globalThis.fetch = mockFetch;
 
-      const result = await provider.listVMs({
+      const result = await provider.listVMs();
+
+      expect(result.map((vm) => vm.id)).toEqual(['1', '2']);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('requires every label with the parenthesised AND filter', async () => {
+      const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+        expect(new URL(url).searchParams.get('filter')).toBe(
+          '(labels.sam-managed = "true") (labels.env = "production") (labels.installation = "0123456789abcdef0123456789abcdef")'
+        );
+        return aggregated({});
+      });
+      globalThis.fetch = mockFetch;
+
+      await provider.listVMs({
         env: 'production',
         installation: '0123456789abcdef0123456789abcdef',
       });
 
-      expect(result.map((vm) => vm.id)).toEqual(['1', '2']);
-      expect(mockFetch).toHaveBeenCalledTimes(9);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
-    it('continues after an empty GCP zonal page when nextPageToken is present', async () => {
-      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
-        if (url.includes('/zones/us-central1-a/instances')) {
-          const parsed = new URL(url);
-          if (!parsed.searchParams.has('pageToken')) {
-            return new Response(JSON.stringify({ items: [], nextPageToken: 'token-2' }));
-          }
-          return new Response(JSON.stringify({ items: [gcpInstance({ id: '3', name: 'later' })] }));
-        }
-        return new Response(JSON.stringify({ error: { message: 'Zone not found' } }), {
-          status: 404,
-        });
-      });
+    it('refuses a label value that could widen the filter, before any request', async () => {
+      const mockFetch = vi.fn();
+      globalThis.fetch = mockFetch;
 
-      const result = await provider.listVMs();
-      expect(result.map((vm) => vm.id)).toEqual(['3']);
+      await expect(provider.listVMs({ env: 'prod") OR (labels.x = "y' })).rejects.toMatchObject({
+        category: 'invalid_config',
+      });
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    it('rejects repeated GCP zonal page tokens', async () => {
-      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
-        if (url.includes('/zones/us-central1-a/instances')) {
-          return new Response(JSON.stringify({ items: [], nextPageToken: 'same-token' }));
-        }
-        return new Response(JSON.stringify({ error: { message: 'Zone not found' } }), {
-          status: 404,
-        });
+    it('accepts an international label value and still quotes it as one term', async () => {
+      const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+        expect(new URL(url).searchParams.get('filter')).toBe(
+          '(labels.sam-managed = "true") (labels.team = "café-équipe_2")'
+        );
+        return aggregated({});
       });
+      globalThis.fetch = mockFetch;
 
-      await expect(provider.listVMs()).rejects.toThrow(/repeated nextPageToken/);
+      await provider.listVMs({ team: 'café-équipe_2' });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
-    it.each([2, ''])('rejects malformed GCP zonal page tokens: %j', async (nextPageToken) => {
-      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
-        if (url.includes('/zones/us-central1-a/instances')) {
-          return new Response(JSON.stringify({ items: [], nextPageToken }));
-        }
-        return new Response(JSON.stringify({ error: { message: 'Zone not found' } }), {
-          status: 404,
-        });
-      });
+    it.each(['Café', 'a b', 'a"b', 'a)b', 'x'.repeat(64)])(
+      'refuses label value %j before any request',
+      async (value) => {
+        const mockFetch = vi.fn();
+        globalThis.fetch = mockFetch;
 
-      await expect(provider.listVMs()).rejects.toThrow(/nextPageToken/);
+        await expect(provider.listVMs({ team: value })).rejects.toMatchObject({
+          category: 'invalid_config',
+        });
+        expect(mockFetch).not.toHaveBeenCalled();
+      }
+    );
+
+    it('fails closed on a scope with neither instances nor a warning', async () => {
+      globalThis.fetch = vi.fn().mockImplementation(async () =>
+        aggregated({
+          'zones/us-central1-a': { instances: [gcpInstance({ id: '1' })] },
+          'zones/us-east1-b': {},
+        })
+      );
+
+      await expect(provider.listVMs()).rejects.toThrow(/expected instances or warning/);
     });
 
-    it('propagates later GCP zonal page errors', async () => {
-      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
-        if (url.includes('/zones/us-central1-a/instances')) {
-          const parsed = new URL(url);
-          if (!parsed.searchParams.has('pageToken')) {
-            return new Response(JSON.stringify({ items: [], nextPageToken: 'token-2' }));
-          }
-          return new Response(JSON.stringify({ error: { message: 'Permission denied' } }), {
-            status: 403,
-          });
-        }
-        return new Response(JSON.stringify({ error: { message: 'Zone not found' } }), {
-          status: 404,
-        });
-      });
-
-      await expect(provider.listVMs()).rejects.toThrow(/zone us-central1-a list failed/);
-    });
-
-    it('fails closed when GCP zonal pagination exceeds the max-page guard', async () => {
-      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
-        if (url.includes('/zones/us-central1-a/instances')) {
-          const parsed = new URL(url);
-          const current = parsed.searchParams.get('pageToken') || 'token-0';
-          return new Response(JSON.stringify({ items: [], nextPageToken: `${current}-next` }));
-        }
-        return new Response(JSON.stringify({ error: { message: 'Zone not found' } }), {
-          status: 404,
-        });
-      });
+    it('fails closed when any zone is unreachable: the inventory would be partial', async () => {
+      globalThis.fetch = vi.fn().mockImplementation(async () =>
+        aggregated({
+          'zones/us-central1-a': { instances: [gcpInstance({ id: '1' })] },
+          'zones/europe-west3-a': {
+            warning: {
+              code: 'UNREACHABLE',
+              message: 'zone europe-west3-a is unreachable',
+              data: [{ key: 'scope', value: 'zones/europe-west3-a' }],
+            },
+          },
+        })
+      );
 
       await expect(provider.listVMs()).rejects.toThrow(
-        new RegExp(`exceeded ${DEFAULT_GCP_MAX_LIST_PAGES} pages`)
+        'GCP instance list is incomplete: unreachable zones/europe-west3-a'
       );
     });
 
-    it('collects VMs across three or more GCP zonal pages', async () => {
+    it('follows aggregated nextPageToken across three or more pages', async () => {
       globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
-        if (url.includes('/zones/us-central1-a/instances')) {
-          const parsed = new URL(url);
-          const token = parsed.searchParams.get('pageToken');
-          if (!token) {
-            return new Response(
-              JSON.stringify({
-                items: [gcpInstance({ id: '1', name: 'page-1' })],
-                nextPageToken: 'tok-2',
-              })
-            );
-          }
-          if (token === 'tok-2') {
-            return new Response(
-              JSON.stringify({
-                items: [gcpInstance({ id: '2', name: 'page-2' })],
-                nextPageToken: 'tok-3',
-              })
-            );
-          }
-          if (token === 'tok-3') {
-            return new Response(
-              JSON.stringify({
-                items: [gcpInstance({ id: '3', name: 'page-3' })],
-              })
-            );
-          }
+        const token = new URL(url).searchParams.get('pageToken');
+        if (!token) {
+          return aggregated(
+            { 'zones/us-central1-a': { instances: [gcpInstance({ id: '1', name: 'page-1' })] } },
+            'tok-2'
+          );
         }
-        return new Response(JSON.stringify({ error: { message: 'Zone not found' } }), {
-          status: 404,
+        if (token === 'tok-2') {
+          return aggregated(
+            { 'zones/us-east1-b': { instances: [gcpInstance({ id: '2', name: 'page-2' })] } },
+            'tok-3'
+          );
+        }
+        return aggregated({
+          'zones/me-central2-c': { instances: [gcpInstance({ id: '3', name: 'page-3' })] },
         });
       });
 
@@ -762,22 +777,80 @@ describe('GcpProvider', () => {
       expect(vms.map((vm) => vm.name)).toEqual(['page-1', 'page-2', 'page-3']);
     });
 
-    it('should fail fast on permission failures', async () => {
+    it('continues after an empty aggregated page when nextPageToken is present', async () => {
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        if (!new URL(url).searchParams.has('pageToken')) return aggregated({}, 'token-2');
+        return aggregated({
+          'zones/us-central1-a': { instances: [gcpInstance({ id: '3', name: 'later' })] },
+        });
+      });
+
+      const result = await provider.listVMs();
+      expect(result.map((vm) => vm.id)).toEqual(['3']);
+    });
+
+    it('rejects repeated aggregated page tokens', async () => {
+      globalThis.fetch = vi.fn().mockImplementation(async () => aggregated({}, 'same-token'));
+
+      await expect(provider.listVMs()).rejects.toThrow(/repeated nextPageToken/);
+    });
+
+    it.each([2, ''])('rejects malformed aggregated page tokens: %j', async (nextPageToken) => {
+      globalThis.fetch = vi
+        .fn()
+        .mockImplementation(async () => new Response(JSON.stringify({ items: {}, nextPageToken })));
+
+      await expect(provider.listVMs()).rejects.toThrow(/nextPageToken/);
+    });
+
+    it('fails closed when aggregated pagination exceeds the max-page guard', async () => {
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        const current = new URL(url).searchParams.get('pageToken') || 'token-0';
+        return aggregated({}, `${current}-next`);
+      });
+
+      await expect(provider.listVMs()).rejects.toThrow(
+        new RegExp(`exceeded ${DEFAULT_GCP_MAX_LIST_PAGES} pages`)
+      );
+    });
+
+    it('propagates a later aggregated page error', async () => {
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        if (!new URL(url).searchParams.has('pageToken')) return aggregated({}, 'token-2');
+        return new Response(JSON.stringify({ error: { message: 'Permission denied' } }), {
+          status: 403,
+        });
+      });
+
+      await expect(provider.listVMs()).rejects.toThrow(/GCP instance list failed/);
+    });
+
+    it('fails fast on permission failures', async () => {
       globalThis.fetch = vi
         .fn()
         .mockResolvedValue(
           new Response(JSON.stringify({ error: { message: 'Permission denied' } }), { status: 403 })
         );
 
-      await expect(provider.listVMs()).rejects.toThrow(/zone us-central1-a list failed/);
+      await expect(provider.listVMs()).rejects.toThrow(/GCP instance list failed/);
     });
 
-    it('should fail fast on malformed list payloads', async () => {
+    it('fails fast on malformed list payloads', async () => {
       globalThis.fetch = vi
         .fn()
         .mockResolvedValue(
-          new Response(JSON.stringify({ items: [{ id: 'missing-required-fields' }] }))
+          new Response(
+            JSON.stringify({ items: { 'zones/us-central1-a': { instances: [{ id: 'missing' }] } } })
+          )
         );
+
+      await expect(provider.listVMs()).rejects.toThrow(/response validation failed/);
+    });
+
+    it('fails fast on a scope warning without a code', async () => {
+      globalThis.fetch = vi
+        .fn()
+        .mockResolvedValue(aggregated({ 'zones/us-central1-a': { warning: { message: 'x' } } }));
 
       await expect(provider.listVMs()).rejects.toThrow(/response validation failed/);
     });

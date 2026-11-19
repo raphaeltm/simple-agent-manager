@@ -1,0 +1,255 @@
+---
+/**
+ * 07 Interface: the building blocks people meet first, on a small void, plus a session row
+ * assembled from them. Buttons and the badge are the site's real classes.
+ */
+import SectionHead from './SectionHead.astro';
+
+const people = [
+  { initials: 'RT', color: '#4ade80', label: 'You' },
+  { initials: 'MK', color: '#22d3ee', label: 'First teammate' },
+  { initials: 'JL', color: '#a78bfa', label: 'Second teammate' },
+];
+---
+
+<section id="interface" class="bg-section" aria-labelledby="interface-title">
+  <div class="container">
+    <SectionHead id="interface" title="The pieces people touch">
+      The same parts appear on the website and in the app. Use them as they are; if something is
+      missing, add it to the shared package rather than restyling a copy.
+    </SectionHead>
+
+    <div class="bg-ui sam-void" data-reveal="scale">
+      <div class="bg-ui-grid">
+        <div class="bg-ui-cell sam-glass sam-glass-rim">
+          <p class="bg-ui-label">Buttons</p>
+          <div class="bg-ui-row">
+            <span class="sam-btn sam-btn--primary">Deploy SAM</span>
+            <span class="sam-btn sam-btn--glass">Read the docs</span>
+          </div>
+          <p class="bg-ui-note">One primary action per view. The primary keeps white text at 4.6:1 or better.</p>
+        </div>
+
+        <div class="bg-ui-cell sam-glass sam-glass-rim">
+          <p class="bg-ui-label">Status</p>
+          <div class="bg-ui-row">
+            <span class="bg-chip bg-chip--live"><span class="d"></span>Running</span>
+            <span class="bg-chip bg-chip--wait"><span class="d"></span>Needs input</span>
+            <span class="bg-chip"><span class="d"></span>Stopped</span>
+          </div>
+          <p class="bg-ui-note">Chips are solid tints, never glass. Green is working, amber is waiting on you.</p>
+        </div>
+
+        <div class="bg-ui-cell sam-glass sam-glass-rim">
+          <p class="bg-ui-label">People</p>
+          <div class="bg-ui-row">
+            <span class="bg-avatars">
+              {people.map((person) => (
+                <span class="bg-avatar" style={`--pc:${person.color}`} title={person.label}>{person.initials}</span>
+              ))}
+              <span class="bg-avatar bg-avatar--auto" title="Automation">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>
+              </span>
+            </span>
+          </div>
+          <p class="bg-ui-note">You are green. Teammates are cyan, violet and rose in join order. Automations are slate.</p>
+        </div>
+
+        <div class="bg-ui-cell sam-glass sam-glass-rim">
+          <p class="bg-ui-label">Badge</p>
+          <div class="bg-ui-row">
+            <span class="hero-badge sam-glass sam-glass--chrome sam-glass-rim"><span class="badge-dot"></span>Open source · AGPL-3.0</span>
+          </div>
+          <p class="bg-ui-note">For one short fact above a headline. Never more than one per screen.</p>
+        </div>
+      </div>
+
+      <div class="bg-session sam-glass sam-glass--slab sam-glass-rim" data-reveal style="--i:2">
+        <span class="bg-avatar" style="--pc:#22d3ee">MK</span>
+        <div class="bg-session-text">
+          <strong>Fix the flaky payments webhook test</strong>
+          <span>Payments API · Claude Code · 12 min</span>
+        </div>
+        <span class="bg-chip bg-chip--live"><span class="d"></span>Running</span>
+        <span class="bg-count">1<span class="sr-only"> question waiting</span></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .bg-ui {
+    display: grid;
+    gap: 14px;
+    padding: clamp(16px, 3vw, 28px);
+    border-radius: 28px;
+    overflow: hidden;
+  }
+
+  .bg-ui-grid {
+    display: grid;
+    gap: 14px;
+  }
+
+  @media (min-width: 900px) {
+    .bg-ui-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  .bg-ui-cell {
+    display: grid;
+    gap: 16px;
+    align-content: start;
+    padding: 22px;
+    border-radius: 20px;
+  }
+
+  .bg-ui-label {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-fg-dim);
+  }
+
+  .bg-ui-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    min-height: 52px;
+  }
+
+  .bg-ui-note {
+    font-size: 0.875rem;
+    color: var(--color-fg-muted);
+  }
+
+  /* --- Chips --- */
+  .bg-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-size: 0.8125rem;
+    font-weight: 560;
+    color: var(--color-fg-primary);
+    background: #0c1613;
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.12);
+  }
+
+  html[data-theme='light'] .bg-chip {
+    background: #ffffff;
+    box-shadow: inset 0 0 0 1px rgb(17 39 29 / 0.14);
+  }
+
+  .bg-chip .d {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #94a3b8;
+  }
+
+  .bg-chip--live {
+    box-shadow: inset 0 0 0 1px rgb(74 222 128 / 0.35);
+  }
+
+  .bg-chip--live .d {
+    background: #22c55e;
+    box-shadow: 0 0 8px rgb(34 197 94 / 0.8);
+  }
+
+  .bg-chip--wait {
+    box-shadow: inset 0 0 0 1px rgb(251 191 36 / 0.4);
+  }
+
+  .bg-chip--wait .d {
+    background: #f59e0b;
+  }
+
+  /* --- People --- */
+  .bg-avatars {
+    display: flex;
+  }
+
+  .bg-avatars .bg-avatar + .bg-avatar {
+    margin-left: -5px;
+  }
+
+  .bg-avatar {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #06100c;
+    background: var(--pc);
+    box-shadow: 0 0 0 2px var(--color-bg-canvas);
+  }
+
+  .bg-avatar--auto {
+    color: #06100c;
+    background: #94a3b8;
+  }
+
+  /* --- Session row --- */
+  .bg-session {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 18px;
+    border-radius: 22px;
+  }
+
+  @media (min-width: 640px) {
+    .bg-session {
+      grid-template-columns: auto minmax(0, 1fr) auto auto;
+    }
+  }
+
+  .bg-session-text {
+    display: grid;
+    min-width: 0;
+  }
+
+  .bg-session-text strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+
+  .bg-session-text span {
+    font-size: 0.8125rem;
+    color: var(--color-fg-muted);
+  }
+
+  .bg-session .bg-chip {
+    display: none;
+  }
+
+  @media (min-width: 640px) {
+    .bg-session .bg-chip {
+      display: inline-flex;
+    }
+  }
+
+  .bg-count {
+    display: grid;
+    place-items: center;
+    min-width: 24px;
+    height: 24px;
+    padding: 0 7px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #1a0f00;
+    background: #f59e0b;
+  }
+</style>

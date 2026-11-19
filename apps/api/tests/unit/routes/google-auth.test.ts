@@ -39,7 +39,20 @@ const mockKvPut = vi.fn();
 const mockKvDelete = vi.fn();
 
 const mockEnv = {
-  DATABASE: {} as any,
+  // This route suite starts with no platform overrides or stored OAuth credentials.
+  DATABASE: {
+    prepare: vi.fn((sql: string) => {
+      if (!sql.includes('platform_settings') && !sql.includes('platform_credentials')) {
+        throw new Error(`Unexpected settings read: ${sql}`);
+      }
+      const statement = {
+        bind: (..._values: unknown[]) => statement,
+        first: async () => null,
+        all: async () => ({ success: true, results: [] }),
+      };
+      return statement;
+    }),
+  } as unknown as D1Database,
   KV: { get: mockKvGet, put: mockKvPut, delete: mockKvDelete } as any,
   BASE_DOMAIN: 'example.com',
   GOOGLE_CLIENT_ID: 'test-client-id',
@@ -57,15 +70,17 @@ describe('GET /auth/google/callback', () => {
     // KV state stores userId for verification
     mockKvGet.mockResolvedValue(JSON.stringify({ userId: 'test-user-id' }));
 
-    const mockFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(JSON.stringify({ access_token: 'gcp-token-123' }), { status: 200 }),
-    );
+    const mockFetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ access_token: 'gcp-token-123' }), { status: 200 })
+      );
 
     const app = createTestApp();
     const res = await app.request(
       '/auth/google/callback?code=abc&state=11111111-1111-1111-1111-111111111111',
       { method: 'GET', redirect: 'manual' },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(302);
     const location = res.headers.get('Location')!;
@@ -84,7 +99,7 @@ describe('GET /auth/google/callback', () => {
     expect(mockKvPut).toHaveBeenCalledWith(
       'gcp-oauth-result:test-user-id',
       expect.any(String),
-      expect.objectContaining({ expirationTtl: expect.any(Number) }),
+      expect.objectContaining({ expirationTtl: expect.any(Number) })
     );
 
     mockFetch.mockRestore();
@@ -97,7 +112,7 @@ describe('GET /auth/google/callback', () => {
     const res = await app.request(
       '/auth/google/callback?code=abc&state=11111111-1111-1111-1111-111111111111',
       { method: 'GET', redirect: 'manual' },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(302);
     const location = res.headers.get('Location')!;
@@ -120,11 +135,7 @@ describe('GET /auth/google/oauth-result', () => {
     mockKvGet.mockResolvedValue('test-handle-uuid');
 
     const app = createTestApp();
-    const res = await app.request(
-      '/auth/google/oauth-result',
-      { method: 'GET' },
-      mockEnv,
-    );
+    const res = await app.request('/auth/google/oauth-result', { method: 'GET' }, mockEnv);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual({ handle: 'test-handle-uuid' });
@@ -137,11 +148,7 @@ describe('GET /auth/google/oauth-result', () => {
     mockKvGet.mockResolvedValue(null);
 
     const app = createTestApp();
-    const res = await app.request(
-      '/auth/google/oauth-result',
-      { method: 'GET' },
-      mockEnv,
-    );
+    const res = await app.request('/auth/google/oauth-result', { method: 'GET' }, mockEnv);
     expect(res.status).toBe(404);
   });
 });

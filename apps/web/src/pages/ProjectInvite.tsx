@@ -5,10 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
 import { useToast } from '../hooks/useToast';
-import {
-  getProjectInvitePreview,
-  requestProjectAccess,
-} from '../lib/api';
+import { getProjectInvitePreview, requestProjectAccess } from '../lib/api';
 
 function statusCopy(preview: ProjectInvitePreviewResponse): {
   body: string;
@@ -16,24 +13,48 @@ function statusCopy(preview: ProjectInvitePreviewResponse): {
   tone: 'danger' | 'muted' | 'success';
 } {
   if (preview.status === 'revoked') {
-    return { title: 'Invite revoked', body: 'This invite link is no longer active.', tone: 'danger' };
+    return {
+      title: 'Invite revoked',
+      body: 'This invite link is no longer active.',
+      tone: 'danger',
+    };
   }
   if (preview.status === 'expired') {
-    return { title: 'Invite expired', body: 'Ask a project member for a new link.', tone: 'danger' };
+    return {
+      title: 'Invite expired',
+      body: 'Ask a project member for a new link.',
+      tone: 'danger',
+    };
   }
   if (preview.membershipStatus === 'active-member') {
-    return { title: 'Already a member', body: 'You already have access to this project.', tone: 'success' };
+    return {
+      title: 'Already a member',
+      body: 'You already have access to this project.',
+      tone: 'success',
+    };
   }
   if (preview.membershipStatus === 'pending-request') {
-    return { title: 'Request pending', body: 'An owner or admin can approve this request.', tone: 'muted' };
+    return {
+      title: 'Request pending',
+      body: 'An owner or admin can approve this request.',
+      tone: 'muted',
+    };
   }
   if (preview.membershipStatus === 'approved-request') {
     return { title: 'Access approved', body: 'You can open the project now.', tone: 'success' };
   }
   if (preview.membershipStatus === 'denied-request') {
-    return { title: 'Request denied', body: 'You can request access again if this link is still active.', tone: 'danger' };
+    return {
+      title: 'Request denied',
+      body: 'You can request access again if this link is still active.',
+      tone: 'danger',
+    };
   }
-  return { title: 'Request access', body: 'Your request will be reviewed by a project owner or admin.', tone: 'muted' };
+  return {
+    title: 'Request access',
+    body: 'Your request will be reviewed by a project owner or admin.',
+    tone: 'muted',
+  };
 }
 
 export function ProjectInvite() {
@@ -117,7 +138,9 @@ export function ProjectInvite() {
 
         <div className="rounded-md border border-border-default bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_60%,transparent)] p-3 grid gap-2">
           <div className="text-[0.75rem] uppercase tracking-wide text-fg-muted">Project</div>
-          <div className="text-base font-semibold text-fg-primary break-words">{preview.project.name}</div>
+          <div className="text-base font-semibold text-fg-primary break-words">
+            {preview.project.name}
+          </div>
           <div className="flex items-center gap-2 text-[0.8125rem] text-fg-muted min-w-0">
             <GitBranch size={14} className="shrink-0" />
             <code className="truncate text-[0.8125rem]">{preview.project.repository}</code>
@@ -127,7 +150,9 @@ export function ProjectInvite() {
         {preview.accessRequest?.githubAccessMessage && (
           <div className="rounded-md border border-warning bg-[color-mix(in_srgb,var(--sam-color-warning)_10%,transparent)] p-3 flex gap-2">
             <ShieldAlert size={16} className="text-warning shrink-0 mt-0.5" />
-            <p className="m-0 text-sm text-fg-primary">{preview.accessRequest.githubAccessMessage}</p>
+            <p className="m-0 text-sm text-fg-primary">
+              {preview.accessRequest.githubAccessMessage}
+            </p>
           </div>
         )}
 

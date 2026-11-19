@@ -14,18 +14,25 @@
  * This is the *pull* half of wake visibility, and it is what makes the wake banner
  * survive a navigate-away-and-back (PR #1865). The *push* half — live phase deltas
  * without waiting for a poll — is `session.wake_progress`, broadcast from
- * `durable-objects/project-data/session-wake-progress.ts`.
+ * `packages/project-data/src/do/session-wake-progress.ts`.
  *
  * Both halves report the same vocabulary (`TaskExecutionStep`), so a hydrate and a
  * broadcast that race cannot disagree about what phase means.
  */
 
-import { isTaskExecutionStep, type SessionStateSnapshot } from '@simple-agent-manager/shared';
-import { eq } from 'drizzle-orm';
+import {
+  isTaskExecutionStep,
+  isWakeWaitReason,
+  type SessionStateSnapshot,
+} from '@simple-agent-manager/shared';
+import { and, desc, eq } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
+import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { replacementDeletionRowVerdict } from '../../services/replacement-deletion-fence';
+import { signalSessionWakeReadyBestEffort } from '../../services/session-wake-ready';
 
 type Db = DrizzleD1Database<typeof schema>;
 
@@ -55,6 +62,7 @@ const EMPTY_STATE: SessionStateSnapshot = {
   runtimeWorkSource: null,
   runtimeWorkUpdatedAt: null,
   runtimeWorkProgressAt: null,
+  steeringSupported: null,
 };
 
 /**
@@ -72,7 +80,7 @@ const EMPTY_STATE: SessionStateSnapshot = {
 export async function attachWakeState(
   db: Db,
   state: SessionStateSnapshot | null,
-  args: { projectId: string; sessionId: string; sessionStatus: unknown }
+  args: { projectId: string; sessionId: string; sessionStatus: unknown; env?: Env }
 ): Promise<SessionStateSnapshot | null> {
   if (args.sessionStatus !== 'sleeping') return state;
 
@@ -80,17 +88,84 @@ export async function attachWakeState(
     const [row] = await db
       .select({
         recoveryStatus: schema.sessionSnapshots.recoveryStatus,
+        recoveryAttemptId: schema.sessionSnapshots.recoveryAttemptId,
+        recoveryTaskId: schema.sessionSnapshots.recoveryTaskId,
+        recoveryWorkspaceId: schema.sessionSnapshots.recoveryWorkspaceId,
+        runtime: schema.sessionSnapshots.runtime,
+        agentSessionId: schema.agentSessions.id,
+        taskStatus: schema.tasks.status,
         executionStep: schema.tasks.executionStep,
+        admissionReason: schema.tasks.admissionReason,
+        admissionNextRetryAt: schema.tasks.admissionNextRetryAt,
+        sleptWorkspaceId: schema.workspaces.id,
+        sleptWorkspaceStatus: schema.workspaces.status,
+        sleptWorkspaceDeletionConfirmedAt: schema.workspaces.runtimeDeletionConfirmedAt,
+        sleptNodeTerminationConfirmedAt: schema.nodes.runtimeTerminationConfirmedAt,
       })
       .from(schema.sessionSnapshots)
       .leftJoin(schema.tasks, eq(schema.tasks.id, schema.sessionSnapshots.recoveryTaskId))
+      .leftJoin(schema.workspaces, eq(schema.workspaces.id, schema.sessionSnapshots.workspaceId))
+      .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
+      .leftJoin(
+        schema.agentSessions,
+        and(
+          eq(schema.agentSessions.workspaceId, schema.sessionSnapshots.recoveryWorkspaceId),
+          eq(schema.agentSessions.userId, schema.sessionSnapshots.userId),
+          eq(schema.agentSessions.status, 'running')
+        )
+      )
       .where(eq(schema.sessionSnapshots.chatSessionId, args.sessionId))
+      .orderBy(desc(schema.agentSessions.createdAt))
       .limit(1);
 
     if (!row) return state;
 
-    const recoveryStatus = isRecoveryStatus(row.recoveryStatus) ? row.recoveryStatus : null;
-    if (!recoveryStatus) return state;
+    // A wake may not claim while the slept workspace's deletion is unproven
+    // (`assertReplacementDeletionConfirmed`). This applies the fence's own row
+    // verdict, so the reason is shown only when the row alone proves the wake is
+    // blocked (rule 58). `unknown` (a deletion attempt only the node's lifecycle
+    // object can see) is not reported: that would cost a Durable Object call per
+    // poll, and the banner then shows the generic label rather than a wrong cause.
+    // The fence runs before the claim, so this only applies while recovery_status
+    // is not yet 'waking'.
+    const cleanupPending =
+      replacementDeletionRowVerdict({
+        workspaceId: row.sleptWorkspaceId,
+        workspaceStatus: row.sleptWorkspaceStatus,
+        runtimeDeletionConfirmedAt: row.sleptWorkspaceDeletionConfirmedAt,
+        runtimeTerminationConfirmedAt: row.sleptNodeTerminationConfirmedAt,
+      }) === 'blocked';
+    let recoveryStatus = isRecoveryStatus(row.recoveryStatus) ? row.recoveryStatus : null;
+    if (!recoveryStatus) {
+      return cleanupPending
+        ? { ...(state ?? EMPTY_STATE), waitReason: 'previous_workspace_cleanup', waitRetryAt: null }
+        : state;
+    }
+
+    if (recoveryStatus === 'restored' && ['queued', 'delegated'].includes(row.taskStatus ?? '')) {
+      // Snapshot restore precedes the authoritative task handoff commit.
+      recoveryStatus = 'waking';
+    } else if (recoveryStatus === 'restored' && args.env && row.runtime === 'vm') {
+      // A crash after D1 commit can lose the runner's best-effort signal. Pull hydration
+      // replays the same exact fence, independently of runner memory or notifications.
+      const signaled =
+        row.recoveryTaskId &&
+        row.recoveryAttemptId &&
+        row.recoveryWorkspaceId &&
+        row.agentSessionId &&
+        (await signalSessionWakeReadyBestEffort(args.env, {
+          projectId: args.projectId,
+          chatSessionId: args.sessionId,
+          workspaceId: row.recoveryWorkspaceId,
+          agentSessionId: row.agentSessionId,
+          fence: {
+            runtime: 'vm',
+            taskId: row.recoveryTaskId,
+            recoveryAttemptId: row.recoveryAttemptId,
+          },
+        }));
+      if (!signaled) recoveryStatus = 'waking';
+    }
 
     // Only a wake that is actually in flight has a meaningful phase. A 'restored'
     // or 'failed' snapshot keeps whatever step the finished recovery task last
@@ -99,8 +174,21 @@ export async function attachWakeState(
       recoveryStatus === 'waking' && isTaskExecutionStep(row.executionStep)
         ? row.executionStep
         : null;
-
-    return { ...(state ?? EMPTY_STATE), recoveryStatus, wakePhase };
+    // The admission reason is the wait's cause while the runner waits for a node
+    // (`services/vm-admission-control.ts`). Outside that step it is history.
+    const admissionWait =
+      wakePhase === 'waiting_for_node_capacity' && isWakeWaitReason(row.admissionReason)
+        ? row.admissionReason
+        : null;
+    return {
+      ...(state ?? EMPTY_STATE),
+      recoveryStatus,
+      // Lets the client tell a stale snapshot of a finished wake from a new wake.
+      wakeAttemptId: row.recoveryAttemptId ?? null,
+      wakePhase,
+      waitReason: admissionWait,
+      waitRetryAt: admissionWait ? (row.admissionNextRetryAt ?? null) : null,
+    };
   } catch (err) {
     log.warn('chat.recovery_status_lookup_failed', {
       projectId: args.projectId,

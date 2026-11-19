@@ -51,6 +51,7 @@
  */
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { queueWorkspaceSessionSleep } from '../services/session-sleep-queue';
 import {
   loadRuntimeWorkspaceSnapshot,
   loadTaskSupersession,
@@ -96,7 +97,11 @@ export type RunawayCostCeilingVerdict =
   | {
       kind: 'preserve';
       reason:
-        'session_sleeping' | 'session_sleep_unknown' | 'superseded_live' | 'supersession_unknown';
+        | 'session_sleeping'
+        | 'session_sleep_unknown'
+        | 'superseded_live'
+        | 'supersession_unknown'
+        | 'session_sleep_requested';
     }
   /**
    * Terminalize. `superseded` selects the benign lifecycle label over a failure.
@@ -117,6 +122,8 @@ export interface RunawayCostCeilingInput {
   chat_session_id: string | null;
   /** Epoch ms of `tasks.started_at`, or the `updated_at` fallback. */
   startedAtMs: number;
+  taskMode?: string | null;
+  userId?: string;
 }
 
 /**
@@ -337,14 +344,13 @@ export function runawayCostCeilingReason(
 /**
  * Decide whether the runaway-cost ceiling terminalizes this task.
  *
- * Sequences four stages and nothing else: resolve the allocated runtime
- * generation, compare it against the ceiling, then the sleep and supersession
- * gates. Each stage lives in its own helper above.
+ * Resolve the allocated runtime generation, compare it against the ceiling,
+ * then apply sleep and supersession gates. A conversation within the immutable
+ * sleep grace is handed to the existing D1 sleep queue before terminalization.
  *
  * Deliberately pays no ProjectData DO / container / ACP round-trips — a property
- * pinned by `stuck-tasks.test.ts` "without probing liveness". Every lookup here is
- * a single indexed D1 read, reached only by tasks already past the soft execution
- * timeout (`.claude/rules/47`).
+ * pinned by `stuck-tasks.test.ts` "without probing liveness". The indexed D1 reads and optional sleep-queue writes are reached only by
+ * tasks already past the soft execution timeout (`.claude/rules/47`).
  */
 export async function evaluateRunawayCostCeiling(
   env: Env,
@@ -388,6 +394,41 @@ export async function evaluateRunawayCostCeiling(
 
   const { verdict, superseded } = await ceilingSupersessionGate(env, task, runtimeGenerationMs);
   if (verdict) return verdict;
+
+  // Prefer preserving a conversation through the existing sleep owner. The grace
+  // ages from runtime creation, never the queue timestamp: repeated sweeps cannot
+  // extend it. Once exhausted, failed or un-sleepable runtimes still hit the cost
+  // backstop. No agent/DO probe is added to this cron path.
+  if (
+    !superseded &&
+    task.taskMode === 'conversation' &&
+    task.userId &&
+    task.workspace_id &&
+    !readFailed &&
+    runtimeGenerationMs - opts.absoluteCeilingMs <= opts.sleepGraceMs
+  ) {
+    try {
+      await queueWorkspaceSessionSleep(env, {
+        workspaceId: task.workspace_id,
+        userId: task.userId,
+        reason: 'Conversation reached its absolute runtime ceiling',
+        sleepAfterMs: 0,
+      });
+      log.info('stuck_task.ceiling_sleep_requested', {
+        taskId: task.id,
+        workspaceId: task.workspace_id,
+        runtimeGenerationMs,
+        absoluteCeilingMs: opts.absoluteCeilingMs,
+        sleepGraceMs: opts.sleepGraceMs,
+      });
+      return { kind: 'preserve', reason: 'session_sleep_requested' };
+    } catch (error) {
+      log.warn('stuck_task.ceiling_sleep_request_failed', {
+        taskId: task.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
   return {
     kind: 'terminalize',

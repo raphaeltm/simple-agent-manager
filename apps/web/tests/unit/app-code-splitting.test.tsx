@@ -1,5 +1,5 @@
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
 
 /**
  * Suspense/code-splitting behaviour of the router.
@@ -10,67 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
  * the *first* paint of a route. For the same reason each test below uses a DIFFERENT
  * route — reusing one would make a later test silently non-discriminating.
  */
-
-vi.mock('../../src/components/AuthProvider', () => ({
-  AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  useAuth: () => ({ isSuperadmin: false }),
-}));
-
-vi.mock('../../src/components/ErrorBoundary', () => ({
-  ErrorBoundary: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}));
-
-vi.mock('../../src/hooks/useToast', () => ({
-  ToastProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}));
-
-vi.mock('../../src/components/ProtectedRoute', () => ({
-  ProtectedRoute: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}));
-
-vi.mock('../../src/components/AppShell', () => ({
-  AppShell: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="app-shell">{children}</div>
-  ),
-}));
-
-vi.mock('../../src/pages/Landing', () => ({ Landing: () => <div data-testid="landing-page" /> }));
-vi.mock('../../src/pages/Dashboard', () => ({
-  Dashboard: () => <div data-testid="dashboard-page" />,
-}));
-vi.mock('../../src/pages/Nodes', () => ({ Nodes: () => <div data-testid="nodes-page" /> }));
-vi.mock('../../src/pages/Settings', () => ({
-  Settings: () => <div data-testid="settings-page" />,
-}));
-vi.mock('../../src/pages/Chats', () => ({ Chats: () => <div data-testid="chats-page" /> }));
-
-// Records module evaluation order so the Project-shell/ProjectChat waterfall fix can be
-// observed: both chunks must start loading together, not one after the other.
-const loadOrder = vi.hoisted(() => [] as string[]);
-
-vi.mock('../../src/pages/Project', async () => {
-  const { Outlet } = await import('react-router');
-  loadOrder.push('Project');
-  return {
-    Project: () => (
-      <div data-testid="project-detail-page">
-        <Outlet />
-      </div>
-    ),
-  };
-});
-
-vi.mock('../../src/pages/project-chat', () => {
-  loadOrder.push('project-chat');
-  return { ProjectChat: () => <div data-testid="project-chat-page" /> };
-});
-
-import App from '../../src/App';
-
-function renderAt(path: string) {
-  window.history.pushState({}, '', path);
-  return render(<App />);
-}
+import { loadOrder, preload, renderAt } from '../helpers/app-preload-mocks';
 
 afterEach(() => {
   cleanup();
@@ -120,7 +60,12 @@ describe('App code splitting', () => {
     expect(loadOrder).toEqual([]);
 
     renderAt('/projects/proj-1/chat');
-    await screen.findByTestId('project-chat-page');
+    await waitFor(() => {
+      expect(loadOrder).toContain('Project');
+      expect(loadOrder).toContain('project-chat');
+    });
+    await act(async () => preload.release());
+    await screen.findByTestId('project-chat-page', {}, { timeout: 3000 });
 
     // Both modules must have been requested. The discriminating part is that the child
     // import is kicked off inside the shell's own loader, so it is in flight before the

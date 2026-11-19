@@ -11,16 +11,16 @@
  *
  * See: .claude/rules/60-request-io-and-bundle-budgets.md
  */
-import { beforeEach, describe, expect, it } from 'vitest';
-
-import type { Env } from '../../../src/env';
-import * as svc from '../../../src/services/project-data';
 import {
   DEFAULT_PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES,
   getProjectDataEnsureMemoMaxEntries,
   projectDataEnsureMemoSize,
   resetProjectDataEnsureMemo,
-} from '../../../src/services/project-data-ensure-memo';
+} from '@simple-agent-manager/project-data/internal/client/project-data-ensure-memo';
+import { beforeEach, describe, expect, it } from 'vitest';
+
+import type { Env } from '../../../src/env';
+import * as svc from '../../../src/services/project-data';
 
 interface StubCounters {
   ensure: number;
@@ -149,13 +149,16 @@ describe('ProjectData ensure memo — DO roundtrip budget', () => {
     expect(counters.get('doid-proj-b')?.ensuredWith).toEqual(['proj-b']);
   });
 
-  it('issues a single ensure when concurrent first-callers race', async () => {
+  it('keeps concurrent cold ensures request-owned, then reuses the completed fact', async () => {
     const { env, totals } = makeEnv();
 
     await Promise.all(Array.from({ length: 8 }, () => svc.getSummary(env, 'proj-race')));
 
-    expect(totals.ensure).toBe(1);
+    expect(totals.ensure).toBe(8);
     expect(totals.method).toBe(8);
+    await svc.getSummary(env, 'proj-race');
+    expect(totals.ensure).toBe(8);
+    expect(totals.method).toBe(9);
   });
 
   it('re-ensures after a failed DO call so a reset DO re-persists its projectId', async () => {

@@ -1,0 +1,20 @@
+Subject: Supported global retirement boundary for old Workers versions before a KV-to-Durable-Objects migration
+
+We need clarification of supported Workers and KV platform semantics before activating a storage migration. This inquiry requests documentation and a procedure only; please do not perform account or configuration changes.
+
+An old application version may authenticate an HTTP request and then wait on a streamed JSON body. On resumption it can issue fresh KV operations. It may also have deferred work or already-dispatched KV writes. A new application version moves counters and bounded progress logs into Durable Objects. We must prevent overlapping authoritative admissions and preserve the final legacy log view.
+
+The official [Worker limits](https://developers.cloudflare.com/workers/platform/limits/) describe unlimited connected HTTP duration, a separate post-response/disconnect waitUntil period, and a grace period for provider runtime updates. We have not found an application-version retirement acknowledgment there. The [deployment deletion](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/deployments/methods/delete/) and [version deletion](https://developers.cloudflare.com/api/resources/workers/subresources/beta/subresources/workers/subresources/versions/methods/delete/) references do not specify in-flight invocation or dispatched-storage settlement guarantees. [KV consistency](https://developers.cloudflare.com/kv/concepts/how-kv-works/) also distinguishes completed writes from visibility through cached reads. [Version URLs](https://developers.cloudflare.com/workers/versions-and-deployments/version-urls/) can address individual versions when enabled.
+
+Please identify the smallest supported nondestructive procedure, if one exists, and answer these questions separately:
+
+1. **Invocation retirement:** Can we terminate every execution of specified old application version IDs, including held-body requests, open connections, and deferred tasks? What global completion acknowledgment or guaranteed finite bound is available, and what event starts that bound? Does an ordinary application deployment or version deletion provide this guarantee?
+2. **Dispatched KV operations:** After retirement, can an already-dispatched KV write still complete? How can we establish that all such operations have completed or been cancelled?
+3. **Final legacy visibility:** What supported acknowledgment or read procedure ensures the migration's final legacy read includes all completed old writes, despite positive and negative KV caches? We do not want to assume a fixed visibility wait establishes this.
+4. **Old-version reentry:** How can we prevent any new execution of retired versions through version URLs, version overrides, aliases, service bindings, or other entry points after the boundary?
+5. **Preservation and interruption:** Can the procedure preserve Worker identity, Durable Object namespaces, D1/KV/R2 data, bindings, secrets, and existing client credentials? Specify interruption of active requests, rollback limitations, and any associated storage risk.
+6. **Isolated verification:** Can we exercise the exact procedure on an isolated Worker and independently observe its completion before production use? We would test held request bodies, deferred KV work, and writes dispatched before cancellation, then release holds after the acknowledged boundary.
+
+Existing VM clients can continue sending future requests through the canonical hostname to the new Worker with unchanged authentication. The concern is already executing old Worker code and any entry point that can explicitly invoke an old version; stopping or recreating unrelated VMs is not a retirement proof.
+
+If no supported procedure provides these guarantees, please confirm the unsupported guarantees explicitly. We are not requesting credential rotation, permission changes, resource deletion, or an operational reset. Any later operation would receive separate review and authorization after its semantics and risks are established.

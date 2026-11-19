@@ -8,6 +8,7 @@
 import type { Context, MiddlewareHandler, Next } from 'hono';
 
 import type { Env } from '../env';
+import { clientIpFromHeaders } from '../lib/client-ip';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { AppError } from './error';
@@ -39,15 +40,10 @@ export const DEFAULT_RATE_LIMITS = {
   IDENTITY_TOKEN: 60,
   ANALYTICS_INGEST: 60,
   // Authenticated Report Issue submissions create draft Ideas in the
-  // maintainer feedback project. Keep normal user retries possible while
+  // maintainer Operations project. Keep normal user retries possible while
   // bounding abuse of the externally reachable POST endpoint.
   REPORT_ISSUE_POST: 20,
   PUSH_SUBSCRIPTION: 30,
-  // Tighter limit for anonymous trial creation: each call spawns a DO,
-  // fires ~4 GitHub API calls, and consumes a monthly trial slot.
-  TRIAL_CREATE: 10,
-  // SSE events endpoint — short window to prevent connection storms.
-  TRIAL_SSE: 30,
   // Voice transcription runs Workers AI Whisper on every request. Per MINUTE, not per hour
   // (`DEFAULT_TRANSCRIBE_WINDOW_SECONDS`): dictation is bursty, and the budget is for abuse.
   TRANSCRIBE: 30,
@@ -83,16 +79,7 @@ export function getRateLimit(env: Env, key: keyof typeof DEFAULT_RATE_LIMITS): n
  * Get the client IP address from the request.
  */
 function getClientIp(c: Context): string {
-  const cfIp = c.req.header('CF-Connecting-IP');
-  if (cfIp) return cfIp;
-
-  const xForwardedFor = c.req.header('X-Forwarded-For');
-  if (xForwardedFor) {
-    const firstIp = xForwardedFor.split(',')[0];
-    return firstIp ? firstIp.trim() : 'unknown';
-  }
-
-  return 'unknown';
+  return clientIpFromHeaders((name) => c.req.header(name)) ?? 'unknown';
 }
 
 /**
@@ -178,9 +165,9 @@ export class RateLimitError extends AppError {
 
 type RateLimitResult = { allowed: boolean; remaining: number; resetAt: number };
 
-// The table's CHECK (migration 0174) also admits the retired 'session-summarize' bucket;
-// adding a bucket needs a migration that widens it.
-export type AiSpendRateLimitBucket = 'transcribe';
+// Migration 0174 also admits the retired 'session-summarize' bucket. Synthesis uses
+// the additive 0259 table so existing counters/constraints never need rebuilding.
+export type AiSpendRateLimitBucket = 'transcribe' | 'speech-synthesis';
 
 interface AiSpendRateLimitRow {
   count: number;
@@ -188,7 +175,7 @@ interface AiSpendRateLimitRow {
 }
 
 /**
- * Atomically check and update a Workers AI spend rate limit in D1.
+ * Atomically check and update an AI/endpoint spend rate limit in D1.
  *
  * The generic KV helper above is intentionally left for low-stakes buckets; these
  * buckets guard direct Workers AI spend and must not lose increments under parallel
@@ -201,15 +188,19 @@ export async function checkAiSpendRateLimit(
   limit: number,
   windowSeconds: number
 ): Promise<RateLimitResult> {
+  // These internal literals are the only SQL identifiers interpolated below.
+  const table = bucket === 'speech-synthesis'
+    ? 'speech_synthesis_rate_limits'
+    : 'ai_spend_rate_limits';
   const windowStart = getCurrentWindowStart(windowSeconds);
   const row = await db
     .prepare(
-      `INSERT INTO ai_spend_rate_limits (bucket, user_id, window_start, count)
+      `INSERT INTO ${table} (bucket, user_id, window_start, count)
        VALUES (?, ?, ?, 1)
        ON CONFLICT(bucket, user_id) DO UPDATE SET
          count = CASE
-           WHEN ai_spend_rate_limits.window_start = excluded.window_start
-             THEN ai_spend_rate_limits.count + 1
+           WHEN ${table}.window_start = excluded.window_start
+             THEN ${table}.count + 1
            ELSE 1
          END,
          window_start = excluded.window_start
@@ -394,20 +385,6 @@ export function rateLimitAnonymous(env: Env): MiddlewareHandler<{ Bindings: Env 
   return rateLimit({
     limit: getRateLimit(env, 'ANONYMOUS'),
     keyPrefix: 'anonymous',
-    useIp: true,
-  });
-}
-
-/**
- * Per-IP rate limit for `POST /api/trial/create`. Tighter than the general
- * anonymous bucket because each trial create allocates a Durable Object,
- * makes ~4 outbound GitHub API calls, and consumes a monthly trial slot.
- * Default: 10 requests per hour per IP.
- */
-export function rateLimitTrialCreate(env: Env): MiddlewareHandler<{ Bindings: Env }> {
-  return rateLimit({
-    limit: getRateLimit(env, 'TRIAL_CREATE'),
-    keyPrefix: 'trial-create',
     useIp: true,
   });
 }

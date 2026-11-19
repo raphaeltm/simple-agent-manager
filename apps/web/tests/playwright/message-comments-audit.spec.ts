@@ -1,6 +1,14 @@
 import { expect, type Locator, type Page, type Route, test } from '@playwright/test';
 
 import { assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
+import {
+  ACTIVE_QUOTE,
+  clickPaintedWords,
+  hoverPaintedWords,
+  OTHER_QUOTE,
+  paintedQuotes,
+  paintedWordsOnScreen,
+} from './quote-highlight-helpers';
 
 const PROJECT_ID = 'proj-message-comments';
 const SESSION_ID = 'session-message-comments';
@@ -24,7 +32,6 @@ const MOCK_PROJECT = {
   githubInstallationId: 'inst-message-comments',
   defaultVmSize: null,
   defaultAgentType: null,
-  defaultProvider: null,
   defaultWorkspaceProfile: 'full',
   defaultDevcontainerConfigName: '',
   workspaceIdleTimeoutMs: null,
@@ -50,6 +57,9 @@ const MOCK_SESSION = {
   workspaceUrl: null,
   cleanupAt: null,
   agentSessionId: 'agent-session-message-comments',
+  // The viewer started this chat: an unknown viewer would get the read-only view.
+  isMine: true,
+  viewerAccess: 'owner',
 };
 
 const AUTHOR = {
@@ -91,6 +101,9 @@ interface AuditCommentThread {
   replies: AuditCommentReply[];
 }
 
+const LONG_REPLY_INDEX = 9;
+const LONG_REPLY_QUOTE = 'Closing sentence quoted by a comment at the end of the long reply.';
+
 function makeMessage(index: number) {
   const role = index % 2 === 0 ? 'user' : 'assistant';
   const marker =
@@ -99,6 +112,19 @@ function makeMessage(index: number) {
       : index === 27
         ? 'Assistant mobile comment target 27: Select this exact mobile phrase for the audit.'
         : `${role === 'user' ? 'User' : 'Assistant'} message ${index}`;
+  // A reply taller than the viewport, quoted at its very end: centring the row on a jump
+  // leaves those words off screen unless the quote itself is brought into view.
+  if (index === LONG_REPLY_INDEX) {
+    return {
+      id: `msg-${index}`,
+      sessionId: SESSION_ID,
+      role,
+      content: `Long reply ${index}. ${'This long reply keeps going so the row is taller than the screen. '.repeat(40)}${LONG_REPLY_QUOTE}`,
+      toolMetadata: null,
+      createdAt: NOW - (28 - index) * 10_000,
+      sequence: index,
+    };
+  }
   return {
     id: `msg-${index}`,
     sessionId: SESSION_ID,
@@ -181,7 +207,6 @@ async function setupApiMocks(
     if (path.startsWith('/api/credentials')) return respond(200, []);
     if (path.startsWith('/api/provider-catalog') || path.startsWith('/api/providers/catalog'))
       return respond(200, { catalogs: [] });
-    if (path === '/api/trial/status') return respond(200, { available: false });
     if (path === '/api/transcribe') return respond(200, { text: 'Dictated from voice.' });
     if (path === '/api/agents') return respond(200, { agents: [] });
     if (path === '/api/github/installations') return respond(200, []);
@@ -402,9 +427,7 @@ async function expectCommentThreadVisible(root: Page | Locator, body: string) {
 
 async function expectConversationCanScrollBehindOverlay(page: Page) {
   const scrollResult = await page.evaluate(() => {
-    const scroller = document.querySelector<HTMLElement>(
-      '[data-sam-conversation-scroller="true"]'
-    );
+    const scroller = document.querySelector<HTMLElement>('[data-sam-conversation-scroller="true"]');
     if (!scroller) return null;
 
     const before = scroller.scrollTop;
@@ -431,14 +454,12 @@ async function expectConversationCanScrollBehindOverlay(page: Page) {
 test.describe('message comments audit — desktop 1280x800', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false });
 
-  test('opens a visible empty rail from the always-visible header Comments control', async ({
-    page,
-  }) => {
+  test('opens a visible empty rail from the tool rail Comments action', async ({ page }) => {
     await setupApiMocks(page);
     await openChat(page);
 
     await expect(page.getByRole('complementary', { name: 'Session comments' })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Comments', exact: true }).click();
+    await page.getByRole('button', { name: 'Open comment threads on this session' }).click();
 
     const rail = page.getByRole('complementary', { name: 'Session comments' });
     await expect(rail).toBeVisible();
@@ -448,7 +469,7 @@ test.describe('message comments audit — desktop 1280x800', () => {
         'Select text in a user or agent message, or use a message Comment button to start a thread.'
       )
     ).toBeVisible();
-    await screenshot(page, 'message-comments-desktop-header-empty-rail');
+    await screenshot(page, 'message-comments-desktop-rail-empty');
     await assertNoOverflow(page);
   });
 
@@ -457,12 +478,15 @@ test.describe('message comments audit — desktop 1280x800', () => {
     await openChat(page);
 
     await expect(page.getByRole('complementary', { name: 'Session comments' })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Add comment on message msg-27' }).click();
+    await page
+      .locator('[data-conversation-item-id="msg-27"]')
+      .getByRole('button', { name: 'Comment on this message' })
+      .click();
 
     const rail = page.getByRole('complementary', { name: 'Session comments' });
     await expect(rail).toBeVisible();
     await expect(rail.getByLabel('New message comment')).toBeVisible();
-    await expect(rail.getByText(/New comment on message msg-27/)).toBeVisible();
+    await expect(rail.getByText(/New comment on message The agent's reply ·/)).toBeVisible();
     await expect(rail.getByLabel('Add a comment…')).toBeVisible();
     await screenshot(page, 'message-comments-desktop-message-button-draft');
     await assertNoOverflow(page);
@@ -487,7 +511,7 @@ test.describe('message comments audit — desktop 1280x800', () => {
     const rail = page.getByRole('complementary', { name: 'Session comments' });
     await expect(rail).toBeVisible();
     await expect(rail.getByLabel('New comment on selected text')).toBeVisible();
-    await expect(rail.getByText(/New comment on selected text msg-27/)).toBeVisible();
+    await expect(rail.getByText(/New comment on selected text The agent's reply ·/)).toBeVisible();
     await expect(rail.getByText(selectedQuote)).toBeVisible();
     await expect(rail.getByLabel('Add a comment…')).toBeVisible();
     await screenshot(page, 'message-comments-desktop-selected-text-draft');
@@ -509,7 +533,7 @@ test.describe('message comments audit — desktop 1280x800', () => {
     await openChat(page);
 
     await expect(page.getByRole('complementary', { name: 'Session comments' })).toHaveCount(0);
-    await page.getByRole('button', { name: /1 unresolved comment/i }).click();
+    await page.getByRole('button', { name: /comment threads — 1 unresolved/i }).click();
     const rail = page.getByRole('complementary', { name: 'Session comments' });
     await expect(
       rail.getByText('Seeded desktop rail comment on an offscreen message.')
@@ -523,7 +547,7 @@ test.describe('message comments audit — desktop 1280x800', () => {
     await expect(selectionDialog).toBeVisible();
     await selectionDialog.getByRole('button', { name: 'Comment' }).click();
 
-    await expect(rail.getByText(/New comment on selected text msg-27/)).toBeVisible();
+    await expect(rail.getByText(/New comment on selected text The agent's reply ·/)).toBeVisible();
     await rail.getByLabel('Add a comment…').fill('Desktop note from selected message text.');
     await rail.getByRole('button', { name: 'Comment', exact: true }).click();
 
@@ -633,7 +657,7 @@ test.describe('message comments audit — desktop 1280x800', () => {
     const controls = await setupApiMocks(page, { commentsMode: 'error-then-empty' });
     await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
 
-    await page.getByRole('button', { name: 'Comments', description: 'Open comments' }).click();
+    await page.getByTestId('session-tool-comments').click();
     const rail = page.getByRole('complementary', { name: 'Session comments' });
 
     await expect(rail.getByText('Loading comments…')).toBeVisible();
@@ -671,6 +695,7 @@ test.describe('message comments audit — mobile 375x667', () => {
 
     const actionBar = page.getByRole('dialog', { name: 'Comment on selection' });
     await expect(actionBar.getByRole('button', { name: 'Comment on selection' })).toBeVisible();
+    await screenshot(page, 'message-comments-mobile-action-bar');
     await actionBar.getByRole('button', { name: 'Comment on selection' }).click();
 
     const bottomComposer = page.getByRole('region', {
@@ -697,7 +722,7 @@ test.describe('message comments audit — mobile 375x667', () => {
     await expect(
       page.getByRole('button', { name: /1 comment on this message, 1 unresolved/i })
     ).toBeVisible();
-    await expect(page.locator('aside')).toBeHidden();
+    await expect(page.getByRole('complementary', { name: 'Session comments' })).toBeHidden();
 
     await screenshot(page, 'message-comments-mobile-bottom-composer-send');
     await assertNoOverflow(page);
@@ -740,3 +765,136 @@ test.describe('message comments audit — mobile 375x667', () => {
     await assertNoOverflow(page);
   });
 });
+
+/*
+ * Commented words are painted in the conversation: open threads faintly, the thread someone
+ * was sent to strongly. Clicking painted words opens their thread.
+ */
+const DESKTOP_PHRASE = 'Select this exact desktop phrase for the audit.';
+const MOBILE_PHRASE = 'Select this exact mobile phrase for the audit.';
+const RESOLVED_PHRASE = 'Assistant mobile comment target 27';
+
+const QUOTED_COMMENTS = [
+  makeComment({
+    id: 'quote-far-up',
+    anchor: { kind: 'message', messageId: 'msg-3', quote: DESKTOP_PHRASE },
+    body: 'Deep-linked comment far up the conversation.',
+    createdAt: NOW - 500_000,
+  }),
+  makeComment({
+    id: 'quote-long-end',
+    anchor: { kind: 'message', messageId: `msg-${LONG_REPLY_INDEX}`, quote: LONG_REPLY_QUOTE },
+    body: 'Comment on the last words of a very long reply.',
+    createdAt: NOW - 450_000,
+  }),
+  makeComment({
+    id: 'quote-open',
+    anchor: { kind: 'message', messageId: 'msg-27', quote: MOBILE_PHRASE },
+    body: 'Open comment on the newest reply.',
+    createdAt: NOW - 400_000,
+  }),
+  makeComment({
+    id: 'quote-resolved',
+    anchor: { kind: 'message', messageId: 'msg-27', quote: RESOLVED_PHRASE },
+    body: 'Resolved comment, not painted by default.',
+    createdAt: NOW - 300_000,
+    status: 'resolved',
+  }),
+];
+
+function chatLog(page: Page) {
+  return page.getByRole('log', { name: 'Conversation' });
+}
+
+/** The focused thread where the viewport shows it: the docked rail, or inline on phones. */
+function focusedThread(page: Page, isMobile: boolean) {
+  const root = isMobile
+    ? chatLog(page)
+    : page.getByRole('complementary', { name: 'Session comments' });
+  return root.locator('[data-comment-focused="true"]');
+}
+
+for (const viewport of [
+  { name: 'desktop', size: { width: 1280, height: 800 }, isMobile: false, hasTouch: false },
+  { name: 'mobile', size: { width: 375, height: 667 }, isMobile: true, hasTouch: true },
+] as const) {
+  test.describe(`comment quote highlights in chat — ${viewport.name}`, () => {
+    test.use({ viewport: viewport.size, isMobile: viewport.isMobile, hasTouch: viewport.hasTouch });
+
+    test('paints open comments and opens the thread when its words are clicked', async ({
+      page,
+    }) => {
+      await setupApiMocks(page, { initialComments: QUOTED_COMMENTS });
+      await openChat(page);
+
+      await expect.poll(() => paintedQuotes(page, OTHER_QUOTE)).toContain(MOBILE_PHRASE);
+      expect(await paintedQuotes(page, OTHER_QUOTE)).not.toContain(RESOLVED_PHRASE);
+      expect(await paintedQuotes(page, ACTIVE_QUOTE)).toEqual([]);
+      await screenshot(page, `chat-quote-highlights-default-${viewport.name}`);
+      await assertNoOverflow(page);
+
+      if (!viewport.hasTouch) {
+        await hoverPaintedWords(page, MOBILE_PHRASE);
+        await expect(chatLog(page)).toHaveAttribute('data-quote-hover', '');
+      }
+
+      await clickPaintedWords(page, MOBILE_PHRASE);
+
+      const focused = focusedThread(page, viewport.isMobile);
+      await expect(focused).toBeVisible();
+      await expect(focused).toContainText('Open comment on the newest reply.');
+      if (!viewport.isMobile) {
+        await expect(page.getByRole('complementary', { name: 'Session comments' })).toBeVisible();
+      }
+      await expect.poll(() => paintedQuotes(page, ACTIVE_QUOTE)).toEqual([MOBILE_PHRASE]);
+      await screenshot(page, `chat-quote-highlights-clicked-${viewport.name}`);
+      await assertNoOverflow(page);
+    });
+
+    test('a comment link to the end of a long reply brings the quoted words on screen', async ({
+      page,
+    }) => {
+      await setupApiMocks(page, { initialComments: QUOTED_COMMENTS });
+      const params = new URLSearchParams({
+        commentThread: 'quote-long-end',
+        commentMessage: `msg-${LONG_REPLY_INDEX}`,
+        commentAt: String(MESSAGES[LONG_REPLY_INDEX]!.createdAt),
+      });
+      await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}?${params.toString()}`);
+
+      await expect
+        .poll(() => paintedQuotes(page, ACTIVE_QUOTE), { timeout: 15_000 })
+        .toEqual([LONG_REPLY_QUOTE]);
+      // The row is taller than the screen, so this holds only if the words were revealed.
+      const rowHeight = await page
+        .locator(`[data-conversation-item-id="msg-${LONG_REPLY_INDEX}"]`)
+        .evaluate((row) => row.getBoundingClientRect().height);
+      expect(rowHeight).toBeGreaterThan(viewport.size.height);
+      await expect
+        .poll(() => paintedWordsOnScreen(page, ACTIVE_QUOTE, LONG_REPLY_QUOTE))
+        .toBe(true);
+      await screenshot(page, `chat-quote-highlights-long-reply-${viewport.name}`);
+      await assertNoOverflow(page);
+    });
+
+    test('a comment link paints its words and brings them on screen', async ({ page }) => {
+      await setupApiMocks(page, { initialComments: QUOTED_COMMENTS });
+      const params = new URLSearchParams({
+        commentThread: 'quote-far-up',
+        commentMessage: 'msg-3',
+        commentAt: String(MESSAGES[3]!.createdAt),
+      });
+      await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}?${params.toString()}`);
+
+      await expect
+        .poll(() => paintedQuotes(page, ACTIVE_QUOTE), { timeout: 15_000 })
+        .toEqual([DESKTOP_PHRASE]);
+      await expect.poll(() => paintedWordsOnScreen(page, ACTIVE_QUOTE, DESKTOP_PHRASE)).toBe(true);
+      const focused = focusedThread(page, viewport.isMobile);
+      await expect(focused).toBeVisible();
+      await expect(focused).toContainText('Deep-linked comment far up the conversation.');
+      await screenshot(page, `chat-quote-highlights-deep-link-${viewport.name}`);
+      await assertNoOverflow(page);
+    });
+  });
+}

@@ -1,0 +1,239 @@
+{
+  "now": "2026-08-14T05:00:00Z",
+  "cases": [
+    {
+      "name": "Claude session",
+      "wire": {
+        "code": -32603,
+        "message": "You've hit your session limit · resets 1pm (UTC)",
+        "data": {
+          "errorKind": "rate_limit"
+        }
+      },
+      "callback": {
+        "toStatus": "failed",
+        "reason": "Provider usage limit rejected the prompt",
+        "errorMessage": "provider_limit_reached",
+        "providerLimitResetsAt": 1786712400000,
+        "providerLimitAgentSessionId": "agent-1",
+        "providerLimitCredentialGeneration": 1,
+        "providerLimitPromptAttemptId": 1
+      }
+    },
+    {
+      "name": "Claude weekly",
+      "wire": {
+        "code": -32603,
+        "message": "You've hit your weekly limit",
+        "data": {
+          "errorKind": "rate_limit",
+          "resetsAt": 1786687200
+        }
+      },
+      "callback": {
+        "toStatus": "failed",
+        "reason": "Provider usage limit rejected the prompt",
+        "errorMessage": "provider_limit_reached",
+        "providerLimitResetsAt": 1786687200000,
+        "providerLimitAgentSessionId": "agent-1",
+        "providerLimitCredentialGeneration": 1,
+        "providerLimitPromptAttemptId": 1
+      }
+    },
+    {
+      "name": "Codex plan",
+      "wire": {
+        "code": -32603,
+        "message": "Internal error",
+        "data": {
+          "codexErrorInfo": "usageLimitExceeded",
+          "message": "You've hit your usage limit. Try again later.",
+          "resetsAt": 1786687200
+        }
+      },
+      "callback": {
+        "toStatus": "failed",
+        "reason": "Provider usage limit rejected the prompt",
+        "errorMessage": "provider_limit_reached",
+        "providerLimitResetsAt": 1786687200000,
+        "providerLimitAgentSessionId": "agent-1",
+        "providerLimitCredentialGeneration": 1,
+        "providerLimitPromptAttemptId": 1
+      }
+    },
+    {
+      "name": "API 429",
+      "wire": {
+        "code": -32603,
+        "message": "Internal error",
+        "data": {
+          "errorKind": "rate_limit",
+          "message": "API Error: 429",
+          "resetsAt": 1786687200
+        }
+      },
+      "callback": {
+        "toStatus": "failed",
+        "reason": "Provider usage limit rejected the prompt",
+        "errorMessage": "provider_limit_reached",
+        "providerLimitResetsAt": 1786687200000,
+        "providerLimitAgentSessionId": "agent-1",
+        "providerLimitCredentialGeneration": 1,
+        "providerLimitPromptAttemptId": 1
+      }
+    },
+    {
+      "name": "Codex plan unknown reset",
+      "wire": {
+        "code": -32603,
+        "message": "Internal error",
+        "data": {
+          "codexErrorInfo": "usageLimitExceeded",
+          "message": "You've hit your usage limit"
+        }
+      },
+      "callback": {
+        "toStatus": "failed",
+        "reason": "Provider usage limit rejected the prompt",
+        "errorMessage": "provider_limit_reached",
+        "providerLimitAgentSessionId": "agent-1",
+        "providerLimitCredentialGeneration": 1,
+        "providerLimitPromptAttemptId": 1
+      }
+    },
+    {
+      "name": "Claude gateway SDK wrapper",
+      "wire": {
+        "code": -32603,
+        "message": "Internal error: API Error: Server is temporarily limiting requests (not your usage limit) · You've hit your session limit · resets 1pm (UTC)",
+        "data": {
+          "errorKind": "rate_limit"
+        }
+      },
+      "callback": {
+        "toStatus": "failed",
+        "reason": "Provider usage limit rejected the prompt",
+        "errorMessage": "provider_limit_reached",
+        "providerLimitResetsAt": 1786712400000,
+        "providerLimitAgentSessionId": "agent-1",
+        "providerLimitCredentialGeneration": 1,
+        "providerLimitPromptAttemptId": 1
+      }
+    },
+    {
+      "name": "Claude gateway SDK wrapper unknown reset",
+      "wire": {
+        "code": -32603,
+        "message": "Internal error: API Error: You've hit your weekly limit",
+        "data": {
+          "errorKind": "rate_limit"
+        }
+      },
+      "callback": {
+        "toStatus": "failed",
+        "reason": "Provider usage limit rejected the prompt",
+        "errorMessage": "provider_limit_reached",
+        "providerLimitAgentSessionId": "agent-1",
+        "providerLimitCredentialGeneration": 1,
+        "providerLimitPromptAttemptId": 1
+      }
+    },
+    {
+      "name": "Codex production envelope clock",
+      "wire": {
+        "code": -32603,
+        "message": "Internal error",
+        "data": {
+          "codexErrorInfo": "usageLimitExceeded",
+          "message": "You’ve hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 12:02 PM."
+        }
+      },
+      "callback": {
+        "toStatus": "failed",
+        "reason": "Provider usage limit rejected the prompt",
+        "errorMessage": "provider_limit_reached",
+        "providerLimitResetsAt": 1786708920000,
+        "providerLimitAgentSessionId": "agent-1",
+        "providerLimitCredentialGeneration": 1,
+        "providerLimitPromptAttemptId": 1
+      }
+    },
+    {
+      "name": "Codex production envelope ordinal date",
+      "wire": {
+        "code": -32603,
+        "message": "Internal error",
+        "data": {
+          "codexErrorInfo": "usageLimitExceeded",
+          "message": "You’ve hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 26th, 2026 12:02 PM."
+        }
+      },
+      "callback": {
+        "toStatus": "failed",
+        "reason": "Provider usage limit rejected the prompt",
+        "errorMessage": "provider_limit_reached",
+        "providerLimitAgentSessionId": "agent-1",
+        "providerLimitCredentialGeneration": 1,
+        "providerLimitPromptAttemptId": 1
+      }
+    },
+    {
+      "name": "Claude production envelope 8:10am",
+      "wire": {
+        "code": -32603,
+        "message": "Internal error: You've hit your session limit · resets 8:10am (UTC)",
+        "data": {
+          "errorKind": "rate_limit"
+        }
+      },
+      "callback": {
+        "toStatus": "failed",
+        "reason": "Provider usage limit rejected the prompt",
+        "errorMessage": "provider_limit_reached",
+        "providerLimitResetsAt": 1786695000000,
+        "providerLimitAgentSessionId": "agent-1",
+        "providerLimitCredentialGeneration": 1,
+        "providerLimitPromptAttemptId": 1
+      }
+    },
+    {
+      "name": "Claude production envelope 6pm",
+      "wire": {
+        "code": -32603,
+        "message": "Internal error: You've hit your session limit · resets 6pm (UTC)",
+        "data": {
+          "errorKind": "rate_limit"
+        }
+      },
+      "callback": {
+        "toStatus": "failed",
+        "reason": "Provider usage limit rejected the prompt",
+        "errorMessage": "provider_limit_reached",
+        "providerLimitResetsAt": 1786730400000,
+        "providerLimitAgentSessionId": "agent-1",
+        "providerLimitCredentialGeneration": 1,
+        "providerLimitPromptAttemptId": 1
+      }
+    },
+    {
+      "name": "Claude production envelope 8am",
+      "wire": {
+        "code": -32603,
+        "message": "Internal error: You've hit your session limit · resets 8am (UTC)",
+        "data": {
+          "errorKind": "rate_limit"
+        }
+      },
+      "callback": {
+        "toStatus": "failed",
+        "reason": "Provider usage limit rejected the prompt",
+        "errorMessage": "provider_limit_reached",
+        "providerLimitResetsAt": 1786694400000,
+        "providerLimitAgentSessionId": "agent-1",
+        "providerLimitCredentialGeneration": 1,
+        "providerLimitPromptAttemptId": 1
+      }
+    }
+  ],
+  "fixtureNote": "Representative normalized ACP errors from observed Claude session/weekly and Codex plan-limit shapes; deterministic reset metadata for path testing, not verbatim production captures. Claude gateway SDK wrapper is captured from pinned Claude CLI2.1.281/ACP0.81.2 against the local synthetic provider; only reset clock normalized. The unknown-reset gateway variant uses that captured wrapper shape with reset information deliberately omitted. Five production envelopes supplied by verified coordinator event d42dc97a are exact as received; shared August clock deliberately leaves September explicit date unknown (>7 days). Standalone clock tests validate it against September 25."
+}

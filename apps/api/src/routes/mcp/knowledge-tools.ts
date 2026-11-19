@@ -11,7 +11,6 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
-import { runWorkspaceOperation } from '../../operations/workspace-adapter';
 import * as projectDataService from '../../services/project-data';
 import {
   getMcpLimits,
@@ -23,6 +22,7 @@ import {
   type McpTokenData,
   sanitizeUserInput,
 } from './_helpers';
+import { runWorkspaceOperation } from './workspace-operation-adapter';
 
 // ─── Helper: resolve session ID from workspace ─────────────────────────────
 
@@ -147,16 +147,6 @@ export async function handleAddKnowledge(
     const obs = await projectDataService.addKnowledgeObservation(
       env, tokenData.projectId, entityId, observation, confidence, sourceType, sessionId,
     );
-
-    // Trial bridge — if this project is backing an anonymous trial, fan the
-    // observation out as a `trial.knowledge` SSE event. Non-trial projects
-    // short-circuit after a single KV lookup inside the helper.
-    try {
-      const { bridgeKnowledgeAdded } = await import('../../services/trial/bridge');
-      await bridgeKnowledgeAdded(env, tokenData.projectId, entityName, observation);
-    } catch {
-      // Bridge errors are already logged inside the helper; never block MCP.
-    }
 
     return jsonRpcSuccess(requestId, {
       content: [{ type: 'text', text: JSON.stringify({

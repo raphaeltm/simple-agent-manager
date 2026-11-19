@@ -3,7 +3,9 @@ import { EXECUTION_STEP_LABELS } from '@simple-agent-manager/shared';
 import { Card, StatusBadge } from '@simple-agent-manager/ui';
 import { useNavigate } from 'react-router';
 
+import { projectChatPath, projectPath } from '../lib/project-routes';
 import { ConnectorChip } from './ConnectorChip';
+import { ProviderLimitResume } from './ProviderLimitResume';
 
 interface ActiveTaskCardProps {
   task: DashboardTask;
@@ -31,6 +33,7 @@ function getStepLabel(task: DashboardTask): string | null {
 }
 
 function getTaskGlowClass(task: DashboardTask): string {
+  if (task.providerLimitReason) return '';
   if (task.status === 'failed')
     return 'shadow-[0_0_0_1px_rgba(239,68,68,0.28),0_0_24px_rgba(239,68,68,0.18)]';
   if (task.agentActivityState === 'working' && (task.status === 'in_progress' || task.isActive)) {
@@ -44,6 +47,12 @@ function getActivityIndicator(task: DashboardTask): {
   dotClassName: string;
   textClassName: string;
 } {
+  if (task.providerLimitReason)
+    return {
+      label: task.providerLimitReason.startsWith('Blocked:') ? 'Needs you' : 'Waiting',
+      dotClassName: 'bg-info-fg',
+      textClassName: 'text-info-fg',
+    };
   switch (task.agentActivityState) {
     case 'sleeping':
       return {
@@ -75,43 +84,45 @@ function getActivityIndicator(task: DashboardTask): {
 
 export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
   const navigate = useNavigate();
+  const providerBlocked = task.providerLimitReason?.startsWith('Blocked:');
 
+  // No chat yet: the project's Overview, where the task shows in Running now (inbox slice F2).
   const chatPath = task.sessionId
-    ? `/projects/${task.projectId}/chat/${task.sessionId}`
-    : `/projects/${task.projectId}/chat`;
+    ? projectChatPath(task.projectId, task.sessionId)
+    : projectPath(task.projectId);
 
   const stepLabel = getStepLabel(task);
   const glowClass = getTaskGlowClass(task);
   const activity = getActivityIndicator(task);
 
   return (
-    <div
-      onClick={() => navigate(chatPath)}
-      className="cursor-pointer rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
-      role="button"
-      aria-label={`Open task: ${task.title}`}
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          navigate(chatPath);
-        }
-      }}
-    >
+    <div className="relative">
       <Card
         variant="glass"
-        className={`py-3 px-[clamp(var(--sam-space-3),3vw,var(--sam-space-4))] hover:border-border-default transition-colors ${glowClass}`}
+        className={`relative py-3 px-[clamp(var(--sam-space-3),3vw,var(--sam-space-4))] hover:border-border-default transition-colors ${glowClass}`}
       >
+        <button
+          type="button"
+          aria-label={`Open task: ${task.title}`}
+          onClick={() => navigate(chatPath)}
+          className="absolute inset-0 z-10 cursor-pointer rounded-lg border-0 bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+        />
         {/* Top row: status + activity indicator */}
         <div className="flex items-center justify-between gap-2 mb-2">
-          <StatusBadge status={task.status} />
-          <div className="flex items-center gap-1.5">
-            <span
-              aria-hidden="true"
-              className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${activity.dotClassName}`}
-            />
-            <span className={`sam-type-caption ${activity.textClassName}`}>{activity.label}</span>
-          </div>
+          {providerBlocked ? (
+            <span className="sam-type-caption text-warning-fg">Needs you</span>
+          ) : (
+            <StatusBadge status={task.status} />
+          )}
+          {!providerBlocked && (
+            <div className="flex items-center gap-1.5">
+              <span
+                aria-hidden="true"
+                className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${activity.dotClassName}`}
+              />
+              <span className={`sam-type-caption ${activity.textClassName}`}>{activity.label}</span>
+            </div>
+          )}
         </div>
 
         {/* Task title */}
@@ -129,7 +140,14 @@ export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
         </div>
 
         {/* Execution step (if provisioning) or failed indicator */}
-        {task.status === 'failed' ? (
+        {task.providerLimitReason ? (
+          <p
+            className={`sam-type-caption ${providerBlocked ? 'text-warning-fg' : 'text-info-fg'} mb-2 break-words`}
+            role="status"
+          >
+            {task.providerLimitReason}
+          </p>
+        ) : task.status === 'failed' ? (
           <div className="sam-type-caption text-danger-fg mb-2 overflow-hidden text-ellipsis whitespace-nowrap">
             {stepLabel ? `Failed at: ${stepLabel}` : 'Task failed'}
           </div>
@@ -138,6 +156,16 @@ export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
             {stepLabel}
           </div>
         ) : null}
+
+        {providerBlocked && (
+          <div className="relative z-20 mb-3 w-fit max-w-full">
+            <ProviderLimitResume
+              key={`${task.id}:${task.providerLimitVersion ?? ''}`}
+              projectId={task.projectId}
+              taskId={task.id}
+            />
+          </div>
+        )}
 
         {/* Time info */}
         <div className="flex items-center justify-between sam-type-caption text-fg-muted gap-2">

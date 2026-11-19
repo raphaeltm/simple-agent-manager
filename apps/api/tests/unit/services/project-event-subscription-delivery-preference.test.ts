@@ -42,10 +42,15 @@ describe('resolveDeliveryPreference', () => {
     });
   });
 
+  it('queues runtime_steer wakes so they can steer a running turn (live steering)', () => {
+    expect(resolveDeliveryPreference('runtime_steer', target)).toEqual({
+      requested: 'runtime_steer',
+      resolved: 'queued_for_prompt_delivery',
+      target,
+    });
+  });
+
   it('still records unsupported injection modes as not injected', () => {
-    expect(resolveDeliveryPreference('runtime_steer', target).resolved).toBe(
-      'recorded_not_injected'
-    );
     expect(resolveDeliveryPreference('spawn_task', target).resolved).toBe(
       'recorded_not_injected'
     );

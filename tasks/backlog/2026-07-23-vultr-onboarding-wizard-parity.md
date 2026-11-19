@@ -1,5 +1,7 @@
 # Token cloud providers: first-run onboarding wizard parity
 
+> **Reconciliation 2026-11-02:** Still open; the wizard still offers only Hetzner and Scaleway (`apps/web/src/components/onboarding/choose-path/step-actions.ts:30`). Correction: #2474 (`09b7f3e08`) removed the "Settings → Cloud Providers" page. Vultr and DigitalOcean are now connected from Settings → Infrastructure (`SettingsInfrastructure.tsx`; `/settings/cloud-provider` redirects there via `settings-redirects.tsx`), and the type comment now names that page. The `step-actions.ts` pointers in Scope are about 5 lines lower than cited.
+
 **Filed by:** the Vultr provider PR (`sam/implement-vultr-fourth-cloud-qf96ez`), per rule 42 (tracked follow-up for a deliberately-deferred slice).
 
 ## Problem
@@ -29,3 +31,7 @@ The 5 "has-cloud-provider" detection gates (incl. onboarding completion checks) 
 ## References
 - Parent PR / task: `tasks/archive/2026-07-23-vultr-cloud-provider.md`
 - Rule 42 (no untracked degrading placeholders — this is the tracked follow-up), Rule 26 (project-chat-first — onboarding is secondary).
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. The code premise is gone: #2610 deleted the hardcoded Hetzner/Scaleway `StepForm.tsx`, and onboarding now renders the shared seven-provider `CloudProviderConnectFlow` (`apps/web/src/components/onboarding/choose-path/StepExecution.tsx:276`; Vultr/DigitalOcean arms in `CloudProviderConnectFlow.tsx`). Still open, narrowed to verification: an onboarding-specific Playwright audit of the cloud step with each token provider selected (375 + 1280), and a staging onboarding run with bogus Vultr and DigitalOcean keys showing a clean sanitized error. The Settings audit (`settings-vultr-credential-audit.spec.ts`) covers the shared component only.

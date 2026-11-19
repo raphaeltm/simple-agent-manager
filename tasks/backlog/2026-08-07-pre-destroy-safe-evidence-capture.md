@@ -1,5 +1,9 @@
 # Pre-Destroy Safe Evidence Capture for Reaped Nodes
 
+> **Reconciliation 2026-10-26:** Still open; cleanup still destroys a node without a capture
+> attempt. Pointer correction: `destroyNodeForCleanup` is now
+> `apps/api/src/scheduled/node-cleanup/shared.ts:302`.
+
 ## Problem
 
 When node cleanup reaps a node (stale heartbeat, max lifetime, incompatible build, stopped handoff), `destroyNodeForCleanup` (`apps/api/src/scheduled/node-cleanup/shared.ts:200`) destroys the VM without capturing any evidence. The operator-grade debug package is unreachable exactly when it is most needed: every node diagnostic route is hard-gated on `status === 'running'`, so a failed-then-reaped node leaves behind only the narrow error-triggered incident snapshot (if an error-level report fired while the agent was alive).
@@ -30,3 +34,8 @@ Raphaël has explicitly prioritized preserving VM evidence at incident time befo
 - `tasks/archive/2026-08-07-debugging-experience-overhaul.md` (origin of this follow-up)
 - `tasks/archive/2026-08-05-complete-local-debugging-experience.md` (safe snapshot framework)
 - `.claude/rules/47-control-loop-io-budget.md`, `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Evidence: #2502 black box recorder: services/node-log-capture.ts captureNodeLogsBeforeTeardown called from strict-node-deletion.ts:301 (cleanup sweep path via deleteNodeResourcesStrict) and captureNodeLogsOnUnhealthy (unhealthy-nodes.ts:415)
+- Status: Pre-teardown capture shipped as raw superadmin-only logs (policy a35180d5); the raw capture does not satisfy this file's criteria. Still required: vm-agent self-capture on heartbeat failure, a safe incident snapshot at reap time, and canary-secret coverage for the new capture triggers (unless a human explicitly drops them)

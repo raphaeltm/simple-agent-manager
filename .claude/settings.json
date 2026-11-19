@@ -37,11 +37,26 @@
     "deny": []
   },
   "hooks": {
+    "InstructionsLoaded": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/log-instructions-loaded.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
-        "type": "command",
-        "command": ".claude/hooks/verify-test-quality.sh",
-        "timeout": 30000
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/verify-test-quality.mjs",
+            "timeout": 30
+          }
+        ]
       }
     ]
   }

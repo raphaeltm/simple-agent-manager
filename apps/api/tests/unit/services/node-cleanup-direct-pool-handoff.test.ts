@@ -3,24 +3,22 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { log } from '../../../src/lib/logger';
 import { runNodeCleanupSweep } from '../../../src/scheduled/node-cleanup';
 import {
-  sweepDestroyingHandoffNodes,
-  sweepStoppedHandoffNodes,
-} from '../../../src/scheduled/node-cleanup/node-phases';
-import {
   claimNodeForCleanup,
-  emptyResult,
   resolveCleanupConfig,
 } from '../../../src/scheduled/node-cleanup/shared';
 import { clearCapacityCatalogCache } from '../../../src/services/default-capacity-source-credentials';
-import { encrypt } from '../../../src/services/encryption';
 import { provisionNode } from '../../../src/services/node-provisioning';
-import { fingerprintEncryptedProviderCredential } from '../../../src/services/provider-credential-exact';
 import { findRestorableOrInFlightSleepSnapshot } from '../../../src/services/session-snapshot-sleep-predicate';
-import { fixture, seedHost } from '../routes/node-pool-upgrade-test-helpers';
+import { deleteNodeResourcesStrict } from '../../../src/services/strict-node-deletion';
+import { seedHost } from '../routes/node-pool-upgrade-test-helpers';
+import { handoffFixture } from './node-cleanup-handoff-fixture';
 
 const NOW = new Date('2026-09-08T12:00:00.000Z');
 const OLD = '2026-09-08T10:00:00.000Z';
-vi.mock('../../../src/services/jwt', () => ({ signNodeCallbackToken: async () => 'test-token' }));
+vi.mock('../../../src/services/jwt', () => ({
+  signNodeCallbackToken: async () => 'test-token',
+  signCurrentNodeCallbackToken: async () => 'test-token',
+}));
 
 const updateNodeField = (column: string, value: string) => `UPDATE nodes SET ${column} = ${value}`;
 const protectedHandoffMutations = [
@@ -63,256 +61,26 @@ afterEach(() => {
 
 // Real pool resolution, SQL selection/claim, strict provider deletion and lifecycle
 // finalization. Only provider HTTP and ProjectData transport are replaced.
-async function handoffFixture(scope: 'user' | 'installation' = 'user') {
-  const f = fixture(scope);
-  f.env.ENCRYPTION_KEY = Buffer.from('0123456789abcdef0123456789abcdef').toString('base64');
-  f.env.ENVIRONMENT = 'staging';
-  f.env.SAM_INSTALLATION_ID = '0123456789abcdef0123456789abcdef';
-  const token = await encrypt('test-provider-token', f.env.ENCRYPTION_KEY);
-  const credentialTable = scope === 'installation' ? 'platform_credentials' : 'credentials';
-  f.sqlite
-    .prepare(`UPDATE ${credentialTable} SET encrypted_token = ?, iv = ?`)
-    .run(token.ciphertext, token.iv);
-  const providerDeletes: string[] = [];
-  const rejectedProviderIds = new Set<string>();
-  const rejectedInventoryNodeIds = new Set<string>();
-  const inventoryModeByNodeId = new Map<
-    string,
-    | 'exact'
-    | 'foreign-installation'
-    | 'foreign-environment'
-    | 'ambiguous'
-    | 'duplicate'
-    | 'malformed'
-    | 'changed-identity'
-  >();
-  const inventoryServerById = new Map<string, Record<string, unknown>>();
-  const hangingProviderIds = new Set<string>();
-  const providerSignals: AbortSignal[] = [];
-  const inventorySignals: AbortSignal[] = [];
-  const inventorySelectors: Array<Record<string, string>> = [];
-  const providerGets: string[] = [];
-  const dnsRequests: string[] = [];
-  let hangDns: 'request' | 'error-body' | undefined;
-  let rejectCreateDuringDestroy = false;
-  function waitForAbort(signal: AbortSignal) {
-    return new Promise<Response>((_resolve, reject) => {
-      if (signal.aborted) reject(signal.reason);
-      else signal.addEventListener('abort', () => reject(signal.reason), { once: true });
-    });
-  }
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes('api.hetzner.cloud/v1/server_types')) {
-        return Response.json({
-          server_types: [
-            {
-              id: 1,
-              name: 'cx23',
-              description: 'CX23',
-              cores: 2,
-              memory: 4,
-              disk: 40,
-              architecture: 'x86',
-              cpu_type: 'shared',
-              deprecated: false,
-              prices: [
-                {
-                  location: 'fsn1',
-                  price_hourly: { net: '0.0048', gross: '0.0048' },
-                  price_monthly: { net: '3.99', gross: '3.99' },
-                },
-              ],
-            },
-          ],
-          meta: { pagination: { next_page: null } },
-        });
-      }
-      if (url.includes('/servers/') && init?.method === 'DELETE') {
-        providerDeletes.push(url);
-        if (hangingProviderIds.has(url.split('/').at(-1)!)) {
-          providerSignals.push(init.signal!);
-          return waitForAbort(init.signal!);
-        }
-        if (rejectedProviderIds.has(url.split('/').at(-1)!)) {
-          return Response.json(
-            { error: { code: 'forbidden', message: 'Provider refused deletion' } },
-            { status: 403 }
-          );
-        }
-        return new Response(null, { status: 204 });
-      }
-      if (url.includes('api.hetzner.cloud/v1/servers?') && !init?.method) {
-        if (init?.signal) inventorySignals.push(init.signal);
-        const selector = new URL(url).searchParams.get('label_selector') ?? '';
-        const nodeId = selector
-          .split(',')
-          .find((part) => part.startsWith('node='))
-          ?.slice('node='.length);
-        const labels = Object.fromEntries(
-          selector.split(',').map((part) => {
-            const separator = part.indexOf('=');
-            return [part.slice(0, separator), part.slice(separator + 1)];
-          })
-        );
-        inventorySelectors.push({ ...labels });
-        if (nodeId && rejectedInventoryNodeIds.has(nodeId)) {
-          return Response.json(
-            { error: { code: 'service_error', message: 'Inventory unavailable' } },
-            { status: 503 }
-          );
-        }
-        const mode = nodeId ? inventoryModeByNodeId.get(nodeId) : undefined;
-        const inventoryLabels: Record<string, string> = nodeId
-          ? {
-              node: nodeId,
-              managed: 'simple-agent-manager',
-              role: 'workspace',
-              env: 'staging',
-              installation: '0123456789abcdef0123456789abcdef',
-              incarnation: `incarnation-${nodeId}`,
-            }
-          : {};
-        if (mode === 'foreign-installation')
-          inventoryLabels.installation = 'fedcba9876543210fedcba9876543210';
-        if (mode === 'foreign-environment') inventoryLabels.env = 'production';
-        if (mode === 'ambiguous')
-          inventoryLabels.__sam_internal_ambiguous_label__installation = 'true';
-        const inventory = mode
-          ? [
-              {
-                id: 123,
-                name: `node-${nodeId}`,
-                status: 'running',
-                public_net: { ipv4: { ip: '192.0.2.123' } },
-                server_type: { name: 'cx23', cores: 2, memory: 4, disk: 40 },
-                location: { name: 'fsn1' },
-                created:
-                  mode === 'malformed' ? 'not-a-provider-timestamp' : '2026-09-08T10:30:00.000Z',
-                labels: inventoryLabels,
-              },
-              ...(mode === 'duplicate'
-                ? [
-                    {
-                      id: 124,
-                      name: `node-${nodeId}-duplicate`,
-                      status: 'running',
-                      public_net: { ipv4: { ip: '192.0.2.124' } },
-                      server_type: { name: 'cx23', cores: 2, memory: 4, disk: 40 },
-                      location: { name: 'fsn1' },
-                      created: '2026-09-08T10:31:00.000Z',
-                      labels: inventoryLabels,
-                    },
-                  ]
-                : []),
-            ]
-          : [];
-        for (const server of inventory) inventoryServerById.set(String(server.id), server);
-        return Response.json({
-          servers: inventory,
-          meta: { pagination: { next_page: null } },
-        });
-      }
-      if (url.includes('api.hetzner.cloud/v1/servers/') && !init?.method) {
-        providerGets.push(url);
-        const server = inventoryServerById.get(url.split('/').at(-1)!);
-        if (server) {
-          const nodeId = String(server.name).replace(/^node-/, '');
-          if (inventoryModeByNodeId.get(nodeId) === 'changed-identity') {
-            return Response.json({
-              server: { ...server, location: { name: 'nbg1' } },
-            });
-          }
-          return Response.json({ server });
-        }
-        return Response.json(
-          { error: { code: 'not_found', message: 'Server not found' } },
-          { status: 404 }
-        );
-      }
-      if (url.includes('api.hetzner.cloud/v1/servers') && init?.method === 'POST') {
-        if (!rejectCreateDuringDestroy) throw new Error('Unexpected provider create');
-        f.sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = 'host'").run();
-        return Response.json(
-          { error: { code: 'placement_error', message: 'Placement unavailable' } },
-          { status: 412 }
-        );
-      }
-      if (url.includes('api.cloudflare.com/client/v4/zones/')) {
-        dnsRequests.push(url);
-        if (hangDns === 'request') return waitForAbort(init!.signal!);
-        if (hangDns === 'error-body') return new Response(new ReadableStream(), { status: 503 });
-        return Response.json({ success: true });
-      }
-      throw new Error(`Unexpected provider HTTP: ${init?.method ?? 'GET'} ${url}`);
-    })
-  );
-  clearCapacityCatalogCache();
-  await seedHost(f, await f.run());
-  // Provisioning stamps this server-owned exact binding after resolving the provider.
-  f.sqlite
-    .prepare('UPDATE nodes SET placement_credential_fingerprint = ?')
-    .run(await fingerprintEncryptedProviderCredential(token.ciphertext, token.iv));
-  f.sqlite
-    .prepare("UPDATE nodes SET status = 'stopped', created_at = ?, updated_at = ?")
-    .run(OLD, OLD);
-  f.sqlite
-    .prepare(
-      `INSERT INTO workspaces
-    (id, node_id, user_id, project_id, chat_session_id, status, created_at, updated_at)
-    VALUES ('sleeping-workspace', 'host', 'user-1', 'project-1', 'chat-1', 'sleeping', ?, ?)`
-    )
-    .run(OLD, OLD);
-  f.sqlite
-    .prepare(
-      `INSERT INTO session_snapshots
-    (id, workspace_id, node_id, user_id, project_id, chat_session_id, runtime, status, degradation,
-     manifest_r2_key, expires_at, sleeping_at, sleep_status, recovery_attempts, created_at, updated_at)
-    VALUES ('snapshot-1', 'sleeping-workspace', 'host', 'user-1', 'project-1', 'chat-1', 'vm',
-      'available', 'none', 'manifest-key', '2026-09-09T12:00:00.000Z', ?, 'sleeping', 0, ?, ?)`
-    )
-    .run(OLD, OLD, OLD);
-  const projectStub = f.env.PROJECT_DATA.get(f.env.PROJECT_DATA.idFromName('project-1'));
-  const stopSession = vi.fn(async () => undefined);
-  const cleanupWorkspaceActivity = vi.fn(async () => undefined);
-  Object.assign(projectStub, { stopSession, cleanupWorkspaceActivity });
-  expect(f.sqlite.prepare('SELECT auto_provisioned_node_id FROM tasks').all()).toEqual([
-    { auto_provisioned_node_id: null },
-  ]);
-  const result = emptyResult();
-  const sweep = (now = NOW) =>
-    sweepStoppedHandoffNodes(f.db, f.env, now, resolveCleanupConfig(f.env), result);
-  const sweepDestroying = (now = NOW) =>
-    sweepDestroyingHandoffNodes(f.db, f.env, now, resolveCleanupConfig(f.env), result);
-  return {
-    ...f,
-    hangingProviderIds,
-    providerSignals,
-    inventorySignals,
-    inventorySelectors,
-    providerGets,
-    inventoryModeByNodeId,
-    dnsRequests,
-    setHangDns: (mode: 'request' | 'error-body') => {
-      hangDns = mode;
-    },
-    rejectCreateDuringDestroy: () => {
-      rejectCreateDuringDestroy = true;
-    },
-    rejectedProviderIds,
-    rejectedInventoryNodeIds,
-    providerDeletes,
-    stopSession,
-    cleanupWorkspaceActivity,
-    result,
-    sweep,
-    sweepDestroying,
-  };
-}
 
 describe('direct managed pool VM stopped handoff cleanup', () => {
+  it.each(['available', 'failed'] as const)(
+    'preserves uncleaned %s snapshot sources during automatic retirement',
+    async (status) => {
+      const f = await handoffFixture();
+      f.sqlite
+        .prepare(
+          `UPDATE workspaces SET status = 'sleeping',
+      runtime_deletion_confirmed_at = NULL, runtime_deletion_proof = NULL`
+        )
+        .run();
+      f.sqlite.prepare('UPDATE session_snapshots SET status = ?').run(status);
+      await f.sweep();
+      expect(f.providerDeletes).toHaveLength(0);
+      expect(f.sqlite.prepare('SELECT status FROM nodes').get()).toEqual({ status: 'stopped' });
+      expect(f.result.lifetimeDestroyed).toBe(0);
+    }
+  );
+
   it.each(['user', 'installation'] as const)(
     'deletes a %s pool VM without task provenance and preserves the restorable workspace/session',
     async (scope) => {
@@ -388,7 +156,27 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     expect(f.cleanupWorkspaceActivity).toHaveBeenCalledOnce();
   });
 
-  it('drives production-shaped providerless rows through the real sweep and isolates failures', async () => {
+  it('does not declare a fresh providerless workspace VM absent during allocation recovery', async () => {
+    const f = await handoffFixture();
+    f.sqlite.exec(`DELETE FROM session_snapshots; DELETE FROM workspaces;
+      UPDATE nodes SET status='destroying', provider_instance_id=NULL,
+        runtime_incarnation_id='incarnation-host', runtime_termination_confirmed_at=NULL,
+        created_at='2026-09-08T11:59:00.000Z' WHERE id='host';`);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW);
+    await expect(
+      deleteNodeResourcesStrict('host', 'user-1', f.env, {
+        explicitPermanentDeletion: true,
+      })
+    ).rejects.toThrow('provisioning recovery window');
+    expect(f.inventorySelectors).toEqual([]);
+    expect(f.providerDeletes).toEqual([]);
+    expect(
+      f.sqlite.prepare("SELECT runtime_termination_confirmed_at FROM nodes WHERE id='host'").get()
+    ).toEqual({ runtime_termination_confirmed_at: null });
+  });
+
+  it('reconciles providerless direct creations without task links and isolates inventory failures', async () => {
     const f = await handoffFixture();
     const infoSpy = vi.spyOn(log, 'info');
     f.env.MAX_AUTO_NODE_LIFETIME_MS = '1000';
@@ -405,7 +193,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
       .run();
     f.sqlite
       .prepare(
-        `UPDATE tasks SET status = 'failed', auto_provisioned_node_id = 'host'
+        `UPDATE tasks SET status = 'failed', auto_provisioned_node_id = NULL
           WHERE id = 'task-1'`
       )
       .run();
@@ -435,6 +223,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
       )
       .run();
     f.rejectedInventoryNodeIds.add('bad-inventory');
+    f.inventoryModeByNodeId.set('host', 'exact');
 
     const result = await runNodeCleanupSweep(f.env);
 
@@ -447,7 +236,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
         .prepare("SELECT status, cleanup_backoff_until FROM nodes WHERE id = 'bad-inventory'")
         .get()
     ).toEqual({ status: 'destroying', cleanup_backoff_until: expect.any(String) });
-    expect(f.providerDeletes).toEqual([]);
+    expect(f.providerDeletes).toEqual(['https://api.hetzner.cloud/v1/servers/123']);
     expect(f.inventorySignals).toHaveLength(2);
     expect(f.inventorySignals.every((signal) => signal instanceof AbortSignal)).toBe(true);
     expect(f.inventorySelectors).toEqual([
@@ -486,6 +275,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     ).toEqual({ status: 'destroying', ...failedBackoff });
 
     f.rejectedInventoryNodeIds.delete('bad-inventory');
+    f.inventoryModeByNodeId.set('bad-inventory', 'exact');
     vi.useFakeTimers();
     vi.setSystemTime(Date.parse(failedBackoff.cleanup_backoff_until) + 1);
     const thirdResult = await runNodeCleanupSweep(f.env);
@@ -500,6 +290,88 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     ).toEqual({ status: 'deleted', runtime_termination_confirmed_at: expect.any(String) });
   });
 
+  it('retains an uncertain allocation while create is pending and recovers its later exact VM', async () => {
+    const f = await handoffFixture();
+    f.sqlite.exec(`DELETE FROM session_snapshots; DELETE FROM workspaces;`);
+    f.sqlite
+      .prepare(
+        `UPDATE nodes SET status = 'creating', provider_instance_id = NULL,
+      runtime_termination_confirmed_at = NULL WHERE id = 'host'`
+      )
+      .run();
+    f.env.PROVISIONING_TIMEOUT_MS = '1000';
+    let entered!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    f.setCreateBarrier(async () => {
+      entered();
+      await barrier;
+      throw new TypeError('Provider response was lost after allocation');
+    });
+    const allocation = provisionNode('host', f.env);
+    await started;
+    try {
+      f.sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = 'host'").run();
+      await expect(deleteNodeResourcesStrict('host', 'user-1', f.env)).rejects.toThrow(
+        /allocation remains unresolved/
+      );
+      expect(f.inventorySelectors).toHaveLength(1);
+      expect(
+        f.sqlite
+          .prepare("SELECT status, runtime_termination_confirmed_at FROM nodes WHERE id = 'host'")
+          .get()
+      ).toEqual({
+        status: 'destroying',
+        runtime_termination_confirmed_at: null,
+      });
+      expect(f.providerDeletes).toEqual([]);
+    } finally {
+      release();
+      await allocation;
+    }
+    f.inventoryModeByNodeId.set('host', 'exact');
+    await deleteNodeResourcesStrict('host', 'user-1', f.env);
+    expect(f.providerDeletes).toEqual(['https://api.hetzner.cloud/v1/servers/123']);
+    expect(
+      f.sqlite.prepare("SELECT runtime_termination_confirmed_at FROM nodes WHERE id = 'host'").get()
+    ).toEqual({
+      runtime_termination_confirmed_at: expect.any(String),
+    });
+  });
+
+  it.each([
+    ['2026-09-08T10:30:00.789Z', true],
+    ['2026-09-08T10:30:01.000Z', false],
+  ])(
+    'compares provider timestamps at second precision for node %s',
+    async (createdAt, accepted) => {
+      const f = await handoffFixture();
+      f.sqlite.exec(`DELETE FROM session_snapshots; DELETE FROM workspaces;`);
+      f.sqlite
+        .prepare(
+          `UPDATE nodes SET status = 'destroying', provider_instance_id = NULL,
+      runtime_incarnation_id = 'incarnation-host', runtime_termination_confirmed_at = NULL,
+      created_at = ? WHERE id = 'host'`
+        )
+        .run(createdAt);
+      f.inventoryModeByNodeId.set('host', 'exact');
+      if (accepted) {
+        await deleteNodeResourcesStrict('host', 'user-1', f.env);
+        expect(f.providerDeletes).toHaveLength(1);
+      } else {
+        await expect(deleteNodeResourcesStrict('host', 'user-1', f.env)).rejects.toThrow(
+          /identity is inconsistent/
+        );
+        expect(f.providerDeletes).toEqual([]);
+      }
+    }
+  );
+
   it('deletes only an exact providerless inventory match after a final ownership read', async () => {
     const f = await handoffFixture();
     f.sqlite.exec(`DELETE FROM session_snapshots; DELETE FROM workspaces;`);
@@ -512,7 +384,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
           WHERE id = 'host'`
       )
       .run();
-    f.sqlite.prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = 'host'").run();
+    f.sqlite.prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = NULL").run();
     f.inventoryModeByNodeId.set('host', 'exact');
 
     await f.sweepDestroying();
@@ -546,7 +418,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
             WHERE id = 'host'`
       )
       .run();
-    f.sqlite.prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = 'host'").run();
+    f.sqlite.prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = NULL").run();
     f.inventoryModeByNodeId.set('host', mode);
 
     await f.sweepDestroying();
@@ -570,7 +442,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
           WHERE id = 'host'`
       )
       .run();
-    f.sqlite.prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = 'host'").run();
+    f.sqlite.prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = NULL").run();
 
     await f.sweepDestroying();
 
@@ -602,7 +474,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
           WHERE id = 'host'`
       )
       .run();
-    f.sqlite.prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = 'host'").run();
+    f.sqlite.prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = NULL").run();
     f.inventoryModeByNodeId.set('host', 'exact');
 
     await f.sweepDestroying();
@@ -722,8 +594,8 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
   it.each([
     ...protectedHandoffMutations,
     [
-      'missing provider rejection proof',
-      'UPDATE nodes SET runtime_termination_confirmed_at = NULL',
+      'missing providerless runtime incarnation',
+      'UPDATE nodes SET runtime_termination_confirmed_at = NULL, runtime_incarnation_id = NULL',
     ],
   ] as const)('keeps %s protected during destroying handoff cleanup', async (_label, mutation) => {
     const f = await handoffFixture();
@@ -756,8 +628,9 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
 
   it('aborts dead provider requests within the phase budget and reaches deferred work next tick', async () => {
     const f = await handoffFixture();
-    f.env.NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS = '600';
-    f.env.NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS = '500';
+    // 1.5 s budget, 1 s attempts: the second attempt starts with 0.5 s, above the 1/3 minimum.
+    f.env.NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS = '1500';
+    f.configOverrides.providerDeletionRequestTimeoutMs = 1000;
     for (const id of ['dead-a', 'dead-b']) {
       await seedHost(f, f.starts[0]!, id);
       f.sqlite
@@ -773,14 +646,14 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     vi.setSystemTime(NOW);
     const pending = f.sweep();
     await vi.waitFor(() => expect(f.providerDeletes.length).toBeGreaterThan(0), { interval: 1 });
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(1000);
     await vi.waitFor(() => expect(f.providerDeletes.length % 2).toBe(0), { interval: 1 });
-    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(500);
     await pending;
     expect(f.result).toMatchObject({ errors: 2, lifetimeDestroyed: 0 });
     expect(f.providerDeletes).toHaveLength(2);
     expect(f.providerSignals.every((signal) => signal.aborted)).toBe(true);
-    expect(Date.now() - NOW.getTime()).toBeLessThan(1000);
+    expect(Date.now() - NOW.getTime()).toBeLessThan(2000);
     expect(
       f.sqlite.prepare("SELECT status, cleanup_backoff_until FROM nodes WHERE id = 'host'").get()
     ).toEqual({ status: 'stopped', cleanup_backoff_until: null });
@@ -791,9 +664,9 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     vi.setSystemTime(afterBackoff);
     const retry = f.sweep(afterBackoff);
     await vi.waitFor(() => expect(f.providerDeletes).toHaveLength(4), { interval: 1 });
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(1000);
     await vi.waitFor(() => expect(f.providerDeletes).toHaveLength(5), { interval: 1 });
-    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(500);
     await retry;
     expect(f.providerDeletes).toHaveLength(5);
     expect(f.result.errors).toBe(4);
@@ -803,7 +676,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     'bounds a stalled DNS %s after provider termination without closing the recoverable session',
     async (mode) => {
       const f = await handoffFixture();
-      f.env.NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS = '500';
+      f.configOverrides.providerDeletionRequestTimeoutMs = 1000;
       f.env.CF_ZONE_ID = 'test-zone';
       f.env.CF_API_TOKEN = 'test-dns-token';
       f.env.CF_API_TIMEOUT_MS = '30000';
@@ -813,9 +686,9 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
       vi.setSystemTime(NOW);
       const pending = f.sweep();
       await vi.waitFor(() => expect(f.dnsRequests).toHaveLength(1), { interval: 1 });
-      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(1000);
       await pending;
-      expect(Date.now() - NOW.getTime()).toBeLessThan(1000);
+      expect(Date.now() - NOW.getTime()).toBeLessThan(1500);
       expect(f.result).toMatchObject({ lifetimeDestroyed: 1, errors: 0 });
       expect(f.providerDeletes).toHaveLength(1);
       expect(f.stopSession).not.toHaveBeenCalled();
@@ -825,7 +698,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     }
   );
 
-  it('backs off a saturated failing batch and reaches valid work on the next sweep', async () => {
+  it('rotates a failing batch so valid work is never stuck behind it, and backs every failure off', async () => {
     const f = await handoffFixture();
     f.env.NODE_CLEANUP_SWEEP_LIMIT = '2';
     for (const id of ['failed-null-deadline', 'failed-expired-deadline']) {
@@ -839,9 +712,19 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
         .run('2026-09-08T09:00:00.000Z', OLD, id === 'failed-null-deadline' ? null : OLD, id);
       f.rejectedProviderIds.add(`provider-${id}`);
     }
+    // Never-attempted candidates come before ones whose retry merely fell due: the failing
+    // never-attempted node and the valid host fill the page; the retried one waits a tick.
     await f.sweep();
-    expect(f.result).toMatchObject({ errors: 2, lifetimeDestroyed: 0 });
+    expect(f.result).toMatchObject({ errors: 1, lifetimeDestroyed: 1 });
     expect(f.providerDeletes).toHaveLength(2);
+    expect(f.providerDeletes[0]).toMatch(/provider-failed-null-deadline$/);
+    expect(f.providerDeletes[1]).toMatch(/provider-host$/);
+
+    await f.sweep();
+    expect(f.result).toMatchObject({ errors: 2, lifetimeDestroyed: 1 });
+    expect(f.providerDeletes).toHaveLength(3);
+    expect(f.providerDeletes[2]).toMatch(/provider-failed-expired-deadline$/);
+
     const failures = f.sqlite
       .prepare(
         `SELECT id, status, cleanup_backoff_until FROM nodes
@@ -855,19 +738,12 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
       expect(
         await claimNodeForCleanup(
           f.env,
-          {
-            id: node.id,
-            user_id: 'user-1',
-            status: 'stopped',
-          },
+          { id: node.id, user_id: 'user-1', status: 'stopped' },
           NOW.toISOString()
         )
       ).toBe(false);
     }
-    await f.sweep();
-    expect(f.result).toMatchObject({ errors: 2, lifetimeDestroyed: 1 });
-    expect(f.providerDeletes).toHaveLength(3);
-    expect(f.providerDeletes[2]).toMatch(/provider-host$/);
+    // Both failures are backed off: another tick at the same instant attempts nothing.
     await f.sweep();
     expect(f.providerDeletes).toHaveLength(3);
   });

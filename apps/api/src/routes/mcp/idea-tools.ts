@@ -3,9 +3,11 @@
  * find_related_ideas) and idea management (create_idea, update_idea, get_idea,
  * list_ideas, search_ideas).
  */
+import { ideaTaskPredicateSql } from '@simple-agent-manager/operations';
+import { listLinks, recordLink, removeLink } from '@simple-agent-manager/operations';
+
 import type { Env } from '../../env';
-import { runWorkspaceOperation } from '../../operations/workspace-adapter';
-import * as projectDataService from '../../services/project-data';
+import { operationDeps } from '../../operation-ports';
 import {
   getMcpLimits,
   INVALID_PARAMS,
@@ -16,6 +18,7 @@ import {
   resolveSessionId,
   sanitizeUserInput,
 } from './_helpers';
+import { runWorkspaceOperation } from './workspace-operation-adapter';
 
 export async function handleLinkIdea(
   requestId: string | number | null,
@@ -46,7 +49,7 @@ export async function handleLinkIdea(
 
   // Verify the task exists in this project
   const task = await env.DATABASE.prepare(
-    'SELECT id, title FROM tasks WHERE id = ? AND project_id = ?'
+    `SELECT id, title FROM tasks WHERE id = ? AND project_id = ? AND ${ideaTaskPredicateSql()}`
   )
     .bind(taskId, tokenData.projectId)
     .first<{ id: string; title: string }>();
@@ -55,7 +58,15 @@ export async function handleLinkIdea(
     return jsonRpcError(requestId, INVALID_PARAMS, `Idea not found in this project: ${taskId}`);
   }
 
-  await projectDataService.linkSessionIdea(env, tokenData.projectId, sessionId, taskId, context);
+  await recordLink(operationDeps(env), tokenData.projectId, {
+    sourceKind: 'session',
+    sourceId: sessionId,
+    targetKind: 'idea',
+    targetId: taskId,
+    relation: 'linked',
+    origin: 'explicit',
+    context,
+  });
 
   return jsonRpcSuccess(requestId, {
     content: [
@@ -97,7 +108,13 @@ export async function handleUnlinkIdea(
     );
   }
 
-  await projectDataService.unlinkSessionIdea(env, tokenData.projectId, sessionId, taskId);
+  await removeLink(operationDeps(env), tokenData.projectId, {
+    sourceKind: 'session',
+    sourceId: sessionId,
+    targetKind: 'idea',
+    targetId: taskId,
+    relation: 'linked',
+  });
 
   return jsonRpcSuccess(requestId, {
     content: [
@@ -124,7 +141,12 @@ export async function handleListLinkedIdeas(
     );
   }
 
-  const links = await projectDataService.getIdeasForSession(env, tokenData.projectId, sessionId);
+  const links = (await listLinks(operationDeps(env), tokenData.projectId, 'session', sessionId))
+    .filter((l) => l.sourceKind === 'session' && l.targetKind === 'idea')
+    .filter(
+      (link, index, all) =>
+        all.findIndex((candidate) => candidate.targetId === link.targetId) === index
+    );
 
   // Enrich with task details from D1
   const enriched: Array<{
@@ -133,27 +155,33 @@ export async function handleListLinkedIdeas(
     status: string | null;
     context: string | null;
     linkedAt: number;
+    relation: string;
   }> = [];
 
   if (links.length > 0) {
     // Batch-fetch task details in a single D1 query
     const placeholders = links.map(() => '?').join(', ');
     const rows = await env.DATABASE.prepare(
-      `SELECT id, title, status FROM tasks WHERE project_id = ? AND id IN (${placeholders})`
+      // Through the shared predicate: a link to a row that is not an idea can only be a
+      // legacy one, and showing it to an agent as a linked IDEA would be a claim this
+      // module is not entitled to make (`operations/idea-identity.ts`).
+      `SELECT id, title, status FROM tasks
+        WHERE project_id = ? AND ${ideaTaskPredicateSql()} AND id IN (${placeholders})`
     )
-      .bind(tokenData.projectId, ...links.map((l) => l.taskId))
+      .bind(tokenData.projectId, ...links.map((l) => l.targetId))
       .all<{ id: string; title: string; status: string }>();
 
     const taskMap = new Map((rows.results ?? []).map((t) => [t.id, t]));
 
     for (const link of links) {
-      const task = taskMap.get(link.taskId);
+      const task = taskMap.get(link.targetId);
       enriched.push({
-        taskId: link.taskId,
+        taskId: link.targetId,
         title: task?.title ?? null,
         status: task?.status ?? null,
         context: link.context,
-        linkedAt: link.createdAt,
+        linkedAt: link.firstAt,
+        relation: link.relation,
       });
     }
   }
@@ -196,7 +224,7 @@ export async function handleCreateIdea(
   return runWorkspaceOperation('create_idea', requestId, params, tokenData, env);
 }
 
-export { validateIdeaStatusTransition } from '../../operations/idea-core';
+export { validateIdeaStatusTransition } from '@simple-agent-manager/operations';
 
 export async function handleUpdateIdea(
   requestId: string | number | null,
@@ -207,6 +235,15 @@ export async function handleUpdateIdea(
   return runWorkspaceOperation('update_idea', requestId, params, tokenData, env);
 }
 
+export async function handleListIdeaUpdates(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env
+): Promise<JsonRpcResponse> {
+  return runWorkspaceOperation('list_idea_updates', requestId, params, tokenData, env);
+}
+
 export async function handleGetIdea(
   requestId: string | number | null,
   params: Record<string, unknown>,
@@ -214,6 +251,15 @@ export async function handleGetIdea(
   env: Env
 ): Promise<JsonRpcResponse> {
   return runWorkspaceOperation('get_idea', requestId, params, tokenData, env);
+}
+
+export async function handleGetLinkedContext(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env
+): Promise<JsonRpcResponse> {
+  return runWorkspaceOperation('get_linked_context', requestId, params, tokenData, env);
 }
 
 export async function handleListIdeas(

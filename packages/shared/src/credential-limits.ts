@@ -8,7 +8,11 @@
  * weekly primary only), see `.claude/rules/74-proxy-signals-must-match-the-condition.md`.
  */
 
-import type { CredentialLimitLevel } from './types/credential-limits';
+import type {
+  CredentialLimitCredentialSummary,
+  CredentialLimitLevel,
+  CredentialLimitWindowSummary,
+} from './types/credential-limits';
 
 const CREDENTIAL_LIMIT_LEVEL_RANK: Record<CredentialLimitLevel, number> = {
   ok: 0,
@@ -67,6 +71,42 @@ export function credentialIdFromReference(reference: string): string | null {
   if (!reference.startsWith(CC_CREDENTIAL_REFERENCE_PREFIX)) return null;
   const id = reference.slice(CC_CREDENTIAL_REFERENCE_PREFIX.length).trim();
   return id.length > 0 ? id : null;
+}
+
+const REFERENCE_DIGEST_PREFIX = 'sha256:';
+const referenceEncoder = new TextEncoder();
+
+/** Length of a digest key: `sha256:` plus 64 hex characters. */
+export const CREDENTIAL_REFERENCE_DIGEST_KEY_BYTES = REFERENCE_DIGEST_PREFIX.length + 64;
+
+/**
+ * Key that stands for a credential reference everywhere in the credential-limit
+ * pipeline: window rows (`credential_limit_windows.credential_reference`), a task's
+ * provider-limit wait (`credentialKey`), project-event subject ids and source-outbox
+ * guards. The outbox requires the window key and the event subject to be one string,
+ * so the key must fit both the window column (160 characters) and the deployment's
+ * project-event filter-string limit (`PROJECT_EVENT_FILTER_MAX_STRING_BYTES`).
+ * A reference no longer than a digest key is its own key; a longer one — ids from
+ * the 2026-06 composable-credentials backfill embed the legacy ciphertext —
+ * becomes its SHA-256 digest, which readers recompute from the full reference.
+ * Keys therefore never exceed 71 bytes whatever the configured limit, and unlike
+ * truncation they cannot collide or differ from what a reader looks up.
+ */
+export async function credentialLimitReferenceKey(
+  value: string | null | undefined
+): Promise<string | null> {
+  if (typeof value !== 'string') return null;
+  const reference = value.trim();
+  if (!reference) return null;
+  const bytes = referenceEncoder.encode(reference);
+  if (bytes.byteLength <= CREDENTIAL_REFERENCE_DIGEST_KEY_BYTES) return reference;
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  return `${REFERENCE_DIGEST_PREFIX}${Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** True when a stored credential reference is a digest key, not the reference itself. */
+export function isCredentialLimitReferenceDigest(key: string): boolean {
+  return key.startsWith(REFERENCE_DIGEST_PREFIX);
 }
 
 /** Human label for the window family encoded in the window type prefix. */
@@ -128,4 +168,54 @@ export function credentialLimitWindowLabel(
   }
   const suffix = windowType.split('.').slice(1).join('.');
   return suffix ? suffix.replace(/[_-]+/g, ' ') : 'Window';
+}
+
+/**
+ * Sliding windows: the provider's `resetsAt` says when the oldest usage ages out,
+ * not that the counter returns to zero. OpenCode Go's "rolling" window is the
+ * only one today; nothing in its API contract promises a hard reset.
+ */
+const SLIDING_WINDOW_TYPES = new Set(['opencode.rolling']);
+
+/**
+ * A window as it stands at `now`. A sample only describes usage up to the
+ * window's reset: once `resetsAt` has passed and the sample predates it, the
+ * provider has opened a new window SAM has not sampled yet, so the stale
+ * percentage (or "limit reached") no longer applies. Such a window reads 0%,
+ * level OK, and carries `resetElapsed` so callers can say it reset rather than
+ * present 0% as a measurement. A sliding window only sheds its oldest usage at
+ * that time, so its usage becomes unknown (null) instead of 0%.
+ */
+export function credentialLimitWindowAsOf(
+  window: CredentialLimitWindowSummary,
+  now: number
+): CredentialLimitWindowSummary {
+  const { resetsAt } = window;
+  // Already adjusted (the API applies this at read time, the UI again at render).
+  if (window.resetElapsed) return window;
+  if (resetsAt === null || !Number.isFinite(resetsAt)) return window;
+  if (resetsAt > now || window.observedAt >= resetsAt) return window;
+  const sliding = SLIDING_WINDOW_TYPES.has(window.windowType);
+  return {
+    ...window,
+    status: 'allowed',
+    level: 'ok',
+    utilizationPercent: sliding ? null : 0,
+    remainingAmount: sliding ? null : window.limitAmount,
+    resetElapsed: true,
+  };
+}
+
+/** Every window of a credential as of `now`, with the worst level recomputed. */
+export function credentialLimitSummaryAsOf(
+  summary: CredentialLimitCredentialSummary,
+  now: number
+): CredentialLimitCredentialSummary {
+  const windows = summary.windows.map((window) => credentialLimitWindowAsOf(window, now));
+  if (windows.every((window, index) => window === summary.windows[index])) return summary;
+  return {
+    ...summary,
+    windows,
+    level: worstCredentialLimitLevel(windows.map((window) => window.level)),
+  };
 }

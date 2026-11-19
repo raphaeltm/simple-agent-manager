@@ -1,22 +1,15 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version Change: 1.8.2 → 1.8.3
-Bump Rationale: PATCH - Correct the platform description: SAM is self-hosted, not a multi-tenant SaaS, and each node VM belongs to one user
-
-Modified Principles: None
-
-Modified Sections:
-  - Multi-Tenant Architecture Guidelines: opening paragraph now describes self-hosted installations and per-user node VMs, pointing to the Workspace Isolation Model in the public security docs
-
-Added Sections: None
-
+Version Change: 1.9.0 → 1.10.0
+Bump Rationale: MINOR - Add Principle XV reserving plain agent messages for human-written text.
+Added Principles: XV. Human Voice Is Reserved
+Modified Sections: None
 Templates Status:
-  - plan-template.md: ✅ Compatible (Constitution Check and Complexity Tracking already apply)
-  - spec-template.md: ✅ Compatible (no direct dependency)
-  - tasks-template.md: ✅ Compatible (no direct dependency)
-  - checklist-template.md: ✅ Compatible (no direct dependency)
-
+  - plan-template.md: Compatible (existing Constitution Check covers the new principle)
+  - spec-template.md: Compatible (requirements can specify scope and inheritance)
+  - tasks-template.md: Compatible (shared UI and scope validation fit existing tasks)
+  - checklist-template.md: Compatible (existing compliance checks apply)
 Follow-up TODOs: None
 -->
 
@@ -203,29 +196,31 @@ All business logic values, URLs, timeouts, limits, and configuration MUST be con
 **Rules:**
 
 - **NO hardcoded URLs**: All API endpoints, callback URLs, and service addresses MUST derive from environment variables or configuration
-- **NO hardcoded timeouts**: All duration values (idle timeout, token expiry, retry delays) MUST be configurable via environment variables with sensible defaults
+- **NO hardcoded timeouts**: All duration values (idle timeout, token expiry, retry delays) MUST be configurable through the typed admin settings registry or justified bootstrap configuration, with sensible code defaults
 - **NO hardcoded limits**: All limits (max workspaces, max sessions, rate limits) MUST be configurable
 - **NO hardcoded identifiers**: Issuer names, audience values, key IDs MUST derive from deployment configuration
-- **Defaults are acceptable**: A hardcoded DEFAULT value with env var override is the correct pattern
+- **Defaults are acceptable**: A code DEFAULT with a typed admin override is the preferred runtime pattern; legacy environment overrides remain supported during migration
 - **Constants for truly constant values**: Only mathematical constants, protocol versions, and similar invariants may be hardcoded
 
 **Correct Pattern:**
 
 ```typescript
-// ✅ GOOD: Configurable with sensible default
-const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT_SECONDS || '1800');
+// ✅ GOOD: Typed registry default, with an admin override at runtime
+const classifierEnabled = await resolveAdminSetting(env, 'operations.stalledTaskClassifierEnabled');
 const ISSUER = `https://api.${env.BASE_DOMAIN}`;
 
 // ❌ BAD: Hardcoded values
-const IDLE_TIMEOUT = 1800;
+const classifierEnabled = true;
 const ISSUER = 'https://api.workspaces.example.com';
 ```
 
 **Configuration Sources (in order of precedence):**
 
-1. Environment variables (runtime)
-2. Cloudflare Worker bindings (env.VAR_NAME)
-3. Default values in code (fallback only)
+1. Typed admin setting overrides (D1) for runtime controls
+2. Legacy environment/Worker bindings or KV fallbacks during migration
+3. Default values declared in the typed registry
+
+Emergency operational KV disables remain an independent veto. Bootstrap configuration (such as the base domain) continues to use deployment bindings.
 
 **Rationale:** Hardcoded values require code changes for configuration. This violates twelve-factor principles, complicates deployment across environments, and creates hidden coupling between code and infrastructure.
 
@@ -300,6 +295,60 @@ const result = await persistMessage(sessionId, content);
 ```
 
 **Rationale:** The workspace message routing bug demonstrated that silent acceptance of unvalidated identity fields causes messages to appear in wrong chat sessions. This class of bug is undetectable by users and erodes trust in the system. Fail-fast validation at every boundary prevents data corruption and makes failures immediately visible in logs for rapid diagnosis.
+
+### XIV. Layered Configuration & Consistent UX
+
+SAM composes configuration from the installation, user, project, agent profile, and skill layers
+to create a task and its session. Where a setting supports overrides, a more specific layer can
+refine inherited configuration without changing the meaning of the setting or the way users edit it.
+Not every setting needs an override at every layer; precedence and supported scopes MUST be explicit.
+
+**Rules:**
+
+- Reuse the same editing and account-connection components, validation, and supported interaction
+  methods wherever the same setting appears. Changing scope MUST NOT arbitrarily remove capabilities
+  such as guided sign-in or force users to obtain credentials through a CLI.
+- Scope determines where configuration is saved and what inherits it. Shared controls MUST clearly
+  identify that scope and distinguish inherited values from explicit overrides, including how to
+  return to the inherited value.
+- Save overrides only to the selected scope, enforce its authorization, and preserve broader defaults
+  and unrelated scopes. Resolve effective configuration through shared rules rather than copies of
+  precedence logic in each UI.
+- New override scopes, such as binding an account to an agent profile, SHOULD extend existing shared
+  controls and resolution boundaries rather than introduce a separate configuration experience.
+- Exceptions to consistent UX MUST be narrow and documented with a concrete security, provider, or
+  capability constraint. An unfinished integration or a different navigation entry point is not a
+  sufficient reason to expose fewer connection methods.
+
+**Rationale:** Users configure the same concepts at different levels. Consistent controls make those
+levels understandable as overrides and keep connection and editing workflows usable everywhere,
+including on a phone.
+
+### XV. Human Voice Is Reserved (NON-NEGOTIABLE)
+
+An agent treats a plain chat message as something a person said, and so does the person reading the
+chat. Only text a human wrote may arrive that way.
+
+**Rules:**
+
+- **Plain messages are human-written.** A typed message, a comment directive, or a prompt template a
+  human authored (a trigger, a schedule they created) may reach an agent as a plain chat message.
+- **Everything else is a pointer.** Text written by another agent, by SAM's model-driven assistants,
+  or by an outside system reaches an agent only as a SAM-authored notice that names IDs (event,
+  message, schedule). The agent reads the content through a tool that marks it untrusted and names
+  its verified sender. This holds for every delivery mode: queued, steered into a running turn, or
+  urgent stop-and-deliver.
+- **SAM's own fixed notices are not human voice.** They must say that they are system-generated and
+  must not quote agent-written or external text.
+- **Fail closed.** If the pointer transport is unavailable, refuse the send with a reason the caller
+  can act on. Never fall back to posting the text.
+- **Agent-to-agent task handoff names the sender.** A task an agent dispatches carries its
+  description as the child's first message, and that message MUST name the parent task and chat
+  session and say an agent wrote it.
+
+**Rationale:** On 2026-11-07 a peer agent's steered message appeared in a chat as a user bubble.
+Neither the recipient agent nor the human could tell it apart from a typed message. Recording the
+author and delivering non-human text by reference keeps that distinction at every boundary.
 
 ## Code Organization Guidelines
 
@@ -944,4 +993,4 @@ and other project documentation, this Constitution takes precedence.
 - Violations should be addressed constructively with reference to specific principles
 - Repeated violations may result in contribution restrictions per Code of Conduct
 
-**Version**: 1.8.3 | **Ratified**: 2026-01-24 | **Last Amended**: 2026-10-08
+**Version**: 1.10.0 | **Ratified**: 2026-01-24 | **Last Amended**: 2026-11-07

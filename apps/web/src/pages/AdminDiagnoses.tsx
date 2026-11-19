@@ -1,8 +1,9 @@
-import type { DebugDiagnosisRun } from '@simple-agent-manager/shared';
 import { Body, Button, Card, Spinner } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useCallback } from 'react';
 import { useNavigate } from 'react-router';
 
+import { useQueryScope } from '../hooks/useQueryScope';
 import { fetchAdminDebugDiagnoses, retryAdminDebugDiagnosisRun } from '../lib/api';
 
 function formatTime(value: string | null) {
@@ -25,25 +26,16 @@ const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
 
 export function AdminDiagnoses() {
   const navigate = useNavigate();
-  const [runs, setRuns] = useState<DebugDiagnosisRun[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      setError(null);
-      const { runs: r } = await fetchAdminDebugDiagnoses({});
-      setRuns(r ?? []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load diagnoses');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const scope = useQueryScope();
+  const query = useQuery({
+    queryKey: ['auth', scope, 'admin', 'diagnoses'],
+    queryFn: ({ signal }) => fetchAdminDebugDiagnoses({ summaryOnly: true }, signal),
+    enabled: Boolean(scope),
+  });
+  const runs = query.data?.runs ?? [];
+  const loading = query.isPending;
+  const error = query.error?.message;
+  const load = query.refetch;
 
   const handleRetry = useCallback(
     async (runId: string) => {
@@ -54,7 +46,7 @@ export function AdminDiagnoses() {
         /* retry errors shown on the detail page */
       }
     },
-    [navigate],
+    [navigate]
   );
 
   return (
@@ -86,7 +78,10 @@ export function AdminDiagnoses() {
       ) : (
         <div className="divide-y divide-border-default">
           {runs.map((run) => {
-            const style = STATUS_STYLES[run.status] ?? { bg: 'var(--sam-color-info-tint)', text: 'var(--sam-color-info-fg)' };
+            const style = STATUS_STYLES[run.status] ?? {
+              bg: 'var(--sam-color-info-tint)',
+              text: 'var(--sam-color-info-fg)',
+            };
             return (
               <div
                 key={run.id}
@@ -114,11 +109,7 @@ export function AdminDiagnoses() {
                     <span className="text-xs text-fg-muted">{run.currentStep}</span>
                   )}
                   {run.status === 'failed' && (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => void handleRetry(run.id)}
-                    >
+                    <Button size="sm" variant="secondary" onClick={() => void handleRetry(run.id)}>
                       Retry
                     </Button>
                   )}

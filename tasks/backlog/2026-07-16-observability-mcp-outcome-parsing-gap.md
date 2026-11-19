@@ -33,3 +33,8 @@ local regression tests instead.
 - Do NOT fix in the sessions-list PR — this is a tooling/integration change,
   filed separately per that task's instructions.
 - Workaround today: `wrangler tail --env <env>` or local Miniflare repro.
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Evidence: #2504 added ops_query_worker_logs MCP tool (apps/api/src/services/worker-log-query.ts; observability-logs.ts reads workers?.outcome as optional); documented in apps/www/src/content/docs/docs/guides/agents.md
+- Status: Outcome-tolerant MCP path exists; remaining: staging check that mid-request console.error lines are returned

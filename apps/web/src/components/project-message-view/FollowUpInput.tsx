@@ -1,8 +1,12 @@
 import type { SlashCommand } from '@simple-agent-manager/acp-client';
 import type { AgentProfile } from '@simple-agent-manager/shared';
+import type { Ref } from 'react';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
-import { ProjectChatComposer } from '../project-chat/ProjectChatComposer';
+import {
+  ProjectChatComposer,
+  type ProjectChatComposerAttachment,
+} from '../project-chat/ProjectChatComposer';
 
 /** Follow-up message input for active, idle, or sleeping resumable sessions. */
 export function FollowUpInput({
@@ -12,6 +16,9 @@ export function FollowUpInput({
   onUploadFiles,
   sending,
   uploading,
+  attachments,
+  onRemoveAttachment,
+  uploadError,
   placeholder,
   transcribeApiUrl,
   slashCommands,
@@ -20,9 +27,12 @@ export function FollowUpInput({
   value: string;
   onChange: (v: string) => void;
   onSend: () => void;
-  onUploadFiles?: (files: FileList) => void;
+  onUploadFiles?: (files: FileList | File[]) => void;
   sending: boolean;
   uploading?: boolean;
+  attachments?: ProjectChatComposerAttachment[];
+  onRemoveAttachment?: (index: number) => void;
+  uploadError?: string | null;
   placeholder: string;
   transcribeApiUrl: string;
   slashCommands?: SlashCommand[];
@@ -31,13 +41,20 @@ export function FollowUpInput({
   const isMobile = useIsMobile();
 
   return (
-    <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
+    <div className="relative shrink-0 px-3 py-3 md:px-4">
+      {uploadError && (
+        <p role="alert" className="text-danger text-sm">
+          {uploadError}
+        </p>
+      )}
       <ProjectChatComposer
         value={value}
         onChange={onChange}
         onSend={onSend}
         sending={sending}
         uploading={uploading}
+        attachments={attachments}
+        onRemoveAttachment={onRemoveAttachment}
         placeholder={placeholder}
         transcribeApiUrl={transcribeApiUrl}
         slashCommands={slashCommands}
@@ -55,29 +72,56 @@ export function FollowUpInput({
   );
 }
 
+/**
+ * Shown instead of the composer to someone who can't drive this chat. `ended` covers an
+ * archived chat, which only its owner can fork and which can no longer be shared.
+ * `accessEnded` is for a teammate whose shared access just ran out or was revoked, so the
+ * footer says so instead of reading as if they never had it.
+ */
 export function ReadOnlyFollowUp({
   ownerLabel,
   onNewChat,
+  ended = false,
+  accessEnded = false,
+  noticeRef,
 }: {
   ownerLabel: string;
   onNewChat?: () => void;
+  ended?: boolean;
+  accessEnded?: boolean;
+  /** Lets the chat move focus here when it closes a panel this viewer can no longer use. */
+  noticeRef?: Ref<HTMLDivElement>;
 }) {
   return (
-    <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
-      <div className="flex items-center gap-3 rounded-md border border-border-default bg-surface/50 px-3 py-2">
+    <div className="relative shrink-0 px-3 py-3 md:px-4">
+      <div
+        ref={noticeRef}
+        tabIndex={-1}
+        className="sam-well flex items-center gap-3 rounded-[14px] px-3 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+      >
         <div className="min-w-0 flex-1">
-          <div className="text-xs font-medium text-fg-primary">Read-only session</div>
-          <div className="text-xs text-fg-muted truncate">
-            Only {ownerLabel} can send messages here.
+          <div className="text-xs font-medium text-fg-primary break-words">
+            {ended
+              ? 'This chat has ended'
+              : accessEnded
+                ? 'Your shared access has ended'
+                : `Only ${ownerLabel} can message this agent`}
+          </div>
+          <div className="text-xs text-fg-muted break-words">
+            {ended
+              ? `Only ${ownerLabel} can fork it to continue.`
+              : accessEnded
+                ? `You can still read and comment. Ask ${ownerLabel} to share it again to keep chatting.`
+                : `You can leave comments on any message, or ask ${ownerLabel} to share this chat.`}
           </div>
         </div>
         {onNewChat && (
           <button
             type="button"
             onClick={onNewChat}
-            className="shrink-0 rounded-md border border-accent/40 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/15 transition-colors"
+            className="sam-raised min-h-10 shrink-0 cursor-pointer rounded-[var(--sam-radius-control)] border-0 px-3 text-xs font-medium text-[var(--sam-status-success-fg)] transition-[filter] hover:brightness-110"
           >
-            New chat
+            Start your own chat
           </button>
         )}
       </div>

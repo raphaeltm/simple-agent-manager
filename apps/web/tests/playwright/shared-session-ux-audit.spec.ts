@@ -31,8 +31,6 @@ const MOCK_PROJECT = {
   githubInstallationId: 'inst-1',
   defaultVmSize: null,
   defaultAgentType: null,
-  defaultProvider: null,
-  defaultLocation: null,
   defaultWorkspaceProfile: 'full',
   defaultDevcontainerConfigName: null,
   multiplayerActive: true,
@@ -114,7 +112,6 @@ async function setupApiMocks(page: Page, options: { multiplayerActive?: boolean 
     if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
     if (path.startsWith('/api/credentials')) return respond(200, []);
     if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
-    if (path === '/api/trial/status') return respond(200, { available: false });
     if (path === '/api/agents') return respond(200, { agents: [{ id: 'openai-codex', name: 'Codex', configured: true, supportsAcp: true }] });
     if (path === '/api/github/installations') return respond(200, []);
     if (path === '/api/workspaces') return respond(200, []);
@@ -162,8 +159,8 @@ test.describe('shared project session UX', () => {
 
     await expect(page.getByRole('button', { name: 'All sessions' })).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByText('Bob Collaborator').first()).toBeVisible();
-    await expect(page.getByText('Read-only session')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'New chat', exact: true })).toBeVisible();
+    await expect(page.getByText('Only Bob Collaborator can message this agent')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start your own chat' })).toBeVisible();
 
     const sessionNav = page.getByRole('navigation', { name: 'Chat sessions' });
     await page.getByRole('button', { name: 'My sessions' }).click();
@@ -183,7 +180,7 @@ test.describe('shared project session UX', () => {
     const sessionNav = page.getByRole('navigation', { name: 'Chat sessions' });
     await expect(sessionNav.getByText('Bob Collaborator')).toHaveCount(0);
     await expect(sessionNav.getByText('You')).toHaveCount(0);
-    await expect(page.getByText('Read-only session')).toBeVisible();
+    await expect(page.getByText('Only Bob Collaborator can message this agent')).toBeVisible();
     await capture(page, 'solo-session-ux-desktop');
   });
 

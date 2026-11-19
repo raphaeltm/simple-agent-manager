@@ -9,6 +9,8 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { sendPromptToAgentOnNode, stopAgentSessionOnNode } from '../../services/node-agent';
+import { retireTaskCancellationPrompts } from '../../services/task-cancellation-prompts';
+import { taskRecoveryCancellationStatement } from '../../services/task-recovery-cancellation';
 import { cleanupTerminalTaskResources } from '../../services/task-terminal-cleanup';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import {
@@ -70,14 +72,19 @@ export async function handleStopSubtask(
 
   const { task, workspace, agentSession } = resolution;
 
-  // If reason provided, inject a final warning message (best-effort)
+  // If reason provided, send a final SAM-authored warning (best-effort). The parent's
+  // reason is agent-written, so it is recorded on the task, never put in the prompt
+  // (constitution XV).
   if (reason && task.status !== 'sleeping') {
+    // Grace period to let the agent process the warning (capped at 30s to prevent misconfiguration)
+    const gracePeriodMs = Math.min(limits.orchestratorStopGraceMs, 30_000);
+    const graceSeconds = Math.ceil(gracePeriodMs / 1000);
     try {
       await sendPromptToAgentOnNode(
         workspace.nodeId,
         workspace.id,
         agentSession.id,
-        `[STOP REQUESTED BY PARENT] ${reason}`,
+        stopRequestedNotice(tokenData.taskId, graceSeconds),
         env,
         tokenData.userId
       );
@@ -90,8 +97,6 @@ export async function handleStopSubtask(
       });
     }
 
-    // Grace period to let the agent process the warning (capped at 30s to prevent misconfiguration)
-    const gracePeriodMs = Math.min(limits.orchestratorStopGraceMs, 30_000);
     await new Promise((resolve) => setTimeout(resolve, gracePeriodMs));
   }
 
@@ -129,12 +134,18 @@ export async function handleStopSubtask(
   let preservedTerminalStatus: string | null = null;
   try {
     const cancelFromStatus = async (fromStatus: string): Promise<boolean> => {
+      await retireTaskCancellationPrompts(env, {
+        ...task,
+        userId: tokenData.userId,
+        chatSessionId: workspace.chatSessionId,
+      });
       const [transition] = await env.DATABASE.batch([
         env.DATABASE.prepare(
           `UPDATE tasks
               SET status = 'cancelled', error_message = ?, completed_at = ?, updated_at = ?
-            WHERE id = ? AND status = ?`
-        ).bind(stopReason, now, now, taskId, fromStatus),
+            WHERE id = ? AND project_id = ? AND status = ?`
+        ).bind(stopReason, now, now, taskId, task.projectId, fromStatus),
+        taskRecoveryCancellationStatement(env.DATABASE, task, now),
         env.DATABASE.prepare(
           `INSERT INTO task_status_events
              (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
@@ -264,4 +275,14 @@ export async function handleStopSubtask(
       },
     ],
   });
+}
+
+/** SAM-authored notice for a parent's stop; it names the parent but never quotes its reason. */
+export function stopRequestedNotice(parentTaskId: string | null, graceSeconds: number): string {
+  const parent = parentTaskId ? `parent agent task ${parentTaskId}` : 'its parent agent';
+  return (
+    `SAM notice (system-generated, not a human message): ${parent} is stopping this task. ` +
+    `This session ends in about ${graceSeconds} seconds. Save or push any work you need to keep now. ` +
+    "The parent's reason is agent-written; SAM records it on this task when it stops."
+  );
 }

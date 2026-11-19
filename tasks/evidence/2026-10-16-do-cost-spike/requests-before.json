@@ -1,0 +1,148 @@
+{
+  "data": {
+    "viewer": {
+      "accounts": [
+        {
+          "durableObjectsInvocationsAdaptiveGroups": [
+            {
+              "dimensions": {
+                "datetimeHour": "2026-10-16T12:00:00Z",
+                "type": "jsrpc"
+              },
+              "sum": {
+                "requests": 9077
+              }
+            },
+            {
+              "dimensions": {
+                "datetimeHour": "2026-10-16T12:00:00Z",
+                "type": "alarm"
+              },
+              "sum": {
+                "requests": 1034
+              }
+            },
+            {
+              "dimensions": {
+                "datetimeHour": "2026-10-16T12:00:00Z",
+                "type": "http"
+              },
+              "sum": {
+                "requests": 7
+              }
+            },
+            {
+              "dimensions": {
+                "datetimeHour": "2026-10-16T12:00:00Z",
+                "type": "hibernation"
+              },
+              "sum": {
+                "requests": 136
+              }
+            },
+            {
+              "dimensions": {
+                "datetimeHour": "2026-10-16T13:00:00Z",
+                "type": "alarm"
+              },
+              "sum": {
+                "requests": 755
+              }
+            },
+            {
+              "dimensions": {
+                "datetimeHour": "2026-10-16T13:00:00Z",
+                "type": "hibernation"
+              },
+              "sum": {
+                "requests": 70
+              }
+            },
+            {
+              "dimensions": {
+                "datetimeHour": "2026-10-16T13:00:00Z",
+                "type": "http"
+              },
+              "sum": {
+                "requests": 3
+              }
+            },
+            {
+              "dimensions": {
+                "datetimeHour": "2026-10-16T13:00:00Z",
+                "type": "jsrpc"
+              },
+              "sum": {
+                "requests": 5688
+              }
+            },
+            {
+              "dimensions": {
+                "datetimeHour": "2026-10-16T14:00:00Z",
+                "type": "alarm"
+              },
+              "sum": {
+                "requests": 867
+              }
+            },
+            {
+              "dimensions": {
+                "datetimeHour": "2026-10-16T14:00:00Z",
+                "type": "jsrpc"
+              },
+              "sum": {
+                "requests": 7438
+              }
+            },
+            {
+              "dimensions": {
+                "datetimeHour": "2026-10-16T14:00:00Z",
+                "type": "hibernation"
+              },
+              "sum": {
+                "requests": 59
+              }
+            },
+            {
+              "dimensions": {
+                "datetimeHour": "2026-10-16T15:00:00Z",
+                "type": "alarm"
+              },
+              "sum": {
+                "requests": 710
+              }
+            },
+            {
+              "dimensions": {
+                "datetimeHour": "2026-10-16T15:00:00Z",
+                "type": "jsrpc"
+              },
+              "sum": {
+                "requests": 7322
+              }
+            },
+            {
+              "dimensions": {
+                "datetimeHour": "2026-10-16T15:00:00Z",
+                "type": "http"
+              },
+              "sum": {
+                "requests": 1
+              }
+            },
+            {
+              "dimensions": {
+                "datetimeHour": "2026-10-16T15:00:00Z",
+                "type": "hibernation"
+              },
+              "sum": {
+                "requests": 81
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "errors": null
+}

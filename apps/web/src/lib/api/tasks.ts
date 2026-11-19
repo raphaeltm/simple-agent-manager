@@ -6,6 +6,7 @@ import type {
   ListTasksResponse,
   RunTaskRequest,
   RunTaskResponse,
+  SubmitTaskRequest as SharedSubmitTaskRequest,
   Task,
   TaskDependency,
   TaskDetailResponse,
@@ -35,21 +36,23 @@ export interface TaskAttachmentRef {
   contentType: string;
 }
 
-export interface SubmitTaskRequest {
-  message: string;
+/**
+ * The browser's view of `POST /api/projects/:id/tasks/submit`.
+ *
+ * Derived from the canonical `SubmitTaskRequest` in `@simple-agent-manager/shared` rather
+ * than re-typed, so a new field on the contract cannot be forgotten here. Only the three
+ * fields the browser genuinely sees differently are replaced: the two VM hints it passes
+ * through as plain strings from form state, and attachments, which are presigned upload
+ * references at this layer and only become `TaskAttachment`s server-side.
+ */
+export type SubmitTaskRequest = Omit<
+  SharedSubmitTaskRequest,
+  'vmSize' | 'vmLocation' | 'attachments'
+> & {
   vmSize?: string;
   vmLocation?: string;
-  nodeId?: string;
-  agentType?: string;
-  resourceRequirements?: import('@simple-agent-manager/shared').ResourceRequirements;
-  workspaceProfile?: 'full' | 'lightweight';
-  devcontainerConfigName?: string | null;
-  parentTaskId?: string;
-  taskMode?: 'task' | 'conversation';
-  agentProfileId?: string;
-  skillId?: string;
   attachments?: TaskAttachmentRef[];
-}
+};
 
 export interface SubmitTaskResponse {
   taskId: string;
@@ -60,11 +63,13 @@ export interface SubmitTaskResponse {
 
 export async function submitTask(
   projectId: string,
-  data: SubmitTaskRequest
+  data: SubmitTaskRequest,
+  idempotencyKey?: string
 ): Promise<SubmitTaskResponse> {
   return request<SubmitTaskResponse>(`/api/projects/${projectId}/tasks/submit`, {
     method: 'POST',
     body: JSON.stringify(data),
+    headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
   });
 }
 
@@ -85,14 +90,14 @@ export async function requestAttachmentUpload(
   projectId: string,
   filename: string,
   size: number,
-  contentType: string,
+  contentType: string
 ): Promise<RequestAttachmentUploadResponse> {
   return request<RequestAttachmentUploadResponse>(
     `/api/projects/${projectId}/tasks/request-upload`,
     {
       method: 'POST',
       body: JSON.stringify({ filename, size, contentType }),
-    },
+    }
   );
 }
 
@@ -104,7 +109,7 @@ export async function requestAttachmentUpload(
 export function uploadAttachmentToR2(
   uploadUrl: string,
   file: File,
-  onProgress?: (loaded: number, total: number) => void,
+  onProgress?: (loaded: number, total: number) => void
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -136,11 +141,14 @@ export function uploadAttachmentToR2(
 
 export async function closeConversationTask(
   projectId: string,
-  taskId: string,
+  taskId: string
 ): Promise<{ status: string; closedAt: string }> {
-  return request<{ status: string; closedAt: string }>(`/api/projects/${projectId}/tasks/${taskId}/close`, {
-    method: 'POST',
-  });
+  return request<{ status: string; closedAt: string }>(
+    `/api/projects/${projectId}/tasks/${taskId}/close`,
+    {
+      method: 'POST',
+    }
+  );
 }
 
 // =============================================================================
@@ -175,10 +183,7 @@ export async function listProjectTasks(
   return request<ListTasksResponse>(endpoint);
 }
 
-export async function createProjectTask(
-  projectId: string,
-  data: CreateTaskRequest
-): Promise<Task> {
+export async function createProjectTask(projectId: string, data: CreateTaskRequest): Promise<Task> {
   return request<Task>(`/api/projects/${projectId}/tasks`, {
     method: 'POST',
     body: JSON.stringify(data),
@@ -307,14 +312,18 @@ export async function getTaskSessions(
   return request<TaskSessionsResponse>(`/api/projects/${projectId}/tasks/${taskId}/sessions`);
 }
 
-export async function linkSessionIdea(
-  projectId: string,
-  sessionId: string,
-  taskId: string,
-  context?: string,
-): Promise<{ linked: boolean }> {
-  return request<{ linked: boolean }>(`/api/projects/${projectId}/sessions/${sessionId}/ideas`, {
-    method: 'POST',
-    body: JSON.stringify({ taskId, ...(context ? { context } : {}) }),
-  });
+/** Owner override for a held first start or saved waiting session. */
+export function startProviderLimitTaskAnyway(projectId: string, taskId: string) {
+  return request<{ status: 'starting' | 'waking'; taskId: string }>(
+    `/api/projects/${projectId}/tasks/${taskId}/provider-limit/start-anyway`,
+    { method: 'POST' }
+  );
+}
+
+/** Resume an owner-held provider-limit wait from its saved snapshot. */
+export function resumeProviderLimitTask(projectId: string, taskId: string) {
+  return request<{ status: 'waking'; taskId: string }>(
+    `/api/projects/${projectId}/tasks/${taskId}/provider-limit/resume`,
+    { method: 'POST' }
+  );
 }

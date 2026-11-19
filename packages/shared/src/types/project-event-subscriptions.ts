@@ -45,8 +45,7 @@ export type ProjectEventSubscriptionPlatformCaller = {
 };
 
 export type ProjectEventSubscriptionCaller =
-  | ProjectEventSubscriptionAgentCaller
-  | ProjectEventSubscriptionPlatformCaller;
+  ProjectEventSubscriptionAgentCaller | ProjectEventSubscriptionPlatformCaller;
 
 export const PROJECT_EVENT_SUBSCRIPTION_OWNER_SCOPES = ['caller', 'specific', 'all'] as const;
 export type ProjectEventSubscriptionOwnerScope =
@@ -56,10 +55,13 @@ export type ProjectEventSubscriptionCreateRequest = {
   owner?: ProjectEventSubscriptionOwner | null;
   idempotencyKey: string;
   filter: ProjectEventFilterV1;
-  requestedDelivery: ProjectEventRequestedDeliveryMode;
+  /** Defaults to DEFAULT_PROJECT_EVENT_REQUESTED_DELIVERY (`runtime_steer`). */
+  requestedDelivery?: ProjectEventRequestedDeliveryMode;
   target?: ProjectEventDeliveryPreference['target'] | null;
   reason?: string | null;
   expiresAt?: number | null;
+  /** See CreateProjectEventSubscriptionInput.minWakeIntervalMs. */
+  minWakeIntervalMs?: number | null;
 };
 
 export type ProjectEventSubscriptionCreateResponse = ProjectEventSubscriptionMutationResult & {

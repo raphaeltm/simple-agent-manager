@@ -507,7 +507,7 @@ describe('node-pool legacy authority: reviewed exceptions are narrow', () => {
     expect(
       authorityFindings(
         file(
-          'apps/api/src/services/legacy-node-pool-compatibility.ts',
+          'packages/scheduler-core/src/legacy-node-pool-compatibility.ts',
           [
             "import { canSatisfyVmSize } from '@simple-agent-manager/shared';",
             'export function matches(node: string, want: string) { return canSatisfyVmSize(node, want); }',
@@ -526,17 +526,17 @@ describe('node-pool metadata exemptions preserve real authority detection', () =
       'return input.vmSize;',
     ],
     [
-      'apps/api/src/services/capacity-pool-authority.ts',
+      'packages/scheduler-core/src/capacity-pool-authority.ts',
       'capacityCandidateAuthorityGeneration',
       'return hash([input.machineSize]);',
     ],
     [
-      'apps/api/src/services/default-capacity-pool-candidates.ts',
+      'apps/api/src/services/default-capacity-pool-candidates-values.ts',
       'legacyVmSizeHintForOffering',
       'return input.machineSize;',
     ],
     [
-      'apps/api/src/services/placement-field-resolution.ts',
+      'packages/scheduler-core/src/placement-field-resolution.ts',
       'resolveVmSize',
       'return input.vmSizeOverride ?? fallback;',
     ],
@@ -553,7 +553,7 @@ describe('node-pool metadata exemptions preserve real authority detection', () =
   });
 
   it('does not let a compatibility helper forward labels into a native sink', () => {
-    const path = 'apps/api/src/services/placement-resolver-capacity.ts';
+    const path = 'packages/scheduler-core/src/placement-resolver-capacity.ts';
     expect(
       authorityFindings(
         file(
@@ -604,23 +604,6 @@ describe('node-pool metadata exemptions preserve real authority detection', () =
     expect(
       authorityFindings(
         file(path, "router.patch('/:id', (c) => { return offers[c.body.defaultVmSize]; });")
-      )
-    ).not.toEqual([]);
-  });
-
-  it('allows deprecated trial vocabulary validation while retaining its catalog fence', () => {
-    const path = 'apps/api/src/durable-objects/trial-orchestrator/steps.ts';
-    expect(
-      authorityFindings(
-        file(
-          path,
-          "function resolveTrialVmSize(env) { return env.TRIAL_VM_SIZE === 'small' ? env.TRIAL_VM_SIZE : fallback; }"
-        )
-      )
-    ).toEqual([]);
-    expect(
-      authorityFindings(
-        file(path, 'function resolveTrialVmSize(env) { return offers[env.TRIAL_VM_SIZE]; }')
       )
     ).not.toEqual([]);
   });
@@ -684,7 +667,7 @@ describe('node-pool metadata exemptions preserve real authority detection', () =
   });
 
   it('follows SQL interpolations to actual legacy or native destination columns', () => {
-    const path = 'apps/api/src/services/default-capacity-pool-candidates.ts';
+    const path = 'apps/api/src/services/default-capacity-pool-candidates-values.ts';
     expect(
       authorityFindings(
         file(
@@ -1146,6 +1129,35 @@ describe('node-pool source discovery', () => {
   });
 });
 
+describe('extracted task allocation boundaries', () => {
+  it('discovers schema-interpolated SQL writers without treating arbitrary templates as tables', () => {
+    const source =
+      'export function retry(db) { return db.run(sql`INSERT INTO ${schema.tasks} (${columns}) SELECT ${values}`); }';
+    expect(scanAllocationWriters([file('apps/api/src/retry.ts', source)])).toEqual([
+      expect.objectContaining({ table: 'tasks', owner: 'retry', writerKind: 'sql-insert' }),
+    ]);
+    expect(
+      scanAllocationWriters([
+        file('apps/api/src/retry.ts', source.replace('schema.tasks', 'untrusted.tasks')),
+      ])
+    ).toEqual([]);
+  });
+
+  it.each(['insertDispatchedTask', 'insertSamDispatchedTask', 'insertMcpRetriedTask'])(
+    'requires an admission contract for every new caller of %s',
+    (name) => {
+      const source = `export function bypass(env, row) { return ${name}(env, row); }`;
+      expect(
+        validateAllocationEntrypointInventory([file('apps/api/src/bypass.ts', source)], [])
+      ).toEqual([
+        expect.objectContaining({
+          reason: expect.stringContaining(`uninventoried allocation entrypoint ${name}()`),
+        }),
+      ]);
+    }
+  );
+});
+
 describe('node-pool inventories', () => {
   it('requires incarnation and workspace authority evidence in the durable allocation owner', () => {
     const filePath = 'apps/api/src/durable-objects/node-lifecycle-provisioning.ts';
@@ -1200,7 +1212,8 @@ describe('node-pool inventories', () => {
       expect(entry.owner.length).toBeGreaterThan(0);
       expect(entry.role.length).toBeGreaterThan(0);
     }
-    expect(ALLOCATION_WRITER_INVENTORY.length).toBeGreaterThanOrEqual(23);
+    // 22 since the anonymous-trial task adapter was retired (2026-11-08).
+    expect(ALLOCATION_WRITER_INVENTORY.length).toBeGreaterThanOrEqual(22);
   });
 
   it('records every allocation entrypoint with a scope, role and admission contract', () => {
@@ -1208,7 +1221,8 @@ describe('node-pool inventories', () => {
       expect(entry.owner.length).toBeGreaterThan(0);
       expect(entry.admission.length).toBeGreaterThan(20);
     }
-    expect(ALLOCATION_ENTRYPOINT_INVENTORY.length).toBeGreaterThanOrEqual(21);
+    // 19 since the four anonymous-trial orchestrator entrypoints were retired (2026-11-08).
+    expect(ALLOCATION_ENTRYPOINT_INVENTORY.length).toBeGreaterThanOrEqual(19);
   });
 
   it('has no duplicate writer or entrypoint ownership keys', () => {

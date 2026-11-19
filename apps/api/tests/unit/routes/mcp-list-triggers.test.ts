@@ -1,3 +1,4 @@
+import { cronToHumanReadable } from '@simple-agent-manager/cron';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -5,7 +6,6 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
 import { handleListTriggers } from '../../../src/routes/mcp/trigger-list-tool';
-import { cronToHumanReadable } from '../../../src/services/cron-utils';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 interface TriggerFixture {
@@ -275,14 +275,17 @@ describe('MCP list_triggers handler', () => {
     const invalidStatus = await handleListTriggers('req-1', { status: 'running' }, tokenData, env);
     const invalidSource = await handleListTriggers(
       'req-2',
-      { sourceType: 'email' },
+      { sourceType: 'carrier-pigeon' },
       tokenData,
       env
     );
     const invalidLimit = await handleListTriggers('req-3', { limit: 0 }, tokenData, env);
+    // 'email' became a real source type; it must now pass validation.
+    const emailSource = await handleListTriggers('req-4', { sourceType: 'email' }, tokenData, env);
 
     expect(invalidStatus.error?.message).toContain('status must be');
     expect(invalidSource.error?.message).toContain('sourceType must be');
     expect(invalidLimit.error?.message).toContain('limit must be');
+    expect(emailSource.error).toBeUndefined();
   });
 });

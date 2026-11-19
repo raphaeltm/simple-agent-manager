@@ -7,6 +7,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
+import { resolveWaitUntil } from '../lib/wait-until';
 import { AppError, errors } from '../middleware/error';
 import {
   callbackTokenIssuedAtMs,
@@ -81,27 +82,6 @@ function assertCallbackTokenBoundToBinding(
     });
     throw errors.forbidden('Node identity verification failed');
   }
-}
-
-function resolveWaitUntil(c: {
-  executionCtx: { waitUntil(promise: Promise<unknown>): void };
-}): WaitUntilFn {
-  try {
-    const executionCtx = c.executionCtx;
-    if (typeof executionCtx?.waitUntil === 'function') {
-      return (promise) => executionCtx.waitUntil(promise);
-    }
-  } catch {
-    // Unit-test Hono contexts may not expose executionCtx. Fall back to
-    // attaching the guarded promise so expected coalescing still drains.
-  }
-  return (promise) => {
-    void promise.catch((err) => {
-      log.warn('acp_activity.wait_until_unavailable_flush_failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
-  };
 }
 
 type ActivityCallbackProcessingContext = {
@@ -545,7 +525,7 @@ export async function handleAcpActivityCallback(
 
   const { projectId, sessionId, body } = input;
   const config = getAcpActivityAdmissionConfig(c.env);
-  const waitUntil = resolveWaitUntil(c);
+  const waitUntil = resolveWaitUntil(c, 'acp_activity.wait_until_unavailable_flush_failed');
   const flush = (snapshot: AcpActivityPendingSnapshot) =>
     flushCoalescedAcpActivity(c.env, snapshot);
   const isIntermediate = isIntermediateAcpActivityReport(body);

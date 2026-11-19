@@ -44,9 +44,10 @@ export async function listLibraryFiles(
 
 export async function getLibraryFile(
   projectId: string,
-  fileId: string
+  fileId: string,
+  options: { signal?: AbortSignal } = {}
 ): Promise<FileMetadataResponse> {
-  return request<FileMetadataResponse>(`/api/projects/${projectId}/library/${fileId}`);
+  return request<FileMetadataResponse>(`/api/projects/${projectId}/library/${fileId}`, options);
 }
 
 // =============================================================================

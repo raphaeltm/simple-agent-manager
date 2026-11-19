@@ -1,0 +1,222 @@
+---
+/** HTML version of the app's Ideas page (Northwind mock data): what needs a person first. */
+import './mock.css';
+---
+
+<div class="mk ideas">
+  <div class="mk-pad ideas-grid">
+    <div class="ideas-main">
+      <div class="ideas-head">
+        <div>
+          <p class="mk-h">Ideas</p>
+          <p class="mk-sub">Things you want done. Start work on one when it’s ready.</p>
+        </div>
+        <span class="mk-btn">+ New idea</span>
+      </div>
+      <p class="ideas-search">Search ideas</p>
+
+      <p class="mk-section">Needs you <span class="mk-count">3</span></p>
+      <div class="need need--ask" data-ring>
+        <p class="need-crumb"><span class="dot dot--amber">?</span>Retry failed webhook deliveries <span class="chev">›</span></p>
+        <p class="need-title">Careful Builder asked you something</p>
+        <p class="mk-sub">Stripe gives up after 3 days. Should we match that, or cap retries at 5 attempts?</p>
+        <span class="mk-btn">Answer</span>
+      </div>
+      <div class="need need--fail">
+        <p class="need-crumb"><span class="dot dot--red">!</span>Backfill the delivery index <span class="chev">›</span></p>
+        <p class="need-title">Work stopped: pnpm test failed: 3 suites red in tests/unit/delivery</p>
+        <p class="mk-sub">Backfilling the index stopped before it finished.</p>
+        <p class="btns"><span class="mk-btn">See what happened</span><span class="mk-btn mk-btn--ghost">Try again…</span></p>
+      </div>
+      <div class="need need--merged">
+        <p class="need-crumb"><span class="dot dot--green"><svg class="mk-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M6 8.5v13" /><path d="M11 6h4a3 3 0 0 1 3 3v6.5" /></svg></span>Rate-limit the delivery log <span class="chev">›</span></p>
+        <p class="need-title">PR #476 was merged 4 hours ago. Is this idea done?</p>
+        <p class="btns"><span class="mk-btn">Mark done</span><span class="mk-btn mk-btn--ghost">Keep open</span></p>
+      </div>
+
+      <p class="mk-section">In progress <span class="mk-count">2</span></p>
+      <ul class="rows mk-card">
+        <li>
+          <span class="mk-spin" aria-hidden="true"></span>
+          <span><b>Show every attempt in the dashboard</b><span class="mk-meta">Careful Builder is working in Adding the delivery log view</span></span>
+        </li>
+        <li>
+          <span class="pr" aria-hidden="true"><svg class="mk-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M6 8.5v13" /><path d="M11 6h4a3 3 0 0 1 3 3v6.5" /></svg></span>
+          <span><b>Let merchants replay a parked event</b><span class="mk-meta">PR #491 is open, checks passed</span></span>
+        </li>
+      </ul>
+    </div>
+
+    <aside class="ideas-side mk-card">
+      <p class="mk-section">Ideas move on their own</p>
+      <ul>
+        <li><span class="st">○</span>Not started until someone starts work</li>
+        <li><span class="st">◌</span>In progress while a chat works on it</li>
+        <li><span class="st st--violet"><svg class="mk-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M6 8.5v13" /><path d="M11 6h4a3 3 0 0 1 3 3v6.5" /></svg></span>In review when a pull request is open</li>
+        <li><span class="st st--green">✓</span>Merged: you decide if it’s done</li>
+      </ul>
+    </aside>
+  </div>
+</div>
+
+<style>
+  .ideas-grid {
+    display: grid;
+    gap: 16px;
+  }
+
+  @container (min-width: 620px) {
+    .ideas-grid {
+      grid-template-columns: minmax(0, 1fr) 200px;
+      align-items: start;
+    }
+  }
+
+  .ideas-side {
+    display: none;
+  }
+
+  @container (min-width: 620px) {
+    .ideas-side {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+      margin-top: 74px;
+    }
+  }
+
+  .ideas-side ul {
+    display: grid;
+    gap: 9px;
+    font-size: 0.88em;
+    color: var(--mk-muted);
+  }
+
+  .ideas-side li {
+    display: flex;
+    gap: 8px;
+  }
+
+  .st {
+    color: var(--mk-dim);
+  }
+
+  .st--violet {
+    color: var(--mk-violet);
+  }
+
+  .st--green {
+    color: var(--mk-green);
+  }
+
+  .ideas-main {
+    display: grid;
+    gap: 12px;
+  }
+
+  .ideas-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .ideas-search {
+    padding: 8px 12px;
+    border-radius: 9px;
+    color: var(--mk-dim);
+    border: 1px solid var(--mk-line);
+    background: var(--mk-surface);
+  }
+
+  .need {
+    display: grid;
+    gap: 6px;
+    justify-items: start;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid var(--mk-line);
+  }
+
+  .need--ask {
+    background: color-mix(in srgb, var(--mk-amber) 9%, var(--mk-surface));
+    border-color: color-mix(in srgb, var(--mk-amber) 45%, transparent);
+  }
+
+  .need--fail {
+    background: color-mix(in srgb, var(--mk-red) 8%, var(--mk-surface));
+    border-color: color-mix(in srgb, var(--mk-red) 40%, transparent);
+  }
+
+  .need--merged {
+    background: color-mix(in srgb, var(--mk-green) 7%, var(--mk-surface));
+    border-color: color-mix(in srgb, var(--mk-green) 35%, transparent);
+  }
+
+  .need-crumb {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 0.85em;
+    font-weight: 700;
+  }
+
+  .chev {
+    color: var(--mk-green);
+  }
+
+  .dot {
+    display: inline-grid;
+    place-items: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    font-size: 0.75em;
+    border: 1.5px solid currentColor;
+  }
+
+  .dot--amber {
+    color: var(--mk-amber);
+  }
+
+  .dot--red {
+    color: var(--mk-red);
+  }
+
+  .dot--green {
+    color: var(--mk-green);
+    border: 0;
+  }
+
+  .need-title {
+    font-weight: 700;
+    font-size: 1.05em;
+  }
+
+  .btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 2px;
+  }
+
+  .rows li {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 14px;
+  }
+
+  .rows li + li {
+    border-top: 1px solid var(--mk-line);
+  }
+
+  .rows li > span:last-child {
+    display: grid;
+    gap: 2px;
+  }
+
+  .pr {
+    color: var(--mk-violet);
+  }
+</style>

@@ -1,8 +1,4 @@
-import type {
-  PlatformConfigStatus,
-  PlatformConfigStatusResponse,
-  PlatformIntegrationConfigInput,
-} from './admin';
+import type { PlatformConfigStatus, PlatformIntegrationConfigInput } from './admin';
 import { request } from './client';
 
 export interface SetupStatusResponse {
@@ -12,9 +8,19 @@ export interface SetupStatusResponse {
   tokenConfigured: boolean;
 }
 
+export interface SetupSignInSummary {
+  /** This deployment can email sign-in codes. */
+  email: boolean;
+  /** False while Cloudflare is still verifying the sending domain. */
+  emailReady: boolean;
+  /** The installer's administrator email, when the install was made by the installer. */
+  ownerEmail: string | null;
+}
+
 export interface SetupVerifyResponse {
   ok: true;
   status: PlatformConfigStatus;
+  signIn: SetupSignInSummary;
 }
 
 export interface SetupCompleteResponse {
@@ -26,6 +32,9 @@ export interface LoginProvidersResponse {
   github: boolean;
   google: boolean;
   gitlab: boolean;
+  email: boolean;
+  /** This is a test instance that lets trusted agents sign in through workload identity. */
+  agentSignIn?: boolean;
 }
 
 /** Public: which login providers are configured (Google = the login client). */
@@ -44,19 +53,9 @@ export async function verifySetupToken(token: string): Promise<SetupVerifyRespon
   });
 }
 
-export async function saveSetupConfig(
-  token: string,
-  config: PlatformIntegrationConfigInput,
-): Promise<PlatformConfigStatusResponse> {
-  return request<PlatformConfigStatusResponse>('/api/setup/config', {
-    method: 'PUT',
-    body: JSON.stringify({ token, config }),
-  });
-}
-
 export async function completeSetup(
   token: string,
-  config: PlatformIntegrationConfigInput,
+  config: PlatformIntegrationConfigInput
 ): Promise<SetupCompleteResponse> {
   return request<SetupCompleteResponse>('/api/setup/complete', {
     method: 'POST',

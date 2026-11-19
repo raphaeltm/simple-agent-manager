@@ -38,6 +38,20 @@ function makeDb(dataByTable: Map<unknown, unknown[]>): AppDb {
         currentTable = table;
         return chain;
       },
+      innerJoin: () => {
+        const projects = dataByTable.get(schema.projects) ?? [];
+        const members = dataByTable.get(schema.projectMembers) ?? [];
+        return {
+          where: () => ({
+            limit: () =>
+              Promise.resolve(
+                projects.flatMap((project) =>
+                  members.map((membership) => ({ project, membership }))
+                )
+              ),
+          }),
+        };
+      },
       where: () => chain,
       limit: () => Promise.resolve(dataByTable.get(currentTable) ?? []),
     };
@@ -115,7 +129,12 @@ describe('requireProjectAccess', () => {
   it('returns the project for an active member who is not the project owner', async () => {
     const project = makeProject({ userId: 'owner-user' });
     const member = makeMember({ userId: 'member-user', role: 'viewer' });
-    const db = makeDb(new Map([[schema.projects, [project]], [schema.projectMembers, [member]]]));
+    const db = makeDb(
+      new Map([
+        [schema.projects, [project]],
+        [schema.projectMembers, [member]],
+      ])
+    );
 
     const result = await requireProjectAccess(db, 'p1', 'member-user');
 
@@ -125,7 +144,12 @@ describe('requireProjectAccess', () => {
   it('throws notFound for inactive membership', async () => {
     const project = makeProject({ userId: 'owner-user' });
     const member = makeMember({ userId: 'member-user', status: 'suspended' });
-    const db = makeDb(new Map([[schema.projects, [project]], [schema.projectMembers, [member]]]));
+    const db = makeDb(
+      new Map([
+        [schema.projects, [project]],
+        [schema.projectMembers, [member]],
+      ])
+    );
 
     await expect(requireProjectAccess(db, 'p1', 'member-user')).rejects.toMatchObject({
       statusCode: 404,
@@ -136,7 +160,12 @@ describe('requireProjectAccess', () => {
   it('throws notFound when DB returns a membership for a different user', async () => {
     const project = makeProject({ userId: 'owner-user' });
     const member = makeMember({ userId: 'other-user' });
-    const db = makeDb(new Map([[schema.projects, [project]], [schema.projectMembers, [member]]]));
+    const db = makeDb(
+      new Map([
+        [schema.projects, [project]],
+        [schema.projectMembers, [member]],
+      ])
+    );
 
     await expect(requireProjectAccess(db, 'p1', 'member-user')).rejects.toMatchObject({
       statusCode: 404,
@@ -147,7 +176,12 @@ describe('requireProjectAccess', () => {
   it('throws notFound when DB returns a project row for a different project', async () => {
     const project = makeProject({ id: 'p-other' });
     const member = makeMember();
-    const db = makeDb(new Map([[schema.projects, [project]], [schema.projectMembers, [member]]]));
+    const db = makeDb(
+      new Map([
+        [schema.projects, [project]],
+        [schema.projectMembers, [member]],
+      ])
+    );
 
     await expect(requireProjectAccess(db, 'p1', 'u1')).rejects.toMatchObject({
       statusCode: 404,
@@ -157,21 +191,36 @@ describe('requireProjectAccess', () => {
 });
 
 describe('requireProjectCapability', () => {
-  it.each(['admin', 'maintainer'] as const)('allows active %s members to use task:write on owner-created project tasks', async (role) => {
-    const project = makeProject({ userId: 'owner-user' });
-    const member = makeMember({ userId: 'member-user', role });
-    const db = makeDb(new Map([[schema.projects, [project]], [schema.projectMembers, [member]]]));
+  it.each(['admin', 'maintainer'] as const)(
+    'allows active %s members to use task:write on owner-created project tasks',
+    async (role) => {
+      const project = makeProject({ userId: 'owner-user' });
+      const member = makeMember({ userId: 'member-user', role });
+      const db = makeDb(
+        new Map([
+          [schema.projects, [project]],
+          [schema.projectMembers, [member]],
+        ])
+      );
 
-    const result = await requireProjectCapability(db, 'p1', 'member-user', 'task:write');
+      const result = await requireProjectCapability(db, 'p1', 'member-user', 'task:write');
 
-    expect(result).toEqual(project);
-  });
+      expect(result).toEqual(project);
+    }
+  );
 
   it('returns notFound for task:write when the caller is not an active project member', async () => {
     const project = makeProject({ userId: 'owner-user' });
-    const db = makeDb(new Map([[schema.projects, [project]], [schema.projectMembers, []]]));
+    const db = makeDb(
+      new Map([
+        [schema.projects, [project]],
+        [schema.projectMembers, []],
+      ])
+    );
 
-    await expect(requireProjectCapability(db, 'p1', 'nonmember-user', 'task:write')).rejects.toMatchObject({
+    await expect(
+      requireProjectCapability(db, 'p1', 'nonmember-user', 'task:write')
+    ).rejects.toMatchObject({
       statusCode: 404,
       error: 'NOT_FOUND',
     });
@@ -180,9 +229,16 @@ describe('requireProjectCapability', () => {
   it('returns notFound for task:write when the caller membership is suspended', async () => {
     const project = makeProject({ userId: 'owner-user' });
     const member = makeMember({ userId: 'member-user', role: 'maintainer', status: 'suspended' });
-    const db = makeDb(new Map([[schema.projects, [project]], [schema.projectMembers, [member]]]));
+    const db = makeDb(
+      new Map([
+        [schema.projects, [project]],
+        [schema.projectMembers, [member]],
+      ])
+    );
 
-    await expect(requireProjectCapability(db, 'p1', 'member-user', 'task:write')).rejects.toMatchObject({
+    await expect(
+      requireProjectCapability(db, 'p1', 'member-user', 'task:write')
+    ).rejects.toMatchObject({
       statusCode: 404,
       error: 'NOT_FOUND',
     });
@@ -191,7 +247,12 @@ describe('requireProjectCapability', () => {
   it('allows a member whose role grants the requested capability', async () => {
     const project = makeProject({ userId: 'owner-user' });
     const member = makeMember({ userId: 'member-user', role: 'maintainer' });
-    const db = makeDb(new Map([[schema.projects, [project]], [schema.projectMembers, [member]]]));
+    const db = makeDb(
+      new Map([
+        [schema.projects, [project]],
+        [schema.projectMembers, [member]],
+      ])
+    );
 
     const result = await requireProjectCapability(db, 'p1', 'member-user', 'deployment:deploy');
 
@@ -201,9 +262,16 @@ describe('requireProjectCapability', () => {
   it('throws forbidden when the active role lacks the requested capability', async () => {
     const project = makeProject({ userId: 'owner-user' });
     const member = makeMember({ userId: 'member-user', role: 'viewer' });
-    const db = makeDb(new Map([[schema.projects, [project]], [schema.projectMembers, [member]]]));
+    const db = makeDb(
+      new Map([
+        [schema.projects, [project]],
+        [schema.projectMembers, [member]],
+      ])
+    );
 
-    await expect(requireProjectCapability(db, 'p1', 'member-user', 'task:write')).rejects.toMatchObject({
+    await expect(
+      requireProjectCapability(db, 'p1', 'member-user', 'task:write')
+    ).rejects.toMatchObject({
       statusCode: 403,
       error: 'FORBIDDEN',
     });
@@ -212,9 +280,16 @@ describe('requireProjectCapability', () => {
   it('throws forbidden for an unknown active role', async () => {
     const project = makeProject({ userId: 'owner-user' });
     const member = makeMember({ userId: 'member-user', role: 'unexpected-role' });
-    const db = makeDb(new Map([[schema.projects, [project]], [schema.projectMembers, [member]]]));
+    const db = makeDb(
+      new Map([
+        [schema.projects, [project]],
+        [schema.projectMembers, [member]],
+      ])
+    );
 
-    await expect(requireProjectCapability(db, 'p1', 'member-user', 'project:read')).rejects.toMatchObject({
+    await expect(
+      requireProjectCapability(db, 'p1', 'member-user', 'project:read')
+    ).rejects.toMatchObject({
       statusCode: 403,
       error: 'FORBIDDEN',
     });
@@ -390,6 +465,44 @@ describe('requireActiveProjectMembership against a real SQL engine', () => {
     await expect(requireProjectAccess(db, 'proj-missing', 'owner-a')).rejects.toMatchObject({
       statusCode: 404,
     });
+  });
+
+  it('rejects an orphaned active membership after its project is deleted', async () => {
+    const { db, sqlite } = seed();
+    sqlite.prepare('DELETE FROM projects WHERE id = ?').run(PROJECT_A);
+    await expect(requireProjectAccess(db, PROJECT_A, 'owner-a')).rejects.toMatchObject({
+      statusCode: 404,
+    });
+    await expect(requireProjectAccess(db, PROJECT_B, 'owner-b')).resolves.toMatchObject({
+      id: PROJECT_B,
+    });
+  });
+
+  it.each(['invited', 'removed', 'suspended'])(
+    'rejects %s memberships beside an active control',
+    async (status) => {
+      const { db, sqlite } = seed();
+      sqlite
+        .prepare('UPDATE project_members SET status = ? WHERE project_id = ? AND user_id = ?')
+        .run(status, PROJECT_A, 'viewer-a');
+      await expect(requireProjectAccess(db, PROJECT_A, 'viewer-a')).rejects.toMatchObject({
+        statusCode: 404,
+      });
+      await expect(requireProjectAccess(db, PROJECT_A, 'owner-a')).resolves.toMatchObject({
+        id: PROJECT_A,
+      });
+    }
+  );
+
+  it('reads project and membership in one database statement', async () => {
+    const { sqlite } = seed();
+    const d1 = createSqliteD1(sqlite);
+    const prepare = vi.spyOn(d1, 'prepare');
+    const db = drizzle(d1, { schema }) as unknown as AppDb;
+    await expect(requireProjectAccess(db, PROJECT_A, 'viewer-a')).resolves.toMatchObject({
+      id: PROJECT_A,
+    });
+    expect(prepare).toHaveBeenCalledTimes(1);
   });
 
   it('enforces role capabilities on rows the predicates actually returned', async () => {

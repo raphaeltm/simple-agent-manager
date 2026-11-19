@@ -7,15 +7,14 @@ import {
 } from '../../../src/components/triggers/schedule-cron';
 
 /**
- * Unit coverage for the cron helpers extracted out of `SchedulePicker`, which
- * previously had none. The round-trip below is the property that matters:
- * whatever a stored cron means, the picker must read it back and rebuild the
- * identical string.
+ * Unit coverage for the cron helpers the Automation editor builds on
+ * (`pages/automation/editor/cron.ts` and `state.ts`). The round-trip below is the
+ * property that matters: whatever a stored cron means, the editor must read it
+ * back and rebuild the identical string.
  *
  * NOTE ON SCOPE: this file does NOT lock down the "editing a trigger shows the
- * wrong schedule" bug. That bug was a missing prop reconciliation in the
- * component — the parsing math here was already correct before the fix, so
- * these tests pass on the pre-fix code. `TriggerFormSchedule.test.tsx` is the
+ * wrong schedule" bug, which was about the editor's state, not this parsing math.
+ * `automation-flows.test.tsx` ("opens on the schedule that was saved") is the
  * discriminating regression guard for it.
  */
 describe('schedule-cron', () => {

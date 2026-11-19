@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { createInstrumentedLogger, serializeError } from '../../src/lib/logger';
+import { markTaskSubmitOperation } from '../../src/lib/task-submit-diagnostics';
 import { handleAppError } from '../../src/middleware/app-error-handler';
 import { errors } from '../../src/middleware/error';
 import { persistErrorBatch, queryErrors } from '../../src/services/observability';
@@ -110,6 +111,9 @@ describe('global app.onError observability persistence', () => {
           createdBy: 'nonexistent-user',
         });
       } catch (error) {
+        markTaskSubmitOperation(error, 'task_insert');
+        // An outer boundary must not overwrite the more precise inner label.
+        markTaskSubmitOperation(error, 'route_project_authorization');
         createInstrumentedLogger(c.env.OBSERVABILITY_DATABASE, (p) => pending.push(p), c.env).error(
           'query_failure',
           serializeError(error)
@@ -124,16 +128,38 @@ describe('global app.onError observability persistence', () => {
       executionContext(pending)
     );
     expect(response.status).toBe(500);
+    const body = await response.json<{ requestId: string }>();
     await Promise.all(pending);
     const rows = await env.OBSERVABILITY_DATABASE.prepare(
       'SELECT message, stack, context FROM platform_errors'
     ).all<{ message: string; stack: string | null; context: string }>();
     expect(rows.results).toHaveLength(2);
+    const requestRow = rows.results.find(
+      (row) => JSON.parse(row.context).requestId === body.requestId
+    );
+    expect(JSON.parse(requestRow!.context).failingOperation).toBe('task_insert');
+    expect(JSON.parse(requestRow!.context).d1Category).toBe('constraint_foreignkey');
     for (const row of rows.results) {
       expect(JSON.parse(row.context).causeCode).toMatch(/^SQLITE_CONSTRAINT(?:_FOREIGNKEY)?$/);
       expect(JSON.stringify(row)).not.toContain(canary);
       expect(JSON.stringify(row)).not.toContain('nonexistent-project');
     }
+  });
+
+  it('ignores an untrusted serializable operation property on an error', async () => {
+    const pending: Promise<unknown>[] = [];
+    const error = Object.assign(new Error('ordinary error'), { failingOperation: 'task_insert' });
+    const response = await errorApp(() => error).fetch(
+      new Request('https://api.test.example.com/api/nodes/node-1/fail'),
+      env,
+      executionContext(pending)
+    );
+    expect(response.status).toBe(500);
+    await Promise.all(pending);
+    const row = await env.OBSERVABILITY_DATABASE.prepare(
+      'SELECT context FROM platform_errors'
+    ).first<{ context: string }>();
+    expect(JSON.parse(row!.context)).not.toHaveProperty('failingOperation');
   });
 
   it.each([
@@ -160,6 +186,7 @@ describe('global app.onError observability persistence', () => {
       'SELECT message, stack, context FROM platform_errors LIMIT 1'
     ).first<{ message: string; stack: string | null; context: string }>();
     expect(JSON.parse(row!.context).causeCode).toBe(expectedCode);
+    expect(JSON.parse(row!.context).d1Category).toBe(expectedCode ? 'd1_transient' : undefined);
     expect(row!.stack).toBeNull();
     expect(row!.message).toBe('Failed query: [REDACTED]');
     expect(JSON.stringify(row)).not.toContain('private');

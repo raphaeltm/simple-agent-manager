@@ -96,17 +96,73 @@ export interface ScalingParamMeta {
 
 /** Registry of all per-project scaling parameters. */
 export const SCALING_PARAMS: ScalingParamMeta[] = [
-  { key: 'taskExecutionTimeoutMs', label: 'Task Execution Timeout', envVar: 'TASK_RUN_MAX_EXECUTION_MS', defaultValue: DEFAULT_TASK_EXECUTION_TIMEOUT_MS, min: MIN_TASK_EXECUTION_TIMEOUT_MS, max: MAX_TASK_EXECUTION_TIMEOUT_MS, unit: 'ms' },
-  { key: 'maxConcurrentTasks', label: 'Max Concurrent Tasks', envVar: 'MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT', defaultValue: DEFAULT_MAX_CONCURRENT_TASKS, min: MIN_MAX_CONCURRENT_TASKS, max: MAX_MAX_CONCURRENT_TASKS, unit: 'count' },
-  { key: 'maxDispatchDepth', label: 'Max Dispatch Depth', envVar: 'MCP_DISPATCH_MAX_DEPTH', defaultValue: DEFAULT_MAX_DISPATCH_DEPTH, min: MIN_MAX_DISPATCH_DEPTH, max: MAX_MAX_DISPATCH_DEPTH, unit: 'count' },
-  { key: 'maxSubTasksPerTask', label: 'Max Sub-Tasks Per Task', envVar: 'MCP_DISPATCH_MAX_PER_TASK', defaultValue: DEFAULT_MAX_SUB_TASKS_PER_TASK, min: MIN_MAX_SUB_TASKS_PER_TASK, max: MAX_MAX_SUB_TASKS_PER_TASK, unit: 'count' },
-  { key: 'warmNodeTimeoutMs', label: 'Warm Node Timeout', envVar: 'NODE_WARM_TIMEOUT_MS', defaultValue: DEFAULT_NODE_WARM_TIMEOUT_MS, min: MIN_WARM_NODE_TIMEOUT_MS, max: MAX_WARM_NODE_TIMEOUT_MS, unit: 'ms' },
-  { key: 'nodeCpuThresholdPercent', label: 'Node CPU Threshold', envVar: 'TASK_RUN_NODE_CPU_THRESHOLD_PERCENT', defaultValue: DEFAULT_NODE_CPU_THRESHOLD_PERCENT, min: MIN_NODE_CPU_THRESHOLD_PERCENT, max: MAX_NODE_CPU_THRESHOLD_PERCENT, unit: 'percent' },
-  { key: 'maxTriggers', label: 'Max Triggers', envVar: 'MAX_TRIGGERS_PER_PROJECT', defaultValue: DEFAULT_MAX_TRIGGERS_PER_PROJECT, min: MIN_MAX_TRIGGERS_PER_PROJECT, max: MAX_MAX_TRIGGERS_PER_PROJECT, unit: 'count' },
+  {
+    key: 'taskExecutionTimeoutMs',
+    label: 'Task Execution Timeout',
+    envVar: 'TASK_RUN_MAX_EXECUTION_MS',
+    defaultValue: DEFAULT_TASK_EXECUTION_TIMEOUT_MS,
+    min: MIN_TASK_EXECUTION_TIMEOUT_MS,
+    max: MAX_TASK_EXECUTION_TIMEOUT_MS,
+    unit: 'ms',
+  },
+  {
+    key: 'maxConcurrentTasks',
+    label: 'Max Concurrent Tasks',
+    envVar: 'MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT',
+    defaultValue: DEFAULT_MAX_CONCURRENT_TASKS,
+    min: MIN_MAX_CONCURRENT_TASKS,
+    max: MAX_MAX_CONCURRENT_TASKS,
+    unit: 'count',
+  },
+  {
+    key: 'maxDispatchDepth',
+    label: 'Max Dispatch Depth',
+    envVar: 'MCP_DISPATCH_MAX_DEPTH',
+    defaultValue: DEFAULT_MAX_DISPATCH_DEPTH,
+    min: MIN_MAX_DISPATCH_DEPTH,
+    max: MAX_MAX_DISPATCH_DEPTH,
+    unit: 'count',
+  },
+  {
+    key: 'maxSubTasksPerTask',
+    label: 'Max Sub-Tasks Per Task',
+    envVar: 'MCP_DISPATCH_MAX_PER_TASK',
+    defaultValue: DEFAULT_MAX_SUB_TASKS_PER_TASK,
+    min: MIN_MAX_SUB_TASKS_PER_TASK,
+    max: MAX_MAX_SUB_TASKS_PER_TASK,
+    unit: 'count',
+  },
+  {
+    key: 'warmNodeTimeoutMs',
+    label: 'Warm Node Timeout',
+    envVar: 'NODE_WARM_TIMEOUT_MS',
+    defaultValue: DEFAULT_NODE_WARM_TIMEOUT_MS,
+    min: MIN_WARM_NODE_TIMEOUT_MS,
+    max: MAX_WARM_NODE_TIMEOUT_MS,
+    unit: 'ms',
+  },
+  {
+    key: 'nodeCpuThresholdPercent',
+    label: 'Node CPU Threshold',
+    envVar: 'TASK_RUN_NODE_CPU_THRESHOLD_PERCENT',
+    defaultValue: DEFAULT_NODE_CPU_THRESHOLD_PERCENT,
+    min: MIN_NODE_CPU_THRESHOLD_PERCENT,
+    max: MAX_NODE_CPU_THRESHOLD_PERCENT,
+    unit: 'percent',
+  },
+  {
+    key: 'maxTriggers',
+    label: 'Max Triggers',
+    envVar: 'MAX_TRIGGERS_PER_PROJECT',
+    defaultValue: DEFAULT_MAX_TRIGGERS_PER_PROJECT,
+    min: MIN_MAX_TRIGGERS_PER_PROJECT,
+    max: MAX_MAX_TRIGGERS_PER_PROJECT,
+    unit: 'count',
+  },
 ];
 
 /** Scaling parameter keys as a type. */
-export type ScalingParamKey = typeof SCALING_PARAMS[number]['key'];
+export type ScalingParamKey = (typeof SCALING_PARAMS)[number]['key'];
 
 /**
  * Resolve a project scaling config value with fallback chain:
@@ -115,7 +171,7 @@ export type ScalingParamKey = typeof SCALING_PARAMS[number]['key'];
 export function resolveProjectScalingConfig(
   projectValue: number | null | undefined,
   envValue: string | undefined,
-  defaultValue: number,
+  defaultValue: number
 ): number {
   if (projectValue != null && Number.isFinite(projectValue)) return projectValue;
   if (envValue != null) {

@@ -173,8 +173,6 @@ export function toProjectResponse(project: schema.Project): Project {
     defaultWorkspaceProfile:
       (project.defaultWorkspaceProfile as Project['defaultWorkspaceProfile']) ?? null,
     defaultDevcontainerConfigName: project.defaultDevcontainerConfigName ?? null,
-    defaultProvider: (project.defaultProvider as Project['defaultProvider']) ?? null,
-    defaultLocation: project.defaultLocation ?? null,
     agentDefaults: parseAgentDefaults(project.agentDefaults),
     workspaceIdleTimeoutMs: project.workspaceIdleTimeoutMs ?? null,
     nodeIdleTimeoutMs: project.nodeIdleTimeoutMs ?? null,
@@ -234,7 +232,7 @@ export function toTaskResponse(
     agentProfileHint: displayAgentProfileHint,
     skillId: task.skillId ?? null,
     skillHint: task.skillHint ?? null,
-    blocked,
+    blocked: blocked || task.admissionState === 'provider_limit_blocked',
     triggeredBy: task.triggeredBy ?? 'user',
     connectorClientName: task.connectorClientName ?? null,
     triggerId: task.triggerId ?? null,

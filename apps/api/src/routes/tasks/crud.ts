@@ -1,3 +1,7 @@
+import { cronToHumanReadable } from '@simple-agent-manager/cron';
+import { toOperationHttpError } from '@simple-agent-manager/operations';
+import { applyIdeaStatusTransition, isIdeaStatus } from '@simple-agent-manager/operations';
+import { getIdeaSessionLinks } from '@simple-agent-manager/operations';
 import {
   type ListTaskEventsResponse,
   type ListTasksResponse,
@@ -21,6 +25,7 @@ import { ulid } from '../../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedWorkspace, requireProjectCapability } from '../../middleware/project-auth';
+import { operationDeps, webOperationContext } from '../../operation-ports';
 import {
   CreateTaskDependencySchema,
   CreateTaskSchema,
@@ -34,7 +39,6 @@ import {
   resolveTaskAgentProfileHints,
 } from '../../services/agent-profile-display';
 import { cancelTask } from '../../services/cancel-task';
-import { cronToHumanReadable } from '../../services/cron-utils';
 import { getRuntimeLimits } from '../../services/limits';
 import * as projectDataService from '../../services/project-data';
 import {
@@ -130,6 +134,11 @@ crudRoutes.post(
       title,
       description: body.description?.trim() || null,
       status: 'draft',
+      // Deliberately NOT an idea. This route creates an ordinary task, which starts out
+      // undispatched; `is_idea` stays 0, so it does not appear in Ideas and the idea
+      // transition table cannot move it (`operations/idea-identity.ts`). Before the flag
+      // existed an idea was "a task in `draft`", which is also what this row is — so every
+      // task created here was readable and completable as an idea by any project member.
       priority: body.priority ?? 0,
       agentProfileHint: body.agentProfileHint?.trim() || null,
       createdBy: userId,
@@ -453,6 +462,49 @@ crudRoutes.post(
       throw errors.badRequest('Invalid toStatus value');
     }
 
+    // An idea is not a task in flight: it has its own transition table, and this route must
+    // agree with `update_idea` and the Ideas UI rather than validating with the task table
+    // (`operations/idea-transitions.ts`).
+    //
+    // The flag IS the definition of an idea, so this reads the same thing
+    // `ideaTaskPredicateSql` does — the two surfaces cannot disagree about which state machine
+    // governs a row (`operations/idea-core.ts`).
+    /*
+     * ...but only while the row is actually IN that state machine. A legacy `ready` idea can
+     * still be delegated (`/delegate`), which sets `delegated` and keeps `is_idea = 1`. Routing
+     * on the flag alone then sent a later cancel into the idea table, which has never heard of
+     * `delegated`, so the transition was rejected and `cancelTask` and the terminal cleanup
+     * never ran — the row stranded mid-flight with no way out. An idea that has been handed to
+     * a runner is, for status purposes, a task, and uses the task table like one.
+     */
+    if (task.isIdea && isIdeaStatus(task.status)) {
+      try {
+        await applyIdeaStatusTransition(webOperationContext(c, userId), {
+          projectId,
+          ideaId: task.id,
+          status: body.toStatus,
+        });
+      } catch (error) {
+        throw toOperationHttpError(error);
+      }
+      const ideaRows = await db
+        .select()
+        .from(schema.tasks)
+        .where(eq(schema.tasks.id, task.id))
+        .limit(1);
+      const idea = ideaRows[0];
+      if (!idea) throw errors.notFound('Idea');
+      return c.json(
+        await toDisplayTaskResponse(
+          db,
+          idea,
+          projectId,
+          userId,
+          await computeBlockedForTask(db, idea.id)
+        )
+      );
+    }
+
     const blocked = await computeBlockedForTask(db, task.id);
     if (blocked && isExecutableTaskStatus(body.toStatus)) {
       throw errors.conflict('Task is blocked by unresolved dependencies');
@@ -678,6 +730,11 @@ crudRoutes.post(
     await requireProjectCapability(db, projectId, userId, 'task:write');
     const task = await requireProjectTaskById(db, projectId, taskId);
 
+    // Reachable for an idea only if that idea is ALREADY `ready`. Nothing can put one there
+    // any more: the idea transition table no longer offers `draft -> ready`, because ideas
+    // are not run in place — Start work creates a new linked task instead. Rows that reached
+    // `ready` before that keep this path rather than being stranded with no way to run
+    // (`operations/idea-transitions.ts`, rule 71).
     if (task.status !== 'ready') {
       throw errors.conflict('Only ready tasks can be delegated');
     }
@@ -991,7 +1048,7 @@ crudRoutes.get('/:taskId/sessions', requireAuth(), requireApproved(), async (c) 
 
   await requireProjectCapability(db, projectId, userId, 'task:read');
 
-  const sessions = await projectDataService.getSessionsForIdea(c.env, projectId, taskId);
+  const sessions = await getIdeaSessionLinks(operationDeps(c.env), projectId, taskId);
 
   return c.json({ sessions, count: sessions.length });
 });

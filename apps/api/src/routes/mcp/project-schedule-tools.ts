@@ -78,6 +78,9 @@ export async function handleScheduleTool(
       result = await projectData.createProjectSchedule(env, context.projectId, {
         userId: token.userId,
         creatorChatSessionId: context.target.sessionId,
+        // An agent may schedule only into its user's own chats, never through a grant.
+        creator: 'agent',
+        promptAuthor: 'agent',
         request: params,
       });
     } else if (tool === 'list_project_schedules') {

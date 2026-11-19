@@ -34,6 +34,10 @@ func (s *Server) handleRestoreAgentSession(w http.ResponseWriter, r *http.Reques
 func (s *Server) prepareFreshSessionAfterDegradedRestore(workspaceID, sessionID string, restoreErr error) {
 	hostKey := workspaceID + ":" + sessionID
 	s.sessionHostMu.Lock()
+	if s.isEvictionFinalizing(workspaceID) {
+		s.sessionHostMu.Unlock()
+		return // The eviction retains ownership; do not replace or stop its host.
+	}
 	host := s.sessionHosts[hostKey]
 	if host != nil {
 		delete(s.sessionHosts, hostKey)
@@ -61,7 +65,7 @@ func (s *Server) prepareFreshSessionAfterDegradedRestore(workspaceID, sessionID 
 
 func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceRuntime, sessionID, chatSessionID, agentType, callbackToken string) (result map[string]interface{}, resultErr error) {
 	ctx, timings := startLifecycleTimings(ctx, "metadata")
-	defer func() { s.finishLifecycleTimings(timings, "wake", runtime.ID, callbackToken, resultErr) }()
+	defer func() { s.finishLifecycleTimings(timings, "wake", runtime.ID, chatSessionID, callbackToken, resultErr) }()
 	restore, err := s.fetchSnapshotRestore(ctx, runtime.ID, chatSessionID, callbackToken)
 	if err != nil {
 		return nil, err
@@ -87,7 +91,7 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 	if s.config.IsStandaloneMode() {
 		provisionErr = s.prepareStandaloneWorkspaceRuntime(ctx, runtime)
 	} else {
-		_, provisionErr = s.provisionWorkspaceRuntime(ctx, runtime)
+		_, provisionErr = s.provisionWorkspaceRuntimeWithLifecycleLockHeld(ctx, runtime, timings)
 	}
 	if provisionErr != nil {
 		_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "fresh_injection_failed", provisionErr.Error(), callbackToken)
@@ -183,6 +187,9 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 	}
 	hostKey := runtime.ID + ":" + sessionID
 	host := s.getOrCreateSessionHostForRestore(hostKey, runtime.ID, sessionID, session, runtime, "", true)
+	if host == nil {
+		return nil, fmt.Errorf("resume saved agent context: workspace session admission is fenced")
+	}
 	if restoreErr := host.RestoreAgent(ctx, savedAgentType); restoreErr != nil {
 		return nil, fmt.Errorf("resume saved agent context: %w", restoreErr)
 	}
@@ -264,10 +271,9 @@ func (s *Server) primeRestoredMessageReporter(runtime *WorkspaceRuntime, chatSes
 		return
 	}
 	chatSessionID = strings.TrimSpace(chatSessionID)
-	projectID := strings.TrimSpace(runtime.ProjectID)
-	if projectID == "" {
-		projectID = strings.TrimSpace(s.config.ProjectID)
-	}
+	// Only the boot workspace may borrow the node's project; any other workspace
+	// would bind the reporter, and the runtime below, to another session's project.
+	projectID := s.workspaceSAMIdentity(runtime.ID, runtime, nil).ProjectID
 	if projectID == "" || chatSessionID == "" {
 		// Without a project + chat session the reporter cannot be created, so
 		// the restored agent's output would be silently dropped. Log loudly so

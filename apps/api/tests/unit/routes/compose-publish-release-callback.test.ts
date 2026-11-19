@@ -97,7 +97,7 @@ vi.mock('drizzle-orm', () => ({
   sql: (strings: TemplateStringsArray, ...exprs: unknown[]) => ({ strings, exprs }),
 }));
 
-vi.mock('../../../src/db/schema', () => ({
+vi.mock('@simple-agent-manager/worker-core/schema', () => ({
   workspaces: WORKSPACES,
   deploymentReleases: DEPLOYMENT_RELEASES,
   deploymentEnvironments: DEPLOYMENT_ENVIRONMENTS,

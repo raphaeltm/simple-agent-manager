@@ -1,0 +1,362 @@
+---
+/**
+ * 05 Glass: the app's layers drawn as an exploded isometric stack that pulls apart as it
+ * scrolls through (at rest, and without motion, it is fully exploded), the legend, and the
+ * four ingredients of the glass built up one at a time.
+ */
+import SectionHead from './SectionHead.astro';
+
+const layers = [
+  { name: 'Void', cls: '.sam-void', body: 'The ground. Light at the edges, near black in the middle. One per screen.' },
+  { name: 'Quiet pane', cls: '.sam-glass--quiet', body: 'A pane other panes sit on, like the conversation.' },
+  { name: 'Pane', cls: '.sam-glass', body: 'Sidebars, lists and settings groups. Frosted, lit on the rim.' },
+  { name: 'Slab', cls: '.sam-glass--slab', body: 'A pane laid on a pane: page headers, the message box.' },
+  { name: 'Solid', cls: '.sam-raised', body: 'Things you touch. Buttons, chips and avatars are never see-through.' },
+];
+
+const ingredients = [
+  { name: 'Fill', body: 'A dark, nearly opaque tint so text stays readable.' },
+  { name: 'Rim light', body: 'A bright top edge facing the light, fading down the sides.' },
+  { name: 'Sheen', body: 'A soft diagonal wash, brightest at the top left.' },
+  { name: 'Bounce and depth', body: 'Green light under the bottom edge and a long soft shadow.' },
+];
+---
+
+<section id="material" class="bg-section" aria-labelledby="material-title">
+  <div class="container">
+    <SectionHead id="material" title="Glass over a dark green void">
+      SAM's surfaces are glass panes floating over a deep void. Light comes from the edges of the
+      screen and catches on each pane's rim. Panes are the only translucent things: what you
+      touch is solid. Light mode inverts the void: grey-green edges around a bright white centre.
+    </SectionHead>
+
+    <div class="bg-material" data-progress>
+      <div class="bg-iso-stage" aria-hidden="true">
+        <div class="bg-iso">
+          <div class="layer layer--0 sam-void"></div>
+          <div class="layer layer--1 sam-glass sam-glass--quiet sam-glass-rim">
+            <span class="ln" style="width:62%"></span><span class="ln" style="width:48%"></span><span class="ln" style="width:70%"></span>
+          </div>
+          <div class="layer layer--2 sam-glass sam-glass-rim">
+            <span class="row"></span><span class="row is-on"></span><span class="row"></span>
+          </div>
+          <div class="layer layer--3 sam-glass sam-glass--slab sam-glass-rim">
+            <span class="well sam-well"></span>
+          </div>
+          <div class="layer layer--4">
+            <span class="solid-btn"></span><span class="solid-avatar"></span><span class="solid-chip"></span>
+          </div>
+        </div>
+      </div>
+
+      <ol class="bg-legend">
+        {layers.map((layer, index) => (
+          <li data-layer={index} data-reveal="right" style={`--i:${index}`}>
+            <span class="n">{index + 1}</span>
+            <div>
+              <h3>{layer.name} <code>{layer.cls}</code></h3>
+              <p>{layer.body}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+
+    <h3 class="bg-sub">Four ingredients</h3>
+    <ol class="bg-ingredients">
+      {ingredients.map((item, index) => (
+        <li data-reveal style={`--i:${index}`}>
+          <div class:list={['bg-ing', `bg-ing--${index}`]} aria-hidden="true"></div>
+          <h4><span>{index + 1}</span> {item.name}</h4>
+          <p>{item.body}</p>
+        </li>
+      ))}
+    </ol>
+
+    <ul class="bg-rules">
+      <li class="sam-glass sam-glass-rim"><strong>Surfaces are glass, elements are solid.</strong> Never fade an avatar or make a button see-through.</li>
+      <li class="sam-glass sam-glass-rim"><strong>Leave gaps.</strong> 14 px between panes, so the void shows through. Do not merge columns into one bordered block.</li>
+      <li class="sam-glass sam-glass-rim"><strong>Text sits on near-opaque glass.</strong> Body text keeps 4.5:1 contrast on every pane, in both themes.</li>
+      <li class="sam-glass sam-glass-rim"><strong>Respect the settings.</strong> Reduced transparency and high contrast swap glass for solid fills. The classes do this for you.</li>
+    </ul>
+  </div>
+</section>
+
+<style>
+  .bg-material {
+    display: grid;
+    gap: 40px;
+    align-items: center;
+    margin-bottom: 24px;
+  }
+
+  @media (min-width: 960px) {
+    .bg-material {
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+    }
+  }
+
+  /* --- Isometric stack --- */
+  .bg-iso-stage {
+    --e: 1;
+    display: grid;
+    place-items: center;
+    height: clamp(380px, 60vw, 560px);
+    perspective: 2000px;
+  }
+
+  :global(html.bg-motion) .bg-iso-stage {
+    --e: clamp(0.08, (var(--p, 1) - 0.18) * 2.6, 1);
+  }
+
+  .bg-iso {
+    position: relative;
+    width: clamp(200px, 34vw, 320px);
+    aspect-ratio: 3 / 2;
+    transform-style: preserve-3d;
+    transform: rotateX(56deg) rotateZ(-38deg);
+  }
+
+  .layer {
+    --z: calc(var(--n) * clamp(34px, 6vw, 64px));
+    position: absolute;
+    inset: 0;
+    display: grid;
+    align-content: center;
+    gap: 10px;
+    padding: 18px;
+    border-radius: 18px;
+    transform: translateZ(calc(var(--z) * var(--e) + var(--n) * 2px + var(--lift, 0px)));
+    transition: transform 0.5s var(--ease-glide);
+  }
+
+  .layer--0 {
+    --n: 0;
+    box-shadow: 0 0 0 1px rgb(74 222 128 / 0.25);
+  }
+
+  .layer--1 {
+    --n: 1;
+  }
+
+  .layer--2 {
+    --n: 2;
+    inset: 8% 10% 8% 6%;
+  }
+
+  .layer--3 {
+    --n: 3;
+    inset: auto 8% 10% 22%;
+    height: 34%;
+    border-radius: 16px;
+  }
+
+  .layer--4 {
+    --n: 4;
+    inset: auto 12% 14% 26%;
+    height: 24%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+  }
+
+  :global(html.bg-motion) .layer {
+    transition: none;
+  }
+
+  .layer .ln {
+    height: 8px;
+    border-radius: 4px;
+    background: rgb(255 255 255 / 0.12);
+  }
+
+  .layer .row {
+    height: 22px;
+    border-radius: 8px;
+    background: rgb(255 255 255 / 0.05);
+  }
+
+  .layer .row.is-on {
+    background: linear-gradient(90deg, rgb(74 222 128 / 0.22), rgb(34 197 94 / 0.06));
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12);
+  }
+
+  .layer .well {
+    height: 26px;
+    border-radius: 10px;
+  }
+
+  .solid-btn {
+    width: 46%;
+    height: 22px;
+    border-radius: 8px;
+    background: linear-gradient(180deg, #4ade80, #16a34a);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.4), 0 6px 14px -4px rgb(34 197 94 / 0.6);
+  }
+
+  .solid-avatar {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #22d3ee;
+    box-shadow: 0 0 0 2px var(--color-bg-canvas);
+  }
+
+  .solid-chip {
+    width: 18%;
+    height: 14px;
+    border-radius: 999px;
+    background: #f59e0b;
+  }
+
+  /* Pointing at a legend row lifts its layer. */
+  .bg-material:has(li[data-layer='0']:hover) .layer--0,
+  .bg-material:has(li[data-layer='1']:hover) .layer--1,
+  .bg-material:has(li[data-layer='2']:hover) .layer--2,
+  .bg-material:has(li[data-layer='3']:hover) .layer--3,
+  .bg-material:has(li[data-layer='4']:hover) .layer--4 {
+    --lift: 36px;
+    transition: transform 0.5s var(--ease-glide);
+  }
+
+  /* --- Legend --- */
+  .bg-legend {
+    display: grid;
+    gap: 6px;
+    list-style: none;
+  }
+
+  .bg-legend li {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 12px;
+    padding: 14px;
+    border-radius: var(--radius-lg);
+    transition: background 0.3s ease;
+  }
+
+  .bg-legend li:hover {
+    background: var(--color-accent-glow);
+  }
+
+  .bg-legend .n {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-fg-primary);
+    box-shadow: inset 0 0 0 1px var(--color-border);
+  }
+
+  .bg-legend h3 {
+    font-family: var(--font-display);
+    font-size: 1.125rem;
+    font-weight: 600;
+  }
+
+  .bg-legend code {
+    margin-left: 6px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--color-accent-strong);
+  }
+
+  html[data-theme='light'] .bg-legend code {
+    color: var(--color-accent);
+  }
+
+  .bg-legend p {
+    font-size: 0.9375rem;
+    color: var(--color-fg-muted);
+  }
+
+  /* --- Ingredients: each tile adds one more part of the material --- */
+  .bg-ingredients {
+    display: grid;
+    gap: 16px;
+    margin-bottom: 40px;
+    list-style: none;
+  }
+
+  @media (min-width: 640px) {
+    .bg-ingredients {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .bg-ingredients {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  .bg-ingredients li {
+    display: grid;
+    gap: 8px;
+    padding: 18px;
+    border-radius: var(--radius-xl);
+    background: radial-gradient(ellipse at 50% 0%, rgb(34 197 94 / 0.18), transparent 70%), var(--sam-void-base);
+  }
+
+  .bg-ing {
+    position: relative;
+    height: 140px;
+    margin-bottom: 8px;
+    border-radius: 18px;
+    background: var(--sam-glass-v2-fill);
+  }
+
+  .bg-ing--1::before,
+  .bg-ing--2::before,
+  .bg-ing--3::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    padding: 1px;
+    border-radius: inherit;
+    background: linear-gradient(165deg, var(--sam-glass-v2-rim-top), var(--sam-glass-v2-rim-mid) 30%, transparent 55%, var(--sam-glass-v2-rim-bottom));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+  }
+
+  .bg-ing--2,
+  .bg-ing--3 {
+    background: linear-gradient(160deg, var(--sam-glass-v2-sheen), transparent 40%), var(--sam-glass-v2-fill);
+  }
+
+  .bg-ing--3 {
+    box-shadow:
+      inset 0 1px 0 var(--sam-glass-v2-bevel),
+      inset 0 -1px 0 var(--sam-glass-v2-bounce),
+      var(--sam-glass-v2-depth-slab);
+  }
+
+  .bg-ingredients h4 {
+    font-family: var(--font-display);
+    font-size: 1.125rem;
+    font-weight: 600;
+  }
+
+  .bg-ingredients h4 span {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-accent-strong);
+    margin-right: 4px;
+  }
+
+  html[data-theme='light'] .bg-ingredients h4 span {
+    color: var(--color-accent);
+  }
+
+  .bg-ingredients p {
+    font-size: 0.875rem;
+    color: var(--color-fg-muted);
+  }
+</style>

@@ -1,24 +1,19 @@
-import { type ResolvedResourceReservation } from '@simple-agent-manager/shared';
-
-import type { PlacementHostDiagnosticInput } from '../../services/placement-diagnostics';
-import {
-  normalizePlacementHostSignals,
-  type PlacementHostSignals,
-} from '../../services/placement-strategy';
 import {
   type ActiveWorkspaceReservationUsage,
   cpuBudgetMillis,
   evaluateWorkspaceReservationCapacity,
+  normalizePlacementHostSignals,
   parseWorkspaceAdmissionMetrics,
+  type PlacementHostDiagnosticInput,
+  type PlacementHostSignals,
   resolveTrustedWorkspaceNodeCapacity,
   usableMemoryMb,
   type WorkspaceAdmissionPolicy,
-} from '../../services/workspace-resource-capacity';
-import type {
-  DeferrableReusableNodeCandidate,
-  ReusableNodeSelection,
-} from './node-placement-deferral';
-import type { NodePlacementFields } from './node-selection';
+} from '@simple-agent-manager/scheduler-core';
+import { type ResolvedResourceReservation } from '@simple-agent-manager/shared';
+
+import { LIFETIME_ADMISSION_CUTOFF_REASON } from '../../services/node-lifetime-admission';
+import type { NodePlacementFields, ReusableNodeSelection } from './node-selection-shared';
 
 export type RankedReusableNode = {
   id: string;
@@ -31,7 +26,6 @@ export type RankedReusableNode = {
 type ReusableNodeCandidateEvaluation = {
   diagnosticHost: PlacementHostDiagnosticInput;
   candidate?: RankedReusableNode;
-  deferrableCandidate?: DeferrableReusableNodeCandidate;
   rejection?: { nodeId: string; reasons: string[] };
 };
 
@@ -44,6 +38,11 @@ type ReusableNodeCandidateInput = {
   agentCompatible: boolean;
   satisfiesTaskResources: boolean;
   authoritative: boolean;
+  /**
+   * The node is in the last part of its lifetime (`node-lifetime-admission.ts`). Checked first:
+   * placing onto, or queueing behind, a node about to be reaped gains nothing.
+   */
+  pastLifetimeAdmissionCutoff?: boolean;
 };
 
 function candidateSignals(input: ReusableNodeCandidateInput): PlacementHostSignals {
@@ -57,6 +56,7 @@ function candidateSignals(input: ReusableNodeCandidateInput): PlacementHostSigna
 }
 
 function reusableNodeExclusion(input: ReusableNodeCandidateInput): string | null {
+  if (input.pastLifetimeAdmissionCutoff) return LIFETIME_ADMISSION_CUTOFF_REASON;
   if (!input.agentCompatible) return 'Host agent version is incompatible';
   const capacity = resolveTrustedWorkspaceNodeCapacity(input.node);
   if (
@@ -126,7 +126,7 @@ function capacityCandidateEvaluation(
   );
   const diagnosticHost: PlacementHostDiagnosticInput = {
     signals,
-    outcome: capacity.deferrable ? 'deferred' : 'rejected',
+    outcome: 'rejected',
     reasons: capacity.admitted ? ['Another eligible host ranked higher'] : capacity.reasons,
     provider: input.node.cloudProvider,
     location: input.node.vmLocation,
@@ -134,12 +134,6 @@ function capacityCandidateEvaluation(
   };
   if (capacity.admitted)
     return { diagnosticHost, candidate: rankedNode(input, signals, selection) };
-  if (capacity.deferrable) {
-    return {
-      diagnosticHost,
-      deferrableCandidate: rankedNode(input, signals, selection),
-    };
-  }
   return {
     diagnosticHost,
     rejection: { nodeId: input.node.id, reasons: capacity.reasons },

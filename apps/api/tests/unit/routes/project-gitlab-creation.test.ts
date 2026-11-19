@@ -23,6 +23,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('drizzle-orm/d1');
 vi.mock('../../../src/middleware/auth', () => ({
+  // Agent sign-in session guards: inert for these ordinary-session route tests.
+  rejectAgentSignInSession: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  assertNotAgentSignInSession: () => undefined,
+
   requireAuth: () => vi.fn((c: any, next: any) => next()),
   requireApproved: () => vi.fn((c: any, next: any) => next()),
   getUserId: () => 'user-1',
@@ -76,7 +80,11 @@ describe('POST /api/projects — GitLab provider', () => {
   const mockEnv = { DATABASE: {} as D1Database } as Env;
 
   const createGitLabProject = (
-    body: Record<string, unknown> = { name: 'GitLab Project', repoProvider: 'gitlab', gitlabProjectId: 123 }
+    body: Record<string, unknown> = {
+      name: 'GitLab Project',
+      repoProvider: 'gitlab',
+      gitlabProjectId: 123,
+    }
   ) =>
     app.request(
       '/api/projects',

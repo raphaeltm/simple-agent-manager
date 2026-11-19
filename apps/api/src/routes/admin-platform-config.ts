@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import type { Env } from '../env';
 import { getUserId, requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { requireActiveSettingsSuperadmin } from '../middleware/settings-admin';
 import { jsonValidator, UpdatePlatformIntegrationConfigSchema } from '../schemas';
 import { enforceCredentialMutationRateLimit } from '../services/credential-mutation-rate-limit';
 import {
@@ -10,10 +11,17 @@ import {
   savePlatformIntegrationConfig,
 } from '../services/platform-config';
 import { validatePlatformIntegrationInput } from '../services/platform-config-validation';
+import { requestWaitUntil, scheduleSecurityAlert } from '../services/security-alerts';
 
 const adminPlatformConfigRoutes = new Hono<{ Bindings: Env }>();
 
-adminPlatformConfigRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
+adminPlatformConfigRoutes.use(
+  '/*',
+  requireAuth(),
+  requireApproved(),
+  requireSuperadmin(),
+  requireActiveSettingsSuperadmin()
+);
 
 async function assertFeedbackProjectSelection(
   env: Env,
@@ -30,12 +38,17 @@ async function assertFeedbackProjectSelection(
     .bind(projectId, userId)
     .first<{ id: string }>();
   if (!row) {
-    throw errors.badRequest('Feedback project must exist and be a project you can access');
+    throw errors.badRequest('Operations project must exist and be a project you can access');
   }
 }
 
 adminPlatformConfigRoutes.get('/', async (c) => {
-  return c.json({ status: await getPlatformConfigStatus(c.env, { userId: getUserId(c) }) });
+  return c.json({
+    status: await getPlatformConfigStatus(c.env, {
+      userId: getUserId(c),
+      includeActorLabels: true,
+    }),
+  });
 });
 
 adminPlatformConfigRoutes.put(
@@ -44,11 +57,13 @@ adminPlatformConfigRoutes.put(
   async (c) => {
     const { config } = c.req.valid('json');
     const userId = getUserId(c);
-    if (config.googleInfrastructure) {
+    if (config.googleInfrastructure || config.clear?.includes('googleInfrastructureOAuth')) {
       await enforceCredentialMutationRateLimit(c.env, userId, 'google-infra-oauth');
     }
     if (config.feedback?.remove && config.feedback.projectId?.trim()) {
-      throw errors.badRequest('Choose a feedback project or clear the runtime selection, not both');
+      throw errors.badRequest(
+        'Choose an Operations project or clear the runtime selection, not both'
+      );
     }
     const feedbackProjectId = config.feedback?.projectId?.trim();
     if (feedbackProjectId) {
@@ -58,8 +73,15 @@ adminPlatformConfigRoutes.put(
     if (!validation.ok) {
       throw errors.badRequest('Platform configuration is invalid', { errors: validation.errors });
     }
-    await savePlatformIntegrationConfig(c.env, config, userId);
-    return c.json({ status: await getPlatformConfigStatus(c.env, { userId }) });
+    const changes = await savePlatformIntegrationConfig(c.env, config, userId);
+    scheduleSecurityAlert(c.env, requestWaitUntil(c), {
+      kind: 'integration-changed',
+      actorUserId: userId,
+      changes,
+    });
+    return c.json({
+      status: await getPlatformConfigStatus(c.env, { userId, includeActorLabels: true }),
+    });
   }
 );
 

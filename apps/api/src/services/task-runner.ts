@@ -26,9 +26,9 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { stopWorkspaceOnNode } from './node-agent';
-import * as nodeLifecycleService from './node-lifecycle';
+import { handOffEmptyWorkspaceNode } from './node-warm-handoff';
 import { stopNodeResources } from './nodes';
-import { wakeVmAdmissionWaiters } from './vm-admission-control';
+import { sleptFallbackRecord } from './session-sleep-episode';
 import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
 
 function getCleanupDelayMs(env: Env): number {
@@ -41,8 +41,8 @@ function getCleanupDelayMs(env: Env): number {
 }
 
 /**
- * Clean up a workspace and optionally its auto-provisioned node after task completion.
- * Called when a task run finishes (either success or failure).
+ * Clean up a workspace after task completion and hand its node to NodeLifecycle when the
+ * node is left empty. Called when a task run finishes (either success or failure).
  *
  * TDF-7: Fully idempotent — safe to call multiple times. Checks workspace
  * and node state before taking action. No side effects on repeated calls.
@@ -51,7 +51,8 @@ export async function cleanupTaskRun(
   taskId: string,
   env: Env,
   warmTimeoutOverrideMs?: number | null,
-  requiredUserId?: string
+  requiredUserId?: string,
+  options: { requireStopAcknowledgement?: boolean } = {}
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
   const cleanupDelay = getCleanupDelayMs(env);
@@ -63,9 +64,10 @@ export async function cleanupTaskRun(
 
   const [task] = await db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).limit(1);
 
-  if (!task || !task.workspaceId) {
-    return;
+  if (!task && options.requireStopAcknowledgement) {
+    throw new Error('SAM stop target no longer exists');
   }
+  if (!task || !task.workspaceId) return;
 
   const workspaceConditions = [eq(schema.workspaces.id, task.workspaceId)];
   if (requiredUserId) {
@@ -79,6 +81,16 @@ export async function cleanupTaskRun(
     .limit(1);
 
   if (!workspace || !workspace.nodeId) {
+    if (options.requireStopAcknowledgement) {
+      // A removed workspace needs no stop. A filtered-out owner or an attached
+      // workspace without a node is ambiguous and must not produce success.
+      const [existing] = await db
+        .select({ id: schema.workspaces.id })
+        .from(schema.workspaces)
+        .where(eq(schema.workspaces.id, task.workspaceId))
+        .limit(1);
+      if (existing) throw new Error('SAM stop resource identity is unconfirmed');
+    }
     if (requiredUserId) {
       log.info('task_run.cleanup.skipped_owner_mismatch', {
         taskId,
@@ -115,6 +127,10 @@ export async function cleanupTaskRun(
     .where(and(eq(schema.nodes.id, workspace.nodeId), eq(schema.nodes.userId, cleanupUserId)))
     .limit(1);
 
+  if (options.requireStopAcknowledgement && !node) {
+    throw new Error('SAM stop node identity is unconfirmed');
+  }
+
   if (node?.runtime === 'cf-container') {
     const [snapshot] = workspace.chatSessionId
       ? await db
@@ -122,6 +138,14 @@ export async function cleanupTaskRun(
             status: schema.sessionSnapshots.status,
             degradation: schema.sessionSnapshots.degradation,
             expiresAt: schema.sessionSnapshots.expiresAt,
+            sleepStatus: schema.sessionSnapshots.sleepStatus,
+            sleepingAt: schema.sessionSnapshots.sleepingAt,
+            sleepFallbackJson: schema.sessionSnapshots.sleepFallbackJson,
+            snapshotGeneration: schema.sessionSnapshots.snapshotGeneration,
+            workspaceId: schema.sessionSnapshots.workspaceId,
+            nodeId: schema.sessionSnapshots.nodeId,
+            userId: schema.sessionSnapshots.userId,
+            projectId: schema.sessionSnapshots.projectId,
           })
           .from(schema.sessionSnapshots)
           .where(eq(schema.sessionSnapshots.chatSessionId, workspace.chatSessionId))
@@ -129,10 +153,23 @@ export async function cleanupTaskRun(
       : [];
     const preserveSleepingSnapshot =
       workspace.status === 'sleeping' &&
-      snapshot?.status === 'available' &&
-      snapshot.degradation === 'none' &&
-      Date.parse(snapshot.expiresAt) > Date.now();
+      snapshot &&
+      Date.parse(snapshot.expiresAt) > Date.now() &&
+      ((snapshot.status === 'available' && snapshot.degradation === 'none') ||
+        // A committed bounded fallback has already stopped paid compute. Keep
+        // its logical Instant identity so a message can start fresh from the
+        // transcript. A stopping/unconfirmed or replaced runtime is not proof.
+        (snapshot.sleepStatus === 'sleeping' &&
+          snapshot.sleepingAt !== null &&
+          snapshot.workspaceId === workspace.id &&
+          snapshot.nodeId === workspace.nodeId &&
+          snapshot.userId === workspace.userId &&
+          snapshot.projectId === workspace.projectId &&
+          Boolean(sleptFallbackRecord(snapshot))));
     if (preserveSleepingSnapshot) {
+      if (options.requireStopAcknowledgement) {
+        throw new Error('Preserved sleep cannot acknowledge a SAM stop');
+      }
       log.info('task_run.cleanup.cf_container_sleep_preserved', {
         taskId,
         workspaceId: workspace.id,
@@ -150,6 +187,16 @@ export async function cleanupTaskRun(
     return;
   }
 
+  if (
+    options.requireStopAcknowledgement &&
+    workspace.status !== 'running' &&
+    workspace.status !== 'recovery'
+  ) {
+    // A legacy stopped row may have been written after a swallowed node failure.
+    // Do not replay a stop or manufacture acknowledgement from control-plane state.
+    throw new Error('SAM workspace stop acknowledgement is unavailable');
+  }
+
   // Stop the workspace (idempotent: only if still running/recovery)
   if (workspace.status === 'running' || workspace.status === 'recovery') {
     try {
@@ -161,6 +208,9 @@ export async function cleanupTaskRun(
         nodeId: workspace.nodeId,
         error: err instanceof Error ? err.message : String(err),
       });
+      // Interactive SAM receipts must not certify a stop without its acknowledgement.
+      // Background cleanup retains its existing best-effort deletion scheduling.
+      if (options.requireStopAcknowledgement) throw err;
     }
 
     const stoppedAt = new Date().toISOString();
@@ -206,126 +256,21 @@ export async function cleanupTaskRun(
     }
   }
 
-  // If node was auto-provisioned for this task, check if it can be cleaned up
-  if (task.autoProvisionedNodeId) {
-    await cleanupAutoProvisionedNode(
-      db,
-      task.autoProvisionedNodeId,
-      cleanupUserId,
-      workspace.id,
-      env,
-      warmTimeoutOverrideMs
-    );
-  }
-}
-
-/**
- * Check if an auto-provisioned node has no other active workspaces.
- * If empty, marks the node as warm (idle) via the NodeLifecycle DO
- * so it stays available for fast reuse. The DO alarm handles eventual
- * teardown if not reclaimed within the warm timeout.
- *
- * TDF-7: Idempotent — checks if node is already warm or stopped before
- * calling markIdle. Running cleanup twice produces no side effects.
- */
-async function cleanupAutoProvisionedNode(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  nodeId: string,
-  userId: string,
-  excludeWorkspaceId: string | null,
-  env: Env,
-  warmTimeoutOverrideMs?: number | null
-): Promise<void> {
-  // Check current node state first (TDF-7: idempotency guard)
-  const [node] = await db
-    .select({ id: schema.nodes.id, status: schema.nodes.status, warmSince: schema.nodes.warmSince })
-    .from(schema.nodes)
-    .where(eq(schema.nodes.id, nodeId))
-    .limit(1);
-
-  if (!node) {
-    log.info('task_run.cleanup.node_not_found', { nodeId });
-    return;
-  }
-
-  // Already stopped or deleted — nothing to do
-  if (node.status === 'stopped' || node.status === 'deleted') {
-    log.info('task_run.cleanup.node_already_stopped', { nodeId, status: node.status });
-    return;
-  }
-
-  // Already warm — don't re-mark (would reset alarm timer)
-  if (node.warmSince) {
-    log.info('task_run.cleanup.node_already_warm', { nodeId, warmSince: node.warmSince });
-    return;
-  }
-
-  // Count active workspaces on this node (excluding the one we're cleaning up)
-  const workspaces = await db
-    .select({ id: schema.workspaces.id, status: schema.workspaces.status })
-    .from(schema.workspaces)
-    .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
-
-  const activeWorkspaces = workspaces.filter(
-    (ws) => ws.id !== excludeWorkspaceId && isActiveWorkspaceForNodeCleanup(ws.status)
-  );
-
-  if (activeWorkspaces.length > 0) {
-    // Other workspaces still running, don't mark idle
-    return;
-  }
-
-  // No active workspaces — mark node as warm for reuse.
-  // The NodeLifecycle DO will schedule an alarm for eventual teardown.
-  const markedIdle = await markNodeIdleForReuse(env, nodeId, userId, warmTimeoutOverrideMs);
-  if (!markedIdle) return;
-
-  try {
-    await wakeVmAdmissionWaiters(env, { userId, reason: 'node_marked_warm' });
-  } catch (err) {
-    log.warn('task_run.cleanup.admission_wake_failed', {
+  // Hand the node to NodeLifecycle once this was its last live workspace. Key on the node the
+  // workspace ran on: a task pack-placed onto an existing pool node never records
+  // autoProvisionedNodeId, and a woken conversation clears it (reactivateSleepingTask), so
+  // gating on that pointer left healthy nodes running empty with no teardown path. A
+  // provisioning pointer naming a different node is handed off too.
+  const handoffNodeIds = new Set([workspace.nodeId]);
+  if (task.autoProvisionedNodeId) handoffNodeIds.add(task.autoProvisionedNodeId);
+  for (const nodeId of handoffNodeIds) {
+    await handOffEmptyWorkspaceNode(env, {
       nodeId,
-      userId,
-      error: err instanceof Error ? err.message : String(err),
+      expectedUserId: cleanupUserId,
+      sourceProjectId: workspace.projectId,
+      warmTimeoutOverrideMs,
+      reason: 'task_run_cleanup',
     });
-  }
-}
-
-function isActiveWorkspaceForNodeCleanup(status: string): boolean {
-  return status === 'running' || status === 'creating' || status === 'recovery';
-}
-
-async function markNodeIdleForReuse(
-  env: Env,
-  nodeId: string,
-  userId: string,
-  warmTimeoutOverrideMs?: number | null
-): Promise<boolean> {
-  try {
-    await nodeLifecycleService.markIdle(env, nodeId, userId, warmTimeoutOverrideMs);
-    log.info('task_run.cleanup.node_marked_warm', { nodeId, userId, warmTimeoutOverrideMs });
-    return true;
-  } catch (err) {
-    log.error('task_run.cleanup.mark_idle_failed', {
-      nodeId,
-      userId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    // Fallback: stop node directly if DO fails
-    try {
-      const { stopNodeResources } = await import('./nodes');
-      await stopNodeResources(nodeId, userId, env);
-      log.info('task_run.cleanup.node_stopped_fallback', { nodeId, userId });
-    } catch (stopErr) {
-      // Both markIdle and fallback stop failed — log for cron sweep to catch
-      log.error('task_run.cleanup.node_cleanup_total_failure', {
-        nodeId,
-        userId,
-        markIdleError: err instanceof Error ? err.message : String(err),
-        stopError: stopErr instanceof Error ? stopErr.message : String(stopErr),
-      });
-    }
-    return false;
   }
 }
 

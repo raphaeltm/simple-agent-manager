@@ -14,8 +14,11 @@
  * adapter: the guard IS a SQL predicate, so a mock whose `.where()` ignores its
  * arguments would pass with the predicate deleted (rule 28).
  */
+import { resolveWorkspaceAdmissionPolicy } from '@simple-agent-manager/scheduler-core';
 import type { CapacityPlacementSnapshot } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
@@ -29,12 +32,13 @@ import type {
   TaskRunnerState,
 } from '../../../src/durable-objects/task-runner/types';
 import type { Env } from '../../../src/env';
+import { disableCapacitySourceAvailability } from '../../../src/services/default-capacity-pool-sources';
+import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
 import { assertNodeAllocationPlanCurrent } from '../../../src/services/nodes';
 import type { TaskStartCapacityPoolSelection } from '../../../src/services/placement-resolver';
 import { filterReusableNodesByCurrentAuthority } from '../../../src/services/reusable-node-authority';
 import type { WorkspacePlacementInput } from '../../../src/services/workspace-placement';
 import { reserveWorkspacePlacement } from '../../../src/services/workspace-placement';
-import { resolveWorkspaceAdmissionPolicy } from '../../../src/services/workspace-resource-capacity';
 import {
   createAllSchemaTables,
   createSqliteD1,
@@ -63,6 +67,8 @@ interface PoolFixture {
   sourceId: string;
   candidateId: string;
   scope: PoolScope;
+  /** Cloud credential behind the source; the seeded personal credential by default. */
+  credentialId?: string;
 }
 
 function db(): Database.Database {
@@ -136,6 +142,44 @@ function seedPool(scope: PoolScope, options: { isDefault?: boolean } = {}): Pool
 }
 
 /**
+ * A second account (credential, capacity source and active pick) in the same pool as `pool`,
+ * so a test can switch one account off and watch the other.
+ */
+function seedSecondAccount(pool: PoolFixture): PoolFixture {
+  const credentialId = 'user-cloud-b';
+  const sourceId = `${pool.sourceId}-b`;
+  const candidateId = `${pool.candidateId}-b`;
+  db().exec(`
+    INSERT INTO credentials
+      (id, user_id, project_id, provider, credential_type, is_active, encrypted_token, iv,
+       created_at, updated_at)
+    VALUES
+      ('${credentialId}', '${USER_ID}', NULL, 'hetzner', 'cloud-provider', 1, 'enc', 'iv',
+       '${AUTHORITY_TIMESTAMP}', '${AUTHORITY_TIMESTAMP}');
+
+    INSERT INTO capacity_sources
+      (id, scope, owner_user_id, owner_project_id, source_kind, provider, credential_source,
+       credential_id, platform_credential_id, credential_reference, credential_version,
+       external_source_ref, status, created_at, updated_at)
+    VALUES
+      ('${sourceId}', 'user', '${USER_ID}', NULL, 'cloud-provider-credential',
+       'hetzner', 'user', '${credentialId}', NULL, 'credentials:${credentialId}',
+       ${AUTHORITY_VERSION}, NULL, 'active', '${AUTHORITY_TIMESTAMP}', '${AUTHORITY_TIMESTAMP}');
+
+    INSERT INTO capacity_pool_candidates
+      (id, pool_id, capacity_source_id, provider, location, workload_role, provider_instance_type,
+       provider_instance_vcpu_count, provider_instance_memory_mb, provider_instance_disk_gb,
+       provider_instance_boot_disk_size_gb, provider_instance_image, provider_instance_architecture,
+       catalog_availability, status, priority, candidate_order, created_at, updated_at)
+    VALUES
+      ('${candidateId}', '${pool.poolId}', '${sourceId}', 'hetzner', 'fsn1', 'workspace', 'cx42',
+       8, ${16 * 1024}, 240, NULL, NULL, NULL, 'available', 'active', 1, 1,
+       '${AUTHORITY_TIMESTAMP}', '${AUTHORITY_TIMESTAMP}');
+  `);
+  return { ...pool, sourceId, candidateId, credentialId };
+}
+
+/**
  * A configured-empty higher-precedence default pool: it has no usable candidates,
  * which is exactly the case that must still be authoritative rather than falling
  * back to a lower scope.
@@ -162,7 +206,7 @@ function snapshotFor(fixture: PoolFixture): CapacityPlacementSnapshot {
     capacitySourceExternalRef: null,
     capacityPoolCandidateId: fixture.candidateId,
     placementCredentialSource: 'user',
-    placementCredentialReference: 'credentials:user-cloud',
+    placementCredentialReference: `credentials:${fixture.credentialId ?? 'user-cloud'}`,
     placementCredentialVersion: AUTHORITY_VERSION,
     capacityPoolProjectId: fixture.scope === 'project' ? PROJECT_ID : null,
     workloadRole: 'workspace',
@@ -220,6 +264,7 @@ function seedNode(fixture: PoolFixture | null, overrides: Record<string, unknown
     observed_provider_instance_disk_gb: 240,
     observed_hardware_source: 'observed',
     health_status: 'healthy',
+    agent_ready_at: AUTHORITY_TIMESTAMP,
     heartbeat_stale_after_seconds: 180,
     last_metrics: null,
     node_mode: 'shared',
@@ -293,6 +338,7 @@ function reuseState(fixture: PoolFixture): TaskRunnerState {
   } as TaskStartCapacityPoolSelection;
   return {
     taskId: 'task-reuse',
+    agentReadyStartedAt: null,
     userId: USER_ID,
     projectId: PROJECT_ID,
     config: {
@@ -314,11 +360,14 @@ function reuseState(fixture: PoolFixture): TaskRunnerState {
 }
 
 describe('reuse selection agrees with final authority admission', () => {
-  it('never claims a stale warm node when a current warm host is available', async () => {
+  it('never claims a warm node with stale source authority when a current host is available', async () => {
     const database = createDb();
     const pool = seedPool('user');
-    seedNode(pool, { capacity_pool_revision: 3, warm_since: AUTHORITY_TIMESTAMP });
-    seedNode(pool, { id: 'node-2', warm_since: AUTHORITY_TIMESTAMP });
+    seedNode(pool, {
+      capacity_source_generation: AUTHORITY_VERSION - 1,
+      warm_since: AUTHORITY_TIMESTAMP,
+    });
+    seedNode(pool, { id: 'node-2', capacity_pool_revision: 3, warm_since: AUTHORITY_TIMESTAMP });
     const claimedIds: string[] = [];
     const context = {
       env: {
@@ -340,10 +389,10 @@ describe('reuse selection agrees with final authority admission', () => {
     expect(claimedIds).toEqual(['node-2']);
   });
 
-  it('rejects a stale preferred host before advancing to workspace creation', async () => {
+  it('rejects a preferred host with stale source authority before workspace creation', async () => {
     const database = createDb();
     const pool = seedPool('user');
-    seedNode(pool, { capacity_pool_revision: 3 });
+    seedNode(pool, { capacity_source_generation: AUTHORITY_VERSION - 1 });
     const state = reuseState(pool);
     state.config.preferredNodeId = 'node-1';
     const advanceToStep = vi.fn();
@@ -357,20 +406,56 @@ describe('reuse selection agrees with final authority admission', () => {
     expect(advanceToStep).not.toHaveBeenCalled();
   });
 
-  it('skips a stale pool revision and selects the current host instead of retrying the same host', async () => {
+  it('skips stale source authority and selects the current host instead of retrying the same host', async () => {
     const database = createDb();
     const pool = seedPool('user');
-    seedNode(pool, { capacity_pool_revision: 3 });
+    seedNode(pool, { capacity_source_generation: AUTHORITY_VERSION - 1 });
     seedNode(pool, { id: 'node-2' });
 
-    expect(await reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).toBe(false);
+    expect(await reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).toBe(
+      false
+    );
     const selected = await findNodeWithCapacity(reuseState(pool), {
       env: envFor(database),
     } as TaskRunnerContext);
     expect(selected?.nodeId).toBe('node-2');
     expect(
-      await reserveWorkspacePlacement(database, placementInput(pool, { nodeId: 'node-2' }), ADMISSION_POLICY)
+      await reserveWorkspacePlacement(
+        database,
+        placementInput(pool, { nodeId: 'node-2' }),
+        ADMISSION_POLICY
+      )
     ).toBe(true);
+  });
+
+  it('reuses an established node across pool revisions and revalidates again at final admission', async () => {
+    const database = createDb();
+    const pool = seedPool('user');
+    seedNode(pool, { capacity_pool_revision: 3 });
+
+    const selected = await findNodeWithCapacity(reuseState(pool), {
+      env: envFor(database),
+    } as TaskRunnerContext);
+    expect(selected?.nodeId).toBe('node-1');
+    expect(selected?.capacityPlacementSnapshot?.capacityPoolRevision).toBe(4);
+
+    // A second harmless refresh wins after selection. Admission checks current
+    // authority in its INSERT instead of requiring the historical node revision.
+    db().exec("UPDATE capacity_pools SET revision = 5 WHERE id = 'pool-user'");
+    expect(
+      await reserveWorkspacePlacement(
+        database,
+        placementInput(pool, { capacityPlacementSnapshot: selected?.capacityPlacementSnapshot }),
+        ADMISSION_POLICY
+      )
+    ).toBe(true);
+    expect(db().prepare('SELECT capacity_pool_revision FROM nodes').get()).toEqual({
+      capacity_pool_revision: 3,
+    });
+    expect(db().prepare('SELECT node_id, status FROM workspaces').get()).toEqual({
+      node_id: 'node-1',
+      status: 'creating',
+    });
   });
 
   it('returns no reusable node when only a grandfathered host exists under a current user pool', async () => {
@@ -384,20 +469,257 @@ describe('reuse selection agrees with final authority admission', () => {
     ).toBeNull();
   });
 
-  it.each([
-    "UPDATE credentials SET is_active = 0 WHERE id = 'user-cloud'",
-    "UPDATE project_members SET status = 'removed' WHERE project_id = 'project-1'",
-    "UPDATE capacity_pools SET is_default = 0 WHERE id = 'pool-user'",
-  ])('does not offer a node whose authority was revoked: %s', async (sql) => {
+  it('does not reuse an unallocated managed node record despite otherwise current authority', async () => {
     const database = createDb();
     const pool = seedPool('user');
-    seedNode(pool);
+    seedNode(pool, { capacity_pool_revision: 3, provider_instance_id: null });
+
+    expect(
+      await filterReusableNodesByCurrentAuthority(database, {
+        userId: USER_ID,
+        projectId: PROJECT_ID,
+        selections: [{ nodeId: 'node-1', capacityPlacementSnapshot: snapshotFor(pool) }],
+      })
+    ).toEqual(new Set());
+    expect(
+      await findNodeWithCapacity(reuseState(pool), {
+        env: envFor(database),
+      } as TaskRunnerContext)
+    ).toBeNull();
+    expect(await reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).toBe(
+      false
+    );
+    expect(db().prepare('SELECT COUNT(*) AS count FROM workspaces').get()).toEqual({ count: 0 });
+  });
+
+  it.each([
+    "UPDATE credentials SET is_active = 0 WHERE id = 'user-cloud'",
+    "UPDATE credentials SET updated_at = '2026-11-12T00:00:00.000Z' WHERE id = 'user-cloud'",
+    "UPDATE project_members SET status = 'removed' WHERE project_id = 'project-1'",
+    "UPDATE project_members SET role = 'viewer' WHERE project_id = 'project-1'",
+    "UPDATE capacity_pools SET is_default = 0 WHERE id = 'pool-user'",
+    "UPDATE capacity_pools SET excluded_source_ids_json = '[\"source-user\"]' WHERE id = 'pool-user'",
+    "UPDATE capacity_sources SET status = 'disabled' WHERE id = 'source-user'",
+    "UPDATE capacity_sources SET authority_generation = 123 WHERE id = 'source-user'",
+    "UPDATE capacity_pool_candidates SET status = 'disabled' WHERE id = 'candidate-user'",
+    "UPDATE capacity_pool_candidates SET catalog_availability = 'last-known-unavailable' WHERE id = 'candidate-user'",
+    "UPDATE capacity_pool_candidates SET provider_instance_memory_mb = 32768 WHERE id = 'candidate-user'",
+    "UPDATE nodes SET user_id = 'user-2' WHERE id = 'node-1'",
+  ])('rechecks revoked authority after revision-tolerant selection: %s', async (sql) => {
+    const database = createDb();
+    const pool = seedPool('user');
+    seedNode(pool, { capacity_pool_revision: 3 });
+    const selected = await findNodeWithCapacity(reuseState(pool), {
+      env: envFor(database),
+    } as TaskRunnerContext);
+    expect(selected?.nodeId).toBe('node-1');
     db().exec(sql);
     expect(
       await findNodeWithCapacity(reuseState(pool), {
         env: envFor(database),
       } as TaskRunnerContext)
     ).toBeNull();
+    expect(
+      await reserveWorkspacePlacement(
+        database,
+        placementInput(pool, { capacityPlacementSnapshot: selected?.capacityPlacementSnapshot }),
+        ADMISSION_POLICY
+      )
+    ).toBe(false);
+    expect(db().prepare('SELECT COUNT(*) AS count FROM workspaces').get()).toEqual({ count: 0 });
+  });
+
+  it('keeps a running node reusable after the pool provider order changes', async () => {
+    const database = createDb();
+    const pool = seedPool('user');
+    // The authority fixture leaves this policy column unset; the update writer reads it.
+    db().exec(`UPDATE capacity_pools SET deployment_strategy = 'smallest-fit'`);
+    seedNode(pool);
+    const update = (input: Omit<Parameters<typeof updateDefaultCapacityPool>[1], 'scope'>) =>
+      updateDefaultCapacityPool(drizzle(database, { schema }), { scope: 'user', ...input });
+    const reusable = () =>
+      filterReusableNodesByCurrentAuthority(database, {
+        userId: USER_ID,
+        projectId: PROJECT_ID,
+        selections: [{ nodeId: 'node-1', capacityPlacementSnapshot: snapshotFor(pool) }],
+      });
+
+    // A reorder must leave reuse alone: it does not bump the revision reuse authority checks.
+    const reorder = await update({
+      ownerUserId: USER_ID,
+      ownerProjectId: null,
+      sourceOrder: [pool.sourceId],
+    });
+    expect(reorder).toMatchObject({ conflict: false, missingSourceIds: [] });
+    expect(reorder.summary?.pool.sourceOrder).toEqual([pool.sourceId]);
+
+    expect(await reusable()).toEqual(new Set(['node-1']));
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
+    ).resolves.toBe(true);
+
+    // A policy revision does not revoke the running node's still-current offering.
+    // Paid new allocations keep their independent strict plan-generation fence.
+    await update({
+      ownerUserId: USER_ID,
+      ownerProjectId: null,
+      policy: { exhaustionPolicy: 'fallback-chain' },
+    });
+    expect(await reusable()).toEqual(new Set(['node-1']));
+  });
+
+  it('stops reuse and admission on an account switched off, and restores both when it is back on', async () => {
+    const database = createDb();
+    const pool = seedPool('user');
+    db().exec(`UPDATE capacity_pools SET deployment_strategy = 'smallest-fit'`);
+    seedNode(pool);
+    const update = (input: Omit<Parameters<typeof updateDefaultCapacityPool>[1], 'scope'>) =>
+      updateDefaultCapacityPool(drizzle(database, { schema }), { scope: 'user', ...input });
+    const reusable = () =>
+      filterReusableNodesByCurrentAuthority(database, {
+        userId: USER_ID,
+        projectId: PROJECT_ID,
+        selections: [{ nodeId: 'node-1', capacityPlacementSnapshot: snapshotFor(pool) }],
+      });
+    // Owner-path control: the account is on, so its running node is reusable.
+    expect(await reusable()).toEqual(new Set(['node-1']));
+
+    const off = await update({
+      ownerUserId: USER_ID,
+      ownerProjectId: null,
+      excludedSourceIds: [pool.sourceId],
+    });
+    expect(off).toMatchObject({ conflict: false, missingSourceIds: [] });
+    expect(off.summary?.pool.excludedSourceIds).toEqual([pool.sourceId]);
+    // Like the provider order, switching an account off does not bump the revision: other
+    // accounts' running nodes stay reusable.
+    expect(off.summary?.pool.revision).toBe(4);
+    expect(off.summary?.activeCandidateCount).toBe(0);
+    expect(off.summary?.effectiveState).toBe('configured-empty');
+    // Its picks are kept, not removed.
+    expect(
+      db().prepare('SELECT status FROM capacity_pool_candidates WHERE id = ?').get(pool.candidateId)
+    ).toEqual({ status: 'active' });
+    // The authority SQL refuses the switched-off account for reuse and for final admission.
+    expect(await reusable()).toEqual(new Set());
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
+    ).resolves.toBe(false);
+
+    const on = await update({ ownerUserId: USER_ID, ownerProjectId: null, excludedSourceIds: [] });
+    expect(on.summary?.pool.excludedSourceIds).toEqual([]);
+    expect(on.summary?.activeCandidateCount).toBe(1);
+    expect(await reusable()).toEqual(new Set(['node-1']));
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
+    ).resolves.toBe(true);
+  });
+
+  describe('two accounts in one pool, one switched off', () => {
+    /** Accounts A and B each hold an active pick and a running node. */
+    function twoAccountFixture() {
+      const database = createDb();
+      const a = seedPool('user');
+      const b = seedSecondAccount(a);
+      db().exec(`UPDATE capacity_pools SET deployment_strategy = 'smallest-fit'`);
+      seedNode(a, { id: 'node-a', provider_instance_id: 'server-a' });
+      seedNode(b, { id: 'node-b', provider_instance_id: 'server-b' });
+      const reusable = () =>
+        filterReusableNodesByCurrentAuthority(database, {
+          userId: USER_ID,
+          projectId: PROJECT_ID,
+          selections: [
+            { nodeId: 'node-a', capacityPlacementSnapshot: snapshotFor(a) },
+            { nodeId: 'node-b', capacityPlacementSnapshot: snapshotFor(b) },
+          ],
+        });
+      const admits = (fixture: PoolFixture, nodeId: string) =>
+        reserveWorkspacePlacement(database, placementInput(fixture, { nodeId }), ADMISSION_POLICY);
+      const exclude = (excludedSourceIds: string[]) =>
+        updateDefaultCapacityPool(drizzle(database, { schema }), {
+          scope: 'user',
+          ownerUserId: USER_ID,
+          ownerProjectId: null,
+          excludedSourceIds,
+        });
+      return { database, a, b, reusable, admits, exclude };
+    }
+
+    it('reuses and admits both accounts while neither is switched off (control)', async () => {
+      const { a, b, reusable, admits } = twoAccountFixture();
+      expect(await reusable()).toEqual(new Set(['node-a', 'node-b']));
+      await expect(admits(a, 'node-a')).resolves.toBe(true);
+      await expect(admits(b, 'node-b')).resolves.toBe(true);
+    });
+
+    it('keeps the node on account B usable and refuses the node on switched-off account A', async () => {
+      const { a, b, reusable, admits, exclude } = twoAccountFixture();
+      const result = await exclude([a.sourceId]);
+      expect(result).toMatchObject({ conflict: false, missingSourceIds: [] });
+      expect(result.summary?.pool.excludedSourceIds).toEqual([a.sourceId]);
+
+      expect(await reusable()).toEqual(new Set(['node-b']));
+      await expect(admits(a, 'node-a')).resolves.toBe(false);
+      await expect(admits(b, 'node-b')).resolves.toBe(true);
+    });
+
+    it('mirrors the exclusion: switching B off keeps the node on A and refuses the one on B', async () => {
+      const { a, b, reusable, admits, exclude } = twoAccountFixture();
+      await exclude([b.sourceId]);
+
+      expect(await reusable()).toEqual(new Set(['node-a']));
+      await expect(admits(b, 'node-b')).resolves.toBe(false);
+      await expect(admits(a, 'node-a')).resolves.toBe(true);
+    });
+
+    it('leaves both nodes usable when the excluded id is not the source of either node', async () => {
+      const { a, b, reusable, admits } = twoAccountFixture();
+      // A stale id (an account that no longer serves the pool) is harmless by design.
+      db().exec(`UPDATE capacity_pools SET excluded_source_ids_json = '["source-long-gone"]'`);
+
+      expect(await reusable()).toEqual(new Set(['node-a', 'node-b']));
+      await expect(admits(a, 'node-a')).resolves.toBe(true);
+      await expect(admits(b, 'node-b')).resolves.toBe(true);
+    });
+
+    it('refuses the node on a disconnected account and keeps the other usable', async () => {
+      const { database, a, b, reusable, admits } = twoAccountFixture();
+      // Disconnecting a credential disables its source through this writer
+      // (reconcileCapacityPoolsForCredentialMutation -> disableCapacitySourcesMissingFromSeeds).
+      const orm = drizzle(database, { schema });
+      // Production sources always carry a generation; the writer matches on it.
+      db()
+        .prepare('UPDATE capacity_sources SET source_generation = 1 WHERE id = ?')
+        .run(a.sourceId);
+      const [source] = await orm
+        .select()
+        .from(schema.capacitySources)
+        .where(eq(schema.capacitySources.id, a.sourceId));
+      await disableCapacitySourceAvailability(
+        orm as never,
+        { scope: 'user', ownerUserId: USER_ID, ownerProjectId: null },
+        source!
+      );
+      expect(
+        db().prepare('SELECT status FROM capacity_sources WHERE id = ?').get(a.sourceId)
+      ).toEqual({ status: 'disabled' });
+
+      expect(await reusable()).toEqual(new Set(['node-b']));
+      await expect(admits(a, 'node-a')).resolves.toBe(false);
+      await expect(admits(b, 'node-b')).resolves.toBe(true);
+    });
+
+    it('refuses both nodes when both accounts are switched off, and restores both on clearing', async () => {
+      const { a, b, reusable, admits, exclude } = twoAccountFixture();
+      await exclude([a.sourceId, b.sourceId]);
+      expect(await reusable()).toEqual(new Set());
+      await expect(admits(a, 'node-a')).resolves.toBe(false);
+      await expect(admits(b, 'node-b')).resolves.toBe(false);
+
+      await exclude([]);
+      expect(await reusable()).toEqual(new Set(['node-a', 'node-b']));
+      await expect(admits(a, 'node-a')).resolves.toBe(true);
+    });
   });
 
   it('filters 150 hosts using grouped queries within the D1 parameter ceiling', async () => {
@@ -426,17 +748,28 @@ describe('current effective pool authority at final admission', () => {
     const pool = seedPool('user');
     seedNode(pool);
 
-    await expect(reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).resolves.toBe(true);
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
+    ).resolves.toBe(true);
   });
 
   it('rejects a user-pool node once a configured-empty project default pool outranks it', async () => {
     const database = createDb();
     const pool = seedPool('user');
-    seedNode(pool);
+    seedNode(pool, { capacity_pool_revision: 3 });
+    expect(
+      (
+        await findNodeWithCapacity(reuseState(pool), {
+          env: envFor(database),
+        } as TaskRunnerContext)
+      )?.nodeId
+    ).toBe('node-1');
     // Introduced AFTER the plan was resolved — the exact race the guard exists for.
     seedConfiguredEmptyProjectDefaultPool();
 
-    await expect(reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).resolves.toBe(false);
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
+    ).resolves.toBe(false);
     expect(
       (db().prepare('SELECT COUNT(*) AS count FROM workspaces').get() as { count: number }).count
     ).toBe(0);
@@ -447,7 +780,9 @@ describe('current effective pool authority at final admission', () => {
     const pool = seedPool('installation');
     seedNode(pool);
 
-    await expect(reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).resolves.toBe(true);
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
+    ).resolves.toBe(true);
   });
 
   it('rejects an installation-pool node once a user default pool outranks it', async () => {
@@ -459,7 +794,9 @@ describe('current effective pool authority at final admission', () => {
     seedNode(pool);
     seedPool('user');
 
-    await expect(reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).resolves.toBe(false);
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
+    ).resolves.toBe(false);
     expect(
       (db().prepare('SELECT COUNT(*) AS count FROM workspaces').get() as { count: number }).count
     ).toBe(0);
@@ -472,7 +809,9 @@ describe('current effective pool authority at final admission', () => {
 
     db().exec(`UPDATE capacity_pools SET is_default = 0 WHERE id = '${pool.poolId}'`);
 
-    await expect(reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).resolves.toBe(false);
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
+    ).resolves.toBe(false);
   });
 
   it('keeps admitting a project-pool node — nothing outranks the project scope', async () => {
@@ -482,7 +821,9 @@ describe('current effective pool authority at final admission', () => {
     // A user default pool is LOWER precedence and must not disturb a project plan.
     seedPool('user');
 
-    await expect(reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).resolves.toBe(true);
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
+    ).resolves.toBe(true);
   });
 
   it('preserves same-user/same-project isolation for project-pool nodes', async () => {
@@ -500,7 +841,11 @@ describe('current effective pool authority at final admission', () => {
     `);
 
     await expect(
-      reserveWorkspacePlacement(database, placementInput(pool, { projectId: 'project-2' }), ADMISSION_POLICY)
+      reserveWorkspacePlacement(
+        database,
+        placementInput(pool, { projectId: 'project-2' }),
+        ADMISSION_POLICY
+      )
     ).resolves.toBe(false);
   });
 
@@ -509,7 +854,9 @@ describe('current effective pool authority at final admission', () => {
     const pool = seedPool('user');
     seedNode(pool, { user_id: 'user-2' });
 
-    await expect(reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).resolves.toBe(false);
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
+    ).resolves.toBe(false);
   });
 
   it('keeps the composed reservation statement inside the D1 bind ceiling', async () => {
@@ -528,6 +875,20 @@ describe('current effective pool authority at final admission', () => {
 });
 
 describe('current effective pool authority at the paid provider boundary', () => {
+  it.each(['creating', 'running'])(
+    'rejects a stale pool revision for a %s allocation even though existing-node reuse allows it',
+    async (status) => {
+      const database = createDb();
+      const pool = seedPool('user');
+      seedNode(pool, { capacity_pool_revision: 3, status });
+
+      await expect(
+        assertNodeAllocationPlanCurrent(envFor(database), 'node-1', USER_ID, PROJECT_ID)
+      ).rejects.toThrow('Node allocation plan is no longer current');
+      expect(db().prepare('SELECT COUNT(*) AS count FROM workspaces').get()).toEqual({ count: 0 });
+    }
+  );
+
   it('accepts an explicitly selected node while its pool is still effective', async () => {
     const database = createDb();
     const pool = seedPool('user');
@@ -566,7 +927,9 @@ describe('legacy unpooled nodes follow the same effective-pool chain', () => {
     const database = createDb();
     seedNode(null);
 
-    await expect(reserveWorkspacePlacement(database, placementInput(null), ADMISSION_POLICY)).resolves.toBe(true);
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(null), ADMISSION_POLICY)
+    ).resolves.toBe(true);
   });
 
   it('stops admitting a legacy unpooled node once any default pool governs the caller', async () => {
@@ -574,6 +937,8 @@ describe('legacy unpooled nodes follow the same effective-pool chain', () => {
     seedNode(null);
     seedPool('user');
 
-    await expect(reserveWorkspacePlacement(database, placementInput(null), ADMISSION_POLICY)).resolves.toBe(false);
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(null), ADMISSION_POLICY)
+    ).resolves.toBe(false);
   });
 });

@@ -1,0 +1,65 @@
+---
+import type { Integration } from '../../data/integrations';
+
+interface Props {
+  integration: Integration;
+}
+
+const { integration } = Astro.props;
+---
+
+<a href={`/integrations/${integration.slug}/`} class="int-card animate-on-scroll">
+  <img src={integration.logoPath} alt="" width="40" height="40" loading="lazy" />
+  <span class="int-text">
+    <span class="int-name">{integration.name}</span>
+    <span class="int-tagline">{integration.tagline}</span>
+  </span>
+  <svg class="int-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+</a>
+
+<style>
+  .int-card {
+    display: grid;
+    grid-template-columns: 40px 1fr 16px;
+    gap: 14px;
+    align-items: start;
+    padding: 18px;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    background: var(--glass-bg);
+    text-decoration: none;
+    transition: border-color 0.2s;
+  }
+
+  .int-card:hover {
+    border-color: var(--glass-border-hover);
+  }
+
+  .int-card img {
+    border-radius: var(--radius-md);
+  }
+
+  .int-name {
+    display: block;
+    font-family: var(--font-display);
+    font-weight: 600;
+    color: var(--color-fg-primary);
+    margin-bottom: 4px;
+  }
+
+  .int-tagline {
+    display: block;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--color-fg-muted);
+  }
+
+  .int-arrow {
+    color: var(--color-fg-dim);
+    margin-top: 4px;
+  }
+
+  .int-card:hover .int-arrow {
+    color: var(--color-accent);
+  }
+</style>

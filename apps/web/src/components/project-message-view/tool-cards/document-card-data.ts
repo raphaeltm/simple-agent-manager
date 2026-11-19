@@ -66,7 +66,7 @@ export interface DocumentCardData {
  * (the MCP content wrapper itself) is already dispatched by the Array.isArray
  * check above, before isJsonRecord ever sees it.
  */
-function parseResultPayload(rawOutput: unknown): Record<string, unknown> | null {
+export function parseResultPayload(rawOutput: unknown): Record<string, unknown> | null {
   if (Array.isArray(rawOutput)) {
     for (const block of rawOutput) {
       if (

@@ -1,11 +1,14 @@
-/**
- * Availability-oriented brakes for costly recurring control loops.
- *
- * Unlike the trials security/cost gate, these switches deliberately fail open:
- * an absent key or KV read error leaves work enabled. A transient KV outage must
- * not silently stop task recovery and cleanup across the platform.
+/** Costly control-loop brakes resolved through the shared audited settings service.
+ * Missing overrides preserve legacy KV and enabled defaults. Once disabled is
+ * observed, a settings outage keeps the brake applied until a valid enabled read.
  */
+import type { Env } from '../env';
 import { log } from '../lib/logger';
+import {
+  __resetAdminSettingsCacheForTest,
+  resolveAdminSetting,
+  updateAdminSettings,
+} from './admin-settings';
 
 export const DEFAULT_CRON_SWEEPS_ENABLED_KV_KEY = 'control-loops:cron-enabled';
 export const DEFAULT_DO_ALARMS_ENABLED_KV_KEY = 'control-loops:alarms-enabled';
@@ -17,6 +20,7 @@ export const MIN_CONTROL_LOOP_DISABLED_ALARM_RETRY_MS = 60_000;
 export type OperationalLoop = 'cron' | 'alarms';
 
 export interface OperationalKillSwitchEnv {
+  DATABASE: D1Database;
   KV: KVNamespace;
   CRON_SWEEPS_ENABLED_KV_KEY?: string;
   DO_ALARMS_ENABLED_KV_KEY?: string;
@@ -24,19 +28,15 @@ export interface OperationalKillSwitchEnv {
   CONTROL_LOOP_DISABLED_ALARM_RETRY_MS?: string;
 }
 
-interface CacheEntry {
-  enabled: boolean;
-  expiresAt: number;
-}
-
-const cache: Partial<Record<OperationalLoop, CacheEntry>> = {};
-
+/** Compatibility reset; the authoritative cache is owned by admin-settings. */
 export function __resetOperationalKillSwitchCacheForTest(): void {
-  delete cache.cron;
-  delete cache.alarms;
+  __resetAdminSettingsCacheForTest();
 }
 
-export function resolveOperationalLoopKvKey(env: OperationalKillSwitchEnv, loop: OperationalLoop): string {
+export function resolveOperationalLoopKvKey(
+  env: OperationalKillSwitchEnv,
+  loop: OperationalLoop
+): string {
   return loop === 'cron'
     ? (env.CRON_SWEEPS_ENABLED_KV_KEY ?? DEFAULT_CRON_SWEEPS_ENABLED_KV_KEY)
     : (env.DO_ALARMS_ENABLED_KV_KEY ?? DEFAULT_DO_ALARMS_ENABLED_KV_KEY);
@@ -59,43 +59,37 @@ export function resolveDisabledAlarmRetryMs(env: OperationalKillSwitchEnv): numb
 export async function isOperationalLoopEnabled(
   env: OperationalKillSwitchEnv,
   loop: OperationalLoop,
-  now: number = Date.now(),
+  _now: number = Date.now()
 ): Promise<boolean> {
-  const cached = cache[loop];
-  if (cached && now < cached.expiresAt) return cached.enabled;
-
-  const key = resolveOperationalLoopKvKey(env, loop);
-  let enabled = true;
-  try {
-    const value = await env.KV.get(key);
-    enabled = value !== 'false' && value !== 'disabled';
-  } catch (err) {
-    log.error('control_loop.kill_switch.kv_read_failed', {
-      loop,
-      key,
-      semantics: 'fail_open',
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-
-  cache[loop] = {
-    enabled,
-    expiresAt: now + resolveOperationalKillSwitchCacheMs(env),
-  };
-  return enabled;
+  return Boolean(
+    await resolveAdminSetting(
+      env as Env,
+      loop === 'cron' ? 'operations.cronSweepsEnabled' : 'operations.doAlarmsEnabled'
+    )
+  );
 }
 
 export async function setOperationalLoopEnabled(
   env: OperationalKillSwitchEnv,
   loop: OperationalLoop,
   enabled: boolean,
-  now: number = Date.now(),
+  _now: number = Date.now(),
+  actorUserId: string = 'system'
 ): Promise<{ enabled: boolean; kvKey: string; cacheTtlMs: number }> {
-  const kvKey = resolveOperationalLoopKvKey(env, loop);
-  const cacheTtlMs = resolveOperationalKillSwitchCacheMs(env);
-  await env.KV.put(kvKey, enabled ? 'true' : 'false');
-  cache[loop] = { enabled, expiresAt: now + cacheTtlMs };
-  return { enabled, kvKey, cacheTtlMs };
+  await updateAdminSettings(env as Env, {
+    changes: [
+      {
+        name: loop === 'cron' ? 'operations.cronSweepsEnabled' : 'operations.doAlarmsEnabled',
+        value: enabled,
+      },
+    ],
+    actorUserId,
+  });
+  return {
+    enabled,
+    kvKey: resolveOperationalLoopKvKey(env, loop),
+    cacheTtlMs: resolveOperationalKillSwitchCacheMs(env),
+  };
 }
 
 /** Return true when alarm work was skipped and safely re-armed. */
@@ -103,7 +97,7 @@ export async function deferAlarmWhenDisabled(
   env: OperationalKillSwitchEnv,
   storage: DurableObjectStorage,
   durableObject: string,
-  now: number = Date.now(),
+  now: number = Date.now()
 ): Promise<boolean> {
   if (await isOperationalLoopEnabled(env, 'alarms', now)) return false;
 

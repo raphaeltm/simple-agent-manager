@@ -1,5 +1,28 @@
 # Fix All Known Flaky Tests at the Root (No Retries)
 
+> **Reconciliation 2026-11-02:** Three named flake candidates got test-side fixes, none confirmed as root-cause fixes. #2447 (`87549f5aa`) made `comment-send-to-agent-gating.test.tsx:432` wait for `scrollIntoView` instead of asserting synchronously. #2480 (`af45a52b0`) added a 30 s `beforeAll` warm-up to `task-callback-auth-routing.test.ts:224`. #2481 (`20db08dc5`) made `error-trends.test.tsx` wait for the range button to be enabled before clicking (`:127,235`). Still open: the global `asyncUtilTimeout`, the fail-fast fetch stub, the Go replay test, and the rest of the pattern audit.
+
+> **Reconciliation 2026-10-26:** #2407 (`1b99904ce`) fixed a new instance of this file's 1 s
+> `findBy` timeout class, `apps/web/tests/unit/pages/automation-flows.test.tsx`, with a per-file
+> 5 s wait (`CHAINED_LOAD`); it had failed `main` CI run 39717873907, so that production deploy was
+> skipped. None of the tests named below failed in the 100 latest failed CI runs (10-16 to 10-25).
+> Still open: the global `asyncUtilTimeout`, the fetch stub, the Go replay test (its `replay_done`
+> send is now `packages/vm-agent/internal/acp/session_host.go:476-480`) and the rest of the audit.
+> Unconfirmed candidates, each failing twice on unrelated branches since 10-16:
+> `comment-send-to-agent-gating.test.tsx` (runs 39496108969, 39494666312), `connector-oauth.test.ts`
+> (39421294504, 40045261908) and `task-callback-auth-routing.test.ts` (40074974736, 40055327379).
+
+> **Reconciliation 2026-10-12:** #2271 (`2a5f2e7d3`) fixed one file this task's pattern audit
+> names: `apps/web/tests/unit/components/repo-selector.test.tsx` now waits until the response has
+> rendered, not just until the mock was called (`:80`, `:98`, `:125`, `:154`, `:181`, `:202`). It
+> also fixed two Go flakes not listed here:
+> `packages/vm-agent/internal/acp/session_host_interactions_sdk_test.go` and
+> `packages/vm-agent/internal/server/session_restore_retry_test.go`. Still open: everything else in
+> the two notes below, including the rest of the pattern audit. The `replay_done` send cited below
+> is now at `packages/vm-agent/internal/acp/session_host.go:465-469`. A related ordering flake was
+> already fixed by #2213 and is archived:
+> `tasks/archive/2026-10-07-credential-limits-randomized-order-assertion.md`.
+
 > **Reconciliation 2026-10-05:** Two more load-sensitive tests surfaced in this week's PRs and are tracked nowhere else: `apps/api/tests/unit/routes/nodes-max-nodes-quota.test.ts` hits its 5 s timeout under a full parallel `pnpm test`, also on `main` (#2205), and `apps/web/tests/unit/components/admin/error-trends.test.tsx` failed once under CI load (#2199). None of this file's fixes shipped; none of its named tests failed in the 15 failed CI runs since 2026-09-30.
 
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
@@ -115,3 +138,7 @@ Historically flaky files to re-check: `repo-selector.test.tsx`, `agents-section.
 - `tasks/archive/2026-04-11-fix-flaky-useAvailableCommands-test.md` (superseded analysis)
 - `tasks/archive/2026-02-28-fix-flaky-vm-agent-tests.md` (superseded analysis — Option A invalid, ingestion is synchronous)
 - Prior flake fixes: PRs #867, #878, commit 3217faa06
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. The named automation-flows flake is fixed at the root. Still open: the global `asyncUtilTimeout` (no `configure(` in `apps/web/tests/setup.ts` or `packages/acp-client/src/test-setup.ts`), the fail-fast fetch stub, the Go replay test and the pattern audit. Evidence: #2739; `apps/web/tests/unit/pages/automation-flows.test.tsx` (paste events, waits for the detail route).

@@ -40,6 +40,9 @@ export interface AgentActivityTask {
   title: string;
   status: string;
   executionStep: string | null;
+  providerLimitReason?: string | null;
+  /** Opaque wait generation; changes when a new blocked wait replaces an accepted resume. */
+  providerLimitVersion?: string | null;
   projectId: string;
   projectName: string;
   userId: string;
@@ -47,6 +50,9 @@ export interface AgentActivityTask {
   chatSessionId: string | null;
   supersededByTaskId: string | null;
   outputBranch: string | null;
+  outputPrUrl: string | null;
+  /** Branch the task's current workspace checked out; null before one exists. */
+  workspaceBranch: string | null;
   priority: number;
   createdAt: string;
   startedAt: string | null;
@@ -60,6 +66,9 @@ interface AgentActivitySqlRow {
   title: string;
   status: string;
   executionStep: string | null;
+  providerLimitReason?: string | null;
+  /** Opaque wait generation; changes when a new blocked wait replaces an accepted resume. */
+  providerLimitVersion?: string | null;
   projectId: string;
   projectName: string;
   userId: string;
@@ -67,6 +76,8 @@ interface AgentActivitySqlRow {
   chatSessionId: string | null;
   supersededByTaskId: string | null;
   outputBranch: string | null;
+  outputPrUrl: string | null;
+  workspaceBranch: string | null;
   priority: number | null;
   createdAt: string;
   startedAt: string | null;
@@ -80,11 +91,23 @@ interface AgentActivitySqlRow {
   snapshotRecoveryFailedAt: string | null;
 }
 
+/** Identifies one pull request; a task matching any link counts as its owner. */
+export interface PullRequestOwnerFilter {
+  /** The PR's head branch, matched against output and workspace branches. */
+  headBranch?: string;
+  /** The PR URL, matched against output, description, and explicit associations. */
+  url?: string;
+}
+
 export interface ListAgentActivityTasksOptions {
   userId?: string;
   projectId?: string;
   activeOnly?: boolean;
   excludeTaskId?: string | null;
+  /** Restrict the list to tasks that own this pull request. */
+  ownsPullRequest?: PullRequestOwnerFilter;
+  /** Restrict the list to these tasks (a team view classifies a known set of tasks). */
+  taskIds?: readonly string[];
   limit?: number;
   nowMs?: number;
 }
@@ -187,6 +210,51 @@ function appendActiveCondition(conditions: string[], binds: unknown[]): void {
   conditions.push('t.superseded_by_task_id IS NULL');
 }
 
+/**
+ * A task owns a pull request when it will push to the PR's head branch, has
+ * reported the PR as its output, or was dispatched to work on it. No single
+ * column covers every owner:
+ * - `t.output_branch`: the task that opened the PR. The VM agent also rewrites it
+ *   to the pushed branch whenever a task-mode turn ends.
+ * - `w.branch`: a completion task dispatched with `branch=<head>`. Until its first
+ *   turn ends, its output branch is still its own generated name. The column keeps
+ *   the branch checked out at workspace creation and is never resynced.
+ * - `t.output_pr_url`: written by `complete_task`, including conversation-mode
+ *   tasks that stay active awaiting follow-up.
+ * - `task_pull_request_associations`: exact canonical URL evidence for artifacts
+ *   assigned after dispatch. Retained history does not make an inactive task active.
+ * - `t.description` citing the URL: a task dispatched for the PR whose workspace
+ *   does not exist yet (for example while waiting for node capacity). A URL that
+ *   is a prefix of another PR's URL also matches; a false owner only defers.
+ */
+function appendPullRequestOwnerCondition(
+  conditions: string[],
+  binds: unknown[],
+  filter: PullRequestOwnerFilter
+): void {
+  const links: string[] = [];
+  if (filter.headBranch) {
+    links.push('t.output_branch = ?', 'w.branch = ?');
+    binds.push(filter.headBranch, filter.headBranch);
+  }
+  if (filter.url) {
+    // Canonical PR URLs exceed D1's LIKE pattern ceiling. Literal substring
+    // matching avoids that limit; lower() preserves LIKE's ASCII case folding.
+    links.push(
+      "lower(rtrim(t.output_pr_url, '/')) = lower(?)",
+      'instr(lower(t.description), lower(?)) > 0',
+      'EXISTS (SELECT 1 FROM task_pull_request_associations association WHERE association.task_id = t.id AND association.project_id = t.project_id AND lower(association.pr_url) = lower(?))'
+    );
+    const canonicalUrl = filter.url.replace(/\/$/, '');
+    binds.push(canonicalUrl, canonicalUrl, canonicalUrl);
+  }
+  // An empty filter would return every task as an owner; refuse it outright.
+  if (links.length === 0) {
+    throw new Error('ownsPullRequest requires a headBranch or url');
+  }
+  conditions.push(`(${links.join(' OR ')})`);
+}
+
 function normalizedLimit(limit: number | undefined): number | null {
   if (limit === undefined) return null;
   if (!Number.isFinite(limit) || limit <= 0) return null;
@@ -211,6 +279,14 @@ export async function listAgentActivityTasks(
     binds.push(options.excludeTaskId);
   }
   if (activeOnly) appendActiveCondition(conditions, binds);
+  if (options.ownsPullRequest) {
+    appendPullRequestOwnerCondition(conditions, binds, options.ownsPullRequest);
+  }
+  if (options.taskIds) {
+    // One JSON bind, so the set is not bounded by D1's 100-parameter statement limit.
+    conditions.push('t.id IN (SELECT value FROM json_each(?))');
+    binds.push(JSON.stringify(options.taskIds));
+  }
 
   const limit = normalizedLimit(options.limit);
   const sql = `
@@ -221,6 +297,8 @@ export async function listAgentActivityTasks(
       t.title AS title,
       t.status AS status,
       t.execution_step AS executionStep,
+      CASE WHEN t.admission_state IN ('provider_limit_waiting','provider_limit_blocked') THEN t.admission_reason ELSE NULL END AS providerLimitReason,
+      CASE WHEN t.admission_state IN ('provider_limit_waiting','provider_limit_blocked') AND json_valid(t.provider_limit_wait_json) THEN json_extract(t.provider_limit_wait_json, '$.scheduleKey') ELSE NULL END AS providerLimitVersion,
       t.project_id AS projectId,
       p.name AS projectName,
       t.user_id AS userId,
@@ -228,6 +306,8 @@ export async function listAgentActivityTasks(
       t.chat_session_id AS chatSessionId,
       t.superseded_by_task_id AS supersededByTaskId,
       t.output_branch AS outputBranch,
+      t.output_pr_url AS outputPrUrl,
+      w.branch AS workspaceBranch,
       t.priority AS priority,
       t.created_at AS createdAt,
       t.started_at AS startedAt,
@@ -268,6 +348,8 @@ export async function listAgentActivityTasks(
     title: row.title,
     status: row.status,
     executionStep: row.executionStep,
+    ...(row.providerLimitReason ? { providerLimitReason: row.providerLimitReason } : {}),
+    ...(row.providerLimitVersion ? { providerLimitVersion: row.providerLimitVersion } : {}),
     projectId: row.projectId,
     projectName: row.projectName,
     userId: row.userId,
@@ -275,6 +357,8 @@ export async function listAgentActivityTasks(
     chatSessionId: row.chatSessionId,
     supersededByTaskId: row.supersededByTaskId,
     outputBranch: row.outputBranch,
+    outputPrUrl: row.outputPrUrl,
+    workspaceBranch: row.workspaceBranch,
     priority: row.priority ?? 0,
     createdAt: row.createdAt,
     startedAt: row.startedAt,

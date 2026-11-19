@@ -9,14 +9,15 @@ export type ProjectScheduledAction =
       skillId: string | null;
     };
 
+/**
+ * Who wrote a schedule's prompt (constitution XV). Only a human-written prompt is delivered as a
+ * plain chat message; an agent-written one arrives as a SAM notice naming the schedule. `sam`
+ * marks SAM's own fixed continuation text. Null on rows created before this was recorded.
+ */
+export type SchedulePromptAuthor = 'human' | 'agent' | 'sam';
+
 export type ProjectScheduleState =
-  | 'pending'
-  | 'processing'
-  | 'admitted'
-  | 'cancelled'
-  | 'expired'
-  | 'failed'
-  | 'ambiguous';
+  'pending' | 'processing' | 'admitted' | 'cancelled' | 'expired' | 'failed' | 'ambiguous';
 
 /** A read-only observation of canonical task/inbox state, separate from admission. */
 export type ProjectScheduleExecution = {
@@ -38,6 +39,7 @@ export type ProjectSchedule = {
   projectId: string;
   creatorUserId: string;
   creatorChatSessionId: string | null;
+  promptAuthor: SchedulePromptAuthor | null;
   reason: string | null;
   action: ProjectScheduledAction;
   state: ProjectScheduleState;

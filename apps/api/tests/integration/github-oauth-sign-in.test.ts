@@ -8,14 +8,17 @@
  * test ran a real OAuth callback. A dependency bump that breaks sign-in must fail here.
  */
 import Database from 'better-sqlite3';
-import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
-import { handleAppError } from '../../src/middleware/app-error-handler';
-import { authRoutes } from '../../src/routes/auth';
 import { __resetPlatformConfigCacheForTest } from '../../src/services/platform-config';
+import {
+  buildAuthApp,
+  type CookieJar,
+  createCookieJar,
+  startSocialSignIn,
+} from '../helpers/oauth-sign-in';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const API_ORIGIN = 'https://api.example.com';
@@ -117,38 +120,12 @@ function createFakeGitHub() {
   return { approve, fetch, outboundRequests };
 }
 
-/** Carries cookies between requests the way the browser does across the OAuth redirects. */
-function createCookieJar() {
-  const cookies = new Map<string, string>();
-  return {
-    store(response: Response) {
-      for (const setCookie of response.headers.getSetCookie()) {
-        const pair = setCookie.split(';', 1)[0] ?? '';
-        const separator = pair.indexOf('=');
-        const name = pair.slice(0, separator).trim();
-        const value = pair.slice(separator + 1).trim();
-        if (value === '' || /max-age=0/i.test(setCookie)) cookies.delete(name);
-        else cookies.set(name, value);
-      }
-    },
-    header: () => [...cookies].map(([name, value]) => `${name}=${value}`).join('; '),
-  };
-}
-
-function buildApp() {
-  // Mounted, and its errors handled, exactly as `src/index.ts` does.
-  const app = new Hono<{ Bindings: Env }>();
-  app.onError(handleAppError);
-  app.route('/api/auth', authRoutes);
-  return app;
-}
-
 describe('GitHub sign-in through better-auth (vertical slice)', () => {
   let sqlite: Database.Database;
   let env: Env;
   let github: ReturnType<typeof createFakeGitHub>;
-  let jar: ReturnType<typeof createCookieJar>;
-  const app = buildApp();
+  let jar: CookieJar;
+  const app = buildAuthApp();
 
   beforeEach(() => {
     sqlite = new Database(':memory:');
@@ -172,30 +149,29 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
   });
 
   /** Browser: click "Sign in with GitHub", approve on GitHub, land back on the callback. */
-  async function signInWithGitHub(code?: string): Promise<Response> {
-    const start = await app.request(
-      `${API_ORIGIN}/api/auth/sign-in/social`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', origin: APP_ORIGIN, cookie: jar.header() },
-        body: JSON.stringify({ provider: 'github', callbackURL: CALLBACK_URL }),
-      },
-      env
-    );
-    expect(start.status).toBe(200);
-    jar.store(start);
-    const { url } = (await start.json()) as { url: string };
-    const authorizeUrl = new URL(url);
+  async function signInWithGitHub(
+    code?: string,
+    onBeforeCallback?: (state: string, authorizeUrl: URL) => void,
+    clientHeaders: Record<string, string> = {}
+  ): Promise<Response> {
+    const authorizeUrl = await startSocialSignIn(app, env, jar, {
+      apiOrigin: API_ORIGIN,
+      appOrigin: APP_ORIGIN,
+      provider: 'github',
+      callbackURL: CALLBACK_URL,
+    });
+    const state = authorizeUrl.searchParams.get('state') ?? '';
+    onBeforeCallback?.(state, authorizeUrl);
     const approvedCode = github.approve(authorizeUrl);
 
     const callback = new URL(GITHUB_REDIRECT_URI);
     callback.searchParams.set('code', code ?? approvedCode);
-    callback.searchParams.set('state', authorizeUrl.searchParams.get('state') ?? '');
+    callback.searchParams.set('state', state);
     // GitHub's RFC 9207 issuer parameter, present on every production callback.
     callback.searchParams.set('iss', 'https://github.com/login/oauth');
     const response = await app.request(
       callback.toString(),
-      { headers: { cookie: jar.header() } },
+      { headers: { cookie: jar.header(), ...clientHeaders } },
       env
     );
     jar.store(response);
@@ -220,6 +196,40 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
     }>;
     return rows.map((row) => row.id);
   }
+
+  // BetterAuth retains its existing IPv6 /64 normalization and test-mode localhost fallback.
+  it.each([
+    [
+      'Cloudflare',
+      {
+        'CF-Connecting-IP': '203.0.113.7',
+        'X-Forwarded-For': '198.51.100.66',
+        'X-Real-IP': '198.51.100.67',
+      },
+      '203.0.113.7',
+    ],
+    [
+      'trusted proxy overwriting the ingress header',
+      { 'CF-Connecting-IP': '2001:db8::7', 'X-Forwarded-For': '198.51.100.66, 10.0.0.1' },
+      '2001:0db8:0000:0000:0000:0000:0000:0000',
+    ],
+    [
+      'missing trusted ingress',
+      { 'X-Forwarded-For': '198.51.100.66', 'X-Real-IP': '198.51.100.67' },
+      '127.0.0.1',
+    ],
+  ] as const)(
+    'stores the ingress IP for %s, ignoring spoofed forwarding headers',
+    async (_mode, headers, expectedIp) => {
+      const callback = await signInWithGitHub(undefined, undefined, headers);
+      expect(callback.status).toBe(302);
+      expect(callback.headers.get('location')).toBe(CALLBACK_URL);
+      expect((await currentUser()).status).toBe(200);
+      const sessions = sqlite.prepare('SELECT ip_address FROM sessions').all();
+      expect(sessions).toEqual([{ ip_address: expectedIp }]);
+      expect(githubAccounts()).toHaveLength(1);
+    }
+  );
 
   it('signs a first-time GitHub user in and starts a session', async () => {
     const callback = await signInWithGitHub();
@@ -287,4 +297,57 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
     expect(realUserIds()).toEqual([]);
     expect(githubAccounts()).toEqual([]);
   });
+
+  it('namespaces OAuth state in verifications with auth-state: and consumes it on callback (CVE-2026-114607)', async () => {
+    const verificationIdentifiers = () =>
+      (
+        sqlite.prepare(`SELECT identifier FROM verifications`).all() as Array<{
+          identifier: string;
+        }>
+      ).map((row) => row.identifier);
+
+    let issuedState = '';
+    const response = await signInWithGitHub(undefined, (state) => {
+      issuedState = state;
+      expect(issuedState).not.toBe('');
+      // Pre-1.7.7 stored the bare state as the verification identifier, allowing OAuth state
+      // records to collide with unprefixed verification tokens (CVE-2026-114607).
+      expect(verificationIdentifiers()).toEqual([`auth-state:${issuedState}`]);
+    });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe(CALLBACK_URL);
+    expect(verificationIdentifiers()).toEqual([]);
+  });
+
+  it.each(['superadmin', 'admin', 'user'])(
+    'refuses implicit same-email GitHub linking to an existing %s account',
+    async (role) => {
+      const sent: Array<{ to: string; subject: string }> = [];
+      env = {
+        ...env,
+        AGENT_EMAIL: {
+          send: async (message: { to: string; subject: string }) => {
+            sent.push(message);
+            return { messageId: 'test-email' };
+          },
+        },
+      } as unknown as Env;
+      const createdAt = Date.parse('2026-06-26T10:13:40Z');
+      sqlite
+        .prepare(
+          `INSERT INTO users (id, email, email_verified, name, image, role, status, created_at, updated_at) VALUES
+        ('owner', 'owner@example.com', 1, 'Owner', NULL, 'superadmin', 'active', ?, ?),
+        ('linked', 'mona@example.com', 1, 'Mona', NULL, ?, 'active', ?, ?)`
+        )
+        .run(createdAt, createdAt, role, createdAt, createdAt);
+      const callback = await signInWithGitHub();
+      expect(callback.status).toBe(302);
+      expect(callback.headers.get('location')).toContain('error=');
+      expect(githubAccounts()).toEqual([]);
+      expect((await currentUser()).status).toBe(401);
+      expect(sent).toEqual([]);
+      expect(realUserIds()).toEqual(expect.arrayContaining(['owner', 'linked']));
+    }
+  );
 });

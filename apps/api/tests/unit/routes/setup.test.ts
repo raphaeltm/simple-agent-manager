@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,50 +8,17 @@ import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { setupRoutes } from '../../../src/routes/setup';
 import { decrypt, generateEncryptionKey } from '../../../src/services/encryption';
-
-function createD1(sqlite: Database.Database): D1Database {
-  return {
-    prepare(sql: string) {
-      const statement = sqlite.prepare(sql);
-      let bindings: unknown[] = [];
-      return {
-        bind(...values: unknown[]) {
-          bindings = values;
-          return this;
-        },
-        async first<T>() {
-          return statement.get(...bindings) as T | null;
-        },
-        async all<T>() {
-          return { results: statement.all(...bindings) as T[] };
-        },
-        async run() {
-          const result = statement.run(...bindings);
-          return { meta: { changes: result.changes } };
-        },
-      };
-    },
-    async batch(statements: D1PreparedStatement[]) {
-      sqlite.exec('BEGIN');
-      const results: D1Result[] = [];
-      try {
-        for (const statement of statements) {
-          results.push(await statement.run());
-        }
-        sqlite.exec('COMMIT');
-        return results;
-      } catch (err) {
-        sqlite.exec('ROLLBACK');
-        throw err;
-      }
-    },
-  } as unknown as D1Database;
-}
+import { createMemoryKv, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 function createEnv(overrides: Partial<Env> = {}): Env {
   const sqlite = new Database(':memory:');
   sqlite.exec(`
-    CREATE TABLE users (id TEXT PRIMARY KEY);
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      role TEXT NOT NULL DEFAULT 'user',
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at INTEGER NOT NULL DEFAULT 0
+    );
     INSERT INTO users (id) VALUES ('system_anonymous_trials');
     CREATE TABLE platform_settings (
       key TEXT PRIMARY KEY NOT NULL,
@@ -73,8 +42,15 @@ function createEnv(overrides: Partial<Env> = {}): Env {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
+  sqlite.exec(
+    readFileSync(
+      new URL('../../../src/db/migrations/0196_admin_settings.sql', import.meta.url),
+      'utf8'
+    )
+  );
   return {
-    DATABASE: createD1(sqlite),
+    DATABASE: createSqliteD1(sqlite),
+    KV: createMemoryKv(),
     BASE_DOMAIN: 'example.com',
     ENCRYPTION_KEY: generateEncryptionKey(),
     SETUP_TOKEN: 'setup-token',
@@ -279,7 +255,7 @@ describe('setup routes', () => {
       completed: true,
       status: {
         integrations: {
-          gitlabOAuth: { configured: true, label: 'set here' },
+          gitlabOAuth: { configured: true, label: 'stored in SAM' },
         },
       },
     });
@@ -287,9 +263,9 @@ describe('setup routes', () => {
 
   it('rejects invalid GitLab host values', async () => {
     const res = await createApp().request(
-      '/api/setup/config',
+      '/api/setup/complete',
       {
-        method: 'PUT',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.13' },
         body: JSON.stringify({
           token: 'setup-token',
@@ -339,7 +315,7 @@ describe('setup routes', () => {
     const written = await env.DATABASE.prepare(
       "SELECT value FROM platform_settings WHERE key = 'integration.google.clientId'"
     ).first<{ value: string }>();
-    expect(written).toBeUndefined();
+    expect(written).toBeNull();
   });
 
   it('does not persist partial config when setup completion validation fails', async () => {
@@ -361,29 +337,17 @@ describe('setup routes', () => {
     const completed = await env.DATABASE.prepare(
       "SELECT value FROM platform_settings WHERE key = 'setup.completed'"
     ).first<{ value: string }>();
-    expect(appId).toBeUndefined();
-    expect(completed).toBeUndefined();
+    expect(appId).toBeNull();
+    expect(completed).toBeNull();
   });
 
   it('rolls back setup config when the transactional completion write fails', async () => {
     const env = createEnv();
-    const originalPrepare = env.DATABASE.prepare.bind(env.DATABASE);
-    env.DATABASE.prepare = ((sql: string) => {
-      const statement = originalPrepare(sql);
-      const originalBind = statement.bind.bind(statement);
-      statement.bind = ((...values: unknown[]) => {
-        const bound = originalBind(...values);
-        if (values[0] === 'setup.completed') {
-          const originalRun = bound.run.bind(bound);
-          bound.run = async () => {
-            await originalRun();
-            throw new Error('forced completion write failure');
-          };
-        }
-        return bound;
-      }) as D1PreparedStatement['bind'];
-      return statement;
-    }) as D1Database['prepare'];
+    await env.DATABASE.exec(`
+      CREATE TRIGGER reject_setup_completion AFTER INSERT ON platform_settings
+      WHEN NEW.key = 'setup.completed'
+      BEGIN SELECT RAISE(ABORT, 'forced completion write failure'); END;
+    `);
 
     const res = await createApp().request(
       '/api/setup/complete',
@@ -401,14 +365,15 @@ describe('setup routes', () => {
     );
 
     expect(res.status).toBe(500);
+    expect(await res.text()).not.toContain('forced completion write failure');
     const clientId = await env.DATABASE.prepare(
       "SELECT value FROM platform_settings WHERE key = 'integration.google.clientId'"
     ).first<{ value: string }>();
     const completed = await env.DATABASE.prepare(
       "SELECT value FROM platform_settings WHERE key = 'setup.completed'"
     ).first<{ value: string }>();
-    expect(clientId).toBeUndefined();
-    expect(completed).toBeUndefined();
+    expect(clientId).toBeNull();
+    expect(completed).toBeNull();
   });
 
   it('updates the existing platform integration secret row during forced setup completion', async () => {
@@ -491,7 +456,7 @@ describe('setup routes', () => {
       });
     }
 
-    function setupRequest(method: 'POST' | 'PUT', ip: string, withConfig: boolean) {
+    function setupRequest(method: 'POST', ip: string, withConfig: boolean) {
       return {
         method,
         headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': ip },
@@ -519,30 +484,6 @@ describe('setup routes', () => {
     function expectNoSecretMarkers(body: string): void {
       for (const marker of ALL_SECRET_MARKERS) expect(body).not.toContain(marker);
     }
-
-    it('PUT /config returns only the status projection, never a secret value', async () => {
-      const res = await createApp().request(
-        '/api/setup/config',
-        setupRequest('PUT', '198.51.100.30', true),
-        envWithSecrets()
-      );
-
-      expect(res.status).toBe(200);
-      const text = await res.text();
-      expectNoSecretMarkers(text);
-
-      const json = JSON.parse(text) as { status: { integrations: Record<string, unknown> } };
-      expect(Object.keys(json)).toEqual(['status']);
-      // Liveness: the projection still reports every seeded secret, so an empty body cannot pass.
-      expect(json.status.integrations).toMatchObject({
-        githubOAuth: { configured: true, source: 'environment' },
-        githubApp: { configured: true, source: 'environment' },
-        githubWebhook: { configured: true, source: 'environment' },
-        googleInfrastructureOAuth: { configured: true, source: 'environment' },
-        googleOAuth: { configured: true, source: 'runtime' },
-        gitlabOAuth: { configured: true, source: 'runtime' },
-      });
-    });
 
     it('POST /verify and POST /complete never return a secret value either', async () => {
       const env = envWithSecrets();

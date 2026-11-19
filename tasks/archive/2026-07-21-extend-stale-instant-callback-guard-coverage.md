@@ -1,0 +1,50 @@
+# Extend Stale Instant-Callback Guard to Non-Destructive Regressions
+
+> **Resolved 2026-11-08 (task `01M6YNJDB3328SQ43281EEH7T1`, branch
+> `sam/finish-workspace-credential-revocation-eeh7t1`):** implemented the generation/epoch
+> option. `persistRuntimeRecovering` rotates `workspaces.callback_generation` and
+> `nodes.callback_generation` to the new runtime incarnation, every token minted for the woken
+> container carries it (`cgen`), and `verifyCallbackToken` refuses any other generation with 401.
+> A superseded container can therefore send no callback at all (`error`, `failed`, `completed`,
+> `cancelled`, `idle` alike), regardless of the freshness margin. Evidence:
+> `tests/unit/services/callback-credential-generation.test.ts` (Instant cases through the real
+> `persistRuntimeRecovering`), `tests/integration/instant-idle-sleep-wake.test.ts` ("retires the
+> slept container credentials ..."), and the enumeration test proving every callback JWT is
+> verified in `verifyCallbackToken`. The freshness heuristic (`_stale-callback-guard.ts`) is kept
+> as defence in depth; it no longer decides anything a current-generation token could reach.
+
+> **Note 2026-11-08 (task `01M6Y0DAXRD0S56125X2TQA7RF`):** callback tokens now require `scope`
+> and `iat`. The AI proxy and MCP tokens are now bound to the workspace lifecycle (an inactive
+> workspace is refused). One residual remains: a superseded Instant generation's
+> still-unexpired workspace token is accepted while the same workspace is active again. The
+> generation/epoch claim described below is the durable fix for that too. It is documented as a
+> known limit in `architecture/security.md` (Callback Tokens).
+
+> **Reconciliation 2026-10-26:** Still open; the guard still covers only `failed` task callbacks
+> (`apps/api/src/routes/tasks/callback.ts:321-368`) and `error` activity callbacks. Pointer move:
+> the activity path now lives in `apps/api/src/services/acp-activity-callback-handler.ts`
+> (`rejectSupersededInstantError` at `:225` returns early for anything but `error` at `:234`);
+> `routes/projects/agent-activity-callback.ts` is a 35-line wrapper.
+
+## Problem
+
+PR (branch `sam/diagnose-fix-remaining-production-0dvhf5`) added a freshness guard (`apps/api/src/routes/_stale-callback-guard.ts`) that rejects destructive `error`/`failed` callbacks arriving from a superseded Instant container generation after a completed recovery. Two adjacent surfaces remain unguarded:
+
+1. **Stale `completed`/`cancelled` task callbacks** (`apps/api/src/routes/tasks/callback.ts`): a late terminal-success callback from a dead container generation could prematurely complete/cancel a task the recovered generation is still working on.
+2. **Stale `idle` activity callbacks** (`apps/api/src/routes/projects/agent-activity-callback.ts`): a late `idle` report from the dead generation could mark the live recovered session idle and trigger an early hibernate/handback on the healthy runtime.
+
+Both are less damaging than the guarded `error`/`failed` regressions (work is preserved; the session can wake again), which is why they were scoped out of the recovery PR.
+
+Known residual gaps of the existing guard (documented in the PR): supersession within the freshness margin (default 60s, tunable via `INSTANT_STALE_CALLBACK_MARGIN_MS`), and callbacks landing after container death but before `persistRuntimeRecovering` stamps the row.
+
+## Context
+
+Identified by the security-auditor review of the Instant runtime recovery work (2026-07-21) and scoped out by the implementing agent as follow-up. A durable fix for the whole class would be a generation/epoch claim minted into callback tokens by the `VmAgentContainer` DO on every `launch()`/`wakeFromSnapshot()` and persisted for comparison — that design needs DO + token changes the recovery PR intentionally avoided.
+
+## Acceptance Criteria
+
+- [ ] Decide guard-vs-epoch: either extend the freshness guard to `completed`/`cancelled`/`idle` transitions, or implement the generation/epoch token claim and retire the freshness heuristic.
+- [ ] A stale `idle` from a superseded generation cannot hibernate a live recovered session (behavioral test).
+- [ ] A stale `completed`/`cancelled` from a superseded generation cannot terminate a task the recovered generation is progressing (behavioral test).
+- [ ] Legitimate current-generation reports still flow (negative tests).
+- [ ] Rejections log structured warns per `.claude/rules/11` and return statuses the vm-agent clients tolerate without retry storms.

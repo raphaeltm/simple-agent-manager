@@ -46,6 +46,10 @@ type usageReportPayload struct {
 	ObservedAt           int64               `json:"observedAt,omitempty"`
 	Source               string              `json:"source,omitempty"`
 	RateLimits           []usageLimitPayload `json:"rateLimits"`
+	// TokenUsage is the run's cumulative token totals (Insights slice U,
+	// session_host_run_usage.go). Omitted when the report carries none; a
+	// control plane that predates it ignores the field.
+	TokenUsage *tokenUsagePayload `json:"tokenUsage,omitempty"`
 }
 
 type usageReportRequest struct {
@@ -115,8 +119,10 @@ func (h *SessionHost) buildUsageReportRequest(attr credentialAttribution, hasAtt
 	if !hasAttr || attr.CredentialReference == "" || attr.CredentialSource == "" {
 		return usageReportRequest{}, false
 	}
-	if len(limits) == 0 {
-		return usageReportRequest{}, false
+	// A token-only report has no limits. rateLimits stays a JSON array ([]),
+	// never null: every control plane version requires the array.
+	if limits == nil {
+		limits = []usageLimitPayload{}
 	}
 
 	payload := usageReportPayload{
@@ -147,6 +153,7 @@ func (h *SessionHost) enqueueUsageReportFromActiveCallback(request usageReportRe
 
 func (h *SessionHost) enqueueUsageReportRequest(request usageReportRequest, allowClosedGrace bool) {
 	h.usageReportMu.Lock()
+	h.observeProviderLimitLocked(request.payload)
 	if h.usageReportClosed && (!allowClosedGrace || !h.usageReportCloseGrace) {
 		h.recordUsageReportFailureLocked("usage report ingress closed")
 		h.usageReportMu.Unlock()
@@ -372,6 +379,7 @@ func usageReportCoalesceKey(request usageReportRequest) string {
 		int64PointerKey(limit.RemainingAmount),
 		int64PointerKey(limit.WindowMinutes),
 		int64PointerKey(limit.ResetsAt),
+		tokenUsageEpochKey(request.payload.TokenUsage),
 	}, "\x1f")
 }
 

@@ -1,5 +1,13 @@
 # Mobile Nav Bar: Use Dropdown Menus in Workspace View
 
+> **Reconciliation 2026-10-12:** Pointer correction only; nothing this week touched the scope.
+> `apps/web/src/pages/Workspace.tsx` and `apps/web/src/components/workspace/` no longer exist.
+> #592 (`512510d87`) moved the workspace nav bar to
+> `apps/web/src/pages/workspace/WorkspaceHeader.tsx`. On mobile it still shows separate icon
+> buttons for worktrees, files, git changes and the command palette, plus a button that opens the
+> "Workspace menu" drawer (`WorkspaceHeader.tsx:178-264`; drawer at `workspace/index.tsx:579`).
+> Still open: group the secondary actions into one dropdown.
+
 **Created**: 2026-02-28
 **Status**: Backlog
 **Priority**: Medium

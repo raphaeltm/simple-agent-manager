@@ -1,0 +1,60 @@
+---
+/**
+ * Brand and style guide. Intentionally unlinked and kept out of search and the sitemap until
+ * it is reviewed: to launch it, drop `noindex`, remove the sitemap filter in astro.config.ts
+ * and link it from the footer.
+ */
+import '../../styles/brand-guide.css';
+
+import Footer from '../../../../../packages/ui/src/brand/Footer.astro';
+import AssetsSection from '../../components/brand/AssetsSection.astro';
+import BrandHero from '../../components/brand/BrandHero.astro';
+import BrandIndex from '../../components/brand/BrandIndex.astro';
+import ColourSection from '../../components/brand/ColourSection.astro';
+import EssenceSection from '../../components/brand/EssenceSection.astro';
+import ImagerySection from '../../components/brand/ImagerySection.astro';
+import InterfaceSection from '../../components/brand/InterfaceSection.astro';
+import LogoSection from '../../components/brand/LogoSection.astro';
+import MaterialSection from '../../components/brand/MaterialSection.astro';
+import MotionSection from '../../components/brand/MotionSection.astro';
+import TypeSection from '../../components/brand/TypeSection.astro';
+import VoiceSection from '../../components/brand/VoiceSection.astro';
+import Header from '../../components/Header.astro';
+import Base from '../../layouts/Base.astro';
+---
+
+<Base
+  title="SAM brand and style guide"
+  description="How SAM looks, sounds and moves: the logo, colour, type, glass, motion, writing style and downloadable assets for Simple Agent Manager."
+  noindex
+>
+  <Header />
+  <main class="bg-page">
+    <BrandHero />
+    <BrandIndex />
+    <EssenceSection />
+    <hr class="divider" />
+    <LogoSection />
+    <hr class="divider" />
+    <ColourSection />
+    <hr class="divider" />
+    <TypeSection />
+    <hr class="divider" />
+    <MaterialSection />
+    <hr class="divider" />
+    <MotionSection />
+    <hr class="divider" />
+    <InterfaceSection />
+    <hr class="divider" />
+    <VoiceSection />
+    <hr class="divider" />
+    <ImagerySection />
+    <hr class="divider" />
+    <AssetsSection />
+  </main>
+  <Footer />
+</Base>
+
+<script>
+  import '../../components/brand/brand-motion';
+</script>

@@ -40,7 +40,7 @@ For each `overflow-x: auto` wrapper around a `<table>`, add:
 <div class="table-wrapper" tabindex="0" role="region" aria-label="<descriptive label>">
 ```
 
-(See the applied fix in `Comparison.astro` for the pattern.)
+(The pattern above was first applied to the homepage comparison table, `Comparison.astro`, removed with the old homepage on 2026-11-11.)
 
 ## Acceptance Criteria
 
@@ -56,3 +56,7 @@ For each `overflow-x: auto` wrapper around a `<table>`, add:
 ## Execute
 
 Execute this task using the /do skill.
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. #2716 rewrote the three enterprise pages, removing 3 of the 8 wrappers. Still without `tabindex="0"`: `self-host/index.astro`, `compare/paseo.astro`, `layouts/BlogPost.astro`, `components/GitHubAppSetup.astro`, `components/placement/explorer.css`.

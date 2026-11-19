@@ -55,17 +55,23 @@ func (s *Server) registerSessionMcpServers(workspaceID, sessionID string, entrie
 	s.sessionMcpServers[hostKey] = entries
 	s.sessionHostMu.Unlock()
 
-	// Persist to SQLite so MCP servers survive VM agent restarts and
-	// are available even if a WebSocket creates the SessionHost first.
-	if s.store != nil {
-		if err := s.store.UpsertSessionMcpServers(workspaceID, sessionID, toPersistedMcpServers(entries)); err != nil {
-			slog.Warn("Failed to persist MCP servers to SQLite",
-				"workspace", workspaceID, "session", sessionID, "error", err)
-		}
-	}
+	s.persistSessionMcpServers(workspaceID, sessionID, entries)
 
 	slog.Info("MCP servers registered for agent session",
 		"workspace", workspaceID, "session", sessionID, "count", len(entries))
+}
+
+// persistSessionMcpServers writes a session's MCP servers to SQLite so they
+// survive VM agent restarts and are available even if a WebSocket creates the
+// SessionHost first. Failures are logged, never fatal.
+func (s *Server) persistSessionMcpServers(workspaceID, sessionID string, entries []acp.McpServerEntry) {
+	if s.store == nil {
+		return
+	}
+	if err := s.store.UpsertSessionMcpServers(workspaceID, sessionID, toPersistedMcpServers(entries)); err != nil {
+		slog.Warn("Failed to persist MCP servers to SQLite",
+			"workspace", workspaceID, "session", sessionID, "error", err)
+	}
 }
 
 // toPersistedMcpServers and fromPersistedMcpServers are the only conversions between the acp

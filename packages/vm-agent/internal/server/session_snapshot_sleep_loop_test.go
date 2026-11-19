@@ -49,7 +49,7 @@ func initSnapshotRemoteRepoWithHistory(t *testing.T, historyBytes int) (repo, re
 }
 
 // writeLocalTaskWork leaves an unpushed commit, an unstaged edit and an
-// untracked file on a new branch, and returns the local commit.
+// untracked file, staged content and workflow state, and returns the local commit.
 func writeLocalTaskWork(t *testing.T, repo, branch string) string {
 	t.Helper()
 	runGit(t, repo, "checkout", "-b", branch)
@@ -58,6 +58,11 @@ func writeLocalTaskWork(t *testing.T, repo, branch string) string {
 	runGit(t, repo, "commit", "-m", "local only")
 	mustWriteSnapshotFile(t, repo, "README.md", "uncommitted edit")
 	mustWriteSnapshotFile(t, repo, "untracked.txt", "untracked work")
+	mustWriteSnapshotFile(t, repo, "staged.txt", "staged content")
+	runGit(t, repo, "add", "staged.txt")
+	mustWriteSnapshotFile(t, repo, "staged.txt", "staged plus unstaged")
+	mustWriteSnapshotFile(t, repo, ".do-state.md", "local workflow progress")
+	mustWriteSnapshotFile(t, repo, ".workflow-state.md", "local orchestration progress")
 	return gitOutput(t, repo, "rev-parse", "HEAD")
 }
 
@@ -70,14 +75,23 @@ func assertRestoredLocalTaskWork(t *testing.T, restored, wantHead, branch string
 		t.Fatalf("restored branch = %q, want %q", got, branch)
 	}
 	for name, want := range map[string]string{
-		"local-commit.txt": "committed locally, never pushed",
-		"README.md":        "uncommitted edit",
-		"untracked.txt":    "untracked work",
+		"local-commit.txt":   "committed locally, never pushed",
+		"README.md":          "uncommitted edit",
+		"untracked.txt":      "untracked work",
+		"staged.txt":         "staged plus unstaged",
+		".do-state.md":       "local workflow progress",
+		".workflow-state.md": "local orchestration progress",
 	} {
 		got, err := os.ReadFile(filepath.Join(restored, name))
 		if err != nil || string(got) != want {
 			t.Fatalf("restored %s = %q (err %v), want %q", name, got, err, want)
 		}
+	}
+	if got := gitOutput(t, restored, "show", ":staged.txt"); got != "staged content" {
+		t.Fatalf("restored staged content = %q", got)
+	}
+	if got := gitOutput(t, restored, "diff", "--cached", "--name-only"); got != "staged.txt" {
+		t.Fatalf("restored index = %q, want only staged.txt", got)
 	}
 }
 
@@ -367,6 +381,9 @@ func TestSnapshotCaptureSkipsRegenerableHomeCaches(t *testing.T) {
 		".local/share/uv/tools/ruff/bin/ruff":                  "tool",
 		".codex/sessions/2026/10/03/rollout.jsonl":             "conversation",
 		".codex/plugins/cache/curated/skill/SKILL.md":          "plugin",
+		".gemini/antigravity/bin/webm_encoder":                 "helper",
+		".config/antigravity/plugin-secrets.json":              "secret",
+		".gemini/antigravity-acp/conversations/agy.db":         "conversation",
 	} {
 		path := filepath.Join(home, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -389,14 +406,14 @@ func TestSnapshotCaptureSkipsRegenerableHomeCaches(t *testing.T) {
 		t.Fatalf("skipped = %#v: excluded caches must not be recorded as lost state (their symlinks used to mark snapshots degraded)", skipped)
 	}
 	names := snapshotTarNames(t, tarPath)
-	for _, excluded := range []string{".npm-global/", ".codex/cache/", ".local/share/uv/"} {
+	for _, excluded := range []string{".npm-global/", ".codex/cache/", ".local/share/uv/", ".gemini/antigravity/bin/", ".config/antigravity/"} {
 		for _, name := range names {
 			if strings.HasPrefix(name, excluded) {
 				t.Fatalf("snapshot captured regenerable %s", name)
 			}
 		}
 	}
-	for _, kept := range []string{".codex/sessions/2026/10/03/rollout.jsonl", ".codex/plugins/cache/curated/skill/SKILL.md"} {
+	for _, kept := range []string{".codex/sessions/2026/10/03/rollout.jsonl", ".codex/plugins/cache/curated/skill/SKILL.md", ".gemini/antigravity-acp/conversations/agy.db"} {
 		if !containsString(names, kept) {
 			t.Fatalf("snapshot names %v are missing harness state %s", names, kept)
 		}
@@ -410,12 +427,13 @@ func TestSnapshotCaptureSkipsRegenerableHomeCaches(t *testing.T) {
 	if got := strings.Split(strings.TrimSuffix(string(selected), "\x00"), "\x00"); !reflect.DeepEqual(got, []string{"sessions/s.jsonl"}) || len(rootSkipped) != 0 {
 		t.Fatalf("external Codex root selection = %q (skipped %#v), want sessions without cache", got, rootSkipped)
 	}
-	homeInventory := []byte("f\x0010\x00644\x00.codex/sessions/s.jsonl\x00f\x0010\x00644\x00.npm-global/lib/cli.js\x00f\x0010\x00644\x00.codex/cache/catalog.json\x00")
+	homeInventory := []byte("f\x0010\x00644\x00.codex/sessions/s.jsonl\x00f\x0010\x00644\x00.npm-global/lib/cli.js\x00f\x0010\x00644\x00.codex/cache/catalog.json\x00" +
+		"f\x0010\x00755\x00.gemini/antigravity/bin/webm_encoder\x00f\x0010\x00600\x00.config/antigravity/plugin-secrets.json\x00f\x0010\x00644\x00.gemini/antigravity-acp/conversations/agy.db\x00")
 	homeSelected, homeSkipped, _, err := buildContainerSnapshotArchiveList(homeInventory, "", 1<<20, 1<<30)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Split(strings.TrimSuffix(string(homeSelected), "\x00"), "\x00"); !reflect.DeepEqual(got, []string{".codex/sessions/s.jsonl"}) || len(homeSkipped) != 0 {
+	if got := strings.Split(strings.TrimSuffix(string(homeSelected), "\x00"), "\x00"); !reflect.DeepEqual(got, []string{".codex/sessions/s.jsonl", ".gemini/antigravity-acp/conversations/agy.db"}) || len(homeSkipped) != 0 {
 		t.Fatalf("container HOME selection = %q (skipped %#v), want sessions without regenerable caches", got, homeSkipped)
 	}
 	if args := strings.Join(containerSnapshotInventoryArgs("/home/node", ""), " "); !strings.Contains(args, "-path /home/node/.npm-global") {
@@ -423,16 +441,19 @@ func TestSnapshotCaptureSkipsRegenerableHomeCaches(t *testing.T) {
 	}
 }
 
-// Snapshots captured before these caches were excluded legitimately contain
+// Snapshots captured before these paths were excluded legitimately contain
 // them, and they must still wake. Credential paths stay rejected.
 func TestSnapshotHomeArchiveValidationStillAcceptsRegenerableCaches(t *testing.T) {
-	accepted := writeSnapshotTestTar(t, ".npm-global/lib/node_modules/x/index.js", ".codex/cache/remote_plugin_catalog.json", ".local/share/uv/tools/x/bin/x")
+	accepted := writeSnapshotTestTar(t, ".npm-global/lib/node_modules/x/index.js", ".codex/cache/remote_plugin_catalog.json", ".local/share/uv/tools/x/bin/x",
+		".gemini/antigravity/bin/webm_encoder", ".config/antigravity/plugin-secrets.json")
 	if _, err := validateSnapshotHomeTar(accepted, 1<<20, 1<<30); err != nil {
-		t.Fatalf("archive from an older agent with regenerable caches was rejected: %v", err)
+		t.Fatalf("archive from an older agent with capture-only exclusions was rejected: %v", err)
 	}
-	rejected := writeSnapshotTestTar(t, ".ssh/id_ed25519")
-	if _, err := validateSnapshotHomeTar(rejected, 1<<20, 1<<30); err == nil || !strings.Contains(err.Error(), "excluded path") {
-		t.Fatalf("credential path validation error = %v, want excluded-path rejection", err)
+	for _, credential := range []string{".ssh/id_ed25519"} {
+		rejected := writeSnapshotTestTar(t, credential)
+		if _, err := validateSnapshotHomeTar(rejected, 1<<20, 1<<30); err == nil || !strings.Contains(err.Error(), "excluded path") {
+			t.Fatalf("%s validation error = %v, want excluded-path rejection", credential, err)
+		}
 	}
 }
 
@@ -505,7 +526,7 @@ func TestSnapshotSkippedEntriesBudgetFallsBackToDefaultLimit(t *testing.T) {
 
 func completionRequestSize(t *testing.T, manifest snapshotManifest) int {
 	t.Helper()
-	encoded, err := json.Marshal(snapshotCompletionPayload("agent-1", "chat-1", "vm", "01GENERATION", manifest))
+	encoded, err := json.Marshal(snapshotCompletionPayload("agent-1", "chat-1", "vm", "01GENERATION", manifest, false))
 	if err != nil {
 		t.Fatal(err)
 	}

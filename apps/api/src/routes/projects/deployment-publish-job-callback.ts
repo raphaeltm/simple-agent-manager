@@ -3,15 +3,22 @@ import { Hono } from 'hono';
 import type { InferOutput } from 'valibot';
 import * as v from 'valibot';
 
+import { createCloudflareBuildPorts } from '../../app-deployment-ports/cloudflare-builder';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
-import { parseWithSchema, readRequestJsonRecord } from '../../lib/runtime-validation';
+import { log } from '../../lib/logger';
+import { parseWithSchema } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
-import { appendDeploymentPublishJobEvent } from '../../services/deployment-publish-jobs';
+import {
+  appendDeploymentPublishJobEvent,
+  PUBLISH_JOB_TERMINAL_STATUSES,
+} from '../../services/deployment-publish-jobs';
 import { recordDeploymentPublishJobLifecycleEventBestEffort } from '../../services/project-lifecycle-events';
-import { verifyWorkspacePublishCallback } from './_callback-auth';
+import { verifyPublishCallback } from './_publish-callback-auth';
+import { publishJobSpecRoute } from './publish-job-spec';
 
 const deploymentPublishJobCallbackRoute = new Hono<{ Bindings: Env }>();
+deploymentPublishJobCallbackRoute.route('/', publishJobSpecRoute);
 
 function optionalString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
@@ -47,12 +54,19 @@ const publishJobEventSchema = v.object({
 });
 
 deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/events', async (c) => {
-  const { projectId, workspaceId, userId, db, assertCurrent } =
-    await verifyWorkspacePublishCallback(
-      c,
-      'deployment_publish_job_event',
-      'Invalid token scope for deployment publish job event'
-    );
+  const {
+    projectId,
+    workspaceId,
+    userId,
+    db,
+    assertCurrent,
+    job: authenticatedJob,
+    body: requestBody,
+  } = await verifyPublishCallback(
+    c,
+    'deployment_publish_job_event',
+    'Invalid token scope for deployment publish job event'
+  );
   const publishJobId = c.req.param('jobId');
   const [job] = await db
     .select()
@@ -68,13 +82,6 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
     .limit(1);
   if (!job) {
     throw errors.notFound('Publish job');
-  }
-
-  let requestBody: Record<string, unknown>;
-  try {
-    requestBody = await readRequestJsonRecord(c.req.raw, 'deployment_publish_job_event.body');
-  } catch {
-    throw errors.badRequest('Invalid publish job event body');
   }
 
   let event: InferOutput<typeof publishJobEventSchema>;
@@ -94,11 +101,38 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
     throw errors.badRequest('Publish job event requires eventType and message');
   }
 
-  const status = optionalString(event.status) ?? undefined;
-  const currentStep = optionalString(event.currentStep) ?? optionalString(event.step);
+  // The verified context callback already handed execution to admission. The
+  // collector reports this receipt afterwards, possibly after the builder has
+  // started. Keep its diagnostic history without letting old source agents
+  // move the job backwards or bypass context verification. Shadow collection
+  // still owns its terminal completion.
+  const sourceContextReceipt =
+    !authenticatedJob &&
+    job.executor === 'cloudflare' &&
+    !job.contextShadow &&
+    eventType === 'publish.context.collected';
+  const status = sourceContextReceipt ? undefined : (optionalString(event.status) ?? undefined);
+  if (event.terminal && (!status || !PUBLISH_JOB_TERMINAL_STATUSES.has(status))) {
+    throw errors.badRequest('Terminal publish job event requires a terminal status');
+  }
+  if (
+    !optionalString(event.releaseId) &&
+    (event.releaseVersion !== undefined || event.releaseStatus !== undefined)
+  ) {
+    throw errors.badRequest('Release metadata requires releaseId');
+  }
+  if (authenticatedJob && event.releaseId && event.releaseId !== authenticatedJob.releaseId)
+    throw errors.forbidden('Event release must already be linked to this job');
+  const terminal = event.terminal === true || PUBLISH_JOB_TERMINAL_STATUSES.has(status ?? '');
+  const currentStep = sourceContextReceipt
+    ? undefined
+    : (optionalString(event.currentStep) ?? optionalString(event.step) ?? undefined);
   await assertCurrent();
-  await appendDeploymentPublishJobEvent(db, {
+  const accepted = await appendDeploymentPublishJobEvent(db, {
     publishJobId,
+    expectedAttempt: authenticatedJob?.attempt,
+    sourceCollector: !authenticatedJob,
+    expectedExecutor: authenticatedJob ? 'cloudflare' : undefined,
     projectId,
     environmentId: job.environmentId,
     nodeId: job.nodeId,
@@ -109,17 +143,24 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
     eventType,
     message,
     detail: requestBody.detail,
-    terminal: event.terminal === true,
-    releaseId: optionalString(event.releaseId),
-    releaseVersion: optionalNumber(event.releaseVersion),
-    releaseStatus: optionalString(event.releaseStatus),
+    terminal,
+    releaseId: optionalString(event.releaseId) ?? undefined,
+    releaseVersion: optionalNumber(event.releaseVersion) ?? undefined,
+    releaseStatus: optionalString(event.releaseStatus) ?? undefined,
     errorMessage: optionalString(event.errorMessage),
     errorCode: optionalString(event.errorCode),
     retryable: event.retryable === true,
   });
 
-  await assertCurrent();
-  if (status && status !== job.status) {
+  if (accepted === false)
+    throw errors.conflict('Publish job is terminal or release does not match');
+  if (!authenticatedJob) await assertCurrent();
+  if (
+    !job.contextShadow &&
+    eventType !== 'publish.job.heartbeat' &&
+    status &&
+    status !== job.status
+  ) {
     c.executionCtx.waitUntil(
       recordDeploymentPublishJobLifecycleEventBestEffort(c.env, {
         projectId,
@@ -130,16 +171,22 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
         currentStep,
         nodeId: job.nodeId,
         workspaceId,
-        releaseId: optionalString(event.releaseId),
-        releaseVersion: optionalNumber(event.releaseVersion),
-        terminal: event.terminal === true,
+        releaseId: optionalString(event.releaseId) ?? undefined,
+        releaseVersion: optionalNumber(event.releaseVersion) ?? undefined,
+        terminal,
         source: 'deployment_publish_job_callback.status',
         occurredAt: Date.now(),
       })
     );
   }
 
-  await assertCurrent();
+  if (!authenticatedJob) await assertCurrent();
+  if (job.executor === 'cloudflare' && job.executorInstanceId && terminal)
+    c.executionCtx.waitUntil(
+      createCloudflareBuildPorts(c.env)
+        .builder.stop(job)
+        .catch(() => log.warn('cloudflare_builder.stop_pending', { publishJobId: job.id }))
+    );
   return c.json({ ok: true });
 });
 

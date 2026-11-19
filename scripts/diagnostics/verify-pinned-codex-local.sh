@@ -21,7 +21,7 @@ read -r signature_name signature_file signature_hash signature_identity < <(sed 
 [[ "$(git -C "$adapter_source" rev-parse HEAD)" == "$adapter_commit" ]]
 [[ "$(git -C "$adapter_source" rev-parse "$adapter_tag^{commit}")" == "$adapter_commit" ]]
 cli_patch="$script_dir/patches/codex-cli-rust-v0.160.0-explicit-mcp.patch"
-adapter_patch="$script_dir/patches/codex-acp-v2.1.1-explicit-mcp.patch"
+adapter_patch="$script_dir/patches/codex-acp-v2.1.1-sam-c2.3.patch"
 [[ "$(sha256sum "$cli_patch" | cut -d' ' -f1)" == "$cli_patch_hash" ]]
 [[ "$(sha256sum "$adapter_patch" | cut -d' ' -f1)" == "$adapter_patch_hash" ]]
 cmp -s "$cli_patch" <(git -C "$cli_source" diff -U0 -- codex-rs ':!codex-rs/Cargo.lock')
@@ -32,5 +32,5 @@ cmp -s "$adapter_patch" <(git -C "$adapter_source" diff -U0 -- src package.json 
 [[ "$archive_binary_hash" == "$(sed -n '3s/ .*//p' "$script_dir/pinned-codex-local.sha256")" ]]
 [[ -x "$host_binary" ]]
 [[ "$("$cli_binary" --version)" == "codex-cli 0.160.0-sam-c2.2" ]]
-[[ "$(node "$adapter_binary" --version)" == "@agentclientprotocol/codex-acp 2.1.1-sam-c2.2" ]]
+[[ "$(node "$adapter_binary" --version)" == "@agentclientprotocol/codex-acp 2.1.1-sam-c2.3" ]]
 echo "pinned HEAD/tag commits, scoped unstaged diffs (CLI excludes Cargo.lock), patch/artifact hashes and runtime identities verified"

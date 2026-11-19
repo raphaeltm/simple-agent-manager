@@ -1,5 +1,23 @@
 # MCP Page-Size Limits Not Configurable via Env Vars
 
+> **Reconciliation 2026-10-26:** Nothing in scope shipped; pointers moved. The three
+> configurable limits are now `packages/operations/src/limits.ts:22-25` (read at
+> `routes/mcp/_helpers.ts:151-153` and `operations/task-core.ts:138,151,155`), typed at
+> `env.ts:1073-1076` and documented at `.env.example:752-755`; the parity test is
+> `platform-operations.test.ts:568`. Still open: the session limits are bare constants
+> (`_helpers.ts:81-82,154-155`), and `MCP_MESSAGE_SEARCH_MAX` (`env.ts:1082`) is still not in
+> `.env.example` (only `MCP_MESSAGE_SEARCH_LIMIT` is, `:760`).
+
+> **Reconciliation 2026-10-12:** #2293 (`6973ceb77`) made three of the five configurable:
+> `taskListLimit`, `taskListMax` and `taskSearchMax` now come from `getPlatformOperationLimits`
+> (`packages/operations/src/limits.ts:19-22`; read at `routes/mcp/_helpers.ts:135,149-151` and
+> `operations/task-core.ts:181,193-198`), are typed in `apps/api/src/env.ts:1063-1066` and are
+> documented in `apps/api/.env.example:750-753`. A parity test covers the shared values
+> (`apps/api/tests/unit/operations/platform-operations.test.ts:515`). Still open:
+> `sessionListLimit`/`sessionListMax` are bare constants (`routes/mcp/_helpers.ts:79-80,152-153`,
+> read by `list_sessions` at `routes/mcp/session-tools.ts:29-30`), and `MCP_MESSAGE_SEARCH_MAX` is
+> still not in `.env.example` (only `MCP_MESSAGE_SEARCH_LIMIT` is, `:758`).
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** `messageSearchMax` now reads `MCP_MESSAGE_SEARCH_MAX` (PR #460;

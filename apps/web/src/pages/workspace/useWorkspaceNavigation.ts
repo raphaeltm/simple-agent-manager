@@ -46,7 +46,11 @@ export interface UseWorkspaceNavigationResult {
 
   // Worktree management
   handleSelectWorktree: (worktreePath: string | null) => void;
-  handleCreateWorktree: (request: { branch: string; createBranch: boolean; baseBranch?: string }) => Promise<void>;
+  handleCreateWorktree: (request: {
+    branch: string;
+    createBranch: boolean;
+    baseBranch?: string;
+  }) => Promise<void>;
   handleRemoveWorktree: (path: string, force: boolean) => Promise<void>;
 }
 
@@ -120,7 +124,15 @@ export function useWorkspaceNavigation(
       disposed = true;
       clearInterval(interval);
     };
-  }, [workspaceUrl, terminalToken, id, isRunning, activeWorktree, applyGitStatus, markGitStatusStale]);
+  }, [
+    workspaceUrl,
+    terminalToken,
+    id,
+    isRunning,
+    activeWorktree,
+    applyGitStatus,
+    markGitStatusStale,
+  ]);
 
   // ── Worktree state ──
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);

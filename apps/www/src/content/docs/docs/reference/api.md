@@ -5,15 +5,85 @@ description: SAM REST API endpoints for managing workspaces, nodes, and credenti
 
 The SAM API runs on a Cloudflare Worker at `api.{domain}`. All authenticated endpoints require a valid BetterAuth session cookie.
 
+## Incremental chat message appends
+
+The workspace callback `POST /api/workspaces/:id/messages` accepts the optional
+`X-SAM-Outbox-Incarnation` UUID header. Updated reporters persist one random UUID with their
+SQLite outbox, retaining it across reopen, retries and session changes; recreating the database
+creates a new UUID. The JSON message body is unchanged. The header is transport identity, not an
+authentication claim: normal callback authentication and workspace/session fencing still apply.
+The server keys retry progress by the authenticated workspace, its current callback generation
+(including the valid initial NULL generation), and the incarnation. Missing or malformed headers
+use ordinary individual-row persistence. Older Workers ignore the header.
+
+Clients connect to `GET /api/projects/:projectId/sessions/ws`. With `sessionId`, the socket
+subscribes to that chat session and receives its transcript frames (`message.new`,
+`messages.batch`, `message.append`), its lifecycle events and project-wide events. Without
+`sessionId`, it is a project socket: it receives every non-transcript event for every session
+(lifecycle, attention, comments, access, activity and other project events), but no transcript
+frames.
+
+A client can add `messageAppend=message-append-v1` to advertise canonical message append support.
+A session socket without this capability keeps the individual-row stream and disables merging for
+its session only; project sockets never affect merging. The server never sends `message.append`
+to a socket without the capability. If such a session socket connects while a merged batch is
+being delivered, the server closes it with code `4409` instead; the client should reconnect and
+read the newest messages, which contain the complete row. This covers text that arrives after the
+socket connects. A client without the capability that read a row over REST before connecting,
+while the row grew, keeps its shorter copy until it next reconnects or reloads.
+
+With merging enabled, `messages.batch` introduces a canonical row under its first chunk's ID.
+Later `message.append` events carry `{ id, sessionId, content, offset, revision }`: `content` is
+only the new suffix, `offset` is its starting UTF-16 string offset, and `revision` equals
+`offset + content.length`. The row's ID, timestamp and sequence remain fixed. Tool/card metadata
+continues through the existing message events.
+
+Apply an append only when its base content reaches `offset`. Ignore a duplicate when its exact
+suffix is already present. A missing base or conflicting/gapped suffix requires an authoritative
+read before displaying it; the base may be behind the newest page. Reconnect catch-up must include
+the cached tail row, which can grow without changing its cursor, then drain all newer pages.
+Keep the longer matching prefix when an older REST snapshot races with live appends. REST reads
+return the complete canonical row, and comments reference its stable ID. Existing historical IDs
+remain valid.
+
 :::note
 This reference covers the most commonly used endpoints. For the complete list of all API routes, see the [source code](https://github.com/raphaeltm/simple-agent-manager/tree/main/apps/api/src/routes).
 :::
+
+## Private SAM account assistant
+
+These endpoints require an authenticated, approved account and resolve the `SamSession` Durable Object by that user's identity. Settings are off by default. Enabling is additionally subject to the installation kill switch; assistant turns and actions require both gates. No caller-supplied project ID selects the private conversation's owner.
+
+| Method | Endpoint                              | Contract                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------ | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/sam/settings`                   | Returns `{ enabled, available }`; `enabled` is the saved user preference, `available` reflects installation availability.                                                                                                                                                                                                                                                                                  |
+| PATCH  | `/api/sam/settings`                   | Body `{ enabled: boolean }`; returns the saved settings. Disabling fences further assistant effects and preserves history and already-dispatched project work.                                                                                                                                                                                                                                             |
+| GET    | `/api/sam/turns`                      | Returns `{ conversationId, backingTaskId, legacyHistoryAvailable, turns, nextCursor, work }`. Pass the opaque `nextCursor` unchanged as `before` to load older turns. Each page is chronological; the first page contains the newest bounded window.                                                                                                                                                       |
+| POST   | `/api/sam/fork`                       | Body `{ requestKey }`; returns `{ conversationId, backingTaskId, replayed }`. Creates and selects a private branch with copied user/assistant history and a new backing-task identity linked to its parent. Requires no active turn; retry the same key after a lost response. Does not copy project actions or grant project access. No fork button is exposed in the launch UI.                          |
+| POST   | `/api/sam/turns`                      | Body `{ requestKey, message }`; returns `{ turn, accepted, replayed }`, with `202` for new acceptance or `200` for a replay. Reuse the same key and identical message after a lost response. Acceptance is not completion.                                                                                                                                                                                 |
+| GET    | `/api/sam/turns/:id/stream`           | Server-sent events for the running turn: a `snapshot` (`phase`, `elapsedMs`, published `text`, one-line `thinking`, tool `activity`), then `phase`, `text` (`at` offset), `draft-reset`, `thinking`, `tool` and a final `done`. `204` when the turn is not running in the server object; `429` above the reader cap. Live text is only what passes the receipt guard; the stored turn stays authoritative. |
+| POST   | `/api/sam/turns/:id/cancel`           | Stops an accepted/running assistant turn; returns `{ turn }`. This does not stop a project task already dispatched.                                                                                                                                                                                                                                                                                        |
+| POST   | `/api/sam/actions/:id/confirm`        | Body `{ approved: boolean }`; approves or declines the exact stored action and returns `{ action }`. Repeating confirmation does not repeat its external effect.                                                                                                                                                                                                                                           |
+| POST   | `/api/sam/actions/:id/reconcile`      | Checks the existing reservation for an uncertain `sam_chat_start` action; returns `{ action }`. This is reconciliation, not permission to dispatch replacement work.                                                                                                                                                                                                                                       |
+| POST   | `/api/sam/updates/:id/seen`           | The ID is the dispatch action ID. Marks its retained event references communicated after current authorization checks; returns `{ seen: true }`. It does not answer an agent request.                                                                                                                                                                                                                      |
+| GET    | `/api/sam/conversations`              | Lists retained private conversations.                                                                                                                                                                                                                                                                                                                                                                      |
+| GET    | `/api/sam/conversations/:id/messages` | Returns `{ messages, nextCursor }`; optional `limit` and `before` sequence cursor. Returns a chronological page from the newest remaining window. The assistant UI shows earlier history read-only and suppresses `operator:` message IDs already rendered as rich turns.                                                                                                                                  |
+
+Turns include `id`, `request_key`, `message`, `state`, `response`, `error`, `actions` and `created_at`; the running turn also carries `live`, the same snapshot the stream sends first. Action receipts include `id`, `operation`, `input_json`, `state`, `result_json`, and optional `available`. Read-operation receipts project `input_json` as the string `"{}"` and `result_json` as `null`; retained resource payloads are not a visibility grant. A mutating action whose current resource access cannot be verified has `available: false`, redacted input, and an explanatory result; clients hide its confirmation controls. Treat `uncertain` as unresolved, not successful or safe to repeat. An explicit `rejectedBeforeEffects: true` error permits correcting the rejected input; absence of that flag does not prove that no effect occurred.
+
+`work` contains authorized source task/session references, project/task labels, observed status and timestamp, attention flags, and coalesced unread update metadata. New events do not automatically generate assistant messages. Read transport acknowledgement and user-visible communication are separate records.
+
+The old `POST /api/sam/chat` inference path is closed: enabled clients receive `409 client_update_required` and must use durable turns. See the [assistant guide](/docs/guides/sam-assistant/) for supported workflows and the [architecture decision](/docs/architecture/sam-account-assistant/) for ownership and recovery boundaries.
 
 ## MCP orchestration
 
 Task agents can call `wait_for_subtasks` with a stable workflow-step `waitKey`, unique same-project task IDs, an optional `condition` of `all` (the default) or `any`, and an optional bounded `wakeAfterSeconds`. The agent must persist the workflow state and key before calling, reuse the key after a lost response, and end its turn after registration. ProjectData then reconciles selected task terminal state and durably wakes the same canonical caller session exactly once, including after session sleep and runtime replacement. Automatic wake prompts carry only trusted task IDs and statuses; agents fetch peer-authored output explicitly as untrusted data. Servers without durable prompt delivery reject registration so clients can use bounded foreground polling as a compatibility fallback.
 
-Private feedback-project agents can also call `list_incident_queue`, `get_incident`, `claim_incident`, and `resolve_incident`. These tools are scoped server-side to the effective private feedback project setting (Admin → Integrations runtime value first, then `PLATFORM_FEEDBACK_PROJECT_ID` fallback); callers cannot provide a project id. `claim_incident` and `resolve_incident` require a task-scoped MCP token, use bounded leases/CAS tokens, and return only private redacted incident evidence labelled as untrusted. `resolve_incident` accepts structured ship-or-track fields for resolved outcomes: `fixPrUrl`, `dispatchedTaskId`, or `linkedRecordId`; rejected outcomes require a justification note instead.
+Operations-project agents can also call `list_incident_queue`, `get_incident`, `claim_incident`, and `resolve_incident`; `tools/list` shows them only to tokens for the Operations project. Use the full incident ID returned by `list_incident_queue` or the generated backlog prompt; abbreviated display references are not tool identifiers. These tools are scoped server-side to the effective Operations project setting (`feedback.projectId`: the Admin → Integrations runtime value first, then the `PLATFORM_FEEDBACK_PROJECT_ID` fallback); callers cannot provide a project id. `claim_incident` and `resolve_incident` require a task-scoped MCP token, use bounded leases/CAS tokens, and return only private redacted incident evidence labelled as untrusted. `resolve_incident` accepts structured ship-or-track fields for resolved outcomes: `fixPrUrl`, `dispatchedTaskId`, or `linkedRecordId`; rejected outcomes require a justification note instead.
+
+Operations debugger tools (`ops_*`) are listed only to the Operations project while the `operations.debuggerTools` admin setting is not `off`. Each call is refused with JSON-RPC `-32602` and `data.reason` (`not_operations_project`, `mode_off`, `mode_read_only`, `not_task_scoped`, `task_not_found`, `task_owner_mismatch` or `not_superadmin`) unless the setting allows the capability, the token is a task token in the Operations project, and the task's owner is an active superadmin at call time. `ops_get_access_status` reports the mode, the allowed capabilities (`read`, `act`) and any denial reason without failing. Gated `ops_*` tools record every call in `operations_audit_log`. `ops_get_access_status` is the exception: it records task-scoped calls made inside the Operations project (outcome `allowed` or `denied`), and records nothing for calls from other projects or from tokens without a task.
+
+The read-only `ops_*` tools (`ops_find_anomalies`, `ops_list_nodes`, `ops_get_node`, `ops_get_session_story`, `ops_timeline`, `ops_search_errors`, `ops_query_worker_logs`, `ops_node_logs`, `ops_node_system_info`, `ops_node_events`, `ops_node_containers`, `ops_workspace_agent_sessions`, `ops_capture_debug_package`) need capability `read`. Each result is JSON with `untrustedContent: true`; free text from users, agents and nodes is returned inside `----- BEGIN UNTRUSTED ... -----` envelopes. Capped lists report `total`/`truncated`, and `ops_timeline` returns `continueUntil` for reading further back. See [Admin Settings](/docs/guides/admin-settings/#read-tools).
 
 Project eventing uses a pull loop over the canonical ProjectData `project_event_*` tables. Agents create a short-lived subscription with `create_project_event_subscription`, using v1 exact/set filters for `source`, `eventType`, `subjectType`, `subjectId`, and `severity`; recover existing subscriptions with `list_project_event_subscriptions`; inspect or cancel with `get_project_event_subscription` and `cancel_project_event_subscription`. Project, task, session, workspace, owner, and agent identity come from the verified MCP token, not tool arguments.
 
@@ -21,7 +91,7 @@ Project eventing uses a pull loop over the canonical ProjectData `project_event_
 
 `dispatch_task` also accepts an optional `coordinationChannel`: an ordinary project event channel name (`agent-dm.` is reserved) shared by a feature's agents. When omitted, the child inherits the dispatching task's channel, so every descendant shares one channel; `retry_subtask` and session recovery copy it onto replacement tasks. The child's description gains a short "Coordination channel" section and `get_instructions` returns `task.coordinationChannel` with guidance. Channels stay project-visible, so this routes work and is not an access boundary. Implementation: `parseCoordinationChannelParam` in `apps/api/src/routes/mcp/dispatch-coordination-channel.ts`.
 
-After subscribing, call `list_subscription_events` with the `subscriptionId` to replay missed or queued matches. The list response is payload-free: it returns summaries, delivery IDs, delivery state, `hasMore`, and an opaque `nextCursor` that is valid only for the same subscription. Call `get_event` only when a summary needs full stored event details, then call `ack_event_delivery` after processing each returned `deliveryId`; ack is idempotent. The pull tools themselves record matches, delivery decisions, and pull acknowledgements only — they do not steer runtimes, spawn tasks, or expose human/UI controls. Delivery happens out of band: `existing_session_prompt` and `runtime_interrupt` subscriptions wake the target chat through the durable prompt queue, and `runtime_interrupt` wakes carry the `interrupt` mailbox class, which may cancel an in-flight turn so the wake is delivered immediately.
+After subscribing, call `list_subscription_events` with the `subscriptionId` to replay missed or queued matches. The list response is payload-free: it returns summaries, delivery IDs, delivery state, `hasMore`, and an opaque `nextCursor` that is valid only for the same subscription. Call `get_event` only when a summary needs full stored event details, then call `ack_event_delivery` after processing each returned `deliveryId`; ack is idempotent. The pull tools themselves record matches, delivery decisions, and pull acknowledgements only — they do not steer runtimes, spawn tasks, or expose human/UI controls. Delivery happens out of band: `runtime_steer` (the default), `existing_session_prompt` and `runtime_interrupt` subscriptions wake the target chat through the durable prompt queue. `runtime_steer` wakes join a running turn without stopping it (see [Live steering](#live-steering)), and `runtime_interrupt` wakes carry the `interrupt` mailbox class, which may cancel an in-flight turn so the wake is delivered immediately. Wakes for one subscription are at least the platform cooldown apart (`PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS`). A subscription created with `minWakeIntervalSeconds` is spaced by that longer interval instead, counted from when the previous wake reached the agent; events in between are bundled into the next wake. The interval is accepted only for waking subscriptions, cannot exceed `PROJECT_EVENT_WAKE_SUBSCRIPTION_LIFETIME_MS`, and is returned as the effective `minWakeIntervalMs` on the subscription.
 
 ## Event subscriptions
 
@@ -60,9 +130,12 @@ Concurrent publications are included through either catch-up or live matching.
 Replaying a follow key retains the original watermark and deadline; a retention
 gap or expired checkpoint requires a new explicit history/follow decision.
 Omit the history cursor when only future events are wanted.
-Following defaults to recording events. With `requestedDelivery: existing_session_prompt`,
+Following defaults to recording events. With `requestedDelivery: runtime_steer` (recommended) or
+`existing_session_prompt`,
 follow and catch-up responses include the ordinary subscription checkpoint/end-turn
 instructions and explain that a no-match expiry delivers no wake prompt.
+Add `minWakeIntervalSeconds` to be woken at most once per that many seconds on a busy
+channel; messages in between arrive together in the next wake.
 
 Publishing the same message with the same key in the same chat/channel replays its
 retained event. Reusing that key with different content reports a conflict.
@@ -72,29 +145,43 @@ Payload, fanout, channel cardinality and history page limits are configurable.
 Empty idle catalog generations may be reclaimed, while live subscriptions continue
 to follow the stable channel name.
 
-A channel publication never matches the publisher's own `existing_session_prompt` or
+A channel publication never matches the publisher's own `runtime_steer`, `existing_session_prompt` or
 `runtime_interrupt` subscription, live or through catch-up, so publishing never wakes
 the publisher (`isSelfOriginatedChannelWake`). Record-only followers still see their
 own publications in their pull feed. Channel names starting with `agent-dm.` are
 reserved for SAM agent messaging and are rejected by `publish_channel_event`.
 
+### Subscriber roster
+
+Agents can inspect a channel's subscriber roster with `list_channel_subscribers(channel,state?,cursor?,limit?)`. It requires an active task-backed agent and existing project `task:read` access; the project comes from the verified token. Results include subscription ID, owner type/ID/name, target session/task/runtime/agent IDs, effective state, expiry and creation time across owners. The default `active` state excludes elapsed expiry even before cleanup; `cancelled`, `expired` and `any` are also supported. Every filter dimension must match a canonical channel publication (`sam.agent_channel`, `agent.channel.published`, subject type `agent_channel`, the channel name, severity `info`); omitted dimensions and matching exact/set values count. The roster includes broad subscriptions, not just explicit channel follows, and does not depend on the current channel catalog generation. This is filter eligibility; routing and wake rules still apply.
+
+All matching and state filtering happens before the configured page limit. Continue `nextCursor` with the same channel and state until `hasMore` is false; the cursor is project/channel/state-bound and pages reflect current state rather than a frozen snapshot. No subscription reasons, private filters, idempotency keys, event payloads or delivery receipts are returned. A subscription does **not** prove that an agent read, acknowledged or acted on any message. Existing subscription get/cancel tools remain restricted to the caller's own subscriptions.
+
 ### Agent messages over shared channels
 
-With `AGENT_MESSAGE_CHANNELS_ENABLED=true`, and only while event wakes and durable
-prompt delivery are enabled, `send_durable_message` (classes `notify` and `deliver`)
-and `send_message_to_subtask` stop injecting the sender's text into the recipient's
-prompt. One ProjectData transaction (`sendAgentChannelMessage`) finds or creates the
+`send_durable_message` (every class and `deliveryIntent`) and `send_message_to_subtask`
+never put the sender's text into the recipient's chat or prompt (constitution principle XV). One ProjectData transaction (`sendAgentChannelMessage`) finds or creates the
 canonical `agent-dm.<pair digest>` channel for the two chat sessions, ensures a
-SAM-managed prompt-delivery subscription for each chat, and publishes the message
-with its server-derived sender. The recipient is woken with a SAM-authored notice
-that carries event IDs only; it reads the text with `get_event`
+SAM-managed `runtime_steer` subscription for each chat (`ensureManagedSubscription`), and
+publishes the message with its server-derived sender. The recipient gets a SAM-authored
+notice that carries event IDs only: added to its running turn when it has one and supports
+live steering, otherwise delivered or woken as an ordinary prompt. A managed subscription
+created with another delivery mode is replaced on the pair's next message: the replacement
+receives that message and later ones at once, while the old subscription loses its match keys
+and only delivers the wakes it already owed, in its original mode. The recipient reads the text with `get_event`
 (`event.metadata.actor` is the verified sender), replies with `send_durable_message`,
-and acknowledges with `ack_event_delivery`. Urgent classes keep stop-and-deliver.
+and acknowledges with `ack_event_delivery`. A batch holding an urgent message (`interrupt`,
+`preempt_and_replan` or `shutdown_with_final_prompt`) is delivered stop-and-deliver with that
+class (`urgentAgentMessageClass`); its notice is still IDs-only.
 Responses report `accepted: true, delivered: false` with `transport`, `channel`,
 `eventId` and `sequence`; an optional `idempotencyKey` replays a lost-response retry,
 and changed content under the same key is rejected as a conflict. Messages are capped
 by `PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES` and pair channels by
-`AGENT_MESSAGE_CHANNEL_MAX_CHANNELS`. Managed deployments enable the transport in `wrangler.toml`; the code fallback is off and `AGENT_MESSAGE_CHANNELS_ENABLED=false` selects the legacy path.
+`AGENT_MESSAGE_CHANNEL_MAX_CHANNELS`. The transport needs `AGENT_MESSAGE_CHANNELS_ENABLED=true`, event wakes and durable prompt
+delivery. Managed deployments enable it in `wrangler.toml` (the code fallback is off). When any of
+the three is off, both tools refuse the send with `outcome: "unavailable"` and the reason; there is
+no legacy path that posts the text. `deliveryIntent` is accepted for compatibility: the managed
+subscription already steers notices into a running turn, so `queue` and `steer` deliver alike.
 
 Pair-channel events match only subscriptions targeting one of the two participant
 chats (`subscriptionCanMatchProjectEvent`), `follow_event_channel` rejects
@@ -111,11 +198,95 @@ candidate still owes a wake. Failed sends report `outcome` as `recipient_unavail
 wake remains deliverable while a replacement handles new messages. The drained old
 subscription is retired after delivery.
 
+## SAM Connector
+
+The user-level MCP server that external AI apps use to act as a person; see
+[Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/). Paths are on the API host
+(`https://api.<your-domain>`).
+
+| Method         | Path                                                | Purpose                                                                     |
+| -------------- | --------------------------------------------------- | --------------------------------------------------------------------------- |
+| any            | `/connect/mcp`                                      | MCP endpoint. Accepts an OAuth access token or a SAM API token as a bearer  |
+| `GET`          | `/.well-known/oauth-protected-resource/connect/mcp` | Protected-resource metadata                                                 |
+| `GET`          | `/.well-known/oauth-authorization-server`           | Authorization-server metadata                                               |
+| `POST`         | `/oauth/register`                                   | Dynamic client registration                                                 |
+| `GET`          | `/oauth/authorize`                                  | Starts authorization and sends the person to the web app's `/oauth/consent` |
+| `POST`         | `/oauth/token`                                      | Code exchange and refresh                                                   |
+| `POST`         | `/oauth/revoke`                                     | Token revocation                                                            |
+| `GET`, `POST`  | `/api/connector/consent`                            | Consent preview and decision, used by the consent page                      |
+| `GET`          | `/api/connector/settings`                           | `{ enabled, writeEnabled, url }` for the signed-in person                   |
+| `GET`          | `/api/connector/connections`                        | The person's connected apps: `{ connections, nextCursor }`                  |
+| `DELETE`       | `/api/connector/connections/:id`                    | Revoke one of the person's connections                                      |
+| `GET`, `PATCH` | `/api/admin/connector/settings`                     | Superadmin settings; `PATCH` takes changed keys, and `null` resets a key    |
+| `GET`          | `/api/admin/connector/connections`                  | Every person's connections                                                  |
+| `DELETE`       | `/api/admin/connector/connections/:id`              | Revoke any connection                                                       |
+| `GET`          | `/api/admin/connector/clients`                      | Registered clients: `{ clients, nextCursor }`                               |
+| `PATCH`        | `/api/admin/connector/clients/:id`                  | `{ "blocked": true }` or `false`                                            |
+
+Notes for client developers:
+
+- Write tools take a `requestKey`. Reuse it when you retry, so a retry can't start work twice.
+- `sam_chat_read` returns whole messages, newest first (`paginationUnit: "logical_messages"`).
+  `limit` counts messages; tool calls, thinking and plans between them come back as `activity`
+  entries built from tool metadata only. `nextCursor` always sits between messages. A message cut
+  to its character budget carries `truncated` and `nextOffset`: read the rest with
+  `sam_chat_message_get`. The first page names the `latest` user and assistant messages.
+  `unit: "rows"` returns the previous stored-row pages, where a group split across pages carries
+  `partialBefore` or `mayContinueInNewerPage`. Owners and shared writers also get
+  `pendingInteractions` and `pendingAttention` (questions agents asked). A read that reaches its
+  row budget, or its time budget on an archived chat, returns what it read with
+  `scanBudgetExhausted` and a `nextCursor` to continue from; `mayContinueInNewerPage` is `null`
+  when that read had no time left to check it.
+- Results are sized to fit one Connector response. `sam_chats_search` leaves out the last
+  excerpts when they would not fit (`excerptCoverage.droppedToFitResponse`), and
+  `sam_channel_history` shortens every post on the page instead (`perMessageChars`).
+- A task's final-message summary is the newest whole assistant reply, and `recentAssistantMessages`
+  lists the last few whole replies, newest first, assembled within a bounded scan
+  (`connector.transcriptScanRows`). If that scan holds no assistant text (a very long tool run),
+  the summary is `null`; read the chat for older progress.
+- `sam_inbox_get` returns `items` from the shared inbox list (the same read as `sam_inbox_list`,
+  see [Inbox](#inbox)), plus your finished or follow-up `tasks` and unread `notifications`;
+  `nextCursor` continues all three. `sam_inbox_list`, `sam_inbox_count`, `sam_inbox_item_get`,
+  `sam_inbox_answer` and `sam_inbox_archive` read and act on single inbox items. Secret values
+  cannot be supplied through an app: `sam_inbox_answer` only declines a secret request.
+- `sam_team_status` takes one of `taskId`, `sessionId` or `channel`. A team too large for one
+  response lists as many tasks as fit (`truncated`, `omitted`) and shortens agent text only when
+  that lists more (`agentTextShortenedTo`); `counts` and `usage` cover every task read. A task
+  without agent text has `summary: null`. `sam_schedules_list`,
+  `sam_schedule_get`, `sam_schedule_create`, `sam_schedule_update` and `sam_schedule_cancel` cover
+  one-off schedules and recurring (cron) ones. `sam_channels_list`, `sam_channel_history`,
+  `sam_channel_get` and `sam_channel_subscription_cancel` read and manage coordination channels;
+  apps cannot post to them.
+- `sam_profiles_list` gives each profile an `account`: `state` (`account`, `sam_ai_proxy`,
+  `paused`, `none` or `unknown`), `tier` (`profile`, `project` or `user`), an opaque `poolId`, and
+  `accountName` (null for accounts stored before named accounts existed). It is the account a new
+  run would use, chosen by the same selection as the agent-key callback
+  (`services/agent-credential-selection.ts`) from row metadata only; a skill that switches the agent
+  is not applied. A platform credential is never an account: without one of yours, Claude Code and
+  Codex run on SAM's AI proxy only when you chose SAM as the provider (`sam_ai_proxy`), otherwise
+  `none`. `sam_usage_get` groups profiles by `poolId` (one stored secret, including byte-identical
+  copies; the id is a digest that can change, so re-read it) and returns provider-reported windows
+  with `usedPercent`, `remainingPercent`, `resetsAt`, `observedAt`, `ageMinutes` and `freshness`
+  (`fresh`, `stale` after `connector.usageStaleAfterMinutes`, or `reset_since_sample`), plus per-pool
+  `exhausted` and `nextResetAt`. `usage.state` is `reported`, `never_reported` (unknown, not full),
+  `unavailable` (the read failed; retry) or, for the `sam_ai_proxy` pool, `sam_ai_budget` with
+  `samAiToday`. Credentials, ciphertext, credential ids and other members' accounts are never
+  returned.
+- `sam_chat_start` accepts `model` and `effort` for that chat only; the result echoes the requested
+  values as `agentOverrides`. An effort the resolved agent cannot run is refused before anything
+  starts. `sam_chats_list` rows carry `operational` (`taskStatus`, `executionStep`,
+  `parentTaskId`, `taskTerminal`, `labelMayBeStale`), `lastMessageAt` and `agentCompletedAt` beside
+  the index `status` label, and
+  `sam_tasks_list` rows carry `parentTaskId`, `executionStep` and `sessionId`.
+- To answer an agent, send its `interactionId` with an `optionId`, `formContent`, or
+  `decline: true`. A link request is accepted with `optionId: "accept"`. An attention question takes
+  its `markerId` and an `answer` instead. SAM generates the receipt metadata.
+
 ## Authentication
 
 ### `POST /api/auth/sign-in/social`
 
-Start GitHub OAuth flow. Redirects to GitHub for authorization.
+Start an OAuth sign-in (GitHub, Google or GitLab). Redirects to the provider for authorization.
 
 ### `POST /api/auth/sign-out`
 
@@ -124,6 +295,66 @@ End the current session.
 ### `GET /api/auth/session`
 
 Returns the current authenticated session and user info.
+
+### `POST /api/auth/email-otp/send-verification-otp`
+
+Email a six-digit sign-in code. Body: `{ "email": "...", "type": "sign-in" }`. Exists only when the
+deployment can send email. Always answers `200 { "success": true }`; a code is sent only to an
+existing account or the installer owner (see [Security](/docs/architecture/security/)). Returns
+`429` past the per-IP limit.
+
+### `POST /api/auth/sign-in/email-otp`
+
+Sign in with an emailed code. Body: `{ "email": "...", "otp": "123456" }`. Sets the session cookie.
+Limited per IP address. Other `/api/auth/email-otp/*` routes return `404`.
+
+### `GET /api/config/login-providers`
+
+Public. `{ "github": bool, "google": bool, "gitlab": bool, "email": bool }`: which sign-in options
+the login page offers.
+
+### `GET /api/config/platform-capabilities`
+
+Public. `{ "speechToText": bool, "textToSpeech": bool, "agentModelCalls": bool }`: which platform
+services this installation has, so the app hides controls that cannot work here. On Cloudflare it
+is computed from the Worker's bindings and settings with no D1 or KV read
+(`resolvePublicPlatformCapabilities()` in `apps/api/src/services/speech-backend.ts`, over
+`publicPlatformCapabilities()` in `apps/api/src/services/platform-capabilities.ts`). With the
+Workers AI binding present, every field is true; `textToSpeech` is also false when `TTS_ENABLED` is
+`"false"`. Only a runtime without the binding whose entry installed a speech backend (the self-host
+build's OpenAI-compatible speech endpoints, `apps/api/src/selfhost/speech/`) reads that backend's
+settings to answer `speechToText` and `textToSpeech`. The
+web app treats a missing field, a failed request or a pending answer as "available", so controls
+never flicker away while it loads.
+
+Routes that need a missing service answer `404` with
+`{ "error": "FEATURE_UNAVAILABLE", "message": "…", "details": { "feature": "<capability>" } }`
+(`errors.featureUnavailable()` in `apps/api/src/middleware/error.ts`): `POST /api/transcribe`,
+`POST /api/tts/synthesize` and `GET /api/agent-models/catalog` without the Workers AI binding
+(the two speech routes only when no speech backend is installed and configured either).
+Agent-facing model calls (`list_ai_models`, `run_ai_model`) answer with the non-retryable
+`not_available` code in that case.
+
+### `GET /api/config/instant-runtime`
+
+Public. `{ "enabled": bool }`: whether agents can run on Instant (Cloudflare Containers) here
+with no cloud account. True only when the runtime is on and its container binding exists
+(`isInstantRuntimeAvailable`). Onboarding asks for a cloud account only when this is false and
+the instance has no machines of its own.
+
+### First-run setup (`/api/setup/*`)
+
+The `POST` routes require `SETUP_TOKEN`; `GET /api/setup/status` is public. Every route returns
+`410 SETUP_CLOSED` once setup is complete, which includes any install with an active superadmin.
+
+- `GET /api/setup/status` — public. `{ completed, open, forced, tokenConfigured }`.
+- `POST /api/setup/verify` — body `{ token }`. Returns the integration `status` and
+  `signIn: { email, emailReady, ownerEmail }`; `emailReady` is `false` while Cloudflare is still
+  verifying the sending domain.
+- `POST /api/setup/complete` — body `{ token, config? }`. Needs a sign-in method: email sign-up
+  (installer owner set, email prepared and its sending domain verified), or an OAuth provider in
+  `config` or already configured. Setup never turns
+  agent email on; a superadmin does that from **Admin → Integrations**.
 
 ## Workspaces
 
@@ -157,7 +388,9 @@ Permanently stop a running workspace and delete any retained persistent-session 
 
 ### `POST /api/workspaces/:id/sleep`
 
-Checkpoint the workspace's agent HOME, harness identity, exact Git checkout, and repository work in progress, verify the snapshot, and put the session to sleep. Git state includes the saved `HEAD`, branch or detached state, canonical upstream metadata, clean local-only commits, working tree, and index. VM compute is stopped only after SAM re-verifies the durable manifest and every artifact the manifest still claims. A complete snapshot restores and validates that state; if the saved Git state cannot be recreated, wake reports explicit degraded recovery instead of success on a different commit. Sleep requires a complete final snapshot (`verifyAndBeginSleepTeardown` in `apps/api/src/services/session-sleep-execution.ts`). If the final checkpoint is degraded, or stops reporting progress and is recorded as degraded, the sleep request fails and the workspace stays awake. SAM then retries automatically, within the bounded sleep-failure budget (`SESSION_SLEEP_FAILURE_MAX_ATTEMPTS`, `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS`); after that an idle VM session may sleep on a Git recovery point instead ([SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot)). A session that already sleeps on an older degraded snapshot still wakes and reports the reduced restore state. Sending a follow-up in the same chat wakes the session during the seven-day retention window.
+Checkpoint the workspace's agent HOME, harness identity, exact Git checkout, and repository work in progress, verify the snapshot, and put the session to sleep. Git state includes the saved `HEAD`, branch or detached state, canonical upstream metadata, clean local-only commits, working tree, and index. VM compute is stopped only after SAM re-verifies the durable manifest and every artifact the manifest still claims. A complete snapshot restores and validates that state; if the saved Git state cannot be recreated, wake reports explicit degraded recovery instead of success on a different commit. Sleep requires a complete final snapshot (`verifyAndBeginSleepTeardown` in `apps/api/src/services/session-sleep-execution.ts`). If the final checkpoint is degraded, or stops reporting progress and is recorded as degraded, the sleep request fails and the workspace stays awake. SAM then retries automatically, within the bounded sleep-failure budget (`SESSION_SLEEP_FAILURE_MAX_ATTEMPTS`, `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS`); after that SAM releases the idle runtime anyway, sleeping on a verified Git recovery point when there is one and otherwise keeping only the transcript and successful backups ([SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot)). A session that already sleeps on an older degraded snapshot still wakes and reports the reduced restore state. Sending a follow-up in the same chat wakes the session during the seven-day retention window.
+
+This request, the chat's **Sleep** button (`POST /api/projects/:id/sessions/:sessionId/sleep`) and `sam chat sleep` are explicit sleeps, and an explicit sleep does not wait for the agent. If the agent is still in a turn, SAM first cancels it the way the chat's **Stop** button does: the agent process is stopped (SIGTERM, then SIGKILL if it does not exit) and restarted idle, and the turn ends as cancelled. The turn is not continued after wake. If the sleep then fails, the chat keeps a working agent (`endAgentTurnForRequiredSleep` in `apps/api/src/services/session-sleep-required-turn-end.ts`). If SAM cannot reach the agent, the request fails, and SAM keeps retrying the same sleep without waiting for the turn until it succeeds or the bounded fallback releases the runtime.
 
 ### `POST /api/workspaces/:id/restart`
 
@@ -225,6 +458,18 @@ List active agent sessions for a workspace.
 
 Stop a running agent session.
 
+## Linked work
+
+Project members can read context for an idea, chat, or library file:
+
+| Method | Path                                                 | Response         |
+| ------ | ---------------------------------------------------- | ---------------- |
+| GET    | `/api/projects/:projectId/ideas/:ideaId/links`       | `IdeaContext`    |
+| GET    | `/api/projects/:projectId/sessions/:sessionId/links` | `SessionContext` |
+| GET    | `/api/projects/:projectId/library/:fileId/links`     | `FileContext`    |
+
+Each context groups linked resources into capped lists with `items`, `total`, `truncated`, and `totalIsLowerBound`. The last field is true when a bounded PR read can only report a minimum count. Foreign and missing resources both return 404.
+
 ## Resource history
 
 Retained CPU, memory, I/O, and out-of-memory observations for VM-backed workspaces. Requires project access. See [Session Resource History](/docs/guides/session-resources/) for how to read the values.
@@ -250,7 +495,55 @@ The Resources drawer reads a whole chat session through two endpoints, both scop
 
 The index returns `{ sessionId, runs, chunks, totalChunkCount, omittedChunkCount, maxChunks, collection, runtime }`. `chunks` is ascending by start time and covers every workspace the session ran on (each wake is a new workspace); each carries its `summary` and a columnar per-minute `rollup` (`null` for chunks uploaded before rollups existed). `runs` groups chunks by workspace with that workspace's `reservation` (`cpuMillis`, `memoryMb`, or `null`). Past `WORKSPACE_RESOURCE_TIMELINE_MAX_CHUNKS` (1000) the oldest chunks are left out and counted in `omittedChunkCount`. When there are no chunks, `collection` explains why: `unsupported` (an Instant session), `expired` (samples passed retention; the summary remains), or `pending` (nothing uploaded yet). The chunk endpoint returns the same shape as `detail` above and `404`s for a chunk that belongs to another project or session.
 
-Agents read the same data with the `get_resource_history` MCP tool, which takes no `projectId` — the project comes from the verified token. With no arguments it returns the caller's own session; supplying any one of `sessionId`, `taskId`, or `workspaceId` replaces the caller's defaults entirely rather than narrowing within them.
+Agents read the same data with the `sessions_read` MCP tool and `{"method": "resource_history"}`, which takes no `projectId` — the project comes from the verified token. With no arguments it returns the caller's own session; supplying any one of `sessionId`, `taskId`, or `workspaceId` replaces the caller's defaults entirely rather than narrowing within them.
+
+### Live steering
+
+A message can carry a delivery intent: `queue` (the default) waits for the target's next turn,
+and `steer` adds it to the turn the target is running, without stopping it (see
+[Sending a message while the agent works](/docs/guides/chat-features/#sending-a-message-while-the-agent-works)).
+Steering needs durable prompt delivery.
+
+- `POST /api/projects/:id/sessions/:sessionId/prompt` accepts `"deliveryIntent": "steer"`. It
+  returns `409` when durable delivery is off and `400` with attachments, which travel only with a
+  queued prompt. The response echoes `deliveryIntent`.
+- The MCP tool `send_durable_message` takes `deliveryIntent` (`queue` or `steer`); `steer` is
+  accepted only with the `notify` and `deliver` classes. The message travels over the pair channel
+  either way (see [Agent messages over shared channels](#agent-messages-over-shared-channels)), and
+  its notice steers into a running turn through the managed subscription. Urgent classes make the
+  notice stop-and-deliver.
+- An event subscription with `requestedDelivery: "runtime_steer"` wakes its chat through the same
+  queue with the steer intent: a chat that is mid-turn on a steering runtime gets the batch in that
+  turn, and an idle, sleeping or non-steering chat gets an ordinary wake prompt. Like the other
+  prompt-delivery modes, it never matches the publisher's own channel publications.
+  `runtime_steer` is the default for `create_project_event_subscription`
+  (`DEFAULT_PROJECT_EVENT_REQUESTED_DELIVERY`) and for the notices of agent messages sent over a
+  pair channel; pass `existing_session_prompt` to wait for the running turn to end instead.
+
+A delivery ID belongs to one intent: reusing it with the other intent is rejected. Steers are a
+separate lane from queued prompts, so a steer is not held behind a queued prompt waiting for the
+turn to end, and steers for one chat are admitted one at a time, in order. Steering never wakes a
+sleeping chat. When the target cannot take the steer (no running turn, chat asleep, an agent or VM
+agent without steering, a runtime that changed), SAM converts it to an ordinary queued prompt and
+records why. A steer whose result is unknown, for example because the runtime restarted while it
+was in flight, becomes `ambiguous` and is never replayed. A steer the runtime took does not start a
+new prompt epoch, reset the turn's timeouts, or mark the chat idle.
+
+The chat socket broadcasts `mailbox.delivery_updated` with `promptMessageId` (the transcript row),
+`deliveryIntent`, `deliveryState`, and for steers `steerOutcome` (`steered` or `queued_fallback`)
+and `steerReason`. The transcript row of a message sent as a steer keeps `deliveryIntent: "steer"`
+in its `toolMetadata`, plus `steerOutcome` (`steered`, `queued_fallback`, `unconfirmed` or
+`failed`) and `steerReason` once known, so the label survives a reload.
+
+On the VM, `GET /workspaces/:workspaceId/agent-capabilities` advertises `steering` (`supported`, `version`, `lookup`,
+receipt `states`) when the VM agent can steer; older VM agents omit it and every steer to them
+falls back to the queue. The control plane calls
+`POST /workspaces/:workspaceId/agent-sessions/:sessionId/steer` with
+`{ protocolVersion, deliveryId, messageId, prompt }` and recovers a lost response from
+`GET .../steer-receipts/:deliveryId` instead of steering again. Each receipt is `accepted`,
+`in_flight`, `injected`, `not_consumed` or `ambiguous`; a repeated `deliveryId` with the same
+prompt returns its existing receipt, and with a different prompt returns `409`. The VM agent bounds
+one steering request to the adapter with `ACP_STEER_TIMEOUT` (default `20s`).
 
 ### Agent requests
 
@@ -259,16 +552,161 @@ The permission requests, questions, and links an agent puts in a chat while it w
 | Method | Endpoint                                                                   | Purpose                                            |
 | ------ | -------------------------------------------------------------------------- | -------------------------------------------------- |
 | GET    | `/api/projects/:id/sessions/:sessionId/interactions`                       | Pending and recently settled requests for the chat |
-| GET    | `/api/projects/:id/sessions/:sessionId/interactions/:interactionId`        | One request's full detail (session creator only)   |
-| POST   | `/api/projects/:id/sessions/:sessionId/interactions/:interactionId/answer` | Answer a pending request (session creator only)    |
+| GET    | `/api/projects/:id/sessions/:sessionId/interactions/:interactionId`        | One request's full detail (session writers only)   |
+| POST   | `/api/projects/:id/sessions/:sessionId/interactions/:interactionId/answer` | Answer a pending request (session writers only)    |
 
-The list returns `{ pending, settled, cursor }` and needs `task:read` on the project. Each item has the request's `interactionId`, `kind` (`permission`, `form`, or `url`), `state`, `createdAt`, and `deadlineAt`; for other project members that is all a pending item carries, and `settled` is empty — they never see the question or the answer. The detail is for the session creator only, decrypted on request, and served with `Cache-Control: private, no-store`. Answering needs `task:write`, must come from the SAM web app's origin (the `Origin` header must match), and sends an `answerKey` with a `decision`: `{ kind: "selected_option", optionId }` for a permission, `{ kind: "accepted", content }` for a question (`content` holds the form's values) or `{ kind: "accepted" }` for a link, or `{ kind: "declined" }`. Each decision also carries an `answerHash`: the SHA-256 hex of the option ID, of the form values as key-sorted JSON, or of the word `accepted` or `declined`. Sending the same `answerKey` and decision again is safe; answering a request that was already answered or has expired returns `409`.
+The list returns `{ pending, settled, cursor }` and needs `task:read` on the project. Each item has the request's `interactionId`, `kind` (`permission`, `form`, or `url`), `state`, `createdAt`, and `deadlineAt`; for other project members that is all a pending item carries, and `settled` is empty — they never see the question or the answer. A _session writer_ is the session's creator or a member it is [shared with](#shared-chat-access). The detail is for session writers only, decrypted on request, and served with `Cache-Control: private, no-store`. Answering needs `task:write`, must come from the SAM web app's origin (the `Origin` header must match), and sends an `answerKey` with a `decision`: `{ kind: "selected_option", optionId }` for a permission, `{ kind: "accepted", content }` for a question (`content` holds the form's values) or `{ kind: "accepted" }` for a link, or `{ kind: "declined" }`. Each decision also carries an `answerHash`: the SHA-256 hex of the option ID, of the form values as key-sorted JSON, or of the word `accepted` or `declined`. Sending the same `answerKey` and decision again is safe; answering a request that was already answered or has expired returns `409`.
+
+### Inbox
+
+Everything agents are waiting on from you, one item per ask, across projects
+(`apps/api/src/routes/inbox.ts`, operations in `packages/operations/src/inbox-*.ts`). The list reads
+each ask where it is stored: inbox asks (questions agents ask with `request_human_input`, and the
+reviews, results and tasks they file), permission requests from the chat index (`session_summaries`),
+[secret requests](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret) and Operations
+approvals. Nothing is copied.
+
+| Method | Endpoint                                            | Purpose                                        |
+| ------ | --------------------------------------------------- | ---------------------------------------------- |
+| GET    | `/api/inbox`                                        | Your items across every project you belong to  |
+| GET    | `/api/inbox/count`                                  | `{ needsYou, blocking }`: items you can act on |
+| GET    | `/api/projects/:projectId/inbox`                    | One project's items (same query parameters)    |
+| GET    | `/api/projects/:projectId/inbox/count`              | One project's counts                           |
+| GET    | `/api/projects/:projectId/inbox/items/:ref`         | One item; `?context=true` adds the transcript  |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/answer`  | Answer it through the path its store uses      |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/archive` | Close it (see below for what the agent hears)  |
+
+A human task (`ask:<id>` of kind `task`) adds its own routes beside these
+(`apps/api/src/routes/inbox-tasks.ts`, operations in `packages/operations/src/inbox-task-core.ts`).
+`GET …/items/:ref` returns it with `task`: steps, assignee, who took it, activity and discussion.
+Each write wakes the chats watching the task, with these exceptions
+([Tasks for people](/docs/guides/inbox/#tasks-for-people)): step ticks wake only a chat that asked
+for them (`wakeOnSteps`); a comment wakes only the chat that assigned the task, and only when its
+author is the assignee, the member who took it, or a writer of that chat; a chat that attached to the
+task is woken by lifecycle changes, not comments.
+
+| Method | Endpoint                                                 | Purpose                                            |
+| ------ | -------------------------------------------------------- | -------------------------------------------------- |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/steps/:index` | `{ done }`: tick or untick a step                  |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/comments`     | `{ body, threadId?, mentions? }`: comment or reply |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/claim`        | Take a team task                                   |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/reassign`     | `{ assigneeUserId }` or `{ team: true }`           |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/done`         | `{ note? }`: mark it done                          |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/reopen`       | Reopen a done or archived task                     |
+
+The list takes `filter` (`needs_you` by default: open items you can act on; `blocking`, `tasks`,
+`reviews`, or `archived`), `limit` (default `inbox.listPageSize`, at most `inbox.listPageMax`) and
+`cursor`, and returns `{ items, nextCursor, skipped }`. Items with a live deadline (permission
+requests, asks with a due time) come first, then the ones an agent is stopped on, then the rest,
+oldest first; one chat's items stay together (`stackKey`). `skipped` counts stored rows on the page
+that could not be read. You see an ask assigned to you (or a team ask; one another member took
+is listed but is not counted as needing you), questions in
+chats you created, secret requests your agents made (and, when the member whose agent asked
+cannot supply secrets, the requests of members who cannot, if you can), and, as an active
+superadmin, Operations approvals in projects you belong to. Opening, answering or archiving an
+item by `ref` follows the same rules. A question asked before questions became inbox asks is listed
+from the chat index (`attention:` ref, the newest one per chat) until it is answered or expires.
+
+Each item has a `ref` naming its store (`ask:<id>`, `attention:<sessionId>:<markerId>`,
+`secret:<id>`, `approval:<id>`), `kind` (`question`, `permission`, `form`, `url`, `secret`,
+`approval`, `review`, `result`, `task`, `error`), project and chat, `title` and `body` (agent text, untrusted),
+`blocking`, `agentState` (`waiting`, `working`, `finished`, `not_started`, `unknown`), `status`,
+`createdAt`, `updatedAt`, `failureCount` (error items only, otherwise `null`), `expiresAt`, `dueAt`,
+`links`, `canAct`, and `answerSpec`, which says what an answer
+looks like: `options` or `text` (`{ "answer": "…" }`), `interaction` (`{ "optionId": "…" }`,
+`{ "decline": true }` or `{ "formContent": {…} }`), `secret`
+(`{ "secret": { "value": "…", "replaceExisting": true, "expectedExistingVersion": "…" } }` or
+`{ "decline": true }`), `approval` (`{ "decision": "approve" | "deny", "note": "…" }`) or
+`acknowledge` (`{}` or `{ "answer": "comment" }`), or `actions` (`{ "action": "retry" | "wake" |
+"resume" }`, see below). Answers go through the existing path for each
+store: the question answer (the same one the chat card uses, so two answers meet at one
+compare-and-set and the loser gets `409`), the permission answer, secret fulfil/decline, and the
+approval decision.
+Secret values and Operations approval decisions are accepted only from the SAM app, never through
+an app connected to the Connector (`403`). Answering an item filed from a chat needs the same
+right to wake that chat's agent as answering in the chat. Archiving wakes nothing: an inbox ask
+needs only that it is yours to act on, and a question asked before questions moved to inbox asks
+needs the right to write in its chat.
+
+Archive closes an item for every kind. A question, review or result becomes `archived` (a
+question asked before questions moved to inbox asks is resolved with reason `archived`) and the
+agent is not told: it stays where it is until you answer something or write in its chat. Archiving
+a question also holds SAM's automatic check-ins off that chat until someone writes in it, for at
+most `inbox.archiveCheckinHoldHours`. A permission or approval is denied and a secret request is
+declined, which the agent does hear. Archiving a task tells the chats watching it. Both writes
+return `{ ref, outcome, agentNotified }`; for an answer or an archived task, `agentNotified: false`
+means the notice was not queued yet, and SAM retries it for `inbox.noticeRetryMinutes`. The
+exception is **Got it** on a result (an empty `acknowledge` answer): it closes the item without
+telling the agent, by design, so nothing is retried. A non-empty reply to a review or result whose
+agent has finished returns `400`, because it could not be delivered. Writes must come from the
+app's own origin with
+`Content-Type: application/json`, like the other answer routes. A missing item and one in another
+project both return `404`; an item that is already closed returns `409`, and one you cannot act
+on returns `403`. The transcript context is returned only to a member who can read the source chat.
+
+#### System error items
+
+SAM files an `error` item itself when something fails that the person should know about; it is
+the only kind SAM files without an agent asking (`packages/operations/src/inbox-error-core.ts`,
+`apps/api/src/services/inbox/`). Each failing thing has one item, addressed to the person who owns
+the task, chat or automation:
+
+| Failure                                                                                         | Found by                                                                                             | Fix offered                                           |
+| ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| A task couldn't start, or stopped before it finished                                            | five-minute cron scan of failed tasks (`system-errors.ts`), and inline in the VM-agent task callback | `retry` (the project owner's task retry), `open_chat` |
+| An automation failed `inbox.automationFailureThreshold` runs in a row, or was paused after them | five-minute cron scan of failed runs (`automation-errors.ts`)                                        | `resume` when paused                                  |
+| A chat slept without a fresh snapshot, so unsaved work may be lost                              | the sleep fallback (`session-sleep-fallback.ts`)                                                     | `open_chat`                                           |
+| Your answer to a permission, form or link request was never confirmed delivered                 | the interaction store (`interaction-store-attention.ts`)                                             | `open_chat`                                           |
+| A chat could not be woken to take a message waiting for it                                      | ProjectData's wake failure (`wake-failure.ts`, `project-data-ports/inbox-errors.ts`)                 | `wake` (VM chats), `open_chat`                        |
+| Your inbox answer never reached the agent after the inbox sweep's retries                       | the inbox sweep (`system-errors.ts:fileUndeliveredAskAnswers`)                                       | `open_chat`                                           |
+
+Normal endings never file one: a cancellation, a stop by you or a parent agent, an expected
+question expiry, completion, a superseded wake, an archived chat, or a status you set yourself. A
+task waiting for a provider usage limit is not failed and files nothing; once the wait is blocked,
+it also closes the chat's failed-wake item (`answer_json.resolution` `superseded`,
+`provider-limit-attention.ts`). A repeat failure of
+the same thing updates the open item (`failureCount`, title, body, `updatedAt`) instead of filing
+another. When the thing recovers (a retry starts, the task is run again, the automation runs
+cleanly or is resumed, the chat wakes, or you write in the chat) the item closes by itself
+(`status` `done`). Titles and bodies are SAM's own
+sentences, never the raw error. `answerSpec` is `{ type: "actions", actions: [{ id, label }] }`,
+first action primary; `open_chat` is handled by the app (open the item's chat) and the server
+refuses it. Answering `{ "action": "retry" }` or `{ "action": "resume" }` returns `outcome`
+`retried` or `resumed` and closes the item; `{ "action": "wake" }` returns `wake_requested` and
+the item closes when the chat wakes. A refused fix returns `409` and leaves it open.
+Archiving an error item tells no agent.
+
+### Shared chat access
+
+A chat's creator can give another project member the same controls in that one chat (see [Share a chat](/docs/guides/collaboration/#share-a-chat)). Every route that drives a chat — `POST .../prompt`, cancel, stop, archive, `POST .../comments/:threadId/send`, idle reset, answering agent requests, and the two below — accepts the creator or an active grantee, and returns `403` to other members. For a grantee, the server also requires that the grantee and the creator are both still active members with `task:write`; nothing else is checked. Grantee prompts must use durable delivery (`409` when it is off); their attachments must be the grantee's own uploads (`400` otherwise) and are copied only into the chat's workspace. Work still resolves resources and credentials as the session's creator; the grantee is recorded as the sender.
+
+| Method | Endpoint                                                                      | Purpose                                               |
+| ------ | ----------------------------------------------------------------------------- | ----------------------------------------------------- |
+| GET    | `/api/projects/:id/sessions/:sessionId/access`                                | Who can drive the chat (any member with `task:read`)  |
+| POST   | `/api/projects/:id/sessions/:sessionId/access/grants`                         | Share the chat with a member for a set time, or renew |
+| DELETE | `/api/projects/:id/sessions/:sessionId/access/grants/:userId`                 | Revoke a member's access now, or leave                |
+| POST   | `/api/projects/:id/sessions/:sessionId/sleep`                                 | Put the chat to sleep (session writers)               |
+| POST   | `/api/projects/:id/sessions/:sessionId/agent-sessions/:agentSessionId/resume` | Resume the chat's agent (session writers)             |
+
+`GET .../access` and `GET /api/projects/:id/sessions/:sessionId` return `viewerAccess` (`owner`, `grantee`, or `reader`) plus the owner, the active grants, `undelivered` and `serverTime` (the server's clock, so clients can show the time left). Each grant has `expiresAt` and `durationMinutes`. `undelivered` lists, newest first (at most 100), the messages cancelled before delivery because their sender's access ended, as `{ messageId, reason }` with `reason` `sender_access_revoked` or `sender_access_expired`; the message row carries the same label, and the list lets a client label a row it cached before the cancellation. `POST .../access/grants` takes `{ "userId": "...", "durationMinutes": 30, "acknowledgeSharedCredentials": true }`. `durationMinutes` must be `5`, `10`, `30` or `60`; there is no default. The acknowledgment is required because the chat runs on the creator's accounts. It returns `201` with the new grant. For someone who already has access it returns `200`: `renewed: true` when the creator renews (a new period from now), and `renewed: false` with nothing changed when anyone else shares again. A grant passed on by a grantee ends no later than theirs. The `access` summary in either response leaves out `undelivered`, so a client keeps the list from its last read. It returns `400` without a valid duration or the acknowledgment, for someone who is not an active member, the creator, or yourself, or when the chat has ended (only running or sleeping chats can be shared), and `409` above `collaboration.sessionAccessMaxGrants`. Access ends at `expiresAt` on every route above and before a queued prompt is delivered; prompts still queued then are cancelled. `DELETE` removes the grant and every grant that member issued, fails their prompts that have not reached the agent, and returns `{ revokedGrantIds, cancelledDeliveryIds, access }` (with `access.undelivered`). Anyone can delete their own grant.
+
+Comment threads and replies accept an optional `mentions: [{ "userId": "..." }]`. The server keeps active project members only, stores each person's display name at the time, and returns `400` above `collaboration.commentMentionsMax`.
+
+`GET /api/projects/:id/sessions/:sessionId/attention/:markerId` returns the full saved question an agent asked with `request_human_input`, for the question card in the conversation (`apps/api/src/routes/chat-attention.ts`): the request (its text, choices, `category` (`decision`, `clarification`, `approval`, `error_help`, or `null`), whether it is resolved or expired, and `canAnswer`) and the session's id and topic. It needs `task:read`. `canAnswer` is true only for the chat's owner, or a teammate it is shared with, while the question is open. Add `?context=true` for the messages before it (`messages`): `collaboration.commentContextMessages` of them by default, or `limit`, capped by the session message limit; and for what the agent did since asking (`since`: the messages after it, `activityCount` tool runs, and `truncated` when more happened than the read covers). A question from another chat, or one that isn't an agent question, returns `404`. Answer it with `POST .../attention/:markerId/resolve` and `{ "answer": "…" }`: `200` with `{ resolved: true, alreadyResolved, answer }` once it reached the agent (or the same answer already had), `202` with `{ inFlight: true }` while the answer is still being delivered (SAM retries it), `409` when a different answer is being delivered or the question is closed, and `400` for an answer outside the choices. `:markerId` is the question's inbox ask id, the id `request_human_input` returns (`apps/api/src/services/inbox/question-asks.ts`); a question asked before questions became inbox asks is read and answered by its attention marker id until it is answered or expires.
+
+`GET /api/projects/:id/secret-requests/:requestId` returns one agent [secret request](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret) for the card in the conversation (`apps/api/src/routes/projects/secret-requests.ts`): the variable name, the agent's reason, the requested expiry, its status (`pending`, `fulfilled`, `declined`, `expired`), who answered it, whether a project variable with that name already exists, and `canResolve`. It needs `secret:read`, and never includes a value. `POST .../fulfill` with `{ "value": "…", "replaceExisting": true, "expectedExistingVersion": "…" }` stores the value as an encrypted project secret and wakes the requesting agent with a notice that names the variable only; it needs `secret:write`, and `replaceExisting` is required when the name already exists (`409` otherwise). `expectedExistingVersion` (the `existing.version` the person confirmed, an opaque fingerprint) is required with it; if it is missing, or the stored value has changed since (or changes before the write), the request returns `409` and stays open. `POST .../decline` closes the request. Both return `{ request, agentNotified }`; `agentNotified: false` means the agent's notice could not be queued yet (SAM retries it for `secrets.notifyRetryMinutes`, and the card asks you to tell the agent). Both are writes from the app's own browser flow: they require an `Origin` header equal to the app origin (`https://app.<BASE_DOMAIN>`; any other or missing origin returns `403`) and `Content-Type: application/json` (`415` otherwise), so another site, including a workspace port on the same domain, cannot submit one on your behalf. An empty value or one over the runtime variable size limit returns `400`, as does a project already at its variable limit; the request stays open. A request that was already answered returns `409`; one past its deadline returns `410`. A request from another project returns `404`.
+
+`GET /api/projects/:id/sessions/:sessionId/comments/:threadId/context` returns one comment thread with the chat around the message it is on, for [reading a comment in its conversation](/docs/guides/collaboration/#read-a-comment-in-its-conversation): `{ thread, session: { id, topic }, viewerAccess, anchor: { messageId, found }, messages, hasMoreBefore, hasMoreAfter }`. It needs `task:read`. `messages` is in transcript order and holds the whole commented message (an agent reply is stored as many streamed rows, and a comment can be on any of them) plus `collaboration.commentContextMessages` messages each side, reading at most `collaboration.commentContextMaxRows` rows each side. Page further with `GET .../sessions/:sessionId/messages` and `before`/`after` cursors from the first and last rows. When the commented message is no longer in the chat, `anchor.found` is `false` and `messages` is empty. A thread from another chat or another project returns `404`.
 
 ## Nodes
 
 ### `GET /api/nodes`
 
 List all nodes for the authenticated user.
+
+### `GET /api/nodes/resource-usage`
+
+CPU and memory for each of the caller's own workspaces on the caller's own nodes, for the Nodes page (`apps/api/src/services/node-resource-usage.ts`). Returns `{ windowMinutes, windowStart, windowEnd, bucketMs, historyOmittedCount, historyTruncatedCount, workspacesOmitted, workspaces }`. Each workspace has `workspaceId`, `nodeId`, `projectId`, `projectName`, `chatSessionId`, `title` (the chat topic, then the task title, then the workspace name), `ownerUserId`, `ownerName`, `isMine`, `status`, `holdsReservation` (true while running, creating or recovering), `createdAt`, `reservation` (`{ cpuMillis, memoryMb, diskMb, exclusiveNode }` or `null`) and `series`: per-`bucketMs` `{ start, cpuMillis, memoryBytes }` from the workspace's resource history over the last `windowMinutes` (admin setting `nodes.usageWindowMinutes`, default 60). Project fields are returned only for projects the caller is an active member of; otherwise `projectId`, `projectName` and `chatSessionId` are `null` and `title` is a neutral `Workspace <id>` label. History arrives in batches, so `historyEndsAt` says where it currently stops. At most `nodes.usageMaxWorkspaces` (default 500) workspaces are listed, running and most recently changed first; `workspacesOmitted` says whether more exist. History is read only for workspaces that are still running or changed recently, at most `nodes.usageMaxHistoryWorkspaces` (default 150) per request, running first and each machine's newest before any machine's second; `historyOmittedCount` and each workspace's `historyOmitted` say what was left out. Each read is bounded by time (`nodes.usageChunkLookbackMinutes` before the window, default 60) and by `nodes.usageMaxChunksPerWorkspace` (default 48) chunks per workspace, newest first; `historyTruncatedCount` and `historyTruncated` say which workspaces lost their oldest minutes. Live per-workspace memory is in each node's `lastMetrics.workspaceMemory` from `GET /api/nodes`.
 
 ### `GET /api/nodes/:id`
 
@@ -282,7 +720,94 @@ Stop a running node. All workspaces on the node must be stopped first.
 
 Delete a node and clean up DNS records and Hetzner resources.
 
+### `POST /api/nodes/:id/manual-deletion`
+
+Remove a node SAM failed to delete, after you deleted its server at the provider yourself. Body:
+`{ "confirmed": true }`. The node must be yours, in `destroying`, `deleting` or `error`, and not a
+machine you enrolled yourself. Returns `403` for a node on SAM's own cloud account or a container
+runtime, `409` if the provider still reports the server, and `503` if the provider lookup failed
+temporarily. The lookup cannot prove the server is gone (a missing or rejected credential cannot see
+it), so the caller attests that. On success SAM removes the node's records as `DELETE` does; it
+never deletes anything at the provider.
+
 ## Credentials
+
+### Guided agent account sign-in
+
+`POST /api/agent-credential-setup-sessions` starts browser-based subscription sign-in
+for a personal default. Its optional JSON body accepts `agentType` (`claude-code`
+or `openai-codex`, default `openai-codex`).
+
+`POST /api/agent-credential-setup-sessions/project` uses the same sign-in flow and
+requires `projectId` in the JSON body, alongside optional `agentType`. It saves an
+account pinned only to that project and requires `task:write` (pinning your own
+account affects only your own runs), checked at creation and again before the captured
+credential is saved. The personal endpoint rejects
+`projectId`; project creation must never fall back to personal creation. Invalid
+JSON or invalid fields return `400`.
+
+The response includes `id`, `status`, `agentType`, `expiresAt`, `verificationUrl`, and
+`userCode`. A new session returns `201`; an existing active session for the same
+agent and destination is returned with `200`. An active session in a different
+destination returns `409`: finish or cancel it before starting another. Busy setup
+capacity returns `202` with `status: "no_capacity"`.
+
+Use `GET /api/agent-credential-setup-sessions/config` to check availability. It
+advertises `scopes: ["user", "project"]`; clients require explicit project support
+before offering guided project login. Older APIs return `404` for the dedicated
+project creation endpoint, so deployment skew or rollback cannot silently create a
+personal session. Use
+`GET /api/agent-credential-setup-sessions/:id` to poll,
+`POST /api/agent-credential-setup-sessions/:id/verification-code` with `{ code }` for
+Claude's browser-displayed code, and
+`POST /api/agent-credential-setup-sessions/:id/cancel` to cancel. Setup sessions belong
+to the authenticated user; captured credentials are saved encrypted on the server
+and never returned to the browser.
+
+### Account pins: projects and profiles
+
+Pins choose which of **your own** agent accounts runs your work. They never affect
+another member's runs. Resolution for an agent credential is profile pin → project
+pin → your default → SAM platform (`explainResolution` in
+`packages/shared/src/composable-credentials/resolver.ts`). A paused pin, or one whose
+account is paused, stops the run instead of falling back.
+
+- `POST /api/cc/attachments` with `{ configurationId, projectId }` pins one of your
+  accounts to a project, replacing your previous pin for that agent. It requires
+  `task:write` in the project. The project's agent credential routes
+  (`PUT /api/projects/:id/credentials`, `DELETE /api/projects/:id/credentials/:agentType/:credentialKind`)
+  use the same permission.
+- `POST /api/cc/attachments/default` with `{ configurationId }` makes one of your
+  agent accounts your default for its agent (`makeAgentAccountDefault` in
+  `apps/api/src/services/composable-credentials/make-default.ts`). Projects pinned to an
+  account keep it, and the previous default stays connected. Cloud accounts are refused
+  (`400`, "Only agent accounts can be made the default here"), and so is a paused account
+  (`400`, "This account is paused").
+- `GET /api/cc/profile-attachments` lists your profile pins with profile and project
+  names.
+- `GET /api/cc/profile-attachments/profiles?agentType=` lists the profiles you can pin
+  to: your own global profiles, and project profiles in projects where you have
+  `task:write`. The list is capped by the admin setting `chat.profilePinCandidateLimit`
+  (default 500) and returns `truncated` and `limit`.
+- `POST /api/cc/profile-attachments` with `{ configurationId, profileId }` pins an
+  account to a profile, replacing your previous pin for that profile and agent. The
+  account must be yours, active, and for the profile's agent; a missing profile and one
+  you cannot use both return `404`.
+- `DELETE /api/cc/profile-attachments/:id` removes one of your pins.
+
+A pin applies only when the run starts the profile's agent: a skill or task that
+switches agents skips it. Removing a member from a project deletes their pins on that
+project's profiles; the offboarding preview reports `personalProfilePinCount`.
+
+`GET /api/projects/:projectId/sessions/:sessionId/agent-credential` reports which
+account a chat's agent ran on: `credentialSource` (who owns it), `credentialScope`
+(`profile`, `project`, `user` or `platform`), and `accountName`, which is returned only
+to the person who ran the session. Its `runtime` object is the configuration the session
+froze when it started (`agent_sessions.runtime_contract_json`): `model` (null means the
+agent's default), `effort`, `permissionMode` and `opencodeProvider`, plus `skillName`,
+the skill's current name (looked up live, so a renamed skill shows its new name; a
+personal skill's name is returned only to the person who ran the session). `runtime` is
+null for sessions started before that record existed.
 
 ### `POST /api/credentials`
 
@@ -313,13 +838,17 @@ Latest provider usage windows for the authenticated user's personal credentials,
 `cc_credentials:<id>` references), `level` (`ok`, `warning`, `critical`, `rejected`) and its
 `windows` (`windowType`, `utilizationPercent`, `windowMinutes`, `resetsAt`, `observedAt`, `source`).
 Rows come from `credential_limit_windows`; the response is capped by `CREDENTIAL_LIMIT_READ_MAX_ROWS`.
+A window whose `resetsAt` passed after its latest sample is returned as `utilizationPercent: 0`,
+`level: "ok"`, `status: "allowed"` with `resetElapsed: true` and the original `resetsAt`
+(`credentialLimitWindowAsOf` in `packages/shared/src/credential-limits.ts`); both limit routes and the
+MCP tool apply this.
 
 ### `GET /api/projects/:id/credential-limits`
 
 Usage windows visible to the caller inside a project: the caller's own credentials plus project-
 and platform-shared ones, never another member's personal credential. Requires `project:read`.
 Optional `agentSessionId` narrows the result to the credential that agent session is attributed to,
-resolved server-side from `agent_sessions`. The MCP tool `get_credential_limits` exposes the same
+resolved server-side from `agent_sessions`. The MCP tool `workspace_read` method `credential_limits` exposes the same
 view to agents (`scope: "session" | "project"`). `credentialId` is filled in for the caller's own
 credentials; a shared credential owned by another member whose reference is longer than 71 bytes
 comes back with a `sha256:` digest as `credentialReference` and `credentialId: null`, with or
@@ -399,8 +928,9 @@ credentials.
 
 ### `PATCH /api/capacity-pools/defaults`
 
-Update the authenticated user's owned default-pool policy, candidate statuses, or provider-native
-`catalogAdditions`. This endpoint does not mutate project or installation fallback pools.
+Update the authenticated user's owned default-pool policy, candidate statuses, provider-native
+`catalogAdditions`, or provider order (`sourceOrder`). This endpoint does not mutate project or
+installation fallback pools.
 
 `catalogAdditions` reactivates a currently available provider-native offering from the same
 credential-scoped catalog used by reconciliation. It identifies the active source plus concrete
@@ -416,6 +946,23 @@ provider/location/instance type; it does not accept secret material:
       "providerInstanceType": "cpx62",
       "providerInstanceSku": null
     }
+  ]
+}
+```
+
+`sourceOrder` sets the pool's provider order: capacity source ids, most preferred first, at most 32.
+New VMs are ranked by it; an existing node with room is still reused first. Sources not listed rank
+after listed ones. `null` or `[]` clears the order. Every id must be a capacity source that serves
+this pool, otherwise the request fails with `400` and `details.missingSourceIds` lists the unknown
+ids. Changing only the order does not bump the pool revision, so existing nodes stay reusable.
+If another edit changed the order after this request read it, the request fails with `409` and
+changes nothing.
+
+```json
+{
+  "sourceOrder": [
+    "cap-source-default:user:gcp-credential-id",
+    "cap-source-default:user:hetzner-credential-id"
   ]
 }
 ```
@@ -437,8 +984,9 @@ context. Project-scoped metadata comes from active project compute credentials. 
 
 ### `PATCH /api/projects/:id/capacity-pools/defaults`
 
-Update only the project-owned default-pool policy, candidate statuses, or provider-native
-`catalogAdditions`. Requires project `secret:write`.
+Update only the project-owned default-pool policy, candidate statuses, provider-native
+`catalogAdditions`, or `sourceOrder` (same shape and `missingSourceIds` error as the user route).
+Requires project `secret:write`.
 
 ### `GET /api/admin/capacity-pools/defaults`
 
@@ -452,8 +1000,9 @@ Superadmin only.
 
 ### `PATCH /api/admin/capacity-pools/defaults`
 
-Update only the installation-owned default-pool policy, candidate statuses, or provider-native
-`catalogAdditions`. Superadmin only.
+Update only the installation-owned default-pool policy, candidate statuses, provider-native
+`catalogAdditions`, or `sourceOrder` (same shape and `missingSourceIds` error as the user route).
+Superadmin only.
 
 ## GitHub
 
@@ -481,7 +1030,210 @@ Create a new project linked to a GitHub repository.
 
 ### `GET /api/projects/:id`
 
-Get project details.
+Get project details. `recentSessions` and `recentActivity` are empty unless you ask for them with
+`?include=recent` (`apps/api/src/routes/projects/project-detail.ts`); that read is bounded by the
+admin setting `performance.projectRecentTimeoutMs`.
+
+### `GET /api/projects/:projectId/overview`
+
+The Project Overview's one read (`projectOverviewGet`, `packages/operations/src/project-overview.ts`).
+Returns `{ projectId, running: { items, total }, recent: { ideas, mergedPullRequests }, brief, unavailable, generatedAt }`:
+
+- `running.items`: awake chats whose task is queued, delegated or in progress and that are starting,
+  mid-turn, or paused on an open question, newest activity first. Each has `sessionId`, `taskId`,
+  `topic`, `state` (`starting`, `working` or `waiting`), `waitingOnViewer`, `startedAt`,
+  `lastActivityAt` and `profile` (`{ id, name }` or null). `running.total` counts every running chat.
+- `recent.ideas`: the most recently updated ideas, open or closed, in the Ideas list's item shape.
+- `recent.mergedPullRequests`: `{ number, url, title, repository, mergedAt }`, newest merge first.
+- `brief`: the generated brief (`readProjectBrief`, `packages/operations/src/project-brief-read.ts`)
+  or null. `{ sentences: [{ parts: [{ text } | { ref: { kind, id, label, url? } }] }], generatedAt,
+stale, refreshing }`. `kind` is `ask`, `chat`, `automation`, `account`, `pullRequest` or `idea`;
+  clients build links from `kind` and `id` (a pull request carries its stored https `url`). Claims
+  about items that have closed since are already removed.
+- `unavailable`: sections whose read failed this time (`running`, `ideas`, `pullRequests`,
+  `brief`); they come back empty rather than failing the whole response.
+
+After responding, the route checks in the background whether the brief needs rewriting
+(`refreshProjectBriefIfDue`, `apps/api/src/services/project-brief/refresh.ts`); the response never
+waits for the model.
+
+Optional query `runningLimit` and `recentLimit` (defaults 5 and 3, at most 20). Requires project
+membership.
+
+### `GET /api/projects/:projectId/tasks/:taskId/receipt`
+
+The Run receipt for one task (`runReceipt`, `packages/operations/src/insights-receipt.ts`; Connector
+operation `sam_run_receipt`). Everything is derived when you ask, from records SAM already keeps:
+
+- `phases`: `{ key, durationMs }` for `machine` (task created until its workspace was placed),
+  `setup` (placed until the agent started), `agent`, `waiting` (the agent's open questions and asks,
+  overlaps counted once) and `ci` (from the agent's last message until the pull request's last
+  check finished). `durationMs` is null when SAM has no record to measure the phase from.
+- `outcome`: `pullRequest` (`{ number, url, title, repository, state, mergedAt }` or null), `checks`
+  (state on the latest head, or null), `ciFirstTry` (`passed`, `failed` or `pending` for the pull
+  request's opening commit, by the Insights · Flow rule `firstTryVerdictSql`; `not_recorded` without
+  a pull request or when SAM did not see it from its first commit) and `terminalReason`.
+- `account`: `agentType`, `credentialSource`, `credentialScope`, and `accountName`, which is only
+  filled in for the person who ran the session.
+- `resources`: peak memory and CPU from resource history, with the memory and CPU the run
+  requested. `measured` is false when no history was recorded (Instant runs record none).
+- `toolCalls`: `{ total, byKind, scanLimited }`, or null when the chat was archived or the read
+  failed. `scanLimited` means the counts are a floor.
+- `tokens`: `{ state: "not_reported" }` when nothing measured the run (SAM never estimates token
+  use), else `{ state: "reported", source, models, total, spend, limited }`
+  (`packages/shared/src/types/insights-run-usage.ts`). `source` is `ai_proxy` when SAM's AI proxy
+  measured the run's calls, else `harness`. Each model carries `input` (excluding cache), `output`,
+  `cacheRead`, `cacheWrite` and `reasoning` (null when not reported apart from output); `model` is
+  null when the agent did not name it. `spend` is `estimate` (USD from SAM's model prices) only for
+  an API-key account, `not_applicable` for subscription and platform accounts, `unknown_account`
+  when the account could not be identified, and `private` for another member's personal key.
+  Tokens are read for the task's chat session, so tasks sharing a chat share its totals. `limited` means the totals are a
+  floor (`insights.receiptTokenRowsMax`).
+- `slowedDown`: up to three items, largest delay first. A machine wait or setup is listed only when
+  it took at least `insights.receiptSlowFactorPercent` of the usual duration for recent runs of the
+  same skill (or profile) in the project.
+- `unavailable`: parts whose read failed this time (`outcome`, `toolCalls`, `comparison`,
+  `account`, `tokens`); the rest of the receipt is still returned.
+
+Requires project membership. A task in another project and a missing task both return `404`. The
+admin settings under `insights.receipt*` bound every read.
+
+### `GET /api/projects/:projectId/insights/flow`
+
+Insights · Flow for one project (`projectFlow`, `packages/operations/src/insights-flow.ts`). Query
+`range` is `7d`, `30d` or `90d` (default `30d`; anything else is `400`). Requires project
+membership. Returns `ProjectFlowResponse` (`packages/shared/src/types/insights-flow.ts`):
+`{ projectId, range, since, until, tiles, merged, runs, stopReasons, flakyChecks, waitingIdeas, topBlocker, unavailable, generatedAt }`.
+
+- `tiles.ideaToMerged`, `tiles.waitingOnPerson`: `{ medianMs, previousMedianMs, count }` (the
+  former also has `sampled: { ideas, cap, truncated }`).
+- `tiles.ciFirstTry`, `tiles.rework`: `{ count, of, rate, previousRate }`, plus `recorded`
+  (pull requests seen from their first commit) and `windowDays` respectively. A `null` rate means
+  there is nothing to measure, never zero.
+- `merged`: `{ count, previous }`. `runs`: `{ bucket: 'day' | 'week', buckets: [{ start, merged, closed, failed }], other: { stopped, prOpen, noPullRequest } }`.
+- `stopReasons`: `[{ reason, count }]`, most first, from the vocabulary in `FLOW_STOP_REASONS`.
+- `flakyChecks`, `waitingIdeas`: `{ items, total }`. `topBlocker`: a stop reason or a flaky check, or
+  null.
+- `unavailable`: sections whose read failed this time (`runs`, `ci`, `flaky`, `asks`, `ideas`,
+  `rework`, `merged`); they come back empty rather than failing the whole response.
+
+### `GET /api/projects/:projectId/insights/accounts`
+
+Insights · Accounts for one project (`projectAccounts`, `packages/operations/src/insights-accounts.ts`).
+Query `range` is `7d`, `30d` or `90d` (default `30d`; anything else is `400`). Requires project
+membership. Sent with `Cache-Control: private, no-store`: the body carries the caller's own account
+names and limit windows. Returns `ProjectAccountsResponse`
+(`packages/shared/src/types/insights-accounts.ts`):
+`{ projectId, range, since, until, bucket, buckets, accounts, stallEpisodes, totals, usageLimited, usageAdmissionLimited?, unavailable, generatedAt }`.
+
+- `accounts`: most runs first. Each is `{ key, name, owner, kind, agentType, credentials, runs, merged, runsByBucket, stalls, usage, tokens, spend }`.
+  `owner` is `you`, `teammate`, `project`, `platform` or `not_recorded`; `kind` is `subscription`,
+  `api_key`, `platform` or `unknown`. Only the caller's own credentials are rows of their own with a
+  `name` (`key` is `cred:<credentialId>`); everyone else's are grouped by owner, agent and kind, with
+  `name: null` and `credentials` saying how many they stand for. `runs` counts the same runs as
+  Flow, attributed to the agent session that ran them; `runsByBucket` lines up with `buckets`.
+- `stalls`: `{ episodes, totalMs, ongoing }`. `usage`: the caller's own last-reported limit windows
+  (`CredentialLimitCredentialSummary`), else `null`. `tokens`: `{ total, perMergedPullRequest }` from
+  the measured usage since the range began (`agent_run_usage`; a proxied run counted once, from the AI
+  proxy rows), or `null` when none was recorded. `spend` (API keys only, `null` otherwise):
+  `{ state: 'not_reported' }` with no usage, `{ state: 'private' }` for another member's personal
+  key, or `{ state: 'reported', costUsd, perMergedPullRequestUsd, unpricedModels }`, an estimate at
+  SAM's catalog prices where `costUsd` is `null` when nothing could be priced and a non-empty
+  `unpricedModels` makes it partial. Read by `accountUsageStatement`
+  (`packages/operations/src/insights-run-usage.ts`).
+- `stallEpisodes`: `{ items, total, listed, truncated }`; each item is
+  `{ accountKey, window, startedAt, endedAt, durationMs, runs, outcome }`, newest first, where
+  `outcome` is `resumed`, `ended` (the run ended while waiting), `blocked` or `ongoing`. `truncated` means the scan cap
+  (`insights.accountsStallScanCap`) left older limit waits out.
+- `usageLimited`: the usage read hit `insights.accountsUsageRowCap`, so tokens and spend are a floor.
+- `usageAdmissionLimited`: some run in the usage window lost harness usage. This optional page-level
+  warning does not mark every account as incomplete; complete account labels stay exact.
+- `unavailable`: sections whose read failed this time (`runs`, `stalls`, `usage`, `tokens`).
+
+### `GET /api/projects/:projectId/insights/setups`
+
+Insights · Agent setups for one project (`projectSetups`, `packages/operations/src/insights-setups.ts`).
+Query `range` is `7d`, `30d` or `90d` (default `30d`) and `groupBy` is `profile`, `skill` or
+`model` (default `profile`); anything else is `400`. Requires project membership. Sent with
+`Cache-Control: private, no-store`: the body names the caller's own personal profiles and skills.
+Returns `ProjectSetupsResponse` (`packages/shared/src/types/insights-setups.ts`):
+`{ projectId, range, groupBy, since, until, rework, sample, groups, suggestions, suggestionMinRuns, usageAdmissionLimited?, unavailable, generatedAt }`.
+
+- `groups`: most runs first, with the rows for no profile/skill and an unrecorded model last. Each
+  is `{ key, label, owner, agentType, usedFor, runs, finished, mergedClean, mergedCleanRate, merged, medianToPullRequestMs, pullRequests, nudges, tokens, memory }`.
+  `owner` is `project`, `you`, `teammate`, `none` or `not_recorded`; a teammate's personal profile
+  or skill has `label: null`. `nudges` is `{ state: 'measured', perRun, total, runs }` or
+  `not_recorded`; `tokens` is `{ state: 'reported', total, perMergedPullRequest, reportedRuns, merged }`
+  or `not_reported`; `memory` is `{ state: 'measured', p90Bytes, maxBytes, requestedMb, runs, oomKills }`
+  or `not_recorded`.
+- `rework`: `{ windowDays, rule: 'same_branch' }`. `sample`: `{ runs, cap, truncated }`, where
+  `truncated` means `insights.setupsRunScanCap` left older runs out.
+- `suggestions`: each is `default_profile` (`{ skill, profile, compared, currentDefault, apply }`) or
+  `request_size` (`{ skill, currentGb, suggestedGb, runs, p90Bytes, maxBytes, oomKills, apply }`).
+  `apply` is `{ skillId, patch }`, the body to send to `PATCH /api/projects/:projectId/skills/:skillId`.
+- `usageAdmissionLimited`: a selected run has incomplete harness token data; the page warns that
+  token totals and comparisons may be understated. Complete proxy measurements take precedence.
+  Older servers may omit this field.
+- `unavailable`: sections whose read failed this time (`runs`, `nudges`).
+
+### `GET /api/projects/:projectId/insights/people`
+
+Insights · People for one project (`projectPeople`, `packages/operations/src/insights-people.ts`).
+Query `range` is `7d`, `30d` or `90d` (default `30d`; anything else is `400`). Requires project
+membership. Sent with `Cache-Control: private, no-store`: the body carries the titles of the inbox
+items the caller may open. Returns `ProjectPeopleResponse`
+(`packages/shared/src/types/insights-people.ts`):
+`{ projectId, range, since, until, waiting, reviewPickup, firstPerson, unavailable, generatedAt }`.
+
+- `waiting`: `{ groups, total, listed }`, open `question`/`review`/`task` asks right now (not
+  range-bound), longest wait first. Each group is
+  `{ key, kind: 'person' | 'unassigned', userId, name, member, you, open, blocking, oldestAgeMs, items }`;
+  `name` is set only for an active member (`member: false` for someone who left). `items` are the
+  oldest `listed` (`insights.peopleWaitingItemsListed`), each
+  `{ private, ref, title, kind, blocking, claimed, createdAt, ageMs, canReassign }`. For an item the
+  caller could not open in the Inbox, `private` is true and `ref`, `title`, `kind`, `blocking` and
+  `claimed` are `null`. `canReassign` is true only for a human task the caller may hand on through
+  `POST /api/projects/:projectId/inbox/items/:ref/reassign`.
+- `reviewPickup`: `{ state: 'recorded', samples, medianMs, p90Ms, waiting, recordedSince, truncated }`
+  or `{ state: 'not_recorded', waiting, recordedSince }`: `not_recorded` when nothing is recorded
+  yet (`recordedSince` null) or no request in the range has been picked up yet. From review
+  request cycles the GitHub webhook ingest records (`pull_request_review_requests`,
+  `services/github-pull-request-reviews.ts`); a cycle still open when its pull request closes is
+  closed as removed and never counts as waiting.
+  `truncated` means the scan cap (`insights.peopleReviewScanCap`) kept only the newest requests.
+- `firstPerson`: `{ closed, firstPerson, share }`, `share` `null` when nothing closed.
+- `unavailable`: sections whose read failed this time (`waiting`, `reviews`, `first_person`).
+
+### Insights for agents: MCP `project_insights` / Connector `sam_project_insights`
+
+The same Insights reads, for agents, as one tool with a `method` (`projectInsights`,
+`packages/operations/src/insights-agent.ts`; catalog operation `sam_project_insights`, which the SAM
+Connector lists; sam-mcp tool `project_insights`, `apps/api/src/routes/mcp/project-insights-tool.ts`).
+
+- `receipt` (`taskId`): `runReceipt`. `flow` (`range`): `projectFlow`. `setups` (`range`,
+  `groupBy`): `projectSetups`. `accounts` (`range`): `projectAccounts`. `phases` (`skillId` or
+  `agentProfileId`, optional `operation`, `phaseNames` and `windowDays`): median and p90 per
+  lifecycle phase from `phaseDurationStats`, over at most the 500 newest successful rows of each
+  operation and phase. Each (operation, phase) is read newest first from one range of an index
+  keyed on every filter (migration 0260), and the read stops at its sample, so the cost does not
+  grow with stored history. Each stat's `truncated` says its pair had older rows left out (the
+  response-level `truncated` says any did, or that the total row bound was reached). An undeclared argument, an argument the method does not
+  read, or a missing one it needs is `invalid_input`.
+- Numbers only: no task, pull request or idea titles, no idea notes, no agent questions, no account
+  names or credential references, no names of a teammate's profiles. CI check names are kept
+  (capped at 100 characters) because they identify a flaky check. Accounts are keyed `account-1`,
+  `account-2`, ... in the order the page lists them. Dollar spend appears only where the receipt
+  page would show it, and is hidden when the run's account was not recorded.
+- On sam-mcp the project always comes from the MCP token; a different `projectId` is refused with
+  `Project does not match workspace token`. Each chat may call it `insights.agentToolCallsPerWindow`
+  times per `insights.agentToolWindowSeconds` (see [admin settings](/docs/guides/admin-settings/));
+  the next call returns JSON-RPC error `-32000` with the retry time. A call refused for its
+  arguments does not count. The Connector has no chat, so
+  there it spends the per-user `connector.readRateLimitPerMinute` budget instead.
+- Round trips in the handler are the page read's plus one rate-limit RPC: receipt at most 8 (it
+  skips the account-name read), flow at most 11, setups at most 6, accounts at most 5, phases 3.
+  Every sam-mcp call also pays the token, storage-activation and HTTP rate-limit checks that all
+  sam-mcp tools share.
 
 ### `POST /api/projects/:id/tasks`
 
@@ -495,6 +1247,49 @@ Create a task record.
 }
 ```
 
+## Ideas
+
+An idea is something you want done. It keeps following the work after someone starts it, and
+these endpoints return each idea's state **derived** from the work linked to it, never a stored
+label; see [Ideas](/docs/guides/ideas/#where-an-idea-stands).
+
+An idea is its own kind of row, marked as one when it is created. `POST /api/projects/:projectId/tasks`
+creates an ordinary task, not an idea, even though that task starts out as a draft: a task you
+have not dispatched yet does not appear in Ideas and cannot be marked done through these
+endpoints. Ideas created before this distinction existed were all marked as ideas, so nothing
+that was in your list has left it.
+
+| Method | Endpoint                                                     | Contract                                                                                                                                                                                                                                                                                                      |
+| ------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/projects/:projectId/ideas`                             | Returns `{ items, truncated, totals }`. Each item carries `derived` (the state, its `source`, and the chat or pull request that decided it), `counts`, and a one-line `summary`. Open ideas and finished ones are capped separately, so a project that shipped a lot cannot push its open ideas off the page. |
+| GET    | `/api/projects/:projectId/ideas/:ideaId`                     | One idea: the current plan in full, its derived state, every chat linked to it and every pull request its work produced.                                                                                                                                                                                      |
+| POST   | `/api/projects/:projectId/ideas`                             | Body `{ title, content? }`; files a new idea and returns it. Goes through the same operation the MCP `ideas_write` method `create` tool uses.                                                                                                                                                                 |
+| POST   | `/api/projects/:projectId/ideas/:ideaId/status`              | Body `{ status: 'completed' \| 'cancelled' \| 'draft' }`, as **Mark done**, **Park** and **Reopen** do. One transition table is shared with `ideas_write` method `update` and the generic task status route, so every surface allows the same moves.                                                          |
+| POST   | `/api/projects/:projectId/ideas/:ideaId/keep-open`           | Records that a person answered the idea's "a pull request merged, is this done?" question with **Keep open**. Changes no status; the question simply stops being asked for that merge.                                                                                                                        |
+| GET    | `/api/projects/:projectId/ideas/:ideaId/updates`             | Returns `{ updates, nextCursor }`: the notes posted beside the plan, newest first. Pass `cursor` for older ones.                                                                                                                                                                                              |
+| POST   | `/api/projects/:projectId/ideas/:ideaId/updates`             | Body `{ body, quote? }`; posts a note without changing the plan (the same operation as `ideas_write` method `update` with `note`). Length limits are the Collaboration admin settings (8,000 characters per note, 1,000 per quote by default).                                                                |
+| DELETE | `/api/projects/:projectId/ideas/:ideaId/updates/:updateId`   | Removes a note. Only the note's author or a project owner or admin can.                                                                                                                                                                                                                                       |
+| GET    | `/api/projects/:projectId/sessions/:sessionId/ideas`         | The ideas linked to a chat.                                                                                                                                                                                                                                                                                   |
+| POST   | `/api/projects/:projectId/sessions/:sessionId/ideas`         | Body `{ taskId, context? }`; links the chat to an idea so that the chat counts as work on it (the same link `ideas_write` method `link_session` makes).                                                                                                                                                       |
+| DELETE | `/api/projects/:projectId/sessions/:sessionId/ideas/:taskId` | Removes that link.                                                                                                                                                                                                                                                                                            |
+
+An idea is open, done or parked, and those are the only moves: an open idea can be marked
+done or parked, and a done or parked idea can be reopened. An idea is never handed to an agent
+in place — **Start work** creates a new task linked to the idea instead — so moving one to
+`ready` is refused. Ideas that were already `ready` keep every way out of it.
+
+Pull request state comes from what SAM has already stored for the project's pull requests. The
+list never asks GitHub, because one page view would be one call per pull request in the project;
+the single-idea read may ask for one bounded background refresh.
+
+Counts can be minimums. Reading an idea's links is bounded per idea, so a very busy idea reports
+`counts.atLeast` naming the counts it could only establish a floor for, and the UI writes those
+as "50+" rather than a number it did not finish counting.
+
+Reads require project membership; writes require the `task:write` capability. Every lookup is
+scoped to the project in the query itself, so an idea from another project is reported as not
+found rather than disclosed.
+
 ## Deployment Releases
 
 ### `POST /api/projects/:projectId/environments/:envId/releases`
@@ -504,6 +1299,18 @@ Create a deployment release for an environment.
 Preferred body: Docker Compose YAML with `Content-Type: text/yaml`, `application/yaml`, `text/x-yaml`, or `application/x-yaml`. Compose submissions may use `x-sam-routes` for routes and `x-sam-secret` environment values for secret references.
 
 Raw manifest JSON is still accepted for backward compatibility when another content type is used.
+
+### `GET /api/projects/:projectId/environments/:envId/releases`
+
+List an environment's releases, newest first. Each release includes `submittedBy` — the `taskId`, `agentProfileId`, `workspaceId` and `userId` of the chat that sent it — or `null` when it was not sent by an agent. Optional `?limit=` (default 50, at most 200) caps how many releases come back.
+
+### `GET /api/projects/:projectId/environments/:envId/releases/:releaseId`
+
+Get one release, including its stored manifest.
+
+### `GET /api/projects/:projectId/environments/:envId/releases/:releaseId/events`
+
+The steps the deployment server reported while applying a release, oldest first: `{ "events": [{ "seq", "level", "eventType", "step", "message", "createdAt" }] }`. Each step reports `deployment.apply.<step>_started` and `…_completed`; a failure arrives as `deployment.apply.failed`. Optional `?limit=` (default 200, at most 500) returns the newest events.
 
 ### `POST /api/projects/:id/tasks/submit`
 
@@ -524,9 +1331,27 @@ Submit an idea for autonomous execution. This is the chat-first path used by the
 
 `resourceRequirements` is additive modern workload input. The API validates known fields and persists the normalized JSON through task launch inputs. Legacy `vmSize` is still accepted for old clients as a deprecated compatibility hint; clients should not infer provider hardware from it. Profiles, skills, and triggers persist the same modern data as `resourceRequirementsJson` for compatibility, with explicit `null` clearing that layer and omitted fields preserving inherited behavior.
 
+Optional `nodeId` pins VM execution to a node owned by the caller. Nodes in `creating` or `running` status are accepted; a booting agent waits before workspace creation within the existing agent-ready deadline (default 15 minutes). A reported different VM agent build is refused, and a deadline failure identifies missing version or readiness. Ownership and placement admission are rechecked by `handleNodeSelection()` (`apps/api/src/durable-objects/task-runner/node-steps.ts`) before a workspace is allocated.
+
+Optional `sourceIdeaId` starts the work from an open idea in the same project. It is validated before anything is created — `404` for an id that is not an open idea in this project, `409` for an idea that is done or parked — and the session → idea link (`works_on` in task mode, `discusses` in conversation mode) is recorded before the agent receives its first prompt, on both the VM and the Instant path. If the link cannot be written the submit fails and the task is not left queued. Repeating the same start touches the same link rather than adding a second one. The idea is never injected into `message`; the agent receives it from `get_instructions`.
+
+Optional `model` (string, up to 200 characters) and `effort` (`auto`, `low`, `medium`, `high`, `xhigh` or `max`) set the agent's model and effort for this task only, over the skill, profile and project defaults. A blank `model` or a `null` either one inherits. The effort must be one the resolved agent supports, or the request returns `400` before anything is created: Claude Code supports every level, Codex every level except `max`, and other agents only `auto`.
+
+Optional `agentConfigurationId` runs this task on one of the caller's own agent accounts (a `cc_configurations` id) instead of the account its profile would use. The account must be active and for the agent the task runs, or the request returns `400` before anything is created (`validateRunAgentConfiguration`). It is stored on the task, checked before the profile's account whenever the run's credential is resolved, and a paused or deleted account stops the run rather than falling back to another.
+
+### `GET /api/projects/:id/agent-profiles/picker`
+
+Returns the caller's own new-chat picker state for the project: `{ usage, hiddenProfileIds, usageWindowDays }`. `usage` lists `{ profileId, lastUsedAt, chatCount }` for profiles the caller started new chats with in the last `usageWindowDays` days (admin setting `chat.profileUsageWindowDays`, default 30), most recent first. Only chats the caller started by hand count; dispatched, triggered, recovered and idea drafts do not. Any active project member can read their own state.
+
+### `PATCH /api/projects/:id/agent-profiles/picker`
+
+Takes `{ "hide": ["<profileId>"], "unhide": ["<profileId>"] }` and returns `{ hiddenProfileIds }`. Hiding only removes a profile from the caller's own new-chat picker in this project; the profile, other members' pickers, triggers, dispatch and @mentions are unaffected. Only profiles the caller can use in the project can be hidden (`400` otherwise), and one profile cannot appear in both lists.
+
 ## File Proxy (Project Chat)
 
 These endpoints proxy file operations to the workspace's VM agent, accessed through a project chat session.
+
+The workspace's owner can use all of them. A member the chat is [shared with](/docs/guides/collaboration/#share-a-chat) can use the read endpoints (list, find, view, download, raw, git status and diff) while their access lasts; upload stays owner-only. For them every path must be relative to the repository working tree: absolute and `~` paths return `404` (a `.` or `..` segment returns `400` for everyone), and the VM agent refuses anything outside the working tree, inside a `.git` folder, or reached through a link that points outside it (`404`). If the workspace's agent cannot confirm that limit, the request returns `409` and nothing from the agent. Other members get `403`.
 
 ### `GET /api/projects/:id/sessions/:sessionId/files/list`
 
@@ -604,6 +1429,8 @@ Start an [Instant](/docs/guides/instant-sessions/) chat session. Returns **`202`
 
 Because the launch is asynchronous, the response does **not** carry `agentSessionId`, `acpSessionId`, or launch `timings` — poll the session or connect to its stream for live state.
 
+Optional `sourceIdeaId` behaves as it does on `POST /api/projects/:id/tasks/submit`, with the link recorded as `discusses`. Optional `model`, `effort` and `agentConfigurationId` behave as they do there too.
+
 This endpoint is Instant-only. It returns `409` (`Selected profile resolves to VM runtime; use task submission instead.`) whenever the runtime resolves to VM — because the profile pins `vm`, because the caller has their own or a project cloud credential, or because `CF_CONTAINER_ENABLED` is not `true` for the deployment. Use `POST /api/projects/:id/tasks/submit` for VM work.
 
 ## Issue Reports
@@ -612,7 +1439,7 @@ See [Reporting Issues](/docs/guides/reporting-issues/) for the user-facing flow 
 
 ### `GET /api/report-issue/config`
 
-Report whether in-app issue reporting is available on this deployment. Returns `{ "enabled": false }` when no effective private feedback project is configured, or when the effective setting does not name an existing project — the UI hides both entry points in that case.
+Report whether in-app issue reporting is available on this deployment. Returns `{ "enabled": false }` when no effective Operations project is configured, or when the effective setting does not name an existing project — the UI hides both entry points in that case.
 
 ### `POST /api/report-issue`
 
@@ -624,24 +1451,102 @@ Rate-limited to 20 submissions per clock hour per user (`RATE_LIMIT_REPORT_ISSUE
 
 ### `POST /api/admin/observability/feedback-triage`
 
-Superadmin only. Runs a platform-error triage sweep immediately instead of waiting for the hourly cron. The feedback project itself is configured from **Admin → Integrations** or the environment fallback; this endpoint remains the manual way to verify automated triage without waiting up to an hour.
+Superadmin only. Runs a platform-error triage sweep immediately instead of waiting for the hourly cron. The Operations project itself is configured from **Admin → Integrations** or the environment fallback; this endpoint remains the manual way to verify automated triage without waiting up to an hour.
+
+## Health & cost
+
+### `GET /api/admin/health-cost`
+
+Superadmin only. Backs **Admin → Health & cost**. Optional `range`: `7d`, `30d` or `month`
+(the default, the calendar month so far in UTC); any other value returns `400`. Returns
+`InstallationHealthResponse` (`packages/shared/src/types/insights-installation.ts`): `window`,
+`compute` (spend per provider and per week at each machine's recorded price), `reuse`, `density`
+(agents per busy machine), `newMachines` (reasons), `latency` (p95 against budget per watched
+state, with open incidents) and `cloudflare` (the Cloudflare account's estimated USD cost this
+month from the daily snapshot, with the snapshot's status). A section that fails to read is
+`null` and named in `unavailable`. See [Health & cost](/docs/guides/admin-settings/#health--cost).
+
+### `POST /api/admin/health-cost/cloudflare/refresh`
+
+Superadmin only. Runs the daily Cloudflare cost snapshot now (the card's **Refresh now**) and
+returns `InstallationCloudflareRefreshResponse`: `status` (`ok`, `not_configured`,
+`permission_denied` or `error`), the stored window (`firstDay`, `lastDay`), `rowsWritten` and
+`error`. A Cloudflare failure is a `200` with that status, recorded for the card. A second refresh
+within `insights.cloudflareCostRefreshMinSeconds` (60 by default) of the last attempt returns `429`
+without calling Cloudflare.
+
+## Operations Approvals
+
+These endpoints back **Admin → Approvals** and require an approved, active **superadmin**. They
+decide what an Operations-project agent asked to do with `ops_request_action`; see
+[Approved actions](/docs/guides/admin-settings/#approved-actions).
+
+### `GET /api/admin/operations/approvals`
+
+Lists approvals, pending first, then newest first: `{ "approvals": [...] }`. Optional `status`
+(`pending`, `approved`, `denied`, `expired`, `executed`) and `limit` (up to 200).
+
+### `GET /api/admin/operations/approvals/:id`
+
+One approval: `{ "approval": {...} }`, or `404`.
+
+### `POST /api/admin/operations/approvals/:id/decision`
+
+Body: `{ "decision": "approve" | "deny", "note"?: string }` (note up to 1,000 characters). Decides
+a pending request once and delivers the decision to the requesting agent's chat. Returns
+`{ "approval", "delivered" }`. Returns `409` if the request was already decided or has expired,
+and `404` for an unknown ID.
+
+## Admin Settings
+
+These endpoints back [Admin → Settings](/docs/guides/admin-settings/) and require an approved,
+active **superadmin**; anyone else gets `403`.
+
+### `GET /api/admin/settings`
+
+Returns `{ revision, settings, history }`. Each setting has `name`, `type`, `category`,
+`description`, `defaultValue`, `value` (the value in effect; secrets are never returned), `secret`,
+`risky`, `range` or `choices` where they apply, `configured`, `source` (`database`, `environment`,
+`kv`, or `default`), `updatedAt`, and `updatedBy`. `history` holds the last 100 changes (`name`,
+`action`, `actorUserId`, `createdAt`, `revision`), never their values. If the settings can't be read
+safely, the response is `503` with `SETTINGS_UNAVAILABLE`.
+
+### `PATCH /api/admin/settings`
+
+Applies 1–23 changes together and returns the same view as `GET`. A `value` of `null` removes the
+saved value (**Reset override**).
+
+```json
+{
+  "expectedRevision": 4,
+  "changes": [{ "name": "connector.writeEnabled", "value": false }]
+}
+```
+
+`409` means `expectedRevision` is out of date: read the settings again, then retry. An invalid value
+returns `400`; an OAuth client ID and secret are checked together. Saving `true` for
+`operations.cronSweepsEnabled` or `operations.doAlarmsEnabled` also sets that switch's emergency KV
+key to `true`, lifting an emergency stop; if that write fails, the response is
+`503 SETTINGS_PROPAGATION_UNCERTAIN` (the change was saved, so read the settings before retrying).
 
 ## Admin Runtime Controls
 
-These endpoints require an approved, authenticated **superadmin**. The switches
-are availability brakes: an absent KV key or KV read error means enabled
-(fail-open), so a transient KV outage does not silently halt recovery work.
+The older endpoints for the cron-sweep and Durable Object alarm switches. They read and write the
+same `operations.cronSweepsEnabled` and `operations.doAlarmsEnabled` settings as
+`/api/admin/settings`, without its revision check, and need the same superadmin access.
 
 ### `GET /api/admin/runtime-controls`
 
-Read the cron-sweep and Durable Object alarm switches. The response includes
-`cronSweepsEnabled`, `doAlarmsEnabled`, the resolved KV keys, the in-memory
-cache TTL, the disabled-alarm retry interval, and `semantics: "fail-open"`.
+Read the cron-sweep and Durable Object alarm switches: `cronSweepsEnabled` and `doAlarmsEnabled`
+(the values in effect), the KV keys of their emergency switches, the cache TTL, and the
+disabled-alarm retry interval.
 
 ### `PATCH /api/admin/runtime-controls`
 
-Update either or both switches. At least one field is required and every
-provided value must be boolean.
+Update either or both switches. At least one field is required and every provided value must be
+boolean. Saving `true` also sets that switch's emergency KV key to `true`; if that write fails, the
+response is `503 SETTINGS_PROPAGATION_UNCERTAIN`. An emergency KV key set to `false`
+or `disabled` stops the work whatever the setting says.
 
 ```json
 {
@@ -653,6 +1558,79 @@ provided value must be boolean.
 Disabling the alarm switch does not drop alarm chains: each affected Durable
 Object re-arms at the reported safe retry interval and resumes normally after
 the switch is enabled again.
+
+## Agent Email (preview)
+
+Agent email is on when the deploy prepared Email Sending for `agents.<BASE_DOMAIN>` and a
+superadmin then ran the setup below (see [Email Triggers](/docs/guides/email-triggers/)).
+
+### `GET /api/config/agent-email`
+
+Public. Returns `{ "enabled": boolean, "domain": string | null }`. `domain` is the domain agent
+addresses live on, for example `agents.example.com`, and is `null` when agent email is off.
+
+### `GET /api/admin/agent-email`
+
+Superadmin only. Returns the same `enabled` and `domain`, plus `loopback`:
+`{ lastSent: { to, sentAt, providerMessageId } | null, lastReceived: { from, subject, autoSubmitted, inReplyTo, receivedAt } | null }`.
+`inReplyTo` is the Message-ID the reply answers, which ties it to one loopback test.
+Loopback status expires after seven days.
+
+### `GET /api/admin/agent-email/setup`
+
+Superadmin only. Reads Cloudflare and returns what turning agent email on would do now:
+`{ state, domain, mainDomain, mainDomainChanges, zoneChanges, consentToken, reason }`. `state` is
+one of:
+
+| `state`         | Meaning                                                                                                                                                                                                                                                                                                                |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unavailable`   | The deploy has not prepared agent email; `reason` says what is missing                                                                                                                                                                                                                                                 |
+| `verifying`     | Cloudflare is still verifying the sending records                                                                                                                                                                                                                                                                      |
+| `refused`       | Setup can't safely change the main domain's SPF: more than one SPF record, mail (MX) without SPF other than Google's, or a policy it can't verify (`redirect=`, an ending other than `~all`/`-all`, mechanisms other than `include:`/`ip4:`/`ip6:`/`all`/`exp=`, more than 10 lookups, or a loop); `reason` says which |
+| `changed`       | An earlier run left the main domain's MX or SPF records different from what it listed                                                                                                                                                                                                                                  |
+| `needs_consent` | Turning it on changes something outside `agents.<BASE_DOMAIN>`; the admin must allow the listed changes                                                                                                                                                                                                                |
+| `ready`         | Setup can run and changes nothing on the main domain or in the zone's Email Routing settings                                                                                                                                                                                                                           |
+| `on`            | Agent email is on                                                                                                                                                                                                                                                                                                      |
+
+Each `mainDomainChanges` entry is `{ type, name, content, priority?, change }`; `priority` is set
+for MX records. In `needs_consent` they are the records Cloudflare adds the first time a zone uses
+Email Routing (`content` is `null` for the DKIM key, which Cloudflare generates), and, when the main
+domain already has an SPF record, that record as `change: "remove"` and its merged replacement as
+`change: "add"`. In `changed` they
+are the differences from the records the earlier run started from, `change: "add"` or
+`"remove"`. `zoneChanges` lists zone settings the setup changes, today only
+`{ setting: "subaddressing", description, allowed }` while subaddressing is off; `allowed` is true
+when the admin allowed it for an earlier run that stopped before making it, which needs no new
+consent. `consentToken` is set when the plan lists changes the admin has not allowed yet: it
+identifies exactly the listed changes. Returns `502` with Cloudflare's error when a Cloudflare
+call fails, or when Cloudflare lists only part of a name's records.
+
+### `POST /api/admin/agent-email/setup`
+
+Superadmin only. Body `{ "consentToken"?: string }`. Turns Email Routing on for
+`agents.<BASE_DOMAIN>`, turns on subaddressing, routes `agent@agents.<BASE_DOMAIN>` to this Worker,
+and records that agent email is on. When the plan lists changes, the body must carry that plan's
+`consentToken`. Before it changes anything, the run stores the main domain's MX and SPF records
+and takes a lease on the setup: one run at a time changes Cloudflare, and only the run holding the
+lease can turn agent email on. Every later run compares the main domain against the stored
+records. Returns
+the resulting plan: `on`, or `pending` when Email Routing is on but its records are not visible
+yet (run it again). Returns `409` when the plan is not `ready`, `needs_consent` or `changed`; when
+the token is missing or belongs to a plan with other changes; when another run holds the lease or
+starts at the same moment; when this run's lease lapses, stalls or is taken over before it finishes
+(it stops before its next Cloudflare change, and agent email stays off); and when the main domain's
+records changed beyond what was listed (agent email stays off, and the plan becomes `changed`). Returns `502` with Cloudflare's error when a Cloudflare call
+fails, and `429` past the `agentEmail.setupRunsPerHour` limit. Running it again once on changes
+nothing.
+
+### `POST /api/admin/agent-email/loopback`
+
+Superadmin only. Body `{ "to": "agent+<key>@agents.<BASE_DOMAIN>" }`. Sends one fixed test email
+from `agent+loopback@agents.<BASE_DOMAIN>` to an existing email trigger and returns `202` with the
+`lastSent` record. When that trigger's agent replies, the reply is routed back and recorded as
+`lastReceived`. The trigger must list `agent+loopback@agents.<BASE_DOMAIN>` as an allowed sender.
+Returns `409` when agent email is off, `400` for an address that is not an email trigger
+address, `404` for an unknown trigger, and `429` past the `agentEmail.loopbackPerHour` limit.
 
 ## Admin AI Allowances
 

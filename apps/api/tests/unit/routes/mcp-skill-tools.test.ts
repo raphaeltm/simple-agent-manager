@@ -606,7 +606,13 @@ describe('MCP Skill Tools', () => {
         defaultProfileId: 'prof-9',
       };
       const fields = extractSkillFields(params);
-      expect(fields).toEqual(params);
+      // Provider and location come from the compute pool; the retired fields are dropped.
+      const supported: Record<string, unknown> = { ...params };
+      delete supported.provider;
+      delete supported.vmLocation;
+      expect(fields).toEqual(supported);
+      expect(fields).not.toHaveProperty('provider');
+      expect(fields).not.toHaveProperty('vmLocation');
     });
 
     it('ignores fields with wrong types', () => {
@@ -635,6 +641,16 @@ describe('MCP Skill Tools', () => {
         /runtime must be one of/
       );
       expect(extractSkillFields({ runtime: null })).toEqual({ runtime: null });
+    });
+
+    it('passes agentType: null through so the override can be cleared', () => {
+      expect(extractSkillFields({ agentType: null })).toEqual({ agentType: null });
+      // A blank string passes through unchanged; the skills service stores it as no override
+      // (covered on real SQLite in skills-optional-agent-type.test.ts).
+      expect(extractSkillFields({ agentType: '' })).toEqual({ agentType: '' });
+      expect(extractSkillFields({ agentType: 'openai-codex' })).toEqual({
+        agentType: 'openai-codex',
+      });
     });
 
     it('ignores unknown fields', () => {

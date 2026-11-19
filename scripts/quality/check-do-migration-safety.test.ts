@@ -5,11 +5,16 @@
  * in DO SQLite migration definitions.
  */
 
-import { describe, expect, it } from 'vitest';
 import { execSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { extractSqlFromTypeScript } from './check-do-migration-safety';
+import { describe, expect, it } from 'vitest';
+
+import {
+  extractSqlFromTypeScript,
+  scanDoMigrations,
+} from './check-do-migration-safety';
 
 /**
  * The extractor is what decides whether the danger checks get to see a statement
@@ -71,7 +76,65 @@ describe('DO migration safety — SQL extraction covers every string form', () =
   });
 });
 
+describe('DO migration safety — comments cannot shift string pairing', () => {
+  const sqlOf = (content: string) => extractSqlFromTypeScript(content).map((r) => r.sql);
+
+  it('still sees a single-quoted DROP after an apostrophe in a comment', () => {
+    // Incident shape: credential-setup-session/schema.ts had `teardown's` in a doc
+    // comment, and a `sql.exec('DROP TABLE ...')` after it reported PASS.
+    const content = [
+      `/** 1 while teardown's sandbox cleanup has not finished. */`,
+      `const DDL = 'ALTER TABLE setup_session ADD COLUMN cleanup_pending INTEGER';`,
+      `sql.exec('DROP TABLE device_auth_details');`,
+    ].join('\n');
+    const found = extractSqlFromTypeScript(content);
+    expect(found.map((r) => r.sql)).toContain('DROP TABLE device_auth_details');
+    expect(found.find((r) => r.sql.startsWith('DROP'))?.lineStart).toBe(3);
+  });
+
+  it('still sees same-line SQL after URL and quote-containing regex literals', () => {
+    const content = String.raw`const url = /https?:\/\//; const quote = /['"\x60]/; sql.exec('DROP TABLE device_auth_details');`;
+    expect(extractSqlFromTypeScript(content)).toContainEqual({
+      sql: 'DROP TABLE device_auth_details',
+      lineStart: 1,
+    });
+  });
+
+  it('does not scan prose in comments, and keeps // inside strings', () => {
+    const content = [
+      `// DROP TABLE in a comment is documentation, not a statement`,
+      `/* DELETE FROM chat_messages explains why we never do this */`,
+      `const url = 'https://example.com/x'; sql.exec("UPDATE t SET a = 1 WHERE id = 'x'");`,
+    ].join('\n');
+    const sql = sqlOf(content);
+    expect(sql.some((s) => /DROP TABLE/.test(s))).toBe(false);
+    expect(sql.some((s) => /DELETE FROM/.test(s))).toBe(false);
+    expect(sql).toContain("UPDATE t SET a = 1 WHERE id = 'x'");
+  });
+});
+
 describe('DO migration safety check', () => {
+  it('reports a destructive statement after a regex through the actual safety gate', () => {
+    const scratch = join(import.meta.dirname, '../../.tmp');
+    mkdirSync(scratch, { recursive: true });
+    const dir = mkdtempSync(join(scratch, 'do-migration-regex-'));
+    const file = join(dir, 'migration.ts');
+    try {
+      writeFileSync(
+        file,
+        String.raw`const url = /https?:\/\//; sql.exec('DROP TABLE device_auth_details');`
+      );
+      expect(scanDoMigrations(file)).toMatchObject([
+        {
+          file: 'migration.ts',
+          line: 1,
+          pattern: 'DROP TABLE in DO migration',
+        },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it('passes on the current codebase DO migrations', () => {
     const result = execSync(
       'npx tsx scripts/quality/check-do-migration-safety.ts',
@@ -82,7 +145,7 @@ describe('DO migration safety check', () => {
       }
     );
     expect(result).toContain('DO migration safety check passed');
-  });
+  }, 30_000);
 
   it('reports on all scanned migration files', () => {
     const result = execSync(
@@ -95,17 +158,18 @@ describe('DO migration safety check', () => {
     );
     expect(result).toContain('migrations.ts: PASS');
     expect(result).toContain('notification-migrations.ts: PASS');
-    expect(result).toContain('trial-counter.ts: PASS');
-  });
+    // A missing file only logs SKIPPED, so pin that the setup-session DDL is scanned.
+    expect(result).toContain('schema.ts: PASS');
+    expect(result).not.toContain('SKIPPED');
+  }, 30_000);
 });
 
 describe('DO migration safety — current migrations are non-destructive', () => {
   it('no DROP TABLE in DO migrations', () => {
-    const { readFileSync } = require('node:fs');
     const migrations = readFileSync(
       join(
         import.meta.dirname,
-        '../../apps/api/src/durable-objects/migrations.ts'
+        '../../packages/project-data/src/do/migrations.ts'
       ),
       'utf-8'
     );
@@ -128,11 +192,10 @@ describe('DO migration safety — current migrations are non-destructive', () =>
   });
 
   it('no DELETE FROM without WHERE in DO migrations', () => {
-    const { readFileSync } = require('node:fs');
     const migrations = readFileSync(
       join(
         import.meta.dirname,
-        '../../apps/api/src/durable-objects/migrations.ts'
+        '../../packages/project-data/src/do/migrations.ts'
       ),
       'utf-8'
     );
@@ -152,12 +215,11 @@ describe('DO migration safety — current migrations are non-destructive', () =>
     }
   });
 
-  it('all DO migrations use safe patterns (CREATE TABLE, ALTER TABLE, CREATE [UNIQUE] INDEX)', () => {
-    const { readFileSync } = require('node:fs');
+  it('all DO migrations use safe patterns (CREATE TABLE, ALTER TABLE, CREATE [UNIQUE] INDEX, non-destructive CREATE TRIGGER)', () => {
     const migrations = readFileSync(
       join(
         import.meta.dirname,
-        '../../apps/api/src/durable-objects/migrations.ts'
+        '../../packages/project-data/src/do/migrations.ts'
       ),
       'utf-8'
     );
@@ -178,6 +240,9 @@ describe('DO migration safety — current migrations are non-destructive', () =>
       /UPDATE\s+\w+\s+SET\s+[\s\S]*WHERE/i, // UPDATE with WHERE is fine
       /INSERT\s+INTO/i,
       /INSERT\s+OR\s+IGNORE/i,
+      // A trigger only adds behaviour; it is safe while its body neither deletes nor drops
+      // anything (migration 076's write-generation triggers only upsert a counter row).
+      /^(?![\s\S]*\b(?:DELETE\s+FROM|DROP)\b)CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS\b/i,
     ];
 
     for (const sql of sqlBlocks) {

@@ -1,11 +1,21 @@
 import Database from 'better-sqlite3';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import {
+  closeExhausted,
+  recordIntake,
+  scheduleRetry,
+} from '../../../src/services/agent-email/inbound-delivery';
+import type { InboundAgentEmail } from '../../../src/services/agent-email/inbound-message';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
 import type { startTaskRunnerDO } from '../../../src/services/task-runner-do';
+import { admitAndSubmitTriggerExecution } from '../../../src/services/trigger-admission';
+import { TriggerTaskSubmissionPendingError } from '../../../src/services/trigger-submission';
+import { ensurePoolsWithStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
 const projectDataBoundary = vi.hoisted(() => {
@@ -183,7 +193,7 @@ function createEnv(): { sqlite: Database.Database; env: Env } {
   };
 }
 
-function seedReservedFixture(label: string): ReservedFixture {
+async function seedReservedFixture(label: string): Promise<ReservedFixture> {
   const { sqlite, env } = createEnv();
   const suffix = unique(label);
   const userId = `user-${suffix}`;
@@ -299,6 +309,12 @@ function seedReservedFixture(label: string): ReservedFixture {
     },
   };
 
+  // A person picks machines before work runs: nothing joins a pool on its own.
+  await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
+    userId,
+    projectId,
+    includeInstallation: false,
+  });
   return { sqlite, env, userId, projectId, triggerId, executionId, input };
 }
 
@@ -423,8 +439,8 @@ describe('submitReservedTask', () => {
     projectDataBoundary.reset();
   });
 
-  function scheduleFixture(kind: 'schedule' | 'standing_watch' = 'schedule') {
-    const fixture = seedReservedFixture(`creator-authority-${kind}`);
+  async function scheduleFixture(kind: 'schedule' | 'standing_watch' = 'schedule') {
+    const fixture = await seedReservedFixture(`creator-authority-${kind}`);
     fixture.input.source = { ...fixture.input.source, kind, triggeredBy: 'cron' };
     fixture.sqlite
       .prepare(
@@ -437,7 +453,7 @@ describe('submitReservedTask', () => {
   it.each(['schedule', 'standing_watch'] as const)(
     'rejects %s creator demotion during title generation before creating a task',
     async (kind) => {
-      const fixture = scheduleFixture(kind);
+      const fixture = await scheduleFixture(kind);
       let releaseTitle!: () => void;
       let titleStarted!: () => void;
       const started = new Promise<void>((resolve) => {
@@ -472,7 +488,7 @@ describe('submitReservedTask', () => {
   it.each(['suspended-user', 'removed-member', 'viewer-member'] as const)(
     'fences a %s after ProjectData admission while repository access remains available',
     async (revocation) => {
-      const fixture = scheduleFixture();
+      const fixture = await scheduleFixture();
       const { deps } = createSubmissionDependencies({
         afterProjectDataCommit: () => {
           if (revocation === 'suspended-user') {
@@ -505,7 +521,7 @@ describe('submitReservedTask', () => {
   it.each(['owner', 'admin', 'maintainer'] as const)(
     'allows an active %s to start a scheduled task',
     async (role) => {
-      const fixture = scheduleFixture();
+      const fixture = await scheduleFixture();
       fixture.sqlite
         .prepare(`UPDATE project_members SET role = ? WHERE project_id = ? AND user_id = ?`)
         .run(role, fixture.projectId, fixture.userId);
@@ -518,7 +534,7 @@ describe('submitReservedTask', () => {
   );
 
   it('reconciles a lost scheduled start receipt after creator revocation without restarting', async () => {
-    const fixture = scheduleFixture();
+    const fixture = await scheduleFixture();
     let started = false;
     const { deps } = createSubmissionDependencies({
       startTaskRunner: vi.fn(async () => {
@@ -544,7 +560,7 @@ describe('submitReservedTask', () => {
   });
 
   it('keeps an unconfirmed scheduled start pending after creator revocation', async () => {
-    const fixture = scheduleFixture();
+    const fixture = await scheduleFixture();
     const { deps } = createSubmissionDependencies({
       startTaskRunner: vi.fn(async () => {
         throw new Error('lost start response');
@@ -568,7 +584,7 @@ describe('submitReservedTask', () => {
   });
 
   it('converges simultaneous same-intent submissions to one task, status, chat, and prompt', async () => {
-    const fixture = seedReservedFixture('same-intent');
+    const fixture = await seedReservedFixture('same-intent');
     // Provision the pool before racing submissions: catalog bootstrap has its own
     // lifecycle and must not turn this test into a provider-catalog setup race.
     await ensureDefaultCapacityPoolsForExistingCredentials(
@@ -656,7 +672,7 @@ From that information, derive the repository change request and append a short n
       ['webhook', webhookPrompt],
     ] as const) {
       expect(prompt.length).toBeGreaterThan(160);
-      const fixture = seedReservedFixture(`rendered-${label}`);
+      const fixture = await seedReservedFixture(`rendered-${label}`);
       const input = { ...fixture.input, prompt };
       const { deps } = createSubmissionDependencies();
 
@@ -671,7 +687,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('separates identity caps from the configured prompt message limit', async () => {
-    const fixture = seedReservedFixture('prompt-limit');
+    const fixture = await seedReservedFixture('prompt-limit');
     const multibytePrompt = 'é'.repeat(161);
     const encodedBytes = new TextEncoder().encode(multibytePrompt).length;
     fixture.env.MAX_TASK_MESSAGE_LENGTH = '161';
@@ -685,7 +701,7 @@ From that information, derive the repository change request and append a short n
       )
     ).resolves.toMatchObject({ outcome: 'admitted' });
 
-    const overLimitFixture = seedReservedFixture('prompt-over-limit');
+    const overLimitFixture = await seedReservedFixture('prompt-over-limit');
     overLimitFixture.env.MAX_TASK_MESSAGE_LENGTH = '160';
     const rejected = await submitReservedTask(
       overLimitFixture.env,
@@ -700,8 +716,8 @@ From that information, derive the repository change request and append a short n
     expectNoSubmission(overLimitFixture);
   });
 
-  it('validates identity, display and reason fields with separate boundaries', () => {
-    const fixture = seedReservedFixture('identity-validation');
+  it('validates identity, display and reason fields with separate boundaries', async () => {
+    const fixture = await seedReservedFixture('identity-validation');
     const validIdentity = 'x'.repeat(160);
     const oversizedIdentity = 'x'.repeat(161);
     const base: ReservedTaskSubmissionInput = {
@@ -784,7 +800,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('rejects a missing source reservation before creating any task effects', async () => {
-    const fixture = seedReservedFixture('missing-source');
+    const fixture = await seedReservedFixture('missing-source');
     fixture.sqlite
       .prepare('DELETE FROM trigger_executions WHERE id = ?')
       .run(fixture.input.source.sourceExecutionId);
@@ -799,8 +815,38 @@ From that information, derive the repository change request and append a short n
     expectNoSubmission(fixture);
   });
 
+  it('fences a managed queue reservation that expires while preparation is in flight', async () => {
+    const fixture = await seedReservedFixture('queue-expiry-race');
+    fixture.sqlite
+      .prepare("UPDATE trigger_executions SET queue_expires_at=?,status='queued' WHERE id=?")
+      .run(new Date(Date.now() + 60000).toISOString(), fixture.input.source.sourceExecutionId);
+    const { deps } = createSubmissionDependencies();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered = false;
+    const generateTitle = deps.generateTitle;
+    deps.generateTitle = async (...args) => {
+      entered = true;
+      await gate;
+      if (!generateTitle) throw new Error('Missing title boundary');
+      return generateTitle(...args);
+    };
+    const work = submitReservedTask(fixture.env, fixture.input, deps);
+    await vi.waitFor(() => expect(entered).toBe(true));
+    fixture.sqlite
+      .prepare(
+        "UPDATE trigger_executions SET status='dropped',skip_reason='queue_expired',queue_expires_at='2000-01-01' WHERE id=?"
+      )
+      .run(fixture.input.source.sourceExecutionId);
+    release();
+    await expect(work).rejects.toThrow('can no longer start a task');
+    expectNoSubmission(fixture);
+  });
+
   it('rejects a trigger execution reserved for another task before creating effects', async () => {
-    const fixture = seedReservedFixture('source-conflict');
+    const fixture = await seedReservedFixture('source-conflict');
     fixture.sqlite
       .prepare('UPDATE trigger_executions SET task_id = ? WHERE id = ?')
       .run('other-task', fixture.input.source.sourceExecutionId);
@@ -816,7 +862,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('rejects conflicting reuse of the reserved task identity before new effects', async () => {
-    const fixture = seedReservedFixture('conflict');
+    const fixture = await seedReservedFixture('conflict');
     const { deps } = createSubmissionDependencies();
 
     await expect(submitReservedTask(fixture.env, fixture.input, deps)).resolves.toMatchObject({
@@ -835,12 +881,232 @@ From that information, derive the repository change request and append a short n
     expectOneSubmission(fixture);
   });
 
+  it('signed GitHub ingress retries overlapping leases through real task submission once', async () => {
+    const [
+      { Hono },
+      { createHmac },
+      { handleGitHubWebhook },
+      recovery,
+      runner,
+      title,
+      repository,
+      producer,
+    ] = await Promise.all([
+      import('hono'),
+      import('node:crypto'),
+      import('../../../src/routes/github-webhook'),
+      import('../../../src/services/github-trigger-recovery'),
+      import('../../../src/services/task-runner-do'),
+      import('../../../src/services/task-title'),
+      import('../../../src/routes/projects/_helpers'),
+      import('../../../src/services/github-project-event-producer'),
+    ]);
+    const fixture = await seedReservedFixture('signed-github');
+    fixture.env.GITHUB_WEBHOOK_SECRET = 'synthetic-signed-secret';
+    fixture.sqlite.prepare('DELETE FROM trigger_executions WHERE id=?').run(fixture.executionId);
+    fixture.sqlite
+      .prepare('UPDATE github_installations SET external_installation_id=?')
+      .run('12345');
+    fixture.sqlite
+      .prepare("UPDATE projects SET github_repo_id=9876, repository='acme/synthetic'")
+      .run();
+    fixture.sqlite
+      .prepare(
+        "UPDATE triggers SET source_type='github',next_execution_sequence=1,max_concurrent=1,skip_if_running=1,trigger_count=0"
+      )
+      .run();
+    fixture.sqlite
+      .prepare(
+        "INSERT INTO github_trigger_configs(id,trigger_id,event_type,filters_json) VALUES('config',?,'issues','{}')"
+      )
+      .run(fixture.triggerId);
+    fixture.sqlite.exec(
+      'DROP TABLE github_trigger_inbox; ALTER TABLE trigger_executions DROP COLUMN github_delivery_id; ALTER TABLE trigger_executions DROP COLUMN admission_snapshot_json; ALTER TABLE trigger_executions DROP COLUMN submission_recorded_at;'
+    );
+    const { readFileSync } = await import('node:fs');
+    fixture.sqlite.exec(
+      readFileSync(
+        new URL('../../../src/db/migrations/0195_github_trigger_recovery.sql', import.meta.url),
+        'utf8'
+      )
+    );
+    const started = new Set<string>();
+    let unblock!: () => void;
+    const suspended = new Promise<void>((resolve) => {
+      unblock = resolve;
+    });
+    let entered!: () => void;
+    const boundary = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let physicalStarts = 0;
+    const startSpy = vi
+      .spyOn(runner, 'startTaskRunnerDO')
+      .mockImplementation(async (_env, input) => {
+        physicalStarts++;
+        started.add(input.taskId);
+        entered();
+        await suspended;
+      });
+    const ensureSpy = vi
+      .spyOn(runner, 'ensureTaskRunnerStarted')
+      .mockImplementation(async (_env, id) => started.has(id));
+    const titleSpy = vi
+      .spyOn(title, 'generateTaskTitle')
+      .mockResolvedValue('Synthetic trigger test');
+    const accessSpy = vi
+      .spyOn(repository, 'requireRepositoryOwnerAccess')
+      .mockResolvedValue(undefined);
+    const producerSpy = vi.spyOn(producer, 'admitGitHubWebhookProjectEvents').mockResolvedValue({
+      processed: false,
+      deliveryId: 'signed-overlap',
+      eventType: 'issues',
+      admittedEvents: [],
+      reason: 'test_boundary',
+    });
+    const app = new Hono<{ Bindings: Env }>();
+    app.post('/api/github/webhook', handleGitHubWebhook);
+    const payload = JSON.stringify({
+      action: 'opened',
+      installation: { id: 12345 },
+      repository: { id: 9876, full_name: 'acme/synthetic' },
+      sender: { login: 'synthetic', type: 'User' },
+      issue: { number: 1, title: 'Synthetic only', body: null, labels: [] },
+    });
+    const pending: Promise<unknown>[] = [];
+    try {
+      const response = await app.request(
+        '/api/github/webhook',
+        {
+          method: 'POST',
+          headers: {
+            'x-github-event': 'issues',
+            'x-github-delivery': 'signed-overlap',
+            'x-hub-signature-256': `sha256=${createHmac('sha256', fixture.env.GITHUB_WEBHOOK_SECRET).update(payload).digest('hex')}`,
+          },
+          body: payload,
+        },
+        fixture.env,
+        { waitUntil: (p) => pending.push(p), passThroughOnException: () => {} }
+      );
+      expect(response.status).toBe(200);
+      await boundary;
+      fixture.sqlite.prepare("UPDATE github_trigger_inbox SET lease_until='2000-01-01'").run();
+      await recovery.runGitHubTriggerRecovery(fixture.env);
+      expect(physicalStarts).toBe(1);
+      unblock();
+      await Promise.all(pending);
+      expect(scalar(fixture.sqlite, 'SELECT COUNT(*) AS value FROM tasks')).toBe(1);
+      expect(scalar(fixture.sqlite, 'SELECT COUNT(*) AS value FROM trigger_executions')).toBe(1);
+      expect(
+        scalar(fixture.sqlite, 'SELECT COUNT(*) AS value FROM task_submission_checkpoints')
+      ).toBe(1);
+      expect(
+        fixture.sqlite.prepare('SELECT state,payload_json FROM github_trigger_inbox').get()
+      ).toEqual({ state: 'completed', payload_json: null });
+      expect(scalar(fixture.sqlite, 'SELECT trigger_count AS value FROM triggers')).toBe(1);
+    } finally {
+      unblock();
+      await Promise.allSettled(pending);
+      startSpy.mockRestore();
+      ensureSpy.mockRestore();
+      titleSpy.mockRestore();
+      accessSpy.mockRestore();
+      producerSpy.mockRestore();
+      fixture.sqlite.close();
+    }
+  });
+
+  it.each(['afterD1Commit', 'afterProjectDataCommit', 'afterRunnerStartConfirmed'] as const)(
+    'GitHub keyed admission reuses actual task/checkpoint after %s crash',
+    async (hook) => {
+      const fixture = await seedReservedFixture(`github-${hook}`);
+      fixture.sqlite.prepare('DELETE FROM trigger_executions WHERE id=?').run(fixture.executionId);
+      fixture.sqlite
+        .prepare(
+          'CREATE UNIQUE INDEX github_execution_identity ON trigger_executions(github_delivery_id,trigger_id) WHERE github_delivery_id IS NOT NULL'
+        )
+        .run();
+      fixture.sqlite
+        .prepare(
+          'UPDATE triggers SET next_execution_sequence=1,max_concurrent=1,skip_if_running=1,trigger_count=0 WHERE id=?'
+        )
+        .run(fixture.triggerId);
+      const [trigger] = await drizzle(fixture.env.DATABASE, { schema })
+        .select()
+        .from(schema.triggers)
+        .where(eq(schema.triggers.id, fixture.triggerId));
+      const base = createSubmissionDependencies();
+      let failOnce = true;
+      const deps = {
+        ...base.deps,
+        [hook]: () => {
+          if (failOnce) {
+            failOnce = false;
+            throw new Error('synthetic crash');
+          }
+        },
+      };
+      const submitter: Parameters<typeof admitAndSubmitTriggerExecution>[2] = async (
+        _env,
+        input
+      ) => {
+        const result = await submitReservedTask(
+          fixture.env,
+          {
+            ...fixture.input,
+            identities: reservedIdentitiesForTriggerExecution(input.triggerExecutionId),
+            prompt: input.renderedPrompt,
+            source: {
+              ...fixture.input.source,
+              sourceExecutionId: input.triggerExecutionId,
+              triggerExecutionId: input.triggerExecutionId,
+            },
+          },
+          deps
+        );
+        if (result.outcome === 'admitted')
+          return {
+            taskId: result.taskId,
+            sessionId: result.sessionId,
+            branchName: result.branchName,
+          };
+        if (result.outcome === 'pending')
+          throw new TriggerTaskSubmissionPendingError({
+            taskId: result.taskId,
+            sessionId: result.sessionId,
+            branchName: result.branchName,
+          });
+        throw new Error(result.outcome);
+      };
+      const input = {
+        trigger: trigger!,
+        githubDeliveryId: 'synthetic-delivery',
+        eventType: 'github.issues.opened',
+        triggeredBy: 'github' as const,
+        renderPrompt: () => fixture.input.prompt,
+      };
+      const first = await admitAndSubmitTriggerExecution(fixture.env, input, submitter);
+      expect(first.outcome).toBe('failed');
+      const retry = await admitAndSubmitTriggerExecution(fixture.env, input, submitter);
+      expect(retry.outcome).toBe('submitted');
+      expect(scalar(fixture.sqlite, 'SELECT COUNT(*) AS value FROM trigger_executions')).toBe(1);
+      expect(scalar(fixture.sqlite, 'SELECT COUNT(*) AS value FROM tasks')).toBe(1);
+      expect(
+        scalar(fixture.sqlite, 'SELECT COUNT(*) AS value FROM task_submission_checkpoints')
+      ).toBe(1);
+      expect(base.startInputs).toHaveLength(1);
+      expect(scalar(fixture.sqlite, 'SELECT trigger_count AS value FROM triggers')).toBe(1);
+      fixture.sqlite.close();
+    }
+  );
+
   it.each([
     ['D1 commit', 'afterD1Commit'],
     ['ProjectData commit', 'afterProjectDataCommit'],
     ['TaskRunner confirmation', 'afterRunnerStartConfirmed'],
   ] as const)('recovers after interruption following the %s boundary', async (_label, hookName) => {
-    const fixture = seedReservedFixture(`interrupt-${hookName}`);
+    const fixture = await seedReservedFixture(`interrupt-${hookName}`);
     let failOnce = true;
     const base = createSubmissionDependencies();
     const deps: ReservedTaskSubmissionDependencies = {
@@ -862,7 +1128,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('recovers a lost TaskRunner acknowledgement on retry without starting a second task', async () => {
-    const fixture = seedReservedFixture('lost-ack');
+    const fixture = await seedReservedFixture('lost-ack');
     const startedTaskIds = new Set<string>();
     const startInputs: TaskRunnerStartInput[] = [];
     let tick = 0;
@@ -896,7 +1162,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('keeps an ambiguous negative start probe pending until a delayed original start is visible', async () => {
-    const fixture = seedReservedFixture('delayed-original-start');
+    const fixture = await seedReservedFixture('delayed-original-start');
     const startedTaskIds = new Set<string>();
     let commitDelayedOriginalStart: (() => void) | null = null;
     let tick = 0;
@@ -936,7 +1202,7 @@ From that information, derive the repository change request and append a short n
   it.each(['delegated', 'in_progress'] as const)(
     'returns admitted when a lost start acknowledgement races with a %s D1 winner',
     async (winnerStatus) => {
-      const fixture = seedReservedFixture(`${winnerStatus}-winner`);
+      const fixture = await seedReservedFixture(`${winnerStatus}-winner`);
       let tick = 0;
       const deps: ReservedTaskSubmissionDependencies = {
         now: () => `2026-09-07T00:04:${String(++tick).padStart(2, '0')}.000Z`,
@@ -968,7 +1234,7 @@ From that information, derive the repository change request and append a short n
   );
 
   it('does not fail, stop, or restart a terminal task on a late retry', async () => {
-    const fixture = seedReservedFixture('terminal');
+    const fixture = await seedReservedFixture('terminal');
     const base = createSubmissionDependencies();
 
     await submitReservedTask(fixture.env, fixture.input, base.deps);
@@ -990,7 +1256,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('revalidates repository authority immediately before physical start', async () => {
-    const fixture = seedReservedFixture('authority');
+    const fixture = await seedReservedFixture('authority');
     const { deps, startInputs } = createSubmissionDependencies({
       requireRepositoryAccess: vi
         .fn()
@@ -1011,7 +1277,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('rejects unavailable skills before creating a task', async () => {
-    const fixture = seedReservedFixture('skill-missing');
+    const fixture = await seedReservedFixture('skill-missing');
     const { deps } = createSubmissionDependencies();
     const result = await submitReservedTask(
       fixture.env,
@@ -1030,7 +1296,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('rejects stopped chat-session reuse from ProjectData without starting the runner', async () => {
-    const fixture = seedReservedFixture('archive-conflict');
+    const fixture = await seedReservedFixture('archive-conflict');
     const stoppedSessionId = `stopped-${fixture.input.identities.chatSessionId}`;
     projectDataBoundary.sessions.set(stoppedSessionId, {
       projectId: fixture.projectId,
@@ -1054,7 +1320,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('persists canonical placement and credential attribution in D1 and TaskRunner input', async () => {
-    const fixture = seedReservedFixture('placement');
+    const fixture = await seedReservedFixture('placement');
     const { deps, startInputs } = createSubmissionDependencies();
     const input: ReservedTaskSubmissionInput = {
       ...fixture.input,
@@ -1092,5 +1358,170 @@ From that information, derive the repository change request and append a short n
       credentialAttributionSource: 'project',
       cloudProvider: 'hetzner',
     });
+  });
+});
+
+describe('agent email executions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    projectDataBoundary.reset();
+  });
+
+  const RECEIVED = new Date('2026-09-07T00:00:00.000Z');
+  const LEASE_MS = 120_000;
+  const ADDRESS = 'agent+k3j2h7m9q2xw4n8p@agents.example.com';
+
+  function inboundEmail(messageId: string): InboundAgentEmail {
+    return {
+      envelopeFrom: 'alice@example.com',
+      envelopeTo: ADDRESS,
+      from: 'alice@example.com',
+      fromName: 'Alice',
+      subject: 'Please look at this',
+      messageId,
+      inReplyTo: null,
+      references: [],
+      text: 'Hello',
+      textTruncated: false,
+      attachments: [],
+      autoSubmitted: null,
+      precedence: null,
+      hasListId: false,
+    };
+  }
+
+  /**
+   * An email stored the way the email() handler stores it, for the fixture's trigger, with its
+   * execution reserved under the email's own execution id, as admission reserves it.
+   */
+  async function storedEmail(fixture: ReservedFixture, messageId: string, sequence: number) {
+    const db = drizzle(fixture.env.DATABASE, { schema });
+    fixture.sqlite
+      .prepare(`UPDATE triggers SET source_type = 'email', max_concurrent = 1 WHERE id = ?`)
+      .run(fixture.triggerId);
+    const intake = await recordIntake(
+      db,
+      {
+        triggerId: fixture.triggerId,
+        projectId: fixture.projectId,
+        messageId,
+        referencesHeader: null,
+        fromAddress: 'alice@example.com',
+        toAddress: ADDRESS,
+        subject: 'Please look at this',
+        rawSize: 512,
+      },
+      { email: inboundEmail(messageId), receivedAt: RECEIVED.toISOString() },
+      RECEIVED,
+      LEASE_MS
+    );
+    if (intake.kind !== 'new') throw new Error('expected a newly stored email');
+    const { executionId } = intake.delivery;
+    fixture.sqlite
+      .prepare(
+        `INSERT INTO trigger_executions (
+           id, trigger_id, project_id, status, rendered_prompt, scheduled_at, sequence_number,
+           created_at
+         ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?)`
+      )
+      .run(
+        executionId,
+        fixture.triggerId,
+        fixture.projectId,
+        fixture.input.prompt,
+        RECEIVED.toISOString(),
+        sequence,
+        RECEIVED.toISOString()
+      );
+    const input: ReservedTaskSubmissionInput = {
+      ...fixture.input,
+      identities: reservedIdentitiesForTriggerExecution(executionId),
+      source: {
+        ...fixture.input.source,
+        triggeredBy: 'email',
+        repositoryAccessFlow: 'trigger-email',
+        sourceExecutionId: executionId,
+        triggerExecutionId: executionId,
+      },
+    };
+    return { db, delivery: intake.delivery, input };
+  }
+
+  /** Submission dependencies whose title generation waits until released. */
+  function pausedAtTitle() {
+    let titleStarted!: () => void;
+    let releaseTitle!: () => void;
+    const started = new Promise<void>((resolve) => {
+      titleStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseTitle = resolve;
+    });
+    const submission = createSubmissionDependencies({
+      generateTitle: vi.fn(async () => {
+        titleStarted();
+        await release;
+        return 'Slow title';
+      }),
+    });
+    return { ...submission, started, release: () => releaseTitle() };
+  }
+
+  it('refuses a late task for an email SAM gave up on mid-submission, after another email took its slot', async () => {
+    const fixture = await seedReservedFixture('email-late-task');
+    const first = await storedEmail(fixture, '<first@example.com>', 2);
+    const slow = pausedAtTitle();
+    // The attempt passed every check and is on its way to creating the task.
+    const late = submitReservedTask(fixture.env, first.input, slow.deps);
+    await slow.started;
+
+    // Its lease ran out and every attempt is used, so the sweep gives the email up. That
+    // releases the run slot the email held.
+    expect(
+      await closeExhausted(first.db, new Date(RECEIVED.getTime() + LEASE_MS + 1), 1, 10)
+    ).toEqual({ gaveUp: 1, accepted: 0 });
+    expect(
+      fixture.sqlite
+        .prepare('SELECT status, task_id FROM trigger_executions WHERE id = ?')
+        .get(first.delivery.executionId)
+    ).toEqual({ status: 'failed', task_id: null });
+
+    // The trigger's next email takes the slot and starts its task.
+    const second = await storedEmail(fixture, '<second@example.com>', 3);
+    const fast = createSubmissionDependencies();
+    expect(await submitReservedTask(fixture.env, second.input, fast.deps)).toMatchObject({
+      outcome: 'admitted',
+    });
+
+    slow.release();
+    await expect(late).rejects.toThrow(/can no longer start a task/);
+
+    expectNoSubmission(fixture, first.input);
+    expectOneSubmission(fixture, second.input);
+    expect(slow.deps.startTaskRunner).not.toHaveBeenCalled();
+    expect(
+      scalar(
+        fixture.sqlite,
+        'SELECT COUNT(*) AS value FROM tasks WHERE trigger_id = ?',
+        fixture.triggerId
+      )
+    ).toBe(1);
+  });
+
+  it('still creates the task of an email that is only waiting for a retry', async () => {
+    const fixture = await seedReservedFixture('email-retry-wait');
+    const first = await storedEmail(fixture, '<first@example.com>', 2);
+    const slow = pausedAtTitle();
+    const late = submitReservedTask(fixture.env, first.input, slow.deps);
+    await slow.started;
+
+    // An attempt failed and scheduled a retry: the email is still SAM's to deliver.
+    expect(
+      await scheduleRetry(first.db, first.delivery, RECEIVED, 60_000, 'TaskRunner unavailable')
+    ).toBe(true);
+
+    slow.release();
+    expect(await late).toMatchObject({ outcome: 'admitted' });
+    expectOneSubmission(fixture, first.input);
   });
 });

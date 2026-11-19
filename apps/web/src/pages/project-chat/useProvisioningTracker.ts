@@ -42,6 +42,7 @@ import type { ChatSessionListItem } from '../../lib/api';
 import { getProjectTask, getWorkspace } from '../../lib/api';
 import type { ProvisioningState } from './types';
 import {
+  isProviderLimitHeld,
   isProvisioningStatus,
   isTerminal,
   PROVISIONING_RESTORE_RETRIES,
@@ -88,6 +89,7 @@ export function useProvisioningTracker({
             errorMessage: task.errorMessage ?? null,
             requestedVmSize: task.requestedVmSize ?? prev.requestedVmSize,
             provisionedVmSize: task.provisionedVmSize ?? prev.provisionedVmSize,
+            providerLimitHeld: isProviderLimitHeld(task),
           };
           if (task.workspaceId && !prev.workspaceId) next.workspaceId = task.workspaceId;
           return next;
@@ -174,6 +176,7 @@ export function useProvisioningTracker({
           workspaceUrl: null,
           requestedVmSize: task.requestedVmSize ?? null,
           provisionedVmSize: task.provisionedVmSize ?? null,
+          providerLimitHeld: isProviderLimitHeld(task),
         });
       } catch {
         // Transient failure (offline blip, 5xx). Retry a bounded number of

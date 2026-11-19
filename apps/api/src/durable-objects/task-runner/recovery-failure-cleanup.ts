@@ -33,7 +33,25 @@ async function resleepRecoverySession(
   const { sleepSession, getSession } = await import('../../services/project-data');
   const session = await getSession(rc.env, state.projectId, recoverySessionId);
   if (!(await ownsRecoveryAttempt(state, rc))) return false;
-  if (session?.status !== 'sleeping') {
+  if (session?.status === 'stopped') {
+    // A terminal mirror is repairable only while this exact replacement still
+    // owns the restorable snapshot. Ordinary sleep must never revive stopped chats.
+    const { repairFailedSessionForSnapshotRecovery } = await import('../../services/project-data');
+    if (!state.stepResults.workspaceId) {
+      throw new Error('Stopped recovery conversation has no authorized replacement workspace');
+    }
+    await repairFailedSessionForSnapshotRecovery(
+      rc.env,
+      state.projectId,
+      recoverySessionId,
+      state.stepResults.workspaceId,
+      state.taskId,
+      state.config.recoveryAttemptId
+    );
+    if ((await getSession(rc.env, state.projectId, recoverySessionId))?.status !== 'sleeping') {
+      throw new Error('Stopped recovery conversation has no authorized snapshot wake claim');
+    }
+  } else if (session?.status !== 'sleeping') {
     const slept = await sleepSession(rc.env, state.projectId, recoverySessionId, {
       failedOnly: session?.status === 'failed',
       ...(state.config.recoveryAttemptId
@@ -82,7 +100,6 @@ export async function failRecoveryLifecycle(
 
   // Keep recovery_status=waking until both the session and replacement cleanup
   // converge. Releasing this claim earlier admits a new wake during old cleanup.
-  await options.beforeRelease?.();
   if (!(await ownsRecoveryAttempt(state, rc))) return;
   if (preserve && state.config.recoveryAttemptId && state.stepResults.workspaceId) {
     // A failed replacement must relinquish the unique workspace/chat binding
@@ -115,6 +132,11 @@ export async function failRecoveryLifecycle(
       )
       .run();
   }
+  // NodeLifecycle's deletion identity includes chatSessionId. Detach before
+  // scheduling cleanup, so the handoff cannot revoke its own queued deletion.
+  if (!(await ownsRecoveryAttempt(state, rc))) return;
+  await options.beforeRelease?.();
+  if (!(await ownsRecoveryAttempt(state, rc))) return;
   const { drizzle } = await import('drizzle-orm/d1');
   const schema = await import('../../db/schema');
   const { failSessionSnapshotRecovery } = await import('../../services/session-snapshots');

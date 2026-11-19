@@ -1,8 +1,9 @@
 import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChatSessionResponse } from '../../../src/lib/api';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 const mocks = vi.hoisted(() => ({
   updateProjectTaskStatus: vi.fn(),
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   getProjectTask: vi.fn(),
   listChatMessages: vi.fn(),
   updateWorkspacePortsPublic: vi.fn(),
+  getSessionAgentCredential: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -19,6 +21,12 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getProjectTask: mocks.getProjectTask,
   listChatMessages: mocks.listChatMessages,
   updateWorkspacePortsPublic: mocks.updateWorkspacePortsPublic,
+  getSessionAgentCredential: mocks.getSessionAgentCredential,
+}));
+
+// The session's account line is a TanStack query keyed on the signed-in user.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
 }));
 
 // The usage chip owns a TanStack query; it has its own tests (credential-limit-chip.test.tsx).
@@ -50,7 +58,10 @@ vi.mock('react-router', () => ({
   ),
 }));
 
-vi.mock('@simple-agent-manager/ui', () => ({
+// Spreads the real module so new SAM Glass primitives (Chip, AvatarStack, paneClassName) render
+// for real; only the pieces this suite needs to observe are replaced.
+vi.mock('@simple-agent-manager/ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/ui')>()),
   Button: ({
     children,
     onClick,
@@ -80,39 +91,34 @@ vi.mock('@simple-agent-manager/ui', () => ({
   Spinner: () => <span data-testid="spinner" />,
 }));
 
-vi.mock('lucide-react', () => ({
-  AlertTriangle: () => <span />,
-  Bot: () => <span />,
-  Box: () => <span />,
-  CheckCircle2: () => <span data-testid="icon-check-circle" />,
-  ChevronDown: () => <span />,
-  ChevronLeft: () => <span />,
-  ChevronRight: () => <span />,
-  ChevronUp: () => <span />,
-  Clock: () => <span />,
-  Cloud: () => <span />,
-  Copy: () => <span data-testid="icon-copy" />,
-  Cpu: () => <span />,
-  ExternalLink: () => <span />,
-  Flag: () => <span />,
-  FolderOpen: () => <span />,
-  GitBranch: () => <span />,
-  GitCompare: () => <span />,
-  GitFork: () => <span />,
-  Globe: () => <span />,
-  Hash: () => <span />,
-  Info: () => <span />,
-  Loader2: () => <span />,
-  MapPin: () => <span />,
-  MessageSquare: () => <span />,
-  MessageSquareQuote: () => <span />,
-  Monitor: () => <span />,
-  RotateCcw: () => <span />,
-  Server: () => <span />,
-  Tag: () => <span />,
-  Timer: () => <span />,
-  User2: () => <span />,
-}));
+/*
+ * Lucide is stubbed so the header's icons do not dominate the rendered output, and so two of
+ * them carry stable test ids.
+ *
+ * It spreads the real module rather than listing every icon: an allowlist breaks the whole
+ * suite the moment any component in this tree imports an icon nobody added here, which is
+ * exactly what happened when the pull-request state badge arrived.
+ */
+vi.mock('lucide-react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('lucide-react')>();
+  const blank = () => <span />;
+  return new Proxy(
+    {
+      ...actual,
+      CheckCircle2: () => <span data-testid="icon-check-circle" />,
+      Copy: () => <span data-testid="icon-copy" />,
+    },
+    {
+      get(target, property, receiver) {
+        // Any other icon renders as an empty span; non-component exports pass through.
+        const value = Reflect.get(target, property, receiver);
+        if (typeof property !== 'string') return value;
+        if (property === 'CheckCircle2' || property === 'Copy') return value;
+        return /^[A-Z]/.test(property) && typeof value === 'function' ? blank : value;
+      },
+    }
+  );
+});
 
 import { useState } from 'react';
 
@@ -235,7 +241,7 @@ function renderHeader(overrides: Partial<HarnessProps> = {}) {
     onSessionMutated: vi.fn(),
     ...overrides,
   };
-  const result = render(<HeaderHarness {...props} />);
+  const result = render(<HeaderHarness {...props} />, { wrapper: QueryTestWrapper });
   return { ...result, props };
 }
 
@@ -243,15 +249,17 @@ describe('SessionHeader', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.updateProjectTaskStatus.mockResolvedValue({});
+    mocks.getSessionAgentCredential.mockResolvedValue({ credential: null, runtime: null });
     mocks.deleteWorkspace.mockResolvedValue({});
     mocks.listChatMessages.mockResolvedValue({ messages: [], hasMore: false });
     mocks.updateWorkspacePortsPublic.mockResolvedValue(makeWorkspace({ portsPublicEnabled: true }));
   });
 
-  it('mounts the usage chip for the session\'s project and agent session', () => {
+  it("mounts the usage chip for the session's project and agent session", () => {
     renderHeader({ session: makeSession({ agentSessionId: 'agent-123' }) });
     expect(chipMock.SessionCredentialLimitChip).toHaveBeenCalledWith(
-      expect.objectContaining({ projectId: 'proj-1', agentSessionId: 'agent-123' }),
+      // The desktop header uses the small chip size, so the usage chip does too.
+      expect.objectContaining({ projectId: 'proj-1', agentSessionId: 'agent-123', size: 'sm' }),
       undefined
     );
   });
@@ -276,6 +284,54 @@ describe('SessionHeader', () => {
     expect(screen.getByText('Stopped')).toBeInTheDocument();
   });
 
+  it('puts the status and the workspace profile in one chip', () => {
+    renderHeader({
+      sessionState: 'active',
+      workspace: makeWorkspace({ workspaceProfile: 'lightweight' }),
+    });
+    const status = screen.getByText('Active').closest('span');
+    expect(status).toHaveTextContent('Active· Lightweight');
+    expect(status).toHaveAttribute('title', 'Workspace profile: Lightweight');
+    // One chip, not two: no standalone profile badge.
+    expect(screen.queryByLabelText('Workspace profile: Lightweight')).not.toBeInTheDocument();
+  });
+
+  it('keeps a recovery container as its own chip instead of merging it', () => {
+    renderHeader({ workspace: makeWorkspace({ status: 'recovery' }) });
+    expect(
+      screen.getByRole('button', { name: /Recovery container: devcontainer build failed/ })
+    ).toBeInTheDocument();
+    expect(screen.getByText('Active').closest('span')).toHaveTextContent(/^Active$/);
+  });
+
+  it('names the creator only when someone else started the session', () => {
+    const { unmount } = renderHeader({ session: makeSession({ isMine: true }) });
+    expect(screen.queryByText('Your session')).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/^Created by/)).not.toBeInTheDocument();
+    expect(screen.getByText('Test Session')).toBeInTheDocument();
+    unmount();
+
+    renderHeader({
+      session: makeSession({
+        isMine: false,
+        createdByUserId: 'user-2',
+        createdBy: { id: 'user-2', name: 'Alex Rivera', email: 'alex@example.com' },
+      } as Partial<ChatSessionResponse>),
+    });
+    expect(screen.getByTitle('Created by Alex Rivera')).toHaveTextContent('Alex Rivera');
+  });
+
+  it('leaves comments to the tool rail on desktop', () => {
+    const onOpenComments = vi.fn();
+    renderHeader({ onOpenComments, unresolvedCommentCount: 2, needsAttentionCommentCount: 1 });
+    const header = within(screen.getByTestId('session-header'));
+    expect(header.queryByRole('button', { name: /comment/i })).not.toBeInTheDocument();
+    expect(header.getByText('Test Session')).toBeInTheDocument();
+    // The rail's Comments action is where they open from (its count wiring is covered in
+    // use-session-tools.test.tsx).
+    expect(screen.getByTestId('session-tool-comments')).toBeInTheDocument();
+  });
+
   it('exposes the details control in the tool rail', () => {
     renderHeader({ taskEmbed: makeTaskEmbed({ outputBranch: 'sam/test' }) });
     expect(screen.getByLabelText(DETAILS_CONTROL)).toBeInTheDocument();
@@ -293,6 +349,130 @@ describe('SessionHeader', () => {
     fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
     // Branch should now be visible
     expect(screen.getByText('sam/test')).toBeInTheDocument();
+  });
+
+  it('shows the account the agent ran on and the tier that chose it', async () => {
+    mocks.getSessionAgentCredential.mockResolvedValue({
+      credential: {
+        agentType: 'claude-code',
+        credentialSource: 'user',
+        credentialScope: 'profile',
+        accountName: 'Claude Max (personal)',
+        isOwnSession: true,
+      },
+      runtime: null,
+    });
+    renderHeader();
+    fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
+
+    expect(await screen.findByTestId('session-agent-credential')).toHaveTextContent(
+      'Claude Max (personal) · chosen for this profile'
+    );
+    expect(mocks.getSessionAgentCredential).toHaveBeenCalledWith('proj-1', expect.any(String));
+  });
+
+  it('shows the configuration the session actually runs with', async () => {
+    mocks.getSessionAgentCredential.mockResolvedValue({
+      credential: null,
+      runtime: {
+        agentType: 'claude-code',
+        model: 'claude-opus-5-5',
+        effort: 'max',
+        permissionMode: 'default',
+        opencodeProvider: null,
+        skillName: 'do',
+      },
+    });
+    renderHeader();
+    fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
+
+    const configuration = await screen.findByTestId('session-run-configuration');
+    expect(configuration).toHaveTextContent('Model');
+    expect(configuration).toHaveTextContent('claude-opus-5-5');
+    expect(configuration).toHaveTextContent('EffortMax');
+    // The `default` mode id is the agent's always-ask mode, not SAM's default.
+    expect(configuration).toHaveTextContent('PermissionsManual');
+    expect(configuration).toHaveTextContent('Skilldo');
+  });
+
+  it('labels an unset model and effort as the agent defaults', async () => {
+    mocks.getSessionAgentCredential.mockResolvedValue({
+      credential: null,
+      runtime: {
+        agentType: 'openai-codex',
+        model: null,
+        effort: null,
+        permissionMode: 'default',
+        opencodeProvider: null,
+        skillName: null,
+      },
+    });
+    renderHeader();
+    fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
+
+    const configuration = await screen.findByTestId('session-run-configuration');
+    expect(configuration).toHaveTextContent('ModelAgent default');
+    expect(configuration).toHaveTextContent('EffortAuto');
+    // Codex always runs with approvals off, whatever mode was stored.
+    expect(configuration).toHaveTextContent('PermissionsFull access (Codex never asks)');
+    expect(configuration).not.toHaveTextContent('Skill');
+  });
+
+  it('shows the OpenCode provider and omits effort the agent cannot use', async () => {
+    mocks.getSessionAgentCredential.mockResolvedValue({
+      credential: null,
+      runtime: {
+        agentType: 'opencode',
+        model: 'opencode-go/glm-5.2',
+        effort: null,
+        permissionMode: 'acceptEdits',
+        opencodeProvider: 'opencode-go',
+        skillName: null,
+      },
+    });
+    renderHeader();
+    fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
+
+    const configuration = await screen.findByTestId('session-run-configuration');
+    expect(configuration).toHaveTextContent('ProviderOpenCode Go');
+    expect(configuration).not.toHaveTextContent('Effort');
+  });
+
+  it('shows a retry when the configuration fails to load, and recovers', async () => {
+    mocks.getSessionAgentCredential.mockRejectedValue(new Error('network down'));
+    renderHeader();
+    fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
+
+    const retry = await screen.findByRole('button', { name: 'Retry' }, { timeout: 5000 });
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Couldn’t load this session’s configuration'
+    );
+
+    mocks.getSessionAgentCredential.mockResolvedValue({
+      credential: null,
+      runtime: {
+        agentType: 'claude-code',
+        model: null,
+        effort: null,
+        permissionMode: 'plan',
+        opencodeProvider: null,
+        skillName: null,
+      },
+    });
+    fireEvent.click(retry);
+    expect(await screen.findByTestId('session-run-configuration')).toHaveTextContent(
+      'PermissionsPlan Mode'
+    );
+  });
+
+  it('hides the configuration section for sessions without a recorded contract', async () => {
+    renderHeader();
+    fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
+
+    // Liveness: the details panel itself rendered.
+    expect(await screen.findByTestId('session-header-details')).toBeInTheDocument();
+    await waitFor(() => expect(mocks.getSessionAgentCredential).toHaveBeenCalled());
+    expect(screen.queryByTestId('session-run-configuration')).not.toBeInTheDocument();
   });
 
   it('shows the full title and fallback initial prompt in expanded details', () => {
@@ -416,8 +596,14 @@ describe('SessionHeader', () => {
     expect(nodeLink).toHaveAttribute('href', '/nodes/node-1');
   });
 
+  it('offers Cancel task, not Complete, for a task that has not started', () => {
+    renderHeader({ taskEmbed: makeTaskEmbed({ status: 'queued' }) });
+    expect(screen.getByLabelText('Cancel this task before it starts')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Mark this task complete')).not.toBeInTheDocument();
+  });
+
   it('shows the Complete control when the task is eligible', () => {
-    renderHeader({ taskEmbed: makeTaskEmbed({ status: 'running' }) });
+    renderHeader({ taskEmbed: makeTaskEmbed({ status: 'in_progress' }) });
     expect(screen.getByLabelText('Mark this task complete')).toBeInTheDocument();
   });
 
@@ -717,19 +903,150 @@ describe('SessionHeader', () => {
     expect(screen.getByText('Test Session')).toBeInTheDocument();
   });
 
-  describe('hasContentBelow prop', () => {
-    it('includes bottom rounding and green glow when hasContentBelow is false (default)', () => {
+  describe('SAM Glass surface', () => {
+    // The header is a slab laid over the conversation pane, not chrome floating over it: it
+    // keeps its own rounded corners whatever follows it.
+    it('renders as a slab with its own rounded corners', () => {
       const { container } = renderHeader();
       const outer = container.firstElementChild as HTMLElement;
-      expect(outer.className).toContain('rounded-b-2xl');
-      expect(outer.className).toContain('after:');
+      expect(outer.className).toContain('sam-glass--slab');
+      expect(outer.className).toContain('rounded-[var(--sam-radius-slab)]');
+    });
+  });
+
+  describe('on a phone', () => {
+    const PHONE_PORTS = [
+      {
+        port: 8787,
+        address: '0.0.0.0',
+        label: 'Wrangler',
+        url: 'https://ws-1--8787.example.org',
+        detectedAt: '',
+      },
+      {
+        port: 5173,
+        address: '0.0.0.0',
+        label: 'Vite',
+        url: 'https://ws-1--5173.example.org',
+        detectedAt: '',
+      },
+    ];
+
+    beforeEach(() => {
+      // `useIsMobile` reads `(max-width: 767px)`; every other query stays unmatched.
+      vi.mocked(window.matchMedia).mockImplementation(
+        (query: string) =>
+          ({
+            matches: query.includes('max-width: 767px'),
+            media: query,
+            onchange: null,
+            addListener: vi.fn(),
+            removeListener: vi.fn(),
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+            dispatchEvent: vi.fn(),
+          }) as unknown as MediaQueryList
+      );
     });
 
-    it('suppresses bottom rounding and green glow when hasContentBelow is true', () => {
-      const { container } = renderHeader({ hasContentBelow: true });
-      const outer = container.firstElementChild as HTMLElement;
-      expect(outer.className).not.toContain('rounded-b-2xl');
-      expect(outer.className).not.toContain('after:');
+    afterEach(() => {
+      vi.mocked(window.matchMedia).mockImplementation(
+        (query: string) =>
+          ({
+            matches: false,
+            media: query,
+            onchange: null,
+            addListener: vi.fn(),
+            removeListener: vi.fn(),
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+            dispatchEvent: vi.fn(),
+          }) as unknown as MediaQueryList
+      );
+    });
+
+    const openInfo = () =>
+      fireEvent.click(screen.getByRole('button', { name: /Show session info/ }));
+
+    it('collapses to one row: title, the lowest port, and no chips or public-ports switch', () => {
+      renderHeader({ detectedPorts: PHONE_PORTS });
+      const header = screen.getByTestId('session-header');
+      expect(header).toHaveAttribute('data-layout', 'mobile');
+      expect(
+        screen.getByRole('button', { name: /Test Session\. Active\. Show session info/ })
+      ).toBeInTheDocument();
+      // The lowest port is the one kept on screen, as on desktop.
+      expect(screen.getByRole('link', { name: 'Open port 5173' })).toHaveAttribute(
+        'href',
+        expect.stringContaining('/api/workspaces/ws-1/port-access?port=5173')
+      );
+      expect(screen.queryByText('Active')).not.toBeInTheDocument();
+      expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('session-info-sheet')).not.toBeInTheDocument();
+    });
+
+    it('opens the session-info sheet from the title with chips, every port, the switch and the full details', () => {
+      renderHeader({ detectedPorts: PHONE_PORTS });
+      openInfo();
+      const sheet = within(screen.getByTestId('session-info-sheet'));
+      expect(sheet.getByRole('heading', { name: 'Test Session' })).toBeInTheDocument();
+      expect(sheet.getByText('Active')).toBeInTheDocument();
+      expect(sheet.getAllByRole('link', { name: /Wrangler|Vite/ })).toHaveLength(2);
+      expect(sheet.getByRole('switch')).toBeInTheDocument();
+      expect(sheet.getByText('References')).toBeInTheDocument();
+      expect(sheet.getByText('Workload identity (OIDC)')).toBeInTheDocument();
+      // The sheet's own heading carries the title, so the details do not repeat it.
+      expect(sheet.queryByText('Title')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Show session info/ })).toHaveAttribute(
+        'aria-expanded',
+        'true'
+      );
+    });
+
+    it("opens the same sheet from the rail's Details action", () => {
+      renderHeader();
+      fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
+      expect(
+        within(screen.getByTestId('session-info-sheet')).getByText('References')
+      ).toBeInTheDocument();
+    });
+
+    it('closes from its close button, from Escape and from the scrim', () => {
+      renderHeader();
+      openInfo();
+      fireEvent.click(screen.getByRole('button', { name: 'Close session info' }));
+      expect(screen.queryByTestId('session-info-sheet')).not.toBeInTheDocument();
+
+      openInfo();
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(screen.queryByTestId('session-info-sheet')).not.toBeInTheDocument();
+
+      openInfo();
+      fireEvent.click(screen.getByTestId('session-info-sheet-backdrop'));
+      expect(screen.queryByTestId('session-info-sheet')).not.toBeInTheDocument();
+      // Liveness: the one-line header is still there after every close.
+      expect(screen.getByRole('button', { name: /Show session info/ })).toHaveAttribute(
+        'aria-expanded',
+        'false'
+      );
+    });
+
+    it('keeps unresolved comments visible in the row, and hides the chip when there are none', () => {
+      const onOpenComments = vi.fn();
+      const { unmount } = renderHeader({ onOpenComments, unresolvedCommentCount: 2 });
+      fireEvent.click(screen.getByRole('button', { name: '2 unresolved comments' }));
+      expect(onOpenComments).toHaveBeenCalledTimes(1);
+      unmount();
+
+      renderHeader({ onOpenComments, unresolvedCommentCount: 0 });
+      expect(screen.queryByRole('button', { name: 'Comments' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Show session info/ })).toBeInTheDocument();
+    });
+
+    it('keeps a mark-complete error on screen with the sheet closed', () => {
+      renderHeader({ completeError: 'Could not complete the task' });
+      expect(screen.getByText('Could not complete the task')).toBeInTheDocument();
+      expect(screen.queryByTestId('session-info-sheet')).not.toBeInTheDocument();
     });
   });
 });

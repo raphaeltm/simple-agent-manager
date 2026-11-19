@@ -1,0 +1,90 @@
+---
+/**
+ * The software-factory homepage body: hero, the infrastructure floor, how work moves through a
+ * team's process, who it is for, the questions a platform team asks, and the call to action.
+ * Pages render it inside <Base> with <Header />. One script reveals `[data-reveal]` elements once
+ * they scroll into view; with reduced motion they show at rest, and without JS Base.astro's
+ * <noscript> styles show them.
+ */
+import Footer from '../../../../../packages/ui/src/brand/Footer.astro';
+import { SINGLE_VM_INSTALL_SHIPPED } from '../../data/factory-shots';
+import FactoryFloor from './FactoryFloor.astro';
+import FactoryHero from './FactoryHero.astro';
+import FactoryPeople from './FactoryPeople.astro';
+import FactoryQuestions from './FactoryQuestions.astro';
+import WorkLine from './WorkLine.astro';
+import './factory-home.css';
+---
+
+<main class="fh">
+  <FactoryHero />
+  <FactoryFloor />
+  <WorkLine />
+  <FactoryPeople />
+  <FactoryQuestions />
+
+  <section class="fh-section">
+    <div class="container">
+      <div class="fh-cta sam-glass sam-glass-rim" data-reveal>
+        <h2 class="fh-h2">Build your software factory on SAM</h2>
+        <p class="fh-lede">
+          Deploy SAM, connect a cloud account and an agent, and start with one project. Add your
+          repos, your people and your process from there.
+        </p>
+        <div class="fh-actions fh-cta-actions">
+          <a href="/self-host/" class="sam-btn sam-btn--primary">Deploy SAM</a>
+          <a href="/docs/" class="sam-btn sam-btn--glass">Read the docs</a>
+        </div>
+        <p class="fh-note">
+          AGPL-3.0 · Your Cloudflare account{SINGLE_VM_INSTALL_SHIPPED ? ' or one VM' : ''} · Your cloud accounts
+          for the machines
+        </p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<Footer />
+
+<script>
+  const items = [...document.querySelectorAll<HTMLElement>('.fh [data-reveal]')];
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) {
+    items.forEach((el) => el.classList.add('is-in'));
+  } else {
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          e.target.classList.add('is-in');
+          io.unobserve(e.target);
+        }
+      },
+      { rootMargin: '0px 0px -12% 0px', threshold: 0.15 },
+    );
+    items.forEach((el) => io.observe(el));
+  }
+</script>
+
+<style>
+  .fh-cta {
+    position: relative;
+    display: grid;
+    justify-items: center;
+    gap: 16px;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 52px 32px;
+    border-radius: var(--radius-xl);
+    text-align: center;
+  }
+
+  .fh-cta .fh-h2,
+  .fh-cta .fh-lede {
+    margin-inline: auto;
+  }
+
+  .fh-cta-actions {
+    justify-content: center;
+    margin-top: 8px;
+  }
+</style>

@@ -10,17 +10,21 @@ const mocks = vi.hoisted(() => ({
   logError: vi.fn(),
 }));
 
+// The caller's own workspace, linked to the chat (the owner's upload path).
+const linkedWorkspace = {
+  id: 'workspace-local',
+  status: 'running',
+  projectId: 'project-local',
+  nodeId: 'NODE-LOCAL',
+  userId: 'user-local',
+};
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
     select: () => ({
       from: () => ({
         where: () => ({
-          limit: async () => [{
-            id: 'workspace-local',
-            status: 'running',
-            projectId: 'project-local',
-            nodeId: 'NODE-LOCAL',
-          }],
+          orderBy: () => ({ limit: async () => [linkedWorkspace] }),
+          limit: async () => [linkedWorkspace],
         }),
       }),
     }),
@@ -28,7 +32,9 @@ vi.mock('drizzle-orm/d1', () => ({
 }));
 vi.mock('../../../src/middleware/auth', () => ({ getUserId: () => 'user-local' }));
 vi.mock('../../../src/middleware/project-auth', () => ({ requireProjectAccess: vi.fn() }));
-vi.mock('../../../src/services/jwt', () => ({ signTerminalToken: async () => ({ token: 'local-test-token' }) }));
+vi.mock('../../../src/services/jwt', () => ({
+  signTerminalToken: async () => ({ token: 'local-test-token' }),
+}));
 vi.mock('../../../src/services/node-agent', () => ({ fetchNodeAgent: mocks.fetchNodeAgent }));
 vi.mock('../../../src/lib/logger', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../../src/lib/logger')>();
@@ -42,7 +48,13 @@ const env = { DATABASE: {}, BASE_DOMAIN: 'example.test' } as Env;
 
 function app() {
   const api = new Hono<{ Bindings: Env }>();
-  api.onError((err, c) => c.json({ error: err.message }, 500));
+  api.onError((err, c) => {
+    const appError = err as { statusCode?: number; error?: string; message?: string };
+    if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
+      return c.json({ error: appError.error, message: appError.message }, appError.statusCode);
+    }
+    return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
+  });
   api.route('/projects', fileProxyRoutes);
   return api;
 }
@@ -62,7 +74,10 @@ describe('authenticated file-proxy multipart forwarding', () => {
       const body = init.body as ReadableStream<Uint8Array>;
       expect(body.locked).toBe(false);
       const forwarded = new Request('https://node.example.test/upload', {
-        method: 'POST', headers: { 'Content-Type': contentType! }, body, duplex: 'half',
+        method: 'POST',
+        headers: { 'Content-Type': contentType! },
+        body,
+        duplex: 'half',
       } as RequestInit);
       const parsed = await forwarded.formData();
       expect([...parsed.keys()].sort()).toEqual(['destination', 'files']);
@@ -74,10 +89,42 @@ describe('authenticated file-proxy multipart forwarding', () => {
       return Response.json({ files: [{ name: file.name }] });
     });
 
-    const response = await app().request(route, { method: 'POST', body: form }, env);
+    const response = await app().request(
+      route,
+      {
+        method: 'POST',
+        headers: {
+          Origin: 'https://app.example.test',
+          'Sec-Fetch-Site': 'same-site',
+        },
+        body: form,
+      },
+      env
+    );
     expect(response.status).toBe(200);
     expect(mocks.fetchNodeAgent).toHaveBeenCalledOnce();
     expect(mocks.fetchNodeAgent.mock.calls[0]![0]).toBe('NODE-LOCAL');
+  });
+
+  it('rejects a same-site workspace upload before contacting the node', async () => {
+    const form = new FormData();
+    form.set('files', new File(['forged'], 'forged.txt'));
+
+    const response = await app().request(
+      route,
+      {
+        method: 'POST',
+        headers: {
+          Origin: 'https://ws-attacker--3000.example.test',
+          'Sec-Fetch-Site': 'same-site',
+        },
+        body: form,
+      },
+      env
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.fetchNodeAgent).not.toHaveBeenCalled();
   });
 
   it('shows a transport exception reaches the global error handler without a node HTTP response', async () => {
@@ -95,9 +142,11 @@ describe('authenticated file-proxy multipart forwarding', () => {
     const body = new ReadableStream<Uint8Array>({
       pull(controller) {
         if (pulls++ === 0) {
-          controller.enqueue(new TextEncoder().encode(
-            `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="small.part"\r\n\r\npartial`
-          ));
+          controller.enqueue(
+            new TextEncoder().encode(
+              `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="small.part"\r\n\r\npartial`
+            )
+          );
         } else {
           controller.error(new Error('local inbound abort'));
         }
@@ -105,15 +154,20 @@ describe('authenticated file-proxy multipart forwarding', () => {
     });
     mocks.fetchNodeAgent.mockImplementation(async (_nodeId, _env, _url, init: RequestInit) => {
       const forwarded = new Request('https://node.example.test/upload', {
-        method: 'POST', headers: init.headers, body: init.body, duplex: 'half',
+        method: 'POST',
+        headers: init.headers,
+        body: init.body,
+        duplex: 'half',
       } as RequestInit);
       await forwarded.formData();
       return Response.json({ ok: true });
     });
 
     const request = new Request(`https://api.example.test${route}`, {
-      method: 'POST', headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
-      body, duplex: 'half',
+      method: 'POST',
+      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+      body,
+      duplex: 'half',
     } as RequestInit);
     const response = await app().fetch(request, env);
     expect(response.status).toBe(500);

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 interface Spec {
   agentType: string;
-  method: 'npm' | 'uv-tool';
+  method: 'npm' | 'uv-tool' | 'github-release' | 'binary-archive';
   package: string;
   version: string;
   bin: string;
@@ -11,6 +11,8 @@ interface Spec {
   extraPackages?: string[];
   npmCompanion?: { package: string; version: string };
   postInstallHook?: 'amp-sdk-patch';
+  repository?: string;
+  assets?: Record<string, string>;
 }
 const root = process.cwd();
 const manifestPath = join(root, 'packages/shared/src/agent-install-manifest.json');
@@ -27,8 +29,10 @@ const catalog = readFileSync(join(root, 'packages/shared/src/agents.ts'), 'utf8'
 // apps/api/tests/unit/cf-container-runtime-contract.test.ts.
 // A pin must be followed by a non-version character so e.g. pkg@1.18.27 cannot
 // be satisfied by a stale pkg@1.18.270 (substring false-positive).
-const containsPin = (source: string, pin: string): boolean =>
-  new RegExp(`${pin.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)}(?![0-9A-Za-z.+-])`).test(source);
+const containsPin = (source: string, pin: string): boolean => {
+  const escapedPin = pin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`${escapedPin}(?![0-9A-Za-z.+-])`).test(source);
+};
 const safePackage = /^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/;
 const safeVersion = /^[0-9][0-9A-Za-z.+-]*$/;
 const ids = new Set<string>();
@@ -41,6 +45,85 @@ for (const spec of specs) {
   )
     throw new Error(`Invalid install manifest entry: ${spec.agentType}`);
   ids.add(spec.agentType);
+  if (spec.method === 'github-release') {
+    const installer = readFileSync(
+      join(root, 'packages/vm-agent/internal/acp/opencode_install.sh'),
+      'utf8'
+    );
+    const goInstaller = readFileSync(
+      join(root, 'packages/vm-agent/internal/acp/opencode_install.go'),
+      'utf8'
+    );
+    const makefile = readFileSync(join(root, 'packages/vm-agent/Makefile'), 'utf8');
+    if (
+      spec.agentType !== 'opencode' ||
+      spec.repository !== 'raphaeltm/simple-agent-manager' ||
+      !installer.includes(`version=${spec.version}\n`) ||
+      !installer.includes(
+        'https://github.com/raphaeltm/simple-agent-manager/releases/download/opencode-v$version/opencode-$target.tar.gz'
+      ) ||
+      !goInstaller.includes(`const opencodeVersion = "${spec.version}"`) ||
+      !goInstaller.includes('//go:embed opencode_install.sh') ||
+      !goSource.includes('installCmd:    opencodeInstallScript') ||
+      !dockerfile.includes('sh /tmp/install-opencode.sh;') ||
+      !dockerfile.includes(
+        'COPY container-artifacts/install-opencode.sh /tmp/install-opencode.sh'
+      ) ||
+      !makefile.includes(
+        'cp internal/acp/opencode_install.sh $(CONTAINER_ARTIFACT_DIR)/install-opencode.sh'
+      )
+    )
+      throw new Error('OpenCode release installer is not synchronized across VM and Instant');
+    for (const target of [
+      'linux-x64-baseline',
+      'linux-x64-baseline-musl',
+      'linux-arm64',
+      'linux-arm64-musl',
+    ]) {
+      const digest = spec.assets?.[target];
+      if (
+        !digest ||
+        !/^[a-f0-9]{64}$/.test(digest) ||
+        !installer.includes(`${target}) digest=${digest} ;;`)
+      )
+        throw new Error(`OpenCode release digest missing or stale: ${target}`);
+    }
+    if (dockerfile.includes('opencode-ai@'))
+      throw new Error('Instant still installs OpenCode v1 via npm');
+    continue;
+  }
+  if (spec.method === 'binary-archive') {
+    // Antigravity unpacks to about 1 GB, so the Instant image does not bake it in;
+    // both runtimes install it on first use with the same embedded script.
+    const installer = readFileSync(
+      join(root, 'packages/vm-agent/internal/acp/antigravity_install.sh'),
+      'utf8'
+    );
+    const goInstaller = readFileSync(
+      join(root, 'packages/vm-agent/internal/acp/antigravity.go'),
+      'utf8'
+    );
+    if (
+      spec.agentType !== 'google-antigravity' ||
+      !installer.includes(`version=${spec.version}\n`) ||
+      !goInstaller.includes(`const antigravityVersion = "${spec.version}"`) ||
+      !goInstaller.includes('//go:embed antigravity_install.sh') ||
+      !goSource.includes('installCmd:    antigravityInstallScript') ||
+      !catalog.includes(`id: '${spec.agentType}'`) ||
+      !/apt-get install[^;]*\bunzip\b/.test(dockerfile)
+    )
+      throw new Error('Antigravity release installer is not synchronized across VM and Instant');
+    for (const target of ['linux-x86_64', 'linux-arm64']) {
+      const digest = spec.assets?.[target];
+      if (
+        !digest ||
+        !/^[a-f0-9]{64}$/.test(digest) ||
+        !installer.includes(`asset=${target}\n    digest=${digest}\n`)
+      )
+        throw new Error(`Antigravity release digest missing or stale: ${target}`);
+    }
+    continue;
+  }
   const pin = `${spec.package}${spec.method === 'npm' ? '@' : '=='}${spec.version}`;
   if (!containsPin(goSource, pin)) throw new Error(`Go installer is missing ${pin}`);
   if (!containsPin(dockerfile, pin)) throw new Error(`cf-container image is missing ${pin}`);

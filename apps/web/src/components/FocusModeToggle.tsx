@@ -1,4 +1,5 @@
-import { ArrowLeftRight, Maximize2, Minimize2, Sparkles } from 'lucide-react';
+import { IconButton, SegmentedControl } from '@simple-agent-manager/ui';
+import { Maximize2, Minimize2, Sparkles } from 'lucide-react';
 
 import {
   FOCUS_MODE_ORDER,
@@ -10,8 +11,8 @@ import {
 /**
  * Focus Mode control for the desktop nav sidebar.
  *
- * - `segmented`: a three-button group (Default / Focus / Zen) shown when the
- *   sidebar is wide enough to fit labels (default mode).
+ * - `segmented`: a SAM Glass segmented control (Default / Focus / Zen) shown when
+ *   the sidebar is wide enough to fit labels (default mode). The F key cycles.
  * - `cycle`: a single compact icon button shown in the 56px focus rail, where
  *   the segmented group would not fit. Clicking it advances to the next mode.
  *
@@ -39,57 +40,27 @@ export function FocusModeToggle({
   if (variant === 'cycle') {
     const NextIcon = MODE_ICON[nextFocusMode(mode)];
     return (
-      <button
-        type="button"
+      <IconButton
+        label={`Focus Mode: ${focusModeLabel(mode)}. Activate to switch to ${focusModeLabel(nextFocusMode(mode))}`}
+        icon={<NextIcon size={17} strokeWidth={1.75} />}
         onClick={onCycle}
-        aria-label={`Focus Mode: ${focusModeLabel(mode)}. Activate to switch to ${focusModeLabel(nextFocusMode(mode))}`}
+        showTooltip={false}
         title={`Focus Mode: ${focusModeLabel(mode)} (F to cycle)`}
-        className="mx-auto flex h-8 w-8 items-center justify-center rounded-sm bg-transparent border border-border-default text-fg-muted cursor-pointer hover:bg-[var(--sam-chrome-accent-hover-subtle)] hover:text-fg-primary transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--sam-color-focus-ring)]"
-      >
-        <NextIcon size={15} />
-      </button>
+        className="mx-auto"
+      />
     );
   }
 
   return (
-    <div className="flex items-center gap-1">
-      <div
-        role="group"
-        aria-label="Focus Mode"
-        className="flex flex-1 items-center gap-0.5 rounded-sm bg-[var(--sam-color-bg-inset,#0d1816)] p-0.5"
-      >
-        {FOCUS_MODE_ORDER.map((m) => {
-          const Icon = MODE_ICON[m];
-          const active = m === mode;
-          return (
-            <button
-              key={m}
-              type="button"
-              onClick={() => onSelect(m)}
-              aria-pressed={active}
-              title={focusModeLabel(m)}
-              className={`flex flex-1 items-center justify-center gap-1 rounded-[3px] py-1 text-[11px] font-medium cursor-pointer border-none transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--sam-color-focus-ring)] ${
-                active
-                  ? 'bg-[var(--sam-chrome-accent-active-subtle)] text-accent'
-                  : 'bg-transparent text-fg-muted hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)]'
-              }`}
-            >
-              <Icon size={13} />
-              <span>{focusModeLabel(m)}</span>
-            </button>
-          );
-        })}
-      </div>
-      <button
-        type="button"
-        onClick={onCycle}
-        aria-label="Cycle Focus Mode"
-        title="Cycle Focus Mode (F)"
-        className="flex items-center gap-1 rounded-sm bg-transparent border border-border-default px-1.5 py-1 text-fg-muted cursor-pointer hover:bg-[var(--sam-chrome-accent-hover-subtle)] hover:text-fg-primary transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--sam-color-focus-ring)]"
-      >
-        <ArrowLeftRight size={13} />
-        <kbd className="font-mono text-[10px]">F</kbd>
-      </button>
-    </div>
+    <SegmentedControl
+      label="Focus Mode"
+      value={mode}
+      onChange={onSelect}
+      options={FOCUS_MODE_ORDER.map((m) => ({
+        value: m,
+        label: focusModeLabel(m),
+        title: `${focusModeLabel(m)} (F to cycle)`,
+      }))}
+    />
   );
 }

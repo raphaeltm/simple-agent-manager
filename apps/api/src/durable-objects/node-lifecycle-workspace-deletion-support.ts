@@ -11,6 +11,7 @@ import type {
   WorkspaceDeletionIdentity,
   WorkspaceDeletionMode,
 } from '../services/workspace-deletion';
+import { CHAT_BINDING_RELEASE_TOLERANT_SQL } from '../services/workspace-deletion-identity';
 
 export type NodeLifecycleDeletionEnv = {
   DATABASE: D1Database;
@@ -30,6 +31,8 @@ export interface PendingWorkspaceDeletion {
   nodeRuntime?: string | null;
   nodeProviderInstanceId?: string | null;
   nodeRuntimeIncarnationId?: string | null;
+  workspaceGeneration?: string | null;
+  mode?: WorkspaceDeletionMode;
   workspaceId: string;
   userId: string;
   projectId?: string | null;
@@ -95,15 +98,18 @@ export async function claimWorkspaceDeletionInD1(
   mode: WorkspaceDeletionMode
 ): Promise<boolean> {
   const statusPredicate =
-    mode === 'automatic' ? "AND status IN ('stopped', 'sleeping', 'stopping', 'deleted')" : '';
+    mode === 'automatic'
+      ? "AND status IN ('stopped', 'sleeping', 'stopping', 'deleted', 'evicted')"
+      : '';
   const result = await env.DATABASE.prepare(
     `UPDATE workspaces
         SET status = 'stopping', error_message = ?, updated_at = ?
       WHERE id = ?
         AND user_id = ?
         AND project_id IS ?
-        AND chat_session_id IS ?
+        AND ${CHAT_BINDING_RELEASE_TOLERANT_SQL}
         AND node_id IS ?
+        AND eviction_generation IS ?
         AND (
           ? IS NULL OR EXISTS (
             SELECT 1 FROM nodes n
@@ -125,6 +131,7 @@ export async function claimWorkspaceDeletionInD1(
       expected.projectId,
       expected.chatSessionId,
       expected.nodeId,
+      expected.workspaceGeneration ?? null,
       expected.nodeId,
       expected.nodeUserId,
       expected.nodeRuntime,

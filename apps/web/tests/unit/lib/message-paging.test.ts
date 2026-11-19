@@ -6,9 +6,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChatMessageResponse, ChatSessionDetailResponse } from '../../../src/lib/api';
 
-const mocks = vi.hoisted(() => ({ getChatSession: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getChatSession: vi.fn(), listChatMessages: vi.fn() }));
 
-vi.mock('../../../src/lib/api', () => ({ getChatSession: mocks.getChatSession }));
+vi.mock('../../../src/lib/api', () => ({
+  getChatSession: mocks.getChatSession,
+  listChatMessages: mocks.listChatMessages,
+}));
 
 const {
   fetchHistoryUntil,
@@ -17,6 +20,7 @@ const {
   newestPersistedCursor,
   oldestPersistedCursor,
   refreshCachedTranscript,
+  readMessagesAfter,
 } = await import('../../../src/lib/message-paging');
 
 function persisted(id: string, createdAt: number, sequence = createdAt): ChatMessageResponse {
@@ -65,6 +69,25 @@ describe('refreshCachedTranscript', () => {
     const cached = page([optimistic('optimistic-only', 5)], false);
     expect(await refreshCachedTranscript('p-1', 's-1', cached)).toBeNull();
     expect(mocks.getChatSession).not.toHaveBeenCalled();
+  });
+
+  it('refreshes an in-place tail before draining pages beyond the newest window', async () => {
+    const tail = persisted('canonical-tail', 100);
+    const grown = { ...tail, role: 'assistant', content: `${tail.content} appended` };
+    const cache = { ...tail, role: 'assistant' };
+    mocks.getChatSession
+      .mockResolvedValueOnce(page([grown, persisted('next-page', 200)], true))
+      .mockResolvedValueOnce(page([persisted('newest-page', 300)], false));
+    const result = await refreshCachedTranscript('p-1', 's-1', page([cache], false));
+    expect(mocks.getChatSession).toHaveBeenNthCalledWith(1, 'p-1', 's-1', {
+      after: '[100,99,"canonical-tail"]',
+      signal: undefined,
+    });
+    expect(result?.messages).toEqual([
+      grown,
+      persisted('next-page', 200),
+      persisted('newest-page', 300),
+    ]);
   });
 
   it('fails visibly when a page does not advance the cursor', async () => {
@@ -125,7 +148,7 @@ describe('mergeRecentWindowOrRefresh', () => {
     expect(merged.messages.map((message) => message.id)).toEqual(['loaded-tail', 'gap', 'recent']);
     expect(merged.hasMore).toBe(true);
     expect(mocks.getChatSession).toHaveBeenCalledWith('p-1', 's-1', {
-      after: '[100,100,"loaded-tail"]',
+      after: '[100,99,"loaded-tail"]',
       signal: undefined,
     });
   });
@@ -219,5 +242,92 @@ describe('fetchNewestPage', () => {
       signal,
       limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
     });
+  });
+});
+
+describe('canonical tool mutation journal and positional paging', () => {
+  beforeEach(() => mocks.getChatSession.mockReset());
+  const tool = (id: string, position: number, revision: number): ChatMessageResponse => ({
+    ...persisted(id, position),
+    role: 'tool',
+    toolMetadata: { toolCallId: id, _samToolRevision: revision },
+    content: `revision ${revision}`,
+  });
+  it('does not add unloaded old snapshots to a newest window', async () => {
+    const recent = {
+      ...page([persisted('window-start', 100), persisted('tail', 200)], true),
+      toolChanges: {
+        revision: 3,
+        floor: 0,
+        resetRequired: false,
+        messages: [tool('unloaded', 1, 3)],
+      },
+    };
+    mocks.getChatSession.mockResolvedValueOnce(recent);
+    const result = await fetchNewestPage('p-1', 's-1');
+    expect(result.messages.map((row) => row.id)).toEqual(['window-start', 'tail']);
+    expect(oldestPersistedCursor(result.messages)).toBe('[100,100,"window-start"]');
+  });
+  it('refreshes loaded old cards but does not let snapshots conceal a forward gap', async () => {
+    const old = tool('loaded', 1, 1);
+    const current = {
+      ...page([old, persisted('cache-tail', 10)], true),
+      toolChanges: { revision: 1, floor: 0, resetRequired: false, messages: [] },
+    };
+    const changed = tool('loaded', 1, 3);
+    const recent = {
+      ...page([persisted('recent', 100)], true),
+      toolChanges: {
+        revision: 3,
+        floor: 0,
+        resetRequired: false,
+        messages: [changed, tool('unloaded', 2, 2)],
+      },
+    };
+    mocks.getChatSession.mockResolvedValueOnce({
+      ...page([persisted('gap', 20), persisted('recent', 100)], false),
+      toolChanges: recent.toolChanges,
+    });
+    const result = await mergeRecentWindowOrRefresh('p-1', 's-1', current, recent);
+    expect(mocks.getChatSession).toHaveBeenCalledOnce();
+    expect(result.messages.map((row) => row.id)).toEqual(['loaded', 'cache-tail', 'gap', 'recent']);
+    expect(result.messages[0]?.content).toBe('revision 3');
+  });
+  it('discards stale cached history when its journal cursor was evicted', async () => {
+    const current = {
+      ...page([tool('old', 1, 1)], true),
+      toolChanges: { revision: 1, floor: 0, resetRequired: false, messages: [] },
+    };
+    const recent = {
+      ...page([persisted('recent', 100)], true),
+      toolChanges: { revision: 10, floor: 5, resetRequired: false, messages: [] },
+    };
+    mocks.getChatSession.mockResolvedValueOnce(recent);
+    const result = await mergeRecentWindowOrRefresh('p-1', 's-1', current, recent);
+    expect(result.messages.map((row) => row.id)).toEqual(['recent']);
+    expect(result.toolChanges?.resetRequired).toBe(true);
+  });
+});
+
+it('subscribed tail catch-up resets an expired mutation cursor instead of retaining old cards', async () => {
+  mocks.listChatMessages.mockResolvedValueOnce({
+    messages: [],
+    hasMore: false,
+    toolChanges: { revision: 8, floor: 4, resetRequired: true, messages: [] },
+  });
+  mocks.getChatSession.mockResolvedValueOnce({
+    ...page([persisted('fresh', 100)], true),
+    toolChanges: { revision: 8, floor: 4, resetRequired: false, messages: [] },
+  });
+  const result = await readMessagesAfter('p-1', 's-1', [persisted('old', 1)], undefined, 2);
+  expect(mocks.listChatMessages).toHaveBeenLastCalledWith(
+    'p-1',
+    's-1',
+    expect.objectContaining({ afterToolRevision: 2 })
+  );
+  expect(result).toMatchObject({
+    messages: [{ id: 'fresh' }],
+    resetRequired: true,
+    toolChanges: { revision: 8 },
   });
 });

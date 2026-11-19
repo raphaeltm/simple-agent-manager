@@ -2,6 +2,13 @@
  * MCP orchestration tools — retry, dependency management, and task removal
  * for agent-to-agent communication.
  */
+import {
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  readPersistedTaskResourcePlan,
+  ResourceRequirementsValidationError,
+} from '@simple-agent-manager/scheduler-core';
 import type { VMSize } from '@simple-agent-manager/shared';
 import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -10,8 +17,10 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
+import { parentAgentAttribution, withoutAuthorAttribution } from '../../services/agent-authorship';
 import { generateBranchName } from '../../services/branch-name';
 import { capacityPlacementSnapshotDbValues } from '../../services/capacity-placement-snapshot';
+import { resolveSystemErrorFor } from '../../services/inbox/system-error-resolve';
 import {
   PlacementResolutionError,
   resolveTaskStartPlacement,
@@ -22,13 +31,6 @@ import {
   assertReplacementDeletionConfirmed,
   WorkspaceDeletionUnconfirmedError,
 } from '../../services/replacement-deletion-fence';
-import {
-  createPersistedTaskResourcePlanJson,
-  firstResourceRequirementLayer,
-  firstResourceRequirementLayerJson,
-  readPersistedTaskResourcePlan,
-  ResourceRequirementsValidationError,
-} from '../../services/resource-requirements-input';
 import { markTaskFailedIfNonTerminal } from '../../services/task-failure';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
@@ -43,8 +45,10 @@ import {
   type McpTokenData,
   sanitizeUserInput,
 } from './_helpers';
+import { resolveCallerChatSession } from './mailbox-target';
 import { denyWhenMcpActorLacksCurrentProjectCapability } from './orchestration-authority';
 import { stopActiveChildAgentForRetry } from './orchestration-retry-stop';
+import { insertMcpRetriedTask } from './orchestration-retry-storage';
 
 // ─── retry_subtask ──────────────────────────────────────────────────────────
 
@@ -191,11 +195,18 @@ export async function handleRetrySubtask(
   const truncatedError = childTask.errorMessage
     ? sanitizeUserInput(childTask.errorMessage.slice(0, 500))
     : '';
-  const replacementDescription =
+  const replacementBody =
     newDescription ??
-    `${originalDescription}\n\nNote: Previous attempt (${childTaskId}) ended with status '${stoppedStatus}'.${
+    `${withoutAuthorAttribution(originalDescription)}\n\nNote: Previous attempt (${childTaskId}) ended with status '${stoppedStatus}'.${
       truncatedError ? ` Error: ${truncatedError}` : ''
     }${childTask.outputBranch ? ` Branch with partial work: ${childTask.outputBranch}` : ''}`;
+  // The retry's description is agent-written too, so it names this parent (constitution XV).
+  const replacementDescription =
+    replacementBody +
+    parentAgentAttribution({
+      taskId: tokenData.taskId,
+      chatSessionId: tokenData.chatSessionId ?? (await resolveCallerChatSession(tokenData, env)),
+    });
 
   // Dispatch replacement task — reuse logic from dispatch-tool
   const taskId = ulid();
@@ -342,11 +353,11 @@ export async function handleRetrySubtask(
   });
 
   const titleConfig = getTaskTitleConfig(env);
-  const taskTitle = await generateTaskTitle(env, replacementDescription, titleConfig);
+  const taskTitle = await generateTaskTitle(env, replacementBody, titleConfig);
 
   const branchPrefix = env.BRANCH_NAME_PREFIX || 'sam/';
   const branchMaxLength = parseInt(env.BRANCH_NAME_MAX_LENGTH || '60', 10);
-  const branchName = generateBranchName(replacementDescription, taskId, {
+  const branchName = generateBranchName(replacementBody, taskId, {
     prefix: branchPrefix,
     maxLength: branchMaxLength,
   });
@@ -356,12 +367,16 @@ export async function handleRetrySubtask(
   // default branch.
   const checkoutBranch = branchName;
 
+  // Reserve the session in the INSERT so the mission orchestrator cannot start it too.
+  const chatSessionId = crypto.randomUUID();
+
   // Insert replacement task
-  await db.insert(schema.tasks).values({
+  const inserted = await insertMcpRetriedTask(db, {
     id: taskId,
     projectId: tokenData.projectId,
     userId: tokenData.userId,
     parentTaskId: tokenData.taskId,
+    chatSessionId,
     title: taskTitle,
     description: replacementDescription,
     status: 'queued',
@@ -374,7 +389,8 @@ export async function handleRetrySubtask(
     requestedVmSizeSource: vmSizeSource,
     agentProfileHint: childTask.agentProfileHint,
     skillId: childTask.skillId,
-    // The replacement keeps its predecessor's feature coordination channel.
+    // A replacement remains part of its predecessor's mission and coordination channel.
+    missionId: childTask.missionId,
     coordinationChannel: childTask.coordinationChannel,
     resourceRequirementsJson: persistedResourceRequirementsJson,
     resourceRequirementPlanJson: persistedResourceRequirementPlanJson,
@@ -388,6 +404,9 @@ export async function handleRetrySubtask(
     createdAt: now,
     updatedAt: now,
   });
+
+  if (!inserted.meta.changes)
+    return jsonRpcError(requestId, INVALID_PARAMS, 'Mission no longer accepts retried tasks');
 
   // Record status event
   await db.insert(schema.taskStatusEvents).values({
@@ -410,7 +429,8 @@ export async function handleRetrySubtask(
       null,
       taskTitle,
       taskId,
-      tokenData.userId
+      tokenData.userId,
+      chatSessionId
     );
 
     await projectDataService.persistMessage(
@@ -423,11 +443,7 @@ export async function handleRetrySubtask(
     );
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await markTaskFailedIfNonTerminal(
-      env.DATABASE,
-      taskId,
-      `Session creation failed: ${errorMsg}`
-    );
+    await markTaskFailedIfNonTerminal(env.DATABASE, taskId, `Session creation failed: ${errorMsg}`);
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to create chat session: ${errorMsg}`);
   }
 
@@ -493,6 +509,14 @@ export async function handleRetrySubtask(
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to start task runner: ${errorMsg}`);
   }
 
+  // The retry worked: the failed child's inbox error item closes (slice E). Never throws.
+  await resolveSystemErrorFor(env, {
+    projectId: tokenData.projectId,
+    source: 'task',
+    subjectId: childTaskId,
+    resolution: 'retried',
+  });
+
   log.info('orchestration.retry_subtask.success', {
     stoppedTaskId: childTaskId,
     newTaskId: taskId,
@@ -524,7 +548,4 @@ export async function handleRetrySubtask(
 // `add_dependency` and `remove_pending_subtask` live in
 // `orchestration-dependency-tools.ts` (rule 18 file-size ceiling); re-exported
 // here so importers keep one entry point for the orchestration tool family.
-export {
-  handleAddDependency,
-  handleRemovePendingSubtask,
-} from './orchestration-dependency-tools';
+export { handleAddDependency, handleRemovePendingSubtask } from './orchestration-dependency-tools';

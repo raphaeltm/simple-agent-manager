@@ -15,24 +15,19 @@ const METADATA_READERS = [
     'renders historical labels in an operator-facing terminal message',
   ],
   [
-    'apps/api/src/services/capacity-pool-authority.ts',
+    'packages/scheduler-core/src/capacity-pool-authority.ts',
     'capacityCandidateAuthorityGeneration',
     'includes the historical label in the complete candidate change fingerprint',
   ],
   [
-    'apps/api/src/services/default-capacity-pool-candidates.ts',
+    'apps/api/src/services/default-capacity-pool-candidates-values.ts',
     'legacyVmSizeHintForOffering',
     'maps a concrete offering back to a historical candidate id to preserve user membership edits',
   ],
   [
-    'apps/api/src/services/placement-field-resolution.ts',
+    'packages/scheduler-core/src/placement-field-resolution.ts',
     'resolveVmSize',
     'collects the deprecated request label from its original request layers',
-  ],
-  [
-    'apps/api/src/durable-objects/trial-orchestrator/steps.ts',
-    'resolveTrialVmSize',
-    'validates and forwards the deprecated trial request label',
   ],
 ] as const;
 
@@ -40,12 +35,12 @@ const METADATA_READERS = [
 const METADATA_ARGUMENTS = [
   ['apps/api/src/services/placement-resolver.ts', 'resolveTaskStartPlacement', 'resolveVmSize'],
   [
-    'apps/api/src/services/placement-resolver-capacity.ts',
+    'packages/scheduler-core/src/placement-resolver-capacity-reuse.ts',
     'resolveReusableNodeCapacitySnapshot',
     'selectCandidateForReusableNode',
   ],
   [
-    'apps/api/src/services/placement-resolver-capacity.ts',
+    'packages/scheduler-core/src/placement-resolver-capacity.ts',
     'normalizeCapacityCandidate',
     'normalizeLegacyPoolSize',
   ],

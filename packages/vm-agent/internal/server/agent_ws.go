@@ -69,7 +69,7 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runtime := s.upsertWorkspaceRuntime(workspaceID, "", "", "running", "")
+	runtime := s.upsertWorkspaceRuntimeForAttach(workspaceID)
 	if !s.requireWorkspaceReconnectState(w, r, runtime) {
 		return
 	}
@@ -228,7 +228,7 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionID string, session agentsessions.Session, runtime *WorkspaceRuntime, requestedWorktree string, restoreOwner bool) *acp.SessionHost {
 	// Fast path: check if host already exists.
 	s.sessionHostMu.Lock()
-	if !restoreOwner && (s.workspaceRestorePendingLocked(workspaceID) || s.workspaceCreationPendingLocked(workspaceID)) {
+	if s.isEvictionFinalizing(workspaceID) || (!restoreOwner && (s.workspaceRestorePendingLocked(workspaceID) || s.workspaceCreationPendingLocked(workspaceID))) {
 		s.sessionHostMu.Unlock()
 		return nil
 	}
@@ -252,7 +252,7 @@ func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionI
 
 	s.sessionHostMu.Lock()
 	defer s.sessionHostMu.Unlock()
-	if !restoreOwner && (s.workspaceRestorePendingLocked(workspaceID) || s.workspaceCreationPendingLocked(workspaceID)) {
+	if s.isEvictionFinalizing(workspaceID) || (!restoreOwner && (s.workspaceRestorePendingLocked(workspaceID) || s.workspaceCreationPendingLocked(workspaceID))) {
 		return nil
 	}
 
@@ -271,6 +271,7 @@ func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionI
 		cfg.ProjectID = strings.TrimSpace(runtime.ProjectID)
 	}
 	cfg.OnPromptComplete = nil
+	cfg.OnPromptCompleteWithContext = nil
 
 	cfg.GitTokenFetcher = s.gitHubTokenFetcherForWorkspace(workspaceID)
 	var runtimeAssetsProvider acp.RuntimeAssetsProvider
@@ -344,14 +345,22 @@ func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionI
 	if cfg.ProjectID == "" && s.config != nil && workspaceID == strings.TrimSpace(s.config.WorkspaceID) {
 		cfg.ProjectID = strings.TrimSpace(s.config.ProjectID)
 	}
+	var sessionTask *taskCallbackContext
+	if hasTaskCtx {
+		sessionTask = &taskCtx
+	}
+	cfg.SAMEnvFallback = s.sessionSAMEnvFallback(workspaceID, runtime, sessionTask, session.RoutedChatSessionID())
 	if hasTaskCtx && s.config != nil && taskCtx.ProjectID != "" && taskCtx.TaskID != "" && taskCtx.WorkspaceID != "" {
-		cfg.OnPromptComplete = s.makeTaskCompletionCallback(
-			s.config.ControlPlaneURL,
-			taskCtx.ProjectID,
-			taskCtx.TaskID,
-			taskCtx.WorkspaceID,
-			taskCtx.TaskMode,
-		)
+		cfg.OnPromptComplete = s.makeTaskCompletionCallback(s.config.ControlPlaneURL, taskCtx.ProjectID, taskCtx.TaskID, taskCtx.WorkspaceID, taskCtx.TaskMode)
+		cfg.OnPromptCompleteWithContext = func(reason string, err error, completion acp.PromptCompletionContext) {
+			s.makeTaskCompletionCallback(
+				s.config.ControlPlaneURL,
+				taskCtx.ProjectID,
+				taskCtx.TaskID,
+				taskCtx.WorkspaceID,
+				taskCtx.TaskMode, completion,
+			)(reason, err)
+		}
 		slog.Info("Task completion callback bound to session",
 			"workspace", workspaceID,
 			"sessionId", sessionID,

@@ -3,19 +3,19 @@ title: Workspaces
 description: How workspaces are provisioned, used, and managed in SAM.
 ---
 
-A **workspace** is the environment an AI coding agent runs in — your repository, cloned and ready, with the tools the agent needs. In everyday use you rarely create one by hand: SAM provisions a workspace for you automatically when you start working in a project chat. This guide explains that automatic flow and the direct controls available for power users.
+A **workspace** is the environment an AI coding agent runs in — your repository, cloned and ready, with the tools the agent needs. You don't create one by hand: SAM provisions a workspace for you automatically when you start working in a project chat. This guide explains that automatic flow and the direct controls available for power users.
 
 ## The Normal Flow: Workspaces Come From Chat
 
 You don't start with a workspace — you start with a conversation:
 
-1. From the **Dashboard**, click **Import Project** and connect a GitHub repository.
-2. Open the project and describe what you want in the **chat**.
-3. SAM automatically provisions a workspace, runs your chosen agent, and streams progress back to you. When the agent finishes, it opens a pull request.
+1. From the **Dashboard**, click **New Project** and connect a GitHub repository, or let SAM host a new one where your instance offers it.
+2. Open the project. It opens on its [Overview](/docs/guides/project-overview/): describe what you want in the task box at the bottom, or in the project's **Chat**.
+3. SAM automatically provisions a workspace, runs your chosen agent, and streams progress back to you. Ask the agent to commit, push and open a pull request when the work is ready.
 
 Provisioning takes a couple of minutes the first time, or seconds when SAM reuses a recently active ("warm") environment. You never have to pick a server or wait at a terminal — the workspace exists to serve the chat.
 
-See [Idea Execution](/docs/guides/idea-execution/) for the full chat-to-pull-request workflow.
+See [What Happens When You Send Work](/docs/guides/idea-execution/) for what happens after you send work, and how to get a pull request.
 
 ## Two kinds of workspace: Instant and VM
 
@@ -24,13 +24,21 @@ A workspace runs either as an **Instant** container on Cloudflare's network or a
 - **A profile whose runtime is "Instant container"** → Instant. Starts in seconds and needs no cloud account, but has no `.devcontainer` build, no Docker, and no automatic port exposure.
 - **Anything else** → a task on a VM, with your full environment.
 
-Submitted tasks always use a VM, so a project that mainly runs tasks needs cloud compute regardless.
+A task you submit in SAM or with the CLI uses a VM unless its profile's runtime is Instant, so a
+project that mainly runs tasks on VM profiles needs cloud compute. Work started through the
+[Connector](/docs/guides/sam-connector/) with an **Auto** profile, or none, runs on Instant when
+neither you nor the project has a cloud credential connected.
+
+A VM belongs to you alone: SAM never places another person's workspace on it, though several of your
+own workspaces can share one. That machine, not the devcontainer, is the security boundary, which
+is why your repository's devcontainer settings, including Docker-in-Docker, are applied as written.
+See the [workspace isolation model](/docs/architecture/security/#workspace-isolation-model).
 
 Everything below — providers, VM sizes, the terminal, stop/restart/delete — describes the **VM** path. If your sessions are starting in seconds and the agent can't run your build tooling, you're on Instant; see [Instant Sessions](/docs/guides/instant-sessions/) for its behavior, limits, and how to pin a runtime explicitly.
 
 ## Where your workspaces run: Bring Your Own Cloud
 
-VM workspaces run on a real cloud VM. On the **hosted platform**, compute is usually provided for you, so you can start working without connecting anything. On a **self-hosted instance**, or when you want VMs billed directly to your own account, SAM follows a **Bring Your Own Cloud (BYOC)** model: you connect a cloud provider once, and every VM runs on your account.
+VM workspaces run on a real cloud VM. If your installation's administrator connected a shared cloud account, compute is provided for you, so you can start working without connecting anything. Otherwise, or when you want VMs billed directly to your own account, SAM follows a **Bring Your Own Cloud (BYOC)** model: you connect a cloud provider once, and every VM runs on your account.
 
 SAM supports seven providers:
 
@@ -46,17 +54,20 @@ SAM supports seven providers:
 
 ### Connecting a provider
 
-1. Open **Settings → Connections** and start connecting a cloud provider. (The **Cloud Provider** tab lets you fill in each provider's form directly instead.)
-2. Pick a provider — each card shows a one-line description to help you choose.
-3. Use the linked provider console to create the credential, paste it into the form, and save. SAM encrypts the credential at rest and validates it before the first VM is created.
+1. Open **Settings → Infrastructure** and, under **Cloud accounts**, click **Connect account**.
+2. Pick a provider.
+3. Fill in that provider's form: use the linked provider console to create the credential, paste it in, and save. Hetzner's form can test the token first; Google Cloud offers **Connect with Google** or a service-account JSON key. SAM encrypts the credential at rest and validates it before the first VM is created.
+4. Name the account (for example, Work or Personal). It becomes your default for that provider. A previous default stays connected and shows as **Unattached**.
 
-![The cloud provider picker in SAM's Connections settings: a selectable card for each supported provider — Hetzner, Scaleway, Google Cloud, Vultr, Infomaniak Public Cloud, DigitalOcean, and UpCloud — each with a short description, above the credential form for the selected provider.](/images/docs/cloud-provider-connect.png)
+To change your default cloud account later, connect the new one the same way (or select **Replace your … default** under the provider's accounts). **Make default** and **Use in projects…** are for agent accounts only; to give one project its own cloud account, open the project's **Settings → Accounts** and select **Use a cloud account only this project bills to**.
 
-Once a provider is connected, SAM uses it automatically when it provisions workspaces. You can connect more than one and set a default provider (and region) per project in project settings. For per-provider VM sizes, regions, and example pricing, see the [Self-Hosting guide](/docs/guides/self-hosting/#user-vm-costs).
+Once a provider is connected, SAM uses it automatically when it provisions workspaces. You can connect more than one; which provider and region a workspace lands on is decided by the [compute pool](/docs/guides/compute-pools/) and the work's resource requirements. For per-provider VM sizes, regions, and example pricing, see the [Self-Hosting guide](/docs/guides/self-hosting/#user-vm-costs).
 
 :::note
-Cloud provider credentials are stored encrypted per user — never as environment variables or shared secrets. In a [shared project](/docs/guides/collaboration/), a member can attach a project-level cloud credential so shared work doesn't run on someone's personal account.
+Cloud provider credentials are stored encrypted per user — never as environment variables or shared secrets. In a [shared project](/docs/guides/collaboration/), a member can attach a project-level cloud credential from the project's **Accounts** tab (**Use a cloud account only this project bills to**) so shared work doesn't run on someone's personal account.
 :::
+
+For Google Cloud API prerequisites, WIF setup, and permission-error troubleshooting, see [Connect Google Cloud](/docs/guides/google-cloud/).
 
 ### Choosing an environment size and profile
 
@@ -72,7 +83,14 @@ Claude Code, Codex, Gemini CLI, OpenCode, and Amp are installed with npm and nee
 
 ## Using a Workspace Directly
 
-Most work happens through chat, but every workspace also has a direct view for hands-on control. You'll find running workspaces under **Nodes / Workspaces** in the navigation.
+Most work happens through chat, but every workspace also has a direct view for hands-on control.
+To find one, select **Infrastructure** in the main navigation (between **Tools** and **Settings**;
+on a phone, in the menu). It opens the **Nodes** page, which lists each machine with the sessions
+running on it (see [What each machine is using](/docs/guides/compute-pools/#what-each-machine-is-using)).
+Open **Advanced** on a machine for links to its workspaces, or select **Details** to see all of them
+under **Workspaces**. There's no longer a single list of every workspace; old links to the
+Workspaces page open Nodes. There's no form for creating a workspace by hand: start a project chat
+and SAM provisions one, and old links to the create-workspace form open Nodes.
 
 ### Terminal
 
@@ -82,15 +100,39 @@ Open a workspace to get a browser-based terminal — a full interactive shell th
 - **Multiple tabs** — run several shells alongside agent chats
 - **Copy/paste and resize** — standard shortcuts work; the terminal fits the window
 
+### What SAM sets in the workspace
+
+SAM sets these environment variables for the agent in a workspace, so the scripts it runs and your
+agent instructions can tell they are on SAM and which project, chat and task they belong to. On a
+machine shared by several chats, each chat's agent gets its own values. A value SAM has nothing for
+can be missing (for example `SAM_TASK_MODE` in a chat started directly in a workspace), so scripts
+should handle an unset variable.
+
+| Variable              | What it holds                                                             |
+| --------------------- | ------------------------------------------------------------------------- |
+| `SAM_WORKSPACE_ID`    | The workspace's ID. Its presence is the way to detect SAM                 |
+| `SAM_WORKSPACE_URL`   | The workspace's own address                                               |
+| `SAM_API_URL`         | The SAM API's address                                                     |
+| `SAM_NODE_ID`         | The machine it runs on                                                    |
+| `SAM_PROJECT_ID`      | The project                                                               |
+| `SAM_CHAT_SESSION_ID` | The chat                                                                  |
+| `SAM_TASK_ID`         | The task behind the chat                                                  |
+| `SAM_TASK_MODE`       | `task` or `conversation`: whether the session is a **Task** or a **Chat** |
+| `SAM_REPOSITORY`      | The repository, as `owner/repo`                                           |
+| `SAM_BRANCH`          | The branch the workspace checked out                                      |
+
 ### Agent chat in a workspace
 
 Click **+ New Chat** to start an AI coding session directly in the workspace. If you've connected more than one agent, you can choose which one to use. Each chat runs in its own tab alongside your shells.
 
 ## Managing Workspaces
 
+On a machine's page, each workspace has **Open** (or **Start**, when it's stopped) and a menu with
+**Stop** (while it's running), **Restart** (once it's stopped) and **Delete**.
+
 ### Stopping
 
-**Stop** a workspace to power down its environment while keeping the record so you can restart later. Stopped workspaces don't incur compute charges.
+**Stop** a workspace to power down its environment while keeping the record so you can restart later. A stopped workspace no longer uses its machine, but the machine keeps billing while other workspaces run on it, and for its warm period after the last one stops (see [Warm reuse](/docs/guides/compute-pools/#warm-reuse)).
 
 ### Restarting
 
@@ -104,6 +146,14 @@ Restarting starts from a clean checkout. Any uncommitted changes from the previo
 
 **Delete** permanently removes a workspace and cleans up everything associated with it.
 
+### Removing a machine
+
+A machine's menu (**⋮**) on the Nodes page has **Stop** and **Delete**, and its page has **Stop Node** and **Delete Node** (**Delete Node Only** on a machine that
+hosts [app deployments](/docs/guides/app-deployments/)). Deleting a machine deletes its server at
+your cloud provider. SAM can take a while to finish, and it waits on purpose while something on the
+machine still needs keeping; a red line on the machine says why. If a machine stays for a long time,
+see [A node won't go away](/docs/guides/session-troubleshooting/#a-node-wont-go-away).
+
 ## Machine sizing
 
 You do not pick a server. You state what the work needs — **vCPU**, **memory**, **disk**, and
@@ -116,9 +166,10 @@ Requirements are inherited field by field, so you only set what you care about:
 task  →  trigger  →  skill  →  agent profile  →  project  →  platform default
 ```
 
-The platform default is 2 vCPU, 4 GB RAM, and 40 GB disk. Set a project baseline in
+The platform default is 2 vCPU, 4 GB RAM, and 15 GB disk. If the project's devcontainer image or
+build is large, set **Disk (GB)** in the project baseline, so work doesn't run out of space. Set a project baseline in
 **Project → Settings → Infrastructure → Default Resources**, a per-profile or per-skill default in
-their editors, or a one-off override from the **Resources** control next to the chat composer.
+their editors, or a one-off override under the sliders button (**Chat options**) above the chat composer.
 
 SAM provisions the exact provider instance type the pool selected, and records what the machine
 actually reports about itself. A node's detail page shows both: **Observed hardware** (from the
@@ -127,9 +178,11 @@ memory, or disk details, they are recorded as unknown rather than inferred
 (`packages/providers/src/native-vm-config.ts`), and a machine SAM cannot measure is never given
 work.
 
-Offering selection accounts for the memory held back for the host itself. With the default 512 MiB
-reserve, a 4 GiB offering can host at most a 3584 MiB workspace reservation, so a request for a
-full 4 GiB needs a larger offering. If no allowed offering fits, submission fails with a
+Offering selection accounts for the memory held back for the host itself. With the default 1 GiB
+reserve, a 4 GiB offering can host at most a 3072 MiB workspace reservation, so a request for more
+than 3 GiB needs a larger offering, and at most two legacy `small` slices (1152 MiB each) share one.
+Admission uses the same reserve, so a machine started for a request can always take it unless the
+host is measured using more than the reserve. If no allowed offering fits, submission fails with a
 resource-capacity error **before** anything is provisioned, rather than starting a machine that
 cannot hold the work.
 
@@ -144,5 +197,5 @@ resource requirements.
 :::
 
 :::note
-Creating a workspace directly (rather than through chat) is an advanced path intended for hands-on infrastructure control. It requires a project to already be imported, and — on a self-hosted instance — a connected [cloud provider](#where-your-workspaces-run-bring-your-own-cloud). On the hosted platform, compute is typically provided for you.
+Creating a workspace directly (rather than through chat) is an advanced path intended for hands-on infrastructure control. It requires a project to already be imported and a connected [cloud provider](#where-your-workspaces-run-bring-your-own-cloud), unless your installation's administrator provides compute for you.
 :::

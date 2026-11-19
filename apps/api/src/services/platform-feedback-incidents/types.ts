@@ -88,6 +88,7 @@ export interface IncidentBacklogSummary {
 
 export interface BuildIncidentBacklogSummaryOptions {
   expireStale?: boolean;
+  reclaimClaims?: boolean;
 }
 
 export interface UserReportIncidentInput {

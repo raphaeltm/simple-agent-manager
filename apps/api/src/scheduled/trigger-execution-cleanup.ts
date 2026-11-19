@@ -181,7 +181,9 @@ async function recoverStaleExecutionsByStatus(
         `SELECT id, trigger_id, task_id, event_type, started_at, created_at
          FROM trigger_executions
          WHERE status = ?
+           AND NOT (status = 'queued' AND queue_expires_at IS NOT NULL)
            AND COALESCE(started_at, created_at) <= ?
+           AND NOT EXISTS (SELECT 1 FROM github_trigger_inbox g WHERE g.id = trigger_executions.github_delivery_id AND g.state IN ('pending','processing'))
            AND NOT EXISTS (
              SELECT 1 FROM webhook_deliveries d
               WHERE d.execution_id = trigger_executions.id AND d.outcome = 'processing'
@@ -286,6 +288,8 @@ async function recoverStaleExecutionsByStatus(
           `UPDATE trigger_executions
            SET status = ?, error_message = ?, completed_at = ?
            WHERE id = ? AND status = ?
+             AND NOT (status = 'queued' AND queue_expires_at IS NOT NULL)
+             AND NOT EXISTS (SELECT 1 FROM github_trigger_inbox g WHERE g.id = trigger_executions.github_delivery_id AND g.state IN ('pending','processing'))
              AND NOT EXISTS (
                SELECT 1 FROM webhook_deliveries d
                 WHERE d.execution_id = trigger_executions.id AND d.outcome = 'processing'
@@ -349,8 +353,10 @@ async function purgeOldTriggerExecutions(
     const result = await db
       .prepare(
         `DELETE FROM trigger_executions
-         WHERE status IN ('completed', 'failed', 'skipped')
-           AND created_at <= ?`
+         WHERE status IN ('completed', 'failed', 'skipped', 'routed', 'dropped')
+           AND created_at <= ?
+           AND NOT EXISTS (SELECT 1 FROM github_trigger_inbox g
+             WHERE g.id = trigger_executions.github_delivery_id AND g.state IN ('pending','processing'))`
       )
       .bind(cutoff)
       .run();

@@ -1,3 +1,5 @@
+import { hasLocalAiCostMetering } from '@simple-agent-manager/ai-proxy';
+import { guardedFetch } from '@simple-agent-manager/worker-core';
 /**
  * AI proxy passthrough routes — URL-path-based workspace auth.
  *
@@ -14,48 +16,27 @@
  * workspaceId, and projectId. Upstream provider credentials are never accepted
  * from, or returned to, tenant workspaces.
  */
-import {
-  DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
-  DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
-  DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES,
-  type Dialect,
-  HARNESS_CAPABILITIES,
-  type HarnessCapability,
-  PROVIDER_PRESETS,
-  resolveHarnessDialect,
-} from '@simple-agent-manager/shared';
-import { drizzle } from 'drizzle-orm/d1';
 import { type Context, Hono } from 'hono';
 
-import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { parsePositiveInt } from '../lib/route-helpers';
-import { readRequestJsonRecord, RequestBodyTooLargeError } from '../lib/runtime-validation';
-import { getCredentialEncryptionKey } from '../lib/secrets';
-import {
-  checkRateLimit,
-  createRateLimitKey,
-  getCurrentWindowStart,
-} from '../middleware/rate-limit';
-import { AIProxyAuthError, verifyAIProxyAuth } from '../services/ai-proxy-shared';
-import type { AiProviderUsageAttribution } from '../services/ai-token-budget';
-import { checkAiUsageGate } from '../services/ai-token-budget';
 import {
   attachUpstreamTokenUsageAccounting,
   estimateInputTokensFromMessages,
+  estimateInputTokensFromRequest,
   optionalExecutionContext,
 } from '../services/ai-token-usage-accounting';
-import { resolveForConsumer } from '../services/composable-credentials/resolve';
 import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
+import { resolveOutboundMaxRedirects } from '../services/outbound-fetch-settings';
+import { anthropicError, credentialErrorHeaders, openaiError } from './ai-proxy-passthrough-errors';
 import {
-  anthropicError,
-  anthropicUsageGateError,
-  credentialErrorHeaders,
-  openaiError,
-  openaiUsageGateError,
-} from './ai-proxy-passthrough-errors';
+  anthropicProxyOptions,
+  openaiProxyOptions,
+  prepareProxyRequest,
+  retryAfterSeconds,
+} from './ai-proxy-passthrough-prepare';
 import { schedulePassthroughLimitHeaders } from './ai-proxy-passthrough-telemetry';
+import { type ResolvedProxyUpstream, trimTrailingSlashes } from './ai-proxy-passthrough-upstream';
 
 const aiProxyPassthroughRoutes = new Hono<{ Bindings: Env }>();
 type ProxyContext = Context<{ Bindings: Env }>;
@@ -68,74 +49,6 @@ type ProxyContext = Context<{ Bindings: Env }>;
 // Shared: verify workspace token from URL path + rate limit + budget
 // =============================================================================
 
-interface PassthroughAuthResult {
-  userId: string;
-  workspaceId: string;
-  projectId: string | null;
-  chatSessionId?: string | null;
-  trialId?: string;
-  agentType?: string | null;
-  agentSessionId?: string | null;
-  agentCredentialReference?: string | null;
-  agentCredentialSource?: 'user' | 'project' | 'platform' | null;
-  agentCredentialProvider?: string | null;
-  agentProviderMode?: string | null;
-  agentCredentialGeneration: number;
-}
-
-interface ResolvedProxyUpstream {
-  agentType: string;
-  dialect: Dialect;
-  capability: HarnessCapability;
-  apiKey: string;
-  baseUrl: string;
-  provider: AiProviderUsageAttribution;
-  credentialReference: string;
-  credentialSource: 'user' | 'project' | 'platform';
-  credentialProvider: string;
-  providerMode: 'proxy-passthrough';
-}
-
-interface PreparedProxyRequest extends PassthroughAuthResult {
-  body: Record<string, unknown>;
-  modelId: string;
-  upstream: ResolvedProxyUpstream;
-}
-
-type PreparedProxyResult =
-  | { ok: true; value: PreparedProxyRequest }
-  | { ok: false; response: Response };
-
-interface PrepareProxyOptions {
-  dialect: Dialect;
-  jsonContext: string;
-  disabledResponse: () => Response;
-  authErrorResponse: (error: AIProxyAuthError) => Response;
-  invalidTokenResponse: () => Response;
-  rateLimitResponse: (c: ProxyContext, resetAt: number) => Response;
-  invalidJsonResponse: () => Response;
-  requestTooLargeResponse: (maxBytes: number) => Response;
-  invalidBodyResponse?: (body: Record<string, unknown>) => Response | null;
-  missingModelResponse: () => Response;
-  usageGateResponse: (reason: 'daily-token-budget' | 'monthly-cost-cap') => Response;
-  missingUpstreamResponse: () => Response;
-}
-
-type ResolvedCredentialSecret = NonNullable<
-  NonNullable<Awaited<ReturnType<typeof resolveForConsumer>>>['credential']
->['secret'];
-
-async function verifyPassthroughAuth(wstoken: string, env: Env): Promise<PassthroughAuthResult> {
-  const db = drizzle(env.DATABASE, { schema });
-  return verifyAIProxyAuth(wstoken, env, db);
-}
-
-function trimTrailingSlashes(value: string): string {
-  let end = value.length;
-  while (end > 0 && value.charCodeAt(end - 1) === 47) end--;
-  return value.slice(0, end);
-}
-
 function trimLeadingSlashes(value: string): string {
   let start = 0;
   while (start < value.length && value.charCodeAt(start) === 47) start++;
@@ -146,165 +59,13 @@ function joinUpstreamUrl(baseUrl: string, path: string): string {
   return `${trimTrailingSlashes(baseUrl)}/${trimLeadingSlashes(path)}`;
 }
 
-function stringSetting(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
-}
-
-function isHttpsUrl(value: string): boolean {
-  try {
-    return new URL(value).protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
-function candidateCapabilities(
-  agentType: string | null | undefined,
-  dialect: Dialect
-): HarnessCapability[] {
-  if (agentType) {
-    const capability = resolveHarnessDialect(agentType, dialect);
-    return capability?.proxyRouteSegment ? [capability] : [];
-  }
-  return HARNESS_CAPABILITIES.filter(
-    (capability) => capability.proxyRouteSegment && capability.dialects.includes(dialect)
-  );
-}
-
-function resolvedBaseUrl(
-  secret: ResolvedCredentialSecret,
-  settings: Record<string, unknown>
-): string | null {
-  return (
-    stringSetting(settings.baseUrl) ??
-    (secret.kind === 'openai-compatible' ? stringSetting(secret.baseUrl) : null)
-  );
-}
-
-function normalizeBaseUrl(value: string): string {
-  const parsed = new URL(value);
-  parsed.hash = '';
-  parsed.search = '';
-  return trimTrailingSlashes(parsed.toString());
-}
-
-function slugFromHost(baseUrl: string): string {
-  const hostname = new URL(baseUrl).hostname.toLowerCase();
-  const host = hostname.startsWith('api.') ? hostname.slice(4) : hostname;
-  let slug = '';
-  let pendingSeparator = false;
-
-  for (let index = 0; index < host.length; index++) {
-    const code = host.charCodeAt(index);
-    const isAlphaNumeric = (code >= 48 && code <= 57) || (code >= 97 && code <= 122);
-    if (isAlphaNumeric) {
-      if (pendingSeparator && slug.length > 0) slug += '-';
-      slug += host.charAt(index);
-      pendingSeparator = false;
-    } else if (slug.length > 0) {
-      pendingSeparator = true;
-    }
-  }
-
-  return slug || 'custom-provider';
-}
-
-function labelFromProviderId(providerId: string): string {
-  return (
-    providerId
-      .split(/[-_]/)
-      .filter(Boolean)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(' ') || 'Custom Provider'
-  );
-}
-
-function resolveProviderAttribution(input: {
-  baseUrl: string;
-  dialect: Dialect;
-  settings: Record<string, unknown>;
-}): AiProviderUsageAttribution {
-  const explicitProviderId = stringSetting(input.settings.providerId);
-  const explicitProviderName = stringSetting(input.settings.providerName);
-  const normalizedBaseUrl = normalizeBaseUrl(input.baseUrl);
-  const preset = PROVIDER_PRESETS.find(
-    (candidate) =>
-      candidate.dialect === input.dialect &&
-      normalizeBaseUrl(candidate.baseUrl) === normalizedBaseUrl
-  );
-  const providerId = explicitProviderId ?? preset?.id ?? slugFromHost(input.baseUrl);
-  return {
-    providerId,
-    providerName: explicitProviderName ?? preset?.label ?? labelFromProviderId(providerId),
-    dialect: input.dialect,
-  };
-}
-
-function credentialApiKey(secret: ResolvedCredentialSecret): string | null {
-  switch (secret.kind) {
-    case 'api-key':
-      return secret.apiKey;
-    case 'openai-compatible':
-      return secret.apiKey;
-    default:
-      return null;
-  }
-}
-
-function credentialSupportsDialect(
-  secret: ResolvedCredentialSecret,
-  settings: Record<string, unknown>,
-  dialect: Dialect
-): boolean {
-  const configuredDialect = stringSetting(settings.dialect);
-  if (configuredDialect) return configuredDialect === dialect;
-  return secret.kind === 'openai-compatible' && dialect === 'openai-compatible';
-}
-
-function credentialSourceFromResolution(source: string): 'user' | 'project' | 'platform' {
-  if (source === 'project-attachment') return 'project';
-  if (source === 'user-attachment') return 'user';
-  return 'platform';
-}
-
-async function resolveProxyUpstream(input: {
-  env: Env;
-  userId: string;
-  projectId: string | null;
-  agentType?: string | null;
-  dialect: Dialect;
-}): Promise<ResolvedProxyUpstream | null> {
-  const db = drizzle(input.env.DATABASE, { schema });
-  const encryptionKey = getCredentialEncryptionKey(input.env);
-  for (const capability of candidateCapabilities(input.agentType, input.dialect)) {
-    const resolved = await resolveForConsumer(
-      db,
-      input.userId,
-      encryptionKey,
-      { kind: 'agent', agentType: capability.agentType },
-      input.projectId
-    );
-    if (!resolved?.credential || resolved.source === 'platform-proxy') continue;
-    const secret = resolved.credential.secret;
-    const settings = resolved.configuration?.settings ?? {};
-    if (!credentialSupportsDialect(secret, settings, input.dialect)) continue;
-    const apiKey = credentialApiKey(secret);
-    const baseUrl = resolvedBaseUrl(secret, settings);
-    if (!apiKey || !baseUrl || !isHttpsUrl(baseUrl)) continue;
-    return {
-      agentType: capability.agentType,
-      dialect: input.dialect,
-      capability,
-      apiKey,
-      baseUrl,
-      provider: resolveProviderAttribution({ baseUrl, dialect: input.dialect, settings }),
-      credentialReference: `cc_credentials:${resolved.credential.id}`,
-      credentialSource: credentialSourceFromResolution(resolved.source),
-      credentialProvider: input.dialect,
-      providerMode: 'proxy-passthrough',
-    };
-  }
-  return null;
+/**
+ * A passthrough call served by a platform-owned credential spends the installation's money, so
+ * where SAM prices spend itself (no AI Gateway) it is priced into the monthly cap and ceiling like
+ * every other platform-billed call. A user's or project's own credential is their own spend.
+ */
+function platformCostModelId(upstream: ResolvedProxyUpstream, modelId: string): string | undefined {
+  return upstream.credentialSource === 'platform' ? modelId : undefined;
 }
 
 function buildUpstreamAuthHeaders(upstream: ResolvedProxyUpstream): Record<string, string> {
@@ -318,159 +79,6 @@ function buildUpstreamAuthHeaders(upstream: ResolvedProxyUpstream): Record<strin
     return { 'x-api-key': upstream.apiKey };
   }
   return {};
-}
-
-async function checkPassthroughRateLimit(
-  env: Env,
-  userId: string
-): Promise<{ allowed: boolean; remaining: number; resetAt: number; limit: number }> {
-  const rpmLimit =
-    parseInt(env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
-  const windowSeconds =
-    parseInt(env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) ||
-    DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS;
-  const windowStart = getCurrentWindowStart(windowSeconds);
-  const rateLimitKey = createRateLimitKey('ai-proxy', userId, windowStart);
-
-  const result = await checkRateLimit(env.KV, rateLimitKey, rpmLimit, windowSeconds);
-  return { ...result, allowed: result.allowed, limit: rpmLimit };
-}
-
-function retryAfterSeconds(resetAt: number): string {
-  const retryAfter = resetAt - Math.floor(Date.now() / 1000);
-  return Math.max(1, retryAfter).toString();
-}
-
-function anthropicAuthErrorResponse(error: AIProxyAuthError): Response {
-  const errType = error.statusCode === 403 ? 'permission_error' : 'authentication_error';
-  return anthropicError(error.message, errType, error.statusCode);
-}
-
-function anthropicProxyOptions(
-  jsonContext: string,
-  rateLimitResponse: PrepareProxyOptions['rateLimitResponse']
-): PrepareProxyOptions {
-  return {
-    dialect: 'anthropic',
-    jsonContext,
-    disabledResponse: () => anthropicError('AI proxy is disabled', 'api_error', 503),
-    authErrorResponse: anthropicAuthErrorResponse,
-    invalidTokenResponse: () =>
-      anthropicError('Invalid or expired workspace token', 'authentication_error', 401),
-    rateLimitResponse,
-    invalidJsonResponse: () =>
-      anthropicError('Invalid JSON in request body', 'invalid_request_error', 400),
-    requestTooLargeResponse: (maxBytes) =>
-      anthropicError(`Request body exceeds ${maxBytes} bytes`, 'invalid_request_error', 413),
-    missingModelResponse: () => anthropicError('model is required', 'invalid_request_error', 400),
-    usageGateResponse: anthropicUsageGateError,
-    missingUpstreamResponse: () =>
-      anthropicError('No compatible upstream credential configured.', 'authentication_error', 401),
-  };
-}
-
-function openaiProxyOptions(jsonContext: string): PrepareProxyOptions {
-  return {
-    dialect: 'openai-compatible',
-    jsonContext,
-    disabledResponse: () => openaiError('AI proxy is disabled', 'service_unavailable', 503),
-    authErrorResponse: (error) =>
-      openaiError(error.message, 'invalid_request_error', error.statusCode),
-    invalidTokenResponse: () =>
-      openaiError('Invalid or expired workspace token', 'invalid_request_error', 401),
-    rateLimitResponse: (c, resetAt) => {
-      c.header('Retry-After', retryAfterSeconds(resetAt));
-      return openaiError('Rate limit exceeded. Please try again later.', 'rate_limit_error', 429);
-    },
-    invalidJsonResponse: () => openaiError('Invalid JSON body', 'invalid_request_error', 400),
-    requestTooLargeResponse: (maxBytes) =>
-      openaiError(`Request body exceeds ${maxBytes} bytes`, 'invalid_request_error', 413),
-    invalidBodyResponse: (body) =>
-      !Array.isArray(body.messages) || body.messages.length === 0
-        ? openaiError('messages array is required', 'invalid_request_error', 400)
-        : null,
-    missingModelResponse: () => openaiError('model is required', 'invalid_request_error', 400),
-    usageGateResponse: openaiUsageGateError,
-    missingUpstreamResponse: () =>
-      openaiError('No compatible upstream credential configured.', 'invalid_request_error', 401),
-  };
-}
-
-async function prepareProxyRequest(
-  c: ProxyContext,
-  options: PrepareProxyOptions
-): Promise<PreparedProxyResult> {
-  if (c.env.AI_PROXY_ENABLED === 'false') {
-    return { ok: false, response: options.disabledResponse() };
-  }
-
-  const wstoken = c.req.param('wstoken');
-  if (!wstoken) {
-    return { ok: false, response: options.invalidTokenResponse() };
-  }
-
-  let auth: PassthroughAuthResult;
-  try {
-    auth = await verifyPassthroughAuth(wstoken, c.env);
-  } catch (err) {
-    if (err instanceof AIProxyAuthError) {
-      return { ok: false, response: options.authErrorResponse(err) };
-    }
-    return { ok: false, response: options.invalidTokenResponse() };
-  }
-
-  const { allowed, remaining, resetAt, limit } = await checkPassthroughRateLimit(
-    c.env,
-    auth.userId
-  );
-  c.header('X-RateLimit-Limit', limit.toString());
-  c.header('X-RateLimit-Remaining', remaining.toString());
-  c.header('X-RateLimit-Reset', resetAt.toString());
-  if (!allowed) {
-    return { ok: false, response: options.rateLimitResponse(c, resetAt) };
-  }
-
-  let body: Record<string, unknown>;
-  try {
-    const maxBodyBytes = parsePositiveInt(
-      c.env.AI_PROXY_REQUEST_BODY_MAX_BYTES,
-      DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES
-    );
-    body = await readRequestJsonRecord(c.req.raw, options.jsonContext, maxBodyBytes);
-  } catch (error) {
-    if (error instanceof RequestBodyTooLargeError) {
-      return { ok: false, response: options.requestTooLargeResponse(error.maxBytes) };
-    }
-    return { ok: false, response: options.invalidJsonResponse() };
-  }
-
-  const invalidBodyResponse = options.invalidBodyResponse?.(body);
-  if (invalidBodyResponse) {
-    return { ok: false, response: invalidBodyResponse };
-  }
-
-  const modelId = typeof body.model === 'string' ? body.model : undefined;
-  if (!modelId) {
-    return { ok: false, response: options.missingModelResponse() };
-  }
-
-  const usageGate = await checkAiUsageGate(c.env.KV, auth.userId, c.env);
-  if (!usageGate.allowed) {
-    return { ok: false, response: options.usageGateResponse(usageGate.reason) };
-  }
-
-  const upstream = await resolveProxyUpstream({
-    env: c.env,
-    userId: auth.userId,
-    projectId: auth.projectId,
-    agentType: auth.agentType,
-    dialect: options.dialect,
-  });
-  if (!upstream) {
-    return { ok: false, response: options.missingUpstreamResponse() };
-  }
-
-  return { ok: true, value: { ...auth, body, modelId, upstream } };
 }
 
 function buildJsonUpstreamHeaders(upstream: ResolvedProxyUpstream): Record<string, string> {
@@ -540,11 +148,15 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
   const upstreamUrl = joinUpstreamUrl(upstream.baseUrl, 'v1/messages');
 
   try {
-    const upstreamResponse = await fetch(upstreamUrl, {
-      method: 'POST',
-      headers: upstreamHeaders,
-      body: JSON.stringify(body),
-    });
+    const upstreamResponse = await guardedFetch(
+      upstreamUrl,
+      {
+        method: 'POST',
+        headers: upstreamHeaders,
+        body: JSON.stringify(body),
+      },
+      { maxRedirects: await resolveOutboundMaxRedirects(c.env) }
+    );
 
     log.info('ai_proxy_passthrough.anthropic.response', {
       userId,
@@ -594,8 +206,15 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
       env: c.env,
       userId,
       format: 'anthropic',
-      fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
+      fallbackInputTokens:
+        upstream.credentialSource === 'platform' && hasLocalAiCostMetering(c.env)
+          ? estimateInputTokensFromRequest(body)
+          : estimateInputTokensFromMessages(body.messages),
       provider: upstream.provider,
+      costModelId: platformCostModelId(upstream, modelId),
+      estimateMissingUsage:
+        upstream.credentialSource === 'platform' && hasLocalAiCostMetering(c.env),
+      onMeasuredUsage: prepared.value.recordRunUsage,
       executionCtx: optionalExecutionContext(() => c.executionCtx),
       headers: responseHeaders,
     });
@@ -629,11 +248,15 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
   const countTokensUrl = joinUpstreamUrl(upstream.baseUrl, 'v1/messages/count_tokens');
 
   try {
-    const upstreamResponse = await fetch(countTokensUrl, {
-      method: 'POST',
-      headers: upstreamHeaders,
-      body: JSON.stringify(body),
-    });
+    const upstreamResponse = await guardedFetch(
+      countTokensUrl,
+      {
+        method: 'POST',
+        headers: upstreamHeaders,
+        body: JSON.stringify(body),
+      },
+      { maxRedirects: await resolveOutboundMaxRedirects(c.env) }
+    );
 
     if (!upstreamResponse.ok) {
       log.error('ai_proxy_passthrough.anthropic.count_tokens_error', {
@@ -711,11 +334,15 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
   });
 
   try {
-    const upstreamResponse = await fetch(upstreamUrl, {
-      method: 'POST',
-      headers: upstreamHeaders,
-      body: JSON.stringify(body),
-    });
+    const upstreamResponse = await guardedFetch(
+      upstreamUrl,
+      {
+        method: 'POST',
+        headers: upstreamHeaders,
+        body: JSON.stringify(body),
+      },
+      { maxRedirects: await resolveOutboundMaxRedirects(c.env) }
+    );
 
     log.info('ai_proxy_passthrough.openai.response', {
       userId,
@@ -769,8 +396,15 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
       env: c.env,
       userId,
       format: 'openai',
-      fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
+      fallbackInputTokens:
+        upstream.credentialSource === 'platform' && hasLocalAiCostMetering(c.env)
+          ? estimateInputTokensFromRequest(body)
+          : estimateInputTokensFromMessages(body.messages),
       provider: upstream.provider,
+      costModelId: platformCostModelId(upstream, modelId),
+      estimateMissingUsage:
+        upstream.credentialSource === 'platform' && hasLocalAiCostMetering(c.env),
+      onMeasuredUsage: prepared.value.recordRunUsage,
       executionCtx: optionalExecutionContext(() => c.executionCtx),
       headers: responseHeaders,
     });
@@ -785,9 +419,6 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
   }
 });
 
-export {
-  aiProxyPassthroughRoutes,
-  buildUpstreamAuthHeaders,
-  joinUpstreamUrl,
-  resolveProxyUpstream,
-};
+export { aiProxyPassthroughRoutes, buildUpstreamAuthHeaders, joinUpstreamUrl };
+
+export { resolveProxyUpstream } from './ai-proxy-passthrough-upstream';

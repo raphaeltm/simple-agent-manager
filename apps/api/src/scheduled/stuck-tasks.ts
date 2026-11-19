@@ -44,12 +44,18 @@ import { log } from '../lib/logger';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
+import { preserveProviderLimitWait } from '../services/provider-limit-reconciliation';
 import { expireSleepingConversation } from '../services/session-expiry';
+import {
+  convergeStaleTaskSleep,
+  DEFAULT_TASK_SLEEP_CONVERGENCE_LIMIT,
+} from '../services/session-sleep-task-convergence';
 import {
   sessionRecoveryAttemptDecayMs,
   sessionRecoveryMaxAttempts,
 } from '../services/session-snapshot-recovery-budget';
 import { sessionSleepInFlightMaxAgeMs } from '../services/session-snapshot-sleep-predicate';
+import { inspectTaskAgentHost } from '../services/task-agent-host-probe';
 import { cleanupTaskRun } from '../services/task-runner';
 import {
   classifyTaskRuntimeLiveness,
@@ -73,6 +79,7 @@ import {
 } from '../services/task-sleep-preservation';
 import { cleanupTerminalTaskResources } from '../services/task-terminal-cleanup';
 import { transitionTaskToTerminal } from '../services/task-terminal-transition';
+import { probeWorkspaceCreatingDeadline } from '../services/timeout';
 import {
   getVmAdmissionDiagnostics,
   isActiveVmAdmissionState,
@@ -149,6 +156,7 @@ export interface StuckTaskCandidate {
   auto_provisioned_node_id: string | null;
   chat_session_id: string | null;
   task_mode: string | null;
+  admission_state?: string | null;
 }
 
 export interface StuckTaskScanCursor {
@@ -270,7 +278,7 @@ function parseStuckTaskScanCursor(raw: string | null): StuckTaskScanCursor | nul
 }
 
 const STUCK_TASK_CANDIDATE_COLUMNS = `id, project_id, user_id, status, execution_step, updated_at, started_at,
-       workspace_id, auto_provisioned_node_id, chat_session_id, task_mode`;
+       workspace_id, auto_provisioned_node_id, chat_session_id, task_mode, admission_state`;
 
 /**
  * Select one bounded, fair page of active tasks. A KV cursor prevents old live
@@ -308,12 +316,13 @@ export async function selectStuckTaskCandidates(
     const forward = await env.DATABASE.prepare(
       `SELECT ${STUCK_TASK_CANDIDATE_COLUMNS}
        FROM tasks
-       WHERE status IN ('queued', 'delegated', 'in_progress')
-         AND (updated_at > ? OR (updated_at = ? AND id > ?))
+       WHERE (status IN ('queued', 'delegated', 'in_progress')
+         OR (status='sleeping' AND admission_state='provider_limit_recovery_pending'))
+         AND (updated_at, id) > (?, ?)
        ORDER BY updated_at ASC, id ASC
        LIMIT ?`
     )
-      .bind(cursor.updatedAt, cursor.updatedAt, cursor.taskId, maxCandidates)
+      .bind(cursor.updatedAt, cursor.taskId, maxCandidates)
       .all<StuckTaskCandidate>();
     tasks = forward.results;
   } else {
@@ -325,7 +334,8 @@ export async function selectStuckTaskCandidates(
        FROM (
          SELECT ${STUCK_TASK_CANDIDATE_COLUMNS}
          FROM tasks
-         WHERE status IN ('queued', 'delegated', 'in_progress')
+         WHERE (status IN ('queued', 'delegated', 'in_progress')
+         OR (status='sleeping' AND admission_state='provider_limit_recovery_pending'))
          ORDER BY updated_at DESC, id DESC
          LIMIT ?
        )
@@ -342,12 +352,13 @@ export async function selectStuckTaskCandidates(
     const wrap = await env.DATABASE.prepare(
       `SELECT ${STUCK_TASK_CANDIDATE_COLUMNS}
        FROM tasks
-       WHERE status IN ('queued', 'delegated', 'in_progress')
-         AND (updated_at < ? OR (updated_at = ? AND id <= ?))
+       WHERE (status IN ('queued', 'delegated', 'in_progress')
+         OR (status='sleeping' AND admission_state='provider_limit_recovery_pending'))
+         AND (updated_at, id) <= (?, ?)
        ORDER BY updated_at ASC, id ASC
        LIMIT ?`
     )
-      .bind(cursor.updatedAt, cursor.updatedAt, cursor.taskId, remaining)
+      .bind(cursor.updatedAt, cursor.taskId, remaining)
       .all<StuckTaskCandidate>();
     if (wrap.results.length > 0) {
       wrapped = true;
@@ -713,7 +724,11 @@ async function classifyTaskRuntime(
   let initialClassification = classifyTaskRuntimeLiveness(livenessSignals);
   if (needsNodeHealthProbe(livenessSignals) && livenessSignals.workspace?.nodeId) {
     const nodeId = livenessSignals.workspace.nodeId;
-    const probe = await probeNodeHealthForTaskLiveness(env, nodeId);
+    const probe = await probeNodeHealthForTaskLiveness(
+      env,
+      nodeId,
+      livenessSignals.workspace.nodeTransport
+    );
     if (probe.outcome !== 'ok') {
       log.warn('stuck_task.node_health_probe_unhealthy', {
         workspaceId: task.workspace_id,
@@ -810,13 +825,15 @@ async function classifyTaskRuntime(
         acpProbeOutcome: 'timeout',
       });
     }
-    return finish({
-      ...livenessSignals,
-      acpProbeOutcome: 'ok',
-      acpSessions: probe.sessions as RuntimeAcpSessionSnapshot[],
-      sessionWork: probe.sessionWork,
-      workEvidence: probe.workEvidence,
-    });
+    return finish(
+      await inspectTaskAgentHost(env, {
+        ...livenessSignals,
+        acpProbeOutcome: 'ok',
+        acpSessions: probe.sessions as RuntimeAcpSessionSnapshot[],
+        sessionWork: probe.sessionWork,
+        workEvidence: probe.workEvidence,
+      })
+    );
   } catch (err) {
     log.warn('stuck_task.liveness_probe_failed', {
       workspaceId: task.workspace_id,
@@ -1135,7 +1152,19 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
   result.candidateCursorWrapped = candidateSelection.wrapped;
   result.candidateCursorErrors = candidateSelection.cursorErrors;
 
+  const sleepConvergenceBudget = {
+    remaining: Math.min(maxCandidates, DEFAULT_TASK_SLEEP_CONVERGENCE_LIMIT),
+  };
   for (const task of candidateSelection.tasks) {
+    if (task.admission_state?.startsWith('provider_limit_')) {
+      try {
+        if (await preserveProviderLimitWait(env, task.id, now.getTime())) continue;
+      } catch {
+        result.errors++;
+        log.warn('provider_limit.reconciliation_failed', { taskId: task.id });
+        continue;
+      }
+    }
     if (task.status === 'in_progress' && task.chat_session_id) {
       try {
         if (await expireSleepingConversation(env, task.project_id, task.chat_session_id, now))
@@ -1288,11 +1317,28 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
             reason = `Instant session start accepted but still queued for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(instantStartStaleTimeoutMs / 1000)}s).${stepInfo} Background container launch may not have completed.`;
           } else if (elapsedMs > queuedTimeoutMs) {
             isStuck = true;
-            reason = `Task stuck in 'queued' for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(queuedTimeoutMs / 1000)}s).${stepInfo} Node provisioning may have failed silently.`;
+            reason = `Task stuck in 'queued' without recorded orchestration progress for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(queuedTimeoutMs / 1000)}s).${stepInfo}`;
           }
           break;
         case 'delegated':
           if (elapsedMs > delegatedTimeoutMs) {
+            // A workspace waiting for its node's build slot is not stuck: it answers to the
+            // shared creating deadline (`workspace-creating-deadline.ts`), not this clock, which
+            // starts at dispatch. Probed only for tasks this branch would otherwise fail.
+            const creating = task.workspace_id
+              ? await probeWorkspaceCreatingDeadline(env.DATABASE, env, task.workspace_id, now)
+              : 'not_starting';
+            if (creating !== 'not_starting') {
+              // 'unknown' (the probe could not read) withholds the verdict for this pass only.
+              log.info('stuck_task.delegated_workspace_still_starting', {
+                taskId: task.id,
+                workspaceId: task.workspace_id,
+                elapsedMs,
+                probe: creating,
+                action: 'deferred',
+              });
+              break;
+            }
             isStuck = true;
             reason = `Task stuck in 'delegated' for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(delegatedTimeoutMs / 1000)}s).${stepInfo} Workspace may have failed to start.`;
           }
@@ -1304,6 +1350,20 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
           const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
           const executionMs = now.getTime() - startedAt;
           if (executionMs > maxExecutionMs) {
+            if (
+              (await convergeStaleTaskSleep(
+                env,
+                {
+                  projectId: task.project_id,
+                  chatSessionId: task.chat_session_id,
+                  workspaceId: task.workspace_id,
+                  userId: task.user_id,
+                },
+                now,
+                sleepConvergenceBudget
+              )) !== 'none'
+            )
+              break;
             const ceiling = await evaluateRunawayCostCeiling(
               env,
               {
@@ -1312,6 +1372,8 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
                 workspace_id: task.workspace_id,
                 chat_session_id: task.chat_session_id,
                 startedAtMs: startedAt,
+                taskMode: task.task_mode,
+                userId: task.user_id,
               },
               {
                 nowMs: now.getTime(),
@@ -1325,7 +1387,12 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
                 },
               }
             );
-            if (ceiling.kind === 'preserve') break;
+            if (ceiling.kind === 'preserve') {
+              // The sleep queue owns this generation now; do not run another
+              // stall/liveness verdict after handing it off.
+              if (ceiling.reason === 'session_sleep_requested') continue;
+              break;
+            }
             if (ceiling.kind === 'terminalize') {
               isStuck = true;
               if (ceiling.superseded) {
@@ -1413,11 +1480,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         const doStatus = doProbe.status;
         const liveness = task.status === 'in_progress' ? await probeLiveness() : null;
 
-        if (
-          task.status === 'in_progress' &&
-          timeForCheck > maxExecutionMs &&
-          liveness?.live
-        ) {
+        if (task.status === 'in_progress' && timeForCheck > maxExecutionMs && liveness?.live) {
           const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
           const stall = await probeStall(liveness);
           if (stall?.decision === 'stalled') {
@@ -1458,7 +1521,14 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         }
 
         if (doStatus?.completed && !isStuck) {
-          await recordTaskRunnerMismatch(env, task.id, doStatus, doProbe.outcome, timeForCheck, liveness);
+          await recordTaskRunnerMismatch(
+            env,
+            task.id,
+            doStatus,
+            doProbe.outcome,
+            timeForCheck,
+            liveness
+          );
         }
       }
       if (!isStuck) continue;
@@ -1572,6 +1642,14 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         taskId: task.id,
         projectId: task.project_id,
         status: terminalStatus,
+        // holdTaskForProviderLimit release and placement may advance this row
+        // across any await above. The verdict belongs to this exact observation,
+        // never the newer status loaded by transitionTaskToTerminal (rule 58).
+        expectedTaskVersion: {
+          status: task.status,
+          workspaceId: task.workspace_id,
+          updatedAt: task.updated_at,
+        },
         reason,
         source: compactionLoopRecovery
           ? 'scheduled.stuck_tasks.compaction_loop'

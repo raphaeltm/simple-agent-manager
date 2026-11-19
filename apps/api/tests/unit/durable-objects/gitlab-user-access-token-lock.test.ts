@@ -5,6 +5,7 @@ import {
   expectTrustedOwnerTokenLookup,
   makeAccessTokenLockRequest,
   makeBetterAuthAccountEnv,
+  makeLockState,
 } from './access-token-lock-test-helpers';
 
 const { createAuthMock, logWarnMock } = vi.hoisted(() => ({
@@ -25,6 +26,17 @@ vi.mock('../../../src/auth', () => ({
   createAuth: createAuthMock,
 }));
 
+// The token lookup only runs with a GitLab provider configured, and selects the rows that
+// provider's host issued (gitlab.com: raw account ids).
+vi.mock('../../../src/services/platform-config-oauth', () => ({
+  getGitLabOAuthConfig: async () => ({
+    host: 'https://gitlab.com',
+    apiBaseUrl: 'https://gitlab.com/api/v4',
+    clientId: 'gitlab-client-id',
+    clientSecret: 'gitlab-client-secret',
+    identityTrusted: true,
+  }),
+}));
 vi.mock('../../../src/lib/logger', () => ({
   log: {
     warn: logWarnMock,
@@ -72,7 +84,7 @@ describe('GitLabUserAccessTokenLock', () => {
     createAuthMock.mockReturnValue({ api: { getAccessToken } });
 
     const { env } = makeBetterAuthAccountEnv('gitlab-account-row');
-    const lock = new GitLabUserAccessTokenLock({} as never, env as never);
+    const lock = new GitLabUserAccessTokenLock(makeLockState() as never, env as never);
 
     const [res1, res2] = await Promise.all([
       lock.fetch(makeAccessTokenLockRequest('https://gitlab-user-access-token-lock/token')),
@@ -89,19 +101,19 @@ describe('GitLabUserAccessTokenLock', () => {
     expectBetterAuthTokenLookup(getAccessToken, 'gitlab-account-row');
   });
 
-  it('returns 401 token_unavailable when BetterAuth cannot produce a token', async () => {
+  it('returns 503 token_unavailable when BetterAuth fails without evidence of expiry', async () => {
     const getAccessToken = vi.fn(async () => {
       throw new Error('FAILED_TO_GET_ACCESS_TOKEN');
     });
     createAuthMock.mockReturnValue({ api: { getAccessToken } });
 
     const { env } = makeBetterAuthAccountEnv('gitlab-account-row');
-    const lock = new GitLabUserAccessTokenLock({} as never, env as never);
+    const lock = new GitLabUserAccessTokenLock(makeLockState() as never, env as never);
     const res = await lock.fetch(
       makeAccessTokenLockRequest('https://gitlab-user-access-token-lock/token')
     );
 
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ error: 'token_unavailable' });
     expect(logWarnMock).toHaveBeenCalledWith(
       'gitlab.user_access_token_lock.unavailable',
@@ -113,7 +125,7 @@ describe('GitLabUserAccessTokenLock', () => {
     const getAccessToken = vi.fn(async () => ({ accessToken: 'owner-token' }));
     createAuthMock.mockReturnValue({ api: { getAccessToken } });
     const { env } = makeBetterAuthAccountEnv('gitlab-account-row');
-    const lock = new GitLabUserAccessTokenLock({} as never, env as never);
+    const lock = new GitLabUserAccessTokenLock(makeLockState() as never, env as never);
 
     const res = await lock.fetch(
       makeAccessTokenLockRequest('https://gitlab-user-access-token-lock/token', {
@@ -130,7 +142,7 @@ describe('GitLabUserAccessTokenLock', () => {
     createAuthMock.mockReturnValue({ api: { getAccessToken } });
 
     const { env } = makeBetterAuthAccountEnv(null);
-    const lock = new GitLabUserAccessTokenLock({} as never, env as never);
+    const lock = new GitLabUserAccessTokenLock(makeLockState() as never, env as never);
     const res = await lock.fetch(
       makeAccessTokenLockRequest('https://gitlab-user-access-token-lock/token')
     );
@@ -147,14 +159,14 @@ describe('GitLabUserAccessTokenLock', () => {
 
   it('rejects non-POST requests', async () => {
     createAuthMock.mockReturnValue({ api: { getAccessToken: vi.fn() } });
-    const lock = new GitLabUserAccessTokenLock({} as never, {} as never);
+    const lock = new GitLabUserAccessTokenLock(makeLockState() as never, {} as never);
     const res = await lock.fetch(new Request('https://gitlab-user-access-token-lock/token'));
     expect(res.status).toBe(405);
   });
 
   it('rejects malformed payloads', async () => {
     createAuthMock.mockReturnValue({ api: { getAccessToken: vi.fn() } });
-    const lock = new GitLabUserAccessTokenLock({} as never, {} as never);
+    const lock = new GitLabUserAccessTokenLock(makeLockState() as never, {} as never);
     const res = await lock.fetch(
       new Request('https://gitlab-user-access-token-lock/token', {
         method: 'POST',

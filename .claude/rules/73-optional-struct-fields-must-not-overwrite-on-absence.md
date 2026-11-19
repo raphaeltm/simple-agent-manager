@@ -1,4 +1,28 @@
+---
+paths:
+  - '**/*.go'
+  - '**/*.ts'
+  - '**/*.tsx'
+  - '**/*.sql'
+---
+
 # A Zero-Valued Optional Field Must Not Overwrite Existing State
+
+## Enforcement
+
+- **Go, blocking in CI:** `pnpm quality:go-optional-fields`
+  (`scripts/quality/go-optional-fields/`) reports a non-string scalar field of an options
+  or patch value that is copied onto existing state with no "not supplied" check, or
+  guarded only by its own truthiness. It reports the original incident at every commit
+  where it existed. A deliberate full replacement opts out with
+  `//sam:optional-field-ok <reason>` on or above the line.
+- **TypeScript:** strict null checks reject the direct form (assigning `boolean | undefined`
+  to `boolean`). Defaulting an absent field on an update path (`patch.flag ?? false`,
+  spreads, `Object.assign`) is not checked: the same syntax is the normal way to create a
+  record, so a lint could not tell them apart. That part, the stored-override-layer shape
+  below, and the tests the rule requires remain review judgment.
+- The check cannot prove that a consumer gates on the right signal (requirement 6). The
+  per-call-site, explicit-override and consumer tests below stay required.
 
 ## When This Applies
 
@@ -56,7 +80,7 @@ nothing panics, no type changes, and every call site still compiles.
 
 It is the options-struct sibling of `.claude/rules/63` (relaxing a column deletes
 the checks that used it) and `.claude/rules/71` (tightening one deletes a
-capability): here, the *default* deletes state.
+capability): here, the _default_ deletes state.
 
 The tells:
 
@@ -94,7 +118,7 @@ The tells:
    and leaves the next caller free to reintroduce the bug.
 
 6. **Ask whether the overwritten field was the right signal in the first place.**
-   The overwrite is the trigger; the reason it was *damaging* is usually that some
+   The overwrite is the trigger; the reason it was _damaging_ is usually that some
    consumer gates behaviour on a field that is merely **correlated** with the
    property it actually cares about. `agent_ws.go` gated runtime-asset injection on
    `runtime.Lightweight` ("skip the devcontainer build" — a per-workspace
@@ -111,7 +135,7 @@ The tells:
   exact upsert shape, assert the field survived. Naming each case after its call
   site is what makes a future deletion visible.
 - **A liveness assertion inside each case** (`.claude/rules/62`): assert a field
-  the caller *did* supply was applied, so a passing test cannot mean the update
+  the caller _did_ supply was applied, so a passing test cannot mean the update
   became a no-op.
 - **An explicit-override control**: the field must still be settable to its zero
   value on purpose, in both directions.
@@ -160,6 +184,28 @@ The tells:
 - [ ] Tests enter through the real handler where one can be driven
 - [ ] Each fix was reverted separately and the reddened tests recorded
 
+## The Same Bug in a Stored Override Layer
+
+A persisted layer that overrides another one (a skill over a profile, a project
+default over a platform default) has the same absence problem in its schema. A
+column declared `NOT NULL DEFAULT <value>`, or a create path that stamps a default
+when the field is omitted, cannot store "not set", so every row overrides the layer
+beneath it.
+
+`skills.agent_type` was `NOT NULL DEFAULT 'claude-code'`, and `createSkill` stamped
+`DEFAULT_TASK_AGENT_TYPE` because the skill form had no agent field. Every skill
+therefore replaced the agent of the profile it ran with: in production, `do` with the
+Sol and Opus profiles ran as `opencode`. Migration 0200 made the column nullable,
+creation stores NULL when the field is omitted, and `resolveSkillProfile` keeps
+`skill.agentType ?? profile.agentType`.
+
+- Override columns are nullable, NULL means "use the layer below", and the create
+  path stores NULL for an omitted field rather than an environment default.
+- When the override is set, check its dependants against the value that actually
+  wins. A skill's effort is dropped if the resolved agent doesn't support it.
+- Test the resolver with the override absent (the lower layer wins) and present
+  (the override wins), through the real create path, not a hand-built row.
+
 ## Audit Result for `workspaceRuntimeOpts`
 
 `Lightweight` was the only `bool`. Every other field is a `string` using the
@@ -178,5 +224,7 @@ this rule applies to it verbatim.
 - `.claude/rules/63-widening-a-table-can-delete-an-auth-check.md` — the schema sibling
 - `.claude/rules/71-tightening-a-column-can-delete-a-capability.md` — the mirror image
 - `.claude/rules/44-dual-write-migration-enumerate-writers.md` — enumerate every caller
+- Stored-layer case: `apps/api/src/db/migrations/0200_skills_optional_agent_type.sql`,
+  `apps/api/tests/unit/services/skills-optional-agent-type.test.ts`
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md` — prove the guard discriminating
 - `.claude/rules/61-guards-must-cover-every-runtime.md` — one guard, every runtime

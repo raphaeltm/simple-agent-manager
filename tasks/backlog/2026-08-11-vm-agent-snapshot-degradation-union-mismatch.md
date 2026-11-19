@@ -1,5 +1,11 @@
 # VM Agent Session-Snapshot Degradation Value Missing From API Union/Allowlist
 
+> **Reconciliation 2026-10-26:** Still open; nothing in the open items changed. Pointer fix: #2305
+> and #2317 edited `scheduled/session-sleep-lifecycle-repair.ts`, and its `status='available'` /
+> `degradation='none'` select and re-check are now at `:106-107,132-133` (the 10-05 note's
+> `:114-115,140-141` was already stale). `FILE_LOSS_DEGRADATIONS` is unchanged at
+> `services/failed-task-preservation.ts:450`.
+
 > **Reconciliation 2026-10-05:** #2208 (7a9782c90) removed the usable-degraded allowlist from `scheduled/session-sleep-lifecycle-repair.ts`. Repair now selects and re-checks only `status='available'` with `degradation='none'` (`:114-115,140-141`), so leaving out `agent-context-skipped` and `wip-only` there no longer matters. The route allowlist (`routes/workspaces/session-snapshots.ts:49-57`) still covers every degradation value the vm-agent sends. Still open:
 >
 > - Decide `FILE_LOSS_DEGRADATIONS` (`services/failed-task-preservation.ts:449`) and record the decision in a comment. It omits `agent-context-skipped`, which keeps its file artifacts, so that is probably intended.

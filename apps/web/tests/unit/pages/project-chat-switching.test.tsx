@@ -104,6 +104,9 @@ function chatSession(id: string, topic: string) {
     startedAt: Date.now() - 60_000,
     endedAt: null,
     createdAt: Date.now() - 60_000,
+    // The viewer's own chats: the server marks them on every detail response.
+    isMine: true,
+    viewerAccess: 'owner',
   };
 }
 
@@ -266,7 +269,7 @@ async function sendFromAlpha(text: string) {
   fireEvent.change(composer(), { target: { value: text } });
   fireEvent.click(screen.getByRole('button', { name: /send/i }));
   await waitFor(() =>
-    expect(mocks.sendFollowUpPrompt).toHaveBeenCalledWith(PROJECT_ID, ALPHA.id, text)
+    expect(mocks.sendFollowUpPrompt).toHaveBeenCalledWith(PROJECT_ID, ALPHA.id, text, [], 'queue')
   );
   return delivery;
 }
@@ -322,13 +325,13 @@ describe('Project chat — switching between chats', () => {
     expect(switched!.conversation).not.toContain('Alpha answer one');
     expect(screen.queryByText('Alpha answer one')).not.toBeInTheDocument();
 
-    // The cached copy is reconciled in the background, asking only for rows
-    // newer than its newest row — even though it is well inside staleTime.
+    // The cached copy is reconciled in the background, overlapping its newest row
+    // to refresh content appended under its stable ID — even though it is well inside staleTime.
     await waitFor(() =>
       expect(mocks.getChatSession).toHaveBeenCalledWith(
         PROJECT_ID,
         BRAVO.id,
-        expect.objectContaining({ after: '[2000,2000,"b1"]' })
+        expect.objectContaining({ after: '[2000,1999,"b1"]' })
       )
     );
     expect(screen.getByText('Bravo cached answer')).toBeInTheDocument();

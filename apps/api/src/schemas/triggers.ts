@@ -1,30 +1,63 @@
+import {
+  areGitHubTriggerActionsValid,
+  GITHUB_AUTHOR_ASSOCIATIONS,
+  GITHUB_REVIEW_STATES,
+  GITHUB_TRIGGER_EVENT_TYPES,
+  isWebhookFilterPresenceOperator,
+  WEBHOOK_FILTER_OPERATORS,
+} from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import { ResourceRequirementsSchema } from './resource-requirements';
 
-const TriggerSourceTypeSchema = v.picklist(['cron', 'webhook', 'github', 'incident']);
+const TriggerSourceTypeSchema = v.picklist(['cron', 'webhook', 'github', 'incident', 'email']);
 const TriggerStatusSchema = v.picklist(['active', 'paused', 'disabled']);
 const TaskModeSchema = v.picklist(['task', 'conversation']);
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 
-const GitHubEventTypeSchema = v.picklist(['issues', 'issue_comment', 'pull_request', 'push']);
+const GitHubEventTypeSchema = v.picklist(GITHUB_TRIGGER_EVENT_TYPES);
 
-const GitHubFiltersSchema = v.optional(
-  v.strictObject({
-    actions: v.optional(v.array(v.string())),
-    labels: v.optional(v.array(v.string())),
-    ignoreActors: v.optional(v.array(v.string())),
-    commandPrefix: v.optional(v.string()),
-    bodyContains: v.optional(v.string()),
-    branches: v.optional(v.array(v.string())),
-    ignoreDrafts: v.optional(v.boolean()),
-  })
-);
-
-export const GitHubConfigValueSchema = v.strictObject({
-  eventType: GitHubEventTypeSchema,
-  filters: GitHubFiltersSchema,
+export const GitHubFiltersValueSchema = v.strictObject({
+  actions: v.optional(v.array(v.string())),
+  labels: v.optional(v.array(v.string())),
+  ignoreActors: v.optional(v.array(v.string())),
+  actors: v.optional(v.array(v.pipe(v.string(), v.trim(), v.minLength(1)))),
+  addedLabel: v.optional(v.string()),
+  authorAssociation: v.optional(v.array(v.picklist(GITHUB_AUTHOR_ASSOCIATIONS))),
+  ignoreBots: v.optional(v.boolean()),
+  commentContains: v.optional(v.string()),
+  isPullRequest: v.optional(v.boolean()),
+  reviewStates: v.optional(v.array(v.picklist(GITHUB_REVIEW_STATES))),
+  commandPrefix: v.optional(v.string()),
+  bodyContains: v.optional(v.string()),
+  branches: v.optional(v.array(v.string())),
+  ignoreDrafts: v.optional(v.boolean()),
 });
+const GitHubFiltersSchema = v.optional(GitHubFiltersValueSchema);
+
+export const GitHubConfigValueSchema = v.pipe(
+  v.strictObject({
+    eventType: GitHubEventTypeSchema,
+    filters: GitHubFiltersSchema,
+    subjectAffinity: v.optional(v.boolean()),
+    queueMaxPending: v.optional(v.pipe(v.number(), v.safeInteger(), v.minValue(1))),
+    queueTtlSeconds: v.optional(
+      v.pipe(
+        v.number(),
+        v.safeInteger(),
+        v.minValue(1),
+        v.check((seconds) => {
+          const deadline = new Date(Date.now() + seconds * 1000);
+          return Number.isFinite(deadline.getTime()) && deadline.toISOString().length === 24;
+        }, 'Queue lifetime is outside the supported date range')
+      )
+    ),
+  }),
+  v.check(
+    (config) => areGitHubTriggerActionsValid(config.eventType, config.filters?.actions),
+    'Actions must be valid for the selected GitHub event; push has no actions'
+  )
+);
 const GitHubConfigSchema = v.optional(GitHubConfigValueSchema);
 
 const WebhookFilterValueSchema = v.union([v.string(), v.number(), v.boolean(), v.null_()]);
@@ -42,17 +75,57 @@ const WebhookFilterSchema = v.pipe(
         'Filter path contains a forbidden segment'
       )
     ),
-    operator: v.picklist(['exists', 'equals', 'contains']),
+    operator: v.picklist(WEBHOOK_FILTER_OPERATORS),
     value: v.optional(WebhookFilterValueSchema),
   }),
   v.check(
     (filter) =>
-      filter.operator === 'exists' ? filter.value === undefined : filter.value !== undefined,
-    'Filter value is required for equals/contains and forbidden for exists'
+      isWebhookFilterPresenceOperator(filter.operator)
+        ? filter.value === undefined
+        : filter.value !== undefined,
+    'Filter value is required for equals/contains and forbidden for exists/notExists'
   )
 );
 
+/** Stored filters are read back through the same rules they were written with. */
+export const StoredWebhookFiltersSchema = v.array(WebhookFilterSchema);
+
+/** A header SAM reads itself (signature or event ID), so credential-like names are allowed. */
+const WebhookHeaderNameSchema = v.pipe(
+  v.string(),
+  v.trim(),
+  v.toLowerCase(),
+  v.minLength(1),
+  v.regex(/^[a-z0-9!#$%&'*+.^_`|~-]+$/, 'Header name is invalid')
+);
+
+const WebhookDotPathSchema = v.pipe(
+  v.string(),
+  v.trim(),
+  v.minLength(1),
+  v.check(
+    (path) =>
+      path
+        .split('.')
+        .every((part) => part && !['__proto__', 'prototype', 'constructor'].includes(part)),
+    'Path contains a forbidden segment'
+  )
+);
+
+const WebhookVerificationSchema = v.variant('scheme', [
+  v.strictObject({ scheme: v.literal('sam_bearer') }),
+  v.strictObject({ scheme: v.literal('slack_v0') }),
+  v.strictObject({ scheme: v.literal('hmac_sha256_body'), header: WebhookHeaderNameSchema }),
+]);
+
+const WebhookEventIdSchema = v.union([
+  v.strictObject({ path: WebhookDotPathSchema }),
+  v.strictObject({ header: WebhookHeaderNameSchema }),
+]);
+
 const WebhookConfigValueSchema = v.strictObject({
+  verification: v.optional(WebhookVerificationSchema),
+  eventId: v.optional(WebhookEventIdSchema),
   sourceLabel: v.optional(v.string()),
   filterMode: v.optional(v.picklist(['all', 'any'])),
   filters: v.optional(v.array(WebhookFilterSchema)),
@@ -76,6 +149,23 @@ const WebhookConfigValueSchema = v.strictObject({
 
 const WebhookConfigSchema = v.optional(WebhookConfigValueSchema);
 
+/** Allowed senders are compared lower-cased; the per-trigger count cap is an admin setting. */
+const AllowedSenderSchema = v.pipe(
+  v.string(),
+  v.trim(),
+  v.toLowerCase(),
+  v.maxLength(254, 'Allowed sender is too long'),
+  v.email('Each allowed sender must be an email address')
+);
+
+const EmailConfigValueSchema = v.strictObject({
+  allowedSenders: v.optional(
+    v.pipe(v.array(AllowedSenderSchema), v.minLength(1, 'Add at least one allowed sender'))
+  ),
+});
+
+const EmailConfigSchema = v.optional(EmailConfigValueSchema);
+
 export const CreateTriggerSchema = v.object({
   name: v.string(),
   description: v.optional(v.string()),
@@ -93,6 +183,7 @@ export const CreateTriggerSchema = v.object({
   maxConcurrent: v.optional(v.number()),
   githubConfig: GitHubConfigSchema,
   webhookConfig: WebhookConfigSchema,
+  emailConfig: EmailConfigSchema,
 });
 
 export const UpdateTriggerSchema = v.object({
@@ -112,6 +203,7 @@ export const UpdateTriggerSchema = v.object({
   maxConcurrent: v.optional(v.number()),
   githubConfig: GitHubConfigSchema,
   webhookConfig: WebhookConfigSchema,
+  emailConfig: EmailConfigSchema,
 });
 
 export const TriggerPreviewSchema = v.strictObject({
@@ -119,4 +211,4 @@ export const TriggerPreviewSchema = v.strictObject({
   headers: v.optional(v.record(v.string(), v.string())),
 });
 
-export { WebhookConfigValueSchema };
+export { EmailConfigValueSchema, WebhookConfigValueSchema };

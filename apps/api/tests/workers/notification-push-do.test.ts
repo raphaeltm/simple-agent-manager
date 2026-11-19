@@ -1,9 +1,9 @@
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import { makeSignature } from 'better-auth/crypto';
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { NotificationService } from '../../src/durable-objects/notification';
-import type { ProjectData } from '../../src/durable-objects/project-data';
 import { encryptWebPushPayload } from '../../src/lib/web-push';
 import { storeMcpToken } from '../../src/services/mcp-token';
 import {
@@ -267,6 +267,100 @@ describe('Notification DO Web Push migration and delivery', () => {
     ]);
   });
 
+  it('refuses a private or metadata push endpoint at the DO save boundary and stores nothing', async () => {
+    const userId = `push-private-save-${crypto.randomUUID()}`;
+    const notification = stub(userId);
+    // Called on the instance (not over RPC) so the expected rejection stays inside the test.
+    await runInDurableObject(notification, async (instance) => {
+      for (const endpoint of [
+        'https://169.254.169.254/latest/meta-data/',
+        'https://127.0.0.1:8443/push',
+        'https://push.internal/send',
+      ]) {
+        await expect(
+          instance.addPushSubscription(
+            userId,
+            { endpoint, keys: { p256dh: RECEIVER_PUBLIC_KEY, auth: AUTH_SECRET } },
+            'Refused'
+          )
+        ).rejects.toThrow(/public host/);
+      }
+    });
+    expect(await notification.listPushSubscriptions(userId)).toEqual([]);
+
+    // Control: a push-service endpoint on a public host is stored.
+    await notification.addPushSubscription(
+      userId,
+      {
+        endpoint: 'https://push.example.test/private-save-control',
+        keys: { p256dh: RECEIVER_PUBLIC_KEY, auth: AUTH_SECRET },
+      },
+      'Accepted'
+    );
+    expect(await notification.listPushSubscriptions(userId)).toHaveLength(1);
+  });
+
+  it('skips a stored private endpoint at delivery while still delivering to a public one', async () => {
+    const userId = `push-private-stored-${crypto.randomUUID()}`;
+    const notification = stub(userId);
+    const created = await notification.createNotification(userId, {
+      type: 'needs_input',
+      urgency: 'high',
+      title: 'Stored private endpoint',
+    });
+    const publicEndpoint = 'https://push.example.test/stored-public';
+    await notification.addPushSubscription(
+      userId,
+      { endpoint: publicEndpoint, keys: { p256dh: RECEIVER_PUBLIC_KEY, auth: AUTH_SECRET } },
+      'Public'
+    );
+    // A row saved before the public-host check existed: written straight into SQLite.
+    const privateEndpoint = 'https://10.0.0.7/push';
+    await runInDurableObject(notification, async (_instance, state) => {
+      const now = Date.now();
+      state.storage.sql.exec(
+        `INSERT INTO push_subscriptions
+           (endpoint, user_id, p256dh, auth, user_agent, disabled_at, failure_count,
+            last_success_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'Legacy', NULL, 0, NULL, ?, ?)`,
+        privateEndpoint,
+        userId,
+        RECEIVER_PUBLIC_KEY,
+        AUTH_SECRET,
+        now,
+        now
+      );
+    });
+
+    const fetchMock = vi.fn(async () => new Response(null, { status: 201 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const warn = vi.spyOn(console, 'warn');
+    await runInDurableObject(notification, async (instance) => {
+      await (
+        instance as unknown as {
+          deliverPushNotification(userId: string, notificationId: string): Promise<void>;
+        }
+      ).deliverPushNotification(userId, created.id);
+    });
+
+    // The refusal is the host check's, reported once with safe fields and no URL. (The VAPID
+    // signer would also reject the endpoint, but only after retrying and without this event.)
+    const refusals = warn.mock.calls
+      .map(([line]) => String(line))
+      .filter((line) => line.includes('web_push.endpoint_refused'));
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toContain('"reason":"host"');
+    expect(refusals[0]).not.toContain('10.0.0.7');
+    warn.mockRestore();
+    // Liveness: the public endpoint received the push. The private one was never contacted.
+    expect(fetchMock.mock.calls.map(([endpoint]) => endpoint)).toEqual([publicEndpoint]);
+    expect(await notification.hasConfirmedPushDelivery(userId, created.id)).toBe(true);
+    const rows = await notification.listPushSubscriptions(userId);
+    const privateRow = rows.find((row) => row.endpoint === privateEndpoint);
+    // The refusal goes through the ordinary failure accounting, so the row ages out.
+    expect(privateRow).toEqual(expect.objectContaining({ failureCount: 1 }));
+  });
+
   it('evicts the oldest endpoint at the configured per-user subscription ceiling', async () => {
     const userId = `push-cap-user-${crypto.randomUUID()}`;
     const notification = stub(userId);
@@ -409,8 +503,16 @@ describe('Notification DO Web Push migration and delivery', () => {
     await vi.waitFor(async () => {
       expect(await notification.hasConfirmedPushDelivery(userId, pushed.id)).toBe(true);
     });
-    const [marker] = await projectData.listActiveAttentionMarkers(sessionId);
-    if (!marker) throw new Error('Expected an active needs_input marker');
+    // Inbox slice G: the question is one D1 `asks` row; the notification points at it.
+    const marker = {
+      id: String((pushed.metadata as { attentionMarkerId: string }).attentionMarkerId),
+    };
+    expect(await projectData.listActiveAttentionMarkers(sessionId)).toEqual([]);
+    expect(
+      await env.DATABASE.prepare('SELECT kind, status, notification_id FROM asks WHERE id = ?')
+        .bind(marker.id)
+        .first()
+    ).toEqual({ kind: 'question', status: 'open', notification_id: pushed.id });
     const signedBrowserSessionToken = `${browserSessionToken}.${await makeSignature(
       browserSessionToken,
       env.BETTER_AUTH_SECRET || env.ENCRYPTION_KEY
@@ -454,11 +556,13 @@ describe('Notification DO Web Push migration and delivery', () => {
       alreadyResolved: false,
       answer: 'Ship now',
     });
-    expect(promptCalls()).toHaveLength(1);
-    expect(JSON.parse(String(promptCalls()[0]?.[1]?.body))).toEqual({
-      prompt: 'Ship now',
-      messageId: marker.id,
-    });
+    // The answer goes to the agent as one durable prompt (the wake path), not a direct live prompt.
+    const snapshot = await projectData.getDurableExecutionSnapshot(sessionId);
+    expect(
+      snapshot.deliveries.filter(
+        (delivery: { id: string }) => delivery.id === `inbox-ask:${marker.id}`
+      )
+    ).toEqual([expect.objectContaining({ sourceKind: 'inbox_ask', sourceTaskId: taskId })]);
 
     const replayResponse = await resolveAttention(marker.id, 'Ship now');
     expect(replayResponse.status).toBe(200);
@@ -468,8 +572,15 @@ describe('Notification DO Web Push migration and delivery', () => {
       answer: 'Ship now',
     });
     expect((await resolveAttention(marker.id, 'Wait')).status).toBe(409);
-    expect(promptCalls()).toHaveLength(1);
+    const answered = await env.DATABASE.prepare(
+      'SELECT status, answer_json, notified_at FROM asks WHERE id = ?'
+    )
+      .bind(marker.id)
+      .first<{ status: string; answer_json: string; notified_at: number | null }>();
+    expect(answered).toMatchObject({ status: 'answered', answer_json: '{"text":"Ship now"}' });
+    expect(answered?.notified_at).not.toBeNull();
 
+    // Overlap control: a question still held as a marker answers through its own path.
     const freeFormMarker = await projectData.createAttentionMarker({
       sessionId,
       taskId,
@@ -486,25 +597,16 @@ describe('Notification DO Web Push migration and delivery', () => {
       alreadyResolved: false,
       answer: 'Use the canary deployment',
     });
-    expect(promptCalls()).toHaveLength(2);
-    expect(JSON.parse(String(promptCalls()[1]?.[1]?.body))).toEqual({
+    const freeFormPrompts = promptCalls().filter(
+      (call) => JSON.parse(String(call[1]?.body)).messageId === freeFormMarker.id
+    );
+    expect(freeFormPrompts).toHaveLength(1);
+    expect(JSON.parse(String(freeFormPrompts[0]?.[1]?.body))).toEqual({
       prompt: 'Use the canary deployment',
       messageId: freeFormMarker.id,
     });
     expect(await projectData.listActiveAttentionMarkers(sessionId)).toEqual([]);
     await runInDurableObject(projectData, async (instance) => {
-      const rows = (instance as unknown as { sql: SqlStorage }).sql
-        .exec(
-          'SELECT resolved_reason, resolved_answer FROM session_attention_markers WHERE id = ?',
-          marker.id
-        )
-        .toArray();
-      expect(rows).toEqual([
-        expect.objectContaining({
-          resolved_reason: 'structured_answer',
-          resolved_answer: 'Ship now',
-        }),
-      ]);
       const freeFormRows = (instance as unknown as { sql: SqlStorage }).sql
         .exec(
           'SELECT resolved_reason, resolved_answer FROM session_attention_markers WHERE id = ?',

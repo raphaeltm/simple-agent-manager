@@ -5,27 +5,36 @@
  * Downloads fetch decrypted content from R2 and push it to the workspace via VM agent.
  * Uploads fetch file content from the workspace via VM agent and encrypt+store in R2.
  */
+import { AppError } from '@simple-agent-manager/worker-core';
 import { and, eq } from 'drizzle-orm';
-import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { parsePositiveInt } from '../../lib/route-helpers';
+import { releaseArrayBuffer } from '../../lib/release-array-buffer';
 import {
   downloadFile,
-  getFile,
+  getDownloadTimeoutMs,
   getListMaxPageSize,
   getMaxTagsPerFile,
   listFiles,
-  replaceFile,
-  updateTags,
   uploadFile,
   validateDirectory,
 } from '../../services/file-library';
-import { signTerminalToken } from '../../services/jwt';
-import { fetchNodeAgent } from '../../services/node-agent';
+import {
+  debugPackageListOptions,
+  mcpDebugPackageFileAccess,
+  mcpDebugPackageGrant,
+} from '../../services/fleet-ops/debug-package-access';
+import { loadLibraryDownload, withLibraryMemory } from '../../services/library-memory';
+import { recordOperationsAudit } from '../../services/operations-access';
+import {
+  downloadFromWorkspace,
+  resolveWorkspaceVmUrl,
+  uploadToWorkspace,
+  validateRelativePath,
+} from '../../services/workspace-file-transfer';
 import {
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -33,20 +42,11 @@ import {
   type JsonRpcResponse,
   jsonRpcSuccess,
   type McpTokenData,
+  resolveSessionId,
 } from './_helpers';
+import { getEncryptionKey, requireWorkspaceId } from './library-tool-helpers';
 
-type AppDb = DrizzleD1Database<typeof schema>;
-
-interface WorkspaceUploadInput {
-  env: Env;
-  vmBaseUrl: string;
-  nodeId: string;
-  workspaceId: string;
-  userId: string;
-  filename: string;
-  data: ArrayBuffer;
-  targetPath: string;
-}
+export { handleReplaceLibraryFile } from './library-replace-tool';
 
 // ─── Configurable defaults (Constitution Principle XI) ──────────────────────
 
@@ -56,173 +56,7 @@ function getDownloadDir(env: Env): string {
   return env.LIBRARY_MCP_DOWNLOAD_DIR ?? DEFAULT_LIBRARY_MCP_DOWNLOAD_DIR;
 }
 
-/** Timeout for VM agent file transfer calls. Override via LIBRARY_MCP_TRANSFER_TIMEOUT_MS. */
-const DEFAULT_LIBRARY_MCP_TRANSFER_TIMEOUT_MS = 60_000;
-function getTransferTimeout(env: Env): number {
-  return parsePositiveInt(env.LIBRARY_MCP_TRANSFER_TIMEOUT_MS, DEFAULT_LIBRARY_MCP_TRANSFER_TIMEOUT_MS);
-}
-
-/** Max caption length for display_from_library cards. Override via LIBRARY_MCP_CAPTION_MAX_LENGTH. */
-const DEFAULT_LIBRARY_MCP_CAPTION_MAX = 500;
-/** Floor to keep a misconfigured (tiny) cap from silently breaking captions. */
-const MIN_LIBRARY_MCP_CAPTION_MAX = 20;
-function getCaptionMax(env: Env): number {
-  return Math.max(
-    parsePositiveInt(env.LIBRARY_MCP_CAPTION_MAX_LENGTH, DEFAULT_LIBRARY_MCP_CAPTION_MAX),
-    MIN_LIBRARY_MCP_CAPTION_MAX,
-  );
-}
-
 // ─── Shared helpers ─────────────────────────────────────────────────────────
-
-function getEncryptionKey(env: Env): string {
-  const key = env.LIBRARY_ENCRYPTION_KEY ?? env.ENCRYPTION_KEY;
-  if (!key) {
-    throw new Error('Encryption key not configured');
-  }
-  return key;
-}
-
-/**
- * Validate that a path is relative and does not contain traversal segments.
- * Returns null if valid, or an error message if invalid.
- */
-function validateRelativePath(path: string): string | null {
-  if (path.startsWith('/')) {
-    return 'Path must be relative (cannot start with /)';
-  }
-  const segments = path.split('/');
-  if (segments.includes('..')) {
-    return 'Path cannot contain ".." segments';
-  }
-  if (segments.includes('.')) {
-    return 'Path cannot contain "." segments';
-  }
-  return null;
-}
-
-function requireWorkspaceId(
-  requestId: string | number | null,
-  tokenData: McpTokenData,
-): JsonRpcResponse | null {
-  if (!tokenData.workspaceId) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'No active workspace — this tool requires a workspace context');
-  }
-  return null;
-}
-
-/**
- * Resolve the workspace's node ID and build the VM agent base URL.
- * Returns null and a JSON-RPC error if the workspace is not found or not running.
- */
-async function resolveWorkspaceVmUrl(
-  db: AppDb,
-  env: Env,
-  workspaceId: string,
-  projectId: string,
-): Promise<{ vmBaseUrl: string; nodeId: string } | { error: string }> {
-  const [workspace] = await db
-    .select({
-      id: schema.workspaces.id,
-      status: schema.workspaces.status,
-      nodeId: schema.workspaces.nodeId,
-    })
-    .from(schema.workspaces)
-    .where(
-      and(
-        eq(schema.workspaces.id, workspaceId),
-        eq(schema.workspaces.projectId, projectId),
-      ),
-    )
-    .limit(1);
-
-  if (!workspace) {
-    return { error: 'Workspace not found' };
-  }
-  if (workspace.status !== 'running' && workspace.status !== 'recovery') {
-    return { error: `Workspace is not running (status: ${workspace.status})` };
-  }
-  if (!workspace.nodeId) {
-    return { error: 'Workspace has no assigned node' };
-  }
-
-  const nodeIdLower = workspace.nodeId.toLowerCase();
-  if (!/^[a-z0-9-]+$/.test(nodeIdLower)) {
-    return { error: 'Invalid node ID format' };
-  }
-
-  const protocol = env.VM_AGENT_PROTOCOL || 'https';
-  const port = env.VM_AGENT_PORT || '8443';
-  const vmBaseUrl = `${protocol}://${nodeIdLower}.vm.${env.BASE_DOMAIN}:${port}`;
-  return { vmBaseUrl, nodeId: workspace.nodeId };
-}
-
-/**
- * Upload a file to the workspace via VM agent multipart upload.
- */
-async function uploadToWorkspace(input: WorkspaceUploadInput): Promise<void> {
-  const { env, vmBaseUrl, nodeId, workspaceId, userId, filename, data, targetPath } = input;
-  const { token } = await signTerminalToken(userId, workspaceId, env);
-  const url = `${vmBaseUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/upload`;
-
-  const formData = new FormData();
-  formData.append('destination', targetPath);
-  formData.append('files', new Blob([data]), filename);
-
-  // Use Authorization header for server-to-server calls (not query param)
-  const res = await fetchNodeAgent(nodeId, env, url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-    body: formData,
-  }, getTransferTimeout(env));
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => 'unknown');
-    throw new Error(`VM agent upload failed: ${res.status} ${text}`);
-  }
-}
-
-/**
- * Download a file from the workspace via VM agent.
- * Returns the file data as ArrayBuffer and the content type.
- */
-async function downloadFromWorkspace(
-  env: Env,
-  vmBaseUrl: string,
-  nodeId: string,
-  workspaceId: string,
-  userId: string,
-  filePath: string,
-): Promise<{ data: ArrayBuffer; contentType: string }> {
-  const { token } = await signTerminalToken(userId, workspaceId, env);
-  const params = new URLSearchParams({ path: filePath });
-  const url = `${vmBaseUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/download?${params.toString()}`;
-
-  // Use Authorization header for server-to-server calls (not query param)
-  const res = await fetchNodeAgent(nodeId, env, url, {
-    headers: { Authorization: `Bearer ${token}` },
-  }, getTransferTimeout(env));
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => 'unknown');
-    if (res.status === 404) {
-      throw new Error(`File not found in workspace: ${filePath}`);
-    }
-    throw new Error(`VM agent download failed: ${res.status} ${text}`);
-  }
-
-  // Guard against oversized responses to avoid OOM in Workers (128 MB heap)
-  const contentLength = parseInt(res.headers.get('Content-Length') ?? '0', 10);
-  const DEFAULT_LIBRARY_UPLOAD_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
-  const maxBytes = parsePositiveInt(env.LIBRARY_UPLOAD_MAX_BYTES, DEFAULT_LIBRARY_UPLOAD_MAX_BYTES);
-  if (contentLength > maxBytes) {
-    throw new Error(`File too large: ${contentLength} bytes exceeds maximum ${maxBytes}`);
-  }
-
-  const data = await res.arrayBuffer();
-  const contentType = res.headers.get('Content-Type') || 'application/octet-stream';
-  return { data, contentType };
-}
 
 // ─── Tool handlers ──────────────────────────────────────────────────────────
 
@@ -233,7 +67,7 @@ export async function handleListLibraryFiles(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   try {
     const db = drizzle(env.DATABASE, { schema });
@@ -244,15 +78,19 @@ export async function handleListLibraryFiles(
       ? params.tags.filter((t): t is string => typeof t === 'string').slice(0, maxTags)
       : undefined;
     const fileType = typeof params.fileType === 'string' ? params.fileType : undefined;
-    const source = params.source === 'user' || params.source === 'agent' ? params.source : undefined;
+    const source =
+      params.source === 'user' || params.source === 'agent' ? params.source : undefined;
     const VALID_SORT_FIELDS = ['createdAt', 'filename', 'sizeBytes'] as const;
-    const sortBy = typeof params.sortBy === 'string' && (VALID_SORT_FIELDS as readonly string[]).includes(params.sortBy)
-      ? (params.sortBy as typeof VALID_SORT_FIELDS[number])
-      : undefined;
+    const sortBy =
+      typeof params.sortBy === 'string' &&
+      (VALID_SORT_FIELDS as readonly string[]).includes(params.sortBy)
+        ? (params.sortBy as (typeof VALID_SORT_FIELDS)[number])
+        : undefined;
     const maxPageSize = getListMaxPageSize(env);
-    const limit = typeof params.limit === 'number' && params.limit > 0
-      ? Math.min(Math.floor(params.limit), maxPageSize)
-      : undefined;
+    const limit =
+      typeof params.limit === 'number' && params.limit > 0
+        ? Math.min(Math.floor(params.limit), maxPageSize)
+        : undefined;
     const rawDirectory = typeof params.directory === 'string' ? params.directory : undefined;
     let directory: string | undefined;
     if (rawDirectory) {
@@ -264,16 +102,24 @@ export async function handleListLibraryFiles(
     }
     const recursive = typeof params.recursive === 'boolean' ? params.recursive : undefined;
 
-    const result = await listFiles(db, env, tokenData.projectId, {
-      tags,
-      mimeType: fileType,
-      uploadSource: source,
-      directory,
-      recursive,
-      sortBy: sortBy ?? 'createdAt',
-      sortOrder: 'desc',
-      limit,
-    });
+    // Raw debug packages are listed only to tokens that pass the Operations read gate.
+    const mayReadDebugPackages = (await mcpDebugPackageGrant(env, tokenData)) !== null;
+    const result = await listFiles(
+      db,
+      env,
+      tokenData.projectId,
+      {
+        tags,
+        mimeType: fileType,
+        uploadSource: source,
+        directory,
+        recursive,
+        sortBy: sortBy ?? 'createdAt',
+        sortOrder: 'desc',
+        limit,
+      },
+      debugPackageListOptions(mayReadDebugPackages)
+    );
 
     const files = result.files.map((f) => ({
       id: f.id,
@@ -288,10 +134,15 @@ export async function handleListLibraryFiles(
     }));
 
     return jsonRpcSuccess(requestId, {
-      content: [{ type: 'text', text: JSON.stringify({ files, totalCount: result.total }, null, 2) }],
+      content: [
+        { type: 'text', text: JSON.stringify({ files, totalCount: result.total }, null, 2) },
+      ],
     });
   } catch (err) {
-    log.error('mcp.list_library_files.error', { projectId: tokenData.projectId, error: String(err) });
+    log.error('mcp.list_library_files.error', {
+      projectId: tokenData.projectId,
+      error: String(err),
+    });
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to list library files');
   }
 }
@@ -303,7 +154,7 @@ export async function handleDownloadLibraryFile(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   // Require workspace
   const wsErr = requireWorkspaceId(requestId, tokenData);
@@ -311,7 +162,11 @@ export async function handleDownloadLibraryFile(
 
   const fileId = params.fileId;
   if (typeof fileId !== 'string' || !fileId.trim()) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'fileId is required and must be a non-empty string');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'fileId is required and must be a non-empty string'
+    );
   }
 
   try {
@@ -319,46 +174,88 @@ export async function handleDownloadLibraryFile(
     const encryptionKey = getEncryptionKey(env);
 
     // Check workspace is reachable first (cheap D1 query) before expensive R2 decrypt
-    const vmResult = await resolveWorkspaceVmUrl(db, env, tokenData.workspaceId, tokenData.projectId);
+    const vmResult = await resolveWorkspaceVmUrl(
+      db,
+      env,
+      tokenData.workspaceId,
+      tokenData.projectId
+    );
     if ('error' in vmResult) {
       return jsonRpcError(requestId, INTERNAL_ERROR, vmResult.error);
     }
 
     // Download and decrypt from R2
-    const { data, file } = await downloadFile(db, env.R2, encryptionKey, tokenData.projectId, fileId);
+    const download = await loadLibraryDownload(
+      () => downloadFile(db, env.R2, encryptionKey, tokenData.projectId, fileId),
+      getDownloadTimeoutMs(env)
+    );
+    return await download.consume(async ({ data, file }) => {
+      // Raw debug packages: Operations read gate on every download, and every download audited.
+      const debugPackageGrant = await mcpDebugPackageFileAccess(env, tokenData, file.directory);
+      if (debugPackageGrant === 'denied') {
+        return jsonRpcError(requestId, INVALID_PARAMS, 'File not found in library');
+      }
 
-    // Determine and validate target path
-    const targetDir = typeof params.targetPath === 'string' && params.targetPath.trim()
-      ? params.targetPath.trim()
-      : getDownloadDir(env);
+      // Determine and validate target path
+      const targetDir =
+        typeof params.targetPath === 'string' && params.targetPath.trim()
+          ? params.targetPath.trim()
+          : getDownloadDir(env);
 
-    const pathErr = validateRelativePath(targetDir);
-    if (pathErr) {
-      return jsonRpcError(requestId, INVALID_PARAMS, pathErr);
-    }
+      const pathErr = validateRelativePath(targetDir);
+      if (pathErr) {
+        return jsonRpcError(requestId, INVALID_PARAMS, pathErr);
+      }
 
-    // Upload to workspace
-    await uploadToWorkspace({
-      env,
-      vmBaseUrl: vmResult.vmBaseUrl,
-      nodeId: vmResult.nodeId,
-      workspaceId: tokenData.workspaceId,
-      userId: tokenData.userId,
-      filename: file.filename,
-      data,
-      targetPath: targetDir,
-    });
-
-    const downloadedTo = `${targetDir}/${file.filename}`;
-
-    return jsonRpcSuccess(requestId, {
-      content: [{ type: 'text', text: JSON.stringify({
-        downloadedTo,
+      // Upload to workspace
+      await uploadToWorkspace({
+        env,
+        vmBaseUrl: vmResult.vmBaseUrl,
+        nodeId: vmResult.nodeId,
+        workspaceId: tokenData.workspaceId,
+        userId: tokenData.userId,
         filename: file.filename,
-        sizeBytes: file.sizeBytes,
-      }, null, 2) }],
+        data,
+        targetPath: targetDir,
+      });
+
+      const downloadedTo = `${targetDir}/${file.filename}`;
+      if (debugPackageGrant) {
+        await recordOperationsAudit(env, {
+          actorUserId: debugPackageGrant.userId,
+          taskId: debugPackageGrant.taskId,
+          tool: 'download_library_file',
+          targetType: 'library_file',
+          targetId: file.id,
+          outcome: 'succeeded',
+          detail: { directory: file.directory, sizeBytes: file.sizeBytes },
+        });
+      }
+
+      return jsonRpcSuccess(requestId, {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                downloadedTo,
+                filename: file.filename,
+                sizeBytes: file.sizeBytes,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      });
     });
   } catch (err) {
+    if (err instanceof AppError && err.statusCode === 429) {
+      return jsonRpcError(requestId, INTERNAL_ERROR, err.message, {
+        httpStatus: 429,
+        retryable: true,
+      });
+    }
     log.error('mcp.download_library_file.error', {
       projectId: tokenData.projectId,
       fileId,
@@ -380,7 +277,7 @@ export async function handleUploadToLibrary(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   // Require workspace
   const wsErr = requireWorkspaceId(requestId, tokenData);
@@ -388,11 +285,17 @@ export async function handleUploadToLibrary(
 
   const filePath = params.filePath;
   if (typeof filePath !== 'string' || !filePath.trim()) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'filePath is required and must be a non-empty string');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'filePath is required and must be a non-empty string'
+    );
   }
 
   const description = typeof params.description === 'string' ? params.description : undefined;
-  const tags = Array.isArray(params.tags) ? params.tags.filter((t): t is string => typeof t === 'string').slice(0, getMaxTagsPerFile(env)) : undefined;
+  const tags = Array.isArray(params.tags)
+    ? params.tags.filter((t): t is string => typeof t === 'string').slice(0, getMaxTagsPerFile(env))
+    : undefined;
   const directory = typeof params.directory === 'string' ? params.directory : undefined;
 
   try {
@@ -400,46 +303,83 @@ export async function handleUploadToLibrary(
     const encryptionKey = getEncryptionKey(env);
 
     // Resolve workspace VM URL
-    const vmResult = await resolveWorkspaceVmUrl(db, env, tokenData.workspaceId, tokenData.projectId);
+    const vmResult = await resolveWorkspaceVmUrl(
+      db,
+      env,
+      tokenData.workspaceId,
+      tokenData.projectId
+    );
     if ('error' in vmResult) {
       return jsonRpcError(requestId, INTERNAL_ERROR, vmResult.error);
     }
 
-    // Download file from workspace
-    const { data, contentType } = await downloadFromWorkspace(
-      env,
-      vmResult.vmBaseUrl,
-      vmResult.nodeId,
-      tokenData.workspaceId,
-      tokenData.userId,
-      filePath.trim(),
-    );
+    const uploadSessionId = await resolveSessionId(env, tokenData.workspaceId);
+    return await withLibraryMemory(async () => {
+      // Download file from workspace
+      const { data, contentType } = await downloadFromWorkspace(
+        env,
+        vmResult.vmBaseUrl,
+        vmResult.nodeId,
+        tokenData.workspaceId,
+        tokenData.userId,
+        filePath.trim()
+      );
+      try {
+        // Extract filename from path
+        const filename = filePath.trim().split('/').pop() || 'unknown';
 
-    // Extract filename from path
-    const filename = filePath.trim().split('/').pop() || 'unknown';
+        const mimeType = contentType;
 
-    const mimeType = contentType;
+        // Upload to library (will throw 409 on duplicate filename in same directory)
+        const result = await uploadFile(
+          db,
+          env.R2,
+          encryptionKey,
+          env,
+          tokenData.projectId,
+          tokenData.userId,
+          filename,
+          mimeType,
+          data,
+          {
+            description,
+            tags,
+            uploadSource: 'agent',
+            uploadSessionId: uploadSessionId ?? undefined,
+            uploadTaskId: tokenData.taskId,
+            tagSource: 'agent',
+            directory,
+          }
+        );
 
-    // Upload to library (will throw 409 on duplicate filename in same directory)
-    const result = await uploadFile(db, env.R2, encryptionKey, env, tokenData.projectId, tokenData.userId, filename, mimeType, data, {
-      description,
-      tags,
-      uploadSource: 'agent',
-      uploadSessionId: tokenData.taskId, // task context doubles as session context for agents
-      uploadTaskId: tokenData.taskId,
-      tagSource: 'agent',
-      directory,
-    });
-
-    return jsonRpcSuccess(requestId, {
-      content: [{ type: 'text', text: JSON.stringify({
-        fileId: result.id,
-        filename: result.filename,
-        mimeType: result.mimeType,
-        sizeBytes: result.sizeBytes,
-      }, null, 2) }],
+        return jsonRpcSuccess(requestId, {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  fileId: result.id,
+                  filename: result.filename,
+                  mimeType: result.mimeType,
+                  sizeBytes: result.sizeBytes,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        });
+      } finally {
+        releaseArrayBuffer(data);
+      }
     });
   } catch (err) {
+    if (err instanceof AppError && err.statusCode === 429) {
+      return jsonRpcError(requestId, INTERNAL_ERROR, err.message, {
+        httpStatus: 429,
+        retryable: true,
+      });
+    }
     const message = (err as Error).message;
 
     // Handle duplicate filename — return structured FILE_EXISTS error
@@ -457,25 +397,34 @@ export async function handleUploadToLibrary(
             and(
               eq(schema.projectFiles.projectId, tokenData.projectId),
               eq(schema.projectFiles.directory, lookupDir),
-              eq(schema.projectFiles.filename, filename),
-            ),
+              eq(schema.projectFiles.filename, filename)
+            )
           )
           .limit(1);
 
         if (existing) {
           return jsonRpcSuccess(requestId, {
-            content: [{ type: 'text', text: JSON.stringify({
-              error: 'FILE_EXISTS',
-              existingFile: {
-                id: existing.id,
-                filename: existing.filename,
-                mimeType: existing.mimeType,
-                sizeBytes: existing.sizeBytes,
-                uploadSource: existing.uploadSource,
-                uploadedBy: existing.uploadedBy,
-                createdAt: existing.createdAt,
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(
+                  {
+                    error: 'FILE_EXISTS',
+                    existingFile: {
+                      id: existing.id,
+                      filename: existing.filename,
+                      mimeType: existing.mimeType,
+                      sizeBytes: existing.sizeBytes,
+                      uploadSource: existing.uploadSource,
+                      uploadedBy: existing.uploadedBy,
+                      createdAt: existing.createdAt,
+                    },
+                  },
+                  null,
+                  2
+                ),
               },
-            }, null, 2) }],
+            ],
           });
         }
       } catch (lookupErr) {
@@ -499,172 +448,15 @@ export async function handleUploadToLibrary(
       return jsonRpcError(requestId, INVALID_PARAMS, 'File not found in workspace');
     }
     // Pass through validation errors (file limit, size limit, bad filename, etc.)
-    if (err instanceof Error && 'statusCode' in err && (err as { statusCode: number }).statusCode === 400) {
+    if (
+      err instanceof Error &&
+      'statusCode' in err &&
+      (err as { statusCode: number }).statusCode === 400
+    ) {
       return jsonRpcError(requestId, INVALID_PARAMS, message);
     }
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to upload to library');
   }
 }
 
-/**
- * replace_library_file — download new content from workspace and replace existing library file.
- * New tags are merged with existing tags.
- */
-export async function handleReplaceLibraryFile(
-  requestId: string | number | null,
-  params: Record<string, unknown>,
-  tokenData: McpTokenData,
-  env: Env,
-): Promise<JsonRpcResponse> {
-  // Require workspace
-  const wsErr = requireWorkspaceId(requestId, tokenData);
-  if (wsErr) return wsErr;
-
-  const fileId = params.fileId;
-  if (typeof fileId !== 'string' || !fileId.trim()) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'fileId is required and must be a non-empty string');
-  }
-
-  const filePath = params.filePath;
-  if (typeof filePath !== 'string' || !filePath.trim()) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'filePath is required and must be a non-empty string');
-  }
-
-  const description = typeof params.description === 'string' ? params.description : undefined;
-  const tags = Array.isArray(params.tags) ? params.tags.filter((t): t is string => typeof t === 'string').slice(0, getMaxTagsPerFile(env)) : undefined;
-
-  try {
-    const db = drizzle(env.DATABASE, { schema });
-    const encryptionKey = getEncryptionKey(env);
-
-    // Verify file exists first to return clean error
-    let existingFile;
-    try {
-      existingFile = await getFile(db, tokenData.projectId, fileId);
-    } catch {
-      return jsonRpcSuccess(requestId, {
-        content: [{ type: 'text', text: JSON.stringify({ error: 'FILE_NOT_FOUND' }, null, 2) }],
-      });
-    }
-
-    const previousSizeBytes = existingFile.file.sizeBytes;
-
-    // Resolve workspace VM URL
-    const vmResult = await resolveWorkspaceVmUrl(db, env, tokenData.workspaceId, tokenData.projectId);
-    if ('error' in vmResult) {
-      return jsonRpcError(requestId, INTERNAL_ERROR, vmResult.error);
-    }
-
-    // Download new file from workspace
-    const { data, contentType } = await downloadFromWorkspace(
-      env,
-      vmResult.vmBaseUrl,
-      vmResult.nodeId,
-      tokenData.workspaceId,
-      tokenData.userId,
-      filePath.trim(),
-    );
-
-    // Extract filename from path
-    const filename = filePath.trim().split('/').pop() || existingFile.file.filename;
-    const mimeType = contentType;
-
-    // Replace file in library
-    const updated = await replaceFile(
-      db,
-      env.R2,
-      encryptionKey,
-      env,
-      tokenData.projectId,
-      fileId,
-      tokenData.userId,
-      filename,
-      mimeType,
-      data,
-      { description },
-    );
-
-    // Merge new tags with existing (additive)
-    if (tags && tags.length > 0) {
-      await updateTags(db, env, tokenData.projectId, fileId, { add: tags }, 'agent');
-    }
-
-    return jsonRpcSuccess(requestId, {
-      content: [{ type: 'text', text: JSON.stringify({
-        fileId: updated.id,
-        filename: updated.filename,
-        mimeType: updated.mimeType,
-        sizeBytes: updated.sizeBytes,
-        previousSizeBytes,
-      }, null, 2) }],
-    });
-  } catch (err) {
-    log.error('mcp.replace_library_file.error', {
-      projectId: tokenData.projectId,
-      fileId,
-      filePath,
-      error: String(err),
-    });
-    return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to replace library file');
-  }
-}
-
-/**
- * display_from_library — surface an existing library file as a document card in
- * the chat. Worker-side only (no workspace required): validates the fileId
- * belongs to the caller's project and returns the metadata the DocumentCard
- * needs to render (fileId, filename, mimeType, sizeBytes) plus an optional
- * caption. The card and its durability come from the persisted tool message —
- * this handler's value is the UI side effect, not the returned payload.
- */
-export async function handleDisplayFromLibrary(
-  requestId: string | number | null,
-  params: Record<string, unknown>,
-  tokenData: McpTokenData,
-  env: Env,
-): Promise<JsonRpcResponse> {
-  const fileId = params.fileId;
-  if (typeof fileId !== 'string' || !fileId.trim()) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'fileId is required and must be a non-empty string');
-  }
-
-  // Optional caption — bound length to keep tool metadata lean and avoid an
-  // unbounded string rendering in the card.
-  const captionMax = getCaptionMax(env);
-  const caption = typeof params.caption === 'string' && params.caption.trim()
-    ? params.caption.trim().slice(0, captionMax)
-    : undefined;
-
-  try {
-    const db = drizzle(env.DATABASE, { schema });
-
-    // Project-scoped ownership check: getFile filters by projectId and throws
-    // notFound when the row is missing or belongs to another project. This is
-    // the trust boundary — a cross-project fileId must never resolve.
-    let existing;
-    try {
-      existing = await getFile(db, tokenData.projectId, fileId.trim());
-    } catch {
-      return jsonRpcSuccess(requestId, {
-        content: [{ type: 'text', text: JSON.stringify({ error: 'FILE_NOT_FOUND' }, null, 2) }],
-      });
-    }
-
-    return jsonRpcSuccess(requestId, {
-      content: [{ type: 'text', text: JSON.stringify({
-        fileId: existing.file.id,
-        filename: existing.file.filename,
-        mimeType: existing.file.mimeType,
-        sizeBytes: existing.file.sizeBytes,
-        ...(caption ? { caption } : {}),
-      }, null, 2) }],
-    });
-  } catch (err) {
-    log.error('mcp.display_from_library.error', {
-      projectId: tokenData.projectId,
-      fileId,
-      error: String(err),
-    });
-    return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to display library file');
-  }
-}
+export { handleDisplayFromLibrary } from './library-display-tool';

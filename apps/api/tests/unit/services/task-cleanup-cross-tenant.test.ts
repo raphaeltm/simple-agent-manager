@@ -149,7 +149,10 @@ beforeEach(() => {
 
   sqlite = new Database(':memory:');
   createSchemaTables(sqlite, [
+    schema.projects,
     schema.nodes,
+    schema.capacityPools,
+    schema.capacityPoolCandidates,
     schema.workspaces,
     schema.tasks,
     schema.agentSessions,
@@ -171,6 +174,37 @@ afterEach(() => {
 });
 
 describe('cleanupTaskRun — cross-tenant compute teardown (real SQLite)', () => {
+  it.each(['timeout', 'HTTP 503'])(
+    'strict stop propagates %s without publishing stopped state',
+    async (failure) => {
+      await seedVictimTaskRun('vm');
+      mocks.stopWorkspaceOnNode.mockRejectedValueOnce(new Error(failure));
+      await expect(
+        cleanupTaskRun('task-victim', env, undefined, VICTIM, { requireStopAcknowledgement: true })
+      ).rejects.toThrow(failure);
+      expect(await readWorkspaceStatus()).toBe('running');
+      expect(mocks.scheduleWorkspaceDeletion).not.toHaveBeenCalled();
+      expect(mocks.markIdle).not.toHaveBeenCalled();
+    }
+  );
+
+  it('strict stop accepts an acknowledged stop and retains normal deletion scheduling', async () => {
+    await seedVictimTaskRun('vm');
+    await cleanupTaskRun('task-victim', env, undefined, VICTIM, {
+      requireStopAcknowledgement: true,
+    });
+    expect(await readWorkspaceStatus()).toBe('stopped');
+    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledOnce();
+  });
+
+  it('legacy background cleanup retains best-effort behavior after stop failure', async () => {
+    await seedVictimTaskRun('vm');
+    mocks.stopWorkspaceOnNode.mockRejectedValueOnce(new Error('timeout'));
+    await cleanupTaskRun('task-victim', env);
+    expect(await readWorkspaceStatus()).toBe('stopped');
+    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledOnce();
+  });
+
   it('ATTACK (vm): a project member cancelling another member task tears down nothing', async () => {
     await seedVictimTaskRun('vm');
 
@@ -199,7 +233,7 @@ describe('cleanupTaskRun — cross-tenant compute teardown (real SQLite)', () =>
     await cleanupTaskRun('task-victim', env, undefined, VICTIM);
 
     expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledWith('node-victim', 'ws-victim', env, VICTIM);
-    expect(mocks.markIdle).toHaveBeenCalledWith(env, 'node-victim', VICTIM, undefined);
+    expect(mocks.markIdle).toHaveBeenCalledWith(env, 'node-victim', VICTIM, 1_800_000);
     expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith(
       'node-victim',
       'ws-victim',
@@ -270,7 +304,7 @@ describe('cleanupTaskRun — task creator differs from workspace owner (real SQL
     await cleanupTaskRun('task-divergent', env);
 
     expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledWith('node-runner', 'ws-runner', env, RUNNER);
-    expect(mocks.markIdle).toHaveBeenCalledWith(env, 'node-runner', RUNNER, undefined);
+    expect(mocks.markIdle).toHaveBeenCalledWith(env, 'node-runner', RUNNER, 1_800_000);
     expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith(
       'node-runner',
       'ws-runner',

@@ -1,4 +1,8 @@
-import type { NativeVMConfig } from '@simple-agent-manager/providers';
+import {
+  assertInfomaniakRequestedBootVolumeAllowed,
+  type NativeVMConfig,
+} from '@simple-agent-manager/providers';
+import { emptyCapacityPoolMessage } from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPlacementSnapshot,
   CapacityWorkloadRole,
@@ -9,11 +13,12 @@ import type {
   VMLocation,
   VMSize,
 } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_SIZE } from '@simple-agent-manager/shared';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import type * as schema from '../db/schema';
 import type { Env } from '../env';
+import { resolveInfomaniakBootVolumeGb } from './infomaniak-provider-settings';
 import {
   capacityPlacementSnapshotForCandidate,
   directPlacementAuditSnapshot,
@@ -95,8 +100,6 @@ export type CanonicalVmAllocationResult =
 export function placementProjectDefaultsFromRow(project: {
   id: string;
   defaultVmSize?: string | null;
-  defaultProvider?: string | null;
-  defaultLocation?: string | null;
   defaultWorkspaceProfile?: string | null;
   defaultDevcontainerConfigName?: string | null;
   defaultAgentType?: string | null;
@@ -105,8 +108,6 @@ export function placementProjectDefaultsFromRow(project: {
   return {
     id: project.id,
     defaultVmSize: project.defaultVmSize ?? null,
-    defaultProvider: project.defaultProvider ?? null,
-    defaultLocation: project.defaultLocation ?? null,
     defaultWorkspaceProfile: project.defaultWorkspaceProfile ?? null,
     defaultDevcontainerConfigName: project.defaultDevcontainerConfigName ?? null,
     defaultAgentType: project.defaultAgentType ?? null,
@@ -162,7 +163,7 @@ export async function resolveCanonicalVmAllocationPlan(
 
   if (capacityPoolSelection && hasNoCapacityPoolCandidates(capacityPoolSelection)) {
     return {
-      error: noEligibleCapacityCandidateMessage(placement, capacityPoolSelection),
+      error: noEligibleCanonicalAllocationMessage(placement, capacityPoolSelection),
       errorKind: 'placement',
     };
   }
@@ -195,6 +196,15 @@ export async function resolveCanonicalVmAllocationPlan(
       errorKind: 'credentials',
     };
   }
+
+  const bootDiskRefusal = BOOT_DISK_SIZE_IS_USER_SUPPLIED[input.entryPoint]
+    ? await refuseOversizedRequestedBootDisk(
+        env,
+        credential.providerName,
+        input.explicit?.native?.providerInstanceBootDiskSizeGb
+      )
+    : null;
+  if (bootDiskRefusal) return { error: bootDiskRefusal, errorKind: 'placement' };
 
   if (
     input.requiredCredentialSource &&
@@ -258,6 +268,55 @@ export async function resolveCanonicalVmAllocationPlan(
     vmLocation: placement.vmLocation,
     native: normalizeNativeRequest(input.explicit?.native),
   });
+}
+
+/**
+ * Whether `explicit.native.providerInstanceBootDiskSizeGb` from this entry point is a size a user
+ * just asked for (capped below) or one replayed from an existing record. The session-snapshot relay
+ * copies a source node's stored size, which must keep resolving after an admin lowers the setting.
+ * Exhaustive on purpose: a new entry point must decide which kind it is.
+ */
+const BOOT_DISK_SIZE_IS_USER_SUPPLIED: Readonly<Record<PlacementEntryPoint, boolean>> = {
+  'direct-node': true,
+  'direct-workspace': true,
+  'task-submit': false,
+  'deployment-provisioning': false,
+  'session-snapshot-relay': false,
+  'mcp-dispatch': false,
+  'sam-session-dispatch': false,
+  'trigger-submit': false,
+  'retry-subtask': false,
+  'task-run': false,
+  'session-recovery': false,
+  'orchestrator-dispatch': false,
+  'orchestration-retry': false,
+};
+
+/**
+ * A user-supplied `bootDiskSizeGb` (node create, workspace create) is capped here, where the request
+ * is admitted, not in the provider: sizes stored on node rows and plans reach `createVM` the same
+ * way and must keep provisioning after an admin lowers the setting. Infomaniak boots from a volume
+ * of any requested size, and the VM may run on a shared platform credential, so the admin setting
+ * `infomaniak.bootVolumeGb` is the largest size a request may ask for. Fixed-root providers reject
+ * sizes above their included disk in `createVM` (`assertIncludedBootDiskCapacity`); GCP's explicit
+ * sizes are uncapped (tasks/backlog/2026-11-17-infomaniak-boot-volume-follow-ups.md).
+ */
+async function refuseOversizedRequestedBootDisk(
+  env: Env,
+  providerName: CredentialProvider,
+  requestedGb: number | null | undefined
+): Promise<string | null> {
+  if (providerName !== 'infomaniak' || requestedGb === null || requestedGb === undefined)
+    return null;
+  try {
+    assertInfomaniakRequestedBootVolumeAllowed(
+      requestedGb,
+      await resolveInfomaniakBootVolumeGb(env)
+    );
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
 }
 
 export function explicitRuntimeAdapterSnapshot(input: {
@@ -387,7 +446,6 @@ function directPlacementProjectDefaults(projectId: string | null): PlacementProj
   return {
     id: projectId ?? '',
     defaultVmSize: DEFAULT_VM_SIZE,
-    defaultLocation: DEFAULT_VM_LOCATION,
   };
 }
 
@@ -400,10 +458,13 @@ function requestedNativeOfferingUnavailableMessage(
     : 'No active compute-pool offering satisfies the requested allocation.';
 }
 
-function noEligibleCapacityCandidateMessage(
+function noEligibleCanonicalAllocationMessage(
   placement: TaskStartPlacement,
   selection: TaskStartCapacityPoolSelection
 ): string {
+  if (selection.effectiveState === 'configured-empty') {
+    return emptyCapacityPoolMessage(selection.scope);
+  }
   const provider = placement.provider ? ` provider ${placement.provider}` : '';
   const location = placement.explicitVmLocation ? ` location ${placement.vmLocation}` : '';
   return (

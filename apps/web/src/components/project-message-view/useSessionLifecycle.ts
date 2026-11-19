@@ -1,3 +1,4 @@
+import type { ChatMessageAppend, PromptDeliveryIntent } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { WakeProgressUpdate } from '../../hooks/useChatWebSocket';
@@ -10,16 +11,15 @@ import type {
   MessageCommentRealtimeEvent,
   SessionStateSnapshot,
 } from '../../lib/api';
-import {
-  getTerminalToken,
-  getTranscribeApiUrl,
-  resetIdleTimer,
-  sendFollowUpPrompt,
-} from '../../lib/api';
+import { getTerminalToken, getTranscribeApiUrl, sendFollowUpPrompt } from '../../lib/api';
+import type { PromptDeliveryUpdate } from '../../lib/prompt-delivery-update';
+import { deliveryUpdateMetadataPatch } from '../../lib/prompt-delivery-update';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
+import { DEFAULT_ATTACHMENT_MESSAGE } from '../../pages/project-chat/useAttachments';
+import { optimisticUserMessage, refreshIdleCleanupAfterSend } from './send-follow-up-helpers';
 import { useSessionDraft } from './session-drafts';
-import type { FilePanelState } from './session-lifecycle-helpers';
-import { parsePlanContent } from './session-lifecycle-helpers';
+import { parsePlanContent, useSessionStatusPush } from './session-lifecycle-helpers';
+import { ownedWorkspaceId, resolveSessionViewerCapabilities } from './session-viewer-access';
 import type { AgentActivityState } from './types';
 import { deriveSessionState, IDLE_TIMEOUT_MS, isWorkingActivity } from './types';
 import { useActivityVerifyTimer } from './useActivityVerifyTimer';
@@ -27,9 +27,12 @@ import { useCancelAgentPrompt } from './useCancelAgentPrompt';
 import { useCompletionDockWorking } from './useCompletionDockWorking';
 import { useConnectionRecovery } from './useConnectionRecovery';
 import { useFallbackSessionPoll } from './useFallbackSessionPoll';
+import { useSessionAccessSync } from './useSessionAccessSync';
+import { useSessionCatchUp } from './useSessionCatchUp';
 import { useSessionFileUpload } from './useSessionFileUpload';
 import { useSessionInfrastructure } from './useSessionInfrastructure';
 import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
+import { useSessionPanels } from './useSessionPanels';
 import { useSessionTranscript } from './useSessionTranscript';
 import { useWakeProgress } from './useWakeProgress';
 
@@ -41,7 +44,13 @@ export function useSessionLifecycle(
   onCommentEvent?: (event: MessageCommentRealtimeEvent) => void
 ): UseSessionLifecycleResult {
   const transcript = useSessionTranscript(projectId, sessionId);
-  const { appendMessages, mergeRecentWindow } = transcript;
+  const {
+    appendMessages,
+    appendMessageContent,
+    catchUpTail,
+    mergeRecentWindow,
+    patchMessageMetadata,
+  } = transcript;
   // Seeded from the cached transcript so a cached chat renders whole on its first
   // render; the server-snapshot effect below keeps both current from then on.
   const [session, setSession] = useState<ChatSessionResponse | null>(
@@ -50,18 +59,20 @@ export function useSessionLifecycle(
   const [taskEmbed, setTaskEmbed] = useState<ChatSessionResponse['task'] | null>(
     () => transcript.detail?.session.task ?? null
   );
+  const chatSocketLive = useRef(false);
+  const { applySessionAccess, onSessionAccessChanged, resyncAccessAfterSubscribe } =
+    useSessionAccessSync(projectId, sessionId, setSession, session?.access, chatSocketLive);
 
-  const appendOptimisticMessage = useCallback(
-    (message: ChatMessageResponse) => appendMessages([message]),
-    [appendMessages]
-  );
-  const { uploading, handleUploadFiles } = useSessionFileUpload({
-    projectId,
-    sessionId,
-    onOptimisticMessage: appendOptimisticMessage,
-  });
+  const {
+    uploading,
+    handleUploadFiles,
+    attachments,
+    removeAttachment,
+    clearAttachments,
+    uploadError,
+  } = useSessionFileUpload({ projectId, sessionId });
 
-  const { workspace, node } = useSessionInfrastructure(session?.workspaceId);
+  const { workspace, node } = useSessionInfrastructure(ownedWorkspaceId(session));
   const draft = useSessionDraft(sessionId);
   const { text: followUp, setText: setFollowUp } = draft;
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
@@ -71,13 +82,19 @@ export function useSessionLifecycle(
   const [currentPlan, setCurrentPlan] = useState<SessionStateSnapshot['currentPlan']>(null);
   const [promptStartedAt, setPromptStartedAt] = useState<number | null>(null);
   const [staleNotice, setStaleNotice] = useState(false);
+  // Whether the agent's adapter can take a message mid-turn. Null until the VM agent says;
+  // older VM agents never do, so null keeps Steer on offer as before.
+  const [steeringSupported, setSteeringSupported] = useState<boolean | null>(null);
   const clearActivity = useCallback(() => {
     setAgentActivity('idle');
     setPromptStartedAt(null);
   }, []);
+  // Every state snapshot (load, fallback poll, activity verification) also carries the
+  // agent's steering capability; a snapshot without it leaves the known value alone.
   const hydratePlan = useCallback((s: SessionStateSnapshot | null | undefined) => {
     if (!s) return;
     setCurrentPlan(s.currentPlan ?? null);
+    if (typeof s.steeringSupported === 'boolean') setSteeringSupported(s.steeringSupported);
   }, []);
   const handleVerifiedStale = useCallback(() => setStaleNotice(true), []);
   const dismissStaleNotice = useCallback(() => setStaleNotice(false), []);
@@ -92,6 +109,12 @@ export function useSessionLifecycle(
   });
 
   const wake = useWakeProgress(sessionId);
+  const { onSessionUpdated, invalidateStatus } = useSessionStatusPush(
+    projectId,
+    sessionId,
+    mergeRecentWindow,
+    setSession
+  );
   const { hydrateWakeProgress } = wake;
 
   const hydrateState = useCallback(
@@ -116,22 +139,20 @@ export function useSessionLifecycle(
     [clearActivity, hydratePlan, hydrateWakeProgress, startVerifyDecayTimer, stopVerifyDecayTimer]
   );
 
-  const [filePanel, setFilePanel] = useState<FilePanelState>(null);
-  const handleFileClick = useCallback((path: string, line?: number | null) => {
-    setFilePanel({ mode: 'view', path, line });
-  }, []);
-  const handleOpenFileBrowser = useCallback(() => setFilePanel({ mode: 'browse', path: '.' }), []);
-  const handleOpenGitChanges = useCallback(() => setFilePanel({ mode: 'git-status' }), []);
-  const [showScrollButton, setShowScrollButton] = useState(false);
+  const {
+    setFilePanel,
+    filePanel,
+    handleFileClick,
+    handleOpenFileBrowser,
+    handleOpenGitChanges,
+    showScrollButton,
+    setShowScrollButton,
+  } = useSessionPanels();
   const sessionState = session ? deriveSessionState(session) : 'terminated';
   const transcribeApiUrl = getTranscribeApiUrl();
 
   // ── DO WebSocket (sole message source) ──
-  const {
-    connectionState,
-    wsRef,
-    retry: retryWs,
-  } = useChatWebSocket({
+  const { connectionState, retry: retryWs } = useChatWebSocket({
     projectId,
     sessionId,
     // A waking session is still `sleeping` server-side for the whole wake —
@@ -145,6 +166,22 @@ export function useSessionLifecycle(
     // ordinary sleeping session still connects nothing) is what makes the push
     // half of wake progress actually reach the user.
     enabled: session?.status === 'active' || wake.isWaking,
+    onMessageAppend: useCallback(
+      (append: ChatMessageAppend) => {
+        const applied = appendMessageContent(append);
+        if (applied) {
+          setAgentActivity('responding');
+          setStaleNotice(false);
+          startVerifyDecayTimer();
+        }
+        return applied;
+      },
+      [appendMessageContent, startVerifyDecayTimer]
+    ),
+    onSubscribed: useCallback(
+      () => catchUpTail(resyncAccessAfterSubscribe),
+      [catchUpTail, resyncAccessAfterSubscribe]
+    ),
     onMessage: useCallback(
       (msg: ChatMessageResponse) => {
         appendMessages([msg]);
@@ -166,33 +203,22 @@ export function useSessionLifecycle(
       [appendMessages, startVerifyDecayTimer]
     ),
     onSessionStopped: useCallback(() => {
+      invalidateStatus();
       setSession((prev) => (prev ? { ...prev, status: 'stopped' } : prev));
       setAgentActivity('idle');
       setPromptStartedAt(null);
       // Stop any pending verify timer so it can't re-arm and flash the bar back on.
       stopVerifyDecayTimer();
-    }, [stopVerifyDecayTimer]),
-    onCatchUp: useCallback(
-      (
-        catchUpMessages: ChatMessageResponse[],
-        catchUpSession: ChatSessionResponse,
-        state?: SessionStateSnapshot | null
-      ) => {
-        setSession(catchUpSession);
-        mergeRecentWindow({
-          session: catchUpSession,
-          messages: catchUpMessages,
-          // A window's own `hasMore` is used only when no transcript is loaded
-          // yet; the catch-up does not report it, so assume older history.
-          hasMore: true,
-          state: state ?? null,
-        }).catch(() => {
-          // Best-effort catch-up: the socket remains connected, and the next
-          // explicit refresh/reconnect will retry from the current cache.
-        });
-        hydrateState(state);
+    }, [invalidateStatus, stopVerifyDecayTimer]),
+    onSessionAccessChanged,
+    onCatchUp: useSessionCatchUp(setSession, mergeRecentWindow, hydrateState),
+    // What the agent's runtime did with a steer, on its transcript row.
+    onDeliveryUpdate: useCallback(
+      (update: PromptDeliveryUpdate) => {
+        const patch = deliveryUpdateMetadataPatch(update);
+        if (patch) patchMessageMetadata(update.promptMessageId, patch);
       },
-      [hydrateState, mergeRecentWindow]
+      [patchMessageMetadata]
     ),
     onAgentCompleted: useCallback(
       (agentCompletedAt: number) => {
@@ -209,8 +235,11 @@ export function useSessionLifecycle(
     onAgentActivity: useCallback(
       (
         activity: 'prompting' | 'idle' | 'recovering' | 'error',
-        promptStartedAt?: number | null
+        promptStartedAt?: number | null,
+        reportedSteeringSupported?: boolean
       ) => {
+        if (reportedSteeringSupported !== undefined)
+          setSteeringSupported(reportedSteeringSupported);
         const working = activity === 'prompting' || activity === 'recovering';
         setAgentActivity(working ? activity : 'idle');
         setPromptStartedAt(working ? (promptStartedAt ?? Date.now()) : null);
@@ -226,12 +255,7 @@ export function useSessionLifecycle(
       },
       [startVerifyDecayTimer, stopVerifyDecayTimer]
     ),
-    onSessionUpdated: useCallback(
-      (updates: Partial<Pick<ChatSessionResponse, 'topic' | 'workspaceId' | 'agentSessionId'>>) => {
-        setSession((prev) => (prev ? { ...prev, ...updates } : prev));
-      },
-      []
-    ),
+    onSessionUpdated,
     // Pushed wake phase — arrives well ahead of the fallback poll, so the banner
     // tracks the actual wake instead of lagging a poll interval behind it.
     onWakeProgress: useCallback(
@@ -248,6 +272,7 @@ export function useSessionLifecycle(
     ),
     onCommentEvent,
   });
+  chatSocketLive.current = connectionState === 'connected';
 
   // Connection recovery (banner debounce, idle timer, auto-resume)
   const recovery = useConnectionRecovery({
@@ -257,6 +282,7 @@ export function useSessionLifecycle(
     connectionState,
     session,
     isProvisioning,
+    canDriveSession: resolveSessionViewerCapabilities(session).canDriveSession,
     setSession,
   });
 
@@ -327,10 +353,11 @@ export function useSessionLifecycle(
     hydrateWakeProgress,
   });
 
-  // ── Send follow-up via REST API ──
-  const handleSendFollowUp = async () => {
-    const trimmed = followUp.trim();
-    if (!trimmed || sendingFollowUp) return;
+  // ── Send follow-up via REST API ── (`steer` only matters while a turn runs.)
+  const handleSendFollowUp = async (deliveryIntent: PromptDeliveryIntent = 'queue') => {
+    const trimmed = followUp.trim() || (attachments.length > 0 ? DEFAULT_ATTACHMENT_MESSAGE : '');
+    if (!trimmed || sendingFollowUp || attachments.some((a) => a.status !== 'complete')) return;
+    const attachmentRefs = attachments.flatMap((a) => (a.ref ? [a.ref] : []));
 
     const wakingSleepingSession = sessionState === 'sleeping';
     if (wakingSleepingSession) sleepingWakePendingRef.current = true;
@@ -341,54 +368,25 @@ export function useSessionLifecycle(
     // the old error visible would attach it to work it has nothing to do with.
     clearCancelError();
     try {
-      if (sessionState === 'idle') {
-        resetIdleTimer(projectId, sessionId)
-          .then((result) => {
-            if (result.cleanupAt) {
-              setSession((prev) => {
-                if (!prev) return prev;
-                return {
-                  ...prev,
-                  cleanupAt: result.cleanupAt,
-                  isIdle: false,
-                  agentCompletedAt: null,
-                } as ChatSessionResponse;
-              });
-            }
-          })
-          .catch(() => {});
-      }
-
-      // Optimistic user message
-      const optimisticId = `optimistic-${crypto.randomUUID()}`;
-      const optimisticMessage: ChatMessageResponse = {
-        id: optimisticId,
-        sessionId,
-        role: 'user',
-        content: trimmed,
-        toolMetadata: null,
-        createdAt: Date.now(),
-      };
-      appendMessages([optimisticMessage]);
+      if (sessionState === 'idle') refreshIdleCleanupAfterSend(projectId, sessionId, setSession);
+      const optimisticMessage = optimisticUserMessage(sessionId, trimmed, deliveryIntent);
+      // Attachment display includes canonical workspace paths, so only plain messages get
+      // an optimistic row; durable acceptance persists and broadcasts the real one.
+      if (attachmentRefs.length === 0) appendMessages([optimisticMessage]);
       draft.sending(trimmed);
 
-      // Persist via DO WebSocket
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(
-          JSON.stringify({
-            type: 'message.send',
-            sessionId,
-            content: trimmed,
-            role: 'user',
-          })
-        );
-      }
-
+      // The transcript row is written by the server when the prompt is accepted (durable
+      // delivery) and attributed to the sender; the socket is read-only.
       // For idle sessions, resume first then send the prompt. The composer is
       // cleared only when delivery is confirmed (onDelivered); a failed resume
       // or delivery resets the working state and keeps the typed text as the
       // manual-retry affordance (onFailed).
-      if (sessionState === 'idle' && session?.workspaceId && session?.agentSessionId) {
+      if (
+        attachmentRefs.length === 0 &&
+        sessionState === 'idle' &&
+        session?.workspaceId &&
+        session?.agentSessionId
+      ) {
         recovery.resumeAndSend(trimmed, {
           onDelivered: () => {
             draft.delivered(trimmed);
@@ -401,7 +399,8 @@ export function useSessionLifecycle(
       } else {
         // Forward prompt to the running agent via REST API
         try {
-          await sendFollowUpPrompt(projectId, sessionId, trimmed);
+          await sendFollowUpPrompt(projectId, sessionId, trimmed, attachmentRefs, deliveryIntent);
+          clearAttachments();
           // Delivery confirmed — clear any stale recovery banner and the composer.
           recovery.clearResumeError();
           draft.delivered(trimmed);
@@ -457,11 +456,13 @@ export function useSessionLifecycle(
     showConnectionBanner: recovery.showConnectionBanner,
     retryWs,
     agentActivity,
+    steeringSupported,
     completionDockWorking,
     /** True while a wake is in flight (hydrated from D1 or pushed over the socket). */
     isWaking: wake.isWaking,
     /** Current wake phase, or null before the replacement runner reports a step. */
     wakePhase: wake.wakePhase,
+    wakeWait: wake.wakeWait,
     staleNotice,
     dismissStaleNotice,
     currentPlan,
@@ -480,10 +481,13 @@ export function useSessionLifecycle(
     cancelError,
     handleSendFollowUp,
     handleUploadFiles,
+    attachments,
+    removeAttachment,
+    uploadError,
     loadMore: transcript.loadMore,
     loadUntil: transcript.loadUntil,
     loadingMore: transcript.loadingMore,
     transcribeApiUrl,
-    wsRef,
+    applySessionAccess,
   };
 }

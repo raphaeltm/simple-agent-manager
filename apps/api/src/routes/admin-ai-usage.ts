@@ -37,8 +37,6 @@ export interface AiUsageSummary {
   totalInputTokens: number;
   totalOutputTokens: number;
   totalCostUsd: number;
-  trialRequests: number;
-  trialCostUsd: number;
   cachedRequests: number;
   errorRequests: number;
   byModel: UsageByModel[];
@@ -63,8 +61,6 @@ adminAiUsageRoutes.get('/', async (c) => {
       totalInputTokens: 0,
       totalOutputTokens: 0,
       totalCostUsd: 0,
-      trialRequests: 0,
-      trialCostUsd: 0,
       cachedRequests: 0,
       errorRequests: 0,
       byModel: [],
@@ -84,8 +80,6 @@ adminAiUsageRoutes.get('/', async (c) => {
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let totalCostUsd = 0;
-  let trialRequests = 0;
-  let trialCostUsd = 0;
   let cachedRequests = 0;
   let errorRequests = 0;
 
@@ -97,10 +91,6 @@ adminAiUsageRoutes.get('/', async (c) => {
 
     if (entry.cached) cachedRequests++;
     if (!entry.success) errorRequests++;
-    if (entry.metadata?.trialId) {
-      trialRequests++;
-      trialCostUsd += entry.cost || 0;
-    }
 
     aggregateByModel(modelMap, entry);
     aggregateByDay(dayMap, entry);
@@ -111,8 +101,6 @@ adminAiUsageRoutes.get('/', async (c) => {
     totalInputTokens,
     totalOutputTokens,
     totalCostUsd,
-    trialRequests,
-    trialCostUsd,
     cachedRequests,
     errorRequests,
     byModel: Array.from(modelMap.values()).sort((a, b) => b.costUsd - a.costUsd),

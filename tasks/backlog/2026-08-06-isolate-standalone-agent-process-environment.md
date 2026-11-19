@@ -1,5 +1,10 @@
 # Isolate standalone agent process environments
 
+> **Reconciliation 2026-10-26:** Still open. Pointer correction: `os.Environ()` is passed in at
+> `packages/vm-agent/internal/acp/process.go:415`, and `mergeProcessEnv` is `:499-527`. #2332
+> (`faaf861ba`) added `protectManagedSecretEnv` for selected secret env vars; ambient inheritance
+> is unchanged.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** duplicate-key canonicalization. `mergeProcessEnv` gives configured variables

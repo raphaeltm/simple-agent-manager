@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
 import type { ChatSessionResponse } from '../../lib/api';
-import { resumeAgentSession, sendFollowUpPrompt } from '../../lib/api';
+import { resumeChatSessionAgent, sendFollowUpPrompt } from '../../lib/api';
 import {
   DEFAULT_DELIVERY_ERROR_MESSAGE,
   getResumeFailureMessage,
@@ -41,6 +41,11 @@ export interface UseConnectionRecoveryOptions {
   connectionState: ChatConnectionState;
   session: ChatSessionResponse | null;
   isProvisioning: boolean;
+  /**
+   * Whether this viewer may drive the session (owner or grantee). Readers never resume an
+   * agent — the server would refuse — so auto-resume stays off for them.
+   */
+  canDriveSession: boolean;
   setSession: React.Dispatch<React.SetStateAction<ChatSessionResponse | null>>;
 }
 
@@ -67,6 +72,7 @@ export function useConnectionRecovery(
     connectionState,
     session,
     isProvisioning,
+    canDriveSession,
     setSession,
   } = opts;
 
@@ -202,7 +208,7 @@ export function useConnectionRecovery(
       setResumeError(null);
       if (followUp) pendingFollowUpRef.current = followUp;
 
-      resumeAgentSession(workspaceId, agentSessionId)
+      resumeChatSessionAgent(projectId, sessionId, agentSessionId)
         .then(async () => {
           // Stale (superseded by a newer attempt or a session switch) — do not
           // touch state or send, and leave `isResuming` to the newest attempt.
@@ -265,6 +271,7 @@ export function useConnectionRecovery(
   useEffect(() => {
     if (
       sessionState !== 'idle' ||
+      !canDriveSession ||
       isResuming ||
       isProvisioning ||
       !workspaceId ||
@@ -280,7 +287,7 @@ export function useConnectionRecovery(
 
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- beginResume is intentionally read via beginResumeRef (see comment above), not listed here
-  }, [sessionState, isResuming, isProvisioning, workspaceId, agentSessionId]);
+  }, [sessionState, canDriveSession, isResuming, isProvisioning, workspaceId, agentSessionId]);
 
   // Debounced connection banner
   useEffect(() => {

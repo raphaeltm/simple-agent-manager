@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import {
   findNodeWithCapacity,
+  hasReusableNodeReservationCapacity,
   nodeSatisfiesTaskResources,
 } from '../../../src/durable-objects/task-runner/node-selection';
 import type {
@@ -38,6 +39,7 @@ interface NodeRow {
   observedHardwareSource?: string | null;
   providerInstanceId?: string | null;
   warmSince?: string | null;
+  createdAt?: string;
 }
 
 function insertNode(sqlite: Database.Database, row: NodeRow): void {
@@ -82,7 +84,7 @@ function insertNode(sqlite: Database.Database, row: NodeRow): void {
       row.diskGb ?? 160,
       row.observedHardwareSource === undefined ? 'observed' : row.observedHardwareSource,
       JSON.stringify({ cpuLoadAvg1: 0, memoryPercent: 5, diskPercent: 5 }),
-      now,
+      row.createdAt ?? now,
       now
     );
 }
@@ -209,6 +211,52 @@ describe('findNodeWithCapacity scoping (real SQL)', () => {
   });
 });
 
+describe('findNodeWithCapacity skips nodes in the last 10% of their lifetime (policy a3780107)', () => {
+  const HOUR = 60 * 60 * 1000;
+  const ageOf = (ageMs: number) => new Date(Date.now() - ageMs).toISOString();
+  function autoProvision(nodeId: string) {
+    sqlite
+      .prepare(
+        `INSERT INTO tasks (id, project_id, user_id, title, status, auto_provisioned_node_id,
+           created_at, updated_at)
+         VALUES (?, 'project-1', 'user-1', 'Provisioner', 'completed', ?, ?, ?)`
+      )
+      .run(`provisioner-${nodeId}`, nodeId, ageOf(0), ageOf(0));
+  }
+
+  it('passes over an auto-provisioned node 23h into its 24h lifetime for a younger one', async () => {
+    // The default cutoff resolves through the real resolver (no settings store: code default).
+    insertNode(sqlite, { id: 'old-node', createdAt: ageOf(23 * HOUR) });
+    autoProvision('old-node');
+    insertNode(sqlite, { id: 'young-node', createdAt: ageOf(2 * HOUR) });
+    autoProvision('young-node');
+
+    const result = await findNodeWithCapacity(createState(), createContext(database));
+
+    expect(result?.nodeId).toBe('young-node');
+  });
+
+  it('selects nothing when the only node is past the cutoff, and records why', async () => {
+    insertNode(sqlite, { id: 'old-node', createdAt: ageOf(23 * HOUR) });
+    autoProvision('old-node');
+    const state = createState();
+
+    expect(await findNodeWithCapacity(state, createContext(database))).toBeNull();
+    // Rule 74: the refusal names its own condition in the placement diagnostics.
+    expect(JSON.stringify(state.stepResults.placementDiagnostics)).toContain(
+      'Host is in the last part of its lifetime and takes no new workspaces'
+    );
+  });
+
+  it('still reuses an equally old node no task auto-provisioned (control)', async () => {
+    insertNode(sqlite, { id: 'old-manual-node', createdAt: ageOf(23 * HOUR) });
+
+    const result = await findNodeWithCapacity(createState(), createContext(database));
+
+    expect(result?.nodeId).toBe('old-manual-node');
+  });
+});
+
 describe('nodeSatisfiesTaskResources fails closed without trusted hardware', () => {
   const state = createState();
 
@@ -287,4 +335,35 @@ describe('nodeSatisfiesTaskResources fails closed without trusted hardware', () 
       )
     ).toBe(true);
   });
+});
+
+describe('disk admission on node reuse', () => {
+  it.each([79.99, 80, 92])(
+    'checks occupied selection and warm reuse at disk=%s',
+    async (diskPercent) => {
+      insertNode(sqlite, { id: 'disk-node' });
+      sqlite
+        .prepare("UPDATE nodes SET last_metrics = json_set(last_metrics, '$.diskPercent', ?)")
+        .run(diskPercent);
+      const state = createState();
+      const rc = createContext(database);
+      expect((await findNodeWithCapacity(state, rc)) !== null).toBe(diskPercent < 80);
+      // This is the same post-claim capacity guard used for both fresh and persisted warm claims.
+      expect(
+        await hasReusableNodeReservationCapacity(rc, state, {
+          id: 'disk-node',
+          vmSize: 'large',
+          vmLocation: 'nbg1',
+          cloudProvider: 'hetzner',
+          providerInstanceId: 'pi-disk-node',
+          observedHardwareSource: 'observed',
+          observedProviderInstanceVcpuCount: 8,
+          observedProviderInstanceMemoryMb: 16384,
+          observedProviderInstanceDiskGb: 160,
+          lastHeartbeatAt: new Date().toISOString(),
+          lastMetrics: JSON.stringify({ cpuLoadAvg1: 0, memoryPercent: 5, diskPercent }),
+        })
+      ).toBe(diskPercent < 80);
+    }
+  );
 });

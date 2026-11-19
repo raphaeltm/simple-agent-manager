@@ -1,0 +1,383 @@
+{
+  "data": {
+    "viewer": {
+      "accounts": [
+        {
+          "durableObjectsInvocationsAdaptiveGroups": [
+            {
+              "dimensions": {
+                "date": "2026-10-09",
+                "type": "http"
+              },
+              "sum": {
+                "requests": 196
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-09",
+                "type": "jsrpc"
+              },
+              "sum": {
+                "requests": 44485
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-09",
+                "type": "alarm"
+              },
+              "sum": {
+                "requests": 6566
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-09",
+                "type": "hibernation"
+              },
+              "sum": {
+                "requests": 1282
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-10",
+                "type": "alarm"
+              },
+              "sum": {
+                "requests": 6782
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-10",
+                "type": "jsrpc"
+              },
+              "sum": {
+                "requests": 24802
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-10",
+                "type": "hibernation"
+              },
+              "sum": {
+                "requests": 1181
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-10",
+                "type": "http"
+              },
+              "sum": {
+                "requests": 89
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-11",
+                "type": "hibernation"
+              },
+              "sum": {
+                "requests": 1527
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-11",
+                "type": "http"
+              },
+              "sum": {
+                "requests": 188
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-11",
+                "type": "jsrpc"
+              },
+              "sum": {
+                "requests": 48399
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-11",
+                "type": "alarm"
+              },
+              "sum": {
+                "requests": 8197
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-12",
+                "type": "http"
+              },
+              "sum": {
+                "requests": 34
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-12",
+                "type": "alarm"
+              },
+              "sum": {
+                "requests": 10589
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-12",
+                "type": "jsrpc"
+              },
+              "sum": {
+                "requests": 68806
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-12",
+                "type": "hibernation"
+              },
+              "sum": {
+                "requests": 1193
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-13",
+                "type": "http"
+              },
+              "sum": {
+                "requests": 76
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-13",
+                "type": "hibernation"
+              },
+              "sum": {
+                "requests": 1516
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-13",
+                "type": "jsrpc"
+              },
+              "sum": {
+                "requests": 55337
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-13",
+                "type": "alarm"
+              },
+              "sum": {
+                "requests": 7823
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-14",
+                "type": "alarm"
+              },
+              "sum": {
+                "requests": 6330
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-14",
+                "type": "hibernation"
+              },
+              "sum": {
+                "requests": 1701
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-14",
+                "type": "jsrpc"
+              },
+              "sum": {
+                "requests": 42367
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-14",
+                "type": "http"
+              },
+              "sum": {
+                "requests": 89
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-15",
+                "type": "hibernation"
+              },
+              "sum": {
+                "requests": 2354
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-15",
+                "type": "jsrpc"
+              },
+              "sum": {
+                "requests": 133718
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-15",
+                "type": "alarm"
+              },
+              "sum": {
+                "requests": 11370
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-15",
+                "type": "http"
+              },
+              "sum": {
+                "requests": 205
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-16",
+                "type": "jsrpc"
+              },
+              "sum": {
+                "requests": 130015
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-16",
+                "type": "http"
+              },
+              "sum": {
+                "requests": 56
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-16",
+                "type": "alarm"
+              },
+              "sum": {
+                "requests": 13589
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-16",
+                "type": "hibernation"
+              },
+              "sum": {
+                "requests": 1253
+              }
+            }
+          ],
+          "durableObjectsPeriodicGroups": [
+            {
+              "dimensions": {
+                "date": "2026-10-09"
+              },
+              "sum": {
+                "duration": 4061.985936256,
+                "rowsRead": 154261450,
+                "rowsWritten": 732380
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-10"
+              },
+              "sum": {
+                "duration": 2888.446088704,
+                "rowsRead": 127404393,
+                "rowsWritten": 531087
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-11"
+              },
+              "sum": {
+                "duration": 2880.87401792,
+                "rowsRead": 299680693,
+                "rowsWritten": 1026039
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-12"
+              },
+              "sum": {
+                "duration": 5447.230787584,
+                "rowsRead": 651126964,
+                "rowsWritten": 1247875
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-13"
+              },
+              "sum": {
+                "duration": 5080.821517695998,
+                "rowsRead": 511203703,
+                "rowsWritten": 1005117
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-14"
+              },
+              "sum": {
+                "duration": 3345.8220330239997,
+                "rowsRead": 476593488,
+                "rowsWritten": 758410
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-15"
+              },
+              "sum": {
+                "duration": 5187.648301567999,
+                "rowsRead": 2219754634,
+                "rowsWritten": 1788870
+              }
+            },
+            {
+              "dimensions": {
+                "date": "2026-10-16"
+              },
+              "sum": {
+                "duration": 4773.022385280001,
+                "rowsRead": 3491602481,
+                "rowsWritten": 1697646
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "errors": null
+}

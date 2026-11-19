@@ -1,0 +1,54 @@
+{
+  "passed": true,
+  "observations": [
+    {
+      "page": "/dashboard",
+      "loaded": true
+    },
+    {
+      "page": "/projects",
+      "loaded": true
+    },
+    {
+      "page": "/settings/agents",
+      "loaded": true
+    },
+    {
+      "provider": "claude-code",
+      "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+      "setupId": "01M6672KHB26MSZ6X1RGEFZZ3R",
+      "createStatus": 201,
+      "ready": true,
+      "personalScopeConflict": 409,
+      "cancelled": true,
+      "width": 375
+    },
+    {
+      "provider": "openai-codex",
+      "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+      "setupId": "01M66737SMMXR0PZEFRC0HHV6T",
+      "createStatus": 201,
+      "ready": true,
+      "personalScopeConflict": 409,
+      "cancelled": true,
+      "width": 1280
+    }
+  ],
+  "d1": [
+    {
+      "id": "01M6672KHB26MSZ6X1RGEFZZ3R",
+      "project_id": "01KJNR9R3TEN3KX1ETE33852R8",
+      "scope": "project",
+      "status": "cancelled"
+    },
+    {
+      "id": "01M66737SMMXR0PZEFRC0HHV6T",
+      "project_id": "01KJNR9R3TEN3KX1ETE33852R8",
+      "scope": "project",
+      "status": "cancelled"
+    }
+  ],
+  "personalDefaultsUnchanged": true,
+  "pageErrors": [],
+  "realProviderApproval": "not performed; no real account/default changes"
+}

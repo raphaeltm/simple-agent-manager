@@ -1,5 +1,20 @@
 # Consolidate remaining hand-rolled visibility-aware polls onto `useVisibilityAwarePoll`
 
+> **Reconciliation 2026-11-02:** Progress on the out-of-scope list. #2481 (`20db08dc5`) moved the
+> `useAdminAnalytics` and `useAdminHealth` polls onto TanStack Query `refetchInterval` with
+> `refetchIntervalInBackground: false` (`hooks/useAdminAnalytics.ts:55-56`,
+> `hooks/useAdminHealth.ts:29-30`), so they pause on a hidden tab. Still open:
+> `usePushSubscription.ts:160-163`, `useWorkspaceNavigation.ts:115`, `useAdminErrors.ts:193`,
+> `StepExecution.tsx:134`, `CodexConnectModal.tsx:207` (device-code poll) and the
+> `useSamLiveTurn.ts:40` listener.
+
+> **Reconciliation 2026-10-26:** Progress on the out-of-scope list. #2426 (`833ebc366`) replaced
+> the two hardcoded `ProjectDeploymentEnvironmentDetail.tsx` polls with TanStack Query
+> `refetchInterval` (`pages/deployments/data.ts:52,87`, env-configurable `DEPLOYMENTS_*_POLL_MS` in
+> `lib/poll-intervals.ts:68-79`), which pauses on a hidden tab. New: #2398 (`d431ea877`) added a
+> hand-rolled `visibilitychange` listener in `components/sam/useSamLiveTurn.ts:40` (it gates a live
+> stream, not a poll) instead of using `useDocumentVisible`. Everything else below is unchanged.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** `useRecentChats` moved to TanStack Query (PR #1860), which pauses

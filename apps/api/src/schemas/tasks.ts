@@ -1,10 +1,16 @@
 import {
+  AGENT_EFFORT_LEVELS,
   DEVCONTAINER_CONFIG_NAME_MAX_LENGTH,
   DEVCONTAINER_CONFIG_NAME_REGEX,
   TASK_EXECUTION_STEPS,
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
+import { MAX_RESOURCE_ID_LENGTH } from './_validator';
+
+/** Bound on an echoed account id; see `agentConfigurationId` below. */
+const RUN_AGENT_CONFIGURATION_ID_MAX_LENGTH = 1024;
+import { AGENT_SETTINGS_VALIDATION_DEFAULTS } from './agent-settings';
 import { ResourceRequirementsSchema } from './resource-requirements';
 
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
@@ -43,7 +49,7 @@ const GitPushResultSchema = v.object({
   error: v.nullable(v.string()),
 });
 
-const TaskAttachmentSchema = v.object({
+export const TaskAttachmentSchema = v.object({
   uploadId: v.string(),
   filename: v.string(),
   size: v.number(),
@@ -63,6 +69,28 @@ const DevcontainerConfigNameSchema = v.pipe(
   )
 );
 
+/**
+ * One-chat model and effort overrides, shared by task submit and Instant chat start. Whether
+ * the effort is supported is checked against the resolved agent by `resolveTaskAgentOverrides`.
+ */
+export const TaskAgentOverrideFields = {
+  model: v.optional(
+    v.nullable(
+      v.pipe(v.string(), v.trim(), v.maxLength(AGENT_SETTINGS_VALIDATION_DEFAULTS.maxModelLength))
+    )
+  ),
+  effort: v.optional(v.nullable(v.picklist(AGENT_EFFORT_LEVELS))),
+  /**
+   * The caller's own agent account (`cc_configurations.id`) for this run, over the profile's.
+   * Checked against the stored row by `validateRunAgentConfiguration`, which is the real
+   * validation; the cap only bounds the string. It is not the 128-char resource-id cap:
+   * ids from the 2026-06 composable-credentials backfill run past 200 characters.
+   */
+  agentConfigurationId: v.optional(
+    v.nullable(v.pipe(v.string(), v.trim(), v.maxLength(RUN_AGENT_CONFIGURATION_ID_MAX_LENGTH)))
+  ),
+};
+
 export const SubmitTaskSchema = v.object({
   message: v.string(),
   vmSize: v.optional(VMSizeSchema),
@@ -74,11 +102,15 @@ export const SubmitTaskSchema = v.object({
   provider: v.optional(CredentialProviderSchema),
   parentTaskId: v.optional(v.string()),
   contextSummary: v.optional(v.string()),
+  sourceSessionId: v.optional(v.string()),
   taskMode: v.optional(TaskModeSchema),
   agentProfileId: v.optional(v.string()),
   skillId: v.optional(v.string()),
   attachments: v.optional(v.array(TaskAttachmentSchema)),
   resourceRequirements: v.optional(v.nullable(ResourceRequirementsSchema)),
+  ...TaskAgentOverrideFields,
+  /** An open idea in this project this work starts from; linked before the agent starts. */
+  sourceIdeaId: v.optional(v.pipe(v.string(), v.maxLength(MAX_RESOURCE_ID_LENGTH))),
 });
 
 export const CreateTaskSchema = v.object({
@@ -104,6 +136,18 @@ export const UpdateTaskStatusSchema = v.object({
   outputBranch: v.optional(v.string()),
   outputPrUrl: v.optional(v.string()),
   errorMessage: v.optional(v.string()),
+  promptSucceeded: v.optional(v.boolean()),
+  promptStartedAt: v.optional(
+    v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(Number.MAX_SAFE_INTEGER))
+  ),
+  providerLimitAgentSessionId: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(128))),
+  providerLimitPromptAttemptId: v.optional(
+    v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(Number.MAX_SAFE_INTEGER))
+  ),
+  providerLimitCredentialGeneration: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
+  providerLimitResetsAt: v.optional(
+    v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(8_640_000_000_000_000))
+  ),
   gitPushResult: v.optional(GitPushResultSchema),
 });
 

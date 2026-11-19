@@ -5,16 +5,16 @@ export const DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS = 5 * 60 * 1000;
 
 /**
  * Absolute ceiling on how long harness-owned background work may defer sleep,
- * measured from the last real lifecycle PROGRESS edge (not from the last
- * heartbeat).
+ * measured from the last real session work (including lifecycle progress),
+ * never from the last heartbeat.
  *
  * The sliding lease alone is renewable forever: the VM agent re-reports the
  * active snapshot every `ActivityRereportInterval`, and each report refreshes
  * `runtimeWorkUpdatedAt`. An adapter faithfully re-reporting a STALE task set —
  * the canonical case being an abandoned detached dev server that stays in a
- * runtime-work set — would therefore pin compute awake indefinitely. That
- * contradicts the canonical definition of idleness: only work still expected to
- * return to the agent pins compute.
+ * runtime-work set — would therefore pin compute awake indefinitely. Long-lived
+ * background work may deliberately keep a session awake, but only for this
+ * bounded interval after real work; heartbeat reports cannot renew it.
  *
  * NOTE: `runtimeWorkProgressAt` is ONE clock for the reporter's whole tracked
  * set, so this ceiling can only bound a set that stops progressing as a whole.
@@ -24,7 +24,15 @@ export const DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS = 5 * 60 * 1000;
  * and the `background_tasks_changed` wholesale replace (Claude) in
  * `packages/vm-agent/internal/acp/session_host_harness_work.go`.
  */
-export const DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS = 30 * 60 * 1000;
+export const DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * Default for `operations.sessionStaleTurnNoWorkMinutes`: how long an open turn on a running task
+ * may go without real work before it stops keeping the session awake. Longer than a Claude Code
+ * foreground Bash call (capped at 10 min); background tasks and Codex/OpenCode tool calls hold
+ * the session through the harness lease instead.
+ */
+export const DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES = 30;
 
 export interface HarnessWorkConfig {
   leaseMs: number;
@@ -33,7 +41,13 @@ export interface HarnessWorkConfig {
 
 export interface SessionIdlenessActivityState {
   activity?: string | null;
+  /** Last-REPORT clock: same-turn re-reports move it. Never an idleness anchor on its own. */
   activityAt?: number | null;
+  promptStartedAt?: number | null;
+  /** Last real-work clock (`project-data/session-work-clock.ts`). */
+  workAt?: number | null;
+  /** The VM's own latest turn start; grows only when a new prompt starts. */
+  reportedPromptStartedAt?: number | null;
   runtimeWorkState?: string | null;
   runtimeWorkCount?: number | null;
   runtimeWorkSource?: string | null;
@@ -47,7 +61,8 @@ export type SessionIdlenessReason =
   | 'prompt_turn_active'
   | 'prompt_turn_unknown'
   | 'idle_interval_pending'
-  | 'completed_prompt_stale';
+  | 'completed_prompt_stale'
+  | 'prompt_turn_stale';
 
 /**
  * The two different questions callers ask of the same idleness evidence.
@@ -107,20 +122,30 @@ export function getFreshHarnessWorkLeaseExpiry(
   const expiresAt = state.runtimeWorkUpdatedAt + leaseMs;
   if (expiresAt <= now.getTime()) return null;
 
-  // Absolute ceiling anchored on the PROGRESS clock, which only advances on real
-  // harness lifecycle edges/progress — never on the periodic heartbeat re-report
-  // that refreshes `runtimeWorkUpdatedAt`. Work that has stopped progressing
-  // therefore releases the session even while the adapter keeps reporting it.
-  // Falls back to the heartbeat clock when no progress timestamp was reported,
-  // which is the conservative direction (sleep sooner, never later).
-  const progressAnchor =
-    state.runtimeWorkProgressAt && state.runtimeWorkProgressAt > 0
-      ? state.runtimeWorkProgressAt
-      : state.runtimeWorkUpdatedAt;
+  // Bound protection by real work across both foreground turns and harness
+  // progress. A partial/older reporter without a progress field still has the
+  // persisted work clock; heartbeat receipt must never renew this ceiling.
+  const progressAnchor = sessionWorkAnchor(state);
+  if (progressAnchor === null) return null;
   const ceiling = progressAnchor + maxDurationMs;
   if (ceiling <= now.getTime()) return null;
 
   return new Date(Math.min(expiresAt, ceiling));
+}
+
+/**
+ * When the session last did real work. `workAt` is the work clock; rows written before
+ * it existed fall back to the turn start or harness progress, then the last report
+ * only when no real-work anchor exists. Harness progress counts as work too.
+ */
+export function sessionWorkAnchor(state: SessionIdlenessActivityState | null): number | null {
+  if (!state) return null;
+  const positive = (value: number | null | undefined): number | null =>
+    typeof value === 'number' && value > 0 ? value : null;
+  const work = positive(state.workAt) ?? positive(state.promptStartedAt);
+  const progress = positive(state.runtimeWorkProgressAt);
+  if (work === null) return progress ?? positive(state.activityAt);
+  return progress === null ? work : Math.max(work, progress);
 }
 
 /**
@@ -146,6 +171,11 @@ export function classifySessionIdleness(input: {
   idleAfterMs: number;
   harnessWorkConfig: HarnessWorkConfig;
   policy: SessionIdlenessPolicy;
+  /**
+   * How long an open turn on a non-terminal task may go without real work before it no longer
+   * counts as one (`operations.sessionStaleTurnNoWorkMinutes`). Omitted or null: unbounded.
+   */
+  staleTurnMs?: number | null;
 }): SessionIdlenessClassification {
   const activity = input.state?.activity ?? null;
 
@@ -174,11 +204,6 @@ export function classifySessionIdleness(input: {
     };
   }
 
-  const activityAt =
-    typeof input.state.activityAt === 'number' && input.state.activityAt > 0
-      ? input.state.activityAt
-      : null;
-
   // Terminal tasks whose conversation is kept by sleep (completed, and failed —
   // see `SLEEP_PRESERVED_TERMINAL_TASK_STATUSES`) can retain a stale `prompting`
   // transition forever. Treat that state as idle only after the normal idle
@@ -188,13 +213,20 @@ export function classifySessionIdleness(input: {
   if (sleepPreservedTerminalTask && activity !== 'idle') {
     // complete_task runs inside the prompt: an hours-old prompting transition
     // does not mean the response following that tool has already drained. The
-    // drain follows activity for a failed task too: an agent still working after
+    // drain follows real work for a failed task too: an agent still working after
     // the failure would otherwise be slept mid-turn, and `sleepWorkspaceSession`
-    // aborts on every activity change, spending the retry budget. A HUNG failed
-    // prompt is bounded elsewhere: the check-in watchdog releases it, and failed
-    // preservation has its own maximum wait (`failed-task-preservation-release.ts`).
+    // aborts on every work change, spending the retry budget.
+    //
+    // The anchor is the WORK clock, never `activityAt`: the VM agent re-reports an
+    // open turn every minute and each report moves `activityAt`, so a turn that never
+    // returns would keep the drain open forever (.claude/rules/53). Persisted
+    // messages move the work clock, so an agent still writing after complete_task
+    // keeps draining.
     const completedAt = Date.parse(input.taskCompletedAt ?? '');
-    const drainAnchor = Math.max(activityAt ?? 0, Number.isFinite(completedAt) ? completedAt : 0);
+    const drainAnchor = Math.max(
+      sessionWorkAnchor(input.state) ?? 0,
+      Number.isFinite(completedAt) ? completedAt : 0
+    );
     if (!drainAnchor) {
       return {
         idle: false,
@@ -203,6 +235,9 @@ export function classifySessionIdleness(input: {
         activity,
       };
     }
+    // Silence is bounded by the idle interval. A Claude Code foreground Bash call is capped
+    // at 10 min (SAM does not raise BASH_MAX_TIMEOUT_MS), background tasks and Codex /
+    // OpenCode tool calls hold the session as harness work, and the sleep keeps a snapshot.
     const eligibleAt = drainAnchor + input.idleAfterMs;
     if (eligibleAt > input.now.getTime()) {
       return {
@@ -222,6 +257,22 @@ export function classifySessionIdleness(input: {
   }
 
   if (activity !== 'idle') {
+    // A turn that never returns keeps reporting `prompting` (production 2026-11-04: a
+    // conversation's turn ran 9h54m with no output, idea 01M6K6QTEE7T9KNYB7317D7Y8E). The VM's
+    // own SessionHost confirms it, so the stale-activity probe cannot end it either. Bound it by
+    // the WORK clock, which same-turn re-reports and probe confirmations do not move: no message
+    // and no harness progress for the bound means nothing is coming back (policy d08d64dc). A
+    // fresh harness lease already returned above, so live background work is never cut short.
+    const workAnchor = sessionWorkAnchor(input.state);
+    if (input.staleTurnMs && input.staleTurnMs > 0 && workAnchor !== null) {
+      const silenceMs =
+        input.policy === 'idle-interval-elapsed'
+          ? Math.max(input.staleTurnMs, input.idleAfterMs)
+          : input.staleTurnMs;
+      if (workAnchor + silenceMs <= input.now.getTime()) {
+        return { idle: true, conclusive: true, reason: 'prompt_turn_stale', activity };
+      }
+    }
     return {
       idle: false,
       conclusive: true,
@@ -245,10 +296,12 @@ export function classifySessionIdleness(input: {
   }
 
   // Automatic sleep additionally waits out the idle interval. A missing
-  // `activityAt` means we cannot tell how long the session has been idle, so
+  // work anchor means we cannot tell how long the session has been idle, so
   // the unattended scheduler declines to reclaim it (a user can still sleep it
   // explicitly, which takes the `prompt-turn-ended` branch above).
-  const idleEligibleAt = activityAt === null ? null : activityAt + input.idleAfterMs;
+  // Same-state reports renew liveness, never the unattended idle deadline.
+  const workAnchor = sessionWorkAnchor(input.state);
+  const idleEligibleAt = workAnchor === null ? null : workAnchor + input.idleAfterMs;
   if (idleEligibleAt === null || idleEligibleAt > input.now.getTime()) {
     return {
       idle: false,

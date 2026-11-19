@@ -1,10 +1,14 @@
 # Wire Provider Env Var Overrides
 
+> **Reconciliation 2026-10-26:** Pointer correction only. The non-overridable `vm_location` default
+> `'nbg1'` is on the `nodes` table at `apps/api/src/db/schema.ts:1533` (not `:1330`). The other
+> pointers hold; all three items are still open.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** the HIGH Scaleway item. Placement falls back to the provider's default location
 >   before `DEFAULT_VM_LOCATION` (`getDefaultLocationForProvider` in
->   `apps/api/src/services/placement-field-resolution.ts:112-126`).
+>   `packages/scheduler-core/src/placement-field-resolution.ts:112-126`).
 > - **Still open:**
 >   - `HETZNER_DATACENTER` is not in `Env` and not read by `buildProviderConfig`
 >     (`apps/api/src/services/provider-credential-codecs.ts:140-165`, which wires the other
@@ -41,3 +45,7 @@ When a Scaleway user submits a task via API without specifying `vmLocation`, the
 - [ ] Update nodes.ts, workspaces/crud.ts, tasks/run.ts, tasks/submit.ts to check env override
 - [ ] Resolve vmLocation from provider.defaultLocation when none supplied (Scaleway fix)
 - [ ] Document the SQL schema default as non-overridable
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. One hard-coded `nbg1` site is gone. Still open: `apps/api/src/routes/nodes.ts:126` and `routes/workspaces/workspace-create.ts:102`, `HETZNER_DATACENTER` still unwired (the comment at `packages/shared/src/constants/hetzner.ts:5` is stale), and the D1 `vm_location` default is undocumented. Evidence: #2731 removed `DEFAULT_VM_LOCATION` / `defaultLocation` from `apps/api/src/services/canonical-vm-allocation.ts`.

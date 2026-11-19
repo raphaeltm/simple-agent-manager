@@ -1,0 +1,147 @@
+{
+  "testedHead": "d3a58269548657c6a843ed468093dcf7d0b5f533",
+  "guards": [
+    {
+      "guard": "legacy-capability",
+      "test": "preserves silent healthy",
+      "exitCode": 1,
+      "failureEvidence": [
+        "FAIL  tests/unit/services/deployment-publish-job-hardening.test.ts > publish job atomic guards on SQLite > preserves silent healthy builds and legacy jobs while expiring dead heartbeat-capable jobs",
+        "AssertionError: expected [ 'dead', 'legacy' ] to deeply equal [ 'dead' ]"
+      ]
+    },
+    {
+      "guard": "heartbeat-freshness",
+      "test": "preserves silent healthy",
+      "exitCode": 1,
+      "failureEvidence": [
+        "FAIL  tests/unit/services/deployment-publish-job-hardening.test.ts > publish job atomic guards on SQLite > preserves silent healthy builds and legacy jobs while expiring dead heartbeat-capable jobs",
+        "AssertionError: expected [ 'alive', 'dead' ] to deeply equal [ 'dead' ]"
+      ]
+    },
+    {
+      "guard": "stall-detection",
+      "test": "preserves silent healthy",
+      "exitCode": 1,
+      "failureEvidence": [
+        "FAIL  tests/unit/services/deployment-publish-job-hardening.test.ts > publish job atomic guards on SQLite > preserves silent healthy builds and legacy jobs while expiring dead heartbeat-capable jobs",
+        "AssertionError: expected [] to deeply equal [ 'dead' ]"
+      ]
+    },
+    {
+      "guard": "expiry-recheck",
+      "test": "rechecks heartbeat",
+      "exitCode": 1,
+      "failureEvidence": [
+        "FAIL  tests/unit/services/deployment-publish-job-hardening.test.ts > publish job atomic guards on SQLite > rechecks heartbeat between sweep selection and update",
+        "AssertionError: expected [ { id: 'job', \u2026(26) } ] to deeply equal []"
+      ]
+    },
+    {
+      "guard": "terminal-heartbeat",
+      "test": "records heartbeat capability",
+      "exitCode": 1,
+      "failureEvidence": [
+        "FAIL  tests/unit/services/deployment-publish-job-hardening.test.ts > publish job atomic guards on SQLite > records heartbeat capability without changing progress or allowing terminal resurrection",
+        "AssertionError: expected true to be false // Object.is equality"
+      ]
+    },
+    {
+      "guard": "heartbeat-recording",
+      "test": "records heartbeat capability",
+      "exitCode": 1,
+      "failureEvidence": [
+        "FAIL  tests/unit/services/deployment-publish-job-hardening.test.ts > publish job atomic guards on SQLite > records heartbeat capability without changing progress or allowing terminal resurrection",
+        "AssertionError: expected null to be truthy",
+        "- Expected:",
+        "+ Received:"
+      ]
+    },
+    {
+      "guard": "heartbeat-producer",
+      "test": "TestMcpBuildAndPublishHeartbeatsDuringSilentRunner",
+      "exitCode": 1,
+      "failureEvidence": [
+        "--- FAIL: TestMcpBuildAndPublishHeartbeatsDuringSilentRunner (2.13s)",
+        "--- FAIL: TestMcpBuildAndPublishHeartbeatsDuringSilentRunner/periodic (1.07s)",
+        "publish_job_heartbeat_test.go:73: silent build did not heartbeat",
+        "--- FAIL: TestMcpBuildAndPublishHeartbeatsDuringSilentRunner/blocked_callback_canceled_before_terminal (1.06s)",
+        "publish_job_heartbeat_test.go:73: silent build did not heartbeat",
+        "FAIL",
+        "FAIL\tgithub.com/workspace/vm-agent/internal/server\t2.142s",
+        "FAIL"
+      ]
+    },
+    {
+      "guard": "heartbeat-periodicity",
+      "test": "TestMcpBuildAndPublishHeartbeatsDuringSilentRunner",
+      "exitCode": 1,
+      "failureEvidence": [
+        "--- FAIL: TestMcpBuildAndPublishHeartbeatsDuringSilentRunner (1.10s)",
+        "--- FAIL: TestMcpBuildAndPublishHeartbeatsDuringSilentRunner/periodic (1.04s)",
+        "publish_job_heartbeat_test.go:73: silent build did not heartbeat",
+        "FAIL",
+        "FAIL\tgithub.com/workspace/vm-agent/internal/server\t1.104s",
+        "FAIL"
+      ]
+    },
+    {
+      "guard": "api-deadline-margin",
+      "test": "real API + VM default resolver contract",
+      "exitCode": 1,
+      "failureEvidence": [
+        "--- FAIL: TestPublishDeadlineDefaultContract (0.00s)",
+        "publish_contract_test.go:35: API deadline 1200000ms must exceed resolved VM timeout 20m0s plus 300000ms admission/callback margin",
+        "FAIL",
+        "FAIL\tgithub.com/workspace/vm-agent/internal/config\t0.004s",
+        "FAIL"
+      ]
+    },
+    {
+      "guard": "vm-timeout-margin",
+      "test": "real API + VM default resolver contract",
+      "exitCode": 1,
+      "failureEvidence": [
+        "--- FAIL: TestPublishDeadlineDefaultContract (0.00s)",
+        "publish_contract_test.go:35: API deadline 1800000ms must exceed resolved VM timeout 30m0s plus 300000ms admission/callback margin",
+        "FAIL",
+        "FAIL\tgithub.com/workspace/vm-agent/internal/config\t0.003s",
+        "FAIL"
+      ]
+    },
+    {
+      "guard": "heartbeat-stall-margin",
+      "test": "real API + VM default resolver contract",
+      "exitCode": 1,
+      "failureEvidence": [
+        "--- FAIL: TestPublishDeadlineDefaultContract (0.00s)",
+        "publish_contract_test.go:39: API stall 300000ms must exceed resolved heartbeat interval 10m0s plus callback timeout 30s",
+        "FAIL",
+        "FAIL\tgithub.com/workspace/vm-agent/internal/config\t0.003s",
+        "FAIL"
+      ]
+    },
+    {
+      "guard": "heartbeat-stop-cancels-in-flight-request",
+      "test": "real-handler blocked callback terminal ordering",
+      "exitCode": 1,
+      "failureEvidence": [
+        "--- FAIL: TestMcpBuildAndPublishHeartbeatsDuringSilentRunner (6.23s)",
+        "--- FAIL: TestMcpBuildAndPublishHeartbeatsDuringSilentRunner/periodic (1.17s)",
+        "publish_job_heartbeat_test.go:84: completion did not abort heartbeat callback promptly",
+        "--- FAIL: TestMcpBuildAndPublishHeartbeatsDuringSilentRunner/blocked_callback_canceled_before_terminal (5.06s)",
+        "publish_job_heartbeat_test.go:84: completion did not abort heartbeat callback promptly",
+        "FAIL",
+        "FAIL\tgithub.com/workspace/vm-agent/internal/server\t6.241s",
+        "FAIL"
+      ]
+    }
+  ],
+  "method": "Isolated git archive of tested head; one guard changed per run and restored in finally; intended assertion failures retained. Default cross-language red proofs paired with precise resolved Go assertion output.",
+  "restoredValidation": {
+    "realSqliteTests": 21,
+    "realDefaultContract": "PASS",
+    "realHandlerHeartbeatTests": "PASS",
+    "focusedHandlerRaceTests": "PASS"
+  }
+}

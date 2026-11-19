@@ -1,5 +1,11 @@
 # Harden node-level callback-token fallback for workspace-specific git-token exchange
 
+> **Reconciliation 2026-10-26:** no change to the open items; `callbackTokenForWorkspace`
+> (`workspace_provisioning.go:28-34`) still has no warning on the node-level fallback. Pointer
+> moved: #2358 (`8778abe1c`) split token resolution out of `fetchGitTokenResponseForWorkspace`, so
+> the both-empty guard is now `packages/vm-agent/internal/server/git_credential.go:289`, in
+> `gitTokenRequestCredentials`.
+
 **Origin:** MEDIUM finding from `security-auditor` during Phase 5 review of the
 secondary-workspace git-credential gate fix
 (`tasks/archive/2026-06-09-fix-secondary-workspace-git-credential-gate.md`,
@@ -50,3 +56,7 @@ blast radius of this and may be implemented together.
 - `packages/vm-agent/internal/server/git_credential.go` (`fetchGitTokenResponseForWorkspace`)
 - `.claude/rules/28-credential-resolution-fallback-tests.md`
 - `.claude/rules/34-vm-agent-callback-auth.md`
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. #2759 changed the empty-id case, so the planned test no longer fits as written. Still open: `callbackTokenForWorkspace` falls back to the node token with no `slog.Warn` (the helper-bearer path now always reaches that fallback), and there is no test for a secondary workspace with an empty `CallbackToken`. Evidence: #2759; `packages/vm-agent/internal/server/workspace_provisioning.go:28-34`; `git_credential.go:281-284`.

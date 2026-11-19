@@ -9,6 +9,7 @@ import {
   isCapacityPoolStatus,
   isCapacityPoolStrategy,
   isValidProvider,
+  MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH,
 } from '@simple-agent-manager/shared';
 
 import { errors } from '../middleware/error';
@@ -42,6 +43,14 @@ export function assertDefaultCapacityPoolUpdateResult(
       'Candidate updates must be currently available in the provider catalog',
       {
         unavailableCandidateIds: result.unavailableCandidateIds,
+      }
+    );
+  }
+  if (result.missingSourceIds.length > 0) {
+    throw errors.badRequest(
+      'sourceOrder and excludedSourceIds must list capacity sources that serve this pool',
+      {
+        missingSourceIds: result.missingSourceIds,
       }
     );
   }
@@ -86,10 +95,24 @@ export function parseDefaultCapacityPoolUpdateRequest(
     record.catalogAdditions === undefined
       ? undefined
       : parseCatalogAdditions(record.catalogAdditions);
+  const sourceOrder =
+    record.sourceOrder === undefined
+      ? undefined
+      : parseSourceIdList('sourceOrder', record.sourceOrder);
+  const excludedSourceIds =
+    record.excludedSourceIds === undefined
+      ? undefined
+      : parseSourceIdList('excludedSourceIds', record.excludedSourceIds);
 
-  if (!policy && !candidates && !catalogAdditions) {
+  if (
+    !policy &&
+    !candidates &&
+    !catalogAdditions &&
+    sourceOrder === undefined &&
+    excludedSourceIds === undefined
+  ) {
     throw errors.badRequest(
-      'Default capacity pool update must include policy, candidates, or catalogAdditions'
+      'Default capacity pool update must include policy, candidates, catalogAdditions, sourceOrder, or excludedSourceIds'
     );
   }
 
@@ -97,7 +120,35 @@ export function parseDefaultCapacityPoolUpdateRequest(
     ...(policy ? { policy } : {}),
     ...(candidates ? { candidates } : {}),
     ...(catalogAdditions ? { catalogAdditions } : {}),
+    ...(sourceOrder !== undefined ? { sourceOrder } : {}),
+    ...(excludedSourceIds !== undefined ? { excludedSourceIds } : {}),
   };
+}
+
+/**
+ * A list of capacity source ids: the provider order (most preferred first) or the switched-off
+ * accounts. `null` or `[]` clears it.
+ */
+function parseSourceIdList(field: string, value: unknown): string[] | null {
+  if (value === null) return null;
+  if (!Array.isArray(value)) {
+    throw errors.badRequest(`${field} must be an array of capacity source ids or null`);
+  }
+  if (value.length > MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH) {
+    throw errors.badRequest(
+      `${field} may list at most ${MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH} capacity sources`
+    );
+  }
+  const ids = value.map((id) => {
+    if (typeof id !== 'string' || id.trim().length === 0) {
+      throw errors.badRequest(`${field} entries must be non-empty capacity source ids`);
+    }
+    return id.trim();
+  });
+  if (new Set(ids).size !== ids.length) {
+    throw errors.badRequest(`${field} must not list a capacity source twice`);
+  }
+  return ids;
 }
 
 function parsePolicyUpdate(

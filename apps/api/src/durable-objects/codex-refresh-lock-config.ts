@@ -12,11 +12,12 @@ export interface RefreshRequestPayload {
   /** The userId to look up credentials for. */
   userId: string;
   /**
-   * Optional projectId — when set, the DO prefers the project-scoped credential
-   * row. Preserves scope when rotating OAuth tokens so a project-scoped credential
-   * doesn't collapse to user-scoped.
+   * References (`cc_credentials:<id>` / `credentials:<id>`) of the credentials the
+   * calling workspace's runs were seeded with, from
+   * `resolveRunAgentCredentialReferences`. The DO refreshes only one of these, so
+   * a run pinned to an account can never be answered with another account's tokens.
    */
-  projectId?: string | null;
+  credentialReferences: string[];
 }
 
 export interface CodexRefreshEnv {
@@ -79,8 +80,9 @@ export const DEFAULT_RATE_WINDOW_SECONDS = 3600;
  */
 export const DEFAULT_GRACE_WINDOW_MS = 300_000;
 /**
- * Maximum number of recently-rotated token hashes to track in DO storage.
- * Keeps storage bounded even under pathological refresh patterns.
+ * Maximum number of recently-rotated token hashes to track per credential in DO
+ * storage. Entries also expire with the grace window, so storage stays bounded
+ * even under pathological refresh patterns.
  */
 export const MAX_ROTATED_TOKEN_ENTRIES = 5;
 
@@ -94,6 +96,19 @@ export interface RotatedTokenEntry {
   tokenHash: string;
   /** Unix timestamp (ms) when the token was rotated out. */
   rotatedAt: number;
+  /**
+   * The credential the token was rotated out of. A grace hit returns that
+   * credential's current tokens, so it must match the credential being served.
+   * Entries written before this field existed never match (they expire within
+   * the grace window).
+   */
+  credentialReference?: string;
+  /**
+   * Fingerprint of the exact ciphertext the rotation wrote
+   * (`credentialGenerationFingerprint`). A grace hit requires the credential to
+   * still hold that generation. Entries without it never match.
+   */
+  successorGeneration?: string;
 }
 
 export interface RateLimitState {

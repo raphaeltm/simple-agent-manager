@@ -94,7 +94,8 @@ export async function ensureSessionLinked(
         state.projectId,
         chatSessionId,
         workspaceId,
-        state.taskId
+        state.taskId,
+        state.config.recoveryAttemptId
       );
     }
     await projectDataService.linkSessionToWorkspace(

@@ -1,19 +1,25 @@
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type Database from 'better-sqlite3';
+import { Hono } from 'hono';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import * as schema from '../../../src/db/schema';
+import { handleAppError } from '../../../src/middleware/app-error-handler';
+import { connectorAdminRoutes } from '../../../src/routes/connector-settings';
+vi.mock('../../../src/middleware/auth', () => ({
+  requireAuth: () => async (c: any, next: any) => { c.set('auth',{user:{id:'admin',role:c.req.header('x-test-role') ?? 'superadmin',status:c.req.header('x-test-status') ?? 'active'}}); await next(); },
+  requireApproved: () => async (_c: any, next: any) => next(),
+  requireSuperadmin: () => async (_c: any, next: any) => next(),
+}));
+
 import type { Env } from '../../../src/env';
 import {
   getConnectorSettingsConfig,
   updateConnectorSettings,
 } from '../../../src/services/connector-settings';
-import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
 let sqlite: Database.Database;
 let env: Env;
 beforeEach(() => {
-  sqlite = new Database(':memory:');
-  createSchemaTables(sqlite, [schema.platformSettings]);
-  env = { DATABASE: createSqliteD1(sqlite), CONNECTOR_WRITE_ENABLED: 'false' } as Env;
+  ({ sqlite, env } = createAdminSettingsEnv({ CONNECTOR_WRITE_ENABLED: 'false' }));
 });
 afterEach(() => sqlite.close());
 describe('Connector settings overrides', () => {
@@ -63,3 +69,16 @@ describe('Connector settings overrides', () => {
     });
   });
 });
+
+for (const status of ['pending','suspended']) {
+  it(`prevents ${status} superadmins bypassing settings authorization through legacy Connector routes`, async () => {
+    const app = new Hono<{Bindings:Env}>();
+    app.onError(handleAppError);
+    app.route('/admin/connector',connectorAdminRoutes);
+    const response = await app.request('/admin/connector/settings',{
+      method:'PATCH',headers:{'Content-Type':'application/json','x-test-status':status},body:JSON.stringify({enabled:false}),
+    },env);
+    expect(response.status).toBe(403);
+    expect(sqlite.prepare('SELECT revision FROM admin_settings_revision').get()).toEqual({revision:0});
+  });
+}

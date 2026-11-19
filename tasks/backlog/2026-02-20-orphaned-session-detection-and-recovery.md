@@ -1,5 +1,19 @@
 # Orphaned Session Detection & Recovery UX
 
+> **Reconciliation 2026-10-26:** Still open: no merge since 10-12 touched the stop handler
+> (`agent-sessions.ts:328-373` unchanged) or the workspace session list, so all four open items
+> remain. Pointer fix: `ACP_PROMPT_TIMEOUT` is at
+> `packages/vm-agent/internal/config/config_load.go:155`; the 09-30 `:153-154` now lands on the
+> ping/pong settings.
+
+> **Reconciliation 2026-10-12:** Nothing in this file's open scope changed this week. Pointer fix:
+> #2208 and #2217 (7a9782c90, b79136805) moved the stop handler to
+> `apps/api/src/routes/workspaces/agent-sessions.ts:328-373`, so the `:275-291` and `:278-302`
+> references below land in other handlers. It still calls the VM (skipped for a sleeping Instant
+> container) and only logs a failure (`:346-360`), then marks a running session `stopped` either
+> way (`:365-369`). Still open: an "unknown" status when the VM agent is unreachable, a Stop All
+> confirmation, a VM-confirmed stop, and a toast for the LoadSession fallback.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

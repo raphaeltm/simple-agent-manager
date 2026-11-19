@@ -1,0 +1,18 @@
+{
+  "normal": {
+    "runs": 30,
+    "testsPassed": 390,
+    "failures": 0,
+    "targetMedianMs": 2649.8564530000003,
+    "targetMaxMs": 2967.575761,
+    "positiveBusyCpuInEveryLoadedRun": null
+  },
+  "loaded": {
+    "runs": 30,
+    "testsPassed": 390,
+    "failures": 0,
+    "targetMedianMs": 7255.383034,
+    "targetMaxMs": 10279.541485000002,
+    "positiveBusyCpuInEveryLoadedRun": true
+  }
+}

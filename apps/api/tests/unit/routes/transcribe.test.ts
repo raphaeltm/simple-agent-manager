@@ -48,6 +48,7 @@ describe('Transcribe Routes', () => {
   function createEnv(overrides: Partial<Env> = {}): Env {
     return {
       AI: mockAI as any,
+      BASE_DOMAIN: 'example.test',
       DATABASE: createAiSpendRateLimitD1(),
       KV: createMemoryKv(),
       ...overrides,
@@ -100,6 +101,10 @@ describe('Transcribe Routes', () => {
 
       const res = await app.request('/api/transcribe', {
         method: 'POST',
+        headers: {
+          Origin: 'https://app.example.test',
+          'Sec-Fetch-Site': 'same-site',
+        },
         body: formData,
       }, createEnv());
 
@@ -111,6 +116,27 @@ describe('Transcribe Routes', () => {
         '@cf/openai/whisper-large-v3-turbo',
         expect.objectContaining({ audio: expect.any(String) })
       );
+    });
+
+    it('rejects same-site workspace audio before invoking Workers AI', async () => {
+      const formData = new FormData();
+      formData.append('audio', new Blob(['forged-audio'], { type: 'audio/webm' }), 'clip.webm');
+
+      const res = await app.request(
+        '/api/transcribe',
+        {
+          method: 'POST',
+          headers: {
+            Origin: 'https://ws-attacker--3000.example.test',
+            'Sec-Fetch-Site': 'same-site',
+          },
+          body: formData,
+        },
+        createEnv()
+      );
+
+      expect(res.status).toBe(403);
+      expect(mockAI.run).not.toHaveBeenCalled();
     });
 
     it('should use configurable model ID from env', async () => {
@@ -128,6 +154,14 @@ describe('Transcribe Routes', () => {
         '@cf/openai/whisper-tiny-en',
         expect.objectContaining({ audio: expect.any(String) })
       );
+    });
+
+    it('answers 404 FEATURE_UNAVAILABLE without the Workers AI binding', async () => {
+      const res = await postAudio(createEnv({ AI: undefined as unknown as Ai }));
+
+      expect(res.status).toBe(404);
+      expect(await res.json()).toMatchObject({ error: 'FEATURE_UNAVAILABLE' });
+      expect(mockAI.run).not.toHaveBeenCalled();
     });
 
     it('should return 400 when audio field is missing', async () => {

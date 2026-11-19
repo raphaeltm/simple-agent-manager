@@ -12,6 +12,7 @@ The reference covers:
 - Node Management (`/api/nodes/*`)
 - Workspace Management (`/api/workspaces/*`)
 - Project Management (`/api/projects/*`)
+- Project Insights (`/api/projects/:projectId/insights/{flow,accounts,people}`)
 - Default Capacity Pools (`/api/projects/:id/capacity-pools/defaults*`, `/api/capacity-pools/defaults*`, `/api/admin/capacity-pools/defaults*`)
 - Provider Catalog (`/api/providers/catalog`)
 - Task Management (`/api/projects/:projectId/tasks/*`)
@@ -20,10 +21,11 @@ The reference covers:
 - MCP private incident backlog tools (`list_incident_queue`, `get_incident`, `claim_incident`, `resolve_incident`)
 - Agent Sessions (`/api/workspaces/:id/agent-sessions/*`)
 - Message-anchored chat comments (`/api/projects/:projectId/sessions/:sessionId/comments*`)
+- Shared chat access (`/api/projects/:projectId/sessions/:sessionId/access*`, session sleep/resume) and the session-writer check
 - Project-wide comment inbox (`/api/projects/:projectId/comments`)
 - Agent Settings (`/api/agent-settings/*`)
 - Notifications (`/api/notifications/*`)
-- Automation triggers (`/api/projects/:projectId/triggers/*`, `/api/webhooks/ingest`)
+- Automation triggers (`/api/projects/:projectId/triggers/*`, `/api/webhooks/ingest`, signed `/api/webhooks/in/:triggerId`)
 - VM Communication callbacks
 - Terminal Access
 - Git Integration (VM Agent direct)

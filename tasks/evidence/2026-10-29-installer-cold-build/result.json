@@ -1,0 +1,30 @@
+{
+  "outcome": "inconclusive",
+  "sourceCommit": "82940bdb9e36b8a1c618e3a7da825d59ed140536",
+  "proofWorker": "sam-build-proof-907cd4d61cfd",
+  "applicationId": "75d306039a434f4a97d80e8c78527aa2",
+  "instanceId": "42bd897e12dc6b0c4afbb692a34b9bacd1cc9f0c6bbbc74f1ae62c7dbe688f77",
+  "observedStart": "2026-10-29T08:31:52.301Z",
+  "lastObservedStatus": "running",
+  "lastStatusObservation": "2026-10-29T08:59:00Z",
+  "configuredMaximumSeconds": 3600,
+  "configuredComputeEstimateUpperUsd": 0.220032,
+  "conservativeIncrementalBudgetUsd": 2,
+  "authorizedTotalBelowUsd": 5,
+  "actualBilledUsd": null,
+  "exitCode": null,
+  "finalPhase": null,
+  "peakMemoryBytes": null,
+  "peakDiskUsedBytes": null,
+  "cleanupVerifiedAt": "2026-10-29T10:01:02.764Z",
+  "cleanup": {
+    "applicationGetStatus": 404,
+    "instancesGetStatus": 404,
+    "workerSettingsGetStatus": 404,
+    "additionalDeletionPerformed": false
+  },
+  "resultRetrievalError": "Workspace rotated; old session-scoped execution unavailable; ephemeral files and test controller no longer exist. Terminal output was not preserved.",
+  "scheduledCheckDue": "2026-10-29T09:33:00Z",
+  "scheduledCheckObserved": "2026-10-29T10:00:46Z",
+  "duplicateComputeStarted": false
+}

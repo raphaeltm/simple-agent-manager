@@ -1,5 +1,5 @@
 import { applyD1Migrations, env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { DiagnosisRunner } from '../../src/durable-objects/diagnosis-runner';
 import { listDiagnosisEvents, reconcileDiagnosisRuns } from '../../src/services/diagnosis-runner';
@@ -32,20 +32,66 @@ async function seedRun(runId: string, userId: string): Promise<void> {
     .run();
 }
 
-async function waitForModelAwait(runId: string): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt++) {
-    const started = await env.DATABASE.prepare(
-      "SELECT 1 AS started FROM debug_diagnosis_run_events WHERE run_id=? AND step_key='model:1:started'"
-    )
-      .bind(runId)
-      .first<{ started: number }>();
-    if (started) return;
-    await new Promise((resolve) => setTimeout(resolve, 5));
+async function duringModelAwait(
+  runner: DurableObjectStub<DiagnosisRunner>,
+  runId: string,
+  action: (instance: DiagnosisRunner) => Promise<void>
+): Promise<void> {
+  // The full Workers pool has no AI binding/account credentials. Configure this DO's own
+  // gateway target, then suspend the actual network boundary, not the earlier audit event.
+  let owner!: DiagnosisRunner;
+  await runInDurableObject(runner, async (instance) => {
+    owner = instance;
+    instance.env = {
+      ...instance.env,
+      CF_ACCOUNT_ID: 'test-account',
+      CF_API_TOKEN: 'test-token',
+      AI_GATEWAY_ID: 'test-gateway',
+    };
+  });
+  let boundaryError: unknown;
+  const upstream = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    try {
+      expect(String(input)).toBe(
+        'https://gateway.ai.cloudflare.com/v1/test-account/test-gateway/workers-ai/v1/chat/completions'
+      );
+      expect(init?.method).toBe('POST');
+      // Await the real terminal writer before releasing the model response. Run it in the
+      // model owner's I/O context: workerd forbids using test-context stubs from this DO.
+      await action(owner);
+      return Response.json({
+        choices: [{ message: { content: 'Summary\nDeferred diagnosis completion' } }],
+        usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+      });
+    } catch (error) {
+      boundaryError = error;
+      throw error;
+    }
+  });
+  vi.stubGlobal('fetch', upstream);
+  try {
+    // Keep start's immediate alarm behind the fixture barrier, then drive the
+    // real alarm explicitly. Otherwise the automatic handler can still be running
+    // when runDurableObjectAlarm() observes no scheduled alarm and returns false.
+    await runInDurableObject(runner, async (instance) => {
+      await instance.ctx.blockConcurrencyWhile(async () => {
+        await instance.start(runId);
+        await instance.ctx.storage.setAlarm(Date.now() + 60_000);
+      });
+    });
+    expect(await runDurableObjectAlarm(runner)).toBe(true);
+    if (boundaryError) throw boundaryError; // The production alarm handles model errors itself.
+    expect(upstream).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.unstubAllGlobals();
   }
-  throw new Error('Diagnosis runner did not enter the model await');
 }
 
 describe('DiagnosisRunner DO durability and fault injection', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
   it('starts idempotently and keeps one durable checkpoint/alarm after the 202 owner disappears', async () => {
     const runId = 'diagnosis-do-start-001';
     await seedRun(runId, 'diagnosis-user-start');
@@ -137,20 +183,23 @@ describe('DiagnosisRunner DO durability and fault injection', () => {
   });
 
   it('keeps cancellation terminal when it commits during the real model await', async () => {
+    // Keep native workerd alarms in the future while this test drives each tick explicitly.
+    // Otherwise start() can fire before duringModelAwait installs the gateway boundary.
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 60_000 });
     const runId = 'diagnosis-do-cancel-race-001';
     await seedRun(runId, 'diagnosis-user-cancel-race');
     const runner = stub(runId);
-    await runner.start(runId);
 
-    const alarm = runDurableObjectAlarm(runner);
-    await waitForModelAwait(runId);
-    await runner.cancel(runId);
-    expect(
-      await env.DATABASE.prepare('SELECT cancel_requested_at FROM debug_diagnosis_runs WHERE id=?')
-        .bind(runId)
-        .first<{ cancel_requested_at: string | null }>()
-    ).toMatchObject({ cancel_requested_at: expect.any(String) });
-    await alarm;
+    await duringModelAwait(runner, runId, async (instance) => {
+      await instance.cancel(runId);
+      expect(
+        await instance.env.DATABASE.prepare(
+          'SELECT cancel_requested_at FROM debug_diagnosis_runs WHERE id=?'
+        )
+          .bind(runId)
+          .first<{ cancel_requested_at: string | null }>()
+      ).toMatchObject({ cancel_requested_at: expect.any(String) });
+    });
     await runInDurableObject(runner, async (instance) => instance.alarm());
     await runInDurableObject(runner, async (instance) => instance.alarm());
 
@@ -175,20 +224,20 @@ describe('DiagnosisRunner DO durability and fault injection', () => {
   });
 
   it('keeps deadline reconciliation terminal when it commits during the real model await', async () => {
+    // Use the same controlled alarm clock as the cancellation race above.
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 60_000 });
     const runId = 'diagnosis-do-deadline-race-001';
     await seedRun(runId, 'diagnosis-user-deadline-race');
     const runner = stub(runId);
-    await runner.start(runId);
 
-    const alarm = runDurableObjectAlarm(runner);
-    await waitForModelAwait(runId);
-    await env.DATABASE.prepare(
-      "UPDATE debug_diagnosis_runs SET deadline_at='2020-01-01T00:00:00.000Z',heartbeat_at='2020-01-01T00:00:00.000Z' WHERE id=?"
-    )
-      .bind(runId)
-      .run();
-    expect(await reconcileDiagnosisRuns(env)).toMatchObject({ terminalized: 1 });
-    await alarm;
+    await duringModelAwait(runner, runId, async (instance) => {
+      await instance.env.DATABASE.prepare(
+        "UPDATE debug_diagnosis_runs SET deadline_at='2020-01-01T00:00:00.000Z',heartbeat_at='2020-01-01T00:00:00.000Z' WHERE id=?"
+      )
+        .bind(runId)
+        .run();
+      expect(await reconcileDiagnosisRuns(instance.env)).toMatchObject({ terminalized: 1 });
+    });
     await runInDurableObject(runner, async (instance) => instance.alarm());
     await runInDurableObject(runner, async (instance) => instance.alarm());
 

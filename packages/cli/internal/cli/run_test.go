@@ -504,7 +504,7 @@ func TestModelFlagFailsUntilAPIContractExists(t *testing.T) {
 	if code == 0 {
 		t.Fatal("expected failure")
 	}
-	if !strings.Contains(stderr.String(), "current task submit API does not accept") {
+	if !strings.Contains(stderr.String(), "the CLI does not send a per-dispatch model yet") {
 		t.Fatalf("stderr = %s", stderr.String())
 	}
 }

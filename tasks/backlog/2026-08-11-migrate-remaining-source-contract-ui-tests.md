@@ -1,5 +1,12 @@
 # Migrate Remaining Source-Contract UI Tests in Project Agent/Provider Defaults Suites
 
+> **Reconciliation 2026-10-26:** All 7 assertions are still source-text checks. #2414
+> (`0620c1595`) had to repoint assertion #4's `page` to
+> `components/project-settings/ProjectSettingsAgentsTab.tsx` after the settings page was split
+> into tabs, the fragility this file describes. The blocks are now
+> `apps/api/tests/unit/project-agent-defaults.test.ts:416-441` and
+> `apps/api/tests/unit/project-default-provider.test.ts:472-494`.
+
 **Created**: 2026-08-11
 **Priority**: Medium
 **Context**: AI-slop debt burn-down PR (`tasks/archive/2026-08-10-ai-slop-debt-burndown.md`)
@@ -114,3 +121,7 @@ underlying migration approach/helpers were established there.
 - `apps/api/tests/unit/project-default-provider.test.ts` (lines 1-19 docstring, 295-312 settings UI block)
 - `tasks/backlog/2026-04-01-replace-source-contract-tests.md` — same bug class, different files, filed earlier
 - `tasks/archive/2026-08-10-ai-slop-debt-burndown.md` — the burn-down PR whose prettier rewrap first broke the API-PATCH-route sibling blocks in these same two files
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. #2731 deleted `apps/api/tests/unit/project-default-provider.test.ts` along with the project default-provider feature. Still open: the `readFileSync`/`toContain` UI assertions in `apps/api/tests/unit/project-agent-defaults.test.ts`.

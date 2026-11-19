@@ -4,22 +4,25 @@
  * Uses better-sqlite3 as a stand-in for DO SQLite. D1 queries and
  * VM agent calls are mocked since they cross service boundaries.
  */
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { runMigrations } from '../../../src/durable-objects/migrations';
-import { computeProjectDataAlarmTime } from '../../../src/durable-objects/project-data/alarm-schedule';
+import { computeProjectDataAlarmTime } from '@simple-agent-manager/project-data/internal/do/alarm-schedule';
 import {
   createAttentionMarker,
   getExpiredMarkers,
   resolveAttentionMarkerById,
   resolveAttentionMarkers,
-} from '../../../src/durable-objects/project-data/attention';
+} from '@simple-agent-manager/project-data/internal/do/attention';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   computeReconciliationAlarmTime,
   getReconciliationCandidates,
   processReconciliationCandidates,
-} from '../../../src/durable-objects/project-data/reconciliation';
+} from '@simple-agent-manager/project-data/internal/do/reconciliation';
+import { releaseQuestionHold } from '@simple-agent-manager/project-data/internal/do/reconciliation-candidate-state';
+import * as workerSchema from '@simple-agent-manager/worker-core/schema';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import {
   acceptedPromptResponse,
   missingPromptReceipt,
@@ -33,6 +36,7 @@ const nodeAgentMocks = vi.hoisted(() => ({
   runtimeIdentity: 'runtime-1',
   nodeAgentRequest: vi.fn(),
   sendPromptToAgentOnNode: vi.fn(),
+  listAgentSessionsOnNode: vi.fn(),
   cancelAgentSessionOnNode: vi.fn().mockResolvedValue({ success: true, status: 200 }),
 }));
 vi.mock('../../../src/services/node-agent', async (importOriginal) => ({
@@ -40,6 +44,7 @@ vi.mock('../../../src/services/node-agent', async (importOriginal) => ({
   nodeAgentRequest: nodeAgentMocks.nodeAgentRequest,
   sendPromptToAgentOnNode: nodeAgentMocks.sendPromptToAgentOnNode,
   cancelAgentSessionOnNode: nodeAgentMocks.cancelAgentSessionOnNode,
+  listAgentSessionsOnNode: nodeAgentMocks.listAgentSessionsOnNode,
 }));
 vi.mock('../../../src/services/project-data', () => ({ reconcileTaskWaits: vi.fn() }));
 vi.mock('../../../src/services/vm-admission-control', () => ({
@@ -265,7 +270,7 @@ const FIVE_MINUTES = 5 * 60 * 1000;
 const ONE_MINUTE = 60 * 1000;
 const THIRTY_MINUTES = 30 * 60 * 1000;
 const TWO_HOURS = 2 * 60 * 60 * 1000;
-type ProjectDataEnv = import('../../../src/durable-objects/project-data/types').Env;
+type ProjectDataEnv = import('@simple-agent-manager/project-data/internal/do/types').Env;
 
 describe('Task Reconciliation Module', () => {
   let db: Database.Database;
@@ -298,6 +303,16 @@ describe('Task Reconciliation Module', () => {
         )
       );
     nodeAgentMocks.cancelAgentSessionOnNode.mockResolvedValue({ success: true, status: 200 });
+    nodeAgentMocks.listAgentSessionsOnNode
+      .mockReset()
+      .mockImplementation(async (_nodeId: string, workspaceId: string) => ({
+        sessions: db
+          .prepare(
+            'SELECT id, workspace_id AS workspaceId, status FROM acp_sessions WHERE workspace_id = ?'
+          )
+          .all(workspaceId)
+          .map((session) => ({ ...(session as object), hostStatus: 'ready' })),
+      }));
   });
 
   afterEach(() => {
@@ -613,6 +628,104 @@ describe('Task Reconciliation Module', () => {
       expect(candidates).toHaveLength(0);
     });
 
+    // Inbox slice G: an open question in D1 `asks` holds SAM's check-in, on a real SQL engine.
+    describe('the open-question hold (D1 asks, real SQL)', () => {
+      let d1: Database.Database;
+      function questionEnv(): ProjectDataEnv {
+        return { DATABASE: createSqliteD1(d1) } as unknown as ProjectDataEnv;
+      }
+      function seedTask() {
+        d1.prepare(
+          `INSERT INTO tasks (id, project_id, user_id, title, status, task_mode, workspace_id,
+              chat_session_id, created_at, updated_at)
+           VALUES ('task-1', 'project-1', 'user-1', 't', 'in_progress', 'task', 'ws-1', 'session-1',
+              datetime('now'), datetime('now'))`
+        ).run();
+      }
+      function seedAsk(
+        id: string,
+        overrides: {
+          projectId?: string;
+          sessionId?: string;
+          status?: string;
+          expiresAt?: number | null;
+          blocking?: 0 | 1;
+        } = {}
+      ) {
+        d1.prepare(
+          `INSERT INTO asks (id, project_id, assignee_kind, assignee_user_id, kind, blocking, title,
+              source_session_id, status, expires_at, created_at, updated_at)
+           VALUES (?, ?, 'user', 'user-1', 'question', ?, 'q', ?, ?, ?, 1, 1)`
+        ).run(
+          id,
+          overrides.projectId ?? 'project-1',
+          overrides.blocking ?? 1,
+          overrides.sessionId ?? 'session-1',
+          overrides.status ?? 'open',
+          overrides.expiresAt === undefined ? Date.now() + 2 * 60 * 60_000 : overrides.expiresAt
+        );
+      }
+      function gate() {
+        const row = db
+          .prepare(`SELECT value FROM do_meta WHERE key = 'taskReconciliationGate:session-1'`)
+          .get() as { value: string } | undefined;
+        return row ? (JSON.parse(row.value) as Record<string, unknown>) : null;
+      }
+
+      beforeEach(() => {
+        d1 = new Database(':memory:');
+        createSchemaTables(d1, [workerSchema.tasks, workerSchema.asks]);
+        seedTask();
+      });
+
+      it('holds the chat until the question’s deadline, so the alarm does not poll', async () => {
+        setupTaskSession();
+        const deadline = Date.now() + 2 * 60 * 60_000;
+        seedAsk('q-1', { expiresAt: deadline });
+        await expect(getReconciliationCandidates(sql, questionEnv())).resolves.toEqual([]);
+        expect(gate()).toMatchObject({ attempts: 0, nextAttemptAt: deadline, questionHold: true });
+        // The alarm waits for the deadline instead of re-arming at the lease cadence.
+        expect(computeReconciliationAlarmTime(sql, questionEnv())).toBeGreaterThanOrEqual(deadline);
+        // Answering releases it: the chat is a candidate again at once.
+        expect(releaseQuestionHold(sql, 'session-1')).toBe(true);
+        d1.prepare(`UPDATE asks SET status = 'answered' WHERE id = 'q-1'`).run();
+        await expect(getReconciliationCandidates(sql, questionEnv())).resolves.toEqual([
+          expect.objectContaining({ sessionId: 'session-1' }),
+        ]);
+      });
+
+      it.each([
+        ['answered', { status: 'answered' }],
+        ['expired more than three sweep ticks ago', { expiresAt: Date.now() - 16 * 60_000 }],
+        ['in another project', { projectId: 'project-2' }],
+        ['in another chat', { sessionId: 'session-2' }],
+        // Inbox slice D: a non-blocking ask never expires; the agent works on, so SAM still checks in.
+        ['non-blocking (never expires)', { blocking: 0 as const, expiresAt: null }],
+      ])('does not hold for a question that is %s (control)', async (_label, overrides) => {
+        setupTaskSession();
+        seedAsk('q-1', overrides);
+        await expect(getReconciliationCandidates(sql, questionEnv())).resolves.toEqual([
+          expect.objectContaining({ sessionId: 'session-1' }),
+        ]);
+      });
+
+      it('a question just past its deadline still holds until the sweep handles it', async () => {
+        setupTaskSession();
+        seedAsk('q-1', { expiresAt: Date.now() - 60_000 });
+        await expect(getReconciliationCandidates(sql, questionEnv())).resolves.toEqual([]);
+        expect(gate()).toMatchObject({ questionHold: true });
+      });
+
+      it('a release never ends a claim lease or another deferral', () => {
+        setupTaskSession();
+        db.prepare(
+          `INSERT INTO do_meta (key, value) VALUES ('taskReconciliationGate:session-1', ?)`
+        ).run(JSON.stringify({ attempts: 2, nextAttemptAt: Date.now() + 60_000 }));
+        expect(releaseQuestionHold(sql, 'session-1')).toBe(false);
+        expect(gate()).toMatchObject({ attempts: 2 });
+      });
+    });
+
     it('excludes sessions with active needs_input marker', async () => {
       setupTaskSession();
       createAttentionMarker(sql, {
@@ -661,7 +774,7 @@ describe('Task Reconciliation Module', () => {
       });
       const env = {
         DATABASE: mockDb,
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
 
       const candidates = await getReconciliationCandidates(sql, env);
       expect(candidates).toHaveLength(0);
@@ -677,7 +790,7 @@ describe('Task Reconciliation Module', () => {
       });
       const env = {
         DATABASE: mockDb,
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
 
       const candidates = await getReconciliationCandidates(sql, env);
       expect(candidates).toHaveLength(0);
@@ -869,7 +982,7 @@ describe('Task Reconciliation Module', () => {
       );
       const env = {
         DATABASE: mockDb,
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
       const broadcastEvent = vi.fn();
 
       await processReconciliationCandidates(sql, env, broadcastEvent);
@@ -898,7 +1011,7 @@ describe('Task Reconciliation Module', () => {
       );
       const env = {
         DATABASE: mockDb,
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
       const broadcastEvent = vi.fn();
 
       await processReconciliationCandidates(sql, env, broadcastEvent);
@@ -924,7 +1037,7 @@ describe('Task Reconciliation Module', () => {
       const mockDb = createMockD1({ 'task-1': { task_mode: 'task', status: 'in_progress' } });
       const env = {
         DATABASE: mockDb,
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
       const broadcastEvent = vi.fn();
 
       const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
@@ -938,7 +1051,7 @@ describe('Task Reconciliation Module', () => {
       });
       const env = {
         DATABASE: mockDb,
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
       const broadcastEvent = vi.fn();
 
       const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
@@ -1141,7 +1254,7 @@ describe('Task Reconciliation Module', () => {
       const env = {
         DATABASE: mockDb,
         TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS: '1234',
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
       const broadcastEvent = vi.fn();
 
       await processReconciliationCandidates(sql, env, broadcastEvent);
@@ -1173,7 +1286,7 @@ describe('Task Reconciliation Module', () => {
       );
       const env = {
         DATABASE: mockDb,
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
       const broadcastEvent = vi.fn();
 
       const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
@@ -1775,7 +1888,7 @@ describe('Task Reconciliation Module', () => {
       );
       const env = {
         DATABASE: mockDb,
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
       const broadcastEvent = vi.fn();
 
       const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
@@ -2031,7 +2144,7 @@ describe('Task Reconciliation Module', () => {
     it('returns null when no task-mode sessions exist', () => {
       const env = {
         DATABASE: createMockD1(),
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
       const time = computeReconciliationAlarmTime(sql, env);
       expect(time).toBeNull();
     });
@@ -2040,7 +2153,7 @@ describe('Task Reconciliation Module', () => {
       setupTaskSession({ lastActivityAt: now - 60000 }); // 1 minute ago
       const env = {
         DATABASE: createMockD1(),
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
 
       const time = computeReconciliationAlarmTime(sql, env);
       expect(time).not.toBeNull();
@@ -2052,7 +2165,7 @@ describe('Task Reconciliation Module', () => {
       setupTaskSession({ lastActivityAt: now - 60000, withIdleCleanup: false });
       const env = {
         DATABASE: createMockD1(),
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
 
       const time = computeReconciliationAlarmTime(sql, env);
       expect(time).toBe(now - 60000 + FIVE_MINUTES);
@@ -2063,7 +2176,7 @@ describe('Task Reconciliation Module', () => {
       setupTaskSession({ lastActivityAt: now - 10 * 60 * 1000 });
       const env = {
         DATABASE: createMockD1(),
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
 
       const time = computeReconciliationAlarmTime(sql, env);
       expect(time).not.toBeNull();
@@ -2076,7 +2189,7 @@ describe('Task Reconciliation Module', () => {
       const env = {
         DATABASE: createMockD1(),
         TASK_RECONCILIATION_MIN_ALARM_DELAY_MS: String(customDelayMs),
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
 
       const time = computeReconciliationAlarmTime(sql, env);
 
@@ -2107,7 +2220,7 @@ describe('Task Reconciliation Module', () => {
       });
       const env = {
         DATABASE: createMockD1(),
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
 
       const time = computeReconciliationAlarmTime(sql, env);
       expect(time).toBeNull();
@@ -2119,7 +2232,7 @@ describe('Task Reconciliation Module', () => {
       const env = {
         DATABASE: createMockD1(),
         TASK_RECONCILIATION_IDLE_MS: String(customIdleMs),
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
 
       const time = computeReconciliationAlarmTime(sql, env);
       expect(time).toBe(now - 60000 + customIdleMs);
@@ -2301,7 +2414,7 @@ describe('Task Reconciliation Module', () => {
       });
       const env = {
         DATABASE: mockDb,
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
 
       const candidates = await getReconciliationCandidates(sql, env);
       expect(candidates).toHaveLength(0);

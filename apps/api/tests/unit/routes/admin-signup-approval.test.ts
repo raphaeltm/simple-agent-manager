@@ -10,6 +10,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../src/middleware/auth', () => ({
+  // Agent sign-in session guards: inert for these ordinary-session route tests.
+  rejectAgentSignInSession: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  assertNotAgentSignInSession: () => undefined,
+
   requireAuth: () => async (_c: any, next: any) => next(),
   requireApproved: () => async (_c: any, next: any) => next(),
   requireSuperadmin: () => async (c: any, next: any) => {
@@ -75,7 +79,7 @@ describe('admin signup approval routes', () => {
     const res = await createApp().request(
       '/api/admin/signup-approval',
       { headers: { 'X-Test-Role': 'superadmin' } },
-      {} as Env,
+      {} as Env
     );
 
     await expect(res.json()).resolves.toEqual({ config: config(false) });
@@ -96,22 +100,22 @@ describe('admin signup approval routes', () => {
         },
         body: JSON.stringify({ requireApproval: true }),
       },
-      {} as Env,
+      {} as Env
     );
 
     await expect(res.json()).resolves.toEqual({ config: config(true) });
     expect(res.status).toBe(200);
-    expect(mocks.setSignupApprovalConfig).toHaveBeenCalledWith(
-      expect.anything(),
-      { requireApproval: true, updatedBy: 'superadmin-1' },
-    );
+    expect(mocks.setSignupApprovalConfig).toHaveBeenCalledWith(expect.anything(), {
+      requireApproval: true,
+      updatedBy: 'superadmin-1',
+    });
   });
 
   it('keeps the endpoint behind the superadmin guard', async () => {
     const res = await createApp().request(
       '/api/admin/signup-approval',
       { headers: { 'X-Test-Role': 'admin' } },
-      {} as Env,
+      {} as Env
     );
 
     await expect(res.json()).resolves.toEqual({

@@ -1,5 +1,11 @@
 # Additional Cloud Provider Implementations
 
+> **Reconciliation 2026-10-26:** Still open: no merge since 10-12 touched `packages/providers/`, and
+> Linode/Akamai, AWS Lightsail and OVH are still unimplemented. Pointer fix:
+> `packages/shared/src/types.ts` was split by #588; a new provider goes in the
+> `CREDENTIAL_PROVIDERS` array at `packages/shared/src/types/user.ts:69` (`CredentialProvider` is
+> derived from it at `:78`).
+
 **Created**: 2026-02-16 (consolidated 2026-07-02 from seven per-provider task files)
 **Status**: Backlog
 **Priority**: Medium (OVH: Low)

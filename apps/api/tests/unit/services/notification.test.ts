@@ -1,4 +1,4 @@
-import { MAX_NOTIFICATION_BODY_LENGTH } from '@simple-agent-manager/shared';
+import { classifyFailure, MAX_NOTIFICATION_BODY_LENGTH } from '@simple-agent-manager/shared';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import {
@@ -8,7 +8,6 @@ import {
   notifyNeedsInput,
   notifyPrCreated,
   notifyProgress,
-  notifySessionEnded,
   notifyTaskComplete,
   notifyTaskFailed,
   sendNotification,
@@ -225,8 +224,25 @@ describe('Notification Service', () => {
         type: 'error',
         urgency: 'high',
         title: 'Task failed: Deploy to prod',
-        body: 'Build failed: syntax error',
+        body: classifyFailure('Build failed: syntax error').explanation,
       }));
+    });
+
+    it('never puts the raw error text in the body', async () => {
+      await notifyTaskFailed(env, 'user-123', {
+        projectId: 'proj-1',
+        projectName: 'My Project',
+        taskId: 'task-1',
+        taskTitle: 'Deploy to prod',
+        errorMessage: 'git push failed: https://x:ghp_CANARYsecretTOKEN0123456789@github.com/o/r',
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(JSON.stringify(call)).not.toContain('ghp_CANARY');
+      expect(call.body).toBe(
+        classifyFailure('git push failed: https://x:ghp_CANARYsecretTOKEN0123456789@github.com/o/r')
+          .explanation
+      );
     });
 
     it('should include projectName in metadata', async () => {
@@ -241,7 +257,7 @@ describe('Notification Service', () => {
       expect(call.metadata.projectName).toBe('My Project');
     });
 
-    it('should use default error message when none provided', async () => {
+    it('should use the unknown-failure sentence when no error is provided', async () => {
       await notifyTaskFailed(env, 'user-123', {
         projectId: 'proj-1',
         projectName: 'My Project',
@@ -250,47 +266,7 @@ describe('Notification Service', () => {
       });
 
       const call = createNotificationMock.mock.calls[0]![1];
-      expect(call.body).toBe('Task encountered an error');
-    });
-  });
-
-  describe('notifySessionEnded', () => {
-    it('should create session_ended notification with task title', async () => {
-      await notifySessionEnded(env, 'user-123', {
-        projectId: 'proj-1',
-        projectName: 'My Project',
-        sessionId: 'session-1',
-        taskId: 'task-1',
-        taskTitle: 'Review code',
-      });
-
-      expect(createNotificationMock).toHaveBeenCalledWith('user-123', expect.objectContaining({
-        type: 'session_ended',
-        urgency: 'medium',
-        title: 'Agent finished: Review code',
-      }));
-    });
-
-    it('should include projectName in metadata', async () => {
-      await notifySessionEnded(env, 'user-123', {
-        projectId: 'proj-1',
-        projectName: 'My Project',
-        sessionId: 'session-1',
-      });
-
-      const call = createNotificationMock.mock.calls[0]![1];
-      expect(call.metadata.projectName).toBe('My Project');
-    });
-
-    it('should use generic title when no task title', async () => {
-      await notifySessionEnded(env, 'user-123', {
-        projectId: 'proj-1',
-        projectName: 'My Project',
-        sessionId: 'session-1',
-      });
-
-      const call = createNotificationMock.mock.calls[0]![1];
-      expect(call.title).toContain('your turn');
+      expect(call.body).toBe(classifyFailure(undefined).explanation);
     });
   });
 
@@ -348,6 +324,23 @@ describe('Notification Service', () => {
           options: ['Approve', 'Reject', 'Defer'],
         },
       }));
+    });
+
+    it('a heading replaces "<label> needed" (an inbox result item)', async () => {
+      await notifyNeedsInput(env, 'user-123', {
+        projectId: 'proj-1',
+        projectName: 'My Project',
+        taskId: 'task-1',
+        taskTitle: 'Compare hosting costs',
+        context: 'Hetzner is about a third of the price for the same machines.',
+        attentionMarkerId: 'ask-1',
+        heading: 'Result ready',
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.title).toBe('Result ready: Compare hosting costs');
+      expect(call.title).not.toContain('needed');
+      expect(call.body).toBe('Hetzner is about a third of the price for the same machines.');
     });
 
     it('should use generic label when no category provided', async () => {
@@ -506,18 +499,6 @@ describe('Notification Service', () => {
       expect(call.sessionId).toBe('sess-abc');
     });
 
-    it('notifySessionEnded includes sessionId in actionUrl and payload', async () => {
-      await notifySessionEnded(env, 'user-123', {
-        projectId: 'proj-1',
-        projectName: 'My Project',
-        sessionId: 'sess-abc',
-      });
-
-      const call = createNotificationMock.mock.calls[0]![1];
-      expect(call.actionUrl).toBe('/projects/proj-1/chat/sess-abc');
-      expect(call.sessionId).toBe('sess-abc');
-    });
-
     it('notifyNeedsInput includes sessionId in actionUrl and payload', async () => {
       await notifyNeedsInput(env, 'user-123', {
         projectId: 'proj-1',
@@ -567,17 +548,6 @@ describe('Notification Service', () => {
         projectName: 'My Project',
         taskId: 'task-1',
         taskTitle: 'Deploy',
-      });
-
-      const call = createNotificationMock.mock.calls[0]![1];
-      expect(call.actionUrl).toBe('/projects/proj-1');
-      expect(call.sessionId).toBeUndefined();
-    });
-
-    it('notifySessionEnded falls back to project URL when sessionId absent', async () => {
-      await notifySessionEnded(env, 'user-123', {
-        projectId: 'proj-1',
-        projectName: 'My Project',
       });
 
       const call = createNotificationMock.mock.calls[0]![1];
@@ -704,7 +674,6 @@ describe('Notification Service', () => {
       const helpers = [
         () => notifyTaskComplete(env, 'u', { projectId: 'p', projectName: 'PN', taskId: 't', taskTitle: 'T' }),
         () => notifyTaskFailed(env, 'u', { projectId: 'p', projectName: 'PN', taskId: 't', taskTitle: 'T' }),
-        () => notifySessionEnded(env, 'u', { projectId: 'p', projectName: 'PN' }),
         () => notifyPrCreated(env, 'u', { projectId: 'p', projectName: 'PN', taskId: 't', taskTitle: 'T', prUrl: 'http://x' }),
         () => notifyNeedsInput(env, 'u', { projectId: 'p', projectName: 'PN', taskId: 't', taskTitle: 'T', context: 'c' }),
         () => notifyProgress(env, 'u', { projectId: 'p', projectName: 'PN', taskId: 't', taskTitle: 'T', message: 'm' }),

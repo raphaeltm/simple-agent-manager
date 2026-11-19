@@ -1,5 +1,36 @@
 # Multi-Level Override Framework (Meta-Spec)
 
+> **Reconciliation 2026-11-02:** Two steps shipped.
+> - #2490 (`dedb75591`) added a profile tier for agent accounts (`cc_profile_attachments`,
+>   migration 0215). Resolution is profile pin → project pin → user default → platform
+>   (`packages/shared/src/composable-credentials/resolver.ts:75`), and
+>   `agent_sessions.agent_credential_scope` records which tier ran each session. That answers the
+>   audit-trail source-tier question for credentials only.
+> - #2476 (`608bdbd1b`) added constitution Principle XIV (`.specify/memory/constitution.md:299`),
+>   which fixes the installation → user → project → profile → skill composition and requires
+>   shared override controls.
+>
+> Still open: phases 3, 4, 5 and 8, source tiers for non-credential parameters, and the table
+> refresh. The table below is stale: its "Agent credentials" row still shows Project "Phase 2
+> (planned)" and Profile "—", but both tiers now ship (#2485 project pins, #2490 profile pins).
+
+> **Reconciliation 2026-10-26:** #2414 (`0620c1595`) added callable AI models, resolved skill →
+> profile → project → SAM defaults with "Same as project/profile" inherit options
+> (`apps/api/src/services/agent-models/access.ts:1-6`). #2399 (`cc2d968df`) made
+> `skills.agent_type` nullable, so a skill overrides the profile's agent only when it sets one
+> (`apps/api/src/services/skills.ts:327`). Still open: phases 3-6 and 8, the audit-trail source
+> tier and the table refresh. The triggers table is now `apps/api/src/db/schema.ts:2902`, still
+> with no model or permission columns.
+
+> **Reconciliation 2026-10-12:** #2261 (`ab76c0f42`) now stores the resolved agent type, model,
+> effort and permission mode on each agent session the task runner or an Instant session starts
+> (`agent_sessions.runtime_contract_json`, written at
+> `apps/api/src/services/agent-session-bootstrap.ts:306-310`; shape in
+> `apps/api/src/services/session-runtime-contract.ts:18-36`). That partly answers the audit-trail
+> question: it keeps the values, not which tier supplied them, and no UI shows them. Still open:
+> phases 3, 4, 5, 6 and 8, the source tier for the audit trail, and the parameter-table refresh.
+> The triggers table cited for phase 5 is now at `apps/api/src/db/schema.ts:2644`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**
@@ -113,3 +144,7 @@ This task is a framing document — it does **not** itself ship code. Use it to 
 ## Action
 
 Break this down into phase tasks as capacity allows. Phase 2 (credentials) is already written as its own backlog task and is the next concrete unit of work. After that, pull Phase 3 or Phase 4 depending on user demand.
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. Session details now show the effective model/effort/permissions/provider/skill, which is part of the Phase 4 audit trail. Still open: the source tier per value, the session override control, and phases 3, 5, 6 and 8. Evidence: #2689; `apps/web/src/components/project-message-view/SessionRunConfiguration.tsx:27`.

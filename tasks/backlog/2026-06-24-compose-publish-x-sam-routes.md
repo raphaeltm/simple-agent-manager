@@ -1,5 +1,10 @@
 # Compose-publish `x-sam-routes` override support
 
+> **Reconciliation 2026-10-26:** the regression tests are still missing; `compose-publish-apply.ts`
+> and its tests are untouched since 10-12. Docs pointer moved: the `x-sam-routes` lines are now
+> `apps/www/src/content/docs/docs/guides/app-deployments.md:34,107` (#2324 `7e8d69858`, #2426
+> `833ebc366`).
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** the behavior and docs, in PR #1424 (`9256bf64c`). Compose-publish now uses the

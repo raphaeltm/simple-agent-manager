@@ -1,5 +1,21 @@
 # Investigate staging capacity-query and deployment-reset error noise
 
+> **Reconciliation 2026-10-26:** Still open; no item is done. #2319 (`5895f58bb`) adds an
+> allowlisted `context.d1Category` (for example `no_such_column`, `constraint_foreignkey`) beside
+> `causeCode` on persisted request-path errors, so a schema/deployment mismatch would now be
+> classified (`apps/api/src/middleware/app-error-handler.ts:63-74`,
+> `apps/api/src/lib/d1-error-code.ts`; test `tests/workers/app-error-observability.test.ts:98,141`).
+> The 10-12 pointers `:62-69` and test `:97` moved accordingly.
+
+> **Reconciliation 2026-10-12:** still open; no item below is done. #2279 (`78bb75e0a`) changes
+> how a recurrence would look if it comes through the HTTP error handler. A failed query is now
+> persisted as `Failed query: [REDACTED]` with no stack, plus an allowlisted SQLite/D1
+> `context.causeCode` (`apps/api/src/middleware/app-error-handler.ts:62-69`,
+> `apps/api/src/lib/d1-error-code.ts`; test `tests/workers/app-error-observability.test.ts:97`).
+> The cause this file could not see is now recorded, but the SQL text it used to fingerprint the
+> query is not. Rows from scheduled jobs' own `persistError` calls are unchanged; their logs gain
+> `causeCode` through `serializeError` (`apps/api/src/lib/logger.ts:95-96`).
+
 ## Evidence
 
 Found during compact archive staging verification. The standard `pnpm quality:observability-noise` 24-hour check on 2026-09-08 reported two medium findings in staging observability D1 `8c2fa46c-3b89-428b-b235-d835b7914106`:

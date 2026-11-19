@@ -1,7 +1,7 @@
 /**
  * Vertical slice tests for the project-data DO proxy service.
  *
- * Exercises the service layer (apps/api/src/services/project-data.ts) which
+ * Exercises the service layer (packages/project-data/src/client/project-data.ts) which
  * wraps RPC calls to the ProjectData Durable Object. Successful calls go through:
  *   service function → getStub(env, projectId) → ensureProjectId() → DO method
  * Expected rejection cases call the same synchronous core guard through the
@@ -14,13 +14,15 @@
  *
  * See: .claude/rules/35-vertical-slice-testing.md
  */
+import { DEFAULT_MAX_MESSAGES_PER_SESSION } from '@simple-agent-manager/project-data/internal/do/messages';
+import * as sessionState from '@simple-agent-manager/project-data/internal/do/sessions';
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { DEFAULT_MAX_MESSAGES_PER_SESSION } from '../../src/durable-objects/project-data/messages';
 import type { Env } from '../../src/env';
 // Import service functions under test
 import * as svc from '../../src/services/project-data';
+import * as recoveryClaims from '../../src/services/session-snapshot-recovery-lifecycle';
 import {
   seedInstallation,
   seedProject,
@@ -54,28 +56,30 @@ async function lifecycleEvents(projectId: string): Promise<
   const id = env.PROJECT_DATA.idFromName(projectId);
   const stub = env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectDataTestDouble>;
   await stub.ensureProjectId(projectId);
-  return runInDurableObject(stub, async (_instance, state) =>
-    state.storage.sql
-      .exec(
-        `SELECT event_type, subject_type, subject_id, severity, delivery_key,
+  return runInDurableObject(
+    stub,
+    async (_instance, state) =>
+      state.storage.sql
+        .exec(
+          `SELECT event_type, subject_type, subject_id, severity, delivery_key,
                 payload_fingerprint, metadata_json, display_json, raw_payload_ref_json,
                 duplicate_count
            FROM project_events
           WHERE source = 'sam.lifecycle'
           ORDER BY received_at, id`
-      )
-      .toArray() as Array<{
-      event_type: string;
-      subject_type: string;
-      subject_id: string;
-      severity: string;
-      delivery_key: string;
-      payload_fingerprint: string;
-      metadata_json: string;
-      display_json: string;
-      raw_payload_ref_json: string | null;
-      duplicate_count: number;
-    }>
+        )
+        .toArray() as Array<{
+        event_type: string;
+        subject_type: string;
+        subject_id: string;
+        severity: string;
+        delivery_key: string;
+        payload_fingerprint: string;
+        metadata_json: string;
+        display_json: string;
+        raw_payload_ref_json: string | null;
+        duplicate_count: number;
+      }>
   );
 }
 
@@ -232,6 +236,7 @@ describe('project-data service: session lifecycle', () => {
       snapshotExpiresAt?: string;
       snapshotRecoveryStatus?: string | null;
       stopProjectDataSession?: boolean;
+      ordinaryStop?: boolean;
     } = {}
   ) {
     const pid = `svc-snapshot-wake-${suffix}`;
@@ -256,15 +261,15 @@ describe('project-data service: session lifecycle', () => {
       status: 'running',
     });
 
-    const sessionId = await svc.createSession(
-      testEnv,
-      pid,
-      workspaceId,
-      `Snapshot wake ${suffix}`
-    );
+    const sessionId = await svc.createSession(testEnv, pid, workspaceId, `Snapshot wake ${suffix}`);
     expect(await svc.sleepSession(testEnv, pid, sessionId)).toBe(true);
     if (opts.stopProjectDataSession) {
-      await svc.stopSession(testEnv, pid, sessionId);
+      await svc.stopSession(
+        testEnv,
+        pid,
+        sessionId,
+        opts.ordinaryStop ? undefined : { lifecycleSource: 'workspace_eviction_finalization' }
+      );
     }
     await env.DATABASE.prepare(
       `UPDATE workspaces SET chat_session_id = ?, updated_at = datetime('now') WHERE id = ?`
@@ -316,6 +321,16 @@ describe('project-data service: session lifecycle', () => {
         .run();
     }
 
+    // The real handoff relinquishes the old unique binding before linking the replacement.
+    await env.DATABASE.batch([
+      env.DATABASE.prepare('UPDATE workspaces SET chat_session_id = NULL WHERE id = ?').bind(
+        workspaceId
+      ),
+      env.DATABASE.prepare('UPDATE workspaces SET chat_session_id = ? WHERE id = ?').bind(
+        sessionId,
+        nextWorkspaceId
+      ),
+    ]);
     return { pid, sessionId, workspaceId, nextWorkspaceId, recoveryTaskId };
   }
 
@@ -339,6 +354,269 @@ describe('project-data service: session lifecycle', () => {
     });
   });
 
+  it('preserves explicit eviction eligibility on replay without reviving ordinary stop intent', async () => {
+    const f = await seedSnapshotRecoveryWakeFixture('eviction-stop-replay', {
+      stopProjectDataSession: true,
+    });
+    const stub = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(f.pid));
+    await stub.linkSessionToTask(f.sessionId, f.recoveryTaskId);
+    expect(
+      await svc.stopSession(testEnv, f.pid, f.sessionId, {
+        lifecycleSource: 'workspace_eviction_finalization',
+      })
+    ).toBe(false);
+    await svc.repairFailedSessionForSnapshotRecovery(
+      testEnv,
+      f.pid,
+      f.sessionId,
+      f.nextWorkspaceId,
+      f.recoveryTaskId
+    );
+    expect((await svc.getSession(testEnv, f.pid, f.sessionId))?.status).toBe('sleeping');
+    await svc.stopSession(testEnv, f.pid, f.sessionId);
+    expect(
+      await svc.stopSession(testEnv, f.pid, f.sessionId, {
+        lifecycleSource: 'workspace_eviction_finalization',
+      })
+    ).toBe(false);
+    await svc.repairFailedSessionForSnapshotRecovery(
+      testEnv,
+      f.pid,
+      f.sessionId,
+      f.nextWorkspaceId,
+      f.recoveryTaskId
+    );
+    expect((await svc.getSession(testEnv, f.pid, f.sessionId))?.status).toBe('stopped');
+  });
+
+  it.each(['ordinary', 'repeated', 'internal', 'unknown'])(
+    'refuses %s stopped intent despite an exact live claim',
+    async (kind) => {
+      const f = await seedSnapshotRecoveryWakeFixture(`intent-${kind}`, {
+        stopProjectDataSession: true,
+        ordinaryStop: kind === 'ordinary',
+      });
+      const stub = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(f.pid));
+      await stub.linkSessionToTask(f.sessionId, f.recoveryTaskId);
+      if (kind === 'repeated') await svc.stopSession(testEnv, f.pid, f.sessionId);
+      if (kind === 'internal' || kind === 'unknown')
+        await runInDurableObject(stub, (_instance, ctx) => {
+          if (kind === 'internal') sessionState.stopSessionInternal(ctx.storage.sql, f.sessionId);
+          else
+            ctx.storage.sql.exec(
+              'DELETE FROM do_meta WHERE key = ?',
+              `snapshot-recovery-eviction-stop:${f.sessionId}`
+            );
+        });
+      await svc.repairFailedSessionForSnapshotRecovery(
+        testEnv,
+        f.pid,
+        f.sessionId,
+        f.nextWorkspaceId,
+        f.recoveryTaskId
+      );
+      expect((await svc.getSession(testEnv, f.pid, f.sessionId))?.status).toBe('stopped');
+      expect(
+        await svc.wakeSessionForSnapshotRecovery(
+          testEnv,
+          f.pid,
+          f.sessionId,
+          f.nextWorkspaceId,
+          f.recoveryTaskId
+        )
+      ).toBe(false);
+      expect((await svc.getSession(testEnv, f.pid, f.sessionId))?.status).toBe('stopped');
+    }
+  );
+
+  it('survives a native recovery gate authority rejection across public RPC calls', async () => {
+    const f = await seedSnapshotRecoveryWakeFixture('native-authority-rejection', {
+      stopProjectDataSession: true,
+    });
+    const stub = env.PROJECT_DATA.get(
+      env.PROJECT_DATA.idFromName(f.pid)
+    ) as DurableObjectStub<ProjectDataTestDouble>;
+    await stub.linkSessionToTask(f.sessionId, f.recoveryTaskId);
+    const before = await stub.getSession(f.sessionId);
+    const marker = crypto.randomUUID();
+    await runInDurableObject(stub, async (instance) => {
+      const testInstance = instance as unknown as { env: Env; recoveryGateMarker?: string };
+      testInstance.recoveryGateMarker = marker;
+      const originalEnv = testInstance.env;
+      const database = originalEnv.DATABASE;
+      let rejectLookup = true;
+      testInstance.env = {
+        ...originalEnv,
+        DATABASE: {
+          prepare(query: string) {
+            const statement = database.prepare(query);
+            if (!query.includes('SELECT 1 AS found')) return statement;
+            return {
+              bind(...values: unknown[]) {
+                const bound = statement.bind(...values);
+                return {
+                  async first() {
+                    if (rejectLookup) {
+                      rejectLookup = false;
+                      return database
+                        .prepare('SELECT * FROM t1_missing_recovery_authority_table')
+                        .first();
+                    }
+                    return bound.first();
+                  },
+                };
+              },
+            };
+          },
+        } as D1Database,
+      };
+    });
+    const input = { workspaceId: f.nextWorkspaceId, taskId: f.recoveryTaskId };
+    // The adapter catches after the public production method, leaving the
+    // native workerd concurrency gate and its reset behavior untouched.
+    const rejected = await captureProjectDataExpectedError(stub, {
+      operation: 'repairSessionForSnapshotRecovery',
+      args: [f.sessionId, input],
+    }).catch((error: unknown) => ({ threw: true, message: String(error) }));
+    expect(rejected.threw).toBe(true);
+    expect(rejected.message).toContain('t1_missing_recovery_authority_table');
+    expect(await stub.getSession(f.sessionId)).toEqual(before);
+    expect(
+      await runInDurableObject(stub, (instance, ctx) => ({
+        marker: (instance as unknown as { recoveryGateMarker?: string }).recoveryGateMarker,
+        eligible: sessionState.hasEvictionStopEligibility(ctx.storage.sql, f.sessionId),
+      }))
+    ).toEqual({ marker, eligible: true });
+    expect(await stub.repairSessionForSnapshotRecovery(f.sessionId, input)).toBe(true);
+    expect((await stub.getSession(f.sessionId))?.status).toBe('sleeping');
+  });
+
+  it('keeps the repair concurrency callback fulfilled when the D1 authority read rejects', async () => {
+    const f = await seedSnapshotRecoveryWakeFixture('authority-read-rejection', {
+      stopProjectDataSession: true,
+    });
+    const stub = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(f.pid));
+    await stub.linkSessionToTask(f.sessionId, f.recoveryTaskId);
+    await runInDurableObject(stub, async (instance, ctx) => {
+      const before = await instance.getSession(f.sessionId);
+      const failure = new Error('D1 authority read unavailable');
+      let callbackRejected = false;
+      const block = ctx.blockConcurrencyWhile.bind(ctx);
+      const blockSpy = vi.spyOn(ctx, 'blockConcurrencyWhile').mockImplementation((callback) =>
+        block(async () => {
+          try {
+            return await callback();
+          } catch (error) {
+            if (error !== failure) throw error;
+            callbackRejected = true;
+            // Contain the pre-fix reset trigger so the RED run cannot invalidate
+            // the Workers test harness; the assertion below detects it.
+            return { unexpectedCallbackError: error } as never;
+          }
+        })
+      );
+      const database = (instance as unknown as { env: Env }).env.DATABASE;
+      const prepare = database.prepare.bind(database);
+      const prepareSpy = vi.spyOn(database, 'prepare').mockImplementationOnce((sql) => {
+        const statement = prepare(sql);
+        const bind = statement.bind.bind(statement);
+        vi.spyOn(statement, 'bind').mockImplementationOnce((...values) => {
+          const bound = bind(...values);
+          vi.spyOn(bound, 'first').mockRejectedValueOnce(failure);
+          return bound;
+        });
+        return statement;
+      });
+      try {
+        const repair = instance.repairSessionForSnapshotRecovery(f.sessionId, {
+          workspaceId: f.nextWorkspaceId,
+          taskId: f.recoveryTaskId,
+        });
+        const outcome = await repair.then(
+          (value) => ({ value }),
+          (error: unknown) => ({ error })
+        );
+        expect(callbackRejected).toBe(false);
+        expect(outcome).toEqual({ error: failure });
+        expect(await instance.getSession(f.sessionId)).toEqual(before);
+        expect(sessionState.hasEvictionStopEligibility(ctx.storage.sql, f.sessionId)).toBe(true);
+        await expect(
+          instance.repairSessionForSnapshotRecovery(f.sessionId, {
+            workspaceId: f.nextWorkspaceId,
+            taskId: f.recoveryTaskId,
+          })
+        ).resolves.toBe(true);
+        expect((await instance.getSession(f.sessionId))?.status).toBe('sleeping');
+      } finally {
+        prepareSpy.mockRestore();
+        blockSpy.mockRestore();
+      }
+    });
+  });
+
+  it.each(['newer-stop', 'revoked-claim'])(
+    'honors %s during the repair authority check',
+    async (interleave) => {
+      const f = await seedSnapshotRecoveryWakeFixture(`race-${interleave}`, {
+        stopProjectDataSession: true,
+      });
+      const stub = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(f.pid));
+      await stub.linkSessionToTask(f.sessionId, f.recoveryTaskId);
+      let entered!: () => void;
+      let release!: () => void;
+      const checking = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const proceed = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      // Delay query dispatch; execute the real D1 read in the repair RPC's context.
+      const authorize = recoveryClaims.hasAuthorizedRestorableSnapshotWakeClaim;
+      const claimCheck = vi
+        .spyOn(recoveryClaims, 'hasAuthorizedRestorableSnapshotWakeClaim')
+        .mockImplementation(async (database, input) => {
+          if (input.chatSessionId === f.sessionId) {
+            entered();
+            await proceed;
+          }
+          return authorize(database, input);
+        });
+      try {
+        const repair = svc.repairFailedSessionForSnapshotRecovery(
+          testEnv,
+          f.pid,
+          f.sessionId,
+          f.nextWorkspaceId,
+          f.recoveryTaskId
+        );
+        await checking;
+        let stopping: Promise<boolean> | undefined;
+        if (interleave === 'newer-stop') stopping = svc.stopSession(testEnv, f.pid, f.sessionId);
+        else
+          await env.DATABASE.prepare(
+            "UPDATE session_snapshots SET recovery_status = 'failed' WHERE chat_session_id = ?"
+          )
+            .bind(f.sessionId)
+            .run();
+        release();
+        await repair;
+        if (stopping) await stopping;
+        expect((await svc.getSession(testEnv, f.pid, f.sessionId))?.status).toBe('stopped');
+        await svc.repairFailedSessionForSnapshotRecovery(
+          testEnv,
+          f.pid,
+          f.sessionId,
+          f.nextWorkspaceId,
+          f.recoveryTaskId
+        );
+        expect((await svc.getSession(testEnv, f.pid, f.sessionId))?.status).toBe('stopped');
+      } finally {
+        release();
+        claimCheck.mockRestore();
+      }
+    }
+  );
+
   it.each([
     ['the snapshot row is missing', { seedSnapshot: false }],
     ['the snapshot has expired', { snapshotExpiresAt: '2000-01-01T00:00:00.000Z' }],
@@ -358,6 +636,109 @@ describe('project-data service: session lifecycle', () => {
       workspaceId,
       isTerminated: false,
     });
+  });
+
+  it('repairs stopped mirrors only for the exact restorable snapshot wake attempt', async () => {
+    const f = await seedSnapshotRecoveryWakeFixture('repair-stopped', {
+      stopProjectDataSession: true,
+    });
+    const stub = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(f.pid));
+    await stub.linkSessionToTask(f.sessionId, f.recoveryTaskId);
+    await env.DATABASE.prepare(
+      'UPDATE session_snapshots SET recovery_attempt_id = ? WHERE chat_session_id = ?'
+    )
+      .bind('current-attempt', f.sessionId)
+      .run();
+    expect(await svc.sleepSession(testEnv, f.pid, f.sessionId)).toBe(false);
+    expect(
+      await svc.sleepSession(testEnv, f.pid, f.sessionId, { stoppedOnly: true } as never)
+    ).toBe(false);
+    await svc.repairFailedSessionForSnapshotRecovery(
+      testEnv,
+      f.pid,
+      f.sessionId,
+      f.nextWorkspaceId,
+      f.recoveryTaskId,
+      'obsolete-attempt'
+    );
+    expect((await svc.getSession(testEnv, f.pid, f.sessionId))?.status).toBe('stopped');
+    await svc.repairFailedSessionForSnapshotRecovery(
+      testEnv,
+      f.pid,
+      f.sessionId,
+      f.nextWorkspaceId,
+      f.recoveryTaskId,
+      'current-attempt'
+    );
+    expect((await svc.getSession(testEnv, f.pid, f.sessionId))?.status).toBe('sleeping');
+    await svc.linkSessionToWorkspace(testEnv, f.pid, f.sessionId, f.nextWorkspaceId);
+    expect((await svc.getSession(testEnv, f.pid, f.sessionId))?.workspaceId).toBe(
+      f.nextWorkspaceId
+    );
+  });
+
+  it.each([
+    ['missing', { seedSnapshot: false }],
+    ['expired', { snapshotExpiresAt: '2000-01-01T00:00:00.000Z' }],
+    ['terminal owner', { recoveryTaskStatus: 'failed' }],
+    ['released claim', { snapshotRecoveryStatus: null }],
+  ])('does not repair stopped mirrors for %s snapshots', async (name, opts) => {
+    const f = await seedSnapshotRecoveryWakeFixture(`repair-${name.replaceAll(' ', '-')}`, {
+      ...opts,
+      stopProjectDataSession: true,
+    });
+    const stub = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(f.pid));
+    await stub.linkSessionToTask(f.sessionId, f.recoveryTaskId);
+    await svc.repairFailedSessionForSnapshotRecovery(
+      testEnv,
+      f.pid,
+      f.sessionId,
+      f.nextWorkspaceId,
+      f.recoveryTaskId
+    );
+    expect((await svc.getSession(testEnv, f.pid, f.sessionId))?.status).toBe('stopped');
+  });
+
+  it.each([
+    ['sleeping replacement', "UPDATE workspaces SET status = 'sleeping' WHERE chat_session_id = ?"],
+    ['stopping replacement', "UPDATE workspaces SET status = 'stopping' WHERE chat_session_id = ?"],
+    ['unknown replacement', "UPDATE workspaces SET status = 'unknown' WHERE chat_session_id = ?"],
+    ['deleted replacement', "UPDATE workspaces SET status = 'deleted' WHERE chat_session_id = ?"],
+    ['stopped replacement', "UPDATE workspaces SET status = 'stopped' WHERE chat_session_id = ?"],
+    ['evicted replacement', "UPDATE workspaces SET status = 'evicted' WHERE chat_session_id = ?"],
+    [
+      'snapshot replacement',
+      'UPDATE session_snapshots SET recovery_workspace_id = NULL WHERE chat_session_id = ?',
+    ],
+    ['task chat binding', 'UPDATE tasks SET chat_session_id = NULL WHERE chat_session_id = ?'],
+    [
+      'workspace chat binding',
+      'UPDATE workspaces SET chat_session_id = NULL WHERE chat_session_id = ?',
+    ],
+    [
+      'snapshot incomplete',
+      "UPDATE session_snapshots SET status = 'pending' WHERE chat_session_id = ?",
+    ],
+    [
+      'snapshot malformed expiry',
+      "UPDATE session_snapshots SET expires_at = 'z-invalid' WHERE chat_session_id = ?",
+    ],
+  ])('does not repair stopped mirrors with a mismatched %s', async (name, sql) => {
+    const f = await seedSnapshotRecoveryWakeFixture(
+      `repair-mismatch-${name.replaceAll(' ', '-')}`,
+      { stopProjectDataSession: true }
+    );
+    const stub = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(f.pid));
+    await stub.linkSessionToTask(f.sessionId, f.recoveryTaskId);
+    await env.DATABASE.prepare(sql).bind(f.sessionId).run();
+    await svc.repairFailedSessionForSnapshotRecovery(
+      testEnv,
+      f.pid,
+      f.sessionId,
+      f.nextWorkspaceId,
+      f.recoveryTaskId
+    );
+    expect((await svc.getSession(testEnv, f.pid, f.sessionId))?.status).toBe('stopped');
   });
 
   it('failSession transitions to failed with error message', async () => {
@@ -796,11 +1177,7 @@ describe('project-data service: message persistence', () => {
     );
     await svc.persistMessage(testEnv, pid, sessionId, 'user', 'Deploy to production', null);
 
-    const { results } = await svc.searchMessagesWithArchiveMetadata(
-      testEnv,
-      pid,
-      'authentication'
-    );
+    const { results } = await svc.searchMessagesWithArchiveMetadata(testEnv, pid, 'authentication');
     expect(results.length).toBeGreaterThanOrEqual(2);
     for (const r of results) {
       expect(r.snippet.toLowerCase()).toContain('authentication');
@@ -874,74 +1251,6 @@ describe('project-data service: idle cleanup scheduling', () => {
 
     const result = await svc.getCleanupAt(testEnv, pid, sessionId);
     expect(result).toBeNull();
-  });
-});
-
-// =========================================================================
-// 4. Session–Idea Linking (many-to-many)
-// =========================================================================
-
-describe('project-data service: session-idea linking', () => {
-  it('linkSessionIdea and getIdeasForSession', async () => {
-    const pid = 'svc-idea-link';
-    const sessionId = await svc.createSession(testEnv, pid, null, 'Idea session');
-
-    await svc.linkSessionIdea(testEnv, pid, sessionId, 'idea-1', 'Context A');
-    await svc.linkSessionIdea(testEnv, pid, sessionId, 'idea-2', null);
-
-    const ideas = await svc.getIdeasForSession(testEnv, pid, sessionId);
-    expect(ideas).toHaveLength(2);
-
-    const idea1 = ideas.find((i) => i.taskId === 'idea-1');
-    expect(idea1).toBeTruthy();
-    expect(idea1!.context).toBe('Context A');
-
-    const idea2 = ideas.find((i) => i.taskId === 'idea-2');
-    expect(idea2).toBeTruthy();
-    expect(idea2!.context).toBeNull();
-  });
-
-  it('getSessionsForIdea returns linked sessions', async () => {
-    const pid = 'svc-idea-sessions';
-    const s1 = await svc.createSession(testEnv, pid, null, 'Session 1');
-    const s2 = await svc.createSession(testEnv, pid, null, 'Session 2');
-
-    await svc.linkSessionIdea(testEnv, pid, s1, 'idea-shared', 'From S1');
-    await svc.linkSessionIdea(testEnv, pid, s2, 'idea-shared', 'From S2');
-
-    const sessions = await svc.getSessionsForIdea(testEnv, pid, 'idea-shared');
-    expect(sessions).toHaveLength(2);
-    const sessionIds = sessions.map((s) => s.sessionId);
-    expect(sessionIds).toContain(s1);
-    expect(sessionIds).toContain(s2);
-  });
-
-  it('unlinkSessionIdea removes the link', async () => {
-    const pid = 'svc-idea-unlink';
-    const sessionId = await svc.createSession(testEnv, pid, null, 'Unlink session');
-
-    await svc.linkSessionIdea(testEnv, pid, sessionId, 'idea-unlink', 'Will remove');
-
-    let ideas = await svc.getIdeasForSession(testEnv, pid, sessionId);
-    expect(ideas).toHaveLength(1);
-
-    await svc.unlinkSessionIdea(testEnv, pid, sessionId, 'idea-unlink');
-
-    ideas = await svc.getIdeasForSession(testEnv, pid, sessionId);
-    expect(ideas).toHaveLength(0);
-  });
-
-  it('getIdeasForSession returns empty for session with no ideas', async () => {
-    const pid = 'svc-idea-empty';
-    const sessionId = await svc.createSession(testEnv, pid, null, 'No ideas');
-
-    const ideas = await svc.getIdeasForSession(testEnv, pid, sessionId);
-    expect(ideas).toHaveLength(0);
-  });
-
-  it('getSessionsForIdea returns empty for unlinked idea', async () => {
-    const sessions = await svc.getSessionsForIdea(testEnv, 'svc-idea-no-links', 'idea-nowhere');
-    expect(sessions).toHaveLength(0);
   });
 });
 

@@ -18,185 +18,79 @@ import type { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import type { BoundedStrandedRetirement } from '../../services/bounded-stranded-retirement-authority';
 import { deleteNodeResourcesStrict } from '../../services/nodes';
-import { persistError } from '../../services/observability';
-import { boundedWarmPlacementClaimGuardSql } from '../../services/warm-placement-claims';
+import {
+  preparePreservedVmRetirement,
+  type PreservedVmRetirement,
+  type PreservedVmRetirementBudget,
+} from '../../services/preserved-vm-retirement';
+import { repairRetiredVmSleepSnapshots } from '../../services/retired-vm-sleep-repair';
 import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
-import { type CleanupConfig, parseMs } from './config';
+import { claimNodeForCleanup, claimPendingProviderDeletion } from './cleanup-claim';
+import {
+  type CleanupNode,
+  type CleanupOutcomeOptions,
+  errorMessage,
+  handleCleanupFailure,
+  persistCleanupSuccess,
+  recordSweepDecision,
+  refusalDecisionReason,
+} from './cleanup-outcome';
+import {
+  diagnoseCleanupRefusal,
+  handOffArtifactBlockedEmptyNode,
+  recordCleanupRefusal,
+} from './cleanup-refusal';
+export { claimNodeForCleanup, sleepingContainerRetentionGuardSql } from './cleanup-claim';
+import type { CleanupConfig } from './config';
 
+export { cleanupNodeProvenanceSql } from '../../services/node-teardown-provenance';
 export { boundedWarmPlacementClaimGuardSql } from '../../services/warm-placement-claims';
-export { type CleanupConfig, parseMs, parsePositiveInt, resolveCleanupConfig } from './config';
+export {
+  type CleanupConfig,
+  minimumTeardownAttemptMs,
+  parseMs,
+  parsePositiveInt,
+  resolveCleanupConfig,
+} from './config';
 export { emptyResult, type NodeCleanupResult } from './result';
 
 export type CleanupDb = ReturnType<typeof drizzle<typeof schema>>;
 
-export type CleanupContext = Record<string, string | number | null | undefined>;
-export type NodeCleanupDestroyResult = 'destroyed' | 'skipped' | 'failed';
-type CleanupNode = { id: string; user_id: string; status: string };
+export type { CleanupContext } from './cleanup-outcome';
+/**
+ * `pending`: a provider deletion was started (two-phase) or is still running. The node stays
+ * `destroying` with its write-ahead record, and `sweepProviderDeletionConfirmations` writes the
+ * termination proof on a later tick. Not a failure.
+ */
+export type NodeCleanupDestroyResult = 'destroyed' | 'skipped' | 'failed' | 'pending';
 
-interface DestroyNodeForCleanupOptions {
+interface DestroyNodeForCleanupOptions extends CleanupOutcomeOptions {
   logEvent: string;
-  failureLogEvent: string;
-  successMessage: string;
-  failureMessagePrefix: string;
-  recoveryType: string;
-  failureRecoveryType: string;
-  level?: 'info' | 'warn';
-  failureBackoffMs: number;
+  preservedVmBudget?: PreservedVmRetirementBudget;
+  boundedStrandedRetirement?: BoundedStrandedRetirement;
   allowActiveWorkspaces?: boolean;
   allowManagedRunningProvenance?: boolean;
   expectedLastHeartbeatAt?: string | null;
   requireWorkspaceIdle?: boolean;
-  workspaceIdleThresholdIso?: string;
   requestDeadlineMs?: number;
-  context: CleanupContext;
+  /**
+   * Start the provider deletion without waiting for it (two-phase). Only for callers that also
+   * pass `requestDeadlineMs`; the confirm phase finishes the teardown on a later tick.
+   */
+  providerDeletion?: 'request';
+  providerDeletionConfirmMaxMs?: number;
+  providerDeletionSendGraceMs?: number;
+  /**
+   * Confirm a deletion this node already started: claim it with the pending-deletion lease
+   * instead of the ordinary cleanup claim (whose idle/artifact guards were met when it started).
+   */
+  confirmPendingDeletion?: boolean;
 }
 
 export function getNodeWorkspaceIdleThresholdIso(now: Date, config: CleanupConfig): string {
   return new Date(now.getTime() - config.workspaceIdleTimeoutMs).toISOString();
-}
-
-/**
- * NodeLifecycle hands empty managed VMs to cleanup by marking them stopped.
- * Direct workspace provisioning has no task.auto_provisioned_node_id: its
- * server-written pool/credential snapshot is the ownership proof instead.
- * Keep this alternative stopped-only and independent of current pool revisions
- * so retiring a source cannot strand a VM provisioned under its old authority.
- */
-export function cleanupNodeProvenanceSql(
-  alias: 'n' | 'nodes',
-  allowManagedRunningProvenance = false
-): string {
-  const managedPoolStatuses = allowManagedRunningProvenance
-    ? "'stopped', 'running', 'destroying'"
-    : "'stopped', 'destroying'";
-  const present = [
-    'capacity_pool_id',
-    'capacity_source_id',
-    'capacity_pool_candidate_id',
-    'placement_credential_reference',
-    'placement_credential_fingerprint',
-    'cloud_provider',
-    'provider_instance_type',
-  ]
-    .map((column) => `NULLIF(TRIM(${alias}.${column}), '') IS NOT NULL`)
-    .join('\n         AND ');
-  return `(EXISTS (
-    SELECT 1 FROM tasks auto_task
-    WHERE auto_task.auto_provisioned_node_id = ${alias}.id
-  ) OR (
-    ${alias}.status IN (${managedPoolStatuses})
-    AND ${alias}.node_class = 'managed'
-    AND ${alias}.runtime = 'vm'
-    AND ${alias}.workload_role = 'workspace'
-    AND ${alias}.capacity_pool_scope IN ('user', 'project', 'installation')
-    AND (${alias}.capacity_pool_scope != 'project'
-      OR NULLIF(TRIM(${alias}.capacity_pool_project_id), '') IS NOT NULL)
-    AND (${alias}.capacity_pool_scope = 'project' OR ${alias}.capacity_pool_project_id IS NULL)
-    AND ${alias}.capacity_pool_revision > 0
-    AND ${alias}.capacity_source_generation > 0
-    AND ${alias}.placement_credential_source IN ('user', 'project', 'platform')
-    AND ${alias}.placement_credential_version > 0
-    AND (${alias}.provider_instance_id IS NOT NULL
-      OR (${alias}.status = 'destroying' AND ${alias}.runtime_termination_confirmed_at IS NOT NULL))
-    AND ${alias}.provider_instance_vcpu_count > 0
-    AND ${alias}.provider_instance_memory_mb > 0
-    AND ${present}
-  ))`;
-}
-
-/** Sleeping Instant compute is the only wake target; snapshot retention owns teardown. */
-export function sleepingContainerRetentionGuardSql(nodeAlias: string): string {
-  return `AND NOT (${nodeAlias}.runtime = 'cf-container' AND EXISTS (
-    SELECT 1 FROM workspaces retained_workspace
-    WHERE retained_workspace.node_id = ${nodeAlias}.id
-      AND retained_workspace.status = 'sleeping'
-  ))`;
-}
-
-export async function claimNodeForCleanup(
-  env: Env,
-  node: CleanupNode,
-  nowIso: string,
-  options: {
-    allowActiveWorkspaces?: boolean;
-    allowManagedRunningProvenance?: boolean;
-    expectedLastHeartbeatAt?: string | null;
-    requireWorkspaceIdle?: boolean;
-    workspaceIdleThresholdIso?: string;
-  } = {}
-): Promise<boolean> {
-  const workspaceIdleThresholdIso =
-    options.workspaceIdleThresholdIso ??
-    new Date(
-      new Date(nowIso).getTime() -
-        parseMs(
-          env.NODE_WORKSPACE_IDLE_TIMEOUT_MS ?? env.NODE_ORPHAN_IDLE_TIMEOUT_MS,
-          DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS
-        )
-    ).toISOString();
-  const activeWorkspaceGuard = options.allowActiveWorkspaces
-    ? ''
-    : `AND NOT EXISTS (
-         SELECT 1
-         FROM workspaces active_workspace
-         WHERE active_workspace.node_id = nodes.id
-           AND active_workspace.status IN ('running', 'creating', 'recovery')
-       )`;
-  const workspaceIdleGuard =
-    options.requireWorkspaceIdle === false
-      ? ''
-      : `AND (
-         SELECT COALESCE(MAX(workspace_activity.updated_at), nodes.created_at)
-         FROM workspaces workspace_activity
-         WHERE workspace_activity.node_id = nodes.id
-       ) < ?`;
-  const result = await env.DATABASE.prepare(
-    `UPDATE nodes
-     SET status = 'destroying', updated_at = ?
-     WHERE id = ?
-       AND user_id = ?
-       AND status = ?
-       AND node_role = 'workspace'
-       AND node_class != 'user-owned'
-       AND (cleanup_backoff_until IS NULL OR cleanup_backoff_until <= ?)
-       ${options.expectedLastHeartbeatAt === undefined ? '' : 'AND last_heartbeat_at IS ?'}
-       AND ${cleanupNodeProvenanceSql('nodes', options.allowManagedRunningProvenance)}
-       ${activeWorkspaceGuard}
-       ${sleepingContainerRetentionGuardSql('nodes')}
-       ${boundedWarmPlacementClaimGuardSql('nodes.id')}
-       ${workspaceIdleGuard}`
-  )
-    .bind(
-      nowIso,
-      node.id,
-      node.user_id,
-      node.status,
-      nowIso,
-      ...(options.expectedLastHeartbeatAt === undefined ? [] : [options.expectedLastHeartbeatAt]),
-      workspaceIdleThresholdIso,
-      ...(options.requireWorkspaceIdle === false ? [] : [workspaceIdleThresholdIso])
-    )
-    .run();
-
-  return (result.meta.changes ?? 0) > 0;
-}
-
-async function releaseNodeCleanupClaim(
-  env: Env,
-  node: CleanupNode,
-  nowIso: string,
-  backoffUntil: string
-): Promise<void> {
-  await env.DATABASE.prepare(
-    `UPDATE nodes
-     SET status = ?, cleanup_backoff_until = ?, updated_at = ?
-     WHERE id = ?
-       AND user_id = ?
-       AND status = 'destroying'`
-  )
-    .bind(node.status, backoffUntil, nowIso, node.id, node.user_id)
-    .run();
 }
 
 export async function markNodeCleanupBackoff(
@@ -241,111 +135,6 @@ export async function markNodeCleanupBackoff(
  */
 export const LAST_WORKSPACE_ACTIVITY_SQL = 'COALESCE(MAX(w.updated_at), n.created_at)';
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-async function persistCleanupSuccess(
-  env: Env,
-  node: CleanupNode,
-  options: DestroyNodeForCleanupOptions
-): Promise<void> {
-  try {
-    await persistError(
-      env.OBSERVABILITY_DATABASE,
-      {
-        source: 'api',
-        level: options.level ?? 'warn',
-        message: options.successMessage,
-        context: {
-          recoveryType: options.recoveryType,
-          nodeId: node.id,
-          ...options.context,
-        },
-        userId: node.user_id,
-        nodeId: node.id,
-      },
-      env
-    );
-  } catch (error) {
-    log.error('node_cleanup.success_observability_write_failed', {
-      nodeId: node.id,
-      error: errorMessage(error),
-    });
-  }
-}
-
-async function releaseCleanupClaimAfterFailure(
-  env: Env,
-  node: CleanupNode,
-  nowIso: string,
-  backoffUntil: string
-): Promise<void> {
-  try {
-    await releaseNodeCleanupClaim(env, node, nowIso, backoffUntil);
-    log.warn('node_cleanup.candidate_backed_off', { nodeId: node.id, backoffUntil });
-  } catch (error) {
-    log.error('node_cleanup.candidate_claim_release_failed', {
-      nodeId: node.id,
-      error: errorMessage(error),
-    });
-  }
-}
-
-async function persistCleanupFailure(
-  env: Env,
-  node: CleanupNode,
-  options: DestroyNodeForCleanupOptions,
-  error: unknown,
-  backoffUntil: string
-): Promise<void> {
-  try {
-    await persistError(
-      env.OBSERVABILITY_DATABASE,
-      {
-        source: 'api',
-        level: 'error',
-        message: `${options.failureMessagePrefix}: ${errorMessage(error)}`,
-        stack: error instanceof Error ? error.stack : undefined,
-        context: {
-          recoveryType: options.failureRecoveryType,
-          nodeId: node.id,
-          backoffUntil,
-          ...options.context,
-        },
-        userId: node.user_id,
-        nodeId: node.id,
-      },
-      env
-    );
-  } catch (persistErrorValue) {
-    log.error('node_cleanup.failure_observability_write_failed', {
-      nodeId: node.id,
-      error: errorMessage(persistErrorValue),
-    });
-  }
-}
-
-async function handleCleanupFailure(
-  env: Env,
-  node: CleanupNode,
-  nowIso: string,
-  options: DestroyNodeForCleanupOptions,
-  error: unknown
-): Promise<void> {
-  log.error(options.failureLogEvent, {
-    nodeId: node.id,
-    userId: node.user_id,
-    error: errorMessage(error),
-  });
-
-  const backoffUntil = new Date(
-    new Date(nowIso).getTime() + options.failureBackoffMs
-  ).toISOString();
-  await releaseCleanupClaimAfterFailure(env, node, nowIso, backoffUntil);
-  await persistCleanupFailure(env, node, options, error, backoffUntil);
-}
-
 export async function destroyNodeForCleanup(
   db: CleanupDb,
   env: Env,
@@ -353,7 +142,64 @@ export async function destroyNodeForCleanup(
   node: CleanupNode,
   options: DestroyNodeForCleanupOptions
 ): Promise<NodeCleanupDestroyResult> {
+  let preservedVm: PreservedVmRetirement | undefined;
+  if (options.preservedVmBudget) {
+    try {
+      // Retry a repair interrupted after proof was persisted.
+      await repairRetiredVmSleepSnapshots(env, node.id, node.user_id);
+      preservedVm = await preparePreservedVmRetirement(
+        env,
+        node.id,
+        node.user_id,
+        options.preservedVmBudget
+      );
+    } catch (error) {
+      log.warn('node_cleanup.preservation_check_failed', {
+        nodeId: node.id,
+        error: errorMessage(error),
+      });
+      await markNodeCleanupBackoff(
+        env,
+        node.id,
+        new Date(Date.parse(nowIso) + options.failureBackoffMs).toISOString()
+      );
+      await recordSweepDecision(
+        env,
+        node,
+        options,
+        'destroy_failed',
+        'preservation_check_failed',
+        true
+      );
+      return 'failed';
+    }
+  }
+  // A partially spent sweep budget is not a defect in this candidate. Keep it due
+  // for the next tick rather than synchronizing its backoff with unsafe predecessors.
+  if (options.preservedVmBudget?.exhausted) {
+    await recordSweepDecision(env, node, options, 'skipped', 'preservation_budget_exhausted', true);
+    return 'skipped';
+  }
+  if (options.confirmPendingDeletion) {
+    const leaseUntil = new Date(
+      Math.max(Date.parse(nowIso), options.requestDeadlineMs ?? Date.parse(nowIso))
+    ).toISOString();
+    if (!(await claimPendingProviderDeletion(env, node, nowIso, leaseUntil))) {
+      await recordSweepDecision(
+        env,
+        node,
+        options,
+        'skipped',
+        'pending_deletion_claim_refused',
+        true
+      );
+      return 'skipped';
+    }
+    return await runStrictCleanup(db, env, nowIso, node, options, undefined);
+  }
   const claimed = await claimNodeForCleanup(env, node, nowIso, {
+    preservedVm,
+    boundedStrandedRetirement: options.boundedStrandedRetirement,
     allowActiveWorkspaces: options.allowActiveWorkspaces,
     allowManagedRunningProvenance: options.allowManagedRunningProvenance,
     expectedLastHeartbeatAt: options.expectedLastHeartbeatAt,
@@ -361,15 +207,55 @@ export async function destroyNodeForCleanup(
     workspaceIdleThresholdIso: options.workspaceIdleThresholdIso,
   });
   if (!claimed) {
-    log.info('node_cleanup.candidate_claim_lost', {
-      nodeId: node.id,
-      userId: node.user_id,
-      expectedStatus: node.status,
-      ...options.context,
-    });
+    const refusal = await diagnoseCleanupRefusal(
+      env,
+      node,
+      nowIso,
+      options.workspaceIdleThresholdIso ??
+        getNodeWorkspaceIdleThresholdIso(new Date(nowIso), {
+          workspaceIdleTimeoutMs: DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS,
+        } as CleanupConfig),
+      {
+        preservedVm,
+        allowActiveWorkspaces: options.allowActiveWorkspaces,
+        allowManagedRunningProvenance: options.allowManagedRunningProvenance,
+        requireWorkspaceIdle: options.requireWorkspaceIdle,
+      }
+    );
+    if (refusal) {
+      await recordCleanupRefusal(
+        env,
+        node,
+        nowIso,
+        options.failureBackoffMs,
+        refusal,
+        options.blockedRetirementMs,
+        options.refusalWarnAfterMs
+      );
+      await handOffArtifactBlockedEmptyNode(env, node, refusal);
+    }
+    await recordSweepDecision(
+      env,
+      node,
+      options,
+      'skipped',
+      refusalDecisionReason(refusal?.reasons ?? []),
+      true
+    );
     return 'skipped';
   }
+  return await runStrictCleanup(db, env, nowIso, node, options, preservedVm);
+}
 
+/** The strict teardown and its terminal bookkeeping, once the node is claimed. */
+async function runStrictCleanup(
+  db: CleanupDb,
+  env: Env,
+  nowIso: string,
+  node: CleanupNode,
+  options: DestroyNodeForCleanupOptions,
+  preservedVm: PreservedVmRetirement | undefined
+): Promise<NodeCleanupDestroyResult> {
   const controller = options.requestDeadlineMs === undefined ? undefined : new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   if (controller && options.requestDeadlineMs !== undefined) {
@@ -384,16 +270,41 @@ export async function destroyNodeForCleanup(
       userId: node.user_id,
       ...options.context,
     });
+    await recordSweepDecision(env, node, options, 'destroy_attempted', options.recoveryType);
 
     const strictDeletion = controller
       ? await deleteNodeResourcesStrict(node.id, node.user_id, env, {
+          preservedVm,
+          boundedStrandedRetirement: options.boundedStrandedRetirement,
           providerRequestContext: { signal: controller.signal },
           requestDeadlineMs: options.requestDeadlineMs,
+          providerDeletion: options.confirmPendingDeletion ? 'confirm' : options.providerDeletion,
+          providerDeletionConfirmMaxMs: options.providerDeletionConfirmMaxMs,
+          providerDeletionSendGraceMs: options.providerDeletionSendGraceMs,
         })
-      : await deleteNodeResourcesStrict(node.id, node.user_id, env);
+      : await deleteNodeResourcesStrict(
+          node.id,
+          node.user_id,
+          env,
+          ...(preservedVm || options.boundedStrandedRetirement
+            ? [{ preservedVm, boundedStrandedRetirement: options.boundedStrandedRetirement }]
+            : [])
+        );
+    if (strictDeletion.providerVm === 'deletion_pending') {
+      return await recordProviderDeletionPending(env, node, options);
+    }
     if (!strictDeletion.runtimeTerminationConfirmedAt) {
       throw new Error('Strict cleanup returned no managed-runtime termination proof');
     }
+
+    // A confirmed two-phase deletion may have started under preserved-VM or stranded authority
+    // on an earlier tick; the repair is idempotent, so run it for every confirmation too.
+    if (
+      options.preservedVmBudget ||
+      options.boundedStrandedRetirement ||
+      options.confirmPendingDeletion
+    )
+      await repairRetiredVmSleepSnapshots(env, node.id, node.user_id);
 
     const terminalNode = await db
       .update(schema.nodes)
@@ -402,6 +313,8 @@ export async function destroyNodeForCleanup(
         warmSince: null,
         healthStatus: 'stale',
         cleanupBackoffUntil: null,
+        cleanupBlockedSince: null,
+        cleanupBlockedReason: null,
         updatedAt: nowIso,
       })
       .where(
@@ -440,12 +353,61 @@ export async function destroyNodeForCleanup(
     });
 
     await persistCleanupSuccess(env, node, options);
+    await recordSweepDecision(
+      env,
+      node,
+      options,
+      'destroyed',
+      `provider_${strictDeletion.providerVm}`
+    );
 
     return 'destroyed';
   } catch (error) {
-    await handleCleanupFailure(env, node, nowIso, options, error);
+    try {
+      await handleCleanupFailure(env, node, nowIso, options, error);
+    } catch (failureError) {
+      // Failure diagnosis and persistence can fail too. Keep this candidate's
+      // failure from suppressing teardown of the remaining nodes in the phase.
+      log.error('node_cleanup.failure_handler_failed', {
+        nodeId: node.id,
+        userId: node.user_id,
+        error: errorMessage(failureError),
+        originalError: errorMessage(error),
+      });
+    }
+    await recordSweepDecision(env, node, options, 'destroy_failed', errorMessage(error));
     return 'failed';
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
+}
+
+/**
+ * The provider deletion was started (or is still running). Keep the node `destroying` with its
+ * write-ahead record and no backoff, so the confirm phase reads the provider's record next tick.
+ * Nothing is persisted as an error: this is progress, not a failure.
+ */
+async function recordProviderDeletionPending(
+  env: Env,
+  node: CleanupNode,
+  options: DestroyNodeForCleanupOptions
+): Promise<NodeCleanupDestroyResult> {
+  await env.DATABASE.prepare(
+    `UPDATE nodes SET cleanup_backoff_until = NULL
+     WHERE id = ? AND user_id = ? AND status = 'destroying'
+       AND provider_deletion_requested_at IS NOT NULL`
+  )
+    .bind(node.id, node.user_id)
+    .run();
+  await recordSweepDecision(
+    env,
+    node,
+    options,
+    'destroy_pending',
+    options.confirmPendingDeletion
+      ? 'provider_deletion_in_progress'
+      : 'provider_deletion_requested',
+    options.confirmPendingDeletion === true
+  );
+  return 'pending';
 }

@@ -13,8 +13,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { hmacToken } from '../../../src/routes/api-tokens';
 import { connectorMcpRoutes, createConnectorServer } from '../../../src/routes/connector-mcp';
+import { invalidateAdminSettings } from '../../../src/services/admin-settings';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const oauthActor = vi.hoisted(() => ({ value: null as unknown }));
@@ -60,6 +62,7 @@ beforeEach(async () => {
   sqlite = new Database(':memory:');
   createSchemaTables(sqlite, [
     schema.users,
+    schema.asks,
     schema.projects,
     schema.projectMembers,
     schema.tasks,
@@ -99,6 +102,7 @@ describe('Connector real MCP protocol and PAT authorization', () => {
       createConnectorServer(
         {
           env,
+          ports: createOperationPorts(env),
           actor: { userId: 'owner', via: 'pat', scopes: new Set(['sam.read', 'sam.write']) },
           requestId: 'test',
         },
@@ -106,7 +110,7 @@ describe('Connector real MCP protocol and PAT authorization', () => {
       )
     ).not.toThrow();
   });
-  it('real SDK client initializes, lists all 18 annotated tools and reads only current memberships', async () => {
+  it('real SDK client initializes, lists all 46 annotated tools and reads only current memberships', async () => {
     const client = new Client({ name: 'conformance', version: '1' });
     const transport = new StreamableHTTPClientTransport(
       new URL('https://api.test.example.com/connect/mcp'),
@@ -114,7 +118,31 @@ describe('Connector real MCP protocol and PAT authorization', () => {
     );
     await client.connect(transport);
     const catalog = await client.listTools();
-    expect(catalog.tools).toHaveLength(18);
+    expect(catalog.tools).toHaveLength(46);
+    expect(catalog.tools.map((t) => t.name)).toEqual(
+      expect.arrayContaining([
+        'sam_chat_message_get',
+        'sam_team_status',
+        'sam_schedule_create',
+        'sam_channel_history',
+        'sam_chat_interrupt',
+        'sam_chat_status',
+        'sam_chat_delivery_get',
+        'sam_chat_interactions',
+        'sam_work_changes',
+        'sam_chat_jobs_list',
+        'sam_operation_get',
+        'sam_usage_get',
+        'sam_run_receipt',
+        'sam_project_insights',
+      ])
+    );
+    expect(
+      catalog.tools.find((t) => t.name === 'sam_chat_interrupt')?.annotations?.destructiveHint
+    ).toBe(false);
+    expect(
+      catalog.tools.find((t) => t.name === 'sam_chat_interrupt')?.inputSchema.required
+    ).toContain('requestKey');
     for (const tool of catalog.tools) {
       expect(tool.outputSchema).toBeDefined();
       expect(tool.annotations?.openWorldHint).toBe(false);
@@ -175,7 +203,7 @@ describe('Connector real MCP protocol and PAT authorization', () => {
       requestInit: { headers: { Authorization: `Bearer ${token}` } },
     });
     await client.connect(transport);
-    expect((await client.listTools()).tools).toHaveLength(18);
+    expect((await client.listTools()).tools).toHaveLength(46);
     const result = await client.callTool({ name: 'sam_projects_list', arguments: {} });
     expect(JSON.stringify(result)).toContain('My Project');
     await client.close();
@@ -207,12 +235,30 @@ describe('Connector real MCP protocol and PAT authorization', () => {
     expect(denied.res.status).toBe(403);
     expect(denied.res.headers.get('www-authenticate')).toContain('insufficient_scope');
   });
+  it('calls the new receipt read through the real MCP adapter without executing a write', async () => {
+    const { res, json } = await rpc('tools/call', {
+      name: 'sam_operation_get',
+      arguments: {
+        projectId: 'mine',
+        operation: 'sam_chat_start',
+        requestKey: 'not-executed',
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(json.result.structuredContent.data).toMatchObject({
+      state: 'unknown',
+      evidence: 'no_retained_receipt',
+    });
+    expect(sqlite.prepare('SELECT count(*) as n FROM cli_operation_receipts').get()).toEqual({
+      n: 0,
+    });
+  });
   it('disabled installation rejects tokens; write switch hides writes installation-wide', async () => {
     sqlite.exec(
-      `INSERT INTO platform_settings(key,value) VALUES ('connector.writeEnabled','false')`
+      `INSERT INTO platform_settings(key,value,updated_at) VALUES ('connector.writeEnabled','false','2026-10-16T00:00:00Z')`
     );
     const { json } = await rpc('tools/list');
-    expect(json.result.tools).toHaveLength(12);
+    expect(json.result.tools).toHaveLength(33);
     const disabled = await rpc('tools/call', {
       name: 'sam_idea_create',
       arguments: { projectId: 'mine', title: 'Not created' },
@@ -221,7 +267,10 @@ describe('Connector real MCP protocol and PAT authorization', () => {
     expect(disabled.res.headers.get('www-authenticate')).toBeNull();
     expect(disabled.json.result).toMatchObject({ isError: true });
     expect(disabled.json.result.content[0].text).toContain('disabled by the administrator');
-    sqlite.exec(`INSERT INTO platform_settings(key,value) VALUES ('connector.enabled','false')`);
+    sqlite.exec(
+      `INSERT INTO platform_settings(key,value,updated_at) VALUES ('connector.enabled','false','2026-10-16T00:00:00Z')`
+    );
+    invalidateAdminSettings(env);
     expect((await rpc('tools/list')).res.status).toBe(403);
   });
 });

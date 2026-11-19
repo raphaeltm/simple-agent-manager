@@ -12,10 +12,12 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-const taskSubmitSource = readFileSync(
-  resolve(process.cwd(), 'src/services/submit-task.ts'),
-  'utf8'
-);
+const taskSubmitSource = [
+  'src/services/submit-vm-task-effects.ts',
+  'src/services/submit-vm-task.ts',
+]
+  .map((path) => readFileSync(resolve(process.cwd(), path), 'utf8'))
+  .join('\n');
 const taskRunsSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/run.ts'), 'utf8');
 const taskRunnerDoSource = [
   'index.ts',
@@ -31,12 +33,12 @@ const taskRunnerDoSource = [
   .map((f) => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8'))
   .join('\n');
 const projectDataDoSource = [
-  readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/sessions.ts'), 'utf8'),
-  readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/messages.ts'), 'utf8'),
-  readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/index.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), '../../packages/project-data/src/do/sessions.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), '../../packages/project-data/src/do/messages.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), '../../packages/project-data/src/do/index.ts'), 'utf8'),
 ].join('\n');
 const projectDataServiceSource = readFileSync(
-  resolve(process.cwd(), 'src/services/project-data.ts'),
+  resolve(process.cwd(), '../../packages/project-data/src/client/project-data.ts'),
   'utf8'
 );
 const taskRunnerDoServiceSource = readFileSync(
@@ -44,14 +46,18 @@ const taskRunnerDoServiceSource = readFileSync(
   'utf8'
 );
 
+// workspace-steps.ts holds only the workspace_creation step and its helpers since dispatch moved
+// to workspace-dispatch-step.ts, so the module itself is the bounded creation section.
+const workspaceCreationSource = readFileSync(
+  resolve(process.cwd(), 'src/durable-objects/task-runner/workspace-steps.ts'),
+  'utf8'
+);
+
 function getWorkspaceCreationSection(): string {
-  const wsCreationStart = taskRunnerDoSource.indexOf(
-    'export async function handleWorkspaceCreation('
-  );
-  const wsCreationEnd = taskRunnerDoSource.indexOf(
-    'export async function handleWorkspaceDispatch('
-  );
-  return taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
+  if (!workspaceCreationSource.includes('export async function handleWorkspaceCreation(')) {
+    throw new Error('workspace creation step not found in workspace-steps.ts');
+  }
+  return workspaceCreationSource;
 }
 
 // =========================================================================
@@ -127,11 +133,11 @@ describe('TDF-6 Fix 2: No fallback session IDs', () => {
   it('task-submit does NOT have best-effort comment for session creation', () => {
     // Find the session creation area and check it's not marked best-effort
     const sessionArea = taskSubmitSource.slice(
-      taskSubmitSource.indexOf('Create chat session'),
-      taskSubmitSource.indexOf('Persist initial user message')
+      taskSubmitSource.indexOf("setOperation('session_create')"),
+      taskSubmitSource.indexOf("setOperation('initial_message_persist')")
     );
     expect(sessionArea).not.toContain('best-effort');
-    expect(sessionArea).toContain('REQUIRED');
+    expect(sessionArea).toContain('sessionId = await projectDataService.createSession(');
   });
 
   it('task-submit marks task as failed if DO startup fails', () => {
@@ -215,12 +221,12 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
 
 describe('TDF-6 Fix 4: Required session and message persistence', () => {
   it('task-submit persists initial message as REQUIRED', () => {
-    const messageStart = taskSubmitSource.indexOf('Persist initial user message');
+    const messageStart = taskSubmitSource.indexOf("setOperation('initial_message_persist')");
     const backgroundWorkStart = taskSubmitSource.indexOf('schedulePostSubmitWork(', messageStart);
     expect(messageStart).toBeGreaterThanOrEqual(0);
     expect(backgroundWorkStart).toBeGreaterThan(messageStart);
     const messageArea = taskSubmitSource.slice(messageStart, backgroundWorkStart);
-    expect(messageArea).toContain('REQUIRED');
+    expect(messageArea).toContain('await projectDataService.persistMessage(');
     expect(messageArea).not.toContain('best-effort');
   });
 

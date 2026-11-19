@@ -305,7 +305,10 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
     expect(claimed).toBe(true);
     expect(claimed1.status).toBe('active');
 
-    // 3. Mark idle again (task finished)
+    // 3. Mark idle again (task finished; its placement claim is no longer live).
+    await env.DATABASE.prepare("UPDATE tasks SET status = 'completed' WHERE id = ?")
+      .bind('task-lc-001')
+      .run();
     const idle2 = await markIdle(env, nodeId, TEST_USER_ID, 30_000);
     expect(idle2.status).toBe('warm');
 

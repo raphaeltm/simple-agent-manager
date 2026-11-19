@@ -1,0 +1,481 @@
+{
+  "sourceCommit": "f76e77369659c1cd6862c5c8936ded5c0dec0cbb",
+  "stagingDeployRun": 40385983738,
+  "smokeTestsPassed": 12,
+  "signedFixtureRuns": {
+    "sequential": 40389354679,
+    "samePrComments": 40392018612,
+    "sleepingFollowup": 40395075615,
+    "expiry": 40396532269,
+    "inline": 40397144489,
+    "submittedReviewSameTrigger": 40398575145
+  },
+  "observations": [
+    {
+      "mode": "wait",
+      "goal": "first",
+      "case": "queue",
+      "marker": "github-trigger-audit-6385a65b-4dad-4edc-af57-fab684fe7d73",
+      "triggerId": "01M5WVTB8NMNDKTQ2TPRFA762V",
+      "executions": [
+        {
+          "id": "01M5WVWFSSHT185AGM486V27Z7",
+          "eventType": "github.issues.opened",
+          "status": "waiting",
+          "skipReason": null,
+          "subjectKey": null,
+          "taskId": null,
+          "routedExecutionId": null,
+          "routedTaskId": null,
+          "routedSessionId": null,
+          "contextExpanded": true
+        },
+        {
+          "id": "01M5WVWF79NS6GWTM8X8WWGKSB",
+          "eventType": "github.issues.opened",
+          "status": "running",
+          "skipReason": null,
+          "subjectKey": null,
+          "taskId": "01M5WVWF79NS6GWTM8X8WWGKSB",
+          "routedExecutionId": null,
+          "routedTaskId": null,
+          "routedSessionId": null,
+          "contextExpanded": true
+        }
+      ],
+      "tasks": [
+        {
+          "id": "01M5WVWF79NS6GWTM8X8WWGKSB",
+          "status": "in_progress",
+          "executionStep": "awaiting_followup",
+          "workspaceId": "01M5WW2MBBBETP3R5DN3AYZHPW",
+          "sessionId": "chat_01M5WVWF79NS6GWTM8X8WWGKSB",
+          "nodeId": "01M5WVWVB8AJMW1BY1VE13Z3FS",
+          "sessionStatus": "active",
+          "currentTaskId": "01M5WVWF79NS6GWTM8X8WWGKSB",
+          "assistantReplies": 1
+        }
+      ]
+    },
+    {
+      "mode": "wait",
+      "goal": "second",
+      "case": "queue",
+      "marker": "github-trigger-audit-6385a65b-4dad-4edc-af57-fab684fe7d73",
+      "triggerId": "01M5WVTB8NMNDKTQ2TPRFA762V",
+      "executions": [
+        {
+          "id": "01M5WVWFSSHT185AGM486V27Z7",
+          "eventType": "github.issues.opened",
+          "status": "running",
+          "skipReason": null,
+          "subjectKey": null,
+          "taskId": "01M5WVWFSSHT185AGM486V27Z7",
+          "routedExecutionId": null,
+          "routedTaskId": null,
+          "routedSessionId": null,
+          "contextExpanded": true
+        },
+        {
+          "id": "01M5WVWF79NS6GWTM8X8WWGKSB",
+          "eventType": "github.issues.opened",
+          "status": "completed",
+          "skipReason": null,
+          "subjectKey": null,
+          "taskId": "01M5WVWF79NS6GWTM8X8WWGKSB",
+          "routedExecutionId": null,
+          "routedTaskId": null,
+          "routedSessionId": null,
+          "contextExpanded": true
+        }
+      ],
+      "tasks": [
+        {
+          "id": "01M5WVWFSSHT185AGM486V27Z7",
+          "status": "in_progress",
+          "executionStep": "awaiting_followup",
+          "workspaceId": "01M5WWJBX4XE88WAFJ79A477DW",
+          "sessionId": "chat_01M5WVWFSSHT185AGM486V27Z7",
+          "nodeId": "01M5WVWVB8AJMW1BY1VE13Z3FS",
+          "sessionStatus": "active",
+          "currentTaskId": "01M5WVWFSSHT185AGM486V27Z7",
+          "assistantReplies": 1
+        },
+        {
+          "id": "01M5WVWF79NS6GWTM8X8WWGKSB",
+          "status": "completed",
+          "executionStep": null,
+          "workspaceId": "01M5WW2MBBBETP3R5DN3AYZHPW",
+          "sessionId": "chat_01M5WVWF79NS6GWTM8X8WWGKSB",
+          "nodeId": "01M5WVWVB8AJMW1BY1VE13Z3FS",
+          "sessionStatus": "sleeping",
+          "currentTaskId": "01M5WVWF79NS6GWTM8X8WWGKSB",
+          "assistantReplies": 1
+        }
+      ]
+    },
+    {
+      "mode": "wait",
+      "goal": "routed",
+      "case": "affinity",
+      "marker": "github-trigger-audit-8c7489e8-e698-47ae-bb4d-ed7c93b3aaab",
+      "triggerId": "01M5WWVCBM8FZG1NDDSBHKWB6N",
+      "executions": [
+        {
+          "id": "01M5WWX7JY3EGB4FEWEMAW07WH",
+          "eventType": "github.issue_comment.created",
+          "status": "routed",
+          "skipReason": null,
+          "subjectKey": "github:1152713375:7",
+          "taskId": null,
+          "routedExecutionId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "routedTaskId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "routedSessionId": "chat_01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "contextExpanded": true
+        },
+        {
+          "id": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "eventType": "github.issue_comment.created",
+          "status": "running",
+          "skipReason": null,
+          "subjectKey": "github:1152713375:7",
+          "taskId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "routedExecutionId": null,
+          "routedTaskId": null,
+          "routedSessionId": null,
+          "contextExpanded": true
+        }
+      ],
+      "tasks": [
+        {
+          "id": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "status": "in_progress",
+          "executionStep": "awaiting_followup",
+          "workspaceId": "01M5WWXKAKWTKG28SS8G1402MQ",
+          "sessionId": "chat_01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "nodeId": "01M5WVWVB8AJMW1BY1VE13Z3FS",
+          "sessionStatus": "active",
+          "currentTaskId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "assistantReplies": 2
+        }
+      ]
+    },
+    {
+      "mode": "status",
+      "case": "affinity",
+      "marker": "github-trigger-audit-8c7489e8-e698-47ae-bb4d-ed7c93b3aaab",
+      "triggerId": "01M5WWVCBM8FZG1NDDSBHKWB6N",
+      "executions": [
+        {
+          "id": "01M5WWX7JY3EGB4FEWEMAW07WH",
+          "eventType": "github.issue_comment.created",
+          "status": "routed",
+          "skipReason": null,
+          "subjectKey": "github:1152713375:7",
+          "taskId": null,
+          "routedExecutionId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "routedTaskId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "routedSessionId": "chat_01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "contextExpanded": true
+        },
+        {
+          "id": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "eventType": "github.issue_comment.created",
+          "status": "running",
+          "skipReason": null,
+          "subjectKey": "github:1152713375:7",
+          "taskId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "routedExecutionId": null,
+          "routedTaskId": null,
+          "routedSessionId": null,
+          "contextExpanded": true
+        }
+      ],
+      "tasks": [
+        {
+          "id": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "status": "sleeping",
+          "executionStep": null,
+          "workspaceId": "01M5WWXKAKWTKG28SS8G1402MQ",
+          "sessionId": "chat_01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "nodeId": "01M5WVWVB8AJMW1BY1VE13Z3FS",
+          "sessionStatus": "sleeping",
+          "workspaceStatus": "sleeping",
+          "currentTaskId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "assistantReplies": 2
+        }
+      ]
+    },
+    {
+      "mode": "wait",
+      "goal": "wake",
+      "case": "affinity",
+      "marker": "github-trigger-audit-8c7489e8-e698-47ae-bb4d-ed7c93b3aaab",
+      "triggerId": "01M5WWVCBM8FZG1NDDSBHKWB6N",
+      "executions": [
+        {
+          "id": "01M5WY38PVGCYD0YD5R0DK4NMX",
+          "eventType": "github.issue_comment.created",
+          "status": "routed",
+          "skipReason": null,
+          "subjectKey": "github:1152713375:7",
+          "taskId": null,
+          "routedExecutionId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "routedTaskId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "routedSessionId": "chat_01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "contextExpanded": true
+        },
+        {
+          "id": "01M5WWX7JY3EGB4FEWEMAW07WH",
+          "eventType": "github.issue_comment.created",
+          "status": "routed",
+          "skipReason": null,
+          "subjectKey": "github:1152713375:7",
+          "taskId": null,
+          "routedExecutionId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "routedTaskId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "routedSessionId": "chat_01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "contextExpanded": true
+        },
+        {
+          "id": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "eventType": "github.issue_comment.created",
+          "status": "running",
+          "skipReason": null,
+          "subjectKey": "github:1152713375:7",
+          "taskId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "routedExecutionId": null,
+          "routedTaskId": null,
+          "routedSessionId": null,
+          "contextExpanded": true
+        }
+      ],
+      "tasks": [
+        {
+          "id": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "status": "in_progress",
+          "executionStep": "awaiting_followup",
+          "workspaceId": "01M5WYBSQ20A92BWFJRGJZZ6S0",
+          "sessionId": "chat_01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "nodeId": "01M5WVWVB8AJMW1BY1VE13Z3FS",
+          "sessionStatus": "active",
+          "workspaceStatus": "running",
+          "currentTaskId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "assistantReplies": 3
+        }
+      ]
+    },
+    {
+      "mode": "wait",
+      "goal": "expired",
+      "case": "affinity",
+      "marker": "github-trigger-audit-8c7489e8-e698-47ae-bb4d-ed7c93b3aaab",
+      "triggerId": "01M5WWVCBM8FZG1NDDSBHKWB6N",
+      "executions": [
+        {
+          "id": "01M5WYMQ9ZBBMXKT6YBYXY7QY2",
+          "eventType": "github.issues.opened",
+          "status": "dropped",
+          "skipReason": "queue_expired",
+          "subjectKey": "github:1152713375:9",
+          "taskId": null,
+          "routedExecutionId": null,
+          "routedTaskId": null,
+          "routedSessionId": null,
+          "contextExpanded": true
+        },
+        {
+          "id": "01M5WY38PVGCYD0YD5R0DK4NMX",
+          "eventType": "github.issue_comment.created",
+          "status": "routed",
+          "skipReason": null,
+          "subjectKey": "github:1152713375:7",
+          "taskId": null,
+          "routedExecutionId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "routedTaskId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "routedSessionId": "chat_01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "contextExpanded": true
+        },
+        {
+          "id": "01M5WWX7JY3EGB4FEWEMAW07WH",
+          "eventType": "github.issue_comment.created",
+          "status": "routed",
+          "skipReason": null,
+          "subjectKey": "github:1152713375:7",
+          "taskId": null,
+          "routedExecutionId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "routedTaskId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "routedSessionId": "chat_01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "contextExpanded": true
+        },
+        {
+          "id": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "eventType": "github.issue_comment.created",
+          "status": "running",
+          "skipReason": null,
+          "subjectKey": "github:1152713375:7",
+          "taskId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "routedExecutionId": null,
+          "routedTaskId": null,
+          "routedSessionId": null,
+          "contextExpanded": true
+        }
+      ],
+      "tasks": [
+        {
+          "id": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "status": "in_progress",
+          "executionStep": "awaiting_followup",
+          "workspaceId": "01M5WYBSQ20A92BWFJRGJZZ6S0",
+          "sessionId": "chat_01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "nodeId": "01M5WVWVB8AJMW1BY1VE13Z3FS",
+          "sessionStatus": "active",
+          "workspaceStatus": "running",
+          "currentTaskId": "01M5WWX7J6W6FG6JJYFGNVX4G6",
+          "assistantReplies": 3
+        }
+      ]
+    },
+    {
+      "mode": "wait",
+      "goal": "routed",
+      "case": "inline",
+      "marker": "github-trigger-audit-1c0de28c-c2c1-42bc-aa3e-5cc900b8fb2e",
+      "triggerId": "01M5WYVB17GEDNT8C3NRYPXFQK",
+      "executions": [
+        {
+          "id": "01M5WYW8N8X92YXD1KZCD25PM6",
+          "eventType": "github.pull_request_review_comment.created",
+          "status": "routed",
+          "skipReason": null,
+          "subjectKey": "github:1152713375:7",
+          "taskId": null,
+          "routedExecutionId": "01M5WYW7FMAWM5GV0F7EY5RPZH",
+          "routedTaskId": "01M5WYW7FMAWM5GV0F7EY5RPZH",
+          "routedSessionId": "chat_01M5WYW7FMAWM5GV0F7EY5RPZH",
+          "contextExpanded": true,
+          "inlineContext": true
+        },
+        {
+          "id": "01M5WYW7FMAWM5GV0F7EY5RPZH",
+          "eventType": "github.pull_request_review_comment.created",
+          "status": "running",
+          "skipReason": null,
+          "subjectKey": "github:1152713375:7",
+          "taskId": "01M5WYW7FMAWM5GV0F7EY5RPZH",
+          "routedExecutionId": null,
+          "routedTaskId": null,
+          "routedSessionId": null,
+          "contextExpanded": true,
+          "inlineContext": true
+        }
+      ],
+      "tasks": [
+        {
+          "id": "01M5WYW7FMAWM5GV0F7EY5RPZH",
+          "status": "in_progress",
+          "executionStep": "awaiting_followup",
+          "workspaceId": "01M5WYWPJNF95V30XBGKSPR03R",
+          "sessionId": "chat_01M5WYW7FMAWM5GV0F7EY5RPZH",
+          "nodeId": "01M5WVWVB8AJMW1BY1VE13Z3FS",
+          "sessionStatus": "active",
+          "workspaceStatus": "running",
+          "currentTaskId": "01M5WYW7FMAWM5GV0F7EY5RPZH",
+          "assistantReplies": 2
+        }
+      ]
+    },
+    {
+      "mode": "wait",
+      "goal": "review",
+      "case": "inline",
+      "marker": "github-trigger-audit-1c0de28c-c2c1-42bc-aa3e-5cc900b8fb2e",
+      "triggerId": "01M5WYVB17GEDNT8C3NRYPXFQK",
+      "executions": [
+        {
+          "id": "01M5WZE4MTTRZ43TKQ3RV4EN0E",
+          "eventType": "github.pull_request_review.submitted",
+          "status": "routed",
+          "skipReason": null,
+          "subjectKey": "github:1152713375:7",
+          "taskId": null,
+          "routedExecutionId": "01M5WYW7FMAWM5GV0F7EY5RPZH",
+          "routedTaskId": "01M5WYW7FMAWM5GV0F7EY5RPZH",
+          "routedSessionId": "chat_01M5WYW7FMAWM5GV0F7EY5RPZH",
+          "contextExpanded": true,
+          "reviewContext": true
+        },
+        {
+          "id": "01M5WYW8N8X92YXD1KZCD25PM6",
+          "eventType": "github.pull_request_review_comment.created",
+          "status": "routed",
+          "skipReason": null,
+          "subjectKey": "github:1152713375:7",
+          "taskId": null,
+          "routedExecutionId": "01M5WYW7FMAWM5GV0F7EY5RPZH",
+          "routedTaskId": "01M5WYW7FMAWM5GV0F7EY5RPZH",
+          "routedSessionId": "chat_01M5WYW7FMAWM5GV0F7EY5RPZH",
+          "contextExpanded": true,
+          "inlineContext": true
+        },
+        {
+          "id": "01M5WYW7FMAWM5GV0F7EY5RPZH",
+          "eventType": "github.pull_request_review_comment.created",
+          "status": "running",
+          "skipReason": null,
+          "subjectKey": "github:1152713375:7",
+          "taskId": "01M5WYW7FMAWM5GV0F7EY5RPZH",
+          "routedExecutionId": null,
+          "routedTaskId": null,
+          "routedSessionId": null,
+          "contextExpanded": true,
+          "inlineContext": true
+        }
+      ],
+      "tasks": [
+        {
+          "id": "01M5WYW7FMAWM5GV0F7EY5RPZH",
+          "status": "in_progress",
+          "executionStep": "awaiting_followup",
+          "workspaceId": "01M5WYWPJNF95V30XBGKSPR03R",
+          "sessionId": "chat_01M5WYW7FMAWM5GV0F7EY5RPZH",
+          "nodeId": "01M5WVWVB8AJMW1BY1VE13Z3FS",
+          "sessionStatus": "active",
+          "workspaceStatus": "running",
+          "currentTaskId": "01M5WYW7FMAWM5GV0F7EY5RPZH",
+          "assistantReplies": 3
+        }
+      ]
+    }
+  ],
+  "fixtureCleanup": [
+    {
+      "kind": "queue",
+      "triggerId": "01M5WVTB8NMNDKTQ2TPRFA762V",
+      "cleanedAt": "2026-10-26T19:59:34.402Z"
+    },
+    {
+      "kind": "affinity",
+      "triggerId": "01M5WWVCBM8FZG1NDDSBHKWB6N",
+      "cleanedAt": "2026-10-26T20:36:15.954Z"
+    },
+    {
+      "kind": "inline",
+      "triggerId": "01M5WYVB17GEDNT8C3NRYPXFQK",
+      "cleanedAt": "2026-10-26T20:51:20.142Z"
+    }
+  ],
+  "scope": "Per-trigger affinity. Submitted review verified after editing SAME trigger; no cross-trigger mixed-event coalescing or PR watches.",
+  "nodeCleanup": {
+    "nodeId": "01M5WVWVB8AJMW1BY1VE13Z3FS",
+    "confirmedAt": "2026-10-26T20:52:47.020Z",
+    "remainingWorkspaces": 0
+  },
+  "finalInventory": {
+    "ownedTriggers": 0,
+    "ownedWorkspaces": "deleted or absent",
+    "ownedNode": "absent",
+    "preExistingNodes": "unchanged: three sleeping, one error",
+    "verifiedAt": "2026-10-26T20:53:28Z"
+  }
+}

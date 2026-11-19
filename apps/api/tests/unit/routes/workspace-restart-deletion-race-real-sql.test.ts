@@ -42,7 +42,9 @@ vi.mock('../../../src/services/boot-log', () => ({
 }));
 vi.mock('../../../src/services/jwt', () => ({
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
   signNodeCallbackToken: vi.fn(),
+  signCurrentNodeCallbackToken: vi.fn(),
   signNodeManagementToken: (...args: unknown[]) => mocks.signNodeManagementToken(...args),
   verifyCallbackToken: vi.fn(),
 }));
@@ -155,6 +157,12 @@ describe('workspace runtime recreation/deletion races — real SQL', () => {
         : c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500)
     );
     app.route('/api/workspaces', lifecycleRoutes);
+    prepareEvictedRestart();
+    sqlite
+      .prepare(
+        "UPDATE workspaces SET status = 'stopped', eviction_generation = NULL, eviction_finalized_at = NULL WHERE id = ?"
+      )
+      .run(WORKSPACE_ID);
   });
 
   afterEach(() => {
@@ -195,10 +203,85 @@ describe('workspace runtime recreation/deletion races — real SQL', () => {
     sqlite
       .prepare(
         `INSERT INTO project_members (project_id, user_id, role, status)
-      VALUES (?, ?, 'owner', 'active')`
+      VALUES (?, ?, 'owner', 'active') ON CONFLICT DO NOTHING`
       )
       .run(PROJECT_ID, USER_ID);
   }
+
+  it.each([
+    ['restart', 'stopped'],
+    ['restart', 'error'],
+    ['rebuild', 'error'],
+  ] as const)('readmits %s from %s only below the disk cutoff', async (action, status) => {
+    sqlite.prepare('UPDATE workspaces SET status = ? WHERE id = ?').run(status, WORKSPACE_ID);
+    for (const diskPercent of [80, 92]) {
+      sqlite
+        .prepare("UPDATE nodes SET last_metrics = json_set(last_metrics, '$.diskPercent', ?)")
+        .run(diskPercent);
+      expect((await requestLifecycle(action)).status).toBe(409);
+      expect(workspaceStatus()).toBe(status);
+      expect(waitUntilPromises).toHaveLength(0);
+    }
+    sqlite
+      .prepare("UPDATE nodes SET last_metrics = json_set(last_metrics, '$.diskPercent', ?)")
+      .run(79.99);
+    expect((await requestLifecycle(action)).status).toBe(action === 'rebuild' ? 202 : 200);
+    await Promise.all(waitUntilPromises);
+  });
+
+  it.each(['restart', 'rebuild'] as const)(
+    'rejects %s from error with stale or missing occupied-node telemetry',
+    async (action) => {
+      sqlite.prepare("UPDATE workspaces SET status = 'error' WHERE id = ?").run(WORKSPACE_ID);
+      sqlite
+        .prepare(
+          `INSERT INTO workspaces
+      (id, node_id, user_id, project_id, status, resolved_reservation_json)
+      SELECT 'sibling', node_id, user_id, project_id, 'running', resolved_reservation_json
+      FROM workspaces WHERE id = ?`
+        )
+        .run(WORKSPACE_ID);
+      for (const mutation of [
+        "last_heartbeat_at = '2020-01-01T00:00:00.000Z'",
+        'last_metrics = NULL',
+      ]) {
+        sqlite.prepare('UPDATE nodes SET last_heartbeat_at = ?').run(new Date().toISOString());
+        sqlite.exec(`UPDATE nodes SET ${mutation}`);
+        expect((await requestLifecycle(action)).status).toBe(409);
+        expect(workspaceStatus()).toBe('error');
+        expect(waitUntilPromises).toHaveLength(0);
+      }
+    }
+  );
+
+  it.each(['restart', 'rebuild'] as const)(
+    'fails closed on legacy inactive %s without project or reservation',
+    async (action) => {
+      sqlite
+        .prepare(
+          "UPDATE workspaces SET status = 'error', resolved_reservation_json = NULL WHERE id = ?"
+        )
+        .run(WORKSPACE_ID);
+      expect((await requestLifecycle(action)).status).toBe(409);
+      sqlite.prepare('UPDATE workspaces SET project_id = NULL WHERE id = ?').run(WORKSPACE_ID);
+      expect((await requestLifecycle(action)).status).toBe(409);
+      expect(workspaceStatus()).toBe('error');
+      expect(waitUntilPromises).toHaveLength(0);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['running', 'recovery'] as const)(
+    'preserves an already %s workspace rebuild above the cutoff',
+    async (status) => {
+      sqlite.prepare('UPDATE workspaces SET status = ? WHERE id = ?').run(status, WORKSPACE_ID);
+      sqlite
+        .prepare("UPDATE nodes SET last_metrics = json_set(last_metrics, '$.diskPercent', 92)")
+        .run();
+      expect((await requestLifecycle('rebuild')).status).toBe(202);
+      await Promise.all(waitUntilPromises);
+    }
+  );
 
   it('snapshots the current generation for an internal VM Stop before a delayed network request', async () => {
     sqlite
@@ -319,6 +402,67 @@ describe('workspace runtime recreation/deletion races — real SQL', () => {
     expect(sqlite.prepare('SELECT id FROM compute_usage').all()).toEqual([]);
   });
 
+  it.each(['restart', 'rebuild'] as const)(
+    'recovers from %s boot-log storage failure and permits a clean retry',
+    async (action) => {
+      if (action === 'rebuild') sqlite.exec("UPDATE workspaces SET status = 'running'");
+      mocks.writeBootLogs.mockRejectedValueOnce(new Error('Activation/DO unavailable'));
+      expect((await requestLifecycle(action)).status).toBe(action === 'rebuild' ? 202 : 200);
+      await Promise.all(waitUntilPromises);
+      expect(workspaceStatus()).toBe('error');
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+      expect(sqlite.prepare('SELECT error_message FROM workspaces').get()).toEqual({
+        error_message: 'Activation/DO unavailable',
+      });
+
+      waitUntilPromises = [];
+      expect((await requestLifecycle(action)).status).toBe(action === 'rebuild' ? 202 : 200);
+      await Promise.all(waitUntilPromises);
+      expect(workspaceStatus()).toBe('creating');
+      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+      expect(mocks.writeBootLogs).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it.each(['restart', 'rebuild'] as const)(
+    'does not overwrite a successor lifecycle claim when %s log clear fails',
+    async (action) => {
+      if (action === 'rebuild') sqlite.exec("UPDATE workspaces SET status = 'running'");
+      mocks.writeBootLogs.mockImplementationOnce(async () => {
+        sqlite.exec("UPDATE workspaces SET status = 'stopping'");
+        throw new Error('DO unavailable');
+      });
+      expect((await requestLifecycle(action)).status).toBe(action === 'rebuild' ? 202 : 200);
+      await Promise.all(waitUntilPromises);
+      expect(workspaceStatus()).toBe('stopping');
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['restart', 'rebuild'] as const)(
+    'starts a new creating attempt clock on %s and clears the previous build start',
+    async (action) => {
+      // Rebuild from running writes in the route (lifecycle.ts); restart goes through
+      // reserveWorkspaceRestart. Both must start the attempt the shared deadline reads.
+      if (action === 'rebuild') sqlite.exec("UPDATE workspaces SET status = 'running'");
+      sqlite.exec(
+        `UPDATE workspaces SET creating_started_at = '2026-01-01T00:00:00.000Z',
+           build_started_at = '2026-01-01T00:01:00.000Z'`
+      );
+      const before = Date.now();
+
+      expect((await requestLifecycle(action)).status).toBe(action === 'rebuild' ? 202 : 200);
+      await Promise.all(waitUntilPromises);
+
+      const clock = sqlite
+        .prepare('SELECT status, creating_started_at, build_started_at FROM workspaces')
+        .get() as { status: string; creating_started_at: string; build_started_at: string | null };
+      expect(clock.status).toBe('creating');
+      expect(Date.parse(clock.creating_started_at)).toBeGreaterThanOrEqual(before - 1000);
+      expect(clock.build_started_at).toBeNull();
+    }
+  );
+
   it('fails closed when compute tracking cannot start', async () => {
     prepareEvictedRestart();
     sqlite.exec(`CREATE TRIGGER reject_usage BEFORE INSERT ON compute_usage
@@ -427,7 +571,7 @@ describe('workspace runtime recreation/deletion races — real SQL', () => {
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({
-      message: 'Workspace changed while restart cancellation was being claimed',
+      message: 'Workspace restart requires current compute authority and available node capacity',
     });
     expect(workspaceStatus()).toBe('stopping');
     expect(globalThis.fetch).not.toHaveBeenCalled();
@@ -488,7 +632,7 @@ describe('workspace runtime recreation/deletion races — real SQL', () => {
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({
-      message: 'Workspace changed while rebuild cancellation was being claimed',
+      message: 'Workspace rebuild requires current compute authority and available node capacity',
     });
     expect(workspaceStatus()).toBe('stopping');
     expect(globalThis.fetch).not.toHaveBeenCalled();

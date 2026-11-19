@@ -19,6 +19,7 @@ import {
   isToolStripMode,
   type SessionToolAction,
   type SessionToolId,
+  taskEndIntent,
   TOOL_STRIP_MODE_STORAGE_KEY,
   type ToolStripMode,
 } from './session-tool-actions';
@@ -52,15 +53,28 @@ export interface UseSessionToolsInput {
   taskEmbed: ChatSessionResponse['task'] | null;
   unresolvedCommentCount: number;
   needsAttentionCommentCount: number;
+  /** Ideas, files and pull requests linked to this chat — drives the Related badge. */
+  relatedCount?: number;
+  /** True when `relatedCount` is a minimum, so the badge reads "N+". */
+  relatedCountIsLowerBound?: boolean;
   onSessionMutated?: () => void;
   onOpenFiles?: () => void;
   onOpenGit?: () => void;
   onOpenTimeline?: () => void;
   onOpenResources?: () => void;
-  onOpenEvents?: () => void;
+  onOpenAutomation?: () => void;
+  onOpenReceipt?: () => void;
+  onOpenRelated?: () => void;
   onOpenComments?: () => void;
   onRetry?: () => void;
   onFork?: () => void;
+  onOpenShare?: () => void;
+  /** Active shared-access grants on this session. */
+  sharedWithCount?: number;
+  /** Owner and grantees can add or remove people; everyone else only sees who has access. */
+  canManageShare?: boolean;
+  /** Owner and grantees browse workspace files; a grantee's reads stay in the repository. */
+  canBrowseWorkspace?: boolean;
 }
 
 export interface UseSessionToolsResult {
@@ -74,6 +88,8 @@ export interface UseSessionToolsResult {
   reportOpen: boolean;
   closeReport: () => void;
   confirmCompleteOpen: boolean;
+  /** What the open confirm dialog will do: complete a started task or cancel an unstarted one. */
+  confirmIntent: 'completed' | 'cancelled';
   closeConfirmComplete: () => void;
   confirmComplete: () => Promise<void>;
   completeError: string | null;
@@ -88,15 +104,23 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     taskEmbed,
     unresolvedCommentCount,
     needsAttentionCommentCount,
+    relatedCount = 0,
+    relatedCountIsLowerBound = false,
     onSessionMutated,
     onOpenFiles,
     onOpenGit,
     onOpenTimeline,
     onOpenResources,
-    onOpenEvents,
+    onOpenAutomation,
+    onOpenReceipt,
+    onOpenRelated,
     onOpenComments,
     onRetry,
     onFork,
+    onOpenShare,
+    sharedWithCount = 0,
+    canManageShare = false,
+    canBrowseWorkspace = true,
   } = input;
 
   const [mode, setMode] = useState<ToolStripMode>(readStoredMode);
@@ -105,6 +129,13 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
   const [confirmCompleteOpen, setConfirmCompleteOpen] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
+  // Derived from the live status, never captured at click time: a task that starts while the
+  // dialog is open must not be cancelled under "has not started" copy (and vice versa).
+  const endIntent = taskEndIntent(taskEmbed?.status);
+  // The status the task had when an end action succeeded. Until a refetch moves it, the control
+  // stays disabled so a second press cannot re-send against stale state.
+  const [settledStatus, setSettledStatus] = useState<string | null>(null);
+  const ending = completing || (settledStatus !== null && settledStatus === taskEmbed?.status);
 
   const queryScope = useQueryScope();
   const reportConfig = useQuery({
@@ -131,24 +162,36 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
   }, []);
 
   const confirmComplete = useCallback(async () => {
-    if (!taskEmbed?.id || completing) return;
+    if (!taskEmbed?.id || ending || !endIntent) {
+      setConfirmCompleteOpen(false);
+      return;
+    }
+    const confirmIntent = endIntent;
     setCompleteError(null);
     setCompleting(true);
     setConfirmCompleteOpen(false);
     try {
       // Task completion snapshots and sleeps resumable sessions server-side.
       // Destructive workspace deletion belongs only to the explicit archive/delete flow.
-      await updateProjectTaskStatus(projectId, taskEmbed.id, { toStatus: 'completed' });
+      // A task that never started can only be cancelled, which retires its queued run.
+      await updateProjectTaskStatus(projectId, taskEmbed.id, { toStatus: confirmIntent });
       // Reset before the callback so the button is not stuck in "Completing..." if the
       // parent's refresh is slower than expected.
+      setSettledStatus(taskEmbed.status ?? null);
       setCompleting(false);
       onSessionMutated?.();
     } catch (err) {
-      console.error('Failed to mark task complete:', err);
-      setCompleteError(err instanceof Error ? err.message : 'Failed to complete task');
+      console.error(`Failed to set task ${confirmIntent}:`, err);
+      setCompleteError(
+        err instanceof Error
+          ? err.message
+          : confirmIntent === 'cancelled'
+            ? 'Failed to cancel task'
+            : 'Failed to complete task'
+      );
       setCompleting(false);
     }
-  }, [projectId, taskEmbed?.id, completing, onSessionMutated]);
+  }, [projectId, taskEmbed?.id, taskEmbed?.status, ending, endIntent, onSessionMutated]);
 
   // Memoized: an inline array would hand the rail a new prop identity on every poll
   // tick, remounting the whole strip mid-interaction (rule 64).
@@ -161,15 +204,23 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
       reportEnabled,
       unresolvedCommentCount,
       needsAttentionCommentCount,
+      relatedCount,
+      relatedCountIsLowerBound,
       hasFilesHandler: !!onOpenFiles,
       hasGitHandler: !!onOpenGit,
       hasTimelineHandler: !!onOpenTimeline,
       hasResourcesHandler: !!onOpenResources,
-      hasEventsHandler: !!onOpenEvents,
+      hasAutomationHandler: !!onOpenAutomation,
+      hasReceiptHandler: !!onOpenReceipt,
+      hasRelatedHandler: !!onOpenRelated,
       hasCommentsHandler: !!onOpenComments,
       hasRetryHandler: !!onRetry,
       hasForkHandler: !!onFork,
-      completing,
+      hasShareHandler: !!onOpenShare,
+      sharedWithCount,
+      canManageShare,
+      canBrowseWorkspace,
+      completing: ending,
       detailsExpanded,
     });
   }, [
@@ -179,15 +230,23 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     reportEnabled,
     unresolvedCommentCount,
     needsAttentionCommentCount,
+    relatedCount,
+    relatedCountIsLowerBound,
     onOpenFiles,
     onOpenGit,
     onOpenTimeline,
     onOpenResources,
-    onOpenEvents,
+    onOpenAutomation,
+    onOpenReceipt,
+    onOpenRelated,
     onOpenComments,
     onRetry,
     onFork,
-    completing,
+    onOpenShare,
+    sharedWithCount,
+    canManageShare,
+    canBrowseWorkspace,
+    ending,
     detailsExpanded,
   ]);
 
@@ -206,11 +265,20 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
         case 'resources':
           onOpenResources?.();
           break;
-        case 'events':
-          onOpenEvents?.();
+        case 'automation':
+          onOpenAutomation?.();
+          break;
+        case 'related':
+          onOpenRelated?.();
+          break;
+        case 'receipt':
+          onOpenReceipt?.();
           break;
         case 'comments':
           onOpenComments?.();
+          break;
+        case 'share':
+          onOpenShare?.();
           break;
         case 'retry':
           onRetry?.();
@@ -222,6 +290,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
           setReportOpen(true);
           break;
         case 'complete':
+        case 'cancel':
           setConfirmCompleteOpen(true);
           break;
         case 'details':
@@ -239,8 +308,11 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
       onOpenGit,
       onOpenTimeline,
       onOpenResources,
-      onOpenEvents,
+      onOpenAutomation,
+      onOpenReceipt,
+      onOpenRelated,
       onOpenComments,
+      onOpenShare,
       onRetry,
       onFork,
     ]
@@ -260,6 +332,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     reportOpen,
     closeReport,
     confirmCompleteOpen,
+    confirmIntent: endIntent ?? 'completed',
     closeConfirmComplete,
     confirmComplete,
     completeError,

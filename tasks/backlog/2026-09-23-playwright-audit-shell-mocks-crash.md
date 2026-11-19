@@ -1,5 +1,20 @@
 # Playwright audit specs crash the app shell when `/api/credentials` is unmocked
 
+> **Reconciliation 2026-11-02:** Partly addressed per spec, not centrally. #2481 (`20db08dc5`)
+> gave `admin-trials-audit.spec.ts` its own shell mocks (`/api/credentials` and
+> `/api/github/installations` as `[]`), a notifications WebSocket stub and the onboarding-wizard
+> dismissal (`:28-36`). It did the same for five other admin/auth audit specs. Still open:
+> array-shaped defaults and wizard dismissal in `setupAuditRoutes` (it still falls back to `{}` at
+> `audit-routes.ts:106`), a loud fallback for unmatched paths, and a full-corpus run. The spec is
+> still quarantined, so CI does not prove it passes.
+
+> **Reconciliation 2026-10-26:** Partly done. #2439 (`d41ff95d6`) moved `setupAuditRoutes` to
+> `apps/web/tests/playwright/audit-routes.ts:97` and added an opt-in shell helper,
+> `respondToAppShellRoute` (`:72`, answers `/api/credentials` and `/api/github/*` with `[]`), plus
+> `setupProjectAuditRoutes` (`:24`), which also dismisses the wizard. Only the two ideas audits use
+> them. `setupAuditRoutes` still falls back to `{}` (`:106`) and dismisses nothing, and
+> `admin-trials-audit.spec.ts` is unchanged.
+
 ## Problem
 
 `setupAuditRoutes` answers every unmatched `/api/**` request with `{}`. The app shell now
@@ -30,3 +45,8 @@ mocking `/api/credentials*`, `/api/github/installations`, `/api/workspaces`,
       spec broken by the same cause is fixed
 - [ ] The default `{}` fallback in `setupAuditRoutes` fails loudly (or logs) for unmatched
       `/api/**` paths so the next new shell fetch is noticed
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Evidence: #2439, #2481 per-spec mocks; admin-trials-audit.spec.ts deleted by #2588; apps/web/tests/playwright/audit-routes.ts:106 still returns {}
+- Status: Remains: central array defaults + wizard dismissal in setupAuditRoutes, loud fallback, full-corpus run (example spec now gone)

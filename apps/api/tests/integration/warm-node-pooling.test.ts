@@ -36,21 +36,24 @@ describe('warm node pooling lifecycle integration', () => {
     resolve(process.cwd(), 'src/services/node-lifecycle.ts'),
     'utf8'
   );
+  const handoffFile = readFileSync(
+    resolve(process.cwd(), 'src/services/node-warm-handoff.ts'),
+    'utf8'
+  );
   const constantsFile = readFileSync(
     resolve(process.cwd(), '../../packages/shared/src/constants/node-pooling.ts'),
     'utf8'
   );
 
   describe('flow: task complete → workspace destroyed → node warm', () => {
-    it('cleanupTaskRun calls cleanupAutoProvisionedNode', () => {
-      expect(taskRunnerFile).toContain('cleanupAutoProvisionedNode');
+    // Behavior (handoff keyed on the workspace's node, skip reasons, warm state) is covered
+    // through the real D1 + NodeLifecycle DO in tests/workers/empty-node-warm-handoff.test.ts.
+    it('cleanupTaskRun hands the workspace node to the shared warm handoff', () => {
+      expect(taskRunnerFile).toContain('handOffEmptyWorkspaceNode(env, {');
     });
 
-    it('cleanupAutoProvisionedNode calls nodeLifecycleService.markIdle', () => {
-      const section = taskRunnerFile.slice(
-        taskRunnerFile.indexOf('function cleanupAutoProvisionedNode')
-      );
-      expect(section).toContain('nodeLifecycleService.markIdle');
+    it('the shared warm handoff calls nodeLifecycleService.markIdle', () => {
+      expect(handoffFile).toContain('nodeLifecycleService.markIdle(');
     });
 
     it('service.markIdle calls DO.markIdle via stub', () => {
@@ -90,7 +93,7 @@ describe('warm node pooling lifecycle integration', () => {
     });
 
     it('cron sweep finds stale warm nodes and calls strict resource deletion', () => {
-      expect(cleanupFile).toContain('deleteNodeResourcesStrict(node.id, node.user_id, env)');
+      expect(cleanupFile).toMatch(/deleteNodeResourcesStrict\(\s*node\.id,\s*node\.user_id,\s*env[,)\s]/);
     });
 
     it('cron sweep also enforces max auto-provisioned node lifetime', () => {

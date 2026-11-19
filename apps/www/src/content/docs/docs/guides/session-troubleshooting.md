@@ -8,11 +8,22 @@ label in the session list. Find what you are seeing below. The section it points
 your work is safe and what to do next. Everything here applies to both
 [Instant and VM sessions](/docs/guides/instant-sessions/) unless it says otherwise.
 
-- **Needs input** in the session list. The agent, or SAM, is waiting for an answer from the person
-  who started the chat. → [Find what it's waiting for](#the-agent-is-waiting-for-you)
+- **Needs input** in the session list, or an item in your [Inbox](/docs/guides/inbox/). The agent,
+  or SAM, is waiting for an answer from the person who started the chat.
+  → [Find what it's waiting for](#the-agent-is-waiting-for-you)
+- **A Problem in your Inbox**, such as **"Fix login" couldn't start** or **Couldn't wake "Ship
+  billing"**. SAM filed it because something of yours failed; its button is the fix.
+  → [Problems SAM files for you](/docs/guides/inbox/#problems-sam-files-for-you), then the matching
+  section below ([wake failed](#wake-failed), [task failed](#when-a-task-fails))
+- **"Waiting for provider limit reset at…"**, **Waiting** or **Needs you** on the task's Dashboard
+  card, or a red **BLOCKED** badge on the chat in the session list. The agent hit a usage limit;
+  SAM carries on after the reset, unless it says **Blocked**. (A subtask with that badge also reads
+  "Waiting on:" and its parent task's title, whether a usage limit or another task is holding it,
+  so open its chat to tell which.)
+  → [Usually nothing to do](#waiting-for-a-provider-limit-reset)
 - **"SAM paused automatic check-ins…"** The agent kept stopping without finishing, or its model was
   rejected, so SAM stopped nudging it. → [Look, then reply](#sam-paused-automatic-check-ins)
-- **A strip or failure card saying the agent's connection is missing or was rejected**, or that its
+- **A notice or failure card saying the agent's connection is missing or was rejected**, or that its
   model is unavailable for your account. → [Fix the connection](#the-agent-or-a-tool-cant-sign-in)
 - **A message saying a sign-in flow requires a local callback**, or an MCP tool failing with
   `401 Unauthorized`. → [Connect the tool another way](#the-agent-or-a-tool-cant-sign-in)
@@ -20,19 +31,42 @@ your work is safe and what to do next. Everything here applies to both
   been recorded. → [Check wake compatibility](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
 - **The agent stops whenever it needs your approval, and no card appears.** Check whether agent
   requests are enabled on your instance. → [Check request settings](#the-agent-stops-for-approval-and-no-card-appears)
-- **A strip with a spinner**, such as **Waking and restoring session...** or, on a VM, a step like
-  **Finding a server...** or **Waiting for server capacity...**. A wake or a recovery is in
-  progress. → [Wait](#recovery-is-in-progress)
+- **A small floating status with a spinner** over the top of the conversation, such as **Waking and restoring session...** or, on a VM, a step like
+  **Finding a server...**, or a reason it's waiting such as **Your cloud provider has no capacity
+  right now. Retrying...**. A wake or a recovery is in progress.
+  → [Wait, or clear what it's waiting for](#recovery-is-in-progress)
+- **Connecting...**, **Reconnecting...** or **Disconnected** with a **Retry** button, floating over
+  the conversation. This is your browser's live connection to SAM, not the agent: the agent keeps
+  working, and its messages are saved. SAM reconnects on its own; if it says **Disconnected**,
+  select **Retry**, or reload the page if that doesn't help.
+- **"Agent went quiet — no confirmed activity"** above the message box. The chat showed the agent
+  working, but SAM confirmed it has stopped. Read its last message: it may simply have finished.
+  Send a message to carry on, or select **Dismiss**.
+- **A card with a progress track, such as "Installing dependencies · 3 of 4"**, at the start of a
+  new chat on a VM. SAM is preparing its workspace: **Provisioning VM**, **Cloning repository**,
+  **Installing dependencies**, **Starting agent**. A large devcontainer can take several minutes;
+  a step that fails turns red and the chat says why.
 - **"…delivery was interrupted and its execution outcome is unknown"** (Instant). Your prompt may
   or may not have run. → [Check, then decide](#your-prompt-may-or-may-not-have-run)
 - **"…could not restore its last safe checkpoint"** (Instant). SAM stopped the container; your
   transcript is safe. → [Send a message to try again](#a-snapshot-could-not-be-fully-restored)
 - **"SAM restored this sleeping conversation from a degraded snapshot…"** (VM). The chat is back,
   but some unpushed work may not be. → [Check what's missing](#a-snapshot-could-not-be-fully-restored)
-- **"SAM put this session to sleep without saving all of its files."** (VM). Snapshots kept failing,
+- **"SAM could not restore this conversation's workspace: its last sleep saved no snapshot or Git
+  recovery point."** (VM). The chat is back in a fresh workspace, without the earlier files.
+  → [Continue from the transcript](#sam-could-not-save-a-complete-snapshot)
+- **"SAM is putting this session to sleep without saving all of its files."** (VM). Snapshots kept failing,
   so SAM slept the chat on a Git recovery point. → [See what was kept](#sam-could-not-save-a-complete-snapshot)
-- **"SAM could not put this session to sleep."** Snapshots kept failing and there was no safe
-  recovery point, so the workspace keeps running. → [Decide what to do](#sam-could-not-save-a-complete-snapshot)
+- **“SAM is terminating this idle workspace after repeated snapshot failures.”** The transcript and
+  successful backups remain; exact recovery was not verified. → [Continue from the transcript](#sam-could-not-save-a-complete-snapshot)
+- **“SAM could not finish putting this session to sleep.”** Runtime cleanup is still being retried.
+  → [Check cleanup status](#sam-could-not-finish-putting-the-session-to-sleep)
+- **“An earlier sleep attempt could not retain an exact recovery point.”** Snapshots kept failing;
+  SAM is shutting the idle workspace down without an exact recovery point.
+  → [Continue from the transcript](#sam-could-not-save-a-complete-snapshot)
+- **Expired** in the session list, and a **Fork** box reading "The saved workspace has expired…"
+  where the message box was. The chat slept for longer than its saved workspace is kept.
+  → [Fork it](#expired-saved-workspace)
 - **A system message starting "Wake failed:"**, and **Wake failed** in the session list. SAM could
   not wake the sleeping chat. → [Read the reason, then act on it](#wake-failed)
 - **A failure card whose error says "SAM detected a stalled agent turn…"** (VM). SAM ended
@@ -42,50 +76,163 @@ your work is safe and what to do next. Everything here applies to both
   → [See whether it was](#when-a-task-fails)
 - **A system message starting "SAM lost contact with node"** (VM). The machine behind the chat
   stopped responding. → [Wait for the chat to sleep, then wake it](#sam-lost-contact-with-the-machine)
-- **No composer, and the chat reads "This session has ended."** There is nothing left to wake.
-  → [Start a new chat or fork](#the-session-has-ended)
+- **"Workspace disk was not preserved before automatic VM retirement"** on a chat that was asleep.
+  SAM retired its machine before it could confirm the chat's files were saved.
+  → [Why, and how to carry on](#a-node-wont-go-away)
+- **A node on the Nodes page won't go away**: it shows **Stopped**, **Error** or **Unknown**, or a
+  red line such as **Cleanup blocked since…**, for a long time. → [See why, then remove it](#a-node-wont-go-away)
+- **An archived chat shows a Fork box instead of the message box**, or a chat reads
+  **"This session has ended."** or **This chat has ended**. There is nothing left to wake.
+  → [Fork it or start a new chat](#the-session-has-ended)
+- **`git push` or `gh` fails to authenticate** in the workspace, or a workspace fails to start with
+  **failed to fetch git token**. → [Check repository access](#git-push-or-gh-cant-authenticate)
+- **A variable you marked Secret reads `__SAM_SECRET_REQUIRES_EXEC_WITH_SECRETS__…`**, or a
+  command that needs it fails to authenticate. The agent has to run that command with
+  `exec_with_secrets`. → [Run commands with secrets](/docs/guides/secret-execution/)
+- **A task finished, but there's no pull request** (or its branch isn't on GitHub). SAM doesn't
+  open pull requests; the agent does when asked.
+  → [Get one now](/docs/guides/idea-execution/#finished-without-a-pull-request)
 - **No message at all: the agent just stopped mid-sentence** (VM). It may have run out of memory.
   → [Check the Resources panel](#none-of-these-fit)
+- **The chat showed Sleeping on its own, then woke again** (VM). Its machine ran short of memory,
+  so SAM moved the session to another one. → [Check where the agent got to](#sam-moved-the-session-to-another-machine)
+- **"Agent profile not found" when you send a message** (self-hosted v2026.10.10 to v2026.10.14).
+  Your message has `@` followed by a word, such as an email address.
+  → [Rephrase it, or update](#agent-profile-not-found-when-you-send-a-message)
+- **The chat runs another agent than the profile you picked**, such as OpenCode instead of Claude
+  Code. A skill may be choosing the agent. → [Check the skill](#the-chat-runs-a-different-agent-than-its-profile)
+- **A "Message from another agent" line, or (in older chats) a message on your side of the chat
+  that you didn't write, starting "SAM notice (system-generated, not a human message)".** Another
+  agent sent this chat a message; SAM wrote the notice for the agent. You don't need to reply.
+  → [Messages between agents](/docs/guides/agents/#messages-between-agents)
 
 Anything else — including a message that delivery "could not be confirmed" — means SAM couldn't
 classify the failure. Treat it like the interrupted case: check before you resend.
 
-Several sections below say to check GitHub for anything the agent pushed. Work started as a task
-runs on its own `sam/…` [output branch](/docs/guides/idea-execution/#where-the-work-lands), and the
-project **Files** tab shows its diff without opening a workspace. A chat started in the composer on
-an Instant profile has no branch of its own, and pushes only what you ask the agent to push.
+Several sections below say to check GitHub for anything the agent pushed. SAM never commits or
+pushes for you, so GitHub has only what the agent pushed: a **Task**'s agent is told to push its
+branch before it reports the task complete, and a **Chat**'s agent pushes only when you ask
+([Where the work lands](/docs/guides/idea-execution/#where-the-work-lands)). A chat sent from the
+message box on an Instant profile, without attachments and not started from an idea, has no branch
+of its own. Any other chat or task runs on its own `sam/…` output branch, and the
+project **Files** tab shows what was pushed to it without opening a workspace. The session list
+labels each session **Chat** or **Task** ([Chat or Task](/docs/guides/chat-features/#chat-or-task)).
 
-A **Task** keeps its task completion and git delivery behavior after sleep and wake;
-a **Chat** remains a Chat. [Wake settings](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
-explains compatibility with older saved sessions.
+A **Task** stays a Task after sleep and wake, and a **Chat** stays a Chat.
+[Wake settings](/docs/guides/agents/#after-a-chat-wakes-from-sleep) explains compatibility with
+older saved sessions.
 
 ## The agent is waiting for you
 
-**Needs input** beside a chat in the session list means it is waiting for an answer. On a phone,
-open the session list with the list icon at the right of the project-name bar. A chat with no new
-messages for three hours moves into the collapsed **Older** group at the bottom of the list, so look
-there too. Open the chat and look for one of these:
+**Needs input** beside a chat in the session list means it is waiting for an answer. Such chats sit
+at the top of the list under **Needs attention** for 24 hours from when the question was asked
+(or, for **Wake failed**, from when the wake failed). Newer messages in the chat do not extend that.
+After that they move to **Awake** or **Sleeping** and keep the label. On a
+phone, open the session list with the list icon at the right of the project-name bar; an amber count
+on that icon says how many chats need attention. Open the chat and look for one of these:
 
 - **A card in the chat** — a permission request, under the step it's about, or a question or a link
-  to open, at the end of the chat. Answer it there; the agent carries on once it has your answer. If
+  to open, at the end of the chat. Each one also sends you a notification and appears in your
+  [Inbox](/docs/guides/inbox/), where a permission can be answered directly. Answer it there or on
+  the card; the agent carries on once it has your answer. If
   the card says the request expired or was cancelled, the agent was told no, so send a message
   saying how to continue. SAM respects pending requests until their response deadline; waiting for
   your answer is not treated as a stall. See
   [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
 - **A question the agent asked with its `request_human_input` tool.** It shows as that tool's step
-  in the chat, and as a notification — with answer buttons if the agent offered choices. Reply in
-  the composer, or pick an answer in the notification. If nobody answers for about two hours (longer
+  in the chat, and as an item in your [Inbox](/docs/guides/inbox/) — with answer buttons if the
+  agent offered choices. Reply in the composer, or answer from the Inbox, which shows the whole
+  question and the messages before it (see
+  [Answer an item](/docs/guides/inbox/#answer-an-item)).
+  If nobody answers for about two hours (longer
   if the notification didn't reach you), the task fails but keeps its workspace, so you can still
   reply to carry on. See [Notifications](/docs/guides/notifications/#request_human_input).
 - **SAM's notice that it paused check-ins.** See
   [SAM paused automatic check-ins](#sam-paused-automatic-check-ins).
 
-Only the person who started the chat can answer a card. If you're someone else in a
-[shared project](/docs/guides/collaboration/), the card says it is waiting for the session creator:
-ask them (the session list shows who started it).
+Only the person who started the chat, and anyone they
+[shared it with](/docs/guides/collaboration/#share-a-chat), can answer a card. If you're someone
+else in a [shared project](/docs/guides/collaboration/), the card says it is waiting for the session
+creator: ask them (the session list shows who started it), or ask them to share the chat with you.
 
 If an agent keeps asking about every command when you don't want it to, see
 [An agent asks when you don't expect it](/docs/guides/agents/#an-agent-asks-when-you-dont-expect-it).
+
+## Waiting for a provider limit reset
+
+**What you see:** a system message such as **Waiting for provider limit reset at 14:00 UTC
+(2026-10-21).**, and on the Dashboard the task's card says **Waiting** with the same text.
+
+**What happened:** the agent's subscription or API key hit a usage limit (Claude Code's five-hour
+or weekly limit, a Codex plan limit, or an API rate limit that said when it resets), so SAM paused
+the work instead of failing it. This applies to your own subscriptions and keys and to project
+credentials. (In the **SAM** provider mode, or when the agent runs on the installation's platform
+credential, a limit still fails a **Task** and stops a **Chat**; see
+[Usage Limits](/docs/guides/agents/#usage-limits).)
+
+**What to do: nothing.** The chat rests, usually asleep with its workspace saved, and just after the
+reset SAM wakes it with a message telling the agent the wait is over. The agent checks what was
+already done before it carries on, so it doesn't blindly repeat the step that hit the limit. SAM
+never switches to another model, profile, or credential to get around a limit.
+
+**A message you send while it waits is kept.** SAM doesn't report **Wake failed** for a chat that
+is waiting for a limit reset, and it doesn't drop your message after the usual hour: it holds the
+message until the reset (plus that hour), then delivers it when the chat wakes. Don't send it
+again. While a task shows **Needs you** (below), a message doesn't wake the chat; SAM holds it
+until you resume the task, for as long as the saved workspace is kept, and delivers it then. If a
+message you sent can't be delivered in that time, the chat reports **Wake failed** as usual.
+
+- **If Claude Code or Codex didn't say when its limit resets**, the message reads **Waiting for provider
+  limit reset (time unknown); bounded retry 1/3 at 14:05 UTC.** SAM tries again after 5 minutes,
+  then 10, then 20. Repeated rejections before one retry do not use extra waits. If three separate unknown-reset waits don't get the work going, the task shows **Needs you**.
+- **A new VM task that uses the same credential waits too**, before its agent starts (a new Instant
+  chat isn't held). Its card says **Waiting**; once its workspace is ready, the reason reads
+  **Blocked before provider prompt:** followed by the reset time, and its machine stays up
+  meanwhile. Despite the word "Blocked", it starts by itself after the reset.
+
+**Changed your mind, or want it to run now?** For a task that is waiting and has never started:
+
+- **Cancel task** in the chat's tool rail (it replaces **Complete** for a task that hasn't started)
+  cancels it, so nothing starts at the reset.
+- **Start anyway** on the waiting notice (task owner only) starts it now despite the limit, for
+  example when the account has extra credits or overage that the subscription window doesn't show.
+  SAM records your choice for the account selected at that moment; if the task's account changes
+  before it starts, it stops at **Needs you** instead. If the provider really does refuse the
+  prompt, SAM pauses the task the usual way.
+
+**Already started, then went to sleep at the limit?** The owner can choose **Resume anyway**
+on the waiting notice after resetting the same account's limit or enabling extra usage. SAM
+restores the saved session and delivers its queued message using the same account and profile,
+including an account chosen specifically for that run. If no message is queued, the restored
+session waits for your next message; SAM does not replay an earlier prompt.
+Your choice applies to the current wait only and can use extra credits. If the account or profile
+changed, review the selection first. If the provider rejects again, SAM pauses again. An expired
+or unavailable saved workspace cannot be forced to restore. If recovery cannot get started or
+confirmed within its bounded repair window, SAM keeps the saved work and asks you to review it
+before resuming. A recovery already underway can finish under its original deadline.
+
+**Needs you**, with a reason starting **Blocked:**, means SAM stopped waiting. The task won't carry on by itself, and a reply in
+the chat doesn't restart it:
+
+- **Blocked: provider limit wait budget exhausted.** Three unknown-reset waits in a row didn't get the work going. A known reset does not spend this budget.
+- **Blocked: provider limit reset outlives the saved snapshot…** The reset comes after SAM stops
+  keeping the saved workspace, so the chat can't be woken where it left off.
+- **Blocked: selected provider credential changed…** The account the task would run on changed
+  while it waited: the key was replaced, or you (whoever started the task) chose **Make default**,
+  pinned another account to the project, or changed the profile's account. SAM stops rather than carry on with an account you
+  didn't start the task on.
+- Any other reason that starts with **Blocked:** means the same thing.
+
+**Select Resume task** in the chat notice or on its Dashboard card. Only the task owner can
+resume it. This accepts the currently selected provider credential and wakes the saved workspace,
+including work the agent hasn't pushed. SAM still respects an active provider limit: approving a
+resume does not bypass a limit on that account. If the workspace is still being saved, wait until
+sleep finishes and try again. If the saved snapshot has expired, use **Fork** or **Retry** to start
+from a pushed branch instead.
+
+While a task is waiting, SAM holds project event prompts until the wait is released. Credential
+limit events about the task's own credential stay recorded without prompting that agent, so a
+rejection cannot start a notification/rejection loop.
 
 ## SAM paused automatic check-ins
 
@@ -93,8 +240,8 @@ Your work is safe: pausing check-ins doesn't stop the task, the workspace, or an
 left running.
 
 When an agent working on a task goes quiet without finishing, SAM checks in after about five minutes
-with a message asking it to report progress and carry on (it starts **[SAM Orchestrator
-Check-In]**). An agent that keeps stopping without making progress — often because the same error
+with a message asking it to report progress and carry on. The chat shows it as **SAM asked the agent
+for a progress update**; the text the agent received starts **[SAM Orchestrator Check-In]**. An agent that keeps stopping without making progress — often because the same error
 keeps coming back — would otherwise be nudged forever. SAM pauses and posts one of these in the chat:
 
 - **"SAM paused automatic check-ins after repeated attempts without confirmed progress."** This comes
@@ -106,9 +253,9 @@ keeps coming back — would otherwise be nudged forever. SAM pauses and posts on
   model. Choose a model it supports — in the agent's
   [profile](/docs/guides/agents/#choosing-a-model), the project's **Agent Overrides**, or
   **Settings → Agents**, wherever the model was set — then start a new chat, or
-  [Fork](/docs/guides/chat-features/#conversation-forking) this one to carry a summary of it over.
-  The notice says to send a message to retry, but while it's awake the chat keeps its model, so that
-  would hit the same error.
+  [Fork](/docs/guides/chat-features/#conversation-forking) this one so the new agent can read it.
+  The notice says to send a message to retry, but a chat keeps the model it started with, even after
+  it sleeps and wakes, so that would hit the same error.
 
 The chat is marked **Needs input** until someone replies. Your next message, or a new tool step
 finishing successfully, starts the check-ins again with a fresh count. (On a self-hosted instance
@@ -117,24 +264,31 @@ the limit is 3; to change it, add `TASK_RECONCILIATION_MAX_CHECKINS` under `[var
 
 ## The agent or a tool can't sign in
 
-When the agent can't use its provider account, the chat says so — in a strip above the conversation
+When the agent can't use its provider account, the chat says so — in a notice above the session header
 or in the failure card under the chat header (expand the card for the next step):
 
-- **A strip: "Agent connection missing."** The agent has no credential it can use for this chat. If
-  you started the chat, select **Open agent connections** and connect the agent under
-  **Settings → Connections**; otherwise ask the person who started it. Then start the work again —
+- **A notice: "Agent connection missing".** The agent has no credential it can use for this chat. If
+  you started the chat, select **Open agent accounts** and connect the agent under
+  **Settings → Agents**; otherwise ask the person who started it. It also appears when the account
+  pinned to the project or the profile is paused: the project's **Accounts** tab then says **Can't
+  run — its pinned account is paused**, or the profile's **Account** section reads **Needs attention: … (paused)**. Resume
+  the account in **Settings → Advanced**, or choose **Use my default** or **Use my usual account**
+  (see [Pausing an account](/docs/guides/agents/#pausing-an-account)). Then start the work again —
   **Retry** in the [session tool rail](/docs/guides/chat-features/#the-session-tool-rail), or a new
   chat.
 - **A failure card: "Agent connection rejected."** The provider refused the credential — usually an
-  expired subscription sign-in or a revoked API key. Reconnect it under **Settings → Connections**
-  (the card's **Open agent connections** button, for the person who started the chat). The agent
-  picks up the new connection only when it starts again: in a **Task**, wait for the chat to go to
+  expired subscription sign-in or a revoked API key. Reconnect it under **Settings → Agents** (the
+  card's **Open agent accounts** button, for the person who started the chat) with **Replace…** on your
+  default, or in the project's **Accounts** tab if the project uses its own account (see
+  [Refresh an expired sign-in or key, or a pinned account](/docs/guides/agents/#common-account-tasks)). Projects and
+  profiles pinned to the old account keep it until you move them. The agent picks up the new connection only
+  when it starts again: in a **Task**, wait for the chat to go to
   sleep, then reply to wake it; in a **Chat**, select **Sleep** (the moon button above the message
   box), then send a message. The woken session keeps its recorded settings and task behavior.
 - **A failure card: "Model unavailable for this account."** The credential works, but your plan or
   account can't use that model — or the model ID is mistyped. Pick another model in the agent's
   profile, the project's **Agent Overrides**, or **Settings → Agents**, then start a new chat, or
-  [Fork](/docs/guides/chat-features/#conversation-forking) this one to carry a summary of it over.
+  [Fork](/docs/guides/chat-features/#conversation-forking) this one so the new agent can read it.
 
 A tool the agent connects to through an [MCP server](/docs/guides/mcp-servers/) can fail to sign in
 too:
@@ -144,7 +298,7 @@ too:
   [When a server needs sign-in](/docs/guides/mcp-servers/#when-a-server-needs-sign-in).
 - **A message: "This sign-in flow requires a local callback that this session cannot complete."**
   The server wants to finish its sign-in at `localhost`, which a remote SAM session can't do. While
-  that message is the latest in the chat, a strip above the conversation offers the person who
+  that message is the latest in the chat, a notice above the session header offers the person who
   started the chat **Review MCP connections** (anyone else is asked to tell them); connect the
   server another way.
 
@@ -157,32 +311,52 @@ keeps the interaction settings it had when it started; turning requests on appli
 sessions, so start or [fork](/docs/guides/chat-features/#conversation-forking) a chat after enabling
 them. Turning requests off refuses new requests immediately, including in running sessions.
 
-Sleep and wake preserve permission mode and requests for sessions started on the current version.
-Older sessions without recorded settings use Manual permissions; see
+Sleep and wake preserve permission mode and requests for chats started since 7 October 2026
+(v2026.10.08 or later on a self-hosted instance). Older chats have no recorded settings: they wake
+in Manual, with the request switches in force at their first wake; see
 [After a chat wakes from sleep](/docs/guides/agents/#after-a-chat-wakes-from-sleep).
 
 ## Recovery is in progress
 
-A strip with a spinner means SAM is waking the session or rebuilding it from its snapshot. **Do
-nothing.** When it finishes, the chat carries on.
+A small status with a spinner, floating over the top of the conversation, means SAM is waking the session or rebuilding it from its snapshot. Usually you
+need to do nothing: when it finishes, the chat carries on. If the status names a reason it's waiting,
+the table below says what you can do.
 
-On Instant this finishes within two minutes. On a VM, the strip names the step it has reached —
+On Instant this finishes within two minutes. On a VM, the status names the step it has reached —
 **Finding a server...**, **Provisioning a server...**, **Restoring your session...**, **Starting
 the agent...** — because a VM wake often provisions a replacement machine, which takes a few
 minutes. The composer reads **Waking the agent — your message will be delivered...** while it
-works, and the **Nodes** page may briefly show the chat's old workspace deleted and a new one being
-created. That is normal.
+works, and the **Nodes** page (**Infrastructure** in the main navigation) may briefly show the chat's old workspace deleted and a new one being
+created. That is normal. A VM wake that stops partway doesn't spin for ever: after 10 minutes or
+more SAM ends it and says so (see [Wake failed](#wake-failed)), and your next message tries again.
 
-If a VM wake sits on **Waiting for server capacity...**, SAM can't get a machine for it yet. Your
-provider may be out of that machine type, your Hetzner account may be at its server or vCPU limit,
-or you may already have as many machines as SAM allows you (10 by default) or your
-[compute pool](/docs/guides/compute-pools/) permits. SAM keeps trying; if the wait drags on,
-delete machines you no longer need from the **Nodes** page. A message you sent is held for an
+If a VM wake is waiting, the status says why when SAM knows (`attachWakeState` in
+`apps/api/src/routes/chat/wake-state.ts`):
+
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/chat-wake-waiting-mobile.png" />
+  <img src="/images/docs/chat-wake-waiting.png" alt="A sleeping chat titled Add tax columns to receipts. A strip with a spinner across the top reads: Your cloud provider has no capacity right now. Retrying... Next try at 02:34 PM. The last message, a follow-up question from the user, waits below, and the message box reads Waking the agent, your message will be delivered." loading="lazy" />
+</picture>
+
+| The status says                                                        | What is happening                                                                                 | What you can do                                                                                                               |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Waiting for the previous workspace to finish shutting down...**      | SAM is still deleting the machine the chat slept on. The wake starts once it is gone.             | Wait. If it lasts, check that node on the **Nodes** page (see [A node won't go away](#a-node-wont-go-away)).                  |
+| **Your cloud provider has no capacity right now. Retrying...**         | Your provider is out of that machine type in that location.                                       | Wait, or allow more machine types or locations in your [compute pool](/docs/guides/compute-pools/).                           |
+| **Your cloud account's server limit is reached. Retrying...**          | Your Hetzner (or other provider) account is at its server or vCPU limit.                          | Delete servers you no longer need in the provider's console or on the **Nodes** page, or ask the provider to raise the limit. |
+| **Your SAM server limit is reached. Waiting for a free slot...**       | You already have as many machines as SAM allows you (10 by default).                              | Delete machines you no longer need on the **Nodes** page.                                                                     |
+| **This project's server limit is reached. Waiting for a free slot...** | Your [compute pool](/docs/guides/compute-pools/) allows no more machines.                         | Delete an unused machine, or raise the pool's machine limit.                                                                  |
+| **Waiting for a new server to finish starting...**                     | SAM starts one new machine at a time for your account on each cloud, and one is already starting. | Wait; it usually takes a few minutes.                                                                                         |
+| **Waiting for a server that is still setting up...**                   | Shown only by tasks that started waiting before SAM queued work behind setups instead.            | Wait; SAM places the chat on its next try.                                                                                    |
+
+When SAM has scheduled its next attempt, the status adds **Next try at** and the time. If it shows
+only **Waiting for server capacity...**, SAM has not recorded a reason yet. SAM keeps trying; if
+the wait drags on, delete machines you no longer need from the **Nodes** page. A message you sent is held for an
 hour: if the wake is still waiting then, the chat reports **Wake failed: Session is waking** (see
-[Wake failed](#wake-failed)).
+[Wake failed](#wake-failed)). A wake held for a provider limit reset is the exception (see
+[Waiting for a provider limit reset](#waiting-for-a-provider-limit-reset)).
 
 Until a **Wake failed** message appears, SAM still holds your message and keeps retrying the wake,
-even if the strip is gone when you reopen the chat. Don't send the message again: a second copy
+even if the status is gone when you reopen the chat. Don't send the message again: a second copy
 would be delivered as well. SAM retries a pending delivery for up to an hour, but elapsed time and
 the absence of a reply do not prove that the agent never received it. If the state is unclear,
 check the transcript, task, and linked GitHub work before resending. Send it again only when those
@@ -232,7 +406,8 @@ once more (`CF_CONTAINER_RECOVERY_MAX_ATTEMPTS`, two attempts in all):
 - If it works, the chat carries on with its files.
 - If it fails again, SAM marks the session and its task **failed** rather than leaving you watching
   a spinner, and the session ends. Check GitHub for anything the agent pushed, then start a new
-  chat, or [fork](/docs/guides/chat-features/#conversation-forking) this one to keep its context.
+  chat, or [fork](/docs/guides/chat-features/#conversation-forking) this one so the new agent can
+  read it.
 
 **On a VM**, the chat says SAM **restored this sleeping conversation from a degraded snapshot**, so
 the agent is starting fresh. The chat is back, but the agent has lost its own memory of the session
@@ -251,7 +426,7 @@ retrying rather than keep a machine running indefinitely. What it does next depe
 earlier snapshot already saved. It only does this to a session whose agent has finished its turn;
 a session in use is left alone.
 
-**"SAM put this session to sleep without saving all of its files."** An earlier snapshot saved the
+**"SAM is putting this session to sleep without saving all of its files."** An earlier snapshot saved the
 repository: the exact commit the workspace was on, its branch, and its uncommitted changes. SAM
 kept that and the conversation, and released the workspace. The notice lists what was kept and
 what was not. Files outside the repository that the snapshot did not save (often installed tools,
@@ -268,20 +443,38 @@ If the notice says SAM used **its last complete snapshot**, everything in that s
 including files outside the repository, but changes made after it are missing. The agent still
 starts a new session from the transcript, because the conversation went on after that snapshot.
 
-**"SAM could not put this session to sleep."** SAM had no safe recovery point to fall back to. The
-notice gives the reason; usually no snapshot recorded the workspace's Git commit together with
-what is needed to restore it. This is typical of a workspace on an older VM agent whose snapshots
-never complete. SAM stops trying to put this session to sleep automatically, and the workspace
-keeps running. You can:
+**“SAM is terminating this idle workspace after repeated snapshot failures.”** No exact Git or
+filesystem recovery point could be verified. SAM stops the runtime to avoid ongoing compute
+charges, keeps this conversation and any successful backups, and explains the degraded recovery
+in the chat. Unpublished files, uncommitted work, installed tools and saved agent state may be lost.
+Send a message to continue in a fresh workspace; the agent uses the transcript to reconstruct
+missing work. It cannot promise an exact restore. On a VM, the chat then says SAM **could not
+restore this conversation's workspace** and that the agent is starting fresh in a new checkout.
+Check GitHub for anything the agent already pushed before asking it to redo work. Instant sessions
+also use this fresh continuation after repeated snapshot failures.
 
-- Keep working. A message works as usual, and SAM tries sleep again the next time the session
-  goes idle.
-- If you are done with it, commit and push anything you want to keep, then stop its workspace
-  from the **Workspaces** page. Work you did not push is lost once SAM cleans up the stopped
-  workspace.
+## SAM could not finish putting the session to sleep
 
-An Instant session always takes this path when its snapshots keep failing, because it can only
-sleep with a complete snapshot.
+If stopping a workspace fails, SAM keeps retrying cleanup with backoff until runtime removal is
+confirmed. A failed stop does not mean billing has ended. The conversation and successful backups
+remain retained. Active agent work delays cleanup, and a replacement runtime is protected from an
+older sleep attempt. If cleanup remains stuck, [report it](/docs/guides/reporting-issues/) or contact
+your administrator.
+
+After a VM session saves a verified complete snapshot, SAM queues physical cleanup immediately.
+A new message waits for confirmed removal of the old workspace before starting its replacement.
+Failed or incomplete snapshots do not authorize physical deletion.
+
+An older VM agent may be unable to confirm workspace cleanup after a SAM update. In that case,
+SAM can retire the outdated VM once every remaining workspace has finished sleeping and its saved
+files are verified. Other active workspaces keep the VM protected. The sleeping session can wake
+on a replacement VM after the old VM's removal is confirmed.
+
+A related notice, **"SAM blocked the old sleep attempt because this workspace runtime changed."**,
+means the workspace's runtime was replaced (after a restart or rebuild, for example) while an older
+sleep attempt was finishing. SAM left the replacement alone and kept the previous checkpoint, and the
+session keeps running. Check the current workspace before you put the session to sleep or restart
+it.
 
 ## Download retained work
 
@@ -301,7 +494,36 @@ cannot recover deleted work or extend retention.
 
 ## Expired saved workspace
 
-After the seven-day sleep retention window, the conversation shows **Expired**. This is a normal end state, not a task failure. Your transcript stays readable. Choose **Fork conversation** to continue with its context in a new session; the expired workspace itself cannot be restored.
+A sleeping chat can be woken for seven days. After that its saved workspace is deleted and the chat
+ends: it shows **Expired** in its header and in the session list. This is a normal end, not a
+failure, and the chat leaves the dashboard's **Active Tasks**.
+
+Where the message box was, a **Fork** box reads _"The saved workspace has expired. Your transcript
+is still available. Fork into a new chat with retained history. The archived chat stays unchanged.
+Prior workspace files are not restored."_ To carry on, type what should happen next and select
+**Fork**: SAM opens a new **Chat** whose agent is given this conversation's recent history, so you
+don't have to explain it again. See
+[Fork an archived or expired chat](/docs/guides/chat-features/#fork-an-archived-or-expired-chat).
+
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/chat-expired-mobile.png 2x" />
+  <img
+    src="/images/docs/chat-expired.png"
+    alt="A chat titled &quot;Add a CSV export to the orders page&quot; whose header reads &quot;Expired&quot;. The transcript is still there: the user asked for a CSV export button, and the agent replied that it added the button and an export route but had not pushed yet. Where the message box would be, a caption reads &quot;The saved workspace has expired. Your transcript is still available. Fork into a new chat with retained history. The archived chat stays unchanged. Prior workspace files are not restored.&quot;, above a message box reading &quot;Write a prompt to fork this archived chat...&quot; with a Fork button."
+  />
+</picture>
+
+The expired workspace's files can't be restored: anything the agent pushed is still on GitHub, and
+anything it didn't push, including commits it made only in the workspace, is gone. The new chat
+starts from your default branch, so to build on what was pushed, say so, for example "continue from
+the branch the original chat pushed". The history SAM gives the new agent names that branch, if the
+original chat had one ([which chats do](/docs/guides/instant-sessions/#what-happens-to-your-work)).
+**Retry** isn't offered for an expired chat.
+
+Only the person who started the chat gets the **Fork** box. Anyone else in the project sees **This
+chat has ended** and can select **Start your own chat**, or **Fork** in the
+[session tool rail](/docs/guides/chat-features/#the-session-tool-rail), which starts a chat of their
+own that can read this one.
 
 ## Wake failed
 
@@ -311,7 +533,8 @@ or a subtask reporting back. The system message starts with **Wake failed:** and
 when SAM refused the wake outright it reads `Wake failed: <reason> (<code>)`, and when it ran out of
 time retrying, it repeats the last reason it hit. The session list keeps the chat marked
 **Wake failed** until you reply. Anything you sent is still in the transcript; the agent never
-received it.
+received it. SAM also files a **Problem** in your Inbox, **Couldn't wake** and the chat's name, with
+**Wake the chat** (VM chats only) and **Open chat**; it closes by itself once the chat wakes.
 
 <picture>
   <source media="(max-width: 40em)" srcset="/images/docs/chat-wake-failed-mobile.png 2x" />
@@ -321,12 +544,16 @@ received it.
   />
 </picture>
 
-Every message you send starts a new wake attempt, so what matters is whether the cause is something
-you can fix first:
+On a VM, a failed wake doesn't end the chat. As long as its saved workspace can still be restored,
+the chat goes back to sleep on the same task, the task isn't marked failed (though the wake error
+can show in a card under the chat header), and an agent that started it as a subtask isn't told it
+failed. Every message you send starts a new wake attempt, so what matters is
+whether the cause is something you can fix first:
 
 - **Cloud provider credentials are missing for this wake.** No cloud credential is available to pay
   for a replacement machine — for example, the one the session used was removed. Connect one (yours
-  under **Settings → Connections**, or the project's), then send your message again.
+  under **Settings → Infrastructure**, or the project's in its **Accounts** tab), then send your
+  message again.
 - **No configured compute option can satisfy the stored requirements for this wake.** The machine
   the session was saved with can't be provisioned under your current compute settings — for
   example, an instance type, provider, or region it relied on is no longer in its
@@ -342,6 +569,10 @@ you can fix first:
 - **Session is waking (…).** The wake was still going — for example, waiting for server capacity —
   when your message's delivery window ran out. Wait for the chat to finish waking, then send the
   message again.
+- **The last wake attempt stopped without finishing. Send a message to wake this chat again.**
+  A wake stopped partway, for example because the machine it was starting died. Instead of showing
+  that it is waking for ever, SAM ends an attempt that has been stuck for 10 minutes or more. Send
+  your message again.
 - **SAM retried the wake until the delivery expired…**, or another retry reason such as **Session
   cannot wake yet (…)**. Something temporary outlasted SAM's retries: an hour for a message you
   send, a day for a scheduled action. Send your message again.
@@ -363,13 +594,23 @@ If a reason isn't in this list, or a fixable one keeps coming back after you fix
 
 ## When a task fails
 
-A task can fail for reasons that have nothing to do with its work — the provider's usage limit ran
-out, or nobody answered a question the agent asked with its `request_human_input` tool. (A card in
-the chat that nobody answers doesn't fail the task when it expires; it only tells the agent no.) When that
+A task can fail for reasons that have nothing to do with its work: nobody answered a question the
+agent asked with its `request_human_input` tool, or a usage limit ran out in the **SAM** provider
+mode or, on your own subscription or key or a project credential, one SAM can't wait out (see
+[Usage Limits](/docs/guides/agents/#usage-limits)). (A card in the chat that nobody answers doesn't
+fail the task when it expires; it only tells the agent no. On those credentials, a Claude Code or
+Codex plan limit, or a rate limit that says when it resets, doesn't fail it either:
+[SAM waits for the reset](#waiting-for-a-provider-limit-reset).) When that
 happens while the workspace is still running, SAM tries to keep the workspace: it lets the agent's current turn end, snapshots the
 workspace, and puts the chat to sleep. That usually takes a few minutes, but if the agent was in the
 middle of a turn SAM waits for it to end, for up to eight hours. Until then the chat stays awake with
 the failure card showing: wait for it to go to sleep rather than using **Retry**.
+
+SAM also files a **Problem** in your Inbox within about five minutes: **"…" couldn't start** or
+**"…" stopped before it finished**. Its **Retry** (offered to the project's owner when the failure
+can be retried) starts a new task with the original request right away, in a new chat and
+workspace; the tool rail's **Retry** pre-fills a new chat for you to check and send instead. To continue the work this chat already did, use **Open chat** and reply
+there once it is asleep, as below.
 
 SAM's stalled-turn check respects unanswered permission requests and questions until their
 response deadline. Waiting for your answer is not treated as an agent stall. If SAM detects a
@@ -379,13 +620,13 @@ its work before removing the workspace.
 The failure card under the chat header stays either way. It is red, or grey when there is nothing to
 debug — an expired question, for example. Two tools in the
 [session tool rail](/docs/guides/chat-features/#the-session-tool-rail) start over: **Retry** opens a
-new chat pre-filled with the task's original request, and **Fork** opens one for a new instruction.
-Both carry a summary of this chat, but not its files. Read the chat to see whether the work was
-kept:
+new chat pre-filled with the task's original request, and **Fork** opens one pre-filled with this
+chat's IDs, so its agent can read this conversation before it follows your new instruction. Neither
+brings this chat's files. Read the chat to see whether the work was kept:
 
 - **The chat goes to Sleeping, and the composer is still there.** The work was kept. Reply in the
   same chat: it wakes with its files restored, and you can tell the agent how to carry on. A Task
-  keeps its completion and git delivery behavior; a Chat remains a Chat. Don't use **Retry**
+  stays a Task; a Chat stays a Chat. Don't use **Retry**
   for this, even if the failure card suggests it — Retry starts a new chat without the saved files.
 - **A system message: "Task failed. SAM saved this conversation, but its workspace snapshot is
   incomplete (…)".** On a VM, replying still wakes the chat, but some uncommitted changes may be
@@ -440,16 +681,146 @@ instead, assume anything the agent had not pushed is gone. Check GitHub, then us
 If you delete a node yourself from the **Nodes** page, the tasks still running on it are marked
 **cancelled**, not failed — deleting it was your decision, not a malfunction.
 
+## A node won't go away
+
+A node is a machine your workspaces run on; the **Nodes** page is under **Infrastructure** in the main
+navigation. When SAM is removing one, it can sit there for a while. A red line on the node says why.
+
+**"Cleanup blocked since…"** followed by a time (in UTC) and one or more reasons means SAM is holding off on purpose,
+usually to keep something safe. Most of these clear by themselves:
+
+| Reason                                          | What it means                                                                                                                                                |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `active_workspace`                              | A workspace on it is still running.                                                                                                                          |
+| `unproven_workspace_deletion`                   | SAM hasn't yet confirmed that a deleted workspace's files are gone.                                                                                          |
+| `unproven_snapshot_source`                      | A sleeping chat's saved copy isn't confirmed yet.                                                                                                            |
+| `sleeping_container_retention`                  | It's kept for a sleeping chat that may wake on it.                                                                                                           |
+| `warm_placement_claim`                          | SAM is about to reuse it for new work.                                                                                                                       |
+| `idle_window`                                   | It was used recently.                                                                                                                                        |
+| `backoff`                                       | A removal attempt failed, and SAM is waiting before the next one.                                                                                            |
+| `provenance`                                    | SAM can't prove which cloud account the server belongs to (see below).                                                                                       |
+| `lost_race`                                     | The node changed while SAM was checking; it checks again shortly.                                                                                            |
+| `strict_provider_ownership_or_deletion_failure` | SAM tried to delete the server at your provider and couldn't, or couldn't prove the server is yours. See [SAM can't delete a node](#sam-cant-delete-a-node). |
+
+A running machine with no active workspaces that is blocked only by `unproven_workspace_deletion` or
+`unproven_snapshot_source` is moved to the warm pool, so it can be reused and then retired normally.
+
+A workspace machine that is stopped or being deleted, and stays blocked for 30 minutes (the admin
+setting `operations.nodeCleanupBlockedRetirementMs`), is retired anyway so it isn't billed
+indefinitely, unless a workspace on it is still running, SAM is about to reuse it, or SAM can't prove
+who owns its server. Machines that host app deployments aren't retired this way.
+
+Before retiring it, SAM tries to make sure each sleeping chat's files are saved. If it couldn't for
+one of them, that chat can no longer be woken: it fails with **Workspace disk was not preserved before
+automatic VM retirement**, and you continue with **Fork** (see
+[The session has ended](#the-session-has-ended)). Its transcript, and anything the agent pushed, are
+kept.
+
+### SAM can't delete a node
+
+A node can stay in **Error** (or show **Unknown** while SAM is deleting it) when SAM cannot prove
+which cloud account its server belongs to, for example a machine created before SAM recorded that.
+SAM then refuses to delete it and retries every hour. If you have already deleted the server in your
+provider's console:
+
+1. Check in the provider's console that the server is really gone. SAM can't prove that for you.
+2. Open the node and select **I already deleted this server**, then confirm. The button appears only
+   once SAM's own deletion has failed (the node shows **Error**, or **Unknown** while SAM is deleting
+   it). On a **Stopped** node, select **Delete Node** first. If SAM still can't delete it, you'll see
+   an error saying the node's termination isn't confirmed; within a few seconds the node shows
+   **Unknown** and the button appears.
+
+SAM asks your provider with your saved cloud account and refuses if the server turns up
+(**Server … still exists at …. Delete it there first, then try again.**). If the lookup fails for a
+temporary reason, it asks you to try again in a minute. If the account cannot see the server at all
+(it was removed, or belongs to a different account), SAM takes your word for it. It then stops
+tracking the node and removes its records, the same way **Delete Node** does, without deleting
+anything at your provider (`recordManualNodeDeletion` in
+`apps/api/src/services/node-manual-deletion.ts`). For a deployment node this affects every
+environment it hosts.
+
+**I already deleted this server** isn't offered for machines you enrolled yourself (use **Delete** for those). On a machine that runs on SAM's own cloud account, SAM refuses
+with **This server runs on SAM-managed capacity; contact an operator**, so ask your administrator.
+
 ## The session has ended
 
-The composer is gone and the chat reads **"This session has ended."** There is nothing left to
-wake: the session was stopped or archived, or it failed in a way SAM could not preserve (the chat
-says so when that is the reason — see [When a task fails](#when-a-task-fails)).
+There is nothing left to wake: the chat was archived, its saved workspace
+[expired](#expired-saved-workspace), or it failed in a way SAM could not preserve (the chat says so
+when that is the reason; see [When a task fails](#when-a-task-fails)). What you see instead of the
+message box depends on how it ended:
 
-Start again from the [session tool rail](/docs/guides/chat-features/#the-session-tool-rail):
-**Retry** opens a new chat pre-filled with the task's original request, and **Fork** opens one for a
-new instruction. Both carry a summary of this chat, so you don't have to re-explain it, but not its
-files. Or start a new chat from scratch.
+- **A Fork box** ("Fork into a new chat with retained history…") on a chat that was archived or
+  that expired. Type what should happen next and select **Fork** to carry on in a new chat that is
+  given this one's recent history (see
+  [Fork an archived or expired chat](/docs/guides/chat-features/#fork-an-archived-or-expired-chat)).
+- **"This session has ended."** on a chat that failed and couldn't be kept.
+- **This chat has ended** and **Only … can fork it to continue.** on someone else's chat, with
+  **"This session has ended."** under it if that chat failed. Select **Start your own chat**, or use
+  **Fork** in the tool rail (below), which starts a chat of your own.
+
+You can also start again from the [session tool rail](/docs/guides/chat-features/#the-session-tool-rail):
+**Retry** opens a new chat pre-filled with the task's original request, and **Fork** opens one
+pre-filled with this chat's IDs, so its agent can read this conversation and you don't have to
+re-explain it. None of these bring the old chat's files; check GitHub for what the agent pushed.
+
+## `git push` or `gh` can't authenticate
+
+SAM gives each workspace access to the project's repository: through SAM's GitHub App on a GitHub
+project, or your GitLab sign-in on a GitLab project. On a GitHub project it checks, every time Git
+asks, that the person whose workspace it is can still reach the repository. When access is refused,
+`git push` or `git fetch` in the workspace fails with an ordinary authentication error (`gh` can keep
+working until its current token expires, within the hour), and on a VM a new workspace fails to
+start with **failed to fetch git token: git-token authorization_denied (HTTP 403); check
+control-plane availability or repository authorization**.
+
+- **Access was removed.** If you lost access to the repository on GitHub, or the GitHub App was
+  removed from it, restore that access and ask the agent to try again. There's nothing to wait for:
+  the change applies to the next Git command.
+- **Another host.** SAM's access covers GitHub (and, on GitLab projects, the project's GitLab
+  host). Pushing to any other remote needs credentials of your own.
+- **A short SAM outage** is retried automatically for up to about 25 seconds per Git request. If it
+  keeps failing, try again later.
+- **The agent can push but can't open a pull request on a self-hosted instance.** The GitHub App
+  that self-hosted SAM sets up can only read pull requests; see
+  [Let agents open pull requests](/docs/guides/self-hosting/#let-agents-open-pull-requests).
+
+## "Agent profile not found" when you send a message
+
+Typing `@` and the name of one of your [agent profiles](/docs/guides/agents/#agent-profiles)
+mentions that profile: SAM tells the agent the profile exists, so it can hand work to it. Pick the
+profile from the list that opens when you type `@`; a mention has to match the profile's name
+exactly, capitals included. An `@` that doesn't name one of your profiles is ordinary text.
+
+:::caution[Self-hosted v2026.10.10 to v2026.10.14]
+These releases refuse a message in which `@` is directly followed by a word that isn't one of your
+profile names, with **Agent profile not found**, so it never reaches the agent. That includes email
+addresses (`bob@example.com`), package names (`@types/node`), code with decorators or annotations
+(`@dataclass`, `@Override`), and text SAM fills in for you, such as the chat title Fork quotes.
+Picking a profile from the list doesn't help when its name has no spaces but has a character other
+than a letter a–z or A–Z, a digit, or `_` (such as `-`, `.`, `é`, or `д`): the list inserts
+`@code-reviewer`, which these releases read as `@code`, so type `@"code-reviewer"` instead.
+Update to v2026.10.15 or later. Until then, write the `@` so a word doesn't directly follow it, for
+example `bob at example.com` or `@ dataclass`.
+:::
+
+## The chat runs a different agent than its profile
+
+If a chat runs another agent than the profile you picked, for example OpenCode instead of Claude
+Code, look at the skill. A skill that sets an agent replaces the profile's agent and keeps the
+profile's model. Skills created from the **Skills** page before 21 October 2026 (v2026.10.22 on a
+self-hosted instance) all set the platform default agent, usually OpenCode, and the **Skills** page
+doesn't show it. Ask an agent in the project to list the project's skills and clear the agent on
+any that set one (`skills_write` method `update` with `agentType: ""`), or start the chat without that skill. See
+[the order SAM picks the agent in](/docs/guides/agents/#agent-profiles).
+
+## SAM moved the session to another machine
+
+When a VM runs short of memory, SAM may move a session off it: the chat shows **Sleeping** for a
+moment, then wakes on another machine with its files. If the agent was in the middle of something,
+it's told to carry on from where it stopped, in a **Task** or a **Chat**; if it was idle, it waits
+for your next message. Check what it picked up. On a self-hosted release up to v2026.10.15, a
+**Chat** waits for your next message either way, and on v2026.10.08 or earlier so does a **Task**. The session's **Resources** history covers both machines; see
+[Session Resource History](/docs/guides/session-resources/).
 
 ## None of these fit
 

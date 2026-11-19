@@ -15,6 +15,7 @@ import {
   isToolStripMode,
   nextToolStripMode,
   type SessionToolAction,
+  taskEndIntent,
   TOOL_STRIP_MODES,
   type ToolStripMode,
 } from '../../../src/components/project-message-view/session-tool-actions';
@@ -113,7 +114,7 @@ describe('buildSessionToolActions — group assignment', () => {
     hasFilesHandler: true,
     hasGitHandler: true,
     hasTimelineHandler: true,
-    hasEventsHandler: true,
+    hasAutomationHandler: true,
     hasCommentsHandler: true,
     hasRetryHandler: true,
     hasForkHandler: true,
@@ -129,7 +130,7 @@ describe('buildSessionToolActions — group assignment', () => {
   it('assigns each tool to the group its builder owns', () => {
     const byId = new Map(buildSessionToolActions(fullInput()).map((a) => [a.id, a.group]));
 
-    for (const id of ['files', 'git', 'timeline', 'events', 'comments'] as const) {
+    for (const id of ['files', 'git', 'timeline', 'automation', 'comments'] as const) {
       expect(byId.get(id)).toBe('workspace');
     }
     for (const id of ['retry', 'fork'] as const) {
@@ -149,5 +150,145 @@ describe('buildSessionToolActions — group assignment', () => {
     expect(firstSeen).toEqual(['workspace', 'session', 'meta']);
     // No group reappears after another has started.
     expect(groups).toEqual([...groups].sort((a, b) => firstSeen.indexOf(a) - firstSeen.indexOf(b)));
+  });
+});
+
+describe('buildSessionToolActions — shared sessions', () => {
+  const input = (
+    overrides: Partial<BuildSessionToolActionsInput> = {}
+  ): BuildSessionToolActionsInput => ({
+    session: { id: 's1', workspaceId: 'ws1', taskId: 't1' } as never,
+    sessionState: 'active',
+    taskEmbed: { id: 't1', status: 'in_progress' } as never,
+    reportEnabled: false,
+    unresolvedCommentCount: 0,
+    needsAttentionCommentCount: 0,
+    hasFilesHandler: true,
+    hasGitHandler: true,
+    hasTimelineHandler: true,
+    hasAutomationHandler: true,
+    hasCommentsHandler: true,
+    hasRetryHandler: true,
+    hasForkHandler: true,
+    ...overrides,
+  });
+  const ids = (actions: SessionToolAction[]) => actions.map((action) => action.id);
+
+  it('offers Share in the session group, badged with how many people have access', () => {
+    const share = (overrides: Partial<BuildSessionToolActionsInput>) =>
+      buildSessionToolActions(input({ hasShareHandler: true, ...overrides })).find(
+        (action) => action.id === 'share'
+      );
+
+    expect(share({ sharedWithCount: 3, canManageShare: true })).toMatchObject({
+      group: 'session',
+      label: 'Share',
+      badge: 3,
+      hint: 'Shared with 3 people — manage chat access',
+    });
+    expect(share({ canManageShare: true })).toMatchObject({
+      hint: 'Share chat access with a teammate',
+      badge: undefined,
+    });
+    expect(ids(buildSessionToolActions(input()))).not.toContain('share');
+  });
+
+  it('only invites people who can share to share; everyone else is told they can look', () => {
+    const hint = (overrides: Partial<BuildSessionToolActionsInput>) =>
+      buildSessionToolActions(input({ hasShareHandler: true, ...overrides })).find(
+        (action) => action.id === 'share'
+      )?.hint;
+
+    expect(hint({ sharedWithCount: 1, canManageShare: false })).toBe(
+      'Shared with 1 person — see who has access'
+    );
+    expect(hint({ canManageShare: false })).toBe('See who has access to this chat');
+    // Unknown means "cannot", like every other viewer capability.
+    expect(hint({ sharedWithCount: 2 })).toBe('Shared with 2 people — see who has access');
+  });
+
+  it('keeps Files and Git for the owner only: they reach the workspace outside the chat', () => {
+    expect(ids(buildSessionToolActions(input()))).toEqual(expect.arrayContaining(['files', 'git']));
+
+    const viewer = ids(buildSessionToolActions(input({ canBrowseWorkspace: false })));
+    expect(viewer).not.toContain('files');
+    expect(viewer).not.toContain('git');
+    // Everything that stays inside the chat is still there.
+    expect(viewer).toEqual(expect.arrayContaining(['timeline', 'automation', 'comments']));
+  });
+});
+
+describe('taskEndIntent', () => {
+  // A task that never started can only be cancelled (TRANSITIONS in
+  // apps/api/src/services/task-status.ts); terminal tasks offer neither control.
+  it.each([
+    ['draft', 'cancelled'],
+    ['ready', 'cancelled'],
+    ['queued', 'cancelled'],
+    ['delegated', 'cancelled'],
+    ['in_progress', 'completed'],
+    ['sleeping', 'completed'],
+    ['completed', null],
+    ['failed', null],
+    ['cancelled', null],
+    [undefined, null],
+  ] as const)('%s -> %s', (status, intent) => {
+    expect(taskEndIntent(status)).toBe(intent);
+  });
+
+  it('pins Cancel task to the meta group, like Complete', () => {
+    const actions = buildSessionToolActions({
+      session: { id: 's1', workspaceId: null, taskId: 't1' } as never,
+      sessionState: 'active',
+      taskEmbed: { id: 't1', status: 'queued' } as never,
+      reportEnabled: false,
+      unresolvedCommentCount: 0,
+    } as BuildSessionToolActionsInput);
+    expect(actions.find((a) => a.id === 'cancel')?.group).toBe('meta');
+    expect(actions.find((a) => a.id === 'complete')).toBeUndefined();
+  });
+});
+
+describe('buildSessionToolActions — run receipt', () => {
+  const input = (
+    overrides: Partial<BuildSessionToolActionsInput> = {}
+  ): BuildSessionToolActionsInput => ({
+    session: { id: 's1', workspaceId: 'ws1', taskId: 't1' } as never,
+    sessionState: 'active',
+    taskEmbed: { id: 't1', status: 'completed' } as never,
+    reportEnabled: false,
+    unresolvedCommentCount: 0,
+    needsAttentionCommentCount: 0,
+    hasFilesHandler: false,
+    hasGitHandler: false,
+    hasTimelineHandler: true,
+    hasAutomationHandler: false,
+    hasCommentsHandler: false,
+    hasRetryHandler: true,
+    hasForkHandler: true,
+    hasReceiptHandler: true,
+    ...overrides,
+  });
+  const ids = (overrides: Partial<BuildSessionToolActionsInput> = {}) =>
+    buildSessionToolActions(input(overrides)).map((action) => action.id);
+
+  it('offers the receipt in the session group for a task-backed chat, before Retry', () => {
+    const actions = buildSessionToolActions(input());
+    const receipt = actions.find((action) => action.id === 'receipt');
+    expect(receipt).toMatchObject({ label: 'Receipt', group: 'session' });
+    expect(ids().indexOf('receipt')).toBeLessThan(ids().indexOf('retry'));
+  });
+
+  it('offers it for a live run, which shows the time so far', () => {
+    expect(ids({ taskEmbed: { id: 't1', status: 'in_progress' } as never })).toContain('receipt');
+  });
+
+  it('leaves it out of a chat with no task, and when no handler is wired', () => {
+    expect(
+      ids({ session: { id: 's1', workspaceId: null, taskId: null } as never, taskEmbed: null })
+    ).not.toContain('receipt');
+    expect(ids({ hasReceiptHandler: false })).not.toContain('receipt');
+    // Liveness: the same inputs still produce the other tools.
+    expect(ids({ hasReceiptHandler: false })).toContain('timeline');
   });
 });

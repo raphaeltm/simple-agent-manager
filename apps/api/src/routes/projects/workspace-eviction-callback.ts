@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Context, Hono } from 'hono';
 import * as v from 'valibot';
@@ -16,9 +16,11 @@ import {
   nodeStatusTerminatesCallbacks,
 } from '../../services/node-callback-auth';
 import * as projectDataService from '../../services/project-data';
-import { classifySessionRecoveryRefusal } from '../../services/session-recovery-refusals';
-import { finalizeWorkspaceEvictionOnNode } from '../../services/workspace-eviction-lifecycle';
-import { recoverWorkspaceAfterEviction } from '../../services/workspace-eviction-recovery';
+import {
+  evictedWorkspacePreservationReceiptStatement,
+  evictedWorkspaceSnapshotSleepStatement,
+} from '../../services/workspace-eviction-recovery';
+import { completeEvictionRecovery } from './workspace-eviction-callback-recovery';
 
 const WORKSPACE_EVICTION_CALLBACK_ACTIVE_STATUS_VALUES = [
   'creating',
@@ -36,13 +38,14 @@ const WorkspaceEvictionCallbackSchema = v.object({
   reason: v.picklist(['memory_pressure', 'oom_kill']),
   snapshotCaptured: v.boolean(),
   containerStopped: v.boolean(),
+  interruptedWork: v.optional(v.boolean()),
   evictionGeneration: v.optional(v.nullable(v.pipe(v.string(), v.minLength(1)))),
 });
 
-type WorkspaceEvictionBody = v.InferOutput<typeof WorkspaceEvictionCallbackSchema>;
+export type WorkspaceEvictionBody = v.InferOutput<typeof WorkspaceEvictionCallbackSchema>;
 type AppDb = ReturnType<typeof drizzle<typeof schema>>;
 
-type WorkspaceEvictionResource = {
+export type WorkspaceEvictionResource = {
   workspaceId: string;
   userId: string;
   projectId: string | null;
@@ -77,7 +80,7 @@ async function loadWorkspaceEvictionResource(
   db: AppDb,
   workspaceId: string
 ): Promise<WorkspaceEvictionResource | null> {
-  return (
+  const workspace =
     (await db
       .select({
         workspaceId: schema.workspaces.id,
@@ -93,8 +96,26 @@ async function loadWorkspaceEvictionResource(
       .from(schema.workspaces)
       .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
       .where(eq(schema.workspaces.id, workspaceId))
-      .get()) ?? null
-  );
+      .get()) ?? null;
+  if (!workspace || workspace.chatSessionId || workspace.status !== 'evicted') return workspace;
+  // A wake relinquishes the source's UNIQUE chat binding before starting its
+  // replacement. If startup fails, callback replay must still find that exact
+  // retained snapshot, without borrowing a successor's conversation.
+  const snapshot = await db
+    .select({ chatSessionId: schema.sessionSnapshots.chatSessionId })
+    .from(schema.sessionSnapshots)
+    .where(
+      and(
+        eq(schema.sessionSnapshots.workspaceId, workspace.workspaceId),
+        eq(schema.sessionSnapshots.userId, workspace.userId),
+        sql`${schema.sessionSnapshots.projectId} IS ${workspace.projectId}`,
+        sql`${schema.sessionSnapshots.evictionRecoveryWorkspaceId} IS ${workspace.workspaceId}`,
+        sql`${schema.sessionSnapshots.evictionRecoveryNodeId} IS ${workspace.nodeId}`,
+        sql`${schema.sessionSnapshots.evictionRecoveryGeneration} IS ${workspace.evictionGeneration}`
+      )
+    )
+    .get();
+  return snapshot ? { ...workspace, chatSessionId: snapshot.chatSessionId } : workspace;
 }
 
 function tokenMatchesEvictionResource(
@@ -105,60 +126,13 @@ function tokenMatchesEvictionResource(
   if (payload.scope === 'node') {
     return callbackTokenMatchesNode(payload, workspace.nodeId) && workspace.nodeId === body.nodeId;
   }
-  if (payload.scope === 'workspace') {
-    return callbackTokenMatchesWorkspace(payload, workspace.workspaceId);
-  }
-  return payload.workspace === workspace.workspaceId;
+  return callbackTokenMatchesWorkspace(payload, workspace.workspaceId);
 }
 
 function workspaceEvictionErrorMessage(reason: WorkspaceEvictionBody['reason']): string {
   return reason === 'oom_kill'
     ? 'Workspace evicted after container OOM'
     : 'Workspace evicted due to memory pressure';
-}
-
-function evictionRecoveryReasonIsRetryable(reason: string): boolean {
-  return classifySessionRecoveryRefusal(reason).action === 'retry';
-}
-
-async function finalizeEvictionLifecycle(env: Env, workspace: WorkspaceEvictionResource) {
-  if (
-    !workspace.nodeId ||
-    !(await finalizeWorkspaceEvictionOnNode(env, {
-      nodeId: workspace.nodeId,
-      workspaceId: workspace.workspaceId,
-      generation: workspace.evictionGeneration,
-    }))
-  ) {
-    throw errors.gone('Workspace eviction identity changed before cleanup');
-  }
-}
-
-async function recoverEvictedWorkspace(
-  env: Env,
-  workspace: WorkspaceEvictionResource,
-  body: WorkspaceEvictionBody,
-  projectId: string
-): Promise<void> {
-  if (!body.snapshotCaptured || !workspace.chatSessionId) return;
-  const recovery = await recoverWorkspaceAfterEviction(env, {
-    projectId,
-    workspaceId: workspace.workspaceId,
-    chatSessionId: workspace.chatSessionId,
-    nodeId: body.nodeId,
-    generation: body.evictionGeneration ?? null,
-  });
-  if (recovery.status === 'unavailable') {
-    log.warn('workspace_eviction.recovery_deferred', {
-      projectId,
-      workspaceId: workspace.workspaceId,
-      nodeId: body.nodeId,
-      reason: recovery.reason,
-    });
-    if (evictionRecoveryReasonIsRetryable(recovery.reason)) {
-      throw errors.conflict(`Evicted workspace recovery is not ready: ${recovery.reason}`);
-    }
-  }
 }
 
 function rejectMissingWorkspaceCallback(
@@ -229,8 +203,7 @@ async function evictionTerminalResponse(
   // cleanup before telling the VM agent to stop retrying, even if the node has
   // already moved into a terminal lifecycle state.
   if (workspace.status === 'evicted') {
-    await finalizeEvictionLifecycle(c.env, workspace);
-    await recoverEvictedWorkspace(c.env, workspace, body, projectId);
+    await completeEvictionRecovery(c, workspace, body, projectId, { evicted: workspace });
     return c.body(null, 204);
   }
 
@@ -302,7 +275,9 @@ workspaceEvictionCallbackRoute.post(
       workspace.chatSessionId,
       now,
     ];
-    const [transition] = await c.env.DATABASE.batch([
+    // Publish the snapshot in the same transaction as the terminal runtime marker:
+    // other finalizers must never observe evicted without its recoverability record.
+    const [transition, , , , sleepingSnapshot] = await c.env.DATABASE.batch([
       c.env.DATABASE.prepare(
         `UPDATE workspaces SET status = 'evicted', error_message = ?, updated_at = ?, eviction_finalized_at = NULL,
            stop_runtime_confirmed_at = NULL
@@ -338,6 +313,28 @@ workspaceEvictionCallbackRoute.post(
          WHERE workspace_id IN (${claimedWorkspace}) AND sleeping_at IS NULL
            AND sleep_status IN ('scheduled', 'preparing', 'failed')`
       ).bind(now, ...claimBindings),
+      ...(workspace.chatSessionId
+        ? [
+            evictedWorkspaceSnapshotSleepStatement(
+              c.env.DATABASE,
+              {
+                projectId,
+                workspaceId,
+                chatSessionId: workspace.chatSessionId,
+                nodeId: body.nodeId,
+                generation: workspace.evictionGeneration,
+                interruptedWork: body.interruptedWork,
+              },
+              now,
+              now
+            ),
+            evictedWorkspacePreservationReceiptStatement(
+              c.env.DATABASE,
+              { chatSessionId: workspace.chatSessionId },
+              now
+            ),
+          ]
+        : []),
     ]);
 
     if ((transition?.meta.changes ?? 0) === 0) {
@@ -355,13 +352,10 @@ workspaceEvictionCallbackRoute.post(
       throw errors.conflict('Workspace eviction transition was not applied');
     }
 
-    await finalizeEvictionLifecycle(c.env, workspace);
-    await recoverEvictedWorkspace(
-      c.env,
-      { ...workspace, status: 'evicted', updatedAt: now },
-      body,
-      projectId
-    );
+    await completeEvictionRecovery(c, workspace, body, projectId, {
+      evicted: { ...workspace, status: 'evicted', updatedAt: now },
+      snapshotMarked: (sleepingSnapshot?.meta.changes ?? 0) > 0,
+    });
 
     c.executionCtx.waitUntil(
       projectDataService

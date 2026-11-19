@@ -1,18 +1,18 @@
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import {
+  reconcileSchedule,
+  withScheduleExecution,
+} from '@simple-agent-manager/project-data/internal/do/project-event-schedules-recovery';
+import {
+  createSchedule,
+  getSchedule,
+} from '@simple-agent-manager/project-data/internal/do/project-event-schedules-storage';
+import { createWatch } from '@simple-agent-manager/project-data/internal/do/project-standing-watches-storage';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { runMigrations } from '../../../src/durable-objects/migrations';
-import {
-  reconcileSchedule,
-  withScheduleExecution,
-} from '../../../src/durable-objects/project-data/project-event-schedules-recovery';
-import {
-  createSchedule,
-  getSchedule,
-} from '../../../src/durable-objects/project-data/project-event-schedules-storage';
-import { createWatch } from '../../../src/durable-objects/project-data/project-standing-watches-storage';
-import type { Env } from '../../../src/durable-objects/project-data/types';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const databases: Database.Database[] = [];

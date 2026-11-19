@@ -35,7 +35,6 @@ const MOCK_PROJECT = {
   githubInstallationId: 'inst-1',
   defaultVmSize: null,
   defaultAgentType: null,
-  defaultProvider: null,
   workspaceIdleTimeoutMs: null,
   nodeIdleTimeoutMs: null,
   createdAt: '2026-01-01T00:00:00Z',
@@ -62,6 +61,7 @@ function makeSession(overrides: { id: string; topic?: string; status?: string })
     workspaceUrl: null,
     cleanupAt: null,
     agentSessionId: null,
+    viewerAccess: 'owner',
   };
 }
 
@@ -108,7 +108,6 @@ async function setupApiMocks(page: Page) {
     if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
     if (path.startsWith('/api/credentials')) return respond(200, []);
     if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
-    if (path === '/api/trial/status') return respond(200, { available: false });
     if (path === '/api/agents') return respond(200, { agents: [] });
     if (path === '/api/github/installations') return respond(200, []);
     if (path === '/api/workspaces') return respond(200, []);

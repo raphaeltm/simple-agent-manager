@@ -22,6 +22,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/workspace/vm-agent/internal/transferscratch"
 )
 
 // PushCredentials are the short-lived registry credentials minted by the control
@@ -109,6 +111,8 @@ type ReleaseSubmittedBy struct {
 // ReleaseSubmission is the payload sent to the control plane to record a release
 // from a host-built compose artifact.
 type ReleaseSubmission struct {
+	PublishJobID  string              `json:"publishJobId,omitempty"`
+	Attempt       int                 `json:"attempt,omitempty"`
 	Environment   string              `json:"environment"`
 	EnvironmentID string              `json:"environmentId"`
 	Reference     string              `json:"reference"`
@@ -138,6 +142,8 @@ type Docker interface {
 
 // Options configures a new Orchestrator.
 type Options struct {
+	PublishJobID string
+	Attempt      int
 	ControlPlane ControlPlane
 	Docker       Docker
 	HTTPClient   *http.Client
@@ -147,6 +153,8 @@ type Options struct {
 
 // Orchestrator drives the post-build publish flow.
 type Orchestrator struct {
+	publishJobID string
+	attempt      int
 	controlPlane ControlPlane
 	docker       Docker
 	httpClient   *http.Client
@@ -165,6 +173,8 @@ func New(opts Options) *Orchestrator {
 		client = http.DefaultClient
 	}
 	return &Orchestrator{
+		publishJobID: opts.PublishJobID,
+		attempt:      opts.Attempt,
 		controlPlane: opts.ControlPlane,
 		docker:       opts.Docker,
 		httpClient:   client,
@@ -246,6 +256,8 @@ func (o *Orchestrator) Publish(ctx context.Context, projectID, environment, envi
 	}
 
 	submission := &ReleaseSubmission{
+		PublishJobID:  o.publishJobID,
+		Attempt:       o.attempt,
 		Environment:   environment,
 		EnvironmentID: environmentID,
 		Reference:     art.Reference,
@@ -296,11 +308,16 @@ func (o *Orchestrator) exportAndUploadServices(ctx context.Context, art *BuildAr
 	for _, upload := range init.Uploads {
 		uploadsByService[upload.ServiceName] = upload
 	}
-	dir, err := os.MkdirTemp("", "sam-publish-artifacts-*")
+	op, err := transferscratch.NewOperation("publish")
 	if err != nil {
 		return nil, fmt.Errorf("publish: create temp dir: %w", err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() {
+		if err := op.Close(); err != nil {
+			o.log.Warn("publish: scratch cleanup pending", "error", err)
+		}
+	}()
+	dir := op.Path
 
 	releases := make([]ServiceRelease, 0, len(art.Services))
 	for i := range art.Services {

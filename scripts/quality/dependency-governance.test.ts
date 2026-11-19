@@ -1,5 +1,6 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, posix, relative } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join, posix } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -10,22 +11,17 @@ function read(path: string): string {
 }
 
 function walk(dir: string, predicate: (path: string) => boolean): string[] {
-  const absoluteDir = join(root, dir);
-  if (!existsSync(absoluteDir)) return [];
-
-  const paths: string[] = [];
-  for (const entry of readdirSync(absoluteDir)) {
-    if (entry === 'node_modules' || entry === '.git') continue;
-    const absolutePath = join(absoluteDir, entry);
-    const repoPath = posix.normalize(relative(root, absolutePath).replaceAll('\\', '/'));
-    const stats = statSync(absolutePath);
-    if (stats.isDirectory()) {
-      paths.push(...walk(repoPath, predicate));
-    } else if (predicate(repoPath)) {
-      paths.push(repoPath);
-    }
-  }
-  return paths.sort();
+  // Inventory repository inputs, including new files under review, without
+  // traversing ignored caches, node_modules or private agent runtime state.
+  const files = execFileSync(
+    'git',
+    ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
+    { cwd: root, encoding: 'utf8' }
+  )
+    .split('\0')
+    .filter(Boolean);
+  const prefix = dir === '.' ? '' : `${dir}/`;
+  return files.filter((path) => path.startsWith(prefix) && predicate(path)).sort();
 }
 
 function extractDependabotDirectories(ecosystem: string): Set<string> {
@@ -134,14 +130,17 @@ describe('dependency governance', () => {
     const refs = [...dockerFromRefs(dockerfiles), ...dockerRefsInTextFiles(workflowFiles)];
 
     expect(dockerfiles).toEqual([
+      'apps/api/Dockerfile.compose-builder',
       'apps/api/Dockerfile.sandbox',
       'apps/api/Dockerfile.vm-agent-container',
+      'deploy/selfhost/sam-mx/Dockerfile',
       'scripts/e2e/workspace-mock/Dockerfile',
     ]);
     expect(refs.length).toBeGreaterThanOrEqual(dockerfiles.length);
     expect(refs.every((ref) => /@sha256:[a-f0-9]{64}$/.test(ref))).toBe(true);
     expect([...extractDependabotDirectories('docker')].sort()).toEqual([
       '/apps/api',
+      '/deploy/selfhost/sam-mx',
       '/scripts/e2e/workspace-mock',
     ]);
   });

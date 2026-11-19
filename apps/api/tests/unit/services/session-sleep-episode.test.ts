@@ -125,9 +125,10 @@ describe('sessionSleepEpisodePhase', () => {
     expect(phase(0, 60 * 60 * 1000)).toBe('full');
   });
 
-  it('ends blocked at the ceiling', () => {
+  it('keeps cleanup retryable beyond the capture ceiling', () => {
     expect(phase(8, 0)).toBe('fallback');
-    expect(phase(9, 0)).toBe('blocked');
+    expect(phase(9, 0)).toBe('fallback');
+    expect(phase(20, 0)).toBe('fallback');
   });
 
   it('cannot measure time from an unreadable start, but the attempt budget still bounds it', () => {
@@ -174,6 +175,16 @@ describe('the stored fallback record', () => {
     ).toThrow();
   });
 
+  it('recognizes transcript-only fallback independently of snapshot generation', () => {
+    const transcript = record({ recoveryPoint: null });
+    expect(
+      sleptFallbackRecord({
+        sleepFallbackJson: serializeSessionSleepFallbackRecord(transcript),
+        snapshotGeneration: null,
+      })
+    ).toEqual(transcript);
+  });
+
   it('names a fallback sleep only on the generation it was decided for', () => {
     const stored = serializeSessionSleepFallbackRecord(record());
     expect(sleptFallbackRecord({ sleepFallbackJson: stored, snapshotGeneration: 'gen-3' })).toEqual(
@@ -198,12 +209,25 @@ describe('the stored fallback record', () => {
 describe('what the user and the woken agent are told', () => {
   it('says plainly what a fallback kept and lost, without promising an exact restore', () => {
     const notice = sessionSleepFallbackNotice(record());
-    expect(notice).toContain('SAM put this session to sleep without saving all of its files.');
+    expect(notice).toContain(
+      'SAM is putting this session to sleep without saving all of its files.'
+    );
     expect(notice).toContain('Saving a complete snapshot failed after 3 attempts over 15 minutes.');
     expect(notice).toContain(`branch sam/feature at commit ${'f'.repeat(12)}`);
     expect(notice).toContain('installed tools and the agent’s own session files');
     expect(notice).toContain('rebuilds its context from this conversation');
     expect(notice).not.toMatch(/exact(ly)? (restore|reconstruct)/i);
+  });
+
+  it('discloses transcript-only continuation and unpublished filesystem loss', () => {
+    const transcript = record({ recoveryPoint: null });
+    const notice = sessionSleepFallbackNotice(transcript);
+    expect(notice).toMatch(/transcript|conversation/i);
+    expect(notice).toMatch(/unpublished|unsaved/i);
+    expect(notice).not.toContain('restored commit');
+    const prompt = sessionRecoveryInitialPrompt(transcript);
+    expect(prompt).toMatch(/transcript|conversation/i);
+    expect(prompt).not.toContain('SAM restored commit');
   });
 
   it('describes a complete recovery point differently', () => {
@@ -217,28 +241,63 @@ describe('what the user and the woken agent are told', () => {
         },
       })
     );
-    expect(notice).toContain('SAM put this session to sleep using its last complete snapshot.');
+    expect(notice).toContain(
+      'SAM is putting this session to sleep using its last complete snapshot.'
+    );
     expect(notice).toContain('Not kept: any change made after that snapshot was saved.');
     expect(notice).toContain('the agent starts a new session');
   });
 
-  it('tells the user what to do when the episode ends blocked', () => {
-    const blocked = record({
-      outcome: 'blocked',
-      blockedReason: 'no_git_baseline',
-      recoveryPoint: null,
-    });
-    const vm = sessionSleepBlockedNotice(blocked, 'vm');
-    expect(vm).toContain('SAM could not put this session to sleep.');
-    expect(vm).toContain('no saved snapshot records which Git commit the workspace is on');
-    expect(vm).toContain('Its workspace keeps running.');
-    expect(vm).toContain(
-      'commit and push anything you want to keep, then stop its workspace from the Workspaces page'
+  it.each(['vm', 'cf-container'])(
+    'explains guarded idle cleanup and degraded recovery for a legacy %s block',
+    (runtime) => {
+      const notice = sessionSleepBlockedNotice(
+        record({
+          outcome: 'blocked',
+          blockedReason: 'no_git_baseline',
+          recoveryPoint: null,
+        }),
+        runtime
+      );
+      expect(notice).toContain('no saved snapshot records which Git commit the workspace is on');
+      expect(notice).toMatch(/retry.*cleanup|cleanup.*retry/i);
+      expect(notice).toMatch(/idle/i);
+      expect(notice).toMatch(/conversation|transcript/i);
+      expect(notice).toMatch(/backup|artifact/i);
+      expect(notice).toMatch(/unpublished/i);
+      expect(notice).toMatch(/fresh.*transcript|transcript.*fresh/i);
+      expect(notice).not.toMatch(/keeps running|stopped trying|retries have stopped/i);
+      expect(notice).not.toContain('archive');
+    }
+  );
+
+  it('keeps an unconfirmed stop pending without claiming runtime removal', () => {
+    const notice = sessionSleepBlockedNotice(
+      record({
+        outcome: 'blocked',
+        blockedReason: 'teardown_unconfirmed',
+        recoveryPoint: null,
+      }),
+      'vm'
     );
-    expect(vm).not.toContain('archive');
-    expect(sessionSleepBlockedNotice(blocked, 'cf-container')).toContain(
-      'This Instant workspace keeps running'
+    expect(notice).toMatch(/pending|not.*confirmed|could not.*confirm/i);
+    expect(notice).toMatch(/retry|retries/i);
+    expect(notice).toMatch(/conversation|transcript/i);
+    expect(notice).not.toMatch(/retries have stopped|runtime (?:was|has been) removed/i);
+  });
+
+  it('leaves the replacement runtime alone when the old sleep runtime changed', () => {
+    const notice = sessionSleepBlockedNotice(
+      record({
+        outcome: 'blocked',
+        blockedReason: 'runtime_changed',
+        recoveryPoint: null,
+      }),
+      'vm'
     );
+    expect(notice).toContain('replacement runtime has been left alone');
+    expect(notice).toContain('previous checkpoint is retained');
+    expect(notice).not.toMatch(/retry.*cleanup/i);
   });
 
   it('keeps the ordinary wake prompt for a normal sleep', () => {
@@ -252,7 +311,7 @@ describe('what the user and the woken agent are told', () => {
 
   it('guides a fallback wake to check Git state and not replay outside effects', () => {
     const prompt = sessionRecoveryInitialPrompt(record());
-    expect(prompt).toContain('Use get_session_messages for this chat session');
+    expect(prompt).toContain('Use sessions_read method messages for this chat session');
     expect(prompt).toContain(`SAM restored commit ${'f'.repeat(40)} on branch sam/feature`);
     expect(prompt).toContain('Files outside the repository and any changes made after');
     expect(prompt).toContain('You are starting a new agent session');

@@ -88,13 +88,13 @@ func (s *Server) createContainerHomeTar(ctx context.Context, target *containerSn
 			return "", skipped, commandErr
 		}
 		cmd.Stdin = bytes.NewReader(fileList)
-		stderr := &cappedBuffer{maxBytes: 64 * 1024}
+		stderr := newTailBuffer(snapshotCommandStderrBytes)
 		cmd.Stderr = stderr
 		if reportProgress != nil {
 			reportProgress(ctx, "home-copy")
 		}
 		if commandErr := cmd.Run(); commandErr != nil {
-			return "", skipped, fmt.Errorf("archive container snapshot root %q: %w: %s", root.logicalName, commandErr, strings.TrimSpace(stderr.buffer.String()))
+			return "", skipped, fmt.Errorf("archive container snapshot root %q: %w: %s", root.logicalName, commandErr, strings.TrimSpace(stderr.String()))
 		}
 		if reportProgress != nil {
 			reportProgress(ctx, "home-copy")
@@ -426,10 +426,10 @@ func (s *Server) extractContainerSnapshotSubset(ctx context.Context, target *con
 		return err
 	}
 	cmd.Stdin = file
-	stderr := &cappedBuffer{maxBytes: 64 * 1024}
+	stderr := newTailBuffer(snapshotCommandStderrBytes)
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("extract restored container snapshot state: %w: %s", err, strings.TrimSpace(stderr.buffer.String()))
+		return fmt.Errorf("extract restored container snapshot state: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
 }

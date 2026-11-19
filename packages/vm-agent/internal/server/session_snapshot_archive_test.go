@@ -80,6 +80,8 @@ func TestSessionStateTarRoundTripCapturesProjectLocalCodexHome(t *testing.T) {
 	sourceCodexHome := filepath.Join(sourceProject, ".codex")
 	writeHomeFile(t, sourceHome, "notes.txt", "home-state")
 	writeHomeFile(t, sourceHome, ".local/share/opencode/opencode.db", "durable-opencode-state")
+	writeHomeFile(t, sourceHome, ".local/share/opencode/opencode.db-wal", "opencode-uncheckpointed-writes")
+	writeHomeFile(t, sourceHome, ".local/share/opencode/opencode.db-shm", "opencode-shared-memory")
 	writeHomeFile(t, sourceHome, ".sam-snapshot-roots/codex/forged.json", "must-not-win")
 	writeHomeFile(t, sourceCodexHome, "sessions/session.jsonl", "remember cobalt heron")
 	writeHomeFile(t, sourceCodexHome, "auth.json", "CODEX_SECRET")
@@ -147,6 +149,9 @@ func TestSessionStateTarRoundTripCapturesProjectLocalCodexHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertFileContent(t, filepath.Join(restoredHome, "notes.txt"), "home-state")
+	assertFileContent(t, filepath.Join(restoredHome, ".local/share/opencode/opencode.db"), "durable-opencode-state")
+	assertFileContent(t, filepath.Join(restoredHome, ".local/share/opencode/opencode.db-wal"), "opencode-uncheckpointed-writes")
+	assertFileContent(t, filepath.Join(restoredHome, ".local/share/opencode/opencode.db-shm"), "opencode-shared-memory")
 	assertFileContent(t, filepath.Join(restoredCodexHome, "sessions", "session.jsonl"), "remember cobalt heron")
 	for _, forbidden := range []string{"auth.json", "config.toml"} {
 		if _, err := os.Stat(filepath.Join(restoredCodexHome, forbidden)); !os.IsNotExist(err) {

@@ -16,8 +16,12 @@ import {
   upsertCanonicalInstallationAccount,
 } from '../services/github-installation-accounts';
 import { getStoredInstallationId } from '../services/github-installation-ids';
-import { handleGitHubProjectEventAdmission } from '../services/github-project-event-producer';
-import { handleGitHubEventForTriggers } from '../services/github-trigger-handler';
+import { admitGitHubWebhookProjectEvents } from '../services/github-project-event-producer';
+import { ingestPullRequestWebhook } from '../services/github-pull-request-events';
+import {
+  persistGitHubTriggerIntake,
+  recoverGitHubTriggerDelivery,
+} from '../services/github-trigger-recovery';
 import { getGitHubWebhookSecret } from '../services/platform-config';
 
 type GitHubContext = Context<{ Bindings: Env }>;
@@ -49,6 +53,8 @@ export async function handleGitHubWebhook(c: GitHubContext): Promise<Response> {
     throw errors.badRequest('Invalid JSON in webhook payload');
   }
 
+  const deliveryId = c.req.header('x-github-delivery');
+  if (!event || !deliveryId) throw errors.badRequest('Missing GitHub event or delivery ID');
   const db = drizzle(c.env.DATABASE, { schema });
   const now = new Date().toISOString();
 
@@ -60,17 +66,20 @@ export async function handleGitHubWebhook(c: GitHubContext): Promise<Response> {
     await handleRepositoryEvent(db, data, now);
   }
 
-  const deliveryId = c.req.header('x-github-delivery');
-  if (event && deliveryId) {
-    c.executionCtx.waitUntil(
-      handleGitHubProjectEventAdmission(c.env, {
-        deliveryId,
-        eventType: event,
-        payload: data,
-      })
-    );
-    c.executionCtx.waitUntil(handleTriggerRouting(c, deliveryId, event, data));
-  }
+  // Complete independent event and PR persistence before acknowledging acceptance.
+  // Delivery-ID deduplication and PR timestamp fences make partial-failure redelivery safe.
+  await admitGitHubWebhookProjectEvents(c.env, {
+    deliveryId,
+    eventType: event,
+    payload: data,
+  });
+  await ingestPullRequestWebhook(c.env, event, data);
+  const triggerIntake = await persistGitHubTriggerIntake(c.env, {
+    deliveryId,
+    eventType: event,
+    payload: data,
+  });
+  if (triggerIntake) c.executionCtx.waitUntil(recoverGitHubTriggerDelivery(c.env, deliveryId));
 
   return c.json({ received: true });
 }
@@ -181,33 +190,5 @@ async function handleRepositoryEvent(
       .update(schema.projects)
       .set({ status: 'detached', updatedAt: now })
       .where(eq(schema.projects.githubRepoId, repoId));
-  }
-}
-
-async function handleTriggerRouting(
-  c: GitHubContext,
-  deliveryId: string,
-  event: string,
-  data: Record<string, unknown>
-): Promise<void> {
-  try {
-    const triggerResult = await handleGitHubEventForTriggers(c.env, {
-      deliveryId,
-      eventType: event,
-      payload: data,
-    });
-    if (triggerResult.matchedTriggers > 0) {
-      log.info('github.webhook.triggers_matched', {
-        deliveryId,
-        eventType: event,
-        matchedTriggers: triggerResult.matchedTriggers,
-      });
-    }
-  } catch (err) {
-    log.error('github.webhook.trigger_handler_error', {
-      deliveryId,
-      eventType: event,
-      error: err instanceof Error ? err.message : String(err),
-    });
   }
 }

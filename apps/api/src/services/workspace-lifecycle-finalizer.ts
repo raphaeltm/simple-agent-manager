@@ -252,6 +252,10 @@ async function finalizeProjectDataSession(
         row.chat_session_id,
         input.errorMessage ?? 'Workspace lifecycle ended'
       );
+    } else if (input.reason === 'workspace_evicted') {
+      await projectDataService.stopSession(env, row.project_id, row.chat_session_id, {
+        lifecycleSource: 'workspace_eviction_finalization',
+      });
     } else {
       await projectDataService.stopSession(env, row.project_id, row.chat_session_id);
     }

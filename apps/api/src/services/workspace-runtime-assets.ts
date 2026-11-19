@@ -1,5 +1,5 @@
 import type { WorkspaceRuntimeAssetsResponse } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, or, type SQL } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -14,6 +14,18 @@ import {
 } from './profile-runtime-assets';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
+
+/**
+ * A project runtime value is usable only before its `expires_at` (agent-collected secrets with a
+ * TTL, migration 0236). Every reader of project runtime env applies this, so an expired value
+ * fails closed at use time rather than waiting for the daily purge.
+ */
+export function projectRuntimeEnvUnexpired(now = Date.now()): SQL {
+  return or(
+    isNull(schema.projectRuntimeEnvVars.expiresAt),
+    gt(schema.projectRuntimeEnvVars.expiresAt, now)
+  ) as SQL;
+}
 
 // This staging-only process selector must originate from the validated session
 // profile, never from project or skill assets merged into the runtime env.
@@ -33,12 +45,31 @@ export interface RuntimeAssetContext {
   source: 'agent-session' | 'task' | 'workspace' | 'none';
 }
 
-type WorkspaceRuntimeBase = {
+export type WorkspaceRuntimeBase = {
   id: string;
   userId: string;
   projectId: string | null;
   agentProfileHint: string | null;
 };
+
+/**
+ * Rows a caller already loaded, so `resolveWorkspaceRuntimeIds` applies its
+ * precedence without reading them again. `agentSession` must come from a query
+ * scoped to this workspace and its owner; null means no session is running.
+ */
+export interface PreloadedRuntimeRows {
+  workspace: WorkspaceRuntimeBase;
+  agentSession: {
+    id: string;
+    profileId: string | null;
+    skillId: string | null;
+    /**
+     * The run account of the task this workspace serves, read with the session so a
+     * per-model-call caller (the AI proxy) does not pay a second query. Omit when not read.
+     */
+    runConfigurationId?: string | null;
+  } | null;
+}
 
 async function getWorkspaceRuntimeBase(db: Db, workspaceId: string): Promise<WorkspaceRuntimeBase> {
   const rows = await db
@@ -93,13 +124,21 @@ async function resolveAgentSessionRuntimeIds(
 async function resolveTaskRuntimeIds(
   db: Db,
   workspace: WorkspaceRuntimeBase
-): Promise<{ profileId: string | null; skillId: string | null }> {
+): Promise<{
+  profileId: string | null;
+  skillId: string | null;
+  runConfigurationId: string | null;
+}> {
   if (!workspace.projectId) {
-    return { profileId: null, skillId: null };
+    return { profileId: null, skillId: null, runConfigurationId: null };
   }
 
   const taskRows = await db
-    .select({ profileId: schema.tasks.agentProfileHint, skillId: schema.tasks.skillId })
+    .select({
+      profileId: schema.tasks.agentProfileHint,
+      skillId: schema.tasks.skillId,
+      runConfigurationId: schema.tasks.agentConfigurationId,
+    })
     .from(schema.tasks)
     .where(
       and(
@@ -108,12 +147,42 @@ async function resolveTaskRuntimeIds(
         eq(schema.tasks.userId, workspace.userId)
       )
     )
+    // Newest first, so a workspace that served more than one task reads one row every time
+    // (the AI proxy's preload in `ai-proxy-auth.ts` uses the same order).
+    .orderBy(desc(schema.tasks.createdAt), desc(schema.tasks.id))
     .limit(1);
 
   return {
     profileId: taskRows[0]?.profileId ?? null,
     skillId: taskRows[0]?.skillId ?? null,
+    runConfigurationId: taskRows[0]?.runConfigurationId ?? null,
   };
+}
+
+/**
+ * The account chosen for the run this workspace serves (`tasks.agent_configuration_id`),
+ * read from the same task row `resolveWorkspaceRuntimeIds` takes the profile from.
+ */
+export async function resolveWorkspaceRunConfigurationId(
+  db: Db,
+  workspace: WorkspaceRuntimeBase
+): Promise<string | null> {
+  return (await resolveTaskRuntimeIds(db, workspace)).runConfigurationId;
+}
+
+/**
+ * A profile is valid for a run in `projectId` when it is one of that project's
+ * profiles or the run's user's own global profile. The one predicate every caller
+ * uses, including the credential profile context (`profile-context.ts`).
+ */
+export function profileValidForRunCondition(projectId: string | null, userId: string): SQL {
+  const ownGlobalProfile = and(
+    isNull(schema.agentProfiles.projectId),
+    eq(schema.agentProfiles.userId, userId)
+  ) as SQL;
+  return projectId
+    ? (or(eq(schema.agentProfiles.projectId, projectId), ownGlobalProfile) as SQL)
+    : ownGlobalProfile;
 }
 
 async function validateProfileId(
@@ -128,7 +197,7 @@ async function validateProfileId(
     .where(
       and(
         eq(schema.agentProfiles.id, profileId),
-        eq(schema.agentProfiles.projectId, workspace.projectId)
+        profileValidForRunCondition(workspace.projectId, workspace.userId)
       )
     )
     .limit(1);
@@ -173,7 +242,12 @@ async function resolveProjectAssets(
         isSecret: schema.projectRuntimeEnvVars.isSecret,
       })
       .from(schema.projectRuntimeEnvVars)
-      .where(eq(schema.projectRuntimeEnvVars.projectId, workspace.projectId)),
+      .where(
+        and(
+          eq(schema.projectRuntimeEnvVars.projectId, workspace.projectId),
+          projectRuntimeEnvUnexpired()
+        )
+      ),
     db
       .select({
         path: schema.projectRuntimeFiles.filePath,
@@ -191,46 +265,62 @@ async function resolveProjectAssets(
   };
 }
 
+export interface WorkspaceRuntimeIds {
+  workspace: WorkspaceRuntimeBase;
+  /** Not yet validated against the workspace's project. */
+  profileId: string | null;
+  skillId: string | null;
+  /** Read only on the task path; undefined when the ids came from elsewhere. */
+  runConfigurationId?: string | null;
+  source: RuntimeAssetContext['source'];
+}
+
+/** Which profile and skill a workspace's run uses: agent session → task → workspace hint. */
+export async function resolveWorkspaceRuntimeIds(
+  db: Db,
+  input: RuntimeAssetContextInput,
+  preloaded?: PreloadedRuntimeRows
+): Promise<WorkspaceRuntimeIds> {
+  const workspace = preloaded?.workspace ?? (await getWorkspaceRuntimeBase(db, input.workspaceId));
+  if (!workspace.projectId) {
+    return { workspace, profileId: null, skillId: null, runConfigurationId: null, source: 'none' };
+  }
+  const agentSessionId = input.agentSessionId?.trim();
+  if (agentSessionId) {
+    const loaded = preloaded?.agentSession;
+    const ids =
+      loaded?.id === agentSessionId
+        ? {
+            profileId: loaded.profileId,
+            skillId: loaded.skillId,
+            runConfigurationId: loaded.runConfigurationId,
+          }
+        : await resolveAgentSessionRuntimeIds(db, workspace, agentSessionId);
+    return { workspace, ...ids, source: 'agent-session' };
+  }
+  const taskIds = await resolveTaskRuntimeIds(db, workspace);
+  if (taskIds.profileId || taskIds.skillId) return { workspace, ...taskIds, source: 'task' };
+  const { runConfigurationId } = taskIds;
+  if (workspace.agentProfileHint) {
+    return {
+      workspace,
+      profileId: workspace.agentProfileHint,
+      skillId: null,
+      runConfigurationId,
+      source: 'workspace',
+    };
+  }
+  return { workspace, profileId: null, skillId: null, runConfigurationId, source: 'none' };
+}
+
 export async function resolveWorkspaceRuntimeAssetContext(
   db: Db,
   input: RuntimeAssetContextInput
 ): Promise<RuntimeAssetContext> {
-  const workspace = await getWorkspaceRuntimeBase(db, input.workspaceId);
-  if (!workspace.projectId) {
-    return {
-      workspaceId: workspace.id,
-      projectId: null,
-      userId: workspace.userId,
-      agentProfileId: null,
-      skillId: null,
-      source: 'none',
-    };
-  }
-
-  let runtimeIds: { profileId: string | null; skillId: string | null } = {
-    profileId: null,
-    skillId: null,
-  };
-  let source: RuntimeAssetContext['source'] = 'none';
-
-  const agentSessionId = input.agentSessionId?.trim();
-  if (agentSessionId) {
-    runtimeIds = await resolveAgentSessionRuntimeIds(db, workspace, agentSessionId);
-    source = 'agent-session';
-  } else {
-    const taskIds = await resolveTaskRuntimeIds(db, workspace);
-    if (taskIds.profileId || taskIds.skillId) {
-      runtimeIds = taskIds;
-      source = 'task';
-    } else if (workspace.agentProfileHint) {
-      runtimeIds = { profileId: workspace.agentProfileHint, skillId: null };
-      source = 'workspace';
-    }
-  }
-
-  const [agentProfileId, skillId] = await Promise.all([
-    validateProfileId(db, workspace, runtimeIds.profileId),
-    validateSkillId(db, workspace, runtimeIds.skillId),
+  const { workspace, profileId, skillId, source } = await resolveWorkspaceRuntimeIds(db, input);
+  const [agentProfileId, validSkillId] = await Promise.all([
+    validateProfileId(db, workspace, profileId),
+    validateSkillId(db, workspace, skillId),
   ]);
 
   return {
@@ -238,7 +328,7 @@ export async function resolveWorkspaceRuntimeAssetContext(
     projectId: workspace.projectId,
     userId: workspace.userId,
     agentProfileId,
-    skillId,
+    skillId: validSkillId,
     source,
   };
 }
@@ -278,5 +368,67 @@ export async function getWorkspaceRuntimeAssets(
       ...(profileCandidate ? [profileCandidate] : []),
     ],
     files: mergedAssets.files,
+  };
+}
+
+/** Merge stored rows before decrypting: overridden and unselected secrets never decrypt. */
+export async function getSecretExecutionEnv(
+  db: Db,
+  input: RuntimeAssetContextInput,
+  encryptionKey: string,
+  secretNames: readonly string[]
+): Promise<{
+  context: RuntimeAssetContext;
+  envVars: import('@simple-agent-manager/shared').WorkspaceRuntimeEnvVar[];
+}> {
+  if (!input.agentSessionId) throw errors.forbidden('An active agent session is required');
+  const context = await resolveWorkspaceRuntimeAssetContext(db, input);
+  const scopes = [
+    {
+      table: schema.projectRuntimeEnvVars,
+      id: schema.projectRuntimeEnvVars.projectId,
+      value: context.projectId,
+      // An expired collected secret is not a managed secret any more: selecting it fails closed.
+      usable: projectRuntimeEnvUnexpired(),
+    },
+    {
+      table: schema.profileRuntimeEnvVars,
+      id: schema.profileRuntimeEnvVars.profileId,
+      value: context.agentProfileId,
+      usable: undefined,
+    },
+    {
+      table: schema.skillRuntimeEnvVars,
+      id: schema.skillRuntimeEnvVars.skillId,
+      value: context.skillId,
+      usable: undefined,
+    },
+  ];
+  const merged = new Map<
+    string,
+    { key: string; storedValue: string; valueIv: string | null; isSecret: boolean }
+  >();
+  for (const scope of scopes) {
+    if (!scope.value) continue;
+    const rows = await db
+      .select({
+        key: scope.table.envKey,
+        storedValue: scope.table.storedValue,
+        valueIv: scope.table.valueIv,
+        isSecret: scope.table.isSecret,
+      })
+      .from(scope.table)
+      .where(
+        scope.usable ? and(eq(scope.id, scope.value), scope.usable) : eq(scope.id, scope.value)
+      );
+    for (const row of rows) merged.set(row.key, row);
+  }
+  for (const name of secretNames) {
+    if (!merged.get(name)?.isSecret)
+      throw errors.badRequest('Selected name is not a managed secret');
+  }
+  return {
+    context,
+    envVars: await resolveRuntimeEnvRows([...merged.values()], encryptionKey, new Set(secretNames)),
   };
 }

@@ -62,6 +62,12 @@ vi.mock('../../../src/services/project-data', () => ({
   enqueueMailboxMessage: vi.fn().mockResolvedValue({ id: 'msg-123' }),
 }));
 
+vi.mock('../../../src/services/task-cancellation-prompts', () => ({
+  retireTaskCancellationPrompts: vi
+    .fn()
+    .mockResolvedValue({ matched: true, cancelled: 0, sessionId: null }),
+}));
+
 vi.mock('../../../src/services/task-terminal-cleanup', () => ({
   cleanupTerminalTaskResources: vi.fn().mockResolvedValue(undefined),
 }));
@@ -114,7 +120,10 @@ function mockD1(
   };
   return {
     prepare: vi.fn().mockReturnValue(mockStatement),
-    batch: vi.fn().mockResolvedValue([]),
+    batch: vi.fn().mockResolvedValue([
+      { success: true, meta: { changes: options.runChanges ?? 1 } },
+      { success: true, meta: { changes: options.runChanges ?? 1 } },
+    ]),
     _statement: mockStatement,
   };
 }
@@ -212,6 +221,8 @@ describe('stop_subtask', () => {
     queueD1Result(ctx._db._statement, [
       {
         id: 'task-1',
+        user_id: 'user-123',
+        chat_session_id: null,
         status: 'completed',
         workspace_id: null,
         project_id: 'proj-1',
@@ -224,15 +235,95 @@ describe('stop_subtask', () => {
     expect(r.error).toContain('only active tasks');
   });
 
-  it('stops an owned running task without workspace', async () => {
-    const { cleanupTerminalTaskResources } =
-      await import('../../../src/services/task-terminal-cleanup');
+  // `running` and `provisioning` are not task statuses; the stop list used to contain
+  // them instead of `in_progress` and `delegated` (state-machine audit D2).
+  it.each(['running', 'provisioning'])('rejects the non-status %s', async (status) => {
     const ctx = buildCtx();
-    // Task found, running, no workspace — should stop successfully
     queueD1Result(ctx._db._statement, [
       {
         id: 'task-1',
-        status: 'running',
+        user_id: 'user-123',
+        chat_session_id: null,
+        status,
+        workspace_id: null,
+        project_id: 'proj-1',
+        title: 'Ghost',
+      },
+    ]);
+    const result = (await stopSubtask({ taskId: 'task-1' }, ctx)) as { error?: string };
+    expect(result.error).toContain('only active tasks');
+  });
+
+  it.each(['queued', 'delegated', 'in_progress', 'sleeping'])(
+    'stops an owned %s task',
+    async (status) => {
+      const ctx = buildCtx();
+      queueD1Result(ctx._db._statement, [
+        {
+          id: 'task-1',
+          user_id: 'user-123',
+          chat_session_id: null,
+          status,
+          workspace_id: null,
+          project_id: 'proj-1',
+          title: 'Live',
+        },
+      ]);
+      const result = (await stopSubtask({ taskId: 'task-1' }, ctx)) as Record<string, unknown>;
+      expect(result.stopped).toBe(true);
+      expect(result.previousStatus).toBe(status);
+    }
+  );
+
+  it('reports a lost cancel race instead of claiming the task stopped', async () => {
+    const ctx = buildCtx({ dbRunChanges: 0 });
+    queueD1Result(ctx._db._statement, [
+      {
+        id: 'task-1',
+        user_id: 'user-123',
+        chat_session_id: null,
+        status: 'in_progress',
+        workspace_id: null,
+        project_id: 'proj-1',
+        title: 'R',
+      },
+    ]);
+    const result = (await stopSubtask({ taskId: 'task-1' }, ctx)) as Record<string, unknown>;
+    expect(result.stopped).toBeUndefined();
+    expect(result.error).toContain('changed status');
+  });
+
+  it('does not wake a sleeping task to stop its agent', async () => {
+    const { stopAgentSessionOnNode } = await import('../../../src/services/node-agent');
+    vi.mocked(stopAgentSessionOnNode).mockClear();
+    const ctx = buildCtx();
+    queueD1Result(ctx._db._statement, [
+      {
+        id: 'task-1',
+        user_id: 'user-123',
+        chat_session_id: null,
+        status: 'sleeping',
+        workspace_id: 'ws-1',
+        project_id: 'proj-1',
+        title: 'Z',
+      },
+    ]);
+    const result = (await stopSubtask({ taskId: 'task-1' }, ctx)) as Record<string, unknown>;
+    expect(result.stopped).toBe(true);
+    expect(stopAgentSessionOnNode).not.toHaveBeenCalled();
+  });
+
+  it('stops an owned in_progress task without workspace', async () => {
+    const { cleanupTerminalTaskResources } =
+      await import('../../../src/services/task-terminal-cleanup');
+    const ctx = buildCtx();
+    // Task found, in progress, no workspace — should stop successfully
+    queueD1Result(ctx._db._statement, [
+      {
+        id: 'task-1',
+        user_id: 'user-123',
+        chat_session_id: null,
+        status: 'in_progress',
         workspace_id: null,
         project_id: 'proj-1',
         title: 'Test Task',
@@ -242,7 +333,7 @@ describe('stop_subtask', () => {
     const r = result as Record<string, unknown>;
     expect(r.stopped).toBe(true);
     expect(r.taskId).toBe('task-1');
-    expect(r.previousStatus).toBe('running');
+    expect(r.previousStatus).toBe('in_progress');
     expect(cleanupTerminalTaskResources).toHaveBeenCalledWith(ctx.env, 'task-1', {
       status: 'cancelled',
       errorMessage: 'Stopped by user via SAM',
@@ -262,6 +353,8 @@ describe('stop_subtask', () => {
     queueD1Result(stmt, [
       {
         id: 'task-1',
+        user_id: 'user-123',
+        chat_session_id: null,
         status: 'queued',
         workspace_id: 'ws-1',
         project_id: 'proj-1',
@@ -442,21 +535,29 @@ describe('send_message_to_subtask', () => {
     expect(r.error).toContain('only active tasks');
   });
 
-  it('rejects task with no workspace', async () => {
+  // A live task passes the status gate and reaches the next check (no workspace yet).
+  // `in_progress` and `delegated` used to be rejected (state-machine audit D2).
+  it.each(['queued', 'delegated', 'in_progress'])(
+    'accepts a %s task past the status gate',
+    async (status) => {
+      const ctx = buildCtx();
+      // values order: id, status, workspaceId, projectId, title
+      queueD1Result(ctx._db._statement, [
+        { id: 'task-1', status, workspace_id: null, project_id: 'proj-1', title: 'Live' },
+      ]);
+      const result = await sendMessageToSubtask({ taskId: 'task-1', message: 'hello' }, ctx);
+      const r = result as { error?: string };
+      expect(r.error).toContain('no workspace');
+    }
+  );
+
+  it.each(['running', 'provisioning', 'sleeping'])('rejects a %s task', async (status) => {
     const ctx = buildCtx();
-    // Active task but no workspace yet — values order: id, status, workspaceId, projectId, title
     queueD1Result(ctx._db._statement, [
-      {
-        id: 'task-1',
-        status: 'running',
-        workspace_id: null,
-        project_id: 'proj-1',
-        title: 'Running',
-      },
+      { id: 'task-1', status, workspace_id: 'ws-1', project_id: 'proj-1', title: 'X' },
     ]);
     const result = await sendMessageToSubtask({ taskId: 'task-1', message: 'hello' }, ctx);
-    const r = result as { error?: string };
-    expect(r.error).toContain('no workspace');
+    expect((result as { error?: string }).error).toContain('only active tasks');
   });
 });
 
@@ -490,7 +591,8 @@ describe('cancel_mission', () => {
     ]);
     const result = await cancelMission({ missionId: 'mission-1' }, ctx);
     const r = result as Record<string, unknown>;
-    expect(r.cancelled).toBe(true);
+    expect(r.cancellationRequested).toBe(true);
+    expect(r.status).toBe('cancellation_requested');
     expect(r.missionId).toBe('mission-1');
   });
 });

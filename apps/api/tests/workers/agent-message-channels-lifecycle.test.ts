@@ -364,8 +364,21 @@ describe('agent message channels: capacity share', () => {
         const reply = okBody<ChannelReceipt>(await send(f.b, f.a, 'three'));
         expect(reply.channel).toBe(ab.channel);
         expect(await eventMatches(f.stub, reply.eventId)).toEqual([
-          expect.objectContaining({ target_session_id: f.a.sessionId, state: 'matched' }),
+          expect.objectContaining({ target_session_id: f.a.sessionId }),
         ]);
+        // Native alarms may already have moved the match into a wake batch.
+        // Prove the resumed pair delivers and consumes its wake, rather than
+        // depending on the transient pre-materialization state.
+        await materializeWakes(f.stub, f.projectId);
+        await ackWakes(f, f.a);
+        expect(
+          await sqlRows(
+            f.stub,
+            `SELECT b.state, b.target_session_id FROM project_event_delivery_batches b
+             JOIN project_event_matches m ON m.batch_id = b.id WHERE m.event_id = ?`,
+            reply.eventId
+          )
+        ).toEqual([{ target_session_id: f.a.sessionId, state: 'acked' }]);
       })
     );
   });

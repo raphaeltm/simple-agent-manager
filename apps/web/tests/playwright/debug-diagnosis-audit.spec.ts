@@ -447,6 +447,20 @@ async function setup(
 }
 
 test.describe('Deployment diagnosis visual audit', () => {
+  test('renders the cached diagnosis list without full diagnosis text', async ({ page }) => {
+    await setup(page);
+    await page.addInitScript(
+      (id) => localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true'),
+      ADMIN.user.id
+    );
+    await page.routeWebSocket('**/api/notifications/ws', () => undefined);
+    await page.goto('/admin/diagnoses');
+    await expect(page.getByText('All diagnosis runs', { exact: true })).toBeVisible();
+    await expect(page.getByText('Something went wrong')).toHaveCount(0);
+    await assertNoOverflow(page);
+    await screenshot(page, 'admin-diagnoses-performance');
+  });
+
   test('renders durable detail with inert evidence HTML', async ({ page }) => {
     const name = viewportLabel(page);
     await setup(page);

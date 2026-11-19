@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -24,8 +26,7 @@ function createTestD1(sqlite: Database.Database): D1Database {
     },
     async first(col?: string) {
       const row = sqlite.prepare(sql).get(...normalize(params)) as
-        | Record<string, unknown>
-        | undefined;
+        Record<string, unknown> | undefined;
       if (col != null) return row ? (row[col] ?? null) : null;
       return row ?? null;
     },
@@ -102,6 +103,7 @@ describe('MCP update_trigger and delete_trigger handlers', () => {
         resource_requirements_json TEXT,
         max_concurrent INTEGER,
         next_fire_at TEXT,
+        next_execution_sequence INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -110,6 +112,13 @@ describe('MCP update_trigger and delete_trigger handlers', () => {
       CREATE TABLE github_trigger_configs (id TEXT PRIMARY KEY, trigger_id TEXT NOT NULL, event_type TEXT NOT NULL, filters_json TEXT NOT NULL);
       CREATE TABLE trigger_executions (id TEXT PRIMARY KEY, trigger_id TEXT NOT NULL, project_id TEXT NOT NULL, status TEXT NOT NULL);
     `);
+
+    sqlite.exec(
+      readFileSync(
+        new URL('../../../src/db/migrations/0194_trigger_auto_pause_reset.sql', import.meta.url),
+        'utf8'
+      )
+    );
 
     env = {
       DATABASE: createTestD1(sqlite),
@@ -276,6 +285,74 @@ describe('MCP update_trigger and delete_trigger handlers', () => {
     expect(
       sqlite.prepare("SELECT COUNT(*) AS count FROM triggers WHERE id = 'trigger-2'").get()
     ).toEqual({ count: 0 });
+  });
+
+  it.each(['webhook', 'email'])(
+    'keeps the agent profile of %s triggers, which run on outside input',
+    async (sourceType) => {
+      sqlite.exec(
+        "INSERT INTO agent_profiles (id, project_id) VALUES ('profile-1', 'project-1'), ('profile-2', 'project-1')"
+      );
+      insertTrigger('trigger-outside');
+      sqlite
+        .prepare(
+          "UPDATE triggers SET source_type = ?, agent_profile_id = 'profile-1', cron_expression = NULL, cron_timezone = NULL WHERE id = 'trigger-outside'"
+        )
+        .run(sourceType);
+      const profile = () =>
+        (
+          sqlite
+            .prepare("SELECT agent_profile_id FROM triggers WHERE id = 'trigger-outside'")
+            .get() as { agent_profile_id: string | null }
+        ).agent_profile_id;
+
+      for (const agentProfileId of [null, '  ']) {
+        const response = await handleUpdateTrigger(
+          'req-1',
+          { triggerId: 'trigger-outside', agentProfileId },
+          tokenData,
+          env
+        );
+        expect(response.error?.message).toBe(
+          `agentProfileId is required for ${sourceType} triggers`
+        );
+        expect(profile()).toBe('profile-1');
+      }
+
+      // Switching to another profile in the project still works.
+      parseContent(
+        await handleUpdateTrigger(
+          'req-1',
+          { triggerId: 'trigger-outside', agentProfileId: 'profile-2' },
+          tokenData,
+          env
+        )
+      );
+      expect(profile()).toBe('profile-2');
+    }
+  );
+
+  it('still lets a schedule trigger fall back to the project default profile', async () => {
+    sqlite.exec("INSERT INTO agent_profiles (id, project_id) VALUES ('profile-1', 'project-1')");
+    insertTrigger('trigger-cron-profile');
+    sqlite.exec(
+      "UPDATE triggers SET agent_profile_id = 'profile-1' WHERE id = 'trigger-cron-profile'"
+    );
+
+    parseContent(
+      await handleUpdateTrigger(
+        'req-1',
+        { triggerId: 'trigger-cron-profile', agentProfileId: null },
+        tokenData,
+        env
+      )
+    );
+
+    expect(
+      sqlite
+        .prepare("SELECT agent_profile_id FROM triggers WHERE id = 'trigger-cron-profile'")
+        .get()
+    ).toEqual({ agent_profile_id: null });
   });
 
   it('rejects cross-project updates without mutating the trigger', async () => {

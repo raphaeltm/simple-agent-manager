@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rsa"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,9 +13,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/publish"
 )
@@ -221,7 +224,7 @@ func TestMcpBuildAndPublishJobStart_RequestCancelDoesNotCancelBackgroundJob(t *t
 }
 
 func TestRunAcceptedPublishJobReportsUnsupportedComposeVolumesAsNonRetryable(t *testing.T) {
-	s := &Server{publishJobs: map[string]publishJobState{
+	s := &Server{config: &config.Config{}, publishJobs: map[string]publishJobState{
 		"job-volumes": {ID: "job-volumes", WorkspaceID: "ws-001", Status: "starting"},
 	}}
 	dir := t.TempDir()
@@ -247,7 +250,10 @@ func TestRunAcceptedPublishJobReportsUnsupportedComposeVolumesAsNonRetryable(t *
 	}
 
 	var events []publish.Event
+	var eventsMu sync.Mutex
 	reporter := publish.EventFunc(func(_ context.Context, event publish.Event) {
+		eventsMu.Lock()
+		defer eventsMu.Unlock()
 		events = append(events, event)
 	})
 	s.runAcceptedPublishJob(context.Background(), "job-volumes", &preparedBuildPublish{
@@ -467,10 +473,11 @@ func TestMcpBuildAndPublish_MissingCallbackToken(t *testing.T) {
 // then proceeds past the project check (and fails later at the docker-dependent
 // build step, which is not reachable in unit tests, so we only assert it did NOT
 // fail with the project-link error).
-func TestMcpBuildAndPublish_ProjectIDFallsBackToConfig(t *testing.T) {
+func TestMcpBuildAndPublish_BootWorkspaceProjectIDFallsBackToConfig(t *testing.T) {
 	t.Parallel()
 	s, key := mcpBuildTestServer(t)
 	s.config.ProjectID = "proj-from-config"
+	s.config.WorkspaceID = "ws-001" // the workspace the node (or Instant container) booted for
 
 	s.workspaces["ws-001"] = &WorkspaceRuntime{
 		ID:           "ws-001",
@@ -489,6 +496,31 @@ func TestMcpBuildAndPublish_ProjectIDFallsBackToConfig(t *testing.T) {
 	decodeJSON(t, rec, &errResp)
 	if strings.Contains(errResp["error"], "workspace is not linked to a project") {
 		t.Errorf("config projectID should satisfy the project check, got %q", errResp["error"])
+	}
+}
+
+// On a shared node the config describes the boot session. Any other workspace
+// must not publish under the boot session's project.
+func TestMcpBuildAndPublish_OtherWorkspaceDoesNotBorrowBootProject(t *testing.T) {
+	t.Parallel()
+	s, key := mcpBuildTestServer(t)
+	s.config.ProjectID = "proj-boot"
+	s.config.WorkspaceID = "ws-boot"
+
+	s.workspaces["ws-002"] = &WorkspaceRuntime{
+		ID:            "ws-002",
+		Status:        "running",
+		WorkspaceDir:  "/workspace/WS_002",
+		CallbackToken: "tok",
+	}
+
+	rec := mcpBuildPOST(t, s, key, "/workspaces/ws-002/mcp/build-and-publish", "ws-002",
+		validMcpBuildRequest())
+
+	var errResp map[string]string
+	decodeJSON(t, rec, &errResp)
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(errResp["error"], "workspace is not linked to a project") {
+		t.Fatalf("expected the project-link error, got %d %q", rec.Code, errResp["error"])
 	}
 }
 
@@ -709,5 +741,124 @@ func TestContainerPathRelativeToWorkspaces(t *testing.T) {
 			t.Errorf("containerPathRelativeToWorkspaces(%q) = (%q, %v), want (%q, %v)",
 				c.in, gotRel, gotOK, c.wantRel, c.wantOK)
 		}
+	}
+}
+
+func TestMcpBuildAndPublishJobCancel_RealHandlerCancelsRunner(t *testing.T) {
+	s, key := mcpBuildTestServer(t)
+	tmp := t.TempDir()
+	t.Setenv("SAM_DOCKER_CLI_PATH", fakeDockerCLI(t, tmp, "", true))
+	callbacks := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer callbacks.Close()
+	s.config.ControlPlaneURL = callbacks.URL
+	s.workspaces["ws-001"] = &WorkspaceRuntime{ID: "ws-001", Status: "running", WorkspaceDir: "/workspace/WS_001", ProjectID: "proj-1", CallbackToken: "callback-token"}
+	started := make(chan *preparedBuildPublish, 1)
+	done := make(chan error, 1)
+	s.buildPublishRunner = func(ctx context.Context, prepared *preparedBuildPublish, _ publish.EventSink) (*publish.ReleaseResult, error) {
+		started <- prepared
+		<-ctx.Done()
+		done <- ctx.Err()
+		return nil, ctx.Err()
+	}
+	response := mcpBuildJobStartPOST(t, s, key, "ws-001", "job-cancel", McpBuildAndPublishRequest{Environment: "staging", EnvironmentID: "env-1", Attempt: 3}, context.Background())
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("start: %d %s", response.Code, response.Body.String())
+	}
+	select {
+	case prepared := <-started:
+		if prepared.Request.PublishJobID != "job-cancel" || prepared.Request.Attempt != 3 {
+			t.Fatalf("lost release fence: %+v", prepared.Request)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("runner not started")
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/build-and-publish-jobs/{jobId}/cancel", s.handleMcpBuildAndPublishJobCancel)
+	cancelRequest := func(workspace string, authenticated bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/workspaces/"+workspace+"/mcp/build-and-publish-jobs/job-cancel/cancel", nil)
+		if authenticated {
+			req.Header.Set("Authorization", "Bearer "+signWorkspaceCreateNodeToken(t, key, s.config.NodeID, workspace))
+			req.Header.Set("X-SAM-Node-Id", s.config.NodeID)
+			req.Header.Set("X-SAM-Workspace-Id", workspace)
+		}
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := cancelRequest("ws-001", false); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauth: %d", rec.Code)
+	}
+	if rec := cancelRequest("foreign", true); rec.Code != http.StatusNotFound {
+		t.Fatalf("foreign: %d", rec.Code)
+	}
+	select {
+	case <-done:
+		t.Fatal("foreign request canceled owner build")
+	default:
+	}
+	if rec := cancelRequest("ws-001", true); rec.Code != http.StatusOK {
+		t.Fatalf("cancel: %d %s", rec.Code, rec.Body.String())
+	}
+	select {
+	case err := <-done:
+		if err != context.Canceled {
+			t.Fatalf("cancel error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancel did not stop runner")
+	}
+}
+
+func TestMcpBuildAndPublish_RequiresAttemptBeforeBuild(t *testing.T) {
+	for _, attempt := range []int{0, -1, 1} {
+		t.Run(fmt.Sprint(attempt), func(t *testing.T) {
+			s, key := mcpBuildTestServer(t)
+			body := validMcpBuildRequest()
+			body.PublishJobID = "fenced-job"
+			body.Attempt = attempt
+			rec := mcpBuildPOST(t, s, key, "/workspaces/ws-001/mcp/build-and-publish", "ws-001", body)
+			if attempt <= 0 {
+				if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "positive attempt") {
+					t.Fatalf("expected validation before build; status=%d body=%s", rec.Code, rec.Body.String())
+				}
+			} else if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "workspace") {
+				t.Fatalf("valid attempt should reach workspace lookup; status=%d body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+func TestMcpBuildStartIgnoresContextShadowAdmission(t *testing.T) {
+	s, key := mcpBuildTestServer(t)
+	callbacks := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "{\"ok\":true}") }))
+	defer callbacks.Close()
+	s.config.ControlPlaneURL = callbacks.URL
+	s.workspaces["ws-001"] = &WorkspaceRuntime{ID: "ws-001", Status: "running", WorkspaceDir: t.TempDir(), ProjectID: "proj-1", CallbackToken: "callback"}
+	s.publishJobs = map[string]publishJobState{"shadow": {ID: "shadow", WorkspaceID: "ws-001", ContextOnly: true}}
+	done := make(chan struct{})
+	s.buildPublishRunner = func(context.Context, *preparedBuildPublish, publish.EventSink) (*publish.ReleaseResult, error) {
+		close(done)
+		return &publish.ReleaseResult{ReleaseID: "release", Version: 1, Status: "created"}, nil
+	}
+	rec := mcpBuildJobStartPOST(t, s, key, "ws-001", "normal", McpBuildAndPublishRequest{Environment: "staging", EnvironmentID: "env", PublishJobID: "normal", Attempt: 1}, context.Background())
+	if rec.Code != 202 {
+		t.Fatalf("shadow blocked node admission: %d %s", rec.Code, rec.Body.String())
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("node build was delayed by shadow")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		s.publishJobsMu.Lock()
+		state := s.publishJobs["normal"]
+		s.publishJobsMu.Unlock()
+		if !state.CompletedAt.IsZero() {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("node runner did not finish")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

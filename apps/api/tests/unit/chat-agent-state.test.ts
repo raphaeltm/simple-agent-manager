@@ -447,3 +447,21 @@ describe('resolveChatAgentState — independent failure handling', () => {
     await expect(resolve({ stateFailureEvent: undefined })).resolves.toBeDefined();
   });
 });
+
+describe('operational state excludes plan-only idle synthesis', () => {
+  it('preserves unknown activity even when a persisted plan exists', async () => {
+    setupDo({
+      states: {},
+      plan: { currentPlan: [{ content: 'Plan', status: 'pending' }], planUpdatedAt: 10 },
+    });
+    const result = await resolve({ includePlan: false });
+    expect(result.state).toBeNull();
+    expect(mocks.getLatestPersistedPlan).not.toHaveBeenCalled();
+  });
+  it('preserves observed work evidence without fetching a plan', async () => {
+    const observed = snapshot({ activity: 'prompting', activityAt: 12 });
+    setupDo({ states: { [ACP_SESSION_ID]: observed }, plan: null });
+    expect((await resolve({ includePlan: false })).state).toEqual(observed);
+    expect(mocks.getLatestPersistedPlan).not.toHaveBeenCalled();
+  });
+});

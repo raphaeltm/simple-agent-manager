@@ -8,6 +8,7 @@ package server
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -58,6 +59,13 @@ func (rec *snapshotCallbackRecorder) serve(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	switch {
+	case suffix == "/upload/home" || suffix == "/upload/wip":
+		// A successful artifact response acknowledges the entire uploaded body.
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			http.Error(w, "incomplete artifact upload", http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	case strings.HasSuffix(suffix, "/session-snapshot/prepare"):
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"generation":"01GENERATION","config":{"totalBudgetBytes":67108864,"entryThresholdBytes":1048576,"transferIdleTimeoutMs":30000,"jsonBodyMaxBytes":262144},"upload":{"home":"/upload/home","wip":"/upload/wip"}}`))
@@ -125,6 +133,10 @@ func hibernateWithBody(t *testing.T, body string) map[string][]string {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", home)
+	// Snapshot only fixture state, independent of the invoking agent's environment.
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
 
 	rec := &snapshotCallbackRecorder{tokens: map[string][]string{}, done: make(chan struct{})}
 	controlPlane := httptest.NewServer(http.HandlerFunc(rec.serve))

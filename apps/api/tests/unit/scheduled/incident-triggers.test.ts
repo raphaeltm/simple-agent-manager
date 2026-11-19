@@ -1,9 +1,12 @@
+import { readFileSync } from 'node:fs';
+
 import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { runIncidentTriggerSweep } from '../../../src/scheduled/incident-triggers';
 import { claimIncident, resolveIncident } from '../../../src/services/platform-feedback-incidents';
+import { createAgentEmailTables } from '../../helpers/agent-email-tables';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const IMPLEMENTATION_TASK_ID = '01M0YGSPRC0E17FPQMZYW012R8';
@@ -14,7 +17,7 @@ function setup(options: { withTrigger?: boolean } = {}) {
     CREATE TABLE platform_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT, updated_by TEXT);
     CREATE TABLE projects (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, max_triggers INTEGER);
     CREATE TABLE tasks (
-      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, user_id TEXT NOT NULL,
+      id TEXT PRIMARY KEY, recovery_source_task_id TEXT, superseded_by_task_id TEXT, triggered_by TEXT, project_id TEXT NOT NULL, user_id TEXT NOT NULL,
       title TEXT NOT NULL, description TEXT, status TEXT NOT NULL, priority INTEGER NOT NULL,
       task_mode TEXT NOT NULL, dispatch_depth INTEGER NOT NULL, created_by TEXT NOT NULL,
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -62,6 +65,19 @@ function setup(options: { withTrigger?: boolean } = {}) {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
     INSERT INTO projects VALUES ('feedback-project', 'owner-1', 'Private Feedback', NULL);
   `);
+  sqlite.exec(
+    readFileSync(
+      new URL('../../../src/db/migrations/0194_trigger_auto_pause_reset.sql', import.meta.url),
+      'utf8'
+    )
+  );
+  sqlite.exec(
+    readFileSync(
+      new URL('../../../src/db/migrations/0195_github_trigger_recovery.sql', import.meta.url),
+      'utf8'
+    )
+  );
+  createAgentEmailTables(sqlite);
   if (options.withTrigger !== false) {
     sqlite.exec(`
     INSERT INTO triggers (
@@ -699,4 +715,48 @@ describe('incident trigger sweep', () => {
       queue_state: 'pending',
     });
   });
+  it.each(['claimed', 'dispatched'])(
+    'resubmits an unfinished sleeping %s owner through the real sweep',
+    async (state) => {
+      const { sqlite, env } = setup();
+      env.PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS = '1000';
+      seedIncident(sqlite);
+      const submitter = vi.fn(async () => ({
+        taskId: 'replacement',
+        sessionId: 'replacement-session',
+        branchName: 'sam/replacement',
+      }));
+      sqlite.exec(`INSERT INTO tasks (id, project_id, user_id, title, status, priority, task_mode, dispatch_depth, created_by, created_at, updated_at)
+      VALUES ('sleeper', 'feedback-project', 'owner-1', 'unfinished triage', 'sleeping', 0, 'task', 0, 'owner-1', '2026-08-21T00:00:00Z', '2026-08-21T00:00:00Z')`);
+      sqlite
+        .prepare(
+          `UPDATE platform_feedback_triages SET queue_state = ?, dispatched_task_id = 'sleeper',
+      dispatch_lease_token = 'old-dispatch', dispatch_lease_expires_at = 4000,
+      incident_claimed_by_task_id = ?, incident_claim_token = ?, incident_claim_expires_at = ?`
+        )
+        .run(
+          state,
+          state === 'claimed' ? 'sleeper' : null,
+          state === 'claimed' ? 'old-claim' : null,
+          state === 'claimed' ? 4000 : null
+        );
+      const result = await runIncidentTriggerSweep(env, { now: () => 5000, submitter });
+      expect(result.fired).toBe(1);
+      expect(submitter).toHaveBeenCalledTimes(1);
+      expect(
+        sqlite
+          .prepare(
+            'SELECT queue_state, dispatched_task_id, dispatch_attempts FROM platform_feedback_triages'
+          )
+          .get()
+      ).toEqual({
+        queue_state: 'dispatched',
+        dispatched_task_id: 'replacement',
+        dispatch_attempts: 1,
+      });
+      expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'sleeper'").get()).toEqual({
+        status: 'sleeping',
+      });
+    }
+  );
 });

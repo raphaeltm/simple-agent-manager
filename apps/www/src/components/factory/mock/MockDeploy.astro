@@ -1,0 +1,102 @@
+---
+/** HTML version of a staging environment: live, with the versions agents shipped to it. */
+import './mock.css';
+
+const deploys = [
+  { v: 14, who: 'Claude Code — Opus 5', ini: 'CC', ago: '42 min ago', live: true },
+  { v: 13, who: 'Codex 5.5 High', ini: 'CH', ago: '5 h ago' },
+  { v: 12, who: 'Claude Code — Opus 5', ini: 'CC', ago: '1 day ago' },
+];
+---
+
+<div class="mk dp">
+  <div class="mk-pad dp-in">
+    <p class="mk-back">‹ Deployments</p>
+    <div class="env mk-card">
+      <p class="env-name"><span class="live-dot" aria-hidden="true"></span><span><b>staging</b><span><b class="ok">Live.</b> Running version 14.</span></span></p>
+      <p class="url">staging.payments.northwindlabs.dev ↗</p>
+      <p class="mk-meta">v14 by <b>Claude Code — Opus 5</b>, 42 min ago, from <span class="ok">“Retry failed webhook deliveries”</span></p>
+      <p class="btns"><span class="mk-btn">Open app ↗</span><span class="mk-btn mk-btn--ghost">Logs</span></p>
+    </div>
+    <p class="mk-section">Recent deploys</p>
+    <p class="mk-meta">Every version agents shipped here, newest first.</p>
+    <ul class="mk-card list">
+      {deploys.map((d) => (
+        <li data-ring={d.live ? '' : undefined}>
+          <span class="mk-avatar">{d.ini}</span>
+          <span class="dt">
+            <span><span class="mk-meta">v{d.v}</span> <b>{d.who}</b> {d.live && <span class="mk-badge">Live</span>}</span>
+            <span class="mk-meta">{d.ago} · from <span class="ok">“Retry failed webhook deliveries”</span></span>
+          </span>
+        </li>
+      ))}
+    </ul>
+  </div>
+</div>
+
+<style>
+  .dp-in {
+    display: grid;
+    gap: 8px;
+  }
+
+  .env {
+    display: grid;
+    gap: 8px;
+    padding: 14px 16px;
+  }
+
+  .env-name {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .env-name > span:last-child {
+    display: grid;
+  }
+
+  .env-name b:first-child {
+    font-size: 1.35em;
+  }
+
+  .live-dot {
+    width: 30px;
+    height: 30px;
+    flex: none;
+    border-radius: 9px;
+    background: radial-gradient(circle, var(--mk-green) 0 28%, var(--mk-green-soft) 32%);
+  }
+
+  .url {
+    font-weight: 700;
+    color: var(--mk-green);
+    overflow-wrap: anywhere;
+  }
+
+  .ok {
+    color: var(--mk-green);
+  }
+
+  .btns {
+    display: flex;
+    gap: 8px;
+  }
+
+  .list li {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 9px 12px;
+    border-radius: 10px;
+  }
+
+  .list li + li {
+    border-top: 1px solid var(--mk-line);
+  }
+
+  .dt {
+    display: grid;
+    gap: 2px;
+  }
+</style>

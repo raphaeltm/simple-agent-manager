@@ -1,5 +1,5 @@
 /**
- * Report an Issue types — creates draft Ideas in a feedback project
+ * Report an Issue types — creates draft Ideas in the Operations project
  * with optional consent-gated technical references.
  */
 

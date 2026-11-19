@@ -1,4 +1,7 @@
 import type {
+  WorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
+import type {
   CapacityPlacementSnapshot,
   ResolvedResourceReservation,
 } from '@simple-agent-manager/shared';
@@ -9,7 +12,6 @@ import {
   reserveWorkspacePlacement,
   type WorkspacePlacementInput,
 } from '../../src/services/workspace-placement';
-import type { WorkspaceAdmissionPolicy } from '../../src/services/workspace-resource-capacity';
 import { seedInstallation, seedNode, seedProject, seedUser } from './helpers/seed-d1';
 
 const USER_ID = 'user-c3a-final-admission';
@@ -289,6 +291,28 @@ async function seedCurrentAuthorityFixture(
 }
 
 describe('C3a placement authority final admission on real Workers D1', () => {
+  it('admits an allocated node after a harmless catalog revision without rewriting its provenance', async () => {
+    const fixture = await seedCurrentAuthorityFixture('catalog-revision');
+    await env.DATABASE.prepare('UPDATE capacity_pools SET revision = 8 WHERE id = ?')
+      .bind(fixture.snapshot.capacityPoolId)
+      .run();
+
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement(`workspace-${nextId('catalog-revision')}`, fixture),
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+    expect(
+      await env.DATABASE.prepare(
+        'SELECT capacity_pool_revision AS revision FROM nodes WHERE id = ?'
+      )
+        .bind(fixture.nodeId)
+        .first()
+    ).toEqual({ revision: 7 });
+  });
+
   it('requires active project membership in the same atomic reservation statement', async () => {
     const fixture = await seedCurrentAuthorityFixture('membership');
 

@@ -1,4 +1,4 @@
-import type { NodeLifecycleStatus } from '@simple-agent-manager/shared';
+import type { NodeLifecycleState, NodeLifecycleStatus } from '@simple-agent-manager/shared';
 
 import type { NodeLifecycleDeletionEnv } from './node-lifecycle-workspace-deletion';
 
@@ -23,4 +23,10 @@ export interface StoredState {
   warmTimeoutOverrideMs?: number | null;
   /** First transition into destroying, used to bound this nudge-only alarm chain. */
   destroyingSince?: number;
+}
+
+export interface WarmNodeClaimResult {
+  claimed: boolean;
+  state: NodeLifecycleState;
+  reason?: 'source_task_revoked';
 }

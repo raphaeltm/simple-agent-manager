@@ -1,0 +1,496 @@
+# T8 · Ideas redesign: derived status, the Ideas list and the idea page
+
+- Idea: `01M5NG712YTCNSBDWWQVR4F0A1` (program overview `01M5NG3W2ZMDFD797SQF8DWNHR`)
+- Branch: `sam/t8-ideas-redesign-derived-zg8jea`
+- Channel: `feature.linked-work`
+- Design: library `/engineering/ux-audits/ideas-redesign-2026-10-23/` (story `01M5NA13SVX7YDBBPMNXM3D7YJ`,
+  text `01M5NA160HAKFP0T4H4GPHQDZM`, screenshots in `screens/`); prototype code on
+  `origin/sam/started-talking-how-reimagine-861qke` at `apps/web/src/pages/ideas-prototype/`
+  (visual reference only, never merged).
+- Ships as two PRs: **PR1** derived status + the Ideas list; **PR2** the idea page.
+
+## Problem
+
+Ideas never move. An idea is a `tasks` row with `status='draft'`; Execute creates a _separate_ task and
+leaves the idea behind, so the status stays "Exploring" forever and people type status into titles. The
+list is a flat search list with agent-filed error reports mixed in, and the idea page is the raw text plus
+a conversations drawer. Nothing shows what needs a human.
+
+## Research findings
+
+### What exists on main (`f6b24ffbb`)
+
+| Thing                     | Where                                                                                 | Notes                                                                                                                                                                                                                                                                   |
+| ------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ideas list                | `apps/web/src/pages/IdeasPage.tsx` (269 lines)                                        | `draftIdeasQueryOptions` pages `GET tasks?status=draft`; counts sessions client-side from a 200-session fetch                                                                                                                                                           |
+| Idea page                 | `apps/web/src/pages/IdeaDetailPage.tsx` (515 lines)                                   | Status pill mapped from `TaskStatus`, `Execute` → `/chat?executeIdea=`, conversations side panel + mobile FAB/modal                                                                                                                                                     |
+| Idea reads/writes         | `apps/api/src/operations/idea-core.ts`                                                | `searchIdeas` (defaults `status='draft'`), `getIdea`, `prepareIdeaCreate`, `prepareIdeaUpdate`                                                                                                                                                                          |
+| Idea transitions          | `idea-core.ts:268-270` `IDEA_STATUS_TRANSITIONS`                                      | `draft→ready                                                                                                                                                                                                                                                            | cancelled`, `ready→draft                                                  | completed | cancelled` |
+| Task transitions          | `services/task-status.ts:67-77` `TRANSITIONS`                                         | `draft→ready                                                                                                                                                                                                                                                            | cancelled`— **forbids`ready→completed`**, and `completed` has no way back |
+| Generic task PATCH/status | `routes/tasks/crud.ts:437-468`                                                        | uses `canTransitionTaskStatus`, so an idea row routed through it disagrees with `update_idea`                                                                                                                                                                           |
+| Session↔idea links        | DO `project-data/ideas.ts` (`chat_session_ideas`)                                     | `getSessionsForIdea(taskId)` is **per idea**; no batched read exists                                                                                                                                                                                                    |
+| Needs-input markers       | DO `project-data/attention.ts`, table `session_attention_markers` (migration `020-…`) | `kind`, `resolved_at IS NULL`, `created_at`                                                                                                                                                                                                                             |
+| Automation primitives     | `apps/web/src/pages/automation/ui.tsx`, `page.tsx`, `overview-sections.tsx`           | `Panel`, `SectionTitle`, `RowLink`, `Disclosure`, `TextLink`, `ButtonLink`, `Chips`, `PageHeader`, `Page`, `LoadError`, `Notice`, and the `NeedsAttention`/`AttentionPanel` pattern the design copies                                                                   |
+| Markdown renderer         | `apps/web/src/components/MarkdownRenderer.tsx:255-265`                                | `ul`/`ol` set `paddingLeft: 22` but **no `list-style-type`**, and Tailwind preflight sets `list-style: none` → no bullets/numbers anywhere (idea `01M0JQBW9E0T5PJZXY0K72V9BX`). `packages/acp-client/src/components/MessageBubble.tsx` overrides no list element at all |
+| Operation limits          | `apps/api/src/operations/limits.ts`                                                   | `getPlatformOperationLimits(env)`; `ideaListLimit/Max` already exist                                                                                                                                                                                                    |
+
+### Finding 1 — an idea has no durable discriminator (blocking)
+
+"Mark done" must move the row to `completed` and "Park" to `cancelled` (the design: "Done and Parked stay
+human choices (the existing completed and cancelled statuses)"). But _every_ reader identifies an idea as
+`status='draft'`. The moment an idea is marked done it is indistinguishable from an ordinary completed
+task and vanishes from Ideas, so "Done recently" and the Done idea page cannot exist.
+
+→ D1 migration `0207_tasks_idea_flag.sql`: `ALTER TABLE tasks ADD COLUMN is_idea INTEGER NOT NULL DEFAULT 0`,
+backfill `UPDATE tasks SET is_idea = 1 WHERE status = 'draft'` (exactly today's definition, so lossless),
+plus an index. Additive only — no `DROP`, no unscoped `UPDATE` (rule 31). **Announced on the channel for
+coordinator ack before landing** (program rule: no unannounced migrations).
+
+### Finding 2 — the list cannot use T1's per-idea `getIdeaContext`
+
+T1 exposes `GET …/ideas/:ideaId/links → IdeaContext`, one idea at a time. A list of 100 ideas through that
+is 100+ round trips against a ≤20 budget (rule 60). → one batched DO read of my own,
+`getIdeaWorkSnapshots(taskIds[])` in a new sibling module, whose link source is repointed at T1's
+`resource_links` table at integration while keeping T1's strength rules.
+
+### Finding 3 — PR state must not be refreshed from the list
+
+Cloudflare review of the program: list endpoints read **stored** PR state only. T2's
+`getPullRequestStates(ctx, projectId, refs, { refresh })` defaults to stored D1 reads; only the detail route
+passes `refresh: 'single'` (channel seq 10, 11). `canonicalProjectPullRequestUrl` comes from
+`@simple-agent-manager/shared` (T2, channel seq 9).
+
+### Finding 4 — "filed by agents" already has a signal
+
+`tasks.triggered_by` is `'user' | 'connector' | <automation>`; `IdeasPage` already renders an `AUTO` chip
+for `triggeredBy` not in `{user, connector}`. The design's "Filed by agents" group is exactly that set, so
+no new column is needed for it.
+
+### Finding 5 — scrolling wrapper
+
+Policy `63006482`: the app deliberately does not scroll at `html`/`body`. Playwright overflow checks must
+measure the page's own scroll container, and the list/idea pages must live inside the existing project
+layout scroll container rather than introducing their own.
+
+### Rules / post-mortems read
+
+`00-rule-routing`, `02-quality-gates`, `06-technical-patterns` (interaction-effect analysis, UI→backend
+data path), `11-fail-fast-patterns` (project-scoped read/write guards), `18-file-size-limits`,
+`24-no-duplicate-ui-controls`, `25-review-merge-gate`, `30-never-ship-broken-features`,
+`31-migration-safety` (apps/api scoped), `35-vertical-slice-testing`, `48-stale-while-revalidate-ui`,
+`56-clipped-overflow`, `60-request-io-and-bundle-budgets`, `62-tests-must-observe-the-real-trigger`,
+`64-unstable-prop-identity`, `74-proxy-signals-must-match-the-condition` (derived status is a _derivation_,
+not a proxy: every rule reads the condition itself and carries its source), `76-cost-decisions`,
+`17-ui-visual-testing` (apps/web scoped), `04-ui-standards` (apps/web scoped).
+
+## Implementation checklist
+
+### PR1 — derived status, the transition operation, the API and the Ideas list
+
+- [x] `packages/shared/src/types/ideas.ts`: `IdeaDerivedState`, `IdeaAttentionKind`, `IdeaAttention`,
+      `IdeaStatusSource`, `IdeaDerivedStatus`, `IdeaListItem`, `IdeaListResponse`, `IdeaCounts`;
+      `IDEA_NEEDS_YOU_STATES`; exported from `types/index.ts`.
+- [x] `apps/api/src/db/migrations/0207_tasks_idea_flag.sql` (+ `schema.ts` `isIdea` column) — **after
+      channel ack**.
+- [x] `prepareIdeaCreate` writes `is_idea = 1`; every idea reader filters on it (with the
+      `status='draft'` legacy fallback removed only where the backfill covers it).
+- [x] `apps/api/src/operations/idea-status.ts` — **pure** `deriveIdeaStatus(input)` implementing the
+      precedence: done → parked → question → stuck → working → review → merged → not-started, each with
+      its `source`.
+- [x] `apps/api/src/operations/idea-transitions.ts` — one allowed-transition table for idea rows
+      (`markIdeaDone`, `parkIdea`, `reopenIdea`), used by `update_idea`, the new status route and the
+      generic task PATCH/status route when the row is an idea. Delete `IDEA_STATUS_TRANSITIONS` from
+      `idea-core.ts`.
+- [x] DO: `durable-objects/project-data/idea-work.ts` + a one-line delegating method
+      `getIdeaWorkSnapshots(taskIds)` on the class.
+- [x] `apps/api/src/operations/idea-list-core.ts` — batched aggregation (ideas → snapshots → tasks → PR
+      state), ≤20 round trips, no per-idea queries.
+- [x] `apps/api/src/routes/ideas.ts` mounted at `/api/projects/:projectId/ideas`: `GET /`,
+      `GET /:ideaId`, `POST /:ideaId/status`. Project scoping on every read and write.
+- [x] Fix markdown list markers: `MARKDOWN_COMPONENTS` `ul`/`ol` get `list-style-type`, and
+      `MessageBubble`'s agent/user components get the same lists. Mark idea
+      `01M0JQBW9E0T5PJZXY0K72V9BX` done.
+- [x] `apps/web/src/pages/ideas/`: `IdeasListPage.tsx` + `parts.tsx` (`StateIcon`, `IdeaRow`,
+      `AttentionCard`), `view-model.ts` (grouping, Needs-you cap, labels), `api`/`query-options`.
+      Needs you (≤3 + "N more need you") → In progress → Not started; Done recently and Filed by agents
+      folded; desktop side column.
+- [x] Route `IdeasPage` → the new page; delete the old one (no dead code).
+- [x] Tests: table-driven `deriveIdeaStatus` (every rule, weak links must not move status),
+      transition operation against real SQL (allowed + rejected + PATCH/`update_idea` agreement),
+      list route vertical slice with multi-session fixtures, foreign-project attack + owner control,
+      list view-model + behavioural tests for each Needs-you action, markdown `ul`/`ol` rendered test.
+- [x] Playwright 375×667 + 1280×800 with stress/empty data, `assertNoOverflow`, screenshots reviewed.
+- [x] `pnpm quality:cloudflare-cost` before/after, noted in the PR.
+- [x] Docs: `apps/www/src/content/docs/docs/` page for how idea status is derived.
+
+### PR2 — the idea page
+
+- [x] `GET /api/projects/:projectId/ideas/:ideaId` returns idea + derived status + Work + Related
+      (T1 `IdeaContext`, T2 PR state with `refresh: 'single'`).
+- [x] `apps/web/src/pages/ideas/IdeaPage.tsx` (+ parts): status card with the one status-dependent
+      primary action, "The idea" (markdown, the current plan), Work, Updates (T3 notes + composer +
+      quote + derived lifecycle entries), Related. Desktop two columns; the conversations drawer and
+      mobile FAB go away.
+  - **Correction (reconciled 2026-10-26):** the derived lifecycle entries are not on `main`.
+    `IdeaUpdates` renders authored notes only (`apps/web/src/pages/ideas/idea-activity.tsx:150-157`).
+    The fix (`79ac4f2a6`) is on the unmerged branch `sam/t8-pr2-review-followups`, with no PR.
+- [x] Keep Start work (T7) wired; whichever of T7/T8 merges second does the wiring. **T8 merged
+      second, and the wiring was worse than missing — see the three findings below.**
+- [x] Tests: status-dependent primary action per state, Updates composer through the real POST,
+      Mark done / Park through the real route, Playwright both viewports, ui-ux-specialist review.
+
+### Finding 6 — Start work was a dead link on `main`, shipped by PR1
+
+`startWorkPath()` built `/projects/:id/chat?executeIdea=<id>`. T7 removed the branch that read
+that parameter when it built the sheet (`useComposerPrefill.ts` says so, and
+`project-chat.test.tsx` asserts the composer stays empty when the parameter is present). Neither
+PR broke it alone: PR1 added the producer, T7's merge removed the consumer. The Ideas list's
+"Start work" and the stopped-idea "Try again…" therefore opened an empty chat with the idea
+dropped, and `ideas-list-page.test.tsx` asserted that href, which pinned it.
+
+Fixed here: `start-work` is a handler target with no href, `IdeaActionHandlers` gains
+`onStartWork`, and both surfaces open the real sheet through one `useStartWorkLauncher`.
+Discriminating: restoring the old href reddens 13 tests.
+
+### Finding 7 — T7's Start work suite had stopped collecting
+
+`tests/unit/components/start-work-sheet.test.tsx` imports the page this branch deletes
+(`pages/IdeaDetailPage`), so after the deletion it failed to COLLECT — its 10 tests were absent,
+not failing, and a per-file run of the ideas tests never showed them (rule 02: a green test count
+is not a green suite). Repointed at `pages/ideas/IdeaPage`; all 10 pass there, which is the
+evidence that the Start work port is faithful rather than merely present.
+
+### Finding 8 — a closed ordinary task answered 409 with its state
+
+`classifyWorkStartIdea` tested the status before `isIdea`, so a `completed` ordinary task in the
+caller's own project got `409 "That idea is done. Reopen it before starting work on it."` — both
+that the row exists and what state it is in, for an id the caller only guessed at. T7's comment
+explains the ordering was safe while an idea WAS `status = 'draft'` and the two shapes were
+indistinguishable; decision 16's `tasks.is_idea` removed the ambiguity and with it the excuse.
+Non-ideas now get the same non-disclosing 404 as every other non-idea (rule 11). Discriminating:
+reverting only the `!isIdea` early return reddens exactly 3 tests, all 21 controls stay green.
+
+### What the two PR2 specialist reviews changed (2026-10-24)
+
+| Reviewer           | Verdict                              | What it changed                                                                    |
+| ------------------ | ------------------------------------ | ---------------------------------------------------------------------------------- |
+| `security-auditor` | 1 HIGH, 0 CRITICAL — ADDRESSED       | The raw pull-request `href` in `IdeaActionControl` (Finding 10)                     |
+| `ui-ux-specialist` | No blockers; 5/5 hierarchy, a11y     | Three evidence gaps closed, all of them real (below)                               |
+
+The UI/UX review's three findings, all taken rather than deferred:
+
+1. **The page's own `<h1>` had never met a long title.** The long title existed in the fixtures
+   but only the LIST used it, so the shared `PageHeader`'s wrapping was asserted everywhere
+   except the surface under review.
+2. **`PullRequestStateBadge` showed "Checks passed" beside "Merged" at equal weight.** Checks
+   cannot change a merged or closed outcome, so they are now suppressed for those states — in
+   the component, because it is true of all three surfaces that render it (the chat's Related
+   drawer, the chat header's PR row and this page), not at one call site.
+3. **No idea-page case exercised Work or Related under volume**, including the capped "N+" that
+   `SectionTitle.count`'s new string support exists for. Added at both viewports.
+
+Writing (3) surfaced a bug in my own fixture rather than the page: it claimed `total: 3` with
+four items, and `cappedList` in `lib/api/links.ts` discards a total smaller than the rows sent
+in favour of the row count — the one number that is certainly true. So the assertion would have
+been measuring the normaliser. The fixture's totals are now all >= `items.length`, and the
+comment says why, because the next person to write one will reach for a small number too.
+
+### Finding 11 — I guessed twice at a measurement that was one query away
+
+SonarCloud failed the PR on 5.5% duplication on new code. I dedup'd the audit's phone/laptop
+pairs; still 5.5%. I extracted the idea fixtures into one factory; still 5.4%. Both were real
+improvements and neither was the cause, because I was reasoning about where duplication
+*probably* was instead of asking.
+
+jscpd over the changed files reported ZERO clones, which looked like a contradiction and was
+actually the clue: jscpd does not compare a file against itself by default, and SonarCloud
+does. SonarCloud's own API is readable without auth for this project:
+
+```
+https://sonarcloud.io/api/measures/component_tree?component=<key>&pullRequest=<n>&metricKeys=new_duplicated_lines_density,new_lines&qualifiers=FIL
+https://sonarcloud.io/api/duplications/show?key=<key>:<path>&pullRequest=<n>
+```
+
+The first named the files (idea-page-audit.spec.ts 119 duplicated lines of 698 new;
+idea-page.test.tsx 32; ideas-list-audit.spec.ts 5), the second gave exact line ranges. The
+answer was seven per-state audit tests with identical bodies and different strings — which is
+a table, and specifically the table the page's design IS: a state, the word the status card
+says, and the actions that follow in order.
+
+The rule this is an instance of is already written down (`.claude/rules/39`: measure before
+theorising). What makes it worth recording is that the metric *looked* unmeasurable locally —
+the dashboard needs auth — so I substituted plausible theories for a query I had not tried.
+
+### Finding 10 — the sanitising fix had a second path I missed (security-auditor, HIGH)
+
+Converging the Work rows onto `LinkedWorkRow` fixed the raw `tasks.output_pr_url` there, and I
+reported that as "the pull-request URL is now sanitised". It was not. `ideaPrimaryAction` builds
+a SECOND action from the same stored value — `{ to: 'pull-request', url }` for the review state —
+and `IdeaActionControl` rendered it as a raw `href`. That is the idea page's primary button and
+the Ideas list's attention card, so the most likely thing a person clicks was the one path still
+unsanitised.
+
+The lesson is the shape of my own fix: I made one path safe by adopting a component that happens
+to sanitise, and then assumed the value was safe rather than the path. Sanitising now happens in
+`ideaActionHref`, the one place every consumer of an `IdeaActionTarget` resolves a destination,
+so a new consumer is safe by construction (rule 24). Discriminating: reverting it reddens exactly
+one test while the https owner control beside it stays green.
+
+### Finding 9 — the idea page had forked three shared surfaces
+
+Converging onto the merged T1/T4 work fixed two real defects, not just duplication:
+`tasks.output_pr_url` is agent-reported and the Work section rendered it as a raw `href`, where
+`LinkedWorkRow` runs `sanitizeUrl`; and the Related count summed `items.length`, asserting an
+exact total for a bounded read that can only report a lower bound (rule 65). `SectionTitle.count`
+now takes a string so a capped list can say "N+". Also dropped: the hand-copied `IdeaContext` and
+`getIdeaLinks` (that file's own comment asked for this once T1 landed), the duplicate
+`ideaLinksQueryOptions`, and local `ideaPath`/`chatPath` in favour of `lib/project-routes.ts`.
+
+## Every idea writer, and what it sets (coordinator condition, channel seq 133a)
+
+An idea is `tasks.is_idea = 1`. Every path that creates one sets the flag; every path that
+creates an ordinary task leaves it 0. Verified by reading each INSERT, 2026-10-24:
+
+| Writer                                                                       | Sets `is_idea`                                                                                                                        |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `operations/idea-core.ts:231` (`createIdea`, the REST and MCP path)          | `1`, literal in the INSERT                                                                                                            |
+| `durable-objects/sam-session/tools/create-idea.ts:97` (`/sam` `create_idea`) | `1`, literal in the INSERT                                                                                                            |
+| `services/platform-feedback-incidents/user-report.ts:195` (Report an issue)  | `1`, literal in the INSERT                                                                                                            |
+| `services/platform-feedback-triage/runner.ts:309` (hourly triage)            | `1`, literal in the INSERT                                                                                                            |
+| `services/debug-agent.ts:748` (`saveDebugDiagnosisAsIdea`)                   | `isIdea: true` on the drizzle insert                                                                                                  |
+| `services/report-issue.ts`                                                   | **Writes no task.** It delegates to `upsertUserReportIncident`, the row above; the only `tasks` INSERT for a user report is that one. |
+| `routes/tasks/crud.ts:128` (`POST /api/projects/:projectId/tasks`)           | **`0`, deliberately.** An ordinary task also starts in `draft`, which is why the predicate is the flag; commented at the call site.   |
+
+Every other `tasks` INSERT in `apps/api/src` creates work that is already dispatched and
+leaves the column at its default. The full list, from `INSERT INTO tasks` and
+`insert(schema.tasks)` across the tree: `routes/chat-start.ts`, `routes/chat.ts`,
+`services/submit-task-implementation.ts`, `services/submit-instant-task.ts`,
+`services/session-task-repair.ts`, `services/reserved-task-submission-storage.ts`,
+`services/trial/trial-runner.ts`, `routes/mcp/dispatch-tool.ts`,
+`routes/mcp/orchestration-tools.ts`, `routes/workspaces/workspace-create.ts`,
+`durable-objects/sam-session/tools/dispatch-task.ts` and
+`durable-objects/sam-session/tools/retry-subtask.ts`. The last two insert at
+`status = 'queued'`, so they were never idea-like under either definition.
+
+### Readers that had written their own predicate
+
+The narrowing broke three queries that identified an idea as `status = 'draft'` without
+asking the shared helper — correct before the flag, wrong after it, because an undispatched
+ordinary task is also a draft. All three now call `ideaTaskPredicateSql`:
+
+| Reader                                                                           | What it was doing                                                                                                |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `durable-objects/sam-session/tools/find-related-ideas.ts`                        | Served ordinary draft tasks to the agent as "related ideas", and hid every idea that had left `draft`            |
+| `durable-objects/sam-session/tools/create-idea.ts` (the per-project quota count) | Let unrelated draft tasks spend a project's idea quota — one line above the INSERT this work already had to edit |
+| `operations/connector-read-core.ts` (`projectGet`'s `ideaCount`)                 | Reported a count that was neither the old nor the new definition                                                 |
+
+Two more reads in `routes/mcp/idea-tools.ts` (the `link_idea` existence pre-check and the
+`list_linked_ideas` enrichment) were not wrong — the write path behind them already enforces
+the predicate — but went through it too, so an agent is never handed a non-idea row labelled
+as a linked idea.
+
+Migration `0207` backfills `is_idea = 1` for every row the old `status = 'draft'` definition
+covered, so nothing that was in anyone's Ideas list has left it.
+
+## Decision 16: the migration-to-rollout window (coordinator condition 1, seq 210)
+
+`0207` runs before the new Worker is live. An idea the OLD Worker creates in that window —
+one to three minutes — is written with `is_idea = 0` by a writer that did not yet set the flag,
+and is invisible to every idea read afterwards. The backfill has already passed it.
+
+- [x] After the STAGING deploy, run the read-only D1 SELECT below and post the count on
+      `feature.linked-work`. (reconciled 2026-10-26: 0 rows, posted at channel seq 238 and
+      seq 261, window 08:43:39 → 12:52:58Z with the predicate shown able to match at 13:00Z;
+      recorded in "Run it, and the answer" below and in PR #2436's body)
+- [x] After the PRODUCTION deploy, run it again against production and post the count.
+      (reconciled 2026-10-26: 0 rows, posted at channel seq 271 after Deploy Production run
+      40104056792; window from migration 14:54:40 to Worker swap 15:12:24Z, 17m44s; the
+      coordinator accepted it at seq 272)
+- [ ] If either is above zero: post the ids, and backfill by id ONLY after the coordinator's OK.
+      — moot (reconciled 2026-10-26): both counts were 0, so there were no ids to post or
+      backfill.
+
+Run inside `exec_with_secrets` with `secretNames: ["CF_TOKEN"]` (program decision 13), against
+`/accounts/c4e4aebd980b626f6af43ac6b1edcede/d1/database/1cfaf5d4-8226-47d8-bf26-6ba727ce5718/query`
+for staging.
+
+Two things about this query were wrong in its first draft and are worth keeping written down,
+because both would have produced a confident, meaningless number:
+
+1. **The two columns are not the same format.** `d1_migrations.applied_at` is a SQLite
+   `TIMESTAMP` and holds `2026-10-24 04:22:28`; `tasks.created_at` is ISO 8601 and holds
+   `2026-10-24T04:22:28.000Z`. Compared as strings, position 11 is `T` (0x54) against ` `
+   (0x20), so EVERY task created that day sorts after the bookmark — including ones created
+   hours before it. The comparison has to normalize the separator first. Verified against the
+   real staging table rather than assumed (`PRAGMA table_info(d1_migrations)`).
+2. **Nothing distinguishes the two kinds of row by column.** A person filing an idea on the web
+   and `POST /tasks` creating an ordinary task both write `triggered_by = 'user'`,
+   `task_mode = 'task'`, `status = 'draft'`. So the only thing that separates "an idea the old
+   Worker wrote in the window" from "an ordinary task, correctly not an idea" is WHEN it was
+   written: before the Worker swap, or after it. That is why the upper bound is not optional —
+   without it the count grows with ordinary task creation forever and means nothing.
+
+Take the upper bound from the deploy run's own completion time
+(`gh run view <id> --json updatedAt`), as an ISO 8601 string.
+
+```sql
+-- Every draft the new definition does not cover, created between the migration and the
+-- Worker swap. Rows after the swap are ordinary tasks by construction: every idea writer
+-- sets the flag from that moment on.
+SELECT id, title, triggered_by, task_mode, agent_profile_hint,
+       description IS NOT NULL AS has_content, created_at
+  FROM tasks
+ WHERE status = 'draft'
+   AND is_idea = 0
+   AND created_at >= (
+         -- ' ' -> 'T' so this compares against an ISO `created_at`. MAX, because a
+         -- re-applied migration would leave two rows with the same name.
+         SELECT replace(MAX(applied_at), ' ', 'T')
+           FROM d1_migrations
+          WHERE name = '0207_tasks_idea_flag.sql'
+       )
+   AND created_at <= '<worker swap, ISO 8601>'
+ ORDER BY created_at;
+```
+
+Both halves proven on the real staging D1 engine before the deploy, rather than reasoned about
+(`SELECT` of the comparison itself, 2026-10-24T07:47Z):
+
+| Expression                                                          | Result                                               |
+| ------------------------------------------------------------------- | ---------------------------------------------------- |
+| `'2026-10-24T01:00:00.000Z' >= '2026-10-24 04:22:28'` (naive)       | `1` — admits a row written 3h22m BEFORE the bookmark |
+| `'2026-10-24T01:00:00.000Z' >= replace(…,' ','T')` (fixed)          | `0` — rejects it                                     |
+| `'2026-10-24T07:50:00.000Z' >= replace(…,' ','T')` (fixed, control) | `1` — still admits a genuine window row              |
+
+The staging table could not have shown this on its own: it holds no `status='draft'` rows
+created on 2026-10-24, so both predicates return the same count of zero there. A query whose
+only evidence is "it returned zero" is indistinguishable from a query that cannot match
+anything, which is the whole reason for the comparison above.
+
+### Run it, and the answer, 2026-10-24
+
+The window is **08:43:39 → 12:52:58Z** (migration applied, to the last Worker swap of the day),
+which is about four hours across four deploys — not the "one to three minutes" estimated above.
+The migration runs early in `Deploy to Cloudflare` and the Worker swaps at the end of it, and
+each re-deploy reopens nothing: the migration is applied once, so the window closes at the
+FIRST swap. The figure above is the conservative outer bound.
+
+**Window rows: 0.**
+
+That zero only means something because the predicate was shown to be capable of matching. It
+was not, for most of the day: staging held no `status='draft' AND is_idea=0` row at all, so the
+query would have returned 0 whether or not it worked. Proven against the deployed Worker at
+13:00Z, with the row created and removed in the same job:
+
+| step                                 | result                              |
+| ------------------------------------ | ----------------------------------- |
+| before                               | predicate matches **0**             |
+| `POST /tasks` on the deployed Worker | `status='draft'`, **`is_idea = 0`** |
+| after                                | predicate matches **1**             |
+| `GET /api/projects/:id/ideas/<id>`   | **404** — the Ideas read refuses it |
+| after delete                         | back to **0**                       |
+
+That is also the live verification of this PR's documented claim that `POST /tasks` drafts are
+no longer ideas — against deployed code rather than a fixture.
+
+Count zero is the expected answer, and the window is one to three minutes wide. Anything in it
+needs a human look at `has_content` and `agent_profile_hint` before a backfill by id, because
+an ordinary task created in the same minute looks identical to the query.
+
+**Accepted, and noted here because it is a real behaviour change**: the backfill marks every
+row the old definition covered, which includes ordinary undispatched tasks that existed before
+this migration. They become ideas. That is deliberate — leaving them out would make items
+vanish from a page someone is already looking at — and it is bounded: no NEW ordinary task
+joins them, and the only thing a person can now do to one through the idea surfaces is mark it
+done, park it, or start work on it, never run it in place.
+
+## What the five local reviews changed (2026-10-24)
+
+Security found 0 CRITICAL and 0 HIGH. Everything below is from the other four, or is the one
+CI failure, and all of it is fixed in `1f44320f5` except where noted.
+
+| From                   | Finding                                                                     | Resolution                                                                                   |
+| ---------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| CI                     | `tests/workers/resource-links-routes.ts` built its idea with `POST /tasks`  | Uses `POST /ideas`; gained the reciprocal attack case through the composed router            |
+| Security (MED x3)      | Three live readers still said `status = 'draft'`                            | All call `ideaTaskPredicateSql`; two more reads in `idea-tools.ts` joined them               |
+| Security (LOW)         | A `ready` idea could be delegated, running an idea in place                 | `draft -> ready` refused (decision 1); exits from `ready` kept (rule 71)                     |
+| UI/UX (HIGH)           | Needs you was ranked by recency, so a merged card could fold a blocked one  | Ranked question -> stuck -> merged, stably; mixed-severity tests, proven discriminating      |
+| UI/UX (MED)            | The phone never showed the "N in total" hint the laptop did                 | One `doneHint` for both layouts                                                              |
+| UI/UX (LOW x3)         | `Panel` tone override, `aria-label` mismatch, `ideaSourceLabel` unused here | `success` tone added; label matches the heading; the function moves to PR2 with its consumer |
+| Cloudflare             | `listIdeaAssetLinksForTargets` lost its index seek without ANALYZE          | Rewritten to `IN (SELECT value FROM json_each(?))`, matching `listLinksForTargets`           |
+| Cloudflare             | `projects.repository` read twice per page                                   | `getPullRequestStates` takes an optional `repository`                                        |
+| Cloudflare             | The <=8 budget was proven only for a session-link-free page                 | Second case: 100 ideas x 2 chats, 200 task ids, three chunks                                 |
+| Architecture (HIGH x2) | Duplicate cap resolver; duplicated PR-source rule                           | `resolveResourceLinkBatchCaps` and `canonicalPullRequestRefs` in `link-core.ts`              |
+| Architecture (MED)     | `/sam` `create_idea` is a fourth idea-creation path                         | Deferred: idea `01M5PBGHYP4Q4CBDYRM707KWHT`                                                  |
+| Completion (HIGH)      | Criterion 3's third surface was never tested                                | `tests/unit/routes/idea-status-surface-agreement.test.ts` drives all three                   |
+| Completion (MED)       | Two writers missing from the enumeration                                    | Added above                                                                                  |
+| Completion (MED)       | No single test crosses the real route -> DO RPC hop                         | Open; recorded as a gap in the PR                                                            |
+
+## Acceptance criteria
+
+1. An idea's state is derived from its linked work, never typed: a linked chat starting moves it to
+   In progress, an open PR to In review, a merged PR into Needs you, a needs-input marker to
+   Waiting for you, a failure to Stopped. Each state names where it came from.
+2. Weak links (`read`, `viewed`, `discusses`) never change an idea's state.
+3. "Mark done" and "Park" go through one server operation; `update_idea`, the ideas UI and the generic
+   task status route agree, and a test proves the route and `update_idea` agree.
+4. The Ideas list shows Needs you first (≤3 cards then "N more need you"), each with its fix as a
+   button; In progress; Not started; Done recently and Filed by agents folded; desktop side column.
+5. The idea page shows the status card with one primary action, the plan, Work, Updates and Related.
+6. `GET /ideas` stays within 20 round trips for a 100-idea project and never refreshes PR state live.
+7. Markdown lists render bullets and numbers on the idea page and in chat.
+8. No horizontal overflow at 375×667 or 1280×800 with stress data; screenshots posted to each PR.
+9. Verified on staging as a user, on phone and desktop widths.
+
+## Round-trip cost of the Ideas list (rule 60)
+
+Recorded here because the list is the page that scales with a project's history, so the next
+person to add a read to it needs the current number rather than a guess.
+
+A full page costs a fixed handful of round trips, never one per idea:
+
+| Read                                                                | Round trips        |
+| ------------------------------------------------------------------- | ------------------ |
+| `readIdeaRows` open, `readIdeaRows` closed, `readIdeaTotals`        | 3 D1               |
+| `getIdeaWorkSnapshots` (all ideas in one call)                      | 1 DO RPC           |
+| `readSessionTasks`, `readAssociatedPullRequests` (96 ids per chunk) | 2 x ceil(chats/96) |
+| `readAgentProfileNames`                                             | 1 D1               |
+
+At 100 ideas and 300 linked chats that is about 13, inside the ≤20 aggregation budget, and
+`ideas-routes.test.ts` pins it at a full 100-idea page. Two things would move it: T2's
+pull-request-state operation replacing the stub (re-measure at integration), and an idea
+accumulating linked chats without bound — tracked in
+`tasks/backlog/2026-10-24-cap-linked-chats-per-idea.md`.
+
+## One deliberate divergence from the approved design
+
+The approved idea page has a single button on a not-started idea. This ships a quiet second
+one, **Park**, because Parked is a state the page renders, the docs describe, and nothing else
+in the app can enter — without it the state is unreachable. "Start work" is still the filled
+primary and Park is the ghost beside it, so the one obvious next step is unchanged. Flagged in
+PR2 for Raphaël to veto; removing it is one case in `ideaSecondaryAction`.
+
+## Notes
+
+- Nothing merges until T1, T2 and T3 are on `main` and this code uses their real operations.
+- `.do-state.md` is the live tracker.
+
+## Reconciliation 2026-10-26
+
+- Shipped by #2436 (`e19aa30c1`, merged 2026-10-24; derived status and the Ideas list) and #2439
+  (`d41ff95d6`, merged 2026-10-24; the idea page). First successful production deploys: run
+  40104056792 (head `e19aa30c1`, 2026-10-24) and run 40120468463 (head `d41ff95d6`, 2026-10-24).
+- Unticked: 1 — the conditional backfill box, moot because both window counts were 0.
+- Not done on `main`, although its box is ticked: the coordinator's post-merge review of #2439
+  (`feature.linked-work` seq 282-283) found that the PR2 Updates item's "derived lifecycle
+  entries" never shipped (`IdeaUpdates` in `apps/web/src/pages/ideas/idea-activity.tsx` renders
+  authored notes only). It also found the page polling detail and updates every 30 s
+  (`apps/web/src/lib/query-options/ideas.ts:43,55`) and Related still called "not yet available"
+  in `apps/www/src/content/docs/docs/guides/idea-execution.md:119`. The fixes are on branch
+  `sam/t8-pr2-review-followups` (`e15594807`, 4 commits on `d41ff95d6`), pushed 2026-10-24 and
+  never opened as a PR; the T8c task 01M5P5YNDFEP91EC06P1DEXAGF and the coordinator task
+  01M5N1E7R68NYPRNGQ4F861QKE have been asleep since.
+- Idea 01M0JQBW9E0T5PJZXY0K72V9BX (markdown list markers) is still a draft, although its fix
+  shipped in #2436.
+- Verdict: ARCHIVE+FOLLOWUP. Both PRs are live; the follow-up branch is not tracked on `main`
+  and needs a backlog file so it gets opened, staged and merged.

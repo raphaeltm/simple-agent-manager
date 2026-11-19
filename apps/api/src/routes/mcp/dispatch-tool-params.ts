@@ -1,3 +1,7 @@
+import {
+  normalizeResourceRequirementsInput,
+  ResourceRequirementsValidationError,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   AgentProfileRuntime,
   ResourceRequirements,
@@ -12,10 +16,6 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type { ProjectEventChannelEnv } from '../../durable-objects/project-data/project-event-channels-config';
-import {
-  normalizeResourceRequirementsInput,
-  ResourceRequirementsValidationError,
-} from '../../services/resource-requirements-input';
 import { INVALID_PARAMS, jsonRpcError, type JsonRpcResponse } from './_helpers';
 import { parseCoordinationChannelParam } from './dispatch-coordination-channel';
 import { parseDispatchRuntime } from './dispatch-instant';

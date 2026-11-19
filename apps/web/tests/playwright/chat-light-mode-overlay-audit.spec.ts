@@ -50,6 +50,7 @@ function makeSession() {
     isIdle: true,
     agentCompletedAt: Date.now() - 5_000,
     agentSessionId: null,
+    viewerAccess: 'owner',
     agentType: 'claude-code',
   };
 }

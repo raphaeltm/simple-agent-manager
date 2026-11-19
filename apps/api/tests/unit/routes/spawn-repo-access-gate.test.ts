@@ -148,7 +148,10 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     // test needs `meta.changes === 1` so the task transition is accepted.
     DATABASE: {
       prepare: vi.fn(() => ({
-        bind: vi.fn(() => ({ run: vi.fn(() => Promise.resolve({ meta: { changes: 1 } })) })),
+        bind: vi.fn(() => ({
+          run: vi.fn(() => Promise.resolve({ meta: { changes: 1 } })),
+          first: vi.fn(async () => ({ present: 1 })),
+        })),
       })),
     } as unknown as D1Database,
     BASE_DOMAIN: 'sammy.party',
@@ -306,7 +309,8 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
         flow: 'project-access',
         userId: 'user-1',
         repository: 'acme/allowed-private',
-      })
+      }),
+      expect.objectContaining({ repository: 'acme/allowed-private', onFound: expect.any(Function) })
     );
   }
 

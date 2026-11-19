@@ -1,20 +1,20 @@
-import { and, eq, gt, isNull, lte, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { handOffEmptyWorkspaceNode } from '../services/node-warm-handoff';
 import * as projectDataService from '../services/project-data';
-import {
-  finishSleepingWorkspaceComputeCleanup,
-  markWorkspaceNodeWarmIfEmpty,
-} from '../services/session-sleep';
+import { finishSleepingWorkspaceComputeCleanup } from '../services/session-sleep';
+import { finishConfirmedSleepAttention } from '../services/session-sleep-attention';
 import { chatSessionTaskOwnerJoins } from '../services/session-sleep-task-owner';
 import { verifySessionSnapshotArtifactsForSleep } from '../services/session-snapshot-artifacts';
 import { getRestorableSessionSnapshot } from '../services/session-snapshot-persistence';
 import { markSessionSnapshotSleeping } from '../services/session-snapshot-sleep-lifecycle';
 import { sessionSleepInFlightMaxAgeMs } from '../services/session-snapshot-sleep-predicate';
+import { repairConfirmedSleepAttention } from './session-sleep-attention-repair';
 
 export const DEFAULT_SESSION_SLEEP_IN_FLIGHT_REPAIR_BATCH_SIZE = 25;
 export const MAX_SESSION_SLEEP_IN_FLIGHT_REPAIR_BATCH_SIZE = 100;
@@ -71,6 +71,7 @@ export async function runSessionSleepLifecycleRepair(
   env: Env,
   now = new Date()
 ): Promise<SessionSleepLifecycleRepairStats> {
+  await repairConfirmedSleepAttention(env, now, repairBatchSize(env));
   const db = drizzle(env.DATABASE, { schema });
   const cutoff = new Date(now.getTime() - sessionSleepInFlightMaxAgeMs(env)).toISOString();
   const snapshotChatOwner = chatSessionTaskOwnerJoins(schema.sessionSnapshots.chatSessionId);
@@ -82,7 +83,6 @@ export async function runSessionSleepLifecycleRepair(
       projectId: schema.sessionSnapshots.projectId,
       chatSessionId: schema.sessionSnapshots.chatSessionId,
       nodeId: schema.sessionSnapshots.nodeId,
-      nodeRole: schema.nodes.nodeRole,
       runtime: schema.sessionSnapshots.runtime,
       taskId: schema.tasks.id,
       taskStatus: schema.tasks.status,
@@ -90,7 +90,6 @@ export async function runSessionSleepLifecycleRepair(
     })
     .from(schema.sessionSnapshots)
     .leftJoin(schema.workspaces, eq(schema.workspaces.id, schema.sessionSnapshots.workspaceId))
-    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.sessionSnapshots.nodeId))
     .leftJoin(schema.projects, eq(schema.projects.id, schema.sessionSnapshots.projectId))
     .leftJoin(schema.sessionSummaries, snapshotChatOwner.summary)
     .leftJoin(schema.tasks, snapshotChatOwner.task)
@@ -225,19 +224,38 @@ export async function runSessionSleepLifecycleRepair(
             updatedAt: nowIso,
           })
           .where(eq(schema.agentSessions.workspaceId, row.workspaceId)),
+        ...(row.taskId && !terminalFailure && row.runtime !== 'cf-container'
+          ? [
+              db
+                .update(schema.tasks)
+                .set({
+                  status: 'sleeping',
+                  executionStep: null,
+                  errorMessage: null,
+                  updatedAt: nowIso,
+                })
+                .where(
+                  and(
+                    eq(schema.tasks.id, row.taskId),
+                    inArray(schema.tasks.status, ['queued', 'delegated', 'in_progress', 'sleeping'])
+                  )
+                ),
+            ]
+          : []),
       ]);
+      if (!terminalFailure)
+        await finishConfirmedSleepAttention(env, row.projectId, row.chatSessionId, row.workspaceId);
       await finishSleepingWorkspaceComputeCleanup(db, env, {
         workspaceId: row.workspaceId,
         taskId: row.taskId ?? null,
         warmNodeTimeoutMs: row.warmNodeTimeoutMs ?? null,
       });
       if (row.nodeId) {
-        await markWorkspaceNodeWarmIfEmpty(db, env, {
+        await handOffEmptyWorkspaceNode(env, {
           nodeId: row.nodeId,
-          nodeRole: row.nodeRole ?? '',
-          runtime: row.runtime ?? 'vm',
-          userId: row.userId,
-          warmNodeTimeoutMs: row.warmNodeTimeoutMs ?? null,
+          expectedUserId: row.userId,
+          warmTimeoutOverrideMs: row.warmNodeTimeoutMs ?? null,
+          reason: 'session_sleep_lifecycle_repair',
         });
       }
       stats.repaired++;

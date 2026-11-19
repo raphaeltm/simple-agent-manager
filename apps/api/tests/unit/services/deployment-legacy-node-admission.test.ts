@@ -236,6 +236,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   sqlite = new Database(':memory:');
   createAllSchemaTables(sqlite, schema);
+  // The node owner is an active project owner, as in production for every legacy environment.
+  sqlite
+    .prepare(
+      `INSERT INTO project_members (project_id, user_id, role, status) VALUES (?, ?, 'owner', 'active')`
+    )
+    .run(PROJECT_ID, USER_ID);
   mockProvisionDeploymentNode.mockResolvedValue(null);
 });
 
@@ -252,8 +258,9 @@ describe('linkEnvironmentToLegacyNode — owner path', () => {
 
     const row = readEnvironment();
     expect(row.reservationJson).toBe(JSON.stringify(RESERVATION));
-    // 'starting' is what lets the heartbeat advertise pendingReleases again.
-    expect(row.status).toBe('starting');
+    // 'active' is what lets the heartbeat advertise pendingReleases again.
+    expect(row.status).toBe('active');
+    expect(row.observedStatus).toBeNull();
     expect(row.observedErrorMessage).toBeNull();
     expect(row.nodeId).toBe(NODE_ID);
   });
@@ -263,7 +270,7 @@ describe('linkEnvironmentToLegacyNode — owner path', () => {
 
     expect(nodeId).toBe(NODE_ID);
     const row = readEnvironment();
-    expect(row.status).toBe('starting');
+    expect(row.status).toBe('active');
     expect(row.reservationJson).toBe(JSON.stringify(RESERVATION));
     expect(row.observedErrorMessage).toBeNull();
     // The placement never fell through to the failure path.
@@ -306,22 +313,30 @@ describe('linkEnvironmentToLegacyNode — owner path', () => {
 
     expect(nodeId).toBe(NODE_ID);
     const row = readEnvironment();
-    expect(row.status).toBe('starting');
+    expect(row.status).toBe('active');
     expect(row.observedErrorMessage).toBeNull();
     expect(readRelease(RELEASE_V15).status).toBe('created');
   });
 
-  it('leaves an active environment active (only error flips)', async () => {
-    sqlite.prepare(`UPDATE deployment_environments SET status = 'active' WHERE id = ?`).run(ENV_ID);
+  it.each(['active', 'starting'])(
+    'leaves a %s environment as it is (only error flips)',
+    async (status) => {
+      sqlite
+        .prepare(`UPDATE deployment_environments SET status = ? WHERE id = ?`)
+        .run(status, ENV_ID);
+      const before = readEnvironment();
 
-    await expect(adopt()).resolves.toBe(true);
+      await expect(adopt()).resolves.toBe(true);
 
-    const row = readEnvironment();
-    expect(row.status).toBe('active');
-    expect(row.reservationJson).toBe(JSON.stringify(RESERVATION));
-    // Liveness: the write did happen, it just did not touch status.
-    expect(row.updatedAt).not.toBe('2026-09-21T16:49:35.000Z');
-  });
+      const row = readEnvironment();
+      expect(row.status).toBe(status);
+      expect(row.observedStatus).toBe(before.observedStatus);
+      expect(row.observedErrorMessage).toBe(before.observedErrorMessage);
+      expect(row.reservationJson).toBe(JSON.stringify(RESERVATION));
+      // Liveness: the write did happen, it just did not touch status.
+      expect(row.updatedAt).not.toBe('2026-09-21T16:49:35.000Z');
+    }
+  );
 
   it('adopts a shared legacy node for a release that does not require volumes', async () => {
     sqlite.prepare(`UPDATE nodes SET node_mode = 'shared' WHERE id = ?`).run(NODE_ID);
@@ -335,7 +350,7 @@ describe('linkEnvironmentToLegacyNode — owner path', () => {
         reservation: { ...RESERVATION, exclusiveNode: false },
       })
     ).resolves.toBe(true);
-    expect(readEnvironment().status).toBe('starting');
+    expect(readEnvironment().status).toBe('active');
   });
 });
 
@@ -355,6 +370,21 @@ describe('linkEnvironmentToLegacyNode — refusals', () => {
     await expect(run()).resolves.toBe(false);
     expect(readEnvironment()).toEqual(expected);
   }
+
+  it.each([
+    [
+      'removed from the project',
+      `UPDATE project_members SET status = 'removed', removed_at = '2026-10-22T00:00:00.000Z'`,
+    ],
+    ['demoted to viewer', `UPDATE project_members SET role = 'viewer'`],
+    [
+      'a member of a different project only',
+      `UPDATE project_members SET project_id = 'other-project'`,
+    ],
+  ])('refuses when the node owner is %s', async (_label, change) => {
+    sqlite.prepare(change).run();
+    await expectRefusedAndUntouched(() => adopt());
+  });
 
   it('refuses a pooled node (capacity_pool_id set)', async () => {
     sqlite.prepare(`UPDATE nodes SET capacity_pool_id = 'pool-1' WHERE id = ?`).run(NODE_ID);

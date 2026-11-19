@@ -13,7 +13,7 @@ Every workspace has one or more agent chat sessions and its own lifecycle: `pend
 
 A **VM workspace** additionally gives the agent a full Linux toolchain, Docker, and your `.devcontainer`; a browser-based terminal for hands-on work; and automatic port detection for dev servers (see below). An **Instant** workspace trades all of that for a start measured in seconds.
 
-Workspace compute is **ephemeral**. Persistent sessions preserve the home directory and uncommitted repository state while sleeping. If snapshots keep failing, SAM may keep only the repository state and the conversation instead. Either way the snapshot expires after seven days, so push anything you need to keep longer.
+Workspace compute is **ephemeral**. Persistent sessions preserve the home directory and uncommitted repository state while sleeping. If snapshots keep failing, SAM releases idle compute while keeping the conversation and available backups; unpublished files and saved agent state may be lost. Either way the snapshot expires after seven days, so push anything you need to keep longer.
 
 ### Runtimes: Instant vs VM
 
@@ -24,7 +24,7 @@ A workspace runs in one of two places:
 | **Instant** | A container on Cloudflare's network | Starts in seconds, no cloud account needed — but no devcontainer and no Docker |
 | **VM**      | A cloud VM on your provider account | Your full environment, at the cost of a minute or two of provisioning          |
 
-Which one you get is an [agent profile](#agent-profiles) setting: a profile whose runtime is **Instant container** starts chats on Instant; everything else runs on a VM, as a **Task** or a **Chat** depending on the profile (see [Chat or Task](/docs/guides/chat-features/#chat-or-task)). A Task carries the work through to a pull request; a Chat is back-and-forth and doesn't commit or push for you. Instant needs no cloud provider credential, so it's how you work before connecting a cloud account.
+Which one you get is an [agent profile](#agent-profiles) setting: a profile whose runtime is **Instant container** starts chats on Instant; everything else you start in SAM or with the CLI runs on a VM, as a **Task** or a **Chat** depending on the profile (see [Chat or Task](/docs/guides/chat-features/#chat-or-task)). Work started through the [SAM Connector](/docs/guides/sam-connector/) or the [SAM assistant](/docs/guides/sam-assistant/) with an **Auto** profile, or none, can run on Instant instead; see [Workspaces](/docs/guides/creating-workspaces/#two-kinds-of-workspace-instant-and-vm). A Task runs on its own until its agent reports the work complete (SAM tells it to push its branch first); a Chat stays open for back-and-forth. SAM itself doesn't commit, push, or open pull requests, and agents open one only when asked (see [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands)). Instant needs no cloud provider credential, so it's how you work before connecting a cloud account.
 
 Instant and VM sessions sleep when idle and restore from a runtime-neutral snapshot on wake. A VM wake provisions a replacement workspace after the original compute is removed. See [Instant Sessions and persistent sleep](/docs/guides/instant-sessions/).
 
@@ -32,10 +32,10 @@ Instant and VM sessions sleep when idle and restore from a runtime-neutral snaps
 
 An agent profile's **Workspace Profile** setting chooses how much environment a VM chat gets:
 
-| Profile            | Best for                                                                                                                                         |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Full** (default) | Work where the agent needs to run your stack — builds your `.devcontainer` on a VM workspace; no effect on Instant                               |
-| **Lightweight**    | Quick questions and code exploration — starts faster; with **Task Mode** left at **Default**, its sessions are Chats (no automatic pull request) |
+| Profile            | Best for                                                                                                                                                 |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Full** (default) | Work where the agent needs to run your stack — builds your `.devcontainer` on a VM workspace; no effect on Instant                                       |
+| **Lightweight**    | Quick questions and code exploration — starts faster; with **Task Mode** left at **Default**, its sessions are Chats, which stay open for back-and-forth |
 
 ### Port Exposure
 
@@ -47,9 +47,11 @@ https://ws-{workspaceId}--{port}.{baseDomain}
 
 For example, if your dev server starts on port 3000 in workspace `abc123`, you can open it at `https://ws-abc123--3000.example.com`. Common development ports get friendly labels automatically.
 
+In Instant workspaces the SAM workspace agent shares the workspace's network and listens on port 8080 by default. That port is reserved and cannot be opened this way, so run your own services on a different port.
+
 ## Nodes
 
-A **node** is a cloud VM that hosts one or more workspaces. You normally never think about nodes — SAM assigns your workspace to a healthy node or provisions a new one for you, from the machine types your [compute pool](#compute-pools) permits.
+A **node** is a cloud VM that hosts one or more workspaces. You normally never think about nodes — SAM assigns your workspace to a healthy node or provisions a new one for you, from the machine types your [compute pool](#compute-pools) permits. To see them, select **Infrastructure** in the main navigation, which opens the **Nodes** page; each machine lists the sessions running on it and what they are using, with links to its workspaces under **Advanced**.
 
 Several workspaces can share one node when the node's CPU, memory, and disk reservations all still fit and nothing on it asked for exclusive use. Work can also ask for a node to itself; see [Compute Pools](/docs/guides/compute-pools/#resource-requirements-how-much-machine-work-asks-for).
 
@@ -63,28 +65,32 @@ After a piece of work finishes, SAM keeps the environment **warm** for a short w
 
 ## Providers
 
-A **provider** is the cloud your compute runs on. For running workspaces, SAM supports **Hetzner**, **Scaleway**, **Vultr**, **Infomaniak**, **DigitalOcean**, **UpCloud**, and **Google Cloud**. SAM follows a **Bring Your Own Cloud (BYOC)** model: you add your own provider credential in **Settings → Connections** (or the **Cloud Provider** tab), and VM costs are billed directly to your account. On the hosted platform, compute can be provided for you, so you may not need your own credential. Cloud credentials are never stored as environment variables.
+A **provider** is the cloud your compute runs on. For running workspaces, SAM supports **Hetzner**, **Scaleway**, **Vultr**, **Infomaniak**, **DigitalOcean**, **UpCloud**, and **Google Cloud**. SAM follows a **Bring Your Own Cloud (BYOC)** model: you add your own provider credential as a cloud account in **Settings → Infrastructure**, and VM costs are billed directly to your account. An installation administrator can share compute credentials, so individual users may not need their own. Cloud credentials are never stored as environment variables.
 
-You can set a **default provider** and **default location** per project, and the resource requirements new work inherits. The exact machine types, regions, and pricing are shown when you start work.
+Which provider and location a VM uses is decided by the effective [compute pool](/docs/guides/compute-pools/) and the work's resource requirements; projects and agent profiles do not pin a provider or location. The exact machine types, regions, and pricing are shown when you start work.
+
+## Accounts
+
+An **account** is what an agent or a cloud machine runs on: a subscription you signed in with, or an API key or token, encrypted at rest. You can connect several per agent or cloud, such as a work account, a personal one and a client's, and name them. One is your **default**; you can **pin** another to a project, and an agent account to a single profile. For an agent, SAM uses your account for the profile, then your account for the project, then your default, then SAM's platform account where there is one. Pins are personal: they change which of your accounts runs your work, never a teammate's. See [Connecting Agent Accounts](/docs/guides/agents/#connecting-agent-accounts).
 
 ## Compute Pools
 
 A **compute pool** (also called a node pool or capacity pool) is the set of cloud machines SAM is allowed to rent on your behalf. Pools exist at three scopes — **project**, **user**, and **installation** — and SAM uses the first one that exists, in that order.
 
-Each pool holds the credentials that pay for its machines and the list of concrete provider instance types it permits, discovered from your provider's live catalog rather than reduced to small/medium/large presets. Two settings shape what SAM does with that list: a **strategy** (which permitted machine to pick) and an **exhaustion policy** (what to do when none is available).
+Each pool holds the credentials that pay for its machines and the list of concrete provider instance types it permits, drawn from Hetzner's and GCP's live catalogs or standard sizes at the other providers, with estimated prices. Two settings shape what SAM does with that list: a **strategy** (which permitted machine to pick) and an **exhaustion policy** (what to do when none is available).
 
 You normally do not have to configure any of this — SAM creates and maintains a working pool for the credentials it can see. See the [Compute Pools guide](/docs/guides/compute-pools/) for the full picture.
 
 ## Projects
 
-A **project** links a GitHub repository to its chats, agents, ideas, and activity. It's the primary organizational unit in SAM, and the **project chat is the primary way you interact with SAM**.
+A **project** links a repository to its chats, agents, ideas, and activity. The repository can be on GitHub or, where enabled, hosted by SAM on the installation’s Cloudflare account. It's the primary organizational unit in SAM, and the **project chat is the primary way you interact with SAM**.
 
 Each project has:
 
 - A **chat** — the main surface where you describe work and watch agents run it
 - **Agent profiles** and **skills** — reusable configurations you pick from per chat (see below)
-- An **Ideas board** — for capturing and organizing work you haven't started yet
-- A **default provider**, **default location**, and **default resource requirements** for new workspaces
+- An **Ideas list** — what you want done, with whatever needs you first
+- An optional **compute pool** and **default resource requirements** for new workspaces
 - **Runtime configuration** — environment variables and files made available to workspaces
 
 ## Agent Profiles
@@ -93,62 +99,60 @@ An **agent profile** is a saved, reusable configuration for running an agent: wh
 
 ## Skills
 
-A **skill** is a reusable layer of instructions, environment, and files you can apply on top of a profile for a particular kind of work. Skills override profile settings when selected, following the resolution order **skill → profile → project → platform**. Pick a skill per chat the same way you pick a profile.
+A **skill** is a reusable layer of instructions, environment, and files you can apply on top of a profile for a particular kind of work. A skill only overrides the settings it sets: anything it leaves empty, including the agent and model, comes from the profile you pick, following the resolution order **skill → profile → project → platform**. Pick a skill per chat under **Chat options**, the sliders button above the message box, where you can also change the model and effort for that one chat. A skill saved before 21 October 2026 may still set an agent; see [AI Agents](/docs/guides/agents/#agent-profiles).
 
-## Triggers
+## Automation
 
-A **trigger** starts agent work automatically, without you opening a chat. User-facing triggers run from three sources:
+**Automation** is everything in a project that starts work on its own, on one page in the project's navigation. See [Automation](/docs/guides/scheduled-actions/).
 
-- **Schedule** (cron) — run on a recurring basis
-- **GitHub event** — react to activity on the linked repository
-- **Webhook** — start work when an authenticated external request arrives (see [Webhook Triggers](/docs/guides/webhook-triggers/))
+- A **trigger** starts a chat whenever its source fires: a **schedule** (such as weekdays at 9:00), a **GitHub event** on the linked repository, a **webhook** from another service, or an **email** to the automation's own address (preview). See [Triggers](/docs/guides/triggers/).
+- A **one-time run** sends one message to a chat, or starts one new chat, at a time you pick.
+- A **watch** acts whenever SAM sees a matching project event, such as a release failing.
+- A **workflow** is multi-step work an agent planned and handed to SAM, which starts each step when the steps it needs have finished. See [Workflows](/docs/guides/workflows/).
 
-Each trigger runs with a specific agent profile (and optional skill), so triggered work behaves like a chat you started yourself.
+Each run uses an agent profile (and optional skill), so it behaves like a chat you started yourself. Schedule and GitHub triggers without a profile use the project's default agent; webhook and email triggers always name a profile. You can set these up yourself, or ask an agent to.
 
-SAM also has a private operator-only incident trigger source used by the configured platform feedback project. It dispatches agents from grouped private incident backlog summaries rather than from external user/project events.
+SAM also has a private operator-only incident trigger source used by the configured Operations project. It dispatches agents from grouped private incident backlog summaries rather than from external user/project events.
 
 ## Ideas
 
-An **idea** captures a piece of work you want an AI agent to do. Most work starts directly from the project chat — submitting a message both creates and executes the work in one step. The **Ideas board** is where you keep ideas you've drafted but haven't started yet; once an idea is executing or done, you'll follow it in the chat session list.
+An **idea** is something you want done in a project. Most work starts directly from the project chat: sending a message both creates the work and starts it. **Ideas** is where you keep work for later. An idea holds the plan and waits until someone starts work on it with **Start work**. After that it follows the work: its state (**In progress**, **In review**, **Merged**, and so on) comes from the chats and pull requests linked to it, and only a person, or an agent asked to, marks it done. See [Ideas](/docs/guides/ideas/).
 
-You can also execute a saved idea from its detail page with the **Execute** button.
+As agents work, SAM links each chat to the ideas it creates, edits or works on, and to the library files it uploads or reads, and keeps the state of the pull requests it reports. You see those links under **Related** in a chat, and under **Work** and **Related** on an idea's page. See [How work gets linked](/docs/guides/ideas/#how-work-gets-linked).
 
-### How Execution Works
+## How Execution Works
 
 When you submit work from the chat:
 
-1. SAM generates a concise title from your message
-2. A descriptive output branch is created (`sam/...`) from your default branch
-3. SAM selects or provisions a workspace, **already checked out on that branch**, reusing a warm one when available
+1. SAM generates a concise title from your message (an Instant chat that gets no branch keeps the start of your message as its title)
+2. A descriptive output branch is created (`sam/...`) from your default branch, unless it's an Instant chat that [gets no branch](/docs/guides/instant-sessions/#what-happens-to-your-work)
+3. SAM selects or provisions a workspace, **already checked out on that branch**, reusing a warm VM when available — or, for an Instant chat that gets no branch, starts a new container on your default branch
 4. Your chosen agent runs autonomously with your description — unless its [permission mode](/docs/guides/agents/#permission-mode) tells it to ask you first, in which case it [waits for your answer in the chat](/docs/guides/chat-features/#when-the-agent-needs-you)
-5. When a **Task** is done, the agent commits, pushes, and opens a pull request (a **Chat** pushes only what you ask the agent to push)
+5. Ask the agent to commit, push, and open a pull request when you want to publish work, in either a **Task** or a **Chat**
 
-SAM refuses to auto-push a completed task while the workspace is still on the project's default branch, so agent work reaches a reviewable branch rather than `main`. See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands).
-
-### Linking Ideas to Conversations
-
-Ideas can be linked to chat sessions, creating a many-to-many association. This lets you track which conversations led to which ideas, and pull in idea context during a chat. Agents can manage these links using MCP tools (`link_idea`, `unlink_idea`, `find_related_ideas`).
+SAM leaves commits, pushes and pull requests to the agent; turn end and task completion do not publish repository changes. See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands).
 
 ### Agent-to-Agent Dispatch
 
-Running agents can spawn follow-up ideas within the same project using MCP tools. This enables multi-step workflows where one agent delegates sub-work to others.
+Running agents can start follow-up tasks in the same project with SAM's `dispatch_task` tool, then message, check on, or stop them. This enables multi-step workflows where one agent delegates sub-work to others.
 
-See the [Idea Execution guide](/docs/guides/idea-execution/) for full details.
+See [What Happens When You Send Work](/docs/guides/idea-execution/#agent-to-agent-dispatch) for details.
 
 ## Agent Sessions
 
 An **agent session** is an AI coding agent conversation running inside a workspace container. Sessions use the **Agent Communication Protocol (ACP)** to communicate between the browser and the agent process.
 
-SAM supports six AI coding agents:
+SAM supports seven AI coding agents:
 
-| Agent            | Provider                   | API Key Variable    |
-| ---------------- | -------------------------- | ------------------- |
-| **Claude Code**  | Anthropic                  | `ANTHROPIC_API_KEY` |
-| **OpenAI Codex** | OpenAI                     | `OPENAI_API_KEY`    |
-| **Gemini CLI**   | Google                     | `GEMINI_API_KEY`    |
-| **Mistral Vibe** | Mistral                    | `MISTRAL_API_KEY`   |
-| **OpenCode**     | OpenCode managed inference | `OPENCODE_API_KEY`  |
-| **Amp**          | Sourcegraph                | `AMP_API_KEY`       |
+| Agent                  | Provider                   | API Key Variable    |
+| ---------------------- | -------------------------- | ------------------- |
+| **Claude Code**        | Anthropic                  | `ANTHROPIC_API_KEY` |
+| **OpenAI Codex**       | OpenAI                     | `OPENAI_API_KEY`    |
+| **Gemini CLI**         | Google                     | `GEMINI_API_KEY`    |
+| **Google Antigravity** | Google                     | `GEMINI_API_KEY`    |
+| **Mistral Vibe**       | Mistral                    | `MISTRAL_API_KEY`   |
+| **OpenCode**           | OpenCode managed inference | `OPENCODE_API_KEY`  |
+| **Amp**                | Sourcegraph                | `AMP_API_KEY`       |
 
 You choose which agent to run by selecting an **agent profile** in the chat. See the [AI Agents guide](/docs/guides/agents/) for how to connect credentials and configure profiles.
 
@@ -157,7 +161,7 @@ Sessions support:
 - Streaming responses (real-time output as the agent works)
 - Multiple concurrent sessions per workspace (each in its own terminal tab)
 - Persistence across page refreshes (tabs restored from VM Agent SQLite)
-- **Conversation forking** — start a new session that carries a summary of this one, to explore an alternative
+- **Conversation forking** — start a new session linked to this one, whose agent can read the original conversation, to explore an alternative
 - **Voice input** and **text-to-speech playback**
 - **File browsing** — browse, view, and diff files directly in the chat panel
 - **File upload/download** — attach files to conversations and download from workspaces
@@ -166,27 +170,48 @@ See the [AI Agents guide](/docs/guides/agents/) and [Chat Features guide](/docs/
 
 ## Notifications
 
-SAM includes an in-app notification system with real-time delivery via WebSocket:
+SAM includes an in-app notification system with real-time delivery via WebSocket. Everything waiting on you is an [Inbox](/docs/guides/inbox/) item: questions, permission requests, secrets, Operations approvals and reviews you answer there, tasks for people (read-only in the app for now; see [If you were given a task](/docs/guides/inbox/#if-you-were-given-a-task)), and the Problems SAM files when something of yours fails; the other notifications are listed under the Inbox's **Updates** chip:
 
-| Type            | Urgency | Trigger                                    |
-| --------------- | ------- | ------------------------------------------ |
-| `task_complete` | Medium  | A task finishes executing successfully     |
-| `needs_input`   | High    | Agent is blocked and needs your decision   |
-| `error`         | High    | Execution fails                            |
-| `progress`      | Low     | Agent reports incremental progress         |
-| `session_ended` | Medium  | A conversation-mode session turn completes |
-| `pr_created`    | Medium  | Agent creates a pull request               |
+| Type                  | Urgency | Trigger                                                                                                                   |
+| --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `task_complete`       | Medium  | An agent reports its task complete                                                                                        |
+| `needs_input`         | High    | Agent is blocked and needs your decision                                                                                  |
+| `error`               | High    | Execution fails                                                                                                           |
+| `progress`            | Low     | Agent reports incremental progress                                                                                        |
+| `session_ended`       | Medium  | No longer sent; agents file what you need in your Inbox                                                                   |
+| `cron_failure`        | High    | An operational sweep fails (superadmins)                                                                                  |
+| `mention`             | Medium  | A teammate @mentions you in a comment                                                                                     |
+| `comment`             | Low     | New comments on your chat or your threads                                                                                 |
+| `session_access`      | Medium  | A chat is shared with you, or your access to it is extended or removed; or a teammate passes your chat on to someone else |
+| `operations_approval` | High    | An Operations agent asks to run an action (superadmins)                                                                   |
+| `secret_request`      | High    | An agent asks you to supply a secret value through the card in its chat                                                   |
 
 See the [Notifications guide](/docs/guides/notifications/) for full details.
 
+## SAM Connector
+
+The **SAM Connector** lets an AI app you already use, such as Claude or ChatGPT, act as you in SAM:
+it can tell you what needs your attention, read whole replies, follow a team of agents, schedule
+work, start, steer or interrupt project chats, and answer your agents. It reaches the code only
+through the agents in those chats. See [Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/).
+
+The **SAM assistant** (preview) does some of the same from a private conversation inside SAM, once
+you turn it on in **Settings**. See [SAM Assistant](/docs/guides/sam-assistant/).
+
 ## Authentication
 
-SAM uses a **GitHub App** for both OAuth login and repository access. The app needs:
+**Signing in** and **repository access** are separate. You sign in with GitHub, Google or GitLab,
+whichever the instance has configured, or with a code emailed to an existing account where the
+instance can send email. A project's code lives either on GitHub or in a repository SAM hosts on
+Cloudflare Artifacts, which needs no GitHub at all.
 
-- **OAuth** — for user sign-in (BetterAuth handles session management)
+For GitHub repositories (and GitHub sign-in), SAM uses a **GitHub App**. The app needs:
+
+- **OAuth** — for user sign-in with GitHub (BetterAuth handles session management)
 - **Contents: Read and write** — for cloning repos and pushing changes
 - **Email addresses: Read-only** — for user profile information
-- **Pull requests, Checks, and Actions: Read-only** — for project event facts from pull request, review, check, and workflow webhooks
+- **Pull requests, Checks, Actions, and Issues: Read-only** — for project event facts from pull request, review, check, workflow, and issue webhooks
+- **Pull requests: Read and write**, instead of read-only, if agents should open pull requests. A newly created App starts without it (see [Let agents open pull requests](/docs/guides/self-hosting/#let-agents-open-pull-requests))
 
 <Aside type="caution">
   User credentials (cloud provider credentials and agent credentials) are encrypted at rest using

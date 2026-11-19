@@ -27,6 +27,11 @@ vi.mock('../../../src/middleware/auth', () => ({
     });
     await next();
   },
+  // The approval gate itself is exercised through the real worker in
+  // tests/workers/signup-approval-gate.test.ts; these tests cover request validation.
+  requireApproved: () => async (_c: Context, next: Next) => {
+    await next();
+  },
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
   requireProjectAccess: mocks.requireProjectAccess,

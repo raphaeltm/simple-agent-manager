@@ -7,7 +7,7 @@ export const INCIDENT_TOOLS = [
   {
     name: 'list_incident_queue',
     description:
-      'List grouped private feedback incidents in the configured feedback project. ' +
+      'List grouped private incidents in the configured Operations project. ' +
       'The server derives project scope from the MCP token and returns bounded metadata only.',
     inputSchema: {
       type: 'object' as const,

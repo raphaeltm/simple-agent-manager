@@ -1,0 +1,171 @@
+import type {
+  CapacityExhaustionPolicy,
+  CapacityPool,
+  CapacityPoolStrategy,
+  DefaultCapacityPoolUpdateRequest,
+} from '@simple-agent-manager/shared';
+import {
+  CAPACITY_EXHAUSTION_POLICIES,
+  CAPACITY_POOL_STRATEGIES,
+  DEFAULT_CAPACITY_POOL_DEPLOYMENT_STRATEGY,
+  DEFAULT_CAPACITY_POOL_MAX_NODES,
+} from '@simple-agent-manager/shared';
+import { Input, Select } from '@simple-agent-manager/ui';
+import { useId, useState } from 'react';
+
+import {
+  type ChoiceCopy,
+  DEPLOYMENT_STRATEGY_HELP,
+  EXHAUSTION_POLICY_COPY,
+  EXHAUSTION_POLICY_TITLE,
+  MACHINE_LIMIT_HELP,
+  POOL_SCOPE_COPY,
+  SPREAD_MACHINE_LIMIT_NOTE,
+  WORKSPACE_STRATEGY_COPY,
+} from '../../lib/compute-pool-copy';
+
+export interface PolicyDraft {
+  strategy: CapacityPoolStrategy;
+  deploymentStrategy: CapacityPoolStrategy;
+  exhaustionPolicy: CapacityExhaustionPolicy;
+  maxNodes: number;
+}
+
+export function initialPolicy(pool: CapacityPool): PolicyDraft {
+  return {
+    strategy: pool.strategy,
+    deploymentStrategy: pool.deploymentStrategy ?? DEFAULT_CAPACITY_POOL_DEPLOYMENT_STRATEGY,
+    exhaustionPolicy: pool.exhaustionPolicy,
+    maxNodes: pool.maxNodes ?? DEFAULT_CAPACITY_POOL_MAX_NODES,
+  };
+}
+
+export function policyChanges(pool: CapacityPool, draft: PolicyDraft) {
+  const initial = initialPolicy(pool);
+  const policy: NonNullable<DefaultCapacityPoolUpdateRequest['policy']> = {};
+  if (draft.strategy !== initial.strategy) policy.strategy = draft.strategy;
+  if (draft.deploymentStrategy !== initial.deploymentStrategy) {
+    policy.deploymentStrategy = draft.deploymentStrategy;
+  }
+  if (draft.exhaustionPolicy !== initial.exhaustionPolicy) {
+    policy.exhaustionPolicy = draft.exhaustionPolicy;
+  }
+  if (draft.maxNodes !== initial.maxNodes) policy.maxNodes = draft.maxNodes;
+  return policy;
+}
+
+function ChoiceField<T extends string>({
+  label,
+  value,
+  options,
+  copy,
+  help,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: readonly T[];
+  copy: Record<T, ChoiceCopy>;
+  help?: string;
+  onChange: (value: T) => void;
+}) {
+  const id = useId();
+  return (
+    // content-start: in a two-column row, a shorter field must not stretch its select.
+    <div className="grid min-w-0 content-start gap-1">
+      <label htmlFor={id} className="text-xs font-medium text-fg-muted">
+        {label}
+      </label>
+      <Select
+        id={id}
+        value={value}
+        aria-describedby={`${id}-help`}
+        onChange={(event) => onChange(event.currentTarget.value as T)}
+      >
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {copy[option].label}
+          </option>
+        ))}
+      </Select>
+      <p id={`${id}-help`} className="m-0 text-xs text-fg-muted">
+        {help ?? copy[value].description}
+      </p>
+    </div>
+  );
+}
+
+interface PoolSettingsSectionProps {
+  pool: CapacityPool;
+  policy: PolicyDraft;
+  onChange: (policy: PolicyDraft) => void;
+}
+
+/** How SAM uses the pool's machines: placement, capacity fallback, limit, deployments. */
+export function PoolSettingsSection({ pool, policy, onChange }: PoolSettingsSectionProps) {
+  const limitId = useId();
+  // The limit field keeps what the person typed (even empty) while they edit; only a positive
+  // whole number reaches the policy, and leaving the field shows the value that will be saved.
+  const [maxNodesText, setMaxNodesText] = useState(() => String(policy.maxNodes));
+  const update = <K extends keyof PolicyDraft>(key: K, value: PolicyDraft[K]) =>
+    onChange({ ...policy, [key]: value });
+
+  return (
+    <details className="group min-w-0 rounded-md border border-border-default p-3">
+      <summary className="cursor-pointer text-sm font-semibold text-fg-primary">
+        How SAM uses machines
+      </summary>
+      <div className="mt-3 grid min-w-0 gap-4 sm:grid-cols-2">
+        <ChoiceField
+          label="Placing agents"
+          value={policy.strategy}
+          options={CAPACITY_POOL_STRATEGIES}
+          copy={WORKSPACE_STRATEGY_COPY}
+          onChange={(value) => update('strategy', value)}
+        />
+        <ChoiceField
+          label={EXHAUSTION_POLICY_TITLE}
+          value={policy.exhaustionPolicy}
+          options={CAPACITY_EXHAUSTION_POLICIES}
+          copy={EXHAUSTION_POLICY_COPY}
+          onChange={(value) => update('exhaustionPolicy', value)}
+        />
+        <div className="grid min-w-0 content-start gap-1">
+          <label htmlFor={limitId} className="text-xs font-medium text-fg-muted">
+            Machine limit{POOL_SCOPE_COPY[pool.scope].limitPerPerson ? ' per person' : ''}
+          </label>
+          <Input
+            id={limitId}
+            type="number"
+            min={1}
+            step={1}
+            inputMode="numeric"
+            aria-describedby={`${limitId}-help`}
+            value={maxNodesText}
+            onChange={(event) => {
+              const text = event.currentTarget.value;
+              setMaxNodesText(text);
+              const value = Number(text);
+              if (text.trim() !== '' && Number.isSafeInteger(value) && value > 0) {
+                update('maxNodes', value);
+              }
+            }}
+            onBlur={() => setMaxNodesText(String(policy.maxNodes))}
+          />
+          <p id={`${limitId}-help`} className="m-0 text-xs text-fg-muted">
+            {MACHINE_LIMIT_HELP}
+            {policy.strategy === 'spread' ? ` ${SPREAD_MACHINE_LIMIT_NOTE}` : ''}
+          </p>
+        </div>
+        <ChoiceField
+          label="App deployments"
+          value={policy.deploymentStrategy}
+          options={CAPACITY_POOL_STRATEGIES}
+          copy={WORKSPACE_STRATEGY_COPY}
+          help={DEPLOYMENT_STRATEGY_HELP}
+          onChange={(value) => update('deploymentStrategy', value)}
+        />
+      </div>
+    </details>
+  );
+}

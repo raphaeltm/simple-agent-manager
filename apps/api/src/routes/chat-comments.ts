@@ -1,4 +1,8 @@
-import type { CommentStatus } from '@simple-agent-manager/shared';
+import type {
+  CommentStatus,
+  MessageCommentContextResponse,
+  MessageCommentThread,
+} from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Context, Hono } from 'hono';
 
@@ -11,7 +15,9 @@ import {
   parsePositiveIntegerQuery,
   rethrowCommentError,
 } from '../lib/comment-http';
+import { log } from '../lib/logger';
 import { requireRouteParam } from '../lib/route-helpers';
+import { resolveWaitUntil } from '../lib/wait-until';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
@@ -22,12 +28,18 @@ import {
   CreateCommentThreadSchema,
   SendCommentDirectiveSchema,
 } from '../schemas/comments';
+import { authorizeAgentWake } from '../services/agent-wake-authorization';
+import { notifyCommentActivity } from '../services/collaboration-notifications';
+import { getCommentContextLimits } from '../services/collaboration-settings';
+import { resolveCommentMentions } from '../services/comment-mentions';
+import { sendMessageCommentDirective } from '../services/message-comment-directive';
 import {
   createProjectDataMessageCommentAdapter,
   isMessageCommentServiceError,
-  sendMessageCommentDirective,
 } from '../services/message-comments';
 import * as projectDataService from '../services/project-data';
+import { toSessionViewerAccess } from '../services/session-access';
+import { getDefaultCompactMode } from './chat-message-query';
 
 export const chatCommentRoutes = new Hono<{ Bindings: Env }>();
 
@@ -47,6 +59,46 @@ function rethrowCommentDirectiveError(err: unknown): never {
     case 'unavailable':
       throw errors.internal('Comment storage backend is unavailable');
   }
+}
+
+/**
+ * Notify mentioned people, the session owner and thread participants about a new comment.
+ * Runs after the response: the comment is already committed, so a failure here is logged and
+ * never turns the write into an error.
+ */
+function notifyInBackground(
+  c: Context<{ Bindings: Env }>,
+  input: {
+    projectId: string;
+    sessionId: string;
+    thread: MessageCommentThread;
+    comment: { id: string; body: string; mentions: NonNullable<MessageCommentThread['mentions']> };
+    kind: 'thread' | 'reply';
+  }
+): void {
+  const actor = getCommentActor(c);
+  const work = (async () => {
+    const session = await projectDataService.getSession(c.env, input.projectId, input.sessionId);
+    await notifyCommentActivity(c.env, {
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      sessionTopic: typeof session?.topic === 'string' ? session.topic : null,
+      sessionOwnerUserId:
+        typeof session?.createdByUserId === 'string' ? session.createdByUserId : null,
+      thread: input.thread,
+      comment: input.comment,
+      kind: input.kind,
+      actor: { userId: actor.id, name: actor.name },
+    });
+  })().catch((err) => {
+    log.warn('collaboration.comment_notifications_failed', {
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      threadId: input.thread.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+  resolveWaitUntil(c, 'collaboration.comment_notifications_unavailable')(work);
 }
 
 /**
@@ -76,8 +128,79 @@ chatCommentRoutes.get('/:sessionId/comments', async (c) => {
 });
 
 /**
+ * GET /api/projects/:projectId/sessions/:sessionId/comments/:threadId/context
+ * One thread with the conversation around the message it is anchored to, so the Comments
+ * page can show the comment where it was made: the whole anchored message (an agent reply is
+ * many streamed rows) plus `collaboration.commentContextMessages` messages each side. Earlier
+ * and later pages come from `GET .../messages` with cursors from the first and last rows.
+ *
+ * Round trips (rule 60, read-only GET ≤ 8): membership (D1), session access + thread (one
+ * ProjectData RPC each, in parallel), and one RPC to the object that owns the transcript;
+ * plus at most one D1 read to fill the per-isolate admin-settings cache, and one to find
+ * the transcript's owner when archive routing is on. Five typical, seven worst case.
+ */
+chatCommentRoutes.get('/:sessionId/comments/:threadId/context', async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  const sessionId = requireRouteParam(c, 'sessionId');
+  const threadId = requireRouteParam(c, 'threadId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireProjectCapability(db, projectId, userId, 'task:read');
+
+  let loaded: [
+    Awaited<ReturnType<typeof projectDataService.getSessionAccess>>,
+    MessageCommentThread | null,
+  ];
+  try {
+    loaded = await Promise.all([
+      projectDataService.getSessionAccess(c.env, projectId, sessionId, userId),
+      projectDataService.getCommentThread(c.env, projectId, sessionId, threadId),
+    ]);
+  } catch (err) {
+    rethrowCommentError(err);
+  }
+  const [{ session, access }, thread] = loaded;
+  if (!session) throw errors.notFound('Chat session');
+  // The lookup is already scoped to the session in SQL; refuse a row from another session
+  // anyway, so a broken predicate cannot hand one session's thread to another's reader.
+  if (!thread || thread.sessionId !== sessionId) {
+    if (thread) {
+      log.error('comments.context_thread_session_mismatch', {
+        projectId,
+        threadId,
+        requestedSessionId: sessionId,
+        threadSessionId: thread.sessionId,
+        action: 'rejected',
+      });
+    }
+    throw errors.notFound('Comment thread');
+  }
+
+  const limits = await getCommentContextLimits(c.env);
+  const window = await projectDataService.getMessageContextWindow(c.env, projectId, sessionId, {
+    messageId: thread.anchor.messageId,
+    messagesEachSide: limits.messages,
+    maxRows: limits.maxRows,
+    compact: getDefaultCompactMode(c.env),
+  });
+
+  const response: MessageCommentContextResponse = {
+    thread,
+    session: { id: sessionId, topic: typeof session.topic === 'string' ? session.topic : null },
+    viewerAccess: toSessionViewerAccess(access),
+    anchor: { messageId: thread.anchor.messageId, found: window.found },
+    messages: window.messages,
+    hasMoreBefore: window.hasMoreBefore,
+    hasMoreAfter: window.hasMoreAfter,
+  };
+  return c.json(response);
+});
+
+/**
  * POST /api/projects/:projectId/sessions/:sessionId/comments
- * Create a message-anchored comment thread.
+ * Create a message-anchored comment thread. Any project member may comment on any session;
+ * a comment never reaches the agent until a session writer sends it (`/send`).
  */
 chatCommentRoutes.post(
   '/:sessionId/comments',
@@ -91,6 +214,7 @@ chatCommentRoutes.post(
     await requireProjectCapability(db, projectId, userId, 'task:write');
 
     const body = c.req.valid('json');
+    const mentions = await resolveCommentMentions(c.env, db, projectId, body.mentions);
     try {
       const result = await projectDataService.createCommentThread(c.env, projectId, {
         sessionId,
@@ -99,7 +223,21 @@ chatCommentRoutes.post(
         quote: body.quote ?? null,
         clientMutationId: body.clientMutationId ?? null,
         actor: getCommentActor(c),
+        mentions,
       });
+      if (!result.idempotent) {
+        notifyInBackground(c, {
+          projectId,
+          sessionId,
+          thread: result.thread,
+          comment: {
+            id: result.thread.id,
+            body: result.thread.body,
+            mentions: result.thread.mentions ?? [],
+          },
+          kind: 'thread',
+        });
+      }
       return c.json(result, result.idempotent ? 200 : 201);
     } catch (err) {
       rethrowCommentError(err);
@@ -124,6 +262,7 @@ chatCommentRoutes.post(
     await requireProjectCapability(db, projectId, userId, 'task:write');
 
     const body = c.req.valid('json');
+    const mentions = await resolveCommentMentions(c.env, db, projectId, body.mentions);
     try {
       const result = await projectDataService.createCommentReply(c.env, projectId, {
         sessionId,
@@ -131,7 +270,21 @@ chatCommentRoutes.post(
         body: body.body,
         clientMutationId: body.clientMutationId ?? null,
         actor: getCommentActor(c),
+        mentions,
       });
+      if (!result.idempotent) {
+        notifyInBackground(c, {
+          projectId,
+          sessionId,
+          thread: result.thread,
+          comment: {
+            id: result.reply.id,
+            body: result.reply.body,
+            mentions: result.reply.mentions ?? [],
+          },
+          kind: 'reply',
+        });
+      }
       return c.json(result, result.idempotent ? 200 : 201);
     } catch (err) {
       rethrowCommentError(err);
@@ -167,6 +320,13 @@ async function updateCommentStatus(
   }
 }
 
+/**
+ * POST /api/projects/:projectId/sessions/:sessionId/comments/:threadId/send
+ * The explicit "Send to agent" action — the only way a comment reaches the agent. It queues
+ * a prompt on the session owner's agent and credentials, so the agent-wake policy decides who
+ * may do it (`lib/agent-wake-policy.ts`; today: session writers, the owner or an active
+ * grantee).
+ */
 chatCommentRoutes.post(
   '/:sessionId/comments/:threadId/send',
   jsonValidator(SendCommentDirectiveSchema),
@@ -179,6 +339,14 @@ chatCommentRoutes.post(
     const db = drizzle(c.env.DATABASE, { schema });
 
     await requireProjectCapability(db, projectId, userId, 'task:write');
+    const { wake } = await authorizeAgentWake(c.env, {
+      projectId,
+      sessionId,
+      actorUserId: userId,
+      trigger: 'comment_directive',
+      db,
+      action: 'send comments to the agent in this session',
+    });
 
     try {
       const result = await sendMessageCommentDirective({
@@ -187,7 +355,8 @@ chatCommentRoutes.post(
         projectId,
         sessionId,
         threadId,
-        humanUserId: userId,
+        wake,
+        humanDisplayName: getCommentActor(c).name,
         body: body.body ?? null,
       });
       return c.json(

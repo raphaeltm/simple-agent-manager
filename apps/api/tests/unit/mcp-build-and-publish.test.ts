@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+let nodeRuntime = 'vm';
+let currentStatus = 'building';
+const cancelAccepted = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock('../../src/services/deployment-publish-job-cancel', () => ({
+  cancelDeploymentPublishJobOnVmBestEffort: cancelAccepted,
+}));
 const mockAssertAgentDeploymentAllowed = vi.fn();
 const mockLoadDeploymentBuildInterpolationEnv = vi.fn();
 const mockLookupWorkspaceForVmAgent = vi.fn();
@@ -11,8 +17,25 @@ const recordDeploymentPublishJobLifecycleEventBestEffort = vi.hoisted(() =>
   vi.fn(async () => undefined)
 );
 
+const { collectContext, executorSetting } = vi.hoisted(() => ({
+  collectContext: vi.fn(async () => ({ supported: true })),
+  executorSetting: vi.fn(async () => 'node'),
+}));
+vi.mock('../../src/services/build-context-collection', () => ({
+  collectBuildContextOnSource: collectContext,
+  createBuildContextCollectionPorts: vi.fn(() => ({})),
+}));
+vi.mock('../../src/services/admin-settings', () => ({ resolveAdminSetting: executorSetting }));
+
 vi.mock('drizzle-orm/d1', () => ({
-  drizzle: vi.fn(() => ({ mockedDb: true })),
+  drizzle: vi.fn(() => ({
+    mockedDb: true,
+    select: () => ({
+      from: () => ({
+        where: () => ({ limit: async () => [{ runtime: nodeRuntime, status: currentStatus }] }),
+      }),
+    }),
+  })),
 }));
 
 vi.mock('../../src/services/deployment-control', () => ({
@@ -69,6 +92,11 @@ function env() {
 describe('async build_and_publish MCP tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    nodeRuntime = 'vm';
+    executorSetting.mockResolvedValue('node');
+    collectContext.mockResolvedValue({ supported: true });
+    currentStatus = 'building';
+    mockAppendDeploymentPublishJobEvent.mockResolvedValue(true);
     mockAssertAgentDeploymentAllowed.mockResolvedValue({
       environmentId: 'env-1',
       policy: { agentDeployEnabled: true, allowedDeployProfileIds: [] },
@@ -89,9 +117,104 @@ describe('async build_and_publish MCP tools', () => {
     });
     mockCreateDeploymentPublishJob.mockResolvedValue({
       id: 'job-1',
+      environmentId: 'env-1',
+      nodeId: 'node-1',
+      workspaceId: 'ws-1',
+      taskId: 'task-1',
+      attempt: 1,
       createdAt: '2026-08-28T12:00:00.000Z',
     });
     mockStartBuildPublishJobOnVm.mockResolvedValue({ publishJobId: 'job-1', status: 'accepted' });
+  });
+
+  it.each(['canceled', 'failed', 'building'])(
+    'returns the observed %s status and cancels terminal runners after acceptance',
+    async (status) => {
+      currentStatus = status;
+      mockAppendDeploymentPublishJobEvent.mockResolvedValue(false);
+      const result = await handleBuildAndPublish(
+        'race',
+        { environment: 'staging' },
+        tokenData(),
+        env()
+      );
+      const payload = JSON.parse(result.result?.content?.[0]?.text as string);
+      expect(payload.status).toBe(status);
+      expect(cancelAccepted).toHaveBeenCalledTimes(
+        status === 'canceled' || status === 'failed' ? 1 : 0
+      );
+    }
+  );
+
+  it('collects an Instant context independently of the VM default', async () => {
+    nodeRuntime = 'cf-container';
+    const result = await handleBuildAndPublish(1, { environment: 'staging' }, tokenData(), env());
+    expect(JSON.parse(result.result?.content?.[0]?.text as string)).toMatchObject({
+      executor: 'cloudflare',
+      publishJobId: 'job-1',
+    });
+    expect(mockCreateDeploymentPublishJob).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ executor: 'cloudflare' })
+    );
+    expect(collectContext).toHaveBeenCalled();
+    expect(mockStartBuildPublishJobOnVm).not.toHaveBeenCalled();
+  });
+  it('uses explicit Cloudflare selection for a VM without starting a source build', async () => {
+    executorSetting.mockResolvedValue('cloudflare');
+    const result = await handleBuildAndPublish(1, { environment: 'staging' }, tokenData(), env());
+    expect(JSON.parse(result.result?.content?.[0]?.text as string).executor).toBe('cloudflare');
+    expect(collectContext).toHaveBeenCalled();
+    expect(mockStartBuildPublishJobOnVm).not.toHaveBeenCalled();
+  });
+  it('rejects profile-less Cloudflare requests before queuing but retains the node path', async () => {
+    mockAssertAgentDeploymentAllowed.mockResolvedValue({
+      environmentId: 'env-1',
+      taskAgentProfileId: null,
+    });
+    executorSetting.mockResolvedValue('cloudflare');
+    const rejected = await handleBuildAndPublish(1, { environment: 'staging' }, tokenData(), env());
+    expect(rejected.error?.message).toContain('agent profile');
+    expect(mockCreateDeploymentPublishJob).not.toHaveBeenCalled();
+    expect(collectContext).not.toHaveBeenCalled();
+    executorSetting.mockResolvedValue('node');
+    expect(
+      (await handleBuildAndPublish(2, { environment: 'staging' }, tokenData(), env())).error
+    ).toBeUndefined();
+    expect(mockStartBuildPublishJobOnVm).toHaveBeenCalled();
+  });
+  it.each(['context_ready', 'starting', 'building', 'succeeded'])(
+    'returns the same job after a late source timeout in %s',
+    async (status) => {
+      executorSetting.mockResolvedValue('cloudflare');
+      currentStatus = status;
+      collectContext.mockRejectedValueOnce(new Error('source acceptance timed out after handoff'));
+      mockAppendDeploymentPublishJobEvent.mockImplementation(
+        async (_db, input) => input.eventType !== 'publish.job.start_failed'
+      );
+      const result = await handleBuildAndPublish(1, { environment: 'staging' }, tokenData(), env());
+      expect(result.error).toBeUndefined();
+      expect(JSON.parse(result.result?.content?.[0]?.text as string)).toMatchObject({
+        publishJobId: 'job-1',
+        status,
+        executor: 'cloudflare',
+      });
+      expect(mockAppendDeploymentPublishJobEvent).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ eventType: 'publish.job.start_failed', sourceCollector: true })
+      );
+      expect(cancelAccepted).not.toHaveBeenCalled();
+      expect(mockStartBuildPublishJobOnVm).not.toHaveBeenCalled();
+    }
+  );
+  it('never falls back to the source after explicit Cloudflare collection fails', async () => {
+    executorSetting.mockResolvedValue('cloudflare');
+    collectContext.mockRejectedValueOnce(
+      new Error('source collection route unavailable; upgrade source agent')
+    );
+    const result = await handleBuildAndPublish(1, { environment: 'staging' }, tokenData(), env());
+    expect(JSON.parse(result.result?.content?.[0]?.text as string).status).toBe('failed');
+    expect(mockStartBuildPublishJobOnVm).not.toHaveBeenCalled();
   });
 
   it('rejects when there is no active workspace', async () => {
@@ -138,6 +261,7 @@ describe('async build_and_publish MCP tools', () => {
 
     expect(result.error).toBeUndefined();
     expect(mockCreateDeploymentPublishJob).toHaveBeenCalledWith(expect.anything(), {
+      executor: 'node',
       projectId: 'proj-1',
       environmentId: 'env-1',
       workspaceId: 'ws-1',
@@ -185,12 +309,25 @@ describe('async build_and_publish MCP tools', () => {
       occurredAt: '2026-08-28T12:00:00.000Z',
     });
 
+    expect(recordDeploymentPublishJobLifecycleEventBestEffort).toHaveBeenCalledWith(
+      testEnv,
+      expect.objectContaining({ status: 'starting', source: 'mcp.build_and_publish.accepted' })
+    );
     const payload = JSON.parse(result.result?.content?.[0]?.text as string);
     expect(payload).toMatchObject({
       publishJobId: 'job-1',
       status: 'starting',
-      pollTool: 'get_publish_status',
+      pollTool: 'deployments_read',
+      pollMethod: 'publish_status',
     });
+    // The returned instructions are a callable tools/call request for the poll tool.
+    const { resolveGroupedToolCall } = await import('../../src/routes/mcp/tool-group-dispatch');
+    expect(
+      resolveGroupedToolCall(2, payload.pollTool, {
+        method: payload.pollMethod,
+        publishJobId: payload.publishJobId,
+      })
+    ).toMatchObject({ toolName: 'get_publish_status', toolArgs: { publishJobId: 'job-1' } });
   });
 
   it('persists a failed terminal job when VM start fails and redacts signed URL details', async () => {
@@ -214,6 +351,14 @@ describe('async build_and_publish MCP tools', () => {
         terminal: true,
         errorCode: 'failed_to_start',
         message: expect.not.stringContaining('X-Amz-Signature=secret'),
+      })
+    );
+    expect(recordDeploymentPublishJobLifecycleEventBestEffort).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        status: 'failed',
+        source: 'mcp.build_and_publish.failed_to_start',
+        terminal: true,
       })
     );
     const payload = JSON.parse(result.result?.content?.[0]?.text as string);

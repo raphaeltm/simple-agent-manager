@@ -3,6 +3,7 @@ import {
   type NotificationPreference,
   type NotificationPreferencesResponse,
   type NotificationType,
+  RETIRED_NOTIFICATION_TYPES,
 } from '@simple-agent-manager/shared';
 import { Alert, Button, Card } from '@simple-agent-manager/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -12,10 +13,7 @@ import { usePushSubscription } from '../hooks/usePushSubscription';
 import { usePwaInstallPrompt } from '../hooks/usePwaInstallPrompt';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { updateNotificationPreference } from '../lib/api';
-import {
-  notificationPreferencesQueryOptions,
-  notificationQueryKeys,
-} from '../lib/query-options';
+import { notificationPreferencesQueryOptions, notificationQueryKeys } from '../lib/query-options';
 
 const TYPE_LABELS: Record<NotificationType, { label: string; description: string }> = {
   task_complete: {
@@ -34,6 +32,7 @@ const TYPE_LABELS: Record<NotificationType, { label: string; description: string
     label: 'Progress Update',
     description: 'When an agent reports progress on a task',
   },
+  // Retired: no longer sent, so not listed (SETTABLE_NOTIFICATION_TYPES).
   session_ended: {
     label: 'Session Ended',
     description: 'When an agent finishes its turn in a chat',
@@ -46,7 +45,32 @@ const TYPE_LABELS: Record<NotificationType, { label: string; description: string
     label: 'Operational Failure',
     description: 'When a scheduled recovery sweep reports a failure',
   },
+  mention: {
+    label: 'Mentions',
+    description: 'When someone @mentions you in a comment',
+  },
+  comment: {
+    label: 'Comments on your sessions',
+    description: 'When someone comments on your chat, or replies in a thread you are in',
+  },
+  session_access: {
+    label: 'Shared sessions',
+    description: 'When a chat is shared with you, or your access to one is removed',
+  },
+  operations_approval: {
+    label: 'Operations approvals',
+    description: 'When an Operations-project agent asks you to approve an action',
+  },
+  secret_request: {
+    label: 'Secret requests',
+    description: 'When an agent in any of your projects asks for a secret value',
+  },
 };
+
+/** Types SAM still sends; a retired type keeps its label only for stored notifications. */
+const SETTABLE_NOTIFICATION_TYPES = NOTIFICATION_TYPES.filter(
+  (type) => !RETIRED_NOTIFICATION_TYPES.includes(type)
+);
 
 /** A global preference is one not scoped to any project (`projectId === null`). */
 function isGlobalInAppPref(pref: NotificationPreference): boolean {
@@ -165,7 +189,7 @@ export function SettingsNotifications() {
             </div>
           ) : (
             <div className="space-y-3">
-              {NOTIFICATION_TYPES.map((type) => {
+              {SETTABLE_NOTIFICATION_TYPES.map((type) => {
                 const config = TYPE_LABELS[type];
                 const enabled = isEnabled(type);
                 const isSaving = savingType === type;

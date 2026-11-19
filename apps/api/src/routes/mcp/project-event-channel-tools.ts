@@ -1,5 +1,6 @@
 import {
   PROJECT_EVENT_REQUESTED_DELIVERY_MODES,
+  PROJECT_EVENT_SUBSCRIPTION_STATES,
   type ProjectEventRequestedDeliveryMode,
 } from '@simple-agent-manager/shared';
 
@@ -10,6 +11,7 @@ import {
   catchUpChannelForCaller,
   channelCallerContext,
   followChannelForCaller,
+  listChannelSubscribersForCaller,
   publishChannelForCaller,
 } from '../../services/project-event-channels';
 import {
@@ -19,10 +21,12 @@ import {
   jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
+import { parseMinWakeIntervalSeconds } from './wake-interval-param';
 
 export type ChannelTool =
   | 'publish_channel_event'
   | 'list_event_channels'
+  | 'list_channel_subscribers'
   | 'get_channel_history'
   | 'follow_event_channel'
   | 'catch_up_event_channel';
@@ -30,6 +34,7 @@ export type ChannelTool =
 const FIELDS: Record<ChannelTool, readonly string[]> = {
   publish_channel_event: ['channel', 'message', 'idempotencyKey'],
   list_event_channels: ['cursor', 'limit'],
+  list_channel_subscribers: ['channel', 'state', 'cursor', 'limit'],
   get_channel_history: ['channel', 'cursor', 'limit'],
   follow_event_channel: [
     'channel',
@@ -38,6 +43,7 @@ const FIELDS: Record<ChannelTool, readonly string[]> = {
     'requestedDelivery',
     'reason',
     'expiresAt',
+    'minWakeIntervalSeconds',
   ],
   catch_up_event_channel: ['subscriptionId', 'limit'],
 };
@@ -108,6 +114,7 @@ export async function handleChannelTool(
           requestedDelivery: delivery(params.requestedDelivery),
           reason: optional(params.reason, 'reason'),
           expiresAt: integer(params.expiresAt, 'expiresAt'),
+          minWakeIntervalMs: parseMinWakeIntervalSeconds(params.minWakeIntervalSeconds),
         });
         break;
       case 'catch_up_event_channel':
@@ -120,6 +127,22 @@ export async function handleChannelTool(
         const context = await channelCallerContext(env, caller);
         result = await projectData.listProjectEventChannels(env, context.projectId, {
           after: optional(params.cursor, 'cursor'),
+          limit: integer(params.limit, 'limit'),
+        });
+        break;
+      }
+      case 'list_channel_subscribers': {
+        const state = params.state ?? 'active';
+        if (
+          typeof state !== 'string' ||
+          ![...PROJECT_EVENT_SUBSCRIPTION_STATES, 'any'].includes(state)
+        ) {
+          throw errors.badRequest('state must be active, cancelled, expired, or any');
+        }
+        result = await listChannelSubscribersForCaller(env, caller, {
+          channel: required(params.channel, 'channel'),
+          state: state as 'active' | 'cancelled' | 'expired' | 'any',
+          cursor: optional(params.cursor, 'cursor'),
           limit: integer(params.limit, 'limit'),
         });
         break;

@@ -3,13 +3,16 @@
  *
  * Used across all MCP tool handler files (instruction-tools, task-tools, session-tools, idea-tools).
  */
+import { getPlatformOperationLimits } from '@simple-agent-manager/operations';
 import { DEFAULT_PROJECT_EVENT_LIMITS } from '@simple-agent-manager/shared';
 
+import type { McpRateCounter } from '../../durable-objects/mcp-rate-counter';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
-import { getPlatformOperationLimits } from '../../operations/limits';
-import { type McpTokenData, type McpTokenEnv, validateMcpToken } from '../../services/mcp-token';
+import type { McpTokenData } from '../../services/mcp-token';
+import { validateActiveWorkspaceMcpToken } from '../../services/mcp-token-lifecycle';
+import { readStorageActivation } from '../../services/reliability-storage';
 import { LIVE_TASK_STATUSES, WAKEABLE_TASK_STATUSES } from '../../services/task-status';
 
 // Re-export McpTokenData for use by tool handler files
@@ -63,8 +66,6 @@ export { type MessageRole, VALID_MESSAGE_ROLES, validateRoles } from '../../lib/
 /** Default HTTP-level rate limit for the /mcp endpoint (per token, per minute). Override via MCP_RATE_LIMIT env var. */
 const DEFAULT_MCP_RATE_LIMIT = 120;
 const DEFAULT_MCP_RATE_LIMIT_WINDOW_SECONDS = 60;
-const DEFAULT_MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT = 10;
-const DEFAULT_MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX = 50;
 
 /** Default dispatch limits for agent-to-agent task spawning. */
 const DEFAULT_MCP_DISPATCH_MAX_DEPTH = 3;
@@ -154,14 +155,6 @@ export function getMcpLimits(env: Env) {
     messageListLimit: parsePositiveInt(env.MCP_MESSAGE_LIST_LIMIT, DEFAULT_MCP_MESSAGE_LIST_LIMIT),
     messageListMax: parsePositiveInt(env.MCP_MESSAGE_LIST_MAX, DEFAULT_MCP_MESSAGE_LIST_MAX),
     messageSearchMax: parsePositiveInt(env.MCP_MESSAGE_SEARCH_MAX, DEFAULT_MCP_MESSAGE_SEARCH_MAX),
-    archivedToolPayloadListLimit: parsePositiveInt(
-      env.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT,
-      DEFAULT_MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT
-    ),
-    archivedToolPayloadListMax: parsePositiveInt(
-      env.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX,
-      DEFAULT_MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX
-    ),
     projectEventListLimit: parsePositiveInt(
       env.PROJECT_EVENT_LIST_LIMIT,
       DEFAULT_PROJECT_EVENT_LIMITS.listLimitDefault
@@ -331,17 +324,8 @@ function getMcpRateLimitWindow(env: Env): number {
   return val;
 }
 
-/**
- * Check MCP endpoint rate limit using KV. Keyed by taskId to limit per-agent throughput.
- *
- * NOTE: KV does not support atomic read-modify-write. Under high concurrency from
- * the same taskId, two requests may read the same count and both increment to the
- * same value, allowing limit+1 requests through. This is a known limitation shared
- * with all KV-based rate limiters in the codebase (see middleware/rate-limit.ts).
- * For the MCP use case this is acceptable — each agent has a unique taskId, so
- * concurrency is bounded by agent parallelism (typically 1). A Durable Object-based
- * rate limiter would provide true atomicity if stricter enforcement is needed.
- */
+/** Owner is selected by the window start, never by request arrival or DO availability.
+ * Pre-cutover KV is retained only for the bridge release; see the rollout runbook. */
 export async function checkMcpRateLimit(
   kv: KVNamespace,
   taskId: string,
@@ -355,6 +339,19 @@ export async function checkMcpRateLimit(
   const now = Math.floor(Date.now() / 1000);
   const windowStart = Math.floor(now / windowSeconds) * windowSeconds;
   const resetAt = windowStart + windowSeconds;
+  // Pin the window before awaiting shared configuration. A request that saw no
+  // future activation can never resume in a different, DO-owned window.
+  const activation = await readStorageActivation(env.DATABASE);
+  if (activation && activation.windowSeconds !== windowSeconds)
+    throw new Error('MCP rate window differs from shared activation');
+  const cutover = activation?.rateCutoverAt ?? null;
+  if (cutover !== null && windowStart >= cutover) {
+    if (!env.MCP_RATE_COUNTER) throw new Error('MCP_RATE_COUNTER binding required after cutover');
+    const stub = env.MCP_RATE_COUNTER.get(
+      env.MCP_RATE_COUNTER.idFromName(taskId)
+    ) as DurableObjectStub<McpRateCounter>;
+    return stub.consume(windowStart, resetAt, limit);
+  }
   const key = `ratelimit:mcp:${taskId}:${windowStart}`;
 
   const existing = await kv.get<{ count: number; windowStart: number }>(key, 'json');
@@ -387,18 +384,18 @@ export async function checkMcpRateLimit(
 /**
  * Returns [tokenData, rawToken] or [null, null].
  * Unlike extractBearerToken(), this returns null on missing/malformed auth
- * because MCP endpoints fall through to unauthenticated handling.
+ * because MCP endpoints fall through to unauthenticated handling. A token whose
+ * workspace is no longer active is rejected too (`validateActiveWorkspaceMcpToken`).
  */
 export async function authenticateMcpRequest(
   authHeader: string | undefined,
-  kv: KVNamespace,
-  env?: McpTokenEnv
+  env: Env
 ): Promise<[McpTokenData, string] | [null, null]> {
   if (!authHeader?.startsWith('Bearer ') || authHeader.length <= 7) {
     return [null, null];
   }
   const token = authHeader.slice(7);
-  const data = await validateMcpToken(kv, token, env);
+  const data = await validateActiveWorkspaceMcpToken(env, token);
   return data ? [data, token] : [null, null];
 }
 

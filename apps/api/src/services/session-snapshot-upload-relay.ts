@@ -14,6 +14,7 @@ import {
 import { verifyCallbackToken } from './jwt';
 import { getRuntimeLimits } from './limits';
 import { getNodeBackendBaseUrl } from './node-agent-readiness';
+import { provisionsExtensionTransportNodes } from './node-transport-extension';
 import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
 import {
   assertRelayProvisioningAuthority,
@@ -66,8 +67,6 @@ async function resolveRelayAllocation(
     ? await env.DATABASE.prepare(
         `SELECT id,
                 default_vm_size AS defaultVmSize,
-                default_provider AS defaultProvider,
-                default_location AS defaultLocation,
                 default_workspace_profile AS defaultWorkspaceProfile,
                 default_devcontainer_config_name AS defaultDevcontainerConfigName,
                 default_agent_type AS defaultAgentType,
@@ -197,6 +196,7 @@ export async function findSessionSnapshotUploadRelay(
     workloadRole: 'workspace',
     capacityPlacementSnapshot: allocation.capacityPlacementSnapshot,
     requireProjectMembership: projectId !== null,
+    authorityMode: 'existing-node',
   });
 
   const relay = await env.DATABASE.prepare(
@@ -209,6 +209,8 @@ export async function findSessionSnapshotUploadRelay(
         AND n.node_role = 'workspace'
         AND n.node_class != 'user-owned'
         AND n.runtime = 'vm'
+        -- A relay URL goes to another VM over the public hostname; tunnel-only nodes have none.
+        AND COALESCE(n.transport, 'vm-public-dns') != 'reverse-tunnel'
         AND n.cloud_provider = ?
         AND n.vm_location = ?
         AND n.provider_instance_type = ?
@@ -311,6 +313,7 @@ export async function verifySessionSnapshotRelayAuthorization(
     workloadRole: 'workspace',
     capacityPlacementSnapshot: allocation.capacityPlacementSnapshot,
     requireProjectMembership: projectId !== null,
+    authorityMode: 'existing-node',
   });
   const relay = await env.DATABASE.prepare(
     `SELECT n.id
@@ -398,7 +401,10 @@ export async function resolveSessionSnapshotUploadTargets(
       ? { home: authorizationTarget('home'), wip: authorizationTarget('wip') }
       : undefined,
     needsRelayProvisioning:
-      input.directUploadAvailable && !input.directUploadSupported && relay === null,
+      input.directUploadAvailable &&
+      !input.directUploadSupported &&
+      relay === null &&
+      !provisionsExtensionTransportNodes(env),
   };
 }
 
@@ -414,7 +420,7 @@ export async function ensureSessionSnapshotUploadRelay(
   input: { userId: string; sourceNodeId: string; projectId: string | null }
 ): Promise<void> {
   const requiredVersion = env.VM_AGENT_REQUIRED_VERSION?.trim();
-  if (!requiredVersion) return;
+  if (!requiredVersion || provisionsExtensionTransportNodes(env)) return;
   const source = await loadRelaySourceNode(env, input.userId, input.sourceNodeId);
   if (!sourceStillNeedsRelay(source, requiredVersion)) return;
   if (await findSessionSnapshotUploadRelay(env, input.userId, input.projectId, source)) return;

@@ -1,4 +1,5 @@
 import { isJsonRecord } from '../runtime-validation';
+import type { AgentEffort } from './agent-settings';
 import type { ResourceRequirements, ResourceRequirementsSource } from './resource';
 import type { CredentialProvider } from './user';
 import type { VMLocation, VMSize, WorkspaceProfile } from './workspace';
@@ -606,6 +607,9 @@ export interface SubmitTaskRequest {
    * lineage, inherits the parent's credential attribution, and counts toward the fork-depth
    * limit; it still starts on its own output branch. */
   parentTaskId?: string;
+  /** Owned archived source chat. Requires Idempotency-Key; the server supplies historical
+   * context and derives task lineage without restoring or waking the source runtime. */
+  sourceSessionId?: string;
   /** Caller-supplied note persisted as the first system message in the new chat session. It is
    * shown in the chat only; the agent's prompt is `message`. Max 64KB. */
   contextSummary?: string;
@@ -619,6 +623,20 @@ export interface SubmitTaskRequest {
   attachments?: TaskAttachment[];
   /** Explicit resource requirements for this task. Overrides profile/project/platform defaults. */
   resourceRequirements?: ResourceRequirements;
+  /** Model for this task only. Overrides the skill/profile/project model; null/blank inherits. */
+  model?: string | null;
+  /** Effort for this task only. Must be supported by the resolved agent; null inherits. */
+  effort?: AgentEffort | null;
+  /**
+   * The caller's own agent account (`cc_configurations.id`) for this task only, over the
+   * profile's. Must be active and for the agent the task runs; null/absent uses the profile's.
+   */
+  agentConfigurationId?: string | null;
+  /** An open idea in this project that this work starts from. The server validates it,
+   * then records the session → idea link (`works_on` for task mode, `discusses` for
+   * conversation mode) before the agent receives its first prompt. The idea is never
+   * injected into `message`; the agent reads it from `get_instructions`. */
+  sourceIdeaId?: string;
 }
 
 export interface SubmitTaskResponse {
@@ -673,6 +691,9 @@ export type AgentActivityState = (typeof AGENT_ACTIVITY_STATES)[number];
 
 /** An active task enriched with project + session info for the dashboard grid. */
 export interface DashboardTask {
+  providerLimitReason?: string | null;
+  /** Opaque wait generation; changes when a new blocked wait replaces an accepted resume. */
+  providerLimitVersion?: string | null;
   triggeredBy?: string | null;
   connectorClientName?: string | null;
   id: string;

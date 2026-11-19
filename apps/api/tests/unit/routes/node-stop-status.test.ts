@@ -75,6 +75,10 @@ vi.mock('../../../src/services/node-health', async (importOriginal) => ({
   recordNodeHealthEvent: vi.fn(async () => undefined),
 }));
 
+vi.mock('../../../src/services/owner-node-deletion-audit', () => ({
+  recordOwnerNodeDeletionAudit: vi.fn(async () => undefined),
+}));
+
 vi.mock('../../../src/lib/logger', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
@@ -156,7 +160,9 @@ describe('POST /api/nodes/:id/stop', () => {
 
     const mockSelectChain: any = {};
     mockSelectChain.from = vi.fn(() => mockSelectChain);
-    mockSelectChain.where = vi.fn(() => Promise.resolve([]));
+    mockSelectChain.where = vi.fn(() =>
+      Object.assign(Promise.resolve([]), { limit: vi.fn(async () => []) })
+    );
 
     mockDeleteWhere = vi.fn(() => Promise.resolve());
 
@@ -224,7 +230,9 @@ describe('DELETE /api/nodes/:id', () => {
 
     const mockSelectChain: any = {};
     mockSelectChain.from = vi.fn(() => mockSelectChain);
-    mockSelectChain.where = vi.fn(() => Promise.resolve([]));
+    mockSelectChain.where = vi.fn(() =>
+      Object.assign(Promise.resolve([]), { limit: vi.fn(async () => []) })
+    );
     mockDeleteWhere = vi.fn(() => Promise.resolve());
 
     (drizzle as any).mockReturnValue({
@@ -296,7 +304,17 @@ describe('DELETE /api/nodes/:id', () => {
     });
 
     let selectIndex = 0;
-    const selectResults = [[], [{ id: 'workspace-node-1' }]];
+    const selectResults = [
+      // The Delete route reads the consumed proof's provenance first; strict here.
+      [
+        {
+          runtimeTerminationConfirmedAt: '2026-09-04T09:00:00.000Z',
+          runtimeTerminationAttestedAt: null,
+        },
+      ],
+      [],
+      [{ id: 'workspace-node-1' }],
+    ];
     const deleteRun = vi.fn(async () => ({ meta: { changes: 1 } }));
     const deleteWhere = vi.fn(() => {
       operations.push('d1-delete');
@@ -304,10 +322,17 @@ describe('DELETE /api/nodes/:id', () => {
     });
     (drizzle as any).mockReturnValue({
       select: vi.fn(() => {
-        const result = selectResults[selectIndex++] ?? [];
+        let result: any[] = [];
         const chain: any = {};
-        chain.from = vi.fn(() => chain);
-        chain.where = vi.fn(async () => result);
+        chain.from = vi.fn((table: any) => {
+          // Reservation preflights have their own table; do not consume proof fixtures.
+          result = table?.[Symbol.for('drizzle:Name')] === 'deployment_publish_jobs'
+            ? [] : (selectResults[selectIndex++] ?? []);
+          return chain;
+        });
+        chain.where = vi.fn(() =>
+          Object.assign(Promise.resolve(result), { limit: vi.fn(async () => result) })
+        );
         return chain;
       }),
       update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(async () => undefined) })) })),

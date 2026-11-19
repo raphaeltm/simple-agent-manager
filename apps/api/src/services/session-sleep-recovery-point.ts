@@ -1,25 +1,17 @@
 /**
- * The minimum a bounded sleep fallback must keep before it may release compute:
- * a completed snapshot generation that records the exact Git commit the workspace was
- * on, with that commit's objects retained so a fresh workspace can restore it.
- *
- * A commit hash on its own is not restorable: if it was never pushed, a new clone
- * cannot fetch it. The WIP bundle a capture uploads holds the objects the restore
- * needs (pre-fix agents bundle the whole branch history; current agents bundle the
- * unpushed commits plus the snapshot commits on top of the remote refs). So the
- * fallback requires that bundle, verified in R2, unless the generation is a complete
- * snapshot, whose recorded artifacts are all verified instead.
- *
- * The restore this mirrors is the vm-agent's `restoreSessionSnapshot`
- * (`packages/vm-agent/internal/server/session_snapshot_restore.go`): it downloads every
- * recorded artifact, checks out `baseCommit` (on `manifest.git.branch` when present),
- * applies the WIP bundle, and — with no HOME archive — starts the agent fresh. Pre-fix
- * agents already run that path, so a Git-baseline wake needs no agent upgrade.
+ * Optional exact Git recovery assessment for the bounded sleep fallback.
+ * A verified point allows file restoration; its absence never prevents exhausted
+ * idle-runtime cleanup. The fallback instead retains backups and continues fresh
+ * from the transcript, without claiming exact recovery.
  */
-import type * as schema from '../db/schema';
+import { and, eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+
+import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { maybeJsonRecord, parseJsonRecord } from '../lib/runtime-validation';
 import {
+  serializeSessionSleepFallbackRecord,
   type SessionSleepBlockedReason,
   type SessionSleepFallbackRecord,
   type SessionSleepRecoveryPoint,
@@ -63,9 +55,9 @@ function manifestGitState(manifestJson: string | null): ManifestGitState | null 
 
 /**
  * Decide whether the session's current completed generation is a recovery point the
- * fallback may release compute with. Deterministic refusals are returned as a reason;
- * an R2 outage throws, so the caller counts it as a failed attempt and retries rather
- * than ending the episode on a transient fault.
+ * fallback may restore files from. Deterministic refusals are returned as a reason;
+ * an R2 outage throws, and the bounded fallback treats it as unavailable recovery
+ * while retaining the saved artifacts and proceeding through guarded cleanup.
  */
 export async function assessSessionSleepRecoveryPoint(
   env: Env,
@@ -124,7 +116,23 @@ export async function confirmSessionSleepFallbackStopping(
   now: Date
 ): Promise<SessionSleepFallbackRecord | null> {
   const record = sleptFallbackRecord(snapshot);
-  if (!record) return null;
-  const assessment = await assessSessionSleepRecoveryPoint(env, snapshot, now);
-  return assessment.ok ? record : null;
+  if (!record || !snapshot.sleepClaimId || !snapshot.sleepFallbackJson) return null;
+  if (!record.recoveryPoint) return record;
+  const assessment = await assessSessionSleepRecoveryPoint(env, snapshot, now).catch(() => ({
+    ok: false as const,
+  }));
+  if (assessment.ok) return record;
+  const degraded = { ...record, recoveryPoint: null, decidedAt: now.toISOString() };
+  const result = await drizzle(env.DATABASE, { schema })
+    .update(schema.sessionSnapshots)
+    .set({ sleepFallbackJson: serializeSessionSleepFallbackRecord(degraded) })
+    .where(
+      and(
+        eq(schema.sessionSnapshots.id, snapshot.id),
+        eq(schema.sessionSnapshots.sleepStatus, 'stopping'),
+        eq(schema.sessionSnapshots.sleepClaimId, snapshot.sleepClaimId),
+        eq(schema.sessionSnapshots.sleepFallbackJson, snapshot.sleepFallbackJson)
+      )
+    );
+  return (result.meta.changes ?? 0) > 0 ? degraded : null;
 }

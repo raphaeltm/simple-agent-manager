@@ -23,7 +23,8 @@ export interface AllocationWriter {
   snippet: string;
 }
 
-export const ALLOCATION_WRITER_ROOTS = ['apps/api/src'] as const;
+// Packages lifted out of the worker still write allocation tables (worker modularization).
+export const ALLOCATION_WRITER_ROOTS = ['apps/api/src', 'packages/operations/src'] as const;
 
 /** Drizzle schema property / imported binding names, by target table. */
 const DRIZZLE_TABLE_NAMES: Record<string, AllocationTable> = {
@@ -266,7 +267,23 @@ function executedSqlInsertTables(
 function literalOrTemplateText(node: ts.Node): string | null {
   if (ts.isNoSubstitutionTemplateLiteral(node) || ts.isStringLiteral(node)) return node.text;
   if (ts.isTemplateExpression(node)) {
-    return [node.head.text, ...node.templateSpans.map((span) => span.literal.text)].join(' ');
+    // Drizzle's sql tag can interpolate a schema table instead of spelling its
+    // SQL name. Resolve only known schema/table bindings, never arbitrary text.
+    return (
+      node.head.text +
+      node.templateSpans
+        .map((span) => {
+          const expression = span.expression;
+          const table =
+            ts.isPropertyAccessExpression(expression) &&
+            ts.isIdentifier(expression.expression) &&
+            expression.expression.text === 'schema'
+              ? DRIZZLE_TABLE_NAMES[expression.name.text]
+              : undefined;
+          return ` ${table ?? ''} ${span.literal.text}`;
+        })
+        .join('')
+    );
   }
   return null;
 }

@@ -4,7 +4,7 @@
  * It mirrors the shape of the real decision, which is what makes it worth reading:
  *
  *   1. ADMISSION decides whether a host *may* take a workload. In SAM that is
- *      `evaluateWorkspaceReservationCapacity` (apps/api/src/services/workspace-resource-capacity.ts),
+ *      `evaluateWorkspaceReservationCapacity` (packages/scheduler-core/src/workspace-resource-capacity.ts),
  *      the single gate for CPU/memory/disk budgets and exclusivity.
  *   2. RANKING only orders hosts admission already accepted. In SAM that is
  *      `placement-strategy.ts`, whose header states plainly that it "does not re-implement any
@@ -14,7 +14,7 @@
  * that a strategy can make something fit, and it cannot.
  *
  * The four ordering keys below are copied verbatim from `PLACEMENT_STRATEGY_HOST_ORDERING`
- * (apps/api/src/services/placement-strategy.ts).
+ * (packages/scheduler-core/src/placement-strategy.ts).
  *
  * ILLUSTRATIVE VALUES, NOT SAM DEFAULTS: boot/run/warm/deadline step counts compress
  * asynchronous work into countable steps so the consequences are visible. `HOST_MEMORY_RESERVE_MB`

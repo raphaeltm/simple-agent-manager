@@ -1,10 +1,16 @@
 import type { TaskExecutionStep, TaskMode, TaskStatus } from './task';
+import type { WakeWaitReason } from './wake-wait';
 
 // =============================================================================
 // Chat Sessions
 // =============================================================================
 
-export type ChatSessionStatus = 'active' | 'sleeping' | 'stopped' | 'error';
+/**
+ * Chat session lifecycle as the ProjectData DO stores it (`chat_sessions.status`).
+ * A session that ended in failure is `failed` (`failSession`, `project-data/sessions.ts`);
+ * the DO has never written `error`.
+ */
+export type ChatSessionStatus = 'active' | 'sleeping' | 'stopped' | 'failed';
 
 export interface ChatSession {
   id: string;
@@ -21,7 +27,7 @@ export interface ChatSession {
   lastMessageAt: number | null;
   /** Computed: true when status === 'active' && agentCompletedAt != null */
   isIdle: boolean;
-  /** Computed: true when status === 'stopped' */
+  /** Computed: true when status is 'stopped' or 'failed' */
   isTerminated: boolean;
   /** Computed: derived from workspaceId + BASE_DOMAIN */
   workspaceUrl: string | null;
@@ -32,6 +38,14 @@ export interface ChatSession {
 }
 
 export interface ChatSessionTaskEmbed {
+  /** Current provider waiting or needs-attention reason. */
+  providerLimitReason?: string | null;
+  /** Opaque wait generation; changes when a new blocked wait replaces an accepted resume. */
+  providerLimitVersion?: string | null;
+  /** True while a never-started task waits at admission on a provider limit, so its owner
+   * may start it anyway (for example to spend extra credits the limit does not show). */
+  providerLimitCanStartAnyway?: boolean;
+  providerLimitCanResumeAnyway?: boolean;
   id: string;
   /** Canonical, user-safe saved placement diagnostics, including queued runs. */
   placementExplanationJson?: string | null;
@@ -41,6 +55,12 @@ export interface ChatSessionTaskEmbed {
   errorMessage: string | null;
   outputBranch: string | null;
   outputPrUrl: string | null;
+  /** Current GitHub PR state when known. */
+  pr?: {
+    number: number;
+    state: 'open' | 'closed' | 'merged' | null;
+    checks: 'pending' | 'success' | 'failure' | 'neutral' | null;
+  } | null;
   outputSummary: string | null;
   finalizedAt: string | null;
   /** Task execution mode: 'task' (autonomous) or 'conversation' (interactive). */
@@ -129,31 +149,11 @@ export interface PersistMessageBatchResponse {
 }
 
 // =============================================================================
-// ProjectData WebSocket Broadcast Events
-// =============================================================================
-
-export type ProjectWebSocketEventType =
-  | 'message.new'
-  | 'session.created'
-  | 'session.stopped'
-  | 'activity.new';
-
-export interface ProjectWebSocketEvent {
-  type: ProjectWebSocketEventType;
-  payload: Record<string, unknown>;
-}
-
-// =============================================================================
 // Agent Sessions
 // =============================================================================
 
 export type AgentSessionStatus =
-  | 'running'
-  | 'recovery'
-  | 'sleeping'
-  | 'suspended'
-  | 'stopped'
-  | 'error';
+  'running' | 'recovery' | 'sleeping' | 'suspended' | 'stopped' | 'error';
 
 /** Live host status from the VM Agent's SessionHost (more granular than AgentSessionStatus). */
 export type AgentHostStatus = 'idle' | 'starting' | 'ready' | 'prompting' | 'error' | 'stopped';
@@ -251,12 +251,7 @@ export interface WorkspaceTab {
 // =============================================================================
 
 export type AcpSessionStatus =
-  | 'pending'
-  | 'assigned'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'interrupted';
+  'pending' | 'assigned' | 'running' | 'completed' | 'failed' | 'interrupted';
 
 export const ACP_SESSION_TERMINAL_STATUSES: readonly AcpSessionStatus[] = [
   'completed',
@@ -366,8 +361,31 @@ export interface SessionStateSnapshot {
   runtimeWorkUpdatedAt: number | null;
   /** Harness lifecycle progress time reported by the VM Agent. */
   runtimeWorkProgressAt: number | null;
+  /**
+   * Last evidence of real work: an activity edge, a new turn, harness progress or a
+   * persisted message. Unlike `activityAt`, a same-turn re-report does not move it.
+   * Null on rows written before the clock existed.
+   */
+  workAt?: number | null;
+  /**
+   * The latest turn start the VM agent itself reported. Only grows, and only when a new prompt
+   * starts; a re-report of the same turn, a cancel or a restart leaves it unchanged.
+   */
+  reportedPromptStartedAt?: number | null;
+  /**
+   * Whether the session's loaded agent adapter can take input mid-turn (steer). Null until
+   * the VM agent reports it; older VM agents never do.
+   */
+  steeringSupported?: boolean | null;
   /** D1-sourced recovery status from session_snapshots (sleep/wake lifecycle). */
   recoveryStatus?: 'waking' | 'restored' | 'failed' | null;
+  /**
+   * Identity of the wake attempt `recoveryStatus` describes
+   * (`session_snapshots.recovery_attempt_id`, a new ULID per wake claim). Lets the UI
+   * tell a stale snapshot of a finished wake from the start of the next one. Null
+   * when no wake has been claimed in this sleep episode.
+   */
+  wakeAttemptId?: string | null;
   /**
    * Execution step of the replacement TaskRunner currently waking this session,
    * resolved from `session_snapshots.recovery_task_id` -> `tasks.execution_step`.
@@ -375,6 +393,13 @@ export interface SessionStateSnapshot {
    * the recovery task has not reported a step yet.
    */
   wakePhase?: TaskExecutionStep | null;
+  /**
+   * Why an in-flight wake is waiting, when the server knows (`wake-wait.ts`).
+   * Null when the wake is not waiting on anything it can name.
+   */
+  waitReason?: WakeWaitReason | null;
+  /** When the waiting wake next retries (ISO 8601), if scheduled. */
+  waitRetryAt?: string | null;
 }
 
 /** Which end of the system produced the authoritative activity value. */
@@ -386,12 +411,7 @@ export type SessionActivitySource = 'vm_report' | 'control_plane' | 'probe';
  * of the transition so divergence stays diagnosable after the fact.
  */
 export type SessionActivityTerminalReason =
-  | 'completed'
-  | 'cancelled'
-  | 'force_stopped'
-  | 'dead'
-  | 'probe_reconciled'
-  | 'stale_no_evidence';
+  'completed' | 'cancelled' | 'force_stopped' | 'dead' | 'probe_reconciled' | 'stale_no_evidence';
 
 export interface AcpSessionForkRequest {
   contextSummary: string;

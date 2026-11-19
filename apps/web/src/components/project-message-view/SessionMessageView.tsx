@@ -1,32 +1,29 @@
-import type { SlashCommand, ToolCallContentItem } from '@simple-agent-manager/acp-client';
-import { mapToolCallContent } from '@simple-agent-manager/acp-client';
-import type { AgentProfile } from '@simple-agent-manager/shared';
-import { Spinner } from '@simple-agent-manager/ui';
-import { type FC, useCallback, useMemo, useRef, useState } from 'react';
+import type { ToolCallContentItem } from '@simple-agent-manager/acp-client';
+import { type FC, useCallback, useMemo, useRef } from 'react';
 import type { VirtuosoHandle } from 'react-virtuoso';
 
 import { useAcpPermissionInteractions } from '../../hooks/useAcpPermissionInteractions';
 import { useIsMobile } from '../../hooks/useIsMobile';
-import { getMessageToolContent } from '../../lib/api/sessions';
-import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
+import { usePlatformCapabilities } from '../../hooks/usePlatformCapabilities';
 import { useAuth } from '../AuthProvider';
 import { ChatFilePanel } from '../chat/ChatFilePanel';
-import { SessionEventsDrawer } from '../chat/SessionEventsDrawer';
-import { ReportIssueDialog } from '../ReportIssueDialog';
-import { type CommentInboxItem, countBuckets, toInboxItem } from './comments/comment-inbox';
+import { LoadingPane } from '../LoadingPane';
 import { CommentableConversationItem } from './comments/CommentableConversationItem';
 import { DesktopCommentRail } from './comments/MessageCommentPanels';
 import { useMessageComments } from './comments/useMessageComments';
 import { useProjectMessageCommentUi } from './comments/useProjectMessageCommentUi';
 import { ConversationPane } from './ConversationPane';
 import { FloatingHeader } from './FloatingHeader';
-import { type ChatListContext, useFloatingHeaderHeight } from './MessageListScaffold';
+import { loadToolCallContent } from './load-tool-content';
+import type { ChatListContext } from './MessageListScaffold';
 import { ProjectMessageViewDrawers } from './ProjectMessageViewDrawers';
 import { RetainedSnapshotExport } from './RetainedSnapshotExport';
 import { useSessionFocusHandoff } from './session-focus-handoff';
+import { resolveSessionViewerCapabilities, sessionOwnerLabel } from './session-viewer-access';
 import { SessionFooter } from './SessionFooter';
-import { SessionHeaderCompletionDialog } from './SessionHeaderCompletionDialog';
-import { SessionStatusBanners } from './SessionStatusBanners';
+import type { ProjectMessageViewProps } from './SessionMessageView.types';
+import { SessionMessageViewDialogs } from './SessionMessageViewDialogs';
+import { SessionStatusBanners, SessionStatusCapsules } from './SessionStatusBanners';
 import { SessionToolRail } from './SessionToolRail';
 import type { DisplayItem } from './tool-call-groups';
 import { groupToolCallItems } from './tool-call-groups';
@@ -34,53 +31,16 @@ import { chatMessagesToConversationItems } from './types';
 import { useAcpPermissionPlacement } from './useAcpPermissionPlacement';
 import { useAnimatedUserMessages } from './useAnimatedUserMessages';
 import { useConversationJump } from './useConversationJump';
+import { useFilePanelAccessGate } from './useFilePanelAccessGate';
+import { useSessionCommentInbox } from './useSessionCommentInbox';
 import { useSessionLifecycle } from './useSessionLifecycle';
+import { useSessionLinkedWork } from './useSessionLinkedWork';
+import { useSessionOverlays } from './useSessionOverlays';
 import { useSessionTimeline } from './useSessionTimeline';
 import { useSessionTools } from './useSessionTools';
 import { useToolCallGroupRowState } from './useToolCallGroupRowState';
 
-export interface ProjectMessageViewProps {
-  projectId: string;
-  sessionId: string;
-  /** When true, workspace is still provisioning — suppress "agent offline" banner. */
-  isProvisioning?: boolean;
-  /** Called after a mutation (e.g. mark complete) so the parent can refresh session list. */
-  onSessionMutated?: () => void;
-  /** Called when user clicks the retry button in the session header. */
-  onRetry?: () => void;
-  /** Called when user clicks the fork button in the session header. */
-  onFork?: () => void;
-  /** Source details for retries/forks. */
-  sourceContext?: SessionSourceContext;
-  /** Called when the user clicks Sleep on an awake idle conversation-mode session. */
-  onSleepConversation?: () => void;
-  /** Whether a sleep-conversation request is in flight. */
-  sleepingConversation?: boolean;
-  /** Error from a failed sleep-conversation attempt. */
-  sleepError?: string | null;
-  /** Called when the user confirms Archive on a sleeping conversation-mode session. */
-  onCloseConversation?: () => void;
-  /** Whether a close-conversation request is in flight. */
-  closingConversation?: boolean;
-  /** Error from a failed close-conversation attempt. */
-  closeError?: string | null;
-  /** Agent profiles available for @mention autocomplete in follow-up prompts. */
-  agentProfiles?: AgentProfile[];
-  /** Slash commands available for follow-up prompt autocomplete. */
-  slashCommands?: SlashCommand[];
-  /** Open hierarchy modal for the given task. */
-  onShowHierarchy?: (taskId: string) => void;
-  /** Start a new chat from read-only sessions. */
-  onNewChat?: () => void;
-  /** Message id requested by a route-level deep link, such as Project → Comments. */
-  targetMessageId?: string | null;
-  /** Timestamp used to load older history before resolving a route-level target. */
-  targetMessageTimestamp?: number | null;
-  /** Called once a route-level target has been consumed so refreshes do not re-jump. */
-  onTargetMessageConsumed?: () => void;
-  /** Changes whenever project realtime attention state changes for this session. */
-  permissionRefreshSignal?: string | null;
-}
+export type { ProjectMessageViewProps };
 
 export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   projectId,
@@ -104,22 +64,31 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   targetMessageTimestamp,
   onTargetMessageConsumed,
   permissionRefreshSignal,
+  focusCommentThreadId,
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatLogRef = useRef<HTMLDivElement>(null);
-  const [floatingHeaderRef, floatingHeaderHeight] = useFloatingHeaderHeight();
-  const [showTimeline, setShowTimeline] = useState(false);
-  const [showComments, setShowComments] = useState(false);
-  const [showEvents, setShowEvents] = useState(false);
-  const [showResources, setShowResources] = useState(false);
-  const openComments = useCallback(() => setShowComments(true), []);
-  const closeComments = useCallback(() => setShowComments(false), []);
-  // Stable identity matters: this feeds `useSessionTools`' memoized action array, and an
-  // inline arrow would rebuild it on every render (rule 64).
-  const openTimeline = useCallback(() => setShowTimeline(true), []);
-  const closeTimeline = useCallback(() => setShowTimeline(false), []);
-  const openResources = useCallback(() => setShowResources(true), []);
-  const openEvents = useCallback(() => setShowEvents(true), []);
+  /*
+   * The on-demand panels the tool rail opens. Their handlers must keep a stable identity:
+   * they feed `useSessionTools`' memoized action array, and an inline arrow would rebuild it
+   * on every render (rule 64). See `useSessionOverlays`.
+   */
+  const overlays = useSessionOverlays();
+  const {
+    showTimeline,
+    openTimeline,
+    closeTimeline,
+    showComments,
+    openComments,
+    closeComments,
+    showResources,
+    openResources,
+    closeResources,
+    openAutomation,
+    openRelated,
+    openShare,
+    openReceipt,
+  } = overlays;
 
   const messageComments = useMessageComments(projectId, sessionId, Boolean(projectId && sessionId));
   const { user } = useAuth();
@@ -144,33 +113,37 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     : permissionInteractions.interactions;
   const refreshPermissionInteractions = permissionInteractions.refresh;
 
-  // One derivation feeds the header chip, the drawer, and the timeline, so the
-  // three can never disagree about how many comments are outstanding.
-  const commentInbox = useMemo<CommentInboxItem[]>(() => {
-    const roleById = new Map(lc.messages.map((msg) => [msg.id, msg.role]));
-    return messageComments.comments.map((thread) =>
-      toInboxItem(thread, {
-        kind: 'session',
-        sessionId,
-        sessionTopic: lc.session?.topic ?? 'This session',
-        messageId: thread.anchor.messageId,
-        messageRole: anchorRole(roleById.get(thread.anchor.messageId)),
-      })
-    );
-  }, [messageComments.comments, lc.messages, lc.session?.topic, sessionId]);
-
-  const commentCounts = useMemo(
-    () => countBuckets(commentInbox, viewerId),
-    [commentInbox, viewerId]
-  );
-  const unresolvedCommentCount = commentCounts.all - commentCounts.resolved;
-
   // Convert DO messages to conversation items (single source), then fold
   // consecutive tool activity into one collapsed group row. Both passes live in
   // the same memo because every item object is rebuilt on every incoming token.
+  const undeliveredList = lc.session?.access?.undelivered;
   const displayItems = useMemo<DisplayItem[]>(() => {
-    return groupToolCallItems(chatMessagesToConversationItems(lc.messages));
-  }, [lc.messages]);
+    return groupToolCallItems(chatMessagesToConversationItems(lc.messages, undeliveredList));
+  }, [lc.messages, undeliveredList]);
+  // Owner and grantees drive the agent; every member can comment; the server enforces both.
+  const viewer = resolveSessionViewerCapabilities(lc.session);
+  const accessNoticeRef = useRef<HTMLDivElement>(null);
+  const filePanelNotice = useFilePanelAccessGate({
+    canBrowseWorkspace: viewer.canBrowseWorkspace,
+    filePanelOpen: lc.filePanel !== null,
+    setFilePanel: lc.setFilePanel,
+    accessNoticeRef,
+  });
+  // One derivation of the comment threads for the header chip, the drawer, the desktop rail
+  // and the timeline, so the four cannot disagree. See `useSessionCommentInbox`.
+  const comments = useSessionCommentInbox({
+    sessionId,
+    sessionTopic: lc.session?.topic,
+    comments: messageComments.comments,
+    displayItems,
+    ownerName: sessionOwnerLabel(lc.session),
+    viewerIsOwner: viewer.viewerAccess === 'owner',
+    viewerId,
+  });
+  const { describeCommentedMessage } = comments;
+  const commentInbox = comments.items;
+  const commentCounts = comments.counts;
+  const unresolvedCommentCount = comments.unresolvedCount;
 
   const timeline = useSessionTimeline(
     projectId,
@@ -180,7 +153,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     messageComments.comments
   );
 
-  const { jumpToMessage, highlightedRowId } = useConversationJump({
+  const { jumpToMessage, highlightedRowId, rowIdFor } = useConversationJump({
     sessionId,
     displayItems,
     virtuosoRef,
@@ -189,6 +162,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     listReady: Boolean(lc.session) && displayItems.length > 0,
     loadUntil: lc.loadUntil,
     loadingMore: lc.loadingMore,
+    messages: lc.messages,
     targetMessageId,
     targetMessageTimestamp,
     onTargetMessageConsumed,
@@ -199,12 +173,8 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
 
   /** Lazy-load tool content for a compact-mode tool call card. */
   const handleLoadToolContent = useCallback(
-    async (messageId: string): Promise<ToolCallContentItem[]> => {
-      const { content } = await getMessageToolContent(projectId, sessionId, messageId);
-      return (content as Array<{ type: string } & Record<string, unknown>>).map((c) =>
-        mapToolCallContent(c)
-      );
-    },
+    (messageId: string): Promise<ToolCallContentItem[]> =>
+      loadToolCallContent(projectId, sessionId, messageId),
     [projectId, sessionId]
   );
 
@@ -220,31 +190,48 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   // Expansion survives virtualization; the hook documents its live-tail signal.
   const groupRowState = useToolCallGroupRowState(displayItems, lc.completionDockWorking);
 
-  // Only pass a file-click handler through when the session can actually serve
-  // files; hoisted so `renderConversationItem` has a stable dependency instead of
-  // rebuilding the ternary (and therefore the callback) on every render.
+  // Only pass a file-click handler through when the session can serve files to this viewer;
+  // hoisted so `renderConversationItem` has a stable dependency instead of rebuilding the
+  // ternary (and therefore the callback) on every render.
   const fileClickHandler =
-    lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined;
-  const canWriteSession = lc.session?.isMine !== false;
-  const canAnswerPermissions = lc.session?.isMine === true;
+    lc.session?.workspaceId && lc.sessionState === 'active' && viewer.canBrowseWorkspace
+      ? lc.handleFileClick
+      : undefined;
   const permissionPlacement = useAcpPermissionPlacement({
     displayItems,
     interactions: permissionItems,
     projectId,
     sessionId,
-    canAnswer: canAnswerPermissions,
+    canAnswer: viewer.canDriveSession,
     onRefresh: refreshPermissionInteractions,
   });
   const commentUi = useProjectMessageCommentUi({
     messageComments,
-    canWriteSession,
+    canComment: viewer.canComment,
+    canSendToAgent: viewer.canSendToAgent,
     hasMessages: displayItems.length > 0,
     chatLogRef,
     sessionId,
+    projectId,
     onRequestCommentSurface: openComments,
+    focusCommentThreadId,
+    commentSurfaceOpen: showComments,
+    rowIdFor,
   });
   const showDockedCommentRail = showComments && commentUi.usesDesktopRail;
   const showMobileCommentsDrawer = showComments && !commentUi.usesDesktopRail;
+
+  /*
+   * One read of the chat's linked work, shared by the header chip, the rail's Related badge
+   * and the Related drawer. Called here rather than in each of them so there is a single
+   * derivation and a single memoised identity (rule 64), and so opening the drawer costs no
+   * request.
+   */
+  const linkedWork = useSessionLinkedWork({
+    projectId,
+    sessionId,
+    outputPrUrl: lc.taskEmbed?.outputPrUrl ?? null,
+  });
 
   const isMobile = useIsMobile();
   const sessionTools = useSessionTools({
@@ -254,15 +241,23 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     taskEmbed: lc.taskEmbed,
     unresolvedCommentCount,
     needsAttentionCommentCount: commentCounts.needs_you,
+    relatedCount: linkedWork.totalCount,
+    relatedCountIsLowerBound: linkedWork.totalIsLowerBound,
     onSessionMutated,
     onOpenFiles: lc.handleOpenFileBrowser,
     onOpenGit: lc.handleOpenGitChanges,
     onOpenTimeline: openTimeline,
     onOpenResources: openResources,
-    onOpenEvents: openEvents,
+    onOpenAutomation: openAutomation,
+    onOpenReceipt: openReceipt,
+    onOpenRelated: openRelated,
     onOpenComments: openComments,
     onRetry,
     onFork,
+    onOpenShare: lc.session?.access ? openShare : undefined,
+    sharedWithCount: lc.session?.access?.grants.length ?? 0,
+    canManageShare: viewer.canManageAccess,
+    canBrowseWorkspace: viewer.canBrowseWorkspace,
   });
   const sessionToolRail = lc.session ? (
     <SessionToolRail
@@ -274,37 +269,39 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     />
   ) : null;
 
+  // One capabilities read for the whole list; rows get the primitive (AcpConversationItemView).
+  const { textToSpeech } = usePlatformCapabilities();
   // Virtuoso supplies an offset index, so compare it after subtracting `firstItemIndex`.
   const renderConversationItem = useCallback(
-    (index: number, item: DisplayItem) => {
-      return (
-        <CommentableConversationItem
-          index={index}
-          firstItemIndex={lc.firstItemIndex}
-          item={item}
-          projectId={projectId}
-          highlighted={highlightedRowId === item.id}
-          onFileClick={fileClickHandler}
-          onLoadToolContent={handleLoadToolContent}
-          animateAgentText
-          animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
-          canWriteSession={canWriteSession}
-          agentActivity={lc.agentActivity}
-          animationTargetIdx={animationTargetIdx}
-          commentState={commentUi.rowState}
-          groupExpanded={
-            item.kind === 'tool_call_group' ? groupRowState.groupExpandedFor(item.id) : undefined
-          }
-          onToggleGroup={groupRowState.onToggleGroup}
-          groupLive={groupRowState.groupLiveFor(item.id)}
-          afterContent={
-            permissionPlacement.anchored.has(item.id)
-              ? permissionPlacement.render(permissionPlacement.anchored.get(item.id) ?? [])
-              : null
-          }
-        />
-      );
-    },
+    (index: number, item: DisplayItem) => (
+      <CommentableConversationItem
+        index={index}
+        firstItemIndex={lc.firstItemIndex}
+        item={item}
+        projectId={projectId}
+        highlighted={highlightedRowId === item.id}
+        onFileClick={fileClickHandler}
+        onLoadToolContent={handleLoadToolContent}
+        animateAgentText
+        animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
+        canComment={viewer.canComment}
+        canSendToAgent={viewer.canSendToAgent}
+        agentActivity={lc.agentActivity}
+        animationTargetIdx={animationTargetIdx}
+        commentState={commentUi.rowState}
+        groupExpanded={
+          item.kind === 'tool_call_group' ? groupRowState.groupExpandedFor(item.id) : undefined
+        }
+        onToggleGroup={groupRowState.onToggleGroup}
+        groupLive={groupRowState.groupLiveFor(item.id)}
+        afterContent={
+          permissionPlacement.anchored.has(item.id)
+            ? permissionPlacement.render(permissionPlacement.anchored.get(item.id) ?? [])
+            : null
+        }
+        serverTextToSpeech={textToSpeech}
+      />
+    ),
     [
       highlightedRowId,
       projectId,
@@ -314,17 +311,19 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
       lc.agentActivity,
       animationTargetIdx,
       animatedUserMsgIds,
-      canWriteSession,
+      viewer.canComment,
+      viewer.canSendToAgent,
       commentUi.rowState,
       groupRowState,
       permissionPlacement,
+      textToSpeech,
     ]
   );
 
   /** Values the stable `ChatListHeader` reads, passed via Virtuoso's `context`. */
   const chatListContext = useMemo<ChatListContext>(
     () => ({
-      headerSpacerHeight: floatingHeaderHeight + 8,
+      headerSpacerHeight: 12,
       hasMore: lc.hasMore,
       loadingMore: lc.loadingMore,
       onLoadMore: lc.loadMore,
@@ -335,7 +334,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
           </div>
         ) : null,
     }),
-    [floatingHeaderHeight, lc.hasMore, lc.loadingMore, lc.loadMore, permissionPlacement]
+    [lc.hasMore, lc.loadingMore, lc.loadMore, permissionPlacement]
   );
 
   useSessionFocusHandoff(Boolean(lc.session));
@@ -347,9 +346,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     return lc.error ? (
       <div className="p-4 text-danger text-sm">{lc.error}</div>
     ) : (
-      <div className="flex justify-center p-8" data-testid="chat-loading">
-        <Spinner size="lg" />
-      </div>
+      <LoadingPane testId="chat-loading" />
     );
   }
 
@@ -372,6 +369,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
         jumpToMessage({ messageId, timestamp: Date.now() });
       }}
       onClose={closeComments}
+      describeMessage={describeCommentedMessage}
     />
   ) : null;
 
@@ -385,55 +383,68 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
       needsAttentionCommentCount={commentCounts.needs_you}
       sourceContext={sourceContext}
       onShowHierarchy={onShowHierarchy}
-      containerRef={floatingHeaderRef}
       expanded={sessionTools.detailsExpanded}
       onExpandedChange={sessionTools.setDetailsExpanded}
-      flushRight={sessionTools.mode !== 'hidden'}
       completeError={sessionTools.completeError}
       onDismissCompleteError={sessionTools.dismissCompleteError}
+      linkedWork={linkedWork}
     />
   );
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
-      <SessionStatusBanners lc={lc} />
-      <RetainedSnapshotExport
-        key={sessionId}
-        projectId={projectId}
-        sessionId={sessionId}
-        isMine={lc.session?.isMine === true}
-      />
+    <div className="flex min-h-0 min-w-0 flex-1 gap-[var(--sam-space-gutter)]">
+      {/* SAM Glass conversation column: the session slab, the quiet message pane and the
+          message-box slab, separated by gutters. On desktop the tool rail is its own pane
+          beside the whole column; on phones it stays inside the message pane so the header
+          and message box keep the full width. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2.5 md:gap-[var(--sam-space-gutter)]">
+        <SessionStatusBanners lc={lc} projectId={projectId} />
+        <RetainedSnapshotExport
+          key={sessionId}
+          projectId={projectId}
+          sessionId={sessionId}
+          isMine={lc.session?.isMine === true}
+        />
 
-      <ConversationPane
-        lc={lc}
-        displayItems={displayItems}
-        header={floatingHeader}
-        headerHeight={floatingHeaderHeight}
-        chatLogRef={chatLogRef}
-        virtuosoRef={virtuosoRef}
-        renderItem={renderConversationItem}
-        listContext={chatListContext}
-        selectionControls={commentUi.selectionControls}
-        commentRail={desktopCommentRail}
-        toolRail={sessionToolRail}
-        tail={chatListContext.footer}
-      />
+        {floatingHeader}
 
-      <SessionFooter
-        onFork={onFork}
-        lc={lc}
-        canWriteSession={canWriteSession}
-        selectedTextComposer={commentUi.selectedTextComposer}
-        onSleepConversation={onSleepConversation}
-        sleepingConversation={sleepingConversation}
-        sleepError={sleepError}
-        onCloseConversation={onCloseConversation}
-        closingConversation={closingConversation}
-        closeError={closeError}
-        agentProfiles={agentProfiles}
-        slashCommands={slashCommands}
-        onNewChat={onNewChat}
-      />
+        <ConversationPane
+          lc={lc}
+          displayItems={displayItems}
+          chatLogRef={chatLogRef}
+          virtuosoRef={virtuosoRef}
+          renderItem={renderConversationItem}
+          listContext={chatListContext}
+          selectionControls={commentUi.selectionControls}
+          commentRail={desktopCommentRail}
+          toolRail={isMobile ? sessionToolRail : null}
+          tail={chatListContext.footer}
+          statusCapsules={<SessionStatusCapsules lc={lc} />}
+        />
+
+        <SessionFooter
+          projectId={projectId}
+          onFork={onFork}
+          lc={lc}
+          viewer={viewer}
+          viewerId={viewerId}
+          selectedTextComposer={commentUi.selectedTextComposer}
+          onSleepConversation={onSleepConversation}
+          sleepingConversation={sleepingConversation}
+          sleepError={sleepError}
+          onCloseConversation={onCloseConversation}
+          closingConversation={closingConversation}
+          closeError={closeError}
+          agentProfiles={agentProfiles}
+          slashCommands={slashCommands}
+          onNewChat={onNewChat}
+          accessNoticeRef={accessNoticeRef}
+        />
+      </div>
+      {!isMobile && sessionToolRail}
+      <p role="status" className="sr-only">
+        {filePanelNotice}
+      </p>
 
       {/* File viewer slide-over panel */}
       {lc.filePanel && lc.session && (
@@ -456,52 +467,36 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
         onToggleTimelineContext={() => timeline.setShowContext(!timeline.showContext)}
         onCloseTimeline={closeTimeline}
         showResources={showResources}
-        onCloseResources={() => setShowResources(false)}
+        onCloseResources={closeResources}
         showComments={showMobileCommentsDrawer}
         commentItems={commentInbox}
         commentsLoading={messageComments.loading}
         viewerId={viewerId}
-        canWriteSession={canWriteSession}
+        canSendToAgent={viewer.canSendToAgent}
         onCloseComments={closeComments}
         onJump={jumpToMessage}
-        onReply={(threadId, body, action) =>
-          messageComments.reply({ commentId: threadId, body, action })
+        onReply={(threadId, body, action, mentions) =>
+          messageComments.reply({ commentId: threadId, body, action, mentions })
         }
         onResolve={messageComments.resolve}
         onReopen={messageComments.reopen}
         onSendToAgent={(threadId) => messageComments.sendToAgent({ commentId: threadId })}
       />
 
-      {showEvents && (
-        <SessionEventsDrawer
-          projectId={projectId}
-          sessionId={sessionId}
-          onClose={() => setShowEvents(false)}
-        />
-      )}
-
-      {/* Dialogs for the rail's Report and Complete actions. They live here rather than
-          in `SessionHeader` because the actions that open them do. */}
-      <ReportIssueDialog
-        isOpen={sessionTools.reportOpen}
-        onClose={sessionTools.closeReport}
-        refs={{
-          sessionId,
-          taskId: lc.session?.taskId || undefined,
-          nodeId: lc.workspace?.nodeId || undefined,
-        }}
-      />
-      <SessionHeaderCompletionDialog
-        isOpen={sessionTools.confirmCompleteOpen}
-        onClose={sessionTools.closeConfirmComplete}
-        onConfirm={sessionTools.confirmComplete}
+      <SessionMessageViewDialogs
+        projectId={projectId}
+        sessionId={sessionId}
+        session={lc.session}
+        nodeId={lc.workspace?.nodeId ?? null}
+        viewerId={viewerId}
+        sessionTools={sessionTools}
+        overlays={overlays}
+        taskId={lc.taskEmbed?.id ?? lc.session?.task?.id ?? lc.session?.taskId ?? null}
+        linkedWork={linkedWork}
+        onAccessChanged={lc.applySessionAccess}
       />
     </div>
   );
 };
 
 /** The annotated message's author, or null when it is not loaded (older history). */
-function anchorRole(role: string | undefined): 'user' | 'assistant' | null {
-  if (role === undefined) return null;
-  return role === 'user' ? 'user' : 'assistant';
-}

@@ -1,61 +1,84 @@
+import { getPlatformOperationLimits } from '@simple-agent-manager/operations';
 import type { TaskFinalAssistantMessage } from '@simple-agent-manager/shared';
 
+import type { LogicalMessage } from '../durable-objects/project-data/logical-transcript-model';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { getPlatformOperationLimits } from '../operations/limits';
-import { groupTokensIntoMessages, type TokenRow } from './message-groups';
+import { getConnectorReadLimits } from './connector-read-settings';
 import * as projectDataService from './project-data';
 
 export type { TaskFinalAssistantMessage };
 
-export async function getLatestAssistantMessageForTask(
+export type TaskAssistantMessage = TaskFinalAssistantMessage & {
+  partialBefore?: boolean;
+  truncated?: boolean;
+};
+
+function toTaskAssistantMessage(message: LogicalMessage, cap: number): TaskAssistantMessage {
+  const truncated = message.contentLength > cap;
+  return {
+    id: message.messageId,
+    content: truncated ? message.content.slice(0, cap) + '...' : message.content,
+    ...(message.complete ? {} : { partialBefore: true }),
+    ...(truncated ? { truncated: true } : {}),
+    createdAt: message.createdAt,
+  };
+}
+
+/**
+ * The newest `count` assistant replies in a chat, newest first (a reply with no text is left
+ * out), each assembled from its streamed
+ * chunks inside the object that owns the transcript
+ * (`packages/project-data/src/do/logical-transcript.ts`) and capped at
+ * `taskDetailMessageSnippetLength`. The scan is bounded by `connector.transcriptScanRows`: a reply
+ * whose start lies beyond it is marked `partialBefore`, and replies beyond it are not returned.
+ * Returns an empty list when the transcript cannot be read.
+ */
+export async function getRecentAssistantMessagesForTask(
   env: Env,
   projectId: string,
-  sessionId: string | null
-): Promise<(TaskFinalAssistantMessage & { partialBefore?: boolean; truncated?: boolean }) | null> {
-  if (!sessionId) return null;
+  sessionId: string | null,
+  count: number
+): Promise<TaskAssistantMessage[]> {
+  if (!sessionId || count < 1) return [];
 
   try {
-    const limits = getPlatformOperationLimits(env);
-    const { messages, hasMore } = await projectDataService.getMessages(
-      env,
-      projectId,
-      sessionId,
-      limits.messageListMax,
-      null,
-      null,
-      undefined,
-      false,
-      'desc'
+    const cap = getPlatformOperationLimits(env).taskDetailMessageSnippetLength;
+    const scan = await getConnectorReadLimits(env);
+    const page = await projectDataService.getLogicalTranscriptPage(env, projectId, sessionId, {
+      before: null,
+      limit: count,
+      roles: ['assistant'],
+      maxScanRows: scan.transcriptScanRows,
+      // `contentLength` is the whole reply's length, so a capped read still says it was cut.
+      maxMessageChars: cap,
+      maxPageChars: cap * count,
+      includeLatest: false,
+      includeToolTitles: false,
+    });
+    return page.entries.flatMap((entry) =>
+      entry.kind === 'message' && entry.content.trim() ? [toTaskAssistantMessage(entry, cap)] : []
     );
-    const grouped = groupTokensIntoMessages(messages as unknown as TokenRow[]);
-    const message = [...grouped].reverse().find((item) => item.role === 'assistant');
-    if (!message || typeof message.content !== 'string' || !message.content.trim()) {
-      return null;
-    }
-
-    const CONTENT_CAP = limits.taskDetailMessageSnippetLength;
-    const content =
-      message.content.length > CONTENT_CAP
-        ? message.content.slice(0, CONTENT_CAP) + '...'
-        : message.content;
-
-    return {
-      id: typeof message.id === 'string' ? message.id : '',
-      content,
-      ...(hasMore && message === grouped[0] ? { partialBefore: true } : {}),
-      ...(message.content.length > CONTENT_CAP ? { truncated: true } : {}),
-      createdAt:
-        typeof message.createdAt === 'number' || typeof message.createdAt === 'string'
-          ? message.createdAt
-          : '',
-    };
   } catch (err) {
-    log.warn('get_latest_assistant_message_for_task_failed', {
+    log.warn('get_recent_assistant_messages_for_task_failed', {
       projectId,
       sessionId,
       error: err instanceof Error ? err.message : String(err),
     });
-    return null;
+    return [];
   }
+}
+
+/**
+ * The newest assistant reply with text in a chat, or null. Reads the same recent replies as the
+ * task view (`operations/task-core.ts`), so both report the same final message.
+ */
+export async function getLatestAssistantMessageForTask(
+  env: Env,
+  projectId: string,
+  sessionId: string | null
+): Promise<TaskAssistantMessage | null> {
+  const count = getPlatformOperationLimits(env).taskDetailRecentMessageLimit;
+  const [latest] = await getRecentAssistantMessagesForTask(env, projectId, sessionId, count);
+  return latest ?? null;
 }

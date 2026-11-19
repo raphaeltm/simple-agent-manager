@@ -133,7 +133,7 @@ resource mismatch) hides the very distribution you need in order to find this cl
 
 - Task: `tasks/archive/2026-09-11-agent-version-content-identity-and-cpu-admission.md`
 - Implementation: `scripts/deploy/resolve-vm-agent-release.sh`,
-  `apps/api/src/services/workspace-resource-capacity.ts` (`measuredAdmissionDiagnostic`)
+  `packages/scheduler-core/src/workspace-resource-capacity.ts` (`measuredAdmissionDiagnostic`)
 - `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md` — a predicate that cannot fire
 - `.claude/rules/58-terminal-verdicts-must-match-the-resumer.md` — the destroyer must read what the resumer reads
 - `.claude/rules/72-error-categories-must-match-the-recovery-action.md` — categorise by the action, not the vocabulary

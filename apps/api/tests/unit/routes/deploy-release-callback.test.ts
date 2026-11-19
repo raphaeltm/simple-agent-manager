@@ -97,6 +97,12 @@ vi.mock('../../../src/services/deployment-environment-config', () => ({
     mockLoadDeploymentInterpolationEnv(...args),
 }));
 
+const mockDecrypt = vi.hoisted(() => vi.fn(async () => 'decrypted'));
+vi.mock('../../../src/services/encryption', () => ({
+  decrypt: (...args: unknown[]) => mockDecrypt(...args),
+  encrypt: vi.fn(),
+}));
+
 vi.mock('../../../src/services/deployment-volumes', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/services/deployment-volumes')>();
   return {
@@ -1126,12 +1132,18 @@ describe('deployment-env callback route', () => {
       },
       configUpdatedAt: '2026-06-22T10:00:00.000Z',
     });
-    // Decryption ran with the environment id and the server encryption key.
+    // Decryption ran with the environment id and a cipher bound to the server
+    // encryption key.
     expect(mockLoadDeploymentInterpolationEnv).toHaveBeenCalledWith(
       expect.anything(),
       'env-1',
-      'test-encryption-key'
+      expect.objectContaining({ decrypt: expect.any(Function) })
     );
+    const cipher = mockLoadDeploymentInterpolationEnv.mock.lastCall?.[2] as {
+      decrypt(ciphertext: string, iv: string): Promise<string>;
+    };
+    await cipher.decrypt('ciphertext', 'iv');
+    expect(mockDecrypt).toHaveBeenCalledWith('ciphertext', 'iv', 'test-encryption-key');
   });
 
   it('returns configUpdatedAt: null when the environment has never been configured', async () => {

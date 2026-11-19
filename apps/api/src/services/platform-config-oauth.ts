@@ -1,16 +1,17 @@
 import type { Env } from '../env';
 import { resolvePlatformConfig } from './platform-config-core';
+import { type ResolvedLoginOAuthConfig, resolveLoginOAuthConfig } from './platform-config-login';
 import type { ResolvedPlatformConfig } from './platform-config-types';
 
 /*
  * Selectors below are pure projections of an already-resolved config. Callers that need more
- * than one projection (notably `createAuth`) resolve once and select many, instead of paying
- * `resolvePlatformConfig`'s 14 D1 round-trips per projection. The `get*` wrappers keep the
- * single-projection call sites unchanged.
+ * than one projection resolve once and select many. Login-only callers use the shared settings
+ * resolver without waiting for unrelated App/webhook/feedback configuration. The `get*` wrappers
+ * keep single-projection call sites unchanged.
  */
 
 export function selectGitHubOAuthConfig(
-  config: ResolvedPlatformConfig
+  config: Pick<ResolvedLoginOAuthConfig, 'github'>
 ): { clientId: string; clientSecret: string } | null {
   if (!config.github.clientId.value || !config.github.clientSecret.value) return null;
   return { clientId: config.github.clientId.value, clientSecret: config.github.clientSecret.value };
@@ -19,7 +20,7 @@ export function selectGitHubOAuthConfig(
 export async function getGitHubOAuthConfig(
   env: Env
 ): Promise<{ clientId: string; clientSecret: string } | null> {
-  return selectGitHubOAuthConfig(await resolvePlatformConfig(env));
+  return selectGitHubOAuthConfig(await resolveLoginOAuthConfig(env));
 }
 
 function normalizeBaseUrl(value: string): string {
@@ -31,12 +32,38 @@ function normalizeBaseUrl(value: string): string {
   }
 }
 
-export function selectGitLabOAuthConfig(config: ResolvedPlatformConfig): {
+/**
+ * GitLab.com, the GitLab host whose sign-ins vouch for emails GitLab itself verified. Deliberately
+ * not configurable: whoever can write configuration could otherwise declare any host trusted,
+ * which is the 2026-11-12 attack. Deployers pin a self-managed host with GITLAB_HOST instead.
+ */
+const PUBLIC_GITLAB_HOST = 'https://gitlab.com';
+
+export interface GitLabOAuthConfig {
   host: string;
   apiBaseUrl: string;
   clientId: string;
   clientSecret: string;
-} | null {
+  /**
+   * Whether this host's sign-ins may vouch for an email address: link to an existing account
+   * with that email, and rewrite its profile. A GitLab sign-in proves an email only as far as
+   * the host does, and a self-managed host runs whatever its operator wants. GitLab.com is
+   * trusted, and so is a host the deployer pinned in the Worker environment (GITLAB_HOST). A
+   * self-managed host saved at runtime is not: on 2026-11-12 a host set through first-run setup
+   * answered `email_verified: true` for the owner's email and signed in as the superadmin.
+   * GitHub and Google need no such flag, because their identity hosts are fixed.
+   */
+  identityTrusted: boolean;
+}
+
+/**
+ * @param pinnedHost The Worker environment's GITLAB_HOST. A runtime-saved host equal to it is
+ * the host the deployer pinned, so it is trusted like the pin itself.
+ */
+export function selectGitLabOAuthConfig(
+  config: Pick<ResolvedLoginOAuthConfig, 'gitlab'>,
+  pinnedHost?: string
+): GitLabOAuthConfig | null {
   if (
     !config.gitlab.host.value ||
     !config.gitlab.clientId.value ||
@@ -49,16 +76,15 @@ export function selectGitLabOAuthConfig(config: ResolvedPlatformConfig): {
     apiBaseUrl: `${host}/api/v4`,
     clientId: config.gitlab.clientId.value,
     clientSecret: config.gitlab.clientSecret.value,
+    identityTrusted:
+      host === PUBLIC_GITLAB_HOST ||
+      config.gitlab.host.source === 'environment' ||
+      (Boolean(pinnedHost?.trim()) && host === normalizeBaseUrl(pinnedHost ?? '')),
   };
 }
 
-export async function getGitLabOAuthConfig(env: Env): Promise<{
-  host: string;
-  apiBaseUrl: string;
-  clientId: string;
-  clientSecret: string;
-} | null> {
-  return selectGitLabOAuthConfig(await resolvePlatformConfig(env));
+export async function getGitLabOAuthConfig(env: Env): Promise<GitLabOAuthConfig | null> {
+  return selectGitLabOAuthConfig(await resolveLoginOAuthConfig(env), env.GITLAB_HOST);
 }
 
 /**
@@ -73,7 +99,7 @@ export async function getGitLabOAuthConfig(env: Env): Promise<{
  * URIs and scopes.
  */
 export function selectGoogleLoginOAuthConfig(
-  config: ResolvedPlatformConfig
+  config: Pick<ResolvedLoginOAuthConfig, 'google'>
 ): { clientId: string; clientSecret: string } | null {
   if (!config.google.clientId.value || !config.google.clientSecret.value) return null;
   return { clientId: config.google.clientId.value, clientSecret: config.google.clientSecret.value };
@@ -82,7 +108,7 @@ export function selectGoogleLoginOAuthConfig(
 export async function getGoogleLoginOAuthConfig(
   env: Env
 ): Promise<{ clientId: string; clientSecret: string } | null> {
-  return selectGoogleLoginOAuthConfig(await resolvePlatformConfig(env));
+  return selectGoogleLoginOAuthConfig(await resolveLoginOAuthConfig(env));
 }
 
 /**

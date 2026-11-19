@@ -1,6 +1,7 @@
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { VirtuosoHandle } from 'react-virtuoso';
 
+import { mergedRowAliases } from './message-aliases';
 import { nearestItemId } from './timeline-jump';
 import type { TimelineJumpTarget } from './timeline-types';
 import type { DisplayItem, GroupedItem } from './tool-call-groups';
@@ -39,6 +40,13 @@ interface UseConversationJumpInput {
   /** Pages older history in until the target message (or time) is loaded. */
   loadUntil: (target: TimelineJumpTarget) => Promise<void>;
   loadingMore: boolean;
+  /**
+   * The stored rows behind `displayItems`. A comment can be anchored to any streamed chunk of
+   * an agent reply, not only the first, so a target that matches no rendered row is looked up
+   * among the merged chunks (`mergedRowAliases`). Computed only when a jump needs it, so the
+   * per-token rebuild of `displayItems` pays nothing for it.
+   */
+  messages?: readonly { id: string; role: string }[];
   /** Message id requested by a route-level deep link, such as Project → Comments. */
   targetMessageId?: string | null;
   /** Timestamp used to load older history before resolving a route-level target. */
@@ -54,6 +62,11 @@ interface ConversationJump {
   jumpToMessage: (target: TimelineJumpTarget) => void;
   /** Id of the rendered row currently flashing, or null. */
   highlightedRowId: string | null;
+  /**
+   * Id of the rendered row a message id belongs to: itself, or the reply or group that absorbed
+   * it (a later streamed chunk, a tool call). Null when it is not loaded.
+   */
+  rowIdFor: (messageId: string) => string | null;
 }
 
 /**
@@ -68,6 +81,7 @@ export function useConversationJump({
   listReady,
   loadUntil,
   loadingMore,
+  messages,
   targetMessageId,
   targetMessageTimestamp,
   onTargetMessageConsumed,
@@ -118,6 +132,28 @@ export function useConversationJump({
     return map;
   }, [displayItems]);
 
+  // A merged streamed chunk answers to the item that absorbed it. Built on the first miss and
+  // kept until the rows or items change; only jumps and their effects call this.
+  const chunkAliases = useRef<{
+    messages: readonly { id: string; role: string }[];
+    items: DisplayItem[];
+    map: Map<string, string>;
+  } | null>(null);
+  const resolveIndex = useCallback(
+    (id: string): number | undefined => {
+      const direct = itemIndexById.get(id);
+      if (direct !== undefined || !messages) return direct;
+      let cache = chunkAliases.current;
+      if (!cache || cache.messages !== messages || cache.items !== displayItems) {
+        cache = { messages, items: displayItems, map: mergedRowAliases(messages, displayItems) };
+        chunkAliases.current = cache;
+      }
+      const itemId = cache.map.get(id);
+      return itemId === undefined ? undefined : itemIndexById.get(itemId);
+    },
+    [displayItems, itemIndexById, messages]
+  );
+
   // A jump targets either an exact message (user message, comment anchor) or the
   // nearest message to a timestamp (status/activity entries). A chat opens on its
   // newest page, so the target may predate the loaded window — we set a pending
@@ -129,20 +165,27 @@ export function useConversationJump({
 
   const scrollAndHighlight = useCallback(
     (itemId: string, behavior: 'smooth' | 'auto' = 'smooth'): boolean => {
-      const index = itemIndexById.get(itemId);
+      const index = resolveIndex(itemId);
       if (index === undefined) return false;
       virtuosoRef.current?.scrollToIndex({ index, behavior, align: 'center' });
-      setHighlightedItemId(itemId);
+      // Highlight the row itself: the target may be a chunk or a call folded into it.
+      setHighlightedItemId(displayItems[index]?.id ?? itemId);
       return true;
     },
-    [itemIndexById, virtuosoRef]
+    [displayItems, resolveIndex, virtuosoRef]
   );
 
   const jumpToMessage = useCallback(
-    (target: TimelineJumpTarget) => {
+    (target: TimelineJumpTarget, options: { confirm?: boolean } = {}) => {
       onJump();
-      // Fast path: exact message already loaded and on screen.
-      if (listReady && target.messageId && itemIndexById.has(target.messageId)) {
+      // Fast path: exact message already loaded and on screen. `confirm` skips it for a jump
+      // that must be re-checked until it lands (a route deep link into a chat just opened).
+      if (
+        !options.confirm &&
+        listReady &&
+        target.messageId &&
+        resolveIndex(target.messageId) !== undefined
+      ) {
         scrollAndHighlight(target.messageId);
         return;
       }
@@ -151,22 +194,22 @@ export function useConversationJump({
       setPendingJump(target);
       void loadUntil(target);
     },
-    [itemIndexById, listReady, loadUntil, onJump, scrollAndHighlight]
+    [listReady, loadUntil, onJump, resolveIndex, scrollAndHighlight]
   );
 
-  // Route-driven jump from the project Comments page. This deliberately reuses
-  // the same jump path as the timeline and session comments drawer so URL
-  // deep-links inherit the existing virtualized-list coordinate fix and
-  // fallback loading behavior.
+  // Route-driven jump from the project Comments page ("Open in chat"). Always confirmed, never
+  // the one-shot fast path: the chat has just opened, and the list's own first scroll to the
+  // newest message can land after a single scroll and undo it, leaving the reader at the bottom
+  // with the target never mounted.
   useEffect(() => {
     if (!targetMessageId) return;
     const targetKey = `${sessionId}:${targetMessageId}`;
     if (consumedTargetMessageRef.current === targetKey) return;
     consumedTargetMessageRef.current = targetKey;
-    jumpToMessage({
-      messageId: targetMessageId,
-      timestamp: targetMessageTimestamp ?? Date.now(),
-    });
+    jumpToMessage(
+      { messageId: targetMessageId, timestamp: targetMessageTimestamp ?? Date.now() },
+      { confirm: true }
+    );
     onTargetMessageConsumed?.();
   }, [jumpToMessage, onTargetMessageConsumed, sessionId, targetMessageId, targetMessageTimestamp]);
 
@@ -177,14 +220,14 @@ export function useConversationJump({
   useEffect(() => {
     if (!pendingJump || !listReady) return;
     let targetId: string | undefined;
-    if (pendingJump.messageId && itemIndexById.has(pendingJump.messageId)) {
+    if (pendingJump.messageId && resolveIndex(pendingJump.messageId) !== undefined) {
       targetId = pendingJump.messageId;
     } else if (!loadingMore) {
       // No exact anchor, or the anchor never materialized after loading
       // settled → jump to the nearest loaded message by timestamp.
       targetId = nearestItemId(displayItems, pendingJump.timestamp);
     }
-    const index = targetId === undefined ? undefined : itemIndexById.get(targetId);
+    const index = targetId === undefined ? undefined : resolveIndex(targetId);
     if (targetId === undefined || index === undefined) return;
     const id = targetId;
 
@@ -215,7 +258,7 @@ export function useConversationJump({
   }, [
     pendingJump,
     listReady,
-    itemIndexById,
+    resolveIndex,
     displayItems,
     loadingMore,
     listRootRef,
@@ -241,5 +284,13 @@ export function useConversationJump({
     return index === undefined ? null : (displayItems[index]?.id ?? null);
   }, [highlightedItemId, itemIndexById, displayItems]);
 
-  return { jumpToMessage, highlightedRowId };
+  const rowIdFor = useCallback(
+    (messageId: string): string | null => {
+      const index = resolveIndex(messageId);
+      return index === undefined ? null : (displayItems[index]?.id ?? null);
+    },
+    [displayItems, resolveIndex]
+  );
+
+  return { jumpToMessage, highlightedRowId, rowIdFor };
 }

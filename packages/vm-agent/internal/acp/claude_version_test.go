@@ -16,12 +16,12 @@ func TestClaudeInstalledCheckRejectsStaleRuntime(t *testing.T) {
 			name, adapter, cli string
 			wantOK             bool
 		}{
-			{"supported", adapter, "2.1.281 (Claude Code)", true},
-			{"minimum", adapter, "2.1.280 (Claude Code)", true},
-			{"stale embedded SDK with new CLI", "0.73.0", "2.1.281 (Claude Code)", false},
-			{"stale companion", adapter, "2.1.260 (Claude Code)", false},
+			{"supported", adapter, "2.1.321 (Claude Code)", true},
+			{"minimum", adapter, "2.1.321 (Claude Code)", true},
+			{"stale embedded SDK with new CLI", "0.88.0", "2.1.321 (Claude Code)", false},
+			{"stale companion", adapter, "2.1.319 (Claude Code)", false},
 			{"reported failure", "0.73.0", "2.1.257 (Claude Code)", false},
-			{"missing adapter", "", "2.1.281 (Claude Code)", false},
+			{"missing adapter", "", "2.1.321 (Claude Code)", false},
 			{"malformed CLI", adapter, "unknown", false},
 			{"missing CLI", adapter, "", false},
 			{"newer CLI", adapter, "2.2.0 (Claude Code)", true},
@@ -102,7 +102,8 @@ func TestOtherHarnessInstalledChecksRejectStaleVersions(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct{ agent, bin, current, stale string }{
 		{"google-gemini", "gemini", "0.61.0", "0.50.0"},
-		{"opencode", "opencode", "1.18.32", "1.18.27"},
+		// Stock v2.2.5 lacks ACP steering, so SAM's build replaces it.
+		{"opencode", "opencode", "opencode v2.2.5-sam-s1", "opencode v2.2.5"},
 		{"mistral-vibe", "vibe-acp", "vibe-acp 2.25.8", "vibe-acp 2.19.1"},
 		{"amp", "amp", "0.0.1790261352-g2ab14a (released today)", "0.0.1783785389-g0da70d (released yesterday)"},
 	} {

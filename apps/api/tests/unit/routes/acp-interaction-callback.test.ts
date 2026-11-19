@@ -58,6 +58,34 @@ function env(agentSessionStatus = 'running'): Env {
   } as Env;
 }
 
+/**
+ * Workspace identity read by `loadWorkspaceCallbackIdentity` (leftJoin chain) and the task
+ * read by `assertConversationTask` (where().get() chain).
+ */
+function mockWorkspaceIdentity(overrides: { status?: string; nodeStatus?: string | null }) {
+  const identity = {
+    workspaceId: 'workspace-1',
+    projectId: 'project-1',
+    chatSessionId: 'chat-1',
+    userId: 'user-1',
+    status: overrides.status ?? 'running',
+    nodeId: 'node-1',
+    nodeStatus: overrides.nodeStatus === undefined ? 'running' : overrides.nodeStatus,
+  };
+  mocks.drizzle.mockReturnValue({
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        leftJoin: vi.fn(() => ({
+          where: vi.fn(() => ({ limit: vi.fn().mockResolvedValue([identity]) })),
+        })),
+        where: vi.fn(() => ({
+          get: vi.fn().mockResolvedValue({ taskMode: 'conversation' }),
+        })),
+      })),
+    })),
+  });
+}
+
 describe('ACP interaction callback routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -66,20 +94,7 @@ describe('ACP interaction callback routes', () => {
       type: 'callback',
       scope: 'workspace',
     });
-    mocks.drizzle.mockReturnValue({
-      select: vi.fn(() => ({
-        from: vi.fn(() => ({
-          where: vi.fn(() => ({
-            get: vi.fn().mockResolvedValue({
-              projectId: 'project-1',
-              chatSessionId: 'chat-1',
-              userId: 'user-1',
-              status: 'running',
-            }),
-          })),
-        })),
-      })),
-    });
+    mockWorkspaceIdentity({});
     mocks.createInteraction.mockResolvedValue({
       status: 'created',
       summary: { state: 'pending' },
@@ -136,6 +151,31 @@ describe('ACP interaction callback routes', () => {
     expect(response.status).toBe(401);
     expect(mocks.createInteraction).not.toHaveBeenCalled();
   });
+
+  it.each([
+    { status: 'stopped', nodeStatus: 'running' },
+    { status: 'sleeping', nodeStatus: 'running' },
+    { status: 'running', nodeStatus: 'stopping' },
+    { status: 'running', nodeStatus: 'destroyed' },
+    { status: 'running', nodeStatus: null },
+  ])(
+    'refuses a still-valid token when the workspace is $status on a $nodeStatus node',
+    async ({ status, nodeStatus }) => {
+      mockWorkspaceIdentity({ status, nodeStatus });
+      const response = await app().request(
+        '/api/projects/project-1/workspaces/workspace-1/acp-interactions',
+        {
+          method: 'POST',
+          headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+          body: JSON.stringify(body()),
+        },
+        env()
+      );
+
+      expect(response.status).toBe(410);
+      expect(mocks.createInteraction).not.toHaveBeenCalled();
+    }
+  );
 
   it('rejects a stale agent session and binds settle to the route interaction id', async () => {
     const stale = await app().request(

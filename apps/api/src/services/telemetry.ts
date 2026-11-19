@@ -140,6 +140,9 @@ export type DurableExecutionMetricName =
   | 'prompt_delivery_retry'
   | 'prompt_delivery_failed'
   | 'prompt_delivery_ambiguous'
+  | 'prompt_delivery_steered'
+  | 'prompt_delivery_steer_fallback'
+  | 'prompt_delivery_steer_pending'
   | 'checkpoint_episode_transition';
 
 export interface DurableExecutionMetric {

@@ -174,9 +174,9 @@ describe('Hetzner 412 placement failures are transient capacity', () => {
 /**
  * `isTransientCapacityError` calls a HETZNER-specific classifier, but
  * `node-provisioning-step.ts` and `node-provisioning.ts` call it on any `ProviderError` without
- * checking which provider raised it. GCP is the live hazard: `classifyGcpError` has no call
- * sites, so GCP errors also arrive with `category: 'unknown'`, and GCP uses 412 for
- * ETag/precondition mismatches while using "placement policy" in its own vocabulary.
+ * checking which provider raised it. GCP is the live hazard: `GcpProvider.createVM` assigns its
+ * own category, but an unclassified GCP error can still arrive with `category: 'unknown'`, and GCP
+ * uses 412 for ETag/precondition mismatches while using "placement policy" in its own vocabulary.
  */
 describe('cross-provider isolation', () => {
   it('does not read a GCP 412 mentioning placement as Hetzner capacity', () => {

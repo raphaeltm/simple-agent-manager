@@ -1,5 +1,5 @@
 import { Body } from '@simple-agent-manager/ui';
-import { type FC, useMemo,useState } from 'react';
+import { type FC, useMemo, useState } from 'react';
 
 type SortKey = 'event_name' | 'count' | 'unique_users' | 'avg_response_ms';
 type SortDir = 'asc' | 'desc';
@@ -13,7 +13,10 @@ interface EventRow {
 
 function SortIcon({ active, direction }: { active: boolean; direction: SortDir }) {
   return (
-    <span className={`inline-block ml-1 ${active ? 'text-fg-primary' : 'text-fg-muted opacity-40'}`} aria-hidden="true">
+    <span
+      className={`inline-block ml-1 ${active ? 'text-fg-primary' : 'text-fg-muted opacity-40'}`}
+      aria-hidden="true"
+    >
       {active && direction === 'asc' ? '\u25B2' : '\u25BC'}
     </span>
   );
@@ -76,7 +79,9 @@ export const EventsTable: FC<{ data: EventRow[] }> = ({ data }) => {
                     handleSort(col.key);
                   }
                 }}
-                aria-sort={sortKey === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                aria-sort={
+                  sortKey === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'
+                }
               >
                 {col.label}
                 <SortIcon active={sortKey === col.key} direction={sortDir} />
@@ -86,10 +91,20 @@ export const EventsTable: FC<{ data: EventRow[] }> = ({ data }) => {
         </thead>
         <tbody>
           {sorted.map((row) => (
-            <tr key={row.event_name} className="border-b border-border-muted hover:bg-surface-secondary transition-colors">
-              <td className="py-2 pr-4 font-mono text-xs truncate max-w-[200px]" title={row.event_name}>{row.event_name}</td>
+            <tr
+              key={row.event_name}
+              className="border-b border-border-muted hover:bg-surface-secondary transition-colors"
+            >
+              <td
+                className="py-2 pr-4 font-mono text-xs truncate max-w-[200px]"
+                title={row.event_name}
+              >
+                {row.event_name}
+              </td>
               <td className="py-2 pr-4 text-right tabular-nums">{row.count.toLocaleString()}</td>
-              <td className="py-2 pr-4 text-right tabular-nums">{row.unique_users.toLocaleString()}</td>
+              <td className="py-2 pr-4 text-right tabular-nums">
+                {row.unique_users.toLocaleString()}
+              </td>
               <td className="py-2 text-right tabular-nums">{Math.round(row.avg_response_ms)}</td>
             </tr>
           ))}

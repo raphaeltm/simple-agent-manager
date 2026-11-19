@@ -1,3 +1,4 @@
+export type { CloudInitVariables, CloudProvider, GenerateCloudInitOptions } from './generate';
 export {
   generateCloudInit,
   HETZNER_USER_DATA_MAX_BYTES,
@@ -5,5 +6,22 @@ export {
   validateCloudInitSize,
   validateCloudInitVariables,
 } from './generate';
-export type { CloudInitVariables, CloudProvider, GenerateCloudInitOptions } from './generate';
+export {
+  DEFAULT_FRPC_VERSION,
+  FRPC_RELEASES,
+  isReverseTunnelMode,
+  REVERSE_TUNNEL_HEARTBEAT_INTERVAL_SECONDS,
+  REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+  REVERSE_TUNNEL_PROXY_NAME,
+} from './reverse-tunnel';
 export { CLOUD_INIT_TEMPLATE } from './template';
+export {
+  CLOUDFLARED_RELEASES,
+  DEFAULT_CLOUDFLARE_TUNNEL_PORT,
+  DEFAULT_CLOUDFLARED_VERSION,
+  DEFAULT_TUNNEL_CONNECTOR_RESTART_SECONDS,
+  DEFAULT_TUNNEL_LISTENER_PROBE_INTERVAL_SECONDS,
+  DEFAULT_TUNNEL_LISTENER_PROBE_TIMEOUT_SECONDS,
+  DEFAULT_TUNNEL_LISTENER_WAIT_SECONDS,
+  isTunnelMode,
+} from './tunnel';

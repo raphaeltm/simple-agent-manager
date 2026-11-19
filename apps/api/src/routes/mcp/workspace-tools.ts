@@ -20,6 +20,7 @@ import {
   signTerminalToken,
 } from '../../services/jwt';
 import { fetchNodeAgent } from '../../services/node-agent';
+import { getNodeBackendBaseUrl } from '../../services/node-agent-readiness';
 import {
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -93,10 +94,8 @@ export async function lookupWorkspaceForVmAgent(
   };
 }
 
-function vmAgentUrlForPath(env: Env, nodeId: string, path: string): string {
-  const protocol = env.VM_AGENT_PROTOCOL || 'https';
-  const port = env.VM_AGENT_PORT || '8443';
-  return `${protocol}://${nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}${path}`;
+export function vmAgentUrlForPath(env: Env, nodeId: string, path: string): string {
+  return `${getNodeBackendBaseUrl(nodeId, env)}${path}`;
 }
 
 function vmAgentToolUrl(
@@ -105,9 +104,7 @@ function vmAgentToolUrl(
   workspaceId: string,
   toolPath: VmAgentToolPath
 ): string {
-  const protocol = env.VM_AGENT_PROTOCOL || 'https';
-  const port = env.VM_AGENT_PORT || '8443';
-  return `${protocol}://${nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}/workspaces/${encodeURIComponent(workspaceId)}/mcp/${toolPath}`;
+  return `${getNodeBackendBaseUrl(nodeId, env)}/workspaces/${encodeURIComponent(workspaceId)}/mcp/${toolPath}`;
 }
 
 async function fetchVmAgentJson(
@@ -117,7 +114,8 @@ async function fetchVmAgentJson(
   method: 'GET' | 'POST',
   headers: Record<string, string>,
   body: unknown,
-  timeoutMs: number
+  timeoutMs: number,
+  controls?: { noWakeContainer: boolean; recoverContainerOnTimeout: boolean }
 ): Promise<unknown> {
   if (body) {
     headers['Content-Type'] = 'application/json';
@@ -132,7 +130,9 @@ async function fetchVmAgentJson(
     fetchOpts.body = JSON.stringify(body);
   }
 
-  const res = await fetchNodeAgent(nodeId, env, vmUrl, fetchOpts, timeoutMs);
+  const res = controls
+    ? await fetchNodeAgent(nodeId, env, vmUrl, fetchOpts, timeoutMs, controls)
+    : await fetchNodeAgent(nodeId, env, vmUrl, fetchOpts, timeoutMs);
 
   if (!res.ok) {
     const errText = await res.text().catch(() => 'unknown error');
@@ -230,6 +230,33 @@ export async function startBuildPublishJobOnVm(
     },
     body,
     timeoutMs
+  );
+}
+
+/** Durable cancellation is already committed before this best-effort request. */
+export async function cancelBuildPublishJobOnVm(
+  env: Env,
+  workspaceId: string,
+  userId: string,
+  nodeId: string,
+  publishJobId: string,
+  timeoutMs: number
+): Promise<unknown> {
+  const { token } = await signNodeManagementToken(userId, nodeId, workspaceId, env);
+  const path = `/workspaces/${encodeURIComponent(workspaceId)}/mcp/build-and-publish-jobs/${encodeURIComponent(publishJobId)}/cancel`;
+  return fetchVmAgentJson(
+    env,
+    nodeId,
+    vmAgentUrlForPath(env, nodeId, path),
+    'POST',
+    {
+      Authorization: `Bearer ${token}`,
+      'X-SAM-Node-Id': nodeId,
+      'X-SAM-Workspace-Id': workspaceId,
+    },
+    {},
+    timeoutMs,
+    { noWakeContainer: true, recoverContainerOnTimeout: false }
   );
 }
 
@@ -413,4 +440,40 @@ export async function handleGetWorkspaceDiffSummary(
       `Failed to get diff summary: ${e instanceof Error ? e.message : String(e)}`
     );
   }
+}
+
+/** Private same-session execution transport; never expose raw upstream errors. */
+export async function proxySecretExecOnVm(
+  env: Env,
+  caller: McpTokenData,
+  operation: 'start' | 'status' | 'cancel',
+  jobId: string,
+  body?: unknown
+): Promise<unknown> {
+  const workspace = await lookupWorkspaceForVmAgent(env, caller.workspaceId, caller.projectId);
+  const { token } = await signNodeManagementToken(
+    caller.userId,
+    workspace.nodeId,
+    workspace.id,
+    env
+  );
+  const base = `/workspaces/${encodeURIComponent(workspace.id)}/mcp/secret-exec`;
+  const path =
+    operation === 'start'
+      ? base
+      : `${base}/${encodeURIComponent(jobId)}${operation === 'cancel' ? '/cancel' : ''}?agentSessionId=${encodeURIComponent(caller.agentSessionId ?? '')}`;
+  return fetchVmAgentJson(
+    env,
+    workspace.nodeId,
+    vmAgentUrlForPath(env, workspace.nodeId, path),
+    operation === 'status' ? 'GET' : 'POST',
+    {
+      Authorization: `Bearer ${token}`,
+      'X-SAM-Node-Id': workspace.nodeId,
+      'X-SAM-Workspace-Id': workspace.id,
+    },
+    body,
+    getWorkspaceToolTimeout(env),
+    { noWakeContainer: true, recoverContainerOnTimeout: false }
+  );
 }

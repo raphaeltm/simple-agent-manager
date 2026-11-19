@@ -4,11 +4,26 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ProfileFormDialog } from '../../src/components/agent-profiles/ProfileFormDialog';
 
+// The Account section owns its account queries and has its own tests
+// (tests/unit/components/accounts/account-profiles.test.tsx).
+const accountSectionMock = vi.hoisted(() => ({
+  ProfileAccountFormSection: vi.fn(() => <div data-testid="profile-account-form-section" />),
+}));
+vi.mock('../../src/components/agent-profiles/ProfileAccountFormSection', () => accountSectionMock);
 vi.mock('../../src/components/agent-profiles/ProfileRuntimeSection', () => ({
   ProfileRuntimeSection: () => <div data-testid="runtime-section" />,
 }));
 vi.mock('../../src/components/ModelSelect', () => ({
   ModelSelect: ({ value }: { value: string }) => <div data-testid="model-select">{value}</div>,
+}));
+// AgentModelAccessField fetches the catalog/project settings via
+// useQueryScope -> useAuth, neither of which this file provides — this
+// suite is about the OTHER fields' edit-stability, not agent models, so
+// stub it the same way the two mocks above stub their own concerns.
+vi.mock('../../src/components/agent-models/AgentModelAccessField', () => ({
+  AgentModelAccessField: ({ value }: { value: string[] | null }) => (
+    <div data-testid="agent-model-access-field">{value ? value.join(',') : 'inherit'}</div>
+  ),
 }));
 
 /**
@@ -67,7 +82,9 @@ describe('ProfileFormDialog edit stability', () => {
     );
 
     // Liveness: the form is still mounted and rendering this profile's other fields.
-    expect(screen.getByPlaceholderText('What this profile is for...')).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText('What this profile is for. Shown on new-chat cards.')
+    ).toBeInTheDocument();
     expect(name).toBeInTheDocument();
 
     expect(name.value).toBe('My Renamed Profile');

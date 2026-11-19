@@ -36,7 +36,7 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function getCacheConfig(env: Env): CacheConfig | null {
+export function getCacheConfig(env: Env): CacheConfig | null {
   if (!isDevcontainerCacheEnabled(env)) {
     return null;
   }

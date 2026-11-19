@@ -1,0 +1,171 @@
+---
+/**
+ * HTML version of one machine on the Nodes page: its memory and CPU over the last hour, and three
+ * tasks each in its own container with what it uses against what was set aside for it. The third
+ * task is over its memory limit.
+ */
+import './mock.css';
+
+const tasks = [
+  { title: 'Add tax columns to receipts', mem: '2.8/4.0 GB', cpu: '0.7/2.0 vCPU' },
+  { title: 'Run the full test suite and fix the flaky checkout tests', mem: '3.5/4.0 GB', cpu: '4.1/2.0 vCPU', note: 'burst, fine' },
+  { title: 'Load the March invoices into a local database and compare totals', mem: '2.8/2.0 GB', cpu: '0.5/1.0 vCPU', over: true },
+];
+
+// A gently uneven CPU line, deterministic so every render matches.
+const cpu = Array.from({ length: 40 }, (_, i) => 52 + Math.round(8 * Math.sin(i * 0.9) + 5 * Math.sin(i * 2.3)));
+const cpuPath = cpu.map((y, i) => `${i === 0 ? 'M' : 'L'}${(i / 39) * 72} ${y}`).join(' ');
+---
+
+<div class="mk mach">
+  <div class="mk-pad mach-in">
+    <p class="mach-head">
+      <span class="srv" aria-hidden="true">▤</span>
+      <span><b>Hetzner cx43</b><span class="mk-meta">Nuremberg, DE · 8 vCPU · 16 GB · 160 GB disk · €11.99/month</span></span>
+      <span class="mk-badge">● Running</span>
+    </p>
+    <p class="legend"><span><i class="sw sw--mem"></i>memory 9.1 GB of 16 GB</span><span class="mk-meta">set aside 10 GB</span></p>
+    <svg class="chart" viewBox="0 0 100 80" preserveAspectRatio="none" aria-hidden="true">
+      <path class="mem" d="M0 36 L72 36 L72 70 L0 70 Z" />
+      <path class="cpu-fill" d={`${cpuPath} L72 80 L0 80 Z`} />
+      <path class="cpu" d={cpuPath} />
+      <path class="lim" d="M0 30 L100 30" />
+      <path class="lim" d="M0 46 L100 46" />
+    </svg>
+    <p class="legend"><span><i class="sw sw--cpu"></i>cpu 5.2 of 8.0 vCPU</span><span class="mk-meta">set aside 5.0 vCPU</span></p>
+    <ul class="tasks">
+      {tasks.map((t) => (
+        <li class:list={{ over: t.over }} data-ring={t.over ? '' : undefined}>
+          <span class="t-dot" aria-hidden="true"></span>
+          <span class="t-text"><span>{t.title}</span><span class="mk-meta">You · Payments API · 1h 10m</span></span>
+          <span class="t-num mk-mono"><span class:list={{ red: t.over }}>{t.mem}</span><span>{t.cpu}</span>{t.over ? <span class="red">over limit</span> : t.note && <span class="mk-meta">{t.note}</span>}</span>
+        </li>
+      ))}
+    </ul>
+  </div>
+</div>
+
+<style>
+  .mach {
+    font-size: 12px;
+  }
+
+  .mach-in {
+    display: grid;
+    gap: 8px;
+  }
+
+  .mach-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .mach-head > span:nth-child(2) {
+    display: grid;
+    flex: 1;
+  }
+
+  .mach-head b {
+    font-size: 1.15em;
+  }
+
+  .srv {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    color: var(--mk-muted);
+    border: 1px solid var(--mk-line);
+  }
+
+  .legend {
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 0.85em;
+  }
+
+  .sw {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 6px;
+    border-radius: 50%;
+  }
+
+  .sw--mem {
+    background: var(--mk-green);
+  }
+
+  .sw--cpu {
+    background: var(--mk-blue);
+  }
+
+  .chart {
+    width: 100%;
+    height: 90px;
+    border-radius: 8px;
+    border: 1px solid var(--mk-line);
+    background: var(--mk-surface);
+  }
+
+  .chart .mem {
+    fill: color-mix(in srgb, var(--mk-green) 35%, transparent);
+  }
+
+  .chart .cpu-fill {
+    fill: color-mix(in srgb, var(--mk-blue) 22%, transparent);
+  }
+
+  .chart .cpu {
+    fill: none;
+    stroke: var(--mk-blue);
+    stroke-width: 1.2;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .chart .lim {
+    stroke: var(--mk-line-strong);
+    stroke-dasharray: 3 3;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .tasks li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 6px;
+    border-radius: 8px;
+  }
+
+  .tasks li + li {
+    border-top: 1px solid var(--mk-line);
+  }
+
+  .t-dot {
+    width: 7px;
+    height: 7px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--mk-green);
+  }
+
+  .t-text {
+    display: grid;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .t-num {
+    display: grid;
+    justify-items: end;
+    font-size: 0.85em;
+    white-space: nowrap;
+  }
+
+  .red {
+    color: var(--mk-red);
+  }
+</style>

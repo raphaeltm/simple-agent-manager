@@ -1,6 +1,9 @@
+import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 
+import type { Env } from '../../src/env';
 import { resolveCredentialedCorsOrigin } from '../../src/lib/cors-origin';
+import { apiCors } from '../../src/middleware/api-cors';
 
 describe('CORS origin callback', () => {
   const baseDomain = 'example.com';
@@ -112,4 +115,34 @@ describe('CORS origin callback', () => {
   it('never allows the isolated preview origin to make credentialed API requests', () => {
     expect(corsOriginCallback('https://preview.example.com', 'example.com')).toBeNull();
   });
+});
+
+describe('archived Fork browser preflight', () => {
+  it.each(['https://app.example.com', 'https://evil.example.net'])(
+    'preserves allowed-origin isolation for %s',
+    async (origin) => {
+      const app = new Hono<{ Bindings: Env }>();
+      app.use('*', apiCors);
+      app.post('/api/projects/project/tasks/submit', (c) => c.json({ accepted: true }));
+      const response = await app.request(
+        '/api/projects/project/tasks/submit',
+        {
+          method: 'OPTIONS',
+          headers: {
+            Origin: origin,
+            'Access-Control-Request-Method': 'POST',
+            'Access-Control-Request-Headers': 'content-type,idempotency-key',
+          },
+        },
+        { BASE_DOMAIN: 'example.com' } as Env
+      );
+      expect(response.status).toBe(204);
+      expect(response.headers.get('Access-Control-Allow-Headers')?.toLowerCase()).toContain(
+        'idempotency-key'
+      );
+      expect(response.headers.get('Access-Control-Allow-Origin')).toBe(
+        origin === 'https://app.example.com' ? origin : null
+      );
+    }
+  );
 });

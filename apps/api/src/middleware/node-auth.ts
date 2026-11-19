@@ -1,9 +1,10 @@
-import { and, eq, ne } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Context } from 'hono';
 
-import { type Node, nodes, type Workspace, workspaces } from '../db/schema';
+import { type Node, type Workspace, workspaces } from '../db/schema';
 import type { Env } from '../env';
+import { findAccessibleNode, ownerNodeAccess } from '../services/node-diagnostics-access';
 import { getUserId } from './auth';
 
 /**
@@ -14,22 +15,7 @@ export async function requireNodeOwnership(
   c: Context<{ Bindings: Env }>,
   nodeId: string
 ): Promise<Node | null> {
-  const userId = getUserId(c);
-  const db = drizzle(c.env.DATABASE);
-
-  const result = await db
-    .select()
-    .from(nodes)
-    .where(
-      and(
-        eq(nodes.id, nodeId),
-        eq(nodes.userId, userId),
-        ne(nodes.status, 'deleted')
-      )
-    )
-    .limit(1);
-
-  return result[0] ?? null;
+  return findAccessibleNode(c.env, nodeId, ownerNodeAccess(getUserId(c)));
 }
 
 /**
@@ -47,12 +33,7 @@ export async function requireNodeScopedWorkspaceOwnership(
   const result = await db
     .select()
     .from(workspaces)
-    .where(
-      and(
-        eq(workspaces.id, workspaceId),
-        eq(workspaces.userId, userId)
-      )
-    )
+    .where(and(eq(workspaces.id, workspaceId), eq(workspaces.userId, userId)))
     .limit(1);
 
   const workspace = result[0];

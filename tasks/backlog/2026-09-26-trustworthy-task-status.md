@@ -1,5 +1,20 @@
 # Make SAM Task Status Trustworthy
 
+> **Reconciliation 2026-10-26:** Still open: only the #2153 staging check. Pointer fixes: #2317
+> and #2318 moved the sweep's expiry check to `apps/api/src/scheduled/stuck-tasks.ts:1157-1165`,
+> and #2317 and #2382 moved the tests to `stuck-task-sleeping-conversation.test.ts:581,917`.
+
+> **Reconciliation 2026-10-12:** Items 1-4 of the 2026-10-05 list are resolved. #2280
+> (`90cbf4ea4`) ends an expired sleep as `cancelled` + `terminal_reason=snapshot_expired`
+> (`apps/api/src/services/session-expiry.ts:9-53`). It also takes `in_progress` rows, so Instant
+> tasks (still `in_progress` while asleep, by design) are covered. The purge writes it before
+> deleting the snapshot (`apps/api/src/scheduled/session-snapshot-purge.ts:79,147`) and the sweep
+> checks it first (`apps/api/src/scheduled/stuck-tasks.ts:1139-1147`). Migration 0187 moved the 69
+> pre-#2230 rows to `sleeping`; #2281 (`2bbe9336f`, migration 0188) fixed two more. Tests:
+> `apps/api/tests/unit/stuck-task-sleeping-conversation.test.ts:517,853` (purge, then sweep).
+> Read-only production D1 on 10-12: since 10-09, 13 tasks ended `snapshot_expired` and none failed
+> with `workspace_deleted`. Still open: only the unticked staging check of #2153 (item 5).
+
 > **Expiry follow-up 2026-10-08:** Raphaël approved a neutral **Expired** end state after the
 > saved workspace's seven-day retention window, with a readable transcript and Fork continuation.
 > The expiry transition, bounded legacy repair, regression tests, and deployment evidence are
@@ -93,6 +108,6 @@ The 2026-09-26 audit found two task-status defects:
 
 ## References
 
-- `apps/api/.claude/rules/58-terminal-verdicts-must-match-the-resumer.md`
+- `.claude/rules/58-terminal-verdicts-must-match-the-resumer.md`
 - SAM idea `01KZNGJG1DCH8DBC835Y0272P4`
 - `tasks/archive/2026-09-14-stuck-task-sweep-preserves-sleeping-conversations.md`

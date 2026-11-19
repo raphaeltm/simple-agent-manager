@@ -16,7 +16,7 @@ describe('workspace runtime assets shared project access', () => {
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
         project_id TEXT,
-        agent_profile_hint TEXT
+        agent_profile_hint TEXT, callback_generation TEXT
       );
 
       CREATE TABLE tasks (
@@ -25,7 +25,9 @@ describe('workspace runtime assets shared project access', () => {
         project_id TEXT NOT NULL,
         user_id TEXT NOT NULL,
         agent_profile_hint TEXT,
-        skill_id TEXT
+        skill_id TEXT,
+        agent_configuration_id TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE agent_profiles (
@@ -47,7 +49,9 @@ describe('workspace runtime assets shared project access', () => {
         env_key TEXT NOT NULL,
         stored_value TEXT NOT NULL,
         value_iv TEXT,
-        is_secret INTEGER NOT NULL DEFAULT 0
+        is_secret INTEGER NOT NULL DEFAULT 0,
+        expires_at INTEGER,
+        secret_request_id TEXT
       );
 
       CREATE TABLE project_runtime_files (

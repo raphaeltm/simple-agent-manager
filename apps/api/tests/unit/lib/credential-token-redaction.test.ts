@@ -80,7 +80,9 @@ describe('redactCredentialTokens', () => {
  * root cause of the `sk-` gap. A token family may be matched only by the shared module.
  */
 describe('credential-token shapes have exactly one definition', () => {
-  const SHARED_MODULE = path.join(SRC_ROOT, 'lib', 'credential-token-redaction.ts');
+  // The matcher lives in worker-core; the scan covers the worker and that package.
+  const WORKER_CORE_SRC = path.resolve(SRC_ROOT, '../../../packages/worker-core/src');
+  const SHARED_MODULE = path.join(WORKER_CORE_SRC, 'credential-token-redaction.ts');
   // Regex fragments that only a hand-rolled matcher for these families would contain.
   const TOKEN_REGEX_FRAGMENTS = [
     'sk-[',
@@ -96,7 +98,8 @@ describe('credential-token shapes have exactly one definition', () => {
   ];
 
   it('no API source file outside the shared module defines its own token matcher', () => {
-    const files = collectSourceFiles();
+    const files = [...collectSourceFiles(), ...collectSourceFiles(WORKER_CORE_SRC)];
+    expect(files).toContain(SHARED_MODULE);
     // A broken scan must not pass as "all clear".
     expect(files.length).toBeGreaterThan(500);
 
@@ -105,7 +108,8 @@ describe('credential-token shapes have exactly one definition', () => {
       .flatMap((file) => {
         const source = readFileSync(file, 'utf8');
         return TOKEN_REGEX_FRAGMENTS.filter((fragment) => source.includes(fragment)).map(
-          (fragment) => `${path.relative(SRC_ROOT, file)} contains "${fragment}"`
+          (fragment) =>
+            `${path.relative(path.resolve(SRC_ROOT, '../../..'), file)} contains "${fragment}"`
         );
       });
     expect(offenders).toEqual([]);

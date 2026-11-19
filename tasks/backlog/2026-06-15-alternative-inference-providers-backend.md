@@ -1,5 +1,12 @@
 # Alternative Inference Provider Support — Backend-First (via SAM Proxy)
 
+> **Reconciliation 2026-11-02:** the UI follow-up is still open; `apps/web/src` has no `PROVIDER_PRESETS`, `resolveHarnessDialect` or `byProvider`, only display labels. #2474 (`09b7f3e08`) replaced the old Connect flow (`ConnectFlow.tsx` deleted), so presets would now go in `apps/web/src/components/accounts/ConnectAccountSheet.tsx` / `AgentConnectForm.tsx`. #2490 (`dedb75591`) moved the optional cleanup's targets. The provider-fallback conditionals are now `apps/api/src/routes/workspaces/agent-credential-attribution.ts:149-165`, and the claude/codex ladder is `runtime.ts:863-912`. `mapResolvedToLegacy` is now `apps/api/src/services/agent-key-resolution.ts:182`.
+
+> **Reconciliation 2026-10-26:** no change to the UI follow-up: `apps/web/src` still has no
+> `PROVIDER_PRESETS`, `resolveHarnessDialect` or `byProvider`. The optional cleanup's pointers
+> moved by 18 lines (#2318, `7164053b4`): the claude/codex conditionals are now
+> `apps/api/src/routes/workspaces/runtime.ts:301-311` and `:990-1039`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** the whole backend, in PR #1322 (`11c630bcb`): `harness-capabilities.ts` and

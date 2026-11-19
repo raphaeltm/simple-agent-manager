@@ -24,6 +24,7 @@ type Manager struct {
 	defaultRows        int
 	defaultCols        int
 	workDir            string
+	env                []string
 	containerResolver  ContainerResolver
 	containerUser      string
 	processGroup       bool
@@ -40,6 +41,7 @@ type ManagerConfig struct {
 	DefaultRows        int
 	DefaultCols        int
 	WorkDir            string
+	Env                []string // Per-manager environment overrides; never changes the process environment.
 	ContainerResolver  ContainerResolver
 	ContainerUser      string
 	ProcessGroup       bool          // Start sessions in their own process group for local standalone mode
@@ -70,6 +72,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 		defaultRows:        cfg.DefaultRows,
 		defaultCols:        cfg.DefaultCols,
 		workDir:            cfg.WorkDir,
+		env:                append([]string(nil), cfg.Env...),
 		containerResolver:  cfg.ContainerResolver,
 		containerUser:      cfg.ContainerUser,
 		processGroup:       cfg.ProcessGroup,
@@ -127,6 +130,7 @@ func (m *Manager) CreateSessionWithID(sessionID, userID string, rows, cols int, 
 			}
 			return m.workDir
 		}(),
+		Env:              m.env,
 		ContainerID:      containerID,
 		ContainerUser:    m.containerUser,
 		ProcessGroup:     m.processGroup,

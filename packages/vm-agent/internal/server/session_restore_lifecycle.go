@@ -25,6 +25,10 @@ func (s *Server) completeSessionRestore(ctx context.Context, attempt *sessionRes
 		return
 	}
 	defer lock.Unlock()
+	if err := s.requireNoWorkspaceDeletion(input.workspaceID); err != nil {
+		attempt.err = err
+		return
+	}
 	runtime, exists := s.getWorkspaceRuntime(input.workspaceID)
 	if !exists || runtime != admittedRuntime {
 		attempt.err = fmt.Errorf("workspace changed before session restore")

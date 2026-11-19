@@ -319,6 +319,7 @@ describe('composable-credentials resolver', () => {
         'user-1',
         'test-key',
         undefined,
+        undefined,
       );
     });
   });

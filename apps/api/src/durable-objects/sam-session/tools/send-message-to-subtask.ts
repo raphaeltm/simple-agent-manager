@@ -13,9 +13,11 @@ import { log } from '../../../lib/logger';
 import { sendPromptToAgentOnNode } from '../../../services/node-agent';
 import { persistOrchestrationPrompt } from '../../../services/orchestration-prompts';
 import * as projectDataService from '../../../services/project-data';
+import { LIVE_TASK_STATUSES } from '../../../services/task-status';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
-const ACTIVE_STATUSES = ['queued', 'provisioning', 'running', 'awaiting_followup'];
+/** Tasks that hold (or are acquiring) a live agent runtime that can take a message. */
+const ACTIVE_STATUSES = LIVE_TASK_STATUSES;
 const DEFAULT_MAX_MESSAGE_LENGTH = 32_000;
 
 export const sendMessageToSubtaskDef: AnthropicToolDef = {
@@ -41,7 +43,7 @@ export const sendMessageToSubtaskDef: AnthropicToolDef = {
 
 export async function sendMessageToSubtask(
   input: { taskId: string; message: string },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   if (!input.taskId?.trim()) {
     return { error: 'taskId is required.' };
@@ -67,12 +69,7 @@ export async function sendMessageToSubtask(
     })
     .from(schema.tasks)
     .innerJoin(schema.projects, eq(schema.tasks.projectId, schema.projects.id))
-    .where(
-      and(
-        eq(schema.tasks.id, taskId),
-        eq(schema.projects.userId, ctx.userId),
-      ),
-    )
+    .where(and(eq(schema.tasks.id, taskId), eq(schema.projects.userId, ctx.userId)))
     .limit(1);
 
   const task = rows[0];
@@ -81,7 +78,9 @@ export async function sendMessageToSubtask(
   }
 
   if (!ACTIVE_STATUSES.includes(task.status)) {
-    return { error: `Task is in '${task.status}' status — only active tasks can receive messages.` };
+    return {
+      error: `Task is in '${task.status}' status — only active tasks can receive messages.`,
+    };
   }
 
   if (!task.workspaceId) {
@@ -120,8 +119,8 @@ export async function sendMessageToSubtask(
     .where(
       and(
         eq(schema.agentSessions.workspaceId, workspace.id),
-        eq(schema.agentSessions.status, 'running'),
-      ),
+        eq(schema.agentSessions.status, 'running')
+      )
     )
     .orderBy(desc(schema.agentSessions.createdAt))
     .limit(1);
@@ -150,7 +149,7 @@ export async function sendMessageToSubtask(
       message,
       env,
       ctx.userId,
-      messageId,
+      messageId
     );
 
     log.info('sam.send_message_to_subtask.delivered', {
@@ -171,7 +170,10 @@ export async function sendMessageToSubtask(
 
     // Handle 409 — agent is busy, try queuing via mailbox
     if (errorMessage.includes('409')) {
-      log.info('sam.send_message_to_subtask.agent_busy', { taskId, agentSessionId: agentSession.id });
+      log.info('sam.send_message_to_subtask.agent_busy', {
+        taskId,
+        agentSessionId: agentSession.id,
+      });
 
       try {
         const [ws] = await db

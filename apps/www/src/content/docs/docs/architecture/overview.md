@@ -7,6 +7,8 @@ SAM is a serverless platform for ephemeral AI coding environments. The architect
 
 For instant sessions, SAM can also run one standalone vm-agent in a raw Cloudflare Container. The deployment workflow builds the Linux vm-agent from the deployment commit, records its version and SHA-256 digest, and bakes it into the container image before Wrangler deploys the Worker. Cloudflare Worker deployment versions therefore provide the matching image/Worker rollback boundary. The image contains only SAM runtime tooling: project, profile, and skill files, environment variables, and secrets remain outside the image and are fetched and applied when the ACP session starts.
 
+The optional [SAM account assistant](/docs/architecture/sam-account-assistant/) keeps canonical private history in a per-user `SamSession` Durable Object and delegates repository work into visible project tasks.
+
 ## High-Level Architecture
 
 ```mermaid
@@ -95,7 +97,7 @@ The API Worker (`apps/api/`) is a Hono application handling:
 - **Resource management** — CRUD for nodes, workspaces, projects, ideas
 - **Reverse proxy** — workspace subdomain, port traffic, and file proxy to VMs
 - **Durable Objects** — per-project data, node lifecycle, idea orchestration, notifications
-- **Workers AI** — idea title generation, voice transcription, text-to-speech
+- **Workers AI** — idea title generation, voice transcription, text-to-speech, and the models agents call with `run_ai_model`
 - **MCP server** — project-aware tools for running agents
 - **Cron triggers** — provisioning timeout checks, warm node cleanup, orphan detection
 
@@ -163,23 +165,22 @@ Before a deploy applies D1 migrations, SAM records per-table counts and a time-t
 
 ### Durable Objects (Per-Project Data)
 
-| Binding                         | Scope       | Purpose                                                                  |
-| ------------------------------- | ----------- | ------------------------------------------------------------------------ |
-| `PROJECT_DATA`                  | Per project | Chat sessions, messages, activity events, ACP sessions (embedded SQLite) |
-| `NODE_LIFECYCLE`                | Per node    | Warm pool state plus durable proof-bearing workspace deletion retries    |
-| `TASK_RUNNER`                   | Per task    | Multi-step task execution orchestration via alarm callbacks              |
-| `ADMIN_LOGS`                    | Singleton   | Real-time log broadcast to admin WebSocket clients                       |
-| `NOTIFICATION`                  | Per user    | Notification delivery and state management                               |
-| `PROJECT_ORCHESTRATOR`          | Per project | Project-scoped agent orchestration                                       |
-| `PROJECT_AGENT`                 | Per project | AI technical-lead session for a project                                  |
-| `SAM_SESSION`                   | Per user    | SAM agent conversation session state                                     |
-| `CODEX_REFRESH_LOCK`            | Per user    | Serializes Codex OAuth token refresh (prevents 429 rotation races)       |
-| `GITHUB_USER_ACCESS_TOKEN_LOCK` | Per user    | Serializes GitHub OAuth user-token refresh                               |
-| `GITLAB_USER_ACCESS_TOKEN_LOCK` | Per user    | Serializes GitLab OAuth user-token refresh                               |
-| `AI_TOKEN_BUDGET_COUNTER`       | Per user    | Atomic AI token budget accounting                                        |
-| `TRIAL_COUNTER`                 | Singleton   | Monthly trial-onboarding cap counter (keyed by `YYYY-MM`)                |
-| `TRIAL_EVENT_BUS`               | Per trial   | SSE event buffering for trial provisioning                               |
-| `TRIAL_ORCHESTRATOR`            | Per trial   | Alarm-driven trial provisioning                                          |
+| Binding                         | Scope       | Purpose                                                                                                    |
+| ------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------- |
+| `PROJECT_DATA`                  | Per project | Chat sessions, messages, activity events, ACP sessions (embedded SQLite)                                   |
+| `NODE_LIFECYCLE`                | Per node    | Warm pool state plus durable proof-bearing workspace deletion retries                                      |
+| `TASK_RUNNER`                   | Per task    | Multi-step task execution orchestration via alarm callbacks                                                |
+| `ADMIN_LOGS`                    | Singleton   | Real-time log broadcast to admin WebSocket clients                                                         |
+| `NOTIFICATION`                  | Per user    | Notification delivery and state management                                                                 |
+| `PROJECT_ORCHESTRATOR`          | Per project | Project-scoped agent orchestration                                                                         |
+| `PROJECT_AGENT`                 | Per project | AI technical-lead session for a project                                                                    |
+| `SAM_SESSION`                   | Per user    | SAM agent conversation session state                                                                       |
+| `CODEX_REFRESH_LOCK`            | Per user    | Serializes Codex OAuth token refresh of the account each run was seeded with (prevents 429 rotation races) |
+| `GITHUB_USER_ACCESS_TOKEN_LOCK` | Per user    | Serializes GitHub OAuth user-token refresh                                                                 |
+| `GITLAB_USER_ACCESS_TOKEN_LOCK` | Per user    | Serializes GitLab OAuth user-token refresh                                                                 |
+| `AI_TOKEN_BUDGET_COUNTER`       | Per user    | Atomic AI token budget accounting                                                                          |
+
+The retired anonymous-trial classes (`TrialCounter`, `TrialEventBus`, `TrialOrchestrator`) are still exported as unbound tombstones (`apps/api/src/durable-objects/retired-trial.ts`), because Cloudflare refuses a deploy that drops a class an existing namespace depends on unless a storage-deleting `deleted_classes` migration is added.
 
 ### Why Hybrid?
 
@@ -193,7 +194,7 @@ Summary data flows back from DOs to D1 via debounced sync (e.g., `last_activity_
 | -------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **KV**         | `KV`    | Auth sessions, bootstrap tokens, boot logs, MCP tokens                                                                                           |
 | **R2**         | `R2`    | VM Agent binaries, private diagnostic artifacts, session snapshots, compose image artifacts, TTS audio cache, ProjectData archived tool payloads |
-| **Workers AI** | `AI`    | Idea title generation, transcription, TTS                                                                                                        |
+| **Workers AI** | `AI`    | Idea title generation, transcription, TTS, agent model calls (`run_ai_model`)                                                                    |
 
 ### API error diagnostics
 
@@ -217,7 +218,7 @@ only provably stale `created`/`applying` compose releases to terminal `failed` u
 D1-observed deployment-node state and recent release-event activity as the lease. It
 does not call the deployment node or inspect R2. Terminal release retention then prunes
 old releases outside the observed-applied/newest rollback window, and
-`apps/api/src/scheduled/compose-image-artifact-cleanup.ts:runComposeImageArtifactCleanup()`
+`packages/app-deployment/src/scheduled/compose-image-artifact-cleanup.ts:runComposeImageArtifactCleanup()`
 deletes only old compose artifacts that are no longer referenced by any remaining valid
 release manifest.
 
@@ -238,7 +239,8 @@ the task/session context, the project record, a mode-specific `instructions[]` a
 project's stored knowledge and policies.
 
 Knowledge and policies are delivered as **rendered markdown only** — `knowledgeDirectives` and
-`policyDirectives`, produced by `formatKnowledgeDirectives()` and `formatPolicyDirectives()`.
+`policyDirectives`, produced by `formatKnowledgeDirectives()` and `formatPolicyDirectives()` after
+the size budgets described in [Inject modes and size budgets](#inject-modes-and-size-budgets).
 Each field is omitted entirely when there is nothing to render; a failed Durable Object read
 also degrades to "omitted" rather than erroring the bootstrap.
 
@@ -247,11 +249,11 @@ carried `knowledgeContext` and `policyContext` arrays holding byte-identical obs
 policy bodies. Nothing consumed them, and on a mature project they accounted for roughly half
 the payload (~166K → ~81K characters, about 21k tokens per session bootstrap), so they were
 removed. Callers that need machine-readable records should use the dedicated tools —
-`list_policies` / `get_policy`, and `search_knowledge` / `get_project_knowledge` — rather than
+`policies_read` method `list` / `policies_read` method `get`, and `knowledge_read` method `search` / `knowledge_read` method `list` — rather than
 parsing the bootstrap payload.
 
-Because `update_policy` and `remove_policy` resolve rows by exact id (`updatePolicy()` and
-`removePolicy()` in `apps/api/src/durable-objects/project-data/policies.ts` use `WHERE id = ?`),
+Because `policies_write` method `update` and `policies_write` method `remove` resolve rows by exact id (`updatePolicy()` and
+`removePolicy()` in `packages/project-data/src/do/policies.ts` use `WHERE id = ?`),
 each rendered policy line carries its **full, untruncated** id:
 
 ```text
@@ -259,13 +261,13 @@ each rendered policy line carries its **full, untruncated** id:
 - **Call get_instructions first** (id: 7d24e435-0153-44a6-a532-1244510d9e25): Agents must load SAM context before starting work.
 ```
 
-A policy may also carry a **shelf life**. `add_policy` and `update_policy` accept an optional
+A policy may also carry a **shelf life**. `policies_write` method `add` and `policies_write` method `update` accept an optional
 `expiresAt` (epoch milliseconds) and a `scope` of either `always` (a standing project policy,
 the default) or `task` (a one-shot policy captured for a specific piece of work). A
 `task`-scoped policy must set `expiresAt`, enforced at every write boundary by
 `validatePolicyLifecycle()` in `packages/shared/src/constants/policies.ts` — which is what
 stops a constraint captured for one workflow from being injected forever. When a policy has an
-expiry, `formatPolicyLifecycle()` renders it inline between the title and the id:
+expiry, `formatPolicyLifecycle()` (`packages/shared/src/policy-directive-format.ts`) renders it inline between the title and the id:
 
 ```text
 - **Use profile X for the reliability wave** (task-scoped, expires 2026-09-30) (id: d55af478-5234-4178-8f9c-47dfd5647de2): ...
@@ -273,231 +275,88 @@ expiry, `formatPolicyLifecycle()` renders it inline between the title and the id
 ```
 
 Expiry is evaluated at **read time** in `getActivePolicies()`
-(`apps/api/src/durable-objects/project-data/policies.ts`) — `active = 1 AND (expires_at IS NULL
+(`packages/project-data/src/do/policies.ts`) — `active = 1 AND (expires_at IS NULL
 OR expires_at > ?)`. There is no sweep or cron: a lapsed policy simply stops being selected. The
-row is deliberately retained and stays `active`, so `get_policy`, `list_policies`, and the
+row is deliberately retained and stays `active`, so `policies_read` method `get`, `policies_read` method `list`, and the
 Policies tab can still show a human that the policy existed and when it stopped applying. A
 policy with no `expiresAt` never expires, which is the behaviour of every policy created before
 lifecycle controls existed.
 
+#### Inject modes and size budgets
+
+Every policy has an **inject mode** (`project_policies.inject_mode`, ProjectData DO migration
+`080-policy-inject-mode`):
+
+- `pinned` — injected in full into every session. This is the default for every existing policy
+  and every new one, so the policy text a session receives does not change until a project admin
+  unpins a policy. Pinned policies are never trimmed by any budget.
+- `on_demand` — always listed by title, category and id in a disclosed index at the end of
+  `policyDirectives`, and injected in full only when it matches the session's task.
+  `selectPolicies()` (`apps/api/src/routes/mcp/instruction-budget.ts`) scores each on-demand
+  policy by distinctive words it shares with the task title, description, session topic and
+  idea title (2 per title word, 1 per body word; a word in more than a fifth of the project's
+  policies, and in more than one, does not count), ranks by score, category, recency and id, caps each category, and
+  fills the `instructions.onDemandPolicyMaxChars` budget (policy lines only) without cutting a
+  policy part-way.
+
+```text
+### On-demand policies (3): 1 shown in full above because they match this task, 2 listed here by title only
+These still apply. Before you act in an area one of them covers, call `policies_read` method `get` with its id and follow it. Rules and constraints among them are binding.
+- **Daily journal posts stay technical** (preference, id: 215c8350-b530-4065-a444-52b9e080770b)
+```
+
+`policies_write` method `add` and method `update` accept `injectMode`; an update that omits it
+leaves the mode unchanged. In the app, **Agent context → Policies** shows each policy's mode and
+the characters it adds to every session, and lets a project admin pin or unpin it.
+
+Knowledge keeps its ranking (`getAllHighConfidenceKnowledge()`) and gets a size budget on top:
+`fitKnowledge()` drops the lowest-ranked observations until the block fits
+`instructions.knowledgeMaxChars`, keeps the entity index, and the index says how many were left
+out.
+
+`applyInstructionBudgets()` then checks the serialized payload against
+`instructions.totalMaxChars` (default 120,000). When it is over, knowledge is trimmed first and
+on-demand policy text second. When pinned policies, the task and the indexes exceed it by
+themselves, only those are sent, `instructions[]` gains one line saying so, and
+`mcp.get_instructions.required_over_budget` is logged; a lower budget therefore never produces a
+larger payload. Claude Code saves a tool result over about 50,000 characters to a file (measured
+on staging2: 59,820 characters spilled), so inline delivery needs a total of about 48,000 and
+enough policies on demand. Every call logs
+`mcp.get_instructions.size` with the section sizes and counts. If the budget pass throws,
+`renderWithinBudgets()` (`instruction-payload.ts`) falls back to the unbudgeted rendering. Mission child tasks (`dispatch-description.ts`) still inherit every active policy in full,
+whatever its inject mode. The five budgets are admin settings: see [Admin settings](/docs/guides/admin-settings/#agent-instructions).
+
 Knowledge observations do **not** currently carry their `observationId` in this payload, so
-`update_knowledge`, `remove_knowledge`, and `confirm_knowledge` need an id obtained from
-`search_knowledge` or `get_project_knowledge` first.
+`knowledge_write` method `update`, `knowledge_write` method `remove`, and `knowledge_write` method `confirm` need an id obtained from
+`knowledge_read` method `search` or `knowledge_read` method `list` first.
 
 ## Durable Objects Deep Dive
 
+The [Durable Object architecture](/docs/architecture/durable-objects/) covers storage and lifecycle details:
+
 ### ProjectData DO
 
-Terminal-session archive shards support two pinned representations. Legacy shards store raw rows in SQLite; compact shards retain session metadata, a versioned and verified search projection, consolidated conversation records and tool archive pointers in SQLite, with lossless raw history and bulky tool metadata in private compressed R2 chunks. Exact-owner reads verify object identity, sizes and hashes; recovery can export the original rows back to root. Source deletion requires complete projection coverage. Older published shards repair missing coverage from R2 through bounded durable checkpoints while project-wide search reports provisional owner/index coverage. Compact migration admission uses a durable daily write estimate, and the new writer defaults off. See [compact archive configuration](/docs/reference/configuration/#compact-archive-shards).
-
-Each project gets one `ProjectData` Durable Object instance, accessed via `env.PROJECT_DATA.idFromName(projectId)`.
-Every user-visible chat session has exactly one backing D1 Task. `taskMode` controls autonomous task versus human-controlled conversation lifecycle semantics; it never controls whether the Task exists. D1 `tasks.chat_session_id` and ProjectData `chat_sessions.task_id` form a bidirectional soft link. Because the stores cannot share a transaction, creation and legacy repair are idempotent and retain compatibility readers while reconciliation is in progress.
-
-Automatic sleep processes bounded batches of due intents. If the source workspace or its ownership metadata is gone, the scheduler retires that sleep intent while retaining the snapshot artifacts and recovery metadata. It checks the observed record before updating so concurrent recovery or capture takes precedence. A failed attempt receives a future retry deadline, so a persistent failure yields its slot to other due sessions.
-
-Failed sleep attempts are bounded by a persisted episode (`apps/api/src/services/session-sleep-episode.ts`). `claimSessionSnapshotSleep()` starts the episode clock at the first claim, and every failed or abandoned attempt increments `session_snapshots.sleep_episode_failures`; neither a capture generation nor a deferral resets them. After `SESSION_SLEEP_FAILURE_MAX_ATTEMPTS` failures or `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS`, the sweep runs `runSessionSleepFallback()` (`apps/api/src/services/session-sleep-fallback.ts`) for an idle VM session. It re-checks that the agent's turn has ended, abandons any in-flight capture without replacing the last completed generation, and requires a recovery point: a completed generation with a full commit id whose work-in-progress bundle, which carries the commit objects, still verifies in R2 (`assessSessionSleepRecoveryPoint()` in `apps/api/src/services/session-sleep-recovery-point.ts`). It records the decision in `sleep_fallback_json`, writes a chat notice, and releases the workspace through the same teardown as an ordinary sleep (`completeSleepTeardown()` in `apps/api/src/services/session-sleep-teardown.ts`), so shared nodes, other sessions and warm retention are handled the same way. Without a recovery point, on Instant, or at the `SESSION_SLEEP_MAX_ATTEMPTS` ceiling, the episode ends blocked instead: `sleep_status='terminal_failed'`, a chat notice, and no further automatic snapshot attempt until a person sends a message or chooses Sleep. A wake from a fallback sleep restores the files and Git state but starts the agent fresh: the restore response withholds the stale agent session (`sessionSnapshotRestoreResponse()` in `apps/api/src/services/session-snapshot-restore-response.ts`), and the wake prompt says what was restored and not to repeat outside effects (`sessionRecoveryInitialPrompt()` in `apps/api/src/services/session-sleep-fallback-messages.ts`).
-
-Task completion can occur before the final answer finishes streaming. Working activity reports retain the completion sleep intent while releasing any preparing claim. Terminal-session ledger cleanup independently protects the finishing response for the configured `SESSION_SLEEP_AFTER_MS` interval from completion (falling back to the task update time for legacy records), then checks canonical prompt and background-work activity. The D1 session summary follows the authoritative ProjectData session status, so cleanup cannot mark a protected conversation stopped in the UI. Automatic sleep and teardown also measure a completed prompt’s stale interval from the later activity or task-completion time; an old, long-running prompt cannot become immediately sleep-eligible while its final answer streams. A confirmed idle report still releases the teardown safety gate immediately. Stale activity and absent state expire through these existing bounded intervals.
-
-A failed task is kept by sleep too, so its uncommitted or unpushed work survives the failure. `cleanupTerminalTaskResources()` (`apps/api/src/services/task-terminal-cleanup.ts`), explicit run cleanup (`cleanupRequestedTaskRun()` in `apps/api/src/services/requested-task-run-cleanup.ts`) and attention expiry (`failExpiredTaskMarker()` in `apps/api/src/durable-objects/project-data/attention-expiry.ts`) consult `preserveFailedTaskWork()` (`apps/api/src/services/failed-task-preservation.ts`) before any teardown. A runtime the sleep sweep can claim (a live `vm` or `cf-container` workspace with a chat session and a resumable agent session) gets a snapshot-backed sleep queued as a new sleep episode with a fresh retry budget, and the queue is read back to confirm an intent was written. A conversation that has already slept, or whose sleep is in flight, is left asleep, judged by the same predicate the resumer uses, and an incomplete snapshot is noted in the chat. If the lookup fails, teardown is withheld. In all three cases the ProjectData session is never marked `failed`, because snapshot recovery wakes only `sleeping` sessions. Only a runtime that cannot be preserved is torn down, and the chat first receives a system message saying the work was not saved. A failed task drains like a completed one: while its agent still reports a turn, the sleep waits `SESSION_SLEEP_AFTER_MS` past the last report, because `sleepWorkspaceSession()` abandons a capture when activity changes under it. The sleep machinery treats `failed` like `completed` through one authority, `apps/api/src/services/sleep-preserved-task-status.ts`, which covers idleness, the re-report fence, the completion drain, the claimer's own preconditions, and the node-cleanup reapers. The reapers leave a failed task's workspace alone only while the sleep sweep can claim it or has slept it and its sleep has not given up, so they remain the backstop for a release that never ran. The sweep gives up on a failed task's preservation (`apps/api/src/services/failed-task-preservation-release.ts`) when its runtime stops being claimable, such as an agent session ended by a fatal error, when its sleep episode ends blocked, or when the sleep has waited `FAILED_TASK_PRESERVATION_MAX_WAIT_MS` (default 8 hours) since the latest of the failure, an in-place wake and the start of the agent's current turn, and then tears the runtime down and says so. A user still working in the conversation restarts that wait with every turn; only a single turn that never ends, or a state that never resolves, runs it out. A crashed or timed-out agent therefore loses its workspace changes: the sleep path needs a live agent session to snapshot. So does an agent that reported work after its SAM check-in but kept that turn open past the watchdog's hard ceiling: the turn will not end, and a sleep would only wait on it (`assessCheckinActivity()` in `apps/api/src/durable-objects/project-data/checkin-activity.ts`, the same assessment that defers the check-in). A `prompting` label with nothing reported since the check-in is not proof of a hung turn, so that failure is preserved like any other. Archive and delete (`destructiveSessionEnd`), parent stops (`cancelled`), and startup failures keep their immediate destructive cleanup. Failed-task snapshots follow the same retention and purge as every other sleep snapshot.
-
-VM sleep marks the backing non-terminal task `sleeping`. When the conversation wakes, a D1 transaction reactivates that same task for placement, preserving its ID, parent/child hierarchy, dispatch depth, and chat-session binding. The existing TaskRunner Durable Object resets its runtime and placement state, and ProjectData keeps `chat_sessions.task_id` unchanged. New wake cycles do not create replacement recovery tasks or append supersession chains; the legacy recovery columns remain for existing data. Instant sessions continue to wake their runtime in place and retain their active task status.
-
-The control plane records a versioned, credential-free runtime contract in `agent_sessions.runtime_contract_json` before launch and copies it to `session_snapshots.runtime_contract_json` before sleep. Both restore paths deliver its resolved model, effort, permission and provider settings, ACP interaction configuration, and original task callback context before loading the harness. Resolved sessions do not re-read mutable account defaults. Task mode survives wake, including degraded VM fresh starts. Historical NULL contracts use Manual permission compatibility; malformed or unknown contract versions fail recovery safely. Callback tokens and MCP credentials are freshly issued through existing authorized paths, never stored in the contract. Instant refreshes trusted workspace metadata, including the repository default branch, before preparing the same session with fresh scoped MCP credentials and current connector policy. Task tools and automatic delivery remain available after the process restarts, while pushes to the protected default branch remain blocked; failed preparation stops recovery and revokes the new token. Before restore, SAM checks the live runtime advertises support for the saved session contract. An older VM agent or Instant image cannot silently ignore it during a rollout; recovery fails safely until a compatible runtime is available.
-
-Instant runtime-owned Git commands use the trusted workspace launch identity for the local credential exchange. Task completion uses the same GitHub credential refresh helper as agent commands, including PR creation, rather than a token inherited at process startup. Conversation callbacks continue to skip automatic Git delivery.
-
-One Durable Object alarm drives thirteen maintenance sections (runtime heartbeat timeouts, storage safety, workspace idle timeouts, idle cleanups, task reconciliation, attention expiry, activity probes, the mailbox sweep, event-wake materialization, scheduled actions, task waits, prompt delivery, and event retention). A tick runs only the sections that are due (`ProjectDataAlarmSectionScheduler` in `apps/api/src/durable-objects/project-data/alarm-sections.ts`). Because most schedules clamp overdue work into the future, the scheduler remembers each section's earliest computed due time until that section runs, and persists that memory in the object's `do_meta` table so it survives the object being evicted between alarms; an object with no readable memory and at least one tick every `PROJECT_DATA_ALARM_FULL_RUN_INTERVAL_MS` still run every section, and storage safety — the quota firebreak — keeps running before the heavier lifecycle sections. Every tick emits one `project_data.alarm.completed` log naming the ran, skipped, and failed sections with each one's wall time and SQLite rows read/written; a throwing section is isolated and retried no sooner than a minute later.
-
-Message search on a ProjectData object works inside configured windows (`searchMessagesWithCoverage()` in `apps/api/src/durable-objects/project-data/message-search.ts`): full-text ranking scores and reads only the newest matches, and the keyword fallback for not-yet-indexed text scans only the newest raw messages. The full-text index still counts a term's matches once per query for bm25, which is linear in the matches but cheap per match. Search results carry `rootSearch` coverage so callers can disclose when either window was reached.
-
-ProjectData also owns the single durable prompt-delivery queue used by browser followups and agent handoffs. Acceptance persists the visible transcript message and its stable delivery identity before runtime I/O. Alarm-driven attempts use bounded exponential backoff, a finite lifetime, compare-and-set attempt tokens, and stable VM receipts. A lost response is reconciled before retry; if receipt evidence is unavailable or belongs to another runtime, the delivery becomes explicitly ambiguous and is not replayed. Urgent mailbox classes (`interrupt`, `preempt_and_replan`, `shutdown_with_final_prompt`) add stop-and-deliver: when the target VM rejects the submit because a prompt turn is in flight, the claim runner cancels that turn through the same transport as the user stop button, records the control-plane turn end, and the turn-end fan-out releases the urgent delivery so it becomes the target's next prompt. Informational classes (`notify`, `deliver`) never stop a turn. Busy informational deliveries share one exponential-backoff deadline per target session, independent of the capped per-message attempt count; the existing retry base/max settings and delivery TTL still bound retries. An idle or turn-end signal releases that target immediately, including when it arrives before the busy response. A waking VM conversation holds its queued prompts until the TaskRunner commits the agent handoff: `resolveVmPromptDeliveryTarget()` (`apps/api/src/services/vm-prompt-delivery-target.ts`) answers not-ready while the snapshot claim is `waking`, or `restored` for that workspace, and the claiming task is still queued or delegated. The commit's readiness signal (`signalSessionWakeReady()`) then makes the parked prompt due at once. Delivering earlier would let an event-wake prompt mark its batch delivered before the runner's final authority check, which would read the wake's own delivery as revocation and stop the runtime. The woken agent can also read or acknowledge its own event before the commit, which no hold covers, so the runner's check accepts its own chat having consumed the batch (`acceptConsumedByTarget` in `validateProjectEventWakeRecoveryAuthority()`). A wake whose restore resumes the saved agent session never receives the fresh-start prompt, so when nothing is queued for it (a task-mode agent whose runtime was evicted), the TaskRunner queues that prompt itself as a `checkpoint_continuation` delivery after the ProjectData wake and before the commit (`queueRestoredSessionPrompt()` in `apps/api/src/services/restored-session-prompt.ts`), and the same hold delivers it once. The delivery stays valid only while it is the chat's latest continuation and its task is live and owns the chat (`invalidCheckpointContinuationTarget()`). Active-only indexes keep claim, ordering and expiry reads independent of retained mailbox history.
-
-ProjectData stores the durable foundation for project event subscriptions in the same per-project SQLite database. Normalized events are admitted by project, source, delivery key, and payload fingerprint; duplicate replays are idempotent, while the same source/key with a different fingerprint becomes a visible conflict. V1 subscription filters compile only allowlisted exact/set match keys for source, event type, subject type, subject ID, and severity. GitHub producers use source `github`; CI events such as `check_run.completed`, `check_suite.completed`, and `workflow_run.completed` use the head commit SHA as the subject when GitHub provides one and carry repository, PR, run, suite, and check IDs in metadata. Review events such as `pull_request_review.submitted` and `pull_request_review_comment.created` use the pull request number as the subject and carry review/comment commit IDs in metadata. Generic webhook producers use source `webhook`, event types such as `webhook.accepted` and `webhook.filtered`, and the webhook trigger ID as the subject. Delivery batches resolve the subscription's requested delivery through an explicit adapter-capability and authorization decision, then store requested delivery, resolved delivery, and the adapter decision separately for audit. Migration `040-project-event-pull-ack` adds the pull-model acknowledgement state (`ack_required`, `delivered_at`, `acked_at`, and `acked_by_*`) plus a replay index over subscription matches. Agents use MCP to list missed/queued summaries, fetch full event details on demand, and ack processed deliveries. The resolver can record pending durable-queue, runtime-adapter, or spawn decisions. Prompt-queue delivery is implemented: `existing_session_prompt` subscriptions wake the target chat through the existing prompt-delivery queue, and `runtime_interrupt` subscriptions do the same with the `interrupt` mailbox class, which may cancel the target's in-flight turn so the wake prompt is delivered immediately (stop-and-deliver). A chat holds at most one wake that has not yet reached its runtime: wake candidate selection and the wake alarm schedule both skip a chat with a pending prompt-queue batch through one shared predicate (`WAKE_TARGET_HAS_UNDELIVERED_WAKE_SQL` in `apps/api/src/durable-objects/project-data/project-events-wake-config.ts`), so once the runtime accepts that wake the next one can queue, acknowledged or not. Pull reads of events that were never injected record `recorded_not_injected` (`createPullDeliveryBatch` in `project-events-pull.ts`). In-harness runtime steering, native runtime interrupts, and task spawning remain unimplemented until their adapters are enabled. Future delivery surfaces must reuse the existing prompt-delivery queue and receipt/ambiguity handling rather than creating a second prompt-delivery engine. Do not introduce parallel `event_bus_*` tables; project eventing storage is the canonical `project_event_*` schema.
-
-Event retention uses incremental accounting and bounded mutation passes. Orphan inspection limits candidates before looking up parents and saves a tuple cursor in the scheduler state. Healthy history does not trigger rapid continuation; the cursor advances at ordinary maintenance cadence. `hasMore` reports observed eligible backlog, not proof that the uninspected suffix contains no orphan. Large retained histories can therefore take several maintenance passes to inspect completely.
-
-D1 also stores a producer-side `project_event_source_outbox` for source facts that must survive a failed ProjectData admission call. It stores bounded canonical event input, retry state, claim token, expiry, terminal timestamp, and final admission outcome. The established task-terminal transition helper writes a unique transition proof on the task row and captures the lifecycle intent with an `INSERT ... SELECT ... WHERE` guard in the same D1 batch, so losing transitions cannot leave source intents behind. Replays compare the immutable envelope and fingerprint before admission; exact replays converge through ProjectData duplicate handling, while conflicting reuses become terminal conflicts. Reconciliation works in bounded indexed phases for expiry, exhaustion, terminal retention, and due claims; each claim has a unique token so late timeout acknowledgements cannot settle a replaced claim. TaskRunner failure and MCP completion explicitly capture at their winning transition hook boundary; this capture is not atomic with the task write. Other existing lifecycle record helpers remain best-effort admission. These narrower guarantees do not imply blanket lifecycle capture.
-
-Checkpoint episodes are stored idempotently by ACP session and prompt epoch, including state transitions, attempt/error metadata, and a progress envelope for inspection. Automatic long-turn selection and checkpoint preemption remain disabled. Task agents can explicitly park on a bounded `wait_for_subtasks` subscription: ProjectData reconciles selected same-project task terminal state and enqueues one immutable caller wake through the existing durable prompt-delivery queue. See [Configuration](/docs/reference/configuration/) for the durable-execution settings and rollout flags.
-
-Complete consolidated conversation text stays in ProjectData for long-term searchability. Large
-tool-call JSON payloads older than the configured retention window are archived first
-to private, project-scoped R2 objects and only then stripped from the embedded SQLite
-row. Existing tool-content expanders read through the ProjectData service and fall
-back to the archive; MCP agents can retrieve archived payloads by message, session,
-or time range without receiving raw R2 keys.
-
-**Embedded SQLite tables:**
-
-- `chat_sessions` — session metadata, lifecycle status, message counts
-- `chat_messages` — append-only streaming token log; each row is one streaming chunk from Claude Code, not a logical message. Consecutive same-role tokens (assistant, tool, thinking) are grouped into logical messages at the API and UI layers. The `origin` column tags SAM-injected content (e.g. the `get_instructions` reminder) as `system` (NULL/absent = normal `user` message); `origin=system` rows are excluded from grouping/materialization, full-text search, topic auto-capture, and attention resolution, and are rendered collapsed in the chat UI.
-- `chat_messages_grouped` — materialized grouped messages, built by concatenating consecutive same-role tokens. Populated incrementally (`materializeSession()`, `apps/api/src/durable-objects/project-data/materialization.ts`) each time a session sleeps, stops, fails, or is terminalized by idle cleanup; `chat_sessions.materialized_through_created_at` / `materialized_through_sequence` record how far each session has been indexed, so a pass only covers what arrived since. Source for FTS5 full-text search.
-- `chat_messages_grouped_fts` — FTS5 virtual table indexed on grouped message content, using the `unicode61` tokenizer (case- and diacritic-folding, no stemming). Queries are the ANDed words of the search text, with punctuation, quotes, and FTS5 operators stripped (`buildSafeFtsQuery()` in `apps/api/src/lib/fts5.ts`), so there is no phrase or prefix matching.
-- `activity_events` — audit trail (workspace created, session stopped, etc.)
-- `chat_session_ideas` — many-to-many links between sessions and ideas
-- `task_status_events` — idea lifecycle transitions with actor tracking
-- `session_attention_markers` — active human-input and reconciliation waits, including bounded escalation/expiry state and correlated structured answers
-- `acp_sessions` — ACP session state machine with fork lineage
-- `acp_session_events` — ACP session state transition history
-- `task_wait_subscriptions` — idempotent bounded parent waits, immutable wake payloads, and retry state
-- `task_wait_children` — normalized same-project task observations for each durable wait
-- `project_events` — bounded normalized project events keyed by source delivery identity and payload fingerprint
-- `project_event_subscriptions` — explicit owner/lifecycle/filter/delivery-preference records for project-scoped event subscriptions
-- `project_event_subscription_match_keys` — deterministic compiled v1 exact/set match keys used for bounded candidate selection
-- `project_event_matches` — durable event-to-subscription matches after lifecycle and filter rechecks
-- `project_event_delivery_batches` — durable delivery-batch records with requested delivery, resolved delivery, adapter-decision audit data, and pull acknowledgement state
-- `project_event_delivery_attempts` — durable delivery-attempt results including `recorded_not_injected` and `ambiguous`
-- `project_event_source_outbox` — D1 producer retry ledger for bounded source-to-ProjectData event admission
-- `project_event_storage_accounting` — bounded event-subscription storage accounting by category
-
-**Key features:**
-
-- Hibernatable WebSockets for zero-idle-cost real-time chat
-- ACP heartbeat-history checks via DO alarms; VM interruption still requires conclusive runtime/workspace evidence
-- A scheduled node-health sweep records append-only heartbeat-loss and cleanup decisions in D1, requests session sleep before releasing an unresponsive managed VM, and retains those events after the node row is deleted. A fleet-wide heartbeat loss holds destructive cleanup for investigation.
-- Session forking with parent lineage tracking
-- Debounced D1 summary sync for dashboard data
+[ProjectData storage and transcript search](/docs/architecture/durable-objects/#projectdata-do) live in one SQLite-backed object per project, with verified archive shards for terminal sessions.
 
 #### Message search
 
-This is the detail behind the user-facing guidance in
-[Finding Past Conversations](/docs/guides/chat-features/#finding-past-conversations): what an agent
-calling `search_messages` gets back, and what a self-hoster can tune.
-
-Each `chat_messages` row is a single streaming token, so no row holds a whole word. SAM therefore
-concatenates consecutive same-role tokens into logical messages and indexes those with SQLite FTS5
-(`materializeSession()` in `apps/api/src/durable-objects/project-data/materialization.ts`), using the
-`unicode61` tokenizer, which folds case and diacritics but does not stem. Indexing is incremental:
-it runs every time a session sleeps and again when it stops, fails, or is cleaned up after going
-idle. Each pass covers the rows written since the last one, oldest first, up to
-`PROJECT_DATA_MATERIALIZATION_MAX_ROWS_PER_PASS` (5,000 streamed rows), and leaves any remainder
-for the next pass.
-
-- **Everything indexed so far**: word search. The query's words are ANDed, and everything outside
-  ASCII letters, digits, `_`, and whitespace is stripped first (`buildSafeFtsQuery()` in
-  `apps/api/src/lib/fts5.ts`). That removes punctuation, quotes, and FTS5 operators, but also
-  accented and non-Latin letters: `déploiement` becomes `d ploiement`. Because the index folds
-  diacritics, the unaccented form (`deploiement`) matches indexed text; words in non-Latin scripts
-  cannot be searched.
-- **Messages written since a session was last indexed**: keyword (substring) fallback. This rescues
-  whole user messages; streaming agent output is split across too many rows for a keyword match, so
-  agent text becomes searchable only once the next pass runs.
-- **Sessions whose index was pruned for storage**: keyword fallback only, permanently. Under storage
-  pressure SAM deletes the grouped rows and index entries for terminal sessions older than a week to
-  reclaim space, and deliberately never re-indexes them, because re-indexing would undo the reclaimed
-  bytes.
-
-Search work is bounded by configured windows rather than by how much history the project holds
-(`searchMessagesWithCoverage()` in `apps/api/src/durable-objects/project-data/message-search.ts`).
-Full-text ranking scores and reads only the newest `PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT` matches
-(2,000 by default), and the keyword fallback scans the newest
-`PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT` raw messages (50,000 by default). Small projects never
-reach either limit. A search that reached one says so: the `rootSearch` field flags it and
-`coverageNotes` explains what was not searched.
-
-Idea, task, knowledge, and message search all trim only oversized input before it reaches SQLite.
-Long multi-word queries search every retained term, including late ones: LIKE-based paths use one
-short escaped predicate per term, and indexed search uses the equivalent bounded FTS query.
-`SEARCH_QUERY_MAX_LENGTH` and `SEARCH_QUERY_MAX_TERMS` are generous abuse guards (defaults: 4096 bytes
-and 40 terms); `SEARCH_QUERY_MAX_TERM_LENGTH` keeps each LIKE term inside SQLite's pattern budget
-(default 48 bytes; higher overrides are clamped). Responses return the effective `query`, a
-`queryTruncated` flag, and `queryLimits`, so a caller can tell an exact search from one a guardrail
-trimmed (`apps/api/src/lib/search-query-limits.ts`).
-
-Project-wide `search_messages` also traverses the project's archived history. A call can return
-provisional results plus `archiveSearch.continuation`; pass that continuation back with the same
-query, roles, and limit until `archiveSearch.complete` is true. `ownerCoverage`, `indexCoverage`,
-`rootError`, and `executionErrors` distinguish pending traversal, one-time index repair, and
-execution failures. A search scoped to one session reads that session directly.
+[Message search](/docs/architecture/durable-objects/#message-search) uses grouped transcript materialization and FTS5.
 
 ### Notification DO
 
-Each user gets one `Notification` Durable Object instance, accessed via
-`env.NOTIFICATION.idFromName(userId)`. Its embedded SQLite store owns notification rows,
-channel preferences, endpoint-keyed browser Push subscriptions, failure state, and durable
-push delivery receipts. Normal medium/high-urgency inserts schedule encrypted Declarative
-Web Push fan-out with `waitUntil()`; batching and deduplication early returns do not push.
-Live WebSocket presence never suppresses out-of-band delivery.
+[Notifications](/docs/architecture/durable-objects/#notification-do) use per-user objects for connected browser delivery.
 
-For `needs_input`, ProjectData queries the linked Notification receipt before its original
-deadline can fail a task. Missing delivery instead enters a bounded reminder/grace path. The
-`reconciliation_checkin` machine-liveness watchdog is separately classified and fails the task
-at its deadline without that delivery check. Either expiry then goes through failed-task work
-preservation (above) instead of stopping the workspace outright, except a check-in whose agent
-kept a reported turn open past the watchdog's hard ceiling, which releases the runtime at once.
+### TaskRunner: pinned node startup
+
+[Pinned startup](/docs/architecture/durable-objects/#taskrunner-pinned-node-startup) coordinates placement with the selected node.
 
 ### NodeLifecycle DO
 
-Each node gets one `NodeLifecycle` Durable Object, accessed via `env.NODE_LIFECYCLE.idFromName(nodeId)`.
-
-**State machine:**
-
-```mermaid
-stateDiagram-v2
-    [*] --> active
-    active --> warm : Task complete / idle
-    warm --> active : Claimed by new task
-    warm --> destroying : Warm timeout elapsed
-```
-
-- `markIdle(nodeId, userId)` — transitions to warm, schedules cleanup alarm
-- `tryClaim(taskId)` — atomically claims a warm node for reuse (single-threaded, no races)
-- `scheduleWorkspaceDeletion(...)` — retains the exact workspace/node/user/project/session/runtime incarnation and the next bounded retry time
-- `claimWorkspaceDeletionAttempt(...)` — atomically records the point of no return before VM network I/O; restart/rebuild cancellation is refused afterward
-- `confirmWorkspaceDeletion(...)` — removes queue state only after VM-confirmed absence/success or strict provider/container termination proof
-- `alarm()` — claims and dispatches due workspace deletions through `waitUntil`, then handles the independent warm-node timeout
-
-A VM timeout, transport error, or unknown response is never deletion proof. The queue keeps
-the workspace quarantined in `stopping` and retries with bounded exponential backoff. Every
-attempt revalidates the complete workspace and node incarnation immediately before the VM
-request and again before a VM-confirmed terminal write. Identity changes and exhausted
-residence are dead-lettered for investigation rather than silently discarded; a plain D1
-`nodes.status = 'deleted'` value is not terminal proof.
-
-Live attempts also maintain a compact lexicographically ordered due-time index. A bounded,
-resumable per-DO backfill makes pre-index attempts discoverable during rollout. Alarm reads
-are limited to the configured batch and the next indexed deadline, so retained dead letters
-never cause an all-payload queue scan. The default batch is three, keeping the worst successful path
-within the Cloudflare Free-plan D1 query budget; paid deployments can override it deliberately.
+[Node lifecycle](/docs/architecture/durable-objects/#nodelifecycle-do) owns provisioning, retirement and cleanup.
 
 ### TaskRunner DO
 
-Each idea execution gets one `TaskRunner` Durable Object, accessed via `env.TASK_RUNNER.idFromName(taskId)`.
-
-**Orchestration steps** (each idempotent, alarm-driven):
-
-```mermaid
-graph LR
-    NS["node_selection"] --> NP["node_provisioning"]
-    NP --> NAR["node_agent_ready"]
-    NAR --> WC["workspace_creation"]
-    WC --> WR["workspace_ready"]
-    WR --> AS["agent_session"]
-    AS --> R["running"]
-```
-
-Cross-DO coordination with NodeLifecycle (for warm node claims) and ProjectData (for session linkage). Exponential backoff on transient errors.
-
-VM node reuse is reservation-aware. `resolveTaskStartPlacement()` in
-`apps/api/src/services/placement-resolver.ts` produces one concrete CPU, memory, disk, and
-exclusivity snapshot; TaskRunner carries that same snapshot into the workspace row.
-`findNodeWithCapacity()` in
-`apps/api/src/durable-objects/task-runner/node-selection.ts` subtracts reservations for
-`running`, `creating`, and `recovery` workspaces from trusted observed node capacity. The final
-`reserveWorkspacePlacement()` `INSERT ... SELECT` in
-`apps/api/src/services/workspace-placement.ts` repeats the aggregate check atomically together
-with node state, ownership, and compute-pool scope, so concurrent placements cannot both consume
-the last capacity.
-
-`hasWorkspaceReservationCapacity()` in
-`apps/api/src/services/workspace-resource-capacity.ts` makes legacy capacity intentionally
-conservative: both empty and occupied nodes require verified observed CPU, memory, and disk
-capacity. An occupied node also requires valid active reservations and fresh resource telemetry.
-The host memory reserve constrains admission; live memory percentage affects ranking only. CPU
-saturation and disk pressure remain live overload vetoes. Exclusive requests require an empty
-node, and an active exclusive workspace prevents any additional placement. Legacy workspace-count
-and co-tenant settings remain compatible audit data but do not block placement.
+[TaskRunner](/docs/architecture/durable-objects/#taskrunner-do) coordinates task execution and workspace startup.
 
 ## ACP Session Lifecycle
 
@@ -515,6 +374,8 @@ stateDiagram-v2
 ```
 
 **Heartbeat detection**: VM agent session heartbeats are durable ProjectData history. For VM-backed sessions, stale, missing, timed-out, or unobservable ProjectData ACP heartbeat rows are treated as suspect/unknown and do not by themselves prove runtime death. Terminalization requires explicit terminal session evidence, terminal owning workspace/node state, or another authoritative runtime signal. The `ACP_SESSION_DETECTION_WINDOW_MS` setting still bounds stale-session detection, but the ProjectData alarm defers VM session interruption when the only evidence is stale ProjectData heartbeat data.
+
+Node-refreshed ACP heartbeats show node reachability, not whether this task's agent host is running. Suspect-task and idle-cleanup adapters inspect the exact host through the VM agent's existing session endpoint: a running host preserves liveness, a stopped host does not, and unavailable inspection remains inconclusive.
 
 **Session forking**: Sessions track `parentSessionId` and `forkDepth` for lineage. Fork depth is limited to 10 (`ACP_SESSION_MAX_FORK_DEPTH`).
 
@@ -550,17 +411,17 @@ graph TD
     P5 -.- P5D["Health check polling"]
 ```
 
-CI runs lint, typecheck, tests, and build on pull requests and on canonical-repository `main` pushes. In the canonical repository, Deploy Production runs after successful `main` CI and re-verifies that the completed CI SHA is still the current `main` tip after entering the serialized deployment queue. In self-host forks, `main` push CI is intentionally skipped, so operators update their instance by manually running **Deploy Production** against the exact commit SHA from the fork's synced `main` branch. The production GitHub Environment must separately restrict deployments to the selected `main` branch so other refs cannot access its secrets with modified workflow code.
+CI runs lint, typecheck, tests, and build on pull requests and on canonical-repository `main` pushes. In the canonical repository, Deploy Production runs after successful `main` CI. After entering the serialized deployment queue it reads the current `main` tip and deploys that tip only when the tip has its own successful `main` push CI run and is not already the latest production deployment (`validateAutomaticProductionDispatch()` in `scripts/deploy/validate-production-dispatch.ts`). Main CI runs overlap and can finish out of order, so the completed CI run only wakes the gate: when the tip's CI has not succeeded yet, the run ends without deploying and the tip's own CI completion deploys it. In self-host forks, `main` push CI is intentionally skipped, so operators update their instance by manually running **Deploy Production** against the exact commit SHA from the fork's synced `main` branch. The production GitHub Environment must separately restrict deployments to the selected `main` branch so other refs cannot access its secrets with modified workflow code.
 
 ## Key Design Decisions
 
-| Decision                             | Rationale                                                                                                                                                                                                                                  |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Single Worker as API + reverse proxy | Simplifies infrastructure — one Worker handles everything                                                                                                                                                                                  |
-| Hybrid D1 + Durable Objects          | D1 for cross-project reads, DOs for high-throughput project-scoped writes                                                                                                                                                                  |
-| BYOC + platform-credential fallback  | Users/self-hosters may bring their own cloud tokens; projects may attach compute credentials; SAM's hosted platform also has an enabled platform credential so provisioning works with zero config (resolution: project → user → platform) |
-| Callback-driven provisioning         | VMs POST `/ready` when bootstrapped — no polling                                                                                                                                                                                           |
-| Dynamic DNS per workspace            | Instant subdomain resolution; cleaned up on stop                                                                                                                                                                                           |
-| Alarm-driven execution orchestration | Idempotent steps with exponential backoff; no long-running processes                                                                                                                                                                       |
-| No credentials in cloud-init         | Bootstrap tokens for secure credential injection                                                                                                                                                                                           |
-| Multi-provider abstraction           | Unified VM size/lifecycle API across Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP                                                                                                                                  |
+| Decision                             | Rationale                                                                                                                                                                                                                                         |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Single Worker as API + reverse proxy | Simplifies infrastructure — one Worker handles everything                                                                                                                                                                                         |
+| Hybrid D1 + Durable Objects          | D1 for cross-project reads, DOs for high-throughput project-scoped writes                                                                                                                                                                         |
+| BYOC + platform-credential fallback  | Users/self-hosters may bring their own cloud tokens; projects may attach compute credentials; an installation administrator may also enable a platform credential so users can provision with zero config (resolution: project → user → platform) |
+| Callback-driven provisioning         | VMs POST `/ready` when bootstrapped — no polling                                                                                                                                                                                                  |
+| Dynamic DNS per workspace            | Instant subdomain resolution; cleaned up on stop                                                                                                                                                                                                  |
+| Alarm-driven execution orchestration | Idempotent steps with exponential backoff; no long-running processes                                                                                                                                                                              |
+| No credentials in cloud-init         | Bootstrap tokens for secure credential injection                                                                                                                                                                                                  |
+| Multi-provider abstraction           | Unified VM size/lifecycle API across Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP                                                                                                                                         |

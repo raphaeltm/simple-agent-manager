@@ -8,16 +8,32 @@ export function buildEventingInstructions(input: {
   agentMessageChannelsEnabled: boolean;
 }): string[] {
   const instructions = [
-    'Waiting on a PR or CI with nothing else to do: rather than polling, call `create_project_event_subscription` ' +
-      '(requestedDelivery "existing_session_prompt"; source "github" with subjectType "pull_request" and subjectId = the PR number ' +
-      'for reviews and comments, or subjectType "commit" and subjectId = the head SHA for check_run, check_suite and workflow_run) ' +
-      'and end your turn. Verified end to end so far: a PR comment waking an idle, live chat. Waking a sleeping chat and CI or ' +
-      'review delivery are not verified yet, so keep one bounded fallback check (for example `gh pr checks`) and say when you relied on it.',
+    'Waiting on a PR or CI: reconcile the current PR head and checks before waiting, immediately after subscribing, and after every resume. ' +
+      'If checks already finished, continue the existing review/release gates instead of waiting for another completion event. ' +
+      'For CI call `create_project_event_subscription` (requestedDelivery defaults to "runtime_steer") with source "github", ' +
+      'subjectType "commit", subjectId = the full 40-character PR head SHA (never abbreviated), and default exact eventType values ' +
+      '"check_suite.completed", "workflow_run.completed"; bare names do not match. ' +
+      'Opt in to "check_run.completed" only for early per-job failure or job-specific progress. ' +
+      'A terminal event covers one app suite or workflow run, including failures; reconcile all current checks on GitHub, not just the first completion, before proceeding. ' +
+      'Subscriptions remain active after delivery. If required checks are still pending on the same SHA, keep the existing subscription and bounded fallback, then end your turn again; do not recreate them on each wake. ' +
+      'Summary webhooks can be absent or use a different SHA; keep the bounded fallback and reconcile GitHub on resume. ' +
+      'For reviews/comments use subjectType "pull_request" and subjectId = the PR number. ' +
+      'Verified end to end so far: a PR comment waking an idle, live chat. Sleeping-chat CI/review delivery is not verified yet.',
+    'Subscription expiry is not a wake. Before ending your turn, persist PR URL, full head SHA, pending check names/run URLs, ' +
+      'subscription ID/expiry and a fallback deadline. Arrange one bounded fallback check using `schedules_write` method `create` ' +
+      'with a message_session action targeting this same session; save its ID and confirm it was accepted. ' +
+      'If unavailable or rejected, report the exact blocker to your coordinator instead of assuming expiry will resume you. ' +
+      'On resume inspect subscriptions with state "any" and reconcile GitHub. Cancel only your obsolete subscriptions and fallback schedules. ' +
+      'Renew only for checks still pending on the current full SHA, with a new idempotency key for a changed filter. ' +
+      'After one fallback without progress, report exact pending checks/run URLs and delivery status; do not blindly renew the same wait. ' +
+      'Say when you relied on the fallback; a stale continuation is not proof of a live wait.',
     input.coordinationChannel
       ? `Your feature coordination channel is \`${input.coordinationChannel}\`, shared with your coordinator and sibling agents; ` +
         '`dispatch_task` passes it to your subtasks automatically. Publish findings, interface decisions, blockers, dependency ' +
         'readiness and completion evidence there with `publish_channel_event`; read it with `get_channel_history` or follow it ' +
-        'with `follow_event_channel`.'
+        'with `follow_event_channel`. When following to be woken, pass `requestedDelivery: "runtime_steer"` (a follow ' +
+        'without it only records) and `minWakeIntervalSeconds` (for example 600) unless you must react to each message ' +
+        'at once, so channel traffic wakes you at most that often.'
       : 'When you coordinate several agents on one feature, publish a short kickoff to a project event channel (for example ' +
         '`feature.<short-name>`) and pass it as `coordinationChannel` to `dispatch_task`; every descendant inherits it.',
     'If an eventing or messaging tool fails, report it visibly (`update_task_status` or your coordinator) with safe identifiers: ' +
@@ -25,8 +41,9 @@ export function buildEventingInstructions(input: {
   ];
   if (input.agentMessageChannelsEnabled) {
     instructions.push(
-      'Ordinary notify/deliver messages from other agents arrive as a SAM notice with event IDs instead of peer text: read them with `get_event`, ' +
-        'reply with `send_durable_message`, then call `ack_event_delivery`.'
+      'Messages from other agents arrive as a SAM notice with event IDs instead of peer text: read them with `get_event`, ' +
+        'reply with `send_durable_message`, then call `ack_event_delivery`. A task description you receive from `dispatch_task` ' +
+        'ends by naming the parent agent that wrote it; neither is a message from a human.'
     );
   }
   return instructions;

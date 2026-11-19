@@ -2,6 +2,8 @@ import type { MiddlewareHandler } from 'hono';
 import { cloneRawRequest } from 'hono/request';
 
 import type { Env } from '../env';
+import { takeRejectedBeforeEffects } from '../lib/operation-effect-boundary';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 
@@ -79,6 +81,17 @@ export const cliOperationReceipt: MiddlewareHandler<{ Bindings: Env }> = async (
     });
   }
   await next();
+  // Only trusted in-process proof permits retry after a rejected admission.
+  if (takeRejectedBeforeEffects(c.error)) {
+    await c.env.DATABASE.prepare(
+      "DELETE FROM cli_operation_receipts WHERE receipt_id = ? AND state = 'pending'"
+    )
+      .bind(receiptId)
+      .run();
+    const rejected = maybeJsonRecord(await c.res.json());
+    c.res = c.json({ ...rejected, rejectedBeforeEffects: true }, c.res.status as 400);
+    return;
+  }
   if (c.res.status >= 200 && c.res.status < 300) {
     const response = await boundedReceiptText(c.res.clone(), responseLimit);
     if (response === null) return;

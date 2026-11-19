@@ -23,6 +23,7 @@ const { Content } = await render(post);
   author={post.data.author}
   category={post.data.category}
   tags={post.data.tags}
+  socialImage={post.data.socialImage}
 >
   {post.data.interactive === 'scheduler' && <SchedulerExplorer />}
   {post.data.interactive === 'placement' && <PlacementExplorer />}

@@ -18,7 +18,10 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('compute quota pipeline', () => {
-  const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
+  const schemaFile = readFileSync(
+    resolve(process.cwd(), '../../packages/worker-core/src/schema.ts'),
+    'utf8'
+  );
   const serviceFile = readFileSync(
     resolve(process.cwd(), 'src/services/compute-quotas.ts'),
     'utf8'
@@ -34,14 +37,16 @@ describe('compute quota pipeline', () => {
     'utf8'
   );
   const usageRoute = readFileSync(resolve(process.cwd(), 'src/routes/usage.ts'), 'utf8');
-  const submitRoute = readFileSync(resolve(process.cwd(), 'src/services/submit-task.ts'), 'utf8');
+  const submitRoute = ['src/services/submit-vm-task-effects.ts', 'src/services/submit-vm-task.ts']
+    .map((path) => readFileSync(resolve(process.cwd(), path), 'utf8'))
+    .join('\n');
   const placementResolver = readFileSync(
     resolve(process.cwd(), 'src/services/placement-resolver.ts'),
     'utf8'
   );
   // Per-field resolvers (credential lookup policy included) split out of placement-resolver.ts.
   const placementFieldResolution = readFileSync(
-    resolve(process.cwd(), 'src/services/placement-field-resolution.ts'),
+    resolve(process.cwd(), '../../packages/scheduler-core/src/placement-field-resolution.ts'),
     'utf8'
   );
   const nodeStepsFile = readFileSync(
@@ -402,11 +407,27 @@ describe('compute quota pipeline', () => {
     });
 
     it('checks quota before task INSERT', () => {
-      const quotaIdx = dispatchToolFile.indexOf(
-        'resolveTaskStartPlacementCredentialAttributionFromPlacement'
+      const storage = readFileSync(
+        resolve(process.cwd(), 'src/routes/mcp/dispatch-task-storage.ts'),
+        'utf8'
       );
-      const insertIdx = dispatchToolFile.indexOf('INSERT INTO tasks');
-      expect(quotaIdx).toBeLessThan(insertIdx);
+      // Compare executable calls, not imports: the quota rejection must precede
+      // the helper that now owns the INSERT and its bound task values.
+      const resolveIdx = dispatchToolFile.indexOf(
+        'await resolveTaskStartPlacementCredentialAttributionFromPlacement('
+      );
+      const quotaIdx = dispatchToolFile.indexOf('await checkQuotaForUser(');
+      const rejectionIdx = dispatchToolFile.indexOf('if (!quotaCheck.allowed)');
+      const insertIdx = dispatchToolFile.indexOf('await insertDispatchedTask(');
+      expect(resolveIdx).toBeGreaterThan(-1);
+      expect(quotaIdx).toBeGreaterThan(resolveIdx);
+      expect(rejectionIdx).toBeGreaterThan(quotaIdx);
+      expect(insertIdx).toBeGreaterThan(rejectionIdx);
+      expect(dispatchToolFile).toContain("from './dispatch-task-storage'");
+      expect(storage).toContain('export function insertDispatchedTask(');
+      expect(storage).toContain('INSERT INTO tasks');
+      expect(storage).toContain('...values,');
+      expect(storage).toContain('.run()');
     });
 
     it('rejects when no credential exists', () => {

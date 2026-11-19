@@ -31,6 +31,8 @@ import {
 import { exportPKCS8, exportSPKI, generateKeyPair } from 'jose';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { D1_WITHOUT_CALLBACK_ROWS } from '../helpers/callback-generation-d1';
+
 // =============================================================================
 // Key generation for JWT tests
 // =============================================================================
@@ -51,6 +53,16 @@ vi.doMock('../../src/services/fetch-timeout', () => ({
 }));
 const { createAgentSessionOnNode, createWorkspaceOnNode, deleteWorkspaceOnNode } =
   await import('../../src/services/node-agent');
+
+function deletionIdentity(workspaceId: string) {
+  return {
+    workspaceId,
+    nodeId: 'node-abc',
+    userId: 'user-123',
+    nodeRuntimeIncarnationId: 'incarnation',
+    workspaceGeneration: 'generation',
+  };
+}
 
 function makeNodeAgentTestEnv() {
   return {
@@ -177,7 +189,7 @@ describe('Contract schemas: Control Plane -> VM Agent', () => {
 
   describe('DELETE /workspaces/:id response', () => {
     it('validates a correct delete response', () => {
-      const response = { success: true };
+      const response = { success: true, physicalDeleted: true, ...deletionIdentity('ws') };
       const result = DeleteWorkspaceAgentResponseSchema.safeParse(response);
       expect(result.success).toBe(true);
     });
@@ -491,12 +503,13 @@ describe('JWT Token Contract', () => {
       const { jwtVerify, importSPKI } = await import('jose');
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const token = await signCallbackToken('ws-test-123', env);
+      const token = await signCallbackToken('ws-test-123', env, { callbackGeneration: null });
       expect(typeof token).toBe('string');
 
       // Verify and extract claims
@@ -537,12 +550,13 @@ describe('JWT Token Contract', () => {
       const { jwtVerify, importSPKI } = await import('jose');
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const token = await signNodeCallbackToken('node-abc-123', env);
+      const token = await signNodeCallbackToken('node-abc-123', env, { callbackGeneration: null });
       expect(typeof token).toBe('string');
 
       const publicKey = await importSPKI(testPublicKey, JWT_ALGORITHM);
@@ -567,12 +581,13 @@ describe('JWT Token Contract', () => {
       const { signCallbackToken, verifyCallbackToken } = await import('../../src/services/jwt');
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const token = await signCallbackToken('ws-scope-test', env);
+      const token = await signCallbackToken('ws-scope-test', env, { callbackGeneration: null });
       const payload = await verifyCallbackToken(token, env);
 
       expect(payload.workspace).toBe('ws-scope-test');
@@ -583,19 +598,22 @@ describe('JWT Token Contract', () => {
       const { signNodeCallbackToken, verifyCallbackToken } = await import('../../src/services/jwt');
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const token = await signNodeCallbackToken('node-scope-test', env);
+      const token = await signNodeCallbackToken('node-scope-test', env, {
+        callbackGeneration: null,
+      });
       const payload = await verifyCallbackToken(token, env);
 
       expect(payload.workspace).toBe('node-scope-test');
       expect(payload.scope).toBe('node');
     });
 
-    it('returns scope: undefined for legacy tokens (no scope claim)', async () => {
+    it('rejects legacy tokens with no scope claim, with or without an expected scope', async () => {
       const { SignJWT, importPKCS8 } = await import('jose');
       const { verifyCallbackToken } = await import('../../src/services/jwt');
 
@@ -614,13 +632,46 @@ describe('JWT Token Contract', () => {
         .sign(privateKey);
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const payload = await verifyCallbackToken(legacyToken, env);
-      expect(payload.workspace).toBe('ws-legacy');
-      expect(payload.scope).toBeUndefined();
+      await expect(verifyCallbackToken(legacyToken, env)).rejects.toMatchObject({
+        statusCode: 401,
+        message: 'Missing token scope claim',
+      });
+      await expect(
+        verifyCallbackToken(legacyToken, env, { expectedScope: 'workspace' })
+      ).rejects.toMatchObject({ statusCode: 401 });
+    });
+
+    it('rejects a correctly scoped token that carries no issue time', async () => {
+      const { SignJWT, importPKCS8 } = await import('jose');
+      const { verifyCallbackToken } = await import('../../src/services/jwt');
+
+      const privateKey = await importPKCS8(testPrivateKey, JWT_ALGORITHM);
+      const noIatToken = await new SignJWT({
+        workspace: 'ws-1',
+        type: 'callback',
+        scope: 'workspace',
+      })
+        .setProtectedHeader({ alg: JWT_ALGORITHM, kid: 'key-2024-01' })
+        .setIssuer('https://api.example.com')
+        .setSubject('ws-1')
+        .setAudience(JWT_AUDIENCES.callback)
+        .setExpirationTime(new Date(Date.now() + 86400000))
+        .sign(privateKey);
+      const env = {
+        JWT_PUBLIC_KEY: testPublicKey,
+        BASE_DOMAIN: 'example.com',
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
+      } as any;
+
+      await expect(verifyCallbackToken(noIatToken, env)).rejects.toMatchObject({
+        statusCode: 401,
+        message: 'Missing token issue time',
+      });
     });
   });
 
@@ -629,6 +680,7 @@ describe('JWT Token Contract', () => {
       const { signTerminalToken, verifyTerminalToken } = await import('../../src/services/jwt');
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
@@ -645,12 +697,13 @@ describe('JWT Token Contract', () => {
       const { signCallbackToken, verifyTerminalToken } = await import('../../src/services/jwt');
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const token = await signCallbackToken('ws-terminal', env);
+      const token = await signCallbackToken('ws-terminal', env, { callbackGeneration: null });
 
       await expect(verifyTerminalToken(token, env)).rejects.toThrow();
     });
@@ -662,6 +715,7 @@ describe('JWT Token Contract', () => {
       const { jwtVerify, importSPKI } = await import('jose');
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
@@ -699,6 +753,7 @@ describe('JWT Token Contract', () => {
       const { jwtVerify, importSPKI } = await import('jose');
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
@@ -723,12 +778,13 @@ describe('JWT Token Contract', () => {
       const { signCallbackToken, verifyCallbackToken } = await import('../../src/services/jwt');
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const token = await signCallbackToken('ws-verify-test', env);
+      const token = await signCallbackToken('ws-verify-test', env, { callbackGeneration: null });
       const payload = await verifyCallbackToken(token, env);
 
       expect(payload.workspace).toBe('ws-verify-test');
@@ -755,6 +811,7 @@ describe('JWT Token Contract', () => {
         .sign(privateKey);
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
@@ -801,6 +858,7 @@ describe('JWT Token Contract', () => {
         .sign(privateKey);
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
@@ -828,6 +886,7 @@ describe('JWT Token Contract', () => {
         .sign(privateKey);
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
@@ -854,6 +913,7 @@ describe('JWT Token Contract', () => {
         .sign(privateKey);
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
@@ -920,17 +980,42 @@ describe('Node Agent client functions send correct payloads', () => {
 
   it('deleteWorkspaceOnNode sends DELETE with correct path', async () => {
     fetchWithTimeoutMock.mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      })
+      new Response(
+        JSON.stringify({
+          success: true,
+          physicalDeleted: true,
+          ...deletionIdentity('ws-delete-me'),
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      )
     );
 
-    await deleteWorkspaceOnNode('node-abc', 'ws-delete-me', makeNodeAgentTestEnv(), 'user-123');
+    await deleteWorkspaceOnNode('node-abc', 'ws-delete-me', makeNodeAgentTestEnv(), 'user-123', {
+      deletionMode: 'explicit',
+      identity: deletionIdentity('ws-delete-me'),
+    });
 
     const [capturedUrl, capturedInit] = fetchWithTimeoutMock.mock.calls[0] as [string, RequestInit];
     expect(capturedInit.method).toBe('DELETE');
-    expect(capturedUrl).toContain('/workspaces/ws-delete-me');
+    expect(capturedUrl).toContain('/workspaces/ws-delete-me/physical-deletion');
+  });
+
+  it.each([
+    { success: true },
+    { physicalDeleted: false, ...deletionIdentity('ws-test') },
+    { physicalDeleted: true, ...deletionIdentity('ws-test'), workspaceGeneration: 'old' },
+    { physicalDeleted: true, ...deletionIdentity('ws-test'), nodeRuntimeIncarnationId: 'old' },
+  ])('rejects legacy or mismatched physical deletion proof: %j', async (body) => {
+    fetchWithTimeoutMock.mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
+    await expect(
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123', {
+        deletionMode: 'explicit',
+        identity: deletionIdentity('ws-test'),
+      })
+    ).rejects.toThrow('exact workspace incarnation');
   });
 
   it('createAgentSessionOnNode sends correct JSON body', async () => {
@@ -1127,7 +1212,10 @@ describe('Node Agent client functions send correct payloads', () => {
     );
 
     await expect(
-      deleteWorkspaceOnNode('node-abc', 'ws-missing', makeNodeAgentTestEnv(), 'user-123')
+      deleteWorkspaceOnNode('node-abc', 'ws-missing', makeNodeAgentTestEnv(), 'user-123', {
+        deletionMode: 'explicit',
+        identity: deletionIdentity('ws-missing'),
+      })
     ).rejects.toThrow('Node Agent request failed: 404');
   });
 
@@ -1141,7 +1229,10 @@ describe('Node Agent client functions send correct payloads', () => {
     );
 
     await expect(
-      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123')
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123', {
+        deletionMode: 'explicit',
+        identity: deletionIdentity('ws-test'),
+      })
     ).rejects.toThrow('Node Agent unreachable: DNS record for node-abc.vm may be missing');
   });
 
@@ -1153,7 +1244,10 @@ describe('Node Agent client functions send correct payloads', () => {
     );
 
     await expect(
-      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123')
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123', {
+        deletionMode: 'explicit',
+        identity: deletionIdentity('ws-test'),
+      })
     ).rejects.toThrow('Request timed out');
   });
 
@@ -1166,7 +1260,10 @@ describe('Node Agent client functions send correct payloads', () => {
     );
 
     await expect(
-      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123')
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123', {
+        deletionMode: 'explicit',
+        identity: deletionIdentity('ws-test'),
+      })
     ).rejects.toMatchObject({
       statusCode: 503,
       error: 'RUNTIME_RECOVERING',
@@ -1187,7 +1284,10 @@ describe('Node Agent client functions send correct payloads', () => {
     );
 
     await expect(
-      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123')
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123', {
+        deletionMode: 'explicit',
+        identity: deletionIdentity('ws-test'),
+      })
     ).rejects.toThrow('Node Agent request failed: 502');
   });
 
@@ -1202,7 +1302,10 @@ describe('Node Agent client functions send correct payloads', () => {
     );
 
     await expect(
-      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123')
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123', {
+        deletionMode: 'explicit',
+        identity: deletionIdentity('ws-test'),
+      })
     ).rejects.toThrow('Node Agent request failed: 500');
   });
 });

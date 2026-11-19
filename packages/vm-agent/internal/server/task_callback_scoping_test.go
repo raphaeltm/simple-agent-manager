@@ -286,12 +286,8 @@ func TestTaskCompletionCallbacksAreBoundToTaskAndWorkspace(t *testing.T) {
 		if req.Body["executionStep"] != "awaiting_followup" {
 			t.Fatalf("request %d executionStep = %v, want awaiting_followup", i, req.Body["executionStep"])
 		}
-		gitPushResult, ok := req.Body["gitPushResult"].(map[string]interface{})
-		if !ok {
-			t.Fatalf("request %d missing gitPushResult object", i)
-		}
-		if pushed := gitPushResult["pushed"]; pushed != false {
-			t.Fatalf("request %d pushed = %v, want false for conversation mode", i, pushed)
+		if _, exists := req.Body["gitPushResult"]; exists {
+			t.Fatalf("request %d invented a publication result: %#v", i, req.Body)
 		}
 	}
 }

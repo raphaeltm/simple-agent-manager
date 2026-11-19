@@ -8,11 +8,13 @@ import {
   DEFAULT_STALLED_TASK_CLASSIFIER_TRANSCRIPT_MAX_CHARS,
   DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
+import { hasOpenQuestionAsk } from '@simple-agent-manager/worker-core';
 
 import type { Env } from '../env';
 import { redactCredentialTokens } from '../lib/credential-token-redaction';
 import { log } from '../lib/logger';
 import { hasUnexpiredHumanInput } from '../services/acp-interaction-store';
+import { resolveAdminSetting } from '../services/admin-settings';
 import * as projectDataService from '../services/project-data';
 import type { TaskRuntimeLiveness } from '../services/task-runtime-liveness';
 
@@ -188,8 +190,16 @@ async function isWaitingForHumanInput(
     );
   });
   try {
-    const [attentionPending, interactionPending] = await Promise.race([
+    const [questionPending, attentionPending, interactionPending] = await Promise.race([
       Promise.all([
+        // A question in D1 `asks` (inbox slice G); a failed read throws into the fail-safe catch.
+        hasOpenQuestionAsk(env.DATABASE, {
+          projectId: task.project_id,
+          sessionId: task.chat_session_id,
+          taskId: task.id,
+          now: nowMs,
+        }),
+        // A question asked before slice G is still a ProjectData marker until it resolves.
         projectDataService.hasPendingSessionHumanInput(
           env,
           task.project_id,
@@ -204,7 +214,7 @@ async function isWaitingForHumanInput(
     if (typeof attentionPending !== 'boolean' || typeof interactionPending !== 'boolean') {
       throw new Error('invalid human input probe response');
     }
-    return attentionPending || interactionPending;
+    return questionPending || attentionPending || interactionPending;
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -224,6 +234,9 @@ export async function classifyLongRunningTaskStall(
   }
 ): Promise<StalledTaskClassifierResult | null> {
   const config = getStalledTaskClassifierConfig(env);
+  config.enabled = Boolean(
+    await resolveAdminSetting(env, 'operations.stalledTaskClassifierEnabled')
+  );
   if (!config.enabled || !input.task.chat_session_id) return null;
   const activeAgeMs = longTurnAge(input.liveness);
   if (activeAgeMs === null || activeAgeMs < config.minActivityAgeMs) return null;
@@ -336,6 +349,9 @@ export async function classifyReconciliationLoop(
   messages: Record<string, unknown>[]
 ): Promise<Pick<StalledTaskClassifierResult, 'decision' | 'confidence' | 'reason'> | null> {
   const config = getStalledTaskClassifierConfig(env);
+  config.enabled = Boolean(
+    await resolveAdminSetting(env, 'operations.stalledTaskClassifierEnabled')
+  );
   if (!config.enabled) return null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {

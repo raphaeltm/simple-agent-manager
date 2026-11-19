@@ -1,17 +1,19 @@
-import type { ProjectRuntimeConfigResponse } from '@simple-agent-manager/shared';
+export { buildProjectRuntimeConfigResponse } from './project-runtime-response';
+
 import { and, eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 import type { Context } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
-import { AppError, errors } from '../../middleware/error';
+import { errors } from '../../middleware/error';
 import { parseCacheTtlSeconds } from '../../services/cache-config';
 import {
   getUserInstallationRepositories,
   type GitHubRepositoryAccess,
 } from '../../services/github-app';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
+import { githubUserTokenUnavailableError } from '../../services/github-token-errors';
 import {
   getGitHubUserAccessToken,
   getGitHubUserAccessTokenForOwner,
@@ -161,58 +163,6 @@ export function normalizeProjectFilePath(path: string): string {
   return segments.join('/');
 }
 
-export async function buildProjectRuntimeConfigResponse(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  project: schema.Project
-): Promise<ProjectRuntimeConfigResponse> {
-  const [envRows, fileRows] = await Promise.all([
-    db
-      .select()
-      .from(schema.projectRuntimeEnvVars)
-      .where(eq(schema.projectRuntimeEnvVars.projectId, project.id))
-      .orderBy(schema.projectRuntimeEnvVars.envKey),
-    db
-      .select()
-      .from(schema.projectRuntimeFiles)
-      .where(eq(schema.projectRuntimeFiles.projectId, project.id))
-      .orderBy(schema.projectRuntimeFiles.filePath),
-  ]);
-
-  const envVars: ProjectRuntimeConfigResponse['envVars'] = [];
-  for (const row of envRows) {
-    let value: string | null = row.storedValue;
-    if (row.isSecret) {
-      value = null;
-    }
-    envVars.push({
-      key: row.envKey,
-      value,
-      isSecret: row.isSecret,
-      hasValue: true,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    });
-  }
-
-  const files: ProjectRuntimeConfigResponse['files'] = [];
-  for (const row of fileRows) {
-    let content: string | null = row.storedContent;
-    if (row.isSecret) {
-      content = null;
-    }
-    files.push({
-      path: row.filePath,
-      content,
-      isSecret: row.isSecret,
-      hasValue: true,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    });
-  }
-
-  return { envVars, files };
-}
-
 export async function requireOwnedInstallation(
   db: ReturnType<typeof drizzle<typeof schema>>,
   installationRowId: string,
@@ -263,28 +213,53 @@ export async function assertRepositoryAccess(
   flow: 'repositories' | 'branches' | 'project-access' | 'project-invite' = 'project-access',
   env?: Env
 ): Promise<GitHubRepositoryAccess> {
-  const cacheKey = `github-repo-access:v1:${userId}:${installationExternalId}:${repository.toLowerCase()}`;
-  const cached = await env?.KV?.get<GitHubRepositoryAccess>(cacheKey, 'json');
-  if (cached?.fullName) return cached;
-
-  const repositories = await getUserInstallationRepositories(accessToken, installationExternalId, {
-    flow,
-    userId,
-    installationId: installationExternalId,
-    repository,
-  });
+  // Cache only a pagination hint, never a positive authorization decision.
+  // Old v1 positive cache entries are intentionally ignored after revocation.
+  const cacheKey = `github-repo-page:v2:${userId}:${installationExternalId}:${repository.toLowerCase()}`;
+  let pageHint: number | undefined;
+  try {
+    const cached = await env?.KV?.get<{ page: number }>(cacheKey, 'json');
+    if (cached && Number.isInteger(cached.page) && cached.page >= 1) {
+      pageHint = cached.page;
+    }
+  } catch {
+    /* Cache availability must not decide repository access. */
+  }
+  const repositories = await getUserInstallationRepositories(
+    accessToken,
+    installationExternalId,
+    {
+      flow,
+      userId,
+      installationId: installationExternalId,
+      repository,
+    },
+    {
+      repository,
+      pageHint,
+      onFound: async (page) => {
+        // Keep a successful hint until expiry without a hot-key write per exchange.
+        if (page === pageHint) return;
+        const ttl = parseCacheTtlSeconds(env?.GITHUB_REPO_ACCESS_CACHE_TTL_SECONDS, 5 * 60);
+        if (ttl > 0) {
+          try {
+            // KV requires a minimum 60-second expiration; this is only a hint.
+            await env?.KV?.put(cacheKey, JSON.stringify({ page }), {
+              expirationTtl: Math.max(60, ttl),
+            });
+          } catch {
+            /* A failed hint write cannot invalidate a fresh authorization. */
+          }
+        }
+      },
+    }
+  );
   const normalizedRepository = repository.toLowerCase();
   const matchedRepo = repositories.find(
     (repo) => repo.fullName.toLowerCase() === normalizedRepository
   );
   if (!matchedRepo) {
     throw errors.forbidden('Repository is not accessible through the selected installation');
-  }
-  const cacheTtl = parseCacheTtlSeconds(env?.GITHUB_REPO_ACCESS_CACHE_TTL_SECONDS, 5 * 60);
-  if (cacheTtl > 0) {
-    await env?.KV?.put(cacheKey, JSON.stringify(matchedRepo), {
-      expirationTtl: cacheTtl,
-    });
   }
   return matchedRepo;
 }
@@ -300,11 +275,7 @@ export async function requireGitHubUserAccessToken(
 ): Promise<string> {
   const accessToken = await getGitHubUserAccessToken(c, userId);
   if (!accessToken) {
-    throw new AppError(
-      401,
-      'GITHUB_REAUTH_REQUIRED',
-      'Your GitHub authorization has expired — please sign out and back in'
-    );
+    throw await githubUserTokenUnavailableError(c.env, userId);
   }
   return accessToken;
 }
@@ -436,11 +407,7 @@ export async function requireRepositoryOwnerAccess(
   const externalInstallationId = getExternalInstallationId(installation);
   const accessToken = await getGitHubUserAccessTokenForOwner(env, userId, flow);
   if (!accessToken) {
-    throw new AppError(
-      401,
-      'GITHUB_REAUTH_REQUIRED',
-      'Your GitHub authorization has expired — please sign out and back in'
-    );
+    throw await githubUserTokenUnavailableError(env, userId);
   }
   const verifiedRepo = await assertRepositoryAccess(
     accessToken,

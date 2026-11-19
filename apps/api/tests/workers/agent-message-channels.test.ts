@@ -25,41 +25,26 @@ import {
 } from './helpers/agent-message-channels';
 
 describe('agent messages over shared channels: activation', () => {
-  it('keeps the legacy raw-prompt path when the preview flag is off', async () => {
+  // Constitution XV: there is no raw-prompt fallback. Each unavailable prerequisite refuses
+  // the send and writes nothing anywhere.
+  it.each([
+    ['flag_off', {}],
+    ['project_event_wake_disabled', { PROJECT_EVENT_WAKE_ENABLED: 'false' }],
+  ] as const)('refuses the send when the transport is unavailable (%s)', async (reason, env) => {
     const f = await twoAgentProject();
-    const reply = okBody<Record<string, unknown>>(
-      await f.a.tool('send_durable_message', { targetTaskId: f.b.taskId, message: 'legacy hello' })
-    );
-    expect(reply).toMatchObject({ accepted: true, delivered: false });
-    expect(reply).not.toHaveProperty('transport');
+    const send = () =>
+      f.a.tool('send_durable_message', { targetTaskId: f.b.taskId, message: 'hello' });
+    const reply = reason === 'flag_off' ? await send() : await withAgentMessageChannels(send, env);
+    expect(reply.error?.message).toContain('Agent messaging is unavailable');
+    expect(reply.error?.data).toMatchObject({ outcome: 'unavailable', reason });
     expect(await channelRows(f.stub)).toEqual([]);
-    const inbox = await inboxRows(f.stub);
-    expect(inbox).toHaveLength(1);
-    expect(inbox[0]).toMatchObject({
-      target_session_id: f.b.sessionId,
-      source_kind: 'agent_mailbox',
-      content: 'legacy hello',
-    });
+    expect(await inboxRows(f.stub)).toEqual([]);
   });
 
-  it('keeps the legacy path when event wakes are disabled, because no recipient would be notified', async () => {
-    const f = await twoAgentProject();
-    const reply = await withAgentMessageChannels(
-      async () =>
-        okBody<Record<string, unknown>>(
-          await f.a.tool('send_durable_message', { targetTaskId: f.b.taskId, message: 'hi' })
-        ),
-      { PROJECT_EVENT_WAKE_ENABLED: 'false' }
-    );
-    expect(reply).not.toHaveProperty('transport');
-    expect(await channelRows(f.stub)).toEqual([]);
-    expect((await inboxRows(f.stub))[0]?.source_kind).toBe('agent_mailbox');
-  });
-
-  it('keeps stop-and-deliver for urgent classes even when the preview is on', async () => {
+  it('carries urgent classes over the channel too, never as raw text', async () => {
     const f = await twoAgentProject();
     const reply = await withAgentMessageChannels(async () =>
-      okBody<Record<string, unknown>>(
+      okBody<ChannelReceipt>(
         await f.a.tool('send_durable_message', {
           targetTaskId: f.b.taskId,
           message: 'stop now',
@@ -67,11 +52,10 @@ describe('agent messages over shared channels: activation', () => {
         })
       )
     );
-    expect(reply).not.toHaveProperty('transport');
-    expect(await channelRows(f.stub)).toEqual([]);
-    const [row] = await inboxRows(f.stub);
-    expect(row?.source_kind).toBe('agent_mailbox');
-    expect(row?.content).toContain('[Urgent agent message — class: interrupt]');
+    expect(reply.transport).toBe('agent_message_channel');
+    expect(await channelRows(f.stub)).toEqual([{ name: reply.channel, lifetime_count: 1 }]);
+    // Nothing is queued until the wake materializes, and then only the notice.
+    expect(await inboxRows(f.stub)).toEqual([]);
   });
 });
 
@@ -410,16 +394,19 @@ describe('shared coordination channels: echo suppression', () => {
     const aPrompt = await follow(f.a, 'a-prompt', 'existing_session_prompt');
     const aRecord = await follow(f.a, 'a-record', 'record_only');
     const bPrompt = await follow(f.b, 'b-prompt', 'existing_session_prompt');
+    // Steering follows wake too, so they get the same suppression.
+    const aSteer = await follow(f.a, 'a-steer', 'runtime_steer');
 
     const own = await publish(f.a, 'decision-1');
     const ownMatches = (await eventMatches(f.stub, own.event.id)).map((m) => m.subscription_id);
     expect(ownMatches.sort()).toEqual([aRecord, bPrompt].sort());
     expect(ownMatches).not.toContain(aPrompt);
+    expect(ownMatches).not.toContain(aSteer);
 
     const peer = await publish(f.b, 'note-1');
     expect(
       (await eventMatches(f.stub, peer.event.id)).map((m) => m.subscription_id).sort()
-    ).toEqual([aPrompt, aRecord].sort());
+    ).toEqual([aPrompt, aRecord, aSteer].sort());
 
     // Catch-up from the start of history admits only the other agent's events.
     const history = okBody<{ result: { cursor: string } }>(

@@ -14,6 +14,7 @@ import type {
   ResourceResolutionInput,
 } from '../types/resource';
 import type { VMSize } from '../types/workspace';
+import { DEFAULT_INFOMANIAK_BOOT_VOLUME_GB } from './hetzner';
 
 // =============================================================================
 // Resource Reservation Schema Version
@@ -33,7 +34,9 @@ export const LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION = 2;
 export const PLATFORM_RESOURCE_DEFAULTS: Required<ResourceRequirements> = {
   minVcpu: 2,
   minMemoryGb: 4,
-  minDiskGb: 40,
+  // Two measured full SAM workspaces used ~4.4 GB each including caches. Leave
+  // room for growth while fitting a 20 GB offering; installations can override.
+  minDiskGb: 15,
   exclusiveNode: false,
 };
 
@@ -92,20 +95,23 @@ export const PROVIDER_VM_CAPACITY: Record<string, Record<VMSize, VmCapacity>> & 
     medium: { vcpu: 4, ramGb: 12, storageGb: 120 },
     large: { vcpu: 8, ramGb: 32, storageGb: 600 },
   },
+  // Boot disk follows the GCP policy defaults (20 GB per vCPU, 50 GB floor; gcp-boot-disk.ts).
   gcp: {
     small: { vcpu: 1, ramGb: 4, storageGb: 50 },
     medium: { vcpu: 2, ramGb: 8, storageGb: 50 },
-    large: { vcpu: 4, ramGb: 16, storageGb: 50 },
+    large: { vcpu: 4, ramGb: 16, storageGb: 80 },
   },
   vultr: {
     small: { vcpu: 2, ramGb: 4, storageGb: 80 },
     medium: { vcpu: 4, ramGb: 8, storageGb: 160 },
     large: { vcpu: 6, ramGb: 16, storageGb: 320 },
   },
+  // Disk is the default Cinder boot volume (DEFAULT_INFOMANIAK_BOOT_VOLUME_GB), not the flavor's
+  // 20 GB local disk: SAM boots Infomaniak VMs from a volume (infomaniak-boot-volume.ts).
   infomaniak: {
-    small: { vcpu: 2, ramGb: 4, storageGb: 20 },
-    medium: { vcpu: 4, ramGb: 8, storageGb: 20 },
-    large: { vcpu: 8, ramGb: 16, storageGb: 20 },
+    small: { vcpu: 2, ramGb: 4, storageGb: DEFAULT_INFOMANIAK_BOOT_VOLUME_GB },
+    medium: { vcpu: 4, ramGb: 8, storageGb: DEFAULT_INFOMANIAK_BOOT_VOLUME_GB },
+    large: { vcpu: 8, ramGb: 16, storageGb: DEFAULT_INFOMANIAK_BOOT_VOLUME_GB },
   },
   digitalocean: {
     small: { vcpu: 2, ramGb: 4, storageGb: 80 },
@@ -171,7 +177,9 @@ export interface ResourceReservationResolutionOptions {
 
 /**
  * Resolve resource requirements from the precedence chain.
- * Each field is independently resolved: the first layer that defines a field wins.
+ * Each explicit field is independently resolved: the first defining layer wins.
+ * Lower legacy bundles stop contributing once higher modern layers provide both
+ * CPU and memory; explicit lower fields still inherit normally.
  * Any field not set by any layer falls back to PLATFORM_RESOURCE_DEFAULTS.
  *
  * The `source` field on the output records the highest-priority layer that
@@ -267,16 +275,26 @@ export function resolveResourceReservation(
     }
   };
 
+  let higherExplicitCpu = false;
+  let higherExplicitMemory = false;
   for (const layer of layers) {
     const explicit = validatedExplicitLayer(layer);
     if (explicit) recordLayerContribution(layer, explicit);
 
-    const legacy = validatedLegacyLayer(layer, {
-      mapping: legacyWorkloadMapping,
-      adapterVersion: compatibilityAdapterVersion,
-      diagnostics,
-    });
-    if (legacy) recordLayerContribution(layer, legacy);
+    // A complete modern CPU/RAM request describes a workload slice. A lower
+    // legacy size describes a bundled shape, not an explicit requirement for
+    // its missing dimensions. Keep explicit lower fields inheritable, and keep
+    // same-layer legacy compatibility for callers that deliberately supply both.
+    if (!(higherExplicitCpu && higherExplicitMemory)) {
+      const legacy = validatedLegacyLayer(layer, {
+        mapping: legacyWorkloadMapping,
+        adapterVersion: compatibilityAdapterVersion,
+        diagnostics,
+      });
+      if (legacy) recordLayerContribution(layer, legacy);
+    }
+    higherExplicitCpu ||= explicit?.requirements.minVcpu !== undefined;
+    higherExplicitMemory ||= explicit?.requirements.minMemoryGb !== undefined;
   }
 
   // Fill remaining fields from platform defaults

@@ -1,0 +1,261 @@
+---
+/**
+ * "The floor": the infrastructure every agent runs on, told once and briefly. A real machine from
+ * the Nodes page (each task in its own container, with what it uses against what was set aside)
+ * sits over the brand's glass node floor. When the section scrolls into view, the task that ran
+ * out of memory is ringed and a note says what SAM does about it. The node floor animates for a
+ * few seconds and then holds still, so the section needs no pause control.
+ */
+import { SINGLE_VM_INSTALL_SHIPPED } from '../../data/factory-shots';
+import MockMachine from './mock/MockMachine.astro';
+
+const facts = [
+  {
+    title: 'Your control plane',
+    body: 'SAM installs into your own Cloudflare account, or onto a single VM you run.',
+    soon: !SINGLE_VM_INSTALL_SHIPPED,
+  },
+  {
+    title: 'Your machines',
+    body: 'It rents servers from your cloud accounts (Hetzner, Scaleway, GCP and four more) at your provider’s prices.',
+  },
+  {
+    title: 'A container per session, sized to the task',
+    body: 'Each task asks for the CPU and memory it needs. SAM puts it on a machine with room, or starts one.',
+  },
+  {
+    title: 'When memory runs short, the work moves',
+    body: 'SAM tries to save the session, then restarts the work on another machine.',
+  },
+  {
+    title: 'Limits you set',
+    body: 'Choose how many machines each person may run, and raise the installation’s ceiling as far as your cloud quota goes.',
+  },
+];
+---
+
+<section class="fh-section floor" aria-labelledby="floor-title" data-floor>
+  <div class="floor-field" data-floor-field aria-hidden="true"></div>
+  <div class="container floor-grid">
+    <div class="floor-copy">
+      <div class="fh-head">
+        <p class="fh-kicker">The floor</p>
+        <h2 class="fh-h2 floor-title" id="floor-title">One install. As many machines as the work needs.</h2>
+        <p class="fh-lede">
+          Under every process is a place for agents to run. SAM turns your cloud accounts into one
+          pool of machines that every project draws from.
+        </p>
+      </div>
+      <ol class="floor-facts">
+        {facts.map((f, i) => (
+          <li class="floor-fact" data-reveal style={`--delay:${i * 80}ms`}>
+            <span class="floor-n" aria-hidden="true">{String(i + 1).padStart(2, '0')}</span>
+            <span>
+              <strong>{f.title}</strong>
+              <span class="floor-body">
+                {f.body}
+                {f.soon && <span class="fh-soon">soon</span>}
+              </span>
+            </span>
+          </li>
+        ))}
+      </ol>
+    </div>
+
+    <figure class="floor-figure" data-reveal data-play>
+      <div
+        class="fh-frame floor-frame"
+        role="img"
+        aria-label="One machine on the Nodes page: a Hetzner server's memory and CPU, and three tasks each in its own container with what it uses against what was set aside for it, one of them over its memory limit"
+      >
+        <MockMachine />
+      </div>
+      <p class="floor-chip" aria-hidden="true">
+        <span class="floor-dot"></span>Short on memory: saving the session to restart it on another machine
+      </p>
+      <figcaption class="fh-note">One machine, three tasks, each in its own container</figcaption>
+    </figure>
+  </div>
+
+  <p class="container floor-bridge" data-reveal>
+    That’s the floor. Here is what your team builds on it.
+    <span aria-hidden="true">↓</span>
+  </p>
+</section>
+
+<script>
+  import { createGlassNodeField } from '@simple-agent-manager/ui/glass/node-field';
+
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  for (const section of document.querySelectorAll<HTMLElement>('[data-floor]')) {
+    const root = section.querySelector<HTMLElement>('[data-floor-field]');
+    if (!root) continue;
+    let started = false;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (started || !entries.some((e) => e.isIntersecting)) return;
+        started = true;
+        io.disconnect();
+        const field = createGlassNodeField(root, { mode: 'floor', density: 0.22, horizonY: 0.3, vanishX: 0.7 });
+        field.start();
+        if (reduce) return;
+        // Light a few machines, then hold still: the floor animates for under five seconds.
+        const r = root.getBoundingClientRect();
+        window.setTimeout(() => field.wakeNear(r.width * 0.7, r.height * 0.75, r.width * 0.4, 10), 300);
+        window.setTimeout(() => field.burst(field.nodeNear(r.width * 0.72, r.height * 0.8), 4), 1400);
+        window.setTimeout(() => field.pause(), 4600);
+      },
+      { threshold: 0.2 },
+    );
+    io.observe(section);
+  }
+</script>
+
+<style>
+  .floor {
+    isolation: isolate;
+  }
+
+  /* The node floor lies under the machine and the bridge line, faded away from the copy. */
+  .floor-field {
+    position: absolute;
+    inset: 30% 0 0;
+    z-index: -1;
+    opacity: 0.6;
+    -webkit-mask-image:
+      linear-gradient(to bottom, transparent 0%, #000 35%, #000 80%, transparent 100%),
+      linear-gradient(90deg, transparent 0%, rgb(0 0 0 / 0.15) 35%, #000 65%);
+    -webkit-mask-composite: source-in;
+    mask-image:
+      linear-gradient(to bottom, transparent 0%, #000 35%, #000 80%, transparent 100%),
+      linear-gradient(90deg, transparent 0%, rgb(0 0 0 / 0.15) 35%, #000 65%);
+    mask-composite: intersect;
+  }
+
+  .floor-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 4fr) minmax(0, 6fr);
+    gap: 56px;
+    align-items: center;
+  }
+
+  .floor-title {
+    max-width: 18ch;
+  }
+
+  .floor-copy .fh-head {
+    margin-bottom: 32px;
+  }
+
+  .floor-facts {
+    list-style: none;
+    display: grid;
+    gap: 16px;
+  }
+
+  .floor-fact {
+    display: grid;
+    grid-template-columns: 30px 1fr;
+    gap: 12px;
+    line-height: 1.5;
+  }
+
+  .floor-n {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--fh-accent-text);
+    padding-top: 2px;
+  }
+
+  .floor-fact strong {
+    font-weight: 600;
+    color: var(--color-fg-primary);
+  }
+
+  .floor-body {
+    display: block;
+    color: var(--color-fg-muted);
+    font-size: 0.9375rem;
+  }
+
+  .floor-figure {
+    /* The task that ran out of memory is ringed in amber. */
+    --fh-ring: var(--fh-amber);
+    position: relative;
+    margin: 0;
+    display: grid;
+    gap: 12px;
+  }
+
+  .floor-chip {
+    justify-self: end;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: -34px;
+    margin-right: 12px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 0.875rem;
+    color: var(--color-fg-primary);
+    background: var(--color-bg-surface);
+    border: 1px solid var(--glass-border-hover);
+    box-shadow: 0 20px 44px -14px rgb(0 0 0 / 0.6);
+    position: relative;
+    z-index: 1;
+    opacity: 0;
+    transform: translateY(14px);
+  }
+
+  .floor-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--color-accent-strong);
+    box-shadow: 0 0 10px var(--color-accent-strong);
+    flex: none;
+  }
+
+  [data-play].is-in .floor-chip {
+    transition:
+      opacity 0.5s ease 2s,
+      transform 0.7s cubic-bezier(0.2, 1.3, 0.3, 1) 2s;
+    opacity: 1;
+    transform: none;
+  }
+
+  .floor-bridge {
+    margin-top: 72px;
+    text-align: center;
+    font-family: var(--font-display);
+    font-size: clamp(1.25rem, 2vw, 1.5rem);
+    color: var(--color-fg-primary);
+  }
+
+  .floor-bridge span {
+    display: block;
+    margin-top: 6px;
+    color: var(--fh-accent-text);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .floor-chip {
+      opacity: 1;
+      transform: none;
+    }
+
+  }
+
+  @media (max-width: 900px) {
+    .floor-grid {
+      grid-template-columns: 1fr;
+      gap: 40px;
+    }
+
+    .floor-chip {
+      justify-self: stretch;
+      margin: -20px 8px 0;
+      font-size: 0.8125rem;
+    }
+  }
+</style>

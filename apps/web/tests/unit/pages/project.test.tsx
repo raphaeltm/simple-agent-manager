@@ -17,7 +17,6 @@ const mocks = vi.hoisted(() => ({
   deleteProjectRuntimeEnvVar: vi.fn(),
   upsertProjectRuntimeFile: vi.fn(),
   deleteProjectRuntimeFile: vi.fn(),
-  createWorkspace: vi.fn(),
   updateProject: vi.fn(),
   createProjectTask: vi.fn(),
   updateProjectTask: vi.fn(),
@@ -51,7 +50,6 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   deleteProjectRuntimeEnvVar: mocks.deleteProjectRuntimeEnvVar,
   upsertProjectRuntimeFile: mocks.upsertProjectRuntimeFile,
   deleteProjectRuntimeFile: mocks.deleteProjectRuntimeFile,
-  createWorkspace: mocks.createWorkspace,
   updateProject: mocks.updateProject,
   createProjectTask: mocks.createProjectTask,
   updateProjectTask: mocks.updateProjectTask,
@@ -91,8 +89,8 @@ import { ProjectActivity } from '../../../src/pages/ProjectActivity';
 import {
   ProjectSettings,
   ProjectSettingsAccess,
+  ProjectSettingsAccounts,
   ProjectSettingsAgents,
-  ProjectSettingsConnections,
   ProjectSettingsDeploy,
   ProjectSettingsGeneral,
   ProjectSettingsIndexRedirect,
@@ -113,7 +111,7 @@ function renderProjectPage(path = '/projects/proj-1/tasks') {
               <Route index element={<ProjectSettingsIndexRedirect />} />
               <Route path="general" element={<ProjectSettingsGeneral />} />
               <Route path="access" element={<ProjectSettingsAccess />} />
-              <Route path="connections" element={<ProjectSettingsConnections />} />
+              <Route path="accounts" element={<ProjectSettingsAccounts />} />
               <Route path="agents" element={<ProjectSettingsAgents />} />
               <Route path="infrastructure" element={<ProjectSettingsInfrastructure />} />
               <Route path="runtime" element={<ProjectSettingsRuntime />} />
@@ -222,7 +220,6 @@ describe('Project page', () => {
       envVars: [],
       files: [],
     });
-    mocks.createWorkspace.mockResolvedValue({ id: 'ws-1' });
     mocks.updateProject.mockResolvedValue({});
     mocks.createProjectTask.mockResolvedValue({});
     mocks.deleteProjectTask.mockResolvedValue({ success: true });
@@ -240,7 +237,7 @@ describe('Project page', () => {
     renderProjectPage('/projects/proj-1/tasks');
 
     await waitFor(() => {
-      expect(mocks.getProject).toHaveBeenCalledWith('proj-1');
+      expect(mocks.getProject).toHaveBeenCalledWith('proj-1', expect.any(AbortSignal));
       expect(mocks.listProjectTasks).toHaveBeenCalledWith('proj-1', {
         status: undefined,
         minPriority: undefined,

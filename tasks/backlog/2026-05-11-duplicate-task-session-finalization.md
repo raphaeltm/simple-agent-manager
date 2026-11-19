@@ -1,5 +1,14 @@
 # Fix Duplicate Task Sessions And Finalization Drift
 
+> **Reconciliation 2026-10-26:** #2302 (`b67fed80e`) closed the creator-vs-orchestrator double
+> start: every mission-task creator now writes `chat_session_id` in the task INSERT, and
+> `apps/api/tests/workers/mission-dispatch-single-start.test.ts` runs a real orchestrator cycle
+> over claimed tasks (one session per task). Its archived task file
+> (`2026-10-11-mission-dispatch-double-start.md`) attributes the 2026-05-11 six-session task to
+> that race, by signature only. Still open: the orchestrator's own dispatch still creates the
+> session before the claim (`scheduling.ts:467` vs `:488`, catch `:593-608`, moved by #2404 and
+> #2406), tests for that path, and the postmortem.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** this task's own PR #964 was closed unmerged (merge conflicts), but later PRs

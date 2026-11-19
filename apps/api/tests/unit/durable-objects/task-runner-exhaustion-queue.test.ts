@@ -237,7 +237,6 @@ function createState(exhaustionPolicy: 'queue' | 'fail'): TaskRunnerState {
     lastStepAt: Date.now(),
     provisioningStartedAt: null,
     agentReadyStartedAt: null,
-    workspaceReadyStartedAt: null,
     workspaceDispatchStartedAt: null,
     workspaceDispatchAttempts: 0,
     workspaceDispatchLastAttemptAt: null,

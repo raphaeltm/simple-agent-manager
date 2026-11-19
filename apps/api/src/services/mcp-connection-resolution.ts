@@ -124,8 +124,8 @@ export async function buildSessionMcpServers(
  * SAM's own MCP endpoint entry.
  *
  * The single place `https://api.${BASE_DOMAIN}/mcp` is constructed. Kept separate from
- * `buildSessionMcpServers` because the anonymous-trial path needs this entry WITHOUT
- * bring-your-own resolution — it runs as the trial sentinel user, which owns no connections.
+ * `buildSessionMcpServers` so callers that must not resolve bring-your-own connections can
+ * still build SAM's own entry.
  */
 export function buildSamMcpEntry(
   baseDomain: string,

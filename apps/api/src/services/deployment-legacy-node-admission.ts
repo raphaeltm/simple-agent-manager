@@ -20,9 +20,10 @@
  * The product decision is that such an environment keeps deploying to the node
  * it is already on. This module implements that adoption as ONE atomic
  * reservation write that repeats every invariant in its own predicate
- * (`apps/api/.claude/rules/69-aggregate-capacity-at-final-reservation.md`):
+ * (`.claude/rules/69-aggregate-capacity-at-final-reservation.md`):
  * the environment must already be on this node, the node must be a running,
- * healthy, deployment-role node owned by the release's user, the node must
+ * healthy, deployment-role node owned by the release's user, that user must
+ * still be an active project member allowed to deploy, the node must
  * still be legacy-shaped, occupancy must respect the node mode, the release
  * must still be the newest one, and the stored reservation must be exactly what
  * the caller observed.
@@ -38,9 +39,11 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import {
-  DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE,
-  DEPLOYMENT_RELOCATION_CLAIM_FIELD,
-} from './deployment-node-admission';
+  NO_DEPLOYMENT_RELOCATION_CLAIM_SQL,
+  RECOVER_ERRORED_ENVIRONMENT_SET_SQL,
+} from './deployment-environment-state';
+import { DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE } from './deployment-node-admission';
+import { projectMemberRoleCapabilitySql } from './placement-authority';
 
 export interface LinkEnvironmentToLegacyNodeOptions {
   env: Env;
@@ -66,10 +69,10 @@ export interface LinkEnvironmentToLegacyNodeOptions {
  *
  * The `status` flip is load-bearing, not cosmetic: the node heartbeat only
  * advertises `pendingReleases` for environments whose status is `active` or
- * `starting` (`apps/api/src/routes/node-lifecycle.ts`), and the only transition
- * back out of `error` is the `'starting'` → `'active'` move the heartbeat makes
- * when the node reports the release applied. An environment parked in `error`
- * by a placement failure would therefore never receive another release.
+ * `starting` (`apps/api/src/routes/node-lifecycle.ts`), so an environment
+ * parked in `error` by a placement failure would never receive another release.
+ * `linkEnvironmentToNode` makes the same flip; both use
+ * `RECOVER_ERRORED_ENVIRONMENT_SET_SQL` (deployment-environment-state.ts).
  *
  * @returns true when the reservation was written, false when any invariant failed.
  */
@@ -93,16 +96,20 @@ export async function linkEnvironmentToLegacyNode(
     `UPDATE deployment_environments AS de
         SET resolved_reservation_json = ?,
             updated_at = ?,
-            status = CASE WHEN de.status = 'error' THEN 'starting' ELSE de.status END,
-            observed_error_message = CASE
-              WHEN de.status = 'error' THEN NULL
-              ELSE de.observed_error_message
-            END
+            ${RECOVER_ERRORED_ENVIRONMENT_SET_SQL}
        FROM nodes n
       WHERE de.id = ?
         AND de.node_id = n.id
         AND n.id = ?
         AND n.user_id = ?
+        AND EXISTS (
+          SELECT 1 FROM project_members pm
+          WHERE pm.project_id = de.project_id
+            AND pm.user_id = n.user_id
+            AND pm.status = 'active'
+            AND pm.removed_at IS NULL
+            AND ${projectMemberRoleCapabilitySql('pm', 'deployment:deploy')}
+        )
         AND n.status = 'running'
         AND n.node_role = 'deployment'
         AND COALESCE(n.health_status, 'healthy') != 'unhealthy'
@@ -122,11 +129,7 @@ export async function linkEnvironmentToLegacyNode(
           LIMIT 1
         )
         AND de.resolved_reservation_json IS ?
-        AND CASE
-          WHEN json_valid(de.resolved_reservation_json)
-          THEN COALESCE(json_extract(de.resolved_reservation_json, '$.${DEPLOYMENT_RELOCATION_CLAIM_FIELD}'), 0)
-          ELSE 0
-        END = 0`
+        AND ${NO_DEPLOYMENT_RELOCATION_CLAIM_SQL}`
   )
     .bind(
       JSON.stringify(reservation),

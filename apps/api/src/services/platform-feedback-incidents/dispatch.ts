@@ -23,10 +23,10 @@ export async function reclaimExpiredIncidentDispatches(
   // A dispatch lease expiring only proves the handoff marker is old. It does not
   // prove the dispatched task is dead. Mirror the task row that
   // completeIncidentDispatchLink() writes and preserve the lease while that task
-  // remains non-terminal; trigger cleanup/admission use the same liveness owner.
+  // remains active (sleeping ends an unfinished triage turn); trigger cleanup/admission use the same liveness owner.
   const liveDispatchedTaskPredicateFor = (tableRef: string) => `NOT EXISTS (
     SELECT 1 FROM tasks live_task
-     WHERE live_task.status NOT IN (${TERMINAL_TASK_STATUS_SQL})
+     WHERE live_task.status NOT IN (${TERMINAL_TASK_STATUS_SQL}, 'sleeping')
        AND (
          live_task.id = ${tableRef}.dispatched_task_id
          OR live_task.id = (
@@ -41,10 +41,16 @@ export async function reclaimExpiredIncidentDispatches(
     'platform_feedback_triages'
   );
   const expired = await env.DATABASE.prepare(
-    `SELECT triage.signature, triage.dispatch_attempts,
+    `SELECT triage.signature, triage.dispatch_attempts, triage.dispatch_lease_token,
+       triage.dispatch_lease_expires_at,
+       EXISTS (SELECT 1 FROM tasks owner
+         WHERE owner.id = COALESCE(triage.dispatched_task_id,
+           (SELECT task_id FROM trigger_executions WHERE id = triage.dispatched_execution_id))
+           AND owner.status IN ('sleeping', 'completed')) AS unfinished_turn,
        EXISTS (
          SELECT 1 FROM task_status_events event
-         WHERE event.task_id = triage.dispatched_task_id
+         WHERE event.task_id = COALESCE(triage.dispatched_task_id,
+             (SELECT task_id FROM trigger_executions WHERE id = triage.dispatched_execution_id))
            AND event.to_status = 'failed'
            AND event.actor_type = 'workspace_callback'
        ) AS agent_reported_failure
@@ -61,12 +67,15 @@ export async function reclaimExpiredIncidentDispatches(
       signature: string;
       dispatch_attempts: number;
       agent_reported_failure: number;
+      unfinished_turn: number;
+      dispatch_lease_token: string | null;
+      dispatch_lease_expires_at: number;
     }>();
 
   let requeued = 0;
   let rejected = 0;
   for (const row of expired.results ?? []) {
-    const consumedAttempt = row.agent_reported_failure ? 1 : 0;
+    const consumedAttempt = row.agent_reported_failure || row.unfinished_turn ? 1 : 0;
     const nextAttempts = row.dispatch_attempts + consumedAttempt;
     if (nextAttempts >= config.maxDispatchAttempts) {
       const reject = await env.DATABASE.prepare(
@@ -84,14 +93,18 @@ export async function reclaimExpiredIncidentDispatches(
            AND queue_state = 'dispatched'
            AND dispatch_lease_expires_at IS NOT NULL
            AND dispatch_lease_expires_at < ?
+           AND dispatch_lease_token IS ? AND dispatch_lease_expires_at = ? AND dispatch_attempts = ?
            AND ${liveDispatchedTaskUpdatePredicate}`
       )
         .bind(
           now,
-          'incident dispatch attempts exhausted after lease expiry',
+          'incident dispatch attempts exhausted without resolution after lease expiry',
           nextAttempts,
           row.signature,
-          now
+          now,
+          row.dispatch_lease_token,
+          row.dispatch_lease_expires_at,
+          row.dispatch_attempts
         )
         .run();
       rejected += reject.meta.changes ?? 0;
@@ -112,9 +125,18 @@ export async function reclaimExpiredIncidentDispatches(
          AND queue_state = 'dispatched'
          AND dispatch_lease_expires_at IS NOT NULL
          AND dispatch_lease_expires_at < ?
-         AND ${liveDispatchedTaskUpdatePredicate}`
+         AND dispatch_lease_token IS ? AND dispatch_lease_expires_at = ? AND dispatch_attempts = ?
+           AND ${liveDispatchedTaskUpdatePredicate}`
     )
-      .bind(nextAttempts, now, row.signature, now)
+      .bind(
+        nextAttempts,
+        now,
+        row.signature,
+        now,
+        row.dispatch_lease_token,
+        row.dispatch_lease_expires_at,
+        row.dispatch_attempts
+      )
       .run();
     requeued += requeue.meta.changes ?? 0;
   }

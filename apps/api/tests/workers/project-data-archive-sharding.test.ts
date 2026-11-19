@@ -1,17 +1,24 @@
-import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
-
-import type { Env as WorkerEnv } from '../../src/env';
-import { D1_MAX_BOUND_PARAMETERS } from '../../src/lib/d1-limits';
-import { ARCHIVE_WRITE_FIXED_RESERVATION } from '../../src/project-data-archive/write-budget';
+import { ARCHIVE_WRITE_FIXED_RESERVATION } from '@simple-agent-manager/project-data/internal/archive/write-budget';
 import {
   abandonProjectDataArchiveMigration,
   copyBackProjectDataArchiveMigration,
   runProjectDataArchiveSharding,
   runScopedProjectDataArchiveCanary,
-} from '../../src/scheduled/project-data-archive-sharding';
+} from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
+
+import type { Env as WorkerEnv } from '../../src/env';
+import { D1_MAX_BOUND_PARAMETERS } from '../../src/lib/d1-limits';
 import * as projectDataService from '../../src/services/project-data';
-import { countTargetMessages, isolateSweepFixture,projectDataStub, readLocation,seedMessages, withArchiveEnv } from './helpers/archive-fixtures';
+import {
+  countTargetMessages,
+  isolateSweepFixture,
+  projectDataStub,
+  readLocation,
+  seedMessages,
+  withArchiveEnv,
+} from './helpers/archive-fixtures';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 import {
   captureProjectDataExpectedError,
@@ -23,7 +30,21 @@ const OWNER = 'archive-bridge-owner';
 const INSTALLATION = 'archive-bridge-installation';
 const TARGET_SHA = 'b'.repeat(64);
 
-
+/** Finish this fixture's queued summary write before a later global sweep isolates D1. */
+async function settleFixtureSummary(
+  source: DurableObjectStub<ProjectDataTestDouble>
+): Promise<void> {
+  await runInDurableObject(source, (instance) => {
+    const owned = instance as unknown as {
+      summarySyncTimer: ReturnType<typeof setTimeout> | null;
+    };
+    if (owned.summarySyncTimer !== null) clearTimeout(owned.summarySyncTimer);
+    owned.summarySyncTimer = null;
+  });
+  // The existing RPC awaits the same serialized path as the production callback,
+  // including any sync that had already started before the timer was cancelled.
+  await source.runSummarySyncForTest();
+}
 
 async function seedProjectGraph(projectId: string): Promise<void> {
   await seedUser(OWNER);
@@ -32,8 +53,6 @@ async function seedProjectGraph(projectId: string): Promise<void> {
     name: `Archive Bridge ${projectId}`,
   });
 }
-
-
 
 function largeMessage(index: number): string {
   return `archive bridge payload ${index} ${'x'.repeat(24 * 1024)}`;
@@ -56,7 +75,6 @@ function largeMessage(index: number): string {
 const OVER_BIND_LIMIT_ROWS = D1_MAX_BOUND_PARAMETERS * 2 + 1;
 
 /** Small bodies: this fixture stresses the bind count, not the byte budget. */
-
 
 async function seedTerminalSessionWithMessages(
   projectId: string,
@@ -81,10 +99,6 @@ async function countTargetGroupedMessages(ownerName: string, sessionId: string):
     return row.count;
   });
 }
-
-
-
-
 
 async function clearArchiveCadence(): Promise<void> {
   await env.DATABASE.prepare(
@@ -254,6 +268,18 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
         );
         expect(routed.messages).toHaveLength(12);
         expect(routed.messages[0]?.content).toContain('archive bridge payload 0');
+
+        // A comment opened from the Comments page reads its conversation from the shard too.
+        // Roles alternate, so every row is one displayed message: two each side of row 6.
+        const routedIds = routed.messages.map((message) => message.id);
+        const context = await projectDataService.getMessageContextWindow(
+          testEnv,
+          projectId,
+          sessionId,
+          { messageId: String(routedIds[6]), messagesEachSide: 2, maxRows: 50, compact: false }
+        );
+        expect(context).toMatchObject({ found: true, hasMoreBefore: true, hasMoreAfter: true });
+        expect(context.messages.map((message) => message.id)).toEqual(routedIds.slice(4, 9));
         await expect(
           projectDataService.persistMessage(
             testEnv,
@@ -294,16 +320,12 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
           sourceProof.intent.source_database_size_before
         );
         expect(sourceProof.rootMessages).toBe(0);
-        // `source_database_size_after` is captured before the final intent-row UPDATE. In the
-        // real workerd SQLite runtime that metadata write can allocate pages, so the live
-        // `sql.databaseSize` observed here may be larger than the recorded post-delete proof.
-        // The invariant is that both measurements remain below the pre-delete size and the
-        // recorded proof captured actual reclaim after source transcript rows were deleted.
+        // `source_database_size_after` is recorded by the reclaim page that deletes the last
+        // transcript row (the flip itself frees nothing). The live size can move either way
+        // afterwards as SQLite reuses or releases pages, so the invariant is that both
+        // measurements are below the pre-flip size.
         expect(sourceProof.databaseSize).toBeLessThan(
           sourceProof.intent.source_database_size_before
-        );
-        expect(sourceProof.databaseSize).toBeGreaterThanOrEqual(
-          sourceProof.intent.source_database_size_after
         );
 
         const target = projectDataStub(location!.owner_name);
@@ -500,6 +522,15 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
         );
         expect(sourceRowsAfterMigrate).toBe(0);
 
+        // Copy-back must repair a known watermark below the restored rows,
+        // including when the session anchor predates this derived cache.
+        await runInDurableObject(source, (_instance, state) => {
+          state.storage.sql.exec(
+            'UPDATE chat_sessions SET last_message_sequence = 0 WHERE id = ?',
+            sessionId
+          );
+        });
+
         const copyBack = await copyBackProjectDataArchiveMigration(testEnv, {
           migrationId: location!.migration_id!,
           projectId,
@@ -514,6 +545,13 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
           return row.count;
         });
         expect(restored).toBe(OVER_BIND_LIMIT_ROWS);
+        await runInDurableObject(source, (_instance, state) => {
+          expect(
+            state.storage.sql
+              .exec('SELECT last_message_sequence FROM chat_sessions WHERE id = ?', sessionId)
+              .toArray()[0]?.last_message_sequence
+          ).toBe(OVER_BIND_LIMIT_ROWS);
+        });
       }
     );
   }, 120_000);
@@ -547,6 +585,7 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
       threw: true,
       code: 'PROJECT_DATA_TRANSCRIPT_WRITE_FENCED',
     });
+    await settleFixtureSummary(source);
   });
   it('migrates a session larger than one hash page through the real DO, streaming every terminal-version proof', async () => {
     const projectId = `archive-multipage-${crypto.randomUUID()}`;
@@ -702,16 +741,18 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
     );
   });
 
-  it('abandon returns a fenced pre-copy migration to root so the session reads again', async () => {
+  it('abandon returns a fenced pre-copy migration to root so the session accepts writes again', async () => {
     const projectId = `archive-abandon-${crypto.randomUUID()}`;
     const { sessionId } = await seedTerminalSessionWithMessages(projectId, 5);
     const migrationId = crypto.randomUUID();
     await seedFailedPreCopyMigration(projectId, sessionId, migrationId);
 
     await withArchiveEnv({ PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true' }, async () => {
-      // Fenced: the exact read owner is neither root nor a published shard.
+      // A `migrating` session reads from the root (it still holds every row) while writes stay
+      // fenced until the migration publishes or is abandoned.
+      expect(await projectDataService.getMessageCount(testEnv, projectId, sessionId)).toBe(5);
       await expect(
-        projectDataService.getMessageCount(testEnv, projectId, sessionId)
+        projectDataService.persistMessage(testEnv, projectId, sessionId, 'user', 'fenced', null)
       ).rejects.toMatchObject({ code: 'PROJECT_DATA_ARCHIVE_ROUTING_UNSAFE' });
 
       const abandoned = await abandonProjectDataArchiveMigration(testEnv, {
@@ -780,7 +821,7 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
  * None of them tells the sweep which candidate to take. A fixture seeded only with affordable
  * candidates would have passed throughout the outage, so each one seeds a mix and asserts on
  * which session actually moved.
- */describe('archive sweep affordability ceiling and budget fall-through', () => {
+ */ describe('archive sweep affordability ceiling and budget fall-through', () => {
   /**
    * Per-session message ids. The shared `seedMessages` helper numbers its ids from zero, so
    * two sessions in the same Durable Object collide on `messageId` and the second one silently
@@ -1014,6 +1055,56 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
     );
   });
 
+  it('settles an earlier fixture before a queued summary callback can repopulate sweep inputs', async () => {
+    const previous = await newArchiveProject('archive-queued-summary');
+    const debounceMs = parseInt(testEnv.DO_SUMMARY_SYNC_DEBOUNCE_MS || '5000', 10);
+    await runInDurableObject(previous.source, async (instance) => {
+      const owned = instance as unknown as {
+        summarySyncTimer: ReturnType<typeof setTimeout> | null;
+        heldSummaryCallback?: () => Promise<void>;
+      };
+      const schedule = globalThis.setTimeout;
+      globalThis.setTimeout = ((callback: () => Promise<void>, delay?: number) => {
+        if (delay === debounceMs) {
+          owned.heldSummaryCallback = callback;
+          return schedule(() => undefined, 60_000);
+        }
+        return schedule(callback, delay);
+      }) as typeof setTimeout;
+      try {
+        const sessionId = await instance.createSession(null, 'Earlier fixture');
+        await instance.persistMessage(sessionId, 'user', 'earlier transcript', null);
+        await instance.stopSession(sessionId);
+      } finally {
+        globalThis.setTimeout = schedule;
+      }
+      expect(owned.heldSummaryCallback).toBeTypeOf('function');
+      expect(owned.summarySyncTimer).not.toBeNull();
+    });
+    await settleFixtureSummary(previous.source);
+    const current = await newArchiveProject('archive-isolated-summary');
+    await seedTerminalSession(current.source, 'only target', 1);
+    await settleFixtureSummary(current.source);
+    await isolateSweepFixture(current.projectId);
+    // Release the actual production debounce callback after isolation only if teardown
+    // left it queued. No wall-clock sleep decides whether the unrelated row reappears.
+    await runInDurableObject(previous.source, async (instance) => {
+      const owned = instance as unknown as {
+        summarySyncTimer: ReturnType<typeof setTimeout> | null;
+        heldSummaryCallback?: () => Promise<void>;
+      };
+      if (owned.summarySyncTimer !== null) {
+        clearTimeout(owned.summarySyncTimer);
+        await owned.heldSummaryCallback!();
+      }
+      delete owned.heldSummaryCallback;
+    });
+    const rows = await env.DATABASE.prepare('SELECT project_id FROM session_summaries').all<{
+      project_id: string;
+    }>();
+    expect(rows.results).toEqual([{ project_id: current.projectId }]);
+  });
+
   it('stops reporting succeeded after consecutive sweeps that can afford nothing, and resets once one lands', async () => {
     await clearArchiveCadence();
     const { projectId, source } = await newArchiveProject('archive-stall');
@@ -1064,7 +1155,7 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
       // The message must name the recovery action, not just the symptom (`.claude/rules/72`),
       // and must say that waiting will not help — that was the false signal for four days.
       expect(stalled?.last_error).toContain('Waiting will not clear this');
-      expect(stalled?.last_error).toContain('PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET');
+      expect(stalled?.last_error).toContain('PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT');
       expect(stalled?.last_error).toContain('PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET');
     });
 

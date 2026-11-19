@@ -4,7 +4,7 @@
  * This keeps the internal TaskRunner -> GitHub service path real and mocks only
  * the external boundaries: D1 and GitHub HTTP.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   log: {
@@ -22,11 +22,21 @@ vi.mock('../../../../src/lib/logger', () => ({
 
 vi.mock('jose', () => {
   class MockSignJWT {
-    setProtectedHeader() { return this; }
-    setIssuedAt() { return this; }
-    setIssuer() { return this; }
-    setExpirationTime() { return this; }
-    async sign() { return 'mock-jwt'; }
+    setProtectedHeader() {
+      return this;
+    }
+    setIssuedAt() {
+      return this;
+    }
+    setIssuer() {
+      return this;
+    }
+    setExpirationTime() {
+      return this;
+    }
+    async sign() {
+      return 'mock-jwt';
+    }
   }
   return {
     importPKCS8: vi.fn().mockResolvedValue('mock-key'),
@@ -39,7 +49,10 @@ vi.mock('../../../../src/lib/runtime-validation', () => ({
   expectJsonRecord: vi.fn().mockImplementation((value: unknown) => value),
 }));
 
-import type { TaskRunnerContext, TaskRunnerState } from '../../../../src/durable-objects/task-runner/types';
+import type {
+  TaskRunnerContext,
+  TaskRunnerState,
+} from '../../../../src/durable-objects/task-runner/types';
 import { ensureBranchExistsOnRemote } from '../../../../src/durable-objects/task-runner/workspace-steps';
 
 function makeState(): TaskRunnerState {
@@ -82,34 +95,42 @@ function makeState(): TaskRunnerState {
   } as unknown as TaskRunnerState;
 }
 
+import { githubInstallations,projects } from '../../../../src/db/schema';
+import { createAdminSettingsEnv } from '../../../helpers/admin-settings-env';
+import { createSchemaTables } from '../../../helpers/sqlite-d1';
+let fixture: ReturnType<typeof createAdminSettingsEnv>;
 function makeContext(): TaskRunnerContext {
-  const first = vi.fn().mockResolvedValue({
-    installationId: 'legacy-external-123',
-    externalInstallationId: '987654321',
+  fixture = createAdminSettingsEnv({
+    GITHUB_APP_ID: 'test-app-id',
+    GITHUB_APP_PRIVATE_KEY: btoa('test-private-key'),
   });
-  const bind = vi.fn().mockReturnValue({ first });
-  const prepare = vi.fn().mockReturnValue({ bind });
-
+  createSchemaTables(fixture.sqlite, [projects, githubInstallations]);
+  fixture.sqlite
+    .prepare('INSERT INTO projects(id,user_id,repo_provider) VALUES (?,?,?)')
+    .run('proj-test-001', 'user-test-001', 'github');
+  fixture.sqlite
+    .prepare(
+      'INSERT INTO github_installations(id,user_id,installation_id,external_installation_id) VALUES (?,?,?,?)'
+    )
+    .run('01KTDBROW000000000000000001', 'user-test-001', 'legacy-external-123', '987654321');
   return {
-    env: {
-      DATABASE: { prepare },
-      GITHUB_APP_ID: 'test-app-id',
-      GITHUB_APP_PRIVATE_KEY: btoa('test-private-key'),
-    },
+    env: fixture.env,
     assertRecoveryAuthority: vi.fn().mockResolvedValue(undefined),
   } as unknown as TaskRunnerContext;
 }
 
 describe('ensureBranchExistsOnRemote token path', () => {
+  afterEach(() => fixture?.sqlite.close());
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
   });
 
   it('passes the external GitHub installation id all the way to getInstallationToken', async () => {
-    const fetchMock = vi.fn()
+    const fetchMock = vi
+      .fn()
       .mockResolvedValueOnce(
-        Response.json({ token: 'test-installation-token', expires_at: '2026-12-31T00:00:00Z' }),
+        Response.json({ token: 'test-installation-token', expires_at: '2026-12-31T00:00:00Z' })
       )
       .mockResolvedValueOnce(Response.json({ name: 'feature/my-branch' }));
     vi.stubGlobal('fetch', fetchMock);
@@ -119,11 +140,11 @@ describe('ensureBranchExistsOnRemote token path', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       'https://api.github.com/app/installations/987654321/access_tokens',
-      expect.objectContaining({ method: 'POST' }),
+      expect.objectContaining({ method: 'POST' })
     );
     expect(fetchMock).not.toHaveBeenCalledWith(
       expect.stringContaining('01KTDBROW000000000000000001'),
-      expect.anything(),
+      expect.anything()
     );
   });
 });

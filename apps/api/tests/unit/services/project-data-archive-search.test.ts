@@ -1,12 +1,12 @@
+import { describeRootSearchCoverage } from '@simple-agent-manager/project-data/internal/client/project-data-search-coverage';
+import type { MessageSearchCoverage } from '@simple-agent-manager/project-data/internal/do/message-search';
 import { DEFAULT_SAM_MAX_TOOL_RESULT_BYTES } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import type { MessageSearchCoverage } from '../../../src/durable-objects/project-data/message-search';
 import type { Env } from '../../../src/env';
 import { searchMessagesWithArchiveMetadata } from '../../../src/services/project-data';
-import { describeRootSearchCoverage } from '../../../src/services/project-data-search-coverage';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 type SearchRow = {

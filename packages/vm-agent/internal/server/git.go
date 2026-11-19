@@ -85,6 +85,11 @@ func (s *Server) handleGitStatus(w http.ResponseWriter, r *http.Request) {
 	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
 		return
 	}
+	// Already confined: git status reports paths in the working tree only.
+	if _, err := requestedConfinement(w, r); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	containerID, workDir, user, err := s.resolveContainerForWorkspace(workspaceID)
 	if err != nil {
@@ -126,6 +131,11 @@ func (s *Server) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
 		return
 	}
+	confined, err := requestedConfinement(w, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	filePath := r.URL.Query().Get("path")
 	if filePath == "" {
@@ -133,8 +143,16 @@ func (s *Server) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := sanitizeFilePath(filePath); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writePathError(w, err, confined)
 		return
+	}
+	// Git reads a confined path from the working tree root; it never leaves the repository.
+	diffPath := filePath
+	if confined {
+		if diffPath, err = confinedGitPath(filePath); err != nil {
+			writeConfinementError(w, err)
+			return
+		}
 	}
 
 	staged := r.URL.Query().Get("staged") == "true"
@@ -155,9 +173,9 @@ func (s *Server) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 
 	var diff string
 	if staged {
-		diff, _, err = s.execInContainer(ctx, containerID, user, workDir, "git", "diff", "--cached", "--", filePath)
+		diff, _, err = s.execInContainer(ctx, containerID, user, workDir, "git", "diff", "--cached", "--", diffPath)
 	} else {
-		diff, _, err = s.execInContainer(ctx, containerID, user, workDir, "git", "diff", "--", filePath)
+		diff, _, err = s.execInContainer(ctx, containerID, user, workDir, "git", "diff", "--", diffPath)
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("git diff failed: %v", err))
@@ -166,7 +184,15 @@ func (s *Server) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 
 	// For untracked files, git diff returns empty. Show file content as all-additions.
 	if diff == "" {
-		content, _, catErr := s.execInContainer(ctx, containerID, user, workDir, "cat", filePath)
+		readPath := filePath
+		if confined {
+			// cat follows symlinks, so an untracked one must still resolve inside the tree.
+			if readPath, err = s.resolveConfinedPath(ctx, containerID, user, workDir, filePath); err != nil {
+				writeConfinementError(w, err)
+				return
+			}
+		}
+		content, _, catErr := s.execInContainer(ctx, containerID, user, workDir, "cat", "--", readPath)
 		if catErr == nil && content != "" {
 			diff = formatAsAdditions(filePath, content)
 		}
@@ -190,6 +216,11 @@ func (s *Server) handleGitFile(w http.ResponseWriter, r *http.Request) {
 	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
 		return
 	}
+	confined, err := requestedConfinement(w, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	filePath := r.URL.Query().Get("path")
 	if filePath == "" {
@@ -197,7 +228,7 @@ func (s *Server) handleGitFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := sanitizeFilePath(filePath); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writePathError(w, err, confined)
 		return
 	}
 
@@ -224,9 +255,24 @@ func (s *Server) handleGitFile(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		content, _, err = s.execInContainer(ctx, containerID, user, workDir, "git", "show", ref+":"+filePath)
+		showPath := filePath
+		if confined {
+			// git show reads committed objects only, so a relative path is all it needs.
+			if showPath, err = confinedGitPath(filePath); err != nil {
+				writeConfinementError(w, err)
+				return
+			}
+		}
+		content, _, err = s.execInContainer(ctx, containerID, user, workDir, "git", "show", ref+":"+showPath)
 	} else {
-		content, _, err = s.execInContainer(ctx, containerID, user, workDir, "cat", filePath)
+		readPath := filePath
+		if confined {
+			if readPath, err = s.resolveConfinedPath(ctx, containerID, user, workDir, filePath); err != nil {
+				writeConfinementError(w, err)
+				return
+			}
+		}
+		content, _, err = s.execInContainer(ctx, containerID, user, workDir, "cat", "--", readPath)
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to read file: %v", err))
@@ -323,6 +369,9 @@ func parseRemoteBranches(output string) []GitBranchInfo {
 
 // ---------- Helpers ----------
 
+// errPathTraversal marks a path with a ".." component.
+var errPathTraversal = errors.New("path traversal is not allowed")
+
 // sanitizeFilePath validates that a file path is safe for use in git/file commands.
 // Rejects path traversal and null bytes. Absolute paths are allowed because
 // the user owns the container and should be able to view any file in it.
@@ -338,13 +387,13 @@ func sanitizeFilePath(path string) error {
 	// Check for path traversal
 	cleaned := filepath.Clean(path)
 	if strings.HasPrefix(cleaned, "..") {
-		return fmt.Errorf("path traversal is not allowed")
+		return errPathTraversal
 	}
 
 	// Also reject any component that is ".."
 	for _, part := range strings.Split(cleaned, string(filepath.Separator)) {
 		if part == ".." {
-			return fmt.Errorf("path traversal is not allowed")
+			return errPathTraversal
 		}
 	}
 

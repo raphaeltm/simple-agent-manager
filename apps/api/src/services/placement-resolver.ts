@@ -1,3 +1,40 @@
+import {
+  buildCapacityPoolSelection,
+  capacityPlacementSnapshotForTaskStart,
+  collectStoredResourceRequirementLayers,
+  directPlacementAuditSnapshot,
+  hasNoCapacityPoolCandidates,
+  mergeResourceRequirementLayers,
+  noEligibleCapacityCandidateMessage,
+  normalizeCredentialAttribution,
+  type PlacementCredentialAttribution,
+  type PlacementCredentialLookup,
+  type PlacementCredentialResolutionFailure,
+  type PlacementCredentialSourceResult,
+  type PlacementProfileDefaults,
+  PlacementResolutionError,
+  type PlacementRuntimeResolution,
+  preferCapacityCandidatesInLocation,
+  resolveCredentialLookup,
+  resolveDevcontainerConfigName,
+  resolveEffectiveNodeHostMemoryReserveMb,
+  resolvePreferredVmLocation,
+  resolveProvider,
+  resolveTaskMode,
+  resolveVmLocation,
+  resolveVmSize,
+  resolveVmSizeSource,
+  resolveWorkloadRole,
+  resolveWorkspaceProfile,
+  ResourceRequirementsValidationError,
+  type TaskStartCapacityCandidate,
+  type TaskStartCapacityPoolSelection,
+  type TaskStartPlacement,
+  type TaskStartPlacementInput,
+  type TaskStartPlacementWithCredential,
+  validateResolvedLocation,
+  type WorkspaceRuntimeDecision,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   AgentProfileRuntime,
   CredentialSource,
@@ -15,54 +52,10 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { resolveCapacityPoolPlacementSettings } from './capacity-pool-placement-settings';
 import { resolveEffectiveDefaultCapacityPoolSummary } from './default-capacity-pools';
-import { preferCapacityCandidatesInLocation } from './placement-capacity-ranking';
-import {
-  normalizeCredentialAttribution,
-  resolveCredentialLookup,
-  resolveDevcontainerConfigName,
-  resolvePreferredVmLocation,
-  resolveProvider,
-  resolveTaskMode,
-  resolveVmLocation,
-  resolveVmSize,
-  resolveVmSizeSource,
-  resolveWorkloadRole,
-  resolveWorkspaceProfile,
-  validateResolvedLocation,
-} from './placement-field-resolution';
-import {
-  noEligibleCapacityCandidateMessage,
-  PlacementResolutionError,
-} from './placement-resolution-error';
-import {
-  buildCapacityPoolSelection,
-  capacityPlacementSnapshotForTaskStart,
-  directPlacementAuditSnapshot,
-  hasNoCapacityPoolCandidates,
-} from './placement-resolver-capacity';
-import type {
-  PlacementCredentialAttribution,
-  PlacementCredentialLookup,
-  PlacementCredentialSourceResult,
-  PlacementProfileDefaults,
-  PlacementRuntimeResolution,
-  TaskStartCapacityCandidate,
-  TaskStartCapacityPoolSelection,
-  TaskStartPlacement,
-  TaskStartPlacementInput,
-  TaskStartPlacementWithCredential,
-} from './placement-resolver-types';
 import { resolveCredentialSource } from './provider-credentials';
-import {
-  collectStoredResourceRequirementLayers,
-  mergeResourceRequirementLayers,
-  ResourceRequirementsValidationError,
-} from './resource-requirements-input';
-import { resolveEffectiveNodeHostMemoryReserveMb } from './workspace-resource-capacity';
-import type { WorkspaceRuntimeDecision } from './workspace-runtime';
 
-export type { RankCapacityCandidatesInput } from './placement-resolver-capacity';
 export {
+  type CapacityAwareNodePlacementRow,
   capacityPlacementSnapshotForCandidate,
   capacityPlacementSnapshotForTaskStart,
   capacityPoolNoCandidatesError,
@@ -70,34 +63,32 @@ export {
   capacityPoolSnapshotForPool,
   directPlacementAuditSnapshot,
   hasNoCapacityPoolCandidates,
+  type PlacementCredentialAttribution,
+  type PlacementCredentialAttributionInput,
+  type PlacementCredentialLookup,
+  type PlacementCredentialProjectPolicy,
+  type PlacementCredentialResolutionFailure,
+  type PlacementCredentialSourceResult,
+  type PlacementEntryPoint,
+  type PlacementExplicitOverrides,
+  type PlacementProfileDefaults,
+  type PlacementProfileVmSizeSource,
+  type PlacementProjectDefaults,
+  PlacementResolutionError,
+  type PlacementResolutionErrorCode,
+  type PlacementRuntimeResolution,
+  type PlacementTaskModeDefault,
   rankCapacityCandidatesForRuntime,
+  type RankCapacityCandidatesInput,
   resolveReusableNodeCapacitySnapshot,
-} from './placement-resolver-capacity';
-export type {
-  CapacityAwareNodePlacementRow,
-  PlacementCredentialAttribution,
-  PlacementCredentialAttributionInput,
-  PlacementCredentialLookup,
-  PlacementCredentialProjectPolicy,
-  PlacementCredentialSourceResult,
-  PlacementEntryPoint,
-  PlacementExplicitOverrides,
-  PlacementProfileDefaults,
-  PlacementProfileVmSizeSource,
-  PlacementProjectDefaults,
-  PlacementResolutionErrorCode,
-  PlacementRuntimeResolution,
-  PlacementTaskModeDefault,
-  TaskStartCapacityCandidate,
-  TaskStartCapacityPoolSelection,
-  TaskStartPlacement,
-  TaskStartPlacementInput,
-  TaskStartPlacementWithCredential,
-} from './placement-resolver-types';
+  type TaskStartCapacityCandidate,
+  type TaskStartCapacityPoolSelection,
+  type TaskStartPlacement,
+  type TaskStartPlacementInput,
+  type TaskStartPlacementWithCredential,
+} from '@simple-agent-manager/scheduler-core';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
-
-export { PlacementResolutionError } from './placement-resolution-error';
 
 export function resolvePlacementRuntimePreference(input: {
   explicitRuntime?: AgentProfileRuntime | null;
@@ -197,18 +188,12 @@ function resolvePlacementReservation(
 export function resolveTaskStartPlacement(input: TaskStartPlacementInput): TaskStartPlacement {
   const profile = input.profile ?? null;
   const explicit = input.explicit ?? {};
-  const provider = resolveProvider(explicit.provider, profile, input.project);
+  const provider = resolveProvider(explicit.provider);
   const preferredVmLocation =
     explicit.vmLocation == null
       ? resolvePreferredVmLocation(input.preferredVmLocation, provider)
       : null;
-  const vmLocation = resolveVmLocation(
-    explicit.vmLocation,
-    preferredVmLocation,
-    profile,
-    input.project,
-    provider
-  );
+  const vmLocation = resolveVmLocation(explicit.vmLocation, preferredVmLocation, provider);
   const workspaceProfile = resolveWorkspaceProfile(
     explicit.workspaceProfile,
     profile,
@@ -387,11 +372,18 @@ export function resolveCapacityPlacementCredentialAttribution(
   };
 }
 
+/**
+ * Which quota a provisioning attempt is charged to. `targetCandidate` is the offering actually
+ * being provisioned; it defaults to the selection's first. A TaskRunner on a later provider tier
+ * passes that tier's offering, so a user-credential tier is not charged as the platform tier
+ * ranked above it.
+ */
 export function resolveCapacityAwareQuotaCredentialSource(
   credential: PlacementCredentialSourceResult,
-  capacityPoolSelection: TaskStartCapacityPoolSelection | null
+  capacityPoolSelection: TaskStartCapacityPoolSelection | null,
+  targetCandidate: TaskStartCapacityCandidate | null = capacityPoolSelection?.candidates[0] ?? null
 ): CredentialSource {
-  const capacityCandidate = capacityPoolSelection?.candidates[0] ?? null;
+  const capacityCandidate = targetCandidate;
   if (
     credential.credentialSource === 'platform' ||
     capacityCandidate?.credentialAttributionSource === 'platform'
@@ -405,9 +397,7 @@ export async function resolveTaskStartPlacementCredentialAttribution(
   db: Db,
   input: TaskStartPlacementInput,
   options?: { capacityPoolEnsure?: boolean; credentialsRequiredMessage?: string; env?: Env }
-): Promise<
-  TaskStartPlacementWithCredential | { error: string; errorKind: 'placement' | 'credentials' }
-> {
+): Promise<TaskStartPlacementWithCredential | PlacementCredentialResolutionFailure> {
   let placement: TaskStartPlacement;
   try {
     const settings = options?.env
@@ -422,7 +412,7 @@ export async function resolveTaskStartPlacementCredentialAttribution(
     });
   } catch (err) {
     if (err instanceof PlacementResolutionError) {
-      return { error: err.message, errorKind: 'placement' };
+      return { error: err.message, errorKind: 'placement', placementErrorCode: err.code };
     }
     throw err;
   }
@@ -434,10 +424,8 @@ export async function resolveTaskStartPlacementCredentialAttributionFromPlacemen
   db: Db,
   placement: TaskStartPlacement,
   options?: { capacityPoolEnsure?: boolean; credentialsRequiredMessage?: string; env?: Env }
-): Promise<
-  TaskStartPlacementWithCredential | { error: string; errorKind: 'placement' | 'credentials' }
-> {
-  let capacityPoolSelection: TaskStartCapacityPoolSelection | null;
+): Promise<TaskStartPlacementWithCredential | PlacementCredentialResolutionFailure> {
+  let capacityPoolSelection: TaskStartCapacityPoolSelection | null = null;
   let credentialLookup: PlacementCredentialLookup;
   try {
     capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement, {
@@ -448,7 +436,14 @@ export async function resolveTaskStartPlacementCredentialAttributionFromPlacemen
     credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
   } catch (err) {
     if (err instanceof PlacementResolutionError) {
-      return { error: err.message, errorKind: 'placement' };
+      return {
+        error: err.message,
+        errorKind: 'placement',
+        placementErrorCode: err.code,
+        capacityPoolEffectiveState: capacityPoolSelection?.effectiveState,
+        capacityPoolRefreshPending: capacityPoolSelection?.catalogRefreshPending,
+        capacityPoolCatalogPublished: capacityPoolSelection?.catalogPublished,
+      };
     }
     throw err;
   }

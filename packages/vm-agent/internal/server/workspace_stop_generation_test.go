@@ -24,6 +24,29 @@ func workspaceStopRequest(token, body string) *http.Request {
 	return r
 }
 
+// This real-handler response is consumed by workspaceStopAlreadyConfirmed in
+// apps/api/src/services/session-sleep-teardown.ts; keep both sides in sync.
+func TestWorkspaceStopAlreadyStoppedResponseContract(t *testing.T) {
+	s, token, finish := newRestartGenerationTestServer(t, "stopped")
+	defer finish(errors.New("test complete"))
+	s.workspaces["ws-restart"].EvictionGeneration = restartTestGeneration
+
+	rec := httptest.NewRecorder()
+	s.handleStopWorkspace(rec, workspaceStopRequest(token,
+		`{"expectedEvictionGeneration":"`+restartTestGeneration+`"}`))
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("already-stopped response = %d %s, want 409", rec.Code, rec.Body.String())
+	}
+	const want = `{"error":"invalid_transition","message":"Workspace cannot be stopped from current state: stopped"}`
+	if got := strings.TrimSpace(rec.Body.String()); got != want {
+		t.Fatalf("already-stopped response body = %s, want %s", got, want)
+	}
+	if current := s.snapshotWorkspaceRuntime(s.workspaces["ws-restart"]); current.Status != "stopped" || current.EvictionGeneration != restartTestGeneration {
+		t.Fatalf("already-stopped request mutated runtime: %#v", current)
+	}
+}
+
 func TestWorkspaceStopGenerationValidation(t *testing.T) {
 	for _, tt := range []struct {
 		name, body, generation, status string
@@ -52,6 +75,7 @@ func TestWorkspaceStopGenerationValidation(t *testing.T) {
 			if rec.Code != tt.want {
 				t.Fatalf("stop = %d %s, want %d", rec.Code, rec.Body.String(), tt.want)
 			}
+			assertWorkspaceStopStaleGenerationResponse(t, tt.name, rec)
 			wantStatus := tt.status
 			if tt.want == http.StatusOK {
 				wantStatus = "stopped"
@@ -60,6 +84,17 @@ func TestWorkspaceStopGenerationValidation(t *testing.T) {
 				t.Fatalf("unexpected stop mutation: %#v", got)
 			}
 		})
+	}
+}
+
+func assertWorkspaceStopStaleGenerationResponse(t *testing.T, caseName string, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if caseName != "stale initial generation" && caseName != "stale generation" {
+		return
+	}
+	const wantBody = `{"error":"workspace eviction generation changed"}`
+	if got := strings.TrimSpace(rec.Body.String()); got != wantBody {
+		t.Fatalf("stale-generation response body = %s, want %s", got, wantBody)
 	}
 }
 
@@ -112,19 +147,7 @@ func TestWorkspaceStopGenerationRechecksAfterLifecycleWait(t *testing.T) {
 		defer close(done)
 		s.handleStopWorkspace(rec, workspaceStopRequest(token, `{"expectedEvictionGeneration":""}`))
 	}()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		s.workspaceLifecycleMu.Lock()
-		waiting := s.workspaceLifecycleLocks["ws-restart"].users == 2
-		s.workspaceLifecycleMu.Unlock()
-		if waiting {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("stop did not wait for lifecycle ownership")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitForWorkspaceStopLifecycleWaiter(t, s, "ws-restart")
 	// Complete the durable generation transition while the stale stop waits.
 	if changed, err := s.store.CompareAndSwapWorkspaceEvictionGeneration("ws-restart", "", restartTestGeneration); err != nil || !changed {
 		t.Fatalf("persist successor generation: %v %v", changed, err)
@@ -150,5 +173,22 @@ func TestWorkspaceStopGenerationRechecksAfterLifecycleWait(t *testing.T) {
 	}
 	if data, err := os.ReadFile(dockerLog); err == nil && len(data) > 0 {
 		t.Fatalf("stale stop ran Docker: %s", data)
+	}
+}
+
+func waitForWorkspaceStopLifecycleWaiter(t *testing.T, s *Server, workspaceID string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		s.workspaceLifecycleMu.Lock()
+		waiting := s.workspaceLifecycleLocks[workspaceID].users == 2
+		s.workspaceLifecycleMu.Unlock()
+		if waiting {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("stop did not wait for lifecycle ownership")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

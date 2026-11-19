@@ -32,13 +32,20 @@ function makeTestEnv() {
     JWT_PUBLIC_KEY: TEST_RSA_PUBLIC_KEY,
     JWT_PRIVATE_KEY: TEST_RSA_PRIVATE_KEY,
     BASE_DOMAIN: 'test.example.com',
+    // No workspace or node rows: the generation check defers to the sinks, so this suite
+    // keeps testing scope alone (see tests/helpers/callback-generation-d1.ts).
+    DATABASE: { prepare: () => ({ bind: () => ({ first: async () => null }) }) },
   } as unknown as Parameters<typeof import('../../../src/services/jwt').verifyCallbackToken>[1];
 }
 
 describe('verifyCallbackToken — unified scope enforcement (F-010)', () => {
   it('accepts workspace-scoped token when expectedScope is workspace', async () => {
     const { verifyCallbackToken } = await import('../../../src/services/jwt');
-    const token = await signTestToken({ type: 'callback', workspace: 'ws-123', scope: 'workspace' });
+    const token = await signTestToken({
+      type: 'callback',
+      workspace: 'ws-123',
+      scope: 'workspace',
+    });
     const env = makeTestEnv();
 
     const result = await verifyCallbackToken(token, env, { expectedScope: 'workspace' });
@@ -51,9 +58,9 @@ describe('verifyCallbackToken — unified scope enforcement (F-010)', () => {
     const token = await signTestToken({ type: 'callback', workspace: 'ws-123', scope: 'node' });
     const env = makeTestEnv();
 
-    await expect(
-      verifyCallbackToken(token, env, { expectedScope: 'workspace' })
-    ).rejects.toThrow(/does not match expected/);
+    await expect(verifyCallbackToken(token, env, { expectedScope: 'workspace' })).rejects.toThrow(
+      /does not match expected/
+    );
   });
 
   it('rejects legacy token (no scope) when expectedScope is workspace', async () => {
@@ -61,9 +68,9 @@ describe('verifyCallbackToken — unified scope enforcement (F-010)', () => {
     const token = await signTestToken({ type: 'callback', workspace: 'ws-123' });
     const env = makeTestEnv();
 
-    await expect(
-      verifyCallbackToken(token, env, { expectedScope: 'workspace' })
-    ).rejects.toThrow(/does not match expected/);
+    await expect(verifyCallbackToken(token, env, { expectedScope: 'workspace' })).rejects.toThrow(
+      /Missing token scope claim/
+    );
   });
 
   it('accepts node-scoped token when expectedScope is node', async () => {
@@ -75,17 +82,18 @@ describe('verifyCallbackToken — unified scope enforcement (F-010)', () => {
     expect(result.scope).toBe('node');
   });
 
-  it('preserves legacy behavior — no scope check when expectedScope omitted', async () => {
+  it('rejects a legacy token (no scope) even when expectedScope is omitted', async () => {
     const { verifyCallbackToken } = await import('../../../src/services/jwt');
     const legacyToken = await signTestToken({ type: 'callback', workspace: 'ws-legacy' });
     const env = makeTestEnv();
 
-    const result = await verifyCallbackToken(legacyToken, env);
-    expect(result.scope).toBeUndefined();
-    expect(result.workspace).toBe('ws-legacy');
+    await expect(verifyCallbackToken(legacyToken, env)).rejects.toMatchObject({
+      statusCode: 401,
+      message: 'Missing token scope claim',
+    });
   });
 
-  it('preserves legacy behavior — node token accepted when no expectedScope', async () => {
+  it('accepts a node token when no expectedScope is given', async () => {
     const { verifyCallbackToken } = await import('../../../src/services/jwt');
     const token = await signTestToken({ type: 'callback', workspace: 'node-123', scope: 'node' });
     const env = makeTestEnv();
@@ -100,15 +108,15 @@ describe('verifyCallbackToken — unified scope enforcement (F-010)', () => {
 
     // Empty string scope — invalid
     const emptyScope = await signTestToken({ type: 'callback', workspace: 'ws-123', scope: '' });
-    await expect(
-      verifyCallbackToken(emptyScope, env)
-    ).rejects.toThrow(/Invalid token scope/);
+    await expect(verifyCallbackToken(emptyScope, env)).rejects.toThrow(/Invalid token scope/);
 
     // Unexpected scope value — invalid
-    const adminScope = await signTestToken({ type: 'callback', workspace: 'ws-123', scope: 'admin' });
-    await expect(
-      verifyCallbackToken(adminScope, env)
-    ).rejects.toThrow(/Invalid token scope/);
+    const adminScope = await signTestToken({
+      type: 'callback',
+      workspace: 'ws-123',
+      scope: 'admin',
+    });
+    await expect(verifyCallbackToken(adminScope, env)).rejects.toThrow(/Invalid token scope/);
   });
 
   it('contract: AI proxy path and direct verifyCallbackToken reject same tokens', async () => {

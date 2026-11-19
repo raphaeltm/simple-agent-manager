@@ -45,7 +45,6 @@ const project = {
   githubInstallationId: 'installation-1',
   defaultVmSize: null,
   defaultAgentType: null,
-  defaultProvider: null,
   workspaceIdleTimeoutMs: null,
   nodeIdleTimeoutMs: null,
   createdAt: '2026-09-26T00:00:00Z',
@@ -165,7 +164,7 @@ async function renderWakeFailedSidebar(page: Page, screenshotName: string) {
   await page.addInitScript((id) => {
     window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true');
   }, userId);
-  await page.goto(`/projects/${projectId}`);
+  await page.goto(`/projects/${projectId}/chat`);
   await page.waitForTimeout(1500);
 
   const button = page.getByRole('button', { name: 'Open chat list' });

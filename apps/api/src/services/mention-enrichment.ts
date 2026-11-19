@@ -6,22 +6,20 @@
  * profiles were mentioned and how to dispatch work to them via dispatch_task.
  * The agent decides whether and how to act on it.
  */
-import type { ResolvedAgentProfile } from '@simple-agent-manager/shared';
+import type { MentionMatch, ResolvedAgentProfile } from '@simple-agent-manager/shared';
+import { extractMentions, formatMentionName } from '@simple-agent-manager/shared';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import type * as dbSchema from '../db/schema';
 import type { Env } from '../env';
+import { AppError } from '../middleware/error';
 import { resolveAgentProfile } from './agent-profiles';
 
 type Db = ReturnType<typeof drizzle<typeof dbSchema>>;
 type ProfileEnv = Pick<Env, 'DEFAULT_TASK_AGENT_TYPE'>;
 
-export interface MentionMatch {
-  /** The full raw match text (e.g., `@reviewer` or `@"Code Reviewer"`) */
-  raw: string;
-  /** The extracted profile name (e.g., `reviewer` or `Code Reviewer`) */
-  name: string;
-}
+export type { MentionMatch } from '@simple-agent-manager/shared';
+export { extractMentions } from '@simple-agent-manager/shared';
 
 export interface ResolvedMention {
   mention: MentionMatch;
@@ -38,37 +36,12 @@ export interface EnrichmentResult {
 }
 
 /**
- * Extract @mentions from text.
- * Supports `@word` and `@"Multi Word Name"` syntax.
- */
-export function extractMentions(text: string): MentionMatch[] {
-  const regex = /@(?:"([^"]+)"|(\w+))/g;
-  const matches: MentionMatch[] = [];
-  const seen = new Set<string>();
-  let match;
-
-  while ((match = regex.exec(text)) !== null) {
-    const name = match[1] ?? match[2];
-    if (!name) continue;
-    const lower = name.toLowerCase();
-    if (!seen.has(lower)) {
-      seen.add(lower);
-      matches.push({ raw: match[0], name });
-    }
-  }
-
-  return matches;
-}
-
-/**
  * Build the hidden instruction block appended to the enriched message.
  */
 function buildMentionContext(resolved: ResolvedMention[]): string {
   const lines = resolved.map(({ profile }) => {
-    const desc = profile.systemPromptAppend
-      ? ` — "${profile.systemPromptAppend}"`
-      : '';
-    return `- @${profile.profileName}: ${profile.agentType}${desc} (profileId: ${profile.profileId})`;
+    const desc = profile.systemPromptAppend ? ` — "${profile.systemPromptAppend}"` : '';
+    return `- ${formatMentionName(profile.profileName ?? '')}: ${profile.agentType}${desc} (profileId: ${profile.profileId})`;
   });
 
   return (
@@ -90,7 +63,7 @@ export async function enrichMessageWithMentions(
   db: Db,
   projectId: string,
   userId: string,
-  env: ProfileEnv,
+  env: ProfileEnv
 ): Promise<EnrichmentResult> {
   const mentions = extractMentions(message);
 
@@ -101,7 +74,16 @@ export async function enrichMessageWithMentions(
   const resolved: ResolvedMention[] = [];
 
   for (const mention of mentions) {
-    const profile = await resolveAgentProfile(db, projectId, mention.name, userId, env);
+    let profile: ResolvedAgentProfile;
+    try {
+      profile = await resolveAgentProfile(db, projectId, mention.name, userId, env);
+    } catch (error) {
+      // Mentions are optional hints. Explicit profile selection remains strict.
+      if (error instanceof AppError && error.statusCode === 404 && error.error === 'NOT_FOUND') {
+        continue;
+      }
+      throw error;
+    }
     // Only include mentions that resolved to an actual named profile
     if (profile.profileId && profile.profileName) {
       resolved.push({ mention, profile });

@@ -6,6 +6,7 @@ const dispatchTaskMocks = vi.hoisted(() => ({
   },
   createSession: vi.fn(),
   persistMessage: vi.fn(),
+  recordActivityEvent: vi.fn(),
   resolveCredentialSource: vi.fn(),
   resolveTaskStartPlacementCredentialAttribution: vi.fn(),
   resolveAgentProfile: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('../../../src/services/placement-resolver', () => ({
 vi.mock('../../../src/services/project-data', () => ({
   createSession: dispatchTaskMocks.createSession,
   persistMessage: dispatchTaskMocks.persistMessage,
+  recordActivityEvent: dispatchTaskMocks.recordActivityEvent,
 }));
 
 vi.mock('../../../src/services/task-title', () => ({
@@ -90,6 +92,9 @@ export interface DispatchPlacementResolutionInput {
 export function selectRows(rows: unknown[]) {
   return {
     from: vi.fn(() => ({
+      innerJoin: vi.fn(() => ({
+        where: vi.fn(() => ({ limit: vi.fn(() => Promise.resolve(rows)) })),
+      })),
       where: vi.fn(() => ({
         limit: vi.fn(() => Promise.resolve(rows)),
       })),
@@ -133,14 +138,16 @@ export function buildDispatchPlacementResolution(input: DispatchPlacementResolut
 export function resetDispatchTaskMocks(options: { title?: string } = {}) {
   vi.clearAllMocks();
   dispatchTaskMocks.db.select.mockImplementation(() => selectRows([]));
-  dispatchTaskMocks.db.select.mockImplementationOnce(() => selectRows([dispatchProject]));
   dispatchTaskMocks.db.select.mockImplementationOnce(() =>
     selectRows([
       {
-        projectId: 'proj-1',
-        userId: 'user-1',
-        role: 'owner',
-        status: 'active',
+        project: dispatchProject,
+        membership: {
+          projectId: 'proj-1',
+          userId: 'user-1',
+          role: 'owner',
+          status: 'active',
+        },
       },
     ])
   );
@@ -157,6 +164,7 @@ export function resetDispatchTaskMocks(options: { title?: string } = {}) {
   dispatchTaskMocks.requireRepositoryOwnerAccess.mockResolvedValue(undefined);
   dispatchTaskMocks.createSession.mockResolvedValue('session-1');
   dispatchTaskMocks.persistMessage.mockResolvedValue('message-1');
+  dispatchTaskMocks.recordActivityEvent.mockResolvedValue('activity-1');
   dispatchTaskMocks.startTaskRunnerDO.mockResolvedValue(undefined);
 }
 
@@ -199,12 +207,6 @@ export function buildDispatchCtx(
             { success: true, results: [], meta: { changes: 1 } },
             { success: true, results: [], meta: { changes: 1 } },
           ]),
-        },
-        PROJECT_DATA: {
-          idFromName: vi.fn(() => 'project-data-id'),
-          get: vi.fn(() => ({
-            fetch: vi.fn().mockResolvedValue(new Response('ok')),
-          })),
         },
         AI: {},
         BASE_DOMAIN: 'example.com',

@@ -1,11 +1,10 @@
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { upsertActivityState } from '@simple-agent-manager/project-data/internal/do/session-state';
+import type { Env as ProjectDataEnv } from '@simple-agent-manager/project-data/internal/do/types';
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { runMigrations } from '../../src/durable-objects/migrations';
-import { upsertActivityState } from '../../src/durable-objects/project-data/session-state';
-import { getLocalTaskRuntimeLiveness } from '../../src/durable-objects/project-data/task-runtime-liveness';
-import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
 import type { Env } from '../../src/env';
 import { getTaskRuntimeLiveness } from '../../src/scheduled/stuck-tasks';
 import {
@@ -13,10 +12,12 @@ import {
   needsSessionResumabilityProbe,
   needsTaskSupersessionProbe,
 } from '../../src/services/task-runtime-liveness';
+import { getLocalTaskRuntimeLiveness } from '../../src/services/task-runtime-liveness-local';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 import { createSqlStorage } from './durable-objects/sql-storage-test-utils';
 
-const { fetchWithTimeoutMock } = vi.hoisted(() => ({
+const { fetchWithTimeoutMock, hostListingMock } = vi.hoisted(() => ({
+  hostListingMock: vi.fn(),
   fetchWithTimeoutMock: vi.fn(),
 }));
 vi.mock('../../src/services/fetch-timeout', async (importOriginal) => {
@@ -26,6 +27,11 @@ vi.mock('../../src/services/fetch-timeout', async (importOriginal) => {
     fetchWithTimeout: fetchWithTimeoutMock,
   };
 });
+
+vi.mock('../../src/services/node-agent', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/services/node-agent')>()),
+  listAgentSessionsOnNode: hostListingMock,
+}));
 
 /**
  * Vertical slice (`.claude/rules/35`) for the 2026-08-16 production incident,
@@ -193,6 +199,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   fetchWithTimeoutMock.mockReset();
   fetchWithTimeoutMock.mockResolvedValue(new Response(null, { status: 200 }));
+  hostListingMock.mockReset().mockImplementation(async (_nodeId: string, workspaceId: string) => ({
+    sessions: [{ id: 'acp-live', workspaceId, status: 'running', hostStatus: 'ready' }],
+  }));
   seedNode();
   seedTask(TASK_ID);
 });
@@ -615,19 +624,26 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
   });
 
   it('uses the successful node health probe, then proves the task live from local ACP state', async () => {
-    const verdict = await getLocalTaskRuntimeLiveness(sqlWithLiveAcpSession(), doEnv(), doTask);
+    // Route resolution consumes the shared probe budget. This case models no elapsed
+    // time, so the exact fetch timeout must not depend on runner scheduling jitter.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    try {
+      const verdict = await getLocalTaskRuntimeLiveness(sqlWithLiveAcpSession(), doEnv(), doTask);
 
-    expect(fetchWithTimeoutMock).toHaveBeenCalledWith(
-      'https://01m064tg56ecjw1d127h32brvj.vm.example.test:8443/health',
-      { method: 'GET' },
-      5_000
-    );
-    expect(verdict).toMatchObject({
-      live: true,
-      conclusive: true,
-      reason: 'task_acp_session_live',
-      activeAcpSessionId: 'acp-live',
-    });
+      expect(fetchWithTimeoutMock).toHaveBeenCalledWith(
+        'https://01m064tg56ecjw1d127h32brvj.vm.example.test:8443/health',
+        { method: 'GET', redirect: 'manual' },
+        5_000
+      );
+      expect(verdict).toMatchObject({
+        live: true,
+        conclusive: true,
+        reason: 'task_agent_host_running',
+        activeAcpSessionId: 'acp-live',
+      });
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('preserves the task after a failed node health probe response', async () => {
@@ -724,7 +740,7 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
     expect(verdict.evidence?.acpHeartbeatAgeMs).toBeGreaterThanOrEqual(10 * 60 * 1000);
   });
 
-  it('treats stale prompt-turn ProjectData state as suspect instead of terminal death', async () => {
+  it('keeps a confirmed running host live despite stale prompt-turn ProjectData state', async () => {
     const now = Date.now();
     const staleAt = now - 10 * 60 * 1000;
 
@@ -744,11 +760,11 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
     );
 
     expect(verdict).toMatchObject({
-      live: false,
-      conclusive: false,
-      reason: 'task_acp_session_stale',
-      activeAcpSessionId: null,
-      // The stale verdict names its session, so the diagnosis carries both ages.
+      live: true,
+      conclusive: true,
+      reason: 'task_agent_host_running',
+      activeAcpSessionId: 'acp-live',
+      // The host is alive; the stale turn evidence still describes unproven work.
       evidence: { workState: 'prompt_turn_unproven', activity: 'prompting' },
     });
     expect(verdict.evidence?.acpHeartbeatAgeMs).toBeGreaterThanOrEqual(10 * 60 * 1000);
@@ -780,7 +796,7 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
     expect(verdict).toMatchObject({
       live: true,
       conclusive: true,
-      reason: 'task_acp_session_live',
+      reason: 'task_agent_host_running',
       activeAcpSessionId: 'acp-live',
       evidence: { workState: 'idle', activity: 'idle', promptStartedAgeMs: null },
     });
@@ -808,7 +824,7 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
 
     expect(verdict).toMatchObject({
       live: true,
-      reason: 'task_acp_session_live',
+      reason: 'task_agent_host_running',
       evidence: { workState: 'prompt_turn_unproven', activity: 'prompting' },
     });
     expect(verdict.evidence?.promptStartedAgeMs).toBeGreaterThanOrEqual(3 * 60 * 60 * 1000);
@@ -826,7 +842,7 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
 
     expect(verdict).toMatchObject({
       live: true,
-      reason: 'task_acp_session_live',
+      reason: 'task_agent_host_running',
       evidence: { workState: 'unknown', activity: null },
     });
   });

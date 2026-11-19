@@ -1,5 +1,5 @@
 import { persistQueryClient } from '@tanstack/query-persist-client-core';
-import { QueryClient } from '@tanstack/react-query';
+import { dehydrate, QueryClient } from '@tanstack/react-query';
 import { clear, get, keys, set, type UseStore } from 'idb-keyval';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -217,6 +217,38 @@ describe('query-persistence', () => {
   });
 
   describe('persist → restore across a simulated page load', () => {
+    it('restores pre-upgrade disk records without dehydratedAt', async () => {
+      const storageKey = buildQueryPersistStorageKey(NAMESPACE_A)!;
+      const key = ['auth', USER_A, 'projects', 'list', { limit: 50 }] as const;
+      const previous = makeClient();
+      seed(previous, key, USER_A_PRIVATE_PROJECT);
+      const state = dehydrate(previous);
+      // 5.101.2 records remain on disk across deployment. Model their actual
+      // serialized shape rather than casting old types into the new contract.
+      const legacyState = JSON.parse(JSON.stringify(state));
+      for (const query of legacyState.queries) delete query.dehydratedAt;
+      await set(storageKey, {
+        timestamp: Date.now(),
+        buster: QUERY_PERSIST_SCHEMA_VERSION,
+        clientState: legacyState,
+      });
+
+      const current = makeClient();
+      const [unsubscribe, restored] = persistQueryClient({
+        queryClient: current,
+        persister: createIdbQueryPersister(storageKey, { throttleMs: 0 }),
+        buster: QUERY_PERSIST_SCHEMA_VERSION,
+      });
+      try {
+        await restored;
+        expect(current.getQueryData(key)).toEqual(USER_A_PRIVATE_PROJECT);
+      } finally {
+        unsubscribe();
+        previous.clear();
+        current.clear();
+      }
+    });
+
     it('restores allowlisted data into a brand-new QueryClient', async () => {
       const storageKey = buildQueryPersistStorageKey(NAMESPACE_A)!;
       const key = ['auth', USER_A, 'projects', 'list', { limit: 50 }] as const;

@@ -14,11 +14,11 @@
  * nothing. Confirmed forward: at 12:15Z only 19,984 units remained, and the 13:00Z tick was
  * refused.
  *
- * Since 2026-09-27 the cadence claims every 20 minutes (72 ticks/day) and the allowance was
- * tripled with it. One migration per tick is the drain's real ceiling, so the allowance must pay
- * for a current-size migration on every tick or the faster cadence buys nothing once the window
- * runs out. `shippedSweepTicksPerDay` reads the shipped interval, so raising the cadence without
- * the allowance turns that case red.
+ * Since 2026-11-14 the 9-minute cadence claims about every 10 minutes (144 ticks/day),
+ * with a 6M allowance. Since 2026-11-12 a tick keeps working for `_WALL_TIME_MS` (60 s) instead of
+ * stopping after one session, so the allowance must pay for a full tick of messages on every
+ * tick, not just one migration. `shippedSweepTicksPerDay` and the shipped wall time are read
+ * from `wrangler.toml`, so raising either without the allowance turns those cases red.
  *
  * These cases read the value this repository actually ships rather than a number retyped into
  * the test, because a test that pins a hand-copied constant stays green when someone edits
@@ -27,7 +27,7 @@
  * `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` is absent from the `production` and `staging`
  * Environments, so its checked-in value IS the deployed value.
  * `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` IS pinned in the `production` Environment and is
- * changed in lockstep with `wrangler.toml` (2400000 since 2026-09-27); the deploy log names any
+ * changed in lockstep with `wrangler.toml` (6000000 since 2026-11-14); the deploy log names any
  * divergence between the two.
  *
  * The reservation runs against a real SQLite engine through `createSqliteD1`, not a stub,
@@ -35,15 +35,19 @@
  * arguments would return "reserved" no matter what the arithmetic produced
  * (`.claude/rules/28-credential-resolution-fallback-tests.md`).
  */
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
 import {
   ARCHIVE_WRITE_FIXED_RESERVATION,
   archiveWriteBudgetConfig,
   reserveArchiveWrites,
-} from '../../../src/project-data-archive/write-budget';
-import { shippedBudgetEnv, shippedSweepTicksPerDay } from '../../helpers/shipped-archive-budget';
+} from '@simple-agent-manager/project-data/internal/archive/write-budget';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import {
+  readShippedVar,
+  shippedBudgetEnv,
+  shippedSweepTicksPerDay,
+} from '../../helpers/shipped-archive-budget';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 /**
@@ -62,6 +66,17 @@ const ALLOWANCE_WHEN_MEASURED = 800_000;
  */
 const CURRENT_UNITS_PER_MIGRATION = 10_250;
 const WINDOW_START = Date.UTC(2026, 8, 14, 0, 0, 0);
+/**
+ * Coordinator wall time per archived message, from production `project_data_archive_candidate_migrated`
+ * events on 2026-11-12: 441-860-message sessions took 7.8-13.7 s in total, ~8 s of it fixed per
+ * session, and the design review measured ~11.8 ms/message across larger ones. 10 ms is the
+ * optimistic end, which makes the allowance check below conservative (more messages per tick).
+ */
+const MEASURED_MS_PER_MESSAGE = 10;
+/** Inventory units per message, from the 2026-09-20 budget row (see sweep-message-budget-shipped). */
+const MEASURED_UNITS_PER_MESSAGE = 2.17;
+/** Fixed coordinator wall time per session (prepare, seal, manifest, finalize), measured 2026-11-12. */
+const MEASURED_FIXED_MS_PER_SESSION = 3_000;
 
 describe('shipped archive write-estimate factor', () => {
   let sqlite: Database.Database;
@@ -92,7 +107,7 @@ describe('shipped archive write-estimate factor', () => {
     let admitted = 0;
     // Bounded well above any plausible ceiling so a runaway loop fails the test rather than
     // hanging the suite.
-    for (let attempt = 0; attempt < 500; attempt += 1) {
+    for (let attempt = 0; attempt < 10_000; attempt += 1) {
       const outcome = await reserveArchiveWrites(db, estimate, allowance, WINDOW_START);
       if (!outcome.reserved) return admitted;
       admitted += 1;
@@ -128,11 +143,44 @@ describe('shipped archive write-estimate factor', () => {
 
     const admitted = await reserveUntilRefused(allowance, factor, CURRENT_UNITS_PER_MIGRATION);
 
-    // A tick archives one session (the wall-time gate is only checked between candidates), so
-    // ticks/day is the drain's ceiling and an allowance below it silently caps the cadence.
-    // Proven discriminating on 2026-09-27: the previous 800000 allowance admits 37 against the
-    // 72 ticks an 18-minute interval claims, and this goes red.
+    // The floor: every tick copies at least one session. Proven discriminating on 2026-09-27:
+    // the previous 800000 allowance admits 37 against the 72 ticks an 18-minute interval
+    // claims, and this goes red.
     expect(admitted).toBeGreaterThanOrEqual(shippedSweepTicksPerDay());
+  });
+
+  it('pays for a full wall-time tick of messages on every tick the shipped cadence claims', async () => {
+    const { allowance, factor } = archiveWriteBudgetConfig(shippedBudgetEnv());
+    const wallTimeMs = Number(readShippedVar('PROJECT_DATA_ARCHIVE_WALL_TIME_MS'));
+    const ticksPerDay = shippedSweepTicksPerDay();
+
+    // Worst case for the allowance: many sessions, so the fixed 1000-write charge repeats. A
+    // tick runs `wallTimeMs` plus one candidate, and small sessions cost the fixed time plus
+    // per-message time. 400-message sessions are the shape production drains most of today.
+    const messagesPerSession = 400;
+    const sessionMs = MEASURED_FIXED_MS_PER_SESSION + messagesPerSession * MEASURED_MS_PER_MESSAGE;
+    const sessionsPerTick = Math.ceil(wallTimeMs / sessionMs) + 1;
+    const unitsPerSession = Math.ceil(messagesPerSession * MEASURED_UNITS_PER_MESSAGE);
+
+    const admitted = await reserveUntilRefused(allowance, factor, unitsPerSession);
+
+    // If the allowance ran out before the day's ticks did, raising the wall time would buy
+    // nothing past the point the window is exhausted. At 60 s this needs 10 sessions x 144 ticks
+    // = 1440 reservations of 2,736 writes (~3.94M). Proven discriminating on 2026-11-12: with the
+    // allowance set to 1900000 it admits 694 and goes red.
+    expect(admitted).toBeGreaterThanOrEqual(sessionsPerTick * ticksPerDay);
+  });
+
+  it('funds the measured fixture at the targeted 72k raw rows per hour', async () => {
+    const { allowance, factor } = archiveWriteBudgetConfig(shippedBudgetEnv());
+    // 2026-11-14 real Reporter/workerd fixture: 2100 raw + 1 tool + 315 grouped
+    // + 322 FTS byte units. The fixed charge repeats for every migration.
+    const rawRowsPerMigration = 2_100;
+    const fixtureUnits = 2_738;
+    const migrationsPerDay = Math.ceil((72_000 * 24) / rawRowsPerMigration);
+    const admitted = await reserveUntilRefused(allowance, factor, fixtureUnits);
+    expect(admitted).toBeGreaterThanOrEqual(migrationsPerDay);
+    expect(shippedSweepTicksPerDay()).toBe(144);
   });
 
   it('keeps a safety margin over the measured billed-rows ratio', async () => {

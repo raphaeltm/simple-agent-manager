@@ -1,8 +1,10 @@
 import type { Env } from '../env';
+import { resolveActorLabels } from './actor-labels';
 import { isSetupCompleted, resolvePlatformConfig } from './platform-config-core';
 import type {
   FeedbackProjectStatus,
   IntegrationStatus,
+  PlatformConfigFieldStatus,
   PlatformConfigSource,
   PlatformConfigStatus,
   ResolvedPlatformValue,
@@ -10,41 +12,60 @@ import type {
 
 /* Read-only projection of the resolved config into the setup-wizard status payload. */
 
+const SOURCE_LABELS: Record<PlatformConfigSource, string> = {
+  runtime: 'stored in SAM',
+  environment: 'Worker environment fallback',
+  'legacy-kv': 'legacy KV value',
+  unset: 'not configured',
+};
+
 function sourceLabel(source: PlatformConfigSource): string {
-  if (source === 'runtime') return 'set here';
-  if (source === 'environment') return 'set via environment fallback';
-  return 'not configured';
+  return SOURCE_LABELS[source];
 }
 
-function fieldStatus(
-  value: ResolvedPlatformValue
-): Omit<ResolvedPlatformValue, 'value'> & { configured: boolean } {
-  return {
-    configured: Boolean(value.value),
-    source: value.source,
-    updatedAt: value.updatedAt ?? null,
-    updatedBy: value.updatedBy ?? null,
-  };
-}
+type ActorLabels = Map<string, string>;
 
-function integrationStatus(
-  fields: Record<string, ResolvedPlatformValue>,
-  required: string[]
-): IntegrationStatus {
-  const configured = required.every((key) => Boolean(fields[key]?.value));
-  const sources = required.map((key) => fields[key]?.source ?? 'unset');
-  const source: PlatformConfigSource = sources.includes('runtime')
-    ? 'runtime'
-    : sources.includes('environment')
-      ? 'environment'
-      : 'unset';
+function fieldStatus(value: ResolvedPlatformValue, actors: ActorLabels): PlatformConfigFieldStatus {
+  const configured = Boolean(value.value);
+  const source = configured ? value.source : 'unset';
+  const updatedBy = value.updatedBy ?? null;
   return {
     configured,
     source,
     label: sourceLabel(source),
-    fields: Object.fromEntries(
-      Object.entries(fields).map(([key, value]) => [key, fieldStatus(value)])
-    ),
+    updatedAt: value.updatedAt ?? null,
+    updatedBy,
+    updatedByLabel: source === 'runtime' && updatedBy ? (actors.get(updatedBy) ?? updatedBy) : null,
+  };
+}
+
+/**
+ * The integration badge names every source its configured fields come from, so a group with
+ * one stored field and one environment field reads "stored in SAM + Worker environment fallback"
+ * instead of collapsing to whichever source wins. `source` keeps the precedence order the UI
+ * keys behaviour on (runtime beats environment beats legacy KV).
+ */
+function integrationStatus(
+  fields: Record<string, ResolvedPlatformValue>,
+  required: string[],
+  actors: ActorLabels
+): IntegrationStatus {
+  const projected = Object.fromEntries(
+    Object.entries(fields).map(([key, value]) => [key, fieldStatus(value, actors)])
+  );
+  const configured = required.every((key) => projected[key]?.configured);
+  const present = new Set(Object.values(projected).map((field) => field.source));
+  present.delete('unset');
+  const ordered = (['runtime', 'environment', 'legacy-kv'] as const).filter((source) =>
+    present.has(source)
+  );
+  const source: PlatformConfigSource = ordered[0] ?? 'unset';
+  return {
+    configured,
+    source,
+    label: ordered.length ? ordered.map(sourceLabel).join(' + ') : sourceLabel('unset'),
+    clearable: present.has('runtime'),
+    fields: projected,
   };
 }
 
@@ -91,9 +112,10 @@ async function loadFeedbackProject(
 async function feedbackProjectStatus(
   env: Env,
   value: ResolvedPlatformValue,
+  actors: ActorLabels,
   userId?: string
 ): Promise<FeedbackProjectStatus> {
-  const baseField = fieldStatus(value);
+  const baseField = fieldStatus(value, actors);
   const projectId = value.value?.trim() || null;
   if (!projectId) {
     return {
@@ -104,7 +126,7 @@ async function feedbackProjectStatus(
       projectId: null,
       project: null,
       message:
-        'No feedback project is configured. Report Issue and private incident trigger sweeps are hidden.',
+        'No Operations project is configured. Report Issue and private incident trigger sweeps are hidden.',
       fields: { projectId: baseField },
     };
   }
@@ -119,7 +141,7 @@ async function feedbackProjectStatus(
       projectId,
       project: null,
       message:
-        'The configured feedback project does not exist in this deployment. Report Issue remains hidden until an accessible project is selected.',
+        'The configured Operations project does not exist in this deployment. Report Issue remains hidden until an accessible project is selected.',
       fields: { projectId: baseField },
     };
   }
@@ -133,7 +155,7 @@ async function feedbackProjectStatus(
       projectId,
       project: { id: project.id, name: project.name, status: project.status },
       message:
-        'The configured feedback project exists, but this admin account is not an active member. Select an accessible project before saving changes.',
+        'The configured Operations project exists, but this admin account is not an active member. Select an accessible project before saving changes.',
       fields: { projectId: baseField },
     };
   }
@@ -153,16 +175,42 @@ async function feedbackProjectStatus(
 
 export async function getPlatformConfigStatus(
   env: Env,
-  options: { userId?: string } = {}
+  options: { userId?: string; includeActorLabels?: boolean } = {}
 ): Promise<PlatformConfigStatus> {
-  const config = await resolvePlatformConfig(env);
+  const configPromise = resolvePlatformConfig(env);
+  // Actor names (user emails) are for the superadmin view only. The setup routes are gated by the
+  // setup token, which is exactly the credential that leaked in the 2026-11-12 incident.
+  const actorsPromise = !options.includeActorLabels
+    ? Promise.resolve<ActorLabels>(new Map())
+    : configPromise.then((config) =>
+        resolveActorLabels(
+          env,
+          Object.values(config).flatMap((group) =>
+            Object.values(group as Record<string, ResolvedPlatformValue>).map((value) =>
+              value.source === 'runtime' ? value.updatedBy : null
+            )
+          )
+        )
+      );
+  const [config, setupCompleted, actors] = await Promise.all([
+    configPromise,
+    isSetupCompleted(env),
+    actorsPromise,
+  ]);
+  const feedbackProject = await feedbackProjectStatus(
+    env,
+    config.feedback.projectId,
+    actors,
+    options.userId
+  );
   return {
-    setupCompleted: await isSetupCompleted(env),
+    setupCompleted,
     setupForced: env.SETUP_FORCE === 'true',
     integrations: {
       githubOAuth: integrationStatus(
         { clientId: config.github.clientId, clientSecret: config.github.clientSecret },
-        ['clientId', 'clientSecret']
+        ['clientId', 'clientSecret'],
+        actors
       ),
       githubApp: integrationStatus(
         {
@@ -170,21 +218,26 @@ export async function getPlatformConfigStatus(
           appPrivateKey: config.github.appPrivateKey,
           appSlug: config.github.appSlug,
         },
-        ['appId', 'appPrivateKey']
+        ['appId', 'appPrivateKey'],
+        actors
       ),
-      githubWebhook: integrationStatus({ webhookSecret: config.github.webhookSecret }, [
-        'webhookSecret',
-      ]),
+      githubWebhook: integrationStatus(
+        { webhookSecret: config.github.webhookSecret },
+        ['webhookSecret'],
+        actors
+      ),
       googleOAuth: integrationStatus(
         { clientId: config.google.clientId, clientSecret: config.google.clientSecret },
-        ['clientId', 'clientSecret']
+        ['clientId', 'clientSecret'],
+        actors
       ),
       googleInfrastructureOAuth: integrationStatus(
         {
           clientId: config.googleInfrastructure.clientId,
           clientSecret: config.googleInfrastructure.clientSecret,
         },
-        ['clientId', 'clientSecret']
+        ['clientId', 'clientSecret'],
+        actors
       ),
       gitlabOAuth: integrationStatus(
         {
@@ -192,9 +245,10 @@ export async function getPlatformConfigStatus(
           clientId: config.gitlab.clientId,
           clientSecret: config.gitlab.clientSecret,
         },
-        ['host', 'clientId', 'clientSecret']
+        ['host', 'clientId', 'clientSecret'],
+        actors
       ),
     },
-    feedbackProject: await feedbackProjectStatus(env, config.feedback.projectId, options.userId),
+    feedbackProject,
   };
 }

@@ -1,13 +1,13 @@
 /** Real bootstrap, token lifecycle and recovery SQL; only VM HTTP/DO/KV are faked. */
+import {
+  linkSessionToWorkspace,
+  sleepSession,
+} from '@simple-agent-manager/project-data/internal/do/sessions';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import {
-  linkSessionToWorkspace,
-  sleepSession,
-} from '../../../src/durable-objects/project-data/sessions';
 import { TaskRunner } from '../../../src/durable-objects/task-runner';
 import { handleAgentSession } from '../../../src/durable-objects/task-runner/agent-session-step';
 import { isTransientError } from '../../../src/durable-objects/task-runner/helpers';
@@ -24,6 +24,7 @@ import {
   isSessionRecoveryTaskAuthorized,
   SessionRecoveryAuthorityRevokedError,
 } from '../../../src/services/session-recovery-authority';
+import { hasAuthorizedRestorableSnapshotWakeClaim } from '../../../src/services/session-snapshot-recovery-lifecycle';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import { createSqlStorage } from './sql-storage-test-utils';
 
@@ -108,8 +109,8 @@ function seed(sourceTaskId: string | null = null) {
   }
   sqlite
     .prepare(
-      `INSERT INTO workspaces (id, project_id, user_id, name, repository, branch, status, node_id, created_at, updated_at)
-    VALUES ('replacement', 'project', 'user', 'Restored workspace', 'org/repo', 'main', 'running', 'node', ?, ?)`
+      `INSERT INTO workspaces (id, project_id, user_id, name, repository, branch, status, node_id, chat_session_id, created_at, updated_at)
+    VALUES ('replacement', 'project', 'user', 'Restored workspace', 'org/repo', 'main', 'running', 'node', 'chat', ?, ?)`
     )
     .run(now, now);
   sqlite
@@ -161,6 +162,7 @@ beforeEach(() => {
     getSession: vi.fn(async () => ({ ...chat })),
     wakeSession: wake,
     sleepSession: resleep,
+    repairSessionForSnapshotRecovery: vi.fn(async () => false),
     getAcpSession: vi.fn(async (id: string) => acp.get(id) ?? null),
     createAcpSession: vi.fn(async (input: { id: string; chatSessionId: string }) => {
       const session = { ...input, status: 'pending' };
@@ -834,6 +836,7 @@ describe('TaskRunner snapshot restore retry deadline', () => {
       sqlite.exec(`CREATE TABLE chat_sessions (id TEXT PRIMARY KEY, workspace_id TEXT, task_id TEXT,
       created_by_user_id TEXT, status TEXT, message_count INTEGER, ended_at INTEGER, updated_at INTEGER);
       CREATE TABLE workspace_activity (workspace_id TEXT, session_id TEXT, last_message_at INTEGER, created_at INTEGER);
+      CREATE TABLE do_meta (key TEXT PRIMARY KEY, value TEXT);
       INSERT INTO chat_sessions VALUES ('chat', 'original', 'recovery', 'user', 'failed', 0, 1, 1);`);
       const sql = createSqlStorage(sqlite);
       const stub = env.PROJECT_DATA.get(
@@ -849,6 +852,28 @@ describe('TaskRunner snapshot restore retry deadline', () => {
         sleepSession(sql, id, options);
       stub.linkSessionToWorkspace = async (id: string, ws: string) =>
         linkSessionToWorkspace(sql, id, ws);
+      // This suite fakes ProjectData RPC; preserve its authoritative repair contract.
+      stub.repairSessionForSnapshotRecovery = async (
+        id: string,
+        input: { workspaceId: string; taskId: string; recoveryAttemptId?: string | null }
+      ) => {
+        if (
+          !(await hasAuthorizedRestorableSnapshotWakeClaim(env.DATABASE, {
+            projectId: 'project',
+            chatSessionId: id,
+            ...input,
+          }))
+        )
+          return false;
+        const session = await (stub.getSession as (id: string) => Promise<Record<string, unknown>>)(
+          id
+        );
+        if (session.status !== 'failed' || session.taskId !== input.taskId) return false;
+        return sleepSession(sql, id, {
+          failedOnly: true,
+          guard: { taskId: input.taskId, workspaceId: session.workspaceId as string },
+        });
+      };
       if (fixture === 'expired')
         sqlite.exec("UPDATE session_snapshots SET expires_at = '2000-01-01T00:00:00.000Z'");
       if (fixture === 'cancelled')

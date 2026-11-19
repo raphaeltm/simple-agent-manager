@@ -19,6 +19,7 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
+import { pickStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import { seedCloudCredential, seedProjectWithMember, seedUser } from './capacity-pool-test-seeds';
 
@@ -31,6 +32,15 @@ const mocks = vi.hoisted(() => ({
   stopAgentSessionOnNode: vi.fn(),
   sendPromptToAgentOnNode: vi.fn(),
   cleanupTerminalTaskResources: vi.fn(),
+}));
+
+// This suite observes current actor and parent authority; retirement SQL is covered by Workers slices.
+vi.mock('../../../src/services/task-cancellation-prompts', () => ({
+  retireTaskCancellationPrompts: vi.fn(async () => ({
+    matched: true,
+    cancelled: 0,
+    sessionId: null,
+  })),
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
@@ -154,9 +164,7 @@ async function createFixture(memberRole: string | null): Promise<{
       .run(PROJECT_ID, ACTOR_ID);
   } else if (memberRole === 'removed') {
     sqlite
-      .prepare(
-        `UPDATE project_members SET status = 'removed' WHERE project_id = ? AND user_id = ?`
-      )
+      .prepare(`UPDATE project_members SET status = 'removed' WHERE project_id = ? AND user_id = ?`)
       .run(PROJECT_ID, ACTOR_ID);
   } else {
     sqlite
@@ -185,13 +193,16 @@ async function createFixture(memberRole: string | null): Promise<{
     projectId: PROJECT_ID,
     includeInstallation: false,
   });
+  await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
   return { sqlite, env };
 }
 
 function childStatus(sqlite: Database.Database): string {
-  return (sqlite.prepare(`SELECT status FROM tasks WHERE id = 'child-1'`).get() as {
-    status: string;
-  }).status;
+  return (
+    sqlite.prepare(`SELECT status FROM tasks WHERE id = 'child-1'`).get() as {
+      status: string;
+    }
+  ).status;
 }
 
 function taskCount(sqlite: Database.Database): number {

@@ -1,4 +1,5 @@
 // Types
+export * from './chat-message-append';
 export * from './types';
 
 // Agents
@@ -9,12 +10,25 @@ export * from './harness-capabilities';
 
 // Provider Presets
 export * from './provider-presets';
+export * from './pull-requests';
+
+// What starting work on an idea will do (profile/skill capability resolution)
+export * from './work-start';
 
 // Model Catalog
 export * from './model-catalog';
 
+// Agent model calls (Cloudflare-hosted models agents can call)
+export * from './agent-models';
+
 // Constants
 export * from './constants';
+
+// get_instructions policy line rendering (shared by the API formatter and the web size readout)
+export * from './policy-directive-format';
+
+// Mail DNS record comparison (agent email deploy step and admin setup)
+export * from './dns-mail-records';
 
 // VM Agent Contract (Zod schemas + types)
 export * from './vm-agent-contract';
@@ -24,8 +38,8 @@ export * from './acp-form';
 export * from './acp-interactions';
 export * from './acp-url-eligibility';
 
-// Trial Onboarding (types + Valibot schemas)
-export * from './trial';
+// Well-known internal system rows (system user, placeholder GitHub installation)
+export * from './system-ids';
 
 // Deployment Manifest (Zod schemas + validation)
 export * from './deployment-manifest';
@@ -33,11 +47,17 @@ export * from './deployment-manifest';
 // Compose Parser (Compose YAML → deployment manifest)
 export * from './compose-parser';
 
+// Cloudflare cost estimates from billed analytics (rule 76)
+export * from './cloudflare-cost';
+
 // Composable Credentials (three-primitive model)
 export * from './composable-credentials';
 
 // MIME-type helpers (extension fallback for library preview)
 export * from './mime';
+
+// Filename sanitization for uploads
+export * from './filename';
 
 // Credential usage-limit presentation helpers
 export * from './credential-limits';
@@ -52,4 +72,23 @@ export * from './runtime-validation';
 export * from './resource-requirements';
 
 // Chat message pagination cursors (web client ↔ API contract)
+export {
+  isSensitiveAnalyticsPathSegment,
+  normalizeAnalyticsPath,
+  normalizeAnalyticsReferrer,
+} from './analytics-path';
+export { MERGED_MESSAGE_ROLES } from './chat-message-merge';
+export {
+  DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING_LIMIT,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS_LIMIT,
+} from './constants/triggers';
+export * from './github-trigger-contract';
+export type { MentionMatch } from './mentions';
+export { extractMentions, formatMentionName, getMentionQuery } from './mentions';
 export * from './message-cursor';
+export { canonicalProjectPullRequestUrl } from './pull-requests';
+export * from './secret-exec';
+export * from './typed-chat-cards';
+export * from './workload-identity';

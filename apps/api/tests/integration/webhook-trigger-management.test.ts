@@ -1,8 +1,11 @@
+import { readFileSync } from 'node:fs';
+
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
+import { createAgentEmailTables } from '../helpers/agent-email-tables';
 import { createMemoryKv, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const project = vi.hoisted(() => ({
@@ -18,6 +21,10 @@ const authState = vi.hoisted(() => ({ userId: 'user-1' }));
 const admissionState = vi.hoisted(() => ({ renderedPrompt: '' }));
 
 vi.mock('../../src/middleware/auth', () => ({
+  // Agent sign-in session guards: inert for these ordinary-session route tests.
+  rejectAgentSignInSession: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  assertNotAgentSignInSession: () => undefined,
+
   getAuth: () => ({ user: { id: authState.userId } }),
 }));
 
@@ -46,6 +53,8 @@ vi.mock('../../src/services/credential-attribution-health', () => ({
 
 vi.mock('../../src/lib/logger', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  // Trigger routes reach admin settings (email trigger limits), whose modules build loggers.
+  createModuleLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
 import { log } from '../../src/lib/logger';
@@ -70,7 +79,7 @@ CREATE TABLE projects (
   task_execution_timeout_ms INTEGER, max_concurrent_tasks INTEGER, max_dispatch_depth INTEGER,
   max_sub_tasks_per_task INTEGER, warm_node_timeout_ms INTEGER, max_workspaces_per_node INTEGER,
   node_cpu_threshold_percent INTEGER, node_memory_threshold_percent INTEGER,
-  max_triggers INTEGER,
+  max_triggers INTEGER, agent_models_json TEXT, agent_models_monthly_budget_cents INTEGER,
   status TEXT NOT NULL DEFAULT 'active', last_activity_at TEXT,
   active_session_count INTEGER NOT NULL DEFAULT 0, created_by TEXT NOT NULL REFERENCES users(id),
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -119,12 +128,12 @@ CREATE TABLE webhook_deliveries (
 );
 CREATE TABLE github_trigger_configs (
   id TEXT PRIMARY KEY, trigger_id TEXT NOT NULL REFERENCES triggers(id) ON DELETE CASCADE,
-  event_type TEXT NOT NULL, filters_json TEXT NOT NULL DEFAULT '{}',
+  event_type TEXT NOT NULL, filters_json TEXT NOT NULL DEFAULT '{}', subject_affinity INTEGER NOT NULL DEFAULT 0, queue_max_pending INTEGER NOT NULL DEFAULT 50, queue_ttl_seconds INTEGER NOT NULL DEFAULT 86400,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE trigger_executions (
   id TEXT PRIMARY KEY, trigger_id TEXT NOT NULL REFERENCES triggers(id) ON DELETE CASCADE,
-  project_id TEXT NOT NULL, status TEXT NOT NULL, skip_reason TEXT, task_id TEXT,
+  project_id TEXT NOT NULL, status TEXT NOT NULL, skip_reason TEXT, task_id TEXT, subject_key TEXT, queue_expires_at TEXT, queue_attempted_at TEXT, routed_execution_id TEXT, routed_task_id TEXT, routed_session_id TEXT,
   event_type TEXT, rendered_prompt TEXT, error_message TEXT, scheduled_at TEXT,
   started_at TEXT, completed_at TEXT, sequence_number INTEGER, created_at TEXT NOT NULL
 );
@@ -138,6 +147,25 @@ describe('webhook trigger management vertical slice', () => {
   beforeEach(async () => {
     sqlite = new Database(':memory:');
     sqlite.exec(SCHEMA);
+    sqlite.exec(
+      readFileSync(
+        new URL('../../src/db/migrations/0194_trigger_auto_pause_reset.sql', import.meta.url),
+        'utf8'
+      )
+    );
+    sqlite.exec(
+      readFileSync(
+        new URL('../../src/db/migrations/0195_github_trigger_recovery.sql', import.meta.url),
+        'utf8'
+      )
+    );
+    sqlite.exec(
+      readFileSync(
+        new URL('../../src/db/migrations/0235_signed_webhook_triggers.sql', import.meta.url),
+        'utf8'
+      )
+    );
+    createAgentEmailTables(sqlite);
     sqlite.pragma('foreign_keys = ON');
     authState.userId = 'user-1';
     admissionState.renderedPrompt = '';
@@ -217,6 +245,69 @@ describe('webhook trigger management vertical slice', () => {
   });
 
   afterEach(() => sqlite.close());
+
+  it('does not fail or count a reservation promoted after cleanup selected it', async () => {
+    sqlite
+      .prepare(
+        `INSERT INTO trigger_executions(id,trigger_id,project_id,status,created_at) VALUES('promoted','trigger-1','project-1','queued','2026-10-26T00:00:00.000Z')`
+      )
+      .run();
+    const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+    env.DATABASE.prepare = (sql: string) => {
+      if (/^update "trigger_executions"/i.test(sql))
+        sqlite.prepare("UPDATE trigger_executions SET status='running' WHERE id='promoted'").run();
+      return prepare(sql);
+    };
+    const response = await app.request(
+      '/api/projects/project-1/triggers/trigger-1/executions/cleanup',
+      { method: 'POST' },
+      env
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ cleaned: 0 });
+    expect(
+      sqlite.prepare("SELECT status FROM trigger_executions WHERE id='promoted'").get()
+    ).toEqual({ status: 'running' });
+  });
+
+  it('manual cleanup preserves durable queue intents while clearing a legacy reservation', async () => {
+    for (const [id, status, expiresAt] of [
+      ['legacy', 'queued', null],
+      ['managed', 'queued', '2099-01-01T00:00:00.000Z'],
+      ['waiting', 'waiting', '2099-01-01T00:00:00.000Z'],
+      ['routing', 'routing', '2099-01-01T00:00:00.000Z'],
+    ]) {
+      sqlite
+        .prepare(
+          `INSERT INTO trigger_executions(id,trigger_id,project_id,status,queue_expires_at,created_at) VALUES(?,'trigger-1','project-1',?,?,'2026-10-26T00:00:00.000Z')`
+        )
+        .run(id, status, expiresAt);
+    }
+    const response = await app.request(
+      '/api/projects/project-1/triggers/trigger-1/executions/cleanup',
+      { method: 'POST' },
+      env
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ cleaned: 1 });
+    expect(sqlite.prepare('SELECT id,status FROM trigger_executions ORDER BY id').all()).toEqual([
+      { id: 'legacy', status: 'failed' },
+      { id: 'managed', status: 'queued' },
+      { id: 'routing', status: 'routing' },
+      { id: 'waiting', status: 'waiting' },
+    ]);
+    for (const id of ['managed', 'waiting', 'routing']) {
+      const removed = await app.request(
+        '/api/projects/project-1/triggers/trigger-1/executions/' + id,
+        { method: 'DELETE' },
+        env
+      );
+      expect(removed.status).toBe(409);
+    }
+    expect(sqlite.prepare('SELECT COUNT(*) count FROM trigger_executions').get()).toEqual({
+      count: 4,
+    });
+  });
 
   it('preserves REST credential creation while public ingress is disabled', async () => {
     env.WEBHOOK_TRIGGERS_ENABLED = 'false';
@@ -427,6 +518,34 @@ describe('webhook trigger management vertical slice', () => {
       insertGithubTrigger('trigger-gh-good-2', JSON.stringify({ labels: ['bug'] }));
     });
 
+    it('separates unconfirmed deliveries from drops in retained queue audit counts', async () => {
+      for (const [id, status, reason] of [
+        ['wait', 'waiting', null],
+        ['sent', 'routed', null],
+        ['drop', 'dropped', 'queue_expired'],
+        ['uncertain', 'dropped', 'delivery_uncertain'],
+      ]) {
+        sqlite
+          .prepare(
+            `INSERT INTO trigger_executions(id,trigger_id,project_id,status,skip_reason,created_at) VALUES(?,'trigger-gh-good-1','project-1',?,?, '2026-10-26T00:00:00.000Z')`
+          )
+          .run(id, status, reason);
+      }
+      const response = await app.request(
+        '/api/projects/project-1/triggers/trigger-gh-good-1',
+        undefined,
+        env
+      );
+      expect(response.status).toBe(200);
+      expect((await response.json<{ queueStats: unknown }>()).queueStats).toEqual({
+        queued: 1,
+        routed: 1,
+        dropped: 1,
+        unconfirmed: 1,
+        retentionDays: 90,
+      });
+    });
+
     it('does not let one malformed filters_json row break the trigger list (good/bad/good)', async () => {
       const response = await app.request('/api/projects/project-1/triggers', undefined, env);
 
@@ -442,16 +561,25 @@ describe('webhook trigger management vertical slice', () => {
       // Good rows keep their real filters.
       expect(byId.get('trigger-gh-good-1')?.githubConfig).toEqual({
         eventType: 'issues',
+        subjectAffinity: false,
+        queueMaxPending: 50,
+        queueTtlSeconds: 86400,
         filters: { actions: ['opened'] },
       });
       expect(byId.get('trigger-gh-good-2')?.githubConfig).toEqual({
         eventType: 'issues',
+        subjectAffinity: false,
+        queueMaxPending: 50,
+        queueTtlSeconds: 86400,
         filters: { labels: ['bug'] },
       });
       // The malformed row is NOT dropped from the list and does NOT 500 the
       // whole request — it degrades to a safe empty ("match everything") filter set.
       expect(byId.get('trigger-gh-bad')?.githubConfig).toEqual({
         eventType: 'issues',
+        subjectAffinity: false,
+        queueMaxPending: 50,
+        queueTtlSeconds: 86400,
         filters: {},
       });
       expect(log.warn).toHaveBeenCalledWith('trigger.github_filters_invalid', {
@@ -470,7 +598,13 @@ describe('webhook trigger management vertical slice', () => {
       const body = await response.json<{
         githubConfig?: { eventType: string; filters: Record<string, unknown> };
       }>();
-      expect(body.githubConfig).toEqual({ eventType: 'issues', filters: {} });
+      expect(body.githubConfig).toEqual({
+        eventType: 'issues',
+        filters: {},
+        subjectAffinity: false,
+        queueMaxPending: 50,
+        queueTtlSeconds: 86400,
+      });
       expect(log.warn).toHaveBeenCalledWith('trigger.github_filters_invalid', {
         triggerId: 'trigger-gh-bad',
       });
@@ -487,7 +621,13 @@ describe('webhook trigger management vertical slice', () => {
       const body = await response.json<{
         githubConfig?: { eventType: string; filters: Record<string, unknown> };
       }>();
-      expect(body.githubConfig).toEqual({ eventType: 'issues', filters: { actions: ['opened'] } });
+      expect(body.githubConfig).toEqual({
+        eventType: 'issues',
+        filters: { actions: ['opened'] },
+        subjectAffinity: false,
+        queueMaxPending: 50,
+        queueTtlSeconds: 86400,
+      });
     });
   });
 });

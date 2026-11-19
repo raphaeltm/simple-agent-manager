@@ -8,6 +8,8 @@
 
 import type {
   NodeResponse,
+  PromptDeliveryIntent,
+  SessionAccessSummary,
   TaskExecutionStep,
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
@@ -18,6 +20,7 @@ import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } f
 import type { HistoryTarget } from '../../lib/message-paging';
 import type { FilePanelState } from './session-lifecycle-helpers';
 import type { AgentActivityState, SessionState } from './types';
+import type { WakeWait } from './useWakeProgress';
 
 export interface UseSessionLifecycleResult {
   session: ChatSessionResponse | null;
@@ -44,12 +47,19 @@ export interface UseSessionLifecycleResult {
   showConnectionBanner: boolean;
   retryWs: () => void;
   agentActivity: AgentActivityState;
+  /**
+   * Whether the agent's adapter can take a message mid-turn. Null until the VM agent
+   * reports it (older agents never do).
+   */
+  steeringSupported: boolean | null;
   /** Debounced working signal used only by CompletionDock to swallow brief idle reversals. */
   completionDockWorking: boolean;
   /** True while a wake is in flight (hydrated from D1 or pushed over the socket). */
   isWaking: boolean;
   /** Current wake phase, or null before the replacement runner reports a step. */
   wakePhase: TaskExecutionStep | null;
+  /** Why the wake is waiting, when the server knows. */
+  wakeWait: WakeWait | null;
   staleNotice: boolean;
   dismissStaleNotice: () => void;
   currentPlan: SessionStateSnapshot['currentPlan'];
@@ -68,12 +78,17 @@ export interface UseSessionLifecycleResult {
   cancelling: boolean;
   /** Message from a failed interrupt attempt, surfaced beside the control. */
   cancelError: string | null;
-  handleSendFollowUp: () => Promise<void>;
-  handleUploadFiles: (files: FileList | File[]) => Promise<void>;
+  /** `steer` adds the message to the running turn when the agent's runtime can; else it queues. */
+  handleSendFollowUp: (deliveryIntent?: PromptDeliveryIntent) => Promise<void>;
+  handleUploadFiles: (files: FileList | File[] | null) => void;
+  attachments: import('../../pages/project-chat/useAttachments').AttachmentUploadState[];
+  removeAttachment: (index: number) => void;
+  uploadError: string | null;
   loadMore: () => Promise<void>;
   /** Pages older history in until the target message (or, without an id, time) is loaded. */
   loadUntil: (target: HistoryTarget) => Promise<void>;
   loadingMore: boolean;
   transcribeApiUrl: string;
-  wsRef: React.RefObject<WebSocket | null>;
+  /** Apply a fresh shared-access summary for this session. */
+  applySessionAccess: (access: SessionAccessSummary) => void;
 }

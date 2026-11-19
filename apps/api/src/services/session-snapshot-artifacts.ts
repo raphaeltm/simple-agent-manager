@@ -139,6 +139,11 @@ export interface CompleteSessionSnapshotInput {
     homeBytes?: number;
     wipBytes?: number;
   };
+  /**
+   * The VM agent captured this generation from a stopped source with no other writer.
+   * Recorded on the cleanup identity; only an eviction can turn it into preservation.
+   */
+  quiesced?: boolean;
 }
 
 export interface SessionSnapshotCaptureState {
@@ -338,7 +343,16 @@ export async function verifyRestorableSessionSnapshotArtifacts(
  */
 export async function verifySessionSnapshotRecordedArtifacts(
   env: Env,
-  snapshot: schema.SessionSnapshot
+  snapshot: Pick<
+    schema.SessionSnapshot,
+    | 'chatSessionId'
+    | 'snapshotGeneration'
+    | 'homeR2Key'
+    | 'homeSha256'
+    | 'wipR2Key'
+    | 'wipSha256'
+    | 'manifestJson'
+  >
 ): Promise<boolean> {
   const generation = snapshot.snapshotGeneration;
   if (!generation) return false;

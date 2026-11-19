@@ -1,5 +1,12 @@
 # Give permanent session-recovery refusals their own names
 
+> **Reconciliation 2026-10-26:** Still open; reason codes and logic are unchanged. Pointer fixes:
+> #2377 (`f483db374`) grew `session-recovery.ts` to 392 lines, so `placement_unsatisfiable` is at
+> `:203`, `placement_credentials_missing` at `:222-223` and
+> `session_recovery_placement_lookup_failed` at `:290`. In `session-snapshot-recovery-lifecycle.ts`
+> (#2319, #2377) the non-`root` check is `archiveMigrationFenceIsClear` (`:147-159`) and the
+> refusal is at `:383-384`. No test references `placement_unsatisfiable` yet.
+
 > **Reconciliation 2026-10-05:** Pointer correction only. #2230 (`ee80b0ee0`) rewrote
 > `apps/api/src/services/session-recovery.ts` (`createRecoveryTask` became
 > `reactivateSleepingTask`; the file is now 370 lines), so the 2026-09-30 block's
@@ -68,3 +75,7 @@ fence), which a parallel wake-placement change owns.
       each `PlacementResolutionError` kind.
 - [ ] Decide whether `recovery_attempts_exhausted` (released by a 15-minute decay) belongs in the
       list for both callers.
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. #2693 now produces `session_recovery_placement_transient` while a catalog refresh is pending (`apps/api/src/services/session-recovery.ts`) and added `placement_catalog_refresh_unavailable` and `placement_sources_disabled`, so the "remove the unproduced transient entry" item is moot. Still open: `archive_migration_fenced` (retry) for non-root sessions, and the producer tests.

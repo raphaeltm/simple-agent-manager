@@ -1,0 +1,31 @@
+# Regenerate the Ideas marketing screenshot for Start work
+
+> **Reconciliation 2026-11-02:** The stale image is gone. #2449 (`6da30bb6a`) re-captured `sam-ideas-detail(-light)` from the redesigned idea page and rewrote its alt text and captions (`automation.json:16-37`). It also updated the capture test (`marketing-shots-workspace.spec.ts:636-653`), which no longer expects `Execute this idea` or `Conversations (3)`. The new shot shows an In review idea, so neither the Start work button nor its sheet is pictured. Decide whether a Start work or sheet shot is still wanted; if not, close this task after a phone and desktop check of `/features/automation`.
+
+> **Reconciliation 2026-10-26:** The image is unchanged, and #2439 (`d41ff95d6`) has since replaced
+> the page it shows. `apps/web/src/pages/ideas/IdeaPage.tsx` has a status card and The idea, Work,
+> Updates and Related sections, with no Conversations sidebar, so the alt text and the "Link chat
+> context" caption need rewriting with the new image. The capture test
+> `apps/web/tests/playwright/marketing-shots-workspace.spec.ts:573` still asserts `Execute this idea`
+> and `Conversations (3)`.
+
+`apps/www/src/data/features/automation.json` points at
+`/images/features/sam-ideas-detail.png`, which still shows the idea detail page with the
+old green **Execute** button. T7 replaced it with **Start work**, which opens a sheet.
+
+The body copy and captions were updated in the T7 PR; the alt text was reworded to describe
+the button's shape rather than its label, so it is accurate for the current image and will
+stay accurate after the new one lands. The image itself is what needs replacing.
+
+## Acceptance criteria
+
+- [ ] Capture the idea detail page with the **Start work** button, and ideally a second
+      shot of the open sheet, following the UI-render recipe in
+      `apps/www/src/content/CLAUDE.md` (real components, mock data, dark and light).
+- [ ] Replace `/images/features/sam-ideas-detail.png` and restore label-specific alt text.
+- [ ] Check the `/features/automation` page at phone and desktop widths.
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Evidence: #2449 re-captured sam-ideas-detail(-light) and rewrote alt text/captions (apps/www/src/data/features/automation.json); capture test updated
+- Status: Remaining: decide whether a Start work button/sheet shot is wanted, then phone/desktop check of /features/automation.

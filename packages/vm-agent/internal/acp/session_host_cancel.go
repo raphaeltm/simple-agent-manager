@@ -129,6 +129,23 @@ func (h *SessionHost) startCancelGraceTimer(d time.Duration) (<-chan time.Time, 
 	return timer.C, func() { timer.Stop() }
 }
 
+func (h *SessionHost) finishPromptCancelled(attempt *promptAttempt, reqID json.RawMessage, info promptStartInfo) {
+	h.evictionDecisionMu.Lock()
+	defer h.evictionDecisionMu.Unlock()
+	if h.parkPromptCrashForEviction("prompt_cancelled", func() { h.finishPromptCancelled(attempt, reqID, info) }, attempt) {
+		return
+	}
+	if !attempt.completeWith(h, "cancelled", context.Canceled, func() { h.markPromptDoneForAttempt(attempt) }) {
+		return
+	}
+	slog.Info("ACP: Prompt cancelled", "promptId", attempt.id)
+	h.reportLifecycle("info", "ACP Prompt cancelled", attempt.logFields(map[string]interface{}{
+		"duration": time.Since(info.startedAt).String(),
+		"promptId": attempt.id,
+	}))
+	h.broadcastMessage(h.marshalJSONRPCError(reqID, -32800, "Prompt cancelled"))
+}
+
 // settleStuckPromptCancel handles a requested cancel whose attempt did not
 // finish within the grace period. A stop is never a task failure: the attempt
 // finishes "cancelled" and the agent process is restarted through the same
@@ -195,19 +212,28 @@ func (h *SessionHost) SignalProcess(sig syscall.Signal) {
 // prompt cancel without marking the host stopped. The process monitor will
 // restart the agent and return the host to ready for follow-up prompts.
 func (h *SessionHost) StopProcessForPromptCancel() {
+	if !h.stopProcessForIntentionalRestart("StopProcessForPromptCancel") {
+		slog.Warn("StopProcessForPromptCancel: no agent process running")
+	}
+}
+
+// stopProcessForIntentionalRestart terminates the current agent process without
+// marking the host stopped, flagging the exit as intentional so the process
+// monitor restarts the agent in place instead of treating the exit as a crash.
+// It reports whether a process was running; with none it does nothing.
+func (h *SessionHost) stopProcessForIntentionalRestart(caller string) bool {
 	h.mu.Lock()
 	process := h.process
 	if process != nil {
-		h.intentionalPromptCancelProcessStop = true
+		h.intentionalProcessStop = process
 	}
 	h.mu.Unlock()
 
 	if process == nil {
-		slog.Warn("StopProcessForPromptCancel: no agent process running")
-		return
+		return false
 	}
-
 	if err := process.Stop(); err != nil {
-		slog.Warn("StopProcessForPromptCancel: failed to stop agent process", "error", err)
+		slog.Warn(caller+": failed to stop agent process", "error", err)
 	}
+	return true
 }

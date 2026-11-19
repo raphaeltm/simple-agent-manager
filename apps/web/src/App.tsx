@@ -1,6 +1,14 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { type ReactNode, Suspense } from 'react';
-import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router';
+import { type ReactNode, Suspense, useEffect, useRef } from 'react';
+import {
+  BrowserRouter,
+  Navigate,
+  Outlet,
+  Route,
+  Routes,
+  useLocation,
+  useParams,
+} from 'react-router';
 
 import { AppShell } from './components/AppShell';
 import { AuthProvider, useAuth } from './components/AuthProvider';
@@ -11,13 +19,19 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { RouteFallback } from './components/RouteFallback';
 import { GlobalAudioProvider } from './contexts/GlobalAudioContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { useQueryScope } from './hooks/useQueryScope';
 import { ToastProvider } from './hooks/useToast';
-import { lazyNamed } from './lib/lazy-with-retry';
+import { lazyNamed, memoizeRouteImport } from './lib/lazy-with-retry';
+import { prefetchProjectRoute } from './lib/project-route-prefetch';
 import { queryClient } from './lib/query-client';
+import { platformCapabilitiesQueryOptions } from './lib/query-options';
+import { isProjectChatRoute, isProjectOverviewRoute } from './lib/shell-routes';
 // Initial landing set — statically imported per .claude/rules/60-request-io-and-bundle-budgets.md.
 // Every other page below is code-split via lazyNamed(). Do NOT add static page imports here.
 import { Dashboard } from './pages/Dashboard';
 import { Landing } from './pages/Landing';
+import { ChatLoadingLayout } from './pages/project-chat/ChatLoadingLayout';
+import { LegacyCloudProviderRedirect, SettingsRedirect } from './pages/settings-redirects';
 
 const AccountMap = lazyNamed(() => import('./pages/AccountMap'), 'AccountMap');
 const Admin = lazyNamed(() => import('./pages/Admin'), 'Admin');
@@ -29,7 +43,9 @@ const AdminComputeQuotas = lazyNamed(
 );
 const AdminComputeUsage = lazyNamed(() => import('./pages/AdminComputeUsage'), 'AdminComputeUsage');
 const AdminCosts = lazyNamed(() => import('./pages/AdminCosts'), 'AdminCosts');
+const AdminHealthCost = lazyNamed(() => import('./pages/AdminHealthCost'), 'AdminHealthCost');
 const AdminDiagnoses = lazyNamed(() => import('./pages/AdminDiagnoses'), 'AdminDiagnoses');
+const AdminApprovals = lazyNamed(() => import('./pages/AdminApprovals'), 'AdminApprovals');
 const AdminDiagnosis = lazyNamed(() => import('./pages/AdminDiagnosis'), 'AdminDiagnosis');
 const AdminErrors = lazyNamed(() => import('./pages/AdminErrors'), 'AdminErrors');
 const AdminInfrastructure = lazyNamed(
@@ -38,6 +54,7 @@ const AdminInfrastructure = lazyNamed(
 );
 const AdminLogs = lazyNamed(() => import('./pages/AdminLogs'), 'AdminLogs');
 const AdminOverview = lazyNamed(() => import('./pages/AdminOverview'), 'AdminOverview');
+const AdminSettings = lazyNamed(() => import('./pages/AdminSettings'), 'AdminSettings');
 const AdminPlatformConfig = lazyNamed(
   () => import('./pages/AdminPlatformConfig'),
   'AdminPlatformConfig'
@@ -52,39 +69,76 @@ const AdminProjectEvents = lazyNamed(
 );
 const AdminStorage = lazyNamed(() => import('./pages/AdminStorage'), 'AdminStorage');
 const AdminStream = lazyNamed(() => import('./pages/AdminStream'), 'AdminStream');
-const AdminTrials = lazyNamed(() => import('./pages/AdminTrials'), 'AdminTrials');
 const AdminUsers = lazyNamed(() => import('./pages/AdminUsers'), 'AdminUsers');
 const AgentContextPage = lazyNamed(() => import('./pages/AgentContextPage'), 'AgentContextPage');
 const Chats = lazyNamed(() => import('./pages/Chats'), 'Chats');
-const CreateWorkspace = lazyNamed(() => import('./pages/CreateWorkspace'), 'CreateWorkspace');
 const DeviceAuth = lazyNamed(() => import('./pages/DeviceAuth'), 'DeviceAuth');
-const IdeaDetailPage = lazyNamed(() => import('./pages/IdeaDetailPage'), 'IdeaDetailPage');
-const IdeasPage = lazyNamed(() => import('./pages/IdeasPage'), 'IdeasPage');
+const IdeaPage = lazyNamed(() => import('./pages/ideas/IdeaPage'), 'IdeaPage');
+const IdeasListPage = lazyNamed(() => import('./pages/ideas/IdeasListPage'), 'IdeasListPage');
 const Node = lazyNamed(() => import('./pages/Node'), 'Node');
 const Nodes = lazyNamed(() => import('./pages/Nodes'), 'Nodes');
+// Start the active child chunk alongside the shell on cold deep links.
+const loadProjectShell = memoizeRouteImport(() => import('./pages/Project'));
+const loadProjectChat = memoizeRouteImport(() => import('./pages/project-chat'));
+const loadProjectSettings = memoizeRouteImport(() => import('./pages/ProjectSettings'));
+const loadProjectOverview = memoizeRouteImport(() => import('./pages/project-overview'));
+const ProjectShell = lazyNamed(loadProjectShell, 'Project');
+
+/** Start a route chunk's download when the browser is idle (memoized imports make repeats free). */
+function preloadWhenIdle(load: () => Promise<unknown>) {
+  const run = () => void load().catch(() => undefined);
+  if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(run);
+  else setTimeout(run, 1);
+}
 /**
- * `/projects/:id` renders the `Project` shell, whose `<Outlet/>` then renders a child
- * route — so the child's chunk would only START loading once the shell has rendered.
- * That sequential waterfall lands on the app's hottest path (rule 26: project chat is
- * the primary UX surface), and the shell chunk is tiny (~1 kB gzip), so the second
- * request is almost pure round-trip latency.
- *
- * Merging the two into one `advancedChunks` group was measured to be far worse — it made
- * the combined 343 kB gzip chunk eager on every page load (see `vite.config.ts`). Kicking
- * the child import off in parallel with the shell import gets the same overlap with none
- * of the initial-load cost.
- *
- * `chat` is the correct chunk to warm: `/projects/:id` index-redirects to it.
+ * The project shell's chunk fallback. On a chat route it is the chat's own loading
+ * layout, so the spinner is already where the project and transcript spinners that
+ * follow it will be.
  */
-const Project = lazyNamed(() => {
-  const shell = import('./pages/Project');
-  // Fire-and-forget: failures are surfaced by the route's own lazy import, and an
-  // unhandled rejection here would be reported as a page-level error.
-  void import('./pages/project-chat').catch(() => undefined);
-  return shell;
-}, 'Project');
-const ProjectChat = lazyNamed(() => import('./pages/project-chat'), 'ProjectChat');
+function ProjectRouteFallback() {
+  const { pathname } = useLocation();
+  return isProjectChatRoute(pathname) ? (
+    <ChatLoadingLayout testId="route-fallback" />
+  ) : (
+    <RouteFallback />
+  );
+}
+
+function Project() {
+  const { pathname } = useLocation();
+  const queryScope = useQueryScope();
+  const projectId = useParams<{ id: string }>().id;
+  // Read the path when the project changes, not on every in-project navigation: this route
+  // element stays mounted across projects, and a session switch inside one project is read
+  // by the chat page that is already mounted.
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
+  useEffect(() => {
+    if (projectId) prefetchProjectRoute(queryClient, queryScope, pathnameRef.current);
+  }, [projectId, queryScope]);
+  void loadProjectShell().catch(() => undefined);
+  if (/\/settings(?:\/|$)/.test(pathname)) {
+    void loadProjectSettings().catch(() => undefined);
+  } else if (isProjectChatRoute(pathname)) {
+    void loadProjectChat().catch(() => undefined);
+  } else if (isProjectOverviewRoute(pathname)) {
+    void loadProjectOverview().catch(() => undefined);
+    // Chat is one tap from the landing page: fetch its chunk once the Overview's is under way.
+    preloadWhenIdle(loadProjectChat);
+  }
+  return <ProjectShell />;
+}
+const ProjectChat = lazyNamed(loadProjectChat, 'ProjectChat');
 const ProjectActivity = lazyNamed(() => import('./pages/ProjectActivity'), 'ProjectActivity');
+const ProjectOverview = lazyNamed(loadProjectOverview, 'ProjectOverview');
+const ProjectInsights = lazyNamed(() => import('./pages/insights'), 'ProjectInsights');
+const InsightsFlowTab = lazyNamed(() => import('./pages/insights/FlowTab'), 'FlowTab');
+const InsightsAgentSetupsTab = lazyNamed(
+  () => import('./pages/insights/AgentSetupsTab'),
+  'AgentSetupsTab'
+);
+const InsightsAccountsTab = lazyNamed(() => import('./pages/insights/AccountsTab'), 'AccountsTab');
+const InsightsPeopleTab = lazyNamed(() => import('./pages/insights/PeopleTab'), 'PeopleTab');
 const ProjectAgentChat = lazyNamed(() => import('./pages/ProjectAgentChat'), 'ProjectAgentChat');
 const ProjectCreate = lazyNamed(() => import('./pages/ProjectCreate'), 'ProjectCreate');
 const ProjectDeploymentEnvironmentDetail = lazyNamed(
@@ -96,71 +150,78 @@ const ProjectDeployments = lazyNamed(
   'ProjectDeployments'
 );
 const ProjectComments = lazyNamed(() => import('./pages/ProjectComments'), 'ProjectComments');
+const ProjectCommentReader = lazyNamed(
+  () => import('./pages/comment-reader'),
+  'ProjectCommentReader'
+);
 const ProjectFiles = lazyNamed(() => import('./pages/ProjectFiles'), 'ProjectFiles');
 const ProjectInvite = lazyNamed(() => import('./pages/ProjectInvite'), 'ProjectInvite');
 const ProjectLibrary = lazyNamed(() => import('./pages/ProjectLibrary'), 'ProjectLibrary');
-const ProjectNotifications = lazyNamed(
-  () => import('./pages/ProjectNotifications'),
-  'ProjectNotifications'
-);
+const Inbox = lazyNamed(() => import('./pages/inbox'), 'Inbox');
+const ProjectInbox = lazyNamed(() => import('./pages/inbox'), 'ProjectInbox');
 const ProjectProfiles = lazyNamed(() => import('./pages/ProjectProfiles'), 'ProjectProfiles');
 const Projects = lazyNamed(() => import('./pages/Projects'), 'Projects');
-const ProjectSettings = lazyNamed(() => import('./pages/ProjectSettings'), 'ProjectSettings');
-const ProjectSettingsAccess = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsAccess'
-);
-const ProjectSettingsAgents = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsAgents'
-);
-const ProjectSettingsConnections = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsConnections'
-);
-const ProjectSettingsDeploy = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsDeploy'
-);
-const ProjectSettingsGeneral = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsGeneral'
-);
-const ProjectSettingsIndexRedirect = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsIndexRedirect'
-);
+const ProjectSettings = lazyNamed(loadProjectSettings, 'ProjectSettings');
+const ProjectSettingsAccess = lazyNamed(loadProjectSettings, 'ProjectSettingsAccess');
+const ProjectSettingsAgents = lazyNamed(loadProjectSettings, 'ProjectSettingsAgents');
+const ProjectSettingsAccounts = lazyNamed(loadProjectSettings, 'ProjectSettingsAccounts');
+const ProjectSettingsDeploy = lazyNamed(loadProjectSettings, 'ProjectSettingsDeploy');
+const ProjectSettingsGeneral = lazyNamed(loadProjectSettings, 'ProjectSettingsGeneral');
+const ProjectSettingsIndexRedirect = lazyNamed(loadProjectSettings, 'ProjectSettingsIndexRedirect');
 const ProjectSettingsInfrastructure = lazyNamed(
-  () => import('./pages/ProjectSettings'),
+  loadProjectSettings,
   'ProjectSettingsInfrastructure'
 );
-const ProjectSettingsRuntime = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsRuntime'
-);
+const ProjectSettingsRuntime = lazyNamed(loadProjectSettings, 'ProjectSettingsRuntime');
 const ProjectSkills = lazyNamed(() => import('./pages/ProjectSkills'), 'ProjectSkills');
-const ProjectTriggerDetail = lazyNamed(
-  () => import('./pages/ProjectTriggerDetail'),
-  'ProjectTriggerDetail'
+const AutomationOverview = lazyNamed(
+  () => import('./pages/automation/AutomationOverview'),
+  'AutomationOverview'
 );
-const ProjectTriggers = lazyNamed(() => import('./pages/ProjectTriggers'), 'ProjectTriggers');
-const ProjectEvents = lazyNamed(() => import('./pages/ProjectEvents'), 'ProjectEvents');
-const SamPrototype = lazyNamed(() => import('./pages/SamPrototype'), 'SamPrototype');
+const AutomationEditor = lazyNamed(
+  () => import('./pages/automation/AutomationEditor'),
+  'AutomationEditor'
+);
+const AutomationDetail = lazyNamed(
+  () => import('./pages/automation/AutomationDetail'),
+  'AutomationDetail'
+);
+const AutomationHistory = lazyNamed(
+  () => import('./pages/automation/AutomationHistory'),
+  'AutomationHistory'
+);
+const AutomationBehind = lazyNamed(
+  () => import('./pages/automation/AutomationBehind'),
+  'AutomationBehind'
+);
+const WorkflowRuns = lazyNamed(
+  () => import('./pages/automation/workflows/WorkflowRuns'),
+  'WorkflowRuns'
+);
+const WorkflowRunPage = lazyNamed(
+  () => import('./pages/automation/workflows/WorkflowRunPage'),
+  'WorkflowRunPage'
+);
+const LegacyEventsRedirect = lazyNamed(
+  () => import('./pages/automation/redirects'),
+  'LegacyEventsRedirect'
+);
+const LegacyTriggersRedirect = lazyNamed(
+  () => import('./pages/automation/redirects'),
+  'LegacyTriggersRedirect'
+);
+const LegacyTriggerDetailRedirect = lazyNamed(
+  () => import('./pages/automation/redirects'),
+  'LegacyTriggerDetailRedirect'
+);
+const Sam = lazyNamed(() => import('./pages/Sam'), 'Sam');
 const Settings = lazyNamed(() => import('./pages/Settings'), 'Settings');
 const SettingsAgents = lazyNamed(() => import('./pages/SettingsAgents'), 'SettingsAgents');
 const ConnectorConsent = lazyNamed(() => import('./pages/ConnectorConsent'), 'ConnectorConsent');
 const SettingsApiTokens = lazyNamed(() => import('./pages/SettingsApiTokens'), 'SettingsApiTokens');
-const SettingsCloudProvider = lazyNamed(
-  () => import('./pages/SettingsCloudProvider'),
-  'SettingsCloudProvider'
-);
 const SettingsComputeUsage = lazyNamed(
   () => import('./pages/SettingsComputeUsage'),
   'SettingsComputeUsage'
-);
-const SettingsConnections = lazyNamed(
-  () => import('./pages/SettingsConnections'),
-  'SettingsConnections'
 );
 const SettingsMcpServers = lazyNamed(
   () => import('./pages/SettingsMcpServers'),
@@ -183,17 +244,9 @@ const Setup = lazyNamed(() => import('./pages/Setup'), 'Setup');
 const TaskRedirect = lazyNamed(() => import('./pages/TaskRedirect'), 'TaskRedirect');
 const Tools = lazyNamed(() => import('./pages/Tools'), 'Tools');
 const ToolsCli = lazyNamed(() => import('./pages/ToolsCli'), 'ToolsCli');
-const TrialChatGateHarness = lazyNamed(
-  () => import('./pages/TrialChatGateHarness'),
-  'TrialChatGateHarness'
-);
-const Try = lazyNamed(() => import('./pages/Try'), 'Try');
-const TryCapExceeded = lazyNamed(() => import('./pages/TryCapExceeded'), 'TryCapExceeded');
-const TryDiscovery = lazyNamed(() => import('./pages/TryDiscovery'), 'TryDiscovery');
-const TryWaitlistThanks = lazyNamed(() => import('./pages/TryWaitlistThanks'), 'TryWaitlistThanks');
+const RetiredTrial = lazyNamed(() => import('./pages/RetiredTrial'), 'RetiredTrial');
 const UiStandards = lazyNamed(() => import('./pages/UiStandards'), 'UiStandards');
 const Workspace = lazyNamed(() => import('./pages/workspace'), 'Workspace');
-const Workspaces = lazyNamed(() => import('./pages/Workspaces'), 'Workspaces');
 
 /**
  * Wrap a code-split route element in its own Suspense boundary.
@@ -204,8 +257,8 @@ const Workspaces = lazyNamed(() => import('./pages/Workspaces'), 'Workspaces');
  * `.claude/rules/48-stale-while-revalidate-ui.md`: a fallback must never unmount
  * already-rendered content.
  */
-function page(element: ReactNode) {
-  return <Suspense fallback={<RouteFallback />}>{element}</Suspense>;
+function page(element: ReactNode, fallback: ReactNode = <RouteFallback />) {
+  return <Suspense fallback={fallback}>{element}</Suspense>;
 }
 
 function ProtectedLayout() {
@@ -228,12 +281,7 @@ function SuperadminRoute({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-export const DEV_ONLY_ROUTE_PATHS = [
-  '/sam',
-  '/__test/trial-chat-gate',
-  '/__test/error-boundary',
-  '/ui-standards',
-] as const;
+export const DEV_ONLY_ROUTE_PATHS = ['/__test/error-boundary', '/ui-standards'] as const;
 
 /** TEMP audit-only harness — forces ErrorBoundary crash screen for Playwright review. Reverted after use. */
 function ErrorBoundaryAuditHarness(): never {
@@ -246,6 +294,12 @@ export function devOnlyRoutesEnabled() {
 
 export default function App() {
   const showDevOnlyRoutes = devOnlyRoutesEnabled();
+  // Which platform services this installation has (public, cached for minutes). Fetched once at
+  // start so composers and model settings rarely wait on it; until it answers every service is
+  // assumed present (hooks/usePlatformCapabilities.ts).
+  useEffect(() => {
+    void queryClient.prefetchQuery(platformCapabilitiesQueryOptions());
+  }, []);
 
   return (
     <ErrorBoundary>
@@ -260,22 +314,13 @@ export default function App() {
                   <Routes>
                     {/* Public routes */}
                     <Route path="/" element={<Landing />} />
-                    <Route path="/try" element={page(<Try />)} />
-                    <Route path="/try/cap-exceeded" element={page(<TryCapExceeded />)} />
-                    <Route path="/try/waitlist/thanks" element={page(<TryWaitlistThanks />)} />
-                    <Route path="/try/:trialId" element={page(<TryDiscovery />)} />
+                    {/* Retired anonymous trials: stale links go to the self-hosting guide */}
+                    <Route path="/try/*" element={page(<RetiredTrial />)} />
                     <Route path="/oauth/consent" element={page(<ConnectorConsent />)} />
                     <Route path="/device" element={page(<DeviceAuth />)} />
                     <Route path="/setup" element={page(<Setup />)} />
                     {showDevOnlyRoutes && (
                       <>
-                        {/* SAM prototype — local/test only, no auth */}
-                        <Route path="/sam" element={page(<SamPrototype />)} />
-                        {/* Harness for Playwright audits — mounts trial components with mock data */}
-                        <Route
-                          path="/__test/trial-chat-gate"
-                          element={page(<TrialChatGateHarness />)}
-                        />
                         <Route
                           path="/__test/error-boundary"
                           element={<ErrorBoundaryAuditHarness />}
@@ -285,21 +330,51 @@ export default function App() {
                     {/* Protected routes with AppShell (persistent navigation) */}
                     <Route element={<ProtectedLayout />}>
                       <Route path="/dashboard" element={<Dashboard />} />
+                      <Route path="/sam" element={page(<Sam />)} />
+                      <Route path="/inbox" element={page(<Inbox />)} />
                       <Route path="/chats" element={page(<Chats />)} />
                       <Route path="/projects" element={page(<Projects />)} />
                       <Route path="/projects/new" element={page(<ProjectCreate />)} />
                       <Route path="/projects/invite/:token" element={page(<ProjectInvite />)} />
 
                       {/* Project detail — shell with sub-routes */}
-                      <Route path="/projects/:id" element={page(<Project />)}>
-                        <Route index element={<Navigate to="chat" replace />} />
-                        <Route path="chat" element={page(<ProjectChat />)} />
-                        <Route path="chat/:sessionId" element={page(<ProjectChat />)} />
+                      <Route
+                        path="/projects/:id"
+                        element={page(<Project />, <ProjectRouteFallback />)}
+                      >
+                        {/* Opening a project lands on its Overview (inbox slice F2); chat is one tap away. */}
+                        <Route index element={<Navigate to="overview" replace />} />
+                        <Route path="overview" element={page(<ProjectOverview />)} />
+                        <Route path="insights" element={page(<ProjectInsights />)}>
+                          <Route index element={<Navigate to="flow" replace />} />
+                          <Route path="flow" element={page(<InsightsFlowTab />)} />
+                          <Route path="agent-setups" element={page(<InsightsAgentSetupsTab />)} />
+                          <Route path="accounts" element={page(<InsightsAccountsTab />)} />
+                          <Route path="people" element={page(<InsightsPeopleTab />)} />
+                        </Route>
+                        <Route
+                          path="chat"
+                          element={page(
+                            <ProjectChat />,
+                            <ChatLoadingLayout testId="chat-route-fallback" />
+                          )}
+                        />
+                        <Route
+                          path="chat/:sessionId"
+                          element={page(
+                            <ProjectChat />,
+                            <ChatLoadingLayout testId="chat-route-fallback" />
+                          )}
+                        />
                         <Route path="agent" element={page(<ProjectAgentChat />)} />
                         <Route path="library" element={page(<ProjectLibrary />)} />
                         <Route path="comments" element={page(<ProjectComments />)} />
+                        <Route
+                          path="comments/:sessionId/:threadId"
+                          element={page(<ProjectCommentReader />)}
+                        />
                         <Route path="files" element={page(<ProjectFiles />)} />
-                        <Route path="ideas" element={page(<IdeasPage />)} />
+                        <Route path="ideas" element={page(<IdeasListPage />)} />
                         <Route path="deployments" element={page(<ProjectDeployments />)} />
                         <Route
                           path="deployments/:envId"
@@ -310,16 +385,17 @@ export default function App() {
                           path="knowledge"
                           element={<Navigate to="../agent-context" replace />}
                         />
-                        <Route path="ideas/:taskId" element={page(<IdeaDetailPage />)} />
+                        <Route path="ideas/:taskId" element={page(<IdeaPage />)} />
                         <Route path="tasks" element={<Navigate to="../ideas" replace />} />
                         <Route path="tasks/:taskId" element={page(<TaskRedirect />)} />
                         <Route path="settings" element={page(<ProjectSettings />)}>
                           <Route index element={page(<ProjectSettingsIndexRedirect />)} />
                           <Route path="general" element={page(<ProjectSettingsGeneral />)} />
                           <Route path="access" element={page(<ProjectSettingsAccess />)} />
+                          <Route path="accounts" element={page(<ProjectSettingsAccounts />)} />
                           <Route
                             path="connections"
-                            element={page(<ProjectSettingsConnections />)}
+                            element={<SettingsRedirect to="../accounts" />}
                           />
                           <Route path="agents" element={page(<ProjectSettingsAgents />)} />
                           <Route
@@ -330,12 +406,35 @@ export default function App() {
                           <Route path="deploy" element={page(<ProjectSettingsDeploy />)} />
                         </Route>
                         <Route path="activity" element={page(<ProjectActivity />)} />
-                        <Route path="notifications" element={page(<ProjectNotifications />)} />
-                        <Route path="events" element={page(<ProjectEvents />)} />
-                        <Route path="triggers" element={page(<ProjectTriggers />)} />
+                        <Route path="inbox" element={page(<ProjectInbox />)} />
+                        {/* The project Notifications page became the inbox's Updates chip. */}
+                        <Route
+                          path="notifications"
+                          element={<Navigate to="../inbox?filter=updates" replace />}
+                        />
+                        <Route path="automation" element={page(<AutomationOverview />)} />
+                        <Route path="automation/new" element={page(<AutomationEditor />)} />
+                        <Route path="automation/history" element={page(<AutomationHistory />)} />
+                        <Route path="automation/behind" element={page(<AutomationBehind />)} />
+                        <Route path="automation/workflows" element={page(<WorkflowRuns />)} />
+                        <Route
+                          path="automation/workflows/:runId"
+                          element={page(<WorkflowRunPage />)}
+                        />
+                        <Route
+                          path="automation/:kind/:automationId"
+                          element={page(<AutomationDetail />)}
+                        />
+                        <Route
+                          path="automation/:kind/:automationId/edit"
+                          element={page(<AutomationEditor />)}
+                        />
+                        {/* The pages Automation replaced; the API still links to triggers/:id. */}
+                        <Route path="events" element={page(<LegacyEventsRedirect />)} />
+                        <Route path="triggers" element={page(<LegacyTriggersRedirect />)} />
                         <Route
                           path="triggers/:triggerId"
-                          element={page(<ProjectTriggerDetail />)}
+                          element={page(<LegacyTriggerDetailRedirect />)}
                         />
                         <Route path="profiles" element={page(<ProjectProfiles />)} />
                         <Route path="skills" element={page(<ProjectSkills />)} />
@@ -343,23 +442,28 @@ export default function App() {
 
                       <Route path="/nodes" element={page(<Nodes />)} />
                       <Route path="/nodes/:id" element={page(<Node />)} />
-                      <Route path="/workspaces" element={page(<Workspaces />)} />
-                      <Route path="/workspaces/new" element={page(<CreateWorkspace />)} />
+                      {/* The Workspaces list and manual create form were removed; old links land on Infrastructure. */}
+                      <Route path="/workspaces" element={<Navigate to="/nodes" replace />} />
+                      <Route path="/workspaces/new" element={<Navigate to="/nodes" replace />} />
                       <Route path="/settings" element={page(<Settings />)}>
-                        <Route index element={<Navigate to="cloud-provider" replace />} />
-                        <Route path="cloud-provider" element={page(<SettingsCloudProvider />)} />
+                        <Route index element={<Navigate to="agents" replace />} />
+                        <Route path="agents" element={page(<SettingsAgents />)} />
                         <Route path="infrastructure" element={page(<SettingsInfrastructure />)} />
                         <Route path="github" element={page(<SettingsGitHub />)} />
-                        <Route path="connections" element={page(<SettingsConnections />)} />
-                        <Route path="agents" element={page(<SettingsAgents />)} />
                         <Route path="mcp-servers" element={page(<SettingsMcpServers />)} />
+                        {/* Former tabs, folded into Agents and Infrastructure. */}
+                        <Route path="cloud-provider" element={<LegacyCloudProviderRedirect />} />
+                        <Route
+                          path="connections"
+                          element={<SettingsRedirect to="/settings/agents" />}
+                        />
                         <Route
                           path="agent-keys"
-                          element={<Navigate to="../connections" replace />}
+                          element={<SettingsRedirect to="/settings/agents" />}
                         />
                         <Route
                           path="agent-config"
-                          element={<Navigate to="../connections" replace />}
+                          element={<SettingsRedirect to="/settings/agents" />}
                         />
                         <Route path="notifications" element={page(<SettingsNotifications />)} />
                         <Route path="usage" element={page(<SettingsComputeUsage />)} />
@@ -380,18 +484,20 @@ export default function App() {
                       >
                         <Route index element={<Navigate to="users" replace />} />
                         <Route path="users" element={page(<AdminUsers />)} />
+                        <Route path="settings" element={page(<AdminSettings />)} />
                         <Route path="integrations" element={page(<AdminPlatformConfig />)} />
                         <Route path="credentials" element={page(<AdminPlatformCredentials />)} />
                         <Route path="infrastructure" element={page(<AdminInfrastructure />)} />
                         <Route path="storage" element={page(<AdminStorage />)} />
                         <Route path="ai-proxy" element={page(<AdminAIProxy />)} />
-                        <Route path="trials" element={page(<AdminTrials />)} />
+                        <Route path="health-cost" element={page(<AdminHealthCost />)} />
                         <Route path="costs" element={page(<AdminCosts />)} />
                         <Route path="usage" element={page(<AdminComputeUsage />)} />
                         <Route path="quotas" element={page(<AdminComputeQuotas />)} />
                         <Route path="errors" element={page(<AdminErrors />)} />
                         <Route path="diagnoses" element={page(<AdminDiagnoses />)} />
                         <Route path="diagnoses/:runId" element={page(<AdminDiagnosis />)} />
+                        <Route path="approvals" element={page(<AdminApprovals />)} />
                         <Route path="overview" element={page(<AdminOverview />)} />
                         <Route path="project-events" element={page(<AdminProjectEvents />)} />
                         <Route path="logs" element={page(<AdminLogs />)} />

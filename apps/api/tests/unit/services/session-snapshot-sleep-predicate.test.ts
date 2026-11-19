@@ -1,11 +1,6 @@
 /**
- * The shared "restorable or still sleeping" predicate against a real SQL engine
- * (rule 28). Its in-flight arm mirrors the session-sleep sweep (rule 58): a failed
- * sleep is in flight exactly while `runSessionSleepSweep` will act on it. Inside a
- * bounded sleep-failure episode every failure keeps a due retry until the sweep
- * retries it, falls back, or ends the episode blocked, so a scheduled retry is in
- * flight whatever its attempt count. Only the legacy shape with no retry left is
- * bounded by the SLEEP attempt budget, not the wake budget.
+ * Shared sleep predicate against real SQLite. Failed rows remain sweep-owned
+ * at any attempt count, while a finite age bound prevents indefinite retention.
  */
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -25,7 +20,7 @@ describe('findRestorableOrInFlightSleepSnapshot', () => {
     attempts: number;
     status?: string;
     degradation?: string;
-    /** `null` is the legacy exhausted shape: failed with no retry scheduled. */
+    /** `null` is the legacy failed shape with no retry scheduled. */
     sleepAfter?: string | null;
   }) {
     sqlite
@@ -91,42 +86,37 @@ describe('findRestorableOrInFlightSleepSnapshot', () => {
   });
 
   it('keeps a failed sleep in flight while the sweep still has sleep attempts left', async () => {
-    // Five failed attempts: past the wake budget (3), inside the sleep budget (9).
-    // The sweep retries this row, so every reaper that reads this predicate must
-    // leave its runtime alone.
+    // The sweep retries this row, so reapers must leave its runtime alone.
     seedFailedSleep({ attempts: 5 });
 
     await expect(find()).resolves.toMatchObject({ sleep_status: 'failed' });
   });
 
   it('keeps a failed sleep with a scheduled retry in flight whatever its attempt count', async () => {
-    // The bounded episode guarantees the sweep acts on this row soon: another attempt,
-    // the transcript-and-Git fallback, or a blocked end. A destroyer must wait for it.
+    // The sweep owns the scheduled retry and any eventual runtime teardown.
     seedFailedSleep({ attempts: 9 });
 
     await expect(find()).resolves.toMatchObject({ sleep_status: 'failed' });
   });
 
-  it('stops holding a legacy failed sleep that has no retry left once the budget is spent', async () => {
+  it('keeps a legacy failed sleep with no deadline sweep-owned after budget exhaustion', async () => {
     seedFailedSleep({ attempts: 9, sleepAfter: null });
 
-    await expect(find()).resolves.toBeNull();
+    await expect(find()).resolves.toMatchObject({ sleep_status: 'failed' });
   });
 
-  it('reads the configured sleep budget, not the wake budget, for a legacy row', async () => {
+  it('keeps legacy failures sweep-owned independently of sleep and wake attempt budgets', async () => {
     seedFailedSleep({ attempts: 5, sleepAfter: null });
 
     await expect(
       find({ SESSION_SLEEP_MAX_ATTEMPTS: '4', SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS: '10' })
-    ).resolves.toBeNull();
+    ).resolves.toMatchObject({ sleep_status: 'failed' });
     await expect(
       find({ SESSION_SLEEP_MAX_ATTEMPTS: '6', SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS: '1' })
     ).resolves.toMatchObject({ sleep_status: 'failed' });
   });
 
-  it('no longer holds a degraded capture past the budget on its own', async () => {
-    // The former "repairable capture" exemption kept a permanently degraded session
-    // in flight forever. Without a scheduled retry it is not in flight any more.
+  it('keeps a recent degraded failed capture sweep-owned beyond the budget', async () => {
     seedFailedSleep({
       attempts: 9,
       status: 'degraded',
@@ -134,7 +124,28 @@ describe('findRestorableOrInFlightSleepSnapshot', () => {
       sleepAfter: null,
     });
 
+    await expect(find()).resolves.toMatchObject({ sleep_status: 'failed' });
+  });
+
+  it('releases an old failed sleep even when the sweep owns its eventual teardown', async () => {
+    seedFailedSleep({ attempts: 99, sleepAfter: null });
+    sqlite
+      .prepare('UPDATE session_snapshots SET updated_at = ?, created_at = ?')
+      .run('2026-09-25T10:00:00.000Z', '2026-09-25T10:00:00.000Z');
     await expect(find()).resolves.toBeNull();
+  });
+
+  it('uses the configured finite age bound for failed rows without a deadline', async () => {
+    seedFailedSleep({ attempts: 99, sleepAfter: null });
+    sqlite
+      .prepare('UPDATE session_snapshots SET updated_at = ?, created_at = ?')
+      .run('2026-09-25T10:50:00.000Z', '2026-09-25T10:50:00.000Z');
+    await expect(
+      find({ SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS: String(5 * 60 * 1000) })
+    ).resolves.toBeNull();
+    await expect(
+      find({ SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS: String(15 * 60 * 1000) })
+    ).resolves.toMatchObject({ sleep_status: 'failed' });
   });
 
   it('does not hold a sleep episode that ended blocked', async () => {

@@ -48,6 +48,7 @@ function makeSession(overrides: { id: string; topic: string; messageCount: numbe
     isIdle: false,
     agentCompletedAt: null,
     agentSessionId: null,
+    viewerAccess: 'owner',
     agentType: 'claude-code',
   };
 }

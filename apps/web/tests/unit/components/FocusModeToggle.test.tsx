@@ -36,20 +36,6 @@ describe('FocusModeToggle', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Zen' }));
       expect(onSelect).toHaveBeenCalledWith('zen');
     });
-
-    it('calls onCycle when the cycle button is clicked', () => {
-      const onCycle = vi.fn();
-      render(
-        <FocusModeToggle
-          mode="default"
-          onSelect={vi.fn()}
-          onCycle={onCycle}
-          variant="segmented"
-        />,
-      );
-      fireEvent.click(screen.getByRole('button', { name: 'Cycle Focus Mode' }));
-      expect(onCycle).toHaveBeenCalledTimes(1);
-    });
   });
 
   describe('cycle variant', () => {

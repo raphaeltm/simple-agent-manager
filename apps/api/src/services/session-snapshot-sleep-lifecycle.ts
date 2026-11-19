@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, ne, or, type SQL, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -11,6 +11,7 @@ import {
   getSessionSnapshotConfig,
   sessionLifecycleError,
 } from './session-snapshot-artifacts';
+import { preservationReceiptStatement } from './workspace-preservation-receipt';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -72,6 +73,7 @@ export async function deferSessionSnapshotStopping(
     .set({
       sleepAfter: new Date(now.getTime() + retryDelayMs).toISOString(),
       sleepError: sessionLifecycleError(env, error),
+      sleepEpisodeFailures: sql`COALESCE(${schema.sessionSnapshots.sleepEpisodeFailures}, 0) + 1`,
       sleepClaimedAt: now.toISOString(),
       updatedAt: now.toISOString(),
     })
@@ -79,6 +81,7 @@ export async function deferSessionSnapshotStopping(
       and(
         eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
         eq(schema.sessionSnapshots.sleepStatus, 'stopping'),
+        isNull(schema.sessionSnapshots.sleepAfter),
         claimId === null
           ? isNull(schema.sessionSnapshots.sleepClaimId)
           : eq(schema.sessionSnapshots.sleepClaimId, claimId)
@@ -182,13 +185,34 @@ async function markSessionSnapshotSleepingWithConfig(
   claimId?: string,
   sleepWarning?: string | null,
   expectedGeneration?: string,
-  fallback = false
+  fallback = false,
+  runtimeGuard?: SQL,
+  receipt?: { database: D1Database; nowIso: string }
 ): Promise<boolean> {
   const ttlDays = env ? getSessionSnapshotConfig(env).ttlDays : DEFAULT_SESSION_SNAPSHOT_TTL_DAYS;
   const warning = sleepWarning && env ? sessionLifecycleError(env, sleepWarning) : null;
-  const result = await db
+  const grant = db
     .update(schema.sessionSnapshots)
     .set({
+      // Transcript-only termination is wakeable, while original backup keys/manifest stay retained.
+      ...(fallback
+        ? {
+            status: sql`CASE WHEN json_extract(${schema.sessionSnapshots.sleepFallbackJson}, '$.recoveryPoint') IS NULL THEN 'degraded' ELSE ${schema.sessionSnapshots.status} END`,
+            degradation: sql`CASE WHEN json_extract(${schema.sessionSnapshots.sleepFallbackJson}, '$.recoveryPoint') IS NULL THEN 'transcript-only' ELSE ${schema.sessionSnapshots.degradation} END`,
+          }
+        : {}),
+      // A verified full sleep grants preservation authority here. Degraded fallback
+      // writers must never turn an old checkpoint into proof that the source runtime's
+      // latest dirty/untracked data was captured. The only other grant is an eviction
+      // whose final capture was quiesced (`evictedWorkspaceSnapshotSleepStatement`).
+      ...(!fallback && expectedGeneration
+        ? {
+            cleanupIdentityJson: sql`CASE WHEN json_valid(${schema.sessionSnapshots.cleanupIdentityJson})
+          AND json_extract(${schema.sessionSnapshots.cleanupIdentityJson}, '$.snapshotGeneration') = ${expectedGeneration}
+          THEN json_set(${schema.sessionSnapshots.cleanupIdentityJson}, '$.preserved', 1)
+          ELSE NULL END`,
+          }
+        : {}),
       sleepingAt: now.toISOString(),
       expiresAt: snapshotExpiry(now, ttlDays),
       recoveryStatus: null,
@@ -210,6 +234,7 @@ async function markSessionSnapshotSleepingWithConfig(
     .where(
       and(
         eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
+        ...(runtimeGuard ? [runtimeGuard] : []),
         ...(expectedGeneration
           ? [
               eq(schema.sessionSnapshots.snapshotGeneration, expectedGeneration),
@@ -226,6 +251,15 @@ async function markSessionSnapshotSleepingWithConfig(
             ]
           : []),
         or(
+          ...(fallback
+            ? [
+                and(
+                  isNotNull(schema.sessionSnapshots.sleepFallbackJson),
+                  sql`json_extract(${schema.sessionSnapshots.sleepFallbackJson}, '$.outcome') = 'slept'`,
+                  isNull(schema.sessionSnapshots.captureGeneration)
+                ),
+              ]
+            : []),
           and(
             eq(schema.sessionSnapshots.status, 'available'),
             eq(schema.sessionSnapshots.degradation, 'none')
@@ -243,7 +277,19 @@ async function markSessionSnapshotSleepingWithConfig(
           : [])
       )
     );
-  return (result.meta.changes ?? 0) > 0;
+  if (!receipt) return ((await grant).meta.changes ?? 0) > 0;
+  // The receipt joins the grant's transaction, after it: it copies only a generation the
+  // grant just preserved, so it is a no-op when the grant did not apply.
+  const { sql: grantSql, params } = grant.toSQL();
+  const [granted] = await receipt.database.batch([
+    receipt.database.prepare(grantSql).bind(...params),
+    preservationReceiptStatement(receipt.database, {
+      chatSessionId,
+      reason: 'sleep',
+      nowIso: receipt.nowIso,
+    }),
+  ]);
+  return (granted?.meta.changes ?? 0) > 0;
 }
 
 export async function finalizeSessionSnapshotSleeping(
@@ -252,7 +298,12 @@ export async function finalizeSessionSnapshotSleeping(
   chatSessionId: string,
   claimId: string,
   now = new Date(),
-  options: { sleepWarning?: string | null; expectedGeneration?: string; fallback?: boolean } = {}
+  options: {
+    sleepWarning?: string | null;
+    expectedGeneration?: string;
+    fallback?: boolean;
+    runtimeGuard?: SQL;
+  } = {}
 ): Promise<boolean> {
   const finalized = await markSessionSnapshotSleepingWithConfig(
     db,
@@ -262,7 +313,13 @@ export async function finalizeSessionSnapshotSleeping(
     claimId,
     options.sleepWarning,
     options.expectedGeneration,
-    options.fallback ?? false
+    options.fallback ?? false,
+    options.runtimeGuard,
+    // A verified full sleep writes the durable receipt of the generation it preserves, on the
+    // source workspace, in the grant's own transaction (`workspace-preservation-receipt.ts`).
+    !options.fallback && options.expectedGeneration
+      ? { database: env.DATABASE, nowIso: now.toISOString() }
+      : undefined
   );
   if (finalized) {
     // Every sleep finalizes here — the sleep sweep and an Instant container's own

@@ -2,7 +2,7 @@
  * Canonical placement diagnostics — the stable "why this node / why queued /
  * why rejected" contract between the placement runtime and its displays.
  *
- * The API builds these (services/placement-diagnostics.ts); the web surfaces
+ * The API builds these (scheduler-core placement-diagnostics.ts); the web surfaces
  * render them (D3b). Keeping the shape here means a display can never
  * reconstruct placement reasoning from incidental fields it happened to find on
  * a node row.
@@ -47,11 +47,7 @@ export const PLACEMENT_DIAGNOSTICS_VERSION = 1;
  * the translation adapter and must always be LABELLED as an estimate in the UI.
  */
 export type PlacementResourceEvidence =
-  | 'requested'
-  | 'observed'
-  | 'planned'
-  | 'compatibility-estimate'
-  | 'unknown';
+  'requested' | 'observed' | 'planned' | 'compatibility-estimate' | 'unknown';
 
 export interface PlacementResourceFacts {
   cpuMillis: number | null;
@@ -63,6 +59,11 @@ export interface PlacementResourceFacts {
 /** Why one candidate host won or lost. */
 export interface PlacementHostDiagnostic {
   nodeId: string;
+  /**
+   * `deferred` is no longer written: it marked a node whose only blocker was a busy build
+   * queue, which is now a ranking preference (`startupBacklog`). Kept so diagnostics persisted
+   * before that change still parse.
+   */
   outcome: 'selected' | 'deferred' | 'rejected';
   /** Already-sanitized admission reasons, verbatim from the capacity gate. */
   reasons: string[];
@@ -70,6 +71,11 @@ export interface PlacementHostDiagnostic {
   capacity: PlacementResourceFacts;
   /** Active workspaces already placed on the host. */
   coTenantCount: number | null;
+  /**
+   * Workspaces still starting on the host (reserved, building, or waiting for its single build
+   * slot). Absent on diagnostics recorded before startup backlog was tracked.
+   */
+  startupBacklog?: number | null;
   /** Dominant-resource utilization after placing this run, 0-100. */
   projectedUtilizationPercent: number | null;
   provider: string | null;

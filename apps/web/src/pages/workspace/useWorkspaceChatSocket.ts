@@ -11,18 +11,22 @@
  * setters passed in, because the composer, pagination and file upload there all
  * write to them too.
  */
-import { type Dispatch, type SetStateAction, useCallback, useState } from 'react';
+import type { SessionAccessSummary } from '@simple-agent-manager/shared';
+import { type Dispatch, type SetStateAction, useCallback, useRef, useState } from 'react';
 
 import type { AgentActivityState } from '../../components/project-message-view/types';
 import { isWorkingActivity } from '../../components/project-message-view/types';
 import { useActivityVerifyTimer } from '../../components/project-message-view/useActivityVerifyTimer';
+import { useSessionAccessSync } from '../../components/project-message-view/useSessionAccessSync';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
+import type { ToolSnapshotChanges } from '../../lib/api/session-transcript-types';
 import type {
   ChatMessageResponse,
   ChatSessionResponse,
   SessionStateSnapshot,
 } from '../../lib/api/sessions';
 import { mergeMessages } from '../../lib/merge-messages';
+import { mergeRecentWindowOrRefresh, readMessagesAfter } from '../../lib/message-paging';
 
 /** Seconds of silence after last agent row before returning to idle. */
 const IDLE_TIMEOUT_MS = 3000;
@@ -42,13 +46,17 @@ interface UseWorkspaceChatSocketOptions {
   sessionId: string;
   /** The socket only opens for an active session. */
   sessionStatus: string | undefined;
+  /** The chat's access summary; its `undelivered` list labels prompts that were never delivered. */
+  access: SessionAccessSummary | undefined;
+  /** The view's transcript, read when the socket subscribes to find where to resume. */
+  messages: ChatMessageResponse[];
   setMessages: Dispatch<SetStateAction<ChatMessageResponse[]>>;
   setSession: Dispatch<SetStateAction<ChatSessionResponse | null>>;
 }
 
 export interface UseWorkspaceChatSocketResult extends Pick<
   ReturnType<typeof useChatWebSocket>,
-  'connectionState' | 'wsRef'
+  'connectionState'
 > {
   agentActivity: AgentActivityState;
   /** The composer sets `prompting` on send and `idle` when the agent is offline. */
@@ -62,10 +70,14 @@ export function useWorkspaceChatSocket({
   projectId,
   sessionId,
   sessionStatus,
+  access,
+  messages,
   setMessages,
   setSession,
 }: UseWorkspaceChatSocketOptions): UseWorkspaceChatSocketResult {
   const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
 
   const clearActivity = useCallback(() => {
     setAgentActivity('idle');
@@ -93,11 +105,45 @@ export function useWorkspaceChatSocket({
     [clearActivity, startVerifyDecayTimer, stopVerifyDecayTimer]
   );
 
+  // A teammate's queued prompt cancelled by Revoke now or by expiry is labelled from the access
+  // summary, which the server re-sends on every access change: the project chat's own hook.
+  const chatSocketLive = useRef(false);
+  const toolRevision = useRef(0);
+  const { onSessionAccessChanged } = useSessionAccessSync(
+    projectId,
+    sessionId,
+    setSession,
+    access,
+    chatSocketLive
+  );
+
   // ── DO WebSocket for real-time message updates (SOLE message source) ──
-  const { connectionState, wsRef } = useChatWebSocket({
+  const { connectionState } = useChatWebSocket({
     projectId,
     sessionId,
     enabled: sessionStatus === 'active',
+    // The view's load can predate this subscription; read what was persisted since its
+    // newest row. The view's load has finished before the socket opens (the socket waits for
+    // its status), and the cursor is taken now, before this socket delivers anything newer.
+    onSubscribed: useCallback(() => {
+      void readMessagesAfter(
+        projectId,
+        sessionId,
+        messagesRef.current,
+        undefined,
+        toolRevision.current
+      )
+        .then((found) => {
+          toolRevision.current = found.toolChanges?.revision ?? toolRevision.current;
+          if (found.messages.length > 0 || found.resetRequired)
+            setMessages((prev) =>
+              found.resetRequired ? found.messages : mergeMessages(prev, found.messages, 'append')
+            );
+        })
+        .catch((err: unknown) => {
+          console.warn('Failed to read messages persisted before the chat socket opened', err);
+        });
+    }, [projectId, sessionId, setMessages]),
     onMessage: useCallback(
       (msg: ChatMessageResponse) => {
         setMessages((prev) => mergeMessages(prev, [msg], 'append'));
@@ -133,13 +179,31 @@ export function useWorkspaceChatSocket({
       (
         catchUpMsgs: ChatMessageResponse[],
         catchUpSession: ChatSessionResponse,
-        state?: SessionStateSnapshot | null
+        state?: SessionStateSnapshot | null,
+        toolChanges?: ToolSnapshotChanges
       ) => {
         setSession(catchUpSession);
-        setMessages((prev) => mergeMessages(prev, catchUpMsgs, 'replace'));
         hydrateActivity(state);
+        return mergeRecentWindowOrRefresh(
+          projectId,
+          sessionId,
+          {
+            session: catchUpSession,
+            messages: messagesRef.current,
+            hasMore: true,
+            toolChanges: { revision: toolRevision.current, resetRequired: false, messages: [] },
+          },
+          { session: catchUpSession, messages: catchUpMsgs, hasMore: true, state, toolChanges }
+        ).then((merged) => {
+          toolRevision.current = merged.toolChanges?.revision ?? toolRevision.current;
+          setMessages((prev) =>
+            merged.toolChanges?.resetRequired
+              ? merged.messages
+              : mergeMessages(prev, merged.messages, 'replace')
+          );
+        });
       },
-      [hydrateActivity]
+      [hydrateActivity, projectId, sessionId, setMessages, setSession]
     ),
     onAgentCompleted: useCallback((agentCompletedAt: number) => {
       setSession((prev) =>
@@ -159,11 +223,12 @@ export function useWorkspaceChatSocket({
       },
       [clearActivity, startVerifyDecayTimer, stopVerifyDecayTimer]
     ),
+    onSessionAccessChanged,
   });
+  chatSocketLive.current = connectionState === 'connected';
 
   return {
     connectionState,
-    wsRef,
     agentActivity,
     setAgentActivity,
     hydrateActivity,

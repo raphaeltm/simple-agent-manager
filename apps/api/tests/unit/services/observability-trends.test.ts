@@ -1,84 +1,28 @@
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Use vi.hoisted() so mock functions are available when vi.mock factories run
-//
-// Drizzle query chains are thenable — `await select().from().where().orderBy()`
-// calls `.then()` on the result of `orderBy()`. We create thenable objects that
-// resolve to an array when awaited.
-const { mockSelectFrom, mockSelect } = vi.hoisted(() => {
-  function thenable(data: unknown[] = []) {
-    return {
-      then: (resolve: (v: unknown[]) => void) => resolve(data),
-      all: vi.fn().mockResolvedValue(data),
-    };
-  }
-
-  const mockSelectOrderBy = vi.fn().mockReturnValue(thenable([]));
-  const mockSelectWhere = vi.fn().mockReturnValue({
-    orderBy: mockSelectOrderBy,
-    ...thenable([]),
-  });
-  const mockSelectFrom = vi.fn().mockReturnValue({
-    where: mockSelectWhere,
-    orderBy: mockSelectOrderBy,
-    ...thenable([]),
-  });
-  const mockSelect = vi.fn().mockReturnValue({ from: mockSelectFrom });
-
-  return { mockSelectFrom, mockSelect, mockSelectWhere, mockSelectOrderBy };
-});
-
-vi.mock('drizzle-orm/d1', () => ({
-  drizzle: vi.fn().mockReturnValue({
-    select: mockSelect,
-  }),
-}));
-
-vi.mock('drizzle-orm', () => ({
-  eq: vi.fn((_col: unknown, val: unknown) => ({ type: 'eq', val })),
-  and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
-  gte: vi.fn((_col: unknown, val: unknown) => ({ type: 'gte', val })),
-  lte: vi.fn((_col: unknown, val: unknown) => ({ type: 'lte', val })),
-  like: vi.fn((_col: unknown, val: unknown) => ({ type: 'like', val })),
-  desc: vi.fn((col: unknown) => ({ type: 'desc', col })),
-  count: vi.fn(() => 'count_agg'),
-  sql: { raw: vi.fn() },
-  or: vi.fn((...args: unknown[]) => ({ type: 'or', args })),
-}));
-
-vi.mock('../../../src/db/observability-schema', () => ({
-  platformErrors: {
-    id: 'id',
-    source: 'source',
-    level: 'level',
-    message: 'message',
-    stack: 'stack',
-    context: 'context',
-    userId: 'user_id',
-    nodeId: 'node_id',
-    workspaceId: 'workspace_id',
-    ipAddress: 'ip_address',
-    userAgent: 'user_agent',
-    timestamp: 'timestamp',
-    createdAt: 'created_at',
-  },
-}));
-
-vi.mock('../../../src/db/schema', () => ({
-  nodes: { id: 'id', status: 'status' },
-  workspaces: { id: 'id', status: 'status' },
-  tasks: { id: 'id', status: 'status' },
-}));
-
+import { platformErrors } from '../../../src/db/observability-schema';
 import { getErrorTrends } from '../../../src/services/observability';
+import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
-describe('getErrorTrends()', () => {
-  const mockDb = {} as D1Database;
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
+let sqlite: Database.Database;
+let mockDb: D1Database;
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-30T12:00:00.000Z'));
+  sqlite = new Database(':memory:');
+  createSchemaTables(sqlite, [platformErrors]);
+  mockDb = createSqliteD1(sqlite);
+});
+afterEach(() => {
+  vi.useRealTimers();
+  sqlite.close();
+});
+function insertRows(rows: { source: string; timestamp: number }[]) {
+  const insert = sqlite.prepare('INSERT INTO platform_errors(id,source,timestamp) VALUES(?,?,?)');
+  rows.forEach((row, index) => insert.run(String(index), row.source, row.timestamp));
+}
+describe('getErrorTrends() against real SQLite', () => {
   it('should return empty buckets when no errors exist', async () => {
     const result = await getErrorTrends(mockDb, '1h');
 
@@ -140,15 +84,11 @@ describe('getErrorTrends()', () => {
     const mockRows = [
       { source: 'client', timestamp: oneHourAgo + fiveMinMs * 2 + 1000 }, // bucket 2
       { source: 'client', timestamp: oneHourAgo + fiveMinMs * 2 + 2000 }, // bucket 2
-      { source: 'api', timestamp: oneHourAgo + fiveMinMs * 5 + 1000 },    // bucket 5
+      { source: 'api', timestamp: oneHourAgo + fiveMinMs * 5 + 1000 }, // bucket 5
     ];
 
     // Configure mock to return our test rows via thenable
-    const mockOrderBy = vi.fn().mockReturnValue({
-      then: (resolve: (v: unknown[]) => void) => resolve(mockRows),
-    });
-    const mockWhere = vi.fn().mockReturnValue({ orderBy: mockOrderBy });
-    mockSelectFrom.mockReturnValueOnce({ where: mockWhere });
+    insertRows(mockRows);
 
     const result = await getErrorTrends(mockDb, '1h');
 
@@ -176,11 +116,7 @@ describe('getErrorTrends()', () => {
       { source: 'api', timestamp: oneHourAgo + 4000 },
     ];
 
-    const mockOrderBy = vi.fn().mockReturnValue({
-      then: (resolve: (v: unknown[]) => void) => resolve(mockRows),
-    });
-    const mockWhere = vi.fn().mockReturnValue({ orderBy: mockOrderBy });
-    mockSelectFrom.mockReturnValueOnce({ where: mockWhere });
+    insertRows(mockRows);
 
     const result = await getErrorTrends(mockDb, '1h');
 
@@ -229,11 +165,7 @@ describe('getErrorTrends()', () => {
       { source: 'unknown-source', timestamp: oneHourAgo + 2000 },
     ];
 
-    const mockOrderBy = vi.fn().mockReturnValue({
-      then: (resolve: (v: unknown[]) => void) => resolve(mockRows),
-    });
-    const mockWhere = vi.fn().mockReturnValue({ orderBy: mockOrderBy });
-    mockSelectFrom.mockReturnValueOnce({ where: mockWhere });
+    insertRows(mockRows);
 
     const result = await getErrorTrends(mockDb, '1h');
 

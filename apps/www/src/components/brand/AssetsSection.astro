@@ -1,0 +1,211 @@
+---
+/**
+ * 10 Assets: downloadable files. The two lockup PNGs are rendered from Lockup.astro's
+ * proportions with Chillax embedded, by scripts/build-brand-lockups.ts.
+ */
+import SectionHead from './SectionHead.astro';
+
+const assets = [
+  {
+    title: 'Lockup for dark grounds',
+    file: '/images/brand/sam-lockup-on-dark.png',
+    meta: 'PNG · transparent · 1568 × 540',
+    ground: 'dark',
+  },
+  {
+    title: 'Lockup for light grounds',
+    file: '/images/brand/sam-lockup-on-light.png',
+    meta: 'PNG · transparent · 1568 × 540',
+    ground: 'light',
+  },
+  {
+    title: 'Mascot',
+    file: '/images/sam-head.png',
+    meta: 'PNG · transparent · 1024 × 1024',
+    ground: 'dark',
+  },
+  {
+    title: 'App icon',
+    file: '/favicon.png',
+    meta: 'PNG · Tile Green · 1024 × 1024',
+    ground: 'void',
+  },
+  {
+    title: 'Social card',
+    file: '/images/og-default.png',
+    meta: 'PNG · 1200 × 630',
+    ground: 'void',
+  },
+];
+---
+
+<section id="assets" class="bg-section" aria-labelledby="assets-title">
+  <div class="container">
+    <SectionHead id="assets" title="Take what you need">
+      Download the files below rather than screenshotting this page. If you need a format that is
+      not here, open an issue and we will add it.
+    </SectionHead>
+
+    <ul class="bg-assets">
+      {assets.map((asset, index) => (
+        <li class="bg-asset sam-glass sam-glass-rim" data-reveal style={`--i:${index % 3}`}>
+          <div class:list={['bg-asset-preview', `bg-asset-preview--${asset.ground}`]}>
+            <img src={asset.file} alt="" loading="lazy" decoding="async" />
+          </div>
+          <div class="bg-asset-body">
+            <h3>{asset.title}</h3>
+            <p>{asset.meta}</p>
+          </div>
+          <a class="sam-btn sam-btn--glass sam-btn--sm" href={asset.file} download>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12"/><path d="m6 10 6 6 6-6"/><path d="M4 20h16"/></svg>
+            Download<span class="sr-only"> {asset.title}</span>
+          </a>
+        </li>
+      ))}
+      <li class="bg-asset bg-asset--font sam-glass sam-glass-rim" data-reveal style="--i:2">
+        <div class="bg-asset-preview bg-asset-preview--void"><span aria-hidden="true">Aa</span></div>
+        <div class="bg-asset-body">
+          <h3>Chillax</h3>
+          <p>Variable 200 to 700 · Indian Type Foundry · free license</p>
+        </div>
+        <a class="sam-btn sam-btn--glass sam-btn--sm" href="https://www.fontshare.com/fonts/chillax" target="_blank" rel="noopener noreferrer">
+          Get it from Fontshare<span class="sr-only"> (opens in a new tab)</span>
+        </a>
+      </li>
+    </ul>
+
+    <div class="bg-outro sam-glass sam-glass--slab sam-glass-rim" data-reveal="scale">
+      <img src="/images/sam-head.png" width="1024" height="1024" alt="" aria-hidden="true" />
+      <div>
+        <h3>Something missing or unclear?</h3>
+        <p>This guide lives in the open-source repository like everything else. Suggest a change the same way you would for the code.</p>
+      </div>
+      <a class="sam-btn sam-btn--primary" href="https://github.com/raphaeltm/simple-agent-manager/issues/new" target="_blank" rel="noopener noreferrer">
+        Open an issue<span class="sr-only"> on GitHub (opens in a new tab)</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<style>
+  .bg-assets {
+    display: grid;
+    gap: 16px;
+    list-style: none;
+  }
+
+  @media (min-width: 640px) {
+    .bg-assets {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .bg-assets {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  .bg-asset {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    gap: 16px;
+    padding: 14px 14px 18px;
+    border-radius: var(--radius-xl);
+    justify-items: start;
+  }
+
+  .bg-asset-preview {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 180px;
+    padding: 20px;
+    border-radius: 14px;
+    overflow: hidden;
+  }
+
+  .bg-asset-preview img {
+    width: auto;
+    max-width: 100%;
+    max-height: 140px;
+    object-fit: contain;
+    border-radius: 10px;
+    transition: transform 0.7s var(--ease-glide);
+  }
+
+  .bg-asset:hover .bg-asset-preview img {
+    transform: scale(1.05);
+  }
+
+  .bg-asset-preview--dark {
+    background: radial-gradient(ellipse at 50% 30%, #13201d, #070d0b);
+  }
+
+  .bg-asset-preview--light {
+    background: #f8fbf8;
+  }
+
+  .bg-asset-preview--void {
+    background: radial-gradient(ellipse at 50% 120%, rgb(34 197 94 / 0.2), transparent 60%), #010302;
+  }
+
+  .bg-asset-preview span {
+    font-family: var(--font-display);
+    font-size: 5rem;
+    font-weight: 600;
+    color: #e6f2ee;
+  }
+
+  .bg-asset-body {
+    padding: 0 6px;
+  }
+
+  .bg-asset h3 {
+    font-family: var(--font-display);
+    font-size: 1.125rem;
+    font-weight: 600;
+  }
+
+  .bg-asset p {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-fg-muted);
+  }
+
+  .bg-asset .sam-btn {
+    margin-left: 6px;
+  }
+
+  /* --- Outro --- */
+  .bg-outro {
+    display: grid;
+    gap: 20px;
+    align-items: center;
+    margin-top: 64px;
+    padding: 28px;
+    border-radius: 28px;
+  }
+
+  @media (min-width: 900px) {
+    .bg-outro {
+      grid-template-columns: 96px minmax(0, 1fr) auto;
+      padding: 36px 40px;
+    }
+  }
+
+  .bg-outro img {
+    width: 88px;
+  }
+
+  .bg-outro h3 {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .bg-outro p {
+    color: var(--color-fg-muted);
+  }
+</style>

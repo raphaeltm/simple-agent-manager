@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { log } from '../../../src/lib/logger';
 import { AppError } from '../../../src/middleware/error';
 
 /**
@@ -15,6 +16,7 @@ type NodeRow = {
   status: string;
   healthStatus: string;
   nodeRole: string;
+  runtime: string;
   nodeClass: string;
   transport: string | null;
   tunnelId: string | null;
@@ -48,6 +50,7 @@ vi.mock('../../../src/db/schema', () => ({
     ipAddress: 'nodes.ipAddress',
     nodeClass: 'nodes.nodeClass',
     status: 'nodes.status',
+    runtime: 'nodes.runtime',
   },
   workspaces: {
     id: 'workspaces.id',
@@ -78,7 +81,20 @@ function createMockDb() {
                 : state.node
             ),
             // heartbeat: db.select().from(nodes).where().limit(1)
-            limit: vi.fn().mockResolvedValue([state.node]),
+            limit: vi
+              .fn()
+              .mockResolvedValue([
+                selection
+                  ? Object.fromEntries(
+                      Object.entries(selection).map(([key, column]) => [
+                        key,
+                        typeof column === 'string'
+                          ? (state.node as Record<string, unknown>)?.[column.split('.').at(-1)!]
+                          : undefined,
+                      ])
+                    )
+                  : state.node,
+              ]),
           };
         }),
       })),
@@ -101,7 +117,9 @@ vi.mock('drizzle-orm/d1', () => ({ drizzle: () => createMockDb() }));
 vi.mock('../../../src/services/jwt', () => ({
   shouldRefreshCallbackToken: vi.fn(() => state.refreshNeeded),
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
   signNodeCallbackToken: vi.fn().mockResolvedValue('REFRESHED-TOKEN'),
+  signCurrentNodeCallbackToken: vi.fn().mockResolvedValue('REFRESHED-TOKEN'),
   signNodeManagementToken: vi.fn(),
   verifyCallbackToken: vi
     .fn()
@@ -143,6 +161,7 @@ function makeNode(overrides: Partial<NodeRow> = {}): NodeRow {
     status: 'running',
     healthStatus: 'healthy',
     nodeRole: 'workspace',
+    runtime: 'vm',
     nodeClass: 'managed',
     transport: null,
     tunnelId: null,
@@ -176,7 +195,12 @@ function getNodeLifecycleApp(): Hono {
   return nodeLifecycleApp;
 }
 
-async function appRequest(path: string, body: unknown, isText = false): Promise<Response> {
+async function appRequest(
+  path: string,
+  body: unknown,
+  isText = false,
+  requiredVersion?: string
+): Promise<Response> {
   return getNodeLifecycleApp().request(
     path,
     {
@@ -187,7 +211,12 @@ async function appRequest(path: string, body: unknown, isText = false): Promise<
       },
       body: isText ? (body as string) : JSON.stringify(body),
     },
-    { DATABASE: {}, CF_API_TOKEN: 'cf', BASE_DOMAIN: 'example.com' },
+    {
+      DATABASE: {},
+      CF_API_TOKEN: 'cf',
+      BASE_DOMAIN: 'example.com',
+      VM_AGENT_REQUIRED_VERSION: requiredVersion,
+    },
     { waitUntil: vi.fn(), passThroughOnException: vi.fn() }
   );
 }
@@ -197,6 +226,7 @@ const VALID_CSR =
 
 describe('node-lifecycle BYO gates', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     state.node = makeNode();
     state.updates = [];
     state.refreshNeeded = true;
@@ -204,6 +234,11 @@ describe('node-lifecycle BYO gates', () => {
   });
 
   describe('Origin CA issuance gate (critique #2)', () => {
+    it('denies Origin CA for managed reverse-tunnel nodes even with NULL tunnel_id', async () => {
+      state.node = makeNode({ nodeClass: 'managed', transport: 'reverse-tunnel', tunnelId: null });
+      const res = await appRequest('/api/nodes/node-1/origin-ca-certificate', VALID_CSR, true);
+      expect(res.status).toBe(403);
+    });
     it('denies wildcard cert issuance for a user-owned node', async () => {
       state.node = makeNode({ nodeClass: 'user-owned', transport: 'cloudflare-tunnel' });
       const res = await appRequest('/api/nodes/node-1/origin-ca-certificate', VALID_CSR, true);
@@ -242,6 +277,41 @@ describe('node-lifecycle BYO gates', () => {
   });
 
   describe('VM agent build identity persistence', () => {
+    it('logs Instant mismatch but still accepts and records ready', async () => {
+      state.node = makeNode({ runtime: 'cf-container', status: 'creating' });
+      const res = await appRequest(
+        '/api/nodes/node-1/ready',
+        { agentVersion: 'old-release' },
+        false,
+        'new-release'
+      );
+      expect(res.status).toBe(200);
+      expect(log.warn).toHaveBeenCalledWith('instant_session.agent_version_mismatch', {
+        nodeId: 'node-1',
+        expectedVersion: 'new-release',
+        reportedVersion: 'old-release',
+      });
+      expect(state.updates).toContainEqual(
+        expect.objectContaining({ status: 'running', agentVersion: 'old-release' })
+      );
+    });
+    it.each([
+      ['cf-container', 'current', 'current'],
+      ['cf-container', 'current', undefined],
+      ['vm', 'old', 'current'],
+    ])(
+      'does not warn for runtime=%s reported=%s expected=%s',
+      async (runtime, agentVersion, expected) => {
+        state.node = makeNode({ runtime });
+        const res = await appRequest('/api/nodes/node-1/ready', { agentVersion }, false, expected);
+        expect(res.status).toBe(200);
+        expect(log.warn).not.toHaveBeenCalledWith(
+          'instant_session.agent_version_mismatch',
+          expect.anything()
+        );
+      }
+    );
+
     it('stores agentVersion reported by /ready', async () => {
       const res = await appRequest('/api/nodes/node-1/ready', { agentVersion: 'build-sha-1' });
       expect(res.status).toBe(200);
@@ -267,9 +337,7 @@ describe('node-lifecycle BYO gates', () => {
       const res = await appRequest('/api/nodes/node-1/heartbeat', { nodeId: 'node-1' });
 
       expect(res.status).toBe(200);
-      expect(state.updates).toContainEqual(
-        expect.objectContaining({ healthStatus: 'healthy' })
-      );
+      expect(state.updates).toContainEqual(expect.objectContaining({ healthStatus: 'healthy' }));
     });
 
     it('stores creatingWorkspaces even when no metrics payload is present', async () => {
@@ -298,6 +366,119 @@ describe('node-lifecycle BYO gates', () => {
       expect(state.dns.create).toBeNull();
       // No ipAddress written into any node update payload.
       expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
+    });
+
+    function heartbeatFrom(ip: string) {
+      return getNodeLifecycleApp().request(
+        '/api/nodes/node-1/heartbeat',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer node-token',
+            'Content-Type': 'application/json',
+            'CF-Connecting-IP': ip,
+          },
+          body: JSON.stringify({ nodeId: 'node-1' }),
+        },
+        { DATABASE: {}, BASE_DOMAIN: 'example.com' },
+        { waitUntil: vi.fn(), passThroughOnException: vi.fn() }
+      );
+    }
+
+    it.each(['cloudflare-tunnel', 'reverse-tunnel'])('F21: stored %s suppresses IP/DNS with NULL tunnel_id', async (transport) => {
+      state.node = makeNode({ transport, tunnelId: null, ipAddress: null });
+      const res = await heartbeatFrom('203.0.113.9');
+      expect(res.status).toBe(200);
+      expect(state.updates.length).toBeGreaterThan(0);
+      expect(state.dns.create).toBeNull();
+      expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
+    });
+    it('F21: deployment CF tunnel can backfill its app IP with NULL tunnel_id, without DNS', async () => {
+      state.node = makeNode({ transport: 'cloudflare-tunnel', nodeRole: 'deployment',
+        tunnelId: null, ipAddress: null, status: 'creating' });
+      expect((await heartbeatFrom('203.0.113.9')).status).toBe(200);
+      expect(state.updates.some((u) => u.ipAddress === '203.0.113.9')).toBe(true);
+      expect(state.dns.create).toBeNull();
+    });
+    it('ignores the connecting IP of a workspace tunnel node even when one is sent', async () => {
+      state.node = makeNode({
+        transport: 'cloudflare-tunnel',
+        tunnelId: 'tunnel-uuid',
+        ipAddress: null,
+      });
+      const res = await heartbeatFrom('203.0.113.9');
+      expect(res.status).toBe(200);
+      expect(state.dns.create).toBeNull();
+      expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
+    });
+
+    it('records the IPv4 of a deployment tunnel node with no IP, without any backend A record', async () => {
+      state.node = makeNode({
+        nodeRole: 'deployment',
+        status: 'creating',
+        transport: 'cloudflare-tunnel',
+        tunnelId: 'tunnel-uuid',
+        ipAddress: null,
+        errorMessage: 'Awaiting IP allocation — will be set on first heartbeat',
+      });
+      const res = await heartbeatFrom('203.0.113.8');
+      expect(res.status).toBe(200);
+      // App routes need the public IP (grey-cloud A records); the node hostname stays the CNAME.
+      expect(state.updates).toContainEqual(
+        expect.objectContaining({
+          ipAddress: '203.0.113.8',
+          status: 'running',
+          // The "Awaiting IP allocation" error is cleared in the same write.
+          errorMessage: expect.objectContaining({ sql: 'NULL' }),
+        })
+      );
+      expect(state.dns.create).toBeNull();
+      expect(state.dns.update).toBeNull();
+    });
+
+    it('records the IPv4 of an already-running deployment tunnel node that has none', async () => {
+      state.node = makeNode({
+        nodeRole: 'deployment',
+        status: 'running',
+        transport: 'cloudflare-tunnel',
+        tunnelId: 'tunnel-uuid',
+        ipAddress: null,
+      });
+      expect((await heartbeatFrom('203.0.113.6')).status).toBe(200);
+      expect(state.updates).toContainEqual(expect.objectContaining({ ipAddress: '203.0.113.6' }));
+      expect(state.dns.create).toBeNull();
+    });
+
+    it('never backfills a user-owned tunnel node even with the deployment role (server-side class gate)', async () => {
+      state.node = makeNode({
+        nodeRole: 'deployment',
+        nodeClass: 'user-owned',
+        transport: 'cloudflare-tunnel',
+        tunnelId: 'tunnel-uuid',
+        ipAddress: null,
+      });
+      expect((await heartbeatFrom('203.0.113.5')).status).toBe(200);
+      expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
+    });
+
+    it('never backfills a deployment tunnel node from a non-IPv4 address or over a stored IP', async () => {
+      state.node = makeNode({
+        nodeRole: 'deployment',
+        transport: 'cloudflare-tunnel',
+        tunnelId: 'tunnel-uuid',
+        ipAddress: null,
+      });
+      expect((await heartbeatFrom('2001:db8::8')).status).toBe(200);
+      expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
+      state.node = makeNode({
+        nodeRole: 'deployment',
+        transport: 'cloudflare-tunnel',
+        tunnelId: 'tunnel-uuid',
+        ipAddress: '198.51.100.4',
+      });
+      expect((await heartbeatFrom('203.0.113.8')).status).toBe(200);
+      expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
+      expect(state.dns.create).toBeNull();
     });
 
     it('DOES backfill IP + A record for a managed node without a tunnel', async () => {

@@ -3,11 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InfomaniakProvider } from '../../src';
 import { toUpCloudVM } from '../../src/upcloud-utils';
 import {
-  validateGcpInstance,
   validateHetznerServerResponse,
   validateScalewayServerResponse,
 } from '../../src/validation';
 import { validateDigitalOceanDropletResponse } from '../../src/validation-digitalocean';
+import { validateGcpInstance } from '../../src/validation-gcp';
 import { validateUpCloudServerResponse } from '../../src/validation-upcloud';
 import { validateVultrInstanceResponse } from '../../src/validation-vultr';
 
@@ -283,7 +283,12 @@ describe('provider observed hardware response validation', () => {
           {
             token: {
               project: { id: 'project' },
-              catalog: [{ type: 'compute', endpoints: [{ interface: 'public', region: 'dc4-a', url: compute }] }],
+              catalog: [
+                {
+                  type: 'compute',
+                  endpoints: [{ interface: 'public', region: 'dc4-a', url: compute }],
+                },
+              ],
             },
           },
           201,
@@ -297,7 +302,13 @@ describe('provider observed hardware response validation', () => {
             name: 'vm',
             status: 'ACTIVE',
             addresses: {},
-            flavor: { id: 'flavor-1', original_name: 'a2-ram4-disk20-perf1', vcpus: 2, ram: '4096', disk: 20 },
+            flavor: {
+              id: 'flavor-1',
+              original_name: 'a2-ram4-disk20-perf1',
+              vcpus: 2,
+              ram: '4096',
+              disk: 20,
+            },
             created: '2026-09-07T00:00:00Z',
             metadata: {},
           },

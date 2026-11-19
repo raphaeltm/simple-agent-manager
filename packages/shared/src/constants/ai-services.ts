@@ -1,10 +1,23 @@
 // FILE SIZE EXCEPTION: Keep platform model routing metadata in one auditable registry.
+/** Canonical provider endpoints: these identify the vendor whose catalog list price applies. */
+export const AI_PROVIDER_BASE_URLS = {
+  anthropic: 'https://api.anthropic.com',
+  openai: 'https://api.openai.com/v1',
+} as const;
+
 // =============================================================================
 // AI Task Title Generation
 // =============================================================================
 
 /** Default Workers AI model for task title generation. Override via TASK_TITLE_MODEL env var. */
 export const DEFAULT_TASK_TITLE_MODEL = '@cf/google/gemma-4-26b-a4b-it';
+
+/**
+ * Workers AI model for the Project Overview brief (inbox slice I). A small, inexpensive model
+ * through the same SAM AI Gateway path as task titles ($0.10 / $0.30 per million input / output
+ * tokens, see its PLATFORM_AI_MODELS entry).
+ */
+export const DEFAULT_PROJECT_BRIEF_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 
 /** Defaults for the tightly scoped deployment debugging agent. */
 export const DEFAULT_DEBUG_AGENT_MODEL = '@cf/zai-org/glm-5.2';
@@ -190,11 +203,7 @@ export type ToolCallSupport = 'excellent' | 'good' | 'limited' | 'none';
 
 /** Intended role in the SAM agent hierarchy. */
 export type ModelIntendedRole =
-  | 'workspace-agent'
-  | 'sam-agent'
-  | 'project-agent'
-  | 'utility'
-  | 'any';
+  'workspace-agent' | 'sam-agent' | 'project-agent' | 'utility' | 'any';
 
 /** Scopes where a model is allowed. */
 export type ModelAllowedScope = 'workspace' | 'project' | 'top-level';
@@ -215,6 +224,8 @@ export interface PlatformAIModel {
   costPer1kInputTokens: number;
   /** Approximate cost per 1K output tokens (USD) for budget estimation. Actual costs from AI Gateway logs. */
   costPer1kOutputTokens: number;
+  /** Cost per 1K prefix-cache-hit input tokens (USD), when the provider prices them separately. */
+  costPer1kCachedInputTokens?: number;
   /** Context window size in tokens. */
   contextWindow: number;
   /** Tool-call reliability for agent loop suitability. */
@@ -322,6 +333,7 @@ type OpenAIModelTuple = readonly [string, string, PlatformAIModelTier, number, n
 const OPENAI_GPT6_MODELS = [
   ['gpt-6-astra', 'GPT-6 Astra', 'premium', 0.01, 0.05, 'openai-premium'],
   ['gpt-6.1-sol', 'GPT-6.1 Sol', 'premium', 0.002, 0.01, 'openai-premium'],
+  ['gpt-6.1-terra', 'GPT-6.1 Terra', 'premium', 0.001, 0.005, 'openai-premium'],
   ['gpt-6-sol', 'GPT-6 Sol', 'premium', 0.002, 0.01, 'openai-premium'],
   ['gpt-6-luna', 'GPT-6 Luna', 'standard', 0.0001, 0.0005, 'openai-standard'],
 ] as const satisfies readonly OpenAIModelTuple[];
@@ -379,10 +391,38 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     tier: 'low-cost',
     costPer1kInputTokens: 0.0001,
     costPer1kOutputTokens: 0.0003,
-    contextWindow: 32768,
+    // Cloudflare model page, verified 2026-10-21.
+    contextWindow: 256000,
     toolCallSupport: 'good',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'workers-coding',
+  }),
+  workersAIModel({
+    // https://developers.cloudflare.com/workers-ai/models/deepseek-v4.1-flash-1017/
+    // Pricing and limits verified 2026-11-17; USD per 1K tokens.
+    id: '@cf/deepseek-ai/deepseek-v4.1-flash-1017',
+    label: 'DeepSeek V4.1 Flash 1017',
+    tier: 'low-cost',
+    costPer1kInputTokens: 0.0003,
+    costPer1kCachedInputTokens: 0.000006,
+    costPer1kOutputTokens: 0.0012,
+    contextWindow: 1048576,
+    toolCallSupport: 'good',
+    intendedRole: 'utility',
+    fallbackGroup: 'workers-general',
+  }),
+  workersAIModel({
+    // Pricing and limits from the Cloudflare model page, verified 2026-10-21.
+    id: '@cf/zai-org/glm-5.3-flash',
+    label: 'GLM 5.3 Flash',
+    tier: 'low-cost',
+    costPer1kInputTokens: 0.00015,
+    costPer1kCachedInputTokens: 0.00003,
+    costPer1kOutputTokens: 0.0005,
+    contextWindow: 1048576,
+    toolCallSupport: 'good',
+    intendedRole: 'utility',
+    fallbackGroup: 'workers-general',
   }),
   workersAIModel({
     id: '@cf/zai-org/glm-5.2',
@@ -396,6 +436,18 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     fallbackGroup: 'workers-general',
   }),
   // --- Anthropic (via AI Gateway) ---
+  anthropicModel({
+    id: 'claude-haiku-5-5',
+    label: 'Claude Haiku 5.5',
+    tier: 'standard',
+    // Conservative long-prompt price; Anthropic charges less at 100K tokens or below.
+    costPer1kInputTokens: 0.0005,
+    costPer1kOutputTokens: 0.0025,
+    contextWindow: 1000000,
+    toolCallSupport: 'excellent',
+    intendedRole: 'utility',
+    fallbackGroup: 'anthropic-fast',
+  }),
   anthropicModel({
     id: 'claude-haiku-4-5-20251001',
     label: 'Claude Haiku 4.5',
@@ -455,6 +507,17 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'any',
     fallbackGroup: 'anthropic-standard',
+  }),
+  anthropicModel({
+    id: 'claude-fable-5-2',
+    label: 'Claude Fable 5.2',
+    tier: 'premium',
+    costPer1kInputTokens: 0.008,
+    costPer1kOutputTokens: 0.04,
+    contextWindow: 1000000,
+    toolCallSupport: 'excellent',
+    intendedRole: 'workspace-agent',
+    fallbackGroup: 'anthropic-premium',
   }),
   anthropicModel({
     id: 'claude-fable-5-1',
@@ -522,8 +585,9 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
         contextWindow: 1050000,
         toolCallSupport: 'excellent',
         intendedRole: 'workspace-agent',
-        // GPT-6.1 Sol supports tool calls through Responses, but not Chat Completions.
-        supportsChatCompletionsToolCalls: id === 'gpt-6.1-sol' ? false : undefined,
+        // GPT-6.1 Sol and Terra require Responses for tool calls.
+        supportsChatCompletionsToolCalls:
+          id === 'gpt-6.1-sol' || id === 'gpt-6.1-terra' ? false : undefined,
         fallbackGroup,
       })
   ),

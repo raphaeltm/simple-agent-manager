@@ -1,7 +1,10 @@
+import { DEFAULT_CHAT_SESSION_MESSAGE_LIMIT } from '@simple-agent-manager/shared';
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useChatWebSocket } from '../../../src/hooks/useChatWebSocket';
+import { type ChatMessageResponse, getChatSession } from '../../../src/lib/api';
+import { applyMessageAppend, mergeMessages } from '../../../src/lib/merge-messages';
 
 // ---------------------------------------------------------------------------
 // Mock WebSocket
@@ -120,6 +123,299 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(MockWebSocket.instances[0]!.url).toContain('/api/projects/proj-1/sessions/ws');
     // Session-scoped server-side filtering: sessionId must be in WS URL query params
     expect(MockWebSocket.instances[0]!.url).toContain('sessionId=');
+    expect(MockWebSocket.instances[0]!.url).toContain('toolReplace=tool-replace-v1');
+  });
+
+  it('advertises append support only when it can apply canonical deltas', () => {
+    const onMessageAppend = vi.fn().mockReturnValue(true);
+    renderHook(() => useChatWebSocket({ ...defaultProps, onMessageAppend }));
+    const socket = MockWebSocket.instances[0]!;
+    expect(socket.url).toContain('messageAppend=message-append-v1');
+    act(() => socket.simulateOpen());
+    const payload = { id: 'canonical', sessionId: 'sess-1', content: '🙂', offset: 5, revision: 7 };
+    act(() => socket.simulateMessage({ type: 'message.append', payload }));
+    expect(onMessageAppend).toHaveBeenCalledExactlyOnceWith(payload);
+    expect(defaultProps.onMessage).not.toHaveBeenCalled();
+    act(() =>
+      socket.simulateMessage({
+        type: 'message.append',
+        payload: { ...payload, sessionId: 'other' },
+      })
+    );
+    expect(onMessageAppend).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers a missing canonical base behind a full newer page without reconnecting forever', async () => {
+    const template = await getChatSession('proj-1', 'sess-1');
+    vi.mocked(getChatSession).mockClear();
+    const base: ChatMessageResponse = {
+      id: 'missing-base',
+      sessionId: 'sess-1',
+      role: 'assistant',
+      content: 'prefix',
+      createdAt: 10,
+      sequence: 10,
+      toolMetadata: null,
+    };
+    const tools: ChatMessageResponse[] = Array.from({ length: 501 }, (_, index) => ({
+      ...base,
+      id: `tool-${index}`,
+      role: 'tool',
+      content: `tool ${index}`,
+      createdAt: index + 100,
+      sequence: index + 100,
+    }));
+    let resolveSnapshot: (value: typeof template) => void = () => {};
+    vi.mocked(getChatSession)
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveSnapshot = resolve;
+        })
+      )
+      .mockResolvedValueOnce({ ...template, messages: [base], hasMore: false });
+    let cached: ChatMessageResponse[] = [];
+    const onMessageAppend = vi.fn((append) => {
+      const applied = applyMessageAppend(cached, append);
+      cached = applied.messages;
+      return !applied.needsCatchUp;
+    });
+    const onCatchUp = vi.fn((messages: ChatMessageResponse[]) => {
+      cached = mergeMessages(cached, messages, 'append');
+    });
+    renderHook(() =>
+      useChatWebSocket({
+        ...defaultProps,
+        onMessageAppend,
+        onCatchUp,
+        onMessage: (message) => {
+          cached = mergeMessages(cached, [message], 'append');
+        },
+      })
+    );
+    const socket = MockWebSocket.instances[0]!;
+    act(() => socket.simulateOpen());
+    act(() =>
+      socket.simulateMessage({
+        type: 'message.append',
+        payload: {
+          id: base.id,
+          sessionId: 'sess-1',
+          content: ' tail',
+          offset: 6,
+          revision: 11,
+        },
+      })
+    );
+    act(() =>
+      socket.simulateMessage({
+        type: 'messages.batch',
+        payload: { sessionId: 'sess-1', messages: tools },
+      })
+    );
+    await act(async () => {
+      resolveSnapshot({ ...template, messages: tools, hasMore: true });
+    });
+    expect(vi.mocked(getChatSession)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(getChatSession)).toHaveBeenLastCalledWith('proj-1', 'sess-1', {
+      before: '[100,100,"tool-0"]',
+      limit: 500,
+    });
+    expect(cached).toHaveLength(502);
+    expect(cached[0]?.content).toBe('prefix tail');
+    expect(socket.closeCode).toBeUndefined();
+  });
+
+  it('ignores an old socket opening after a session switch', () => {
+    const onSubscribed = vi.fn();
+    const { rerender } = renderHook(
+      ({ sessionId }) => useChatWebSocket({ ...defaultProps, sessionId, onSubscribed }),
+      {
+        initialProps: { sessionId: 'sess-1' },
+      }
+    );
+    const old = MockWebSocket.instances[0]!;
+    rerender({ sessionId: 'sess-2' });
+    act(() => old.simulateOpen());
+    expect(onSubscribed).not.toHaveBeenCalled();
+    expect(old.closeCode).toBe(1000);
+    act(() => MockWebSocket.instances[1]!.simulateOpen());
+    expect(onSubscribed).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a deferred append recovery response after switching sessions', async () => {
+    const snapshot = await getChatSession('proj-1', 'sess-1');
+    let resolveSnapshot: (value: typeof snapshot) => void = () => {};
+    vi.mocked(getChatSession).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveSnapshot = resolve;
+      })
+    );
+    const onMessageAppend = vi.fn().mockReturnValue(false);
+    const onCatchUp = vi.fn();
+    const { rerender } = renderHook(
+      ({ sessionId }) =>
+        useChatWebSocket({ ...defaultProps, sessionId, onMessageAppend, onCatchUp }),
+      { initialProps: { sessionId: 'sess-1' } }
+    );
+    const old = MockWebSocket.instances[0]!;
+    act(() => old.simulateOpen());
+    act(() =>
+      old.simulateMessage({
+        type: 'message.append',
+        payload: {
+          id: 'old-canonical',
+          sessionId: 'sess-1',
+          content: ' tail',
+          offset: 6,
+          revision: 11,
+        },
+      })
+    );
+    rerender({ sessionId: 'sess-2' });
+    const current = MockWebSocket.instances[1]!;
+    await act(async () => resolveSnapshot(snapshot));
+
+    expect(onCatchUp).not.toHaveBeenCalled();
+    expect(onMessageAppend).toHaveBeenCalledTimes(1);
+    expect(current.closeCode).toBeUndefined();
+  });
+
+  it('retains a missing-base delta when history fails and recovers it after reconnect', async () => {
+    const template = await getChatSession('proj-1', 'sess-1');
+    vi.mocked(getChatSession).mockClear();
+    const base: ChatMessageResponse = {
+      id: 'missing-base',
+      sessionId: 'sess-1',
+      role: 'assistant',
+      content: 'prefix',
+      createdAt: 10,
+      sequence: 10,
+      toolMetadata: null,
+    };
+    const newer = { ...base, id: 'newer-tool', role: 'tool', createdAt: 100, sequence: 100 };
+    const recent = { ...template, messages: [newer], hasMore: true };
+    vi.mocked(getChatSession)
+      .mockResolvedValueOnce(recent)
+      .mockRejectedValueOnce(new Error('temporary history failure'))
+      .mockResolvedValueOnce(recent)
+      .mockResolvedValueOnce({ ...template, messages: [base], hasMore: false });
+    let cached: ChatMessageResponse[] = [];
+    const onMessageAppend = vi.fn((append) => {
+      const result = applyMessageAppend(cached, append);
+      cached = result.messages;
+      return !result.needsCatchUp;
+    });
+    const onCatchUp = vi.fn((messages: ChatMessageResponse[]) => {
+      cached = mergeMessages(cached, messages, 'append');
+    });
+    renderHook(() => useChatWebSocket({ ...defaultProps, onMessageAppend, onCatchUp }));
+    const first = MockWebSocket.instances[0]!;
+    act(() => first.simulateOpen());
+    await act(async () =>
+      first.simulateMessage({
+        type: 'message.append',
+        payload: {
+          id: base.id,
+          sessionId: base.sessionId,
+          content: ' tail',
+          offset: 6,
+          revision: 11,
+        },
+      })
+    );
+    expect(first.closeCode).toBe(4000);
+    expect(cached.some((message) => message.id === base.id)).toBe(false);
+    act(() => vi.advanceTimersByTime(1000));
+    const retry = MockWebSocket.instances[1]!;
+    await act(async () => retry.simulateOpen());
+
+    expect(vi.mocked(getChatSession)).toHaveBeenCalledTimes(4);
+    expect(cached.find((message) => message.id === base.id)?.content).toBe('prefix tail');
+    expect(retry.closeCode).toBeUndefined();
+  });
+
+  it('retains bounded recovery targets when pending appends overflow a stalled request', async () => {
+    const template = await getChatSession('proj-1', 'sess-1');
+    vi.mocked(getChatSession).mockClear();
+    const base: ChatMessageResponse = {
+      id: 'overflow-base',
+      sessionId: 'sess-1',
+      role: 'assistant',
+      content: 'prefix',
+      createdAt: 10,
+      sequence: 10,
+      toolMetadata: null,
+    };
+    const newer = { ...base, id: 'newer-tool', role: 'tool', createdAt: 100, sequence: 100 };
+    const recent = { ...template, messages: [newer], hasMore: true };
+    let releaseStalled: (value: typeof template) => void = () => {};
+    vi.mocked(getChatSession)
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          releaseStalled = resolve;
+        })
+      )
+      .mockResolvedValueOnce(recent)
+      .mockResolvedValueOnce({ ...template, messages: [base], hasMore: false });
+    let cached: ChatMessageResponse[] = [];
+    const onMessageAppend = vi.fn((append) => {
+      const result = applyMessageAppend(cached, append);
+      cached = result.messages;
+      return !result.needsCatchUp;
+    });
+    const onCatchUp = vi.fn((messages: ChatMessageResponse[]) => {
+      cached = mergeMessages(cached, messages, 'append');
+    });
+    renderHook(() => useChatWebSocket({ ...defaultProps, onMessageAppend, onCatchUp }));
+    const first = MockWebSocket.instances[0]!;
+    act(() => first.simulateOpen());
+    const queued = DEFAULT_CHAT_SESSION_MESSAGE_LIMIT + 1;
+    const frame = (index: number) => ({
+      type: 'message.append',
+      payload: {
+        id: base.id,
+        sessionId: base.sessionId,
+        content: 'x',
+        offset: base.content.length + index,
+        revision: base.content.length + index + 1,
+      },
+    });
+    act(() => {
+      for (let index = 0; index < queued; index++) first.simulateMessage(frame(index));
+      first.simulateMessage(frame(queued));
+    });
+    expect(first.closeCode).toBe(4000);
+    expect(onMessageAppend).toHaveBeenCalledTimes(queued);
+    act(() => vi.advanceTimersByTime(1000));
+    const retry = MockWebSocket.instances[1]!;
+    await act(async () => retry.simulateOpen());
+
+    expect(vi.mocked(getChatSession)).toHaveBeenCalledTimes(3);
+    expect(cached.find((message) => message.id === base.id)?.content).toBe(
+      base.content + 'x'.repeat(queued)
+    );
+    expect(retry.closeCode).toBeUndefined();
+    const applied = onMessageAppend.mock.calls.length;
+    await act(async () => releaseStalled(recent));
+    expect(onMessageAppend).toHaveBeenCalledTimes(applied);
+  });
+
+  it('refreshes a missing append base even when no later chunk arrives', async () => {
+    const onMessageAppend = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+    const onCatchUp = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onMessageAppend, onCatchUp }));
+    const socket = MockWebSocket.instances[0]!;
+    act(() => socket.simulateOpen());
+    const payload = {
+      id: 'canonical',
+      sessionId: 'sess-1',
+      content: 'tail',
+      offset: 10,
+      revision: 14,
+    };
+    await act(async () => socket.simulateMessage({ type: 'message.append', payload }));
+    expect(onCatchUp).toHaveBeenCalledTimes(1);
+    expect(onMessageAppend).toHaveBeenCalledTimes(2);
   });
 
   it('does not create WebSocket when disabled', () => {
@@ -169,6 +465,33 @@ describe('useChatWebSocket (behavioral)', () => {
     );
   });
 
+  it('keeps the server-written SAM notice on a live message.new', () => {
+    const onMessage = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onMessage }));
+    const samNotice = { v: 1, type: 'agent.message', headline: 'Message from another agent' };
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'message.new',
+        sessionId: 'sess-1',
+        messageId: 'msg-2',
+        role: 'user',
+        content: 'SAM notice (system-generated, not a human message): …',
+        toolMetadata: { kind: 'durable_prompt_delivery', source: 'project_event_wake', samNotice },
+        createdAt: 200,
+      });
+    });
+
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'msg-2',
+        role: 'user',
+        toolMetadata: expect.objectContaining({ samNotice }),
+      })
+    );
+  });
+
   it('ignores messages for different sessions', () => {
     const onMessage = vi.fn();
     renderHook(() => useChatWebSocket({ ...defaultProps, onMessage }));
@@ -202,6 +525,28 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(onSessionStopped).toHaveBeenCalledOnce();
   });
 
+  it('asks the viewer to re-check access when this session is shared or unshared', () => {
+    const onSessionAccessChanged = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onSessionAccessChanged }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.access.changed',
+        payload: { sessionId: 'other-session', reason: 'revoked' },
+      });
+    });
+    expect(onSessionAccessChanged).not.toHaveBeenCalled();
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.access.changed',
+        payload: { sessionId: defaultProps.sessionId, reason: 'revoked' },
+      });
+    });
+    expect(onSessionAccessChanged).toHaveBeenCalledTimes(1);
+  });
+
   it('forwards all supported session.activity states', () => {
     const onAgentActivity = vi.fn();
     renderHook(() => useChatWebSocket({ ...defaultProps, onAgentActivity }));
@@ -219,10 +564,35 @@ describe('useChatWebSocket (behavioral)', () => {
     });
 
     expect(onAgentActivity).toHaveBeenCalledTimes(4);
-    expect(onAgentActivity).toHaveBeenNthCalledWith(1, 'prompting', 123);
-    expect(onAgentActivity).toHaveBeenNthCalledWith(2, 'recovering', 123);
-    expect(onAgentActivity).toHaveBeenNthCalledWith(3, 'error', 123);
-    expect(onAgentActivity).toHaveBeenNthCalledWith(4, 'idle', 123);
+    expect(onAgentActivity).toHaveBeenNthCalledWith(1, 'prompting', 123, undefined);
+    expect(onAgentActivity).toHaveBeenNthCalledWith(2, 'recovering', 123, undefined);
+    expect(onAgentActivity).toHaveBeenNthCalledWith(3, 'error', 123, undefined);
+    expect(onAgentActivity).toHaveBeenNthCalledWith(4, 'idle', 123, undefined);
+  });
+
+  it('forwards steering support from session.activity only when the server sent it', () => {
+    const onAgentActivity = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onAgentActivity }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      for (const steeringSupported of [false, true, null, undefined]) {
+        MockWebSocket.instances[0]!.simulateMessage({
+          type: 'session.activity',
+          sessionId: 'sess-1',
+          activity: 'prompting',
+          promptStartedAt: 123,
+          steeringSupported,
+        });
+      }
+    });
+
+    expect(onAgentActivity.mock.calls.map((call) => call[2])).toEqual([
+      false,
+      true,
+      undefined,
+      undefined,
+    ]);
   });
 
   it('forwards a session.wake_progress event with its parsed phase', () => {
@@ -246,6 +616,8 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(onWakeProgress).toHaveBeenCalledWith({
       recoveryStatus: 'waking',
       wakePhase: 'node_provisioning',
+      // A server that predates attempt ids sends none; the hook keeps its old latch.
+      wakeAttemptId: null,
     });
   });
 
@@ -269,10 +641,12 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(onWakeProgress).toHaveBeenNthCalledWith(1, {
       recoveryStatus: 'restored',
       wakePhase: null,
+      wakeAttemptId: null,
     });
     expect(onWakeProgress).toHaveBeenNthCalledWith(2, {
       recoveryStatus: 'failed',
       wakePhase: null,
+      wakeAttemptId: null,
     });
   });
 
@@ -292,7 +666,44 @@ describe('useChatWebSocket (behavioral)', () => {
       });
     });
 
-    expect(onWakeProgress).toHaveBeenCalledWith({ recoveryStatus: 'waking', wakePhase: null });
+    expect(onWakeProgress).toHaveBeenCalledWith({
+      recoveryStatus: 'waking',
+      wakePhase: null,
+      wakeAttemptId: null,
+    });
+  });
+
+  it('forwards the wake attempt a push names, and drops a non-string one', () => {
+    const onWakeProgress = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onWakeProgress }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.wake_progress',
+        payload: {
+          sessionId: 'sess-1',
+          recoveryStatus: 'restored',
+          wakePhase: null,
+          wakeAttemptId: '01WAKEATTEMPT',
+        },
+      });
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.wake_progress',
+        payload: { sessionId: 'sess-1', recoveryStatus: 'waking', wakeAttemptId: 42 },
+      });
+    });
+
+    expect(onWakeProgress).toHaveBeenNthCalledWith(1, {
+      recoveryStatus: 'restored',
+      wakePhase: null,
+      wakeAttemptId: '01WAKEATTEMPT',
+    });
+    expect(onWakeProgress).toHaveBeenNthCalledWith(2, {
+      recoveryStatus: 'waking',
+      wakePhase: null,
+      wakeAttemptId: null,
+    });
   });
 
   it('ignores a session.wake_progress with an unknown recovery status', () => {
@@ -367,6 +778,39 @@ describe('useChatWebSocket (behavioral)', () => {
     });
 
     expect(onSessionUpdated).toHaveBeenCalledWith({ agentSessionId: 'acp-123' });
+  });
+
+  it('forwards the lifecycle status the DO pushes on sleep and wake', () => {
+    // `applySessionSleep` / `wakeSession` broadcast { sessionId, status }.
+    const onSessionUpdated = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onSessionUpdated }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.updated',
+        sessionId: 'sess-1',
+        status: 'sleeping',
+      });
+    });
+
+    expect(onSessionUpdated).toHaveBeenCalledWith({ status: 'sleeping' });
+  });
+
+  it('does not forward a status that is not a chat session status', () => {
+    const onSessionUpdated = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onSessionUpdated }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.updated',
+        sessionId: 'sess-1',
+        status: 'hibernating',
+      });
+    });
+
+    expect(onSessionUpdated).not.toHaveBeenCalled();
   });
 
   it('does not forward a non-string agentSessionId', () => {
@@ -517,8 +961,104 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(onCatchUp).toHaveBeenLastCalledWith(
       expect.arrayContaining([expect.objectContaining({ id: 'msg-catchup-1' })]),
       expect.any(Object),
+      undefined,
       undefined
     );
+  });
+
+  type SocketProps = { enabled: boolean };
+  function renderSocket(
+    callbacks: { onCatchUp: ReturnType<typeof vi.fn>; onSubscribed: ReturnType<typeof vi.fn> },
+    initialProps: SocketProps
+  ) {
+    return renderHook(
+      ({ enabled }: SocketProps) => useChatWebSocket({ ...defaultProps, enabled, ...callbacks }),
+      { initialProps }
+    );
+  }
+  async function openSocket(index: number) {
+    await act(async () => {
+      MockWebSocket.instances[index]!.simulateOpen();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  it('asks the page to read what was persisted since its last load when the socket first opens', async () => {
+    // The page's REST load can finish before this socket subscribes; a row persisted in between
+    // (a comment sent to the agent, say) was broadcast to no socket.
+    const callbacks = { onCatchUp: vi.fn(), onSubscribed: vi.fn() };
+    renderSocket(callbacks, { enabled: true });
+    expect(callbacks.onSubscribed).not.toHaveBeenCalled();
+
+    await openSocket(0);
+
+    expect(callbacks.onSubscribed).toHaveBeenCalledTimes(1);
+    // Not the newest-window catch-up: that one is for reconnects.
+    expect(callbacks.onCatchUp).not.toHaveBeenCalled();
+  });
+
+  it('asks before delivering any frame of the new socket, so a newer row cannot skip the gap', async () => {
+    const order: string[] = [];
+    const callbacks = {
+      onCatchUp: vi.fn(),
+      onSubscribed: vi.fn(() => order.push('subscribed')),
+    };
+    renderHook(() =>
+      useChatWebSocket({
+        ...defaultProps,
+        ...callbacks,
+        onMessage: (msg) => order.push(`message:${msg.id}`),
+      })
+    );
+
+    await act(async () => {
+      const socket = MockWebSocket.instances[0]!;
+      socket.simulateOpen();
+      socket.simulateMessage({
+        type: 'message.new',
+        payload: { sessionId: 'sess-1', messageId: 'live-1', role: 'assistant', content: 'hi' },
+      });
+      await Promise.resolve();
+    });
+
+    expect(order).toEqual(['subscribed', 'message:live-1']);
+  });
+
+  it('asks again when a chat that slept wakes and its socket opens', async () => {
+    const callbacks = { onCatchUp: vi.fn(), onSubscribed: vi.fn() };
+    const { rerender } = renderSocket(callbacks, { enabled: true });
+    await openSocket(0);
+    expect(callbacks.onSubscribed).toHaveBeenCalledTimes(1);
+
+    // The chat sleeps (socket off) and wakes again. Rows persisted meanwhile, such as the
+    // prompt that woke it, reached no socket.
+    rerender({ enabled: false });
+    expect(MockWebSocket.instances[0]!.readyState).toBe(MockWebSocket.CLOSED);
+    rerender({ enabled: true });
+    expect(callbacks.onSubscribed).toHaveBeenCalledTimes(1);
+    await openSocket(1);
+
+    expect(callbacks.onSubscribed).toHaveBeenCalledTimes(2);
+    expect(callbacks.onCatchUp).not.toHaveBeenCalled();
+  });
+
+  it('runs the newest-window catch-up on a reconnect, not the subscribe read', async () => {
+    const callbacks = { onCatchUp: vi.fn(), onSubscribed: vi.fn() };
+    renderSocket(callbacks, { enabled: true });
+    await openSocket(0);
+    expect(callbacks.onSubscribed).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateClose(1006);
+    });
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    await openSocket(1);
+
+    expect(callbacks.onCatchUp).toHaveBeenCalledTimes(1);
+    expect(callbacks.onSubscribed).toHaveBeenCalledTimes(1);
   });
 
   it('stale onclose does not null the new active socket (BUG-2 fix)', () => {
@@ -946,7 +1486,7 @@ describe('useChatWebSocket (behavioral)', () => {
     });
 
     expect(onAgentActivity).toHaveBeenCalledOnce();
-    expect(onAgentActivity).toHaveBeenCalledWith('prompting', null);
+    expect(onAgentActivity).toHaveBeenCalledWith('prompting', null, undefined);
   });
 
   it('calls onAgentActivity with "idle" on session.activity event', () => {
@@ -968,7 +1508,7 @@ describe('useChatWebSocket (behavioral)', () => {
     });
 
     expect(onAgentActivity).toHaveBeenCalledOnce();
-    expect(onAgentActivity).toHaveBeenCalledWith('idle', null);
+    expect(onAgentActivity).toHaveBeenCalledWith('idle', null, undefined);
   });
 
   it('ignores session.activity for different sessions', () => {

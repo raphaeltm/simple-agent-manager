@@ -3,11 +3,18 @@ import type {
   ToolCallContentItem,
   ToolCallItem,
 } from '@simple-agent-manager/acp-client';
-import { isExpiredTask } from '@simple-agent-manager/shared';
+import { toolMessageRevision } from '@simple-agent-manager/shared';
+import { isExpiredTask, type SessionUndeliveredPrompt } from '@simple-agent-manager/shared';
 
 import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
-import { DOCUMENT_CARD_TOOLS, normalizeToolName } from './tool-cards/document-card-data';
+import { userMessageAttribution, userMessageDelivery } from './message-attribution';
+import {
+  samNoticeForMessage,
+  systemRowNoticeForMessage,
+  withSamNotice,
+} from './sam-notice/notice-items';
+import { isTypedCardToolName } from './tool-cards/typed-card-tools';
 
 /** Default idle timeout in ms — matches the server-side default (NODE_WARM_TIMEOUT_MS). */
 export const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
@@ -76,6 +83,7 @@ interface ToolContentPointer {
   messageId: string;
   contentSize?: number;
   hasStoredContent: boolean;
+  revision: number;
 }
 
 function buildToolContentPointer(
@@ -92,6 +100,7 @@ function buildToolContentPointer(
       : undefined;
   return {
     messageId: msg.id,
+    revision: toolMessageRevision(msg.toolMetadata),
     contentSize: contentSize ?? estimatedSize,
     hasStoredContent:
       hasStructuredContent || fallbackHasContent || (contentSize !== undefined && contentSize > 0),
@@ -108,6 +117,7 @@ function applyToolContentPointer(
   }
 
   toolItem.messageId = pointer.messageId;
+  toolItem.revision = pointer.revision;
   toolItem.contentLoaded = false;
   toolItem.content = [];
   if (pointer.contentSize !== undefined) {
@@ -125,15 +135,9 @@ function applyToolContentPointer(
  */
 function inferToolNameFromTitle(title: string): string | undefined {
   if (!title) return undefined;
-  const base = normalizeToolName(title);
-  if (base && DOCUMENT_CARD_TOOLS.has(base)) return title;
+  if (isTypedCardToolName(title)) return title;
   if (title.startsWith('mcp__') && title.split('__').length >= 3) return title;
   return undefined;
-}
-
-function isDocumentCardTool(toolName: string | undefined): boolean {
-  const base = normalizeToolName(toolName);
-  return Boolean(base && DOCUMENT_CARD_TOOLS.has(base));
 }
 
 function parseJsonRecordFromToolContent(content: string): Record<string, unknown> | undefined {
@@ -159,8 +163,12 @@ function parseJsonRecordFromToolContent(content: string): Record<string, unknown
   return undefined;
 }
 
-function legacyDocumentRawOutput(toolName: string | undefined, content: string): unknown {
-  if (!isDocumentCardTool(toolName)) return undefined;
+/**
+ * Codex result rows can omit rawOutput and keep the tool's JSON result in the message text;
+ * recover it for typed-card tools so the card renders from the correlated tool call.
+ */
+function legacyCardRawOutput(toolName: string | undefined, content: string): unknown {
+  if (!isTypedCardToolName(toolName)) return undefined;
   const payload = parseJsonRecordFromToolContent(content);
   return payload ? [{ type: 'text', text: JSON.stringify(payload) }] : undefined;
 }
@@ -192,8 +200,16 @@ export function deriveSessionState(session: ChatSessionResponse): SessionState {
 // DO message → ConversationItem conversion
 // ---------------------------------------------------------------------------
 
-/** Converts DO-persisted ChatMessageResponse[] into ConversationItem[] for unified rendering. */
-export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): ConversationItem[] {
+/**
+ * Converts DO-persisted ChatMessageResponse[] into ConversationItem[] for unified rendering.
+ * `undeliveredList` is the access summary's list of messages whose delivery was cancelled.
+ */
+export function chatMessagesToConversationItems(
+  msgs: ChatMessageResponse[],
+  undeliveredList?: readonly SessionUndeliveredPrompt[]
+): ConversationItem[] {
+  const undelivered = new Map(undeliveredList?.map((entry) => [entry.messageId, entry.reason]));
+
   // Safety-net deduplication by message ID. Primary dedup now happens at the
   // state level via mergeMessages(). If this catches duplicates, it indicates
   // a gap in state-level dedup that should be investigated.
@@ -217,15 +233,24 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
   const toolCallMap = new Map<string, number>(); // toolCallId → index in acc
   const items = dedupedMsgs.reduce<ConversationItem[]>((acc, msg) => {
     if (msg.role === 'user') {
-      acc.push({
+      const attribution = userMessageAttribution(msg, undelivered.get(msg.id));
+      const delivery = userMessageDelivery(msg);
+      const item: ConversationItem = {
         kind: 'user_message',
         id: msg.id,
         text: msg.content,
         timestamp: msg.createdAt,
         origin: msg.origin === 'system' ? 'system' : 'user',
-      });
+        ...(attribution ? { attribution } : {}),
+        ...(delivery ? { delivery } : {}),
+      };
+      // A message SAM delivered renders as a notice row, not as the owner's bubble.
+      const notice = samNoticeForMessage(msg);
+      acc.push(notice ? withSamNotice(item, notice) : item);
     } else if (msg.role === 'assistant') {
-      // Merge consecutive assistant chunks into one item
+      // Merge consecutive assistant chunks into one item. The merged roles are
+      // MERGED_MESSAGE_ROLES (shared), which the comment context window and
+      // mergedRowAliases also use: change them together.
       const last = acc[acc.length - 1];
       if (last?.kind === 'agent_message') {
         (last as { text: string }).text += msg.content;
@@ -292,7 +317,13 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
       }
     } else if (msg.role === 'tool') {
       const meta = maybeJsonRecord(msg.toolMetadata);
-      const toolCallId = meta && typeof meta.toolCallId === 'string' ? meta.toolCallId : '';
+      const toolCallId =
+        typeof meta?._samToolCanonicalId === 'string'
+          ? meta._samToolCanonicalId
+          : meta && typeof meta.toolCallId === 'string'
+            ? meta.toolCallId
+            : '';
+      const providerCallId = typeof meta?.toolCallId === 'string' ? meta.toolCallId : '';
       const kind = meta && typeof meta.kind === 'string' ? meta.kind : 'tool';
       // Build a meaningful title: prefer the explicit title from metadata,
       // then humanize the kind (e.g. "read" → "Read"), and only fall back
@@ -310,7 +341,7 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
           ? meta.toolName
           : inferToolNameFromTitle(rawTitle);
       const rawInput = meta ? meta.rawInput : undefined;
-      const rawOutput = meta?.rawOutput ?? legacyDocumentRawOutput(toolName, msg.content);
+      const rawOutput = meta?.rawOutput ?? legacyCardRawOutput(toolName, msg.content);
       const validStatuses = new Set(['pending', 'in_progress', 'completed', 'failed']);
       const rawStatus = meta && typeof meta.status === 'string' ? meta.status : '';
       const status = (validStatuses.has(rawStatus) ? rawStatus : 'completed') as
@@ -325,6 +356,19 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
       const contentPointer = buildToolContentPointer(msg, structuredContent, contentSize);
       const contentItems: ToolCallContentItem[] = [];
 
+      // Enabling midway through a call may follow an ordinary legacy start row.
+      // Adopt only a raw provider key, never another incarnation's canonical key.
+      const priorIndex = providerCallId ? toolCallMap.get(providerCallId) : undefined;
+      const priorItem = priorIndex === undefined ? undefined : acc[priorIndex];
+      if (
+        toolCallId !== providerCallId &&
+        priorItem?.kind === 'tool_call' &&
+        priorItem.toolCallId === providerCallId &&
+        priorIndex !== undefined
+      ) {
+        toolCallMap.set(toolCallId, priorIndex);
+        priorItem.toolCallId = toolCallId;
+      }
       // Deduplicate tool calls by toolCallId: merge updates into existing tool call
       if (toolCallId && toolCallMap.has(toolCallId)) {
         const existingIdx = toolCallMap.get(toolCallId);
@@ -335,8 +379,7 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
         // Codex result updates may omit title/toolName and keep the document
         // payload only in message content. Recover it with the initial row's
         // preserved tool identity after correlating the sparse rows by call ID.
-        const mergedRawOutput =
-          rawOutput ?? legacyDocumentRawOutput(existing.toolName, msg.content);
+        const mergedRawOutput = rawOutput ?? legacyCardRawOutput(existing.toolName, msg.content);
         // Update with latest status, explicit title, content, and locations.
         // Status-only tool_call_update rows often omit title/kind; do not let
         // the generic fallback title erase the richer initial tool_call title.
@@ -372,12 +415,19 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
         acc.push(toolItem);
         if (toolCallId) {
           toolCallMap.set(toolCallId, idx);
+          if (providerCallId) toolCallMap.set(providerCallId, idx);
         }
       }
     } else if (msg.role === 'system') {
-      // System messages (task status, error logs) rendered as preformatted text
-      // to prevent markdown interpretation of build log characters (#, *, URLs)
-      acc.push({ kind: 'system_message', id: msg.id, text: msg.content, timestamp: msg.createdAt });
+      // System rows (task status, error logs) render as compact SAM notice rows; the full
+      // text stays preformatted behind the row so build-log characters are not markdown.
+      const item: ConversationItem = {
+        kind: 'system_message',
+        id: msg.id,
+        text: msg.content,
+        timestamp: msg.createdAt,
+      };
+      acc.push(withSamNotice(item, systemRowNoticeForMessage(msg)));
     } else {
       // Unknown roles render as raw fallback (matches workspace chat behavior)
       // to ensure no messages are silently dropped.

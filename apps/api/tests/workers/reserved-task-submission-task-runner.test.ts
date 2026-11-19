@@ -1,3 +1,6 @@
+import {
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -10,11 +13,6 @@ import type {
   TaskRunnerState,
 } from '../../src/durable-objects/task-runner';
 import type { Env } from '../../src/env';
-import {
-  CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
-  capacityPlacementSnapshotSqlValues,
-} from '../../src/services/capacity-placement-snapshot';
-import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../src/services/default-capacity-pools';
 import { fetchNodeAgent } from '../../src/services/node-agent';
 import { resolveTaskStartPlacementCredentialAttribution } from '../../src/services/placement-resolver';
 import * as projectDataService from '../../src/services/project-data';
@@ -33,8 +31,9 @@ import {
   type TaskRunnerReservedSubmissionGuard,
 } from '../../src/services/task-runner-start-guard';
 import { reserveWorkspacePlacement } from '../../src/services/workspace-placement';
-import { resolveWorkspaceAdmissionPolicy } from '../../src/services/workspace-resource-capacity';
-import { seedInstallation, seedNode, seedProject, seedUser } from './helpers/seed-d1';
+import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
+import { seedReadyNode } from './helpers/ready-node';
+import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 
 /** Default admission policy: the placement contract takes a resolved policy, never a count. */
 const ADMISSION_POLICY = resolveWorkspaceAdmissionPolicy({} as never);
@@ -143,42 +142,7 @@ async function makeReadyNode(nodeId: string, userId: string): Promise<void> {
   if ('error' in resolution) throw new Error(resolution.error);
   const snapshot = resolution.capacityPlacementSnapshot;
   if (!snapshot) throw new Error('Missing authoritative pool snapshot');
-  const now = new Date().toISOString();
-  await seedNode(nodeId, userId, {
-    vmSize: 'small',
-    vmLocation: 'nbg1',
-    status: 'running',
-    healthStatus: 'healthy',
-    lastHeartbeatAt: now,
-  });
-  await env.DATABASE.prepare(
-    `UPDATE nodes
-        SET agent_ready_at = ?,
-            agent_version = ?,
-            runtime = 'vm',
-            node_role = 'workspace',
-            cloud_provider = 'hetzner',
-            provider_instance_id = ?,
-            observed_hardware_source = 'observed',
-            observed_provider_instance_vcpu_count = ?,
-            observed_provider_instance_memory_mb = ?,
-            observed_provider_instance_disk_gb = ?,
-            ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS},
-            last_metrics = ?
-      WHERE id = ?`
-  )
-    .bind(
-      now,
-      testEnv.VM_AGENT_REQUIRED_VERSION ?? '0123456789abcdef0123456789abcdef01234567',
-      `provider-${nodeId}`,
-      snapshot.providerInstanceVcpuCount,
-      snapshot.providerInstanceMemoryMb,
-      snapshot.providerInstanceDiskGb,
-      ...capacityPlacementSnapshotSqlValues(snapshot),
-      JSON.stringify({ version: 1, cpuLoadAvg1: 0.1, memoryPercent: 10, diskPercent: 10 }),
-      nodeId
-    )
-    .run();
+  await seedReadyNode(nodeId, userId, snapshot);
 }
 
 async function seedReservedFixture(label: string): Promise<{
@@ -284,10 +248,11 @@ async function seedReservedFixture(label: string): Promise<{
   };
 
   // Establish the configured provider-native pool before concurrent submissions.
-  await ensureDefaultCapacityPoolsForExistingCredentials(drizzle(env.DATABASE, { schema }), {
+  await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
     userId,
     projectId,
     includeInstallation: false,
+    owner: { userId, projectId },
   });
   return { userId, installationId, projectId, repository, triggerId, executionId, input };
 }

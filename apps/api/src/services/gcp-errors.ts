@@ -56,19 +56,25 @@ const STATUS_MESSAGES: Record<number, string> = {
 const STEP_HINTS: Record<string, string> = {
   list_projects: 'Failed to list Google Cloud projects.',
   get_project_number: 'Failed to retrieve project details.',
-  enable_apis: 'Failed to enable required Google Cloud APIs. Ensure your account has the Service Usage Admin role.',
-  create_wif_pool: 'Failed to configure workload identity. Ensure your account has the IAM Admin role.',
+  enable_apis:
+    'Failed to enable required Google Cloud APIs. Ensure your account has the Service Usage Admin role.',
+  create_wif_pool:
+    'Failed to configure workload identity. Ensure your account has the IAM Admin role.',
   create_oidc_provider: 'Failed to configure the identity provider.',
   update_oidc_provider: 'Failed to update the identity provider.',
-  create_service_account: 'Failed to create the service account. Ensure your account has the IAM Admin role.',
+  create_service_account:
+    'Failed to create the service account. Ensure your account has the IAM Admin role.',
   grant_wif_user: 'Failed to configure identity federation on the service account.',
-  grant_project_roles: 'Failed to grant project permissions. Ensure your account has the Project IAM Admin role.',
+  grant_project_roles:
+    'Failed to grant project permissions. Ensure your account has the Project IAM Admin role.',
   poll_operation: 'A Google Cloud operation timed out or failed.',
   sts_exchange: 'Google Cloud token exchange failed. The OIDC setup may need to be reconfigured.',
   sa_impersonation: 'Failed to authenticate with the service account.',
   service_account_key: 'The stored service-account private key is invalid.',
-  service_account_token: 'Google rejected the service-account key. It may be revoked, disabled, or deleted.',
-  service_account_compute_verify: 'The service account cannot use Compute Engine in the selected project and zone.',
+  service_account_token:
+    'Google rejected the service-account key. It may be revoked, disabled, or deleted.',
+  service_account_compute_verify:
+    'The service account cannot use Compute Engine in the selected project and zone.',
 };
 
 /**
@@ -120,27 +126,7 @@ export function sanitizeGcpError(err: unknown, context?: string): string {
       context,
     });
 
-    // Build user-friendly message
-    const stepHint = STEP_HINTS[err.step] || 'A Google Cloud operation failed.';
-    if (err.step === 'service_account_compute_verify') {
-      if (err.statusCode === 403) {
-        return `${stepHint} Grant roles/compute.instanceAdmin.v1 and roles/compute.securityAdmin, and ensure the Compute Engine API is enabled.`;
-      }
-      if (err.statusCode === 404) {
-        return `${stepHint} Verify the service-account project ID and default zone.`;
-      }
-      return `${stepHint} Check the key status and service-account configuration, then try again.`;
-    }
-    if (err.step.startsWith('service_account')) {
-      return `${stepHint} Check the key status and service-account configuration, then try again.`;
-    }
-    const statusHint = err.statusCode ? STATUS_MESSAGES[err.statusCode] : undefined;
-
-    if (statusHint) {
-      return `${stepHint} ${statusHint}`;
-    }
-
-    return `${stepHint} Please check your Google Cloud project permissions and try again.`;
+    return gcpApiErrorHint(err);
   }
 
   // Handle abort/timeout errors
@@ -152,4 +138,28 @@ export function sanitizeGcpError(err: unknown, context?: string): string {
   // Generic fallback — log whatever we got but don't expose it
   log.error('gcp_error_unknown_type', { error: String(err), context });
   return 'Failed to communicate with Google Cloud. Please check your project permissions and try again.';
+}
+
+/** The user-facing hint for a GCP API error, without logging (`sanitizeGcpError` logs first). */
+export function gcpApiErrorHint(err: GcpApiError): string {
+  const stepHint = STEP_HINTS[err.step] || 'A Google Cloud operation failed.';
+  if (err.step === 'service_account_compute_verify') {
+    if (err.statusCode === 403) {
+      return `${stepHint} Grant roles/compute.instanceAdmin.v1 and roles/compute.securityAdmin, and ensure the Compute Engine API is enabled.`;
+    }
+    if (err.statusCode === 404) {
+      return `${stepHint} Verify the service-account project ID and default zone.`;
+    }
+    return `${stepHint} Check the key status and service-account configuration, then try again.`;
+  }
+  if (err.step.startsWith('service_account')) {
+    return `${stepHint} Check the key status and service-account configuration, then try again.`;
+  }
+  const statusHint = err.statusCode ? STATUS_MESSAGES[err.statusCode] : undefined;
+
+  if (statusHint) {
+    return `${stepHint} ${statusHint}`;
+  }
+
+  return `${stepHint} Please check your Google Cloud project permissions and try again.`;
 }

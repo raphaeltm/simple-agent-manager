@@ -1,8 +1,9 @@
 import type { ProviderConfig, ProviderRequestContext } from '@simple-agent-manager/providers';
-import { createProvider, GcpProvider } from '@simple-agent-manager/providers';
+import { createProvider } from '@simple-agent-manager/providers';
 import {
   type CCResolvedEnvironment,
   computeAssembler,
+  credentialOwnerFromSource,
   type CredentialProvider,
   type CredentialSource,
 } from '@simple-agent-manager/shared';
@@ -14,6 +15,9 @@ import type { Env } from '../env';
 import { lazyBackfillIfNeeded } from './composable-credentials/lazy-backfill';
 import { resolveForConsumer } from './composable-credentials/resolve';
 import { decrypt } from './encryption';
+import { createGcpProviderForEnv } from './gcp-provider-factory';
+import { createGcpTokenProvider } from './gcp-token-provider';
+import { buildProviderConfigForEnv } from './infomaniak-provider-settings';
 import { getPlatformCloudCredential } from './platform-credentials';
 import {
   buildProviderConfig,
@@ -163,33 +167,26 @@ async function createProviderFromDecryptedToken(
 ): Promise<ProviderResolutionResult> {
   if (providerName === 'gcp') {
     const gcpCred = parseGcpCredential(decryptedToken);
-    const { getGcpAccessToken } = await import('./gcp-sts');
-    const cacheUserId =
-      credentialSource === 'platform'
-        ? `platform:${userId}`
-        : credentialSource === 'project' && projectId
-          ? `project:${projectId}:${userId}`
-          : userId;
-    const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
-    const tokenProvider = (context?: ProviderRequestContext) =>
-      getGcpAccessToken(cacheUserId, cacheProjectId, gcpCred, env, context);
+    const tokenProvider = createGcpTokenProvider(
+      gcpCred,
+      { credentialSource, userId, projectId },
+      env
+    );
     return {
-      provider: new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone),
+      provider: await createGcpProviderForEnv(env, gcpCred, tokenProvider),
       providerName,
       credentialSource,
     };
   }
 
-  const config = buildProviderConfig(providerName, decryptedToken, env);
+  const config = await buildProviderConfigForEnv(providerName, decryptedToken, env);
   return { provider: createProvider(config), providerName, credentialSource };
 }
 
 type ResolvedComputeCredential = CCResolvedEnvironment;
 
 function providerCredentialSource(resolved: ResolvedComputeCredential): CredentialSource {
-  if (resolved.source === 'project-attachment') return 'project';
-  if (resolved.source === 'user-attachment') return 'user';
-  return 'platform';
+  return credentialOwnerFromSource(resolved.source);
 }
 
 async function resolveComputeCredentialWithBackfill(
@@ -274,12 +271,12 @@ async function createProviderFromComposableConfig(
     const tokenProvider = (context?: ProviderRequestContext) =>
       getGcpAccessToken(cacheUserId, cacheProjectId, gcpCred, env, context);
     return {
-      provider: new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone),
+      provider: await createGcpProviderForEnv(env, gcpCred, tokenProvider),
       providerName,
       credentialSource,
     };
   }
-  const config = buildProviderConfig(providerName, token, env);
+  const config = await buildProviderConfigForEnv(providerName, token, env);
   return { provider: createProvider(config), providerName, credentialSource };
 }
 
@@ -416,7 +413,7 @@ async function createProviderForUserLegacy(
         const tokenProvider = (context?: ProviderRequestContext) =>
           getGcpAccessToken(`project:${projectId}:${userId}`, projectId, gcpCred, env, context);
 
-        const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
+        const provider = await createGcpProviderForEnv(env, gcpCred, tokenProvider);
         return {
           provider,
           providerName,
@@ -433,7 +430,7 @@ async function createProviderForUserLegacy(
         };
       }
 
-      const config = buildProviderConfig(providerName, decryptedToken, env);
+      const config = await buildProviderConfigForEnv(providerName, decryptedToken, env);
       return {
         provider: createProvider(config),
         providerName,
@@ -480,7 +477,7 @@ async function createProviderForUserLegacy(
       const tokenProvider = (context?: ProviderRequestContext) =>
         getGcpAccessToken(userId, cacheProjectId, gcpCred, env, context);
 
-      const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
+      const provider = await createGcpProviderForEnv(env, gcpCred, tokenProvider);
       return {
         provider,
         providerName,
@@ -497,7 +494,7 @@ async function createProviderForUserLegacy(
       };
     }
 
-    const config = buildProviderConfig(providerName, decryptedToken, env);
+    const config = await buildProviderConfigForEnv(providerName, decryptedToken, env);
     return {
       provider: createProvider(config),
       providerName,
@@ -529,7 +526,7 @@ async function createProviderForUserLegacy(
     const tokenProvider = (context?: ProviderRequestContext) =>
       getGcpAccessToken(`platform:${userId}`, cacheProjectId, gcpCred, env, context);
 
-    const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
+    const provider = await createGcpProviderForEnv(env, gcpCred, tokenProvider);
     return {
       provider,
       providerName: platformProvider,
@@ -545,7 +542,7 @@ async function createProviderForUserLegacy(
     };
   }
 
-  const config = buildProviderConfig(platformProvider, decryptedToken, env);
+  const config = await buildProviderConfigForEnv(platformProvider, decryptedToken, env);
   return {
     provider: createProvider(config),
     providerName: platformProvider,

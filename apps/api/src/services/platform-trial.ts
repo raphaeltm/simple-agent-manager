@@ -56,7 +56,9 @@ export async function getPlatformOpencodeAvailability(
 }
 
 /**
- * Check whether the platform trial is available for the current user.
+ * Check whether installation-provided platform compute (platform cloud credential plus the AI
+ * proxy) is available for the current user, with their daily AI token budget and usage.
+ * Unrelated to the retired anonymous-trial product despite the historical name.
  */
 export async function getTrialStatus(
   db: ReturnType<typeof drizzle>,

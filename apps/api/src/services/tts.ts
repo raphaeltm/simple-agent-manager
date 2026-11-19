@@ -18,12 +18,8 @@
  * storage key that callers can derive from their domain (e.g., messageId).
  */
 
-import { Agent } from '@mastra/core/agent';
 import {
   DEFAULT_TTS_CHUNK_SIZE,
-  DEFAULT_TTS_CLEANUP_MAX_TOKENS,
-  DEFAULT_TTS_CLEANUP_MODEL,
-  DEFAULT_TTS_CLEANUP_TIMEOUT_MS,
   DEFAULT_TTS_ENCODING,
   DEFAULT_TTS_MAX_CHUNKS,
   DEFAULT_TTS_MAX_TEXT_LENGTH,
@@ -35,375 +31,36 @@ import {
   DEFAULT_TTS_SUMMARY_THRESHOLD,
   DEFAULT_TTS_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
-import { createWorkersAI } from 'workers-ai-provider';
 
 import { log } from '../lib/logger';
-import { parsePositiveInt } from '../lib/route-helpers';
+import type { SpeechSynthesisBackend } from './speech-backend';
+import { retryWithBackoff, type TTSConfig } from './tts-config';
+import {
+  cleanTextForSpeech,
+  fallbackStripMarkdown,
+  splitTextIntoChunks,
+  summarizeTextForSpeech,
+} from './tts-text';
 
-// ─── Configuration ───────────────────────────────────────────────────────────
-
-export interface TTSConfig {
-  model?: string;
-  speaker?: string;
-  encoding?: string;
-  cleanupModel?: string;
-  cleanupMaxTokens?: number;
-  maxTextLength?: number;
-  timeoutMs?: number;
-  cleanupTimeoutMs?: number;
-  r2Prefix?: string;
-  enabled?: boolean;
-  chunkSize?: number;
-  maxChunks?: number;
-  summaryThreshold?: number;
-  retryAttempts?: number;
-  retryBaseDelayMs?: number;
-}
-
-export interface TTSEnvVars {
-  TTS_MODEL?: string;
-  TTS_SPEAKER?: string;
-  TTS_ENCODING?: string;
-  TTS_CLEANUP_MODEL?: string;
-  TTS_CLEANUP_MAX_TOKENS?: string;
-  TTS_MAX_TEXT_LENGTH?: string;
-  TTS_TIMEOUT_MS?: string;
-  TTS_CLEANUP_TIMEOUT_MS?: string;
-  TTS_R2_PREFIX?: string;
-  TTS_ENABLED?: string;
-  TTS_CHUNK_SIZE?: string;
-  TTS_MAX_CHUNKS?: string;
-  TTS_SUMMARY_THRESHOLD?: string;
-  TTS_RETRY_ATTEMPTS?: string;
-  TTS_RETRY_BASE_DELAY_MS?: string;
-}
-
-export function getTTSConfig(env: TTSEnvVars): TTSConfig {
-  return {
-    model: env.TTS_MODEL || DEFAULT_TTS_MODEL,
-    speaker: env.TTS_SPEAKER || DEFAULT_TTS_SPEAKER,
-    encoding: env.TTS_ENCODING || DEFAULT_TTS_ENCODING,
-    cleanupModel: env.TTS_CLEANUP_MODEL || DEFAULT_TTS_CLEANUP_MODEL,
-    cleanupMaxTokens: parsePositiveInt(env.TTS_CLEANUP_MAX_TOKENS, DEFAULT_TTS_CLEANUP_MAX_TOKENS),
-    maxTextLength: parsePositiveInt(env.TTS_MAX_TEXT_LENGTH, DEFAULT_TTS_MAX_TEXT_LENGTH),
-    timeoutMs: parsePositiveInt(env.TTS_TIMEOUT_MS, DEFAULT_TTS_TIMEOUT_MS),
-    cleanupTimeoutMs: parsePositiveInt(env.TTS_CLEANUP_TIMEOUT_MS, DEFAULT_TTS_CLEANUP_TIMEOUT_MS),
-    r2Prefix: env.TTS_R2_PREFIX || DEFAULT_TTS_R2_PREFIX,
-    enabled: env.TTS_ENABLED !== 'false',
-    chunkSize: parsePositiveInt(env.TTS_CHUNK_SIZE, DEFAULT_TTS_CHUNK_SIZE),
-    maxChunks: parsePositiveInt(env.TTS_MAX_CHUNKS, DEFAULT_TTS_MAX_CHUNKS),
-    summaryThreshold: parsePositiveInt(env.TTS_SUMMARY_THRESHOLD, DEFAULT_TTS_SUMMARY_THRESHOLD),
-    retryAttempts: parsePositiveInt(env.TTS_RETRY_ATTEMPTS, DEFAULT_TTS_RETRY_ATTEMPTS),
-    retryBaseDelayMs: parsePositiveInt(
-      env.TTS_RETRY_BASE_DELAY_MS,
-      DEFAULT_TTS_RETRY_BASE_DELAY_MS
-    ),
-  };
-}
-
-// ─── Retry Utility ──────────────────────────────────────────────────────────
-
-/**
- * Retry an async function with exponential backoff and jitter.
- * Throws the last error if all attempts fail.
- */
-export async function retryWithBackoff<T>(
-  fn: () => Promise<T>,
-  maxAttempts: number,
-  baseDelayMs: number,
-  label: string
-): Promise<T> {
-  let lastError: Error | undefined;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-
-      if (attempt === maxAttempts) {
-        log.warn('tts.retry_exhausted', {
-          label,
-          attempts: maxAttempts,
-          error: lastError.message,
-        });
-        throw lastError;
-      }
-
-      // Exponential backoff: baseDelay * 2^(attempt-1) with ±25% jitter
-      const exponentialDelay = baseDelayMs * Math.pow(2, attempt - 1);
-      const jitter = exponentialDelay * 0.25 * (2 * Math.random() - 1);
-      const delay = Math.max(0, Math.round(exponentialDelay + jitter));
-
-      log.warn('tts.retry_attempt', {
-        label,
-        attempt,
-        maxAttempts,
-        error: lastError.message,
-        delayMs: delay,
-      });
-
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
-  }
-
-  // Should never reach here, but TypeScript needs this
-  throw lastError ?? new Error('retryWithBackoff: no attempts made');
-}
-
-// ─── Markdown Cleanup ────────────────────────────────────────────────────────
-
-const CLEANUP_INSTRUCTIONS = `You are a text preparation assistant for text-to-speech systems. Your job is to convert markdown-formatted text into natural spoken text.
-
-Rules:
-- Output ONLY the cleaned text, nothing else
-- Remove all markdown formatting (headers, bold, italic, code blocks, links, images, lists markers)
-- Convert bullet points and numbered lists into natural flowing sentences
-- Remove code blocks entirely — do not try to read code aloud
-- Convert URLs and links into just the link text
-- Expand common abbreviations if they would sound odd spoken (e.g., "e.g." → "for example")
-- Keep the meaning and tone of the original text
-- Do not add any commentary, explanation, or meta-text
-- Output plain text only — no markdown, no HTML, no special formatting`;
-
-const SUMMARY_INSTRUCTIONS = `You are a text summarization assistant for text-to-speech systems. Your job is to create a concise spoken summary of long content.
-
-Rules:
-- Output ONLY the summary text, nothing else
-- Summarize the key points, findings, and conclusions
-- Use natural spoken language — no markdown, no HTML, no special formatting
-- Remove all code blocks, URLs, and technical formatting
-- Keep the summary proportional: aim for roughly 10-20% of the original length
-- Preserve the most important information and main arguments
-- Use transitional phrases for natural flow when spoken aloud
-- Do not add any commentary like "Here is a summary" — just provide the summary directly
-- Do not add any meta-text or preamble`;
-
-/**
- * Use an LLM to clean markdown/code from text, producing natural spoken text.
- * Retries on failure before falling back to basic regex stripping.
- */
-export async function cleanTextForSpeech(
-  text: string,
-  ai: Ai,
-  config: TTSConfig = {}
-): Promise<string> {
-  const cleanupModel = config.cleanupModel ?? DEFAULT_TTS_CLEANUP_MODEL;
-  const cleanupTimeoutMs = config.cleanupTimeoutMs ?? DEFAULT_TTS_CLEANUP_TIMEOUT_MS;
-  const cleanupMaxTokens = config.cleanupMaxTokens ?? DEFAULT_TTS_CLEANUP_MAX_TOKENS;
-  const retryAttempts = config.retryAttempts ?? DEFAULT_TTS_RETRY_ATTEMPTS;
-  const retryBaseDelayMs = config.retryBaseDelayMs ?? DEFAULT_TTS_RETRY_BASE_DELAY_MS;
-
-  // If text has no markdown indicators, skip LLM cleanup
-  if (!hasMarkdown(text)) {
-    return text.trim();
-  }
-
-  try {
-    // Construct the agent once outside the retry loop to avoid
-    // re-instantiating the Workers AI binding wrapper on each attempt
-    const workersAi = createWorkersAI({ binding: ai });
-    const model = workersAi(cleanupModel as Parameters<typeof workersAi>[0]);
-    const agent = new Agent({
-      id: 'tts-text-cleanup',
-      name: 'TTS Text Cleanup',
-      instructions: CLEANUP_INSTRUCTIONS,
-      model,
-    });
-
-    const cleaned = await retryWithBackoff(
-      async () => {
-        const result = await agent.generate(text, {
-          abortSignal: AbortSignal.timeout(cleanupTimeoutMs),
-          modelSettings: {
-            maxOutputTokens: cleanupMaxTokens,
-          },
-        });
-
-        const resultText = result.text?.trim();
-        if (!resultText) {
-          throw new Error('LLM returned empty cleanup result');
-        }
-        return resultText;
-      },
-      retryAttempts,
-      retryBaseDelayMs,
-      'cleanup'
-    );
-
-    log.info('tts.cleanup_complete', {
-      inputLength: text.length,
-      outputLength: cleaned.length,
-      ratio: Math.round((cleaned.length / text.length) * 100),
-      cleanupModel,
-      cleanupMaxTokens,
-    });
-
-    return cleaned;
-  } catch (err) {
-    log.warn('tts.cleanup_failed', {
-      error: err instanceof Error ? err.message : String(err),
-      textLength: text.length,
-      cleanupModel,
-    });
-    return fallbackStripMarkdown(text);
-  }
-}
-
-/**
- * Use an LLM to summarize long text for TTS.
- * Retries on failure before falling back to truncation + regex stripping.
- */
-export async function summarizeTextForSpeech(
-  text: string,
-  ai: Ai,
-  config: TTSConfig = {}
-): Promise<string> {
-  const cleanupModel = config.cleanupModel ?? DEFAULT_TTS_CLEANUP_MODEL;
-  const cleanupTimeoutMs = config.cleanupTimeoutMs ?? DEFAULT_TTS_CLEANUP_TIMEOUT_MS;
-  const cleanupMaxTokens = config.cleanupMaxTokens ?? DEFAULT_TTS_CLEANUP_MAX_TOKENS;
-  const retryAttempts = config.retryAttempts ?? DEFAULT_TTS_RETRY_ATTEMPTS;
-  const retryBaseDelayMs = config.retryBaseDelayMs ?? DEFAULT_TTS_RETRY_BASE_DELAY_MS;
-
-  try {
-    // Construct the agent once outside the retry loop to avoid
-    // re-instantiating the Workers AI binding wrapper on each attempt
-    const workersAi = createWorkersAI({ binding: ai });
-    const model = workersAi(cleanupModel as Parameters<typeof workersAi>[0]);
-    const agent = new Agent({
-      id: 'tts-text-summarize',
-      name: 'TTS Text Summarize',
-      instructions: SUMMARY_INSTRUCTIONS,
-      model,
-    });
-
-    const summary = await retryWithBackoff(
-      async () => {
-        const result = await agent.generate(text, {
-          abortSignal: AbortSignal.timeout(cleanupTimeoutMs),
-          modelSettings: {
-            maxOutputTokens: cleanupMaxTokens,
-          },
-        });
-
-        const resultText = result.text?.trim();
-        if (!resultText) {
-          throw new Error('LLM returned empty summary result');
-        }
-        return resultText;
-      },
-      retryAttempts,
-      retryBaseDelayMs,
-      'summary'
-    );
-
-    log.info('tts.summary_complete', {
-      inputLength: text.length,
-      outputLength: summary.length,
-      ratio: Math.round((summary.length / text.length) * 100),
-      cleanupModel,
-    });
-
-    return summary;
-  } catch (err) {
-    log.warn('tts.summary_failed', {
-      error: err instanceof Error ? err.message : String(err),
-      textLength: text.length,
-      cleanupModel,
-    });
-    const effectiveChunkSize = config.chunkSize ?? DEFAULT_TTS_CHUNK_SIZE;
-    return fallbackStripMarkdown(text.slice(0, effectiveChunkSize));
-  }
-}
-
-/** Quick check for common markdown patterns. */
-function hasMarkdown(text: string): boolean {
-  return /```|`[^`]+`|#{1,6}\s|[*_]{1,2}\S|\[.*\]\(.*\)|^\s*[-*+]\s|^\s*\d+\.\s/m.test(text);
-}
-
-/** Regex-based markdown stripping fallback (less natural than LLM but works offline). */
-export function fallbackStripMarkdown(md: string): string {
-  return md
-    .replace(/```[\s\S]*?```/g, '') // fenced code blocks
-    .replace(/`([^`]+)`/g, '$1') // inline code
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, '') // images
-    .replace(/\[[^\]]*\]\(([^)]*)\)/g, '$1') // links → URL text
-    .replace(/#{1,6}\s+/g, '') // headings
-    .replace(/\*\*([^*]+)\*\*/g, '$1') // bold
-    .replace(/__([^_]+)__/g, '$1') // bold
-    .replace(/\*([^*]+)\*/g, '$1') // italic
-    .replace(/(?<!\w)_([^_]+)_(?!\w)/g, '$1') // italic
-    .replace(/(^|\n)>\s?/g, '$1') // blockquotes
-    .replace(/(^|\n)\s*[-*+]\s/g, '$1') // unordered list markers
-    .replace(/(^|\n)\s*\d+\.\s/g, '$1') // ordered list markers
-    .replace(/(^|\n)(---+|\*\*\*+|___+)\s*($|\n)/g, '$1') // horizontal rules
-    .replace(/\n{3,}/g, '\n\n') // collapse excess newlines
-    .trim();
-}
-
-// ─── Text Chunking ──────────────────────────────────────────────────────────
-
-/**
- * Split text into chunks at sentence boundaries, respecting a max chunk size.
- * Never splits mid-word. Falls back to word boundaries if no sentence boundary
- * is found within the chunk limit.
- */
-export function splitTextIntoChunks(text: string, maxChunkSize: number): string[] {
-  if (!text) {
-    return [];
-  }
-
-  if (text.length <= maxChunkSize) {
-    return [text];
-  }
-
-  const chunks: string[] = [];
-  let remaining = text;
-
-  while (remaining.length > 0) {
-    if (remaining.length <= maxChunkSize) {
-      chunks.push(remaining);
-      break;
-    }
-
-    // Look for the last sentence boundary within the chunk limit
-    const window = remaining.slice(0, maxChunkSize);
-    let splitIndex = -1;
-
-    // Try sentence boundaries: ". ", "! ", "? ", ".\n", "!\n", "?\n"
-    for (const sep of ['. ', '! ', '? ', '.\n', '!\n', '?\n']) {
-      const idx = window.lastIndexOf(sep);
-      if (idx > splitIndex) {
-        // Include the punctuation but not the space/newline after it
-        splitIndex = idx + 1;
-      }
-    }
-
-    // Also try double newline (paragraph boundary)
-    const paraIdx = window.lastIndexOf('\n\n');
-    if (paraIdx > splitIndex) {
-      splitIndex = paraIdx;
-    }
-
-    // Fallback: split at last space (word boundary)
-    if (splitIndex <= 0) {
-      const spaceIdx = window.lastIndexOf(' ');
-      if (spaceIdx > 0) {
-        splitIndex = spaceIdx;
-      } else {
-        // No space found — force split at max chunk size
-        splitIndex = maxChunkSize;
-      }
-    }
-
-    chunks.push(remaining.slice(0, splitIndex).trim());
-    remaining = remaining.slice(splitIndex).trim();
-  }
-
-  return chunks.filter((c) => c.length > 0);
-}
+export { getTTSConfig, retryWithBackoff, type TTSConfig, type TTSEnvVars } from './tts-config';
+export {
+  cleanTextForSpeech,
+  fallbackStripMarkdown,
+  splitTextIntoChunks,
+  summarizeTextForSpeech,
+} from './tts-text';
 
 // ─── Audio Generation ────────────────────────────────────────────────────────
+
+/**
+ * Where audio comes from: the Workers AI binding, or (without it) a backend the self-host build
+ * installed (services/speech-backend.ts).
+ */
+export type SpeechAudioSource = Ai | SpeechSynthesisBackend;
+
+function isSynthesisBackend(source: SpeechAudioSource): source is SpeechSynthesisBackend {
+  return typeof (source as Partial<SpeechSynthesisBackend>).synthesize === 'function';
+}
 
 /**
  * Generate speech audio for a single chunk of plain text using Workers AI TTS.
@@ -412,9 +69,16 @@ export function splitTextIntoChunks(text: string, maxChunkSize: number): string[
  */
 export async function generateSpeechAudioChunk(
   text: string,
-  ai: Ai,
+  ai: SpeechAudioSource,
   config: TTSConfig = {}
 ): Promise<ArrayBuffer> {
+  if (isSynthesisBackend(ai)) {
+    // One call per chunk, no retry: every call spends the admin's endpoint, and a 4xx (bad key,
+    // unknown model) would only repeat. The client retries the whole read-aloud if it wants to.
+    const buffer = await ai.synthesize(text, config.encoding ?? DEFAULT_TTS_ENCODING);
+    if (buffer.byteLength === 0) throw new Error('Speech backend returned empty audio');
+    return buffer;
+  }
   const model = config.model ?? DEFAULT_TTS_MODEL;
   const speaker = config.speaker ?? DEFAULT_TTS_SPEAKER;
   const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
@@ -487,7 +151,7 @@ export async function generateSpeechAudioChunk(
  */
 export async function generateSpeechAudio(
   text: string,
-  ai: Ai,
+  ai: SpeechAudioSource,
   config: TTSConfig = {},
   r2?: R2Bucket,
   storageId?: string,
@@ -496,6 +160,9 @@ export async function generateSpeechAudio(
   const chunkSize = config.chunkSize ?? DEFAULT_TTS_CHUNK_SIZE;
   const maxChunks = config.maxChunks ?? DEFAULT_TTS_MAX_CHUNKS;
   const chunks = splitTextIntoChunks(text, chunkSize);
+  // Endpoint settings can change between retries. Regenerate endpoint chunks from one
+  // snapshot; only Workers AI uses the historical partial-chunk cache.
+  const chunkCache = isSynthesisBackend(ai) ? undefined : r2;
 
   if (chunks.length === 1) {
     const [chunk] = chunks;
@@ -503,6 +170,12 @@ export async function generateSpeechAudio(
       throw new Error('Internal error: expected exactly one text chunk');
     }
     return generateSpeechAudioChunk(chunk, ai, config);
+  }
+
+  // Each endpoint response is a complete file. Only MP3 frame concatenation is supported;
+  // appending WAV/FLAC/container headers can silently truncate browser playback.
+  if (isSynthesisBackend(ai) && (config.encoding ?? DEFAULT_TTS_ENCODING) !== 'mp3') {
+    throw new Error('Chunked endpoint synthesis requires MP3 encoding');
   }
 
   // Guard against CPU time exhaustion on Workers runtime
@@ -528,9 +201,9 @@ export async function generateSpeechAudio(
   const audioBuffers: ArrayBuffer[] = [];
   for (const [i, chunkText] of chunks.entries()) {
     // Try per-chunk R2 cache first
-    if (r2 && storageId && userId) {
+    if (chunkCache && storageId && userId) {
       const chunkKey = buildChunkR2Key(storageId, userId, i, chunkText, config);
-      const cachedChunk = await r2.get(chunkKey);
+      const cachedChunk = await chunkCache.get(chunkKey);
       if (cachedChunk) {
         const cachedBuffer = await cachedChunk.arrayBuffer();
         audioBuffers.push(cachedBuffer);
@@ -548,10 +221,10 @@ export async function generateSpeechAudio(
     audioBuffers.push(buffer);
 
     // Store individual chunk in R2 for future partial recovery
-    if (r2 && storageId && userId) {
+    if (chunkCache && storageId && userId) {
       const chunkKey = buildChunkR2Key(storageId, userId, i, chunkText, config);
       const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
-      await r2
+      await chunkCache
         .put(chunkKey, buffer, {
           httpMetadata: { contentType: audioContentType(encoding) },
         })
@@ -578,11 +251,11 @@ export async function generateSpeechAudio(
   // Best-effort cleanup of per-chunk R2 objects now that final audio will be stored.
   // Chunks are only needed for retry recovery during generation; the final concatenated
   // audio is what getAudioFromR2 serves.
-  if (r2 && storageId && userId) {
+  if (chunkCache && storageId && userId) {
     const chunkKeys = chunks.map((chunkText, i) =>
       buildChunkR2Key(storageId, userId, i, chunkText, config)
     );
-    await Promise.allSettled(chunkKeys.map((key) => r2.delete(key))).catch(() => {
+    await Promise.allSettled(chunkKeys.map((key) => chunkCache.delete(key))).catch(() => {
       // Non-fatal: cleanup failure doesn't affect the result
     });
   }
@@ -653,14 +326,14 @@ export function simpleHash(str: string): string {
 }
 
 /** Content-Type mapping for audio encodings. */
-function audioContentType(encoding: string): string {
+export function audioContentType(encoding: string): string {
   const types: Record<string, string> = {
     mp3: 'audio/mpeg',
     wav: 'audio/wav',
     ogg: 'audio/ogg',
     flac: 'audio/flac',
     aac: 'audio/aac',
-    opus: 'audio/opus',
+    opus: 'audio/ogg', // Ogg Opus files (RFC 7845 section 9).
   };
   return types[encoding] ?? 'audio/mpeg';
 }
@@ -710,7 +383,7 @@ export interface SynthesizeResult {
  *
  * @param text - The raw text (possibly with markdown) to synthesize
  * @param storageId - Unique identifier for R2 caching (e.g., messageId)
- * @param ai - Workers AI binding
+ * @param ai - Workers AI binding, or a speech backend (no cleanup or summary model then)
  * @param r2 - R2 bucket binding
  * @param config - Optional TTS configuration overrides
  * @param userId - User ID for R2 key scoping
@@ -719,7 +392,7 @@ export interface SynthesizeResult {
 export async function synthesizeSpeech(
   text: string,
   storageId: string,
-  ai: Ai,
+  ai: SpeechAudioSource,
   r2: R2Bucket,
   config: TTSConfig = {},
   userId: string = 'anonymous',
@@ -755,21 +428,34 @@ export async function synthesizeSpeech(
 
   // 3. Decide mode: auto-detect if not explicitly set
   const effectiveMode: TTSMode = mode ?? (inputText.length > summaryThreshold ? 'summary' : 'full');
-  const summarized = effectiveMode === 'summary';
+  // A speech backend has no model to clean up or summarize with: strip markdown with the regex
+  // fallback and keep the text within the chunk limit instead of summarizing.
+  const workersAi = isSynthesisBackend(ai) ? null : ai;
+  const summarized = workersAi !== null && effectiveMode === 'summary';
 
   let processedText: string;
 
-  if (summarized) {
+  if (!workersAi) {
+    const chunkSize = config.chunkSize ?? DEFAULT_TTS_CHUNK_SIZE;
+    const maxChunks = config.maxChunks ?? DEFAULT_TTS_MAX_CHUNKS;
+    // One chunk of headroom: sentence-boundary splitting can need more chunks than length / size.
+    const limit = chunkSize * Math.max(1, maxChunks - 1);
+    const stripped = fallbackStripMarkdown(inputText);
+    if (stripped.length > limit) {
+      log.info('tts.backend_text_truncated', { storageId, textLength: stripped.length, limit });
+    }
+    processedText = stripped.slice(0, limit);
+  } else if (summarized) {
     // Summarize long text via LLM
     log.info('tts.summary_mode', {
       textLength: inputText.length,
       summaryThreshold,
       storageId,
     });
-    processedText = await summarizeTextForSpeech(inputText, ai, config);
+    processedText = await summarizeTextForSpeech(inputText, workersAi, config);
   } else {
     // Clean markdown for natural speech
-    processedText = await cleanTextForSpeech(inputText, ai, config);
+    processedText = await cleanTextForSpeech(inputText, workersAi, config);
   }
 
   if (!processedText) {

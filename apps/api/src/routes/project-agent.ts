@@ -15,7 +15,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { normalizeSearchQuery } from '../lib/search-query-limits';
-import { requireAuth } from '../middleware/auth';
+import { requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import { AgentChatRequestSchema, jsonValidator } from '../schemas';
@@ -29,46 +29,52 @@ function getProjectAgent(env: Env, projectId: string): DurableObjectStub {
 }
 
 /** POST /chat — send a message and stream the response. */
-app.post('/chat', requireAuth(), jsonValidator(AgentChatRequestSchema), async (c) => {
-  const auth = c.get('auth');
-  const projectId = c.req.param('projectId');
-  if (!projectId) throw errors.badRequest('Missing projectId');
-  const db = drizzle(c.env.DATABASE, { schema });
-  await requireProjectCapability(db, projectId, auth.user.id, 'task:write');
+app.post(
+  '/chat',
+  requireAuth(),
+  requireApproved(),
+  jsonValidator(AgentChatRequestSchema),
+  async (c) => {
+    const auth = c.get('auth');
+    const projectId = c.req.param('projectId');
+    if (!projectId) throw errors.badRequest('Missing projectId');
+    const db = drizzle(c.env.DATABASE, { schema });
+    await requireProjectCapability(db, projectId, auth.user.id, 'task:write');
 
-  const body = c.req.valid('json');
+    const body = c.req.valid('json');
 
-  if (!body.message?.trim()) {
-    return c.json({ error: 'Message is required' }, 400);
+    if (!body.message?.trim()) {
+      return c.json({ error: 'Message is required' }, 400);
+    }
+
+    const stub = getProjectAgent(c.env, projectId);
+    const response = await stub.fetch('https://project-agent/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        conversationId: body.conversationId,
+        message: body.message,
+        userId: auth.user.id,
+        projectId,
+      }),
+    });
+
+    if (!response.body) {
+      return c.json({ error: 'No response from project agent' }, 500);
+    }
+
+    return new Response(response.body, {
+      headers: {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+      },
+    });
   }
-
-  const stub = getProjectAgent(c.env, projectId);
-  const response = await stub.fetch('https://project-agent/chat', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      conversationId: body.conversationId,
-      message: body.message,
-      userId: auth.user.id,
-      projectId,
-    }),
-  });
-
-  if (!response.body) {
-    return c.json({ error: 'No response from project agent' }, 500);
-  }
-
-  return new Response(response.body, {
-    headers: {
-      'content-type': 'text/event-stream',
-      'cache-control': 'no-cache',
-      connection: 'keep-alive',
-    },
-  });
-});
+);
 
 /** GET /conversations — list conversations. */
-app.get('/conversations', requireAuth(), async (c) => {
+app.get('/conversations', requireAuth(), requireApproved(), async (c) => {
   const auth = c.get('auth');
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('Missing projectId');
@@ -82,7 +88,7 @@ app.get('/conversations', requireAuth(), async (c) => {
 });
 
 /** GET /conversations/:id/messages — get messages for a conversation. */
-app.get('/conversations/:id/messages', requireAuth(), async (c) => {
+app.get('/conversations/:id/messages', requireAuth(), requireApproved(), async (c) => {
   const auth = c.get('auth');
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('Missing projectId');
@@ -101,7 +107,7 @@ app.get('/conversations/:id/messages', requireAuth(), async (c) => {
 });
 
 /** GET /search — full-text search across conversation history. */
-app.get('/search', requireAuth(), async (c) => {
+app.get('/search', requireAuth(), requireApproved(), async (c) => {
   const auth = c.get('auth');
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('Missing projectId');

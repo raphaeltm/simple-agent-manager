@@ -4,12 +4,6 @@
  * One instance per project, keyed by projectId:
  *   env.PROJECT_ORCHESTRATOR.idFromName(projectId)
  *
- * Coordinates agent work within a project:
- * - Watches missions and manages their lifecycle
- * - Routes handoff packets between tasks via durable messages
- * - Detects stalled tasks and sends interrupt messages
- * - Logs all scheduling decisions for auditability
- *
  * Alarm-driven: wakes on a configurable interval (default 30s) to run
  * the scheduling loop. Sleeps when no active missions exist.
  */
@@ -32,8 +26,11 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { mapRows, parseRowOrNull } from '../row-validation';
+import { cancelTrackedMission, expireMissionCancellations } from './cancel-mission';
+import { continuationDelay } from './cancellation-config';
 import { logDecision, pruneDecisionLog } from './decision-log';
 import { runOrchestratorMigrations } from './migrations';
+import { pauseTrackedMission, resumeTrackedMission } from './mission-lifecycle';
 import { runSchedulingCycle } from './scheduling';
 
 // =============================================================================
@@ -75,6 +72,7 @@ const MissionIdRowSchema = v.object({ mission_id: v.string() });
 
 export class ProjectOrchestrator extends DurableObject<Env> {
   private projectId: string | null = null;
+  private cycleLock: Promise<void> = Promise.resolve();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -92,7 +90,11 @@ export class ProjectOrchestrator extends DurableObject<Env> {
    * Register a mission for orchestration and arm the scheduling alarm.
    * Called when a mission is created (create_mission MCP tool).
    */
-  async startOrchestration(projectId: string, missionId: string): Promise<void> {
+  async startOrchestration(
+    projectId: string,
+    missionId: string,
+    workflowRegistrationDeadline?: number
+  ): Promise<void> {
     this.projectId = projectId;
     await this.ctx.storage.put('projectId', projectId);
     const now = Date.now();
@@ -118,6 +120,13 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     logDecision(sql, missionId, null, 'dispatch', 'Mission registered for orchestration', now);
     log.info('orchestrator.mission_registered', { projectId, missionId });
 
+    if (workflowRegistrationDeadline !== undefined) {
+      sql.exec(
+        'UPDATE orchestrator_missions SET workflow_registration_deadline = ? WHERE mission_id = ?',
+        workflowRegistrationDeadline,
+        missionId
+      );
+    }
     // Arm the scheduling alarm
     await this.armAlarm();
   }
@@ -126,83 +135,36 @@ export class ProjectOrchestrator extends DurableObject<Env> {
    * Pause a mission — stops scheduling new tasks but running tasks continue.
    */
   async pauseMission(projectId: string, missionId: string): Promise<boolean> {
-    this.projectId = projectId;
-    const sql = this.ctx.storage.sql;
-    const result = sql.exec(
-      `UPDATE orchestrator_missions SET status = 'paused' WHERE mission_id = ? AND status = 'active'`,
-      missionId
+    return this.serializeLifecycle(() =>
+      pauseTrackedMission(this.ctx.storage.sql, this.env, projectId, missionId, () => {
+        this.projectId = projectId;
+      })
     );
-    if (result.rowsWritten === 0) return false;
-
-    logDecision(sql, missionId, null, 'pause', 'Mission paused by user', Date.now());
-
-    // Update D1 mission status
-    await this.env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
-      .bind('paused', new Date().toISOString(), missionId)
-      .run();
-
-    log.info('orchestrator.mission_paused', { projectId, missionId });
-    return true;
   }
 
   /**
    * Resume a paused mission — re-enables scheduling.
    */
   async resumeMission(projectId: string, missionId: string): Promise<boolean> {
-    this.projectId = projectId;
-    const sql = this.ctx.storage.sql;
-    const result = sql.exec(
-      `UPDATE orchestrator_missions SET status = 'active' WHERE mission_id = ? AND status = 'paused'`,
-      missionId
+    return this.serializeLifecycle(() =>
+      resumeTrackedMission(
+        this.ctx.storage.sql,
+        this.env,
+        projectId,
+        missionId,
+        () => {
+          this.projectId = projectId;
+        },
+        () => this.armAlarm()
+      )
     );
-    if (result.rowsWritten === 0) return false;
-
-    logDecision(sql, missionId, null, 'resume', 'Mission resumed by user', Date.now());
-
-    // Update D1 mission status
-    await this.env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
-      .bind('active', new Date().toISOString(), missionId)
-      .run();
-
-    log.info('orchestrator.mission_resumed', { projectId, missionId });
-    await this.armAlarm();
-    return true;
   }
 
-  /**
-   * Cancel a mission — marks pending tasks as cancelled.
-   */
   async cancelMission(projectId: string, missionId: string): Promise<boolean> {
     this.projectId = projectId;
-    const sql = this.ctx.storage.sql;
-
-    // Verify mission is tracked before proceeding
-    const tracked = sql
-      .exec(`SELECT 1 FROM orchestrator_missions WHERE mission_id = ?`, missionId)
-      .toArray();
-    if (tracked.length === 0) return false;
-
-    // Update D1 first (source of truth) — cancel tasks and mission
-    const now = new Date().toISOString();
-    await this.env.DATABASE.prepare(
-      `UPDATE tasks SET status = 'cancelled', scheduler_state = 'cancelled', updated_at = ?
-       WHERE mission_id = ? AND status NOT IN ('completed', 'failed', 'cancelled')`
-    )
-      .bind(now, missionId)
-      .run();
-
-    await this.env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
-      .bind('cancelled', now, missionId)
-      .run();
-
-    // Then remove from DO tracking
-    sql.exec(`DELETE FROM orchestrator_missions WHERE mission_id = ?`, missionId);
-    sql.exec('DELETE FROM scheduling_queue WHERE mission_id = ?', missionId);
-
-    logDecision(sql, missionId, null, 'cancel', 'Mission cancelled by user', Date.now());
-    log.info('orchestrator.mission_cancelled', { projectId, missionId });
-
-    return true;
+    return cancelTrackedMission(this.ctx.storage, this.env, projectId, missionId, (work) =>
+      this.serializeLifecycle(work)
+    );
   }
 
   /**
@@ -408,6 +370,15 @@ export class ProjectOrchestrator extends DurableObject<Env> {
   // =========================================================================
 
   override async alarm(): Promise<void> {
+    expireMissionCancellations(this.ctx.storage.sql);
+    if (
+      !this.ctx.storage.sql
+        .exec(
+          "SELECT 1 FROM orchestrator_missions WHERE status IN ('active', 'completing', 'cancelling') LIMIT 1"
+        )
+        .toArray().length
+    )
+      return;
     if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'ProjectOrchestrator')) return;
 
     const config = resolveOrchestratorConfig(this.env);
@@ -418,7 +389,11 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     if (!projectId) return; // No active missions, nothing to do
 
     try {
-      await runSchedulingCycle(this.ctx.storage.sql, this.env, projectId, config);
+      const cycle = this.cycleLock.then(() =>
+        runSchedulingCycle(this.ctx.storage.sql, this.env, projectId, config)
+      );
+      this.cycleLock = cycle.catch(() => undefined);
+      await cycle;
     } catch (err) {
       log.error('orchestrator.alarm.cycle_failed', {
         projectId,
@@ -431,17 +406,31 @@ export class ProjectOrchestrator extends DurableObject<Env> {
 
     // Re-arm while active or legacy completing missions still need work.
     const activeMissions = this.ctx.storage.sql
-      .exec(`SELECT 1 FROM orchestrator_missions WHERE status IN ('active', 'completing') LIMIT 1`)
+      .exec(
+        `SELECT 1 FROM orchestrator_missions WHERE status IN ('active', 'completing', 'cancelling') LIMIT 1`
+      )
       .toArray();
 
     if (activeMissions.length > 0) {
-      await this.ctx.storage.setAlarm(Date.now() + config.schedulingIntervalMs);
+      await this.ctx.storage.setAlarm(
+        Date.now() +
+          (await continuationDelay(this.ctx.storage.sql, this.env, config.schedulingIntervalMs))
+      );
     }
   }
 
   // =========================================================================
   // Helpers
   // =========================================================================
+
+  private serializeLifecycle<T>(work: () => Promise<T>): Promise<T> {
+    const result = this.cycleLock.then(work);
+    this.cycleLock = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
+  }
 
   private async armAlarm(): Promise<void> {
     const config = resolveOrchestratorConfig(this.env);

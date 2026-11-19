@@ -1,0 +1,1464 @@
+/**
+ * The Automation pages driven the way a person uses them: real routes, real clicks, mocked API.
+ * Each test asserts what reached the API, so a control that collects input but drops it fails.
+ */
+import type {
+  ProjectEventSubscriptionRecord,
+  ProjectSchedule,
+  ProjectStandingWatch,
+  TriggerResponse,
+} from '@simple-agent-manager/shared';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { type ReactNode, useState } from 'react';
+import { MemoryRouter, Outlet, Route, Routes, useLocation } from 'react-router';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+
+const api = vi.hoisted(() => ({
+  listWorkflowRuns: vi.fn(),
+  listTriggers: vi.fn(),
+  getTrigger: vi.fn(),
+  listTriggerExecutions: vi.fn(),
+  listWebhookDeliveries: vi.fn(),
+  createTrigger: vi.fn(),
+  updateTrigger: vi.fn(),
+  deleteTrigger: vi.fn(),
+  runTrigger: vi.fn(),
+  previewWebhookTrigger: vi.fn(),
+  rotateWebhookTriggerToken: vi.fn(),
+  setWebhookSigningSecret: vi.fn(),
+  getProjectMembers: vi.fn(),
+  listChatSessions: vi.fn(),
+  listAgentProfiles: vi.fn(),
+  listSkills: vi.fn(),
+  cleanupStuckExecutions: vi.fn(),
+  deleteExecution: vi.fn(),
+  getAgentEmailConfig: vi.fn(),
+}));
+const events = vi.hoisted(() => ({
+  listSchedules: vi.fn(),
+  getSchedule: vi.fn(),
+  createSchedule: vi.fn(),
+  rescheduleSchedule: vi.fn(),
+  cancelSchedule: vi.fn(),
+  reconcileSchedule: vi.fn(),
+  listStandingWatches: vi.fn(),
+  getStandingWatch: vi.fn(),
+  createStandingWatch: vi.fn(),
+  updateStandingWatch: vi.fn(),
+  pauseStandingWatch: vi.fn(),
+  revokeStandingWatch: vi.fn(),
+  listEventSubscriptions: vi.fn(),
+  cancelEventSubscription: vi.fn(),
+  listEventSubscriptionDeliveries: vi.fn(),
+  listEventChannels: vi.fn(),
+  getEventChannelHistory: vi.fn(),
+}));
+const scope = vi.hoisted(() => ({ userId: 'owner' }));
+
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ...api,
+}));
+vi.mock('../../../src/lib/api/triggers', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  cleanupStuckExecutions: api.cleanupStuckExecutions,
+  deleteExecution: api.deleteExecution,
+}));
+// `agentEmailConfigQueryOptions` imports from this submodule directly (not the barrel above).
+vi.mock('../../../src/lib/api/agent-email', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getAgentEmailConfig: api.getAgentEmailConfig,
+}));
+vi.mock('../../../src/lib/project-events-api', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ...events,
+}));
+vi.mock('../../../src/hooks/useQueryScope', () => ({ useQueryScope: () => scope.userId }));
+// `CreateAutomation` reads the viewer's email directly from AuthProvider to default the
+// allowed-senders field of a new Email automation; every other identity need in this file
+// already goes through the mocked useQueryScope above.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: scope.userId, email: 'owner@example.com', name: 'Owner User' } }),
+}));
+
+import { QueryClientProvider } from '@tanstack/react-query';
+
+import { ToastProvider } from '../../../src/hooks/useToast';
+import { AutomationBehind } from '../../../src/pages/automation/AutomationBehind';
+import { AutomationDetail } from '../../../src/pages/automation/AutomationDetail';
+import { AutomationEditor } from '../../../src/pages/automation/AutomationEditor';
+import { AutomationOverview } from '../../../src/pages/automation/AutomationOverview';
+import { VERSION_CONFLICT_TEXT } from '../../../src/pages/automation/errors';
+import {
+  WATCH_CREATOR_ACCESS_REVOKED,
+  WATCH_TARGET_NOT_OWNED,
+} from '../../../src/pages/automation/model';
+import { ProjectContext } from '../../../src/pages/ProjectContext';
+import { createTestQueryClient } from '../../test-utils/query-test-utils';
+
+const NOW = Date.now();
+const HOUR = 3_600_000;
+
+function trigger(overrides: Partial<TriggerResponse> = {}): TriggerResponse {
+  return {
+    id: 'trg-deps',
+    projectId: 'p1',
+    userId: 'owner',
+    name: 'Dependency audit',
+    description: null,
+    status: 'paused',
+    sourceType: 'cron',
+    cronExpression: '0 9 * * *',
+    cronTimezone: 'UTC',
+    skipIfRunning: true,
+    promptTemplate: 'Audit dependencies',
+    agentProfileId: null,
+    skillId: null,
+    taskMode: 'task',
+    vmSizeOverride: null,
+    maxConcurrent: 1,
+    lastTriggeredAt: new Date(NOW - HOUR).toISOString(),
+    triggerCount: 3,
+    nextFireAt: null,
+    createdAt: new Date(NOW - 10 * 24 * HOUR).toISOString(),
+    updatedAt: new Date(NOW - HOUR).toISOString(),
+    ...overrides,
+  };
+}
+
+const failedRun = (id: string, hoursAgo: number) => ({
+  id,
+  triggerId: 'trg-deps',
+  projectId: 'p1',
+  status: 'failed',
+  skipReason: null,
+  taskId: `task-${id}`,
+  eventType: 'cron',
+  renderedPrompt: null,
+  errorMessage: 'GitHub token expired',
+  scheduledAt: new Date(NOW - hoursAgo * HOUR).toISOString(),
+  startedAt: new Date(NOW - hoursAgo * HOUR).toISOString(),
+  completedAt: new Date(NOW - hoursAgo * HOUR + 60_000).toISOString(),
+  sequenceNumber: 1,
+  createdAt: new Date(NOW - hoursAgo * HOUR).toISOString(),
+});
+
+function watch(overrides: Partial<ProjectStandingWatch> = {}): ProjectStandingWatch {
+  return {
+    id: 'w1',
+    projectId: 'p1',
+    creatorUserId: 'someone-else',
+    reason: 'Failed releases',
+    filter: { version: 1, source: 'sam.lifecycle', eventType: 'deployment.release.failed' },
+    action: { kind: 'start_session', prompt: 'Investigate', agentProfileId: null, skillId: null },
+    state: 'active',
+    version: 5,
+    idempotencyKey: 'k',
+    cooldownMs: 60_000,
+    maxConcurrent: 1,
+    maxExecutions: 10,
+    executionCount: 10,
+    nextEligibleAt: 0,
+    subscriptionId: 's1',
+    createdAt: NOW - 5 * 24 * HOUR,
+    updatedAt: NOW - HOUR,
+    lastError: null,
+    ...overrides,
+  };
+}
+
+function schedule(overrides: Partial<ProjectSchedule> = {}): ProjectSchedule {
+  return {
+    id: 'sch-1',
+    projectId: 'p1',
+    creatorUserId: 'owner',
+    creatorChatSessionId: null,
+    reason: 'Check the release',
+    action: { kind: 'message_session', sessionId: 'chat-1', prompt: 'Is it live?' },
+    state: 'pending',
+    dueAt: NOW + 2 * HOUR,
+    displayTimezone: 'UTC',
+    expiresAt: NOW + 26 * HOUR,
+    version: 3,
+    idempotencyKey: 'k',
+    createdAt: NOW - HOUR,
+    updatedAt: NOW - HOUR,
+    nextAttemptAt: null,
+    attemptCount: 0,
+    lastError: null,
+    eventId: null,
+    deliveryId: null,
+    resultTaskId: null,
+    resultSessionId: null,
+    watchId: null,
+    sourceEventId: null,
+    ...overrides,
+  };
+}
+
+function subscription(
+  overrides: Partial<ProjectEventSubscriptionRecord>
+): ProjectEventSubscriptionRecord {
+  return {
+    id: 'sub-ci',
+    projectId: 'p1',
+    contractVersion: 1,
+    owner: { type: 'agent', id: 'p1:chat-1', name: '01AGENT' },
+    idempotencyKey: 'k',
+    filter: {
+      version: 1,
+      source: 'github',
+      eventType: 'check_suite.completed',
+      subjectType: 'commit',
+      subjectId: 'abcdef1234',
+    },
+    filterFingerprint: 'f',
+    matchKeyCount: 1,
+    deliveryPreference: {
+      requested: 'existing_session_prompt',
+      resolved: 'queued_for_prompt_delivery',
+      target: { sessionId: 'chat-1', taskId: 't', runtimeId: null, agentId: null },
+    },
+    state: 'active',
+    reason: null,
+    createdAt: NOW - HOUR,
+    updatedAt: NOW - HOUR,
+    expiresAt: NOW + HOUR,
+    cancelledAt: null,
+    cancelledBy: null,
+    cancelReason: null,
+    lastMatchedAt: null,
+    ...overrides,
+  } as ProjectEventSubscriptionRecord;
+}
+
+function member(userId: string, role: string) {
+  return {
+    projectId: 'p1',
+    userId,
+    role,
+    status: 'active',
+    user: { id: userId, name: userId, email: `${userId}@x.test` },
+  };
+}
+
+function Where() {
+  const location = useLocation();
+  return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
+}
+
+function Shell({ children }: { children?: ReactNode }) {
+  const [value] = useState(() => ({
+    projectId: 'p1',
+    project: { id: 'p1', userId: 'owner', name: 'Project' } as never,
+    installations: [],
+    reload: async () => undefined,
+  }));
+  return (
+    <ProjectContext.Provider value={value}>
+      {children ?? <Outlet />}
+      <Where />
+    </ProjectContext.Provider>
+  );
+}
+
+/** The same automation routes App.tsx declares, under a project route that owns `:id`. */
+function renderAt(path: string) {
+  const client = createTestQueryClient();
+  return render(
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route path="/projects/:id" element={<Shell />}>
+              <Route path="automation" element={<AutomationOverview />} />
+              <Route path="automation/new" element={<AutomationEditor />} />
+              <Route path="automation/behind" element={<AutomationBehind />} />
+              <Route path="automation/:kind/:automationId" element={<AutomationDetail />} />
+              <Route path="automation/:kind/:automationId/edit" element={<AutomationEditor />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </ToastProvider>
+    </QueryClientProvider>
+  );
+}
+
+beforeEach(() => {
+  scope.userId = 'owner';
+  api.listWorkflowRuns.mockResolvedValue({ runs: [], nextCursor: null });
+  api.listTriggers.mockResolvedValue({ triggers: [] });
+  api.listTriggerExecutions.mockResolvedValue({ executions: [], nextCursor: null });
+  api.listWebhookDeliveries.mockResolvedValue({ deliveries: [], nextCursor: null });
+  api.getProjectMembers.mockResolvedValue({
+    members: [member('owner', 'owner'), member('viewer', 'viewer')],
+  });
+  api.listChatSessions.mockResolvedValue({
+    sessions: [{ id: 'chat-1', topic: 'Release shepherd', status: 'active' }],
+    total: 1,
+  });
+  api.listAgentProfiles.mockResolvedValue([
+    { id: 'prof-1', name: 'Codex', model: 'gpt-5.5', effort: 'auto' },
+  ]);
+  api.listSkills.mockResolvedValue([]);
+  events.listSchedules.mockResolvedValue({ schedules: [], nextCursor: null });
+  events.listStandingWatches.mockResolvedValue({ watches: [], nextCursor: null });
+  events.listEventSubscriptions.mockResolvedValue({ subscriptions: [], hasMore: false });
+  api.getAgentEmailConfig.mockResolvedValue({ enabled: true, domain: 'agents.example.com' });
+});
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+  // A test that froze the clock must not leave it frozen for the next one.
+  vi.useRealTimers();
+});
+
+// Some sections render only after two requests in a row: the overview's attention card needs the
+// trigger list, then that trigger's recent runs; a trigger page's "Calls received" needs the
+// trigger, then its calls. On a busy CI runner with coverage such a chained load can outlast
+// Testing Library's 1 s default, above all on a cold first render. Waits for these sections
+// allow 5 s, and the tests making them get a budget above vitest's 5 s default to match.
+const CHAINED_LOAD = { timeout: 5_000 };
+
+describe('overview', { timeout: 15_000 }, () => {
+  it('resumes a trigger SAM paused after failures, from its attention card', async () => {
+    const paused = trigger();
+    api.listTriggers.mockResolvedValue({ triggers: [paused] });
+    api.listTriggerExecutions.mockResolvedValue({
+      executions: [failedRun('r3', 1), failedRun('r2', 25), failedRun('r1', 49)],
+      nextCursor: null,
+    });
+    api.updateTrigger.mockResolvedValue({ ...paused, status: 'active' });
+    renderAt('/projects/p1/automation');
+    const card = await screen.findByRole('region', { name: 'Dependency audit' }, CHAINED_LOAD);
+    expect(within(card).getByText('Paused · its last 3 runs failed')).toBeInTheDocument();
+    await userEvent.click(within(card).getByRole('button', { name: 'Resume' }));
+    await waitFor(() =>
+      expect(api.updateTrigger).toHaveBeenCalledWith('p1', 'trg-deps', { status: 'active' })
+    );
+  });
+
+  it('lets a project member who is not the owner change automation', async () => {
+    scope.userId = 'member-1';
+    api.getProjectMembers.mockResolvedValue({
+      members: [member('owner', 'owner'), member('member-1', 'member')],
+    });
+    api.listTriggers.mockResolvedValue({ triggers: [trigger()] });
+    api.listTriggerExecutions.mockResolvedValue({
+      executions: [failedRun('r3', 1), failedRun('r2', 25), failedRun('r1', 49)],
+      nextCursor: null,
+    });
+    renderAt('/projects/p1/automation');
+    const card = await screen.findByRole('region', { name: 'Dependency audit' }, CHAINED_LOAD);
+    expect(await within(card).findByRole('button', { name: 'Resume' })).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: /New/ }).length).toBeGreaterThan(0);
+  });
+
+  it('never flashes the empty state while other lists are still loading', async () => {
+    let releaseSchedules: (value: unknown) => void = () => undefined;
+    events.listSchedules.mockReturnValue(
+      new Promise((resolve) => {
+        releaseSchedules = resolve;
+      })
+    );
+    renderAt('/projects/p1/automation');
+    // Triggers and watches answer empty; schedules have not answered yet.
+    await waitFor(() => expect(api.listTriggers).toHaveBeenCalled());
+    await waitFor(() => expect(events.listStandingWatches).toHaveBeenCalled());
+    expect(await screen.findByText('Loading automation…')).toBeInTheDocument();
+    expect(screen.queryByText('Nothing runs on its own yet')).toBeNull();
+    await act(async () => {
+      releaseSchedules({ schedules: [schedule()], nextCursor: null });
+    });
+    expect((await screen.findAllByText('Check the release')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Nothing runs on its own yet')).toBeNull();
+  });
+
+  it('shows a viewer everything but no controls', async () => {
+    scope.userId = 'viewer';
+    api.listTriggers.mockResolvedValue({ triggers: [trigger()] });
+    api.listTriggerExecutions.mockResolvedValue({
+      executions: [failedRun('r3', 1), failedRun('r2', 25), failedRun('r1', 49)],
+      nextCursor: null,
+    });
+    renderAt('/projects/p1/automation');
+    expect(
+      await screen.findByText(/Only people who can edit this project can change automation/)
+    ).toBeInTheDocument();
+    // Resume would sit on the attention card, so "no Resume" only counts once the card is up.
+    const card = await screen.findByRole('region', { name: 'Dependency audit' }, CHAINED_LOAD);
+    expect(within(card).getByRole('link', { name: 'Take a look' })).toBeInTheDocument();
+    expect(screen.getAllByText('Dependency audit').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('link', { name: /New automation/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+  });
+});
+
+describe('create flow', () => {
+  it('opens the create flow at /automation/new even though the project route owns :id', async () => {
+    renderAt('/projects/p1/automation/new');
+    expect(await screen.findByText(/Step 1 of 4/)).toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent('/projects/p1/automation/new');
+  });
+
+  // Walks all four steps and types about 40 characters key by key. It takes 3-4 s
+  // on CI, too close to the 5 s default, so it gets its own budget.
+  it('creates a webhook automation and shows its token once', { timeout: 15_000 }, async () => {
+    const user = userEvent.setup();
+    api.createTrigger.mockResolvedValue({
+      ...trigger({ id: 'trg-new', sourceType: 'webhook', status: 'active' }),
+      webhookCredential: {
+        endpointUrl: 'https://api.example.test/api/webhooks/ingest',
+        token: 'secret-token',
+        headerName: 'Authorization',
+      },
+    });
+    api.getTrigger.mockResolvedValue(
+      trigger({ id: 'trg-new', sourceType: 'webhook', status: 'active', cronExpression: null })
+    );
+    renderAt('/projects/p1/automation/new');
+    await user.click(await screen.findByRole('radio', { name: /When another service calls SAM/ }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.type(screen.getByLabelText(/Source label/), 'PagerDuty');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(
+      await screen.findByText('Webhook automations need an agent profile.')
+    ).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('Agent'), 'prof-1');
+    await user.type(screen.getByLabelText('What should it do?'), 'Look into the alert');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.clear(screen.getByLabelText('Name'));
+    await user.type(screen.getByLabelText('Name'), 'Alerts');
+    // Overlap controls apply to every trigger kind, not only schedules.
+    await user.click(screen.getByText('Advanced options'));
+    await user.click(screen.getByRole('checkbox', { name: /Skip a run if the last one/ }));
+    await user.clear(screen.getByLabelText('Most runs at once'));
+    await user.type(screen.getByLabelText('Most runs at once'), '3');
+    await user.click(screen.getByRole('button', { name: 'Create automation' }));
+    await waitFor(() =>
+      expect(api.createTrigger).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({
+          name: 'Alerts',
+          sourceType: 'webhook',
+          agentProfileId: 'prof-1',
+          skipIfRunning: false,
+          maxConcurrent: 3,
+          promptTemplate: 'Look into the alert',
+          webhookConfig: expect.objectContaining({
+            sourceLabel: 'PagerDuty',
+            filterMode: 'all',
+            filters: [],
+          }),
+        })
+      )
+    );
+    expect(await screen.findByText('Save your webhook credential')).toBeInTheDocument();
+    expect(screen.getByText('secret-token')).toBeInTheDocument();
+    await user.click(screen.getByLabelText(/I saved this token/));
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent(
+        '/projects/p1/automation/trigger/trg-new'
+      )
+    );
+  });
+
+  it('creates an email automation with its allowed senders and agent profile', async () => {
+    const user = userEvent.setup();
+    api.createTrigger.mockResolvedValue(
+      trigger({
+        id: 'trg-email',
+        sourceType: 'email',
+        status: 'active',
+        cronExpression: null,
+        emailConfig: {
+          address: 'agent+k3j2h7m9q2xw4n8p@agents.example.com',
+          allowedSenders: ['me@example.com'],
+        },
+      })
+    );
+    api.getTrigger.mockResolvedValue(
+      trigger({
+        id: 'trg-email',
+        sourceType: 'email',
+        status: 'active',
+        cronExpression: null,
+        emailConfig: {
+          address: 'agent+k3j2h7m9q2xw4n8p@agents.example.com',
+          allowedSenders: ['me@example.com'],
+        },
+      })
+    );
+    renderAt('/projects/p1/automation/new');
+    await user.click(await screen.findByRole('radio', { name: /By email/ }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    // Picking "By email" defaults the allowed senders to the signed-in user's own address, and
+    // seeds the starting prompt — both only when the field was still empty.
+    expect(screen.getByLabelText('Allowed senders')).toHaveValue('owner@example.com');
+    expect(
+      screen.getByText('Mail whose From address is on this list starts it.')
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Times use your time zone/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(await screen.findByText('Email automations need an agent profile.')).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('Agent'), 'prof-1');
+    expect((screen.getByLabelText('What should it do?') as HTMLTextAreaElement).value).toContain(
+      'reply_to_email'
+    );
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('button', { name: 'Create automation' }));
+    await waitFor(() =>
+      expect(api.createTrigger).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({
+          sourceType: 'email',
+          agentProfileId: 'prof-1',
+          emailConfig: expect.objectContaining({ allowedSenders: ['owner@example.com'] }),
+        })
+      )
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent(
+        '/projects/p1/automation/trigger/trg-email'
+      )
+    );
+  });
+
+  it('does not offer the Email start on a deployment that has not configured it', async () => {
+    api.getAgentEmailConfig.mockResolvedValue({ enabled: false, domain: null });
+    renderAt('/projects/p1/automation/new');
+    // Liveness first: the start cards rendered, so the absence below is not an empty page.
+    expect(await screen.findByRole('radio', { name: /On a schedule/ })).toBeInTheDocument();
+    await waitFor(() => expect(api.getAgentEmailConfig).toHaveBeenCalled());
+    expect(screen.queryByRole('radio', { name: /By email/ })).not.toBeInTheDocument();
+  });
+
+  it('creates a GitHub automation through its own fields', async () => {
+    const user = userEvent.setup();
+    api.createTrigger.mockResolvedValue(
+      trigger({ id: 'trg-gh', sourceType: 'github', status: 'active', cronExpression: null })
+    );
+    api.getTrigger.mockResolvedValue(
+      trigger({ id: 'trg-gh', sourceType: 'github', status: 'active', cronExpression: null })
+    );
+    renderAt('/projects/p1/automation/new');
+    await user.click(
+      await screen.findByRole('radio', { name: /When something happens on GitHub/ })
+    );
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.selectOptions(screen.getByLabelText('GitHub event'), 'pull_request');
+    // Real paste events exercise the controlled fields without one timer and
+    // filter-preview rerender per character on a busy coverage runner.
+    await user.click(screen.getByLabelText(/Required labels/));
+    await user.paste('needs-review');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByLabelText('What should it do?'));
+    await user.paste('Review the pull request');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('button', { name: 'Create automation' }));
+    await waitFor(() => expect(api.createTrigger).toHaveBeenCalledTimes(1));
+    const [, body] = api.createTrigger.mock.calls[0] ?? [];
+    expect(body).toMatchObject({
+      sourceType: 'github',
+      promptTemplate: 'Review the pull request',
+      githubConfig: {
+        eventType: 'pull_request',
+        filters: expect.objectContaining({ actions: ['opened'], labels: ['needs-review'] }),
+      },
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent(
+        '/projects/p1/automation/trigger/trg-gh'
+      )
+    );
+  });
+
+  it('reminds a chat later with a one-time message to that chat', async () => {
+    const user = userEvent.setup();
+    events.createSchedule.mockResolvedValue({
+      schedule: schedule({ id: 'sch-new' }),
+      changed: true,
+      idempotent: false,
+      actionAlreadyAdmitted: false,
+    });
+    renderAt('/projects/p1/automation/new?sessionId=chat-1');
+    expect(await screen.findByText(/Step 2 of 4/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(screen.getByRole('radio', { name: /Message a chat/ })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    );
+    await waitFor(() => expect(screen.getByLabelText('Which chat?')).toHaveValue('chat-1'));
+    await user.type(screen.getByLabelText('What should the message say?'), 'Check the deploy');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('button', { name: 'Create automation' }));
+    await waitFor(() => expect(events.createSchedule).toHaveBeenCalledTimes(1));
+    const [, body] = events.createSchedule.mock.calls[0] ?? [];
+    expect(body).toMatchObject({
+      action: { kind: 'message_session', sessionId: 'chat-1', prompt: 'Check the deploy' },
+      displayTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
+    expect(body.dueAt).toBeGreaterThan(Date.now());
+    expect(body.expiresAt).toBeGreaterThan(body.dueAt);
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent('/automation/schedule/sch-new')
+    );
+  });
+});
+
+describe('choosing a chat to message', () => {
+  const sessions = [
+    { id: 'chat-mine', topic: 'My release chat', status: 'active', isMine: true },
+    { id: 'chat-theirs', topic: 'Teammate chat', status: 'active', isMine: false },
+  ];
+
+  it('offers a watch only the chats its creator owns', async () => {
+    const user = userEvent.setup();
+    api.listChatSessions.mockResolvedValue({ sessions, total: sessions.length });
+    renderAt('/projects/p1/automation/new?start=event');
+    await user.click(await screen.findByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('radio', { name: /Message a chat/ }));
+    const picker = screen.getByLabelText('Which chat?');
+    expect(within(picker).getByRole('option', { name: 'My release chat' })).toBeInTheDocument();
+    expect(within(picker).queryByRole('option', { name: 'Teammate chat' })).toBeNull();
+  });
+
+  it('offers a one-time message every listed chat, since shared chats qualify too', async () => {
+    const user = userEvent.setup();
+    api.listChatSessions.mockResolvedValue({ sessions, total: sessions.length });
+    renderAt('/projects/p1/automation/new?start=once');
+    await user.click(await screen.findByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('radio', { name: /Message a chat/ }));
+    const picker = screen.getByLabelText('Which chat?');
+    expect(within(picker).getByRole('option', { name: 'My release chat' })).toBeInTheDocument();
+    expect(within(picker).getByRole('option', { name: 'Teammate chat' })).toBeInTheDocument();
+  });
+});
+
+describe('editing a trigger', () => {
+  it('opens on the schedule that was saved, not a default', async () => {
+    api.getTrigger.mockResolvedValue(
+      trigger({ status: 'active', cronExpression: '30 2 * * *', cronTimezone: 'Europe/Paris' })
+    );
+    renderAt('/projects/p1/automation/trigger/trg-deps/edit');
+    expect(await screen.findByRole('radio', { name: 'Every day' })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    );
+    expect(screen.getByLabelText('At')).toHaveValue('02:30');
+    expect(screen.getByLabelText('Time zone')).toHaveValue('Europe/Paris');
+  });
+});
+
+describe('watches', () => {
+  it('lets a maintainer edit a watch someone else made without changing what it does', async () => {
+    const user = userEvent.setup();
+    const existing = watch({ executionCount: 2 });
+    events.getStandingWatch.mockResolvedValue({ watch: existing });
+    events.updateStandingWatch.mockResolvedValue({
+      watch: existing,
+      changed: true,
+      idempotent: false,
+    });
+    renderAt('/projects/p1/automation/watch/w1/edit');
+    expect(await screen.findByText(/Step 1 of 3/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(screen.getByText(/can change what this watch does/)).toBeInTheDocument();
+    expect(screen.queryByLabelText('What should it do?')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(events.updateStandingWatch).toHaveBeenCalledTimes(1));
+    const [, , body] = events.updateStandingWatch.mock.calls[0] ?? [];
+    expect(body).not.toHaveProperty('action');
+    expect(body).toMatchObject({ expectedVersion: 5, filter: existing.filter, maxExecutions: 10 });
+  });
+
+  it('lets the watch creator change what it does', async () => {
+    const user = userEvent.setup();
+    const mine = watch({ creatorUserId: 'owner', executionCount: 2 });
+    events.getStandingWatch.mockResolvedValue({ watch: mine });
+    events.updateStandingWatch.mockResolvedValue({ watch: mine, changed: true, idempotent: false });
+    renderAt('/projects/p1/automation/watch/w1/edit');
+    expect(await screen.findByText(/Step 1 of 3/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(screen.queryByText(/can change what this watch does/)).toBeNull();
+    const prompt = screen.getByLabelText('What should it do?');
+    await user.clear(prompt);
+    await user.type(prompt, 'Investigate and post a summary');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(events.updateStandingWatch).toHaveBeenCalledTimes(1));
+    const [, , body] = events.updateStandingWatch.mock.calls[0] ?? [];
+    expect(body).toMatchObject({
+      expectedVersion: 5,
+      action: expect.objectContaining({
+        kind: 'start_session',
+        prompt: 'Investigate and post a summary',
+      }),
+    });
+  });
+
+  it('lets only the creator resume a watch SAM paused over a chat it cannot message', async () => {
+    const user = userEvent.setup();
+    const paused = (creatorUserId: string, lastError: string) =>
+      watch({ state: 'paused', executionCount: 2, creatorUserId, lastError });
+    events.pauseStandingWatch.mockResolvedValue({
+      watch: watch({ executionCount: 2 }),
+      changed: true,
+      idempotent: false,
+    });
+
+    events.getStandingWatch.mockResolvedValue({
+      watch: paused('someone-else', WATCH_TARGET_NOT_OWNED),
+    });
+    const first = renderAt('/projects/p1/automation/watch/w1');
+    expect(await screen.findByRole('button', { name: /Resume/ })).toBeDisabled();
+    first.unmount();
+
+    events.getStandingWatch.mockResolvedValue({
+      watch: paused('owner', WATCH_CREATOR_ACCESS_REVOKED),
+    });
+    const second = renderAt('/projects/p1/automation/watch/w1');
+    expect(await screen.findByRole('button', { name: /Resume/ })).toBeDisabled();
+    second.unmount();
+
+    events.getStandingWatch.mockResolvedValue({ watch: paused('owner', WATCH_TARGET_NOT_OWNED) });
+    renderAt('/projects/p1/automation/watch/w1');
+    await user.click(await screen.findByRole('button', { name: /Resume/ }));
+    expect(events.pauseStandingWatch).not.toHaveBeenCalled();
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Resume anyway' })
+    );
+    await waitFor(() =>
+      expect(events.pauseStandingWatch).toHaveBeenCalledWith(
+        'p1',
+        'w1',
+        expect.objectContaining({ paused: false })
+      )
+    );
+  });
+
+  it('raises the run limit with only the limit', async () => {
+    const user = userEvent.setup();
+    events.getStandingWatch.mockResolvedValue({ watch: watch() });
+    events.updateStandingWatch.mockResolvedValue({
+      watch: watch({ maxExecutions: 20 }),
+      changed: true,
+      idempotent: false,
+    });
+    renderAt('/projects/p1/automation/watch/w1');
+    await user.click(await screen.findByRole('button', { name: 'Give it more runs' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Give it more runs' });
+    const input = within(dialog).getByLabelText('Total runs it may start');
+    await user.clear(input);
+    await user.type(input, '25');
+    await user.click(within(dialog).getByRole('button', { name: 'Save limit' }));
+    await waitFor(() =>
+      expect(events.updateStandingWatch).toHaveBeenCalledWith('p1', 'w1', {
+        expectedVersion: 5,
+        maxExecutions: 25,
+      })
+    );
+  });
+});
+
+describe('trigger page', () => {
+  it('deletes only after confirming, then returns to the overview', async () => {
+    const user = userEvent.setup();
+    const existing = trigger({ status: 'active' });
+    api.getTrigger.mockResolvedValue(existing);
+    api.deleteTrigger.mockResolvedValue({ success: true });
+    renderAt('/projects/p1/automation/trigger/trg-deps');
+    await user.click(await screen.findByRole('button', { name: 'Delete automation' }));
+    expect(api.deleteTrigger).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/permanently deletes “Dependency audit” and all its run history/)
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(api.deleteTrigger).toHaveBeenCalledWith('p1', 'trg-deps'));
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent(/^\/projects\/p1\/automation$/)
+    );
+  });
+
+  it('replaces a webhook token only after confirming, and shows the new one once', async () => {
+    const user = userEvent.setup();
+    api.getTrigger.mockResolvedValue(
+      trigger({
+        id: 'trg-hook',
+        status: 'active',
+        sourceType: 'webhook',
+        cronExpression: null,
+        webhookConfig: {
+          sourceLabel: 'CI',
+          filterMode: 'all',
+          filters: [],
+          includedHeaders: [],
+          tokenLastFour: 'abcd',
+          tokenCreatedAt: new Date(NOW).toISOString(),
+          tokenRotatedAt: null,
+        },
+      })
+    );
+    api.rotateWebhookTriggerToken.mockResolvedValue({
+      webhookCredential: {
+        endpointUrl: 'https://api.example.test/api/webhooks/ingest',
+        token: 'fresh-token',
+        headerName: 'Authorization',
+      },
+    });
+    renderAt('/projects/p1/automation/trigger/trg-hook');
+    expect(await screen.findByTestId('webhook-url')).toHaveTextContent('/api/webhooks/ingest');
+    await user.click(screen.getByRole('button', { name: /Get a new token/ }));
+    expect(api.rotateWebhookTriggerToken).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Replace token' }));
+    expect(await screen.findByText('fresh-token')).toBeInTheDocument();
+    expect(api.rotateWebhookTriggerToken).toHaveBeenCalledWith('p1', 'trg-hook');
+  });
+
+  it('says what each webhook call did with its run', { timeout: 15_000 }, async () => {
+    api.getTrigger.mockResolvedValue(
+      trigger({
+        id: 'trg-hook',
+        status: 'active',
+        sourceType: 'webhook',
+        cronExpression: null,
+        webhookConfig: {
+          sourceLabel: 'CI',
+          filterMode: 'all',
+          filters: [],
+          includedHeaders: [],
+          tokenLastFour: 'abcd',
+          tokenCreatedAt: new Date(NOW).toISOString(),
+          tokenRotatedAt: null,
+        },
+      })
+    );
+    const call = (id: string, outcome: string, executionId: string | null) => ({
+      id,
+      triggerId: 'trg-hook',
+      outcome,
+      httpStatus: 202,
+      bodyBytes: 120,
+      executionId,
+      errorCode: null,
+      receivedAt: new Date(NOW - HOUR).toISOString(),
+      processedAt: new Date(NOW - HOUR).toISOString(),
+    });
+    api.listWebhookDeliveries.mockResolvedValue({
+      deliveries: [
+        call('d1', 'accepted', 'exec-started'),
+        call('d2', 'still_running', 'exec-skip-record'),
+        call('d3', 'filtered', null),
+      ],
+      nextCursor: null,
+    });
+    renderAt('/projects/p1/automation/trigger/trg-hook');
+    const calls = await screen.findByRole('region', { name: 'Calls received' }, CHAINED_LOAD);
+    expect(
+      await within(calls).findByText('Started a run, listed under Recent runs')
+    ).toHaveAttribute('title', 'Run ID exec-started');
+    expect(
+      within(calls).getByText('Recorded as a skipped run, listed under Recent runs')
+    ).toBeInTheDocument();
+    expect(within(calls).getByText('Ignored: did not match the filters')).toBeInTheDocument();
+    expect(within(calls).getAllByText(/listed under Recent runs/)).toHaveLength(2);
+  });
+
+  it('deletes one run only after confirming, and says so when the API refuses', async () => {
+    const user = userEvent.setup();
+    api.getTrigger.mockResolvedValue(trigger({ status: 'active' }));
+    api.listTriggerExecutions.mockResolvedValue({
+      executions: [failedRun('r1', 2)],
+      nextCursor: null,
+    });
+    api.deleteExecution.mockRejectedValueOnce(new Error('Not allowed for this run'));
+    renderAt('/projects/p1/automation/trigger/trg-deps');
+    await user.click(await screen.findByRole('button', { name: /Delete the run from/ }));
+    expect(api.deleteExecution).not.toHaveBeenCalled();
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete run' })
+    );
+    await waitFor(() => expect(api.deleteExecution).toHaveBeenCalledWith('p1', 'trg-deps', 'r1'));
+    expect(await screen.findByText('Not allowed for this run')).toBeInTheDocument();
+  });
+
+  it('offers to clear stuck runs only while one is queued, and clears after confirming', async () => {
+    const user = userEvent.setup();
+    api.getTrigger.mockResolvedValue(trigger({ status: 'active' }));
+    api.listTriggerExecutions.mockResolvedValue({
+      executions: [{ ...failedRun('r2', 1), status: 'queued', completedAt: null }],
+      nextCursor: null,
+    });
+    api.cleanupStuckExecutions.mockResolvedValue({ cleaned: 1 });
+    renderAt('/projects/p1/automation/trigger/trg-deps');
+    await user.click(await screen.findByRole('button', { name: 'Clear stuck runs' }));
+    expect(api.cleanupStuckExecutions).not.toHaveBeenCalled();
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Clear stuck runs' })
+    );
+    await waitFor(() => expect(api.cleanupStuckExecutions).toHaveBeenCalledWith('p1', 'trg-deps'));
+    expect(await screen.findByText('Cleared 1 stuck run')).toBeInTheDocument();
+  });
+
+  it('keeps showing the automation when a background refresh fails (rule 48)', async () => {
+    const user = userEvent.setup();
+    const active = trigger({ status: 'active' });
+    api.getTrigger.mockResolvedValueOnce(active).mockRejectedValue(new Error('Network down'));
+    api.updateTrigger.mockResolvedValue({ ...active, status: 'paused' });
+    renderAt('/projects/p1/automation/trigger/trg-deps');
+    expect(
+      await screen.findByRole('heading', { name: /Dependency audit/, level: 1 })
+    ).toBeInTheDocument();
+    // Pausing refreshes everything; the trigger read now fails.
+    await user.click(screen.getByRole('button', { name: /Pause/ }));
+    await waitFor(() => expect(api.getTrigger.mock.calls.length).toBeGreaterThanOrEqual(2));
+    expect(screen.getByRole('heading', { name: /Dependency audit/, level: 1 })).toBeInTheDocument();
+    expect(screen.queryByText(/is not available/)).toBeNull();
+  });
+
+  it('does not offer to clear stuck runs when none is queued', async () => {
+    api.getTrigger.mockResolvedValue(trigger({ status: 'active' }));
+    api.listTriggerExecutions.mockResolvedValue({
+      executions: [failedRun('r1', 2)],
+      nextCursor: null,
+    });
+    renderAt('/projects/p1/automation/trigger/trg-deps');
+    expect(await screen.findByRole('button', { name: /Delete the run from/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Clear stuck runs' })).toBeNull();
+  });
+
+  it('never offers run now for an incident trigger', async () => {
+    api.getTrigger.mockResolvedValue(
+      trigger({ id: 'trg-inc', status: 'active', sourceType: 'incident', cronExpression: null })
+    );
+    renderAt('/projects/p1/automation/trigger/trg-inc');
+    expect(await screen.findByText(/cannot be run by hand/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Edit/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Run now/ })).not.toBeInTheDocument();
+  });
+
+  it('never offers run now for an email trigger, and explains why', async () => {
+    api.getTrigger.mockResolvedValue(
+      trigger({
+        id: 'trg-email',
+        status: 'active',
+        sourceType: 'email',
+        cronExpression: null,
+        emailConfig: { address: 'agent+abc123@agents.example.com', allowedSenders: ['a@x.test'] },
+      })
+    );
+    renderAt('/projects/p1/automation/trigger/trg-email');
+    expect(
+      await screen.findByText(/Email triggers run when an email arrives at their address/)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Edit/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Run now/ })).not.toBeInTheDocument();
+  });
+
+  it("shows an email trigger's address with a copy button, and its allowed senders", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    api.getTrigger.mockResolvedValue(
+      trigger({
+        id: 'trg-email',
+        status: 'active',
+        sourceType: 'email',
+        cronExpression: null,
+        emailConfig: {
+          address: 'agent+k3j2h7m9q2xw4n8p@agents.example.com',
+          allowedSenders: ['a@x.test', 'b@x.test'],
+        },
+      })
+    );
+    renderAt('/projects/p1/automation/trigger/trg-email');
+    const address = await screen.findByTestId('email-trigger-address');
+    expect(address).toHaveTextContent('agent+k3j2h7m9q2xw4n8p@agents.example.com');
+    // The address is the real protection while senders are unverified, so the page says so.
+    expect(screen.getByText(/Anyone who has this address can email the agent/)).toBeInTheDocument();
+    const senders = screen.getByTestId('email-allowed-senders');
+    expect(within(senders).getByText('a@x.test')).toBeInTheDocument();
+    expect(within(senders).getByText('b@x.test')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Copy email address' }));
+    expect(writeText).toHaveBeenCalledWith('agent+k3j2h7m9q2xw4n8p@agents.example.com');
+  });
+});
+
+describe('one-time automation page', () => {
+  it('cancels with a reason after confirming', async () => {
+    const user = userEvent.setup();
+    events.getSchedule.mockResolvedValue({ schedule: schedule() });
+    events.cancelSchedule.mockResolvedValue({
+      schedule: schedule({ state: 'cancelled' }),
+      changed: true,
+      idempotent: false,
+      actionAlreadyAdmitted: false,
+    });
+    renderAt('/projects/p1/automation/schedule/sch-1');
+    await user.click(await screen.findByRole('button', { name: /Cancel/ }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText(/Why/), 'Release moved');
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel it' }));
+    await waitFor(() =>
+      expect(events.cancelSchedule).toHaveBeenCalledWith('p1', 'sch-1', {
+        expectedVersion: 3,
+        reason: 'Release moved',
+      })
+    );
+  });
+});
+
+describe('someone else changed it first', () => {
+  it('says so in words, loads the latest, and retries with the new version', async () => {
+    const user = userEvent.setup();
+    events.getSchedule
+      .mockResolvedValueOnce({ schedule: schedule({ version: 3 }) })
+      .mockResolvedValue({ schedule: schedule({ version: 4 }) });
+    events.cancelSchedule
+      .mockRejectedValueOnce(new Error('Schedule version conflict'))
+      .mockResolvedValue({
+        schedule: schedule({ state: 'cancelled', version: 5 }),
+        changed: true,
+        idempotent: false,
+        actionAlreadyAdmitted: false,
+      });
+    renderAt('/projects/p1/automation/schedule/sch-1');
+    const cancelOnce = async () => {
+      await user.click(await screen.findByRole('button', { name: /Cancel/ }));
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: 'Cancel it' }));
+    };
+    await cancelOnce();
+    expect(await screen.findByText(VERSION_CONFLICT_TEXT)).toBeInTheDocument();
+    expect(screen.queryByText('Schedule version conflict')).not.toBeInTheDocument();
+    await waitFor(() => expect(events.getSchedule).toHaveBeenCalledTimes(2));
+    await cancelOnce();
+    await waitFor(() =>
+      expect(events.cancelSchedule).toHaveBeenLastCalledWith(
+        'p1',
+        'sch-1',
+        expect.objectContaining({ expectedVersion: 4 })
+      )
+    );
+  });
+});
+
+describe('behind the scenes', () => {
+  it('names the chat and task a wait delivers to in its details', async () => {
+    const user = userEvent.setup();
+    events.listEventSubscriptions.mockResolvedValue({
+      subscriptions: [subscription({})],
+      hasMore: false,
+    });
+    events.listEventSubscriptionDeliveries.mockResolvedValue({ deliveries: [], hasMore: false });
+    renderAt('/projects/p1/automation/behind');
+    await user.click(await screen.findByText('Details'));
+    expect(await screen.findByText('Target chat')).toBeInTheDocument();
+    expect(screen.getByText('Release shepherd (chat-1)')).toBeInTheDocument();
+    expect(screen.getByText('Target task')).toBeInTheDocument();
+  });
+
+  it('hides SAM relays until asked, and lets people stop only waits they may stop', async () => {
+    const user = userEvent.setup();
+    events.listEventSubscriptions.mockResolvedValue({
+      subscriptions: [
+        subscription({}),
+        subscription({
+          id: 'sub-relay',
+          owner: { type: 'agent', id: 'p1:chat-1', name: 'SAM agent messaging' },
+          filter: {
+            version: 1,
+            source: 'sam.agent_channel',
+            eventType: 'agent.channel.published',
+            subjectType: 'agent_channel',
+            subjectId: 'agent-dm.0123456789abcdef0123456789abcdef01234567',
+          },
+        }),
+        subscription({
+          id: 'sub-watch',
+          owner: { type: 'standing_watch', id: 'w1', name: null },
+          filter: { version: 1, source: 'sam.lifecycle', eventType: 'deployment.release.failed' },
+          deliveryPreference: { requested: 'spawn_task', resolved: 'spawn_task', target: {} },
+        }),
+      ],
+      hasMore: false,
+    });
+    events.cancelEventSubscription.mockResolvedValue({});
+    renderAt('/projects/p1/automation/behind');
+    expect(
+      await screen.findByText(/Release shepherd is waiting for CI to finish on commit abcdef1/)
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/SAM manages this relay/)).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Stop waiting' })).toHaveLength(1);
+    await user.click(screen.getByLabelText(/Show SAM’s own message relays \(1\)/));
+    expect(await screen.findByText(/SAM manages this relay/)).toBeInTheDocument();
+    // The relay is shown but still cannot be stopped; neither can the watch's own wait.
+    expect(screen.getAllByRole('button', { name: 'Stop waiting' })).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: 'Stop waiting' }));
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Stop waiting' })
+    );
+    await waitFor(() =>
+      expect(events.cancelEventSubscription).toHaveBeenCalledWith('p1', 'sub-ci', undefined)
+    );
+  });
+});
+
+describe('signed webhook automation', { timeout: 20_000 }, () => {
+  const SECRET = 'signing-secret-value-0123456789';
+  const signedTrigger = (
+    setup: Record<string, unknown>,
+    config: Record<string, unknown> = {}
+  ): TriggerResponse =>
+    trigger({
+      id: 'trg-slack',
+      name: 'Slack mentions',
+      status: 'active',
+      sourceType: 'webhook',
+      cronExpression: null,
+      webhookConfig: {
+        sourceLabel: null,
+        filterMode: 'all',
+        filters: [
+          { path: 'event.type', operator: 'equals', value: 'app_mention' },
+          { path: 'event.bot_id', operator: 'notExists' },
+        ],
+        includedHeaders: [],
+        verification: { scheme: 'slack_v0' },
+        eventId: { path: 'event_id' },
+        endpointUrl: 'https://api.example.test/api/webhooks/in/trg-slack',
+        tokenLastFour: null,
+        tokenCreatedAt: null,
+        tokenRotatedAt: null,
+        signingSecret: { set: false, setAt: null, setBy: null },
+        setup: {
+          state: 'needs_secret',
+          secretEntryUrl: 'https://app.example.test/projects/p1/automation/trigger/trg-slack',
+          lastEventAt: null,
+          waiting: 0,
+          lastRejection: null,
+          ...setup,
+        },
+        ...config,
+      },
+    });
+
+  it('creates a Slack automation from the caller choice, with no token step', async () => {
+    const user = userEvent.setup();
+    api.createTrigger.mockResolvedValue(signedTrigger({}));
+    api.getTrigger.mockResolvedValue(signedTrigger({}));
+    renderAt('/projects/p1/automation/new');
+    await user.click(await screen.findByRole('radio', { name: /When another service calls SAM/ }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('radio', { name: /^Slack/ }));
+    // Picking Slack fills in the conditions that ignore the app's own messages.
+    expect(screen.getByLabelText('Filter 2 operator')).toHaveValue('notExists');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.selectOptions(screen.getByLabelText('Agent'), 'prof-1');
+    // The starting instructions are filled in too, and say the message is untrusted.
+    expect((screen.getByLabelText('What should it do?') as HTMLTextAreaElement).value).toContain(
+      'untrusted input from Slack'
+    );
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.clear(screen.getByLabelText('Name'));
+    await user.type(screen.getByLabelText('Name'), 'Slack mentions');
+    await user.click(screen.getByText('Advanced options'));
+    expect(screen.getByRole('checkbox', { name: /One run at a time/ })).toBeChecked();
+    expect(screen.getByText('Other events wait their turn.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Create automation' }));
+    await waitFor(() =>
+      expect(api.createTrigger).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({
+          name: 'Slack mentions',
+          sourceType: 'webhook',
+          agentProfileId: 'prof-1',
+          webhookConfig: expect.objectContaining({
+            verification: { scheme: 'slack_v0' },
+            eventId: { path: 'event_id' },
+            filters: [
+              { path: 'event.type', operator: 'equals', value: 'app_mention' },
+              { path: 'event.bot_id', operator: 'notExists' },
+            ],
+          }),
+        })
+      )
+    );
+    // Straight to its page: there is no SAM token to show.
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent(
+        '/projects/p1/automation/trigger/trg-slack'
+      )
+    );
+    expect(screen.queryByText('Save your webhook credential')).not.toBeInTheDocument();
+  });
+
+  it('creates a signed webhook with its signature header and event ID location', async () => {
+    const user = userEvent.setup();
+    api.createTrigger.mockResolvedValue(signedTrigger({}));
+    api.getTrigger.mockResolvedValue(signedTrigger({}));
+    renderAt('/projects/p1/automation/new?start=webhook');
+    await user.click(await screen.findByRole('radio', { name: /Another service that signs/ }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(await screen.findByText(/Enter the header that carries the signature/)).toBeVisible();
+    expect(screen.getByText(/Enter the header that carries the event ID/)).toBeVisible();
+    await user.type(screen.getByLabelText('Signature header'), 'X-Hub-Signature-256');
+    await user.type(screen.getByLabelText('Where is the event ID?'), 'X-GitHub-Delivery');
+    // A header name is not a body path: switching the location clears the key, both ways.
+    await user.selectOptions(screen.getByLabelText('Event ID location'), 'path');
+    expect(screen.getByLabelText('Where is the event ID?')).toHaveValue('');
+    await user.type(screen.getByLabelText('Where is the event ID?'), 'event.id');
+    await user.selectOptions(screen.getByLabelText('Event ID location'), 'header');
+    expect(screen.getByLabelText('Where is the event ID?')).toHaveValue('');
+    await user.type(screen.getByLabelText('Where is the event ID?'), 'X-GitHub-Delivery');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.selectOptions(screen.getByLabelText('Agent'), 'prof-1');
+    await user.type(screen.getByLabelText('What should it do?'), 'Triage it');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.clear(screen.getByLabelText('Name'));
+    await user.type(screen.getByLabelText('Name'), 'Repo');
+    await user.click(screen.getByRole('button', { name: 'Create automation' }));
+    await waitFor(() =>
+      expect(api.createTrigger).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({
+          webhookConfig: expect.objectContaining({
+            verification: { scheme: 'hmac_sha256_body', header: 'x-hub-signature-256' },
+            eventId: { header: 'x-github-delivery' },
+          }),
+        })
+      )
+    );
+  });
+
+  it('saves the signing secret from its page and never shows it again', async () => {
+    const user = userEvent.setup();
+    api.getTrigger.mockResolvedValue(signedTrigger({}));
+    api.setWebhookSigningSecret.mockImplementation(async () => {
+      // The page reloads the automation after saving.
+      api.getTrigger.mockResolvedValue(
+        signedTrigger(
+          { state: 'waiting_for_first_request' },
+          { signingSecret: { set: true, setAt: new Date().toISOString(), setBy: 'owner' } }
+        )
+      );
+      return { signingSecret: { set: true, setAt: new Date().toISOString(), setBy: 'owner' } };
+    });
+    renderAt('/projects/p1/automation/trigger/trg-slack');
+    const status = await screen.findByTestId('webhook-setup-status', undefined, CHAINED_LOAD);
+    expect(status).toHaveTextContent('Paste the signing secret to continue');
+    expect(screen.getByTestId('webhook-url')).toHaveTextContent(
+      'https://api.example.test/api/webhooks/in/trg-slack'
+    );
+    // Nothing about a SAM token on a signed automation.
+    expect(screen.queryByText('Get a new token')).not.toBeInTheDocument();
+    expect(screen.getByText(/subscribe to the\s+bot event/)).toBeInTheDocument();
+    // The Slack app page opens from the steps, in a new tab.
+    expect(
+      screen.getByRole('link', { name: /^Open api\.slack\.com\/apps\s*\(opens in a new tab\)$/ })
+    ).toHaveAttribute('href', 'https://api.slack.com/apps');
+
+    const input = screen.getByLabelText('Signing secret');
+    expect(input).toHaveAttribute('type', 'password');
+    expect(screen.getByRole('button', { name: 'Save secret' })).toBeDisabled();
+    // Whitespace alone cannot be saved.
+    await user.type(input, '   ');
+    expect(screen.getByRole('button', { name: 'Save secret' })).toBeDisabled();
+    await user.clear(input);
+    // The secret is an HMAC key: it is sent exactly as typed, surrounding spaces included.
+    await user.type(input, `  ${SECRET}  `);
+    await user.click(screen.getByRole('button', { name: 'Save secret' }));
+    await waitFor(() =>
+      expect(api.setWebhookSigningSecret).toHaveBeenCalledWith('p1', 'trg-slack', `  ${SECRET}  `)
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('webhook-setup-status')).toHaveTextContent(
+        'Waiting for the first request'
+      )
+    );
+    expect(await screen.findByTestId('signing-secret-saved')).toHaveTextContent(/Saved .* hidden/);
+    expect(screen.queryByLabelText('Signing secret')).not.toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain(SECRET);
+
+    // Replacing opens an empty field again and can be cancelled.
+    await user.click(screen.getByRole('button', { name: 'Replace secret' }));
+    expect(screen.getByLabelText('Signing secret')).toHaveValue('');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByLabelText('Signing secret')).not.toBeInTheDocument();
+  });
+
+  it('says why requests are refused, and moves the panel aside once events arrive', async () => {
+    // The status line prints relative times ("2 min ago") against the fixtures' NOW, which is
+    // taken when the file loads. Freeze only the clock at NOW so the age cannot drift while the
+    // full suite runs; timers stay real so the page's async loading still runs.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW);
+    api.getTrigger.mockResolvedValue(
+      signedTrigger(
+        {
+          state: 'rejecting',
+          lastRejection: {
+            reason: 'invalid_signature',
+            at: new Date(NOW - 60_000).toISOString(),
+            hint: 'The signature did not match. Check that the saved signing secret is current.',
+          },
+        },
+        { signingSecret: { set: true, setAt: new Date(NOW - HOUR).toISOString(), setBy: 'owner' } }
+      )
+    );
+    const first = renderAt('/projects/p1/automation/trigger/trg-slack');
+    const status = await screen.findByTestId('webhook-setup-status', undefined, CHAINED_LOAD);
+    expect(status).toHaveAttribute('data-state', 'rejecting');
+    expect(status).toHaveTextContent('Requests are being refused: the signature doesn’t match');
+    expect(status).toHaveTextContent('Check that the saved signing secret is current');
+    // While setup needs attention the panel is the first thing on the page.
+    await screen.findByRole('region', { name: 'Calls received' }, CHAINED_LOAD);
+    const sections = () =>
+      screen.getAllByRole('region').map((region) => region.getAttribute('aria-label'));
+    expect(sections().indexOf('Webhook connection')).toBeLessThan(
+      sections().indexOf('Calls received')
+    );
+    first.unmount();
+
+    api.getTrigger.mockResolvedValue(
+      signedTrigger(
+        { state: 'receiving', lastEventAt: new Date(NOW - 2 * 60_000).toISOString(), waiting: 3 },
+        { signingSecret: { set: true, setAt: new Date(NOW - HOUR).toISOString(), setBy: 'owner' } }
+      )
+    );
+    renderAt('/projects/p1/automation/trigger/trg-slack');
+    const receiving = await screen.findByTestId('webhook-setup-status', undefined, CHAINED_LOAD);
+    expect(receiving).toHaveTextContent(/Receiving · last event 2 min/);
+    expect(receiving).toHaveTextContent('3 waiting for a free run');
+    // Once it works, the setup steps are gone; the address and secret stay.
+    expect(screen.queryByText(/subscribe to the\s+bot event/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('webhook-url')).toBeInTheDocument();
+    await screen.findByRole('region', { name: 'Calls received' }, CHAINED_LOAD);
+    expect(sections().indexOf('Webhook connection')).toBeGreaterThan(
+      sections().indexOf('Calls received')
+    );
+  });
+
+  it('opens the secret link onto the Replace button when a secret is already saved', async () => {
+    const scroll = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scroll;
+    onTestFinished(() => {
+      Element.prototype.scrollIntoView = original;
+    });
+    api.getTrigger.mockResolvedValue(
+      signedTrigger(
+        { state: 'waiting_for_first_request' },
+        { signingSecret: { set: true, setAt: new Date(NOW - HOUR).toISOString(), setBy: 'owner' } }
+      )
+    );
+    window.history.replaceState(null, '', '/#signing-secret');
+    renderAt('/projects/p1/automation/trigger/trg-slack');
+    const replace = await screen.findByRole('button', { name: 'Replace secret' }, CHAINED_LOAD);
+    await waitFor(() => expect(replace).toHaveFocus());
+    expect(scroll).toHaveBeenCalled();
+    // The fragment is used once.
+    expect(window.location.hash).toBe('');
+  });
+
+  it('keeps Cancel disabled until a secret save settles', async () => {
+    const user = userEvent.setup();
+    let finish!: () => void;
+    api.setWebhookSigningSecret.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = () =>
+            resolve({
+              signingSecret: { set: true, setAt: new Date().toISOString(), setBy: 'owner' },
+            });
+        })
+    );
+    api.getTrigger.mockResolvedValue(
+      signedTrigger(
+        { state: 'receiving' },
+        { signingSecret: { set: true, setAt: new Date(NOW - HOUR).toISOString(), setBy: 'owner' } }
+      )
+    );
+    renderAt('/projects/p1/automation/trigger/trg-slack');
+    await user.click(await screen.findByRole('button', { name: 'Replace secret' }, CHAINED_LOAD));
+    await user.type(screen.getByLabelText('Signing secret'), SECRET);
+    await user.click(screen.getByRole('button', { name: 'Save secret' }));
+    // While the first save is in flight, Cancel cannot open the way to a second one.
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    finish();
+    expect(await screen.findByTestId('signing-secret-saved')).toHaveTextContent(/hidden/);
+  });
+
+  it('lets a viewer see the connection but not the secret field', async () => {
+    scope.userId = 'viewer';
+    api.getTrigger.mockResolvedValue(signedTrigger({}));
+    renderAt('/projects/p1/automation/trigger/trg-slack');
+    expect(
+      await screen.findByText(
+        /Someone who can edit this automation has to save it/,
+        undefined,
+        CHAINED_LOAD
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText('Signing secret')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save secret' })).not.toBeInTheDocument();
+    // The status line does not tell a viewer to do what they cannot.
+    expect(screen.getByTestId('webhook-setup-status')).toHaveTextContent(
+      'Waiting for someone who can edit to save the signing secret'
+    );
+  });
+
+  it('puts each kind of signed call into words', async () => {
+    api.getTrigger.mockResolvedValue(signedTrigger({ state: 'receiving' }));
+    const call = (id: string, outcome: string, errorCode: string | null, executionId?: string) => ({
+      id,
+      triggerId: 'trg-slack',
+      outcome,
+      httpStatus: 202,
+      bodyBytes: 300,
+      executionId: executionId ?? null,
+      errorCode,
+      receivedAt: new Date(NOW - HOUR).toISOString(),
+      processedAt: new Date(NOW - HOUR).toISOString(),
+    });
+    api.listWebhookDeliveries.mockResolvedValue({
+      deliveries: [
+        call('d1', 'queued', null, 'exec-waiting'),
+        call('d2', 'challenge', null),
+        call('d3', 'rejected', 'invalid_signature'),
+        call('d4', 'rejected', 'missing_event_id'),
+        call('d5', 'queue_full', 'queue_full'),
+        call('d6', 'dropped', 'queue_expired', 'exec-dropped'),
+        call('d7', 'rejected', 'stale_timestamp'),
+      ],
+      nextCursor: null,
+    });
+    renderAt('/projects/p1/automation/trigger/trg-slack');
+    const calls = await screen.findByRole('region', { name: 'Calls received' }, CHAINED_LOAD);
+    for (const text of [
+      'Waiting for a free run',
+      'The service checked this address',
+      'Refused: the signature did not match',
+      'Refused: the event had no ID',
+      'Refused: too many events were already waiting',
+      'Dropped: waited too long for a free run',
+      'Refused: the request was too old',
+    ]) {
+      expect(await within(calls).findByText(text)).toBeInTheDocument();
+    }
+    expect(within(calls).getByText('Waiting to start, listed under Recent runs')).toHaveAttribute(
+      'title',
+      'Run ID exec-waiting'
+    );
+    expect(within(calls).getByText('Never started, listed under Recent runs')).toBeInTheDocument();
+  });
+});

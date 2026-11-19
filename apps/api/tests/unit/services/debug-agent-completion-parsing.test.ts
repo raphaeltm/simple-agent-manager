@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import {
@@ -7,6 +7,13 @@ import {
   resolveDebugAgentConfig,
   type ToolCall,
 } from '../../../src/services/debug-agent';
+import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
+
+let settings: ReturnType<typeof createAdminSettingsEnv>;
+beforeEach(() => {
+  settings = createAdminSettingsEnv();
+});
+afterEach(() => settings.sqlite.close());
 
 const mocks = vi.hoisted(() => ({
   queryCloudflareLogs: vi.fn().mockResolvedValue({
@@ -27,6 +34,7 @@ vi.mock('../../../src/services/observability', async (importOriginal) => {
 
 function makeEnv(overrides?: Partial<Env>): Env {
   return {
+    ...settings.env,
     CF_API_TOKEN: 'server-token',
     CF_ACCOUNT_ID: 'account-1',
     ...overrides,
@@ -81,6 +89,7 @@ describe('complete() — validated Completion response parsing', () => {
 
     const config = resolveDebugAgentConfig({} as Env);
     await expect(complete(makeEnv(), config, 'test-feature', [], 100)).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('throws for a tool_calls entry missing required fields', async () => {
@@ -104,6 +113,7 @@ describe('complete() — validated Completion response parsing', () => {
     // function.arguments is missing — every downstream tool_calls consumer
     // (JSON.parse(call.function.arguments)) assumes it is always a string.
     await expect(complete(makeEnv(), config, 'test-feature', [], 100)).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('still throws the HTTP-status error before attempting to parse the body', async () => {

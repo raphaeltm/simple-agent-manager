@@ -51,7 +51,7 @@ export const NORTHWIND = {
   projectName: 'Payments API',
   repository: 'northwind-labs/payments-api',
   defaultBranch: 'main',
-  owner: { id: 'user-priya', name: 'Priya Natarajan', email: 'priya@northwindlabs.dev' },
+  owner: { id: 'user-priya', name: 'Camille Durand', email: 'camille@northwindlabs.dev' },
   members: [
     { id: 'user-marcus', name: 'Marcus Chen', email: 'marcus@northwindlabs.dev' },
     { id: 'user-elena', name: 'Elena Rossi', email: 'elena@northwindlabs.dev' },
@@ -176,10 +176,11 @@ export async function marketingShot(
   const fileName = `${name}${MARKETING_THEME === 'light' ? '-light' : ''}.png`;
   if (process.env.MARKETING_SHOTS) {
     mkdirSync(FEATURE_IMAGE_DIR, { recursive: true });
-    await target.screenshot({ path: `${FEATURE_IMAGE_DIR}/${fileName}` });
+    // Frozen animations (spinners, the Interrupt ring) keep re-captures identical.
+    await target.screenshot({ path: `${FEATURE_IMAGE_DIR}/${fileName}`, animations: 'disabled' });
     return;
   }
   const tmp = resolve(process.cwd(), '../../.codex/tmp/playwright-screenshots');
   mkdirSync(tmp, { recursive: true });
-  await target.screenshot({ path: `${tmp}/${fileName}` });
+  await target.screenshot({ path: `${tmp}/${fileName}`, animations: 'disabled' });
 }

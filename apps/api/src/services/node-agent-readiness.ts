@@ -19,9 +19,10 @@ type NodeAgentFetch = (
 export function getNodeBackendBaseUrl(nodeId: string, env: NodeBackendBaseUrlEnv): string {
   const protocol = env.VM_AGENT_PROTOCOL || 'https';
   const port = env.VM_AGENT_PORT || '8443';
-  // Two-level subdomain ({nodeId}.vm.{domain}) bypasses Cloudflare same-zone routing.
-  // The wildcard Worker route *.{domain}/* matches exactly one subdomain level,
-  // so {nodeId}.vm.{domain} is NOT intercepted — requests reach the VM directly.
+  // The explicit scriptless *.vm.{domain}/* route excludes these backends from
+  // the application Worker (Worker wildcards match multiple subdomain levels).
+  // DNS selects the transport: a proxied A record for legacy VMs, or a proxied
+  // tunnel CNAME for tunnel-backed VMs. There is no direct-IP fallback.
   return `${protocol}://${nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}`;
 }
 

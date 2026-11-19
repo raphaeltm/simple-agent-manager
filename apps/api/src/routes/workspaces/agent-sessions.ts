@@ -213,6 +213,7 @@ agentSessionRoutes.post(
             userId,
             workspaceId: workspace.id,
             chatSessionId: workspace.chatSessionId ?? undefined,
+            callbackGeneration: workspace.callbackGeneration,
             agentSessionId: sessionId,
             createdAt: new Date().toISOString(),
           },

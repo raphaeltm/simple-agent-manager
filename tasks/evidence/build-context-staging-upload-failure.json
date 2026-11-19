@@ -1,0 +1,41 @@
+{
+  "head": "3b65a30f4501ceea29795a8bb78fc33a2dc52cd6",
+  "agentVersion": "28270ffc2f8e2152101c02ca7482b578c3a14797",
+  "vm": {
+    "job": "01M703P5AAM8MVE40TPHFW0N40",
+    "bytes": 8389579,
+    "sha256": "c861aa37887d46b0d26a0f146a27b2d21c4a4331440ae9e97175b40843f12da8",
+    "error": "context upload returned 403"
+  },
+  "instant": {
+    "job": "01M703NMC25Q1SJ23RMG8GF4VG",
+    "bytes": 8389565,
+    "sha256": "0fea14ad8ac8cf7c88115b32ab060df43091fd59e5b791a2fd8d45967afdc7c3",
+    "error": "context upload returned 403"
+  },
+  "publicVMJob": {
+    "id": "01M703P54S9EDP4WD8C26A8J6F",
+    "status": "failed",
+    "reason": "missing interpolation variable before image build"
+  },
+  "instantInitialFixtureLostAfterSleep": true,
+  "uploadCompletionVerified": false,
+  "deployRun": 42611705477,
+  "cleanup": {
+    "verifiedAt": "2026-11-09T12:19:09Z",
+    "activeVMs": 0,
+    "activeFixtureNodes": 0,
+    "fixtureWorkspaces": 0,
+    "fixtureTasks": 0,
+    "fixtureSnapshots": 0,
+    "fixtureEnvironments": 0,
+    "fixtureProfiles": 0,
+    "fixtureJobs": 0,
+    "fixtureReleases": 0,
+    "instantTerminationConfirmedAt": "2026-11-09T12:17:23.527Z",
+    "r2Prefix": "compose-build-contexts/01KVRJCC7Y3NSDQYCPWDRPVJVH/01M7034DE017X8R62HCDHCGCJZ/",
+    "r2Objects": 0,
+    "shadowMode": "off",
+    "releasedToTask": "01M6YQJ2Y7YQQW3CEHR20CJAMS"
+  }
+}

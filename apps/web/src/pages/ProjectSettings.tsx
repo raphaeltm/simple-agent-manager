@@ -1,5 +1,4 @@
 import {
-  AGENT_CATALOG,
   DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS,
   MAX_WORKSPACE_IDLE_TIMEOUT_MS,
   MIN_WORKSPACE_IDLE_TIMEOUT_MS,
@@ -8,13 +7,12 @@ import { Button, Tabs } from '@simple-agent-manager/ui';
 import { useEffect, useRef, useState } from 'react';
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router';
 
+import { ProjectAccountsSection } from '../components/accounts/ProjectAccountsSection';
 import { DeploymentSettings } from '../components/DeploymentSettings';
 import { McpServersManager } from '../components/mcp-servers/McpServersManager';
 import { DefaultCapacityPoolsPanel } from '../components/project-settings/DefaultCapacityPoolsPanel';
-import { ProjectConnectionsSection } from '../components/project-settings/ProjectConnectionsSection';
 import { ProjectMembersSection } from '../components/project-settings/ProjectMembersSection';
 import { ProjectRuntimeConfigSection } from '../components/project-settings/ProjectRuntimeConfigSection';
-import { ProjectAgentsSection } from '../components/ProjectAgentsSection';
 import { RepositoryAccessSettings } from '../components/RepositoryAccessSettings';
 import {
   deserializeResourceRequirements,
@@ -32,10 +30,17 @@ import { useToast } from '../hooks/useToast';
 import { deleteProject, updateProject } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 
+/**
+ * Re-exported so `App.tsx`'s `lazyNamed(() => import('./pages/ProjectSettings'),
+ * 'ProjectSettingsAgents')` route wiring keeps resolving this name after the
+ * Agents tab moved to its own file (`.claude/rules/18-file-size-limits.md`).
+ */
+export { ProjectSettingsAgents } from '../components/project-settings/ProjectSettingsAgentsTab';
+
 const PROJECT_SETTINGS_TABS = [
   { id: 'general', label: 'General', path: 'general' },
   { id: 'access', label: 'Access', path: 'access' },
-  { id: 'connections', label: 'Connections', path: 'connections' },
+  { id: 'accounts', label: 'Accounts', path: 'accounts' },
   { id: 'agents', label: 'Agents', path: 'agents' },
   { id: 'infrastructure', label: 'Infrastructure', path: 'infrastructure' },
   { id: 'runtime', label: 'Runtime', path: 'runtime' },
@@ -49,7 +54,7 @@ export function ProjectSettings() {
     <div className="grid gap-4 min-w-0">
       <div className="grid gap-1 min-w-0">
         <h1 className="sam-type-page-title m-0 text-fg-primary">Project Settings</h1>
-        <div className="text-xs text-fg-muted truncate">{project?.name ?? projectId}</div>
+        <div className="min-h-4 text-xs text-fg-muted truncate">{project?.name}</div>
       </div>
 
       <Tabs
@@ -144,7 +149,7 @@ export function ProjectSettingsGeneral() {
         </div>
       </section>
 
-      <section className="bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_60%,transparent)] backdrop-blur-[12px] rounded-lg border border-danger p-4 grid gap-3">
+      <section className="bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_60%,transparent)] rounded-lg border border-danger p-4 grid gap-3">
         <div>
           <h2 className="sam-type-section-heading m-0 text-danger">Danger Zone</h2>
           <p className="m-0 mt-1 text-xs text-fg-muted">
@@ -210,101 +215,11 @@ export function ProjectSettingsAccess() {
   );
 }
 
-export function ProjectSettingsConnections() {
-  const { projectId, reload } = useProjectContext();
-
-  return <ProjectConnectionsSection projectId={projectId} onUpdated={() => void reload()} />;
-}
-
-export function ProjectSettingsAgents() {
-  const toast = useToast();
-  const { projectId, project, reload } = useProjectContext();
-  const [defaultAgentType, setDefaultAgentType] = useState<string | null>(
-    project?.defaultAgentType ?? null
-  );
-  const [savingAgentType, setSavingAgentType] = useState(false);
-
-  useEffect(() => {
-    if (project) setDefaultAgentType(project.defaultAgentType ?? null);
-  }, [project]);
-
-  const handleSaveAgentType = async (agentId: string) => {
-    const newType = agentId === defaultAgentType ? null : agentId;
-    setSavingAgentType(true);
-    setDefaultAgentType(newType);
-    try {
-      await updateProject(projectId, { defaultAgentType: newType });
-      await reload();
-      toast.success(
-        newType
-          ? `Default agent set to ${AGENT_CATALOG.find((a) => a.id === newType)?.name ?? newType}`
-          : 'Default agent cleared (will use platform default)'
-      );
-    } catch (err) {
-      setDefaultAgentType(project?.defaultAgentType ?? null);
-      toast.error(err instanceof Error ? err.message : 'Failed to update agent type');
-    } finally {
-      setSavingAgentType(false);
-    }
-  };
+export function ProjectSettingsAccounts() {
+  const { projectId, project } = useProjectContext();
 
   return (
-    <div className="grid gap-4">
-      <section className="glass-surface rounded-lg p-4 grid gap-3">
-        <div>
-          <h2 className="sam-type-section-heading m-0 text-fg-primary">Default Agent Type</h2>
-          <p className="m-0 mt-1 text-xs text-fg-muted">
-            Which AI coding agent to use for tasks in this project. Click again to clear.
-          </p>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {AGENT_CATALOG.map((agent) => {
-            const isSelected = defaultAgentType === agent.id;
-            return (
-              <button
-                key={agent.id}
-                type="button"
-                aria-pressed={isSelected}
-                disabled={savingAgentType}
-                onClick={() => void handleSaveAgentType(agent.id)}
-                className={`p-3 rounded-md text-left text-fg-primary transition-all ${
-                  isSelected
-                    ? 'border-2 border-accent bg-accent-tint'
-                    : 'border border-[var(--sam-form-border)] bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_80%,transparent)]'
-                } ${savingAgentType ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}
-              >
-                <div className="font-medium">{agent.name}</div>
-                <div className="text-xs text-fg-muted mt-0.5">{agent.description}</div>
-              </button>
-            );
-          })}
-        </div>
-        {!defaultAgentType && (
-          <div className="text-xs text-fg-muted">
-            No default set - tasks will use the platform default (OpenCode).
-          </div>
-        )}
-      </section>
-
-      <section className="glass-surface rounded-lg p-4 grid gap-3">
-        <div>
-          <h2 className="sam-type-section-heading m-0 text-fg-primary">Agent Overrides</h2>
-          <p className="m-0 mt-1 text-xs text-fg-muted">
-            Per-agent model and permission-mode overrides for this project. Empty fields fall
-            through to your user-level settings.
-          </p>
-        </div>
-        {projectId && (
-          <ProjectAgentsSection
-            projectId={projectId}
-            initialAgentDefaults={project?.agentDefaults ?? null}
-            onUpdated={() => {
-              void reload();
-            }}
-          />
-        )}
-      </section>
-    </div>
+    <ProjectAccountsSection projectId={projectId} projectName={project?.name ?? 'This project'} />
   );
 }
 
@@ -331,14 +246,10 @@ export function ProjectSettingsInfrastructure() {
     const isProjectSwitch = lastProjectIdRef.current !== project.id;
     lastProjectIdRef.current = project.id;
     // Always sync timeout (it has its own save button, no dirty tracking needed)
-    setWorkspaceIdleTimeoutMs(
-      project.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS
-    );
+    setWorkspaceIdleTimeoutMs(project.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS);
     // Only reset resource draft on project switch or when not dirty
     if (isProjectSwitch || !resourceDirtyRef.current) {
-      setResourceReqs(
-        deserializeResourceRequirements(project.resourceRequirementsJson)
-      );
+      setResourceReqs(deserializeResourceRequirements(project.resourceRequirementsJson));
       setLegacyCleared(false);
       resourceDirtyRef.current = false;
     }
@@ -395,8 +306,15 @@ export function ProjectSettingsInfrastructure() {
         </div>
         <ResourceRequirementsInput
           value={resourceReqs}
-          onChange={(next) => { setResourceReqs(next); setResourceErrors({}); resourceDirtyRef.current = true; }}
-          onClearLegacy={() => { setLegacyCleared(true); resourceDirtyRef.current = true; }}
+          onChange={(next) => {
+            setResourceReqs(next);
+            setResourceErrors({});
+            resourceDirtyRef.current = true;
+          }}
+          onClearLegacy={() => {
+            setLegacyCleared(true);
+            resourceDirtyRef.current = true;
+          }}
           disabled={savingResources}
           legacyVmSize={legacyCleared ? null : legacyVmSize}
           inheritLabel="platform default"

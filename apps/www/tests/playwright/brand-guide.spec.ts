@@ -1,0 +1,146 @@
+import { expect, expectNoOverflowOrSeriousAxeViolations, test } from './fixtures';
+
+const PATH = '/brand/';
+
+test.describe('brand guide', () => {
+  test('final frame has no overflow or serious axe violations, and stays out of search', async ({
+    page,
+  }, testInfo) => {
+    // A long page: axe and the full-page capture together outlast the default timeout on phones.
+    test.slow();
+    // Reduced motion renders every section's resting frame, so axe never samples a fade.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto(PATH);
+    await expect(
+      page.getByRole('heading', { level: 1, name: /How SAM looks, sounds and moves/ })
+    ).toBeVisible();
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'noindex');
+    await expect(page.locator('html')).not.toHaveClass(/bg-motion/);
+    // Liveness: the last section rendered too.
+    await expect(page.getByRole('heading', { name: 'Take what you need' })).toBeVisible();
+
+    await expectNoOverflowOrSeriousAxeViolations(page);
+
+    const project = testInfo.project.name.toLowerCase().replace(/\W+/g, '-');
+    await page.screenshot({
+      path: `../../.codex/tmp/playwright-screenshots/www-brand-${project}.png`,
+      fullPage: true,
+      animations: 'disabled',
+    });
+  });
+
+  test('sections reveal as they scroll into view', async ({ page }) => {
+    await page.goto(PATH);
+    await expect(page.locator('html')).toHaveClass(/bg-motion/);
+    // At the top of the page the hero is at rest, not part-way through its scroll motion.
+    const hero = page.locator('.bg-hero');
+    await expect.poll(() => hero.evaluate((el) => el.style.getPropertyValue('--p'))).toBe('0.0000');
+    const heading = page.locator('#voice-title');
+    await expect(heading).not.toHaveClass(/is-in/);
+    await heading.scrollIntoViewIfNeeded();
+    await expect(heading).toHaveClass(/is-in/);
+
+    // Wipes start clipped to nothing, which an ordinary reveal threshold never sees.
+    const share = page.locator('.bg-share');
+    await expect(share).not.toHaveClass(/is-in/);
+    await share.scrollIntoViewIfNeeded();
+    await expect(share).toHaveClass(/is-in/);
+  });
+
+  test('imagery shows the current app captures, and they load', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto(PATH);
+    const desk = page.locator('.bg-collage-desk img:visible');
+    await desk.scrollIntoViewIfNeeded();
+    await expect(desk).toHaveAttribute('src', /\/images\/brand\/app-desktop/);
+    await expect.poll(() => desk.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1600);
+    const phone = page.locator('.bg-collage-phone img:visible');
+    await expect.poll(() => phone.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(780);
+  });
+
+  test('copies a colour value from its swatch', async ({ page, context, browserName }) => {
+    // Both projects run Chromium; the guard documents that clipboard permissions are Chromium-only.
+    test.skip(browserName !== 'chromium', 'clipboard permissions are Chromium-only');
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto(PATH);
+    const button = page.getByRole('button', { name: 'Copy Tile Green hex #004222' });
+    await button.click();
+    await expect(button).toHaveAttribute('data-copied', '');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('#004222');
+    await expect(page.locator('[data-copy-status]')).toHaveText('Copied #004222');
+  });
+
+  test('clear-space guides and the weight slider respond', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto(PATH);
+    const toggle = page.getByRole('button', { name: 'Show clear space' });
+    const stage = page.locator('#logo-stage');
+    await expect(stage).not.toHaveAttribute('data-on');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    await expect(stage).toHaveAttribute('data-on', '');
+
+    const word = page.locator('#specimen-word');
+    await expect(word).toHaveCSS('font-weight', '600');
+    await page.getByLabel('Weight').fill('300');
+    await expect(word).toHaveCSS('font-weight', '300');
+  });
+
+  test('colour track pins and slides on wide screens, and stays a grid on phones', async ({
+    page,
+  }, testInfo) => {
+    await page.goto(PATH);
+    const pin = page.locator('[data-pin]');
+    const track = page.locator('[data-pin-track]');
+    if (testInfo.project.name.includes('Mobile')) {
+      await expect(pin).not.toHaveAttribute('data-pinned');
+      return;
+    }
+    await expect(pin).toHaveAttribute('data-pinned', '');
+    const top = await pin.evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
+    const travel = await pin.evaluate((el) => el.offsetHeight - window.innerHeight);
+    expect(travel).toBeGreaterThan(200);
+
+    const progressAt = (fraction: number) => fraction.toFixed(2);
+    const shiftAt = async (fraction: number) => {
+      await page.evaluate((y) => window.scrollTo(0, y), top + travel * fraction);
+      // Wait for the scroll handler to write the new progress before reading the transform.
+      await expect
+        .poll(async () =>
+          Number(await pin.evaluate((el) => el.style.getPropertyValue('--p'))).toFixed(2)
+        )
+        .toBe(progressAt(fraction));
+      return track.evaluate((el) => new DOMMatrixReadOnly(getComputedStyle(el).transform).m41);
+    };
+    const start = await shiftAt(0.05);
+    const end = await shiftAt(0.95);
+    expect(end).toBeLessThan(start - 200);
+  });
+
+  test('tabbing to an off-screen swatch scrolls the pinned track to it', async ({
+    page,
+  }, testInfo) => {
+    // Phones keep the palette as a plain grid, so there is no pinned track to scroll.
+    test.skip(testInfo.project.name.includes('Mobile'), 'the track only pins on wide screens');
+    await page.goto(PATH);
+    await expect(page.locator('[data-pin]')).toHaveAttribute('data-pinned', '');
+    const last = page.getByRole('button', { name: 'Copy Forest Ink hex #11271d' });
+    await last.focus();
+    // The focus handler scrolls the page and the track's transform follows a frame later,
+    // so poll until the whole button sits inside the viewport.
+    const viewport = page.viewportSize()!;
+    await expect
+      .poll(async () => {
+        const box = await last.boundingBox();
+        if (!box) return 'missing';
+        const inside =
+          box.x >= 0 &&
+          box.y >= 0 &&
+          box.x + box.width <= viewport.width &&
+          box.y + box.height <= viewport.height;
+        return inside ? 'inside' : `outside at ${Math.round(box.x)},${Math.round(box.y)}`;
+      })
+      .toBe('inside');
+  });
+});

@@ -45,12 +45,21 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { capacityPlacementSnapshotForTaskStart } from '../../services/placement-resolver';
+import {
+  type ProviderLimitRecoveryApproval,
+  providerLimitRecoveryApprovalIsCurrent,
+} from '../../services/provider-limit-recovery-approval';
 import { SessionRecoveryAuthorityRevokedError } from '../../services/session-recovery-authority';
 import { handleAgentSession } from './agent-session-step';
-import { putTaskRunnerState, taskRunnerAttemptContext } from './attempt-storage';
+import {
+  persistProviderLimitRecoveryNudge,
+  putTaskRunnerState,
+  taskRunnerAttemptContext,
+} from './attempt-storage';
 import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
 import { handleNodeAgentReady, handleNodeProvisioning, handleNodeSelection } from './node-steps';
 import { recordRunnerPhase } from './phase-timings';
+import { holdTaskForProviderLimit } from './provider-limit-admission';
 import {
   assertCurrentRecoveryAttempt,
   assertRecoveryAuthority,
@@ -133,7 +142,6 @@ export class TaskRunner extends DurableObject<Env> {
       admissionScopeKey: null,
       admissionLeaseToken: null,
       agentReadyStartedAt: null,
-      workspaceReadyStartedAt: null,
       workspaceDispatchStartedAt: null,
       workspaceDispatchAttempts: 0,
       workspaceDispatchLastAttemptAt: null,
@@ -231,7 +239,6 @@ export class TaskRunner extends DurableObject<Env> {
         admissionScopeKey: null,
         admissionLeaseToken: null,
         agentReadyStartedAt: null,
-        workspaceReadyStartedAt: null,
         workspaceDispatchStartedAt: null,
         workspaceDispatchAttempts: 0,
         workspaceDispatchLastAttemptAt: null,
@@ -291,9 +298,11 @@ export class TaskRunner extends DurableObject<Env> {
   }
 
   /**
-   * Called when the VM agent dequeues a workspace build and actual provisioning starts.
-   * This resets the workspace-ready timeout window so time spent queued behind another
-   * devcontainer build does not count against the build itself.
+   * Called when the VM agent dequeues a workspace build and actual provisioning starts. The
+   * callback route has already recorded the durable `workspaces.build_started_at`; the
+   * workspace_ready step measures its deadline from that row (`workspace-creating-deadline.ts`),
+   * so this only wakes the step to re-read it. It writes no clock of its own: a duplicate or a
+   * lost notification cannot move the deadline.
    */
   async notifyWorkspaceBuildStarted(workspaceId: string): Promise<void> {
     const state = await this.getState();
@@ -306,9 +315,6 @@ export class TaskRunner extends DurableObject<Env> {
       });
       return;
     }
-
-    state.workspaceReadyStartedAt = Date.now();
-    await putTaskRunnerState(this.ctx.storage, this.env.DATABASE, state);
 
     log.info('task_runner_do.workspace_build_started', {
       taskId: state.taskId,
@@ -347,11 +353,25 @@ export class TaskRunner extends DurableObject<Env> {
    * Pull a non-terminal runner's alarm forward after external capacity changes.
    * Used by VM admission wakeups; safe to call repeatedly.
    */
-  async nudge(reason?: string): Promise<boolean> {
+  async nudge(reason?: string, approval?: ProviderLimitRecoveryApproval): Promise<boolean> {
     const state = await this.getState();
     if (!state || state.completed) return false;
     if (state.currentStep === 'running' || state.currentStep === 'awaiting_followup') {
       return false;
+    }
+    if (approval) {
+      if (
+        !(await providerLimitRecoveryApprovalIsCurrent(
+          this.env,
+          state.taskId,
+          state.projectId,
+          approval
+        ))
+      )
+        return false;
+      if (!state.config.recoveryAttemptId || !(await this.isCurrentRecoveryAttempt(state)))
+        return false;
+      return persistProviderLimitRecoveryNudge(this.ctx.storage, state, approval);
     }
     await this.ctx.storage.setAlarm(Date.now());
     log.info('task_runner_do.nudged', {
@@ -394,6 +414,7 @@ export class TaskRunner extends DurableObject<Env> {
 
     try {
       await this.assertRecoveryAuthority(state);
+      if (await holdTaskForProviderLimit(state, rc)) return;
       switch (state.currentStep) {
         case 'node_selection':
           await handleNodeSelection(state, rc);
@@ -442,7 +463,7 @@ export class TaskRunner extends DurableObject<Env> {
       const errorMessage = err instanceof Error ? err.message : String(err);
       const durationMs = Date.now() - stepStartMs;
 
-      recordRunnerPhase(state, 'error');
+      this.ctx.waitUntil(recordRunnerPhase(this.env.DATABASE, state, 'error'));
       log.error('task_runner_do.step_error', {
         taskId: state.taskId,
         step: state.currentStep,
@@ -496,7 +517,7 @@ export class TaskRunner extends DurableObject<Env> {
           state,
           'task_runner.advance_to_step'
         );
-        recordRunnerPhase(state, 'success');
+        this.ctx.waitUntil(recordRunnerPhase(this.env.DATABASE, state, 'success'));
         state.currentStep = nextStep;
         state.retryCount = 0;
         state.lastStepAt = Date.now();
@@ -568,6 +589,7 @@ export class TaskRunner extends DurableObject<Env> {
               projectId: currentState.projectId,
               chatSessionId: wakeChatSessionId,
               step,
+              attemptId: currentState.config.recoveryAttemptId,
             })
           );
         }
@@ -590,7 +612,6 @@ export class TaskRunner extends DurableObject<Env> {
     raw.admissionScopeKey ??= null;
     raw.admissionLeaseToken ??= null;
     raw.agentReadyStartedAt ??= null;
-    raw.workspaceReadyStartedAt ??= null;
     raw.workspaceDispatchStartedAt ??= null;
     raw.workspaceDispatchAttempts ??= 0;
     raw.workspaceDispatchLastAttemptAt ??= null;

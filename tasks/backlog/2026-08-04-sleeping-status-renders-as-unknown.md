@@ -1,5 +1,10 @@
 # A sleeping Instant session renders as "Unknown" (and often "Unhealthy")
 
+> **Reconciliation 2026-10-26:** Still open. Pointer correction: the sleep-teardown
+> `healthStatus: 'unhealthy'` write is now `apps/api/src/services/session-sleep-teardown.ts:356`;
+> the container writes (`vm-agent-container-runtime.ts:178,213`) and the badges
+> (`NodeCard.tsx:142-143`, `NodeOverviewSection.tsx:52-53`) are unchanged.
+
 > **Reconciliation 2026-10-05:** #2230 (ee80b0ee0) added `sleeping` → **Sleeping** with the muted palette to `statusConfig` (`packages/ui/src/components/StatusBadge.tsx:72-76`), plus a rendered-label test (`packages/ui/tests/StatusBadge.test.tsx:17`). Call sites pass the raw status, so sleeping workspaces and nodes now read "Sleeping" (`WorkspaceCard.tsx:98`, `NodeCard.tsx:142`, `NodeOverviewSection.tsx:52`). The docs caution paragraph was already removed by #1785 (00169b016). Still open:
 >
 > - A sleeping Instant node still shows **Unhealthy** next to it. It is written at `vm-agent-container-runtime.ts:178,213` and `services/session-sleep-teardown.ts:236`, and rendered at `NodeCard.tsx:143` and `NodeOverviewSection.tsx:53`.
@@ -62,3 +67,8 @@ is checking whether their work survived.
       — the fallback silently hides every one of them
 - [ ] Simplify the "Don't read too much into the badges" paragraph in
       `guides/instant-sessions.md` once the label is correct
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Evidence: #2230 added sleeping to StatusBadge statusConfig; health_status='unhealthy' still written at vm-agent-container-runtime.ts:178,213 and session-sleep-teardown.ts:307; NodeOverviewSection.tsx:53 renders the health badge (NodeCard.tsx removed by #2528)
+- Status: Remaining: sleeping node shown Unhealthy, Playwright audit, audit of other missing statuses, unused STATUS_LABELS

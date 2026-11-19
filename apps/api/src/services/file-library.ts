@@ -20,15 +20,18 @@ import type {
   UpdateTagsRequest,
 } from '@simple-agent-manager/shared';
 import { buildLibraryR2Key } from '@simple-agent-manager/shared';
-import { and, asc, desc, eq, inArray, like, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, like, notLike, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { chunk } from '../lib/d1-limits';
 import { log } from '../lib/logger';
+import { releaseArrayBuffer } from '../lib/release-array-buffer';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import type { AppDb } from '../middleware/project-auth';
 import {
+  AES_GCM_TAG_BYTES,
   decryptFile,
   encryptFile,
   metadataToR2CustomMetadata,
@@ -281,10 +284,16 @@ export async function uploadFile(
   const now = new Date().toISOString();
 
   // Store encrypted data in R2 with encryption metadata
-  await r2.put(r2Key, ciphertext, {
-    customMetadata: metadataToR2CustomMetadata(metadata),
-    httpMetadata: { contentType: 'application/octet-stream' },
-  });
+  try {
+    await r2.put(r2Key, ciphertext, {
+      customMetadata: metadataToR2CustomMetadata(metadata),
+      httpMetadata: { contentType: 'application/octet-stream' },
+    });
+  } finally {
+    // R2 has consumed the ciphertext. Release this owned buffer before another
+    // whole-file write; bounded memory must not depend on the next GC cycle.
+    releaseArrayBuffer(ciphertext);
+  }
 
   // Insert D1 metadata
   const fileRow: schema.NewProjectFile = {
@@ -371,10 +380,16 @@ export async function replaceFile(
   const now = new Date().toISOString();
 
   // Upload new encrypted data to R2 (overwrites existing object — key is stable)
-  await r2.put(r2Key, ciphertext, {
-    customMetadata: metadataToR2CustomMetadata(metadata),
-    httpMetadata: { contentType: 'application/octet-stream' },
-  });
+  try {
+    await r2.put(r2Key, ciphertext, {
+      customMetadata: metadataToR2CustomMetadata(metadata),
+      httpMetadata: { contentType: 'application/octet-stream' },
+    });
+  } finally {
+    // R2 has consumed the ciphertext. Release this owned buffer before another
+    // whole-file write; bounded memory must not depend on the next GC cycle.
+    releaseArrayBuffer(ciphertext);
+  }
 
   // Update D1
   await db
@@ -419,24 +434,22 @@ function getListDefaultPageSize(env: Env): number {
   return isNaN(parsed) || parsed <= 0 ? 50 : parsed;
 }
 
-function chunk<T>(items: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
-  }
-  return chunks;
-}
-
 export async function listFiles(
   db: AppDb,
   env: Env,
   projectId: string,
-  filters: ListFilesRequest = {}
+  filters: ListFilesRequest = {},
+  /** Hide every file whose directory starts with this prefix (restricted directories). */
+  options: { excludeDirectoryPrefix?: string } = {}
 ): Promise<ListFilesResponse> {
   const pageSize = Math.min(filters.limit ?? getListDefaultPageSize(env), getListMaxPageSize(env));
 
   // Build conditions
   const conditions = [eq(schema.projectFiles.projectId, projectId)];
+  if (options.excludeDirectoryPrefix) {
+    const escaped = options.excludeDirectoryPrefix.replace(/[%_]/g, '\\$&');
+    conditions.push(notLike(schema.projectFiles.directory, `${escaped}%`));
+  }
 
   // Directory filtering
   if (filters.directory) {
@@ -637,7 +650,8 @@ export async function downloadFile(
   r2: R2Bucket,
   encryptionKey: string,
   projectId: string,
-  fileId: string
+  fileId: string,
+  maxPlaintextBytes?: number
 ): Promise<{ data: ArrayBuffer; file: ProjectFile; metadata: FileEncryptionMetadata }> {
   const rows = await db
     .select()
@@ -658,12 +672,23 @@ export async function downloadFile(
     throw errors.internal('File data not found in storage');
   }
 
+  // A caller that reserved memory from earlier metadata must not read a larger replacement.
+  if (maxPlaintextBytes !== undefined && r2Object.size > maxPlaintextBytes + AES_GCM_TAG_BYTES) {
+    await r2Object.body.cancel();
+    throw errors.conflict('File changed while loading. Please retry.');
+  }
+
   // Read encryption metadata from R2 custom metadata
   const encMeta = r2CustomMetadataToMetadata(r2Object.customMetadata ?? {});
 
   // Decrypt
   const ciphertext = await r2Object.arrayBuffer();
-  const plaintext = await decryptFile(ciphertext, encMeta, encryptionKey);
+  let plaintext: ArrayBuffer;
+  try {
+    plaintext = await decryptFile(ciphertext, encMeta, encryptionKey);
+  } finally {
+    releaseArrayBuffer(ciphertext);
+  }
 
   return {
     data: plaintext,
@@ -676,32 +701,7 @@ export async function downloadFile(
 // Delete
 // ---------------------------------------------------------------------------
 
-export async function deleteFile(
-  db: AppDb,
-  r2: R2Bucket,
-  projectId: string,
-  fileId: string
-): Promise<void> {
-  const rows = await db
-    .select()
-    .from(schema.projectFiles)
-    .where(and(eq(schema.projectFiles.id, fileId), eq(schema.projectFiles.projectId, projectId)))
-    .limit(1);
-
-  if (!rows[0]) {
-    throw errors.notFound('File');
-  }
-
-  // Delete D1 first (safer order — orphaned R2 objects are benign, orphaned D1 rows are errors)
-  // Explicitly delete tags since D1 may not have PRAGMA foreign_keys = ON
-  await db.delete(schema.projectFileTags).where(eq(schema.projectFileTags.fileId, fileId));
-  await db.delete(schema.projectFiles).where(eq(schema.projectFiles.id, fileId));
-
-  // Then delete R2 object (best-effort)
-  await r2.delete(rows[0].r2Key);
-
-  log.info('file_library_delete', { projectId, fileId, filename: rows[0].filename });
-}
+export { deleteFile, deleteFiles } from './file-library-delete';
 
 // ---------------------------------------------------------------------------
 // Tag management

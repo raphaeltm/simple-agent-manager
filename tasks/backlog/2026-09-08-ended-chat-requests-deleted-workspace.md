@@ -1,5 +1,18 @@
 # Avoid deleted-workspace requests when opening ended chat history
 
+> **Reconciliation 2026-10-26:** Still open for the chat's owner. #2381 (`110730c2a`) now passes
+> the workspace id only when the viewer owns the chat (`useSessionLifecycle.ts:69`,
+> `ownedWorkspaceId` in `session-viewer-access.ts:67`), so teammates on a shared chat no longer
+> request it. `useSessionInfrastructure.ts` is unchanged and still retries a 404. Two newer backlog
+> files reported the same retry; both are absorbed into this file (see "Carried over 2026-10-26")
+> and removed from the backlog.
+
+> **Reconciliation 2026-10-12:** still open; `useSessionInfrastructure.ts` did not change this week.
+> Pointer fix for the "Related" line at the end: #2231 (`1c7f8dd90`) moved the restore-provisioning
+> effect from `useProjectChatState.ts:525-557` to
+> `pages/project-chat/useProvisioningTracker.ts:147-198`. See the 2026-10-12 note in
+> `2026-09-09-chat-requests-reaped-task-404.md`.
+
 > **Reconciliation 2026-09-30:** still open. `useSessionInfrastructure.ts:20-66` still fetches the
 > workspace unconditionally and retries on a 404 (unchanged since #2030). This file now absorbs the
 > duplicate `2026-09-29-chat-page-404s-on-deleted-session-workspace.md`; see the section at the end.
@@ -40,6 +53,36 @@ consolidated here by the weekly queue audit:
 - Once this is fixed, drop the workspace-404 allow-list in
   `apps/web/tests/playwright/staging-tool-rail-verify.spec.ts:167-176`.
 
+## Carried over 2026-10-26
+
+Consolidated by the weekly queue audit from the duplicates `2026-10-19-chat-page-workspace-404-retries`
+and `2026-10-24-chat-retries-deleted-workspace` (removed from the backlog 2026-10-26; see git history):
+
+- Staging, 2026-10-19 (shared-sessions PR, idea `01M59MYE4GY91BWTE8TZF1ZB5D`): the owner's page on a
+  stopped Instant chat logged three 404s for its workspace. Since #2381 only the chat's owner
+  requests it (`ownedWorkspaceId`), so the bug now affects owners of chats whose workspace is gone.
+- Staging, 2026-10-24 02:18Z (comment reader live check): session
+  `160d9aed-b74d-4956-8d2a-1f2fb00a2167`, workspace `01M5K1VJ1G490QGPYTV9APDB8W` made 4 failing
+  requests on desktop and 2 on a phone.
+- Additional acceptance criteria from those files:
+  - [ ] A 404 for the session's workspace means "the workspace is gone": it is not retried, the page
+        makes at most one request for that workspace id, and the chat shows its existing
+        stopped/archived state without console errors.
+  - [ ] Transient failures (network, 5xx) still retry as today.
+  - [ ] Paired tests: one request and the "gone" state on a 404; retries on a 503.
+
 Related: `tasks/backlog/2026-09-09-chat-requests-reaped-task-404.md` is the same symptom from a
 different hook. There, an ended chat requests a deleted task through the restore-provisioning
 effect in `apps/web/src/pages/project-chat/useProjectChatState.ts:525-557`.
+
+## Folded in (2026-11-16)
+
+Two later reports of the same retry-on-404 in `useSessionInfrastructure` (`apps/web/src/components/project-message-view/useSessionInfrastructure.ts`) were folded in here and archived:
+
+- `2026-11-12-slept-session-workspace-404-console-errors`: the **sleeping** case. A slept session's workspace row is retired, and `useRetryingInfrastructureResource` still retries it on the `[2s, 5s, 10s]` schedule (about four 404s per load). Staging sessions `ff0d98a2-a98c-4106-bb3f-f248321de941`, `c600096d-f10f-4a99-a9cd-e6c72d5bbeb9` (2026-11-12).
+- `2026-11-13-chat-page-fetches-deleted-workspace`: reproduces on a session still on the root object (`01KJNR9R3TEN3KX1ETE33852R8` / `b82b360a-…`, workspace `01M2EYHVKGDJ0QZGF3G5VGM7ZK`), so the archive path is not the cause.
+
+Added criteria:
+
+- [ ] A sleeping or stopped session does not retry a workspace it knows is retired.
+- [ ] Opening a slept chat on staging produces no 404 console errors.

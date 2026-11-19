@@ -11,10 +11,9 @@
  * exercises the same entry point production takes rather than the SQL helpers
  * underneath it (.claude/rules/62).
  */
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-
-import type { ProjectData } from '../../src/durable-objects/project-data';
 
 function getStub(projectId: string): DurableObjectStub<ProjectData> {
   const id = env.PROJECT_DATA.idFromName(projectId);

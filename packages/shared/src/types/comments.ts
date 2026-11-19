@@ -3,9 +3,12 @@
  * commenting.
  *
  * Anchor types form a discriminated union on `kind`. Phase 1 supports
- * 'message' and 'library_file'. Block anchors, fuzzy re-anchoring,
- * reactions, and mentions are outside this slice.
+ * 'message' and 'library_file'. Block anchors, fuzzy re-anchoring and
+ * reactions are outside this slice. Message comments carry structured
+ * @mentions of project members (`CommentMention`); library-file comments do not.
  */
+import type { InboxItemCommentThread } from './inbox-tasks';
+import type { SessionViewerAccess } from './session-access';
 
 export const COMMENT_STATUSES = ['open', 'sent', 'resolved'] as const;
 export type CommentStatus = (typeof COMMENT_STATUSES)[number];
@@ -37,6 +40,24 @@ export type CommentAuthor = {
 
 export type MessageCommentAuthor = CommentAuthor;
 
+/**
+ * A project member @mentioned in a message comment or reply.
+ *
+ * Mentions are structured: the client sends user IDs picked from the member
+ * list, and the server keeps only IDs that belong to active project members.
+ * `displayName` is snapshotted by the server at write time for rendering; it is
+ * never used as an identity. Plain `@text` that was not picked stays text.
+ */
+export type CommentMention = {
+  userId: string;
+  displayName: string | null;
+};
+
+/** Client input for a mention: only the ID is trusted, and only after server validation. */
+export type CommentMentionInput = {
+  userId: string;
+};
+
 export type MessageCommentAnchor = {
   kind: 'message';
   messageId: string;
@@ -53,6 +74,14 @@ export type CommentAnchor = MessageCommentAnchor | LibraryFileCommentAnchor;
 
 export const COMMENT_ANCHOR_KINDS = ['message', 'library_file'] as const;
 export type CommentAnchorKind = (typeof COMMENT_ANCHOR_KINDS)[number];
+
+/**
+ * Every anchor kind the comment store holds: the kinds above (the `CommentAnchor` union clients
+ * render) plus `inbox_item`, discussion on an inbox item such as a human task (inbox slice H1),
+ * which is read through the task view rather than as a `CommentAnchor`.
+ */
+export const STORED_COMMENT_ANCHOR_KINDS = [...COMMENT_ANCHOR_KINDS, 'inbox_item'] as const;
+export type StoredCommentAnchorKind = (typeof STORED_COMMENT_ANCHOR_KINDS)[number];
 
 export type MessageCommentSourceMessageContext = {
   id: string;
@@ -84,6 +113,8 @@ export type CommentReply = {
   sequence?: number;
   clientMutationId?: string | null;
   sentToAgent?: boolean;
+  /** Message replies only. */
+  mentions?: CommentMention[];
 };
 
 export type MessageCommentReply = CommentReply;
@@ -112,6 +143,7 @@ export type MessageCommentThread = {
   lastReplyAt?: number | null;
   sourceMessage?: MessageCommentSourceMessageContext | null;
   directive?: MessageCommentDirectiveState | null;
+  mentions?: CommentMention[];
   replies: MessageCommentReply[];
 };
 
@@ -130,6 +162,29 @@ export type MessageCommentMutationResponse = {
   idempotent: boolean;
 };
 
+/**
+ * A comment thread with the stored chat messages around the message it is anchored to, for
+ * reading the comment in its conversation from the Comments page
+ * (`GET /api/projects/:projectId/sessions/:sessionId/comments/:threadId/context`).
+ *
+ * The window is counted in displayed messages: a run of streamed agent (or thinking) rows is
+ * one message. It always holds the whole anchored message, then a few messages each side.
+ * Further pages come from `GET .../sessions/:sessionId/messages` with `before`/`after`
+ * cursors taken from the first and last rows.
+ */
+export type MessageCommentContextResponse<TMessage = Record<string, unknown>> = {
+  thread: MessageCommentThread;
+  session: { id: string; topic: string | null };
+  /** The viewer's access to the session: only an owner or grantee can send to the agent. */
+  viewerAccess: SessionViewerAccess;
+  /** `found` is false when the anchored message is no longer in the transcript. */
+  anchor: { messageId: string; found: boolean };
+  /** Stored rows in transcript order. Empty when the anchored message is gone. */
+  messages: TMessage[];
+  hasMoreBefore: boolean;
+  hasMoreAfter: boolean;
+};
+
 export type MessageCommentReplyMutationResponse = {
   thread: MessageCommentThread;
   reply: MessageCommentReply;
@@ -137,11 +192,7 @@ export type MessageCommentReplyMutationResponse = {
 };
 
 export type MessageCommentThreadEventReason =
-  | 'thread_created'
-  | 'reply_created'
-  | 'marked_sent'
-  | 'resolved'
-  | 'reopened';
+  'thread_created' | 'reply_created' | 'marked_sent' | 'resolved' | 'reopened';
 
 export type MessageCommentThreadEvent = {
   type: 'comment.thread.changed';
@@ -292,12 +343,18 @@ export interface ProjectCommentListResponse {
   sessions: ProjectCommentSessionRef[];
   /** Filenames for every file referenced by `fileThreads`. Same reasoning. */
   files: ProjectCommentFileRef[];
+  /**
+   * Discussion on human tasks (inbox slice H1), limited to tasks the viewer may read, with the
+   * task titles. Optional for clients built before the field existed.
+   */
+  inboxItemThreads?: InboxItemCommentThread[];
+  inboxItems?: Array<{ ref: string; id: string; title: string }>;
   /** True when the row or byte budget kept the response from covering every thread. */
   hasMore: boolean;
   /**
-   * Total threads in the project across both anchor kinds, matching the same
-   * status filter. Present so a truncated list can never be read as a complete
-   * one (.claude/rules/65-capped-selection-must-rank-and-disclose.md).
+   * Total threads visible to this viewer across every anchor kind, matching the
+   * same status filter. Present so a truncated list can never be read as a
+   * complete one (.claude/rules/65-capped-selection-must-rank-and-disclose.md).
    */
   totalCount: number;
 }

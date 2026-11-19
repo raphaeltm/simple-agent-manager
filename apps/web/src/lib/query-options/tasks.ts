@@ -1,13 +1,6 @@
-import type { Task } from '@simple-agent-manager/shared';
 import { queryOptions } from '@tanstack/react-query';
 
-import {
-  getProjectTask,
-  getTaskSessions,
-  listActiveTasks,
-  listProjectTasks,
-  listTaskEvents,
-} from '../api';
+import { getProjectTask, getTaskSessions, listActiveTasks, listTaskEvents } from '../api';
 
 /**
  * The dashboard's cross-project active-task list (`GET /api/dashboard/active-tasks`).
@@ -24,54 +17,23 @@ export const taskQueryKeys = {
   active: (queryScope: string) => [...taskQueryKeys.all(queryScope), 'active'] as const,
   project: (queryScope: string, projectId: string) =>
     [...taskQueryKeys.all(queryScope), 'project', projectId] as const,
-  draftIdeas: (queryScope: string, projectId: string, limit: number, maxPages: number) =>
-    [...taskQueryKeys.project(queryScope, projectId), 'draft-ideas', { limit, maxPages }] as const,
   detail: (queryScope: string, projectId: string, taskId: string) =>
     [...taskQueryKeys.project(queryScope, projectId), 'detail', taskId] as const,
   sessions: (queryScope: string, projectId: string, taskId: string) =>
     [...taskQueryKeys.project(queryScope, projectId), 'sessions', taskId] as const,
   events: (queryScope: string, projectId: string, taskId: string, limit?: number) =>
-    [...taskQueryKeys.project(queryScope, projectId), 'events', taskId, { limit: limit ?? null }] as const,
+    [
+      ...taskQueryKeys.project(queryScope, projectId),
+      'events',
+      taskId,
+      { limit: limit ?? null },
+    ] as const,
 };
 
 export function activeTasksQueryOptions(queryScope: string) {
   return queryOptions({
     queryKey: taskQueryKeys.active(queryScope),
     queryFn: async () => (await listActiveTasks()).tasks,
-  });
-}
-
-async function listAllDraftIdeas(projectId: string, limit: number, maxPages: number) {
-  const tasks: Task[] = [];
-  let cursor: string | undefined;
-  let pagesLoaded = 0;
-
-  do {
-    const result = await listProjectTasks(projectId, {
-      status: 'draft',
-      limit,
-      cursor,
-    });
-    tasks.push(...result.tasks);
-    cursor = result.nextCursor ?? undefined;
-    pagesLoaded += 1;
-  } while (cursor && pagesLoaded < maxPages);
-
-  return {
-    tasks: tasks.filter((task) => task.status === 'draft'),
-    truncated: Boolean(cursor),
-  };
-}
-
-export function draftIdeasQueryOptions(
-  queryScope: string,
-  projectId: string,
-  limit: number,
-  maxPages: number
-) {
-  return queryOptions({
-    queryKey: taskQueryKeys.draftIdeas(queryScope, projectId, limit, maxPages),
-    queryFn: () => listAllDraftIdeas(projectId, limit, maxPages),
   });
 }
 

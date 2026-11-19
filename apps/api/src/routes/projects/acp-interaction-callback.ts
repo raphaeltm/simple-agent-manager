@@ -19,6 +19,10 @@ import {
   settleInteraction,
 } from '../../services/acp-interaction-store';
 import { verifyCallbackToken } from '../../services/jwt';
+import {
+  assertWorkspaceAcceptsCallback,
+  loadWorkspaceCallbackIdentity,
+} from '../workspaces/_helpers';
 
 const acpInteractionCallbackRoute = new Hono<{ Bindings: Env }>();
 
@@ -42,24 +46,13 @@ async function verifyWorkspaceCallback(c: {
     throw errors.unauthorized('Callback token does not match workspace');
   }
 
-  const db = drizzle(c.env.DATABASE, { schema });
-  const row = await db
-    .select({
-      projectId: schema.workspaces.projectId,
-      chatSessionId: schema.workspaces.chatSessionId,
-      userId: schema.workspaces.userId,
-      status: schema.workspaces.status,
-    })
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, workspaceId))
-    .get();
+  const row = await loadWorkspaceCallbackIdentity(c.env, workspaceId);
   if (row?.projectId !== projectId || !row.chatSessionId) {
     throw errors.notFound('Workspace');
   }
   const chatSessionId = row.chatSessionId;
-  if (!['creating', 'running', 'recovery'].includes(row.status)) {
-    throw errors.gone(`Workspace is ${row.status}`);
-  }
+  // Active workspace on a node that is not ending; otherwise designed 410 (rule 34).
+  await assertWorkspaceAcceptsCallback(c.env, row, workspaceId, 'acp_interaction');
   return {
     projectId,
     workspaceId,

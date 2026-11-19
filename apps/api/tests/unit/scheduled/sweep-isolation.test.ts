@@ -64,13 +64,13 @@ describe('createSweepIsolator', () => {
       order.push('cron_triggers');
       return { fired: 3 };
     });
-    const last = await sweeps.isolate('trial_expire', async () => {
-      order.push('trial_expire');
+    const last = await sweeps.isolate('compute_usage_cleanup', async () => {
+      order.push('compute_usage_cleanup');
       return { expired: 2 };
     });
 
     // Every sweep ran, in order — this is the whole point.
-    expect(order).toEqual(['diagnosis_reconcile', 'node_cleanup', 'cron_triggers', 'trial_expire']);
+    expect(order).toEqual(['diagnosis_reconcile', 'node_cleanup', 'cron_triggers', 'compute_usage_cleanup']);
 
     expect(first).toEqual({ restarted: 1 });
     expect(downstream).toEqual({ fired: 3 });
@@ -88,14 +88,14 @@ describe('createSweepIsolator', () => {
       throw new Error('boom');
     });
     await sweeps.isolate('cron_triggers', async () => ({ fired: 0 }));
-    await sweeps.isolate('trial_expire', async () => {
+    await sweeps.isolate('compute_usage_cleanup', async () => {
       throw new Error('kaboom');
     });
 
-    expect(sweeps.failedSweeps()).toEqual(['node_cleanup', 'trial_expire']);
+    expect(sweeps.failedSweeps()).toEqual(['node_cleanup', 'compute_usage_cleanup']);
     expect(sweeps.failures()).toEqual([
       { sweep: 'node_cleanup', error: 'boom' },
-      { sweep: 'trial_expire', error: 'kaboom' },
+      { sweep: 'compute_usage_cleanup', error: 'kaboom' },
     ]);
 
     expect(logError).toHaveBeenCalledWith(

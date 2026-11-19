@@ -5,6 +5,7 @@ import {
   DEFAULT_GCP_WIF_POOL_ID,
   DEFAULT_GCP_WIF_PROVIDER_ID,
   GCP_CREDENTIAL_VERSION,
+  GCP_REQUIRED_APIS,
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
@@ -48,6 +49,7 @@ const gcpProjectListResponseSchema = v.object({
 const gcpOperationSchema = v.object({
   name: v.optional(v.string()),
   done: v.optional(v.boolean()),
+  error: v.optional(v.object({ message: v.optional(v.string()) })),
 });
 
 const iamBindingSchema = v.object({
@@ -175,19 +177,12 @@ export async function getProjectNumber(
   return data.projectNumber;
 }
 
+/** APIs enabled for VM provisioning; the list lives in shared so the UI can name them. */
+const VM_APIS = GCP_REQUIRED_APIS.map((api) => api.service);
+
 /**
  * Enable required GCP APIs for the project.
  */
-/** Default APIs enabled for VM provisioning. */
-const VM_APIS = [
-  'cloudresourcemanager.googleapis.com',
-  'iam.googleapis.com',
-  'iamcredentials.googleapis.com',
-  'sts.googleapis.com',
-  'compute.googleapis.com',
-  'aiplatform.googleapis.com',
-];
-
 export async function enableApis(
   oauthToken: string,
   projectNumber: string,
@@ -220,6 +215,14 @@ export async function enableApis(
 
   // Poll the long-running operation
   const op = await readResponseJson(res, gcpOperationSchema, 'gcp.service_usage.batch_enable');
+  // A completed operation can still have failed; recording the APIs as enabled would hide them.
+  if (op.error) {
+    throw new GcpApiError({
+      step: 'enable_apis',
+      message: 'Failed to enable APIs',
+      rawBody: op.error.message,
+    });
+  }
   if (!op.done) {
     await pollOperation(oauthToken, requireOperationName(op, 'enable_apis'), timeoutMs);
   }
@@ -740,5 +743,7 @@ export async function runGcpSetup(
     wifPoolId: poolId,
     wifProviderId: providerId,
     defaultZone,
+    // Recorded so a later addition to the required list shows this credential as needing setup.
+    enabledApis: [...VM_APIS],
   };
 }

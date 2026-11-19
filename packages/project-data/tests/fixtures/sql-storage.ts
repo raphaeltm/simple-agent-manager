@@ -1,0 +1,47 @@
+import type Database from 'better-sqlite3';
+
+export function createSqlStorage(db: Database.Database): SqlStorage {
+  return {
+    exec(query: string, ...params: unknown[]) {
+      const trimmed = query.trim().toUpperCase();
+      const isSelect =
+        trimmed.startsWith('SELECT') ||
+        trimmed.startsWith('WITH') ||
+        trimmed.startsWith('PRAGMA TABLE_INFO') ||
+        /\bRETURNING\b/.test(trimmed);
+
+      if (isSelect) {
+        const stmt = db.prepare(query);
+        const rows = params.length > 0 ? stmt.all(...params) : stmt.all();
+        return {
+          toArray() {
+            return rows;
+          },
+          [Symbol.iterator]() {
+            return rows[Symbol.iterator]();
+          },
+          rowsWritten: /\bRETURNING\b/.test(trimmed) ? rows.length : 0,
+        };
+      }
+
+      if (params.length === 0) {
+        db.exec(query);
+        return {
+          toArray() {
+            return [];
+          },
+          rowsWritten: 0,
+        };
+      }
+
+      const stmt = db.prepare(query);
+      const result = stmt.run(...params);
+      return {
+        toArray() {
+          return [];
+        },
+        rowsWritten: result.changes,
+      };
+    },
+  } as unknown as SqlStorage;
+}

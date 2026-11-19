@@ -22,6 +22,7 @@ import type {
 
 import type { Env } from '../../env';
 import type { TaskStartCapacityPoolSelection } from '../../services/placement-resolver';
+import type { ProviderLimitRecoveryApproval } from '../../services/provider-limit-recovery-approval';
 import type { ProjectEventWakeRecoveryGuard } from '../../services/session-recovery-authority';
 import type { TaskRunnerStartGuard } from '../../services/task-runner-start-guard';
 
@@ -43,6 +44,18 @@ export interface StepResults {
   agentStarted: boolean;
   /** First restore RPC operation deadline plus one request window to retrieve its result. */
   snapshotRestoreDeadlineAt?: number | null;
+  /**
+   * Snapshot generation this run's restore committed. The wake's commit stamps the source
+   * receipt of exactly this generation (`transitionToInProgress`); a successor capture would
+   * have replaced the row's live generation by then.
+   */
+  restoredSnapshotGeneration?: string | null;
+  /**
+   * The restore brought back the snapshot's files (`snapshotRestore: 'restored'`). Only then
+   * may the commit record the restore on the source's receipt and release the source: a
+   * `degraded` restore can have left HOME or WIP behind. Unknown counts as incomplete.
+   */
+  snapshotRestoreComplete?: boolean;
   /** Opaque MCP token for agent platform awareness (stored in KV) */
   mcpToken: string | null;
   /** VM size actually provisioned for an auto-provisioned node. May be smaller
@@ -50,11 +63,23 @@ export interface StepResults {
   provisionedVmSize: VMSize | null;
   /** Capacity pool/source/candidate audit snapshot selected for this run placement. */
   capacityPlacementSnapshot?: CapacityPlacementSnapshot | null;
+  /**
+   * Startup backlog observed on the node ranked for this run, when another admitted node was
+   * available. The workspace reservation applies it only when `nodeId` still matches.
+   */
+  rankedStartupBacklog?: { nodeId: string; backlog: number } | null;
 }
 
 export interface TaskRunConfig {
   vmSize: VMSize;
   vmLocation: VMLocation;
+  /**
+   * Whether `vmLocation` is the caller's explicit placement override rather than a pool or
+   * project default. Explicit locality outranks startup backlog when ranking reusable hosts;
+   * a default does not (`compareReusableHosts`). Absent on runs started before this field
+   * existed, which keep the earlier order: location first.
+   */
+  explicitVmLocation?: boolean;
   branch: string;
   preferredNodeId: string | null;
   /** Node that must not be reused for this run, e.g. the source of a resource eviction. */
@@ -64,6 +89,8 @@ export interface TaskRunConfig {
   githubId: string | null;
   taskTitle: string;
   taskDescription: string | null;
+  /** Archived transcript data, delivered through the system-origin context block. */
+  historicalContext?: string | null;
   repository: string;
   installationId: string;
   outputBranch: string | null;
@@ -108,6 +135,8 @@ export interface TaskRunConfig {
   systemPromptAppend: string | null;
   /** Agent profile ID — stored on workspace for GitHub CLI policy enforcement. */
   agentProfileHint: string | null;
+  /** Saved skill identity; optional for runners persisted before skill propagation. */
+  skillId?: string | null;
   /** File attachments uploaded to R2 before task submission. Null = no attachments. */
   attachments: TaskAttachment[] | null;
   /** Per-project scaling overrides. Null values mean "use platform default". */
@@ -156,6 +185,7 @@ export interface TaskRunConfig {
   projectEventWakeGuard?: ProjectEventWakeRecoveryGuard | null;
   /** Member whose continued write permission authorizes a scheduled wake. */
   recoveryRequiredProjectMemberId?: string | null;
+  providerLimitRecoveryApproval?: ProviderLimitRecoveryApproval | null;
 }
 
 export interface TaskRunnerState {
@@ -185,8 +215,20 @@ export interface TaskRunnerState {
   admissionLeaseToken?: number | null;
   /** Set when we started waiting for agent ready — used for timeout detection */
   agentReadyStartedAt: number | null;
-  /** Set when we started waiting for workspace ready — used for timeout detection */
-  workspaceReadyStartedAt: number | null;
+  /**
+   * Consecutive final-reservation refusals in this run (`workspace-placement-rejection.ts`).
+   * Reset when a reservation succeeds; at `operations.workspacePlacementMaxRejections` the task fails.
+   */
+  workspacePlacementRejections?: number;
+  /**
+   * Final reservations refused only because the chosen node's startup backlog grew after it was
+   * ranked (`workspace-placement-rejection.ts`), counted since this run's last successful
+   * reservation. Capacity refusals neither add to nor reset it, and these refusals do not count
+   * toward `workspacePlacementRejections`. At `operations.workspacePlacementBacklogConflictRetries`
+   * the next reservation drops the backlog guard and keeps every capacity guard. Reset when a
+   * reservation succeeds.
+   */
+  startupBacklogConflicts?: number;
   /** Set when we started trying to dispatch workspace creation to the VM agent */
   workspaceDispatchStartedAt: number | null;
   /** Number of VM-agent workspace dispatch attempts made by the dispatch step */

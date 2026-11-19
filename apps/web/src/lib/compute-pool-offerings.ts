@@ -1,21 +1,32 @@
-import {
-  type CapacityPoolCandidate,
-  type CapacityPoolStatus,
-  type CapacitySourceIdentity,
-  DEFAULT_APPROXIMATE_BILLING_MONTH_HOURS,
-  type ProviderCatalog,
-  type ProviderCatalogOfferingInfo,
-  type SizeInfo,
-  type VMSize,
+import type {
+  CapacityPoolCandidate,
+  CapacityPoolStatus,
+  CapacitySourceIdentity,
+  ProviderCatalog,
+  ProviderCatalogOfferingInfo,
+  SizeInfo,
+  VMSize,
 } from '@simple-agent-manager/shared';
 
-const HOURS_PER_APPROXIMATE_BILLING_MONTH = DEFAULT_APPROXIMATE_BILLING_MONTH_HOURS;
+import {
+  candidateSourceKey,
+  catalogSourceKey,
+  type ExtendedCandidate,
+  knownProviderLocation,
+  monthlyPriceAmount,
+  normalizeDiskGb,
+  normalizeNumber,
+  normalizeRamGb,
+  offeringKey,
+  priceLabelForOffering,
+  providerDisplayName,
+  sourceKeyFromIdentity,
+} from './compute-pool-offering-fields';
 
 export interface ComputePoolOffering {
   key: string;
   sourceId: string | null;
   sourceKey: string | null;
-  sourceLabel: string | null;
   provider: string;
   providerLabel: string;
   location: string;
@@ -38,247 +49,17 @@ export interface ComputePoolOffering {
 export interface ComputePoolCandidateOffering extends ComputePoolOffering {
   candidateId: string;
   candidateStatus: CapacityPoolStatus;
-  runtime: string | null;
-  machineClass: string | null;
-  priority: number;
-  candidateOrder: number;
 }
 
 export interface ComputePoolCatalogOffering extends ComputePoolOffering {
   candidateId: string | null;
-  candidateStatus: CapacityPoolStatus | 'not-configured' | 'pending-add';
-  runtime: string | null;
-  machineClass: string | null;
-  canUpdateExistingCandidate: boolean;
+  candidateStatus: CapacityPoolStatus | 'not-configured';
 }
 
 export interface ComputePoolOfferingsModel {
   allowed: ComputePoolCandidateOffering[];
   excluded: ComputePoolCandidateOffering[];
   catalog: ComputePoolCatalogOffering[];
-}
-
-export interface ComputePoolOfferingFilters {
-  provider: string;
-  location: string;
-  minVcpu: string;
-  minRamGb: string;
-  maxMonthlyPrice: string;
-  availability: 'all' | 'available' | 'unavailable' | 'stale';
-}
-
-type ExtendedCandidate = CapacityPoolCandidate & {
-  providerOfferingId?: string | null;
-  sku?: string | null;
-  instanceType?: string | null;
-  type?: string | null;
-  providerInstanceType?: string | null;
-  vcpu?: number | null;
-  providerInstanceVcpuCount?: number | null;
-  ramGb?: number | null;
-  memoryGb?: number | null;
-  memoryMb?: number | null;
-  providerInstanceMemoryMb?: number | null;
-  storageGb?: number | null;
-  diskGb?: number | null;
-  providerInstanceDiskGb?: number | null;
-  price?: string | null;
-  providerInstancePriceDisplay?: string | null;
-  priceMonthly?: number | null;
-  priceHourly?: number | null;
-  priceMonthlyUsd?: number | null;
-  priceHourlyUsd?: number | null;
-  providerInstancePriceMonthlyCents?: number | null;
-  providerInstancePriceHourlyMicros?: number | null;
-  providerInstancePriceCurrency?: string | null;
-  available?: boolean | null;
-  stale?: boolean | null;
-  catalogStatus?: string | null;
-};
-
-function titleCaseProvider(value: string | null | undefined): string {
-  if (!value) return 'Unknown provider';
-  const named: Record<string, string> = {
-    digitalocean: 'DigitalOcean',
-    gcp: 'Google Cloud',
-    hetzner: 'Hetzner',
-    infomaniak: 'Infomaniak',
-    scaleway: 'Scaleway',
-    upcloud: 'UpCloud',
-    vultr: 'Vultr',
-  };
-  return (
-    named[value] ??
-    value
-      .split(/[-_\s]+/)
-      .filter(Boolean)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(' ')
-  );
-}
-
-function identityPart(value: string | null | undefined): string {
-  const normalized = value?.trim();
-  return normalized ? normalized.toLowerCase() : 'unknown';
-}
-
-function catalogSourceKey(catalog: ProviderCatalog): string | null {
-  const source = catalog.credentialSource?.trim();
-  if (source && catalog.externalSourceRef?.trim()) {
-    return `${source}:${catalog.externalSourceRef.trim()}`;
-  }
-  const id =
-    source === 'platform' ? catalog.platformCredentialId?.trim() : catalog.credentialId?.trim();
-  return source && id ? `${source}:${id}` : null;
-}
-
-function sourceLabelFromParts(
-  credentialSource: string | null | undefined,
-  credentialId: string | null | undefined
-): string | null {
-  if (!credentialSource && !credentialId) return null;
-  const source =
-    credentialSource === 'platform'
-      ? 'Platform credential'
-      : credentialSource === 'project'
-        ? 'Project credential'
-        : credentialSource === 'user'
-          ? 'User credential'
-          : credentialSource
-            ? `${titleCaseProvider(credentialSource)} credential`
-            : 'Credential';
-  return credentialId ? `${source} ${credentialId}` : source;
-}
-
-function sourceKeyFromIdentity(source: CapacitySourceIdentity): string | null {
-  if (source.platformCredentialId) return `platform:${source.platformCredentialId}`;
-  if (source.credentialId && source.credentialSource) {
-    return `${source.credentialSource}:${source.credentialId}`;
-  }
-  if (source.externalSourceRef && source.credentialSource) {
-    return `${source.credentialSource}:${source.externalSourceRef}`;
-  }
-  if (source.externalSourceRef) return `external:${source.externalSourceRef}`;
-  return null;
-}
-
-function sourceLabelFromIdentity(source: CapacitySourceIdentity): string | null {
-  return sourceLabelFromParts(
-    source.credentialSource,
-    source.credentialId ?? source.platformCredentialId ?? source.externalSourceRef
-  );
-}
-
-function offeringKey(
-  sourceKey: string | null | undefined,
-  provider: string,
-  location: string,
-  sku: string
-): string {
-  return [sourceKey ?? 'source-unscoped', provider, location, sku]
-    .map((part) => identityPart(part))
-    .join(':');
-}
-
-function legacyOfferingKey(
-  sourceKey: string | null | undefined,
-  provider: string,
-  location: string,
-  machineSize: string
-): string {
-  return offeringKey(sourceKey, provider, location, machineSize);
-}
-
-function candidateSourceKey(
-  candidate: ExtendedCandidate,
-  sourceKeysById: ReadonlyMap<string, string | null>
-): string | null {
-  const mapped = sourceKeysById.get(candidate.capacitySourceId);
-  if (mapped) return mapped;
-  const sourceId = candidate.capacitySourceId?.trim();
-  return sourceId ? `capacity-source:${sourceId}` : null;
-}
-
-function parsePriceAmount(value: string | null | undefined): number | null {
-  if (!value) return null;
-  const match = value.replace(',', '.').match(/([0-9]+(?:\.[0-9]+)?)/);
-  if (!match) return null;
-  const amount = Number(match[1]);
-  if (!Number.isFinite(amount)) return null;
-
-  if (/\/\s*(h|hr|hour)/i.test(value)) {
-    return amount * HOURS_PER_APPROXIMATE_BILLING_MONTH;
-  }
-
-  return amount;
-}
-
-function monthlyPriceAmount(input: {
-  priceMonthly?: number | null;
-  priceHourly?: number | null;
-  priceMonthlyUsd?: number | null;
-  priceHourlyUsd?: number | null;
-  priceLabel?: string | null;
-}): number | null {
-  if (typeof input.priceMonthly === 'number' && Number.isFinite(input.priceMonthly)) {
-    return input.priceMonthly;
-  }
-  if (typeof input.priceHourly === 'number' && Number.isFinite(input.priceHourly)) {
-    return input.priceHourly * HOURS_PER_APPROXIMATE_BILLING_MONTH;
-  }
-  if (typeof input.priceMonthlyUsd === 'number' && Number.isFinite(input.priceMonthlyUsd)) {
-    return input.priceMonthlyUsd;
-  }
-  if (typeof input.priceHourlyUsd === 'number' && Number.isFinite(input.priceHourlyUsd)) {
-    return input.priceHourlyUsd * HOURS_PER_APPROXIMATE_BILLING_MONTH;
-  }
-  return parsePriceAmount(input.priceLabel);
-}
-
-function normalizeNumber(value: number | null | undefined): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function normalizeRamGb(offering: {
-  ramGb?: number | null;
-  memoryGb?: number | null;
-  memoryMb?: number | null;
-}): number | null {
-  const ramGb = normalizeNumber(offering.ramGb ?? offering.memoryGb);
-  if (ramGb !== null) return ramGb;
-  const memoryMb = normalizeNumber(offering.memoryMb);
-  return memoryMb === null ? null : memoryMb / 1024;
-}
-
-function normalizeDiskGb(offering: {
-  storageGb?: number | null;
-  diskGb?: number | null;
-}): number | null {
-  return normalizeNumber(offering.storageGb ?? offering.diskGb);
-}
-
-function priceLabelForOffering(offering: {
-  price?: string | null;
-  priceMonthly?: number | null;
-  priceHourly?: number | null;
-  priceMonthlyUsd?: number | null;
-  priceHourlyUsd?: number | null;
-  currency?: string | null;
-}): string | null {
-  if (offering.price) return offering.price;
-  if (typeof offering.priceMonthly === 'number' && Number.isFinite(offering.priceMonthly)) {
-    return `${offering.currency ?? 'CUR'} ${offering.priceMonthly.toFixed(2)}/mo`;
-  }
-  if (typeof offering.priceHourly === 'number' && Number.isFinite(offering.priceHourly)) {
-    return `${offering.currency ?? 'CUR'} ${offering.priceHourly.toFixed(4)}/hr`;
-  }
-  if (typeof offering.priceMonthlyUsd === 'number' && Number.isFinite(offering.priceMonthlyUsd)) {
-    return `${offering.currency ?? 'USD'} ${offering.priceMonthlyUsd.toFixed(2)}/mo`;
-  }
-  if (typeof offering.priceHourlyUsd === 'number' && Number.isFinite(offering.priceHourlyUsd)) {
-    return `${offering.currency ?? 'USD'} ${offering.priceHourlyUsd.toFixed(4)}/hr`;
-  }
-  return null;
 }
 
 function offeringFromLegacySize(
@@ -291,19 +72,14 @@ function offeringFromLegacySize(
 ): ComputePoolOffering {
   const priceLabel = size.price || null;
   const sourceKey = catalogSourceKey(catalog);
-  const sourceLabel = sourceLabelFromParts(
-    catalog.credentialSource,
-    catalog.credentialSource === 'platform' ? catalog.platformCredentialId : catalog.credentialId
-  );
   const key = offeringKey(sourceKey, catalog.provider, locationId, size.type);
 
   return {
     key,
     sourceId: null,
     sourceKey,
-    sourceLabel,
     provider: catalog.provider,
-    providerLabel: titleCaseProvider(catalog.provider),
+    providerLabel: providerDisplayName(catalog.provider),
     location: locationId,
     locationLabel,
     country,
@@ -338,18 +114,13 @@ function offeringFromNativeCatalog(
     'sku pending';
   const priceLabel = priceLabelForOffering(offering);
   const sourceKey = catalogSourceKey(catalog);
-  const sourceLabel = sourceLabelFromParts(
-    catalog.credentialSource,
-    catalog.credentialSource === 'platform' ? catalog.platformCredentialId : catalog.credentialId
-  );
 
   return {
     key: offeringKey(sourceKey, catalog.provider, location, sku),
     sourceId: null,
     sourceKey,
-    sourceLabel,
     provider: catalog.provider,
-    providerLabel: titleCaseProvider(catalog.provider),
+    providerLabel: providerDisplayName(catalog.provider),
     location,
     locationLabel: offering.locationName ?? locationInfo?.name ?? location,
     country: offering.country ?? locationInfo?.country ?? null,
@@ -380,9 +151,7 @@ function offeringFromNativeCatalog(
   };
 }
 
-export function flattenProviderCatalogOfferings(
-  catalogs: ProviderCatalog[]
-): ComputePoolOffering[] {
+function flattenProviderCatalogOfferings(catalogs: ProviderCatalog[]): ComputePoolOffering[] {
   return catalogs.flatMap((catalog) => {
     if (catalog.offerings && catalog.offerings.length > 0) {
       return catalog.offerings.map((offering) => offeringFromNativeCatalog(catalog, offering));
@@ -417,8 +186,7 @@ function candidateSku(candidate: ExtendedCandidate): string | null {
 
 function candidateFallbackOffering(
   candidate: ExtendedCandidate,
-  sourceKey: string | null,
-  sourceLabel: string | null
+  sourceKey: string | null
 ): ComputePoolOffering {
   const provider = candidate.provider ?? 'unknown-provider';
   const location = candidate.location ?? 'unknown-region';
@@ -438,16 +206,17 @@ function candidateFallbackOffering(
       ? candidate.providerInstancePriceHourlyMicros / 1_000_000
       : null;
 
+  const knownLocation = knownProviderLocation(provider, location);
+
   return {
     key: offeringKey(sourceKey, provider, location, sku),
     sourceId: candidate.capacitySourceId ?? null,
     sourceKey,
-    sourceLabel,
     provider,
-    providerLabel: titleCaseProvider(provider),
+    providerLabel: providerDisplayName(provider),
     location,
-    locationLabel: location,
-    country: null,
+    locationLabel: knownLocation?.name ?? location,
+    country: knownLocation?.country ?? null,
     sku,
     providerInstanceType:
       candidate.providerInstanceType ?? candidate.instanceType ?? candidate.type ?? sku,
@@ -492,15 +261,10 @@ function sortOfferings<T extends ComputePoolOffering>(offerings: T[]): T[] {
 export function buildComputePoolOfferingsModel(
   candidates: CapacityPoolCandidate[],
   catalogs: ProviderCatalog[],
-  sources: CapacitySourceIdentity[] = [],
-  draftStatuses: Record<string, CapacityPoolStatus> = {},
-  draftCatalogAdditionKeys: ReadonlySet<string> = new Set()
+  sources: CapacitySourceIdentity[] = []
 ): ComputePoolOfferingsModel {
   const sourceKeysById = new Map(
     sources.map((source) => [source.id, sourceKeyFromIdentity(source)])
-  );
-  const sourceLabelsById = new Map(
-    sources.map((source) => [source.id, sourceLabelFromIdentity(source)])
   );
   const sourceIdsByKey = new Map<string, string>();
   for (const source of sources) {
@@ -508,6 +272,11 @@ export function buildComputePoolOfferingsModel(
     if (key) sourceIdsByKey.set(key, source.id);
   }
   const catalogOfferings = flattenProviderCatalogOfferings(catalogs);
+  // A row is only "no longer offered" when its own account's catalog is loaded and lacks it.
+  // Without that catalog (a fallback pool, a failed catalog read) there is no evidence either way.
+  const loadedCatalogSourceKeys = new Set(
+    catalogs.map((catalog) => catalogSourceKey(catalog)).filter((key): key is string => !!key)
+  );
   const byKey = new Map(catalogOfferings.map((offering) => [offering.key, offering]));
   const byLegacyCandidate = new Map<string, ComputePoolOffering>();
   const byUnscopedKey = new Map<string, ComputePoolOffering[]>();
@@ -517,7 +286,7 @@ export function buildComputePoolOfferingsModel(
     byUnscopedKey.set(unscopedKey, [...(byUnscopedKey.get(unscopedKey) ?? []), offering]);
     if (!offering.machineSizeHint) continue;
     byLegacyCandidate.set(
-      legacyOfferingKey(
+      offeringKey(
         offering.sourceKey,
         offering.provider,
         offering.location,
@@ -533,9 +302,6 @@ export function buildComputePoolOfferingsModel(
     const location = extended.location ?? 'unknown-region';
     const nativeSku = candidateSku(extended);
     const sourceKey = candidateSourceKey(extended, sourceKeysById);
-    const sourceLabel =
-      sourceLabelsById.get(extended.capacitySourceId) ??
-      (sourceKey ? `Capacity source ${extended.capacitySourceId}` : null);
     const sourceScopedKey = nativeSku
       ? offeringKey(sourceKey, provider, location, nativeSku)
       : null;
@@ -546,26 +312,24 @@ export function buildComputePoolOfferingsModel(
         (unscopedMatches.length === 1 ? unscopedMatches[0] : null))
       : null;
     const legacyCatalogOffering = extended.machineSize
-      ? byLegacyCandidate.get(
-          legacyOfferingKey(sourceKey, provider, location, extended.machineSize)
-        )
+      ? byLegacyCandidate.get(offeringKey(sourceKey, provider, location, extended.machineSize))
       : null;
     const base =
       exactCatalogOffering ??
       legacyCatalogOffering ??
-      candidateFallbackOffering(extended, sourceKey, sourceLabel);
+      candidateFallbackOffering(extended, sourceKey);
     const missingFromCurrentCatalog =
-      nativeSku !== null && !exactCatalogOffering && !legacyCatalogOffering;
+      nativeSku !== null &&
+      !exactCatalogOffering &&
+      !legacyCatalogOffering &&
+      sourceKey !== null &&
+      loadedCatalogSourceKeys.has(sourceKey);
 
     return {
       ...base,
       sourceId: extended.capacitySourceId ?? base.sourceId,
       candidateId: candidate.id,
-      candidateStatus: draftStatuses[candidate.id] ?? candidate.status,
-      runtime: candidate.runtime,
-      machineClass: candidate.machineClass,
-      priority: candidate.priority,
-      candidateOrder: candidate.candidateOrder,
+      candidateStatus: candidate.status,
       available: missingFromCurrentCatalog ? false : base.available,
       stale: missingFromCurrentCatalog ? true : base.stale,
       statusLabel: missingFromCurrentCatalog
@@ -594,12 +358,7 @@ export function buildComputePoolOfferingsModel(
             ...offering,
             sourceId,
             candidateId: null,
-            candidateStatus: draftCatalogAdditionKeys.has(offering.key)
-              ? 'pending-add'
-              : 'not-configured',
-            runtime: null,
-            machineClass: null,
-            canUpdateExistingCandidate: false,
+            candidateStatus: 'not-configured',
           };
         }
         return {
@@ -607,53 +366,10 @@ export function buildComputePoolOfferingsModel(
           sourceId: matchingCandidate.sourceId,
           candidateId: matchingCandidate.candidateId,
           candidateStatus: matchingCandidate.candidateStatus,
-          runtime: matchingCandidate.runtime,
-          machineClass: matchingCandidate.machineClass,
-          canUpdateExistingCandidate: true,
         };
       })
     ),
   };
-}
-
-export function matchesComputePoolFilters(
-  offering: ComputePoolOffering,
-  filters: ComputePoolOfferingFilters
-): boolean {
-  if (filters.provider !== 'all' && offering.provider !== filters.provider) return false;
-  if (
-    filters.location.trim() &&
-    !`${offering.location} ${offering.locationLabel} ${offering.country ?? ''}`
-      .toLowerCase()
-      .includes(filters.location.trim().toLowerCase())
-  ) {
-    return false;
-  }
-
-  const minVcpu = Number(filters.minVcpu);
-  if (filters.minVcpu && Number.isFinite(minVcpu) && (offering.vcpu ?? 0) < minVcpu) {
-    return false;
-  }
-
-  const minRamGb = Number(filters.minRamGb);
-  if (filters.minRamGb && Number.isFinite(minRamGb) && (offering.ramGb ?? 0) < minRamGb) {
-    return false;
-  }
-
-  const maxMonthlyPrice = Number(filters.maxMonthlyPrice);
-  if (filters.maxMonthlyPrice && Number.isFinite(maxMonthlyPrice)) {
-    if (offering.monthlyPriceAmount === null || offering.monthlyPriceAmount > maxMonthlyPrice) {
-      return false;
-    }
-  }
-
-  if (filters.availability === 'available' && !canAddComputePoolOffering(offering)) return false;
-  if (filters.availability === 'unavailable' && (offering.available !== false || offering.stale)) {
-    return false;
-  }
-  if (filters.availability === 'stale' && !offering.stale) return false;
-
-  return true;
 }
 
 export function canAddComputePoolOffering(

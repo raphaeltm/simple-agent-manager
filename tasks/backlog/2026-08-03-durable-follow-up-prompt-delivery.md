@@ -1,5 +1,23 @@
 # Durable follow-up prompt delivery for existing chat sessions
 
+> **Reconciliation 2026-10-26:** Still open. #2381 (`110730c2a`) moved `sendFollowUpPrompt` to
+> `apps/web/src/lib/api/sessions.ts:411-424` (still no key, and its type still omits
+> `deliveryId`), and the `mailbox.delivery_updated` broadcast is now
+> `prompt-delivery-runner.ts:276`. #2381's new "Not delivered" label (`message-attribution.ts:35`)
+> covers only prompts cancelled because the sender's shared access ended; queued, delivering and
+> failed states and retry are still missing.
+
+> **Reconciliation 2026-10-12:** The server half of the idempotency item shipped. #2291
+> (`d4fa4f372`) runs `POST .../sessions/:sessionId/prompt` through `cliOperationReceipt`
+> (`apps/api/src/routes/chat-prompt-route.ts:17-30`), so a retry that repeats the same
+> `Idempotency-Key` header replays the stored response instead of creating a second delivery
+> (`apps/api/src/services/cli-operation-receipts.ts:26-91`; test
+> `apps/api/tests/unit/routes/cli-worker-contract.test.ts:183-200`). Only the CLI sends that header
+> (`packages/cli/internal/cli/client.go:407`). Still open: the web client sends no key and still
+> ignores `deliveryId`/`status` (`apps/web/src/lib/api/sessions.ts:392-404`), nothing in the web
+> app consumes `mailbox.delivery_updated` (now `prompt-delivery-runner.ts:249`), and there is no
+> retry UI.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** the server side, in PR #1785 (00169b016):
@@ -51,3 +69,7 @@ Convert follow-up prompt submission into durable accept + server-owned delivery:
 - Duplicate retries or ambiguous acknowledgements do not create duplicate VM messages.
 - Failed follow-up deliveries are visible and retryable.
 
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Evidence: #1785 (server durable accept/runner), #2291 (server Idempotency-Key via cliOperationReceipt), #2536 (web consumes mailbox.delivery_updated via lib/prompt-delivery-update.ts, steer rows only); apps/web/src/lib/api/session-prompts.ts:22-39 sends no idempotency key
+- Status: Remaining: web idempotency key, queued/delivering/failed state for normal follow-ups on refresh, retry UI for failed deliveries

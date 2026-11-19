@@ -1,5 +1,37 @@
 import type { WorkspaceDeletionIdentity } from '../services/workspace-deletion';
+import { chatBindingAllowsDeletion } from '../services/workspace-deletion-identity';
 import type { PendingWorkspaceDeletion } from './node-lifecycle-workspace-deletion-support';
+
+const WORKSPACE_DELETION_ELIGIBLE_STATUSES = new Set([
+  'stopped',
+  'evicted',
+  'sleeping',
+  'stopping',
+  'deleted',
+]);
+
+export function isWorkspaceDeletionEligibleStatus(status: string): boolean {
+  return WORKSPACE_DELETION_ELIGIBLE_STATUSES.has(status);
+}
+
+/** `left` is the workspace's current identity, `right` the queued or expected one. */
+export function sameDeletionIdentity(
+  left: WorkspaceDeletionIdentity,
+  right: WorkspaceDeletionIdentity
+): boolean {
+  return (
+    left.workspaceId === right.workspaceId &&
+    (left.workspaceGeneration ?? null) === (right.workspaceGeneration ?? null) &&
+    left.nodeId === right.nodeId &&
+    left.nodeUserId === right.nodeUserId &&
+    left.nodeRuntime === right.nodeRuntime &&
+    left.nodeProviderInstanceId === right.nodeProviderInstanceId &&
+    left.nodeRuntimeIncarnationId === right.nodeRuntimeIncarnationId &&
+    left.userId === right.userId &&
+    left.projectId === right.projectId &&
+    chatBindingAllowsDeletion(left.chatSessionId, right.chatSessionId)
+  );
+}
 
 export function deletionEntryClaimedWithoutNodeIncarnation(
   entry: PendingWorkspaceDeletion
@@ -9,7 +41,8 @@ export function deletionEntryClaimedWithoutNodeIncarnation(
     (entry.nodeUserId === undefined ||
       entry.nodeRuntime === undefined ||
       entry.nodeProviderInstanceId === undefined ||
-      entry.nodeRuntimeIncarnationId === undefined)
+      entry.nodeRuntimeIncarnationId === undefined ||
+      entry.workspaceGeneration === undefined)
   );
 }
 
@@ -21,6 +54,7 @@ export function deletionEntryMatchesScheduledIdentity(
     entry &&
     !deletionEntryClaimedWithoutNodeIncarnation(entry) &&
     entry.nodeId === identity.nodeId &&
+    (entry.workspaceGeneration ?? null) === (identity.workspaceGeneration ?? null) &&
     (entry.nodeUserId === undefined || entry.nodeUserId === identity.nodeUserId) &&
     (entry.nodeRuntime === undefined || entry.nodeRuntime === identity.nodeRuntime) &&
     (entry.nodeProviderInstanceId === undefined ||
@@ -29,7 +63,7 @@ export function deletionEntryMatchesScheduledIdentity(
       entry.nodeRuntimeIncarnationId === identity.nodeRuntimeIncarnationId) &&
     entry.userId === identity.userId &&
     entry.projectId === identity.projectId &&
-    entry.chatSessionId === identity.chatSessionId
+    chatBindingAllowsDeletion(identity.chatSessionId, entry.chatSessionId ?? null)
   );
 }
 
@@ -43,6 +77,7 @@ export function scheduledDeletionIdentity(input: {
   return (
     input.supplied ??
     input.current ?? {
+      workspaceGeneration: null,
       workspaceId: input.workspaceId,
       nodeId: input.nodeId,
       nodeUserId: null,
@@ -74,6 +109,8 @@ export function scheduledDeletionEntry(input: {
     nodeRuntime: identity.nodeRuntime,
     nodeProviderInstanceId: identity.nodeProviderInstanceId,
     nodeRuntimeIncarnationId: identity.nodeRuntimeIncarnationId,
+    workspaceGeneration: identity.workspaceGeneration,
+    mode: preserved?.mode ?? 'automatic',
     workspaceId: input.workspaceId,
     userId: identity.userId,
     projectId: identity.projectId,
@@ -98,6 +135,7 @@ export function deletionEntryMatchesClaimIdentity(input: {
   const { entry, expected } = input;
   if (!entry) return true;
   return (
+    (entry.workspaceGeneration ?? null) === (expected.workspaceGeneration ?? null) &&
     (entry.nodeId ?? input.nodeId) === (expected.nodeId ?? input.nodeId) &&
     (entry.nodeUserId === undefined ? expected.nodeUserId : entry.nodeUserId) ===
       expected.nodeUserId &&
@@ -111,7 +149,12 @@ export function deletionEntryMatchesClaimIdentity(input: {
       : entry.nodeRuntimeIncarnationId) === expected.nodeRuntimeIncarnationId &&
     entry.userId === input.userId &&
     (entry.projectId ?? expected.projectId) === expected.projectId &&
-    (entry.chatSessionId ?? expected.chatSessionId) === expected.chatSessionId
+    // An entry written before chat bindings were recorded (`undefined`) is not compared; a
+    // workspace queued unbound (`null`) still fences a chat that binds it later.
+    chatBindingAllowsDeletion(
+      expected.chatSessionId,
+      entry.chatSessionId === undefined ? expected.chatSessionId : entry.chatSessionId
+    )
   );
 }
 
@@ -121,6 +164,7 @@ export function deletionIdentityFromEntry(
   if (!entry) return null;
   return {
     workspaceId: entry.workspaceId,
+    workspaceGeneration: entry.workspaceGeneration,
     nodeId: entry.nodeId ?? null,
     nodeUserId: entry.nodeUserId ?? null,
     nodeRuntime: entry.nodeRuntime ?? null,
@@ -140,6 +184,7 @@ export function deletionIdentityForAttempt(input: {
   const { entry, current } = input;
   return {
     workspaceId: entry.workspaceId,
+    workspaceGeneration: entry.workspaceGeneration,
     nodeId: entry.nodeId ?? input.storedNodeId ?? current?.nodeId ?? null,
     nodeUserId: entry.nodeUserId === undefined ? (current?.nodeUserId ?? null) : entry.nodeUserId,
     nodeRuntime:
@@ -170,6 +215,7 @@ export function claimedDeletionEntry(input: {
   const { entry, expected } = input;
   return {
     ...entry,
+    workspaceGeneration: expected.workspaceGeneration,
     nodeId: expected.nodeId ?? undefined,
     nodeUserId: expected.nodeUserId,
     nodeRuntime: expected.nodeRuntime,

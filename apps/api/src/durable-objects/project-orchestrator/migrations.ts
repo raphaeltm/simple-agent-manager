@@ -42,6 +42,20 @@ export const ORCHESTRATOR_MIGRATIONS = [
       CREATE INDEX IF NOT EXISTS idx_decisions_created ON decision_log(created_at);
     `,
   },
+  {
+    name: '002_workflow_registration',
+    sql: 'ALTER TABLE orchestrator_missions ADD COLUMN workflow_registration_deadline INTEGER;',
+  },
+  {
+    name: '003_cancellation_progress',
+    sql: `ALTER TABLE orchestrator_missions ADD COLUMN cancellation_started_at INTEGER;
+      ALTER TABLE orchestrator_missions ADD COLUMN cancellation_cursor TEXT;
+      ALTER TABLE orchestrator_missions ADD COLUMN cancellation_pass INTEGER NOT NULL DEFAULT 0;`,
+  },
+  {
+    name: '004_cancellation_deadline',
+    sql: 'ALTER TABLE orchestrator_missions ADD COLUMN cancellation_deadline_at INTEGER;',
+  },
 ] as const;
 
 /**
@@ -60,7 +74,11 @@ export function runOrchestratorMigrations(sql: SqlStorage): void {
     const applied = sql.exec('SELECT 1 FROM _migrations WHERE name = ?', migration.name).toArray();
     if (applied.length === 0) {
       sql.exec(migration.sql);
-      sql.exec('INSERT INTO _migrations (name, applied_at) VALUES (?, ?)', migration.name, Date.now());
+      sql.exec(
+        'INSERT INTO _migrations (name, applied_at) VALUES (?, ?)',
+        migration.name,
+        Date.now()
+      );
     }
   }
 }

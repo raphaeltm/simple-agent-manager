@@ -1,5 +1,19 @@
 import type { ProjectEventLimits } from '../types/project-events';
 
+/**
+ * Source and the event types of SAM's own lifecycle events, as the API emits them
+ * (apps/api/src/services/project-lifecycle-event-inputs.ts). Shared so filters built outside
+ * the API, such as the web Automation page's watch presets, match what is emitted; an API
+ * contract test (project-lifecycle-event-contract.test.ts) pins the two together.
+ */
+export const PROJECT_LIFECYCLE_EVENT_SOURCE = 'sam.lifecycle';
+export const PROJECT_LIFECYCLE_EVENT_TYPES = {
+  taskFailed: 'task.failed',
+  sessionFailed: 'session.failed',
+  releaseFailed: 'deployment.release.failed',
+  releaseApplied: 'deployment.release.applied',
+} as const;
+
 export const DEFAULT_PROJECT_EVENT_MAX_ACTIVE_SUBSCRIPTIONS_PER_PROJECT = 200;
 export const DEFAULT_PROJECT_EVENT_FILTER_MAX_VALUES_PER_FIELD = 20;
 export const DEFAULT_PROJECT_EVENT_FILTER_MAX_MATCH_KEYS = 100;

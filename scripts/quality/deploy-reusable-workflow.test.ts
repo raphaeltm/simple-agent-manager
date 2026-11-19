@@ -12,7 +12,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import * as TOML from '@iarna/toml';
 import { describe, expect, it } from 'vitest';
+
+import { OMITTED_WORKER_VAR_DEFAULTS } from '../deploy/worker-var-defaults.js';
 
 const workflow = readFileSync(
   new URL('../../.github/workflows/deploy-reusable.yml', import.meta.url),
@@ -190,6 +193,20 @@ function stepBlock(stepName: string): string {
     throw new Error(`Unable to find workflow step: ${stepName}`);
   }
   return block;
+}
+
+/**
+ * The value the repository ships for a Worker var without any GitHub Environment override: its
+ * top-level `[vars]` entry, else the code default recorded for a var wrangler.toml omits.
+ */
+function checkedInDefault(name: string): string | undefined {
+  const vars = (
+    TOML.parse(readFileSync(new URL('../../apps/api/wrangler.toml', import.meta.url), 'utf8')) as {
+      vars?: Record<string, unknown>;
+    }
+  ).vars;
+  if (vars && Object.prototype.hasOwnProperty.call(vars, name)) return String(vars[name]);
+  return OMITTED_WORKER_VAR_DEFAULTS[name];
 }
 
 function extractOptionalWorkerEnvVars(): string[] {
@@ -582,9 +599,10 @@ describe('deploy reusable workflow', () => {
       expect(goflags).toContain('-buildvcs=false');
     });
 
-    it('embeds only the reviewed installer, which is a release input', () => {
+    it('embeds only reviewed installers, each included as a release input', () => {
       const agentRoot = fileURLToPath(new URL('../../packages/vm-agent', import.meta.url));
-      const found = spawnSync('grep', ['-rn', '--include=*.go', 'go:embed', agentRoot], {
+      // Match directives only; a comment that mentions go:embed is not an embed.
+      const found = spawnSync('grep', ['-rn', '--include=*.go', '^//go:embed', agentRoot], {
         encoding: 'utf8',
       });
       expect(found.status, `grep failed: ${found.stderr}`).toBe(0);
@@ -592,25 +610,36 @@ describe('deploy reusable workflow', () => {
       const embeds = found.stdout
         .trim()
         .split('\n')
-        .map((line) => line.replace(`${agentRoot}/`, '').replace(/:\d+:/, ':'));
+        .map((line) => line.replace(`${agentRoot}/`, '').replace(/:\d+:/, ':'))
+        // grep walks directories in filesystem order, which differs between machines.
+        .sort();
+      // All installers live under the agent source path, which the release resolver hashes
+      // (it excludes only .claude, AGENTS.md and tests), so editing any rotates the release.
       expect(embeds).toEqual([
+        'internal/acp/antigravity.go://go:embed antigravity_install.sh',
         'internal/acp/codex_runtime_distribution.go://go:embed codex_runtime_installer.sh',
+        'internal/acp/opencode_install.go://go:embed opencode_install.sh',
       ]);
       withAgentReleaseRepo((repo) => {
-        const path = join(
-          repo.directory,
-          'packages/vm-agent/internal/acp/codex_runtime_installer.sh'
-        );
-        writeFileSync(path, '#!/bin/bash\necho installer-v2\n');
-        execFileSync('git', ['add', '.'], { cwd: repo.directory });
-        execFileSync('git', ['commit', '-m', 'embedded installer change'], { cwd: repo.directory });
-        const head = execFileSync('git', ['rev-parse', 'HEAD'], {
-          cwd: repo.directory,
-          encoding: 'utf8',
-        }).trim();
-        const result = runReleaseResolver(repo.directory, head);
-        expect(result.status).toBe(0);
-        expect(releaseFieldsFrom(result.stdout).release).toBe(head);
+        for (const installer of [
+          'codex_runtime_installer.sh',
+          'opencode_install.sh',
+          'antigravity_install.sh',
+        ]) {
+          const path = join(repo.directory, 'packages/vm-agent/internal/acp', installer);
+          writeFileSync(path, '#!/bin/bash\necho installer-v2\n');
+          execFileSync('git', ['add', '.'], { cwd: repo.directory });
+          execFileSync('git', ['commit', '-m', `embedded installer change: ${installer}`], {
+            cwd: repo.directory,
+          });
+          const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+            cwd: repo.directory,
+            encoding: 'utf8',
+          }).trim();
+          const result = runReleaseResolver(repo.directory, head);
+          expect(result.status, installer).toBe(0);
+          expect(releaseFieldsFrom(result.stdout).release, installer).toBe(head);
+        }
       });
     });
 
@@ -743,7 +772,11 @@ describe('deploy reusable workflow', () => {
       'Sync Wrangler Config \\(API \\+ Tail Worker\\)',
       'Deploy API Worker',
     ]) {
-      expect(stepBlock(name)).toContain('if: ${{ inputs.dry_run != true }}');
+      // Legacy mutations require both normal execution and the legacy route.
+      // Shared-engine runs must never fall through into a second deployment.
+      expect(stepBlock(name)).toContain(
+        'if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}'
+      );
     }
   });
 
@@ -806,7 +839,11 @@ describe('deploy reusable workflow', () => {
     for (const envVar of extractOptionalWorkerEnvVars().filter(
       (name) => name !== 'VM_AGENT_REQUIRED_VERSION'
     )) {
-      const mapping = `${envVar}: \${{ vars.${envVar} }}`;
+      // GitHub reserves GITHUB_* configuration-variable names; the Worker keeps its runtime name.
+      const githubVar = envVar.startsWith('GITHUB_TRIGGER_RECOVERY_')
+        ? envVar.replace(/^GITHUB_/, 'GH_')
+        : envVar;
+      const mapping = `${envVar}: \${{ vars.${githubVar} }}`;
       expect(initialSync).toContain(mapping);
       expect(firstDeployResync).toContain(mapping);
     }
@@ -1112,6 +1149,17 @@ describe('deploy reusable workflow', () => {
     }
   });
 
+  it('forwards an explicit SAM model override into every config sync', () => {
+    expect(extractOptionalWorkerEnvVars()).toContain('SAM_MODEL');
+    for (const sync of [
+      stepBlock('Sync Wrangler Config \\(API \\+ Tail Worker\\)'),
+      stepBlock('Re-sync Wrangler Config \\(add tail_consumers\\)'),
+    ]) {
+      expect(sync).toContain('SAM_MODEL: ${{ vars.SAM_MODEL }}');
+    }
+    expect(checkedInDefault('SAM_MODEL')).toBe('@cf/deepseek-ai/deepseek-v4.1-flash-1017');
+  });
+
   it('forwards ACP interaction controls into every wrangler config sync env', () => {
     const optionalWorkerVars = extractOptionalWorkerEnvVars();
     const syncBlocks = [
@@ -1125,12 +1173,11 @@ describe('deploy reusable workflow', () => {
         expect(sync).toContain(name + ': ${{ vars.' + name + ' }}');
       }
     }
-    const wranglerToml = readFileSync(
-      new URL('../../apps/api/wrangler.toml', import.meta.url),
-      'utf8'
-    );
-    expect(wranglerToml).toMatch(/^ACP_INTERACTION_FORMS_ENABLED = "false"$/m);
-    expect(wranglerToml).toMatch(/^ACP_INTERACTION_URLS_ENABLED = "false"$/m);
+    // Off unless a deployment opts in: the code default is "false" (proved by
+    // apps/api/tests/unit/config/omitted-worker-var-defaults.test.ts), so wrangler.toml omits the
+    // flags and the deploy override report compares an opt-in against that recorded default.
+    expect(checkedInDefault('ACP_INTERACTION_FORMS_ENABLED')).toBe('false');
+    expect(checkedInDefault('ACP_INTERACTION_URLS_ENABLED')).toBe('false');
   });
 
   /**
@@ -1140,9 +1187,10 @@ describe('deploy reusable workflow', () => {
    * sweep's candidate ceiling, its fall-through depth and its stall alert — exactly the
    * knobs an operator reaches for when the sweep is misbehaving.
    *
-   * They must ALSO exist in the top-level `[vars]`, because `listEnvironmentVarOverrides`
-   * only logs an override for a name it can compare against a checked-in value. Without
-   * that, an override of one of these would ship with no line in the deploy log — the
+   * They must ALSO have a checked-in value — a top-level `[vars]` entry, or the recorded code
+   * default in `OMITTED_WORKER_VAR_DEFAULTS` when wrangler.toml omits them — because
+   * `listEnvironmentVarOverrides` only logs an override for a name it can compare against one.
+   * Without that, an override of one of these would ship with no line in the deploy log — the
    * `.claude/rules/70` failure mode verbatim.
    */
   it('forwards the archive sweep affordability tunables into every wrangler config sync env', () => {
@@ -1151,14 +1199,10 @@ describe('deploy reusable workflow', () => {
       stepBlock('Sync Wrangler Config \\(API \\+ Tail Worker\\)'),
       stepBlock('Re-sync Wrangler Config \\(add tail_consumers\\)'),
     ];
-    const wranglerToml = readFileSync(
-      new URL('../../apps/api/wrangler.toml', import.meta.url),
-      'utf8'
-    );
 
     for (const name of ARCHIVE_SWEEP_AFFORDABILITY_ENV_VARS) {
       expect(optionalWorkerVars).toContain(name);
-      expect(wranglerToml).toMatch(new RegExp(`^${name} = "`, 'm'));
+      expect(checkedInDefault(name), name).toBeDefined();
       for (const sync of syncBlocks) {
         expect(sync).toContain(name + ': ${{ vars.' + name + ' }}');
       }
@@ -1180,8 +1224,48 @@ describe('deploy reusable workflow', () => {
       expect(block).toContain('BUILD_DATE="$VM_AGENT_BUILD_DATE"');
       expect(block).not.toContain('$DEPLOY_SHA');
     }
-    expect(build).toContain('make -C packages/vm-agent build-all');
+    // Linux only: publish-vm-agent-artifacts.sh uploads linux amd64/arm64.
+    expect(build).toContain('make -C packages/vm-agent build-linux-amd64 build-linux-arm64');
+    expect(build).not.toContain('build-all');
     expect(build).toContain('VERSION="$VM_AGENT_RELEASE"');
+  });
+
+  it('resolves container images after their inputs exist and before any API Worker deploy', () => {
+    const resolve = stepBlock('Resolve container images');
+    const index = (name: string) => workflow.indexOf(`- name: ${name}`);
+    expect(resolve).toContain('pnpm tsx scripts/deploy/container-image-reuse.ts');
+    expect(resolve).toContain('CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}');
+    expect(resolve).toContain('API_WORKER_NAME: ${{ steps.deploy_resources.outputs.api_worker }}');
+    expect(resolve).toContain('DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}');
+    expect(resolve).toContain("vars.CONTAINER_IMAGE_REUSE_ENABLED != 'false'");
+    // The vm-agent image copies the prepared artifact, the generated env section
+    // must exist, and the build uses the mirror-configured Docker daemon.
+    for (const before of [
+      'Sync Wrangler Config (API + Tail Worker)',
+      'Prepare Versioned VM Agent Container Artifact',
+      'Configure Docker Hub cache',
+      'Install uv for container image fingerprints',
+    ])
+      expect(index(before), before).toBeLessThan(index('Resolve container images'));
+    // Every Wrangler deploy of the API reads the overridden config; the tail
+    // re-sync keeps it through SAM_CONTAINER_IMAGE_OVERRIDES in GITHUB_ENV.
+    for (const after of [
+      'Bootstrap API Worker',
+      'Re-sync Wrangler Config (add tail_consumers)',
+      'Re-deploy API Worker (with tail_consumers)',
+      'Deploy API Worker',
+    ])
+      expect(index(after), after).toBeGreaterThan(index('Resolve container images'));
+    // The #2722 rollout gate is unchanged around it.
+    expect(index('Snapshot container rollout identities')).toBeLessThan(
+      index('Resolve container images')
+    );
+    expect(index('Wait for container rollout completion')).toBeGreaterThan(
+      index('Deploy API Worker')
+    );
+    expect(stepBlock('Wait for container rollout completion')).toContain(
+      'if: ${{ inputs.dry_run != true }}'
+    );
   });
 
   it('reuses identical same-SHA artifacts and refuses immutable-key overwrites', () => {

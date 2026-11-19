@@ -1,6 +1,9 @@
 import sitemap from '@astrojs/sitemap';
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
+
+import { expressiveCode } from './src/lib/expressive-code';
+
 export default defineConfig({
   site: process.env.SITE_URL || 'https://www.simple-agent-manager.org',
   server: {
@@ -32,6 +35,7 @@ export default defineConfig({
             { slug: 'docs/overview' },
             { slug: 'docs/quickstart' },
             { slug: 'docs/concepts' },
+            { slug: 'docs/guides/recent-product-changes' },
           ],
         },
         {
@@ -40,29 +44,50 @@ export default defineConfig({
             { slug: 'docs/guides/agents' },
             { slug: 'docs/guides/idea-execution' },
             { slug: 'docs/guides/chat-features' },
+            { slug: 'docs/guides/project-overview' },
+            { slug: 'docs/guides/insights' },
+            { slug: 'docs/guides/agent-context' },
+            { slug: 'docs/guides/ideas' },
             { slug: 'docs/guides/collaboration' },
+            { slug: 'docs/guides/account-map' },
             { slug: 'docs/guides/project-files' },
             { slug: 'docs/guides/creating-workspaces' },
             { slug: 'docs/guides/compute-pools' },
+            { slug: 'docs/guides/google-cloud' },
             { slug: 'docs/guides/session-resources' },
             { slug: 'docs/guides/instant-sessions' },
             { slug: 'docs/guides/session-troubleshooting' },
             { slug: 'docs/guides/reporting-issues' },
-            { slug: 'docs/guides/recent-product-changes' },
+            { slug: 'docs/guides/inbox' },
             { slug: 'docs/guides/notifications' },
-            { slug: 'docs/guides/webhook-triggers' },
             { slug: 'docs/guides/scheduled-actions' },
+            { slug: 'docs/guides/triggers' },
+            { slug: 'docs/guides/webhook-triggers' },
+            { slug: 'docs/guides/email-triggers' },
+            { slug: 'docs/guides/workflows' },
             { slug: 'docs/guides/mcp-servers' },
+            { slug: 'docs/guides/secret-execution' },
+            { slug: 'docs/guides/workload-identity' },
+            { slug: 'docs/guides/agent-sign-in' },
+            { slug: 'docs/guides/ai-models-for-agents' },
+            { slug: 'docs/guides/sam-assistant' },
             { slug: 'docs/guides/sam-connector' },
+            { slug: 'docs/guides/cli' },
             { slug: 'docs/guides/app-deployments' },
             { slug: 'docs/guides/self-hosting' },
+            { slug: 'docs/guides/installer' },
+            { slug: 'docs/guides/admin-settings' },
             { slug: 'docs/guides/local-development' },
           ],
         },
         {
           label: 'Architecture',
           collapsed: true,
-          items: [{ slug: 'docs/architecture/overview' }, { slug: 'docs/architecture/security' }],
+          items: [
+            { slug: 'docs/architecture/overview' },
+            { slug: 'docs/architecture/security' },
+            { slug: 'docs/architecture/sam-account-assistant' },
+          ],
         },
         {
           label: 'Reference',
@@ -71,12 +96,16 @@ export default defineConfig({
             { slug: 'docs/reference/api' },
             { slug: 'docs/reference/vm-agent' },
             { slug: 'docs/reference/configuration' },
+            { slug: 'docs/reference/cli-project-workflows' },
             { slug: 'docs/reference/cli-openapi' },
             { slug: 'docs/reference/contributing' },
             { slug: 'docs/reference/roadmap' },
           ],
         },
       ],
+      // Code blocks (src/lib/expressive-code.ts). Plugins can be passed here instead of
+      // `ec.config.mjs` because the site does not use the `<Code>` component.
+      expressiveCode,
       customCss: ['./src/styles/starlight-custom.css'],
       head: [
         {
@@ -104,14 +133,10 @@ export default defineConfig({
       ],
       disable404Route: true,
     }),
-    sitemap(),
+    // The brand guide (/brand/) is published but not launched: keep it out of the sitemap.
+    sitemap({ filter: (page) => !new URL(page).pathname.startsWith('/brand/') }),
   ],
   build: {
     assets: '_assets',
-  },
-  markdown: {
-    shikiConfig: {
-      theme: 'night-owl',
-    },
   },
 });

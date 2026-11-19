@@ -7,6 +7,199 @@ import GitHubAppSetup from '../../../../components/GitHubAppSetup.astro';
 
 This guide walks you through deploying Simple Agent Manager to your own infrastructure. Deployment runs through the **Deploy Production** GitHub Actions workflow in your own fork, with Pulumi provisioning the Cloudflare resources.
 
+If you'd rather not fork and configure a repository, the [installer](/docs/guides/installer/) builds and deploys a complete SAM in your Cloudflare account from your browser, and updates it later (check [who can use the hosted installer today](/docs/guides/installer/)). This guide is the fork-based path: more steps, and full control over every setting.
+
+## Single-box transport foundation
+
+The single-box deployment is being landed in separate slices. Its reverse-tunnel API foundation
+is build-specific: lease allocation and frps authorization live under `apps/api/src/selfhost/`
+and are absent from the Cloudflare Worker entry. Setting `VM_AGENT_TRANSPORT=reverse-tunnel`
+on a Cloudflare deployment does not install that transport and fails before VM allocation.
+
+The self-host build supplies the frpc boot renderer and installs its transport adapter before
+requests or Durable Object dispatch. It appends the migration manifest from
+`apps/api/src/selfhost/reverse-tunnel-migrations.ts` to the **same database's** flat migration
+projection after the shared migrations, rejecting filename collisions. Cloudflare databases do
+not receive the reverse-tunnel lease table. Existing boxes keep the additive table created by
+the earlier migration number.
+
+Product analytics on the box use the same pattern. The self-host entry installs a D1 analytics
+sink (`installAnalyticsD1Sink()` in `apps/api/src/selfhost/analytics/`), and the build appends
+`apps/api/src/selfhost/observability-migrations.ts` to the **observability** database's flat
+projection (`appendSelfhostObservabilityMigrations()` in `scripts/selfhost/`). Cloudflare
+observability databases never receive the `analytics_events` table.
+
+The transport setting admits new leases. Existing allocations adopt their original lease only
+while its exact stored owner remains live. Cleanup and the backstop follow the installed
+self-host driver, so changing the setting cannot strand an old lease. A build without that
+driver performs no reverse-lease SQL.
+
+Lease credentials and frps session IDs use separate HKDF-derived HMAC keys. One pinned frps
+instance owns session replacement. Its Login plugin must apply the server-selected `run_id`
+with `unchange: false`, and every subsequent operation checks that session against the lease.
+Credential-key rotation recovery is tracked separately. Changing the root key rejects stale
+resume derivation and old session IDs, but a credential matching the stored lease hash can
+still log in and obtain the new session ID; root-key rotation alone does not revoke that lease. Installer packaging follows this foundation.
+
+The node boot document for this transport comes from `@simple-agent-manager/cloud-init`. A
+non-empty `reverseTunnelCredential` selects reverse-tunnel mode (`isReverseTunnelMode` in
+`packages/cloud-init/src/reverse-tunnel.ts`). The node then gets the Cloudflare Tunnel firewall
+(no public agent or SSH ingress), no Origin CA certificate and no cloudflared. It installs a
+pinned frpc release, checked against a per-architecture sha256, and runs it as the unprivileged
+`sam-frpc` unit (`packages/cloud-init/src/template-reverse-tunnel.ts`). frpc dials the control
+plane host over `wss` on its public HTTPS port, verifies its certificate against the system CA
+store, and exposes only the agent's loopback tunnel listener as one TCP proxy on the leased port.
+The credential is written only to the root-only `/etc/sam/frpc/credential.env`; `frpc.toml`
+reads it through frp's environment template. A failed frpc install reports the
+`frpc_install` boot-failure reason. Cloudflare nodes never set these variables and render
+exactly as before.
+
+The self-host entry wraps the shared Worker with `withReverseTunnel(worker, render)` from
+`apps/api/src/selfhost/reverse-tunnel/entry.ts`. That call installs the transport driver, serves
+the gateway endpoints under `/api/self-host/gateway/` before the shared app sees the request,
+and runs the lease backstop after the shared handler on the five-minute sweep cron. The
+backstop logs `cron.reverse_tunnel_lease_sweep` with its release count, or why it skipped, and
+it honours the operational cron switch. The gateway has two endpoints:
+
+- `POST /api/self-host/gateway/frps-plugin`: the frps server plugin. frps authenticates with
+  HTTP basic auth, user `frps`, password `REVERSE_TUNNEL_GATEWAY_SECRET`. A Login allow is
+  answered `{reject:false, unchange:false, content}`, so frps applies the server-selected
+  `run_id`. Every other allow is `{reject:false, unchange:true}`.
+- `GET /api/self-host/gateway/node-websocket`: Caddy `forward_auth` for node WebSockets,
+  authenticated with the `X-SAM-Gateway-Secret` header. The original request runs through the
+  normal ws-* or node log-stream authentication. The answer is either that handler's refusal or
+  `X-SAM-Upstream`/`X-SAM-Upstream-*` headers naming the loopback lease port and the credentials
+  Caddy forwards.
+
+Without a gateway secret of at least 32 characters, both endpoints answer 404; a wrong secret
+gets 401. The Cloudflare Worker never imports this entry.
+
+Control-plane requests, the task liveness probe and WebSocket decisions reach a reverse-tunnel
+node through the active lease of its current incarnation (`resolveNodeAgentRoute` in
+`apps/api/src/services/node-agent-route.ts`). A released or superseded lease is never routed to,
+so revocation applies to control-plane traffic on the next request. frps drops the node's
+control session within one heartbeat timeout, because a refused Ping does not refresh it. A
+reverse-tunnel node is never chosen as a snapshot-upload relay, since it has no public hostname.
+
+The self-host build supplies these bootstrap settings; they are not Cloudflare Worker bindings:
+
+| Setting | Default and contract |
+| --- | --- |
+| `REVERSE_TUNNEL_GATEWAY_SECRET` | Required random secret, at least 32 characters, shared with the frps/plugin gateway. |
+| `REVERSE_TUNNEL_GATEWAY_SECRET_ALTERNATE` | Unset; optional second gateway secret during a coordinated rotation. |
+| `REVERSE_TUNNEL_PORT_RANGE_START` / `REVERSE_TUNNEL_PORT_RANGE_END` | `20000` / `29999`; ports 1024–65535, at most 20,000 ports; must match frps `allowPorts`. |
+| `REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS` | `90`; 60–3600 seconds; the build must supply the same timeout to frps. |
+| `REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS` | `180`; cannot be shorter than twice the heartbeat timeout; maximum 86400 seconds. |
+
+Allocation considers the whole bounded port range in one atomic SQL statement, with indexed
+history lookups. Release checks all active leases in one local statement, without network calls
+or pagination. At the outer normal limit of 20,000 active leases, one backstop pass releases all
+eligible leases; the self-host entry runs that backstop every five minutes. A newly
+freed port still waits for its cooling interval. A full range and a cooling range have distinct
+errors so operators can distinguish capacity exhaustion from a wait for safe reuse.
+
+
+## Speech endpoints on a single-box build
+
+This is a build integration foundation for the single-box runtime. Its entry must call
+`installSpeechEndpoints()` before serving requests and apply the shared database migrations,
+including `0259_speech_synthesis_rate_limits.sql`. The Cloudflare fork and browser-installer
+paths described below use Workers AI instead: they do not install these endpoint settings.
+A runtime without Workers AI or this installed backend cannot offer server speech.
+
+Once your single-box build includes that integration:
+
+1. Choose an OpenAI-compatible speech provider or run a compatible server reachable from SAM's
+   API process. It must support multipart `POST /audio/transcriptions` for voice input and/or
+   JSON `POST /audio/speech` returning real audio bytes for read-aloud. Check that provider's
+   documentation for its supported model IDs and synthesis voice IDs. Speech recordings and
+   read-aloud text leave SAM for the selected provider; configure only an endpoint you trust.
+2. Sign in as a superadmin and open [**Admin → Settings**](/docs/guides/admin-settings/),
+   category **AI models**. Configure either feature independently with the exact names below.
+   Use a base URL such as `https://speech.example.com/v1`; SAM appends the audio route, so do
+   not include `/audio/transcriptions` or `/audio/speech`, credentials, a query, or a fragment.
+
+   | Voice input setting | Read-aloud setting | Value |
+   | --- | --- | --- |
+   | `speech.transcription.baseUrl` | `speech.synthesis.baseUrl` | The provider's API base URL. |
+   | `speech.transcription.model` | `speech.synthesis.model` | A model ID supported by that endpoint. |
+   | — | `speech.synthesis.voice` | A voice ID supported by the synthesis model; required. |
+   | `speech.transcription.apiKey` | `speech.synthesis.apiKey` | Optional Bearer API key; required when the provider requires authentication. |
+   | `speech.transcription.allowPrivateNetwork` | `speech.synthesis.allowPrivateNetwork` | Defaults to `false`; opt in only for a trusted private endpoint. |
+
+3. Enter keys in the secret setting fields, never in the URL, repository, or GitHub Actions
+   logs. SAM stores them encrypted in its credential store and sends them as Bearer tokens.
+   An endpoint that requires no key can leave its key unset. Changing risky endpoint settings
+   requires the normal admin confirmation. HTTPS is required for public hosts. Plain HTTP is
+   allowed only for private hosts with that feature's `allowPrivateNetwork` enabled. Loopback
+   and Docker names resolve from the API process/container, so `localhost` must actually run
+   the provider there. Cloud metadata and link-local destinations remain refused after opt-in.
+4. Keep `TTS_ENCODING=mp3` in the runtime configuration for chunked read-aloud. Other supported
+   encodings work only for a single chunk; SAM refuses multi-chunk container formats before
+   spending provider calls. Raw `pcm` output is unsupported and refused before a provider call,
+   because the browser audio route cannot play it. Single-chunk Ogg Opus output is stored and
+   served as `audio/ogg`. Keep `TTS_ENABLED` enabled for read-aloud.
+5. Refresh the app after saving. Capability queries may remain fresh in the existing browser
+   query cache for up to five minutes. Check `/api/config/platform-capabilities` for
+   `speechToText` and `textToSpeech`, then record a short known sentence in project chat and
+   play read-aloud on a response. Verify the actual transcript and audible result: configured
+   capabilities indicate a complete configuration, not that provider credentials are valid.
+   Failed endpoint calls return a generic unavailable response; check server diagnostics without
+   publishing credentials. Clear that feature's base URL to disable its endpoint backend.
+
+The **AI models** category also exposes `speech.endpointTimeoutMs` (60,000 ms per provider call),
+`speech.transcription.maxResponseBytes` (1 MiB JSON), `speech.synthesis.maxAudioBytes` (8 MiB
+combined audio per read-aloud request), and `speech.synthesis.maxRequestsPerHour` (120 requests
+per user per clock hour). The hourly limit uses an atomic database counter and includes cache
+hits and failed requests; database-counter failures refuse synthesis. A 429 response includes
+`Retry-After` seconds until the next window. Provider billing, models, voices, availability and
+quotas remain the endpoint operator's responsibility.
+
+## Email on a single-box build
+
+A Cloudflare deployment sends SAM's email through Cloudflare Email Sending (the `AGENT_EMAIL`
+binding) and receives agent email through Email Routing; nothing below changes that. The
+transport is chosen in one place, `emailTransportKind()` in
+`packages/agent-email/src/provider.ts`, and the binding wins whenever it exists.
+
+A single-box build has no binding. It can send sign-in codes, owner security alerts and
+account-link confirmations through an SMTP relay instead. These are bootstrap settings in the
+box configuration, because the first account may sign up by email before any administrator
+exists. The Cloudflare pipeline does not forward them.
+
+| Setting         | Default                               | Description                                                                                                                     |
+| --------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `SMTP_HOST`     | _(unset)_                             | Relay host. Unset means no SMTP transport.                                                                                      |
+| `SMTP_TLS`      | `starttls`                            | `starttls`, `tls` (implicit TLS) or `none`. `none` is accepted only for a loopback host (a mail collector on the same machine). |
+| `SMTP_PORT`     | `587` for `starttls`, `465` for `tls` | Required with `none`.                                                                                                           |
+| `SMTP_USERNAME` | _(unset)_                             | Sent with `AUTH PLAIN`, only after TLS (or over loopback). Set with `SMTP_PASSWORD` (a secret) or not at all.                   |
+| `SMTP_FROM`     | _(required)_                          | The address SAM's email comes from. It must be one the relay accepts.                                                           |
+
+`resolveSmtpConfig()` (`packages/agent-email/src/smtp-config.ts`) refuses an invalid set as a
+whole and logs the reason once; email sign-in is then not offered. A server that does not offer
+STARTTLS in `starttls` mode is refused rather than used in plaintext, and the certificate chain is
+verified by the runtime. The whole exchange is bounded by the `agentEmail.smtpTimeoutMs` admin
+setting (15 seconds by default). Every other email sign-in rule (codes only for existing accounts
+or the installer's owner, identical responses, rate limits) is the same as on Cloudflare.
+
+Before first-run setup can finish on email alone, SAM checks the relay
+(`emailSignInReadiness()` in `apps/api/src/services/email-sign-in.ts`): it connects, starts TLS,
+authenticates, and offers `SMTP_FROM` as sender and the owner email as recipient, then abandons the
+transaction so nothing is sent. If the relay refuses any step or does not answer, setup asks for a
+sign-in provider instead, and the reason is logged as `email_sign_in.smtp_relay_unusable`. The check
+cannot prove the mailbox receives mail, only that the relay would accept it.
+
+**Inbound agent email.** The box can also run `sam-mx` (`deploy/selfhost/sam-mx`), an SMTP
+receiver for `agent+<key>@agents.<BASE_DOMAIN>`. It requires the From domain to be authenticated
+(aligned SPF or DKIM) and hands each message, during the SMTP session, to the loopback-only route
+`POST /api/self-host/gateway/inbound-email` (`apps/api/src/selfhost/reverse-tunnel/inbound-email.ts`),
+which runs the same inbound handler as Cloudflare Email Routing. Replies from `reply_to_email` go
+through the SMTP relay above, from `SMTP_FROM` with `Reply-To` set to the trigger's address
+(`selfHostAgentEmailSender()` in `apps/api/src/services/agent-email/self-host-inbound.ts`). Agent
+email is on only when `AGENT_EMAIL_INBOUND_SMTP=true` (the receiver is installed), the gateway
+secret is set and an SMTP relay works. The admin loopback test needs Email Routing and is refused
+on a box; send a test email from an allowed sender instead.
+
 ## Prerequisites
 
 | Requirement              | Purpose                   | Tier                 |
@@ -61,6 +254,14 @@ Set **Zone Resources** to your specific domain and **Account Resources** to your
 
 The default deploy configures AI Gateway and writes Analytics Engine data, so keep the **AI Gateway** permission and enable **Analytics Engine** even if every user brings their own model keys. SAM also enables the Cloudflare Container instant-session runtime by default, so **Containers: Edit** is required for the default Worker deploy. The same deploy automatically builds and versions the container vm-agent; no prebuilt image, registry credential, or manual vm-agent version is required. The **Account → SSL and Certificates → Edit** permission is required for issuing per-node Origin CA certificates used for VM-agent TLS — without it, new nodes cannot obtain a TLS certificate and will fail to boot.
 
+**Optional — VM Cloudflare Tunnels:** To use outbound-only VM agent connections for newly provisioned workspace and deployment VMs, grant the runtime token **Account → Cloudflare One Connector: cloudflared → Edit** (the API catalog calls this `Cloudflare One Connector: cloudflared Write`) and set the GitHub Environment variable `VM_AGENT_TRANSPORT` to `cloudflare-tunnel`. Manual deployments use `CF_API_TOKEN` for runtime operations, so update that token before enabling the setting. The hosted installer includes this permission in newly created runtime tokens; existing installations need their runtime token permission updated. DNS Edit is also required. No per-machine token setup is needed: SAM creates, configures, and removes the tunnels. Existing VMs and instant containers keep their current transport, and deployment VMs keep serving app routes on their public IP. See [VM transport configuration](/docs/reference/configuration/#vm-transport-and-tls).
+
+**Optional — Account Analytics read:** Add **Account → Account Analytics → Read** so superadmins see what the Cloudflare account costs. It powers the Cloudflare card on **Admin → Health & cost** (a daily usage-derived estimate of this month's Cloudflare cost and a projection) and the Analytics Engine charts on **Admin → Analytics**. Without it, the Cloudflare card says the token cannot read account analytics and what to add; the Admin → Analytics charts and the optional daily analytics forward fail with a generic error. Runtime tokens created by the hosted installer do not include this permission yet. You can add it to an existing token in the Cloudflare dashboard; no redeploy is needed. See [Health & cost](/docs/guides/admin-settings/#cloudflare-cost-snapshot).
+
+**Optional — Workers AI read:** [AI models for agents](/docs/guides/ai-models-for-agents/) works without extra permissions. Model calls and the model list use the Worker's own Workers AI binding and go through your AI Gateway. Adding **Account → Workers AI → Read** also lets agents fetch a model's full input schema with `list_ai_models`. Without it, agents get the model's documentation link instead. Model calls are billed to this Cloudflare account, and each project has a monthly limit.
+
+**Optional — email sign-in and agent email:** Give the deployment token **Zone → Zone Settings → Edit**, **Zone → Email Routing Rules → Edit**, and **Email Sending → Edit** (Workers Paid required), and every deploy prepares email automatically; no GitHub variable is needed, and without these permissions email stays off with a notice in the deploy log. With email prepared, people with an account can sign in with an emailed code. Installs made by the hosted installer, which records its owner's email, also let that owner create the first account by email, so their `/setup` needs no OAuth app; other deployments still configure one OAuth provider for the first sign-in. [Email triggers](/docs/guides/email-triggers/) give an automation its own address on `agents.<your-domain>`: a superadmin turns them on after signing in, in **Admin → Integrations → Agent email**, after reviewing any DNS change they would make to your main domain. Your MX records never change. See [Turn on agent email](/docs/guides/email-triggers/#turn-on-agent-email-admins) for the steps and for what to do when setup refuses your SPF record.
+
 **Optional — SAM-hosted repositories (experimental):** SAM can create and host Git repositories for projects directly on [Cloudflare Artifacts](https://developers.cloudflare.com/artifacts/) (currently in beta), letting users start a project without connecting GitHub. If your Cloudflare account has Artifacts access, add an **Account → Artifacts → Edit** permission to the token. The deploy **auto-detects** whether the token can reach the Artifacts REST API and enables the SAM-hosted project option only when it can — so it is safe to add the permission if it is available, or omit it entirely with no effect. To force the behavior regardless of detection, set the `ARTIFACTS_BINDING_ENABLED` GitHub Actions **variable** to `true` or `false`.
 
 Because the token includes **Workers R2 Storage** access, Cloudflare's final creation screen shows **both** the API token **and** a set of R2 S3 keys (Access Key ID + Secret Access Key) together. You do **not** need to create a separate R2 API token. Copy all of the values before leaving the page:
@@ -73,9 +274,9 @@ Pulumi uses the R2 S3 keys for its state backend. The deploy workflow creates th
 
 ## Step 4: Create GitHub App
 
-You can deploy SAM before creating a GitHub App. On first deploy, SAM generates a one-time `SETUP_TOKEN` Worker variable and the workflow prints a Cloudflare dashboard link where you can read it. Open `https://app.yourdomain.com/setup`, paste that token, and configure GitHub App, GitHub OAuth, and Google **login** OAuth credentials in the setup wizard. The Google login client must have `https://api.yourdomain.com/api/auth/callback/google` registered as an authorized redirect URI, and is a separate OAuth client from any Google/GCP infrastructure credentials (`GOOGLE_CLIENT_ID`). The values are stored in SAM's encrypted platform credential store and can be rotated later by a superadmin.
+You can deploy SAM before creating a GitHub App. On first deploy, SAM generates a one-time `SETUP_TOKEN` Worker variable and the workflow prints a Cloudflare dashboard link where you can read it. The workflow log never shows the token itself: it is masked as `***`, so copy it from the dashboard. Open `https://app.yourdomain.com/setup` and paste that token. When the deploy prepared email and the installer recorded an owner email (`BOOTSTRAP_OWNER_EMAIL`), setup needs only the token and emails that owner a sign-in code; if Cloudflare is still verifying the sending domain, it asks you to wait a few minutes. Otherwise setup asks for one of GitHub, Google or GitLab OAuth, because email cannot create the first account without an owner email; a provider the deployment already has (for example from `GH_*` secrets) is used as is. The Google login client must have `https://api.yourdomain.com/api/auth/callback/google` registered as an authorized redirect URI, and is a separate OAuth client from any Google/GCP infrastructure credentials (`GOOGLE_CLIENT_ID`). After you sign in, add the GitHub App and any other provider in **Admin → Integrations**. The values are stored in SAM's encrypted platform credential store and can be rotated later by a superadmin.
 
-If you prefer to create the GitHub App first, use the wizard below to create it with all settings pre-filled. Enter your domain, click through to GitHub, and paste the generated values into `/setup` or set the optional `GH_*` GitHub Environment secrets before deploy.
+If you prefer to create the GitHub App first, use the wizard below to create it with all settings pre-filled. Enter your domain, click through to GitHub, and paste the generated values into **Admin → Integrations** or set the optional `GH_*` GitHub Environment secrets before deploy.
 
 <GitHubAppSetup />
 
@@ -85,19 +286,88 @@ The GitHub App needs **Pull requests: Read-only** for pull request and review we
 "Request user authorization (OAuth) during installation" must be **unchecked** on the GitHub form. When checked, it disables the Setup URL and breaks post-installation redirects.
 :::
 
+### Let agents open pull requests
+
+The App that the wizard creates can read pull requests and issues but not write them. Agents can
+clone and push branches, but `gh pr create` fails, and a trigger's run can't comment on or label an
+issue. SAM doesn't open pull requests itself (from v2026.10.17 the agent does, when asked), so to
+let agents open them:
+
+1. In the App's settings on GitHub, under **Permissions & events**, set **Pull requests** to
+   **Read and write**. Set **Issues** to **Read and write** too if runs should comment on or label
+   issues.
+2. Save. GitHub asks the owner of each installation to accept the new permissions, and the old ones
+   apply until they do.
+
+Workspaces then get the new permissions on their next GitHub token, within about an hour (SAM reuses a token for up to 50 minutes). A profile can narrow them again
+under **Platform Policy → GitHub CLI access**.
+
 ## Platform integrations after deploy
 
-Fresh deployments can keep most platform integration credentials out of GitHub Actions secrets. After the first deploy, open `/setup` with the one-time setup token and configure the integrations users need:
+Fresh deployments can keep most platform integration credentials out of GitHub Actions secrets. After the first deploy, open `/setup` with the one-time setup token to choose how people sign in, then configure the rest in **Admin → Integrations** (`/admin/integrations`):
 
 - **GitHub App and GitHub OAuth** for GitHub-backed projects, pull requests, and repository access.
 - **Google login OAuth** for Sign in with Google. This is separate from Google/GCP infrastructure OAuth.
 - **GitLab OAuth** when users need to create GitLab-backed projects and workspaces.
+- **Google infrastructure OAuth** for keyless GCP/WIF setup. It is never offered in `/setup`, so it cannot be confused with Google login. Runtime integration values are stored encrypted and override environment fallbacks without a redeploy.
 
-A superadmin can separately configure **Google infrastructure OAuth** at `/admin/integrations` for keyless GCP/WIF setup. It is intentionally absent from `/setup` so installations do not confuse it with Google login. Runtime integration values are stored encrypted and override environment fallbacks without a redeploy.
+Before users connect GCP accounts, follow [Connect Google Cloud](/docs/guides/google-cloud/) to enable the infrastructure OAuth-client project APIs and configure its callback. The guide also explains why disabled APIs can appear as permission errors.
+
+### Check where a value came from, and clear one
+
+Each integration and field on **Admin → Integrations** shows where its value comes from: **stored in SAM** (saved in `/setup`, on this page, or in **Admin → Settings**), **Worker environment fallback** (a `GH_*`, `GOOGLE_*` or `GITLAB_*` variable from your GitHub Environment), or **not configured**. A stored value also shows when it changed and who changed it. A value written by `/setup` reads **first-run setup (unauthenticated)**, because anyone holding the setup token can write it.
+
+To remove a stored integration, select **Clear** on its card and confirm. SAM deletes the stored values, including the encrypted secret, and records a `reset` for each field in the settings audit. The environment fallback takes over if one is set; otherwise the integration is off and its sign-in button disappears. **Clear** appears only on cards that have a stored value.
+
+### Security alerts by email
+
+When the deployment can send email (see the optional email permissions above), SAM emails every active superadmin when:
+
+- an integration value is set or cleared, on this page or in **Admin → Settings**, naming who did it;
+- first-run setup completes;
+- a GitHub, Google or GitLab sign-in is linked to an admin or superadmin account.
+
+The emails come from `security@agents.yourdomain.com` (on a single-box build that sends through SMTP, from `SMTP_FROM`; see [Email on a single-box build](#email-on-a-single-box-build)) and link to the admin page to review. Before the first superadmin exists, the owner email the installer recorded (`BOOTSTRAP_OWNER_EMAIL`) gets them instead. Sending is best-effort: a failed email is logged (`security_alert.send_failed`) and never blocks the change. Without email, nothing is sent.
+
+### Set up GitLab sign-in
+
+To let people sign in with GitLab and create projects from GitLab repositories:
+
+1. In GitLab, add an OAuth application in your user, group, or instance **Applications** settings
+   (see GitLab's [OAuth provider guide](https://docs.gitlab.com/integration/oauth_provider/)):
+   - **Redirect URI:** `https://api.yourdomain.com/api/auth/callback/gitlab`, using your `BASE_DOMAIN`.
+   - **Scopes:** `read_user`, `api`, `read_repository` and `write_repository`. SAM asks for all four
+     at sign-in, and GitLab-backed workspaces use them to clone and push.
+2. Enter the GitLab host (for example `https://gitlab.com`), the application ID, and its secret in
+   `/setup`, or later in [**Admin → Settings**](/docs/guides/admin-settings/) under **OAuth**. The
+   `GITLAB_*` variables in the table below are only fallbacks for an unsaved value.
+
+   A GitLab sign-in can join an existing SAM account with the same email, and update its name and
+   avatar, only when the host is `https://gitlab.com` or comes from the `GITLAB_HOST` environment
+   variable. A self-managed host saved in `/setup` or **Admin → Settings** signs people in, but a
+   person who already uses SAM through another sign-in method keeps using that method: SAM cannot
+   check that a self-managed GitLab really verified the email it reports. To let GitLab sign-ins
+   join existing accounts on a self-managed host, set `GITLAB_HOST` (plus `GITLAB_CLIENT_ID` and
+   `GITLAB_CLIENT_SECRET`) in the GitHub Environment instead. That also applies if people already
+   signed in with GitLab through a self-managed host saved before November 2026: SAM now stores
+   such logins under a host-specific id, so those earlier GitLab links only match again once the
+   host is set in `GITLAB_HOST`.
+
+3. Check it: [create a test project from a GitLab repository](#verification) and start a chat.
 
 ### Let users report problems
 
-SAM's in-app **Report an Issue** flow is off until you nominate a project to receive reports. Create a project for feedback, then open **Admin → Integrations** (`/admin/integrations`) and select it under **Private feedback project**. `PLATFORM_FEEDBACK_PROJECT_ID` is still supported as a bootstrap/environment fallback, but the in-app runtime setting is preferred and overrides it. Until an effective project exists, the Report button and the crash-screen report link are hidden from every user — so if people tell you there's no Report button, this is why. The same setting enables hourly automated triage of platform errors into that project. See [Reporting Issues](/docs/guides/reporting-issues/#for-operators-where-reports-land).
+SAM's in-app **Report an Issue** flow is off until you nominate a project to receive reports. Create a private project for this (SAM calls it the **Operations project**), then open **Admin → Integrations** (`/admin/integrations`) and select it under **Operations project**. `PLATFORM_FEEDBACK_PROJECT_ID` is still supported as a bootstrap/environment fallback, but the in-app runtime setting is preferred and overrides it. Until an effective project exists, the Report button and the crash-screen report link are hidden from every user — so if people tell you there's no Report button, this is why. The same setting enables hourly automated triage of platform errors into that project. See [Reporting Issues](/docs/guides/reporting-issues/#for-operators-where-reports-land).
+
+### Let an agent debug your installation
+
+Debugger tools let agents in the Operations project read across every user's nodes, workspaces and
+sessions, including raw node logs and debug packages (kept for 7 days by default). Actions that
+change things, each approved by a person, arrive in a later release. The tools are off by default. To turn them on, set
+`operations.debuggerTools` in [**Admin → Settings**](/docs/guides/admin-settings/#operations-debugger-tools)
+under **Operations**. Only tasks owned by an active superadmin can use them, checked on every call,
+and every call is audited. Leave the setting `off` if you do not want any agent to see other users'
+infrastructure.
 
 ### Let agents ask in chat
 
@@ -112,9 +382,9 @@ Claude Code in a devcontainer that
 every time it asks to make a change. Release-specific steps are in the self-hoster notes of
 [Recent Product Changes](/docs/guides/recent-product-changes/).
 
-We recommend turning it on; the hosted service has it on. Agents set to ask then wait for an
+We recommend turning it on. Agents set to ask then wait for an
 answer — a permission request for up to 30 minutes in a task and 2 hours in a chat — and only the
-person who started the chat can answer, with no notification sent. To turn it on, add these GitHub
+person who started the chat, or someone they shared it with, can answer, with no notification sent. To turn it on, add these GitHub
 Environment **variables** (not secrets) to your `production` environment, each set to `true`:
 
 | Variable                        | What it turns on                                                      |
@@ -125,8 +395,9 @@ Environment **variables** (not secrets) to your `production` environment, each s
 
 They take effect at the next deploy: run **Deploy Production**, or set them before you
 [update](#updating-an-existing-self-hosted-instance) so the update's deploy picks them up. Turning a
-switch on applies to chats started after that deploy; a chat that sleeps and wakes usually can't
-ask yet.
+switch on applies to chats started after that deploy, including after they sleep and wake. Chats
+started before it on v2026.10.08 or later still can't ask; older chats pick up the current switches
+the first time they wake, and keep them after that.
 To check that it works, start a new chat with a Claude Code profile set to **Manual** and ask the
 agent to create a file: a card with a **Permission needed** badge should appear. Turning a switch off refuses new requests straight away,
 even in running chats; any already waiting can still be answered until they expire. Deadlines and
@@ -164,12 +435,12 @@ SELECT 'project: ' || pr.name, pr.id, u.email, pr.agent_defaults
 project. A project row lists every agent the project sets a mode for; read its JSON to see which.
 Set those modes to **Bypass Permissions**, or clear them: a user changes their own **Settings →
 Agents**, and any admin of a project can change its profiles and **Agent Overrides**. A skill's mode
-has no field in the app; change it with SAM's `update_skill` tool (ask an agent in the project) or
+has no field in the app; change it with SAM's `skills_write` method `update` tool (ask an agent in the project) or
 the API.
 
 ## GCP provisioning credentials
 
-Each user connects Google Cloud from **Settings → Cloud Provider → Google Cloud**. SAM supports two mutually exclusive authentication modes.
+Each user connects Google Cloud from **Settings → Infrastructure**: under **Cloud accounts**, click **Connect account** and pick **Google Cloud**. SAM supports two mutually exclusive authentication modes.
 
 ### Workload Identity Federation (recommended)
 
@@ -192,7 +463,7 @@ Create a dedicated least-privilege identity rather than granting Project Owner:
 PROJECT_ID="your-gcp-project-id"
 SERVICE_ACCOUNT="sam-vm-manager@${PROJECT_ID}.iam.gserviceaccount.com"
 
-gcloud services enable compute.googleapis.com --project="${PROJECT_ID}"
+gcloud services enable compute.googleapis.com cloudbilling.googleapis.com --project="${PROJECT_ID}"
 gcloud iam service-accounts create sam-vm-manager \
   --project="${PROJECT_ID}" \
   --display-name="SAM VM manager"
@@ -207,9 +478,9 @@ gcloud iam service-accounts keys create sam-service-account.json \
   --project="${PROJECT_ID}"
 ```
 
-Vertex AI access is optional and is not required for VM provisioning. If your organization policy disables service-account key creation, use WIF or ask a Google Cloud administrator to approve an appropriate key-management policy; do not weaken the policy just for SAM.
+Cloud Billing (`cloudbilling.googleapis.com`) lets SAM read Google's public list prices for the machine catalog; it grants no access to your billing account. Without it, machines are still offered but show "Price unavailable", and Settings → Infrastructure shows a warning with the exact command and an enable link. Use **Check again** on the Google Cloud connection after enabling it. Vertex AI access is optional and is not required for VM provisioning. If your organization policy disables service-account key creation, use WIF or ask a Google Cloud administrator to approve an appropriate key-management policy; do not weaken the policy just for SAM.
 
-SAM encrypts the complete JSON in both credential stores with the configured credential-encryption key. Only safe metadata is returned to the browser. Derived Google access tokens are short-lived and cached only up to their returned expiry. Rotation verifies the new key before atomically replacing all SAM copies. Disconnect removes SAM's encrypted copies and cached tokens, but it cannot revoke the key in Google Cloud—disable or delete the old key there after a successful rotation or disconnect.
+SAM encrypts the complete JSON in both credential stores with the configured credential-encryption key. Only safe metadata is returned to the browser. Derived Google access tokens are short-lived and cached only up to their returned expiry. Rotation verifies the new key before atomically replacing all SAM copies. Running VMs stay deletable after a rotation or reconnect: SAM tears them down with your current credential once each VM proves, by its SAM labels, that it belongs to the node being deleted. If the new credential points at a different Google Cloud project, those VMs are flagged as needing manual cleanup instead. Disconnect removes SAM's encrypted copies and cached tokens, but it cannot revoke the key in Google Cloud—disable or delete the old key there after a successful rotation or disconnect.
 
 ## Step 5: Generate Pulumi Passphrase
 
@@ -258,7 +529,7 @@ stop routing to them) or `D1_SESSION_MODE=disabled` to keep the replicas but rou
 query at the primary. Replication needs no extra API-token permission beyond the
 **Account → Cloudflare Workers: D1 → Edit** grant the deploy token already requires.
 
-The reviewed default churning selectors are `DATABASE.deployment_releases`, `DATABASE.github_webhook_deliveries`, `DATABASE.project_files`, `DATABASE.registry_credential_rate_limits`, `DATABASE.session_snapshots`, `DATABASE.sessions`, `DATABASE.trial_waitlist`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. All other application tables retain zero row-decrease tolerance. Leave `D1_MIGRATION_CHURNING_TABLES` unset to use the complete reviewed default list.
+The reviewed default churning selectors are listed in the [configuration reference](/docs/reference/configuration/) (`DEFAULT_D1_MIGRATION_CHURNING_TABLES` in `scripts/deploy/d1-migration-churning-tables.ts`). All other application tables retain zero row-decrease tolerance. Leave `D1_MIGRATION_CHURNING_TABLES` unset to use the complete reviewed default list.
 
 The guided setup generates `RESOURCE_PREFIX` from `BASE_DOMAIN` as `s` plus the
 first six hex characters of the domain's SHA-256 hash. Use that generated value
@@ -275,37 +546,43 @@ compute credential configured by an administrator.
 
 **GitHub Environment secrets:**
 
-| Secret                                     | Description                                                                                                                                                                                                                                                                                                                  |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CF_API_TOKEN`                             | Cloudflare API token                                                                                                                                                                                                                                                                                                         |
-| `CF_ACCOUNT_ID`                            | Cloudflare account ID (32-char hex)                                                                                                                                                                                                                                                                                          |
-| `CF_ZONE_ID`                               | Domain zone ID (32-char hex)                                                                                                                                                                                                                                                                                                 |
-| `R2_ACCESS_KEY_ID`                         | R2 API token access key                                                                                                                                                                                                                                                                                                      |
-| `R2_SECRET_ACCESS_KEY`                     | R2 API token secret key                                                                                                                                                                                                                                                                                                      |
-| `PULUMI_CONFIG_PASSPHRASE`                 | Generated passphrase                                                                                                                                                                                                                                                                                                         |
-| `GH_CLIENT_ID`                             | Optional GitHub App client ID; can be configured in `/setup` instead                                                                                                                                                                                                                                                         |
-| `GH_CLIENT_SECRET`                         | Optional GitHub App client secret; can be configured in `/setup` instead                                                                                                                                                                                                                                                     |
-| `GH_APP_ID`                                | Optional GitHub App ID; can be configured in `/setup` instead                                                                                                                                                                                                                                                                |
-| `GH_APP_PRIVATE_KEY`                       | Optional GitHub App private key (PEM or base64); can be configured in `/setup`                                                                                                                                                                                                                                               |
-| `GH_APP_SLUG`                              | Optional GitHub App URL slug; can be configured in `/setup` instead                                                                                                                                                                                                                                                          |
-| `GH_WEBHOOK_SECRET`                        | Optional GitHub App webhook secret; can be configured in `/setup` instead                                                                                                                                                                                                                                                    |
-| `GOOGLE_LOGIN_CLIENT_ID`                   | Optional Google **login** OAuth client ID (Sign in with Google); can be configured in `/setup` instead. Register redirect URI `https://api.yourdomain.com/api/auth/callback/google`                                                                                                                                          |
-| `GOOGLE_LOGIN_CLIENT_SECRET`               | Optional Google **login** OAuth client secret; can be configured in `/setup` instead                                                                                                                                                                                                                                         |
-| `GITLAB_HOST`                              | Optional GitLab OAuth host, such as `https://gitlab.com`; can be configured in `/setup` instead. Register redirect URI `https://api.yourdomain.com/api/auth/callback/gitlab` and grant the `read_user` and `api` scopes (`api` is required for repository clone/push and merge-request creation in GitLab-backed workspaces) |
-| `GITLAB_CLIENT_ID`                         | Optional GitLab OAuth application ID; can be configured in `/setup` instead                                                                                                                                                                                                                                                  |
-| `GITLAB_CLIENT_SECRET`                     | Optional GitLab OAuth secret; can be configured in `/setup` instead                                                                                                                                                                                                                                                          |
-| `GOOGLE_CLIENT_ID`                         | Optional environment fallback for the Google **infra/GCP** OAuth client ID. A superadmin can configure the independent runtime pair at `/admin/integrations`; not used for login.                                                                                                                                            |
-| `GOOGLE_CLIENT_SECRET`                     | Optional environment fallback for the Google **infra/GCP** OAuth client secret. Runtime admin configuration takes precedence; not used for login.                                                                                                                                                                            |
-| `CF_AIG_TOKEN`                             | Optional narrower Cloudflare AI Gateway Unified Billing token                                                                                                                                                                                                                                                                |
-| `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`  | Optional narrower Cloudflare token for managed devcontainer registry credentials                                                                                                                                                                                                                                             |
-| `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | Optional Cloudflare account override for managed devcontainer registry credentials                                                                                                                                                                                                                                           |
+| Secret                                     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `CF_API_TOKEN`                             | Cloudflare API token                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `CF_ACCOUNT_ID`                            | Cloudflare account ID (32-char hex)                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `CF_ZONE_ID`                               | Domain zone ID (32-char hex)                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `R2_ACCESS_KEY_ID`                         | R2 API token access key                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `R2_SECRET_ACCESS_KEY`                     | R2 API token secret key                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `PULUMI_CONFIG_PASSPHRASE`                 | Generated passphrase                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `GH_CLIENT_ID`                             | Optional GitHub App client ID; can be configured in `/setup` instead                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `GH_CLIENT_SECRET`                         | Optional GitHub App client secret; can be configured in `/setup` instead                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `GH_APP_ID`                                | Optional GitHub App ID; can be configured in `/setup` instead                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `GH_APP_PRIVATE_KEY`                       | Optional GitHub App private key (PEM or base64); can be configured in `/setup`                                                                                                                                                                                                                                                                                                                                                                                           |
+| `GH_APP_SLUG`                              | Optional GitHub App URL slug; can be configured in `/setup` instead                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `GH_WEBHOOK_SECRET`                        | Optional GitHub App webhook secret; can be configured in `/setup` instead                                                                                                                                                                                                                                                                                                                                                                                                |
+| `GOOGLE_LOGIN_CLIENT_ID`                   | Optional Google **login** OAuth client ID (Sign in with Google); can be configured in `/setup` instead. Register redirect URI `https://api.yourdomain.com/api/auth/callback/google`                                                                                                                                                                                                                                                                                      |
+| `GOOGLE_LOGIN_CLIENT_SECRET`               | Optional Google **login** OAuth client secret; can be configured in `/setup` instead                                                                                                                                                                                                                                                                                                                                                                                     |
+| `GITLAB_HOST`                              | Optional GitLab OAuth host, such as `https://gitlab.com`; can be configured in `/setup` instead. A self-managed host set here also lets GitLab sign-ins join existing accounts by email; one saved in `/setup` cannot. Register redirect URI `https://api.yourdomain.com/api/auth/callback/gitlab` and select the `read_user`, `api`, `read_repository`, and `write_repository` scopes, which SAM requests at sign-in and GitLab-backed workspaces use to clone and push |
+| `GITLAB_CLIENT_ID`                         | Optional GitLab OAuth application ID; can be configured in `/setup` instead                                                                                                                                                                                                                                                                                                                                                                                              |
+| `GITLAB_CLIENT_SECRET`                     | Optional GitLab OAuth secret; can be configured in `/setup` instead                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `GOOGLE_CLIENT_ID`                         | Optional environment fallback for the Google **infra/GCP** OAuth client ID. A superadmin can configure the independent runtime pair at `/admin/integrations`; not used for login.                                                                                                                                                                                                                                                                                        |
+| `GOOGLE_CLIENT_SECRET`                     | Optional environment fallback for the Google **infra/GCP** OAuth client secret. Runtime admin configuration takes precedence; not used for login.                                                                                                                                                                                                                                                                                                                        |
+| `CF_AIG_TOKEN`                             | Optional narrower Cloudflare AI Gateway Unified Billing token                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`  | Optional narrower Cloudflare token for managed devcontainer registry credentials                                                                                                                                                                                                                                                                                                                                                                                         |
+| `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | Optional Cloudflare account override for managed devcontainer registry credentials                                                                                                                                                                                                                                                                                                                                                                                       |
 
 :::note
-GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB_*`. When present, the deployment workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets and SAM uses them as environment fallbacks. Values saved in `/setup` or the superadmin platform config UI take precedence.
+GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB_*`. When present, the deployment workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets and SAM uses them as environment fallbacks. Values saved in `/setup`, **Admin → Integrations**, or [**Admin → Settings**](/docs/guides/admin-settings/) take precedence.
 :::
 
 :::note
-Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`) and `TRIAL_CLAIM_TOKEN_SECRET` are automatically generated during deployment. Pulumi persists the source key material, and the deployment workflow derives/copies the runtime Worker secrets. No manual setup required.
+Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`) are automatically generated during deployment. Pulumi persists the source key material, and the deployment workflow derives/copies the runtime Worker secrets (`scripts/deploy/configure-secrets.sh`), registering every value it reads from Pulumi with GitHub's log masking before any other use. No manual setup required. Generated `RandomId` key encodings (`b64Std`, `b64Url`, `dec`, `hex`) are marked secret, but Pulumi cannot encrypt the special resource ID through secret-output annotations; that ID is the same key bytes encoded as unpadded base64url. Keep the state backend and backups private. Annotation updates preserve existing keys and do not rotate credentials.
+:::
+
+:::note[Generated-key metadata preview]
+The **Pulumi State Repair** workflow's `secret-metadata-preview` action previews the four existing generated key resources without applying changes, refreshing resources, or exporting state. It uses the selected GitHub Environment's existing secrets and approval controls. Only operation counts, resource types, and identity/input/protection/secret booleans are logged; raw preview output is discarded even on failure. Verification fails if a key is missing or changed, any resource operation would mutate, or expected secret declarations are absent. Pulumi's default preview contains pre-step metadata, so `same` operations establish preservation while new resource IDs/output markers can still be unknown; secret booleans verify annotation intent, not persisted state. A separate `persistedSecretMetadataVerified` boolean checks only the old state's regular secret markers, allowing safe verification after an authorized apply. Post-apply acceptance requires both `verified` and `persistedSecretMetadataVerified` to be true. This does not encrypt the special resource ID or verify unrelated infrastructure.
+
+Optional GitHub Environment variables `PULUMI_METADATA_PREVIEW_TIMEOUT_MS` (default `600000`) and `PULUMI_METADATA_PREVIEW_MAX_BYTES` (default `16777216`) bound each runner subprocess and captured preview output. Unset or empty values use the defaults; nonpositive or invalid values fail safely. No additional secrets or permissions are required.
 :::
 
 :::note[Provider resource ownership]
@@ -313,7 +590,7 @@ Pulumi also generates a non-secret, per-installation identity in stack state and
 :::
 
 :::note[VM TLS certificates]
-New VM nodes do not receive a shared Origin CA private key in cloud-init. The cloud-init template generates a node-local RSA key and CSR, then calls the node-scoped callback endpoint `POST /api/nodes/:id/origin-ca-certificate` with its callback JWT. The API Worker signs that CSR through Cloudflare Origin CA using `CF_API_TOKEN` (`packages/cloud-init/src/template.ts`, `apps/api/src/routes/node-lifecycle.ts`, `apps/api/src/services/origin-ca-certificates.ts`).
+New public-DNS VM nodes do not receive a shared Origin CA private key in cloud-init. The cloud-init template generates a node-local RSA key and CSR, then calls the node-scoped callback endpoint `POST /api/nodes/:id/origin-ca-certificate` with its callback JWT. The API Worker signs that CSR through Cloudflare Origin CA using `CF_API_TOKEN` (`packages/cloud-init/src/template-ingress.ts`, `apps/api/src/routes/node-lifecycle.ts`, `apps/api/src/services/origin-ca-certificates.ts`); tunnel nodes skip Origin CA provisioning.
 :::
 
 :::note[Analytics privacy and configuration]
@@ -384,7 +661,7 @@ After reviewing the preview, repeat the command with `-f dry_run=false`. Each su
 If deployment stops with a Durable Object migration-state error:
 
 - **Errors mentioning listing lag or a Worker "created moments ago" are transient.** The workflow already retries the state probe a few times (tune with the `DO_MIGRATION_STATE_PROBE_ATTEMPTS` and `DO_MIGRATION_STATE_PROBE_RETRY_DELAY_MS` GitHub repository variables); re-running the deployment is safe and resumes cleanly.
-- **"tag is not present in the checked-in history"** means `apps/api/wrangler.toml` lost migration entries that were already applied to your Worker — usually an upgrade merge that dropped fork-local `[[migrations]]` entries. Restore the missing entries so the deployed tag appears in the history, then redeploy.
+- **"tag is not present in the checked-in history"** means `apps/api/wrangler.toml` lacks migration entries that were already applied to your Worker. Usually an upgrade merge dropped fork-local `[[migrations]]` entries: restore them so the deployed tag appears in the history, then redeploy. If instead you deployed an older release than the one already running (a rollback), don't edit `[[migrations]]`: put `main` back on the newer release and deploy it (see [Update forward, not back](#option-a-update-self-hosted-instance-workflow-recommended)).
 - **Never delete the API Worker to recover.** Deleting a Worker destroys every Durable Object namespace behind it — all chat sessions, messages, and task state. There is no undo.
 
 VM diagnostic evidence, ProjectData archived tool payloads, and terminal-session archive chunks/manifests use the existing application R2 bucket; there is no separate bucket or manually generated secret to configure. Pulumi creates an independent lifecycle rule for the private diagnostic prefix and the deployment sync binds the same bucket as `PROJECT_DATA_ARCHIVE_R2` for ProjectData archival. Optional stack settings are `diagnosticIncidentPrefix` (default `diagnostic-incidents`) and `diagnosticIncidentTtlDays` (default `7`, any positive integer). Keep the diagnostic prefix private and distinct from the reserved application namespaces `agents`, `cli`, `compose-image-artifacts`, `library`, `project-data`, `resource-history`, `session-snapshots`, `temp-uploads`, and `tts`; Pulumi rejects overrides whose top-level segment would expire objects owned by one of those features.
@@ -399,9 +676,23 @@ curl https://api.yourdomain.com/health
 # Should return: {"status":"healthy","timestamp":"..."}
 ```
 
-Open the Cloudflare dashboard link printed by the workflow, copy the plaintext `SETUP_TOKEN` Worker variable, then open `https://app.yourdomain.com/setup`. The setup page accepts the token only while first-run setup is incomplete. After you save a valid login provider and complete setup, `/setup` returns Gone and future changes move to the superadmin platform config UI.
+Open the Cloudflare dashboard link printed by the workflow, copy the plaintext `SETUP_TOKEN` Worker variable, then open `https://app.yourdomain.com/setup`. The setup page accepts the token only while first-run setup is incomplete, and setup counts as complete as soon as the instance has an active superadmin, even one created before the setup page existed. When the deploy prepared email and the installer named an owner, setup finishes with the token alone and emails that owner a sign-in code; otherwise it asks for one OAuth provider. Once setup is complete, `/setup` returns Gone and future changes are made by a superadmin in **Admin → Integrations** and [**Admin → Settings**](/docs/guides/admin-settings/).
 
-Open `https://app.yourdomain.com` — you should see the login page with whichever providers you configured.
+Open `https://app.yourdomain.com` — you should see the login page with whichever providers you configured, plus **Email me a sign-in code** when the deploy prepared email.
+
+**Check that setup is closed.** Once you have signed in as the first superadmin, nobody else can
+use the setup page. Confirm it from any machine:
+
+```bash
+curl -i https://api.yourdomain.com/api/setup/status
+# Should return: HTTP/2 410 with "error":"SETUP_CLOSED"
+```
+
+A `200` response with `"open":true` means setup is still open to anyone holding the `SETUP_TOKEN`:
+finish setup now. If it shows `"forced":true`, the `SETUP_FORCE=true` lockout-recovery override is
+set; remove it from the Worker's variables once you have recovered access, because it keeps setup
+open even after a superadmin exists. See the
+[security advisory on setup takeover](/blog/security-advisory-setup-takeover/) for why this matters.
 
 If you enabled GitLab in platform configuration, create a test project from a GitLab repository and start a lightweight chat before inviting users. That validates the OAuth app, repository metadata propagation, and workspace credential helper path together.
 
@@ -422,6 +713,24 @@ The **Update Self-Hosted Instance** workflow (`update-self-hosted.yml`) automate
 
 If your fork has local commits that are not in the upstream release, the workflow will fail with a fast-forward error. In that case, merge manually and use Option B.
 
+:::caution[Update forward, not back]
+Releases up to v2026.10.16 can no longer deploy: Cloudflare now rejects their R2 CORS request, so
+Deploy Production stops at **Configure R2 CORS** (see
+[Troubleshooting](#deploy-fails-at-configure-r2-cors-http-400-code-10029)). Update to v2026.10.17 or
+later.
+
+There's no rollback. If a release misbehaves, update to a newer one that fixes it:
+
+- **Update Self-Hosted Instance** only moves `main` forward. Pick a release older than the one you
+  run and it stops with "Cannot fast-forward main to …", even if your fork has no commits of its own.
+- **Deploy Production** only deploys the current tip of `main`.
+- If you move `main` back by hand, the deploy fails once the older release lacks a Durable Object
+  migration that has already run. After v2026.10.18 or later has deployed, that's every release
+  before v2026.10.18: "Deployed Durable Object migration tag "v22" is not present in the checked-in
+  history…". Don't edit `[[migrations]]` to get past it. Put `main` back on the newer release and
+  deploy that.
+  :::
+
 ### Option B: Manual deploy
 
 1. Sync your fork's `main` branch with upstream (e.g. via GitHub's "Sync fork" button or `git fetch upstream && git merge upstream/main`).
@@ -431,26 +740,113 @@ If your fork has local commits that are not in the upstream release, the workflo
 
 Use the manual workflow when you rotate deployment secrets, change GitHub Environment variables, or want to re-apply Pulumi-managed infrastructure.
 
+### Deploys wait for container rollout
+
+Staging and production deployments wait for container application rollouts to reach
+100% before reporting success. Wrangler returning successfully only means the
+rollout started; the workflow's **Wait for container rollout completion** step
+compares rollout records before/after deployment and requires the exact pinned
+rollout to complete every step through 100% at its target. The application list
+can retain the previous version after completion; the gate logs this disagreement
+without holding a finished rollout. Application version alone never establishes
+completion. Multiple new rollouts fail as ambiguous; no-op or
+metadata-only updates require no new rollout, but await an existing pending one.
+Gradual rollout behavior
+is preserved. API errors, unreadable state and timeout fail the deployment.
+The wait closes the window where deployment reports success mid-rollout; it does
+not prove every running instance's binary version. The authenticated `/ready`
+callback logs `instant_session.agent_version_mismatch` with expected and reported
+versions without rejecting readiness, providing evidence for remaining version
+discrepancies.
+Optional GitHub Environment variables `CONTAINER_ROLLOUT_TIMEOUT_MS` (default
+`1200000`, 20 minutes) and `CONTAINER_ROLLOUT_POLL_INTERVAL_MS` (default `10000`)
+accept positive integer milliseconds. These are deployment runner settings, not
+Worker runtime settings. Timeout errors include the rollout ID and last status.
+
+### Container image reuse
+
+Before the API Worker is deployed, the **Resolve container images** step
+(`scripts/deploy/container-image-reuse.ts`) gives each Instant container image a
+content key. The key covers the Dockerfile, every file it copies, and a
+fingerprint of every input installed from the network: the apt package indexes
+of each suite the image installs from, every URL the build fetches, the resolved
+dependency tree of each `npm install -g` package, and the resolved PyPI
+dependencies of each `uv tool install` (`container-image-inputs.ts`,
+`container-image-fingerprints.ts`). The registry tag `inputs-<key>` in your
+account's container registry records an image built from those inputs.
+
+- **Inputs unchanged:** the deploy uses that image's digest. Nothing is built or
+  pushed, and when it is the running image Wrangler reports no change and starts
+  no rollout, so the rollout gate returns at once.
+- **Inputs changed** (including an upstream security update or dependency
+  release): the image is built and pushed under the new key, and the rollout
+  gate waits for the rollout as usual.
+- **Latest rollout failed or cancelled** (or its state cannot be read): the image
+  is rebuilt to a fresh digest even when its inputs are unchanged, so the deploy
+  starts a new rollout instead of re-pointing at the one that failed.
+- **Any doubt** (a Dockerfile command, fetched URL or npm install script outside
+  the reviewed lists in `container-image-reviewed-inputs.ts`, a failed
+  fingerprint, a registry error): the Dockerfile is left in place and Wrangler
+  builds the image as it would without this step. A failed image build fails the
+  deployment.
+
+Anyone who can push to a repository in your account's container registry can
+replace the image a tag points at, so registry write access is deploy access. That
+was already true of the deploy token, which can publish Workers too; keep
+production in a Cloudflare account, or behind a token, that staging cannot use.
+
+The step's job summary lists each image's outcome and reason. A clean install
+has no recorded images, so its first deploy builds them. To always build with
+Wrangler, set the GitHub Environment variable `CONTAINER_IMAGE_REUSE_ENABLED` to
+exactly `false`. Optional `CONTAINER_IMAGE_FINGERPRINT_TIMEOUT_MS` (default
+`180000`) bounds each fingerprint request and all of an image's lookups together, and `CONTAINER_REGISTRY_CREDENTIAL_MINUTES`
+(default `30`) sets the lifetime of each short-lived registry credential.
+
 ## First Login & Admin Access
 
-The first genuine human to sign in to a fresh deployment becomes the **superadmin** — the account that can approve other users, manage platform credentials, and reach the admin dashboard.
+On ordinary deployments without an installer owner binding, the first genuine human to sign in becomes the **superadmin**: the account that can approve other users, manage platform credentials, and reach the admin dashboard. The promotion happens once, when that person's first session is created (`establishFirstSuperadmin`, `apps/api/src/services/first-superadmin.ts`), and only while they are the **only** real account on the instance.
 
-Fresh deployments are seeded with an internal sentinel user (`system_anonymous_trials`, `status='system'`, created by a database migration) used for anonymous trials. This sentinel is **not** a real user and never counts toward "is this the first human" checks. Two mechanisms guarantee the first real human is promoted regardless of the sentinel:
+Email sign-in codes (`services/email-sign-in.ts`) create an account only for the installer owner email, before that owner exists. Otherwise only addresses that already belong to an account receive a code. Deployments without an owner email never create accounts by email, because the first person to ask for a code would become the administrator. The response is the same for every address, and the code is sent after the response, so its timing reveals nothing either. The password-reset, verification and email-change code routes are closed. Codes expire after 5 minutes and allow 3 attempts. Each address gets at most 5 codes an hour, each IP address at most 20 requests, and each address at most 10 code guesses an hour from all IP addresses combined (the `agentEmail.signInCodesPerEmailPerHour`, `agentEmail.signInCodesPerIpPerHour` and `agentEmail.signInCodeAttemptsPerEmailPerHour` settings). GitHub is not required before the instance exists. Preserve the owner binding across routine updates.
 
-- **Deploy-time backfill** (migration): when a deployment has exactly one non-system human and no superadmin yet, that human is promoted to `superadmin`/`active` when migrations run. This also covers accounts created via token-login or device-flow.
-- **Login-time self-heal** (all sign-in paths): on every session creation — GitHub OAuth, token-login, and device-flow — if the signing-in user is the only non-system human and no superadmin exists, they are promoted in a single atomic, idempotent write. A failure here never blocks login.
+Fresh deployments are seeded with an internal system user (`system_anonymous_trials`, `status='system'`, created by a database migration). Its id dates from SAM's retired anonymous-trial product; it now records SAM itself as the author of platform settings saved during unattended setup, and it owns the placeholder GitHub installation row that Artifacts- and GitLab-backed projects point at. Never delete either row. This system user is **not** a real user, cannot sign in, and never counts toward "is this the first human" checks.
 
-Both mechanisms apply the same promotion conditions and are strictly no-ops in any other state — they never promote a second user, never touch an existing superadmin, and never auto-promote a `suspended` or `system` account. They differ only in how they exclude the sentinel: the login-time hook excludes it by both `status='system'` and id, while the deploy-time migration excludes it by `status='system'` alone. On managed/multi-user deployments nothing changes.
+Without the installer owner binding, the first-superadmin election works like this:
+
+- **One atomic write.** The promotion is a single guarded database update, so two sign-ups can never both become superadmin. It promotes the signing-in user only if they are not `suspended`, no other real account exists, and the election has not already happened. It then records the winner in the `platform_settings` row `setup.firstSuperadminEstablished`.
+- **A later sign-up never wins.** If any other real account already exists, whether active, pending or suspended, nobody is promoted. If two people sign up at the same moment on a fresh instance and both accounts exist before either election runs, neither becomes superadmin. Use the recovery steps below.
+- **The election happens once.** After the marker row exists, no sign-in is ever auto-promoted, even if every superadmin is later deleted. Instances that already had a superadmin got the marker from the `first_superadmin_election` database migration. That migration only writes the marker and never changes a user.
+- **Login always succeeds.** If the database fails during the election, the sign-in still completes without promotion and the error is logged as `auth.first_superadmin_election.failed`. The next sign-in tries again.
+- **Login-time self-heal** (`session.create.after`, `apps/api/src/auth.ts`) applies the same conditions and is a second attempt in the same sign-in. It is a no-op once the marker exists.
+
+#### More than one superadmin
+
+The admin API never grants the superadmin role, so an instance has at most one unless it was hit by the concurrent first-sign-up race that existed before this election, or someone edited the database by hand. SAM does not demote anyone automatically. On an instance without `BOOTSTRAP_OWNER_EMAIL`, each sign-in logs the warning `first-superadmin.multiple_superadmins` with the count, visible in the API Worker's logs (Cloudflare dashboard → Workers → your API worker → Logs, or `wrangler tail`). To review the accounts, run this against your D1 database:
+
+```sql
+SELECT id, email, status, created_at FROM users
+WHERE role = 'superadmin' AND status != 'system' ORDER BY created_at;
+```
+
+Demote any account you do not recognise with `UPDATE users SET role = 'user' WHERE id = '<id>';`. The admin UI can't do this, because it refuses to modify superadmin accounts.
+
+#### Recovering when no account can administer the instance
+
+This applies when the only superadmin was deleted, or when no superadmin was ever elected (for example, after the simultaneous-sign-up case above). Pick one:
+
+1. **Bind an owner email (recommended).** Add the API Worker secret `BOOTSTRAP_OWNER_EMAIL` with the email address of the person who should administer the instance: `wrangler secret put BOOTSTRAP_OWNER_EMAIL --name <your-api-worker-name>` (the worker is named `<resource-prefix>-api-<stack>`), or in the Cloudflare dashboard under the API worker's **Settings → Variables and Secrets**. Deploys leave a secret they don't set in place (`scripts/deploy/configure-secrets.sh` skips an empty value). That person then signs in with that address as a **verified** email. While no superadmin exists, the owner path (`bootstrapSessionAllowed`, `apps/api/src/services/bootstrap-owner.ts`) promotes them. It does not depend on the first-superadmin marker. Until the owner has signed in, every other sign-in is refused. After that, normal sign-in resumes and the secret can stay or be removed. This option does not work on an installer-bound instance whose owner was already established (the `setup.bootstrapOwnerEstablished` row exists): the owner path runs only until that row is written, so use option 2 there.
+2. **Edit D1 directly.** Promote a specific account: `UPDATE users SET role = 'superadmin', status = 'active' WHERE id = '<id>';` (`wrangler d1 execute <database> --remote --command "..."`). Role checks read the database on every request, so a page refresh is enough.
+
+Deleting the `setup.firstSuperadminEstablished` row does not choose an account. It only lets the election run again, and the election still promotes nobody unless exactly one real account exists.
 
 Notes:
 
-- **Promotion happens regardless of `REQUIRE_APPROVAL`.** Even with open registration, the first human owns the deployment.
-- **First-login race:** if two brand-new users sign in at the exact same moment, the atomic guard ensures at most one becomes superadmin; the other remains a normal user.
-- **Cookie-cache staleness:** the session role is cached for up to 5 minutes. If you were promoted while already holding a session (e.g. the deploy-time backfill ran during a deploy while you were logged in), the cached session still shows your old `user` role. **Log out and log back in** to pick up superadmin access immediately; otherwise you must wait for the cache to expire (up to 5 minutes). If the admin dashboard is still not visible after re-logging in, the promotion did not occur — recheck the guard conditions above.
+- **Promotion is independent of `REQUIRE_APPROVAL`.** Installer-bound deployments still require the configured verified owner identity.
+- **First-login races:** both the owner-bound election and the ordinary election promote at most one user, including simultaneous provider callbacks.
+- **Session freshness:** SAM disables BetterAuth’s session-cookie cache when reading authorization state, so role and suspension checks use current database data. Refresh the page after a promotion; if access is still missing, recheck the promotion conditions rather than waiting for a cookie-cache timeout.
 
-### Overriding the sentinel id (optional)
+### Signup approval
 
-The sentinel user id defaults to `system_anonymous_trials`. If your deployment uses a different sentinel id, set `TRIAL_ANONYMOUS_USER_ID` to that value so the first-user checks exclude it correctly. This variable scopes the login-time self-heal hook and the first-user creation check; the deploy-time migration excludes the sentinel by its `status='system'` flag (not by id), so it stays correct regardless of this setting because the sentinel is always seeded with `status='system'`. Most deployments never need to set this.
+When signup approval is on (`REQUIRE_APPROVAL`, or the runtime switch in **Admin → Users**), new accounts are created **pending** (the very first is promoted to an active superadmin when its first session starts) and stay pending until a superadmin approves them there. Accounts created while approval was off stay active. A pending account can sign in, see that it is waiting for approval, sign out, and link its own GitHub App installation. SAM's features answer `403 APPROVAL_REQUIRED` until the account is approved, including the SAM and project agent chats, API token management, every project route, and browser-session workspace access. This also applies to pending accounts that already own resources when approval is turned on. Admins and superadmins are never held for approval, and suspended accounts are refused on authenticated account surfaces. Publicly published workspace ports and valid port-access links use their own anonymous or capability access model.
 
 ### Storage and archive circuit breakers
 
@@ -466,7 +862,7 @@ Below the breakers, **Problem migrations** lists the individual session migratio
 
 What to do, by what the card shows:
 
-- **Frozen, error code `precopy_refused`**: nothing. The session was still in use when the sweep tried to copy it, so nothing was copied and it reads normally; the sweep tries it again after `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS` (a week). The list shows these last.
+- **Frozen, error code `precopy_refused`**: nothing. The session was still in use when the sweep tried to copy it, so nothing was copied and it reads normally; the sweep tries it again after `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS` (a day). The list shows these last.
 - **Frozen, error code `operator_abandoned`**: nothing. Someone already abandoned it, and the card stays in the list as a record. These records are never removed, and the list puts older entries first, so over time they can push newer problems past its limit (`PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_DEFAULT`, 25). When the page says more may exist beyond the limit, open `https://api.yourdomain.com/api/admin/project-data/storage/archive-sharding/problem-migrations?limit=100&projectId=<id>` in a browser tab where you're signed in as a superadmin (100 is the default maximum; leave out `projectId` to list every project).
 - **Failed**: nothing yet. If it keeps failing it turns Poisoned.
 - **Poisoned, or Frozen with any other error code**: read the error and fix its cause first. Then clear the migration with **Abandon** (or a copy-back, if it already deleted its source — see below), and finally **Close breaker** for the project, because abandoning a migration does not close the breaker.
@@ -497,6 +893,14 @@ resolve stuck archive migrations through **Admin → Storage** before writes sto
 
 To remove all resources: Actions → Teardown → Run workflow → type `DELETE` to confirm.
 
+A full teardown (with **keep_data** off) empties the installation's assets bucket before it
+deletes the stack, because R2 refuses to delete a non-empty bucket. The emptying stops after
+`TEARDOWN_R2_EMPTY_DEADLINE_SECONDS` (GitHub Environment variable, default 600, roughly 2,000
+objects); if anything is left the bucket deletion fails and the summary says so, and running the
+teardown again continues where it stopped. Full teardown also deletes the API Worker's Durable
+Object data; **keep_data** leaves the Worker in place. Teardown does not delete VMs: delete
+workspaces and nodes in the app first.
+
 ## Cost Estimation
 
 ### Platform Costs
@@ -515,7 +919,12 @@ The Workers Paid plan ($5/month) is required for Durable Objects and Cloudflare 
 
 VMs are billed to the cloud provider credential SAM uses for the node. In a typical self-hosted setup, that is each user's own BYOC credential; admins may also configure a platform credential for shared zero-config provisioning. SAM supports Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP. The example prices below cover the built-in Hetzner, Scaleway, Vultr, DigitalOcean, and UpCloud size mappings; Infomaniak and GCP pricing depend on the selected region and machine configuration.
 
-When Infrastructure Compute Pools are enabled, the editor uses the provider-native catalog for the
+Connecting a cloud credential lists its machines in the matching compute pool but adds none of them:
+nothing joins a pool on its own. After you add a platform credential, open **Admin → Infrastructure**
+and add the machines and regions the shared pool may use. Until a pool has machines, people who use it
+can run only Instant sessions. See [Compute Pools](/docs/guides/compute-pools/#an-empty-pool-runs-only-instant-sessions).
+
+When compute pools are enabled, the pool editor uses the provider-native catalog for the
 project, user, or platform credential in scope. The small/medium/large prices below remain useful as
 legacy provider examples, but pool editing is based on concrete provider instance types. Deprecated
 legacy size labels are translated into workload slices for compatibility; they do not choose a
@@ -551,7 +960,7 @@ admission records is part of the parent section C integration.
 | Medium (vc2-4c-8gb) | 4 vCPU, 8GB RAM, 160GB  | ~$40    |
 | Large (vc2-6c-16gb) | 6 vCPU, 16GB RAM, 320GB | ~$80    |
 
-Vultr bills hourly and the default region is `fra` (Frankfurt). When you create the Vultr Personal Access Token, its **IP access control** allowlist must be set to **Allow All IPv4/IPv6** — SAM calls the Vultr API from Cloudflare Workers, which have no static egress IP, so a restricted allowlist will reject provisioning requests.
+Vultr bills hourly. Machines go to the regions your [compute pool](/docs/guides/compute-pools/) allows; `fra` (Frankfurt) is only the provider fallback when nothing else names a region. When you create the Vultr Personal Access Token, its **IP access control** allowlist must be set to **Allow All IPv4/IPv6** — SAM calls the Vultr API from Cloudflare Workers, which have no static egress IP, so a restricted allowlist will reject provisioning requests.
 
 **DigitalOcean:**
 
@@ -561,7 +970,7 @@ Vultr bills hourly and the default region is `fra` (Frankfurt). When you create 
 | Medium (s-4vcpu-8gb) | 4 vCPU, 8GB RAM, 160GB  | ~$48    |
 | Large (s-8vcpu-16gb) | 8 vCPU, 16GB RAM, 320GB | ~$96    |
 
-DigitalOcean bills hourly, defaults to `fra1` (Frankfurt), and requires a Full Access Personal Access Token (or equivalent custom scopes for droplets, block storage, tags, account, actions, images, regions, and sizes).
+DigitalOcean bills hourly (machines go to the regions your compute pool allows; `fra1`, Frankfurt, is only the provider fallback) and requires a Full Access Personal Access Token (or equivalent custom scopes for droplets, block storage, tags, account, actions, images, regions, and sizes).
 
 **UpCloud:**
 
@@ -571,11 +980,11 @@ DigitalOcean bills hourly, defaults to `fra1` (Frankfurt), and requires a Full A
 | Medium (4xCPU-8GB) | 4 vCPU, 8GB RAM  | ~$24            |
 | Large (8xCPU-16GB) | 8 vCPU, 16GB RAM | ~$48            |
 
-UpCloud billing is usage-based. SAM verifies the configured simple plan and zone through the current API before provisioning; the default zone is `de-fra1` (Frankfurt). Create a dedicated API subaccount with API access and storage permissions, then enter its username and password in Settings. Prices are indicative; verify current regional pricing in the UpCloud calculator.
+UpCloud billing is usage-based. SAM verifies the configured simple plan and zone through the current API before provisioning; machines go to the zones your compute pool allows, with `de-fra1` (Frankfurt) as the provider fallback. Create a dedicated API subaccount with API access and storage permissions, then enter its username and password in Settings. Prices are indicative; verify current regional pricing in the UpCloud calculator.
 
 ### Unresponsive machines are released automatically
 
-A workspace VM that stops sending heartbeats is released rather than left running up a bill and holding provider quota. That covers every cloud VM SAM manages for workspaces — the ones it provisioned automatically and the ones users created from the **Nodes** page:
+A workspace VM that stops sending heartbeats is released rather than left running up a bill and holding provider quota. That covers every cloud VM SAM manages for workspaces — the ones it provisioned automatically and the ones users created from the **Nodes** page (**Infrastructure** in the main navigation):
 
 1. After `NODE_UNHEALTHY_DRAIN_AFTER_MS` (10 minutes) of silence, SAM posts a notice in each chat on the VM and asks those sessions to sleep, so idle ones can be woken on another machine later. Once every session on the VM is asleep, or if it had none, SAM deletes the VM right away.
 2. Otherwise, after `NODE_UNHEALTHY_RELEASE_AFTER_MS` (30 minutes), SAM deletes the VM through the provider and fails any task still running on it, with a message naming the lost node.
@@ -589,8 +998,9 @@ For what SAM does with a workspace VM that stops responding, see [Unresponsive m
 ### Agents stop whenever they need approval
 
 If agents stop each time they need permission and no card appears in the chat, agent requests are
-off, so SAM refuses every request. (With requests on, a chat that has slept and woken usually does the
-same: it can't ask yet, so fork it or start a new chat.) Turn them on as described in
+off, so SAM refuses every request. (With requests on, a chat started on v2026.10.08 or later but
+before you turned them on does the same, even after it sleeps and wakes, so fork it or start a new
+chat.) Turn them on as described in
 [Let agents ask in chat](#let-agents-ask-in-chat), or have users switch those agents to **Bypass
 Permissions**, then start a new chat — running sessions keep the setting they started with. Amp and
 Gemini CLI ask on their own even in Bypass Permissions, and so does Claude Code in a devcontainer that
@@ -636,6 +1046,15 @@ Upgrade to the **Workers Paid plan** ($5/month). Go to **Workers & Pages** → u
 
 Your API token is missing the **Account → Containers → Edit** permission. SAM enables Cloudflare Container instant sessions by default, so edit the token and add the permission. To deploy without the container runtime, set the GitHub environment variable `CF_CONTAINER_ENABLED=false` and re-run the workflow.
 
+### Deploy fails at Configure R2 CORS (HTTP 400, code 10029)
+
+Deploy Production stops at the **Configure R2 CORS** step because Cloudflare rejected the request:
+since October 2026 its API refuses the field names that releases up to v2026.10.16 send. The deploy
+stops before database migrations run or anything new is published, so your running instance keeps
+working. Update to v2026.10.17 or later with the
+[Update Self-Hosted Instance workflow](#option-a-update-self-hosted-instance-workflow-recommended),
+which sends the fields Cloudflare expects, then re-run the deploy if it doesn't start on its own.
+
 ### SSL Handshake Failure
 
 If using a subdomain as `BASE_DOMAIN` (e.g., `sam.example.com`), the free Universal SSL certificate does not cover nested wildcards (`*.sam.example.com`). Use a top-level domain as `BASE_DOMAIN` instead.
@@ -666,6 +1085,55 @@ Compact SQLite/R2 archive writes are opt-in (`PROJECT_DATA_ARCHIVE_COMPACT_ENABL
 
 ## AI app Connector
 
-The user-level SAM Connector is enabled by default. Connect Claude, ChatGPT, or a command-line client from **Settings → Access**; manage installation policy in **Admin → Integrations → Connector**. See [Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/).
+The user-level SAM Connector is enabled by default, including after you update to v2026.10.10 or later. People connect Claude, ChatGPT, or a command-line client from their account's **Settings → Access**; superadmins manage installation policy in **Admin → Integrations → Connector**. To turn it off, switch off **Enable Connector** there or in **Admin → Settings**. Setting the `CONNECTOR_ENABLED` GitHub Environment variable to `false` before you deploy also works, but only while no value has been saved in the app: a saved value wins over the variable. See [Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/) and the [Connector settings](/docs/reference/configuration/#sam-connector).
 
 Each installation has its own OAuth issuer and audience. Pulumi provisions the `OAUTH_KV` namespace and Worker binding. Vendor servers must reach the API host's discovery endpoints, `/oauth/*`, and `/connect/mcp`; Cloudflare Access login walls or WAF challenges on these paths can block connection and refresh. Keep SAM's OAuth authentication enforced when adjusting those network policies. Users also need the web host for sign-in and consent.
+
+## API Worker tracing
+
+Deployments enable Cloudflare's native API Worker traces at 100% sampling, alongside existing
+Workers logs. Traces capture dependency timings for D1, KV, outbound HTTP and Durable Object
+calls without an application SDK. Find new traces in the Cloudflare Workers Observability
+dashboard; enabling tracing cannot recover traces for older requests.
+
+To reduce sampling or disable tracing, add the standard configuration to the top level of
+`apps/api/wrangler.toml` before deploying. The deployment generator preserves these trace
+settings in both staging and production:
+
+```toml
+[observability]
+enabled = true
+
+[observability.traces]
+enabled = true
+head_sampling_rate = 0.05 # Trace 5% of requests; use 1 for full capture.
+persist = true
+```
+
+Set `observability.traces.enabled = false` to disable capture. Traces retain seven days of
+history. Starting December 1, 2026, stored traces count toward account-wide observability
+ingestion and storage allowances; 100% sampling can generate substantial volume on busy
+installations. Review [Cloudflare tracing](https://developers.cloudflare.com/workers/observability/traces/)
+and [observability pricing](https://developers.cloudflare.com/observability/pricing/) before
+choosing ongoing sampling. The generated configuration redacts query strings from observability URLs because callback
+and terminal URLs can contain credentials. Traces can still include URL paths and database
+statement metadata; restrict access to observability data as you would for production logs.
+
+## Application deployment builds
+
+Instant sessions publish applications through a dedicated Cloudflare Container build executor. Cloudflare Containers are already part of SAM's supported setup, so this adds no separate cloud account or manual secret prerequisite. Deployment targets remain VMs. VM sessions retain the node executor by default; keep `deployments.buildExecutor=node` in **Admin → Settings** until a staging VM trial verifies a served release with unchanged source build/save counters. VM publishing through Cloudflare remains unverified. `DEPLOY_BUILDER_INSTANCE_TYPE` and `DEPLOY_BUILDER_MAX_INSTANCES` are deployment-time sizing controls; see the [configuration reference](/docs/reference/configuration/#cloudflare-application-build-executor).
+
+The builder runs one job per ephemeral container and can execute arbitrary Dockerfile steps as root inside DinD with host build networking and unrestricted internet access, just like VM workspaces. Context and image transfers use direct presigned URLs; no outbound proxy or HTTPS interception CA is installed. It receives no user or installation credentials, runtime secret values or workspace token. Its callback token stays in the Go supervisor's memory and authorizes only one job and attempt until that job's deadline or terminal state. Treat arbitrary root code as having that job's authority. The bootstrap listener closes before build steps run, and a durable alarm attempts to destroy the microVM at the hard deadline, independent of source-session liveness. If shutdown cannot be confirmed, cron force-releases the reservation after the stored deadline plus `deployments.builderReservationGraceMs` (five minutes by default), marks unfinished jobs `unknown` and records an alert. This permits deletion and new admissions without claiming physical shutdown; Cloudflare capacity can remain occupied until reclaimed. See the [build trust model](/docs/architecture/security/#application-build-executor) for the enforcing code paths.
+
+
+### Connect a repository sign-in to an email account
+
+A person who signs in by email or Google can open **Settings → GitHub** to connect GitHub or GitLab, if that provider is configured. Connecting adds a sign-in method and repository authorization to the same SAM account. Google cannot be linked to an existing account.
+
+Choose **Connect**, then open the confirmation email in the same browser. Choose **Confirm connection** to continue to the provider's consent screen. The email is a fresh, one-time sign-in check for that account, session and provider; an existing session alone cannot add a new sign-in method. Confirmation expires after five minutes by default. An administrator can change `security.accountLinkProofTtlSeconds` (60–900 seconds) in **Admin → Settings → Email**; new confirmation emails use the updated value and existing proofs keep their original deadline. A revoked session or expired confirmation must start again. Your account email must already be confirmed and the installation must support email delivery. If your provider has not confirmed it, sign in with that provider after confirming your email there, or contact the installation administrator.
+
+The existing OAuth application registration stays unchanged: GitHub uses `https://api.<your-domain>/api/auth/callback/github` and GitLab uses `https://api.<your-domain>/api/auth/callback/gitlab`. Flow context travels in protected OAuth state, never in per-user redirect URIs. GitLab retains its configured host and identity-trust restrictions.
+
+The connected provider may have a different email. Linking and later provider sign-ins preserve the already-verified SAM account email; name and avatar may refresh. SAM sends a linked-provider security notification to the account owner's stored email. Review the connected provider in **Settings → GitHub** and choose **Disconnect** if you do not recognize it. Disconnect requires a confirmed account email and available email sign-in, so removing a provider cannot remove your last sign-in method. An old session may require signing out and signing in again first.
+
+Accounts created by a provider with an unverified email receive a provider-sign-in reminder instead of a sign-in code. Their email-code redemption is refused so BetterAuth cannot remove their provider link while proving a previously unverified email. Existing verified email users can continue using email codes after connecting or disconnecting a provider.

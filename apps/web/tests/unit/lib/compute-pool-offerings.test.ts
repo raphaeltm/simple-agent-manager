@@ -1,28 +1,18 @@
-import type {
-  CapacityPoolCandidate,
-  CapacitySourceIdentity,
-  ProviderCatalog,
+import {
+  type CapacityPoolCandidate,
+  type CapacitySourceIdentity,
+  PROVIDER_LABELS,
+  type ProviderCatalog,
 } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
+import { providerDisplayName } from '../../../src/lib/compute-pool-offering-fields';
 import {
   buildComputePoolOfferingsModel,
   canAddComputePoolOffering,
-  type ComputePoolOfferingFilters,
-  flattenProviderCatalogOfferings,
-  matchesComputePoolFilters,
 } from '../../../src/lib/compute-pool-offerings';
 
 type CatalogOffering = NonNullable<ProviderCatalog['offerings']>[number];
-
-const BASE_FILTERS: ComputePoolOfferingFilters = {
-  provider: 'all',
-  location: '',
-  minVcpu: '',
-  minRamGb: '',
-  maxMonthlyPrice: '',
-  availability: 'all',
-};
 
 const CATALOG_LAST_SEEN_AT = '2026-08-28T00:00:00.000Z';
 
@@ -189,73 +179,7 @@ function catalog(): ProviderCatalog {
   };
 }
 
-describe('compute-pool offering filters', () => {
-  const offerings = flattenProviderCatalogOfferings([catalog()]);
-  const bySku = Object.fromEntries(offerings.map((offering) => [offering.sku, offering]));
-
-  it('filters provider-native catalog rows by provider and location metadata', () => {
-    expect(matchesComputePoolFilters(bySku.cx22!, { ...BASE_FILTERS, provider: 'hetzner' })).toBe(
-      true
-    );
-    expect(
-      matchesComputePoolFilters(bySku.cx22!, { ...BASE_FILTERS, provider: 'digitalocean' })
-    ).toBe(false);
-    expect(matchesComputePoolFilters(bySku.cpx31!, { ...BASE_FILTERS, location: 'ash' })).toBe(
-      true
-    );
-    expect(matchesComputePoolFilters(bySku.cpx31!, { ...BASE_FILTERS, location: 'germany' })).toBe(
-      false
-    );
-  });
-
-  it('filters by minimum vCPU, minimum RAM, and maximum monthly price', () => {
-    expect(matchesComputePoolFilters(bySku.cpx31!, { ...BASE_FILTERS, minVcpu: '4' })).toBe(true);
-    expect(matchesComputePoolFilters(bySku.cx22!, { ...BASE_FILTERS, minVcpu: '4' })).toBe(false);
-    expect(matchesComputePoolFilters(bySku.ccx33!, { ...BASE_FILTERS, minRamGb: '32' })).toBe(true);
-    expect(matchesComputePoolFilters(bySku.cpx31!, { ...BASE_FILTERS, minRamGb: '32' })).toBe(
-      false
-    );
-    expect(
-      matchesComputePoolFilters(bySku.cpx31!, { ...BASE_FILTERS, maxMonthlyPrice: '15' })
-    ).toBe(true);
-    expect(
-      matchesComputePoolFilters(bySku.ccx33!, { ...BASE_FILTERS, maxMonthlyPrice: '15' })
-    ).toBe(false);
-  });
-
-  it('filters by availability state including unavailable and stale catalog rows', () => {
-    expect(
-      matchesComputePoolFilters(bySku.cx22!, { ...BASE_FILTERS, availability: 'available' })
-    ).toBe(true);
-    expect(
-      matchesComputePoolFilters(bySku.ccx33!, { ...BASE_FILTERS, availability: 'available' })
-    ).toBe(false);
-    expect(
-      matchesComputePoolFilters(bySku['stale-16c-64gb']!, {
-        ...BASE_FILTERS,
-        availability: 'available',
-      })
-    ).toBe(false);
-    expect(
-      matchesComputePoolFilters(bySku.ccx33!, { ...BASE_FILTERS, availability: 'unavailable' })
-    ).toBe(true);
-    expect(
-      matchesComputePoolFilters(bySku['stale-16c-64gb']!, {
-        ...BASE_FILTERS,
-        availability: 'unavailable',
-      })
-    ).toBe(false);
-    expect(
-      matchesComputePoolFilters(bySku['stale-16c-64gb']!, {
-        ...BASE_FILTERS,
-        availability: 'stale',
-      })
-    ).toBe(true);
-    expect(matchesComputePoolFilters(bySku.cx22!, { ...BASE_FILTERS, availability: 'stale' })).toBe(
-      false
-    );
-  });
-
+describe('compute-pool offerings model', () => {
   it('keeps removed provider-native catalog rows addable without exposing legacy size choices', () => {
     const model = buildComputePoolOfferingsModel(
       [
@@ -342,7 +266,6 @@ describe('compute-pool offering filters', () => {
     expect(cpx31).toMatchObject({
       candidateId: 'candidate-cpx31',
       candidateStatus: 'deleted',
-      canUpdateExistingCandidate: true,
       machineSizeHint: null,
     });
     expect(canAddComputePoolOffering(cpx31!)).toBe(true);
@@ -404,7 +327,7 @@ describe('compute-pool offering filters', () => {
     expect(catalogOnly).toMatchObject({
       candidateId: null,
       candidateStatus: 'not-configured',
-      canUpdateExistingCandidate: false,
+      sourceId: null,
     });
   });
 
@@ -416,22 +339,110 @@ describe('compute-pool offering filters', () => {
       sourceId: 'source-project',
       candidateId: null,
       candidateStatus: 'not-configured',
-      canUpdateExistingCandidate: false,
       providerInstanceType: 'cpx31',
       providerInstanceSku: null,
     });
     expect(canAddComputePoolOffering(cpx31!)).toBe(true);
+  });
+});
 
-    const pendingModel = buildComputePoolOfferingsModel(
-      [],
-      [catalog()],
-      [sourceIdentity()],
-      {},
-      new Set([cpx31!.key])
+describe('compute-pool source to catalog matching', () => {
+  // Production shape (2026-10-15): one user pool with a legacy credential source AND a
+  // composable connection source for the same provider. The composable source carries
+  // both a credential id and an attachment ref; provider-catalogs.ts keys its catalog by
+  // the attachment ref.
+  const LEGACY_ID = 'legacy-credential';
+  const COMPOSABLE_ID = 'cc-backfill-composable-credential';
+  const ATTACHMENT_REF = 'cc_attachments:attachment-1';
+
+  function userCatalog(overrides: Partial<ProviderCatalog>): ProviderCatalog {
+    return { ...catalog(), credentialSource: 'user', ...overrides };
+  }
+
+  const legacySource = sourceIdentity({
+    id: 'source-legacy',
+    scope: 'user',
+    ownerUserId: 'user-1',
+    ownerProjectId: null,
+    credentialSource: 'user',
+    credentialId: LEGACY_ID,
+    credentialReference: `credentials:${LEGACY_ID}`,
+  });
+  const composableSource = sourceIdentity({
+    id: 'source-composable',
+    scope: 'user',
+    ownerUserId: 'user-1',
+    ownerProjectId: null,
+    credentialSource: 'user',
+    credentialId: COMPOSABLE_ID,
+    credentialReference: `cc_credentials:${COMPOSABLE_ID}`,
+    externalSourceRef: ATTACHMENT_REF,
+  });
+
+  function buildTwoSourceModel() {
+    return buildComputePoolOfferingsModel(
+      [
+        candidate({ id: 'legacy-cx22', capacitySourceId: 'source-legacy', status: 'active' }),
+        candidate({
+          id: 'composable-cx22',
+          capacitySourceId: 'source-composable',
+          status: 'deleted',
+        }),
+      ],
+      [
+        userCatalog({ credentialId: LEGACY_ID, externalSourceRef: null }),
+        userCatalog({ credentialId: COMPOSABLE_ID, externalSourceRef: ATTACHMENT_REF }),
+      ],
+      [legacySource, composableSource]
     );
-    expect(pendingModel.catalog.find((offering) => offering.sku === 'cpx31')).toMatchObject({
-      sourceId: 'source-project',
-      candidateStatus: 'pending-add',
+  }
+
+  it('matches a composable source to the catalog read through its attachment', () => {
+    const model = buildTwoSourceModel();
+
+    const composable = model.excluded.find(
+      (offering) => offering.candidateId === 'composable-cx22'
+    );
+    expect(composable).toMatchObject({
+      sourceId: 'source-composable',
+      stale: false,
+      available: true,
+      locationLabel: 'Falkenstein',
+      country: 'DE',
     });
+    expect(canAddComputePoolOffering(composable!)).toBe(true);
+
+    // The composable catalog's row for the same machine belongs to the composable source,
+    // so it is addable instead of a dead "reconcile source" row.
+    const composableCatalogRows = model.catalog.filter(
+      (offering) => offering.sourceId === 'source-composable'
+    );
+    expect(composableCatalogRows.length).toBe(catalog().offerings!.length);
+    expect(composableCatalogRows.find((offering) => offering.sku === 'cx22')).toMatchObject({
+      candidateId: 'composable-cx22',
+      candidateStatus: 'deleted',
+    });
+  });
+
+  it('keeps the legacy source matched to its own catalog (control)', () => {
+    const model = buildTwoSourceModel();
+
+    const legacy = model.allowed.find((offering) => offering.candidateId === 'legacy-cx22');
+    expect(legacy).toMatchObject({ sourceId: 'source-legacy', stale: false, available: true });
+    expect(model.catalog.filter((offering) => offering.sourceId === 'source-legacy').length).toBe(
+      catalog().offerings!.length
+    );
+  });
+});
+
+describe('providerDisplayName', () => {
+  it('uses the app-wide provider labels so every page names a provider the same way', () => {
+    expect(providerDisplayName('infomaniak')).toBe(PROVIDER_LABELS.infomaniak);
+    expect(providerDisplayName('gcp')).toBe(PROVIDER_LABELS.gcp);
+  });
+
+  it('title-cases providers the app does not know yet', () => {
+    expect(providerDisplayName('new-cloud_co')).toBe('New Cloud Co');
+    expect(providerDisplayName(null)).toBe('Unknown provider');
   });
 });

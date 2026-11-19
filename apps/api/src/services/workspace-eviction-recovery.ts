@@ -1,5 +1,6 @@
 import type { Env } from '../env';
 import { ensureSessionRecovery, type SessionRecoveryResult } from './session-recovery';
+import { preservationReceiptStatement } from './workspace-preservation-receipt';
 
 export interface WorkspaceEvictionRecoveryIdentity {
   projectId: string;
@@ -7,6 +8,7 @@ export interface WorkspaceEvictionRecoveryIdentity {
   chatSessionId: string;
   nodeId: string;
   generation: string | null;
+  interruptedWork?: boolean;
 }
 
 /**
@@ -15,22 +17,41 @@ export interface WorkspaceEvictionRecoveryIdentity {
  * callback cannot put a successor runtime back to sleep. Recovery itself uses
  * the snapshot's existing task claim, making callback replay idempotent.
  */
-export async function recoverWorkspaceAfterEviction(
-  env: Env,
-  identity: WorkspaceEvictionRecoveryIdentity
-): Promise<SessionRecoveryResult> {
-  const now = new Date().toISOString();
-  const sleeping = await env.DATABASE.prepare(
-    `UPDATE session_snapshots
+export function evictedWorkspaceSnapshotSleepStatement(
+  database: D1Database,
+  identity: WorkspaceEvictionRecoveryIdentity,
+  now: string,
+  claimedAt: string | null = null
+): D1PreparedStatement {
+  return database
+    .prepare(
+      `UPDATE session_snapshots
         SET sleeping_at = COALESCE(sleeping_at, ?),
             recovery_status = CASE WHEN sleeping_at IS NULL THEN NULL ELSE recovery_status END,
             recovery_error = CASE WHEN sleeping_at IS NULL THEN NULL ELSE recovery_error END,
             recovery_attempts = CASE WHEN sleeping_at IS NULL THEN 0 ELSE recovery_attempts END,
             recovery_failed_at = CASE WHEN sleeping_at IS NULL THEN NULL ELSE recovery_failed_at END,
             eviction_recovery_workspace_id = ?, eviction_recovery_node_id = ?,
+            eviction_recovery_interrupted_work = CASE
+              WHEN sleeping_at IS NULL OR eviction_recovery_workspace_id IS NOT ?
+                OR eviction_recovery_node_id IS NOT ? OR eviction_recovery_generation IS NOT ?
+              THEN ? ELSE eviction_recovery_interrupted_work END,
             eviction_recovery_generation = ?,
             sleep_status = 'sleeping', sleep_after = NULL, sleep_error = NULL,
-            sleep_claim_id = NULL, sleep_claimed_at = NULL, updated_at = ?
+            sleep_claim_id = NULL, sleep_claimed_at = NULL, updated_at = ?,
+            -- A final capture taken from the stopped source with no other writer
+            -- (VM-reported quiesced) proves the source's last state was preserved,
+            -- exactly like a verified full sleep. A live pre-stop capture never does.
+            cleanup_identity_json = CASE
+              WHEN status = 'available' AND degradation = 'none' AND capture_generation IS NULL
+                AND json_valid(cleanup_identity_json)
+                AND json_extract(cleanup_identity_json, '$.quiesced') = 1
+                AND json_extract(cleanup_identity_json, '$.snapshotGeneration') = snapshot_generation
+                AND json_extract(cleanup_identity_json, '$.workspaceId') = workspace_id
+                AND json_extract(cleanup_identity_json, '$.nodeId') = ?
+                AND json_extract(cleanup_identity_json, '$.workspaceGeneration') = COALESCE(?, '')
+              THEN json_set(cleanup_identity_json, '$.preserved', 1)
+              ELSE cleanup_identity_json END
       WHERE chat_session_id = ?
         AND workspace_id = ?
         AND project_id = ?
@@ -45,14 +66,25 @@ export async function recoverWorkspaceAfterEviction(
           SELECT 1 FROM workspaces
            WHERE id = ? AND node_id = ?
              AND eviction_generation IS ? AND status = 'evicted'
+             AND (? IS NULL OR (
+               updated_at = ? AND user_id = session_snapshots.user_id
+               AND project_id = session_snapshots.project_id
+               AND chat_session_id = session_snapshots.chat_session_id
+             ))
         )`
-  )
+    )
     .bind(
       now,
       identity.workspaceId,
       identity.nodeId,
+      identity.workspaceId,
+      identity.nodeId,
+      identity.generation,
+      identity.interruptedWork === undefined ? null : Number(identity.interruptedWork),
       identity.generation,
       now,
+      identity.nodeId,
+      identity.generation,
       identity.chatSessionId,
       identity.workspaceId,
       identity.projectId,
@@ -62,11 +94,46 @@ export async function recoverWorkspaceAfterEviction(
       identity.generation,
       identity.workspaceId,
       identity.nodeId,
-      identity.generation
-    )
-    .run();
+      identity.generation,
+      claimedAt,
+      claimedAt
+    );
+}
 
-  if ((sleeping.meta.changes ?? 0) === 0) {
+export async function markEvictedWorkspaceSnapshotSleeping(
+  env: Env,
+  identity: WorkspaceEvictionRecoveryIdentity
+): Promise<boolean> {
+  const now = new Date().toISOString();
+  const [sleeping] = await env.DATABASE.batch([
+    evictedWorkspaceSnapshotSleepStatement(env.DATABASE, identity, now),
+    evictedWorkspacePreservationReceiptStatement(env.DATABASE, identity, now),
+  ]);
+  return (sleeping?.meta.changes ?? 0) > 0;
+}
+
+/**
+ * Receipt for a quiesced eviction capture, batched after the sleep statement that grants
+ * it. A no-op for a live capture, which is never granted preservation.
+ */
+export function evictedWorkspacePreservationReceiptStatement(
+  database: D1Database,
+  identity: Pick<WorkspaceEvictionRecoveryIdentity, 'chatSessionId'>,
+  now: string
+): D1PreparedStatement {
+  return preservationReceiptStatement(database, {
+    chatSessionId: identity.chatSessionId,
+    reason: 'quiesced_eviction',
+    nowIso: now,
+  });
+}
+
+export async function recoverWorkspaceAfterEviction(
+  env: Env,
+  identity: WorkspaceEvictionRecoveryIdentity
+): Promise<SessionRecoveryResult> {
+  const sleeping = await markEvictedWorkspaceSnapshotSleeping(env, identity);
+  if (!sleeping) {
     const completed = await env.DATABASE.prepare(
       `SELECT recovery_task_id AS recoveryTaskId
          FROM session_snapshots
@@ -99,6 +166,23 @@ export async function recoverWorkspaceAfterEviction(
     return { status: 'unavailable', reason: 'eviction_snapshot_missing_or_stale' };
   }
 
+  const evidence = await env.DATABASE.prepare(
+    `SELECT eviction_recovery_interrupted_work AS interruptedWork FROM session_snapshots
+      WHERE chat_session_id = ? AND project_id = ? AND workspace_id = ?
+        AND eviction_recovery_workspace_id = ? AND eviction_recovery_node_id = ?
+        AND eviction_recovery_generation IS ?`
+  )
+    .bind(
+      identity.chatSessionId,
+      identity.projectId,
+      identity.workspaceId,
+      identity.workspaceId,
+      identity.nodeId,
+      identity.generation
+    )
+    .first<{ interruptedWork: number | null }>();
+  if (!evidence) return { status: 'unavailable', reason: 'eviction_snapshot_missing_or_stale' };
+
   return ensureSessionRecovery(env, identity.projectId, identity.chatSessionId, undefined, {
     excludedNodeId: identity.nodeId,
     evictionFence: {
@@ -108,5 +192,6 @@ export async function recoverWorkspaceAfterEviction(
     },
     // Eviction kills the runtime mid-work; no message is queued for the agent.
     wakeCause: 'runtime_lost',
+    interruptedWork: evidence.interruptedWork === null ? undefined : evidence.interruptedWork === 1,
   });
 }

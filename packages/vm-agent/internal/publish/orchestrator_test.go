@@ -132,7 +132,7 @@ func TestPublishHappyPath(t *testing.T) {
 		result:   &ReleaseResult{ReleaseID: "rel1", Version: 1, Status: "created"},
 	}
 
-	orch := New(Options{ControlPlane: control, Docker: docker})
+	orch := New(Options{ControlPlane: control, Docker: docker, PublishJobID: "publish-job-1", Attempt: 3})
 
 	submittedBy := &ReleaseSubmittedBy{TaskID: "task-1", AgentProfileID: "profile-1"}
 	res, err := orch.Publish(context.Background(), "proj1", "staging", "env-1", art, submittedBy)
@@ -162,6 +162,10 @@ func TestPublishHappyPath(t *testing.T) {
 		t.Fatalf("unexpected uploaded archives: %#v", *uploads)
 	}
 
+	// The release submission carries its durable attempt fence.
+	if control.submitted.PublishJobID != "publish-job-1" || control.submitted.Attempt != 3 {
+		t.Fatalf("missing release fence: %+v", control.submitted)
+	}
 	// The release submission carries the resolved compose + per-service refs.
 	if control.submittedProj != "proj1" {
 		t.Errorf("submitted project = %q, want proj1", control.submittedProj)

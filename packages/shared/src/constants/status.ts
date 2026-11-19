@@ -16,6 +16,8 @@ export const STATUS_LABELS: Record<SharedStatus, string> = {
   sleeping: 'Sleeping',
   stopped: 'Stopped',
   evicted: 'Evicted',
+  destroying: 'Destroying',
+  deleting: 'Deleting',
   deleted: 'Deleted',
   error: 'Error',
 };
@@ -29,6 +31,8 @@ export const STATUS_COLORS: Record<SharedStatus, string> = {
   stopped: 'gray',
   evicted: 'yellow',
   sleeping: 'blue',
+  destroying: 'yellow',
+  deleting: 'yellow',
   deleted: 'gray',
   error: 'red',
 };

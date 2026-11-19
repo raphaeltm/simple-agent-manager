@@ -86,25 +86,77 @@ async function box(locator: Locator) {
  * Virtuoso only mounts rows near the viewport. When the target is not mounted,
  * walk the list from the top until it is, then center it.
  */
+async function rowSettled(target: Locator): Promise<boolean> {
+  return target
+    .evaluate(
+      async (row) => {
+        const scroller = row.closest('[data-testid="virtuoso-scroller"]');
+        if (!(scroller instanceof HTMLElement)) return false;
+        const sample = () => {
+          const rect = row.getBoundingClientRect();
+          return [scroller.scrollTop, scroller.scrollHeight, rect.top, rect.height];
+        };
+        const before = sample();
+        // Observe layout across paints, rather than mistaking a mounted virtual row for readiness.
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        );
+        const after = sample();
+        const rect = row.getBoundingClientRect();
+        const area = scroller.getBoundingClientRect();
+        return (
+          row.isConnected &&
+          rect.bottom > area.top &&
+          rect.top < area.bottom &&
+          before.every((value, index) => Math.abs(value - after[index]!) < 0.5)
+        );
+      },
+      undefined,
+      { timeout: 300 }
+    )
+    .catch(() => false);
+}
+
 async function reveal(target: Locator, scroller: Locator): Promise<Locator> {
-  if ((await target.count()) === 0) {
-    await scroller.evaluate((el) => el.scrollTo({ top: 0 }));
-    for (let step = 0; step < 20; step++) {
-      try {
-        // Give Virtuoso a frame to render the rows at the new offset.
-        await target.first().waitFor({ state: 'attached', timeout: 300 });
-        break;
-      } catch {
-        await scroller.evaluate((el) => el.scrollBy({ top: el.clientHeight / 2 }));
+  await scroller.evaluate((el) => el.scrollTo({ top: 0, behavior: 'instant' }));
+  for (let step = 0; step < 20; step++) {
+    const attached = await target.waitFor({ state: 'attached', timeout: 300 }).then(
+      () => true,
+      () => false
+    );
+    if (attached) {
+      // Re-resolve after any Virtuoso eviction; never wait the full test deadline on a stale row.
+      const scrolled = await target
+        .evaluate(
+          (row) => {
+            const area = row.closest('[data-testid="virtuoso-scroller"]');
+            if (!(area instanceof HTMLElement)) return;
+            const rect = row.getBoundingClientRect();
+            const bounds = area.getBoundingClientRect();
+            area.scrollBy({
+              top: rect.top - bounds.top - (area.clientHeight - rect.height) / 2,
+              behavior: 'instant',
+            });
+          },
+          undefined,
+          { timeout: 300 }
+        )
+        .then(
+          () => true,
+          () => false
+        );
+      if (scrolled && (await rowSettled(target))) {
+        await expect(target).toHaveCount(1);
+        await expect(target).toBeVisible();
+        return target;
       }
+    } else {
+      await scroller.evaluate((el) =>
+        el.scrollBy({ top: el.clientHeight / 2, behavior: 'instant' })
+      );
     }
   }
-  // Resolve and scroll in one in-page step: Virtuoso can swap row nodes between
-  // a separate lookup and scroll.
-  await target.evaluate((el) => el.scrollIntoView({ block: 'center' }));
-  await expect(target).toHaveCount(1);
-  await expect(target).toBeVisible();
-  return target;
+  throw new Error('Virtualized message did not settle inside its conversation scroller');
 }
 
 /** Info + Copy inside the bubble, never Read aloud. */
@@ -137,6 +189,21 @@ async function expectPopoverUsable(page: Page, popover: Locator, scroller: Locat
   expect(pop.y + pop.height).toBeLessThanOrEqual(area.y + area.height);
   expect(pop.x).toBeGreaterThanOrEqual(0);
   expect(pop.x + pop.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+
+  // Virtuoso can settle the surrounding rows after the dialog is attached.
+  // Wait for its actual paint order; a persistent obstruction still fails.
+  await expect
+    .poll(() =>
+      popover.evaluate((el) => {
+        const rect = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.bottom - 4);
+        return {
+          onTop: hit !== null && el.contains(hit),
+          coveringElement: hit && !el.contains(hit) ? `${hit.tagName}.${hit.className}` : null,
+        };
+      })
+    )
+    .toMatchObject({ onTop: true });
 
   const layout = await popover.evaluate((el) => {
     const rect = el.getBoundingClientRect();
@@ -192,6 +259,7 @@ const SESSION = {
   isIdle: false,
   agentCompletedAt: null,
   agentSessionId: 'acp-user-actions',
+  viewerAccess: 'owner',
   agentType: 'claude-code',
 };
 
@@ -247,6 +315,8 @@ async function openProjectChat(page: Page, theme: 'dark' | 'light') {
     timeout: 15_000,
   });
   await expectTheme(page, theme);
+  // The list starts at the newest item; wait for initial bottom positioning before scrolling it.
+  await expect(page.locator('[data-conversation-item-id="user-multiline"]')).toBeVisible();
 }
 
 /** The project chat's virtualized message list. */
@@ -518,7 +588,6 @@ async function openWorkspaceChat(page: Page, theme: 'dark' | 'light') {
     if (path === `/api/nodes/${NODE.id}`) return json(NODE);
     if (path === `/api/nodes/${NODE.id}/system-info`) return json(NODE_SYSTEM_INFO);
     if (path === '/api/projects') return json({ projects: [], nextCursor: null });
-    if (path === '/api/trial/status') return json({ available: false });
     if (path === '/api/agents') return json({ agents: [] });
     if (path === '/api/github/installations') return json([]);
     return json({});

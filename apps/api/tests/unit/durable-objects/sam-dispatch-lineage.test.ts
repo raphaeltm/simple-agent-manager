@@ -31,6 +31,22 @@ describe('SAM dispatch_task lineage propagation', () => {
     resetDispatchTaskMocks({ title: 'Child task title' });
   });
 
+  // Constitution XV: the SAM assistant is a model, so the task it writes names it.
+  it('ends the child first message and runner description with a SAM assistant line', async () => {
+    const { ctx, bindCalls } = buildDispatchCtx({ id: 'parent-task-1', dispatch_depth: 0 });
+    await dispatchTask({ projectId: 'proj-1', description: 'Fix the bug' }, ctx);
+
+    const firstMessage = dispatchTaskMocks.persistMessage.mock.calls[0]![4] as string;
+    expect(firstMessage.startsWith('Fix the bug\n\n---\nSent by the SAM assistant.')).toBe(true);
+    expect(firstMessage).toContain('an AI model, wrote this task description');
+    expect(dispatchTaskMocks.startTaskRunnerDO).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskDescription: firstMessage })
+    );
+    // The stored task description matches what the child reads.
+    expect(bindCalls.some((args) => args.includes(firstMessage))).toBe(true);
+  });
+
   describe('with parentTaskId provided', () => {
     it('sets parent_task_id and dispatch_depth in the INSERT', async () => {
       const { ctx } = buildDispatchCtx({ id: 'parent-task-1', dispatch_depth: 0 });

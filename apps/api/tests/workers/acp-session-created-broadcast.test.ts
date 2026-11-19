@@ -8,10 +8,11 @@
  * subscription on the chat session, then `createAcpSession` exactly as the
  * chat-start and task-runner paths call it.
  */
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import type { ProjectData } from '../../src/durable-objects/project-data';
+import { socketMember } from './helpers/socket-member';
 
 function getStub(projectId: string): DurableObjectStub<ProjectData> {
   const id = env.PROJECT_DATA.idFromName(projectId);
@@ -22,7 +23,7 @@ type Broadcast = { type?: string; payload?: Record<string, unknown> } & Record<s
 
 async function subscribe(stub: DurableObjectStub<ProjectData>, chatSessionId: string) {
   const response = await stub.fetch(`https://do/ws?sessionId=${chatSessionId}`, {
-    headers: { Upgrade: 'websocket' },
+    headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': await socketMember(stub) },
   });
   expect(response.status).toBe(101);
   const ws = response.webSocket!;

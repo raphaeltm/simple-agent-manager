@@ -1,17 +1,42 @@
-import { normalizeMimeType, resolveEffectiveMimeType } from '@simple-agent-manager/shared';
+import {
+  normalizeMimeType,
+  resolveEffectiveMimeType,
+  sanitizeFilename,
+} from '@simple-agent-manager/shared';
 
 /** Image file extensions that can be rendered inline via <img> tag. */
 const IMAGE_EXTENSIONS = new Set([
-  'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'avif', 'ico', 'bmp',
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'svg',
+  'webp',
+  'avif',
+  'ico',
+  'bmp',
 ]);
 
 /** MIME types that support inline preview. SVG excluded — script risk in iframe. */
 const PREVIEWABLE_IMAGE_MIMES = new Set([
-  'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif',
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/avif',
+]);
+
+/** Video types a browser plays in <video>. Keep in sync with apps/api/src/services/file-serving-policy.ts */
+const PREVIEWABLE_VIDEO_MIMES = new Set([
+  'video/mp4',
+  'video/webm',
+  'video/quicktime',
+  'video/ogg',
 ]);
 
 const PREVIEWABLE_MIMES = new Set([
   ...PREVIEWABLE_IMAGE_MIMES,
+  ...PREVIEWABLE_VIDEO_MIMES,
   'application/pdf',
   'text/markdown',
   'text/html',
@@ -50,6 +75,11 @@ export function isPreviewableImageMime(mimeType: string, filename?: string): boo
   return PREVIEWABLE_IMAGE_MIMES.has(resolveEffectiveMimeType(mimeType, filename));
 }
 
+/** Check if a MIME type is a video the preview can play. */
+export function isVideoMime(mimeType: string, filename?: string): boolean {
+  return PREVIEWABLE_VIDEO_MIMES.has(resolveEffectiveMimeType(mimeType, filename));
+}
+
 /** Check if a MIME type is PDF. */
 export function isPdfMime(mimeType: string, filename?: string): boolean {
   return resolveEffectiveMimeType(mimeType, filename) === 'application/pdf';
@@ -67,17 +97,15 @@ export function isHtmlMime(mimeType: string, filename?: string): boolean {
 
 /** Default threshold for inline rendering (0–10 MB). Override via VITE_FILE_PREVIEW_INLINE_MAX_BYTES. */
 const DEFAULT_FILE_PREVIEW_INLINE_MAX_BYTES = 10 * 1024 * 1024;
-export const FILE_PREVIEW_INLINE_MAX_BYTES =
-  import.meta.env.VITE_FILE_PREVIEW_INLINE_MAX_BYTES
-    ? parseInt(import.meta.env.VITE_FILE_PREVIEW_INLINE_MAX_BYTES)
-    : DEFAULT_FILE_PREVIEW_INLINE_MAX_BYTES;
+export const FILE_PREVIEW_INLINE_MAX_BYTES = import.meta.env.VITE_FILE_PREVIEW_INLINE_MAX_BYTES
+  ? parseInt(import.meta.env.VITE_FILE_PREVIEW_INLINE_MAX_BYTES)
+  : DEFAULT_FILE_PREVIEW_INLINE_MAX_BYTES;
 
 /** Threshold above which only download is offered (> 50 MB). Override via VITE_FILE_PREVIEW_LOAD_MAX_BYTES. */
 const DEFAULT_FILE_PREVIEW_LOAD_MAX_BYTES = 50 * 1024 * 1024;
-export const FILE_PREVIEW_LOAD_MAX_BYTES =
-  import.meta.env.VITE_FILE_PREVIEW_LOAD_MAX_BYTES
-    ? parseInt(import.meta.env.VITE_FILE_PREVIEW_LOAD_MAX_BYTES)
-    : DEFAULT_FILE_PREVIEW_LOAD_MAX_BYTES;
+export const FILE_PREVIEW_LOAD_MAX_BYTES = import.meta.env.VITE_FILE_PREVIEW_LOAD_MAX_BYTES
+  ? parseInt(import.meta.env.VITE_FILE_PREVIEW_LOAD_MAX_BYTES)
+  : DEFAULT_FILE_PREVIEW_LOAD_MAX_BYTES;
 
 /** Format file size as human-readable string. */
 export function formatFileSize(bytes: number): string {
@@ -90,13 +118,36 @@ export function formatFileSize(bytes: number): string {
 
 /** Map file extensions to Prism language identifiers. */
 const EXT_TO_LANG: Record<string, string> = {
-  ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
-  go: 'go', py: 'python', css: 'css', html: 'markup', htm: 'markup',
-  json: 'json', yaml: 'yaml', yml: 'yaml', md: 'markdown',
-  sh: 'bash', bash: 'bash', zsh: 'bash', dockerfile: 'docker',
-  toml: 'toml', sql: 'sql', rs: 'rust', rb: 'ruby', java: 'java',
-  c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp', xml: 'markup', svg: 'markup',
-  graphql: 'graphql', gql: 'graphql',
+  ts: 'typescript',
+  tsx: 'tsx',
+  js: 'javascript',
+  jsx: 'jsx',
+  go: 'go',
+  py: 'python',
+  css: 'css',
+  html: 'markup',
+  htm: 'markup',
+  json: 'json',
+  yaml: 'yaml',
+  yml: 'yaml',
+  md: 'markdown',
+  sh: 'bash',
+  bash: 'bash',
+  zsh: 'bash',
+  dockerfile: 'docker',
+  toml: 'toml',
+  sql: 'sql',
+  rs: 'rust',
+  rb: 'ruby',
+  java: 'java',
+  c: 'c',
+  cpp: 'cpp',
+  h: 'c',
+  hpp: 'cpp',
+  xml: 'markup',
+  svg: 'markup',
+  graphql: 'graphql',
+  gql: 'graphql',
 };
 
 /** Detect syntax highlighting language from a file path. */
@@ -107,4 +158,15 @@ export function detectLanguage(filePath: string): string {
   if (lower === 'makefile') return 'makefile';
   const ext = lower.split('.').pop() ?? '';
   return EXT_TO_LANG[ext] ?? '';
+}
+
+/**
+ * Return `file` with a name the upload API accepts. Unsafe characters are
+ * replaced rather than rejected; the original File is returned untouched when
+ * its name is already safe.
+ */
+export function withSafeFilename(file: File): File {
+  const name = sanitizeFilename(file.name);
+  if (name === file.name) return file;
+  return new File([file], name, { type: file.type, lastModified: file.lastModified });
 }

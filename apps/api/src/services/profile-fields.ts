@@ -7,6 +7,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
+import { agentModelsResponse, serializeAgentModelSelection } from './agent-models/selection';
 
 /**
  * Field mappers shared by agent profiles and skills. Both entities store the
@@ -23,7 +24,8 @@ export interface BaseProfileRow {
   userId: string;
   name: string;
   description: string | null;
-  agentType: string;
+  /** Always set for profiles; null on a skill means "use the profile's agent". */
+  agentType: string | null;
   model: string | null;
   effort: unknown;
   permissionMode: string | null;
@@ -32,12 +34,12 @@ export interface BaseProfileRow {
   timeoutMinutes: number | null;
   vmSizeOverride: string | null;
   resourceRequirementsJson: string | null;
-  provider: string | null;
-  vmLocation: string | null;
   workspaceProfile: string | null;
   runtime: unknown;
   devcontainerConfigName: string | null;
   taskMode: string | null;
+  /** JSON array of callable model ids for run_ai_model; null = inherit. */
+  agentModelsJson: string | null;
   createdAt: string;
   updatedAt: string;
   isBuiltin: number;
@@ -58,12 +60,11 @@ export interface BaseProfileFieldsResponse {
   timeoutMinutes: number | null;
   vmSizeOverride: string | null;
   resourceRequirementsJson: string | null;
-  provider: string | null;
-  vmLocation: string | null;
   workspaceProfile: string | null;
   runtime: AgentProfileRuntime | null;
   devcontainerConfigName: string | null;
   taskMode: string | null;
+  agentModels: string[] | null;
   createdAt: string;
   updatedAt: string;
   isBuiltin: boolean;
@@ -74,7 +75,9 @@ export interface BaseProfileFieldsResponse {
  * converting the integer `isBuiltin` flag to a boolean. Generic over the row type
  * so each caller preserves its exact field union types.
  */
-export function toBaseProfileFields<R extends BaseProfileRow>(row: R): BaseProfileFieldsResponse {
+export function toBaseProfileFields<R extends BaseProfileRow>(
+  row: R
+): Omit<BaseProfileFieldsResponse, 'agentType'> & { agentType: R['agentType'] } {
   return {
     id: row.id,
     projectId: row.projectId,
@@ -90,12 +93,14 @@ export function toBaseProfileFields<R extends BaseProfileRow>(row: R): BaseProfi
     timeoutMinutes: row.timeoutMinutes,
     vmSizeOverride: row.vmSizeOverride,
     resourceRequirementsJson: row.resourceRequirementsJson,
-    provider: row.provider,
-    vmLocation: row.vmLocation,
     workspaceProfile: row.workspaceProfile,
     runtime: isAgentProfileRuntime(row.runtime) ? row.runtime : null,
     devcontainerConfigName: row.devcontainerConfigName,
     taskMode: row.taskMode,
+    agentModels: agentModelsResponse(row.agentModelsJson, {
+      table: 'profile_or_skill',
+      id: row.id,
+    }),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     isBuiltin: row.isBuiltin === 1,
@@ -105,7 +110,7 @@ export function toBaseProfileFields<R extends BaseProfileRow>(row: R): BaseProfi
 /** Shape accepted by the insert/update helpers — every base field is optional. */
 export interface BaseProfileWriteInput {
   description?: string | null;
-  agentType?: string;
+  agentType?: string | null;
   model?: string | null;
   effort?: AgentEffort | null;
   permissionMode?: string | null;
@@ -114,11 +119,11 @@ export interface BaseProfileWriteInput {
   timeoutMinutes?: number | null;
   vmSizeOverride?: string | null;
   resourceRequirementsJson?: string | null;
-  provider?: string | null;
-  vmLocation?: string | null;
   workspaceProfile?: string | null;
   runtime?: AgentProfileRuntime | null;
   devcontainerConfigName?: string | null;
+  /** Callable models for run_ai_model. Omit = keep (update) / inherit (create); null = inherit. */
+  agentModels?: readonly string[] | null;
 }
 
 /**
@@ -142,11 +147,10 @@ export function baseProfileInsertValues(
     timeoutMinutes: body.timeoutMinutes ?? null,
     vmSizeOverride: body.vmSizeOverride ?? null,
     resourceRequirementsJson: body.resourceRequirementsJson ?? null,
-    provider: body.provider ?? null,
-    vmLocation: body.vmLocation ?? null,
     workspaceProfile: body.workspaceProfile ?? null,
     runtime: body.runtime ?? null,
     devcontainerConfigName: body.devcontainerConfigName ?? null,
+    agentModelsJson: serializeAgentModelSelection(body.agentModels ?? null),
   };
 }
 
@@ -166,8 +170,6 @@ const BASE_PROFILE_UPDATE_FIELDS = [
   'timeoutMinutes',
   'vmSizeOverride',
   'resourceRequirementsJson',
-  'provider',
-  'vmLocation',
   'workspaceProfile',
   'runtime',
   'devcontainerConfigName',
@@ -186,6 +188,9 @@ export function applyBaseProfileUpdates<T extends Record<string, unknown>>(
   const set = updates as Record<string, unknown>;
   if (body.name !== undefined) set.name = body.name.trim();
   if (body.effort !== undefined) set.effort = body.effort ?? DEFAULT_AGENT_EFFORT;
+  if (body.agentModels !== undefined) {
+    set.agentModelsJson = serializeAgentModelSelection(body.agentModels);
+  }
   for (const field of BASE_PROFILE_UPDATE_FIELDS) {
     if (body[field] !== undefined) {
       set[field] = body[field];

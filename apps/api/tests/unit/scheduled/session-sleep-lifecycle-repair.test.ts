@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
+  finishConfirmedSessionSleep: vi.fn(async () => true),
   getSession: (...args: unknown[]) => mocks.getSession(...args),
   sleepSession: (...args: unknown[]) => mocks.sleepSession(...args),
 }));
@@ -348,7 +349,7 @@ describe('session sleep lifecycle repair', () => {
     expect(await runSessionSleepLifecycleRepair(env, now)).toMatchObject({ selected: 0 });
   });
 
-  it('hands stale stopping rows to repair rather than retrying the runtime forever', async () => {
+  it('keeps stale stopping rows owned by the bounded sleep sweep', async () => {
     insertStaleStoppingSnapshot(sqlite, { claimedAt: '2026-08-12T00:00:00.000Z' });
     expect(
       await selectSweepCandidates(
@@ -358,7 +359,7 @@ describe('session sleep lifecycle repair', () => {
         25,
         3
       )
-    ).toEqual([]);
+    ).toHaveLength(1);
     // A due claim inside the stopping age bound still gets its normal retry.
     sqlite.exec("UPDATE session_snapshots SET sleep_stopping_since = '2026-08-12T00:55:00.000Z'");
     expect(

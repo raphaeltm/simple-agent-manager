@@ -25,6 +25,8 @@ import { extractProfileFields, McpProfileFieldValidationError } from './profile-
 /** Extract skill-specific fields that go beyond the shared profile fields. */
 function extractSkillExtraFields(params: Record<string, unknown>): Partial<UpdateSkillRequest> {
   const fields: Partial<UpdateSkillRequest> = {};
+  // null clears a skill's agent override so the chosen profile's agent runs.
+  if (params.agentType === null) fields.agentType = null;
   if (typeof params.defaultProfileId === 'string')
     fields.defaultProfileId = params.defaultProfileId;
   if (params.defaultProfileId === null) fields.defaultProfileId = null;
@@ -112,8 +114,6 @@ export async function handleGetSkill(
               maxTurns: skill.maxTurns,
               timeoutMinutes: skill.timeoutMinutes,
               vmSizeOverride: skill.vmSizeOverride,
-              provider: skill.provider,
-              vmLocation: skill.vmLocation,
               workspaceProfile: skill.workspaceProfile,
               devcontainerConfigName: skill.devcontainerConfigName,
               taskMode: skill.taskMode,

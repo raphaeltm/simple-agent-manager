@@ -98,7 +98,6 @@ async function setupApiMocks(page: Page, options: MockOptions = {}) {
     }
     if (path.startsWith('/api/credentials')) return respond(200, []);
     if (path === '/api/agents') return respond(200, { agents: [] });
-    if (path === '/api/trial/status') return respond(200, { available: false });
     if (path.includes('/sessions')) return respond(200, { sessions: [], total: 0 });
     if (path.includes('/tasks')) return respond(200, { tasks: [], nextCursor: null });
     if (path.includes('/agent-profiles')) return respond(200, { items: [] });

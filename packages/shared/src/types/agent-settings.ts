@@ -22,11 +22,7 @@ export const VALID_AGENT_PROVIDER_MODES: readonly AgentProviderMode[] = [
 
 /** Valid permission modes for agent sessions */
 export type AgentPermissionMode =
-  | 'default'
-  | 'acceptEdits'
-  | 'plan'
-  | 'dontAsk'
-  | 'bypassPermissions';
+  'default' | 'acceptEdits' | 'plan' | 'dontAsk' | 'bypassPermissions';
 
 /** Valid OpenCode inference provider types */
 export type OpenCodeProvider = 'opencode-zen' | 'opencode-go' | 'custom';
@@ -141,6 +137,9 @@ export interface SaveAgentSettingsRequest {
 // Agent Effort
 // =============================================================================
 
+/** Longest model id accepted anywhere an agent model is set (settings, profiles, one-chat overrides). */
+export const AGENT_MODEL_MAX_LENGTH = 200;
+
 export const AGENT_EFFORT_LEVELS = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type AgentEffort = (typeof AGENT_EFFORT_LEVELS)[number];
 
@@ -192,8 +191,6 @@ export interface AgentProfile {
   timeoutMinutes: number | null;
   vmSizeOverride: string | null;
   resourceRequirementsJson?: string | null;
-  provider: string | null;
-  vmLocation: string | null;
   workspaceProfile: string | null;
   /** Workspace runtime preference. null = auto-resolve from environment/profile/user tier. */
   runtime: AgentProfileRuntime | null;
@@ -202,6 +199,11 @@ export interface AgentProfile {
   taskMode: string | null;
   /** SAM platform policy slice for GitHub CLI installation-token scoping. */
   githubCliPolicy: GitHubCliPolicy | null;
+  /**
+   * Cloudflare-hosted models agents may call with `run_ai_model`. null = inherit the
+   * layer below (a skill inherits the profile, a profile inherits the project); [] = none.
+   */
+  agentModels: string[] | null;
   isBuiltin: boolean;
   createdAt: string;
   updatedAt: string;
@@ -221,8 +223,6 @@ export interface CreateAgentProfileRequest {
   vmSizeOverride?: string | null;
   resourceRequirements?: ResourceRequirements | null;
   resourceRequirementsJson?: string | null;
-  provider?: string | null;
-  vmLocation?: string | null;
   workspaceProfile?: string | null;
   /** Workspace runtime preference. null/omitted = automatic. */
   runtime?: AgentProfileRuntime | null;
@@ -231,6 +231,8 @@ export interface CreateAgentProfileRequest {
   taskMode?: string | null;
   /** SAM platform policy slice for GitHub CLI installation-token scoping. */
   githubCliPolicy?: GitHubCliPolicy | null;
+  /** Callable models for `run_ai_model`. Omit or null = inherit; [] = none. */
+  agentModels?: string[] | null;
 }
 
 /** Request body for PUT /api/projects/:projectId/agent-profiles/:profileId */
@@ -247,8 +249,6 @@ export interface UpdateAgentProfileRequest {
   vmSizeOverride?: string | null;
   resourceRequirements?: ResourceRequirements | null;
   resourceRequirementsJson?: string | null;
-  provider?: string | null;
-  vmLocation?: string | null;
   workspaceProfile?: string | null;
   /** Workspace runtime preference. null = automatic. */
   runtime?: AgentProfileRuntime | null;
@@ -257,6 +257,8 @@ export interface UpdateAgentProfileRequest {
   taskMode?: string | null;
   /** SAM platform policy slice for GitHub CLI installation-token scoping. */
   githubCliPolicy?: GitHubCliPolicy | null;
+  /** Callable models for `run_ai_model`. Omit = keep; null = inherit; [] = none. */
+  agentModels?: string[] | null;
 }
 
 /** Resolved agent profile for task execution */
@@ -272,8 +274,6 @@ export interface ResolvedAgentProfile {
   timeoutMinutes: number | null;
   vmSizeOverride: string | null;
   resourceRequirementsJson?: string | null;
-  provider: string | null;
-  vmLocation: string | null;
   workspaceProfile: string | null;
   /** Workspace runtime preference. null = automatic. */
   runtime: AgentProfileRuntime | null;
@@ -284,23 +284,52 @@ export interface ResolvedAgentProfile {
   githubCliPolicy: GitHubCliPolicy | null;
 }
 
+/** One profile's use in the caller's own new chats in a project (GET .../agent-profiles/picker). */
+export interface ProfilePickerUsage {
+  profileId: string;
+  /** ISO timestamp of the caller's latest new chat with this profile in the window. */
+  lastUsedAt: string;
+  chatCount: number;
+}
+
+/** The caller's new-chat picker state for one project. */
+export interface ProfilePickerState {
+  usage: ProfilePickerUsage[];
+  /** Profiles this person hid from the new-chat picker in this project. */
+  hiddenProfileIds: string[];
+  /** Days of chats counted in `usage` (admin setting `chat.profileUsageWindowDays`). */
+  usageWindowDays: number;
+}
+
+/** Body for PATCH .../agent-profiles/picker. Hiding only affects the caller's picker. */
+export interface UpdateProfilePickerRequest {
+  hide?: string[];
+  unhide?: string[];
+}
+
 // =============================================================================
 // Skills (per-project repeatable-work definitions)
 // =============================================================================
 
-export interface AgentSkill extends Omit<AgentProfile, 'effort'> {
+export interface AgentSkill extends Omit<AgentProfile, 'effort' | 'agentType'> {
+  /** null = use the agent of the profile chosen for the run. A skill only overrides what it sets. */
+  agentType: string | null;
   /** null = inherit from the selected/default profile. */
   effort: AgentEffort | null;
   resourceRequirementsJson: string | null;
   defaultProfileId: string | null;
 }
 
-export interface CreateSkillRequest extends CreateAgentProfileRequest {
+export interface CreateSkillRequest extends Omit<CreateAgentProfileRequest, 'agentType'> {
+  /** Omit or null to use the chosen profile's agent. */
+  agentType?: string | null;
   resourceRequirementsJson?: string | null;
   defaultProfileId?: string | null;
 }
 
-export interface UpdateSkillRequest extends UpdateAgentProfileRequest {
+export interface UpdateSkillRequest extends Omit<UpdateAgentProfileRequest, 'agentType'> {
+  /** null clears the override so the chosen profile's agent is used. */
+  agentType?: string | null;
   resourceRequirementsJson?: string | null;
   defaultProfileId?: string | null;
 }

@@ -44,11 +44,13 @@ vi.mock('../../../src/services/session-snapshots', () => ({
 }));
 vi.mock('../../../src/services/jwt', () => ({ verifyCallbackToken: mocks.verifyCallbackToken }));
 vi.mock('../../../src/services/project-data', () => ({
+  getSession: vi.fn(async () => null),
   stopSession: mocks.stopSession,
   cleanupWorkspaceActivity: mocks.cleanupWorkspaceActivity,
   recordActivityEvent: mocks.recordActivityEvent,
 }));
-vi.mock('../../../src/services/workspace-eviction-recovery', () => ({
+vi.mock('../../../src/services/workspace-eviction-recovery', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/workspace-eviction-recovery')>()),
   recoverWorkspaceAfterEviction: mocks.recoverWorkspaceAfterEviction,
 }));
 
@@ -274,6 +276,42 @@ describe('workspace eviction lifecycle through HTTP and real SQL', () => {
     ).toEqual({ status: 'available', sleep_status: null, sleep_after: null });
   });
 
+  // A wake releases the stopping workspace's chat binding (and advances `updated_at`) while
+  // the Stop finalizer is queued behind the NodeLifecycle gate.
+  it.each([
+    ['finalizes a Stop whose chat a wake released meanwhile', true, 'stopped'],
+    ['still refuses a Stop whose row changed while its chat stayed bound', false, 'stopping'],
+  ])('%s', async (_label, releaseChat, expected) => {
+    const lifecycle = env.NODE_LIFECYCLE;
+    env.NODE_LIFECYCLE = {
+      ...lifecycle,
+      get: (id: DurableObjectId) => {
+        const stub = lifecycle.get(id) as unknown as {
+          finalizeWorkspaceStop: (identity: WorkspaceStopIdentity) => Promise<boolean>;
+        };
+        return {
+          ...stub,
+          finalizeWorkspaceStop: async (identity: WorkspaceStopIdentity) => {
+            sqlite
+              .prepare(
+                `UPDATE workspaces SET updated_at = ?${releaseChat ? ', chat_session_id = NULL' : ''} WHERE id = 'workspace'`
+              )
+              .run(new Date(Date.now() + 5).toISOString());
+            return stub.finalizeWorkspaceStop(identity);
+          },
+        };
+      },
+    } as unknown as Env['NODE_LIFECYCLE'];
+
+    expect((await stop()).status).toBe(200);
+    await Promise.all(pending);
+    expect(state().workspace).toEqual({ status: expected });
+    expect(sqlite.prepare('SELECT stop_runtime_confirmed_at FROM workspaces').get()).toEqual({
+      stop_runtime_confirmed_at: expect.any(String),
+    });
+    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledTimes(releaseChat ? 1 : 0);
+  });
+
   it('retries confirmed Stop cleanup after a ProjectData failure without stopping the VM again', async () => {
     mocks.stopSession.mockRejectedValueOnce(new Error('temporary ProjectData failure'));
     expect((await stop()).status).toBe(200);
@@ -297,10 +335,10 @@ describe('workspace eviction lifecycle through HTTP and real SQL', () => {
     expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledOnce();
   });
 
-  it('closes metering and sessions at eviction, retaining workspace and snapshot state', async () => {
+  it('closes metering and agent sessions while preserving captured recovery state', async () => {
     sqlite.exec(`INSERT INTO session_snapshots
-      (id, workspace_id, chat_session_id, project_id, status, sleep_status, sleep_after, expires_at)
-      VALUES ('snapshot', 'workspace', 'chat', 'project', 'available', 'scheduled',
+      (id, user_id, workspace_id, chat_session_id, project_id, status, degradation, sleep_status, sleep_after, expires_at)
+      VALUES ('snapshot', 'user', 'workspace', 'chat', 'project', 'available', 'none', 'scheduled',
         '2026-09-13T00:00:00.000Z', '2099-01-01T00:00:00.000Z')`);
     expect((await evict()).status).toBe(204);
     const ended = state();
@@ -309,9 +347,9 @@ describe('workspace eviction lifecycle through HTTP and real SQL', () => {
     expect(ended.usage).toEqual({ ended_at: (ended.agent as { stopped_at: string }).stopped_at });
     expect(sqlite.prepare('SELECT id FROM session_snapshots').all()).toEqual([{ id: 'snapshot' }]);
     expect(sqlite.prepare('SELECT sleep_status, sleep_after FROM session_snapshots').get()).toEqual(
-      { sleep_status: null, sleep_after: null }
+      { sleep_status: 'sleeping', sleep_after: null }
     );
-    expect(mocks.stopSession).toHaveBeenCalledWith(env, 'project', 'chat');
+    expect(mocks.stopSession).not.toHaveBeenCalled();
     expect(mocks.cleanupWorkspaceActivity).toHaveBeenCalledWith(env, 'project', 'workspace');
     expect((await evict()).status).toBe(204);
     expect(state()).toEqual(ended);
@@ -336,6 +374,48 @@ describe('workspace eviction lifecycle through HTTP and real SQL', () => {
       nodeId: 'node',
       generation: 'generation-1',
     });
+  });
+
+  // Staging 2026-11-05: the VM's 10 s callback client gave up mid-wake, the runtime cancelled the
+  // unregistered work after the snapshot claim, and the conversation stayed stranded in `waking`.
+  it.each([
+    ['the first callback', 'pending'],
+    ['a replay after the eviction committed', 'evicted'],
+  ])('keeps the wake alive past a client disconnect on %s', async (_label, phase) => {
+    sqlite
+      .prepare("UPDATE workspaces SET eviction_generation = 'generation-1' WHERE id = 'workspace'")
+      .run();
+    if (phase === 'evicted') {
+      expect((await evict({ evictionGeneration: 'generation-1' })).status).toBe(204);
+      expect(state().workspace).toEqual({ status: 'evicted' });
+      await Promise.all(pending);
+      pending.length = 0;
+      mocks.recoverWorkspaceAfterEviction.mockClear();
+    }
+    let releaseWake!: () => void;
+    let wakeStarted!: () => void;
+    const started = new Promise<void>((resolve) => (wakeStarted = resolve));
+    mocks.recoverWorkspaceAfterEviction.mockImplementationOnce(() => {
+      wakeStarted();
+      return new Promise((resolve) => {
+        releaseWake = () => resolve({ status: 'waking', taskId: 'recovery' });
+      });
+    });
+
+    const response = evict({ evictionGeneration: 'generation-1' });
+    await started;
+    // The client may disconnect here; only work registered with waitUntil survives it.
+    expect(pending).toHaveLength(1);
+    let registeredSettled = false;
+    void pending[0]!.then(() => (registeredSettled = true));
+    await Promise.resolve();
+    expect(registeredSettled).toBe(false);
+
+    releaseWake();
+    expect((await response).status).toBe(204);
+    await pending[0];
+    expect(registeredSettled).toBe(true);
+    expect(mocks.recoverWorkspaceAfterEviction).toHaveBeenCalledOnce();
   });
 
   it.each([

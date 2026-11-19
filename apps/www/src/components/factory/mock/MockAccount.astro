@@ -1,0 +1,101 @@
+---
+/** HTML version of choosing which of your own accounts a profile runs on ("Only you see this"). */
+import './mock.css';
+
+const options = [
+  { name: 'Use my usual account', meta: 'Right now: Work Max plan' },
+  { name: 'Work Max plan', meta: 'Your default' },
+  { name: 'Acme client key' },
+  { name: 'Personal Pro plan', picked: true },
+];
+---
+
+<div class="mk acct">
+  <div class="acct-in">
+    <p class="acct-head">
+      <span>Which Claude Code account this profile runs on when you use it.</span>
+      <span class="acct-lock"><svg class="mk-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>Only you see this</span>
+    </p>
+    <ul>
+      {options.map((o) => (
+        <li class:list={['acct-opt', { 'acct-opt--picked': o.picked }]}>
+          <span class="radio" />
+          <span class="acct-text"><b>{o.name}</b>{o.meta && <span class="mk-meta">{o.meta}</span>}</span>
+        </li>
+      ))}
+    </ul>
+    <p class="mk-meta">Other members pick their own account for this profile. Yours never runs their work.</p>
+  </div>
+</div>
+
+<style>
+  .acct {
+    font-size: 12px;
+  }
+
+  .acct-in {
+    display: grid;
+    gap: 8px;
+    padding: 14px;
+  }
+
+  .acct-head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 6px;
+    color: var(--mk-muted);
+  }
+
+  .acct-lock {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--mk-line-strong);
+    white-space: nowrap;
+  }
+
+  .acct ul {
+    display: grid;
+    gap: 6px;
+  }
+
+  .acct-opt {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 9px;
+    border: 1px solid var(--mk-line);
+    background: var(--mk-surface);
+  }
+
+  .acct-opt--picked {
+    border-color: var(--mk-green);
+    background: var(--mk-green-soft);
+  }
+
+  .radio {
+    width: 13px;
+    height: 13px;
+    flex: none;
+    border-radius: 50%;
+    border: 1.5px solid var(--mk-line-strong);
+    background: var(--mk-bg);
+  }
+
+  .acct-opt--picked .radio {
+    border-color: var(--mk-green);
+    background: radial-gradient(circle, var(--mk-green) 0 45%, var(--mk-bg) 50%);
+  }
+
+  .acct-text {
+    display: grid;
+  }
+
+  .acct-text b {
+    font-weight: 600;
+  }
+</style>

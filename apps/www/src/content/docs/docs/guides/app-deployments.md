@@ -1,22 +1,93 @@
 ---
 title: App Deployments
-description: Author and submit SAM app deployment releases with Docker Compose.
+description: Put your app on the internet. Create an environment, let agents deploy to it, see what's running, and fix what goes wrong. Also covers the Docker Compose format agents publish.
 ---
 
-SAM app deployments are agent-first. A user creates a deployment environment and enables agent deployment for that environment. An agent then targets that named environment when it publishes a release.
+SAM app deployments are agent-first: you create an environment and decide which agents may deploy
+to it, and an agent ships your app there when you ask. You don't run Docker or touch a server.
 
-Agents can discover this whole flow at runtime by calling the `get_deployment_guide` MCP tool, which returns a briefing on the agent-first model and the order in which to call the deployment tools. It takes no arguments and is the recommended starting point whenever a user asks to deploy, launch, publish, ship, or release an app.
+## Put your app online
+
+1. Open the project and select **Deployments**, then **New environment** (or **New** once you have
+   one).
+2. Name it, for example `staging` (lowercase letters, numbers and dashes). Nothing runs, and nothing
+   costs money, until an agent deploys to it.
+3. Under **Which agents can deploy here?**, choose **Any agent in this project** (good for previews
+   and staging), **Only some agent profiles** (good for production; then pick at least one), or
+   **Nobody yet** (turn it on later from the environment). Select **Create environment**.
+4. On the environment's page, select **Ask an agent to deploy**. A new chat opens with the request
+   already written; pick the profile and send it. You can also just ask in any chat, for example
+   "deploy this to staging". Both **Cloud VM** and [Instant](/docs/guides/instant-sessions/) chats can publish.
+5. Watch **Recent deploys**: the newest version lists the steps the server reports as it goes. When
+   it's **Live**, select **Open app**.
+
+Owners and admins create environments, choose who can deploy, and pause, start or delete them.
+Everyone in the project sees the same buttons, but for other members SAM refuses those changes with
+"Project capability is required".
+
+## The Deployments page
+
+A project's **Deployments** page lists its environments grouped by what they need from you: **Needs your attention**, **Running**, and **Not running**. Each row shows the address people visit (your own domain when one is working) and who shipped the newest version, with **Open** for an app that's up or **Ask an agent** for a problem an agent can fix.
+
+Opening an environment shows one page, top to bottom:
+
+- **Status in one sentence**, the address with **Open app** and **Logs**, and who shipped the running version from which chat. A deploy in progress says the app is offline until the new version is up, because the server stops the old version before starting the new one.
+- **Needs your attention**: each problem in plain words, the raw error under **Show the error**, and its fix (see the table below). **Ask an agent** opens a new chat with a request about this environment already written; you choose the agent and send it.
+- **Recent deploys**: every version, who sent it, and the chat it came from (four at first, **Show all** for the rest). While the newest version deploys, or after it fails, it lists the steps the server reported, including which step broke and whether the previous version came back.
+- **Who can deploy**: turning agent deploys on asks you to choose **Any agent in this project** or named agent profiles. Nothing changes until you choose, and an **Only these** list with nobody picked shows a warning, because an empty list means any agent may deploy.
+- **Settings your app reads** (variables and secrets), **Addresses** (public routes and your own domains), **Saved data** (volumes), and **Behind the scenes** (the server, its hardware, containers and raw signals).
+- **Pause or delete** at the bottom. Delete lists what it removes and asks you to type the environment name.
+
+The page refreshes every few seconds while something is changing.
+
+### Problems and their fixes
+
+| Problem                                    | Fix buttons                              |
+| ------------------------------------------ | ---------------------------------------- |
+| "Version N didn't start"                   | **Ask an agent to fix it**, **See logs** |
+| "SAM couldn't get a server for version N"  | **Ask an agent to deploy again**         |
+| "Starting didn't finish"                   | **Start again**                          |
+| "Pausing didn't finish"                    | **Pause again**, **See the server**      |
+| "The server hasn't checked in for N hours" | **See the server**                       |
+| A part of the app isn't running properly   | **See logs**, **Ask an agent to fix it** |
+| "&lt;your domain&gt; doesn't point here"   | **Check domains**                        |
+
+When agent deploys are off for the environment, each **Ask an agent…** button reads **Let agents deploy here…** instead.
+
+### What the deploy labels mean
+
+| Label                    | Meaning                                                         |
+| ------------------------ | --------------------------------------------------------------- |
+| **Live**                 | The version that's running now                                  |
+| **Deploying**            | On its way; the app is offline until it's up                    |
+| **Didn't start**         | It failed; the steps show where                                 |
+| **Skipped**              | A newer version arrived before a server picked this one up      |
+| **Comes back on start**  | The version that runs again when you start a paused environment |
+| **May still be running** | Pausing didn't finish, so it might still be up                  |
+| (no label)               | An older version that was replaced                              |
+
+## For agents: publishing a release
+
+Agents can discover this whole flow at runtime by calling the `deployments_read` MCP tool with `{"method": "guide"}`, which returns a briefing on the agent-first model and the order in which to call the deployment tools. It needs no other arguments.
 
 Publishing is a two-step, asynchronous flow:
 
-1. `build_and_publish(environment, reference?, workingDir?)` starts a build/publish job on the SAM VM and immediately returns a durable `publishJobId`. The job builds the workspace's Docker Compose stack, pushes built service images with SAM-owned registry credentials, and records the release server-side. Agents never run docker or registry commands and never receive registry credentials.
-2. `get_publish_status(publishJobId)` reports progress. Poll it until the status is terminal — `succeeded`, `failed`, `canceled`, or `unknown` — rather than retrying `build_and_publish` blindly.
+1. `deployments_write` with `method: "publish"` (`environment`, optional `reference` and `workingDir`) starts a build/publish job and immediately returns a durable `publishJobId`. The job builds the workspace's Docker Compose stack, uploads built service images as scoped artifacts, and records the release server-side. Agents never run docker or registry commands and never receive registry credentials.
+2. `deployments_read` with `method: "publish_status"` and the `publishJobId` reports progress. Poll it until the status is terminal — `succeeded`, `failed`, `canceled`, or `unknown` — rather than retrying `deployments_write` method `publish` blindly.
 
-After a successful publish, agents can verify runtime health with `read_deployment_logs(environment, ...)`.
+To stop a running build, call `deployments_write` with `method: "cancel_publish"` and `publishJobId` (also callable as `cancel_publish(publishJobId)`). It uses the same project and requesting-workspace scope as `deployments_read` method `publish_status`. Cancellation is durable even if the build machine is unreachable. Terminal jobs stay unchanged. A release already recorded before cancellation continues deploying; cancellation does not roll it back.
 
-`build_and_publish` requires the named deployment environment to be active — or in `error`, awaiting a recovery release — agent deployment to be enabled by a user, and the agent profile to satisfy that environment's policy. An environment that a previous release left in `error` stays available to agents precisely so the next release can recover it; environments that are starting, stopping, stopped, or being deleted are not agent-deployable.
+A heartbeat-capable job whose executor stops sending heartbeats and progress events fails with `errorCode: stalled`; a job that exceeds its overall time budget fails with `errorCode: deadline_exceeded`. Both are retryable. Inspect the recent events before starting a new job. The default silence threshold is five minutes and the overall deadline is thirty minutes; the scheduled sweep detects expiry on its next tick. Healthy builds and uploads may be silent while executor heartbeats continue. Older VM agents without heartbeats, and executors lost before their first successful heartbeat, are bounded by the overall deadline only. The VM heartbeat interval defaults to one minute (`DEPLOY_PUBLISH_HEARTBEAT_INTERVAL`); keep any overridden heartbeat interval well below the stall threshold. The API enforces a minimum stall threshold of 150 seconds, covering two default heartbeat intervals plus callback grace. The API deadline includes admission and callback margin beyond the VM’s default twenty-minute build/publish timeout. If overriding the VM timeout, increase the API deadline accordingly. Installation admins can change these in **Admin → Settings** (`deployments.publishJobStallMs` and `deployments.publishJobDeadlineMs`).
 
-Agents can preview route behavior before publishing with `preview_deployment_routes(environment, composeYaml)` and inspect the latest release's generated routes and custom domains with `list_deployment_routes(environment)`.
+Instant sessions build in a dedicated Cloudflare Container. VM sessions build on their source node by default; installation admins can select Cloudflare in **Admin → Settings → deployments.buildExecutor**. For VM sessions, leave it at `node` (the default): building VM sessions in Cloudflare has not been verified end to end yet, while the Instant path has. An explicit Cloudflare selection never silently falls back to the source node. If the source agent lacks collection support, restart the workspace to upgrade it.
+
+For Cloudflare builds, keep the source session awake while SAM collects and verifies its context. Once the job reports `context_ready` (or a later build step), the source can sleep: the independent builder owns the job. Capacity-limited builds queue, and SAM retries admission automatically. Cancellation and the hard builder deadline stop the dedicated container. Confirmed stops also remove the builder’s deadline schedule and native alarm, so completed builds do not retain a wake at their former deadline. The default builder deadline is twenty minutes after first admission, capped by the overall publish-job deadline. A queued job does not need executor heartbeats.
+
+After a successful publish, agents can verify runtime health with `deployments_read` (`method: "logs"`).
+
+`deployments_write` method `publish` requires the named deployment environment to be active — or in `error`, awaiting a recovery release — agent deployment to be enabled by a user, and the agent profile to satisfy that environment's policy. An environment that a previous release left in `error` stays available to agents precisely so the next release can recover it; environments that are starting, stopping, stopped, or being deleted are not agent-deployable.
+
+Agents can preview route behavior before publishing with `deployments_read` (`method: "preview_routes"`, `environment`, `composeYaml`) and inspect the latest release's generated routes and custom domains with `deployments_read` (`method: "routes"`).
 
 The release submission format is Docker Compose YAML with SAM extensions. SAM supports multi-service Compose stacks, preserves service topology including Docker Model Runner `provider:` services, and derives route hints from either `x-sam-routes` or compose service `ports:`. Compose long-syntax `ports:` entries with `mode: host` are treated as internal/private route hints; other `ports:` entries are public by default unless an explicit private `x-sam-routes` entry suppresses them.
 
@@ -61,16 +132,16 @@ Content-Type: text/yaml
 
 SAM accepts `application/yaml`, `text/yaml`, `application/x-yaml`, and `text/x-yaml`. Raw manifest JSON is still accepted for older callers, but Compose YAML is the authoring format.
 
-Configure values on each deployment environment from the Deployments page:
+Configure values on each deployment environment in its **Settings your app reads** section. Use **Add**, and turn on **Keep it secret** for a secret:
 
-- **Variables** are visible after save. SAM supplies them to `build_and_publish` and to deployment-node Compose apply commands, so they can be used for image tags, build args, domains, and runtime environment values.
+- **Variables** are visible after save. SAM supplies them to `deployments_write` method `publish` and to deployment-node Compose apply commands, so they can be used for image tags, build args, domains, and runtime environment values.
 - **Secrets** are hidden after save. SAM supplies them only to deployment-node Compose apply commands as process environment for Compose interpolation. Secrets are not sent to build nodes and should not be used in build args, image tags, route fields, or other build/publish-control fields.
 
 Compose interpolation only affects placeholders such as `${DATABASE_URL}`. It does not override literal Compose values like `NODE_ENV: production`.
 
 `x-sam-secret` and older explicit secret references remain supported for compatibility, but new deployments should prefer normal Compose `${VAR}` placeholders backed by per-environment Variables and Secrets.
 
-For compose-publish releases, `build_and_publish` supports safe named Docker Compose volumes when each service mount references a top-level named volume declaration. SAM creates missing provider-backed block volumes for those declarations and rewrites service mounts to SAM-managed volume roots before deployment apply. Host bind mounts, Docker socket mounts, anonymous volumes, undeclared named volumes, `volumes_from`, `tmpfs`, external volumes, custom volume drivers, and driver options are rejected.
+For compose-publish releases, `deployments_write` method `publish` supports safe named Docker Compose volumes when each service mount references a top-level named volume declaration. SAM creates missing provider-backed block volumes for those declarations and rewrites service mounts to SAM-managed volume roots before deployment apply. Host bind mounts, Docker socket mounts, anonymous volumes, undeclared named volumes, `volumes_from`, `tmpfs`, external volumes, custom volume drivers, and driver options are rejected.
 
 ```yaml
 services:
@@ -84,6 +155,13 @@ volumes:
     x-sam-size-hint-mb: 2048
 ```
 
+Deployment machines run a restricted subset of Compose. Settings that would give a container power
+over the machine itself, such as `privileged`, `cap_add`, `network_mode`, `devices`, and
+`use_api_socket` (access to the Docker Engine API), aren't allowed: a release that includes one is
+refused with a message naming the setting, and `deployments_write` method `publish` removes them from the services it
+publishes. A deployment machine can host several of your environments, so this keeps one app from
+reaching another.
+
 Use `mode: host` for service ports such as databases, queues, and workers that should be reachable only inside the deployed Compose stack/private network. Public web/API entrypoints should use normal `ports:` entries or explicit public `x-sam-routes`.
 
 If an app needs to know its public hostname before it starts, agents should preview routes before publishing and then write the returned URLs into deployment configuration. Common examples are Django `ALLOWED_HOSTS` / CSRF trusted origins, CORS origins, OAuth callback URLs, webhook callback URLs, and canonical app URL variables.
@@ -92,7 +170,7 @@ If an app needs to know its public hostname before it starts, agents should prev
 
 Provider-backed block volumes give a deployment environment durable storage that survives container restarts and the stop/start lifecycle. They are real cloud block volumes created through the deployment environment's provider and attached to the deployment node.
 
-- Volumes are created automatically from safe Compose named volume declarations during `build_and_publish`, and can also be created, viewed, attached, detached, and deleted from the deployment environment's **Volumes** tab.
+- Volumes are created automatically from safe Compose named volume declarations during `deployments_write` method `publish`. They can also be created, viewed, and deleted in the environment's **Saved data** section, and attached or detached by hand under **Behind the scenes**.
 - Each volume is mounted at a SAM-managed path derived from the environment id, and the deployment apply payload tells the node which provider volume to mount where.
 - All volumes in one environment must share the same provider **and** the same location. A single VM can only attach volumes that live in its own provider/location, so an environment that mixes providers or regions is rejected before a node is provisioned.
 - When an environment has volumes (or is marked as requiring volumes), provisioning is pinned to the volumes' provider and location so the node lands where the volumes can attach.
@@ -100,19 +178,49 @@ Provider-backed block volumes give a deployment environment durable storage that
 
 ## Stop and start lifecycle
 
-A deployment environment can be stopped to release its compute while preserving its volumes and release history, then started again later.
+A deployment environment can be stopped to release its compute while preserving its volumes and release history, then started again later. In the app this is **Pause** and **Start** at the bottom of the environment page.
 
-- **Stop** tears down the running Compose stack on the node, detaches the environment's provider volumes (the volume data is preserved), clears the node placement, and deletes the node if no other environment is using it. Stop fails with a `409` if the environment is already stopping or if the live teardown on the node fails, so a stop never silently strands a half-torn-down environment.
+- **Stop** tears down the running Compose stack on the node, detaches the environment's provider volumes (the volume data is preserved), clears the node placement, and deletes the node if no other environment is using it. Stop returns `409` while a recent stop is in progress, or if live teardown, volume detachment, or managed node deletion fails. Failed node deletion keeps the placement linked and displays the stop error; retrying Pause resumes cleanup. Scheduled recovery also retries interrupted stops and abandoned deployment teardown with bounded requests and backoff. The environment becomes stopped only after its cleanup succeeds; a shared node continues serving other environments.
 - **Start** re-provisions or selects a deployment node, reattaches the environment's volumes, and lets the node's heartbeat reapply the latest release. If the environment requires volumes but no volume records exist, start fails with a `409` rather than booting against empty storage.
 - Volume-requiring environments only receive a deployment payload once the node has reported its provider instance id. Until then the deploy-release callback returns `422` and the node retries, which prevents a volume-backed app from ever starting against ephemeral container storage.
 
-From the user's perspective, **Stop** is the safe way to tear down compute without deleting the deployment environment. Use it when a preview app is idle but you may need its latest release, variables, secrets, domains, or volumes again. Use destructive delete controls only when the environment and its managed resources are no longer needed.
+From the user's perspective, **Pause** (stop) is the safe way to tear down compute without deleting the deployment environment. Use it when a preview app is idle but you may need its latest release, variables, secrets, domains, or volumes again. Use destructive delete controls only when the environment and its managed resources are no longer needed.
+
+### If pausing doesn't finish
+
+When SAM can't finish a pause (most often because the cloud provider didn't delete the server), the
+environment says **Pause didn't finish**: SAM stopped partway, so the app may still be running. A
+**Pausing didn't finish** problem appears below it. The environment stays linked to its server, so nothing
+is forgotten.
+
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/deployment-pause-failed-mobile.png" />
+  <img src="/images/docs/deployment-pause-failed.png" alt="The load-test environment page. Under its name, in red: Pause didn't finish. SAM stopped partway, so the app may still be running. Under Needs your attention, a problem card reads Pausing didn't finish: The app may still be running, and its disks may still be attached. Pause again to finish. It has Show the error, Pause again and See the server. A second card says the server hasn't checked in for 14 minutes." loading="lazy" />
+</picture>
+
+1. Select **Pause again**, then **Pause** in the dialog that opens. SAM picks up the cleanup where it
+   stopped; it also retries on its own from time to time.
+2. If it keeps failing, select **Show the error** to see why. **See the server** opens **Behind the
+   scenes** on the same page; select the server's name there to open its node page. If SAM can't
+   delete the node and you have already deleted the server in your provider's console, use **I
+   already deleted this server** on the node page (see
+   [SAM can't delete a node](/docs/guides/session-troubleshooting/#sam-cant-delete-a-node)). That
+   removes the node for every environment on it, so check what else it hosts first.
+
+## Recovering from a failed release
+
+If a release cannot be placed (for example, the cloud provider has no room for that server type in that region right now), the environment page says SAM couldn't get a server for that version, with the reason under **Show the error**. Either of these recovers it:
+
+- **Ask an agent to deploy again** (the button on that problem, or ask in any chat). The new version gets a server, and the page goes from **Down** to **Deploying vN**, then **Live**, clearing the old error. If there's still no server, the problem comes back with the new reason. (Since 22 October 2026, or v2026.10.23 on a self-hosted instance; before that, every later version stayed stuck behind the old error.)
+- **Pause, then Start.** Start finds a server for the latest version and shows **Starting** until the server reports it's running.
+
+If SAM has to give up before any server is created, for example because the person who deployed lost access to the project, the version is marked failed and **Show the error** reads "Deployment node placement stopped before a server was created: &lt;reason&gt;. Deploy again to retry." A placement replaced by a newer release, or by a Stop or delete of the environment, is left to that newer release or action instead.
 
 ## Custom domains
 
 Each public route gets a SAM-owned hostname such as
 `r1-web-3000-env.apps.example.com`. You can attach your own subdomain to that
-route from the deployment environment's **Domains** tab. SAM shows the exact
+route from the **Addresses** section of the environment page. SAM shows the exact
 CNAME target to create, verifies the hostname through DNS-over-HTTPS, and — once
 verified — activates the custom hostname on the running app **without a full
 redeploy**.
@@ -120,38 +228,39 @@ redeploy**.
 Custom domains attach to an already-published public route, so publish a release
 with at least one public route first. Then:
 
-1. Open the deployment environment and go to the **Domains** tab.
-2. Pick the public route you want to expose and add a concrete subdomain such as
-   `app.example.com` (apex/root domains are not supported in this version).
-3. Create a **CNAME** record from your subdomain to the SAM route hostname shown
-   in the panel. If your DNS provider puts a proxy or CDN in front of records
-   (for example Cloudflare's orange-cloud toggle), turn it off for this record so
+1. Open the deployment environment and choose **Your domain** under **Addresses**.
+2. Pick the part of the app (public route) you want to expose and enter a
+   concrete subdomain such as `app.example.com` (apex/root domains are not
+   supported in this version).
+3. Create the **CNAME** record shown, from your subdomain to the SAM route
+   hostname. If your DNS provider puts a proxy or CDN in front of records (for
+   example Cloudflare's orange-cloud toggle), turn it off for this record so
    verification can see the real target.
-4. Click **Verify** after the DNS record propagates. Verification succeeds when
-   the custom hostname resolves to the SAM route hostname, or to the deployment
-   node IP for DNS providers that flatten CNAMEs to A records.
+4. Select **Add domain and check DNS**. If the record hasn't propagated yet, the
+   domain waits for DNS; use **Check again** once it has. Verification succeeds
+   when the custom hostname resolves to the SAM route hostname, or to the
+   deployment node IP for DNS providers that flatten CNAMEs to A records.
 
 That's it — you do not need to republish the release. A successful verification
 queues a **route-only** activation to the deployment node, which reloads its
 router and provisions TLS for the new hostname automatically.
 
-![The deployment Domains tab: an Add domain form showing the exact CNAME record to create (type CNAME, the subdomain as the name, the SAM route hostname as the value, proxy set to DNS only) with a Copy CNAME value button, the environment's public routes, and a saved custom domain in the Pending DNS state.](/images/docs/deployment-custom-domains.png)
+![The "Use your own domain" sheet: step 1 picks the part of the app, step 2 is the subdomain, and step 3 shows the exact DNS record to add (type CNAME, the subdomain as the name, the SAM route hostname it points to) with Copy buttons, a note to turn off Cloudflare's proxy for the record, and an "Add domain and check DNS" button.](/images/docs/deployment-custom-domains.png)
 
 ### Domain states
 
-The Domains tab shows a live status badge for each domain so you can tell where
-it is in the lifecycle:
+The **Addresses** section shows each domain's state in words, and shows nothing
+extra while a domain works:
 
-| State                    | Meaning                                                                |
-| ------------------------ | ---------------------------------------------------------------------- |
-| **Pending DNS**          | Waiting for DNS to resolve to the route target before activation.      |
-| **Activating**           | DNS is verified and route activation is queued to the node.            |
-| **Active**               | The node is serving the hostname with TLS.                             |
-| **DNS recheck required** | The underlying route target changed; re-verify the record.             |
-| **Route missing**        | The route this domain was attached to no longer exists in the release. |
-| **DNS mismatch**         | The record does not point at the expected route target.                |
-| **Inactive**             | The environment is stopped; the saved domain is preserved.             |
-| **Deactivating**         | The domain is being removed and the node is dropping the route.        |
+| State                | Meaning                                                                                     |
+| -------------------- | ------------------------------------------------------------------------------------------- |
+| **Waiting for DNS**  | The record isn't there yet, or has never resolved to the route target. Use **Check again**. |
+| **Turning on**       | DNS is verified and route activation is queued to the node.                                 |
+| _(no label)_         | The node is serving the hostname with TLS.                                                  |
+| **Points elsewhere** | The domain worked before, but its record or the route target changed. Re-check the record.  |
+| **Not attached**     | The route this domain was attached to no longer exists in the latest release.               |
+| **Paused**           | The environment is paused; the saved domain is preserved.                                   |
+| **Removing**         | The domain is being removed and the node is dropping the route.                             |
 
 Saved domains stay visible even when the environment is **stopped** or in an
 error state, so a stop/start cycle does not lose your DNS setup. Removing a
@@ -161,3 +270,39 @@ the route.
 SAM does not create or manage your DNS record. Root/apex domains, wildcard
 domains, TXT-record ownership challenges, and on-demand TLS authorization are out
 of scope for this version.
+
+### Publish-agent rollout compatibility
+
+Updated VM agents include `publishJobId` and `attempt` in release callbacks. SAM accepts a release only while its job is non-terminal, the attempt matches, and no release is linked. Duplicate, canceled, expired, or stale submissions return HTTP 409 and create no release. Terminal jobs reject later event updates. During rollout, older agents that omit `publishJobId` retain the legacy release behavior without this fence; older agents without the cancel endpoint may continue building locally after the control plane marks their job canceled. Refresh VM agents to obtain the full guarantee.
+
+## Portable build contexts
+
+The authenticated node system-info response includes optional `publishExecution`
+diagnostics on updated agents: a process incarnation and monotonically increasing
+Compose-build and Docker-save execution-attempt counts. Failed attempts count too.
+These snapshots are uncached. To verify remote execution, compare snapshots from
+the same source node, agent version, and process incarnation before and after its
+publish job. An unchanged count confirms that the vm-agent publish path attempted
+no source build or save during that interval. A restart, missing fields, or an
+increased count cannot establish that proof. These counters do not observe other
+host processes; older agents omit them and remain compatible.
+
+Cloudflare builds use a portable context collected from the calling session. This applies to application deployments; deployment targets remain VMs. It does not build SAM installation or self-hosting releases.
+
+Cloudflare build failures currently show a generic error without the failing Dockerfile step or detailed build output. Adding a bounded, redacted build-output tail is tracked in SAM idea `01M7HDK9DV8G2JPBK1KTVNY6JN` as the first follow-up after this executor ships. VM sessions using the default node executor retain their existing build error details.
+
+The collector uses Compose discovery, overrides, and server-supplied non-secret interpolation config. It creates one `tar.zst` bundle with the original relative layout of local build contexts, Dockerfiles, and Compose files. Docker ignore filtering is conservative: if either the context `.dockerignore` or the Dockerfile-specific ignore rules include a file, the bundle retains it. Runtime `env_file`, Compose secret files, and interpolation dotenv files become empty placeholders, including filesystem aliases. Ordinary Compose config files retain their contents. Supply build interpolation values through SAM deployment config; runtime secrets cannot be used in image/build fields.
+
+Remote/Git contexts, non-local additional contexts, inputs outside the selected working directory, escaping symlinks, and over-limit bundles fail before upload. VM collection reads the devcontainer volume; Instant collection reads `/workspaces` directly without Docker. The source directory is held open from its trusted runtime base, and discovery, configuration, ignore rules, traversal and payload reads stay relative to that directory handle so workspace path changes cannot redirect collection outside it. Legacy agents return an unsupported-capability result and require a workspace restart to obtain the current agent.
+
+The API signs short-lived PUTs for server-derived `compose-build-contexts/{project}/{environment}/{job}/{attempt}.tar.zst` keys. Completion checks R2 HEAD size and the recorded SHA-256 metadata, then atomically records `context_ready` and timing history. This records the source's digest; it does not independently hash the object on the API Worker. The builder independently checks the downloaded byte count and SHA-256 before safe extraction. Context completion queues the job for atomic admission (at most two builds per project and six across the installation, also bounded by the deployed class capacity). An installation admin can temporarily enable `deployments.buildContextCollectionMode=shadow` to verify collection through the normal publish call. The default is `off`. Shadow collection is accepted asynchronously in a separate internal job, cannot submit or link a release, and is hidden from publish status, project events, and publish failure counts. Node builds do not wait for shadow collection or depend on its success. Shadow mode applies only to the node execution path. Successful probes record `context_ready` and then terminalize as `succeeded`; stalled probes use the existing deadline sweep.
+
+Bundles for active jobs are retained. Abandoned and terminal bundles expire through the existing daily Compose artifact cleanup (48 hours by default). After a builder releases its reservation through confirmed stop or the deadline-plus-grace escape, the original source-node delete cascade can remove the job; its orphaned bundle becomes eligible after retention.
+
+Cloudflare builders start cold with no shared layer cache. The initial instance is `standard-4` (4 vCPU, 12 GiB memory, 20 GB ephemeral disk), as measured in the deployment-build spike. Context, pulled images, build layers and exported archives share that disk. For larger workloads, use a VM session with the node executor, or reduce the context and image sizes. Builds target Linux amd64. An independent hard deadline attempts to stop the builder even if the control plane cannot read the job. If shutdown cannot be confirmed, the deadline-plus-grace escape below bounds reservation retention.
+
+Builds have unrestricted internet access, like VM workspaces, so Dockerfile `RUN` steps can install packages from public repositories. Context downloads and image uploads use direct, short-lived presigned URLs. Arbitrary build steps run as root with host networking inside a dedicated microVM. The microVM receives only one job's callback authority and object transfers; SAM does not supply platform credentials or runtime secret values. See the [build trust model](/docs/architecture/security/#application-build-executor).
+
+A running Cloudflare build normally retains its capacity reservation until its builder stops, including after cancellation. Deleting its source node, deployment environment, or project returns a conflict until that reservation is released. Sleeping the source remains supported after context acceptance.
+
+If a Cloudflare builder cannot confirm shutdown, deletion may briefly report that a build is still stopping. After its build deadline plus the shutdown grace period (five minutes by default), SAM releases the reservation and records an alert. An unfinished job becomes `unknown`. This lets deletion proceed; it does not confirm that the builder stopped, and platform capacity may remain occupied until Cloudflare reclaims it. Operators can tune `deployments.builderReservationGraceMs` in Admin settings.

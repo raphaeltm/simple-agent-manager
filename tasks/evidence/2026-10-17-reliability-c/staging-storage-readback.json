@@ -1,0 +1,36 @@
+{
+  "environment": "staging",
+  "worker": "sam-api-staging",
+  "expectedSha": "7939ff8b9c247ae0686f70b3d7ba52955c763ae9",
+  "expectedVersion": "de2d30f3-b3ee-4c21-8ed0-b632bb1d101b",
+  "outcome": "existing",
+  "record": {
+    "publishedAt": 1792240653,
+    "rateCutoverAt": 1792240920,
+    "bootLogCutoverAt": 1792240920,
+    "windowSeconds": 60
+  },
+  "database": "1cfaf5d4-8226-47d8-bf26-6ba727ce5718",
+  "windowSeconds": 60,
+  "storageEvidence": {
+    "workspaceId": "01M54X8H4YHWWGBQGTW2Q4S5V3",
+    "rateIdentity": "01M54XTQYM87Z6AE4P8SCPA07X",
+    "logCount": 18,
+    "oldest": "2026-10-17T13:01:33Z",
+    "newest": "2026-10-17T13:01:48Z",
+    "logState": [
+      {
+        "expiresAt": 1792243909105,
+        "allowLegacy": 0
+      }
+    ],
+    "counters": [
+      {
+        "windowStart": 1792243200,
+        "resetAt": 1792243260,
+        "count": 4
+      }
+    ],
+    "queryRowsWritten": 0
+  }
+}

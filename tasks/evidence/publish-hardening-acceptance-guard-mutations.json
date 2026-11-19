@@ -1,0 +1,22 @@
+{
+  "guards": [
+    {
+      "guard": "failed-job-cancel-retry",
+      "mutation": "remove guard",
+      "exitCode": 1,
+      "intendedTestFailed": true,
+      "test": "observed failed"
+    },
+    {
+      "guard": "observed-acceptance-status",
+      "mutation": "remove guard",
+      "exitCode": 1,
+      "intendedTestFailed": true,
+      "test": "observed canceled"
+    }
+  ],
+  "restoredSuite": {
+    "passed": true,
+    "tests": 10
+  }
+}

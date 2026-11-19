@@ -77,6 +77,11 @@ export interface CapacitySourceIdentity {
   /** Stable semantic source authority. This is not the refresh-order source_generation fence. */
   authorityGeneration?: number;
   status: CapacityPoolStatus;
+  /**
+   * The name a person gave this connection (composable credentials), for display only. Absent
+   * on placement reads and for keys without a name. Never use it for identity.
+   */
+  label?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -97,6 +102,18 @@ export interface CapacityPool {
   exhaustionPolicy: CapacityExhaustionPolicy;
   /** Per-user managed workspace-node ceiling. Spread provisions until this limit, then packs. */
   maxNodes?: number;
+  /**
+   * Capacity source ids in provider-preference order, most preferred first. New VMs are planned
+   * from earlier sources first; a running node with room is reused regardless. Null or absent
+   * means every source is equal (no order).
+   */
+  sourceOrder?: string[] | null;
+  /**
+   * Capacity source ids a person switched off in this pool. Their picks are kept but never
+   * placed: no new VMs and no reuse of their running nodes. Absent or empty means every
+   * source is on. See `isCapacitySourceExcluded`.
+   */
+  excludedSourceIds?: string[];
   lastReconciledAt?: string | null;
   migrationVersion?: string | null;
   migrationState?: string | null;
@@ -230,6 +247,12 @@ export interface SafeCapacityPoolPlacementSettingsSummary {
     legacyWorkloadMapping: Record<VMSize, Required<ResourceRequirements>>;
     platformDefaults: Required<ResourceRequirements>;
   };
+  /**
+   * Memory (MB) each node keeps for its host before placing any workspace, as this installation
+   * resolves it (`resolveEffectiveNodeHostMemoryReserveMb`). Placement subtracts it from every
+   * machine. Absent from older servers.
+   */
+  hostMemoryReserveMb?: number;
 }
 
 // =============================================================================
@@ -267,6 +290,10 @@ export interface SafeEffectiveCapacityPoolSummary {
 }
 
 export interface DefaultCapacityPoolSummary {
+  /** Actual durable refresh work; false after failure or its first-attempt deadline. */
+  catalogRefreshPending?: boolean;
+  /** A completed publication or trusted pre-upgrade catalog remains usable during refresh. */
+  catalogPublished?: boolean;
   pool: CapacityPool;
   sources: CapacitySourceIdentity[];
   candidates: CapacityPoolCandidate[];
@@ -305,10 +332,31 @@ export interface DefaultCapacityPoolCandidateCatalogAddition {
   providerInstanceSku?: string | null;
 }
 
+/** Most capacity sources a pool's provider order may list. */
+export const MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH = 32;
+
 export interface DefaultCapacityPoolUpdateRequest {
   policy?: DefaultCapacityPoolPolicyUpdate;
   candidates?: DefaultCapacityPoolCandidateStatusUpdate[];
   catalogAdditions?: DefaultCapacityPoolCandidateCatalogAddition[];
+  /**
+   * Replace the pool's provider order with these capacity source ids, most preferred first.
+   * `null` or `[]` clears it, making every source equal again.
+   */
+  sourceOrder?: string[] | null;
+  /**
+   * Replace the set of switched-off capacity sources (accounts). `null` or `[]` switches every
+   * account on. Activating a machine of a switched-off account switches that account on.
+   */
+  excludedSourceIds?: string[] | null;
+}
+
+/** True when a person switched this capacity source off in this pool. */
+export function isCapacitySourceExcluded(
+  pool: Pick<CapacityPool, 'excludedSourceIds'>,
+  sourceId: string
+): boolean {
+  return pool.excludedSourceIds?.includes(sourceId) ?? false;
 }
 
 export interface ProjectDefaultCapacityPoolsResponse {

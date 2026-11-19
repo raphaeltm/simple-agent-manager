@@ -5,6 +5,8 @@
  * 800-line hard file-size limit (rule 18).
  */
 
+import { formatPolicyDirectiveLine } from '@simple-agent-manager/shared';
+
 import type { KnowledgeEntityIndexEntry } from '../../durable-objects/project-data/knowledge';
 
 // ─── Policy Formatting Helpers ──────────────────────────────────────────────
@@ -20,24 +22,11 @@ export interface PolicyEntry {
 }
 
 /**
- * Render a policy's shelf life as a short inline annotation.
- *
- * A policy that is going to lapse must not read like a permanent gate, so the
- * agent is told when it expires. Date-only (no time) keeps the annotation to a
- * few tokens — this renders once per policy in every session.
- */
-function formatPolicyLifecycle(entry: PolicyEntry): string {
-  if (entry.expiresAt === null || entry.expiresAt === undefined) return '';
-  const date = new Date(entry.expiresAt).toISOString().slice(0, 10);
-  return entry.scope === 'task' ? ` (task-scoped, expires ${date})` : ` (expires ${date})`;
-}
-
-/**
  * Format active policies into a readable text block grouped by category.
  * Returns null if there are no policies.
  *
- * Each policy carries its full id inline so agents can call `update_policy` /
- * `remove_policy` without a separate lookup. This is the only place the id is exposed —
+ * Each policy carries its full id inline so agents can call `policies_write` method `update` /
+ * `policies_write` method `remove` without a separate lookup. This is the only place the id is exposed —
  * the former `policyContext` structured array was removed as duplication.
  *
  * Output looks like:
@@ -53,22 +42,14 @@ export function formatPolicyDirectives(entries: PolicyEntry[]): string | null {
   if (entries.length === 0) return null;
 
   // Group by category
-  const grouped = new Map<
-    string,
-    { id: string; title: string; content: string; lifecycle: string }[]
-  >();
+  const grouped = new Map<string, PolicyEntry[]>();
   for (const entry of entries) {
     let group = grouped.get(entry.category);
     if (!group) {
       group = [];
       grouped.set(entry.category, group);
     }
-    group.push({
-      id: entry.id,
-      title: entry.title,
-      content: entry.content,
-      lifecycle: formatPolicyLifecycle(entry),
-    });
+    group.push(entry);
   }
 
   // Category display order and labels
@@ -84,11 +65,9 @@ export function formatPolicyDirectives(entries: PolicyEntry[]): string | null {
     const label = categoryLabels[category] || category;
     lines.push(`### ${label}`);
     for (const item of items) {
-      // The id MUST be rendered in full — `update_policy` / `remove_policy` resolve it with
-      // `WHERE id = ?` (exact match), so an abbreviated id would not address the row.
-      // The lifecycle annotation sits between the title and the id so a temporary policy
-      // reads as temporary at a glance rather than as a permanent gate.
-      lines.push(`- **${item.title}**${item.lifecycle} (id: ${item.id}): ${item.content}`);
+      // One renderer, shared with the web Policies tab's size readout (see the shared
+      // module for why the id is rendered in full).
+      lines.push(formatPolicyDirectiveLine(item));
     }
     lines.push('');
   }
@@ -109,8 +88,8 @@ export function buildPolicyInstructions(hasPolicies: boolean, isConversation: bo
         'You MUST follow all rules and constraints. Preferences are softer guidance — follow them unless you have a good reason not to.'
     );
     instructions.push(
-      'If a user statement contradicts an existing policy, use `update_policy` to update it. ' +
-        'If a policy is no longer relevant, use `remove_policy` to deactivate it. ' +
+      'If a user statement contradicts an existing policy, use `policies_write` method `update` to update it. ' +
+        'If a policy is no longer relevant, use `policies_write` method `remove` to deactivate it. ' +
         'Each policy in policyDirectives is tagged with its `policyId` as "(id: ...)" — pass that id exactly as shown. ' +
         'A policy annotated "(expires ...)" is temporary — treat it as current guidance, not a permanent gate.'
     );
@@ -119,14 +98,14 @@ export function buildPolicyInstructions(hasPolicies: boolean, isConversation: bo
   if (isConversation) {
     instructions.push(
       'When a user states a rule, constraint, delegation preference, or soft preference, ' +
-        'save it as a project policy via `add_policy` so it applies to all future agents in this project.'
+        'save it as a project policy via `policies_write` method `add` so it applies to all future agents in this project.'
     );
     instructions.push(
       'Before saving a policy, decide whether it is standing or one-shot. If it is tied to a specific workflow, ' +
         'wave, migration, or dated piece of work — anything that will be finished later — pass `scope: "task"` and an ' +
-        '`expiresAt` (epoch ms) to `add_policy` so it stops being injected once that work is done. Only genuinely ' +
-        'permanent guidance should be saved with the default `scope: "always"`. Policies without an expiry are loaded ' +
-        'into every future session in this project forever, so an un-expiring one-shot policy is a real cost.'
+        '`expiresAt` (epoch ms) to `policies_write` method `add` so it stops being injected once that work is done. Only genuinely ' +
+        'permanent guidance should be saved with the default `scope: "always"`. A pinned policy without an expiry (every new ' +
+        'policy is pinned) is loaded into every future session in this project forever, so an un-expiring one-shot policy is a real cost.'
     );
   }
 
@@ -192,7 +171,9 @@ export function formatKnowledgeDirectives(entries: KnowledgeEntry[]): string | n
 export function formatKnowledgeEntityIndex(
   entityIndex: KnowledgeEntityIndexEntry[],
   injected: KnowledgeEntry[],
-  totalEntities: number
+  totalEntities: number,
+  /** Observations the size budget left out of the ranked block (instruction-budget.ts). */
+  droppedForBudget = 0
 ): string | null {
   if (entityIndex.length === 0) return null;
 
@@ -211,9 +192,12 @@ export function formatKnowledgeEntityIndex(
     `\n${heading}\n` +
       'The block above shows only the highest-ranked observations, capped per entity — it is NOT everything ' +
       `this project knows.${notInjected > 0 ? ` ${notInjected} of the entities listed here have no observations shown above at all.` : ''} ` +
-      `${truncated ? `A further ${totalEntities - entityIndex.length} entities are not listed; \`search_knowledge\` still reaches them. ` : ''}` +
+      `${truncated ? `A further ${totalEntities - entityIndex.length} entities are not listed; \`knowledge_read\` method \`search\` still reaches them. ` : ''}` +
+      // Only rendered when the size budget actually dropped something, so an unbudgeted
+      // payload is byte-identical to the pre-budget one.
+      `${droppedForBudget > 0 ? `To fit the size budget, ${droppedForBudget} lower-ranked observations were left out of the block above. ` : ''}` +
       'Each entry below is `EntityName (type, N observations)`. To read anything not shown in full, call ' +
-      '`search_knowledge` with the entity name, or `get_relevant_knowledge` with a description of what you are about to do. ' +
+      '`knowledge_read` method `search` with the entity name, or `knowledge_read` method `relevant` with a description of what you are about to do. ' +
       'Do this before decisions that touch one of these topics.\n',
     entityIndex.map((e) => `${e.name} (${e.entityType}, ${e.observationCount})`).join(', '),
   ].join('\n');
@@ -237,7 +221,7 @@ export function buildKnowledgeInstructions(
 
   // When to SAVE — concrete trigger patterns
   instructions.push(
-    'Save to knowledge graph (via `add_knowledge`) when ANY of these happen: ' +
+    'Save to knowledge graph (via `knowledge_write` method `add`) when ANY of these happen: ' +
       '(1) User corrects you or says "don\'t do X" → sourceType "explicit", confidence 0.9+. ' +
       '(2) User states a preference ("I prefer...", "always use...", "never...") → sourceType "explicit", confidence 0.9+. ' +
       '(3) User describes their role, expertise, or background → entityType "expertise". ' +
@@ -247,7 +231,7 @@ export function buildKnowledgeInstructions(
 
   // When to READ — decision-point retrieval (Layer 2)
   instructions.push(
-    'Search knowledge (via `search_knowledge`) BEFORE making key decisions: ' +
+    'Search knowledge (via `knowledge_read` method `search`) BEFORE making key decisions: ' +
       'before writing content/blogs → search "ContentStyle"; ' +
       'before choosing libraries/tools → search "CodeQuality"; ' +
       'before UI layout decisions → search "User" and "mobile"; ' +
@@ -268,9 +252,9 @@ export function buildKnowledgeInstructions(
       'The knowledgeDirectives field above contains stored knowledge from previous sessions. Apply these preferences and facts to your work. ' +
         'It is RANKED (by confidence and how recently each observation was confirmed) and CAPPED per entity, so it is a partial view, not the whole store. ' +
         'Its trailing knowledge-index section lists entities with their observation counts, and states in its own heading whether that list is itself complete or truncated — do not infer completeness from this sentence. ' +
-        'Use `search_knowledge` or `get_relevant_knowledge` to pull anything listed there but not shown in full, and to reach entities the index itself had to drop. ' +
-        'If any observation seems outdated, call `update_knowledge` or `remove_knowledge`. ' +
-        'If you verify an observation is still accurate, call `confirm_knowledge` to keep it fresh — confirming also raises its rank for future sessions.'
+        'Use `knowledge_read` method `search` or `knowledge_read` method `relevant` to pull anything listed there but not shown in full, and to reach entities the index itself had to drop. ' +
+        'If any observation seems outdated, call `knowledge_write` method `update` or `knowledge_write` method `remove`. ' +
+        'If you verify an observation is still accurate, call `knowledge_write` method `confirm` to keep it fresh — confirming also raises its rank for future sessions.'
     );
   } else {
     // Empty knowledge graph — bootstrapping prompt
@@ -278,7 +262,7 @@ export function buildKnowledgeInstructions(
       'This project has no stored knowledge yet. ' +
         'Actively look for user preferences, project conventions, and important context to store. ' +
         'If this is a conversation, ask the user about their preferences when relevant. ' +
-        'You can also search past conversations (via `search_messages`) for user preferences using queries like "prefer", "don\'t want", "I like", "always" to seed the knowledge graph.'
+        'You can also search past conversations (via `sessions_read` method `search`) for user preferences using queries like "prefer", "don\'t want", "I like", "always" to seed the knowledge graph.'
     );
   }
 

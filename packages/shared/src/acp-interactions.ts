@@ -36,6 +36,11 @@ export const ACP_RUNTIME_ANSWER_STATUS_VALUES = [
   'conflict',
 ] as const;
 
+/**
+ * Creating reviewed permission requests is off until a deployment opts in after verifying its agent
+ * runtimes are compatible. Pending requests stay answerable while creation is off. Forms and URL
+ * elicitations have their own opt-in switches below.
+ */
 export const DEFAULT_ACP_INTERACTIONS_ENABLED = false;
 export const DEFAULT_ACP_INTERACTION_FORMS_ENABLED = false;
 export const DEFAULT_ACP_INTERACTION_URLS_ENABLED = false;

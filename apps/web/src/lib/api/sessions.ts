@@ -1,159 +1,51 @@
-import type { AgentProfileRuntime, TaskExecutionStep } from '@simple-agent-manager/shared';
+import type {
+  ChatMessagesListResponse,
+  ChatSessionDetailResponse,
+  ChatSessionListResponse,
+  ChatSessionStateResponse,
+} from './session-transcript-types';
+export type {
+  ChatMessageResponse,
+  ChatMessagesListResponse,
+  ChatSessionDetailResponse,
+  ChatSessionListItem,
+  ChatSessionListResponse,
+  ChatSessionResponse,
+  ChatSessionStateResponse,
+  ChatSessionTaskEmbed,
+  SessionStateSnapshot,
+  ToolSnapshotChanges,
+} from './session-transcript-types';
+import type { AgentEffort, AgentProfileRuntime } from '@simple-agent-manager/shared';
+import { CHAT_TOOL_REPLACE_CAPABILITY } from '@simple-agent-manager/shared';
 
+import { recordServerTime } from '../server-clock';
 import { request } from './client';
 
 // =============================================================================
 // Chat Sessions (Project DO)
 // =============================================================================
 
-/** Task embed shape — populated in the detail response, added via enrichment for list items. */
-export interface ChatSessionTaskEmbed {
-  triggeredBy?: string;
-  connectorClientName?: string | null;
-  id: string;
-  /** Canonical, user-safe saved placement diagnostics, including queued runs. */
-  placementExplanationJson?: string | null;
-  status?: string;
-  executionStep?: string | null;
-  terminalReason?: string | null;
-  errorMessage?: string | null;
-  outputBranch?: string | null;
-  outputPrUrl?: string | null;
-  outputSummary?: string | null;
-  finalizedAt?: string | null;
-  /** Task execution mode: 'task' (autonomous) or 'conversation' (interactive). */
-  taskMode?: 'task' | 'conversation' | null;
-  /** Agent profile name hint (human-readable label from dispatch). */
-  agentProfileHint?: string | null;
-}
-
-/** Session list item, including authoritative task outcome from D1. */
-export interface ChatSessionListItem {
-  task?: ChatSessionTaskEmbed;
-  id: string;
-  workspaceId: string | null;
-  taskId: string | null;
-  createdByUserId?: string | null;
-  createdBy?: {
-    id: string;
-    name: string | null;
-    email: string | null;
-    image: string | null;
-    avatarUrl: string | null;
-  } | null;
-  isMine?: boolean;
-  topic: string | null;
-  status: string;
-  messageCount: number;
-  startedAt: number;
-  endedAt: number | null;
-  createdAt: number;
-  /** Timestamp when the agent completed its work (null if still running or never started). */
-  agentCompletedAt?: number | null;
-  /** Timestamp of the last message in the session. */
-  lastMessageAt?: number | null;
-  /** Whether the session is idle (agent completed but session still active). */
-  isIdle?: boolean;
-  /** Whether the session has been stopped. */
-  isTerminated?: boolean;
-  /** Full workspace URL for direct access. */
-  workspaceUrl?: string | null;
-  /** Scheduled cleanup timestamp for idle sessions (from idle_cleanup_schedule). */
-  cleanupAt?: number | null;
-  /** Active agent session ID (ULID) from D1, used for ACP WebSocket routing. */
-  agentSessionId?: string | null;
-  /** Agent type from ACP session (e.g., 'claude-code', 'openai-codex'). */
-  agentType?: string | null;
-  /** Durable attention marker summary from backend (null = no active marker). */
-  attention?: {
-    markerId: string;
-    kind: string;
-    createdAt: number;
-    expiresAt: number | null;
-    reason: string | null;
-    options: string[];
-  } | null;
-}
-
-/**
- * Enriched session — extends the list item with an optional task embed.
- *
- * This is the type used by components that need to distinguish completed/failed
- * tasks from stopped sessions. The `task` field is populated either by:
- * - The detail API (`GET /api/projects/:id/sessions/:sessionId`)
- * - List API outcome, plus frontend hints from `taskInfoMap` (see SessionTreeItem)
- */
-export interface ChatSessionResponse extends ChatSessionListItem {
-  task?: ChatSessionTaskEmbed;
-}
-
-export interface ChatSessionListResponse {
-  sessions: ChatSessionListItem[];
-  total: number;
-}
-
-export interface ChatMessageResponse {
-  id: string;
-  sessionId: string;
-  role: string;
-  content: string;
-  toolMetadata: Record<string, unknown> | null;
-  createdAt: number;
-  sequence?: number | null;
-  /** "system" for SAM-injected messages the UI collapses; absent for normal messages. */
-  origin?: 'user' | 'system' | null;
-}
-
-/** Persisted session state snapshot from the DO (for catch-up on page load). */
-export interface SessionStateSnapshot {
-  activity: 'idle' | 'prompting' | 'recovering' | 'error' | 'stopped';
-  activityAt: number;
-  statusError: string | null;
-  currentPlan: Array<{ content: string; status: string }> | null;
-  planUpdatedAt: number | null;
-  promptStartedAt: number | null;
-  agentType: string | null;
-  lastStopReason: string | null;
-  runtimeWorkState: 'inactive' | 'active' | 'settling' | null;
-  runtimeWorkCount: number | null;
-  runtimeWorkSource: string | null;
-  runtimeWorkUpdatedAt: number | null;
-  runtimeWorkProgressAt: number | null;
-  recoveryStatus?: 'waking' | 'restored' | 'failed' | null;
-  /**
-   * Execution step of the replacement TaskRunner waking this session. Drives
-   * phase-level wake progress; null when no wake is in flight.
-   */
-  wakePhase?: TaskExecutionStep | null;
-}
-
-export interface ChatSessionDetailResponse {
-  session: ChatSessionResponse;
-  messages: ChatMessageResponse[];
-  hasMore: boolean;
-  state?: SessionStateSnapshot | null;
-}
-
-export interface ChatSessionStateResponse {
-  state: SessionStateSnapshot | null;
-  agentSessionId: string | null;
-  agentType: string | null;
-}
-
-export interface ChatMessagesListResponse {
-  messages: ChatMessageResponse[];
-  hasMore: boolean;
-}
-
 export async function listChatSessions(
   projectId: string,
-  params: { status?: string; limit?: number; offset?: number; scope?: 'my' | 'all' } = {}
+  params: {
+    status?: string;
+    limit?: number;
+    offset?: number;
+    scope?: 'my' | 'all';
+    /**
+     * Also return every awake and sleeping session in scope that the newest page left out
+     * (first page, no status filter). The chat sidebar groups by state, not by age.
+     */
+    includeLive?: boolean;
+  } = {}
 ): Promise<ChatSessionListResponse> {
   const searchParams = new URLSearchParams();
   if (params.status) searchParams.set('status', params.status);
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
   if (params.offset !== undefined) searchParams.set('offset', String(params.offset));
   if (params.scope) searchParams.set('scope', params.scope);
+  if (params.includeLive) searchParams.set('include', 'live');
 
   const qs = searchParams.toString();
   const endpoint = qs
@@ -228,9 +120,18 @@ export async function getAllChats(
 export async function getChatSession(
   projectId: string,
   sessionId: string,
-  params: { limit?: number; before?: string; after?: string; signal?: AbortSignal } = {}
+  params: {
+    limit?: number;
+    before?: string;
+    after?: string;
+    afterToolRevision?: number;
+    signal?: AbortSignal;
+  } = {}
 ): Promise<ChatSessionDetailResponse> {
   const searchParams = new URLSearchParams();
+  searchParams.set('toolReplace', CHAT_TOOL_REPLACE_CAPABILITY);
+  if (params.afterToolRevision !== undefined)
+    searchParams.set('afterToolRevision', String(params.afterToolRevision));
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
   if (params.before !== undefined) searchParams.set('before', params.before);
   if (params.after !== undefined) searchParams.set('after', params.after);
@@ -240,10 +141,12 @@ export async function getChatSession(
     ? `/api/projects/${projectId}/sessions/${sessionId}?${qs}`
     : `/api/projects/${projectId}/sessions/${sessionId}`;
 
-  return request<ChatSessionDetailResponse>(
+  const detail = await request<ChatSessionDetailResponse>(
     endpoint,
     params.signal ? { signal: params.signal } : {}
   );
+  recordServerTime(detail.session?.access?.serverTime);
+  return detail;
 }
 
 export async function getChatSessionState(
@@ -264,6 +167,7 @@ export async function listChatMessages(
     limit?: number;
     before?: string;
     after?: string;
+    afterToolRevision?: number;
     roles?: string[];
     compact?: boolean;
     order?: 'asc' | 'desc';
@@ -271,6 +175,9 @@ export async function listChatMessages(
   } = {}
 ): Promise<ChatMessagesListResponse> {
   const searchParams = new URLSearchParams();
+  searchParams.set('toolReplace', CHAT_TOOL_REPLACE_CAPABILITY);
+  if (params.afterToolRevision !== undefined)
+    searchParams.set('afterToolRevision', String(params.afterToolRevision));
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
   if (params.before !== undefined) searchParams.set('before', params.before);
   if (params.after !== undefined) searchParams.set('after', params.after);
@@ -324,6 +231,15 @@ export interface StartInstantChatSessionRequest {
   agentProfileId?: string;
   skillId?: string;
   parentTaskId?: string;
+  /** Model for this chat only; omitted inherits the skill/profile model. */
+  model?: string;
+  /** Effort for this chat only; must be supported by the resolved agent. */
+  effort?: AgentEffort;
+  /** The caller's own account for this chat only; omitted uses the profile's account. */
+  agentConfigurationId?: string;
+  /** An open idea in this project this conversation starts from. The server links it
+   * (`discusses`) before the agent receives its first prompt. */
+  sourceIdeaId?: string;
 }
 
 export interface StartInstantChatSessionResponse {
@@ -372,33 +288,6 @@ export async function stopChatSession(
     `/api/projects/${projectId}/sessions/${sessionId}/stop`,
     {
       method: 'POST',
-    }
-  );
-}
-
-export async function resetIdleTimer(
-  projectId: string,
-  sessionId: string
-): Promise<{ cleanupAt: number }> {
-  return request<{ cleanupAt: number }>(
-    `/api/projects/${projectId}/sessions/${sessionId}/idle-reset`,
-    {
-      method: 'POST',
-    }
-  );
-}
-
-/** Send a follow-up prompt to the running agent via the REST API. */
-export async function sendFollowUpPrompt(
-  projectId: string,
-  sessionId: string,
-  content: string
-): Promise<{ status: string; sessionId?: string; message?: string }> {
-  return request<{ status: string; sessionId?: string; message?: string }>(
-    `/api/projects/${projectId}/sessions/${sessionId}/prompt`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ content }),
     }
   );
 }

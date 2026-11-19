@@ -40,7 +40,6 @@ const MOCK_PROJECT = {
   githubInstallationId: 'inst-1',
   defaultVmSize: null,
   defaultAgentType: null,
-  defaultProvider: null,
   workspaceIdleTimeoutMs: null,
   nodeIdleTimeoutMs: null,
   createdAt: '2026-01-01T00:00:00Z',
@@ -100,6 +99,7 @@ function makeSession(overrides: Partial<Record<string, unknown>> = {}) {
     isIdle: false,
     isTerminated: false,
     agentSessionId: 'acp-session-1',
+    viewerAccess: 'owner',
     agentType: 'claude-code',
     task: {
       id: 'task-1',
@@ -285,8 +285,10 @@ function respondJson(route: Route, body: unknown, status = 200) {
 }
 
 test('expired transcript, neutral label, and Fork remain usable', async ({ page }, testInfo) => {
-  page.on('pageerror', error => console.log('PAGE ERROR', error.message));
-  page.on('console', message => { if (message.type() === 'error') console.log('BROWSER ERROR', message.text()); });
+  page.on('pageerror', (error) => console.log('PAGE ERROR', error.message));
+  page.on('console', (message) => {
+    if (message.type() === 'error') console.log('BROWSER ERROR', message.text());
+  });
   const longTitle =
     'Saved workspace expired — readable transcript Ω ' + 'long conversation title '.repeat(12);
   const expiredTask = makeTask({
@@ -327,7 +329,14 @@ test('expired transcript, neutral label, and Fork remain usable', async ({ page 
     localStorage.setItem('sam-onboarding-wizard-dismissed-user-1', 'true')
   );
   await page.goto('/projects/proj-agent-1/chat/chat-session-1');
-  await expect(page.getByText('Expired', { exact: true }).first()).toBeVisible();
+  if ((page.viewportSize()?.width ?? 1280) <= 767) {
+    // The one-row phone header shows the state as a dot; its name is on the title button.
+    await expect(
+      page.getByRole('button', { name: /\. Expired\. Show session info$/ })
+    ).toBeVisible();
+  } else {
+    await expect(page.getByText('Expired', { exact: true }).first()).toBeVisible();
+  }
   await expect(
     page.getByText('Your earlier work remains readable in this transcript.')
   ).toBeVisible();
@@ -339,7 +348,9 @@ test('expired transcript, neutral label, and Fork remain usable', async ({ page 
   await page.screenshot({
     path: `../../.codex/tmp/playwright-screenshots/expired-header-${suffix}.png`,
   });
-  await page.getByRole('button', { name: 'Fork conversation', exact: true }).click();
+  await expect(page.getByPlaceholder('Write a prompt to fork this archived chat...')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Fork', exact: true })).toBeDisabled();
+  await page.getByTestId('session-tool-fork').first().click();
   await expect(page.getByText(/Forking from:/)).toBeVisible();
   // No agent is configured in this fixture, so the composer shows its add-an-agent placeholder.
   await expect(page.getByRole('combobox')).toHaveValue(/Parent session ID: chat-session-1/);
@@ -350,6 +361,11 @@ test('expired transcript, neutral label, and Fork remain usable', async ({ page 
     await openList.click();
   }
   await expect(page.getByPlaceholder('Search chats...')).toBeVisible();
+  // Expired chats are History, folded by default; the open one stays in view.
+  const history = page.getByRole('button', { name: /^History/ });
+  await expect(history).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByText('Older conversation 1', { exact: true })).toHaveCount(0);
+  await history.click();
   await expect(page.getByText('Older conversation 1', { exact: true })).toBeVisible();
   await expect(page.getByText('Expired', { exact: true }).first()).toBeVisible();
   await page.screenshot({

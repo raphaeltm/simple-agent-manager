@@ -1,10 +1,17 @@
+import {
+  createAttentionMarker,
+  resolveAttentionMarkerById,
+} from '@simple-agent-manager/project-data/internal/do/attention';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import {
+  SESSION_SUMMARY_DELTA_SQL,
+  syncSessionSummariesToD1,
+} from '@simple-agent-manager/project-data/internal/do/session-summary-sync';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { runMigrations } from '../../../src/durable-objects/migrations';
-import { syncSessionSummariesToD1 } from '../../../src/durable-objects/project-data/session-summary-sync';
-import type { Env } from '../../../src/durable-objects/project-data/types';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import { createSqlStorage } from './sql-storage-test-utils';
 
@@ -102,6 +109,91 @@ describe('ProjectData session summary sync', () => {
     } finally {
       source.db.close();
       d1.db.close();
+    }
+  });
+
+  it('copies a new or answered question to the index without a new message', async () => {
+    const source = makeDoSql();
+    const d1 = makeD1Env();
+    try {
+      source.sql.exec(
+        `INSERT INTO chat_sessions
+           (id, workspace_id, created_by_user_id, topic, status, message_count,
+            started_at, created_at, updated_at)
+         VALUES ('session-question', 'workspace-sync', 'user-sync', 'Quiet chat', 'active', 1,
+                 1000, 1000, 1000)`
+      );
+      const attention = () =>
+        d1.db
+          .prepare('SELECT attention_json FROM session_summaries WHERE id = ?')
+          .get('session-question') as { attention_json: string | null };
+
+      await syncSessionSummariesToD1(source.sql, d1.env, 'project-sync');
+      await syncSessionSummariesToD1(source.sql, d1.env, 'project-sync');
+      expect(attention().attention_json).toBeNull();
+      expect(d1.db.prepare('SELECT complete FROM session_index_coverage').get()).toEqual({
+        complete: 1,
+      });
+
+      // request_human_input writes only a marker: chat_sessions.updated_at does not move.
+      const marker = createAttentionMarker(source.sql, {
+        sessionId: 'session-question',
+        taskId: null,
+        workspaceId: null,
+        kind: 'needs_input',
+        source: 'request_human_input',
+        reason: 'Ship to production?',
+      });
+      await syncSessionSummariesToD1(source.sql, d1.env, 'project-sync');
+      expect(JSON.parse(attention().attention_json ?? 'null')).toMatchObject({
+        markerId: marker.id,
+        reason: 'Ship to production?',
+      });
+
+      resolveAttentionMarkerById(source.sql, marker.id, 'human', 'answered');
+      await syncSessionSummariesToD1(source.sql, d1.env, 'project-sync');
+      expect(attention().attention_json).toBeNull();
+    } finally {
+      source.db.close();
+      d1.db.close();
+    }
+  });
+
+  it('reads only changed sessions and markers through their indexes', () => {
+    // Every mutation schedules this delta, and markers are kept after they resolve, so neither
+    // table may be scanned whole. Plans are taken over a populated object without ANALYZE
+    // statistics, as Durable Object storage has none unless something runs it.
+    const source = makeDoSql();
+    try {
+      const session = source.db.prepare(
+        `INSERT INTO chat_sessions (id, topic, status, message_count, started_at, created_at, updated_at)
+         VALUES (?, 'topic', 'active', 0, 1, 1, ?)`
+      );
+      const marker = source.db.prepare(
+        `INSERT INTO session_attention_markers (id, session_id, kind, source, created_at, resolved_at)
+         VALUES (?, ?, 'needs_input', 'request_human_input', ?, ?)`
+      );
+      for (let index = 0; index < 500; index += 1) {
+        session.run(`session-${index}`, index);
+        marker.run(`marker-${index}`, `session-${index}`, index, index % 2 ? index + 1 : null);
+      }
+
+      const plan = source.db
+        .prepare(`EXPLAIN QUERY PLAN ${SESSION_SUMMARY_DELTA_SQL}`)
+        .all(490, 490, 490, 100)
+        .map((row) => (row as { detail: string }).detail);
+
+      expect(plan.some((step) => step.startsWith('SCAN chat_sessions'))).toBe(false);
+      expect(plan.some((step) => step.startsWith('SCAN session_attention_markers'))).toBe(false);
+      expect(plan).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('USING INDEX idx_chat_sessions_updated_at'),
+          expect.stringContaining('USING INDEX idx_attention_created_at'),
+          expect.stringContaining('USING INDEX idx_attention_resolved_at'),
+        ])
+      );
+    } finally {
+      source.db.close();
     }
   });
 });

@@ -311,7 +311,6 @@ export const REQUIRED_SECRETS = [
   'JWT_PUBLIC_KEY',
   'DEPLOY_SIGNING_PRIVATE_KEY',
   'DEPLOY_SIGNING_PUBLIC_KEY',
-  'TRIAL_CLAIM_TOKEN_SECRET',
 ] as const;
 
 // Note: HETZNER_TOKEN is NOT a platform secret.
@@ -337,6 +336,7 @@ export const OPTIONAL_SECRETS = [
   'SEGMENT_WRITE_KEY',
   'GA4_API_SECRET',
   'GA4_MEASUREMENT_ID',
+  'AGENT_SIGN_IN_TRUST',
 ] as const;
 
 export const DNS_RECORDS = ['api', 'app', '*'] as const;
@@ -413,6 +413,7 @@ export interface WranglerToml extends WranglerTomlBindings {
   compatibility_flags?: string[];
   vars?: Record<string, string>;
   limits?: WorkerLimitsConfig;
+  observability?: ObservabilityConfig;
   env?: Record<string, WranglerEnvConfig>;
   [key: string]: unknown;
 }
@@ -459,8 +460,17 @@ export interface AnalyticsEngineDatasetBinding {
   dataset: string;
 }
 
+export interface ObservabilityTracesConfig {
+  enabled?: boolean;
+  head_sampling_rate?: number;
+  persist?: boolean;
+  destinations?: string[];
+}
+
 export interface ObservabilityConfig {
   enabled: boolean;
+  redact_query_string?: boolean;
+  traces?: ObservabilityTracesConfig;
   logs?: {
     invocation_logs: boolean;
     head_sampling_rate: number;

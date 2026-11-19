@@ -264,10 +264,22 @@ describe('ProjectData event MCP tools vertical route', () => {
       agentSessionId: owner.agentSessionId,
       createdAt: new Date().toISOString(),
     });
-    const staleIdentity = await callMcpTool(staleToken, 'get_event', {
-      eventId: ownerEventId,
+    // The token names a workspace from another project, so MCP authentication refuses it
+    // (validateActiveWorkspaceMcpToken) before the tool's own identity check runs.
+    const staleIdentity = await SELF.fetch('https://api.test.example.com/mcp', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${staleToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'stale-identity',
+        method: 'tools/call',
+        params: { name: 'get_event', arguments: { eventId: ownerEventId } },
+      }),
     });
-    expect(staleIdentity.error?.message).toBe('Caller identity is not valid for this project');
+    expect(staleIdentity.status).toBe(401);
+    const staleBody = await staleIdentity.text();
+    expect(staleBody).not.toContain(ownerEventId);
+    expect(staleBody).not.toContain('vertical-payload-secret');
   });
 
   it('maps malformed opaque cursors through /mcp without leaking stored event data', async () => {

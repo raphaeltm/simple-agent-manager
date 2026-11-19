@@ -5,13 +5,13 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { requireActiveSettingsSuperadmin } from '../middleware/settings-admin';
 import { jsonValidator } from '../schemas';
+import { readAdminSettings, updateAdminSettings } from '../services/admin-settings';
 import {
-  isOperationalLoopEnabled,
   resolveDisabledAlarmRetryMs,
   resolveOperationalKillSwitchCacheMs,
   resolveOperationalLoopKvKey,
-  setOperationalLoopEnabled,
 } from '../services/operational-kill-switch';
 
 // Both fields are validated loosely (v.unknown()) — the handler below
@@ -23,13 +23,22 @@ const UpdateRuntimeControlsSchema = v.object({
 
 const adminRuntimeControlRoutes = new Hono<{ Bindings: Env }>();
 
-adminRuntimeControlRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
+adminRuntimeControlRoutes.use(
+  '/*',
+  requireAuth(),
+  requireApproved(),
+  requireSuperadmin(),
+  requireActiveSettingsSuperadmin()
+);
 
 async function readRuntimeControls(env: Env) {
-  const [cronSweepsEnabled, doAlarmsEnabled] = await Promise.all([
-    isOperationalLoopEnabled(env, 'cron'),
-    isOperationalLoopEnabled(env, 'alarms'),
-  ]);
+  const view = await readAdminSettings(env, { fresh: true });
+  const cronSweepsEnabled = view.settings.find(
+    (setting) => setting.name === 'operations.cronSweepsEnabled'
+  )?.value;
+  const doAlarmsEnabled = view.settings.find(
+    (setting) => setting.name === 'operations.doAlarmsEnabled'
+  )?.value;
   return {
     cronSweepsEnabled,
     doAlarmsEnabled,
@@ -57,12 +66,17 @@ adminRuntimeControlRoutes.patch('/', jsonValidator(UpdateRuntimeControlsSchema),
     throw errors.badRequest('doAlarmsEnabled must be a boolean');
   }
 
-  if (typeof body.cronSweepsEnabled === 'boolean') {
-    await setOperationalLoopEnabled(c.env, 'cron', body.cronSweepsEnabled);
-  }
-  if (typeof body.doAlarmsEnabled === 'boolean') {
-    await setOperationalLoopEnabled(c.env, 'alarms', body.doAlarmsEnabled);
-  }
+  await updateAdminSettings(c.env, {
+    changes: [
+      ...(typeof body.cronSweepsEnabled === 'boolean'
+        ? [{ name: 'operations.cronSweepsEnabled' as const, value: body.cronSweepsEnabled }]
+        : []),
+      ...(typeof body.doAlarmsEnabled === 'boolean'
+        ? [{ name: 'operations.doAlarmsEnabled' as const, value: body.doAlarmsEnabled }]
+        : []),
+    ],
+    actorUserId: c.get('auth').user.id,
+  });
 
   log.info('admin.runtime_controls.updated', {
     actorUserId: c.get('auth')?.user.id,

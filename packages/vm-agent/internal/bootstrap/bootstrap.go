@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/workspace/vm-agent/internal/bootlog"
@@ -169,7 +170,7 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 	if cfg.ContainerMode {
 		reporter.Log("volume_create", "started", "Creating workspace volume")
 		var volErr error
-		volumeName, volErr = ensureVolumeReady(ctx, cfg.WorkspaceID)
+		volumeName, volErr = ensureVolumeReady(ctx, cfg.WorkspaceID, cfg)
 		if volErr != nil {
 			reporter.Log("volume_create", "failed", "Volume creation failed", volErr.Error())
 			return volErr
@@ -187,7 +188,7 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 	// Pre-generate credential helper on the VM host so it can be bind-mounted
 	// into the container. This makes git authentication available during
 	// devcontainer lifecycle hooks (postCreateCommand, postStartCommand, etc.).
-	credHelperHostPath, credErr := writeCredentialHelperToHost(cfg)
+	credHelperHostPath, _, credHelperMinted, credErr := writeCredentialHelperToHost(cfg)
 	if credErr != nil {
 		slog.Warn("Failed to write credential helper to host (non-fatal)", "error", credErr)
 		reporter.Log("git_credential_helper", "failed", "Credential helper setup failed — git auth may be unavailable in lifecycle hooks", credErr.Error())
@@ -199,7 +200,7 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 			// file stays for the lifetime of the workspace and is removed in
 			// handleDeleteWorkspace via RemoveCredentialHelperFromHost.
 			if !bootstrapSucceeded {
-				RemoveCredentialHelperFromHost(cfg.WorkspaceID)
+				cleanupCredentialHelperAfterFailedPrepare(cfg, credHelperMinted)
 			}
 		}()
 	}
@@ -323,7 +324,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	if cfg.ContainerMode {
 		reporter.Log("volume_create", "started", "Creating workspace volume")
 		var volErr error
-		volumeName, volErr = ensureVolumeReady(ctx, cfg.WorkspaceID)
+		volumeName, volErr = ensureVolumeReady(ctx, cfg.WorkspaceID, cfg)
 		if volErr != nil {
 			reporter.Log("volume_create", "failed", "Volume creation failed", volErr.Error())
 			return false, volErr
@@ -346,7 +347,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 
 	// Pre-generate credential helper on the VM host so it can be bind-mounted
 	// into the container during devcontainer lifecycle hooks.
-	credHelperHostPath, credErr := writeCredentialHelperToHost(cfg)
+	credHelperHostPath, _, credHelperMinted, credErr := writeCredentialHelperToHost(cfg)
 	if credErr != nil {
 		slog.Warn("Failed to write credential helper to host (non-fatal)", "error", credErr)
 		reporter.Log("git_credential_helper", "failed", "Credential helper setup failed — git auth may be unavailable in lifecycle hooks", credErr.Error())
@@ -355,7 +356,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	if credHelperHostPath != "" {
 		defer func() {
 			if !prepareSucceeded {
-				RemoveCredentialHelperFromHost(cfg.WorkspaceID)
+				cleanupCredentialHelperAfterFailedPrepare(cfg, credHelperMinted)
 			}
 		}()
 	}
@@ -507,11 +508,23 @@ func prepareDevcontainerCache(ctx context.Context, cfg *config.Config, githubTok
 // ensureVolumeReady creates a Docker named volume for the workspace if it doesn't
 // already exist. The volume persists across container rebuilds and is deleted when
 // the workspace is deleted.
-func ensureVolumeReady(ctx context.Context, workspaceID string) (string, error) {
+func ensureVolumeReady(ctx context.Context, workspaceID string, configs ...*config.Config) (string, error) {
 	volumeName := VolumeNameForWorkspace(workspaceID)
 
 	// docker volume create is idempotent — returns the volume name if it already exists.
-	cmd := exec.CommandContext(ctx, "docker", "volume", "create", volumeName)
+	args := []string{"volume", "create"}
+	if len(configs) > 0 && configs[0] != nil {
+		cfg := configs[0]
+		if cfg.NodeID != "" && cfg.NodeUserID != "" && cfg.NodeRuntimeIncarnationID != "" {
+			for _, label := range []string{"sam.workspace.id=" + workspaceID, "sam.node.id=" + cfg.NodeID, "sam.node.incarnation=" + cfg.NodeRuntimeIncarnationID, "sam.owner.id=" + cfg.NodeUserID} {
+				args = append(args, "--label", label)
+			}
+		}
+	}
+	// Docker does not update labels on an existing volume: unknown legacy volumes
+	// remain unowned and deletion refuses them rather than retroactively adopting.
+	args = append(args, volumeName)
+	cmd := exec.CommandContext(ctx, "docker", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to create Docker volume %s: %w: %s", volumeName, err, strings.TrimSpace(string(output)))
@@ -820,7 +833,7 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 			return fmt.Errorf("failed to create workspace parent directory: %w", err)
 		}
 
-		if err := os.RemoveAll(cfg.WorkspaceDir); err != nil {
+		if err := clearWorkspaceDirForClone(cfg.WorkspaceDir); err != nil {
 			return fmt.Errorf("failed to clean workspace directory: %w", err)
 		}
 
@@ -2105,14 +2118,24 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("failed to locate devcontainer for credential helper setup: %w", err)
 	}
 
-	// If the credential helper was already bind-mounted into the container
-	// (pre-devcontainer-up), skip the copy — docker cp cannot overwrite a
-	// bind-mounted file ("device or resource busy"). The GIT_CONFIG env vars
-	// are also already set via containerEnv in this case.
+	// The host helper is the canonical carrier of the workspace's exchange
+	// bearer, so the in-container copy installed below embeds the same bearer
+	// as any bind-mounted copy. Preparing it here also installs the digest
+	// before git is configured to call the helper.
+	_, script, _, err := writeCredentialHelperToHost(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to prepare git credential helper: %w", err)
+	}
+
+	// If the container already carries a helper whose bearer the digest still
+	// accepts (normally the bind mount set up before devcontainer up), keep it:
+	// docker cp cannot overwrite a bind-mounted file ("device or resource
+	// busy"), and the GIT_CONFIG env vars are already set via containerEnv. A
+	// helper whose bearer is missing or stale (copied in by an earlier agent
+	// build, or by an attempt whose digest was since replaced) is reinstalled.
 	installPath := credentialHelperContainerPath
-	checkCmd := exec.CommandContext(ctx, "docker", "exec", containerID, "test", "-f", installPath)
-	if checkCmd.Run() == nil {
-		slog.Info("Git credential helper already present (bind-mounted), skipping post-build copy", "containerID", containerID)
+	if inContainerHelperAccepted(ctx, cfg, containerID, installPath) {
+		slog.Info("Git credential helper already present with a current exchange bearer, skipping post-build copy", "containerID", containerID)
 		// Still configure git to use the helper (belt-and-suspenders with containerEnv)
 		// and install the gh wrapper.
 		if err := configureGitCredentialHelper(ctx, containerID, installPath); err != nil {
@@ -2125,11 +2148,6 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 			}
 		}
 		return nil
-	}
-
-	script, err := renderGitCredentialHelperScript(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to render git credential helper script: %w", err)
 	}
 
 	tempFile, err := os.CreateTemp("", "git-credential-sam-*")
@@ -2180,8 +2198,33 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 			slog.Warn("gh wrapper install failed (non-fatal)", "error", err)
 		}
 	}
-
 	return nil
+}
+
+// readInContainerHelper returns the content of the helper installed in the
+// container, or ok=false when there is none. It is a variable so tests can
+// model a container's helper without Docker.
+var readInContainerHelper = func(ctx context.Context, containerID, installPath string) (string, bool) {
+	out, err := exec.CommandContext(ctx, container.DockerCLIPath(), "exec", containerID, "cat", installPath).Output()
+	if err != nil {
+		return "", false
+	}
+	return string(out), true
+}
+
+// inContainerHelperAccepted reports whether the container's helper presents a
+// bearer the workspace's digest accepts.
+func inContainerHelperAccepted(ctx context.Context, cfg *config.Config, containerID, installPath string) bool {
+	content, ok := readInContainerHelper(ctx, containerID, installPath)
+	if !ok {
+		return false
+	}
+	if ValidateGitCredentialExchange(cfg.WorkspaceID, ExchangeTokenFromHelperScript(content)) {
+		return true
+	}
+	slog.Warn("Git credential helper in devcontainer has no current exchange bearer; reinstalling",
+		"workspaceID", cfg.WorkspaceID, "containerID", containerID)
+	return false
 }
 
 // installGhWrapper moves the real gh binary to gh.real and installs a wrapper
@@ -2237,7 +2280,7 @@ exec "%s" "$@"
 	return nil
 }
 
-func renderGitCredentialHelperScript(cfg *config.Config) (string, error) {
+func renderGitCredentialHelperScript(cfg *config.Config, exchangeToken string) (string, error) {
 	if cfg == nil {
 		return "", errors.New("nil config")
 	}
@@ -2246,6 +2289,16 @@ func renderGitCredentialHelperScript(cfg *config.Config) (string, error) {
 	}
 	if cfg.Port <= 0 {
 		return "", fmt.Errorf("invalid VM agent port: %d", cfg.Port)
+	}
+	exchangeToken = strings.TrimSpace(exchangeToken)
+	if exchangeToken == "" {
+		return "", errors.New("git credential exchange token is empty")
+	}
+	// The exchange bearer is validated per workspace, so a helper that cannot
+	// name its workspace could never authenticate.
+	workspaceID := strings.TrimSpace(cfg.WorkspaceID)
+	if workspaceID == "" {
+		return "", errors.New("workspace id is empty")
 	}
 	credentialTimeout := cfg.GitCredentialTimeout
 	if credentialTimeout == 0 {
@@ -2256,20 +2309,21 @@ func renderGitCredentialHelperScript(cfg *config.Config) (string, error) {
 	}
 	credentialTimeoutSeconds := strconv.FormatFloat(credentialTimeout.Seconds(), 'f', -1, 64)
 
-	query := ""
-	if workspaceID := strings.TrimSpace(cfg.WorkspaceID); workspaceID != "" {
-		query = "?workspaceId=" + url.QueryEscape(workspaceID)
-	}
+	query := "?workspaceId=" + url.QueryEscape(workspaceID)
 	// Hostnames are case-insensitive; normalize once here and lowercase the
 	// requested host in the shell so the comparison cannot fail on casing.
 	allowedGitLabHost := strings.ToLower(strings.TrimSpace(cfg.RepositoryHost))
+	// Hosted Artifacts authority checks have one owner: the authenticated local
+	// exchange validates both the workspace binding and the resolved credential.
+	// Forward the raw host rather than duplicating Go's port parser in POSIX sh.
+	delegateHostedArtifacts := isBoundHostedArtifactsHost(cfg, cfg.RepositoryHost)
 
 	// When TLS is enabled on the VM agent, the credential helper must use https://
 	// with -k (skip cert verification) because the TLS cert is issued for the
 	// external domain (e.g. ws-*.example.com), not for internal Docker addresses
-	// like host.docker.internal or 172.17.0.1. The helper deliberately does not
-	// carry the durable workspace callback token; it asks the VM agent to perform
-	// the control-plane token exchange using its in-memory workspace callback.
+	// like host.docker.internal or 172.17.0.1. The helper carries only a dedicated
+	// exchange bearer; the VM agent keeps the broader workspace callback token in
+	// memory and uses it for the control-plane token exchange.
 	scheme := "http"
 	curlTLSFlag := ""
 	if cfg.TLSEnabled {
@@ -2287,14 +2341,20 @@ fi
 
 requested_host=""
 requested_path=""
+requested_protocol=""
 while IFS= read -r line; do
   [ -z "$line" ] && break
   case "$line" in
     host=*) requested_host="${line#host=}" ;;
     path=*) requested_path="${line#path=}" ;;
+    protocol=*) requested_protocol="${line#protocol=}" ;;
   esac
 done
 
+delegate_host_filter=%t
+if [ "$delegate_host_filter" = true ]; then
+  [ "$requested_protocol" = https ] || exit 0
+else
 case "$requested_host" in
   ""|github.com|api.github.com|artifacts.cloudflare.net|*.artifacts.cloudflare.net) ;;
   *)
@@ -2305,11 +2365,15 @@ case "$requested_host" in
     fi
     ;;
 esac
+fi
 
 credential_query="%s"
+exchange_token=%s
 url_encode_query_value() {
   printf '%%s' "$1" | sed 's/%%/%%25/g; s/&/%%26/g; s/=/%%3D/g; s/?/%%3F/g; s/#/%%23/g; s/+/%%2B/g; s/ /%%20/g'
 }
+encoded_protocol=$(url_encode_query_value "$requested_protocol")
+credential_query="${credential_query}&protocol=${encoded_protocol}"
 if [ -n "$requested_host" ]; then
   encoded_host=$(url_encode_query_value "$requested_host")
   if [ -n "$credential_query" ]; then
@@ -2334,6 +2398,7 @@ resolve_gateway() {
 request_credentials() {
   target="$1"
   curl -fsS --max-time %s%s \
+    -H "Authorization: Bearer ${exchange_token}" \
     "%s://${target}:%d/git-credential${credential_query}"
 }
 
@@ -2346,7 +2411,7 @@ for target in host.docker.internal "$gateway" 172.17.0.1; do
 done
 
 exit 0
-`, shellSingleQuote(allowedGitLabHost), query, credentialTimeoutSeconds, curlTLSFlag, scheme, cfg.Port), nil
+`, delegateHostedArtifacts, shellSingleQuote(allowedGitLabHost), query, shellSingleQuote(exchangeToken), credentialTimeoutSeconds, curlTLSFlag, scheme, cfg.Port), nil
 }
 
 // sanitizeWorkspaceID strips characters that are not alphanumeric or hyphens
@@ -2377,31 +2442,142 @@ const credentialHelperContainerPath = "/usr/local/bin/git-credential-sam"
 // bind-mounted into the container so that devcontainer lifecycle hooks
 // (postCreateCommand, postStartCommand, etc.) can authenticate to private repos.
 //
-// Returns the host path of the written file, or empty string if skipped.
-func writeCredentialHelperToHost(cfg *config.Config) (string, error) {
+// The host file is also the canonical carrier of the workspace's exchange
+// bearer: a reprovision reuses the bearer it holds (ResolveGitCredentialExchangeToken)
+// and leaves the file untouched when nothing changed, so a running container's
+// bind-mounted helper keeps working. minted reports whether this call created a
+// new bearer, which is what decides whether a failed attempt may clean up.
+//
+// Returns the host path and rendered script, or empty strings if skipped.
+func writeCredentialHelperToHost(cfg *config.Config) (hostPath, script string, minted bool, err error) {
 	if !needsCredentialHelperForConfig(cfg) {
 		slog.Info("Repository does not need credential helper, skipping host-side write", "repository", cfg.Repository)
-		return "", nil
+		return "", "", false, nil
 	}
 	if cfg.CallbackToken == "" {
-		return "", errors.New("callback token is required for credential helper")
+		return "", "", false, errors.New("callback token is required for credential helper")
 	}
 	if cfg.Port <= 0 {
-		return "", fmt.Errorf("invalid VM agent port: %d", cfg.Port)
+		return "", "", false, fmt.Errorf("invalid VM agent port: %d", cfg.Port)
+	}
+	if strings.TrimSpace(cfg.WorkspaceID) == "" {
+		return "", "", false, errors.New("workspace id is required for credential helper")
 	}
 
-	script, err := renderGitCredentialHelperScript(cfg)
+	hostPath = credentialHelperHostPath(cfg.WorkspaceID)
+	exchangeToken, reused, err := ResolveGitCredentialExchangeToken(cfg.WorkspaceID, hostPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to render credential helper script: %w", err)
+		return "", "", false, fmt.Errorf("failed to prepare git credential exchange: %w", err)
 	}
 
-	hostPath := credentialHelperHostPath(cfg.WorkspaceID)
-	if err := writeCredentialHelperScriptAtomically(hostPath, script); err != nil {
-		return "", err
+	script, err = renderGitCredentialHelperScript(cfg, exchangeToken)
+	if err != nil {
+		return "", "", false, fmt.Errorf("failed to render credential helper script: %w", err)
 	}
 
-	slog.Info("Wrote credential helper to host", "path", hostPath, "workspaceID", cfg.WorkspaceID)
-	return hostPath, nil
+	if reused {
+		if current, readErr := os.ReadFile(hostPath); readErr == nil && string(current) == script {
+			slog.Info("Credential helper on host is current; reusing it", "path", hostPath, "workspaceID", cfg.WorkspaceID)
+			return hostPath, script, false, nil
+		}
+	}
+	if reused {
+		// Same bearer, changed helper: replace the file so a running container
+		// keeps its old inode, which still carries the valid bearer.
+		if err := writeCredentialHelperScriptAtomically(hostPath, script); err != nil {
+			return "", "", false, err
+		}
+	} else if err := writeMintedCredentialHelper(hostPath, script); err != nil {
+		return "", "", false, err
+	}
+	if !reused {
+		if err := InstallGitCredentialExchange(cfg.WorkspaceID, exchangeToken); err != nil {
+			// Keep the helper: a running container's bind mount may already pin the
+			// inode just rewritten with this bearer, and the next attempt reinstalls
+			// the digest from it (ResolveGitCredentialExchangeToken's lost-digest path).
+			return "", "", false, fmt.Errorf("failed to install git credential exchange: %w", err)
+		}
+	}
+
+	slog.Info("Wrote credential helper to host", "path", hostPath, "workspaceID", cfg.WorkspaceID, "exchangeTokenReused", reused)
+	return hostPath, script, !reused, nil
+}
+
+// findRunningDevcontainerForCleanup is the container lookup used before a failed
+// provisioning attempt removes credential files. It is a variable so tests can
+// model a running container without Docker.
+var findRunningDevcontainerForCleanup = findDevcontainerID
+
+// credentialHelperCleanupLookupTimeout bounds the container lookup a failed
+// attempt runs before cleanup. The attempt's own context has often expired by
+// then (a bootstrap timeout is a common failure), so the lookup cannot use it.
+const credentialHelperCleanupLookupTimeout = 10 * time.Second
+
+// cleanupCredentialHelperAfterFailedPrepare removes the host helper and exchange
+// digest that a failed provisioning attempt created, but only when no running
+// container can be presenting them. A reused bearer belongs to a container that
+// outlived an earlier attempt; deleting its digest would revoke git auth under
+// a workspace that is still running, and its bind mount cannot be refreshed in
+// place. Lookup errors other than "not running" keep the files: workspace
+// deletion (RemoveCredentialHelperFromHost) still removes them.
+func cleanupCredentialHelperAfterFailedPrepare(cfg *config.Config, minted bool) {
+	if cfg == nil || strings.TrimSpace(cfg.WorkspaceID) == "" {
+		return
+	}
+	if !minted {
+		slog.Info("Keeping reused git credential exchange after failed provisioning", "workspaceID", cfg.WorkspaceID)
+		return
+	}
+	lookupCtx, cancel := context.WithTimeout(context.Background(), credentialHelperCleanupLookupTimeout)
+	defer cancel()
+	if _, err := findRunningDevcontainerForCleanup(lookupCtx, cfg); err == nil ||
+		!errors.Is(err, container.ErrNoRunningDevcontainer) {
+		slog.Warn("Keeping git credential exchange after failed provisioning: a devcontainer may be running",
+			"workspaceID", cfg.WorkspaceID, "lookupError", err)
+		return
+	}
+	if err := RemoveCredentialHelperFromHost(cfg.WorkspaceID); err != nil {
+		slog.Warn("Failed to remove credential helper after failed provisioning", "workspaceID", cfg.WorkspaceID, "error", err)
+	}
+}
+
+// writeMintedCredentialHelper writes a helper carrying a newly minted bearer.
+// An existing regular file is rewritten in place rather than replaced: a
+// running container's single-file bind mount is pinned to that inode, and the
+// bearer it holds is no longer accepted, so only an in-place write can repair
+// it. (A replaced file would leave the container on the old inode, and docker
+// cp cannot write through a read-only bind mount.)
+func writeMintedCredentialHelper(hostPath, script string) error {
+	info, err := os.Lstat(hostPath)
+	if os.IsNotExist(err) {
+		return writeCredentialHelperScriptAtomically(hostPath, script)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to inspect credential helper on host: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("refusing to replace non-regular credential helper path %s", hostPath)
+	}
+	if !ownedByCurrentUser(info) {
+		// Not a helper this agent wrote, so no container of ours pins it.
+		return writeCredentialHelperScriptAtomically(hostPath, script)
+	}
+	f, err := os.OpenFile(hostPath, os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return fmt.Errorf("failed to open credential helper on host: %w", err)
+	}
+	if _, err := f.WriteString(script); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("failed to rewrite credential helper on host: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("failed to finalize credential helper on host: %w", err)
+	}
+	// 0o755 is intentional: the devcontainer user must execute the bind-mounted helper.
+	if err := os.Chmod(hostPath, 0o755); err != nil { // NOSONAR
+		return fmt.Errorf("failed to chmod credential helper on host: %w", err)
+	}
+	return nil
 }
 
 func writeCredentialHelperScriptAtomically(hostPath, script string) error {
@@ -2445,11 +2621,16 @@ func writeCredentialHelperScriptAtomically(hostPath, script string) error {
 
 // RemoveCredentialHelperFromHost removes the host-side credential helper script.
 // This is called during workspace deletion to clean up.
-func RemoveCredentialHelperFromHost(workspaceID string) {
+func RemoveCredentialHelperFromHost(workspaceID string) error {
 	hostPath := credentialHelperHostPath(workspaceID)
+	var removeErrors []error
 	if err := os.Remove(hostPath); err != nil && !os.IsNotExist(err) {
-		slog.Warn("Failed to remove credential helper from host", "path", hostPath, "error", err)
+		removeErrors = append(removeErrors, fmt.Errorf("failed to remove workspace credential helper: %w", err))
 	}
+	if err := removeGitCredentialExchange(workspaceID); err != nil {
+		removeErrors = append(removeErrors, err)
+	}
+	return errors.Join(removeErrors...)
 }
 
 // credentialHelperMountEntry returns the Docker bind mount string for mounting
@@ -2966,7 +3147,11 @@ func buildProjectRuntimeEnvScript(envVars []ProjectRuntimeEnvVar) (string, error
 		if !projectEnvKeyPattern.MatchString(key) {
 			return "", fmt.Errorf("invalid project env var key %q", envVar.Key)
 		}
-		sb.WriteString(fmt.Sprintf("export %s=%s\n", key, shellSingleQuote(envVar.Value)))
+		value := envVar.Value
+		if envVar.IsSecret {
+			value = "__SAM_SECRET_REQUIRES_EXEC_WITH_SECRETS__" + key + "__"
+		}
+		sb.WriteString(fmt.Sprintf("export %s=%s\n", key, shellSingleQuote(value)))
 	}
 
 	return sb.String(), nil
@@ -3212,14 +3397,15 @@ func withGitToken(repoURL, token string, cfg *config.Config) (string, error) {
 	isGitLabHost := cfg != nil &&
 		strings.EqualFold(strings.TrimSpace(cfg.RepoProvider), "gitlab") &&
 		strings.EqualFold(strings.TrimSpace(cfg.RepositoryHost), host)
-	if !gitrepo.IsKnownGitHost(host) && !isGitLabHost {
+	hostedArtifactsHost := isBoundHostedArtifactsHost(cfg, host)
+	if !gitrepo.IsKnownGitHost(host) && !isGitLabHost && !hostedArtifactsHost {
 		return repoURL, nil
 	}
 
-	// For GitHub repos use "x-access-token"; for Artifacts use "x"; for
-	// GitLab OAuth use the conventional "oauth2" username.
+	// For GitHub repos use "x-access-token"; for Artifacts (Cloudflare or a
+	// self-hosted SAM git server) use "x"; for GitLab OAuth use "oauth2".
 	username := "x-access-token"
-	if gitrepo.IsArtifactsHost(host) {
+	if gitrepo.IsArtifactsHost(host) || hostedArtifactsHost {
 		username = "x"
 	} else if isGitLabHost {
 		username = "oauth2"
@@ -3257,6 +3443,9 @@ func needsCredentialHelperForConfig(cfg *config.Config) bool {
 		return false
 	}
 	if strings.TrimSpace(cfg.RepositoryHost) != "" && strings.EqualFold(strings.TrimSpace(cfg.RepoProvider), "gitlab") {
+		return true
+	}
+	if isBoundHostedArtifactsHost(cfg, cfg.RepositoryHost) {
 		return true
 	}
 	return needsCredentialHelper(firstNonEmptyString(cfg.CloneURL, cfg.Repository))

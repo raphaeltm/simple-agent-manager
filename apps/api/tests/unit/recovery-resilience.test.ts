@@ -226,7 +226,6 @@ describe('stuck-tasks DO health checks (TDF-7)', () => {
       'recoverStuckTasks(env)',
       'runNodeCleanupSweep(env)',
       'runCronTriggerSweep(env)',
-      'runTrialExpireSweep(env)',
       'runObservabilityPurge(env)',
     ]) {
       const idx = sweepBody.indexOf(sweepFn);
@@ -393,7 +392,7 @@ describe('timeout service OBSERVABILITY_DATABASE recording (TDF-7)', () => {
 
   it('records provisioning timeouts in OBSERVABILITY_DATABASE', () => {
     expect(timeoutSource).toContain("recoveryType: 'provisioning_timeout'");
-    expect(timeoutSource).toContain('persistError(observabilityDb');
+    expect(timeoutSource).toMatch(/persistError\(\s*observabilityDb/);
   });
 
   it('includes workspace and node IDs in context', () => {
@@ -418,55 +417,11 @@ describe('timeout service OBSERVABILITY_DATABASE recording (TDF-7)', () => {
 // =========================================================================
 
 describe('cleanup idempotency (TDF-7)', () => {
-  it('checks node status before calling markIdle', () => {
-    const cleanupSection = taskRunnerSource.slice(
-      taskRunnerSource.indexOf('async function cleanupAutoProvisionedNode(')
-    );
-    expect(cleanupSection).toContain('node.status');
-    expect(cleanupSection).toContain('node.warmSince');
-  });
-
-  it('skips if node is already stopped', () => {
-    expect(taskRunnerSource).toContain("node.status === 'stopped'");
-    expect(taskRunnerSource).toContain('task_run.cleanup.node_already_stopped');
-  });
-
-  it('skips if node is already warm', () => {
-    expect(taskRunnerSource).toContain('node.warmSince');
-    expect(taskRunnerSource).toContain('task_run.cleanup.node_already_warm');
-  });
-
-  it('skips if node not found in D1', () => {
-    expect(taskRunnerSource).toContain('task_run.cleanup.node_not_found');
-  });
-
+  // The node half of cleanup (not found, stopped, already warm, occupied) moved to the shared
+  // handOffEmptyWorkspaceNode; its skip reasons are exercised against real D1 and the real
+  // NodeLifecycle DO in tests/workers/empty-node-warm-handoff.test.ts.
   it('logs when workspace is already stopped', () => {
     expect(taskRunnerSource).toContain('task_run.cleanup.workspace_already_stopped');
-  });
-
-  it('queries node from D1 before deciding cleanup action', () => {
-    const cleanupSection = taskRunnerSource.slice(
-      taskRunnerSource.indexOf('async function cleanupAutoProvisionedNode('),
-      taskRunnerSource.indexOf('// Count active workspaces')
-    );
-    expect(cleanupSection).toContain('schema.nodes.warmSince');
-    expect(cleanupSection).toContain('eq(schema.nodes.id, nodeId)');
-  });
-
-  it('only calls markIdle if node is running and not warm', () => {
-    const cleanupSection = taskRunnerSource.slice(
-      taskRunnerSource.indexOf('async function cleanupAutoProvisionedNode(')
-    );
-    // After all the guard checks, only then do we reach markIdle
-    const nodeNotFoundIdx = cleanupSection.indexOf('node_not_found');
-    const alreadyStoppedIdx = cleanupSection.indexOf('node_already_stopped');
-    const alreadyWarmIdx = cleanupSection.indexOf('node_already_warm');
-    const markIdleIdx = cleanupSection.indexOf('markIdle(env');
-    // Guards come before markIdle
-    expect(nodeNotFoundIdx).toBeGreaterThan(-1);
-    expect(alreadyStoppedIdx).toBeGreaterThan(nodeNotFoundIdx);
-    expect(alreadyWarmIdx).toBeGreaterThan(alreadyStoppedIdx);
-    expect(markIdleIdx).toBeGreaterThan(alreadyWarmIdx);
   });
 });
 

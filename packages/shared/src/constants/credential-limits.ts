@@ -35,12 +35,14 @@ export const DEFAULT_CREDENTIAL_LIMIT_SUPPORTED_SOURCES = [
   'claude-acp.rate_limit',
   'claude-acp.usage_update',
   'vm-agent.acp_usage_update',
+  'task-prompt.limit_rejection',
   'vm-agent.codex_rollout',
   'vm-agent.opencode_go_usage',
 ] as const;
 
 /** Window identifiers accepted from credential-limit telemetry. */
 export const DEFAULT_CREDENTIAL_LIMIT_SUPPORTED_WINDOW_TYPES = [
+  'provider.prompt_rejection',
   'anthropic.input-tokens',
   'anthropic.output-tokens',
   'anthropic.priority-input-tokens',
@@ -63,6 +65,18 @@ export const DEFAULT_CREDENTIAL_LIMIT_SUPPORTED_WINDOW_TYPES = [
 
 /** Maximum credential-limit observations accepted from one usage callback/report. */
 export const DEFAULT_CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT = 16;
+
+/**
+ * Most models one run-usage report may carry (Insights slice U). A Claude Code turn lists each
+ * model it used (main model plus subagent/haiku helpers), so a handful is normal.
+ */
+export const RUN_USAGE_MAX_MODELS_PER_REPORT = 16;
+
+/** Largest value one token counter in a run-usage report may carry (schema bound). */
+export const RUN_USAGE_MAX_TOKENS_PER_COUNTER = 1_000_000_000_000;
+
+/** Lifetime new-row admission ceiling for one chat across harness epochs, models and credentials. */
+export const DEFAULT_RUN_USAGE_MAX_ROWS_PER_SESSION = 256;
 
 /** Maximum predecessor-CAS recomputes for one credential-limit observation. */
 export const DEFAULT_CREDENTIAL_LIMIT_TRANSITION_RECOMPUTE_ATTEMPTS = 4;

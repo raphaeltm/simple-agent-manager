@@ -1,8 +1,10 @@
-import type { ProjectData } from '../durable-objects/project-data';
+import type { ProjectData } from '@simple-agent-manager/project-data/durable-object';
+
 import type { SessionWakeReadyInput } from '../durable-objects/project-data/session-wake-ready';
 import { parseEnvInt } from '../durable-objects/task-runner/helpers';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { resolveSystemErrorFor } from './inbox/system-error-resolve';
 
 // Shared bound for the wake completion's scheduling and browser notifications.
 export const DEFAULT_WAKE_PROGRESS_BROADCAST_TIMEOUT_MS = 5_000;
@@ -33,6 +35,9 @@ export async function signalSessionWakeReadyBestEffort(
         );
       }),
     ]);
+    const accepted =
+      typeof released === 'number' && Number.isSafeInteger(released) && released >= 0;
+
     log.info('session_wake.ready_signaled', {
       projectId: input.projectId,
       sessionId: input.chatSessionId,
@@ -42,8 +47,9 @@ export async function signalSessionWakeReadyBestEffort(
       signalStartedAt: readyAt,
       signaledAt: Date.now(),
       released,
+      accepted,
     });
-    return true;
+    return accepted;
   } catch (error) {
     log.warn('session_wake.ready_signal_failed', {
       sessionId: input.chatSessionId,
@@ -53,5 +59,14 @@ export async function signalSessionWakeReadyBestEffort(
     return false;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+    // The runtime is committed ready: the chat woke, so its failed-wake inbox item closes by
+    // itself (slice E), whether or not the scheduling signal landed. After the signal, so the D1
+    // write cannot delay readiness or reorder the queued deliveries; it never throws.
+    await resolveSystemErrorFor(env, {
+      projectId: input.projectId,
+      source: 'wake',
+      subjectId: input.chatSessionId,
+      resolution: 'recovered',
+    });
   }
 }

@@ -1,4 +1,8 @@
-import type { ToolCallContentItem } from '@simple-agent-manager/acp-client';
+import type {
+  ToolCallContentItem,
+  UserMessageAttribution,
+  UserMessageDelivery,
+} from '@simple-agent-manager/acp-client';
 import {
   AgentCrashReportView,
   MessageBubble as AcpMessageBubble,
@@ -10,9 +14,12 @@ import { memo, useCallback } from 'react';
 
 import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
 import { getTtsApiUrl } from '../../lib/api';
+import { noticeOf, systemRowNotice } from './sam-notice/notice-items';
+import { NoticeRow } from './sam-notice/NoticeRow';
 import type { DisplayItem } from './tool-call-groups';
 import { matchToolCard } from './tool-cards';
 import { AbsorbedConversationItemView, ToolCallGroupCard } from './ToolCallGroupCard';
+import { UserMessageDeliveryChip } from './UserMessageDeliveryChip';
 
 /** Lazily computed TTS API URL — avoids module-scope errors in test environments. */
 let _cachedTtsApiUrl: string | undefined;
@@ -21,35 +28,31 @@ function getTtsUrl(): string {
   return _cachedTtsApiUrl;
 }
 
-/** Renders a system message (task status, error logs) as preformatted text.
- *  Prevents markdown interpretation of build log characters (#, *, URLs). */
-export function SystemMessageBubble({ text }: { text: string }) {
+/**
+ * Above a user-role bubble the session owner did not type: who sent it to the agent, and
+ * whether it was cancelled before delivery because the sender's shared access ended.
+ */
+function UserMessageAttributionLine({ attribution }: { attribution: UserMessageAttribution }) {
+  const sender = attribution.senderName ?? 'A teammate';
+  const label =
+    attribution.kind === 'comment'
+      ? attribution.commentAuthorName && attribution.commentAuthorName !== attribution.senderName
+        ? `${sender} sent ${attribution.commentAuthorName}'s comment to the agent`
+        : `${sender} sent a comment to the agent`
+      : `${sender} · shared access${attribution.scheduled ? ' · scheduled' : ''}`;
   return (
-    <div className="flex justify-start mb-4">
-      <div
-        role="region"
-        aria-label="System message"
-        className="max-w-[90%] min-w-0 rounded-lg px-4 py-2 border overflow-hidden"
-        style={{
-          backgroundColor: 'rgba(22, 163, 74, 0.06)',
-          borderColor: 'rgba(34, 197, 94, 0.1)',
-        }}
-      >
-        <div className="flex items-center gap-1.5 mb-2">
-          <span
-            className="text-xs font-semibold uppercase tracking-wide"
-            style={{ color: 'var(--sam-color-fg-muted)' }}
-          >
-            System
-          </span>
-        </div>
-        <pre
-          className="text-xs whitespace-pre-wrap break-words m-0 font-mono leading-relaxed"
-          style={{ color: 'var(--sam-color-fg-primary)' }}
-        >
-          {text}
-        </pre>
-      </div>
+    <div
+      className="mb-1 flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-xs text-fg-muted"
+      data-testid="user-message-attribution"
+    >
+      <span className="min-w-0 break-words text-right">{label}</span>
+      {attribution.notDelivered && (
+        <span className="rounded border border-warning/30 bg-warning-tint px-1.5 py-0.5 text-warning-fg">
+          {attribution.notDelivered === 'access_expired'
+            ? 'Not delivered — access expired'
+            : 'Not delivered — access was removed'}
+        </span>
+      )}
     </div>
   );
 }
@@ -104,11 +107,24 @@ interface AcpConversationItemViewProps {
   onToggleGroup?: (groupId: string) => void;
   /** True when this group is the tail row and the agent is mid-turn. */
   groupLive?: boolean;
+  /**
+   * Whether server read-aloud (text-to-speech) exists on this installation. Read once by the
+   * list that owns the rows (`usePlatformCapabilities`) and passed down as a primitive, so a
+   * long conversation is one query observer, and rows re-render only if the answer changes.
+   * Without it the bubble falls back to the browser's own speech synthesis.
+   */
+  serverTextToSpeech: boolean;
 }
+
+const NOTICE_DELIVERY_PROBLEMS: ReadonlySet<UserMessageDelivery['status']> = new Set([
+  'unconfirmed',
+  'not_delivered',
+]);
 
 /** Renders a single ACP ConversationItem using the shared acp-client components.
  *  When `animateText` is true for agent_message items, MessageBubble renders with
  *  per-character fade-in animation via TypewriterText. */
+
 function AcpConversationItemViewImpl({
   item,
   onFileClick,
@@ -119,6 +135,7 @@ function AcpConversationItemViewImpl({
   groupExpanded,
   onToggleGroup,
   groupLive,
+  serverTextToSpeech,
 }: AcpConversationItemViewProps) {
   // Depend on `startPlayback` (a stable useCallback) rather than the whole
   // GlobalAudio context value — that value is memoized but re-created as
@@ -153,23 +170,47 @@ function AcpConversationItemViewImpl({
     });
   }, [startPlayback, audioId, audioText]);
 
-  const handlePlayAudio = isAgentMessage ? playAudio : undefined;
+  const handlePlayAudio = isAgentMessage && serverTextToSpeech ? playAudio : undefined;
 
   switch (item.kind) {
-    case 'user_message':
+    case 'user_message': {
+      const notice = noticeOf(item);
+      if (notice) {
+        // A notice stays one quiet line when delivery went fine; the chip appears only when the
+        // agent may not have received it.
+        return (
+          <>
+            <NoticeRow
+              notice={notice}
+              rawText={item.text}
+              rawLabel="Show what the agent saw"
+              timestamp={item.timestamp}
+              projectId={projectId}
+            />
+            {item.delivery && NOTICE_DELIVERY_PROBLEMS.has(item.delivery.status) && (
+              <UserMessageDeliveryChip delivery={item.delivery} />
+            )}
+          </>
+        );
+      }
       if (item.origin === 'system') {
         return <CollapsedInjectedMessage text={item.text} />;
       }
       // The timestamp is what turns on the bubble's Info + Copy actions.
       return (
-        <AcpMessageBubble
-          text={item.text}
-          role="user"
-          animated={animateUserMessage}
-          timestamp={item.timestamp}
-          bubbleClassName="glass-msg-user"
-        />
+        <>
+          {item.attribution && <UserMessageAttributionLine attribution={item.attribution} />}
+          <AcpMessageBubble
+            text={item.text}
+            role="user"
+            animated={animateUserMessage}
+            timestamp={item.timestamp}
+            bubbleClassName="glass-msg-user"
+          />
+          {item.delivery && <UserMessageDeliveryChip delivery={item.delivery} />}
+        </>
       );
+    }
     case 'agent_message':
       return (
         <AcpMessageBubble
@@ -178,11 +219,12 @@ function AcpConversationItemViewImpl({
           streaming={item.streaming}
           animated={animateText}
           timestamp={item.timestamp}
-          ttsApiUrl={getTtsUrl()}
+          ttsApiUrl={serverTextToSpeech ? getTtsUrl() : undefined}
           ttsStorageId={item.id}
           onPlayAudio={handlePlayAudio}
           onFileClick={onFileClick}
-          bubbleClassName="glass-msg-assistant"
+          layout="flush"
+          bubbleClassName="glass-msg-agent"
         />
       );
     case 'thinking':
@@ -218,8 +260,19 @@ function AcpConversationItemViewImpl({
     }
     case 'plan':
       return <PlanView plan={item} />;
-    case 'system_message':
-      return <SystemMessageBubble text={item.text} />;
+    case 'system_message': {
+      // The mapper gives every system row a notice; the fallback covers items built elsewhere.
+      const notice = noticeOf(item) ?? systemRowNotice(item.text);
+      return (
+        <NoticeRow
+          notice={notice}
+          rawText={item.text}
+          rawLabel="Show full message"
+          timestamp={item.timestamp}
+          projectId={projectId}
+        />
+      );
+    }
     case 'agent_crash_report':
       return <AgentCrashReportView item={item} />;
     case 'raw_fallback':
