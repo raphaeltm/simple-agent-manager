@@ -604,6 +604,17 @@ describe('imageRebuilds', () => {
     expect(imageRebuilds([], null, COMPOSE())).toEqual(['caddy', 'sam-mx']);
   });
 
+  // An overlay whose context is the repository root (`../..` from deploy/selfhost) sends every
+  // file to the build: a change anywhere in the repository must count.
+  it('counts any changed file for a build context at the repository root', () => {
+    const rootBuild = 'services:\n  celld:\n    build:\n      context: ../..\n';
+    const overlays = [{ from: rootBuild, to: rootBuild }];
+    expect(
+      imageRebuilds(['apps/api/src/index.ts'], COMPOSE(), COMPOSE(), () => null, overlays)
+    ).toEqual(['celld']);
+    expect(imageRebuilds(['README.md'], COMPOSE(), COMPOSE(), () => null, overlays)).toEqual([]);
+  });
+
   // Compose merges build args by name whatever form each file uses (list or mapping).
   it('merges list-form overlay args by name, so a base-only arg change still rebuilds', () => {
     const listOverlay = 'services:\n  caddy:\n    build:\n      args:\n        - EXTRA=x\n';

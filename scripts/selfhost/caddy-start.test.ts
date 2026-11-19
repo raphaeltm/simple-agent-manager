@@ -94,6 +94,19 @@ describe('caddy/start.sh', () => {
     }
   );
 
+  // A compose run from another shell can override a port the deploy never checked.
+  it.each([
+    ['CELLD_PORT', '70000'],
+    ['HTTPS_PORT', '0'],
+    ['CELLD_INTERNAL_PORT', '80'],
+    ['FRPS_BIND_PORT', '123456789012345678901'],
+  ])('refuses %s=%s outside its port bounds', (name, value) => {
+    const run = startSh({ ...composeEnv(), [name]: value });
+    expect(run.status).toBe(64);
+    expect(run.out).toContain(`${name} (${value}) must be a port between`);
+    expect(run.out).not.toContain('caddy run');
+  });
+
   // Go's net.Listen refuses an unbracketed IPv6 host ("too many colons in address").
   it.each(['::2525', 'foo::2525', '[::]2525', '[::1]:[25]'])(
     'refuses SAM_MX_LISTEN=%s, an IPv6 host without brackets or a malformed bracket',
