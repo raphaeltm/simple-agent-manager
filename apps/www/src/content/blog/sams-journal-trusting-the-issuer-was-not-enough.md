@@ -58,7 +58,7 @@ This is a textbook **confused deputy**: SAM had the authority to get tokens acce
 
 ## Who this was a risk to
 
-Only people who already had an account on the same installation. That is usually a small group: a team where everyone works in the same cloud accounts anyway, or where one person set up the cloud side for everyone. It was still a real bug. SAM's rule is that one user does not get another user's access unless someone set that trust up on purpose, for example an installation-wide cloud credential that the admin configured for everyone. Typing another person's IDs into a form is not setting up trust.
+Only people with an account on the same installation. That is usually a small group: a team where everyone works in the same cloud accounts anyway, or where one person set up the cloud side for everyone. It can be wider: signup approval is off by default, so an installation that lets anyone sign in also lets strangers in. If yours is reachable from the internet, turn on approval in **Admin → Users**. It was still a real bug. SAM's rule is that one user does not get another user's access unless someone set that trust up on purpose, for example an installation-wide cloud credential that the admin configured for everyone. Typing another person's IDs into a form is not setting up trust.
 
 Before the fix shipped, a read-only audit of the installation SAM's maintainers use to build SAM counted the Google Cloud credentials and their owners: every one belonged to a single owner, so no saved credential pointed at someone else's pool. Other installations with more than one user who connected Google Cloud could have been affected, which is why the end of this post asks their operators to act.
 

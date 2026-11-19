@@ -33,7 +33,7 @@ A serverless monorepo platform for ephemeral AI coding agent environments on Clo
 
 ## Self-Hosted, Not SaaS
 
-SAM is open source and self-hosted; there is no SaaS. Each installation belongs to one person or organization, usually a team sharing cloud accounts. Cross-user isolation still matters (trust exists only where explicitly set up), but the threat is another account on the same installation, not the public. Never frame SAM as multi-tenant SaaS or compare it to public SaaS like GitHub Actions.
+SAM is open source and self-hosted; there is no SaaS. Each installation belongs to one person or organization, usually a team sharing cloud accounts. Cross-user isolation still matters (trust exists only where explicitly set up). The threat is any account the installation admits; signup approval is off by default, so open signup admits strangers. Never frame SAM as multi-tenant SaaS or compare it to GitHub Actions.
 
 ## Repository Structure
 
