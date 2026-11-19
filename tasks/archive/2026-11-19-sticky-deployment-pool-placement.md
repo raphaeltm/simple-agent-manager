@@ -11,7 +11,7 @@ Trace: release submission -> resolveDeploymentPlacement / canonical allocation -
 - [x] Reconstruct placement from actual node candidate including credentials and use it for volume attachment authority.
 - [x] Resolve volume placement using existing provider/location, with accurate rejection when unavailable.
 - [x] Update deployment documentation.
-- [ ] Validate lint/typecheck/tests/build, specialists and completion review.
+- [x] Validate lint/typecheck/tests/build, specialists and completion review.
 - [ ] Staging verification, CI and CodeRabbit; merge and monitor production.
 
 ## Acceptance
@@ -23,6 +23,9 @@ Rules 28, 62, 69, 74. Existing native-placement SQLite tests and scheduler pool 
 ## Validation evidence
 - Pre-fix SQLite divergence: both shared/exclusive retention tests failed; after fix both pass.
 - Focused suites: 133/134 passed before updating one expected error string; final focused rerun 31/31 passed. Remaining suites were green in prior run.
-- Root build: 19/19 tasks passed. Root lint import order fixed; rerun in progress. Full typecheck/test in progress.
-- Completion reviewer PASS for implementation; domain review PASS, follow-up Cloudflare review running.
-- Draft PR #2903; staging reservation succeeded, deployment run 44484341664 queued.
+- Root build: 19/19 tasks passed. Root lint 23/23 tasks passed; typecheck 38/38 passed. Full API run: 17,829 passed, 2 failed, 5 skipped; both failures were the Compose volume mock missing the newly used list read. Fixed mock and reran Compose 8/8 green. Focused deployment suites 134/134 green. All other package suites passed.
+- Completion reviewer PASS for implementation; Cloudflare/constitution/doc/security review PASS.
+- Draft PR #2903; staging reservation succeeded, deployment run 44484341664 in progress; live first release applied on Hetzner cx23 at fsn1, heartbeat confirmed. Second release tests GCP-first reorder. Runtime source tree unchanged since staging commit 428873ac8; later commits only task/test changes.
+
+## Workflow status at implementation archive
+Implementation and completion review passed. Remaining staging cleanup, CI, CodeRabbit and production gates are tracked in PR #2903 and local .do-state.md; this archive does not claim those operational gates have passed.
