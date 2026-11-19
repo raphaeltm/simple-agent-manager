@@ -75,7 +75,12 @@ async function resavePlatformCredential(nodeId: string) {
   await env.DATABASE.prepare(
     `UPDATE platform_credentials SET encrypted_token = ?, iv = ?, updated_at = ? WHERE id = ?`
   )
-    .bind(token.ciphertext, token.iv, new Date(Date.now() + 1000).toISOString(), `${nodeId}-proof-credential`)
+    .bind(
+      token.ciphertext,
+      token.iv,
+      new Date(Date.now() + 1000).toISOString(),
+      `${nodeId}-proof-credential`
+    )
     .run();
 }
 
@@ -270,7 +275,13 @@ describe('superadmin attestation removes a stranded SAM-capacity node', () => {
         WHERE target_id = ?`
     )
       .bind(seeded.nodeId)
-      .first<{ actor_user_id: string; tool: string; target_type: string; outcome: string; detail: string }>();
+      .first<{
+        actor_user_id: string;
+        tool: string;
+        target_type: string;
+        outcome: string;
+        detail: string;
+      }>();
     expect(audit).toMatchObject({
       actor_user_id: operatorId,
       tool: 'admin_operator_node_deletion',

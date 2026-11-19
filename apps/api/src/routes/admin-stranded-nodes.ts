@@ -23,17 +23,22 @@ import { getUserId, requireApproved, requireAuth, requireSuperadmin } from '../m
 import { errors } from '../middleware/error';
 import { requireActiveSettingsSuperadmin } from '../middleware/settings-admin';
 import { jsonValidator } from '../schemas';
-import { listStrandedNodeTasks } from '../services/node-stranded-tasks';
 import {
   listStrandedPlatformNodes,
   OPERATOR_ATTESTED_REMOVAL_REASON,
   recordOperatorNodeDeletion,
 } from '../services/node-operator-deletion';
+import { listStrandedNodeTasks } from '../services/node-stranded-tasks';
 import { completeAttestedNodeRemoval } from './nodes/manual-deletion';
 
 const OperatorNodeDeletionSchema = v.object({
   confirmation: v.pipe(v.string(), v.maxLength(200)),
-  note: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(OPERATOR_NODE_DELETION_NOTE_MAX_CHARS)),
+  note: v.pipe(
+    v.string(),
+    v.trim(),
+    v.minLength(1),
+    v.maxLength(OPERATOR_NODE_DELETION_NOTE_MAX_CHARS)
+  ),
 });
 
 const adminStrandedNodeRoutes = new Hono<{ Bindings: Env }>();

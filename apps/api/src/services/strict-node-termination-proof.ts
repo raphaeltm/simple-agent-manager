@@ -9,7 +9,7 @@
  * superadmin for SAM's own capacity (`services/node-operator-deletion.ts`). Who attested is
  * recorded in the removal audit (`node_health_events`), not on the node row.
  */
-import { type SQL, and, eq, sql } from 'drizzle-orm';
+import { and, eq, type SQL, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
 import {
@@ -72,7 +72,11 @@ export async function markRuntimeTerminationConfirmed(
       providerDeletionRequestedAt: null,
       providerDeletionJson: null,
     })
-    .where(admission ? and(exactNodeIncarnationPredicate(node), admission) : exactNodeIncarnationPredicate(node))
+    .where(
+      admission
+        ? and(exactNodeIncarnationPredicate(node), admission)
+        : exactNodeIncarnationPredicate(node)
+    )
     .run();
   if ((result.meta.changes ?? 0) !== 1) {
     throw new Error(`Strict node deletion proof CAS failed: node=${node.id}`);

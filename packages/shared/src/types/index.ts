@@ -490,6 +490,16 @@ export type { ActivityActorType, ActivityEvent, ActivityEventType } from './acti
 
 // Notification
 export type {
+  AdminStrandedNode,
+  ListAdminStrandedNodesResponse,
+  OperatorNodeDeletionRequest,
+} from './admin-stranded-nodes';
+export {
+  DEFAULT_ADMIN_STRANDED_NODES_LIMIT,
+  MAX_ADMIN_STRANDED_NODES_LIMIT,
+  OPERATOR_NODE_DELETION_NOTE_MAX_CHARS,
+} from './admin-stranded-nodes';
+export type {
   CreateNotificationRequest,
   ListNotificationsResponse,
   NotificationChannel,
@@ -525,17 +535,6 @@ export {
   OPERATIONS_AUTO_SAFE_ACTIONS,
   OPERATIONS_IRREVERSIBLE_ACTIONS,
 } from './operations-actions';
-
-export type {
-  AdminStrandedNode,
-  ListAdminStrandedNodesResponse,
-  OperatorNodeDeletionRequest,
-} from './admin-stranded-nodes';
-export {
-  DEFAULT_ADMIN_STRANDED_NODES_LIMIT,
-  MAX_ADMIN_STRANDED_NODES_LIMIT,
-  OPERATOR_NODE_DELETION_NOTE_MAX_CHARS,
-} from './admin-stranded-nodes';
 
 // Shared session access
 export type {

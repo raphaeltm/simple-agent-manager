@@ -2,10 +2,7 @@
  * Providerless strict teardown: a `destroying` VM row whose provider create response was lost.
  * Split out of `strict-node-deletion.ts` (rule 18); behavior unchanged.
  */
-import {
-  type ProviderRequestContext,
-  type VMInstance,
-} from '@simple-agent-manager/providers';
+import { type ProviderRequestContext, type VMInstance } from '@simple-agent-manager/providers';
 
 import type { Env } from '../env';
 import { getCredentialEncryptionKey } from '../lib/secrets';
@@ -55,7 +52,11 @@ async function requirePinnedProviderlessCredential(
 ): Promise<ProviderForUserResult> {
   const { targetProvider, attributionUserId, attributionProjectId, exactCredential } =
     getStrictNodeCredentialContext(node, userId);
-  if (!targetProvider || !exactCredential || !hasExactProviderCredentialGenerationProof(exactCredential)) {
+  if (
+    !targetProvider ||
+    !exactCredential ||
+    !hasExactProviderCredentialGenerationProof(exactCredential)
+  ) {
     throw new Error(
       `Cannot reconcile providerless VM ${node.id}: exact provider credential binding is missing ` +
         `(${describeMissingExactBinding(node, targetProvider, exactCredential)})`

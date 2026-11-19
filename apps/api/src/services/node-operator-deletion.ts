@@ -187,7 +187,11 @@ export async function recordOperatorNodeDeletion(
     .where(eq(schema.nodes.id, input.nodeId))
     .limit(1);
   if (!node) throw errors.notFound('Node');
-  if (isUserOwnedNodeClass(node.nodeClass) || node.nodeClass !== 'managed' || node.runtime !== 'vm') {
+  if (
+    isUserOwnedNodeClass(node.nodeClass) ||
+    node.nodeClass !== 'managed' ||
+    node.runtime !== 'vm'
+  ) {
     throw errors.conflict('Only a managed cloud server can be removed this way');
   }
   if (!isOnSamCapacity(node)) {
@@ -268,7 +272,6 @@ export async function recordOperatorNodeDeletion(
   });
   return { node, runtimeTerminationConfirmedAt };
 }
-
 
 /** Teardown error text is shown to the operator only as a hint; keep the page small. */
 const STRANDED_NODE_ERROR_MESSAGE_MAX_CHARS = 500;

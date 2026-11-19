@@ -33,7 +33,10 @@ export interface ManualNodeDeletionProof {
  * `placementCredentialSource`, older nodes set `credentialSource`.
  */
 export function isOnSamCapacity(
-  node: Pick<NodeRow, 'credentialSource' | 'placementCredentialSource' | 'credentialAttributionSource'>
+  node: Pick<
+    NodeRow,
+    'credentialSource' | 'placementCredentialSource' | 'credentialAttributionSource'
+  >
 ): boolean {
   return (
     node.credentialSource === 'platform' ||
