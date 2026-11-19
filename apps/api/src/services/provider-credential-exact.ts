@@ -50,7 +50,7 @@ type ProviderFactory<TEnv extends Env> = (
   env: TEnv
 ) => Promise<ProviderResolutionResult>;
 
-function parseProviderCredentialReference(
+export function parseProviderCredentialReference(
   reference: string | null | undefined
 ): ParsedProviderCredentialReference | null {
   const trimmed = reference?.trim();
@@ -91,7 +91,7 @@ export async function fingerprintEncryptedProviderCredential(
   return `sha256:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 }
 
-async function exactCredentialGenerationMatches(
+export async function exactCredentialGenerationMatches(
   exactCredential: ExactProviderCredentialBinding,
   row: { encryptedToken: string; iv: string; createdAt?: string | null; updatedAt?: string | null }
 ): Promise<{ matches: boolean; fingerprint: string }> {

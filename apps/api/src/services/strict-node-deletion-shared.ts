@@ -7,14 +7,12 @@ import { and, eq, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
-import type { Env } from '../env';
-import { getCredentialEncryptionKey } from '../lib/secrets';
 import {
   hasExactProviderCredentialGenerationProof,
   isExactCredentialSource,
 } from './provider-credential-exact';
 import {
-  createProviderForUser,
+  type createProviderForUser,
   type ExactProviderCredentialBinding,
   exactProviderCredentialBindingFromPlacementSnapshot,
 } from './provider-credentials';
@@ -189,40 +187,4 @@ export function describeMissingExactBinding(
     missing.push('placementCredentialFingerprint and placementCredentialVersion');
   }
   return missing.join(', ');
-}
-
-export async function requireStrictNodeProvider(
-  db: NodeDb,
-  node: NodeRow,
-  userId: string,
-  env: Env
-): Promise<ProviderForUserResult> {
-  const { targetProvider, attributionUserId, attributionProjectId, exactCredential } =
-    getStrictNodeCredentialContext(node, userId);
-  // A fingerprint is the preferred generation proof, but requiring it outright strands every
-  // node provisioned before migration 0142 — that column is backfill-proof, so those rows can
-  // never satisfy it. `hasExactProviderCredentialGenerationProof` also accepts the weaker
-  // version snapshot those nodes were placed with; `exactCredentialGenerationMatches` still
-  // refuses a rotated credential on either path, so this stays fail-closed.
-  if (!targetProvider || !hasExactProviderCredentialGenerationProof(exactCredential)) {
-    throw new Error(
-      `Cannot strictly delete node ${node.id}: exact provider credential binding is missing ` +
-        `(${describeMissingExactBinding(node, targetProvider, exactCredential)})`
-    );
-  }
-  const providerResult = await createProviderForUser(
-    db,
-    attributionUserId,
-    getCredentialEncryptionKey(env),
-    env,
-    targetProvider,
-    attributionProjectId,
-    exactCredential
-  );
-  if (!providerResult) {
-    throw new Error(
-      `Cloud provider credentials missing for strict node deletion: node=${node.id} provider=${node.cloudProvider ?? 'unknown'} instance=${node.providerInstanceId}`
-    );
-  }
-  return providerResult;
 }
