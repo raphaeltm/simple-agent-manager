@@ -300,3 +300,7 @@ Redirects and oversized responses are refused on every attempt.
 
 The metadata proxy listener port is reserved outside node tunnel leases even while the GCE
 profile is disabled. Deploy and Caddy refuse a conflicting range before serving.
+
+Configured SMTP relay hostnames are resolved at deploy, opening only their exact TCP endpoints.
+After relay DNS changes, rerun `pnpm selfhost:deploy --init` to reconcile the fence. Metadata
+addresses and protected local listeners remain forbidden for relays.
