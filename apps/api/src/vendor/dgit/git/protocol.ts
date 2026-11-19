@@ -1,7 +1,7 @@
 /* eslint-disable */
 // @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 // FILE SIZE EXCEPTION: vendored third-party code kept identical to upstream dgit (see ../UPSTREAM.md)
-import { concat, isOid, ZERO_OID, te } from "./util";
+import { concat, isOid, ZERO_OID, td, te } from "./util";
 import { pkt, FLUSH, PktParser } from "./pktline";
 import { GitStore } from "./store";
 import { PackWriter } from "./pack";
@@ -1130,9 +1130,13 @@ async function reachableComplete(
   store: GitStore,
   tip: string,
   known: OidSet,
-  failed: OidSet
+  failed: OidSet,
+  cached: boolean
 ): Promise<boolean> {
-  if (known.hasHex(tip)) return true; // tip already in a validated closure
+  // SAM: with a valid reachable cache, every cached object is reachable from a
+  // validated ref tip, so its closure is complete: one SQL lookup, no object read.
+  const validated = (oid: string) => known.hasHex(oid) || (cached && store.reachableHas(oid));
+  if (validated(tip)) return true; // tip already in a validated closure
   if (failed.hasHex(tip)) return false; // an earlier command in this push proved it incomplete
   // Cursor BFS over the scratch set itself: newly reached oids append past the
   // cursor, so no separate hex-oid stack is needed to walk it. Parallel arrays
@@ -1164,6 +1168,7 @@ async function reachableComplete(
     if (!obj) return fail(i);
     let children: ChildRef[];
     try {
+      assertGitObjectShape(obj);
       children = childRefs(obj);
     } catch (err) {
       // SAM: a commit, tag or tree that does not parse cannot have a proven
@@ -1172,7 +1177,7 @@ async function reachableComplete(
       throw err;
     }
     for (const child of children) {
-      if (known.hasHex(child.oid) || fresh.hasHex(child.oid)) {
+      if (validated(child.oid) || fresh.hasHex(child.oid)) {
         // Already validated or queued under another edge: this edge still has to name
         // an object of the type it requires (absent ones fail when their entry is walked).
         const type = store.typeAndSize(child.oid)?.type;
@@ -1238,6 +1243,58 @@ function childOids(obj: { type: ObjType; data: Uint8Array }): string[] {
   return [];
 }
 
+const TREE_MODES: ReadonlySet<string> = new Set(["100644", "100755", "100664", "120000", "40000", "160000"]);
+
+/** Header keys of a commit or tag, in order (continuation lines belong to the previous key). */
+function headerKeys(data: Uint8Array): string[] {
+  const text = td.decode(data);
+  const end = text.indexOf("\n\n");
+  const keys: string[] = [];
+  for (const line of (end === -1 ? text : text.slice(0, end)).split("\n")) {
+    if (line === "" || line.startsWith(" ")) continue;
+    keys.push(line.slice(0, line.indexOf(" ") === -1 ? line.length : line.indexOf(" ")));
+  }
+  return keys;
+}
+
+/**
+ * SAM: refuse objects git itself cannot read, so a pushed object can never make the
+ * repository uncloneable. The parsers above are lenient (any header order, any mode
+ * text); git requires a commit to start with `tree` and its parents, a tag to start
+ * with `object`, `type`, `tag`, and tree entries with a known mode and a plain name.
+ */
+function assertGitObjectShape(obj: { type: ObjType; data: Uint8Array }): void {
+  if (obj.type === "commit") {
+    const keys = headerKeys(obj.data);
+    let i = 0;
+    if (keys[i++] !== "tree") throw new GitParseError("commit must start with a tree header");
+    while (keys[i] === "parent") i++;
+    if (keys[i] !== "author" || keys[i + 1] !== "committer") {
+      throw new GitParseError("commit must have author then committer after its parents");
+    }
+    for (const k of keys.slice(i + 2)) {
+      if (k === "tree" || k === "parent" || k === "author" || k === "committer") {
+        throw new GitParseError(`commit has a misplaced ${k} header`);
+      }
+    }
+  } else if (obj.type === "tag") {
+    const keys = headerKeys(obj.data);
+    if (keys[0] !== "object" || keys[1] !== "type" || keys[2] !== "tag") {
+      throw new GitParseError("tag must start with object, type and tag headers");
+    }
+    if (!parseTag(obj.data).tag) throw new GitParseError("tag has an empty name");
+  } else if (obj.type === "tree") {
+    const names = new Set<string>();
+    for (const e of parseTree(obj.data)) {
+      if (!TREE_MODES.has(e.mode)) throw new GitParseError("tree entry has an invalid mode");
+      if (!e.name || e.name.includes("/") || names.has(e.name)) {
+        throw new GitParseError("tree entry has an invalid or duplicate name");
+      }
+      names.add(e.name);
+    }
+  }
+}
+
 /** An object a parent references, with the type the reference requires. */
 interface ChildRef {
   oid: string;
@@ -1273,6 +1330,21 @@ function childRefs(obj: { type: ObjType; data: Uint8Array }): ChildRef[] {
   return [];
 }
 
+/**
+ * SAM: the ancestry check only decides whether an update strands history (GC and
+ * cache invalidation). When a heavy history exhausts the push's work budget, treat
+ * the update as forced, the conservative answer, rather than failing the push.
+ */
+async function isAncestorOrForced(store: GitStore, old: string, next: string): Promise<boolean> {
+  try {
+    return await isAncestor(store, old, next);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    if (msg.includes("exceeds decompression budget") || msg.includes("exceeds time budget")) return false;
+    throw err;
+  }
+}
+
 export async function validatePush(
   store: GitStore,
   commands: PushCommand[],
@@ -1293,14 +1365,11 @@ export async function validatePush(
   // SAM: seeding reads no objects. Upstream peeled every ref tip here, which
   // inflated each tip under the push's decompression budget on every push, so
   // a handful of large tips made every later push, including the deletion
-  // that would remove them, exceed the budget. Only cached peel targets count.
+  // that would remove them, exceed the budget. A walk that reaches a tagged
+  // commit descends through it instead (or stops at the reachable cache).
   const known = new OidSet(4096);
   const existing = store.refs();
-  for (const r of existing) {
-    known.addHex(r.target);
-    const peeled = store.getPeeled(r.target);
-    if (peeled) known.addHex(peeled);
-  }
+  for (const r of existing) known.addHex(r.target);
   const knownHead = store.resolveHead();
   if (knownHead) known.addHex(knownHead);
   // oids proven to have an incomplete closure earlier in this push
@@ -1366,12 +1435,12 @@ export async function validatePush(
       decisions.push({ ref: cmd.ref, expectedOld: cmd.old, reject: "trying to write non-commit object to branch" });
       continue;
     }
-    const connected = await reachableComplete(store, cmd.next, known, failed);
+    const connected = await reachableComplete(store, cmd.next, known, failed, hadCache);
     if (!connected) {
       decisions.push({ ref: cmd.ref, expectedOld: cmd.old, reject: "missing necessary objects" });
       continue;
     }
-    const forced = cmd.old !== ZERO_OID && !(await isAncestor(store, cmd.old, cmd.next));
+    const forced = cmd.old !== ZERO_OID && !(await isAncestorOrForced(store, cmd.old, cmd.next));
     decisions.push({ ref: cmd.ref, expectedOld: cmd.old, set: cmd.next, forced });
     if (current === ZERO_OID) trackRef(cmd.ref, 1);
   }

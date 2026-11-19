@@ -1235,6 +1235,43 @@ describe('push connectivity admission (closure must be complete per command)', (
     await assertCleanClone(remote);
   });
 
+  it('refuses objects git cannot read (header order, tag headers, tree modes) and keeps clones working', async () => {
+    const project = await createHostedProject(await createEmailOnlyUser(), 'Object shapes');
+    const token = await mintToken(project, 'write');
+    const remote = localRemote(project.repository, token);
+    const work = await freshDir('object-shapes');
+    await gitOk(['init', '-q', '-b', 'main', work]);
+    const plain = await commitFile(work, 'plain.txt');
+    const blob = (await gitOk(['rev-parse', `${plain.commit}:plain.txt`], work)).stdout.trim();
+    const literal = (type: string, input: Buffer | string) => {
+      const out = spawnSync('git', ['hash-object', '-t', type, '--literally', '-w', '--stdin'], { cwd: work, env: gitEnv(), input });
+      expect(out.status).toBe(0);
+      return out.stdout.toString().trim();
+    };
+    const sig = 'Test <test@example.com> 0 +0000';
+    const authorFirst = literal('commit', `author ${sig}\ntree ${plain.tree}\ncommitter ${sig}\n\nauthor first\n`);
+    const typeFirstTag = literal('tag', `type commit\nobject ${plain.commit}\ntag odd\ntagger ${sig}\n\nodd\n`);
+    const badModeTree = literal('tree', Buffer.concat([Buffer.from('8 f\0'), Buffer.from(blob, 'hex')]));
+    const badModeCommit = literal('commit', `tree ${badModeTree}\nauthor ${sig}\ncommitter ${sig}\n\nbad mode\n`);
+    const out = await receive(
+      project,
+      token,
+      [
+        [ZERO, authorFirst, 'refs/heads/author-first'],
+        [ZERO, typeFirstTag, 'refs/tags/type-first'],
+        [ZERO, badModeCommit, 'refs/heads/bad-mode'],
+        [ZERO, plain.commit, 'refs/heads/plain'],
+      ],
+      packOf(work, [authorFirst, typeFirstTag, badModeTree, badModeCommit, plain.commit, plain.tree, blob])
+    );
+    expect(out).toContain('ng refs/heads/author-first missing necessary objects');
+    expect(out).toContain('ng refs/tags/type-first missing necessary objects');
+    expect(out).toContain('ng refs/heads/bad-mode missing necessary objects');
+    expect(out).toContain('ok refs/heads/plain');
+    const check = await assertCleanClone(remote);
+    expect(await rev(check, 'origin/plain')).toBe(plain.commit);
+  });
+
   it('treats deleting a missing ref as a no-op that queues no GC, and refuses D/F ref conflicts', async () => {
     const project = await createHostedProject(await createEmailOnlyUser(), 'Ref no-ops');
     const token = await mintToken(project, 'write');

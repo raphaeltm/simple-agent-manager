@@ -18,6 +18,8 @@ import ts from 'typescript';
 
 export const REPO_ROOT = resolve(import.meta.dirname, '../../../..');
 export const API_SRC = resolve(REPO_ROOT, 'apps/api/src');
+/** Walking a >1,000-file import graph takes several seconds on a loaded CI runner. */
+export const GRAPH_WALK_TIMEOUT_MS = 60_000;
 
 /** Repository-relative path prefixes only the self-host build may contain. */
 export const SELFHOST_ONLY_PATHS: readonly string[] = [

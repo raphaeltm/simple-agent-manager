@@ -23,6 +23,7 @@ import {
   API_SRC,
   CLOUDFLARE_ENTRY_FORBIDDEN_PATHS,
   collectImportGraph,
+  GRAPH_WALK_TIMEOUT_MS,
   REPO_ROOT,
   selfhostOnlyFindings,
 } from '../../helpers/selfhost-only-modules';
@@ -37,9 +38,6 @@ function celldEntryImports(): string[] {
     .filter((specifier) => specifier.startsWith(prefix))
     .map((specifier) => resolve(API_SRC, specifier.slice(prefix.length)));
 }
-
-/** Walking a >1,000-file import graph takes several seconds on a loaded CI runner. */
-const GRAPH_WALK_TIMEOUT_MS = 60_000;
 
 describe('self-host-only code stays out of the Cloudflare Worker', () => {
   it('detects real imports of the hosted DO, vendored git and pako', () => {

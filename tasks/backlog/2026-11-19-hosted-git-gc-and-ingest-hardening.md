@@ -11,7 +11,14 @@ The adversarial review of the push admission path in PR #2907 (H2, SAM-hosted gi
    GC then fails on every attempt, garbage packs are never reclaimed, and the repository drifts towards `maxRepoBytes`, where every push is refused. The reviewer reproduced this at 268 MB of a 268.4 MB cap. Raising the budget only moves the bound, since a compression bomb can exceed any inflation or deadline cap.
 2. **Delta depth is enforced on read but not at ingest** (review M4). `packstore.ts` resolves deltas eagerly at ingest without checking `maxDeltaDepth`, so a pack built with `--depth=250` is accepted. Cold reads then throw `delta chain exceeds depth`, and a shallow clone aborts with `early EOF` until GC rewrites the objects loose. The exception is thrown inside the upload response stream and is not caught.
 3. **GC holds the input gate for the whole sweep** (review M5, the part not fixed in #2907). `gc()` runs under `blockConcurrencyWhile` for up to `workTimeoutMs` (120 s), blocking every other request to that repository, reads included.
-4. **Lower-severity items** (review L7 to L10):
+4. **Pushes over heavy history without a reachable cache** (re-verification F1, the part not fixed in #2907).
+   - With a valid reachable cache, a push stops at any cached object. Without one, the case after any deletion or force push until the next full clone, a push whose parent is not a ref tip proves that parent's closure by walking old commits and trees under the 128 MiB budget.
+   - A repository whose old trees inflate past the budget then cannot accept a fork-from-old-commit push. A full clone faces the same envelope.
+   - An ancestry check that runs out of budget is already treated as a forced update rather than failing the push.
+   - Fix: keep a persistent set of validated objects that only GC prunes. GC already computes the reachable set, and every accepted push adds its proven closure. Or record commit parents at ingest.
+   - Also: `store.setPeeled` is never called, so `getPeeled` and the `peeled` table are dead upstream code. Remove them or populate them.
+5. **Alarm error handling** (re-verification F4): `armHostedGitGcAlarm` in the failed-ingest path propagates a `getAlarm`/`setAlarm` error as a 500, which is deliberate so the earlier tests keep the cleanup-before-alarm ordering. `queueHostedGitGc` swallows alarm errors, so `gc-pending=1` can wait for the next push.
+6. **Lower-severity items** (review L7 to L10):
    - **No rate limit.** There is no per-token or per-repository request rate limit, and a queued push is authorized before it waits on `receiveChain`.
    - **Command lines dropped silently.** Unmatched command pkt-lines are skipped with no `ng`, and invalid UTF-8 ref bytes alias to U+FFFD.
    - **Gzip buffering.** The gzip push path buffers about 3× `maxPushBytes`.
@@ -36,3 +43,4 @@ Who can trigger them:
 - [ ] GC no longer blocks reads for the whole sweep; a test shows a clone proceeding while GC runs.
 - [ ] Decide on and implement per-token push rate limiting, or record why not.
 - [ ] Every malformed command line is answered with `ng` or a refusal, never dropped.
+- [ ] A push forking from an old, heavy, uncached commit succeeds within the budget. A real-git test proves it, with no reachable cache present.

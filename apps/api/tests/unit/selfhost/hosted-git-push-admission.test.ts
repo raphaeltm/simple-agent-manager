@@ -47,7 +47,11 @@ class Repo {
     return this.put(label, 'commit', enc.encode(text));
   }
   tag(label: string, object: string, type: string) {
-    return this.put(label, 'tag', enc.encode(`object ${object}\ntype ${type}\ntag ${label}\ntagger ${SIG}\n\n${label}\n`));
+    return this.put(
+      label,
+      'tag',
+      enc.encode(`object ${object}\ntype ${type}\ntag ${label}\ntagger ${SIG}\n\n${label}\n`)
+    );
   }
   /** A complete one-file commit. */
   simple(label: string, parents: string[] = []) {
@@ -83,7 +87,11 @@ class Repo {
 
 async function decide(repo: Repo, commands: [old: string, next: string, ref: string][]) {
   return withGitWorkBudget(DEFAULT_HOSTED_GIT_LIMITS, () =>
-    validatePush(repo.store(), commands.map(([old, next, ref]) => ({ old, next, ref })), null)
+    validatePush(
+      repo.store(),
+      commands.map(([old, next, ref]) => ({ old, next, ref })),
+      null
+    )
   );
 }
 
@@ -141,7 +149,9 @@ describe('push admission: edge types', () => {
     const plan = await decide(repo, [[ZERO, evil, 'refs/heads/evil']]);
     expect(plan.decisions[0]).toMatchObject({ reject: 'missing necessary objects' });
     const ok = repo.simple('child', [tip]);
-    expect((await decide(repo, [[ZERO, ok, 'refs/heads/child']])).decisions[0]).toMatchObject({ set: ok });
+    expect((await decide(repo, [[ZERO, ok, 'refs/heads/child']])).decisions[0]).toMatchObject({
+      set: ok,
+    });
   });
 
   it('refuses a tree entry whose mode disagrees with its object type', async () => {
@@ -177,7 +187,9 @@ describe('push admission: edge types', () => {
       [ZERO, tree, 'refs/heads/tree'],
       [ZERO, tree, 'refs/tags/tree'],
     ]);
-    expect(plan.decisions[0]).toMatchObject({ reject: 'trying to write non-commit object to branch' });
+    expect(plan.decisions[0]).toMatchObject({
+      reject: 'trying to write non-commit object to branch',
+    });
     expect(plan.decisions[1]).toMatchObject({ set: tree });
   });
 });
@@ -261,5 +273,153 @@ describe('armHostedGitGcAlarm', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('push admission: object shapes git can read', () => {
+  const header = `author ${SIG}\ncommitter ${SIG}`;
+  it('refuses commits, tags and trees git cannot parse, with git-shaped controls accepted', async () => {
+    const repo = new Repo();
+    const tree = repo.tree('shape-tree', [treeEntry('100644', 'f', repo.blob('shape-blob'))]);
+    const signed = repo.put(
+      'signed',
+      'commit',
+      enc.encode(
+        `tree ${tree}\n${header}\nencoding UTF-8\ngpgsig -----BEGIN PGP SIGNATURE-----\n line\n -----END PGP SIGNATURE-----\n\nsigned\n`
+      )
+    );
+    const authorFirst = repo.put(
+      'author-first',
+      'commit',
+      enc.encode(`${header.split('\n')[0]}\ntree ${tree}\n${header.split('\n')[1]}\n\nx\n`)
+    );
+    const noCommitter = repo.put(
+      'no-committer',
+      'commit',
+      enc.encode(`tree ${tree}\nauthor ${SIG}\n\nx\n`)
+    );
+    const lateParent = repo.put(
+      'late-parent',
+      'commit',
+      enc.encode(`tree ${tree}\n${header}\nparent ${signed}\n\nx\n`)
+    );
+    const tagTypeFirst = repo.put(
+      'type-first',
+      'tag',
+      enc.encode(`type commit\nobject ${signed}\ntag t\ntagger ${SIG}\n\nx\n`)
+    );
+    const tagNoName = repo.put(
+      'no-name',
+      'tag',
+      enc.encode(`object ${signed}\ntype commit\ntagger ${SIG}\n\nx\n`)
+    );
+    const badMode = repo.commit(
+      'bad-mode',
+      repo.tree('bad-mode-tree', [treeEntry('8', 'f', repo.blob('m'))])
+    );
+    const dupName = repo.commit(
+      'dup-name',
+      repo.tree('dup-tree', [
+        treeEntry('100644', 'f', repo.blob('d1')),
+        treeEntry('100644', 'f', repo.blob('d2')),
+      ])
+    );
+    const slashName = repo.commit(
+      'slash',
+      repo.tree('slash-tree', [treeEntry('100644', 'a/b', repo.blob('s'))])
+    );
+    const plan = await decide(repo, [
+      [ZERO, signed, 'refs/heads/signed'],
+      [ZERO, authorFirst, 'refs/heads/author-first'],
+      [ZERO, noCommitter, 'refs/heads/no-committer'],
+      [ZERO, lateParent, 'refs/heads/late-parent'],
+      [ZERO, tagTypeFirst, 'refs/tags/type-first'],
+      [ZERO, tagNoName, 'refs/tags/no-name'],
+      [ZERO, badMode, 'refs/heads/bad-mode'],
+      [ZERO, dupName, 'refs/heads/dup-name'],
+      [ZERO, slashName, 'refs/heads/slash'],
+      [ZERO, repo.tag('good-tag', signed, 'commit'), 'refs/tags/good'],
+    ]);
+    const outcome = plan.decisions.map((d) => (d.reject ? 'reject' : 'set'));
+    expect(outcome).toEqual([
+      'set',
+      'reject',
+      'reject',
+      'reject',
+      'reject',
+      'reject',
+      'reject',
+      'reject',
+      'reject',
+      'set',
+    ]);
+  });
+});
+
+describe('push admission: bounded reads of old history', () => {
+  /** A history of `n` commits where only the newest is a ref tip. */
+  function history(repo: Repo, n: number) {
+    const commits: string[] = [];
+    for (let i = 0; i < n; i++)
+      commits.push(repo.simple(`h-${i}`, commits.length ? [commits[commits.length - 1]!] : []));
+    return commits;
+  }
+
+  it('stops at the reachable cache when a push forks from an old commit', async () => {
+    for (const cached of [true, false]) {
+      const repo = new Repo();
+      const commits = history(repo, 1201);
+      repo.refs.set('refs/heads/main', commits[commits.length - 1]!);
+      const reachable = new Set(repo.objects.keys());
+      // Fork just below the tip, so proving the parent's closure spans the whole history.
+      const fork = repo.simple(`fork-${cached}`, [commits[commits.length - 2]!]);
+      const store = repo.store() as unknown as Record<string, unknown>;
+      store.getMeta = (key: string) => (cached && key === 'reachable-version' ? 'v' : null);
+      store.reachableHas = (oid: string) => reachable.has(oid);
+      repo.reads = 0;
+      const plan = await withGitWorkBudget(DEFAULT_HOSTED_GIT_LIMITS, () =>
+        validatePush(
+          store as unknown as GitStore,
+          [{ old: ZERO, next: fork, ref: 'refs/heads/fork' }],
+          null
+        )
+      );
+      expect(plan.decisions[0]).toMatchObject({ set: fork });
+      // Cached: the fork commit and its tree. Without the cache (control): the walk proves
+      // the old history down to the root, since no ref tip covers it.
+      if (cached) expect(repo.reads).toBe(2);
+      else expect(repo.reads).toBeGreaterThan(1201);
+    }
+  });
+
+  it('treats an update as forced when the ancestry check exhausts the work budget', async () => {
+    const repo = new Repo();
+    const old = repo.simple('old');
+    const side = repo.simple('side');
+    const next = repo.simple('next', [side]);
+    repo.refs.set('refs/heads/main', old);
+    repo.refs.set('refs/heads/side', side);
+    const store = repo.store() as unknown as Record<string, unknown>;
+    const get = store.get as (oid: string) => Promise<unknown>;
+    let failRead: string | null = side;
+    store.get = async (oid: string) => {
+      if (oid === failRead) throw new Error('git work exceeds decompression budget');
+      return get(oid);
+    };
+    const plan = await withGitWorkBudget(DEFAULT_HOSTED_GIT_LIMITS, () =>
+      validatePush(store as unknown as GitStore, [{ old, next, ref: 'refs/heads/main' }], null)
+    );
+    expect(plan.decisions[0]).toMatchObject({ set: next, forced: true });
+    // Any other failure still fails the push.
+    failRead = side;
+    store.get = async (oid: string) => {
+      if (oid === failRead) throw new Error('storage unavailable');
+      return get(oid);
+    };
+    await expect(
+      withGitWorkBudget(DEFAULT_HOSTED_GIT_LIMITS, () =>
+        validatePush(store as unknown as GitStore, [{ old, next, ref: 'refs/heads/main' }], null)
+      )
+    ).rejects.toThrow('storage unavailable');
   });
 });

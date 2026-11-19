@@ -96,3 +96,11 @@ Previous owner 01M7SR1B79 stopped after repeated provider content-filter refusal
 - Request-body helpers moved to `hosted-git-body.ts` so `hosted-git-repo.ts` stays under 500 lines; GC queueing is one helper (`queueHostedGitGc`, `armHostedGitGcAlarm`).
 - [ ] Fresh CI green, 0 open threads, Codex re-requested on final head
 - [ ] Final BOX smoke on the exact final head over main (closes the L22c "box from main runs an agent session" criterion deferred to H2 by Raphaël)
+
+## Independent re-verification of f9eb945ef (23:20 UTC)
+
+A fresh security-auditor re-verified f9eb945ef. It found 0 CRITICAL and 0 HIGH. Its 400-seed differential fuzz confirmed the failure memo, the parse-failure handling, GC-on-throw, the no-op delete, the alarm and the D/F checks. Mutating the blame-parent logic to blame the child made 74 fuzz cases red.
+
+MEDIUM-F2 was fixed: lenient parsers let a writer push a commit with `author` before `tree`, tags missing or reordering `object`/`type`/`tag`, or tree modes like `8`, and git then cannot clone. `assertGitObjectShape` now runs in the walk, so a malformed object rejects its own command. A real-git test reproduces each shape; a signed commit with continuation lines and extra headers stays accepted.
+
+MEDIUM-F1 was partly fixed: with a valid reachable cache the walk stops at cached objects (SQL lookup, no read), and an ancestry check that exhausts the work budget counts as a forced update rather than failing the push. The dead `getPeeled` seeding was dropped. The cache-less heavy-history case and F4 (alarm error handling) were deferred to the backlog task. Discrimination was checked again: removing the shape check, the cache stop or the budget tolerance each turned its intended tests red.
