@@ -122,7 +122,8 @@ Some cases are not fully closed yet, and the [security architecture page](/docs/
 
 1. Update your installation to the latest release.
 2. Have each user who connected Google Cloud with the guided setup run that setup again for the same Google project. Setup reuses the existing pool and service account, scopes the provider to that user and removes the pool-wide binding. If the connection card shows **Re-run Google setup**, use it. Otherwise, disconnect and choose **Connect with Google** again with the same project. Running machines stay deletable, but new work cannot start on Google Cloud in between, and it is worth checking your compute pool settings afterwards. The [Google Cloud guide](/docs/guides/google-cloud/) has the details.
-3. If setup now reports that a pool belongs to a different owner, another user or your installation's own credential already uses that Google project. Only an operator can release a pool claim, and the [self-hosting guide](/docs/guides/self-hosting/) says when that is safe.
+3. If you changed `GCP_WIF_POOL_ID` or `GCP_SERVICE_ACCOUNT_ID` since a connection was made, setup only cleans up the pool and service account those settings name now. Remove the old `principalSet://…/workloadIdentityPools/<old-pool>/*` member from the previous service account by hand, as the [self-hosting guide](/docs/guides/self-hosting/) describes.
+4. If setup now reports that a pool belongs to a different owner, another user or your installation's own credential already uses that Google project. Only an operator can release a pool claim, and the [self-hosting guide](/docs/guides/self-hosting/) says when that is safe.
 
 ## The general lesson
 
