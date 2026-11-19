@@ -5,6 +5,7 @@
  * round trip is live/backup-restore.live.test.ts (pinned MinIO image, Docker).
  */
 import { randomBytes } from 'node:crypto';
+import * as fs from 'node:fs';
 import {
   cpSync,
   existsSync,
@@ -39,6 +40,10 @@ import {
 import { buildCelldConfig } from './celld-config';
 import { prepareCelldProject, writeCelldConfig } from './celld-project';
 import { composeProjectFor, expectedComposeProjectFor, recordInstall } from './install-record';
+
+vi.mock('node:fs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('node:fs')>()),
+}));
 
 const PLATFORM_KEYS = JSON.stringify({ SAM_INSTALLATION_ID: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' });
 const SECRET = 'store-secret-value-123';
@@ -115,6 +120,7 @@ function fakeRun(command: string, args: string[], env?: NodeJS.ProcessEnv): RunR
           : '',
     };
   if (command === 'docker' && args[0] === 'volume') {
+    if (args[1] === 'ls') return { ...ok, stdout: `${selectedProject}_celld-data` };
     if (args[1] === 'rm') return ok;
     if (args[1] === 'inspect') {
       cacheInspections += 1;
@@ -126,7 +132,8 @@ function fakeRun(command: string, args: string[], env?: NodeJS.ProcessEnv): RunR
         Name: name,
         CreatedAt:
           (cacheProof === 'replaced' && cacheInspections > 1) ||
-          (cacheProof === 'replaced-after-remove' && cacheInspections > 2)
+          (cacheProof === 'replaced-after-remove' &&
+            calls.some((c) => c.args[0] === 'container' && c.args[1] === 'rm'))
             ? '2026-11-19T02:00:00Z'
             : '2026-11-19T01:00:00Z',
         Labels: {
@@ -636,6 +643,84 @@ describe('runRollback', () => {
     );
   });
 
+  it('binds a manual rollback to the authenticated source commit before mutation', () => {
+    const context = ctx('gs://fleet/celld', join(root, 'state'));
+    const snapshot = join(root, 'wrong-code-snapshot');
+    runBackup(context, snapshot);
+    calls = [];
+    expect(() => runRollback(context, snapshot, 'f'.repeat(40))).toThrow(/different code revision/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('retains original owned state and cache when staging restored files fails, then retries', () => {
+    const context = ctx('gs://fleet/celld', join(root, 'state'));
+    const snapshot = join(root, 'retry-state-copy');
+    runBackup(context, snapshot);
+    writeFileSync(join(context.stateDir, 'retained-until-swap'), 'original');
+    const original = fs.cpSync;
+    const copy = vi.spyOn(fs, 'cpSync').mockImplementation((source, destination, options) => {
+      if (String(destination).includes('.rollback-state-'))
+        throw new Error('transient state copy failure');
+      return original(source, destination, options);
+    });
+    calls = [];
+    expect(() => runRollback(context, snapshot)).toThrow(/transient state copy failure/);
+    copy.mockRestore();
+    expect(readFileSync(join(context.stateDir, 'retained-until-swap'), 'utf8')).toBe('original');
+    expect(calls.some((call) => call.args[0] === 'container' && call.args[1] === 'rm')).toBe(false);
+    expect(() => runRollback(context, snapshot)).not.toThrow();
+    expect(existsSync(join(context.stateDir, 'retained-until-swap'))).toBe(false);
+  });
+
+  it.each(['bucket', 'volume'] as const)(
+    'retries recovery after a transient %s failure',
+    (phase) => {
+      const context = ctx('gs://fleet/celld', join(root, 'state'));
+      const snapshot = join(root, `retry-${phase}`);
+      runBackup(context, snapshot);
+      writeFileSync(join(root, 'store/fleet/celld/current.json'), 'new data');
+      writeFileSync(
+        join(context.stateDir, 'upgrade-pending.json'),
+        JSON.stringify({ from: 'a'.repeat(40), backupDir: snapshot }),
+        { mode: 0o600 }
+      );
+      let containerRemoved = false;
+      let failed = false;
+      context.run = (command, args, env) => {
+        if (
+          command === 'docker' &&
+          args[0] === 'compose' &&
+          args.includes('ps') &&
+          args.includes('-q') &&
+          containerRemoved
+        )
+          return { status: 0, stdout: '', stderr: '' };
+        const bucket =
+          command === 'gcloud' && args.includes('--delete-unmatched-destination-objects');
+        const volume = command === 'docker' && args[0] === 'volume' && args[1] === 'rm';
+        if (!failed && ((phase === 'bucket' && bucket) || (phase === 'volume' && volume))) {
+          failed = true;
+          return { status: 1, stdout: '', stderr: 'transient failure' };
+        }
+        if (command === 'docker' && args[0] === 'container' && args[1] === 'rm')
+          containerRemoved = true;
+        return fakeRun(command, args, env);
+      };
+      expect(() => runRollback(context, snapshot)).toThrow(
+        /restore pre-upgrade bucket|remove owned celld cache/
+      );
+      expect(containerRemoved).toBe(phase === 'volume');
+      expect(
+        JSON.parse(readFileSync(join(context.stateDir, 'upgrade-pending.json'), 'utf8')).backupDir
+      ).toBe(snapshot);
+      expect(existsSync(join(context.stateDir, 'platform-keys.json'))).toBe(true);
+      expect(() => runRollback(context, snapshot)).not.toThrow();
+      expect(failed).toBe(true);
+      expect(readFileSync(join(root, 'store/fleet/celld/current.json'), 'utf8')).toBe('{"v":3}');
+      expect(existsSync(join(context.stateDir, 'rollback-cache-pending.json'))).toBe(false);
+    }
+  );
+
   it.each(['wrong', 'duplicate', 'bind'] as const)(
     'refuses a selected overlay with %s celld cache mount before rollback bucket writes',
     (mount) => {
@@ -676,10 +761,10 @@ describe('runRollback', () => {
     cacheProof = 'replaced-after-remove';
     calls = [];
     expect(() => runRollback(context, snapshot)).toThrow(/cache identity changed/);
-    expect(cacheInspections).toBe(3);
+    expect(cacheInspections).toBe(5);
     expect(calls.some((call) => call.args.includes('--force'))).toBe(true);
     expect(calls.some((call) => call.args[0] === 'volume' && call.args[1] === 'rm')).toBe(false);
-    expect(calls.some((call) => call.command === 'gcloud')).toBe(false);
+    expect(calls.some((call) => call.command === 'gcloud')).toBe(true);
   });
 
   it('rechecks the live state inode immediately before removal after the bucket copy', () => {
@@ -851,7 +936,7 @@ describe('runRollback', () => {
       '--delete-unmatched-destination-objects'
     );
     expect(calls.some((c) => c.args.includes('stop'))).toBe(true);
-    expect(cacheInspections).toBe(3);
+    expect(cacheInspections).toBe(5);
     const volumeDelete = calls.find(
       (c) => c.command === 'docker' && c.args[0] === 'volume' && c.args[1] === 'rm'
     );

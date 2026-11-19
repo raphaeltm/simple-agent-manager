@@ -256,7 +256,7 @@ describe('runUpgrade', () => {
       diff = ['apps/api/src/db/migrations/0300_new.sql'];
       failCommand = command;
       await expect(upgrade()).rejects.toThrow(/command output withheld/);
-      expect(runRollback).toHaveBeenCalledWith(expect.anything(), join(root, 'backup'));
+      expect(runRollback).toHaveBeenCalledWith(expect.anything(), join(root, 'backup'), FROM);
       expect(steps.indexOf('RESTORE')).toBeLessThan(steps.indexOf(`git checkout --detach ${FROM}`));
       expect(steps.at(-1)).toMatch(/^docker compose .* up -d$/);
       expect(logs.join('\n')).toContain('automatic rollback completed');

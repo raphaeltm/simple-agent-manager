@@ -186,7 +186,7 @@ describe('runUpgrade', () => {
     ]);
     expect(result.composeRestarted).toBe(false);
     expect(runBackup).toHaveBeenCalledOnce();
-    expect(result.rollback.join('\n')).toContain('selfhost:restore');
+    expect(result.rollback.join('\n')).toContain('--rollback-from');
   });
 
   it('restarts the stack between --init and the deploy when a compose file changed', async () => {
@@ -228,7 +228,7 @@ describe('runUpgrade', () => {
     expect(
       rollback.some(
         (step) =>
-          step.includes('selfhost:restore') && step.includes('--box-env <root>/custom/box.env')
+          step.includes('--rollback-from') && step.includes('--box-env <root>/custom/box.env')
       )
     ).toBe(true);
   });
@@ -248,8 +248,8 @@ describe('runUpgrade', () => {
     diff = ['apps/api/src/db/migrations/0300_new.sql'];
     const result = await upgrade();
     expect(result.migrationsChanged).toBe(true);
-    expect(result.rollback.join('\n')).toContain('do not redeploy old code');
-    expect(result.rollback.join('\n')).toContain('selfhost:restore');
+    expect(result.rollback.join('\n')).toContain(`selfhost:upgrade --to ${FROM}`);
+    expect(result.rollback.join('\n')).toContain('--rollback-from');
   });
 
   it('stops at a failed deploy and prints the rollback', async () => {
@@ -304,8 +304,9 @@ describe('runUpgrade', () => {
     writeFileSync(join(root, 'state/gateway.env'), 'before');
     failDeploy = false;
     const rollback = (await upgrade()).rollback;
-    expect(rollback.some((step) => step.includes('selfhost:restore'))).toBe(true);
-    expect(rollback.some((step) => /^docker compose .* up -d$/.test(step))).toBe(true);
+    expect(rollback.some((step) => step.includes('--rollback-from'))).toBe(true);
+    expect(rollback).toHaveLength(1);
+    expect(rollback[0]).toContain(`--to ${FROM}`);
   });
 
   it('fails when the API is unhealthy after the deploy', async () => {
@@ -395,12 +396,10 @@ describe('runUpgrade with the box .env COMPOSE_FILE', () => {
     diff = ['deploy/selfhost/docker-compose.yml'];
     const ctx = boxFromEnv(['COMPOSE_FILE=docker-compose.yml:docker-compose.override.yml']);
     const result = await runUpgrade(ctx, { to: 'v1', checkHealth: async () => true });
-    const composeSteps = result.rollback.filter((step) => step.includes('docker compose'));
-    expect(composeSteps.map((step) => step.replaceAll(root, '<root>'))).toEqual([
-      `docker compose --project-name sam-test -f ${join(SELFHOST_DIR, 'docker-compose.yml')} ` +
-        `-f ${join(SELFHOST_DIR, 'docker-compose.override.yml')} ` +
-        `--env-file <root>/real.env up -d`,
-    ]);
+    expect(result.rollback).toHaveLength(1);
+    expect(result.rollback[0]).toContain(`--box-env ${ctx.envFile}`);
+    expect(result.rollback[0]).toContain(`--state-dir ${ctx.stateDir}`);
+    expect(result.rollback[0]).not.toContain('selfhost:restore');
   });
 
   it('selects the same box in the restore-based rollback, quoting a path with a space', async () => {
@@ -413,12 +412,10 @@ describe('runUpgrade with the box .env COMPOSE_FILE', () => {
     );
     const ctx = { ...loadBox(envFile, join(root, 'state')), run, log: (m: string) => logs.push(m) };
     const { rollback } = await runUpgrade(ctx, { to: 'v1', checkHealth: async () => true });
-    const file = join(SELFHOST_DIR, 'docker-compose.yml');
     expect(rollback.join('\n')).toContain(`--box-env '${envFile}'`);
-    expect(rollback).toContain(
-      `docker compose --project-name sam-test -f ${file} --env-file '${envFile}' up -d`
-    );
-    expect(rollback.join('\n')).toContain('empty installation');
+    expect(rollback.join('\n')).toContain(`--to ${FROM}`);
+    expect(rollback.join('\n')).toContain('--rollback-from');
+    expect(rollback.join('\n')).not.toContain('selfhost:restore');
   });
 
   // COMPOSE_FILE may list a file outside deploy/selfhost; a change to it alone must restart.
@@ -449,8 +446,8 @@ describe('runUpgrade with the box .env COMPOSE_FILE', () => {
       `--env-file <root>/real.env build caddy`;
     expect(steps).toContain(build);
     const rollback = result.rollback.map((step) => step.replaceAll(root, '<root>'));
-    expect(rollback.indexOf(build)).toBeGreaterThan(-1);
-    expect(rollback.indexOf(build)).toBeLessThan(rollback.findIndex((s) => s.endsWith(' up -d')));
+    expect(rollback[0]).toContain('--rebuild caddy');
+    expect(rollback[0]).toContain('--box-env <root>/real.env');
   });
 });
 
@@ -477,11 +474,7 @@ describe('runUpgrade with a state dir docker compose would not read on its own',
     const state = join(root, 'state');
     expect(dockerStateEnv.length).toBeGreaterThan(1);
     expect(dockerStateEnv.every((value) => value === state)).toBe(true);
-    const printed = result.rollback.filter((step) => step.includes('docker compose'));
-    expect(printed.length).toBeGreaterThan(0);
-    expect(printed.every((step) => step.startsWith(`SAM_SELFHOST_STATE_DIR=${state} docker`))).toBe(
-      true
-    );
+    expect(result.rollback[0]).toContain(`--state-dir ${state}`);
   });
 
   it('control: sets nothing when the .env already names that state dir', async () => {
@@ -492,7 +485,7 @@ describe('runUpgrade with a state dir docker compose would not read on its own',
     });
     expect(dockerStateEnv.length).toBeGreaterThan(1);
     expect(dockerStateEnv.every((value) => value === undefined)).toBe(true);
-    expect(result.rollback.some((step) => step.startsWith('docker compose'))).toBe(true);
+    expect(result.rollback[0]).toContain(`--state-dir ${join(root, 'state')}`);
     expect(result.rollback.some((step) => step.includes('SAM_SELFHOST_STATE_DIR='))).toBe(false);
   });
 });
@@ -566,18 +559,8 @@ describe('runUpgrade image builds', () => {
     expect(result.imagesRebuilt).toEqual(['caddy']);
     // Rolling back rebuilds the old image the same explicit way.
     const rollback = result.rollback.map((step) => step.replaceAll(root, '<root>'));
-    expect(rollback).toContain(
-      'docker compose --project-name sam-test -f compose.yml --env-file <root>/box.env build caddy'
-    );
-    expect(
-      rollback.indexOf(
-        'docker compose --project-name sam-test -f compose.yml --env-file <root>/box.env build caddy'
-      )
-    ).toBeLessThan(
-      rollback.indexOf(
-        'docker compose --project-name sam-test -f compose.yml --env-file <root>/box.env up -d'
-      )
-    );
+    expect(rollback[0]).toContain('--rebuild caddy');
+    expect(rollback[0]).toContain('--box-env <root>/box.env');
   });
 
   it('rebuilds caddy when the compose build args changed (a new pinned module)', async () => {

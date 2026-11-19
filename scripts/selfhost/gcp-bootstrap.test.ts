@@ -624,7 +624,7 @@ describe('bootstrap creation receipts', () => {
   it('records actual new resource identities and preserves the proof on repeat', () => {
     expect(run(args()).status).toBe(0);
     const before = receipts();
-    expect(before).toHaveLength(5);
+    expect(before).toHaveLength(6);
     expect(
       before.every(
         (r) =>
@@ -635,6 +635,24 @@ describe('bootstrap creation receipts', () => {
     ).toBe(true);
     expect(run(args()).status).toBe(0);
     expect(receipts().every((r) => r.action === 'created')).toBe(true);
+  });
+  it('records only a newly added pool grant on a reused service account as created', () => {
+    expect(run(['--project', 'sam-vm-test', '--api-url', ISSUER]).status).toBe(0);
+    setGcp((db) => {
+      db.saBindings = {};
+    });
+    expect(run(args()).status).toBe(0);
+    const grant = receipts().find((r) => r.kind === 'service-account-iam-binding');
+    expect(grant?.action).toBe('created');
+    expect(grant?.attributes.role).toBe('roles/iam.workloadIdentityUser');
+    expect(grant?.attributes.member).toMatch(
+      /^principalSet:\/\/iam.googleapis.com\/projects\/123456789012\/locations\/global\/workloadIdentityPools\/[^/]+\/\*$/
+    );
+    expect(receipts().find((r) => r.kind === 'service-account')?.action).toBe('reused');
+    expect(run(args()).status).toBe(0);
+    expect(receipts().find((r) => r.kind === 'service-account-iam-binding')?.action).toBe(
+      'created'
+    );
   });
   it('records preexisting resources and grants as reused', () => {
     expect(run(['--project', 'sam-vm-test', '--api-url', ISSUER]).status).toBe(0);

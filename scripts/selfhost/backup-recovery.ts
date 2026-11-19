@@ -1,6 +1,14 @@
 /** Restore an upgrade's authenticated snapshot to the same owned installation. */
-import { cpSync, lstatSync, readFileSync, rmSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import {
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+} from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 
 import { readRecord } from '../../deploy/selfhost/created-resources.mjs';
 import { decryptBackupTree } from './backup-encryption';
@@ -23,6 +31,7 @@ import {
 } from './backup-lib';
 import { composeProjectFor, recordInstall } from './install-record';
 import { assertOperatorExecution } from './operator-only';
+import { assertPrivateFile, replacePrivateFile } from './secret-files';
 import { assertRollbackReady } from './upgrade-preflight';
 function compose(ctx: BoxContext, args: string[]): void {
   check(
@@ -150,30 +159,135 @@ export function assertRollbackCacheReady(ctx: BoxContext): RollbackCacheProof {
   return { ...proof, container };
 }
 
-/** Re-prove the active mount and immutable volume creation identity immediately before removal. */
-function discardCelldCache(ctx: BoxContext, expected: RollbackCacheProof): void {
-  const current = assertRollbackCacheReady(ctx);
+/** A private receipt permits retry after this process removed only part of the cache. */
+const CACHE_PENDING = 'rollback-cache-pending.json';
+function pendingCache(ctx: BoxContext, from: string): RollbackCacheProof | null {
+  const path = join(ctx.stateDir, CACHE_PENDING);
+  if (!existsSync(path)) return null;
+  assertPrivateFile(path);
+  let value: { snapshot?: unknown; name?: unknown; createdAt?: unknown; container?: unknown };
+  try {
+    value = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    throw new Error('Invalid rollback cache recovery receipt');
+  }
   if (
-    current.name !== expected.name ||
-    current.createdAt !== expected.createdAt ||
-    current.container !== expected.container
+    value.snapshot !== resolve(from) ||
+    value.name !== `${composeProjectFor(ctx.box, ctx.stateDir)}_celld-data` ||
+    typeof value.createdAt !== 'string' ||
+    !Number.isFinite(Date.parse(value.createdAt)) ||
+    typeof value.container !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(value.container)
   )
+    throw new Error('Invalid rollback cache recovery receipt');
+  return { name: value.name, createdAt: value.createdAt, container: value.container };
+}
+function cachePresence(
+  ctx: BoxContext,
+  expected: RollbackCacheProof
+): { container: boolean; volume: boolean } {
+  assertRollbackReady(ctx);
+  const selected = check(
+    ctx.run(
+      'docker',
+      composeArgs(ctx, ['ps', '--all', '--no-trunc', '-q', 'celld']),
+      composeRunEnv(ctx)
+    ),
+    'inspect recovering celld'
+  ).stdout.trim();
+  if (selected && selected !== expected.container)
     throw new Error('Rollback celld cache identity changed; refusing removal');
-  check(
-    ctx.run('docker', ['container', 'rm', '--force', expected.container]),
-    'remove exact rollback celld container'
+  const volumes = check(
+    ctx.run('docker', [
+      'volume',
+      'ls',
+      '--filter',
+      `name=^${expected.name}$`,
+      '--format',
+      '{{.Name}}',
+    ]),
+    'inspect recovering cache'
+  ).stdout.trim();
+  if (volumes && volumes !== expected.name) throw new Error('Ambiguous recovering celld cache');
+  if (volumes) {
+    const current = inspectCacheVolume(ctx);
+    if (current.createdAt !== expected.createdAt)
+      throw new Error('Rollback celld cache identity changed; refusing removal');
+  }
+  if (selected) {
+    const current = assertRollbackCacheReady(ctx);
+    if (!volumes || current.createdAt !== expected.createdAt)
+      throw new Error('Rollback celld cache identity changed; refusing removal');
+  }
+  return { container: Boolean(selected), volume: Boolean(volumes) };
+}
+/** Keep the proof durable until both exact resources have disappeared. */
+function discardCelldCache(ctx: BoxContext, expected: RollbackCacheProof, from: string): void {
+  replacePrivateFile(
+    join(ctx.stateDir, CACHE_PENDING),
+    JSON.stringify({ ...expected, snapshot: resolve(from) })
   );
-  const after = inspectCacheVolume(ctx);
-  if (after.name !== expected.name || after.createdAt !== expected.createdAt)
-    throw new Error('Rollback celld cache identity changed; refusing removal');
-  check(ctx.run('docker', ['volume', 'rm', expected.name]), 'remove owned celld cache');
+  const present = cachePresence(ctx, expected);
+  if (present.container)
+    check(
+      ctx.run('docker', ['container', 'rm', '--force', expected.container]),
+      'remove exact rollback celld container'
+    );
+  if (present.volume) {
+    const after = inspectCacheVolume(ctx);
+    if (after.createdAt !== expected.createdAt)
+      throw new Error('Rollback celld cache identity changed; refusing removal');
+    check(ctx.run('docker', ['volume', 'rm', expected.name]), 'remove owned celld cache');
+  }
+  rmSync(join(ctx.stateDir, CACHE_PENDING));
+}
+/** Stage the full replacement before swapping directories; failed copying retains live state. */
+function restoreState(
+  ctx: BoxContext,
+  source: string,
+  id: string,
+  pending: RollbackCacheProof | null,
+  from: string
+): void {
+  const stage = mkdtempSync(join(dirname(ctx.stateDir), '.rollback-state-'));
+  const staged = join(stage, 'restored');
+  const previous = join(stage, 'previous');
+  try {
+    cpSync(source, staged, { recursive: true });
+    // Keep the original upgrade's recovery pointer until recoverUpgrade verifies health.
+    const upgradePending = join(ctx.stateDir, 'upgrade-pending.json');
+    if (existsSync(upgradePending)) {
+      assertPrivateFile(upgradePending);
+      replacePrivateFile(
+        join(staged, 'upgrade-pending.json'),
+        readFileSync(upgradePending, 'utf8')
+      );
+    }
+    if (pending)
+      replacePrivateFile(
+        join(staged, CACHE_PENDING),
+        JSON.stringify({ ...pending, snapshot: resolve(from) })
+      );
+    assertStateReceipt(ctx.stateDir, ctx.stateDir, id, true);
+    renameSync(ctx.stateDir, previous);
+    try {
+      renameSync(staged, ctx.stateDir);
+      recordInstall(ctx.stateDir, ctx.envFile, ctx.box, id);
+    } catch (error) {
+      rmSync(ctx.stateDir, { recursive: true, force: true });
+      renameSync(previous, ctx.stateDir);
+      throw error;
+    }
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+  }
 }
 
 /**
  * Compensate only an upgrade of this exact install using its own pre-upgrade snapshot.
  * The target is the original scoped bucket, never an arbitrary restore destination.
  */
-export function runRollback(ctx: BoxContext, from: string): void {
+export function runRollback(ctx: BoxContext, from: string, expectedSamCommit?: string): void {
   assertOperatorExecution();
   const key = backupKey(ctx);
   assertBackupOutside(ctx, from);
@@ -182,6 +296,8 @@ export function runRollback(ctx: BoxContext, from: string): void {
     const plain = join(temp, 'plain');
     decryptBackupTree(from, plain, key);
     const manifest = readManifest(plain);
+    if (expectedSamCommit && manifest.samCommit !== expectedSamCommit)
+      throw new Error('Rollback snapshot belongs to a different code revision');
     if (manifest.bucket !== ctx.box.CELLD_BUCKET)
       throw new Error('Rollback snapshot belongs to a different bucket');
     const oldKeys = readIdentity(join(plain, STATE_DIR, 'platform-keys.json'));
@@ -194,9 +310,16 @@ export function runRollback(ctx: BoxContext, from: string): void {
     }
     assertStateReceipt(join(plain, STATE_DIR), ctx.stateDir, oldKeys.SAM_INSTALLATION_ID);
     assertStateReceipt(ctx.stateDir, ctx.stateDir, currentKeys.SAM_INSTALLATION_ID, true);
-    const cache = assertRollbackCacheReady(ctx);
+    const pending = pendingCache(ctx, from);
+    const cache = pending ?? assertRollbackCacheReady(ctx);
+    if (pending) cachePresence(ctx, pending);
     compose(ctx, ['stop', 'celld']);
-    discardCelldCache(ctx, cache);
+    // Recheck before bucket mutation, retaining the stopped cache until all data is restored.
+    if (!pending) {
+      const current = assertRollbackCacheReady(ctx);
+      if (JSON.stringify(current) !== JSON.stringify(cache))
+        throw new Error('Rollback cache identity changed; refusing removal');
+    }
     const url = parseBucketUrl(ctx.box.CELLD_BUCKET ?? '');
     const source = join(plain, BUCKET_DIR);
     if (url.scheme === 'gs') {
@@ -225,12 +348,15 @@ export function runRollback(ctx: BoxContext, from: string): void {
         'restore pre-upgrade bucket'
       );
     }
-    // State may hold new generated files: replace it, retaining the source ownership receipts.
-    assertStateReceipt(ctx.stateDir, ctx.stateDir, currentKeys.SAM_INSTALLATION_ID, true);
-    rmSync(ctx.stateDir, { recursive: true, force: true });
-    cpSync(join(plain, STATE_DIR), ctx.stateDir, { recursive: true });
-    cpSync(join(plain, ENV_FILE), ctx.envFile);
-    recordInstall(ctx.stateDir, ctx.envFile, ctx.box, oldKeys.SAM_INSTALLATION_ID as string);
+    restoreState(ctx, join(plain, STATE_DIR), oldKeys.SAM_INSTALLATION_ID as string, pending, from);
+    // A previous partial cache deletion must remain retryable even if copying the env fails.
+    if (pending)
+      replacePrivateFile(
+        join(ctx.stateDir, CACHE_PENDING),
+        JSON.stringify({ ...cache, snapshot: resolve(from) })
+      );
+    replacePrivateFile(ctx.envFile, readFileSync(join(plain, ENV_FILE), 'utf8'));
+    discardCelldCache(ctx, cache, from);
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }

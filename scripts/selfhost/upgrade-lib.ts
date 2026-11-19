@@ -23,6 +23,7 @@ import { COMPOSE_PATH, imageRebuilds } from './image-rebuilds.js';
 import { assertOperatorExecution } from './operator-only.js';
 import { assertPrivateFile, replacePrivateFile } from './secret-files.js';
 import { composeInputsChanged, composeOverlays, stateFingerprint } from './upgrade-compose.js';
+import { rollbackSteps } from './upgrade-instructions.js';
 import {
   assertMigrationProgression,
   type DoMigration,
@@ -149,39 +150,6 @@ function deployBoxArgs(ctx: Pick<BoxContext, 'envFile' | 'stateDir' | 'secretsFi
   ];
 }
 
-/** `value` as one POSIX shell word, for the printed rollback commands. */
-function shellWord(value: string): string {
-  return /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replaceAll("'", `'\\''`)}'`;
-}
-
-/**
- * Rollback steps, printed for the operator. Their compose commands select the same box as the
- * upgrade's own (`composeArgs`: every compose file and the box's .env), so a custom `--box-env`
- * is rolled back, not the default stack.
- */
-function rollbackSteps(
-  ctx: BoxContext,
-  from: string,
-  backupDir: string,
-  imagesRebuilt: readonly string[]
-): string[] {
-  const stateDir = composeStateDirOverride(ctx);
-  const compose = (args: string[]) =>
-    [
-      ...(stateDir === null ? [] : [`SAM_SELFHOST_STATE_DIR=${shellWord(stateDir)}`]),
-      ['docker', ...composeArgs(ctx, args)].map(shellWord).join(' '),
-    ].join(' ');
-  return [
-    '# Restore the encrypted snapshot into an empty installation; do not redeploy old code over migrated data.',
-    `git checkout --detach ${from}`,
-    'pnpm install --frozen-lockfile',
-    `pnpm selfhost:restore --from ${shellWord(backupDir)} --box-env ${shellWord(ctx.envFile)} --state-dir ${shellWord(ctx.stateDir)}` +
-      (ctx.encryptionKeyFile ? ` --encryption-key-file ${shellWord(ctx.encryptionKeyFile)}` : ''),
-    ...(imagesRebuilt.length ? [compose(['build', ...imagesRebuilt])] : []),
-    compose(['up', '-d']),
-  ];
-}
-
 function backupContext(ctx: BoxContext): BackupContext {
   return {
     ...ctx,
@@ -191,14 +159,15 @@ function backupContext(ctx: BoxContext): BackupContext {
 }
 
 /** Restore before starting old code: even a failed deployment can already have migrated data. */
-async function recoverUpgrade(
+export async function recoverUpgrade(
   ctx: BoxContext,
   from: string,
   backupDir: string,
   rebuilds: readonly string[],
   opts: UpgradeOptions
 ): Promise<void> {
-  runRollback(backupContext(ctx), backupDir);
+  assertOperatorExecution();
+  runRollback(backupContext(ctx), backupDir, from);
   replacePrivateFile(
     join(ctx.stateDir, UPGRADE_PENDING_FILE),
     `${JSON.stringify({ from, backupDir })}\n`

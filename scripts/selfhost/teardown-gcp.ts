@@ -20,7 +20,10 @@ import {
   gcloudNotFound,
   gcloudReason,
 } from './teardown-gcp-bootstrap';
+import { type GcpFirewallTargets, parseFirewallTargets } from './teardown-gcp-targets';
 import { both, type Item, STEPS } from './teardown-model';
+
+export { parseFirewallTargets } from './teardown-gcp-targets';
 
 /**
  * The firewall rule names SAM's GCP provider ensures (SAM_AGENT_FIREWALL_RULE_NAME and
@@ -44,14 +47,6 @@ interface GcpInstance {
   tags: string[];
   /** Names (last path segment) of the networks its interfaces are on. */
   networks: string[];
-}
-
-/** What a firewall rule applies to (gcloud `firewall-rules describe --format=json`). */
-interface GcpFirewallTargets {
-  network: string | null;
-  targetTags: string[];
-  /** Rules selecting by service account are not modelled: report them as unknown. */
-  targetServiceAccounts: boolean;
 }
 
 export function gcpItems(ctx: TeardownContext): Item[] {
@@ -99,16 +94,14 @@ function listInstances(ctx: TeardownContext, project: string): GcpInstance[] | E
     '--format=json',
   ]);
   if (result.status !== 0) {
-    return new Error(`gcloud compute instances list failed: ${result.stderr.trim().slice(0, 400)}`);
+    return new Error(`gcloud compute instances list failed: ${gcloudReason(result.stderr)}`);
   }
   try {
     const parsed = JSON.parse(result.stdout) as unknown;
     if (!Array.isArray(parsed)) throw new Error('not a list');
     return parseUniqueInstances(parsed);
-  } catch (error) {
-    return new Error(
-      `unreadable instance list: ${error instanceof Error ? error.message : String(error)}`
-    );
+  } catch {
+    return new Error('unreadable instance list: invalid inventory metadata');
   }
 }
 
@@ -275,7 +268,12 @@ function deleteInstance(ctx: TeardownContext, project: string, listed: GcpInstan
     if (/not found|was not found|404/i.test(described.stderr)) return; // already gone
     check(described, `gcloud compute instances describe ${listed.name}`);
   }
-  const current = parseInstance(JSON.parse(described.stdout) as unknown);
+  let current: GcpInstance;
+  try {
+    current = parseInstance(JSON.parse(described.stdout) as unknown);
+  } catch {
+    throw new Error('refused: unreadable instance ownership metadata');
+  }
   // The same VM (immutable id), still this install's, at the moment of deletion.
   if (current.id !== listed.id) {
     throw new Error(
@@ -441,29 +439,8 @@ function listAllInstances(ctx: TeardownContext, project: string): GcpInstance[] 
     const parsed = JSON.parse(result.stdout) as unknown;
     if (!Array.isArray(parsed)) throw new Error('not a list');
     return parseUniqueInstances(parsed);
-  } catch (error) {
-    return new Error(
-      `unreadable instance list: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
-}
-
-export function parseFirewallTargets(json: string): GcpFirewallTargets | null {
-  try {
-    const raw: unknown = JSON.parse(json);
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-    const v = raw as Record<string, unknown>;
-    const targetTags = Array.isArray(v.targetTags)
-      ? v.targetTags.filter((t): t is string => typeof t === 'string')
-      : [];
-    return {
-      network: typeof v.network === 'string' ? lastSegment(v.network) : null,
-      targetTags,
-      targetServiceAccounts:
-        Array.isArray(v.targetServiceAccounts) && v.targetServiceAccounts.length > 0,
-    };
   } catch {
-    return null;
+    return new Error('unreadable instance list: invalid inventory metadata');
   }
 }
 

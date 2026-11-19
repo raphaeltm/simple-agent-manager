@@ -71,7 +71,10 @@ beforeEach(() => {
     `
     const args=process.argv.slice(2), cmd=args.join(' ');
     fs.appendFileSync(process.env.CALLS, 'gcloud '+cmd+'\\n');
-    if(cmd.startsWith('compute instances list')) console.log(process.env.VMS ?? '[]');
+    if(cmd.startsWith('compute instances list')) {
+      if(process.env.LIST_ERROR) { console.error(process.env.LIST_ERROR);process.exit(1); }
+      console.log(process.env.VMS ?? '[]');
+    }
     else if(cmd.startsWith('compute instances describe')) console.log(process.env.DESCRIBED ?? process.env.VM);
     else if(cmd.startsWith('compute instances delete')) {}
     else if(cmd.startsWith('compute firewall-rules describe')) {
@@ -80,7 +83,8 @@ beforeEach(() => {
     }
     else if(cmd.startsWith('compute firewall-rules delete')) {}
     else if(cmd.startsWith('iam workload-identity-pools providers list')) console.log(process.env.FOREIGN==='pool' ? '[{"name":"foreign","oidc":{"issuerUri":"foreign"}}]' : '[]');
-    else if(cmd.startsWith('iam service-accounts get-iam-policy')) console.log(process.env.FOREIGN==='account' ? '{"bindings":[{"role":"foreign","members":["foreign"]}]}' : '{}');
+    else if(cmd.startsWith('iam service-accounts remove-iam-policy-binding')) {}
+    else if(cmd.startsWith('iam service-accounts get-iam-policy')) console.log(process.env.SA_POLICY ?? (process.env.FOREIGN==='account' ? '{"bindings":[{"role":"foreign","members":["foreign"]}]}' : '{}'));
     else if(cmd.startsWith('iam service-accounts keys list')) console.log('[]');
     else if(cmd.startsWith('iam service-accounts describe')) console.log(JSON.stringify({uniqueId:'acct-id',description:'Creates and deletes SAM workspace VMs and their firewall rules for https://api.${DOMAIN}'}));
     else if(cmd.startsWith('iam workload-identity-pools providers describe')) console.log(JSON.stringify({name:'projects/123/locations/global/workloadIdentityPools/pool/providers/provider',oidc:{issuerUri:'https://api.${DOMAIN}'}}));
@@ -229,6 +233,72 @@ function wifReceipts() {
   });
   cloudReceipt('service-account', 'acct', { identity: 'acct-id', pool: 'pool' });
 }
+it.each(['keep-data', 'remove-everything', 'replaced', 'conditional', 'reused'])(
+  'handles a receipted service account grant safely in %s mode',
+  async (mode) => {
+    const member =
+      'principalSet://iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/pool/*';
+    cloudReceipt('workload-identity-pool', 'pool', {
+      identity: 'projects/123/locations/global/workloadIdentityPools/pool',
+      pool: 'pool',
+    });
+    cloudReceipt('service-account-iam-binding', `acct#roles/iam.workloadIdentityUser#${member}`, {
+      account: 'acct',
+      identity: mode === 'replaced' ? 'old-account-id' : 'acct-id',
+      pool: 'pool',
+      member,
+      role: 'roles/iam.workloadIdentityUser',
+    });
+    addResource(recordPath(state), {
+      cloud: 'gcp',
+      kind: 'service-account',
+      name: 'acct',
+      action: 'reused',
+      createdBy: 'gcp-bootstrap',
+      attributes: {
+        project: 'sam-test-proj',
+        install: `https://api.${DOMAIN}`,
+        environment: 'selfhost',
+        installation: OWN,
+        identity: 'acct-id',
+        pool: 'pool',
+      },
+    });
+    if (mode === 'reused') {
+      const record = JSON.parse(readFileSync(recordPath(state), 'utf8'));
+      record.resources.find(
+        (r: { kind: string }) => r.kind === 'service-account-iam-binding'
+      ).action = 'reused';
+      writeFileSync(recordPath(state), JSON.stringify(record));
+    }
+    const policy = {
+      bindings: [
+        {
+          role: 'roles/iam.workloadIdentityUser',
+          members: [member],
+          ...(mode === 'conditional' ? { condition: { expression: 'true' } } : {}),
+        },
+      ],
+    };
+    const result = await run(
+      [mode === 'keep-data' ? '--keep-data' : '--remove-everything', '--confirm', DOMAIN],
+      { SA_POLICY: JSON.stringify(policy) }
+    );
+    const removed = calls().includes('service-accounts remove-iam-policy-binding acct');
+    expect(removed).toBe(mode === 'remove-everything');
+    expect(result.status, result.out).toBe(mode === 'keep-data' ? 0 : 1);
+    expect(calls()).not.toContain('service-accounts delete acct');
+    if (removed) {
+      expect(calls()).toContain(
+        `--member=${member} --role=roles/iam.workloadIdentityUser --condition=None`
+      );
+      expect(calls().indexOf('service-accounts remove-iam-policy-binding acct')).toBeLessThan(
+        calls().indexOf('workload-identity-pools delete pool')
+      );
+    }
+  }
+);
+
 it('removes recorded owned WIF resources and rechecks their current identity', async () => {
   wifReceipts();
   const result = await run(['--remove-everything', '--confirm', DOMAIN]);
@@ -285,6 +355,25 @@ it('deletes a real-trigger owned node while preserving an identically named fore
   expect(calls()).toContain('instances delete sam-node-same-prefix ');
   expect(calls()).not.toContain('instances delete sam-node-same-prefix-other');
 });
+it.each(['list-error', 'invalid-list-json', 'invalid-describe-json'])(
+  'sanitizes %s provider diagnostics at the real CLI boundary and retains state',
+  async (failure) => {
+    const sentinel = 'credential-sentinel-never-print-0123456789';
+    const own = ownedVm();
+    const result = await run(['--remove-everything', '--destroy-key', '--confirm', DOMAIN], {
+      VMS: failure === 'invalid-list-json' ? `{"${sentinel}` : JSON.stringify([own]),
+      VM: JSON.stringify(own),
+      ...(failure === 'list-error' ? { LIST_ERROR: `Authorization: Bearer ${sentinel}` } : {}),
+      ...(failure === 'invalid-describe-json' ? { DESCRIBED: `{"${sentinel}` } : {}),
+    });
+    expect(result.status, result.out).toBe(1);
+    expect(result.out).not.toContain(sentinel);
+    expect(calls()).not.toMatch(/instances delete|firewall-rules delete/);
+    expect(existsSync(join(state, 'platform-keys.json'))).toBe(true);
+    expect(existsSync(env)).toBe(true);
+  }
+);
+
 it.each(['changed-id', 'changed-owner', 'duplicate', 'malformed'])(
   'refuses %s VM inventory before destructive deletion',
   async (kind) => {

@@ -33,12 +33,14 @@ export function bootstrapItems(ctx: TeardownContext, project: string): Item[] {
       (a, b) =>
         [
           'iam-binding',
+          'service-account-iam-binding',
           'workload-identity-provider',
           'workload-identity-pool',
           'service-account',
         ].indexOf(a.kind) -
         [
           'iam-binding',
+          'service-account-iam-binding',
           'workload-identity-provider',
           'workload-identity-pool',
           'service-account',
@@ -101,6 +103,8 @@ export function bootstrapItems(ctx: TeardownContext, project: string): Item[] {
               pool,
               entry.kind === 'service-account' ? entry.name : attrs.account
             );
+          if (entry.kind === 'service-account-iam-binding')
+            assertServiceAccountGrant(ctx, project, entry);
           check(gcloud(ctx, remove), 'delete recorded resource');
         },
         record: entry,
@@ -266,6 +270,29 @@ function bootstrapOperation(entry: CreatedResource, project: string, issuer: str
         description: `Creates and deletes SAM workspace VMs and their firewall rules for ${issuer}`,
       };
       break;
+    case 'service-account-iam-binding':
+      if (
+        !attrs.account ||
+        !attrs.identity ||
+        !attrs.member ||
+        attrs.role !== 'roles/iam.workloadIdentityUser'
+      )
+        throw new Error('refused: incomplete service account grant receipt');
+      describe = ['iam', 'service-accounts', 'describe', attrs.account, ...where];
+      remove = [
+        'iam',
+        'service-accounts',
+        'remove-iam-policy-binding',
+        attrs.account,
+        ...where,
+        `--member=${attrs.member}`,
+        `--role=${attrs.role}`,
+        '--condition=None',
+        '--quiet',
+        '--format=none',
+      ];
+      expected = { uniqueId: attrs.identity };
+      break;
     case 'iam-binding': {
       // Delete an exact grant only, never a project policy replacement. Creation receipt
       // is linked to the service account's immutable id, checked immediately beforehand.
@@ -289,4 +316,63 @@ function bootstrapOperation(entry: CreatedResource, project: string, issuer: str
       throw new Error(`refused: unsupported recorded resource kind ${entry.kind}`);
   }
   return { describe, remove, expected };
+}
+
+/** Remove only the receipted unconditional member, even when the account itself was reused. */
+function assertServiceAccountGrant(
+  ctx: TeardownContext,
+  project: string,
+  entry: CreatedResource
+): void {
+  const attrs = entry.attributes ?? {};
+  const pools = ctx.record.filter(
+    (r) =>
+      r.kind === 'workload-identity-pool' &&
+      r.cloud === 'gcp' &&
+      r.createdBy === BOOTSTRAP &&
+      !r.removedAt &&
+      r.name === attrs.pool &&
+      r.attributes?.project === project &&
+      r.attributes?.installation === ctx.installationId &&
+      r.attributes?.environment === 'selfhost' &&
+      r.attributes?.install === `https://api.${ctx.domain}`
+  );
+  const identity = pools.length === 1 ? pools[0].attributes?.identity : undefined;
+  if (
+    !identity ||
+    !/^projects\/\d+\/locations\/global\/workloadIdentityPools\/[^/]+$/.test(identity) ||
+    attrs.member !== `principalSet://iam.googleapis.com/${identity}/*`
+  )
+    throw new Error('refused: service account grant pool identity changed');
+  const policy = check(
+    gcloud(ctx, [
+      'iam',
+      'service-accounts',
+      'get-iam-policy',
+      attrs.account,
+      `--project=${project}`,
+      '--format=json',
+    ]),
+    'read service account grant before deletion'
+  );
+  try {
+    const value: unknown = JSON.parse(policy.stdout);
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      throw new Error('Invalid policy');
+    const bindings = (value as { bindings?: unknown }).bindings ?? [];
+    if (
+      !Array.isArray(bindings) ||
+      bindings.some(
+        (b) =>
+          !b ||
+          typeof b.role !== 'string' ||
+          !Array.isArray(b.members) ||
+          b.members.some((m: unknown) => typeof m !== 'string') ||
+          (b.role === attrs.role && b.members.includes(attrs.member) && !!b.condition)
+      )
+    )
+      throw new Error('Invalid grant');
+  } catch {
+    throw new Error('refused: unreadable or conditional service account grant');
+  }
 }

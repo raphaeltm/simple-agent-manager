@@ -12,6 +12,7 @@ import { parseArgs } from 'node:util';
 import { celldPort, SELFHOST_DIR, waitForHealth } from './deploy-steps.js';
 import { assertOperatorExecution } from './operator-only.js';
 import { loadBox, runUpgrade } from './upgrade-lib.js';
+import { runManualRollback } from './upgrade-rollback.js';
 
 assertOperatorExecution();
 
@@ -22,6 +23,8 @@ const { values } = parseArgs({
     'state-dir': { type: 'string' },
     secrets: { type: 'string' },
     'backup-to': { type: 'string' },
+    'rollback-from': { type: 'string' },
+    rebuild: { type: 'string', multiple: true },
     'encryption-key-file': { type: 'string' },
   },
 });
@@ -35,15 +38,27 @@ const ctx = loadBox(
 );
 const port = celldPort(ctx.box);
 
-await runUpgrade(ctx, {
-  to: values.to,
-  ...(values['backup-to'] ? { backupDir: resolve(values['backup-to']) } : {}),
-  checkHealth: async () => {
-    try {
-      await waitForHealth(port, ctx.box.SAM_DOMAIN ?? '');
-      return true;
-    } catch {
-      return false;
-    }
-  },
-});
+const checkHealth = async () => {
+  try {
+    await waitForHealth(port, ctx.box.SAM_DOMAIN ?? '');
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+if (values['rollback-from']) {
+  await runManualRollback(ctx, {
+    from: values.to,
+    backupDir: resolve(values['rollback-from']),
+    rebuilds: values.rebuild ?? [],
+    checkHealth,
+  });
+} else {
+  if (values.rebuild?.length) throw new Error('--rebuild is only used with --rollback-from');
+  await runUpgrade(ctx, {
+    to: values.to,
+    ...(values['backup-to'] ? { backupDir: resolve(values['backup-to']) } : {}),
+    checkHealth,
+  });
+}

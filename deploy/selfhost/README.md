@@ -177,6 +177,24 @@ snapshot path. Keep celld stopped if automatic recovery fails; retain the snapsh
 retry the same upgrade command to recover the original install before attempting a new upgrade.
 Do not delete the pending record to bypass a failed recovery.
 
+After a successful upgrade, its printed rollback command restores the populated installation
+in place. Run it from the upgraded checkout, keeping the original full commit SHA, snapshot,
+key and any printed `--rebuild` arguments:
+
+```sh
+pnpm selfhost:upgrade --to <original-full-commit-sha> \
+  --rollback-from /absolute/path/to/pre-upgrade-backup \
+  --encryption-key-file /secure/path/to/backup.key
+```
+
+This command verifies that the authenticated snapshot belongs to that revision and installation,
+restores its data before starting the old code, and checks health. Keep celld stopped and retry
+the same rollback command if recovery fails. Failure restores the operator checkout and dependencies
+without starting the application. If the process was killed or that checkout recovery fails,
+restore the newer operator checkout and run `pnpm install --frozen-lockfile` before retrying.
+`selfhost:restore` requires an empty replacement
+target; use the printed upgrade rollback command for an existing installation.
+
 For a nondefault install, use `--box-env`, `--state-dir` and, if needed, `--secrets`. Every deploy
 and Compose operation uses that installation's environment and overlays. Set
 `SAM_SELFHOST_STATE_DIR` to an absolute path when running Compose manually.

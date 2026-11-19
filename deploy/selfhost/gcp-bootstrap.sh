@@ -399,9 +399,27 @@ done
 # credential and no user's. SAM also refuses a user credential that names a pool the platform
 # credential holds (gcp-wif-pool-ownership.ts). Any provider added to this pool later would
 # inherit the service account too, so do not add providers to it.
+sa_grant_action=created
+if [[ "$DRY_RUN" -eq 0 && -n "$INSTALLATION_ID" && "$sa_existed" -eq 1 ]]; then
+  sa_grant_status=0
+  printf '%s' "$sa_policy" | POOL_PRINCIPAL="$POOL_PRINCIPAL" node -e '
+    let text=""; process.stdin.on("data", x=>text+=x); process.stdin.on("end", ()=>{
+      let p; try {p=JSON.parse(text)} catch {process.exit(2)};
+      if (!p || !Array.isArray(p.bindings ?? [])) process.exit(2);
+      process.exit((p.bindings ?? []).some(b=>!b.condition && b.role==="roles/iam.workloadIdentityUser" && b.members?.includes(process.env.POOL_PRINCIPAL)) ? 0 : 10);
+    });' || sa_grant_status=$?
+  case "$sa_grant_status" in
+    0) sa_grant_action=reused ;;
+    10) ;;
+    *) die "cannot parse service account IAM policy" ;;
+  esac
+fi
 change_retry iam service-accounts add-iam-policy-binding "$SA_EMAIL" --project="$PROJECT" \
   --role=roles/iam.workloadIdentityUser --member="$POOL_PRINCIPAL" \
   --condition=None --quiet --format=none
+if [[ "$DRY_RUN" -eq 0 && -n "$INSTALLATION_ID" ]]; then
+  record_resource service-account-iam-binding "$SA_EMAIL#roles/iam.workloadIdentityUser#$POOL_PRINCIPAL" "$sa_grant_action" "$sa_identity" "$POOL_PRINCIPAL" roles/iam.workloadIdentityUser
+fi
 
 # Optional: make only rules absent at creation time, preserving an ownership receipt.
 # Existing same-name rules belong to whoever created them and are never adopted.
