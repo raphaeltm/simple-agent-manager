@@ -2,8 +2,9 @@
  * selfhost:upgrade orchestration (upgrade-lib.ts) with git, pnpm and docker answered by a fake
  * runner. Asserts the order of the steps, that no backup is taken, that the stack restarts only
  * when compose inputs change (files in deploy/selfhost/, selected compose files or generated
- * .state/ files), that a failed upgrade can be retried, and that the printed rollback selects the
- * same box and matches whether the upgrade carried a D1 migration.
+ * .state/ files), that an image is rebuilt only by an explicit `docker compose build` of a service
+ * whose build inputs changed (never `up --build`), that a failed upgrade can be retried, and that
+ * the printed rollback selects the same box and matches whether the upgrade carried a D1 migration.
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,6 +12,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { imageRebuilds } from './image-rebuilds.js';
 import {
   type BoxContext,
   composeFilesFor,
@@ -32,6 +34,29 @@ let failDeploy: boolean;
 let initRewritesState: boolean;
 /** What the fake checkout has checked out (`git checkout --detach` moves it). */
 let head: string;
+/** docker-compose.yml at each ref, and the services `docker compose config --services` lists. */
+let composeAt: Record<string, string | null>;
+let activeServices: string[];
+
+const COMPOSE = (dnsModule = 'github.com/caddy-dns/googleclouddns@v1.1.0') => `
+services:
+  celld:
+    image: ghcr.io/denoland/celld@sha256:${'1'.repeat(64)}
+  caddy:
+    build:
+      context: ./caddy
+      args:
+        CADDY_DNS_MODULE: \${CADDY_DNS_MODULE:-${dnsModule}}
+    image: sam-selfhost-caddy:local
+  sam-mx:
+    profiles: [mail-in]
+    build: ./sam-mx
+    image: sam-selfhost-sam-mx:local
+`;
+/** Files at the target ref that the upgrade reads (the caddy context's .dockerignore). */
+const FILES_AT_TO: Record<string, string> = {
+  'deploy/selfhost/caddy/.dockerignore': '# empty context\n*\n',
+};
 
 function run(command: string, args: string[]): RunResult {
   const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
@@ -42,6 +67,18 @@ function run(command: string, args: string[]): RunResult {
     if (args[0] === 'checkout') head = args[2] ?? head;
     if (args[0] === 'rev-parse') return ok(TO);
     if (args[0] === 'diff') return ok(diff.join('\n'));
+    if (args[0] === 'show') {
+      const [ref = '', path = ''] = (args[1] ?? '').split(':');
+      const text =
+        path === 'deploy/selfhost/docker-compose.yml'
+          ? composeAt[ref]
+          : ref === TO
+            ? FILES_AT_TO[path]
+            : undefined;
+      return text === undefined || text === null
+        ? { status: 128, stdout: '', stderr: 'does not exist' }
+        : ok(text);
+    }
     steps.push(line);
     return ok();
   }
@@ -50,6 +87,7 @@ function run(command: string, args: string[]): RunResult {
   if (deploy && args.includes('--init') && initRewritesState) {
     writeFileSync(join(root, 'state/gateway.env'), 'FRPS_PORT_RANGE=21000-21999\n');
   }
+  if (command === 'docker' && args.includes('config')) return ok(activeServices.join('\n'));
   if (deploy && !args.includes('--init') && failDeploy) {
     return { status: 1, stdout: '', stderr: 'migration 0219 failed' };
   }
@@ -82,6 +120,8 @@ beforeEach(() => {
   failDeploy = false;
   initRewritesState = false;
   head = FROM;
+  composeAt = { [FROM]: COMPOSE(), [TO]: COMPOSE() };
+  activeServices = ['celld', 'caddy'];
 });
 
 afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -115,7 +155,7 @@ describe('runUpgrade', () => {
     diff = ['deploy/selfhost/docker-compose.yml', 'deploy/selfhost/README.md'];
     const result = await upgrade();
     const order = compact();
-    const up = order.indexOf('docker compose up -d --build');
+    const up = order.indexOf('docker compose up -d');
     expect(up).toBeGreaterThan(order.indexOf(`pnpm selfhost:deploy --init ${BOX_ARGS}`));
     expect(up).toBeLessThan(order.indexOf(`pnpm selfhost:deploy ${BOX_ARGS}`));
     expect(result.composeRestarted).toBe(true);
@@ -191,7 +231,7 @@ describe('runUpgrade', () => {
       'pnpm install --frozen-lockfile',
       `pnpm selfhost:deploy --init ${BOX_ARGS}`,
       // The failed run may have restarted the stack already, so the retry restarts it too.
-      'docker compose up -d --build',
+      'docker compose up -d',
       `pnpm selfhost:deploy ${BOX_ARGS}`,
     ]);
     expect(retry.from).toBe(FROM);
@@ -226,7 +266,7 @@ describe('runUpgrade', () => {
     await expect(upgrade()).rejects.toThrow(/migration 0219 failed/);
     const printed = logs.join('\n').replaceAll(root, '<root>');
     expect(printed).toContain(`pnpm selfhost:deploy ${BOX_ARGS} --init`);
-    expect(printed).toMatch(/docker compose .* up -d --build/);
+    expect(printed).toMatch(/docker compose .* up -d$/m);
 
     // A fresh box at FROM for the success case.
     rmSync(join(root, 'state', UPGRADE_PENDING_FILE));
@@ -235,7 +275,7 @@ describe('runUpgrade', () => {
     failDeploy = false;
     const rollback = (await upgrade()).rollback.map((step) => step.replaceAll(root, '<root>'));
     expect(rollback).toContain(`pnpm selfhost:deploy ${BOX_ARGS} --init`);
-    expect(rollback.some((step) => /^docker compose .* up -d --build$/.test(step))).toBe(true);
+    expect(rollback.some((step) => /^docker compose .* up -d$/.test(step))).toBe(true);
   });
 
   it('fails when the API is unhealthy after the deploy', async () => {
@@ -271,7 +311,7 @@ describe('runUpgrade with the box .env COMPOSE_FILE', () => {
     expect(restartCommand()).toBe(
       `docker compose -f ${join(SELFHOST_DIR, 'docker-compose.yml')} ` +
         `-f ${join(SELFHOST_DIR, 'docker-compose.override.yml')} ` +
-        `--env-file <root>/real.env up -d --build`
+        `--env-file <root>/real.env up -d`
     );
   });
 
@@ -280,7 +320,7 @@ describe('runUpgrade with the box .env COMPOSE_FILE', () => {
     const ctx = boxFromEnv([]);
     await runUpgrade(ctx, { to: 'v1', checkHealth: async () => true });
     expect(restartCommand()).toBe(
-      `docker compose -f ${join(SELFHOST_DIR, 'docker-compose.yml')} --env-file <root>/real.env up -d --build`
+      `docker compose -f ${join(SELFHOST_DIR, 'docker-compose.yml')} --env-file <root>/real.env up -d`
     );
   });
 
@@ -292,7 +332,7 @@ describe('runUpgrade with the box .env COMPOSE_FILE', () => {
     expect(composeSteps.map((step) => step.replaceAll(root, '<root>'))).toEqual([
       `docker compose -f ${join(SELFHOST_DIR, 'docker-compose.yml')} ` +
         `-f ${join(SELFHOST_DIR, 'docker-compose.override.yml')} ` +
-        `--env-file <root>/real.env up -d --build`,
+        `--env-file <root>/real.env up -d`,
     ]);
   });
 
@@ -323,6 +363,120 @@ describe('runUpgrade with the box .env COMPOSE_FILE', () => {
     expect(
       (await runUpgrade(ctx, { to: 'v1', checkHealth: async () => true })).composeRestarted
     ).toBe(false);
+  });
+
+  // F11: the explicit build selects the same box as every other compose command.
+  it('rebuilds with every selected compose file and the box .env, forward and in the rollback', async () => {
+    diff = ['deploy/selfhost/caddy/Dockerfile'];
+    const ctx = boxFromEnv(['COMPOSE_FILE=docker-compose.yml:docker-compose.override.yml']);
+    const result = await runUpgrade(ctx, { to: 'v1', checkHealth: async () => true });
+    const build =
+      `docker compose -f ${join(SELFHOST_DIR, 'docker-compose.yml')} ` +
+      `-f ${join(SELFHOST_DIR, 'docker-compose.override.yml')} ` +
+      `--env-file <root>/real.env build caddy`;
+    expect(steps).toContain(build);
+    const rollback = result.rollback.map((step) => step.replaceAll(root, '<root>'));
+    expect(rollback.indexOf(build)).toBeGreaterThan(-1);
+    expect(rollback.indexOf(build)).toBeLessThan(rollback.findIndex((s) => s.endsWith(' up -d')));
+  });
+});
+
+// F11: an image build fetches base images and modules from the network, so it must be explicit
+// and happen only when the image it produces differs.
+describe('runUpgrade image builds', () => {
+  const dockerSteps = () => compact().filter((step) => step.startsWith('docker'));
+
+  it('rebuilds caddy explicitly, then restarts without --build, when its Dockerfile changed', async () => {
+    diff = ['deploy/selfhost/caddy/Dockerfile'];
+    const result = await upgrade();
+    expect(dockerSteps()).toEqual([
+      'docker compose config --services',
+      'docker compose build caddy',
+      'docker compose up -d',
+    ]);
+    const order = compact();
+    expect(order.indexOf('docker compose build caddy')).toBeGreaterThan(
+      order.indexOf(`pnpm selfhost:deploy --init ${BOX_ARGS}`)
+    );
+    expect(order.indexOf('docker compose up -d')).toBeLessThan(
+      order.indexOf(`pnpm selfhost:deploy ${BOX_ARGS}`)
+    );
+    expect(result.imagesRebuilt).toEqual(['caddy']);
+    // Rolling back rebuilds the old image the same explicit way.
+    expect(result.rollback.map((step) => step.replaceAll(root, '<root>'))).toEqual([
+      `git checkout ${FROM}`,
+      'pnpm install --frozen-lockfile',
+      `pnpm selfhost:deploy ${BOX_ARGS} --init`,
+      'docker compose -f compose.yml --env-file <root>/box.env build caddy',
+      'docker compose -f compose.yml --env-file <root>/box.env up -d',
+      `pnpm selfhost:deploy ${BOX_ARGS}`,
+    ]);
+  });
+
+  it('rebuilds caddy when the compose build args changed (a new pinned module)', async () => {
+    diff = ['deploy/selfhost/docker-compose.yml'];
+    composeAt[TO] = COMPOSE('github.com/caddy-dns/googleclouddns@v1.2.0');
+    expect((await upgrade()).imagesRebuilt).toEqual(['caddy']);
+  });
+
+  it('does not rebuild caddy for a Caddyfile change: its build context is empty', async () => {
+    diff = ['deploy/selfhost/caddy/Caddyfile', 'deploy/selfhost/caddy/sam.d/frp.caddy'];
+    const result = await upgrade();
+    expect(dockerSteps()).toEqual(['docker compose up -d']);
+    expect(result.imagesRebuilt).toEqual([]);
+    expect(result.composeRestarted).toBe(true);
+  });
+
+  it('does not build sam-mx on a box that does not run it (mail-in profile off)', async () => {
+    diff = ['deploy/selfhost/sam-mx/session.go'];
+    const result = await upgrade();
+    expect(dockerSteps()).toEqual(['docker compose config --services', 'docker compose up -d']);
+    expect(result.imagesRebuilt).toEqual([]);
+  });
+
+  it('builds sam-mx when the box runs it and its source changed (control)', async () => {
+    diff = ['deploy/selfhost/sam-mx/session.go'];
+    activeServices = ['celld', 'caddy', 'sam-mx'];
+    expect((await upgrade()).imagesRebuilt).toEqual(['sam-mx']);
+    expect(dockerSteps()).toContain('docker compose build sam-mx');
+  });
+
+  it('prints the rebuild in the rollback when the deploy after it fails', async () => {
+    diff = ['deploy/selfhost/caddy/Dockerfile'];
+    failDeploy = true;
+    await expect(upgrade()).rejects.toThrow(/migration 0219 failed/);
+    const printed = logs.join('\n').replaceAll(root, '<root>');
+    expect(printed).toContain(
+      'docker compose -f compose.yml --env-file <root>/box.env build caddy'
+    );
+  });
+
+  it('never passes --build to docker compose', async () => {
+    diff = ['deploy/selfhost/caddy/Dockerfile', 'deploy/selfhost/docker-compose.yml'];
+    await upgrade();
+    expect(steps.some((step) => step.includes('--build'))).toBe(false);
+  });
+});
+
+describe('imageRebuilds', () => {
+  it('counts every file of a context that sends its files to the build', () => {
+    expect(imageRebuilds(['deploy/selfhost/sam-mx/go.sum'], COMPOSE(), COMPOSE())).toEqual([
+      'sam-mx',
+    ]);
+  });
+
+  it('ignores README files and unrelated paths', () => {
+    expect(
+      imageRebuilds(
+        ['deploy/selfhost/sam-mx/README.md', 'apps/api/src/index.ts'],
+        COMPOSE(),
+        COMPOSE()
+      )
+    ).toEqual([]);
+  });
+
+  it('rebuilds a service that had no build section at the old ref', () => {
+    expect(imageRebuilds([], null, COMPOSE())).toEqual(['caddy', 'sam-mx']);
   });
 });
 
