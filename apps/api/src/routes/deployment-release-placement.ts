@@ -9,13 +9,15 @@ import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { DEPLOYMENT_RELOCATION_CLAIM_FIELD } from '../services/deployment-environment-state';
 import {
+  deploymentNodeAdmissionFailureMessage,
+  type DeploymentNodeAdmissionRejection,
+} from '../services/deployment-node-admission-result';
+import {
   claimDeploymentEnvironmentRelocation,
   completeDeploymentEnvironmentRelocation,
   type DeploymentNodeResult,
   type DeploymentPlacement,
-  findDeploymentNodeWithCapacity,
   linkEnvironmentToLegacyNode,
-  linkEnvironmentToNode,
   provisionDeploymentNode,
   restoreDeploymentEnvironmentRelocation,
 } from '../services/deployment-provisioning';
@@ -30,13 +32,14 @@ import {
   markDeploymentReleaseVolumeAttachFailed,
 } from '../services/deployment-volumes';
 import { teardownDeploymentEnvironmentOnNode } from '../services/node-agent';
+import { reserveExistingNodeForRelease } from './deployment-release-existing-node';
 
 type DeploymentReleaseDb = ReturnType<typeof drizzle>;
 type ReleasePlacement = DeploymentPlacement;
 type ProvisionDeploymentNodeOptions = NonNullable<Parameters<typeof provisionDeploymentNode>[4]>;
 type BeforeExternalMutation = () => Promise<void>;
 
-interface PlaceReleaseOnDeploymentNodeParams {
+export interface PlaceReleaseOnDeploymentNodeParams {
   db: DeploymentReleaseDb;
   env: Env;
   envId: string;
@@ -544,42 +547,6 @@ async function attachVolumesToExistingNode(params: {
   });
 }
 
-async function reserveExistingNodeForRelease(params: {
-  release: PlaceReleaseOnDeploymentNodeParams;
-  nodeId: string;
-  expectedReservationJson: string | null;
-  beforeExternalMutation: BeforeExternalMutation;
-}): Promise<{ admitted: boolean; placement: ReleasePlacement | null }> {
-  if (!params.release.placement) return { admitted: true, placement: null };
-  await params.beforeExternalMutation();
-  const nodeMode = params.release.requiresVolumes ? 'exclusive' : 'shared';
-  const currentNode = await findDeploymentNodeWithCapacity(
-    params.release.env,
-    params.release.userId,
-    params.release.placement,
-    params.release.requiresVolumes,
-    {
-      nodeId: params.nodeId,
-      excludeEnvironmentId: params.release.envId,
-      nodeMode,
-    }
-  );
-  if (currentNode?.nodeId !== params.nodeId) return { admitted: false, placement: null };
-  const linked = await linkEnvironmentToNode({
-    env: params.release.env,
-    db: params.release.db,
-    envId: params.release.envId,
-    nodeId: params.nodeId,
-    placement: currentNode.placement,
-    userId: params.release.userId,
-    expectedNodeStatus: 'running',
-    nodeMode,
-    expectedReservationJson: params.expectedReservationJson,
-    releaseId: params.release.releaseId,
-  });
-  return { admitted: linked, placement: linked ? currentNode.placement : null };
-}
-
 async function relocateSharedNodeForRelease(params: {
   release: PlaceReleaseOnDeploymentNodeParams & { placement: ReleasePlacement };
   nodeId: string;
@@ -656,6 +623,7 @@ async function relocateSharedNodeForRelease(params: {
 }
 
 async function handleExistingNodeReservationFailure(params: {
+  reason?: DeploymentNodeAdmissionRejection;
   release: PlaceReleaseOnDeploymentNodeParams;
   nodeId: string;
   expectedReservationJson: string | null;
@@ -673,7 +641,7 @@ async function handleExistingNodeReservationFailure(params: {
     params.release.env,
     params.release.envId,
     params.release.releaseId,
-    'Existing exclusive deployment node is no longer eligible under the effective compute pool or cannot admit the declared resource reservation'
+    deploymentNodeAdmissionFailureMessage(params.reason ?? 'unavailable')
   );
   return null;
 }
@@ -769,6 +737,7 @@ export async function placeReleaseOnDeploymentNode(
     });
     if (!adoptedLegacyNode) {
       return handleExistingNodeReservationFailure({
+        reason: reserved.reason,
         release: params,
         nodeId,
         expectedReservationJson: runtime.resolvedReservationJson,

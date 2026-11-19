@@ -38,3 +38,8 @@ Implementation and completion review passed. Remaining staging cleanup, CI, Code
 
 - Completed omitted-volume exclusivity propagation: stored rows now determine effective requiresVolumes before computing the reservation; admission, persistence and volume attachment retain exclusive mode. Manifest declarations alone control creating missing volumes.
 - Added active exclusive-node real SQLite submission coverage asserting retained node, persisted exclusive reservation/volume requirement, attachment and no teardown/provision. Disabling the stored-row condition made exactly this new test fail (nodeId null); restored fix passes. API typecheck passed.
+
+### Specific admission refusal reporting
+
+- Addressed automated review4626349099: exclusive release errors now distinguish pool ineligibility, capacity refusal, unavailable node, and final reservation authority changes. Diagnostic classification reuses the scheduler eligibility predicate without the reservation only after its capacity-aware check refuses; admission decisions remain unchanged.
+- Added real SQLite release-path assertions for removed provider, exhausted capacity and credential revocation/final reservation refusal. 77 targeted tests PASS, incremental completion review PASS. Extracted existing-node reservation into a route helper to keep placement below800lines.

@@ -367,17 +367,47 @@ describe('linked deployment node pool eligibility through release placement', ()
     expect(await f.place()).toBeNull();
     expect(attach).not.toHaveBeenCalled();
     expect(provision).not.toHaveBeenCalled();
+    expect(
+      f.sqlite
+        .prepare(
+          "SELECT observed_error_message AS error_message FROM deployment_environments WHERE id = 'environment'"
+        )
+        .get()
+    ).toEqual({
+      error_message:
+        'Deployment node placement failed: Existing exclusive deployment node is no longer eligible under the effective compute pool',
+    });
   });
   it('still checks credential authority at the final reservation', async () => {
     const f = fixture(true);
     f.sqlite.exec("UPDATE credentials SET is_active = 0 WHERE id = 'hetzner'");
     expect(await f.place()).toBeNull();
     expect(attach).not.toHaveBeenCalled();
+    expect(
+      f.sqlite
+        .prepare(
+          "SELECT observed_error_message AS error_message FROM deployment_environments WHERE id = 'environment'"
+        )
+        .get()
+    ).toEqual({
+      error_message:
+        'Deployment node placement failed: Existing exclusive deployment node admission changed during reservation; retry the release',
+    });
   });
   it('still checks resource capacity', async () => {
     const f = fixture(true);
     f.placement.reservation.memoryMb = 8192;
     expect(await f.place()).toBeNull();
     expect(attach).not.toHaveBeenCalled();
+    expect(
+      f.sqlite
+        .prepare(
+          "SELECT observed_error_message AS error_message FROM deployment_environments WHERE id = 'environment'"
+        )
+        .get()
+    ).toEqual({
+      error_message:
+        'Deployment node placement failed: Existing exclusive deployment node cannot admit the declared resource reservation',
+    });
   });
 });

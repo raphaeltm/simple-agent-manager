@@ -21,6 +21,7 @@ import {
   NO_DEPLOYMENT_RELOCATION_CLAIM_SQL,
   RECOVER_ERRORED_ENVIRONMENT_SET_SQL,
 } from './deployment-environment-state';
+import type { DeploymentNodeAdmissionRejection } from './deployment-node-admission-result';
 import type { DeploymentPlacement } from './deployment-provisioning';
 import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
 import {
@@ -86,6 +87,7 @@ export async function findDeploymentNodeWithCapacity(
     nodeId?: string;
     excludeEnvironmentId?: string;
     nodeMode?: 'shared' | 'exclusive';
+    onRejection?: (reason: DeploymentNodeAdmissionRejection) => void;
   } = {}
 ): Promise<DeploymentNodeMatch | null> {
   const nodeMode = options.nodeMode ?? 'shared';
@@ -171,6 +173,7 @@ export async function findDeploymentNodeWithCapacity(
     rowsByNode.set(row.nodeId, rows);
   }
 
+  let rejection: DeploymentNodeAdmissionRejection = 'pool-ineligible';
   const scored = candidates.flatMap((node) => {
     const capacityPlacementSnapshot = resolveReusableNodeCapacitySnapshot({
       selection: placement.capacityPoolSelection,
@@ -179,7 +182,16 @@ export async function findDeploymentNodeWithCapacity(
       requestedVmSize: placement.vmSize,
       requestedReservation: placement.reservation,
     });
-    if (capacityPlacementSnapshot === undefined) return [];
+    if (capacityPlacementSnapshot === undefined) {
+      const eligible = resolveReusableNodeCapacitySnapshot({
+        selection: placement.capacityPoolSelection,
+        node,
+        projectId: placement.projectId,
+        requestedVmSize: placement.vmSize,
+      });
+      if (eligible !== undefined) rejection = 'capacity';
+      return [];
+    }
     if (
       placement.capacityPoolSelection === null &&
       !directDeploymentNodeMatchesPlacement(node, placement)
@@ -195,14 +207,20 @@ export async function findDeploymentNodeWithCapacity(
             env.MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE,
             DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE
           );
-    if (usage.activeCount >= maxEnvironments) return [];
+    if (usage.activeCount >= maxEnvironments) {
+      rejection = 'capacity';
+      return [];
+    }
     const decision = evaluateWorkspaceReservationCapacity(
       node,
       usage,
       placement.reservation,
       policy
     );
-    if (!decision.admitted) return [];
+    if (!decision.admitted) {
+      rejection = 'capacity';
+      return [];
+    }
 
     const trusted = resolveTrustedWorkspaceNodeCapacity(node);
     const remainingCpu =
@@ -226,7 +244,10 @@ export async function findDeploymentNodeWithCapacity(
     ];
   });
 
-  if (scored.length === 0) return null;
+  if (scored.length === 0) {
+    options.onRejection?.(rejection);
+    return null;
+  }
 
   scored.sort((a, b) => {
     return (
