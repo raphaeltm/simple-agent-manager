@@ -135,14 +135,18 @@ async function inboxRow(f: Fixture, deliveryId: string) {
   return runInDurableObject(f.stub, async (_instance, state) => {
     return state.storage.sql
       .exec(
-        `SELECT i.delivery_state, i.last_error, m.tool_metadata
+        `SELECT i.delivery_state, i.terminal_reason, i.last_error, i.next_attempt_at,
+                i.attempt_started_at, m.tool_metadata
            FROM session_inbox i LEFT JOIN chat_messages m ON m.id = i.prompt_message_id
           WHERE i.id = ?`,
         deliveryId
       )
       .toArray()[0] as {
       delivery_state: string;
+      terminal_reason: string | null;
       last_error: string | null;
+      next_attempt_at: number | null;
+      attempt_started_at: number | null;
       tool_metadata: string | null;
     };
   });
@@ -240,6 +244,7 @@ describe('a teammate’s attachments in a shared chat', () => {
       attachments: [first, second],
     });
     expect(sent.status).toBe(202);
+    const { deliveryId } = (await sent.json()) as { deliveryId: string };
 
     let revoked = false;
     const vm = installVm(f, async () => {
@@ -251,7 +256,26 @@ describe('a teammate’s attachments in a shared chat', () => {
     });
     const result = await runDueDelivery(f);
 
-    expect(result).toMatchObject({ kind: 'failed', reason: 'sender_unauthorized' });
+    // The resumed worker has lost its claim; its generic stale result must not
+    // overwrite the authoritative sender-revocation reason or transcript label.
+    expect(result).toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'Prompt preparation claim is no longer current',
+    });
+    const retired = await inboxRow(f, deliveryId);
+    expect(retired).toMatchObject({
+      delivery_state: 'failed',
+      terminal_reason: 'sender_access_revoked',
+      last_error: 'The sender no longer has access to this session',
+      next_attempt_at: null,
+      attempt_started_at: null,
+    });
+    expect(JSON.parse(retired.tool_metadata ?? '{}').deliveryCancelled).toBe(
+      'sender_access_revoked'
+    );
+    expect(await runDueDelivery(f)).toBeNull();
+    expect(await inboxRow(f, deliveryId)).toEqual(retired);
     expect(vm.uploads.map((upload) => upload.destination)).toEqual([
       `/workspaces/.private/${first.uploadId}`,
     ]);

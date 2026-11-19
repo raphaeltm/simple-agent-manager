@@ -144,6 +144,8 @@ export interface ProjectSetupsResponse {
   suggestions: InsightsSetupSuggestion[];
   /** Minimum finished runs per setup before a suggestion is offered. */
   suggestionMinRuns: number;
+  /** A selected run lost harness usage; page warning only. Absent on older responses. */
+  usageAdmissionLimited?: boolean;
   unavailable: InsightsSetupsSection[];
   generatedAt: string;
 }

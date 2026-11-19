@@ -5,14 +5,17 @@
  * Downloads fetch decrypted content from R2 and push it to the workspace via VM agent.
  * Uploads fetch file content from the workspace via VM agent and encrypt+store in R2.
  */
+import { AppError } from '@simple-agent-manager/worker-core';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { releaseArrayBuffer } from '../../lib/release-array-buffer';
 import {
   downloadFile,
+  getDownloadTimeoutMs,
   getListMaxPageSize,
   getMaxTagsPerFile,
   listFiles,
@@ -24,6 +27,7 @@ import {
   mcpDebugPackageFileAccess,
   mcpDebugPackageGrant,
 } from '../../services/fleet-ops/debug-package-access';
+import { loadLibraryDownload, withLibraryMemory } from '../../services/library-memory';
 import { recordOperationsAudit } from '../../services/operations-access';
 import {
   downloadFromWorkspace,
@@ -181,73 +185,77 @@ export async function handleDownloadLibraryFile(
     }
 
     // Download and decrypt from R2
-    const { data, file } = await downloadFile(
-      db,
-      env.R2,
-      encryptionKey,
-      tokenData.projectId,
-      fileId
+    const download = await loadLibraryDownload(
+      () => downloadFile(db, env.R2, encryptionKey, tokenData.projectId, fileId),
+      getDownloadTimeoutMs(env)
     );
+    return await download.consume(async ({ data, file }) => {
+      // Raw debug packages: Operations read gate on every download, and every download audited.
+      const debugPackageGrant = await mcpDebugPackageFileAccess(env, tokenData, file.directory);
+      if (debugPackageGrant === 'denied') {
+        return jsonRpcError(requestId, INVALID_PARAMS, 'File not found in library');
+      }
 
-    // Raw debug packages: Operations read gate on every download, and every download audited.
-    const debugPackageGrant = await mcpDebugPackageFileAccess(env, tokenData, file.directory);
-    if (debugPackageGrant === 'denied') {
-      return jsonRpcError(requestId, INVALID_PARAMS, 'File not found in library');
-    }
+      // Determine and validate target path
+      const targetDir =
+        typeof params.targetPath === 'string' && params.targetPath.trim()
+          ? params.targetPath.trim()
+          : getDownloadDir(env);
 
-    // Determine and validate target path
-    const targetDir =
-      typeof params.targetPath === 'string' && params.targetPath.trim()
-        ? params.targetPath.trim()
-        : getDownloadDir(env);
+      const pathErr = validateRelativePath(targetDir);
+      if (pathErr) {
+        return jsonRpcError(requestId, INVALID_PARAMS, pathErr);
+      }
 
-    const pathErr = validateRelativePath(targetDir);
-    if (pathErr) {
-      return jsonRpcError(requestId, INVALID_PARAMS, pathErr);
-    }
-
-    // Upload to workspace
-    await uploadToWorkspace({
-      env,
-      vmBaseUrl: vmResult.vmBaseUrl,
-      nodeId: vmResult.nodeId,
-      workspaceId: tokenData.workspaceId,
-      userId: tokenData.userId,
-      filename: file.filename,
-      data,
-      targetPath: targetDir,
-    });
-
-    const downloadedTo = `${targetDir}/${file.filename}`;
-    if (debugPackageGrant) {
-      await recordOperationsAudit(env, {
-        actorUserId: debugPackageGrant.userId,
-        taskId: debugPackageGrant.taskId,
-        tool: 'download_library_file',
-        targetType: 'library_file',
-        targetId: file.id,
-        outcome: 'succeeded',
-        detail: { directory: file.directory, sizeBytes: file.sizeBytes },
+      // Upload to workspace
+      await uploadToWorkspace({
+        env,
+        vmBaseUrl: vmResult.vmBaseUrl,
+        nodeId: vmResult.nodeId,
+        workspaceId: tokenData.workspaceId,
+        userId: tokenData.userId,
+        filename: file.filename,
+        data,
+        targetPath: targetDir,
       });
-    }
 
-    return jsonRpcSuccess(requestId, {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              downloadedTo,
-              filename: file.filename,
-              sizeBytes: file.sizeBytes,
-            },
-            null,
-            2
-          ),
-        },
-      ],
+      const downloadedTo = `${targetDir}/${file.filename}`;
+      if (debugPackageGrant) {
+        await recordOperationsAudit(env, {
+          actorUserId: debugPackageGrant.userId,
+          taskId: debugPackageGrant.taskId,
+          tool: 'download_library_file',
+          targetType: 'library_file',
+          targetId: file.id,
+          outcome: 'succeeded',
+          detail: { directory: file.directory, sizeBytes: file.sizeBytes },
+        });
+      }
+
+      return jsonRpcSuccess(requestId, {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                downloadedTo,
+                filename: file.filename,
+                sizeBytes: file.sizeBytes,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      });
     });
   } catch (err) {
+    if (err instanceof AppError && err.statusCode === 429) {
+      return jsonRpcError(requestId, INTERNAL_ERROR, err.message, {
+        httpStatus: 429,
+        retryable: true,
+      });
+    }
     log.error('mcp.download_library_file.error', {
       projectId: tokenData.projectId,
       fileId,
@@ -305,62 +313,73 @@ export async function handleUploadToLibrary(
       return jsonRpcError(requestId, INTERNAL_ERROR, vmResult.error);
     }
 
-    // Download file from workspace
-    const { data, contentType } = await downloadFromWorkspace(
-      env,
-      vmResult.vmBaseUrl,
-      vmResult.nodeId,
-      tokenData.workspaceId,
-      tokenData.userId,
-      filePath.trim()
-    );
-
-    // Extract filename from path
-    const filename = filePath.trim().split('/').pop() || 'unknown';
-
-    const mimeType = contentType;
-
     const uploadSessionId = await resolveSessionId(env, tokenData.workspaceId);
-    // Upload to library (will throw 409 on duplicate filename in same directory)
-    const result = await uploadFile(
-      db,
-      env.R2,
-      encryptionKey,
-      env,
-      tokenData.projectId,
-      tokenData.userId,
-      filename,
-      mimeType,
-      data,
-      {
-        description,
-        tags,
-        uploadSource: 'agent',
-        uploadSessionId: uploadSessionId ?? undefined,
-        uploadTaskId: tokenData.taskId,
-        tagSource: 'agent',
-        directory,
-      }
-    );
+    return await withLibraryMemory(async () => {
+      // Download file from workspace
+      const { data, contentType } = await downloadFromWorkspace(
+        env,
+        vmResult.vmBaseUrl,
+        vmResult.nodeId,
+        tokenData.workspaceId,
+        tokenData.userId,
+        filePath.trim()
+      );
+      try {
+        // Extract filename from path
+        const filename = filePath.trim().split('/').pop() || 'unknown';
 
-    return jsonRpcSuccess(requestId, {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
+        const mimeType = contentType;
+
+        // Upload to library (will throw 409 on duplicate filename in same directory)
+        const result = await uploadFile(
+          db,
+          env.R2,
+          encryptionKey,
+          env,
+          tokenData.projectId,
+          tokenData.userId,
+          filename,
+          mimeType,
+          data,
+          {
+            description,
+            tags,
+            uploadSource: 'agent',
+            uploadSessionId: uploadSessionId ?? undefined,
+            uploadTaskId: tokenData.taskId,
+            tagSource: 'agent',
+            directory,
+          }
+        );
+
+        return jsonRpcSuccess(requestId, {
+          content: [
             {
-              fileId: result.id,
-              filename: result.filename,
-              mimeType: result.mimeType,
-              sizeBytes: result.sizeBytes,
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  fileId: result.id,
+                  filename: result.filename,
+                  mimeType: result.mimeType,
+                  sizeBytes: result.sizeBytes,
+                },
+                null,
+                2
+              ),
             },
-            null,
-            2
-          ),
-        },
-      ],
+          ],
+        });
+      } finally {
+        releaseArrayBuffer(data);
+      }
     });
   } catch (err) {
+    if (err instanceof AppError && err.statusCode === 429) {
+      return jsonRpcError(requestId, INTERNAL_ERROR, err.message, {
+        httpStatus: 429,
+        retryable: true,
+      });
+    }
     const message = (err as Error).message;
 
     // Handle duplicate filename — return structured FILE_EXISTS error

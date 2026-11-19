@@ -23,6 +23,7 @@ import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
 import { jsonValidator, RequestAttachmentUploadSchema } from '../../schemas';
 import { generatePresignedUploadUrl } from '../../services/attachment-upload';
+import { hasR2S3Credentials } from '../../services/r2-s3-client';
 
 const uploadRoutes = new Hono<{ Bindings: Env }>();
 
@@ -50,8 +51,8 @@ uploadRoutes.post('/request-upload', requireAuth(), requireApproved(), jsonValid
   // Validate project ownership
   await requireProjectCapability(db, projectId, userId, 'task:write');
 
-  // Check R2 S3 credentials are configured
-  if (!c.env.R2_ACCESS_KEY_ID || !c.env.R2_SECRET_ACCESS_KEY) {
+  // Check presigning is configured (Cloudflare R2 or an operator store; one shared check)
+  if (!hasR2S3Credentials(c.env)) {
     throw errors.forbidden('File attachments are not configured (R2 S3 credentials missing)');
   }
 

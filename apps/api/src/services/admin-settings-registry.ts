@@ -1,16 +1,19 @@
 import type { AdminSettingDefinition } from './admin-setting-definitions';
 import { ACCOUNT_LINKING_SETTINGS } from './admin-settings-account-linking-definitions';
 import { CORE_SETTINGS } from './admin-settings-core-definitions';
+import { CREDENTIAL_SETUP_SETTINGS } from './admin-settings-credential-setup-definitions';
 import { DEPLOYMENT_PUBLISH_SETTINGS } from './admin-settings-deployment-publish-definitions';
 import { FEATURE_SETTINGS } from './admin-settings-features-definitions';
 import { GCP_CATALOG_SETTINGS } from './admin-settings-gcp-catalog-definitions';
 import { INFOMANIAK_SETTINGS } from './admin-settings-infomaniak-definitions';
 import { INSTRUCTION_BUDGET_SETTINGS } from './admin-settings-instructions-definitions';
+import { LIBRARY_MULTIPART_SETTINGS } from './admin-settings-library-definitions';
 import { LIFECYCLE_LATENCY_SETTINGS } from './admin-settings-lifecycle-latency-definitions';
 import { MESSAGE_MERGE_SETTINGS } from './admin-settings-message-merge-definitions';
 import { NODE_TUNNEL_SETTINGS } from './admin-settings-node-tunnel-definitions';
 import { OPERATIONS_TELEMETRY_SETTINGS } from './admin-settings-operations-telemetry-definitions';
 import { OPERATOR_SETTINGS } from './admin-settings-operator-definitions';
+import { ORCHESTRATOR_SETTINGS } from './admin-settings-orchestrator-definitions';
 import { OUTBOUND_SETTINGS } from './admin-settings-outbound-definitions';
 import { OVERVIEW_BRIEF_SETTINGS } from './admin-settings-overview-brief-definitions';
 import { PROJECT_EVENT_SETTINGS } from './admin-settings-project-event-definitions';
@@ -32,6 +35,7 @@ export {
   OPERATOR_DEFAULTS,
 } from './admin-setting-definitions';
 const definitions = [
+  ...LIBRARY_MULTIPART_SETTINGS,
   ...ACCOUNT_LINKING_SETTINGS,
   ...llmEndpointSettingDefinitions(),
   ...AI_PROXY_SETTINGS,
@@ -39,11 +43,13 @@ const definitions = [
   ...PROJECT_EVENT_SETTINGS,
   ...DEPLOYMENT_PUBLISH_SETTINGS,
   ...CORE_SETTINGS,
+  ...CREDENTIAL_SETUP_SETTINGS,
   ...NODE_TUNNEL_SETTINGS,
   ...FEATURE_SETTINGS,
   ...GCP_CATALOG_SETTINGS,
   ...INFOMANIAK_SETTINGS,
   ...OPERATOR_SETTINGS,
+  ...ORCHESTRATOR_SETTINGS,
   ...LIFECYCLE_LATENCY_SETTINGS,
   ...OPERATIONS_TELEMETRY_SETTINGS,
   ...OUTBOUND_SETTINGS,

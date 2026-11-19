@@ -277,28 +277,8 @@ export async function handleCompleteTask(
       failureLogEvent: 'mcp.complete_task.conversation_activity_event_failed',
     });
 
-    // Emit session_ended notification for conversation-mode remap (agent finished turn)
-    // Use tokenData.userId as authoritative target
-    if (env.NOTIFICATION && tokenData.userId) {
-      try {
-        const [projectName, sessionId] = await Promise.all([
-          notificationService.getProjectName(env, tokenData.projectId),
-          notificationService.getChatSessionId(env, tokenData.workspaceId),
-        ]);
-        await notificationService.notifySessionEnded(env, tokenData.userId, {
-          projectId: tokenData.projectId,
-          projectName,
-          sessionId,
-          taskId: tokenData.taskId,
-          taskTitle: taskRow.title,
-        });
-      } catch (err) {
-        log.warn('mcp.complete_task.conversation_notification_failed', {
-          taskId: tokenData.taskId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
+    // No "your turn" notification: the agent files what the person needs in the inbox
+    // (spec decision 2 of idea 01M7G03ZCQ6TM6CMEYDRKQ8ST9; inbox Result items).
 
     return jsonRpcSuccess(requestId, {
       content: [{ type: 'text', text: 'Acknowledged. Conversation remains open for follow-up.' }],

@@ -579,6 +579,10 @@ describe('AI proxy run usage', () => {
       sqlite,
       new URL('../../../src/db/migrations/0253_agent_run_usage.sql', import.meta.url)
     );
+    applySqliteMigration(
+      sqlite,
+      new URL('../../../src/db/migrations/0261_agent_run_usage_admission_hits.sql', import.meta.url)
+    );
     return { sqlite, db: createSqliteD1(sqlite) };
   }
 

@@ -19,6 +19,7 @@ import {
   isLifecycleTaskStatus,
   recordTaskLifecycleEventBestEffort,
 } from '../../services/project-lifecycle-events';
+import { retireTaskCancellationPrompts } from '../../services/task-cancellation-prompts';
 import {
   canTransitionTaskStatus,
   getAllowedTaskTransitions,
@@ -374,6 +375,10 @@ taskCallbackRoute.post(
     }
 
     const prUpdate = await callbackPr.prepareStatusCallbackPullRequest(db, projectId, task, body);
+    if (body.toStatus === 'cancelled') {
+      await retireTaskCancellationPrompts(c.env, task, revalidateWorkspace);
+      await revalidateWorkspace();
+    }
     const updatedTask = await setTaskStatus(
       db,
       task,

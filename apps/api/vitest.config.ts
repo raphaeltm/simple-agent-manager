@@ -8,6 +8,7 @@ export default defineConfig({
   resolve: {
     alias: {
       'cloudflare:workers': resolve(__dirname, 'tests/mocks/cloudflare-workers.ts'),
+      'cloudflare:sockets': resolve(__dirname, 'tests/mocks/cloudflare-sockets.ts'),
       '@cloudflare/containers': resolve(__dirname, 'tests/mocks/cloudflare-containers.ts'),
     },
   },

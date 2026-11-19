@@ -163,6 +163,7 @@ vi.mock('../../src/routes/workspaces/_helpers', async (importOriginal) => ({
     status: 'running',
     nodeId: 'node1',
     nodeStatus: 'running',
+    callbackGeneration: null,
     ...(mockDbLimit()[0] ?? {}),
   })),
   assertWorkspaceCallbackIdentityCurrent: vi.fn(async (_env: unknown, workspace: unknown) =>

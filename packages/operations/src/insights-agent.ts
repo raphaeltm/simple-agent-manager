@@ -209,6 +209,7 @@ export function agentSetups(setups: ProjectSetupsResponse) {
           }
     ),
     suggestionMinRuns: setups.suggestionMinRuns,
+    usageAdmissionLimited: setups.usageAdmissionLimited,
     unavailable: setups.unavailable,
   };
 }
@@ -263,6 +264,7 @@ export function agentAccounts(accounts: ProjectAccountsResponse) {
     },
     totals: accounts.totals,
     usageLimited: accounts.usageLimited,
+    usageAdmissionLimited: accounts.usageAdmissionLimited,
     unavailable: accounts.unavailable,
   };
 }

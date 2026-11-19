@@ -30,10 +30,14 @@ export type {
   ComposeImageArtifactDescriptor,
   ComposeImageArtifactDownload,
   ComposeImageArtifactPlatform,
+  ComposeImageArtifactPresignTarget,
   ComposeImageArtifactRequest,
   ComposeImageArtifactUpload,
 } from './compose-image-artifacts';
 export {
+  buildComposeImageArtifactKey,
+  COMPOSE_IMAGE_ARTIFACT_ARCHIVE_TYPE,
+  COMPOSE_IMAGE_ARTIFACT_MEDIA_TYPE,
   createComposeImageArtifactDownloads,
   createComposeImageArtifactUploads,
   getComposeImageArtifactMaxBytes,

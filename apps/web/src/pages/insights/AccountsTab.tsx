@@ -76,6 +76,10 @@ export function AccountsBody({ data }: { data: ProjectAccountsResponse }) {
         </Notice>
       )}
 
+      {(data.usageLimited || data.usageAdmissionLimited) && (
+        <Notice>Token usage is incomplete for this range.</Notice>
+      )}
+
       {data.accounts.length === 0 && !runsFailed ? (
         <Pane className="px-5 py-8 text-center" data-testid="insights-accounts-empty">
           <h2 className="m-0 text-[15px] font-semibold text-fg-primary">No runs in this range</h2>

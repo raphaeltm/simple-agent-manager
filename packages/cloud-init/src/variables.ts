@@ -63,6 +63,17 @@ export interface CloudInitVariables {
   tunnelListenerProbeIntervalSeconds?: string;
   /** systemd RestartSec for the connector after it exits or fails to start (default: 5). */
   tunnelConnectorRestartSeconds?: string;
+  /**
+   * Per-node reverse-tunnel credential (self-hosted control plane). Non-empty selects
+   * reverse-tunnel mode: no Origin CA certificate, no public agent ingress, a pinned frpc
+   * dialling the control-plane host over wss and exposing only the agent's loopback tunnel
+   * listener. Mutually exclusive with `cloudflareTunnelToken`. Written only to a root-only file.
+   */
+  reverseTunnelCredential?: string;
+  /** Loopback port leased to this node on the control-plane box (frpc `remotePort`). */
+  reverseTunnelRemotePort?: string;
+  /** Loopback port of the agent's tunnel listener in reverse-tunnel mode (default: 8444). */
+  reverseTunnelLocalPort?: string;
   /** Node-scoped endpoint used at boot to sign a locally generated Origin CA CSR. */
   originCaCertificateUrl?: string;
   /** Deadline for the agent binary transfer, including DNS/connect time. */

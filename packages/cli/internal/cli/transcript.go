@@ -65,7 +65,7 @@ func writeTranscriptExport(runtime Runtime, p parsedArgs, transcript transcriptR
 		}
 		return writeWorkflow(runtime, p, map[string]any{"output": output, "complete": true, "messageCount": len(transcript.messages), "snapshotCursor": transcript.snapshot})
 	}
-	_, err := runtime.Stdout.Write(data)
+	_, err := fmt.Fprint(runtime.Stdout, terminalSafeJSON(data))
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}

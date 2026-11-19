@@ -89,7 +89,7 @@ export const INBOX_SETTINGS = [
     name: 'inbox.noticeRetryMinutes',
     defaultValue: 60,
     description:
-      'Minutes the sweep keeps retrying an agent’s notice that an inbox item was archived or expired.',
+      'Minutes the sweep keeps retrying an agent’s notice that an inbox item was answered, a task archived, or an item expired.',
     range: { min: 5, max: 1_440 },
   },
   // Questions (`request_human_input`). Defaults are the old HUMAN_INPUT_* Worker defaults
@@ -157,6 +157,13 @@ export const INBOX_SETTINGS = [
     description:
       'Lifecycle rows a task view or an agent’s read of a task returns, newest kept. The view says when older rows exist.',
     range: { min: 10, max: 500 },
+  },
+  {
+    name: 'inbox.archiveCheckinHoldHours',
+    defaultValue: 168,
+    description:
+      'Hours SAM holds its automatic check-ins off a chat after a person archives its question, unless the person writes in that chat first. Archive tells the agent nothing, and this keeps a check-in from nudging it instead.',
+    range: { min: 1, max: 2_160 },
   },
   {
     name: 'inbox.closedTaskWatchHours',

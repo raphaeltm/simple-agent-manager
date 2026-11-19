@@ -1375,6 +1375,11 @@ export const tasks = sqliteTable(
     activeUpdatedIdIdx: index('idx_tasks_active_updated_id')
       .on(table.updatedAt, table.id)
       .where(sql`status IN ('queued', 'delegated', 'in_progress')`),
+    recoveryScanUpdatedIdIdx: index('idx_tasks_recovery_scan_updated_id').on(
+      table.updatedAt,
+      table.id
+    ).where(sql`status IN ('queued', 'delegated', 'in_progress')
+        OR (status='sleeping' AND admission_state='provider_limit_recovery_pending')`),
     projectChatSessionIdx: index('idx_tasks_project_chat_session')
       .on(table.projectId, table.chatSessionId)
       .where(sql`chat_session_id IS NOT NULL`),
@@ -6151,6 +6156,23 @@ export const agentRunUsage = sqliteTable(
     projectUpdatedIdx: index('idx_agent_run_usage_project_updated').on(
       table.projectId,
       table.updatedAt
+    ),
+  })
+);
+
+/** Sticky disclosure of harness usage refused by admission (migration 0261). */
+export const agentRunUsageAdmissionHits = sqliteTable(
+  'agent_run_usage_admission_hits',
+  {
+    projectId: text('project_id').notNull(),
+    chatSessionId: text('chat_session_id').notNull(),
+    lastRejectedAt: integer('last_rejected_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.chatSessionId] }),
+    projectRejectedIdx: index('idx_agent_run_usage_hits_project_rejected').on(
+      table.projectId,
+      table.lastRejectedAt
     ),
   })
 );

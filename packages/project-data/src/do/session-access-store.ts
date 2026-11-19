@@ -14,7 +14,13 @@ import * as v from 'valibot';
 
 import { HUMAN_PROMPT_DELIVERY_TRIGGERS } from './agent-wake-policy';
 import { cancelCreatorSchedulesForSession } from './project-event-schedules-storage';
+import {
+  labelUndeliveredPrompt,
+  quarantineUncertainPromptRetries,
+  UNISSUED_PROMPT_DELIVERY_SQL,
+} from './prompt-delivery-cancellation';
 import { parseRow } from './row-schemas';
+export { labelUndeliveredPrompt } from './prompt-delivery-cancellation';
 
 const log = createModuleLogger('project_data.session_access');
 
@@ -320,6 +326,10 @@ export function cancelUndeliveredSenderPrompts(
   // bind count does not grow with the number of revoked people. A scheduled message carries its
   // creator as the sender with sender type `system`; these senders do not own the session, so
   // any of theirs here was made under a grant.
+  quarantineUncertainPromptRetries(sql, sessionId, {
+    userIds: senderUserIds,
+    humanSources: SESSION_WRITER_PROMPT_SOURCES,
+  });
   const rows = sql
     .exec(
       `UPDATE session_inbox
@@ -334,10 +344,7 @@ export function cancelUndeliveredSenderPrompts(
             (sender_type = 'human' AND source_kind IN (SELECT value FROM json_each(?)))
             OR source_kind = 'scheduled_action'
           )
-          AND (
-            delivery_state IN ('queued', 'retry_wait')
-            OR (delivery_state = 'delivering' AND prompt_delivery_phase = 'preparing')
-          )
+          AND ${UNISSUED_PROMPT_DELIVERY_SQL}
         RETURNING id, prompt_message_id`,
       reason,
       SENDER_ACCESS_ENDED_ERRORS[reason],
@@ -401,24 +408,4 @@ export function listUndeliveredSenderPrompts(
       }
       return [{ messageId: row.prompt_message_id, reason }];
     });
-}
-
-/**
- * Mark a transcript row as never delivered, so it no longer reads as something the agent got.
- * Used when a sender's access ends while their prompt is queued, and by the delivery fence.
- */
-export function labelUndeliveredPrompt(
-  sql: SqlStorage,
-  sessionId: string,
-  promptMessageId: string,
-  reason: SenderAccessEndedReason
-): void {
-  sql.exec(
-    `UPDATE chat_messages
-        SET tool_metadata = json_set(COALESCE(tool_metadata, '{}'), '$.deliveryCancelled', ?)
-      WHERE id = ? AND session_id = ? AND json_valid(COALESCE(tool_metadata, '{}'))`,
-    reason,
-    promptMessageId,
-    sessionId
-  );
 }

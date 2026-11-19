@@ -320,6 +320,52 @@ export function advanceProjectEventPromptAttemptCheckpoint(
   if (attemptState === 'accepted') rearmMinWakeIntervalOnAcceptance(sql, projectId, batchId, now);
 }
 
+/** Mirror a retired prompt without inventing a physical transport attempt or receipt. */
+export function settleRetiredProjectEventPrompt(
+  sql: SqlStorage,
+  projectId: string | null,
+  deliveryId: string,
+  reason: 'task_cancelled' | 'receipt_unavailable',
+  now = Date.now()
+): void {
+  if (!projectId) return;
+  const batch = sql
+    .exec(
+      `SELECT 1 FROM project_event_delivery_batches
+     WHERE project_id = ? AND id = ? AND delivery_channel = 'prompt_queue' AND state = 'pending'`,
+      projectId,
+      deliveryId
+    )
+    .toArray()[0];
+  if (!batch) return;
+  const result: PromptDeliveryResult =
+    reason === 'task_cancelled'
+      ? {
+          kind: 'failed',
+          reason: 'terminal_target',
+          error: 'Task was cancelled before prompt submission',
+          runtimeIdentity: null,
+          capabilities: null,
+        }
+      : {
+          kind: 'ambiguous',
+          reason: 'receipt_unavailable',
+          error:
+            'Cancellation retained an uncertain prior submission; receipt evidence requires review',
+          runtimeIdentity: null,
+          capabilities: null,
+          receipt: null,
+        };
+  updatePromptQueueBatchForAttempt(
+    sql,
+    projectId,
+    deliveryId,
+    reason === 'task_cancelled' ? 'failed' : 'ambiguous',
+    result,
+    now
+  );
+}
+
 /**
  * An agent-chosen wake interval counts from when the runtime receives a wake, not from when it was
  * queued. A wake can wait behind a busy turn for longer than the interval, and the next one would
