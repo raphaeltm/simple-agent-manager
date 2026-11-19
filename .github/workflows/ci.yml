@@ -1268,8 +1268,10 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
 
+      # No lifecycle scripts: nothing in this job needs one. celld runs esbuild's own bin entry
+      # (celld-binary.ts resolveEsbuild), which finds the platform binary without a postinstall.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       # celld bundles API modules (worker-core's shared-flight) through their built dist/, and the
       # live tests type-check against them.
