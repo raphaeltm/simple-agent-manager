@@ -14,7 +14,7 @@ handler and become HTTP 500, although the condition is a caller-fixable conflict
 ## Context
 
 Found by code inspection during PR #2853 (exact composable credential pool anchors,
-task `tasks/active/2026-09-25-composable-capacity-source-anchor-guard.md`). Pre-existing;
+task `tasks/archive/2026-09-25-composable-capacity-source-anchor-guard.md`). Pre-existing;
 not introduced by that PR. The guard correctly refuses (no workspace is created); only
 the status code and error category are wrong. A 5xx also pollutes staging/production
 error groups and is reported as a server fault (rule 72: categorize by recovery action).

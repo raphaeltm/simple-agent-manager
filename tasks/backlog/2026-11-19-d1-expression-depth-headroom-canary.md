@@ -13,7 +13,7 @@ fails only at the cap itself. Miniflare cannot lower the limit, so the margin is
 ## Context
 
 Deferred LOW from the cloudflare-specialist review of PR #2853 (task
-`tasks/active/2026-09-25-composable-capacity-source-anchor-guard.md`, archived with that PR).
+`tasks/archive/2026-09-25-composable-capacity-source-anchor-guard.md`).
 
 ## Acceptance Criteria
 
