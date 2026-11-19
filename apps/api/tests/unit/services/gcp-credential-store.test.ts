@@ -12,8 +12,7 @@ import {
   replaceUserGcpCredential,
 } from '../../../src/services/gcp-credential-store';
 import { parseGcpCredential } from '../../../src/services/provider-credentials';
-import { applyGcpWifPoolOwnershipMigration } from '../../helpers/gcp-wif-pool-tables';
-import { createSqliteD1 } from '../../helpers/sqlite-d1';
+import { applySqliteMigration, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const ENCRYPTION_KEY = 'SK4ihJazAK3GIWUQcM6nZ1odR6KQHrqRAVSp6HdPxrg=';
 const USER_ID = 'user-gcp-store';
@@ -89,8 +88,24 @@ function setupDatabase(): Database.Database {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    -- What GCP workload identity pool ownership reads besides the tables above.
+    CREATE TABLE platform_credentials (
+      id TEXT PRIMARY KEY, credential_type TEXT NOT NULL, provider TEXT,
+      encrypted_token TEXT NOT NULL, iv TEXT NOT NULL
+    );
+    CREATE TABLE project_deployment_credentials (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, user_id TEXT NOT NULL, provider TEXT NOT NULL,
+      gcp_project_number TEXT NOT NULL, wif_pool_id TEXT NOT NULL
+    );
+    CREATE TABLE platform_settings (
+      key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by TEXT
+    );
   `);
-  applyGcpWifPoolOwnershipMigration(sqlite);
+  applySqliteMigration(
+    sqlite,
+    new URL('../../../src/db/migrations/0262_gcp_wif_pool_index.sql', import.meta.url)
+  );
   return sqlite;
 }
 
