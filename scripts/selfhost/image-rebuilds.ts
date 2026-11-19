@@ -111,9 +111,12 @@ export function imageRebuilds(
       continue;
     }
     const contextRel = build.context ?? '.';
-    const context = isAbsolute(contextRel)
+    // Repository-relative, '' for the repository root itself (`../..` or the absolute root).
+    const joined = isAbsolute(contextRel)
       ? relative(REPO_ROOT, contextRel).split(/[\\/]/).join('/')
       : posix.join(posix.dirname(COMPOSE_PATH), contextRel);
+    const context = joined === '.' ? '' : joined;
+    const under = context === '' ? '' : `${context}/`;
     const dockerfile = posix.join(context, build.dockerfile ?? 'Dockerfile');
     const ignore = posix.join(context, '.dockerignore');
     const emptyContext = ignoresEverything(readFileAtTo(ignore));
@@ -121,7 +124,7 @@ export function imageRebuilds(
       (file) =>
         file === dockerfile ||
         file === ignore ||
-        (!emptyContext && file.startsWith(`${context}/`) && !file.endsWith('.md'))
+        (!emptyContext && file.startsWith(under) && !file.endsWith('.md'))
     );
     if (touched) rebuilds.push(service);
   }

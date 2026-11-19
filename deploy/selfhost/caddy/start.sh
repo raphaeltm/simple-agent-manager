@@ -101,10 +101,21 @@ for name in HTTP_PORT HTTPS_PORT CELLD_PORT CELLD_INTERNAL_PORT FRPS_BIND_PORT O
 		;;
 	*) ;;
 	esac
+	# Same bounds as the deploy (box-settings.ts boxPort): a compose run from another shell can
+	# override a port the deploy never saw. Services with no capability cannot bind below 1024.
+	min=1
+	case "$name" in
+	CELLD_PORT | CELLD_INTERNAL_PORT | FRPS_BIND_PORT | MAIL_COLLECTOR_SMTP_PORT | MAIL_COLLECTOR_UI_PORT) min=1024 ;;
+	*) ;;
+	esac
+	if [ "${#port}" -gt 5 ] || [ "$port" -lt "$min" ] || [ "$port" -gt 65535 ]; then
+		echo "caddy: $name ($port) must be a port between $min and 65535" >&2
+		exit 64
+	fi
 	if [ "$port" -ge "$start" ] && [ "$port" -le "$end" ]; then
 		echo "caddy: $name ($port) lies inside the reverse-tunnel range $start-$end; a node could be leased it. Change the port or REVERSE_TUNNEL_PORT_RANGE_START/END, then pnpm selfhost:deploy --init" >&2
 		exit 64
 	fi
 done
-unset start end bound name port
+unset start end bound name port min
 exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
