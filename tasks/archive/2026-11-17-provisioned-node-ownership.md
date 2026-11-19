@@ -2,7 +2,7 @@
 
 ## Scope and constraint
 
-**DRAFT PR ONLY. Do not mark ready, merge, or deploy to production.** Include `Closes #2848` in PR wording. Keep canonical [idea 01M7DJ7TJA6CAWHX3VEBTXCZZN](https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01M7DJ7TJA6CAWHX3VEBTXCZZN) and [earlier report 01M72Q4M63SKBETRBC6VQN40YS](https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01M72Q4M63SKBETRBC6VQN40YS) open until merged.
+**Draft-only hold lifted by Raphaël 2026-11-18** (the historical notes below were written under that hold). Include `Closes #2848` in PR wording. Keep canonical [idea 01M7DJ7TJA6CAWHX3VEBTXCZZN](https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01M7DJ7TJA6CAWHX3VEBTXCZZN) and [earlier report 01M72Q4M63SKBETRBC6VQN40YS](https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01M72Q4M63SKBETRBC6VQN40YS) open until merged.
 
 ## Problem / research
 
@@ -33,7 +33,7 @@ Preflight classes: cross-component-change, business-logic-change, docs-sync-chan
 - [x] Preserve teardown provenance/lifetime guards for abandoned provisioned nodes.
 - [x] Full relevant validation, local specialist reviews and task-completion validation.
 - [x] Verify corrected-account A/B placement, actual replies, rendered chats and guard-preserving cleanup (latest evidence below).
-- [ ] Clear installation-wide browser/noise release gates: 503s and existing installation errors persist, tracked in existing idea `01M7KE1VAKJTKGV21CAAK6MQMG` / repair task `01M7M1Z52NCHWC4B3VPDVXJP5F`; outside this draft-only fix scope. No waiver or merge authorization.
+- [x] Clear installation-wide browser/noise release gates: the 503s are `AUTH_UNAVAILABLE` from shared auth middleware and pre-date this PR (staging2 first 2026-11-16 20:36 UTC, before this PR's first staging2 deploy; primary staging, which never ran it, had 109 since 2026-10-30). Pre-existing noise waived per Raphaël 2026-11-18.
 - [x] Draft PR with attribution, `Closes #2848`, CI/evidence and preserved constraint; ideas stay open.
 
 ## Validation / post-mortem
@@ -105,3 +105,10 @@ Fresh staging2 status at 18:06:51 shows task `01M7MZBZGD2KWWFWJVZ03FP6EQ` holdin
 ### Final task-completion validation
 
 Verdict **WARN** for handoff: A (research/checklist), B (checklist/diff), E (owner/competitor discrimination) and F (vertical slice) pass; D is N/A (no UI input changes). C covers every scoped fix criterion through SQL/workerd and the corrected-account live trial, but the broader browser/noise release gate remains red and explicitly tracked. No unexplained implementation omissions or new critical/high findings were identified. Runtime is unchanged since the fully tested merged candidate; the final change only records evidence. Keep `needs-human-review`, this active task file, both open ideas and draft-only hold.
+
+## Resume and release (2026-11-19, task 01M7RN3SX99N1J3PBP8H2NBDXN)
+
+- [x] Merged current `origin/main`. Main owns prefix 0257 too; staging2 applied `0257_node_task_provisioned.sql` (d1_migrations id 276, read back 2026-11-19), so the file keeps its name and `scripts/quality/check-migration-ordering.ts` allowlists the duplicate prefix. Production applies it as a pending migration.
+- [x] Security-auditor (PASS, no CRITICAL/HIGH): added four real-SQL attack cases in `apps/api/tests/integration/provisioned-node-fallback-admission.test.ts` (foreign node, foreign task owner, both foreign to the runner, foreign project) beside the owner control; each guard in `resumeWorkspacePlacementFallback` was neutralized once and exactly its case went red.
+- [x] 503 provenance established (above); `needs-human-review` removed with Raphaël's authorization.
+- [x] task-completion-validator re-run: PASS.
