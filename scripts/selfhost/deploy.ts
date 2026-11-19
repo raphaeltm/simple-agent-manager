@@ -93,6 +93,7 @@ import {
   type PlatformKeysMode,
   type PlatformKeysResult,
 } from './platform-keys.js';
+import { composeProjectFor, recordInstall } from './install-record.js';
 import { assertPrivateFile, ensurePrivateDir, readSecretsFile } from './secret-files.js';
 import {
   buildVmAgentBinaries,
@@ -162,6 +163,7 @@ function buildApiDependencies(): void {
 }
 
 interface DeployInputs {
+  envFile: string;
   box: Record<string, string>;
   stateDir: string;
   secretsPath: string;
@@ -207,6 +209,7 @@ function readDeployInputs(): DeployInputs {
   if (!baseDomain) throw new Error(`${envFile}: SAM_DOMAIN is required`);
   if (!box.CELLD_BUCKET) throw new Error(`${envFile}: CELLD_BUCKET is required`);
   return {
+    envFile,
     box,
     stateDir,
     secretsPath,
@@ -254,6 +257,10 @@ function prepareBoxState(inputs: DeployInputs): BoxState {
     );
     return { keys, tunnelSettings, collectorPasswordPath, collectorPassword: null };
   }
+  recordInstall(stateDir, inputs.envFile, box, keys.SAM_INSTALLATION_ID);
+  log(
+    `Compose project: ${composeProjectFor(box, stateDir)} (set COMPOSE_PROJECT_NAME to this name before starting Docker Compose)`
+  );
   syncGatewayEnv(
     join(stateDir, 'gateway.env'),
     renderGatewayEnv(keys.REVERSE_TUNNEL_GATEWAY_SECRET, tunnelSettings),

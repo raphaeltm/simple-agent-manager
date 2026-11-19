@@ -603,3 +603,77 @@ describe('gcp-bootstrap.sh against the guided setup (drift)', () => {
     for (const role of Object.keys(OMITTED_ROLES)) expect(script, role).toContain(role);
   });
 });
+
+describe('bootstrap creation receipts', () => {
+  const args = () => [
+    '--project',
+    'sam-vm-test',
+    '--api-url',
+    ISSUER,
+    '--installation-id',
+    'a'.repeat(32),
+    '--state-dir',
+    state,
+  ];
+  const receipts = () =>
+    JSON.parse(readFileSync(join(state, 'created-resources.json'), 'utf8')).resources as Array<{
+      kind: string;
+      action: string;
+      attributes: Record<string, string>;
+    }>;
+  it('records actual new resource identities and preserves the proof on repeat', () => {
+    expect(run(args()).status).toBe(0);
+    const before = receipts();
+    expect(before).toHaveLength(5);
+    expect(
+      before.every(
+        (r) =>
+          r.action === 'created' &&
+          !!r.attributes.identity &&
+          r.attributes.installation === 'a'.repeat(32)
+      )
+    ).toBe(true);
+    expect(run(args()).status).toBe(0);
+    expect(receipts().every((r) => r.action === 'created')).toBe(true);
+  });
+  it('records preexisting resources and grants as reused', () => {
+    expect(run(['--project', 'sam-vm-test', '--api-url', ISSUER]).status).toBe(0);
+    expect(run(args()).status).toBe(0);
+    expect(receipts().every((r) => r.action === 'reused')).toBe(true);
+  });
+});
+
+it('creates absent firewall rules with identity receipts without adopting an existing shared rule', () => {
+  const args = [
+    '--project',
+    'sam-vm-test',
+    '--api-url',
+    ISSUER,
+    '--installation-id',
+    'a'.repeat(32),
+    '--state-dir',
+    state,
+    '--create-firewalls',
+    '--agent-source-ranges',
+    '10.0.0.0/24',
+  ];
+  const first = run(args);
+  expect(first.status, first.stderr).toBe(0);
+  const receipts = JSON.parse(readFileSync(join(state, 'created-resources.json'), 'utf8'))
+    .resources as Array<{ kind: string; name: string; attributes: Record<string, string> }>;
+  const rules = receipts.filter((r) => r.kind === 'firewall-rule');
+  expect(rules).toHaveLength(2);
+  expect(
+    rules.every((r) => r.attributes.identity && r.attributes.installation === 'a'.repeat(32))
+  ).toBe(true);
+  // A second installation shares this account, existing rule names and environment. Its WIF
+  // bootstrap must record no ownership of either firewall, despite --create-firewalls.
+  const foreignState = join(state, 'other-install');
+  const second = run(
+    args.map((v) => (v === state ? foreignState : v === 'a'.repeat(32) ? 'b'.repeat(32) : v))
+  );
+  expect(second.status, second.stderr).toBe(0);
+  const foreign = JSON.parse(readFileSync(join(foreignState, 'created-resources.json'), 'utf8'))
+    .resources as Array<{ kind: string }>;
+  expect(foreign.some((r) => r.kind === 'firewall-rule')).toBe(false);
+});

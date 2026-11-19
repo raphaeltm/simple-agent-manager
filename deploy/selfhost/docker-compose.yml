@@ -23,7 +23,7 @@
 # `docker compose build` (or when the image does not exist yet); `pnpm selfhost:upgrade` rebuilds
 # a service only when its build inputs changed. The pinned celld version must match CELLD_VERSION
 # in scripts/selfhost/versions.ts, which the deploy script uses for `celld deploy`.
-name: sam-selfhost
+name: ${COMPOSE_PROJECT_NAME:?Set the installation-specific project printed by selfhost:deploy --init}
 
 services:
   celld:

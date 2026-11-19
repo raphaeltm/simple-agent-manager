@@ -52,7 +52,10 @@ From the repository root on the VM:
    only that address can claim the new install by signing in with an emailed code.
 4. `pnpm selfhost:deploy --init`: generates the platform keys (`.state/platform-keys.json`; back
    it up), `.state/gateway.env` (the reverse-tunnel gateway secret and lease port range) and the
-   mail-collector files. Run it again after changing the port range or turning a profile on.
+   mail-collector files. Set `COMPOSE_PROJECT_NAME` in `.env` to the installation-specific name
+   this command prints, before running Compose. Keep that name with this install; another install
+   needs its own state directory and project name. Run init again after changing the port range
+   or turning a profile on (`scripts/selfhost/install-record.ts:expectedComposeProjectFor`).
 5. `(cd deploy/selfhost && docker compose build)`: builds the two local images (`caddy`, and
    `sam-mx` when `mail-in` is on). See [Image builds](#image-builds).
 6. `(cd deploy/selfhost && docker compose up -d)`. Run compose from `deploy/selfhost/`, as every
@@ -64,7 +67,10 @@ From the repository root on the VM:
    `celld deploy`, then waits until the new version answers.
 8. Sign in at `https://app.SAM_DOMAIN`. To add someone, or a first administrator without
    `BOOTSTRAP_OWNER_EMAIL`: `pnpm selfhost:create-account --email someone@example.com [--superadmin]`.
-9. GCP nodes: `pnpm selfhost:gcp-bootstrap -- --project <id> --api-url https://api.SAM_DOMAIN`.
+9. GCP nodes: `pnpm selfhost:gcp-bootstrap -- --project <id> --api-url https://api.SAM_DOMAIN
+--state-dir /absolute/path/to/install/.state --installation-id <SAM_INSTALLATION_ID>`.
+   Use the generated installation's 32-character hexadecimal id; it is a public identifier.
+   Keep the state directory with this install: the bootstrap writes creation receipts there.
    It runs after step 7 because it checks the token issuer the running install advertises. It
    creates a workload identity pool and provider trusting only this install, and a node service
    account, then prints the credential JSON to paste in **Admin -> Credentials** (Cloud Provider,
@@ -89,31 +95,129 @@ From the repository root on the VM:
 
 `pnpm selfhost:deploy --dry-run` prints the Worker configuration it would deploy, secrets redacted.
 
+## Backup and restore
+
+The fleet bucket contains Worker secrets as well as application data. The backup command encrypts
+**the entire backup**, including the bucket, `.state/`, `.env` and its manifest, with AES-256-GCM.
+It briefly stops celld for a consistent second bucket copy and restarts it even if that copy
+fails (`scripts/selfhost/backup-lib.ts:runBackup`, `runPlainBackup`). Temporary plaintext lives
+under the private `.tmp/selfhost-backups/` directory and is removed on success or failure.
+Backup, restore and upgrade are operator-box commands; they refuse GitHub Actions.
+
+Create a separate raw 32-byte key once. These commands write the key directly to a private file;
+they do not print it, and refuse to overwrite an existing key:
+
+```sh
+install -d -m 700 "$HOME/.config/sam"
+(umask 077; set -C; openssl rand 32 > "$HOME/.config/sam/backup.key")
+pnpm selfhost:backup --encryption-key-file "$HOME/.config/sam/backup.key"
+```
+
+Use `--to /absolute/path/to/new-backup` for a specific destination; the default is
+`deploy/selfhost/backups/<timestamp>`. Keep the key outside installation state and all backup
+folders. Alternatively set `SAM_BACKUP_KEY_FILE` in the private `.env` to the key's **absolute**
+path. The file must be owned by the operator, mode 0600, exactly 32 raw bytes, and have no symlinks
+or hard links (`scripts/selfhost/backup-encryption.ts:readBackupKey`). Store a separate offline
+copy of this key with your recovery records. Losing it makes the backups unrecoverable; keeping
+it alongside a backup defeats that backup's encryption. Never print keys, Worker secrets or raw
+bucket deployment manifests when diagnosing a failure.
+
+Restore into a fresh disposable or replacement installation using the same SAM checkout/ref as
+the original backup. Prepare an existing mode-0600 target `.env` with its own domain, object-store
+settings, absolute state path and installation-specific Compose project. Its state directory
+must be empty or absent, and its bucket/prefix must contain no objects. For an `s3://` store,
+set `R2_S3_REGION` as well as `S3_ENDPOINT` and its credentials.
+
+```sh
+pnpm selfhost:restore --from /absolute/path/to/backup \
+  --box-env /absolute/path/to/target.env --state-dir /absolute/path/to/fresh-state \
+  --encryption-key-file "$HOME/.config/sam/backup.key"
+```
+
+Restore authenticates the complete encrypted inventory and every file before touching the target.
+It copies state and bucket data, keeps the target `.env`, strips the source installation's
+creation receipts, and leaves celld stopped. Follow the printed checkout and Compose commands
+to start the recovered install, then verify its data (`scripts/selfhost/backup-lib.ts:runRestore`).
+This command refuses an occupied target; it does not overwrite an existing fleet.
+
 ## Upgrade
 
 ```sh
-pnpm selfhost:upgrade --to <git ref>
+pnpm selfhost:upgrade --to <git-ref> --encryption-key-file "$HOME/.config/sam/backup.key"
 ```
 
-It refuses a checkout with uncommitted changes, checks the ref out, runs `deploy --init`, rebuilds
-only the images whose build inputs changed (explicitly, with `docker compose build <service>`),
-restarts the stack (`up -d`, never `--build`) only when compose inputs changed, deploys, checks
-health and prints how to roll back. For a box other than the default, pass `--box-env`,
-`--state-dir` and `--secrets`; every deploy and compose command it runs or prints uses that box's
-`.env` and every compose file its `COMPOSE_FILE` selects. Docker compose reads
-`SAM_SELFHOST_STATE_DIR` relative to `deploy/selfhost/`, so when `--state-dir` (or a `.env` outside
-`deploy/selfhost/`) puts the state elsewhere, the upgrade passes the absolute path to every compose
-command it runs or prints. Set it in the box `.env` as an absolute path to run `docker compose`
-by hand.
+Every upgrade requires a fresh encrypted pre-upgrade backup; `--skip-backup` is unsupported.
+Use `--backup-to /absolute/path/to/new-backup` to choose its location, or let the command create
+`backups/pre-upgrade-<timestamp>` next to the state directory. Keep that snapshot and its key
+until you have verified the upgraded installation.
 
-If an upgrade fails, `.state/upgrade-pending.json` records the ref it started from and the printed
-output gives both ways out: run the same `selfhost:upgrade --to <ref>` again to retry (it reruns
-every step, from the recorded ref, and its rollback still names that ref), or run the printed
-rollback commands. The file is removed once an upgrade passes its health check.
+Before deploying, the upgrade checks the active deployment's Durable Object classes against the
+installed migration history and the target checkout. Unknown, removed, duplicated or reordered
+migration tags, and changes to existing class declarations, are refused. Self-host-only tags,
+including `selfhost-hosted-git-v1` when present in that checkout, participate in the same check
+(`scripts/selfhost/upgrade-migrations.ts:installedMigrations`, `assertMigrationProgression`).
 
-**It takes no backup.** Copy the fleet bucket and `deploy/selfhost/.state` yourself first. An
-upgrade that carries a D1 migration cannot be rolled back by redeploying the old ref; only your
-own pre-upgrade copy restores it.
+The command requires a clean tracked checkout and an installation-specific Compose project with
+creation receipts. It checks out the target, runs `deploy --init`, rebuilds changed local images,
+restarts Compose when its inputs changed, deploys and checks health. Failure automatically restores
+the encrypted snapshot and previous code/dependencies before starting the previous version.
+The recovery checks the original installation, bucket, state and Compose ownership before removing
+its disposable celld cache (`scripts/selfhost/upgrade-lib.ts:runUpgrade`, `recoverUpgrade`;
+`scripts/selfhost/backup-recovery.ts:runRollback`). Redeploying an old Worker alone cannot undo a
+migration.
+
+An unfinished operation retains `.state/upgrade-pending.json` with the previous ref and encrypted
+snapshot path. Keep celld stopped if automatic recovery fails; retain the snapshot and key, and
+retry the same upgrade command to recover the original install before attempting a new upgrade.
+Do not delete the pending record to bypass a failed recovery.
+
+For a nondefault install, use `--box-env`, `--state-dir` and, if needed, `--secrets`. Every deploy
+and Compose operation uses that installation's environment and overlays. Set
+`SAM_SELFHOST_STATE_DIR` to an absolute path when running Compose manually.
+
+Older installs using the shared `sam-selfhost` project may set `COMPOSE_PROJECT_NAME=sam-selfhost`
+explicitly for backup. Upgrades and destructive teardown refuse that shared identity. Move to a
+separate, installation-specific Compose project through an operator-controlled migration first;
+these commands do not adopt or automatically migrate the old project.
+
+## Teardown
+
+Inventory is read-only by default. Review a dry run before confirming either removal mode:
+
+```sh
+pnpm selfhost:teardown
+pnpm selfhost:teardown --keep-data --dry-run
+pnpm selfhost:teardown --keep-data --confirm <SAM_DOMAIN>
+pnpm selfhost:teardown --remove-everything --dry-run
+pnpm selfhost:teardown --remove-everything --confirm <SAM_DOMAIN>
+```
+
+`--keep-data` stops/removes this installation's Compose containers and owned node VMs, while
+keeping its volumes, bucket, configuration, backups, keys, workload identity pool/provider, service
+account and IAM grants. The retained data keeps the identity needed to use it again.
+
+`--remove-everything` also removes proven-owned local volumes/state and cloud resources recorded
+as created for this installation. It preserves backups unless `--delete-backups` is explicit,
+and preserves local platform key material unless `--destroy-key` is explicit. It does not adopt
+resources because their names look familiar. Foreign, ambiguous, replaced and unrecorded resources
+are preserved; a refusal/failure returns a nonzero exit status. The summary lists retained data
+and manual cleanup steps (`scripts/selfhost/teardown.ts`, `teardown-model.ts:execute`).
+
+Operator-managed `gs://` and external `s3://` stores and their contents are retained for manual
+cleanup: a configured bucket URL or prefix is not creation proof. Verify exclusive ownership
+before deleting anything there. The bundled trial store is removed only with its proven-owned
+installation-specific Compose volume. DNS records, the box VM, its network and other manually
+created resources remain operator cleanup steps. Never run destructive verification against a
+shared install; use disposable resources you created for the test.
+
+For new GCP node firewall rules, the bootstrap optionally accepts `--create-firewalls
+--agent-source-ranges <comma-separated-CIDRs>` together with `--installation-id` and `--state-dir`.
+It creates only missing rules and records their immutable ids and installation/environment scope.
+Choose agent source ranges appropriate for your ingress path. Existing shared rules are not
+adopted. Teardown deletes a recorded rule only after rechecking its id, owner and absence of
+other VM users; it preserves shared or legacy rules (`deploy/selfhost/gcp-bootstrap.sh`,
+`scripts/selfhost/teardown-gcp.ts:firewallItems`). Keep `.state/created-resources.json` after a
+partial teardown: it is the receipt used to resume cleanup.
 
 ## Image builds
 
@@ -213,13 +317,12 @@ bucket's deploy manifests, so the bucket credential is the install's master key.
   and run agents only once a GitHub App (the `GITHUB_*` Worker secrets in `.state/secrets.env`)
   or a GitLab integration is configured.
   Without one, sign-in, administration and nodes work, but no agent session can start.
-- **Backup, restore and teardown** commands. Back up the fleet bucket and `.state/` yourself.
 
 Do not put data on this box that you could not afford to lose or leak.
 
 ## Tests
 
-- `pnpm selfhost:test`: deploy, upgrade, account and configuration logic, compose wiring, pinned
+- `pnpm selfhost:test`: deploy, encrypted backup/restore, upgrade recovery, teardown ownership, account and configuration logic, compose wiring, pinned
   versions, `caddy/start.sh` (no Docker needed).
 - `pnpm selfhost:live-test`: the box's real Caddy image (built from `caddy/Dockerfile`), frp and
   celld in Docker with host networking: gateway 404s and path tricks, the frp rate limit, header
