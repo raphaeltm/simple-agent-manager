@@ -3,6 +3,7 @@ import {
   type CapacityPlacementSnapshot,
   type CredentialSource,
 } from '@simple-agent-manager/shared';
+import { AppError } from '@simple-agent-manager/worker-core';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -74,9 +75,14 @@ export interface ProvisionedNode {
   updatedAt: string;
 }
 
-export class CapacityPoolNodeLimitExceededError extends Error {
+export class CapacityPoolNodeLimitExceededError extends AppError {
   constructor() {
-    super('Capacity pool node limit reached');
+    super(
+      409,
+      'CAPACITY_POOL_NODE_LIMIT',
+      'Your compute pool has reached its node limit. Delete an idle node or ask the pool owner to raise the limit in Infrastructure.'
+    );
+    // TaskRunner uses this name to release its provisioning lease and wait for capacity.
     this.name = 'CapacityPoolNodeLimitExceededError';
   }
 }
