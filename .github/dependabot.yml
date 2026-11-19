@@ -56,3 +56,8 @@ updates:
     directory: '/deploy/selfhost/sam-mx'
     schedule:
       interval: weekly
+  # Self-hosted Caddy build (caddy builder + runtime, both pinned by digest).
+  - package-ecosystem: 'docker'
+    directory: '/deploy/selfhost/caddy'
+    schedule:
+      interval: weekly

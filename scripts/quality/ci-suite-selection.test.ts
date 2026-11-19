@@ -672,10 +672,30 @@ describe('runner budget (jobs a ready PR starts)', () => {
   });
 
   // 32: the Self-host Email job (landing plan F12) runs only on self-host email paths.
-  it('a PR that matches every filter starts at most 32 jobs (27 before: four more Workers shards, then Self-host Email)', () => {
+  // 33: the Self-host Live job (landing plan D9) runs only on self-host paths.
+  it('a PR that matches every filter starts at most 33 jobs (27 before: four more Workers shards, Self-host Email, Self-host Live)', () => {
     expect(
       jobCount(simulate({ eventName: 'pull_request', filters: allFilters() }))
-    ).toBeLessThanOrEqual(32);
+    ).toBeLessThanOrEqual(33);
+  });
+
+  it('the Self-host Live job starts only for self-host paths (D9)', () => {
+    const live = (paths: string[]) =>
+      simulate({ eventName: 'pull_request', filters: filtersFor(paths) }).get('selfhost-live');
+    for (const path of [
+      'deploy/selfhost/caddy/Caddyfile',
+      'scripts/selfhost/deploy.ts',
+      'apps/api/src/selfhost/build.ts',
+    ]) {
+      expect(live([path]), path).toBe('success');
+    }
+    for (const path of [
+      'packages/cloud-init/src/reverse-tunnel.ts',
+      'apps/api/src/index.ts',
+      'packages/worker-core/src/shared-flight.ts',
+    ]) {
+      expect(live([path]), path).not.toBe('success');
+    }
   });
 
   it('a draft PR starts 6 jobs', () => {
