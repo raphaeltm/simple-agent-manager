@@ -1,7 +1,7 @@
 /**
  * The egress fence against real tools: rendered rulesets go through `nft -c` (the kernel's own
- * parser), and celld's entrypoint runs under bash. nft needs netlink access; where neither `nft`
- * nor passwordless `sudo nft` can check a ruleset, those cases are skipped and say so. The
+ * parser), and celld's entrypoint runs under bash. nft needs netlink access; without that access
+ * these optional local parser cases skip. CI requires the isolated privileged kernel lab. The
  * success path of celld/start.sh needs a live fence: live/fence-netns.live.test.ts applies the
  * rendered ruleset in a network namespace and runs start.sh and fence.sh against it.
  */
@@ -32,8 +32,7 @@ function nftChecker(): string[] | null {
 }
 
 const nft = nftChecker();
-// CI installs nftables before this suite; there a missing checker is a failure, not a skip.
-// The privileged isolated Docker lab validates nft rules in CI.
+// Local nft parsing is optional; the required privileged isolated Docker lab validates rules in CI.
 
 describe.skipIf(nft === null)('rendered rulesets pass nft -c', () => {
   const RESOLV = 'nameserver 127.0.0.53\nnameserver 2001:4860:4860::8888\n';

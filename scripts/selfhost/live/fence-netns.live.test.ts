@@ -6,7 +6,14 @@
  * Every forbidden target has a listener (in the peer namespace, or on this namespace's own
  * addresses), so the control uid reaches it and only the fence can explain a refusal.
  */
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -110,6 +117,7 @@ const CASES: Case[] = [
 
 describe.skipIf(unavailable !== null)('egress fence in a network namespace', () => {
   const lab = new NetnsLab();
+  mkdirSync(resolve('.tmp'), { recursive: true });
   const dir = mkdtempSync(resolve('.tmp/fence-netns-'));
   chmodSync(dir, 0o755);
   const rulesFile = join(dir, 'egress-fence.nft');
