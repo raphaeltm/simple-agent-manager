@@ -8,7 +8,6 @@
 // The production entry (src/index.ts, imported by the celld entry) wires repo-hosting's ports
 // first; the branch list, project create and import reach them, so this entry must too.
 import '../../../src/repo-hosting-wiring';
-import { invalidateAdminSettings } from '../../../src/services/admin-settings-resolution';
 
 import { Hono } from 'hono';
 
@@ -21,6 +20,7 @@ import { HostedGitRepo, mountHostedGitRoute } from '../../../src/selfhost/hosted
 import type { HostedGitEnv as Env } from '../../../src/selfhost/hosted-git/env';
 import { hostedGitTokenRoutes } from '../../../src/selfhost/hosted-git/token-route';
 import { type HostedGitScope, mintHostedGitToken } from '../../../src/selfhost/hosted-git/tokens';
+import { invalidateAdminSettings } from '../../../src/services/admin-settings-resolution';
 import { signCurrentWorkspaceCallbackToken } from '../../../src/services/jwt';
 
 /** Test-only: run the GC alarm on demand (production schedules it 5 minutes after a push). */
