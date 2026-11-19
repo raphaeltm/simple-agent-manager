@@ -23,7 +23,7 @@ Use existing L16 selection, extend its optional token context and fetch/import c
 - [ ] Local lint/typecheck/tests/build; security, Cloudflare, architecture and completion reviews
 - [ ] Draft PR then ready/CI/CodeRabbit request and wait
 - [ ] Primary staging lease/deploy: Artifacts and GitHub project creation unchanged, local seam off
-- [ ] BOX existing bucket-mode deploy adds selfhost-hosted-git-v1; create project; OpenCode free reply; agent push verified; cleanup and BOX FREE
+- [x] BOX existing bucket-mode deploy adds selfhost-hosted-git-v1; create project; OpenCode free reply; agent push verified; cleanup and BOX FREE
 - [ ] Merge main; all gates current head; announce merging/merged SHA; production success; idea SHIPPED
 
 ## Acceptance
@@ -33,3 +33,5 @@ No HostedGitRepo/dgit/pako reachable from Cloudflare index; wrangler unchanged; 
 ## Implementation evidence
 
 Stacked L22c539625202 per coordinator to break circular BOX gate; #2906 merges before H2. Hosted suite19/19 (real git18 + celld dry-run1); selfhost unit113/113; config/project29/29; native runtime-token32/32. Worker graph negative probe importing pako through workspace package failed as intended. GC admission negative probe failed exactly the race test. Security followup inflation/GC6/6.
+
+BOX proof: existing795bf674f upgraded bucket-mode to a7cad then f6c65e71a healthy, celld tag confirmed. Hosted project01M7SX75X1YVADRG9Z4AB4AMV0; OpenCode big-pickle task01M7SXCMYYTAB9DNCFFAZMM0G1 replied pong; cookie-free clone verified agent commitad485ee136d4c8469b1e05e2983e086dd9e9393b and h2-proof.txt=pong. Stop/node/project delete200; nodes empty/project404/GCP no matching VM. Test credential/key/firewall/scratch removed. BOX FREE channel sequence403.

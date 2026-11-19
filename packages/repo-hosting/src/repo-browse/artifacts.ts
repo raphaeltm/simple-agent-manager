@@ -10,10 +10,10 @@ import { errors } from '@simple-agent-manager/worker-core';
 import { createPatch } from 'diff';
 import git from 'isomorphic-git';
 import webHttp from 'isomorphic-git/http/web';
-import { createFetchHttpClient } from './fetch-http-client';
 
 import type { Env } from '../env';
 import { repoHostingPorts } from '../ports';
+import { createFetchHttpClient } from './fetch-http-client';
 import { MemoryFS } from './memory-fs';
 import type { RepoBrowser } from './types';
 import { basename, guessContentType, isBinaryBytes, maxCompareFiles, maxInlineBytes } from './util';
