@@ -169,7 +169,11 @@ export async function writeAndReconcileFence(input: FenceReconcileInput): Promis
   // Never start a deliberately stopped install. Retain pending work for its next active deploy.
   const wasActive = (name: string) => ['running', 'restarting'].includes(states.get(name) ?? '');
   pending.celld ||= wasActive('celld');
-  pending.proxy ||= wasActive('gce-metadata-proxy');
+  // A profile transition needs a new proxy before recovering an active celld.
+  // An existing exited proxy remains an operator's deliberate stopped state.
+  pending.proxy ||=
+    wasActive('gce-metadata-proxy') ||
+    (pending.celld && !states.has('gce-metadata-proxy') && metadataProxyEnabled(box));
   const active = wasActive('egress-fence') || pending.celld || pending.proxy;
   if (existing) writePrivateFile(marker, JSON.stringify(pending));
   if (!active) return;

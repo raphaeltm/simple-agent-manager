@@ -116,6 +116,67 @@ describe(
       ]);
     });
 
+    it.each(['missing', 'stopped'] as const)(
+      'enabling GCE for an active S3 installation handles a %s proxy',
+      async (proxyState) => {
+        expect(
+          (await init(['COMPOSE_PROFILES=tunnel,local-store', 'CELLD_BUCKET=s3://fleet/celld']))
+            .status
+        ).toBe(0);
+        serviceState(
+          active
+            .filter((row) => row.Service !== 'gce-metadata-proxy')
+            .concat(
+              proxyState === 'stopped' ? [{ Service: 'gce-metadata-proxy', State: 'exited' }] : []
+            )
+        );
+        const result = await init();
+        expect(result.status, result.out).toBe(0);
+        const ops = operations();
+        const proxy = ops.findIndex(
+          (args) => args.includes('up') && args.includes('gce-metadata-proxy')
+        );
+        const celld = ops.findIndex((args) => args.includes('up') && args.includes('celld'));
+        expect(celld).toBeGreaterThan(0);
+        if (proxyState === 'missing') {
+          expect(proxy).toBeGreaterThan(0);
+          expect(proxy).toBeLessThan(celld);
+        } else {
+          expect(proxy).toBe(-1);
+        }
+      }
+    );
+
+    it('retains a newly required proxy across a failed GCE transition retry', async () => {
+      expect(
+        (await init(['COMPOSE_PROFILES=tunnel,local-store', 'CELLD_BUCKET=s3://fleet/celld']))
+          .status
+      ).toBe(0);
+      serviceState(active.filter((row) => row.Service !== 'gce-metadata-proxy'));
+      writeFileSync(join(dir, 'fail'), 'fail');
+      expect((await init()).status).toBe(1);
+      const pending = JSON.parse(
+        readFileSync(join(dir, '.state/fence-reconcile-pending.json'), 'utf8')
+      );
+      expect(pending.proxy).toBe(true);
+      rmSync(join(dir, 'fail'));
+      serviceState(
+        active
+          .filter((row) => row.Service !== 'gce-metadata-proxy')
+          .map((row) => ({ ...row, State: 'exited' }))
+      );
+      writeFileSync(calls, '');
+      expect((await init()).status).toBe(0);
+      expect(operations()).toContainEqual([
+        'up',
+        '-d',
+        '--no-deps',
+        '--force-recreate',
+        '--wait',
+        'gce-metadata-proxy',
+      ]);
+    });
+
     it('unchanged inputs inspect but never restart services', async () => {
       expect((await init()).status).toBe(0);
       expect((await init()).status).toBe(0);
