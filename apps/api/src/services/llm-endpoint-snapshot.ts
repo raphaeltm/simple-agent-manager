@@ -1,9 +1,10 @@
 /** Joint endpoint URL/key snapshot: independent caches can mix remote admin generations. */
-import { log, settleSharedFlight } from '@simple-agent-manager/worker-core';
+import { log } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { resolveD1BindingIdentity } from '../lib/d1-session';
+import { settleSharedFlight } from '../lib/shared-flight';
 import { ADMIN_SETTINGS_CACHE_MAX_MS, AdminSettingsUnavailableError } from './admin-settings-cache';
 import { type AdminSettingName } from './admin-settings-registry';
 import { adminSettingsGeneration, requiredDefinition, resolved } from './admin-settings-resolution';

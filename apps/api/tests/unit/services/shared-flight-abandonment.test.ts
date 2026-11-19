@@ -16,7 +16,9 @@
  * interval past the bound before it reads the answers.
  *
  * Proven discriminating (F1): removing the abandonment retry in `credentialRows` / `legacyKv` /
- * `resolveLegacyPlatformConfig` turns the matching case red. (The ProjectData ensure memo no
+ * `resolveLegacyPlatformConfig` turns the matching case red. The AdminSettingsCache and LLM
+ * endpoint snapshot cases (L22a) cover the two sites the static check cannot see, because their
+ * cache entry reaches the join through a function parameter. (The ProjectData ensure memo no
  * longer shares in-flight ensures, so it has no abandonment branch to test here.)
  */
 import type Database from 'better-sqlite3';
@@ -33,6 +35,7 @@ import {
   credentialRows,
 } from '../../../src/services/admin-settings-resolution';
 import { DEFAULT_CONFIG_READ_TIMEOUT_MS } from '../../../src/services/config-read-deadline';
+import { resolveLlmEndpointSettings } from '../../../src/services/llm-endpoint-snapshot';
 import {
   __resetPlatformConfigCacheForTest,
   resolvePlatformConfig,
@@ -179,6 +182,83 @@ describe.each([
       await vi.advanceTimersByTimeAsync(1 + SHARED_FLIGHT_POLL_MS);
       // The KV kill switch still wins: the joiners read the real value, not a default.
       await expect(Promise.all(joiners)).resolves.toEqual([false, false, false]);
+      expect(reads).toBe(2);
+    });
+  });
+
+  describe('AdminSettingsCache: joiners of a dropped overrides read', () => {
+    it('wait out its deadline, then share one replacement read', async () => {
+      const { sqlite, env } = createAdminSettingsEnv();
+      open.push(sqlite);
+      const expected = await untilSettled(resolveAdminSetting(env, 'connector.enabled'));
+      __resetAdminSettingsCacheForTest();
+      let reads = 0;
+      const realPrepare = env.DATABASE.prepare.bind(env.DATABASE);
+      env.DATABASE.prepare = ((sql: string) => {
+        const statement = realPrepare(sql);
+        if (!sql.startsWith('SELECT key, value, updated_at AS updatedAt')) return statement;
+        return {
+          all: () => {
+            reads += 1;
+            return reads === 1 ? never() : statement.all();
+          },
+        };
+      }) as typeof env.DATABASE.prepare;
+
+      await startAndDrop(
+        () => resolveAdminSetting(env, 'connector.enabled'),
+        () => reads >= 1
+      );
+      expect(reads).toBe(1);
+
+      const joiners = [
+        resolveAdminSetting(env, 'connector.enabled'),
+        resolveAdminSetting(env, 'connector.enabled'),
+      ];
+      const settled = watch(joiners);
+      await vi.advanceTimersByTimeAsync(JOIN_BOUND_MS - 1);
+      expect(settled).toEqual([false, false]);
+      expect(reads).toBe(1);
+
+      await advanceUntil(() => settled.every(Boolean));
+      await expect(Promise.all(joiners)).resolves.toEqual([expected, expected]);
+      expect(reads).toBe(2);
+    });
+  });
+
+  describe('LLM endpoint snapshot: joiners of a dropped snapshot read', () => {
+    it('wait out its deadline, then share one replacement read', async () => {
+      const { sqlite, env } = createAdminSettingsEnv();
+      open.push(sqlite);
+      const names = ['llm.openAICompatible.baseUrl', 'outbound.maxRedirects'] as const;
+      const expected = await untilSettled(resolveLlmEndpointSettings(env, [...names]));
+      // A fresh binding identity is not available here, so drop the cached snapshot by
+      // invalidating the admin-settings generation it is keyed on.
+      __resetAdminSettingsCacheForTest();
+      let reads = 0;
+      const realBatch = env.DATABASE.batch.bind(env.DATABASE);
+      env.DATABASE.batch = ((statements: Parameters<typeof realBatch>[0]) => {
+        reads += 1;
+        return reads === 1 ? never() : realBatch(statements);
+      }) as typeof env.DATABASE.batch;
+
+      await startAndDrop(
+        () => resolveLlmEndpointSettings(env, [...names]),
+        () => reads >= 1
+      );
+      expect(reads).toBe(1);
+
+      const joiners = [
+        resolveLlmEndpointSettings(env, [...names]),
+        resolveLlmEndpointSettings(env, [...names]),
+      ];
+      const settled = watch(joiners);
+      await vi.advanceTimersByTimeAsync(JOIN_BOUND_MS - 1);
+      expect(settled).toEqual([false, false]);
+      expect(reads).toBe(1);
+
+      await advanceUntil(() => settled.every(Boolean));
+      await expect(Promise.all(joiners)).resolves.toEqual([expected, expected]);
       expect(reads).toBe(2);
     });
   });

@@ -70,7 +70,10 @@ download several runs' `workers-timings-*` artifacts and run
   module-scope variable that holds a promise. It does not follow state reached through a
   function parameter (a helper handed a shared entry object is trusted), iteration over a shared
   collection, Durable Object fields (an object's ops survive one of its requests
-  answering on celld 0.6.3), or `for await`.
+  answering on celld 0.6.3), `for await`, or a flight held inside a library (jose's JWKS fetch).
+  The parameter-reached sites (AdminSettingsCache, the LLM endpoint snapshot, compact-r2) have
+  behavioural abandonment tests instead
+  (`apps/api/tests/unit/services/shared-flight-abandonment.test.ts`).
 - `pnpm lint:oxlint` is report-only. Promotion is forbidden until
   `scripts/quality/lint-adoption-evidence.json` records finding, fix-diff, scope, template,
   suppression, and cold-performance parity. Type-aware Oxlint is disabled.

@@ -46,7 +46,13 @@
  * to joinR2Operation), so a helper that receives a shared ENTRY object is trusted to join through
  * the two helpers; iteration over a shared collection (`for (const e of flights.values())`,
  * `.map`, spreads); fields declared in a base class or as constructor parameters; a class whose
- * module-scope instance lives in another scanned project; and `for await` over a shared promise.
+ * module-scope instance lives in another scanned project; `for await` over a shared promise; and
+ * a flight held inside a library (jose's `createRemoteJWKSet` keeps one pending JWKS fetch, but
+ * drops instead of joining it when it detects a Workers runtime, which celld reports itself as).
+ * The parameter-reached sites (AdminSettingsCache, the LLM endpoint snapshot, compact-r2) are
+ * covered by behavioural abandonment tests instead
+ * (apps/api/tests/unit/services/shared-flight-abandonment.test.ts,
+ * packages/project-data/tests/unit/project-data-compact-archive.test.ts).
  */
 import { relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
