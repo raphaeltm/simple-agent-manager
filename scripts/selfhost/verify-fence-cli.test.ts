@@ -1,6 +1,6 @@
 /** Real verification CLI with Docker replaced only at its process boundary. */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { networkInterfaces } from 'node:os';
 import { join, resolve } from 'node:path';
