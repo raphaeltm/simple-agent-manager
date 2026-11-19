@@ -152,6 +152,44 @@ for (const isMine of [true, false]) {
   });
 }
 
+test('owned sleeping session keeps its live path and shows no retained download control', async ({
+  page,
+}) => {
+  const user = makeMockUser({
+    userId: 'user-test-1',
+    sessionId: 'session-test-1',
+    name: 'Synthetic Owner',
+    email: 'owner@example.com',
+    role: 'user',
+  });
+  await page.addInitScript(() =>
+    window.localStorage.setItem('sam-onboarding-wizard-dismissed-user-test-1', 'true')
+  );
+  await setupSleepingChatMocks(page, {
+    user,
+    project: makeMockProject(),
+    session: {
+      id: 'session-1',
+      projectId: 'proj-test-1',
+      topic: 'Sleeping owned session',
+      status: 'sleeping',
+      workspaceId: null,
+      nodeId: null,
+      taskId: null,
+      isMine: true,
+      createdByUserId: 'user-test-1',
+      startedAt: Date.parse('2026-01-15T10:00:00Z'),
+    },
+    messages: [],
+    state: makeIdleSessionState(),
+    ownTask: {},
+  });
+  await page.goto('/projects/proj-test-1/chat/session-1');
+  // Liveness: the session view rendered before asserting the control is absent.
+  await expect(page.getByText('Sleeping owned session').first()).toBeVisible();
+  await expect(page.getByTestId('retained-snapshot-export')).toHaveCount(0);
+});
+
 test('retained export with populated transcript and thirty session choices', async ({ page }) => {
   const session = {
     id: 'session-1',

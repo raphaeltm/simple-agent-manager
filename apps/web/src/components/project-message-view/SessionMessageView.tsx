@@ -399,12 +399,16 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
           and message box keep the full width. */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2.5 md:gap-[var(--sam-space-gutter)]">
         <SessionStatusBanners lc={lc} projectId={projectId} />
-        <RetainedSnapshotExport
-          key={sessionId}
-          projectId={projectId}
-          sessionId={sessionId}
-          isMine={lc.session?.isMine === true}
-        />
+        {/* Retained work only matters once the live runtime is gone; active and sleeping
+            sessions keep their workspace path, so the control stays out of their way. */}
+        {(lc.session?.status === 'stopped' || lc.session?.status === 'failed') && (
+          <RetainedSnapshotExport
+            key={sessionId}
+            projectId={projectId}
+            sessionId={sessionId}
+            isMine={lc.session?.isMine === true}
+          />
+        )}
 
         {floatingHeader}
 
