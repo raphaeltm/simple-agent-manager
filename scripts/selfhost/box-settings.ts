@@ -41,6 +41,29 @@ export const BOX_RESERVED_PORTS: Readonly<Record<string, number>> = {
   MAIL_COLLECTOR_UI_PORT: DEFAULT_MAIL_COLLECTOR_UI_PORT,
 };
 
+/**
+ * The box settings with the port values docker compose will actually run with. Compose takes a
+ * variable from the shell before the .env file, so `CELLD_INTERNAL_PORT=20001 docker compose up`
+ * runs celld's operator API on 20001 whatever the .env says. The deploy and upgrade run in the
+ * operator's shell, so they apply the same override to every box port before checking the lease
+ * range, and report each one. (caddy/start.sh repeats the check inside the running stack, for a
+ * compose command run from another shell.)
+ */
+export function withComposePortOverrides(
+  box: Readonly<Record<string, string>>,
+  hostEnv: NodeJS.ProcessEnv
+): { box: Record<string, string>; overridden: string[] } {
+  const effective: Record<string, string> = { ...box };
+  const overridden: string[] = [];
+  for (const name of Object.keys(BOX_RESERVED_PORTS)) {
+    const value = hostEnv[name];
+    if (value === undefined || value === box[name]) continue;
+    effective[name] = value;
+    overridden.push(name);
+  }
+  return { box: effective, overridden };
+}
+
 export interface PortRange {
   start: number;
   end: number;
