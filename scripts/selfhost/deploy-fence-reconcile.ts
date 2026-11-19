@@ -9,7 +9,7 @@ import { composeFilesFor } from './compose-env.js';
 import { SELFHOST_DIR } from './deploy-steps.js';
 import { metadataProxyEnabled } from './egress-fence.js';
 import { writeFenceFiles } from './fence-state.js';
-import { writePrivateFile } from './secret-files.js';
+import { replacePrivateFile } from './secret-files.js';
 
 /** Bounds daemon discovery, stop and recreate; --wait also checks fence health before celld. */
 const DEFAULT_COMPOSE_TIMEOUT_MS = 60_000;
@@ -151,6 +151,29 @@ function stopCredentialConsumers(compose: Compose, states: ReadonlyMap<string, s
   }
 }
 
+/** Merge original consumer intent before a changed bind mount can reach a running service. */
+function checkpointReconciliation(
+  pending: PendingReconciliation,
+  changed: readonly string[],
+  input: FenceReconcileInput,
+  states: ReadonlyMap<string, string>,
+  marker: string,
+  existing: boolean
+): void {
+  pending.rules ||= changed.includes(join(input.stateDir, 'egress-fence.nft'));
+  pending.env ||= changed.includes(join(input.stateDir, 'celld.env'));
+  if (!pending.rules && !pending.env) return;
+  const wasActive = (name: string) => ['running', 'restarting'].includes(states.get(name) ?? '');
+  pending.celld ||= wasActive('celld');
+  // A profile transition needs a new proxy before recovering an active celld.
+  // An existing exited proxy remains an operator's deliberate stopped state.
+  pending.proxy ||=
+    wasActive('gce-metadata-proxy') ||
+    (pending.celld && !states.has('gce-metadata-proxy') && metadataProxyEnabled(input.box));
+  // Atomic rename plus file/directory fsync must complete before either input is changed.
+  if (existing) replacePrivateFile(marker, JSON.stringify(pending));
+}
+
 export async function writeAndReconcileFence(input: FenceReconcileInput): Promise<void> {
   const { stateDir, box } = input;
   const marker = join(stateDir, 'fence-reconcile-pending.json');
@@ -161,21 +184,18 @@ export async function writeAndReconcileFence(input: FenceReconcileInput): Promis
   // Discover before changing the bind mount. Fresh --init never contacts Docker.
   const states = serviceStates(existing, compose);
   const pending = pendingReconciliation(marker);
-  const { changed } = await writeFenceFiles(input);
-  pending.rules ||= changed.includes(join(stateDir, 'egress-fence.nft'));
-  pending.env ||= changed.includes(join(stateDir, 'celld.env'));
+  await writeFenceFiles({
+    ...input,
+    beforeWrite: (changed) =>
+      checkpointReconciliation(pending, changed, input, states, marker, existing),
+  });
   if (!pending.rules && !pending.env) return;
 
   // Never start a deliberately stopped install. Retain pending work for its next active deploy.
-  const wasActive = (name: string) => ['running', 'restarting'].includes(states.get(name) ?? '');
-  pending.celld ||= wasActive('celld');
-  // A profile transition needs a new proxy before recovering an active celld.
-  // An existing exited proxy remains an operator's deliberate stopped state.
-  pending.proxy ||=
-    wasActive('gce-metadata-proxy') ||
-    (pending.celld && !states.has('gce-metadata-proxy') && metadataProxyEnabled(box));
-  const active = wasActive('egress-fence') || pending.celld || pending.proxy;
-  if (existing) writePrivateFile(marker, JSON.stringify(pending));
+  const active =
+    ['running', 'restarting'].includes(states.get('egress-fence') ?? '') ||
+    pending.celld ||
+    pending.proxy;
   if (!active) return;
   try {
     reconcileServices(compose, pending, states, box);

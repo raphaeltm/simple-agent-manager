@@ -1,6 +1,5 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -37,7 +36,9 @@ async function init(extra: string[] = []) {
   return runDeploy(envFile, ['--init'], env);
 }
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'sam-fence-reconcile-'));
+  const scratch = resolve(import.meta.dirname, '../../.tmp');
+  mkdirSync(scratch, { recursive: true });
+  dir = mkdtempSync(join(scratch, 'sam-fence-reconcile-'));
   calls = join(dir, 'calls');
   writeFileSync(calls, '');
   mkdirSync(join(dir, 'bin'));
@@ -46,7 +47,7 @@ beforeEach(() => {
   writeFileSync(
     join(dir, 'bin/docker'),
     `#!/usr/bin/env node
-const fs = require('node:fs');
+import fs from 'node:fs';
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.FENCE_CALLS, JSON.stringify(args) + '\\n');
 if (process.env.SAM_SELFHOST_STATE_DIR !== process.env.FENCE_STATE) process.exit(90);
@@ -237,6 +238,69 @@ describe(
         'celld',
       ]);
     });
+    it('recovers original consumer intent after process exit immediately following a rules write', async () => {
+      expect((await init()).status).toBe(0);
+      const rulesPath = join(dir, '.state/egress-fence.nft');
+      const oldRules = readFileSync(rulesPath, 'utf8');
+      const oldEnv = readFileSync(join(dir, '.state/celld.env'), 'utf8');
+      // Intercept only the external filesystem write, after the real write succeeds.
+      // An abrupt process exit cannot execute reconciliation or its error handler.
+      const crashModule = join(dir, 'crash-after-write.mjs');
+      writeFileSync(
+        crashModule,
+        `
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+const original = fs.writeFileSync;
+fs.writeFileSync = function(path, ...args) {
+  const result = original.call(this, path, ...args);
+  if (String(path) === process.env.FENCE_CRASH_PATH) process.exit(77);
+  return result;
+};
+syncBuiltinESMExports();
+`
+      );
+      envFile = writeBox(dir, [
+        'COMPOSE_PROFILES=tunnel,gce',
+        'CELLD_BUCKET=gs://fleet-bucket',
+        'SAM_EGRESS_ALLOW=192.168.44.1:8000',
+      ]);
+      const interrupted = await runDeploy(envFile, ['--init'], {
+        ...env,
+        NODE_OPTIONS: `--import=${crashModule}`,
+        FENCE_CRASH_PATH: rulesPath,
+      });
+      expect(interrupted.status, interrupted.out).toBe(77);
+      expect(readFileSync(rulesPath, 'utf8')).not.toBe(oldRules);
+      expect(readFileSync(join(dir, '.state/celld.env'), 'utf8')).toBe(oldEnv);
+      expect(operations()).toEqual([['ps', '--all', '--format', 'json']]);
+      const pending = JSON.parse(
+        readFileSync(join(dir, '.state/fence-reconcile-pending.json'), 'utf8')
+      );
+      expect(pending.rules).toBe(true);
+      expect(pending.celld).toBe(true);
+      serviceState(active.map((row) => ({ ...row, State: 'exited' })));
+      writeFileSync(calls, '');
+      const retry = await runDeploy(envFile, ['--init'], env);
+      expect(retry.status, retry.out).toBe(0);
+      expect(operations()).toContainEqual([
+        'up',
+        '-d',
+        '--no-deps',
+        '--force-recreate',
+        '--wait',
+        'egress-fence',
+      ]);
+      expect(operations()).toContainEqual([
+        'up',
+        '-d',
+        '--no-deps',
+        '--force-recreate',
+        '--wait',
+        'celld',
+      ]);
+    });
+
     it('refuses invalid discovery before mutating an existing ruleset', async () => {
       expect((await init()).status).toBe(0);
       const rules = readFileSync(join(dir, '.state/egress-fence.nft'), 'utf8');
