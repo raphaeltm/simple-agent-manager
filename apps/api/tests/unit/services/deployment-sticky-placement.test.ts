@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { createDeploymentReleaseFromManifest } from '../../../src/routes/deployment-release-submission';
 import { placeReleaseOnDeploymentNode } from '../../../src/routes/deployment-release-placement';
 import {
   type DeploymentPlacement,
@@ -19,12 +20,14 @@ import {
 } from '../../../src/services/deployment-provisioning';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
+const resolvePlacement = vi.hoisted(() => vi.fn());
 const provision = vi.hoisted(() => vi.fn(async () => null));
 const teardown = vi.hoisted(() => vi.fn(async () => undefined));
 const attach = vi.hoisted(() => vi.fn(async () => []));
 vi.mock('../../../src/services/deployment-provisioning', async (original) => ({
   ...(await original<typeof import('../../../src/services/deployment-provisioning')>()),
   provisionDeploymentNode: provision,
+  resolveDeploymentPlacement: resolvePlacement,
 }));
 vi.mock('../../../src/services/node-agent', () => ({
   teardownDeploymentEnvironmentOnNode: teardown,
@@ -263,7 +266,7 @@ function fixture(exclusive = false) {
       placement,
       reservation,
     });
-  return { sqlite, env, placement, selection, place };
+  return { sqlite, db, env, placement, selection, place };
 }
 afterEach(() => {
   for (const db of databases.splice(0)) db.close();
@@ -298,6 +301,61 @@ describe('linked deployment node pool eligibility through release placement', ()
       });
     }
   );
+  it('retains an exclusive node through submission when stored volumes are omitted from the manifest', async () => {
+    const f = fixture(true);
+    f.sqlite.exec(`INSERT INTO deployment_volumes
+      (id, environment_id, name, provider_name, location, size_gb, provider_volume_id, status)
+      VALUES ('volume', 'environment', 'data', 'hetzner', 'fsn1', 10, 'provider-volume', 'attached')`);
+    resolvePlacement.mockImplementation(async (_user, _env, _project, options) => ({
+      ...f.placement,
+      reservation: options.reservation,
+    }));
+    const result = await createDeploymentReleaseFromManifest(
+      f.db,
+      {
+        version: 1,
+        services: {
+          web: {
+            image: {
+              registry: 'docker.io',
+              repository: 'test',
+              digest: `sha256:${'a'.repeat(64)}`,
+            },
+            env: {},
+            volumes: [],
+          },
+        },
+        volumes: {},
+        routes: [],
+      },
+      { envId: 'environment', projectId: 'project', userId: 'user', env: f.env }
+    );
+    expect(result).toMatchObject({ success: true, body: { nodeId: 'node' } });
+    expect(resolvePlacement).toHaveBeenCalledWith(
+      'user',
+      f.env,
+      'project',
+      expect.objectContaining({
+        providerOverride: 'hetzner',
+        vmLocationOverride: 'fsn1',
+        reservation: expect.objectContaining({ exclusiveNode: true }),
+      })
+    );
+    const row = f.sqlite
+      .prepare('SELECT requires_volumes, resolved_reservation_json FROM deployment_environments')
+      .get() as {
+      requires_volumes: number;
+      resolved_reservation_json: string;
+    };
+    expect(row.requires_volumes).toBe(1);
+    expect(JSON.parse(row.resolved_reservation_json)).toMatchObject({ exclusiveNode: true });
+    expect(f.sqlite.prepare('SELECT node_mode FROM nodes').get()).toEqual({
+      node_mode: 'exclusive',
+    });
+    expect(attach).toHaveBeenCalledTimes(1);
+    expect(provision).not.toHaveBeenCalled();
+    expect(teardown).not.toHaveBeenCalled();
+  });
   it('does not admit a lower-priority provider for a fresh environment', async () => {
     const f = fixture();
     expect(await findDeploymentNodeWithCapacity(f.env, 'user', f.placement, false)).toBeNull();

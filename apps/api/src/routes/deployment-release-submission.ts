@@ -226,9 +226,9 @@ async function prepareManifestVolumes(params: {
   env: Env;
   requiresVolumes: boolean;
   reservation: ResolvedResourceReservation;
+  volume: ReturnType<typeof resolveVolumePlacementConstraint>;
 }): Promise<VolumePreparationOutcome> {
-  const volumes = await listEnvironmentVolumes(params.db, params.envId);
-  const volume = resolveVolumePlacementConstraint(volumes);
+  const volume = params.volume;
   const placement = await resolveDeploymentPlacement(params.userId, params.env, params.projectId, {
     reservation: params.reservation,
     ...(volume ? { providerOverride: volume.provider, vmLocationOverride: volume.location } : {}),
@@ -338,21 +338,27 @@ export async function createDeploymentReleaseFromManifest(
     executionCtx?: ExecutionContext;
   }
 ): Promise<CreateDeploymentReleaseOutcome> {
-  const requiresVolumes = Object.keys(manifest.volumes).length > 0;
-  const reservation = resolveDeploymentManifestReservation(manifest, params.envId, {
-    cpuMillis: parsePositiveInt(
-      params.env.DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS,
-      DEFAULT_DEPLOYMENT_SERVICE_CPU_MILLIS
-    ),
-    memoryMb: parsePositiveInt(
-      params.env.DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB,
-      DEFAULT_DEPLOYMENT_SERVICE_MEMORY_MB
-    ),
-    diskMb: parsePositiveInt(
-      params.env.DEPLOYMENT_DEFAULT_ROOT_DISK_MB,
-      DEFAULT_DEPLOYMENT_SERVICE_DISK_MB
-    ),
-  });
+  const manifestRequiresVolumes = Object.keys(manifest.volumes).length > 0;
+  const volumes = await listEnvironmentVolumes(db, params.envId);
+  const volume = resolveVolumePlacementConstraint(volumes);
+  const requiresVolumes = manifestRequiresVolumes || volumes.length > 0;
+  const reservation = {
+    ...resolveDeploymentManifestReservation(manifest, params.envId, {
+      cpuMillis: parsePositiveInt(
+        params.env.DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS,
+        DEFAULT_DEPLOYMENT_SERVICE_CPU_MILLIS
+      ),
+      memoryMb: parsePositiveInt(
+        params.env.DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB,
+        DEFAULT_DEPLOYMENT_SERVICE_MEMORY_MB
+      ),
+      diskMb: parsePositiveInt(
+        params.env.DEPLOYMENT_DEFAULT_ROOT_DISK_MB,
+        DEFAULT_DEPLOYMENT_SERVICE_DISK_MB
+      ),
+    }),
+    exclusiveNode: requiresVolumes,
+  };
   const secretError = await validateManifestSecrets(db, manifest, params.envId);
   if (secretError) {
     return { success: false, response: secretError };
@@ -369,8 +375,9 @@ export async function createDeploymentReleaseFromManifest(
     projectId: params.projectId,
     userId: params.userId,
     env: params.env,
-    requiresVolumes,
+    requiresVolumes: manifestRequiresVolumes,
     reservation,
+    volume,
   });
   if (!volumePreparation.success) {
     return { success: false, response: volumePreparation.response };

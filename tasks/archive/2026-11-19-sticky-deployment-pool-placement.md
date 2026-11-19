@@ -35,3 +35,6 @@ Implementation and completion review passed. Remaining staging cleanup, CI, Code
 - Fixed stored-volume affinity when the new manifest omits volumes: submission always reads existing environment volume rows before resolving placement. Manifest declarations still control creating missing volumes.
 - Added a real SQLite submission regression with stored Hetzner/nbg1 data and an empty volume manifest. Confirmed it fails before the fix because provider/location overrides are absent, then passes after the fix (5/5 affinity tests).
 - Incremental completion reviewer: PASS; the extra read is environment-scoped and reuses the existing lookup.
+
+- Completed omitted-volume exclusivity propagation: stored rows now determine effective requiresVolumes before computing the reservation; admission, persistence and volume attachment retain exclusive mode. Manifest declarations alone control creating missing volumes.
+- Added active exclusive-node real SQLite submission coverage asserting retained node, persisted exclusive reservation/volume requirement, attachment and no teardown/provision. Disabling the stored-row condition made exactly this new test fail (nodeId null); restored fix passes. API typecheck passed.

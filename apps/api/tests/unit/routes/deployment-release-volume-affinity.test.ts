@@ -97,9 +97,16 @@ describe('release submission volume affinity', () => {
       'user',
       f.env,
       'project',
-      expect.objectContaining({ providerOverride: 'hetzner', vmLocationOverride: 'nbg1' })
+      expect.objectContaining({
+        providerOverride: 'hetzner',
+        vmLocationOverride: 'nbg1',
+        reservation: expect.objectContaining({ exclusiveNode: true }),
+      })
     );
     expect(createVolumes).not.toHaveBeenCalled();
+    expect(f.sqlite.prepare('SELECT requires_volumes FROM deployment_environments').get()).toEqual({
+      requires_volumes: 1,
+    });
   });
   it('reports unavailable pinned placement before creating volumes or a release', async () => {
     const f = fixture();
