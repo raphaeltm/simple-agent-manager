@@ -264,6 +264,9 @@ jobs:
               # The box files its static tests read: compose, Caddy fragments and start.sh, frps.toml,
               # gcp-bootstrap.sh, .env.example.
               - 'deploy/selfhost/**'
+              # gcp-bootstrap.test.ts pins the script's APIs and roles to the guided setup's.
+              - 'packages/shared/src/constants/gcp-required-apis.ts'
+              - 'apps/api/src/services/gcp-setup.ts'
               # ...and what its tests read outside it: the self-host migration projection and the
               # SMTP settings parser.
               - 'apps/api/src/selfhost/**'

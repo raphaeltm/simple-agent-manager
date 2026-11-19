@@ -32,12 +32,20 @@ if (cmd.startsWith('projects describe')) out('123456789012');
 else if (cmd.startsWith('services enable')) save();
 else if (cmd.startsWith('iam workload-identity-pools providers')) {
   const [, , , op, id] = words;
-  if (op === 'describe') {
+  const pool = flag('workload-identity-pool');
+  if (op === 'list') {
+    // value(name,oidc.issuerUri): the full resource name, a tab, the issuer.
+    for (const [providerId, provider] of Object.entries(db.providers)) {
+      if (provider.pool !== pool) continue;
+      const name = `projects/123456789012/locations/global/workloadIdentityPools/${pool}/providers/${providerId}`;
+      out(`${name}\t${provider.issuer ?? ''}`);
+    }
+  } else if (op === 'describe') {
     if (!db.providers[id]) fail('not found');
     if (format.includes('issuerUri')) out(db.providers[id].issuer);
     if (format.includes('state')) out(db.providers[id].state ?? 'ACTIVE');
   } else if (op === 'create-oidc') {
-    db.providers[id] = { issuer: flag('issuer-uri') };
+    db.providers[id] = { issuer: flag('issuer-uri'), pool };
     save();
   } else fail(`unexpected ${cmd}`);
 } else if (cmd.startsWith('iam workload-identity-pools')) {

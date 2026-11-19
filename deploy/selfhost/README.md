@@ -65,6 +65,14 @@ From the repository root on the VM:
    creates a workload identity pool and provider trusting only this install, and a node service
    account, then prints the credential JSON to paste in **Admin -> Credentials** (Cloud Provider,
    GCP). Add machines to the installation pool in **Admin -> Infrastructure**.
+   **Use a GCP project dedicated to SAM's nodes**, not the box's: the node service account's
+   roles apply to the whole project, so in a shared project it could change or delete the box VM
+   and its firewall. An existing `--pool-id` is reused only when its sole provider is this
+   install's. Known gap: the service account trusts every token this install signs for that
+   provider, and SAM does not yet stop a user's own GCP credential from naming this pool, so a
+   user of the install could act as the node service account (fix tracked as SAM task
+   01M7SB8FRZ08M5NEX9WGM74X61). Until then, give accounts on a GCP-node install only to people
+   you would trust with that project.
 
 `pnpm selfhost:deploy --dry-run` prints the Worker configuration it would deploy, secrets redacted.
 
@@ -101,8 +109,11 @@ pinned by version and verified against the Go checksum database, and the build f
 binary carries exactly those versions; `sam-mx` modules are pinned by `go.sum`.
 
 A build still downloads from the network (Docker Hub, the Go module proxy, Alpine packages). The
-content is pinned, so a changed upstream fails the build rather than changing the image. After
-changing `CADDY_DNS_MODULE`, run `docker compose build caddy`.
+content is pinned, so a changed upstream fails the build rather than changing the image.
+
+After changing a build argument in `.env` (`CADDY_DNS_MODULE`), run `docker compose build caddy`
+yourself, then `docker compose up -d`: `selfhost:upgrade` rebuilds only for changes in the
+repository, so it never notices an `.env` edit.
 
 ## Settings worth knowing
 
@@ -149,7 +160,9 @@ waits 1.5-2.4 s while a new one loads. Caddy pings `/health` every `SAM_KEEP_WAR
 (default 5s) so the ping pays that cost instead of a user. `SAM_KEEP_WARM=off` turns it off.
 
 **Logs.** `docker compose logs caddy` is the access log: one JSON line per request, with no
-headers, query strings or path credentials. `docker compose logs celld` is the Worker's output.
+headers, no query strings, and no credentials in the path on the routes listed in
+`caddy/log-redaction.caddy` (bootstrap, invite and AI-proxy tokens, preview signatures).
+`docker compose logs celld` is the Worker's output.
 
 ## Not included yet
 

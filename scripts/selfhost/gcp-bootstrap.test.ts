@@ -9,6 +9,8 @@ import { join, resolve } from 'node:path';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { GCP_REQUIRED_APIS } from '../../packages/shared/src/constants/gcp-required-apis';
+
 // Every case runs bash and a node-based fake gcloud many times.
 vi.setConfig({ testTimeout: 60_000 });
 
@@ -51,7 +53,7 @@ function run(args: string[], advertisedIssuer = ISSUER, env: NodeJS.ProcessEnv =
 
 interface FakeGcp {
   pools: Record<string, { description: string; state?: string }>;
-  providers: Record<string, { issuer: string; state?: string }>;
+  providers: Record<string, { issuer: string; pool?: string; state?: string }>;
   accounts: Record<string, { description: string }>;
   bindings: string[];
 }
@@ -159,6 +161,84 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
     expect(gcp().providers['sam-api'].issuer).toBe(ISSUER);
   });
 
+  // S1: the node service account binding is pool-wide, so a reused pool must hold nothing but
+  // this install's provider.
+  describe('an existing --pool-id', () => {
+    const seedPool = (providers: Record<string, { issuer: string; state?: string }>) => {
+      writeFileSync(
+        join(state, 'gcp.json'),
+        JSON.stringify({
+          pools: { 'sam-shared': { description: 'made elsewhere' } },
+          providers: Object.fromEntries(
+            Object.entries(providers).map(([id, p]) => [id, { ...p, pool: 'sam-shared' }])
+          ),
+          accounts: {},
+          bindings: [],
+        })
+      );
+    };
+    const args = ['--project', 'sam-vm-test', '--api-url', ISSUER, '--pool-id', 'sam-shared'];
+    const changes = (result: ReturnType<typeof run>) =>
+      result.calls.filter((c) => MUTATING.test(c) && !c.startsWith('services'));
+
+    it('is refused when another provider in it trusts another issuer; nothing is bound', () => {
+      seedPool({ 'github-actions': { issuer: 'https://token.actions.githubusercontent.com' } });
+      const result = run(args);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('pool sam-shared is not dedicated to this install');
+      expect(result.stderr).toContain(
+        'provider github-actions already trusts https://token.actions.githubusercontent.com'
+      );
+      expect(changes(result)).toEqual([]);
+      expect(gcp().bindings).toEqual([]);
+    });
+
+    it('is refused when it also holds this issuer under another provider id', () => {
+      seedPool({ 'sam-api': { issuer: ISSUER }, 'sam-api-2': { issuer: ISSUER } });
+      const result = run(args);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('provider sam-api-2 already trusts');
+      expect(changes(result)).toEqual([]);
+    });
+
+    it('is refused when the other provider is soft-deleted (it can be undeleted)', () => {
+      seedPool({ other: { issuer: 'https://idp.example.com', state: 'DELETED' } });
+      const result = run(args);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('provider other already trusts https://idp.example.com');
+      expect(changes(result)).toEqual([]);
+    });
+
+    it('control: reused when it holds only this install provider, or nothing yet', () => {
+      seedPool({ 'sam-api': { issuer: ISSUER } });
+      const reused = run(args);
+      expect(reused.status, reused.stderr).toBe(0);
+      expect(reused.stdout).toContain('pool sam-shared: exists');
+      expect(reused.calls.filter((c) => / create/.test(c) && c.includes('pools'))).toEqual([]);
+
+      seedPool({});
+      const empty = run(args);
+      expect(empty.status, empty.stderr).toBe(0);
+      expect(gcp().providers['sam-api']).toMatchObject({ issuer: ISSUER, pool: 'sam-shared' });
+    });
+  });
+
+  it.each(['--project', '--api-url', '--pool-id', '--provider-id', '--service-account'])(
+    'a trailing %s with no value is a clear error, not a shift failure',
+    (flag) => {
+      const result = run(['--project', 'sam-vm-test', flag]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(`gcp-bootstrap: ${flag} needs a value`);
+      expect(result.calls).toEqual([]);
+    }
+  );
+
+  it('says to use a project dedicated to SAM nodes', () => {
+    const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER, '--dry-run']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('use a project dedicated to SAM nodes');
+  });
+
   it('refuses an install whose discovery document names a different issuer', () => {
     const result = run(
       ['--project', 'sam-vm-test', '--api-url', ISSUER],
@@ -225,5 +305,71 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
     const result = run(['--project', 'sam-vm-test', '--api-url', "https://app.x.org' || true"]);
     expect(result.status).not.toBe(0);
     expect(result.calls).toEqual([]);
+  });
+});
+
+/**
+ * A4: what the bootstrap enables and grants, against what the in-app guided setup does for a user
+ * project. Every API or role it leaves out must be on these lists with a reason, and named in
+ * the script's own comment, so a new required API fails here until someone decides.
+ */
+const OMITTED_APIS: Record<string, string> = {
+  'cloudresourcemanager.googleapis.com':
+    'only the guided setup calls it, with the user OAuth token; nodes never do',
+  'aiplatform.googleapis.com': 'Vertex AI for agents in a user project, not node provisioning',
+};
+/**
+ * SA_PROJECT_ROLES in apps/api/src/services/gcp-setup.ts (not exported, so copied here; the test
+ * below reads that file and fails when the two differ).
+ */
+const GUIDED_SETUP_SA_ROLES = [
+  'roles/compute.instanceAdmin.v1',
+  'roles/compute.securityAdmin',
+  'roles/aiplatform.user',
+];
+const OMITTED_ROLES: Record<string, string> = {
+  'roles/aiplatform.user': 'Vertex AI for agents; the node service account only manages VMs',
+};
+
+describe('gcp-bootstrap.sh against the guided setup (drift)', () => {
+  const script = readFileSync(SCRIPT, 'utf8');
+  const enabled = () => {
+    const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER]);
+    expect(result.status, result.stderr).toBe(0);
+    const services = result.calls.find((c) => c.startsWith('services enable'))!;
+    const roles = result.calls
+      .filter((c) => c.startsWith('projects add-iam-policy-binding'))
+      .map((c) => /--role=(\S+)/.exec(c)?.[1] ?? '');
+    return { apis: services.split(' ').filter((w) => w.endsWith('.googleapis.com')), roles };
+  };
+
+  it('enables only APIs the guided setup requires, and omits only listed ones', () => {
+    const required = GCP_REQUIRED_APIS.map((api) => api.service);
+    const { apis } = enabled();
+    expect(apis.length).toBeGreaterThan(0);
+    for (const api of apis) expect(required, api).toContain(api);
+    expect(required.filter((api) => !apis.includes(api)).sort()).toEqual(
+      Object.keys(OMITTED_APIS).sort()
+    );
+    for (const api of Object.keys(OMITTED_APIS)) expect(script, api).toContain(`#   ${api}:`);
+  });
+
+  it('the copied guided-setup role list still matches gcp-setup.ts', () => {
+    const source = readFileSync(
+      resolve(import.meta.dirname, '../../apps/api/src/services/gcp-setup.ts'),
+      'utf8'
+    );
+    const list = /const SA_PROJECT_ROLES = \[([^\]]*)\]/.exec(source)?.[1] ?? '';
+    expect([...list.matchAll(/'(roles\/[^']+)'/g)].map((m) => m[1])).toEqual(GUIDED_SETUP_SA_ROLES);
+  });
+
+  it('grants only roles the guided setup grants, and omits only listed ones', () => {
+    const { roles } = enabled();
+    expect(roles.length).toBeGreaterThan(0);
+    for (const role of roles) expect(GUIDED_SETUP_SA_ROLES, role).toContain(role);
+    expect(GUIDED_SETUP_SA_ROLES.filter((role) => !roles.includes(role)).sort()).toEqual(
+      Object.keys(OMITTED_ROLES).sort()
+    );
+    for (const role of Object.keys(OMITTED_ROLES)) expect(script, role).toContain(role);
   });
 });

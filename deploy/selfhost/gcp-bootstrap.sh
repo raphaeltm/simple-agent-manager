@@ -12,8 +12,14 @@
 # then prints the platform cloud credential to add in Admin -> Credentials (Cloud Provider, GCP).
 # It does not create the box VM, its firewall, the fleet bucket or DNS (README.md, Prerequisites).
 #
+# Use a GCP project dedicated to SAM's nodes, not the box's project: the service account's roles
+# apply to the whole project, so in a shared project it could also change or delete the box VM
+# and its firewall rules.
+#
 # Every resource is described first and created only when missing. A provider that already
-# trusts a different issuer is never retargeted; pick another --pool-id.
+# trusts a different issuer is never retargeted, and an existing pool is reused only when its
+# sole provider is this install's (the pool-wide binding below admits every provider in it);
+# otherwise pick another --pool-id.
 #
 # Run it once the install answers (after the first `pnpm selfhost:deploy`): it checks the issuer
 # the install advertises.
@@ -36,19 +42,37 @@ SA_ID="sam-nodes"
 DRY_RUN=0
 CHECK_ISSUER=1
 
+# The APIs node provisioning calls: compute (VMs, firewalls; packages/providers/src/gcp*.ts),
+# cloudbilling (list prices, gcp-pricing.ts), and iam, sts and iamcredentials (the pool and the
+# token exchange and impersonation in apps/api/src/services/gcp-sts.ts). The in-app guided setup
+# enables GCP_REQUIRED_APIS (packages/shared/src/constants/gcp-required-apis.ts); two of those
+# are intentionally left out here, because no node path calls them:
+#   cloudresourcemanager.googleapis.com: only the guided setup (gcp-setup.ts) calls it, with the
+#     user's own OAuth token, to list projects and edit the project IAM policy.
+#   aiplatform.googleapis.com: Vertex AI for agents in a user's own project, not node provisioning.
+# Likewise the guided setup also grants roles/aiplatform.user (SA_PROJECT_ROLES in gcp-setup.ts);
+# the node service account gets only the two compute roles.
+# scripts/selfhost/gcp-bootstrap.test.ts fails when either list drifts from the guided setup's.
+NODE_APIS=(compute.googleapis.com iam.googleapis.com iamcredentials.googleapis.com
+  sts.googleapis.com cloudbilling.googleapis.com)
+NODE_ROLES=(roles/compute.instanceAdmin.v1 roles/compute.securityAdmin)
+
 die() { echo "gcp-bootstrap: $*" >&2; exit 1; }
+# `--flag value`: refuse a trailing flag with no value instead of failing on `shift 2`.
+need_value() { [ "$2" -ge 2 ] || die "$1 needs a value (see --help)"; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --) shift ;;
-    --project) PROJECT="${2:-}"; shift 2 ;;
-    --api-url) API_URL="${2:-}"; shift 2 ;;
-    --pool-id) POOL_ID="${2:-}"; shift 2 ;;
-    --provider-id) PROVIDER_ID="${2:-}"; shift 2 ;;
-    --service-account) SA_ID="${2:-}"; shift 2 ;;
+    --project) need_value "$1" $#; PROJECT="$2"; shift 2 ;;
+    --api-url) need_value "$1" $#; API_URL="$2"; shift 2 ;;
+    --pool-id) need_value "$1" $#; POOL_ID="$2"; shift 2 ;;
+    --provider-id) need_value "$1" $#; PROVIDER_ID="$2"; shift 2 ;;
+    --service-account) need_value "$1" $#; SA_ID="$2"; shift 2 ;;
     --skip-issuer-check) CHECK_ISSUER=0; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
-    -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
+    # The header comment, up to the first line that is not a comment.
+    -h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
 done
@@ -113,11 +137,11 @@ PROJECT_NUMBER="$(gcloud projects describe "$PROJECT" --format='value(projectNum
 [ -n "$PROJECT_NUMBER" ] || die "project ${PROJECT} has no project number"
 
 echo "Project ${PROJECT} (${PROJECT_NUMBER}), issuer ${ISSUER}, pool ${POOL_ID}"
+echo "Note: use a project dedicated to SAM nodes. The node service account's roles apply to the whole project, so in a shared project it could also change the box VM and its firewall."
 
 # cloudbilling: read-only Compute Engine list prices for the node catalog (no IAM role needed;
 # without it every GCP machine shows "Price unavailable"; box round R14).
-change services enable compute.googleapis.com iam.googleapis.com iamcredentials.googleapis.com \
-  sts.googleapis.com cloudbilling.googleapis.com --project="$PROJECT"
+change services enable "${NODE_APIS[@]}" --project="$PROJECT"
 
 # A deleted pool still describes (state DELETED) and keeps its id for 30 days: reusing it as
 # "exists" would then try to create a provider in a deleted pool (R13 D5).
@@ -125,6 +149,18 @@ if pool_state="$(gcloud iam workload-identity-pools describe "$POOL_ID" --projec
   --location=global --format='value(state)' 2>/dev/null)"; then
   [ "$pool_state" != "DELETED" ] \
     || die "workload identity pool ${POOL_ID} was deleted (Google keeps a deleted pool for 30 days, and its id cannot be reused until it is purged). Either undelete it: gcloud iam workload-identity-pools undelete ${POOL_ID} --project=${PROJECT} --location=global, then run this again; or pass --pool-id <a new id> and put the new values in the platform credential (Admin -> Credentials)."
+  # The service account binding below is pool-wide, so every provider in the pool would be
+  # admitted: reuse the pool only when each provider in it (deleted ones too, which can be
+  # undeleted) is PROVIDER_ID trusting this install's issuer.
+  pool_providers="$(gcloud iam workload-identity-pools providers list --project="$PROJECT" \
+    --location=global --workload-identity-pool="$POOL_ID" --show-deleted \
+    --format='value(name,oidc.issuerUri)')" || die "cannot list the providers of pool ${POOL_ID}"
+  while IFS=$'\t' read -r provider_name provider_issuer; do
+    [ -n "$provider_name" ] || continue
+    if [ "${provider_name##*/}" != "$PROVIDER_ID" ] || [ "$provider_issuer" != "$ISSUER" ]; then
+      die "pool ${POOL_ID} is not dedicated to this install: its provider ${provider_name##*/} already trusts ${provider_issuer:-a non-OIDC issuer}, and the node service account would admit every provider in the pool. Use another --pool-id."
+    fi
+  done <<<"$pool_providers"
   echo "pool ${POOL_ID}: exists"
 else
   change iam workload-identity-pools create "$POOL_ID" --project="$PROJECT" --location=global \
@@ -162,15 +198,19 @@ else
     --description="Creates and deletes SAM workspace VMs and their firewall rules for ${ISSUER}"
 fi
 
-for role in roles/compute.instanceAdmin.v1 roles/compute.securityAdmin; do
+for role in "${NODE_ROLES[@]}"; do
   change_retry projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:${SA_EMAIL}" \
     --role="$role" --condition=None --quiet --format=none
 done
 
-# Scope: the whole pool. That is this one install only, because the pool is created for it and
-# its only provider admits tokens whose issuer is this install's API origin (the condition
-# above, checked again on every run). Any provider added to this pool later would inherit the
-# service account, so do not add providers to it.
+# Scope: the whole pool. Its only provider (checked above on every run) admits tokens whose
+# issuer is this install's API origin and whose audience is that provider, so the binding admits
+# ANY token this installation signs for the provider's audience, not only the ones it signs for
+# node provisioning. SAM does not currently stop a user's own GCP credential from naming this
+# pool, provider and service account, so a user of this install could obtain such a token and act
+# as the node service account; closing that needs a Worker change (SAM task
+# 01M7SB8FRZ08M5NEX9WGM74X61). Any provider added to this pool later would inherit the service
+# account too, so do not add providers to it.
 change_retry iam service-accounts add-iam-policy-binding "$SA_EMAIL" --project="$PROJECT" \
   --role=roles/iam.workloadIdentityUser \
   --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/*" \
