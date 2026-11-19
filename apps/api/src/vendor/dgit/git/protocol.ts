@@ -1116,24 +1116,32 @@ const BAD_REF = /[\s~^:?*\[\\'"<>&`\x00-\x1f\x7f]/;
  * (and tag->target) with a presence probe at each node catches it before the
  * ref moves. `known` is pre-seeded with the pre-existing ref tips, whose
  * closure was validated at their own push, so descent stops there — the walk
- * touches only objects this push introduced.
+ * touches only objects this push introduced (or older objects no ref holds).
+ *
+ * SAM: the walk is transactional per command. Newly reached oids go into a
+ * scratch set and are merged into `known` only once the whole closure is
+ * proven present. Upstream walked straight into `known`, so a command whose
+ * walk failed left its unproven frontier there and a later command in the
+ * same push stopped at it: a ref could then name an object that does not
+ * exist (Codex r4633317762). `known` therefore only ever holds validated
+ * closures, which is also what commitPush folds into the reachable cache.
  */
 async function reachableComplete(store: GitStore, tip: string, known: OidSet): Promise<boolean> {
-  // Cursor BFS over `known` itself: newly reached oids append past `start`,
-  // and pre-existing entries (a fast-forward's already-validated closure) sit
-  // before it and are never re-walked. Reusing the set as its own frontier
-  // needs no separate hex-oid stack to walk it.
-  const start = known.size;
-  if (!known.addHex(tip)) return true; // tip already in a validated closure
-  for (let i = start; i < known.size; i++) {
-    const oid = known.atHex(i);
+  if (known.hasHex(tip)) return true; // tip already in a validated closure
+  // Cursor BFS over the scratch set itself: newly reached oids append past
+  // the cursor, so no separate hex-oid stack is needed to walk it.
+  const fresh = new OidSet(1024);
+  fresh.addHex(tip);
+  for (let i = 0; i < fresh.size; i++) {
+    const oid = fresh.atHex(i);
     const meta = store.typeAndSize(oid);
     if (!meta) return false;
     if (meta.type === "blob") continue;
     const obj = await store.get(oid);
     if (!obj) return false;
-    for (const child of childOids(obj)) known.addHex(child);
+    for (const child of childOids(obj)) if (!known.hasHex(child)) fresh.addHex(child);
   }
+  for (let i = 0; i < fresh.size; i++) known.addHex(fresh.atHex(i));
   return true;
 }
 
@@ -1182,67 +1190,21 @@ function childOids(obj: { type: ObjType; data: Uint8Array }): string[] {
   return [];
 }
 
-/**
- * Verify a freshly ingested pack is connectivity-complete — every child oid its
- * objects reference is present in `pack_objects` ∪ `objects` — and return the
- * first missing child, or null when complete. This is the storage-backed
- * counterpart to walking the graph: it scans the pack's non-blob objects one
- * keyset page at a time, stages their referenced children into `push_edges` in
- * bounded batches, and lets SQLite anti-join each batch against the stores. A
- * complete pack means every tip in it has a complete closure (by induction over
- * the edges), so the whole push is connected — checked in flat memory, with no
- * OidSet that scales with the object count. Used for a fresh push, where the
- * old walk built a reachable set the commit step then discarded anyway.
- */
-async function packComplete(store: GitStore, packId: number): Promise<string | null> {
-  const PAGE = 1000;
-  const EDGE_BATCH = 8192;
-  store.resetPushEdges();
-  let after = "";
-  let pending: string[] = [];
-  const flush = (): string | null => {
-    if (!pending.length) return null;
-    store.addPushEdges(pending);
-    pending = [];
-    const miss = store.firstMissingPushEdge();
-    store.resetPushEdges();
-    return miss;
-  };
-  for (;;) {
-    const page = store.packNonBlobOidsAfter(packId, after, PAGE);
-    if (!page.length) break;
-    for (const oid of page) {
-      const obj = await store.get(oid);
-      if (!obj) return oid; // indexed but unreadable — the pack is not complete
-      for (const child of childOids(obj)) pending.push(child);
-      if (pending.length >= EDGE_BATCH) {
-        const miss = flush();
-        if (miss) return miss;
-      }
-    }
-    after = page[page.length - 1];
-  }
-  return flush();
-}
-
 export async function validatePush(
   store: GitStore,
   commands: PushCommand[],
-  unpackError: string | null,
-  packId: number | null
+  unpackError: string | null
 ): Promise<PushPlan> {
   // whether the reachable cache is valid for the pre-push refs: only then can
   // it be extended in place (union with the connectivity walk) instead of
   // rebuilt from scratch on the next full clone
   const hadCache = store.getMeta("reachable-version") === store.reachableVersion();
-  // A fresh push (no cache to extend) verifies connectivity in SQL rather than
-  // by walking into an OidSet — the walk's result would be discarded by the
-  // commit step's invalidate below, so it was pure memory spent to reject a
-  // broken pack. `packMissing` names the first unresolved child, or stays null.
-  // A fast-forward keeps the cheap new-object walk, which both verifies and
-  // extends the cache in one pass.
-  const packMissing =
-    !hadCache && !unpackError && packId !== null ? await packComplete(store, packId) : null;
+  // SAM: every command proves its closure by walking, with or without a cache.
+  // Upstream checked a cache-less push in SQL ("every child of the new pack is
+  // in pack_objects ∪ objects"), which is sound only if every object outside
+  // the new pack is itself closure-complete. Here a pack whose refs were all
+  // rejected stays ingested until GC reclaims it, so an earlier broken pack
+  // could vouch for a later command. Repository caps bound the walk.
   // pre-existing ref tips bound the connectivity walk: their closure is
   // already validated, so a normal fast-forward only re-checks new objects
   const known = new OidSet(4096);
@@ -1277,9 +1239,7 @@ export async function validatePush(
       decisions.push({ ref: cmd.ref, expectedOld: cmd.old, del: true });
       continue;
     }
-    const connected = hadCache
-      ? await reachableComplete(store, cmd.next, known)
-      : packMissing === null && store.has(cmd.next);
+    const connected = await reachableComplete(store, cmd.next, known);
     if (!connected) {
       decisions.push({ ref: cmd.ref, expectedOld: cmd.old, reject: "missing necessary objects" });
       continue;

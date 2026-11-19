@@ -79,9 +79,6 @@ export class GitStore {
         data TEXT NOT NULL,
         PRIMARY KEY (tip_oid, period)
       );
-      CREATE TABLE IF NOT EXISTS push_edges (
-        child TEXT NOT NULL
-      );
     `);
     const flag = this.getMeta("has-loose");
     if (flag === null) {
@@ -158,57 +155,6 @@ export class GitStore {
 
   objectCount(): number {
     return this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM objects").one().n + this.packs.countObjects();
-  }
-
-  // --- push connectivity ---------------------------------------------------
-  // Connectivity of a fresh push is checked in SQL, not by an in-memory graph
-  // walk: the pushed pack must be complete, i.e. every object it introduces
-  // must have its referenced children in `pack_objects` ∪ `objects`. Children
-  // are staged into `push_edges` in bounded batches and each batch is
-  // anti-joined against the stores, so the check costs O(batch) rows of scratch
-  // rather than an OidSet that scales with the object count.
-
-  /** A page of a pack's non-blob oids after `after` (keyset, so the scan holds
-   * one page, never the whole pack). Empty array ends the walk. */
-  packNonBlobOidsAfter(packId: number, after: string, limit: number): string[] {
-    return this.sql
-      .exec<{ oid: string }>(
-        "SELECT oid FROM pack_objects WHERE pack_id = ? AND type != 'blob' AND oid > ? ORDER BY oid LIMIT ?",
-        packId,
-        after,
-        limit,
-      )
-      .toArray()
-      .map((r) => r.oid);
-  }
-
-  resetPushEdges(): void {
-    this.sql.exec("DELETE FROM push_edges");
-  }
-
-  /** Stage referenced child oids, chunked under the DO's ~100 bound-variable
-   * statement cap. */
-  addPushEdges(children: string[]): void {
-    for (let i = 0; i < children.length; i += 64) {
-      const batch = children.slice(i, i + 64);
-      const placeholders = batch.map(() => "(?)").join(",");
-      this.sql.exec(`INSERT INTO push_edges (child) VALUES ${placeholders}`, ...batch);
-    }
-  }
-
-  /** The first staged child absent from both stores, or null when every staged
-   * child is present. SQLite runs the membership test over its own indexes, so
-   * no oid set is built in the isolate. */
-  firstMissingPushEdge(): string | null {
-    const rows = this.sql
-      .exec<{ child: string }>(
-        `SELECT e.child FROM push_edges e
-         WHERE NOT EXISTS (SELECT 1 FROM pack_objects p WHERE p.oid = e.child)
-           AND NOT EXISTS (SELECT 1 FROM objects o WHERE o.oid = e.child)
-         LIMIT 1`,
-      )
-      .toArray();
-    return rows.length ? rows[0].child : null;
   }
 
   /** Resolve an abbreviated oid; null if unknown or ambiguous. */

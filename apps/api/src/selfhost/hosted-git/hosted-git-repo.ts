@@ -197,6 +197,7 @@ export class HostedGitRepo extends DurableObject {
           head: this.store.head(),
           objects: this.store.objectCount(),
           bytes: this.store.dbSize(),
+          reachableCache: this.store.reachableCacheValid(),
         });
       }
       return new Response('not found\n', { status: 404 });
@@ -479,7 +480,7 @@ export class HostedGitRepo extends DurableObject {
       }
     }
 
-    const plan = await validatePush(this.store, commands, unpackError, packId);
+    const plan = await validatePush(this.store, commands, unpackError);
     const { results, changed, needsGc } = this.ctx.storage.transactionSync(() =>
       commitPush(this.store, plan)
     );

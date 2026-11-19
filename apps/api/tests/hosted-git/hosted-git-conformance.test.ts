@@ -7,7 +7,7 @@
  * project-create route (artifacts provider, an email-only user with no GitHub link), which seeds
  * the README in-process; workspace credentials come from the real POST /workspaces/:id/git-token.
  */
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -872,5 +872,195 @@ describe('repository cleanup through real SQLite', () => {
     const after = await git(['ls-remote', remote]);
     expect(after.code).not.toBe(0); expect(after.stderr).toContain('410');
     expect((await runtime.fetch(`/__test/repository/${project.artifactsRepoId}`, { method: 'DELETE' })).status).toBe(200);
+  });
+});
+
+/**
+ * Push connectivity admission: a ref may only move to an object whose whole closure is
+ * present. Each scenario builds raw packs with the git CLI, sends them through the real
+ * receive-pack route into the real SQLite store, and asserts on refs read back plus an
+ * fsck of a fresh clone.
+ */
+describe('push connectivity admission (closure must be complete per command)', () => {
+  const ZERO = '0'.repeat(40);
+
+  function gitEnv(): NodeJS.ProcessEnv {
+    return {
+      PATH: process.env.PATH ?? '',
+      HOME: scratch,
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_AUTHOR_NAME: 'Test',
+      GIT_AUTHOR_EMAIL: 'test@example.com',
+      GIT_COMMITTER_NAME: 'Test',
+      GIT_COMMITTER_EMAIL: 'test@example.com',
+    };
+  }
+
+  /** A pack holding exactly `oids`, deliberately omitting anything they reference. */
+  function packOf(cwd: string, oids: string[]): Buffer {
+    const out = spawnSync('git', ['pack-objects', '--stdout'], {
+      cwd,
+      env: gitEnv(),
+      input: `${oids.join('\n')}\n`,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    if (out.status !== 0) throw new Error(`pack-objects failed: ${out.stderr.toString()}`);
+    return out.stdout;
+  }
+
+  async function rev(cwd: string, spec: string): Promise<string> {
+    return (await gitOk(['rev-parse', spec], cwd)).stdout.trim();
+  }
+
+  /** Commit one new uniquely named file and return the commit and its root tree. */
+  async function commitFile(cwd: string, name: string): Promise<{ commit: string; tree: string }> {
+    await writeFile(join(cwd, name), `${name} ${randomBytes(8).toString('hex')}\n`);
+    await gitOk(['add', name], cwd);
+    await gitOk(['commit', '-m', name], cwd);
+    return { commit: await rev(cwd, 'HEAD'), tree: await rev(cwd, 'HEAD^{tree}') };
+  }
+
+  async function receive(
+    project: CreatedProject,
+    token: string,
+    commands: Array<[old: string, next: string, ref: string]>,
+    pack?: Uint8Array
+  ): Promise<string> {
+    const packet = (line: string) => (Buffer.byteLength(line) + 4).toString(16).padStart(4, '0') + line;
+    const lines = commands.map(([old, next, ref], i) =>
+      packet(`${old} ${next} ${ref}${i === 0 ? '\0report-status' : ''}\n`)
+    );
+    const head = Buffer.from(lines.join('') + '0000');
+    const body = pack ? Buffer.concat([head, Buffer.from(pack)]) : head;
+    const res = await runtime.fetch(`/git/${project.artifactsRepoId}.git/git-receive-pack`, {
+      method: 'POST',
+      headers: {
+        authorization: `Basic ${Buffer.from(`x:${token}`).toString('base64')}`,
+        'content-type': 'application/x-git-receive-pack-request',
+      },
+      body: body as unknown as BodyInit,
+    });
+    return res.text();
+  }
+
+  async function reachableCache(project: CreatedProject): Promise<boolean> {
+    const info = (await (await runtime.fetch(`/__test/info/${project.artifactsRepoId}`)).json()) as {
+      reachableCache: boolean;
+    };
+    return info.reachableCache;
+  }
+
+  async function assertCleanClone(remote: string): Promise<string> {
+    const check = await freshDir('closure-check');
+    await gitOk(['clone', remote, check]);
+    expect((await git(['fsck', '--strict', '--connectivity-only'], check)).code).toBe(0);
+    expect((await git(['fsck', '--strict'], check)).code).toBe(0);
+    return check;
+  }
+
+  it('with a reachable cache, a failed first command does not vouch for a later command (Codex r4633317762)', async () => {
+    const project = await createHostedProject(await createEmailOnlyUser(), 'Closure cache attack');
+    const token = await mintToken(project, 'write');
+    const remote = localRemote(project.repository, token);
+    const work = await freshDir('closure-cache');
+    await gitOk(['clone', remote, work]); // a full clone persists the reachable cache
+    expect(await reachableCache(project)).toBe(true);
+
+    const { commit, tree } = await commitFile(work, 'attack.txt');
+    // The pack carries the commit but not its tree. The first command's walk reaches the
+    // missing tree and fails; the second command names that same tree directly.
+    const out = await receive(
+      project,
+      token,
+      [
+        [ZERO, commit, 'refs/heads/attack-commit'],
+        [ZERO, tree, 'refs/heads/attack-tree'],
+      ],
+      packOf(work, [commit])
+    );
+    expect(out).toContain('ng refs/heads/attack-commit missing necessary objects');
+    expect(out).toContain('ng refs/heads/attack-tree missing necessary objects');
+    const refs = (await gitOk(['ls-remote', remote])).stdout;
+    expect(refs).toContain('refs/heads/main');
+    expect(refs).not.toContain('attack-commit');
+    expect(refs).not.toContain('attack-tree');
+    expect(await reachableCache(project)).toBe(true);
+    await assertCleanClone(remote);
+  });
+
+  it('with a reachable cache, a valid multi-ref push whose closures overlap is accepted and extends the cache', async () => {
+    const project = await createHostedProject(await createEmailOnlyUser(), 'Closure cache control');
+    const token = await mintToken(project, 'write');
+    const remote = localRemote(project.repository, token);
+    const work = await freshDir('closure-cache-ok');
+    await gitOk(['clone', remote, work]);
+    expect(await reachableCache(project)).toBe(true);
+
+    const first = await commitFile(work, 'one.txt');
+    const second = await commitFile(work, 'two.txt'); // child of `first`
+    await gitOk(['branch', 'b-one', first.commit], work);
+    await gitOk(['branch', 'b-two', second.commit], work);
+    await gitOk(['push', 'origin', 'b-one', 'b-two', 'HEAD:refs/heads/main'], work);
+    // A fast-forward with a valid prior cache extends it in place rather than invalidating.
+    expect(await reachableCache(project)).toBe(true);
+    const refs = (await gitOk(['ls-remote', remote])).stdout;
+    expect(refs).toContain(`${first.commit}\trefs/heads/b-one`);
+    expect(refs).toContain(`${second.commit}\trefs/heads/b-two`);
+    // The next full clone is served from the extended cache, so a missing object fails fsck.
+    const check = await assertCleanClone(remote);
+    expect(await rev(check, 'origin/b-two')).toBe(second.commit);
+  });
+
+  it('without a reachable cache, a commit left by a rejected pack cannot be referenced later', async () => {
+    const project = await createHostedProject(await createEmailOnlyUser(), 'Closure stale pack');
+    const token = await mintToken(project, 'write');
+    const remote = localRemote(project.repository, token);
+    const work = await freshDir('closure-stale');
+    await gitOk(['init', '-q', '-b', 'main', work]);
+    const orphan = await commitFile(work, 'orphan.txt'); // root commit, tree not sent
+    expect(await reachableCache(project)).toBe(false);
+
+    const first = await receive(project, token, [[ZERO, orphan.commit, 'refs/heads/stale']], packOf(work, [orphan.commit]));
+    expect(first).toContain('ng refs/heads/stale missing necessary objects');
+    // The rejected pack stays ingested until GC runs; it must not count as validated history.
+    const child = await commitFile(work, 'child.txt');
+    const childTreeObjects = (await gitOk(['ls-tree', '-r', '-t', child.commit], work)).stdout
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => line.split(/\s+/)[2]!)
+      .filter((oid) => oid !== orphan.tree);
+    const second = await receive(
+      project,
+      token,
+      [
+        [ZERO, orphan.commit, 'refs/heads/reuse-orphan'],
+        [ZERO, child.commit, 'refs/heads/child-of-orphan'],
+      ],
+      packOf(work, [child.commit, child.tree, ...childTreeObjects])
+    );
+    expect(second).toContain('ng refs/heads/reuse-orphan missing necessary objects');
+    expect(second).toContain('ng refs/heads/child-of-orphan missing necessary objects');
+    const ref = await receive(project, token, [[ZERO, orphan.commit, 'refs/heads/ref-only']]);
+    expect(ref).toContain('ng refs/heads/ref-only missing necessary objects');
+    const refs = (await gitOk(['ls-remote', remote])).stdout;
+    expect(refs).toContain('refs/heads/main');
+    expect(refs).not.toMatch(/stale|reuse-orphan|child-of-orphan|ref-only/);
+    expect(await reachableCache(project)).toBe(false);
+    await assertCleanClone(remote);
+  });
+
+  it('without a reachable cache, a valid push from a shallow clone is accepted', async () => {
+    const project = await createHostedProject(await createEmailOnlyUser(), 'Closure shallow control');
+    const token = await mintToken(project, 'write');
+    const remote = localRemote(project.repository, token);
+    const work = await freshDir('closure-shallow');
+    await gitOk(['clone', '--depth', '1', remote, work]); // not a full clone: no cache
+    expect(await reachableCache(project)).toBe(false);
+    const next = await commitFile(work, 'shallow.txt');
+    await gitOk(['push', 'origin', 'HEAD:refs/heads/main', 'HEAD:refs/heads/shallow-copy'], work);
+    const refs = (await gitOk(['ls-remote', remote])).stdout;
+    expect(refs).toContain(`${next.commit}\trefs/heads/main`);
+    expect(refs).toContain(`${next.commit}\trefs/heads/shallow-copy`);
+    await assertCleanClone(remote);
   });
 });

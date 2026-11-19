@@ -19,11 +19,11 @@ const invalid = [
 const valid = ['refs/heads/normal', 'refs/heads/feature/x', 'refs/tags/v1.0', 'refs/heads/x.lockish/y', 'refs/heads/a.b/c', 'refs/heads/café'];
 const store = {
   getMeta: () => null, reachableVersion: () => '0', refs: () => [], resolveHead: () => null,
-  getRef: () => null, has: () => true,
+  getRef: () => null, typeAndSize: () => ({ type: 'blob', size: 1 }),
 } as unknown as GitStore;
 async function decision(ref: string) {
   return withGitWorkBudget(DEFAULT_HOSTED_GIT_LIMITS, async () => {
-    const plan = await validatePush(store, [{ old: '0'.repeat(40), next: 'a'.repeat(40), ref }], null, null);
+    const plan = await validatePush(store, [{ old: '0'.repeat(40), next: 'a'.repeat(40), ref }], null);
     return plan.decisions[0];
   });
 }
