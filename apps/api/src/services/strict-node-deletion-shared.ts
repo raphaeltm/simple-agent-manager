@@ -103,6 +103,18 @@ export async function requireStrictNode(
   return node;
 }
 
+/**
+ * The node is no longer the exact incarnation the caller loaded, or a proof compare-and-set
+ * refused (its fence or an admission condition no longer holds). The recovery action is "reload
+ * and decide again", unlike a storage or provider fault, so callers can map it on its own.
+ */
+export class NodeIncarnationFenceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NodeIncarnationFenceError';
+  }
+}
+
 export async function requireSameNodeIncarnation(
   db: NodeDb,
   expected: NodeRow,
@@ -110,7 +122,7 @@ export async function requireSameNodeIncarnation(
 ): Promise<NodeRow> {
   const current = await requireStrictNode(db, expected.id, expected.userId);
   if (!isSameNodeIncarnation(current, expected)) {
-    throw new Error(
+    throw new NodeIncarnationFenceError(
       `Strict node deletion lost its incarnation fence before ${phase}: node=${expected.id}`
     );
   }

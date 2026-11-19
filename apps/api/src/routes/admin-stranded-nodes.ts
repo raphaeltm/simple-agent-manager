@@ -82,6 +82,8 @@ adminStrandedNodeRoutes.post(
       operatorUserId,
       confirmation: body.confirmation,
       note: body.note,
+      // Not refused (an agent may relay a person's check of the provider console), but recorded.
+      agentSignIn: c.get('auth')?.session.agentSignIn === true,
     });
     await completeAttestedNodeRemoval({
       env: c.env,

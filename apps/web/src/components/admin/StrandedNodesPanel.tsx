@@ -1,13 +1,18 @@
-import type { AdminStrandedNode } from '@simple-agent-manager/shared';
-import { OPERATOR_NODE_DELETION_NOTE_MAX_CHARS } from '@simple-agent-manager/shared';
-import { Button, Dialog, Input, Spinner, Textarea } from '@simple-agent-manager/ui';
+import type {
+  AdminStrandedNode,
+  CredentialProvider,
+  ListAdminStrandedNodesResponse,
+} from '@simple-agent-manager/shared';
+import { OPERATOR_NODE_DELETION_NOTE_MAX_CHARS, PROVIDER_LABELS } from '@simple-agent-manager/shared';
+import { Alert, Button, Dialog, Input, Spinner, Textarea } from '@simple-agent-manager/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
-import { useId, useState } from 'react';
+import { useCallback, useId, useRef, useState } from 'react';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { useToast } from '../../hooks/useToast';
 import { attestOperatorNodeDeletion, fetchAdminStrandedNodes } from '../../lib/api';
+import { CopyableIdPill } from './CopyableIdPill';
 
 const strandedNodeKeys = {
   all: (scope: string) => ['auth', scope, 'admin', 'stranded-nodes'] as const,
@@ -27,7 +32,7 @@ const BLOCK_REASON_TEXT: Record<string, string> = {
 };
 
 function describeBlock(reason: string | null): string {
-  if (!reason) return 'SAM has not recorded why yet.';
+  if (!reason) return 'SAM keeps failing to tear it down.';
   const first = reason.split(',')[0]?.trim() ?? reason;
   return BLOCK_REASON_TEXT[first] ?? reason;
 }
@@ -35,13 +40,15 @@ function describeBlock(reason: string | null): string {
 function formatTime(value: string | null): string {
   if (!value) return 'never';
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleString(undefined, { timeZoneName: 'short' });
 }
 
 function providerName(node: AdminStrandedNode): string {
   const name = node.cloudProvider;
   if (!name) return 'the provider';
-  return name.charAt(0).toUpperCase() + name.slice(1);
+  return PROVIDER_LABELS[name as CredentialProvider] ?? name;
 }
 
 function RemoveNodeDialog({
@@ -51,86 +58,131 @@ function RemoveNodeDialog({
 }: {
   node: AdminStrandedNode;
   onClose: () => void;
-  onRemoved: () => void;
+  onRemoved: (nodeId: string) => void;
 }) {
   const toast = useToast();
+  const titleId = useId();
+  const introId = useId();
   const confirmId = useId();
+  const confirmHintId = useId();
   const noteId = useId();
+  const noteHintId = useId();
   const [confirmation, setConfirmation] = useState('');
   const [note, setNote] = useState('');
+  const errorRef = useRef<HTMLParagraphElement>(null);
   const mutation = useMutation({
     mutationFn: () =>
       attestOperatorNodeDeletion(node.id, { confirmation: confirmation.trim(), note: note.trim() }),
     onSuccess: () => {
-      toast.success('Node removed');
-      onRemoved();
+      toast.success(`Node ${node.id} removed`);
+      onRemoved(node.id);
+    },
+    onError: () => {
+      requestAnimationFrame(() => errorRef.current?.scrollIntoView({ block: 'nearest' }));
     },
   });
-  const ready = confirmation.trim() === node.id && note.trim().length > 0;
-  const lookFor = node.providerInstanceId
-    ? `server ${node.providerInstanceId}`
-    : `server named node-${node.id.toLowerCase()} or labelled node=${node.id.toLowerCase()}`;
+  const idMatches = confirmation.trim() === node.id;
+  const ready = idMatches && note.trim().length > 0;
+  const provider = providerName(node);
+  const lowerId = node.id.toLowerCase();
+  // A pending removal cannot be dismissed: Escape or a stray backdrop tap would hide its outcome.
+  const guardedClose = useCallback(() => {
+    if (!mutation.isPending) onClose();
+  }, [mutation.isPending, onClose]);
 
   return (
-    <Dialog isOpen onClose={onClose} maxWidth="md" aria-label="Remove a stuck node">
+    <Dialog
+      isOpen
+      onClose={guardedClose}
+      maxWidth="md"
+      aria-labelledby={titleId}
+      aria-describedby={introId}
+    >
       <form
-        className="grid gap-4 p-5"
+        className="grid gap-4"
         onSubmit={(event) => {
           event.preventDefault();
           if (ready && !mutation.isPending) mutation.mutate();
         }}
       >
-        <h2 className="m-0 text-base font-semibold text-fg-primary">Remove a stuck node</h2>
-        <div className="grid gap-2 text-sm text-fg-secondary">
-          <p className="m-0">
-            Only continue if you checked {providerName(node)} yourself and there is no {lookFor}.
+        <h2 id={titleId} className="m-0 text-base font-semibold text-fg-primary">
+          Remove a stuck node
+        </h2>
+        <div id={introId} className="grid gap-2 text-sm text-fg-secondary">
+          <p className="m-0">Check {provider} first. Continue only if it has no server for:</p>
+          <div className="flex flex-wrap gap-2">
+            {node.providerInstanceId ? (
+              <CopyableIdPill label="server" value={node.providerInstanceId} />
+            ) : (
+              <>
+                <CopyableIdPill label="name" value={`node-${lowerId}`} />
+                <CopyableIdPill label="label" value={`node=${lowerId}`} />
+              </>
+            )}
+          </div>
+          <p className="m-0 text-fg-muted">
+            SAM checks again and refuses if it finds the server. Nothing is deleted at {provider}.
           </p>
-          <p className="m-0">
-            SAM will first ask {providerName(node)} with every credential it still has, and refuse
-            if it finds the server. It will not delete anything at {providerName(node)}; it stops
-            tracking this node and frees its capacity.
-          </p>
-          {!node.providerInstanceId && (
-            <p className="m-0 text-fg-muted">No server ID was ever recorded for this node.</p>
-          )}
         </div>
-        <label className="grid gap-1.5 text-sm" htmlFor={confirmId}>
-          <span className="font-medium text-fg-primary">Type the node ID to confirm</span>
-          <span className="break-all font-mono text-xs text-fg-muted">{node.id}</span>
+        <div className="grid gap-1.5 text-sm">
+          <label htmlFor={confirmId} className="font-medium text-fg-primary">
+            Type the node ID <span className="break-all font-mono text-xs">{node.id}</span>
+          </label>
           <Input
             id={confirmId}
             value={confirmation}
             autoComplete="off"
+            autoCapitalize="characters"
+            autoCorrect="off"
             spellCheck={false}
+            aria-describedby={confirmHintId}
             onChange={(event) => setConfirmation(event.target.value)}
           />
-        </label>
-        <label className="grid gap-1.5 text-sm" htmlFor={noteId}>
-          <span className="font-medium text-fg-primary">What did you check?</span>
+          <span id={confirmHintId} aria-live="polite" className="text-xs text-fg-muted">
+            {confirmation.trim() === ''
+              ? 'Must match exactly.'
+              : idMatches
+                ? 'Matches.'
+                : 'Does not match yet.'}
+          </span>
+        </div>
+        <div className="grid gap-1.5 text-sm">
+          <label htmlFor={noteId} className="font-medium text-fg-primary">
+            What did you check?
+          </label>
           <Textarea
             id={noteId}
             value={note}
             rows={3}
             maxLength={OPERATOR_NODE_DELETION_NOTE_MAX_CHARS}
-            placeholder="For example: searched the Hetzner console for the name and label, no server."
+            placeholder={`For example: searched the ${provider} console by name and label; nothing found.`}
+            aria-describedby={noteHintId}
             onChange={(event) => setNote(event.target.value)}
           />
-          <span className="text-xs text-fg-muted">
+          <span id={noteHintId} className="text-xs text-fg-muted">
             Saved in the audit log with your name and the time. Do not paste secrets.
           </span>
-        </label>
-        {mutation.error && (
-          <p role="alert" className="m-0 rounded-md bg-danger-tint p-3 text-sm text-danger-fg">
-            {mutation.error instanceof Error ? mutation.error.message : 'Could not remove the node'}
-          </p>
-        )}
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={onClose} disabled={mutation.isPending}>
-            Cancel
-          </Button>
-          <Button type="submit" variant="danger" disabled={!ready} loading={mutation.isPending}>
-            Remove node
-          </Button>
+        </div>
+        <div className="sticky -bottom-6 -mx-6 -mb-6 grid gap-3 bg-surface px-6 pb-6 pt-3">
+          {mutation.error && (
+            <p
+              ref={errorRef}
+              role="alert"
+              className="m-0 rounded-md bg-danger-tint p-3 text-sm text-danger-fg [overflow-wrap:anywhere]"
+            >
+              {mutation.error instanceof Error
+                ? mutation.error.message
+                : 'Could not remove the node'}
+            </p>
+          )}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={onClose} disabled={mutation.isPending}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="danger" disabled={!ready} loading={mutation.isPending}>
+              Remove node
+            </Button>
+          </div>
         </div>
       </form>
     </Dialog>
@@ -154,47 +206,47 @@ function StrandedNodeRow({
           {node.providerInstanceId ? `server ${node.providerInstanceId}` : 'no server ID recorded'}{' '}
           · owner {node.ownerEmail ?? node.ownerUserId}
         </span>
-        <span className="text-sm text-fg-secondary">
-          {describeBlock(node.cleanupBlockedReason)}
-        </span>
+        <span className="text-sm text-fg-secondary">{describeBlock(node.cleanupBlockedReason)}</span>
         <span className="text-xs text-fg-muted">
-          {node.cleanupBlockedSince
-            ? `Teardown failing since ${formatTime(node.cleanupBlockedSince)}`
-            : 'No failed teardown recorded yet'}
-          {` · last heartbeat ${formatTime(node.lastHeartbeatAt)}`}
+          Failing since {formatTime(node.cleanupBlockedSince)} · last heartbeat{' '}
+          {formatTime(node.lastHeartbeatAt)}
         </span>
         {node.errorMessage && (
-          <span
-            className="line-clamp-2 text-xs text-fg-muted [overflow-wrap:anywhere]"
-            title={node.errorMessage}
-          >
-            {node.errorMessage}
-          </span>
+          <details className="text-xs text-fg-muted">
+            <summary className="cursor-pointer py-1">Last error</summary>
+            <p className="m-0 mt-1 [overflow-wrap:anywhere]">{node.errorMessage}</p>
+          </details>
         )}
       </div>
-      {node.cleanupBlockedSince ? (
+      {node.operatorRemovable ? (
         <Button
           size="sm"
           variant="secondary"
           className="min-h-11 justify-self-start sm:min-h-0"
+          aria-label={`Remove stuck node ${node.id}`}
           onClick={() => onRemove(node)}
         >
-          Server is gone…
+          Remove…
         </Button>
-      ) : null}
+      ) : (
+        <span className="max-w-56 text-xs text-fg-muted">
+          The server may still exist. Check {providerName(node)} and resolve it there first.
+        </span>
+      )}
     </li>
   );
 }
 
 /**
- * Admin → Infrastructure: nodes on SAM's own capacity that SAM cannot finish tearing down, and
- * the superadmin's way to remove one after checking the provider (POST
+ * Admin → Infrastructure: nodes on SAM's own capacity that SAM has failed to tear down, and the
+ * superadmin's way to remove one after checking the provider (POST
  * /api/admin/nodes/:id/operator-deletion). An owner removes nodes on their own cloud account from
  * the node page instead.
  */
 export function StrandedNodesPanel() {
   const scope = useQueryScope();
   const headingId = useId();
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const queryClient = useQueryClient();
   const [removing, setRemoving] = useState<AdminStrandedNode | null>(null);
   const query = useQuery({
@@ -204,25 +256,51 @@ export function StrandedNodesPanel() {
   });
   const nodes = query.data?.nodes ?? [];
   const total = query.data?.total ?? 0;
+  const closeDialog = useCallback(() => setRemoving(null), []);
+  const handleRemoved = useCallback(
+    (nodeId: string) => {
+      setRemoving(null);
+      // Drop the row at once so it cannot be tapped again while the refetch runs.
+      queryClient.setQueryData<ListAdminStrandedNodesResponse>(
+        strandedNodeKeys.all(scope),
+        (current) =>
+          current
+            ? {
+                nodes: current.nodes.filter((node) => node.id !== nodeId),
+                total: Math.max(0, current.total - 1),
+              }
+            : current
+      );
+      void queryClient.invalidateQueries({ queryKey: strandedNodeKeys.all(scope) });
+      headingRef.current?.focus();
+    },
+    [queryClient, scope]
+  );
 
   return (
     <section
       className="glass-surface grid min-w-0 gap-4 rounded-lg p-4"
       aria-labelledby={headingId}
+      aria-busy={query.isFetching}
     >
       <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h2 id={headingId} className="sam-type-section-heading m-0 text-fg-primary">
+          <h2
+            id={headingId}
+            ref={headingRef}
+            tabIndex={-1}
+            className="sam-type-section-heading m-0 text-fg-primary"
+          >
             Stuck nodes
           </h2>
           <p className="m-0 mt-1 text-sm text-fg-muted">
-            Nodes on SAM&apos;s capacity that SAM is trying, and failing, to tear down.
+            Nodes on SAM&apos;s capacity that SAM has failed to tear down.
           </p>
         </div>
         <Button
           size="sm"
           variant="ghost"
-          className="shrink-0 self-start border-transparent text-fg-muted hover:text-fg-primary"
+          className="min-h-11 shrink-0 self-start border-transparent text-fg-muted hover:text-fg-primary sm:min-h-0"
           aria-label="Refresh stuck nodes"
           disabled={!scope}
           onClick={() => void query.refetch()}
@@ -236,16 +314,18 @@ export function StrandedNodesPanel() {
         </Button>
       </div>
 
+      {query.isError && query.data && (
+        <Alert variant="warning">Could not refresh. Showing the last list.</Alert>
+      )}
+
       {query.isPending && !query.data ? (
-        <div className="flex justify-center py-4">
+        <div className="flex justify-center py-4" role="status" aria-label="Loading stuck nodes">
           <Spinner size="sm" />
         </div>
       ) : query.isError && !query.data ? (
-        <p role="alert" className="m-0 text-sm text-danger-fg">
-          Could not load stuck nodes.
-        </p>
+        <Alert variant="error">Could not load stuck nodes. Try Refresh.</Alert>
       ) : nodes.length === 0 ? (
-        <p className="m-0 text-sm text-fg-muted">No stuck nodes.</p>
+        <p className="m-0 text-sm text-fg-muted">No stuck nodes. Every teardown is completing.</p>
       ) : (
         <>
           <ul className="m-0 grid list-none divide-y divide-border-default p-0">
@@ -262,14 +342,7 @@ export function StrandedNodesPanel() {
       )}
 
       {removing && (
-        <RemoveNodeDialog
-          node={removing}
-          onClose={() => setRemoving(null)}
-          onRemoved={() => {
-            setRemoving(null);
-            void queryClient.invalidateQueries({ queryKey: strandedNodeKeys.all(scope) });
-          }}
-        />
+        <RemoveNodeDialog node={removing} onClose={closeDialog} onRemoved={handleRemoved} />
       )}
     </section>
   );

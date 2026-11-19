@@ -15,6 +15,7 @@ import * as schema from '../db/schema';
 import {
   exactNodeIncarnationPredicate,
   type NodeDb,
+  NodeIncarnationFenceError,
   type NodeRow,
   requireSameNodeIncarnation,
 } from './strict-node-deletion-shared';
@@ -79,7 +80,7 @@ export async function markRuntimeTerminationConfirmed(
     )
     .run();
   if ((result.meta.changes ?? 0) !== 1) {
-    throw new Error(`Strict node deletion proof CAS failed: node=${node.id}`);
+    throw new NodeIncarnationFenceError(`Strict node deletion proof CAS failed: node=${node.id}`);
   }
   await requireSameNodeIncarnation(
     db,

@@ -496,8 +496,11 @@ export type {
 } from './admin-stranded-nodes';
 export {
   DEFAULT_ADMIN_STRANDED_NODES_LIMIT,
+  isOperatorRemovableBlockReason,
   MAX_ADMIN_STRANDED_NODES_LIMIT,
   OPERATOR_NODE_DELETION_NOTE_MAX_CHARS,
+  OPERATOR_REMOVABLE_BLOCK_REASONS,
+  primaryCleanupBlockReason,
 } from './admin-stranded-nodes';
 export type {
   CreateNotificationRequest,
