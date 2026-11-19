@@ -50,6 +50,7 @@ import {
   resolveTunnelSettings,
   STORAGE_SECRET_KEYS,
   tunnelWorkerVars,
+  withComposePortOverrides,
 } from './box-settings.js';
 import { verifyNewVersionServes } from './celld-adopt.js';
 import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
@@ -172,7 +173,12 @@ async function main(): Promise<void> {
   const envFile = resolve(values['env-file'] ?? join(REPO_ROOT, 'deploy/selfhost/.env'));
   // The .env holds the bucket credential, which can read every deployed secret.
   assertPrivateFile(envFile);
-  const box = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
+  // Box ports as docker compose will run them: a shell override beats the .env (F21 L5).
+  const { box, overridden } = withComposePortOverrides(
+    parseDotenv(readFileSync(envFile, 'utf8'), envFile),
+    process.env
+  );
+  for (const name of overridden) log(`${name} from the shell environment overrides ${envFile}`);
   // Same default and base directory docker compose uses for SAM_SELFHOST_STATE_DIR.
   const stateDir = resolve(
     dirname(envFile),
