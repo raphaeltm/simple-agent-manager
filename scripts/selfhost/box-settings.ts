@@ -256,6 +256,9 @@ export const STORAGE_ENV_KEYS = [
   'AWS_SECRET_ACCESS_KEY',
 ] as const;
 
+/** The storage settings that are credentials: scrubbed from any celld output a script prints. */
+export const STORAGE_SECRET_KEYS = ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'] as const;
+
 /**
  * The environment for `celld deploy` / `celld d1`: an allowlist of host variables plus the
  * box's storage settings and the esbuild path. Unrelated host secrets never reach celld.

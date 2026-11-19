@@ -12,12 +12,16 @@ import {
   existsSync,
   fchmodSync,
   fstatSync,
+  fsyncSync,
   mkdirSync,
   openSync,
   readFileSync,
+  renameSync,
+  rmSync,
   statSync,
   writeSync,
 } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 
 import * as v from 'valibot';
 
@@ -61,6 +65,57 @@ export function writePrivateFile(path: string, content: string): void {
   } finally {
     closeSync(fd);
   }
+}
+
+/** Writes `content` to a new file (mode 0600, refusing an existing one) and fsyncs it. */
+function writeNewPrivateFileSynced(path: string, content: string): void {
+  const fd = openSync(path, 'wx', 0o600);
+  try {
+    fchmodSync(fd, 0o600);
+    writeSync(fd, content);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function fsyncDir(dir: string): void {
+  const fd = openSync(dir, 'r');
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Replaces `path` with `content` so a crash leaves either the old or the new file, never a torn
+ * one: a 0600 temp file in the same directory is written and fsynced, then renamed over `path`.
+ * With `backup`, an existing file's content is first kept as `<path>.bak` (0600, same way).
+ */
+export function replacePrivateFile(
+  path: string,
+  content: string,
+  options: { backup?: boolean } = {}
+): void {
+  const dir = dirname(path);
+  const temp = join(dir, `.${basename(path)}.${process.pid}.tmp`);
+  const stage = (target: string, text: string): void => {
+    rmSync(temp, { force: true });
+    try {
+      writeNewPrivateFileSynced(temp, text);
+      renameSync(temp, target);
+    } catch (error) {
+      rmSync(temp, { force: true });
+      throw error;
+    }
+  };
+  if (options.backup && existsSync(path)) {
+    assertPrivateFile(path);
+    stage(`${path}.bak`, readFileSync(path, 'utf8'));
+  }
+  stage(path, content);
+  fsyncDir(dir);
 }
 
 /** Creates `dir` (mode 0700) or tightens an existing one, and checks it belongs to this user. */
