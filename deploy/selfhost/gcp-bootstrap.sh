@@ -257,9 +257,21 @@ done
 # credential and no user's. SAM also refuses a user credential that names a pool the platform
 # credential holds (gcp-wif-pool-ownership.ts). Any provider added to this pool later would
 # inherit the service account too, so do not add providers to it.
+POOL_PRINCIPAL="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/*"
+# add-iam-policy-binding only adds a member: an account reused after a --pool-id change (or one
+# granted elsewhere) would still be impersonable through the old member. Refuse while any other
+# member holds workloadIdentityUser on it; revoking is the operator's decision.
+if exists iam service-accounts describe "$SA_EMAIL" --project="$PROJECT"; then
+  wi_members="$(gcloud iam service-accounts get-iam-policy "$SA_EMAIL" --project="$PROJECT" \
+    --flatten='bindings[].members' --filter='bindings.role=roles/iam.workloadIdentityUser' \
+    --format='value(bindings.members)')" || die "cannot read the IAM policy of ${SA_EMAIL}"
+  while IFS= read -r member; do
+    [[ -z "$member" || "$member" == "$POOL_PRINCIPAL" ]] && continue
+    die "service account ${SA_EMAIL} can also be impersonated by ${member} (roles/iam.workloadIdentityUser), which this install does not use. Remove it: gcloud iam service-accounts remove-iam-policy-binding ${SA_EMAIL} --project=${PROJECT} --role=roles/iam.workloadIdentityUser --member='${member}', then run this again; or pass --service-account <a new id>."
+  done <<<"$wi_members"
+fi
 change_retry iam service-accounts add-iam-policy-binding "$SA_EMAIL" --project="$PROJECT" \
-  --role=roles/iam.workloadIdentityUser \
-  --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/*" \
+  --role=roles/iam.workloadIdentityUser --member="$POOL_PRINCIPAL" \
   --condition=None --quiet --format=none
 
 [[ "$DRY_RUN" -eq 1 ]] && echo "Dry run: nothing was changed."

@@ -69,6 +69,7 @@ interface FakeGcp {
   >;
   accounts: Record<string, { description: string; disabled?: boolean }>;
   bindings: string[];
+  saBindings?: Record<string, string[]>;
 }
 
 function gcp(): FakeGcp {
@@ -232,6 +233,32 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
     expect(
       result.calls.slice(before).filter((c) => MUTATING.test(c) && !c.startsWith('services enable'))
     ).toEqual([]);
+  });
+
+  // add-iam-policy-binding only adds a member: moving to a new --pool-id would leave the old
+  // pool's principalSet able to impersonate the reused node account.
+  it('a new --pool-id with the old pool still bound: stops with the remove command, binds nothing', () => {
+    expect(
+      run(['--project', 'sam-vm-test', '--api-url', ISSUER, '--pool-id', 'sam-old']).status
+    ).toBe(0);
+    const before = calls().length;
+    const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER, '--pool-id', 'sam-new']);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('workloadIdentityPools/sam-old/*');
+    expect(result.stderr).toContain('remove-iam-policy-binding');
+    expect(
+      result.calls
+        .slice(before)
+        .filter((c) => c.startsWith('iam service-accounts add-iam-policy-binding'))
+    ).toEqual([]);
+  });
+
+  it('control: the same pool on a re-run is not a stale member', () => {
+    expect(
+      run(['--project', 'sam-vm-test', '--api-url', ISSUER, '--pool-id', 'sam-old']).status
+    ).toBe(0);
+    const again = run(['--project', 'sam-vm-test', '--api-url', ISSUER, '--pool-id', 'sam-old']);
+    expect(again.status, again.stderr).toBe(0);
   });
 
   it('a disabled service account: stops with the enable command, grants nothing', () => {

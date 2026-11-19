@@ -79,8 +79,19 @@ else if (cmd.startsWith('iam workload-identity-pools providers')) {
     db.pools[id] = { description: flag('description') };
     save();
   } else fail(`unexpected ${cmd}`);
-} else if (cmd.startsWith('iam service-accounts add-iam-policy-binding')) save();
-else if (cmd.startsWith('iam service-accounts')) {
+} else if (cmd.startsWith('iam service-accounts add-iam-policy-binding')) {
+  const email = words[3];
+  db.saBindings = db.saBindings ?? {};
+  const members = (db.saBindings[email] = db.saBindings[email] ?? []);
+  const member = flag('member');
+  if (flag('role') === 'roles/iam.workloadIdentityUser' && !members.includes(member)) {
+    members.push(member);
+  }
+  save();
+} else if (cmd.startsWith('iam service-accounts get-iam-policy')) {
+  // --flatten bindings[].members --filter role=workloadIdentityUser --format value(members)
+  for (const member of db.saBindings?.[words[3]] ?? []) out(member);
+} else if (cmd.startsWith('iam service-accounts')) {
   const [, , op, id] = words;
   const email = id.includes('@') ? id : `${id}@${flag('project')}.iam.gserviceaccount.com`;
   if (op === 'describe') {

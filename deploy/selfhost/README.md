@@ -53,11 +53,12 @@ From the repository root on the VM:
 4. `pnpm selfhost:deploy --init`: generates the platform keys (`.state/platform-keys.json`; back
    it up), `.state/gateway.env` (the reverse-tunnel gateway secret and lease port range) and the
    mail-collector files. Run it again after changing the port range or turning a profile on.
-5. `docker compose -f deploy/selfhost/docker-compose.yml --env-file deploy/selfhost/.env build`:
-   builds the two local images (`caddy`, and `sam-mx` when `mail-in` is on). See
-   [Image builds](#image-builds).
-6. `docker compose -f deploy/selfhost/docker-compose.yml --env-file deploy/selfhost/.env up -d`
-   (or run `docker compose build` / `up -d` from inside `deploy/selfhost/`, which reads `.env`).
+5. `(cd deploy/selfhost && docker compose build)`: builds the two local images (`caddy`, and
+   `sam-mx` when `mail-in` is on). See [Image builds](#image-builds).
+6. `(cd deploy/selfhost && docker compose up -d)`. Run compose from `deploy/selfhost/`, as every
+   compose command in this README assumes: there it reads `.env`, including any `COMPOSE_FILE`
+   overlays and `COMPOSE_PROFILES`. A `-f` on the command line replaces `COMPOSE_FILE`, which would
+   drop your overlays.
 7. `pnpm selfhost:deploy`: builds the web UI, the API Worker's dependencies and the vm-agent
    (in a pinned Go image), publishes the vm-agent to the bucket, applies D1 migrations and runs
    `celld deploy`, then waits until the new version answers.

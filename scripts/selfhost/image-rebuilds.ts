@@ -25,8 +25,29 @@ export interface ComposeOverlay {
   to: string | null;
 }
 
+/**
+ * Build args as a mapping. Compose accepts a list (`- NAME=value`, or `- NAME` for a value taken
+ * from the environment) or a mapping, and merges them by name across files whichever form each
+ * file uses.
+ */
+function argsMap(args: unknown): Record<string, unknown> | undefined {
+  if (Array.isArray(args)) {
+    const map: Record<string, unknown> = {};
+    for (const entry of args) {
+      const text = String(entry);
+      const separator = text.indexOf('=');
+      if (separator < 0) map[text] = null;
+      else map[text.slice(0, separator)] = text.slice(separator + 1);
+    }
+    return map;
+  }
+  return isJsonRecord(args) ? args : undefined;
+}
+
 function asSection(build: string | BuildSection): BuildSection {
-  return typeof build === 'string' ? { context: build } : { ...build };
+  if (typeof build === 'string') return { context: build };
+  const args = argsMap(build.args);
+  return { ...build, ...(args === undefined ? {} : { args }) };
 }
 
 /**

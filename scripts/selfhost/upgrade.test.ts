@@ -604,6 +604,18 @@ describe('imageRebuilds', () => {
     expect(imageRebuilds([], null, COMPOSE())).toEqual(['caddy', 'sam-mx']);
   });
 
+  // Compose merges build args by name whatever form each file uses (list or mapping).
+  it('merges list-form overlay args by name, so a base-only arg change still rebuilds', () => {
+    const listOverlay = 'services:\n  caddy:\n    build:\n      args:\n        - EXTRA=x\n';
+    const overlays = [{ from: listOverlay, to: listOverlay }];
+    expect(imageRebuilds([], COMPOSE('mod@v1'), COMPOSE('mod@v2'), () => null, overlays)).toEqual([
+      'caddy',
+    ]);
+    expect(imageRebuilds([], COMPOSE('mod@v1'), COMPOSE('mod@v1'), () => null, overlays)).toEqual(
+      []
+    );
+  });
+
   it('merges an overlay build section over the base one (args merge, keys replace)', () => {
     const tweak = 'services:\n  caddy:\n    build:\n      args:\n        EXTRA: x\n';
     expect(
