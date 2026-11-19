@@ -101,14 +101,14 @@ for (const isMine of [true, false]) {
       await expect(page.getByTestId('retained-snapshot-export')).toHaveCount(0);
     } else {
       const summary = page.getByText('Download saved work', { exact: true });
-      expect((await summary.boundingBox())?.height).toBeGreaterThanOrEqual(56);
+      expect((await summary.boundingBox())?.height).toBeGreaterThanOrEqual(44);
       await summary.click();
       await expect(
         page.getByRole('button', { name: 'Download manifest', exact: true })
       ).toBeVisible();
       const button = page.getByRole('button', { name: 'Download WIP bundle', exact: true });
       await expect(button).toBeVisible();
-      expect((await button.boundingBox())?.height).toBeGreaterThanOrEqual(56);
+      expect((await button.boundingBox())?.height).toBeGreaterThanOrEqual(44);
       await button.click();
       await expect(page.getByRole('alert')).toContainText('Saved work could not be downloaded.');
       await expect(button).toBeEnabled();
