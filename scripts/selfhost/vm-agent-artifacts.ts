@@ -144,6 +144,7 @@ export function buildVmAgentBinaries(
   cacheDir: string,
   { release, buildDate }: VmAgentRelease
 ): string {
+  bindMount(cacheDir, '/cache');
   mkdirSync(cacheDir, { recursive: true, mode: 0o700 });
   const workDir = mkdtempSync(join(tmpdir(), 'sam-vm-agent-'));
   const archive = spawnSync(
@@ -162,6 +163,18 @@ export function buildVmAgentBinaries(
   return join(src, 'bin');
 }
 
+/**
+ * A `docker run --mount` bind value. The value is a comma-separated key=value list, so a comma in
+ * a host path would end `src` and start options of the caller's choosing (`readonly=false`, a
+ * second `dst`); such a path is refused rather than quoted.
+ */
+export function bindMount(src: string, dst: string): string {
+  if (src.includes(',') || dst.includes(',')) {
+    throw new Error(`cannot bind-mount ${src}: docker --mount paths may not contain a comma`);
+  }
+  return `type=bind,src=${src},dst=${dst}`;
+}
+
 // GOFLAGS is not passed: the Makefile defines its own, and make exports it to `go`.
 function runVmAgentBuild(src: string, cacheDir: string, { release, buildDate }: VmAgentRelease) {
   const uid = process.getuid?.() ?? 0;
@@ -176,9 +189,9 @@ function runVmAgentBuild(src: string, cacheDir: string, { release, buildDate }: 
     '--security-opt',
     'no-new-privileges',
     '--mount',
-    `type=bind,src=${src},dst=/src`,
+    bindMount(src, '/src'),
     '--mount',
-    `type=bind,src=${cacheDir},dst=/cache`,
+    bindMount(cacheDir, '/cache'),
     '-e',
     'HOME=/tmp',
     '-e',

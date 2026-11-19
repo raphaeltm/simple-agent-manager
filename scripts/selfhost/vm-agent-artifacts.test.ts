@@ -1,9 +1,12 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import {
+  bindMount,
+  buildVmAgentBinaries,
   decideVmAgentPublish,
   isR2NoObjectError,
   parseVmAgentRelease,
@@ -109,5 +112,24 @@ describe('build pins', () => {
     expect(
       isR2NoObjectError('Error: no node leases in the bucket', 'workspaces-dev-assets', 'k')
     ).toBe(false);
+  });
+});
+
+describe('docker bind mounts', () => {
+  it('refuses a cache dir containing a comma before creating or mounting anything', () => {
+    const cacheDir = join(tmpdir(), `sam-go-cache-${process.pid},readonly=false`);
+    expect(() =>
+      buildVmAgentBinaries('/nonexistent-repo', cacheDir, {
+        release: RELEASE,
+        buildDate: '2026-11-10T12:23:48Z',
+      })
+    ).toThrow(/may not contain a comma/);
+    expect(existsSync(cacheDir)).toBe(false);
+  });
+
+  it('renders a plain path, and refuses a comma on either side', () => {
+    expect(bindMount('/state/go-cache', '/cache')).toBe('type=bind,src=/state/go-cache,dst=/cache');
+    expect(() => bindMount('/state/a,dst=/etc', '/cache')).toThrow(/comma/);
+    expect(() => bindMount('/state/a', '/cache,ro')).toThrow(/comma/);
   });
 });
