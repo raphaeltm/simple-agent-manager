@@ -27,12 +27,8 @@ import {
   type CapacityAwareNodePlacementRow,
   resolveReusableNodeCapacitySnapshot,
 } from './placement-resolver';
-import {
-  trustedWorkspaceNodeCapacityColumnsSql,
-} from './workspace-admission-sql';
-import {
-  RESOURCE_REQUIREMENTS_SOURCE_SQL,
-} from './workspace-reservation-usage';
+import { trustedWorkspaceNodeCapacityColumnsSql } from './workspace-admission-sql';
+import { RESOURCE_REQUIREMENTS_SOURCE_SQL } from './workspace-reservation-usage';
 
 /** Default maximum number of deployment environments placed on one deployment node. */
 export const DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE = 5;
@@ -101,6 +97,8 @@ export async function findDeploymentNodeWithCapacity(
     return null;
   }
   const policy = resolveWorkspaceAdmissionPolicy(env);
+  // A linked node is sticky across provider priorities; the scheduler checks every
+  // candidate in the effective pool below. Fresh admission stays provider-scoped.
   const nodes = await env.DATABASE.prepare(
     `SELECT n.id,
             n.vm_size AS vmSize,
@@ -137,11 +135,11 @@ export async function findDeploymentNodeWithCapacity(
        AND n.health_status != 'unhealthy'
        AND n.node_role = 'deployment'
        AND COALESCE(n.node_mode, 'shared') = ?
-       AND n.cloud_provider = ?
+       ${options.nodeId ? '' : 'AND n.cloud_provider = ?'}
        ${options.nodeId ? 'AND n.id = ?' : ''}
      ORDER BY n.id`
   )
-    .bind(userId, nodeMode, placement.provider, ...(options.nodeId ? [options.nodeId] : []))
+    .bind(userId, nodeMode, ...(options.nodeId ? [options.nodeId] : [placement.provider]))
     .all<DeploymentNodeCandidate>();
 
   const candidates = nodes.results ?? [];
@@ -247,6 +245,7 @@ function directDeploymentNodeMatchesPlacement(
   placement: DeploymentPlacement
 ): boolean {
   return (
+    node.cloudProvider === placement.provider &&
     node.vmLocation === placement.location &&
     node.providerInstanceType === placement.providerInstanceType &&
     node.providerInstanceBootDiskSizeGb === placement.providerInstanceBootDiskSizeGb &&
@@ -260,8 +259,22 @@ function deploymentPlacementForNode(
   node: DeploymentNodeCandidate,
   capacityPlacementSnapshot: CapacityPlacementSnapshot | null
 ): DeploymentPlacement {
+  const candidate = request.capacityPoolSelection?.candidates.find(
+    (candidate) => candidate.id === capacityPlacementSnapshot?.capacityPoolCandidateId
+  );
   return {
     ...request,
+    provider: candidate?.provider ?? request.provider,
+    credentialSource: candidate?.credentialAttributionSource ?? request.credentialSource,
+    credentialAttributionProjectId:
+      candidate?.credentialAttributionSource === 'project' ? request.projectId : null,
+    placementCredentialSource:
+      capacityPlacementSnapshot?.placementCredentialSource ?? request.placementCredentialSource,
+    placementCredentialReference:
+      capacityPlacementSnapshot?.placementCredentialReference ??
+      request.placementCredentialReference,
+    placementCredentialVersion:
+      capacityPlacementSnapshot?.placementCredentialVersion ?? request.placementCredentialVersion,
     location: node.vmLocation ?? request.location,
     vmSize: node.vmSize ?? request.vmSize,
     providerInstanceType: node.providerInstanceType ?? null,
@@ -302,6 +315,7 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
     workloadRole: 'deployment',
     capacityPlacementSnapshot: placement.capacityPlacementSnapshot,
     requireProjectMembership: true,
+    authorityMode: expectedNodeStatus === 'running' ? 'existing-node' : 'allocation-plan',
   });
   const nativeIdentity = deploymentNativeIdentityPredicate(placement);
   const policy = resolveWorkspaceAdmissionPolicy(env);
@@ -500,6 +514,7 @@ export async function claimDeploymentEnvironmentRelocation(params: {
     workloadRole: 'deployment',
     capacityPlacementSnapshot: params.placement.capacityPlacementSnapshot,
     requireProjectMembership: true,
+    authorityMode: 'existing-node',
   });
   const claimJson = JSON.stringify({
     ...params.reservation,

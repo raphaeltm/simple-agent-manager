@@ -549,7 +549,7 @@ async function reserveExistingNodeForRelease(params: {
   nodeId: string;
   expectedReservationJson: string | null;
   beforeExternalMutation: BeforeExternalMutation;
-}): Promise<boolean> {
+}): Promise<ReleasePlacement | boolean> {
   if (!params.release.placement) return true;
   await params.beforeExternalMutation();
   const nodeMode = params.release.requiresVolumes ? 'exclusive' : 'shared';
@@ -565,7 +565,7 @@ async function reserveExistingNodeForRelease(params: {
     }
   );
   if (currentNode?.nodeId !== params.nodeId) return false;
-  return linkEnvironmentToNode({
+  const linked = await linkEnvironmentToNode({
     env: params.release.env,
     db: params.release.db,
     envId: params.release.envId,
@@ -577,6 +577,7 @@ async function reserveExistingNodeForRelease(params: {
     expectedReservationJson: params.expectedReservationJson,
     releaseId: params.release.releaseId,
   });
+  return linked ? currentNode.placement : false;
 }
 
 async function relocateSharedNodeForRelease(params: {
@@ -672,7 +673,7 @@ async function handleExistingNodeReservationFailure(params: {
     params.release.env,
     params.release.envId,
     params.release.releaseId,
-    'Existing exclusive deployment node cannot admit the declared resource reservation'
+    'Existing exclusive deployment node is no longer eligible under the effective compute pool or cannot admit the declared resource reservation'
   );
   return null;
 }
@@ -790,6 +791,7 @@ export async function placeReleaseOnDeploymentNode(
   } else if (params.requiresVolumes) {
     await attachVolumesToExistingNode({
       ...params,
+      placement: typeof reserved === 'object' ? reserved : params.placement,
       beforeExternalMutation: assertPlacementCurrent,
     });
   }

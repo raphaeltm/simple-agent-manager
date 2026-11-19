@@ -19,7 +19,10 @@ import { errors } from '../middleware/error';
 import { collectSecretNames } from '../services/compose-renderer';
 import { NO_DEPLOYMENT_RELOCATION_CLAIM_SQL } from '../services/deployment-environment-state';
 import { resolveDeploymentPlacement } from '../services/deployment-provisioning';
-import { createMissingManifestVolumes } from '../services/deployment-volumes';
+import {
+  createMissingManifestVolumes,
+  listEnvironmentVolumes,
+} from '../services/deployment-volumes';
 import { recordDeploymentReleaseLifecycleEventBestEffort } from '../services/project-lifecycle-events';
 import {
   isPlacementCancellation,
@@ -223,8 +226,28 @@ async function prepareManifestVolumes(params: {
   requiresVolumes: boolean;
   reservation: ResolvedResourceReservation;
 }): Promise<VolumePreparationOutcome> {
+  const volumes = params.requiresVolumes
+    ? await listEnvironmentVolumes(params.db, params.envId)
+    : [];
+  const volume = volumes[0];
+  if (
+    volume &&
+    volumes.some((item) => item.provider !== volume.provider || item.location !== volume.location)
+  ) {
+    return {
+      success: false,
+      response: {
+        status: 400,
+        body: {
+          error: 'VOLUME_PLACEMENT_CONFLICT',
+          message: 'Existing environment volumes must share the same provider and location.',
+        },
+      },
+    };
+  }
   const placement = await resolveDeploymentPlacement(params.userId, params.env, params.projectId, {
     reservation: params.reservation,
+    ...(volume ? { providerOverride: volume.provider, vmLocationOverride: volume.location } : {}),
   });
   if (!placement) {
     return {
@@ -232,9 +255,10 @@ async function prepareManifestVolumes(params: {
       response: {
         status: 400,
         body: {
-          error: 'NO_CLOUD_PROVIDER',
-          message:
-            'No cloud provider credential found. Connect a cloud provider before deploying applications.',
+          error: volume ? 'VOLUME_PLACEMENT_UNAVAILABLE' : 'NO_CLOUD_PROVIDER',
+          message: volume
+            ? 'The effective compute pool cannot place this environment on the provider and location of its existing volumes.'
+            : 'No cloud provider credential found. Connect a cloud provider before deploying applications.',
         },
       },
     };
