@@ -12,6 +12,12 @@
  * state dir with no trace of an earlier deploy (`PRIOR_DEPLOY_EVIDENCE`). Both conditions are
  * required: a plain deploy or an upgrade pointed at the wrong state dir must stop rather than
  * mint a second identity for the install.
+ *
+ * When the file exists, only `--init` completes a key group it lacks (`pnpm selfhost:upgrade`
+ * runs `deploy --init` first), and never an identity group (`ENCRYPTION_KEY`,
+ * `SAM_INSTALLATION_ID`): every platform-keys.json ever written has had both, so one missing from
+ * the file was lost, not added by a newer version, and regenerating it would replace the key the
+ * box already uses.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -74,8 +80,18 @@ type PlatformKeyName = (typeof PLATFORM_KEY_NAMES)[number];
 const GENERATORS: ReadonlyArray<{
   names: readonly PlatformKeyName[];
   generate: () => Partial<Record<PlatformKeyName, string>>;
+  /**
+   * In every keys file since the first version, so its absence from an existing file means the
+   * value was lost: it is restored from a backup, never regenerated. A group added later must
+   * not set this, so `--init` can complete it on boxes created before it existed.
+   */
+  identity?: true;
 }> = [
-  { names: ['ENCRYPTION_KEY'], generate: () => ({ ENCRYPTION_KEY: generateEncryptionKey() }) },
+  {
+    names: ['ENCRYPTION_KEY'],
+    identity: true,
+    generate: () => ({ ENCRYPTION_KEY: generateEncryptionKey() }),
+  },
   {
     names: ['JWT_PRIVATE_KEY', 'JWT_PUBLIC_KEY'],
     generate: () => {
@@ -108,6 +124,7 @@ const GENERATORS: ReadonlyArray<{
   },
   {
     names: ['SAM_INSTALLATION_ID'],
+    identity: true,
     generate: () => ({ SAM_INSTALLATION_ID: randomBytes(16).toString('hex') }),
   },
   // Shared with frps and Caddy through gateway.env (box-settings.ts). The Worker authenticates
@@ -153,7 +170,7 @@ function readExistingKeys(
   stateDir: string,
   path: string,
   mode: PlatformKeysMode
-): { existing: Record<string, string>; keys: Record<string, string> } {
+): { existing: Record<string, string>; keys: Record<string, string>; fileExists: boolean } {
   if (!existsSync(path)) {
     assertNoPriorDeploy(stateDir, path);
     if (mode === 'deploy') {
@@ -162,7 +179,7 @@ function readExistingKeys(
           'platform keys once), or restore the file from your backup'
       );
     }
-    return { existing: {}, keys: {} };
+    return { existing: {}, keys: {}, fileExists: false };
   }
   const existing = readPrivateJson(path);
   const keys: Record<string, string> = {};
@@ -176,17 +193,41 @@ function readExistingKeys(
     }
     keys[name] = value;
   }
-  return { existing, keys };
+  return { existing, keys, fileExists: true };
+}
+
+/** Throws unless a group missing from an existing keys file may be generated in `mode`. */
+function assertMayCompleteGroup(
+  group: (typeof GENERATORS)[number],
+  path: string,
+  mode: PlatformKeysMode
+): void {
+  const names = group.names.join(', ');
+  if (group.identity) {
+    throw new Error(
+      `${path} has no ${names}. Every platform-keys.json has had it, so it was lost; a new value ` +
+        "would make every stored credential unreadable or orphan the box's nodes. Restore it " +
+        `from your backup (${PLATFORM_KEYS_FILE}.bak or your own copy).`
+    );
+  }
+  if (mode === 'deploy') {
+    throw new Error(
+      `${path} has no ${names}; run pnpm selfhost:deploy --init to generate it (a key added by a ` +
+        'newer version), or restore it from your backup'
+    );
+  }
 }
 
 /**
  * Fills every wholly missing key group into `keys` (placeholders in a dry run) and returns the
- * names it filled. A group with only some of its keys present is an error.
+ * names it filled. A group with only some of its keys present is an error, and so is a group
+ * missing from an existing file that `assertMayCompleteGroup` does not allow.
  */
 function completeKeyGroups(
   keys: Record<string, string>,
   path: string,
-  mode: PlatformKeysMode
+  mode: PlatformKeysMode,
+  fileExists: boolean
 ): PlatformKeyName[] {
   const generated: PlatformKeyName[] = [];
   for (const group of GENERATORS) {
@@ -198,6 +239,7 @@ function completeKeyGroups(
           'restore the missing value from a backup instead of regenerating the pair'
       );
     }
+    if (fileExists) assertMayCompleteGroup(group, path, mode);
     if (mode === 'dry-run') {
       for (const name of group.names) keys[name] = DRY_RUN_KEY_PLACEHOLDER;
     } else {
@@ -214,14 +256,15 @@ function completeKeyGroups(
  *
  * - No file: only `init` on a state dir with no `PRIOR_DEPLOY_EVIDENCE` creates one; `deploy`
  *   refuses, and `dry-run` reports placeholders.
- * - A file missing a whole group (a key added by a newer version) is completed in `init` and
- *   `deploy`. A pair with one half missing, or a key present with an empty value, is an error:
- *   regenerating would silently rotate a key the box already uses.
+ * - A file missing a whole group (a key added by a newer version) is completed only in `init`
+ *   (`dry-run` reports it); `deploy` refuses. A missing identity group, a pair with one half
+ *   missing, or a key present with an empty value is an error in every mode: regenerating would
+ *   silently rotate a key the box already uses.
  */
 export function ensurePlatformKeys(stateDir: string, mode: PlatformKeysMode): PlatformKeysResult {
   const path = join(stateDir, PLATFORM_KEYS_FILE);
-  const { existing, keys } = readExistingKeys(stateDir, path, mode);
-  const generated = completeKeyGroups(keys, path, mode);
+  const { existing, keys, fileExists } = readExistingKeys(stateDir, path, mode);
+  const generated = completeKeyGroups(keys, path, mode, fileExists);
   // Any other value already in the file is kept, as before.
   const all = { ...existing, ...keys } as Record<PlatformKeyName, string>;
   if (generated.length > 0 && mode !== 'dry-run') {

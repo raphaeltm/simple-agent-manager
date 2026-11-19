@@ -10,7 +10,9 @@
  * writes `<state-dir>/gateway.env` (the shared secret docker compose hands to frps and Caddy) and
  * the mail-collector files; run it once before the first `docker compose up`. Only `--init` on a
  * state dir with no trace of an earlier deploy creates platform-keys.json; otherwise a missing
- * file stops the deploy (restore it from backup).
+ * file stops the deploy (restore it from backup). A key added to an existing file by a newer
+ * version is likewise generated only by `--init`; a lost ENCRYPTION_KEY or SAM_INSTALLATION_ID
+ * is never regenerated.
  *
  * `--dry-run` prints the config celld would get, secrets redacted, and writes nothing: no keys
  * (missing ones show as placeholders), no state dir, no gateway.env or mail-collector files.

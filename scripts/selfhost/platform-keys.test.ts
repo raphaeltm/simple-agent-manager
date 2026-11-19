@@ -115,22 +115,51 @@ describe('ensurePlatformKeys', () => {
     expect(readdirSync(dir)).toEqual([]);
   });
 
-  it('completes a file missing a whole group, keeping the previous file as .bak', () => {
+  it('--init completes a file missing a whole group, keeping the previous file as .bak', () => {
     const dir = tempDir();
     const path = join(dir, PLATFORM_KEYS_FILE);
     const { keys } = ensurePlatformKeys(dir, 'init');
+    for (const entry of PRIOR_DEPLOY_EVIDENCE) plantEvidence(dir, entry);
     const rest: Record<string, string> = { ...keys };
     delete rest.PREVIEW_SIGNING_KEY;
     rewrite(dir, rest);
     const previous = readFileSync(path, 'utf8');
-    const result = ensurePlatformKeys(dir, 'deploy');
+    // A plain deploy does not generate it; a dry run reports it; --init (as upgrade runs) does.
+    expect(() => ensurePlatformKeys(dir, 'deploy')).toThrow(
+      /has no PREVIEW_SIGNING_KEY; run pnpm selfhost:deploy --init/
+    );
+    expect(readFileSync(path, 'utf8')).toBe(previous);
+    expect(ensurePlatformKeys(dir, 'dry-run').generated).toEqual(['PREVIEW_SIGNING_KEY']);
+    expect(readFileSync(path, 'utf8')).toBe(previous);
+    const result = ensurePlatformKeys(dir, 'init');
     expect(result.generated).toEqual(['PREVIEW_SIGNING_KEY']);
     expect(result.keys.ENCRYPTION_KEY).toBe(keys.ENCRYPTION_KEY);
     expect(readFileSync(`${path}.bak`, 'utf8')).toBe(previous);
     expect(statSync(`${path}.bak`).mode & 0o777).toBe(0o600);
     expect(statSync(path).mode & 0o777).toBe(0o600);
-    expect(readdirSync(dir).sort()).toEqual([PLATFORM_KEYS_FILE, `${PLATFORM_KEYS_FILE}.bak`]);
+    expect(existsSync(`${path}.tmp`)).toBe(false);
   });
+
+  it.each([['ENCRYPTION_KEY'], ['SAM_INSTALLATION_ID']])(
+    'never regenerates a lost %s in an existing file, in any mode',
+    (name) => {
+      const dir = tempDir();
+      const path = join(dir, PLATFORM_KEYS_FILE);
+      const { keys } = ensurePlatformKeys(dir, 'init');
+      for (const entry of PRIOR_DEPLOY_EVIDENCE) plantEvidence(dir, entry);
+      const rest: Record<string, string> = { ...keys };
+      delete rest[name];
+      rewrite(dir, rest);
+      const before = readFileSync(path, 'utf8');
+      for (const mode of ['init', 'deploy', 'dry-run'] as const) {
+        expect(() => ensurePlatformKeys(dir, mode)).toThrow(
+          new RegExp(`has no ${name}\\..*Restore it from your backup`, 's')
+        );
+      }
+      expect(readFileSync(path, 'utf8')).toBe(before);
+      expect(existsSync(`${path}.bak`)).toBe(false);
+    }
+  );
 
   it('refuses to regenerate half of a key pair', () => {
     const dir = tempDir();
