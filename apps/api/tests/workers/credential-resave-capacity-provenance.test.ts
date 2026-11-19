@@ -121,15 +121,21 @@ async function request(
   );
 }
 
-const GCP_CONNECTION = {
-  provider: 'gcp',
-  gcpProjectId: 'sam-staging-infra',
-  gcpProjectNumber: '353771248703',
-  serviceAccountEmail: 'sam-vm-manager@sam-staging-infra.iam.gserviceaccount.com',
-  wifPoolId: 'sam-pool',
-  wifProviderId: 'sam-oidc',
-  defaultZone: 'europe-west1-b',
-};
+/**
+ * Each test gets its own workload identity pool: the suite shares one D1, and a pool stays
+ * claimed by the first owner whose credential named it (gcp-wif-pool-ownership.ts).
+ */
+function gcpConnection() {
+  return {
+    provider: 'gcp',
+    gcpProjectId: 'sam-staging-infra',
+    gcpProjectNumber: '353771248703',
+    serviceAccountEmail: 'sam-vm-manager@sam-staging-infra.iam.gserviceaccount.com',
+    wifPoolId: prefix,
+    wifProviderId: 'sam-oidc',
+    defaultZone: 'europe-west1-b',
+  };
+}
 
 /** Reconcile the default pools the way the scheduled backfill does, with a complete catalog. */
 async function reconcile(scope: { userId?: string; projectId?: string; installation?: boolean }) {
@@ -329,7 +335,7 @@ function claim(nodeId: string, userId: string, status: string, allowRunning = fa
 
 describe('a GCP connection re-saved through the product', () => {
   it('keeps the connection, its pool choices and its order, so GCP stays placeable', async () => {
-    const saved = await request(ownerId, 'POST', '/api/credentials', GCP_CONNECTION);
+    const saved = await request(ownerId, 'POST', '/api/credentials', gcpConnection());
     expect(saved.status).toBe(201);
     await reconcile({ userId: ownerId });
     const credentialId = await userGcpCredentialId(ownerId);
@@ -341,7 +347,7 @@ describe('a GCP connection re-saved through the product', () => {
     });
     expect(picked.sourceId).toBe(`cap-source-default:user:${credentialId}`);
 
-    const resaved = await request(ownerId, 'POST', '/api/credentials', GCP_CONNECTION);
+    const resaved = await request(ownerId, 'POST', '/api/credentials', gcpConnection());
     expect(resaved.status).toBe(200);
     expect(((await resaved.json()) as { id: string }).id).toBe(credentialId);
     await reconcile({ userId: ownerId });
@@ -358,7 +364,7 @@ describe('a GCP connection re-saved through the product', () => {
   });
 
   it('leaves nodes placed before the save reapable by the cron and the warm handoff', async () => {
-    expect((await request(ownerId, 'POST', '/api/credentials', GCP_CONNECTION)).status).toBe(201);
+    expect((await request(ownerId, 'POST', '/api/credentials', gcpConnection())).status).toBe(201);
     await reconcile({ userId: ownerId });
     await pickProvider({
       scope: 'user',
@@ -371,7 +377,7 @@ describe('a GCP connection re-saved through the product', () => {
     const placed = await placeNode(stoppedNode, ownerId, null, 'stopped');
     await placeNode(runningNode, ownerId, null, 'running');
 
-    expect((await request(ownerId, 'POST', '/api/credentials', GCP_CONNECTION)).status).toBe(200);
+    expect((await request(ownerId, 'POST', '/api/credentials', gcpConnection())).status).toBe(200);
     await reconcile({ userId: ownerId });
 
     // The column the cleanup predicate reads survives the save.
@@ -558,7 +564,7 @@ describe('a source deleted with its credential (disconnect, platform rotation)',
         provider: 'gcp',
         label: 'platform gcp',
         credential: JSON.stringify({
-          ...GCP_CONNECTION,
+          ...gcpConnection(),
           version: 2,
           authType: 'workload-identity',
         }),
@@ -821,7 +827,7 @@ describe('rows already damaged in the production shape', () => {
   });
 
   it('a pool whose order names a deleted source still places on its active options', async () => {
-    expect((await request(ownerId, 'POST', '/api/credentials', GCP_CONNECTION)).status).toBe(201);
+    expect((await request(ownerId, 'POST', '/api/credentials', gcpConnection())).status).toBe(201);
     await reconcile({ userId: ownerId });
     const picked = await pickProvider({
       scope: 'user',
