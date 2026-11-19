@@ -235,8 +235,10 @@ VMs (`resolveStrictNodeTeardownAuthority()` in
   node stays `destroying` with a named `cleanup_blocked_reason`
   (`teardown_credential_unavailable`, `teardown_instance_not_visible`,
   `teardown_instance_ownership_mismatch`,
-  `teardown_ownership_scope_unavailable`, `teardown_delete_refused` or
-  `teardown_deletion_unconfirmed`) and SAM raises its operator alert
+  `teardown_ownership_scope_unavailable`, `teardown_delete_refused`,
+  `teardown_deletion_unconfirmed`, or for a node with no server ID
+  `teardown_credential_generation_changed` and `teardown_allocation_unresolved`
+  from `reconcileStrictProviderlessVm()`) and SAM raises its operator alert
   (`recordNodeTeardownBlocked()` in `node-teardown-blocked.ts`), instead of
   retrying silently. A credential that could not be read at all (a transient
   storage or decryption failure) is an ordinary failure and is retried on the

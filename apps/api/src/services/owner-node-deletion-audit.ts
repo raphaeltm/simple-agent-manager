@@ -6,6 +6,19 @@ import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import type { DeleteNodeResourcesResult } from './node-resource-deletion';
 
+/** The audited removal reasons, and the event each is recorded under. */
+const NODE_REMOVAL_AUDIT_EVENTS: Record<string, string> = {
+  owner_requested_node_deletion: 'deleted_by_owner',
+  owner_attested_manual_deletion: 'deleted_by_owner',
+  // A superadmin attested that a SAM-capacity node's server is gone (`node-operator-deletion.ts`).
+  // A distinct event, so nothing that trusts an owner's removal reads it as one.
+  operator_attested_manual_deletion: 'deleted_by_operator',
+};
+const ATTESTED_REMOVAL_REASONS = new Set([
+  'owner_attested_manual_deletion',
+  'operator_attested_manual_deletion',
+]);
+
 /** Persist consumed proof while the node still makes retries possible.
  * Fence the insert itself: stale proof must not create a strict audit even when
  * the later removal CAS would reject it. Orphan recovery also requires absence
@@ -18,11 +31,13 @@ export async function recordOwnerNodeDeletionAudit(
   cleanup: DeleteNodeResourcesResult,
   reason: string
 ): Promise<void> {
-  if (reason !== 'owner_requested_node_deletion' && reason !== 'owner_attested_manual_deletion') {
+  const event = NODE_REMOVAL_AUDIT_EVENTS[reason];
+  if (!event) {
     throw errors.conflict('Unknown owner node deletion audit reason');
   }
+  const attested = ATTESTED_REMOVAL_REASONS.has(reason);
   const userOwned = isUserOwnedNodeClass(node.nodeClass);
-  if (userOwned && reason === 'owner_attested_manual_deletion') {
+  if (userOwned && attested) {
     throw errors.conflict('Registered machines cannot use manual deletion attestation');
   }
   if (!userOwned && !cleanup.runtimeTerminationConfirmedAt) {
@@ -31,14 +46,14 @@ export async function recordOwnerNodeDeletionAudit(
   const result = await env.DATABASE.prepare(
     `INSERT INTO node_health_events
      (id, node_id, episode_started_at, event, reason, created_at)
-     SELECT ?, n.id, ?, 'deleted_by_owner', ?, ?
+     SELECT ?, n.id, ?, ?, ?, ?
      FROM nodes n WHERE n.id=? AND n.user_id=? AND n.node_class IS ?
        AND (? OR (n.runtime_termination_confirmed_at IS ?
          AND n.runtime_incarnation_id IS ?))
-       AND ((? = 'owner_requested_node_deletion' AND
+       AND ((? = 0 AND
            (n.runtime_termination_attested_at IS NULL OR
             n.runtime_termination_attested_at IS NOT n.runtime_termination_confirmed_at))
-         OR (? = 'owner_attested_manual_deletion' AND
+         OR (? = 1 AND
              n.runtime_termination_confirmed_at IS NOT NULL AND
              n.runtime_termination_attested_at IS n.runtime_termination_confirmed_at))
      ON CONFLICT(node_id, episode_started_at, event, reason)
@@ -47,6 +62,7 @@ export async function recordOwnerNodeDeletionAudit(
     .bind(
       ulid(),
       node.lastHeartbeatAt ?? node.createdAt,
+      event,
       reason,
       new Date().toISOString(),
       node.id,
@@ -55,8 +71,8 @@ export async function recordOwnerNodeDeletionAudit(
       userOwned ? 1 : 0,
       cleanup.runtimeTerminationConfirmedAt,
       cleanup.runtimeIncarnationId,
-      reason,
-      reason
+      attested ? 1 : 0,
+      attested ? 1 : 0
     )
     .run();
   // Existing events retain their timestamp; the same statement must still

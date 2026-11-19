@@ -505,7 +505,51 @@ SAM first attempts to preserve existing recovery sources. At the deadline, it re
 
 Two related settings control warning and alert frequency: `operations.nodeCleanupRefusalWarnAfterMs` defaults to 300,000 milliseconds (five minutes), and `operations.nodeCleanupOwnershipAlertIntervalMs` defaults to 86,400,000 milliseconds (one day).
 
-Active workspaces and provider ownership checks remain protected. When SAM can't retire a blocked VM at the deadline (often, but not always, because it can't prove who owns the server), it keeps the VM and records an error in **Admin → Errors**, at most once per node per `operations.nodeCleanupOwnershipAlertIntervalMs` (one day by default): **VM may still exist at provider: _provider_ _server id_; cleanup requires ownership/operator resolution**. Before deleting anything, open the node and read its **Cleanup blocked since…** reasons. Delete the server in that provider's console only when the reason is `provenance` (or `strict_provider_ownership_or_deletion_failure`) and you have checked that it belongs to your installation and runs nothing you need. If the reasons include `active_workspace` or `warm_placement_claim`, or the node hosts app deployments, resolve that first instead. Once the server is gone, the node's owner can remove the node with **I already deleted this server** on its page, after selecting **Delete Node** first if the node shows **Stopped**; see [SAM can't delete a node](/docs/guides/session-troubleshooting/#sam-cant-delete-a-node). That button refuses nodes on the installation's own cloud account, and the app has no other way to remove such a node yet.
+Active workspaces and provider ownership checks remain protected. When SAM can't retire a blocked VM at the deadline (often, but not always, because it can't prove who owns the server), it keeps the VM and records an error in **Admin → Errors**, at most once per node per `operations.nodeCleanupOwnershipAlertIntervalMs` (one day by default): **VM may still exist at provider: _provider_ _server id_; cleanup requires ownership/operator resolution**. Before deleting anything, open the node and read its **Cleanup blocked since…** reasons. Delete the server in that provider's console only when the reason is `provenance` (or `strict_provider_ownership_or_deletion_failure`) and you have checked that it belongs to your installation and runs nothing you need. If the reasons include `active_workspace` or `warm_placement_claim`, or the node hosts app deployments, resolve that first instead. Once the server is gone, the node's owner can remove the node with **I already deleted this server** on its page, after selecting **Delete Node** first if the node shows **Stopped**; see [SAM can't delete a node](/docs/guides/session-troubleshooting/#sam-cant-delete-a-node). That button refuses nodes on the installation's own cloud account; a superadmin removes those from **Admin → Infrastructure → Stuck nodes** instead (below).
+
+### Stuck nodes on SAM's capacity
+
+**Admin → Infrastructure → Stuck nodes** lists managed VM nodes on the installation's own cloud
+credential that are `destroying` with a recorded teardown refusal (`listStrandedPlatformNodes()`
+in `apps/api/src/services/node-operator-deletion.ts`), the ones you can act on first, then oldest
+first, with the reason SAM recorded.
+Two reasons mean SAM can never finish by itself, because the node has no server ID and only the
+exact credential it was created with could prove no server exists:
+
+- `teardown_credential_generation_changed`: that platform credential was re-saved or rotated
+  since. A re-saved credential is never accepted as proof: SAM cannot show it is the same
+  provider account.
+- `teardown_allocation_unresolved`: the create failed before SAM got a server ID, and the
+  credential's complete inventory shows no server. SAM keeps retrying (a late server would
+  still be found and deleted) but never treats an empty list as proof.
+
+**Remove…** is offered only when the refusal means SAM cannot see the server
+(`OPERATOR_REMOVABLE_BLOCK_REASONS` in `packages/shared`: the two above,
+`teardown_credential_unavailable`, `teardown_instance_not_visible` and `provenance`). A refusal
+that means the server may be live (a delete the provider refused or never confirmed, or an
+ownership mismatch) shows a note to resolve it at the provider instead.
+
+After checking the provider's console yourself, select **Remove…**, type the node ID and say what
+you checked (`recordOperatorNodeDeletion()`). An agent sign-in session is refused unless
+`operations.operatorNodeDeletionAllowAgentSessions` is on; the audit entry records whether an agent
+made the request either way.
+
+1. SAM asks the provider with the node's own credential, or every enabled platform credential if
+   that one no longer resolves (never the owner's own credentials), and refuses if any returns a
+   server for the node. If a SAM credential exists but cannot be read, it asks you to retry. A node with no server ID whose ownership labels cannot be built is
+   refused while a credential could look.
+2. It writes the audit entry (your note, name, time, and what the lookup could check) to the
+   Operations audit log (`admin_operator_node_deletion`) **before** anything changes, and changes
+   nothing if that write fails.
+3. It records the attested termination proof in one database write that re-checks the exact
+   refusal you were shown, that no workspace is active or pending, that no live task holds a
+   placement claim on the node, that no Cloudflare build is reserved on it, and that its heartbeat
+   is stale. It also refuses a node with no
+   server ID created inside the provisioning window.
+
+It deletes nothing at the provider. The removal is recorded as `operator_attested_manual_deletion`
+(`deleted_by_operator`) in the node's health events. Nodes on a user's own cloud account are
+refused here; their owner removes them from the node page.
 
 Blocked nodes show the time and reason in their error message on the node list and detail page, as **Cleanup blocked since** _time_ followed by reason codes; [A node won't go away](/docs/guides/session-troubleshooting/#a-node-wont-go-away) explains each one.
 
@@ -827,10 +871,11 @@ The **Operations project** is the private project you select in **Admin → Inte
 debugger tools that let its agents look across every user's nodes, workspaces and sessions. Two
 **Operations** settings control them:
 
-| Setting                         | Default | Values                                      | What it controls                                                                           |
-| ------------------------------- | ------- | ------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `operations.debuggerTools`      | `off`   | `off`, `read`, `read_ask`, `read_auto_safe` | Which debugger tools Operations agents may use. `off` hides and refuses all of them        |
-| `operations.auditRetentionDays` | 90      | 1–3,650                                     | Days each debugger tool audit record is kept before the daily 03:00 UTC cleanup deletes it |
+| Setting                                             | Default | Values                                      | What it controls                                                                                                                                           |
+| --------------------------------------------------- | ------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `operations.debuggerTools`                          | `off`   | `off`, `read`, `read_ask`, `read_auto_safe` | Which debugger tools Operations agents may use. `off` hides and refuses all of them                                                                        |
+| `operations.auditRetentionDays`                     | 90      | 1–3,650                                     | Days each debugger tool audit record is kept before the daily 03:00 UTC cleanup deletes it                                                                 |
+| `operations.operatorNodeDeletionAllowAgentSessions` | off     | on/off                                      | Let an agent sign-in session remove a stuck SAM-capacity node on a person's behalf (Stuck nodes). Off: only a person's own session can. Read with no cache |
 
 `ops_get_access_status` reports this setting, the capabilities a task has, and why any are
 refused. The read tools and the [approved actions](#approved-actions) below all use the gate
