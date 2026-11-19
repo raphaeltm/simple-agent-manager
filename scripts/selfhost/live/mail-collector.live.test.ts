@@ -63,7 +63,7 @@ async function get(
   auth?: string
 ): Promise<{ status: number; body: string }> {
   const reply = await httpsGet(
-    stack.https,
+    stack,
     host,
     '/api/v1/messages',
     auth ? { Authorization: auth } : {}

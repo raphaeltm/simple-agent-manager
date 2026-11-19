@@ -70,7 +70,7 @@ async function startCaddy(extra: Record<string, string>): Promise<Stack> {
 }
 
 const get = (stack: Stack, host: string, path: string, headers: Record<string, string> = {}) =>
-  httpsGet(stack.https, host, path, headers);
+  httpsGet(stack, host, path, headers);
 
 function accessLines(stack: Stack): Array<Record<string, unknown>> {
   return stack

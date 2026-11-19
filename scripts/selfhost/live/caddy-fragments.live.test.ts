@@ -168,7 +168,8 @@ describe.skipIf(skipWithoutDocker)('the box Caddy routes (live)', () => {
           'Sec-WebSocket-Key': randomBytes(16).toString('base64'),
         }
       : {};
-    return httpsGet(ports.https, fullHost, path, { ...upgradeHeaders, ...headers });
+    if (!caddy) return Promise.reject(new Error('Caddy did not start'));
+    return httpsGet(caddy, fullHost, path, { ...upgradeHeaders, ...headers });
   }
 
   /** What celld (Deno / workerd URL parsing) could treat as the gateway route, generously. */

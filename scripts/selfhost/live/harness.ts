@@ -180,10 +180,19 @@ function caddyRunArgs(name: string, env: Record<string, string>, detach: boolean
   ];
 }
 
-export interface CaddyRun {
-  container: string;
+/** Where Caddy's internal CA (tls/internal.caddy) keeps its root certificate, in the container. */
+const CADDY_LOCAL_ROOT = '/data/caddy/pki/authorities/local/root.crt';
+
+/** What httpsGet needs to reach one Caddy: its HTTPS port and the CA that signs its certificate. */
+export interface HttpsTarget {
   /** The HTTPS port (env.HTTPS_PORT). */
   https: number;
+  /** PEM of the root that signs the certificate Caddy serves (its internal CA). */
+  ca: string;
+}
+
+export interface CaddyRun extends HttpsTarget {
+  container: string;
   stdout: () => string;
   stderr: () => string;
   /** Removes the container (idempotent). */
@@ -192,8 +201,9 @@ export interface CaddyRun {
 
 /**
  * Start the box's Caddy image through start.sh, exactly as docker-compose.yml does, with `env`
- * (start with caddyBoxEnv() so start.sh's checks pass), and wait until it answers HTTPS on
- * env.HTTPS_PORT with any status (a stack whose upstream is down answers 502).
+ * (start with caddyBoxEnv() so start.sh's checks pass; SAM_TLS_MODE internal), read the root of
+ * its internal CA, and wait until it answers HTTPS on env.HTTPS_PORT with a certificate that root
+ * verifies, with any status (a stack whose upstream is down answers 502).
  */
 export async function startCaddy(env: Record<string, string>): Promise<CaddyRun> {
   const container = `sam-live-caddy-${randomBytes(4).toString('hex')}`;
@@ -202,16 +212,28 @@ export async function startCaddy(env: Record<string, string>): Promise<CaddyRun>
   const run: CaddyRun = {
     container,
     https: Number(env.HTTPS_PORT),
+    ca: '',
     stdout: () => logs().stdout ?? '',
     stderr: () => logs().stderr ?? '',
     stop: () => void spawnSync(DOCKER, ['rm', '-f', container], { stdio: 'ignore' }),
   };
   try {
+    run.ca = await waitFor(
+      "Caddy's internal CA root",
+      () => {
+        const read = spawnSync(DOCKER, ['exec', container, 'cat', CADDY_LOCAL_ROOT], {
+          encoding: 'utf8',
+        });
+        return read.status === 0 && read.stdout.includes('BEGIN CERTIFICATE') ? read.stdout : '';
+      },
+      120_000,
+      run.stderr
+    );
     await waitFor(
       'Caddy to serve TLS',
       async () => {
         try {
-          return (await httpsGet(run.https, `app.${env.SAM_DOMAIN}`, '/')).status > 0;
+          return (await httpsGet(run, `app.${env.SAM_DOMAIN}`, '/')).status > 0;
         } catch {
           return false;
         }
@@ -246,12 +268,13 @@ export interface HttpsReply {
 }
 
 /**
- * One HTTPS request to Caddy on 127.0.0.1:`port` for `host` (SNI and Host), with the exact raw
- * `path` (Node does not normalize it) and the box's self-signed certificate accepted. For a
- * request with WebSocket upgrade headers, a 101 reply's socket is closed at once.
+ * One HTTPS request to Caddy on 127.0.0.1:`target.https` for `host` (SNI and Host), with the exact
+ * raw `path` (Node does not normalize it). The certificate is verified against Caddy's internal CA
+ * (`target.ca`) and must name `host`, so a test cannot pass against the wrong site. For a request
+ * with WebSocket upgrade headers, a 101 reply's socket is closed at once.
  */
 export function httpsGet(
-  port: number,
+  target: HttpsTarget,
   host: string,
   path: string,
   headers: Record<string, string> = {}
@@ -259,9 +282,10 @@ export function httpsGet(
   return new Promise((done, fail) => {
     const req = httpsRequest({
       host: '127.0.0.1',
-      port,
+      port: target.https,
+      // SNI, and the name the certificate is checked against (DNS names are case-insensitive).
       servername: host.toLowerCase(),
-      rejectUnauthorized: false,
+      ca: target.ca,
       method: 'GET',
       path,
       headers: { Host: host, ...headers },
