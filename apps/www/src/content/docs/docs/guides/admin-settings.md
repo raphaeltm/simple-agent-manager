@@ -530,8 +530,9 @@ that means the server may be live (a delete the provider refused or never confir
 ownership mismatch) shows a note to resolve it at the provider instead.
 
 After checking the provider's console yourself, select **Remove…**, type the node ID and say what
-you checked (`recordOperatorNodeDeletion()`). An agent sign-in session is refused unless
-`operations.operatorNodeDeletionAllowAgentSessions` is on; the audit entry records whether an agent
+you checked (`recordOperatorNodeDeletion()`). An agent sign-in session may do this on a person's
+behalf while `operations.operatorNodeDeletionAllowAgentSessions` is on (the default, by owner
+decision); turn it off to require a person's own session. The audit entry records whether an agent
 made the request either way.
 
 1. SAM asks the provider with the node's own credential, or every enabled platform credential if
@@ -875,7 +876,7 @@ debugger tools that let its agents look across every user's nodes, workspaces an
 | --------------------------------------------------- | ------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `operations.debuggerTools`                          | `off`   | `off`, `read`, `read_ask`, `read_auto_safe` | Which debugger tools Operations agents may use. `off` hides and refuses all of them                                                                        |
 | `operations.auditRetentionDays`                     | 90      | 1–3,650                                     | Days each debugger tool audit record is kept before the daily 03:00 UTC cleanup deletes it                                                                 |
-| `operations.operatorNodeDeletionAllowAgentSessions` | off     | on/off                                      | Let an agent sign-in session remove a stuck SAM-capacity node on a person's behalf (Stuck nodes). Off: only a person's own session can. Read with no cache |
+| `operations.operatorNodeDeletionAllowAgentSessions` | on      | on/off                                      | Let an agent sign-in session remove a stuck SAM-capacity node on a person's behalf (Stuck nodes). Off: only a person's own session can. Read with no cache |
 
 `ops_get_access_status` reports this setting, the capabilities a task has, and why any are
 refused. The read tools and the [approved actions](#approved-actions) below all use the gate
@@ -1122,12 +1123,12 @@ Nodes created before this change still boot from the flavor's local disk and kee
 
 ### Provider fallback
 
-| Setting                                               | Default | Allowed range | Applies to                                                                                                                             |
-| ----------------------------------------------------- | ------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `operations.provisioningAttemptsPerProviderTier`      | 8       | 1–50          | Most offerings one task tries from one provider source under `fallback-chain` before moving to the pool's next-ranked provider         |
-| `operations.workspacePlacementMaxRejections`          | 3       | 1–20          | Consecutive times the node a task selected may refuse its final workspace reservation per episode; an owned provisioned node gets one fallback before final failure                            |
-| `operations.workspacePlacementBacklogConflictRetries` | 3       | 1–20          | Times a task may pick again because its chosen node gained a queued workspace setup before the reservation, counted until one succeeds |
-| `operations.workspaceBuildQueueTimeoutMinutes`        | 60      | 5–1440        | Minutes a workspace may wait for its node's single build slot before it times out                                                      |
+| Setting                                               | Default | Allowed range | Applies to                                                                                                                                                          |
+| ----------------------------------------------------- | ------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `operations.provisioningAttemptsPerProviderTier`      | 8       | 1–50          | Most offerings one task tries from one provider source under `fallback-chain` before moving to the pool's next-ranked provider                                      |
+| `operations.workspacePlacementMaxRejections`          | 3       | 1–20          | Consecutive times the node a task selected may refuse its final workspace reservation per episode; an owned provisioned node gets one fallback before final failure |
+| `operations.workspacePlacementBacklogConflictRetries` | 3       | 1–20          | Times a task may pick again because its chosen node gained a queued workspace setup before the reservation, counted until one succeeds                              |
+| `operations.workspaceBuildQueueTimeoutMinutes`        | 60      | 5–1440        | Minutes a workspace may wait for its node's single build slot before it times out                                                                                   |
 
 See [Provider order](/docs/guides/compute-pools/#provider-order). Each attempt is a create request
 to the provider, so this bounds the work one task does before it reaches the next provider.

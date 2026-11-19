@@ -748,52 +748,57 @@ describe('superadmin attestation removes a stranded SAM-capacity node', () => {
     }
   });
 
-  it('refuses an agent sign-in session by default, and accepts it once the installation opts in', async () => {
+  it('admits and audits an agent sign-in session by default, and refuses it once turned off', async () => {
     const operatorId = `op-del-admin-agent-${Date.now()}`;
     await signIn(operatorId, 'superadmin');
-    const seeded = await seedStrandedPlatformNode('agent-session');
-    await resavePlatformCredential(seeded.nodeId);
-    await recordBlock(seeded.nodeId);
-    const calls = stubHetzner();
-    const before = await readNode(seeded.nodeId);
-    const attest = async () =>
+    const refusedNode = await seedStrandedPlatformNode('agent-session-off');
+    const admittedNode = await seedStrandedPlatformNode('agent-session-default');
+    for (const seeded of [refusedNode, admittedNode]) {
+      await resavePlatformCredential(seeded.nodeId);
+      await recordBlock(seeded.nodeId);
+    }
+    const attest = async (nodeId: string) =>
       recordOperatorNodeDeletion(drizzle(env.DATABASE, { schema }), TEST_ENV, {
-        nodeId: seeded.nodeId,
+        nodeId,
         operatorUserId: operatorId,
-        confirmation: seeded.nodeId,
-        expectedBlockedReason: await currentBlockedReason(seeded.nodeId),
+        confirmation: nodeId,
+        expectedBlockedReason: await currentBlockedReason(nodeId),
         note: 'relayed the owner console check',
         agentSignIn: true,
       });
 
-    __resetAdminSettingsCacheForTest();
-    await expect(attest()).rejects.toMatchObject({ statusCode: 403 });
-    // Refused before anything else: no provider call, no audit row, nothing changed.
-    expect(calls).toEqual([]);
-    expect(await auditOutcomes(seeded.nodeId)).toEqual([]);
-    expect(await readNode(seeded.nodeId)).toEqual(before);
-
+    // Explicitly off: refused before anything else (no provider call, no audit, no change).
     await updateAdminSettings(TEST_ENV, {
       actorUserId: operatorId,
-      changes: [{ name: 'operations.operatorNodeDeletionAllowAgentSessions', value: true }],
+      changes: [{ name: 'operations.operatorNodeDeletionAllowAgentSessions', value: false }],
     });
     try {
-      const proof = await attest();
-      expect(proof.runtimeTerminationConfirmedAt).toEqual(expect.any(String));
-      const audit = await env.DATABASE.prepare(
-        `SELECT json_extract(detail, '$.agentSignIn') AS agent FROM operations_audit_log
-          WHERE target_id = ?`
-      )
-        .bind(seeded.nodeId)
-        .first<{ agent: number }>();
-      expect(audit?.agent).toBe(1);
+      __resetAdminSettingsCacheForTest();
+      const calls = stubHetzner();
+      const before = await readNode(refusedNode.nodeId);
+      await expect(attest(refusedNode.nodeId)).rejects.toMatchObject({ statusCode: 403 });
+      expect(calls).toEqual([]);
+      expect(await auditOutcomes(refusedNode.nodeId)).toEqual([]);
+      expect(await readNode(refusedNode.nodeId)).toEqual(before);
     } finally {
-      await updateAdminSettings(TEST_ENV, {
-        actorUserId: operatorId,
-        changes: [{ name: 'operations.operatorNodeDeletionAllowAgentSessions', value: false }],
-      });
+      // Back to the stored default, so the next case resolves it through the real resolver.
+      await env.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?')
+        .bind('operations.operatorNodeDeletionAllowAgentSessions')
+        .run();
       __resetAdminSettingsCacheForTest();
     }
+
+    // Default (no stored value): admitted, and the audit says an agent did it.
+    stubHetzner();
+    const proof = await attest(admittedNode.nodeId);
+    expect(proof.runtimeTerminationConfirmedAt).toEqual(expect.any(String));
+    const audit = await env.DATABASE.prepare(
+      `SELECT json_extract(detail, '$.agentSignIn') AS agent FROM operations_audit_log
+        WHERE target_id = ?`
+    )
+      .bind(admittedNode.nodeId)
+      .first<{ agent: number }>();
+    expect(audit?.agent).toBe(1);
   });
 
   it('changes nothing when the audit entry cannot be written', async () => {
