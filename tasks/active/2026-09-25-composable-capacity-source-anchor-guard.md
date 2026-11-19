@@ -105,8 +105,9 @@ Regression coverage here must drive the real writer rather than hand-seed the an
       (staging finding below): parenthesize the authority `EXISTS` WHERE into pool, source,
       candidate and credential groups in `placement-authority.ts`. Same terms, same binds.
 - [x] Prove it on Miniflare's D1, which enforces the cap: composable user/project plus legacy
-      and platform controls, through plan guard, reuse, `attachPrecreatedWorkspacePlacement`
-      and `reserveWorkspacePlacement` (`tests/workers/composable-authority-d1-expression-depth.test.ts`).
+      and platform controls, through plan guard, reuse, `attachPrecreatedWorkspacePlacement`,
+      `reserveWorkspacePlacement` and `reserveWorkspaceRestart`
+      (`tests/workers/composable-authority-d1-expression-depth.test.ts`).
 - [ ] Verify the same public API/UI flow on staging with an isolated project and remove every
       created node, workspace, project, and attachment. Record evidence that stable plans pass
       while changed authority is rejected; do not mutate shared pool policy to reproduce it.
@@ -228,8 +229,14 @@ placeholder attach (`attachPrecreatedWorkspacePlacement`, 79 binds) failed with
 - better-sqlite3 allows depth 1000, so the unit suite could not see it. Miniflare's D1 reports
   the production error, so the regression lives in `tests/workers/`.
 - Grouping the authority `EXISTS` WHERE takes the captured statement from 102 to 76.
-- Discrimination: with the grouping reverted, exactly the two composable attach cases fail with
-  the D1 depth error; legacy/platform controls and reuse pass. With it, 8/8 pass.
+- Discrimination: with the grouping reverted, exactly the four composable attach and restart cases
+  fail with the D1 depth error; legacy/platform controls and reuse pass. With it, 12/12 pass.
+- Cloudflare review measured every composable caller (pre → post): attach 102/103 → 76/79,
+  restart 106/107 → 80/83, reserve 95/96 → 69/72, relay select 95/97 → 78/81, deployment
+  link/relocation 96–97 → 64–74, reuse 94/95 → 66/69. Query plans identical (24/24).
+  Restart was also over the cap before the fix, so it is now covered on Miniflare.
+- Deferred LOW (review): no padding canary enforces the ~17-level margin; any new `node_scope`
+  term lowers it. The Miniflare suite still fails at the cap itself.
 - No D1 depth errors in this account in the previous 7 days, so this path had not run before.
 
 Cleanup: the kit deleted the node (HTTP 200, row gone, no provider instance recorded on the

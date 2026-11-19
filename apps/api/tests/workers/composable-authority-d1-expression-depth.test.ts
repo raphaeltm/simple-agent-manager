@@ -26,6 +26,7 @@ import { filterReusableNodesByCurrentAuthority } from '../../src/services/reusab
 import {
   attachPrecreatedWorkspacePlacement,
   reserveWorkspacePlacement,
+  reserveWorkspaceRestart,
   type WorkspacePlacementInput,
 } from '../../src/services/workspace-placement';
 import { offering } from '../helpers/capacity-pool-offerings';
@@ -137,7 +138,13 @@ async function fixture(scope: 'user' | 'project', kind: Kind) {
     includeInstallation: kind === 'platform',
     offeringResolver: async () => [offering('hetzner', 'fsn1', 'cx23')],
   });
-  await pickStarterMachines(db);
+  // Storage is shared within this file: pick only this fixture's pools (the installation pool is a singleton).
+  await pickStarterMachines(
+    db,
+    kind === 'platform'
+      ? { scopes: ['installation'] }
+      : { owner: { userId: ids.user, projectId: ids.project } }
+  );
   const selection = await resolveTaskStartCapacityPoolSelection(
     db,
     resolveTaskStartPlacement({
@@ -269,4 +276,55 @@ describe('placement authority statements stay within D1 expression depth (#2843)
     ).toBe(true);
     expect(await nodeOf(workspaceId)).toEqual({ node_id: f.nodeId });
   });
+
+  // Restart reacquires the released reservation on the workspace's own node; it was the deepest
+  // composed statement (depth 106 before the grouping).
+  it.each(cases)(
+    '%s: a stopped workspace restarts on its node on D1',
+    async (_label, scope, kind) => {
+      const f = await runningFixture(scope, kind);
+      const workspaceId = `depth-restart-${f.nodeId}`;
+      const input = f.placement(workspaceId);
+      await testEnv.DATABASE.prepare(
+        `INSERT INTO workspaces (id, node_id, project_id, user_id, installation_id, name, display_name,
+         normalized_display_name, repository, branch, status, vm_size, vm_location,
+         resolved_reservation_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'main', 'stopped', 'small', 'fsn1', ?, ?, ?)`
+      )
+        .bind(
+          workspaceId,
+          f.nodeId,
+          f.ids.project,
+          f.ids.user,
+          f.ids.installation,
+          workspaceId,
+          workspaceId,
+          workspaceId,
+          `acme/${f.ids.project}`,
+          JSON.stringify(input.resolvedReservation),
+          TIMESTAMP,
+          TIMESTAMP
+        )
+        .run();
+      expect(
+        await reserveWorkspaceRestart(
+          testEnv.DATABASE,
+          {
+            ...input,
+            chatSessionId: null,
+            evictionGeneration: `${workspaceId}-generation`,
+            expectedEvictionGeneration: null,
+            expectedStatus: 'stopped',
+          },
+          f.policy
+        )
+      ).toBe(true);
+      const row = await testEnv.DATABASE.prepare(
+        'SELECT node_id, status FROM workspaces WHERE id = ?'
+      )
+        .bind(workspaceId)
+        .first<{ node_id: string; status: string }>();
+      expect(row).toEqual({ node_id: f.nodeId, status: 'creating' });
+    }
+  );
 });
