@@ -101,6 +101,12 @@ Regression coverage here must drive the real writer rather than hand-seed the an
 - [x] Add discriminating rejection cases for a revoked/detached attachment, changed credential
       version, foreign owner/project, and an unrelated credential anchor. Keep legacy user and
       platform credential allocation passing; cover both user and project composable sources.
+- [x] Keep the composed placeholder-attach statement within D1's expression-depth cap of 100
+      (staging finding below): parenthesize the authority `EXISTS` WHERE into pool, source,
+      candidate and credential groups in `placement-authority.ts`. Same terms, same binds.
+- [x] Prove it on Miniflare's D1, which enforces the cap: composable user/project plus legacy
+      and platform controls, through plan guard, reuse, `attachPrecreatedWorkspacePlacement`
+      and `reserveWorkspacePlacement` (`tests/workers/composable-authority-d1-expression-depth.test.ts`).
 - [ ] Verify the same public API/UI flow on staging with an isolated project and remove every
       created node, workspace, project, and attachment. Record evidence that stable plans pass
       while changed authority is rejected; do not mutate shared pool policy to reproduce it.
@@ -199,3 +205,34 @@ impersonation, guard changes or duplicate implementation is involved.
 Current main `4fc4cb99a` integrated through a normal merge without source/test conflicts.
 The exact-anchor production correction remains unchanged. Fresh combined-tree validation,
 independent reviews and real leased staging remain pending. Canonical idea stays open.
+
+## Staging finding: D1 expression depth (2026-11-19)
+
+Takeover task `01M7PX4F5CPXBW4TEZCHCRAGC6`. Merged main (123 commits, clean) as `2e1a89550` and
+deployed it to primary staging (run `44427672139`). The live kit's first attempt stopped at a
+pre-existing fixture conflict: the smoke user already owns a project on
+`serverspresentation2025/deploy-test` (one project per user, installation and repository since
+#2030), so the kit now uses the unlinked `serverspresentation2025/VoyajApp`.
+
+The second attempt reconciled the composable pool, selected the exact anchor and created node
+`01M7RMD7ADHMD443V4QAEQ7S1N`, which booted, sent `/ready` at 00:52:50Z and heartbeated. Workspace
+`01M7RMD7HA25QMYFMACB8Q2788` was never linked. Workers observability showed the NodeLifecycle alarm
+retrying `node_provisioning.durable_attempt_failed` every 30 s, and the matching span for the
+placeholder attach (`attachPrecreatedWorkspacePlacement`, 79 binds) failed with
+`Expression tree is too large (maximum depth 100): SQLITE_ERROR`.
+
+- SQLite nests `a AND b AND …` one level per term; D1 caps depth at 100. The captured statement
+  needs depth 102 with or without this PR's `OR` (Python `sqlite3.setlimit` on the migrated
+  schema), so the cap blocked composable fresh allocation independently of the anchor fix.
+  Removing the composable `EXISTS` drops it to 87, which is why legacy/platform pools work.
+- better-sqlite3 allows depth 1000, so the unit suite could not see it. Miniflare's D1 reports
+  the production error, so the regression lives in `tests/workers/`.
+- Grouping the authority `EXISTS` WHERE takes the captured statement from 102 to 76.
+- Discrimination: with the grouping reverted, exactly the two composable attach cases fail with
+  the D1 depth error; legacy/platform controls and reuse pass. With it, 8/8 pass.
+- No D1 depth errors in this account in the previous 7 days, so this path had not run before.
+
+Cleanup: the kit deleted the node (HTTP 200, row gone, no provider instance recorded on the
+workspace). The project and attachment were deleted afterwards (200). The never-placed
+workspace row stays `stopping` with `runtime_deletion_unconfirmed`, like four older staging rows;
+it has no node or VM.

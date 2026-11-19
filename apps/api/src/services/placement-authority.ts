@@ -186,8 +186,9 @@ export function buildPlacementAuthoritySqlPredicate(
     binds.push(...higherPrecedenceExclusion.binds);
   }
 
-  // Identity is already pinned through node columns above; joins reuse those
-  // columns instead of binding the snapshot values again.
+  // Identity is already pinned through node columns above; joins reuse those columns instead of
+  // binding the snapshot values again. SQLite nests an AND chain one level per term and D1 caps
+  // expression depth at 100, so the pool/source/candidate/credential groups stay parenthesized.
   clauses.push(
     `AND EXISTS (
       SELECT 1
@@ -198,14 +199,14 @@ export function buildPlacementAuthoritySqlPredicate(
         ON c.id = ${nodeAlias}.capacity_pool_candidate_id
        AND c.pool_id = p.id
        AND c.capacity_source_id = s.id
-      WHERE p.id = ${nodeAlias}.capacity_pool_id
+      WHERE (p.id = ${nodeAlias}.capacity_pool_id
         AND p.scope = ${nodeAlias}.capacity_pool_scope
         ${existingNode ? '' : `AND p.revision = ${nodeAlias}.capacity_pool_revision`}
         AND p.status = 'active'
         AND p.configuration_state = 'configured-ready'
         AND p.is_default = 1
-        ${poolScope.sql}
-        AND s.scope = p.scope
+        ${poolScope.sql})
+        AND (s.scope = p.scope
         AND s.source_kind = 'cloud-provider-credential'
         AND s.status = 'active'
         -- A switched-off account keeps its picks but is never placed (new VMs or reuse).
@@ -220,8 +221,8 @@ export function buildPlacementAuthoritySqlPredicate(
         AND (CASE WHEN s.authority_generation > 0 THEN s.authority_generation
              ELSE ${sqliteTimestampVersion('s.updated_at')} END) = ${nodeAlias}.capacity_source_generation
         AND s.external_source_ref IS ${nodeAlias}.capacity_source_external_ref
-        ${sourceScope.sql}
-        AND c.status = 'active'
+        ${sourceScope.sql})
+        AND (c.status = 'active'
         AND c.catalog_availability = 'available'
         AND c.provider = ${nodeAlias}.cloud_provider
         AND c.location = ${nodeAlias}.vm_location
@@ -232,8 +233,8 @@ export function buildPlacementAuthoritySqlPredicate(
         AND c.provider_instance_disk_gb IS ?
         AND c.provider_instance_boot_disk_size_gb IS ${nodeAlias}.provider_instance_boot_disk_size_gb
         AND c.provider_instance_image IS ${nodeAlias}.provider_instance_image
-        AND c.provider_instance_architecture IS ${nodeAlias}.provider_instance_architecture
-        ${credential.sql}
+        AND c.provider_instance_architecture IS ${nodeAlias}.provider_instance_architecture)
+        AND (1 = 1 ${credential.sql})
     )`
   );
   binds.push(
