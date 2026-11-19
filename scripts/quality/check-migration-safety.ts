@@ -8,21 +8,32 @@
  * pre-apply guard.
  */
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { readdirSync,readFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 
 import {
   isIdentifier,
   isKeyword,
   logicalSqlStatements,
+  splitSqlStatements,
   type SqlStatement,
   type SqlToken,
-  splitSqlStatements,
   tokenizeSql,
 } from './sql-migration-parser';
 
 const MIGRATIONS_DIR = resolve(import.meta.dirname, '../../apps/api/src/db/migrations');
-const DEFAULT_MIGRATION_DIRS = [MIGRATIONS_DIR, join(MIGRATIONS_DIR, 'observability')];
+// Self-host-only migrations (apps/api/src/selfhost/migrations/) are projected into the same
+// databases on a self-hosted box, so they get the same data-loss checks.
+const SELFHOST_MIGRATIONS_DIR = resolve(
+  import.meta.dirname,
+  '../../apps/api/src/selfhost/migrations'
+);
+const DEFAULT_MIGRATION_DIRS = [
+  MIGRATIONS_DIR,
+  join(MIGRATIONS_DIR, 'observability'),
+  SELFHOST_MIGRATIONS_DIR,
+  join(SELFHOST_MIGRATIONS_DIR, 'observability'),
+];
 
 /** Historical violations that ran before the guard existed. Never add new entries. */
 const ALLOWLISTED_VIOLATIONS = new Set([

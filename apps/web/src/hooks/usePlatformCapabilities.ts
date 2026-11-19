@@ -18,6 +18,23 @@ export function usePlatformCapabilities(): PlatformCapabilities {
 }
 
 /**
+ * The capabilities plus whether the answer has arrived. `known` is false only while the first
+ * request is outstanding; a failed query counts as known and keeps every service assumed present.
+ * For surfaces that would otherwise call a backend the installation may not have before the
+ * answer arrives (Admin → Logs and Admin → Stream).
+ */
+export function usePlatformCapabilitiesStatus(): {
+  capabilities: PlatformCapabilities;
+  known: boolean;
+} {
+  const query = useQuery(platformCapabilitiesQueryOptions());
+  return {
+    capabilities: query.data ?? ASSUMED_PLATFORM_CAPABILITIES,
+    known: query.data !== undefined || query.isError,
+  };
+}
+
+/**
  * Whether agents can call Cloudflare-hosted models here. `known` stays false until the
  * capabilities answer arrives, so callers render as usual but hold the model catalog request
  * until then: an installation without Workers AI never asks for a catalog it cannot serve. A

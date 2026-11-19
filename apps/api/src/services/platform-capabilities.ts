@@ -1,4 +1,4 @@
-import { LlmUnavailableError } from '@simple-agent-manager/ai-proxy';
+import { hasCloudflareAccountApi, LlmUnavailableError } from '@simple-agent-manager/ai-proxy';
 
 import { resolveD1BindingIdentity } from '../lib/d1-session';
 import { cache } from './admin-settings-resolution';
@@ -23,14 +23,25 @@ export {
  * with its bindings present resolves every capability to true, so its behaviour does not change.
  */
 import type { Env } from '../env';
+import { activeLocalAnalyticsSink } from './analytics-sink';
 import { getTTSConfig } from './tts-config';
 
 /** One platform service. The name is also the `feature` field of a FEATURE_UNAVAILABLE error. */
-export type PlatformCapability = 'workersAi' | 'speechToText' | 'textToSpeech';
+export type PlatformCapability =
+  | 'workersAi'
+  | 'speechToText'
+  | 'textToSpeech'
+  | 'analyticsQuery'
+  | 'workersObservability'
+  | 'liveLogStream';
 
 export type PlatformCapabilities = Readonly<Record<PlatformCapability, boolean>>;
 
-type CapabilityEnv = Pick<Env, 'AI' | 'TTS_ENABLED'>;
+/**
+ * The Worker environment. Analytics availability can consult a local sink the self-host build
+ * installs (services/analytics-sink.ts), which reads its own bindings, so this takes the whole Env.
+ */
+type CapabilityEnv = Env;
 
 /** The Workers AI binding, or null when this runtime has none (or it lacks `run`). */
 export function getWorkersAiBindingOrNull(env: Pick<Env, 'AI'>): Ai | null {
@@ -39,11 +50,28 @@ export function getWorkersAiBindingOrNull(env: Pick<Env, 'AI'>): Ai | null {
   return ai as Ai;
 }
 
+/**
+ * Whether Admin → Stream can receive anything. The stream is fed by the tail worker (a Cloudflare
+ * `tail_consumers` attachment), which the Worker cannot see from inside, so the deployment
+ * declares its absence: `LOG_TAIL_AVAILABLE="false"` (the self-host config generator sets it).
+ * Unset means available, which keeps Cloudflare deployments unchanged.
+ */
+export function hasLiveLogStream(env: Pick<Env, 'LOG_TAIL_AVAILABLE'>): boolean {
+  return env.LOG_TAIL_AVAILABLE?.trim().toLowerCase() !== 'false';
+}
+
 /** Resolve every capability from bindings and settings. Pure and synchronous: no I/O. */
 export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabilities {
   const workersAi = getWorkersAiBindingOrNull(env) !== null;
+  const cloudflareAccountApi = hasCloudflareAccountApi(env);
   return {
     workersAi,
+    // Admin analytics reads Cloudflare's Analytics Engine SQL API (CF_ACCOUNT_ID + CF_API_TOKEN),
+    // or a local sink the self-host build installed and enabled (selfhost/analytics/).
+    analyticsQuery: cloudflareAccountApi || activeLocalAnalyticsSink(env) !== undefined,
+    // Admin → Logs search reads Workers Observability through the same account API.
+    workersObservability: cloudflareAccountApi,
+    liveLogStream: hasLiveLogStream(env),
     // Whisper runs on Workers AI (routes/transcribe.ts).
     speechToText: workersAi,
     // Synthesis runs on Workers AI, and the operator can switch it off (routes/tts.ts).
@@ -61,6 +89,10 @@ export interface PublicPlatformCapabilities {
   speechToText: boolean;
   /** Server read-aloud on agent messages and task summaries. */
   textToSpeech: boolean;
+  /** Admin → Logs search (Workers Observability). False where logs are read on the server. */
+  logSearch: boolean;
+  /** Admin → Stream (tail worker). False where no tail worker feeds it. */
+  liveLogStream: boolean;
   /**
    * Whether agents can call Cloudflare-hosted models (Workers AI). Profile, skill and project
    * settings hide their model-access field when false instead of asking for a catalog that
@@ -74,6 +106,8 @@ export function publicPlatformCapabilities(env: CapabilityEnv): PublicPlatformCa
   return {
     speechToText: capabilities.speechToText,
     textToSpeech: capabilities.textToSpeech,
+    logSearch: capabilities.workersObservability,
+    liveLogStream: capabilities.liveLogStream,
     agentModelCalls: capabilities.workersAi,
   };
 }
