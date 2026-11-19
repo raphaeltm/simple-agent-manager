@@ -58,9 +58,16 @@ interface FakeGcp {
   pools: Record<string, { description: string; state?: string; disabled?: boolean }>;
   providers: Record<
     string,
-    { issuer: string; pool?: string; state?: string; condition?: string; disabled?: boolean }
+    {
+      issuer: string;
+      pool?: string;
+      state?: string;
+      condition?: string;
+      audience?: string;
+      disabled?: boolean;
+    }
   >;
-  accounts: Record<string, { description: string }>;
+  accounts: Record<string, { description: string; disabled?: boolean }>;
   bindings: string[];
 }
 
@@ -172,6 +179,18 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
       expect(result.calls.filter((c) => c.includes('providers update-oidc'))).toHaveLength(1);
     });
 
+    it('a hand-edited audience is set back, with the condition', () => {
+      expect(run(['--project', 'sam-vm-test', '--api-url', ISSUER]).status).toBe(0);
+      const audience = gcp().providers['sam-api'].audience;
+      setGcp((db) => {
+        db.providers['sam-api'].audience = 'https://example.com/other';
+      });
+      const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER]);
+      expect(result.status, result.stderr).toBe(0);
+      expect(gcp().providers['sam-api'].audience).toBe(audience);
+      expect(gcp().providers['sam-api'].condition).toBe(CONDITION);
+    });
+
     it('dry run only shows the update', () => {
       const result = narrow(['--dry-run']);
       expect(result.status, result.stderr).toBe(0);
@@ -210,6 +229,23 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toMatch(/provider sam-[0-9a-f]{8}\/sam-api is disabled/);
     // API enablement runs first and is idempotent; nothing in IAM changes.
+    expect(
+      result.calls.slice(before).filter((c) => MUTATING.test(c) && !c.startsWith('services enable'))
+    ).toEqual([]);
+  });
+
+  it('a disabled service account: stops with the enable command, grants nothing', () => {
+    expect(run(['--project', 'sam-vm-test', '--api-url', ISSUER]).status).toBe(0);
+    setGcp((db) => {
+      db.accounts['sam-nodes@sam-vm-test.iam.gserviceaccount.com'].disabled = true;
+    });
+    const before = calls().length;
+    const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      'service account sam-nodes@sam-vm-test.iam.gserviceaccount.com is disabled'
+    );
+    expect(result.stderr).toContain('gcloud iam service-accounts enable');
     expect(
       result.calls.slice(before).filter((c) => MUTATING.test(c) && !c.startsWith('services enable'))
     ).toEqual([]);

@@ -67,13 +67,25 @@ const UNPRIVILEGED_LISTENERS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Compose's own control variables that the box .env may set and the scripts read: which files
+ * (COMPOSE_FILE, COMPOSE_PATH_SEPARATOR) and which profiles (COMPOSE_PROFILES: the mail collector,
+ * inbound mail) the stack runs with. Compose takes them from the shell before the .env, like an
+ * interpolated variable, but no compose file references them, so they are named here.
+ */
+export const COMPOSE_CONTROL_VARIABLES: readonly string[] = [
+  'COMPOSE_FILE',
+  'COMPOSE_PATH_SEPARATOR',
+  'COMPOSE_PROFILES',
+];
+
+/**
  * The box settings with the values docker compose will actually run with. Compose takes every
  * variable it interpolates from the shell before the .env file, so `CELLD_BUCKET=... docker
  * compose up` runs celld on that bucket and `CELLD_INTERNAL_PORT=20001 docker compose up` runs
  * celld's operator API on 20001, whatever the .env says. The deploy and upgrade run in the
  * operator's shell, so they apply the same precedence to every name in `composeVariables` (what
- * the box's compose files interpolate, composeFileVariables) and to every box port, and report
- * each override by name. Other shell variables (PATH, ...) are not compose's and are ignored.
+ * the box's compose files interpolate, composeFileVariables), to compose's control variables
+ * (COMPOSE_CONTROL_VARIABLES) and to every box port, and report each override by name. Other shell variables (PATH, ...) are not compose's and are ignored.
  * (caddy/start.sh repeats the port check inside the running stack, for a compose command run
  * from another shell.)
  */
@@ -85,7 +97,11 @@ export function withComposeShellOverrides(
   const effective: Record<string, string> = { ...box };
   const overridden: string[] = [];
   // Box ports stay covered even if a compose file stops referencing one.
-  const names = new Set([...composeVariables, ...Object.keys(BOX_RESERVED_PORTS)]);
+  const names = new Set([
+    ...composeVariables,
+    ...COMPOSE_CONTROL_VARIABLES,
+    ...Object.keys(BOX_RESERVED_PORTS),
+  ]);
   for (const name of [...names].sort((a, b) => a.localeCompare(b))) {
     const value = hostEnv[name];
     if (value === undefined || value === box[name]) continue;
@@ -109,10 +125,12 @@ export function loadBoxEnv(
   onOverride: (name: string) => void = () => {}
 ): Record<string, string> {
   const fromFile = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
+  // A shell COMPOSE_FILE selects the files, so resolve the control variables before reading them.
+  const selecting = withComposeShellOverrides(fromFile, hostEnv, []).box;
   const { box, overridden } = withComposeShellOverrides(
     fromFile,
     hostEnv,
-    composeFileVariables(fromFile, composeDir)
+    composeFileVariables(selecting, composeDir)
   );
   overridden.forEach(onOverride);
   resolveTunnelPortRange(box);

@@ -36,6 +36,8 @@ let initRewritesState: boolean;
 let head: string;
 /** docker-compose.yml at each ref, and the services `docker compose config --services` lists. */
 let composeAt: Record<string, string | null>;
+/** Other tracked files by repository path, then ref (a selected compose overlay). */
+let trackedAt: Record<string, Record<string, string>>;
 let activeServices: string[];
 
 const COMPOSE = (dnsModule = 'github.com/caddy-dns/googleclouddns@v1.1.0') => `
@@ -58,7 +60,11 @@ const FILES_AT_TO: Record<string, string> = {
   'deploy/selfhost/caddy/.dockerignore': '# empty context\n*\n',
 };
 
-function run(command: string, args: string[]): RunResult {
+/** SAM_SELFHOST_STATE_DIR in each docker command's environment (undefined: not set). */
+let dockerStateEnv: (string | undefined)[];
+
+function run(command: string, args: string[], env?: NodeJS.ProcessEnv): RunResult {
+  if (command === 'docker') dockerStateEnv.push(env?.SAM_SELFHOST_STATE_DIR);
   const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
   const line = `${command} ${args.join(' ')}`;
   if (command === 'git') {
@@ -72,9 +78,7 @@ function run(command: string, args: string[]): RunResult {
       const text =
         path === 'deploy/selfhost/docker-compose.yml'
           ? composeAt[ref]
-          : ref === TO
-            ? FILES_AT_TO[path]
-            : undefined;
+          : (trackedAt[path]?.[ref] ?? (ref === TO ? FILES_AT_TO[path] : undefined));
       return text === undefined || text === null
         ? { status: 128, stdout: '', stderr: 'does not exist' }
         : ok(text);
@@ -96,7 +100,12 @@ function run(command: string, args: string[]): RunResult {
 
 function ctx(): BoxContext {
   return {
-    box: { CELLD_BUCKET: 'gs://fleet/celld', SAM_DOMAIN: 'box.example' },
+    // The .env names the state dir, so docker compose reads the same one the upgrade does.
+    box: {
+      CELLD_BUCKET: 'gs://fleet/celld',
+      SAM_DOMAIN: 'box.example',
+      SAM_SELFHOST_STATE_DIR: join(root, 'state'),
+    },
     envFile: join(root, 'box.env'),
     stateDir: join(root, 'state'),
     composeFiles: ['compose.yml'],
@@ -121,6 +130,8 @@ beforeEach(() => {
   initRewritesState = false;
   head = FROM;
   composeAt = { [FROM]: COMPOSE(), [TO]: COMPOSE() };
+  trackedAt = {};
+  dockerStateEnv = [];
   activeServices = ['celld', 'caddy'];
 });
 
@@ -166,7 +177,11 @@ describe('runUpgrade', () => {
   it('passes a non-default env file, state dir and secrets file to every deploy it runs', async () => {
     const envFile = join(root, 'custom', 'box.env');
     mkdirSync(join(root, 'custom'));
-    writeFileSync(envFile, 'CELLD_BUCKET=gs://fleet/celld\n', { mode: 0o600 });
+    writeFileSync(
+      envFile,
+      `CELLD_BUCKET=gs://fleet/celld\nSAM_SELFHOST_STATE_DIR=${join(root, 'state')}\n`,
+      { mode: 0o600 }
+    );
     const secrets = join(root, 'custom', 'secrets.env');
     const loaded = loadBox(envFile, join(root, 'custom-state'), secrets);
     diff = ['deploy/selfhost/docker-compose.yml'];
@@ -317,7 +332,8 @@ describe('loadBox refuses a box port inside the lease range', () => {
 describe('runUpgrade with the box .env COMPOSE_FILE', () => {
   const boxFromEnv = (lines: string[]): BoxContext => {
     const envFile = join(root, 'real.env');
-    writeFileSync(envFile, [`CELLD_BUCKET=gs://fleet/celld`, ...lines, ''].join('\n'), {
+    const stateLine = `SAM_SELFHOST_STATE_DIR=${join(root, 'state')}`;
+    writeFileSync(envFile, [`CELLD_BUCKET=gs://fleet/celld`, stateLine, ...lines, ''].join('\n'), {
       mode: 0o600,
     });
     // The real loader reads the .env; only the commands are answered by the fake runner.
@@ -361,7 +377,11 @@ describe('runUpgrade with the box .env COMPOSE_FILE', () => {
   it('selects the same box in the restore-based rollback, quoting a path with a space', async () => {
     diff = ['apps/api/src/db/migrations/0300_new.sql'];
     const envFile = join(root, 'my box.env');
-    writeFileSync(envFile, 'CELLD_BUCKET=gs://fleet/celld\n', { mode: 0o600 });
+    writeFileSync(
+      envFile,
+      `CELLD_BUCKET=gs://fleet/celld\nSAM_SELFHOST_STATE_DIR=${join(root, 'state')}\n`,
+      { mode: 0o600 }
+    );
     const ctx = { ...loadBox(envFile, join(root, 'state')), run, log: (m: string) => logs.push(m) };
     const { rollback } = await runUpgrade(ctx, { to: 'v1', checkHealth: async () => true });
     const file = join(SELFHOST_DIR, 'docker-compose.yml');
@@ -400,6 +420,89 @@ describe('runUpgrade with the box .env COMPOSE_FILE', () => {
     const rollback = result.rollback.map((step) => step.replaceAll(root, '<root>'));
     expect(rollback.indexOf(build)).toBeGreaterThan(-1);
     expect(rollback.indexOf(build)).toBeLessThan(rollback.findIndex((s) => s.endsWith(' up -d')));
+  });
+});
+
+// docker compose reads ${SAM_SELFHOST_STATE_DIR:-./.state} against deploy/selfhost/, not the .env's
+// directory, so a --state-dir the .env does not name must reach every compose command.
+describe('runUpgrade with a state dir docker compose would not read on its own', () => {
+  const box = (stateLine: string[]): BoxContext => {
+    const envFile = join(root, 'real.env');
+    writeFileSync(envFile, ['CELLD_BUCKET=gs://fleet/celld', ...stateLine, ''].join('\n'), {
+      mode: 0o600,
+    });
+    return { ...loadBox(envFile, join(root, 'state')), run, log: (m) => logs.push(m) };
+  };
+
+  it('sets SAM_SELFHOST_STATE_DIR on every compose command it runs and prints', async () => {
+    diff = ['deploy/selfhost/caddy/Dockerfile', 'apps/api/src/db/migrations/0300_new.sql'];
+    const result = await runUpgrade(box([]), { to: 'v1', checkHealth: async () => true });
+    const state = join(root, 'state');
+    expect(dockerStateEnv.length).toBeGreaterThan(1);
+    expect(dockerStateEnv.every((value) => value === state)).toBe(true);
+    const printed = result.rollback.filter((step) => step.includes('docker compose'));
+    expect(printed.length).toBeGreaterThan(0);
+    expect(printed.every((step) => step.startsWith(`SAM_SELFHOST_STATE_DIR=${state} docker`))).toBe(
+      true
+    );
+  });
+
+  it('control: sets nothing when the .env already names that state dir', async () => {
+    diff = ['deploy/selfhost/caddy/Dockerfile', 'apps/api/src/db/migrations/0300_new.sql'];
+    const result = await runUpgrade(box([`SAM_SELFHOST_STATE_DIR=${join(root, 'state')}`]), {
+      to: 'v1',
+      checkHealth: async () => true,
+    });
+    expect(dockerStateEnv.length).toBeGreaterThan(1);
+    expect(dockerStateEnv.every((value) => value === undefined)).toBe(true);
+    expect(result.rollback.some((step) => step.startsWith('docker compose'))).toBe(true);
+    expect(result.rollback.some((step) => step.includes('SAM_SELFHOST_STATE_DIR='))).toBe(false);
+  });
+});
+
+// A selected overlay can add or change a build section; up -d never builds, so the plan must see it.
+describe('runUpgrade with a compose overlay that builds', () => {
+  const OVERLAY = 'deploy/selfhost/docker-compose.override.yml';
+  const overlay = (dnsModule: string) => `
+services:
+  caddy:
+    build:
+      args:
+        CADDY_DNS_MODULE: ${dnsModule}
+`;
+  const boxWithOverlay = (file = 'docker-compose.override.yml'): BoxContext => {
+    const envFile = join(root, 'real.env');
+    writeFileSync(
+      envFile,
+      `CELLD_BUCKET=gs://fleet/celld\nSAM_SELFHOST_STATE_DIR=${join(root, 'state')}\n` +
+        `COMPOSE_FILE=docker-compose.yml:${file}\n`,
+      { mode: 0o600 }
+    );
+    return { ...loadBox(envFile, join(root, 'state')), run, log: (m) => logs.push(m) };
+  };
+  const built = () => steps.filter((s) => s.startsWith('docker compose') && s.includes(' build '));
+
+  it('rebuilds caddy when a tracked overlay changes its build args', async () => {
+    diff = [OVERLAY];
+    trackedAt[OVERLAY] = { [FROM]: overlay('mod@v1'), [TO]: overlay('mod@v2') };
+    await runUpgrade(boxWithOverlay(), { to: 'v1', checkHealth: async () => true });
+    expect(built().map((s) => s.split(' ').at(-1))).toEqual(['caddy']);
+  });
+
+  it('control: an overlay change that leaves every build section alone rebuilds nothing', async () => {
+    diff = [OVERLAY];
+    trackedAt[OVERLAY] = { [FROM]: overlay('mod@v1'), [TO]: `${overlay('mod@v1')}  celld: {}\n` };
+    await runUpgrade(boxWithOverlay(), { to: 'v1', checkHealth: async () => true });
+    expect(built()).toEqual([]);
+  });
+
+  it('rebuilds a service an untracked overlay builds when its context changed', async () => {
+    const file = join(root, 'ops.yml');
+    writeFileSync(file, 'services:\n  celld:\n    build: ./celld-local\n');
+    diff = ['deploy/selfhost/celld-local/main.go'];
+    activeServices = ['celld', 'caddy'];
+    await runUpgrade(boxWithOverlay(file), { to: 'v1', checkHealth: async () => true });
+    expect(built().map((s) => s.split(' ').at(-1))).toEqual(['celld']);
   });
 });
 
@@ -499,6 +602,16 @@ describe('imageRebuilds', () => {
 
   it('rebuilds a service that had no build section at the old ref', () => {
     expect(imageRebuilds([], null, COMPOSE())).toEqual(['caddy', 'sam-mx']);
+  });
+
+  it('merges an overlay build section over the base one (args merge, keys replace)', () => {
+    const tweak = 'services:\n  caddy:\n    build:\n      args:\n        EXTRA: x\n';
+    expect(
+      imageRebuilds([], COMPOSE(), COMPOSE(), () => null, [{ from: null, to: tweak }])
+    ).toEqual(['caddy']);
+    expect(
+      imageRebuilds([], COMPOSE(), COMPOSE(), () => null, [{ from: tweak, to: tweak }])
+    ).toEqual([]);
   });
 });
 

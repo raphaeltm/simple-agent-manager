@@ -97,7 +97,11 @@ only the images whose build inputs changed (explicitly, with `docker compose bui
 restarts the stack (`up -d`, never `--build`) only when compose inputs changed, deploys, checks
 health and prints how to roll back. For a box other than the default, pass `--box-env`,
 `--state-dir` and `--secrets`; every deploy and compose command it runs or prints uses that box's
-`.env` and every compose file its `COMPOSE_FILE` selects.
+`.env` and every compose file its `COMPOSE_FILE` selects. Docker compose reads
+`SAM_SELFHOST_STATE_DIR` relative to `deploy/selfhost/`, so when `--state-dir` (or a `.env` outside
+`deploy/selfhost/`) puts the state elsewhere, the upgrade passes the absolute path to every compose
+command it runs or prints. Set it in the box `.env` as an absolute path to run `docker compose`
+by hand.
 
 If an upgrade fails, `.state/upgrade-pending.json` records the ref it started from and the printed
 output gives both ways out: run the same `selfhost:upgrade --to <ref>` again to retry (it reruns

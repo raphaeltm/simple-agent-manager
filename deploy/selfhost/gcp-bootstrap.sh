@@ -187,6 +187,8 @@ else
     --description="Dedicated to the SAM install whose token issuer is ${ISSUER}"
 fi
 
+# SAM signs aud=https://iam.googleapis.com/<provider> (gcp-sts.ts).
+AUDIENCE="https://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/providers/${PROVIDER_ID}"
 if provider_state="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
   --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" \
   --format='value(state)' 2>/dev/null)"; then
@@ -203,15 +205,22 @@ if provider_state="$(gcloud iam workload-identity-pools providers describe "$PRO
   [[ "$current" = "$ISSUER" ]] \
     || die "provider ${POOL_ID}/${PROVIDER_ID} already trusts ${current}, not ${ISSUER}; refusing to retarget it. Use another --pool-id."
   echo "provider ${PROVIDER_ID}: exists, issuer ${ISSUER}"
-  # A provider made by an earlier version of this script admits every token of this issuer:
-  # narrow it to the platform-only condition.
+  # A provider made by an earlier version of this script admits every token of this issuer, and
+  # one edited by hand may name another audience (every exchange would then fail): set both to
+  # what this script creates. The attribute mapping is not checked: neither the condition nor the
+  # pool-wide binding reads a mapped attribute.
   current_condition="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
     --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" \
     --format='value(attributeCondition)')" \
     || die "cannot read the attribute condition of provider ${POOL_ID}/${PROVIDER_ID}"
-  if [[ "$current_condition" != "$CONDITION" ]]; then
+  current_audiences="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
+    --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" \
+    --format='value(oidc.allowedAudiences)')" \
+    || die "cannot read the allowed audiences of provider ${POOL_ID}/${PROVIDER_ID}"
+  if [[ "$current_condition" != "$CONDITION" || "$current_audiences" != "$AUDIENCE" ]]; then
     change iam workload-identity-pools providers update-oidc "$PROVIDER_ID" --project="$PROJECT" \
-      --location=global --workload-identity-pool="$POOL_ID" --attribute-condition="$CONDITION"
+      --location=global --workload-identity-pool="$POOL_ID" --attribute-condition="$CONDITION" \
+      --allowed-audiences="$AUDIENCE"
   fi
 else
   # Only this install's platform tokens are admitted (attributeCondition), and only tokens
@@ -220,12 +229,17 @@ else
   change iam workload-identity-pools providers create-oidc "$PROVIDER_ID" --project="$PROJECT" \
     --location=global --workload-identity-pool="$POOL_ID" --display-name="SAM API" \
     --issuer-uri="$ISSUER" \
-    --allowed-audiences="https://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/providers/${PROVIDER_ID}" \
+    --allowed-audiences="$AUDIENCE" \
     --attribute-mapping="google.subject=assertion.sub,attribute.sam_user=assertion.user_id,attribute.sam_project=assertion.project_id" \
     --attribute-condition="$CONDITION"
 fi
 
 if exists iam service-accounts describe "$SA_EMAIL" --project="$PROJECT"; then
+  # A disabled account can be granted roles but mints no tokens, so every node exchange would fail.
+  sa_disabled="$(gcloud iam service-accounts describe "$SA_EMAIL" --project="$PROJECT" \
+    --format='value(disabled)')" || die "cannot read service account ${SA_EMAIL}"
+  [[ "${sa_disabled,,}" != "true" ]] \
+    || die "service account ${SA_EMAIL} is disabled, and a disabled account mints no tokens. Either enable it: gcloud iam service-accounts enable ${SA_EMAIL} --project=${PROJECT}, then run this again; or pass --service-account <a new id>."
   echo "service account ${SA_EMAIL}: exists"
 else
   change iam service-accounts create "$SA_ID" --project="$PROJECT" --display-name="SAM nodes" \

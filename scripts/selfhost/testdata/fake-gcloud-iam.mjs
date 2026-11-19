@@ -53,12 +53,19 @@ else if (cmd.startsWith('iam workload-identity-pools providers')) {
     if (format.includes('state')) out(db.providers[id].state ?? 'ACTIVE');
     if (format.includes('attributeCondition')) out(db.providers[id].condition ?? '');
     if (format.includes('disabled')) out(db.providers[id].disabled ? 'True' : 'False');
+    if (format.includes('allowedAudiences')) out(db.providers[id].audience ?? '');
   } else if (op === 'create-oidc') {
-    db.providers[id] = { issuer: flag('issuer-uri'), pool, condition: flag('attribute-condition') };
+    db.providers[id] = {
+      issuer: flag('issuer-uri'),
+      pool,
+      condition: flag('attribute-condition'),
+      audience: flag('allowed-audiences'),
+    };
     save();
   } else if (op === 'update-oidc') {
     if (!db.providers[id]) fail('not found');
     db.providers[id].condition = flag('attribute-condition');
+    db.providers[id].audience = flag('allowed-audiences');
     save();
   } else fail(`unexpected ${cmd}`);
 } else if (cmd.startsWith('iam workload-identity-pools')) {
@@ -78,6 +85,7 @@ else if (cmd.startsWith('iam service-accounts')) {
   const email = id.includes('@') ? id : `${id}@${flag('project')}.iam.gserviceaccount.com`;
   if (op === 'describe') {
     if (!db.accounts[email]) fail('not found');
+    if (format.includes('disabled')) out(db.accounts[email].disabled ? 'True' : 'False');
   } else if (op === 'create') {
     db.accounts[email] = { description: flag('description') };
     save();

@@ -8,7 +8,8 @@
  *     `--env-file` and `--state-dir` (and `--secrets` when given): without them the deploy would
  *     read the checkout's default .env and .state, a different box.
  *  4. Rebuild a locally built image (caddy, sam-mx) only when its build inputs changed
- *     (imageRebuilds: its build section in docker-compose.yml or a file in its build context),
+ *     (imageRebuilds: its build section, merged across every selected compose file, or a file in
+ *     its build context),
  *     with an explicit `docker compose build <service>`; then restart the stack
  *     (`docker compose up -d`, never `--build`) only when compose inputs changed: a non-README file
  *     under deploy/selfhost/, a compose file the box's COMPOSE_FILE selects, or a generated file
@@ -33,12 +34,12 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 import { loadBoxEnv } from './box-settings.js';
 import { composeFilesFor } from './compose-env.js';
 import { log, REPO_ROOT, SELFHOST_DIR } from './deploy-steps.js';
-import { COMPOSE_PATH, imageRebuilds } from './image-rebuilds.js';
+import { COMPOSE_PATH, type ComposeOverlay, imageRebuilds } from './image-rebuilds.js';
 import { assertPrivateFile, replacePrivateFile } from './secret-files.js';
 
 /** Suffix of the files under .state/ that docker compose services read (`env_file`). */
@@ -96,6 +97,19 @@ function runCommand(command: string, args: string[], env?: NodeJS.ProcessEnv): R
   return { status: result.status ?? 1, stdout: result.stdout, stderr: result.stderr };
 }
 
+/**
+ * The state directory docker compose must read for this box, when it differs from the one compose
+ * would read on its own: compose resolves `${SAM_SELFHOST_STATE_DIR:-./.state}` against the
+ * compose file's directory, while the deploy resolves the state dir against the .env's directory
+ * or takes `--state-dir`. A shell variable beats the .env in compose, so every compose command
+ * this upgrade runs or prints sets it; otherwise Caddy and frps would read another box's (or no)
+ * gateway.env. Null when compose already reads `ctx.stateDir`.
+ */
+function composeStateDirOverride(ctx: Pick<BoxContext, 'box' | 'stateDir'>): string | null {
+  const composeReads = resolve(SELFHOST_DIR, ctx.box.SAM_SELFHOST_STATE_DIR || '.state');
+  return resolve(ctx.stateDir) === composeReads ? null : resolve(ctx.stateDir);
+}
+
 /** `docker compose` arguments for this box: every compose file, then its .env, then `args`. */
 function composeArgs(ctx: Pick<BoxContext, 'composeFiles' | 'envFile'>, args: string[]): string[] {
   return [
@@ -123,7 +137,7 @@ export function loadBox(
   return {
     box,
     envFile,
-    // Same default and base directory docker compose and deploy.ts use.
+    // Same default and base directory deploy.ts uses; compose is pointed at it (composeStateDirOverride).
     stateDir: resolve(dirname(envFile), stateDirOverride ?? box.SAM_SELFHOST_STATE_DIR ?? '.state'),
     ...(secretsFile ? { secretsFile: resolve(secretsFile) } : {}),
     composeFiles: composeFilesFor(box, SELFHOST_DIR),
@@ -177,15 +191,19 @@ function shellWord(value: string): string {
  * is rolled back, not the default stack.
  */
 function rollbackSteps(
-  ctx: Pick<BoxContext, 'composeFiles' | 'envFile'>,
+  ctx: Pick<BoxContext, 'composeFiles' | 'envFile' | 'box' | 'stateDir'>,
   from: string,
   migrationsChanged: boolean,
   composeChanged: boolean,
   boxArgs: readonly string[] = [],
   imagesRebuilt: readonly string[] = []
 ): string[] {
+  const stateDir = composeStateDirOverride(ctx);
   const compose = (args: string[]) =>
-    ['docker', ...composeArgs(ctx, args)].map(shellWord).join(' ');
+    [
+      ...(stateDir === null ? [] : [`SAM_SELFHOST_STATE_DIR=${shellWord(stateDir)}`]),
+      ['docker', ...composeArgs(ctx, args)].map(shellWord).join(' '),
+    ].join(' ');
   const deploy = ['pnpm selfhost:deploy', ...boxArgs.map(shellWord)].join(' ');
   // The images the upgrade rebuilt are rebuilt again from the old ref, never with `up --build`.
   const rebuild = imagesRebuilt.length > 0 ? [compose(['build', ...imagesRebuilt])] : [];
@@ -222,6 +240,31 @@ export function composeInputsChanged(changed: readonly string[], composeFiles: r
   return changed.some(
     (f) => (f.startsWith('deploy/selfhost/') && !f.endsWith('.md')) || selected.has(f)
   );
+}
+
+/**
+ * Every compose file the box selects other than docker-compose.yml, at both refs, for
+ * imageRebuilds: a tracked file is read from git at each ref; a file git does not have (an
+ * operator's untracked overlay, or one outside the repository) is the same at both, so it is read
+ * from disk once.
+ */
+export function composeOverlays(
+  composeFiles: readonly string[],
+  from: string,
+  to: string,
+  fileAt: (ref: string, path: string) => string | null
+): ComposeOverlay[] {
+  return composeFiles
+    .map((file) => ({ file, rel: relative(REPO_ROOT, resolve(file)).split(/[\\/]/).join('/') }))
+    .filter(({ rel }) => rel !== COMPOSE_PATH)
+    .map(({ file, rel }) => {
+      const inRepo = !rel.startsWith('../') && !isAbsolute(rel);
+      const atFrom = inRepo ? fileAt(from, rel) : null;
+      const atTo = inRepo ? fileAt(to, rel) : null;
+      if (atFrom !== null || atTo !== null) return { from: atFrom, to: atTo };
+      const onDisk = existsSync(file) ? readFileSync(file, 'utf8') : null;
+      return { from: onDisk, to: onDisk };
+    });
 }
 
 /** The ref an unfinished upgrade started from (`UPGRADE_PENDING_FILE`), or null. */
@@ -289,8 +332,14 @@ async function applyUpgrade(
   progress: UpgradeProgress
 ): Promise<boolean> {
   const pnpm = (args: string[]) => check(ctx.run('pnpm', args), `pnpm ${args.join(' ')}`);
+  const stateDir = composeStateDirOverride(ctx);
+  const composeEnv =
+    stateDir === null ? undefined : { ...process.env, SAM_SELFHOST_STATE_DIR: stateDir };
   const docker = (args: string[]) =>
-    check(ctx.run('docker', composeArgs(ctx, args)), `docker compose ${args.join(' ')}`);
+    check(
+      ctx.run('docker', composeArgs(ctx, args), composeEnv),
+      `docker compose ${args.join(' ')}`
+    );
   git(['checkout', '--detach', plan.to]);
   pnpm(['install', '--frozen-lockfile']);
   const before = stateFingerprint(ctx.stateDir);
@@ -358,7 +407,13 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
   };
   const composeTo = fileAt(to);
   if (composeTo === null) throw new Error(`${to} has no ${COMPOSE_PATH}`);
-  const rebuilds = imageRebuilds(changed, fileAt(from), composeTo, (path) => fileAt(to, path));
+  const rebuilds = imageRebuilds(
+    changed,
+    fileAt(from),
+    composeTo,
+    (path) => fileAt(to, path),
+    composeOverlays(ctx.composeFiles, from, to, fileAt)
+  );
   if (pendingFrom !== null) {
     ctx.log(`resuming an unfinished upgrade that started from ${pendingFrom.slice(0, 12)}`);
   }

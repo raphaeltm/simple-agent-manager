@@ -31,6 +31,7 @@ import {
 } from './box-settings.js';
 import { composeFileVariables, composeVariableNames } from './compose-env.js';
 import { SELFHOST_DIR, syncGatewayEnv } from './deploy-steps.js';
+import { mailCollectorEnabled } from './mail-settings.js';
 import { parseDotenv } from './secret-files.js';
 
 const SECRET = 'ab'.repeat(32);
@@ -314,6 +315,19 @@ describe('withComposeShellOverrides (F21 L5)', () => {
     expect(() => resolveTunnelPortRange(box)).toThrow(/contains FRPS_BIND_PORT \(25000\)/);
   });
 
+  // Compose reads COMPOSE_PROFILES from the shell first; mailCollectorEnabled must see the same.
+  it('applies a shell COMPOSE_PROFILES, which no compose file interpolates', () => {
+    const fromEnv = { COMPOSE_PROFILES: 'tunnel,local-store,mail-collector' };
+    const { box, overridden } = withComposeShellOverrides(
+      fromEnv,
+      { COMPOSE_PROFILES: 'tunnel,local-store' },
+      composeNames
+    );
+    expect(overridden).toEqual(['COMPOSE_PROFILES']);
+    expect(mailCollectorEnabled(fromEnv)).toBe(true);
+    expect(mailCollectorEnabled(box)).toBe(false);
+  });
+
   it('control: without a shell override the .env value is checked and passes', () => {
     const { box, overridden } = withComposeShellOverrides(
       { CELLD_INTERNAL_PORT: '7001' },
@@ -419,6 +433,18 @@ describe('loadBoxEnv (S4: checked before anything starts)', () => {
     ).toThrow(/contains CELLD_INTERNAL_PORT \(20001\)/);
     // The override is reported before the refusal, so the operator sees where it came from.
     expect(reported).toEqual(['CELLD_INTERNAL_PORT']);
+  });
+
+  it('reads the compose files a shell COMPOSE_FILE selects, and their variables', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sam-box-overlay-'));
+    const overlay = join(dir, 'ops.yml');
+    writeFileSync(overlay, 'services:\n  celld:\n    environment:\n      X: ${OPS_ONLY_VAR}\n');
+    const loaded = loadBoxEnv(box(['SAM_DOMAIN=box.example']), SELFHOST_DIR, {
+      COMPOSE_FILE: `docker-compose.yml:${overlay}`,
+      OPS_ONLY_VAR: 'from-shell',
+    });
+    expect(loaded.OPS_ONLY_VAR).toBe('from-shell');
+    expect(loaded.COMPOSE_FILE).toBe(`docker-compose.yml:${overlay}`);
   });
 
   it('control: returns the box with shell overrides applied', () => {
