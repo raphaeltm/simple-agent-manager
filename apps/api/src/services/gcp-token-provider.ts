@@ -2,7 +2,7 @@ import type { GcpTokenProvider, ProviderRequestContext } from '@simple-agent-man
 import type { CredentialSource, GcpCredential } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
-import type { GcpAccessTokenOptions } from './gcp-sts';
+import type { GcpAccessTokenOptions, GcpTokenRequester } from './gcp-sts';
 
 /** Who a GCP token is minted for: the credential's owner and the SAM project it serves. */
 export interface GcpTokenOwner {
@@ -10,6 +10,29 @@ export interface GcpTokenOwner {
   userId: string;
   /** The SAM project the token acts for; null when the credential is not project-scoped. */
   projectId: string | null;
+  /**
+   * The user who stored the credential, when it differs from `userId`: a project-scoped
+   * credential one member saved and another member's run uses. Defaults to `userId`.
+   * Ignored for platform credentials, which the installation owns.
+   */
+  credentialOwnerUserId?: string;
+}
+
+/** The token identity and pool owner for a credential resolved for `owner`. */
+export function gcpTokenRequester(owner: GcpTokenOwner): GcpTokenRequester {
+  const cacheUserId =
+    owner.credentialSource === 'platform'
+      ? `platform:${owner.userId}`
+      : owner.credentialSource === 'project' && owner.projectId
+        ? `project:${owner.projectId}:${owner.userId}`
+        : owner.userId;
+  return {
+    cacheUserId,
+    poolOwner:
+      owner.credentialSource === 'platform'
+        ? { kind: 'platform' }
+        : { kind: 'user', userId: owner.credentialOwnerUserId ?? owner.userId },
+  };
 }
 
 /**
@@ -24,17 +47,12 @@ export function createGcpTokenProvider(
   env: Env,
   options: GcpAccessTokenOptions = {}
 ): GcpTokenProvider {
-  const cacheUserId =
-    owner.credentialSource === 'platform'
-      ? `platform:${owner.userId}`
-      : owner.credentialSource === 'project' && owner.projectId
-        ? `project:${owner.projectId}:${owner.userId}`
-        : owner.userId;
+  const requester = gcpTokenRequester(owner);
   const cacheProjectId = owner.projectId ?? credential.gcpProjectId;
   return async (context?: ProviderRequestContext) => {
     const { getGcpAccessToken } = await import('./gcp-sts');
     return options.scopes
-      ? getGcpAccessToken(cacheUserId, cacheProjectId, credential, env, context, options)
-      : getGcpAccessToken(cacheUserId, cacheProjectId, credential, env, context);
+      ? getGcpAccessToken(requester, cacheProjectId, credential, env, context, options)
+      : getGcpAccessToken(requester, cacheProjectId, credential, env, context);
   };
 }

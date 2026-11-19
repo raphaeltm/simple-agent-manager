@@ -20,6 +20,12 @@ vi.mock('../../../src/scheduled/provider-orphan-credentials', () => ({
   resolveInventoryProvider: vi.fn(),
 }));
 vi.mock('../../../src/services/observability', () => ({ persistError: vi.fn() }));
+// This suite has no database; pool ownership has its own real-SQL suite. Spy on the check to
+// prove the sweep's exchange runs it as the installation.
+vi.mock('../../../src/services/gcp-wif-pool-ownership', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/gcp-wif-pool-ownership')>()),
+  assertGcpWifPoolOwnership: vi.fn(async () => undefined),
+}));
 vi.mock('../../../src/lib/logger', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -163,13 +169,26 @@ describe('platform GCP orphan sweep configuration and authentication', () => {
     expect(result.errors).toBe(0);
     expect(result.deletionRequested).toBe(1);
     expect(result.destroyed).toBe(0);
+    const { assertGcpWifPoolOwnership } =
+      await import('../../../src/services/gcp-wif-pool-ownership');
+    expect(assertGcpWifPoolOwnership).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ authType: 'workload-identity' }),
+      { kind: 'platform' },
+      'token_exchange'
+    );
     const sts = fetchMock.mock.calls.find(([url]) => String(url).includes('sts.googleapis.com'));
     expect(sts).toBeDefined();
     const body = JSON.parse(sts![1]!.body as string);
     const claims = JSON.parse(
       atob(body.subjectToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))
     );
-    expect(claims).toMatchObject({ user_id: 'platform:admin-owner', project_id: 'test-project' });
+    // No SAM project: the credential's own GCP project is signed namespaced, never as a SAM project id.
+    expect(claims).toMatchObject({
+      user_id: 'platform:admin-owner',
+      project_id: 'gcp-project:test-project',
+      sub: 'project:gcp-project:test-project',
+    });
     const deletes = fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE');
     expect(deletes.map(([url]) => String(url))).toEqual([
       'https://compute.googleapis.com/compute/v1/projects/test-project/zones/us-central1-a/instances/vm-123',

@@ -8,6 +8,13 @@ import {
 
 import { type AdminSettingDefinition, integerDefinition } from './admin-setting-definitions';
 
+/** Defaults for the workload identity pool index (`gcp-wif-pool-ownership.ts`). */
+export const DEFAULT_GCP_WIF_POOL_INDEX_PAGE_SIZE = 25;
+/** Short, because an unreadable row withholds first claims for other owners until it is retried. */
+export const DEFAULT_GCP_WIF_POOL_INDEX_UNREADABLE_RETRY_MINUTES = 10;
+export const DEFAULT_GCP_WIF_POOL_INDEX_BUDGET_MS = 10_000;
+export const DEFAULT_GCP_WIF_POOL_INDEX_MAX_QUERIES_PER_CHECK = 500;
+
 export type GcpCatalogSettingName =
   | 'gcpCatalog.machineTypes'
   | 'gcpCatalog.priceTableTtlMinutes'
@@ -18,7 +25,11 @@ export type GcpCatalogSettingName =
   | 'gcpCatalog.priceRefreshBudgetMs'
   | 'gcpCatalog.apiIssueTtlMinutes'
   | 'gcpCatalog.bootDiskGbPerVcpu'
-  | 'gcpCatalog.bootDiskMinGb';
+  | 'gcpCatalog.bootDiskMinGb'
+  | 'gcpWif.poolIndexPageSize'
+  | 'gcpWif.poolIndexBudgetMs'
+  | 'gcpWif.poolIndexUnreadableRetryMinutes'
+  | 'gcpWif.poolIndexMaxQueriesPerCheck';
 
 /**
  * General-purpose shapes SAM offers from Google Cloud by default: shared-core e2-medium, and the
@@ -122,5 +133,38 @@ export const GCP_CATALOG_SETTINGS: readonly AdminSettingDefinition[] = [
     'Operations',
     'Smallest boot disk, in GB, SAM gives a new Google Cloud VM, whatever its vCPU count.',
     { min: GCP_BOOT_DISK_FLOOR_GB, max: GCP_BOOT_DISK_MAX_GB }
+  ),
+  // Workload identity pool ownership (`gcp-wif-pool-ownership.ts`). Indexing runs only for
+  // credentials added or re-encrypted since the last check; a check that cannot finish inside the
+  // budget refuses rather than trusting a partial index. A page costs a probe batch (2 SQL
+  // statements) plus up to 2 statements per row; `gcpWif.poolIndexMaxQueriesPerCheck` caps the
+  // statements one check issues, and a page shrinks to fit.
+  integerDefinition(
+    'gcpWif.poolIndexPageSize',
+    DEFAULT_GCP_WIF_POOL_INDEX_PAGE_SIZE,
+    'Operations',
+    'Stored cloud credentials SAM decrypts per step when indexing which Google Cloud workload identity pool each one names.',
+    { min: 5, max: 50 }
+  ),
+  integerDefinition(
+    'gcpWif.poolIndexBudgetMs',
+    DEFAULT_GCP_WIF_POOL_INDEX_BUDGET_MS,
+    'Operations',
+    'Most milliseconds one Google Cloud token exchange or credential save may spend indexing newly saved credentials before it refuses and asks to retry.',
+    { min: 1_000, max: 25_000 }
+  ),
+  integerDefinition(
+    'gcpWif.poolIndexUnreadableRetryMinutes',
+    DEFAULT_GCP_WIF_POOL_INDEX_UNREADABLE_RETRY_MINUTES,
+    'Operations',
+    'Minutes before SAM tries again to read a stored cloud credential it could not decrypt while indexing workload identity pools. Until then the unreadable credential stops other owners from claiming new pools.',
+    { min: 1, max: 24 * 60 }
+  ),
+  integerDefinition(
+    'gcpWif.poolIndexMaxQueriesPerCheck',
+    DEFAULT_GCP_WIF_POOL_INDEX_MAX_QUERIES_PER_CHECK,
+    'Operations',
+    'Most SQL statements one token exchange or credential save may issue while indexing new credentials (each page is a probe batch plus up to two statements per credential). Past it the check refuses with a retryable error and the next one continues.',
+    { min: 6, max: 900 }
   ),
 ];
