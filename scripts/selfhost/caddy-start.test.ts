@@ -94,7 +94,18 @@ describe('caddy/start.sh', () => {
     }
   );
 
-  it.each([':2525', '0.0.0.0:2525', '[::]:2525'])(
+  // Go's net.Listen refuses an unbracketed IPv6 host ("too many colons in address").
+  it.each(['::2525', 'foo::2525', '[::]2525', '[::1]:[25]'])(
+    'refuses SAM_MX_LISTEN=%s, an IPv6 host without brackets or a malformed bracket',
+    (listen) => {
+      const run = startSh({ ...composeEnv(), SAM_MX_LISTEN: listen });
+      expect(run.status).toBe(64);
+      expect(run.out).toMatch(/SAM_MX_LISTEN (must be a listen address|must be set to a port)/);
+      expect(run.out).not.toContain('caddy run');
+    }
+  );
+
+  it.each([':2525', '0.0.0.0:2525', '[::]:2525', '[::1]:2525'])(
     'control: accepts the listen address SAM_MX_LISTEN=%s',
     (listen) => {
       const run = startSh({ ...composeEnv(), SAM_MX_LISTEN: listen });

@@ -389,6 +389,23 @@ describe('sam-mx listen address and unprivileged listeners (S4)', () => {
     );
   });
 
+  // Go's net.Listen refuses an unbracketed IPv6 host ("too many colons in address").
+  it.each(['::2525', 'foo::2525', '[::1:2525', '[a]b]:2525'])(
+    'refuses SAM_MX_LISTEN=%s, a host with an unbracketed colon or bracket',
+    (listen) => {
+      expect(() => resolveTunnelPortRange({ SAM_MX_LISTEN: listen })).toThrow(
+        /IPv6 host in brackets/
+      );
+    }
+  );
+
+  it('control: a bracketed IPv6 host is accepted', () => {
+    expect(resolveTunnelPortRange({ SAM_MX_LISTEN: '[::1]:2525' })).toEqual({
+      start: 20000,
+      end: 29999,
+    });
+  });
+
   it.each(['0.0.0.0:', ':x', 'smtp'])('refuses a malformed SAM_MX_LISTEN %s', (listen) => {
     expect(() => resolveTunnelPortRange({ SAM_MX_LISTEN: listen })).toThrow(/SAM_MX_LISTEN/);
   });

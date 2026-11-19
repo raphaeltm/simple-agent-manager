@@ -76,7 +76,14 @@ done
 # SAM_MX_LISTEN is a listen address ([host]:port): its port is the part after the last ':'. sam-mx
 # hands it to Go's net.Listen, which refuses a bare port, so the inbound-mail service would
 # restart-loop: refuse it here.
+# Go also refuses a host with an unbracketed ':' (`::2525`: "too many colons in address"): an
+# IPv6 host must be bracketed.
 case "${SAM_MX_LISTEN:-}" in
+\[*\]:*) ;;
+*\[* | *\]* | *:*:*)
+	echo "caddy: SAM_MX_LISTEN must be a listen address [host]:port with an IPv6 host in brackets (e.g. [::]:2525), got ${SAM_MX_LISTEN}" >&2
+	exit 64
+	;;
 *:*) ;;
 *)
 	echo "caddy: SAM_MX_LISTEN must be a listen address [host]:port (e.g. :25 or 0.0.0.0:2525), not a bare port" >&2

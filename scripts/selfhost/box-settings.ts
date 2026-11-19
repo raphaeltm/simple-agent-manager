@@ -179,6 +179,14 @@ function boxPort(box: Readonly<Record<string, string>>, name: string, fallback: 
       `${name} must be a listen address [host]:port (e.g. :${raw}), not a bare port: got ${raw}`
     );
   }
+  // Go's net.Listen takes host:port with a host free of ':' or a bracketed IPv6 host, and refuses
+  // `::2525` ("too many colons in address"): the inbound-mail service would restart-loop.
+  const host = raw.slice(0, separator);
+  if (/^\[.*\]$/.test(host) ? /[[\]]/.test(host.slice(1, -1)) : /[:[\]]/.test(host)) {
+    throw new Error(
+      `${name} must be a listen address [host]:port, with an IPv6 host in brackets (e.g. [::]:2525): got ${raw}`
+    );
+  }
   const port = raw.slice(separator + 1);
   if (port === '') throw new Error(`${name} must end in :<port>, got ${raw}`);
   return integer(port, fallback, name, bounds);
