@@ -152,6 +152,8 @@ jobs:
               - 'scripts/selfhost/selfhost-migrations.ts'
               # selfhost-inbound-email.test.ts builds this receiver (Self-host Email job only).
               - 'deploy/selfhost/sam-mx/**'
+              # The self-host access-log redaction guard scans the API routes against this filter.
+              - 'deploy/selfhost/caddy/log-redaction.caddy'
               - 'scripts/quality/node-pool-boundary.ts'
               - 'scripts/quality/node-pool-boundary/**'
               - 'tests/fixtures/acp-activity-report-v1.json'
@@ -166,6 +168,8 @@ jobs:
               - 'packages/terminal/**'
               - 'packages/ui/**'
               - 'tests/fixtures/diagnostic-secret-canaries.json'
+              # The self-host access-log redaction guard scans App.tsx against this filter.
+              - 'deploy/selfhost/caddy/log-redaction.caddy'
             # Storybook (packages/ui) and the public site (apps/www, which depends on ui).
             public-site:
               - *workspace-root
@@ -253,6 +257,9 @@ jobs:
               - 'scripts/deploy/**'
               # Self-hosted (celld) packaging: config generator, deploy, upgrade, create-account.
               - 'scripts/selfhost/**'
+              # The box files its static tests read: compose, Caddy fragments and start.sh, frps.toml,
+              # gcp-bootstrap.sh, .env.example.
+              - 'deploy/selfhost/**'
               # ...and what its tests read outside it: the self-host migration projection and the
               # SMTP settings parser.
               - 'apps/api/src/selfhost/**'

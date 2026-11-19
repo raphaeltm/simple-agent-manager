@@ -698,6 +698,30 @@ describe('runner budget (jobs a ready PR starts)', () => {
     }
   });
 
+  it('a box file alone starts Validate Deploy Scripts, whose static tests read deploy/selfhost', () => {
+    const jobs = (paths: string[]) =>
+      simulate({ eventName: 'pull_request', filters: filtersFor(paths) });
+    for (const path of [
+      'deploy/selfhost/caddy/start.sh',
+      'deploy/selfhost/docker-compose.yml',
+      'deploy/selfhost/gcp-bootstrap.sh',
+    ]) {
+      expect(jobs([path]).get('deploy-scripts'), path).toBe('success');
+    }
+    // Control: a change outside the deploy inputs does not start it.
+    expect(jobs(['apps/web/src/main.tsx']).get('deploy-scripts')).not.toBe('success');
+  });
+
+  // The access-log redaction guards: the API one runs with the API unit suite, the App.tsx one
+  // with the web suite, and either runs when the redaction filter itself changes.
+  it('a credential route or the redaction filter selects the suite holding its guard', () => {
+    expect(suitesFor(['apps/api/src/routes/bootstrap.ts'])).toContain('test-api');
+    expect(suitesFor(['apps/web/src/App.tsx'])).toContain('test-web');
+    expect(suitesFor(['deploy/selfhost/caddy/log-redaction.caddy'])).toEqual(
+      expect.arrayContaining(['test-api', 'test-web'])
+    );
+  });
+
   it('a draft PR starts 6 jobs', () => {
     const results = simulate({ eventName: 'pull_request', draft: true, filters: allFilters() });
     expect(started(results)).toHaveLength(6);
