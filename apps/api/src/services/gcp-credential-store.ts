@@ -4,6 +4,7 @@ import type { Env } from '../env';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { encrypt } from './encryption';
+import { assertGcpWifPoolOwnership } from './gcp-wif-pool-ownership';
 import { serializeGcpCredential } from './provider-credentials';
 
 export interface StoredGcpCredentialResult {
@@ -109,6 +110,14 @@ export async function replaceUserGcpCredential(
 ): Promise<StoredGcpCredentialResult> {
   if (typeof env.DATABASE.batch !== 'function') {
     throw new Error('Atomic credential replacement is unavailable');
+  }
+  if (credential.authType === 'workload-identity') {
+    await assertGcpWifPoolOwnership(
+      env,
+      credential,
+      { kind: 'user', userId },
+      'save_user_gcp_credential'
+    );
   }
   const now = new Date().toISOString();
   const legacyId = ulid();

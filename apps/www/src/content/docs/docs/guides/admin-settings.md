@@ -1104,6 +1104,8 @@ These control the live Google Cloud catalog described in [Google Cloud](/docs/gu
 | `gcpCatalog.apiIssueTtlMinutes`             | 10080                                           | 60–43200          | How long a Google API problem Google reported stays shown on a credential; a successful check clears it.                                                       |
 | `gcpCatalog.bootDiskGbPerVcpu`              | 20                                              | 1–256             | GB of boot disk a new Google Cloud node gets per vCPU, used by the catalog, prices and new nodes from the next catalog refresh; running nodes keep their disk. |
 | `gcpCatalog.bootDiskMinGb`                  | 50                                              | 10–4096           | Smallest boot disk, in GB, a new Google Cloud node gets whatever its vCPU count; same refresh rule.                                                            |
+| `gcpWif.poolIndexPageSize`                  | 100                                             | 10–100            | Stored cloud credentials decrypted per step when indexing which workload identity pool each one names (only new or re-saved credentials are indexed). |
+| `gcpWif.poolIndexBudgetMs`                  | 10000                                           | 1000–25000        | Most time one token exchange or credential save may spend indexing new credentials before it refuses and asks to retry, rather than trust a partial index. |
 
 ### Infomaniak boot volume
 

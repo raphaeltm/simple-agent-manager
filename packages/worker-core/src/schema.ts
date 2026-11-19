@@ -1121,6 +1121,35 @@ export const projectDeploymentCredentials = sqliteTable(
       table.provider
     ),
     userIdx: index('idx_project_deployment_creds_user').on(table.userId),
+    gcpProjectNumberIdx: index('idx_project_deployment_creds_gcp_project_number').on(
+      table.gcpProjectNumber
+    ),
+  })
+);
+
+// =============================================================================
+// GCP Workload Identity Pool Index (migration 0262)
+// Which pool each stored cloud credential names, filled by the Worker on every ownership check
+// (`apps/api/src/services/gcp-wif-pool-ownership.ts`). No secret material: `iv` identifies the
+// indexed ciphertext generation, `pool_key` is `<projectNumber>/<poolId>` or NULL when the row
+// names no workload identity pool.
+// =============================================================================
+export const gcpWifPoolIndex = sqliteTable(
+  'gcp_wif_pool_index',
+  {
+    sourceTable: text('source_table').notNull(), // 'credentials' | 'platform_credentials' | 'cc_credentials'
+    sourceId: text('source_id').notNull(),
+    iv: text('iv').notNull(),
+    ownerKind: text('owner_kind').notNull(), // 'user' | 'platform'
+    ownerUserId: text('owner_user_id'),
+    poolKey: text('pool_key'),
+    indexedAt: text('indexed_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.sourceTable, table.sourceId] }),
+    poolIdx: index('idx_gcp_wif_pool_index_pool')
+      .on(table.poolKey)
+      .where(sql`pool_key IS NOT NULL`),
   })
 );
 

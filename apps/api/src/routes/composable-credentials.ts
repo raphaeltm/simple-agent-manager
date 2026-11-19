@@ -24,6 +24,7 @@ import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { reconcileCapacityPoolsForCredentialMutation } from '../services/capacity-pool-credential-lifecycle';
 import { encrypt } from '../services/encryption';
+import { assertGcpWifPayloadOwnership } from '../services/gcp-wif-pool-ownership';
 import { registerCCAttachmentRoutes, uniqueProjectIds } from './composable-credentials-attachments';
 import { registerCCProfileAttachmentRoutes } from './composable-credentials-profile-attachments';
 
@@ -186,6 +187,14 @@ ccRoutes.post('/credentials', async (c) => {
 
   const encryptionKey = getCredentialEncryptionKey(c.env);
   const tokenToEncrypt = typeof secret === 'string' ? secret : JSON.stringify(secret);
+  if (kind === 'cloud-provider') {
+    await assertGcpWifPayloadOwnership(
+      c.env,
+      tokenToEncrypt,
+      { kind: 'user', userId },
+      'save_composable_credential'
+    );
+  }
   const { ciphertext, iv } = await encrypt(tokenToEncrypt, encryptionKey);
 
   const id = `cc-cred-${ulid()}`;

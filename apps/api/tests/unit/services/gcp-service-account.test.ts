@@ -27,6 +27,13 @@ import {
 vi.mock('../../../src/services/jwt', () => ({
   signIdentityToken: vi.fn().mockResolvedValue('sam-identity-token'),
 }));
+// Pool ownership has its own real-SQL suite (gcp-wif-pool-ownership.test.ts); here it is a
+// pass-through so these tests stay about cancellation and caching.
+vi.mock('../../../src/services/gcp-wif-pool-ownership', () => ({
+  assertGcpWifPoolOwnership: vi.fn().mockResolvedValue(undefined),
+}));
+
+const USER_1 = { tokenUserId: 'user-1', poolOwner: { kind: 'user', userId: 'user-1' } } as const;
 
 let privateKey: string;
 
@@ -201,7 +208,7 @@ describe('service-account verification and caching', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const request = getGcpAccessToken(
-      'user-1',
+      USER_1,
       'project-a',
       credential,
       { KV: kv.namespace } as Env,
@@ -242,7 +249,7 @@ describe('service-account verification and caching', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const request = getGcpAccessToken(
-      'user-1',
+      USER_1,
       'project-a',
       credential,
       { KV: kv.namespace } as Env,
@@ -272,6 +279,40 @@ describe('service-account verification and caching', () => {
     );
   });
 
+  it('checks pool ownership for the credential owner before signing, and refuses without signing', async () => {
+    const { assertGcpWifPoolOwnership } =
+      await import('../../../src/services/gcp-wif-pool-ownership');
+    const { signIdentityToken } = await import('../../../src/services/jwt');
+    const credential = workloadIdentityCredential();
+    const kv = createKv();
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const refusal = new Error('pool belongs to another owner');
+    vi.mocked(assertGcpWifPoolOwnership).mockRejectedValueOnce(refusal);
+    vi.mocked(signIdentityToken).mockClear();
+    const env = { KV: kv.namespace } as Env;
+
+    await expect(
+      getGcpAccessToken(
+        { tokenUserId: 'project:p-1:user-2', poolOwner: { kind: 'user', userId: 'user-9' } },
+        'p-1',
+        credential,
+        env
+      )
+    ).rejects.toBe(refusal);
+
+    expect(assertGcpWifPoolOwnership).toHaveBeenLastCalledWith(
+      env,
+      credential,
+      // The stored credential's owner, not the user whose run is asking.
+      { kind: 'user', userId: 'user-9' },
+      'token_exchange'
+    );
+    expect(signIdentityToken).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(kv.namespace.put).not.toHaveBeenCalled();
+  });
+
   it('cancels a pending WIF STS exchange without IAM impersonation or token caching', async () => {
     const credential = workloadIdentityCredential();
     const kv = createKv();
@@ -286,7 +327,7 @@ describe('service-account verification and caching', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const request = getGcpAccessToken(
-      'user-1',
+      USER_1,
       'project-a',
       credential,
       { KV: kv.namespace } as Env,
@@ -327,7 +368,7 @@ describe('service-account verification and caching', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const request = getGcpAccessToken(
-      'user-1',
+      USER_1,
       'project-a',
       credential,
       { KV: kv.namespace } as Env,
@@ -363,13 +404,13 @@ describe('service-account verification and caching', () => {
     vi.stubGlobal('fetch', fetchMock);
     const env = { KV: kv.namespace } as Env;
 
-    await expect(getGcpAccessToken('user-1', 'project-a', credential, env)).resolves.toBe(
+    await expect(getGcpAccessToken(USER_1, 'project-a', credential, env)).resolves.toBe(
       'short-lived-token'
     );
-    await expect(getGcpAccessToken('user-1', 'project-a', credential, env)).resolves.toBe(
+    await expect(getGcpAccessToken(USER_1, 'project-a', credential, env)).resolves.toBe(
       'short-lived-token'
     );
-    await expect(getGcpAccessToken('user-1', 'project-b', credential, env)).resolves.toBe(
+    await expect(getGcpAccessToken(USER_1, 'project-b', credential, env)).resolves.toBe(
       'short-lived-token'
     );
 
@@ -439,8 +480,8 @@ describe('WIF impersonation scopes', () => {
     const env = { KV: kv.namespace } as Env;
     const { impersonationScopes } = stubWifExchange();
 
-    const provisioning = await getGcpAccessToken('user-1', 'project-a', credential, env);
-    const pricing = await getGcpAccessToken('user-1', 'project-a', credential, env, undefined, {
+    const provisioning = await getGcpAccessToken(USER_1, 'project-a', credential, env);
+    const pricing = await getGcpAccessToken(USER_1, 'project-a', credential, env, undefined, {
       scopes: ['https://www.googleapis.com/auth/cloud-billing.readonly'],
     });
 
@@ -451,7 +492,7 @@ describe('WIF impersonation scopes', () => {
     // Different scopes never share a cached token, in either order.
     expect(provisioning).toBe('token-1');
     expect(pricing).toBe('token-2');
-    expect(await getGcpAccessToken('user-1', 'project-a', credential, env)).toBe('token-1');
+    expect(await getGcpAccessToken(USER_1, 'project-a', credential, env)).toBe('token-1');
     expect(kv.puts.map((put) => put.key)).toEqual([
       getGcpAccessTokenCacheKey('user-1', 'project-a', credential),
       expect.stringMatching(/:scopes:/),
@@ -463,7 +504,7 @@ describe('WIF impersonation scopes', () => {
     const kv = createKv();
     const env = { KV: kv.namespace } as Env;
     stubWifExchange();
-    await getGcpAccessToken('user-1', 'project-a', credential, env, undefined, {
+    await getGcpAccessToken(USER_1, 'project-a', credential, env, undefined, {
       scopes: ['https://www.googleapis.com/auth/cloud-billing.readonly'],
     });
     expect(kv.values.size).toBe(1);

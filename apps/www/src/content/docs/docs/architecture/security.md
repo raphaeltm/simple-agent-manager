@@ -296,6 +296,18 @@ The complete source credential is encrypted at rest with AES-256-GCM. SAM signs 
 
 Save and rotation verify the selected Compute zone before one D1 transaction updates the user's stored credential in place and replaces its composable copy. The stored credential keeps its id, which the compute pool's account and every node placed from it are keyed on, so a re-save does not reset pool choices or orphan running machines (`replaceUserGcpCredential()`). A failed verification or transaction leaves the previous credential intact. Disconnect removes SAM's encrypted copies and cached derivatives but does not revoke a Google-managed service-account key.
 
+#### One owner per workload identity pool
+
+SAM signs an identity token for whatever pool a stored WIF credential names, so the pool's own trust must not be the only control. A WIF credential may name a pool (`gcpProjectNumber` + `wifPoolId`) only when no credential of a different owner names it (`assertGcpWifPoolOwnership()` in `apps/api/src/services/gcp-wif-pool-ownership.ts`). An owner is one SAM user, whose user-level and project-scoped credentials may share a pool, or the installation, which owns platform credentials. Deployment credentials count for the user who connected them.
+
+- **At save**, `POST /api/credentials`, the Google setup routes, project cloud credentials, composable credentials and admin platform credentials return `409 GCP_WIF_POOL_OWNED_BY_ANOTHER_OWNER`. Guided setup checks the pool after reading the project number and before it changes anything in Google.
+- **At token exchange**, the same check runs before SAM signs the identity token (`exchangeGcpWifAccessToken()` in `gcp-sts.ts`), so credentials saved before the check existed are refused too. The owner is the stored credential's owner, so a project member using another member's project credential still works. Refusals log `gcp_wif_pool.cross_owner_refused`.
+- Pool identities sit inside encrypted payloads, so the Worker keeps an index (`gcp_wif_pool_index`, migration 0262) of the pool each stored credential names, keyed by the row's IV. Each check first indexes rows it has not seen, in the same D1 batch as the owner lookup, so a writer that skips the index, a rotation or a deletion cannot leave it stale. A normal check is one D1 round trip with no decryption. A row that cannot be decrypted or parsed is recorded with no pool and logged, and does not affect other credentials. If newly saved rows cannot be indexed within `gcpWif.poolIndexBudgetMs`, the check refuses (`503 GCP_WIF_POOL_INDEX_UNAVAILABLE`) rather than trust a partial index.
+
+The Google side is scoped as well. User-level guided setup creates a provider whose condition is `assertion.iss == '<issuer>' && assertion.user_id == '<userId>'` and grants the service account only to `principalSet://.../workloadIdentityPools/<pool>/attribute.sam_user/<userId>`. Deployment setup uses `assertion.project_id` and `principal://.../subject/project:<projectId>` (`wifAttributeCondition()`, `wifServiceAccountMember()` in `gcp-wif-setup.ts`). Setups before this change used an issuer-only condition and a `pool/*` binding. Re-running setup rewrites the provider's condition and removes the `pool/*` member from the service account.
+
+Residual risk: whoever saves a pool first owns it in SAM. A user who knows another person's Google Cloud project number can save a credential naming that pool before its owner connects, which blocks the owner's setup (a denial of service, not impersonation). An administrator resolves it by deleting the squatting credential.
+
 ## Terminal Authentication
 
 Terminal WebSocket connections use short-lived JWTs:

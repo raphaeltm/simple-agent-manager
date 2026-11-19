@@ -18,7 +18,9 @@ export type GcpCatalogSettingName =
   | 'gcpCatalog.priceRefreshBudgetMs'
   | 'gcpCatalog.apiIssueTtlMinutes'
   | 'gcpCatalog.bootDiskGbPerVcpu'
-  | 'gcpCatalog.bootDiskMinGb';
+  | 'gcpCatalog.bootDiskMinGb'
+  | 'gcpWif.poolIndexPageSize'
+  | 'gcpWif.poolIndexBudgetMs';
 
 /**
  * General-purpose shapes SAM offers from Google Cloud by default: shared-core e2-medium, and the
@@ -122,5 +124,22 @@ export const GCP_CATALOG_SETTINGS: readonly AdminSettingDefinition[] = [
     'Operations',
     'Smallest boot disk, in GB, SAM gives a new Google Cloud VM, whatever its vCPU count.',
     { min: GCP_BOOT_DISK_FLOOR_GB, max: GCP_BOOT_DISK_MAX_GB }
+  ),
+  // Workload identity pool ownership (`gcp-wif-pool-ownership.ts`). Indexing runs only for
+  // credentials added or re-encrypted since the last check; a check that cannot finish inside the
+  // budget refuses rather than trusting a partial index.
+  integerDefinition(
+    'gcpWif.poolIndexPageSize',
+    100,
+    'Operations',
+    'Stored cloud credentials SAM decrypts per step when indexing which Google Cloud workload identity pool each one names.',
+    { min: 10, max: 100 }
+  ),
+  integerDefinition(
+    'gcpWif.poolIndexBudgetMs',
+    10_000,
+    'Operations',
+    'Most milliseconds one Google Cloud token exchange or credential save may spend indexing newly saved credentials before it refuses and asks to retry.',
+    { min: 1_000, max: 25_000 }
   ),
 ];

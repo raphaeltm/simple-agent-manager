@@ -23,7 +23,19 @@ import {
   exchangeGcpServiceAccountAccessToken,
   type GcpAccessTokenResult,
 } from './gcp-service-account';
+import { assertGcpWifPoolOwnership, type GcpWifPoolOwner } from './gcp-wif-pool-ownership';
 import { signIdentityToken } from './jwt';
+
+/** Who a GCP access token is minted for. */
+export interface GcpTokenRequester {
+  /**
+   * The identity SAM asserts as the token's `user_id` claim and keys the token cache on: the
+   * user id, `project:<projectId>:<userId>` or `platform:<userId>`.
+   */
+  tokenUserId: string;
+  /** The owner of the stored credential, which must own the workload identity pool it names. */
+  poolOwner: GcpWifPoolOwner;
+}
 
 interface StsTokenResponse {
   access_token: string;
@@ -129,7 +141,7 @@ export interface GcpAccessTokenOptions {
  * encrypted D1 storage.
  */
 export async function getGcpAccessToken(
-  userId: string,
+  requester: GcpTokenRequester,
   projectId: string,
   credential: GcpCredential,
   env: Env,
@@ -137,6 +149,7 @@ export async function getGcpAccessToken(
   options: GcpAccessTokenOptions = {}
 ): Promise<string> {
   throwIfProviderRequestAborted(context);
+  const userId = requester.tokenUserId;
   // A token minted for different scopes is a different token; the suffix keeps the shared
   // prefix, so clearGcpAccessTokenCache still removes it.
   const cacheKey = options.scopes
@@ -149,7 +162,7 @@ export async function getGcpAccessToken(
   const result =
     credential.authType === 'service-account-key'
       ? await exchangeGcpServiceAccountAccessToken(credential, env, context)
-      : await exchangeGcpWifAccessToken(userId, projectId, credential, env, context, options);
+      : await exchangeGcpWifAccessToken(requester, projectId, credential, env, context, options);
   throwIfProviderRequestAborted(context);
 
   const configuredTtl = positiveInteger(
@@ -168,7 +181,7 @@ export async function getGcpAccessToken(
 }
 
 async function exchangeGcpWifAccessToken(
-  userId: string,
+  requester: GcpTokenRequester,
   projectId: string,
   credential: GcpOidcCredential,
   env: Env,
@@ -188,7 +201,14 @@ async function exchangeGcpWifAccessToken(
   const wifResourcePath = `projects/${credential.gcpProjectNumber}/locations/global/workloadIdentityPools/${credential.wifPoolId}/providers/${credential.wifProviderId}`;
   const jwtAudience = `https://iam.googleapis.com/${wifResourcePath}`;
   const stsAudience = `//iam.googleapis.com/${wifResourcePath}`;
-  const identityToken = await signIdentityToken({ userId, projectId, audience: jwtAudience }, env);
+  // Refuse before signing: a provider that trusts only SAM's issuer would accept any token SAM
+  // signs, so naming another owner's pool must never produce one.
+  await assertGcpWifPoolOwnership(env, credential, requester.poolOwner, 'token_exchange');
+  throwIfProviderRequestAborted(context);
+  const identityToken = await signIdentityToken(
+    { userId: requester.tokenUserId, projectId, audience: jwtAudience },
+    env
+  );
 
   const stsResponse = await fetchWithTimeout(
     gcpStsUrl,
@@ -272,12 +292,12 @@ async function exchangeGcpWifAccessToken(
 
 /** Verify the existing WIF path with a full exchange. */
 export async function verifyGcpOidcSetup(
-  userId: string,
+  requester: GcpTokenRequester,
   projectId: string,
   credential: GcpOidcCredential,
   env: Env,
   context?: ProviderRequestContext
 ): Promise<boolean> {
-  await getGcpAccessToken(userId, projectId, credential, env, context);
+  await getGcpAccessToken(requester, projectId, credential, env, context);
   return true;
 }

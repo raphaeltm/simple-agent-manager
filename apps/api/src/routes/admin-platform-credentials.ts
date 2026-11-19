@@ -25,6 +25,7 @@ import {
 import { reconcileCapacityPoolsForCredentialMutation } from '../services/capacity-pool-credential-lifecycle';
 import { decrypt, encrypt } from '../services/encryption';
 import { deleteGcpApiHealthSafely } from '../services/gcp-api-health';
+import { assertGcpWifPayloadOwnership } from '../services/gcp-wif-pool-ownership';
 import { buildProviderConfig } from '../services/provider-credentials';
 import { CredentialValidator } from '../services/validation';
 
@@ -122,6 +123,17 @@ adminPlatformCredentialRoutes.post(
       if (!validation.valid) {
         throw errors.badRequest(validation.error || 'Invalid credential format');
       }
+    }
+
+    if (body.credentialType === 'cloud-provider' && body.provider === 'gcp') {
+      // The installation owns platform credentials: a pool a user's credential names is not
+      // available to them, and the reverse is refused when users save.
+      await assertGcpWifPayloadOwnership(
+        c.env,
+        body.credential,
+        { kind: 'platform' },
+        'save_platform_credential'
+      );
     }
 
     // Encrypt and store

@@ -48,9 +48,10 @@ export async function runGcpDeploySetup(
   oauthToken: string,
   gcpProjectId: string,
   env: Env,
-  onProgress?: SetupProgressCallback,
-  samProjectId?: string
+  samProjectId: string,
+  onProgress?: SetupProgressCallback
 ): Promise<Omit<ProjectDeploymentCredential, 'id' | 'userId' | 'createdAt' | 'updatedAt'>> {
+  const trustScope = { kind: 'project', samProjectId } as const;
   const timeoutMs = env.GCP_API_TIMEOUT_MS
     ? parseInt(env.GCP_API_TIMEOUT_MS, 10)
     : DEFAULT_GCP_API_TIMEOUT_MS;
@@ -85,7 +86,7 @@ export async function runGcpDeploySetup(
     providerId,
     issuerUri,
     timeoutMs,
-    samProjectId
+    trustScope
   );
   onProgress?.('create_oidc_provider', 'done');
 
@@ -110,7 +111,7 @@ export async function runGcpDeploySetup(
     saEmail,
     poolId,
     timeoutMs,
-    samProjectId
+    trustScope
   );
   onProgress?.('grant_wif_user', 'done');
 

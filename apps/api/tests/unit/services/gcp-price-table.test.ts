@@ -31,18 +31,28 @@ import {
 } from '../../helpers/google-api-errors';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../../helpers/sqlite-d1';
 
-const tokenCalls: Array<{ userId: string; projectId: string; gcpProjectId: string }> = [];
+const tokenCalls: Array<{
+  userId: string;
+  poolOwner: unknown;
+  projectId: string;
+  gcpProjectId: string;
+}> = [];
 const tokenScopes: Array<readonly string[] | undefined> = [];
 vi.mock('../../../src/services/gcp-sts', () => ({
   getGcpAccessToken: async (
-    userId: string,
+    requester: { tokenUserId: string; poolOwner: unknown },
     projectId: string,
     credential: { gcpProjectId: string },
     _env: unknown,
     _context: unknown,
     options?: { scopes?: readonly string[] }
   ) => {
-    tokenCalls.push({ userId, projectId, gcpProjectId: credential.gcpProjectId });
+    tokenCalls.push({
+      userId: requester.tokenUserId,
+      poolOwner: requester.poolOwner,
+      projectId,
+      gcpProjectId: credential.gcpProjectId,
+    });
     tokenScopes.push(options?.scopes);
     return `token-for-${credential.gcpProjectId}`;
   },
@@ -212,7 +222,12 @@ describe('GCP price table', () => {
     expect(result).toMatchObject({ status: 'refreshed', credentialSource: 'platform', regions: 1 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(tokenCalls).toEqual([
-      { userId: 'platform:admin-1', projectId: 'platform-gcp', gcpProjectId: 'platform-gcp' },
+      {
+        userId: 'platform:admin-1',
+        poolOwner: { kind: 'platform' },
+        projectId: 'platform-gcp',
+        gcpProjectId: 'platform-gcp',
+      },
     ]);
     // The price read asks for read-only Cloud Billing alone; provisioning tokens never carry it.
     expect(tokenScopes).toEqual([['https://www.googleapis.com/auth/cloud-billing.readonly']]);
@@ -233,7 +248,12 @@ describe('GCP price table', () => {
     await refreshGcpPriceTableIfDue(env, NOW);
 
     expect(tokenCalls).toEqual([
-      { userId: 'project:project-9:user-1', projectId: 'project-9', gcpProjectId: 'project-gcp' },
+      {
+        userId: 'project:project-9:user-1',
+        poolOwner: { kind: 'user', userId: 'user-1' },
+        projectId: 'project-9',
+        gcpProjectId: 'project-gcp',
+      },
     ]);
   });
 

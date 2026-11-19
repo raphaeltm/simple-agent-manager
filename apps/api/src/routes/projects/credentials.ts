@@ -53,6 +53,7 @@ import {
 import { decrypt, encrypt } from '../../services/encryption';
 import { getTimeoutMs } from '../../services/fetch-timeout';
 import { deleteGcpApiHealthSafely } from '../../services/gcp-api-health';
+import { assertGcpWifPayloadOwnership } from '../../services/gcp-wif-pool-ownership';
 import { serializeCredentialToken } from '../../services/provider-credentials';
 import {
   CredentialValidator,
@@ -299,6 +300,14 @@ projectCredentialsRoutes.put(
     const requestBody = c.req.valid('json');
     const { providerName, tokenToValidate: tokenToEncrypt } = getCloudCredentialFields(requestBody);
     const validation = await validateCloudCredentialRequest(requestBody, c.env);
+    // Same owner as the user's own credentials: a user may reuse their pool per project, but
+    // never name a pool another user or the installation uses.
+    await assertGcpWifPayloadOwnership(
+      c.env,
+      tokenToEncrypt,
+      { kind: 'user', userId },
+      'save_project_cloud_credential'
+    );
     const { ciphertext, iv } = await encrypt(tokenToEncrypt, getCredentialEncryptionKey(c.env));
 
     const existing = await db

@@ -80,7 +80,8 @@ async function connect(baseDomain: string, extra: Partial<Env> = {}) {
     'oauth-token',
     'sam-staging-infra',
     'us-central1-a',
-    envFor(baseDomain, extra)
+    envFor(baseDomain, extra),
+    { userId: 'user-1' }
   );
 }
 
@@ -132,8 +133,18 @@ describe('installations sharing one Google Cloud project', () => {
   });
 
   it('names deployment providers per installation too', async () => {
-    const primary = await runGcpDeploySetup('oauth-token', 'sam-staging-infra', envFor(PRIMARY));
-    const staging2 = await runGcpDeploySetup('oauth-token', 'sam-staging-infra', envFor(STAGING2));
+    const primary = await runGcpDeploySetup(
+      'oauth-token',
+      'sam-staging-infra',
+      envFor(PRIMARY),
+      'sam-project-1'
+    );
+    const staging2 = await runGcpDeploySetup(
+      'oauth-token',
+      'sam-staging-infra',
+      envFor(STAGING2),
+      'sam-project-1'
+    );
 
     expect(primary.wifPoolId).toBe('sam-deploy-pool');
     expect(primary.wifProviderId).not.toBe(staging2.wifProviderId);

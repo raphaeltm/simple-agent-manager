@@ -18,10 +18,13 @@ import type { ProviderCatalogCredentialSeed } from '../../../src/services/provid
 import { serializeGcpCredential } from '../../../src/services/provider-credential-codecs';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../../helpers/sqlite-d1';
 
-const tokenCalls: Array<{ userId: string; projectId: string }> = [];
+const tokenCalls: Array<{ userId: string; poolOwner: unknown; projectId: string }> = [];
 vi.mock('../../../src/services/gcp-sts', () => ({
-  getGcpAccessToken: async (userId: string, projectId: string) => {
-    tokenCalls.push({ userId, projectId });
+  getGcpAccessToken: async (
+    requester: { tokenUserId: string; poolOwner: unknown },
+    projectId: string
+  ) => {
+    tokenCalls.push({ userId: requester.tokenUserId, poolOwner: requester.poolOwner, projectId });
     return 'gcp-token';
   },
 }));
@@ -139,7 +142,9 @@ describe('GCP live catalog build', () => {
       price: 'Price unavailable',
     });
     // A user-level credential is bound to no SAM project, so its GCP project id is the identity.
-    expect(tokenCalls).toEqual([{ userId: 'user-1', projectId: 'my-vms' }]);
+    expect(tokenCalls).toEqual([
+      { userId: 'user-1', poolOwner: { kind: 'user', userId: 'user-1' }, projectId: 'my-vms' },
+    ]);
   });
 
   it('mints a project-scoped credential for its SAM project', async () => {
@@ -150,7 +155,13 @@ describe('GCP live catalog build', () => {
       seed: await seed({ credentialSource: 'project', ownerProjectId: 'project-9' }),
     });
 
-    expect(tokenCalls).toEqual([{ userId: 'project:project-9:user-1', projectId: 'project-9' }]);
+    expect(tokenCalls).toEqual([
+      {
+        userId: 'project:project-9:user-1',
+        poolOwner: { kind: 'user', userId: 'user-1' },
+        projectId: 'project-9',
+      },
+    ]);
   });
 
   it('offers machine types unpriced when no price table has been stored yet', async () => {

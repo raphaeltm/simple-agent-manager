@@ -159,7 +159,7 @@ describe('GCP routes', () => {
     expect(res.status).toBe(200);
     expect(mocks.replaceUserGcpCredential).toHaveBeenCalledWith(env, 'test-user-id', wifCredential);
     expect(mocks.verifyGcpOidcSetup).toHaveBeenCalledWith(
-      'test-user-id',
+      { tokenUserId: 'test-user-id', poolOwner: { kind: 'user', userId: 'test-user-id' } },
       'setup-verification',
       wifCredential,
       env
@@ -197,7 +197,7 @@ describe('GCP routes', () => {
     );
     expect(mocks.parseServiceAccountJson).toHaveBeenCalledWith(uploadedJson, 'us-central1-a');
     expect(mocks.getGcpAccessToken).toHaveBeenCalledWith(
-      'test-user-id',
+      { tokenUserId: 'test-user-id', poolOwner: { kind: 'user', userId: 'test-user-id' } },
       'service-account-setup',
       serviceAccountCredential,
       env
