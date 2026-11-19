@@ -35,7 +35,9 @@ export const OPERATOR_SETTINGS: AdminSettingDefinition[] = [
     true,
     'Operations',
     "Let an agent sign-in session remove a stuck SAM-capacity node (Admin → Infrastructure → Stuck nodes) on a person's behalf. Off: only a person's own session can attest a server is gone. Either way the audit log records whether an agent did it.",
-    {}
+    // Fail closed: when the settings store cannot be read, an installation that turned this off
+    // must not fall back to the permissive default and admit an agent-session removal.
+    { unavailableValue: false }
   ),
   integerDefinition(
     'operations.auditRetentionDays',
