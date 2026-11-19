@@ -11,8 +11,12 @@ export function buildEventingInstructions(input: {
     'Waiting on a PR or CI: reconcile the current PR head and checks before waiting, immediately after subscribing, and after every resume. ' +
       'If checks already finished, continue the existing review/release gates instead of waiting for another completion event. ' +
       'For CI call `create_project_event_subscription` (requestedDelivery defaults to "runtime_steer") with source "github", ' +
-      'subjectType "commit", subjectId = the full 40-character PR head SHA (never abbreviated), and exact eventType values ' +
-      '"check_run.completed", "check_suite.completed", "workflow_run.completed"; bare names do not match. ' +
+      'subjectType "commit", subjectId = the full 40-character PR head SHA (never abbreviated), and default exact eventType values ' +
+      '"check_suite.completed", "workflow_run.completed"; bare names do not match. ' +
+      'Opt in to "check_run.completed" only for early per-job failure or job-specific progress. ' +
+      'A terminal event covers one app suite or workflow run, including failures; reconcile all current checks on GitHub, not just the first completion, before proceeding. ' +
+      'Subscriptions remain active after delivery. If required checks are still pending on the same SHA, keep the existing subscription and bounded fallback, then end your turn again; do not recreate them on each wake. ' +
+      'Summary webhooks can be absent or use a different SHA; keep the bounded fallback and reconcile GitHub on resume. ' +
       'For reviews/comments use subjectType "pull_request" and subjectId = the PR number. ' +
       'Verified end to end so far: a PR comment waking an idle, live chat. Sleeping-chat CI/review delivery is not verified yet.',
     'Subscription expiry is not a wake. Before ending your turn, persist PR URL, full head SHA, pending check names/run URLs, ' +
