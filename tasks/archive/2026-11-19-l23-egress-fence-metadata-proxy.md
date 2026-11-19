@@ -27,7 +27,7 @@ Docs stay experimental operator guide in deploy/selfhost/README.md per landing p
 - [x] Wire deploy/upgrade/compose minimally; preserve s3 R2_S3_REGION requirement.
 - [x] Unit/live tests plus self-host-only import graph; lint/typecheck/build/full relevant checks.
 - [x] Security design follow-up acceptance, final-head security and supporting specialist reviews.
-- [ ] Final task-completion validation before archive.
+- [x] Final task-completion validation before archive (PASS on68b4bc08b; runtime bbd7e5d1c).
 - [x] Coordinate BOX after H2 BOX FREE; prove all denials/recovery/flush stop/scoped token/normal workload; clean resources/access.
 - [ ] Draft PR, ready CI+CodeRabbit; merge main first; current-head gates; merging channel note; merge; monitor production; idea SHIPPED.
 
