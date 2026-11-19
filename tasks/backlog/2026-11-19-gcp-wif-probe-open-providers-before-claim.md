@@ -14,7 +14,10 @@ Related: claim squatting with no proof of control (cloudflare-specialist M3, sec
 
 ## Proposed fix
 
-Before the first claim of a pool (no claim, no holder), mint a probe identity token with a synthetic foreign `user_id`/`project_id` for the named provider and call Google STS. If STS accepts it, the provider trusts SAM's issuer alone: refuse the save/exchange and tell the owner to re-run guided setup. Treat any STS failure as "not open".
+Before the first claim of a pool (no claim, no holder), mint a probe identity token with a synthetic foreign `user_id`/`project_id` for the named provider and call Google STS. Three outcomes:
+- STS **accepts** it: the provider trusts SAM's issuer alone. Refuse the save/exchange and tell the owner to re-run guided setup.
+- STS **rejects it on the attribute condition** (a verified scope rejection): the provider is scoped; record the claim.
+- **Anything inconclusive** (timeout, 5xx, network error, unparseable response, an error that does not identify a condition rejection): do not claim and do not sign. Return a retryable error. An outage must never be read as "this provider is safe", or the documented attack works whenever Google is slow.
 
 Decide with Raphaël whether the probe should also run on exchanges of already-claimed pools (closes legacy issuer-only providers fleet-wide, but would refuse production's one legacy guided connection until its owner re-runs setup).
 
@@ -24,6 +27,6 @@ Also consider: a per-owner cap on claims, and recording a claim when a deploymen
 
 - [ ] A first claim of a pool whose named provider accepts a foreign `user_id` is refused, with a message telling the owner to re-run setup
 - [ ] A user-scoped (guided) provider passes the probe
-- [ ] STS errors other than acceptance do not block the claim
+- [ ] Only a verified attribute-condition rejection permits the claim; inconclusive probe results refuse with a retryable error and sign nothing
 - [ ] Decision recorded on probing already-claimed pools
-- [ ] Tests: attack (open provider refused), owner control (scoped provider claimed), STS error control
+- [ ] Tests: attack (open provider refused), owner control (scoped provider claimed), inconclusive control (timeout/5xx refused, retryable)

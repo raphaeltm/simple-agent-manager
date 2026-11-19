@@ -48,36 +48,44 @@ SELECT 'cc_credentials', cc.id, 'user', cc.owner_id, cc.encrypted_token, cc.iv
                       AND (i.unreadable = 0 OR i.indexed_at >= ?))
 LIMIT ?`;
 
-// Everything that holds one pool: its claim, every live credential naming it (index rows whose
-// source row still exists), and every deployment credential naming it (plaintext, read directly).
-// Used only when the unindexed-row probe in the same D1 batch (one transaction) returned nothing,
-// so every live row is indexed at its current IV and owner. Inactive and disabled credentials
-// count: they can be re-enabled, and Google still trusts them.
+// What decides one pool for one owner: its claim, plus at most one live credential and at most one
+// deployment credential of a DIFFERENT owner naming it (one foreign holder is enough to refuse).
+// Index rows of deleted credentials drop out through the existence checks. Used only when the
+// unindexed-row probe in the same D1 batch (one transaction) returned nothing, so every live row
+// is indexed at its current IV and owner. Inactive and disabled credentials count: they can be
+// re-enabled, and Google still trusts them.
 //
-// Binds: pool key x2, project number, pool id.
+// Binds: pool key; pool key, owner kind, owner user id or ''; project number, pool id,
+// owner kind, owner user id or ''.
 export const POOL_HOLDERS_SQL = `
 SELECT 'gcp_wif_pool_claims' AS sourceTable, k.pool_key AS sourceId, k.owner_kind AS ownerKind,
        k.owner_user_id AS ownerUserId
   FROM gcp_wif_pool_claims k
  WHERE k.pool_key = ?
 UNION ALL
-SELECT i.source_table, i.source_id, i.owner_kind, i.owner_user_id
-  FROM gcp_wif_pool_index i
- WHERE i.pool_key = ?
-   AND (
-     (i.source_table = 'credentials' AND EXISTS (
-        SELECT 1 FROM credentials c WHERE c.id = i.source_id AND c.provider = 'gcp'
-           AND c.credential_type = 'cloud-provider'))
-     OR (i.source_table = 'platform_credentials' AND EXISTS (
-        SELECT 1 FROM platform_credentials p WHERE p.id = i.source_id AND p.provider = 'gcp'
-           AND p.credential_type = 'cloud-provider'))
-     OR (i.source_table = 'cc_credentials' AND EXISTS (
-        SELECT 1 FROM cc_credentials cc WHERE cc.id = i.source_id AND cc.kind = 'cloud-provider'))
-   )
+SELECT * FROM (
+  SELECT i.source_table, i.source_id, i.owner_kind, i.owner_user_id
+    FROM gcp_wif_pool_index i
+   WHERE i.pool_key = ?
+     AND NOT (i.owner_kind = ? AND COALESCE(i.owner_user_id, '') = ?)
+     AND (
+       (i.source_table = 'credentials' AND EXISTS (
+          SELECT 1 FROM credentials c WHERE c.id = i.source_id AND c.provider = 'gcp'
+             AND c.credential_type = 'cloud-provider'))
+       OR (i.source_table = 'platform_credentials' AND EXISTS (
+          SELECT 1 FROM platform_credentials p WHERE p.id = i.source_id AND p.provider = 'gcp'
+             AND p.credential_type = 'cloud-provider'))
+       OR (i.source_table = 'cc_credentials' AND EXISTS (
+          SELECT 1 FROM cc_credentials cc WHERE cc.id = i.source_id AND cc.kind = 'cloud-provider'))
+     )
+   LIMIT 1)
 UNION ALL
-SELECT 'project_deployment_credentials', d.id, 'user', d.user_id
-  FROM project_deployment_credentials d
- WHERE d.provider = 'gcp' AND d.gcp_project_number = ? AND lower(trim(d.wif_pool_id)) = ?`;
+SELECT * FROM (
+  SELECT 'project_deployment_credentials', d.id, 'user', d.user_id
+    FROM project_deployment_credentials d
+   WHERE d.provider = 'gcp' AND d.gcp_project_number = ? AND lower(trim(d.wif_pool_id)) = ?
+     AND NOT (? = 'user' AND d.user_id = ?)
+   LIMIT 1)`;
 
 // Binds: source table, source id, iv, owner kind, owner user id, pool key, unreadable, indexed at.
 export const UPSERT_INDEX_SQL = `
@@ -88,11 +96,26 @@ ON CONFLICT (source_table, source_id) DO UPDATE SET
   iv = excluded.iv, owner_kind = excluded.owner_kind, owner_user_id = excluded.owner_user_id,
   pool_key = excluded.pool_key, unreadable = excluded.unreadable, indexed_at = excluded.indexed_at`;
 
-// First owner wins: the primary key makes concurrent claims race-free.
-// Binds: pool key, owner kind, owner user id, claimed at.
+// First owner wins: the primary key makes concurrent claims race-free. A claim is withheld while
+// a live credential of a different owner could not be decrypted: it might name this pool, and a
+// claim granted now would outlive the key fix. The unreadable row is retried after
+// `gcpWif.poolIndexUnreadableRetryMinutes`; an operator removes a permanently corrupt row.
+// Binds: pool key, owner kind, owner user id, claimed at, owner kind, owner user id or ''.
 export const CLAIM_POOL_SQL = `
 INSERT INTO gcp_wif_pool_claims (pool_key, owner_kind, owner_user_id, claimed_at)
-VALUES (?, ?, ?, ?)
+SELECT ?, ?, ?, ?
+ WHERE NOT EXISTS (
+   SELECT 1 FROM gcp_wif_pool_index u
+    WHERE u.unreadable = 1
+      AND NOT (u.owner_kind = ? AND COALESCE(u.owner_user_id, '') = ?)
+      AND (
+        (u.source_table = 'credentials' AND EXISTS (
+           SELECT 1 FROM credentials c WHERE c.id = u.source_id AND c.iv = u.iv))
+        OR (u.source_table = 'platform_credentials' AND EXISTS (
+           SELECT 1 FROM platform_credentials p WHERE p.id = u.source_id AND p.iv = u.iv))
+        OR (u.source_table = 'cc_credentials' AND EXISTS (
+           SELECT 1 FROM cc_credentials cc WHERE cc.id = u.source_id AND cc.iv = u.iv))
+      ))
 ON CONFLICT (pool_key) DO NOTHING`;
 
 // Binds: pool key.

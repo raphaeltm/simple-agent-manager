@@ -35,7 +35,7 @@ User-level guided GCP setup created a pool provider whose attribute condition ch
 - [x] Review round 2 fixes: namespaced fallback `project_id` (`gcpIdentityTokenProjectId`, `gcp-project:<id>`); per-check D1 query cap (`gcpWif.poolIndexMaxQueriesPerCheck`, exact statement count); fail closed (503) on malformed batch results and D1 faults while indexing
 - [x] Composable (`cc_credentials:`) exact-path owner test (G23); reverted an accidental `tokenUserId` log-key rename in four unrelated MCP files
 - [x] Deferred (MEDIUM, with justification): open issuer-only providers on pools SAM never recorded, and claims without proof of Google control → `tasks/backlog/2026-11-19-gcp-wif-probe-open-providers-before-claim.md`
-- [ ] Full quality suite
+- [x] Full quality suite: check:fast passes; API suite 17,869 tests, 0 failures
 - [ ] Reviews: security-auditor (re-verify), task-completion-validator, cloudflare-specialist
 - [ ] Staging: live save-time and exchange-time refusals
 

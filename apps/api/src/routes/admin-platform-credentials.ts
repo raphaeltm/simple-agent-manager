@@ -26,6 +26,7 @@ import { reconcileCapacityPoolsForCredentialMutation } from '../services/capacit
 import { decrypt, encrypt } from '../services/encryption';
 import { deleteGcpApiHealthSafely } from '../services/gcp-api-health';
 import { assertGcpWifPayloadOwnership } from '../services/gcp-wif-pool-ownership';
+import { reconcileGcpWifPoolIndex } from '../services/gcp-wif-pool-ownership';
 import { buildProviderConfig } from '../services/provider-credentials';
 import { CredentialValidator } from '../services/validation';
 
@@ -245,6 +246,8 @@ adminPlatformCredentialRoutes.patch(
 adminPlatformCredentialRoutes.delete('/:id', async (c) => {
   const credentialId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
+  // Record the pool a GCP platform credential names before it goes: Google may still trust it.
+  await reconcileGcpWifPoolIndex(c.env, 'delete_platform_credential');
 
   const result = await db
     .delete(schema.platformCredentials)

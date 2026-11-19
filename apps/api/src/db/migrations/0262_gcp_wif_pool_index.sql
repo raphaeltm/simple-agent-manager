@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS gcp_wif_pool_index (
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_gcp_wif_pool_index_pool
   ON gcp_wif_pool_index (pool_key) WHERE pool_key IS NOT NULL;
+-- Unreadable rows withhold first claims for other owners; keep that lookup off a table scan.
+CREATE INDEX IF NOT EXISTS idx_gcp_wif_pool_index_unreadable
+  ON gcp_wif_pool_index (source_table, source_id) WHERE unreadable = 1;
 
 -- The first owner whose credential named a pool. Never released by deleting or re-pointing a
 -- credential: the trust an earlier setup granted in Google outlives the SAM row. An operator
@@ -35,6 +38,18 @@ CREATE TABLE IF NOT EXISTS gcp_wif_pool_claims (
   claimed_at TEXT NOT NULL,
   CHECK ((owner_kind = 'user' AND owner_user_id IS NOT NULL) OR (owner_kind = 'platform' AND owner_user_id IS NULL))
 ) WITHOUT ROWID;
+
+-- Deployment credentials store their pool in plaintext, so their claims are recorded here, before
+-- any check runs: deleting a deployment credential must not free its pool. A pool named by more
+-- than one owner gets no claim; the live rows keep refusing every owner until an operator decides.
+INSERT INTO gcp_wif_pool_claims (pool_key, owner_kind, owner_user_id, claimed_at)
+SELECT trim(gcp_project_number) || '/' || lower(trim(wif_pool_id)), 'user', min(user_id),
+       strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+  FROM project_deployment_credentials
+ WHERE provider = 'gcp'
+ GROUP BY trim(gcp_project_number) || '/' || lower(trim(wif_pool_id))
+HAVING count(DISTINCT user_id) = 1
+ON CONFLICT (pool_key) DO NOTHING;
 
 -- Keep the unindexed-row probe proportional to cloud credentials, not to every stored
 -- credential (agent keys share these tables).

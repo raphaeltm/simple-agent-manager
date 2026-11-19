@@ -42,6 +42,8 @@ const {
   GcpWifPoolInvalidError,
   GcpWifPoolOwnedByAnotherOwnerError,
 } = await import('../../../src/services/gcp-wif-pool-ownership');
+const { handleAppError } = await import('../../../src/middleware/app-error-handler');
+const { runGcpDeploySetup } = await import('../../../src/services/gcp-deploy-setup');
 const { serializeCredentialToken, createProviderForUser } =
   await import('../../../src/services/provider-credentials');
 const { UNINDEXED_ROWS_SQL } = await import('../../../src/services/gcp-wif-pool-ownership-sql');
@@ -158,16 +160,8 @@ function indexRows() {
 
 function testApp() {
   const app = new Hono<{ Bindings: Env }>();
-  app.onError((err, c) => {
-    const appError = err as { statusCode?: number; error?: string; message?: string };
-    if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
-      return c.json(
-        { error: appError.error, message: appError.message },
-        appError.statusCode as 400
-      );
-    }
-    return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
-  });
+  // The production handler, so a refusal that stopped being an AppError would surface as 500.
+  app.onError(handleAppError);
   app.route('/api/credentials', credentialsRoutes);
   app.route('/api/cc', ccRoutes);
   return app;
@@ -198,6 +192,7 @@ beforeEach(() => {
   createAllSchemaTables(sqlite, schema);
   // Exercise the real migration (its CHECK constraints and indexes), not only the drizzle shape.
   sqlite.exec('DROP TABLE gcp_wif_pool_index');
+  sqlite.exec('DROP TABLE gcp_wif_pool_claims');
   sqlite.exec(
     readFileSync(
       new URL('../../../src/db/migrations/0262_gcp_wif_pool_index.sql', import.meta.url),
@@ -914,5 +909,166 @@ describe('the check fails closed on its own limits', () => {
     await expect(exchange(user('user-b'), wif(POOL_A))).rejects.toBeInstanceOf(
       GcpWifPoolOwnedByAnotherOwnerError
     );
+  });
+});
+
+describe('review round 3: unresolved rows, budgets, deletes and deployments', () => {
+  afterEach(async () => {
+    const { __resetAdminSettingsCacheForTest } =
+      await import('../../../src/services/admin-settings-resolution');
+    __resetAdminSettingsCacheForTest();
+  });
+
+  async function setSetting(key: string, value: string) {
+    const { __resetAdminSettingsCacheForTest } =
+      await import('../../../src/services/admin-settings-resolution');
+    __resetAdminSettingsCacheForTest();
+    sqlite
+      .prepare('INSERT INTO platform_settings (key, value, updated_at) VALUES (?, ?, ?)')
+      .run(key, value, NOW);
+  }
+
+  async function storeUnreadableCc(id: string, ownerId: string, pool = POOL_A) {
+    const otherKey = Buffer.from('fedcba9876543210fedcba9876543210').toString('base64');
+    const foreign = await encrypt(JSON.stringify(wif(pool)), otherKey);
+    sqlite
+      .prepare(
+        `INSERT INTO cc_credentials (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
+         VALUES (?, ?, 'x', 'cloud-provider', ?, ?, 1, ?, ?)`
+      )
+      .run(id, ownerId, foreign.ciphertext, foreign.iv, NOW, NOW);
+  }
+
+  it('withholds a first claim while another owner’s credential is unreadable', async () => {
+    // A's credential for POOL_A cannot be decrypted (for example a key misconfiguration).
+    await storeUnreadableCc('cc-a-unreadable', 'user-a');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(exchange(user('user-b'), wif(POOL_A))).rejects.toBeInstanceOf(
+      GcpWifPoolIndexUnavailableError
+    );
+    expect(signIdentityToken).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT count(*) AS n FROM gcp_wif_pool_claims').get()).toEqual({
+      n: 0,
+    });
+    // Owner control: the unreadable row's own owner is not blocked by it.
+    await expect(exchange(user('user-a'), wif(POOL_B))).resolves.toBe('sa-token');
+    await expect(exchange(user('user-a'), wif(POOL_B))).resolves.toBe('sa-token');
+  });
+
+  it('never issues more statements than the per-check budget, even on the first page', async () => {
+    await setSetting('gcpWif.poolIndexPageSize', '50');
+    await setSetting('gcpWif.poolIndexMaxQueriesPerCheck', '6');
+    for (let i = 0; i < 3; i++) await storeCcRow(`cc-other-${i}`, 'user-b', `token-${i}`);
+    await storeLegacyRow('cred-a', 'user-a', wif(POOL_A));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const batch = vi.spyOn(env.DATABASE, 'batch');
+
+    await expect(exchange(user('user-a'), wif(POOL_A))).rejects.toBeInstanceOf(
+      GcpWifPoolIndexUnavailableError
+    );
+    const statements = batch.mock.calls.reduce((sum, [list]) => sum + list.length, 0);
+    expect(statements).toBeLessThanOrEqual(6);
+    expect(
+      (sqlite.prepare('SELECT count(*) AS n FROM gcp_wif_pool_index').get() as { n: number }).n
+    ).toBe(1);
+  });
+
+  it('a rejected probe becomes the retryable 503, not an upstream error', async () => {
+    vi.spyOn(env.DATABASE, 'batch').mockRejectedValueOnce(new Error('D1_ERROR: overloaded'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(exchange(user('user-a'), wif(POOL_A))).rejects.toBeInstanceOf(
+      GcpWifPoolIndexUnavailableError
+    );
+    // Liveness control: the next check succeeds.
+    await expect(exchange(user('user-a'), wif(POOL_A))).resolves.toBe('sa-token');
+  });
+
+  it('a disconnect before any other check still leaves the pool claimed', async () => {
+    // A connected before this release: the row exists, nothing is indexed or claimed yet.
+    await storeLegacyRow('cred-a', 'user-a', wif(POOL_A));
+    auth.userId = 'user-a';
+    const removed = await testApp().request('/api/credentials/gcp', { method: 'DELETE' }, env);
+    expect(removed.status).toBe(200);
+    expect(
+      sqlite.prepare('SELECT count(*) AS n FROM credentials WHERE user_id = ?').get('user-a')
+    ).toEqual({ n: 0 });
+
+    auth.userId = 'user-b';
+    const attack = await postGcpCredential(wif(POOL_A));
+    expect(attack.status).toBe(409);
+    // Control: B can still save a pool nobody holds.
+    expect((await postGcpCredential(wif(POOL_B))).status).toBe(201);
+  });
+
+  it('the production error handler keeps unrelated failures distinct', async () => {
+    auth.userId = 'user-b';
+    const invalid = await testApp().request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'gcp', gcpProjectId: 'x' }),
+      },
+      env
+    );
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).not.toMatchObject({
+      error: 'GCP_WIF_POOL_OWNED_BY_ANOTHER_OWNER',
+    });
+  });
+
+  it('migration 0262 claims existing deployment pools with one owner, and none with two', () => {
+    const deployment = (id: string, userId: string, projectNumber: string, pool: string) =>
+      sqlite
+        .prepare(
+          `INSERT INTO project_deployment_credentials (id, project_id, user_id, provider, gcp_project_id,
+             gcp_project_number, service_account_email, wif_pool_id, wif_provider_id, created_at, updated_at)
+           VALUES (?, ?, ?, 'gcp', 'gcp-x', ?, 'deployer@x', ?, 'p', ?, ?)`
+        )
+        .run(id, `proj-${id}`, userId, projectNumber, pool, NOW, NOW);
+    sqlite.pragma('foreign_keys = OFF');
+    deployment('dep-1', 'user-a', '444444444444', 'Sam-Deploy-Pool');
+    deployment('dep-2', 'user-a', '555555555555', 'sam-deploy-pool');
+    deployment('dep-3', 'user-b', '555555555555', 'sam-deploy-pool');
+    sqlite.exec(
+      readFileSync(
+        new URL('../../../src/db/migrations/0262_gcp_wif_pool_index.sql', import.meta.url),
+        'utf8'
+      )
+    );
+    expect(
+      sqlite
+        .prepare('SELECT pool_key, owner_user_id FROM gcp_wif_pool_claims ORDER BY pool_key')
+        .all()
+    ).toEqual([{ pool_key: '444444444444/sam-deploy-pool', owner_user_id: 'user-a' }]);
+  });
+
+  it('deployment setup stops before changing anything in Google when the pool is taken', async () => {
+    await storeLegacyRow(
+      'cred-a',
+      'user-a',
+      wif({ gcpProjectNumber: POOL_A.gcpProjectNumber, wifPoolId: 'sam-deploy-pool' })
+    );
+    const google = vi.fn(async () =>
+      Response.json({ projectNumber: POOL_A.gcpProjectNumber, projectId: 'gcp-a' })
+    );
+    vi.stubGlobal('fetch', google);
+    const { assertGcpWifPoolOwnership } =
+      await import('../../../src/services/gcp-wif-pool-ownership');
+
+    await expect(
+      runGcpDeploySetup('oauth', 'gcp-a', env, 'proj-b', {
+        assertPoolAvailable: (pool) =>
+          assertGcpWifPoolOwnership(
+            env,
+            pool,
+            { kind: 'user', userId: 'user-b' },
+            'gcp_deploy_setup'
+          ),
+      })
+    ).rejects.toBeInstanceOf(GcpWifPoolOwnedByAnotherOwnerError);
+    expect(google).toHaveBeenCalledTimes(1);
   });
 });

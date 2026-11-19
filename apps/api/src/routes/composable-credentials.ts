@@ -25,6 +25,7 @@ import { errors } from '../middleware/error';
 import { reconcileCapacityPoolsForCredentialMutation } from '../services/capacity-pool-credential-lifecycle';
 import { encrypt } from '../services/encryption';
 import { assertGcpWifPayloadOwnership } from '../services/gcp-wif-pool-ownership';
+import { reconcileGcpWifPoolIndex } from '../services/gcp-wif-pool-ownership';
 import { registerCCAttachmentRoutes, uniqueProjectIds } from './composable-credentials-attachments';
 import { registerCCProfileAttachmentRoutes } from './composable-credentials-profile-attachments';
 
@@ -245,6 +246,9 @@ ccRoutes.delete('/credentials/:id', async (c) => {
   const { id } = c.req.param();
 
   const affectedProjectIds = await listAffectedCredentialProjectIds(db, userId, id);
+  // A cloud credential may name a GCP pool; record it before the row goes (Google may still
+  // trust it). One D1 batch when nothing is unindexed.
+  await reconcileGcpWifPoolIndex(c.env, 'delete_composable_credential');
 
   const result = await db
     .delete(schema.ccCredentials)

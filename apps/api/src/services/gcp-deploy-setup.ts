@@ -49,8 +49,16 @@ export async function runGcpDeploySetup(
   gcpProjectId: string,
   env: Env,
   samProjectId: string,
-  onProgress?: SetupProgressCallback
+  hooks: {
+    onProgress?: SetupProgressCallback;
+    /**
+     * Called with the pool once the project number is known, before SAM creates or changes any
+     * Google resource. Throws to stop a setup that would take over another owner's pool.
+     */
+    assertPoolAvailable?: (pool: { gcpProjectNumber: string; wifPoolId: string }) => Promise<void>;
+  } = {}
 ): Promise<Omit<ProjectDeploymentCredential, 'id' | 'userId' | 'createdAt' | 'updatedAt'>> {
+  const { onProgress } = hooks;
   const trustScope = { kind: 'project', samProjectId } as const;
   const timeoutMs = env.GCP_API_TIMEOUT_MS
     ? parseInt(env.GCP_API_TIMEOUT_MS, 10)
@@ -66,6 +74,7 @@ export async function runGcpDeploySetup(
   onProgress?.('get_project_number', 'in_progress');
   const projectNumber = await getProjectNumber(oauthToken, gcpProjectId, timeoutMs);
   onProgress?.('get_project_number', 'done');
+  await hooks.assertPoolAvailable?.({ gcpProjectNumber: projectNumber, wifPoolId: poolId });
 
   // Step 2: Enable deployment APIs
   onProgress?.('enable_apis', 'in_progress');

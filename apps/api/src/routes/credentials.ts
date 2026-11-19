@@ -53,6 +53,7 @@ import {
   replaceUserGcpCredential,
 } from '../services/gcp-credential-store';
 import { clearGcpAccessTokenCache } from '../services/gcp-sts';
+import { reconcileGcpWifPoolIndex } from '../services/gcp-wif-pool-ownership';
 import { parseGcpCredential, serializeCredentialToken } from '../services/provider-credentials';
 import {
   CredentialValidator,
@@ -448,6 +449,8 @@ credentialsRoutes.delete('/:provider', async (c) => {
       )
       .limit(1);
     if (!stored) throw errors.notFound('Credential');
+    // Record the pool this credential names before it goes: Google may still trust it.
+    await reconcileGcpWifPoolIndex(c.env, 'delete_user_gcp_credential');
 
     let credential;
     try {

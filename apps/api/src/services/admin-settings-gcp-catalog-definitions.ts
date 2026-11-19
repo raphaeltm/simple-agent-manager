@@ -8,11 +8,11 @@ import {
 
 import { type AdminSettingDefinition, integerDefinition } from './admin-setting-definitions';
 
-/** Defaults for the workload identity pool index, also used before the settings are read. */
+/** Defaults for the workload identity pool index (`gcp-wif-pool-ownership.ts`). */
 export const DEFAULT_GCP_WIF_POOL_INDEX_PAGE_SIZE = 25;
-export const DEFAULT_GCP_WIF_POOL_INDEX_UNREADABLE_RETRY_MINUTES = 60;
+/** Short, because an unreadable row withholds first claims for other owners until it is retried. */
+export const DEFAULT_GCP_WIF_POOL_INDEX_UNREADABLE_RETRY_MINUTES = 10;
 export const DEFAULT_GCP_WIF_POOL_INDEX_BUDGET_MS = 10_000;
-/** Under the 1,000 D1 queries a paid Workers invocation allows, leaving room for the request. */
 export const DEFAULT_GCP_WIF_POOL_INDEX_MAX_QUERIES_PER_CHECK = 500;
 
 export type GcpCatalogSettingName =
@@ -136,8 +136,9 @@ export const GCP_CATALOG_SETTINGS: readonly AdminSettingDefinition[] = [
   ),
   // Workload identity pool ownership (`gcp-wif-pool-ownership.ts`). Indexing runs only for
   // credentials added or re-encrypted since the last check; a check that cannot finish inside the
-  // budget refuses rather than trusting a partial index. A page costs 2 + 2 x page size D1
-  // statements; `gcpWif.poolIndexMaxQueriesPerCheck` caps their sum per check.
+  // budget refuses rather than trusting a partial index. A page costs a probe batch (2 SQL
+  // statements) plus up to 2 statements per row; `gcpWif.poolIndexMaxQueriesPerCheck` caps the
+  // statements one check issues, and a page shrinks to fit.
   integerDefinition(
     'gcpWif.poolIndexPageSize',
     DEFAULT_GCP_WIF_POOL_INDEX_PAGE_SIZE,
@@ -156,14 +157,14 @@ export const GCP_CATALOG_SETTINGS: readonly AdminSettingDefinition[] = [
     'gcpWif.poolIndexUnreadableRetryMinutes',
     DEFAULT_GCP_WIF_POOL_INDEX_UNREADABLE_RETRY_MINUTES,
     'Operations',
-    'Minutes before SAM tries again to read a stored cloud credential it could not decrypt while indexing workload identity pools.',
+    'Minutes before SAM tries again to read a stored cloud credential it could not decrypt while indexing workload identity pools. Until then the unreadable credential stops other owners from claiming new pools.',
     { min: 1, max: 24 * 60 }
   ),
   integerDefinition(
     'gcpWif.poolIndexMaxQueriesPerCheck',
     DEFAULT_GCP_WIF_POOL_INDEX_MAX_QUERIES_PER_CHECK,
     'Operations',
-    'Most D1 queries one token exchange or credential save may spend indexing new credentials. Keep it under your Workers plan’s per-request D1 query limit (1,000 on paid; on the free plan use 40 with a page size of 5).',
-    { min: 12, max: 900 }
+    'Most SQL statements one token exchange or credential save may issue while indexing new credentials (each page is a probe batch plus up to two statements per credential). Past it the check refuses with a retryable error and the next one continues.',
+    { min: 6, max: 900 }
   ),
 ];

@@ -366,7 +366,10 @@ export async function grantWifUserOnSa(
         Authorization: `Bearer ${oauthToken}`,
         'Content-Type': 'application/json',
       },
-      body: '{}',
+      // Version 3 returns conditional bindings under their real role with a `condition` field.
+      // Without it Google appends `_withcond_<hash>` to the role, and a conditional `pool/*`
+      // grant would escape the removal below.
+      body: JSON.stringify({ options: { requestedPolicyVersion: 3 } }),
     },
     timeoutMs
   );
@@ -425,7 +428,12 @@ export async function grantWifUserOnSa(
         policy: {
           bindings: nonEmptyBindings,
           etag: policy.etag,
-          ...(policy.version !== undefined ? { version: policy.version } : {}),
+          // Conditional bindings can only be written back in a version 3 policy.
+          ...(nonEmptyBindings.some((b) => b.condition !== undefined)
+            ? { version: 3 }
+            : policy.version !== undefined
+              ? { version: policy.version }
+              : {}),
         },
       }),
     },

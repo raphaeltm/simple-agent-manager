@@ -68,7 +68,7 @@ describe('runGcpDeploySetup', () => {
       'my-project',
       mockEnv(),
       'sam-project-123',
-      (step, status) => progressSteps.push({ step, status })
+      { onProgress: (step, status) => progressSteps.push({ step, status }) }
     );
 
     // Verify result

@@ -232,6 +232,47 @@ describe('WIF trust scoping (cross-owner impersonation prevention)', () => {
       ]);
     });
 
+    it('reads the policy as version 3 and removes a conditional pool-wide grant', async () => {
+      const keepCondition = {
+        title: 'business-hours',
+        expression: 'request.time < timestamp("2030-01-01T00:00:00Z")',
+      };
+      mockFetch.mockResolvedValueOnce(
+        mockGcpResponse({
+          version: 3,
+          etag: 'abc',
+          bindings: [
+            {
+              role: WIF_ROLE,
+              members: [`principalSet://${POOL_PATH}/*`],
+              condition: { title: 'legacy', expression: 'true' },
+            },
+            { role: WIF_ROLE, members: ['user:ops@example.com'], condition: keepCondition },
+          ],
+        })
+      );
+      mockFetch.mockResolvedValueOnce(mockGcpResponse({ etag: 'def' }));
+
+      await grantWifUserOnSa(
+        'token',
+        'my-gcp-project',
+        '123456',
+        'sa@my-gcp-project.iam.gserviceaccount.com',
+        'sam-pool',
+        5000,
+        USER_SCOPE
+      );
+
+      expect(requestBody(0)).toEqual({ options: { requestedPolicyVersion: 3 } });
+      const policy = (requestBody(1) as { policy: Record<string, unknown> }).policy;
+      expect(policy.version).toBe(3);
+      expect(policy.bindings).toEqual([
+        { role: WIF_ROLE, members: ['user:ops@example.com'], condition: keepCondition },
+        // Never added under another binding's condition.
+        { role: WIF_ROLE, members: [`principalSet://${POOL_PATH}/attribute.sam_user/user-a`] },
+      ]);
+    });
+
     it('leaves the policy untouched when already scoped and no wildcard remains', async () => {
       mockFetch.mockResolvedValueOnce(
         mockGcpResponse({
