@@ -15,15 +15,18 @@
  */
 
 import * as crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
 import { generateDeploySigningKeyPair } from './deploy-signing-keys';
 import { deriveVapidKeyPairFromPem } from './vapid-keys';
 
-function generateEncryptionKey(): string {
+/** 32 random bytes, base64. Same shape as the Pulumi-managed `encryption-key`. */
+export function generateEncryptionKey(): string {
   return crypto.randomBytes(32).toString('base64');
 }
 
-function generateKeyPair(): { publicKey: string; privateKey: string } {
+/** RSA-2048 PEM pair for JWT signing. Same shape as the Pulumi-managed `jwt-signing-key`. */
+export function generateKeyPair(): { publicKey: string; privateKey: string } {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
     modulusLength: 2048,
     publicKeyEncoding: { type: 'spki', format: 'pem' },
@@ -33,7 +36,8 @@ function generateKeyPair(): { publicKey: string; privateKey: string } {
   return { publicKey, privateKey };
 }
 
-function generateVapidKeyPair(): { publicKey: string; privateKey: string } {
+/** Raw base64url P-256 VAPID pair, derived the same way the deploy pipeline derives it. */
+export function generateVapidKeyPair(): { publicKey: string; privateKey: string } {
   const { privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   return deriveVapidKeyPairFromPem(privateKey.export({ format: 'pem', type: 'pkcs8' }).toString());
 }
@@ -75,7 +79,11 @@ async function main(): Promise<void> {
   console.log('---');
 }
 
-main().catch((error) => {
-  console.error('❌ Error:', error instanceof Error ? error.message : error);
-  process.exit(1);
-});
+// Run only as a CLI, so other scripts (scripts/selfhost/platform-keys.ts) can import the
+// generators without printing keys.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error('❌ Error:', error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
+}
