@@ -133,7 +133,9 @@ jobs:
               - 'scripts/deploy/deploy-signing-keys.ts'
               - 'scripts/deploy/types.ts'
               - 'scripts/deploy/vapid-keys.ts'
+              - 'scripts/selfhost/observability-migrations.ts'
               - 'scripts/selfhost/reverse-tunnel-migrations.ts'
+              - 'scripts/selfhost/selfhost-migrations.ts'
               # selfhost-inbound-email.test.ts builds this receiver (Self-host Email job only).
               - 'deploy/selfhost/sam-mx/**'
               - 'scripts/quality/node-pool-boundary.ts'
