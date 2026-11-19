@@ -12,7 +12,7 @@ The adversarial review of the push admission path in PR #2907 (H2, SAM-hosted gi
 2. **Delta depth is enforced on read but not at ingest** (review M4). `packstore.ts` resolves deltas eagerly at ingest without checking `maxDeltaDepth`, so a pack built with `--depth=250` is accepted. Cold reads then throw `delta chain exceeds depth`, and a shallow clone aborts with `early EOF` until GC rewrites the objects loose. The exception is thrown inside the upload response stream and is not caught.
 3. **GC holds the input gate for the whole sweep** (review M5, the part not fixed in #2907). `gc()` runs under `blockConcurrencyWhile` for up to `workTimeoutMs` (120 s), blocking every other request to that repository, reads included.
 4. **Pushes over heavy history without a reachable cache** (re-verification F1, the part not fixed in #2907).
-   - With a valid reachable cache, a push stops at any cached object. Without one, the case after any deletion or force push until the next full clone, a push whose parent is not a ref tip proves that parent's closure by walking old commits and trees under the 128 MiB budget.
+   - A push whose parent is not a ref tip proves that parent's closure by walking old commits and trees under the 128 MiB budget. Admission deliberately does not trust the reachable cache: a version of #2907 that did was shown to admit a parent GC had deleted, after a clone raced a deleting push (stamp race now fixed in `saveReachable`).
    - A repository whose old trees inflate past the budget then cannot accept a fork-from-old-commit push. A full clone faces the same envelope.
    - An ancestry check that runs out of budget is already treated as a forced update rather than failing the push.
    - Fix: keep a persistent set of validated objects that only GC prunes. GC already computes the reachable set, and every accepted push adds its proven closure. Or record commit parents at ingest.
@@ -43,4 +43,5 @@ Who can trigger them:
 - [ ] GC no longer blocks reads for the whole sweep; a test shows a clone proceeding while GC runs.
 - [ ] Decide on and implement per-token push rate limiting, or record why not.
 - [ ] Every malformed command line is answered with `ng` or a refusal, never dropped.
-- [ ] A push forking from an old, heavy, uncached commit succeeds within the budget. A real-git test proves it, with no reachable cache present.
+- [ ] A push forking from an old, heavy commit succeeds within the budget. A real-git test proves it, and a stale or poisoned cache cannot vouch for a missing object.
+- [ ] Optionally reject the remaining fsck error-level shapes that default clients tolerate but `transfer.fsckObjects=true` clients refuse: unsorted trees, malformed idents, CR in headers.

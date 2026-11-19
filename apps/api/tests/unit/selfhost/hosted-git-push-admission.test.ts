@@ -278,6 +278,85 @@ describe('armHostedGitGcAlarm', () => {
 
 describe('push admission: object shapes git can read', () => {
   const header = `author ${SIG}\ncommitter ${SIG}`;
+  it('refuses byte-level shapes git cannot read, and accepts names that are not UTF-8', async () => {
+    const repo = new Repo();
+    const blob = repo.blob('bytes-blob');
+    const tree = repo.tree('bytes-tree', [treeEntry('100644', 'f', blob)]);
+    const bom = [0xef, 0xbb, 0xbf];
+    const raw = (label: string, type: Kind, bytes: number[]) =>
+      repo.put(label, type, new Uint8Array(bytes));
+    const sigLines = `author ${SIG}\ncommitter ${SIG}\n`;
+    const bomCommit = raw('bom-commit', 'commit', [
+      ...bom,
+      ...enc.encode(`tree ${tree}\n${sigLines}\nx\n`),
+    ]);
+    const good = repo.commit('good', tree);
+    const bomTag = raw('bom-tag', 'tag', [
+      ...bom,
+      ...enc.encode(`object ${good}\ntype commit\ntag t\n\nx\n`),
+    ]);
+    const openTag = raw('open-tag', 'tag', [...enc.encode(`object ${good}\ntype commit\ntag v1`)]);
+    // The header section must end in a newline even when its last line is optional.
+    const openTagger = raw('open-tagger', 'tag', [
+      ...enc.encode(`object ${good}\ntype commit\ntag v2\ntagger ${SIG}`),
+    ]);
+    const nulHeader = raw('nul', 'commit', [
+      ...enc.encode(`tree ${tree}\nauthor T`),
+      0,
+      ...enc.encode(` ${SIG}\ncommitter ${SIG}\n\nx\n`),
+    ]);
+    const entry = (mode: string, name: number[], oid: string) => [
+      ...enc.encode(`${mode} `),
+      ...name,
+      0,
+      ...Buffer.from(oid, 'hex'),
+    ];
+    const latin = repo.commit(
+      'latin',
+      repo.tree('latin-tree', [entry('100644', [0xe8], blob), entry('100644', [0xe9], blob)])
+    );
+    const bomName = repo.commit(
+      'bom-name',
+      repo.tree('bom-name-tree', [entry('100644', bom, blob)])
+    );
+    const oddMode = repo.commit(
+      'odd-mode',
+      repo.tree('odd-mode-tree', [entry('100600', [0x66], blob)])
+    );
+    const dotGit = repo.commit(
+      'dot-git',
+      repo.tree('dot-git-tree', [entry('100644', [...enc.encode('.GIT ')], blob)])
+    );
+    const dotDot = repo.commit(
+      'dot-dot',
+      repo.tree('dot-dot-tree', [entry('40000', [...enc.encode('..')], tree)])
+    );
+    const plan = await decide(repo, [
+      [ZERO, bomCommit, 'refs/heads/bom'],
+      [ZERO, bomTag, 'refs/tags/bom'],
+      [ZERO, openTag, 'refs/tags/open'],
+      [ZERO, openTagger, 'refs/tags/open-tagger'],
+      [ZERO, nulHeader, 'refs/heads/nul'],
+      [ZERO, dotGit, 'refs/heads/dot-git'],
+      [ZERO, dotDot, 'refs/heads/dot-dot'],
+      [ZERO, latin, 'refs/heads/latin'],
+      [ZERO, bomName, 'refs/heads/bom-name'],
+      [ZERO, oddMode, 'refs/heads/odd-mode'],
+    ]);
+    expect(plan.decisions.map((d) => (d.reject ? 'reject' : 'set'))).toEqual([
+      'reject',
+      'reject',
+      'reject',
+      'reject',
+      'reject',
+      'reject',
+      'reject',
+      'set',
+      'set',
+      'set',
+    ]);
+  });
+
   it('refuses commits, tags and trees git cannot parse, with git-shaped controls accepted', async () => {
     const repo = new Repo();
     const tree = repo.tree('shape-tree', [treeEntry('100644', 'f', repo.blob('shape-blob'))]);
@@ -356,40 +435,35 @@ describe('push admission: object shapes git can read', () => {
   });
 });
 
-describe('push admission: bounded reads of old history', () => {
-  /** A history of `n` commits where only the newest is a ref tip. */
-  function history(repo: Repo, n: number) {
-    const commits: string[] = [];
-    for (let i = 0; i < n; i++)
-      commits.push(repo.simple(`h-${i}`, commits.length ? [commits[commits.length - 1]!] : []));
-    return commits;
-  }
-
-  it('stops at the reachable cache when a push forks from an old commit', async () => {
-    for (const cached of [true, false]) {
-      const repo = new Repo();
-      const commits = history(repo, 1201);
-      repo.refs.set('refs/heads/main', commits[commits.length - 1]!);
-      const reachable = new Set(repo.objects.keys());
-      // Fork just below the tip, so proving the parent's closure spans the whole history.
-      const fork = repo.simple(`fork-${cached}`, [commits[commits.length - 2]!]);
-      const store = repo.store() as unknown as Record<string, unknown>;
-      store.getMeta = (key: string) => (cached && key === 'reachable-version' ? 'v' : null);
-      store.reachableHas = (oid: string) => reachable.has(oid);
-      repo.reads = 0;
-      const plan = await withGitWorkBudget(DEFAULT_HOSTED_GIT_LIMITS, () =>
-        validatePush(
-          store as unknown as GitStore,
-          [{ old: ZERO, next: fork, ref: 'refs/heads/fork' }],
-          null
-        )
-      );
-      expect(plan.decisions[0]).toMatchObject({ set: fork });
-      // Cached: the fork commit and its tree. Without the cache (control): the walk proves
-      // the old history down to the root, since no ref tip covers it.
-      if (cached) expect(repo.reads).toBe(2);
-      else expect(repo.reads).toBeGreaterThan(1201);
-    }
+describe('push admission: old history and the reachable cache', () => {
+  it('never trusts the reachable cache for a push: a cached but absent parent is refused', async () => {
+    // A clone racing a stranding push could once stamp a stale reachable set as current,
+    // and GC then deleted an object the cache still listed. Admission must not consult it.
+    const repo = new Repo();
+    const base = repo.simple('base');
+    repo.refs.set('refs/heads/main', base);
+    const gone = oidOf('collected-commit');
+    const child = repo.simple('child-of-gone', [gone]);
+    const store = repo.store() as unknown as Record<string, unknown>;
+    store.getMeta = (key: string) => (key === 'reachable-version' ? 'v' : null);
+    store.reachableHas = (oid: string) => oid === gone || repo.objects.has(oid);
+    const plan = await withGitWorkBudget(DEFAULT_HOSTED_GIT_LIMITS, () =>
+      validatePush(
+        store as unknown as GitStore,
+        [{ old: ZERO, next: child, ref: 'refs/heads/child' }],
+        null
+      )
+    );
+    expect(plan.decisions[0]).toMatchObject({ reject: 'missing necessary objects' });
+    const ok = repo.simple('child-of-base', [base]);
+    const control = await withGitWorkBudget(DEFAULT_HOSTED_GIT_LIMITS, () =>
+      validatePush(
+        store as unknown as GitStore,
+        [{ old: ZERO, next: ok, ref: 'refs/heads/ok' }],
+        null
+      )
+    );
+    expect(control.decisions[0]).toMatchObject({ set: ok });
   });
 
   it('treats an update as forced when the ancestry check exhausts the work budget', async () => {
@@ -421,5 +495,58 @@ describe('push admission: bounded reads of old history', () => {
         validatePush(store as unknown as GitStore, [{ old, next, ref: 'refs/heads/main' }], null)
       )
     ).rejects.toThrow('storage unavailable');
+  });
+});
+
+describe('reachable cache stamping and GC', () => {
+  it('stamps a clone-built reachable set only if refs did not move during the walk', async () => {
+    const { GitStore } = await import('../../../src/vendor/dgit/git/store');
+    const { OidSet } = await import('../../../src/vendor/dgit/git/oidset');
+    const set = new OidSet(16);
+    set.markHex(oidOf('reachable-1'));
+    const fakeThis = (current: string) => ({
+      reachableVersion: () => current,
+      sql: { exec: vi.fn() },
+      setMeta: vi.fn(),
+    });
+    const moved = fakeThis('after-push');
+    await GitStore.prototype.saveReachable.call(moved as unknown as GitStore, set, 'before-push');
+    expect(moved.setMeta).not.toHaveBeenCalled();
+    expect(moved.sql.exec).not.toHaveBeenCalled();
+    const steady = fakeThis('same');
+    await GitStore.prototype.saveReachable.call(steady as unknown as GitStore, set, 'same');
+    expect(steady.setMeta).toHaveBeenCalledWith('reachable-version', 'same');
+  });
+
+  it('invalidates the reachable cache when GC deletes objects, and only then', async () => {
+    const { runHostedGitGc } = await import('../../../src/selfhost/hosted-git/hosted-git-gc');
+    const gcStore = (loose: string[]) => {
+      const invalidateReachable = vi.fn();
+      const store = {
+        objectCount: () => loose.length,
+        refs: () => [],
+        resolveHead: () => null,
+        typeAndSize: () => null,
+        get: async () => null,
+        packs: {
+          baseOids: () => [],
+          countObjects: () => 0,
+          totalPackBytes: () => 0,
+          lookup: () => null,
+          reset: () => undefined,
+        },
+        dbSize: () => 0,
+        allOids: () => loose,
+        deleteObject: vi.fn(),
+        invalidateReachable,
+      } as unknown as GitStore;
+      return { store, invalidateReachable };
+    };
+    const withGarbage = gcStore([oidOf('garbage')]);
+    expect((await runHostedGitGc(withGarbage.store)).removed).toBe(1);
+    expect(withGarbage.invalidateReachable).toHaveBeenCalledOnce();
+    const clean = gcStore([]);
+    expect((await runHostedGitGc(clean.store)).removed).toBe(0);
+    expect(clean.invalidateReachable).not.toHaveBeenCalled();
   });
 });

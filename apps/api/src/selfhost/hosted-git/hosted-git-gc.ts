@@ -105,6 +105,8 @@ export async function runHostedGitGc(store: GitStore): Promise<HostedGitGcResult
       removed++;
     }
   }
+  // A reachable cache must never list a deleted object: the next full clone rebuilds it.
+  if (removed > 0) store.invalidateReachable();
   return noHeadroom
     ? { removed, kept: reachable.size, skipped: true }
     : { removed, kept: reachable.size };

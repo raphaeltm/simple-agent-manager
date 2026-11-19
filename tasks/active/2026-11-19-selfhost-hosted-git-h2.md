@@ -104,3 +104,14 @@ A fresh security-auditor re-verified f9eb945ef. It found 0 CRITICAL and 0 HIGH. 
 MEDIUM-F2 was fixed: lenient parsers let a writer push a commit with `author` before `tree`, tags missing or reordering `object`/`type`/`tag`, or tree modes like `8`, and git then cannot clone. `assertGitObjectShape` now runs in the walk, so a malformed object rejects its own command. A real-git test reproduces each shape; a signed commit with continuation lines and extra headers stays accepted.
 
 MEDIUM-F1 was partly fixed: with a valid reachable cache the walk stops at cached objects (SQL lookup, no read), and an ancestry check that exhausts the work budget counts as a forced update rather than failing the push. The dead `getPeeled` seeding was dropped. The cache-less heavy-history case and F4 (alarm error handling) were deferred to the backlog task. Discrimination was checked again: removing the shape check, the cache stop or the budget tolerance each turned its intended tests red.
+
+## Narrow verification of 8bc9a3af4 (23:45 UTC)
+
+The narrow verification found a HIGH regression introduced by the cache stop in 8bc9a3af4. A clone that raced a deleting push could stamp a stale reachable set as current (`saveReachable` captured its version after the walk). After GC deleted a stranded object, the cache stop admitted a push naming it, and clones failed. The same race on f9eb945ef rejected the push. Fixes:
+- The cache stop is removed: admission never trusts the reachable cache.
+- `saveReachable` stamps only the version its clone walk started from.
+- GC invalidates the cache whenever it deletes objects.
+
+The shape check moved to raw bytes. Lossy UTF-8 decoding hid BOM-prefixed commits and tags (clone-breaking) and falsely merged distinct non-UTF-8 names. Header sections must be newline-terminated, header NUL is refused, `.`, `..` and `.git` variants are refused, and every `100xxx` file mode is accepted. The budget-tolerant ancestry check was confirmed sound (verdict D: PASS).
+
+Unit tests cover each fix: an absent cached parent is refused, with a control; the stamp guard; GC invalidation, with a control; BOM, unterminated, NUL, `.git` and `..` cases, plus accepted Latin-1, BOM-only and `100600` names. Each fix was mutated once and its test went red.

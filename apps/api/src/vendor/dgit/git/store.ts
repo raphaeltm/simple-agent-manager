@@ -327,8 +327,12 @@ export class GitStore {
    * landing during a cold clone) the version guard abandons the stamp, leaving
    * the half-written table unversioned and thus ignored until it is rebuilt.
    */
-  async saveReachable(set: OidSet): Promise<void> {
-    const version = this.reachableVersion();
+  async saveReachable(set: OidSet, version: string = this.reachableVersion()): Promise<void> {
+    // SAM: `version` is the ref version the walk that built `set` started from.
+    // A push that moved refs during that walk (the walk yields) makes `set`
+    // describe old refs; stamping it with the new version would let a stranded,
+    // later-collected object pass for reachable.
+    if (this.reachableVersion() !== version) return;
     this.sql.exec("DELETE FROM reachable");
     const n = set.markedSize;
     for (let i = 0; i < n; i++) {

@@ -1,7 +1,7 @@
 /* eslint-disable */
 // @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 // FILE SIZE EXCEPTION: vendored third-party code kept identical to upstream dgit (see ../UPSTREAM.md)
-import { concat, isOid, ZERO_OID, td, te } from "./util";
+import { concat, isOid, ZERO_OID, te } from "./util";
 import { pkt, FLUSH, PktParser } from "./pktline";
 import { GitStore } from "./store";
 import { PackWriter } from "./pack";
@@ -666,6 +666,7 @@ export async function uploadPack(
 
   let send = fullClone ? store.loadReachable() : null;
   if (!send) {
+    const walkVersion = store.reachableVersion();
     const excluded = await excludedObjects(store, req.haves, req.clientShallows, req.wants);
     // a plain clone enumerates the whole database: size the walk's set up front
     // so it never doubles (a doubling keeps the old and new arrays live at once)
@@ -681,7 +682,7 @@ export async function uploadPack(
     );
     if (fullClone) {
       try {
-        await store.saveReachable(send);
+        await store.saveReachable(send, walkVersion);
       } catch {
         // the cache is best-effort: a failed persist just means the next full
         // clone walks again, never a wrong pack
@@ -1130,13 +1131,9 @@ async function reachableComplete(
   store: GitStore,
   tip: string,
   known: OidSet,
-  failed: OidSet,
-  cached: boolean
+  failed: OidSet
 ): Promise<boolean> {
-  // SAM: with a valid reachable cache, every cached object is reachable from a
-  // validated ref tip, so its closure is complete: one SQL lookup, no object read.
-  const validated = (oid: string) => known.hasHex(oid) || (cached && store.reachableHas(oid));
-  if (validated(tip)) return true; // tip already in a validated closure
+  if (known.hasHex(tip)) return true; // tip already in a validated closure
   if (failed.hasHex(tip)) return false; // an earlier command in this push proved it incomplete
   // Cursor BFS over the scratch set itself: newly reached oids append past the
   // cursor, so no separate hex-oid stack is needed to walk it. Parallel arrays
@@ -1177,7 +1174,7 @@ async function reachableComplete(
       throw err;
     }
     for (const child of children) {
-      if (validated(child.oid) || fresh.hasHex(child.oid)) {
+      if (known.hasHex(child.oid) || fresh.hasHex(child.oid)) {
         // Already validated or queued under another edge: this edge still has to name
         // an object of the type it requires (absent ones fail when their entry is walked).
         const type = store.typeAndSize(child.oid)?.type;
@@ -1243,54 +1240,98 @@ function childOids(obj: { type: ObjType; data: Uint8Array }): string[] {
   return [];
 }
 
-const TREE_MODES: ReadonlySet<string> = new Set(["100644", "100755", "100664", "120000", "40000", "160000"]);
+/** Git's file modes (any 100xxx permission set), plus symlink, tree and gitlink. */
+const TREE_MODE = /^(100[0-7]{3}|120000|40000|160000)$/;
 
-/** Header keys of a commit or tag, in order (continuation lines belong to the previous key). */
-function headerKeys(data: Uint8Array): string[] {
-  const text = td.decode(data);
-  const end = text.indexOf("\n\n");
-  const keys: string[] = [];
-  for (const line of (end === -1 ? text : text.slice(0, end)).split("\n")) {
-    if (line === "" || line.startsWith(" ")) continue;
-    keys.push(line.slice(0, line.indexOf(" ") === -1 ? line.length : line.indexOf(" ")));
+/** Bytes as a one-char-per-byte string: lossless, unlike a UTF-8 decode (BOMs, invalid bytes). */
+function byteString(data: Uint8Array, start: number, end: number): string {
+  let out = "";
+  for (let i = start; i < end; i += 8192) {
+    out += String.fromCharCode(...data.subarray(i, Math.min(end, i + 8192)));
   }
-  return keys;
+  return out;
+}
+
+/**
+ * Header lines of a commit or tag, as raw byte strings, or null when the header
+ * section is not newline-terminated (git cannot parse a tag whose last header
+ * lacks its newline). The section ends at the first blank line or at the end.
+ */
+function rawHeaderLines(data: Uint8Array): string[] | null {
+  let stop = data.length;
+  for (let i = 0; i + 1 < data.length; i++) {
+    if (data[i] === 10 && data[i + 1] === 10) {
+      stop = i + 1;
+      break;
+    }
+  }
+  if (stop === 0 || data[stop - 1] !== 10) return null;
+  const lines: string[] = [];
+  for (let i = 0, start = 0; i < stop; i++) {
+    if (data[i] === 10) {
+      lines.push(byteString(data, start, i));
+      start = i + 1;
+    }
+  }
+  return lines;
+}
+
+function headerKeyList(lines: string[]): string[] {
+  return lines.filter((l) => !l.startsWith(" ")).map((l) => (l.includes(" ") ? l.slice(0, l.indexOf(" ")) : l));
+}
+
+function isDotGitName(name: string): boolean {
+  return name.toLowerCase().replace(/[ .]+$/, "") === ".git";
 }
 
 /**
  * SAM: refuse objects git itself cannot read, so a pushed object can never make the
- * repository uncloneable. The parsers above are lenient (any header order, any mode
- * text); git requires a commit to start with `tree` and its parents, a tag to start
- * with `object`, `type`, `tag`, and tree entries with a known mode and a plain name.
+ * repository uncloneable. The parsers above are lenient (any header order, lossy
+ * UTF-8 decoding); git requires a commit to start with `tree` and its parents, a tag
+ * to start with `object`, `type`, `tag`, newline-terminated headers, and tree entries
+ * with a known mode and a plain, unique name. Checked on raw bytes, so a BOM or an
+ * invalid UTF-8 byte is neither hidden nor mistaken for another name.
  */
 function assertGitObjectShape(obj: { type: ObjType; data: Uint8Array }): void {
-  if (obj.type === "commit") {
-    const keys = headerKeys(obj.data);
-    let i = 0;
-    if (keys[i++] !== "tree") throw new GitParseError("commit must start with a tree header");
-    while (keys[i] === "parent") i++;
-    if (keys[i] !== "author" || keys[i + 1] !== "committer") {
-      throw new GitParseError("commit must have author then committer after its parents");
-    }
-    for (const k of keys.slice(i + 2)) {
-      if (k === "tree" || k === "parent" || k === "author" || k === "committer") {
-        throw new GitParseError(`commit has a misplaced ${k} header`);
+  if (obj.type === "commit" || obj.type === "tag") {
+    const lines = rawHeaderLines(obj.data);
+    if (!lines) throw new GitParseError(`${obj.type} headers are not newline-terminated`);
+    if (lines.some((l) => l.includes("\0"))) throw new GitParseError(`${obj.type} header contains NUL`);
+    const keys = headerKeyList(lines);
+    if (obj.type === "commit") {
+      let i = 0;
+      if (keys[i++] !== "tree") throw new GitParseError("commit must start with a tree header");
+      while (keys[i] === "parent") i++;
+      if (keys[i] !== "author" || keys[i + 1] !== "committer") {
+        throw new GitParseError("commit must have author then committer after its parents");
       }
+      for (const k of keys.slice(i + 2)) {
+        if (k === "tree" || k === "parent" || k === "author" || k === "committer") {
+          throw new GitParseError(`commit has a misplaced ${k} header`);
+        }
+      }
+    } else {
+      if (keys[0] !== "object" || keys[1] !== "type" || keys[2] !== "tag") {
+        throw new GitParseError("tag must start with object, type and tag headers");
+      }
+      const name = lines.filter((l) => !l.startsWith(" "))[2]!.slice(4);
+      if (!name) throw new GitParseError("tag has an empty name");
     }
-  } else if (obj.type === "tag") {
-    const keys = headerKeys(obj.data);
-    if (keys[0] !== "object" || keys[1] !== "type" || keys[2] !== "tag") {
-      throw new GitParseError("tag must start with object, type and tag headers");
-    }
-    if (!parseTag(obj.data).tag) throw new GitParseError("tag has an empty name");
   } else if (obj.type === "tree") {
+    const data = obj.data;
     const names = new Set<string>();
-    for (const e of parseTree(obj.data)) {
-      if (!TREE_MODES.has(e.mode)) throw new GitParseError("tree entry has an invalid mode");
-      if (!e.name || e.name.includes("/") || names.has(e.name)) {
+    for (let pos = 0; pos < data.length; ) {
+      const sp = data.indexOf(32, pos);
+      const nul = sp === -1 ? -1 : data.indexOf(0, sp + 1);
+      if (sp === -1 || nul === -1 || nul + 21 > data.length) throw new GitParseError("malformed tree");
+      const mode = byteString(data, pos, sp);
+      const name = byteString(data, sp + 1, nul);
+      pos = nul + 21;
+      if (!TREE_MODE.test(mode)) throw new GitParseError("tree entry has an invalid mode");
+      if (!name || name.includes("/") || name === "." || name === ".." || isDotGitName(name) || names.has(name)) {
         throw new GitParseError("tree entry has an invalid or duplicate name");
       }
-      names.add(e.name);
+      names.add(name);
     }
   }
 }
@@ -1435,7 +1476,7 @@ export async function validatePush(
       decisions.push({ ref: cmd.ref, expectedOld: cmd.old, reject: "trying to write non-commit object to branch" });
       continue;
     }
-    const connected = await reachableComplete(store, cmd.next, known, failed, hadCache);
+    const connected = await reachableComplete(store, cmd.next, known, failed);
     if (!connected) {
       decisions.push({ ref: cmd.ref, expectedOld: cmd.old, reject: "missing necessary objects" });
       continue;
