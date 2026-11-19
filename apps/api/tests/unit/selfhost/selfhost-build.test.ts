@@ -32,7 +32,10 @@ describe('withSelfHostBuild', () => {
     expect(activeLocalAnalyticsSink(boxEnv)).toBeUndefined();
     expect(findAdminSetting('analytics.d1.retentionDays')).toBeUndefined();
 
-    withSelfHostBuild(shared, new Hono<{ Bindings: Env }>().get('/health', (c) => c.text('ok')));
+    withSelfHostBuild(
+      shared,
+      new Hono<{ Bindings: Env }>().get('/health', (c) => c.text('ok'))
+    );
 
     expect(activeLocalAnalyticsSink(boxEnv)?.table).toBe('analytics_events');
     expect(resolvePlatformCapabilities(boxEnv).analyticsQuery).toBe(true);
@@ -41,7 +44,10 @@ describe('withSelfHostBuild', () => {
   });
 
   it('leaves the sink inactive on an installation that does not switch it on', () => {
-    withSelfHostBuild(shared, new Hono<{ Bindings: Env }>().get('/health', (c) => c.text('ok')));
+    withSelfHostBuild(
+      shared,
+      new Hono<{ Bindings: Env }>().get('/health', (c) => c.text('ok'))
+    );
     expect(
       activeLocalAnalyticsSink({ OBSERVABILITY_DATABASE: {} } as unknown as Env)
     ).toBeUndefined();

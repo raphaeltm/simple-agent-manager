@@ -59,8 +59,8 @@ export function renderCelldMain(): string {
     '',
     'resumeSharedFlightJoinsOnOwnTimer();',
     `export * from './${SOURCE_LINK}/index.ts';`,
-    ...SELFHOST_DURABLE_OBJECTS.map(({ className }) =>
-      `export { ${className} } from './${SOURCE_LINK}/${SELFHOST_ENTRY_MODULE}';`
+    ...SELFHOST_DURABLE_OBJECTS.map(
+      ({ className }) => `export { ${className} } from './${SOURCE_LINK}/${SELFHOST_ENTRY_MODULE}';`
     ),
     'export default withSelfHostBuild(worker, app);',
     '',

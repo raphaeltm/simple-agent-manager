@@ -25,7 +25,10 @@ import { installSpeechEndpoints } from './speech';
 
 const mounted = new WeakSet<object>();
 
-export function withSelfHostBuild<T extends SharedWorkerEntry>(worker: T, app: Hono<{ Bindings: Env }>): T {
+export function withSelfHostBuild<T extends SharedWorkerEntry>(
+  worker: T,
+  app: Hono<{ Bindings: Env }>
+): T {
   if (!mounted.has(app)) {
     mountHostedGitRoute(app);
     app.route('/api/projects', hostedGitTokenRoutes);

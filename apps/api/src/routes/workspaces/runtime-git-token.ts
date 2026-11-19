@@ -6,7 +6,10 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { errors } from '../../middleware/error';
-import { createArtifactsRuntimeToken, resolveArtifactsBackend } from '../../services/artifacts/backend';
+import {
+  createArtifactsRuntimeToken,
+  resolveArtifactsBackend,
+} from '../../services/artifacts/backend';
 import { getInstallationToken, getUserInstallationRepositories } from '../../services/github-app';
 import {
   GitHubCliPolicyError,

@@ -37,33 +37,29 @@ const scratch = mkdtempSync(join(tmpdir(), 'sam-celld-entry-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 describe('generated celld project', () => {
-  it(
-    'bundles with the HostedGitRepo binding',
-    async () => {
-      const plan = buildCelldConfig(
-        TOML.parse(readFileSync(join(API_DIR, 'wrangler.toml'), 'utf8')) as unknown as WranglerToml,
-        { main: CELLD_MAIN, baseDomain: 'box.example.com' }
-      );
-      const projectDir = join(scratch, 'plain');
-      prepareCelldProject({ apiDir: API_DIR, projectDir, plan });
-      writeCelldConfig(projectDir, plan.config);
+  it('bundles with the HostedGitRepo binding', async () => {
+    const plan = buildCelldConfig(
+      TOML.parse(readFileSync(join(API_DIR, 'wrangler.toml'), 'utf8')) as unknown as WranglerToml,
+      { main: CELLD_MAIN, baseDomain: 'box.example.com' }
+    );
+    const projectDir = join(scratch, 'plain');
+    prepareCelldProject({ apiDir: API_DIR, projectDir, plan });
+    writeCelldConfig(projectDir, plan.config);
 
-      const celld = await ensureCelldBinary(join(tmpdir(), 'sam-celld-bin'));
-      const result = spawnSync(
-        celld,
-        ['deploy', projectDir, '--dry-run', '--bucket', 's3://dry-run-not-written'],
-        {
-          encoding: 'utf8',
-          timeout: 300_000,
-          env: { ...process.env, CELLD_ESBUILD: resolveEsbuild(API_DIR) },
-        }
-      );
-      const output = `${result.stdout}${result.stderr}`;
-      expect(result.status, output.slice(-4000)).toBe(0);
-      expect(output).toContain('Bundled workspaces-api');
-      expect(output).toMatch(/env\.HOSTED_GIT \(HostedGitRepo\)\s+Durable Object \(SQLite\)/);
-      expect(output).toMatch(/env\.HOSTED_GIT_BACKEND \(Text\)/);
-    },
-    600_000
-  );
+    const celld = await ensureCelldBinary(join(tmpdir(), 'sam-celld-bin'));
+    const result = spawnSync(
+      celld,
+      ['deploy', projectDir, '--dry-run', '--bucket', 's3://dry-run-not-written'],
+      {
+        encoding: 'utf8',
+        timeout: 300_000,
+        env: { ...process.env, CELLD_ESBUILD: resolveEsbuild(API_DIR) },
+      }
+    );
+    const output = `${result.stdout}${result.stderr}`;
+    expect(result.status, output.slice(-4000)).toBe(0);
+    expect(output).toContain('Bundled workspaces-api');
+    expect(output).toMatch(/env\.HOSTED_GIT \(HostedGitRepo\)\s+Durable Object \(SQLite\)/);
+    expect(output).toMatch(/env\.HOSTED_GIT_BACKEND \(Text\)/);
+  }, 600_000);
 });
