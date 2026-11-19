@@ -43,6 +43,8 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     DATABASE: {} as any,
     R2_ACCESS_KEY_ID: 'test-key-id',
     R2_SECRET_ACCESS_KEY: 'test-secret',
+    CF_ACCOUNT_ID: 'test-account',
+    R2_BUCKET_NAME: 'test-bucket',
     ...overrides,
   } as Env;
 }
@@ -87,7 +89,7 @@ describe('POST /projects/:projectId/tasks/request-upload', () => {
     });
 
     expect(res.status).toBe(200);
-    const json = await res.json() as any;
+    const json = (await res.json()) as any;
     expect(json.uploadId).toBe('TEST-UPLOAD-ID');
     expect(json.uploadUrl).toBe('https://r2.example.com/presigned');
     expect(json.r2Key).toBeUndefined(); // r2Key should NOT be exposed to client
@@ -153,10 +155,12 @@ describe('POST /projects/:projectId/tasks/request-upload', () => {
   });
 
   it('rejects when R2 credentials are missing', async () => {
-    const { app, env } = makeApp(makeEnv({
-      R2_ACCESS_KEY_ID: undefined,
-      R2_SECRET_ACCESS_KEY: undefined,
-    }));
+    const { app, env } = makeApp(
+      makeEnv({
+        R2_ACCESS_KEY_ID: undefined,
+        R2_SECRET_ACCESS_KEY: undefined,
+      })
+    );
     const res = await postUpload(app, env, {
       filename: 'test.txt',
       size: 1024,
@@ -166,9 +170,11 @@ describe('POST /projects/:projectId/tasks/request-upload', () => {
   });
 
   it('rejects file size exceeding limit', async () => {
-    const { app, env } = makeApp(makeEnv({
-      ATTACHMENT_UPLOAD_MAX_BYTES: '500',
-    }));
+    const { app, env } = makeApp(
+      makeEnv({
+        ATTACHMENT_UPLOAD_MAX_BYTES: '500',
+      })
+    );
     const res = await postUpload(app, env, {
       filename: 'big.bin',
       size: 1000,
@@ -199,7 +205,23 @@ describe('POST /projects/:projectId/tasks/request-upload', () => {
         filename: 'data.csv',
         size: 2048,
         contentType: 'text/csv',
-      }),
+      })
     );
+  });
+});
+
+describe('request-upload presign configuration', () => {
+  it('refuses a partial operator store with 403 instead of failing inside the presigner', async () => {
+    mockGeneratePresignedUploadUrl.mockClear();
+    const { app, env } = makeApp(
+      makeEnv({ R2_S3_ENDPOINT: 'https://s3.example.com', R2_S3_BUCKET: 'fleet' })
+    );
+    const res = await postUpload(app, env, {
+      filename: 'a.txt',
+      size: 10,
+      contentType: 'text/plain',
+    });
+    expect(res.status).toBe(403);
+    expect(mockGeneratePresignedUploadUrl).not.toHaveBeenCalled();
   });
 });

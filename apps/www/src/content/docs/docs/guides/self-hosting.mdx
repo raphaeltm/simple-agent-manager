@@ -23,6 +23,12 @@ projection after the shared migrations, rejecting filename collisions. Cloudflar
 not receive the reverse-tunnel lease table. Existing boxes keep the additive table created by
 the earlier migration number.
 
+Product analytics on the box use the same pattern. The self-host entry installs a D1 analytics
+sink (`installAnalyticsD1Sink()` in `apps/api/src/selfhost/analytics/`), and the build appends
+`apps/api/src/selfhost/observability-migrations.ts` to the **observability** database's flat
+projection (`appendSelfhostObservabilityMigrations()` in `scripts/selfhost/`). Cloudflare
+observability databases never receive the `analytics_events` table.
+
 The transport setting admits new leases. Existing allocations adopt their original lease only
 while its exact stored owner remains live. Cleanup and the backstop follow the installed
 self-host driver, so changing the setting cannot strand an old lease. A build without that
