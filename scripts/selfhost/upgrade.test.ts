@@ -40,11 +40,12 @@ function run(command: string, args: string[]): RunResult {
     steps.push(line);
     return ok();
   }
-  steps.push(line.replace(join(root, ''), '<root>/'));
-  if (command === 'pnpm' && args.join(' ') === 'selfhost:deploy --init' && initRewritesState) {
+  steps.push(line.replaceAll(root, '<root>'));
+  const deploy = command === 'pnpm' && args[0] === 'selfhost:deploy';
+  if (deploy && args.includes('--init') && initRewritesState) {
     writeFileSync(join(root, 'state/gateway.env'), 'FRPS_PORT_RANGE=21000-21999\n');
   }
-  if (command === 'pnpm' && args.join(' ') === 'selfhost:deploy' && failDeploy) {
+  if (deploy && !args.includes('--init') && failDeploy) {
     return { status: 1, stdout: '', stderr: 'migration 0219 failed' };
   }
   return ok();
@@ -79,6 +80,8 @@ beforeEach(() => {
 
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
+/** The deploy arguments the fake box (ctx()) must be deployed with. */
+const BOX_ARGS = '--env-file <root>/box.env --state-dir <root>/state';
 const compact = () =>
   steps.map((s) => (s.startsWith('docker compose') ? s.replace(/ -f .* --env-file \S+/, '') : s));
 
@@ -90,15 +93,15 @@ describe('runUpgrade', () => {
       'git fetch --tags origin',
       `git checkout --detach ${TO}`,
       'pnpm install --frozen-lockfile',
-      'pnpm selfhost:deploy --init',
-      'pnpm selfhost:deploy',
+      `pnpm selfhost:deploy --init ${BOX_ARGS}`,
+      `pnpm selfhost:deploy ${BOX_ARGS}`,
     ]);
     expect(result.composeRestarted).toBe(false);
     expect(logs.join('\n')).toContain('no backup is taken');
-    expect(result.rollback).toEqual([
+    expect(result.rollback.map((step) => step.replaceAll(root, '<root>'))).toEqual([
       `git checkout ${FROM}`,
       'pnpm install --frozen-lockfile',
-      'pnpm selfhost:deploy',
+      `pnpm selfhost:deploy ${BOX_ARGS}`,
     ]);
   });
 
@@ -107,9 +110,35 @@ describe('runUpgrade', () => {
     const result = await upgrade();
     const order = compact();
     const up = order.indexOf('docker compose up -d --build');
-    expect(up).toBeGreaterThan(order.indexOf('pnpm selfhost:deploy --init'));
-    expect(up).toBeLessThan(order.indexOf('pnpm selfhost:deploy'));
+    expect(up).toBeGreaterThan(order.indexOf(`pnpm selfhost:deploy --init ${BOX_ARGS}`));
+    expect(up).toBeLessThan(order.indexOf(`pnpm selfhost:deploy ${BOX_ARGS}`));
     expect(result.composeRestarted).toBe(true);
+  });
+
+  // An upgrade that dropped them deployed the checkout's default deploy/selfhost/.env and
+  // .state instead, where --init generates brand-new platform keys for an existing install.
+  it('passes a non-default env file, state dir and secrets file to every deploy it runs', async () => {
+    const envFile = join(root, 'custom', 'box.env');
+    mkdirSync(join(root, 'custom'));
+    writeFileSync(envFile, 'CELLD_BUCKET=gs://fleet/celld\n', { mode: 0o600 });
+    const secrets = join(root, 'custom', 'secrets.env');
+    const loaded = loadBox(envFile, join(root, 'custom-state'), secrets);
+    diff = ['deploy/selfhost/docker-compose.yml'];
+    const result = await runUpgrade(
+      { ...loaded, run, log: (m) => logs.push(m) },
+      { to: 'v1', checkHealth: async () => true }
+    );
+    const expected =
+      '--env-file <root>/custom/box.env --state-dir <root>/custom-state ' +
+      '--secrets <root>/custom/secrets.env';
+    const deploys = steps.filter((step) => step.startsWith('pnpm selfhost:deploy'));
+    expect(deploys).toEqual([
+      `pnpm selfhost:deploy --init ${expected}`,
+      `pnpm selfhost:deploy ${expected}`,
+    ]);
+    const rollback = result.rollback.map((step) => step.replaceAll(root, '<root>'));
+    expect(rollback).toContain(`pnpm selfhost:deploy ${expected} --init`);
+    expect(rollback).toContain(`pnpm selfhost:deploy ${expected}`);
   });
 
   it('restarts the stack when --init rewrote a generated state file (gateway.env)', async () => {
@@ -173,7 +202,7 @@ describe('runUpgrade with the box .env COMPOSE_FILE', () => {
     expect(restartCommand()).toBe(
       `docker compose -f ${join(SELFHOST_DIR, 'docker-compose.yml')} ` +
         `-f ${join(SELFHOST_DIR, 'docker-compose.override.yml')} ` +
-        `--env-file <root>//real.env up -d --build`
+        `--env-file <root>/real.env up -d --build`
     );
   });
 
@@ -182,7 +211,7 @@ describe('runUpgrade with the box .env COMPOSE_FILE', () => {
     const ctx = boxFromEnv([]);
     await runUpgrade(ctx, { to: 'v1', checkHealth: async () => true });
     expect(restartCommand()).toBe(
-      `docker compose -f ${join(SELFHOST_DIR, 'docker-compose.yml')} --env-file <root>//real.env up -d --build`
+      `docker compose -f ${join(SELFHOST_DIR, 'docker-compose.yml')} --env-file <root>/real.env up -d --build`
     );
   });
 
