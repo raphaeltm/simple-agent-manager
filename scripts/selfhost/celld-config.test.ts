@@ -67,10 +67,11 @@ describe('buildCelldConfig against the real apps/api/wrangler.toml', () => {
     }
   });
 
-  it('runs no container and leaves SAM-native git off', () => {
+  it('runs no container and enables the self-host git fallback', () => {
     expect(config).not.toHaveProperty('containers');
-    // No Artifacts binding and no other backend registered: resolveArtifactsBackend is null.
-    expect(config.vars.ARTIFACTS_ENABLED).not.toBe('true');
+    // The self-host build registers the backend; Cloudflare keeps its own configuration.
+    expect(config.vars.ARTIFACTS_ENABLED).toBe('true');
+    expect(config.vars.HOSTED_GIT_BACKEND).toBe('durable-object');
   });
 
   it('folds every legacy new_classes create into new_sqlite_classes, keeping tag order', () => {
@@ -80,8 +81,8 @@ describe('buildCelldConfig against the real apps/api/wrangler.toml', () => {
       new_sqlite_classes?: string[];
     }>;
     expect(sourceMigrations.some((m) => m.new_classes?.length)).toBe(true);
-    // wrangler.toml's tags, in order, and nothing else.
-    expect(config.migrations.map((m) => m.tag)).toEqual(sourceMigrations.map((m) => m.tag));
+    // Keep shared tags in order, then append the celld-only tag.
+    expect(config.migrations.map((m) => m.tag)).toEqual([...sourceMigrations.map((m) => m.tag), 'selfhost-hosted-git-v1']);
     for (const migration of config.migrations) {
       expect(Object.keys(migration).sort()).toEqual(['new_sqlite_classes', 'tag']);
     }
@@ -90,12 +91,12 @@ describe('buildCelldConfig against the real apps/api/wrangler.toml', () => {
       ...(m.new_sqlite_classes ?? []),
       ...(m.new_classes ?? []),
     ]);
-    expect(new Set(created)).toEqual(new Set(expected));
+    expect(new Set(created)).toEqual(new Set([...expected, 'HostedGitRepo']));
   });
 
-  it('binds exactly the Durable Objects wrangler.toml binds', () => {
+  it('adds only HostedGitRepo to the shared Durable Object bindings', () => {
     expect(config.durable_objects.bindings).toEqual(
-      (source.durable_objects as { bindings: Array<{ name: string; class_name: string }> }).bindings
+      [...(source.durable_objects as { bindings: Array<{ name: string; class_name: string }> }).bindings, { name: 'HOSTED_GIT', class_name: 'HostedGitRepo' }]
     );
   });
 

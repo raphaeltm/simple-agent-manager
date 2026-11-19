@@ -11,12 +11,12 @@ Trace: project-create -> resolved Artifacts backend -> seed/import via backend r
 Use existing L16 selection, extend its optional token context and fetch/import contract. Move implementation under selfhost; preserve Cloudflare semantics. Import with git checkout paths, no cherry-pick. Tests must exercise real git over smart HTTP and prove import-graph detection by introducing a forbidden import. Relevant lessons: callback routing/auth rule 34; DO interleaving rule 45; cross-boundary/vertical tests rules 23/35; no secret readback rule 83. Docs: operator README only (experimental self-host slice).
 
 ## Checklist
-- [ ] Fresh branch from main; import selected integration paths and trim
-- [ ] Move DO and hosted-git services under selfhost; dgit/pako excluded from Worker graph
-- [ ] Extend generic fallback seam: workspace-bound token context, remoteFetch and import; remove shared local-backend branches
-- [ ] Wire celld-only binding/export/tag via L22 single entry after L22c lands
-- [ ] Add conformance/auth/lifecycle/token tests and import-graph violation proof
-- [ ] Document self-host repository support and limits
+- [x] Fresh branch from main; import selected integration paths and trim
+- [x] Move DO and hosted-git services under selfhost; dgit/pako excluded from Worker graph
+- [x] Extend generic fallback seam: workspace-bound token context, remoteFetch and optional import capability (unregistered per coordinator empty-repo decision); remove shared local-backend branches
+- [x] Wire celld-only binding/export/tag via L22 single entry stacked on stable L22c539625202 per coordinator
+- [x] Add conformance/auth/lifecycle/token tests and import-graph violation proof
+- [x] Document self-host repository support and limits
 - [ ] Local lint/typecheck/tests/build; security, Cloudflare, architecture and completion reviews
 - [ ] Draft PR then ready/CI/CodeRabbit request and wait
 - [ ] Primary staging lease/deploy: Artifacts and GitHub project creation unchanged, local seam off
@@ -25,3 +25,6 @@ Use existing L16 selection, extend its optional token context and fetch/import c
 
 ## Acceptance
 No HostedGitRepo/dgit/pako reachable from Cloudflare index; wrangler unchanged; no CF migration. Shared seam inert on Cloudflare. BOX upgrade succeeds with new celld tag, project creation and actual short free-model agent reply/push work. Every resource created by this task cleaned up. All required gates pass on merge head.
+
+## Implementation evidence
+Stacked L22c539625202 per coordinator to break circular BOX gate; #2906 merges before H2. Hosted suite19/19 (real git18 + celld dry-run1); selfhost unit113/113; config/project29/29; native runtime-token32/32. Worker graph negative probe importing pako through workspace package failed as intended. GC admission negative probe failed exactly the race test. Security followup inflation/GC6/6.

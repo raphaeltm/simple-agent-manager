@@ -3,6 +3,7 @@
  * the D1 analytics sink and its `analytics.d1.*` settings, or a box loses product analytics
  * and their retention bound. Enters through the real build function, not the sink's own installer.
  */
+import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
@@ -31,7 +32,7 @@ describe('withSelfHostBuild', () => {
     expect(activeLocalAnalyticsSink(boxEnv)).toBeUndefined();
     expect(findAdminSetting('analytics.d1.retentionDays')).toBeUndefined();
 
-    withSelfHostBuild(shared);
+    withSelfHostBuild(shared, new Hono<{ Bindings: Env }>().get('/health', (c) => c.text('ok')));
 
     expect(activeLocalAnalyticsSink(boxEnv)?.table).toBe('analytics_events');
     expect(resolvePlatformCapabilities(boxEnv).analyticsQuery).toBe(true);
@@ -40,7 +41,7 @@ describe('withSelfHostBuild', () => {
   });
 
   it('leaves the sink inactive on an installation that does not switch it on', () => {
-    withSelfHostBuild(shared);
+    withSelfHostBuild(shared, new Hono<{ Bindings: Env }>().get('/health', (c) => c.text('ok')));
     expect(
       activeLocalAnalyticsSink({ OBSERVABILITY_DATABASE: {} } as unknown as Env)
     ).toBeUndefined();

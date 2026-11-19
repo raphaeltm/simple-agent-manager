@@ -37,14 +37,14 @@ const scratch = mkdtempSync(join(tmpdir(), 'sam-celld-entry-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 describe('generated celld project', () => {
-  it.each([['plain', false]])(
-    'bundles in %s mode with the HostedGitRepo binding',
-    async (_mode, _runtimeSecrets) => {
+  it(
+    'bundles with the HostedGitRepo binding',
+    async () => {
       const plan = buildCelldConfig(
         TOML.parse(readFileSync(join(API_DIR, 'wrangler.toml'), 'utf8')) as unknown as WranglerToml,
         { main: CELLD_MAIN, baseDomain: 'box.example.com' }
       );
-      const projectDir = join(scratch, runtimeSecrets ? 'sealed' : 'plain');
+      const projectDir = join(scratch, 'plain');
       prepareCelldProject({ apiDir: API_DIR, projectDir, plan });
       writeCelldConfig(projectDir, plan.config);
 

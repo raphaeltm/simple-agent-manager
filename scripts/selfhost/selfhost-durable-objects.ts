@@ -28,10 +28,8 @@ export interface SelfhostDurableObject {
 /** The module under apps/api/src that the generated celld entry imports for these classes. */
 export const SELFHOST_ENTRY_MODULE = 'selfhost/build.ts';
 
-/** Function in `SELFHOST_ENTRY_MODULE` the entry calls with the shared Hono app. */
-
 export const SELFHOST_DURABLE_OBJECTS: readonly SelfhostDurableObject[] = [
-  // SAM-hosted git repositories (one per repository); selfhost/hosted-git/backend.ts selects it
+  // SAM-hosted git repositories (one per repository); selfhost/hosted-git/local-backend.ts selects it
   // with HOSTED_GIT_BACKEND=durable-object (SELFHOST_VAR_OVERRIDES).
   { binding: 'HOSTED_GIT', className: 'HostedGitRepo', migrationTag: 'selfhost-hosted-git-v1' },
 ];
