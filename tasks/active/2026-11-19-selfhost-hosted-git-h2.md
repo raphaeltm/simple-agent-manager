@@ -73,3 +73,17 @@ New current-head Codex r4633207972 found intermediate .lock components accepted 
 Real raw smart-HTTP test refuses foo.lock/bar, foo.lock and ends-dot., and accepts normal, feature/x and foo.lockish/bar through the same validatePush/write path. Real validatePush rule matrix66/66 compares Git CLI outcomes (NUL checked directly since OS argv cannot carry it); full conformance25/25. Independent negative controls: remove component guard -> raw HTTP accepts the invalid ref; remove trailing-dot guard -> exactly1matrixfailure/65pass. Restored suite rerun. Security independently audited all ten rules and passed this delta.
 
 Coordinator decision5e57db22-5e40-46af-8aec-f1894395779f extends NOBOXREPEAT to this invalid-name admission tightening if ordinary+nested positive controls, negative control, full real-git, security delta, fresh CI and zero threads all pass. It rejects names the ordinary BOX branch never used; auth, happy-path valid names and deletion remain unchanged. Fresh CI remains required.
+
+
+## Takeover by task 01M7TY7Z3HBTSDSSV85FPRHE1B (2026-11-19 ~21:00 UTC)
+
+Previous owner 01M7SR1B79 stopped after repeated provider content-filter refusals; its pushed head 0eda6a2bd was intact.
+
+- [x] Merge main 917077fef (L22c merged): conflicts only in L22c files (took main's final versions) and deploy/selfhost/README.md (kept the hosted-git section, dropped main's now-false "Hosted git: not included" bullet). Merge 553a9060f.
+- [x] Codex P2 r4633317762: `reachableComplete` now walks each command into a scratch OidSet and merges into `known` only once the closure is complete.
+- [x] Same class, found while fixing it: the cache-less path trusted `packComplete` + `store.has(tip)`. That is sound only if every object outside the new pack is closure-complete, but a pack whose refs were all rejected stays ingested until GC. A later push (ref-only, or a pack whose commit's parent is the stale commit) could point a ref at an incomplete closure. Every command now proves its closure with the same walk; `packComplete` and the `push_edges` helpers/table creation are removed (existing repos keep an empty, unused `push_edges` table; no DO DROP).
+- [x] Real git/SQLite tests (describe "push connectivity admission"): cache-path multi-ref attack, cache-less stale-rejected-pack attack (ref-only and child-pack variants), and positive controls (overlapping multi-ref push extends the cache and a full clone fscks; shallow-clone push on the cache-less path). Both attack tests fail on 0eda6a2bd. Discrimination: A non-transactional walk -> both attack tests red; B cache-less presence-only -> stale-pack test red; C never merging into `known` -> cache control red (clone from extended cache fails fsck). Hosted suite 29/29, self-host unit 186/186, API typecheck and focused lint pass.
+- Bound (rule 81): one walk is bounded by the repository caps (30,000 objects, 256 MiB stored), the 128 MiB per-request inflation budget and the 120 s git-operation deadline. Worst case is one walk over every object in the repository: at most 30,000 SQLite presence probes plus inflating the non-blob objects, completing in one attempt or failing closed with the budget error. A fresh push's walk reads the same non-blob objects `packComplete` read before.
+- [ ] Security delta review + one adversarial pass over the whole push admission path
+- [ ] Fresh CI green, 0 open threads, Codex re-requested on final head
+- [ ] Final BOX smoke on the exact final head over main (closes the L22c "box from main runs an agent session" criterion deferred to H2 by Raphaël)
