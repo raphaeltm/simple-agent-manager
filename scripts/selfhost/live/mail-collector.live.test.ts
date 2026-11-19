@@ -127,9 +127,13 @@ describe.skipIf(skipWithoutDocker)('mail collector (live)', () => {
     });
 
     it('keeps the plaintext password out of the running Caddy process', () => {
-      const environ = execFileSync(DOCKER, ['exec', stack.container, 'cat', '/proc/1/environ'], {
-        encoding: 'utf8',
-      });
+      // Caddy runs as uid 7101 from a binary with a file capability, which makes the process
+      // non-dumpable: only a privileged reader (root with CAP_SYS_PTRACE) may see its environment.
+      const environ = execFileSync(
+        DOCKER,
+        ['exec', '--privileged', '--user', '0', stack.container, 'cat', '/proc/1/environ'],
+        { encoding: 'utf8' }
+      );
       expect(environ).not.toContain(PASSWORD);
       expect(environ).toMatch(/MAIL_COLLECTOR_UI_HASH=\$2a\$/);
     });
