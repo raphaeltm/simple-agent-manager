@@ -1,4 +1,4 @@
-import { Button } from '@simple-agent-manager/ui';
+import { Button, paneClassName } from '@simple-agent-manager/ui';
 import { useState } from 'react';
 
 import {
@@ -32,29 +32,29 @@ export function RetainedSnapshotExport({
   };
   return (
     <details
-      className="shrink-0 border-b border-border-default bg-surface px-4 text-sm"
+      className={`${paneClassName('slab')} shrink-0 px-4 text-sm`}
       data-testid="retained-snapshot-export"
     >
-      <summary className="min-h-14 cursor-pointer rounded py-4 text-fg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-primary">
+      <summary className="min-h-11 cursor-pointer rounded py-3 text-fg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-primary">
         Download saved work
       </summary>
-      <div className="mt-3 space-y-3">
+      <div className="space-y-3 pb-3.5">
         <p className="text-xs text-fg-muted">
           Download the saved manifest or Git WIP bundle without starting the agent. Downloads may
           contain private code. Save them somewhere private.
         </p>
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button
-            variant="secondary"
-            className="min-h-14"
+            variant="raised"
+            className="min-h-11"
             disabled={busy !== null}
             onClick={() => void download('manifest')}
           >
             {busy === 'manifest' ? 'Preparing manifest…' : 'Download manifest'}
           </Button>
           <Button
-            variant="secondary"
-            className="min-h-14"
+            variant="raised"
+            className="min-h-11"
             disabled={busy !== null}
             onClick={() => void download('wip')}
           >

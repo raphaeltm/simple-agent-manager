@@ -148,6 +148,15 @@ describe('human owner retained snapshot export across route/DO/D1/R2', () => {
     const ok = await SELF.fetch(f.url(), { headers: { cookie } });
     expect(ok.status).toBe(200);
     await ok.arrayBuffer();
+    // Mounting the export router ahead of chatRoutes must not shadow existing session routes.
+    const sessionDetail = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${project}/sessions/${f.session}`,
+      { headers: { cookie } }
+    );
+    expect(sessionDetail.status).toBe(200);
+    expect(((await sessionDetail.json()) as { session?: { id?: string } }).session?.id).toBe(
+      f.session
+    );
     await env.DATABASE.prepare("UPDATE users SET status='suspended' WHERE id=?").bind(owner).run();
     expect((await SELF.fetch(f.url(), { headers: { cookie } })).status).toBe(403);
     await env.DATABASE.prepare("UPDATE users SET status='active' WHERE id=?").bind(owner).run();
@@ -161,6 +170,25 @@ describe('human owner retained snapshot export across route/DO/D1/R2', () => {
     await unavailable(
       await app().request(f.url().replace(project, 'missing-project'), {}, bindings)
     );
+  });
+
+  it('denies a shared-session grantee while the owner control still downloads', async () => {
+    const f = await fixture();
+    const { result } = await projectData.createSessionAccessGrant(bindings, project, {
+      sessionId: f.session,
+      granteeUserId: other,
+      grantedByUserId: owner,
+      durationMinutes: 60,
+      maxActiveGrants: 5,
+    });
+    expect(result.status).toBe('created');
+    const access = await projectData.getSessionAccess(bindings, project, f.session, other);
+    expect(access.access.role).toBe('grantee');
+    await unavailable(await app(other).request(f.url(), {}, bindings));
+    await unavailable(await app(other).request(f.url('manifest'), {}, bindings));
+    const ok = await app(owner).request(f.url(), {}, bindings);
+    expect(ok.status).toBe(200);
+    await ok.arrayBuffer();
   });
 
   it('does not let a project owner export another member creator snapshot', async () => {

@@ -10,6 +10,21 @@ import { errors } from '../middleware/error';
 import { buildSessionSnapshotR2Key, getSessionSnapshotConfig } from './session-snapshot-artifacts';
 
 export type OwnerSnapshotArtifact = 'manifest' | 'wip';
+const RECHECKED_SNAPSHOT_FIELDS = [
+  'id',
+  'userId',
+  'projectId',
+  'chatSessionId',
+  'snapshotGeneration',
+  'captureGeneration',
+  'status',
+  'degradation',
+  'expiresAt',
+  'manifestJson',
+  'manifestR2Key',
+  'wipR2Key',
+  'wipSha256',
+] as const satisfies readonly (keyof schema.SessionSnapshot)[];
 export const retainedSnapshotNotFound = () => errors.notFound('Retained snapshot');
 const SHA256 = /^[a-f0-9]{64}$/;
 const encoder = new TextEncoder();
@@ -230,7 +245,10 @@ export async function exportOwnerSessionSnapshot(
   try {
     const current = await authorizedSnapshot(env, input.projectId, input.sessionId, input.userId);
     // Be conservative during capture/expiry/ownership changes, even if the old object still exists.
-    if (JSON.stringify(current) !== JSON.stringify(snapshot)) throw retainedSnapshotNotFound();
+    // Compare the fields that decide ownership and which bytes are served, not the whole row, so
+    // an unrelated column write during the download cannot fail a valid export.
+    if (RECHECKED_SNAPSHOT_FIELDS.some((field) => current[field] !== snapshot[field]))
+      throw retainedSnapshotNotFound();
   } catch (error) {
     discardObject(object);
     throw error;
