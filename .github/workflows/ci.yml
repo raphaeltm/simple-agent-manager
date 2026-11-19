@@ -131,10 +131,22 @@ jobs:
               - 'apps/web/src/pages/project-chat/lineageUtils.ts'
               - 'apps/web/src/pages/project-chat/useTaskGroups.ts'
               - 'scripts/deploy/deploy-signing-keys.ts'
+              # Imported by scripts/selfhost/celld-config.ts (below).
+              - 'scripts/deploy/durable-object-migrations.ts'
               - 'scripts/deploy/types.ts'
               - 'scripts/deploy/vapid-keys.ts'
+              # Self-host build tests import the celld generator, presign vars, SMTP settings and
+              # account SQL: these modules plus the scripts/selfhost modules they import. The
+              # transitive ones are listed by hand: ci-suite-selection.test.ts checks the direct
+              # imports but does not follow `./x.js` specifiers to `x.ts`.
+              - 'scripts/selfhost/account-sql.ts'
+              - 'scripts/selfhost/box-settings.ts'
+              - 'scripts/selfhost/celld-config.ts'
+              - 'scripts/selfhost/celld-project.ts'
+              - 'scripts/selfhost/mail-settings.ts'
               - 'scripts/selfhost/observability-migrations.ts'
               - 'scripts/selfhost/reverse-tunnel-migrations.ts'
+              - 'scripts/selfhost/secret-files.ts'
               - 'scripts/selfhost/selfhost-migrations.ts'
               # selfhost-inbound-email.test.ts builds this receiver (Self-host Email job only).
               - 'deploy/selfhost/sam-mx/**'
@@ -227,6 +239,8 @@ jobs:
               - 'apps/*/package.json'
               - 'packages/*/package.json'
               - 'packages/vm-agent/Makefile'
+              # scripts/selfhost/vm-agent-artifacts.test.ts pins the Go build image to its go directive.
+              - 'packages/vm-agent/go.mod'
               - 'packages/cli/Makefile'
               - 'apps/installer/scripts/**'
               - 'apps/www/scripts/build-tracker.ts'
@@ -235,6 +249,12 @@ jobs:
               - 'apps/api/scripts/**'
               - 'apps/api/container-entrypoints/**'
               - 'scripts/deploy/**'
+              # Self-hosted (celld) packaging: config generator, deploy, upgrade, create-account.
+              - 'scripts/selfhost/**'
+              # ...and what its tests read outside it: the self-host migration projection and the
+              # SMTP settings parser.
+              - 'apps/api/src/selfhost/**'
+              - 'packages/agent-email/src/smtp-config.ts'
               # The generated Worker config is built from wrangler.toml, so its text-binding
               # guard and effective-config tests must run when only wrangler.toml changes.
               - 'apps/api/wrangler.toml'
@@ -853,7 +873,9 @@ jobs:
         run: pnpm quality:file-sizes
 
       - name: Type check deployment scripts
-        run: npx tsc --project scripts/deploy/tsconfig.json --noEmit
+        run: |
+          pnpm exec tsc --project scripts/deploy/tsconfig.json --noEmit
+          pnpm exec tsc --project scripts/selfhost/tsconfig.json --noEmit
 
       - name: Validate script syntax
         run: |
@@ -866,6 +888,11 @@ jobs:
       # compatibility regression suite (clean install vs applied history).
       - name: Run deploy and quality script tests
         run: pnpm quality:scripts:test
+
+      # celld wrangler.json generator, plaintext deploy (--init/--dry-run), upgrade, root-only
+      # secret files, pinned versions. No Docker, celld or frp: those run on a box.
+      - name: Run self-host packaging tests
+        run: pnpm selfhost:test
 
       - name: Verify installer engine, runtime integrity and bounded proof contracts
         run: |

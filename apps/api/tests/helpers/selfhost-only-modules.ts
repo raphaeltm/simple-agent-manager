@@ -27,6 +27,16 @@ export const SELFHOST_ONLY_PATHS: readonly string[] = [
   'apps/api/src/vendor/dgit/',
 ];
 
+/**
+ * Repository-relative path prefixes the Cloudflare Worker's entry must not reach: the self-host-only
+ * code, plus `scripts/` (deploy and packaging tooling, scripts/selfhost/ included), which runs on
+ * an operator's machine with node APIs and never belongs in any Worker bundle.
+ */
+export const CLOUDFLARE_ENTRY_FORBIDDEN_PATHS: readonly string[] = [
+  ...SELFHOST_ONLY_PATHS,
+  'scripts/',
+];
+
 /** npm packages only the self-host build may import (pako 2 is dgit's compression library). */
 export const SELFHOST_ONLY_PACKAGES: readonly string[] = ['pako'];
 
@@ -85,9 +95,15 @@ export function collectImportGraph(entry: string): ImportGraph {
   return { files, packages };
 }
 
-/** Every self-host-only file and package `graph` reaches, as human-readable findings. */
-export function selfhostOnlyFindings(graph: ImportGraph): string[] {
-  const files = graph.files.filter((file) => SELFHOST_ONLY_PATHS.some((p) => file.startsWith(p)));
+/**
+ * Every self-host-only file and package `graph` reaches, as human-readable findings. `paths` are
+ * the forbidden file prefixes (`CLOUDFLARE_ENTRY_FORBIDDEN_PATHS` for the Cloudflare entry).
+ */
+export function selfhostOnlyFindings(
+  graph: ImportGraph,
+  paths: readonly string[] = SELFHOST_ONLY_PATHS
+): string[] {
+  const files = graph.files.filter((file) => paths.some((p) => file.startsWith(p)));
   const packages = SELFHOST_ONLY_PACKAGES.filter((name) => graph.packages.has(name)).map(
     (name) => `package ${name} (imported by ${graph.packages.get(name)})`
   );
