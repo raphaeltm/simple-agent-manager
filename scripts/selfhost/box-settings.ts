@@ -144,6 +144,15 @@ export function tunnelWorkerVars(settings: TunnelSettings): Record<string, strin
  * R2_SECRET_ACCESS_KEY from secrets.env. Without an endpoint the Worker leaves presigning off.
  * Azure (az://) buckets have no S3 interface, so they get no presign vars.
  */
+/** Strips leading and trailing `/` in linear time (a `/\/+$/` regex backtracks quadratically). */
+export function trimSlashes(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value[start] === '/') start += 1;
+  while (end > start && value[end - 1] === '/') end -= 1;
+  return value.slice(start, end);
+}
+
 /** GCS's S3-compatible XML API signs with any region; "auto" is what its docs use. */
 const GCS_SIGNING_REGION = 'auto';
 
@@ -155,10 +164,11 @@ export function presignVars(
   if (!match) throw new Error('CELLD_BUCKET must be [s3://|gs://|az://]NAME[/PREFIX]');
   const [, scheme = 's3', bucket = '', fleetPrefix = ''] = match;
   if (scheme === 'az') return {};
-  const prefix = fleetPrefix.replace(/^\/+|\/+$/g, '');
+  const prefix = trimSlashes(fleetPrefix);
+  const fleetKeyPrefix = prefix ? `${prefix}/` : '';
   const vars: Record<string, string> = {
     R2_S3_BUCKET: bucket,
-    R2_S3_KEY_PREFIX: `${prefix ? `${prefix}/` : ''}r2/${r2BucketName}/`,
+    R2_S3_KEY_PREFIX: `${fleetKeyPrefix}r2/${r2BucketName}/`,
   };
   if (box.R2_S3_ENDPOINT) {
     vars.R2_S3_ENDPOINT = box.R2_S3_ENDPOINT;

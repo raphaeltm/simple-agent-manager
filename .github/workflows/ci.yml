@@ -874,8 +874,8 @@ jobs:
 
       - name: Type check deployment scripts
         run: |
-          npx tsc --project scripts/deploy/tsconfig.json --noEmit
-          npx tsc --project scripts/selfhost/tsconfig.json --noEmit
+          pnpm exec tsc --project scripts/deploy/tsconfig.json --noEmit
+          pnpm exec tsc --project scripts/selfhost/tsconfig.json --noEmit
 
       - name: Validate script syntax
         run: |

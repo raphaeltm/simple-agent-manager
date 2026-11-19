@@ -9,6 +9,7 @@ import {
   renderGatewayEnv,
   resolveTunnelPortRange,
   resolveTunnelSettings,
+  trimSlashes,
   tunnelWorkerVars,
 } from './box-settings.js';
 import { parseDotenv } from './secret-files.js';
@@ -179,6 +180,28 @@ describe('presignVars', () => {
 
   it('gives Azure buckets no presign vars', () => {
     expect(presignVars({ CELLD_BUCKET: 'az://container' }, 'assets')).toEqual({});
+  });
+
+  it('trims slashes around the fleet prefix but keeps inner ones', () => {
+    const keyPrefix = (bucket: string) =>
+      presignVars({ CELLD_BUCKET: bucket }, 'assets').R2_S3_KEY_PREFIX;
+    expect(keyPrefix('s3://b')).toBe('r2/assets/');
+    expect(keyPrefix('s3://b/')).toBe('r2/assets/');
+    expect(keyPrefix('s3://b///')).toBe('r2/assets/');
+    expect(keyPrefix('s3://b//a/b//')).toBe('a/b/r2/assets/');
+    expect(keyPrefix('b/a//c')).toBe('a//c/r2/assets/');
+    expect(trimSlashes('')).toBe('');
+    expect(trimSlashes('/')).toBe('');
+    expect(trimSlashes('//x//')).toBe('x');
+  });
+
+  it('trims a long run of inner slashes in linear time (regression: /\\/+$/ was quadratic)', () => {
+    // The previous /^\/+|\/+$/g took ~1.2 s on 40k inner slashes; linear trimming takes <1 ms.
+    const bucket = `s3://b/a${'/'.repeat(50_000)}x/`;
+    const started = performance.now();
+    const vars = presignVars({ CELLD_BUCKET: bucket }, 'assets');
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(vars.R2_S3_KEY_PREFIX).toBe(`a${'/'.repeat(50_000)}x/r2/assets/`);
   });
 });
 

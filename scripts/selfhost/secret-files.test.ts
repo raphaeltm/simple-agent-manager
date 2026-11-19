@@ -59,6 +59,51 @@ describe('parseDotenv', () => {
       /^s:1: unterminated double quote$/
     );
   });
+
+  it('accepts the same NAME=value shapes as before the regex was replaced', () => {
+    expect(
+      parseDotenv(
+        [
+          'A = spaced',
+          'export\tB=tab',
+          'export   C =  c ',
+          'export=keyword-as-name',
+          'exportD=1',
+          '_E1=x=y',
+          'F="q" # comment',
+          "G='lit' ignored",
+        ].join('\n'),
+        't'
+      )
+    ).toEqual({
+      A: 'spaced',
+      B: 'tab',
+      C: 'c',
+      export: 'keyword-as-name',
+      exportD: '1',
+      _E1: 'x=y',
+      F: 'q',
+      G: 'lit',
+    });
+  });
+
+  it('rejects the same malformed lines as before the regex was replaced', () => {
+    for (const bad of ['1A=x', 'A B=x', 'export 1A=x', '=x', 'A', 'A=x\ry']) {
+      expect(() => parseDotenv(bad, 't'), JSON.stringify(bad)).toThrow('t:1: expected NAME=value');
+    }
+    expect(() => parseDotenv('A="x" trailing', 't')).toThrow(
+      't:1: unexpected text after closing quote'
+    );
+    expect(() => parseDotenv("A='x", 't')).toThrow('t:1: unterminated single quote');
+  });
+
+  it('rejects a long adversarial line in linear time (regression: \\s*=\\s*(.*)$ was quadratic)', () => {
+    // The previous single regex took ~1.5 s on this shape at 40k spaces; string parsing takes <1 ms.
+    const line = `A=${' '.repeat(50_000)}y\ry`;
+    const started = performance.now();
+    expect(() => parseDotenv(line, 't')).toThrow('t:1: expected NAME=value');
+    expect(performance.now() - started).toBeLessThan(200);
+  });
 });
 
 describe('root-only secret files', () => {
