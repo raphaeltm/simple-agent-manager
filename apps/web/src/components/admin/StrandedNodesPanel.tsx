@@ -39,7 +39,9 @@ function formatTime(value: string | null): string {
 }
 
 function providerName(node: AdminStrandedNode): string {
-  return node.cloudProvider ?? 'the provider';
+  const name = node.cloudProvider;
+  if (!name) return 'the provider';
+  return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
 function RemoveNodeDialog({
@@ -67,7 +69,7 @@ function RemoveNodeDialog({
   const ready = confirmation.trim() === node.id && note.trim().length > 0;
   const lookFor = node.providerInstanceId
     ? `server ${node.providerInstanceId}`
-    : `a server named node-${node.id.toLowerCase()} or labelled node=${node.id.toLowerCase()}`;
+    : `server named node-${node.id.toLowerCase()} or labelled node=${node.id.toLowerCase()}`;
 
   return (
     <Dialog isOpen onClose={onClose} maxWidth="md" aria-label="Remove a stuck node">
@@ -146,7 +148,7 @@ function StrandedNodeRow({
     <li className="grid min-w-0 gap-2 py-3 first:pt-0 last:pb-0 sm:grid-cols-[1fr_auto] sm:items-start sm:gap-4">
       <div className="grid min-w-0 gap-1">
         <span className="break-all font-mono text-sm text-fg-primary">{node.id}</span>
-        <span className="break-words text-xs text-fg-muted">
+        <span className="text-xs text-fg-muted [overflow-wrap:anywhere]">
           {providerName(node)}
           {node.vmLocation ? ` · ${node.vmLocation}` : ''} · {node.nodeRole} ·{' '}
           {node.providerInstanceId ? `server ${node.providerInstanceId}` : 'no server ID recorded'}{' '}
@@ -163,7 +165,7 @@ function StrandedNodeRow({
         </span>
         {node.errorMessage && (
           <span
-            className="line-clamp-2 break-words text-xs text-fg-muted"
+            className="line-clamp-2 text-xs text-fg-muted [overflow-wrap:anywhere]"
             title={node.errorMessage}
           >
             {node.errorMessage}
@@ -220,7 +222,7 @@ export function StrandedNodesPanel() {
         <Button
           size="sm"
           variant="ghost"
-          className="shrink-0 border-transparent text-fg-muted hover:text-fg-primary"
+          className="shrink-0 self-start border-transparent text-fg-muted hover:text-fg-primary"
           aria-label="Refresh stuck nodes"
           disabled={!scope}
           onClick={() => void query.refetch()}
