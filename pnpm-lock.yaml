@@ -152,9 +152,6 @@ importers:
       '@iarna/toml':
         specifier: 2.2.5
         version: 2.2.5
-      lucide-react:
-        specifier: 1.8.0
-        version: 1.8.0(react@19.3.1)
     devDependencies:
       '@commitlint/cli':
         specifier: 21.2.0
@@ -1311,8 +1308,8 @@ importers:
         specifier: 2.6.2
         version: 2.6.2
       satori:
-        specifier: 0.62.0
-        version: 0.62.0
+        specifier: 0.63.2
+        version: 0.63.2
     devDependencies:
       tsx:
         specifier: 'catalog:'
@@ -7751,11 +7748,6 @@ packages:
     peerDependencies:
       react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0-rc
 
-  lucide-react@1.8.0:
-    resolution: {integrity: sha512-WuvlsjngSk7TnTBJ1hsCy3ql9V9VOdcPkd3PKcSmM34vJD8KG6molxz7m7zbYFgICwsanQWmJ13JlYs4Zp7Arw==}
-    peerDependencies:
-      react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
-
   lz-string@1.5.0:
     resolution: {integrity: sha512-h5bgJWpxJNswbU7qCrV0tIKQCaS3blPDrqKWx+QxzuzL1zGUzij9XCWLrSLsJPu5t+eWA/ycetzYAO5IOMcWAQ==}
     hasBin: true
@@ -8902,8 +8894,8 @@ packages:
   safer-buffer@2.1.2:
     resolution: {integrity: sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==}
 
-  satori@0.62.0:
-    resolution: {integrity: sha512-6w3G54svVX9B3RY3S7XgZ3i9ZNtvO7Z8AWWUPcHM3HMhgvmYAZOl5TkWBqE8moxRxHW0i2XPbjI1mUsUmWGriA==}
+  satori@0.63.2:
+    resolution: {integrity: sha512-h7dm4BRMo8F53l9vOXOIfJoqeVXuZvyz13VsvVuwJb72sLfq+8uddJIJcjLKLv2BqWzDvYIpzi3rvBBS+ETuvw==}
     engines: {node: '>=16'}
 
   sax@1.6.1:
@@ -16752,10 +16744,6 @@ snapshots:
     dependencies:
       react: 19.3.1
 
-  lucide-react@1.8.0(react@19.3.1):
-    dependencies:
-      react: 19.3.1
-
   lz-string@1.5.0: {}
 
   magic-string@0.30.21:
@@ -18447,7 +18435,7 @@ snapshots:
 
   safer-buffer@2.1.2: {}
 
-  satori@0.62.0:
+  satori@0.63.2:
     dependencies:
       '@shuding/opentype.js': 1.4.0-beta.0
       css-background-parser: 0.1.0
