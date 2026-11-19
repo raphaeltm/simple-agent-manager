@@ -21,7 +21,7 @@ const BASE_BOX_ENV = [
   'CELLD_BUCKET=s3://fleet/celld',
   'S3_ENDPOINT=http://127.0.0.1:9000',
   'AWS_ACCESS_KEY_ID=fleet-key',
-  'AWS_SECRET_ACCESS_KEY=fleet-secret-0123456789',
+  'AWS_SECRET_ACCESS_KEY=fleet-secret-0123456789abcdef',
 ];
 
 export function writeBox(dir: string, extra: string[] = []): string {

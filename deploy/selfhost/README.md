@@ -123,7 +123,9 @@ credential scoped to the R2 prefix (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`; 
 credential, which the deploy refuses). **For an `s3://` bucket `R2_S3_REGION` is required** (the
 store's SigV4 signing region, for MinIO usually `us-east-1`): the deploy refuses `R2_S3_ENDPOINT`
 without it. A `gs://` bucket defaults to `auto`. The bundled store is a community MinIO build that
-celld does not qualify for production.
+celld does not qualify for production. It refuses to start unless `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY` are set, are not `minioadmin`, and the secret has at least 24 characters
+(`openssl rand -hex 24`): that credential reads every Worker secret in the bucket.
 
 **Reverse-tunnel ports and the gateway secret.** frps binds one loopback port per node from
 `REVERSE_TUNNEL_PORT_RANGE_START`..`_END` (default 20000-29999). The deploy writes the resolved

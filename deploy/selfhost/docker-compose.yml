@@ -286,7 +286,8 @@ services:
     # Compose interpolates every service, including ones whose profile is off, so a `:?` here
     # would stop a gs:// or s3:// install that never runs this store. The store checks instead:
     # it refuses an unset credential (MinIO would fall back to minioadmin), MinIO's well-known
-    # default, and a secret under 8 characters. /usr/bin/docker-entrypoint.sh is the image's
+    # default, and a secret under 24 characters (the root credential reads every deployed Worker
+    # secret in the fleet bucket, so it must not be guessable). /usr/bin/docker-entrypoint.sh is the image's
     # own ENTRYPOINT at the pinned digest.
     entrypoint:
       - /bin/sh
@@ -296,8 +297,8 @@ services:
         :* | *: | minioadmin:* | *:minioadmin)
         echo 'objectstore: set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env (not minioadmin)' >&2; exit 64;;
         esac;
-        test "$${#MINIO_ROOT_PASSWORD}" -ge 8 ||
-        { echo 'objectstore: AWS_SECRET_ACCESS_KEY must be at least 8 characters' >&2; exit 64; };
+        test "$${#MINIO_ROOT_PASSWORD}" -ge 24 ||
+        { echo 'objectstore: AWS_SECRET_ACCESS_KEY must be at least 24 characters (openssl rand -hex 24)' >&2; exit 64; };
         exec /usr/bin/docker-entrypoint.sh "$$@"
       - objectstore
     environment:

@@ -1,11 +1,13 @@
 /**
- * Static wiring for Caddy's access log and the keep-warm health check (the behaviour itself is
- * proven against the real Caddy image in live/access-log-keep-warm.live.test.ts): compose passes
- * the keep-warm settings with their defaults and caps the Caddy log on disk, and both Caddy
- * loggers import the one redaction filter. Which path prefixes the filter rewrites is pinned against
- * the routes themselves in apps/api/tests/unit/selfhost/caddy-log-redaction-routes.test.ts, which CI
- * runs on route changes.
+ * Static wiring in docker-compose.yml. Caddy (its behaviour is proven against the real image in
+ * live/access-log-keep-warm.live.test.ts): compose passes the keep-warm settings with their
+ * defaults and caps the Caddy log on disk, and both Caddy loggers import the one redaction filter.
+ * Which path prefixes the filter rewrites is pinned against the routes themselves in
+ * apps/api/tests/unit/selfhost/caddy-log-redaction-routes.test.ts and
+ * apps/web/tests/unit/selfhost-log-redaction-routes.test.ts, which CI runs on route changes.
+ * Also: the capabilities of celld and frps, and the bundled object store's credential check.
  */
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -22,6 +24,7 @@ interface Service {
   security_opt?: string[];
   read_only?: boolean;
   tmpfs?: string[];
+  entrypoint?: string[];
   logging?: { driver?: string; options?: Record<string, string> };
 }
 
@@ -91,5 +94,42 @@ describe('box service privileges', () => {
   it('control: Caddy keeps only NET_BIND_SERVICE, for 80 and 443', () => {
     expect(caddy?.cap_drop).toEqual(['ALL']);
     expect(caddy?.cap_add).toEqual(['NET_BIND_SERVICE']);
+  });
+});
+
+// The bundled store's root credential reads every Worker secret in the fleet bucket. Its
+// entrypoint (run here under /bin/sh, with the image's own entrypoint stubbed) refuses a weak one.
+describe('bundled object store credential', () => {
+  const [shell, flag, script, name] = compose.services.objectstore?.entrypoint ?? [];
+  const run = (user: string, password: string) =>
+    spawnSync(
+      shell!,
+      [
+        flag!,
+        // Compose writes $$ for a literal $; the image's entrypoint becomes a marker.
+        script!.replaceAll('$$', '$').replace('exec /usr/bin/docker-entrypoint.sh', 'echo started'),
+        name!,
+        'server',
+      ],
+      {
+        encoding: 'utf8',
+        env: { PATH: '/usr/bin:/bin', MINIO_ROOT_USER: user, MINIO_ROOT_PASSWORD: password },
+      }
+    );
+
+  it.each([
+    ['an unset secret', 'sam-objectstore', ''],
+    ['the MinIO default', 'minioadmin', 'minioadmin'],
+    ['a 23-character secret', 'sam-objectstore', 'a'.repeat(23)],
+  ])('refuses %s', (_, user, password) => {
+    const result = run(user, password);
+    expect(result.status).toBe(64);
+    expect(result.stdout).not.toContain('started');
+  });
+
+  it('control: starts with a 24-character secret', () => {
+    const result = run('sam-objectstore', 'a'.repeat(24));
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('started');
   });
 });
