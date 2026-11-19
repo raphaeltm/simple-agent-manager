@@ -20,6 +20,12 @@ vi.mock('../../../src/scheduled/provider-orphan-credentials', () => ({
   resolveInventoryProvider: vi.fn(),
 }));
 vi.mock('../../../src/services/observability', () => ({ persistError: vi.fn() }));
+// This suite has no database; pool ownership has its own real-SQL suite. Spy on the check to
+// prove the sweep's exchange runs it as the installation.
+vi.mock('../../../src/services/gcp-wif-pool-ownership', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/gcp-wif-pool-ownership')>()),
+  assertGcpWifPoolOwnership: vi.fn(async () => undefined),
+}));
 vi.mock('../../../src/lib/logger', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -163,6 +169,14 @@ describe('platform GCP orphan sweep configuration and authentication', () => {
     expect(result.errors).toBe(0);
     expect(result.deletionRequested).toBe(1);
     expect(result.destroyed).toBe(0);
+    const { assertGcpWifPoolOwnership } =
+      await import('../../../src/services/gcp-wif-pool-ownership');
+    expect(assertGcpWifPoolOwnership).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ authType: 'workload-identity' }),
+      { kind: 'platform' },
+      'token_exchange'
+    );
     const sts = fetchMock.mock.calls.find(([url]) => String(url).includes('sts.googleapis.com'));
     expect(sts).toBeDefined();
     const body = JSON.parse(sts![1]!.body as string);

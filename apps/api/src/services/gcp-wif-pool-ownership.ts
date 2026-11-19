@@ -4,29 +4,44 @@
  * SAM signs an identity token for whatever pool a stored GCP credential names. A pool whose
  * provider checks only SAM's issuer, with a `pool/*` binding (the user-level guided setup before
  * this module existed), accepts any token SAM signs. So user B could save a credential naming
- * user A's pool and impersonate A's service account. This module refuses that on the Worker side:
- * a credential may name a `(gcpProjectNumber, wifPoolId)` only when no credential belonging to a
- * different owner names it. Owners are one SAM user (user-level and project-scoped credentials of
- * the same user may share a pool) or the installation (platform credentials).
+ * user A's pool and impersonate A's service account. This module refuses that on the Worker side.
+ * Owners are one SAM user (their user-level and project-scoped credentials may share a pool) or
+ * the installation (platform credentials). A credential may name a `(gcpProjectNumber, wifPoolId)`
+ * only when
+ * - no credential of a different owner names it, and
+ * - the pool is unclaimed or claimed by the same owner. The first owner whose credential names a
+ *   pool claims it, and the claim outlives that credential: deleting or re-pointing a credential
+ *   in SAM leaves the trust an earlier setup granted in Google, so it must not free the pool for
+ *   someone else. An operator releases a claim by deleting its row (see the self-hosting guide).
  *
  * Pool identities live inside encrypted credential payloads, so they are indexed in
  * `gcp_wif_pool_index`, one row per stored credential, keyed by the row's IV. Writers do not
- * maintain the index: every check first indexes rows whose IV the index has not seen (a new or
- * re-encrypted row), then reads owners only through index rows whose source row still exists with
- * the same IV. A writer that forgets the index, a deleted credential, or a rotation therefore
- * cannot leave the check reading stale data. Deployment credentials store their pool in plaintext
- * and are read directly.
+ * maintain the index: every check first indexes rows whose IV the index has not seen, in the same
+ * D1 batch (one transaction) as the read of the pool's holders. A writer that skips the index, a
+ * deleted credential, or a rotation therefore cannot leave the check reading stale data.
  *
- * Per check: one D1 round trip (the unindexed-row probe and the owner lookup run as one batch).
- * Only when a credential was added or re-encrypted since the last check does it decrypt those
- * rows, page by page, inside a time budget, and run the owner lookup again.
+ * I/O per check when nothing changed: one D1 round trip, no decryption, no admin-settings read.
+ * A first-time claim adds one round trip for that pool. A new or re-encrypted credential adds
+ * one page of decrypts plus two round trips per `gcpWif.poolIndexPageSize` rows, within
+ * `gcpWif.poolIndexBudgetMs`; past the budget the check refuses rather than trust a partial index.
  */
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { AppError } from '../middleware/error';
+import {
+  DEFAULT_GCP_WIF_POOL_INDEX_PAGE_SIZE,
+  DEFAULT_GCP_WIF_POOL_INDEX_UNREADABLE_RETRY_MINUTES,
+} from './admin-settings-gcp-catalog-definitions';
 import { resolveAdminSetting } from './admin-settings-resolution';
 import { decrypt } from './encryption';
+import {
+  CLAIM_POOL_SQL,
+  POOL_HOLDERS_SQL,
+  READ_CLAIM_SQL,
+  UNINDEXED_ROWS_SQL,
+  UPSERT_INDEX_SQL,
+} from './gcp-wif-pool-ownership-sql';
 import { extractCloudProviderToken, parseGcpCredential } from './provider-credential-codecs';
 
 /** Who a stored GCP credential belongs to, for pool ownership. */
@@ -36,26 +51,50 @@ export type GcpWifPoolOwner = { kind: 'platform' } | { kind: 'user'; userId: str
 export interface GcpWifPoolIdentity {
   gcpProjectNumber: string;
   wifPoolId: string;
-  /** `<projectNumber>/<poolId>`, the index key. */
+  /** `<projectNumber>/<poolId>`, the index and claim key. */
   key: string;
 }
 
-const PROJECT_NUMBER_PATTERN = /^\d{1,20}$/;
+// Google project numbers never start with 0, so `0123` cannot alias `123`.
+const PROJECT_NUMBER_PATTERN = /^[1-9]\d{0,19}$/;
 const POOL_ID_PATTERN = /^[a-z0-9-]{1,63}$/;
 
 /**
  * Normalize a pool identity, or return null when the values cannot name a real pool. Google
  * resource IDs are lowercase and STS audiences use the project number, so a value that differs
- * only in case or whitespace is the same pool.
+ * only in case or surrounding whitespace is the same pool.
  */
 export function gcpWifPoolIdentity(
   gcpProjectNumber: string,
   wifPoolId: string
 ): GcpWifPoolIdentity | null {
+  if (typeof gcpProjectNumber !== 'string' || typeof wifPoolId !== 'string') return null;
   const projectNumber = gcpProjectNumber.trim();
   const poolId = wifPoolId.trim().toLowerCase();
   if (!PROJECT_NUMBER_PATTERN.test(projectNumber) || !POOL_ID_PATTERN.test(poolId)) return null;
   return { gcpProjectNumber: projectNumber, wifPoolId: poolId, key: `${projectNumber}/${poolId}` };
+}
+
+const PROVIDER_ID_PATTERN = /^[a-z0-9-]{1,63}$/;
+const SERVICE_ACCOUNT_EMAIL_PATTERN = /^[a-z0-9][a-z0-9._-]{0,62}@[a-z0-9][a-z0-9.-]{0,252}$/i;
+
+/**
+ * Refuse a credential whose provider ID or service account could change the STS audience or the
+ * impersonation URL they are interpolated into (path segments, query strings).
+ */
+export function assertGcpWifCredentialShape(credential: {
+  wifProviderId: string;
+  serviceAccountEmail: string;
+}): void {
+  if (
+    typeof credential.wifProviderId !== 'string' ||
+    typeof credential.serviceAccountEmail !== 'string' ||
+    !PROVIDER_ID_PATTERN.test(credential.wifProviderId) ||
+    !SERVICE_ACCOUNT_EMAIL_PATTERN.test(credential.serviceAccountEmail)
+  ) {
+    log.warn('gcp_wif_pool.invalid_credential_shape', { action: 'refused' });
+    throw new GcpWifPoolInvalidError();
+  }
 }
 
 /**
@@ -79,7 +118,7 @@ export class GcpWifPoolOwnedByAnotherOwnerError extends AppError {
     super(
       409,
       'GCP_WIF_POOL_OWNED_BY_ANOTHER_OWNER',
-      'This Google Cloud workload identity pool is already used by a credential that belongs to a different SAM owner. Each SAM user, and the installation itself, must use its own pool.'
+      'This Google Cloud workload identity pool already belongs to a different SAM owner. Each SAM user, and the installation itself, must use its own pool.'
     );
     this.name = 'GcpWifPoolOwnedByAnotherOwnerError';
   }
@@ -90,7 +129,7 @@ export class GcpWifPoolInvalidError extends AppError {
     super(
       400,
       'GCP_WIF_POOL_INVALID',
-      'The Google Cloud project number must be digits and the workload identity pool ID may contain only lowercase letters, digits and hyphens.'
+      'The Google Cloud project number must be digits, the workload identity pool and provider IDs may contain only lowercase letters, digits and hyphens, and the service account must be an email address.'
     );
     this.name = 'GcpWifPoolInvalidError';
   }
@@ -127,72 +166,12 @@ interface UnindexedRow {
   iv: string;
 }
 
-interface PoolOwnerRow {
+interface PoolHolderRow {
   sourceTable: string;
   sourceId: string;
   ownerKind: 'user' | 'platform';
   ownerUserId: string | null;
 }
-
-// Every stored row that can be exchanged as a GCP credential. Composable credentials do not
-// record their provider in plaintext, so every cloud-provider row is indexed once (a non-GCP row
-// is stored with a NULL pool and is not decrypted again until it is re-encrypted).
-const UNINDEXED_ROWS_SQL = `
-SELECT 'credentials' AS sourceTable, c.id AS sourceId, 'user' AS ownerKind, c.user_id AS ownerUserId,
-       c.encrypted_token AS encryptedToken, c.iv AS iv
-  FROM credentials c
- WHERE c.provider = 'gcp' AND c.credential_type = 'cloud-provider'
-   AND NOT EXISTS (SELECT 1 FROM gcp_wif_pool_index i
-                    WHERE i.source_table = 'credentials' AND i.source_id = c.id
-                      AND i.iv = c.iv AND i.owner_kind = 'user' AND i.owner_user_id = c.user_id)
-UNION ALL
-SELECT 'platform_credentials', p.id, 'platform', NULL, p.encrypted_token, p.iv
-  FROM platform_credentials p
- WHERE p.provider = 'gcp' AND p.credential_type = 'cloud-provider'
-   AND NOT EXISTS (SELECT 1 FROM gcp_wif_pool_index i
-                    WHERE i.source_table = 'platform_credentials' AND i.source_id = p.id
-                      AND i.iv = p.iv AND i.owner_kind = 'platform')
-UNION ALL
-SELECT 'cc_credentials', cc.id, 'user', cc.owner_id, cc.encrypted_token, cc.iv
-  FROM cc_credentials cc
- WHERE cc.kind = 'cloud-provider'
-   AND NOT EXISTS (SELECT 1 FROM gcp_wif_pool_index i
-                    WHERE i.source_table = 'cc_credentials' AND i.source_id = cc.id
-                      AND i.iv = cc.iv AND i.owner_kind = 'user' AND i.owner_user_id = cc.owner_id)
-LIMIT ?`;
-
-// Owners of one pool. Index rows of deleted credentials drop out through the existence checks.
-// The read is used only when the unindexed-row probe in the same D1 batch (one transaction)
-// returned nothing, so every remaining index row already matches its credential's current IV and
-// owner. Inactive and disabled rows still count: they can be re-enabled, and the pool's binding
-// in Google still trusts them.
-const POOL_OWNERS_SQL = `
-SELECT i.source_table AS sourceTable, i.source_id AS sourceId, i.owner_kind AS ownerKind,
-       i.owner_user_id AS ownerUserId
-  FROM gcp_wif_pool_index i
- WHERE i.pool_key = ?
-   AND (
-     (i.source_table = 'credentials' AND EXISTS (
-        SELECT 1 FROM credentials c WHERE c.id = i.source_id AND c.provider = 'gcp'
-           AND c.credential_type = 'cloud-provider'))
-     OR (i.source_table = 'platform_credentials' AND EXISTS (
-        SELECT 1 FROM platform_credentials p WHERE p.id = i.source_id AND p.provider = 'gcp'
-           AND p.credential_type = 'cloud-provider'))
-     OR (i.source_table = 'cc_credentials' AND EXISTS (
-        SELECT 1 FROM cc_credentials cc WHERE cc.id = i.source_id AND cc.kind = 'cloud-provider'))
-   )
-UNION ALL
-SELECT 'project_deployment_credentials', d.id, 'user', d.user_id
-  FROM project_deployment_credentials d
- WHERE d.provider = 'gcp' AND d.gcp_project_number = ? AND lower(trim(d.wif_pool_id)) = ?`;
-
-const UPSERT_INDEX_SQL = `
-INSERT INTO gcp_wif_pool_index
-  (source_table, source_id, iv, owner_kind, owner_user_id, pool_key, indexed_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT (source_table, source_id) DO UPDATE SET
-  iv = excluded.iv, owner_kind = excluded.owner_kind, owner_user_id = excluded.owner_user_id,
-  pool_key = excluded.pool_key, indexed_at = excluded.indexed_at`;
 
 function isSourceTable(value: unknown): value is SourceTable {
   return value === 'credentials' || value === 'platform_credentials' || value === 'cc_credentials';
@@ -203,17 +182,21 @@ function toUnindexedRow(row: Record<string, unknown>): UnindexedRow | null {
   if (
     !isSourceTable(sourceTable) ||
     typeof sourceId !== 'string' ||
-    (ownerKind !== 'user' && ownerKind !== 'platform') ||
-    (ownerUserId !== null && typeof ownerUserId !== 'string') ||
     typeof encryptedToken !== 'string' ||
     typeof iv !== 'string'
   ) {
     return null;
   }
-  return { sourceTable, sourceId, ownerKind, ownerUserId, encryptedToken, iv };
+  if (ownerKind === 'platform') {
+    return { sourceTable, sourceId, ownerKind, ownerUserId: null, encryptedToken, iv };
+  }
+  if (ownerKind === 'user' && typeof ownerUserId === 'string') {
+    return { sourceTable, sourceId, ownerKind, ownerUserId, encryptedToken, iv };
+  }
+  return null;
 }
 
-function toPoolOwnerRow(row: Record<string, unknown>): PoolOwnerRow | null {
+function toPoolHolderRow(row: Record<string, unknown>): PoolHolderRow | null {
   const { sourceTable, sourceId, ownerKind, ownerUserId } = row;
   if (
     typeof sourceTable !== 'string' ||
@@ -226,41 +209,66 @@ function toPoolOwnerRow(row: Record<string, unknown>): PoolOwnerRow | null {
   return { sourceTable, sourceId, ownerKind, ownerUserId };
 }
 
+/**
+ * Parse every row or fail closed. A row these queries return always has these shapes (the
+ * columns are NOT NULL), so an unparseable row means the check cannot be trusted: treating it
+ * as absent could hide an unindexed credential or a foreign holder.
+ */
+function parseAll<T>(
+  results: Record<string, unknown>[] | undefined,
+  parse: (row: Record<string, unknown>) => T | null,
+  context: string
+): T[] {
+  const parsed: T[] = [];
+  for (const row of results ?? []) {
+    const value = parse(row);
+    if (!value) {
+      log.error('gcp_wif_pool_index.row_unparseable', { context, action: 'refused' });
+      throw new GcpWifPoolIndexUnavailableError();
+    }
+    parsed.push(value);
+  }
+  return parsed;
+}
+
 function ownerLabel(owner: GcpWifPoolOwner): string {
   return owner.kind === 'platform' ? 'platform' : `user:${owner.userId}`;
 }
 
-function belongsToOwner(row: PoolOwnerRow, owner: GcpWifPoolOwner): boolean {
+function heldBy(row: PoolHolderRow, owner: GcpWifPoolOwner): boolean {
   if (owner.kind === 'platform') return row.ownerKind === 'platform';
   return row.ownerKind === 'user' && row.ownerUserId === owner.userId;
 }
 
-async function readIndexSettings(env: Env): Promise<{ pageSize: number; budgetMs: number }> {
-  const [pageSize, budgetMs] = await Promise.all([
-    resolveAdminSetting(env, 'gcpWif.poolIndexPageSize'),
-    resolveAdminSetting(env, 'gcpWif.poolIndexBudgetMs'),
-  ]);
-  return { pageSize: Number(pageSize), budgetMs: Number(budgetMs) };
+function ownerColumns(owner: GcpWifPoolOwner): ['user' | 'platform', string | null] {
+  return owner.kind === 'platform' ? ['platform', null] : ['user', owner.userId];
 }
 
-/** Decrypt and index one page of unindexed rows. A row that fails is indexed with no pool. */
+function retryCutoff(retryMinutes: number): string {
+  return new Date(Date.now() - retryMinutes * 60_000).toISOString();
+}
+
+/** Decrypt and index one page; claim each named pool for the row's owner if it is unclaimed. */
 async function indexRows(env: Env, rows: UnindexedRow[]): Promise<void> {
   const key = getCredentialEncryptionKey(env);
   const now = new Date().toISOString();
   const statements: D1PreparedStatement[] = [];
   for (const row of rows) {
     let poolKey: string | null = null;
+    let unreadable = 0;
     try {
       const decrypted = await decrypt(row.encryptedToken, row.iv, key);
       poolKey = gcpWifPoolFromDecryptedPayload(decrypted)?.key ?? null;
     } catch (err) {
-      // An unreadable row cannot be exchanged either, so it owns no pool. Recording it stops
-      // it being decrypted again on every check until it is re-encrypted (rule 41, rule 47).
+      // An unreadable row cannot be exchanged either. It is retried after
+      // `gcpWif.poolIndexUnreadableRetryMinutes` (a key fix makes it readable without a new IV),
+      // not on every check, so one bad row cannot stall every check (rule 41, rule 47).
+      unreadable = 1;
       log.error('gcp_wif_pool_index.row_unreadable', {
         sourceTable: row.sourceTable,
         sourceId: row.sourceId,
         error: err instanceof Error ? err.message : String(err),
-        action: 'indexed_without_pool',
+        action: 'indexed_unreadable',
       });
     }
     statements.push(
@@ -269,60 +277,76 @@ async function indexRows(env: Env, rows: UnindexedRow[]): Promise<void> {
         row.sourceId,
         row.iv,
         row.ownerKind,
-        row.ownerKind === 'platform' ? null : row.ownerUserId,
+        row.ownerUserId,
         poolKey,
+        unreadable,
         now
       )
     );
+    if (poolKey) {
+      statements.push(
+        env.DATABASE.prepare(CLAIM_POOL_SQL).bind(poolKey, row.ownerKind, row.ownerUserId, now)
+      );
+    }
   }
   if (statements.length > 0) await env.DATABASE.batch(statements);
 }
 
-function parseRows<T>(
-  results: Record<string, unknown>[] | undefined,
-  parse: (row: Record<string, unknown>) => T | null,
-  context: string
-): T[] {
-  const parsed: T[] = [];
-  for (const row of results ?? []) {
-    const value = parse(row);
-    if (value) parsed.push(value);
-    else log.error('gcp_wif_pool_index.row_skipped', { context, action: 'skipped' });
-  }
-  return parsed;
+async function readIndexSettings(
+  env: Env
+): Promise<{ pageSize: number; budgetMs: number; retryMinutes: number }> {
+  const [pageSize, budgetMs, retryMinutes] = await Promise.all([
+    resolveAdminSetting(env, 'gcpWif.poolIndexPageSize'),
+    resolveAdminSetting(env, 'gcpWif.poolIndexBudgetMs'),
+    resolveAdminSetting(env, 'gcpWif.poolIndexUnreadableRetryMinutes'),
+  ]);
+  return {
+    pageSize: Number(pageSize),
+    budgetMs: Number(budgetMs),
+    retryMinutes: Number(retryMinutes),
+  };
 }
 
 /**
- * Bring the index up to date, then return every live credential that names `pool`.
- * Throws GcpWifPoolIndexUnavailableError when unindexed rows remain after the time budget,
- * because an incomplete index cannot prove that no other owner names the pool.
+ * Bring the index up to date, then return everything that holds `pool`: its claim, live
+ * credentials naming it, and deployment credentials naming it. Throws
+ * GcpWifPoolIndexUnavailableError when unindexed rows remain after the time budget.
  */
-async function listPoolOwners(env: Env, pool: GcpWifPoolIdentity): Promise<PoolOwnerRow[]> {
-  const { pageSize, budgetMs } = await readIndexSettings(env);
-  const deadline = Date.now() + budgetMs;
-  const ownersStatement = env.DATABASE.prepare(POOL_OWNERS_SQL).bind(
+async function listPoolHolders(env: Env, pool: GcpWifPoolIdentity): Promise<PoolHolderRow[]> {
+  const holders = env.DATABASE.prepare(POOL_HOLDERS_SQL).bind(
+    pool.key,
     pool.key,
     pool.gcpProjectNumber,
     pool.wifPoolId
   );
+  // Settings are read only when something needs indexing, so the steady state costs one batch.
+  let settings: Awaited<ReturnType<typeof readIndexSettings>> | null = null;
+  let deadline = Infinity;
   let indexedAny = false;
   for (;;) {
-    const [unindexedResult, ownersResult] = await env.DATABASE.batch<Record<string, unknown>>([
-      env.DATABASE.prepare(UNINDEXED_ROWS_SQL).bind(pageSize),
-      ownersStatement,
+    const pageSize = settings?.pageSize ?? DEFAULT_GCP_WIF_POOL_INDEX_PAGE_SIZE;
+    const cutoff = retryCutoff(
+      settings?.retryMinutes ?? DEFAULT_GCP_WIF_POOL_INDEX_UNREADABLE_RETRY_MINUTES
+    );
+    const [unindexedResult, holdersResult] = await env.DATABASE.batch<Record<string, unknown>>([
+      env.DATABASE.prepare(UNINDEXED_ROWS_SQL).bind(cutoff, cutoff, cutoff, pageSize),
+      holders,
     ]);
-    const unindexed = parseRows(unindexedResult?.results, toUnindexedRow, 'unindexed');
+    const unindexed = parseAll(unindexedResult?.results, toUnindexedRow, 'unindexed');
     if (unindexed.length === 0) {
-      const owners = parseRows(ownersResult?.results, toPoolOwnerRow, 'owners');
+      const found = parseAll(holdersResult?.results, toPoolHolderRow, 'holders');
       if (indexedAny) {
-        log.info('gcp_wif_pool_index.reconciled', { poolKey: pool.key, owners: owners.length });
+        log.info('gcp_wif_pool_index.reconciled', { poolKey: pool.key, holders: found.length });
       }
-      return owners;
+      return found;
     }
-    if (Date.now() >= deadline) {
+    if (!settings) {
+      settings = await readIndexSettings(env);
+      deadline = Date.now() + settings.budgetMs;
+    } else if (Date.now() >= deadline) {
       log.error('gcp_wif_pool_index.budget_exhausted', {
         poolKey: pool.key,
-        budgetMs,
+        budgetMs: settings.budgetMs,
         remainingPage: unindexed.length,
         action: 'refused',
       });
@@ -333,9 +357,28 @@ async function listPoolOwners(env: Env, pool: GcpWifPoolIdentity): Promise<PoolO
   }
 }
 
+function refuse(
+  context: string,
+  pool: GcpWifPoolIdentity,
+  owner: GcpWifPoolOwner,
+  foreign: PoolHolderRow[]
+): never {
+  // A designed refusal, logged at warn (rule 34): one line per refused attempt.
+  log.warn('gcp_wif_pool.cross_owner_refused', {
+    context,
+    poolKey: pool.key,
+    owner: ownerLabel(owner),
+    conflicting: foreign.map((row) => `${row.sourceTable}:${row.sourceId}`),
+    conflictingOwnerKinds: [...new Set(foreign.map((row) => row.ownerKind))],
+    action: 'refused',
+  });
+  throw new GcpWifPoolOwnedByAnotherOwnerError();
+}
+
 /**
- * Refuse when a credential belonging to a different owner names `pool`.
- * `context` names the caller (save route or token exchange) for the structured log line.
+ * Refuse when the pool is claimed by, or named by a credential of, a different owner; otherwise
+ * claim it for `owner` if nobody has. `context` names the caller (a save route or the token
+ * exchange) for the structured log line.
  */
 export async function assertGcpWifPoolOwnership(
   env: Env,
@@ -345,25 +388,33 @@ export async function assertGcpWifPoolOwnership(
 ): Promise<void> {
   const identity = gcpWifPoolIdentity(pool.gcpProjectNumber, pool.wifPoolId);
   if (!identity) {
-    log.error('gcp_wif_pool.invalid_identity', {
+    log.warn('gcp_wif_pool.invalid_identity', {
       context,
       owner: ownerLabel(owner),
       action: 'refused',
     });
     throw new GcpWifPoolInvalidError();
   }
-  const owners = await listPoolOwners(env, identity);
-  const foreign = owners.filter((row) => !belongsToOwner(row, owner));
-  if (foreign.length === 0) return;
-  log.error('gcp_wif_pool.cross_owner_refused', {
-    context,
-    poolKey: identity.key,
-    owner: ownerLabel(owner),
-    conflictingCredentials: foreign.map((row) => `${row.sourceTable}:${row.sourceId}`),
-    conflictingOwnerKinds: [...new Set(foreign.map((row) => row.ownerKind))],
-    action: 'refused',
-  });
-  throw new GcpWifPoolOwnedByAnotherOwnerError();
+  const holders = await listPoolHolders(env, identity);
+  const foreign = holders.filter((row) => !heldBy(row, owner));
+  if (foreign.length > 0) refuse(context, identity, owner, foreign);
+  if (holders.some((row) => row.sourceTable === 'gcp_wif_pool_claims')) return;
+
+  // Unclaimed: claim it. The primary key decides a concurrent claim, so re-read the winner.
+  const [ownerKind, ownerUserId] = ownerColumns(owner);
+  const [, claimResult] = await env.DATABASE.batch<Record<string, unknown>>([
+    env.DATABASE.prepare(CLAIM_POOL_SQL).bind(
+      identity.key,
+      ownerKind,
+      ownerUserId,
+      new Date().toISOString()
+    ),
+    env.DATABASE.prepare(READ_CLAIM_SQL).bind(identity.key),
+  ]);
+  const claim = parseAll(claimResult?.results, toPoolHolderRow, 'claim');
+  const [winner] = claim;
+  if (!winner || claim.length !== 1) throw new GcpWifPoolIndexUnavailableError();
+  if (!heldBy(winner, owner)) refuse(context, identity, owner, claim);
 }
 
 /**

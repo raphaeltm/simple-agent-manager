@@ -40,7 +40,7 @@ const tokenCalls: Array<{
 const tokenScopes: Array<readonly string[] | undefined> = [];
 vi.mock('../../../src/services/gcp-sts', () => ({
   getGcpAccessToken: async (
-    requester: { tokenUserId: string; poolOwner: unknown },
+    requester: { cacheUserId: string; poolOwner: unknown },
     projectId: string,
     credential: { gcpProjectId: string },
     _env: unknown,
@@ -48,7 +48,7 @@ vi.mock('../../../src/services/gcp-sts', () => ({
     options?: { scopes?: readonly string[] }
   ) => {
     tokenCalls.push({
-      userId: requester.tokenUserId,
+      userId: requester.cacheUserId,
       poolOwner: requester.poolOwner,
       projectId,
       gcpProjectId: credential.gcpProjectId,

@@ -341,6 +341,10 @@ export const credentials = sqliteTable(
     activeCredential: index('idx_credentials_active')
       .on(table.userId, table.projectId, table.agentType, table.isActive)
       .where(sql`credential_type = 'agent-api-key' AND is_active = 1`),
+    // GCP workload identity pool ownership probe (migration 0262).
+    gcpCloudCredential: index('idx_credentials_gcp_cloud')
+      .on(table.id)
+      .where(sql`provider = 'gcp' AND credential_type = 'cloud-provider'`),
   })
 );
 
@@ -1128,11 +1132,13 @@ export const projectDeploymentCredentials = sqliteTable(
 );
 
 // =============================================================================
-// GCP Workload Identity Pool Index (migration 0262)
-// Which pool each stored cloud credential names, filled by the Worker on every ownership check
-// (`apps/api/src/services/gcp-wif-pool-ownership.ts`). No secret material: `iv` identifies the
-// indexed ciphertext generation, `pool_key` is `<projectNumber>/<poolId>` or NULL when the row
-// names no workload identity pool.
+// GCP Workload Identity Pool Index and Claims (migration 0262)
+// `gcp_wif_pool_index`: which pool each stored cloud credential names, filled by the Worker on
+// every ownership check (`apps/api/src/services/gcp-wif-pool-ownership.ts`). No secret material:
+// `iv` identifies the indexed ciphertext generation, `pool_key` is `<projectNumber>/<poolId>` or
+// NULL when the row names no workload identity pool. `gcp_wif_pool_claims`: the first owner of
+// each pool, never released by credential deletion (an operator deletes the row to release it).
+// The CHECK constraints live in the migration only.
 // =============================================================================
 export const gcpWifPoolIndex = sqliteTable(
   'gcp_wif_pool_index',
@@ -1143,6 +1149,7 @@ export const gcpWifPoolIndex = sqliteTable(
     ownerKind: text('owner_kind').notNull(), // 'user' | 'platform'
     ownerUserId: text('owner_user_id'),
     poolKey: text('pool_key'),
+    unreadable: integer('unreadable').notNull().default(0),
     indexedAt: text('indexed_at').notNull(),
   },
   (table) => ({
@@ -1152,6 +1159,13 @@ export const gcpWifPoolIndex = sqliteTable(
       .where(sql`pool_key IS NOT NULL`),
   })
 );
+
+export const gcpWifPoolClaims = sqliteTable('gcp_wif_pool_claims', {
+  poolKey: text('pool_key').primaryKey(),
+  ownerKind: text('owner_kind').notNull(), // 'user' | 'platform'
+  ownerUserId: text('owner_user_id'),
+  claimedAt: text('claimed_at').notNull(),
+});
 
 // =============================================================================
 // Missions (Phase 2: Orchestration Primitives)
@@ -5900,6 +5914,10 @@ export const ccCredentials = sqliteTable(
   (table) => ({
     ownerIdx: index('idx_cc_credentials_owner').on(table.ownerId),
     ownerKindIdx: index('idx_cc_credentials_owner_kind').on(table.ownerId, table.kind),
+    // GCP workload identity pool ownership probe (migration 0262).
+    cloudCredential: index('idx_cc_credentials_cloud')
+      .on(table.id)
+      .where(sql`kind = 'cloud-provider'`),
   })
 );
 

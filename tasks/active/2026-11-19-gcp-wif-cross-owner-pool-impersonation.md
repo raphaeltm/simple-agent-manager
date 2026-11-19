@@ -27,10 +27,22 @@ User-level guided GCP setup created a pool provider whose attribute condition ch
 - [x] User-scoped provider condition and `attribute.sam_user/<userId>` binding; update path rewrites the condition; re-run removes `pool/*`
 - [x] Real-SQL attack/owner-control tests; each guard deleted once (results in PR)
 - [x] Unit tests for condition/binding strings and the update path
-- [ ] Docs: security.md, self-hosting.mdx, admin-settings.md, google-cloud.md
+- [x] Docs: security.md, self-hosting.mdx, admin-settings.md, google-cloud.md
+- [x] Production audit (counts only): one owner for every GCP credential, no conflicts
+- [x] Review round 1 fixes: sticky claims (`gcp_wif_pool_claims`, first claim wins atomically, operator release), signed `user_id` = credential owner for user/project credentials, partial indexes + query-plan test, lazy settings read, fail closed on unparseable probe rows, unreadable-row retry window, leading-zero / provider-id / SA-email validation, warn-level refusal log, IAM conditions and policy version preserved
+- [x] Vertical tests through the real resolver (legacy and exact paths) for project-member owner plumbing and the signed claim
+- [x] Fixtures updated: capacity-pool suite applies migration 0262; teardown test uses a pool of the other user's own; orphan sweep asserts the platform owner check
 - [ ] Full quality suite
-- [ ] Reviews: security-auditor, task-completion-validator, cloudflare-specialist
+- [ ] Reviews: security-auditor (re-verify), task-completion-validator, cloudflare-specialist
 - [ ] Staging: live save-time and exchange-time refusals
+
+## Review round 1 (2026-11-19)
+
+- security-auditor H1: ownership disappeared with the credential row while Google's `pool/*` binding survived; a disconnect re-opened the hole. Fixed with sticky claims.
+- security-auditor M2: save race. Fixed: the claim insert is atomic on the pool key and re-read.
+- validator HIGH / security M4: project-attached credentials signed `user_id = project:<pid>:<uid>`, which the user-scoped provider rejects. Fixed: `gcpIdentityTokenUserId()` signs the credential owner's id.
+- cloudflare 1/3/6: full scans, settings read on the hot path, fail-open on unparseable rows. Fixed.
+- security M3 (409 reveals another owner uses a project number), L1 (parser divergence; not exploitable because the exchange check keys on the credential actually exchanged), L3 (cached tokens): documented as residual.
 
 ## Acceptance criteria
 
@@ -38,7 +50,7 @@ User-level guided GCP setup created a pool provider whose attribute condition ch
 - [ ] A user credential cannot name the platform credential's pool, and vice versa
 - [ ] The owner, the same user's project-scoped credential, and a project member using it still work
 - [ ] New guided user-level setups use `assertion.user_id == '<userId>'` and `attribute.sam_user/<userId>`; re-runs fix existing providers and bindings
-- [ ] Production has no cross-owner sharing (verified: counts above)
+- [x] Production has no cross-owner sharing (verified: counts above)
 - [ ] Refusals shown live on staging
 
 ## References

@@ -54,7 +54,7 @@ const gcpRoutes = new Hono<{ Bindings: Env }>();
 
 /** A user acting on their own user-level GCP credential. */
 function userTokenRequester(userId: string): GcpTokenRequester {
-  return { tokenUserId: userId, poolOwner: { kind: 'user', userId } };
+  return { cacheUserId: userId, poolOwner: { kind: 'user', userId } };
 }
 
 gcpRoutes.use('*', requireAuth(), requireApproved());

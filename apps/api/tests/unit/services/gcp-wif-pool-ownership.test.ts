@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 
 import { GCP_CREDENTIAL_VERSION, type GcpOidcCredential } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -41,7 +42,9 @@ const {
   GcpWifPoolInvalidError,
   GcpWifPoolOwnedByAnotherOwnerError,
 } = await import('../../../src/services/gcp-wif-pool-ownership');
-const { serializeCredentialToken } = await import('../../../src/services/provider-credentials');
+const { serializeCredentialToken, createProviderForUser } =
+  await import('../../../src/services/provider-credentials');
+const { UNINDEXED_ROWS_SQL } = await import('../../../src/services/gcp-wif-pool-ownership-sql');
 
 const KEY = Buffer.from('0123456789abcdef0123456789abcdef').toString('base64');
 const NOW = '2026-11-19T00:00:00.000Z';
@@ -115,7 +118,7 @@ async function storeCcRow(id: string, ownerId: string, plaintext: string) {
 }
 
 function user(userId: string) {
-  return { tokenUserId: userId, poolOwner: { kind: 'user' as const, userId } };
+  return { cacheUserId: userId, poolOwner: { kind: 'user' as const, userId } };
 }
 
 function exchange(
@@ -255,10 +258,38 @@ describe('token exchange refuses a pool another owner uses (rows that predate th
     await expect(
       exchange(
         user('user-b'),
-        wif({ gcpProjectNumber: ` ${POOL_A.gcpProjectNumber} `, wifPoolId: 'SAM-Pool' })
+        wif(
+          { gcpProjectNumber: ` ${POOL_A.gcpProjectNumber} `, wifPoolId: 'SAM-Pool' },
+          { gcpProjectId: 'gcp-b', serviceAccountEmail: 'sam@gcp-b.iam.gserviceaccount.com' }
+        )
       )
     ).rejects.toBeInstanceOf(GcpWifPoolOwnedByAnotherOwnerError);
     expect(signIdentityToken).not.toHaveBeenCalled();
+  });
+
+  it('attack: a leading zero cannot alias A’s project number', async () => {
+    await storeLegacyRow('cred-a', 'user-a', wif(POOL_A));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(
+      exchange(
+        user('user-b'),
+        wif({ gcpProjectNumber: `0${POOL_A.gcpProjectNumber}`, wifPoolId: 'sam-pool' })
+      )
+    ).rejects.toBeInstanceOf(GcpWifPoolInvalidError);
+    expect(signIdentityToken).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['provider id with a path', { wifProviderId: 'p/../../other-pool/providers/x' }],
+    ['service account with a query', { serviceAccountEmail: 'sa@x.iam.gserviceaccount.com?a=b' }],
+  ])('refuses a %s before signing', async (_name, overrides) => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(exchange(user('user-a'), wif(POOL_A, overrides))).rejects.toBeInstanceOf(
+      GcpWifPoolInvalidError
+    );
+    expect(signIdentityToken).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('attack: a user credential cannot name the platform credential’s pool', async () => {
@@ -272,7 +303,7 @@ describe('token exchange refuses a pool another owner uses (rows that predate th
     // Owner control: the installation still exchanges with its own pool.
     await expect(
       exchange(
-        { tokenUserId: 'platform:user-b', poolOwner: { kind: 'platform' } },
+        { cacheUserId: 'platform:user-b', poolOwner: { kind: 'platform' } },
         wif(POOL_PLATFORM)
       )
     ).resolves.toBe('sa-token');
@@ -282,7 +313,7 @@ describe('token exchange refuses a pool another owner uses (rows that predate th
     await storeLegacyRow('cred-a', 'user-a', wif(POOL_A));
 
     await expect(
-      exchange({ tokenUserId: 'platform:user-b', poolOwner: { kind: 'platform' } }, wif(POOL_A))
+      exchange({ cacheUserId: 'platform:user-b', poolOwner: { kind: 'platform' } }, wif(POOL_A))
     ).rejects.toBeInstanceOf(GcpWifPoolOwnedByAnotherOwnerError);
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -310,7 +341,7 @@ describe('token exchange refuses a pool another owner uses (rows that predate th
 
     await expect(
       exchange(
-        { tokenUserId: 'project:proj-a:user-a', poolOwner: { kind: 'user', userId: 'user-a' } },
+        { cacheUserId: 'project:proj-a:user-a', poolOwner: { kind: 'user', userId: 'user-a' } },
         wif(POOL_A),
         'proj-a'
       )
@@ -318,34 +349,70 @@ describe('token exchange refuses a pool another owner uses (rows that predate th
     // Another project member's run uses A's project credential, so A owns the pool.
     await expect(
       exchange(
-        { tokenUserId: 'project:proj-a:user-m', poolOwner: { kind: 'user', userId: 'user-a' } },
+        { cacheUserId: 'project:proj-a:user-m', poolOwner: { kind: 'user', userId: 'user-a' } },
         wif(POOL_A),
         'proj-a'
       )
     ).resolves.toBe('sa-token');
   });
 
-  it('a deleted or re-pointed credential stops owning its old pool', async () => {
+  it('a pool stays claimed after its credential is deleted or re-pointed (Google still trusts it)', async () => {
     await storeLegacyRow('cred-a', 'user-a', wif(POOL_A));
     await expect(exchange(user('user-b'), wif(POOL_A))).rejects.toBeInstanceOf(
       GcpWifPoolOwnedByAnotherOwnerError
     );
 
-    // A re-saves their credential for a different pool (new IV), then B may use the old one.
+    // A re-saves their credential for a different pool (new IV): A now holds both pools.
     const repointed = await sealed(JSON.stringify(wif(POOL_B)));
     sqlite
       .prepare('UPDATE credentials SET encrypted_token = ?, iv = ? WHERE id = ?')
       .run(repointed.ciphertext, repointed.iv, 'cred-a');
-    await expect(exchange(user('user-b'), wif(POOL_A))).resolves.toBe('sa-token');
+    await expect(exchange(user('user-b'), wif(POOL_A))).rejects.toBeInstanceOf(
+      GcpWifPoolOwnedByAnotherOwnerError
+    );
     await expect(exchange(user('user-b'), wif(POOL_B))).rejects.toBeInstanceOf(
       GcpWifPoolOwnedByAnotherOwnerError
     );
 
+    // A disconnects entirely: the claims remain, because A's `pool/*` binding may remain too.
     sqlite.prepare('DELETE FROM credentials WHERE id = ?').run('cred-a');
-    await expect(exchange(user('user-b'), wif(POOL_B))).resolves.toBe('sa-token');
+    await expect(exchange(user('user-b'), wif(POOL_A))).rejects.toBeInstanceOf(
+      GcpWifPoolOwnedByAnotherOwnerError
+    );
+    // Owner control: A reconnects to the same pool.
+    await expect(exchange(user('user-a'), wif(POOL_A))).resolves.toBe('sa-token');
+
+    // An operator releases the claim once Google-side trust is gone; then B may use the pool.
+    sqlite
+      .prepare('DELETE FROM gcp_wif_pool_claims WHERE pool_key = ?')
+      .run('111111111111/sam-pool');
+    await expect(exchange(user('user-b'), wif(POOL_A))).resolves.toBe('sa-token');
+    // B now holds the released pool.
+    expect(
+      sqlite
+        .prepare('SELECT owner_user_id FROM gcp_wif_pool_claims WHERE pool_key = ?')
+        .get('111111111111/sam-pool')
+    ).toEqual({ owner_user_id: 'user-b' });
   });
 
-  it('deleted platform and composable credentials stop owning their pools', async () => {
+  it('a live credential of another owner still blocks after a claim is released (symmetric check)', async () => {
+    await storeLegacyRow('cred-a', 'user-a', wif(POOL_A));
+    await storeLegacyRow('cred-b', 'user-b', wif(POOL_A));
+    await expect(exchange(user('user-a'), wif(POOL_A))).rejects.toBeInstanceOf(
+      GcpWifPoolOwnedByAnotherOwnerError
+    );
+    sqlite.prepare('DELETE FROM gcp_wif_pool_claims').run();
+    // Both rows still exist and name the pool: neither owner may use it.
+    await expect(exchange(user('user-a'), wif(POOL_A))).rejects.toBeInstanceOf(
+      GcpWifPoolOwnedByAnotherOwnerError
+    );
+    await expect(exchange(user('user-b'), wif(POOL_A))).rejects.toBeInstanceOf(
+      GcpWifPoolOwnedByAnotherOwnerError
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('platform and composable credentials claim their pools', async () => {
     await storePlatformRow('plat-1', wif(POOL_PLATFORM));
     await storeCcRow('cc-a', 'user-a', JSON.stringify(wif(POOL_A)));
     await expect(exchange(user('user-b'), wif(POOL_PLATFORM))).rejects.toBeInstanceOf(
@@ -354,11 +421,36 @@ describe('token exchange refuses a pool another owner uses (rows that predate th
     await expect(exchange(user('user-b'), wif(POOL_A))).rejects.toBeInstanceOf(
       GcpWifPoolOwnedByAnotherOwnerError
     );
+    expect(
+      sqlite
+        .prepare(
+          'SELECT pool_key, owner_kind, owner_user_id FROM gcp_wif_pool_claims ORDER BY pool_key'
+        )
+        .all()
+    ).toEqual([
+      { pool_key: '111111111111/sam-pool', owner_kind: 'user', owner_user_id: 'user-a' },
+      { pool_key: '222222222222/sam-pool', owner_kind: 'platform', owner_user_id: null },
+    ]);
+  });
 
-    sqlite.prepare('DELETE FROM platform_credentials WHERE id = ?').run('plat-1');
-    sqlite.prepare('DELETE FROM cc_credentials WHERE id = ?').run('cc-a');
-    await expect(exchange(user('user-b'), wif(POOL_PLATFORM))).resolves.toBe('sa-token');
-    await expect(exchange(user('user-b'), wif(POOL_A))).resolves.toBe('sa-token');
+  it('concurrent first claims of an unclaimed pool: exactly one owner wins', async () => {
+    const results = await Promise.allSettled([
+      assertGcpWifPayloadOwnership(
+        env,
+        JSON.stringify(wif(POOL_B)),
+        { kind: 'user', userId: 'user-a' },
+        't'
+      ),
+      assertGcpWifPayloadOwnership(
+        env,
+        JSON.stringify(wif(POOL_B)),
+        { kind: 'user', userId: 'user-b' },
+        't'
+      ),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+    const rejected = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+    expect(rejected.reason).toBeInstanceOf(GcpWifPoolOwnedByAnotherOwnerError);
   });
 
   it('a bad row does not break the check for others (rule 41)', async () => {
@@ -411,6 +503,10 @@ describe('token exchange refuses a pool another owner uses (rows that predate th
 
   it('fails closed when unindexed rows remain after the time budget', async () => {
     await storeLegacyRow('cred-a', 'user-a', wif(POOL_A));
+    // More rows than one page (default 25), so a second page is needed after the deadline.
+    for (let i = 0; i < 30; i++) {
+      await storeCcRow(`cc-other-${String(i).padStart(2, '0')}`, 'user-b', `token-${i}`);
+    }
     // Every clock reading is 20 s after the previous one, so whichever reading sets the
     // deadline (default budget 10 s), the next reading is already past it.
     let clock = Date.now();
@@ -547,5 +643,140 @@ describe('save time refuses a pool another owner uses', () => {
     ).rejects.toBeInstanceOf(GcpWifPoolOwnedByAnotherOwnerError);
     // Only the project-number lookup ran: no API enablement, pool, provider or IAM change.
     expect(google).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('index maintenance and cost', () => {
+  it('retries an undecryptable row only after the retry window, then indexes it', async () => {
+    await storeLegacyRow('cred-a', 'user-a', wif(POOL_A));
+    // Encrypted under another key, as if the Worker's key were misconfigured when it was read.
+    const otherKey = Buffer.from('fedcba9876543210fedcba9876543210').toString('base64');
+    const foreign = await encrypt(JSON.stringify(wif(POOL_B)), otherKey);
+    sqlite
+      .prepare(
+        `INSERT INTO cc_credentials (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
+         VALUES ('cc-other-key', 'user-a', 'x', 'cloud-provider', ?, ?, 1, ?, ?)`
+      )
+      .run(foreign.ciphertext, foreign.iv, NOW, NOW);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const row = () =>
+      sqlite
+        .prepare(
+          `SELECT pool_key, unreadable FROM gcp_wif_pool_index WHERE source_id = 'cc-other-key'`
+        )
+        .get();
+
+    await expect(exchange(user('user-a'), wif(POOL_A))).resolves.toBe('sa-token');
+    expect(row()).toEqual({ pool_key: null, unreadable: 1 });
+
+    // The key is fixed. Inside the retry window the row is not decrypted again.
+    (env as { ENCRYPTION_KEY: string }).ENCRYPTION_KEY = otherKey;
+    const encryption = await import('../../../src/services/encryption');
+    const decryptSpy = vi.spyOn(encryption, 'decrypt');
+    await expect(
+      assertGcpWifPayloadOwnership(
+        env,
+        JSON.stringify(wif(POOL_A)),
+        { kind: 'user', userId: 'user-a' },
+        't'
+      )
+    ).resolves.toBeUndefined();
+    expect(decryptSpy).not.toHaveBeenCalled();
+    expect(row()).toEqual({ pool_key: null, unreadable: 1 });
+
+    // After the default 60-minute window it is read and its pool claimed for its owner.
+    const later = Date.now() + 61 * 60_000;
+    vi.spyOn(Date, 'now').mockReturnValue(later);
+    await expect(
+      assertGcpWifPayloadOwnership(
+        env,
+        JSON.stringify(wif(POOL_A)),
+        { kind: 'user', userId: 'user-a' },
+        't'
+      )
+    ).resolves.toBeUndefined();
+    expect(row()).toEqual({ pool_key: '333333333333/sam-pool', unreadable: 0 });
+    await expect(
+      assertGcpWifPayloadOwnership(
+        env,
+        JSON.stringify(wif(POOL_B)),
+        { kind: 'user', userId: 'user-b' },
+        't'
+      )
+    ).rejects.toBeInstanceOf(GcpWifPoolOwnedByAnotherOwnerError);
+  });
+
+  it('the probe reads only cloud credentials through the partial indexes', () => {
+    const plan = sqlite
+      .prepare(`EXPLAIN QUERY PLAN ${UNINDEXED_ROWS_SQL}`)
+      .all(NOW, NOW, NOW, 25) as Array<{ detail: string }>;
+    const details = plan.map((step) => step.detail);
+    // No full scan of `credentials` (agent keys live there) or `cc_credentials`.
+    expect(details.filter((d) => /^SCAN (c|cc)$/.test(d))).toEqual([]);
+    expect(details.some((d) => d.includes('idx_credentials_gcp_cloud'))).toBe(true);
+    expect(details.some((d) => d.includes('idx_cc_credentials_cloud'))).toBe(true);
+  });
+});
+
+describe('the credential owner reaches the exchange through the real resolver', () => {
+  it('a project member using another member’s project credential signs as, and is checked as, its owner', async () => {
+    await storeLegacyRow('cred-a-proj', 'user-a', wif(POOL_A), 'proj-a');
+    // A's pool is claimed by A (e.g. A also has a user-level credential for it).
+    await storeLegacyRow('cred-a', 'user-a', wif(POOL_A));
+
+    const resolved = await createProviderForUser(
+      drizzle(env.DATABASE, { schema }),
+      'user-m',
+      KEY,
+      env,
+      'gcp',
+      'proj-a'
+    );
+    expect(resolved?.credentialSource).toBe('project');
+    await expect(resolved!.provider.validateToken()).resolves.toBe(true);
+    expect(signIdentityToken).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-a', projectId: 'proj-a' }),
+      env
+    );
+  });
+
+  it('the exact-credential path uses the stored row’s owner too', async () => {
+    await storeLegacyRow('cred-a-proj', 'user-a', wif(POOL_A), 'proj-a');
+    await storeLegacyRow('cred-a', 'user-a', wif(POOL_A));
+
+    const resolved = await createProviderForUser(
+      drizzle(env.DATABASE, { schema }),
+      'user-m',
+      KEY,
+      env,
+      'gcp',
+      'proj-a',
+      {
+        credentialSource: 'project',
+        credentialReference: 'credentials:cred-a-proj',
+        credentialVersion: Date.parse(NOW),
+      }
+    );
+    await expect(resolved!.provider.validateToken()).resolves.toBe(true);
+    expect(signIdentityToken).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-a', projectId: 'proj-a' }),
+      env
+    );
+  });
+
+  it('a user-level credential signs its owner’s id, which the user-scoped condition requires', async () => {
+    await storeLegacyRow('cred-a', 'user-a', wif(POOL_A));
+    const resolved = await createProviderForUser(
+      drizzle(env.DATABASE, { schema }),
+      'user-a',
+      KEY,
+      env,
+      'gcp'
+    );
+    await expect(resolved!.provider.validateToken()).resolves.toBe(true);
+    expect(signIdentityToken).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-a' }),
+      env
+    );
   });
 });

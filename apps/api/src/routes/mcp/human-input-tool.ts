@@ -109,7 +109,7 @@ export async function handleRequestHumanInput(
   // Verify task ownership matches token — use tokenData.userId as authoritative target
   if (taskRow.user_id !== tokenData.userId) {
     log.error('mcp.request_human_input.user_id_mismatch', {
-      tokenUserId: tokenData.userId,
+      cacheUserId: tokenData.userId,
       taskUserId: taskRow.user_id,
       taskId: tokenData.taskId,
     });

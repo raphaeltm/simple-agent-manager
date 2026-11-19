@@ -20,14 +20,14 @@ export interface GcpTokenOwner {
 
 /** The token identity and pool owner for a credential resolved for `owner`. */
 export function gcpTokenRequester(owner: GcpTokenOwner): GcpTokenRequester {
-  const tokenUserId =
+  const cacheUserId =
     owner.credentialSource === 'platform'
       ? `platform:${owner.userId}`
       : owner.credentialSource === 'project' && owner.projectId
         ? `project:${owner.projectId}:${owner.userId}`
         : owner.userId;
   return {
-    tokenUserId,
+    cacheUserId,
     poolOwner:
       owner.credentialSource === 'platform'
         ? { kind: 'platform' }

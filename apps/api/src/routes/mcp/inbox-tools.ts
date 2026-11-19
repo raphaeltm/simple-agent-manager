@@ -54,7 +54,7 @@ async function resolveSource(tokenData: McpTokenData, env: Env): Promise<Source>
     log.error('mcp.inbox.task_mismatch', {
       taskId: tokenData.taskId,
       projectId: tokenData.projectId,
-      tokenUserId: tokenData.userId,
+      cacheUserId: tokenData.userId,
       taskUserId: task?.user_id ?? null,
       action: 'rejected',
     });

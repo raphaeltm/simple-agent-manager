@@ -200,7 +200,7 @@ export async function validateActiveWorkspaceMcpToken(
     workspaceId: data.workspaceId || null,
     projectId: data.projectId,
     taskId: data.taskId || null,
-    tokenUserId: data.userId,
+    cacheUserId: data.userId,
     workspaceUserId: row?.userId ?? null,
     workspaceProjectId: row?.projectId ?? null,
     userStatus: joinedStatus(row?.joinedUserId, row?.userStatus),

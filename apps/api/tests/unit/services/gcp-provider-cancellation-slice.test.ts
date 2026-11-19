@@ -139,13 +139,13 @@ describe('GCP provider credential cancellation wiring', () => {
         mocks.resolveForConsumer.mockResolvedValue(composableGcpResolution());
         return makeCredentialDbMock();
       },
-      expectedRequester: { tokenUserId: USER_ID, poolOwner: { kind: 'user', userId: USER_ID } },
+      expectedRequester: { cacheUserId: USER_ID, poolOwner: { kind: 'user', userId: USER_ID } },
       expectedSource: 'user',
     },
     {
       name: 'legacy user credential',
       setup: () => makeCredentialDbMock(legacyGcpCredential()),
-      expectedRequester: { tokenUserId: USER_ID, poolOwner: { kind: 'user', userId: USER_ID } },
+      expectedRequester: { cacheUserId: USER_ID, poolOwner: { kind: 'user', userId: USER_ID } },
       expectedSource: 'user',
     },
     {
@@ -157,7 +157,7 @@ describe('GCP provider credential cancellation wiring', () => {
         });
         return makeCredentialDbMock();
       },
-      expectedRequester: { tokenUserId: `platform:${USER_ID}`, poolOwner: { kind: 'platform' } },
+      expectedRequester: { cacheUserId: `platform:${USER_ID}`, poolOwner: { kind: 'platform' } },
       expectedSource: 'platform',
     },
   ])(

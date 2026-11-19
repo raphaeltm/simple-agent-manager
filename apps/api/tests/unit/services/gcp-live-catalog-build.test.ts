@@ -21,10 +21,10 @@ import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../../hel
 const tokenCalls: Array<{ userId: string; poolOwner: unknown; projectId: string }> = [];
 vi.mock('../../../src/services/gcp-sts', () => ({
   getGcpAccessToken: async (
-    requester: { tokenUserId: string; poolOwner: unknown },
+    requester: { cacheUserId: string; poolOwner: unknown },
     projectId: string
   ) => {
-    tokenCalls.push({ userId: requester.tokenUserId, poolOwner: requester.poolOwner, projectId });
+    tokenCalls.push({ userId: requester.cacheUserId, poolOwner: requester.poolOwner, projectId });
     return 'gcp-token';
   },
 }));

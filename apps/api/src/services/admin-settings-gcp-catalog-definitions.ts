@@ -8,6 +8,10 @@ import {
 
 import { type AdminSettingDefinition, integerDefinition } from './admin-setting-definitions';
 
+/** Defaults for the workload identity pool index, also used before the settings are read. */
+export const DEFAULT_GCP_WIF_POOL_INDEX_PAGE_SIZE = 25;
+export const DEFAULT_GCP_WIF_POOL_INDEX_UNREADABLE_RETRY_MINUTES = 60;
+
 export type GcpCatalogSettingName =
   | 'gcpCatalog.machineTypes'
   | 'gcpCatalog.priceTableTtlMinutes'
@@ -20,7 +24,8 @@ export type GcpCatalogSettingName =
   | 'gcpCatalog.bootDiskGbPerVcpu'
   | 'gcpCatalog.bootDiskMinGb'
   | 'gcpWif.poolIndexPageSize'
-  | 'gcpWif.poolIndexBudgetMs';
+  | 'gcpWif.poolIndexBudgetMs'
+  | 'gcpWif.poolIndexUnreadableRetryMinutes';
 
 /**
  * General-purpose shapes SAM offers from Google Cloud by default: shared-core e2-medium, and the
@@ -127,13 +132,14 @@ export const GCP_CATALOG_SETTINGS: readonly AdminSettingDefinition[] = [
   ),
   // Workload identity pool ownership (`gcp-wif-pool-ownership.ts`). Indexing runs only for
   // credentials added or re-encrypted since the last check; a check that cannot finish inside the
-  // budget refuses rather than trusting a partial index.
+  // budget refuses rather than trusting a partial index. A page is one D1 batch of up to two
+  // statements per row, so the maximum stays well inside D1's per-invocation query limits.
   integerDefinition(
     'gcpWif.poolIndexPageSize',
-    100,
+    DEFAULT_GCP_WIF_POOL_INDEX_PAGE_SIZE,
     'Operations',
     'Stored cloud credentials SAM decrypts per step when indexing which Google Cloud workload identity pool each one names.',
-    { min: 10, max: 100 }
+    { min: 5, max: 50 }
   ),
   integerDefinition(
     'gcpWif.poolIndexBudgetMs',
@@ -141,5 +147,12 @@ export const GCP_CATALOG_SETTINGS: readonly AdminSettingDefinition[] = [
     'Operations',
     'Most milliseconds one Google Cloud token exchange or credential save may spend indexing newly saved credentials before it refuses and asks to retry.',
     { min: 1_000, max: 25_000 }
+  ),
+  integerDefinition(
+    'gcpWif.poolIndexUnreadableRetryMinutes',
+    DEFAULT_GCP_WIF_POOL_INDEX_UNREADABLE_RETRY_MINUTES,
+    'Operations',
+    'Minutes before SAM tries again to read a stored cloud credential it could not decrypt while indexing workload identity pools.',
+    { min: 1, max: 24 * 60 }
   ),
 ];

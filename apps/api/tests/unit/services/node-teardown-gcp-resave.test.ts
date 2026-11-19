@@ -324,7 +324,12 @@ describe('node teardown after the GCP connection is saved again (incident 2026-1
 
     // A stale caller that observed an older incarnation or another episode claims nothing.
     await alertNodeCleanupBlocked(env, { ...input, runtimeIncarnationId: 'older' }, now, 60_000);
-    await alertNodeCleanupBlocked(env, { ...input, blockedSince: '2026-11-13T22:00:00.000Z' }, now, 60_000);
+    await alertNodeCleanupBlocked(
+      env,
+      { ...input, blockedSince: '2026-11-13T22:00:00.000Z' },
+      now,
+      60_000
+    );
     expect(nodeRow()).toMatchObject({ alertedAt: null });
 
     // Control: the matching runtime and episode is claimed and alerted.
@@ -334,17 +339,17 @@ describe('node teardown after the GCP connection is saved again (incident 2026-1
 
   it('records a blocked verdict only on the runtime incarnation that was refused', async () => {
     await placeNode();
-    const { recordNodeTeardownBlocked } = await import(
-      '../../../src/services/node-teardown-blocked'
-    );
-    const { NodeTeardownBlockedError } = await import(
-      '../../../src/services/node-teardown-authority'
-    );
+    const { recordNodeTeardownBlocked } =
+      await import('../../../src/services/node-teardown-blocked');
+    const { NodeTeardownBlockedError } =
+      await import('../../../src/services/node-teardown-authority');
     sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = ?").run(NODE_ID);
     const db = drizzle(env.DATABASE, { schema });
     const [stale] = await db.select().from(schema.nodes);
     // The node was re-provisioned after the refused attempt read it.
-    sqlite.prepare("UPDATE nodes SET runtime_incarnation_id = 'replacement' WHERE id = ?").run(NODE_ID);
+    sqlite
+      .prepare("UPDATE nodes SET runtime_incarnation_id = 'replacement' WHERE id = ?")
+      .run(NODE_ID);
 
     await recordNodeTeardownBlocked(
       env,
@@ -393,17 +398,25 @@ describe('node teardown after the GCP connection is saved again (incident 2026-1
     ]);
   });
 
-  it('never uses another user\'s credential, even one that can see the instance', async () => {
+  it("never uses another user's credential, even one that can see the instance", async () => {
     await placeNode();
     putInstance('sam-staging-infra', { id: INSTANCE_ID, labels: samLabels() });
-    // The owner disconnects GCP; a different user connects the SAME GCP project.
+    // The owner disconnects GCP; a different user connects the SAME GCP project. The owner's
+    // workload identity pool stays claimed by the owner after the disconnect (pool ownership,
+    // gcp-wif-pool-ownership.ts), so the other user connects through a pool of their own.
     await env.DATABASE.batch([
-      env.DATABASE.prepare(
-        "DELETE FROM credentials WHERE user_id = ? AND provider = 'gcp'"
-      ).bind(OWNER),
+      env.DATABASE.prepare("DELETE FROM credentials WHERE user_id = ? AND provider = 'gcp'").bind(
+        OWNER
+      ),
       env.DATABASE.prepare('DELETE FROM cc_attachments WHERE user_id = ?').bind(OWNER),
     ]);
-    await replaceUserGcpCredential(env, 'other-user', gcpCredential('sam-staging-infra'));
+    await expect(
+      replaceUserGcpCredential(env, 'other-user', gcpCredential('sam-staging-infra'))
+    ).rejects.toMatchObject({ error: 'GCP_WIF_POOL_OWNED_BY_ANOTHER_OWNER' });
+    await replaceUserGcpCredential(env, 'other-user', {
+      ...gcpCredential('sam-staging-infra'),
+      wifPoolId: 'other-user-pool',
+    } as Parameters<typeof replaceUserGcpCredential>[2]);
 
     const response = await ownerDelete();
 
@@ -416,9 +429,8 @@ describe('node teardown after the GCP connection is saved again (incident 2026-1
 
 describe('proveNodeInstanceOwnership: provider refusals', () => {
   async function prove(error: Error) {
-    const { proveNodeInstanceOwnership } = await import(
-      '../../../src/services/node-teardown-authority'
-    );
+    const { proveNodeInstanceOwnership } =
+      await import('../../../src/services/node-teardown-authority');
     const node = {
       id: NODE_ID,
       nodeRole: 'workspace',
@@ -456,7 +468,8 @@ describe('proveNodeInstanceOwnership: provider refusals', () => {
         step: 'sa_impersonation',
         message: 'Permission denied on projects/corporate-prod',
         statusCode: 403,
-        rawBody: '{"error":{"status":"PERMISSION_DENIED","message":"generate access token denied"}}',
+        rawBody:
+          '{"error":{"status":"PERMISSION_DENIED","message":"generate access token denied"}}',
       })
     );
     expect(result.message).toMatch(/^teardown_instance_not_visible/);
@@ -478,11 +491,17 @@ describe('proveNodeInstanceOwnership: provider refusals', () => {
         step: 'sts_exchange',
         message: 'The caller does not have access to rate-limit-tests',
         statusCode: 401,
-        rawBody: '{"error":"invalid_grant","error_description":"token for project quota-prod is revoked"}',
+        rawBody:
+          '{"error":"invalid_grant","error_description":"token for project quota-prod is revoked"}',
       }),
-      new ProviderError('hetzner', 403, 'hetzner API error (403): forbidden on project quota-prod', {
-        providerCode: 'forbidden',
-      }),
+      new ProviderError(
+        'hetzner',
+        403,
+        'hetzner API error (403): forbidden on project quota-prod',
+        {
+          providerCode: 'forbidden',
+        }
+      ),
     ];
     for (const error of cases) {
       expect((await prove(error)).message).toMatch(/^teardown_instance_not_visible/);
@@ -498,7 +517,8 @@ describe('proveNodeInstanceOwnership: provider refusals', () => {
         step: 'sa_impersonation',
         message: 'Forbidden',
         statusCode: 403,
-        rawBody: '{"error":{"status":"PERMISSION_DENIED","details":[{"reason":"RATE_LIMIT_EXCEEDED"}]}}',
+        rawBody:
+          '{"error":{"status":"PERMISSION_DENIED","details":[{"reason":"RATE_LIMIT_EXCEEDED"}]}}',
       }),
       new GcpApiError({
         step: 'sa_impersonation',
@@ -534,4 +554,3 @@ describe('proveNodeInstanceOwnership: provider refusals', () => {
     }
   });
 });
-

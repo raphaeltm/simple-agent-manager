@@ -33,7 +33,7 @@ vi.mock('../../../src/services/gcp-wif-pool-ownership', () => ({
   assertGcpWifPoolOwnership: vi.fn().mockResolvedValue(undefined),
 }));
 
-const USER_1 = { tokenUserId: 'user-1', poolOwner: { kind: 'user', userId: 'user-1' } } as const;
+const USER_1 = { cacheUserId: 'user-1', poolOwner: { kind: 'user', userId: 'user-1' } } as const;
 
 let privateKey: string;
 
@@ -294,7 +294,7 @@ describe('service-account verification and caching', () => {
 
     await expect(
       getGcpAccessToken(
-        { tokenUserId: 'project:p-1:user-2', poolOwner: { kind: 'user', userId: 'user-9' } },
+        { cacheUserId: 'project:p-1:user-2', poolOwner: { kind: 'user', userId: 'user-9' } },
         'p-1',
         credential,
         env

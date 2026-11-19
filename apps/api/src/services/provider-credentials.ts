@@ -269,8 +269,8 @@ async function createProviderFromComposableConfig(
     const gcpCred = parseGcpCredential(token);
     const { getGcpAccessToken } = await import('./gcp-sts');
     const requester: GcpTokenRequester = isPlatform
-      ? { tokenUserId: `platform:${userId}`, poolOwner: { kind: 'platform' } }
-      : { tokenUserId: userId, poolOwner: { kind: 'user', userId } };
+      ? { cacheUserId: `platform:${userId}`, poolOwner: { kind: 'platform' } }
+      : { cacheUserId: userId, poolOwner: { kind: 'user', userId } };
     const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
     const tokenProvider = (context?: ProviderRequestContext) =>
       getGcpAccessToken(requester, cacheProjectId, gcpCred, env, context);
@@ -417,7 +417,7 @@ async function createProviderForUserLegacy(
         const tokenProvider = (context?: ProviderRequestContext) =>
           getGcpAccessToken(
             {
-              tokenUserId: `project:${projectId}:${userId}`,
+              cacheUserId: `project:${projectId}:${userId}`,
               // The project credential may have been saved by another member of the project.
               poolOwner: { kind: 'user', userId: projectCred.userId },
             },
@@ -490,7 +490,7 @@ async function createProviderForUserLegacy(
       const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
       const tokenProvider = (context?: ProviderRequestContext) =>
         getGcpAccessToken(
-          { tokenUserId: userId, poolOwner: { kind: 'user', userId } },
+          { cacheUserId: userId, poolOwner: { kind: 'user', userId } },
           cacheProjectId,
           gcpCred,
           env,
@@ -545,7 +545,7 @@ async function createProviderForUserLegacy(
     const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
     const tokenProvider = (context?: ProviderRequestContext) =>
       getGcpAccessToken(
-        { tokenUserId: `platform:${userId}`, poolOwner: { kind: 'platform' } },
+        { cacheUserId: `platform:${userId}`, poolOwner: { kind: 'platform' } },
         cacheProjectId,
         gcpCred,
         env,

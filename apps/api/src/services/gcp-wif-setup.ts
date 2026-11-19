@@ -11,9 +11,15 @@ import {
   requireOperationName,
 } from './gcp-setup-transport';
 
-const serviceAccountPolicySchema = v.object({
-  bindings: v.optional(v.array(iamBindingSchema)),
+// Loose, so a binding's IAM `condition` and the policy `version` survive the read-modify-write.
+const serviceAccountBindingSchema = v.looseObject({
+  ...iamBindingSchema.entries,
+  condition: v.optional(v.unknown()),
+});
+const serviceAccountPolicySchema = v.looseObject({
+  bindings: v.optional(v.array(serviceAccountBindingSchema)),
   etag: v.string(),
+  version: v.optional(v.number()),
 });
 
 /**
@@ -397,7 +403,8 @@ export async function grantWifUserOnSa(
     b.role === role ? { ...b, members: b.members.filter((m) => m !== legacyMember) } : b
   );
   if (!granted) {
-    const target = bindings.find((b) => b.role === role);
+    // Never add the member under another binding's IAM condition.
+    const target = bindings.find((b) => b.role === role && b.condition === undefined);
     if (target) target.members.push(member);
     else bindings.push({ role, members: [member] });
   }
@@ -414,7 +421,13 @@ export async function grantWifUserOnSa(
         Authorization: `Bearer ${oauthToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ policy: { bindings: nonEmptyBindings, etag: policy.etag } }),
+      body: JSON.stringify({
+        policy: {
+          bindings: nonEmptyBindings,
+          etag: policy.etag,
+          ...(policy.version !== undefined ? { version: policy.version } : {}),
+        },
+      }),
     },
     timeoutMs
   );
