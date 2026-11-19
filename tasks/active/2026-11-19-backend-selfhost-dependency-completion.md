@@ -27,22 +27,26 @@ For each PR, independently:
 - [ ] Verify final merged/closed GitHub state, preserve branch, monitor applicable deployment, update SAM ideas and maintenance.pr-shepherd.
 
 PR completion:
-- [ ] #2891
+- [x] #2891
 - [ ] #2892
 - [ ] #2893
 - [ ] #2896
 
 References: `.agents/skills/do/SKILL.md`, rules 02/05/09/13/14/25, constitution principles II/X/XI/XII/XIII; `tasks/archive/2026-11-18-l21-smtp-sign-in-selfhost-inbound-email.md` for receiver flow and prior box evidence. Every checkbox requires concrete test/runtime/GitHub evidence before completion.
 
-## #2891 evidence (in progress)
+## #2891 evidence (complete)
 
-- Fresh original head 3233d51bba069b30605874d4f31d67a4374e9a93; no review threads, closing issues, other active owners or associations. Associated to this task; merged current main normally in original branch worktree.
-- Existing receiver suite plus four new protocol tests: 39 pass under race detector, vet and binary build pass; Dockerfile build passes on original Go/Alpine pins.
-- New controls: rejected chunk cannot issue QUIT, command limit restored between chunks, Postmaster still rejected by SAM, consecutive signed BDAT deliveries assert exact gateway bytes/auth identity.
-- pnpm selfhost:test: 15 files / 212 tests pass. API dependency build: 12 tasks pass. Seven SMTP/real-receiver vertical suites pass (110 tests); workerd SMTP suite passes (6 tests). Actual built image runs UID7102:7102 with all capabilities dropped except NET_BIND_SERVICE, binds internal25, EHLO250, relay550, agentRCPT250 and unsignedDATA550; test container removed. Coordinated live staging/self-host proof remains pending.
-- Both staging queues free 12:13Z. L22 released box; next claimant H2 contacted; no box mutation performed.
-- Workflow task-only push to main rejected by required CI; task record carried in this PR rather than bypassing protection.
-- No public docs reference the old dependency pin; no user-facing SAM interface/configuration changed.
-- Remaining checklist items for other PRs intentionally pending sequential execution after #2891.
+- Original head 3233d51bba069b30605874d4f31d67a4374e9a93 reconciled with all threads/owners/associations; normal merge from main, four protocol controls added. 39 receiver race tests, vet/build, 212 self-host tests, 110 SMTP/real-receiver vertical tests and six workerd tests passed; Docker nonroot port25 proof passed.
+- Independent Go/security/completion reviews PASS/ADDRESSED; upstream compare claims corrected against immutable sources. Candidate afa800bac269d4622e688a84239e27379bbc1281 CI44523195754 attempt2 passed; CodeRabbit explicit Review skipped, no findings.
+- Coordinated BOX proof reached real Worker gateway verdict; unsigned mail refused before gateway. Accepted live task/reply not exercised on fresh BOX; automated vertical tests cover it. All config fingerprints restored, temporary image/container/access cleaned, BOX released to H2. Staging44523357951 succeeded, workflow Playwright12pass/1optional skip; authenticated API smoke/signout200, zero new/growing error groups. Pre-existing noise waived per Raphaël 2026-11-18. Lease released44526616931.
+- Merged at12:48:43Z as efe96eb12ab74ae467f9ce8349f361aa2913ef31. Original branch unexpectedly disappeared after merge; restored with ordinary non-force push and independently verified at reviewed afa800bac. Main CI44527364370 passed attempt2 after one Ubuntu package timeout retry; production44532642501 succeeded with container rollouts/health. Independent API health200 healthy and app200 at13:37Z. No active lease or BOX resources remain.
+- No public docs reference the old pin; no user-facing SAM interface/configuration changed. Task remains active for remaining PRs.
 
-- Independent Go/security/completion reviews: implementation PASS; misleading upstream compare claims corrected. CI, CodeRabbit and live deployed environment gates still pending. Task remains active for the four-PR sequence.
+## #2892 evidence (in progress)
+
+- Fresh original head 3e80b0aa96013dc0dbb22f6528419af6239c9d08 on original Dependabot branch. No review threads/reviews/closing issues or competing owners; all association pages empty before own claim. Search found own assigned task only as relevant owner, no matching SAM idea. Main merged normally, retaining history and #2891 receiver controls.
+- Sonar API reported exactly two docker:S8431 maintainability issues AaHwH2bn54NAEkiABVQ_ and AaHwH2bn54NAEkiABVQ-: FROM tag plus digest. Both references now use the same immutable digest as sole authority, with version comments. Runtime changes to original Alpine3.24 digest; builder remains exact Go1.26.11 digest. No suppression or gate waiver.
+- Original and final Dockerfile builds passed. Actual runtime /etc/alpine-release is3.24.4; libcap-utils2.78-r0 installs/setcap succeeds, then libcap tools/libraries removed. Final image UID7102:7102; read-only/no-new-privileges, cap-dropALL/cap-addNET_BIND_SERVICE, 512MiB/128pids smoke binds internal25, EHLO250, relay/Postmaster550, unsignedDATA550 without gateway, trusted fixtureDATA250 through HTTP with exact payload/auth. Test containers removed. Fixture-only trusted control does not claim real Worker task acceptance.
+- 39 receiver tests passed race; vet passed; self-host15files/212tests passed. Local smoke assertion assumptions corrected (Docker CAP_ normalization and trusted auth label); final smoke passed without product changes.
+- Configuration-only Docker FROM changes: Cloudflare app artifacts and VM provisioning are unchanged; live verification targets exact receiver image on coordinated existing BOX rather than an unrelated Cloudflare redeploy or new VM. H2 still holds BOX claim404; request sent for next bounded slot, no access or mutation while held.
+- Independent domain/security/completion reviews, CodeRabbit, current CI/Sonar and BOX verification remain pending. No archive/merge until applicable gates pass.
