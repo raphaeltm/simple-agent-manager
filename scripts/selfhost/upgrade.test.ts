@@ -1,10 +1,11 @@
 /**
  * selfhost:upgrade orchestration (upgrade-lib.ts) with git, pnpm and docker answered by a fake
  * runner. Asserts the order of the steps, that no backup is taken, that the stack restarts only
- * when compose inputs change (files in deploy/selfhost/ or generated .state/ files), and that the
- * printed rollback matches whether the upgrade carried a D1 migration.
+ * when compose inputs change (files in deploy/selfhost/, selected compose files or generated
+ * .state/ files), that a failed upgrade can be retried, and that the printed rollback selects the
+ * same box and matches whether the upgrade carried a D1 migration.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -17,6 +18,7 @@ import {
   type RunResult,
   runUpgrade,
   SELFHOST_DIR,
+  UPGRADE_PENDING_FILE,
 } from './upgrade-lib.js';
 
 const FROM = 'a'.repeat(40);
@@ -28,13 +30,16 @@ let diff: string[];
 let dirty: boolean;
 let failDeploy: boolean;
 let initRewritesState: boolean;
+/** What the fake checkout has checked out (`git checkout --detach` moves it). */
+let head: string;
 
 function run(command: string, args: string[]): RunResult {
   const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
   const line = `${command} ${args.join(' ')}`;
   if (command === 'git') {
     if (args[0] === 'status') return ok(dirty ? ' M apps/api/src/index.ts' : '');
-    if (args[0] === 'rev-parse' && args[1] === 'HEAD') return ok(FROM);
+    if (args[0] === 'rev-parse' && args[1] === 'HEAD') return ok(head);
+    if (args[0] === 'checkout') head = args[2] ?? head;
     if (args[0] === 'rev-parse') return ok(TO);
     if (args[0] === 'diff') return ok(diff.join('\n'));
     steps.push(line);
@@ -76,6 +81,7 @@ beforeEach(() => {
   dirty = false;
   failDeploy = false;
   initRewritesState = false;
+  head = FROM;
 });
 
 afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -169,6 +175,69 @@ describe('runUpgrade', () => {
     expect(logs.join('\n')).toContain(`git checkout ${FROM}`);
   });
 
+  // The failed run leaves the checkout at the target: equal refs must not read as "deployed".
+  it('retries a failed upgrade with the same --to, from the ref deployed before it', async () => {
+    failDeploy = true;
+    await expect(upgrade()).rejects.toThrow(/migration 0219 failed/);
+    expect(head).toBe(TO);
+    expect(existsSync(join(root, 'state', UPGRADE_PENDING_FILE))).toBe(true);
+
+    failDeploy = false;
+    steps = [];
+    const retry = await upgrade();
+    expect(compact()).toEqual([
+      'git fetch --tags origin',
+      `git checkout --detach ${TO}`,
+      'pnpm install --frozen-lockfile',
+      `pnpm selfhost:deploy --init ${BOX_ARGS}`,
+      // The failed run may have restarted the stack already, so the retry restarts it too.
+      'docker compose up -d --build',
+      `pnpm selfhost:deploy ${BOX_ARGS}`,
+    ]);
+    expect(retry.from).toBe(FROM);
+    expect(retry.rollback[0]).toBe(`git checkout ${FROM}`);
+    expect(existsSync(join(root, 'state', UPGRADE_PENDING_FILE))).toBe(false);
+
+    // Control: once it has succeeded, the same --to is a no-op.
+    steps = [];
+    expect((await upgrade()).rollback).toEqual([]);
+    expect(steps).toEqual(['git fetch --tags origin']);
+    expect(logs.at(-1)).toBe('already at that ref; nothing to do');
+  });
+
+  it('refuses a pending record it did not write before touching the checkout', async () => {
+    writeFileSync(join(root, 'state', UPGRADE_PENDING_FILE), '{"from":"HEAD~1"}\n');
+    await expect(upgrade()).rejects.toThrow(/not a record this upgrade wrote/);
+    expect(steps).toEqual(['git fetch --tags origin']);
+  });
+
+  it('control: a completed upgrade leaves no pending record and is not repeated', async () => {
+    await upgrade();
+    expect(existsSync(join(root, 'state', UPGRADE_PENDING_FILE))).toBe(false);
+    steps = [];
+    await upgrade();
+    expect(steps).toEqual(['git fetch --tags origin']);
+  });
+
+  // The upgrade restarted the stack for the new gateway.env; the rollback must restart it again.
+  it('rolls back generated state that --init changed, on failure and on success', async () => {
+    initRewritesState = true;
+    failDeploy = true;
+    await expect(upgrade()).rejects.toThrow(/migration 0219 failed/);
+    const printed = logs.join('\n').replaceAll(root, '<root>');
+    expect(printed).toContain(`pnpm selfhost:deploy ${BOX_ARGS} --init`);
+    expect(printed).toMatch(/docker compose .* up -d --build/);
+
+    // A fresh box at FROM for the success case.
+    rmSync(join(root, 'state', UPGRADE_PENDING_FILE));
+    writeFileSync(join(root, 'state/gateway.env'), 'FRPS_PORT_RANGE=20000-29999\n');
+    head = FROM;
+    failDeploy = false;
+    const rollback = (await upgrade()).rollback.map((step) => step.replaceAll(root, '<root>'));
+    expect(rollback).toContain(`pnpm selfhost:deploy ${BOX_ARGS} --init`);
+    expect(rollback.some((step) => /^docker compose .* up -d --build$/.test(step))).toBe(true);
+  });
+
   it('fails when the API is unhealthy after the deploy', async () => {
     await expect(upgrade(false)).rejects.toThrow(/not healthy/);
   });
@@ -215,11 +284,45 @@ describe('runUpgrade with the box .env COMPOSE_FILE', () => {
     );
   });
 
-  it('prints rollback compose steps that read .env in deploy/selfhost instead of naming one file', async () => {
+  it('prints rollback compose steps for the selected box: its .env and every compose file', async () => {
     diff = ['deploy/selfhost/docker-compose.yml'];
-    const result = await runUpgrade(boxFromEnv([]), { to: 'v1', checkHealth: async () => true });
+    const ctx = boxFromEnv(['COMPOSE_FILE=docker-compose.yml:docker-compose.override.yml']);
+    const result = await runUpgrade(ctx, { to: 'v1', checkHealth: async () => true });
     const composeSteps = result.rollback.filter((step) => step.includes('docker compose'));
-    expect(composeSteps).toEqual(['(cd deploy/selfhost && docker compose up -d --build)']);
+    expect(composeSteps.map((step) => step.replaceAll(root, '<root>'))).toEqual([
+      `docker compose -f ${join(SELFHOST_DIR, 'docker-compose.yml')} ` +
+        `-f ${join(SELFHOST_DIR, 'docker-compose.override.yml')} ` +
+        `--env-file <root>/real.env up -d --build`,
+    ]);
+  });
+
+  it('selects the same box in the restore-based rollback, quoting a path with a space', async () => {
+    diff = ['apps/api/src/db/migrations/0300_new.sql'];
+    const envFile = join(root, 'my box.env');
+    writeFileSync(envFile, 'CELLD_BUCKET=gs://fleet/celld\n', { mode: 0o600 });
+    const ctx = { ...loadBox(envFile, join(root, 'state')), run, log: (m: string) => logs.push(m) };
+    const { rollback } = await runUpgrade(ctx, { to: 'v1', checkHealth: async () => true });
+    const file = join(SELFHOST_DIR, 'docker-compose.yml');
+    expect(rollback).toContain(`docker compose -f ${file} --env-file '${envFile}' down`);
+    expect(rollback).toContain(`docker compose -f ${file} --env-file '${envFile}' up -d`);
+    expect(rollback.join('\n')).toContain(`Point CELLD_BUCKET in ${envFile} at a new`);
+  });
+
+  // COMPOSE_FILE may list a file outside deploy/selfhost; a change to it alone must restart.
+  it('restarts the stack when only a selected compose file outside deploy/selfhost changed', async () => {
+    const ctx = boxFromEnv(['COMPOSE_FILE=docker-compose.yml:../../ops/box.yml']);
+    diff = ['ops/box.yml'];
+    expect(
+      (await runUpgrade(ctx, { to: 'v1', checkHealth: async () => true })).composeRestarted
+    ).toBe(true);
+  });
+
+  it('control: an unselected file beside it does not restart the stack', async () => {
+    const ctx = boxFromEnv(['COMPOSE_FILE=docker-compose.yml:../../ops/box.yml']);
+    diff = ['ops/other.yml'];
+    expect(
+      (await runUpgrade(ctx, { to: 'v1', checkHealth: async () => true })).composeRestarted
+    ).toBe(false);
   });
 });
 
