@@ -502,6 +502,18 @@ Cancelling queued work revokes its admission authority. A later free slot cannot
 task or provision a machine for it. If cancellation races a new allocation, SAM retires only
 that newly allocated empty machine, preserving occupied hosts and other placement claims.
 
+A VM provisioned for an active task is held until that task places its workspace, fails, or is
+cancelled. Other tasks skip it during selection, and atomic workspace admission also enforces
+the hold, including direct workspace creation, attachment, and restart
+(`services/provisioned-node-ownership.ts:buildProvisionedNodeHoldSqlPredicate`).
+
+If the owner's VM still cannot admit it after `operations.workspacePlacementMaxRejections`,
+TaskRunner releases the claim once and returns to normal placement. It can reuse another VM,
+provision within the existing limits, or wait under the pool's exhaustion policy. The rejected
+VM retains its normal cleanup and lifetime guards; occupied VMs are preserved. A second
+exhausted refusal budget fails the run instead of starting an endless replacement chain
+(`task-runner/workspace-placement-fallback.ts:resumeWorkspacePlacementFallback`).
+
 ## Exhaustion policy: what happens when nothing is available
 
 Providers run out of capacity, regions sell out, and accounts hit server limits. **Exhaustion
@@ -694,8 +706,15 @@ reason a new machine can appear while an existing one still looks roomy. The poo
 [**Deployment strategy**](#the-four-policy-fields) only orders the _provisioning_ step; under its
 **Smallest fit** default that means the smallest allowed machine that can hold the deployment.
 
-A deployment **with** persistent volumes skips that search entirely and always gets its own
-machine — see below.
+On a new release, a healthy linked deployment node stays in use while it matches any candidate
+in the effective pool and has room for the declared reservation. Adding a provider or changing
+provider priorities does not move an eligible deployment. The preferred candidate is used when
+a fresh machine must be provisioned.
+
+A deployment **with** persistent volumes gets an exclusive machine. New releases keep that
+machine under the same eligibility and capacity checks. Existing volumes pin release placement
+and any newly declared volumes to their provider and location. If the pool no longer allows that
+placement, the release fails rather than moving the volumes to another provider.
 
 What drives the size is your **deployment manifest**:
 

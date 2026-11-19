@@ -374,6 +374,8 @@ Create a new workspace.
 }
 ```
 
+With `nodeId`, the workspace is placed on that existing node. The request returns `409` when the node no longer has current placement authority (for example its compute source was excluded from the pool, or its credential was rotated or revoked) or no longer has capacity (`assertPinnedNodeAllocationPlanCurrent` and `reserveWorkspacePlacement`, `apps/api/src/routes/workspaces/workspace-create.ts`).
+
 ### `GET /api/workspaces`
 
 List all workspaces for the authenticated user.
@@ -555,7 +557,7 @@ approvals. Nothing is copied.
 | GET    | `/api/projects/:projectId/inbox/count`              | One project's counts                           |
 | GET    | `/api/projects/:projectId/inbox/items/:ref`         | One item; `?context=true` adds the transcript  |
 | POST   | `/api/projects/:projectId/inbox/items/:ref/answer`  | Answer it through the path its store uses      |
-| POST   | `/api/projects/:projectId/inbox/items/:ref/archive` | Close it (see below for what the agent hears)  |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/archive` | Close it; no agent is told                     |
 
 A human task (`ask:<id>` of kind `task`) adds its own routes beside these
 (`apps/api/src/routes/inbox-tasks.ts`, operations in `packages/operations/src/inbox-task-core.ts`).
@@ -606,21 +608,21 @@ approval decision.
 Secret values and Operations approval decisions are accepted only from the SAM app, never through
 an app connected to the Connector (`403`). Answering an item filed from a chat needs the same
 right to wake that chat's agent as answering in the chat. Archiving wakes nothing: an inbox ask
-needs only that it is yours to act on, and a question asked before questions moved to inbox asks
-needs the right to write in its chat.
+needs only that it is yours to act on, and a question asked before questions moved to inbox asks or
+a pending permission needs the right to write in its chat.
 
-Archive closes an item for every kind. A question, review or result becomes `archived` (a
-question asked before questions moved to inbox asks is resolved with reason `archived`) and the
-agent is not told: it stays where it is until you answer something or write in its chat. Archiving
-a question also holds SAM's automatic check-ins off that chat until someone writes in it, for at
-most `inbox.archiveCheckinHoldHours`. A permission or approval is denied and a secret request is
-declined, which the agent does hear. Archiving a task tells the chats watching it. Both writes
-return `{ ref, outcome, agentNotified }`; for an answer or an archived task, `agentNotified: false`
-means the notice was not queued yet, and SAM retries it for `inbox.noticeRetryMinutes`. The
-exception is **Got it** on a result (an empty `acknowledge` answer): it closes the item without
-telling the agent, by design, so nothing is retried. A non-empty reply to a review or result whose
-agent has finished returns `400`, because it could not be delivered. Writes must come from the
-app's own origin with
+Archive closes an item for every kind and tells no agent (`agentNotified` is always `false`). A
+question, review, result or task becomes `archived` (a question asked before questions moved to
+inbox asks is resolved with reason `archived`); a secret request becomes `declined` and an approval
+`denied`; a pending permission, form or link request leaves the inbox without an answer and stays
+answerable in its chat (SAM's check-ins still treat that chat as waiting on a person). Archiving a
+question also holds SAM's automatic check-ins off that chat until someone writes in it, for at most
+`inbox.archiveCheckinHoldHours`. Both writes return `{ ref, outcome, agentNotified }`; for an
+answer, `agentNotified: false` means the notice was not queued yet, and SAM retries it for
+`inbox.noticeRetryMinutes`. The exception is **Got it** on a result (an empty `acknowledge`
+answer): it closes the item without telling the agent, by design, so nothing is retried. A
+non-empty reply to a review or result whose agent has finished returns `400`, because it could not
+be delivered. Writes must come from the app's own origin with
 `Content-Type: application/json`, like the other answer routes. A missing item and one in another
 project both return `404`; an item that is already closed returns `409`, and one you cannot act
 on returns `403`. The transcript context is returned only to a member who can read the source chat.
@@ -680,6 +682,16 @@ Comment threads and replies accept an optional `mentions: [{ "userId": "..." }]`
 `GET /api/projects/:id/sessions/:sessionId/comments/:threadId/context` returns one comment thread with the chat around the message it is on, for [reading a comment in its conversation](/docs/guides/collaboration/#read-a-comment-in-its-conversation): `{ thread, session: { id, topic }, viewerAccess, anchor: { messageId, found }, messages, hasMoreBefore, hasMoreAfter }`. It needs `task:read`. `messages` is in transcript order and holds the whole commented message (an agent reply is stored as many streamed rows, and a comment can be on any of them) plus `collaboration.commentContextMessages` messages each side, reading at most `collaboration.commentContextMaxRows` rows each side. Page further with `GET .../sessions/:sessionId/messages` and `before`/`after` cursors from the first and last rows. When the commented message is no longer in the chat, `anchor.found` is `false` and `messages` is empty. A thread from another chat or another project returns `404`.
 
 ## Nodes
+
+### `POST /api/nodes`
+
+Create a node for the authenticated user. Returns `201` when creation is scheduled.
+If the caller has reached the selected compute pool's per-person limit for managed
+workspace nodes, returns `409` with
+`error: "CAPACITY_POOL_NODE_LIMIT"`. Delete an idle node or ask the pool owner to
+raise the limit in Infrastructure, then retry. A rejected request does not create
+a node or schedule provisioning (`apps/api/src/services/nodes.ts:createNodeRecord`,
+`apps/api/src/routes/nodes.ts`, `apps/api/src/middleware/app-error-handler.ts:handleAppError`).
 
 ### `GET /api/nodes`
 
@@ -1328,6 +1340,30 @@ Returns the caller's own new-chat picker state for the project: `{ usage, hidden
 
 Takes `{ "hide": ["<profileId>"], "unhide": ["<profileId>"] }` and returns `{ hiddenProfileIds }`. Hiding only removes a profile from the caller's own new-chat picker in this project; the profile, other members' pickers, triggers, dispatch and @mentions are unaffected. Only profiles the caller can use in the project can be hidden (`400` otherwise), and one profile cannot appear in both lists.
 
+## Retained Session Work Downloads (Project Chat)
+
+### `GET /api/projects/:projectId/sessions/:sessionId/retained-snapshot/manifest`
+
+### `GET /api/projects/:projectId/sessions/:sessionId/retained-snapshot/wip`
+
+Download a stopped or sleeping chat's retained snapshot manifest or Git WIP bundle as a private
+attachment, using browser-session authentication. No live workspace is needed. Only the
+approved, active session creator who still has active membership in the original project and
+owns the retained snapshot can download it; project membership, administrator status or a
+shared-session grant alone is insufficient.
+
+The server selects the retained generation, verifies identity, expiry, exact length and
+SHA-256, and rechecks ownership and generation before streaming. Success uses `private, no-store`,
+`nosniff` and attachment headers. Foreign, missing, expired, deleted or inconsistent artifacts
+share `404 NOT_FOUND`; infrastructure errors are generic. There is no HOME download, snapshot
+listing, object-key parameter, agent-token authentication, public URL, lifecycle mutation or
+retention extension.
+
+Both paths also accept authenticated `HEAD` with the same checks and headers but no body. The
+web app checks availability with `HEAD`, then starts a native `GET` download so a phone does not
+buffer the WIP bundle in memory. A capture or expiry change between the two requests makes the
+`GET` fail safely with `404`.
+
 ## File Proxy (Project Chat)
 
 These endpoints proxy file operations to the workspace's VM agent, accessed through a project chat session.
@@ -1477,6 +1513,31 @@ Body: `{ "decision": "approve" | "deny", "note"?: string }` (note up to 1,000 ch
 a pending request once and delivers the decision to the requesting agent's chat. Returns
 `{ "approval", "delivered" }`. Returns `409` if the request was already decided or has expired,
 and `404` for an unknown ID.
+
+### `GET /api/admin/nodes/stranded`
+
+Superadmin only. Managed VM nodes on the installation's own cloud credential that are
+`destroying` with a recorded teardown refusal, operator-removable ones first, then oldest first:
+`{ nodes, total }`. Each node carries
+its owner, provider, server ID (null when none was recorded), `cleanupBlockedSince`,
+`cleanupBlockedReason`, a truncated error, and `operatorRemovable` (whether the refusal is one an
+operator may attest past). `limit` defaults to 50, at most 200; `total` counts every match.
+
+### `POST /api/admin/nodes/:id/operator-deletion`
+
+Superadmin only. Remove a stuck node on the installation's own capacity after checking the
+provider. Body: `{ "confirmation": "<node ID>", "expectedBlockedReason": "<the cleanupBlockedReason
+you were shown, or null>", "note": "<what you checked>" }`. Returns `400`
+when the confirmation is not the node ID or the note is empty, `403` for a node on its owner's
+cloud account or for an agent sign-in session while `operations.operatorNodeDeletionAllowAgentSessions`
+is turned off (it is on by default), `409` when the node is not `destroying`, its refusal is not operator-removable, it
+is providerless and still inside the provisioning window or has no buildable ownership labels, it
+has an active or pending workspace, a live task placement claim or a recent heartbeat, its
+refusal changed, or any usable credential still finds its server, and `503` when a provider
+lookup failed temporarily, a SAM credential for the provider exists but could not be read, or the
+audit entry could not be written. The audit entry is written
+before the proof. On success the node's records are removed as `DELETE` does, audited as
+`operator_attested_manual_deletion`; nothing is deleted at the provider.
 
 ## Admin Settings
 

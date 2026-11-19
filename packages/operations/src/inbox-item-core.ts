@@ -166,7 +166,8 @@ async function readAttentionItem(
     blocking: 1,
     title: null,
     body: null,
-    status: marker.resolvedAt === null ? 'open' : 'done',
+    status:
+      marker.resolvedAt !== null ? 'done' : marker.inboxArchivedAt !== null ? 'archived' : 'open',
     created_at: marker.createdAt,
     expires_at: marker.expiresAt,
     due_at: null,

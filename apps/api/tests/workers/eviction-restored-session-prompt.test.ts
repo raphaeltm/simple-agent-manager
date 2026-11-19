@@ -11,11 +11,6 @@
  * instead drive snapshot completion, node selection, provisioning/readiness and TaskRunner linking.
  */
 import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
-import {
-  claimDuePromptDeliveries,
-  type PromptDeliveryResult,
-} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
-import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
 import { buildVmPromptDeliveryCapabilitiesPath } from '@simple-agent-manager/shared';
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { eq } from 'drizzle-orm';
@@ -26,7 +21,6 @@ import * as schema from '../../src/db/schema';
 import type { TaskRunner, TaskRunnerState } from '../../src/durable-objects/task-runner';
 import { ensureSessionLinked } from '../../src/durable-objects/task-runner/session-linking';
 import type { TaskRunnerContext } from '../../src/durable-objects/task-runner/types';
-import type { Env } from '../../src/env';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
   capacityPlacementSnapshotSqlValues,
@@ -42,7 +36,6 @@ import {
   SESSION_RECOVERY_INITIAL_PROMPT,
 } from '../../src/services/session-sleep-fallback-messages';
 import { buildSessionSnapshotR2Key } from '../../src/services/session-snapshots';
-import { DefaultVmPromptDeliveryAdapter } from '../../src/services/vm-prompt-delivery-adapter';
 import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 import {
   acceptedPromptResponse,
@@ -59,6 +52,7 @@ import {
   seedUser,
   seedWorkspace,
 } from './helpers/seed-d1';
+import { runDueDelivery } from './helpers/vm-prompt-delivery';
 
 const config = resolveDurableExecutionConfig({});
 /** Captured before any test replaces it, so a second VM double cannot call into the first. */
@@ -220,31 +214,6 @@ async function evict(f: Fixture, interruptedWork?: boolean): Promise<void> {
     }
   );
   expect(response.status, await response.text()).toBe(204);
-}
-
-/** One pass of the production delivery claim runner for whatever is due at `now`. */
-async function runDueDelivery(f: Fixture, now = Date.now()): Promise<PromptDeliveryResult | null> {
-  return runInDurableObject(f.stub, async (instance, state) => {
-    const [claim] = claimDuePromptDeliveries(state.storage.sql, config, now);
-    if (!claim) return null;
-    // Bindings must come from the object's own context, as in its production alarm.
-    const objectEnv = (instance as unknown as { env: Env }).env;
-    return runPromptDeliveryClaim(
-      state.storage.sql,
-      objectEnv,
-      config,
-      claim,
-      new DefaultVmPromptDeliveryAdapter(objectEnv),
-      {
-        projectId: f.projectId,
-        recalculateAlarm: async () => undefined,
-        broadcastEvent: () => undefined,
-        armIdleCleanup: () => undefined,
-        nudgeDeliveries: () => 0,
-        scheduleSummarySync: () => undefined,
-      }
-    );
-  });
 }
 
 /**

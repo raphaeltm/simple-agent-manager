@@ -107,6 +107,7 @@ export {
   fetchAdminProjectDataArchiveProblemMigrations,
   fetchAdminProjectDataStorageTelemetry,
 } from './admin-project-data-storage';
+export { attestOperatorNodeDeletion, fetchAdminStrandedNodes } from './admin-stranded-nodes';
 export type {
   AdminAgentEmailStatus,
   AgentEmailLoopbackReceived,

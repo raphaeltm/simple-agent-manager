@@ -7,6 +7,7 @@ import * as schema from '../../db/schema';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { normalizeAgentVersion } from '../../services/node-agent-compatibility';
+import { taskProvisionedNodeConditionSql } from '../../services/node-teardown-provenance';
 import { ensureSessionSnapshotForSleep } from '../../services/session-snapshots';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
@@ -35,7 +36,7 @@ export async function requestIncompatiblePoolNodeDrain(
         AND n.status = 'running' AND n.runtime = 'vm'
         AND n.node_role = 'workspace' AND n.node_class = 'managed'
         AND (n.agent_version IS NULL OR TRIM(n.agent_version) != ?)
-        AND EXISTS (SELECT 1 FROM tasks t WHERE t.auto_provisioned_node_id = n.id)
+        AND ${taskProvisionedNodeConditionSql('n')}
         AND w.status IN ('running', 'recovery')
         AND w.project_id IS NOT NULL AND w.chat_session_id IS NOT NULL
         AND s.sleep_status IS NULL AND s.sleeping_at IS NULL

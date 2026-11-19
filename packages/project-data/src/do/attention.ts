@@ -186,6 +186,31 @@ export function resolveAttentionMarkerById(
   return count;
 }
 
+/**
+ * Archive a pending ACP interaction's marker from the person's inbox: it leaves the inbox and the
+ * chat list's summary, and stays unresolved, so the interaction is still pending in its chat and
+ * the silent-agent reconciliation (which skips a chat with an unresolved `needs_input` marker)
+ * does not cancel the prompt waiting on it. Bound to the session; returns rows changed.
+ */
+export function archiveInteractionMarkerFromInbox(
+  sql: SqlStorage,
+  sessionId: string,
+  markerId: string,
+  now = Date.now()
+): number {
+  return sql
+    .exec(
+      `UPDATE session_attention_markers
+       SET inbox_archived_at = ?
+       WHERE id = ? AND session_id = ? AND kind = 'needs_input' AND source = 'acp_interaction'
+         AND resolved_at IS NULL AND inbox_archived_at IS NULL
+       RETURNING id`,
+      now,
+      markerId,
+      sessionId
+    )
+    .toArray().length;
+}
 
 export type PrepareAttentionAnswerResult =
   | { status: 'ready' }
@@ -423,7 +448,7 @@ export function getAttentionSummary(
     .exec(
       `SELECT id, kind, source, created_at, expires_at, reason, metadata
        FROM session_attention_markers
-       WHERE session_id = ? AND resolved_at IS NULL
+       WHERE session_id = ? AND resolved_at IS NULL AND inbox_archived_at IS NULL
        ORDER BY CASE WHEN kind = 'needs_input' THEN 0 ELSE 1 END, created_at DESC
        LIMIT 1`,
       sessionId
@@ -560,7 +585,6 @@ export function computeAttentionAlarmTime(sql: SqlStorage): number | null {
   if (row?.earliest === null || row?.earliest === undefined) return null;
   return row.earliest as number;
 }
-
 
 export function humanInputUndeliveredGraceMs(value?: string): number {
   return positiveEnvNumber(value, DEFAULT_HUMAN_INPUT_UNDELIVERED_GRACE_MS);

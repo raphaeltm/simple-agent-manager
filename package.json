@@ -36,6 +36,10 @@
     "db:migrate:local": "tsx scripts/deploy/run-migrations.ts --local",
     "setup:github": "tsx scripts/deploy/setup-github.ts",
     "setup:local": "tsx scripts/deploy/setup-local-dev.ts",
+    "selfhost:deploy": "tsx scripts/selfhost/deploy.ts",
+    "selfhost:create-account": "tsx scripts/selfhost/create-account.ts",
+    "selfhost:test": "vitest run --config scripts/selfhost/vitest.config.ts",
+    "selfhost:upgrade": "tsx scripts/selfhost/upgrade.ts",
     "quality:preflight": "tsx scripts/quality/check-preflight-evidence.ts",
     "test:acp-c2-remote-service": "node tests/fixtures/acp-c2-remote-service.test.mjs",
     "quality:wrangler-bindings": "tsx scripts/quality/check-wrangler-bindings.ts",
@@ -43,6 +47,7 @@
     "quality:agent-install-manifest": "tsx scripts/quality/check-agent-install-manifest.ts",
     "quality:skill-references": "tsx scripts/quality/check-skill-references.ts",
     "quality:ast-checks": "tsx scripts/quality/ast-checks.ts",
+    "quality:shared-flight-joins": "tsx scripts/quality/check-shared-flight-joins.ts",
     "quality:file-sizes": "tsx scripts/quality/check-file-sizes.ts",
     "quality:stale-artifacts": "tsx scripts/quality/check-stale-artifacts.ts",
     "quality:migration-safety": "tsx scripts/quality/check-migration-safety.ts",
@@ -77,8 +82,7 @@
     "test:e2e:provider-limits": "node scripts/e2e/provider-limit-path.mjs"
   },
   "dependencies": {
-    "@iarna/toml": "2.2.5",
-    "lucide-react": "1.8.0"
+    "@iarna/toml": "2.2.5"
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.0",

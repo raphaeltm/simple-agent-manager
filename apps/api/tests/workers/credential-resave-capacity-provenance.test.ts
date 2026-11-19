@@ -32,6 +32,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
+import { getCredentialEncryptionKey } from '../../src/lib/secrets';
 import { adminPlatformCredentialRoutes } from '../../src/routes/admin-platform-credentials';
 import { credentialsRoutes } from '../../src/routes/credentials';
 import { gcpRoutes } from '../../src/routes/gcp';
@@ -44,6 +45,7 @@ import {
 } from '../../src/services/capacity-placement-snapshot';
 import { updateDefaultCapacityPool } from '../../src/services/default-capacity-pool-updates';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../src/services/default-capacity-pools';
+import { encrypt } from '../../src/services/encryption';
 import { handOffEmptyWorkspaceNode } from '../../src/services/node-warm-handoff';
 import {
   resolveTaskStartCapacityPoolSelection,
@@ -54,6 +56,16 @@ import { deleteNodeResourcesStrict } from '../../src/services/strict-node-deleti
 import { seedInstallation, seedNode, seedProject, seedUser } from './helpers/seed-d1';
 
 const workerEnv = env as unknown as Env;
+
+/**
+ * Ciphertext for a credential row that exists only for its foreign keys. It must decrypt: the
+ * suite shares one D1, and an undecryptable GCP row of another owner rightly withholds new
+ * workload identity pool claims (gcp-wif-pool-ownership.ts).
+ */
+async function sealedPlaceholder(): Promise<[string, string]> {
+  const { ciphertext, iv } = await encrypt('placeholder', getCredentialEncryptionKey(workerEnv));
+  return [ciphertext, iv];
+}
 const db = drizzle(env.DATABASE, { schema });
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -121,15 +133,21 @@ async function request(
   );
 }
 
-const GCP_CONNECTION = {
-  provider: 'gcp',
-  gcpProjectId: 'sam-staging-infra',
-  gcpProjectNumber: '353771248703',
-  serviceAccountEmail: 'sam-vm-manager@sam-staging-infra.iam.gserviceaccount.com',
-  wifPoolId: 'sam-pool',
-  wifProviderId: 'sam-oidc',
-  defaultZone: 'europe-west1-b',
-};
+/**
+ * Each test gets its own workload identity pool: the suite shares one D1, and a pool stays
+ * claimed by the first owner whose credential named it (gcp-wif-pool-ownership.ts).
+ */
+function gcpConnection() {
+  return {
+    provider: 'gcp',
+    gcpProjectId: 'sam-staging-infra',
+    gcpProjectNumber: '353771248703',
+    serviceAccountEmail: 'sam-vm-manager@sam-staging-infra.iam.gserviceaccount.com',
+    wifPoolId: prefix,
+    wifProviderId: 'sam-oidc',
+    defaultZone: 'europe-west1-b',
+  };
+}
 
 /** Reconcile the default pools the way the scheduled backfill does, with a complete catalog. */
 async function reconcile(scope: { userId?: string; projectId?: string; installation?: boolean }) {
@@ -329,7 +347,7 @@ function claim(nodeId: string, userId: string, status: string, allowRunning = fa
 
 describe('a GCP connection re-saved through the product', () => {
   it('keeps the connection, its pool choices and its order, so GCP stays placeable', async () => {
-    const saved = await request(ownerId, 'POST', '/api/credentials', GCP_CONNECTION);
+    const saved = await request(ownerId, 'POST', '/api/credentials', gcpConnection());
     expect(saved.status).toBe(201);
     await reconcile({ userId: ownerId });
     const credentialId = await userGcpCredentialId(ownerId);
@@ -341,7 +359,7 @@ describe('a GCP connection re-saved through the product', () => {
     });
     expect(picked.sourceId).toBe(`cap-source-default:user:${credentialId}`);
 
-    const resaved = await request(ownerId, 'POST', '/api/credentials', GCP_CONNECTION);
+    const resaved = await request(ownerId, 'POST', '/api/credentials', gcpConnection());
     expect(resaved.status).toBe(200);
     expect(((await resaved.json()) as { id: string }).id).toBe(credentialId);
     await reconcile({ userId: ownerId });
@@ -358,7 +376,7 @@ describe('a GCP connection re-saved through the product', () => {
   });
 
   it('leaves nodes placed before the save reapable by the cron and the warm handoff', async () => {
-    expect((await request(ownerId, 'POST', '/api/credentials', GCP_CONNECTION)).status).toBe(201);
+    expect((await request(ownerId, 'POST', '/api/credentials', gcpConnection())).status).toBe(201);
     await reconcile({ userId: ownerId });
     await pickProvider({
       scope: 'user',
@@ -371,7 +389,7 @@ describe('a GCP connection re-saved through the product', () => {
     const placed = await placeNode(stoppedNode, ownerId, null, 'stopped');
     await placeNode(runningNode, ownerId, null, 'running');
 
-    expect((await request(ownerId, 'POST', '/api/credentials', GCP_CONNECTION)).status).toBe(200);
+    expect((await request(ownerId, 'POST', '/api/credentials', gcpConnection())).status).toBe(200);
     await reconcile({ userId: ownerId });
 
     // The column the cleanup predicate reads survives the save.
@@ -558,7 +576,7 @@ describe('a source deleted with its credential (disconnect, platform rotation)',
         provider: 'gcp',
         label: 'platform gcp',
         credential: JSON.stringify({
-          ...GCP_CONNECTION,
+          ...gcpConnection(),
           version: 2,
           authType: 'workload-identity',
         }),
@@ -659,9 +677,9 @@ describe('rows already damaged in the production shape', () => {
     await env.DATABASE.prepare(
       `INSERT INTO credentials (id, user_id, provider, credential_type, credential_kind,
          is_active, encrypted_token, iv, created_at, updated_at)
-       VALUES (?, ?, 'gcp', 'cloud-provider', 'api-key', 1, 'x', 'y', datetime('now'), datetime('now'))`
+       VALUES (?, ?, 'gcp', 'cloud-provider', 'api-key', 1, ?, ?, datetime('now'), datetime('now'))`
     )
-      .bind(`${prefix}-cred`, ownerId)
+      .bind(`${prefix}-cred`, ownerId, ...(await sealedPlaceholder()))
       .run();
     await env.DATABASE.prepare(
       `INSERT INTO capacity_sources (id, scope, owner_user_id, source_kind, provider,
@@ -732,9 +750,9 @@ describe('rows already damaged in the production shape', () => {
     await env.DATABASE.prepare(
       `INSERT INTO credentials (id, user_id, provider, credential_type, credential_kind,
          is_active, encrypted_token, iv, created_at, updated_at)
-       VALUES (?, ?, 'gcp', 'cloud-provider', 'api-key', 1, 'x', 'y', datetime('now'), datetime('now'))`
+       VALUES (?, ?, 'gcp', 'cloud-provider', 'api-key', 1, ?, ?, datetime('now'), datetime('now'))`
     )
-      .bind(`${prefix}-proven-cred`, ownerId)
+      .bind(`${prefix}-proven-cred`, ownerId, ...(await sealedPlaceholder()))
       .run();
     await env.DATABASE.prepare(
       `INSERT INTO capacity_sources (id, scope, owner_user_id, source_kind, provider,
@@ -821,7 +839,7 @@ describe('rows already damaged in the production shape', () => {
   });
 
   it('a pool whose order names a deleted source still places on its active options', async () => {
-    expect((await request(ownerId, 'POST', '/api/credentials', GCP_CONNECTION)).status).toBe(201);
+    expect((await request(ownerId, 'POST', '/api/credentials', gcpConnection())).status).toBe(201);
     await reconcile({ userId: ownerId });
     const picked = await pickProvider({
       scope: 'user',

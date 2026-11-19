@@ -1,0 +1,193 @@
+#!/usr/bin/env tsx
+/**
+ * Create a SAM account on a deployed celld box, so that address can sign in with an emailed code.
+ *
+ *   pnpm selfhost:create-account --email someone@example.com [--superadmin]
+ *                                [--env-file deploy/selfhost/.env] [--state-dir <env dir>/.state]
+ *                                [--secrets <state-dir>/secrets.env] [--dry-run]
+ *
+ * `--secrets` is the file `pnpm selfhost:deploy --secrets` read (same default): it says whether
+ * the install has a bootstrap owner (BOOTSTRAP_OWNER_EMAIL), which `--superadmin` must know
+ * (`resolveBootstrapOwner`).
+ *
+ * For an install whose first-account path is already used (a seeded smoke-test superadmin, or an
+ * owner who signed up): email sign-in sends codes only to existing accounts, so a new person needs
+ * an account first. Idempotent: an existing account is left as it is, except that --superadmin
+ * promotes it. Writes the `users` table BetterAuth reads (account-sql.ts) through
+ * `celld d1 execute`, so the stack must be running and deployed (`pnpm selfhost:deploy`).
+ */
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { parseArgs } from 'node:util';
+
+import { isEntrypoint } from '../deploy/entrypoint.js';
+import {
+  type AccountPlan,
+  type AccountReport,
+  createAccountSql,
+  generateAccountId,
+  normalizeAccountEmail,
+  parseAccountReport,
+  superadminWaitsForOwner,
+} from './account-sql.js';
+import { celldChildEnv, redactSecrets, STORAGE_SECRET_KEYS } from './box-settings.js';
+import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
+import { log, REPO_ROOT } from './deploy-steps.js';
+import { assertPrivateFile, parseDotenv, readSecretsFile } from './secret-files.js';
+
+/** Upper bound on captured celld output. */
+const CHILD_OUTPUT_MAX_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Why `--superadmin` was refused, or null. The SQL writes nothing for a non-owner superadmin
+ * while the bootstrap owner is not established (account-sql.ts), so a missing account, or one
+ * that is still not a superadmin, means the guard held.
+ */
+export function ownerLockoutRefusal(
+  plan: AccountPlan,
+  account: AccountReport | null
+): string | null {
+  if (!superadminWaitsForOwner(plan) || account?.role === 'superadmin') return null;
+  return (
+    `refused: ${plan.bootstrapOwnerEmail} (BOOTSTRAP_OWNER_EMAIL) has not signed in yet. ` +
+    `SAM makes the owner the administrator on their first sign-in only while no other ` +
+    `superadmin exists, and admits no one else before that, so a superadmin for ` +
+    `${plan.email} now would lock everyone out. Nothing was changed. Sign in as the owner ` +
+    `first, then run this again, or run it without --superadmin.`
+  );
+}
+
+/**
+ * The installer's owner email from the deploy's secrets file, or undefined when the install has
+ * none. An install without BOOTSTRAP_OWNER_EMAIL is legitimate: the Worker then has no owner gate
+ * (`bootstrapOwnerEmail` in apps/api/src/services/bootstrap-owner.ts returns undefined), so a
+ * superadmin cannot lock anyone out and `--superadmin` proceeds.
+ *
+ * What must not happen is reading the wrong file and concluding "no owner": a missing secrets
+ * file is indistinguishable from a deploy that used another `--secrets` path, so with
+ * `--superadmin` it is refused rather than taken as "no owner". An unreadable or non-private file
+ * always throws (readSecretsFile).
+ */
+export function resolveBootstrapOwner(
+  secretsPath: string,
+  superadmin: boolean
+): string | undefined {
+  if (!existsSync(secretsPath)) {
+    if (!superadmin) return undefined;
+    throw new Error(
+      `--superadmin needs the secrets file the deploy read, to know whether ` +
+        `BOOTSTRAP_OWNER_EMAIL is set, and ${secretsPath} does not exist. Pass the deploy's ` +
+        '--secrets <path>. If the deploy ran without a secrets file (no bootstrap owner), ' +
+        `create an empty one first: install -m 600 /dev/null ${secretsPath}`
+    );
+  }
+  const owner = readSecretsFile(secretsPath).BOOTSTRAP_OWNER_EMAIL?.trim();
+  // The Worker treats a present but empty owner email as configured and admits no one
+  // (bootstrap-owner.ts); refuse rather than write accounts nobody can use.
+  if (owner === '') {
+    throw new Error(
+      `BOOTSTRAP_OWNER_EMAIL is set but empty in ${secretsPath}: SAM would admit no one. Set ` +
+        "the owner's address or remove the line, then deploy, before creating accounts."
+    );
+  }
+  return owner ? normalizeAccountEmail(owner) : undefined;
+}
+
+/** The D1 database bound as DATABASE in the deployed (secrets-free) celld config. */
+export function mainDatabaseName(wranglerJson: string): string {
+  const config: unknown = JSON.parse(wranglerJson);
+  const databases =
+    config && typeof config === 'object' && 'd1_databases' in config ? config.d1_databases : null;
+  if (Array.isArray(databases)) {
+    for (const entry of databases as unknown[]) {
+      if (entry && typeof entry === 'object' && 'binding' in entry && 'database_name' in entry) {
+        if (entry.binding === 'DATABASE' && typeof entry.database_name === 'string') {
+          return entry.database_name;
+        }
+      }
+    }
+  }
+  throw new Error('the deployed config has no DATABASE binding; run pnpm selfhost:deploy first');
+}
+
+async function main(): Promise<void> {
+  const { values } = parseArgs({
+    options: {
+      email: { type: 'string' },
+      superadmin: { type: 'boolean', default: false },
+      'env-file': { type: 'string' },
+      'state-dir': { type: 'string' },
+      secrets: { type: 'string' },
+      'dry-run': { type: 'boolean', default: false },
+    },
+  });
+  if (!values.email) throw new Error('--email is required');
+  const email = normalizeAccountEmail(values.email);
+
+  const envFile = resolve(values['env-file'] ?? join(REPO_ROOT, 'deploy/selfhost/.env'));
+  assertPrivateFile(envFile);
+  const box = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
+  if (!box.CELLD_BUCKET) throw new Error(`${envFile}: CELLD_BUCKET is required`);
+  const stateDir = resolve(
+    dirname(envFile),
+    values['state-dir'] ?? box.SAM_SELFHOST_STATE_DIR ?? '.state'
+  );
+  const superadmin = values.superadmin ?? false;
+  const owner = resolveBootstrapOwner(
+    resolve(values.secrets ?? join(stateDir, 'secrets.env')),
+    superadmin
+  );
+  const plan = {
+    email,
+    superadmin,
+    id: generateAccountId(),
+    nowMs: Date.now(),
+    bootstrapOwnerEmail: owner,
+  };
+  const sql = createAccountSql(plan);
+  if (values['dry-run']) {
+    console.log(sql);
+    return;
+  }
+
+  const projectDir = join(stateDir, 'project');
+  const configPath = join(projectDir, 'wrangler.json');
+  if (!existsSync(configPath)) throw new Error(`${configPath} not found; run pnpm selfhost:deploy`);
+  const database = mainDatabaseName(readFileSync(configPath, 'utf8'));
+
+  const celld = await ensureCelldBinary(join(stateDir, 'bin'));
+  const env = celldChildEnv(process.env, box, resolveEsbuild(join(REPO_ROOT, 'apps/api')));
+  log(`${values.superadmin ? 'creating or promoting' : 'creating'} the account for ${email}`);
+  const result = spawnSync(
+    celld,
+    ['d1', 'execute', database, '--command', sql, projectDir, '--bucket', box.CELLD_BUCKET],
+    { cwd: REPO_ROOT, env, encoding: 'utf8', maxBuffer: CHILD_OUTPUT_MAX_BYTES }
+  );
+  const secrets = STORAGE_SECRET_KEYS.map((name) => box[name] ?? '').filter(Boolean);
+  process.stdout.write(redactSecrets(`${result.stdout ?? ''}${result.stderr ?? ''}`, secrets));
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`celld d1 execute failed (exit ${result.status})`);
+  // The last statement reports the account; no row means nothing usable was written.
+  const account = parseAccountReport(result.stdout ?? '', email);
+  const refusal = ownerLockoutRefusal(plan, account);
+  if (refusal) throw new Error(refusal);
+  if (!account) throw new Error(`no account for ${email} after the command; nothing was created`);
+  if (account.status === 'suspended') {
+    log(`note: ${email} is suspended; an administrator must reactivate it in Admin → Users`);
+  }
+  log(`done: ${email} can now request a sign-in code at https://app.${box.SAM_DOMAIN ?? ''}`);
+  // Until the installer owner has signed in once, SAM admits no one else (bootstrap-owner.ts).
+  if (owner && owner !== email) {
+    log(`note: BOOTSTRAP_OWNER_EMAIL is set; if ${owner} has not signed in yet, only they can`);
+  }
+}
+
+if (isEntrypoint(import.meta.url)) {
+  try {
+    await main();
+  } catch (error: unknown) {
+    console.error(`[selfhost] ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+}

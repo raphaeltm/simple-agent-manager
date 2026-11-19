@@ -59,7 +59,7 @@ import {
   catalogPublicationMigrationSql,
 } from '../../helpers/capacity-pool-migrations';
 import { pickStarterMachines } from '../../helpers/capacity-pool-picks';
-import { createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
+import { applySqliteMigration, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
 let sqlite: Database.Database | null = null;
 const TEST_ENCRYPTION_KEY = Buffer.from('0123456789abcdef0123456789abcdef').toString('base64');
@@ -214,7 +214,21 @@ function createDb(options: { includeCatalogPublication?: boolean } = {}) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE project_deployment_credentials (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      provider TEXT NOT NULL DEFAULT 'gcp',
+      gcp_project_number TEXT NOT NULL,
+      wif_pool_id TEXT NOT NULL
+    );
   `);
+  // GCP credential saves check workload identity pool ownership (migration 0262).
+  applySqliteMigration(
+    sqlite,
+    new URL('../../../src/db/migrations/0262_gcp_wif_pool_index.sql', import.meta.url)
+  );
   seedIdentity();
   applyCapacityPoolSchemaMigrations(sqlite, options);
   return poolDb();

@@ -19,7 +19,11 @@ import { errors } from '../middleware/error';
 import { collectSecretNames } from '../services/compose-renderer';
 import { NO_DEPLOYMENT_RELOCATION_CLAIM_SQL } from '../services/deployment-environment-state';
 import { resolveDeploymentPlacement } from '../services/deployment-provisioning';
-import { createMissingManifestVolumes } from '../services/deployment-volumes';
+import { resolveVolumePlacementConstraint } from '../services/deployment-volume-placement';
+import {
+  createMissingManifestVolumes,
+  listEnvironmentVolumes,
+} from '../services/deployment-volumes';
 import { recordDeploymentReleaseLifecycleEventBestEffort } from '../services/project-lifecycle-events';
 import {
   isPlacementCancellation,
@@ -222,9 +226,12 @@ async function prepareManifestVolumes(params: {
   env: Env;
   requiresVolumes: boolean;
   reservation: ResolvedResourceReservation;
+  volume: ReturnType<typeof resolveVolumePlacementConstraint>;
 }): Promise<VolumePreparationOutcome> {
+  const volume = params.volume;
   const placement = await resolveDeploymentPlacement(params.userId, params.env, params.projectId, {
     reservation: params.reservation,
+    ...(volume ? { providerOverride: volume.provider, vmLocationOverride: volume.location } : {}),
   });
   if (!placement) {
     return {
@@ -232,9 +239,10 @@ async function prepareManifestVolumes(params: {
       response: {
         status: 400,
         body: {
-          error: 'NO_CLOUD_PROVIDER',
-          message:
-            'No cloud provider credential found. Connect a cloud provider before deploying applications.',
+          error: volume ? 'VOLUME_PLACEMENT_UNAVAILABLE' : 'NO_CLOUD_PROVIDER',
+          message: volume
+            ? 'The effective compute pool cannot place this environment on the provider and location of its existing volumes.'
+            : 'No cloud provider credential found. Connect a cloud provider before deploying applications.',
         },
       },
     };
@@ -330,21 +338,27 @@ export async function createDeploymentReleaseFromManifest(
     executionCtx?: ExecutionContext;
   }
 ): Promise<CreateDeploymentReleaseOutcome> {
-  const requiresVolumes = Object.keys(manifest.volumes).length > 0;
-  const reservation = resolveDeploymentManifestReservation(manifest, params.envId, {
-    cpuMillis: parsePositiveInt(
-      params.env.DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS,
-      DEFAULT_DEPLOYMENT_SERVICE_CPU_MILLIS
-    ),
-    memoryMb: parsePositiveInt(
-      params.env.DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB,
-      DEFAULT_DEPLOYMENT_SERVICE_MEMORY_MB
-    ),
-    diskMb: parsePositiveInt(
-      params.env.DEPLOYMENT_DEFAULT_ROOT_DISK_MB,
-      DEFAULT_DEPLOYMENT_SERVICE_DISK_MB
-    ),
-  });
+  const manifestRequiresVolumes = Object.keys(manifest.volumes).length > 0;
+  const volumes = await listEnvironmentVolumes(db, params.envId);
+  const volume = resolveVolumePlacementConstraint(volumes);
+  const requiresVolumes = manifestRequiresVolumes || volumes.length > 0;
+  const reservation = {
+    ...resolveDeploymentManifestReservation(manifest, params.envId, {
+      cpuMillis: parsePositiveInt(
+        params.env.DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS,
+        DEFAULT_DEPLOYMENT_SERVICE_CPU_MILLIS
+      ),
+      memoryMb: parsePositiveInt(
+        params.env.DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB,
+        DEFAULT_DEPLOYMENT_SERVICE_MEMORY_MB
+      ),
+      diskMb: parsePositiveInt(
+        params.env.DEPLOYMENT_DEFAULT_ROOT_DISK_MB,
+        DEFAULT_DEPLOYMENT_SERVICE_DISK_MB
+      ),
+    }),
+    exclusiveNode: requiresVolumes,
+  };
   const secretError = await validateManifestSecrets(db, manifest, params.envId);
   if (secretError) {
     return { success: false, response: secretError };
@@ -361,8 +375,9 @@ export async function createDeploymentReleaseFromManifest(
     projectId: params.projectId,
     userId: params.userId,
     env: params.env,
-    requiresVolumes,
+    requiresVolumes: manifestRequiresVolumes,
     reservation,
+    volume,
   });
   if (!volumePreparation.success) {
     return { success: false, response: volumePreparation.response };

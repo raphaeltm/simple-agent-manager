@@ -66,8 +66,6 @@ export function buildInboxAskPrompt(
       return answer
         ? `The person marked your ${item} done, with this comment:\n\n${answer}`
         : `The person marked your ${item} done.`;
-    case 'archived':
-      return `The person archived your ${item} and will not act on it. Do not wait for it: continue without it, or file a new item only if something changed.`;
     case 'expired':
       return `Your ${item} expired before anyone acted on it. Do not wait for it.`;
   }
@@ -77,18 +75,16 @@ function askNotice(row: InboxAskNoticeRow, outcome: InboxAskNoticeOutcome): SamN
   return buildSamNotice({
     type: `inbox_ask.${outcome}`,
     headline:
-      outcome === 'archived'
-        ? 'Inbox item archived'
-        : outcome === 'expired'
-          ? 'Inbox item expired'
-          : outcome === 'done'
-            ? 'Inbox item done'
-            : 'Inbox item answered',
+      outcome === 'expired'
+        ? 'Inbox item expired'
+        : outcome === 'done'
+          ? 'Inbox item done'
+          : 'Inbox item answered',
     detail:
-      outcome === 'archived' || outcome === 'expired'
+      outcome === 'expired'
         ? 'The agent was told not to wait for it.'
         : 'The agent was given the answer.',
-    severity: outcome === 'archived' || outcome === 'expired' ? 'info' : 'success',
+    severity: outcome === 'expired' ? 'info' : 'success',
     refs: row.sourceTaskId ? [{ kind: 'task', id: row.sourceTaskId, label: null }] : [],
   });
 }

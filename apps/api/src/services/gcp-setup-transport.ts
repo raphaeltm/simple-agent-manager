@@ -83,3 +83,21 @@ export async function fetchWithTimeout(
     clearTimeout(timeoutId);
   }
 }
+
+export const gcpOperationSchema = v.object({
+  name: v.optional(v.string()),
+  done: v.optional(v.boolean()),
+  error: v.optional(v.object({ message: v.optional(v.string()) })),
+});
+
+export const iamBindingSchema = v.object({
+  role: v.string(),
+  members: v.array(v.string()),
+});
+
+export function requireOperationName(op: { name?: string }, context: string): string {
+  if (!op.name) {
+    throw new GcpApiError({ step: context, message: 'GCP operation response missing name' });
+  }
+  return op.name;
+}

@@ -7,6 +7,7 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { taskProvisionedNodeConditionSql } from './node-teardown-provenance';
 
 export async function loadSleepWorkspace(env: Env, workspaceId: string, userId: string) {
   const db = drizzle(env.DATABASE, { schema });
@@ -25,8 +26,7 @@ export async function loadSleepWorkspace(env: Env, workspaceId: string, userId: 
       nodeCreatedAt: schema.nodes.createdAt,
       nodeRole: schema.nodes.nodeRole,
       nodeClass: schema.nodes.nodeClass,
-      nodeAutoProvisioned: sql<number>`EXISTS (SELECT 1 FROM tasks auto_task
-        WHERE auto_task.auto_provisioned_node_id = ${schema.workspaces.nodeId})`,
+      nodeAutoProvisioned: sql<number>`${sql.raw(taskProvisionedNodeConditionSql('nodes'))}`,
       taskId: schema.tasks.id,
       taskStatus: schema.tasks.status,
       taskCompletedAt: sql<

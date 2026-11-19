@@ -112,7 +112,7 @@ export const INBOX_TOOLS = [
   {
     name: 'inbox_assign',
     description:
-      'Hand a person non-blocking work only a person can do (add a production secret, decide a price, record a demo). It goes to their inbox under Tasks; you keep working. You are woken in this chat when they comment, take it, hand it on, finish, reopen or archive it. It never expires.',
+      'Hand a person non-blocking work only a person can do (add a production secret, decide a price, record a demo). It goes to their inbox under Tasks; you keep working. You are woken in this chat when they comment, take it, hand it on, finish or reopen it; archiving it wakes no one. It never expires.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -168,7 +168,7 @@ export const INBOX_TOOLS = [
   {
     name: 'inbox_attach',
     description:
-      'Watch an open task another of your chats assigned instead of assigning a duplicate: this chat is woken when it is taken, handed on, finished, reopened or archived (comments wake the assigning chat; read them with inbox_read get).',
+      'Watch an open task another of your chats assigned instead of assigning a duplicate: this chat is woken when it is taken, handed on, finished or reopened (archiving it wakes no one; comments wake the assigning chat; read them with inbox_read get).',
     inputSchema: {
       type: 'object' as const,
       properties: { ref, wakeOnSteps },

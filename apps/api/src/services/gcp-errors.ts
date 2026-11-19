@@ -62,6 +62,8 @@ const STEP_HINTS: Record<string, string> = {
     'Failed to configure workload identity. Ensure your account has the IAM Admin role.',
   create_oidc_provider: 'Failed to configure the identity provider.',
   update_oidc_provider: 'Failed to update the identity provider.',
+  oidc_provider_issuer_mismatch:
+    'This identity provider belongs to another SAM installation. Ask an administrator to configure a separate workload identity pool or provider, then reconnect.',
   create_service_account:
     'Failed to create the service account. Ensure your account has the IAM Admin role.',
   grant_wif_user: 'Failed to configure identity federation on the service account.',

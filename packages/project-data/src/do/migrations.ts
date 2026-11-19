@@ -2782,6 +2782,29 @@ export const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    name: '082-attention-marker-inbox-archived',
+    run(sql) {
+      // Every inbox archive is silent (Raphaël, 2026-11-17). A pending ACP interaction archived
+      // from the inbox must leave the inbox without resolving its marker: the marker is what keeps
+      // SAM's silent-agent reconciliation from cancelling a prompt that is waiting on that
+      // interaction. STRICTLY ADDITIVE (rules 31 / 63): one nullable ADD COLUMN; no existing
+      // predicate changes, and every existing row reads NULL (not archived from the inbox).
+      const existing = new Set(
+        sql
+          .exec('PRAGMA table_info(session_attention_markers)')
+          .toArray()
+          .map((row) => String(row.name))
+      );
+      if (!existing.has('inbox_archived_at'))
+        sql.exec('ALTER TABLE session_attention_markers ADD COLUMN inbox_archived_at INTEGER');
+      // The summary delta re-reads chats whose markers were archived since the last sync; this
+      // keeps that lookup on an index like its created_at / resolved_at siblings.
+      sql.exec(
+        'CREATE INDEX IF NOT EXISTS idx_attention_inbox_archived_at ON session_attention_markers(inbox_archived_at)'
+      );
+    },
+  },
   // Retired before release: `072-anchored-comment-threads` ran on staging only (renumbered to
   // 073 after another 072 merged first). That name may not be reused.
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects

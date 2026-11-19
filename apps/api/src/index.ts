@@ -68,6 +68,7 @@ import { adminQuotaRoutes } from './routes/admin-quotas';
 import { adminRuntimeControlRoutes } from './routes/admin-runtime-controls';
 import { adminSandboxRoutes } from './routes/admin-sandbox';
 import { adminSettingsRoutes } from './routes/admin-settings';
+import { adminStrandedNodeRoutes } from './routes/admin-stranded-nodes';
 import { adminUsageRoutes } from './routes/admin-usage';
 import { agentRoutes } from './routes/agent';
 import { agentCredentialSetupSessionsRoutes } from './routes/agent-credential-setup-sessions';
@@ -135,6 +136,7 @@ import { nodesRoutes } from './routes/nodes';
 import { notificationRoutes } from './routes/notifications';
 import { observabilityIngestRoutes } from './routes/observability-ingest';
 import { orchestratorRoutes } from './routes/orchestrator';
+import { ownerSessionSnapshotRoutes } from './routes/owner-session-snapshots';
 import { platformCapabilitiesRoutes } from './routes/platform-capabilities';
 import { policyRoutes } from './routes/policies';
 import { profileRuntimeRoutes } from './routes/profile-runtime';
@@ -205,7 +207,8 @@ app.use('*', async (c, next) => {
   await next();
 });
 
-// Proxy non-API subdomains to their respective Cloudflare Pages deployments.
+// Proxy non-API subdomains to their respective Cloudflare Pages deployments (or, on a
+// self-hosted deployment with an ASSETS binding, serve app.* from the Worker's assets).
 // The Worker wildcard route *.{domain}/* intercepts ALL subdomains, so we must
 // proxy app.* and www.* requests to Pages before any other middleware runs.
 // The apex domain is redirected to www.* for the marketing site.
@@ -221,7 +224,15 @@ app.use('*', async (c, next) => {
     baseDomain,
     appPagesProjectName: c.env.PAGES_PROJECT_NAME,
     wwwPagesProjectName: c.env.WWW_PAGES_PROJECT_NAME,
+    hasWebAssets: Boolean(c.env.ASSETS),
   });
+
+  // Self-hosted deployments bind the apps/web build as ASSETS and serve app.* from it.
+  // Cloudflare deployments have no ASSETS binding and keep proxying to Pages. (`c.env.ASSETS` is
+  // re-checked only so TypeScript narrows the optional binding.)
+  if (pagesTarget.type === 'assets' && c.env.ASSETS) {
+    return c.env.ASSETS.fetch(c.req.raw);
+  }
 
   if (pagesTarget.type === 'missing-config') {
     return c.text(pagesTarget.message, 503);
@@ -433,6 +444,8 @@ app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/operation-receipts', cliOperationReceiptRoutes);
 app.route('/api/projects/:projectId/cli', cliProjectMetadataRoutes);
 app.route('/api/projects/:projectId/sessions', chatStartRoutes);
+// Human-owner retained exports are independent of workspace callback JWT routes.
+app.route('/api/projects/:projectId/sessions', ownerSessionSnapshotRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
 app.route('/api/projects/:projectId/ideas', ideaUpdateRoutes);
 app.route('/api/projects/:projectId/comments', projectCommentRoutes);
@@ -480,6 +493,7 @@ app.route('/api/admin/quotas', adminQuotaRoutes);
 app.route('/api/admin/agent-email', adminAgentEmailRoutes);
 app.route('/api/admin/runtime-controls', adminRuntimeControlRoutes);
 app.route('/api/admin/operations/approvals', adminOperationsApprovalRoutes);
+app.route('/api/admin/nodes', adminStrandedNodeRoutes);
 app.route('/api/admin/settings', adminSettingsRoutes);
 app.route('/api/admin/usage', adminUsageRoutes);
 app.route('/api/admin/costs', adminCostRoutes);

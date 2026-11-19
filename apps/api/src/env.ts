@@ -62,6 +62,9 @@ export interface Env
   R2: R2Bucket;
   // Private R2 archive for ProjectData tool payload JSON
   PROJECT_DATA_ARCHIVE_R2: R2Bucket;
+  // apps/web build served for app.${BASE_DOMAIN}. Bound only on self-hosted (celld)
+  // deployments; Cloudflare deployments serve the web UI from Pages (lib/pages-proxy.ts).
+  ASSETS?: Fetcher;
   // Workers AI for speech-to-text transcription
   AI: Ai;
   // Agent email (preview): AGENT_EMAIL and AGENT_EMAIL_WORKER_NAME are declared in
@@ -1262,6 +1265,8 @@ export interface Env
   ANALYTICS_WEBSITE_TRAFFIC_TOP_PAGES_LIMIT?: string; // Max top pages per section in website traffic (default: 20)
   // Analytics ingest endpoint (Phase 2 — client-side events)
   ANALYTICS_INGEST_ENABLED?: string; // "true" (default) or "false"
+  /** "d1" records and reads product analytics in OBSERVABILITY_DATABASE when the self-host build installed the D1 sink (selfhost/analytics/). Unset: Analytics Engine. */
+  ANALYTICS_SINK?: string;
   RATE_LIMIT_ANALYTICS_INGEST?: string; // Rate limit per IP per hour (default: 500)
   MAX_ANALYTICS_INGEST_BATCH_SIZE?: string; // Max events per batch (default: 25)
   MAX_ANALYTICS_INGEST_BODY_BYTES?: string; // Max request body bytes (default: 65536)
@@ -1298,6 +1303,14 @@ export interface Env
   R2_SECRET_ACCESS_KEY?: string;
   // R2 bucket name (runtime — set by wrangler sync script; used for presigned URL generation)
   R2_BUCKET_NAME?: string;
+  // Operator-run S3 store that holds the R2 binding's objects (non-Cloudflare runtimes such as
+  // celld). When R2_S3_ENDPOINT is set, presigned URLs target R2_S3_BUCKET at
+  // `${R2_S3_KEY_PREFIX}${key}` instead of Cloudflare R2. See services/r2-presign-config.ts.
+  R2_S3_ENDPOINT?: string;
+  R2_S3_BUCKET?: string;
+  R2_S3_KEY_PREFIX?: string;
+  R2_S3_REGION?: string; // Signing region of that store; required with R2_S3_ENDPOINT ("auto" for GCS/R2, e.g. "us-east-1" for MinIO or AWS)
+  R2_S3_FORCE_PATH_STYLE?: string; // "false" for virtual-host addressing (default with R2_S3_ENDPOINT: path style)
   // Task attachment upload limits (all configurable per constitution Principle XI)
   ATTACHMENT_UPLOAD_MAX_BYTES?: string;
   ATTACHMENT_UPLOAD_BATCH_MAX_BYTES?: string;
@@ -1463,6 +1476,8 @@ export interface Env
   CF_CONTAINER_HARNESS_LEASE_CHECK_TIMEOUT_MS?: string; // Max time for the ProjectData RPC that checks harness work lease before sleep (default: 5000)
   CF_CONTAINER_CLONE_FILTER?: string; // Git partial-clone filter passed to the container as STANDALONE_CLONE_FILTER (vm-agent default: blob:none; "off" disables)
   CF_CONTAINER_WORKSPACE_BASE_DIR?: string; // Base checkout dir inside raw container (default: /workspaces)
+  /** "false" when no tail consumer feeds the AdminLogs DO (self-host: celld has no tail handler). Unset: available. */
+  LOG_TAIL_AVAILABLE?: string;
   // Legacy Sandbox SDK prototype (admin-only)
   SANDBOX_ENABLED?: string; // Legacy/fallback kill switch for sandbox routes and older staging config (default: false)
   SANDBOX_EXEC_TIMEOUT_MS?: string; // Default exec timeout in ms (default: 30000)
