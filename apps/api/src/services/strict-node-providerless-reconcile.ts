@@ -2,24 +2,28 @@
  * Providerless strict teardown: a `destroying` VM row whose provider create response was lost.
  * Split out of `strict-node-deletion.ts` (rule 18); behavior unchanged.
  */
-import {
-  type ProviderRequestContext,
-  type VMInstance,
-} from '@simple-agent-manager/providers';
+import { type ProviderRequestContext, type VMInstance } from '@simple-agent-manager/providers';
 
 import type { Env } from '../env';
+import { getCredentialEncryptionKey } from '../lib/secrets';
 import {
   buildNodeProviderLabels,
   nodeProviderLabelsMatch,
   resolveEnvironmentLabel,
   resolveInstallationId,
 } from './node-provider-labels';
+import { NodeTeardownBlockedError } from './node-teardown-authority';
+import { hasExactProviderCredentialGenerationProof } from './provider-credential-exact';
+import { diagnoseExactCredentialUnresolved } from './provider-credential-exact-diagnosis';
+import { createProviderForUser } from './provider-credentials';
 import {
+  describeMissingExactBinding,
+  getStrictNodeCredentialContext,
   hasManagedVmPlacementProof,
   type NodeDb,
   type NodeRow,
+  type ProviderForUserResult,
   requireSameNodeIncarnation,
-  requireStrictNodeProvider,
 } from './strict-node-deletion-shared';
 import { getProvisioningTimeoutMs } from './timeout';
 
@@ -29,6 +33,64 @@ function sameProviderInventoryIdentity(current: VMInstance, discovered: VMInstan
     current.createdAt === discovered.createdAt &&
     current.location === discovered.location &&
     current.serverType === discovered.serverType
+  );
+}
+
+/**
+ * Resolve ONLY the exact credential generation this node was placed with. A providerless node has
+ * no instance ID, so the only evidence about it is a complete inventory under that same account;
+ * the current-credential fallback strict teardown uses for nodes WITH an instance ID cannot help
+ * (an empty list under another credential proves nothing). When the pinned generation does not
+ * resolve, name why (rule 72): a re-saved or rotated credential can never resolve again, which is
+ * a different recovery action from a removed one.
+ */
+async function requirePinnedProviderlessCredential(
+  db: NodeDb,
+  node: NodeRow,
+  userId: string,
+  env: Env
+): Promise<ProviderForUserResult> {
+  const { targetProvider, attributionUserId, attributionProjectId, exactCredential } =
+    getStrictNodeCredentialContext(node, userId);
+  if (
+    !targetProvider ||
+    !exactCredential ||
+    !hasExactProviderCredentialGenerationProof(exactCredential)
+  ) {
+    throw new Error(
+      `Cannot reconcile providerless VM ${node.id}: exact provider credential binding is missing ` +
+        `(${describeMissingExactBinding(node, targetProvider, exactCredential)})`
+    );
+  }
+  const providerResult = await createProviderForUser(
+    db,
+    attributionUserId,
+    getCredentialEncryptionKey(env),
+    env,
+    targetProvider,
+    attributionProjectId,
+    exactCredential
+  );
+  if (providerResult) return providerResult;
+  const cause = await diagnoseExactCredentialUnresolved(
+    db,
+    attributionUserId,
+    targetProvider,
+    attributionProjectId,
+    exactCredential
+  );
+  if (cause === 'generation_changed') {
+    throw new NodeTeardownBlockedError(
+      'teardown_credential_generation_changed',
+      `node=${node.id} provider=${targetProvider}: the ${exactCredential.credentialSource} ` +
+        'credential this node was placed with was re-saved or rotated, so its inventory can no ' +
+        'longer prove the node has no server'
+    );
+  }
+  throw new NodeTeardownBlockedError(
+    'teardown_credential_unavailable',
+    `node=${node.id} provider=${targetProvider}: the ${exactCredential.credentialSource} ` +
+      'credential this node was placed with was removed or disabled'
   );
 }
 
@@ -54,7 +116,7 @@ export async function reconcileStrictProviderlessVm(
 ): Promise<'deleted'> {
   // A node whose capacity source was released is not admitted here: the release means its
   // pinned credential was deleted, and this path resolves only that exact credential
-  // (`requireStrictNodeProvider`). Such a node stays `destroying` and surfaces through
+  // (`requirePinnedProviderlessCredential`). Such a node stays `destroying` and surfaces through
   // `node_destroying_too_long`.
   if (node.status !== 'destroying' || !hasManagedVmPlacementProof(node)) {
     throw new Error(
@@ -93,7 +155,7 @@ export async function reconcileStrictProviderlessVm(
     installationId,
     runtimeIncarnationId: node.runtimeIncarnationId,
   });
-  const providerResult = await requireStrictNodeProvider(db, node, userId, env);
+  const providerResult = await requirePinnedProviderlessCredential(db, node, userId, env);
   if (providerResult.providerName !== node.cloudProvider) {
     throw new Error(
       `Cannot reconcile providerless VM ${node.id}: persisted provider binding did not resolve exactly`
@@ -116,8 +178,9 @@ export async function reconcileStrictProviderlessVm(
 
   const discovered = servers[0];
   if (!discovered) {
-    throw new Error(
-      `Cannot reconcile providerless VM ${node.id}: allocation remains unresolved despite empty inventory`
+    throw new NodeTeardownBlockedError(
+      'teardown_allocation_unresolved',
+      `node=${node.id}: allocation remains unresolved despite empty inventory`
     );
   }
   const createdAt = Date.parse(discovered.createdAt);

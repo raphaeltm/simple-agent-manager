@@ -3,6 +3,7 @@ import { errors } from '../middleware/error';
 import { resolveAdminSetting } from './admin-settings';
 import { MAX_LOG_QUERY_LIMIT } from './observability-common';
 import { queryCloudflareLogs } from './observability-logs';
+import { hasCloudflareAccountApi } from './platform-capabilities';
 
 export const WORKER_LOG_LEVELS = ['error', 'warn', 'info', 'debug', 'log'] as const;
 
@@ -32,9 +33,10 @@ export async function queryWorkerLogs(
   query: WorkerLogQuery,
   callerSignal?: AbortSignal
 ): ReturnType<typeof queryCloudflareLogs> {
-  if (!env.CF_API_TOKEN || !env.CF_ACCOUNT_ID) {
-    throw errors.badRequest(
-      'Cloudflare API credentials not configured. Set CF_API_TOKEN and CF_ACCOUNT_ID.'
+  if (!hasCloudflareAccountApi(env)) {
+    throw errors.featureUnavailable(
+      'workersObservability',
+      'Worker log search is not available on this installation'
     );
   }
   const start = new Date(query.timeRange.start);

@@ -32,6 +32,7 @@ import { GcpOAuthHandleSchema, jsonValidator, ProjectDeploymentSetupSchema } fro
 import { runGcpDeploySetup } from '../services/gcp-deploy-setup';
 import { toSanitizedAppError } from '../services/gcp-errors';
 import { listGcpProjects } from '../services/gcp-setup';
+import { assertGcpWifPoolOwnership, isGcpWifPoolOwnershipError } from '../services/gcp-wif-pool-ownership';
 import { signIdentityToken } from '../services/jwt';
 import { validateActiveWorkspaceMcpToken } from '../services/mcp-token-lifecycle';
 import { getGoogleInfraOAuthConfig } from '../services/platform-config';
@@ -185,10 +186,34 @@ projectDeploymentRoutes.post(
 
     const oauthToken = await resolveDeployOAuthToken(body.oauthHandle, c.env.KV);
 
+    // The deployment credential belongs to whoever first connected it; a project member who
+    // re-runs setup keeps that owner (the row's user_id is never rewritten below).
+    const [currentCredential] = await db
+      .select({ userId: schema.projectDeploymentCredentials.userId })
+      .from(schema.projectDeploymentCredentials)
+      .where(
+        and(
+          eq(schema.projectDeploymentCredentials.projectId, projectId),
+          eq(schema.projectDeploymentCredentials.provider, 'gcp'),
+        ),
+      )
+      .limit(1);
+    const poolOwnerUserId = currentCredential?.userId ?? userId;
+
     let result;
     try {
-      result = await runGcpDeploySetup(oauthToken, body.gcpProjectId, c.env, undefined, projectId);
+      result = await runGcpDeploySetup(oauthToken, body.gcpProjectId, c.env, projectId, {
+        // Before any Google change: a pool another owner holds must not be re-pointed here.
+        assertPoolAvailable: (pool) =>
+          assertGcpWifPoolOwnership(
+            c.env,
+            pool,
+            { kind: 'user', userId: poolOwnerUserId },
+            'gcp_deploy_setup',
+          ),
+      });
     } catch (err) {
+      if (isGcpWifPoolOwnershipError(err)) throw err;
       throw toSanitizedAppError(err, 'deploy-setup');
     }
 
@@ -212,6 +237,9 @@ projectDeploymentRoutes.post(
       await db
         .update(schema.projectDeploymentCredentials)
         .set({
+          // The owner whose pool claim was checked above, so a concurrent first setup by
+          // another member cannot leave this row naming a pool its owner does not hold.
+          userId: poolOwnerUserId,
           gcpProjectId: result.gcpProjectId,
           gcpProjectNumber: result.gcpProjectNumber,
           serviceAccountEmail: result.serviceAccountEmail,
@@ -224,7 +252,7 @@ projectDeploymentRoutes.post(
       await db.insert(schema.projectDeploymentCredentials).values({
         id: ulid(),
         projectId,
-        userId,
+        userId: poolOwnerUserId,
         provider: 'gcp',
         gcpProjectId: result.gcpProjectId,
         gcpProjectNumber: result.gcpProjectNumber,

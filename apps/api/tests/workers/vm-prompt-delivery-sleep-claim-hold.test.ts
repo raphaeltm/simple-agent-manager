@@ -12,30 +12,24 @@
  * and the production delivery runner attempts it against a VM double that would accept it.
  */
 import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
-import {
-  claimDuePromptDeliveries,
-  type PromptDeliveryResult,
-} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
-import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
 import { buildVmPromptDeliveryCapabilitiesPath } from '@simple-agent-manager/shared';
-import { env, runInDurableObject } from 'cloudflare:test';
+import { env } from 'cloudflare:test';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import type { Env } from '../../src/env';
 import { getNodeBackendBaseUrl } from '../../src/services/node-agent-readiness';
 import * as projectData from '../../src/services/project-data';
 import { ensureSessionSnapshotForSleep } from '../../src/services/session-snapshot-prepare';
 import { claimSessionSnapshotSleep } from '../../src/services/session-snapshot-sleep-claim';
 import { failSessionSnapshotSleepBeforeTeardown } from '../../src/services/session-snapshot-sleep-failure';
-import { DefaultVmPromptDeliveryAdapter } from '../../src/services/vm-prompt-delivery-adapter';
 import { resolveVmPromptDeliveryTarget } from '../../src/services/vm-prompt-delivery-target';
 import {
   acceptedPromptResponse,
   versionedPromptCapabilities,
 } from '../helpers/vm-prompt-delivery-fixtures';
 import { inboxRows, sqlRows, testEnv, twoAgentProject } from './helpers/agent-message-channels';
+import { runDueDelivery } from './helpers/vm-prompt-delivery';
 
 const config = resolveDurableExecutionConfig({});
 const RUNTIME_IDENTITY = 'sleep-claim-runtime';
@@ -116,30 +110,6 @@ function installVm(f: Fixture) {
     return Response.json({ ok: true });
   });
   return { prompts };
-}
-
-/** One pass of the production delivery claim runner for whatever is due at `now`. */
-async function runDueDelivery(f: Fixture, now: number): Promise<PromptDeliveryResult | null> {
-  return runInDurableObject(f.stub, async (instance, state) => {
-    const [claim] = claimDuePromptDeliveries(state.storage.sql, config, now);
-    if (!claim) return null;
-    const objectEnv = (instance as unknown as { env: Env }).env;
-    return runPromptDeliveryClaim(
-      state.storage.sql,
-      objectEnv,
-      config,
-      claim,
-      new DefaultVmPromptDeliveryAdapter(objectEnv),
-      {
-        projectId: f.projectId,
-        recalculateAlarm: async () => undefined,
-        broadcastEvent: () => undefined,
-        armIdleCleanup: () => undefined,
-        nudgeDeliveries: () => 0,
-        scheduleSummarySync: () => undefined,
-      }
-    );
-  });
 }
 
 async function deliveryState(f: Fixture) {

@@ -1,25 +1,31 @@
-const REVERSE_TUNNEL_HEARTBEAT_INTERVAL_SECONDS = '30';
-const REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS = '90';
-
 import { constantTimeEqual } from '../../lib/constant-time';
 import type { ReverseTunnelEnv as Env } from './env';
+import {
+  DEFAULT_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+  DEFAULT_REVERSE_TUNNEL_PORT_RANGE_END,
+  DEFAULT_REVERSE_TUNNEL_PORT_RANGE_START,
+  DEFAULT_REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS,
+  MAX_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+  MAX_REVERSE_TUNNEL_PORT_RANGE_SIZE,
+  MAX_REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS,
+  MIN_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+  REVERSE_TUNNEL_PORT_REUSE_HEARTBEAT_MULTIPLE,
+} from './limits';
+
+export {
+  DEFAULT_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+  DEFAULT_REVERSE_TUNNEL_PORT_RANGE_END,
+  DEFAULT_REVERSE_TUNNEL_PORT_RANGE_START,
+  DEFAULT_REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS,
+  MAX_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+  MAX_REVERSE_TUNNEL_PORT_RANGE_SIZE,
+  MAX_REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS,
+  MIN_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+  REVERSE_TUNNEL_PORT_REUSE_HEARTBEAT_MULTIPLE,
+} from './limits';
 
 export const REVERSE_TUNNEL_UPSTREAM_HOST = '127.0.0.1';
-export const DEFAULT_REVERSE_TUNNEL_PORT_RANGE_START = 20000;
-export const DEFAULT_REVERSE_TUNNEL_PORT_RANGE_END = 29999;
-export const MAX_REVERSE_TUNNEL_PORT_RANGE_SIZE = 20000;
 export const MIN_REVERSE_TUNNEL_GATEWAY_SECRET_LENGTH = 32;
-
-export const DEFAULT_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS = Number(
-  REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS
-);
-export const MIN_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS =
-  2 * Number(REVERSE_TUNNEL_HEARTBEAT_INTERVAL_SECONDS);
-export const MAX_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS = 3600;
-export const REVERSE_TUNNEL_PORT_REUSE_HEARTBEAT_MULTIPLE = 2;
-export const DEFAULT_REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS =
-  REVERSE_TUNNEL_PORT_REUSE_HEARTBEAT_MULTIPLE * DEFAULT_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS;
-export const MAX_REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS = 86_400;
 
 const CREDENTIAL_LABEL = 'sam-reverse-tunnel-credential:v1';
 
@@ -181,28 +187,50 @@ async function signIdentity(
   purpose: string,
   identity: ReverseTunnelCredentialIdentity
 ): Promise<ArrayBuffer> {
-  if (!env.ENCRYPTION_KEY) throw new Error('ENCRYPTION_KEY is required for reverse-tunnel credentials');
+  if (!env.ENCRYPTION_KEY)
+    throw new Error('ENCRYPTION_KEY is required for reverse-tunnel credentials');
   for (const value of Object.values(identity)) {
-    if (!value || value.length > 256) throw new Error('Reverse-tunnel identity is required and bounded');
+    if (!value || value.length > 256)
+      throw new Error('Reverse-tunnel identity is required and bounded');
   }
   const encoder = new TextEncoder();
-  const root = await crypto.subtle.importKey('raw', encoder.encode(env.ENCRYPTION_KEY), 'HKDF', false, ['deriveKey']);
-  const key = await crypto.subtle.deriveKey(
-    { name: 'HKDF', hash: 'SHA-256', salt: encoder.encode('sam:reverse-tunnel:v1'), info: encoder.encode(purpose) },
-    root, { name: 'HMAC', hash: 'SHA-256', length: 256 }, false, ['sign']
+  const root = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(env.ENCRYPTION_KEY),
+    'HKDF',
+    false,
+    ['deriveKey']
   );
-  return crypto.subtle.sign('HMAC', key, encoder.encode(JSON.stringify([
-    identity.leaseId, identity.nodeId, identity.runtimeIncarnationId,
-  ])));
+  const key = await crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: encoder.encode('sam:reverse-tunnel:v1'),
+      info: encoder.encode(purpose),
+    },
+    root,
+    { name: 'HMAC', hash: 'SHA-256', length: 256 },
+    false,
+    ['sign']
+  );
+  return crypto.subtle.sign(
+    'HMAC',
+    key,
+    encoder.encode(
+      JSON.stringify([identity.leaseId, identity.nodeId, identity.runtimeIncarnationId])
+    )
+  );
 }
 export async function deriveReverseTunnelCredential(
-  env: Pick<Env, 'ENCRYPTION_KEY'>, identity: ReverseTunnelCredentialIdentity
+  env: Pick<Env, 'ENCRYPTION_KEY'>,
+  identity: ReverseTunnelCredentialIdentity
 ): Promise<string> {
   return base64Url(await signIdentity(env, CREDENTIAL_LABEL, identity));
 }
 /** frps replaces the previous control before activating another with this same server-chosen id. */
 export async function deriveReverseTunnelRunId(
-  env: Pick<Env, 'ENCRYPTION_KEY'>, identity: ReverseTunnelCredentialIdentity
+  env: Pick<Env, 'ENCRYPTION_KEY'>,
+  identity: ReverseTunnelCredentialIdentity
 ): Promise<string> {
   return hex(await signIdentity(env, 'sam-reverse-tunnel-control:v1', identity)).slice(0, 32);
 }

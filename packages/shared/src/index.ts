@@ -72,6 +72,11 @@ export * from './runtime-validation';
 export * from './resource-requirements';
 
 // Chat message pagination cursors (web client ↔ API contract)
+export {
+  isSensitiveAnalyticsPathSegment,
+  normalizeAnalyticsPath,
+  normalizeAnalyticsReferrer,
+} from './analytics-path';
 export { MERGED_MESSAGE_ROLES } from './chat-message-merge';
 export {
   DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,

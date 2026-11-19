@@ -83,6 +83,8 @@ const ALLOWLIST: Record<string, string> = {
     'Post-allocation compensation for a node this request just created. It refuses any node that already has an attached workspace or deployment environment, so no lifecycle a finalizer owns can exist yet: the DELETE only removes a placeholder row that never reached the provider, and the strict-deletion call is the same external teardown primitive strict-node-deletion.ts is allowlisted for.',
   'services/strict-node-deletion.ts':
     'Strict external teardown deliberately does not mutate workspace/node rows; callers update D1 rows and invoke the shared finalizer only after external deletion succeeds.',
+  'services/strict-node-termination-proof.ts':
+    'Proof writers moved out of strict-node-deletion.ts. They mark workspaces deleted only in the same fenced step that records the node runtime termination proof (strict or attested), so the rows match the proof; the callers then run the shared removal tail (completeOwnerNodeRemoval) or the cleanup sweep, which own finalization.',
   'services/vm-agent-container.ts':
     'Transport wrapper around the VM_AGENT_CONTAINER Durable Object. Runtime-ended D1 writes happen inside the DO via persistRuntimeEnded().',
 };

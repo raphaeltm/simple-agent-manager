@@ -10,6 +10,7 @@ import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { resolveAdminSetting } from './admin-settings';
 import { recordNodeLifecycleDecision } from './node-lifecycle-decisions';
+import { taskProvisionedNodeConditionSql } from './node-teardown-provenance';
 import * as projectDataService from './project-data';
 import {
   classifySessionIdleness,
@@ -181,8 +182,7 @@ export async function checkAutomaticSessionSleepEligibility(
       nodeCreatedAt: schema.nodes.createdAt,
       nodeRole: schema.nodes.nodeRole,
       nodeClass: schema.nodes.nodeClass,
-      nodeAutoProvisioned: sql<number>`EXISTS (SELECT 1 FROM tasks auto_task
-        WHERE auto_task.auto_provisioned_node_id = ${schema.workspaces.nodeId})`,
+      nodeAutoProvisioned: sql<number>`${sql.raw(taskProvisionedNodeConditionSql('nodes'))}`,
     })
     .from(schema.workspaces)
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))

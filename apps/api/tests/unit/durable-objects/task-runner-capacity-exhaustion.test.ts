@@ -21,16 +21,21 @@ import type {
   TaskRunnerContext,
   TaskRunnerState,
 } from '../../../src/durable-objects/task-runner/types';
+import { CapacityPoolNodeLimitExceededError } from '../../../src/services/nodes';
 
 // Mock the dynamically-imported service modules. node-steps imports these via
 // `await import(...)` inside handleNodeProvisioning, so the mocks apply to the
 // dynamic import too.
 const createNodeRecord = vi.fn();
 const provisionNode = vi.fn();
-vi.mock('../../../src/services/nodes', () => ({
-  createNodeRecord: (...args: unknown[]) => createNodeRecord(...args),
-  provisionNode: (...args: unknown[]) => provisionNode(...args),
-}));
+vi.mock('../../../src/services/nodes', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../src/services/nodes')>();
+  return {
+    CapacityPoolNodeLimitExceededError: original.CapacityPoolNodeLimitExceededError,
+    createNodeRecord: (...args: unknown[]) => createNodeRecord(...args),
+    provisionNode: (...args: unknown[]) => provisionNode(...args),
+  };
+});
 
 const getRuntimeLimits = vi.fn(() => ({ nodeHeartbeatStaleSeconds: 180 }));
 vi.mock('../../../src/services/limits', () => ({
@@ -362,9 +367,7 @@ describe('TaskRunner capacity exhaustion', () => {
   });
 
   it('does not call the provider when the atomic pool insert loses a cross-domain race', async () => {
-    const poolLimitError = new Error('Capacity pool node limit reached');
-    poolLimitError.name = 'CapacityPoolNodeLimitExceededError';
-    createNodeRecord.mockRejectedValueOnce(poolLimitError);
+    createNodeRecord.mockRejectedValueOnce(new CapacityPoolNodeLimitExceededError());
     const { DATABASE } = createDbMock({
       firstResolver: (sql) =>
         sql.includes('capacity_pool_id = ?') && sql.includes('COUNT(*) AS count')
@@ -381,6 +384,51 @@ describe('TaskRunner capacity exhaustion', () => {
 
     expect(createNodeRecord).toHaveBeenCalledOnce();
     expect(provisionNode).not.toHaveBeenCalled();
+  });
+
+  it('releases the provisioning lease and waits after the named pool-limit error', async () => {
+    createNodeRecord.mockRejectedValueOnce(new CapacityPoolNodeLimitExceededError());
+    resolveCredentialSource.mockResolvedValue({
+      credentialSource: 'user',
+      providerName: 'vultr',
+    });
+    const { DATABASE, runCalls } = createDbMock({
+      firstResolver: (sql) => {
+        if (sql.includes('capacity_pool_id = ?') && sql.includes('COUNT(*) AS count')) {
+          return { count: 2 };
+        }
+        if (sql.includes('FROM vm_provisioning_leases')) {
+          return {
+            owner_task_id: 'task-1',
+            fencing_token: 1,
+            expires_at: new Date(Date.now() + 60_000).toISOString(),
+          };
+        }
+        return FALLTHROUGH;
+      },
+    });
+    const rc = createContext(DATABASE, { VM_ADMISSION_CONTROL_MODE: 'enforce' });
+    const state = createState({ capacityPoolSelection: capacityPoolSelection() });
+
+    await handleNodeProvisioning(state, rc);
+
+    expect(createNodeRecord).toHaveBeenCalledOnce();
+    expect(provisionNode).not.toHaveBeenCalled();
+    expect(rc.advanceToStep).not.toHaveBeenCalled();
+    expect(runCalls).toContainEqual({
+      sql: expect.stringContaining('DELETE FROM vm_provisioning_leases'),
+      args: [expect.any(String), 'task-1', 1],
+    });
+    expect(state.admissionScopeKey).toBeNull();
+    expect(state.admissionLeaseToken).toBeNull();
+    expect(rc.updateD1ExecutionStep).toHaveBeenCalledWith('task-1', 'waiting_for_node_capacity');
+    expect(rc.ctx.storage.setAlarm).toHaveBeenCalledWith(expect.any(Number));
+    expect(
+      runCalls.some(
+        (call) =>
+          call.sql.includes("SET state = 'waiting'") && call.args[0] === 'capacity_pool_node_limit'
+      )
+    ).toBe(true);
   });
 
   it('does not provision through legacy fallback when the selected pool has no candidates', async () => {

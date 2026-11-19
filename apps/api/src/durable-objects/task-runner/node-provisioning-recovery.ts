@@ -31,7 +31,7 @@ export async function adoptProvisionedNodeAfterCrash(
       .bind(state.taskId)
       .first<{ auto_provisioned_node_id: string | null }>();
     const recoveredNodeId = taskRow?.auto_provisioned_node_id ?? null;
-    if (recoveredNodeId) {
+    if (recoveredNodeId && recoveredNodeId !== state.rejectedAutoProvisionedNodeId) {
       const existing = await rc.env.DATABASE.prepare(
         `SELECT
            id,

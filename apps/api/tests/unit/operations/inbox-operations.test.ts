@@ -514,7 +514,7 @@ describe('inbox asks writes', () => {
     expect(edges.acceptPromptDelivery).not.toHaveBeenCalled();
   });
 
-  it('the sweep sends nothing for questions, reviews and results an earlier build archived without a notice', async () => {
+  it('the sweep sends nothing for items an earlier build archived without a notice', async () => {
     const resolvedAt = Date.now() - 10 * 60_000;
     const closed = {
       source_session_id: 'chat-1',
@@ -524,6 +524,7 @@ describe('inbox asks writes', () => {
     ask('old-question', { ...closed, kind: 'question', status: 'archived' });
     ask('old-review', { ...closed, kind: 'review', status: 'archived' });
     ask('old-result', { ...closed, kind: 'result', status: 'archived' });
+    ask('old-task', { ...closed, kind: 'task', status: 'archived' });
     // Control: an answer whose notice was not queued is still retried in the same run.
     ask('old-answer', { ...closed, kind: 'review', status: 'answered' });
     await expect(runInboxAskSweep(env, Date.now())).resolves.toMatchObject({ noticesRetried: 1 });
@@ -536,6 +537,7 @@ describe('inbox asks writes', () => {
     expect(askRow('old-question').notified_at).toBeNull();
     expect(askRow('old-review').notified_at).toBeNull();
     expect(askRow('old-result').notified_at).toBeNull();
+    expect(askRow('old-task').notified_at).toBeNull();
   });
 
   it('the sweep expires an open ask past its deadline and leaves an unexpired one', async () => {
@@ -709,7 +711,7 @@ describe('inbox answers and archives for every store', () => {
     ).toEqual({ status: 'denied', decided_by: 'admin' });
   });
 
-  it('archiving a permission declines it through the interaction answer path', async () => {
+  it('archiving a permission answers nothing: the item leaves the inbox and the agent is not told', async () => {
     const c = ctx('owner');
     c.ports.inbox.attentionMarker = vi.fn().mockResolvedValue({
       id: 'm-perm',
@@ -724,30 +726,24 @@ describe('inbox answers and archives for every store', () => {
       createdAt: 10,
       expiresAt: null,
       resolvedAt: null,
+      inboxArchivedAt: null,
       topic: 'Chat',
       canRead: true,
       canWrite: true,
     });
-    c.ports.access.requireSessionWriter = vi.fn().mockResolvedValue({});
-    const prepared = { decision: { kind: 'declined' } };
-    c.ports.connector.prepareAgentAnswer = vi.fn().mockResolvedValue(prepared);
-    c.ports.chat.answerAgentInteraction = vi.fn().mockResolvedValue({ accepted: true });
+    c.ports.inbox.archiveInteraction = vi.fn().mockResolvedValue(undefined);
+    c.ports.connector.prepareAgentAnswer = vi.fn();
+    c.ports.chat.answerAgentInteraction = vi.fn();
     await expect(
       archiveInboxItem(c, { projectId: P1, ref: 'attention:chat-1:m-perm' })
-    ).resolves.toMatchObject({ outcome: 'declined' });
-    expect(c.ports.connector.prepareAgentAnswer).toHaveBeenCalledWith(
-      P1,
-      'chat-1',
-      'interaction-1',
-      expect.objectContaining({ decline: true })
-    );
-    expect(c.ports.chat.answerAgentInteraction).toHaveBeenCalledWith(
-      'owner',
-      P1,
-      'chat-1',
-      'interaction-1',
-      prepared
-    );
+    ).resolves.toEqual({
+      ref: 'attention:chat-1:m-perm',
+      outcome: 'archived',
+      agentNotified: false,
+    });
+    expect(c.ports.inbox.archiveInteraction).toHaveBeenCalledWith('owner', P1, 'chat-1', 'm-perm');
+    expect(c.ports.connector.prepareAgentAnswer).not.toHaveBeenCalled();
+    expect(c.ports.chat.answerAgentInteraction).not.toHaveBeenCalled();
   });
 
   it('a question a member can only read is not theirs to see or answer', async () => {
@@ -765,6 +761,7 @@ describe('inbox answers and archives for every store', () => {
       createdAt: 10,
       expiresAt: null,
       resolvedAt: null,
+      inboxArchivedAt: null,
       topic: 'Chat',
       canRead: true,
       canWrite: false,

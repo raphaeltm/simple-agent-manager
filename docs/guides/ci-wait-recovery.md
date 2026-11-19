@@ -2,13 +2,13 @@
 
 GitHub event types include their action. Subscription matching is exact, including
 commit subjects. Obtain `headRefOid` using `gh pr view <PR> --json headRefOid`;
-never copy an abbreviated SHA from a log. A CI completion filter looks like:
+never copy an abbreviated SHA from a log. For ordinary all-CI waits, default to terminal suite/workflow events:
 
 ```json
 {
   "version": 1,
   "source": "github",
-  "eventType": ["check_run.completed", "check_suite.completed", "workflow_run.completed"],
+  "eventType": ["check_suite.completed", "workflow_run.completed"],
   "subjectType": "commit",
   "subjectId": "0123456789abcdef0123456789abcdef01234567"
 }
@@ -16,6 +16,39 @@ never copy an abbreviated SHA from a log. A CI completion filter looks like:
 
 Replace the example SHA with the current PR's full 40-character head SHA. Bare
 `check_run`, `check_suite`, and `workflow_run` do not match completion events.
+
+Opt in to `check_run.completed` only for early per-job failure or job-specific
+progress. Add it to the terminal event set when those notifications are needed;
+ordinary all-CI waits avoid per-job storage and wakes.
+
+A `check_suite.completed` summarizes the checks from one GitHub App for a commit
+(for example CodeRabbit or Sonar when they publish Checks API runs).
+`workflow_run.completed` covers one GitHub Actions workflow run, including this
+repository's CI. Both carry failure conclusions: completion is not success.
+A commit usually has several workflows and suites (CI, CodeRabbit request, Sonar,
+deploy); each terminal completion can cause a separate wake. Neither says every
+workflow, app or rerun on the SHA has finished. Reconcile all
+current checks and required review/release gates before proceeding.
+
+SAM's GitHub producer uses `head_sha` for commit subjects and retains conclusions
+(`apps/api/src/services/github-project-event-producer.ts`, `resolveSubject` and
+`buildMetadata`); the matcher uses exact event type sets and subjects
+(`packages/project-data/src/do/project-events-normalization.ts`,
+`filterMatchesProjectEvent`). The generated App manifest subscribes to both types
+with Checks/Actions read access (`scripts/deploy/utils/github.ts`). GitHub documents
+[per-app suites and their conclusions](https://docs.github.com/en/rest/guides/using-the-rest-api-to-interact-with-checks)
+and [workflow completion, including failures](https://docs.github.com/en/webhooks/webhook-events-and-payloads#workflow_run).
+
+A usable terminal event is not guaranteed: status-only providers have no Checks
+suite, an app may never finish its suite, webhook configuration/permissions or
+delivery may be missing, and fork/merge-commit setups may report a different SHA.
+Keep the bounded fallback below and **reconcile GitHub on every resume**, including
+checks, statuses and reviews. Do not rely on subscription expiry or add per-job
+subscriptions as a substitute for reconciliation.
+
+This is product-wide agent guidance, not a matcher change. Existing active
+subscriptions are not migrated; they expire naturally. Savings ramp in as new
+sessions pick up the instructions and create narrower subscriptions.
 
 Draft pull requests run only the quick CI checks (`.github/workflows/ci.yml`: every
 full-suite job is skipped when `github.event.pull_request.draft` is true). A green
@@ -41,10 +74,15 @@ the full run, then wait on that run's head SHA.
    An expired/cancelled subscription, a changed head, or terminal checks invalidates
    the old wait. Cancel only your obsolete subscriptions/schedules. A changed
    filter needs a new idempotency key; retrying the same create keeps its key.
-5. Renew only for genuinely pending current-head checks. After one fallback with
+5. Subscriptions remain active after delivery, until cancelled or expired. If
+   required checks are still pending on the same SHA, keep the existing active
+   subscription and bounded fallback, then end your turn again. Do not create a
+   new subscription or fallback for each workflow wake. Proceed only when required
+   checks are complete and their results satisfy the existing gates. Renew only
+   an expired subscription for genuinely pending current-head checks. After one fallback with
    no progress, report pending runs, subscription and schedule delivery status,
    and the next explicit recovery action to the coordinator. Do not repeatedly
-   recreate the same wait. Cancel your redundant fallback when work progresses.
+   recreate the same wait. Cancel your fallback when the wait ends, not when only one workflow finishes.
 
 ## Shepherd: preserve ownership without preserving a dead wait
 

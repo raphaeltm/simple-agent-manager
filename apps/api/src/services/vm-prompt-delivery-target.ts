@@ -20,6 +20,7 @@ import { classifySessionRecoveryRefusal } from './session-recovery-refusals';
 import { sessionSleepClaimLeaseMs } from './session-snapshot-sleep-claim';
 import { signalSessionWakeReadyBestEffort } from './session-wake-ready';
 import { isSessionWakeReadyCurrent } from './session-wake-ready-authority';
+import { isVmPromptTargetStarting } from './vm-prompt-delivery-startup';
 
 /** ProjectData owns the delivery contract these describe; re-exported for worker callers. */
 export type { VmPromptDeliverySourceTaskGuard, VmPromptDeliveryTarget };
@@ -329,6 +330,10 @@ export async function resolveVmPromptDeliveryTarget(
         'Sleeping container workspace no longer exists',
         runSideEffectGuard
       );
+    }
+    if (await isVmPromptTargetStarting(env, projectId, chatSessionId)) {
+      // Readiness retries preserve the attempt budget; the delivery TTL bounds this wait.
+      return { kind: 'retry', reason: 'Task is still starting; no workspace yet' };
     }
     const guarded = await runSideEffectGuard();
     if (guarded) return { kind: 'guarded', result: guarded };
