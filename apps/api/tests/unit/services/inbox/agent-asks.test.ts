@@ -1,6 +1,6 @@
 /**
  * Agent inbox tools (inbox slice D), on a real SQL engine (`.claude/rules/28`, `.claude/rules/11`):
- * filing asks and reviews through the shared operations, the answer shapes, idempotency, similar
+ * filing asks, reviews and results through the shared operations, the answer shapes, idempotency, similar
  * items, link checks, the blocking-only "paused" readers, and tenancy for update / cancel / get
  * (each attack case paired with an owner control). Replaced edges only: ProjectData RPCs (live
  * events, chat/policy/knowledge lookups, prompt delivery) and the agent-wake policy.
@@ -10,6 +10,7 @@ import {
   answerInboxItem,
   cancelAgentAsk,
   fileAgentAsk,
+  fileAgentResult,
   fileAgentReview,
   getAgentAsk,
   listAgentAsks,
@@ -615,6 +616,135 @@ describe('inbox_write review', () => {
         'answered'
       )
     ).toMatch(/replied:\n\nFix the header/);
+  });
+});
+
+describe('inbox_write result', () => {
+  const file = () =>
+    fileAgentResult(ctxFor('owner', P1), chat1, {
+      title: 'Hetzner is the cheapest option for the staging nodes',
+      why: 'Same machines cost **about a third** of the other providers. Details are in the linked PR.',
+      links: [{ kind: 'pr', url: 'https://github.com/acme/one/pull/9' }],
+    });
+
+  it('files a non-blocking, never-expiring result and tells the person it is ready', async () => {
+    const filed = await file();
+    expect(filed).toMatchObject({ kind: 'result', blocking: false, expiresAt: null });
+    expect(askRow(filed.id)).toMatchObject({
+      kind: 'result',
+      blocking: 0,
+      expires_at: null,
+      status: 'open',
+    });
+    expect(JSON.parse(String(askRow(filed.id).answer_spec_json))).toEqual({ type: 'acknowledge' });
+    expect(edges.createNotification).toHaveBeenCalledWith(
+      'owner',
+      expect.objectContaining({
+        type: 'needs_input',
+        // Leads with the outcome, not the task's name.
+        title: 'Result ready: Hetzner is the cheapest option for the staging nodes',
+        // `why` is markdown in the inbox; the push shows it as plain text.
+        body: 'Same machines cost about a third of the other providers. Details are in the linked PR.',
+      })
+    );
+    // A result never pauses the chat.
+    expect(edges.recordQuestionAsked).not.toHaveBeenCalled();
+    // It outlives every question window.
+    await runInboxAskSweep(env, Date.now() + 3 * 24 * 60 * 60_000);
+    expect(askRow(filed.id).status).toBe('open');
+  });
+
+  it('"Got it" closes it without waking the agent, and the notice sweep never wakes it later', async () => {
+    const filed = await file();
+    const answered = await answerInboxItem(webCtx('owner'), { projectId: P1, ref: filed.ref });
+    expect(answered).toMatchObject({ outcome: 'answered', agentNotified: false });
+    const row = askRow(filed.id);
+    expect(row).toMatchObject({
+      status: 'answered',
+      answer_json: null,
+      resolved_by_user_id: 'owner',
+    });
+    // Settled in the closing write, so the retry sweep has nothing to send.
+    expect(row.notified_at).not.toBeNull();
+    // No wake was even asked for: "Got it" is not a message to the agent.
+    expect(edges.authorizeAgentWake).not.toHaveBeenCalled();
+    await runInboxAskSweep(env, Date.now() + 10 * 60_000);
+    expect(edges.acceptPromptDelivery).not.toHaveBeenCalled();
+  });
+
+  it('a reply closes it and reaches the agent once, with the reply', async () => {
+    const filed = await file();
+    const answered = await answerInboxItem(webCtx('owner'), {
+      projectId: P1,
+      ref: filed.ref,
+      answer: 'Great, go ahead and switch staging over.',
+    });
+    expect(answered).toMatchObject({ outcome: 'answered', agentNotified: true });
+    expect(edges.authorizeAgentWake).toHaveBeenCalledTimes(1);
+    expect(edges.acceptPromptDelivery).toHaveBeenCalledTimes(1);
+    const delivery = edges.acceptPromptDelivery.mock.calls[0]?.[2] as { deliveryContent: string };
+    expect(delivery.deliveryContent).toMatch(
+      /replied to your inbox item .*:\n\nGreat, go ahead and switch staging over\./
+    );
+    // Already notified: the sweep does not send it again.
+    await runInboxAskSweep(env, Date.now() + 10 * 60_000);
+    expect(edges.acceptPromptDelivery).toHaveBeenCalledTimes(1);
+  });
+
+  it('a reply after the filing task finished is refused, the item stays open, nothing is lost', async () => {
+    const filed = await file();
+    sqlite.prepare(`UPDATE tasks SET status = 'completed' WHERE id = 'task-1'`).run();
+    await rejects(
+      answerInboxItem(webCtx('owner'), {
+        projectId: P1,
+        ref: filed.ref,
+        answer: 'And production?',
+      }),
+      'invalid_input',
+      /has finished.*Continue in its chat/
+    );
+    expect(askRow(filed.id)).toMatchObject({ status: 'open', answer_json: null });
+    expect(edges.acceptPromptDelivery).not.toHaveBeenCalled();
+    // "Got it" still closes it.
+    const answered = await answerInboxItem(webCtx('owner'), { projectId: P1, ref: filed.ref });
+    expect(answered).toMatchObject({ outcome: 'answered', agentNotified: false });
+  });
+
+  it('a reply is refused when the task finishes between the check and the closing write', async () => {
+    const filed = await file();
+    // The wake check runs after the item (agent still working) was read and before the closing
+    // write: finish the task there, as a complete_task landing at that moment would.
+    edges.authorizeAgentWake.mockImplementation(async () => {
+      sqlite.prepare(`UPDATE tasks SET status = 'completed' WHERE id = 'task-1'`).run();
+      return { writer: { ownerUserId: 'owner', role: 'owner' }, wake: { allowed: true } };
+    });
+    await rejects(
+      answerInboxItem(webCtx('owner'), {
+        projectId: P1,
+        ref: filed.ref,
+        answer: 'And production?',
+      }),
+      'invalid_input',
+      /has finished/
+    );
+    expect(edges.authorizeAgentWake).toHaveBeenCalledTimes(1);
+    expect(askRow(filed.id)).toMatchObject({ status: 'open', answer_json: null });
+    expect(edges.acceptPromptDelivery).not.toHaveBeenCalled();
+  });
+
+  it('a review answered "Looks good" still wakes the agent (control)', async () => {
+    const filed = await fileAgentReview(ctxFor('owner', P1), chat1, { title: 'Review the PR' });
+    const answered = await answerInboxItem(webCtx('owner'), { projectId: P1, ref: filed.ref });
+    expect(answered).toMatchObject({ outcome: 'answered', agentNotified: true });
+    expect(edges.acceptPromptDelivery).toHaveBeenCalledTimes(1);
+  });
+
+  it('the filing chat can edit and cancel its own result', async () => {
+    const filed = await file();
+    await updateAgentAsk(ctxFor('owner', P1), chat1, { ref: filed.ref, title: 'Hetzner wins' });
+    expect(askRow(filed.id).title).toBe('Hetzner wins');
+    await cancelAgentAsk(ctxFor('owner', P1), chat1, { ref: filed.ref, reason: 'Superseded' });
+    expect(askRow(filed.id).status).toBe('cancelled');
   });
 });
 

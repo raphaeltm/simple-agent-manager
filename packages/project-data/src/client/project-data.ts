@@ -173,6 +173,7 @@ import { projectDataPorts } from '../do/ports';
 import type { ValidateProjectEventWakeRecoveryAuthorityInput } from '../do/project-events-wake-delivery';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from '../do/prompt-delivery';
 import type { CancelUnissuedSessionPromptsResult } from '../do/prompt-delivery-cancellation';
+import { BROWSER_SOCKET_ACTOR_HEADER } from '../do/session-sockets';
 import type { ActivityReportOutcome } from '../do/session-work-clock';
 import type {
   CreateReservedTaskSessionWithInitialMessageInput,
@@ -3474,7 +3475,9 @@ export async function getHandoffPacketsForTask(env: Env, projectId: string, task
 export async function forwardWebSocket(
   env: Env,
   projectId: string,
-  request: Request
+  request: Request,
+  /** The user the route authenticated. Set on the forwarded request, replacing any browser value. */
+  actorId: string
 ): Promise<Response> {
   // A WebSocket upgrade creates no state a repeat could duplicate; a retried attempt simply
   // accepts a fresh socket if the first one never reached the object.
@@ -3485,8 +3488,28 @@ export async function forwardWebSocket(
     (stub) => {
       const url = new URL(request.url);
       url.pathname = '/ws';
-      return stub.fetch(new Request(url.toString(), request));
+      const forwarded = new Request(url.toString(), request);
+      forwarded.headers.set(BROWSER_SOCKET_ACTOR_HEADER, actorId);
+      return stub.fetch(forwarded);
     },
+    'idempotent_read'
+  );
+}
+
+/**
+ * Close every browser socket a user holds on a project after their access to it was revoked.
+ * Closing is idempotent, so a retried call that already closed them closes nothing more.
+ */
+export async function closeBrowserSocketsForActor(
+  env: Env,
+  projectId: string,
+  actorId: string
+): Promise<number> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'closeBrowserSocketsForActor',
+    (stub) => stub.closeBrowserSocketsForActor(actorId),
     'idempotent_read'
   );
 }
@@ -3533,6 +3556,21 @@ export async function recordQuestionAsked(
     projectId,
     'recordQuestionAsked',
     (stub) => stub.recordQuestionAsked(input),
+    'mutation'
+  );
+}
+
+/** The person archived a question held in D1 `asks`: a live update only, nothing reaches the agent. */
+export async function recordQuestionArchived(
+  env: Env,
+  projectId: string,
+  input: Parameters<ProjectData['recordQuestionArchived']>[0]
+): Promise<void> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'recordQuestionArchived',
+    (stub) => stub.recordQuestionArchived(input),
     'mutation'
   );
 }

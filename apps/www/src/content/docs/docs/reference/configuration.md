@@ -336,6 +336,51 @@ and saved plans; do not drop columns or recreate tables as a rollback step.
 
 Activity coalescing and binding caches are per Worker isolate, so burst reduction scales with the number of active isolates for the same session. Delayed flushes carry their original observed event time, and ProjectData rejects stale writes so a delayed intermediate report cannot overwrite a newer idle/error state from another isolate.
 
+### Browser Library upload limits
+
+Browser Library uploads and replacements accept one file of up to 50 MiB by default.
+Their effective file limit is the smaller of `LIBRARY_UPLOAD_MAX_BYTES` and
+`library.multipartFileMaxBytes` in **Admin → Settings**. The browser limit cannot
+exceed 50 MiB, including when the legacy environment override is higher: whole-file
+AES-GCM retains plaintext and ciphertext concurrently. Existing encrypted objects,
+metadata and download compatibility are unchanged.
+
+| Runtime setting                     | Default             | Purpose                                                                     |
+| ----------------------------------- | ------------------- | --------------------------------------------------------------------------- |
+| `library.multipartFileMaxBytes`     | `52428800` (50 MiB) | Browser file ceiling; may be lowered, maximum 50 MiB.                       |
+| `library.multipartOverheadMaxBytes` | `65536` (64 KiB)    | Additional wire bytes above the file ceiling, and aggregate metadata bytes. |
+| `library.multipartMaxParts`         | `16`                | Parts per request, including ignored fields.                                |
+| `library.multipartMaxHeaderBytes`   | `8192`              | Header bytes per part.                                                      |
+| `library.multipartReadTimeoutMs`    | `120000`            | Total ingress and parsing deadline, in milliseconds.                        |
+
+The 120-second ingress budget permits a full 50 MiB file at about 427 KiB/s;
+metadata consumes a small additional portion. Parsing uses 64 KiB allocation chunks
+(at most 802 buffers at the default wire limit) and releases them before encryption.
+Browser writes, HTTP downloads/previews, agent transfers and diagnostic-package
+capture share a 50 MiB memory budget per Worker isolate (`acquireLibraryMemory()` in
+`apps/api/src/services/library-memory.ts`). A browser upload reserves its declared
+`Content-Length`, which is then enforced while streaming; a download or preview reserves
+the stored file size and refuses (`409`) a stored object larger than that reservation.
+Every reservation adds 256 KiB for fixed buffers, so at most about 200 transfers fit.
+Agent transfers, diagnostic capture and uploads without a declared length reserve the
+whole budget. So several small uploads or previews run together, while a maximum-size
+file runs alone. A transfer that does not fit
+receives `429` (or the MCP retry error) without queuing file buffers. The reservation
+follows the file through encryption/storage or its actual consumer. HTTP reads copy at
+most 64 KiB per response pull and keep their reservation until consumption,
+cancellation or the egress deadline. Decrypted plaintext and ciphertext are released
+after their consumers finish. A load timeout keeps the reservation until the underlying
+load settles, so late work cannot overlap a new transfer.
+
+`LIBRARY_DOWNLOAD_TIMEOUT_MS` (default 60000) bounds loading and HTTP egress separately;
+a full 50 MiB response needs about 854 KiB/s to meet the egress deadline. Awaited agent
+transfers use their existing VM transfer deadline and retain admission through request-body
+termination and exposed transport settlement. An opaque container RPC may retain bounded
+chunk copies after its existing timeout; it never receives a view of the whole plaintext. Multipart settings apply to browser writes; existing agent file-size limits
+remain in place. The canonical ownership implementation is
+`apps/api/src/services/library-memory.ts`; multipart parsing is in
+`apps/api/src/routes/library-upload-request.ts`.
+
 ### Project file library cleanup
 
 | Variable                                    | Default | Description                                                                                                                                          |
@@ -1815,6 +1860,18 @@ them doesn't; the upload-link lifetime isn't checked in the browser. Set them in
 | `ATTACHMENT_MAX_FILES`              | `20`                 | Max files per message        |
 | `ATTACHMENT_PRESIGN_EXPIRY_SECONDS` | `900` (15 min)       | Lifetime of each upload link |
 
+Upload links (attachments, session snapshots, compose image artifacts and build contexts) are all
+signed by one client, `getR2PresignTarget()` in `apps/api/src/services/r2-s3-client.ts`. On
+Cloudflare it addresses `https://<CF_ACCOUNT_ID>.r2.cloudflarestorage.com` with `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY` and `R2_BUCKET_NAME`. A runtime whose R2 binding keeps objects in its own S3
+store sets `R2_S3_ENDPOINT`, `R2_S3_BUCKET`, `R2_S3_KEY_PREFIX` and `R2_S3_REGION` (its SigV4
+signing region, for example `auto` for Google Cloud Storage or `us-west-2` for AWS S3; there is no
+default, because a wrong region makes every signed URL fail), plus optional
+`R2_S3_FORCE_PATH_STYLE` (default path style); links then target
+`<R2_S3_BUCKET>/<R2_S3_KEY_PREFIX><key>` (`resolveR2PresignConfig()` in
+`apps/api/src/services/r2-presign-config.ts`). A partially configured store disables presigning
+rather than falling back to Cloudflare, and attachment requests then answer `403`.
+
 ### Workspace uploads and downloads
 
 These apply to files uploaded straight into a workspace from its own page, and to files downloaded
@@ -2003,6 +2060,25 @@ Client page/referrer fields follow a privacy normalization contract before enque
 | `MAX_ANALYTICS_INGEST_BATCH_SIZE`           | `25`                                            | Max browser events accepted per ingest request                                     |
 | `MAX_ANALYTICS_INGEST_BODY_BYTES`           | `65536`                                         | Max ingest request body size in bytes                                              |
 | `MAX_ANALYTICS_DURATION_MS`                 | `3600000`                                       | Max accepted page-duration value; larger values are clamped                        |
+
+Cloudflare installations write analytics to Workers Analytics Engine and read them through the
+Analytics Engine SQL API (`queryAnalyticsEngine()` in `apps/api/src/routes/admin-analytics-query.ts`),
+which needs `CF_ACCOUNT_ID` and `CF_API_TOKEN`. Without them the admin analytics routes answer
+`404 FEATURE_UNAVAILABLE` (`analyticsQuery`) instead of a server error. A self-hosted build can
+instead install a local sink (`installAnalyticsD1Sink()` in `apps/api/src/selfhost/analytics/`):
+with `ANALYTICS_SINK="d1"` it records and reads the same events in the `analytics_events` table of
+`OBSERVABILITY_DATABASE`. That table is created by a self-host-only migration
+(`apps/api/src/selfhost/observability-migrations.ts`), never on Cloudflare, and its retention is
+bounded by the self-host admin settings `analytics.d1.retentionDays` (default 90) and
+`analytics.d1.maxRows` (default 500,000), applied by the 5-minute observability purge in batches
+of `analytics.d1.purgeBatchRows` (default 5,000) for at most `analytics.d1.purgeTickBudgetMs`
+(default 10,000) per run; unfinished deletes continue on the next run. The
+Cloudflare Worker does not install the sink, so `ANALYTICS_SINK` has no effect there.
+
+Admin → Logs search reads Workers Observability with the same account API (`queryWorkerLogs()`),
+and Admin → Stream is fed by the tail worker. A deployment without a tail worker declares
+`LOG_TAIL_AVAILABLE="false"`; both pages then show where to read logs on the server instead
+(`publicPlatformCapabilities()` reports `logSearch` and `liveLogStream`).
 
 ## Analytics Forwarding
 

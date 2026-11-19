@@ -122,6 +122,24 @@ describe('admin settings authorization and API', () => {
       ).status
     ).toBe(409);
   });
+  it('edits, validates and resets the run-usage ceiling while invalidating its cached value', async () => {
+    const name = 'insights.runUsageMaxRowsPerSession';
+    expect(await resolveAdminSetting(bindings, name)).toBe(256);
+    for (const value of [0, 10001, 1.5, '2']) {
+      expect((await request({}, { expectedRevision: 0, changes: [{ name, value }] })).status).toBe(
+        400
+      );
+    }
+    expect((await request({}, { expectedRevision: 0, changes: [{ name, value: 2 }] })).status).toBe(
+      200
+    );
+    expect(await resolveAdminSetting(bindings, name)).toBe(2);
+    expect(
+      (await request({}, { expectedRevision: 1, changes: [{ name, value: null }] })).status
+    ).toBe(200);
+    expect(await resolveAdminSetting(bindings, name)).toBe(256);
+  });
+
   it('sanitizes SQL errors and never exposes value-derived diagnostics', async () => {
     sqlite.exec(
       "CREATE TRIGGER fail_write BEFORE INSERT ON platform_settings BEGIN SELECT RAISE(ABORT,'private-plaintext'); END;"

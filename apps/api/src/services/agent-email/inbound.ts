@@ -5,7 +5,7 @@ import * as pkg from '@simple-agent-manager/agent-email';
 import type { Env } from '../../env';
 import { type AgentEmailPortOverrides, agentEmailPorts } from './ports';
 
-export { type InboundEmailMessage } from '@simple-agent-manager/agent-email';
+export { type InboundDeps, type InboundEmailMessage } from '@simple-agent-manager/agent-email';
 
 export function handleInboundAgentEmail(
   message: pkg.InboundEmailMessage,

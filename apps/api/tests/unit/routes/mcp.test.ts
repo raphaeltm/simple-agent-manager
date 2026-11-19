@@ -5082,9 +5082,9 @@ describe('MCP Routes', () => {
       );
     });
 
-    it('complete_task in conversation mode should call notifySessionEnded', async () => {
-      // complete_task calls .first() once to get task_mode + user_id + title in one query.
-      // Then it calls .run() for the UPDATE. Both queries use raw D1 (prepare/bind pattern).
+    it('complete_task in conversation mode sends no "your turn" notification', async () => {
+      // The agent files what the person needs in the inbox; SAM never files a content-free
+      // "Agent finished" notification (inbox Result items).
       mockD1._stmt.first.mockResolvedValueOnce({
         task_mode: 'conversation',
         user_id: 'user-789',
@@ -5104,8 +5104,9 @@ describe('MCP Routes', () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
+      // Liveness: the remap ran.
       expect(body.result.content[0].text).toContain('Conversation remains open');
-      expect(mockNotificationStub.createNotification).toHaveBeenCalledWith(
+      expect(mockNotificationStub.createNotification).not.toHaveBeenCalledWith(
         'user-789',
         expect.objectContaining({ type: 'session_ended' })
       );

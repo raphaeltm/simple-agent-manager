@@ -35,6 +35,8 @@ export const DEFAULT_AGENT_EMAIL_SIGN_IN_CODE_ATTEMPTS_PER_EMAIL_PER_HOUR = 10;
 
 export const DEFAULT_AGENT_EMAIL_SETUP_PLAN_TIMEOUT_MS = 15_000;
 export const DEFAULT_AGENT_EMAIL_READ_TIMEOUT_MS = 5_000;
+/** Whole SMTP exchange (connect, TLS, AUTH, one message) for SAM's own email over SMTP. */
+export const DEFAULT_AGENT_EMAIL_SMTP_TIMEOUT_MS = 15_000;
 
 export const AGENT_EMAIL_SETTINGS = [
   {
@@ -151,6 +153,13 @@ export const AGENT_EMAIL_SETTINGS = [
     description:
       'Sign-in code guesses accepted for one address per hour, across all IP addresses. Caps distributed guessing.',
     range: { min: 1, max: 100 },
+  },
+  {
+    name: 'agentEmail.smtpTimeoutMs',
+    defaultValue: DEFAULT_AGENT_EMAIL_SMTP_TIMEOUT_MS,
+    description:
+      'Maximum milliseconds for one SMTP exchange (sign-in codes on installs that send through SMTP_HOST instead of Cloudflare Email Sending).',
+    range: { min: 1_000, max: 120_000 },
   },
 ] as const;
 

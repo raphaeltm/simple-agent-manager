@@ -6,6 +6,7 @@
  * The only stubs are the genuine system boundaries:
  *   - D1 `project_files`, seeded for two projects so the filename lookup's
  *     `project_id` predicate is actually exercised;
+ *   - D1 task visibility, empty in these non-task scenarios;
  *   - the ProjectData RPC hop, which delegates straight into the real
  *     project-comment-inbox module against that project's own SQLite.
  *
@@ -96,10 +97,15 @@ function createApp() {
 }
 
 function get(projectId: string, query = '') {
+  const database = {
+    prepare: () => ({
+      bind: () => ({ all: async () => ({ results: [] }) }),
+    }),
+  };
   return createApp().request(
     `https://api.test/api/projects/${projectId}/comments${query}`,
     { method: 'GET' },
-    { DATABASE: {} } as Env
+    { DATABASE: database } as unknown as Env
   );
 }
 

@@ -14,6 +14,7 @@ import { parsePositiveInt } from '../lib/route-helpers';
 import { signTerminalToken } from './jwt';
 import { fetchNodeAgent } from './node-agent';
 import { getNodeBackendBaseUrl } from './node-agent-readiness';
+import { sendWorkspaceMultipart } from './workspace-upload-body';
 
 type AppDb = DrizzleD1Database<typeof schema>;
 
@@ -105,27 +106,25 @@ export async function uploadToWorkspace(input: WorkspaceUploadInput): Promise<vo
   const { token } = await signTerminalToken(userId, workspaceId, env);
   const url = `${vmBaseUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/upload`;
 
-  const formData = new FormData();
-  formData.append('destination', targetPath);
-  formData.append('files', new Blob([data]), filename);
-
-  // Use Authorization header for server-to-server calls (not query param)
-  const res = await fetchNodeAgent(
-    nodeId,
-    env,
-    url,
-    {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
-    },
-    getTransferTimeout(env)
+  await sendWorkspaceMultipart(
+    data,
+    filename,
+    targetPath,
+    getTransferTimeout(env),
+    (body, contentType, signal) =>
+      fetchNodeAgent(
+        nodeId,
+        env,
+        url,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': contentType },
+          body,
+          signal,
+        },
+        getTransferTimeout(env)
+      )
   );
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => 'unknown');
-    throw new Error(`VM agent upload failed: ${res.status} ${text}`);
-  }
 }
 
 /**

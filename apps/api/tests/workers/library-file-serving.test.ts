@@ -192,3 +192,69 @@ describe('GET /library/:fileId/download', () => {
     }
   );
 });
+
+describe('HEAD Library file ownership through the combined Worker app', () => {
+  it.each(['download', 'preview'] as const)(
+    'HEAD %s preserves GET headers and releases memory before the next upload',
+    async (action) => {
+      const original = await storeFile(`head-${action}.png`, PNG_BYTES, 'image/png');
+      const createdIds = [original.id];
+      const path = `${API}/api/projects/${projectId}/library/${original.id}/${action}`;
+      try {
+        // Auth failures must remain bodyless and must not reserve file memory.
+        const anonymous = await SELF.fetch(path, { method: 'HEAD' });
+        expect(anonymous.status).toBe(401);
+        expect(await anonymous.text()).toBe('');
+        const outsiderId = `head-outsider-${crypto.randomUUID()}`;
+        await seedUser(outsiderId);
+        const outsiderCookie = await seedSignedInUser(outsiderId);
+        const forbidden = await SELF.fetch(path, {
+          method: 'HEAD',
+          headers: { Cookie: outsiderCookie },
+        });
+        expect(forbidden.status).toBe(404);
+        expect(await forbidden.text()).toBe('');
+
+        // A real owner GET proves this file decrypts and that the route works.
+        const get = await fetchFile(original.id, action);
+        expect(get.status).toBe(200);
+        expect(new Uint8Array(await get.arrayBuffer())).toEqual(PNG_BYTES);
+
+        // Hono routes HEAD through GET and discards the returned body. This must
+        // release the real Library permit even though nobody consumes that stream.
+        const head = await SELF.fetch(path, {
+          method: 'HEAD',
+          headers: { Cookie: sessionCookie },
+        });
+        expect(head.status).toBe(200);
+        for (const name of [
+          'Content-Type',
+          'Content-Length',
+          'Content-Disposition',
+          'Cache-Control',
+          'X-Content-Type-Options',
+        ]) {
+          expect(head.headers.get(name), name).toBe(get.headers.get(name));
+        }
+        expect(head.headers.get('Content-Length')).toBe(String(PNG_BYTES.byteLength));
+        expect(await head.text()).toBe('');
+
+        // Reach real ingress/auth/parser/encryption/R2 immediately, without a timer
+        // or direct permit release. The pre-fix HEAD leaves this write at 429.
+        const afterHead = await storeFile(`after-head-${action}.png`, PNG_BYTES, 'image/png');
+        createdIds.push(afterHead.id);
+        const saved = await fetchFile(afterHead.id, 'download');
+        expect(saved.status).toBe(200);
+        expect(new Uint8Array(await saved.arrayBuffer())).toEqual(PNG_BYTES);
+      } finally {
+        for (const fileId of createdIds) {
+          const deleted = await SELF.fetch(`${API}/api/projects/${projectId}/library/${fileId}`, {
+            method: 'DELETE',
+            headers: { Cookie: sessionCookie },
+          });
+          expect(deleted.status).toBe(200);
+        }
+      }
+    }
+  );
+});

@@ -10,6 +10,7 @@ import {
   interactivePreviewErrorResponse,
   verifyPreviewPath,
 } from '../services/interactive-preview';
+import { loadLibraryDownload } from '../services/library-memory';
 function previewMaxBytes(env: Env): number {
   const parsed = Number(env.FILE_PREVIEW_MAX_BYTES);
   return Number.isSafeInteger(parsed) && parsed > 0
@@ -48,17 +49,26 @@ export async function handleInteractivePreviewRequest(
       return interactivePreviewErrorResponse(env);
     }
     const timeoutMs = getDownloadTimeoutMs(env);
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    const { data } = await Promise.race([
-      downloadFile(db, env.R2, encryptionKey(env), scope.projectId, scope.fileId),
-      new Promise<never>((_, reject) => {
-        timeout = setTimeout(() => reject(new Error('Preview timed out')), timeoutMs);
-      }),
-    ]).finally(() => clearTimeout(timeout));
-    const headers = getInteractivePreviewHeaders(env);
-    headers.set('Content-Type', 'text/html; charset=utf-8');
-    headers.set('Content-Length', String(data.byteLength));
-    return new Response(request.method === 'HEAD' ? null : data, { status: 200, headers });
+    const download = await loadLibraryDownload(
+      () =>
+        downloadFile(db, env.R2, encryptionKey(env), scope.projectId, scope.fileId, file.sizeBytes),
+      timeoutMs,
+      file.sizeBytes
+    );
+    try {
+      const headers = getInteractivePreviewHeaders(env);
+      headers.set('Content-Type', 'text/html; charset=utf-8');
+      headers.set('Content-Length', String(download.value.data.byteLength));
+      if (request.method === 'HEAD') {
+        download.dispose();
+        return new Response(null, { status: 200, headers });
+      }
+      // The stream owns the permit until the HTTP consumer finishes or cancels.
+      return new Response(download.stream(), { status: 200, headers });
+    } catch (error) {
+      download.dispose();
+      throw error;
+    }
   } catch {
     return interactivePreviewErrorResponse(env);
   }

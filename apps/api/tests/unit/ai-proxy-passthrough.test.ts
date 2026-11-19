@@ -91,7 +91,8 @@ vi.mock('@simple-agent-manager/ai-proxy/internal/ai-token-budget', () => ({
   incrementProviderUsage: (...args: unknown[]) => mockIncrementProviderUsage(...args),
 }));
 
-vi.mock('../../src/lib/logger', () => ({
+vi.mock('../../src/lib/logger', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../src/lib/logger')>(),
   log: {
     info: vi.fn(),
     error: (...args: unknown[]) => mockLogError(...args),
