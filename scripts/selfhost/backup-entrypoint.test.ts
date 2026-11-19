@@ -1,9 +1,9 @@
 /**
  * `pnpm selfhost:backup` then `pnpm selfhost:restore`, run as the real commands (tsx backup.ts,
  * tsx restore.ts) with fake `gcloud` and `docker` binaries first on PATH (testdata/). The fake
- * gcloud reproduces the box failure from PR #2675: objects celld rewrites while running vanish
- * mid-copy in the live pass, and the aborted pass leaves state that broke the delta pass with
- * `[Errno 2] No such file or directory: <backup>/bucket/nodes/node_<id>.json`.
+ * gcloud models generation churn and the confirmed box failure from PR #2675: SDK523 can
+ * reach its POSIX-metadata stat after finalize_download returned false and no local file exists.
+ * Destination-keyed partial-state isolation and a clean full-copy fallback are both exercised.
  */
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -125,6 +125,38 @@ afterEach(() => {
 });
 
 describe('selfhost:backup and selfhost:restore (real entry points, fake gcloud)', () => {
+  it('uses a clean full copy after the stopped pass hits the confirmed POSIX stat of a missing finalized file', () => {
+    writeFileSync(
+      join(root, 'fake/posix-fail-once.json'),
+      JSON.stringify({ key: 'nodes/node_live.json', metadata: { atime: '1', mtime: '2' } })
+    );
+    const dest = join(root, 'posix-fallback-backup');
+    const result = run('backup.ts', [
+      '--to',
+      dest,
+      '--box-env',
+      join(root, 'box.env'),
+      '--state-dir',
+      join(root, 'state'),
+      '--encryption-key-file',
+      join(root, 'backup-key'),
+    ]);
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain('delta copy failed');
+    expect(result.stdout).not.toContain('set_posix_attributes');
+    const calls = readFileSync(join(root, 'fake/calls.log'), 'utf8').trim().split('\n');
+    expect(calls.filter((call) => call.startsWith('gcloud storage rsync'))).toHaveLength(3);
+    const plain = join(root, 'posix-inspection');
+    decryptBackupTree(dest, plain, join(root, 'backup-key'));
+    try {
+      expect(tree(join(plain, 'bucket'))).toEqual(tree(join(root, 'gcs/fleet/celld')));
+    } finally {
+      rmSync(plain, { recursive: true, force: true });
+    }
+    expect(readFileSync(join(root, 'fake/celld'), 'utf8')).toBe('running');
+  }, 60_000);
+
   it('backs up the actual legacy shell-selected project when its YAML has only a static name', () => {
     const compose = join(root, 'legacy-compose.yml');
     writeFileSync(compose, 'name: sam-selfhost\nservices:\n  celld:\n    image: fixture/celld\n');

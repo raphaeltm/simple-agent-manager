@@ -99,6 +99,8 @@ From the repository root on the VM:
 
 The fleet bucket contains Worker secrets as well as application data. The backup command encrypts
 **the entire backup**, including the bucket, `.state/`, `.env` and its manifest, with AES-256-GCM.
+Restored files retain owner execution when needed, with mode 0700 for tools and 0600 for other
+files; group and world access are never restored. Rebuildable `go-cache` data is excluded.
 It first requires exactly one running celld in the selected Compose project, then briefly stops
 it for a consistent second bucket copy and restarts it even if that copy
 fails (`scripts/selfhost/backup-lib.ts:runBackup`, `runPlainBackup`). Temporary plaintext lives
@@ -116,7 +118,8 @@ pnpm selfhost:backup --encryption-key-file "$HOME/.config/sam/backup.key"
 ```
 
 Use `--to /absolute/path/to/new-backup` for a specific destination; the default is
-`deploy/selfhost/backups/<timestamp>`. Keep the key outside installation state and all backup
+`deploy/selfhost/backups/<timestamp>`. Existing parent directory permissions are preserved; only
+new dedicated directories are created private, and symlinked parents are refused. Keep the key outside installation state and all backup
 folders. Alternatively set `SAM_BACKUP_KEY_FILE` in the private `.env` to the key's **absolute**
 path. The file must be owned by the operator, mode 0600, exactly 32 raw bytes, and have no symlinks
 or hard links (`scripts/selfhost/backup-encryption.ts:readBackupKey`). Store a separate offline
@@ -137,6 +140,10 @@ pnpm selfhost:restore --from /absolute/path/to/backup \
 ```
 
 Restore authenticates the complete encrypted inventory and every file before touching the target.
+If a copy fails, retain `<state-dir>.restore-progress.json` and retry the exact same command and
+backup. This private journal binds the original empty target and authenticated snapshot. A retry
+refuses changed, additional, linked or foreign-owned partial files before copying again; do not
+start the target or remove its journal to bypass a refusal. The journal is removed after success.
 It refuses a target project with existing containers, copies state and bucket data, keeps the
 target `.env`, strips the source installation's creation receipts, and does not start celld. On the original SAM ref, run `selfhost:deploy --init`
 to retain the restored keys and establish new target ownership receipts. Set the target `.env`'s
@@ -168,7 +175,8 @@ creation receipts. It checks out the target, runs `deploy --init`, rebuilds chan
 restarts Compose when its inputs changed, deploys and checks health. Failure automatically restores
 the encrypted snapshot and previous code/dependencies before starting the previous version.
 The recovery checks the original installation, bucket, state and Compose ownership before removing
-its disposable celld cache (`scripts/selfhost/upgrade-lib.ts:runUpgrade`, `recoverUpgrade`;
+its disposable celld cache. The recovery journal remains until the old service is healthy, and
+current resource creation/removal receipts survive rollback (`scripts/selfhost/upgrade-lib.ts:runUpgrade`, `recoverUpgrade`;
 `scripts/selfhost/backup-recovery.ts:runRollback`). Redeploying an old Worker alone cannot undo a
 migration.
 

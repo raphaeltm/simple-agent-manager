@@ -42,6 +42,18 @@ afterEach(() => {
 });
 
 describe('operator encrypted backup trees', () => {
+  it('authenticates and preserves owner execution for restored tools while keeping all files private', () => {
+    const f = fixture();
+    writeFileSync(join(f.source, 'celld'), 'operator binary', { mode: 0o755 });
+    writeFileSync(join(f.source, 'other-execute-only'), 'private content', { mode: 0o655 });
+    encryptBackupTree(f.source, f.encrypted, f.key);
+    expect(statSync(join(f.encrypted, 'celld')).mode & 0o777).toBe(0o600);
+    decryptBackupTree(f.encrypted, f.restored, f.key);
+    expect(statSync(join(f.restored, 'celld')).mode & 0o777).toBe(0o700);
+    expect(statSync(join(f.restored, 'secrets.env')).mode & 0o777).toBe(0o600);
+    expect(statSync(join(f.restored, 'other-execute-only')).mode & 0o777).toBe(0o600);
+  });
+
   it('round trips binary archives larger than the chunk size, empty files and directories without storing plaintext', () => {
     const f = fixture();
     const archive = randomBytes(8 * 1024 * 1024 + 7);

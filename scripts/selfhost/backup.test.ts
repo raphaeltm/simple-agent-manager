@@ -10,6 +10,7 @@ import {
   chmodSync,
   cpSync,
   existsSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -26,6 +27,7 @@ import { basename, join, resolve } from 'node:path';
 import * as TOML from '@iarna/toml';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { addResource, markRemoved, readRecord } from '../../deploy/selfhost/created-resources.mjs';
 import type { WranglerToml } from '../deploy/types';
 import { decryptBackupTree, encryptBackupTree } from './backup-encryption';
 import {
@@ -63,6 +65,8 @@ let selectedProject: string;
 let replaceStateOnPush: boolean;
 let celldStopped: boolean;
 let runningCelldIds: string;
+let failRestorePush: boolean;
+let replaceRestoreJournalOnPull: boolean;
 let cacheInspections: number;
 let targetContainers: string;
 let occupiedProject: string | undefined;
@@ -197,9 +201,22 @@ function fakeRun(command: string, args: string[], env?: NodeJS.ProcessEnv): RunR
         }
         rmSync(hostDir, { recursive: true, force: true });
         cpSync(storePath(src), hostDir, { recursive: true });
+        if (replaceRestoreJournalOnPull && src === 'src/fresh/celld') {
+          const journal = join(root, 'new-state.restore-progress.json');
+          writeFileSync(`${journal}.replacement`, readFileSync(journal), { mode: 0o600 });
+          renameSync(`${journal}.replacement`, journal);
+        }
       } else {
         if (mc.includes('--remove')) rmSync(storePath(dst), { recursive: true, force: true });
         mkdirSync(storePath(dst), { recursive: true });
+        if (failRestorePush) {
+          failRestorePush = false;
+          replaceRestoreJournalOnPull = false;
+          const first = Object.keys(tree(hostDir))[0]!;
+          mkdirSync(join(storePath(dst), first, '..'), { recursive: true });
+          cpSync(join(hostDir, first), join(storePath(dst), first));
+          return { status: 1, stdout: '', stderr: 'fixture provider failure must not be echoed' };
+        }
         cpSync(hostDir, storePath(dst), { recursive: true });
       }
       return ok;
@@ -246,6 +263,8 @@ beforeEach(() => {
   replaceStateOnPush = false;
   celldStopped = false;
   runningCelldIds = 'c'.repeat(64);
+  failRestorePush = false;
+  replaceRestoreJournalOnPull = false;
   cacheInspections = 0;
   targetContainers = '';
   occupiedProject = undefined;
@@ -274,6 +293,24 @@ function inspectBackup(dest: string, part: string): Record<string, string> {
 }
 
 describe('runBackup', () => {
+  it('preserves an operator parent mode1777 through the public backup entry', () => {
+    const parent = join(root, 'operator-parent');
+    mkdirSync(parent);
+    chmodSync(parent, 0o1777);
+    runBackup(ctx('s3://fleet/celld', join(root, 'state')), join(parent, 'snapshot'));
+    expect(statSync(parent).mode & 0o7777).toBe(0o1777);
+  });
+  it('refuses a symlink parent before copying or stopping anything and preserves its mode', () => {
+    const parent = join(root, 'operator-parent');
+    mkdirSync(parent, { mode: 0o755 });
+    symlinkSync(parent, join(root, 'linked-parent'));
+    expect(() =>
+      runBackup(ctx('s3://fleet/celld', join(root, 'state')), join(root, 'linked-parent/snapshot'))
+    ).toThrow(/without symlinks/);
+    expect(calls).toHaveLength(0);
+    expect(statSync(parent).mode & 0o777).toBe(0o755);
+  });
+
   it.each(['', `${'c'.repeat(64)}\n${'d'.repeat(64)}`, 'short-id'])(
     'refuses missing or ambiguous running celld before any bucket copy (%s)',
     (ids) => {
@@ -509,6 +546,99 @@ describe('runBackup', () => {
 });
 
 describe('runRestore', () => {
+  it('refuses a hard-linked partial state file before copying over an external inode', () => {
+    const snapshot = join(root, 'retry-hardlink-snapshot');
+    runBackup(ctx('s3://fleet/celld', join(root, 'state')), snapshot);
+    const target = ctx('s3://fresh/celld', join(root, 'new-state'));
+    failRestorePush = true;
+    expect(() => runRestore(target, snapshot)).toThrow();
+    mkdirSync(target.stateDir, { mode: 0o700 });
+    const external = join(root, 'external-key-file');
+    writeFileSync(external, PLATFORM_KEYS, { mode: 0o600 });
+    linkSync(external, join(target.stateDir, 'platform-keys.json'));
+    calls = [];
+    expect(() => runRestore(target, snapshot)).toThrow(/unsafe data/);
+    expect(readFileSync(external, 'utf8')).toBe(PLATFORM_KEYS);
+    expect(statSync(external).nlink).toBe(2);
+    expect(
+      calls.some((call) => call.args.includes('mirror') && call.args.at(-2) === '/backup')
+    ).toBe(false);
+  });
+  it('revalidates retry journal identity immediately before the resumed write phase', () => {
+    const snapshot = join(root, 'retry-journal-race-snapshot');
+    runBackup(ctx('s3://fleet/celld', join(root, 'state')), snapshot);
+    const target = ctx('s3://fresh/celld', join(root, 'new-state'));
+    failRestorePush = true;
+    expect(() => runRestore(target, snapshot)).toThrow();
+    replaceRestoreJournalOnPull = true;
+    calls = [];
+    expect(() => runRestore(target, snapshot)).toThrow('Restore retry ownership changed');
+    expect(
+      calls.some((call) => call.args.includes('mirror') && call.args.at(-2) === '/backup')
+    ).toBe(false);
+  });
+
+  it('resumes a real partial bucket copy from the same authenticated backup without deleting data', () => {
+    const snapshot = join(root, 'retry-snapshot');
+    runBackup(ctx('s3://fleet/celld', join(root, 'state')), snapshot);
+    const target = ctx('s3://fresh/celld', join(root, 'new-state'));
+    failRestorePush = true;
+    expect(() => runRestore(target, snapshot)).toThrow(/mc mirror/);
+    expect(Object.keys(tree(join(root, 'store/fresh/celld')))).toHaveLength(1);
+    expect(existsSync(`${target.stateDir}.restore-progress.json`)).toBe(true);
+    // Simulate a prior interrupted state copy as an exact subset of the same authenticated state.
+    mkdirSync(target.stateDir, { mode: 0o700 });
+    writeFileSync(join(target.stateDir, 'platform-keys.json'), PLATFORM_KEYS, { mode: 0o600 });
+    runRestore(target, snapshot);
+    expect(tree(join(root, 'store/fresh/celld'))).toEqual(tree(join(root, 'store/fleet/celld')));
+    expect(tree(target.stateDir)).toEqual({ 'platform-keys.json': PLATFORM_KEYS });
+    expect(existsSync(`${target.stateDir}.restore-progress.json`)).toBe(false);
+  });
+
+  it.each(['foreign-object', 'changed-object', 'foreign-state'] as const)(
+    'refuses retry with %s and preserves it instead of overwriting or deleting',
+    (defect) => {
+      const snapshot = join(root, 'retry-refusal-snapshot');
+      runBackup(ctx('s3://fleet/celld', join(root, 'state')), snapshot);
+      const target = ctx('s3://fresh/celld', join(root, 'new-state'));
+      failRestorePush = true;
+      expect(() => runRestore(target, snapshot)).toThrow(/mc mirror/);
+      let path: string;
+      if (defect === 'foreign-state') {
+        mkdirSync(target.stateDir, { mode: 0o700 });
+        path = join(target.stateDir, 'foreign-file');
+      } else
+        path = join(
+          root,
+          'store/fresh/celld',
+          defect === 'changed-object'
+            ? Object.keys(tree(join(root, 'store/fresh/celld')))[0]!
+            : 'foreign-file'
+        );
+      writeFileSync(path, 'foreign-data-must-survive');
+      calls = [];
+      expect(() => runRestore(target, snapshot)).toThrow(/Restore retry contains/);
+      expect(readFileSync(path, 'utf8')).toBe('foreign-data-must-survive');
+      expect(
+        calls.some((call) => call.args.includes('mirror') && call.args.at(-2) === '/backup')
+      ).toBe(false);
+      expect(existsSync(`${target.stateDir}.restore-progress.json`)).toBe(true);
+    }
+  );
+
+  it('binds retry ownership to the exact target bucket before any runner call', () => {
+    const snapshot = join(root, 'retry-target-snapshot');
+    runBackup(ctx('s3://fleet/celld', join(root, 'state')), snapshot);
+    const target = ctx('s3://fresh/celld', join(root, 'new-state'));
+    failRestorePush = true;
+    expect(() => runRestore(target, snapshot)).toThrow();
+    calls = [];
+    expect(() =>
+      runRestore({ ...target, box: { ...target.box, CELLD_BUCKET: 's3://other/celld' } }, snapshot)
+    ).toThrow('Cannot verify restore retry ownership');
+    expect(calls).toHaveLength(0);
+  });
+
   it('refuses containers under the final restored identity even when the pre-key project is empty', () => {
     const snapshot = join(root, 'post-restore-project-backup');
     runBackup(ctx('s3://fleet/celld', join(root, 'state')), snapshot);
@@ -644,6 +774,62 @@ describe('runRollback', () => {
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     );
   });
+
+  it('retains current backup/cloud receipts and removal markers instead of reviving snapshot history', () => {
+    const context = ctx('gs://fleet/celld', join(root, 'state'));
+    const ledger = join(context.stateDir, 'created-resources.json');
+    const cloud = (name: string, action: 'created' | 'reused' = 'created') => ({
+      cloud: 'gcp',
+      kind: 'firewall',
+      name,
+      action,
+      createdBy: 'gcp-bootstrap',
+      attributes: { installation: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', identity: name + '-id' },
+    });
+    addResource(ledger, cloud('removed-after-snapshot'));
+    addResource(ledger, cloud('replaced-after-snapshot'));
+    const snapshot = join(root, 'ledger-snapshot');
+    runBackup(context, snapshot);
+    markRemoved(ledger, 'gcp', 'firewall', 'removed-after-snapshot');
+    markRemoved(ledger, 'gcp', 'firewall', 'replaced-after-snapshot');
+    addResource(ledger, cloud('replaced-after-snapshot', 'reused'));
+    addResource(ledger, cloud('created-after-snapshot'));
+    const before = readRecord(ledger);
+    runRollback(context, snapshot);
+    const after = readRecord(ledger);
+    expect(after.resources.filter((r) => r.cloud === 'gcp')).toEqual(
+      before.resources.filter((r) => r.cloud === 'gcp')
+    );
+    expect(after.resources.find((r) => r.kind === 'backup' && r.name === snapshot)).toEqual(
+      before.resources.find((r) => r.kind === 'backup' && r.name === snapshot)
+    );
+    expect(
+      after.resources.find((r) => r.name === 'removed-after-snapshot')?.removedAt
+    ).toBeTruthy();
+    expect(after.resources.find((r) => r.name === 'replaced-after-snapshot')?.action).toBe(
+      'reused'
+    );
+    expect(after.resources.find((r) => r.kind === 'state-dir')?.attributes?.inode).toBe(
+      String(statSync(context.stateDir).ino)
+    );
+  });
+
+  it.each(['domain', 'environment', 'composeProject'])(
+    'refuses a foreign current ledger %s before mutation',
+    (field) => {
+      const context = ctx('gs://fleet/celld', join(root, 'state'));
+      const snapshot = join(root, 'foreign-ledger');
+      runBackup(context, snapshot);
+      const ledger = join(context.stateDir, 'created-resources.json');
+      const record = readRecord(ledger);
+      const installation = record.resources.find((r) => r.kind === 'installation');
+      installation!.attributes![field] = 'foreign';
+      writeFileSync(ledger, JSON.stringify(record));
+      calls = [];
+      expect(() => runRollback(context, snapshot)).toThrow(/different installation scope/);
+      expect(calls).toEqual([]);
+    }
+  );
 
   it('restores after a real Go module cache made read-only directories in the old state', () => {
     const context = ctx('gs://fleet/celld', join(root, 'state'));

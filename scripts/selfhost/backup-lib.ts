@@ -13,13 +13,14 @@ import {
 } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 
+import { prepareBackupParent } from './backup-destination';
 import { decryptBackupTree, encryptBackupTree, readBackupKey } from './backup-encryption';
-import { readManifest } from './backup-manifest';
 import { assertBackupOutside, assertOperationPaths } from './backup-paths';
+import { restoreBackup } from './backup-restore';
 import { requireRunningCelld } from './backup-runtime';
-import { composeProjectFor, expectedComposeProjectFor, recordBackup } from './install-record';
+import { composeProjectFor, recordBackup } from './install-record';
 import { assertOperatorExecution } from './operator-only';
-import { ensurePrivateDir, readPrivateJson } from './secret-files';
+import { ensurePrivateDir } from './secret-files';
 
 /**
  * Rebuildable caches under the state dir, left out of every backup. `go-cache` is the vm-agent
@@ -377,45 +378,6 @@ function runPlainBackup(
   return manifest;
 }
 
-/**
- * Restore `from` into an empty install: the target bucket (the CELLD_BUCKET in ctx.box) must be
- * empty and the target `.state/` must have no platform keys. celld stays stopped; the caller
- * prints how to start the stack.
- */
-function runPlainRestore(ctx: BoxContext, from: string): BackupManifest {
-  const manifest = readManifest(from);
-  if (existsSync(ctx.stateDir) && readdirSync(ctx.stateDir).length > 0) {
-    throw new Error(`${ctx.stateDir} is not empty: restore only into an empty install`);
-  }
-  if (!bucketIsEmpty(ctx)) {
-    throw new Error(`${ctx.box.CELLD_BUCKET} is not empty: restore only into an empty bucket`);
-  }
-  // Fresh state has no gateway.env, so even 'compose stop' would fail config validation.
-  // Refuse any existing target runtime without parsing a not-yet-created Compose stack.
-  const sourceIdentity = readPrivateJson(
-    join(from, STATE_DIR, 'platform-keys.json')
-  ).SAM_INSTALLATION_ID;
-  if (typeof sourceIdentity !== 'string' || !/^[a-f0-9]{32}$/.test(sourceIdentity))
-    throw new Error('Invalid backup installation identity');
-  const projects = new Set([
-    composeProjectFor(ctx.box, ctx.stateDir),
-    expectedComposeProjectFor(ctx.box, ctx.stateDir, sourceIdentity),
-  ]);
-  for (const project of projects) {
-    const containers = check(
-      ctx.run('docker', ['ps', '-aq', '--filter', `label=com.docker.compose.project=${project}`]),
-      'check empty restore runtime'
-    );
-    if (containers.stdout.trim())
-      throw new Error('Restore target already has containers; use a fresh installation');
-  }
-  ctx.log(`copying ${manifest.objectCount} objects into ${ctx.box.CELLD_BUCKET}`);
-  pushBucket(ctx, join(from, BUCKET_DIR));
-  ensurePrivateDir(ctx.stateDir);
-  cpSync(join(from, STATE_DIR), ctx.stateDir, { recursive: true, preserveTimestamps: true });
-  return manifest;
-}
-
 /** Backups are operator-only: no secret-bearing reads or decryptions in CI. */
 export function backupKey(ctx: BoxContext): string {
   assertOperatorExecution();
@@ -454,7 +416,7 @@ export function runBackup(
     if (!rel.startsWith('..') && !rel.startsWith('/'))
       throw new Error('Keep the backup key outside installation state and backups');
   }
-  ensurePrivateDir(dirname(resolve(dest)));
+  prepareBackupParent(dest);
   requireRunningCelld(ctx);
   const temp = backupScratch();
   try {
@@ -478,10 +440,7 @@ export function runRestore(ctx: BoxContext, from: string): BackupManifest {
   try {
     const plain = join(temp, 'plain');
     decryptBackupTree(from, plain, key);
-    const manifest = runPlainRestore(ctx, plain);
-    // Creation receipts belong to the source install, never to a fresh restore target.
-    rmSync(join(ctx.stateDir, 'created-resources.json'), { force: true });
-    return manifest;
+    return restoreBackup(ctx, plain, from);
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }

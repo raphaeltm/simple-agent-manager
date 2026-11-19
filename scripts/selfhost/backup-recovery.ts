@@ -31,7 +31,7 @@ import {
   readManifest,
   STATE_DIR,
 } from './backup-lib';
-import { composeProjectFor, recordInstall } from './install-record';
+import { composeProjectFor, recordInstall, SELFHOST_ENVIRONMENT } from './install-record';
 import { assertOperatorExecution } from './operator-only';
 import { assertPrivateFile, replacePrivateFile } from './secret-files';
 import { assertRollbackReady } from './upgrade-preflight';
@@ -86,6 +86,26 @@ function assertStateReceipt(path: string, expected: string, id: unknown, live = 
       throw new Error('Rollback state directory identity changed; refusing removal');
     }
   }
+}
+
+/** Ownership history follows the live installation, including post-backup removals/creations. */
+function currentLedger(ctx: BoxContext, id: string): string {
+  assertStateReceipt(ctx.stateDir, ctx.stateDir, id, true);
+  const path = join(ctx.stateDir, 'created-resources.json');
+  const stat = lstatSync(path);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Invalid rollback ownership ledger');
+  assertPrivateFile(path);
+  const record = readRecord(path);
+  const installation = record.resources.find(
+    (r) => r.cloud === 'box' && r.kind === 'installation' && r.name === id
+  );
+  if (
+    installation?.attributes?.domain !== (ctx.box.SAM_DOMAIN ?? '') ||
+    installation.attributes.environment !== SELFHOST_ENVIRONMENT ||
+    installation.attributes.composeProject !== composeProjectFor(ctx.box, ctx.stateDir)
+  )
+    throw new Error('Rollback ownership ledger belongs to a different installation scope');
+  return `${JSON.stringify(record, null, 2)}\n`;
 }
 
 export interface RollbackCacheProof {
@@ -305,7 +325,7 @@ function restoreState(
         join(staged, CACHE_PENDING),
         JSON.stringify({ ...pending, snapshot: resolve(from) })
       );
-    assertStateReceipt(ctx.stateDir, ctx.stateDir, id, true);
+    replacePrivateFile(join(staged, 'created-resources.json'), currentLedger(ctx, id));
     renameSync(ctx.stateDir, previous);
     try {
       renameSync(staged, ctx.stateDir);
@@ -346,7 +366,7 @@ export function runRollback(ctx: BoxContext, from: string, expectedSamCommit?: s
       throw new Error('Rollback snapshot belongs to a different installation');
     }
     assertStateReceipt(join(plain, STATE_DIR), ctx.stateDir, oldKeys.SAM_INSTALLATION_ID);
-    assertStateReceipt(ctx.stateDir, ctx.stateDir, currentKeys.SAM_INSTALLATION_ID, true);
+    currentLedger(ctx, oldKeys.SAM_INSTALLATION_ID);
     const pending = pendingCache(ctx, from);
     const cache = pending ?? assertRollbackCacheReady(ctx);
     if (pending) cachePresence(ctx, pending);

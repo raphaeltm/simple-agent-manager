@@ -13,6 +13,8 @@ import {
   runRestore,
   runRollback,
 } from './backup-lib';
+import { restoreBackup } from './backup-restore';
+import { assertRestoreSubset, restoreProgress } from './restore-progress';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const ABSENT = resolve(ROOT, '.tmp/nonexistent-operator-guard-sentinel');
@@ -45,6 +47,9 @@ describe('operator commands never read secret files in CI', () => {
       };
       for (const invoke of [
         () => loadBox(ABSENT),
+        () => restoreBackup(context, ABSENT, ABSENT),
+        () => restoreProgress(context, ABSENT),
+        () => assertRestoreSubset(ABSENT, ABSENT),
         () => readBackupKey(ABSENT),
         () => encryptBackupTree(ABSENT, ABSENT, ABSENT),
         () => decryptBackupTree(ABSENT, ABSENT, ABSENT),

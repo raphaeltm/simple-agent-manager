@@ -7,6 +7,7 @@ import {
   randomBytes,
 } from 'node:crypto';
 import {
+  chmodSync,
   closeSync,
   constants,
   existsSync,
@@ -174,13 +175,13 @@ function transformFile(
   }
 }
 
-function sealManifest(tree: Tree, snapshot: string, key: Buffer): Buffer {
+function sealManifest(tree: Tree, snapshot: string, key: Buffer, executable: string): Buffer {
   const prefix = header();
   const cipher = createCipheriv('aes-256-gcm', key, prefix.subarray(MAGIC.length));
   cipher.setAAD(aad(prefix, `\0${MANIFEST}`));
   return Buffer.concat([
     prefix,
-    cipher.update(JSON.stringify({ snapshot, tree })),
+    cipher.update(JSON.stringify({ snapshot, tree, executable })),
     cipher.final(),
     cipher.getAuthTag(),
   ]);
@@ -201,7 +202,10 @@ export function encryptBackupTree(source: string, destination: string, keyFile: 
     for (const dir of tree.directories) mkdirSync(join(destination, dir), { mode: 0o700 });
     for (const file of tree.files)
       transformFile(join(source, file), join(destination, file), file, key, false, snapshot);
-    writeFileSync(join(destination, MANIFEST), sealManifest(tree, snapshot, key), {
+    const executable = tree.files
+      .map((file) => (lstatSync(join(source, file)).mode & 0o100 ? '1' : '0'))
+      .join('');
+    writeFileSync(join(destination, MANIFEST), sealManifest(tree, snapshot, key, executable), {
       mode: 0o600,
       flag: 'wx',
     });
@@ -231,12 +235,16 @@ export function decryptBackupTree(source: string, destination: string, keyFile: 
       directories: tree.directories,
     };
     const expected = JSON.stringify(inventory);
-    const manifestSize =
-      Buffer.byteLength(JSON.stringify({ snapshot: '0'.repeat(32), tree: inventory })) +
-      MAGIC.length +
-      NONCE_BYTES +
-      TAG_BYTES;
-    if (lstatSync(join(source, MANIFEST)).size !== manifestSize)
+    const manifestSizes = [undefined, '0'.repeat(inventory.files.length)].map(
+      (executable) =>
+        Buffer.byteLength(
+          JSON.stringify({ snapshot: '0'.repeat(32), tree: inventory, executable })
+        ) +
+        MAGIC.length +
+        NONCE_BYTES +
+        TAG_BYTES
+    );
+    if (!manifestSizes.includes(lstatSync(join(source, MANIFEST)).size))
       throw new Error('Backup inventory size mismatch');
     mkdirSync(destination, { mode: 0o700 });
     created = true;
@@ -250,13 +258,17 @@ export function decryptBackupTree(source: string, destination: string, keyFile: 
       typeof manifest.snapshot !== 'string' ||
       !/^[a-f0-9]{32}$/.test(manifest.snapshot) ||
       !('tree' in manifest) ||
-      JSON.stringify(manifest.tree) !== expected
+      JSON.stringify(manifest.tree) !== expected ||
+      ('executable' in manifest &&
+        (typeof manifest.executable !== 'string' ||
+          manifest.executable.length !== inventory.files.length ||
+          [...manifest.executable].some((bit) => bit !== '0' && bit !== '1')))
     ) {
       throw new Error('Backup inventory mismatch');
     }
     rmSync(join(destination, MANIFEST));
     for (const dir of tree.directories) mkdirSync(join(destination, dir), { mode: 0o700 });
-    for (const file of tree.files.filter((f) => f !== MANIFEST))
+    for (const [index, file] of inventory.files.entries()) {
       transformFile(
         join(source, file),
         join(destination, file),
@@ -265,6 +277,14 @@ export function decryptBackupTree(source: string, destination: string, keyFile: 
         true,
         manifest.snapshot
       );
+      // Preserve owner execution only, after this file authenticates; all other access stays private.
+      if (
+        'executable' in manifest &&
+        typeof manifest.executable === 'string' &&
+        manifest.executable[index] === '1'
+      )
+        chmodSync(join(destination, file), 0o700);
+    }
   } catch {
     if (created) rmSync(destination, { recursive: true, force: true });
     throw new Error('Backup authentication failed; incomplete plaintext removed');

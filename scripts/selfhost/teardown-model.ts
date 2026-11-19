@@ -106,9 +106,9 @@ export function decide(item: Item, mode: Mode): Decision {
 }
 
 /**
- * Runs every item the mode removes, step by step. A failure ends the run after its step: later
- * steps (which would remove the means to clean up what failed, such as the cloud identity behind
- * undeleted VMs) are reported as not attempted, and a second run continues from there.
+ * Runs every item the mode removes, step by step. A failure stops new actions immediately,
+ * including dependent resources in the same step. Already-run shared actions still settle their
+ * individual results; unattempted actions remain available for a later retry.
  */
 export function execute(items: Item[], mode: Mode, recordFile: string): Outcome[] {
   const outcomes: Outcome[] = [];
@@ -118,9 +118,10 @@ export function execute(items: Item[], mode: Mode, recordFile: string): Outcome[
   const ran = new Map<string, Error | null>();
   for (const step of new Set(ordered.map((i) => i.step))) {
     for (const item of ordered.filter((i) => i.step === step)) {
-      outcomes.push(executeItem(item, items, mode, recordFile, failedStep, ran));
+      const outcome = executeItem(item, items, mode, recordFile, failedStep, ran);
+      outcomes.push(outcome);
+      if (outcome.status === 'failed') failedStep = step;
     }
-    if (outcomes.some((o) => o.status === 'failed' && o.item.step === step)) failedStep = step;
   }
   return outcomes;
 }
@@ -155,7 +156,7 @@ function executeItem(
   const decision = decide(item, mode);
   if (decision.act !== 'remove') return { item, status: statusOf(decision), why: decision.why };
   if (item.removedAt) return { item, status: 'already removed', why: item.removedAt };
-  if (failedStep !== null)
+  if (failedStep !== null && !ran.has(item.runKey ?? item.id))
     return { item, status: 'not attempted', why: `step ${failedStep} failed` };
   const error = runAction(item, items, ran);
   if (error && !item.goneDespiteGroupFailure?.())

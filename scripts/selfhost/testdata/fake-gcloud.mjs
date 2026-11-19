@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Fake `gcloud storage` for backup-entrypoint.test.ts. gs://<path> maps to $FAKE_GCS_ROOT/<path>.
-// It models what the box showed (PR #2675): while celld runs, objects in $FAKE_STATE/churn.json
-// vanish mid-copy (404) and the aborted download leaves a tracker keyed by its destination path;
-// a later download to that same path fails with `[Errno 2] No such file or directory`.
+// Models live generation churn (404) and the confirmed SDK523 failure: an absent finalized
+// download still reaches the POSIX-metadata stat step. A destination-keyed tracker model also
+// exercises isolation of partial download state; it is not claimed as the confirmed root cause.
 import {
   appendFileSync,
   cpSync,
@@ -11,6 +11,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -67,6 +68,27 @@ for (const f of source) {
     // celld replaced this generation mid-copy: the download aborts and leaves its tracker
     trackers.push(target);
     errors.push(`ERROR: ${src}/${f}#1 not found: 404.`);
+    continue;
+  }
+  const posixFailure = join(state, 'posix-fail-once.json');
+  if (
+    !celldRunning &&
+    existsSync(posixFailure) &&
+    JSON.parse(readFileSync(posixFailure, 'utf8')).key === f
+  ) {
+    // SDK523 finalize_download(false): the vanished temp yields no final file, yet POSIX follows.
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(`${target}_.gstmp`, 'incomplete-download');
+    rmSync(`${target}_.gstmp`);
+    rmSync(target, { force: true });
+    rmSync(posixFailure);
+    try {
+      statSync(target);
+    } catch {
+      errors.push(
+        `FileDownloadTask.execute -> set_posix_attributes_on_file_if_valid: [Errno 2] No such file or directory: '${target}'`
+      );
+    }
     continue;
   }
   if (trackers.includes(target) && !existsSync(`${target}_.gstmp`)) {

@@ -7,7 +7,15 @@
  */
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -134,6 +142,7 @@ describe.skipIf(!hasDocker && !process.env.CI)(
           'mb',
           'src/fleet',
           'src/fresh',
+          'src/retry',
         ],
         env
       );
@@ -146,7 +155,70 @@ describe.skipIf(!hasDocker && !process.env.CI)(
       if (root) rmSync(root, { recursive: true, force: true });
     });
 
+    it('retries after a real partial MinIO upload without deleting the partial target', () => {
+      const seed = join(root, 'retry-seed');
+      mkdirSync(join(seed, 'data'), { recursive: true });
+      writeFileSync(join(seed, 'current.json'), '{"v":1}');
+      writeFileSync(join(seed, 'data/second.bin'), Buffer.from([0, 1, 2, 255]));
+      pushBucket(ctx('s3://fleet/celld-retry', join(root, 'retry-unused')), seed);
+      const state = join(root, 'retry-source-state');
+      mkdirSync(state, { mode: 0o700 });
+      writeFileSync(join(state, 'platform-keys.json'), PLATFORM_KEYS, { mode: 0o600 });
+      writeFileSync(join(root, 'box.env'), 'CELLD_BUCKET=s3://fleet/celld-retry\n', {
+        mode: 0o600,
+      });
+      const snapshot = join(root, 'retry-backup');
+      runBackup(ctx('s3://fleet/celld-retry', state), snapshot);
+      const target = ctx('s3://retry/celld', join(root, 'retry-state'));
+      let fail = true;
+      const partial: BoxContext = {
+        ...target,
+        run(command, args, env) {
+          if (
+            fail &&
+            command === 'docker' &&
+            args.includes('mirror') &&
+            args.at(-2) === '/backup' &&
+            args.at(-1) === 'src/retry/celld'
+          ) {
+            fail = false;
+            const image = args.indexOf(OBJECTSTORE_IMAGE);
+            const result = run(
+              command,
+              [
+                ...args.slice(0, image + 1),
+                'cp',
+                '--quiet',
+                '/backup/current.json',
+                'src/retry/celld/current.json',
+              ],
+              env
+            );
+            if (result.status !== 0) return result;
+            return {
+              status: 1,
+              stdout: '',
+              stderr: 'injected network failure after one actual upload',
+            };
+          }
+          return run(command, args, env);
+        },
+      };
+      expect(() => runRestore(partial, snapshot)).toThrow(/mc mirror/);
+      const first = join(root, 'retry-partial-check');
+      pullBucket(target, first);
+      expect(tree(first)).toEqual({ 'current.json': '{"v":1}' });
+      expect(existsSync(`${target.stateDir}.restore-progress.json`)).toBe(true);
+      runRestore(partial, snapshot);
+      const complete = join(root, 'retry-complete-check');
+      pullBucket(target, complete);
+      expect(tree(complete)).toEqual(tree(seed));
+      expect(tree(target.stateDir)).toEqual({ 'platform-keys.json': PLATFORM_KEYS });
+      expect(existsSync(`${target.stateDir}.restore-progress.json`)).toBe(false);
+    });
+
     it('round-trips the fleet bucket and box state into an empty install', () => {
+      composeCalls.length = 0;
       // Seed the "fleet" through the same push path restore uses.
       const seed = join(root, 'seed');
       mkdirSync(join(seed, 'd1/main'), { recursive: true });
