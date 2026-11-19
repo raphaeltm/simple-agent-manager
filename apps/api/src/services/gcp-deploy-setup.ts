@@ -3,7 +3,6 @@ import {
   DEFAULT_GCP_API_TIMEOUT_MS,
   DEFAULT_GCP_DEPLOY_SERVICE_ACCOUNT_ID,
   DEFAULT_GCP_DEPLOY_WIF_POOL_ID,
-  DEFAULT_GCP_DEPLOY_WIF_PROVIDER_ID,
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
@@ -15,6 +14,7 @@ import {
   getProjectNumber,
   grantProjectRoles,
   grantWifUserOnSa,
+  installationWifProviderId,
   type SetupProgressCallback,
 } from './gcp-setup';
 
@@ -49,13 +49,15 @@ export async function runGcpDeploySetup(
   gcpProjectId: string,
   env: Env,
   onProgress?: SetupProgressCallback,
-  samProjectId?: string,
+  samProjectId?: string
 ): Promise<Omit<ProjectDeploymentCredential, 'id' | 'userId' | 'createdAt' | 'updatedAt'>> {
   const timeoutMs = env.GCP_API_TIMEOUT_MS
     ? parseInt(env.GCP_API_TIMEOUT_MS, 10)
     : DEFAULT_GCP_API_TIMEOUT_MS;
   const poolId = env.GCP_DEPLOY_WIF_POOL_ID || DEFAULT_GCP_DEPLOY_WIF_POOL_ID;
-  const providerId = env.GCP_DEPLOY_WIF_PROVIDER_ID || DEFAULT_GCP_DEPLOY_WIF_PROVIDER_ID;
+  // Per installation: a provider trusts one issuer, and installations may share a project.
+  const providerId =
+    env.GCP_DEPLOY_WIF_PROVIDER_ID || (await installationWifProviderId(env.BASE_DOMAIN));
   const saAccountId = env.GCP_DEPLOY_SERVICE_ACCOUNT_ID || DEFAULT_GCP_DEPLOY_SERVICE_ACCOUNT_ID;
   const issuerUri = `https://api.${env.BASE_DOMAIN}`;
 
@@ -76,21 +78,40 @@ export async function runGcpDeploySetup(
 
   // Step 4: Create OIDC provider
   onProgress?.('create_oidc_provider', 'in_progress');
-  await createOidcProvider(oauthToken, projectNumber, poolId, providerId, issuerUri, timeoutMs, samProjectId);
+  await createOidcProvider(
+    oauthToken,
+    projectNumber,
+    poolId,
+    providerId,
+    issuerUri,
+    timeoutMs,
+    samProjectId
+  );
   onProgress?.('create_oidc_provider', 'done');
 
   // Step 5: Create service account
   onProgress?.('create_service_account', 'in_progress');
   const saEmail = await createServiceAccount(
-    oauthToken, gcpProjectId, saAccountId, timeoutMs,
+    oauthToken,
+    gcpProjectId,
+    saAccountId,
+    timeoutMs,
     'SAM Deployer',
-    'Service account for SAM deployment via Defang',
+    'Service account for SAM deployment via Defang'
   );
   onProgress?.('create_service_account', 'done');
 
   // Step 6: Grant WIF user on SA
   onProgress?.('grant_wif_user', 'in_progress');
-  await grantWifUserOnSa(oauthToken, gcpProjectId, projectNumber, saEmail, poolId, timeoutMs, samProjectId);
+  await grantWifUserOnSa(
+    oauthToken,
+    gcpProjectId,
+    projectNumber,
+    saEmail,
+    poolId,
+    timeoutMs,
+    samProjectId
+  );
   onProgress?.('grant_wif_user', 'done');
 
   // Step 7: Grant deployment roles

@@ -7,7 +7,10 @@ import type { createProviderForUser } from './provider-credentials';
 
 type Node = typeof schema.nodes.$inferSelect;
 type Db = ReturnType<typeof drizzle<typeof schema>>;
-type ResolvedProvider = NonNullable<Awaited<ReturnType<typeof createProviderForUser>>>;
+type ResolvedProvider = Pick<
+  NonNullable<Awaited<ReturnType<typeof createProviderForUser>>>,
+  'providerName' | 'exactCredentialBinding'
+>;
 
 export function rejectedAllocationPlacementPredicate(node: Node, provider: ResolvedProvider) {
   const binding = provider.exactCredentialBinding;

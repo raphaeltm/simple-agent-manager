@@ -281,6 +281,16 @@ describe('runGcpSetup', () => {
       ) {
         return existing ? json({ error: { code: 409 } }, 409) : json({ done: true });
       }
+      if (
+        url.includes('/workloadIdentityPools/sam-pool/providers/') &&
+        (init?.method ?? 'GET') === 'GET'
+      ) {
+        // This installation's own provider from an earlier run.
+        return json({
+          name: url.slice(url.indexOf('projects/')),
+          oidc: { issuerUri: 'https://api.example.com' },
+        });
+      }
       if (init?.method === 'PATCH') return json({ done: true });
       if (url.endsWith(':getIamPolicy')) return json({ bindings: [], etag: 'etag-1' });
       if (url.endsWith(':setIamPolicy')) return json({ etag: 'etag-2' });
