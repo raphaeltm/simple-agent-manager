@@ -209,7 +209,11 @@ Public repository import is unavailable in this slice; an import URL returns a c
 A bounded importer is tracked in `tasks/backlog/2026-11-19-bounded-selfhost-git-import.md`.
 GitHub and GitLab integrations remain available when configured.
 
-Admin → Settings exposes `repositories.*` limits. Defaults are 64 MiB per push, 30,000 objects
+Admin → Settings exposes `repositories.*` limits. Failed GC sweeps retry up to
+`repositories.maxGcAttempts` (default 3), five minutes apart; success resets the budget.
+Exhaustion preserves a failed marker and emits `hosted_git.gc_failed`; a later admitted push
+starts a new cleanup episode. Failed pack ingestion reclaims incomplete rows before the next
+push checks quota. Defaults are 64 MiB per push, 30,000 objects
 10,000 refs and 256 MiB stored per repository, 16 MiB per inflated object, 128 MiB cumulative inflation
 per request, delta depth 100 and 120 seconds per git operation. Operators can lower these
 limits; raising them needs measured capacity review. Rejected pushes leave existing refs intact.

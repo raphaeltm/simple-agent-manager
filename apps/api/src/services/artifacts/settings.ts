@@ -11,6 +11,7 @@ export const REPOSITORY_POLICY_DEFAULTS = {
   maxInflatedBytes: 128 * 1024 * 1024,
   maxDeltaDepth: 100,
   workTimeoutMs: 120_000,
+  maxGcAttempts: 3,
 } as const;
 
 export type RepositoryPolicyKey = keyof typeof REPOSITORY_POLICY_DEFAULTS;

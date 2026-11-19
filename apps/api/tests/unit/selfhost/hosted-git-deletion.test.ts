@@ -150,3 +150,16 @@ it('retries failed cleanup while keeping all writes fenced', async () => {
   expect(state.deleteAlarm).toHaveBeenCalledTimes(2);
   expect(state.meta.get('deleted')).toBe('1');
 });
+
+it('reclaims failed-ingest rows even when scheduling the cleanup alarm fails', async () => {
+  const cell = repo();
+  const events: string[] = [];
+  const packs = (cell as unknown as { store: { packs: { ingest: () => Promise<never>; cleanupOrphans: () => Promise<void> } } }).store.packs;
+  packs.ingest = async () => { events.push('ingest'); throw new Error('pack checksum mismatch'); };
+  packs.cleanupOrphans = async () => { events.push('cleanup'); };
+  state.setAlarm.mockImplementationOnce(async () => { events.push('alarm'); throw new Error('alarm storage unavailable'); });
+  const response = await cell.fetch(new Request('https://git/git-receive-pack', { method: 'POST', body: new Uint8Array([48, 48, 48, 48, 80, 65, 67, 75, 0, 0, 0, 2, 0, 0, 0, 0]) }));
+  expect(response.status).toBe(500);
+  expect(events).toEqual(['ingest', 'cleanup', 'alarm']);
+  expect(state.meta.get('gc-pending')).toBe('1');
+});

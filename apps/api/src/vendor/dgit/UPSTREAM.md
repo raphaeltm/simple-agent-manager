@@ -32,3 +32,5 @@ conformance suite (`pnpm --filter @simple-agent-manager/api test:hosted-git`). P
 SAM adds `git/budget.ts` around pack ingest, reads and delta application. Every request and GC invocation carries a separate cumulative decompression and deadline budget, including streamed responses. Object size is checked before allocation and while inflating, delta targets before allocation, and delta depth before traversal. Policy values come from the optional repository backend's typed admin settings. These are deliberate security changes to the vendored code; this directory is not byte-for-byte upstream.
 
 SQL identifiers use static allowlisted statements, and variable-sized bind lists are split below the runtime parameter ceiling. The additional GC admission and response accounting checks are covered by the hosted git suite.
+
+- PackStore exposes its existing incomplete-pack sweep as `cleanupOrphans`, so failed uploads can reclaim quota immediately and GC can retry storage cleanup independently of another admitted push.

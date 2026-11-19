@@ -797,6 +797,50 @@ describe('repository cleanup through real SQLite', () => {
     await runtime.fetch(`/__test/gc/${project.artifactsRepoId}`, { method: 'POST' });
     expect((await info()).objects).toBe(before.objects);
   });
+
+  it('reclaims failed-ingest pack rows before the next push quota check', async () => {
+    const project = await createHostedProject(await createEmailOnlyUser(), 'Failed ingest');
+    const token = await mintToken(project, 'write');
+    const work = await freshDir('failed-ingest');
+    await gitOk(['clone', localRemote(project.repository, token), work]);
+    const before = await (await runtime.fetch(`/__test/info/${project.artifactsRepoId}`)).json() as { bytes: number };
+    // A full raw chunk is persisted before checksum validation; the remaining bytes cross quota.
+    const pack = randomBytes(2 * 1024 * 1024);
+    pack.write('PACK'); pack.writeUInt32BE(2, 4); pack.writeUInt32BE(1, 8);
+    const cap = before.bytes + pack.length;
+    await runtime.DATABASE.prepare("INSERT INTO platform_settings (key,value,updated_at) VALUES ('repositories.maxRepoBytes',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(JSON.stringify(cap), Date.now()).run();
+    await runtime.fetch('/__test/invalidate-settings', { method: 'POST' });
+    try {
+      const response = await runtime.fetch(`/git/${project.artifactsRepoId}.git/git-receive-pack`, { method: 'POST', headers: { authorization: `Basic ${Buffer.from(`x:${token}`).toString('base64')}` }, body: buildReceivePackRequest('a'.repeat(40), 'bad', pack) as BodyInit });
+      expect(await response.text()).toContain('checksum mismatch');
+      // No alarm or second ingest is allowed to repair the first request for this assertion.
+      const after = await (await runtime.fetch(`/__test/info/${project.artifactsRepoId}`)).json() as { bytes: number };
+      expect(after.bytes).toBeLessThan(cap);
+      await gitOk(['commit', '--allow-empty', '-m', 'safe after corrupt upload'], work);
+      await gitOk(['push', 'origin', 'HEAD:refs/heads/recovered'], work);
+      expect((await gitOk(['ls-remote', 'origin'], work)).stdout).toContain('refs/heads/recovered');
+    } finally {
+      await runtime.DATABASE.prepare("DELETE FROM platform_settings WHERE key='repositories.maxRepoBytes'").run();
+      await runtime.fetch('/__test/invalidate-settings', { method: 'POST' });
+    }
+  });
+  it('retains failed GC work and reclaims it on the next alarm after a transient read failure', async () => {
+    const project = await createHostedProject(await createEmailOnlyUser(), 'GC retry');
+    const token = await mintToken(project, 'write');
+    const before = await (await runtime.fetch(`/__test/info/${project.artifactsRepoId}`)).json() as { objects: number };
+    const { pack, commitOid } = await buildSeedPack({ projectName: 'Unreachable retry pack' });
+    await runtime.fetch(`/git/${project.artifactsRepoId}.git/git-receive-pack`, { method: 'POST', headers: { authorization: `Basic ${Buffer.from(`x:${token}`).toString('base64')}` }, body: buildReceivePackRequest(commitOid, 'main', pack) as BodyInit });
+    await runtime.fetch(`/__test/alarm/${project.artifactsRepoId}/fail`, { method: 'POST' });
+    const failed = await (await runtime.fetch(`/__test/gc-state/${project.artifactsRepoId}`)).json() as { pending: string; alarm: number | null };
+    expect(failed.pending).toBe('1'); expect(failed.alarm).not.toBeNull();
+    await runtime.fetch(`/__test/alarm/${project.artifactsRepoId}/run`, { method: 'POST' });
+    const done = await (await runtime.fetch(`/__test/gc-state/${project.artifactsRepoId}`)).json();
+    expect(done).toMatchObject({ pending: '0', alarm: null });
+    const after = await (await runtime.fetch(`/__test/info/${project.artifactsRepoId}`)).json() as { objects: number };
+    expect(after.objects).toBe(before.objects);
+    await runtime.fetch(`/__test/alarm/${project.artifactsRepoId}/run`, { method: 'POST' });
+    expect(await (await runtime.fetch(`/__test/gc-state/${project.artifactsRepoId}`)).json()).toMatchObject({ pending: '0', alarm: null });
+  });
   it('transactionally deletes a populated repository and refuses later Git requests', async () => {
     const owner = await createEmailOnlyUser();
     const project = await createHostedProject(owner, 'Delete me');

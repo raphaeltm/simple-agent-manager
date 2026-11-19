@@ -33,6 +33,7 @@ import type { HostedGitEnv } from './env';
 import { type HostedGitGcResult, runHostedGitGc } from './hosted-git-gc';
 import { filterLsRefsResponse, lsRefsPrefixes } from './hosted-git-ls-refs';
 import {
+  type HostedGitLimits,
   hostedGitPushByteBudget,
   hostedGitPushRefusal,
   hostedGitPushTooLargeMessage,
@@ -210,20 +211,18 @@ export class HostedGitRepo extends DurableObject {
 
   async alarm(): Promise<void> {
     const limits = await resolveHostedGitLimits(this.settingsEnv);
-    return withGitWorkBudget(limits, () => this.runAlarm());
+    return withGitWorkBudget(limits, () => this.runAlarm(limits));
   }
 
-  private async runAlarm(): Promise<void> {
+  private async runAlarm(limits: HostedGitLimits): Promise<void> {
     if (this.deleting || this.store.getMeta('gc-pending') !== '1') return;
     // GC drops packs: never while a clone is streaming. Leave gc-pending set and retry.
     if (this.activeUploads > 0) {
       await this.ctx.storage.setAlarm(Date.now() + 30_000).catch(() => undefined);
       return;
     }
-    // Clear first (at most once), so a throwing sweep cannot cause a retry storm.
-    this.store.setMeta('gc-pending', '0');
     try {
-      const result = await this.gc();
+      const result = await this.gc(limits);
       log.info('hosted_git.gc', { ...result });
     } catch (err) {
       log.error('hosted_git.gc_failed', {
@@ -233,24 +232,48 @@ export class HostedGitRepo extends DurableObject {
   }
 
   /** GC serialized behind pushes and with no other request interleaving (it resets packs). */
-  private gc(): Promise<HostedGitGcResult> {
+  private gc(limits: HostedGitLimits): Promise<HostedGitGcResult> {
     let result: HostedGitGcResult = { removed: 0, kept: 0 };
+    let failure: unknown;
+    let failed = false;
     const run = this.receiveChain.then(() =>
       this.ctx.blockConcurrencyWhile(async () => {
-        // Recheck after acquiring the push slot: a clone may have started while GC queued.
-        if (this.activeUploads > 0) {
-          this.store.setMeta('gc-pending', '1');
-          await this.ctx.storage.setAlarm(Date.now() + GC_DELAY_MS);
-          return;
+        try {
+          // Recheck after acquiring the push slot: a clone may have started while GC queued.
+          if (this.activeUploads > 0) {
+            this.store.setMeta('gc-pending', '1');
+            await this.ctx.storage.setAlarm(Date.now() + GC_DELAY_MS);
+            return;
+          }
+          await this.store.packs.cleanupOrphans();
+          result = await runHostedGitGc(this.store);
+          this.store.setMeta('gc-pending', '0');
+          this.store.setMeta('gc-attempts', '0');
+        } catch (err) {
+          // Rejecting blockConcurrencyWhile resets a DO before the outer alarm can retain retry
+          // intent. Carry the failure out after the input gate completes successfully instead.
+          const attempts = Number(this.store.getMeta('gc-attempts') ?? '0') + 1;
+          this.store.setMeta('gc-attempts', String(attempts));
+          // Keep repairable work pending, but stop automatic retries at the configured budget.
+          this.store.setMeta('gc-pending', attempts < limits.maxGcAttempts ? '1' : 'failed');
+          if (attempts < limits.maxGcAttempts) {
+            await this.ctx.storage.setAlarm(Date.now() + GC_DELAY_MS).catch(() => {
+              log.error('hosted_git.gc_retry_schedule_failed');
+            });
+          }
+          failure = err;
+          failed = true;
         }
-        result = await runHostedGitGc(this.store);
       })
     );
     this.receiveChain = run.then(
       () => undefined,
       () => undefined
     );
-    return run.then(() => result);
+    return run.then(() => {
+      if (failed) throw failure;
+      return result;
+    });
   }
 
   private async upload(req: Request): Promise<Response> {
@@ -430,6 +453,16 @@ export class HostedGitRepo extends DurableObject {
           });
           packId = ingested.packId;
         } catch (err) {
+          // Ingest writes chunks before checksum/index validation. Reclaim those rows now,
+          // before the next push's quota check; retain an alarm if storage cleanup itself fails.
+          this.store.setMeta('gc-pending', '1');
+          this.store.setMeta('gc-attempts', '0');
+          await this.store.packs.cleanupOrphans().catch((cleanupError: unknown) => {
+            log.error('hosted_git.ingest_cleanup_failed', {
+              error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+            });
+          });
+          await this.ctx.storage.setAlarm(Date.now() + GC_DELAY_MS);
           const msg = err instanceof Error ? err.message : String(err);
           unpackError = msg.includes('exceeds maximum push size')
             ? hostedGitPushTooLargeMessage(maxBytes)
@@ -456,6 +489,7 @@ export class HostedGitRepo extends DurableObject {
     }
     if (needsGc || packId !== null) {
       this.store.setMeta('gc-pending', '1');
+      this.store.setMeta('gc-attempts', '0');
       await this.ctx.storage.setAlarm(Date.now() + GC_DELAY_MS).catch(() => undefined);
     }
     if (caps.includes('report-status')) emit(renderStatus(results, unpackError, sideband));

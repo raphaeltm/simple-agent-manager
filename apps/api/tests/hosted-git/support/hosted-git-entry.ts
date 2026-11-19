@@ -34,6 +34,14 @@ export class HostedGitRepoTest extends HostedGitRepo {
       await this.ctx.storage.deleteAlarm();
       return new Response('ok');
     }
+    if (new URL(req.url).pathname === '/__test/alarm' || new URL(req.url).pathname === '/__test/alarm-fail') {
+      const store = (this as unknown as { store: { get: (...args: unknown[]) => Promise<unknown> } }).store;
+      const get = store.get;
+      if (new URL(req.url).pathname.endsWith('-fail')) store.get = async () => { throw new Error('injected transient read failure'); };
+      await this.ctx.storage.deleteAlarm();
+      try { await this.alarm(); } finally { store.get = get; }
+      return new Response('ok');
+    }
     if (new URL(req.url).pathname === '/__test/gc-state') {
       return Response.json({ pending: this.ctx.storage.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key='gc-pending'").toArray()[0]?.value, alarm: await this.ctx.storage.getAlarm() });
     }
@@ -104,4 +112,9 @@ app.get('/__test/gc-state/:repo', async (c) => {
 app.delete('/__test/repository/:repo', async (c) => {
   const ns = c.env.HOSTED_GIT!;
   return ns.get(ns.idFromName(c.req.param('repo'))).fetch('https://hosted-git/', { method: 'DELETE' });
+});
+
+app.post('/__test/alarm/:repo/:mode', (c) => {
+  const ns = c.env.HOSTED_GIT!;
+  return ns.get(ns.idFromName(c.req.param('repo'))).fetch('https://hosted-git/__test/alarm' + (c.req.param('mode') === 'fail' ? '-fail' : ''));
 });

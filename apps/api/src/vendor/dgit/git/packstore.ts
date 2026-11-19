@@ -481,28 +481,8 @@ export class PackStore {
    * bases hot — so the straggler pass afterwards is nearly empty. Memory
    * stays bounded regardless of pack size.
    */
-  async ingest(
-    firstBytes: Uint8Array,
-    reader: ReadableStreamDefaultReader<Uint8Array> | null,
-    opts: {
-      maxBytes: number;
-      /** push body size (content-length ~= pack size); packs this size are
-       * stored in R2 when a bucket is bound, else in SQLite. Absent means the
-       * client went chunked, which git only does above ~1MB (http.postBuffer)
-       * — so unknown size picks R2, the safe side for the 10GB SQLite cap. */
-      sizeHint?: number;
-      cache: ObjCache;
-      onProgress?: (msg: string) => void;
-      /** called periodically so the runtime can flush its write buffer —
-       * workerd holds a request's dirty pages in the 128MB isolate heap */
-      flush?: () => Promise<void>;
-      /** screen every block with SHA-1DC (git-parity collision detection);
-       * default hashes with native crypto.subtle, which yields the identical
-       * oid without the collision check */
-      collisionDetect?: boolean;
-    }
-  ): Promise<{ packId: number; count: number }> {
-    const cd = opts.collisionDetect ?? false;
+  /** Reclaim incomplete packs without requiring another admitted upload. Caller owns the write slot. */
+  async cleanupOrphans(): Promise<void> {
     // a failed or interrupted ingest leaves rows (or an R2 raw object) without a
     // pack_meta entry; reclaim that space before starting (pack_meta is only
     // written on success). Union across every per-pack table so an R2 ingest that
@@ -532,6 +512,31 @@ export class PackStore {
     // the reclaimed pack id is about to be handed out again: drop anything the
     // chunk LRU still holds for it (and for anything else — it is only a cache)
     if (orphans.length) this.chunks.clear();
+  }
+
+  async ingest(
+    firstBytes: Uint8Array,
+    reader: ReadableStreamDefaultReader<Uint8Array> | null,
+    opts: {
+      maxBytes: number;
+      /** push body size (content-length ~= pack size); packs this size are
+       * stored in R2 when a bucket is bound, else in SQLite. Absent means the
+       * client went chunked, which git only does above ~1MB (http.postBuffer)
+       * — so unknown size picks R2, the safe side for the 10GB SQLite cap. */
+      sizeHint?: number;
+      cache: ObjCache;
+      onProgress?: (msg: string) => void;
+      /** called periodically so the runtime can flush its write buffer —
+       * workerd holds a request's dirty pages in the 128MB isolate heap */
+      flush?: () => Promise<void>;
+      /** screen every block with SHA-1DC (git-parity collision detection);
+       * default hashes with native crypto.subtle, which yields the identical
+       * oid without the collision check */
+      collisionDetect?: boolean;
+    }
+  ): Promise<{ packId: number; count: number }> {
+    const cd = opts.collisionDetect ?? false;
+    await this.cleanupOrphans();
     const packId =
       (this.sql.exec<{ m: number | null }>("SELECT MAX(pack_id) AS m FROM pack_meta").one().m ?? 0) + 1;
     const started = Date.now();
