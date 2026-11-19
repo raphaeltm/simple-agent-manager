@@ -463,13 +463,20 @@ describe('bounded delivered check-in episodes', () => {
     });
     // Selection leases a candidate, so the first read must be the one under test: nothing
     // selected the chat before it.
-    // Archived from the inbox: the agent is still waiting on the permission, so SAM must not
-    // cancel its prompt or check in (every inbox archive is silent).
-    expect(archiveInteractionMarkerFromInbox(sql, 'session-1', marker.id)).toBe(1);
-    expect(await getReconciliationCandidates(sql, env)).toEqual([]);
-    // A second archive changes nothing; another chat's id does not reach it.
-    expect(archiveInteractionMarkerFromInbox(sql, 'session-1', marker.id)).toBe(0);
+    const inboxArchivedAt = () =>
+      sql
+        .exec('SELECT inbox_archived_at FROM session_attention_markers WHERE id = ?', marker.id)
+        .toArray()[0]?.inbox_archived_at ?? null;
+    // Attack first, while the marker is still unarchived: another chat's id does not reach it.
     expect(archiveInteractionMarkerFromInbox(sql, 'session-2', marker.id)).toBe(0);
+    expect(inboxArchivedAt()).toBeNull();
+    // Control: the owning chat archives it. The agent is still waiting on the permission, so SAM
+    // must not cancel its prompt or check in (every inbox archive is silent).
+    expect(archiveInteractionMarkerFromInbox(sql, 'session-1', marker.id)).toBe(1);
+    expect(inboxArchivedAt()).not.toBeNull();
+    expect(await getReconciliationCandidates(sql, env)).toEqual([]);
+    // A second archive changes nothing.
+    expect(archiveInteractionMarkerFromInbox(sql, 'session-1', marker.id)).toBe(0);
     // Control: when the interaction ends its marker resolves, and the same chat is a candidate.
     expect(resolveAttentionMarkerById(sql, marker.id, 'system', 'interaction_resolved')).toBe(1);
     expect((await getReconciliationCandidates(sql, env)).map((c) => c.taskId)).toEqual(['1']);

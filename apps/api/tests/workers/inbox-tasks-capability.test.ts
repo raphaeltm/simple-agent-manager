@@ -603,7 +603,19 @@ describe('human tasks through the real entry points', () => {
     ).toBe(400);
 
     await deliverWakes(s, s.chatSessionId);
+    const watchExpiries = async () =>
+      (
+        await sqlRows<{ expires_at: number | null }>(
+          s.project,
+          `SELECT expires_at FROM project_event_subscriptions WHERE target_session_id = ?`,
+          s.chatSessionId
+        )
+      ).map((row) => row.expires_at);
+    // An open task's watch never expires.
+    expect(await watchExpiries()).toEqual([null]);
+    const archiveStart = Date.now();
     const archived = await post(itemPath(s, ref, '/archive'), s.colleagueCookie, {});
+    const archiveEnd = Date.now();
     expect(archived.status).toBe(200);
     // Archive tells no watcher (every inbox archive is silent; Raphaël, 2026-11-17). The step
     // ticks above prove this chat does get woken by a task event when one is sent.
@@ -613,14 +625,12 @@ describe('human tasks through the real entry points', () => {
       .bind(filed.inboxItem.id)
       .first<{ notified_at: number | null }>();
     expect(settled?.notified_at).not.toBeNull();
-    // No event wound the watch down, so the archive does: it expires after the closed-task grace.
-    const watches = await sqlRows<{ expires_at: number | null }>(
-      s.project,
-      `SELECT expires_at FROM project_event_subscriptions WHERE target_session_id = ?`,
-      s.chatSessionId
-    );
-    expect(watches).toHaveLength(1);
-    expect(watches[0]!.expires_at).toBeGreaterThan(Date.now());
+    // No event wound the watch down, so the archive does: it expires after the closed-task grace
+    // (`inbox.closedTaskWatchHours`, 168 hours by default), measured from the archive.
+    const graceMs = 168 * 3_600_000;
+    const [expiresAt] = await watchExpiries();
+    expect(expiresAt).toBeGreaterThanOrEqual(archiveStart + graceMs);
+    expect(expiresAt).toBeLessThanOrEqual(archiveEnd + graceMs);
     const view = await get<TaskView>(itemPath(s, ref), s.colleagueCookie);
     expect(view.body.task?.activity.map((entry) => entry.kind)).toEqual([
       'created',
