@@ -208,7 +208,7 @@ export function useInboxWalk({
     (item: InboxItem) => {
       advancePast(item.ref);
       scheduleArchive(item);
-      showReceipt('Archived · the agent will be told', 'success', item.ref);
+      showReceipt('Archived', 'success', item.ref);
     },
     [advancePast, scheduleArchive, showReceipt]
   );

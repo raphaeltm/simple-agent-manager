@@ -1177,10 +1177,16 @@ describe('MCP Orchestration Tools', () => {
     });
 
     it('should cancel queued task and cleanup dependencies', async () => {
+      // The canonical cancellation writes task status and snapshot authority in one two-query batch.
+      mockD1.batch.mockResolvedValueOnce([
+        { success: true, results: [['child-queued']], meta: { changes: 1 } },
+        { success: true, results: [], meta: { changes: 1 } },
+      ]);
+
       mockD1._handlers.push({
         match: 'from "tasks"',
         method: 'raw',
-        result: [['child-queued', 'parent-task-1', 'queued', 'proj-456']],
+        result: [['child-queued', 'parent-task-1', 'queued', 'proj-456', 'user-789', null, null]],
         once: true,
       });
 

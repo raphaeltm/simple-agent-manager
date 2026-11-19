@@ -49,7 +49,7 @@ const PROVIDERS: Record<string, [slug: string, file: string, constName: string]>
   scaleway: ['scaleway', 'scaleway-volumes.ts', 'SCALEWAY_VOLUME_CAPABILITIES'],
   gcp: ['gcp', 'gcp-metadata.ts', 'GCP_VOLUME_CAPABILITIES'],
   vultr: ['vultr', 'vultr-volumes.ts', 'VULTR_VOLUME_CAPABILITIES'],
-  infomaniak: ['infomaniak', 'infomaniak.ts', 'INFOMANIAK_VOLUME_CAPABILITIES'],
+  infomaniak: ['infomaniak', 'infomaniak-metadata.ts', 'INFOMANIAK_VOLUME_CAPABILITIES'],
   digitalocean: ['digitalocean', 'digitalocean-metadata.ts', 'DIGITALOCEAN_VOLUME_CAPABILITIES'],
   upcloud: ['upcloud', 'upcloud.ts', 'UPCLOUD_VOLUME_CAPABILITIES'],
 };

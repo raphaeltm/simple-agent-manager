@@ -84,6 +84,12 @@ import { projectsRoutes } from '../../src/routes/projects';
 
 const worker = await import('../../src/index');
 
+const database = {
+  prepare: () => ({
+    bind: () => ({ all: async () => ({ results: [] }) }),
+  }),
+};
+
 function createCombinedApp() {
   const app = new Hono<{ Bindings: Env }>();
   app.onError((err, c) => {
@@ -136,8 +142,8 @@ describe('project comment auth routing', () => {
     const app = createCombinedApp();
 
     const response = await app.request('/api/projects/project-a/comments', { method: 'GET' }, {
-      DATABASE: {},
-    } as Env);
+      DATABASE: database,
+    } as unknown as Env);
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
@@ -156,7 +162,7 @@ describe('project comment auth routing', () => {
     expect(harness.listProjectCommentInbox).toHaveBeenCalledWith(
       expect.anything(),
       'project-a',
-      expect.any(Object)
+      expect.objectContaining({ readableInboxItemIds: [] })
     );
   });
 
@@ -165,7 +171,7 @@ describe('project comment auth routing', () => {
 
     const unauthenticated = await worker.default.fetch(
       new Request('https://api.example.test/api/projects/project-a/comments'),
-      { DATABASE: {} } as Env
+      { DATABASE: database } as unknown as Env
     );
 
     expect(unauthenticated.status).toBe(401);
@@ -174,7 +180,7 @@ describe('project comment auth routing', () => {
 
     const authenticated = await worker.default.fetch(
       new Request('https://api.example.test/api/projects/project-a/comments'),
-      { DATABASE: {} } as Env
+      { DATABASE: database } as unknown as Env
     );
 
     expect(authenticated.status).toBe(200);

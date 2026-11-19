@@ -1,15 +1,19 @@
 /**
- * Email sign-in: BetterAuth's emailOTP plugin, sending a six-digit code through the agent email
- * send binding (`packages/agent-email/src/provider.ts`) from `sign-in@agents.<BASE_DOMAIN>`.
- *
- * It exists only where the deploy prepared Email Sending (`hasAgentEmailBinding`): installer
- * installs and GitHub Actions deploys whose token has the email permissions. Turning inbound
- * agent email on is a separate admin step; sending does not need it.
+ * Email sign-in: BetterAuth's emailOTP plugin, sending a six-digit code through SAM's email
+ * transport (`packages/agent-email/src/provider.ts`, `emailTransportKind`):
+ * - Cloudflare Email Sending (the `AGENT_EMAIL` binding), from `sign-in@agents.<BASE_DOMAIN>`:
+ *   installer installs and GitHub Actions deploys whose token has the email permissions.
+ *   Turning inbound agent email on is a separate admin step; sending does not need it.
+ * - SMTP (`SMTP_*`), from `SMTP_FROM`, on installs without the binding, such as a self-hosted
+ *   celld box (`scripts/selfhost/mail-settings.ts`).
+ * With neither, email sign-in is not offered.
  *
  * Who gets a code:
  * - an address that already belongs to an account;
  * - the installer's owner email (`BOOTSTRAP_OWNER_EMAIL`) until that owner exists.
- * Everyone else gets nothing. The response is the same either way, and the code is sent after
+ * An account created by a provider sign-in whose email is unverified and that still has its
+ * provider link gets a note telling it to sign in with that provider instead of a code
+ * (`findAccountByEmail`). Everyone else gets nothing. The response is the same either way, and the code is sent after
  * the response (`CreateAuthOptions.waitUntil`), so neither the body nor the timing reveals which
  * addresses have accounts. Installations without an owner email do not offer email sign-up: the
  * first person to request a code would become the administrator. `databaseHooks.user.create.before` in `../auth.ts` still
@@ -31,9 +35,9 @@ import {
 } from '../middleware/rate-limit';
 import { agentEmailDomain } from './agent-email/address';
 import { listSendingSubdomains } from './agent-email/cloudflare-email-api';
-import { agentEmailSenderFor } from './agent-email/provider';
+import { type EmailTransportEnv, emailTransportKind } from './agent-email/provider';
 import { getAgentEmailLimits } from './agent-email/settings';
-import { hasAgentEmailBinding } from './agent-email/setup-state';
+import { resolveSystemEmailTransport } from './agent-email/system-email';
 import { bootstrapOwnerEmail, bootstrapOwnerEstablished } from './bootstrap-owner';
 
 const log = createModuleLogger('email-sign-in');
@@ -61,13 +65,13 @@ export function isClosedEmailOtpPath(pathname: string): boolean {
   return path.startsWith('/email-otp/') || path === '/forget-password/email-otp';
 }
 
-export function emailSignInAvailable(env: Pick<Env, 'AGENT_EMAIL' | 'BASE_DOMAIN'>): boolean {
-  return hasAgentEmailBinding(env);
+export function emailSignInAvailable(env: EmailTransportEnv): boolean {
+  return emailTransportKind(env) !== null;
 }
 
 /** Can the first account be created by email? Only where the installer named its owner. */
 export function emailSignUpOffered(
-  env: Pick<Env, 'AGENT_EMAIL' | 'BASE_DOMAIN' | 'BOOTSTRAP_OWNER_EMAIL'>
+  env: EmailTransportEnv & Pick<Env, 'BOOTSTRAP_OWNER_EMAIL'>
 ): boolean {
   return emailSignInAvailable(env) && Boolean(env.BOOTSTRAP_OWNER_EMAIL?.trim());
 }
@@ -75,18 +79,26 @@ export function emailSignUpOffered(
 /**
  * Can first-run setup rely on email sign-in right now?
  *
- * - `unavailable`: no email sign-up here (no send binding, or no installer owner email).
+ * - `unavailable`: no email sign-up here (no email transport, or no installer owner email).
  * - `verifying`: Cloudflare has not finished verifying the sending domain, so a code would not
  *   arrive. Setup must not close on email alone yet: with no OAuth provider it would lock the
  *   owner out.
  * - `ready`: the sending domain is enabled, or its state could not be read. An unreadable state
  *   (older runtime tokens lack Email Sending Read) keeps the previous behaviour rather than
  *   blocking setup on a permission the deploy may not have granted.
+ *
+ * An SMTP transport (a self-hosted box) has no sending-domain state to read, and Cloudflare's
+ * API is never asked about it. Instead the relay is probed (`EmailTransport.probe`): connect,
+ * TLS, credentials, then the sender and the owner as recipient, abandoned with RSET so nothing
+ * is sent. A relay that refuses any step, or does not answer within `agentEmail.smtpTimeoutMs`,
+ * makes email sign-up `unavailable`, so setup asks for a sign-in provider instead of closing on
+ * a code that would never arrive (F13). The probe runs only for the token-gated setup routes.
  */
 export type EmailSignInReadiness = 'unavailable' | 'verifying' | 'ready';
 
 export async function emailSignInReadiness(env: Env): Promise<EmailSignInReadiness> {
   if (!emailSignUpOffered(env)) return 'unavailable';
+  if (emailTransportKind(env) !== 'cloudflare') return smtpRelayReadiness(env);
   const domain = agentEmailDomain(env.BASE_DOMAIN).toLowerCase();
   try {
     const subdomains = await listSendingSubdomains(env);
@@ -97,6 +109,23 @@ export async function emailSignInReadiness(env: Env): Promise<EmailSignInReadine
       error: error instanceof Error ? error.message : String(error),
     });
     return 'ready';
+  }
+}
+
+async function smtpRelayReadiness(env: Env): Promise<EmailSignInReadiness> {
+  const owner = bootstrapOwnerEmail(env);
+  const transport = await resolveSystemEmailTransport(env);
+  if (!owner || !transport?.probe) return 'unavailable';
+  try {
+    await transport.probe(owner);
+    return 'ready';
+  } catch (error) {
+    // SmtpError messages name the refused step and reply code, never the server's text.
+    log.error('email_sign_in.smtp_relay_unusable', {
+      error: error instanceof Error ? error.message : String(error),
+      action: 'email_sign_up_unavailable',
+    });
+    return 'unavailable';
   }
 }
 
@@ -114,14 +143,31 @@ export async function emailSignUpAllowed(env: Env, email: string): Promise<boole
  */
 export async function emailCodeRedemptionAllowed(env: Env, email: string): Promise<boolean> {
   const normalized = email.trim().toLowerCase();
-  return (await accountExists(env, normalized)) || (await emailSignUpAllowed(env, normalized));
+  const account = await findAccountByEmail(env, normalized);
+  return account ? !account.providerOnly : emailSignUpAllowed(env, normalized);
 }
 
-async function accountExists(env: Env, email: string): Promise<boolean> {
-  const row = await env.DATABASE.prepare('SELECT 1 FROM users WHERE lower(email) = ? LIMIT 1')
+/** An OTP would make BetterAuth revoke this unproven account's provider links and sessions. */
+async function findAccountByEmail(
+  env: Env,
+  email: string
+): Promise<{ providerOnly: boolean } | null> {
+  const row = await env.DATABASE.prepare(
+    `SELECT u.email_verified AS emailVerified,
+      EXISTS (SELECT 1 FROM accounts a WHERE a.user_id = u.id AND a.provider_id != 'credential') AS linked
+     FROM users u WHERE lower(u.email) = ? LIMIT 1`
+  )
     .bind(email)
-    .first();
-  return row !== null;
+    .first<{ emailVerified: number | null; linked: number }>();
+  if (!row) return null;
+  return { providerOnly: !row.emailVerified && Boolean(row.linked) };
+}
+
+export function providerSignInRequiredEmail(baseDomain: string) {
+  return {
+    subject: 'Sign in to SAM with your connected provider',
+    text: `Someone requested a SAM sign-in code. This account's email has not been confirmed by its sign-in provider. To keep your connected accounts safe, use GitHub, GitLab or the provider you previously used at https://app.${baseDomain}. No sign-in code was sent. If you did not request this, ignore this email.`,
+  };
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -196,31 +242,43 @@ export function signInCodeEmail(baseDomain: string, code: string) {
   };
 }
 
-/** Sends the code when the address may sign in; otherwise sends nothing. Never throws. */
+/**
+ * Sends the code when the address may sign in, a provider sign-in note to an account that must
+ * use its provider, and nothing otherwise. Never throws.
+ */
 export async function deliverSignInCode(env: Env, email: string, code: string): Promise<void> {
-  const sender = agentEmailSenderFor(env);
-  if (!sender) return;
+  if (!emailTransportKind(env)) return;
   try {
-    const known = await accountExists(env, email);
+    const account = await findAccountByEmail(env, email);
+    const known = account !== null;
     if (!known && !(await emailSignUpAllowed(env, email))) {
       log.info('email_sign_in.code_not_sent', { reason: 'no_account' });
       return;
     }
-    const message = signInCodeEmail(env.BASE_DOMAIN, code);
-    await sender.send({
-      from: {
-        email: `${EMAIL_SIGN_IN_LOCAL_PART}@${agentEmailDomain(env.BASE_DOMAIN)}`,
-        name: 'SAM',
-      },
+    const transport = await resolveSystemEmailTransport(env);
+    if (!transport) return;
+    // The note goes to the mailbox, not into the API response, so the response still reveals
+    // nothing about which addresses have accounts.
+    const message = account?.providerOnly
+      ? providerSignInRequiredEmail(env.BASE_DOMAIN)
+      : signInCodeEmail(env.BASE_DOMAIN, code);
+    await transport.sender.send({
+      from: { email: transport.systemFrom(EMAIL_SIGN_IN_LOCAL_PART), name: 'SAM' },
       to: email,
       subject: message.subject,
       text: message.text,
       headers: {},
     });
-    log.info('email_sign_in.code_sent', { newAccount: !known });
+    log.info(
+      account?.providerOnly
+        ? 'email_sign_in.provider_required_note_sent'
+        : 'email_sign_in.code_sent',
+      { newAccount: !known, transport: transport.kind }
+    );
   } catch (error) {
     log.error('email_sign_in.send_failed', {
       error: error instanceof Error ? error.message : String(error),
+      transport: emailTransportKind(env),
     });
   }
 }

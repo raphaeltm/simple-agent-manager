@@ -1,6 +1,8 @@
 import type { Env } from '../env';
 
 export interface SessionRecoveryOptions {
+  /** Revalidate the exact durable delivery after awaited recovery prerequisites. */
+  isDeliveryStillAuthorized?: () => Promise<boolean>;
   excludedNodeId?: string | null;
   evictionFence?: {
     workspaceId: string;

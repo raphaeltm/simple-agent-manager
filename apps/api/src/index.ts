@@ -81,6 +81,7 @@ import { aiProxyAnthropicRoutes } from './routes/ai-proxy-anthropic';
 import { aiProxyPassthroughRoutes } from './routes/ai-proxy-passthrough';
 import { analyticsIngestRoutes } from './routes/analytics-ingest';
 import { apiTokenRoutes } from './routes/api-tokens';
+import { artifactsConfigRoutes } from './routes/artifacts-config';
 import { authRoutes } from './routes/auth';
 import { bootstrapRoutes } from './routes/bootstrap';
 import { cachedCommandRoutes } from './routes/cached-commands';
@@ -204,7 +205,8 @@ app.use('*', async (c, next) => {
   await next();
 });
 
-// Proxy non-API subdomains to their respective Cloudflare Pages deployments.
+// Proxy non-API subdomains to their respective Cloudflare Pages deployments (or, on a
+// self-hosted deployment with an ASSETS binding, serve app.* from the Worker's assets).
 // The Worker wildcard route *.{domain}/* intercepts ALL subdomains, so we must
 // proxy app.* and www.* requests to Pages before any other middleware runs.
 // The apex domain is redirected to www.* for the marketing site.
@@ -220,7 +222,15 @@ app.use('*', async (c, next) => {
     baseDomain,
     appPagesProjectName: c.env.PAGES_PROJECT_NAME,
     wwwPagesProjectName: c.env.WWW_PAGES_PROJECT_NAME,
+    hasWebAssets: Boolean(c.env.ASSETS),
   });
+
+  // Self-hosted deployments bind the apps/web build as ASSETS and serve app.* from it.
+  // Cloudflare deployments have no ASSETS binding and keep proxying to Pages. (`c.env.ASSETS` is
+  // re-checked only so TypeScript narrows the optional binding.)
+  if (pagesTarget.type === 'assets' && c.env.ASSETS) {
+    return c.env.ASSETS.fetch(c.req.raw);
+  }
 
   if (pagesTarget.type === 'missing-config') {
     return c.text(pagesTarget.message, 503);
@@ -272,10 +282,7 @@ app.get('/health', (c) => {
 });
 
 // Public config — exposes feature flags the UI needs before auth
-app.get('/api/config/artifacts-enabled', (c) => {
-  applyCacheHeaders(c, 'public-config');
-  return c.json({ enabled: c.env.ARTIFACTS_ENABLED === 'true' && !!c.env.ARTIFACTS });
-});
+app.route('/api/config', artifactsConfigRoutes);
 
 app.route('/api/config', platformCapabilitiesRoutes);
 

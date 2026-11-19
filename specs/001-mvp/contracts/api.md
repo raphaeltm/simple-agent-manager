@@ -821,6 +821,10 @@ context is valid. Reads use existing archive-owner routing. Missing session/requ
 Answers continue through the existing `POST .../attention/:markerId/resolve`; fixed choices
 must match the saved options exactly, and a request without options accepts a typed answer.
 
+### Start or resume despite a recorded provider limit
+
+`POST /api/projects/:projectId/tasks/:taskId/provider-limit/start-anyway` requires an approved authenticated task owner with project `task:write`. No body is required. Existing waiting admission holds return `202 { status: "starting", taskId }`. Waiting callback-origin holds on sleeping VM sessions return `202 { status: "waking", taskId }` after recording a bounded override for the same credential, profile and skill. Saved recovery requires current session-owner authority, an unexpired restorable sleeping snapshot and matching source credential generation. An existing waking claim is retained and its runner nudged; an unclaimed snapshot uses normal recovery. The operation does not re-post the original prompt or change accounts. A fresh provider rejection removes the override and parks normally. Changed, terminal or already-approved waits return `409`; another member returns `403`. An uncertain runner response retains the accepted override and claim and returns `409` asking the owner to refresh. Chat task embeds expose `providerLimitCanResumeAnyway` for the owner-facing **Resume anyway** control; the endpoint revalidates authority and snapshot eligibility.
+
 ### Resume a blocked provider-limit task
 
 `POST /api/projects/:projectId/tasks/:taskId/provider-limit/resume` requires an approved, authenticated task owner with project `task:write`. No body is required. Returns `202 { status: "waking", taskId }` after accepting the current credential selection and starting recovery from the retained sleeping snapshot (or nudging a first-dispatch admission wait). Returns `403` for another member and `409` when the wait is no longer blocked, sleep is incomplete, or a snapshot cannot be restored. Repeated approval is fenced against the current wait; retained WIP is never discarded.
@@ -843,3 +847,14 @@ Shadow probes (`context_shadow=1`) are internal rows only. They cannot link a re
 The existing publish-job events, artifact init/complete and compose release callbacks additionally accept a `publish-job` callback JWT bound to `{jobId,projectId,environmentId,agentProfileId,attempt}`. It expires at the persisted builder deadline and is valid only for the matching nonterminal, non-shadow Cloudflare job. Source-workspace/node liveness is not required. Other callback routes (including context uploads, registry credentials and token renewal) reject this scope.
 
 `GET /api/projects/:id/deployment-publish-jobs/:jobId/spec` uses this job identity to return the verified context's presigned GET, size, SHA, Compose project name, non-secret build variables and secret key names. Job tokens cannot request another job or environment. Artifact keys use the exact job-and-attempt upload namespace. Release submissions from job tokens must include matching job ID, attempt, environment, profile and task; the legacy unfenced path remains workspace-token-only. Event updates fence the current attempt atomically, and event release metadata must reference the already-linked release.
+
+
+### Explicit account linking
+
+`POST /api/auth/account-link/request` accepts `{provider: "github" | "gitlab"}` with a human browser session and same-app Origin. A verified stored email and working system email sender are required. It sends a one-time, session/provider-bound email sign-in check (default five minutes) and returns `{success:true}`. The confirmation URL uses a fragment so proof does not enter HTTP referrers or access logs. A new request replaces that session/provider's previous proof.
+
+`POST /api/auth/link-social` uses BetterAuth's existing static OAuth callback and accepts the confirmation proof as `additionalData.samLinkToken`. Linking refuses Google, missing/expired/replayed proof, another session, agent sign-in sessions and suspended users. The same live session, user, provider and proof deadline are rechecked before the OAuth callback mutates accounts (including existing-link token updates).
+
+`POST /api/auth/unlink-account` accepts BetterAuth `{accountId}`. Only the caller's GitHub/GitLab accounts can be removed; removing the last provider requires usable verified email sign-in. The affected account owner receives a linked-provider security notification at their preserved SAM email. Explicit links may have a different provider email; future sign-ins preserve an already-verified SAM email. A lookup failure aborts sign-in rather than replacing identity.
+
+GitHub repository errors distinguish `403 GITHUB_NOT_CONNECTED`, `401 GITHUB_REAUTH_REQUIRED`, `503 GITHUB_UNAVAILABLE`, `409 GITHUB_APP_NOT_CONFIGURED` and `404 FEATURE_UNAVAILABLE`. Only actual authorization failures request reauthentication; provider outages offer retry. Unverified provider-linked accounts receive a provider-sign-in note instead of an email code, and code redemption is refused without deleting links or sessions.

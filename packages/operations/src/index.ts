@@ -69,11 +69,13 @@ export {
   AgentCancelInputSchema,
   type AgentFileResult,
   type AgentLinkInput,
+  type AgentResultInput,
   type AgentReviewInput,
   AgentReviewInputSchema,
   AgentUpdateInputSchema,
   cancelAgentAsk,
   fileAgentAsk,
+  fileAgentResult,
   fileAgentReview,
   updateAgentAsk,
 } from './inbox-agent-core';
@@ -156,6 +158,20 @@ export {
 } from './inbox-write-core';
 export { projectAccounts, type ProjectAccountsInput } from './insights-accounts';
 export {
+  PROJECT_INSIGHTS_METHODS,
+  projectInsights,
+  type ProjectInsightsInput,
+  projectInsightsInputError,
+  ProjectInsightsInputSchema,
+  type ProjectInsightsMethod,
+} from './insights-agent';
+export {
+  getInsightsAgentRateLimit,
+  INSIGHTS_AGENT_SETTINGS,
+  type InsightsAgentRateLimit,
+  type InsightsAgentSettingName,
+} from './insights-agent-settings';
+export {
   INSIGHTS_CLOUDFLARE_COST_SETTINGS,
   type InsightsCloudflareCostSettingName,
 } from './insights-cloudflare-cost-settings-definition';
@@ -166,10 +182,7 @@ export {
   type InstallationHealthInput,
   utcWeekStart,
 } from './insights-installation';
-export {
-  readCloudflareCost,
-  summarizeCloudflareCost,
-} from './insights-installation-cloudflare';
+export { readCloudflareCost, summarizeCloudflareCost } from './insights-installation-cloudflare';
 export {
   densityFromRuns,
   newMachineReasonsFor,
@@ -259,6 +272,7 @@ export {
 } from './platform-operations';
 export { type ProfileAccountBinding } from './port-types';
 export {
+  type ArchiveCheckinHold,
   type InboxAskAnnouncement,
   type InboxAskNoticeOutcome,
   type InboxAskNoticeRow,

@@ -33,7 +33,11 @@ import {
   AgentEmailMainDomainChangedError,
   AgentEmailSetupRefusedError,
 } from '../services/agent-email/setup-errors';
-import { activeAgentEmailSender, agentEmailConfig } from '../services/agent-email/setup-state';
+import {
+  activeAgentEmailSender,
+  agentEmailConfig,
+  hasAgentEmailBinding,
+} from '../services/agent-email/setup-state';
 import { IoTimeoutError, withDeadline } from '../services/fetch-timeout';
 
 const LoopbackSchema = v.object({
@@ -130,6 +134,14 @@ adminAgentEmailRoutes.post('/setup', jsonValidator(SetupSchema), async (c) => {
 });
 
 adminAgentEmailRoutes.post('/loopback', jsonValidator(LoopbackSchema), async (c) => {
+  // The loopback test sends From the loopback address and expects the reply From the trigger's
+  // own address. Over a self-hosted box's SMTP relay both go out From SMTP_FROM (Reply-To carries
+  // the agent address), so the round trip could never confirm: refuse it there instead.
+  if (!hasAgentEmailBinding(c.env)) {
+    throw errors.conflict(
+      'The loopback test needs Cloudflare Email Routing; on a self-hosted box, send a test email from an allowed sender instead'
+    );
+  }
   const sender = await activeAgentEmailSender(c.env);
   if (!sender) throw errors.conflict('Agent email is not enabled on this deployment');
   const recipient = parseAgentEmailRecipient(c.req.valid('json').to, c.env.BASE_DOMAIN);

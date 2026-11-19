@@ -13,6 +13,15 @@ You are an autonomous task executor. The user has described a task above. Your j
 
 ---
 
+For CI waits, default to `check_suite.completed` + `workflow_run.completed` for the
+full 40-character PR head SHA. Opt in to `check_run.completed` only for early
+per-job failure or job-specific progress. Reconcile all current GitHub checks on
+every resume; one suite/workflow completion includes failures and is not all-CI
+success. Subscriptions stay active after delivery: while required checks are
+pending on the same SHA, retain the existing subscription and fallback and end
+your turn again; do not recreate them on each wake. Keep one bounded fallback schedule for missing terminal webhooks; follow
+`docs/guides/ci-wait-recovery.md` for registration, reconciliation and cleanup.
+
 ## Phase 0: Initialize Workflow Tracker (MANDATORY FIRST STEP)
 
 **Before doing ANYTHING else**, create a TodoWrite with all phases of this workflow. This todo list survives context compaction and ensures no phase is skipped even if the conversation is continued in a new session.

@@ -1,4 +1,5 @@
-import type { TaskRuntimeLivenessPort } from '../durable-objects/project-data/ports';
+import type { TaskRuntimeLivenessPort } from '@simple-agent-manager/project-data';
+
 import {
   classifyTaskRuntimeDelivery,
   isSupersededTerminalReason,

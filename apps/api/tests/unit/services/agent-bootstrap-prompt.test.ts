@@ -32,5 +32,9 @@ describe('agent bootstrap prompt helpers', () => {
     expect(buildSamBootstrapInstructions({ contextType: 'conversation' })).toContain(
       'MUST call the `get_instructions` tool'
     );
+    // The first thing an agent reads points it at how to reach the person.
+    expect(buildSamBootstrapInstructions({ contextType: 'task' })).toContain(
+      'how to deliver your answer: the person may not read this chat'
+    );
   });
 });
