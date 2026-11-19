@@ -1478,6 +1478,24 @@ a pending request once and delivers the decision to the requesting agent's chat.
 `{ "approval", "delivered" }`. Returns `409` if the request was already decided or has expired,
 and `404` for an unknown ID.
 
+### `GET /api/admin/nodes/stranded`
+
+Superadmin only. Managed VM nodes on the installation's own cloud credential that are
+`destroying`, oldest failure first: `{ nodes, total }`. Each node carries its owner, provider,
+server ID (null when none was recorded), `cleanupBlockedSince`, `cleanupBlockedReason` and a
+truncated error. `limit` defaults to 50, at most 200; `total` counts every match.
+
+### `POST /api/admin/nodes/:id/operator-deletion`
+
+Superadmin only. Remove a stuck node on the installation's own capacity after checking the
+provider. Body: `{ "confirmation": "<node ID>", "note": "<what you checked>" }`. Returns `400`
+when the confirmation is not the node ID or the note is empty, `403` for a node on its owner's
+cloud account, `409` when the node is not `destroying` with a recorded teardown failure, is
+providerless and still inside the provisioning window, has an active workspace, a task placement
+claim or a recent heartbeat, or when any usable credential still finds its server, and `503` when
+a provider lookup failed temporarily. On success the node's records are removed as `DELETE`
+does, audited as `operator_attested_manual_deletion`; nothing is deleted at the provider.
+
 ## Admin Settings
 
 These endpoints back [Admin → Settings](/docs/guides/admin-settings/) and require an approved,

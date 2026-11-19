@@ -725,6 +725,8 @@ environment it hosts.
 
 **I already deleted this server** isn't offered for machines you enrolled yourself (use **Delete** for those). On a machine that runs on SAM's own cloud account, SAM refuses
 with **This server runs on SAM-managed capacity; contact an operator**, so ask your administrator.
+An administrator removes those from **Admin → Infrastructure → Stuck nodes**; see
+[Stuck nodes on SAM's capacity](/docs/guides/admin-settings/#stuck-nodes-on-sams-capacity).
 
 ## The session has ended
 

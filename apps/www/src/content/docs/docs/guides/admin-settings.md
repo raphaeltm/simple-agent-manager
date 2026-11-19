@@ -505,7 +505,33 @@ SAM first attempts to preserve existing recovery sources. At the deadline, it re
 
 Two related settings control warning and alert frequency: `operations.nodeCleanupRefusalWarnAfterMs` defaults to 300,000 milliseconds (five minutes), and `operations.nodeCleanupOwnershipAlertIntervalMs` defaults to 86,400,000 milliseconds (one day).
 
-Active workspaces and provider ownership checks remain protected. When SAM can't retire a blocked VM at the deadline (often, but not always, because it can't prove who owns the server), it keeps the VM and records an error in **Admin → Errors**, at most once per node per `operations.nodeCleanupOwnershipAlertIntervalMs` (one day by default): **VM may still exist at provider: _provider_ _server id_; cleanup requires ownership/operator resolution**. Before deleting anything, open the node and read its **Cleanup blocked since…** reasons. Delete the server in that provider's console only when the reason is `provenance` (or `strict_provider_ownership_or_deletion_failure`) and you have checked that it belongs to your installation and runs nothing you need. If the reasons include `active_workspace` or `warm_placement_claim`, or the node hosts app deployments, resolve that first instead. Once the server is gone, the node's owner can remove the node with **I already deleted this server** on its page, after selecting **Delete Node** first if the node shows **Stopped**; see [SAM can't delete a node](/docs/guides/session-troubleshooting/#sam-cant-delete-a-node). That button refuses nodes on the installation's own cloud account, and the app has no other way to remove such a node yet.
+Active workspaces and provider ownership checks remain protected. When SAM can't retire a blocked VM at the deadline (often, but not always, because it can't prove who owns the server), it keeps the VM and records an error in **Admin → Errors**, at most once per node per `operations.nodeCleanupOwnershipAlertIntervalMs` (one day by default): **VM may still exist at provider: _provider_ _server id_; cleanup requires ownership/operator resolution**. Before deleting anything, open the node and read its **Cleanup blocked since…** reasons. Delete the server in that provider's console only when the reason is `provenance` (or `strict_provider_ownership_or_deletion_failure`) and you have checked that it belongs to your installation and runs nothing you need. If the reasons include `active_workspace` or `warm_placement_claim`, or the node hosts app deployments, resolve that first instead. Once the server is gone, the node's owner can remove the node with **I already deleted this server** on its page, after selecting **Delete Node** first if the node shows **Stopped**; see [SAM can't delete a node](/docs/guides/session-troubleshooting/#sam-cant-delete-a-node). That button refuses nodes on the installation's own cloud account; a superadmin removes those from **Admin → Infrastructure → Stuck nodes** instead (below).
+
+### Stuck nodes on SAM's capacity
+
+**Admin → Infrastructure → Stuck nodes** lists managed VM nodes on the installation's own cloud
+credential that are `destroying` (`listStrandedPlatformNodes()` in
+`apps/api/src/services/node-operator-deletion.ts`), oldest failure first, with the reason SAM
+recorded. Two reasons mean SAM can never finish by itself, because the node has no server ID and
+only the exact credential it was created with could prove no server exists:
+
+- `teardown_credential_generation_changed`: that platform credential was re-saved or rotated
+  since. A re-saved credential is never accepted as proof: SAM cannot show it is the same
+  provider account.
+- `teardown_allocation_unresolved`: the create failed before SAM got a server ID, and the
+  credential's complete inventory shows no server. SAM keeps retrying (a late server would
+  still be found and deleted) but never treats an empty list as proof.
+
+After checking the provider's console yourself, select **Server is gone…**, type the node ID
+and say what you checked. SAM then asks the provider with every credential it still has and
+refuses if any returns a server for the node. It also refuses if the node has an active
+workspace, a task holding a placement on it, a recent heartbeat, no recorded teardown failure,
+or (with no server ID) was created inside the provisioning window; these are re-checked in the
+same database write that records the proof (`recordOperatorNodeDeletion()`). It deletes nothing
+at the provider. The removal is recorded as `operator_attested_manual_deletion` in the node's
+health events and, with your note, name and time, in the Operations audit log
+(`admin_operator_node_deletion`). Nodes on a user's own cloud account are refused here; their
+owner removes them from the node page.
 
 Blocked nodes show the time and reason in their error message on the node list and detail page, as **Cleanup blocked since** _time_ followed by reason codes; [A node won't go away](/docs/guides/session-troubleshooting/#a-node-wont-go-away) explains each one.
 
