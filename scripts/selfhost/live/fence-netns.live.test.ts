@@ -276,7 +276,11 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
     it('latches a transient flush-and-restore from the kernel event stream', async () => {
       const pair = await startPair();
       lab.nft(lab.fenced, ['-f', rulesFile]);
-      await waitFor(() => existsSync(join(pair.state, 'lost')));
+      await waitFor(
+        () =>
+          existsSync(join(pair.state, 'lost')) &&
+          readFileSync(pair.attestation, 'utf8') === 'lost\n'
+      );
       expect(readFileSync(pair.attestation, 'utf8')).toBe('lost\n');
       expect(readFileSync(join(pair.state, 'events.jsonl'), 'utf8')).toContain('egress_fence.lost');
       stopFence();
@@ -285,7 +289,11 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
     it('fails closed when the kernel event observer exits', async () => {
       const pair = await startPair();
       lab.killInNamespace(lab.fenced, 'nft monitor');
-      await waitFor(() => existsSync(join(pair.state, 'lost')));
+      await waitFor(
+        () =>
+          existsSync(join(pair.state, 'lost')) &&
+          readFileSync(pair.attestation, 'utf8') === 'lost\n'
+      );
       expect(readFileSync(pair.attestation, 'utf8')).toBe('lost\n');
       stopFence();
     });

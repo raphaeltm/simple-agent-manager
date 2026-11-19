@@ -277,3 +277,14 @@ assertion was a false positive; the exact comparison plus native-parent control 
 Self-host tests install the broker's isolated npm lockfile. CI runs the kernel lab in a disposable
 privileged Docker container with its own network namespaces; no workspace sudo or apt is needed.
 For an `s3://` operator store, `R2_S3_REGION` remains mandatory when `R2_S3_ENDPOINT` is set.
+
+### Reconcile generated fence state
+
+On an existing running installation, ordinary deploy and `--init` now reconcile changed fence
+inputs before continuing: stop affected celld, recreate and verify the fence, apply volume
+ownership for its configured UID, then reload the proxy and celld as needed. Services deliberately
+stopped remain stopped. Fresh `--init` only generates files. A failed reconciliation retains
+private retry intent and aborts; repair Compose and rerun deploy. Each Compose command is bounded
+by `SELFHOST_COMPOSE_TIMEOUT_MS` (default `60000` milliseconds); captured output is suppressed
+because Compose can interpolate credentials. Verification honors the same
+`SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS` setting as celld (default `2` seconds).

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { buildProbeScript, parseProbeOutput, type ProbeOutcome } from './fence-probes.js';
 import {
   attestationProblem,
+  boxAttestationProblem,
   dnsChainAddresses,
   judgeTargets,
   missingNameservers,
@@ -363,5 +364,25 @@ describe('public resolver verification', () => {
     expect(dns).toHaveLength(2);
     expect(dns.every((t) => t.expect === 'reachable')).toBe(true);
     expect(targets.some((t) => t.host === '1.1.1.1' && t.port === 2019)).toBe(false);
+  });
+});
+
+describe('configured attestation age', () => {
+  it('honors longer and shorter box settings and the compose default', () => {
+    const text = 'ok 1000\n';
+    expect(
+      boxAttestationProblem(text, 1003, { SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS: '5' })
+    ).toBeNull();
+    expect(
+      boxAttestationProblem(text, 1002, { SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS: '1' })
+    ).toMatch(/limit 1s/);
+    expect(boxAttestationProblem(text, 1002, {})).toBeNull();
+    expect(boxAttestationProblem(text, 1003, {})).toMatch(/limit 2s/);
+    expect(boxAttestationProblem(text, 999, {})).toMatch(/future/);
+  });
+  it.each(['0', '-1', '0.5', 'bad', '9007199254740992'])('refuses invalid age %s', (age) => {
+    expect(() =>
+      boxAttestationProblem('ok 1000', 1000, { SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS: age })
+    ).toThrow(/positive integer/);
   });
 });

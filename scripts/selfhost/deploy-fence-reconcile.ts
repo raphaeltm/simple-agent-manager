@@ -1,0 +1,153 @@
+/** Reconcile generated fence inputs for an existing Compose installation, including --init. */
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+
+import type { PortRange } from './box-settings.js';
+import { commandPath } from './command-path.js';
+import { composeFilesFor } from './compose-env.js';
+import { SELFHOST_DIR } from './deploy-steps.js';
+import { metadataProxyEnabled } from './egress-fence.js';
+import { writeFenceFiles } from './fence-state.js';
+import { writePrivateFile } from './secret-files.js';
+
+/** Bounds daemon discovery, stop and recreate; --wait also checks fence health before celld. */
+const DEFAULT_COMPOSE_TIMEOUT_MS = 60_000;
+const COMPOSE_OUTPUT_MAX_BYTES = 64 * 1024;
+const SERVICES = ['egress-fence', 'celld', 'gce-metadata-proxy'] as const;
+
+export async function writeAndReconcileFence(input: {
+  stateDir: string;
+  envFile: string;
+  box: Readonly<Record<string, string>>;
+  leaseRange: PortRange;
+}): Promise<void> {
+  const { stateDir, envFile, box } = input;
+  const marker = join(stateDir, 'fence-reconcile-pending.json');
+  const existing = ['egress-fence.nft', 'celld.env'].some((name) =>
+    existsSync(join(stateDir, name))
+  );
+  const rawTimeout =
+    process.env.SELFHOST_COMPOSE_TIMEOUT_MS ||
+    box.SELFHOST_COMPOSE_TIMEOUT_MS ||
+    String(DEFAULT_COMPOSE_TIMEOUT_MS);
+  const timeout = Number(rawTimeout);
+  if (!/^\d+$/.test(rawTimeout) || !Number.isSafeInteger(timeout) || timeout <= 0) {
+    throw new Error('SELFHOST_COMPOSE_TIMEOUT_MS must be a positive integer');
+  }
+  const compose = (args: string[]) => {
+    const result = spawnSync(
+      commandPath('docker'),
+      [
+        'compose',
+        ...composeFilesFor(box, SELFHOST_DIR).flatMap((file) => ['-f', file]),
+        '--env-file',
+        envFile,
+        ...args,
+      ],
+      {
+        cwd: SELFHOST_DIR,
+        env: { ...process.env, ...box, SAM_SELFHOST_STATE_DIR: stateDir },
+        encoding: 'utf8',
+        timeout,
+        maxBuffer: COMPOSE_OUTPUT_MAX_BYTES,
+      }
+    );
+    // Compose output can contain interpolated credentials. Never log or propagate it.
+    if (result.error || result.status !== 0)
+      throw new Error('fence reconciliation failed: Compose command failed');
+    return result.stdout;
+  };
+
+  // Query before changing the bind mount: inability to discover an existing installation must
+  // fail before disturbing its running fence. Fresh --init needs neither Docker nor a daemon.
+  const states = new Map<string, string>();
+  if (existing) {
+    const output = compose(['ps', '--all', '--format', 'json']).trim();
+    try {
+      // Compose versions emit either a JSON array or one object per line.
+      const rows: unknown = output.startsWith('[')
+        ? JSON.parse(output)
+        : output
+            .split('\n')
+            .filter(Boolean)
+            .map((line) => JSON.parse(line));
+      if (!Array.isArray(rows)) throw new Error('invalid services');
+      for (const row of rows) {
+        if (
+          typeof row !== 'object' ||
+          row === null ||
+          typeof row.Service !== 'string' ||
+          typeof row.State !== 'string'
+        )
+          throw new Error('invalid service');
+        if (SERVICES.some((name) => name === row.Service)) states.set(row.Service, row.State);
+      }
+    } catch {
+      throw new Error('fence reconciliation failed: invalid Compose service state');
+    }
+  }
+
+  let pending = { rules: false, env: false, celld: false, proxy: false };
+  if (existsSync(marker)) {
+    const stored: unknown = JSON.parse(readFileSync(marker, 'utf8'));
+    if (
+      typeof stored !== 'object' ||
+      stored === null ||
+      !('rules' in stored) ||
+      !('env' in stored) ||
+      typeof stored.rules !== 'boolean' ||
+      typeof stored.env !== 'boolean' ||
+      !('celld' in stored) ||
+      typeof stored.celld !== 'boolean' ||
+      !('proxy' in stored) ||
+      typeof stored.proxy !== 'boolean'
+    )
+      throw new Error('invalid pending fence reconciliation');
+    pending = { rules: stored.rules, env: stored.env, celld: stored.celld, proxy: stored.proxy };
+  }
+  const { changed } = await writeFenceFiles(input);
+  pending.rules ||= changed.includes(join(stateDir, 'egress-fence.nft'));
+  pending.env ||= changed.includes(join(stateDir, 'celld.env'));
+  if (!pending.rules && !pending.env) return;
+
+  // Never start a deliberately stopped install. Retain pending work for its next active deploy.
+  const wasActive = (name: string) => ['running', 'restarting'].includes(states.get(name) ?? '');
+  pending.celld ||= wasActive('celld');
+  pending.proxy ||= wasActive('gce-metadata-proxy');
+  const active = wasActive('egress-fence') || pending.celld || pending.proxy;
+  if (existing) writePrivateFile(marker, JSON.stringify(pending));
+  if (!active) return;
+  const consumers = ['celld', 'gce-metadata-proxy'].filter((name) => states.has(name));
+  const recreate = (service: string) =>
+    compose(['up', '-d', '--no-deps', '--force-recreate', '--wait', service]);
+  try {
+    if (pending.celld) compose(['stop', 'celld']);
+    if (pending.rules) {
+      // Missing fence is an invalid existing stack; do not create new services implicitly.
+      if (!states.has('egress-fence')) throw new Error('missing fence service');
+      recreate('egress-fence');
+    }
+    if (pending.env && pending.proxy) {
+      if (metadataProxyEnabled(box)) recreate('gce-metadata-proxy');
+      else compose(['stop', 'gce-metadata-proxy']);
+    }
+    if (pending.celld) {
+      if (pending.rules) compose(['run', '--rm', '--no-deps', 'celld-data-owner']);
+      recreate('celld');
+    }
+    rmSync(marker);
+  } catch {
+    // Keep the marker: a retry must reconcile even though generated files now compare equal.
+    if (consumers.length > 0) {
+      try {
+        compose(['stop', ...consumers]);
+      } catch {
+        /* Report failure without printing credentials. */
+      }
+    }
+    throw new Error(
+      'fence reconciliation failed; credential consumers stopped where possible; retry deploy after repairing Compose'
+    );
+  }
+}

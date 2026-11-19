@@ -28,11 +28,11 @@ function composeArgs(input: { composeFiles: string[]; envFile: string }, args: s
     ...args,
   ];
 }
-import { resolveTunnelPortRange } from './box-settings.js';
+import { loadBoxEnv, resolveTunnelPortRange } from './box-settings.js';
 import { EGRESS_FENCE_TABLE, parseNameservers } from './egress-fence.js';
 import { buildProbeScript, parseProbeOutput, type ProbeOutcome } from './fence-probes.js';
 import {
-  attestationProblem,
+  boxAttestationProblem,
   dnsChainAddresses,
   judgeTargets,
   missingNameservers,
@@ -40,7 +40,6 @@ import {
   type VerifyTarget,
   verifyTargets,
 } from './fence-verify.js';
-import { parseDotenv } from './secret-files.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../..');
 const SELFHOST_DIR = join(REPO_ROOT, 'deploy/selfhost');
@@ -50,8 +49,6 @@ const DEFAULT_PUBLIC_NAME = 'example.com';
 const CONTROL_UID = 65534;
 /** Above the ~1 s a refused TCP connect() takes (it is reported on the first SYN retransmit). */
 const DEFAULT_PROBE_TIMEOUT_SECONDS = 4;
-/** Same default as SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS in docker-compose.yml. */
-const DEFAULT_ATTESTATION_MAX_AGE_SECONDS = 2;
 const ATTESTATION_PATH = '/run/sam-egress-fence/attestation';
 
 interface Run {
@@ -66,7 +63,7 @@ function run(command: string, args: string[]): Run {
 
 /** Compose with every file the box runs with (its COMPOSE_FILE), as the stack was started. */
 function compose(envFile: string, args: string[]): Run {
-  const box = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
+  const box = loadBoxEnv(envFile, SELFHOST_DIR);
   return run(
     'docker',
     composeArgs({ composeFiles: composeFilesFor(box, SELFHOST_DIR), envFile }, args)
@@ -149,10 +146,10 @@ function checkService(envFile: string, probeContainer: string, failures: string[
     );
   }
   const attestation = compose(envFile, ['exec', '-T', 'egress-fence', 'cat', ATTESTATION_PATH]);
-  const problem = attestationProblem(
+  const problem = boxAttestationProblem(
     attestation.output,
     Math.floor(Date.now() / 1000),
-    DEFAULT_ATTESTATION_MAX_AGE_SECONDS
+    loadBoxEnv(envFile, SELFHOST_DIR)
   );
   if (problem) failures.push(`${problem}; celld stops serving without it`);
 }
@@ -165,7 +162,7 @@ function localAddresses(): string[] {
 }
 
 async function verify(envFile: string, publicProbe: string, publicName: string): Promise<string[]> {
-  const box = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
+  const box = loadBoxEnv(envFile, SELFHOST_DIR);
   const own = localAddresses();
   const targets = await verifyTargets({
     box,

@@ -65,6 +65,7 @@ import {
 } from './celld-config.js';
 import { ASSETS_DIR, CELLD_MAIN, prepareCelldProject, writeCelldConfig } from './celld-project.js';
 import { commandPath } from './command-path.js';
+import { writeAndReconcileFence } from './deploy-fence-reconcile.js';
 import {
   applyAllMigrations,
   bucketOf,
@@ -78,7 +79,6 @@ import {
   SELFHOST_DIR,
   syncGatewayEnv,
 } from './deploy-steps.js';
-import { writeFenceFiles } from './fence-state.js';
 import { inboundMailWorkerVars } from './inbound-mail-settings.js';
 import {
   ensureMailCollectorPassword,
@@ -164,6 +164,7 @@ function buildApiDependencies(): void {
 
 interface DeployInputs {
   box: Record<string, string>;
+  envFile: string;
   stateDir: string;
   secretsPath: string;
   projectDir: string;
@@ -209,6 +210,7 @@ function readDeployInputs(): DeployInputs {
   if (!box.CELLD_BUCKET) throw new Error(`${envFile}: CELLD_BUCKET is required`);
   return {
     box,
+    envFile,
     stateDir,
     secretsPath,
     projectDir: join(stateDir, 'project'),
@@ -389,7 +391,12 @@ async function main(): Promise<void> {
   const { keys, tunnelSettings, collectorPasswordPath, collectorPassword } =
     prepareBoxState(inputs);
   if (!inputs.dryRun) {
-    await writeFenceFiles({ stateDir, box, leaseRange: tunnelSettings.range });
+    await writeAndReconcileFence({
+      stateDir,
+      box,
+      envFile: inputs.envFile,
+      leaseRange: tunnelSettings.range,
+    });
   }
   if (inputs.init) return;
   const { installationId, secrets } = resolveWorkerSecrets(inputs, keys);

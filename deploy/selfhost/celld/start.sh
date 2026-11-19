@@ -19,8 +19,8 @@
 # 1. Before starting: wait up to SAM_EGRESS_FENCE_WAIT_SECONDS for both, else exit 1. After a
 #    reboot Docker restarts containers without compose ordering; this is what keeps celld from
 #    serving unfenced.
-# 2. While running: check every SAM_EGRESS_FENCE_CHECK_SECONDS. On a failure, check once more
-#    at once (a single fork failure must not restart celld), then SIGKILL celld and exit 1.
+# 2. While running: check every SAM_EGRESS_FENCE_CHECK_SECONDS. On a failure,
+#    immediately SIGKILL celld and exit 1.
 #    SIGKILL, not SIGTERM: celld's graceful drain would let in-flight Worker code keep making
 #    connections without the fence for up to its shutdown budget. celld is crash-safe (every
 #    acknowledged write is in the bucket); Docker restarts the container, which waits at step 1.
@@ -28,7 +28,7 @@ set -euo pipefail
 
 probes="${SAM_EGRESS_FENCE_PROBES:?SAM_EGRESS_FENCE_PROBES is not set; run pnpm selfhost:deploy --init}"
 attestation="${SAM_EGRESS_FENCE_ATTESTATION:?SAM_EGRESS_FENCE_ATTESTATION is not set}"
-max_age="${SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS:-20}"
+max_age="${SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS:-2}"
 wait_seconds="${SAM_EGRESS_FENCE_WAIT_SECONDS:-60}"
 check_seconds="${SAM_EGRESS_FENCE_CHECK_SECONDS:-0.1}"
 case "$check_seconds" in 0.1|0.05|0.01) ;; *) echo "invalid fence check interval" >&2; exit 64;; esac

@@ -254,9 +254,24 @@ export function attestationProblem(
   const match = /^ok (\d+)\s*$/.exec(text);
   if (!match) return `the fence service has not attested (got "${text.trim().slice(0, 40)}")`;
   const age = nowSeconds - Number(match[1]);
+  if (age < 0) return 'the fence service attestation is in the future';
   return age > maxAgeSeconds
     ? `the fence service's attestation is ${age}s old (limit ${maxAgeSeconds}s)`
     : null;
+}
+
+/** Match Compose's celld entrypoint age setting, including its validated default. */
+export function boxAttestationProblem(
+  text: string,
+  nowSeconds: number,
+  box: Readonly<Record<string, string>>
+): string | null {
+  const raw = box.SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS || '2';
+  const maxAge = Number(raw);
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(maxAge) || maxAge <= 0) {
+    throw new Error('SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS must be a positive integer');
+  }
+  return attestationProblem(text, nowSeconds, maxAge);
 }
 
 /** Nameserver addresses opened by chain `dns` in `nft list chain inet <table> dns` output. */
