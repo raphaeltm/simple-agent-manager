@@ -83,7 +83,7 @@ describe('caddy/start.sh', () => {
 
   // A malformed bound used to make `[ -ge ]` error, which `if` reads as false: the range check
   // was skipped and Caddy started with a box port inside the real range.
-  it.each([
+  it.each<Record<string, string>>([
     { REVERSE_TUNNEL_PORT_RANGE_START: '1:2' },
     { REVERSE_TUNNEL_PORT_RANGE_END: '29999:1' },
     { REVERSE_TUNNEL_PORT_RANGE_START: '20000x' },
