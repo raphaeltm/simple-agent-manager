@@ -1,0 +1,2 @@
+# Local CA (caddy's own). For local proofs only: browsers and celld's outbound fetch do not trust it.
+tls internal
