@@ -6,14 +6,14 @@
  * self-host-inbound.ts), and replies need an SMTP transport, so the profile without one is refused
  * here rather than deploying addresses whose agents cannot answer.
  */
-import { composeProfiles } from './mail-settings.js';
+import { composeProfileEnabled } from './mail-settings.js';
 
 const MAIL_IN_PROFILE = 'mail-in';
 
 type Box = Readonly<Record<string, string>>;
 
 export function inboundMailEnabled(box: Box): boolean {
-  return composeProfiles(box).includes(MAIL_IN_PROFILE);
+  return composeProfileEnabled(box, MAIL_IN_PROFILE);
 }
 
 /** Worker vars for inbound agent email ({} when the profile is off). */
