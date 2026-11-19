@@ -3560,6 +3560,26 @@ export async function recordQuestionAsked(
   );
 }
 
+/**
+ * The person archived a pending ACP interaction (a permission, form or link request) from their
+ * inbox: it leaves the inbox, its marker stays unresolved, and the interaction stays pending and
+ * answerable in the chat. Returns rows changed (0 when already archived or resolved).
+ */
+export async function archiveInteractionMarker(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  markerId: string
+): Promise<number> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'archiveInteractionMarkerFromInbox',
+    (stub) => stub.archiveInteractionMarkerFromInbox(sessionId, markerId),
+    'mutation'
+  );
+}
+
 /** The person archived a question held in D1 `asks`: a live update only, nothing reaches the agent. */
 export async function recordQuestionArchived(
   env: Env,

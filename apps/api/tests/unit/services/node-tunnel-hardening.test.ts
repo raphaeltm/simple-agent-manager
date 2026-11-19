@@ -4,6 +4,7 @@ import './node-tunnel-fixture';
 import { markProviderCreateNotDispatched, ProviderError } from '@simple-agent-manager/providers';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { GcpApiError } from '../../../src/services/gcp-errors';
 import { NodeAllocationUncertainError } from '../../../src/services/node-allocation-recovery';
 import { releaseDurableTunnelBeforeVm } from '../../../src/services/node-provisioning-predicates';
 import {
@@ -637,5 +638,165 @@ describe('a durable allocation that ends before any create POST releases its tun
     });
     expect(journal(node.id)).toMatchObject([{ status: 'active' }]);
     expect(cf.liveTunnels()).toHaveLength(1);
+  });
+});
+
+describe('terminal GCP failures before the provider create was dispatched', () => {
+  it('records exact absence after a resolved binding upgrade and strict teardown needs no new token', async () => {
+    const node = await freshNode();
+    mocks.createProvider.mockResolvedValue({
+      ...provider, providerName: 'gcp',
+      exactCredentialBinding: { credentialSource: 'user', credentialReference: 'credentials:resolved', credentialVersion: 7, credentialFingerprint: 'sha256:resolved' },
+    });
+    const failure = markProviderCreateNotDispatched(
+      new GcpApiError({
+        step: 'sts_exchange',
+        statusCode: 400,
+        message: 'GCP STS token exchange failed (400)',
+        rawBody: JSON.stringify({ error: 'invalid_grant' }),
+      })
+    );
+    mocks.createVM.mockRejectedValueOnce(failure);
+    await provisionNode(node.id, env);
+    expect(readNode(node.id)).toMatchObject({
+      status: 'error',
+      providerInstanceId: null,
+      proof: expect.any(String),
+    });
+    expect(mocks.createVM).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteVM).not.toHaveBeenCalled();
+    // The proof is server-written on this exact incarnation, not inferred from error text.
+    const { deleteNodeResourcesStrict } =
+      await import('../../../src/services/strict-node-deletion');
+    mocks.createProvider.mockRejectedValue(new Error('credential can no longer mint a token'));
+    const calls = mocks.createProvider.mock.calls.length;
+    await expect(deleteNodeResourcesStrict(node.id, 'user-1', env)).resolves.toMatchObject({
+      providerVm: 'no-instance',
+    });
+    expect(mocks.createProvider).toHaveBeenCalledTimes(calls);
+  });
+
+  it('refuses absence when the resolved binding changes after the identity claim', async () => {
+    const node = await freshNode();
+    mocks.createProvider.mockResolvedValue({
+      ...provider, providerName: 'gcp',
+      exactCredentialBinding: { credentialSource: 'user', credentialReference: 'credentials:resolved', credentialVersion: 7, credentialFingerprint: 'sha256:resolved' },
+    });
+    mocks.createVM.mockImplementationOnce(async () => {
+      const bound = sqlite.prepare('SELECT placement_credential_fingerprint AS fingerprint FROM nodes WHERE id=?').get(node.id);
+      expect(bound).toEqual({ fingerprint: 'sha256:resolved' });
+      sqlite.prepare('UPDATE nodes SET placement_credential_fingerprint=? WHERE id=?').run('sha256:rotated', node.id);
+      throw markProviderCreateNotDispatched(new GcpApiError({ step: 'sts_exchange', statusCode: 400, message: 'STS refused' }));
+    });
+    await provisionNode(node.id, env);
+    expect(mocks.createVM).toHaveBeenCalledTimes(1);
+    expect(readNode(node.id)).toMatchObject({ status: 'error', proof: null });
+  });
+
+  it.each([
+    ['fully absent', null, null, false],
+    ['weak proof only', 1, null, false],
+    ['strong proof present', 1, 'sha256:original', false],
+    ['strong proof mismatched', 1, 'sha256:original', true],
+  ] as const)(
+    'fences terminal absence for binding state: %s',
+    async (_state, version, fingerprint, mutate) => {
+      const node = await freshNode();
+      sqlite
+        .prepare(
+          'UPDATE nodes SET placement_credential_source=?, placement_credential_reference=?, placement_credential_version=?, placement_credential_fingerprint=? WHERE id=?'
+        )
+        .run(
+          version === null ? null : 'user',
+          version === null ? null : 'credentials:cred-1',
+          version,
+          fingerprint,
+          node.id
+        );
+      mocks.createProvider.mockResolvedValue({ ...provider, providerName: 'gcp' });
+      mocks.createVM.mockImplementationOnce(async () => {
+        if (mutate)
+          sqlite
+            .prepare('UPDATE nodes SET placement_credential_fingerprint=? WHERE id=?')
+            .run('sha256:rotated', node.id);
+        throw markProviderCreateNotDispatched(
+          new GcpApiError({ step: 'sts_exchange', statusCode: 400, message: 'STS refused' })
+        );
+      });
+      await provisionNode(node.id, env);
+      expect(mocks.createVM).toHaveBeenCalledTimes(1);
+      expect(readNode(node.id)).toMatchObject({
+        status: 'error',
+        proof: mutate ? null : expect.any(String),
+      });
+    }
+  );
+
+  it('a previously unproven incarnation cannot gain absence from a later unsent failure', async () => {
+    const node = await freshNode();
+    sqlite
+      .prepare('UPDATE nodes SET runtime_termination_confirmed_at=NULL WHERE id=?')
+      .run(node.id);
+    mocks.createProvider.mockResolvedValue({ ...provider, providerName: 'gcp' });
+    mocks.createVM.mockRejectedValueOnce(
+      markProviderCreateNotDispatched(
+        new GcpApiError({ step: 'sts_exchange', statusCode: 400, message: 'STS refused' })
+      )
+    );
+    await provisionNode(node.id, env);
+    expect(mocks.createVM).toHaveBeenCalledTimes(1);
+    expect(readNode(node.id)).toMatchObject({ status: 'error', proof: null });
+  });
+
+  it.each(['proof', 'placement'] as const)(
+    'does not overwrite a changed %s after recording absence but before recording failure',
+    async (changed) => {
+      const node = await freshNode();
+      mocks.createProvider.mockResolvedValue({ ...provider, providerName: 'gcp' });
+      mocks.createVM.mockRejectedValueOnce(
+        markProviderCreateNotDispatched(
+          new GcpApiError({ step: 'sts_exchange', statusCode: 400, message: 'STS refused' })
+        )
+      );
+      const { persistError } = await import('../../../src/services/observability');
+      let proofBefore: string | null = null;
+      vi.mocked(persistError).mockImplementationOnce(async () => {
+        // Production awaits this durable error report between the two real D1 writes.
+        // Mutate only the field the final guard must protect; keep the original incarnation.
+        proofBefore = readNode(node.id)!.proof;
+        expect(proofBefore).toEqual(expect.any(String));
+        if (changed === 'proof') {
+          sqlite
+            .prepare('UPDATE nodes SET runtime_termination_confirmed_at=NULL WHERE id=?')
+            .run(node.id);
+        } else {
+          sqlite
+            .prepare('UPDATE nodes SET placement_credential_fingerprint=? WHERE id=?')
+            .run('sha256:concurrent', node.id);
+        }
+      });
+      await provisionNode(node.id, env);
+      expect(proofBefore).toEqual(expect.any(String));
+      expect(mocks.createVM).toHaveBeenCalledTimes(1);
+      expect(readNode(node.id)).toMatchObject({
+        status: 'creating',
+        proof: changed === 'proof' ? null : proofBefore,
+      });
+    }
+  );
+
+  it('an unmarked STS 400 remains uncertain despite matching error text', async () => {
+    const node = await freshNode();
+    mocks.createProvider.mockResolvedValue({ ...provider, providerName: 'gcp' });
+    mocks.createVM.mockRejectedValueOnce(
+      new GcpApiError({
+        step: 'sts_exchange',
+        statusCode: 400,
+        message: 'GCP STS token exchange failed (400)',
+      })
+    );
+    await provisionNode(node.id, env);
+    expect(readNode(node.id)).toMatchObject({ status: 'error', proof: null });
+    expect(mocks.createVM).toHaveBeenCalledTimes(1);
   });
 });

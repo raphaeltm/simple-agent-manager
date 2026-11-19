@@ -74,7 +74,7 @@ export async function handleRequestSecret(
     return textResult(requestId, {
       message: created.deduplicated
         ? `An open request for ${request.envKey} already exists in this chat; the person can answer it on the existing card.`
-        : `Secret request recorded. A project owner or admin can supply ${request.envKey} on the card in this chat. End your turn or keep working; you will get a notice when it is supplied, declined or expires (${request.expiresAt}). Then use exec_with_secrets with secretNames ["${request.envKey}"].`,
+        : `Secret request recorded. A project owner or admin can supply ${request.envKey} on the card in this chat. End your turn or keep working; you will get a notice when it is supplied, declined or expires (${request.expiresAt}). If the person archives it from their inbox instead, no notice comes. Then use exec_with_secrets with secretNames ["${request.envKey}"].`,
       secretRequest: {
         id: request.id,
         sessionId: request.requestingChatSessionId,

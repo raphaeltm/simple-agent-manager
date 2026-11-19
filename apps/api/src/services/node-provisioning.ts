@@ -51,6 +51,7 @@ import { resolveManagedNodeTransport, type TunnelEnv } from './node-tunnel-confi
 import type { NodeTunnelProvisioningPhase } from './node-tunnel-provisioning';
 import {
   createProviderForUser,
+  type ExactProviderCredentialBinding,
   exactProviderCredentialBindingFromPlacementSnapshot,
 } from './provider-credentials';
 import {
@@ -133,6 +134,7 @@ export async function provisionNode(
 
   const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
   let attemptedProvider = targetProvider;
+  let resolvedCredentialBinding: ExactProviderCredentialBinding | undefined;
   let provisioningRuntimeIncarnationId = node.runtimeIncarnationId;
   let providerCreateRejected = false;
   let providerAllocationRejected = false;
@@ -209,6 +211,7 @@ export async function provisionNode(
     }
     throwIfProviderRequestAborted(providerContext);
     attemptedProvider = providerResult.providerName;
+    resolvedCredentialBinding = providerResult.exactCredentialBinding;
     assertNativePlanConcrete(providerResult.providerName, node);
 
     // Persist the resolved provider identity before external provisioning so
@@ -583,7 +586,7 @@ export async function provisionNode(
     return { allocationConfirmed: true };
   } catch (err) {
     await handleNodeProvisioningFailure(err, {
-      env, node, options, durable, db, tunnelJournaled, provisioningRuntimeIncarnationId, tunnelPhase, providerCreateRequested, providerContext, attemptedProvider, providerCreateRejected, providerAllocationRejected, providerRejectionProofAt, rejectedPlacementPredicate,
+      env, node, options, durable, db, tunnelJournaled, provisioningRuntimeIncarnationId, tunnelPhase, providerCreateRequested, providerContext, attemptedProvider, resolvedCredentialBinding, providerCreateRejected, providerAllocationRejected, providerRejectionProofAt, rejectedPlacementPredicate,
     });
   }
 }

@@ -575,7 +575,7 @@ describe('human tasks through the real entry points', () => {
     expect(await wakesFor(s, s.chatSessionId)).toHaveLength(1);
   });
 
-  it('archive through the inbox route closes a task and wakes; untick is recorded; wakeOnSteps makes ticks wake', async () => {
+  it('archive through the inbox route closes a task and wakes no one; untick is recorded; wakeOnSteps makes ticks wake', async () => {
     const s = await seed();
     const filed = await assign(s, {
       title: 'Check the invoice totals',
@@ -603,12 +603,34 @@ describe('human tasks through the real entry points', () => {
     ).toBe(400);
 
     await deliverWakes(s, s.chatSessionId);
+    const watchExpiries = async () =>
+      (
+        await sqlRows<{ expires_at: number | null }>(
+          s.project,
+          `SELECT expires_at FROM project_event_subscriptions WHERE target_session_id = ?`,
+          s.chatSessionId
+        )
+      ).map((row) => row.expires_at);
+    // An open task's watch never expires.
+    expect(await watchExpiries()).toEqual([null]);
+    const archiveStart = Date.now();
     const archived = await post(itemPath(s, ref, '/archive'), s.colleagueCookie, {});
+    const archiveEnd = Date.now();
     expect(archived.status).toBe(200);
-    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: true });
-    const wakes = await wakesFor(s, s.chatSessionId);
-    expect(wakes).toHaveLength(1);
-    expect(wakes[0]!.content).toContain('archived');
+    // Archive tells no watcher (every inbox archive is silent; Raphaël, 2026-11-17). The step
+    // ticks above prove this chat does get woken by a task event when one is sent.
+    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: false });
+    expect(await wakesFor(s, s.chatSessionId)).toHaveLength(0);
+    const settled = await testEnv.DATABASE.prepare('SELECT notified_at FROM asks WHERE id = ?')
+      .bind(filed.inboxItem.id)
+      .first<{ notified_at: number | null }>();
+    expect(settled?.notified_at).not.toBeNull();
+    // No event wound the watch down, so the archive does: it expires after the closed-task grace
+    // (`inbox.closedTaskWatchHours`, 168 hours by default), measured from the archive.
+    const graceMs = 168 * 3_600_000;
+    const [expiresAt] = await watchExpiries();
+    expect(expiresAt).toBeGreaterThanOrEqual(archiveStart + graceMs);
+    expect(expiresAt).toBeLessThanOrEqual(archiveEnd + graceMs);
     const view = await get<TaskView>(itemPath(s, ref), s.colleagueCookie);
     expect(view.body.task?.activity.map((entry) => entry.kind)).toEqual([
       'created',
@@ -616,7 +638,7 @@ describe('human tasks through the real entry points', () => {
       'step_unchecked',
       'archived',
     ]);
-    // Reopen from archived wakes again.
+    // Reopening is engaging with it again, so it does wake the chat.
     await deliverWakes(s, s.chatSessionId);
     expect((await post(itemPath(s, ref, '/reopen'), s.colleagueCookie, {})).body).toMatchObject({
       status: 'open',

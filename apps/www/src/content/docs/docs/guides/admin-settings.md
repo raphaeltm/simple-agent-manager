@@ -287,7 +287,7 @@ items agents file (`packages/operations/src/inbox-settings-definition.ts`).
 | `inbox.answerMaxChars`             | 4,000   | 100–20,000 | Characters of a typed answer or comment                                                                                 |
 | `inbox.similarMatchesMax`          | 3       | 0–20       | Similar open items an agent is shown when it files an ask, review or result; 0 turns it off                             |
 | `inbox.similarScanMax`             | 50      | 1–500      | Newest open items of the project compared when an agent files (rows read per filing)                                    |
-| `inbox.noticeRetryMinutes`         | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered or expired, or a task archived                         |
+| `inbox.noticeRetryMinutes`         | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered, done or expired                                       |
 | `inbox.automationFailureThreshold` | 2       | 1–20       | Failed runs in a row that file an inbox error item for an automation's owner                                            |
 | `inbox.errorSweepBatchSize`        | 10      | 1–50       | Error items one five-minute sweep files at most (failed tasks, automations, lost answers)                               |
 | `inbox.errorLookbackMinutes`       | 30      | 5–1,440    | How far back that sweep looks for failures with no error item yet                                                       |
