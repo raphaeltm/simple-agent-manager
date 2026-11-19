@@ -4,6 +4,8 @@ import { type AdminSettingDefinition, integerDefinition } from '../admin-setting
 export const REPOSITORY_POLICY_DEFAULTS = {
   maxPushBytes: 64 * 1024 * 1024,
   maxRepoObjects: 30_000,
+  // At 255 characters per ref, even UTF-8 advertisements stay below 12 MiB.
+  maxRepoRefs: 10_000,
   maxRepoBytes: 256 * 1024 * 1024,
   maxObjectBytes: 16 * 1024 * 1024,
   maxInflatedBytes: 128 * 1024 * 1024,

@@ -13,7 +13,7 @@ import { getUserId } from '../../middleware/auth';
 import { AppError, errors } from '../../middleware/error';
 import { createOwnerProjectMembership } from '../../middleware/project-auth';
 import { CreateProjectSchema, jsonValidator } from '../../schemas';
-import { resolveArtifactsBackend } from '../../services/artifacts/backend';
+import { artifactsBackendExtensions, resolveArtifactsBackend } from '../../services/artifacts/backend';
 import { seedArtifactsReadme } from '../../services/artifacts/seed-readme';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import {
@@ -104,7 +104,8 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
       }
 
       const importUrl = body.importUrl?.trim() || null;
-      const importer = artifacts.importSource;
+      const extensions = artifactsBackendExtensions(c.env, artifacts);
+      const importer = extensions.importSource;
       if (importUrl && !importer) {
         throw errors.badRequest('This repository backend does not support importUrl');
       }
@@ -157,7 +158,7 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
             branch: defaultBranch,
             projectName: name,
             description,
-            fetchImpl: artifacts.remoteFetch,
+            fetchImpl: extensions.remoteFetch,
           });
         }
       } catch (seedError) {

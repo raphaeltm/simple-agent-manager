@@ -5,8 +5,8 @@ import {
   readGitChunk,
   withGitWorkBudget,
 } from '../../../src/vendor/dgit/git/budget';
-import { deflate, inflate } from '../../../src/vendor/dgit/git/zlib';
 import { applyDelta } from '../../../src/vendor/dgit/git/pack';
+import { deflate, inflate } from '../../../src/vendor/dgit/git/zlib';
 
 const limits = { maxObjectBytes: 32, maxInflatedBytes: 48, maxDeltaDepth: 2, workTimeoutMs: 1000 };
 

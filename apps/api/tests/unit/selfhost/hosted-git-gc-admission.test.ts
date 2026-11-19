@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { HostedGitRepo } from '../../../src/selfhost/hosted-git/hosted-git-repo';
 import { DEFAULT_HOSTED_GIT_LIMITS } from '../../../src/selfhost/hosted-git/limits';
 const mocks = vi.hoisted(() => ({

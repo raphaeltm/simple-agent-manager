@@ -8,6 +8,7 @@
 // The production entry (src/index.ts, imported by the celld entry) wires repo-hosting's ports
 // first; the branch list, project create and import reach them, so this entry must too.
 import '../../../src/repo-hosting-wiring';
+import { invalidateAdminSettings } from '../../../src/services/admin-settings-resolution';
 
 import { Hono } from 'hono';
 
@@ -86,3 +87,8 @@ app.post('/__test/workspace-callback-token', async (c) => {
 });
 
 export default app;
+
+app.post('/__test/invalidate-settings', (c) => {
+  invalidateAdminSettings(c.env);
+  return new Response('ok');
+});

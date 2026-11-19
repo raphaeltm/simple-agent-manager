@@ -182,7 +182,8 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
         return {
           remote,
           onAuth,
-          http: binding.remoteFetch ? createFetchHttpClient(binding.remoteFetch) : webHttp,
+          // Native RPC bindings fabricate unknown methods; extensions belong to the fallback.
+          http: !this.env.ARTIFACTS && binding.remoteFetch ? createFetchHttpClient(binding.remoteFetch) : webHttp,
         };
       })();
     }

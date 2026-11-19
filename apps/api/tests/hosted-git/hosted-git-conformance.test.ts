@@ -724,3 +724,51 @@ describe('vertical: project creation to a workspace clone and push', () => {
     expect(refused.code).not.toBe(0);
   });
 });
+
+describe('ref-only push admission', () => {
+  it('caps new refs without a pack, while permitting recovery by deleting refs', async () => {
+    const owner = await createEmailOnlyUser();
+    const project = await createHostedProject(owner, 'Ref cap');
+    const token = await mintToken(project, 'write');
+    const work = await freshDir('ref-cap');
+    await gitOk(['clone', localRemote(project.repository, token), work]);
+    const setting = runtime.DATABASE.prepare(
+      "INSERT OR REPLACE INTO platform_settings(key,value) VALUES ('repositories.maxRepoRefs',?)"
+    );
+    try {
+      await setting.bind('2').run();
+      await runtime.fetch('/__test/invalidate-settings', { method: 'POST' });
+      await gitOk(['push', 'origin', 'HEAD:refs/heads/second'], work);
+      // A stale deletion must not create capacity for a partially accepted mixed push.
+      const tip = (await gitOk(['rev-parse', 'HEAD'], work)).stdout.trim();
+      const packet = (line: string) =>
+        (Buffer.byteLength(line) + 4).toString(16).padStart(4, '0') + line;
+      const mixed = await runtime.fetch(`/git/${project.artifactsRepoId}.git/git-receive-pack`, {
+        method: 'POST',
+        headers: {
+          authorization: `Basic ${Buffer.from(`x:${token}`).toString('base64')}`,
+          'content-type': 'application/x-git-receive-pack-request',
+        },
+        body:
+          packet(`${'1'.repeat(40)} ${'0'.repeat(40)} refs/heads/second\0report-status\n`) +
+          packet(`${'0'.repeat(40)} ${tip} refs/heads/third\n`) +
+          '0000',
+      });
+      expect(await mixed.text()).toContain('2-ref limit');
+      const refs = (await gitOk(['ls-remote', 'origin'], work)).stdout;
+      expect(refs).toContain('refs/heads/second');
+      expect(refs).not.toContain('refs/heads/third');
+      const refused = await git(['push', 'origin', 'HEAD:refs/heads/third'], work);
+      expect(refused.code).not.toBe(0);
+      expect(refused.stderr).toContain('2-ref limit');
+      expect((await gitOk(['ls-remote', 'origin'], work)).stdout).not.toContain('refs/heads/third');
+      await gitOk(['push', 'origin', '--delete', 'second'], work);
+      await gitOk(['push', 'origin', 'HEAD:refs/heads/third'], work);
+    } finally {
+      await runtime.DATABASE.prepare(
+        "DELETE FROM platform_settings WHERE key='repositories.maxRepoRefs'"
+      ).run();
+      await runtime.fetch('/__test/invalidate-settings', { method: 'POST' });
+    }
+  });
+});

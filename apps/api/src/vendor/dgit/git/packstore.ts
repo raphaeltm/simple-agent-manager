@@ -1,5 +1,5 @@
-// @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 /* eslint-disable */
+// @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 // FILE SIZE EXCEPTION: vendored dgit core with SAM resource bounds and static SQL identifiers (see ../UPSTREAM.md)
 import pako from "pako";
 import { inflate as inflateAll } from "./zlib";

@@ -1,5 +1,5 @@
-// @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 /* eslint-disable */
+// @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 import { gitWorkLimits } from "./budget";
 import { concat, te, sha1hex } from "./util";
 import { deflate, inflate } from "./zlib";

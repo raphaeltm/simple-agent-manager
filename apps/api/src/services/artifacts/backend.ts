@@ -58,3 +58,11 @@ export function resolveArtifactsBackendForCleanup(env: Env): ArtifactsBackend | 
 export function isArtifactsAvailable(env: Env): boolean {
   return resolveArtifactsBackend(env) !== null;
 }
+
+/** Native RPC stubs synthesize properties for unknown methods; never probe optional extensions. */
+export function artifactsBackendExtensions(
+  env: Env,
+  backend: ArtifactsBackend
+): Pick<ArtifactsBackend, 'remoteFetch' | 'importSource'> {
+  return env.ARTIFACTS ? {} : backend;
+}

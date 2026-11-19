@@ -1,5 +1,5 @@
-// @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 /* eslint-disable */
+// @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 import { SHA1_DVS, ubcCheck } from "./sha1dc-tables";
 
 /**

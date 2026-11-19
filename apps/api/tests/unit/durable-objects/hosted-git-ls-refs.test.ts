@@ -81,3 +81,11 @@ describe('ls-refs ref-prefix', () => {
     ]);
   });
 });
+
+it('rejects an oversized advertisement with a readable response', async () => {
+  const response = await filterLsRefsResponse(new Response(new Uint8Array(16 * 1024 * 1024 + 1)), [
+    'refs/heads/',
+  ]);
+  expect(response.status).toBe(413);
+  expect(await response.text()).toContain('advertisement exceeds');
+});

@@ -1,5 +1,5 @@
-// @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 /* eslint-disable */
+// @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 import pako from "pako";
 import { chargeGitWork, gitWorkLimits } from "./budget";
 import { concat } from "./util";

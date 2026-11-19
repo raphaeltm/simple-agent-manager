@@ -11,13 +11,13 @@ import { toProjectSummaryResponse } from '../../lib/mappers';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { getUserId } from '../../middleware/auth';
 import { requireProjectCapability } from '../../middleware/project-auth';
+import { resolveArtifactsBackendForCleanup } from '../../services/artifacts/backend';
 import {
   buildProjectLibraryDeleteStatements,
   buildProjectLibraryR2Prefix,
   deleteProjectLibraryObjects,
   getProjectDeleteCleanupBatchSize,
 } from '../../services/file-library';
-import { resolveArtifactsBackendForCleanup } from '../../services/artifacts/backend';
 import { reconcileGcpWifPoolIndex } from '../../services/gcp-wif-pool-ownership';
 import { getRuntimeLimits } from '../../services/limits';
 import { deleteWorkspaceResourceHistoryObjectsForProject } from '../../services/workspace-resource-history';

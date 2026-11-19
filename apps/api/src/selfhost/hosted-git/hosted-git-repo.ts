@@ -36,8 +36,10 @@ import {
   hostedGitPushByteBudget,
   hostedGitPushRefusal,
   hostedGitPushTooLargeMessage,
+  hostedGitRefRefusal,
 } from './limits';
 import { resolveHostedGitLimits } from './policy';
+import { HostedGitUploads } from './uploads';
 
 /** An upload-pack request is wants/haves/caps only. */
 const MAX_UPLOAD_PACK_BYTES = 16 * 1024 * 1024;
@@ -113,6 +115,9 @@ export class HostedGitRepo extends DurableObject {
   /** Pushes are serialized: concurrent ingests would race pack-id allocation. */
   private receiveChain: Promise<void> = Promise.resolve();
   private activeUploads = 0;
+  private readonly uploads = new HostedGitUploads();
+  private deletion: Promise<void> | undefined;
+  private deleting = false;
 
   constructor(ctx: DurableObjectState, env: unknown) {
     super(ctx, env as never);
@@ -130,6 +135,32 @@ export class HostedGitRepo extends DurableObject {
     const url = new URL(req.url);
     const path = url.pathname;
     try {
+      if (path === '/' && req.method === 'DELETE') {
+        this.deleting = true;
+        this.deletion ??= this.receiveChain
+          .then(async () => {
+            await this.uploads.close();
+            await this.ctx.blockConcurrencyWhile(async () => {
+              // Preserve celld replication control tables; deleteAll would remove them.
+              this.store.setMeta('deleted', '1');
+              this.ctx.storage.transactionSync(() => {
+                this.store.wipe();
+                this.store = new GitStore(this.ctx.storage.sql);
+                this.store.setMeta('deleted', '1');
+              });
+              await this.ctx.storage.deleteAlarm();
+            });
+          })
+          .catch((error) => {
+            this.deletion = undefined;
+            throw error;
+          });
+        this.receiveChain = this.deletion.catch(() => undefined);
+        await this.deletion;
+        return new Response('deleted\n');
+      }
+      if (this.deleting || this.store.getMeta('deleted') === '1')
+        return new Response('repository deleted\n', { status: 410 });
       if (path === '/info/refs' && req.method === 'GET') {
         const service = url.searchParams.get('service');
         if (service !== 'git-upload-pack' && service !== 'git-receive-pack') {
@@ -167,16 +198,6 @@ export class HostedGitRepo extends DurableObject {
           bytes: this.store.dbSize(),
         });
       }
-      if (path === '/' && req.method === 'DELETE') {
-        await this.ctx.blockConcurrencyWhile(async () => {
-          // wipe() drops dgit's tables. Not storage.deleteAll(): on celld that also sweeps the
-          // replication control tables and breaks WAL capture for the cell (upstream note).
-          this.store.wipe();
-          await this.ctx.storage.deleteAlarm();
-          this.store = new GitStore(this.ctx.storage.sql);
-        });
-        return new Response('deleted\n');
-      }
       return new Response('not found\n', { status: 404 });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -193,7 +214,7 @@ export class HostedGitRepo extends DurableObject {
   }
 
   private async runAlarm(): Promise<void> {
-    if (this.store.getMeta('gc-pending') !== '1') return;
+    if (this.deleting || this.store.getMeta('gc-pending') !== '1') return;
     // GC drops packs: never while a clone is streaming. Leave gc-pending set and retry.
     if (this.activeUploads > 0) {
       await this.ctx.storage.setAlarm(Date.now() + 30_000).catch(() => undefined);
@@ -245,21 +266,33 @@ export class HostedGitRepo extends DurableObject {
     }
     // The slot spans the whole response stream; release() fires once from close/cancel.
     this.activeUploads++;
+    const slot = this.uploads.start();
     let released = false;
     const release = () => {
       if (released) return;
       released = true;
       this.activeUploads--;
+      slot.release();
     };
     try {
       let body = await readBodyBounded(req, MAX_UPLOAD_PACK_BYTES);
+      if (this.deleting) {
+        release();
+        return new Response('repository deleted\n', { status: 410 });
+      }
       if (req.headers.get('content-encoding')?.includes('gzip')) {
         body = gunzipLimited(body, MAX_UPLOAD_PACK_BYTES);
       }
       // dgit answers ls-refs with every ref whatever `ref-prefix` asks; filter the answer here.
       const prefixes = lsRefsPrefixes(body);
       const response = await uploadPack(this.store, body, release);
-      return prefixes ? await filterLsRefsResponse(response, prefixes) : response;
+      const filtered = prefixes ? await filterLsRefsResponse(response, prefixes) : response;
+      if (this.deleting) {
+        await filtered.body?.cancel();
+        release();
+        return new Response('repository deleted\n', { status: 410 });
+      }
+      return slot.response(filtered);
     } catch (err) {
       release();
       if (
@@ -285,6 +318,7 @@ export class HostedGitRepo extends DurableObject {
         headers: { 'content-type': 'text/plain; charset=utf-8' },
       });
     }
+    if (this.deleting) return new Response('repository deleted\n', { status: 410 });
     const chunks: Uint8Array[] = [];
     const run = this.receiveChain.then(() => this.processReceive(req, (c) => chunks.push(c)));
     this.receiveChain = run.then(
@@ -365,7 +399,7 @@ export class HostedGitRepo extends DurableObject {
     // Read up to the pack header so the declared object count can be checked before storing.
     const packStart = pos;
     const hasPack = (await need(PACK_HEADER_BYTES)) || buf.length > packStart;
-    let unpackError: string | null = null;
+    let unpackError = hostedGitRefRefusal(this.store.refs(), commands, currentBytes, limits);
     let packId: number | null = null;
     if (hasPack) {
       const header = buf.subarray(packStart, packStart + PACK_HEADER_BYTES);
@@ -373,11 +407,13 @@ export class HostedGitRepo extends DurableObject {
         header.length === PACK_HEADER_BYTES
           ? new DataView(header.buffer, header.byteOffset, header.byteLength).getUint32(8)
           : 0;
-      const refusal = hostedGitPushRefusal(
-        { objects: this.store.objectCount(), bytes: currentBytes },
-        incomingObjects,
-        limits
-      );
+      const refusal =
+        unpackError ??
+        hostedGitPushRefusal(
+          { objects: this.store.objectCount(), bytes: currentBytes },
+          incomingObjects,
+          limits
+        );
       if (refusal) {
         unpackError = refusal;
       } else {
@@ -418,7 +454,7 @@ export class HostedGitRepo extends DurableObject {
       this.store.setMeta('created', '1');
       this.store.setMeta('last-push', String(Date.now()));
     }
-    if (needsGc) {
+    if (needsGc || packId !== null) {
       this.store.setMeta('gc-pending', '1');
       await this.ctx.storage.setAlarm(Date.now() + GC_DELAY_MS).catch(() => undefined);
     }

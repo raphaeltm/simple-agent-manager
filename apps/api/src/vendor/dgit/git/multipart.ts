@@ -1,5 +1,5 @@
-// @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 /* eslint-disable */
+// @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 import { concat } from "./util";
 
 /** In-progress R2 multipart upload for one pack object (clone cache or raw store). */

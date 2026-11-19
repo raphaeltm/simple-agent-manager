@@ -5,8 +5,7 @@
  * always answers HEAD plus every ref. Git's protocol v2 says a server given `ref-prefix` arguments
  * shows only refs that start with one of them (gitprotocol-v2, "ls-refs"). Clients that rely on it,
  * such as isomorphic-git's `listServerRefs({ prefix: 'refs/heads/' })` behind the project's branch
- * list, then saw "HEAD" as a branch (box round R13 D11). The vendored files stay a byte copy of
- * upstream (UPSTREAM.md), so the filter lives here, applied by the Durable Object to the answer.
+ * list, then saw "HEAD" as a branch (box round R13 D11). The SAM adaptation is recorded in UPSTREAM.md; this filter is applied by the Durable Object.
  */
 import { FLUSH, pkt, PktParser } from '../../vendor/dgit/git/pktline';
 import { concat } from '../../vendor/dgit/git/util';
@@ -39,7 +38,8 @@ export async function filterLsRefsResponse(
   prefixes: readonly string[]
 ): Promise<Response> {
   const body = new Uint8Array(await response.arrayBuffer());
-  if (body.length > MAX_LS_REFS_RESPONSE_BYTES) return response;
+  if (body.length > MAX_LS_REFS_RESPONSE_BYTES)
+    return new Response('error: ref advertisement exceeds maximum size\n', { status: 413 });
   const parser = new PktParser(body);
   const kept: Uint8Array[] = [];
   for (let p = parser.read(); p !== null; p = parser.read()) {
