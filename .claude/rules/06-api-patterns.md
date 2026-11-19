@@ -41,6 +41,10 @@ app.use('*', async (c, next) => {
 
 Throw `AppError` (from `@simple-agent-manager/worker-core`, re-exported by `middleware/error.ts`) in route handlers — the global `app.onError()` handler catches them.
 
+Expected domain rejections from services also need the `AppError` contract. Preserve
+exception names used by recovery callers, and test the real route with the production
+`handleAppError` handler plus an unrelated-error control when changing classification.
+
 ## Hono Middleware Scoping (CRITICAL)
 
 **NEVER use wildcard `use('/*', ...)` middleware on subrouters that share a base path with other subrouters using different auth models.** Hono's `app.route('/', subRouter)` merges routes — wildcard middleware from one subrouter leaks to ALL sibling subrouters mounted at the same path.
