@@ -33,7 +33,7 @@ The old `POST /api/sam/chat` inference path is closed: enabled clients receive `
 
 ## Node Management
 
-- `POST /api/nodes` — Create node
+- `POST /api/nodes` — Create node (`201`). At the caller's per-person managed workspace-node limit in the selected pool, returns `409 CAPACITY_POOL_NODE_LIMIT` with guidance to delete an idle node or ask the pool owner to raise the limit in Infrastructure; no node is created or provisioning scheduled (`services/nodes.ts:createNodeRecord`, `routes/nodes.ts`).
 - `GET /api/nodes` — List user's nodes
 - `GET /api/nodes/:id` — Get node details
 - `POST /api/nodes/:id/stop` — Stop node

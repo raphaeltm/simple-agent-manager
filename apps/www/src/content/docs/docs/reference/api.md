@@ -681,6 +681,16 @@ Comment threads and replies accept an optional `mentions: [{ "userId": "..." }]`
 
 ## Nodes
 
+### `POST /api/nodes`
+
+Create a node for the authenticated user. Returns `201` when creation is scheduled.
+If the caller has reached the selected compute pool's per-person limit for managed
+workspace nodes, returns `409` with
+`error: "CAPACITY_POOL_NODE_LIMIT"`. Delete an idle node or ask the pool owner to
+raise the limit in Infrastructure, then retry. A rejected request does not create
+a node or schedule provisioning (`apps/api/src/services/nodes.ts:createNodeRecord`,
+`apps/api/src/routes/nodes.ts`, `apps/api/src/middleware/app-error-handler.ts:handleAppError`).
+
 ### `GET /api/nodes`
 
 List all nodes for the authenticated user.
