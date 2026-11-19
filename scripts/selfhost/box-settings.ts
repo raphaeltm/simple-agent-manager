@@ -35,6 +35,8 @@ export const BOX_RESERVED_PORTS: Readonly<Record<string, number>> = {
   CELLD_PORT: 8080,
   CELLD_INTERNAL_PORT: 7001,
   FRPS_BIND_PORT: 7000,
+  // Reserved even with gce off: a tunnel must never contend for the credential broker.
+  GCE_METADATA_PROXY_PORT: 7180,
   OBJECTSTORE_PORT: 9000,
   OBJECTSTORE_CONSOLE_PORT: 9001,
   HTTP_PORT: 80,
@@ -62,6 +64,7 @@ const UNPRIVILEGED_LISTENERS: ReadonlySet<string> = new Set([
   'CELLD_PORT',
   'CELLD_INTERNAL_PORT',
   'FRPS_BIND_PORT',
+  'GCE_METADATA_PROXY_PORT',
   'MAIL_COLLECTOR_SMTP_PORT',
   'MAIL_COLLECTOR_UI_PORT',
 ]);

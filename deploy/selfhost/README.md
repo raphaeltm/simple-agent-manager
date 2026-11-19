@@ -297,3 +297,6 @@ Celld stdout/stderr redact the broker path credential before Docker records logs
 Metadata transport timeouts apply per attempt. The pinned Google STS SDK enables its bounded
 retry policy for transient failures; callers receive a generic failure if exchange cannot complete.
 Redirects and oversized responses are refused on every attempt.
+
+The metadata proxy listener port is reserved outside node tunnel leases even while the GCE
+profile is disabled. Deploy and Caddy refuse a conflicting range before serving.

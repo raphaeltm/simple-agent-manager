@@ -228,7 +228,13 @@ export function buildFencePlan({
     if (endpoint.address === '127.0.0.1') loopbackPorts.push(endpoint.port);
     else endpoints.push(endpoint);
   }
-  if (metadataProxyEnabled(box)) loopbackPorts.push(metadataProxyPort(box));
+  if (metadataProxyEnabled(box)) {
+    const port = metadataProxyPort(box);
+    if (inRange(port, leaseRange)) {
+      throw new Error('metadata proxy port must be outside the node tunnel lease range');
+    }
+    loopbackPorts.push(port);
+  }
   const dnsServers = parseNameservers(resolvConf);
   if (dnsServers.length === 0) throw new Error('no nameserver in resolv.conf; celld needs DNS');
   const plan: EgressFencePlan = {
