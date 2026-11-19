@@ -53,6 +53,20 @@ export function gcpIdentityTokenUserId(requester: GcpTokenRequester): string {
   return requester.poolOwner.kind === 'user' ? requester.poolOwner.userId : requester.cacheUserId;
 }
 
+/**
+ * The `project_id` claim (and `sub = project:<id>`) SAM signs. Callers pass a SAM project the
+ * caller is authorized for, or, when the token acts for no SAM project, the credential's own
+ * `gcpProjectId`. That second value is whatever the credential's owner typed, so it is
+ * namespaced: signed bare it could equal another user's SAM project ID, which a deployment
+ * provider trusts (`assertion.project_id == '<samProjectId>'`, `subject/project:<id>`).
+ */
+export function gcpIdentityTokenProjectId(
+  projectId: string,
+  credential: GcpOidcCredential
+): string {
+  return projectId === credential.gcpProjectId ? `gcp-project:${projectId}` : projectId;
+}
+
 interface StsTokenResponse {
   access_token: string;
   token_type: string;
@@ -223,7 +237,11 @@ async function exchangeGcpWifAccessToken(
   await assertGcpWifPoolOwnership(env, credential, requester.poolOwner, 'token_exchange');
   throwIfProviderRequestAborted(context);
   const identityToken = await signIdentityToken(
-    { userId: gcpIdentityTokenUserId(requester), projectId, audience: jwtAudience },
+    {
+      userId: gcpIdentityTokenUserId(requester),
+      projectId: gcpIdentityTokenProjectId(projectId, credential),
+      audience: jwtAudience,
+    },
     env
   );
 

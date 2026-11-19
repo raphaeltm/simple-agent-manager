@@ -484,7 +484,7 @@ describe('token exchange refuses a pool another owner uses (rows that predate th
   });
 
   it('indexes more rows than one page in a single check, then reads the index without decrypting', async () => {
-    // 230 non-GCP rows (more than two pages at the default page size of 100) ahead of A's row.
+    // 230 non-GCP rows (more than nine pages at the default page size of 25) ahead of A's row.
     for (let i = 0; i < 230; i++) {
       await storeCcRow(`cc-other-${String(i).padStart(3, '0')}`, 'user-b', `token-${i}`);
     }
@@ -777,6 +777,105 @@ describe('the credential owner reaches the exchange through the real resolver', 
     expect(signIdentityToken).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-a' }),
       env
+    );
+  });
+});
+
+describe('the signed project_id cannot be chosen by the credential owner', () => {
+  it('a user-level credential naming a SAM project id as its GCP project signs it namespaced', async () => {
+    // B's own pool; B sets gcpProjectId to A's SAM project id, hoping a deployment provider
+    // that trusts `project_id == 'proj-a'` accepts the token.
+    const credential = wif(POOL_B, { gcpProjectId: 'proj-a' });
+    await expect(exchange(user('user-b'), credential)).resolves.toBe('sa-token');
+    expect(signIdentityToken).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-b', projectId: 'gcp-project:proj-a' }),
+      env
+    );
+  });
+
+  it('control: a token for a SAM project the caller acts for keeps that project id', async () => {
+    await expect(
+      exchange(
+        { cacheUserId: 'project:proj-a:user-a', poolOwner: { kind: 'user', userId: 'user-a' } },
+        wif(POOL_A),
+        'proj-a'
+      )
+    ).resolves.toBe('sa-token');
+    expect(signIdentityToken).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-a', projectId: 'proj-a' }),
+      env
+    );
+  });
+});
+
+describe('the check fails closed on its own limits', () => {
+  afterEach(async () => {
+    const { __resetAdminSettingsCacheForTest } =
+      await import('../../../src/services/admin-settings-resolution');
+    __resetAdminSettingsCacheForTest();
+  });
+
+  it('refuses with 503 once indexing would pass the per-check D1 query budget, then resumes', async () => {
+    const { __resetAdminSettingsCacheForTest } =
+      await import('../../../src/services/admin-settings-resolution');
+    __resetAdminSettingsCacheForTest();
+    // Page size 5 costs at most 2 + 2 x 5 = 12 statements; a budget of 30 allows two pages.
+    for (const [key, value] of [
+      ['gcpWif.poolIndexPageSize', '5'],
+      ['gcpWif.poolIndexMaxQueriesPerCheck', '30'],
+    ]) {
+      sqlite
+        .prepare('INSERT INTO platform_settings (key, value, updated_at) VALUES (?, ?, ?)')
+        .run(key, value, NOW);
+    }
+    for (let i = 0; i < 40; i++) {
+      await storeCcRow(`cc-other-${String(i).padStart(2, '0')}`, 'user-b', `token-${i}`);
+    }
+    await storeLegacyRow('cred-a', 'user-a', wif(POOL_A));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(exchange(user('user-a'), wif(POOL_A))).rejects.toBeInstanceOf(
+      GcpWifPoolIndexUnavailableError
+    );
+    expect(signIdentityToken).not.toHaveBeenCalled();
+    const indexed = () =>
+      (sqlite.prepare('SELECT count(*) AS n FROM gcp_wif_pool_index').get() as { n: number }).n;
+    const afterFirst = indexed();
+    expect(afterFirst).toBeGreaterThan(0);
+    expect(afterFirst).toBeLessThan(41);
+
+    // Progress is durable: later checks continue where the first stopped, then succeed.
+    let attempts = 1;
+    for (;;) {
+      attempts += 1;
+      try {
+        await exchange(user('user-a'), wif(POOL_A));
+        break;
+      } catch (err) {
+        expect(err).toBeInstanceOf(GcpWifPoolIndexUnavailableError);
+        expect(attempts).toBeLessThan(10);
+      }
+    }
+    expect(indexed()).toBe(41);
+  });
+
+  it.each([
+    ['a short batch result', () => []],
+    ['statements without row arrays', () => [{}, {}]],
+  ])('refuses on %s instead of reading it as "no holders"', async (_name, shape) => {
+    await storeLegacyRow('cred-a', 'user-a', wif(POOL_A));
+    const realBatch = env.DATABASE.batch.bind(env.DATABASE);
+    vi.spyOn(env.DATABASE, 'batch').mockImplementationOnce(async () => shape() as never);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(exchange(user('user-b'), wif(POOL_A))).rejects.toBeInstanceOf(
+      GcpWifPoolIndexUnavailableError
+    );
+    expect(signIdentityToken).not.toHaveBeenCalled();
+    // Liveness control: the real batch still refuses B as another owner.
+    vi.mocked(env.DATABASE.batch).mockImplementation(realBatch);
+    await expect(exchange(user('user-b'), wif(POOL_A))).rejects.toBeInstanceOf(
+      GcpWifPoolOwnedByAnotherOwnerError
     );
   });
 });

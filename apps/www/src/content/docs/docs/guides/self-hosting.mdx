@@ -458,7 +458,11 @@ Each user-level connection is scoped to the SAM user who made it. The provider's
 
 Within one installation a pool has one owner: one user, or the installation for platform credentials. SAM refuses to save, or to exchange tokens for, a credential naming a pool that another owner claimed or that a different owner's credential names (`409 GCP_WIF_POOL_OWNED_BY_ANOTHER_OWNER`; see [Security](/docs/architecture/security/#one-owner-per-workload-identity-pool)). Give every user and the platform credential its own Google Cloud project or pool.
 
-A claim stays after its credential is deleted, because the Google-side trust may stay too. To hand a pool to a different owner (for example after a Google Cloud project changes hands), first remove the old owner's trust in Google: delete the old workload identity provider, or remove its members from the service account's `roles/iam.workloadIdentityUser` binding. Then release the claim (`<projectNumber>/<poolId>`, lowercase pool ID):
+A claim stays after its credential is deleted, because the Google-side trust may stay too. Deleting a SAM account leaves its claims behind for the same reason. To hand a pool to a different owner (for example after a Google Cloud project changes hands):
+
+1. Remove the old owner's trust in Google: delete the old workload identity provider, or remove its members from the service account's `roles/iam.workloadIdentityUser` binding.
+2. Delete or re-point every SAM credential of the old owner that still names the pool. A live credential keeps blocking other owners even without a claim.
+3. Release the claim (`<projectNumber>/<poolId>`, lowercase pool ID):
 
 ```bash
 npx wrangler d1 execute <your-d1-database> --remote \

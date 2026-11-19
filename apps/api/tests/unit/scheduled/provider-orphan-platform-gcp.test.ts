@@ -183,7 +183,12 @@ describe('platform GCP orphan sweep configuration and authentication', () => {
     const claims = JSON.parse(
       atob(body.subjectToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))
     );
-    expect(claims).toMatchObject({ user_id: 'platform:admin-owner', project_id: 'test-project' });
+    // No SAM project: the credential's own GCP project is signed namespaced, never as a SAM project id.
+    expect(claims).toMatchObject({
+      user_id: 'platform:admin-owner',
+      project_id: 'gcp-project:test-project',
+      sub: 'project:gcp-project:test-project',
+    });
     const deletes = fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE');
     expect(deletes.map(([url]) => String(url))).toEqual([
       'https://compute.googleapis.com/compute/v1/projects/test-project/zones/us-central1-a/instances/vm-123',

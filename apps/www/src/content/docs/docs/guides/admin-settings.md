@@ -1107,6 +1107,7 @@ These control the live Google Cloud catalog described in [Google Cloud](/docs/gu
 | `gcpWif.poolIndexPageSize`                  | 25                                              | 5–50              | Stored cloud credentials decrypted per step when indexing which workload identity pool each one names (only new or re-saved credentials are indexed). |
 | `gcpWif.poolIndexBudgetMs`                  | 10000                                           | 1000–25000        | Most time one token exchange or credential save may spend indexing new credentials before it refuses and asks to retry, rather than trust a partial index. |
 | `gcpWif.poolIndexUnreadableRetryMinutes`    | 60                                              | 1–1440            | Wait before SAM tries again to read a stored cloud credential it could not decrypt while indexing workload identity pools. |
+| `gcpWif.poolIndexMaxQueriesPerCheck`        | 500                                             | 12–900            | Most D1 queries one check may spend indexing. Keep it under your Workers plan's per-request D1 query limit; on the free plan use 40 with a page size of 5. |
 
 ### Infomaniak boot volume
 

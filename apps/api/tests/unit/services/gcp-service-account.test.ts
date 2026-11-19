@@ -29,7 +29,8 @@ vi.mock('../../../src/services/jwt', () => ({
 }));
 // Pool ownership has its own real-SQL suite (gcp-wif-pool-ownership.test.ts); here it is a
 // pass-through so these tests stay about cancellation and caching.
-vi.mock('../../../src/services/gcp-wif-pool-ownership', () => ({
+vi.mock('../../../src/services/gcp-wif-pool-ownership', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/gcp-wif-pool-ownership')>()),
   assertGcpWifPoolOwnership: vi.fn().mockResolvedValue(undefined),
 }));
 

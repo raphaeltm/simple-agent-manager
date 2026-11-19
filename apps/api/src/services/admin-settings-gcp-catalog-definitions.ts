@@ -11,6 +11,9 @@ import { type AdminSettingDefinition, integerDefinition } from './admin-setting-
 /** Defaults for the workload identity pool index, also used before the settings are read. */
 export const DEFAULT_GCP_WIF_POOL_INDEX_PAGE_SIZE = 25;
 export const DEFAULT_GCP_WIF_POOL_INDEX_UNREADABLE_RETRY_MINUTES = 60;
+export const DEFAULT_GCP_WIF_POOL_INDEX_BUDGET_MS = 10_000;
+/** Under the 1,000 D1 queries a paid Workers invocation allows, leaving room for the request. */
+export const DEFAULT_GCP_WIF_POOL_INDEX_MAX_QUERIES_PER_CHECK = 500;
 
 export type GcpCatalogSettingName =
   | 'gcpCatalog.machineTypes'
@@ -25,7 +28,8 @@ export type GcpCatalogSettingName =
   | 'gcpCatalog.bootDiskMinGb'
   | 'gcpWif.poolIndexPageSize'
   | 'gcpWif.poolIndexBudgetMs'
-  | 'gcpWif.poolIndexUnreadableRetryMinutes';
+  | 'gcpWif.poolIndexUnreadableRetryMinutes'
+  | 'gcpWif.poolIndexMaxQueriesPerCheck';
 
 /**
  * General-purpose shapes SAM offers from Google Cloud by default: shared-core e2-medium, and the
@@ -132,8 +136,8 @@ export const GCP_CATALOG_SETTINGS: readonly AdminSettingDefinition[] = [
   ),
   // Workload identity pool ownership (`gcp-wif-pool-ownership.ts`). Indexing runs only for
   // credentials added or re-encrypted since the last check; a check that cannot finish inside the
-  // budget refuses rather than trusting a partial index. A page is one D1 batch of up to two
-  // statements per row, so the maximum stays well inside D1's per-invocation query limits.
+  // budget refuses rather than trusting a partial index. A page costs 2 + 2 x page size D1
+  // statements; `gcpWif.poolIndexMaxQueriesPerCheck` caps their sum per check.
   integerDefinition(
     'gcpWif.poolIndexPageSize',
     DEFAULT_GCP_WIF_POOL_INDEX_PAGE_SIZE,
@@ -143,7 +147,7 @@ export const GCP_CATALOG_SETTINGS: readonly AdminSettingDefinition[] = [
   ),
   integerDefinition(
     'gcpWif.poolIndexBudgetMs',
-    10_000,
+    DEFAULT_GCP_WIF_POOL_INDEX_BUDGET_MS,
     'Operations',
     'Most milliseconds one Google Cloud token exchange or credential save may spend indexing newly saved credentials before it refuses and asks to retry.',
     { min: 1_000, max: 25_000 }
@@ -154,5 +158,12 @@ export const GCP_CATALOG_SETTINGS: readonly AdminSettingDefinition[] = [
     'Operations',
     'Minutes before SAM tries again to read a stored cloud credential it could not decrypt while indexing workload identity pools.',
     { min: 1, max: 24 * 60 }
+  ),
+  integerDefinition(
+    'gcpWif.poolIndexMaxQueriesPerCheck',
+    DEFAULT_GCP_WIF_POOL_INDEX_MAX_QUERIES_PER_CHECK,
+    'Operations',
+    'Most D1 queries one token exchange or credential save may spend indexing new credentials. Keep it under your Workers plan’s per-request D1 query limit (1,000 on paid; on the free plan use 40 with a page size of 5).',
+    { min: 12, max: 900 }
   ),
 ];

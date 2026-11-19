@@ -20,6 +20,10 @@
  * D1 batch (one transaction) as the read of the pool's holders. A writer that skips the index, a
  * deleted credential, or a rotation therefore cannot leave the check reading stale data.
  *
+ * The holders read may be served by a read replica at or after the request's bookmark; the
+ * claim insert and its re-read are one write batch on the primary, which is what decides who
+ * holds an unclaimed pool.
+ *
  * I/O per check when nothing changed: one D1 round trip, no decryption, no admin-settings read.
  * A first-time claim adds one round trip for that pool. A new or re-encrypted credential adds
  * one page of decrypts plus two round trips per `gcpWif.poolIndexPageSize` rows, within
@@ -215,12 +219,12 @@ function toPoolHolderRow(row: Record<string, unknown>): PoolHolderRow | null {
  * as absent could hide an unindexed credential or a foreign holder.
  */
 function parseAll<T>(
-  results: Record<string, unknown>[] | undefined,
+  results: Record<string, unknown>[],
   parse: (row: Record<string, unknown>) => T | null,
   context: string
 ): T[] {
   const parsed: T[] = [];
-  for (const row of results ?? []) {
+  for (const row of results) {
     const value = parse(row);
     if (!value) {
       log.error('gcp_wif_pool_index.row_unparseable', { context, action: 'refused' });
@@ -248,8 +252,11 @@ function retryCutoff(retryMinutes: number): string {
   return new Date(Date.now() - retryMinutes * 60_000).toISOString();
 }
 
-/** Decrypt and index one page; claim each named pool for the row's owner if it is unclaimed. */
-async function indexRows(env: Env, rows: UnindexedRow[]): Promise<void> {
+/**
+ * Decrypt and index one page; claim each named pool for the row's owner if it is unclaimed.
+ * Returns the number of D1 statements issued.
+ */
+async function indexRows(env: Env, rows: UnindexedRow[]): Promise<number> {
   const key = getCredentialEncryptionKey(env);
   const now = new Date().toISOString();
   const statements: D1PreparedStatement[] = [];
@@ -290,20 +297,26 @@ async function indexRows(env: Env, rows: UnindexedRow[]): Promise<void> {
     }
   }
   if (statements.length > 0) await env.DATABASE.batch(statements);
+  return statements.length;
 }
 
-async function readIndexSettings(
-  env: Env
-): Promise<{ pageSize: number; budgetMs: number; retryMinutes: number }> {
-  const [pageSize, budgetMs, retryMinutes] = await Promise.all([
+async function readIndexSettings(env: Env): Promise<{
+  pageSize: number;
+  budgetMs: number;
+  retryMinutes: number;
+  maxQueries: number;
+}> {
+  const [pageSize, budgetMs, retryMinutes, maxQueries] = await Promise.all([
     resolveAdminSetting(env, 'gcpWif.poolIndexPageSize'),
     resolveAdminSetting(env, 'gcpWif.poolIndexBudgetMs'),
     resolveAdminSetting(env, 'gcpWif.poolIndexUnreadableRetryMinutes'),
+    resolveAdminSetting(env, 'gcpWif.poolIndexMaxQueriesPerCheck'),
   ]);
   return {
     pageSize: Number(pageSize),
     budgetMs: Number(budgetMs),
     retryMinutes: Number(retryMinutes),
+    maxQueries: Number(maxQueries),
   };
 }
 
@@ -311,6 +324,32 @@ async function readIndexSettings(
  * Bring the index up to date, then return everything that holds `pool`: its claim, live
  * credentials naming it, and deployment credentials naming it. Throws
  * GcpWifPoolIndexUnavailableError when unindexed rows remain after the time budget.
+ */
+/** Both statements of a two-statement batch returned a row array, or the check cannot be trusted. */
+function batchRows(
+  results: D1Result<Record<string, unknown>>[] | undefined,
+  context: string
+): [Record<string, unknown>[], Record<string, unknown>[]] {
+  const first = Array.isArray(results) && results.length === 2 ? results[0]?.results : undefined;
+  const second = Array.isArray(results) && results.length === 2 ? results[1]?.results : undefined;
+  if (!Array.isArray(first) || !Array.isArray(second)) {
+    log.error('gcp_wif_pool_index.batch_malformed', { context, action: 'refused' });
+    throw new GcpWifPoolIndexUnavailableError();
+  }
+  return [first, second];
+}
+
+/** D1 statements one page of indexing can issue: the probe batch plus up to two per row. */
+function queriesPerPage(pageSize: number): number {
+  return 2 + 2 * pageSize;
+}
+
+/**
+ * Bring the index up to date, then return everything that holds `pool`: its claim, live
+ * credentials naming it, and deployment credentials naming it. Throws
+ * GcpWifPoolIndexUnavailableError when unindexed rows remain after the time budget or the query
+ * budget (`gcpWif.poolIndexMaxQueriesPerCheck`, kept under D1's per-invocation query limit), or
+ * when D1 fails while indexing. Progress is durable, so the next check continues.
  */
 async function listPoolHolders(env: Env, pool: GcpWifPoolIdentity): Promise<PoolHolderRow[]> {
   const holders = env.DATABASE.prepare(POOL_HOLDERS_SQL).bind(
@@ -322,19 +361,24 @@ async function listPoolHolders(env: Env, pool: GcpWifPoolIdentity): Promise<Pool
   // Settings are read only when something needs indexing, so the steady state costs one batch.
   let settings: Awaited<ReturnType<typeof readIndexSettings>> | null = null;
   let deadline = Infinity;
+  let queries = 0;
   let indexedAny = false;
   for (;;) {
     const pageSize = settings?.pageSize ?? DEFAULT_GCP_WIF_POOL_INDEX_PAGE_SIZE;
     const cutoff = retryCutoff(
       settings?.retryMinutes ?? DEFAULT_GCP_WIF_POOL_INDEX_UNREADABLE_RETRY_MINUTES
     );
-    const [unindexedResult, holdersResult] = await env.DATABASE.batch<Record<string, unknown>>([
-      env.DATABASE.prepare(UNINDEXED_ROWS_SQL).bind(cutoff, cutoff, cutoff, pageSize),
-      holders,
-    ]);
-    const unindexed = parseAll(unindexedResult?.results, toUnindexedRow, 'unindexed');
+    const [unindexedRows, holderRows] = batchRows(
+      await env.DATABASE.batch<Record<string, unknown>>([
+        env.DATABASE.prepare(UNINDEXED_ROWS_SQL).bind(cutoff, cutoff, cutoff, pageSize),
+        holders,
+      ]),
+      'probe'
+    );
+    queries += 2;
+    const unindexed = parseAll(unindexedRows, toUnindexedRow, 'unindexed');
     if (unindexed.length === 0) {
-      const found = parseAll(holdersResult?.results, toPoolHolderRow, 'holders');
+      const found = parseAll(holderRows, toPoolHolderRow, 'holders');
       if (indexedAny) {
         log.info('gcp_wif_pool_index.reconciled', { poolKey: pool.key, holders: found.length });
       }
@@ -343,16 +387,30 @@ async function listPoolHolders(env: Env, pool: GcpWifPoolIdentity): Promise<Pool
     if (!settings) {
       settings = await readIndexSettings(env);
       deadline = Date.now() + settings.budgetMs;
-    } else if (Date.now() >= deadline) {
+    } else if (
+      Date.now() >= deadline ||
+      queries + queriesPerPage(settings.pageSize) > settings.maxQueries
+    ) {
       log.error('gcp_wif_pool_index.budget_exhausted', {
         poolKey: pool.key,
         budgetMs: settings.budgetMs,
+        queries,
+        maxQueries: settings.maxQueries,
         remainingPage: unindexed.length,
         action: 'refused',
       });
       throw new GcpWifPoolIndexUnavailableError();
     }
-    await indexRows(env, unindexed);
+    try {
+      queries += await indexRows(env, unindexed);
+    } catch (err) {
+      log.error('gcp_wif_pool_index.index_write_failed', {
+        poolKey: pool.key,
+        error: err instanceof Error ? err.message : String(err),
+        action: 'refused',
+      });
+      throw new GcpWifPoolIndexUnavailableError();
+    }
     indexedAny = true;
   }
 }
@@ -402,16 +460,19 @@ export async function assertGcpWifPoolOwnership(
 
   // Unclaimed: claim it. The primary key decides a concurrent claim, so re-read the winner.
   const [ownerKind, ownerUserId] = ownerColumns(owner);
-  const [, claimResult] = await env.DATABASE.batch<Record<string, unknown>>([
-    env.DATABASE.prepare(CLAIM_POOL_SQL).bind(
-      identity.key,
-      ownerKind,
-      ownerUserId,
-      new Date().toISOString()
-    ),
-    env.DATABASE.prepare(READ_CLAIM_SQL).bind(identity.key),
-  ]);
-  const claim = parseAll(claimResult?.results, toPoolHolderRow, 'claim');
+  const [, claimRows] = batchRows(
+    await env.DATABASE.batch<Record<string, unknown>>([
+      env.DATABASE.prepare(CLAIM_POOL_SQL).bind(
+        identity.key,
+        ownerKind,
+        ownerUserId,
+        new Date().toISOString()
+      ),
+      env.DATABASE.prepare(READ_CLAIM_SQL).bind(identity.key),
+    ]),
+    'claim'
+  );
+  const claim = parseAll(claimRows, toPoolHolderRow, 'claim');
   const [winner] = claim;
   if (!winner || claim.length !== 1) throw new GcpWifPoolIndexUnavailableError();
   if (!heldBy(winner, owner)) refuse(context, identity, owner, claim);
