@@ -1,11 +1,17 @@
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { buildFencePlan, renderFenceRuleset } from './egress-fence.js';
 import { writeFenceFiles } from './fence-state.js';
 import { mailEgressEndpoints } from './mail-settings.js';
+const lookup = vi.hoisted(() => vi.fn());
+vi.mock('node:dns/promises', () => ({ lookup }));
+beforeEach(() => {
+  lookup.mockReset();
+});
+
 const RANGE = { start: 20000, end: 29999 };
 const RESOLV = 'nameserver 127.0.0.53\n';
 mkdirSync(resolve('.tmp'), { recursive: true });
@@ -77,4 +83,48 @@ describe('DNS SMTP relay fence', () => {
       }
     }
   );
+});
+
+describe('SMTP DNS at the deployment boundary', () => {
+  it('writes every resolved address at only the effective relay TCP port', async () => {
+    lookup.mockResolvedValue([
+      { address: '10.42.0.5', family: 4 },
+      { address: 'fd00::5', family: 6 },
+    ]);
+    const stateDir = mkdtempSync(resolve('.tmp/smtp-fence-'));
+    await writeFenceFiles({
+      stateDir,
+      box: {
+        SMTP_HOST: 'smtp.example.com',
+        SMTP_PORT: '2465',
+        SMTP_FROM: 'sign-in@sam.example.com',
+      },
+      leaseRange: RANGE,
+      resolvConf: RESOLV,
+    });
+    expect(lookup).toHaveBeenCalledWith('smtp.example.com', { all: true });
+    const rules = readFileSync(join(stateDir, 'egress-fence.nft'), 'utf8');
+    expect(rules).toContain('ip daddr 10.42.0.5 tcp dport 2465 accept');
+    expect(rules).toContain('ip6 daddr fd00::5 tcp dport 2465 accept');
+    expect(rules).not.toContain('ip daddr 10.42.0.5 udp dport 2465 accept');
+    expect(rules).not.toContain('ip6 daddr fd00::5 tcp dport 2466 accept');
+  });
+
+  it('leaves both live inputs unchanged when relay DNS fails', async () => {
+    const stateDir = mkdtempSync(resolve('.tmp/smtp-fence-'));
+    const box = { SMTP_HOST: '127.0.0.2', SMTP_PORT: '2525', SMTP_FROM: 'sign-in@sam.example.com' };
+    await writeFenceFiles({ stateDir, box, leaseRange: RANGE, resolvConf: RESOLV });
+    const paths = ['egress-fence.nft', 'celld.env'].map((name) => join(stateDir, name));
+    const previous = paths.map((path) => readFileSync(path, 'utf8'));
+    lookup.mockRejectedValue(new Error('resolver unavailable'));
+    await expect(
+      writeFenceFiles({
+        stateDir,
+        box: { ...box, SMTP_HOST: 'smtp.example.com' },
+        leaseRange: RANGE,
+        resolvConf: RESOLV,
+      })
+    ).rejects.toThrow('resolver unavailable');
+    expect(paths.map((path) => readFileSync(path, 'utf8'))).toEqual(previous);
+  });
 });
