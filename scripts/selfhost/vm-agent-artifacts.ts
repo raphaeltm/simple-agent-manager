@@ -27,6 +27,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { sha256Hex } from './celld-binary.js';
+import { commandPath } from './command-path.js';
 
 /** Matches `toolchain` in packages/vm-agent/go.mod. */
 export const VM_AGENT_BUILD_IMAGE =
@@ -120,16 +121,22 @@ function childFailure(
 }
 
 export function resolveVmAgentRelease(repoRoot: string): VmAgentRelease {
-  const result = spawnSync('bash', ['scripts/deploy/resolve-vm-agent-release.sh', 'HEAD'], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-  });
+  const result = spawnSync(
+    commandPath('bash'),
+    ['scripts/deploy/resolve-vm-agent-release.sh', 'HEAD'],
+    {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    }
+  );
   if (result.status !== 0) throw childFailure('resolve-vm-agent-release.sh', result, (t) => t);
   return parseVmAgentRelease(result.stdout);
 }
 
 function docker(args: string[], what: string): void {
-  const result = spawnSync('docker', args, { stdio: ['ignore', 'inherit', 'inherit'] });
+  const result = spawnSync(commandPath('docker'), args, {
+    stdio: ['ignore', 'inherit', 'inherit'],
+  });
   if (result.status !== 0) {
     const reason = result.error?.message ?? `exit ${result.status}`;
     throw new Error(`${what} failed (docker ${reason})`);
@@ -150,7 +157,7 @@ export function buildVmAgentBinaries(
   mkdirSync(cacheDir, { recursive: true, mode: 0o700 });
   const workDir = mkdtempSync(join(tmpdir(), 'sam-vm-agent-'));
   const archive = spawnSync(
-    'sh',
+    commandPath('sh'),
     ['-c', 'git archive --format=tar HEAD -- packages/vm-agent | tar -x -C "$1"', 'sh', workDir],
     { cwd: repoRoot, encoding: 'utf8' }
   );

@@ -63,6 +63,7 @@ import {
   type CelldWranglerConfig,
 } from './celld-config.js';
 import { ASSETS_DIR, CELLD_MAIN, prepareCelldProject, writeCelldConfig } from './celld-project.js';
+import { commandPath } from './command-path.js';
 import {
   applyAllMigrations,
   bucketOf,
@@ -136,7 +137,7 @@ function buildWeb(baseDomain: string): string {
   log(`building apps/web for https://api.${baseDomain}`);
   const env = { ...process.env, VITE_API_URL: `https://api.${baseDomain}` };
   const result = spawnSync(
-    'pnpm',
+    commandPath('pnpm'),
     ['exec', 'turbo', 'run', 'build', '--filter=@simple-agent-manager/web'],
     {
       cwd: REPO_ROOT,
@@ -156,7 +157,7 @@ function buildWeb(baseDomain: string): string {
 function buildApiDependencies(): void {
   log("building the API Worker's workspace dependencies");
   const result = spawnSync(
-    'pnpm',
+    commandPath('pnpm'),
     ['exec', 'turbo', 'run', 'build', '--filter=@simple-agent-manager/api^...'],
     { cwd: REPO_ROOT, stdio: 'inherit' }
   );
