@@ -12,8 +12,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import { createDeploymentReleaseFromManifest } from '../../../src/routes/deployment-release-submission';
 import { placeReleaseOnDeploymentNode } from '../../../src/routes/deployment-release-placement';
+import { createDeploymentReleaseFromManifest } from '../../../src/routes/deployment-release-submission';
 import {
   type DeploymentPlacement,
   findDeploymentNodeWithCapacity,
