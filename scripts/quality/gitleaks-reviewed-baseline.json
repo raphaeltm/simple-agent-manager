@@ -236,6 +236,14 @@
         "3ea24e85ceb78d673fcb02e42f5d44dfabe7a97fa680f090d0fcf1e79c0eff74",
         "e2345bc2c8f9744b9067ec77eebb1d7baa52999404834bfb429fb63579062263"
       ]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "PR #2906 commit range: scripts/selfhost/deploy-harness.ts BASE_BOX_ENV sets AWS_SECRET_ACCESS_KEY to a fixed, human-readable fleet fixture lengthened to 24+ characters for the objectstore minimum (commit 6ffc0c89d). It is the deploy test harness box .env, never a real credential. Exact finding only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-19T08:20:34.012Z",
+      "expiresAt": "2026-12-19T08:20:34.012Z",
+      "digests": ["bf079eb1d64eb9f1ada2812def7fc669b390aaa9b56fc1010923fe4095706b31"]
     }
   ]
 }
