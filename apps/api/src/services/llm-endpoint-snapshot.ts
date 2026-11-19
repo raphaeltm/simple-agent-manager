@@ -86,7 +86,7 @@ async function load(env: Env, db: D1Database): Promise<Snapshot> {
 /** The cached load for this generation, or a fresh one when absent, superseded or expired. */
 function currentEntry(env: Env, db: D1Database, generation: number): Entry {
   const cached = snapshots.get(db);
-  if (cached && cached.generation === generation && Date.now() < cached.expiresAt) return cached;
+  if (cached?.generation === generation && Date.now() < cached.expiresAt) return cached;
   const entry: Entry = {
     generation,
     expiresAt: Date.now() + ADMIN_SETTINGS_CACHE_MAX_MS,

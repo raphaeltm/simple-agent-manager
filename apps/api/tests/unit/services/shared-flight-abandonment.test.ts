@@ -24,6 +24,7 @@
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { Env } from '../../../src/env';
 import {
   __setSharedFlightResumeOnOwnTimerForTest,
   DEFAULT_SHARED_FLIGHT_JOIN_GRACE_MS,
@@ -103,6 +104,45 @@ async function startAndDrop(start: () => Promise<unknown>, inFlight: () => boole
   await vi.advanceTimersByTimeAsync(0);
   await advanceUntil(inFlight);
   vi.clearAllTimers();
+}
+
+/** The statements one legacy platform-config read runs. */
+const isLegacyConfigRead = (sql: string) => /WHERE key = \?|AS encryptedToken/.test(sql);
+
+/**
+ * A counting env whose admin-settings caches are warm, so only the legacy platform-config read
+ * runs below, plus how many statements that read takes. The platform-config cache is cleared.
+ */
+async function warmPlatformConfigEnv() {
+  const { env, counter } = createEnv();
+  await untilSettled(resolvePlatformConfig(env));
+  __resetPlatformConfigCacheForTest();
+  counter.reset();
+  await untilSettled(resolvePlatformConfig(env));
+  const perRead = counter.executed.filter(isLegacyConfigRead).length;
+  expect(perRead).toBeGreaterThan(0);
+  __resetPlatformConfigCacheForTest();
+  counter.reset();
+  return { env, counter, perRead };
+}
+
+/**
+ * Lands a settings write (the revocation invalidatePlatformConfigCache performs) at the start of
+ * each of the first `reads` legacy reads. Returns the count of legacy statements run since.
+ */
+function revokePlatformConfigReads(env: Env, perRead: number, reads: number): () => number {
+  let statements = 0;
+  const realPrepare = env.DATABASE.prepare.bind(env.DATABASE);
+  env.DATABASE.prepare = ((sql: string) => {
+    if (isLegacyConfigRead(sql)) {
+      if (statements % perRead === 0 && statements / perRead < reads) {
+        __resetPlatformConfigCacheForTest();
+      }
+      statements += 1;
+    }
+    return realPrepare(sql);
+  }) as typeof env.DATABASE.prepare;
+  return () => statements;
 }
 
 describe.each([
@@ -266,18 +306,8 @@ describe.each([
 
   describe('platform config: joiners of a dropped legacy-config read', () => {
     it('wait out its deadline, then share one replacement read', async () => {
-      const { env, counter } = createEnv();
-      // Warm the admin-settings caches so only the legacy platform-config read is in flight below.
-      await untilSettled(resolvePlatformConfig(env));
-      __resetPlatformConfigCacheForTest();
-      counter.reset();
-      await untilSettled(resolvePlatformConfig(env));
-      const legacyReads = () =>
-        counter.executed.filter((sql) => /WHERE key = \?|AS encryptedToken/.test(sql)).length;
-      const perRead = legacyReads();
-      expect(perRead).toBeGreaterThan(0);
-      __resetPlatformConfigCacheForTest();
-      counter.reset();
+      const { env, counter, perRead } = await warmPlatformConfigEnv();
+      const legacyReads = () => counter.executed.filter(isLegacyConfigRead).length;
 
       const gate = counter.stall();
       await startAndDrop(
@@ -305,64 +335,28 @@ describe.each([
     });
 
     it('after three revoked reads, answers from one read of its own that it does not publish', async () => {
-      const { env, counter } = createEnv();
-      await untilSettled(resolvePlatformConfig(env));
-      __resetPlatformConfigCacheForTest();
-      counter.reset();
-      await untilSettled(resolvePlatformConfig(env));
-      const isLegacy = (sql: string) => /WHERE key = \?|AS encryptedToken/.test(sql);
-      const perRead = counter.executed.filter(isLegacy).length;
-      __resetPlatformConfigCacheForTest();
-      counter.reset();
-
-      // A settings write lands during each of the first three reads (the same revocation
-      // invalidatePlatformConfigCache performs), so each read loses its right to publish.
-      let legacyStatements = 0;
-      const realPrepare = env.DATABASE.prepare.bind(env.DATABASE);
-      env.DATABASE.prepare = ((sql: string) => {
-        if (isLegacy(sql)) {
-          if (legacyStatements % perRead === 0 && legacyStatements / perRead < 3) {
-            __resetPlatformConfigCacheForTest();
-          }
-          legacyStatements += 1;
-        }
-        return realPrepare(sql);
-      }) as typeof env.DATABASE.prepare;
+      const { env, perRead } = await warmPlatformConfigEnv();
+      // A settings write lands during each of the first three reads, so each loses its right
+      // to publish.
+      const statements = revokePlatformConfigReads(env, perRead, 3);
 
       const config = await untilSettled(resolvePlatformConfig(env));
       expect(config.github.appSlug.value).toBe('env-app-slug');
       // Three revoked reads, then exactly one more: the bounded fallback, not a fourth retry.
-      expect(legacyStatements).toBe(4 * perRead);
+      expect(statements()).toBe(4 * perRead);
 
       // The fallback read was not published, so the next caller reads again.
       await untilSettled(resolvePlatformConfig(env));
-      expect(legacyStatements).toBe(5 * perRead);
+      expect(statements()).toBe(5 * perRead);
     });
 
     it('refuses the fallback read when a write also lands while it is pending', async () => {
-      const { env, counter } = createEnv();
-      await untilSettled(resolvePlatformConfig(env));
-      __resetPlatformConfigCacheForTest();
-      counter.reset();
-      await untilSettled(resolvePlatformConfig(env));
-      const isLegacy = (sql: string) => /WHERE key = \?|AS encryptedToken/.test(sql);
-      const perRead = counter.executed.filter(isLegacy).length;
-      __resetPlatformConfigCacheForTest();
-      counter.reset();
-
+      const { env, perRead } = await warmPlatformConfigEnv();
       // A write lands during all four reads, the fallback included.
-      let legacyStatements = 0;
-      const realPrepare = env.DATABASE.prepare.bind(env.DATABASE);
-      env.DATABASE.prepare = ((sql: string) => {
-        if (isLegacy(sql)) {
-          if (legacyStatements % perRead === 0) __resetPlatformConfigCacheForTest();
-          legacyStatements += 1;
-        }
-        return realPrepare(sql);
-      }) as typeof env.DATABASE.prepare;
+      const statements = revokePlatformConfigReads(env, perRead, Number.POSITIVE_INFINITY);
 
       await expect(untilSettled(resolvePlatformConfig(env))).rejects.toBeInstanceOf(IoTimeoutError);
-      expect(legacyStatements).toBe(4 * perRead);
+      expect(statements()).toBe(4 * perRead);
     });
   });
 });
