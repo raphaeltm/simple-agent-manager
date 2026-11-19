@@ -396,7 +396,8 @@ export async function grantWifUserOnSa(
   // while `pool/*` stays, any provider in the pool that still trusts SAM's issuer alone lets
   // every SAM user impersonate this service account.
   const roleBindings = (policy.bindings || []).filter((b) => b.role === role);
-  const granted = roleBindings.some((b) => b.members.includes(member));
+  // Only an unconditional grant counts: a member under someone's IAM condition may be denied.
+  const granted = roleBindings.some((b) => b.condition === undefined && b.members.includes(member));
   const legacyPresent = roleBindings.some((b) => b.members.includes(legacyMember));
   if (granted && !legacyPresent) {
     return; // Already granted, nothing to remove

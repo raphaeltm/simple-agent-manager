@@ -237,6 +237,9 @@ projectDeploymentRoutes.post(
       await db
         .update(schema.projectDeploymentCredentials)
         .set({
+          // The owner whose pool claim was checked above, so a concurrent first setup by
+          // another member cannot leave this row naming a pool its owner does not hold.
+          userId: poolOwnerUserId,
           gcpProjectId: result.gcpProjectId,
           gcpProjectNumber: result.gcpProjectNumber,
           serviceAccountEmail: result.serviceAccountEmail,
@@ -249,7 +252,7 @@ projectDeploymentRoutes.post(
       await db.insert(schema.projectDeploymentCredentials).values({
         id: ulid(),
         projectId,
-        userId,
+        userId: poolOwnerUserId,
         provider: 'gcp',
         gcpProjectId: result.gcpProjectId,
         gcpProjectNumber: result.gcpProjectNumber,

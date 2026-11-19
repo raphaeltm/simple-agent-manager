@@ -273,6 +273,30 @@ describe('WIF trust scoping (cross-owner impersonation prevention)', () => {
       ]);
     });
 
+    it('a conditional grant of the scoped member does not count as granted', async () => {
+      const condition = {
+        title: 'expires',
+        expression: 'request.time < timestamp("2030-01-01T00:00:00Z")',
+      };
+      await grant([
+        {
+          role: WIF_ROLE,
+          members: [`principalSet://${POOL_PATH}/attribute.sam_user/user-a`],
+          condition,
+        } as PolicyBinding,
+      ]);
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(setPolicyBindings(1)).toEqual([
+        {
+          role: WIF_ROLE,
+          members: [`principalSet://${POOL_PATH}/attribute.sam_user/user-a`],
+          condition,
+        },
+        { role: WIF_ROLE, members: [`principalSet://${POOL_PATH}/attribute.sam_user/user-a`] },
+      ]);
+    });
+
     it('leaves the policy untouched when already scoped and no wildcard remains', async () => {
       mockFetch.mockResolvedValueOnce(
         mockGcpResponse({
