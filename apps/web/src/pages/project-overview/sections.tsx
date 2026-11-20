@@ -92,6 +92,16 @@ export function Section({
   );
 }
 
+/**
+ * One row of a rail list (Running now, Recently): an icon, a one-line title and a muted line
+ * under it. One line each keeps six running chats and six recent items to a glance; the full
+ * title is the row's tooltip and opens with the row.
+ */
+const ROW_CLASS =
+  'flex min-h-11 min-w-0 items-start gap-2.5 rounded-lg px-2 py-1.5 no-underline hover:bg-surface-hover';
+const ROW_TITLE_CLASS =
+  'line-clamp-1 text-[14px] font-medium leading-snug text-fg-primary [overflow-wrap:anywhere]';
+
 /** Muted one-liner for an empty or unavailable section. */
 export function SectionNote({ children }: { children: ReactNode }) {
   return <p className="m-0 px-2 pb-1 text-sm text-fg-muted">{children}</p>;
@@ -181,16 +191,15 @@ export function RunningRow({
     <li className="list-none">
       <Link
         to={`/projects/${projectId}/chat/${chat.sessionId}`}
-        className="flex min-h-12 min-w-0 items-start gap-3 rounded-lg px-2 py-2 no-underline hover:bg-surface-hover"
+        className={ROW_CLASS}
+        title={title}
         data-testid="overview-running-row"
       >
         <span className="mt-0.5 flex shrink-0">
           <RunningIcon chat={chat} pausedOnYou={pausedOnYou} />
         </span>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="line-clamp-2 break-words text-[15px] font-medium leading-snug text-fg-primary">
-            {title}
-          </span>
+          <span className={ROW_TITLE_CLASS}>{title}</span>
           <RunningMeta chat={chat} now={now} pausedOnYou={pausedOnYou} />
         </span>
       </Link>
@@ -284,16 +293,15 @@ function RecentIdeaRow({ item, projectId }: { item: IdeaListItem; projectId: str
     <li className="list-none">
       <Link
         to={projectIdeaPath(projectId, item.ideaId)}
-        className="flex min-h-12 min-w-0 items-start gap-3 rounded-lg px-2 py-2 no-underline hover:bg-surface-hover"
+        className={ROW_CLASS}
+        title={item.title}
         data-testid="overview-recent-idea"
       >
         <span className="mt-0.5 flex shrink-0">
           <IdeaStateIcon state={item.derived.state} size="glyph" />
         </span>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="line-clamp-2 break-words text-[15px] font-medium leading-snug text-fg-primary">
-            {item.title}
-          </span>
+          <span className={ROW_TITLE_CLASS}>{item.title}</span>
           <span className="line-clamp-1 text-[13px] text-fg-muted [overflow-wrap:anywhere]">
             <span className="sr-only">{IDEA_STATE_LABELS[item.derived.state]}. </span>
             {item.derived.state === 'working' && (
@@ -317,14 +325,15 @@ function MergedPullRequestRow({ pr }: { pr: OverviewMergedPullRequest }) {
         href={pr.url}
         target="_blank"
         rel="noreferrer"
-        className="flex min-h-12 min-w-0 items-start gap-3 rounded-lg px-2 py-2 no-underline hover:bg-surface-hover"
+        className={ROW_CLASS}
+        title={pr.title?.trim() || undefined}
         data-testid="overview-merged-pr"
       >
         <span className="mt-0.5 flex shrink-0 text-[var(--sam-status-purple-fg)]">
           <GitMerge size={18} aria-hidden="true" />
         </span>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="line-clamp-2 break-words text-[15px] font-medium leading-snug text-fg-primary">
+          <span className={ROW_TITLE_CLASS}>
             {pr.title?.trim() || `Pull request #${pr.number}`}
           </span>
           <span className="line-clamp-1 text-[13px] text-fg-muted [overflow-wrap:anywhere]">

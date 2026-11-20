@@ -80,6 +80,7 @@ import {
   syncGatewayEnv,
 } from './deploy-steps.js';
 import { inboundMailWorkerVars } from './inbound-mail-settings.js';
+import { expectedComposeProjectFor, recordInstall } from './install-record.js';
 import {
   ensureMailCollectorPassword,
   MAIL_COLLECTOR_PASSWORD_FILE,
@@ -163,8 +164,8 @@ function buildApiDependencies(): void {
 }
 
 interface DeployInputs {
-  box: Record<string, string>;
   envFile: string;
+  box: Record<string, string>;
   stateDir: string;
   secretsPath: string;
   projectDir: string;
@@ -209,8 +210,8 @@ function readDeployInputs(): DeployInputs {
   if (!baseDomain) throw new Error(`${envFile}: SAM_DOMAIN is required`);
   if (!box.CELLD_BUCKET) throw new Error(`${envFile}: CELLD_BUCKET is required`);
   return {
-    box,
     envFile,
+    box,
     stateDir,
     secretsPath,
     projectDir: join(stateDir, 'project'),
@@ -257,6 +258,10 @@ function prepareBoxState(inputs: DeployInputs): BoxState {
     );
     return { keys, tunnelSettings, collectorPasswordPath, collectorPassword: null };
   }
+  recordInstall(stateDir, inputs.envFile, box, keys.SAM_INSTALLATION_ID);
+  log(
+    `Compose project: ${expectedComposeProjectFor(box, stateDir, keys.SAM_INSTALLATION_ID)} (set COMPOSE_PROJECT_NAME to this name before starting Docker Compose)`
+  );
   syncGatewayEnv(
     join(stateDir, 'gateway.env'),
     renderGatewayEnv(keys.REVERSE_TUNNEL_GATEWAY_SECRET, tunnelSettings),

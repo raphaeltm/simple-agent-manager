@@ -271,31 +271,36 @@ export function FilePreviewModal({
           <section
             ref={previewPaneRef}
             aria-label={`Preview of ${file.filename}`}
-            className={`${paneClassName('quiet')} relative min-h-0 min-w-0 flex-1 ${
-              // HTML needs a flex column so its iframe can claim the full height; the other
-              // viewers scroll inside the pane.
-              kind === 'html' ? 'flex flex-col overflow-hidden' : 'overflow-auto'
-            }`}
+            className={`${paneClassName('quiet')} relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden`}
           >
-            <FilePreviewContent
-              file={file}
-              kind={kind}
-              previewUrl={previewUrl}
-              onDownload={onDownload}
-              markdown={{
-                mode: mdViewMode,
-                content: mdContent,
-                loading: mdLoading,
-                error: mdError,
-                bodyRef: previewBodyRef,
-              }}
-              html={{
-                mode: htmlViewMode,
-                source: htmlSource,
-                loading: htmlSourceLoading,
-                error: htmlSourceError,
-              }}
-            />
+            {/* The pane is the frame and this div scrolls, so the rim and frost stay put
+                (sam-glass-design-system.md, "Scrolling panes"). HTML needs a flex column so its
+                iframe can claim the full height; the other viewers scroll. */}
+            <div
+              className={`relative min-h-0 flex-1 ${
+                kind === 'html' ? 'flex flex-col overflow-hidden' : 'overflow-auto'
+              }`}
+            >
+              <FilePreviewContent
+                file={file}
+                kind={kind}
+                previewUrl={previewUrl}
+                onDownload={onDownload}
+                markdown={{
+                  mode: mdViewMode,
+                  content: mdContent,
+                  loading: mdLoading,
+                  error: mdError,
+                  bodyRef: previewBodyRef,
+                }}
+                html={{
+                  mode: htmlViewMode,
+                  source: htmlSource,
+                  loading: htmlSourceLoading,
+                  error: htmlSourceError,
+                }}
+              />
+            </div>
           </section>
 
           {commentsOpen && (

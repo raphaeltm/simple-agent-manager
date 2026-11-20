@@ -15,8 +15,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -46,7 +45,8 @@ async function dryRun(envFile: string): Promise<{ out: string; config: Record<st
 }
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'sam-deploy-'));
+  mkdirSync(resolve('.tmp'), { recursive: true });
+  dir = mkdtempSync(resolve('.tmp/sam-deploy-'));
   state = join(dir, '.state');
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
@@ -64,9 +64,23 @@ describe('selfhost:deploy', { timeout: CHILD_TEST_TIMEOUT_MS }, () => {
       keys.REVERSE_TUNNEL_GATEWAY_SECRET
     );
 
-    // A second --init keeps every key.
+    // Follow init's public project guidance before existing-install Compose reconciliation.
+    const project = /Compose project: (sam-selfhost-[a-f0-9]+)/.exec(init.out)?.[1];
+    expect(project).toBeTruthy();
+    writeBox(dir, [`COMPOSE_PROJECT_NAME=${project}`]);
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, 'docker'),
+      `#!/usr/bin/env node
+if (!process.argv.includes('ps') || process.env.COMPOSE_PROJECT_NAME !== ${JSON.stringify(project)}) process.exit(90);
+process.stdout.write('[]');
+`,
+      { mode: 0o755 }
+    );
     const before = readFileSync(keysPath, 'utf8');
-    expect((await runDeploy(envFile, ['--init'])).status).toBe(0);
+    const second = await runDeploy(envFile, ['--init'], { PATH: `${bin}:${process.env.PATH}` });
+    expect(second.status, second.out).toBe(0);
     expect(readFileSync(keysPath, 'utf8')).toBe(before);
 
     writeSecrets([`GITHUB_CLIENT_SECRET=${OPERATOR_SECRET}`]);

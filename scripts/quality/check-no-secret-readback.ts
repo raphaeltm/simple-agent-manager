@@ -37,6 +37,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 
+import { operatorBackupAllowances } from './operator-backup-exceptions';
+
 export type RuleId = 'show-secrets' | 'decryption' | 'xtrace' | 'env-dump';
 
 export interface Finding {
@@ -250,7 +252,9 @@ export function scanText(
 ): ScanResult {
   const lines = text.split(/\r?\n/);
   const result: ScanResult = { findings: [], allowed: [], invalidMarkers: [] };
+  const operatorDecryptLines = operatorBackupAllowances(file, text);
   const report = (index: number, rule: RuleId): void => {
+    if (rule === 'decryption' && operatorDecryptLines.has(index)) return;
     const finding: Finding = { file, line: index + 1, rule, text: lines[index].trim() };
     const task = EXCUSABLE_RULES.has(rule) ? markerTask(lines, index, isAllowed) : null;
     if (task) result.allowed.push({ ...finding, task });

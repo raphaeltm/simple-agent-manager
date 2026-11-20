@@ -58,7 +58,9 @@ on a wide screen):
   the usual fix as one button: **Resume**, **See what went wrong**, **Give it more runs**, or
   **Check the result**. An automation SAM paused after its last three runs failed also offers **See
   the runs**. A one-time run that failed stays here for three days, then only on its own page and
-  in History. A [workflow](/docs/guides/workflows/) that stopped and needs attention appears here
+  in History. A reminder an agent set to message its own chat later (usually a backup check on CI
+  or a queue) is never listed here: when one doesn't run, its chat has moved on and there is
+  nothing for you to fix. Its outcome still shows on its own page. A [workflow](/docs/guides/workflows/) that stopped and needs attention appears here
   the same way, with **See what went wrong**.
 - **Coming up** shows the next things that start on their own, and when.
 - **Your automations** lists every automation in words: what starts it and what it does.
@@ -163,8 +165,11 @@ reason, shown later on its page). If someone else changed it first, SAM says so 
 latest version, so you can try again. Once it has run, cancelling doesn't undo it: stop or reply
 in the chat it messaged or started instead.
 
-If the chat it should message has been archived, the run fails and says so; SAM never sends the
-message to a different chat. A run that gives up starts nothing. **May have run, but SAM could not
+If the chat it should message has ended by the time it's due (archived, stopped, or its task
+finished), the run fails and says the chat had already ended; SAM never sends the message to a
+different chat. When the schedule was an agent's reminder to its own chat, the same outcome is
+recorded as cancelled instead, because nothing was lost. If the person who scheduled it can no
+longer message that chat, the run fails and says so. A run that gives up starts nothing. **May have run, but SAM could not
 confirm it** means SAM tried and can't tell whether it got through. Look at the linked chat before
 you try again: the agent may already have acted on it.
 

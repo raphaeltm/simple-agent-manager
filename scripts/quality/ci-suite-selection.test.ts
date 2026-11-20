@@ -375,7 +375,8 @@ function crossReads(
   const walk = (current: string) => {
     if (!existsSync(current)) return;
     for (const entry of readdirSync(current)) {
-      if (['node_modules', 'dist', '.astro', 'coverage', 'test-results'].includes(entry)) continue;
+      if (['node_modules', 'dist', '.astro', '.tmp', 'coverage', 'test-results'].includes(entry))
+        continue;
       const full = join(current, entry);
       if (statSync(full).isDirectory()) walk(full);
       else if (CODE_FILE.test(entry)) queue.push(full);
@@ -389,6 +390,8 @@ function crossReads(
     for (const { path, imported } of references(file)) {
       const repoPath = relative(REPO_ROOT, path);
       if (repoPath === '' || repoPath.startsWith('..')) continue;
+      // Generated scratch is output, never a checked-in suite input.
+      if (repoPath === '.tmp' || repoPath.startsWith('.tmp/')) continue;
       if (repoPath.startsWith(`${scanned}/`)) {
         if (imported && CODE_FILE.test(path) && statSync(path).isFile() && !seen.has(path)) {
           seen.add(path);
@@ -420,6 +423,18 @@ function suiteReads(suite: (typeof SUITES)[number]): Array<{ file: string; path:
 }
 
 describe('every file a suite reads outside its package is in its filter', () => {
+  it('runs real git through its dedicated config exactly once in the selected API matrix', () => {
+    const job = loadWorkflow().jobs['test-api']!;
+    const step = job.steps!.find(
+      (entry) => entry.name === 'Hosted git conformance and celld bundle'
+    )!;
+    expect(job.if).toContain("needs.changes.outputs.api-unit == 'true'");
+    expect(step.if).toBe('matrix.shard == 1');
+    expect(step.run).toBe('pnpm --filter @simple-agent-manager/api test:hosted-git');
+    const buildIndex = job.steps!.findIndex((entry) => entry.name === 'Build API dependencies');
+    expect(buildIndex).toBeGreaterThanOrEqual(0);
+    expect(job.steps!.findIndex((entry) => entry === step)).toBeGreaterThan(buildIndex);
+  });
   it.each(SUITES.map((suite) => [suite.output, suite] as const))(
     '%s',
     (_, suite) => {
@@ -452,6 +467,8 @@ describe('every file a suite reads outside its package is in its filter', () => 
     );
     expect(apiReads.some((path) => path.startsWith('packages/vm-agent/'))).toBe(true);
     expect(apiReads).toContain('apps/tail-worker/src/x');
+    expect(apiReads.some((path) => path === '.tmp' || path.startsWith('.tmp/'))).toBe(false);
+    expect(apiReads).toContain('scripts/selfhost/celld-binary.ts');
     // Reached only by following a web module's own imports (lineage test -> useTaskGroups).
     expect(apiReads).toContain('apps/web/src/lib/api/client.ts');
     // Without the vm-agent extra the API unit filter would miss them.

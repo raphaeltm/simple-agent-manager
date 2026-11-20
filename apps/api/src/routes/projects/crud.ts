@@ -11,6 +11,7 @@ import { toProjectSummaryResponse } from '../../lib/mappers';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { getUserId } from '../../middleware/auth';
 import { requireProjectCapability } from '../../middleware/project-auth';
+import { resolveArtifactsBackendForCleanup } from '../../services/artifacts/backend';
 import {
   buildProjectLibraryDeleteStatements,
   buildProjectLibraryR2Prefix,
@@ -18,7 +19,6 @@ import {
   getProjectDeleteCleanupBatchSize,
 } from '../../services/file-library';
 import { reconcileGcpWifPoolIndex } from '../../services/gcp-wif-pool-ownership';
-import { resolveArtifactsBackendForCleanup } from '../../services/hosted-git/backend';
 import { getRuntimeLimits } from '../../services/limits';
 import { deleteWorkspaceResourceHistoryObjectsForProject } from '../../services/workspace-resource-history';
 import { registerProjectCreateRoute } from './project-create';

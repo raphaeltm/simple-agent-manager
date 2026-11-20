@@ -390,5 +390,6 @@ export {
 export {
   getLatestPersistedPlan,
   getSessionState,
+  listWorkingChatSessionIds,
   type PersistedPlanSnapshot,
 } from './session-state-read';
