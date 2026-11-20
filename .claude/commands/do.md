@@ -21,6 +21,9 @@ success. Subscriptions stay active after delivery: while required checks are
 pending on the same SHA, retain the existing subscription and fallback and end
 your turn again; do not recreate them on each wake. Keep one bounded fallback schedule for missing terminal webhooks; follow
 `docs/guides/ci-wait-recovery.md` for registration, reconciliation and cleanup.
+When you open the PR, also subscribe to `source: github`, `subjectType: pull_request`,
+`subjectId: <PR number>` (no eventType) so Codex, CodeRabbit and human reviews/comments
+wake you; address or reply to every finding before merge.
 
 ## Phase 0: Initialize Workflow Tracker (MANDATORY FIRST STEP)
 
@@ -126,6 +129,8 @@ Execute the checklist from the task file. Follow these rules:
    ```
    gh pr create --draft --title "<short title>" --body-file <filled-in .github/pull_request_template.md>
    ```
+
+   Then subscribe to the PR's review and comment events (see the top of this file).
 
    CI on a draft PR runs only the quick checks: Detect Changes, PR Evidence, Lint, Build and Type Check, Code Quality Checks and Secret Scan. The test suites, browser audits, deploy-script, VM, CLI and Workers jobs start only when the PR is marked ready (Phase 4, step 5), and the required `Durable Object Workers` check is not reported for a draft run, so a draft can never be merged on quick checks. Push as often as you like while it is a draft. PR Evidence is expected to fail until the Specialist Review Evidence table is filled in; after the final body edit, re-run it with `gh run rerun <run-id> --failed` (body edits alone do not start CI, and the check reads the live body).
 
@@ -394,7 +399,7 @@ The PR is open as a draft from Phase 3 and ready from Phase 4, so CI and CodeRab
 
    Agents MUST NOT post `@coderabbitai review` directly with their own GitHub App token; CodeRabbit ignores bot-authored review commands. The workflow is the human-identity bridge.
 
-5. **Wait about 15 minutes from the request for CodeRabbit, then follow whichever case applies.** The wait ends at once when CodeRabbit replies with a rate-limit, quota or `Review skipped` notice, or the request workflow fails. If you have nothing else to do while waiting, you may subscribe to the PR's review and comment events (`create_project_event_subscription`, source `github`, subjectType `pull_request`, subjectId = the PR number; `requestedDelivery` defaults to `runtime_steer`) and end your turn instead of sleeping in a loop; only PR comment wakes of a live chat are verified so far, so still check the PR once when the wait ends and say if eventing did not wake you. If CodeRabbit has visibly started a review that is still in progress, let it finish, up to about 45 minutes in total. A CodeRabbit review is not required; requesting one and waiting is. See `.claude/rules/25-review-merge-gate.md`.
+5. **Wait about 15 minutes from the request for CodeRabbit, then follow whichever case applies.** The wait ends at once when CodeRabbit replies with a rate-limit, quota or `Review skipped` notice, or the request workflow fails. If you have nothing else to do while waiting, end your turn on the PR subscription from Phase 3 instead of sleeping in a loop (it expires after the MCP token lifetime, about 8 hours: list your subscriptions with `state: "any"` first; if it has expired, create a replacement with a new `idempotencyKey`, because the original key returns the expired record). Before ending the turn, make sure your single bounded fallback schedule is due at or after this wait's deadline: extend the existing one, or create one if none is active, and confirm it was accepted; only PR comment wakes of a live chat are verified so far, so still check the PR once when the wait ends and say if eventing did not wake you. If CodeRabbit has visibly started a review that is still in progress, let it finish, up to about 45 minutes in total. A CodeRabbit review is not required; requesting one and waiting is. See `.claude/rules/25-review-merge-gate.md`.
    - **A review arrived: it blocks merge until its feedback is resolved.** Read every CodeRabbit review comment, thread, and summary. Implement valid feedback, push fixes, and re-run the affected validation/CI checks. For feedback you believe is not applicable, explicitly review it, document the reason, and resolve the thread. Keep the `coderabbit-review` label on the PR so pushed fixes get incremental reviews, and give each one the same wait. You are done when no CodeRabbit feedback is unresolved and you independently agree the PR is ready. CodeRabbit not re-reviewing your fixes within the wait does not block.
    - **No review arrived: skip CodeRabbit and continue.** This covers silence after the wait, a `Review skipped` status (for example `bot user not eligible for review`), a rate-limit or quota notice, and a failed request workflow. Record what you observed in the PR's "CodeRabbit Review Evidence" section. **Do NOT add `needs-human-review`, call `request_human_input`, or wait for a waiver because CodeRabbit is silent.**
 

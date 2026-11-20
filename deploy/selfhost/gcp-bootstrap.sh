@@ -31,6 +31,10 @@
 #   --provider-id <id>      default: sam-api
 #   --service-account <id>  default: sam-nodes (account id, before @)
 #   --skip-issuer-check     do not fetch <api-url>/.well-known/openid-configuration first
+#   --state-dir <dir>       creation receipts (default deploy/selfhost/.state)
+#   --installation-id <id>  normalized SAM_INSTALLATION_ID; enables ownership receipts for teardown
+#   --create-firewalls      create absent shared SAM node rules with installation ownership metadata
+#   --agent-source-ranges <CIDRs>  required with --create-firewalls (comma-separated; agent ingress)
 #   --dry-run               print every gcloud command that would change something; change nothing
 set -euo pipefail
 
@@ -41,6 +45,11 @@ PROVIDER_ID="sam-api"
 SA_ID="sam-nodes"
 DRY_RUN=0
 CHECK_ISSUER=1
+INSTALLATION_ID=""
+CREATE_FIREWALLS=0
+AGENT_RANGES=""
+STATE_DIR="$(cd "$(dirname "$0")" && pwd)/.state"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # The APIs node provisioning calls: compute (VMs, firewalls; packages/providers/src/gcp*.ts),
 # cloudbilling (list prices, gcp-pricing.ts), and iam, sts and iamcredentials (the pool and the
@@ -70,6 +79,10 @@ while [[ $# -gt 0 ]]; do
     --provider-id) need_value "$1" $#; PROVIDER_ID="$2"; shift 2 ;;
     --service-account) need_value "$1" $#; SA_ID="$2"; shift 2 ;;
     --skip-issuer-check) CHECK_ISSUER=0; shift ;;
+    --installation-id) need_value "$1" $#; INSTALLATION_ID="$2"; shift 2 ;;
+    --create-firewalls) CREATE_FIREWALLS=1; shift ;;
+    --agent-source-ranges) need_value "$1" $#; AGENT_RANGES="$2"; shift 2 ;;
+    --state-dir) need_value "$1" $#; STATE_DIR="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     # The header comment, up to the first line that is not a comment.
     -h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
@@ -78,7 +91,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # grep checks below are line by line: refuse any value with a newline before they run.
-for value in "$PROJECT" "$API_URL" "$POOL_ID" "$PROVIDER_ID" "$SA_ID"; do
+for value in "$PROJECT" "$API_URL" "$POOL_ID" "$PROVIDER_ID" "$SA_ID" "$INSTALLATION_ID" "$AGENT_RANGES"; do
   case "$value" in
     *$'\n'*|*$'\r'*) die "arguments must not contain line breaks" ;;
     *) ;;
@@ -103,6 +116,13 @@ printf '%s' "$POOL_ID" | grep -Eq '^[a-z][a-z0-9-]{3,31}$' || die "invalid --poo
 printf '%s' "$PROVIDER_ID" | grep -Eq '^[a-z][a-z0-9-]{3,31}$' || die "invalid --provider-id: $PROVIDER_ID"
 printf '%s' "$SA_ID" | grep -Eq '^[a-z][a-z0-9-]{5,29}$' || die "invalid --service-account: $SA_ID"
 SA_EMAIL="${SA_ID}@${PROJECT}.iam.gserviceaccount.com"
+if [[ -n "$INSTALLATION_ID" ]]; then
+  printf '%s' "$INSTALLATION_ID" | grep -Eq '^[a-f0-9]{32}$' || die "--installation-id must be the normalized 32 hex installation id"
+fi
+if [[ "$CREATE_FIREWALLS" -eq 1 ]]; then
+  [[ -n "$INSTALLATION_ID" && -n "$AGENT_RANGES" ]] || die "--create-firewalls requires --installation-id and --agent-source-ranges"
+  printf '%s' "$AGENT_RANGES" | grep -Eq '^[0-9a-fA-F:.,/]+$' || die "invalid --agent-source-ranges"
+fi
 # Only tokens SAM signs for the installation's own (platform) credential: SAM sets
 # user_id = platform:<userId> for those and the bare owner id for a user's credential
 # (gcpIdentityTokenUserId in apps/api/src/services/gcp-sts.ts). So a user's GCP credential that
@@ -131,7 +151,25 @@ change_retry() {
   return 1
 }
 
+# Validate the existing ledger before any issuer/cloud call, including dry-run and no-ID modes.
+node "$SCRIPT_DIR/created-resources.mjs" assert-project "$STATE_DIR/created-resources.json" "$PROJECT" \
+  || die "cannot use this receipt path for the requested GCP project"
+
 command -v gcloud >/dev/null 2>&1 || die "gcloud is not installed or not on PATH"
+
+# Receipts contain public resource identifiers only, never credentials. Reuse never becomes
+# creation proof; teardown will preserve resources that existed before this install.
+record_resource() {
+  local resource_kind="$1" resource_name="$2" resource_action="$3" resource_identity="$4"
+  local resource_member="${5:-}" resource_role="${6:-}" resource_operation="${7:-add}"
+  local grant_attributes=()
+  if [[ "$resource_kind" == iam-binding || "$resource_kind" == service-account-iam-binding ]]; then
+    grant_attributes=("condition=None" "grantPending=")
+  fi
+  [[ "$DRY_RUN" -eq 0 && -n "$INSTALLATION_ID" ]] || return 0
+  node "$SCRIPT_DIR/created-resources.mjs" "$resource_operation" "$STATE_DIR/created-resources.json" gcp "$resource_kind" "$resource_name" "$resource_action" gcp-bootstrap \
+    "project=$PROJECT" "install=$ISSUER" "identity=$resource_identity" "pool=$POOL_ID" "environment=selfhost" "installation=$INSTALLATION_ID" "account=$SA_EMAIL" "member=$resource_member" "role=$resource_role" "${grant_attributes[@]}"
+}
 
 # The OIDC provider trusts the issuer the install advertises: check it before trusting it.
 if [[ "$CHECK_ISSUER" -eq 1 ]]; then
@@ -155,6 +193,7 @@ change services enable "${NODE_APIS[@]}" --project="$PROJECT"
 
 # A deleted pool still describes (state DELETED) and keeps its id for 30 days: reusing it as
 # "exists" would then try to create a provider in a deleted pool (R13 D5).
+pool_action=reused
 if pool_state="$(gcloud iam workload-identity-pools describe "$POOL_ID" --project="$PROJECT" \
   --location=global --format='value(state)' 2>/dev/null)"; then
   [[ "$pool_state" != "DELETED" ]] \
@@ -182,13 +221,20 @@ if pool_state="$(gcloud iam workload-identity-pools describe "$POOL_ID" --projec
   done <<<"$pool_providers"
   echo "pool ${POOL_ID}: exists"
 else
+  pool_action=created
   change iam workload-identity-pools create "$POOL_ID" --project="$PROJECT" --location=global \
     --display-name="SAM ${ISSUER#https://api.}" \
     --description="Dedicated to the SAM install whose token issuer is ${ISSUER}"
 fi
 
+if [[ "$DRY_RUN" -eq 0 && -n "$INSTALLATION_ID" ]]; then
+  pool_identity="$(gcloud iam workload-identity-pools describe "$POOL_ID" --project="$PROJECT" --location=global --format='value(name)')"
+  record_resource workload-identity-pool "$POOL_ID" "$pool_action" "$pool_identity"
+fi
+
 # SAM signs aud=https://iam.googleapis.com/<provider> (gcp-sts.ts).
 AUDIENCE="https://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/providers/${PROVIDER_ID}"
+provider_action=reused
 if provider_state="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
   --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" \
   --format='value(state)' 2>/dev/null)"; then
@@ -226,12 +272,18 @@ else
   # Only this install's platform tokens are admitted (attributeCondition), and only tokens
   # addressed to this provider: SAM signs aud=https://iam.googleapis.com/<provider> (gcp-sts.ts). Mapping
   # matches the guided setup (gcp-setup.ts).
+  provider_action=created
   change iam workload-identity-pools providers create-oidc "$PROVIDER_ID" --project="$PROJECT" \
     --location=global --workload-identity-pool="$POOL_ID" --display-name="SAM API" \
     --issuer-uri="$ISSUER" \
     --allowed-audiences="$AUDIENCE" \
     --attribute-mapping="google.subject=assertion.sub,attribute.sam_user=assertion.user_id,attribute.sam_project=assertion.project_id" \
     --attribute-condition="$CONDITION"
+fi
+
+if [[ "$DRY_RUN" -eq 0 && -n "$INSTALLATION_ID" ]]; then
+  provider_identity="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" --format='value(name)')"
+  record_resource workload-identity-provider "$PROVIDER_ID" "$provider_action" "$provider_identity"
 fi
 
 sa_existed=0
@@ -273,11 +325,14 @@ if [[ "$sa_existed" -eq 1 ]]; then
       let policy;
       try { policy = JSON.parse(text); } catch { process.exit(2); }
       if (policy === null || typeof policy !== "object" || Array.isArray(policy)) process.exit(2);
-      const bindings = policy.bindings ?? [];
+      const bindings = policy.bindings === undefined ? [] : policy.bindings;
       if (!Array.isArray(bindings)) process.exit(2);
       for (const binding of bindings) {
         if (!binding || typeof binding.role !== "string" || !Array.isArray(binding.members)) process.exit(2);
-        if (binding.condition) process.exit(3);
+        if (binding.condition !== undefined) {
+          if (!binding.condition || typeof binding.condition !== "object" || Array.isArray(binding.condition) || typeof binding.condition.expression !== "string") process.exit(2);
+          process.exit(3);
+        }
         for (const member of binding.members) {
           if (typeof member !== "string") process.exit(2);
           const ours = binding.role === "roles/iam.workloadIdentityUser" && member === process.env.POOL_PRINCIPAL;
@@ -319,9 +374,42 @@ if [[ "$sa_existed" -eq 1 ]]; then
     || die "service account ${SA_EMAIL} has ${key_count} user-managed key(s); anyone holding one acts as the node account. Delete them (gcloud iam service-accounts keys list --iam-account=${SA_EMAIL} --managed-by=user, then gcloud iam service-accounts keys delete <key-id> --iam-account=${SA_EMAIL}), then run this again; or pass --service-account <a new id>."
 fi
 
+if [[ "$DRY_RUN" -eq 0 && -n "$INSTALLATION_ID" ]]; then
+  sa_identity="$(gcloud iam service-accounts describe "$SA_EMAIL" --project="$PROJECT" --format='value(uniqueId)')"
+  sa_action=created
+  [[ "$sa_existed" -eq 0 ]] || sa_action=reused
+  record_resource service-account "$SA_EMAIL" "$sa_action" "$sa_identity"
+fi
+
+# --condition=None adds an unconditional grant; a conditional sibling is not that grant.
 for role in "${NODE_ROLES[@]}"; do
+  grant_action=reused
+  if [[ "$DRY_RUN" -eq 0 && -n "$INSTALLATION_ID" ]]; then
+    policy="$(gcloud projects get-iam-policy "$PROJECT" --format=json)" || die "cannot read project IAM policy"
+    grant_status=0
+    printf '%s' "$policy" | ROLE="$role" MEMBER="serviceAccount:$SA_EMAIL" node -e '
+      let text=""; process.stdin.on("data", x=>text+=x); process.stdin.on("end", ()=>{
+        let p; try {p=JSON.parse(text)} catch {process.exit(2)};
+        if (!p || typeof p!=="object" || Array.isArray(p) || !Array.isArray(p.bindings===undefined ? [] : p.bindings)) process.exit(2);
+        const bindings=p.bindings===undefined ? [] : p.bindings;
+        for (const b of bindings) {
+          if (!b || typeof b.role!=="string" || !Array.isArray(b.members) || b.members.some(m=>typeof m!=="string")) process.exit(2);
+          if (b.condition!==undefined && (!b.condition || typeof b.condition!=="object" || Array.isArray(b.condition) || typeof b.condition.expression!=="string")) process.exit(2);
+        }
+        process.exit(bindings.some(b=>b.condition===undefined && b.role===process.env.ROLE && b.members.includes(process.env.MEMBER)) ? 0 : 10);
+      });' || grant_status=$?
+    case "$grant_status" in
+      0) ;;
+      10) grant_action=created ;;
+      *) die "cannot parse project IAM policy" ;;
+    esac
+  fi
+  record_resource iam-binding "projects/$PROJECT#$role#serviceAccount:$SA_EMAIL" "$grant_action" "${sa_identity:-}" "serviceAccount:$SA_EMAIL" "$role" grant-intent
   change_retry projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:${SA_EMAIL}" \
     --role="$role" --condition=None --quiet --format=none
+  if [[ "$DRY_RUN" -eq 0 && -n "$INSTALLATION_ID" ]]; then
+    record_resource iam-binding "projects/$PROJECT#$role#serviceAccount:$SA_EMAIL" "$grant_action" "$sa_identity" "serviceAccount:$SA_EMAIL" "$role"
+  fi
 done
 
 # Scope: the whole pool. Its only provider (checked above on every run) admits only tokens whose
@@ -330,9 +418,48 @@ done
 # credential and no user's. SAM also refuses a user credential that names a pool the platform
 # credential holds (gcp-wif-pool-ownership.ts). Any provider added to this pool later would
 # inherit the service account too, so do not add providers to it.
+sa_grant_action=created
+if [[ "$DRY_RUN" -eq 0 && -n "$INSTALLATION_ID" && "$sa_existed" -eq 1 ]]; then
+  sa_grant_status=0
+  printf '%s' "$sa_policy" | POOL_PRINCIPAL="$POOL_PRINCIPAL" node -e '
+    let text=""; process.stdin.on("data", x=>text+=x); process.stdin.on("end", ()=>{
+      let p; try {p=JSON.parse(text)} catch {process.exit(2)};
+      if (!p || typeof p!=="object" || Array.isArray(p) || !Array.isArray(p.bindings===undefined ? [] : p.bindings)) process.exit(2);
+      process.exit((p.bindings===undefined ? [] : p.bindings).some(b=>b.condition===undefined && b.role==="roles/iam.workloadIdentityUser" && b.members?.includes(process.env.POOL_PRINCIPAL)) ? 0 : 10);
+    });' || sa_grant_status=$?
+  case "$sa_grant_status" in
+    0) sa_grant_action=reused ;;
+    10) ;;
+    *) die "cannot parse service account IAM policy" ;;
+  esac
+fi
+record_resource service-account-iam-binding "$SA_EMAIL#roles/iam.workloadIdentityUser#$POOL_PRINCIPAL" "$sa_grant_action" "${sa_identity:-}" "$POOL_PRINCIPAL" roles/iam.workloadIdentityUser grant-intent
 change_retry iam service-accounts add-iam-policy-binding "$SA_EMAIL" --project="$PROJECT" \
   --role=roles/iam.workloadIdentityUser --member="$POOL_PRINCIPAL" \
   --condition=None --quiet --format=none
+if [[ "$DRY_RUN" -eq 0 && -n "$INSTALLATION_ID" ]]; then
+  record_resource service-account-iam-binding "$SA_EMAIL#roles/iam.workloadIdentityUser#$POOL_PRINCIPAL" "$sa_grant_action" "$sa_identity" "$POOL_PRINCIPAL" roles/iam.workloadIdentityUser
+fi
+
+# Optional: make only rules absent at creation time, preserving an ownership receipt.
+# Existing same-name rules belong to whoever created them and are never adopted.
+if [[ "$CREATE_FIREWALLS" -eq 1 ]]; then
+  for rule in sam-allow-agent sam-allow-app-routes; do
+    if gcloud compute firewall-rules describe "$rule" --project="$PROJECT" --format=json >/dev/null 2>&1; then
+      echo "firewall $rule: exists; not adopted"
+      continue
+    fi
+    ranges="$AGENT_RANGES"; ports=tcp:8080,tcp:8443; tag=sam-agent
+    if [[ "$rule" == sam-allow-app-routes ]]; then ranges=0.0.0.0/0; ports=tcp:80,tcp:443; tag=sam-deployment-app-routes; fi
+    description="SAM installation=$INSTALLATION_ID environment=selfhost issuer=$ISSUER"
+    change compute firewall-rules create "$rule" --project="$PROJECT" --network=default --direction=INGRESS \
+      --priority=1000 --target-tags="$tag" --allow="$ports" --source-ranges="$ranges" --description="$description"
+    if [[ "$DRY_RUN" -eq 0 && -n "$INSTALLATION_ID" ]]; then
+      identity="$(gcloud compute firewall-rules describe "$rule" --project="$PROJECT" --format='value(id)')"
+      record_resource firewall-rule "$rule" created "$identity"
+    fi
+  done
+fi
 
 [[ "$DRY_RUN" -eq 1 ]] && echo "Dry run: nothing was changed."
 # The shape parseGcpCredential (apps/api/src/services/provider-credential-codecs.ts) reads.

@@ -4,6 +4,9 @@ compatibility_date = "2026-01-01"
 # Report handled multi-tick stream failures after the microtask checkpoint.
 compatibility_flags = ["nodejs_compat", "unhandled_rejection_after_microtask_checkpoint"]
 port = 8787
+# Preserve pre-4.150 upload behavior: this Worker's generated source maps exceed
+# Cloudflare's 60 MiB upload limit. Runtime logging and traces remain enabled.
+upload_source_maps = false
 
 # Paid Workers and sub-hour Cron Triggers default to 30s CPU. Declaring that
 # budget explicitly prevents an accidental dashboard increase from turning a

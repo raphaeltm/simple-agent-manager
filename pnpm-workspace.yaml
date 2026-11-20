@@ -31,7 +31,7 @@ catalog:
 
   # === Cloudflare ===
   '@cloudflare/workers-types': 5.20260707.1
-  wrangler: 4.149.0
+  wrangler: 4.163.0
 
   # === React Ecosystem ===
   react: 19.3.1
@@ -61,7 +61,7 @@ catalog:
   '@aws-sdk/s3-request-presigner': 3.1169.0
   yaml: 2.9.1
   # One jose copy: the API worker and repo-hosting both sign and verify JWTs.
-  jose: 6.2.3
+  jose: 6.2.17
   execa: 10.2.1
   prism-react-renderer: 2.4.1
   react-markdown: 10.1.0

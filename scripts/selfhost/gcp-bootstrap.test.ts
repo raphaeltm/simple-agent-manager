@@ -3,11 +3,10 @@
  * Google Cloud state as files, so a second run sees what the first created.
  */
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GCP_REQUIRED_APIS } from '../../packages/shared/src/constants/gcp-required-apis';
 
@@ -25,6 +24,7 @@ const FAKE_GCLOUD = `#!/usr/bin/env bash
 exec node ${JSON.stringify(resolve(import.meta.dirname, 'testdata/fake-gcloud-iam.mjs'))} "$@"
 `;
 const FAKE_CURL = `#!/usr/bin/env bash
+printf 'issuer check\\n' >> "$STATE/issuer-calls"
 printf '{"issuer":"%s","jwks_uri":"%s/.well-known/jwks.json"}' "$FAKE_ISSUER" "$FAKE_ISSUER"
 `;
 
@@ -32,12 +32,18 @@ let state: string;
 let bin: string;
 
 beforeEach(() => {
-  state = mkdtempSync(join(tmpdir(), 'gcp-bootstrap-state-'));
-  bin = mkdtempSync(join(tmpdir(), 'gcp-bootstrap-bin-'));
+  mkdirSync(resolve('.tmp'), { recursive: true });
+  state = mkdtempSync(resolve('.tmp/gcp-bootstrap-state-'));
+  bin = mkdtempSync(resolve('.tmp/gcp-bootstrap-bin-'));
   writeFileSync(join(bin, 'gcloud'), FAKE_GCLOUD);
   writeFileSync(join(bin, 'curl'), FAKE_CURL);
   chmodSync(join(bin, 'gcloud'), 0o755);
   chmodSync(join(bin, 'curl'), 0o755);
+});
+
+afterEach(() => {
+  rmSync(state, { recursive: true, force: true });
+  rmSync(bin, { recursive: true, force: true });
 });
 
 function run(args: string[], advertisedIssuer = ISSUER, env: NodeJS.ProcessEnv = {}) {
@@ -94,6 +100,103 @@ function calls(): string[] {
 
 const MUTATING =
   /^(services enable|iam workload-identity-pools( providers)? (create|update)|iam service-accounts create|projects add-iam-policy-binding|iam service-accounts add-iam-policy-binding)/;
+
+describe('bootstrap project scope at the same state directory', () => {
+  const args = (project: string, installation = true) => [
+    '--project',
+    project,
+    '--api-url',
+    ISSUER,
+    '--state-dir',
+    state,
+    ...(installation ? ['--installation-id', 'a'.repeat(32)] : []),
+  ];
+  const receiptFile = () => join(state, 'created-resources.json');
+  function seed() {
+    const first = run(args('sam-vm-test'));
+    expect(first.status, first.stderr).toBe(0);
+    expect(first.calls.some((call) => MUTATING.test(call))).toBe(true);
+    const record = JSON.parse(readFileSync(receiptFile(), 'utf8'));
+    expect(
+      record.resources.some(
+        (r: { attributes?: { project?: string } }) => r.attributes?.project === 'sam-vm-test'
+      )
+    ).toBe(true);
+    return record;
+  }
+  it.each([
+    { name: 'default-name collisions in another project', installation: true, dryRun: false },
+    { name: 'omitted installation ID', installation: false, dryRun: false },
+    { name: 'dry run', installation: true, dryRun: true },
+  ])(
+    'refuses $name before issuer or cloud access and preserves original receipts',
+    ({ installation, dryRun }) => {
+      seed();
+      const original = readFileSync(receiptFile(), 'utf8');
+      const cloud = readFileSync(join(state, 'gcp.json'), 'utf8');
+      const before = calls();
+      const issuerCalls = readFileSync(join(state, 'issuer-calls'), 'utf8');
+      const result = run([
+        ...args('second-project', installation),
+        ...(dryRun ? ['--dry-run'] : []),
+      ]);
+      expect(result.status, result.stderr).not.toBe(0);
+      expect(result.stderr).toMatch(/project|scope/i);
+      expect(readFileSync(receiptFile(), 'utf8')).toBe(original);
+      expect(readFileSync(join(state, 'gcp.json'), 'utf8')).toBe(cloud);
+      expect(calls()).toEqual(before);
+      expect(readFileSync(join(state, 'issuer-calls'), 'utf8')).toBe(issuerCalls);
+    }
+  );
+  it.each(['missing', 'malformed'])(
+    'refuses an active receipt with %s project scope before external access',
+    (scope) => {
+      const record = seed();
+      const active = record.resources.find(
+        (r: { cloud: string; removedAt?: string }) => r.cloud === 'gcp' && !r.removedAt
+      );
+      if (scope === 'missing') delete active.attributes.project;
+      else active.attributes.project = { invalid: true };
+      writeFileSync(receiptFile(), JSON.stringify(record));
+      const original = readFileSync(receiptFile(), 'utf8');
+      const cloud = readFileSync(join(state, 'gcp.json'), 'utf8');
+      const before = calls();
+      const issuerCalls = readFileSync(join(state, 'issuer-calls'), 'utf8');
+      const result = run(args('sam-vm-test'));
+      expect(result.status).not.toBe(0);
+      expect(readFileSync(receiptFile(), 'utf8')).toBe(original);
+      expect(readFileSync(join(state, 'gcp.json'), 'utf8')).toBe(cloud);
+      expect(calls()).toEqual(before);
+      expect(readFileSync(join(state, 'issuer-calls'), 'utf8')).toBe(issuerCalls);
+    }
+  );
+  it('allows an exact same-project retry and preserves created ownership', () => {
+    seed();
+    const before = calls().length;
+    const result = run(args('sam-vm-test'));
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.calls.length).toBeGreaterThan(before);
+    expect(result.calls.slice(before).filter((call) => / (create|update)/.test(call))).toEqual([]);
+    const record = JSON.parse(readFileSync(receiptFile(), 'utf8'));
+    expect(
+      record.resources.every(
+        (r: { action: string; attributes: { project: string } }) =>
+          r.action === 'created' && r.attributes.project === 'sam-vm-test'
+      )
+    ).toBe(true);
+  });
+  it('allows project reuse when every old GCP receipt is removed', () => {
+    const record = seed();
+    for (const resource of record.resources) resource.removedAt = new Date().toISOString();
+    writeFileSync(receiptFile(), JSON.stringify(record));
+    const before = calls().length;
+    const result = run(args('second-project'));
+    expect(result.status, result.stderr).toBe(0);
+    expect(
+      result.calls.slice(before).some((call) => call.includes('--project=second-project'))
+    ).toBe(true);
+  });
+});
 
 describe('pnpm selfhost:gcp-bootstrap', () => {
   it('creates the pool, issuer-scoped provider, service account and bindings, and prints the five form values', () => {
@@ -602,4 +705,96 @@ describe('gcp-bootstrap.sh against the guided setup (drift)', () => {
     );
     for (const role of Object.keys(OMITTED_ROLES)) expect(script, role).toContain(role);
   });
+});
+
+describe('bootstrap creation receipts', () => {
+  const args = () => [
+    '--project',
+    'sam-vm-test',
+    '--api-url',
+    ISSUER,
+    '--installation-id',
+    'a'.repeat(32),
+    '--state-dir',
+    state,
+  ];
+  const receipts = () =>
+    JSON.parse(readFileSync(join(state, 'created-resources.json'), 'utf8')).resources as Array<{
+      kind: string;
+      action: string;
+      attributes: Record<string, string>;
+    }>;
+  it('records actual new resource identities and preserves the proof on repeat', () => {
+    expect(run(args()).status).toBe(0);
+    const before = receipts();
+    expect(before).toHaveLength(6);
+    expect(
+      before.every(
+        (r) =>
+          r.action === 'created' &&
+          !!r.attributes.identity &&
+          r.attributes.installation === 'a'.repeat(32)
+      )
+    ).toBe(true);
+    expect(run(args()).status).toBe(0);
+    expect(receipts().every((r) => r.action === 'created')).toBe(true);
+  });
+  it('records only a newly added pool grant on a reused service account as created', () => {
+    expect(run(['--project', 'sam-vm-test', '--api-url', ISSUER]).status).toBe(0);
+    setGcp((db) => {
+      db.saBindings = {};
+    });
+    expect(run(args()).status).toBe(0);
+    const grant = receipts().find((r) => r.kind === 'service-account-iam-binding');
+    expect(grant?.action).toBe('created');
+    expect(grant?.attributes.role).toBe('roles/iam.workloadIdentityUser');
+    expect(grant?.attributes.member).toMatch(
+      /^principalSet:\/\/iam.googleapis.com\/projects\/123456789012\/locations\/global\/workloadIdentityPools\/[^/]+\/\*$/
+    );
+    expect(receipts().find((r) => r.kind === 'service-account')?.action).toBe('reused');
+    expect(run(args()).status).toBe(0);
+    expect(receipts().find((r) => r.kind === 'service-account-iam-binding')?.action).toBe(
+      'created'
+    );
+  });
+  it('records preexisting resources and grants as reused', () => {
+    expect(run(['--project', 'sam-vm-test', '--api-url', ISSUER]).status).toBe(0);
+    expect(run(args()).status).toBe(0);
+    expect(receipts().every((r) => r.action === 'reused')).toBe(true);
+  });
+});
+
+it('creates absent firewall rules with identity receipts without adopting an existing shared rule', () => {
+  const args = [
+    '--project',
+    'sam-vm-test',
+    '--api-url',
+    ISSUER,
+    '--installation-id',
+    'a'.repeat(32),
+    '--state-dir',
+    state,
+    '--create-firewalls',
+    '--agent-source-ranges',
+    '10.0.0.0/24',
+  ];
+  const first = run(args);
+  expect(first.status, first.stderr).toBe(0);
+  const receipts = JSON.parse(readFileSync(join(state, 'created-resources.json'), 'utf8'))
+    .resources as Array<{ kind: string; name: string; attributes: Record<string, string> }>;
+  const rules = receipts.filter((r) => r.kind === 'firewall-rule');
+  expect(rules).toHaveLength(2);
+  expect(
+    rules.every((r) => r.attributes.identity && r.attributes.installation === 'a'.repeat(32))
+  ).toBe(true);
+  // A second installation shares this account, existing rule names and environment. Its WIF
+  // bootstrap must record no ownership of either firewall, despite --create-firewalls.
+  const foreignState = join(state, 'other-install');
+  const second = run(
+    args.map((v) => (v === state ? foreignState : v === 'a'.repeat(32) ? 'b'.repeat(32) : v))
+  );
+  expect(second.status, second.stderr).toBe(0);
+  const foreign = JSON.parse(readFileSync(join(foreignState, 'created-resources.json'), 'utf8'))
+    .resources as Array<{ kind: string }>;
+  expect(foreign.some((r) => r.kind === 'firewall-rule')).toBe(false);
 });

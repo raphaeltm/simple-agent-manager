@@ -858,3 +858,20 @@ The existing publish-job events, artifact init/complete and compose release call
 `POST /api/auth/unlink-account` accepts BetterAuth `{accountId}`. Only the caller's GitHub/GitLab accounts can be removed; removing the last provider requires usable verified email sign-in. The affected account owner receives a linked-provider security notification at their preserved SAM email. Explicit links may have a different provider email; future sign-ins preserve an already-verified SAM email. A lookup failure aborts sign-in rather than replacing identity.
 
 GitHub repository errors distinguish `403 GITHUB_NOT_CONNECTED`, `401 GITHUB_REAUTH_REQUIRED`, `503 GITHUB_UNAVAILABLE`, `409 GITHUB_APP_NOT_CONFIGURED` and `404 FEATURE_UNAVAILABLE`. Only actual authorization failures request reauthentication; provider outages offer retry. Unverified provider-linked accounts receive a provider-sign-in note instead of an email code, and code redemption is refused without deleting links or sessions.
+
+## Self-hosted repository credentials
+
+### POST /api/projects/{id}/hosted-git/token
+
+Available only on self-host installations using the local hosted Git backend. Requires an
+approved, session-authenticated user. The `scope` query parameter is `write` for push access;
+all other values (including omission) select `read`. Read requires `project:read`; write
+requires `workspace:write` on the addressed project. No request body is required.
+
+Returns `200` with `{ cloneUrl, host, username: "x", token, scope, expiresAt }`. `expiresAt`
+is the token's expiry timestamp in ISO 8601 format. Use `username` and `token` as Git HTTP Basic
+credentials; keep the short-lived token private. This personal token is not workspace-bound.
+
+Returns `401` for missing authentication, `403` for insufficient capability, and `404` when
+the project is absent or does not use this installation's local hosted Git backend. Cloudflare
+Workers do not register this endpoint and return `404`; their Artifacts and forge behavior is unchanged.

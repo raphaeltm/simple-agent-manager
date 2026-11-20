@@ -109,7 +109,9 @@ export function listAcpSessions(
 
   const rows = sql
     .exec(
-      `SELECT * FROM acp_sessions ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      // `id DESC` breaks same-millisecond ties: the chat view's "newest session" and
+      // Running now's (`session-state-read.ts`, CHAT_ACTIVITY_SQL) must pick the same row.
+      `SELECT * FROM acp_sessions ${where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
       ...params,
       limit,
       offset
