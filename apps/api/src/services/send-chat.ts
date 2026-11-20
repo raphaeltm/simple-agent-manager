@@ -171,7 +171,9 @@ Their message:
       ttlMs: durableConfig.ttlMs,
       metadata: {
         userId,
-        ...(inboxReply ? { inboxRef: inboxReply.ref } : {}),
+        // The title as it was when the person replied: the chat's "Re:" chip names the item
+        // without a second read. Agent-written, rendered as text only.
+        ...(inboxReply ? { inboxRef: inboxReply.ref, inboxTitle: inboxReply.title } : {}),
         ...(inboxReply?.fingerprint ? { inboxReplyFingerprint: inboxReply.fingerprint } : {}),
         ...(inboxReply?.permission ? { inboxReplyPermission: inboxReply.permission } : {}),
         wake: agentWakeRecord(wake),

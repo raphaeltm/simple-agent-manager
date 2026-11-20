@@ -2,6 +2,7 @@ import type {
   ToolCallContentItem,
   UserMessageAttribution,
   UserMessageDelivery,
+  UserMessageInboxReply,
 } from '@simple-agent-manager/acp-client';
 import {
   AgentCrashReportView,
@@ -10,10 +11,13 @@ import {
   RawFallbackView,
   ThinkingBlock as AcpThinkingBlock,
 } from '@simple-agent-manager/acp-client';
+import { Inbox } from 'lucide-react';
 import { memo, useCallback } from 'react';
+import { Link } from 'react-router';
 
 import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
 import { getTtsApiUrl } from '../../lib/api';
+import { projectInboxItemPath } from '../../lib/project-routes';
 import { noticeOf, systemRowNotice } from './sam-notice/notice-items';
 import { NoticeRow } from './sam-notice/NoticeRow';
 import type { DisplayItem } from './tool-call-groups';
@@ -51,6 +55,45 @@ function UserMessageAttributionLine({ attribution }: { attribution: UserMessageA
           {attribution.notDelivered === 'access_expired'
             ? 'Not delivered — access expired'
             : 'Not delivered — access was removed'}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Above a user message sent as a reply from the inbox: which item it is about. Opens the item in
+ * the project inbox. The title is the agent's own text from when the reply was sent.
+ */
+function InboxReplyChip({
+  inboxReply,
+  projectId,
+}: {
+  inboxReply: UserMessageInboxReply;
+  projectId?: string;
+}) {
+  const label = `Re: ${inboxReply.title ?? 'an inbox item'}`;
+  const chip =
+    'flex min-h-9 max-w-[85%] min-w-0 items-center gap-1.5 rounded-full border border-[var(--sam-hairline)] px-3 text-xs text-fg-secondary no-underline';
+  const content = (
+    <>
+      <Inbox size={13} aria-hidden="true" className="shrink-0 text-fg-muted" />
+      <span className="min-w-0 truncate">{label}</span>
+    </>
+  );
+  return (
+    <div className="mb-1 flex justify-end" data-testid="inbox-reply-chip">
+      {projectId ? (
+        <Link
+          to={projectInboxItemPath(projectId, inboxReply.ref)}
+          className={`${chip} hover:text-fg-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
+          title={label}
+        >
+          {content}
+        </Link>
+      ) : (
+        <span className={chip} title={label}>
+          {content}
         </span>
       )}
     </div>
@@ -199,6 +242,7 @@ function AcpConversationItemViewImpl({
       // The timestamp is what turns on the bubble's Info + Copy actions.
       return (
         <>
+          {item.inboxReply && <InboxReplyChip inboxReply={item.inboxReply} projectId={projectId} />}
           {item.attribution && <UserMessageAttributionLine attribution={item.attribution} />}
           <AcpMessageBubble
             text={item.text}

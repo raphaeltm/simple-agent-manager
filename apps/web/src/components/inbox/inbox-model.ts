@@ -183,27 +183,21 @@ export function readErrorActions(item: InboxItem): InboxErrorActionModel[] | nul
 }
 
 /**
- * Whether an item has an answer area to pin. Open human tasks and SAM's own error items have
- * nothing to answer yet (Open chat is in the top bar), so they show no empty control strip.
+ * Whether an item shows answer controls (`InboxAnswerControls` renders something). Open human
+ * tasks and SAM's own error items have nothing to answer yet (Open chat is in the top bar); a
+ * free-text question and a settled permission are answered by replying in the composer.
  */
-export function hasPinnedControls(item: InboxItem): boolean {
-  if (item.status !== 'open' || !item.canAct) return true;
+export function hasAnswerControls(item: InboxItem): boolean {
+  if (item.status !== 'open') return !item.canReply;
+  if (!item.canAct) return true;
   if (readErrorActions(item)) return true;
+  if (item.answerSpec.type === 'text') return !item.canReply;
   return !(item.answerSpec.type === 'acknowledge' && !isAcknowledgeable(item));
 }
 
 /** Reviews and results are answered from the inbox: "Looks good" / "Got it", or a reply. */
 export function isAcknowledgeable(item: InboxItem): boolean {
   return item.kind === 'review' || item.kind === 'result';
-}
-
-/**
- * Whether a reply can still reach the agent. A reply is delivered only while the filing task is
- * live (`sourceTaskGuardForClaim`, `inbox_ask`); once it has finished the server refuses a reply
- * (`answerAsk`), so the person continues in the chat instead.
- */
-export function canReplyToAgent(item: InboxItem): boolean {
-  return item.agentState !== 'finished';
 }
 
 /** The one-tap acknowledgement for a review or a result. */

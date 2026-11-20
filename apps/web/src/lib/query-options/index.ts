@@ -131,6 +131,7 @@ export {
 } from './ideas';
 export {
   inboxCountQueryOptions,
+  inboxConversationQueryOptions,
   inboxItemQueryOptions,
   inboxListQueryOptions,
   inboxQueryKeys,

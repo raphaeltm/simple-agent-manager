@@ -1,4 +1,8 @@
-import type { UserMessageAttribution, UserMessageDelivery } from '@simple-agent-manager/acp-client';
+import type {
+  UserMessageAttribution,
+  UserMessageDelivery,
+  UserMessageInboxReply,
+} from '@simple-agent-manager/acp-client';
 import type { SessionUndeliveredReason } from '@simple-agent-manager/shared';
 
 import type { ChatMessageResponse } from '../../lib/api';
@@ -101,4 +105,20 @@ export function userMessageAttribution(
     };
   }
   return undefined;
+}
+
+/**
+ * The inbox item a user message replies to: the server writes `source: 'inbox_reply'` with the
+ * item's ref and its title at reply time (`sendChat`). Rows written before the title was recorded
+ * carry the ref only.
+ */
+export function userMessageInboxReply(
+  message: Pick<ChatMessageResponse, 'role' | 'toolMetadata'>
+): UserMessageInboxReply | undefined {
+  if (message.role !== 'user') return undefined;
+  const meta = maybeJsonRecord(message.toolMetadata);
+  if (!meta || meta.source !== 'inbox_reply') return undefined;
+  const ref = nonEmptyString(meta.inboxRef);
+  if (!ref) return undefined;
+  return { ref, title: nonEmptyString(meta.inboxTitle) };
 }

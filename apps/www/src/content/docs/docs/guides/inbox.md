@@ -49,18 +49,24 @@ marks it read and opens it. **Archived**, in the **⋯** menu, lists what you ar
 On a phone, select a row to open the item full screen; **‹** and **›** step to the previous and next
 item. On a desktop the open item sits beside the list.
 
-The item shows its kind and the agent's state, the ask, the agent's reason, links to the ideas,
-files or pull requests it mentioned, and **Context**: the messages before the ask and what the agent
-has done since. The answer controls stay pinned at the bottom:
+The item reads as a conversation with the agent. Its first message is the ask: the kind and the
+agent's state, the ask, the agent's reason, links to the ideas, files or pull requests it
+mentioned, and **Context** (the messages before the ask and what the agent has done since). The
+answer controls sit inside that message. Your replies and the agent's responses follow in time
+order, and once the agent responds the controls move to its latest response, so there is only one
+set. **Show more of the conversation** reads earlier replies and later responses. The chat
+composer is pinned at the bottom ([Reply to an item](#reply-to-an-item)).
+
+The answer controls by kind:
 
 | Kind               | Answer                                                                                                                                                                                              |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Question           | One of the agent's options, or **Type a different answer** when it allows free text. With more than five options they become a list with one **Send** button.                                       |
+| Question           | One of the agent's options. With more than five options they become a list with one **Send** button. A typed answer is a reply in the composer.                                                     |
 | Permission         | The exact options the agent's tool offered, such as **Allow once**, **Always allow in this chat** or **Deny**. The command it wants to run is shown above them.                                     |
 | Secret             | The secure value field; it is saved encrypted and never shown to the agent ([details](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret)). **Decline** says you will not supply it. |
 | Approval           | **Approve** or **Deny** (superadmins, Operations project).                                                                                                                                          |
-| Review             | **Looks good**, or **Reply** with a comment.                                                                                                                                                        |
-| Result             | **Got it** closes it without waking the agent. **Reply** sends your reply and wakes its chat while the agent is still running; once it has finished, **Open chat** takes its place.                 |
+| Review             | **Looks good**. Anything more is a reply in the composer.                                                                                                                                           |
+| Result             | **Got it** closes it without waking the agent. Anything more is a reply in the composer.                                                                                                            |
 | Task               | Read-only in the Inbox for now: the task's title, why a person is needed, its steps and links. **Archive** closes it. See [Tasks for people](#tasks-for-people).                                    |
 | Problem            | The fix for what failed, such as **Retry** or **Wake the chat**. See [Problems SAM files for you](#problems-sam-files-for-you).                                                                     |
 | Form, Sign-in link | Answered in the chat: the item says **This request is answered in its chat.** with an **Answer in chat** button.                                                                                    |
@@ -70,7 +76,7 @@ last item of a stack moves on to the next stack; answering the last item leaves 
 the item was answered somewhere else meanwhile (in the chat card, another tab or by a teammate), it
 closes by itself. If sending fails, the item stays open with the error.
 
-![A question opened full screen on a phone: "1 of 3 from Ship billing", the question, the agent's reason, link chips, a collapsed Context line, and the answer buttons pinned at the bottom with Type a different answer.](/images/docs/inbox-item-mobile.png)
+![A question opened full screen on a phone: "1 of 3 from Ship billing", the question, the agent's reason, link chips, a collapsed Context line, and the answer buttons.](/images/docs/inbox-item-mobile.png)
 
 **Open chat** (the speech bubble at the top) opens the conversation the ask came from. An answer
 given in the chat card is the same answer, so the Inbox catches up.
@@ -122,6 +128,20 @@ both, and the agent is woken in its chat with your answer. **Got it** on a resul
 there is nothing for the agent to do, so its chat is not woken (`answerAsk`,
 `packages/operations/src/inbox-write-core.ts`).
 
+## Reply to an item
+
+Every item with a chat behind it has the project chat's own composer at the bottom: type, attach
+files, dictate, or paste. **Send** puts your message in the agent's chat with a pointer to the
+item, and a receipt says **Sent to the agent’s chat. This comes back if it responds.** The item
+then leaves Needs you. In the agent's chat your message carries a small **Re:** chip naming the
+item; select it to open the item. On a pending permission the composer says
+**Sending declines this request** before you send: your message goes to the agent as the reason.
+A permission you declined this way keeps its conversation, without the permission buttons, and you
+can still reply to it.
+
+In the list, an item that came back shows a green dot and **The agent responded**, with who
+replied. Items still with the agent are listed under **Archived** with a **With the agent** label.
+
 ## Replies and the agent’s response
 
 A reply sends your message and attachments to the item’s source chat. The agent receives the item
@@ -151,9 +171,8 @@ was interrupted before a canonical message exists, an explicit retry resumes the
 Concurrent attempts are deduplicated, and a conflicting receipt is rejected. If delivery remains
 ambiguous, inspect the source chat before sending again.
 
-The backend supports these replies through `POST /api/projects/:projectId/inbox/items/:ref/reply`.
-The conversation composer in the item is being delivered separately; the existing answer buttons
-keep their current behavior until that web update ships.
+The composer posts to `POST /api/projects/:projectId/inbox/items/:ref/reply`
+(`InboxReplyComposer`, `apps/web/src/components/inbox/InboxReplyComposer.tsx`).
 
 ## Tasks for people
 

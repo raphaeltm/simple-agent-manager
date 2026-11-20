@@ -1,0 +1,219 @@
+import type {
+  InboxConversation,
+  InboxItem,
+  InboxItemCommentThread,
+  InboxItemContext,
+  InboxReplyMessage,
+} from '@simple-agent-manager/shared';
+import { Bot, MessageSquare, Paperclip } from 'lucide-react';
+import type { ReactNode, Ref } from 'react';
+
+import { formatFileSize } from '../../lib/file-utils';
+import { RenderedMarkdown } from '../MarkdownRenderer';
+import {
+  type InboxConversationEntry,
+  latestResponseId,
+  replierName,
+  replyDisplayText,
+} from './inbox-conversation-model';
+import { formatAge } from './inbox-model';
+import { InboxItemBody } from './InboxItemView';
+import { useInboxConversation } from './useInboxConversation';
+
+function AgentAvatar() {
+  return (
+    <span
+      aria-hidden="true"
+      className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[var(--sam-person-auto)] text-[var(--sam-person-ink)] ring-2 ring-[var(--sam-separator)]"
+    >
+      <Bot size={15} strokeWidth={2.2} />
+    </span>
+  );
+}
+
+/** An agent turn: avatar in the gutter, the content, then the answer controls if it carries them. */
+function AgentTurn({
+  children,
+  controls,
+  meta,
+  testId,
+}: {
+  children: ReactNode;
+  controls?: ReactNode;
+  meta?: string;
+  testId: string;
+}) {
+  return (
+    <div className="flex min-w-0 items-start gap-2.5" data-testid={testId}>
+      <AgentAvatar />
+      <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+        {children}
+        {controls && (
+          <div className="min-w-0 pt-0.5" data-testid="inbox-answer-controls">
+            {controls}
+          </div>
+        )}
+        {meta && <span className="text-[11px] text-fg-muted">{meta}</span>}
+      </div>
+    </div>
+  );
+}
+
+function ReplyAttachments({ reply }: { reply: InboxReplyMessage }) {
+  if (reply.attachments.length === 0) return null;
+  return (
+    <ul className="m-0 flex max-w-[85%] list-none flex-col items-end gap-1 p-0">
+      {reply.attachments.map((file) => (
+        <li
+          key={file.uploadId}
+          className="sam-raised flex max-w-full min-w-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] text-fg-secondary"
+        >
+          <Paperclip size={13} aria-hidden="true" className="shrink-0 text-fg-muted" />
+          <span className="min-w-0 truncate">{file.filename}</span>
+          <span className="shrink-0 text-[11px] text-fg-muted">{formatFileSize(file.size)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** The person's reply: an ordinary message in the agent's chat, shown here on the right. */
+function ReplyTurn({
+  reply,
+  viewerId,
+  now,
+}: {
+  reply: InboxReplyMessage;
+  viewerId: string;
+  now: number;
+}) {
+  const text = replyDisplayText(reply);
+  const who = replierName(reply, viewerId);
+  return (
+    <div className="flex min-w-0 flex-col items-end gap-1.5" data-testid="inbox-reply">
+      <span className="sr-only">{who} replied:</span>
+      {text && (
+        <div className="sam-raised max-w-[85%] rounded-2xl rounded-br-md px-3 py-2 text-[15px] whitespace-pre-wrap break-words text-fg-primary [overflow-wrap:anywhere]">
+          {text}
+        </div>
+      )}
+      <ReplyAttachments reply={reply} />
+      <span className="flex items-center gap-1 text-[11px] text-fg-muted">
+        <MessageSquare size={11} aria-hidden="true" />
+        {who === 'You' ? '' : `${who} · `}Sent in the agent’s chat ·{' '}
+        {formatAge(new Date(reply.createdAt).toISOString(), now)}
+      </span>
+    </div>
+  );
+}
+
+/** The agent's response on the item (an anchored comment thread), with any follow-ups in it. */
+function ResponseTurn({
+  response,
+  now,
+  controls,
+}: {
+  response: InboxItemCommentThread;
+  now: number;
+  controls?: ReactNode;
+}) {
+  return (
+    <AgentTurn
+      testId="inbox-response"
+      controls={controls}
+      meta={`Responded on this item · ${formatAge(new Date(response.createdAt).toISOString(), now)}`}
+    >
+      <span className="sr-only">The agent responded:</span>
+      {/* Agent-written markdown: the renderer never renders raw HTML and sanitizes links. */}
+      <div className="min-w-0 text-[15px] text-fg-secondary">
+        <RenderedMarkdown content={response.body} inline />
+      </div>
+      {response.replies.map((followUp) => (
+        <div key={followUp.id} className="min-w-0 text-[15px] text-fg-secondary">
+          <RenderedMarkdown content={followUp.body} inline />
+        </div>
+      ))}
+    </AgentTurn>
+  );
+}
+
+/**
+ * An inbox item as a conversation (idea 01M7N16AF5HDPH1ZND4D4RJ00J). The ask is the agent's first
+ * message; the person's replies and the agent's responses follow in time order. The answer
+ * controls sit on the newest agent turn, so there is only ever one set: inside the ask until the
+ * agent responds, then on its latest response.
+ */
+export function InboxConversationThread({
+  item,
+  context,
+  conversation,
+  now,
+  viewerId,
+  stackPosition,
+  detail,
+  headingRef,
+  controls,
+}: {
+  item: InboxItem;
+  context: InboxItemContext | null;
+  /** The first conversation page, from the item read; null when the reader cannot see the chat. */
+  conversation: InboxConversation | null;
+  now: number;
+  viewerId: string;
+  stackPosition: { index: number; total: number; topic: string | null } | null;
+  detail?: ReactNode;
+  headingRef?: Ref<HTMLHeadingElement>;
+  controls: ReactNode;
+}) {
+  const thread = useInboxConversation({
+    projectId: item.projectId,
+    itemRef: item.ref,
+    first: conversation,
+  });
+  const lastResponse = latestResponseId(thread.entries);
+  return (
+    <div className="flex min-w-0 flex-col gap-5" data-testid="inbox-conversation">
+      <AgentTurn testId="inbox-ask" controls={lastResponse === null ? controls : undefined}>
+        <InboxItemBody
+          item={item}
+          context={context}
+          now={now}
+          stackPosition={stackPosition}
+          detail={detail}
+          headingRef={headingRef}
+        />
+      </AgentTurn>
+      {(thread.hasMore || thread.loadingMore || thread.loadError) && (
+        <div className="flex flex-wrap items-center gap-2 pl-9">
+          {thread.loadingMore ? (
+            <span role="status" className="text-sm text-fg-muted">
+              Loading more of the conversation…
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={thread.loadMore}
+              className="min-h-11 cursor-pointer rounded-md border-0 bg-transparent px-1 text-sm text-accent hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+            >
+              {thread.loadError
+                ? 'Could not load more. Try again'
+                : 'Show more of the conversation'}
+            </button>
+          )}
+        </div>
+      )}
+      {thread.entries.map((entry: InboxConversationEntry) =>
+        entry.kind === 'reply' ? (
+          <ReplyTurn key={`reply:${entry.id}`} reply={entry.reply} viewerId={viewerId} now={now} />
+        ) : (
+          <ResponseTurn
+            key={`response:${entry.id}`}
+            response={entry.response}
+            now={now}
+            controls={entry.id === lastResponse ? controls : undefined}
+          />
+        )
+      )}
+    </div>
+  );
+}

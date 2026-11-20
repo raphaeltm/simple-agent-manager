@@ -164,6 +164,23 @@ export function useInboxWalk({
     [advancePast, invalidate, showReceipt]
   );
 
+  /**
+   * A reply went to the agent's chat. The item leaves Needs you (the server hides it until the
+   * agent acts), so the walk moves on as after an answer. In Archived, where items with the agent
+   * are listed, it stays open and refreshes to show the reply.
+   */
+  const onReplied = useCallback(
+    (ref: string, text: string) => {
+      if (view === 'archived') {
+        showReceipt(text, 'success');
+        invalidate();
+        return;
+      }
+      onAnswered(ref, text);
+    },
+    [invalidate, onAnswered, showReceipt, view]
+  );
+
   const staleHandled = useRef(new Set<string>());
   const onStale = useCallback(
     (ref: string) => {
@@ -176,12 +193,17 @@ export function useInboxWalk({
     [advancePast, invalidate, showReceipt]
   );
 
-  // Answered or closed elsewhere (another tab, the chat card, a teammate): close it.
+  // Answered or closed elsewhere (another tab, the chat card, a teammate): close it. A settled
+  // item that still takes replies (a permission declined by a reply, then responded on) is a
+  // conversation, not a closed item.
   useEffect(() => {
     if (!selectedRef || view === 'archived') return;
     const closed =
       (detail.error && isStaleInboxError(detail.error)) ||
-      (detail.data && detail.data.item.ref === selectedRef && detail.data.item.status !== 'open');
+      (detail.data &&
+        detail.data.item.ref === selectedRef &&
+        detail.data.item.status !== 'open' &&
+        detail.data.item.canReply !== true);
     if (closed) onStale(selectedRef);
   }, [detail.data, detail.error, onStale, selectedRef, view]);
 
@@ -252,6 +274,7 @@ export function useInboxWalk({
     step,
     close,
     onAnswered,
+    onReplied,
     onStale,
     archiveItem,
   };
