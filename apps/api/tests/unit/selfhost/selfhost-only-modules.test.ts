@@ -11,8 +11,8 @@
  *   them: it imports `selfhost/build.ts`, whose graph the walker must see, so this guard cannot
  *   pass because the walker went blind.
  */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { relative, resolve } from 'node:path';
 
 import * as TOML from '@iarna/toml';
 import { describe, expect, it } from 'vitest';
@@ -23,6 +23,7 @@ import {
   API_SRC,
   CLOUDFLARE_ENTRY_FORBIDDEN_PATHS,
   collectImportGraph,
+  GRAPH_WALK_TIMEOUT_MS,
   REPO_ROOT,
   selfhostOnlyFindings,
 } from '../../helpers/selfhost-only-modules';
@@ -38,10 +39,39 @@ function celldEntryImports(): string[] {
     .map((specifier) => resolve(API_SRC, specifier.slice(prefix.length)));
 }
 
-/** Walking a >1,000-file import graph takes several seconds on a loaded CI runner. */
-const GRAPH_WALK_TIMEOUT_MS = 60_000;
-
 describe('self-host-only code stays out of the Cloudflare Worker', () => {
+  it('detects real imports of the hosted DO, vendored git and pako', () => {
+    const scratchRoot = resolve(REPO_ROOT, '.tmp');
+    mkdirSync(scratchRoot, { recursive: true });
+    const scratch = mkdtempSync(resolve(scratchRoot, 'hosted-git-graph-'));
+    const entry = resolve(scratch, 'entry.ts');
+    const doPath = 'apps/api/src/selfhost/hosted-git/hosted-git-repo.ts';
+    try {
+      writeFileSync(entry, `import '${relative(scratch, resolve(REPO_ROOT, doPath))}';`);
+      const graph = collectImportGraph(entry);
+      const findings = selfhostOnlyFindings(graph, CLOUDFLARE_ENTRY_FORBIDDEN_PATHS);
+      expect(findings).toContain(doPath);
+      expect(findings.some((path) => path.startsWith('apps/api/src/vendor/dgit/'))).toBe(true);
+      expect(findings.some((path) => path.startsWith('package pako '))).toBe(true);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it('control: the actual metadata broker graph is forbidden to the Worker', () => {
+    const graph = collectImportGraph(
+      resolve(REPO_ROOT, 'deploy/selfhost/metadata-proxy/server.ts')
+    );
+    expect(graph.files).toContain('deploy/selfhost/metadata-proxy/token.ts');
+    expect(selfhostOnlyFindings(graph, CLOUDFLARE_ENTRY_FORBIDDEN_PATHS)).toEqual(
+      expect.arrayContaining([
+        'deploy/selfhost/metadata-proxy/server.ts',
+        'deploy/selfhost/metadata-proxy/token.ts',
+        'deploy/selfhost/metadata-proxy/peer.ts',
+      ])
+    );
+  });
+
   it(
     'the shared entry reaches no self-host-only module, package or script',
     { timeout: GRAPH_WALK_TIMEOUT_MS },

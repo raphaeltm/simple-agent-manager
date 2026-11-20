@@ -96,7 +96,11 @@ describe('box service privileges', () => {
   it('celld writes only its data volume and a tmpfs /tmp', () => {
     const celld = compose.services.celld as Service & { volumes?: string[] };
     expect(celld.tmpfs).toEqual(['/tmp']);
-    expect(celld.volumes).toEqual(['celld-data:/var/lib/celld']);
+    expect(celld.volumes).toEqual([
+      'celld-data:/var/lib/celld',
+      './celld/start.sh:/etc/sam/celld-start.sh:ro',
+      'egress-fence-attestation:/run/sam-egress-fence:ro',
+    ]);
     expect(celld.environment?.CELLD_WATCH).toBe('/var/lib/celld');
   });
 

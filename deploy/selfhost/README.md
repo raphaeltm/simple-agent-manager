@@ -53,7 +53,7 @@ From the repository root on the VM:
 4. `pnpm selfhost:deploy --init`: generates the platform keys (`.state/platform-keys.json`; back
    it up), `.state/gateway.env` (the reverse-tunnel gateway secret and lease port range) and the
    mail-collector files. Run it again after changing the port range or turning a profile on.
-5. `(cd deploy/selfhost && docker compose build)`: builds the two local images (`caddy`, and
+5. `(cd deploy/selfhost && docker compose build)`: builds the local images (`egress-fence`, `gce-metadata-proxy`, `caddy`, and
    `sam-mx` when `mail-in` is on). See [Image builds](#image-builds).
 6. `(cd deploy/selfhost && docker compose up -d)`. Run compose from `deploy/selfhost/`, as every
    compose command in this README assumes: there it reads `.env`, including any `COMPOSE_FILE`
@@ -132,9 +132,8 @@ so a box whose certificates were written by an older, root Caddy keeps them.
 
 A build still downloads from the network (Docker Hub, the Go module proxy, Alpine packages). The
 content is pinned, so a changed upstream fails the build rather than changing the image. A build
-step has the same unrestricted network access as everything else on this box, the cloud metadata
-server included (see [Not included yet](#not-included-yet)): pinning, not a fence, is what keeps an
-upstream from changing what runs.
+step has unrestricted network access, including metadata. The runtime UID fence does not
+apply to build tools; only reviewed, pinned build inputs belong on the box.
 
 After changing a build argument in `.env` (`CADDY_DNS_MODULE`), run `docker compose build caddy`
 yourself, then `docker compose up -d`: `selfhost:upgrade` rebuilds only for changes in the
@@ -200,19 +199,45 @@ headers, no query strings, and no credentials in the path on the routes listed i
 `caddy/log-redaction.caddy` (bootstrap, invite and AI-proxy tokens, preview signatures).
 `docker compose logs celld` is the Worker's output.
 
+## SAM-hosted repositories
+
+The celld build enables SAM-hosted git. Create a project with the Artifacts repository option;
+SAM seeds an empty repository so an agent can clone, commit and push without a GitHub App.
+The repository Durable Object and its `selfhost-hosted-git-v1` migration exist only in celld.
+The Cloudflare Worker never includes them.
+
+Public repository import is unavailable in this slice; an import URL returns a clear 400.
+A bounded importer is tracked in `tasks/backlog/2026-11-19-bounded-selfhost-git-import.md`.
+GitHub and GitLab integrations remain available when configured.
+
+Admin → Settings exposes `repositories.*` limits. Failed GC sweeps retry up to
+`repositories.maxGcAttempts` (default 3), five minutes apart; success resets the budget.
+Exhaustion preserves a failed marker and emits `hosted_git.gc_failed`; a later admitted push
+starts a new cleanup episode. Failed pack ingestion reclaims incomplete rows before the next
+push checks quota. Defaults are 64 MiB per push, 30,000 objects
+10,000 refs and 256 MiB stored per repository, 16 MiB per inflated object, 128 MiB cumulative inflation
+per request, delta depth 100 and 120 seconds per git operation. Operators can lower these
+limits; raising them needs measured capacity review. Rejected pushes leave existing refs intact.
+The storage limit is checked again after a pack and its index are stored; a push that crosses it
+is refused and its pack dropped at once.
+Like git, push ingest hashes every object with SHA-1 collision detection (SHA-1DC) and refuses
+a push carrying a SHA-1 collision-attack block before any ref changes.
+GC first drops whole packs that hold nothing reachable (for example a rejected push) without
+inflating them. Known limit: moving the remaining reachable packed objects to loose storage
+inflates each one under the same decompression budget, so that step cannot finish while more than
+`repositories.maxInflatedBytes` of reachable pushed content waits for collection. Tracked in
+`tasks/backlog/2026-11-19-hosted-git-gc-and-ingest-hardening.md`.
+Clone/push credentials expire and runtime credentials also require the same active workspace
+and callback generation. Deleting a project removes its hosted repository. At the ref limit, delete old refs in a separate
+push before creating replacements; an unvalidated deletion does not reserve space for new refs.
+
 ## Not included yet
 
 This version runs in plaintext mode: celld keeps every Worker secret in plaintext in the fleet
 bucket's deploy manifests, so the bucket credential is the install's master key. Also missing:
 
-- **Egress fence**: nothing stops Worker code from reaching loopback services, the private
-  network or the cloud metadata server on the box.
 - **Sealed secrets**: no key agent or KMS-backed encryption of the Worker's secrets.
 - **Guided credential login** (sandboxed agent sign-in on the box).
-- **Hosted git.** Every project needs a repository, so on this install users can create projects
-  and run agents only once a GitHub App (the `GITHUB_*` Worker secrets in `.state/secrets.env`)
-  or a GitLab integration is configured.
-  Without one, sign-in, administration and nodes work, but no agent session can start.
 - **Backup, restore and teardown** commands. Back up the fleet bucket and `.state/` yourself.
 
 Do not put data on this box that you could not afford to lose or leak.
@@ -225,3 +250,88 @@ Do not put data on this box that you could not afford to lose or leak.
   celld in Docker with host networking: gateway 404s and path tricks, the frp rate limit, header
   stripping, logging, keep-warm, the mail collector, frpc certificate checks, celld's guarded
   fetch and shared in-flight reads. CI runs it only when self-host paths change.
+
+## Egress fence and metadata broker
+
+`egress-fence.ts` renders a native nftables OUTPUT table for celld UID7103, distinct from Caddy7101,
+sam-mx7102 and the metadata broker65532. DNS is open only to the configured resolver addresses on
+TCP/UDP53; tunnel lease ports, exact store/SMTP endpoints and public HTTP(S) remain usable.
+Loopback (including127.0.0.2 andIPv6), private, metadata, reserved and transition ranges are denied.
+`SAM_EGRESS_ALLOW` adds exact IP:TCP-port exceptions; it cannot open metadata or Caddy admin2019.
+The established allowance is reply-direction only, so restoration also blocks forbidden sockets
+opened during a flush. Tests live in `scripts/selfhost/live/fence-netns.live.test.ts`.
+
+`celld/start.sh` requires every rule-class probe and a current attestation before serving. A rule
+loss kills celld within the <=1-second validated bound; this is a bounded stop, not zero-gap kernel
+protection. Only host root or host NET_ADMIN can change the control-plane rules. celld has neither;
+ordinary agent workspaces and their privileged nested containers run on separate per-user node VMs.
+No guided-login or untrusted app containers run on this box in this slice.
+
+`fence.sh` observes kernel change events as well as exact rule fingerprints. Rule changes, flushes,
+or observer failure latch a structured `egress_fence.lost` error in container logs and
+`egress-fence-attestation/events.jsonl`. `docker compose ps` reports the fence unhealthy and celld
+stays stopped/restarting; the front door cannot serve the API. There is no automatic rule repair.
+Recover as the installation operator: regenerate with `pnpm selfhost:deploy --init`, then
+`docker compose restart egress-fence`, wait for healthy, and run `pnpm selfhost:verify-fence`.
+Only verified startup clears the loss latch; event history remains. After resolver changes, regenerate
+and restart the fence too. An `iptables -F` does not erase this native nft table; full native ruleset
+flush/replacement is also tested. `verify-fence` covers DNS, TCP, UDP, routedIPv6 and alternate loopback.
+
+For `gs://`, add `gce` to `COMPOSE_PROFILES`. The proxy listens only on127.0.0.1:7180 and checks the
+client socket UID from Linux `/proc/net/tcp` as well as the generated path and Metadata-Flavor header.
+It refuses other UIDs even if they know the path. It holds the VM token in its own process and uses
+the pinned official Google auth SDK to exchange it through STS for a Credential Access Boundary
+fixed to the `CELLD_BUCKET` bucket. `GCE_METADATA_PROXY_SCOPES` selects `devstorage.read_write`
+(objects only: `roles/storage.objectAdmin`) or `devstorage.read_only` (`roles/storage.objectViewer`).
+Mixed scopes and full_control are refused. Query, scope and resource overrides are404; exchange
+failure is503 and never falls back to the VM token. Tokens and request paths are never logged.
+
+The VM account needs object permissions on that exact bucket and IAM/STS APIs enabled once per
+installation. This broker creates no accounts, grants or OAuth callbacks. CAB intersects existing
+permissions and cannot grant access to another bucket or Cloud DNS. See Google's
+[CAB guide](https://docs.cloud.google.com/iam/docs/create-downscoped-short-lived-credentials).
+Metadata `scopes` alone is not used as a security boundary; Google's current
+[metadata documentation](https://docs.cloud.google.com/compute/docs/metadata/querying-metadata)
+also requires `enforce_scopes=true` and scopes supported by the instance.
+
+The SAM API Worker is trusted with fleet authority. The fleet bucket still contains plaintext
+deployment manifests and secrets, and fleet write authority is powerful; CAB does not establish
+isolation between mutually untrusted Workers. Safety from broad VM permissions does not depend on
+hiding the broker path. The pinned runtime test `live/metadata-proxy.live.test.ts` nevertheless
+proves an exact native canary is absent from Worker process env (unknown keys return shim functions),
+host/proc files are inaccessible, and Worker child-process execution fails. The first truthiness
+assertion was a false positive; the exact comparison plus native-parent control is the proof.
+
+Self-host tests install the broker's isolated npm lockfile. CI runs the kernel lab in a disposable
+privileged Docker container with its own network namespaces; no workspace sudo or apt is needed.
+For an `s3://` operator store, `R2_S3_REGION` remains mandatory when `R2_S3_ENDPOINT` is set.
+
+### Reconcile generated fence state
+
+On an existing running installation, ordinary deploy and `--init` now reconcile changed fence
+inputs before continuing: stop affected celld, recreate and verify the fence, apply volume
+ownership for its configured UID, then reload the proxy and celld as needed. Services deliberately
+stopped remain stopped. Fresh `--init` only generates files. A failed reconciliation retains
+private retry intent and aborts; repair Compose and rerun deploy. Each Compose command is bounded
+by `SELFHOST_COMPOSE_TIMEOUT_MS` (default `60000` milliseconds); captured output is suppressed
+because Compose can interpolate credentials. Verification honors the same
+`SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS` setting as celld (default `2` seconds).
+
+List Compose profiles explicitly: `COMPOSE_PROFILES=*` is refused, since it would select the
+optional GCE broker even for an S3 installation. The broker accepts only its fixed native
+client audience query; it never uses caller queries to select a token audience, scope or bucket.
+Celld stdout/stderr redact the broker path credential before Docker records logs.
+
+Metadata transport timeouts apply per attempt. The pinned Google STS SDK enables its bounded
+retry policy for transient failures; callers receive a generic failure if exchange cannot complete.
+Redirects and oversized responses are refused on every attempt.
+
+The metadata proxy listener port is reserved outside node tunnel leases even while the GCE
+profile is disabled. Deploy and Caddy refuse a conflicting range before serving.
+
+Configured SMTP relay hostnames are resolved at deploy, opening only their exact TCP endpoints.
+After relay DNS changes, rerun `pnpm selfhost:deploy --init` to reconcile the fence. Metadata
+addresses and protected local listeners remain forbidden for relays.
+
+The broker port must also differ from every other managed box listener, including disabled
+optional services. Deploy, fence planning and Caddy startup all check this reservation.

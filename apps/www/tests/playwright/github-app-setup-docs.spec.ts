@@ -75,7 +75,7 @@ test.describe('Embedded docs GitHub App setup', () => {
   test('Automation guide is reachable from the real documentation sidebar', async ({ page }) => {
     await page.goto('/docs/guides/self-hosting/');
     if (page.viewportSize()!.width < 800)
-      await page.locator('button[aria-controls="starlight__sidebar"]').click();
+      await page.locator('button[popovertarget="starlight__sidebar"]').click();
     const guide = page
       .locator('#starlight__sidebar')
       .getByRole('link', { name: 'Automation', exact: true });

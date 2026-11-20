@@ -10,6 +10,7 @@ export default defineConfig({
   test: {
     root: import.meta.dirname,
     include: ['**/*.live.test.ts'],
+    exclude: process.env.SAM_FENCE_LAB === '1' ? [] : ['fence-netns.live.test.ts'],
     testTimeout: 120_000,
     hookTimeout: 300_000,
     fileParallelism: false,

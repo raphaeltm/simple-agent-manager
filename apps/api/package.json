@@ -18,7 +18,8 @@
     "openapi:generate": "tsx scripts/generate-openapi.ts",
     "openapi:check": "tsx scripts/generate-openapi.ts --check",
     "deploy": "wrangler deploy",
-    "deploy:staging": "wrangler deploy --env staging"
+    "deploy:staging": "wrangler deploy --env staging",
+    "test:hosted-git": "vitest run --config vitest.hosted-git.config.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "2.0.87",
@@ -51,6 +52,7 @@
     "drizzle-orm": "catalog:",
     "hono": "4.13.4",
     "jose": "catalog:",
+    "pako": "^2.1.0",
     "tsx": "catalog:",
     "valibot": "catalog:",
     "workers-ai-provider": "4.0.1",
@@ -62,6 +64,7 @@
     "@modelcontextprotocol/client": "2.4.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/diff": "^8.0.0",
+    "@types/pako": "^2.0.3",
     "@typescript-eslint/eslint-plugin": "catalog:",
     "@typescript-eslint/parser": "catalog:",
     "@vitest/coverage-v8": "catalog:",

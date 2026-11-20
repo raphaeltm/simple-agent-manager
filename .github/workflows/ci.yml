@@ -137,19 +137,8 @@ jobs:
               - 'scripts/deploy/durable-object-migrations.ts'
               - 'scripts/deploy/types.ts'
               - 'scripts/deploy/vapid-keys.ts'
-              # Self-host build tests import the celld generator, presign vars, SMTP settings and
-              # account SQL: these modules plus the scripts/selfhost modules they import. The
-              # transitive ones are listed by hand: ci-suite-selection.test.ts checks the direct
-              # imports but does not follow `./x.js` specifiers to `x.ts`.
-              - 'scripts/selfhost/account-sql.ts'
-              - 'scripts/selfhost/box-settings.ts'
-              - 'scripts/selfhost/celld-config.ts'
-              - 'scripts/selfhost/celld-project.ts'
-              - 'scripts/selfhost/mail-settings.ts'
-              - 'scripts/selfhost/observability-migrations.ts'
-              - 'scripts/selfhost/reverse-tunnel-migrations.ts'
-              - 'scripts/selfhost/secret-files.ts'
-              - 'scripts/selfhost/selfhost-migrations.ts'
+              # API build/conformance tests import the celld generator and its helpers.
+              - 'scripts/selfhost/**'
               # selfhost-inbound-email.test.ts builds this receiver (Self-host Email job only).
               - 'deploy/selfhost/sam-mx/**'
               # The self-host access-log redaction guard scans the API routes against this filter.
@@ -589,6 +578,11 @@ jobs:
           --coverage.thresholds.statements=0 --coverage.thresholds.branches=0
           --coverage.thresholds.functions=0 --coverage.thresholds.lines=0
 
+      # One shard owns the real-git suite; the dedicated config launches its own runtime.
+      - name: Hosted git conformance and celld bundle
+        if: matrix.shard == 1
+        run: pnpm --filter @simple-agent-manager/api test:hosted-git
+
       - name: Upload API blob report
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -896,6 +890,9 @@ jobs:
 
       # No workspace build here: neither these scripts nor their tests import a workspace package
       # (the self-host tests that do live in the API unit suite and the Self-host Live job).
+      - name: Install isolated metadata broker SDK
+        run: npm ci --prefix deploy/selfhost/metadata-proxy --ignore-scripts --no-audit --no-fund
+
       - name: Type check deployment scripts
         run: |
           pnpm exec tsc --project scripts/deploy/tsconfig.json --noEmit
@@ -1283,6 +1280,29 @@ jobs:
 
       - name: Run self-host live tests
         run: pnpm selfhost:live-test
+
+      - name: Check rendered rules with the production nft binary
+        run: |
+          mkdir -p .tmp
+          pnpm exec tsx --eval '
+            import { writeFileSync } from "node:fs";
+            import { buildFencePlan, renderFenceRuleset } from "./scripts/selfhost/egress-fence.ts";
+            const plan = buildFencePlan({
+              box: { GCE_METADATA_PROXY: "off" },
+              leaseRange: { start: 20000, end: 29999 },
+              resolvConf: "nameserver 127.0.0.53\nnameserver 2001:4860:4860::8888\n",
+              objectStore: [{ address: "127.0.0.1", port: 9000 }],
+              localAddresses: ["127.0.0.1", "::1"],
+            });
+            writeFileSync(".tmp/selfhost-production-fence.nft", renderFenceRuleset(plan));
+          '
+          docker build -t sam-fence-production-parser deploy/selfhost/egress-fence
+          docker run --rm --network none --cap-drop ALL --cap-add NET_ADMIN --mount "type=bind,src=$GITHUB_WORKSPACE/.tmp/selfhost-production-fence.nft,dst=/fixture.nft,readonly" --entrypoint nft sam-fence-production-parser -c -f /fixture.nft
+
+      - name: Run isolated egress fence kernel tests
+        run: |
+          docker build -f deploy/selfhost/egress-fence/Dockerfile.lab -t sam-fence-lab deploy/selfhost/egress-fence
+          docker run --rm --privileged --network none -e SAM_FENCE_LAB=1 -e CI=true -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" sam-fence-lab pnpm exec vitest run --config scripts/selfhost/live/vitest.config.ts fence-netns.live.test.ts
 
   cli-test:
     name: CLI Test
