@@ -19,15 +19,15 @@ import type {
   AgentEffort,
   AgentProfile,
   CredentialLimitsResponse,
-  InboxItemContext,
   InboxConversation,
-  TaskAttachment,
+  InboxItemContext,
   InboxLink,
   InstallationLifecycleLatency,
   NotificationResponse,
   NotificationType,
   SessionStateSnapshot,
   SubmitTaskResponse,
+  TaskAttachment,
   TaskStatus,
   TriggerStatus,
   UserAiBudgetSettings,
@@ -498,6 +498,7 @@ export interface OperationInboxPort {
     /** When given, read only the canonical replies carrying this ref and item comments. */
     inboxRef?: string;
     replyCursor?: string;
+    responseCursor?: number;
     includeContext?: boolean;
   }): Promise<(InboxItemContext & { conversation?: InboxConversation }) | null>;
   /**

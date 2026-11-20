@@ -270,9 +270,11 @@ export const handleInboxAttach: Handler = (requestId, params, tokenData, env) =>
     attachAgentTask(ctx, source, params as Parameters<typeof attachAgentTask>[2])
   );
 
-export const handleInboxRespond = (requestId: number | string, params: Record<string, unknown>, tokenData: McpTokenData, env: Env) =>
+export const handleInboxRespond: Handler = (requestId, params, tokenData, env) =>
   run(requestId, 'inbox_write respond', tokenData, env, (ctx, source) =>
-    respondToAgentInboxItem(ctx, source, params as Parameters<typeof respondToAgentInboxItem>[2]));
-export const handleInboxResolve = (requestId: number | string, params: Record<string, unknown>, tokenData: McpTokenData, env: Env) =>
+    respondToAgentInboxItem(ctx, source, params as Parameters<typeof respondToAgentInboxItem>[2])
+  );
+export const handleInboxResolve: Handler = (requestId, params, tokenData, env) =>
   run(requestId, 'inbox_write resolve', tokenData, env, (ctx, source) =>
-    resolveAgentInboxItem(ctx, source, params as Parameters<typeof resolveAgentInboxItem>[2]));
+    resolveAgentInboxItem(ctx, source, params as Parameters<typeof resolveAgentInboxItem>[2])
+  );

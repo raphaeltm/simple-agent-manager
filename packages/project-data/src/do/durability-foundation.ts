@@ -121,7 +121,11 @@ export async function finalizeAcceptedPromptDelivery(
   if (alarmError) throw alarmError;
   // A person's prompt answers the chat's open questions in D1 `asks`, after the broadcast and the
   // alarm so the D1 round trip delays neither (`question-asks.ts`, never throws).
-  if (accepted.transcriptInserted && input.senderType === 'human') {
+  if (
+    accepted.transcriptInserted &&
+    input.senderType === 'human' &&
+    input.sourceKind !== 'inbox_reply'
+  ) {
     await hooks.closeQuestionAsks?.(
       input.targetSessionId,
       accepted.transcriptMessageId,
@@ -157,6 +161,8 @@ function runAcceptedPromptDeliveryHooks(
     idleCleanup.resetIdleCleanup(sql, env, input.targetSessionId);
     if (input.senderType === 'human') {
       resetReconciliationEpisode(sql, input.targetSessionId);
+    }
+    if (input.senderType === 'human' && input.sourceKind !== 'inbox_reply') {
       attention.resolveAttentionMarkers(
         sql,
         input.targetSessionId,

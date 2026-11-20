@@ -17,7 +17,7 @@ export const INBOX_TURN_END_INSTRUCTION =
   'Nobody reads this chat. A person sees only what you put in their inbox (`inbox_write`), so anything meant for them goes there: ' +
   'the answer or finished work they asked for (method `result`), something you want them to check (`review`), a decision you need (`ask`), or work only a person can do (`assign`). ' +
   'When you end a turn you must be in exactly one of three states: ' +
-  '(1) finished: if a person asked for this, file a `result` with what they need; if another agent dispatched this task, report back to that agent instead and file nothing; a routine run with nothing worth a person’s attention files nothing; in task mode also call `complete_task`, and since a person cannot reply to you once your task has completed, `ask` before completing when you need their answer; ' +
+  '(1) finished: if a person asked for this, file a `result` with what they need; if another agent dispatched this task, report back to that agent instead and file nothing; a routine run with nothing worth a person’s attention files nothing; in task mode also call `complete_task`, `ask` before completing when you need their answer; ' +
   '(2) waiting on a machine (subtasks, CI, a schedule): a durable wait is registered; ' +
   '(3) waiting on a person: an open inbox item from this chat states exactly what you need. ' +
   'If you end a turn without filing an item, the person will assume there is nothing for them and will not open this chat. ' +

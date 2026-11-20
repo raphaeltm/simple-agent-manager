@@ -87,6 +87,7 @@ export {
   listAgentAsks,
   titleSimilarity,
 } from './inbox-agent-reads';
+export { resolveAgentInboxItem,respondToAgentInboxItem } from './inbox-agent-replies';
 export {
   type AgentAssignInput,
   type AgentAssignResult,
@@ -125,6 +126,7 @@ export {
   questionSchedule,
   questionUndeliveredExtension,
 } from './inbox-question-schedule';
+export { replyToInboxItem } from './inbox-reply-core';
 export { inboxTitle } from './inbox-rows';
 export { defaultInboxLimits, getInboxLimits, type InboxLimits } from './inbox-settings';
 export { INBOX_SETTINGS, type InboxSettingName } from './inbox-settings-definition';
@@ -271,6 +273,7 @@ export {
   samTasksList,
 } from './platform-operations';
 export { type ProfileAccountBinding } from './port-types';
+export type { InboxChatDelivery } from './ports';
 export {
   type ArchiveCheckinHold,
   type InboxAskAnnouncement,
@@ -357,8 +360,3 @@ export {
 export { samUsageGet, usageOperations } from './usage-operations';
 export { utf8ByteLength } from './utf8';
 export { readArchivedToolPayloads, readResourceHistory } from './workspace-history';
-
-export { replyToInboxItem } from './inbox-reply-core';
-export type { InboxChatDelivery } from './ports';
-
-export { respondToAgentInboxItem, resolveAgentInboxItem } from './inbox-agent-replies';

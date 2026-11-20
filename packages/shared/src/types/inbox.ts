@@ -143,6 +143,8 @@ export interface InboxItem {
   links: InboxLink[];
   /** Whether this viewer may answer or archive it. */
   canAct: boolean;
+  /** Reply is available on an open item, or a settled permission conversation. Send still checks chat access. */
+  canReply?: boolean;
   /** True while a person's reply is awaiting action from the agent. Store status is unchanged. */
   withAgent?: boolean;
   latestReply?: InboxReplyAttribution | null;
@@ -183,6 +185,8 @@ export interface InboxConversation {
   responses: InboxItemCommentThread[];
   /** Pass as replyCursor to the item detail endpoint to scan earlier canonical chat history. */
   nextReplyCursor: string | null;
+  /** Pass as responseCursor to read later anchored responses. */
+  nextResponseCursor: number | null;
   /** Reply/context or comment read is partial. */
   hasMore: boolean;
 }

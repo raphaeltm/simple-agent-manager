@@ -94,6 +94,7 @@ describe('agent wake policy (trusted_project)', () => {
     // Attention answers go straight to the live agent, so they are a wake but not a queued source.
     expect(HUMAN_AGENT_WAKE_TRIGGERS).toEqual([
       'user_followup',
+      'inbox_reply',
       'comment_directive',
       'attention_answer',
       'inbox_task_comment',

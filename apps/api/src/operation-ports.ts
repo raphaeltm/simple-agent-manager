@@ -175,7 +175,10 @@ export function createOperationPorts(env: Env): OperationPorts {
         const authorized = await authorizeSendChat(env, userId, projectId, sessionId);
         return {
           send: (body, assertEffectAllowed, inboxReply) =>
-            sendChat(env, userId, projectId, sessionId, body, authorized, assertEffectAllowed, inboxReply),
+            sendChat(env, userId, projectId, sessionId, body, authorized, {
+              assertEffectAllowed,
+              inboxReply,
+            }),
         };
       },
       validateSendContent: validateSendChatContent,

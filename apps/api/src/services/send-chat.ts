@@ -80,9 +80,9 @@ export async function sendChat(
   sessionId: string,
   body: v.InferOutput<typeof SendChatMessageSchema>,
   authorized?: AuthorizedSendChat,
-  assertEffectAllowed?: () => Promise<void>,
-  inboxReply?: InboxChatDelivery
+  options: { assertEffectAllowed?: () => Promise<void>; inboxReply?: InboxChatDelivery } = {}
 ) {
+  const { assertEffectAllowed, inboxReply } = options;
   const db = drizzle(env.DATABASE, { schema });
 
   const { writer, wake } = matchesRequest(authorized, userId, projectId, sessionId)
@@ -91,7 +91,7 @@ export async function sendChat(
   const shared = writer.role === 'grantee';
 
   const validatedContent = validateSendChatContent(body);
-  const content = inboxReply ? body.content! : validatedContent;
+  const content = inboxReply ? (body.content ?? validatedContent) : validatedContent;
   const deliveryIntent = body.deliveryIntent ?? 'queue';
 
   // Every refusal comes before the first side effect (validating uploads, cancelling a
@@ -158,7 +158,10 @@ Their message:
       ...(inboxReply ? { deliveryId: inboxReply.deliveryId } : {}),
       targetSessionId: sessionId,
       displayContent: buildVisibleInitialPrompt({ message: content, attachments }),
-      deliveryContent: buildVisibleInitialPrompt({ message: header + deliveryMessage, attachments }),
+      deliveryContent: buildVisibleInitialPrompt({
+        message: header + deliveryMessage,
+        attachments,
+      }),
       senderType: 'human',
       senderId: userId,
       messageClass: 'deliver',

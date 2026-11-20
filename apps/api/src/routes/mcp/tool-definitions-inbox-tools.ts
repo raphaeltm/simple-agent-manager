@@ -178,13 +178,25 @@ export const INBOX_TOOLS = [
   },
   {
     name: 'inbox_respond',
-    description: 'Respond on an item this chat filed, including a pending secret or approval request. The response brings it back to the person’s inbox. Never file a duplicate item.',
-    inputSchema: { type: 'object' as const, properties: { ref, body: { type: 'string' } }, required: ['ref', 'body'], additionalProperties: false },
+    description:
+      'Respond on an item this chat filed, including a pending secret or approval request. The response brings it back to the person’s inbox. Never file a duplicate item.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { ref, body: { type: 'string' } },
+      required: ['ref', 'body'],
+      additionalProperties: false,
+    },
   },
   {
     name: 'inbox_resolve',
-    description: 'Treat the person’s latest reply as the answer to this chat’s open question, review or result. References its chat message; stays out of their inbox. Cannot resolve secrets, approvals or human tasks.',
-    inputSchema: { type: 'object' as const, properties: { ref }, required: ['ref'], additionalProperties: false },
+    description:
+      'Treat the person’s latest reply as the answer to this chat’s open question, review or result. References its chat message; stays out of their inbox. Cannot resolve secrets, approvals or human tasks.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { ref },
+      required: ['ref'],
+      additionalProperties: false,
+    },
   },
   {
     name: 'inbox_update_item',

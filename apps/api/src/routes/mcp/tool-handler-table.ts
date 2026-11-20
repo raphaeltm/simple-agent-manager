@@ -34,11 +34,11 @@ import {
   handleInboxComment,
   handleInboxGetItem,
   handleInboxListItems,
+  handleInboxResolve,
+  handleInboxRespond,
   handleInboxResult,
   handleInboxReview,
   handleInboxUpdateItem,
-  handleInboxRespond,
-  handleInboxResolve,
 } from './inbox-tools';
 import {
   handleClaimIncident,

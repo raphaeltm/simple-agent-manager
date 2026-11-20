@@ -140,9 +140,19 @@ export const MCP_TOOL_GROUPS: readonly McpToolGroup[] = [
         tool: 'inbox_attach',
         summary: 'watch a task another of your chats assigned instead of assigning a duplicate',
       },
-      respond: { tool: 'inbox_respond', summary: 'respond on an item from this chat; returns it to the inbox' },
-      resolve: { tool: 'inbox_resolve', summary: 'treat the latest reply as the answer to your question, review or result; keeps it out of the inbox' },
-      update: { tool: 'inbox_update_item', summary: 'edit your open ask and bring it back to the inbox' },
+      respond: {
+        tool: 'inbox_respond',
+        summary: 'respond on an item from this chat; returns it to the inbox',
+      },
+      resolve: {
+        tool: 'inbox_resolve',
+        summary:
+          'treat the latest reply as the answer to your question, review or result; keeps it out of the inbox',
+      },
+      update: {
+        tool: 'inbox_update_item',
+        summary: 'edit your open ask and bring it back to the inbox',
+      },
       cancel: {
         tool: 'inbox_cancel_item',
         summary: 'close your open item when it is moot, saying why',

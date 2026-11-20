@@ -41,13 +41,21 @@ export interface InboxAnswerInput {
 
 export async function requireActable(
   ctx: OperationContext,
-  input: { projectId: string; ref: string }
+  input: { projectId: string; ref: string },
+  allowRepliedPermission = false
 ): Promise<{ item: InboxItem; ref: ParsedInboxRef }> {
   await authorizeProjectOperation(ctx, input.projectId, 'task:write');
   const resolved = await resolveInboxItem(ctx, input, true);
   // A human task has its own rule for who may close it (`canWriteTask`); the task operation
   // checks it, so the inbox's assignee-only gate must not refuse the filer first.
   if (resolved.item.kind === 'task' && resolved.ref.store === 'ask') return resolved;
+  if (allowRepliedPermission && resolved.ref.store === 'attention' && resolved.item.kind === 'permission' &&
+      resolved.item.status === 'done') {
+    const replied = await ctx.env.DATABASE.prepare(
+      'SELECT 1 AS ok FROM inbox_replies WHERE project_id = ? AND item_ref = ? AND permission_rejected = 1 LIMIT 1'
+    ).bind(input.projectId, input.ref).first();
+    if (replied) return resolved;
+  }
   if (resolved.item.status !== 'open')
     throw new OperationError('conflict', `This inbox item is already ${resolved.item.status}`);
   if (!resolved.item.canAct) throw new OperationError('forbidden', 'You cannot act on this item');

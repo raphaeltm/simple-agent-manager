@@ -21,7 +21,6 @@ import {
 import * as v from 'valibot';
 
 import { OperationError } from './errors';
-import { markInboxAgentActed } from './inbox-reply-core';
 import {
   AGENT_ITEM_NOT_FOUND,
   agentAskId,
@@ -30,6 +29,7 @@ import {
 } from './inbox-agent-reads';
 import { createAsk } from './inbox-ask-create-core';
 import { questionSchedule } from './inbox-question-schedule';
+import { inboxReplyWatermark, markInboxAgentActed } from './inbox-reply-core';
 import { inboxTitle } from './inbox-rows';
 import { getInboxLimits, type InboxLimits } from './inbox-settings';
 import { recordActivity } from './inbox-task-rows';
@@ -376,6 +376,7 @@ export async function updateAgentAsk(
     input.links === undefined
       ? undefined
       : await checkedLinks(ctx, source.projectId, input.links, limits);
+  const watermark = await inboxReplyWatermark(ctx, source.projectId, input.ref);
   const actedAt = Date.now();
   const result = await ctx.env.DATABASE.prepare(
     `UPDATE asks
@@ -399,7 +400,7 @@ export async function updateAgentAsk(
     )
     .run();
   if ((result.meta?.changes ?? 0) !== 1) await explainNoMatch(ctx, source, askId);
-  await markInboxAgentActed(ctx, source.projectId, input.ref, actedAt);
+  await markInboxAgentActed(ctx, source.projectId, input.ref, watermark);
   return { ref: input.ref, status: 'open' };
 }
 

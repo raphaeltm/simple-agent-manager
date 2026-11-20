@@ -214,6 +214,7 @@ projectInboxRoutes.get('/items/:ref', ...session, async (c) => {
         ref: requireRouteParam(c, 'ref'),
         context: c.req.query('context') === 'true',
         replyCursor: c.req.query('replyCursor') || undefined,
+        responseCursor: limitParam(c.req.query('responseCursor')),
       })
     )
   );
@@ -260,14 +261,24 @@ async function isErrorItemRef(env: Env, projectId: string, ref: string): Promise
   return Boolean(row);
 }
 
-projectInboxRoutes.post('/items/:ref/reply', ...session, jsonValidator(SendChatMessageSchema), async (c) => {
-  assertBrowserJsonWrite(c, 'inbox');
-  const body = c.req.valid('json');
-  const ctx = webOperationContext(c, getUserId(c));
-  return c.json(await run(() => replyToInboxItem(ctx, {
-    content: body.content ?? '',
-    attachments: body.attachments,
-    projectId: requireRouteParam(c, 'projectId'),
-    ref: requireRouteParam(c, 'ref'),
-  })), 202);
-});
+projectInboxRoutes.post(
+  '/items/:ref/reply',
+  ...session,
+  jsonValidator(SendChatMessageSchema),
+  async (c) => {
+    assertBrowserJsonWrite(c, 'inbox');
+    const body = c.req.valid('json');
+    const ctx = webOperationContext(c, getUserId(c));
+    return c.json(
+      await run(() =>
+        replyToInboxItem(ctx, {
+          content: body.content ?? '',
+          attachments: body.attachments,
+          projectId: requireRouteParam(c, 'projectId'),
+          ref: requireRouteParam(c, 'ref'),
+        })
+      ),
+      202
+    );
+  }
+);

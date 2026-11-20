@@ -24,6 +24,7 @@ import type { Env } from './types';
 export interface ListInboxItemCommentThreadsInput {
   itemId: string;
   limit?: number | null;
+  afterSequence?: number | null;
 }
 
 export interface CreateInboxItemCommentInput {
@@ -61,6 +62,7 @@ export function toInboxItemCommentThread(
     status: record.status,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
+    sequence: record.sequence,
     replies: record.replies.map((reply) => ({
       id: reply.id,
       threadId: reply.threadId,
@@ -88,7 +90,7 @@ export function listInboxItemCommentThreads(
 ): { threads: InboxItemCommentThread[]; hasMore: boolean } {
   const result = listThreadRecords(sql, itemScope(input.itemId), {
     status: null,
-    afterSequence: null,
+    afterSequence: input.afterSequence ?? null,
     limit: resolveCommentListLimit(env, input.limit),
   });
   return {

@@ -119,7 +119,8 @@ export function inboxItemsSql(
     });
   }
 
-  const openStoresIncluded = input.filter === 'needs_you' || input.filter === 'blocking' || input.filter === 'archived';
+  const openStoresIncluded =
+    input.filter === 'needs_you' || input.filter === 'blocking' || input.filter === 'archived';
   if (openStoresIncluded) {
     // Questions and permissions, from the chat index. A row whose JSON cannot be read is still
     // selected for a list page so the reader logs and skips it (rule 50); a count leaves it out.
@@ -144,6 +145,34 @@ export function inboxItemsSql(
             AND ${field('kind')} = 'needs_input'
             AND (${field('expiresAt')} IS NULL OR ${field('expiresAt')} > ?)))`,
       params: [...taskWriters.params, me, me, ...scope.params, input.now],
+    });
+
+    // A rejected permission's live attention summary is gone. Derive its stable reference
+    // from the reply ledger and chat index; its body/detail still lives only in ProjectData.
+    const historyScope = projectScope('ir.project_id');
+    const historyMarker = "substr(history.item_ref, 11 + instr(substr(history.item_ref, 11), ':'))";
+    parts.push({
+      sql: `SELECT 'attention' AS store, ss.id AS item_id, ${historyMarker} AS marker_id,
+        ss.project_id, ss.id AS session_id, ss.task_id, NULL AS kind, 0 AS blocking,
+        NULL AS title, NULL AS body, 'done' AS status, history.asked_at AS created_at,
+        NULL AS expires_at, NULL AS due_at, NULL AS updated_at, NULL AS failure_count,
+        json_object('markerId', ${historyMarker}, 'kind', 'needs_input', 'createdAt', history.asked_at,
+          'expiresAt', NULL, 'reason', 'acp_interaction_pending', 'source', 'acp_interaction',
+          'interactionKind', 'permission') AS extra_json, NULL AS links_json,
+        CASE WHEN pm.role IN (${taskWriters.sql}) THEN 1 ELSE 0 END AS can_act,
+        2 AS tier, ss.id AS stack_key
+      FROM (SELECT ir.project_id, ir.item_ref, MIN(ir.replied_at) AS asked_at FROM inbox_replies ir
+        WHERE ir.permission_rejected = 1${historyScope.sql}
+          AND ir.project_id IN (SELECT project_id FROM project_members
+            WHERE user_id = ? AND status = 'active')
+        GROUP BY ir.project_id, ir.item_ref) history
+      JOIN session_summaries ss ON ss.project_id = history.project_id
+        AND ss.id = substr(history.item_ref, 11, instr(substr(history.item_ref, 11), ':') - 1)
+      ${member('ss.project_id')}
+      WHERE ss.created_by_user_id = ?${input.filter === 'blocking' ? ' AND 0' : ''}
+        AND (ss.attention_json IS NULL OR NOT json_valid(ss.attention_json)
+          OR json_extract(ss.attention_json, '$.markerId') IS NOT ${historyMarker})`,
+      params: [...taskWriters.params, ...historyScope.params, me, me, me],
     });
 
     const secretScope = projectScope('r.project_id');
@@ -194,6 +223,7 @@ export function inboxItemsSql(
   return {
     sql: `SELECT base.*, lr.user_id AS reply_user_id, u.name AS reply_name,
       lr.message_id AS reply_message_id, lr.replied_at AS replied_at,
+      COALESCE(lr.permission_rejected, 0) AS permission_rejected, lr.agent_acted_at AS agent_acted_at,
       CASE WHEN EXISTS (SELECT 1 FROM inbox_replies pending
         WHERE pending.project_id = base.project_id AND pending.item_ref = ${replyRefSql('base')}
           AND pending.agent_acted_at IS NULL) THEN 1 ELSE 0 END AS with_agent
@@ -202,11 +232,17 @@ export function inboxItemsSql(
         AND lr.item_ref = ${replyRefSql('base')}
         AND lr.message_id = (SELECT latest.message_id FROM inbox_replies latest
           WHERE latest.project_id = base.project_id AND latest.item_ref = ${replyRefSql('base')}
-          ORDER BY latest.replied_at DESC, latest.message_id DESC LIMIT 1)
+          ORDER BY latest.id DESC LIMIT 1)
       LEFT JOIN users u ON u.id = lr.user_id
-      WHERE ${input.filter === 'archived'
-        ? "(base.status IN ('archived', 'answered') OR EXISTS (SELECT 1 FROM inbox_replies hidden WHERE hidden.project_id = base.project_id AND hidden.item_ref = " + replyRefSql('base') + " AND hidden.agent_acted_at IS NULL))"
-        : "NOT EXISTS (SELECT 1 FROM inbox_replies hidden WHERE hidden.project_id = base.project_id AND hidden.item_ref = " + replyRefSql('base') + " AND hidden.agent_acted_at IS NULL)"}`,
+      WHERE ${
+        input.filter === 'archived'
+          ? "(base.status IN ('archived', 'answered') OR EXISTS (SELECT 1 FROM inbox_replies hidden WHERE hidden.project_id = base.project_id AND hidden.item_ref = " +
+            replyRefSql('base') +
+            ' AND hidden.agent_acted_at IS NULL))'
+          : 'NOT EXISTS (SELECT 1 FROM inbox_replies hidden WHERE hidden.project_id = base.project_id AND hidden.item_ref = ' +
+            replyRefSql('base') +
+            ' AND hidden.agent_acted_at IS NULL)'
+      }`,
     params: parts.flatMap((part) => part.params),
   };
 }
