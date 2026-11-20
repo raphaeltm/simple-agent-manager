@@ -9,19 +9,23 @@
  *   there (the control: this is why secrets cannot be vars on celld);
  * - with the agent down a fresh isolate answers 503 SECRETS_UNAVAILABLE, and serves again as
  *   soon as the agent is back;
+ * - the Worker reaches the agent over `cloudflare:sockets` (runtime-secrets-socket.ts, the module
+ *   the generated celld entry imports), and an HTTP request from inside the same Worker, with the
+ *   real bundle id, headers and body, gets nothing (finding F9);
  * - the agent refuses a peer uid it does not allow, on real loopback sockets.
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
+import { createConnection, createServer, type Server } from 'node:net';
 import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { pingKeyAgent } from '../../../deploy/selfhost/key-agent/healthcheck.ts';
+import { KEY_AGENT_PREAMBLE } from '../../../deploy/selfhost/key-agent/server.ts';
 import { ensureCelldBinary } from '../celld-binary.js';
 import {
   celldNode,
-  hasDocker,
   type ObjectStore,
   sealBundle,
   type SealedBundle,
@@ -29,9 +33,10 @@ import {
   startObjectStore,
   writeProject,
 } from './celld-lab';
-import { freePort, LIVE_TMP, REPO_ROOT, type Running, sleep, waitFor } from './harness';
+import { freePort, hasDocker, LIVE_TMP, REPO_ROOT, type Running, sleep, waitFor } from './harness';
 
-const RUNTIME_SECRETS = join(REPO_ROOT, 'apps/api/src/selfhost/runtime-secrets.ts');
+/** What the generated celld entry imports on a sealed box (scripts/selfhost/celld-project.ts). */
+const RUNTIME_SECRETS = join(REPO_ROOT, 'apps/api/src/selfhost/runtime-secrets-socket.ts');
 
 const WORKER = `
 import { wrapDurableObject, wrapWorker } from ${JSON.stringify(RUNTIME_SECRETS)};
@@ -45,8 +50,23 @@ export const ProbeDO = wrapDurableObject(Probe);
 export default wrapWorker({
   async fetch(request, env) {
     served += 1;
-    if (new URL(request.url).pathname === '/do') {
+    const path = new URL(request.url).pathname;
+    if (path === '/do') {
       return await env.PROBE_DO.get(env.PROBE_DO.idFromName('one')).fetch('https://do/');
+    }
+    if (path === '/ssrf') {
+      // What a steered fetch from inside the Worker can do: the real bundle id, the headers and
+      // body the HTTP agent accepted. It must get no answer at all.
+      try {
+        const answer = await fetch('http://' + env.SAM_KEY_AGENT_ADDRESS + '/v1/secrets', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-sam-key-agent': '1' },
+          body: JSON.stringify({ bundleId: env.SAM_SECRET_BUNDLE_ID, nonce: '1'.repeat(32), installationId: env.SAM_INSTALLATION_ID }),
+        });
+        return Response.json({ answered: true, status: answer.status, text: await answer.text() });
+      } catch (error) {
+        return Response.json({ answered: false, error: String(error).slice(0, 200) });
+      }
     }
     const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(env.LIVE_SECRET ?? '')));
     return Response.json({ isolateId, served, secretSha256: [...digest].map((b) => b.toString(16).padStart(2, '0')).join('') });
@@ -100,7 +120,7 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets on celld', () => 
       worker: WORKER,
       probeObject: true,
       vars: {
-        SAM_KEY_AGENT_URL: `http://127.0.0.1:${agentPort}/v1/secrets`,
+        SAM_KEY_AGENT_ADDRESS: `127.0.0.1:${agentPort}`,
         SAM_SECRET_BUNDLE_ID: bundleId,
         SAM_KEY_AGENT_VERIFY_KEY: bundle.verifyKey,
         SAM_INSTALLATION_ID: 'c'.repeat(32),
@@ -126,6 +146,15 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets on celld', () => 
     expect(worker.body.secretSha256).toBe(sha256(canary));
     const object = await get('/do');
     expect(object).toEqual({ status: 200, body: { doSecret: 'string' } });
+  });
+
+  it('F9: an HTTP request from inside the Worker, with the real bundle id, gets nothing', async () => {
+    const ssrf = await get('/ssrf');
+    expect(ssrf.status).toBe(200);
+    expect(ssrf.body.answered).toBe(false);
+    expect(JSON.stringify(ssrf.body)).not.toContain(canary);
+    // Control: the same isolate's socket path still serves the secrets.
+    expect((await get('/')).body.secretSha256).toBe(sha256(canary));
   });
 
   it('leaves no secret in the fleet bucket, while a plain var is stored there in plaintext', () => {
@@ -159,10 +188,7 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets on celld', () => 
     });
     expect(JSON.stringify(down.body)).not.toContain(canary);
     agent = startAgent(process.getuid?.() ?? 0);
-    await waitFor(
-      'the agent',
-      async () => (await fetch(`http://127.0.0.1:${agentPort}/healthz`).catch(() => null))?.ok
-    );
+    await waitFor('the agent', async () => await pingKeyAgent(agentPort).catch(() => null));
     const back = await get('/');
     expect(back.status).toBe(200);
     expect(back.body.secretSha256).toBe(sha256(canary));
@@ -170,12 +196,20 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets on celld', () => 
 
   it('refuses an impostor that took the agent port while the agent was down', async () => {
     await agent?.stop();
-    const impostor: Server = createServer((_req, res) => {
-      res.writeHead(200, {
-        'content-type': 'application/json',
-        'x-sam-key-agent-signature': 'AAAA',
+    // Speaks the framed protocol, but cannot sign: it never opened the bundle.
+    const impostor: Server = createServer((socket) => {
+      socket.once('data', () => {
+        const json = Buffer.from(
+          JSON.stringify({
+            status: 200,
+            body: JSON.stringify({ bundleId, secrets: { LIVE_SECRET: 'forged' } }),
+            signature: 'AAAA',
+          })
+        );
+        const length = Buffer.alloc(4);
+        length.writeUInt32BE(json.length);
+        socket.end(Buffer.concat([length, json]));
       });
-      res.end(JSON.stringify({ bundleId, secrets: { LIVE_SECRET: 'forged' } }));
     });
     await new Promise<void>((done) => impostor.listen(agentPort, '127.0.0.1', done));
     try {
@@ -186,10 +220,7 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets on celld', () => 
     } finally {
       await new Promise<void>((done) => impostor.close(() => done()));
       agent = startAgent(process.getuid?.() ?? 0);
-      await waitFor(
-        'the agent',
-        async () => (await fetch(`http://127.0.0.1:${agentPort}/healthz`).catch(() => null))?.ok
-      );
+      await waitFor('the agent', async () => await pingKeyAgent(agentPort).catch(() => null));
     }
     // Control: the real agent's signed answer verifies on celld (Ed25519 WebCrypto).
     expect((await get('/')).body.secretSha256).toBe(sha256(canary));
@@ -199,17 +230,29 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets on celld', () => 
     const port = await freePort();
     const strict = startAgent((process.getuid?.() ?? 0) + 1, port);
     try {
-      await waitFor(
-        'strict agent',
-        async () => (await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => null))?.ok
-      );
-      const refused = await fetch(`http://127.0.0.1:${port}/v1/secrets`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-sam-key-agent': '1' },
-        body: JSON.stringify({ bundleId }),
+      await waitFor('strict agent', async () => await pingKeyAgent(port).catch(() => null));
+      const answer = await new Promise<string>((resolve, reject) => {
+        const socket = createConnection({ host: '127.0.0.1', port });
+        const chunks: Buffer[] = [];
+        socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+        socket.on('close', () => resolve(Buffer.concat(chunks).subarray(4).toString('utf8')));
+        socket.on('error', reject);
+        socket.once('connect', () => {
+          const body = Buffer.from(
+            JSON.stringify({
+              op: 'secrets',
+              bundleId,
+              nonce: '1'.repeat(32),
+              installationId: 'c'.repeat(32),
+            })
+          );
+          const length = Buffer.alloc(4);
+          length.writeUInt32BE(body.length);
+          socket.write(Buffer.concat([Buffer.from(KEY_AGENT_PREAMBLE), length, body]));
+        });
       });
-      expect(refused.status).toBe(403);
-      expect(await refused.text()).not.toContain(canary);
+      expect(JSON.parse(answer)).toEqual({ status: 403, error: 'peer_refused' });
+      expect(answer).not.toContain(canary);
     } finally {
       await strict.stop();
     }

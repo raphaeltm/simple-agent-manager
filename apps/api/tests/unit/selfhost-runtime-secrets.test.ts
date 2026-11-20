@@ -2,19 +2,65 @@
  * The API Worker's side of sealed self-host secrets (src/selfhost/runtime-secrets.ts): cached per
  * isolate after the first success, each cold caller making its own request (never joining
  * another request's load), fail closed when the agent is unreachable or answers wrongly, and
- * Durable Objects held until their secrets arrive. The same module on the real celld runtime:
- * scripts/selfhost/live/key-agent-celld.live.test.ts and shared-flight-cancel.live.test.ts.
+ * Durable Objects held until their secrets arrive. The agent is reached over a socket speaking the
+ * framed protocol (never HTTP, finding F9); here an in-memory socket decodes the real request frame
+ * and answers like the agent. The same module against the real agent and celld:
+ * selfhost-sealed-secrets-contract.test.ts and scripts/selfhost/live/key-agent-celld.live.test.ts.
  */
 import { generateKeyPairSync, sign } from 'node:crypto';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  KEY_AGENT_PREAMBLE,
+  type KeyAgentSocket,
   loadRuntimeSecrets,
   resetRuntimeSecretsForTests,
   wrapDurableObject,
   wrapWorker,
 } from '../../src/selfhost/runtime-secrets';
+
+type Envelope = Record<string, unknown>;
+type Agent = (request: Record<string, unknown>) => Promise<Envelope>;
+
+/**
+ * A socket that reads one request frame (checking the preamble and length), hands its JSON to
+ * the agent mock, and returns the agent's envelope framed the way server.ts frames it.
+ */
+function fakeConnect(agent: Agent) {
+  return vi.fn((_address: { hostname: string; port: number }): KeyAgentSocket => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const readable = new ReadableStream<Uint8Array>({ start: (c) => void (controller = c) });
+    const written: number[] = [];
+    const writable = new WritableStream<Uint8Array>({
+      write(chunk) {
+        written.push(...chunk);
+        const bytes = Buffer.from(written);
+        const head = Buffer.byteLength(KEY_AGENT_PREAMBLE);
+        if (bytes.length < head + 4) return;
+        expect(bytes.subarray(0, head).toString('utf8')).toBe(KEY_AGENT_PREAMBLE);
+        const length = bytes.readUInt32BE(head);
+        if (bytes.length < head + 4 + length) return;
+        const request = JSON.parse(bytes.subarray(head + 4).toString('utf8')) as Record<
+          string,
+          unknown
+        >;
+        void agent(request).then(
+          (envelope) => {
+            const json = Buffer.from(JSON.stringify(envelope));
+            const out = Buffer.alloc(4 + json.length);
+            out.writeUInt32BE(json.length);
+            json.copy(out, 4);
+            controller.enqueue(new Uint8Array(out));
+            controller.close();
+          },
+          (error: unknown) => controller.error(error)
+        );
+      },
+    });
+    return { readable, writable, close: async () => undefined };
+  });
+}
 
 const BUNDLE = 'ab'.repeat(16);
 const agentKey = generateKeyPairSync('ed25519');
@@ -23,7 +69,7 @@ const VERIFY_KEY = Buffer.from(
   'base64url'
 ).toString('base64');
 const env = () => ({
-  SAM_KEY_AGENT_URL: 'http://127.0.0.1:7190/v1/secrets',
+  SAM_KEY_AGENT_ADDRESS: '127.0.0.1:7190',
   SAM_SECRET_BUNDLE_ID: BUNDLE,
   SAM_KEY_AGENT_VERIFY_KEY: VERIFY_KEY,
   SAM_INSTALLATION_ID: 'c'.repeat(32),
@@ -41,30 +87,29 @@ function answer(
     unsigned?: boolean;
   } = {}
 ) {
-  return async (_url: string, init: RequestInit): Promise<Response> => {
-    const request = JSON.parse(String(init.body)) as { nonce: string };
+  return async (request: Record<string, unknown>): Promise<Envelope> => {
     const text = JSON.stringify({
       bundleId: overrides.bundleId ?? BUNDLE,
       nonce: overrides.nonce ?? request.nonce,
       secrets,
     });
     const signature = sign(null, Buffer.from(text), overrides.signWith ?? agentKey.privateKey);
-    return new Response(text, {
-      status: 200,
-      headers: overrides.unsigned
-        ? {}
-        : { 'x-sam-key-agent-signature': signature.toString('base64') },
-    });
+    return overrides.unsigned
+      ? { status: 200, body: text }
+      : { status: 200, body: text, signature: signature.toString('base64') };
   };
 }
 const ok = (secrets: Record<string, string>) => answer(secrets);
 const ctx = {} as ExecutionContext;
 
-let fetchMock: ReturnType<typeof vi.fn>;
+let fetchMock: ReturnType<typeof vi.fn<Agent>>;
+let connect: ReturnType<typeof fakeConnect>;
 beforeEach(() => {
-  resetRuntimeSecretsForTests();
-  fetchMock = vi.fn();
-  vi.stubGlobal('fetch', fetchMock);
+  fetchMock = vi.fn<Agent>();
+  connect = fakeConnect((request) => fetchMock(request));
+  resetRuntimeSecretsForTests(connect);
+  // The loader never uses fetch: any call fails the test.
+  vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('fetch must not be used'))));
   vi.spyOn(console, 'log').mockImplementation(() => undefined);
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
 });
@@ -87,10 +132,9 @@ describe('wrapWorker fetch', () => {
     for (let i = 0; i < 3; i += 1)
       expect((await worker.fetch!(new Request('https://api/'), base, ctx)).status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(base.SAM_KEY_AGENT_URL);
-    expect(init).toMatchObject({ method: 'POST', redirect: 'manual' });
-    expect((init.headers as Record<string, string>)['x-sam-key-agent']).toBe('1');
+    expect(connect).toHaveBeenCalledWith({ hostname: '127.0.0.1', port: 7190 });
+    expect(fetchMock.mock.calls[0]?.[0]).toMatchObject({ op: 'secrets', bundleId: BUNDLE });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
     expect(seen[0]).toMatchObject({ ENCRYPTION_KEY: 'k1', DATABASE: { binding: 'db' } });
     expect(base).not.toHaveProperty('ENCRYPTION_KEY'); // the runtime's env is never mutated
   });
@@ -100,7 +144,7 @@ describe('wrapWorker fetch', () => {
     // as a fetch that never resolves, then prove the next request does not wait on it.
     const respond = ok({ A_SECRET: 'v' });
     fetchMock
-      .mockImplementationOnce(() => new Promise<Response>(() => undefined))
+      .mockImplementationOnce(() => new Promise<Envelope>(() => undefined))
       .mockImplementation(respond);
     const worker = wrapWorker({ fetch: async () => new Response('ok') });
     const stuck = worker.fetch!(new Request('https://api/'), env(), ctx);
@@ -148,7 +192,7 @@ describe('wrapWorker fetch', () => {
   it.each([
     [
       'a refusal',
-      async () => new Response(JSON.stringify({ error: 'peer_refused' }), { status: 403 }),
+      async () => ({ status: 403, error: 'peer_refused' }),
       'KEY_AGENT_REFUSED',
     ],
     [
@@ -170,14 +214,10 @@ describe('wrapWorker fetch', () => {
     ['a non-string value', answer({ A: 1 }), 'KEY_AGENT_BAD_RESPONSE'],
     [
       'a channel setting',
-      answer({ SAM_KEY_AGENT_URL: 'http://127.0.0.1:1/v1/secrets' }),
+      answer({ SAM_KEY_AGENT_ADDRESS: '127.0.0.1:1' }),
       'KEY_AGENT_BAD_RESPONSE',
     ],
-    [
-      'a redirect',
-      async () => new Response(null, { status: 302, headers: { location: 'http://evil/' } }),
-      'KEY_AGENT_REFUSED',
-    ],
+    ['an answer with no body', async () => ({ status: 200 }), 'KEY_AGENT_REFUSED'],
   ])('fails closed on %s', async (_label, respond, code) => {
     fetchMock.mockImplementation(respond);
     const inner = vi.fn(async () => new Response('ok'));
@@ -205,25 +245,38 @@ describe('wrapWorker fetch', () => {
   it('sends a fresh nonce and the installation id with every request', async () => {
     fetchMock.mockImplementation(ok({ A: 'v' }));
     await loadRuntimeSecrets(env());
-    resetRuntimeSecretsForTests();
+    resetRuntimeSecretsForTests(connect);
     await loadRuntimeSecrets(env());
-    const bodies = fetchMock.mock.calls.map(
-      ([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, string>
-    );
+    resetRuntimeSecretsForTests(connect);
+    const bodies = fetchMock.mock.calls.map(([request]) => request as Record<string, string>);
     expect(bodies[0]).toMatchObject({ bundleId: BUNDLE, installationId: 'c'.repeat(32) });
     expect(bodies[0]?.nonce).toMatch(/^[0-9a-f]{32}$/);
     expect(bodies[0]?.nonce).not.toBe(bodies[1]?.nonce);
   });
 
-  it('refuses an agent URL that is not loopback, before any request', async () => {
+  it.each(['attacker.example:7190', 'http://127.0.0.1:7190/v1/secrets', '127.0.0.1:0', ''])(
+    'refuses an agent address that is not a loopback socket (%s), before connecting',
+    async (address) => {
+      const res = await wrapWorker({ fetch: async () => new Response('ok') }).fetch!(
+        new Request('https://api/'),
+        { ...env(), SAM_KEY_AGENT_ADDRESS: address },
+        ctx
+      );
+      expect(res.status).toBe(503);
+      expect(await res.json()).toMatchObject({ code: 'SECRETS_MISCONFIGURED' });
+      expect(connect).not.toHaveBeenCalled();
+    }
+  );
+
+  it('gives up on an agent that never answers, after SAM_KEY_AGENT_TIMEOUT_MS', async () => {
+    fetchMock.mockImplementation(() => new Promise<Envelope>(() => undefined));
     const res = await wrapWorker({ fetch: async () => new Response('ok') }).fetch!(
       new Request('https://api/'),
-      { ...env(), SAM_KEY_AGENT_URL: 'https://attacker.example/v1/secrets' },
+      { ...env(), SAM_KEY_AGENT_TIMEOUT_MS: '50' },
       ctx
     );
     expect(res.status).toBe(503);
-    expect(await res.json()).toMatchObject({ code: 'SECRETS_MISCONFIGURED' });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await res.json()).toMatchObject({ code: 'KEY_AGENT_UNREACHABLE' });
   });
 
   it('scheduled: throws instead of running the cron without its secrets', async () => {

@@ -5,11 +5,17 @@
  * writeProject also serves tests that run `celld dev` on a bare project (celld-redirect).
  */
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
+import { generateKeyPairSync } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { parse } from 'yaml';
 
+import { sealSecrets } from '../../../deploy/selfhost/key-agent/bundle.ts';
+import {
+  createFileProvider,
+  generateFileKek,
+} from '../../../deploy/selfhost/key-agent/provider-file.ts';
 import { resolveEsbuild } from '../celld-binary.js';
 import { childEnv, DOCKER, freePort, REPO_ROOT, type Running, start, waitFor } from './harness';
 
@@ -204,4 +210,57 @@ export function writeProject(
     })
   );
   return dir;
+}
+
+export interface SealedBundle {
+  bundleId: string;
+  /** The agent's Ed25519 public key, base64, as `SAM_KEY_AGENT_VERIFY_KEY`. */
+  verifyKey: string;
+  /** The file provider's key file, as `SAM_KEY_FILE`. */
+  kekFile: string;
+  /** The agent's state directory (holds kek and bundles/). */
+  stateDir: string;
+  bundleDir: string;
+}
+
+/**
+ * Seal `secrets` the way the deploy does (scripts/selfhost/key-service.ts), file provider, with a
+ * fresh agent signing key. Writes `<stateDir>/kek` and `<stateDir>/bundles/<id>.json`.
+ */
+export async function sealBundle(
+  stateDir: string,
+  secrets: Record<string, string>,
+  installationId: string
+): Promise<SealedBundle> {
+  const bundleDir = join(stateDir, 'bundles');
+  mkdirSync(bundleDir, { recursive: true, mode: 0o700 });
+  const kekFile = join(stateDir, 'kek');
+  writeFileSync(kekFile, generateFileKek(), { mode: 0o600 });
+  const agentKey = generateKeyPairSync('ed25519');
+  const verifyKey = Buffer.from(
+    String(agentKey.publicKey.export({ format: 'jwk' }).x),
+    'base64url'
+  ).toString('base64');
+  const signing = agentKey.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64');
+  const bundle = await sealSecrets(
+    { ...secrets, SAM_KEY_AGENT_SIGNING_KEY: signing },
+    createFileProvider({ SAM_KEY_FILE: kekFile }),
+    { installationId }
+  );
+  writeFileSync(join(bundleDir, `${bundle.bundleId}.json`), JSON.stringify(bundle), {
+    mode: 0o600,
+  });
+  return { bundleId: bundle.bundleId, verifyKey, kekFile, stateDir, bundleDir };
+}
+
+/** The key agent (deploy/selfhost/key-agent/server.ts), file provider, serving `bundle`. */
+export function startKeyAgent(bundle: SealedBundle, port: number, allowedUid: number): Running {
+  return start('node', [join(REPO_ROOT, 'deploy/selfhost/key-agent/server.ts')], {
+    SAM_KEY_PROVIDER: 'file',
+    SAM_KEY_FILE: bundle.kekFile,
+    SAM_KEY_AGENT_PORT: String(port),
+    SAM_KEY_AGENT_STATE_DIR: bundle.stateDir,
+    SAM_KEY_AGENT_BUNDLE_DIR: bundle.bundleDir,
+    SAM_KEY_AGENT_ALLOWED_UIDS: String(allowedUid),
+  });
 }

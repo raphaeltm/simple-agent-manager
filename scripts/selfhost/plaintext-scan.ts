@@ -33,7 +33,7 @@ import { bundleStoreFor, KEY_AGENT_DIR, keyServiceSettings, listBundles } from '
 import { PLATFORM_KEY_NAMES } from './platform-keys';
 import { parseDotenv, readPrivateJson } from './secret-files';
 
-/** Said wherever rotation would be the answer: SAM cannot rotate its own platform keys yet. */
+/** Said wherever rotation would be the answer: SAM cannot rotate its own platform keys yet (idea 01M7VTNAG1HMCE18GCNPS052X3). */
 export const PLATFORM_KEY_ROTATION_PENDING =
   'platform-key rotation is not available yet (a later self-host release adds it); until then ' +
   'every copy listed here stays readable by anyone holding the bucket credential or the backup';

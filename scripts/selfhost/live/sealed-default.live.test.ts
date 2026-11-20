@@ -10,14 +10,25 @@
  * `deploy.ts` renders for this box (read from its --dry-run); in legacy mode it gets the secrets
  * as plain vars, as a pre-sealing deploy did. It answers the SHA-256 of ENCRYPTION_KEY.
  *
- * Proves: the agent container drops from root to the owner of .state/key-agent and serves
- * celld's uid only; a migration that breaks after the switch rolls back to plaintext deploy vars;
- * a working one leaves a clean current version, keeps the plaintext files until a key copy is
- * proven, then removes them; the old plaintext version is then listed and purged.
+ * Proves, on an existing install that ran on plaintext deploy vars: the agent container runs as
+ * the owner of .state from the start, never root, with no capabilities, and refuses to start as
+ * root (finding F10); a migration that breaks after the switch rolls back to plaintext deploy
+ * vars; a working one leaves a clean current version, keeps the plaintext files until a key copy
+ * is proven, then removes them; the old plaintext version is listed and nothing is deleted
+ * (F10: no purge); `secrets reseal` (the switch path) moves the install to a new bundle without a
+ * gap and it keeps serving.
  */
 import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -25,27 +36,34 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runCommand } from '../backup-cli';
 import type { BoxContext } from '../backup-lib';
 import { ensureCelldBinary } from '../celld-binary.js';
-import { CLOSED_HOST, runDeploy } from '../deploy-harness.js';
-import { knownSecrets, purgeVersions, scanDeployVersions } from '../plaintext-scan';
+import { pingKeyAgent } from '../../../deploy/selfhost/key-agent/healthcheck.ts';
+import { CLOSED_HOST, noStackDocker, runDeploy as harnessRunDeploy } from '../deploy-harness.js';
+import { knownSecrets, scanDeployVersions } from '../plaintext-scan';
 import { ensurePlatformKeys } from '../platform-keys';
 import { parseDotenv, readPrivateJson } from '../secret-files';
 import { type MigrateDeps, runMigration } from '../secrets-migrate';
 import { preflightSealedSecrets } from '../secrets-preflight';
+import { runSwitch } from '../secrets-switch';
 import {
   type CelldNode,
   celldNode,
-  hasDocker,
   type ObjectStore,
   startObjectStore,
   writeProject,
 } from './celld-lab';
-import { freePort, LIVE_TMP, REPO_ROOT, type Running, waitFor } from './harness';
+import { freePort, hasDocker, LIVE_TMP, REPO_ROOT, type Running, waitFor } from './harness';
 
 const KEY = 'sam-live-default';
 const SECRET = 'live-default-store-0123456789';
 const IMAGE = 'sam-selfhost-key-agent:live-test';
-const RUNTIME_SECRETS = join(REPO_ROOT, 'apps/api/src/selfhost/runtime-secrets.ts');
+/** What the generated celld entry imports on a sealed box (scripts/selfhost/celld-project.ts). */
+const RUNTIME_SECRETS = join(REPO_ROOT, 'apps/api/src/selfhost/runtime-secrets-socket.ts');
 const uid = process.getuid?.() ?? 0;
+const gid = process.getgid?.() ?? 0;
+
+/** The real deploy entry; its init finds an existing install, and no stack runs in this lab. */
+const runDeploy = (envFile: string, args: string[]) =>
+  harnessRunDeploy(envFile, args, noStackDocker(root));
 
 let root = '';
 let state = '';
@@ -105,7 +123,7 @@ async function deploySealed(): Promise<void> {
     JSON.parse(dry.out.slice(dry.out.indexOf('{\n'))) as { vars: Record<string, string> }
   ).vars;
   const keep = [
-    'SAM_KEY_AGENT_URL',
+    'SAM_KEY_AGENT_ADDRESS',
     'SAM_SECRET_BUNDLE_ID',
     'SAM_KEY_AGENT_VERIFY_KEY',
     'SAM_INSTALLATION_ID',
@@ -122,47 +140,41 @@ function stopAgent(): void {
   agentContainer = '';
 }
 
-/** The key-agent service as docker-compose.yml runs it: root with SETUID/SETGID only, read-only. */
+/** `docker run` arguments for the key-agent service as docker-compose.yml runs it. */
+function agentArgs(user: string): string[] {
+  return [
+    'run',
+    '-d',
+    '--network',
+    'host',
+    '--user',
+    user,
+    '--cap-drop',
+    'ALL',
+    '--security-opt',
+    'no-new-privileges:true',
+    '--read-only',
+    '--env-file',
+    join(state, 'key-agent/agent.env'),
+    '-e',
+    `SAM_KEY_AGENT_ALLOWED_UIDS=${uid}`,
+    '-e',
+    'SAM_KEY_AGENT_STATE_DIR=/etc/sam/key-agent',
+    '-v',
+    `${join(state, 'key-agent')}:/etc/sam/key-agent:ro`,
+    IMAGE,
+  ];
+}
+
+/** The key-agent service as docker-compose.yml runs it: SAM_KEY_AGENT_UID, no capabilities. */
 async function startAgent(): Promise<void> {
   stopAgent();
-  const run = spawnSync(
-    'docker',
-    [
-      'run',
-      '-d',
-      '--network',
-      'host',
-      '--user',
-      '0',
-      '--cap-drop',
-      'ALL',
-      '--cap-add',
-      'SETUID',
-      '--cap-add',
-      'SETGID',
-      '--security-opt',
-      'no-new-privileges:true',
-      '--read-only',
-      '--env-file',
-      join(state, 'key-agent/agent.env'),
-      '-e',
-      `SAM_KEY_AGENT_ALLOWED_UIDS=${uid}`,
-      '-e',
-      'SAM_KEY_AGENT_STATE_DIR=/etc/sam/key-agent',
-      '-v',
-      `${join(state, 'key-agent')}:/etc/sam/key-agent:ro`,
-      IMAGE,
-    ],
-    { encoding: 'utf8' }
-  );
+  const run = spawnSync('docker', agentArgs(`${uid}:${gid}`), { encoding: 'utf8' });
   expect(run.status, run.stderr).toBe(0);
   agentContainer = run.stdout.trim();
   await waitFor(
     'the key agent container',
-    async () => {
-      const r = await fetch(`http://127.0.0.1:${agentPort}/healthz`).catch(() => null);
-      return r?.ok ? ((await r.json()) as { sealed?: boolean }).sealed !== false : false;
-    },
+    async () => (await pingKeyAgent(agentPort).catch(() => null))?.sealed === true,
     60_000,
     () => spawnSync('docker', ['logs', agentContainer], { encoding: 'utf8' }).stdout
   );
@@ -233,6 +245,7 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets by default on cel
         `AWS_ACCESS_KEY_ID=${KEY}`,
         `AWS_SECRET_ACCESS_KEY=${SECRET}`,
         `SAM_KEY_AGENT_PORT=${agentPort}`,
+        `SAM_KEY_AGENT_UID=${uid}`,
         `CELLD_PORT=${node.port}`,
         `CELLD_INTERNAL_PORT=${node.internalPort}`,
         `SAM_GCE_METADATA_HOST=${CLOSED_HOST}`,
@@ -243,7 +256,7 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets by default on cel
     );
     // A box from before sealed secrets: plaintext platform keys and operator secrets.
     mkdirSync(state, { mode: 0o700 });
-    ensurePlatformKeys(join(state, 'platform-keys.json'));
+    ensurePlatformKeys(state, 'init');
     writeFileSync(
       join(state, 'secrets.env'),
       `GITHUB_CLIENT_SECRET=${randomBytes(16).toString('hex')}\n`,
@@ -287,16 +300,28 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets by default on cel
     expect(existsSync(join(state, 'platform-keys.json'))).toBe(true);
   }, 600_000);
 
-  it('the agent container drops from root to the owner of .state/key-agent', async () => {
+  it('the agent container runs as the owner of .state, never root, and refuses root', async () => {
     await startAgent();
     const top = spawnSync('docker', ['top', agentContainer, '-o', 'pid,uid,comm'], {
       encoding: 'utf8',
     });
     expect(top.stdout).toMatch(new RegExp(`\\n\\s*\\d+\\s+${uid}\\s+node`));
     expect(top.stdout).not.toMatch(/\n\s*\d+\s+0\s+node/);
-    // Its own start-up log says so (server.ts dropToOwnerOf); peer refusal: key-agent-celld.live.
-    const logs = spawnSync('docker', ['logs', agentContainer], { encoding: 'utf8' });
-    expect(logs.stdout).toContain(`"event":"key_agent.dropped_root","uid":${uid}`);
+    const caps = spawnSync(
+      'docker',
+      ['inspect', '-f', '{{json .HostConfig.CapAdd}}', agentContainer],
+      {
+        encoding: 'utf8',
+      }
+    );
+    expect(caps.stdout.trim()).toBe('null');
+    // F10 control: the same image started as root exits with the reason, serving nothing.
+    const root = spawnSync('docker', [...agentArgs('0:0').filter((a) => a !== '-d'), '--rm'], {
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+    expect(root.status).not.toBe(0);
+    expect(`${root.stdout}${root.stderr}`).toContain('the key agent must not run as root');
   }, 120_000);
 
   it('migrates: clean current version, files kept until a key copy is proven, then removed', async () => {
@@ -330,14 +355,52 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets by default on cel
     expect(existsSync(join(state, 'secrets.env'))).toBe(false);
 
     // Every secret still known (from the bundle alone); the old plaintext version is listed
-    // and purged; the current one is clean and keeps serving.
+    // (names only) and nothing is deleted (F10: no purge); the current one is clean.
     const secrets = await knownSecrets(box(), state);
     expect(secrets.values).toContain(keys.ENCRYPTION_KEY);
-    const before = scanDeployVersions(ctx(), secrets);
-    expect(before.filter((v) => v.secretNames.length > 0).length).toBeGreaterThanOrEqual(1);
-    const result = purgeVersions(ctx(), secrets, 's3://fleet/celld', { minAgeMs: 0 });
-    expect(result.deleted.length).toBeGreaterThanOrEqual(1);
-    expect(scanDeployVersions(ctx(), secrets).every((v) => v.secretNames.length === 0)).toBe(true);
+    const versions = scanDeployVersions(ctx(), secrets);
+    const plaintext = versions.filter((v) => v.secretNames.length > 0);
+    expect(plaintext.length).toBeGreaterThanOrEqual(1);
+    expect(
+      versions.find((v) => v.referencedBy.includes('deploy/current.json'))?.secretNames
+    ).toEqual([]);
+    expect(scanDeployVersions(ctx(), secrets).map((v) => v.prefix)).toEqual(
+      versions.map((v) => v.prefix)
+    );
     expect((await finishing.adoptAndCheck()).healthy).toBe(true);
+  }, 600_000);
+
+  it('reseal (the switch path) moves the running install to a new bundle and keeps serving', async () => {
+    const served = async () =>
+      ((await (await fetch(`http://127.0.0.1:${node.port}/`)).json()) as { sha?: string }).sha;
+    const shaBefore = await served();
+    expect(shaBefore).toMatch(/^[0-9a-f]{64}$/);
+    const before = readdirSync(join(state, 'key-agent/bundles'));
+    const log: string[] = [];
+    const healthyOnNewBundle = async () => {
+      const reload = await fetch(`http://127.0.0.1:${node.internalPort}/reload`, {
+        method: 'POST',
+      });
+      const sha = await served();
+      return { healthy: reload.ok && sha === shaBefore, detail: `sha ${sha}` };
+    };
+    await runSwitch(
+      { box: box(), stateDir: state, to: null },
+      {
+        log: (m) => log.push(m),
+        detect: async () => ({ platform: null, candidates: [] }),
+        restartAgent: startAgent,
+        deploy: deploySealed,
+        adoptAndCheck: healthyOnNewBundle,
+      }
+    );
+    const added = readdirSync(join(state, 'key-agent/bundles')).filter((n) => !before.includes(n));
+    expect(added).toHaveLength(1);
+    expect(existsSync(join(state, 'key-agent/previous.env'))).toBe(false);
+    expect(log.join('\n')).toContain('done: the box seals with file');
+    // The Worker now names the new bundle and still gets the same ENCRYPTION_KEY.
+    const dry = await runDeploy(envFile, ['--dry-run', '--skip-vm-agent']);
+    expect(dry.out).toContain(`"SAM_SECRET_BUNDLE_ID": "${added[0]?.replace('.json', '')}"`);
+    expect(await served()).toBe(shaBefore);
   }, 600_000);
 });

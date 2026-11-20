@@ -264,7 +264,7 @@ cannot go back to plaintext deploy vars once `platform-keys.json` is gone
 
 **Agent VMs never receive the bucket or KMS credentials.** Only the box's key agent and the deploy
 hold a key provider's credential; workspace nodes get neither, and the Worker never sees one
-(`apps/api/tests/unit/selfhost-agent-vm-credentials.test.ts`).
+(`scripts/selfhost/agent-vm-credentials.test.ts`).
 
 ## Backup and restore
 

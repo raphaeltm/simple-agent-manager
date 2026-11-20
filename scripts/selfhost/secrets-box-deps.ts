@@ -4,6 +4,7 @@
  */
 import { spawnSync } from 'node:child_process';
 
+import { pingKeyAgent } from '../../deploy/selfhost/key-agent/healthcheck.ts';
 import { REPO_ROOT } from './backup-cli';
 import { type BoxContext, composeArgs } from './backup-lib';
 import { adoptAndCheck } from './celld-adopt';
@@ -30,12 +31,8 @@ function visible(command: string, args: string[]): void {
 async function waitForSealedAgent(port: number): Promise<void> {
   const deadline = Date.now() + DEFAULT_AGENT_WAIT_MS;
   for (;;) {
-    const response = await fetch(`http://127.0.0.1:${port}/healthz`, {
-      signal: AbortSignal.timeout(3000),
-    }).catch(() => null);
-    const body = response?.ok ? ((await response.json()) as { sealed?: unknown }) : null;
     // The agent of a sealed box; a legacy one answers `sealed: false`.
-    if (body && body.sealed !== false) return;
+    if ((await pingKeyAgent(port).catch(() => null))?.sealed) return;
     if (Date.now() > deadline)
       throw new Error(`the key agent did not come up on 127.0.0.1:${port}`);
     await sleep(POLL_MS);
