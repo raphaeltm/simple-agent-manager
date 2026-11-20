@@ -53,6 +53,19 @@ function canonicalFor(f: Fixture): string {
   return expectedComposeProjectFor({ SAM_DOMAIN: 'adopt.example.test' }, f.stateDir, id);
 }
 
+/** One adoption in its own process group, so the test can SIGKILL it and any child. */
+function spawnChild(f: Fixture, healthDelayMs: number) {
+  return spawn(
+    resolve(REPO_ROOT, 'node_modules/.bin/tsx'),
+    [
+      resolve(import.meta.dirname, 'legacy-adoption-child.ts'),
+      JSON.stringify(f),
+      String(healthDelayMs),
+    ],
+    { cwd: REPO_ROOT, env: childEnv(), stdio: 'ignore', detached: true }
+  );
+}
+
 describe.skipIf(skipWithoutDocker)('legacy compose adoption (real Docker)', () => {
   beforeAll(() => {
     dockerOk(['pull', '--quiet', ALPINE]);
@@ -205,7 +218,18 @@ describe.skipIf(skipWithoutDocker)('legacy compose adoption (real Docker)', () =
     const git = new FakeGit(TO);
     await expect(
       adopt(git, {
-        checkHealth: async () => (calls++ === 0 ? false : real()),
+        checkHealth: async () => {
+          if (calls++ > 0) return real();
+          // The canonical celld writes before verification fails: that state must not be lost.
+          dockerOk([
+            'exec',
+            containerOf(canonical, 'celld'),
+            'sh',
+            '-c',
+            'echo newer > /var/lib/celld/do/after',
+          ]);
+          return false;
+        },
         upgrade: async () => {
           upgrades.push('called');
         },
@@ -218,30 +242,60 @@ describe.skipIf(skipWithoutDocker)('legacy compose adoption (real Docker)', () =
     expect(containerOf(canonical, 'celld')).toBe('');
     expect(volumesOf(canonical)).toEqual([]);
     expect(readVolumeFile(`${fixture.legacyProject}_caddy-data`, 'cert.pem')).toBe('0:0:600\ncert');
-    // The canonical celld ran, so the disposable legacy cache was emptied (the bucket is durable).
-    expect(
-      dockerOk([
-        'run',
-        '--rm',
-        '-v',
-        `${fixture.legacyProject}_celld-data:/v:ro`,
-        ALPINE,
-        'ls',
-        '-A',
-        '/v',
-      ])
-    ).toBe('');
+    // The canonical cache (the newest local celld state) was carried back to the legacy cache.
+    expect(readVolumeFile(`${fixture.legacyProject}_celld-data`, 'do/marker')).toBe(
+      '7103:7103:640\ndurable'
+    );
+    expect(readVolumeFile(`${fixture.legacyProject}_celld-data`, 'do/after')).toContain('newer');
     expect(existsSync(join(fixture.stateDir, ADOPTION_JOURNAL_FILE))).toBe(false);
     expect(git.head).toBe(FROM);
   });
 
+  it('resumes after a kill past the .env switch, then rolls back cleanly on a failed verify', async () => {
+    seedData(fixture);
+    const child = spawnChild(fixture, 60_000);
+    const exited = new Promise((done) => child.on('exit', done));
+    let killed = false;
+    const deadline = Date.now() + 90_000;
+    while (Date.now() < deadline && child.exitCode === null) {
+      const journal = existsSync(join(fixture.stateDir, ADOPTION_JOURNAL_FILE))
+        ? readAdoptionJournal(fixture.stateDir)
+        : null;
+      if (
+        journal?.phase === 'switched' &&
+        journal.canonicalStarted &&
+        containerOf(canonical, 'celld')
+      ) {
+        process.kill(-(child.pid as number), 'SIGKILL');
+        killed = true;
+        break;
+      }
+      await new Promise((done) => setTimeout(done, 50));
+    }
+    await exited;
+    expect(killed).toBe(true);
+    expect(readFileSync(fixture.envFile, 'utf8')).toContain(`COMPOSE_PROJECT_NAME=${canonical}`);
+
+    let calls = 0;
+    const real = projectHealth(fixture);
+    const logs: string[] = [];
+    await expect(
+      adopt(new FakeGit(FROM), { checkHealth: async () => (calls++ === 0 ? false : real()) }, logs)
+    ).rejects.toThrow(/not healthy/);
+    expect(logs).toContain('resuming legacy adoption at phase switched');
+    expect(readFileSync(fixture.envFile, 'utf8')).toBe(fixture.envText);
+    expect(containerOf(fixture.legacyProject, 'celld')).not.toBe('');
+    expect(containerOf(canonical, 'celld')).toBe('');
+    expect(volumesOf(canonical)).toEqual([]);
+    expect(readVolumeFile(`${fixture.legacyProject}_celld-data`, 'do/marker')).toBe(
+      '7103:7103:640\ndurable'
+    );
+    expect(existsSync(join(fixture.stateDir, ADOPTION_JOURNAL_FILE))).toBe(false);
+  });
+
   it('resumes after the operator process is killed in the middle of a volume copy', async () => {
     seedData(fixture, 4000, 256);
-    const child = spawn(
-      resolve(REPO_ROOT, 'node_modules/.bin/tsx'),
-      [resolve(import.meta.dirname, 'legacy-adoption-child.ts'), JSON.stringify(fixture)],
-      { cwd: REPO_ROOT, env: childEnv(), stdio: 'ignore', detached: true }
-    );
+    const child = spawnChild(fixture, 0);
     const exited = new Promise<number | null>((done) => child.on('exit', (code) => done(code)));
     const helper = helperName(canonical, 'celld-data');
     let killedMidCopy = false;

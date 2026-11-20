@@ -32,27 +32,28 @@ every install created before L24 (#2918) cannot upgrade to main:
 
 ## Checklist
 
-- [ ] `--adopt-legacy --from <full sha>` on `selfhost:upgrade` (upgrade.ts), operator-only
-- [ ] Ownership proof: every container in the legacy project is labelled with this checkout's
+- [x] `--adopt-legacy --from <full sha>` on `selfhost:upgrade` (upgrade.ts), operator-only
+- [x] Ownership proof: every container in the legacy project is labelled with this checkout's
       working dir, compose files and env file; bind mounts sit inside the checkout or state dir;
       each legacy volume is mounted only by proven containers; the running config hash equals
       `--from`'s compose config; there is exactly one running celld; the canonical project is empty
       (or exactly what this journal created). Anything else refuses.
-- [ ] Backup first (runBackup against the explicit legacy project) before any change
-- [ ] Durable private journal (`.state/legacy-adoption.json`) plus a private copy of the original
+- [x] Backup first (runBackup against the explicit legacy project) before any change
+- [x] Durable private journal (`.state/legacy-adoption.json`) plus a private copy of the original
       .env; resume after a kill at every phase; a killed copy helper is removed before re-copy
-- [ ] Copy each volume into a labelled canonical volume; verify by a content, mode and owner digest
-- [ ] Set `COMPOSE_PROJECT_NAME`, start the canonical project, verify health, write receipts via
+- [x] Copy each volume into a labelled canonical volume; verify by a content, mode and owner digest
+- [x] Set `COMPOSE_PROJECT_NAME`, start the canonical project, verify health, write receipts via
       `recordInstall`, remove the stopped legacy containers, keep the legacy volumes (print rm command)
-- [ ] Failure or failed verify rolls back to the legacy project: canonical containers and owned
-      volumes removed, .env restored byte for byte, legacy cache emptied if canonical celld ran,
+- [x] Failure or failed verify rolls back to the legacy project: canonical containers and owned
+      volumes removed, .env restored byte for byte, canonical celld cache copied back if it ran,
       legacy stack started and health-checked
-- [ ] Chain into `runUpgrade` from `--from`; keep the journal until the upgrade succeeds
-- [ ] README: legacy adoption procedure, resume and rollback behaviour
-- [ ] Live real-Docker tests: adopt-then-upgrade (the L24 preflight passes afterwards), kill
+- [x] Chain into `runUpgrade` from `--from`; keep the journal until the upgrade succeeds
+- [x] README: legacy adoption procedure, resume and rollback behaviour
+- [x] Live real-Docker tests: adopt-then-upgrade (the L24 preflight passes afterwards), kill
       mid-copy then resume, ambiguous-ownership refusal (another checkout on the same project),
       failed verify rolls back to legacy; plus unit tests for argument and journal validation
-- [ ] Security review; box adoption plus smoke steps 1, 2 and 4 after merge
+- [ ] Box adoption from the PR head BEFORE merge (staging gate, coordinator); after merge, the normal L24 upgrade to main plus the forced-verify rollback (smoke steps 1, 2 and 4)
+- [x] Security review (security-auditor PASS: 3 MEDIUM and 4 LOW fixed in the second commit)
 
 ## Acceptance criteria
 

@@ -6,8 +6,9 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { runLegacyAdoption } from './legacy-adoption.js';
 import { proveLegacyOwnership } from './legacy-adoption-inventory.js';
 import {
   ADOPTION_JOURNAL_FILE,
@@ -190,5 +191,85 @@ describe('proveLegacyOwnership', () => {
   it('refuses a volume of another project', () => {
     mounts.push({ Type: 'volume', Name: 'other_data' });
     expect(prove).toThrow(/volume of another project/);
+  });
+});
+
+describe('runLegacyAdoption argument guards', () => {
+  const FROM = 'f'.repeat(40);
+  const TO = 'e'.repeat(40);
+  let head: string;
+  let dirty: boolean;
+  let docker: string[];
+
+  const ctx = () => {
+    const dir = join(root, 'deploy/selfhost');
+    writeFileSync(join(dir, '.env'), 'SAM_DOMAIN=x.test\n', { mode: 0o600 });
+    return {
+      box: { SAM_DOMAIN: 'x.test' } as Record<string, string>,
+      envFile: join(dir, '.env'),
+      stateDir: state(),
+      composeFiles: [join(dir, 'docker-compose.yml')],
+      log: () => {},
+      run: (command: string, args: string[]): RunResult => {
+        const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
+        if (command === 'docker') {
+          docker.push(args.join(' '));
+          return { status: 1, stdout: '', stderr: 'docker must not run' };
+        }
+        if (args[0] === 'status') return ok(dirty ? ' M x.ts' : '');
+        if (args[0] === 'rev-parse' && args[1] === 'HEAD') return ok(head);
+        if (args[0] === 'rev-parse') return ok(args[2]?.startsWith('main') ? TO : 'c'.repeat(40));
+        return ok();
+      },
+    };
+  };
+  const adopt = (overrides: { from?: string; to?: string } = {}) =>
+    runLegacyAdoption(ctx(), {
+      from: overrides.from ?? FROM,
+      to: overrides.to ?? 'main',
+      checkHealth: async () => true,
+      upgrade: async () => {},
+    });
+
+  beforeEach(() => {
+    for (const name of Object.keys(process.env))
+      if (name === 'CI' || name === 'GITHUB_ACTIONS' || name.startsWith('RUNNER_'))
+        vi.stubEnv(name, undefined);
+    vi.stubEnv('COMPOSE_PROJECT_NAME', undefined);
+    head = TO;
+    dirty = false;
+    docker = [];
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    // Every refusal happens before any container, volume or compose command.
+    expect(docker).toEqual([]);
+  });
+
+  it('refuses an abbreviated --from', async () => {
+    await expect(adopt({ from: 'f'.repeat(12) })).rejects.toThrow(/full 40-character/);
+  });
+  it('refuses a shell COMPOSE_PROJECT_NAME', async () => {
+    vi.stubEnv('COMPOSE_PROJECT_NAME', 'sam-selfhost');
+    await expect(adopt()).rejects.toThrow(/Unset COMPOSE_PROJECT_NAME/);
+  });
+  it('refuses a dirty checkout', async () => {
+    dirty = true;
+    await expect(adopt()).rejects.toThrow(/uncommitted changes/);
+  });
+  it('refuses to run from the deployed commit itself', async () => {
+    head = FROM;
+    await expect(adopt()).rejects.toThrow(/check out the target SAM ref first/);
+  });
+  it('refuses a --to that is not the checked-out target', async () => {
+    await expect(adopt({ to: 'v2026.11.19' })).rejects.toThrow(/check out v2026.11.19 first/);
+  });
+  it('refuses to resume an adoption with a different --from', async () => {
+    writeAdoptionJournal(state(), journal());
+    await expect(adopt({ from: 'a'.repeat(40) })).rejects.toThrow(/pass the same --from/);
+  });
+  it('refuses an orphaned .env copy left without its journal', async () => {
+    writeFileSync(join(state(), 'legacy-adoption.env'), 'A=1\n', { mode: 0o600 });
+    await expect(adopt()).rejects.toThrow(/exists without its journal/);
   });
 });

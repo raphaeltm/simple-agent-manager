@@ -62,11 +62,15 @@ export function phaseAtLeast(journal: AdoptionJournal, phase: AdoptionPhase): bo
   return ADOPTION_PHASES.indexOf(journal.phase) >= ADOPTION_PHASES.indexOf(phase);
 }
 
+const PROJECT = /^[a-z0-9][a-z0-9_-]*$/;
+const SUFFIX = /^[a-z0-9][a-z0-9_.-]*$/;
+
 function validVolume(value: unknown, legacyProject: string, canonicalProject: string): boolean {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
   return (
     typeof v.suffix === 'string' &&
+    SUFFIX.test(v.suffix) &&
     v.legacy === `${legacyProject}_${v.suffix}` &&
     v.canonical === `${canonicalProject}_${v.suffix}` &&
     (v.createdAt === undefined || typeof v.createdAt === 'string') &&
@@ -98,7 +102,9 @@ export function readAdoptionJournal(stateDir: string): AdoptionJournal | null {
     typeof j.to !== 'string' ||
     !SHA.test(j.to) ||
     typeof j.legacyProject !== 'string' ||
+    !PROJECT.test(j.legacyProject) ||
     typeof j.canonicalProject !== 'string' ||
+    !/^sam-selfhost-[a-f0-9]{12}$/.test(j.canonicalProject) ||
     j.legacyProject === j.canonicalProject ||
     typeof j.installationId !== 'string' ||
     !/^[a-f0-9]{32}$/.test(j.installationId) ||

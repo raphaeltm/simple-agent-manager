@@ -27,8 +27,6 @@ const DIGEST_SCRIPT =
 /** Empty the destination first: a retry after a kill must not merge with a partial copy. */
 const COPY_SCRIPT = 'set -eu; find /to -mindepth 1 -delete; cp -a /from/. /to/';
 
-const EMPTY_SCRIPT = 'set -eu; find /cache -mindepth 1 -delete';
-
 export function helperName(canonicalProject: string, suffix: string): string {
   return `${canonicalProject}-legacy-adoption-${suffix}`;
 }
@@ -40,7 +38,8 @@ export function helperNames(canonicalProject: string, suffixes: readonly string[
       const name = helperName(canonicalProject, suffix);
       return [name, `${name}-digest`];
     }),
-    helperName(canonicalProject, 'cache-reset'),
+    helperName(canonicalProject, 'cache-return'),
+    `${helperName(canonicalProject, 'cache-return')}-digest`,
   ];
 }
 
@@ -221,20 +220,6 @@ export function copyVolume(
   if (source !== copy)
     throw new Error(`Legacy adoption: copy of ${from} does not match its source`);
   return copy;
-}
-
-/** celld-data is a disposable cache; a stale one is emptied before the legacy celld restarts. */
-export function emptyVolume(
-  ctx: Pick<BoxContext, 'run'>,
-  helper: Helper,
-  name: string,
-  container: string
-): void {
-  removeStaleHelper(ctx, helper, container);
-  check(
-    ctx.run('docker', helperArgs(helper, container, [`${name}:/cache`], [EMPTY_SCRIPT])),
-    'empty stale legacy cache'
-  );
 }
 
 export function removeVolume(ctx: Pick<BoxContext, 'run'>, name: string): void {

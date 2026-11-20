@@ -37,7 +37,6 @@ import {
   copyVolume,
   createCanonicalVolume,
   DEFAULT_ADOPTION_HELPER_IMAGE,
-  emptyVolume,
   type Helper,
   helperName,
   helperNames,
@@ -126,6 +125,10 @@ function startJournal(ctx: BoxContext, opts: AdoptionOptions, to: string): Adopt
     throw new Error(
       `Legacy adoption refused: COMPOSE_PROJECT_NAME is ${named}, not the legacy ${legacyProject}; use a normal upgrade`
     );
+  if (existsSync(join(ctx.stateDir, ADOPTION_ENV_FILE)))
+    throw new Error(
+      `Legacy adoption refused: ${ctx.stateDir}/${ADOPTION_ENV_FILE} exists without its journal; inspect it (it is a copy of an earlier .env) and remove it`
+    );
   const installationId = installationIdOf(ctx.stateDir);
   const box = { ...ctx.box };
   delete box.COMPOSE_PROJECT_NAME;
@@ -167,15 +170,17 @@ function assertCanonicalClear(ctx: BoxContext, journal: AdoptionJournal): void {
     .filter(Boolean);
   for (const name of listed) {
     const owned = journal.volumes.find((v) => v.canonical === name);
-    if (!owned?.createdAt)
+    if (!owned)
       throw new Error(`Legacy adoption refused: ${name} exists and is not this adoption's copy`);
-    ownedCanonicalVolume(
+    // Labelled with this journal's random adoption id; a kill can precede recording its CreatedAt.
+    const volume = ownedCanonicalVolume(
       ctx,
       journal.canonicalProject,
       owned.suffix,
       journal.adoptionId,
       owned.createdAt
     );
+    if (volume && !owned.createdAt) owned.createdAt = volume.createdAt;
   }
 }
 
@@ -252,7 +257,8 @@ async function adopt(ctx: BoxContext, opts: AdoptionOptions, journal: AdoptionJo
           journal.adoptionId,
           volume.createdAt
         );
-        if (!existing) {
+        if (existing) volume.createdAt = existing.createdAt;
+        else {
           volume.createdAt = createCanonicalVolume(
             ctx,
             journal.canonicalProject,
@@ -305,43 +311,55 @@ function removeLegacyContainers(ctx: BoxContext, journal: AdoptionJournal): void
   if (stale.length) check(ctx.run('docker', ['rm', ...stale]), 'remove stopped legacy containers');
 }
 
-/** Back to the legacy project; its volumes were only read, except the disposable cache. */
+/** Rollback could not restore the legacy stack: its journal and env copy must be kept. */
+class RollbackIncomplete extends Error {}
+
+/**
+ * Back to the legacy project. Its volumes were only read, except the celld cache: when the
+ * canonical celld ran, its cache is the newest local state, so it is copied back over the legacy
+ * cache (nothing celld kept locally is lost, whatever its flush semantics) before the canonical
+ * volumes are removed.
+ */
 async function rollbackToLegacy(ctx: BoxContext, opts: AdoptionOptions, journal: AdoptionJournal) {
   ctx.log('legacy adoption failed; restoring the legacy compose project');
   const legacy = withProject(ctx, journal.legacyProject);
   const canonical = withProject(ctx, journal.canonicalProject);
   const helper = helperOf(opts, journal);
   try {
+    for (const name of helperNames(
+      journal.canonicalProject,
+      journal.volumes.map((v) => v.suffix)
+    ))
+      removeStaleHelper(ctx, helper, name);
     if (journal.canonicalStarted)
       compose(canonical, ['down', '--remove-orphans'], 'stop canonical stack');
-    for (const volume of journal.volumes) {
-      removeStaleHelper(ctx, helper, helperName(journal.canonicalProject, volume.suffix));
-      removeStaleHelper(
-        ctx,
-        helper,
-        `${helperName(journal.canonicalProject, volume.suffix)}-digest`
-      );
-      if (!volume.createdAt) continue;
-      const owned = ownedCanonicalVolume(
+    const owned = journal.volumes.map((volume) => ({
+      volume,
+      present: ownedCanonicalVolume(
         ctx,
         journal.canonicalProject,
         volume.suffix,
         journal.adoptionId,
         volume.createdAt
+      ),
+    }));
+    const cache = owned.find((o) => o.volume.suffix === 'celld-data');
+    if (journal.canonicalStarted && cache?.present)
+      copyVolume(
+        ctx,
+        helper,
+        cache.present.name,
+        cache.volume.legacy,
+        helperName(journal.canonicalProject, 'cache-return')
       );
-      if (owned) removeVolume(ctx, owned.name);
-    }
+    for (const { present } of owned) if (present) removeVolume(ctx, present.name);
     if (phaseAtLeast(journal, 'switched') || existsSync(join(ctx.stateDir, ADOPTION_ENV_FILE)))
       replacePrivateFile(ctx.envFile, readOriginalEnv(ctx.stateDir));
-    const cache = journal.volumes.find((v) => v.suffix === 'celld-data');
-    // The canonical celld may have written newer data to the bucket than this cache holds.
-    if (journal.canonicalStarted && cache)
-      emptyVolume(ctx, helper, cache.legacy, helperName(journal.canonicalProject, 'cache-reset'));
     compose(legacy, ['up', '-d'], 'restart legacy stack');
     if (!(await opts.checkHealth())) throw new Error('legacy stack is not healthy');
   } catch {
-    throw new Error(
-      `legacy adoption failed and rollback did not complete; keep ${ctx.stateDir}/legacy-adoption.json and the legacy volumes, then inspect the stack`
+    throw new RollbackIncomplete(
+      `legacy adoption failed and rollback did not complete; keep ${ctx.stateDir}/legacy-adoption.json, its legacy-adoption.env and the legacy volumes, then inspect the stack`
     );
   }
   clearAdoptionJournal(ctx.stateDir);
@@ -388,7 +406,7 @@ export async function runLegacyAdoption(ctx: BoxContext, opts: AdoptionOptions):
     try {
       await adopt(ctx, opts, journal);
     } catch (error) {
-      if (!phaseAtLeast(journal, 'stopped')) {
+      if (!(error instanceof RollbackIncomplete) && !phaseAtLeast(journal, 'stopped')) {
         // Nothing moved yet: return the operator's checkout and forget the attempt.
         clearAdoptionJournal(ctx.stateDir);
         git(ctx, ['checkout', '--detach', journal.to], 'restore target checkout');

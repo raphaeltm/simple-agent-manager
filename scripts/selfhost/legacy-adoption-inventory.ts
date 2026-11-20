@@ -69,7 +69,7 @@ function real(path: string): string {
 
 function inside(root: string, path: string): boolean {
   const rel = relative(root, path);
-  return rel === '' || (!rel.startsWith('..') && !rel.startsWith('/'));
+  return rel === '' || (rel !== '..' && !rel.startsWith('../') && !rel.startsWith('/'));
 }
 
 /** Container IDs carrying `label`, all states. */
@@ -151,6 +151,14 @@ export function proveLegacyOwnership(
     const labels = item.Config?.Labels ?? {};
     const label = (name: string) => (typeof labels[name] === 'string' ? labels[name] : '');
     if (label(PROJECT_LABEL) !== opts.legacyProject) refuse(`container ${id} changed project`);
+    if (
+      !label('com.docker.compose.project.working_dir') ||
+      !label('com.docker.compose.project.config_files') ||
+      !label('com.docker.compose.project.environment_file')
+    )
+      refuse(
+        `container ${id.slice(0, 12)} of project ${opts.legacyProject} belongs to another checkout, compose file set or .env (labels missing)`
+      );
     const files = label('com.docker.compose.project.config_files')
       .split(',')
       .filter(Boolean)
