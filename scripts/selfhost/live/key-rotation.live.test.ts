@@ -35,7 +35,7 @@ import {
 import { completeSealedPlatformKeys } from '../platform-keys';
 import type { RotateDeps } from '../rotate-apply';
 import { boxRotateDeps } from '../rotate-box-deps';
-import { runRotate } from '../rotate-run';
+import { drainMinutes, runRotate } from '../rotate-run';
 import { openRotationStore, readJournal } from '../rotate-store';
 import { parseDotenv } from '../secret-files';
 import {
@@ -161,11 +161,18 @@ async function readProbe(): Promise<{ values: string[]; file: string; rotating: 
   return (await response.json()) as { values: string[]; file: string; rotating: boolean };
 }
 
+const drainWaits: number[] = [];
+
 function deps(log: string[], interruptAfterMigratePages = 0): RotateDeps {
   const real = boxRotateDeps({ ...ctx(), log: (m) => log.push(m) });
   let migratePages = 0;
   return {
     ...real,
+    // No request is in flight in this test, so the request drain is recorded, not slept out
+    // (rotate-steps-data.ts waits it in-run; its timing is covered by rotate-command.test.ts).
+    sleep: async (ms) => {
+      drainWaits.push(ms);
+    },
     backup: () => null,
     deploy: deployProbe,
     adoptAndCheck,
@@ -340,10 +347,12 @@ describe.skipIf(!hasDocker && !process.env.CI)('encryption-key rotation on celld
     expect(mid.values).toEqual(before.values);
     expect(mid.file).toBe('library body');
 
-    await runRotate(rotateInput({ resume: true }), deps(log));
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    // The resume finishes the migration, waits out the drain in-run and retires the old key.
     await runRotate(rotateInput({ resume: true }), deps(log));
     expect(readJournal(state)).toBeNull();
+    // The drain was waited before each retirement (encryption key, then the chained sign-in key).
+    expect(drainWaits.length).toBeGreaterThanOrEqual(2);
+    expect(Math.max(...drainWaits)).toBeGreaterThan(drainMinutes(box()) * 60_000 - 60_000);
 
     const head = (await openRotationStore(box(), state).head()).secrets;
     expect(head.ENCRYPTION_KEY).not.toBe(oldKey);
