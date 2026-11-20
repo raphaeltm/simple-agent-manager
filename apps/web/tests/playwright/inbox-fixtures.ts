@@ -343,7 +343,7 @@ export const CONVERSATIONS: Record<string, Record<string, unknown>> = {
       agentResponse('c-1', 'Three nodes hit it today, all on the same flaky provider region.', 70),
       agentResponse(
         'c-2',
-        'Mid-retry nodes **keep their current count**; the new cap applies from their next attempt. Nothing is reset.\n\n- per node: 3 nodes affected\n- per project: 1 project affected',
+        'Mid-retry nodes **keep their current count**; the new cap applies from their next attempt. Nothing is reset.\n\n- per node: 3 nodes affected\n- per project: 1 project affected\n\n```\nretry_cap{scope="node",node="01M7WXC7W20AZRP11K9YB3QCSZ-very-long-node-identifier"} 3 attempts_remaining=0 next_attempt_at=2026-11-20T17:05:00Z\n```',
         30
       ),
       agentResponse('c-3', 'Noted. One last check before I push: per node it is?', 4),

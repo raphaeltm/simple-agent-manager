@@ -6,7 +6,7 @@
  */
 import { expect, type Page, test } from '@playwright/test';
 
-import { assertNoClippedOverflow, assertNoOverflow, screenshot } from './audit-helpers';
+import { assertNoClippedOverflow, assertNoOverflow, screenshot, seedTheme } from './audit-helpers';
 import { type InboxMockState, KIND_ITEMS, REPLY_ITEMS, setupInboxMocks } from './inbox-fixtures';
 
 function state(): InboxMockState {
@@ -79,6 +79,15 @@ for (const viewport of [
       await check(page, `inbox-replies-conversation-bottom-${viewport.label}`);
     });
 
+    test('light theme: the conversation and its controls', async ({ page }) => {
+      await seedTheme(page, 'light');
+      await openItem(page, state(), 'ask:conv', 'p-billing');
+      await expect(
+        page.getByTestId('inbox-response').last().getByRole('button', { name: 'Per node' })
+      ).toBeVisible();
+      await check(page, `inbox-replies-conversation-light-${viewport.label}`);
+    });
+
     test('writing a reply with an attachment, then the receipt', async ({ page }) => {
       const mock = state();
       await openItem(page, mock, 'ask:conv', 'p-billing');
@@ -113,7 +122,11 @@ for (const viewport of [
     test('a pending permission says sending declines it', async ({ page }) => {
       const permission = KIND_ITEMS.find((item) => item.kind === 'permission')!;
       await openItem(page, state(), permission.ref, permission.projectId);
+      // The notice comes with a draft, so it never adds to what sits over the permission's
+      // own buttons (inside the ask, as designed).
       await expect(page.getByRole('button', { name: 'Allow once' })).toBeVisible();
+      await expect(page.getByTestId('inbox-reply-declines')).toHaveCount(0);
+      await page.getByRole('combobox', { name: 'Reply to the agent' }).fill('Not on staging.');
       await expect(page.getByTestId('inbox-reply-declines')).toContainText(
         'Sending declines this request'
       );

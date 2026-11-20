@@ -6,11 +6,21 @@ import type {
   InboxReplyMessage,
 } from '@simple-agent-manager/shared';
 import { Bot, MessageSquare, Paperclip } from 'lucide-react';
-import { type ReactNode, type Ref, useMemo } from 'react';
+import {
+  forwardRef,
+  type ReactNode,
+  type Ref,
+  type RefObject,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import { formatFileSize } from '../../lib/file-utils';
 import { RenderedMarkdown } from '../MarkdownRenderer';
 import {
+  conversationEntries,
   type InboxConversationEntry,
   latestResponseId,
   replierName,
@@ -32,32 +42,31 @@ function AgentAvatar() {
 }
 
 /** An agent turn: avatar in the gutter, the content, then the answer controls if it carries them. */
-function AgentTurn({
-  children,
-  controls,
-  meta,
-  testId,
-}: {
-  children: ReactNode;
-  controls?: ReactNode;
-  meta?: string;
-  testId: string;
-}) {
+const AgentTurn = forwardRef<
+  HTMLDivElement,
+  { children: ReactNode; controls?: ReactNode; meta?: string; testId: string }
+>(function AgentTurn({ children, controls, meta, testId }, ref) {
   return (
-    <div className="flex min-w-0 items-start gap-2.5" data-testid={testId}>
+    <div ref={ref} className="flex min-w-0 items-start gap-2.5" data-testid={testId}>
       <AgentAvatar />
       <div className="flex min-w-0 flex-1 flex-col gap-2.5">
         {children}
+        {/* The time belongs to the message, before the buttons it carries. */}
+        {meta && <span className="text-xs text-fg-muted">{meta}</span>}
         {controls && (
-          <div className="min-w-0 pt-0.5" data-testid="inbox-answer-controls">
+          <div
+            role="group"
+            aria-label="Answer the agent"
+            className="min-w-0 pt-0.5"
+            data-testid="inbox-answer-controls"
+          >
             {controls}
           </div>
         )}
-        {meta && <span className="text-[11px] text-fg-muted">{meta}</span>}
       </div>
     </div>
   );
-}
+});
 
 function ReplyAttachments({ reply }: { reply: InboxReplyMessage }) {
   if (reply.attachments.length === 0) return null;
@@ -77,12 +86,12 @@ function ReplyAttachments({ reply }: { reply: InboxReplyMessage }) {
   );
 }
 
-/** The person's reply: an ordinary message in the agent's chat, shown here on the right. */
 /** "12m ago" for a millisecond timestamp. */
 function ago(at: number, now: number): string {
   return `${formatAge(new Date(at).toISOString(), now)} ago`;
 }
 
+/** The person's reply: an ordinary message in the agent's chat, shown here on the right. */
 function ReplyTurn({
   reply,
   viewerId,
@@ -106,8 +115,8 @@ function ReplyTurn({
         </div>
       )}
       <ReplyAttachments reply={reply} />
-      <span className="flex items-center gap-1 text-[11px] text-fg-muted">
-        <MessageSquare size={11} aria-hidden="true" />
+      <span className="flex items-center gap-1 text-xs text-fg-muted">
+        <MessageSquare size={12} aria-hidden="true" />
         {who === 'You' ? '' : `${who} · `}Sent in the agent’s chat · {ago(reply.createdAt, now)}
       </span>
     </div>
@@ -115,17 +124,13 @@ function ReplyTurn({
 }
 
 /** The agent's response on the item (an anchored comment thread), with any follow-ups in it. */
-function ResponseTurn({
-  response,
-  now,
-  controls,
-}: {
-  response: InboxItemCommentThread;
-  now: number;
-  controls?: ReactNode;
-}) {
+const ResponseTurn = forwardRef<
+  HTMLDivElement,
+  { response: InboxItemCommentThread; now: number; controls?: ReactNode }
+>(function ResponseTurn({ response, now, controls }, ref) {
   return (
     <AgentTurn
+      ref={ref}
       testId="inbox-response"
       controls={controls}
       meta={`Responded on this item · ${ago(response.createdAt, now)}`}
@@ -142,6 +147,34 @@ function ResponseTurn({
       ))}
     </AgentTurn>
   );
+});
+
+/**
+ * Opening an item the agent has responded on starts at its latest response, where the answer
+ * buttons are; a response that arrives while the item is open is announced. Both key on the
+ * first page of the conversation (the item read), so reading more pages announces nothing.
+ * Runs once per item: the thread is keyed by ref, and a refetch never moves the reader.
+ */
+function useResponseArrivals(
+  conversation: InboxConversation | null,
+  latestRef: RefObject<HTMLDivElement | null>
+): string {
+  const seen = useRef<string | null | undefined>(undefined);
+  const [announcement, setAnnouncement] = useState('');
+  const latest = conversation ? latestResponseId(conversationEntries([conversation])) : null;
+  useEffect(() => {
+    if (!conversation) return;
+    if (seen.current === undefined) {
+      seen.current = latest;
+      if (latest) latestRef.current?.scrollIntoView?.({ block: 'start' });
+      return;
+    }
+    if (latest && latest !== seen.current) {
+      seen.current = latest;
+      setAnnouncement('The agent responded on this item.');
+    }
+  }, [conversation, latest, latestRef]);
+  return announcement;
 }
 
 /**
@@ -183,8 +216,13 @@ export function InboxConversationThread({
     () => new Map(latestReply ? [[latestReply.userId, latestReply.name]] : []),
     [latestReply]
   );
+  const latestRef = useRef<HTMLDivElement>(null);
+  const announcement = useResponseArrivals(conversation, latestRef);
   return (
     <div className="flex min-w-0 flex-col gap-5" data-testid="inbox-conversation">
+      <p role="status" className="sr-only">
+        {announcement}
+      </p>
       <AgentTurn testId="inbox-ask" controls={lastResponse === null ? controls : undefined}>
         <InboxItemBody
           item={item}
@@ -196,22 +234,21 @@ export function InboxConversationThread({
         />
       </AgentTurn>
       {(thread.hasMore || thread.loadingMore || thread.loadError) && (
-        <div className="flex flex-wrap items-center gap-2 pl-9">
-          {thread.loadingMore ? (
-            <span role="status" className="text-sm text-fg-muted">
-              Loading more of the conversation…
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={thread.loadMore}
-              className="min-h-11 cursor-pointer rounded-md border-0 bg-transparent px-1 text-sm text-accent hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
-            >
-              {thread.loadError
+        <div className="flex flex-wrap items-center gap-2 pl-[38px]">
+          {/* One button throughout, so focus stays on it while the next page loads. */}
+          <button
+            type="button"
+            onClick={thread.loadMore}
+            aria-disabled={thread.loadingMore}
+            aria-busy={thread.loadingMore}
+            className="min-h-11 cursor-pointer rounded-md border-0 bg-transparent px-1 text-sm text-accent hover:underline aria-disabled:cursor-default aria-disabled:text-fg-muted aria-disabled:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+          >
+            {thread.loadingMore
+              ? 'Loading more of the conversation…'
+              : thread.loadError
                 ? 'Could not load more. Try again'
                 : 'Show more of the conversation'}
-            </button>
-          )}
+          </button>
         </div>
       )}
       {thread.entries.map((entry: InboxConversationEntry) =>
@@ -226,6 +263,7 @@ export function InboxConversationThread({
         ) : (
           <ResponseTurn
             key={`response:${entry.id}`}
+            ref={entry.id === lastResponse ? latestRef : undefined}
             response={entry.response}
             now={now}
             controls={entry.id === lastResponse ? controls : undefined}

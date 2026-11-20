@@ -76,7 +76,9 @@ export function latestResponseId(entries: InboxConversationEntry[]): string | nu
  */
 const ATTACHED_FILES_MARKER = '\n\n## Attached Files\n';
 export function replyDisplayText(reply: InboxReplyMessage): string {
-  const cut = reply.attachments.length > 0 ? reply.content.indexOf(ATTACHED_FILES_MARKER) : -1;
+  // The chat appends its section last, so the last marker is the generated one; the person's
+  // own text may contain the same heading.
+  const cut = reply.attachments.length > 0 ? reply.content.lastIndexOf(ATTACHED_FILES_MARKER) : -1;
   return (cut >= 0 ? reply.content.slice(0, cut) : reply.content).trim();
 }
 

@@ -74,7 +74,10 @@ describe('inbox reply "Re:" chip', () => {
     renderRows([userRow('r', inboxReply({ inboxTitle: 'Should the retry cap be per project?' }))]);
     // Liveness: the reply itself is an ordinary bubble.
     expect(screen.getByText('Message r')).toBeInTheDocument();
-    const chip = screen.getByRole('link', { name: /Re: Should the retry cap be per project\?/ });
+    const chip = screen.getByRole('link', {
+      name: 'Open the inbox item: Should the retry cap be per project?',
+    });
+    expect(chip).toHaveTextContent('Re: Should the retry cap be per project?');
     fireEvent.click(chip);
     expect(location).toBe('/projects/p1/inbox?item=ask%3A01Q');
   });

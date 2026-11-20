@@ -19,8 +19,9 @@ export const inboxQueryKeys = {
   counts: (queryScope: string) => [...inboxQueryKeys.all(queryScope), 'count'] as const,
   count: (queryScope: string, projectId: string | null) =>
     [...inboxQueryKeys.counts(queryScope), projectId ?? 'all'] as const,
+  items: (queryScope: string) => [...inboxQueryKeys.all(queryScope), 'item'] as const,
   item: (queryScope: string, projectId: string, ref: string) =>
-    [...inboxQueryKeys.all(queryScope), 'item', projectId, ref] as const,
+    [...inboxQueryKeys.items(queryScope), projectId, ref] as const,
   /** Pages of an item's conversation after the first read, starting at `from`. */
   conversation: (
     queryScope: string,

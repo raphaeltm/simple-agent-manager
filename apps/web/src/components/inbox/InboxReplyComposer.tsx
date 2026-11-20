@@ -68,7 +68,9 @@ export function InboxReplyComposer({
 
   return (
     <div className="flex min-w-0 flex-col gap-2" data-testid="inbox-reply-composer">
-      {declines && (
+      {/* Before sending, not before writing: on a phone the notice would otherwise push the
+          permission's own buttons out of view. The placeholder already asks why. */}
+      {declines && (text.trim() || chatAttachments.length > 0) && (
         <p
           className="m-0 flex min-w-0 items-start gap-1.5 text-[13px] text-warning-fg"
           data-testid="inbox-reply-declines"

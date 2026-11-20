@@ -74,7 +74,7 @@ function InboxReplyChip({
 }) {
   const label = `Re: ${inboxReply.title ?? 'an inbox item'}`;
   const chip =
-    'flex min-h-9 max-w-[85%] min-w-0 items-center gap-1.5 rounded-full border border-[var(--sam-hairline)] px-3 text-xs text-fg-secondary no-underline';
+    'sam-raised flex min-h-11 max-w-[85%] min-w-0 items-center gap-1.5 rounded-full px-3 text-xs text-fg-secondary no-underline sm:min-h-9';
   const content = (
     <>
       <Inbox size={13} aria-hidden="true" className="shrink-0 text-fg-muted" />
@@ -88,6 +88,7 @@ function InboxReplyChip({
           to={projectInboxItemPath(projectId, inboxReply.ref)}
           className={`${chip} hover:text-fg-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
           title={label}
+          aria-label={`Open the inbox item: ${inboxReply.title ?? 'an inbox item'}`}
         >
           {content}
         </Link>

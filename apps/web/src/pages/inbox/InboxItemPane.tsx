@@ -71,7 +71,8 @@ export function InboxItemPane({
     const first = !mounted.current;
     mounted.current = true;
     if (first && !focusOnMount) return;
-    headingRef.current?.focus();
+    // preventScroll: an item the agent responded on opens at its latest response.
+    headingRef.current?.focus({ preventScroll: true });
   }, [item.ref, focusOnMount]);
   const permission = useInboxPermissionDetail(item);
   const index = walk.order.findIndex((candidate) => candidate.ref === item.ref);

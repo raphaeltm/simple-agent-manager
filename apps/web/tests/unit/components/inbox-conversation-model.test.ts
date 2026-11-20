@@ -83,6 +83,16 @@ describe('replyDisplayText', () => {
     expect(replyDisplayText({ ...reply('r', 1, text), attachments: files })).toBe('Look');
     expect(replyDisplayText(reply('r', 1, text))).toBe(text);
   });
+  it('keeps the person’s own "Attached Files" heading: only the appended section goes', () => {
+    const files = [{ uploadId: 'u', filename: 'a.png', size: 1, contentType: 'image/png' }];
+    const own = 'Notes\n\n## Attached Files\n\nmine';
+    expect(
+      replyDisplayText({
+        ...reply('r', 1, `${own}\n\n## Attached Files\n\n- a.png`),
+        attachments: files,
+      })
+    ).toBe(own);
+  });
 });
 
 describe('rowReplyHint', () => {

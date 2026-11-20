@@ -56,6 +56,10 @@ export function useInboxWalk({
   );
   const orderRef = useRef(order);
   orderRef.current = order;
+  // Refs this session has seen in a list. Only those can be "closed elsewhere": an item opened by
+  // a link (a chat's "Re:" chip, a notification) may already be closed and is shown as it is.
+  const seenInList = useRef(new Set<string>());
+  for (const item of list.items) seenInList.current.add(item.ref);
 
   // Where each answered or archived item handed over to. The URL catches up a render later; until
   // then the hidden ref in the URL resolves to its successor, so no "nothing open" frame flashes.
@@ -195,7 +199,7 @@ export function useInboxWalk({
 
   // Answered or closed elsewhere (another tab, the chat card, a teammate): close it. A settled
   // item that still takes replies (a permission declined by a reply, then responded on) is a
-  // conversation, not a closed item.
+  // conversation, not a closed item; nor is a closed item this list never showed (opened by link).
   useEffect(() => {
     if (!selectedRef || view === 'archived') return;
     const closed =
@@ -203,7 +207,8 @@ export function useInboxWalk({
       (detail.data &&
         detail.data.item.ref === selectedRef &&
         detail.data.item.status !== 'open' &&
-        detail.data.item.canReply !== true);
+        detail.data.item.canReply !== true &&
+        seenInList.current.has(selectedRef));
     if (closed) onStale(selectedRef);
   }, [detail.data, detail.error, onStale, selectedRef, view]);
 

@@ -1207,12 +1207,15 @@ describe('InboxPage — the item as a conversation', () => {
     installFetch(server);
     renderInbox();
     expect(await screen.findByRole('button', { name: 'Allow once' })).toBeTruthy();
-    expect(screen.getByTestId('inbox-reply-declines').textContent).toContain(
-      'Sending declines this request'
-    );
+    // Said before sending, once there is something to send (it would otherwise cover the
+    // permission's own buttons on a phone).
+    expect(screen.queryByTestId('inbox-reply-declines')).toBeNull();
     fireEvent.change(screen.getByRole('combobox', { name: 'Reply to the agent' }), {
       target: { value: 'Not on production.' },
     });
+    expect(screen.getByTestId('inbox-reply-declines').textContent).toContain(
+      'Sending declines this request'
+    );
     fireEvent.click(screen.getByRole('button', { name: /^Send/ }));
     expect(
       await screen.findByText(
@@ -1314,5 +1317,144 @@ describe('InboxPage — the item as a conversation', () => {
     expect(hint.textContent).toContain('The agent responded');
     expect(hint.textContent).toContain('Dana Reyes replied');
     expect(hint.textContent).not.toContain('With the agent');
+  });
+
+  it('opens at the latest response, and announces one that arrives while the item is open', async () => {
+    const scrolled: string[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      // Only conversation turns: the filter chips scroll themselves into view too.
+      const turn = this.getAttribute('data-testid');
+      if (turn?.startsWith('inbox-')) scrolled.push(turn);
+    };
+    try {
+      server.items = [item({ ref: 'ask:q', canReply: true })];
+      server.conversations = {
+        'ask:q': { ...empty, responses: [response('c1', 'First response', 20)] },
+      };
+      installFetch(server);
+      const { client } = renderInbox();
+      await screen.findByText('First response');
+      await waitFor(() => expect(scrolled).toEqual(['inbox-response']));
+      // The first read is not news.
+      expect(screen.queryByText('The agent responded on this item.')).toBeNull();
+      // The agent responds again; the item refetches (socket invalidation in the app).
+      server.conversations['ask:q'] = {
+        ...empty,
+        responses: [response('c1', 'First response', 20), response('c2', 'Second response', 1)],
+      };
+      await act(async () => {
+        await client.invalidateQueries();
+      });
+      await screen.findByText('Second response');
+      await waitFor(() =>
+        expect(screen.getByText('The agent responded on this item.')).toBeTruthy()
+      );
+      // A refetch never moves the reader again.
+      expect(scrolled).toEqual(['inbox-response']);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
+  it('sends attachments with the reply, and a files-only reply gets the chat’s default text', async () => {
+    server.items = [item({ ref: 'ask:q', canReply: true }), item({ ref: 'ask:next' })];
+    installFetch(server);
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.endsWith('/tasks/request-upload'))
+        return json(200, { uploadId: 'up-1', uploadUrl: 'https://r2.example.com/put/up-1' });
+      return base(input, init);
+    });
+    // The R2 PUT goes through XMLHttpRequest with progress events.
+    class FakeXhr {
+      upload = { addEventListener() {} };
+      onload: null | (() => void) = null;
+      onerror: null | (() => void) = null;
+      status = 200;
+      open() {}
+      setRequestHeader() {}
+      send() {
+        setTimeout(() => this.onload?.(), 0);
+      }
+      addEventListener(type: string, listener: () => void) {
+        if (type === 'load') this.onload = listener;
+        if (type === 'error') this.onerror = listener;
+      }
+    }
+    vi.stubGlobal('XMLHttpRequest', FakeXhr);
+    const { container } = renderInbox();
+    await screen.findByRole('combobox', { name: 'Reply to the agent' });
+    const input = container.querySelector<HTMLInputElement>(
+      '[data-testid="inbox-reply-composer"] input[type=file]'
+    )!;
+    fireEvent.change(input, {
+      target: { files: [new File(['graph'], 'retry-graph.png', { type: 'image/png' })] },
+    });
+    const send = screen.getByRole('button', { name: /^Send/ });
+    await waitFor(() => expect(send).toBeEnabled());
+    fireEvent.click(send);
+    await screen.findByText('Sent to the agent’s chat. This comes back if it responds.');
+    expect(server.calls.find((c) => c.path.endsWith('/reply'))?.body).toEqual({
+      content: 'Please read the attached files.',
+      attachments: [
+        { uploadId: 'up-1', filename: 'retry-graph.png', size: 5, contentType: 'image/png' },
+      ],
+    });
+  });
+
+  it('shows a closed item opened by link (a chat "Re:" chip) instead of closing it', async () => {
+    server.items = [
+      item({ ref: 'ask:done', status: 'answered', canAct: false, canReply: false }),
+      item({ ref: 'ask:open' }),
+    ];
+    // The resolved item is no longer listed, as on the server.
+    server.override = (method, path) =>
+      method === 'GET' && /\/inbox$/.test(path)
+        ? { status: 200, body: { items: [server.items[1]], nextCursor: null, skipped: 0 } }
+        : undefined;
+    installFetch(server);
+    renderInbox('/projects/p1/inbox?item=ask%3Adone');
+    await within(await screen.findByRole('region', { name: 'Inbox item' })).findByRole('heading', {
+      name: 'Title ask:done',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText('Already handled somewhere else')).toBeNull();
+    expect(location).toContain('item=ask%3Adone');
+    expect(screen.getByText('This item is answered.')).toBeTruthy();
+  });
+
+  it('still closes a listed item that was answered elsewhere', async () => {
+    server.items = [item({ ref: 'ask:a' }), item({ ref: 'ask:b' })];
+    installFetch(server);
+    const { client } = renderInbox(openUrl('ask:a'));
+    await screen.findByRole('button', { name: /Title ask:a/ });
+    // A teammate answers it: the item read now says answered.
+    server.items[0] = { ...server.items[0]!, status: 'answered' };
+    await act(async () => {
+      await client.invalidateQueries();
+    });
+    expect(await screen.findByText('Already handled somewhere else')).toBeTruthy();
+  });
+
+  it('re-reads an open item while the reply is with the agent, so its response shows', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    server.items = [item({ ref: 'ask:q', canReply: true, withAgent: true })];
+    installFetch(server);
+    renderInbox('/inbox?filter=archived&item=ask%3Aq&project=p1');
+    await screen.findByRole('heading', { name: 'Title ask:q' });
+    const reads = () =>
+      server.calls.filter((c) => c.method === 'GET' && c.path.endsWith('/items/ask:q')).length;
+    const before = reads();
+    server.conversations = {
+      'ask:q': { ...empty, responses: [response('c1', 'Here is my answer.', 0)] },
+    };
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(31_000);
+    });
+    await waitFor(() => expect(reads()).toBeGreaterThan(before));
+    expect(await screen.findByText('Here is my answer.')).toBeTruthy();
   });
 });
