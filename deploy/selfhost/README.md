@@ -317,7 +317,7 @@ Kept on purpose:
   `ENCRYPTION_KEY`, the value you may be rotating because it leaked: never use it for anything else.
 - `SAM_INSTALLATION_ID` (not a secret: it labels this install's VMs) and `AGENT_SIGN_IN_TRUST` (trust
   configuration, no key).
-- Reverse-tunnel nodes created before the rotation keep their tunnel credential, an HMAC under the
+- Reverse-tunnel nodes created before the rotation (or during its request drain) keep their tunnel credential, an HMAC under the
   old `ENCRYPTION_KEY`, until they are replaced: whoever holds that key and an old backup can still
   log in to frps as them. The run counts them and says so at retirement; delete those nodes (SAM
   provisions new ones on demand). Re-credentialing live nodes needs a VM-agent change

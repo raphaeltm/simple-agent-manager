@@ -235,20 +235,28 @@ async function storedLifetimeMinutes(ctx: StepContext, explicit: number | null):
 }
 
 /** Nodes whose tunnel credential is still derived from the old key (reported, see control.ts). */
-async function recordLegacyTunnelLeases(ctx: StepContext): Promise<void> {
+async function recordLegacyTunnelLeases(ctx: StepContext, drainMinutes: number): Promise<void> {
   const { step, deps } = ctx;
   const call = await controlCall(ctx);
-  const status = (await call({ op: 'status', before: step.switchedAt })) as {
+  // A lease request that started on the previous deployment can commit its row up to the drain
+  // after the switch, with a credential derived from the old key: count those too. A lease the
+  // new deployment created in that window is counted as well (a needless replacement, never a
+  // missed one).
+  const switched = Date.parse(step.switchedAt ?? '');
+  const before = Number.isFinite(switched)
+    ? new Date(switched + drainMinutes * 60_000).toISOString()
+    : step.switchedAt;
+  const status = (await call({ op: 'status', before })) as {
     legacyTunnelLeases?: unknown;
   };
   const count = typeof status.legacyTunnelLeases === 'number' ? status.legacyTunnelLeases : null;
   step.legacyTunnelLeases = count;
   ctx.save();
   if (count === null) {
-    deps.log('  WARNING: could not count reverse-tunnel nodes created before the switch');
+    deps.log('  WARNING: could not count reverse-tunnel nodes created before the switch (or during its drain)');
   } else if (count > 0) {
     deps.log(
-      `  WARNING: ${count} reverse-tunnel node(s) created before the switch keep a tunnel credential derived from the old ENCRYPTION_KEY: whoever holds that key and an old backup can still log in to frps as them. Replace them (delete each node; SAM provisions new ones on demand).`
+      `  WARNING: ${count} reverse-tunnel node(s) created before the switch or during its drain keep a tunnel credential derived from the old ENCRYPTION_KEY: whoever holds that key and an old backup can still log in to frps as them. Replace them (delete each node; SAM provisions new ones on demand).`
     );
   }
 }
@@ -354,7 +362,7 @@ export async function advanceData(
       throw error;
     }
     if (kind === 'aes' && keyName(ctx) === 'ENCRYPTION_KEY' && !step.reverse) {
-      await recordLegacyTunnelLeases(ctx);
+      await recordLegacyTunnelLeases(ctx, drainMinutes);
     }
     await applyPatch(ctx, { remove: previousNames(ctx, kind) }, finalPhase);
     deps.log(`  ${ctx.key.name}: the old value is retired from the Worker`);

@@ -383,6 +383,15 @@ describe('rotate encryption-key', () => {
       )
     ).toBe('sk-agent');
 
+    // A lease request that started on the old deployment commits during the drain (Codex P1).
+    const switchedAt = Date.parse(readJournal(stateDir)!.steps['encryption-key']!.switchedAt!);
+    const inDrain = new Date(switchedAt + 60_000).toISOString();
+    sqlite
+      .prepare(
+        `INSERT INTO node_reverse_tunnel_leases (id, node_id, user_id, runtime_incarnation_id, port, credential_hash, status, created_at, updated_at)
+         VALUES ('lease-drain', 'n-drain', 'u1', 'inc', 20002, 'h', 'active', ?, ?)`
+      )
+      .run(inDrain, inDrain);
     // Too early: nothing changes.
     await runRotate(input({ resume: true }), deps());
     expect((await head()).ENCRYPTION_KEY_PREVIOUS).toBe(old);
@@ -405,7 +414,7 @@ describe('rotate encryption-key', () => {
     expect(credential('c-broken').c).toBe(btoa('z'.repeat(32)));
     expect(logs.join('\n')).toContain('credentials/c-broken.encrypted_token');
     // The node whose tunnel credential is still derived from the old key is named, not hidden.
-    expect(logs.join('\n')).toContain('1 reverse-tunnel node(s) created before the switch');
+    expect(logs.join('\n')).toContain('2 reverse-tunnel node(s) created before the switch or during its drain');
     // The old key is still in the sealed snapshot until the operator deletes it.
     const journalDir = join(stateDir, 'key-agent', 'rotation');
     const id = readFileSync(join(journalDir, readdir(journalDir)[0]!, 'journal.json'), 'utf8');
