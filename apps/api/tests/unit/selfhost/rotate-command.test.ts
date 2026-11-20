@@ -655,6 +655,19 @@ describe('rotate jwt-keys', () => {
 });
 
 describe('rotate gateway-secret', () => {
+  it('does not count a 5xx from the authenticated plugin path as acceptance (Codex P2)', async () => {
+    const old = deployed.REVERSE_TUNNEL_GATEWAY_SECRET!;
+    const failing = deps();
+    // The Worker authenticates the new secret but its plugin path then fails.
+    failing.probeGateway = async (secret) =>
+      isAcceptedGatewaySecret(workerEnv(), secret) ? (secret === old ? 200 : 500) : 401;
+    await expect(runRotate(input({ names: ['gateway-secret'] }), failing)).rejects.toThrow(
+      /rolled back/
+    );
+    expect(readJournal(stateDir)?.steps['gateway-secret']?.error).toMatch(/HTTP 500/);
+    expect(deployed.REVERSE_TUNNEL_GATEWAY_SECRET).toBe(old);
+  });
+
   it('restarts the consumers once with the new value while the Worker accepts both, then accepts only the new one', async () => {
     const old = deployed.REVERSE_TUNNEL_GATEWAY_SECRET!;
     await runRotate(input({ names: ['gateway-secret'] }), deps());

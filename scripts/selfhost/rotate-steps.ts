@@ -109,7 +109,14 @@ function writeGatewayEnv(ctx: StepContext, secret: string): boolean {
 
 async function expectGateway(ctx: StepContext, secret: string, accepted: boolean, what: string) {
   const status = await ctx.deps.probeGateway(secret);
-  if ((status !== 401) !== accepted) {
+  // Only the plugin's documented answers prove anything: 200 (authenticated verdict) or 401
+  // (refused before authentication). A 5xx after authentication is not acceptance.
+  if (status !== 200 && status !== 401) {
+    throw new ApplyFailedError(
+      `the gateway probe for the ${what} secret answered HTTP ${status}, expected 200 or 401`
+    );
+  }
+  if ((status === 200) !== accepted) {
     throw new ApplyFailedError(
       `the Worker ${accepted ? 'refused' : 'still accepts'} the ${what} gateway secret (HTTP ${status})`
     );
