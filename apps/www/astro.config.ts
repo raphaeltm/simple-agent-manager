@@ -5,6 +5,13 @@ import { defineConfig } from 'astro/config';
 import { expressiveCode } from './src/lib/expressive-code';
 
 export default defineConfig({
+  // Astro 7 defaults to 'jsx', which drops the newline between an inline element and the
+  // next word in templates ("<code>x</code>⏎but" renders "xbut"). Keep HTML-aware compression.
+  compressHTML: true,
+  // Astro 7 defaults to 'attribute' ([data-astro-cid-x], specificity 0,1,0). Site CSS was written
+  // for the zero-specificity :where(.astro-x) selectors, so e.g. `.post-body th` would override
+  // `placement-explorer .compare th` and leave dark-on-dark table headers.
+  scopedStyleStrategy: 'where',
   site: process.env.SITE_URL || 'https://www.simple-agent-manager.org',
   server: {
     allowedHosts: true,

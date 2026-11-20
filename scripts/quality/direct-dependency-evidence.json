@@ -92,6 +92,11 @@
       "registryUrl": "https://www.npmjs.com/package/@types/node",
       "necessity": "Types for node:crypto, which project-data's archive hashing uses under the Worker's nodejs_compat; same catalog version as the root."
     },
+    "@types/pako": {
+      "registryUrl": "https://www.npmjs.com/package/@types/pako",
+      "homepageUrl": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/pako",
+      "necessity": "Type declarations for the pako incremental compression API used by the self-host git engine and its resource-boundary tests."
+    },
     "@typescript-eslint/eslint-plugin": {
       "registryUrl": "https://www.npmjs.com/package/@typescript-eslint/eslint-plugin",
       "necessity": "Hosts supported TypeScript lint rules."
@@ -148,9 +153,17 @@
       "registryUrl": "https://www.npmjs.com/package/fast-check",
       "necessity": "Property-based generator for the scheduler lifecycle simulation in scheduler-core; already the API worker's test dependency at the same pinned version."
     },
+    "gaxios": {
+      "registryUrl": "https://www.npmjs.com/package/gaxios",
+      "necessity": "Bounds metadata and STS transport timeouts, redirects and response sizes for the isolated self-host CAB broker."
+    },
     "globals": {
       "registryUrl": "https://www.npmjs.com/package/globals",
       "necessity": "Defines explicit flat-config runtime globals."
+    },
+    "google-auth-library": {
+      "registryUrl": "https://www.npmjs.com/package/google-auth-library",
+      "necessity": "Official Google STS token exchange applies a fixed fleet-bucket Credential Access Boundary; the source VM token never leaves the broker."
     },
     "idb-keyval": {
       "registryUrl": "https://www.npmjs.com/package/idb-keyval",
@@ -167,6 +180,11 @@
     "oxlint": {
       "registryUrl": "https://www.npmjs.com/package/oxlint",
       "necessity": "Measures native lint findings in shadow mode."
+    },
+    "pako": {
+      "registryUrl": "https://www.npmjs.com/package/pako",
+      "homepageUrl": "https://github.com/nodeca/pako",
+      "necessity": "Incremental zlib Inflate callbacks let the self-host-only git engine enforce output budgets before retaining decompressed objects; native one-shot decompression cannot apply those bounds. Excluded from the Cloudflare import graph."
     },
     "postal-mime": {
       "registryUrl": "https://www.npmjs.com/package/postal-mime",

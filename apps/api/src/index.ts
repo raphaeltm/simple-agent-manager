@@ -191,7 +191,7 @@ import { agentEmailConfig } from './services/agent-email/setup-state';
 import { isAgentSignInEnabled } from './services/agent-sign-in/config';
 import { isInstantRuntimeAvailable } from './services/vm-agent-container';
 
-const app = new Hono<{ Bindings: Env }>();
+export const app = new Hono<{ Bindings: Env }>();
 
 // Global error handler — catches errors from all routes including subrouters.
 // Must use app.onError() instead of middleware try/catch because Hono's

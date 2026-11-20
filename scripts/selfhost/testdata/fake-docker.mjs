@@ -1,0 +1,45 @@
+#!/usr/bin/env node
+// Fake `docker compose ... stop|start celld` for backup-entrypoint.test.ts. Stopping celld applies
+// $FAKE_STATE/on-stop.json once: the writes celld made between the live pass and its shutdown.
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, join } from 'node:path';
+
+const state = process.env.FAKE_STATE;
+const args = process.argv.slice(2);
+appendFileSync(join(state, 'calls.log'), `docker ${args.join(' ')}\n`);
+if (args[0] === 'ps') process.exit(0);
+if (args[0] !== 'compose') process.exit(2);
+// Record only this non-secret path, so the entrypoint test observes compose's selected state.
+appendFileSync(
+  join(state, 'compose-state-dirs.log'),
+  `${process.env.SAM_SELFHOST_STATE_DIR ?? ''}\n`
+);
+const selectedProject = args[args.indexOf('--project-name') + 1];
+const matches =
+  !process.env.FAKE_COMPOSE_PROJECT || process.env.FAKE_COMPOSE_PROJECT === selectedProject;
+if (args.includes('ps')) {
+  if (matches && readFileSync(join(state, 'celld'), 'utf8').trim() === 'running')
+    process.stdout.write('c'.repeat(64) + '\n');
+  process.exit(0);
+}
+const [action, service] = args.slice(-2);
+if (!matches) process.exit(action === 'stop' ? 0 : 1);
+if (service !== 'celld') process.exit(2);
+writeFileSync(join(state, 'celld'), action === 'stop' ? 'stopped' : 'running');
+const onStop = join(state, 'on-stop.json');
+if (action === 'stop' && existsSync(onStop)) {
+  const { bucketDir, remove, write } = JSON.parse(readFileSync(onStop, 'utf8'));
+  for (const f of remove) rmSync(join(bucketDir, f));
+  for (const [f, body] of Object.entries(write)) {
+    mkdirSync(dirname(join(bucketDir, f)), { recursive: true });
+    writeFileSync(join(bucketDir, f), body);
+  }
+  rmSync(onStop);
+}

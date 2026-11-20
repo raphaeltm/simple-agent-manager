@@ -52,8 +52,11 @@ From the repository root on the VM:
    only that address can claim the new install by signing in with an emailed code.
 4. `pnpm selfhost:deploy --init`: generates the platform keys (`.state/platform-keys.json`; back
    it up), `.state/gateway.env` (the reverse-tunnel gateway secret and lease port range) and the
-   mail-collector files. Run it again after changing the port range or turning a profile on.
-5. `(cd deploy/selfhost && docker compose build)`: builds the two local images (`caddy`, and
+   mail-collector files. Set `COMPOSE_PROJECT_NAME` in `.env` to the installation-specific name
+   this command prints, before running Compose. Keep that name with this install; another install
+   needs its own state directory and project name. Run init again after changing the port range
+   or turning a profile on (`scripts/selfhost/install-record.ts:expectedComposeProjectFor`).
+5. `(cd deploy/selfhost && docker compose build)`: builds the local images (`egress-fence`, `gce-metadata-proxy`, `caddy`, and
    `sam-mx` when `mail-in` is on). See [Image builds](#image-builds).
 6. `(cd deploy/selfhost && docker compose up -d)`. Run compose from `deploy/selfhost/`, as every
    compose command in this README assumes: there it reads `.env`, including any `COMPOSE_FILE`
@@ -64,7 +67,10 @@ From the repository root on the VM:
    `celld deploy`, then waits until the new version answers.
 8. Sign in at `https://app.SAM_DOMAIN`. To add someone, or a first administrator without
    `BOOTSTRAP_OWNER_EMAIL`: `pnpm selfhost:create-account --email someone@example.com [--superadmin]`.
-9. GCP nodes: `pnpm selfhost:gcp-bootstrap -- --project <id> --api-url https://api.SAM_DOMAIN`.
+9. GCP nodes: `pnpm selfhost:gcp-bootstrap -- --project <id> --api-url https://api.SAM_DOMAIN
+--state-dir /absolute/path/to/install/.state --installation-id <SAM_INSTALLATION_ID>`.
+   Use the generated installation's 32-character hexadecimal id; it is a public identifier.
+   Keep the state directory with this install: the bootstrap writes creation receipts there.
    It runs after step 7 because it checks the token issuer the running install advertises. It
    creates a workload identity pool and provider trusting only this install, and a node service
    account, then prints the credential JSON to paste in **Admin -> Credentials** (Cloud Provider,
@@ -89,31 +95,373 @@ From the repository root on the VM:
 
 `pnpm selfhost:deploy --dry-run` prints the Worker configuration it would deploy, secrets redacted.
 
-## Upgrade
+## Backup and restore
+
+The fleet bucket contains Worker secrets as well as application data. The backup command encrypts
+**the entire backup**, including the bucket, `.state/`, `.env` and its manifest, with AES-256-GCM.
+Restored files retain owner execution when needed, with mode 0700 for tools and 0600 for other
+files; group and world access are never restored. The one exception is `.state/egress-fence.nft`:
+the fence container's root reads it without `DAC_OVERRIDE`, so every restore and rollback puts it
+back at deploy's 0644 (`fence-state.ts:repairFenceRulesMode`). It holds addresses and ports, never
+a secret. Rebuildable `go-cache` data is excluded.
+It first requires exactly one running celld in the selected Compose project, then briefly stops
+it for a consistent second bucket copy and restarts it even if that copy
+fails (`scripts/selfhost/backup-lib.ts:runBackup`, `runPlainBackup`). Temporary plaintext lives
+under the private `.tmp/selfhost-backups/` directory and is removed on success or failure.
+Backup, restore, upgrade and teardown are operator-box commands. They refuse execution whenever
+`CI`, `GITHUB_ACTIONS` or any `RUNNER_*` variable is present, even with an empty or false value.
+
+Create a separate raw 32-byte key once. These commands write the key directly to a private file;
+they do not print it, and refuse to overwrite an existing key:
 
 ```sh
-pnpm selfhost:upgrade --to <git ref>
+install -d -m 700 "$HOME/.config/sam"
+(umask 077; set -C; openssl rand 32 > "$HOME/.config/sam/backup.key")
+pnpm selfhost:backup --encryption-key-file "$HOME/.config/sam/backup.key"
 ```
 
-It refuses a checkout with uncommitted changes, checks the ref out, runs `deploy --init`, rebuilds
-only the images whose build inputs changed (explicitly, with `docker compose build <service>`),
-restarts the stack (`up -d`, never `--build`) only when compose inputs changed, deploys, checks
-health and prints how to roll back. For a box other than the default, pass `--box-env`,
-`--state-dir` and `--secrets`; every deploy and compose command it runs or prints uses that box's
-`.env` and every compose file its `COMPOSE_FILE` selects. Docker compose reads
-`SAM_SELFHOST_STATE_DIR` relative to `deploy/selfhost/`, so when `--state-dir` (or a `.env` outside
-`deploy/selfhost/`) puts the state elsewhere, the upgrade passes the absolute path to every compose
-command it runs or prints. Set it in the box `.env` as an absolute path to run `docker compose`
-by hand.
+Use `--to /absolute/path/to/new-backup` for a specific destination; the default is
+`deploy/selfhost/backups/<timestamp>`. Existing parent directory permissions are preserved; only
+new dedicated directories are created private, and symlinked parents are refused. Keep the key outside installation state and all backup
+folders. Alternatively set `SAM_BACKUP_KEY_FILE` in the private `.env` to the key's **absolute**
+path. The file must be owned by the operator, mode 0600, exactly 32 raw bytes, and have no symlinks
+or hard links (`scripts/selfhost/backup-encryption.ts:readBackupKey`). Store a separate offline
+copy of this key with your recovery records. Losing it makes the backups unrecoverable; keeping
+it alongside a backup defeats that backup's encryption. Never print keys, Worker secrets or raw
+bucket deployment manifests when diagnosing a failure.
 
-If an upgrade fails, `.state/upgrade-pending.json` records the ref it started from and the printed
-output gives both ways out: run the same `selfhost:upgrade --to <ref>` again to retry (it reruns
-every step, from the recorded ref, and its rollback still names that ref), or run the printed
-rollback commands. The file is removed once an upgrade passes its health check.
+Restore into a fresh disposable or replacement installation using the same SAM checkout/ref as
+the original backup. Prepare an existing mode-0600 target `.env` with its own domain, object-store
+settings and absolute state path. Its state directory
+must be empty or absent, and its bucket/prefix must contain no objects. For an `s3://` store,
+set `R2_S3_REGION` as well as `S3_ENDPOINT` and its credentials.
+For the bundled store, first authenticate the backup and print the final target Compose project:
 
-**It takes no backup.** Copy the fleet bucket and `deploy/selfhost/.state` yourself first. An
-upgrade that carries a D1 migration cannot be rolled back by redeploying the old ref; only your
-own pre-upgrade copy restores it.
+```sh
+pnpm --silent selfhost:restore --from /absolute/path/to/backup --print-project \
+  --box-env /absolute/path/to/target.env --state-dir /absolute/path/to/fresh-state \
+  --encryption-key-file "$HOME/.config/sam/backup.key"
+```
+
+This prints only the public project name; it writes a private sibling identity reservation but makes no target state, runtime or store changes. Put that
+name in the target `.env` as `COMPOSE_PROJECT_NAME`, keep `COMPOSE_PROFILES=local-store` (plus any
+other desired profiles), and start only the bundled store and its initializer:
+
+```sh
+docker compose --env-file /absolute/path/to/target.env \
+  -f deploy/selfhost/docker-compose.yml --profile local-store up -d objectstore objectstore-init
+```
+
+Wait for the store to be healthy and the initializer to exit successfully, then run the restore
+below. Its store-only exception verifies the final canonical project, selected canonical Compose
+file, pinned image, ownership labels and exact data/script mounts. It refuses application or
+foreign containers, overlays and a store started under the pre-key project. The same project
+keeps the restored store volume when you initialize and start the application afterward. The
+store healthcheck uses IPv4 loopback and `OBJECTSTORE_PORT`, including a custom port.
+
+```sh
+pnpm selfhost:restore --from /absolute/path/to/backup \
+  --box-env /absolute/path/to/target.env --state-dir /absolute/path/to/fresh-state \
+  --encryption-key-file "$HOME/.config/sam/backup.key"
+```
+
+Restore authenticates the complete encrypted inventory and every file before touching the target.
+If a copy fails, retain `<state-dir>.restore-progress.json` and retry the exact same command and
+backup. This private journal binds the target and authenticated snapshot; its started phase records that
+the target passed the empty-state and empty-bucket checks. A retry
+refuses changed, additional, linked or foreign-owned partial files before copying again; do not
+start the target or remove its journal to bypass a refusal. State files interrupted mid-copy may
+be retried only when their bytes are an exact prefix of the authenticated source; bucket objects
+still require complete byte equality. Before removing the progress journal, restore durably links
+a private `<state-dir>.restore-complete.json` receipt. Keep that completion receipt until a fresh
+deploy and health/data checks succeed: the same restore can safely retry after a completion error,
+even when progress-journal removal succeeded but its directory sync failed. Both receipts must
+match if present. A completed retry still refuses changed data or an application runtime. After
+verification, remove these exact operator-owned metadata files manually; teardown retains them.
+It permits only the verified bundled-store bootstrap described above, copies state and bucket data, keeps the
+target `.env`, strips the source installation's creation receipts, and does not start celld.
+A fresh restore reserves a random `SAM_INSTALLATION_ID` in private target-local metadata,
+distinct even for independent hosts using identical paths and bucket names and stable for retries,
+while preserving all cryptographic keys needed to read the restored data. The generated local
+config receives that new ID. Restore omits the source bucket's active `deploy/current.json`
+pointer but retains immutable deployment objects and application data, so starting celld cannot
+execute source Worker code or its Durable Object alarms. Run a fresh deploy before serving the
+restored application; that deploy creates the target's active pointer and Worker identity. Do not set an installation
+ID in the target environment; restore refuses explicit overrides. Source VMs and their ownership
+labels are retained: the replacement must provision its own nodes, and its teardown cannot adopt or
+delete the source fleet. This also applies to disaster recovery; retire surviving source resources
+separately using their original installation records. For every store type, set the target `.env`'s
+`COMPOSE_PROJECT_NAME` to the canonical name restore prints **before** running `selfhost:deploy --init`.
+You can also reserve it beforehand with the authenticated `--print-project` command. That command
+creates only the private sibling identity reservation; it does not write target state or bucket data
+or start a runtime. A reservation alone never permits restoring into occupied state or a bucket.
+Keep the reservation on the target host and reuse the exact command and backup. Older v1 journals
+are refused because they cannot prove an independent clone identity; preserve their target and
+receipts for inspection instead of deleting metadata to bypass the check.
+The name incorporates the restored installation ID, domain and state directory. On the original
+SAM ref, run init with that setting to retain the keys and establish target ownership receipts, then start
+that target's Compose stack, deploy and verify its data (`scripts/selfhost/backup-lib.ts:runRestore`,
+`scripts/selfhost/install-record.ts:recordInstall`).
+This command refuses an occupied application target; it does not overwrite an existing fleet.
+
+A killed backup process cannot run its restart handler. If interrupted while celld was stopped,
+inspect the exact installation's containers and restart only that installation's celld explicitly,
+then use a fresh backup destination. Normal backup refuses a missing or stopped writer; it never
+guesses which other installation to start. A partial ciphertext directory is not reusable, and a
+fully encrypted backup whose receipt write failed is retained for operator inspection and restore;
+it is not automatically adopted for destructive cleanup. Restore writes and syncs the complete
+private journal before atomically publishing it, so an interrupted initial write can be retried
+without adopting partial metadata. A published journal is revalidated and synced before any
+target write. Invalid or legacy metadata still causes refusal: preserve the target and receipts
+for inspection instead of bypassing ownership.
+
+## Upgrade
+
+After target deployment or restoration of the previous version, upgrade durably records that
+health verification is in progress. If
+verification is interrupted, a retry refuses automatic snapshot recovery: preserve live data and
+inspect the stack before choosing an explicit rollback. A returned health failure still triggers
+automatic rollback. Once health succeeds, both a successful upgrade and recovery of the previous version durably
+commit completion before removing their recovery marker and syncing the state directory. A stale completed marker permits cleanup only,
+never restoration of the pre-upgrade snapshot. An invalid phase or different checkout refuses.
+If deployment is interrupted before health verification begins, retry still recovers the original
+snapshot. **Writes accepted during that unverified upgrade window are discarded on rollback.**
+Holding traffic until verification is tracked separately; schedule upgrades accordingly.
+
+```sh
+pnpm selfhost:upgrade --to <git-ref> --encryption-key-file "$HOME/.config/sam/backup.key"
+```
+
+Every upgrade requires a fresh encrypted pre-upgrade backup; `--skip-backup` is unsupported.
+Use `--backup-to /absolute/path/to/new-backup` to choose its location, or let the command create
+`backups/pre-upgrade-<timestamp>` next to the state directory. Keep that snapshot and its key
+until you have verified the upgraded installation.
+
+Before deploying, the upgrade checks the active deployment's Durable Object classes against the
+installed migration history and the target checkout. Unknown, removed, duplicated or reordered
+migration tags, and changes to existing class declarations, are refused. Self-host-only tags,
+including `selfhost-hosted-git-v1` when present in that checkout, participate in the same check
+(`scripts/selfhost/upgrade-migrations.ts:installedMigrations`, `assertMigrationProgression`).
+
+The command requires a clean tracked checkout and an installation-specific Compose project with
+creation receipts (an older `sam-selfhost` install first needs `--adopt-legacy`, below). It checks out the target, runs `deploy --init`, rebuilds changed local images,
+restarts Compose when its inputs changed, deploys and checks health. Failure automatically restores
+the encrypted snapshot and previous code/dependencies before starting the previous version.
+The recovery checks the original installation, bucket, state and Compose ownership before removing
+its disposable celld cache. The recovery journal remains until the old service is healthy, and
+current resource creation/removal receipts survive rollback (`scripts/selfhost/upgrade-lib.ts:runUpgrade`, `recoverUpgrade`;
+`scripts/selfhost/backup-recovery.ts:runRollback`). Redeploying an old Worker alone cannot undo a
+migration.
+
+An unfinished operation retains `.state/upgrade-pending.json` with the previous ref and encrypted
+snapshot path and resolved target SHA. Keep celld stopped if automatic recovery fails; retain the
+snapshot and key. A pre-verification pending record permits retrying the same resolved target
+to recover the original install. An interrupted verification or uncertain completion instead
+requires inspection as described above; a valid completed marker permits cleanup only. A changed
+`--to`, a moved branch/tag, or an older journal without a target requires the explicit rollback
+command before choosing another target.
+Do not delete the pending record to bypass a failed recovery.
+
+**One-time case when upgrading to the rollback fence fix.** A rollback runs the tool of the version
+you upgrade from. On a version before this fix, a failed upgrade's automatic rollback restores
+`.state/egress-fence.nft` at 0600. The egress-fence container then crash-loops with
+`Could not open file "/etc/sam/egress-fence.nft": Permission denied`, celld stays stopped and the
+upgrade reports that automatic rollback did not complete. Restore the file's mode and rerun the
+same command (the documented retry of the same target):
+
+```sh
+chmod 644 deploy/selfhost/.state/egress-fence.nft   # or "$SAM_SELFHOST_STATE_DIR/egress-fence.nft"
+pnpm selfhost:upgrade --to <same-target> --encryption-key-file "$HOME/.config/sam/backup.key"
+```
+
+The retry restores the snapshot again, so repeat the `chmod` if the fence restarts with the same
+error before celld comes up. Upgrades that start from a fixed version restore the mode
+themselves (`fence-state.ts:repairFenceRulesMode`).
+Rollback also keeps a private sibling `.<state-directory-name>.rollback-state.json` receipt
+while replacing local state. Retry reconciles an interrupted directory swap before reading
+installation metadata, and refuses changed directory identities. Keep that receipt and its
+recorded `.rollback-state-*` directory together until recovery finishes; do not remove them
+manually.
+
+After a successful upgrade, its printed rollback command restores the populated installation
+in place. Run it from the upgraded checkout, keeping the original full commit SHA, snapshot,
+key and any printed `--rebuild` arguments:
+
+```sh
+pnpm selfhost:upgrade --to <original-full-commit-sha> \
+  --rollback-from /absolute/path/to/pre-upgrade-backup \
+  --encryption-key-file /secure/path/to/backup.key
+```
+
+This command verifies that the authenticated snapshot belongs to that revision and installation,
+restores its data before starting the old code, and checks health. Keep celld stopped and retry
+the same rollback command if recovery fails. Failure restores the operator checkout and dependencies
+without starting the application. If the process was killed or that checkout recovery fails,
+restore the newer operator checkout and run `pnpm install --frozen-lockfile` before retrying.
+`selfhost:restore` requires an empty replacement
+target; use the printed upgrade rollback command for an existing installation.
+
+For a nondefault install, use `--box-env`, `--state-dir` and, if needed, `--secrets`. Every deploy
+and Compose operation uses that installation's environment and overlays. Set
+`SAM_SELFHOST_STATE_DIR` to an absolute path when running Compose manually.
+
+Older installs using the shared `sam-selfhost` project may set `COMPOSE_PROJECT_NAME=sam-selfhost`
+explicitly for backup. Upgrades and destructive teardown refuse that shared identity. Move such an
+install to its installation-specific project with legacy adoption (below) first.
+
+### Upgrade an install created before the shared project was retired
+
+Installs created before `pnpm selfhost:upgrade` gained snapshots run under the fixed Compose
+project `sam-selfhost` and have no compose creation receipt, so a plain upgrade refuses them. Their
+own checkout also still holds the old upgrade tool. Check out the new SAM ref, then let its tool
+adopt the install and upgrade it in one command. `--from` is the full 40-character commit the
+stack runs now, and `--to` must resolve to the checked-out ref:
+
+```sh
+git fetch origin && git checkout --detach <target-ref> && pnpm install --frozen-lockfile
+pnpm selfhost:upgrade --adopt-legacy --from <deployed-full-sha> --to <target-ref> \
+  --encryption-key-file "$HOME/.config/sam/backup.key"
+```
+
+`--adoption-backup-to` chooses the adoption snapshot's path (default
+`backups/pre-adoption-<timestamp>` next to the state directory). `--backup-to` applies to the
+upgrade that follows. `--from` and `--adoption-backup-to` require `--adopt-legacy`, which cannot
+be combined with `--rollback-from` or `--rebuild`. The checkout must be clean for tracked files.
+The shell must not set `COMPOSE_PROJECT_NAME`, and the box `.env` must leave it unset or set it to
+`sam-selfhost`. An install that already has its compose creation receipt is refused: use the plain
+upgrade.
+
+The running stack is not touched by the checkout. Adoption changes no SAM code and deploys
+nothing (`scripts/selfhost/legacy-adoption.ts:runLegacyAdoption`):
+
+1. It checks out `--from` again, so the compose files and bind mounts match the running stack.
+2. It proves ownership (`legacy-adoption-inventory.ts:proveLegacyOwnership`):
+   - every container of the `sam-selfhost` project carries this checkout's compose directory,
+     compose files and `.env`; a missing label refuses;
+   - bind mounts stay inside this checkout or its state directory;
+   - each project volume is used only by those containers;
+   - each container's config hash equals `--from`'s compose configuration;
+   - there is exactly one running celld;
+   - the canonical project is empty.
+
+   Another checkout on the same host using `sam-selfhost`, or a wrong `--from`, refuses before
+   any change.
+
+3. It takes the encrypted backup from the live legacy stack.
+4. It stops the legacy stack, journaling the intent first. It copies each volume into
+   `<canonical>_<volume>` with a digest-pinned Alpine image, the egress fence's own base, which it
+   pulls before changing anything if the box does not have it. The helper runs with no network,
+   all capabilities dropped except the file-ownership ones a faithful copy needs, and a label
+   carrying a random adoption id. Each copy is verified by a digest of every path's type, owner and
+   mode and every file's content.
+5. It writes `COMPOSE_PROJECT_NAME=<canonical>` into `.env`, keeping every other byte, then starts
+   the same version under that project and checks health. After health it writes the installation
+   and compose-project creation receipts and removes the stopped legacy containers.
+6. It runs the normal upgrade from `--from` to the target, with its own fresh snapshot, automatic
+   rollback and printed rollback command.
+
+Each step is journaled (phases `proving`, `backed-up`, `stopped`, `switched`, `adopted`) in
+`legacy-adoption.json` in the state directory, beside `legacy-adoption.env`, a private copy of the
+original `.env`. Both are removed when the run succeeds or rolls back completely. If the process is
+killed, check out the target ref again and rerun the identical command:
+
+- it resumes at the recorded step;
+- it removes any helper container the killed run left (only those with its adoption id);
+- it recopies an unfinished volume from scratch;
+- a backup interrupted mid-way is kept and a new one is taken, after restarting the legacy celld
+  it may have left stopped;
+- a stop that completed before its phase was journaled resumes from the stopped stack;
+- a rollback that was interrupted is finished as a rollback, never resumed forward;
+- an upgrade that already completed is not run again.
+
+The upgrade marks the adoption journal while its own completed marker is still durable, so a
+re-checkout of the target cannot make a finished upgrade look unstarted.
+
+A refusal or failure before the legacy stack stopped returns the checkout to the target and
+discards the journal. A later failure, or an unhealthy new project, rolls back to `sam-selfhost`:
+
+- it journals the rollback first, so a killed rollback is finished on the next run;
+- if the new stack ran, it first copies each of its volumes back over the legacy one,
+  digest-verified: the celld cache, Caddy's certificates and, with `local-store`, the bundled
+  bucket itself, so nothing the new stack wrote is lost;
+- it removes the canonical containers and the volumes it created;
+- it restores `.env` byte for byte and restarts the legacy stack.
+
+Before the new stack starts, the legacy volumes are only read. Adoption never restores the bucket
+from its snapshot: the same deployed version kept writing it. After such a rollback the checkout stays at `--from`, which matches the
+running stack. If the rollback itself fails, the journal, the `.env` copy and the legacy volumes
+are kept. Inspect the stack (`docker compose -p sam-selfhost ps`) before rerunning, and do not
+delete those files to get past the error.
+
+If the upgrade step fails, its automatic rollback restores `--from` under the adopted project; the
+adoption stands and its journal remains. Check out the target and rerun the same command to retry
+the upgrade. After a successful run the legacy volumes remain until you remove them with the
+`docker volume rm` command it prints.
+
+## Teardown
+
+Inventory is read-only by default. Review a dry run before confirming either removal mode:
+
+```sh
+pnpm selfhost:teardown
+pnpm selfhost:teardown --keep-data --dry-run
+pnpm selfhost:teardown --keep-data --confirm <SAM_DOMAIN>
+pnpm selfhost:teardown --remove-everything --dry-run
+pnpm selfhost:teardown --remove-everything --confirm <SAM_DOMAIN>
+```
+
+`--keep-data` stops/removes this installation's Compose containers and owned node VMs, while
+keeping its volumes, bucket, configuration, backups, keys, workload identity pool/provider, service
+account and IAM grants. The retained data keeps the identity needed to use it again.
+
+`--remove-everything` also removes proven-owned local volumes/state and cloud resources recorded
+as created for this installation. It preserves backups unless `--delete-backups` is explicit,
+and preserves local platform key material unless `--destroy-key` is explicit. Images and custom networks remain manual cleanup steps because they may be shared. Docker cleanup
+checks live container ids, configuration paths and volume creation identities immediately before
+removing those exact resources; it does not run a broad Compose project sweep. It does not adopt
+resources because their names look familiar. Foreign, ambiguous, replaced and unrecorded resources
+are preserved; a refusal/failure returns a nonzero exit status. The summary lists retained data
+and manual cleanup steps (`scripts/selfhost/teardown.ts`, `teardown-model.ts:execute`).
+
+Operator-managed `gs://` and external `s3://` stores and their contents are retained for manual
+cleanup: a configured bucket URL or prefix is not creation proof. Verify exclusive ownership
+before deleting anything there. The bundled trial store is removed only with its proven-owned
+installation-specific Compose volume. DNS records, the box VM, its network and other manually
+created resources remain operator cleanup steps. Never run destructive verification against a
+shared install; use disposable resources you created for the test.
+
+For new GCP node firewall rules, the bootstrap optionally accepts `--create-firewalls
+--agent-source-ranges <comma-separated-CIDRs>` together with `--installation-id` and `--state-dir`.
+It creates only missing rules and records their immutable ids and installation/environment scope.
+Choose agent source ranges appropriate for your ingress path. Existing shared rules are not
+adopted. Teardown deletes a recorded rule only after rechecking its id, owner and absence of
+other VM users; it preserves shared or legacy rules (`deploy/selfhost/gcp-bootstrap.sh`,
+`scripts/selfhost/teardown-gcp.ts:firewallItems`). Keep `.state/created-resources.json` after a
+partial teardown: it is the receipt used to resume cleanup.
+
+Keep that receipt after interrupted bootstrap too: project and service-account IAM grants have
+an exact, durable intent before mutation, so retrying can preserve their creation proof
+(`deploy/selfhost/created-resources.mjs:grantIntent`, `gcp-bootstrap.sh:record_resource`).
+Pool, provider, service-account and optional firewall creation still have a post-create receipt
+window: interruption before the receipt is saved can leave an unrecorded resource that retry
+preserves as reused. Teardown will not adopt it. Inspect these public inventories in the node
+project before manual cleanup:
+
+```sh
+gcloud iam workload-identity-pools list --project <node-project> --location global --show-deleted
+gcloud iam workload-identity-pools providers list --project <node-project> --location global --workload-identity-pool <pool-id> --show-deleted
+gcloud iam service-accounts list --project <node-project>
+gcloud compute firewall-rules list --project <node-project>
+```
+
+Cross-check immutable IDs, issuer/description, creation time and the creator in Cloud Audit Logs
+against your setup; a familiar name is insufficient. Inspect pool providers, account grants/keys
+and firewall users before deleting anything. Remove only resources you can prove this install
+created and exclusively uses; retain ambiguous/shared resources for inspection. A leftover
+bootstrap firewall retains its original target tags, source ranges and TCP ports: agent ingress
+8080/8443 from the selected ranges, or public app ingress 80/443. It does not widen them, but it
+continues admitting matching traffic until you remove the proven-owned rule. These limitations
+follow the create/describe/record sequence in `deploy/selfhost/gcp-bootstrap.sh`.
 
 ## Image builds
 
@@ -132,9 +480,8 @@ so a box whose certificates were written by an older, root Caddy keeps them.
 
 A build still downloads from the network (Docker Hub, the Go module proxy, Alpine packages). The
 content is pinned, so a changed upstream fails the build rather than changing the image. A build
-step has the same unrestricted network access as everything else on this box, the cloud metadata
-server included (see [Not included yet](#not-included-yet)): pinning, not a fence, is what keeps an
-upstream from changing what runs.
+step has unrestricted network access, including metadata. The runtime UID fence does not
+apply to build tools; only reviewed, pinned build inputs belong on the box.
 
 After changing a build argument in `.env` (`CADDY_DNS_MODULE`), run `docker compose build caddy`
 yourself, then `docker compose up -d`: `selfhost:upgrade` rebuilds only for changes in the
@@ -200,28 +547,144 @@ headers, no query strings, and no credentials in the path on the routes listed i
 `caddy/log-redaction.caddy` (bootstrap, invite and AI-proxy tokens, preview signatures).
 `docker compose logs celld` is the Worker's output.
 
+## SAM-hosted repositories
+
+The celld build enables SAM-hosted git. Create a project with the Artifacts repository option;
+SAM seeds an empty repository so an agent can clone, commit and push without a GitHub App.
+The repository Durable Object and its `selfhost-hosted-git-v1` migration exist only in celld.
+The Cloudflare Worker never includes them.
+
+Public repository import is unavailable in this slice; an import URL returns a clear 400.
+A bounded importer is tracked in `tasks/backlog/2026-11-19-bounded-selfhost-git-import.md`.
+GitHub and GitLab integrations remain available when configured.
+
+Admin → Settings exposes `repositories.*` limits. Failed GC sweeps retry up to
+`repositories.maxGcAttempts` (default 3), five minutes apart; success resets the budget.
+Exhaustion preserves a failed marker and emits `hosted_git.gc_failed`; a later admitted push
+starts a new cleanup episode. Failed pack ingestion reclaims incomplete rows before the next
+push checks quota. Defaults are 64 MiB per push, 30,000 objects
+10,000 refs and 256 MiB stored per repository, 16 MiB per inflated object, 128 MiB cumulative inflation
+per request, delta depth 100 and 120 seconds per git operation. Operators can lower these
+limits; raising them needs measured capacity review. Rejected pushes leave existing refs intact.
+The storage limit is checked again after a pack and its index are stored; a push that crosses it
+is refused and its pack dropped at once.
+Like git, push ingest hashes every object with SHA-1 collision detection (SHA-1DC) and refuses
+a push carrying a SHA-1 collision-attack block before any ref changes.
+GC first drops whole packs that hold nothing reachable (for example a rejected push) without
+inflating them. Known limit: moving the remaining reachable packed objects to loose storage
+inflates each one under the same decompression budget, so that step cannot finish while more than
+`repositories.maxInflatedBytes` of reachable pushed content waits for collection. Tracked in
+`tasks/backlog/2026-11-19-hosted-git-gc-and-ingest-hardening.md`.
+Clone/push credentials expire and runtime credentials also require the same active workspace
+and callback generation. Deleting a project removes its hosted repository. At the ref limit, delete old refs in a separate
+push before creating replacements; an unvalidated deletion does not reserve space for new refs.
+
 ## Not included yet
 
 This version runs in plaintext mode: celld keeps every Worker secret in plaintext in the fleet
 bucket's deploy manifests, so the bucket credential is the install's master key. Also missing:
 
-- **Egress fence**: nothing stops Worker code from reaching loopback services, the private
-  network or the cloud metadata server on the box.
 - **Sealed secrets**: no key agent or KMS-backed encryption of the Worker's secrets.
 - **Guided credential login** (sandboxed agent sign-in on the box).
-- **Hosted git.** Every project needs a repository, so on this install users can create projects
-  and run agents only once a GitHub App (the `GITHUB_*` Worker secrets in `.state/secrets.env`)
-  or a GitLab integration is configured.
-  Without one, sign-in, administration and nodes work, but no agent session can start.
-- **Backup, restore and teardown** commands. Back up the fleet bucket and `.state/` yourself.
 
 Do not put data on this box that you could not afford to lose or leak.
 
 ## Tests
 
-- `pnpm selfhost:test`: deploy, upgrade, account and configuration logic, compose wiring, pinned
+- `pnpm selfhost:test`: deploy, encrypted backup/restore, upgrade recovery, teardown ownership, account and configuration logic, compose wiring, pinned
   versions, `caddy/start.sh` (no Docker needed).
 - `pnpm selfhost:live-test`: the box's real Caddy image (built from `caddy/Dockerfile`), frp and
   celld in Docker with host networking: gateway 404s and path tricks, the frp rate limit, header
   stripping, logging, keep-warm, the mail collector, frpc certificate checks, celld's guarded
   fetch and shared in-flight reads. CI runs it only when self-host paths change.
+
+## Egress fence and metadata broker
+
+`egress-fence.ts` renders a native nftables OUTPUT table for celld UID7103, distinct from Caddy7101,
+sam-mx7102 and the metadata broker65532. DNS is open only to the configured resolver addresses on
+TCP/UDP53; tunnel lease ports, exact store/SMTP endpoints and public HTTP(S) remain usable.
+Loopback (including127.0.0.2 andIPv6), private, metadata, reserved and transition ranges are denied.
+`SAM_EGRESS_ALLOW` adds exact IP:TCP-port exceptions; it cannot open metadata or Caddy admin2019.
+The established allowance is reply-direction only, so restoration also blocks forbidden sockets
+opened during a flush. Tests live in `scripts/selfhost/live/fence-netns.live.test.ts`.
+
+`celld/start.sh` requires every rule-class probe and a current attestation before serving. A rule
+loss kills celld within the <=1-second validated bound; this is a bounded stop, not zero-gap kernel
+protection. Only host root or host NET_ADMIN can change the control-plane rules. celld has neither;
+ordinary agent workspaces and their privileged nested containers run on separate per-user node VMs.
+No guided-login or untrusted app containers run on this box in this slice.
+
+`fence.sh` observes kernel change events as well as exact rule fingerprints. Rule changes, flushes,
+or observer failure latch a structured `egress_fence.lost` error in container logs and
+`egress-fence-attestation/events.jsonl`. `docker compose ps` reports the fence unhealthy and celld
+stays stopped/restarting; the front door cannot serve the API. There is no automatic rule repair.
+Recover as the installation operator: regenerate with `pnpm selfhost:deploy --init` (which also
+restores the rules file's 0644 mode when its content is unchanged), then
+`docker compose restart egress-fence`, wait for healthy, and run `pnpm selfhost:verify-fence`.
+Only verified startup clears the loss latch; event history remains. After resolver changes, regenerate
+and restart the fence too. An `iptables -F` does not erase this native nft table; full native ruleset
+flush/replacement is also tested. `verify-fence` covers DNS, TCP, UDP, routedIPv6 and alternate loopback.
+
+For `gs://`, add `gce` to `COMPOSE_PROFILES`. The proxy listens only on127.0.0.1:7180 and checks the
+client socket UID from Linux `/proc/net/tcp` as well as the generated path and Metadata-Flavor header.
+It refuses other UIDs even if they know the path. It holds the VM token in its own process and uses
+the pinned official Google auth SDK to exchange it through STS for a Credential Access Boundary
+fixed to the `CELLD_BUCKET` bucket. `GCE_METADATA_PROXY_SCOPES` selects `devstorage.read_write`
+(objects only: `roles/storage.objectAdmin`) or `devstorage.read_only` (`roles/storage.objectViewer`).
+Mixed scopes and full_control are refused. Query, scope and resource overrides are404; exchange
+failure is503 and never falls back to the VM token. Tokens and request paths are never logged.
+
+The VM account needs object permissions on that exact bucket and IAM/STS APIs enabled once per
+installation. This broker creates no accounts, grants or OAuth callbacks. CAB intersects existing
+permissions and cannot grant access to another bucket or Cloud DNS. See Google's
+[CAB guide](https://docs.cloud.google.com/iam/docs/create-downscoped-short-lived-credentials).
+Metadata `scopes` alone is not used as a security boundary; Google's current
+[metadata documentation](https://docs.cloud.google.com/compute/docs/metadata/querying-metadata)
+also requires `enforce_scopes=true` and scopes supported by the instance.
+
+The SAM API Worker is trusted with fleet authority. The fleet bucket still contains plaintext
+deployment manifests and secrets, and fleet write authority is powerful; CAB does not establish
+isolation between mutually untrusted Workers. Safety from broad VM permissions does not depend on
+hiding the broker path. The pinned runtime test `live/metadata-proxy.live.test.ts` nevertheless
+proves an exact native canary is absent from Worker process env (unknown keys return shim functions),
+host/proc files are inaccessible, and Worker child-process execution fails. The first truthiness
+assertion was a false positive; the exact comparison plus native-parent control is the proof.
+
+Self-host tests install the broker's isolated npm lockfile. CI runs the kernel lab in a disposable
+privileged Docker container with its own network namespaces; no workspace sudo or apt is needed.
+For an `s3://` operator store, `R2_S3_REGION` remains mandatory when `R2_S3_ENDPOINT` is set.
+
+### Reconcile generated fence state
+
+On an existing running installation, ordinary deploy and `--init` now reconcile changed fence
+inputs before continuing: stop affected celld, recreate and verify the fence, apply volume
+ownership for its configured UID, then reload the proxy and celld as needed. Services deliberately
+stopped remain stopped. Fresh `--init` only generates files. A failed reconciliation retains
+private retry intent and aborts; repair Compose and rerun deploy. Each Compose command is bounded
+by `SELFHOST_COMPOSE_TIMEOUT_MS` (default `60000` milliseconds); captured output is suppressed
+because Compose can interpolate credentials. Verification honors the same
+`SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS` setting as celld (default `2` seconds).
+
+List Compose profiles explicitly: `COMPOSE_PROFILES=*` is refused, since it would select the
+optional GCE broker even for an S3 installation. The broker accepts only its fixed native
+client audience query; it never uses caller queries to select a token audience, scope or bucket.
+Celld stdout/stderr redact the broker path credential before Docker records logs.
+
+Metadata transport timeouts apply per attempt. The pinned Google STS SDK enables its bounded
+retry policy for transient failures; callers receive a generic failure if exchange cannot complete.
+Redirects and oversized responses are refused on every attempt.
+
+The metadata proxy listener port is reserved outside node tunnel leases even while the GCE
+profile is disabled. Deploy and Caddy refuse a conflicting range before serving.
+
+Configured SMTP relay hostnames are resolved at deploy, opening only their exact TCP endpoints.
+After relay DNS changes, rerun `pnpm selfhost:deploy --init` to reconcile the fence. Metadata
+addresses and protected local listeners remain forbidden for relays.
+
+The broker port must also differ from every other managed box listener, including disabled
+optional services. Deploy, fence planning and Caddy startup all check this reservation.
+
+GCP bootstrap requires a dedicated `--state-dir` receipt path for each GCP project. It refuses
+active GCP receipts for a different or unrecorded project before making issuer or cloud calls,
+including in dry-run mode. Preserve existing receipts; use a separate state directory for another
+project. Removed resource receipts do not block reuse.

@@ -71,11 +71,15 @@ describe('resolveRepoBrowser for Artifacts projects', () => {
   });
 
   it('uses the Cloudflare binding directly when present (unchanged)', async () => {
-    const binding = hostedBackend();
+    const binding = new Proxy(hostedBackend(), { get(target, property, receiver) {
+      if (!(property in target)) return vi.fn().mockRejectedValue(new Error('Unknown RPC method'));
+      return Reflect.get(target, property, receiver);
+    } });
     resolve.mockImplementation((env) => env.ARTIFACTS ?? null);
     const env = { ARTIFACTS_ENABLED: 'true', ARTIFACTS: binding } as Env;
     const browser = await resolveRepoBrowser({ project, env });
     await browser.listBranches();
     expect(binding.get).toHaveBeenCalledWith('repo-1');
+    expect(iso.listServerRefs).toHaveBeenCalledWith(expect.objectContaining({ http: {} }));
   });
 });

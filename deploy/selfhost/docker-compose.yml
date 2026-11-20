@@ -11,8 +11,8 @@
 # 127.0.0.1 only.
 #
 # Plaintext mode: celld keeps every Worker secret in plaintext in the fleet bucket's deploy
-# manifests, and nothing restricts the Worker's outbound connections on the box yet (README.md,
-# "Not included yet"). Treat the bucket credential and the box as one secret.
+# manifests. The UID egress fence protects box/private endpoints; treat the fleet bucket
+# credential and the box as one installation secret.
 #
 # Usage (README.md): cp .env.example .env && chmod 600 .env && edit it;
 # `pnpm selfhost:deploy --init` (platform keys + .state/gateway.env); `docker compose build`;
@@ -23,17 +23,34 @@
 # `docker compose build` (or when the image does not exist yet); `pnpm selfhost:upgrade` rebuilds
 # a service only when its build inputs changed. The pinned celld version must match CELLD_VERSION
 # in scripts/selfhost/versions.ts, which the deploy script uses for `celld deploy`.
-name: sam-selfhost
+name: ${COMPOSE_PROJECT_NAME:?Set the installation-specific project printed by selfhost:deploy --init}
 
 services:
   celld:
     image: ghcr.io/denoland/celld:v0.6.3@sha256:22bca1b40a9e4c434cc149d8913d7eaafa9792961a8c05f9fecf921d416216dc
     network_mode: host
+    user: '${CELLD_UID:-7103}:${CELLD_UID:-7103}'
+    entrypoint: ['/bin/bash', '/etc/sam/celld-start.sh']
+    env_file:
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/celld.env
+        required: true
     depends_on:
+      egress-fence:
+        condition: service_healthy
+      celld-data-owner:
+        condition: service_completed_successfully
+      gce-metadata-proxy:
+        condition: service_started
+        required: false
       objectstore-init:
         condition: service_completed_successfully
         required: false # only with the local-store profile
     environment:
+      HOME: /var/lib/celld
+      SAM_EGRESS_FENCE_CHECK_SECONDS: ${SAM_EGRESS_FENCE_CHECK_SECONDS:-0.1}
+      SAM_EGRESS_FENCE_WAIT_SECONDS: ${SAM_EGRESS_FENCE_WAIT_SECONDS:-60}
+      SAM_EGRESS_FENCE_ATTESTATION: /run/sam-egress-fence/attestation
+      SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS: ${SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS:-2}
       CELLD_BUCKET: ${CELLD_BUCKET:?set CELLD_BUCKET in .env}
       # Empty means unset: gs:// buckets take no endpoint and use Application Default Credentials
       # (on GCE, the VM's service account through the metadata server).
@@ -56,6 +73,8 @@ services:
     volumes:
       # A cache on one node: the bucket is the durable copy.
       - celld-data:/var/lib/celld
+      - ./celld/start.sh:/etc/sam/celld-start.sh:ro
+      - egress-fence-attestation:/run/sam-egress-fence:ro
     # Runs the Workers: no capability (its listeners are loopback ports above 1023) and a
     # read-only root. It writes only CELLD_WATCH (the volume above) and nothing to /tmp; the
     # tmpfs is there for the runtime's scratch files. Checked on the pinned image: a Worker and a
@@ -68,6 +87,66 @@ services:
     stop_grace_period: 50s
     # celld docs: restart without an attempt limit. An immediate restart can hit
     # "Address already in use"; Docker's restart backoff covers that.
+    restart: unless-stopped
+
+  # Kernel OUTPUT fence, immutable while serving. Only this service gets host NET_ADMIN.
+  egress-fence:
+    build: ./egress-fence
+    image: sam-selfhost-egress-fence:local
+    pull_policy: never
+    network_mode: host
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
+    security_opt: ['no-new-privileges:true']
+    read_only: true
+    tmpfs: [/tmp]
+    environment:
+      SAM_EGRESS_FENCE_RECHECK_SECONDS: ${SAM_EGRESS_FENCE_RECHECK_SECONDS:-0.1}
+    volumes:
+      - ${SAM_SELFHOST_STATE_DIR:-./.state}/egress-fence.nft:/etc/sam/egress-fence.nft:ro
+      - egress-fence-attestation:/run/sam-egress-fence
+    healthcheck:
+      test: ['CMD', '/bin/sh', '/usr/local/bin/sam-egress-fence', 'check']
+      interval: 1s
+      start_period: 10s
+      retries: 1
+    restart: unless-stopped
+
+  celld-data-owner:
+    image: sam-selfhost-egress-fence:local
+    pull_policy: never
+    depends_on:
+      egress-fence:
+        condition: service_started
+    network_mode: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER, DAC_READ_SEARCH]
+    entrypoint: ['chown', '-R', '${CELLD_UID:-7103}:${CELLD_UID:-7103}', '/var/lib/celld']
+    volumes:
+      - celld-data:/var/lib/celld
+    restart: 'no'
+
+  # Native celld storage alone uses this fixed-bucket Google CAB broker.
+  gce-metadata-proxy:
+    profiles: [gce]
+    build: ./metadata-proxy
+    image: sam-selfhost-metadata-proxy:local
+    pull_policy: never
+    network_mode: host
+    user: '65532:65532'
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    read_only: true
+    env_file:
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/celld.env
+        required: true
+    environment:
+      GCE_METADATA_PROXY_ALLOWED_UID: ${CELLD_UID:-7103}
+      GCE_METADATA_PROXY_TIMEOUT_MS: ${GCE_METADATA_PROXY_TIMEOUT_MS:-5000}
+      GCE_METADATA_PROXY_MAX_RESPONSE_BYTES: ${GCE_METADATA_PROXY_MAX_RESPONSE_BYTES:-65536}
+      GCE_METADATA_PROXY_REQUEST_TIMEOUT_MS: ${GCE_METADATA_PROXY_REQUEST_TIMEOUT_MS:-15000}
+    mem_limit: 128m
+    pids_limit: 64
     restart: unless-stopped
 
   # One-shot, before Caddy: Caddy runs as uid 7101 (caddy/Dockerfile), but a box upgraded from a
@@ -134,6 +213,7 @@ services:
       CELLD_PORT: ${CELLD_PORT:-8080}
       CELLD_INTERNAL_PORT: ${CELLD_INTERNAL_PORT:-7001}
       FRPS_BIND_PORT: ${FRPS_BIND_PORT:-7000}
+      GCE_METADATA_PROXY_PORT: ${GCE_METADATA_PROXY_PORT:-7180}
       OBJECTSTORE_PORT: ${OBJECTSTORE_PORT:-9000}
       OBJECTSTORE_CONSOLE_PORT: ${OBJECTSTORE_CONSOLE_PORT:-9001}
       MAIL_COLLECTOR_SMTP_PORT: ${MAIL_COLLECTOR_SMTP_PORT:-1025}
@@ -332,7 +412,15 @@ services:
     volumes:
       - objectstore-data:/data
     healthcheck:
-      test: ['CMD', 'mc', 'ready', 'local']
+      test:
+        [
+          'CMD',
+          'curl',
+          '--fail',
+          '--silent',
+          '--show-error',
+          'http://127.0.0.1:${OBJECTSTORE_PORT:-9000}/minio/health/ready',
+        ]
       interval: 5s
       retries: 30
     stop_grace_period: 30s
@@ -360,3 +448,4 @@ volumes:
   caddy-data:
   caddy-config:
   objectstore-data:
+  egress-fence-attestation:

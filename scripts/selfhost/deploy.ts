@@ -65,6 +65,7 @@ import {
 } from './celld-config.js';
 import { ASSETS_DIR, CELLD_MAIN, prepareCelldProject, writeCelldConfig } from './celld-project.js';
 import { commandPath } from './command-path.js';
+import { writeAndReconcileFence } from './deploy-fence-reconcile.js';
 import {
   applyAllMigrations,
   bucketOf,
@@ -79,6 +80,7 @@ import {
   syncGatewayEnv,
 } from './deploy-steps.js';
 import { inboundMailWorkerVars } from './inbound-mail-settings.js';
+import { expectedComposeProjectFor, recordInstall } from './install-record.js';
 import {
   ensureMailCollectorPassword,
   MAIL_COLLECTOR_PASSWORD_FILE,
@@ -162,6 +164,7 @@ function buildApiDependencies(): void {
 }
 
 interface DeployInputs {
+  envFile: string;
   box: Record<string, string>;
   stateDir: string;
   secretsPath: string;
@@ -207,6 +210,7 @@ function readDeployInputs(): DeployInputs {
   if (!baseDomain) throw new Error(`${envFile}: SAM_DOMAIN is required`);
   if (!box.CELLD_BUCKET) throw new Error(`${envFile}: CELLD_BUCKET is required`);
   return {
+    envFile,
     box,
     stateDir,
     secretsPath,
@@ -254,6 +258,10 @@ function prepareBoxState(inputs: DeployInputs): BoxState {
     );
     return { keys, tunnelSettings, collectorPasswordPath, collectorPassword: null };
   }
+  recordInstall(stateDir, inputs.envFile, box, keys.SAM_INSTALLATION_ID);
+  log(
+    `Compose project: ${expectedComposeProjectFor(box, stateDir, keys.SAM_INSTALLATION_ID)} (set COMPOSE_PROJECT_NAME to this name before starting Docker Compose)`
+  );
   syncGatewayEnv(
     join(stateDir, 'gateway.env'),
     renderGatewayEnv(keys.REVERSE_TUNNEL_GATEWAY_SECRET, tunnelSettings),
@@ -387,6 +395,14 @@ async function main(): Promise<void> {
   const { box, stateDir, projectDir, baseDomain } = inputs;
   const { keys, tunnelSettings, collectorPasswordPath, collectorPassword } =
     prepareBoxState(inputs);
+  if (!inputs.dryRun) {
+    await writeAndReconcileFence({
+      stateDir,
+      box,
+      envFile: inputs.envFile,
+      leaseRange: tunnelSettings.range,
+    });
+  }
   if (inputs.init) return;
   const { installationId, secrets } = resolveWorkerSecrets(inputs, keys);
   const { plan, vmAgentRelease } = planWorker(inputs, tunnelSettings, installationId, secrets);

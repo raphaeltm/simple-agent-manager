@@ -39,8 +39,12 @@
     "selfhost:deploy": "tsx scripts/selfhost/deploy.ts",
     "selfhost:create-account": "tsx scripts/selfhost/create-account.ts",
     "selfhost:gcp-bootstrap": "bash deploy/selfhost/gcp-bootstrap.sh",
-    "selfhost:test": "vitest run --config scripts/selfhost/vitest.config.ts",
+    "selfhost:verify-fence": "tsx scripts/selfhost/verify-fence.ts",
+    "selfhost:test": "npm ci --prefix deploy/selfhost/metadata-proxy --ignore-scripts --no-audit --no-fund && vitest run --config scripts/selfhost/vitest.config.ts",
     "selfhost:live-test": "vitest run --config scripts/selfhost/live/vitest.config.ts",
+    "selfhost:backup": "tsx scripts/selfhost/backup.ts",
+    "selfhost:restore": "tsx scripts/selfhost/restore.ts",
+    "selfhost:teardown": "tsx --tsconfig scripts/selfhost/tsconfig.json scripts/selfhost/teardown.ts",
     "selfhost:upgrade": "tsx scripts/selfhost/upgrade.ts",
     "quality:preflight": "tsx scripts/quality/check-preflight-evidence.ts",
     "test:acp-c2-remote-service": "node tests/fixtures/acp-c2-remote-service.test.mjs",
@@ -116,7 +120,7 @@
   },
   "packageManager": "pnpm@9.15.9",
   "engines": {
-    "node": "^22.22.0 || >=24.0.0",
+    "node": "^22.23.4 || >=24.0.0",
     "pnpm": ">=9.5.0"
   }
 }

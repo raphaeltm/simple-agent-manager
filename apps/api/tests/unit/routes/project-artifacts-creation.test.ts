@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { registerProjectCreateRoute } from '../../../src/routes/projects/project-create';
-import { registerArtifactsBackendFallback } from '../../../src/services/hosted-git/backend';
+import { registerArtifactsBackendFallback } from '../../../src/services/artifacts/backend';
 
 /**
  * The Artifacts branch of `POST /api/projects` resolves its backend through
@@ -129,6 +129,22 @@ describe('POST /api/projects — Artifacts provider through the hosted-git seam'
     expect(binding.create).toHaveBeenCalledTimes(1);
     expect(fallback).not.toHaveBeenCalled();
     expect(insertedRows[0]).toMatchObject({ repoProvider: 'artifacts', repository: remote });
+  });
+
+  it('does not probe optional extension methods on a native RPC binding', async () => {
+    const remote = 'https://acct.artifacts.cloudflare.net/git/default/hosted-project-r1.git';
+    const binding = new Proxy(backend(remote), { get(target, property, receiver) {
+      if (!(property in target)) return vi.fn().mockRejectedValue(new Error('Unknown RPC method'));
+      return Reflect.get(target, property, receiver);
+    } });
+    limitResponses.push([], [{ id: 'x', repository: remote }]);
+    mocks.seedArtifactsReadme.mockImplementationOnce(async (options) => {
+      if (options.fetchImpl) await options.fetchImpl(options.remote);
+    });
+    const response = await createArtifactsProject({ ...mockEnv, ARTIFACTS_ENABLED: 'true', ARTIFACTS: binding } as Env);
+    expect(response.status).toBe(201);
+    expect(binding.create).toHaveBeenCalledOnce();
+    expect(mocks.seedArtifactsReadme).toHaveBeenCalledWith(expect.objectContaining({ fetchImpl: undefined }));
   });
 
   it('creates the repository with a registered self-host backend when no binding exists', async () => {

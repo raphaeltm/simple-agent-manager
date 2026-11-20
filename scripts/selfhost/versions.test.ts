@@ -22,6 +22,8 @@ const services = (parse(COMPOSE) as { services: Record<string, Service> }).servi
 const LOCAL: Record<string, string> = {
   'sam-selfhost-caddy:local': 'caddy/Dockerfile',
   'sam-selfhost-sam-mx:local': 'sam-mx/Dockerfile',
+  'sam-selfhost-egress-fence:local': 'egress-fence/Dockerfile',
+  'sam-selfhost-metadata-proxy:local': 'metadata-proxy/Dockerfile',
 };
 
 describe('pinned versions', () => {
@@ -37,7 +39,7 @@ describe('pinned versions', () => {
     for (const image of pulled) expect(image).toMatch(/@sha256:[0-9a-f]{64}$/);
     for (const dockerfilePath of Object.values(LOCAL)) {
       const froms = [...read(dockerfilePath).matchAll(/^FROM\s+(\S+)/gm)].map((m) => m[1]);
-      expect(froms.length, dockerfilePath).toBeGreaterThanOrEqual(2);
+      expect(froms.length, dockerfilePath).toBeGreaterThanOrEqual(1);
       for (const from of froms) expect(from, dockerfilePath).toMatch(/@sha256:[0-9a-f]{64}$/);
     }
   });

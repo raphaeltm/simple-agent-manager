@@ -100,8 +100,9 @@ address `https://api.<your domain>/api/auth/callback/google`.
 **Let other people in.** An emailed code only creates the administrator's account: everyone else
 needs another way to sign in the first time. Once you're in, add GitHub, Google or GitLab sign-in
 in **Admin → Integrations** (see [Platform integrations after deploy](/docs/guides/self-hosting/#platform-integrations-after-deploy)),
-then invite people to your projects. If you turned on signup approval, approve them in **Admin →
-Users**.
+then invite people to your projects. Signup approval is on by default (`envRequiresApproval` in
+`apps/api/src/services/signup-approval.ts`), so approve them in **Admin → Users**, or turn approval
+off there.
 
 ### If the review is blocked
 
@@ -158,7 +159,7 @@ Self-hosting lets you review and pin the installer source, then run it in an acc
 You need:
 
 - A Cloudflare account with Workers Paid enabled, and a domain active in that account.
-- Node.js 22 or newer and pnpm 9.15.9.
+- Node.js 22.23.4 or newer (or any Node.js 24+) and pnpm 9.15.9.
 - The [SAM repository](https://github.com/raphaeltm/simple-agent-manager), checked out at the version you want to trust.
 - A Cloudflare API token scoped to that account and zone, with Account Settings Read, Workers Scripts Edit, OAuth Client Read/Write, and permissions for Workers Custom Domains and Workers Routes. Review Cloudflare's current permission names before granting access.
 

@@ -215,8 +215,10 @@ describe('Overview brief through the real entry points', () => {
     );
     expect(gatewayCalls()).toHaveLength(1);
 
-    // The person answers through the real inbox route.
+    // The person answers through the real inbox route, and the agent takes the answer up: its
+    // activity mirror reports a turn in flight, so the chat is still running (no longer paused).
     await answer(s, `ask:${askId}`, 'Staging first');
+    await s.project.reportActivity(s.chatSessionId, 'prompting');
     await syncSummaries(s.project);
     await allowNextCheck(s);
     const after = await viewOverview(s);
@@ -282,6 +284,8 @@ describe('Overview brief through the real entry points', () => {
     await viewOverview(s);
     expect(gatewayCalls()).toHaveLength(1);
     await answer(s, `ask:${askId}`, 'Staging first');
+    // The agent takes the answer up, so the chat is still running.
+    await s.project.reportActivity(s.chatSessionId, 'prompting');
     await syncSummaries(s.project);
     // Past the minimum interval, but not past the day.
     await testEnv.DATABASE.prepare(

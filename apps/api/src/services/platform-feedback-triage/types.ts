@@ -1,5 +1,8 @@
 import type { runDebugDiagnosis } from '../debug-agent';
-import type { IncidentReopenEvidence } from '../platform-feedback-incidents';
+import type {
+  IdeaWorkSnapshotReader,
+  IncidentReopenEvidence,
+} from '../platform-feedback-incidents';
 
 export type FeedbackTriageTrigger = 'cron' | 'manual';
 export interface FeedbackTriageResult {
@@ -35,6 +38,8 @@ export interface FeedbackErrorGroup {
   source: string;
   severity: FeedbackSeverity;
   summary: string;
+  /** Redacted, normalized message in original case; absent for groups rebuilt from storage. */
+  message?: string;
   firstSeenAt: number;
   lastSeenAt: number;
   evidence: FeedbackErrorEvidence[];
@@ -71,4 +76,6 @@ export interface StoredTriageGroupRow {
 export interface TriageDeps {
   now?: () => number;
   diagnose?: typeof runDebugDiagnosis;
+  /** Durable Object link/note reader; defaults to the real ProjectData read. */
+  readEngagement?: IdeaWorkSnapshotReader;
 }

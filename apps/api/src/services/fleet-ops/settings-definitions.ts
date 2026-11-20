@@ -10,6 +10,13 @@ const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const MIB = 1024 * 1024;
 
+/** Hours a pending incident may go undispatched before the queue counts as stalled. */
+export const DEFAULT_INCIDENT_DISPATCH_STALL_HOURS = 24;
+/** Incident ideas the hourly reconciliation handles per batch (one Durable Object read each). */
+export const DEFAULT_INCIDENT_IDEA_RECONCILE_BATCH_SIZE = 25;
+/** Milliseconds the hourly incident-idea reconciliation keeps working before it stops. */
+export const DEFAULT_INCIDENT_IDEA_RECONCILE_DEADLINE_MS = 20_000;
+
 export const FLEET_OPS_SETTINGS = [
   {
     name: 'operations.debugPackageRetentionDays',
@@ -90,6 +97,30 @@ export const FLEET_OPS_SETTINGS = [
     description:
       'Hours of snapshot failures and deletion-quarantine reports the anomaly sweep looks back over.',
     range: { min: 1, max: 30 * 24 },
+  },
+  {
+    name: 'operations.opsAnomalyIncidentDispatchStallHours',
+    key: 'incidentDispatchStallHours',
+    defaultValue: DEFAULT_INCIDENT_DISPATCH_STALL_HOURS,
+    description:
+      'Hours a pending private incident may wait without ever being dispatched to the incident triage trigger before the anomaly sweep reports the queue as stalled and the incident sweep logs a warning.',
+    range: { min: 1, max: 30 * 24 },
+  },
+  {
+    name: 'operations.incidentIdeaReconcileBatchSize',
+    key: 'incidentIdeaReconcileBatchSize',
+    defaultValue: DEFAULT_INCIDENT_IDEA_RECONCILE_BATCH_SIZE,
+    description:
+      'Incident ideas the hourly reconciliation checks per batch when it closes ideas of ended incidents, adopts legacy ideas and retitles them. Each batch reads chat links and notes once from the project Durable Object.',
+    range: { min: 1, max: 100 },
+  },
+  {
+    name: 'operations.incidentIdeaReconcileDeadlineMs',
+    key: 'incidentIdeaReconcileDeadlineMs',
+    defaultValue: DEFAULT_INCIDENT_IDEA_RECONCILE_DEADLINE_MS,
+    description:
+      'Milliseconds the hourly incident-idea reconciliation keeps running batches before it stops; anything left continues the next hour.',
+    range: { min: 1_000, max: 120_000 },
   },
   {
     name: 'operations.opsAnomalyMaxPerClass',
