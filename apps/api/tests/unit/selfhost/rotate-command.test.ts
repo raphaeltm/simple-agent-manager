@@ -526,7 +526,7 @@ describe('rotate encryption-key', () => {
     const step = readJournal(stateDir)?.steps['encryption-key'];
     expect(step?.phase).toBe('rolled-back');
     expect(Date.parse(step?.waitUntil ?? '') - Date.parse(step?.reverseSwitchedAt ?? '')).toBe(
-      (drainMinutes({}) + 5 * 60 + 15) * 60_000
+      (drainMinutes({}) + 5 * 60 + 16) * 60_000
     );
     expect(Date.parse(step?.reverseSwitchedAt ?? '')).toBeGreaterThan(
       Date.parse(step?.switchedAt ?? '') + drainMinutes({}) * 60_000
@@ -775,6 +775,35 @@ describe('rotate gateway-secret', () => {
     expect(deployed.REVERSE_TUNNEL_GATEWAY_SECRET).toBe(old);
   });
 
+  it('finishes the rollback on resume when restoring the consumers failed (Codex P1)', async () => {
+    const old = deployed.REVERSE_TUNNEL_GATEWAY_SECRET!;
+    const failing = deps();
+    // After the switch the Worker seems to still accept the old secret: the step fails.
+    failing.probeGateway = async (secret) =>
+      secret === old && restarts.length > 0
+        ? 200
+        : isAcceptedGatewaySecret(workerEnv(), secret)
+          ? 200
+          : 401;
+    // ...and restarting the consumers back onto the old secret fails too.
+    failing.restartGatewayConsumers = async () => {
+      restarts.push(readFileSync(join(stateDir, 'gateway.env'), 'utf8'));
+      if (restarts.length > 1) throw new Error('systemctl restart frps failed');
+    };
+    await expect(runRotate(input({ names: ['gateway-secret'] }), failing)).rejects.toThrow(
+      /systemctl restart frps failed/
+    );
+    expect(readJournal(stateDir)?.steps['gateway-secret']?.phase).not.toBe('rolled-back');
+    restarts = [];
+    await expect(runRotate(input({ resume: true }), deps())).rejects.toThrow(/rolled back/);
+    // The resume restored gateway.env and the Worker to the old secret instead of marking it done.
+    expect(readJournal(stateDir)?.steps['gateway-secret']?.phase).toBe('rolled-back');
+    expect(deployed.REVERSE_TUNNEL_GATEWAY_SECRET).toBe(old);
+    expect(readFileSync(join(stateDir, 'gateway.env'), 'utf8')).toContain(
+      `REVERSE_TUNNEL_GATEWAY_SECRET=${old}`
+    );
+  });
+
   it('restarts the consumers once with the new value while the Worker accepts both, then accepts only the new one', async () => {
     const old = deployed.REVERSE_TUNNEL_GATEWAY_SECRET!;
     await runRotate(input({ names: ['gateway-secret'] }), deps());
@@ -907,8 +936,8 @@ describe('rotate encryption-key: the wait for values outside D1 and R2 (review V
   it('waits as long as the Worker says a pending interaction can live when that was raised', async () => {
     workerVars = { ACP_INTERACTION_MAX_DEADLINE_MS: String(10 * HOUR) };
     await runRotate(input({ names: ['encryption-key'] }), deps());
-    // 10 h deadline + 1 h sensitive purge + 15 min margin.
-    expect(waitMinutes()).toBe(drainMinutes({}) + 11 * 60 + 15);
+    // 10 h deadline + 1 min URL deadline margin + 1 h sensitive purge + 15 min margin.
+    expect(waitMinutes()).toBe(drainMinutes({}) + 11 * 60 + 16);
     clock += 6 * HOUR; // past the default wait: not yet
     await runRotate(input({ resume: true }), deps());
     expect((await head()).ENCRYPTION_KEY_PREVIOUS).toBeDefined();
@@ -916,7 +945,7 @@ describe('rotate encryption-key: the wait for values outside D1 and R2 (review V
 
   it('keeps the default floor when the Worker uses the defaults (control)', async () => {
     await runRotate(input({ names: ['encryption-key'] }), deps());
-    expect(waitMinutes()).toBe(drainMinutes({}) + 5 * 60 + 15);
+    expect(waitMinutes()).toBe(drainMinutes({}) + 5 * 60 + 16);
   });
 
   it('stops instead of guessing when the Worker cannot report the lifetime', async () => {
@@ -929,7 +958,7 @@ describe('rotate encryption-key: the wait for values outside D1 and R2 (review V
     expect(readJournal(stateDir)?.steps['encryption-key']?.waitUntil).toBeUndefined();
     controlHook = null;
     await runRotate(input({ resume: true }), deps());
-    expect(waitMinutes()).toBe(drainMinutes({}) + 5 * 60 + 15);
+    expect(waitMinutes()).toBe(drainMinutes({}) + 5 * 60 + 16);
   });
 
   it('a resume keeps the --stored-lifetime-minutes the run started with (Codex P1)', async () => {

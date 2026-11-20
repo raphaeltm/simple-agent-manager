@@ -152,7 +152,9 @@ export async function advanceGateway(ctx: StepContext): Promise<void> {
     const snapshot = await ctx.store.readSnapshot(ctx.journal.id, key.name);
     if (writeGatewayEnv(ctx, snapshot[GATEWAY_SECRET] ?? '')) await deps.restartGatewayConsumers();
   };
-  if (isResumingRollback(ctx)) {
+  // A recorded failure that has not reached `rolled-back` is a rollback the run did not finish
+  // (restoring the consumers failed, or the process stopped): finish it rather than carry on.
+  if (isResumingRollback(ctx) || (step.error !== undefined && step.phase !== 'rolled-back')) {
     await restoreConsumers();
     return await rollBack(ctx, names, step.error ?? 'interrupted');
   }
@@ -200,8 +202,12 @@ export async function advanceGateway(ctx: StepContext): Promise<void> {
       ctx.save();
     }
   } catch (error) {
+    // Record the rollback before touching gateway.env: if restoring the consumers fails, a
+    // resume must finish the rollback, not verify the new secret and mark the step done.
+    step.error = message(error);
+    ctx.save();
     await restoreConsumers();
-    await rollBack(ctx, names, message(error));
+    await rollBack(ctx, names, step.error);
   }
 }
 

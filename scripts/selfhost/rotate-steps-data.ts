@@ -30,11 +30,12 @@ export const MAX_MIGRATE_ROUNDS = 3;
 export const MAX_IN_RUN_WAIT_MS = 15 * 60_000;
 /**
  * Values outside D1/R2 that expire on their own: ACP interaction details (InteractionStore DO,
- * DEFAULT_ACP_INTERACTION_MAX_DEADLINE_MS 4 h + DEFAULT_ACP_INTERACTION_SENSITIVE_PURGE_MS 1 h)
+ * DEFAULT_ACP_INTERACTION_MAX_DEADLINE_MS 4 h + DEFAULT_ACP_INTERACTION_DEADLINE_MARGIN_MS 1 min
+ * + DEFAULT_ACP_INTERACTION_SENSITIVE_PURGE_MS 1 h)
  * and bootstrap tokens (KV, BOOTSTRAP_TOKEN_TTL_SECONDS 15 min), plus a margin. The floor of the
  * wait: an install that raised those settings waits for what its Worker reports instead.
  */
-export const DEFAULT_STORED_LIFETIME_MINUTES = 5 * 60 + 15;
+export const DEFAULT_STORED_LIFETIME_MINUTES = 5 * 60 + 16;
 /** Added to the lifetime the Worker reports (clock skew, a value written just after the switch). */
 export const STORED_LIFETIME_MARGIN_MINUTES = 15;
 
@@ -253,7 +254,9 @@ async function recordLegacyTunnelLeases(ctx: StepContext, drainMinutes: number):
   step.legacyTunnelLeases = count;
   ctx.save();
   if (count === null) {
-    deps.log('  WARNING: could not count reverse-tunnel nodes created before the switch (or during its drain)');
+    deps.log(
+      '  WARNING: could not count reverse-tunnel nodes created before the switch (or during its drain)'
+    );
   } else if (count > 0) {
     deps.log(
       `  WARNING: ${count} reverse-tunnel node(s) created before the switch or during its drain keep a tunnel credential derived from the old ENCRYPTION_KEY: whoever holds that key and an old backup can still log in to frps as them. Replace them (delete each node; SAM provisions new ones on demand).`
