@@ -62,6 +62,8 @@ export interface IncidentDispatchBreakdown {
   pending: number;
   /** Pending incidents never dispatched whose queue time is older than the stall window. */
   stalled: number;
+  /** `stalled`, split by the filter holding each one back. */
+  stalledByReason: Record<IncidentDispatchBlockReason, number>;
   reasons: Record<IncidentDispatchBlockReason, number>;
 }
 
@@ -82,9 +84,13 @@ export async function explainUndispatchableIncidents(
   )
     .bind(...reason.binds, now - stallWindowMs)
     .all<{ reason: string; count: number; stalled: number | null }>();
-  const reasons = Object.fromEntries(
-    INCIDENT_DISPATCH_BLOCK_REASONS.map((key) => [key, 0])
-  ) as Record<IncidentDispatchBlockReason, number>;
+  const zero = () =>
+    Object.fromEntries(INCIDENT_DISPATCH_BLOCK_REASONS.map((key) => [key, 0])) as Record<
+      IncidentDispatchBlockReason,
+      number
+    >;
+  const reasons = zero();
+  const stalledByReason = zero();
   let pending = 0;
   let stalled = 0;
   for (const row of rows.results ?? []) {
@@ -93,7 +99,8 @@ export async function explainUndispatchableIncidents(
     stalled += Number(row.stalled) || 0;
     if ((INCIDENT_DISPATCH_BLOCK_REASONS as readonly string[]).includes(row.reason)) {
       reasons[row.reason as IncidentDispatchBlockReason] += count;
+      stalledByReason[row.reason as IncidentDispatchBlockReason] += Number(row.stalled) || 0;
     }
   }
-  return { pending, stalled, reasons };
+  return { pending, stalled, stalledByReason, reasons };
 }

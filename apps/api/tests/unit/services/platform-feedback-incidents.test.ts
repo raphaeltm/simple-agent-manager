@@ -1032,7 +1032,7 @@ describe('platform feedback incidents', () => {
     const signature = '8f721c70c16aa98a8c398b29708f0ada71d473b24abd7b5b39d6d4c1a9b9a0ef';
     seedIncident(sqlite, { signature });
     const summary = await buildIncidentBacklogSummary(env, 10, 5000);
-    const promptId = summary.rendered.match(/— id ([^,]+),/)?.[1] ?? '';
+    const promptId = summary.rendered.match(/^\d+\. id ([^,]+),/m)?.[1] ?? '';
     expect(promptId).toBe(signature);
     expect(await getIncidentDetail(env, promptId)).toMatchObject({ id: signature });
     expect(await claimIncident(env, promptId, 'task-1', 5000)).not.toBeNull();

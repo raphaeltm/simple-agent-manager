@@ -12,6 +12,9 @@ import {
 } from '../../../src/services/platform-feedback-triage';
 import { createSqliteD1, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
+/** No chat links or notes on any idea (the Durable Object read is outside these tests). */
+const noEngagement = async () => ({});
+
 function setup() {
   const main = new Database(':memory:');
   main.exec(`
@@ -365,7 +368,7 @@ describe('platform feedback triage', () => {
         PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES: '60',
       } as Env,
       'manual',
-      { now: () => at + 1, diagnose }
+      { now: () => at + 1, diagnose, readEngagement: noEngagement }
     );
 
     expect(result).toMatchObject({ ideasCreated: 0, ideasUpdated: 1 });
@@ -428,7 +431,7 @@ describe('platform feedback triage', () => {
         PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT: '100',
       } as Env,
       'manual',
-      { now: () => at + 1, diagnose }
+      { now: () => at + 1, diagnose, readEngagement: noEngagement }
     );
 
     expect(result).toMatchObject({ groupsFound: 0, ideasCreated: 0 });
@@ -466,6 +469,7 @@ describe('platform feedback triage', () => {
     const first = await runPlatformFeedbackTriage(env, 'manual', {
       now: () => at + 1000,
       diagnose,
+      readEngagement: noEngagement,
     });
     expect(first).toMatchObject({ enabled: true, trigger: 'manual', ideasCreated: 1 });
     expect(diagnose).toHaveBeenCalledWith(
@@ -474,7 +478,11 @@ describe('platform feedback triage', () => {
       { errorId: '123e4567-e89b-42d3-a456-426614174000' },
       { featureKey: SCHEDULED_TRIAGE_DEBUG_FEATURE_KEY }
     );
-    const second = await runPlatformFeedbackTriage(env, 'cron', { now: () => at + 2000, diagnose });
+    const second = await runPlatformFeedbackTriage(env, 'cron', {
+      now: () => at + 2000,
+      diagnose,
+      readEngagement: noEngagement,
+    });
     expect(second).toMatchObject({ trigger: 'cron', ideasCreated: 0, ideasUpdated: 1 });
     expect(diagnose).toHaveBeenCalledTimes(1);
     expect(main.prepare('SELECT COUNT(*) AS count FROM tasks').get()).toEqual({ count: 1 });
@@ -542,6 +550,7 @@ describe('platform feedback triage', () => {
     const oldSweep = await runPlatformFeedbackTriage(env, 'cron', {
       now: () => resolvedAt + 1_000,
       diagnose,
+      readEngagement: noEngagement,
     });
 
     expect(oldSweep).toMatchObject({ groupsFound: 1, groupsSkipped: 1, ideasCreated: 0 });
@@ -560,6 +569,7 @@ describe('platform feedback triage', () => {
     const newSweep = await runPlatformFeedbackTriage(env, 'cron', {
       now: () => newerOccurrenceAt + 1_000,
       diagnose,
+      readEngagement: noEngagement,
     });
 
     expect(newSweep).toMatchObject({ groupsFound: 1, groupsSkipped: 0, ideasCreated: 1 });
@@ -612,6 +622,7 @@ describe('platform feedback triage', () => {
     const cooldownSweep = await runPlatformFeedbackTriage(env, 'cron', {
       now: () => resolvedAt + 8 * 60_000,
       diagnose,
+      readEngagement: noEngagement,
     });
 
     expect(cooldownSweep).toMatchObject({ groupsFound: 1, groupsSkipped: 1, ideasCreated: 0 });
@@ -635,6 +646,7 @@ describe('platform feedback triage', () => {
     const afterCooldownSweep = await runPlatformFeedbackTriage(env, 'cron', {
       now: () => resolvedAt + 12 * 60_000,
       diagnose,
+      readEngagement: noEngagement,
     });
 
     expect(afterCooldownSweep).toMatchObject({ groupsFound: 1, ideasCreated: 1 });
@@ -674,6 +686,7 @@ describe('platform feedback triage', () => {
     const oldSweep = await runPlatformFeedbackTriage(env, 'cron', {
       now: () => expiredAt + 1_000,
       diagnose,
+      readEngagement: noEngagement,
     });
 
     expect(oldSweep).toMatchObject({ groupsFound: 1, groupsSkipped: 1, ideasCreated: 0 });
@@ -691,6 +704,7 @@ describe('platform feedback triage', () => {
     const cooldownSweep = await runPlatformFeedbackTriage(env, 'cron', {
       now: () => expiredAt + 6 * 60_000,
       diagnose,
+      readEngagement: noEngagement,
     });
 
     expect(cooldownSweep).toMatchObject({ groupsFound: 1, groupsSkipped: 1, ideasCreated: 0 });
@@ -714,6 +728,7 @@ describe('platform feedback triage', () => {
     const afterCooldownSweep = await runPlatformFeedbackTriage(env, 'cron', {
       now: () => expiredAt + 12 * 60_000,
       diagnose,
+      readEngagement: noEngagement,
     });
 
     expect(afterCooldownSweep).toMatchObject({ groupsFound: 1, ideasCreated: 1 });
@@ -769,6 +784,7 @@ describe('platform feedback triage', () => {
     const staleSweep = await runPlatformFeedbackTriage(env, 'cron', {
       now: () => resolvedAt + 46 * 60_000,
       diagnose,
+      readEngagement: noEngagement,
     });
 
     expect(staleSweep).toMatchObject({ groupsFound: 1, groupsSkipped: 1, ideasCreated: 0 });
@@ -794,6 +810,7 @@ describe('platform feedback triage', () => {
     const currentSweep = await runPlatformFeedbackTriage(env, 'cron', {
       now: () => resolvedAt + 61 * 60_000,
       diagnose,
+      readEngagement: noEngagement,
     });
 
     expect(currentSweep).toMatchObject({ groupsFound: 1, groupsSkipped: 0, ideasCreated: 1 });
@@ -832,7 +849,7 @@ describe('platform feedback triage', () => {
         PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project',
       } as Env,
       'manual',
-      { now: () => at + 1, diagnose }
+      { now: () => at + 1, diagnose, readEngagement: noEngagement }
     );
 
     const idea = main.prepare('SELECT title, description FROM tasks').get() as Record<
@@ -903,7 +920,7 @@ describe('platform feedback triage', () => {
         PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project',
       } as Env,
       'manual',
-      { now: () => at + 1, diagnose }
+      { now: () => at + 1, diagnose, readEngagement: noEngagement }
     );
 
     const idea = main.prepare('SELECT title, description FROM tasks').get() as Record<
@@ -940,7 +957,7 @@ describe('platform feedback triage', () => {
         PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project',
       } as Env,
       'manual',
-      { now: () => at + 1, diagnose }
+      { now: () => at + 1, diagnose, readEngagement: noEngagement }
     );
     expect(result).toMatchObject({ ideasCreated: 0, groupsSkipped: 1 });
     expect(main.prepare('SELECT COUNT(*) AS count FROM tasks').get()).toEqual({ count: 0 });
@@ -985,7 +1002,7 @@ describe('platform feedback triage', () => {
         PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project',
       } as Env,
       'manual',
-      { now: () => at + 10, diagnose }
+      { now: () => at + 10, diagnose, readEngagement: noEngagement }
     );
 
     expect(result).toMatchObject({ groupsFound: 2, ideasCreated: 1, groupsFailed: 1 });
@@ -1039,7 +1056,7 @@ describe('platform feedback triage', () => {
         PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT: '1',
       } as Env,
       'manual',
-      { now: () => at + 1000, diagnose }
+      { now: () => at + 1000, diagnose, readEngagement: noEngagement }
     );
 
     expect(result).toMatchObject({ groupsFound: 1, ideasCreated: 1 });
@@ -1083,7 +1100,11 @@ describe('platform feedback triage', () => {
       PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES: '1',
     } as Env;
 
-    const first = await runPlatformFeedbackTriage(env, 'cron', { now: () => at + 1, diagnose });
+    const first = await runPlatformFeedbackTriage(env, 'cron', {
+      now: () => at + 1,
+      diagnose,
+      readEngagement: noEngagement,
+    });
     const deferredUntil = Date.parse('2026-07-30T00:00:00.000Z');
     expect(first).toMatchObject({
       groupsBudgetDeferred: 1,
@@ -1111,6 +1132,7 @@ describe('platform feedback triage', () => {
     const beforeRefresh = await runPlatformFeedbackTriage(env, 'cron', {
       now: () => at + 5_000,
       diagnose,
+      readEngagement: noEngagement,
     });
     expect(beforeRefresh).toMatchObject({ groupsSkipped: 1, ideasCreated: 0 });
     expect(diagnose).toHaveBeenCalledTimes(1);
@@ -1118,6 +1140,7 @@ describe('platform feedback triage', () => {
     const afterRefresh = await runPlatformFeedbackTriage(env, 'cron', {
       now: () => deferredUntil + 2 * 60 * 60_000,
       diagnose,
+      readEngagement: noEngagement,
     });
     expect(afterRefresh).toMatchObject({
       groupsBudgetDeferred: 0,
@@ -1184,11 +1207,19 @@ describe('platform feedback triage', () => {
       diagnosis: 'redacted',
     })) as unknown as typeof runDebugDiagnosis;
 
-    const first = await runPlatformFeedbackTriage(env, 'cron', { now: () => at + 100, diagnose });
+    const first = await runPlatformFeedbackTriage(env, 'cron', {
+      now: () => at + 100,
+      diagnose,
+      readEngagement: noEngagement,
+    });
     expect(first).toMatchObject({ ideasCreated: 0, groupsSkipped: 1 });
     expect(diagnose).not.toHaveBeenCalled();
 
-    const second = await runPlatformFeedbackTriage(env, 'cron', { now: () => at + 1000, diagnose });
+    const second = await runPlatformFeedbackTriage(env, 'cron', {
+      now: () => at + 1000,
+      diagnose,
+      readEngagement: noEngagement,
+    });
     expect(second).toMatchObject({ ideasCreated: 1, groupsSkipped: 0, groupsFailed: 0 });
     expect(diagnose).toHaveBeenCalledTimes(1);
     const recovered = main
@@ -1229,9 +1260,21 @@ describe('platform feedback triage', () => {
       PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES: '2',
     } as Env;
 
-    const first = await runPlatformFeedbackTriage(env, 'manual', { now: () => at + 1, diagnose });
-    const second = await runPlatformFeedbackTriage(env, 'manual', { now: () => at + 2, diagnose });
-    const third = await runPlatformFeedbackTriage(env, 'manual', { now: () => at + 3, diagnose });
+    const first = await runPlatformFeedbackTriage(env, 'manual', {
+      now: () => at + 1,
+      diagnose,
+      readEngagement: noEngagement,
+    });
+    const second = await runPlatformFeedbackTriage(env, 'manual', {
+      now: () => at + 2,
+      diagnose,
+      readEngagement: noEngagement,
+    });
+    const third = await runPlatformFeedbackTriage(env, 'manual', {
+      now: () => at + 3,
+      diagnose,
+      readEngagement: noEngagement,
+    });
 
     expect(first).toMatchObject({ groupsFailed: 1, groupsSkipped: 0 });
     expect(second).toMatchObject({ groupsFailed: 1, groupsSkipped: 0 });
@@ -1309,7 +1352,7 @@ describe('platform feedback triage', () => {
         PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project',
       } as Env,
       'manual',
-      { now: () => at + 10, diagnose }
+      { now: () => at + 10, diagnose, readEngagement: noEngagement }
     );
 
     expect(result).toMatchObject({ groupsFound: 1, ideasCreated: 1 });
@@ -1382,7 +1425,7 @@ describe('platform feedback triage', () => {
         PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES: '60',
       } as Env,
       'manual',
-      { now: () => at + 60_000, diagnose }
+      { now: () => at + 60_000, diagnose, readEngagement: noEngagement }
     );
 
     expect(result).toMatchObject({ groupsFound: 50, ideasCreated: 50 });
@@ -1410,10 +1453,18 @@ describe('platform feedback triage', () => {
       OBSERVABILITY_DATABASE: createSqliteD1(observability),
       PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project',
     } as Env;
-    await runPlatformFeedbackTriage(env, 'manual', { now: () => at + 1, diagnose });
+    await runPlatformFeedbackTriage(env, 'manual', {
+      now: () => at + 1,
+      diagnose,
+      readEngagement: noEngagement,
+    });
     main.prepare("UPDATE tasks SET status = 'ready'").run();
     insert.run('223e4567-e89b-42d3-a456-426614174000', 'api', 'error', 'failure 67890', at + 2);
-    const repeat = await runPlatformFeedbackTriage(env, 'cron', { now: () => at + 3, diagnose });
+    const repeat = await runPlatformFeedbackTriage(env, 'cron', {
+      now: () => at + 3,
+      diagnose,
+      readEngagement: noEngagement,
+    });
     expect(repeat).toMatchObject({ ideasUpdated: 0, groupsSkipped: 1 });
     expect(main.prepare('SELECT occurrence_count FROM platform_feedback_triages').get()).toEqual({
       occurrence_count: 2,

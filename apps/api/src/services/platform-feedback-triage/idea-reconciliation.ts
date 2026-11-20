@@ -45,7 +45,8 @@ import { positive } from './numbers';
 import type { FeedbackErrorGroup } from './types';
 
 /** Generated body markers of a pre-ownership idea (`ideaDescription` before 2026-11). */
-const LEGACY_BODY_PREFIX = '## Maintainer Instructions%Triage this automated platform feedback report%';
+const LEGACY_BODY_PREFIX =
+  '## Maintainer Instructions%Triage this automated platform feedback report%';
 const LEGACY_TITLE_PATTERN = 'Recurring % platform error';
 const TERMINAL_INCIDENT_SQL = "('resolved', 'rejected', 'expired')";
 
@@ -108,7 +109,7 @@ async function untouchedOnly(ctx: StepContext, rows: Candidate[]): Promise<Candi
 async function adoptLegacyIdeas(ctx: StepContext): Promise<void> {
   while (ctx.now() < ctx.deadlineAt) {
     const rows = await ctx.env.DATABASE.prepare(
-      `SELECT triage.signature, triage.idea_id
+      `SELECT triage.signature, triage.idea_id, idea.updated_at
        FROM platform_feedback_triages triage
        JOIN tasks idea ON idea.id = triage.idea_id
        WHERE triage.idea_owned_at IS NULL
@@ -117,29 +118,40 @@ async function adoptLegacyIdeas(ctx: StepContext): Promise<void> {
          AND idea.status = 'draft' AND idea.priority = 0
          AND idea.title LIKE ?
          AND idea.description LIKE ?
-         AND substr(rtrim(idea.description), -3) = '\`\`\`'
+         AND substr(rtrim(idea.description, char(9, 10, 13, 32)), -3) = '\`\`\`'
        ORDER BY triage.signature
        LIMIT ?`
     )
       .bind(ctx.projectId, LEGACY_TITLE_PATTERN, LEGACY_BODY_PREFIX, ctx.batchSize)
-      .all<Candidate>();
+      .all<Candidate & { updated_at: string }>();
     const batch = rows.results ?? [];
     if (batch.length === 0) return;
     const untouched = await untouchedOnly(ctx, batch);
+    const updatedAt = new Map(batch.map((row) => [row.signature, row.updated_at]));
     if (untouched.length > 0) {
-      // Record the idea's current timestamp as the pipeline's own write. The compare keeps a
-      // write that landed since the select from being adopted.
-      await ctx.env.DATABASE.batch(
+      // Compare-and-set on the `updated_at` read with the candidate: an edit that lands while
+      // the Durable Object is being read moves it, and that idea is not adopted. It then fails
+      // the selector's shape checks or stays NULL until the next run re-reads it.
+      const results = await ctx.env.DATABASE.batch(
         untouched.map((row) =>
           ctx.env.DATABASE.prepare(
-            `UPDATE platform_feedback_triages
-             SET idea_owned_at = (SELECT updated_at FROM tasks WHERE id = ?),
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE signature = ? AND idea_id = ? AND idea_owned_at IS NULL`
-          ).bind(row.idea_id, row.signature, row.idea_id)
+            `UPDATE platform_feedback_triages SET idea_owned_at = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE signature = ? AND idea_id = ? AND idea_owned_at IS NULL
+               AND EXISTS (SELECT 1 FROM tasks WHERE id = ? AND updated_at = ?
+                           AND status = 'draft' AND priority = 0)`
+          ).bind(
+            updatedAt.get(row.signature),
+            row.signature,
+            row.idea_id,
+            row.idea_id,
+            updatedAt.get(row.signature)
+          )
         )
       );
-      ctx.result.adopted += untouched.length;
+      const adopted = results.reduce((sum, item) => sum + (item.meta.changes ?? 0), 0);
+      ctx.result.adopted += adopted;
+      // A lost compare leaves the row selectable; stop rather than spin on it this run.
+      if (adopted < untouched.length) return;
     }
   }
   ctx.result.deadlineReached = true;
@@ -180,10 +192,7 @@ async function closeEndedIncidentIdeas(ctx: StepContext): Promise<void> {
   ctx.result.deadlineReached = true;
 }
 
-async function representativeMessage(
-  env: Env,
-  evidenceRefs: string
-): Promise<string | null> {
+async function representativeMessage(env: Env, evidenceRefs: string): Promise<string | null> {
   const ids = parseStoredEvidenceRefs(evidenceRefs, 5).map((item) => item.errorId);
   if (ids.length === 0) return null;
   const row = await env.OBSERVABILITY_DATABASE.prepare(
@@ -235,12 +244,6 @@ async function retitleLegacyIdeas(ctx: StepContext): Promise<void> {
       if (!raw) continue;
       const message = displayPlatformErrorMessage(raw);
       const summary = platformErrorSummary(row.source, message);
-      await ctx.env.DATABASE.prepare(
-        `UPDATE platform_feedback_triages SET summary = ?, updated_at = CURRENT_TIMESTAMP
-         WHERE signature = ? AND summary LIKE ?`
-      )
-        .bind(summary, row.signature, LEGACY_TITLE_PATTERN)
-        .run();
       const group: FeedbackErrorGroup = {
         signature: row.signature,
         source: row.source,
@@ -252,6 +255,8 @@ async function retitleLegacyIdeas(ctx: StepContext): Promise<void> {
         evidence: parseStoredEvidenceRefs(row.evidence_refs, 10),
         count: row.occurrence_count,
       };
+      // Idea first, then the stored summary: if the idea write throws, the row keeps the
+      // legacy summary and is retried next run instead of leaving with a generic idea title.
       const updated = await refreshOwnedIdea(ctx.env, {
         group,
         signature: row.signature,
@@ -260,7 +265,14 @@ async function retitleLegacyIdeas(ctx: StepContext): Promise<void> {
         diagnosisId: row.diagnosis_id ?? 'pending',
         ideaTitleMaxLength: ctx.ideaTitleMaxLength,
         writtenAt: new Date(ctx.now()).toISOString(),
+        title: summary,
       });
+      await ctx.env.DATABASE.prepare(
+        `UPDATE platform_feedback_triages SET summary = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE signature = ? AND summary LIKE ?`
+      )
+        .bind(summary, row.signature, LEGACY_TITLE_PATTERN)
+        .run();
       if (updated) ctx.result.retitled += 1;
     }
   }
@@ -290,8 +302,7 @@ export async function reconcileIncidentIdeas(
   if (!projectId) return result;
   result.enabled = true;
   const now = deps.now ?? Date.now;
-  const settings =
-    deps.batchSize && deps.deadlineMs ? null : await resolveFleetOpsSettings(env);
+  const settings = deps.batchSize && deps.deadlineMs ? null : await resolveFleetOpsSettings(env);
   const ctx: StepContext = {
     env,
     projectId,
@@ -300,7 +311,10 @@ export async function reconcileIncidentIdeas(
     batchSize: deps.batchSize ?? settings?.incidentIdeaReconcileBatchSize ?? 1,
     ideaTitleMaxLength:
       deps.ideaTitleMaxLength ??
-      positive(env.SAM_IDEA_TITLE_MAX_LENGTH, DEFAULT_PLATFORM_FEEDBACK_TRIAGE_IDEA_TITLE_MAX_LENGTH),
+      positive(
+        env.SAM_IDEA_TITLE_MAX_LENGTH,
+        DEFAULT_PLATFORM_FEEDBACK_TRIAGE_IDEA_TITLE_MAX_LENGTH
+      ),
     readEngagement: deps.readEngagement ?? readIdeaEngagement,
     result,
   };

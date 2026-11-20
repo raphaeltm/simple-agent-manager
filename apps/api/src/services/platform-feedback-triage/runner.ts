@@ -23,7 +23,7 @@ import {
   nextUtcDayStart,
   sanitizeFailureReason,
 } from './grouping';
-import { refreshOwnedIdea } from './idea-refresh';
+import { ownedIdeaStillUntouched, refreshOwnedIdea } from './idea-refresh';
 import { positive } from './numbers';
 import {
   annotateNodeAgentVersions,
@@ -230,15 +230,23 @@ export async function runPlatformFeedbackTriage(
     if (existing?.idea_id) {
       // One idea per signature: a re-occurrence refreshes the idea the pipeline still owns and
       // leaves an idea someone has taken up exactly as they left it.
-      const updated = await refreshOwnedIdea(env, {
-        group,
-        signature: group.signature,
-        ideaId: existing.idea_id,
-        projectId: project.id,
-        diagnosisId: existing.diagnosis_id ?? 'pending',
-        ideaTitleMaxLength,
-        writtenAt: new Date(now).toISOString(),
-      });
+      const untouched = await ownedIdeaStillUntouched(
+        env,
+        project.id,
+        group.signature,
+        deps.readEngagement
+      );
+      const updated =
+        untouched &&
+        (await refreshOwnedIdea(env, {
+          group,
+          signature: group.signature,
+          ideaId: existing.idea_id,
+          projectId: project.id,
+          diagnosisId: existing.diagnosis_id ?? 'pending',
+          ideaTitleMaxLength,
+          writtenAt: new Date(now).toISOString(),
+        }));
       if (updated) result.ideasUpdated += 1;
       else result.groupsSkipped += 1;
       continue;

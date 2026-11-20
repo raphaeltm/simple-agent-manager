@@ -66,6 +66,7 @@ export function scheduleHourlyPlatformMaintenance(
         incidentIdeasRetitled: incidentIdeas?.retitled ?? 0,
         incidentIdeasReleased: incidentIdeas?.released ?? 0,
         incidentIdeasFailedSteps: incidentIdeas?.failedSteps ?? [],
+        incidentIdeasDeadlineReached: incidentIdeas?.deadlineReached ?? false,
         monthlyCostUsersUpdated: result?.usersUpdated ?? 0,
         monthlyCostTotalEntries: result?.totalEntries ?? 0,
         monthlyCostErrors: result?.errors ?? 0,

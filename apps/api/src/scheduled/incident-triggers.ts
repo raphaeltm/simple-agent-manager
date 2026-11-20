@@ -31,7 +31,7 @@ import {
 import { renderTemplate } from '../services/trigger-template';
 import {
   logIncidentDispatchDecline,
-  releaseEngagedIdeasBeforeDispatch,
+  releaseEngagedIdeasUntilStable,
 } from './incident-trigger-diagnostics';
 
 export interface IncidentTriggerSweepStats {
@@ -304,24 +304,6 @@ export async function runIncidentTriggerSweep(
       config,
       summaryOptions
     );
-    if (summary.pendingCount > 0) {
-      const released = await releaseEngagedIdeasBeforeDispatch(
-        env,
-        projectId,
-        summary.incidents,
-        deps.readEngagement
-      );
-      if (released.length > 0) {
-        base.releasedIdeas += released.length;
-        summary = await buildIncidentBacklogSummary(
-          env,
-          config.summaryLimit,
-          now,
-          config,
-          summaryOptions
-        );
-      }
-    }
     base.pendingIncidents = Math.max(base.pendingIncidents, summary.pendingCount);
     if (summary.pendingCount === 0) {
       base.stalledIncidents = await logIncidentDispatchDecline(env, {
@@ -352,6 +334,30 @@ export async function runIncidentTriggerSweep(
         dispatchRateWindowMs: config.dispatchRateWindowMs,
       });
       continue;
+    }
+
+    // Only now, when this tick would actually dispatch, read the Durable Object for chats,
+    // notes, files or pull requests on the incidents' own ideas (`idea-ownership.ts`).
+    const recheck = await releaseEngagedIdeasUntilStable(env, {
+      projectId,
+      summary,
+      rebuild: () =>
+        buildIncidentBacklogSummary(env, config.summaryLimit, now, config, summaryOptions),
+      readEngagement: deps.readEngagement,
+    });
+    base.releasedIdeas += recheck.released;
+    if (!recheck.summary) {
+      // The read failed: dispatching could hand someone's in-progress work to a triage run.
+      base.skipped += 1;
+      continue;
+    }
+    summary = recheck.summary;
+    if (summary.pendingCount === 0) {
+      base.stalledIncidents = await logIncidentDispatchDecline(env, {
+        ...declineContext,
+        cause: 'no_dispatchable_incidents',
+      });
+      break;
     }
 
     const signatures = summary.incidents.map((incident) => incident.id);

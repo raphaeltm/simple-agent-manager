@@ -185,6 +185,27 @@ export function isLegacyGenericSummary(summary: string | null | undefined): bool
   return LEGACY_GENERIC_SUMMARY.test(summary ?? '');
 }
 
+/** `password=…`, `api_key: …`, `client-secret=…`: a value after a secret-named key. */
+const SECRET_ASSIGNMENT =
+  /\b(password|passwd|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|client[_-]?secret|credentials?)(\s*[:=]\s*)(?!\[)\S+/gi;
+const BEARER_VALUE = /\b(bearer|basic)\s+(?!\[)[A-Za-z0-9._~+/=-]{8,}/gi;
+/** A long run mixing letters and digits: provider tokens with no known prefix. */
+const UNSHAPED_TOKEN =
+  /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*[A-Za-z])(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{24,}(?![A-Za-z0-9_-])/g;
+
+/**
+ * Extra scrubbing for text that becomes an idea title or body. `redactSensitiveData` knows
+ * secret formats with a recognisable shape; a token with no known prefix (Hetzner, Vultr) or a
+ * `password=…` pair would otherwise survive into a durable, searchable title. Not applied to
+ * the signature, so grouping is unchanged.
+ */
+function scrubUnshapedSecrets(value: string): string {
+  return value
+    .replace(SECRET_ASSIGNMENT, '$1$2[redacted]')
+    .replace(BEARER_VALUE, '$1 [redacted]')
+    .replace(UNSHAPED_TOKEN, '[id]');
+}
+
 /**
  * The redacted, normalized message in its original case: the same redaction and token
  * placeholders as the signature, so it never carries ids, urls, emails, numbers or quoted
@@ -199,8 +220,10 @@ export function displayPlatformErrorMessage(message: string): string {
     })
     .join('');
   return (
-    printable.replace(/\s+/g, ' ').trim().slice(0, PLATFORM_ERROR_MESSAGE_GROUP_MAX_LENGTH) ||
-    'redacted platform error'
+    scrubUnshapedSecrets(printable)
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, PLATFORM_ERROR_MESSAGE_GROUP_MAX_LENGTH) || 'redacted platform error'
   );
 }
 

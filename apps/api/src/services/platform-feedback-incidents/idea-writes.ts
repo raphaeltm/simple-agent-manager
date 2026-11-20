@@ -5,6 +5,7 @@
  * one records the new `updated_at` it wrote, in the same D1 batch, so ownership survives it.
  */
 import type { Env } from '../../env';
+import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { PIPELINE_IDEA_TRIGGERED_BY } from './idea-ownership';
 
@@ -16,6 +17,17 @@ export interface OwnedIdeaTarget {
   signature: string;
   ideaId: string;
   projectId: string;
+}
+
+/** A refused write is expected (someone engaged with the idea); it is logged so it is countable. */
+function logOwnershipLost(write: 'update' | 'cancel', target: OwnedIdeaTarget) {
+  log.info('platform_feedback_incident.idea_write_refused', {
+    write,
+    reason: 'not_owned_by_pipeline',
+    ideaId: target.ideaId,
+    projectId: target.projectId,
+    signature: target.signature.slice(0, 16),
+  });
 }
 
 function recordOwnership(env: Env, target: OwnedIdeaTarget, writtenAt: string) {
@@ -42,7 +54,10 @@ export async function updateOwnedIncidentIdea(
   )
     .bind(target.ideaId, target.projectId, target.signature, target.ideaId)
     .first<{ status: string }>();
-  if (!before || !['draft', 'cancelled'].includes(before.status)) return false;
+  if (!before || !['draft', 'cancelled'].includes(before.status)) {
+    logOwnershipLost('update', target);
+    return false;
+  }
   const statements = [
     env.DATABASE.prepare(
       `UPDATE tasks SET title = COALESCE(?, title), description = ?, status = 'draft',
@@ -76,7 +91,9 @@ export async function updateOwnedIncidentIdea(
     );
   }
   const results = await env.DATABASE.batch(statements);
-  return (results[0]?.meta.changes ?? 0) === 1;
+  const written = (results[0]?.meta.changes ?? 0) === 1;
+  if (!written) logOwnershipLost('update', target);
+  return written;
 }
 
 /**
@@ -101,5 +118,7 @@ export async function cancelOwnedIncidentIdea(
        WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ? AND updated_at = ? AND status = 'cancelled')`
     ).bind(ulid(), target.ideaId, reason, writtenAt, target.ideaId, writtenAt),
   ]);
-  return (results[0]?.meta.changes ?? 0) === 1;
+  const written = (results[0]?.meta.changes ?? 0) === 1;
+  if (!written) logOwnershipLost('cancel', target);
+  return written;
 }
