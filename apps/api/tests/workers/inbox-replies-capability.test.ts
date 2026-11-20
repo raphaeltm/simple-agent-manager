@@ -16,6 +16,7 @@ import { requireApproved, requireAuth } from '../../src/middleware/auth';
 import { registerChatPromptRoute } from '../../src/routes/chat-prompt-route';
 import { acpInteractionCallbackRoute } from '../../src/routes/projects/acp-interaction-callback';
 import { decrypt } from '../../src/services/encryption';
+import { rejectInboxReplyPermission } from '../../src/services/inbox/reject-reply-permission';
 import { signCallbackToken } from '../../src/services/jwt';
 import {
   callTool,
@@ -60,7 +61,7 @@ describe('inbox reply capability through real routes and Durable Objects', () =>
     vi.unstubAllGlobals();
   });
 
-  it('a permission reply selects the actual reject option before accepting the chat prompt', async () => {
+  it('a permission reply persists its rejection and replays it from ProjectData without a self-RPC deadlock', async () => {
     testEnv.ACP_INTERACTIONS_ENABLED = 'true';
     const s = await seed();
     const interactionId = crypto.randomUUID();
@@ -135,9 +136,36 @@ describe('inbox reply capability through real routes and Durable Objects', () =>
       optionId: 'no-specific',
     });
     const snapshot = await s.project.getDurableExecutionSnapshot(s.chatSessionId);
-    expect(snapshot.deliveries.find((entry) => entry.id === reply.body.deliveryId)).toMatchObject({
+    const delivery = snapshot.deliveries.find((entry) => entry.id === reply.body.deliveryId)!;
+    expect(delivery).toMatchObject({
       sourceKind: 'inbox_reply',
+      metadata: {
+        inboxReplyPermission: {
+          interactionId,
+          answer: {
+            decision: { kind: 'selected_option', optionId: 'no-specific' },
+          },
+        },
+      },
     });
+    // Delivery preparation runs inside this same ProjectData object. Its permission answer
+    // authorizes through getSessionAccess on this object's stub: exercise that reentrant RPC.
+    const replay = await runInDurableObject(s.project, async () =>
+      rejectInboxReplyPermission(testEnv, {
+        projectId: s.projectId,
+        claim: { message: delivery, attemptId: 'permission-replay', mode: 'submit' },
+      })
+    );
+    expect(replay).toBeNull();
+    const afterReplay = await runInDurableObject(store, async (_instance, state) =>
+      state.storage.sql
+        .exec(
+          'SELECT state, encrypted_decision, decision_iv FROM interactions WHERE interaction_id = ?',
+          interactionId
+        )
+        .one()
+    );
+    expect(afterReplay).toEqual(interaction);
   });
 
   it('preserves every open question, keeps the header out of the transcript, and ordinary chat still closes questions', async () => {
@@ -304,5 +332,47 @@ describe('inbox reply capability through real routes and Durable Objects', () =>
       'Use option B.',
     ]);
     expect(second.body.conversation?.nextResponseCursor).toBeNull();
+  });
+
+  it('pages canonical replies backwards without duplicates and keeps each page chronological', async () => {
+    const previousLimit = testEnv.CHAT_SESSION_MESSAGE_LIMIT;
+    testEnv.CHAT_SESSION_MESSAGE_LIMIT = '2';
+    try {
+      const s = await seed();
+      const item = await ask(s, 'Which release should we ship?');
+      const ids: string[] = [];
+      // Two full pages and a remainder exercise the real chat page cap and exact cursor.
+      for (let index = 0; index < 5; index += 1) {
+        const sent = await post(`${itemPath(s, item.ref)}/reply`, s.ownerCookie, {
+          content: `Reply ${index}`,
+        });
+        expect(sent.status).toBe(202);
+        ids.push(String(sent.body.messageId));
+      }
+      let cursor: string | null = null;
+      const received: string[] = [];
+      for (const expected of [ids.slice(3), ids.slice(1, 3), ids.slice(0, 1)]) {
+        const suffix = cursor ? `?replyCursor=${encodeURIComponent(cursor)}` : '';
+        const page = await get<InboxItemResponse>(
+          `${itemPath(s, item.ref)}${suffix}`,
+          s.ownerCookie
+        );
+        expect(page.status).toBe(200);
+        const conversation = page.body.conversation!;
+        expect(conversation.replies.map((reply) => reply.id)).toEqual(expected);
+        expect(conversation.replies.map((reply) => reply.content)).toEqual(
+          expected.map((id) => `Reply ${ids.indexOf(id)}`)
+        );
+        received.push(...conversation.replies.map((reply) => reply.id));
+        cursor = conversation.nextReplyCursor;
+        expect(conversation.hasMore).toBe(received.length < ids.length);
+      }
+      expect(cursor).toBeNull();
+      expect(new Set(received).size).toBe(5);
+      expect([...received].sort()).toEqual([...ids].sort());
+    } finally {
+      if (previousLimit === undefined) delete testEnv.CHAT_SESSION_MESSAGE_LIMIT;
+      else testEnv.CHAT_SESSION_MESSAGE_LIMIT = previousLimit;
+    }
   });
 });

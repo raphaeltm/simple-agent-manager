@@ -171,6 +171,7 @@ Their message:
       metadata: {
         userId,
         ...(inboxReply ? { inboxRef: inboxReply.ref } : {}),
+        ...(inboxReply?.permission ? { inboxReplyPermission: inboxReply.permission } : {}),
         wake: agentWakeRecord(wake),
         ...(names
           ? {
@@ -182,6 +183,7 @@ Their message:
         ...(attachments.length > 0 ? { attachments } : {}),
       },
     });
+    await inboxReply?.afterAcceptance?.();
     return {
       accepted: true,
       status: 'queued',

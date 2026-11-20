@@ -134,6 +134,9 @@ export interface InboxChatDelivery {
   ref: string;
   title: string;
   deliveryId: string;
+  /** Persisted with the prompt so its delivery owns a retryable permission rejection. */
+  permission?: { interactionId: string; answer: AcpInteractionBrowserAnswer };
+  afterAcceptance?: () => Promise<void>;
   /** Runs once after send validation, before accepting the durable message. */
   beforeDelivery: () => Promise<void>;
 }

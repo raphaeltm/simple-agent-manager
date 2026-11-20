@@ -62,6 +62,7 @@ export async function replyToInboxItem(
       { optionId: reject.id }
     );
   }
+  const preparedPermission = permission;
   const messageId = ulid();
   const sessionId = item.sessionId;
   let recorded = false;
@@ -73,16 +74,39 @@ export async function replyToInboxItem(
         ref: item.ref,
         title: item.title,
         deliveryId: messageId,
+        ...(preparedPermission && item.answerSpec.type === 'interaction'
+          ? {
+              permission: {
+                interactionId: item.answerSpec.interactionId ?? '',
+                answer: preparedPermission,
+              },
+              async afterAcceptance() {
+                // The canonical prompt is already durable. A failed immediate rejection is
+                // retried by the delivery adapter before it can deliver this prompt.
+                try {
+                  await ctx.ports.chat.answerAgentInteraction(
+                    ctx.actor.userId,
+                    item.projectId,
+                    sessionId,
+                    item.answerSpec.type === 'interaction'
+                      ? (item.answerSpec.interactionId ?? '')
+                      : '',
+                    preparedPermission
+                  );
+                } catch (error) {
+                  console.warn(
+                    JSON.stringify({
+                      event: 'inbox.reply_permission_rejection_queued',
+                      projectId: item.projectId,
+                      ref: item.ref,
+                      errorName: error instanceof Error ? error.name : 'Error',
+                    })
+                  );
+                }
+              },
+            }
+          : {}),
         async beforeDelivery() {
-          if (permission && item.answerSpec.type === 'interaction') {
-            await ctx.ports.chat.answerAgentInteraction(
-              ctx.actor.userId,
-              item.projectId,
-              sessionId,
-              item.answerSpec.interactionId ?? '',
-              permission
-            );
-          }
           // Before acceptance: even an immediate agent respond/update observes this reply.
           await ctx.env.DATABASE.prepare(
             'INSERT INTO inbox_replies (project_id, item_ref, user_id, message_id, replied_at, permission_rejected) VALUES (?, ?, ?, ?, ?, ?)'

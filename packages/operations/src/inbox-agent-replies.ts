@@ -64,9 +64,19 @@ export async function respondToAgentInboxItem(
     );
   await requireSourceItem(ctx, source, input.ref);
   const watermark = await inboxReplyWatermark(ctx, source.projectId, input.ref);
+  // Repeating this response in the same reply epoch repairs a failed D1 acknowledgement
+  // through the comment core's durable receipt, without creating a second response thread.
+  const digest = new Uint8Array(
+    await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode(JSON.stringify([source.sessionId, input.ref, watermark, body]))
+    )
+  );
+  const clientMutationId = `inbox-response:${Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
   const created = await ctx.ports.inboxTasks.createComment(source.projectId, {
     askId: inboxCommentAnchor(input.ref),
     body,
+    clientMutationId,
     actor: { kind: 'agent', id: source.sessionId, name: null },
   });
   await markInboxAgentActed(ctx, source.projectId, input.ref, watermark);
@@ -88,7 +98,7 @@ export async function resolveAgentInboxItem(
   const now = Date.now();
   // Select the latest reply in the same statement that closes the ask. No human notice: the
   // agent already read the reply. Never resolve a different chat's item or a human task.
-  const closed = await ctx.env.DATABASE.prepare(
+  const close = ctx.env.DATABASE.prepare(
     `UPDATE asks SET status = 'answered',
       answer_json = json_object('messageId', (SELECT message_id FROM inbox_replies
         WHERE project_id = asks.project_id AND item_ref = ?
@@ -101,19 +111,51 @@ export async function resolveAgentInboxItem(
         AND kind IN ('question', 'review', 'result')
         AND EXISTS (SELECT 1 FROM inbox_replies WHERE project_id = asks.project_id AND item_ref = ?)
       RETURNING answer_json, kind, blocking`
-  )
-    .bind(
+  ).bind(
+    input.ref,
+    input.ref,
+    now,
+    now,
+    now,
+    parsed.id,
+    source.projectId,
+    source.sessionId,
+    input.ref
+  );
+  // Closing the ask and acknowledging its replies are one D1 transaction. Bound the
+  // acknowledgement to the selected answer, so a concurrently admitted later reply is untouched.
+  const results = await ctx.env.DATABASE.batch([
+    close,
+    ctx.env.DATABASE.prepare(
+      `UPDATE inbox_replies SET agent_acted_at = ?
+       WHERE project_id = ? AND item_ref = ? AND id <= (
+         SELECT r.id FROM asks a JOIN inbox_replies r
+           ON r.project_id = a.project_id AND r.item_ref = ?
+             AND r.message_id = json_extract(a.answer_json, '$.messageId')
+         WHERE a.id = ? AND a.project_id = ? AND a.source_session_id = ?
+           AND a.status = 'answered' AND a.kind IN ('question', 'review', 'result'))`
+    ).bind(
+      now,
+      source.projectId,
       input.ref,
       input.ref,
-      now,
-      now,
-      now,
       parsed.id,
       source.projectId,
-      source.sessionId,
-      input.ref
-    )
-    .first<{ answer_json: string; kind: string; blocking: number }>();
+      source.sessionId
+    ),
+  ]);
+  const closedRow = results[0]?.results?.[0];
+  const closed =
+    closedRow === undefined
+      ? undefined
+      : v.parse(
+          v.object({
+            answer_json: v.string(),
+            kind: v.string(),
+            blocking: v.number(),
+          }),
+          closedRow
+        );
   if (!closed)
     throw new OperationError(
       'conflict',

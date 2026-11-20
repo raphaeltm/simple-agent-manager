@@ -49,7 +49,7 @@ vi.mock('../../../src/services/mention-enrichment', () => ({
 vi.mock('../../../src/services/project-data', async (original) => ({
   ...(await original<typeof import('../../../src/services/project-data')>()),
   acceptPromptDelivery: edge.accept,
-  getMessages: async () => ({ messages: [...edge.messages].reverse(), hasMore: false }),
+  getMessages: async () => ({ messages: [...edge.messages], hasMore: false }),
   getSessionAccess: async () => ({ session: { id: 'chat' }, access: { found: true } }),
   listInboxItemCommentThreads: edge.comments,
 }));
@@ -69,7 +69,7 @@ vi.mock('../../../src/services/connector-agent-answer', async (original) => ({
     choice: { optionId: string }
   ) => ({
     answerKey: 'key',
-    decision: { kind: 'selected_option', optionId: choice.optionId, answerHash: 'hash' },
+    decision: { kind: 'selected_option', optionId: choice.optionId, answerHash: 'a'.repeat(64) },
   }),
 }));
 vi.mock('../../../src/routes/chat-acp-interactions', async (original) => ({
@@ -83,6 +83,8 @@ import { handleAppError } from '../../../src/middleware/app-error-handler';
 import { errors } from '../../../src/middleware/error';
 import { createOperationPorts } from '../../../src/operation-ports';
 import { projectInboxRoutes } from '../../../src/routes/inbox';
+import { rejectInboxReplyPermission } from '../../../src/services/inbox/reject-reply-permission';
+import type { VmPromptDeliveryAdapterInput } from '../../../src/services/vm-prompt-delivery-adapter';
 import {
   applySqliteMigration,
   createAllSchemaTables,
@@ -321,8 +323,57 @@ describe('inbox replies through the real route on SQLite', () => {
     expect(row.status).toBe('answered');
     expect(JSON.parse(row.answer_json)).toEqual({ messageId: sent.body.messageId });
     expect(row.notified_at).toBeGreaterThan(0);
+    expect((await req('?filter=archived')).body.items[0]).toMatchObject({
+      status: 'answered',
+      withAgent: false,
+    });
+    expect((await req(path(ref))).body.item.withAgent).toBe(false);
     expect(edge.accept).toHaveBeenCalledTimes(1);
     await expect(resolveAgentInboxItem(ctx(), source, { ref: 'secret:secret' })).rejects.toThrow();
+  });
+
+  it('reuses the anchored response receipt when acknowledgement fails, then repairs visibility on retry', async () => {
+    const ref = ask();
+    await req(path(ref, '/reply'), { content: 'What about a project override?' });
+    const context = ctx();
+    const threads = new Map<string, string>();
+    context.ports.inboxTasks.createComment = vi.fn().mockImplementation(async (_project, input) => {
+      const existing = threads.get(input.clientMutationId);
+      const id = existing ?? `thread-${threads.size + 1}`;
+      threads.set(input.clientMutationId, id);
+      return { thread: { id }, commentId: id, idempotent: Boolean(existing) };
+    });
+    sqlite.exec(`CREATE TRIGGER fail_ack BEFORE UPDATE OF agent_acted_at ON inbox_replies
+      BEGIN SELECT RAISE(ABORT, 'ack unavailable'); END`);
+    await expect(
+      respondToAgentInboxItem(context, source, { ref, body: 'Yes, use the override.' })
+    ).rejects.toThrow('ack unavailable');
+    expect(threads.size).toBe(1);
+    expect((await req('/count')).body.needsYou).toBe(0);
+    sqlite.exec('DROP TRIGGER fail_ack');
+    await expect(
+      respondToAgentInboxItem(context, source, { ref, body: 'Yes, use the override.' })
+    ).resolves.toMatchObject({ thread: { id: 'thread-1' } });
+    expect(threads.size).toBe(1);
+    const calls = vi.mocked(context.ports.inboxTasks.createComment).mock.calls;
+    expect(calls[0][1].clientMutationId).toBeTruthy();
+    expect(calls[1][1].clientMutationId).toBe(calls[0][1].clientMutationId);
+    expect((await req('/count')).body.needsYou).toBe(1);
+  });
+
+  it('rolls back ask resolution if acknowledging its replies fails', async () => {
+    const ref = ask();
+    await req(path(ref, '/reply'), { content: 'Per project.' });
+    sqlite.exec(`CREATE TRIGGER fail_ack BEFORE UPDATE OF agent_acted_at ON inbox_replies
+      BEGIN SELECT RAISE(ABORT, 'ack unavailable'); END`);
+    await expect(resolveAgentInboxItem(ctx(), source, { ref })).rejects.toThrow('ack unavailable');
+    expect(sqlite.prepare('SELECT status FROM asks').get()).toEqual({ status: 'open' });
+    expect((await req('?filter=archived')).body.items[0].withAgent).toBe(true);
+    sqlite.exec('DROP TRIGGER fail_ack');
+    await expect(resolveAgentInboxItem(ctx(), source, { ref })).resolves.toMatchObject({
+      status: 'answered',
+    });
+    expect((await req('?filter=archived')).body.items[0].withAgent).toBe(false);
   });
 
   it('a refused delivery restores the item; foreign project, nonwriter and missing-chat requests write nothing', async () => {
@@ -404,7 +455,7 @@ describe('inbox replies through the real route on SQLite', () => {
       reason: 'acp_interaction_pending',
       metadata: JSON.stringify({
         source: 'acp_interaction',
-        interactionId: 'interaction',
+        interactionId: '11111111-1111-4111-8111-111111111111',
         kind: 'permission',
       }),
       createdAt: 1000,
@@ -424,7 +475,7 @@ describe('inbox replies through the real route on SQLite', () => {
         expiresAt: null,
         source: 'acp_interaction',
         reason: 'acp_interaction_pending',
-        interactionId: 'interaction',
+        interactionId: '11111111-1111-4111-8111-111111111111',
         interactionKind: 'permission',
       }),
     });
@@ -436,7 +487,7 @@ describe('inbox replies through the real route on SQLite', () => {
     }));
     edge.reject.mockResolvedValue([
       {
-        interactionId: 'interaction',
+        interactionId: '11111111-1111-4111-8111-111111111111',
         answerOptions: [
           { id: 'allow', kind: 'allow_once' },
           { id: 'reject-specific', kind: 'reject_once' },
@@ -451,11 +502,34 @@ describe('inbox replies through the real route on SQLite', () => {
       marker.resolvedAt = Date.now();
       sqlite.prepare('UPDATE session_summaries SET attention_json = NULL').run();
     });
+    // A refused durable acceptance must leave the permission untouched and retryable.
+    edge.accept.mockRejectedValueOnce(new Error('ProjectData unavailable'));
+    const failed = await req(path(ref, '/reply'), { content: 'Please use a safer command.' });
+    expect(failed.status).toBe(500);
+    expect(edge.answer).not.toHaveBeenCalled();
+    expect(marker.resolvedAt).toBeNull();
+    expect((await req('/count')).body).toEqual({ needsYou: 1, blocking: 1 });
+    // Acceptance succeeds but the immediate rejection fails; its durable metadata
+    // lets the delivery adapter repair the rejection before forwarding the message.
+    edge.answer.mockRejectedValueOnce(new Error('InteractionStore unavailable'));
     const sent = await req(path(ref, '/reply'), { content: 'Please use a safer command.' });
     expect(sent.status).toBe(202);
-    expect(edge.answer.mock.invocationCallOrder[0]).toBeLessThan(
-      edge.accept.mock.invocationCallOrder[0]
+    expect(edge.accept.mock.invocationCallOrder[1]).toBeLessThan(
+      edge.answer.mock.invocationCallOrder[0]
     );
+    expect(edge.accept.mock.calls[1]![2].metadata.inboxReplyPermission).toMatchObject({
+      interactionId: '11111111-1111-4111-8111-111111111111',
+      answer: { decision: { optionId: 'reject-specific' } },
+    });
+    expect(marker.resolvedAt).toBeNull();
+    const queued = edge.accept.mock.calls[1]![2];
+    expect(
+      await rejectInboxReplyPermission(env, {
+        projectId: 'p',
+        claim: { message: queued } as VmPromptDeliveryAdapterInput['claim'],
+      })
+    ).toBeNull();
+    expect(edge.answer.mock.calls[1]![5]).toEqual(edge.answer.mock.calls[0]![5]);
     expect((await req('/count')).body).toEqual({ needsYou: 0, blocking: 0 });
     expect((await req('?filter=archived')).body.items[0]).toMatchObject({
       ref,
@@ -485,7 +559,7 @@ describe('inbox replies through the real route on SQLite', () => {
     });
     const second = await req(path(ref, '/reply'), { content: 'Thanks, carry on.' });
     expect(second.status).toBe(202);
-    expect(edge.answer).toHaveBeenCalledTimes(1);
+    expect(edge.answer).toHaveBeenCalledTimes(2);
     expect((await req('/count')).body.needsYou).toBe(0);
     const sql = (
       await import('@simple-agent-manager/operations/internal/inbox-list-core')

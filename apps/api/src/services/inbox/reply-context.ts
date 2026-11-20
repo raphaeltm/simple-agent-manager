@@ -53,17 +53,23 @@ export async function readInboxConversation(
       });
     }
   }
-  const last = page.messages.at(-1);
+  // getMessages selects newest first but returns each page in chronological order.
+  // Continue before its oldest scanned row, including rows belonging to another inbox item.
+  const oldest = page.messages[0];
   const nextReplyCursor =
     page.hasMore &&
-    last &&
-    typeof last.createdAt === 'number' &&
-    typeof last.sequence === 'number' &&
-    typeof last.id === 'string'
-      ? formatMessageCursor({ createdAt: last.createdAt, sequence: last.sequence, id: last.id })
+    oldest &&
+    typeof oldest.createdAt === 'number' &&
+    typeof oldest.sequence === 'number' &&
+    typeof oldest.id === 'string'
+      ? formatMessageCursor({
+          createdAt: oldest.createdAt,
+          sequence: oldest.sequence,
+          id: oldest.id,
+        })
       : null;
   return {
-    replies: replies.reverse(),
+    replies,
     responses: comments.threads.filter((t) => t.author.kind === 'agent'),
     nextReplyCursor,
     nextResponseCursor: comments.hasMore ? (comments.threads.at(-1)?.sequence ?? null) : null,
