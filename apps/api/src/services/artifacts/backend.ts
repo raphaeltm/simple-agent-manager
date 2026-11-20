@@ -17,6 +17,18 @@
 import type { Env } from '../../env';
 
 export type ArtifactsBackend = NonNullable<Env['ARTIFACTS']>;
+type ArtifactsRepo = Awaited<ReturnType<ArtifactsBackend['get']>>;
+
+/** Preserve the native binding's RPC contract; fallback tokens can bind runtime identity. */
+export function createArtifactsRuntimeToken(
+  env: Env,
+  repo: ArtifactsRepo,
+  scope: 'read' | 'write',
+  ttl: number,
+  context: NonNullable<Parameters<ArtifactsRepo['createToken']>[2]>
+): ReturnType<ArtifactsRepo['createToken']> {
+  return env.ARTIFACTS ? repo.createToken(scope, ttl) : repo.createToken(scope, ttl, context);
+}
 
 /** Builds the fallback backend for an install with no Artifacts binding, or returns null. */
 export type ArtifactsBackendFallback = (env: Env) => ArtifactsBackend | null;
@@ -45,4 +57,12 @@ export function resolveArtifactsBackendForCleanup(env: Env): ArtifactsBackend | 
 /** Whether this install can create and serve SAM-native (Artifacts) repositories. */
 export function isArtifactsAvailable(env: Env): boolean {
   return resolveArtifactsBackend(env) !== null;
+}
+
+/** Native RPC stubs synthesize properties for unknown methods; never probe optional extensions. */
+export function artifactsBackendExtensions(
+  env: Env,
+  backend: ArtifactsBackend
+): Pick<ArtifactsBackend, 'remoteFetch' | 'importSource'> {
+  return env.ARTIFACTS ? {} : backend;
 }

@@ -414,6 +414,38 @@ headers, no query strings, and no credentials in the path on the routes listed i
 `caddy/log-redaction.caddy` (bootstrap, invite and AI-proxy tokens, preview signatures).
 `docker compose logs celld` is the Worker's output.
 
+## SAM-hosted repositories
+
+The celld build enables SAM-hosted git. Create a project with the Artifacts repository option;
+SAM seeds an empty repository so an agent can clone, commit and push without a GitHub App.
+The repository Durable Object and its `selfhost-hosted-git-v1` migration exist only in celld.
+The Cloudflare Worker never includes them.
+
+Public repository import is unavailable in this slice; an import URL returns a clear 400.
+A bounded importer is tracked in `tasks/backlog/2026-11-19-bounded-selfhost-git-import.md`.
+GitHub and GitLab integrations remain available when configured.
+
+Admin → Settings exposes `repositories.*` limits. Failed GC sweeps retry up to
+`repositories.maxGcAttempts` (default 3), five minutes apart; success resets the budget.
+Exhaustion preserves a failed marker and emits `hosted_git.gc_failed`; a later admitted push
+starts a new cleanup episode. Failed pack ingestion reclaims incomplete rows before the next
+push checks quota. Defaults are 64 MiB per push, 30,000 objects
+10,000 refs and 256 MiB stored per repository, 16 MiB per inflated object, 128 MiB cumulative inflation
+per request, delta depth 100 and 120 seconds per git operation. Operators can lower these
+limits; raising them needs measured capacity review. Rejected pushes leave existing refs intact.
+The storage limit is checked again after a pack and its index are stored; a push that crosses it
+is refused and its pack dropped at once.
+Like git, push ingest hashes every object with SHA-1 collision detection (SHA-1DC) and refuses
+a push carrying a SHA-1 collision-attack block before any ref changes.
+GC first drops whole packs that hold nothing reachable (for example a rejected push) without
+inflating them. Known limit: moving the remaining reachable packed objects to loose storage
+inflates each one under the same decompression budget, so that step cannot finish while more than
+`repositories.maxInflatedBytes` of reachable pushed content waits for collection. Tracked in
+`tasks/backlog/2026-11-19-hosted-git-gc-and-ingest-hardening.md`.
+Clone/push credentials expire and runtime credentials also require the same active workspace
+and callback generation. Deleting a project removes its hosted repository. At the ref limit, delete old refs in a separate
+push before creating replacements; an unvalidated deletion does not reserve space for new refs.
+
 ## Not included yet
 
 This version runs in plaintext mode: celld keeps every Worker secret in plaintext in the fleet
@@ -421,10 +453,6 @@ bucket's deploy manifests, so the bucket credential is the install's master key.
 
 - **Sealed secrets**: no key agent or KMS-backed encryption of the Worker's secrets.
 - **Guided credential login** (sandboxed agent sign-in on the box).
-- **Hosted git.** Every project needs a repository, so on this install users can create projects
-  and run agents only once a GitHub App (the `GITHUB_*` Worker secrets in `.state/secrets.env`)
-  or a GitLab integration is configured.
-  Without one, sign-in, administration and nodes work, but no agent session can start.
 
 Do not put data on this box that you could not afford to lose or leak.
 
