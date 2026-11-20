@@ -30,6 +30,7 @@ import {
   shouldRefreshCallbackToken,
   signCallbackToken,
   verifyCallbackToken,
+  verifyPublishJobClaims,
 } from '../../../src/services/jwt';
 import { LEGACY_JWT_KEY_ID } from '../../../src/services/jwt-keys';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -221,3 +222,19 @@ describe('BetterAuth versioned secrets (better-auth-secrets.ts)', () => {
     expect(options.secrets?.map((s) => s.version)).toEqual([2, 1]);
   });
 });
+
+describe('a misconfigured JWT_PUBLIC_KEY stays a server fault (as on main)', () => {
+  it('is not turned into a 401 by the callback or publish-job verifiers', async () => {
+    const token = await signCallbackToken('ws-1', cloudflareEnvWithEveryRotationVar(), {
+      callbackGeneration: null,
+    });
+    const broken = { ...cloudflareEnvWithEveryRotationVar(), JWT_PUBLIC_KEY: 'not a pem' } as Env;
+    const callback = await verifyCallbackToken(token, broken).catch((error: unknown) => error);
+    const publishJob = await verifyPublishJobClaims(broken, token).catch((error: unknown) => error);
+    for (const error of [callback, publishJob]) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as { statusCode?: number }).statusCode).toBeUndefined();
+    }
+  });
+});
+
