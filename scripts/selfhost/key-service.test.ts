@@ -326,6 +326,33 @@ describe('removing a sealed value (pnpm selfhost:deploy --unset NAME)', () => {
   });
 });
 
+describe('review fixes', () => {
+  // Security review L-2: a plain deploy never writes a key file; only --init does.
+  it('creates the file key only when asked (--init), and says to run --init otherwise', async () => {
+    const s = keyServiceSettings(box(), state);
+    if (!s) throw new Error('key service off');
+    await expect(ensureKeyServiceFiles(s, { createKeyFile: false })).rejects.toThrow(
+      /run pnpm selfhost:deploy --init first/
+    );
+    expect(existsSync(join(state, 'key-agent/kek'))).toBe(false);
+    await ensureKeyServiceFiles(s, { createKeyFile: true });
+    expect(existsSync(join(state, 'key-agent/kek'))).toBe(true);
+  });
+
+  // Security review L-4: secrets.env cannot replace the agent's signing key or channel vars.
+  it.each(['SAM_KEY_AGENT_SIGNING_KEY', 'SAM_KEY_AGENT_ADDRESS', 'SAM_SECRET_BUNDLE_ID'])(
+    'refuses %s in secrets.env',
+    async (name) => {
+      await expect(
+        resolveSealedSecrets(
+          await sealInput({ platformKeysFile: null, operatorSecrets: { [name]: 'x' } })
+        )
+      ).rejects.toThrow(new RegExp(`${name} is set by the sealed deploy`));
+      expect(await bundles()).toEqual([]);
+    }
+  );
+});
+
 describe('agent signing key', () => {
   it('is generated once into the bundle; the Worker gets only its public half', async () => {
     const r = await resolveSealedSecrets(

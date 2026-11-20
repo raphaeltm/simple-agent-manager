@@ -391,7 +391,7 @@ async function main(): Promise<void> {
     tunnelSettings,
     installationId,
     secrets,
-    sealedWorkerVars(keyService, sealed)
+    sealedWorkerVars(keyService, sealed, box)
   );
   // What `celld deploy` gets, and celld stores in the fleet bucket for this version. Sealed: no
   // secret at all. legacy-plaintext: only this in-memory copy and a transient project file

@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
+import { LOCAL_BUNDLE_SUBDIR } from '../../deploy/selfhost/key-agent/bundle-store.ts';
 import { loadBox, log, SELFHOST_DIR } from './backup-cli';
 import { composeArgs, runRestore } from './backup-lib';
 import { expectedComposeProjectFor } from './install-record';
@@ -32,7 +33,7 @@ if (values['print-project']) {
 }
 const manifest = runRestore(ctx, from);
 log(`restored backup of ${manifest.createdAt} (SAM ${manifest.samCommit ?? 'unknown commit'})`);
-if (existsSync(join(ctx.stateDir, 'key-agent', 'bundles'))) {
+if (existsSync(join(ctx.stateDir, LOCAL_BUNDLE_SUBDIR))) {
   // A sealed backup holds no key (backup-lib.ts isKeyServiceSecretPath): the clone needs one.
   log(
     'This backup is sealed. Before --init, give the target the key: with the file key, copy the ' +

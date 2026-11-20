@@ -74,6 +74,7 @@ async function setup(
     wrap?: (p: KeyProvider) => KeyProvider;
     cacheMs?: number;
     staleWaitMs?: number;
+    maxStaleMs?: number;
     noSigningKey?: boolean;
   } = {}
 ) {
@@ -94,6 +95,7 @@ async function setup(
     allowedUids: new Set([7101]),
     cacheMs: options.cacheMs ?? 1000,
     staleWaitMs: options.staleWaitMs,
+    maxStaleMs: options.maxStaleMs,
     connectionTimeoutMs: 500,
     peerUid: () => (options.uid === undefined ? 7101 : options.uid),
     now: () => now,
@@ -343,6 +345,18 @@ describe('cache and key-service failures', () => {
     expect(await within(300, pending)).toBe('timed out');
     state.release?.();
     expect((await pending).status).toBe(200);
+  });
+
+  // Security review M-2: an unreachable key service is ridden out only so long.
+  it('stops serving a stale copy older than the maximum stale age', async () => {
+    const state: { fail: KeyProviderError | null; calls: number } = { fail: null, calls: 0 };
+    const { ask, advance } = await setup({ wrap: flaky(state), maxStaleMs: 5000 });
+    await ask();
+    state.fail = new KeyProviderError('unavailable', 'kms down');
+    advance(1001);
+    expect((await ask()).status).toBe(200); // within the stale age: served
+    advance(5000);
+    expect(await ask()).toEqual({ status: 503, error: 'key_service_unavailable' });
   });
 
   it('drops the copy when the key service refuses (revocation takes effect)', async () => {

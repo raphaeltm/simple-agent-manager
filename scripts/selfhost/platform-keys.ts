@@ -24,6 +24,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { LOCAL_BUNDLE_SUBDIR } from '../../deploy/selfhost/key-agent/bundle-store.ts';
 import { generateDeploySigningKeyPair } from '../deploy/deploy-signing-keys.js';
 import {
   generateEncryptionKey,
@@ -51,7 +52,7 @@ export const PRIOR_DEPLOY_EVIDENCE: readonly string[] = [
   MAIL_COLLECTOR_ENV_FILE,
   // Sealed key bundles: a box that keeps its keys sealed instead of in platform-keys.json, which
   // this deploy cannot open.
-  join('key-agent', 'bundles'),
+  LOCAL_BUNDLE_SUBDIR,
 ];
 
 /** What the deploy is doing: whether it may create or write keys. */

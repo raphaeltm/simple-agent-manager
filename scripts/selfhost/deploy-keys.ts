@@ -75,15 +75,26 @@ export async function resolveBoxKeys(input: {
   return resolved;
 }
 
-/** The Worker vars of a sealed deploy: where the agent is, which bundle, and its verify key. */
+/** The Worker's own sealed-secrets tunables (runtime-secrets.ts), passed through from `.env`. */
+const WORKER_SETTINGS = ['SAM_KEY_AGENT_TIMEOUT_MS', 'SAM_RUNTIME_SECRETS_TTL_MS'] as const;
+
+/**
+ * The Worker vars of a sealed deploy: where the agent is, which bundle, its verify key, and the
+ * Worker's tunables when `.env` sets them. None is a secret.
+ */
 export function sealedWorkerVars(
   keyService: KeyServiceSettings | null,
-  sealed: ResolvedSecrets | null
+  sealed: ResolvedSecrets | null,
+  box: Readonly<Record<string, string>> = {}
 ): Record<string, string> {
   if (!keyService || !sealed) return {};
+  const tunables = Object.fromEntries(
+    WORKER_SETTINGS.flatMap((name) => (box[name]?.trim() ? [[name, box[name].trim()]] : []))
+  );
   return {
     SAM_KEY_AGENT_ADDRESS: keyAgentAddress(keyService),
     SAM_SECRET_BUNDLE_ID: sealed.bundleId,
     SAM_KEY_AGENT_VERIFY_KEY: agentVerifyKey(sealed.secrets),
+    ...tunables,
   };
 }

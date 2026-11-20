@@ -18,8 +18,10 @@
  *
  * Cache: an opened bundle stays in memory for SAM_KEY_AGENT_CACHE_SECONDS. After that the next
  * request opens it again. If the key service is merely unreachable the stale copy is served (an
- * outage does not take SAM down); if it refuses (`denied`) the copy is dropped, so revoking the
- * box's access stops new Worker isolates within that window. A key service that hangs rather than
+ * outage does not take SAM down), for at most SAM_KEY_AGENT_MAX_STALE_SECONDS after it was
+ * opened; if it refuses (`denied`) the copy is dropped, so revoking the box's access stops new
+ * Worker isolates within that window and running ones at their next refresh
+ * (SAM_RUNTIME_SECRETS_TTL_MS in runtime-secrets.ts). A key service that hangs rather than
  * refuses would hold the request for the whole key-service timeout (5 s), longer than the Worker
  * waits for this agent (SAM_KEY_AGENT_TIMEOUT_MS, 3 s), so with a stale copy in hand a request
  * waits at most SAM_KEY_AGENT_STALE_WAIT_MS for the refresh and then gets the stale copy while the
@@ -51,6 +53,14 @@ export const DEFAULT_CACHE_SECONDS = 300;
 export const DEFAULT_STALE_WAIT_MS = 1000;
 /** A connection that has not sent a whole request within this is closed (a stuck client). */
 export const DEFAULT_CONNECTION_TIMEOUT_MS = 5000;
+/** Connections open at once; more are refused (a local flood, security review L-3). */
+export const DEFAULT_MAX_CONNECTIONS = 64;
+/**
+ * Longest the agent serves a copy it could not refresh because the key service is unreachable
+ * (SAM_KEY_AGENT_MAX_STALE_SECONDS). Past it the agent fails closed: an outage that long is not
+ * one SAM should ride out on keys nobody can revoke.
+ */
+export const DEFAULT_MAX_STALE_MS = 6 * 3600_000;
 /**
  * First bytes of every request (runtime-secrets.ts has the same constant;
  * apps/api/tests/unit/selfhost-sealed-secrets-contract.test.ts pins both). NUL first: no HTTP
@@ -119,6 +129,10 @@ export interface AgentOptions {
   staleWaitMs?: number;
   /** Close a connection that sent no whole request in time (DEFAULT_CONNECTION_TIMEOUT_MS). */
   connectionTimeoutMs?: number;
+  /** Serve an unrefreshable copy at most this long after it was opened (DEFAULT_MAX_STALE_MS). */
+  maxStaleMs?: number;
+  /** Connections open at once (DEFAULT_MAX_CONNECTIONS). */
+  maxConnections?: number;
   /** Peer lookup; tests replace it, production reads /proc/net/tcp. */
   peerUid?: (socket: Socket) => number | null;
   now?: () => number;
@@ -146,8 +160,7 @@ function answer(socket: Socket, envelope: Record<string, unknown>): void {
 }
 
 type Request =
-  | { op: 'ping' }
-  | { op: 'secrets'; bundleId: string; nonce: string; installationId: string };
+  { op: 'ping' } | { op: 'secrets'; bundleId: string; nonce: string; installationId: string };
 
 /**
  * Reads one request frame. Resolves null (and the caller closes the socket without answering)
@@ -223,12 +236,15 @@ export function createKeyAgent(options: AgentOptions): Server {
 
   const staleWaitMs = options.staleWaitMs ?? DEFAULT_STALE_WAIT_MS;
   const connectionTimeoutMs = options.connectionTimeoutMs ?? DEFAULT_CONNECTION_TIMEOUT_MS;
+  const maxStaleMs = options.maxStaleMs ?? DEFAULT_MAX_STALE_MS;
+  /** Whether a copy opened at `openedAt` may still stand in for a refresh that failed. */
+  const mayServeStale = (openedAt: number): boolean => now() - openedAt < maxStaleMs;
 
   async function open(bundleId: string): Promise<Opened> {
     const cached = cache.get(bundleId);
     if (cached && now() - cached.openedAt < options.cacheMs) return cached.opened;
     const attempt = opening.get(bundleId) ?? refresh(bundleId);
-    if (!cached) return await attempt;
+    if (!cached || !mayServeStale(cached.openedAt)) return await attempt;
     // A stale copy is in hand: do not let a hung key service outlast the Worker's wait.
     let timer: ReturnType<typeof setTimeout> | undefined;
     const slow = new Promise<typeof STALE>((done) => {
@@ -271,7 +287,12 @@ export function createKeyAgent(options: AgentOptions): Server {
         });
         return opened;
       } catch (error) {
-        if (cached && error instanceof KeyProviderError && error.kind === 'unavailable') {
+        if (
+          cached &&
+          mayServeStale(cached.openedAt) &&
+          error instanceof KeyProviderError &&
+          error.kind === 'unavailable'
+        ) {
           log({ event: 'key_agent.serving_stale', bundleId, reason: error.message });
           return cached.opened;
         }
@@ -331,7 +352,7 @@ export function createKeyAgent(options: AgentOptions): Server {
     }
   }
 
-  return createServer((socket) => {
+  const server = createServer((socket) => {
     socket.on('error', () => socket.destroy());
     readRequest(socket, connectionTimeoutMs)
       .then(async (request) => {
@@ -349,6 +370,8 @@ export function createKeyAgent(options: AgentOptions): Server {
         if (!socket.destroyed) answer(socket, { status: 500, error: 'internal' });
       });
   });
+  server.maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS;
+  return server;
 }
 
 function parseUids(raw: string | undefined): Set<number> {
@@ -365,8 +388,8 @@ function parseUids(raw: string | undefined): Set<number> {
  * service runs as SAM_KEY_AGENT_UID (the owner of `.state`), and a missing or wrong uid must fail
  * loudly here rather than as an unexplained 503 in the Worker.
  */
-export function assertRunsAsStateOwner(dir: string): void {
-  if (process.getuid?.() === 0) {
+export function assertRunsAsStateOwner(dir: string, uid = process.getuid?.()): void {
+  if (uid === 0) {
     throw new Error(
       'the key agent must not run as root: set SAM_KEY_AGENT_UID in .env to the uid that owns ' +
         'the state directory (`id -u`; pnpm selfhost:deploy --init prints it)'
@@ -376,7 +399,7 @@ export function assertRunsAsStateOwner(dir: string): void {
     accessSync(dir, constants.R_OK | constants.X_OK);
   } catch {
     throw new Error(
-      `uid ${process.getuid?.()} cannot read ${dir}: set SAM_KEY_AGENT_UID in .env to the uid ` +
+      `uid ${uid} cannot read ${dir}: set SAM_KEY_AGENT_UID in .env to the uid ` +
         'that owns the state directory (`id -u`; pnpm selfhost:deploy --init prints it)'
     );
   }
@@ -440,6 +463,9 @@ function main(): void {
     cacheMs: Math.max(0, cacheSeconds) * 1000,
     staleWaitMs: positiveInt(env.SAM_KEY_AGENT_STALE_WAIT_MS) ?? DEFAULT_STALE_WAIT_MS,
     connectionTimeoutMs,
+    maxStaleMs:
+      (positiveInt(env.SAM_KEY_AGENT_MAX_STALE_SECONDS) ?? DEFAULT_MAX_STALE_MS / 1000) * 1000,
+    maxConnections: positiveInt(env.SAM_KEY_AGENT_MAX_CONNECTIONS) ?? DEFAULT_MAX_CONNECTIONS,
   });
   server.listen(port, '127.0.0.1', () => {
     console.log(

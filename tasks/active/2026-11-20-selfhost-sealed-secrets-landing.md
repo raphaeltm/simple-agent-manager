@@ -51,9 +51,16 @@ Land it on main, self-host only, with no Cloudflare behaviour change.
       run `secrets migrate`; agent.env changes restart the stack
 - [x] Egress fence opens the agent port only on a sealed box (recorded choice included)
 - [x] Compose `key-agent` service, `.env.example`, README
-- [ ] API tests (runtime-secrets, sealed contract) on the socket protocol
-- [ ] Live suite on real celld + MinIO: socket path, fresh install, migrate, switch
-- [ ] Validation, reviews, PR, box/VM proof, merge, deploy
+- [x] API tests (runtime-secrets 26, sealed contract 5, raw-socket allowlist 2) on the socket protocol
+- [x] Live suite on real celld 0.6.3 + MinIO + the agent image: socket path and F9 from inside the
+      Worker (key-agent-celld 6/6), rollback, non-root agent, migrate of a plaintext install,
+      read-only listing, reseal (sealed-default 4/4), transit 12/12; sealed SAM API entry bundles
+- [x] Review fixes: raw-socket allowlist (M-1), Worker TTL + agent max stale age (M-2),
+      idempotent restore reseal (L-1), key file only on --init (L-2), connection cap (L-3),
+      protected names in secrets.env (L-4), sanitized agent error text (L-5), uid seam, bundle
+      path constant everywhere
+- [x] Staging2 smoke (no Cloudflare change): sign-in, health, me, projects, nodes, capabilities
+- [ ] Box proof (held by the coordinator until the legacy adoption path lands), merge, deploy
 
 ## Acceptance criteria
 

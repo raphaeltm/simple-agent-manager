@@ -41,6 +41,15 @@ import { keyFileNotice } from './secrets-keyfile.js';
 
 type Box = Readonly<Record<string, string | undefined>>;
 
+/** The Worker vars that point it at the agent (sealedWorkerVars); never operator secrets. */
+const CHANNEL_VARS = new Set([
+  'SAM_KEY_AGENT_ADDRESS',
+  'SAM_SECRET_BUNDLE_ID',
+  'SAM_KEY_AGENT_VERIFY_KEY',
+  'SAM_KEY_AGENT_TIMEOUT_MS',
+  'SAM_RUNTIME_SECRETS_TTL_MS',
+]);
+
 function sameSecrets(a: Secrets, b: Secrets): boolean {
   const keys = Object.keys(a);
   return (
@@ -158,7 +167,11 @@ export async function resolveSealedSecrets(input: ResolveSecretsInput): Promise<
   const provider = (): KeyProvider => (created ??= createKeyProvider(settings.hostEnv));
   const latest = (await listBundles(settings.bundles))[0];
   const current = latest ? await openBundle(latest, provider()) : {};
-  const restored = readRestoredIdentity(input.stateDir, latest, current);
+  const record = readRestoredIdentity(input.stateDir, latest, current);
+  if (record === 'done' && input.mode !== 'dry-run') {
+    rmSync(join(input.stateDir, RESTORED_IDENTITY_FILE));
+  }
+  const restored = record === 'done' ? null : record;
   if (restored) current.SAM_INSTALLATION_ID = restored.installationId;
   const fromFile = input.platformKeysFile ?? {};
   for (const name of PLATFORM_KEY_NAMES) {
@@ -181,7 +194,15 @@ export async function resolveSealedSecrets(input: ResolveSecretsInput): Promise<
     input.mode
   );
   const generated: string[] = [...completed.generated];
-  // secrets.env is laid over the keys below; it may not replace one (as on a legacy box).
+  // secrets.env is laid over the keys below; it may not replace one (as on a legacy box), nor the
+  // agent's signing key or the Worker's channel settings (security review L-4).
+  for (const name of Object.keys(input.operatorSecrets)) {
+    if (name === SIGNING_KEY_NAME || CHANNEL_VARS.has(name)) {
+      throw new Error(
+        `${input.secretsSource ?? 'secrets.env'}: ${name} is set by the sealed deploy; remove it`
+      );
+    }
+  }
   assertSecretsKeepPlatformKeys(
     input.operatorSecrets,
     completed.keys,
@@ -245,7 +266,7 @@ function readRestoredIdentity(
   stateDir: string,
   latest: SealedBundle | undefined,
   current: Secrets
-): { from: string; installationId: string } | null {
+): { from: string; installationId: string } | 'done' | null {
   const path = join(stateDir, RESTORED_IDENTITY_FILE);
   if (!existsSync(path)) return null;
   const record = readPrivateJson(path);
@@ -257,6 +278,10 @@ function readRestoredIdentity(
     from === installationId
   ) {
     throw new Error(`${path} is malformed; restore again`);
+  }
+  // Already sealed in by an --init that stopped before removing the record (security review L-1).
+  if (latest?.installationId === installationId && current.SAM_INSTALLATION_ID === installationId) {
+    return 'done';
   }
   if (!latest || latest.installationId !== from || current.SAM_INSTALLATION_ID !== from) {
     throw new Error(
@@ -336,7 +361,11 @@ export async function resolveDeployKeys(input: {
     return { keyService, keys: ensured.keys, sealed: null, generated: ensured.generated };
   }
   if (!dryRun) {
-    for (const path of await ensureKeyServiceFiles(keyService)) {
+    // Only --init creates the file key (security review L-2): a plain deploy with no key file
+    // stops instead of writing one that could never open a restored bundle.
+    for (const path of await ensureKeyServiceFiles(keyService, {
+      createKeyFile: mode === 'init',
+    })) {
       log(`wrote ${path}`);
       // Once, when the file key is created: the operator must keep a copy off the box.
       if (path === keyService.hostEnv.SAM_KEY_FILE) {

@@ -38,6 +38,13 @@ import { type JsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 
 export const DEFAULT_KEY_AGENT_TIMEOUT_MS = 3000;
 /**
+ * How long an isolate keeps the secrets before asking the agent again (SAM_RUNTIME_SECRETS_TTL_MS).
+ * Bounds how long a revoked key service, or a replaced bundle, keeps serving a long-lived isolate:
+ * once due, an agent that refuses or cannot prove itself fails the request; only an unreachable
+ * agent lets the isolate keep its copy (an agent restart must not take SAM down).
+ */
+export const DEFAULT_RUNTIME_SECRETS_TTL_MS = 5 * 60_000;
+/**
  * First bytes of every request on the agent's socket (deploy/selfhost/key-agent/server.ts has the
  * same constant; apps/api/tests/unit/selfhost-sealed-secrets-contract.test.ts pins both). NUL
  * first: no HTTP request line can start with it.
@@ -59,6 +66,7 @@ export interface KeyAgentEnv {
   /** Bound into the request: the agent refuses a bundle sealed for another install. */
   SAM_INSTALLATION_ID?: string;
   SAM_KEY_AGENT_TIMEOUT_MS?: string;
+  SAM_RUNTIME_SECRETS_TTL_MS?: string;
 }
 
 /** Names the agent's answer may never set: the channel's own settings. */
@@ -67,6 +75,7 @@ const PROTECTED_NAMES = new Set([
   'SAM_SECRET_BUNDLE_ID',
   'SAM_KEY_AGENT_VERIFY_KEY',
   'SAM_KEY_AGENT_TIMEOUT_MS',
+  'SAM_RUNTIME_SECRETS_TTL_MS',
   'SAM_INSTALLATION_ID',
 ]);
 
@@ -95,7 +104,7 @@ const NO_SOCKET: KeyAgentConnect = () => {
   throw new Error('no key-agent socket configured');
 };
 let connectSocket: KeyAgentConnect = NO_SOCKET;
-let cached: { bundleId: string; secrets: RuntimeSecrets } | null = null;
+let cached: { bundleId: string; secrets: RuntimeSecrets; loadedAt: number } | null = null;
 
 /** Sets how this isolate reaches the agent (runtime-secrets-socket.ts on celld). */
 export function useKeyAgentSocket(socket: KeyAgentConnect): void {
@@ -178,9 +187,18 @@ async function verifySignature(
   }
 }
 
-/** This isolate's secrets if already loaded for the deployment's bundle, else null. */
+function ttlMs(env: KeyAgentEnv): number {
+  const ttl = Number.parseInt(env.SAM_RUNTIME_SECRETS_TTL_MS ?? '', 10);
+  return Number.isSafeInteger(ttl) && ttl > 0 ? ttl : DEFAULT_RUNTIME_SECRETS_TTL_MS;
+}
+
+/** This isolate's secrets if loaded for the deployment's bundle and not yet due, else null. */
 export function cachedRuntimeSecrets(env: KeyAgentEnv): RuntimeSecrets | null {
-  return cached && cached.bundleId === env.SAM_SECRET_BUNDLE_ID ? cached.secrets : null;
+  return cached &&
+    cached.bundleId === env.SAM_SECRET_BUNDLE_ID &&
+    Date.now() - cached.loadedAt < ttlMs(env)
+    ? cached.secrets
+    : null;
 }
 
 /** A request frame: the preamble, a 4-byte big-endian length, then the JSON body. */
@@ -314,7 +332,11 @@ async function fetchSecrets(agent: AgentSettings): Promise<RuntimeSecrets> {
     )
   );
   if (envelope.status !== 200 || typeof envelope.body !== 'string') {
-    const error = typeof envelope.error === 'string' ? ` ${envelope.error.slice(0, 64)}` : '';
+    // Unsigned text from whoever holds the port: printable, short, never a log injection.
+    const error =
+      typeof envelope.error === 'string'
+        ? ` ${envelope.error.replace(/[^\x20-\x7e]/g, '?').slice(0, 64)}`
+        : '';
     throw new RuntimeSecretsUnavailableError(
       'KEY_AGENT_REFUSED',
       `key agent answered ${typeof envelope.status === 'number' ? envelope.status : 'malformed'}${error}`
@@ -363,8 +385,22 @@ export async function loadRuntimeSecrets(env: KeyAgentEnv): Promise<RuntimeSecre
   const hit = cachedRuntimeSecrets(env);
   if (hit) return hit;
   const agent = settings(env);
-  const secrets = await fetchSecrets(agent);
-  cached = { bundleId: agent.bundleId, secrets };
+  let secrets: RuntimeSecrets;
+  try {
+    secrets = await fetchSecrets(agent);
+  } catch (error) {
+    // A due copy survives only an unreachable agent; a refusal or an unverified answer ends it.
+    if (
+      cached?.bundleId === agent.bundleId &&
+      error instanceof RuntimeSecretsUnavailableError &&
+      error.code === 'KEY_AGENT_UNREACHABLE'
+    ) {
+      return cached.secrets;
+    }
+    if (cached?.bundleId === agent.bundleId) cached = null;
+    throw error;
+  }
+  cached = { bundleId: agent.bundleId, secrets, loadedAt: Date.now() };
   return secrets;
 }
 
@@ -448,7 +484,9 @@ type DurableObjectClass = abstract new (...args: any[]) => object;
  * A Durable Object class whose instances see the runtime secrets in `env`. The constructor gets
  * a copy of the runtime's env; when this isolate already has the secrets they are in it before
  * the original constructor runs, otherwise `blockConcurrencyWhile` holds every event until they
- * are, and a failure there fails the object's events (fail closed).
+ * are, and a failure there fails the object's events (fail closed). An object keeps the secrets
+ * it started with until celld evicts it: revoking the key service stops new objects and isolates
+ * (SAM_RUNTIME_SECRETS_TTL_MS), not one already running.
  */
 export function wrapDurableObject<C extends DurableObjectClass>(Base: C): C {
   // @ts-expect-error -- TS cannot type a mixin over an abstract constructor with a custom constructor

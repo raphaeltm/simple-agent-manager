@@ -1079,6 +1079,15 @@ import fs from 'node:fs'; const a=process.argv.slice(2).join(' ');fs.appendFileS
       readFileSync(join(targetState, 'key-agent/bundles', bundles[0] ?? ''), 'utf8')
     ) as { installationId: string };
     expect(cloneHeader.installationId).toBe(record.installationId);
+    // Security review L-1: an --init that sealed but stopped before removing the record is not a
+    // dead end. The next --init sees the bundle already carries the clone's identity and goes on.
+    writeFileSync(join(targetState, 'key-agent/restored-identity.json'), JSON.stringify(raw), {
+      mode: 0o600,
+    });
+    const again = await runDeploy(targetEnv, ['--init'], env);
+    expect(again.status, again.out).toBe(0);
+    expect(existsSync(join(targetState, 'key-agent/restored-identity.json'))).toBe(false);
+    expect(readdirSync(join(targetState, 'key-agent/bundles'))).toEqual(bundles);
     expect(
       readRecord(join(targetState, 'created-resources.json')).resources.find(
         (r) => r.kind === 'installation'

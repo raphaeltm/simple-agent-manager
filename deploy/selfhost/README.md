@@ -7,15 +7,15 @@
 
 One Linux VM runs the whole control plane with Docker Compose (`docker-compose.yml`):
 
-| Service          | What it does                                                                |
-| ---------------- | --------------------------------------------------------------------------- |
-| `celld`          | Runs the API Worker and serves the web UI, on `127.0.0.1:8080`              |
+| Service          | What it does                                                                       |
+| ---------------- | ---------------------------------------------------------------------------------- |
+| `celld`          | Runs the API Worker and serves the web UI, on `127.0.0.1:8080`                     |
 | `key-agent`      | Opens the sealed Worker secrets for celld only ([Sealed secrets](#sealed-secrets)) |
-| `caddy`          | TLS on 80/443 for `*.SAM_DOMAIN`, proxies to celld; carries node WebSockets |
-| `frps`           | Reverse tunnels from workspace nodes (profile `tunnel`), loopback only      |
-| `objectstore`    | Bundled MinIO for trials (profile `local-store`)                            |
-| `mail-collector` | Catches sign-in email for test installs (profile `mail-collector`)          |
-| `sam-mx`         | Inbound agent email on port 25 (profile `mail-in`)                          |
+| `caddy`          | TLS on 80/443 for `*.SAM_DOMAIN`, proxies to celld; carries node WebSockets        |
+| `frps`           | Reverse tunnels from workspace nodes (profile `tunnel`), loopback only             |
+| `objectstore`    | Bundled MinIO for trials (profile `local-store`)                                   |
+| `mail-collector` | Catches sign-in email for test installs (profile `mail-collector`)                 |
+| `sam-mx`         | Inbound agent email on port 25 (profile `mail-in`)                                 |
 
 Workspace nodes are cloud VMs that dial back to `wss://api.SAM_DOMAIN/~!frp`; they need no public
 DNS of their own. The fleet bucket (`CELLD_BUCKET`) is the durable copy of everything celld stores.
@@ -114,9 +114,13 @@ way, so nothing the Worker can be made to fetch (any URL, headers, body, redirec
 can ask the agent for secrets. The agent also answers only celld's uid (checked in
 `/proc/net/tcp`), and signs every answer over the Worker's nonce with a key sealed in the bundle,
 so a process that takes the port while the agent is down cannot answer as it. Each fresh Worker
-isolate pays one loopback round trip; the agent keeps an opened bundle for 300 s, serves that copy
-while an unreachable or slow key service is retried (`SAM_KEY_AGENT_STALE_WAIT_MS`, 1000 ms), and
-drops it when the key service refuses.
+isolate pays one loopback round trip and asks again every `SAM_RUNTIME_SECRETS_TTL_MS` (5 min).
+The agent keeps an opened bundle for 300 s, serves that copy while an unreachable or slow key
+service is retried (`SAM_KEY_AGENT_STALE_WAIT_MS`, 1000 ms), for at most
+`SAM_KEY_AGENT_MAX_STALE_SECONDS` (6 h) after it opened it, and drops it when the key service
+refuses. So revoking the box's key access reaches running Worker isolates within one refresh; a
+Durable Object already running keeps the secrets it started with until celld evicts it. The other
+limits are in `.env.example`.
 
 **The agent runs as the owner of `.state`**, from the start: never root, no capabilities, a
 read-only root file system. Docker Compose takes the uid from `SAM_KEY_AGENT_UID` in `.env`;
@@ -135,15 +139,15 @@ up, and never to a weaker key by itself: a configured key that fails, or a key t
 cannot be used, stops `--init` with the reason (`sealingFloorRefusal` in `key-choice.ts`).
 `SAM_KEY_PROVIDER` in `.env` overrides the choice:
 
-| `SAM_KEY_PROVIDER` | Key                                                                                   | Settings                                                                                       |
-| ------------------ | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| unset (default)    | chosen by `--init`                                                                    |                                                                                                |
-| `file`             | 32 bytes in `.state/key-agent/kek`, created at the first seal                         |                                                                                                |
-| `gcp-kms`          | Cloud KMS key, the VM's service account                                               | `SAM_GCP_KMS_KEY`                                                                              |
-| `aws-kms`          | KMS symmetric key, the instance role through IMDSv2; **not yet run against real AWS** | `SAM_AWS_KMS_KEY_ID`, `SAM_AWS_KMS_REGION`                                                     |
-| `azure-kv`         | Key Vault key, the VM's managed identity; **not yet run against real Azure**          | `SAM_AZURE_KEY_VAULT_URL`, `SAM_AZURE_KEY_NAME`                                                |
-| `transit`          | Vault or OpenBao transit key, off the box                                             | `SAM_TRANSIT_ADDR`, `SAM_TRANSIT_KEY`, `SAM_TRANSIT_ROLE_ID` (secret id in `credentials/`)    |
-| `legacy-plaintext` | **none: LEGACY.** Every Worker secret is a deploy var, in plaintext in the bucket     |                                                                                                |
+| `SAM_KEY_PROVIDER` | Key                                                                                   | Settings                                                                                   |
+| ------------------ | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| unset (default)    | chosen by `--init`                                                                    |                                                                                            |
+| `file`             | 32 bytes in `.state/key-agent/kek`, created at the first seal                         |                                                                                            |
+| `gcp-kms`          | Cloud KMS key, the VM's service account                                               | `SAM_GCP_KMS_KEY`                                                                          |
+| `aws-kms`          | KMS symmetric key, the instance role through IMDSv2; **not yet run against real AWS** | `SAM_AWS_KMS_KEY_ID`, `SAM_AWS_KMS_REGION`                                                 |
+| `azure-kv`         | Key Vault key, the VM's managed identity; **not yet run against real Azure**          | `SAM_AZURE_KEY_VAULT_URL`, `SAM_AZURE_KEY_NAME`                                            |
+| `transit`          | Vault or OpenBao transit key, off the box                                             | `SAM_TRANSIT_ADDR`, `SAM_TRANSIT_KEY`, `SAM_TRANSIT_ROLE_ID` (secret id in `credentials/`) |
+| `legacy-plaintext` | **none: LEGACY.** Every Worker secret is a deploy var, in plaintext in the bucket     |                                                                                            |
 
 **A box sealed with the file key can never be replaced or rebuilt on another machine.** The key
 that opens its bundles exists only on that box, and backups leave it out

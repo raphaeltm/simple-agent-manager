@@ -62,6 +62,14 @@ const PROVIDER_SETTINGS = [
   'SAM_AWS_KMS_ENDPOINT',
   'SAM_AWS_IMDS_HOST',
 ] as const;
+/** The agent's own tunables (deploy/selfhost/key-agent/server.ts), copied from `.env` when set. */
+const AGENT_SETTINGS = [
+  'SAM_KEY_AGENT_CACHE_SECONDS',
+  'SAM_KEY_AGENT_STALE_WAIT_MS',
+  'SAM_KEY_AGENT_MAX_STALE_SECONDS',
+  'SAM_KEY_AGENT_CONNECTION_TIMEOUT_MS',
+  'SAM_KEY_AGENT_MAX_CONNECTIONS',
+] as const;
 /** Box files that can unlock the bundle; backups leave them out (backup-lib.ts). */
 export const KEY_SERVICE_BACKUP_EXCLUDES = [`${KEY_AGENT_DIR}/kek`, `${KEY_AGENT_DIR}/credentials`];
 
@@ -77,6 +85,8 @@ export interface KeyServiceSettings {
   hostEnv: Record<string, string>;
   /** The same environment as seen from the key-agent container. */
   containerEnv: Record<string, string>;
+  /** The agent's own tunables from `.env` (cache, stale age, connection limits). */
+  agentEnv: Record<string, string>;
 }
 
 /** Whether this box seals its secrets. `box` is the effective box (key-choice.ts applyKeyChoice). */
@@ -114,6 +124,11 @@ export function keyServiceSettings(box: Box, stateDir: string): KeyServiceSettin
       containerEnv[name] = value;
     }
   }
+  const agentEnv: Record<string, string> = {};
+  for (const name of AGENT_SETTINGS) {
+    const value = box[name]?.trim();
+    if (value) agentEnv[name] = value;
+  }
   // Test-only switch (plain-HTTP fake Key Vault): honoured by the deploy, never given to the agent.
   if (box.SAM_AZURE_ALLOW_HTTP_FOR_TESTS === '1') hostEnv.SAM_AZURE_ALLOW_HTTP_FOR_TESTS = '1';
   if (provider === 'file') {
@@ -133,6 +148,7 @@ export function keyServiceSettings(box: Box, stateDir: string): KeyServiceSettin
     bundles: bundleStoreFor(stateDir),
     hostEnv,
     containerEnv,
+    agentEnv,
   };
 }
 
@@ -181,6 +197,7 @@ export function keyAgentAddress(settings: Pick<KeyServiceSettings, 'port'>): str
 export function renderKeyAgentEnv(settings: KeyServiceSettings): string {
   const lines = Object.entries({
     ...settings.containerEnv,
+    ...settings.agentEnv,
     SAM_KEY_AGENT_PORT: String(settings.port),
     SAM_KEY_AGENT_BUNDLE_DIR: `${CONTAINER_DIR}/bundles`,
   }).map(([name, value]) => `${name}=${value}`);
@@ -207,7 +224,10 @@ export function ensureLegacyAgentEnv(stateDir: string, port: number): string[] {
  * bundle exists. A missing key file beside existing bundles was lost, not never made, and a new
  * one could never open them, so that stops the deploy (restore the copy kept off the box).
  */
-export async function ensureKeyServiceFiles(settings: KeyServiceSettings): Promise<string[]> {
+export async function ensureKeyServiceFiles(
+  settings: KeyServiceSettings,
+  options: { createKeyFile?: boolean } = {}
+): Promise<string[]> {
   const written: string[] = [];
   ensurePrivateDir(settings.dir);
   const keyFile = settings.hostEnv.SAM_KEY_FILE ?? '';
@@ -217,6 +237,11 @@ export async function ensureKeyServiceFiles(settings: KeyServiceSettings): Promi
         `${keyFile} is missing but ${settings.bundles.location} holds sealed bundles: the key ` +
           'file was lost. Restore it from the copy you kept off the box; a new key could not ' +
           'open them.'
+      );
+    }
+    if (options.createKeyFile === false) {
+      throw new Error(
+        `${keyFile} does not exist: run pnpm selfhost:deploy --init first (it creates the key file once)`
       );
     }
     writePrivateFile(keyFile, `${generateFileKek()}\n`);

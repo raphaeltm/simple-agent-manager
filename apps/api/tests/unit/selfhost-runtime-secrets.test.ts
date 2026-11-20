@@ -288,6 +288,46 @@ describe('wrapWorker fetch', () => {
   });
 });
 
+describe('refresh after SAM_RUNTIME_SECRETS_TTL_MS (security review M-2)', () => {
+  const ttlEnv = () => ({ ...env(), SAM_RUNTIME_SECRETS_TTL_MS: '1000' });
+  let now = 1_000_000;
+  beforeEach(() => {
+    now = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+  });
+
+  it('asks again once due, and takes the new answer', async () => {
+    fetchMock.mockImplementationOnce(ok({ K: 'v1' })).mockImplementationOnce(ok({ K: 'v2' }));
+    expect((await loadRuntimeSecrets(ttlEnv())).K).toBe('v1');
+    now += 999;
+    expect((await loadRuntimeSecrets(ttlEnv())).K).toBe('v1');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    now += 2;
+    expect((await loadRuntimeSecrets(ttlEnv())).K).toBe('v2');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('a refusal once due ends the copy (revocation reaches a long-lived isolate)', async () => {
+    fetchMock
+      .mockImplementationOnce(ok({ K: 'v1' }))
+      .mockImplementation(async () => ({ status: 503, error: 'key_service_denied' }));
+    await loadRuntimeSecrets(ttlEnv());
+    now += 1001;
+    await expect(loadRuntimeSecrets(ttlEnv())).rejects.toThrow(/answered 503/);
+    // And it stays ended: the next request asks again rather than reviving the old copy.
+    await expect(loadRuntimeSecrets(ttlEnv())).rejects.toThrow(/answered 503/);
+  });
+
+  it('control: an unreachable agent once due keeps the copy (an agent restart is not an outage)', async () => {
+    fetchMock
+      .mockImplementationOnce(ok({ K: 'v1' }))
+      .mockRejectedValue(new TypeError('connection refused'));
+    await loadRuntimeSecrets(ttlEnv());
+    now += 1001;
+    expect((await loadRuntimeSecrets(ttlEnv())).K).toBe('v1');
+  });
+});
+
 describe('wrapDurableObject', () => {
   class Probe {
     env: Record<string, unknown>;

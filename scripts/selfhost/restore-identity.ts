@@ -2,6 +2,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { LOCAL_BUNDLE_SUBDIR } from '../../deploy/selfhost/key-agent/bundle-store.ts';
 import type { BoxContext } from './backup-lib';
 import { RESTORED_IDENTITY_FILE } from './key-service';
 import { assertOperatorExecution } from './operator-only';
@@ -11,7 +12,7 @@ import { readPrivateJson, readSecretsFile, writePrivateFile } from './secret-fil
 // A sealed box keeps its platform keys in sealed bundles the restore cannot open (the key file and
 // key-service credentials are never in a backup). The restore records the clone's new identity in
 // RESTORED_IDENTITY_FILE instead, and the target's `pnpm selfhost:deploy --init` seals it in.
-const BUNDLES = join('key-agent', 'bundles');
+const BUNDLES = LOCAL_BUNDLE_SUBDIR;
 
 /** The installation id in the newest sealed bundle's header (not encrypted), or null. */
 function sealedInstallationId(state: string): string | null {
