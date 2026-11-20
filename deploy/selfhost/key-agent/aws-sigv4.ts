@@ -85,7 +85,8 @@ export function signRequest(input: SignInput): Signed {
   }
   const payloadHash = sha256Hex(input.body);
   if (input.signBody) headers['x-amz-content-sha256'] = payloadHash;
-  const names = Object.keys(headers).sort();
+  // SigV4 orders by code point, not locale.
+  const names = Object.keys(headers).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const canonicalHeaders = names
     .map((name) => `${name}:${(headers[name] ?? '').trim().replace(/ +/g, ' ')}\n`)
     .join('');

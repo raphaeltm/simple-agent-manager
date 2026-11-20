@@ -19,6 +19,7 @@ import { expectedComposeProjectFor, SELFHOST_ENVIRONMENT } from './install-recor
 import { assertOperatorExecution } from './operator-only';
 import { removePrivateTree } from './private-tree';
 import { replacePrivateFile } from './secret-files';
+import { stateInstallationId } from './state-installation';
 
 type Context = Pick<BoxContext, 'stateDir' | 'envFile' | 'box'>;
 interface Identity {
@@ -102,19 +103,13 @@ function assertLedger(ctx: Context, path: string, id: string, expected: Identity
     install[0]?.attributes?.composeProject !== expectedComposeProjectFor(ctx.box, ctx.stateDir, id)
   )
     throw new Error('Rollback state swap ownership or scope changed');
-  let keys: unknown;
+  let installation: string;
   try {
-    keys = JSON.parse(readFileSync(join(path, 'platform-keys.json'), 'utf8'));
+    installation = stateInstallationId(path);
   } catch {
     throw new Error('Cannot verify rollback state swap installation');
   }
-  if (
-    !keys ||
-    typeof keys !== 'object' ||
-    !('SAM_INSTALLATION_ID' in keys) ||
-    keys.SAM_INSTALLATION_ID !== id
-  )
-    throw new Error('Rollback state swap installation changed');
+  if (installation !== id) throw new Error('Rollback state swap installation changed');
 }
 
 /** Run before any preflight reads state, including direct recovery/manual rollback calls. */

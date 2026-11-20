@@ -92,7 +92,7 @@ export async function startFakeKeyServices(
         response.writeHead(status, { 'content-type': 'application/json' });
         response.end(JSON.stringify(payload));
       };
-      const url = new URL(request.url ?? '/', 'http://fake');
+      const url = new URL(request.url ?? '/', 'http://localhost');
       // Platform identity (platform-probe.ts): each answers only with its own request marker.
       if (url.pathname === '/computeMetadata/v1/project/project-id') {
         if (request.headers['metadata-flavor'] !== 'Google') return send(403, {});

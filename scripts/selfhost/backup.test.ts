@@ -1388,6 +1388,60 @@ describe('runRollback', () => {
     }
   );
 
+  // Codex P1s on #2933: a sealed box has no platform-keys.json (migrate removes it), and its
+  // snapshot holds no file key or key-service credentials (isKeyServiceSecretPath). Rollback must
+  // still find the installation, and must keep the live key so the agent can open the bundles.
+  it('rolls back a sealed install: identity from the bundle header, live file key and credentials kept', () => {
+    const context = ctx('gs://fleet/celld', join(root, 'state'));
+    const keyAgent = join(context.stateDir, 'key-agent');
+    rmSync(join(context.stateDir, 'platform-keys.json'));
+    mkdirSync(join(keyAgent, 'bundles'), { recursive: true });
+    mkdirSync(join(keyAgent, 'credentials'), { mode: 0o700 });
+    const bundle = JSON.stringify({
+      format: 1,
+      installationId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      createdAt: '2026-11-20T00:00:00.000Z',
+      ciphertext: 'sealed-before-upgrade',
+    });
+    writeFileSync(join(keyAgent, 'bundles', `${'b'.repeat(32)}.json`), bundle);
+    const kek = randomBytes(32).toString('base64');
+    const credential = randomBytes(24).toString('hex');
+    writeFileSync(join(keyAgent, 'kek'), kek, { mode: 0o600 });
+    writeFileSync(join(keyAgent, 'credentials/transit-secret-id'), credential, { mode: 0o600 });
+    const snapshot = join(root, 'sealed-rollback');
+    runBackup(context, snapshot);
+    // The failed upgrade wrote a new bundle; the rollback returns the pre-upgrade one.
+    writeFileSync(join(keyAgent, 'bundles', `${'c'.repeat(32)}.json`), bundle);
+    runRollback(context, snapshot);
+    expect(readdirSync(join(keyAgent, 'bundles'))).toEqual([`${'b'.repeat(32)}.json`]);
+    expect(readFileSync(join(keyAgent, 'kek'), 'utf8')).toBe(kek);
+    expect(statSync(join(keyAgent, 'kek')).mode & 0o777).toBe(0o600);
+    expect(readFileSync(join(keyAgent, 'credentials/transit-secret-id'), 'utf8')).toBe(credential);
+    expect(existsSync(join(context.stateDir, 'platform-keys.json'))).toBe(false);
+  });
+
+  it('refuses a sealed rollback whose snapshot names a different installation', () => {
+    const context = ctx('gs://fleet/celld', join(root, 'state'));
+    const bundles = join(context.stateDir, 'key-agent/bundles');
+    rmSync(join(context.stateDir, 'platform-keys.json'));
+    mkdirSync(bundles, { recursive: true });
+    const header = (installationId: string, createdAt: string) =>
+      JSON.stringify({ format: 1, installationId, createdAt, ciphertext: 'x' });
+    writeFileSync(
+      join(bundles, `${'b'.repeat(32)}.json`),
+      header('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-11-20T00:00:00.000Z')
+    );
+    const snapshot = join(root, 'sealed-foreign');
+    runBackup(context, snapshot);
+    writeFileSync(
+      join(bundles, `${'c'.repeat(32)}.json`),
+      header('dddddddddddddddddddddddddddddddd', '2026-11-21T00:00:00.000Z')
+    );
+    calls = [];
+    expect(() => runRollback(context, snapshot)).toThrow(/different installation/);
+    expect(calls.filter((call) => call.args.includes('rsync'))).toEqual([]);
+  });
+
   it('restores after a real Go module cache made read-only directories in the old state', () => {
     const context = ctx('gs://fleet/celld', join(root, 'state'));
     const cache = join(context.stateDir, 'go-cache/module/pkg');

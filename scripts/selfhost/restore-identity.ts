@@ -1,39 +1,17 @@
 /** A restored fleet gets its own ownership identity while retaining its data encryption keys. */
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { LOCAL_BUNDLE_SUBDIR } from '../../deploy/selfhost/key-agent/bundle-store.ts';
 import type { BoxContext } from './backup-lib';
 import { RESTORED_IDENTITY_FILE } from './key-service';
 import { assertOperatorExecution } from './operator-only';
 import { readRestoredInstallationId } from './restore-progress';
 import { readPrivateJson, readSecretsFile, writePrivateFile } from './secret-files';
+import { sealedInstallationId } from './state-installation';
 
 // A sealed box keeps its platform keys in sealed bundles the restore cannot open (the key file and
 // key-service credentials are never in a backup). The restore records the clone's new identity in
 // RESTORED_IDENTITY_FILE instead, and the target's `pnpm selfhost:deploy --init` seals it in.
-const BUNDLES = LOCAL_BUNDLE_SUBDIR;
-
-/** The installation id in the newest sealed bundle's header (not encrypted), or null. */
-function sealedInstallationId(state: string): string | null {
-  const dir = join(state, BUNDLES);
-  if (!existsSync(dir)) return null;
-  let newest: { createdAt: string; installationId: string } | null = null;
-  for (const name of readdirSync(dir)) {
-    if (!/^[0-9a-f]{32}\.json$/.test(name)) continue;
-    let header: unknown;
-    try {
-      header = JSON.parse(readFileSync(join(dir, name), 'utf8')) as unknown;
-    } catch {
-      throw new Error('Invalid restored sealed bundle');
-    }
-    const { createdAt, installationId } = (header ?? {}) as Record<string, unknown>;
-    if (typeof createdAt !== 'string' || typeof installationId !== 'string')
-      throw new Error('Invalid restored sealed bundle');
-    if (!newest || createdAt > newest.createdAt) newest = { createdAt, installationId };
-  }
-  return newest?.installationId ?? null;
-}
 
 /** Stable for a retry of this target; never adopts the source fleet's VM ownership labels. */
 export function restoredInstallationId(ctx: BoxContext, source: string): string {

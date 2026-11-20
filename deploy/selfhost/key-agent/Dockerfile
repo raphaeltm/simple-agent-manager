@@ -5,4 +5,6 @@ FROM docker.io/library/node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75b
 COPY bundle.ts bundle-store.ts peer.ts provider.ts providers.ts provider-file.ts provider-transit.ts \
   provider-gcp-kms.ts provider-azure-kv.ts provider-aws-kms.ts aws-sigv4.ts healthcheck.ts server.ts \
   /opt/sam-key-agent/
+# Non-root by default too; Compose sets the real uid (SAM_KEY_AGENT_UID).
+USER 65534:65534
 ENTRYPOINT ["node", "/opt/sam-key-agent/server.ts"]

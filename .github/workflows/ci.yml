@@ -139,6 +139,8 @@ jobs:
               - 'scripts/deploy/vapid-keys.ts'
               # API build/conformance tests import the celld generator and its helpers.
               - 'scripts/selfhost/**'
+              # The sealed-secrets key agent: scripts/selfhost imports its bundle store and providers.
+              - 'deploy/selfhost/key-agent/**'
               # selfhost-inbound-email.test.ts builds this receiver (Self-host Email job only).
               - 'deploy/selfhost/sam-mx/**'
               # The self-host access-log redaction guard scans the API routes against this filter.

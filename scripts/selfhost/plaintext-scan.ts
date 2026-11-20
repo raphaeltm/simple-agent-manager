@@ -39,6 +39,8 @@ export const PLATFORM_KEY_ROTATION_PENDING =
   'every copy listed here stays readable by anyone holding the bucket credential or the backup';
 /** Values shorter than this are not matched by content (too many false hits); names still are. */
 const MIN_MATCH_LENGTH = 12;
+/** Stable, locale-free ordering for names and paths in the listing. */
+const byCodePoint = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 const NOT_SECRET = new Set(['SAM_INSTALLATION_ID']);
 
 export interface KnownSecrets {
@@ -126,7 +128,7 @@ function secretsIn(text: string, secrets: KnownSecrets): string[] {
     if (secrets.names.has(name) && value !== '') found.add(name);
   }
   if (secrets.values.some((value) => text.includes(value))) found.add('(a known secret value)');
-  return [...found].sort();
+  return [...found].sort(byCodePoint);
 }
 
 /** Every version prefix that a pointer or queue attachment names, with who names it. */
@@ -315,16 +317,18 @@ export function scanRemoteBackups(
     }
     groups.set(group, entry);
   }
-  return [...groups.entries()].sort().map(([group, entry]) => ({
-    dir: `${url.replace(/\/+$/, '')}/${group}`,
-    createdAt: entry.latest,
-    holds: [
-      ...[...entry.holds].sort(),
-      ...(entry.exposed.size > 0
-        ? [`deploy versions with ${[...entry.exposed].sort().join(', ')}`]
-        : []),
-    ],
-  }));
+  return [...groups.entries()]
+    .sort(([a], [b]) => byCodePoint(a, b))
+    .map(([group, entry]) => ({
+      dir: `${url.replace(/\/+$/, '')}/${group}`,
+      createdAt: entry.latest,
+      holds: [
+        ...[...entry.holds].sort(byCodePoint),
+        ...(entry.exposed.size > 0
+          ? [`deploy versions with ${[...entry.exposed].sort(byCodePoint).join(', ')}`]
+          : []),
+      ],
+    }));
 }
 
 /** How to rotate each kind of secret the listing names. */
@@ -382,7 +386,8 @@ export function formatPlaintextReport(
   );
   if (exposedNames.size > 0) {
     lines.push('Rotate what these copies hold (deleting a copy does not undo an earlier read):');
-    for (const name of [...exposedNames].sort()) lines.push(`  ${name}: ${rotationAdvice(name)}`);
+    for (const name of [...exposedNames].sort(byCodePoint))
+      lines.push(`  ${name}: ${rotationAdvice(name)}`);
   }
   if (dirty.length > 0) {
     lines.push(

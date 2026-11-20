@@ -80,7 +80,7 @@ export async function preflightSealedSecrets(input: {
     }
     if (missing.length > 0) {
       throw new Error(
-        `the Worker would not get these secrets unchanged: ${missing.sort().join(', ')}`
+        `the Worker would not get these secrets unchanged: ${missing.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join(', ')}`
       );
     }
     return { bundleId: bundle.bundleId, checked: Object.keys(answered).length };

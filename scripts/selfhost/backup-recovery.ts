@@ -1,5 +1,13 @@
 /** Restore an upgrade's authenticated snapshot to the same owned installation. */
-import { cpSync, existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 import { readRecord } from '../../deploy/selfhost/created-resources.mjs';
@@ -22,6 +30,7 @@ import {
   STATE_DIR,
 } from './backup-lib';
 import { composeProjectFor, SELFHOST_ENVIRONMENT } from './install-record';
+import { KEY_SERVICE_BACKUP_EXCLUDES } from './key-service';
 import { assertOperatorExecution } from './operator-only';
 import { removePrivateTree } from './private-tree';
 import {
@@ -38,6 +47,7 @@ import {
 } from './rollback-cache-transition';
 import { publishRollbackState, recoverRollbackState, rollbackStatePending } from './rollback-state';
 import { assertPrivateFile, replacePrivateFile } from './secret-files';
+import { stateInstallationId } from './state-installation';
 import { assertRollbackReady } from './upgrade-preflight';
 function compose(ctx: BoxContext, args: string[]): void {
   check(
@@ -45,14 +55,35 @@ function compose(ctx: BoxContext, args: string[]): void {
     'rollback compose operation'
   );
 }
-function readIdentity(path: string): Record<string, unknown> {
+/**
+ * The installation id of a live or snapshotted state directory. A plaintext box keeps it in
+ * platform-keys.json; a sealed box has no such file (`selfhost:secrets migrate` removes it) and
+ * carries the id in its sealed bundles' plaintext headers.
+ */
+function installationIdOf(state: string): string {
   try {
-    const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
-    if (typeof value !== 'object' || value === null || Array.isArray(value))
-      throw new Error('Invalid rollback identity object');
-    return value as Record<string, unknown>;
+    return stateInstallationId(state);
   } catch {
     throw new Error('Cannot verify rollback installation identity');
+  }
+}
+
+/**
+ * Same-install rollback keeps the live key-service secrets (the file key, key-service credentials).
+ * Backups leave them out (backup-lib.ts isKeyServiceSecretPath), so the snapshot cannot hold them,
+ * and replacing the state directory without them leaves a key agent that cannot open any bundle.
+ */
+function carryKeyServiceSecrets(live: string, staged: string): void {
+  for (const rel of KEY_SERVICE_BACKUP_EXCLUDES) {
+    const from = join(live, rel);
+    if (!existsSync(from)) continue;
+    const stat = lstatSync(from);
+    if (stat.isSymbolicLink()) throw new Error(`Refusing a symlinked key-service secret: ${rel}`);
+    if (stat.isFile()) assertPrivateFile(from);
+    const to = join(staged, rel);
+    rmSync(to, { recursive: true, force: true });
+    mkdirSync(dirname(to), { recursive: true, mode: 0o700 });
+    cpSync(from, to, { recursive: true, preserveTimestamps: true });
   }
 }
 function assertStateReceipt(path: string, expected: string, id: unknown, live = false): void {
@@ -294,10 +325,7 @@ export function beginRollbackCacheStart(ctx: BoxContext, from: string): void {
   const present = cachePresence(ctx, pending);
   if (present.container || present.volume)
     throw new Error('Recovery start requires the previous cache to be absent');
-  currentLedger(
-    ctx,
-    String(readIdentity(join(ctx.stateDir, 'platform-keys.json')).SAM_INSTALLATION_ID)
-  );
+  currentLedger(ctx, installationIdOf(ctx.stateDir));
   replacePrivateFile(
     join(ctx.stateDir, CACHE_PENDING),
     JSON.stringify({ ...pending, snapshot: resolve(from), startingAt: cacheStartTime() })
@@ -337,6 +365,7 @@ function restoreState(
   const staged = join(stage, 'restored');
   try {
     cpSync(source, staged, { recursive: true });
+    carryKeyServiceSecrets(ctx.stateDir, staged);
     // Keep the original upgrade's recovery pointer until recoverUpgrade verifies health.
     const upgradePending = join(ctx.stateDir, 'upgrade-pending.json');
     if (existsSync(upgradePending)) {
@@ -376,16 +405,11 @@ export function runRollback(ctx: BoxContext, from: string, expectedSamCommit?: s
       throw new Error('Rollback snapshot belongs to a different code revision');
     if (manifest.bucket !== ctx.box.CELLD_BUCKET)
       throw new Error('Rollback snapshot belongs to a different bucket');
-    const oldKeys = readIdentity(join(plain, STATE_DIR, 'platform-keys.json'));
-    const currentKeys = readIdentity(join(ctx.stateDir, 'platform-keys.json'));
-    if (
-      typeof oldKeys.SAM_INSTALLATION_ID !== 'string' ||
-      oldKeys.SAM_INSTALLATION_ID !== currentKeys.SAM_INSTALLATION_ID
-    ) {
+    const installation = installationIdOf(join(plain, STATE_DIR));
+    if (installation !== installationIdOf(ctx.stateDir))
       throw new Error('Rollback snapshot belongs to a different installation');
-    }
-    assertStateReceipt(join(plain, STATE_DIR), ctx.stateDir, oldKeys.SAM_INSTALLATION_ID);
-    currentLedger(ctx, oldKeys.SAM_INSTALLATION_ID);
+    assertStateReceipt(join(plain, STATE_DIR), ctx.stateDir, installation);
+    currentLedger(ctx, installation);
     let pending = pendingCache(ctx, from);
     if (pending?.startingAt) {
       pending = recoverCacheStart(ctx, pending, inspectCacheVolume, assertRollbackCacheReady);
@@ -431,7 +455,7 @@ export function runRollback(ctx: BoxContext, from: string, expectedSamCommit?: s
         'restore pre-upgrade bucket'
       );
     }
-    restoreState(ctx, join(plain, STATE_DIR), oldKeys.SAM_INSTALLATION_ID as string, pending, from);
+    restoreState(ctx, join(plain, STATE_DIR), installation, pending, from);
     // A previous partial cache deletion must remain retryable even if copying the env fails.
     if (pending)
       replacePrivateFile(
