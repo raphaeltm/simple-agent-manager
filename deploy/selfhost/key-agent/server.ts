@@ -79,6 +79,8 @@ interface Opened {
   installationId: string;
   secrets: Secrets;
   signingKey: KeyObject;
+  /** When this copy was opened; set by refresh(). */
+  openedAt?: number;
 }
 
 /**
@@ -286,7 +288,8 @@ export function createKeyAgent(options: AgentOptions): Server {
             ? previous
             : options.provider;
         const opened = toOpened(bundle.installationId, await openBundle(bundle, provider));
-        cache.set(bundleId, { opened, openedAt: now() });
+        opened.openedAt = now();
+        cache.set(bundleId, { opened, openedAt: opened.openedAt });
         log({
           event: 'key_agent.bundle_opened',
           bundleId,
@@ -338,7 +341,10 @@ export function createKeyAgent(options: AgentOptions): Server {
       }
       // Signed over the exact body, which carries the caller's nonce: a process that took this
       // port while the agent was down cannot produce it without opening the bundle itself.
-      const body = JSON.stringify({ bundleId, nonce, secrets: opened.secrets });
+      // ageMs: how old this copy is, so a Worker's stale window counts from when it was opened
+      // (a stale copy served during a key-service outage is not fresh to the Worker).
+      const ageMs = Math.max(0, now() - (opened.openedAt ?? now()));
+      const body = JSON.stringify({ bundleId, nonce, ageMs, secrets: opened.secrets });
       answer(socket, {
         status: 200,
         body,

@@ -108,7 +108,17 @@ const NO_SOCKET: KeyAgentConnect = () => {
   throw new Error('no key-agent socket configured');
 };
 let connectSocket: KeyAgentConnect = NO_SOCKET;
-let cached: { bundleId: string; secrets: RuntimeSecrets; loadedAt: number } | null = null;
+/**
+ * `loadedAt`: when this isolate fetched the copy (the TTL counts from it). `openedAt`: when the
+ * agent opened it, earlier than `loadedAt` when the agent answered from a stale copy while the key
+ * service was down (the stale bound counts from it, so the two stale windows never add up).
+ */
+let cached: {
+  bundleId: string;
+  secrets: RuntimeSecrets;
+  loadedAt: number;
+  openedAt: number;
+} | null = null;
 /** A resident object's background refresh in flight (residentSecret), or null. */
 let backgroundRefresh: Promise<unknown> | null = null;
 
@@ -212,19 +222,30 @@ function maxStaleMs(env: KeyAgentEnv): number {
  * negative age; that copy counts as expired, so a clock correction cannot stretch either bound.
  */
 function cachedAgeMs(): number | null {
-  if (!cached) return null;
-  const age = Date.now() - cached.loadedAt;
+  return cached ? ageSince(cached.loadedAt) : null;
+}
+
+/** How long ago the agent opened this isolate's copy (the stale bound), as cachedAgeMs. */
+function cachedStaleAgeMs(): number | null {
+  return cached ? ageSince(cached.openedAt) : null;
+}
+
+function ageSince(at: number): number {
+  const age = Date.now() - at;
   return age < 0 ? Number.POSITIVE_INFINITY : age;
 }
 
 /** This isolate's secrets if loaded for the deployment's bundle and not yet due, else null. */
 export function cachedRuntimeSecrets(env: KeyAgentEnv): RuntimeSecrets | null {
   const age = cachedAgeMs();
+  const staleAge = cachedStaleAgeMs();
   // Due at the TTL or the stale bound, whichever comes first: a TTL above the bound is capped.
   return cached &&
     cached.bundleId === env.SAM_SECRET_BUNDLE_ID &&
     age !== null &&
-    age < Math.min(ttlMs(env), maxStaleMs(env))
+    staleAge !== null &&
+    age < ttlMs(env) &&
+    staleAge < maxStaleMs(env)
     ? cached.secrets
     : null;
 }
@@ -285,7 +306,9 @@ function parseRecord(text: string): JsonRecord {
   }
 }
 
-async function fetchSecrets(agent: AgentSettings): Promise<RuntimeSecrets> {
+async function fetchSecrets(
+  agent: AgentSettings
+): Promise<{ secrets: RuntimeSecrets; ageMs: number }> {
   const started = Date.now();
   const nonce = hex(crypto.getRandomValues(new Uint8Array(16)));
   const envelope = parseRecord(
@@ -321,7 +344,12 @@ async function fetchSecrets(agent: AgentSettings): Promise<RuntimeSecrets> {
   }
   const record = parseRecord(text);
   const secrets = record.secrets;
+  // How old the agent's copy is (0 when fresh; an agent from before this field sends none).
+  const ageMs = 'ageMs' in record ? record.ageMs : 0;
   if (
+    typeof ageMs !== 'number' ||
+    !Number.isFinite(ageMs) ||
+    ageMs < 0 ||
     record.bundleId !== agent.bundleId ||
     record.nonce !== nonce ||
     typeof secrets !== 'object' ||
@@ -341,7 +369,7 @@ async function fetchSecrets(agent: AgentSettings): Promise<RuntimeSecrets> {
     count: Object.keys(secrets).length,
     ms: Date.now() - started,
   });
-  return Object.freeze({ ...(secrets as Record<string, string>) });
+  return { secrets: Object.freeze({ ...(secrets as Record<string, string>) }), ageMs };
 }
 
 /**
@@ -354,10 +382,10 @@ export async function loadRuntimeSecrets(env: KeyAgentEnv): Promise<RuntimeSecre
   if (hit) return hit;
   const agent = settings(env);
   // Past the stale bound the copy is gone before the agent is asked: nothing can revive it.
-  if ((cachedAgeMs() ?? 0) >= maxStaleMs(env)) cached = null;
-  let secrets: RuntimeSecrets;
+  if ((cachedStaleAgeMs() ?? 0) >= maxStaleMs(env)) cached = null;
+  let fetched: { secrets: RuntimeSecrets; ageMs: number };
   try {
-    secrets = await fetchSecrets(agent);
+    fetched = await fetchSecrets(agent);
   } catch (error) {
     // A due copy survives only an unreachable agent; a refusal or an unverified answer ends it.
     if (
@@ -370,8 +398,14 @@ export async function loadRuntimeSecrets(env: KeyAgentEnv): Promise<RuntimeSecre
     if (cached?.bundleId === agent.bundleId) cached = null;
     throw error;
   }
-  cached = { bundleId: agent.bundleId, secrets, loadedAt: Date.now() };
-  return secrets;
+  const loadedAt = Date.now();
+  cached = {
+    bundleId: agent.bundleId,
+    secrets: fetched.secrets,
+    loadedAt,
+    openedAt: loadedAt - fetched.ageMs,
+  };
+  return fetched.secrets;
 }
 
 /**
@@ -385,66 +419,6 @@ export function withRuntimeSecrets<E extends object>(env: E, secrets: RuntimeSec
     if (existing === undefined || typeof existing === 'string') merged[name] = value;
   }
   return merged as E;
-}
-
-function unavailableResponse(error: unknown): Response {
-  const code = error instanceof RuntimeSecretsUnavailableError ? error.code : 'SECRETS_UNAVAILABLE';
-  log.error('runtime_secrets.unavailable', {
-    code,
-    message: error instanceof Error ? error.message : String(error),
-    action: 'rejected',
-  });
-  return Response.json(
-    {
-      error: 'SECRETS_UNAVAILABLE',
-      code,
-      message: 'This SAM install cannot reach its key agent. Check `docker compose ps key-agent`.',
-    },
-    { status: 503, headers: { 'retry-after': '5', 'cache-control': 'no-store' } }
-  );
-}
-
-interface WorkerHandlers<E> {
-  fetch?: (request: Request, env: E, ctx: ExecutionContext) => Response | Promise<Response>;
-  scheduled?: (
-    controller: ScheduledController,
-    env: E,
-    ctx: ExecutionContext
-  ) => void | Promise<void>;
-  email?: (message: ForwardableEmailMessage, env: E, ctx: ExecutionContext) => void | Promise<void>;
-}
-
-/** The Worker's handlers, each run with the runtime secrets or not at all. */
-export function wrapWorker<E extends object>(worker: WorkerHandlers<E>): WorkerHandlers<E> {
-  const wrapped: WorkerHandlers<E> = {};
-  if (worker.fetch) {
-    const inner = worker.fetch;
-    wrapped.fetch = async (request, env, ctx) => {
-      let secrets: RuntimeSecrets;
-      try {
-        secrets = await loadRuntimeSecrets(env as KeyAgentEnv);
-      } catch (error) {
-        return unavailableResponse(error);
-      }
-      return await inner(request, withRuntimeSecrets(env, secrets), ctx);
-    };
-  }
-  if (worker.scheduled) {
-    const inner = worker.scheduled;
-    wrapped.scheduled = async (controller, env, ctx) => {
-      // Throws when unavailable: the cron run fails visibly instead of running without keys.
-      const secrets = await loadRuntimeSecrets(env as KeyAgentEnv);
-      await inner(controller, withRuntimeSecrets(env, secrets), ctx);
-    };
-  }
-  if (worker.email) {
-    const inner = worker.email;
-    wrapped.email = async (message, env, ctx) => {
-      const secrets = await loadRuntimeSecrets(env as KeyAgentEnv);
-      await inner(message, withRuntimeSecrets(env, secrets), ctx);
-    };
-  }
-  return wrapped;
 }
 
 /** One refresh at a time for resident objects; its own timeout (exchange) always settles it. */
@@ -464,6 +438,7 @@ export function refreshInBackground(env: KeyAgentEnv): void {
 export function currentRuntimeSecrets(env: KeyAgentEnv): {
   secrets: RuntimeSecrets | null;
   ageMs: number;
+  staleAgeMs: number;
   ttlMs: number;
   maxStaleMs: number;
 } {
@@ -472,6 +447,7 @@ export function currentRuntimeSecrets(env: KeyAgentEnv): {
   return {
     secrets: current ? current.secrets : null,
     ageMs: age ?? Number.POSITIVE_INFINITY,
+    staleAgeMs: cachedStaleAgeMs() ?? Number.POSITIVE_INFINITY,
     ttlMs: ttlMs(env),
     maxStaleMs: maxStaleMs(env),
   };

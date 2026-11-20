@@ -135,6 +135,7 @@ describe('who may ask', () => {
     expect(JSON.parse(text)).toEqual({
       bundleId: bundle.bundleId,
       nonce: NONCE,
+      ageMs: 0,
       secrets: { ENCRYPTION_KEY: 'sealed-value-123456' },
     });
     const signature = Buffer.from(String(res.signature), 'base64');
@@ -382,6 +383,17 @@ describe('cache and key-service failures', () => {
     state.fail = new KeyProviderError('denied', 'HTTP 403');
     expect(await ask()).toEqual({ status: 503, error: 'key_service_denied' });
     expect(state.calls).toBe(2);
+  });
+
+  it('tells the Worker how old a stale copy is, inside the signed body (Codex P2)', async () => {
+    const state: { fail: KeyProviderError | null; calls: number } = { fail: null, calls: 0 };
+    const { ask, advance } = await setup({ wrap: flaky(state), maxStaleMs: 60_000 });
+    expect(JSON.parse(String((await ask()).body)).ageMs).toBe(0);
+    state.fail = new KeyProviderError('unavailable', 'kms down');
+    advance(4000);
+    const stale = await ask();
+    expect(stale.status).toBe(200);
+    expect(JSON.parse(String(stale.body)).ageMs).toBe(4000);
   });
 
   it('drops the copy when the key service refuses (revocation takes effect)', async () => {

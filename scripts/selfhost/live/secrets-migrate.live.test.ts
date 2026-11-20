@@ -300,6 +300,36 @@ describe('secrets migrate', () => {
     expect(plaintextLeft()).toHaveLength(2);
   });
 
+  // Codex P2 on #2933: a run interrupted between its two removals left secrets.env alone, and
+  // every retry said "nothing to migrate" because platform-keys.json was gone.
+  it('a retry finishes a removal interrupted after platform-keys.json, once the sealed version runs', async () => {
+    expect(await runMigration({ box: box(), stateDir: state }, deps())).toBe('migrated-files-kept');
+    rmSync(join(state, 'platform-keys.json')); // the interrupted run's first removal
+    const copy = join(dir, 'kek-copy');
+    writeFileSync(copy, readFileSync(join(state, 'key-agent/kek')), { mode: 0o600 });
+    const sealedRuns = deps({
+      currentVersionSecrets: async () => {
+        steps.push('scan current');
+        return [];
+      },
+    });
+    // Control: while the running version still holds secret vars, nothing is removed.
+    const stillPlain = deps({
+      currentVersionSecrets: async () => {
+        steps.push('scan current');
+        return ['ENCRYPTION_KEY'];
+      },
+    });
+    expect(await runMigration({ box: box(), stateDir: state, keyCopy: copy }, stillPlain)).toBe(
+      'nothing-to-migrate'
+    );
+    expect(plaintextLeft()).toEqual(['secrets.env']);
+    expect(await runMigration({ box: box(), stateDir: state, keyCopy: copy }, sealedRuns)).toBe(
+      'migrated'
+    );
+    expect(plaintextLeft()).toEqual([]);
+  });
+
   it('refuses while .env says legacy-plaintext, and has nothing to do on a sealed box', async () => {
     envFile = writeBox(dir, [...NO_CLOUD, 'SAM_KEY_PROVIDER=legacy-plaintext']);
     await expect(runMigration({ box: box(), stateDir: state }, deps())).rejects.toThrow(

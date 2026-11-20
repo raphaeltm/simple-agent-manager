@@ -16,9 +16,9 @@ import {
   type KeyAgentSocket,
   loadRuntimeSecrets,
   resetRuntimeSecretsForTests,
-  wrapWorker,
 } from '../../src/selfhost/runtime-secrets';
 import { wrapDurableObject } from '../../src/selfhost/runtime-secrets-durable-object';
+import { wrapWorker } from '../../src/selfhost/runtime-secrets-worker';
 
 type Envelope = Record<string, unknown>;
 type Agent = (request: Record<string, unknown>) => Promise<Envelope>;
@@ -85,12 +85,14 @@ function answer(
     nonce?: string;
     signWith?: typeof agentKey.privateKey;
     unsigned?: boolean;
+    ageMs?: unknown;
   } = {}
 ) {
   return async (request: Record<string, unknown>): Promise<Envelope> => {
     const text = JSON.stringify({
       bundleId: overrides.bundleId ?? BUNDLE,
       nonce: overrides.nonce ?? request.nonce,
+      ...(overrides.ageMs === undefined ? {} : { ageMs: overrides.ageMs }),
       secrets,
     });
     const signature = sign(null, Buffer.from(text), overrides.signWith ?? agentKey.privateKey);
@@ -383,6 +385,47 @@ describe('cache bounds (Codex P2s)', () => {
     now += 1;
     expect((await loadRuntimeSecrets(e)).K).toBe('v2');
   });
+});
+
+describe("the agent's copy age (Codex P2: the two stale windows must not add up)", () => {
+  let now = 1_000_000;
+  beforeEach(() => {
+    now = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+  });
+  const e = () => ({
+    ...env(),
+    SAM_RUNTIME_SECRETS_TTL_MS: '1000',
+    SAM_RUNTIME_SECRETS_MAX_STALE_MS: '5000',
+  });
+
+  it('counts the stale bound from when the agent opened its copy, not from this fetch', async () => {
+    fetchMock
+      .mockImplementationOnce(answer({ K: 'v1' }, { ageMs: 4000 })) // agent served a stale copy
+      .mockRejectedValue(new TypeError('connection refused'));
+    expect((await loadRuntimeSecrets(e())).K).toBe('v1');
+    now += 999;
+    expect((await loadRuntimeSecrets(e())).K).toBe('v1'); // TTL still counts from the fetch
+    now += 1; // 1000 ms after the fetch: 5000 ms after the agent opened it
+    await expect(loadRuntimeSecrets(e())).rejects.toThrow(/unreachable/);
+  });
+
+  it('control: a fresh answer (ageMs 0 or absent) keeps the full stale window', async () => {
+    fetchMock
+      .mockImplementationOnce(answer({ K: 'v1' }, { ageMs: 0 }))
+      .mockRejectedValue(new TypeError('connection refused'));
+    await loadRuntimeSecrets(e());
+    now += 4999;
+    expect((await loadRuntimeSecrets(e())).K).toBe('v1');
+  });
+
+  it.each([[-1], ['1000'], [Number.NaN], [null]])(
+    'refuses an answer whose ageMs is %s',
+    async (ageMs) => {
+      fetchMock.mockImplementation(answer({ K: 'v1' }, { ageMs }));
+      await expect(loadRuntimeSecrets(e())).rejects.toThrow(/malformed/);
+    }
+  );
 });
 
 describe('wrapDurableObject', () => {

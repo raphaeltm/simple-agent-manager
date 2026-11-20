@@ -21,8 +21,8 @@ type DurableObjectClass = abstract new (...args: any[]) => object;
  * is gone and the read throws, so the object's event fails closed (the loader's own rules).
  */
 function residentSecret(env: KeyAgentEnv, name: string): string | undefined {
-  const { secrets, ageMs, ttlMs, maxStaleMs } = currentRuntimeSecrets(env);
-  if (!secrets || ageMs >= maxStaleMs) {
+  const { secrets, ageMs, staleAgeMs, ttlMs, maxStaleMs } = currentRuntimeSecrets(env);
+  if (!secrets || staleAgeMs >= maxStaleMs) {
     refreshInBackground(env);
     throw new RuntimeSecretsUnavailableError(
       'SECRETS_EXPIRED',

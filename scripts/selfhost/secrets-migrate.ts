@@ -70,8 +70,21 @@ export async function runMigration(
       `.env sets SAM_KEY_PROVIDER=${LEGACY_KEY_PROVIDER}: remove that line to migrate`
     );
   }
-  const files = PLAINTEXT_SECRET_FILES.filter((name) => existsSync(join(stateDir, name)));
+  // platform-keys.json goes last: its presence is what marks the box as not yet migrated, so an
+  // interrupted removal can only leave it behind together with the rest, never secrets.env alone.
+  const files = PLAINTEXT_SECRET_FILES.filter((name) => existsSync(join(stateDir, name))).sort(
+    (a, b) => Number(a === 'platform-keys.json') - Number(b === 'platform-keys.json')
+  );
   if (!existsSync(join(stateDir, 'platform-keys.json'))) {
+    // An earlier run that stopped between its removals left secrets.env: finish once the running
+    // version is confirmed sealed.
+    if (files.length > 0 && readKeyChoice(stateDir) !== null) {
+      const running = await deps.adoptAndCheck();
+      if (running.healthy && (await deps.currentVersionSecrets()).length === 0) {
+        log('a previous migrate stopped before removing every plaintext file; finishing that');
+        return removePlaintext(input, files, log);
+      }
+    }
     log('no platform-keys.json on this box: it is already sealed (or new). Nothing to migrate.');
     log('Old copies may remain in the bucket and backups: pnpm selfhost:secrets plaintext');
     return 'nothing-to-migrate';
