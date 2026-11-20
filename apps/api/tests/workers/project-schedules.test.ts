@@ -57,6 +57,24 @@ function browser(
   );
 }
 
+/** Make one schedule due now and run the production schedule alarm inside the real DO. */
+async function fireDueSchedule(state: DurableObjectState, projectId: string, scheduleId: string) {
+  state.storage.sql.exec(
+    `UPDATE project_schedules SET due_at = ?, next_attempt_at = ? WHERE id = ?`,
+    Date.now() - 1,
+    Date.now() - 1,
+    scheduleId
+  );
+  await runScheduleAlarm(state.storage.sql, testEnv, {
+    getProjectId: () => projectId,
+    transactionSync: (callback) => state.storage.transactionSync(callback),
+    waitUntil: () => {},
+    recalculateAlarm: async () => {},
+    scheduleSummarySync: () => {},
+    broadcastEvent: () => {},
+  });
+}
+
 function request(sessionId: string, key = crypto.randomUUID()) {
   return {
     action: { kind: 'message_session', sessionId, prompt: 'Scheduled route message' },
@@ -239,22 +257,9 @@ describe('scheduled actions public boundaries', () => {
     await testEnv.DATABASE.prepare(`UPDATE tasks SET status = 'cancelled' WHERE id = ?`)
       .bind(f.taskId)
       .run();
-    await runInDurableObject(f.stub, async (_instance, state) => {
-      state.storage.sql.exec(
-        `UPDATE project_schedules SET due_at = ?, next_attempt_at = ? WHERE id = ?`,
-        Date.now() - 1,
-        Date.now() - 1,
-        created.schedule.id
-      );
-      await runScheduleAlarm(state.storage.sql, testEnv, {
-        getProjectId: () => f.projectId,
-        transactionSync: (callback) => state.storage.transactionSync(callback),
-        waitUntil: () => {},
-        recalculateAlarm: async () => {},
-        scheduleSummarySync: () => {},
-        broadcastEvent: () => {},
-      });
-    });
+    await runInDurableObject(f.stub, async (_instance, state) =>
+      fireDueSchedule(state, f.projectId, created.schedule.id)
+    );
     const response = await browser(f.projectId, f.userId);
     expect(response.status).toBe(200);
     const listed = (await response.json<{ schedules: Array<Record<string, unknown>> }>()).schedules;
@@ -305,20 +310,7 @@ describe('scheduled actions public boundaries', () => {
       request: request(f.sessionId),
     });
     const result = await runInDurableObject(f.stub, async (instance, state) => {
-      state.storage.sql.exec(
-        `UPDATE project_schedules SET due_at = ?, next_attempt_at = ? WHERE id = ?`,
-        Date.now() - 1,
-        Date.now() - 1,
-        created.schedule.id
-      );
-      await runScheduleAlarm(state.storage.sql, testEnv, {
-        getProjectId: () => f.projectId,
-        transactionSync: (callback) => state.storage.transactionSync(callback),
-        waitUntil: () => {},
-        recalculateAlarm: async () => {},
-        scheduleSummarySync: () => {},
-        broadcastEvent: () => {},
-      });
+      await fireDueSchedule(state, f.projectId, created.schedule.id);
       const schedule = await instance.getProjectSchedule({
         projectId: f.projectId,
         userId: f.userId,
