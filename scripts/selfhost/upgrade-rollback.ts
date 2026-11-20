@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { composeArgs, composeRunEnv } from './backup-lib.js';
 import { assertOperatorExecution } from './operator-only.js';
+import { recoverRollbackState } from './rollback-state.js';
 import { type BoxContext, recoverUpgrade, UPGRADE_PENDING_FILE } from './upgrade-lib.js';
 import { assertRollbackReady } from './upgrade-preflight.js';
 
@@ -19,6 +20,7 @@ export async function runManualRollback(
   opts: ManualRollbackOptions
 ): Promise<void> {
   assertOperatorExecution();
+  recoverRollbackState(ctx);
   if (
     !/^[a-f0-9]{40}$/.test(opts.from) ||
     opts.rebuilds.some((name) => !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name))

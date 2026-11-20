@@ -1,13 +1,5 @@
 /** Restore an upgrade's authenticated snapshot to the same owned installation. */
-import {
-  cpSync,
-  existsSync,
-  lstatSync,
-  mkdtempSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-} from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 import { readRecord } from '../../deploy/selfhost/created-resources.mjs';
@@ -29,7 +21,7 @@ import {
   readManifest,
   STATE_DIR,
 } from './backup-lib';
-import { composeProjectFor, recordInstall, SELFHOST_ENVIRONMENT } from './install-record';
+import { composeProjectFor, SELFHOST_ENVIRONMENT } from './install-record';
 import { assertOperatorExecution } from './operator-only';
 import { removePrivateTree } from './private-tree';
 import {
@@ -44,6 +36,7 @@ import {
   cacheStartTime,
   recoverCacheStart,
 } from './rollback-cache-transition';
+import { publishRollbackState, recoverRollbackState, rollbackStatePending } from './rollback-state';
 import { assertPrivateFile, replacePrivateFile } from './secret-files';
 import { assertRollbackReady } from './upgrade-preflight';
 function compose(ctx: BoxContext, args: string[]): void {
@@ -342,7 +335,6 @@ function restoreState(
 ): void {
   const stage = mkdtempSync(join(dirname(ctx.stateDir), '.rollback-state-'));
   const staged = join(stage, 'restored');
-  const previous = join(stage, 'previous');
   try {
     cpSync(source, staged, { recursive: true });
     // Keep the original upgrade's recovery pointer until recoverUpgrade verifies health.
@@ -360,17 +352,9 @@ function restoreState(
         JSON.stringify({ ...pending, snapshot: resolve(from) })
       );
     replacePrivateFile(join(staged, 'created-resources.json'), currentLedger(ctx, id));
-    renameSync(ctx.stateDir, previous);
-    try {
-      renameSync(staged, ctx.stateDir);
-      recordInstall(ctx.stateDir, ctx.envFile, ctx.box, id);
-    } catch (error) {
-      rmSync(ctx.stateDir, { recursive: true, force: true });
-      renameSync(previous, ctx.stateDir);
-      throw error;
-    }
+    publishRollbackState(ctx, stage, id);
   } finally {
-    removePrivateTree(stage);
+    if (!rollbackStatePending(ctx)) removePrivateTree(stage);
   }
 }
 
@@ -380,6 +364,7 @@ function restoreState(
  */
 export function runRollback(ctx: BoxContext, from: string, expectedSamCommit?: string): void {
   assertOperatorExecution();
+  recoverRollbackState(ctx);
   const key = backupKey(ctx);
   assertBackupOutside(ctx, from);
   const temp = backupScratch();

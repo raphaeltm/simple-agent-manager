@@ -237,6 +237,11 @@ snapshot and key, and retry the same resolved target to recover the original ins
 `--to`, a moved branch/tag, or an older journal without a target requires the explicit rollback
 command before choosing another target.
 Do not delete the pending record to bypass a failed recovery.
+Rollback also keeps a private sibling `.<state-directory-name>.rollback-state.json` receipt
+while replacing local state. Retry reconciles an interrupted directory swap before reading
+installation metadata, and refuses changed directory identities. Keep that receipt and its
+recorded `.rollback-state-*` directory together until recovery finishes; do not remove them
+manually.
 
 After a successful upgrade, its printed rollback command restores the populated installation
 in place. Run it from the upgraded checkout, keeping the original full commit SHA, snapshot,

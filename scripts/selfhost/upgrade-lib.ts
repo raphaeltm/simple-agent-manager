@@ -24,6 +24,7 @@ import { composeFilesFor } from './compose-env.js';
 import { log, REPO_ROOT, SELFHOST_DIR } from './deploy-steps.js';
 import { COMPOSE_PATH, imageRebuilds } from './image-rebuilds.js';
 import { assertOperatorExecution } from './operator-only.js';
+import { recoverRollbackState } from './rollback-state.js';
 import { assertPrivateFile, replacePrivateFile } from './secret-files.js';
 import {
   composeInputsChanged,
@@ -170,6 +171,7 @@ export async function recoverUpgrade(
   opts: UpgradeOptions
 ): Promise<void> {
   assertOperatorExecution();
+  recoverRollbackState(ctx);
   const pendingPath = join(ctx.stateDir, UPGRADE_PENDING_FILE);
   const to = existsSync(pendingPath)
     ? pendingUpgradeTarget(JSON.parse(readFileSync(pendingPath, 'utf8')))
@@ -383,6 +385,7 @@ async function rollbackFailedUpgrade(
 
 export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise<UpgradeResult> {
   assertOperatorExecution();
+  recoverRollbackState(ctx);
   assertRollbackReady(ctx);
   const git: Git = (args, what = `git ${args.join(' ')}`) => check(ctx.run('git', args), what);
 

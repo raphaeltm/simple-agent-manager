@@ -85,6 +85,14 @@ The coordinator explicitly deferred the pre-existing pool/provider/service-accou
 
 Plaintext backups, missing rollback/history validation and name-based lifecycle assumptions were unsafe. Real SDK failure evidence replaced the unconfirmed tracker hypothesis. Real disposable execution exposed read-only cache cleanup and executable-mode loss; both have discriminating regressions. Review added clone identity isolation, inactive restore deployment, durable retries, exact backup deletion proof and retained-key retry ownership. Clean CI exposed an unbuilt workspace-package dependency that locally built output had hidden; the full suite now proves source resolution with that output absent.
 
+## Rollback state-swap interruption delta
+
+Automatic review 4638273658 exposed a process-kill gap between moving live state aside and recording the replacement inode. The same emitted rollback command reproduced both missing-state and stale-ledger failures. The replacement ledger now binds its new inode before publication; a private sibling swap receipt durably binds installation scope and original/staged directory identities before either rename. Automatic, explicit and direct recovery reconcile that receipt before reading installation metadata. An interrupted cleanup retains the proof; replaced or symlinked directories and receipts refuse before destructive work.
+
+Ten real-CLI scenarios cover uninterrupted recovery, SIGKILL after receipt publication, each directory rename and stage removal, plus foreign previous/live/stage/restored inodes and a symlink receipt. Every retry uses the same printed command and state path with spaces. Tests assert preserved upgrade/cache pointers, restored bucket/state, the new ledger inode, exact scratch cleanup and refusal before cloud/cache mutation. The two rename controls failed on the original implementation and pass with the fix. Existing BOX evidence and the coordinator-owned post-merge combined smoke remain as recorded above.
+
+Final delta validation: full self-host suite 995 passed, four conditional skips, 56 files; TypeScript, focused lint, formatting, diff and secret-readback scanner pass. Independent security and completion/documentation/constitution delta reviews pass with no unresolved finding. FIFO receipts refuse before opening and malformed key diagnostics withhold source contents.
+
 ## References
 
 PR https://github.com/raphaeltm/simple-agent-manager/pull/2918; idea01M72M9AEB933ZY8269D376DKC LANDING PLAN part6; SAM task01M7TTKAS78AMJ3853S5N4BYAK; coordinator01M7JMXS2JRW6QQMB1356ENPM3; policy795e72a6; rule56; `/do`.
