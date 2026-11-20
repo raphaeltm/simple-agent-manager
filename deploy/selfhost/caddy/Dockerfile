@@ -10,7 +10,7 @@
 # - the build fails unless the binary carries exactly the requested module versions.
 # Change the DNS provider with CADDY_DNS_MODULE=github.com/caddy-dns/<provider>@<version> in .env,
 # add a matching tls/dns-<provider>.caddy snippet, then `docker compose build caddy`.
-FROM caddy:2.11.9-builder@sha256:3db11aead97f1fdff9c563d0dd8e7fba2e4c7031bef40f3e44fd1982f3e8366b AS build
+FROM caddy:2.11.9-builder@sha256:f9beaa5ddbe7df6f26ebbcf9cbf44e05a1917b9bba464f0c3229038d7e2e6e13 AS build
 ARG CADDY_DNS_MODULE=github.com/caddy-dns/googleclouddns@v1.1.0
 ARG CADDY_RATELIMIT_MODULE=github.com/mholt/caddy-ratelimit@v0.1.0
 ENV GOPROXY=https://proxy.golang.org \
@@ -34,7 +34,7 @@ RUN set -eu; \
         || { echo "caddy was not built with $module" >&2; cat /tmp/build-info >&2; exit 1; }; \
     done
 
-FROM caddy:2.11.9@sha256:ce773ec7a742ce15ee6bf2bb5f65882b9e2a4487b10733e6f1484f86e6b5d8bc
+FROM caddy:2.11.9@sha256:4851e54a46b206517c574821bb5cc67f170d2156041e9fbc4c9193b45e84a75b
 COPY --from=build /usr/bin/caddy /usr/bin/caddy
 # Never root. The file capability is the only privilege: it lets the unprivileged process bind
 # 80/443, and compose keeps NET_BIND_SERVICE as the one capability (docker-compose.yml, service
