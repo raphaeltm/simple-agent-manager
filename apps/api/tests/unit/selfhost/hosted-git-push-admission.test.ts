@@ -225,6 +225,28 @@ describe('push admission: directory/file ref conflicts', () => {
     expect(plan.decisions[1]).toMatchObject({ reject: 'ref name conflicts with an existing ref' });
   });
 
+  it('refuses every command for a ref the push names twice, so a losing delete frees no name', async () => {
+    const repo = new Repo();
+    const a = repo.simple('a');
+    const b = repo.simple('b', [a]);
+    repo.refs.set('refs/heads/a', a);
+    // Update a, delete a (loses its CAS to the update at commit), create a/b under it.
+    const out = commitPush(
+      repo.store(),
+      await decide(repo, [
+        [a, b, 'refs/heads/a'],
+        [a, ZERO, 'refs/heads/a'],
+        [ZERO, a, 'refs/heads/a/b'],
+      ])
+    );
+    expect(out.results.map((r) => (r.ok ? 'ok' : r.msg))).toEqual([
+      'multiple updates for ref not allowed',
+      'multiple updates for ref not allowed',
+      'ref name conflicts with an existing ref',
+    ]);
+    expect([...repo.refs]).toEqual([['refs/heads/a', a]]);
+  });
+
   it('allows replacing a ref with a nested one when the same push deletes it', async () => {
     const repo = new Repo();
     const c = repo.simple('c');

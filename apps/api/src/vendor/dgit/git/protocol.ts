@@ -1481,9 +1481,22 @@ export async function validatePush(
     }
     return false;
   };
+  // SAM: a ref named by more than one command is refused for all of them, as git
+  // refuses multiple updates of one ref in a transaction. Otherwise a deletion that
+  // loses its CAS to an earlier update of the same ref would still have freed the
+  // name for a nested ref here, leaving both stored.
+  const seen = new Set<string>();
+  const duplicated = new Set<string>();
+  for (const cmd of commands) {
+    if (seen.has(cmd.ref)) duplicated.add(cmd.ref);
+    seen.add(cmd.ref);
+  }
   for (const r of existing) trackRef(r.name, 1);
   for (const cmd of commands) {
-    if (cmd.next === ZERO_OID && refNames.has(cmd.ref) && store.getRef(cmd.ref) === cmd.old) {
+    if (
+      cmd.next === ZERO_OID && !duplicated.has(cmd.ref) && refNames.has(cmd.ref)
+      && store.getRef(cmd.ref) === cmd.old
+    ) {
       trackRef(cmd.ref, -1);
     }
   }
@@ -1496,6 +1509,10 @@ export async function validatePush(
     }
     if (!isValidGitRefName(cmd.ref)) {
       decisions.push({ ref: cmd.ref, expectedOld: cmd.old, reject: "funny refname" });
+      continue;
+    }
+    if (duplicated.has(cmd.ref)) {
+      decisions.push({ ref: cmd.ref, expectedOld: cmd.old, reject: "multiple updates for ref not allowed" });
       continue;
     }
     const current = store.getRef(cmd.ref) ?? ZERO_OID;

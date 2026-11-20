@@ -1515,6 +1515,31 @@ describe('push connectivity admission (closure must be complete per command)', (
     await assertCleanClone(remote);
   });
 
+  it('refuses every command for a ref named twice, so a losing delete cannot free a nested name', async () => {
+    const project = await createHostedProject(await createEmailOnlyUser(), 'Duplicate ref commands');
+    const token = await mintToken(project, 'write');
+    const remote = localRemote(project.repository, token);
+    const work = await freshDir('dup-ref');
+    await gitOk(['clone', remote, work]);
+    const main = await rev(work, 'HEAD');
+    await commitFile(work, 'next.txt');
+    const next = await rev(work, 'HEAD');
+    await gitOk(['push', 'origin', 'HEAD:refs/heads/next'], work);
+    expect(await receive(project, token, [[ZERO, main, 'refs/heads/a']])).toContain('ok refs/heads/a');
+    // Update a, delete a (would lose its CAS to the update), then create a/b nested under it.
+    const out = await receive(project, token, [
+      [main, next, 'refs/heads/a'],
+      [main, ZERO, 'refs/heads/a'],
+      [ZERO, main, 'refs/heads/a/b'],
+    ]);
+    expect(out).toContain('ng refs/heads/a multiple updates for ref not allowed');
+    expect(out).toContain('ng refs/heads/a/b ref name conflicts with an existing ref');
+    const refs = (await gitOk(['ls-remote', remote])).stdout;
+    expect(refs).toContain(`${main}\trefs/heads/a\n`);
+    expect(refs).not.toContain('refs/heads/a/b');
+    await assertCleanClone(remote);
+  });
+
   it('without a reachable cache, a valid push from a shallow clone is accepted', async () => {
     const project = await createHostedProject(await createEmailOnlyUser(), 'Closure shallow control');
     const token = await mintToken(project, 'write');
