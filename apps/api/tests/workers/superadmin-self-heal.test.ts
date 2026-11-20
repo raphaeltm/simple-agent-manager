@@ -241,7 +241,7 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
     expect(await getUser('real-1')).toMatchObject(expected);
   });
 
-  it('promotes the sole user even when REQUIRE_APPROVAL is unset (open registration)', async () => {
+  it('promotes the sole user even when REQUIRE_APPROVAL is unset (approval on by default)', async () => {
     await insertUser('real-1', { role: 'user', status: 'active' });
     // Omit REQUIRE_APPROVAL entirely — the self-heal is ungated and must still fire.
     const hook = await getSessionAfterHook({ REQUIRE_APPROVAL: undefined });
