@@ -130,8 +130,8 @@ describe('plaintext listing', () => {
     const report = formatPlaintextReport(ROOT, versions, [], '/backups').join('\n');
     expect(report).toContain('2 with plaintext secrets');
     expect(report).toContain('ENCRYPTION_KEY: the key every stored credential is encrypted under');
-    expect(report).toContain('platform-key rotation is not available yet');
-    expect(report).not.toContain('selfhost:secrets rotate');
+    expect(report).toContain('pnpm selfhost:secrets rotate encryption-key');
+    expect(report).not.toContain('not available yet');
     expect(report).toContain('GITHUB_CLIENT_SECRET: regenerate it in the GitHub App settings');
     expect(report).not.toContain(SECRET_VALUE);
   });

@@ -12,6 +12,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { getTokenHashKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
 import { getUserId, rejectAgentSignInSession } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
@@ -147,7 +148,7 @@ projectMembersRoutes.post(
     const rawToken = generateInviteToken(
       parsePositiveEnvInt(c.env.PROJECT_INVITE_TOKEN_BYTES, DEFAULT_INVITE_TOKEN_BYTES)
     );
-    const tokenHash = await hmacInviteToken(rawToken, c.env.ENCRYPTION_KEY);
+    const tokenHash = await hmacInviteToken(rawToken, getTokenHashKey(c.env));
     const link = {
       id: ulid(),
       projectId,

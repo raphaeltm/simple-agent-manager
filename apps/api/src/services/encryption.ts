@@ -4,6 +4,7 @@
  */
 
 import { log } from '../lib/logger';
+import { previousEncryptionKeyFor } from './encryption-key-fallback';
 
 function bufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
@@ -45,11 +46,7 @@ export async function encrypt(
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encoded = new TextEncoder().encode(plaintext);
 
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    key,
-    encoded
-  );
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
 
   return {
     ciphertext: bufferToBase64(ciphertext),
@@ -57,33 +54,44 @@ export async function encrypt(
   };
 }
 
+async function decryptWith(ciphertext: string, iv: string, keyBase64: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    base64ToBuffer(keyBase64),
+    { name: 'AES-GCM' },
+    false,
+    ['decrypt']
+  );
+
+  const decrypted = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: base64ToBuffer(iv) },
+    key,
+    base64ToBuffer(ciphertext)
+  );
+
+  return new TextDecoder().decode(decrypted);
+}
+
 /**
  * Decrypt a ciphertext string using AES-256-GCM.
  * Returns the original plaintext.
  * Logs decryption failures for security monitoring.
+ *
+ * During a self-hosted key rotation a previous key may be registered for `keyBase64`
+ * (encryption-key-fallback.ts); it is tried only after the given key fails.
  */
-export async function decrypt(
-  ciphertext: string,
-  iv: string,
-  keyBase64: string
-): Promise<string> {
+export async function decrypt(ciphertext: string, iv: string, keyBase64: string): Promise<string> {
   try {
-    const key = await crypto.subtle.importKey(
-      'raw',
-      base64ToBuffer(keyBase64),
-      { name: 'AES-GCM' },
-      false,
-      ['decrypt']
-    );
-
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: base64ToBuffer(iv) },
-      key,
-      base64ToBuffer(ciphertext)
-    );
-
-    return new TextDecoder().decode(decrypted);
+    return await decryptWith(ciphertext, iv, keyBase64);
   } catch (error) {
+    const previous = previousEncryptionKeyFor(keyBase64);
+    if (previous) {
+      try {
+        return await decryptWith(ciphertext, iv, previous);
+      } catch {
+        // reported below with the original error
+      }
+    }
     // Log decryption failures for security monitoring
     // This could indicate key rotation issues, data corruption, or tampering
     log.error('decryption_failure', {
@@ -92,6 +100,15 @@ export async function decrypt(
     });
     throw error;
   }
+}
+
+/** Decrypt with exactly this key: no rotation fallback, no failure log (key-rotation checks). */
+export async function decryptWithKeyOnly(
+  ciphertext: string,
+  iv: string,
+  keyBase64: string
+): Promise<string> {
+  return await decryptWith(ciphertext, iv, keyBase64);
 }
 
 /**

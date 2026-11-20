@@ -11,6 +11,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { getTokenHashKey } from '../../lib/secrets';
 import { errors } from '../../middleware/error';
 import { clearCredentialAttributionHealthCache } from '../../services/credential-attribution-health';
 import { getUserInstallationRepositories } from '../../services/github-app';
@@ -258,7 +259,7 @@ export async function loadProjectInviteByToken(
     throw errors.notFound('Invite link');
   }
   const db = drizzle(c.env.DATABASE, { schema });
-  const tokenHash = await hmacInviteToken(token, c.env.ENCRYPTION_KEY);
+  const tokenHash = await hmacInviteToken(token, getTokenHashKey(c.env));
   const rows = await db
     .select({ link: schema.projectInviteLinks, project: schema.projects })
     .from(schema.projectInviteLinks)

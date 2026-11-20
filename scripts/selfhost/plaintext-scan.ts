@@ -16,9 +16,8 @@
  * But celld's documentation (docs/guarantees.md) says an operator must not delete objects under
  * `deploy/`, with no exception for old versions, so SAM does not delete them (finding F10: the
  * integration branch had an opt-in purge; it did not land). Rotating every secret the listing
- * names is what makes the old copies worthless. Platform-key rotation is not available yet (see
- * PLATFORM_KEY_ROTATION_PENDING): until it lands, those copies stay readable by anyone with the
- * bucket credential.
+ * names is what makes the old copies worthless: platform keys with `pnpm selfhost:secrets rotate`
+ * (rotate-run.ts), external secrets where they were issued (rotationAdvice).
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -33,10 +32,6 @@ import { bundleStoreFor, KEY_AGENT_DIR, keyServiceSettings, listBundles } from '
 import { PLATFORM_KEY_NAMES } from './platform-keys';
 import { parseDotenv, readPrivateJson } from './secret-files';
 
-/** Said wherever rotation would be the answer: SAM cannot rotate its own platform keys yet (idea 01M7VTNAG1HMCE18GCNPS052X3). */
-export const PLATFORM_KEY_ROTATION_PENDING =
-  'platform-key rotation is not available yet (a later self-host release adds it); until then ' +
-  'every copy listed here stays readable by anyone holding the bucket credential or the backup';
 /** Values shorter than this are not matched by content (too many false hits); names still are. */
 const MIN_MATCH_LENGTH = 12;
 /** Stable, locale-free ordering for names and paths in the listing. */
@@ -334,10 +329,10 @@ export function scanRemoteBackups(
 /** How to rotate each kind of secret the listing names. */
 export function rotationAdvice(name: string): string {
   if (name === 'ENCRYPTION_KEY' || name.startsWith('ENCRYPTION_KEY_')) {
-    return `the key every stored credential is encrypted under: ${PLATFORM_KEY_ROTATION_PENDING}. Treat the credentials users stored in SAM as exposed and have them replace cloud tokens and agent keys.`;
+    return 'rotate it with pnpm selfhost:secrets rotate encryption-key (dry run first; stored credentials are re-encrypted online). Backups taken before then still hold data under the old key: treat the credentials users stored in SAM as exposed and have them replace cloud tokens and agent keys.';
   }
   if (PLATFORM_KEY_NAMES.includes(name as (typeof PLATFORM_KEY_NAMES)[number])) {
-    return `a generated platform key: ${PLATFORM_KEY_ROTATION_PENDING}. Exposure lets someone sign tokens or push messages as this install.`;
+    return 'a generated platform key: rotate it with pnpm selfhost:secrets rotate --all (dry run first). Until then, exposure lets someone sign tokens or push messages as this install.';
   }
   if (name.startsWith('GITHUB_')) {
     return 'regenerate it in the GitHub App settings (client secret, private key or webhook secret), put the new value in .state/secrets.env, run pnpm selfhost:deploy, then delete the old one at GitHub.';
