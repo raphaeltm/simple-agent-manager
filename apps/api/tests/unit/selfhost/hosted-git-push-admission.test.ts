@@ -381,12 +381,16 @@ describe('push admission: object shapes git can read', () => {
       [ZERO, named('short', '40000', 'GIT~1', tree), 'refs/heads/short'],
       [ZERO, named('stream', '100644', '.git:x', blob), 'refs/heads/stream'],
       [ZERO, named('modules', '120000', '.gitmodules', blob), 'refs/heads/modules'],
+      [ZERO, named('modules-short', '120000', 'GITMOD~1', blob), 'refs/heads/modules-short'],
+      [ZERO, named('modules-stream', '120000', '.gitmodules:x', blob), 'refs/heads/modules-stream'],
       [ZERO, named('long', '100644', 'n'.repeat(256), blob), 'refs/heads/long'],
       [ZERO, named('limit', '100644', 'n'.repeat(255), blob), 'refs/heads/limit'],
       [ZERO, named('modules-file', '100644', '.gitmodules', blob), 'refs/heads/modules-file'],
       [ZERO, named('gitignore', '100644', '.gitignore', blob), 'refs/heads/gitignore'],
     ]);
     expect(plan.decisions.map((d) => (d.reject ? 'reject' : 'set'))).toEqual([
+      'reject',
+      'reject',
       'reject',
       'reject',
       'reject',
@@ -547,6 +551,7 @@ describe('reachable cache stamping and GC', () => {
     const set = new OidSet(16);
     set.markHex(oidOf('reachable-1'));
     const fakeThis = (current: string) => ({
+      reachableSaveGeneration: 0,
       reachableVersion: () => current,
       sql: { exec: vi.fn() },
       setMeta: vi.fn(),
@@ -594,5 +599,66 @@ describe('reachable cache stamping and GC', () => {
     const clean = gcStore([]);
     expect((await runHostedGitGc(clean.store)).removed).toBe(0);
     expect(clean.invalidateReachable).not.toHaveBeenCalled();
+  });
+});
+
+describe('reachable cache writers check validity when they write', () => {
+  it('lets only the latest of two overlapping clone saves keep writing and stamp', async () => {
+    const { GitStore } = await import('../../../src/vendor/dgit/git/store');
+    const { OidSet } = await import('../../../src/vendor/dgit/git/oidset');
+    const n = 8192 * 2 + 5; // more than one insert batch, so each save yields mid-rewrite
+    const set = new OidSet(n);
+    for (let i = 0; i < n; i++) set.markHex(oidOf(`row-${i}`));
+    let inserts = 0;
+    const store = {
+      reachableSaveGeneration: 0,
+      reachableVersion: () => 'v',
+      sql: { exec: (q: string) => void (q.startsWith('INSERT') && inserts++) },
+      setMeta: vi.fn(),
+    } as unknown as InstanceType<typeof GitStore>;
+    const save = GitStore.prototype.saveReachable;
+    const first = save.call(store, set, 'v'); // runs one batch, then yields
+    const second = save.call(store, set, 'v'); // supersedes it
+    await Promise.all([first, second]);
+    const stamps = (store.setMeta as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([, v]) => v === 'v'
+    );
+    expect(stamps).toHaveLength(1);
+    // The superseded save stopped after its first batch; the latest wrote every row.
+    expect(inserts).toBe(8192 + n);
+  });
+
+  it('extends the cache at commit only if it is still stamped current, with a control', async () => {
+    const run = async (stillValid: boolean) => {
+      const repo = new Repo();
+      const base = repo.simple('base');
+      repo.refs.set('refs/heads/main', base);
+      const next = repo.simple('next', [base]);
+      const store = repo.store() as unknown as Record<string, unknown>;
+      store.getMeta = (key: string) => (key === 'reachable-version' ? 'v' : null);
+      const extendReachable = vi.fn();
+      const invalidateReachable = vi.fn();
+      Object.assign(store, {
+        extendReachable,
+        invalidateReachable,
+        reachableCacheValid: () => stillValid,
+      });
+      const plan = await withGitWorkBudget(DEFAULT_HOSTED_GIT_LIMITS, () =>
+        validatePush(
+          store as unknown as GitStore,
+          [{ old: base, next, ref: 'refs/heads/main' }],
+          null
+        )
+      );
+      expect(plan.hadCache).toBe(true);
+      commitPush(store as unknown as GitStore, plan);
+      return { extendReachable, invalidateReachable };
+    };
+    const rewritten = await run(false); // a clone's save unstamped the cache during validation
+    expect(rewritten.extendReachable).not.toHaveBeenCalled();
+    expect(rewritten.invalidateReachable).toHaveBeenCalledOnce();
+    const steady = await run(true);
+    expect(steady.extendReachable).toHaveBeenCalledOnce();
+    expect(steady.invalidateReachable).not.toHaveBeenCalled();
   });
 });

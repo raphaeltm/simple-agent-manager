@@ -1286,6 +1286,12 @@ function isDotGitName(name: string): boolean {
   return n === ".git" || n === "git~1" || n.startsWith(".git:");
 }
 
+/** `.gitmodules` in the same forms git checks: case, trailing dots/spaces, NTFS short name and streams. */
+function isDotGitmodulesName(name: string): boolean {
+  const n = name.toLowerCase().replace(/[ .]+$/, "");
+  return n === ".gitmodules" || n === "gitmod~1" || n.startsWith(".gitmodules:");
+}
+
 const OID_LINE = /^[0-9a-f]{40}$/;
 /** Longest single path component git checks out (NAME_MAX). */
 const MAX_TREE_NAME_BYTES = 255;
@@ -1351,7 +1357,7 @@ function assertGitObjectShape(obj: { type: ObjType; data: Uint8Array }): void {
       ) {
         throw new GitParseError("tree entry has an invalid or duplicate name");
       }
-      if (mode === "120000" && name.toLowerCase().replace(/[ .]+$/, "") === ".gitmodules") {
+      if (mode === "120000" && isDotGitmodulesName(name)) {
         throw new GitParseError("tree has a .gitmodules symlink");
       }
       names.add(name);
@@ -1524,6 +1530,10 @@ export function commitPush(store: GitStore, plan: PushPlan): { results: CommandR
   let changed = false;
   let needsGc = false;
   let casMismatch = false;
+  // SAM: re-check the cache stamp now, before any ref moves. `plan.hadCache` was read
+  // before validation awaited; a clone's save may have unstamped and be rewriting the
+  // table since, and extending that partial table would stamp it current.
+  const cacheValid = plan.hadCache && store.reachableCacheValid();
   for (const d of plan.decisions) {
     if (d.reject) {
       results.push({ ref: d.ref, ok: false, msg: d.reject });
@@ -1570,7 +1580,7 @@ export function commitPush(store: GitStore, plan: PushPlan): { results: CommandR
   // describing a command that did not apply) invalidates it, so the next full
   // clone rebuilds by walking rather than risk serving unreachable objects.
   if (changed) {
-    if (plan.hadCache && !needsGc && !casMismatch) store.extendReachable(plan.known);
+    if (cacheValid && !needsGc && !casMismatch) store.extendReachable(plan.known);
     else store.invalidateReachable();
   }
   return { results, changed, needsGc };

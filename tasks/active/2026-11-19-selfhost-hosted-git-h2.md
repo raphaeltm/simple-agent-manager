@@ -126,3 +126,14 @@ New findings, fixed:
 - LOW: `git~1`, `.git:` streams, a `.gitmodules` symlink and names over 255 bytes are now refused.
 
 Deferred to the backlog: path depth, and accepting uppercase-hex oids. Each guard was mutated once and its test went red. The real-git shape test also pushes the leading-continuation commit.
+
+## Scoped verification of dc8e9e4c (00:25 UTC)
+
+- Q1 PASS: the leading-continuation bypass is closed. 27 crafted commit and tag shapes went through the real Durable Object; none of the accepted ones broke a clone.
+- Q2 PASS: nothing that git fsck accepts and a default clone checks out is refused.
+- Q3 found two MEDIUM cache-concurrency races, both fixed:
+  - Two overlapping clone saves could stamp a partial table. `saveReachable` is now single-flight through a generation counter, checked before and after every yield and before stamping.
+  - A push that read `hadCache` before a save unstamped could extend the partial table. `commitPush` now re-checks `reachableCacheValid()` at commit time, before refs move.
+- LOW: the `.gitmodules` symlink check now covers `gitmod~1` and `.gitmodules:` streams.
+
+Unit tests cover overlapping saves (only the latest stamps; the superseded save stops after one batch), the commit-time re-check with a control, and the NTFS forms. Each guard was mutated once and its test went red. The admission HIGHs were independently verified closed; these last cache fixes have discriminating tests but no further review round.

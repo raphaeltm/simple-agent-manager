@@ -34,6 +34,8 @@ const CACHE_BUDGET = typeof caches !== "undefined" ? 16 * 1024 * 1024 : 128 * 10
 export class GitStore {
   readonly packs: PackStore;
   readonly cache = new ObjCache(CACHE_BUDGET);
+  /** SAM: bumped by each saveReachable; only the latest save may keep writing or stamp. */
+  private reachableSaveGeneration = 0;
   /**
    * Whether the loose `objects` table holds anything. A pushed repo is
    * pack-native — loose objects only appear after a gc migration (see
@@ -333,6 +335,10 @@ export class GitStore {
     // describe old refs; stamping it with the new version would let a stranded,
     // later-collected object pass for reachable.
     if (this.reachableVersion() !== version) return;
+    // Single-flight: a later save's DELETE wipes this one's rows, so a superseded
+    // save must neither keep inserting nor stamp what is left.
+    const generation = ++this.reachableSaveGeneration;
+    const current = () => this.reachableSaveGeneration === generation && this.reachableVersion() === version;
     // Unstamp before rewriting: while this rewrite yields, a stamp left from an earlier
     // save would present the partial table as the whole reachable set, and a push in the
     // window would extend that partial table and re-stamp it valid.
@@ -342,11 +348,12 @@ export class GitStore {
     for (let i = 0; i < n; i++) {
       this.sql.exec("INSERT OR IGNORE INTO reachable (oid) VALUES (?)", set.markedAtHex(i));
       if ((i & 8191) === 8191) {
-        if (this.reachableVersion() !== version) return;
+        if (!current()) return;
         await new Promise((r) => setTimeout(r, 0));
+        if (!current()) return;
       }
     }
-    if (this.reachableVersion() !== version) return;
+    if (!current()) return;
     this.setMeta("reachable-version", version);
   }
 
