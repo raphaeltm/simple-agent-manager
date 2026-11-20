@@ -66,7 +66,7 @@ export function acceptPromptDeliveryInTransaction(
   now = Date.now()
 ): AcceptedPromptDelivery {
   const targetSessionId = input.targetSessionId.trim();
-  const displayContent = input.displayContent.trim();
+  const displayContent = input.sourceKind === 'inbox_reply' ? input.displayContent : input.displayContent.trim();
   const deliveryContent = (input.deliveryContent ?? input.displayContent).trim();
   if (!targetSessionId) throw new Error('targetSessionId is required');
   if (!displayContent || !deliveryContent) throw new Error('prompt content is required');
@@ -212,7 +212,7 @@ function listExpiringWakeDeliveries(sql: SqlStorage, now: number): ExpiredWakeDe
         WHERE inbox.delivery_state IN ('queued', 'retry_wait', 'delivering')
           AND inbox.expires_at IS NOT NULL
           AND inbox.expires_at <= ?
-          AND inbox.source_kind IN ('user_followup', 'parent_wakeup', 'project_event_wake', 'github_trigger', 'scheduled_action', 'operations_decision', 'secret_request', 'inbox_ask', 'checkpoint_continuation')
+          AND inbox.source_kind IN ('user_followup', 'inbox_reply', 'parent_wakeup', 'project_event_wake', 'github_trigger', 'scheduled_action', 'operations_decision', 'secret_request', 'inbox_ask', 'checkpoint_continuation')
           AND session.status = 'sleeping'`,
       now
     )

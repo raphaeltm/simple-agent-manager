@@ -88,7 +88,9 @@ export function userMessageAttribution(
   // A teammate's own message, typed now or scheduled while they had access. The owner's
   // scheduled messages carry no `onBehalfOfUserId` and stay the owner's bubble.
   if (
-    (meta.source === 'user_followup' || meta.source === 'scheduled_action') &&
+    (meta.source === 'user_followup' ||
+      meta.source === 'scheduled_action' ||
+      meta.source === 'inbox_reply') &&
     nonEmptyString(meta.onBehalfOfUserId)
   ) {
     return {

@@ -38,7 +38,7 @@
  * Durable prompt sources a human originates. The delivery fence re-asks the policy for these
  * just before delivery, using the source kind as the trigger.
  */
-export const HUMAN_PROMPT_DELIVERY_TRIGGERS = ['user_followup', 'comment_directive'] as const;
+export const HUMAN_PROMPT_DELIVERY_TRIGGERS = ['user_followup', 'inbox_reply', 'comment_directive'] as const;
 /** Every human action that starts agent work. */
 export const HUMAN_AGENT_WAKE_TRIGGERS = [
   ...HUMAN_PROMPT_DELIVERY_TRIGGERS,

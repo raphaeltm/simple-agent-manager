@@ -101,9 +101,7 @@ a chat opened directly on a workspace has no inbox to file into.
   preview. Answer **Looks good** or reply. It never expires.
 - **Result** (`result`): what you asked for, such as the answer to a question, a finding, or work
   that is done. The title is the outcome and the details follow. **Got it** closes it and leaves
-  the agent alone; a reply wakes the agent's chat with your reply. A reply reaches the agent only
-  while its task is still running: once it has finished, the item offers **Open chat** instead of
-  **Reply** (`canReplyToAgent`, and `answerAsk` refuses the reply). It never blocks the agent and
+  the agent alone; a reply wakes the agent's chat with your reply. The reply endpoint follows the same access and wake rules as sending a message in its chat, including a sleeping agent. It never blocks the agent and
   never expires. You get a push titled **Result ready** that opens the item.
 - **Task** (`assign`): work only a person can do, such as adding a production secret or deciding a
   price. It never blocks the agent and never expires; a soft due date only sorts and highlights it.
@@ -123,6 +121,39 @@ An item you answer in the chat card or in the Inbox is the same record: answerin
 both, and the agent is woken in its chat with your answer. **Got it** on a result is the exception:
 there is nothing for the agent to do, so its chat is not woken (`answerAsk`,
 `packages/operations/src/inbox-write-core.ts`).
+
+## Replies and the agent’s response
+
+A reply sends your message and attachments to the item’s source chat. The agent receives the item
+reference and decides whether your message answers the ask, needs a response, or changes the ask.
+Your chat transcript keeps your original message; the item guidance is delivered only to the agent.
+
+While your reply is **with the agent**, the open item leaves Needs you and Blocking and appears in
+Archived with who replied. A team item leaves everyone’s inbox. This does not close the ask,
+decline a secret request, or approve an Operations action. Replying to a pending permission does
+**decline that permission first**, so the agent can read your message.
+
+An agent uses `inbox_write` method `respond` with `ref` and `body` to respond on that item, or
+`update` to change its ask. The agent passes `replyMessageId` from the received SAM header, so
+any other queued reply stays with the agent until it handles that reply too. With no outstanding
+replies, ordinary responses and updates need no message id. Method `resolve` treats the observed reply
+as the answer to a question, review or result and keeps it out of your inbox. It requires that
+message id and refuses while another reply is outstanding. It cannot resolve
+secrets, Operations approvals or tasks assigned to people. If the agent carries on without acting
+on the reply, the item stays with the agent, including after its task finishes. It should never
+file a duplicate item for the same conversation. An agent must handle outstanding replies before
+withdrawing the item with `cancel`. A response on a system error linked to the source chat
+brings it back without closing the error.
+
+A failed or expired delivery does not bring the item back. Sending the reply again explicitly
+creates a new delivery; expiry does not prove the earlier message was never received. If acceptance
+was interrupted before a canonical message exists, an explicit retry resumes the same delivery id.
+Concurrent attempts are deduplicated, and a conflicting receipt is rejected. If delivery remains
+ambiguous, inspect the source chat before sending again.
+
+The backend supports these replies through `POST /api/projects/:projectId/inbox/items/:ref/reply`.
+The conversation composer in the item is being delivered separately; the existing answer buttons
+keep their current behavior until that web update ships.
 
 ## Tasks for people
 
@@ -233,3 +264,11 @@ The Inbox reads the record each ask lives in; it keeps no copy. It refreshes whe
 you come back to the tab, and when a new notification arrives over the app's live connection.
 [Web Push](/docs/guides/notifications/#delivery-channels) and notification preferences work as
 before.
+
+If a permission decision changes before the queued reply can decline it, that delivery fails
+with an inspectable conflict. SAM does not retry the conflicting decision or automatically
+resurface the item. Inspect the chat before sending another reply.
+
+Agent responses and updates return `withAgent`. When true, other replies remain outstanding: `inbox_read` method `get` on the item returns the source chat’s canonical `conversation` and `pendingReplyIds` visible on that page. Follow `replyCursor` / `responseCursor` with the returned conversation cursors to read more, including earlier failed deliveries. Reading acknowledges nothing; handle each observed reply explicitly before resolving the ask. Other chats’ existing item reads do not expose the source conversation.
+
+Conversation pagination reads both streams initially. On continuation, supply only non-null returned cursors: `replyCursor` advances replies and `responseCursor` advances responses. An omitted stream is skipped on that continuation, preventing already-exhausted replies or responses from restarting. `hasMore` covers the streams requested in that call.

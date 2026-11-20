@@ -122,6 +122,7 @@ describe('connector operations current membership and creator authority', () => 
     sqlite = new Database(':memory:');
     createSchemaTables(sqlite, [
       schema.users,
+      schema.inboxReplies,
       schema.projects,
       schema.projectMembers,
       schema.tasks,

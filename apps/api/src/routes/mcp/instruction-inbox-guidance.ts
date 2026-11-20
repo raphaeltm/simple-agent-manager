@@ -17,7 +17,7 @@ export const INBOX_TURN_END_INSTRUCTION =
   'Nobody reads this chat. A person sees only what you put in their inbox (`inbox_write`), so anything meant for them goes there: ' +
   'the answer or finished work they asked for (method `result`), something you want them to check (`review`), a decision you need (`ask`), or work only a person can do (`assign`). ' +
   'When you end a turn you must be in exactly one of three states: ' +
-  '(1) finished: if a person asked for this, file a `result` with what they need; if another agent dispatched this task, report back to that agent instead and file nothing; a routine run with nothing worth a person’s attention files nothing; in task mode also call `complete_task`, and since a person cannot reply to you once your task has completed, `ask` before completing when you need their answer; ' +
+  '(1) finished: if a person asked for this, file a `result` with what they need; if another agent dispatched this task, report back to that agent instead and file nothing; a routine run with nothing worth a person’s attention files nothing; in task mode also call `complete_task`, `ask` before completing when you need their answer; ' +
   '(2) waiting on a machine (subtasks, CI, a schedule): a durable wait is registered; ' +
   '(3) waiting on a person: an open inbox item from this chat states exactly what you need. ' +
   'If you end a turn without filing an item, the person will assume there is nothing for them and will not open this chat. ' +
@@ -25,4 +25,11 @@ export const INBOX_TURN_END_INSTRUCTION =
   'Write like a short note to a colleague, in clear, simple language: the title is the outcome or the ask in one plain sentence (no markdown); `why` always gives brief, easy-to-read context in markdown (short paragraphs, bullet lists, **bold** for what matters) so they can understand and act without opening the chat; lead with what matters; no IDs, jargon or tool names; link the ideas, Library files, PRs or previews they need instead of pasting them. ' +
   'Before filing, call `inbox_read` method `list`; if an open item already covers it, do not file another. ' +
   'Use a blocking ask only when you cannot continue; otherwise keep working. ' +
-  'You will be woken in this chat when the person answers or replies.';
+  'You will be woken in this chat when the person answers or replies. ' +
+  'An inbox reply arrives as a chat message naming the item; it leaves everyone’s inbox until you act. ' +
+  'Decide what it means: use inbox_write resolve { ref, replyMessageId } if it answers your question, review or result (references their reply); ' +
+  'respond { ref, body, replyMessageId } to respond on the same item, or update { ref, replyMessageId, title / why / links } to change your ask. Respond and update bring it back. ' +
+  'Use the exact replyMessageId from the received header; other queued replies remain with you. Resolve refuses if another reply is outstanding. ' +
+  'Secrets still need the secure field and Operations approvals a person’s decision; you cannot resolve them. A reply to a permission declines it first. ' +
+  'Respond/update returns withAgent: true while other replies remain. Use inbox_read get for the ref and follow conversation cursors to read pendingReplyIds, including earlier failed deliveries; explicitly handle each observed reply. Reading acknowledges nothing. ' +
+  'Otherwise carry on; it stays archived, even when your task ends. Never file a new item for the same thing.';

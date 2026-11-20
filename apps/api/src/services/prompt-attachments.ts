@@ -29,7 +29,7 @@ export async function transferPromptAttachments(
   target: VmPromptDeliveryTarget,
   beforeTransfer: () => Promise<void>
 ): Promise<void> {
-  if (claim.message.sourceKind !== 'user_followup') return;
+  if (claim.message.sourceKind !== 'user_followup' && claim.message.sourceKind !== 'inbox_reply') return;
   const raw = claim.message.metadata?.attachments;
   if (raw === undefined) return;
   const attachments = v.parse(v.array(TaskAttachmentSchema), raw);
