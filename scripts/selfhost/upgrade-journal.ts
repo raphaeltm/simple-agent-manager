@@ -39,15 +39,26 @@ export function completeUpgradeJournal(
   clearUpgradeJournal(stateDir);
 }
 
-/** The durable completed marker of a healthy upgrade to `to`, if one is present. */
+/** The durable completed marker of a healthy upgrade to `to`, validated as readPendingFrom does. */
 export function upgradeCompletedTo(stateDir: string, to: string): boolean {
   const path = join(stateDir, UPGRADE_PENDING_FILE);
   if (!existsSync(path)) return false;
   try {
+    const stat = lstatSync(path);
+    if (!stat.isFile() || stat.isSymbolicLink()) return false;
+    assertPrivateFile(path);
     const raw: unknown = JSON.parse(readFileSync(path, 'utf8'));
-    if (!raw || typeof raw !== 'object') return false;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
     const record = raw as Record<string, unknown>;
-    return record.phase === 'completed' && record.to === to && record.from !== to;
+    return (
+      record.phase === 'completed' &&
+      record.to === to &&
+      typeof record.from === 'string' &&
+      /^[0-9a-f]{40}$/.test(record.from) &&
+      record.from !== to &&
+      typeof record.backupDir === 'string' &&
+      isAbsolute(record.backupDir)
+    );
   } catch {
     return false;
   }

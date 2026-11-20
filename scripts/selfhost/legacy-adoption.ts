@@ -126,6 +126,10 @@ function startJournal(ctx: BoxContext, opts: AdoptionOptions, to: string): Adopt
     throw new Error(
       `Legacy adoption refused: COMPOSE_PROJECT_NAME is ${named}, not the legacy ${legacyProject}; use a normal upgrade`
     );
+  if (existsSync(join(ctx.stateDir, UPGRADE_PENDING_FILE)))
+    throw new Error(
+      'Legacy adoption refused: an unfinished upgrade record exists; inspect it before adopting'
+    );
   if (existsSync(join(ctx.stateDir, ADOPTION_ENV_FILE)))
     throw new Error(
       `Legacy adoption refused: ${ctx.stateDir}/${ADOPTION_ENV_FILE} exists without its journal; inspect it (it is a copy of an earlier .env) and remove it`
@@ -481,8 +485,12 @@ export async function runLegacyAdoption(ctx: BoxContext, opts: AdoptionOptions):
     }
   }
   // A completed marker left by a kill is cleaned up the way the upgrade itself would.
-  if (upgradeCompletedTo(ctx.stateDir, journal.to))
-    readPendingFrom(ctx.stateDir, git(ctx, ['rev-parse', 'HEAD'], 'git rev-parse HEAD'));
+  if (upgradeCompletedTo(ctx.stateDir, journal.to)) {
+    // The deployed version is the target: the checkout follows it before the marker is cleared.
+    if (git(ctx, ['rev-parse', 'HEAD'], 'git rev-parse HEAD') !== journal.to)
+      git(ctx, ['checkout', '--detach', journal.to], 'check out the upgraded target');
+    readPendingFrom(ctx.stateDir, journal.to);
+  }
   clearAdoptionJournal(ctx.stateDir);
   ctx.log('legacy volumes are kept until you remove them after checking the upgraded install:');
   ctx.log(`  docker volume rm ${journal.volumes.map((v) => v.legacy).join(' ')}`);

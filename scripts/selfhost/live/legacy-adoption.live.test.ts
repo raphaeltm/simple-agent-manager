@@ -439,4 +439,50 @@ describe.skipIf(skipWithoutDocker)('legacy compose adoption (real Docker)', () =
     expect(existsSync(join(fixture.stateDir, ADOPTION_JOURNAL_FILE))).toBe(false);
     expect(existsSync(join(fixture.stateDir, UPGRADE_PENDING_FILE))).toBe(false);
   });
+  it('pulls a missing helper image before changing anything (installs older than the fence)', async () => {
+    seedData(fixture);
+    // A second pinned image: the fixture's own services keep the default one in use.
+    const helper =
+      'alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab';
+    docker(['image', 'rm', 'alpine:3.21']);
+    docker([
+      'image',
+      'rm',
+      'alpine@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab',
+    ]);
+    expect(docker(['image', 'inspect', helper]).status).not.toBe(0);
+    const order: string[] = [];
+    const base = fixtureContext(fixture, new FakeGit(TO));
+    await runLegacyAdoption(
+      {
+        ...base,
+        run: (command, args, env) => {
+          if (command === 'docker') order.push(args.slice(0, 4).join(' '));
+          return base.run(command, args, env);
+        },
+      },
+      {
+        to: TO,
+        from: FROM,
+        checkHealth: projectHealth(fixture),
+        backup: ((_ctx: BoxContext, dest: string) => {
+          order.push('backup');
+          mkdirSync(dest, { recursive: true });
+        }) as never,
+        upgrade: async () => {},
+        legacyProject: fixture.legacyProject,
+        helperImage: helper,
+        checkoutRoot: fixture.root,
+      }
+    );
+    const pull = order.findIndex((line) => line.startsWith('pull '));
+    const firstMutation = order.findIndex(
+      (line) => line === 'backup' || / stop$/.test(line) || line.startsWith('volume create')
+    );
+    expect(pull).toBeGreaterThanOrEqual(0);
+    expect(pull).toBeLessThan(firstMutation);
+    expect(docker(['image', 'inspect', helper]).status).toBe(0);
+    expect(readVolumeFile(`${canonical}_celld-data`, 'do/marker')).toBe('7103:7103:640\ndurable');
+    expect(containerOf(canonical, 'celld')).not.toBe('');
+  });
 });
