@@ -83,13 +83,13 @@ reverse-tunnel node is never chosen as a snapshot-upload relay, since it has no 
 
 The self-host build supplies these bootstrap settings; they are not Cloudflare Worker bindings:
 
-| Setting | Default and contract |
-| --- | --- |
-| `REVERSE_TUNNEL_GATEWAY_SECRET` | Required random secret, at least 32 characters, shared with the frps/plugin gateway. |
-| `REVERSE_TUNNEL_GATEWAY_SECRET_ALTERNATE` | Unset; optional second gateway secret during a coordinated rotation. |
+| Setting                                                             | Default and contract                                                                     |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `REVERSE_TUNNEL_GATEWAY_SECRET`                                     | Required random secret, at least 32 characters, shared with the frps/plugin gateway.     |
+| `REVERSE_TUNNEL_GATEWAY_SECRET_ALTERNATE`                           | Unset; optional second gateway secret during a coordinated rotation.                     |
 | `REVERSE_TUNNEL_PORT_RANGE_START` / `REVERSE_TUNNEL_PORT_RANGE_END` | `20000` / `29999`; ports 1024–65535, at most 20,000 ports; must match frps `allowPorts`. |
-| `REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS` | `90`; 60–3600 seconds; the build must supply the same timeout to frps. |
-| `REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS` | `180`; cannot be shorter than twice the heartbeat timeout; maximum 86400 seconds. |
+| `REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS`                          | `90`; 60–3600 seconds; the build must supply the same timeout to frps.                   |
+| `REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS`                         | `180`; cannot be shorter than twice the heartbeat timeout; maximum 86400 seconds.        |
 
 Allocation considers the whole bounded port range in one atomic SQL statement, with indexed
 history lookups. Release checks all active leases in one local statement, without network calls
@@ -97,7 +97,6 @@ or pagination. At the outer normal limit of 20,000 active leases, one backstop p
 eligible leases; the self-host entry runs that backstop every five minutes. A newly
 freed port still waits for its cooling interval. A full range and a cooling range have distinct
 errors so operators can distinguish capacity exhaustion from a wait for safe reuse.
-
 
 ## Speech endpoints on a single-box build
 
@@ -119,13 +118,13 @@ Once your single-box build includes that integration:
    Use a base URL such as `https://speech.example.com/v1`; SAM appends the audio route, so do
    not include `/audio/transcriptions` or `/audio/speech`, credentials, a query, or a fragment.
 
-   | Voice input setting | Read-aloud setting | Value |
-   | --- | --- | --- |
-   | `speech.transcription.baseUrl` | `speech.synthesis.baseUrl` | The provider's API base URL. |
-   | `speech.transcription.model` | `speech.synthesis.model` | A model ID supported by that endpoint. |
-   | — | `speech.synthesis.voice` | A voice ID supported by the synthesis model; required. |
-   | `speech.transcription.apiKey` | `speech.synthesis.apiKey` | Optional Bearer API key; required when the provider requires authentication. |
-   | `speech.transcription.allowPrivateNetwork` | `speech.synthesis.allowPrivateNetwork` | Defaults to `false`; opt in only for a trusted private endpoint. |
+   | Voice input setting                        | Read-aloud setting                     | Value                                                                        |
+   | ------------------------------------------ | -------------------------------------- | ---------------------------------------------------------------------------- |
+   | `speech.transcription.baseUrl`             | `speech.synthesis.baseUrl`             | The provider's API base URL.                                                 |
+   | `speech.transcription.model`               | `speech.synthesis.model`               | A model ID supported by that endpoint.                                       |
+   | —                                          | `speech.synthesis.voice`               | A voice ID supported by the synthesis model; required.                       |
+   | `speech.transcription.apiKey`              | `speech.synthesis.apiKey`              | Optional Bearer API key; required when the provider requires authentication. |
+   | `speech.transcription.allowPrivateNetwork` | `speech.synthesis.allowPrivateNetwork` | Defaults to `false`; opt in only for a trusted private endpoint.             |
 
 3. Enter keys in the secret setting fields, never in the URL, repository, or GitHub Actions
    logs. SAM stores them encrypted in its credential store and sends them as Bearer tokens.
@@ -454,6 +453,25 @@ Register both static redirect URIs on that infrastructure client:
 - `https://api.yourdomain.com/api/deployment/gcp/callback`
 
 The flow requests the Google `cloud-platform` scope. Runtime values saved by a superadmin are encrypted in D1 and take precedence over the environment pair; removing the runtime pair reveals the environment fallback, if present. This client is never used for user login. Google sign-in uses a different client, different variable names (`GOOGLE_LOGIN_*`), and only `https://api.yourdomain.com/api/auth/callback/google`.
+
+Several SAM installations can connect the same Google Cloud project. A workload identity provider trusts exactly one issuer URL, so each installation creates its own provider, named from its base domain (`installationWifProviderId()` in `apps/api/src/services/gcp-wif-setup.ts`; for example `sam-sammy2-party-<hash>` for `sammy2.party`). The installations share the pool (`sam-pool`, or `sam-deploy-pool` for deployments) and the service account, so every installation connected to a project can act as that project's service account; use separate Google Cloud projects when installations must not share cloud access. `GCP_WIF_PROVIDER_ID` and `GCP_DEPLOY_WIF_PROVIDER_ID` override the derived name. SAM still refuses to update an existing provider whose issuer differs from its own (`updateOidcProvider()`). Existing connections keep the pool and provider recorded when they were created; reconnecting creates the installation's own provider.
+
+Each user-level connection is scoped to the SAM user who made it. The provider's condition requires `assertion.user_id == '<userId>'`, and the service account is granted to `principalSet://iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/<pool>/attribute.sam_user/<userId>` (`wifAttributeCondition()` and `wifServiceAccountMember()` in `apps/api/src/services/gcp-wif-setup.ts`). Connections made before this scoping used an issuer-only condition and a `pool/*` binding, which let any user of the installation who named the pool act as its service account. Re-run Google setup on each such connection (**Re-run Google setup** when the connection reports an API issue, otherwise disconnect and **Connect with Google** again with the same project): it scopes this installation's provider to the user and removes the `pool/*` member. Disconnecting deletes the connection, so plan for new Google Cloud work not starting until the user reconnects, and check compute pool settings afterwards; running VMs stay deletable. An older shared `sam-oidc` provider stays in the pool with its issuer-only condition, but the narrowed binding admits a token through it only when its `user_id` maps to that user; delete it in Google once no installation uses it. Re-running only cleans the pool and service account that `GCP_WIF_POOL_ID` and `GCP_SERVICE_ACCOUNT_ID` name now: if either changed since the connection was made, remove the `principalSet://…/workloadIdentityPools/<old-pool>/*` member from the previous service account by hand. If another installation shared that service account through `pool/*`, it loses access as soon as the first setup removes that member, so re-run that installation's setup promptly too, so it gets its own scoped binding. A platform GCP workload identity credential needs a pool the installation configures for it; the guided setup only creates user-scoped pools.
+
+Within one installation a pool has one owner: one user, or the installation for platform credentials. SAM refuses to save, or to exchange tokens for, a credential naming a pool that another owner claimed or that a different owner's credential names (`409 GCP_WIF_POOL_OWNED_BY_ANOTHER_OWNER`; see [Security](/docs/architecture/security/#one-owner-per-workload-identity-pool)). Give every user and the platform credential its own Google Cloud project or pool. The same applies to app deployments: the first SAM user to connect deployments in a Google Cloud project owns that project's deployment pool (`GCP_DEPLOY_WIF_POOL_ID`), and a different user's deployment setup in the same project is refused before it changes anything in Google. Project members re-running setup act as the original owner.
+
+A claim stays after its credential is deleted, because the Google-side trust may stay too. Deleting a SAM account leaves its claims behind for the same reason. To hand a pool to a different owner (for example after a Google Cloud project changes hands):
+
+1. Remove the old owner's trust in Google: delete the old workload identity provider, or remove its members from the service account's `roles/iam.workloadIdentityUser` binding.
+2. Delete or re-point every SAM credential of the old owner that still names the pool. A live credential keeps blocking other owners even without a claim.
+3. Release the claim (`<projectNumber>/<poolId>`, lowercase pool ID):
+
+```bash
+npx wrangler d1 execute <your-d1-database> --remote \
+  --command "DELETE FROM gcp_wif_pool_claims WHERE pool_key = '123456789012/sam-pool'"
+```
+
+If STS reports an issuer mismatch, another installation's setup replaced the shared provider this connection was recorded against (setups before per-installation providers all used `sam-oidc`). Reconnect the affected installation through its Connect GCP flow, which creates its own provider. Do not switch a shared provider back and forth or accept both issuers. A failed token exchange does not prove a failed node has no cloud server. After independently checking the provider account and in-flight allocation, the existing owner-confirmed removal action can remove a failed node on user-owned cloud capacity. Its audit reason stays `owner_attested_manual_deletion`, separate from strict provider-confirmed termination. Fresh terminal provisioning failures positively proven to precede the provider create request retain an exact incarnation and placement absence proof, allowing normal teardown without minting another token. Intermediate durable retries keep their allocation state.
 
 ### Service account JSON (OAuth-free alternative)
 

@@ -150,6 +150,7 @@ export type AdminSettingName =
   | 'operations.doAlarmsEnabled'
   | 'operations.stalledTaskClassifierEnabled'
   | 'operations.samOperatorDisabled'
+  | 'operations.operatorNodeDeletionAllowAgentSessions'
   | 'operations.debuggerTools'
   | 'operations.auditRetentionDays'
   | 'operations.samOperatorWatchLifetimeMs'

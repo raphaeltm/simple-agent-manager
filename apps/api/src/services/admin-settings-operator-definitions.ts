@@ -1,6 +1,4 @@
-import {
-  PROVIDER_LIMIT_POLICY,
-} from '@simple-agent-manager/scheduler-core';
+import { PROVIDER_LIMIT_POLICY } from '@simple-agent-manager/scheduler-core';
 
 import {
   type AdminSettingDefinition,
@@ -8,6 +6,7 @@ import {
   integerDefinition,
   MAX_SAM_OPERATOR_EVENT_PAGE_SIZE,
   OPERATOR_DEFAULTS,
+  switchDefinition,
 } from './admin-setting-definitions';
 import { FLEET_OPS_SETTINGS } from './fleet-ops/settings-definitions';
 /** Operations-project debugger tools dial (idea 01M6GGY1QPGG4D40HG0PVGQS3R, policy a35180d5). */
@@ -28,6 +27,17 @@ export const OPERATOR_SETTINGS: AdminSettingDefinition[] = [
     OPERATIONS_TOOLS_MODES,
     'Operations',
     'Which debugger tools agents in the Operations project may use. off: none. read: read-only tools. read_ask: read-only tools, plus actions that each need a human approval. read_auto_safe: like read_ask, but low-risk actions run without approval. Only tasks owned by an active superadmin can use them.'
+  ),
+  switchDefinition(
+    'operations.operatorNodeDeletionAllowAgentSessions',
+    // On by owner decision (2026-11-19, ask 01M7RX9S6DG1NDNKPPHARGBT96: "Allow agents (audited)
+    // everywhere"). The audit always records whether an agent made the request.
+    true,
+    'Operations',
+    "Let an agent sign-in session remove a stuck SAM-capacity node (Admin → Infrastructure → Stuck nodes) on a person's behalf. Off: only a person's own session can attest a server is gone. Either way the audit log records whether an agent did it.",
+    // Fail closed: when the settings store cannot be read, an installation that turned this off
+    // must not fall back to the permissive default and admit an agent-session removal.
+    { unavailableValue: false }
   ),
   integerDefinition(
     'operations.auditRetentionDays',

@@ -1,10 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
   "extends": "../deploy/tsconfig.json",
-  "compilerOptions": {
-    // deploy/selfhost/docker-proxy runs under Node's type stripping, which needs .ts specifiers.
-    "allowImportingTsExtensions": true
-  },
-  "include": ["**/*.ts", "../../deploy/selfhost/docker-proxy/*.ts", "../../deploy/selfhost/key-agent/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["**/*.ts"],
+  // live/ imports API modules that resolve workspace packages through their built dist/, so it
+  // has its own project, checked by the Self-host Live job after it builds them.
+  "exclude": ["node_modules", "dist", "live"]
 }

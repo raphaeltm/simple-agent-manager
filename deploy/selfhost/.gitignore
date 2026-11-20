@@ -1,4 +1,4 @@
-# Operator configuration and box state: never commit.
+# Operator configuration and box state (platform keys, secrets.env, gateway.env): never commit.
 .env
 .state/
 backups/

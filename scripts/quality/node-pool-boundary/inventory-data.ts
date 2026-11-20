@@ -186,7 +186,8 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     owner: 'post /',
     role: 'legacy direct workspace route adapter',
     canonicalService: 'explicit legacy workspace route adapter',
-    requiredEvidence: [{ kind: 'call', name: 'assertNodeAllocationPlanCurrent' }],
+    // Delegates to assertNodeAllocationPlanCurrent; authority drift answers the pinned request with 409.
+    requiredEvidence: [{ kind: 'call', name: 'assertPinnedNodeAllocationPlanCurrent' }],
   },
   {
     filePath: 'apps/api/src/services/instant-session.ts',

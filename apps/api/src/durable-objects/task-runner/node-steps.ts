@@ -199,6 +199,7 @@ export async function handleNodeSelection(
     }
 
     const authoritativeNodes = await filterReusableNodesByCurrentAuthority(rc.env.DATABASE, {
+      requestingTaskId: state.taskId,
       userId: state.userId,
       projectId: state.projectId,
       selections: [{ nodeId: node.id, capacityPlacementSnapshot }],

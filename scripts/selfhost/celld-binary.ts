@@ -12,15 +12,15 @@ import { gunzipSync } from 'node:zlib';
 
 import { CELLD_RELEASE_SHA256, CELLD_VERSION, DEFAULT_CELLD_RELEASE_BASE_URL } from './versions.js';
 
+/** celld release target triple for each supported `platform()/arch()` pair. */
+const RELEASE_TARGETS: ReadonlyMap<string, string> = new Map([
+  ['linux/x64', 'x86_64-unknown-linux-gnu'],
+  ['linux/arm64', 'aarch64-unknown-linux-gnu'],
+  ['darwin/arm64', 'aarch64-apple-darwin'],
+]);
+
 export function celldReleaseTarget(os = platform(), cpu = arch()): string {
-  const target =
-    os === 'linux' && cpu === 'x64'
-      ? 'x86_64-unknown-linux-gnu'
-      : os === 'linux' && cpu === 'arm64'
-        ? 'aarch64-unknown-linux-gnu'
-        : os === 'darwin' && cpu === 'arm64'
-          ? 'aarch64-apple-darwin'
-          : null;
+  const target = RELEASE_TARGETS.get(`${os}/${cpu}`);
   if (!target || !CELLD_RELEASE_SHA256[target]) {
     throw new Error(
       `celld ${CELLD_VERSION} has no release for ${os}/${cpu}; set CELLD_BIN to a celld binary`
@@ -78,6 +78,16 @@ export async function ensureCelldBinary(
   return path;
 }
 
+/** The esbuild entry of a package.json `bin` field (a string, or an object with `esbuild`). */
+function esbuildBinPath(pkg: unknown): string | undefined {
+  const binField = typeof pkg === 'object' && pkg !== null && 'bin' in pkg ? pkg.bin : undefined;
+  if (typeof binField === 'string') return binField;
+  if (typeof binField === 'object' && binField !== null && 'esbuild' in binField) {
+    return String(binField.esbuild);
+  }
+  return undefined;
+}
+
 /**
  * An esbuild executable for celld's bundler: `CELLD_ESBUILD` when set, otherwise the esbuild
  * wrangler depends on (the same toolchain that bundles the Worker for Cloudflare).
@@ -88,13 +98,7 @@ export function resolveEsbuild(apiDir: string, env: NodeJS.ProcessEnv = process.
   const fromWrangler = createRequire(fromApi.resolve('wrangler/package.json'));
   const pkgPath = fromWrangler.resolve('esbuild/package.json');
   const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf8')) as unknown;
-  const binField = typeof pkg === 'object' && pkg !== null && 'bin' in pkg ? pkg.bin : undefined;
-  const bin =
-    typeof binField === 'string'
-      ? binField
-      : typeof binField === 'object' && binField !== null && 'esbuild' in binField
-        ? String(binField.esbuild)
-        : undefined;
+  const bin = esbuildBinPath(pkg);
   if (!bin) throw new Error(`${pkgPath} declares no esbuild binary; set CELLD_ESBUILD`);
   return join(dirname(pkgPath), bin);
 }

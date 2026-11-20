@@ -1,4 +1,7 @@
-import { __setSharedFlightResumeOnOwnTimerForTest } from '@simple-agent-manager/worker-core';
+import {
+  __setSharedFlightResumeOnOwnTimerForTest,
+  SHARED_FLIGHT_POLL_MS,
+} from '@simple-agent-manager/worker-core';
 import Database from 'better-sqlite3';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 
@@ -717,6 +720,77 @@ describe('compact archive bounded failures', () => {
       expect(bucket.put).toHaveBeenCalledTimes(1);
     }
   );
+
+  it('on celld, a writer joining a pending PUT resumes on its own timer, not on the PUT settling', async () => {
+    // On celld the code that runs when a promise settles belongs to the request that settled
+    // it, so a joiner must wake on a timer it owns (lib/shared-flight.ts). Only the timers are
+    // faked: the joiner's poll timer cannot fire until the test advances it.
+    __setSharedFlightResumeOnOwnTimerForTest(true);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+      __setSharedFlightResumeOnOwnTimerForTest(false);
+    });
+    const sha256 = async (body: Uint8Array) =>
+      Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', body)), (byte) =>
+        byte.toString(16).padStart(2, '0')
+      ).join('');
+    let finishPut: ((value: R2Object) => void) | undefined;
+    let stored: Promise<R2Object> | undefined;
+    const bucket = {
+      head: vi.fn(async () => (stored ? await stored : null)),
+      put: vi.fn((_key: string, body: Uint8Array) => {
+        // The digest is computed eagerly, so a later HEAD answers within microtasks.
+        const object = sha256(new Uint8Array(body)).then(
+          (archiveBodySha256) =>
+            ({ size: body.byteLength, customMetadata: { archiveBodySha256 } }) as R2Object
+        );
+        return new Promise<R2Object>((resolve) => {
+          finishPut = (value) => {
+            stored = object;
+            resolve(value);
+          };
+        });
+      }),
+      get: vi.fn(),
+    } as unknown as R2Bucket;
+    const flush = async () => {
+      for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+    };
+
+    // Each writer hashes its body with real async crypto before touching R2, so wait on the
+    // condition itself rather than a fixed number of ticks (CI coverage runs are slow).
+    const waitFor = async (condition: () => boolean) => {
+      for (let i = 0; i < 1_000 && !condition(); i++) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      expect(condition()).toBe(true);
+    };
+    const starter = writeImmutableJson(bucket, 'own-timer.json', { ok: true }, 2_000);
+    await waitFor(() => vi.mocked(bucket.put).mock.calls.length === 1);
+    // Wait until the joiner is parked on the pending PUT, signalled by the timer it registers
+    // there (its poll timer on celld, its deadline timer otherwise).
+    const timersBefore = vi.getTimerCount();
+    const joiner = writeImmutableJson(bucket, 'own-timer.json', { ok: true }, 2_000);
+    let joinerSettled = false;
+    void joiner.then(
+      () => (joinerSettled = true),
+      () => (joinerSettled = true)
+    );
+    await waitFor(() => vi.getTimerCount() > timersBefore);
+    expect(joinerSettled).toBe(false);
+
+    finishPut?.({} as R2Object);
+    await expect(starter).resolves.toBeUndefined();
+    await flush();
+    // The PUT has settled and the starter answered, but the joiner has not resumed with it.
+    expect(joinerSettled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(SHARED_FLIGHT_POLL_MS);
+    await flush();
+    await expect(joiner).resolves.toBeUndefined();
+    expect(bucket.put).toHaveBeenCalledTimes(1);
+  });
 
   it('rejects oversized metadata before fetching and cancels a stalled object read', async () => {
     const { bucket } = memoryR2();

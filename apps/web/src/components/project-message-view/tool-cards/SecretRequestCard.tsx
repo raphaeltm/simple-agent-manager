@@ -77,7 +77,7 @@ function outcomeText(request: RuntimeSecretRequest, valueExpired: boolean): stri
       }
       return `Supplied${by}${when}. The agent sees the name, never the value, and can use it until it expires or is deleted.`;
     case 'declined':
-      return `Declined${by}${when}. SAM tells the agent not to wait for it.`;
+      return `Declined${by}${when}.`;
     case 'expired':
       return 'Nobody supplied a value in time. SAM tells the agent not to wait for it.';
     case 'pending':

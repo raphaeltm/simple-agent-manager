@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# One-command Google Cloud trust for a self-hosted SAM install (pnpm selfhost:gcp-bootstrap).
+# One-command Google Cloud trust for nodes of a self-hosted SAM install (pnpm selfhost:gcp-bootstrap).
+# EXPERIMENTAL, like the rest of deploy/selfhost (README.md).
 #
 # Creates or reuses, in one GCP project:
 #   - a workload identity pool dedicated to this install,
@@ -9,44 +10,27 @@
 #   - the binding that lets identities from that pool impersonate the service account,
 #   - the APIs nodes need, including Cloud Billing (read-only list prices for the machine catalog),
 # then prints the platform cloud credential to add in Admin -> Credentials (Cloud Provider, GCP).
-# With --kms, also the key that seals the box's Worker secrets (README, Sealed secrets):
-#   - a Cloud KMS key ring (default sam-selfhost) and a key for this install (default
-#     sam-<8 hex of sha256(issuer)>, the name `pnpm selfhost:deploy --init` looks for),
-#   - roles/cloudkms.cryptoKeyEncrypterDecrypter for the box VM's service account on that key only,
-# then prints the key reference.
+# It does not create the box VM, its firewall, the fleet bucket or DNS (README.md, Prerequisites).
 #
-# Every resource is described first and created only when missing; what this script created (not
-# what it found) is written to <state-dir>/created-resources.json, which --teardown reads. A
-# provider that already trusts a different issuer is never retargeted; pick another --pool-id.
+# Use a GCP project dedicated to SAM's nodes, not the box's project: the service account's roles
+# apply to the whole project, so in a shared project it could also change or delete the box VM
+# and its firewall rules.
+#
+# Every resource is described first and created only when missing. A provider that already
+# trusts a different issuer is never retargeted, and an existing pool is reused only when its
+# sole provider is this install's (the pool-wide binding below admits every provider in it);
+# otherwise pick another --pool-id.
+#
+# Run it once the install answers (after the first `pnpm selfhost:deploy`): it checks the issuer
+# the install advertises.
 #
 # Usage:
-#   pnpm selfhost:gcp-bootstrap -- --project <id> --api-url https://api.<domain> [--kms ...] [--dry-run]
-#   pnpm selfhost:gcp-bootstrap -- --project <id> --api-url https://api.<domain> --teardown [--dry-run]
+#   pnpm selfhost:gcp-bootstrap -- --project <id> --api-url https://api.<domain> [--dry-run]
 # Options:
 #   --pool-id <id>          default: sam-<8 hex of sha256(issuer)>, unique per install
 #   --provider-id <id>      default: sam-api
 #   --service-account <id>  default: sam-nodes (account id, before @)
 #   --skip-issuer-check     do not fetch <api-url>/.well-known/openid-configuration first
-#                           (--kms-only never fetches it: it creates no OIDC provider)
-#   --kms                   also create the key for sealed secrets (needs a box identity below)
-#   --kms-only              only the key: no pool, provider or node service account
-#   --box-service-account <email>  the box VM's service account, granted use of the key
-#   --box-instance <name> --box-zone <zone>  read that service account (and its scopes) from the VM
-#   --kms-location <loc>    default: global
-#   --key-ring <id>         default: sam-selfhost
-#   --key <id>              default: sam-<8 hex of sha256(issuer)>
-#   --new-key-version       the key exists with no enabled primary version (for example after
-#                           teardown --destroy-key): create a new primary version. Bundles and
-#                           backups sealed with the old version stay unrecoverable.
-#   --restore-key-version   same case: restore the primary version from DESTROY_SCHEDULED (within
-#                           30 days of the teardown) or DISABLED, enable it and keep it primary.
-#                           Undoes a destruction the operator asked for: only when you mean it.
-#   --state-dir <dir>       where created-resources.json lives; default: deploy/selfhost/.state
-#   --teardown              remove what this script created for this install (see README)
-#   --destroy-key-versions <key id>  with --teardown: schedule destruction of the key's versions.
-#                           Every bundle and backup sealed with the key becomes unrecoverable.
-#   --keep-kms              with --teardown: leave the KMS key, its ring and the box's grant on it
-#                           (pnpm selfhost:teardown --keep-data uses this)
 #   --dry-run               print every gcloud command that would change something; change nothing
 set -euo pipefail
 
@@ -57,61 +41,51 @@ PROVIDER_ID="sam-api"
 SA_ID="sam-nodes"
 DRY_RUN=0
 CHECK_ISSUER=1
-KMS=0
-NODES=1
-TEARDOWN=0
-BOX_SA=""
-BOX_INSTANCE=""
-BOX_ZONE=""
-KMS_LOCATION="global"
-KEY_RING="sam-selfhost"
-KEY_ID=""
-DESTROY_KEY=""
-KEEP_KMS=0
-KEY_VERSION_ACTION=""
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STATE_DIR="${HERE}/.state"
-RECORD_TOOL="${HERE}/created-resources.mjs"
-TOOL="gcp-bootstrap"
+
+# The APIs node provisioning calls: compute (VMs, firewalls; packages/providers/src/gcp*.ts),
+# cloudbilling (list prices, gcp-pricing.ts), and iam, sts and iamcredentials (the pool and the
+# token exchange and impersonation in apps/api/src/services/gcp-sts.ts). The in-app guided setup
+# enables GCP_REQUIRED_APIS (packages/shared/src/constants/gcp-required-apis.ts); two of those
+# are intentionally left out here, because no node path calls them:
+#   cloudresourcemanager.googleapis.com: only the guided setup (gcp-setup.ts) calls it, with the
+#     user's own OAuth token, to list projects and edit the project IAM policy.
+#   aiplatform.googleapis.com: Vertex AI for agents in a user's own project, not node provisioning.
+# Likewise the guided setup also grants roles/aiplatform.user (SA_PROJECT_ROLES in gcp-setup.ts);
+# the node service account gets only the two compute roles.
+# scripts/selfhost/gcp-bootstrap.test.ts fails when either list drifts from the guided setup's.
+NODE_APIS=(compute.googleapis.com iam.googleapis.com iamcredentials.googleapis.com
+  sts.googleapis.com cloudbilling.googleapis.com)
+NODE_ROLES=(roles/compute.instanceAdmin.v1 roles/compute.securityAdmin)
 
 die() { echo "gcp-bootstrap: $*" >&2; exit 1; }
+# `--flag value`: refuse a trailing flag with no value instead of failing on `shift 2`.
+need_value() { [[ "$2" -ge 2 ]] || die "$1 needs a value (see --help)"; }
 
-while [ $# -gt 0 ]; do
+while [[ $# -gt 0 ]]; do
   case "$1" in
     --) shift ;;
-    --project) PROJECT="${2:-}"; shift 2 ;;
-    --api-url) API_URL="${2:-}"; shift 2 ;;
-    --pool-id) POOL_ID="${2:-}"; shift 2 ;;
-    --provider-id) PROVIDER_ID="${2:-}"; shift 2 ;;
-    --service-account) SA_ID="${2:-}"; shift 2 ;;
+    --project) need_value "$1" $#; PROJECT="$2"; shift 2 ;;
+    --api-url) need_value "$1" $#; API_URL="$2"; shift 2 ;;
+    --pool-id) need_value "$1" $#; POOL_ID="$2"; shift 2 ;;
+    --provider-id) need_value "$1" $#; PROVIDER_ID="$2"; shift 2 ;;
+    --service-account) need_value "$1" $#; SA_ID="$2"; shift 2 ;;
     --skip-issuer-check) CHECK_ISSUER=0; shift ;;
-    --kms) KMS=1; shift ;;
-    --kms-only) KMS=1; NODES=0; shift ;;
-    --box-service-account) BOX_SA="${2:-}"; shift 2 ;;
-    --box-instance) BOX_INSTANCE="${2:-}"; shift 2 ;;
-    --box-zone) BOX_ZONE="${2:-}"; shift 2 ;;
-    --kms-location) KMS_LOCATION="${2:-}"; shift 2 ;;
-    --key-ring) KEY_RING="${2:-}"; shift 2 ;;
-    --key) KEY_ID="${2:-}"; shift 2 ;;
-    --state-dir) STATE_DIR="${2:-}"; shift 2 ;;
-    --teardown) TEARDOWN=1; shift ;;
-    --destroy-key-versions) DESTROY_KEY="${2:-}"; shift 2 ;;
-    --keep-kms) KEEP_KMS=1; shift ;;
-    --new-key-version) KEY_VERSION_ACTION="${KEY_VERSION_ACTION:+both}new"; shift ;;
-    --restore-key-version) KEY_VERSION_ACTION="${KEY_VERSION_ACTION:+both}restore"; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
-    -h|--help) sed -n '2,48p' "$0"; exit 0 ;;
+    # The header comment, up to the first line that is not a comment.
+    -h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
 done
 
 # grep checks below are line by line: refuse any value with a newline before they run.
-for value in "$PROJECT" "$API_URL" "$POOL_ID" "$PROVIDER_ID" "$SA_ID" "$BOX_SA" "$BOX_INSTANCE" \
-  "$BOX_ZONE" "$KMS_LOCATION" "$KEY_RING" "$KEY_ID" "$DESTROY_KEY" "$STATE_DIR"; do
-  case "$value" in *$'\n'*|*$'\r'*) die "arguments must not contain line breaks" ;; esac
+for value in "$PROJECT" "$API_URL" "$POOL_ID" "$PROVIDER_ID" "$SA_ID"; do
+  case "$value" in
+    *$'\n'*|*$'\r'*) die "arguments must not contain line breaks" ;;
+    *) ;;
+  esac
 done
-[ -n "$PROJECT" ] || die "--project is required"
-[ -n "$API_URL" ] || die "--api-url is required (https://api.<your SAM domain>)"
+[[ -n "$PROJECT" ]] || die "--project is required"
+[[ -n "$API_URL" ]] || die "--api-url is required (https://api.<your SAM domain>)"
 ISSUER="${API_URL%/}"
 case "$ISSUER" in
   https://api.*) ;;
@@ -124,33 +98,21 @@ printf '%s' "$PROJECT" | grep -Eq '^[a-z][a-z0-9-]{4,28}[a-z0-9]$' || die "inval
 
 if command -v sha256sum >/dev/null 2>&1; then hash_cmd=(sha256sum); else hash_cmd=(shasum -a 256); fi
 INSTALL_HASH="$(printf '%s' "$ISSUER" | "${hash_cmd[@]}" | cut -c1-8)"
-[ -n "$POOL_ID" ] || POOL_ID="sam-${INSTALL_HASH}"
-[ -n "$KEY_ID" ] || KEY_ID="sam-${INSTALL_HASH}"
+[[ -n "$POOL_ID" ]] || POOL_ID="sam-${INSTALL_HASH}"
 printf '%s' "$POOL_ID" | grep -Eq '^[a-z][a-z0-9-]{3,31}$' || die "invalid --pool-id: $POOL_ID"
 printf '%s' "$PROVIDER_ID" | grep -Eq '^[a-z][a-z0-9-]{3,31}$' || die "invalid --provider-id: $PROVIDER_ID"
 printf '%s' "$SA_ID" | grep -Eq '^[a-z][a-z0-9-]{5,29}$' || die "invalid --service-account: $SA_ID"
-printf '%s' "$KMS_LOCATION" | grep -Eq '^[a-z0-9-]{1,63}$' || die "invalid --kms-location: $KMS_LOCATION"
-printf '%s' "$KEY_RING" | grep -Eq '^[A-Za-z0-9_-]{1,63}$' || die "invalid --key-ring: $KEY_RING"
-printf '%s' "$KEY_ID" | grep -Eq '^[A-Za-z0-9_-]{1,63}$' || die "invalid --key: $KEY_ID"
-[ -z "$DESTROY_KEY" ] || [ "$TEARDOWN" -eq 1 ] || die "--destroy-key-versions needs --teardown"
-[ "$KEEP_KMS" -eq 0 ] || [ "$TEARDOWN" -eq 1 ] || die "--keep-kms needs --teardown"
-[ "$KEEP_KMS" -eq 0 ] || [ -z "$DESTROY_KEY" ] || die "--keep-kms and --destroy-key-versions contradict each other"
-case "$KEY_VERSION_ACTION" in both*) die "--new-key-version and --restore-key-version contradict each other" ;; esac
-[ -z "$KEY_VERSION_ACTION" ] || [ "$KMS" -eq 1 ] || die "--new-key-version and --restore-key-version need --kms or --kms-only"
-[ -z "$KEY_VERSION_ACTION" ] || [ "$TEARDOWN" -eq 0 ] || die "--new-key-version and --restore-key-version do not apply to --teardown"
-
 SA_EMAIL="${SA_ID}@${PROJECT}.iam.gserviceaccount.com"
-CONDITION="assertion.iss == '${ISSUER}'"
-POOL_NAME="projects/${PROJECT}/locations/global/workloadIdentityPools/${POOL_ID}"
-KEY_NAME="projects/${PROJECT}/locations/${KMS_LOCATION}/keyRings/${KEY_RING}/cryptoKeys/${KEY_ID}"
-RING_NAME="projects/${PROJECT}/locations/${KMS_LOCATION}/keyRings/${KEY_RING}"
-KMS_ROLE="roles/cloudkms.cryptoKeyEncrypterDecrypter"
-RECORD="${STATE_DIR}/created-resources.json"
-KEY_FLAGS=(--keyring="$KEY_RING" --location="$KMS_LOCATION" --project="$PROJECT")
+# Only tokens SAM signs for the installation's own (platform) credential: SAM sets
+# user_id = platform:<userId> for those and the bare owner id for a user's credential
+# (gcpIdentityTokenUserId in apps/api/src/services/gcp-sts.ts). So a user's GCP credential that
+# names this pool cannot reach the node service account, even if that user claimed the pool in
+# SAM before the operator saved the platform credential.
+CONDITION="assertion.iss == '${ISSUER}' && assertion.user_id.startsWith('platform:')"
 
 # Read-only calls run in every mode; changes go through `change`.
 change() {
-  if [ "$DRY_RUN" -eq 1 ]; then
+  if [[ "$DRY_RUN" -eq 1 ]]; then
     printf 'would run: gcloud'; printf ' %q' "$@"; printf '\n'
   else
     gcloud "$@"
@@ -162,232 +124,219 @@ change_retry() {
   local attempt
   for attempt in 1 2 3 4 5; do
     change "$@" && return 0
-    [ "$attempt" -lt 5 ] && sleep "${GCP_BOOTSTRAP_RETRY_SECONDS:-5}"
+    [[ "$attempt" -lt 5 ]] || break
+    echo "Retrying in ${GCP_BOOTSTRAP_RETRY_SECONDS:-5}s (attempt ${attempt} of 5): a new service account takes a few seconds to appear to IAM, so the error above is expected once."
+    sleep "${GCP_BOOTSTRAP_RETRY_SECONDS:-5}"
   done
   return 1
 }
-# record <kind> <name> <created|reused> [k=v ...]: no-op in a dry run.
-record() {
-  [ "$DRY_RUN" -eq 1 ] && return 0
-  node "$RECORD_TOOL" add "$RECORD" gcp "$1" "$2" "$3" "$TOOL" "project=${PROJECT}" "install=${ISSUER}" "${@:4}"
-}
-# Whether the record says this script created <kind> <name> (and no teardown removed it yet).
-created() {
-  [ -f "$RECORD" ] || return 1
-  node "$RECORD_TOOL" list "$RECORD" gcp "$TOOL" | awk -F'\t' -v k="$1" -v n="$2" \
-    '$1 == k && $2 == n && $3 == "created" && $4 == "" { found = 1 } END { exit found ? 0 : 1 }'
-}
 
 command -v gcloud >/dev/null 2>&1 || die "gcloud is not installed or not on PATH"
-command -v node >/dev/null 2>&1 || die "node is not on PATH (it writes the created-resources record)"
 
-if [ "$TEARDOWN" -eq 1 ]; then
-  # shellcheck source=deploy/selfhost/gcp-teardown.sh
-  . "${HERE}/gcp-teardown.sh"
-  run_teardown
-  exit 0
-fi
-
-# The check guards the OIDC provider the node setup creates; --kms-only creates none, and runs
-# before the install exists (README: the key comes before `deploy --init`), so it skips it.
-if [ "$CHECK_ISSUER" -eq 1 ] && [ "$NODES" -eq 1 ]; then
+# The OIDC provider trusts the issuer the install advertises: check it before trusting it.
+if [[ "$CHECK_ISSUER" -eq 1 ]]; then
   discovery="$(curl -fsS --max-time 10 "${ISSUER}/.well-known/openid-configuration" 2>/dev/null)" \
-    || die "could not read ${ISSUER}/.well-known/openid-configuration: the node setup trusts this install's token issuer, so it runs once the install answers (after \`pnpm selfhost:deploy\`; README order). For the sealed-secrets key alone, before the install exists, use --kms-only (no issuer check). --skip-issuer-check skips the check if you are sure ${ISSUER} is right."
+    || die "could not read ${ISSUER}/.well-known/openid-configuration: the node setup trusts this install's token issuer, so it runs once the install answers (after \`pnpm selfhost:deploy\`; README order). --skip-issuer-check skips the check if you are sure ${ISSUER} is right."
   issuer_re="$(printf '%s' "$ISSUER" | sed 's/[.]/\\./g')"
   printf '%s' "$discovery" | grep -Eq "\"issuer\"[[:space:]]*:[[:space:]]*\"${issuer_re}\"" \
     || die "the install at ${ISSUER} does not advertise issuer ${ISSUER}; check --api-url"
 fi
 
-if [ "$KMS" -eq 1 ]; then
-  if [ -n "$BOX_INSTANCE" ]; then
-    [ -n "$BOX_ZONE" ] || die "--box-instance needs --box-zone"
-    BOX_SA="$(gcloud compute instances describe "$BOX_INSTANCE" --zone="$BOX_ZONE" --project="$PROJECT" \
-      --format='value(serviceAccounts[0].email)')" || die "cannot read instance ${BOX_INSTANCE}"
-    scopes="$(gcloud compute instances describe "$BOX_INSTANCE" --zone="$BOX_ZONE" --project="$PROJECT" \
-      --format='value(serviceAccounts[0].scopes)')"
-    case "$scopes" in
-      *cloud-platform*|*cloudkms*) ;;
-      *) echo "WARNING: ${BOX_INSTANCE}'s access scopes allow neither cloud-platform nor cloudkms;" \
-           "Cloud KMS will refuse the VM's token until the scopes include one (instance stopped):" \
-           "gcloud compute instances set-service-account ${BOX_INSTANCE} --zone=${BOX_ZONE} --service-account=${BOX_SA} --scopes=cloud-platform" >&2 ;;
-    esac
-  fi
-  [ -n "$BOX_SA" ] || die "--kms needs the box VM's identity: --box-service-account <email> or --box-instance <name> --box-zone <zone>"
-  printf '%s' "$BOX_SA" | grep -Eq '^[a-z0-9-]+@[a-z0-9.-]+\.gserviceaccount\.com$' \
-    || die "invalid box service account: $BOX_SA"
-  case "$BOX_SA" in
-    *-compute@developer.gserviceaccount.com)
-      echo "WARNING: ${BOX_SA} is the project's default Compute Engine account: every VM that runs" \
-        "as it could use this key. Give the box VM its own service account." >&2 ;;
-  esac
-fi
-
 PROJECT_NUMBER="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)' 2>/dev/null)" \
   || die "cannot read project ${PROJECT}; run 'gcloud auth login' as a project owner"
-[ -n "$PROJECT_NUMBER" ] || die "project ${PROJECT} has no project number"
+[[ -n "$PROJECT_NUMBER" ]] || die "project ${PROJECT} has no project number"
 
 echo "Project ${PROJECT} (${PROJECT_NUMBER}), issuer ${ISSUER}, pool ${POOL_ID}"
+echo "Note: use a project dedicated to SAM nodes. The node service account's roles apply to the whole project, so in a shared project it could also change the box VM and its firewall."
 
-if [ "$NODES" -eq 1 ]; then
-  # cloudbilling: read-only Compute Engine list prices for the node catalog (no IAM role needed;
-  # without it every GCP machine shows "Price unavailable"; box round R14).
-  change services enable compute.googleapis.com iam.googleapis.com iamcredentials.googleapis.com \
-    sts.googleapis.com cloudbilling.googleapis.com --project="$PROJECT"
+# cloudbilling: read-only Compute Engine list prices for the node catalog (no IAM role needed;
+# without it every GCP machine shows "Price unavailable"; box round R14).
+change services enable "${NODE_APIS[@]}" --project="$PROJECT"
 
-  # A deleted pool still describes (state DELETED) and keeps its id for 30 days: reusing it as
-  # "exists" would then try to create a provider in a deleted pool (R13 D5).
-  if pool_state="$(gcloud iam workload-identity-pools describe "$POOL_ID" --project="$PROJECT" \
-    --location=global --format='value(state)' 2>/dev/null)"; then
-    [ "$pool_state" != "DELETED" ] \
-      || die "workload identity pool ${POOL_ID} was deleted (Google keeps a deleted pool for 30 days, and its id cannot be reused until it is purged). Either undelete it: gcloud iam workload-identity-pools undelete ${POOL_ID} --project=${PROJECT} --location=global, then run this again; or pass --pool-id <a new id> and put the new values in the platform credential (Admin -> Credentials)."
-    echo "pool ${POOL_ID}: exists"
-    record workload-identity-pool "$POOL_NAME" reused
-  else
-    change iam workload-identity-pools create "$POOL_ID" --project="$PROJECT" --location=global \
-      --display-name="SAM ${ISSUER#https://api.}" \
-      --description="Dedicated to the SAM install whose token issuer is ${ISSUER}"
-    record workload-identity-pool "$POOL_NAME" created
-  fi
+# A deleted pool still describes (state DELETED) and keeps its id for 30 days: reusing it as
+# "exists" would then try to create a provider in a deleted pool (R13 D5).
+if pool_state="$(gcloud iam workload-identity-pools describe "$POOL_ID" --project="$PROJECT" \
+  --location=global --format='value(state)' 2>/dev/null)"; then
+  [[ "$pool_state" != "DELETED" ]] \
+    || die "workload identity pool ${POOL_ID} was deleted (Google keeps a deleted pool for 30 days, and its id cannot be reused until it is purged). Either undelete it: gcloud iam workload-identity-pools undelete ${POOL_ID} --project=${PROJECT} --location=global, then run this again; or pass --pool-id <a new id> and put the new values in the platform credential (Admin -> Credentials)."
+  # A disabled pool still reports state ACTIVE (`disabled` is a separate field) and exchanges no
+  # tokens, so every node exchange would fail later.
+  pool_disabled="$(gcloud iam workload-identity-pools describe "$POOL_ID" --project="$PROJECT" \
+    --location=global --format='value(disabled)')" || die "cannot read workload identity pool ${POOL_ID}"
+  [[ "$pool_disabled" != [Tt][Rr][Uu][Ee] ]] \
+    || die "workload identity pool ${POOL_ID} is disabled, and a disabled pool exchanges no tokens. Either enable it: gcloud iam workload-identity-pools update ${POOL_ID} --project=${PROJECT} --location=global --no-disabled, then run this again; or pass --pool-id <a new id>."
+  # The service account binding below is pool-wide, so every provider in the pool would be
+  # admitted: reuse the pool only when each provider in it (deleted ones too, which can be
+  # undeleted) is PROVIDER_ID trusting this install's issuer.
+  pool_providers="$(gcloud iam workload-identity-pools providers list --project="$PROJECT" \
+    --location=global --workload-identity-pool="$POOL_ID" --show-deleted \
+    --format='value(name,oidc.issuerUri)')" || die "cannot list the providers of pool ${POOL_ID}"
+  while IFS=$'\t' read -r provider_name provider_issuer; do
+    [[ -n "$provider_name" ]] || continue
+    if [[ "${provider_name##*/}" != "$PROVIDER_ID" ]]; then
+      die "pool ${POOL_ID} holds provider ${provider_name##*/} (issuer ${provider_issuer:-not OIDC}) besides ${PROVIDER_ID}, deleted providers included, and the node service account would admit every provider in the pool. Use another --pool-id."
+    fi
+    if [[ "$provider_issuer" != "$ISSUER" ]]; then
+      die "pool ${POOL_ID} is not dedicated to this install: its provider ${PROVIDER_ID} trusts ${provider_issuer:-a non-OIDC issuer}, not ${ISSUER}. Use another --pool-id."
+    fi
+  done <<<"$pool_providers"
+  echo "pool ${POOL_ID}: exists"
+else
+  change iam workload-identity-pools create "$POOL_ID" --project="$PROJECT" --location=global \
+    --display-name="SAM ${ISSUER#https://api.}" \
+    --description="Dedicated to the SAM install whose token issuer is ${ISSUER}"
+fi
 
-  if provider_state="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
+# SAM signs aud=https://iam.googleapis.com/<provider> (gcp-sts.ts).
+AUDIENCE="https://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/providers/${PROVIDER_ID}"
+if provider_state="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
+  --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" \
+  --format='value(state)' 2>/dev/null)"; then
+  [[ "$provider_state" != "DELETED" ]] \
+    || die "provider ${POOL_ID}/${PROVIDER_ID} was deleted (Google keeps it for 30 days). Undelete it: gcloud iam workload-identity-pools providers undelete ${PROVIDER_ID} --workload-identity-pool=${POOL_ID} --project=${PROJECT} --location=global, then run this again; or pass --provider-id <a new id>."
+  provider_disabled="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
     --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" \
-    --format='value(state)' 2>/dev/null)"; then
-    [ "$provider_state" != "DELETED" ] \
-      || die "provider ${POOL_ID}/${PROVIDER_ID} was deleted (Google keeps it for 30 days). Undelete it: gcloud iam workload-identity-pools providers undelete ${PROVIDER_ID} --workload-identity-pool=${POOL_ID} --project=${PROJECT} --location=global, then run this again; or pass --provider-id <a new id>."
-    current="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
-      --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" \
-      --format='value(oidc.issuerUri)')"
-    [ "$current" = "$ISSUER" ] \
-      || die "provider ${POOL_ID}/${PROVIDER_ID} already trusts ${current}, not ${ISSUER}; refusing to retarget it. Use another --pool-id."
-    echo "provider ${PROVIDER_ID}: exists, issuer ${ISSUER}"
-    record workload-identity-provider "${POOL_NAME}/providers/${PROVIDER_ID}" reused
-  else
-    # Only this install's issuer is admitted (attributeCondition), and only tokens addressed to
-    # this provider: SAM signs aud=https://iam.googleapis.com/<provider> (gcp-sts.ts). Mapping
-    # matches the guided setup (gcp-setup.ts).
-    change iam workload-identity-pools providers create-oidc "$PROVIDER_ID" --project="$PROJECT" \
-      --location=global --workload-identity-pool="$POOL_ID" --display-name="SAM API" \
-      --issuer-uri="$ISSUER" \
-      --allowed-audiences="https://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/providers/${PROVIDER_ID}" \
-      --attribute-mapping="google.subject=assertion.sub,attribute.sam_user=assertion.user_id,attribute.sam_project=assertion.project_id" \
-      --attribute-condition="$CONDITION"
-    record workload-identity-provider "${POOL_NAME}/providers/${PROVIDER_ID}" created
+    --format='value(disabled)')" || die "cannot read provider ${POOL_ID}/${PROVIDER_ID}"
+  [[ "$provider_disabled" != [Tt][Rr][Uu][Ee] ]] \
+    || die "provider ${POOL_ID}/${PROVIDER_ID} is disabled, and a disabled provider exchanges no tokens. Either enable it: gcloud iam workload-identity-pools providers update-oidc ${PROVIDER_ID} --workload-identity-pool=${POOL_ID} --project=${PROJECT} --location=global --no-disabled, then run this again; or pass --provider-id <a new id>."
+  current="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
+    --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" \
+    --format='value(oidc.issuerUri)')"
+  [[ "$current" = "$ISSUER" ]] \
+    || die "provider ${POOL_ID}/${PROVIDER_ID} already trusts ${current}, not ${ISSUER}; refusing to retarget it. Use another --pool-id."
+  echo "provider ${PROVIDER_ID}: exists, issuer ${ISSUER}"
+  # A provider made by an earlier version of this script admits every token of this issuer, and
+  # one edited by hand may name another audience (every exchange would then fail): set both to
+  # what this script creates. The attribute mapping is not checked: neither the condition nor the
+  # pool-wide binding reads a mapped attribute.
+  current_condition="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
+    --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" \
+    --format='value(attributeCondition)')" \
+    || die "cannot read the attribute condition of provider ${POOL_ID}/${PROVIDER_ID}"
+  current_audiences="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
+    --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" \
+    --format='value(oidc.allowedAudiences)')" \
+    || die "cannot read the allowed audiences of provider ${POOL_ID}/${PROVIDER_ID}"
+  if [[ "$current_condition" != "$CONDITION" || "$current_audiences" != "$AUDIENCE" ]]; then
+    change iam workload-identity-pools providers update-oidc "$PROVIDER_ID" --project="$PROJECT" \
+      --location=global --workload-identity-pool="$POOL_ID" --attribute-condition="$CONDITION" \
+      --allowed-audiences="$AUDIENCE"
   fi
-
-  sa_action=reused
-  if exists iam service-accounts describe "$SA_EMAIL" --project="$PROJECT"; then
-    echo "service account ${SA_EMAIL}: exists"
-    created service-account "$SA_EMAIL" && sa_action=created
-  else
-    # The description names the issuer: --teardown deletes only an account that carries it.
-    change iam service-accounts create "$SA_ID" --project="$PROJECT" --display-name="SAM nodes" \
-      --description="Creates and deletes SAM workspace VMs and their firewall rules for ${ISSUER}"
-    sa_action=created
-  fi
-  record service-account "$SA_EMAIL" "$sa_action"
-
-  for role in roles/compute.instanceAdmin.v1 roles/compute.securityAdmin; do
-    change_retry projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:${SA_EMAIL}" \
-      --role="$role" --condition=None --quiet --format=none
-    # Ours to remove only with the account ours too: a shared account keeps its roles.
-    record iam-binding "projects/${PROJECT}#${role}#serviceAccount:${SA_EMAIL}" "$sa_action" \
-      "resource=projects/${PROJECT}" "role=${role}" "member=serviceAccount:${SA_EMAIL}"
-  done
-
-  # Scope: the whole pool. That is this one install only, because the pool is created for it and
-  # its only provider admits tokens whose issuer is this install's API origin (the condition
-  # above, checked again on every run). Any provider added to this pool later would inherit the
-  # service account, so do not add providers to it.
-  change_retry iam service-accounts add-iam-policy-binding "$SA_EMAIL" --project="$PROJECT" \
-    --role=roles/iam.workloadIdentityUser \
-    --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/*" \
-    --condition=None --quiet --format=none
+else
+  # Only this install's platform tokens are admitted (attributeCondition), and only tokens
+  # addressed to this provider: SAM signs aud=https://iam.googleapis.com/<provider> (gcp-sts.ts). Mapping
+  # matches the guided setup (gcp-setup.ts).
+  change iam workload-identity-pools providers create-oidc "$PROVIDER_ID" --project="$PROJECT" \
+    --location=global --workload-identity-pool="$POOL_ID" --display-name="SAM API" \
+    --issuer-uri="$ISSUER" \
+    --allowed-audiences="$AUDIENCE" \
+    --attribute-mapping="google.subject=assertion.sub,attribute.sam_user=assertion.user_id,attribute.sam_project=assertion.project_id" \
+    --attribute-condition="$CONDITION"
 fi
 
-# A key the box can seal with has an ENABLED primary version. After `teardown --destroy-key` the
-# key's name stays (Cloud KMS never deletes it) with its only version DESTROY_SCHEDULED, and
-# encrypt answers FAILED_PRECONDITION. Reusing it silently left `deploy --init` to give up on the
-# key (box round R13). So: stop and say what to run, unless --new-key-version or
-# --restore-key-version says which way to go. Stopping is the default because each way changes
-# something the operator decided: restoring undoes a destruction they asked for, and a new version
-# is new key material (and a monthly cost) on a key they meant to retire.
-ensure_primary_version() {
-  local state version versions target
-  state="$(gcloud kms keys describe "$KEY_ID" "${KEY_FLAGS[@]}" --format='value(primary.state)')" \
-    || die "cannot read key ${KEY_NAME}"
-  [ "$state" = "ENABLED" ] && return 0
-  version="$(gcloud kms keys describe "$KEY_ID" "${KEY_FLAGS[@]}" --format='value(primary.name)')"
-  version="${version##*/}"
-  versions="$(gcloud kms keys versions list --key="$KEY_ID" "${KEY_FLAGS[@]}" --format='value(name,state)' \
-    | awk -F'\t' '{ n = $1; sub(/.*\//, "", n); printf "%s%s=%s", sep, n, $2; sep = ", " }')"
-  case "$KEY_VERSION_ACTION" in
-    new)
-      echo "key ${KEY_ID}: no enabled primary version (${versions:-no versions}); a new primary version$([ "$DRY_RUN" -eq 1 ] && echo " would be" || echo " is being") created"
-      change kms keys versions create --key="$KEY_ID" "${KEY_FLAGS[@]}" --primary
-      ;;
-    restore)
-      # The primary version, else the newest version that can still come back.
-      target="$version"
-      if [ -z "$target" ]; then
-        target="$(gcloud kms keys versions list --key="$KEY_ID" "${KEY_FLAGS[@]}" --format='value(name,state)' \
-          | awk -F'\t' '$2 == "DESTROY_SCHEDULED" || $2 == "DISABLED" { n = $1; sub(/.*\//, "", n); if (n + 0 > best + 0) best = n } END { print best }')"
-        state="$(gcloud kms keys versions list --key="$KEY_ID" "${KEY_FLAGS[@]}" --format='value(name,state)' \
-          | awk -F'\t' -v t="$target" '{ n = $1; sub(/.*\//, "", n); if (n == t) print $2 }')"
-      fi
-      case "$state" in
-        DESTROY_SCHEDULED)
-          change kms keys versions restore "$target" --key="$KEY_ID" "${KEY_FLAGS[@]}"
-          change kms keys versions enable "$target" --key="$KEY_ID" "${KEY_FLAGS[@]}" ;;
-        DISABLED)
-          change kms keys versions enable "$target" --key="$KEY_ID" "${KEY_FLAGS[@]}" ;;
-        *) die "key ${KEY_NAME} has no version to restore (${versions:-no versions}): use --new-key-version instead" ;;
-      esac
-      [ "$target" = "$version" ] || change kms keys set-primary-version "$KEY_ID" "${KEY_FLAGS[@]}" --version="$target"
-      if [ "$DRY_RUN" -eq 1 ]; then echo "key ${KEY_ID}: version ${target} would be restored and enabled"
-      else echo "key ${KEY_ID}: version ${target} restored and enabled"; fi
-      ;;
-    *)
-      die "key ${KEY_NAME} has no enabled primary version (${versions:-no versions}), so the box cannot seal with it (Cloud KMS answers FAILED_PRECONDITION). After \`pnpm selfhost:teardown --destroy-key\` its version is scheduled for destruction. Run this again with --new-key-version (a new primary version; anything sealed with the old one stays lost), or with --restore-key-version to undo the destruction (only within 30 days of it), or pass another --key."
-      ;;
+sa_existed=0
+if exists iam service-accounts describe "$SA_EMAIL" --project="$PROJECT"; then
+  sa_existed=1
+  # A disabled account can be granted roles but mints no tokens, so every node exchange would fail.
+  sa_disabled="$(gcloud iam service-accounts describe "$SA_EMAIL" --project="$PROJECT" \
+    --format='value(disabled)')" || die "cannot read service account ${SA_EMAIL}"
+  [[ "$sa_disabled" != [Tt][Rr][Uu][Ee] ]] \
+    || die "service account ${SA_EMAIL} is disabled, and a disabled account mints no tokens. Either enable it: gcloud iam service-accounts enable ${SA_EMAIL} --project=${PROJECT}, then run this again; or pass --service-account <a new id>."
+  echo "service account ${SA_EMAIL}: exists"
+else
+  change iam service-accounts create "$SA_ID" --project="$PROJECT" --display-name="SAM nodes" \
+    --description="Creates and deletes SAM workspace VMs and their firewall rules for ${ISSUER}"
+fi
+
+POOL_PRINCIPAL="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/*"
+# add-iam-policy-binding only adds a member, so a reused account keeps every grant it already has:
+# a member from an older --pool-id, or anyone given workloadIdentityUser, serviceAccountTokenCreator,
+# serviceAccountUser or any other role on it, could act as the node account. Refuse while its policy
+# holds anything but this pool's workloadIdentityUser binding, or a conditional binding;
+# revoking is the operator's decision. This runs before ANY grant, the project roles included, so
+# a member refused here never gains the node roles. The policy is parsed as JSON and anything
+# unexpected refuses: a filter that silently matched nothing would let the grants through.
+# User-managed keys are refused below. Roles inherited from the project, folder or organisation
+# are not visible here; that is why the
+# node project must be dedicated to SAM (README).
+# A just-created account has an empty policy (and IAM may not list it yet), so it is skipped.
+if [[ "$sa_existed" -eq 1 ]]; then
+  sa_policy="$(gcloud iam service-accounts get-iam-policy "$SA_EMAIL" --project="$PROJECT" \
+    --format=json)" || die "cannot read the IAM policy of ${SA_EMAIL}"
+  # Prints one "role<TAB>member" per member other than this pool's workloadIdentityUser binding;
+  # exits 2 on output that is not a policy, 3 on a conditional binding.
+  parse_status=0
+  stray="$(printf '%s' "$sa_policy" | POOL_PRINCIPAL="$POOL_PRINCIPAL" node -e '
+    let text = "";
+    process.stdin.on("data", (chunk) => (text += chunk));
+    process.stdin.on("end", () => {
+      let policy;
+      try { policy = JSON.parse(text); } catch { process.exit(2); }
+      if (policy === null || typeof policy !== "object" || Array.isArray(policy)) process.exit(2);
+      const bindings = policy.bindings ?? [];
+      if (!Array.isArray(bindings)) process.exit(2);
+      for (const binding of bindings) {
+        if (!binding || typeof binding.role !== "string" || !Array.isArray(binding.members)) process.exit(2);
+        if (binding.condition) process.exit(3);
+        for (const member of binding.members) {
+          if (typeof member !== "string") process.exit(2);
+          const ours = binding.role === "roles/iam.workloadIdentityUser" && member === process.env.POOL_PRINCIPAL;
+          if (!ours) console.log(`${binding.role}\t${member}`);
+        }
+      }
+    });
+  ')" || parse_status=$?
+  case "$parse_status" in
+  0) ;;
+  3) die "service account ${SA_EMAIL} has a conditional IAM binding; this script cannot tell who it admits. Remove it (gcloud iam service-accounts get-iam-policy ${SA_EMAIL} --project=${PROJECT}), then run this again; or pass --service-account <a new id>." ;;
+  *) die "could not parse the IAM policy of ${SA_EMAIL}; refusing to grant anything." ;;
   esac
-}
-
-if [ "$KMS" -eq 1 ]; then
-  change services enable cloudkms.googleapis.com --project="$PROJECT"
-  if exists kms keyrings describe "$KEY_RING" --location="$KMS_LOCATION" --project="$PROJECT"; then
-    echo "key ring ${KEY_RING}: exists"
-    created kms-key-ring "$RING_NAME" || record kms-key-ring "$RING_NAME" reused
-  else
-    change kms keyrings create "$KEY_RING" --location="$KMS_LOCATION" --project="$PROJECT"
-    record kms-key-ring "$RING_NAME" created
+  if [[ -n "$stray" ]]; then
+    role="${stray%%$'\t'*}"
+    member="$(printf '%s' "${stray#*$'\t'}" | head -n 1)"
+    role="$(printf '%s' "$role" | head -n 1)"
+    printf '%s\n' "$member" | grep -Eq '^[A-Za-z0-9:/._@+*=-]+$' || member="(a member with unusual characters)"
+    die "service account ${SA_EMAIL} grants ${role} to ${member}, which this install does not use; that member could act as the node account. Remove it: gcloud iam service-accounts remove-iam-policy-binding ${SA_EMAIL} --project=${PROJECT} --role=${role} --member=${member}, then run this again (every other member is refused the same way); or pass --service-account <a new id>."
   fi
-  key_action=reused
-  if exists kms keys describe "$KEY_ID" "${KEY_FLAGS[@]}"; then
-    owner="$(gcloud kms keys describe "$KEY_ID" "${KEY_FLAGS[@]}" --format='value(labels.sam-install)')"
-    [ "$owner" = "$INSTALL_HASH" ] \
-      || die "key ${KEY_NAME} exists but is not labelled sam-install=${INSTALL_HASH}; refusing to use another install's key. Pick --key."
-    echo "key ${KEY_ID}: exists"
-    if created kms-key "$KEY_NAME"; then key_action=created; else record kms-key "$KEY_NAME" reused; fi
-    ensure_primary_version
-  else
-    # Labelled with this install, so --teardown can prove the key is this install's.
-    change kms keys create "$KEY_ID" "${KEY_FLAGS[@]}" --purpose=encryption \
-      --labels="sam-install=${INSTALL_HASH}"
-    record kms-key "$KEY_NAME" created
-    key_action=created
-  fi
-  # On the key only, never the ring or the project.
-  change_retry kms keys add-iam-policy-binding "$KEY_ID" "${KEY_FLAGS[@]}" \
-    --member="serviceAccount:${BOX_SA}" --role="$KMS_ROLE" --format=none
-  # Ours to remove only on a key this bootstrap created: a grant on someone's key may predate us.
-  record iam-binding "${KEY_NAME}#${KMS_ROLE}#serviceAccount:${BOX_SA}" "$key_action" \
-    "resource=${KEY_NAME}" "role=${KMS_ROLE}" "member=serviceAccount:${BOX_SA}"
+  # A user-managed key authenticates as the account without any IAM binding, so the policy above
+  # cannot show who holds one. Nodes never use keys (workload identity only): refuse any, and
+  # anything that is not a JSON list, before the grants.
+  sa_keys="$(gcloud iam service-accounts keys list --iam-account="$SA_EMAIL" --project="$PROJECT" \
+    --managed-by=user --format=json)" || die "cannot list the keys of ${SA_EMAIL}"
+  key_count=0
+  key_count="$(printf '%s' "$sa_keys" | node -e '
+    let text = "";
+    process.stdin.on("data", (chunk) => (text += chunk));
+    process.stdin.on("end", () => {
+      let keys;
+      try { keys = JSON.parse(text); } catch { process.exit(2); }
+      if (!Array.isArray(keys)) process.exit(2);
+      console.log(String(keys.length));
+    });
+  ')" || die "could not parse the key list of ${SA_EMAIL}; refusing to grant anything."
+  [[ "$key_count" =~ ^[0-9]+$ ]] || die "could not parse the key list of ${SA_EMAIL}; refusing to grant anything."
+  [[ "$key_count" -eq 0 ]] \
+    || die "service account ${SA_EMAIL} has ${key_count} user-managed key(s); anyone holding one acts as the node account. Delete them (gcloud iam service-accounts keys list --iam-account=${SA_EMAIL} --managed-by=user, then gcloud iam service-accounts keys delete <key-id> --iam-account=${SA_EMAIL}), then run this again; or pass --service-account <a new id>."
 fi
 
-[ "$DRY_RUN" -eq 1 ] && echo "Dry run: nothing was changed."
-if [ "$NODES" -eq 1 ]; then
-  # The shape parseGcpCredential (apps/api/src/services/provider-credential-codecs.ts) reads.
-  cat <<EOF
+for role in "${NODE_ROLES[@]}"; do
+  change_retry projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:${SA_EMAIL}" \
+    --role="$role" --condition=None --quiet --format=none
+done
+
+# Scope: the whole pool. Its only provider (checked above on every run) admits only tokens whose
+# issuer is this install's API origin, whose audience is that provider, and whose user_id is a
+# platform identity, so the binding admits the tokens SAM signs for the installation's own
+# credential and no user's. SAM also refuses a user credential that names a pool the platform
+# credential holds (gcp-wif-pool-ownership.ts). Any provider added to this pool later would
+# inherit the service account too, so do not add providers to it.
+change_retry iam service-accounts add-iam-policy-binding "$SA_EMAIL" --project="$PROJECT" \
+  --role=roles/iam.workloadIdentityUser --member="$POOL_PRINCIPAL" \
+  --condition=None --quiet --format=none
+
+[[ "$DRY_RUN" -eq 1 ]] && echo "Dry run: nothing was changed."
+# The shape parseGcpCredential (apps/api/src/services/provider-credential-codecs.ts) reads.
+cat <<EOF
 
 Add the installation's cloud account in SAM: Admin -> Credentials -> Add Credential,
 Type "Cloud Provider", Provider "GCP", any label. Paste this as the API Token, with ZONE
@@ -403,15 +352,3 @@ The values in it:
   Service account email:  ${SA_EMAIL}
 Then add machines to the installation pool in Admin -> Infrastructure.
 EOF
-fi
-if [ "$KMS" -eq 1 ]; then
-  cat <<EOF
-
-Sealed-secrets key (the box VM ${BOX_SA} may encrypt and decrypt with it, nothing else):
-  SAM_GCP_KMS_KEY=${KEY_NAME}
-With the default names, \`pnpm selfhost:deploy --init\` on the box finds it by itself; otherwise
-put that line in deploy/selfhost/.env. A box already sealed with another key moves to it with
-\`pnpm selfhost:secrets switch --to gcp-kms\`.
-EOF
-fi
-[ "$DRY_RUN" -eq 1 ] || echo "Recorded what this created in ${RECORD} (--teardown reads it)."

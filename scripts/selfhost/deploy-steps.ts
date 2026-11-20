@@ -2,13 +2,25 @@
  * Small steps of `pnpm selfhost:deploy` (deploy.ts), kept apart so the orchestration stays short.
  */
 import { existsSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
-import { gatewayEnvAction } from './box-settings.js';
+import { BOX_RESERVED_PORTS, gatewayEnvAction } from './box-settings.js';
 import type { CelldWranglerConfig } from './celld-config.js';
-import { writePrivateFile } from './secret-files.js';
+import { replacePrivateFile } from './secret-files.js';
 
-function log(message: string): void {
+/** The repository checkout the self-host scripts run from. */
+export const REPO_ROOT = resolve(import.meta.dirname, '../..');
+/** The box's compose project: docker-compose.yml, its .env, caddy/, frps/. */
+export const SELFHOST_DIR = join(REPO_ROOT, 'deploy/selfhost');
+
+/** Progress output of the self-host scripts. */
+export function log(message: string): void {
   console.log(`[selfhost] ${message}`);
+}
+
+/** celld's API port on loopback: CELLD_PORT from the compose .env, else compose's default. */
+export function celldPort(box: Readonly<Record<string, string | undefined>>): string {
+  return box.CELLD_PORT || String(BOX_RESERVED_PORTS.CELLD_PORT);
 }
 
 export function redact(config: CelldWranglerConfig, secretNames: Set<string>): CelldWranglerConfig {
@@ -30,7 +42,8 @@ export function syncGatewayEnv(path: string, content: string, init: boolean): vo
   const existing = existsSync(path) ? readFileSync(path, 'utf8') : null;
   const action = gatewayEnvAction(existing, content, init);
   if (action === 'unchanged') return;
-  writePrivateFile(path, content);
+  // Replaced, not rewritten in place: compose may be reading it right now.
+  replacePrivateFile(path, content);
   log(`wrote ${path}; (re)start the stack: docker compose up -d`);
   if (action === 'write-then-restart') {
     throw new Error(
@@ -65,7 +78,7 @@ const DEFAULT_HEALTH_REQUEST_TIMEOUT_MS = 10_000;
 
 export function intEnv(name: string, fallback: number): number {
   const raw = process.env[name];
-  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 

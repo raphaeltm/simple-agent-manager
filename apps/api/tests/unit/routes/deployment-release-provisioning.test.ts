@@ -509,7 +509,11 @@ describe('POST /:projectId/environments/:envId/releases — provisioning trigger
       'test-user-id',
       expect.anything(),
       false,
-      { nodeId: 'node-existing', excludeEnvironmentId: 'env-1', nodeMode: 'shared' }
+      expect.objectContaining({
+        nodeId: 'node-existing',
+        excludeEnvironmentId: 'env-1',
+        nodeMode: 'shared',
+      })
     );
     expect(mockClaimDeploymentEnvironmentRelocation).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -661,7 +665,7 @@ describe('POST /:projectId/environments/:envId/releases — provisioning trigger
       dbCalls.some(
         ({ values }) =>
           values?.observedErrorMessage ===
-          'Deployment node placement failed: Existing exclusive deployment node cannot admit the declared resource reservation'
+          'Deployment node placement failed: Existing exclusive deployment node is unavailable for admission'
       )
     ).toBe(true);
   });

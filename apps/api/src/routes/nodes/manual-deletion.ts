@@ -5,76 +5,93 @@ import type { Context } from 'hono';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { getAuth } from '../../middleware/auth';
+import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireNodeOwnership } from '../../middleware/node-auth';
 import { deleteDNSRecord } from '../../services/dns';
 import { recordManualNodeDeletion } from '../../services/node-manual-deletion';
-import { recordOperatorRetirementAudit } from '../../services/node-operator-retirement';
 import { listStrandedNodeTasks } from '../../services/node-stranded-tasks';
 import { completeOwnerNodeRemoval, OWNER_ATTESTED_REMOVAL_REASON } from './delete';
 
+type NodesDb = ReturnType<typeof drizzle<typeof schema>>;
+type NodeRow = typeof schema.nodes.$inferSelect;
+
 /**
- * POST /api/nodes/:id/manual-deletion — the owner confirms they deleted the
- * node's server at their provider, so SAM removes the node it could not tear
- * down itself. The body must be `{ "confirmed": true }`.
- *
- * On SAM-managed capacity only a superadmin may do this, as the operator, and only on proof
- * the server is gone (`services/node-operator-retirement.ts`). `confirmNodeName` carries the
- * node name the operator typed when the provider cannot be asked.
+ * Everything after a person attested that a node's server is gone: best-effort backend DNS
+ * cleanup, then the owner's removal tail run as the node's owner. Shared by the owner route below
+ * and the superadmin route (`routes/admin-stranded-nodes.ts`), so there is one removal path.
+ * `strandedTasks` must be listed before the proof is written, as the owner Delete does.
  */
-export async function confirmManualNodeDeletionRoute(c: Context<{ Bindings: Env }>) {
-  const nodeId = c.req.param('id');
-  if (!nodeId) throw errors.badRequest('Node id is required');
-  const auth = getAuth(c);
-  const userId = auth.user.id;
-  // Validated by ConfirmManualNodeDeletionSchema where the route is registered (routes/nodes.ts).
-  const body = c.req.valid('json' as never) as unknown as { confirmNodeName?: string };
-  const db = drizzle(c.env.DATABASE, { schema });
-  const owned = await requireNodeOwnership(c, nodeId);
-  if (!owned) throw errors.notFound('Node');
-
-  await assertNoReservedCloudflareBuilds(db, { nodeId });
-  const strandedTasks = await listStrandedNodeTasks(c.env, nodeId);
-  const { node, runtimeTerminationConfirmedAt, operatorProof } = await recordManualNodeDeletion(
-    db,
-    c.env,
-    nodeId,
-    userId,
-    { actorIsSuperadmin: auth.user.role === 'superadmin', confirmNodeName: body.confirmNodeName }
-  );
-
+export async function completeAttestedNodeRemoval(input: {
+  env: Env;
+  db: NodesDb;
+  node: NodeRow;
+  runtimeTerminationConfirmedAt: string;
+  strandedTasks: Awaited<ReturnType<typeof listStrandedNodeTasks>>;
+  reason: string;
+}): Promise<void> {
+  const { env, db, node } = input;
   let backendDnsDeleted = !node.backendDnsRecordId;
   if (node.backendDnsRecordId) {
     try {
-      await deleteDNSRecord(node.backendDnsRecordId, c.env);
+      await deleteDNSRecord(node.backendDnsRecordId, env);
       backendDnsDeleted = true;
     } catch (error) {
       log.warn('node_manual_deletion.dns_cleanup_failed', {
-        nodeId,
+        nodeId: node.id,
         error: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
   await completeOwnerNodeRemoval({
-    env: c.env,
+    env,
     db,
     node,
-    userId,
+    userId: node.userId,
     cleanup: {
       nodeFound: true,
       runtimeTerminationConfirmed: true,
       providerVmDeleted: false,
-      providerVmDeleteSkippedReason: 'owner_attested_manual_deletion',
+      providerVmDeleteSkippedReason: input.reason,
       backendDnsDeleted,
-      runtimeTerminationConfirmedAt,
+      runtimeTerminationConfirmedAt: input.runtimeTerminationConfirmedAt,
       runtimeIncarnationId: node.runtimeIncarnationId,
       errors: [],
     },
+    strandedTasks: input.strandedTasks,
+    reason: input.reason,
+  });
+}
+
+/**
+ * POST /api/nodes/:id/manual-deletion — the owner confirms they deleted the
+ * node's server at their provider, so SAM removes the node it could not tear
+ * down itself. The body must be `{ "confirmed": true }`.
+ */
+export async function confirmManualNodeDeletionRoute(c: Context<{ Bindings: Env }>) {
+  const nodeId = c.req.param('id');
+  if (!nodeId) throw errors.badRequest('Node id is required');
+  const userId = getUserId(c);
+  const db = drizzle(c.env.DATABASE, { schema });
+  const owned = await requireNodeOwnership(c, nodeId);
+  if (!owned) throw errors.notFound('Node');
+
+  await assertNoReservedCloudflareBuilds(db, { nodeId });
+  const strandedTasks = await listStrandedNodeTasks(c.env, nodeId);
+  const { node, runtimeTerminationConfirmedAt } = await recordManualNodeDeletion(
+    db,
+    c.env,
+    nodeId,
+    userId
+  );
+  await completeAttestedNodeRemoval({
+    env: c.env,
+    db,
+    node,
+    runtimeTerminationConfirmedAt,
     strandedTasks,
     reason: OWNER_ATTESTED_REMOVAL_REASON,
   });
-  if (operatorProof) await recordOperatorRetirementAudit(c.env, userId, node, operatorProof);
   return c.json({ success: true });
 }

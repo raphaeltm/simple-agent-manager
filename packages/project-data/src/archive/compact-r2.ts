@@ -65,7 +65,8 @@ const pendingR2Operations = new WeakMap<R2Bucket, Map<string, PendingR2Operation
  *
  * Unlike the other shared flights, an abandoned operation is NOT evicted: a second provider call
  * must never race the first on an immutable key (see timedR2). On celld a dropped operation
- * therefore keeps failing joiners for that key with a timeout until the isolate is retired.
+ * therefore keeps failing joiners for that key with a timeout until the isolate is retired
+ * (tracked: tasks/backlog/2026-11-19-compact-r2-celld-abandoned-op-eviction.md).
  */
 async function joinR2Operation(
   pending: PendingR2Operation,

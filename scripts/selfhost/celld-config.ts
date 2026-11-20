@@ -14,12 +14,6 @@
 
 import { resolveDurableObjectMigrations } from '../deploy/durable-object-migrations.js';
 import type { MigrationEntry, WranglerToml } from '../deploy/types.js';
-import {
-  GUIDED_LOGIN_CONTAINER_CLASS,
-  type GuidedLoginSettings,
-  SANDBOX_IMAGE_DIR,
-} from './guided-login.js';
-import { appendSelfhostDurableObjects } from './selfhost-durable-objects.js';
 
 /** Worker vars set for every celld deployment, overriding wrangler.toml [vars]. */
 export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
@@ -27,13 +21,9 @@ export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
   // blocks container -> host traffic on a one-box install (idea 01M72M9AEB933ZY8269D376DKC).
   CF_CONTAINER_ENABLED: 'false',
   SANDBOX_ENABLED: 'false',
-  // SAM-native git repos: Artifacts is dropped below; the HostedGitRepo Durable Object (declared
-  // for this build only, selfhost-durable-objects.ts) serves https://api.<SAM_DOMAIN>/git/<repo>.git.
-  ARTIFACTS_ENABLED: 'true',
-  HOSTED_GIT_BACKEND: 'durable-object',
   // Managed devcontainer cache uses the Cloudflare container registry API.
   DEVCONTAINER_CACHE_ENABLED: 'false',
-  // Not forced off here (overnight B3): task titles use the admin's OpenAI-compatible endpoint
+  // Not forced off here: task titles use the admin's OpenAI-compatible endpoint
   // and truncate without one (task-title.ts); the AI proxy without a gateway stays off until an
   // admin turns on `aiProxy.directUpstreamEnabled` (ai-proxy-availability.ts); read-aloud follows
   // the `speech.synthesis.*` settings (platform-capabilities.ts). The stalled-task classifier
@@ -50,34 +40,26 @@ export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
   // wrangler.toml ships AI_GATEWAY_ID="sam". Empty makes every gateway consumer take its
   // no-gateway branch (direct Anthropic/OpenAI URLs, no AI Gateway log or cost queries).
   AI_GATEWAY_ID: '',
-  // The container DO classes stay bound (index.ts exports them) but celld runs no container
-  // behind VmAgentContainer: Instant is never available on a box. The sandbox class has its own
-  // declaration (SANDBOX_CONTAINER_RUNTIME_AVAILABLE), set below only when guided login is on.
-  CONTAINER_RUNTIME_AVAILABLE: 'false',
-  SANDBOX_CONTAINER_RUNTIME_AVAILABLE: 'false',
   // Nodes reach the box through frps on loopback instead of per-node Cloudflare DNS/tunnels
-  // (reverse-tunnel transport, sibling task T2 on sam/selfhost-pass-2).
+  // (reverse-tunnel transport, apps/api/src/selfhost/reverse-tunnel/).
   VM_AGENT_TRANSPORT: 'reverse-tunnel',
   // The environment label that, with SAM_INSTALLATION_ID, scopes provider resources to this
   // install (node-provider-labels.ts). Cloudflare deploys set staging/production in
   // sync-wrangler-config.ts; unset, a node whose create response was lost can never be
   // recovered ("Allocation ownership scope is unavailable") and the provider-orphan sweep is
-  // skipped. Verified on the T4 GCP box.
+  // skipped.
   ENVIRONMENT: 'selfhost',
 };
 
 /**
  * Vars the deployment writes and an operator's secrets.env may not override (deploy.ts merges
- * secrets.env last). The container declarations state what celld runs; an override would
- * advertise guided login with no container behind it, or Instant, whose vm-agent cannot reach
- * this box.
+ * secrets.env last): the domain and bucket the config was built for, and the vm-agent release
+ * this deploy published.
  */
-export const OPERATOR_FORBIDDEN_VARS = [
+const OPERATOR_FORBIDDEN_VARS = [
   'BASE_DOMAIN',
   'R2_BUCKET_NAME',
   'VM_AGENT_REQUIRED_VERSION',
-  'CONTAINER_RUNTIME_AVAILABLE',
-  'SANDBOX_CONTAINER_RUNTIME_AVAILABLE',
 ] as const;
 
 /** Throws when secrets.env sets a var the deployment writes (`OPERATOR_FORBIDDEN_VARS`). */
@@ -91,11 +73,7 @@ export function assertOperatorSecretsAllowed(
 }
 
 /** Keys the generator owns. Values a caller passes for these are rejected. */
-const GENERATED_VAR_KEYS = [
-  'BASE_DOMAIN',
-  'R2_BUCKET_NAME',
-  'SANDBOX_CONTAINER_RUNTIME_AVAILABLE',
-] as const;
+const GENERATED_VAR_KEYS = ['BASE_DOMAIN', 'R2_BUCKET_NAME'] as const;
 
 export interface CelldD1Database {
   binding: string;
@@ -124,16 +102,6 @@ export interface CelldWranglerConfig {
   migrations: Array<{ tag: string; new_sqlite_classes: string[] }>;
   triggers: { crons: string[] };
   assets?: CelldAssets;
-  containers?: CelldContainer[];
-}
-
-/** celld accepts class_name, image, name, instance_type, max_instances and runtime. */
-export interface CelldContainer {
-  class_name: string;
-  image: string;
-  instance_type: string;
-  max_instances?: number;
-  runtime?: string;
 }
 
 /** One flat migrations directory to materialise inside the project dir. */
@@ -160,13 +128,11 @@ export interface CelldConfigOptions {
   assetsDirectory?: string;
   /** Extra plain vars (installation id, operator settings). Secrets are merged later. */
   vars?: Record<string, string>;
-  /** Guided credential login (scripts/selfhost/guided-login.ts); omit to run no container. */
-  guidedLogin?: GuidedLoginSettings | null;
 }
 
 /** Name used for the per-database flat migration directories inside the project dir. */
-export const MIGRATIONS_ROOT = 'd1-migrations';
-export const ASSETS_BINDING = 'ASSETS';
+const MIGRATIONS_ROOT = 'd1-migrations';
+const ASSETS_BINDING = 'ASSETS';
 
 type Rule =
   | { kind: 'drop'; reason: string }
@@ -302,44 +268,6 @@ function translateR2(value: unknown, ctx: TranslateContext): void {
   });
 }
 
-/**
- * Cloudflare Containers. With guided login on, only the sign-in sandbox class runs, under the
- * configured runtime; every other class (VmAgentContainer, Instant) stays a plain DO. The image
- * is built from the minimal context `materialiseSandboxImageContext` writes into the project.
- */
-function translateContainers(value: unknown, ctx: TranslateContext): void {
-  const guided = ctx.options.guidedLogin;
-  const out: CelldContainer[] = [];
-  for (const [index, raw] of asArray(value, 'containers').entries()) {
-    const entry = asRecord(raw, `containers[${index}]`);
-    const className = asString(entry.class_name, `containers[${index}].class_name`);
-    if (!guided || className !== GUIDED_LOGIN_CONTAINER_CLASS) {
-      ctx.plan.report.push(`drop container ${className}: stays bound as a plain DO`);
-      continue;
-    }
-    const unknown = Object.keys(entry).filter(
-      (key) => !['class_name', 'image', 'instance_type', 'max_instances'].includes(key)
-    );
-    if (unknown.length > 0)
-      fail(`containers ${className} has untranslated keys: ${unknown.join(', ')}`);
-    const container: CelldContainer = {
-      class_name: className,
-      image: `${SANDBOX_IMAGE_DIR}/Dockerfile`,
-      instance_type: guided.instanceType,
-    };
-    if (typeof entry.max_instances === 'number') container.max_instances = entry.max_instances;
-    container.runtime = guided.runtime;
-    out.push(container);
-    ctx.plan.report.push(
-      `container ${className}: runtime ${guided.runtime}, ` +
-        `instance_type ${guided.instanceType} (wrangler.toml ${String(entry.instance_type)})`
-    );
-  }
-  if (guided && out.length === 0)
-    fail(`guided login needs a ${GUIDED_LOGIN_CONTAINER_CLASS} container`);
-  if (out.length > 0) ctx.out.containers = out;
-}
-
 const RULES: Readonly<Record<string, Rule>> = {
   name: { kind: 'translate', apply: (v, ctx) => (ctx.out.name = asString(v, 'name')) },
   main: { kind: 'translate', apply: (_v, ctx) => (ctx.out.main = ctx.options.main) },
@@ -368,15 +296,17 @@ const RULES: Readonly<Record<string, Rule>> = {
   },
   artifacts: {
     kind: 'drop',
-    reason:
-      'Cloudflare Artifacts binding; the HostedGitRepo Durable Object serves SAM-native repos',
+    reason: 'Cloudflare Artifacts binding; a box has no SAM-native git backend',
   },
   analytics_engine_datasets: {
     kind: 'drop',
     reason: 'Analytics Engine binding; ANALYTICS_SINK=d1 records analytics in D1 instead',
   },
   ai: { kind: 'drop', reason: 'Workers AI binding' },
-  containers: { kind: 'translate', apply: translateContainers },
+  containers: {
+    kind: 'drop',
+    reason: 'Cloudflare Containers; celld runs none, so their classes stay bound as plain DOs',
+  },
   d1_databases: { kind: 'translate', apply: translateD1 },
   kv_namespaces: {
     kind: 'translate',
@@ -426,23 +356,20 @@ const REQUIRED_OUTPUT_KEYS = [
   'triggers',
 ] as const;
 
-/**
- * Builds the celld config for one deployment.
- *
- * Throws on any wrangler.toml key without a translation rule, on binding fields it does not
- * know, and on Durable Object migrations celld cannot apply (renames, deletes, transfers).
- */
-export function buildCelldConfig(
-  source: WranglerToml,
-  options: CelldConfigOptions
-): CelldConfigPlan {
+function assertCelldConfigOptions(options: CelldConfigOptions): void {
   if (!/^[a-z0-9.-]+$/i.test(options.baseDomain) || !options.baseDomain.includes('.')) {
     fail(`baseDomain "${options.baseDomain}" is not a domain name`);
   }
   for (const key of GENERATED_VAR_KEYS) {
     if (options.vars && key in options.vars) fail(`vars.${key} is generated; do not pass it`);
   }
+}
 
+/** Applies each top-level key's rule; throws on a key with none, or a missing required key. */
+function translateTopLevelKeys(
+  source: WranglerToml,
+  options: CelldConfigOptions
+): TranslateContext {
   const unknownKeys = Object.keys(source).filter((key) => !(key in RULES));
   if (unknownKeys.length > 0) {
     fail(
@@ -462,39 +389,54 @@ export function buildCelldConfig(
   for (const key of REQUIRED_OUTPUT_KEYS) {
     if (ctx.out[key] === undefined) fail(`wrangler.toml is missing ${key}`);
   }
+  return ctx;
+}
+
+/** Serves the web build through the ASSETS binding, Worker first. */
+function assetsConfig(assetsDirectory: string, out: CelldWranglerConfig): CelldAssets {
+  if (assetsDirectory.startsWith('/') || assetsDirectory.split('/').includes('..')) {
+    fail('assetsDirectory must be relative to the project dir with no ..');
+  }
+  if (out.durable_objects.bindings.some((b) => b.name === ASSETS_BINDING)) {
+    fail(`binding name ${ASSETS_BINDING} is already used`);
+  }
+  // run_worker_first: every request reaches the Worker, which sends only
+  // app.${BASE_DOMAIN} to env.ASSETS (lib/pages-proxy.ts). Without it celld would answer
+  // api./ws-* requests whose path matches a file in the web build.
+  return {
+    directory: assetsDirectory,
+    binding: ASSETS_BINDING,
+    not_found_handling: 'single-page-application',
+    run_worker_first: true,
+  };
+}
+
+/**
+ * Builds the celld config for one deployment.
+ *
+ * Throws on any wrangler.toml key without a translation rule, on binding fields it does not
+ * know, and on Durable Object migrations celld cannot apply (renames, deletes, transfers).
+ */
+export function buildCelldConfig(
+  source: WranglerToml,
+  options: CelldConfigOptions
+): CelldConfigPlan {
+  assertCelldConfigOptions(options);
+  const ctx = translateTopLevelKeys(source, options);
 
   const out = ctx.out as CelldWranglerConfig;
   out.compatibility_flags ??= [];
-  appendSelfhostDurableObjects(out, ctx.plan.report);
   const r2 = out.r2_buckets.find((bucket) => bucket.binding === 'R2');
   out.vars = {
     ...out.vars,
     ...SELFHOST_VAR_OVERRIDES,
-    ...(options.vars ?? {}),
-    ...(out.containers ? { SANDBOX_CONTAINER_RUNTIME_AVAILABLE: 'true' } : {}),
+    ...options.vars,
     BASE_DOMAIN: options.baseDomain,
     ...(r2 ? { R2_BUCKET_NAME: r2.bucket_name } : {}),
   };
 
   if (options.assetsDirectory !== undefined) {
-    if (
-      options.assetsDirectory.startsWith('/') ||
-      options.assetsDirectory.split('/').includes('..')
-    ) {
-      fail('assetsDirectory must be relative to the project dir with no ..');
-    }
-    if (out.durable_objects.bindings.some((b) => b.name === ASSETS_BINDING)) {
-      fail(`binding name ${ASSETS_BINDING} is already used`);
-    }
-    // run_worker_first: every request reaches the Worker, which sends only
-    // app.${BASE_DOMAIN} to env.ASSETS (lib/pages-proxy.ts). Without it celld would answer
-    // api./ws-* requests whose path matches a file in the web build.
-    out.assets = {
-      directory: options.assetsDirectory,
-      binding: ASSETS_BINDING,
-      not_found_handling: 'single-page-application',
-      run_worker_first: true,
-    };
+    out.assets = assetsConfig(options.assetsDirectory, out);
   }
 
   return { config: out, migrationDirs: ctx.plan.migrationDirs, report: ctx.plan.report };

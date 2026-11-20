@@ -6,7 +6,7 @@
  * celld drops the op when that request's client disconnects: the flight never settles, and the
  * deadline timer its starter set is dropped with it. A request that joined it would wait until
  * its own client gave up or celld's 300 s handler budget ran out (task H2, the one-minute hangs
- * on the self-host box; scripts/selfhost/live/shared-flight-cancel.live.test.ts).
+ * on the self-host box).
  *
  * `joinSharedFlight` waits under a timer the JOINING request owns, until the flight's own
  * deadline plus a grace, then reports the flight abandoned so the caller can start its own. A
@@ -20,7 +20,6 @@
  * anywhere (task R6 on the box: authenticated requests hung to the client cap after #2706). So
  * on celld the flight's settlement only records the outcome, and the joiner wakes on its own short
  * timer.
- * scripts/selfhost/live/shared-flight-cancel.live.test.ts covers both cases on the real runtime.
  */
 
 /**
@@ -38,9 +37,8 @@ export const SHARED_FLIGHT_POLL_MS = 10;
 
 /**
  * Whether a joiner resumes on its own timer instead of on the flight's settlement. Only the celld
- * runtime needs it: the generated celld entry module turns it on at startup
- * (scripts/selfhost/celld-project.ts), so Cloudflare keeps resuming joiners directly, with no
- * added timer or latency.
+ * runtime needs it: the self-host build's generated celld entry module turns it on at startup,
+ * so Cloudflare keeps resuming joiners directly, with no added poll timer or latency.
  */
 let resumeOnOwnTimer = false;
 
@@ -82,8 +80,10 @@ export async function joinSharedFlight<T>(
     (value) => (state.outcome = { ok: true, value }),
     (error: unknown) => (state.outcome = { ok: false, error })
   );
-  // An already-settled flight is recorded by now, still in this request's own turn: no timer.
-  await null;
+  // Yield exactly one microtask, still in this request's own turn: an already-settled flight's
+  // reaction above was queued first, so it has recorded the outcome before the loop and no timer
+  // is needed. (An already-resolved native promise, like `await null`, resumes after one tick.)
+  await Promise.resolve();
   while (!state.outcome) {
     const remaining = giveUpAt - Date.now();
     if (remaining <= 0) throw new SharedFlightAbandonedError();

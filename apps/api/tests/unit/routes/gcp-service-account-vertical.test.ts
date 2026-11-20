@@ -13,6 +13,7 @@ import type { Env } from '../../../src/env';
 import { gcpRoutes } from '../../../src/routes/gcp';
 import { decrypt } from '../../../src/services/encryption';
 import { parseGcpCredential } from '../../../src/services/provider-credentials';
+import { applyGcpWifPoolOwnershipMigration } from '../../helpers/gcp-wif-pool-tables';
 import { googleErrorResponse, googleServiceDisabledBody } from '../../helpers/google-api-errors';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -58,6 +59,7 @@ function setupDatabase(): Database.Database {
       ');',
     ].join('\n')
   );
+  applyGcpWifPoolOwnershipMigration(sqlite);
   return sqlite;
 }
 

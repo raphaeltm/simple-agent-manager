@@ -41,13 +41,17 @@ describe('selfhost create-account SQL', () => {
   app.onError(handleAppError);
   app.route('/api/auth', authRoutes);
 
-  /** Runs the command's batch the way `celld d1 execute` does; returns the report rows. */
+  /**
+   * Runs the command's batch the way `celld d1 execute` does; returns the report rows. The plan
+   * carries the box's BOOTSTRAP_OWNER_EMAIL, as create-account reads it from the deploy secrets.
+   */
   function runCommand(email: string, superadmin = false): Row[] {
     const sql = createAccountSql({
       email: normalizeAccountEmail(email),
       superadmin,
       id: generateAccountId(),
       nowMs: Date.now(),
+      bootstrapOwnerEmail: env.BOOTSTRAP_OWNER_EMAIL,
     });
     let rows: Row[] = [];
     for (const statement of sql.split(';\n')) {
@@ -210,6 +214,21 @@ describe('selfhost create-account SQL', () => {
         email: 'teammate@example.com',
         role: 'user',
       });
+    });
+
+    it('writes no superadmin for another address before the owner signs in, and admits no one', async () => {
+      expect(runCommand('teammate@example.com', true)).toEqual([]);
+      expect(realUsers()).toEqual([]);
+      runCommand('teammate@example.com');
+      expect(runCommand('teammate@example.com', true)[0]).toMatchObject({ role: 'user' });
+      expect(await signInByEmail('teammate@example.com')).toBeNull();
+      // Control: the owner can still be created as superadmin and sign in.
+      runCommand(OWNER, true);
+      expect(await signInByEmail(OWNER)).toMatchObject({ email: OWNER, role: 'superadmin' });
+      expect(realUsers()).toEqual([
+        { email: OWNER, role: 'superadmin', status: 'active' },
+        { email: 'teammate@example.com', role: 'user', status: 'active' },
+      ]);
     });
 
     it('lets the owner, created as a plain account, sign in and become the administrator', async () => {

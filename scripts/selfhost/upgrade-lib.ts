@@ -2,48 +2,148 @@
  * `pnpm selfhost:upgrade --to <ref>`: move a one-box install to another SAM git ref.
  *
  *  1. Refuse a checkout with uncommitted tracked changes; fetch; resolve the ref.
- *  2. Back up (backup-lib.ts runBackup) unless --skip-backup.
- *  3. Check out the ref (detached) and `pnpm install --frozen-lockfile`.
- *  4. `pnpm selfhost:deploy --init`: regenerates gateway.env, the egress-fence files and the
- *     other generated state for the new code. It never regenerates platform keys.
- *  5. Restart the stack (`docker compose up -d --build`) only when compose inputs changed: a
- *     non-README file under deploy/selfhost/, or a generated file in .state/ that step 4 changed.
- *     This must precede step 6: deploy refuses to update the Worker while gateway.env differs
- *     from what the running frps and Caddy read.
- *  6. `pnpm selfhost:deploy`: applies D1 migrations (celld d1 migrations apply) and publishes the
+ *  2. Check out the ref (detached) and `pnpm install --frozen-lockfile`.
+ *  3. `pnpm selfhost:deploy --init`: regenerates gateway.env and the other generated state for the
+ *     new code. It never regenerates platform keys. Every deploy call gets this box's
+ *     `--env-file` and `--state-dir` (and `--secrets` when given): without them the deploy would
+ *     read the checkout's default .env and .state, a different box.
+ *  4. Rebuild a locally built image (caddy, sam-mx) only when its build inputs changed
+ *     (imageRebuilds: its build section, merged across every selected compose file, or a file in
+ *     its build context),
+ *     with an explicit `docker compose build <service>`; then restart the stack
+ *     (`docker compose up -d`, never `--build`) only when compose inputs changed: a non-README file
+ *     under deploy/selfhost/, a compose file the box's COMPOSE_FILE selects, or a generated file
+ *     in .state/ that step 3 changed. This must precede step 5: deploy refuses to update the
+ *     Worker while gateway.env differs from what the running frps and Caddy read.
+ *  5. `pnpm selfhost:deploy`: applies D1 migrations (celld d1 migrations apply) and publishes the
  *     Worker with `celld deploy`, which applies Durable Object migrations (celld accepts only
  *     `new_sqlite_classes`); it waits for /health itself.
- *  7. Verify /health once more, then print how to roll back.
+ *  6. Verify /health once more, then print how to roll back.
  *
- * Rollback depends on whether the upgrade carried a D1 migration: without one, the previous ref
- * redeploys over the same fleet; with one, an older Worker must not run against the migrated
- * data, so rollback is a restore of the step-2 backup into an empty bucket.
+ * Before step 2 the upgrade records the ref it started from in `<state-dir>/upgrade-pending.json`
+ * and removes the record only after step 6 passes. A failed upgrade leaves the checkout at the
+ * target, so a retry with the same `--to` is not "already there": it resumes from the recorded
+ * ref, runs every step again (restarting the stack, since the failed run may have got that far),
+ * and its rollback still names the ref that was deployed before.
+ *
+ * The upgrade takes NO backup. Rollback depends on whether the upgrade carried a D1 migration:
+ * without one, the previous ref redeploys over the same fleet; with one, an older Worker must not
+ * run against the migrated data, so rollback needs the operator's own pre-upgrade copy of the
+ * fleet bucket and .state, restored into an empty bucket.
  */
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
-import { type BoxContext, composeArgs, runBackup, type RunResult } from './backup-lib';
+import { loadBoxEnv } from './box-settings.js';
+import { composeFilesFor } from './compose-env.js';
+import { log, REPO_ROOT, SELFHOST_DIR } from './deploy-steps.js';
+import { COMPOSE_PATH, type ComposeOverlay, imageRebuilds } from './image-rebuilds.js';
+import { assertPrivateFile, replacePrivateFile } from './secret-files.js';
 
-/** Files under .state/ that docker compose services read (env_file, mounts). */
-const GENERATED_STATE_FILE = /\.(env|nft|caddy|toml|json)$/;
-/** Generated files in subdirectories of .state/ that a compose service reads. */
-const GENERATED_NESTED_FILES = ['key-agent/agent.env'];
+/** Suffix of the files under .state/ that docker compose services read (`env_file`). */
+const GENERATED_STATE_FILE_SUFFIX = '.env';
 const MIGRATIONS_DIR = 'apps/api/src/db/migrations/';
+/** In the state dir while an upgrade has not finished: `{ "from": "<sha>" }`. */
+export const UPGRADE_PENDING_FILE = 'upgrade-pending.json';
+
+export interface RunResult {
+  status: number;
+  stdout: string;
+  stderr: string;
+}
+
+/** Runs a command. `env` is the child's environment (secrets go here, never in `args`). */
+export type Runner = (command: string, args: string[], env?: NodeJS.ProcessEnv) => RunResult;
+
+export interface BoxContext {
+  /** Parsed deploy/selfhost/.env. */
+  box: Readonly<Record<string, string>>;
+  envFile: string;
+  stateDir: string;
+  /** The deploy's `--secrets` file, when not the default `<stateDir>/secrets.env`. */
+  secretsFile?: string;
+  /** Every compose file the box runs with, in order (composeFilesFor). */
+  composeFiles: string[];
+  run: Runner;
+  log: (message: string) => void;
+}
 
 export interface UpgradeOptions {
   to: string;
-  backupDir: string | null;
   checkHealth: () => Promise<boolean>;
 }
 
 export interface UpgradeResult {
   from: string;
   to: string;
-  backupDir: string | null;
+  /** Locally built services this upgrade rebuilt (explicitly, before the restart). */
+  imagesRebuilt: string[];
   composeRestarted: boolean;
   migrationsChanged: boolean;
   rollback: string[];
+}
+
+function runCommand(command: string, args: string[], env?: NodeJS.ProcessEnv): RunResult {
+  const result = spawnSync(command, args, {
+    cwd: REPO_ROOT,
+    env: env ?? process.env,
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.error) throw result.error;
+  return { status: result.status ?? 1, stdout: result.stdout, stderr: result.stderr };
+}
+
+/**
+ * The state directory docker compose must read for this box, when it differs from the one compose
+ * would read on its own: compose resolves `${SAM_SELFHOST_STATE_DIR:-./.state}` against the
+ * compose file's directory, while the deploy resolves the state dir against the .env's directory
+ * or takes `--state-dir`. A shell variable beats the .env in compose, so every compose command
+ * this upgrade runs or prints sets it; otherwise Caddy and frps would read another box's (or no)
+ * gateway.env. Null when compose already reads `ctx.stateDir`.
+ */
+function composeStateDirOverride(ctx: Pick<BoxContext, 'box' | 'stateDir'>): string | null {
+  const composeReads = resolve(SELFHOST_DIR, ctx.box.SAM_SELFHOST_STATE_DIR || '.state');
+  return resolve(ctx.stateDir) === composeReads ? null : resolve(ctx.stateDir);
+}
+
+/** `docker compose` arguments for this box: every compose file, then its .env, then `args`. */
+function composeArgs(ctx: Pick<BoxContext, 'composeFiles' | 'envFile'>, args: string[]): string[] {
+  return [
+    'compose',
+    ...ctx.composeFiles.flatMap((file) => ['-f', file]),
+    '--env-file',
+    ctx.envFile,
+    ...args,
+  ];
+}
+
+/** The box context from an .env file (which must exist and be private: it holds the bucket key). */
+export function loadBox(
+  envFile: string,
+  stateDirOverride?: string,
+  secretsFile?: string
+): BoxContext {
+  if (!existsSync(envFile)) throw new Error(`${envFile} does not exist`);
+  assertPrivateFile(envFile);
+  // The box as docker compose runs it (a shell variable any compose file interpolates beats the
+  // .env), as deploy.ts reads it, its ports checked against the lease range before the upgrade
+  // touches the checkout or the stack.
+  const box = loadBoxEnv(envFile, SELFHOST_DIR);
+  if (!box.CELLD_BUCKET) throw new Error(`${envFile}: CELLD_BUCKET is required`);
+  return {
+    box,
+    envFile,
+    // Same default and base directory deploy.ts uses; compose is pointed at it (composeStateDirOverride).
+    stateDir: resolve(dirname(envFile), stateDirOverride ?? box.SAM_SELFHOST_STATE_DIR ?? '.state'),
+    ...(secretsFile ? { secretsFile: resolve(secretsFile) } : {}),
+    composeFiles: composeFilesFor(box, SELFHOST_DIR),
+    run: runCommand,
+    log,
+  };
 }
 
 function check(result: RunResult, what: string): string {
@@ -59,69 +159,220 @@ function stateFingerprint(stateDir: string): string {
   const hash = createHash('sha256');
   if (!existsSync(stateDir)) return '';
   for (const name of readdirSync(stateDir).sort()) {
-    if (!GENERATED_STATE_FILE.test(name) || name === 'platform-keys.json') continue;
-    const path = join(stateDir, name);
+    if (!name.endsWith(GENERATED_STATE_FILE_SUFFIX)) continue;
     try {
-      hash.update(name).update(readFileSync(path));
+      hash.update(name).update(readFileSync(join(stateDir, name)));
     } catch {
       // a directory or unreadable entry is not a compose input
     }
   }
-  for (const name of GENERATED_NESTED_FILES) {
-    const path = join(stateDir, name);
-    if (existsSync(path)) hash.update(name).update(readFileSync(path));
-  }
   return hash.digest('hex');
 }
 
-/**
- * A plaintext box (platform-keys.json present) with no recorded key provider and no
- * SAM_KEY_PROVIDER in .env: one the upgrade must not switch to sealed secrets by itself.
- */
-export function holdOnPlaintext(ctx: Pick<BoxContext, 'box' | 'stateDir'>): boolean {
-  return (
-    existsSync(join(ctx.stateDir, 'platform-keys.json')) &&
-    !existsSync(join(ctx.stateDir, 'key-agent', 'choice.json')) &&
-    !ctx.box.SAM_KEY_PROVIDER?.trim()
-  );
+/** The `pnpm selfhost:deploy` arguments that select this box (env file, state dir, secrets). */
+function deployBoxArgs(ctx: Pick<BoxContext, 'envFile' | 'stateDir' | 'secretsFile'>): string[] {
+  return [
+    '--env-file',
+    ctx.envFile,
+    '--state-dir',
+    ctx.stateDir,
+    ...(ctx.secretsFile ? ['--secrets', ctx.secretsFile] : []),
+  ];
+}
+
+/** `value` as one POSIX shell word, for the printed rollback commands. */
+function shellWord(value: string): string {
+  return /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
 /**
- * Rollback steps run compose from deploy/selfhost with no `-f`, so it reads .env there and honours
- * its COMPOSE_FILE (an explicit `-f docker-compose.yml` would drop docker-compose.guided-login.yml).
+ * Rollback steps, printed for the operator. Their compose commands select the same box as the
+ * upgrade's own (`composeArgs`: every compose file and the box's .env), so a custom `--box-env`
+ * is rolled back, not the default stack.
  */
-const composeInBoxDir = (args: string) => `(cd deploy/selfhost && docker compose ${args})`;
-
-export function rollbackSteps(
+function rollbackSteps(
+  ctx: Pick<BoxContext, 'composeFiles' | 'envFile' | 'box' | 'stateDir'>,
   from: string,
   migrationsChanged: boolean,
   composeChanged: boolean,
-  backupDir: string | null
+  boxArgs: readonly string[] = [],
+  imagesRebuilt: readonly string[] = []
 ): string[] {
+  const stateDir = composeStateDirOverride(ctx);
+  const compose = (args: string[]) =>
+    [
+      ...(stateDir === null ? [] : [`SAM_SELFHOST_STATE_DIR=${shellWord(stateDir)}`]),
+      ['docker', ...composeArgs(ctx, args)].map(shellWord).join(' '),
+    ].join(' ');
+  const deploy = ['pnpm selfhost:deploy', ...boxArgs.map(shellWord)].join(' ');
+  // The images the upgrade rebuilt are rebuilt again from the old ref, never with `up --build`.
+  const rebuild = imagesRebuilt.length > 0 ? [compose(['build', ...imagesRebuilt])] : [];
   if (!migrationsChanged) {
     return [
       `git checkout ${from}`,
       'pnpm install --frozen-lockfile',
-      ...(composeChanged ? ['pnpm selfhost:deploy --init', composeInBoxDir('up -d --build')] : []),
-      'pnpm selfhost:deploy',
+      ...(composeChanged || rebuild.length > 0
+        ? [`${deploy} --init`, ...rebuild, compose(['up', '-d'])]
+        : []),
+      deploy,
     ];
   }
   return [
     '# This upgrade applied D1 migrations: do NOT redeploy the old Worker over the migrated fleet.',
-    composeInBoxDir('down'),
-    '# Point CELLD_BUCKET in deploy/selfhost/.env at a new, empty bucket (or empty the old one),',
-    '# move deploy/selfhost/.state aside, then:',
+    '# The upgrade took no backup. Rolling back needs your own copy of the fleet bucket and',
+    '# .state from before the upgrade:',
+    compose(['down']),
+    `# Point CELLD_BUCKET in ${ctx.envFile} at a new, empty bucket, copy your pre-upgrade`,
+    '# bucket contents into it, put your pre-upgrade .state back, then:',
     `git checkout ${from}`,
     'pnpm install --frozen-lockfile',
-    backupDir
-      ? `pnpm selfhost:restore --from ${backupDir}`
-      : '# no backup was taken (--skip-backup): restore your most recent pnpm selfhost:backup',
-    composeInBoxDir('up -d'),
+    ...rebuild,
+    compose(['up', '-d']),
   ];
 }
 
+/**
+ * True when the diff touches a compose input: a non-README file under deploy/selfhost/, or any
+ * compose file the box selects (COMPOSE_FILE may list one elsewhere in the repository).
+ */
+export function composeInputsChanged(changed: readonly string[], composeFiles: readonly string[]) {
+  const selected = new Set(composeFiles.map((file) => relative(REPO_ROOT, resolve(file))));
+  return changed.some(
+    (f) => (f.startsWith('deploy/selfhost/') && !f.endsWith('.md')) || selected.has(f)
+  );
+}
+
+/**
+ * Every compose file the box selects other than docker-compose.yml, at both refs, for
+ * imageRebuilds: a tracked file is read from git at each ref; a file git does not have (an
+ * operator's untracked overlay, or one outside the repository) is the same at both, so it is read
+ * from disk once.
+ */
+export function composeOverlays(
+  composeFiles: readonly string[],
+  from: string,
+  to: string,
+  fileAt: (ref: string, path: string) => string | null
+): ComposeOverlay[] {
+  return composeFiles
+    .map((file) => ({ file, rel: relative(REPO_ROOT, resolve(file)).split(/[\\/]/).join('/') }))
+    .filter(({ rel }) => rel !== COMPOSE_PATH)
+    .map(({ file, rel }) => {
+      const inRepo = !rel.startsWith('../') && !isAbsolute(rel);
+      const atFrom = inRepo ? fileAt(from, rel) : null;
+      const atTo = inRepo ? fileAt(to, rel) : null;
+      if (atFrom !== null || atTo !== null) return { from: atFrom, to: atTo };
+      const onDisk = existsSync(file) ? readFileSync(file, 'utf8') : null;
+      return { from: onDisk, to: onDisk };
+    });
+}
+
+/** The ref an unfinished upgrade started from (`UPGRADE_PENDING_FILE`), or null. */
+function readPendingFrom(stateDir: string): string | null {
+  const path = join(stateDir, UPGRADE_PENDING_FILE);
+  if (!existsSync(path)) return null;
+  let from: unknown;
+  try {
+    const record = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+    if (typeof record === 'object' && record !== null && 'from' in record) from = record.from;
+  } catch {
+    from = undefined;
+  }
+  if (typeof from !== 'string' || !/^[0-9a-f]{40}$/.test(from)) {
+    throw new Error(
+      `${path} is not a record this upgrade wrote; check which ref the box last deployed ` +
+        'successfully, check it out, and delete the file'
+    );
+  }
+  return from;
+}
+
+type Git = (args: string[], what?: string) => string;
+
+/** `origin/<ref>` after the fetch, else `<ref>` as given (a tag or a commit). */
+function resolveUpgradeTarget(git: Git, ref: string): string {
+  try {
+    return git(['rev-parse', '--verify', `origin/${ref}^{commit}`]);
+  } catch {
+    return git(['rev-parse', '--verify', `${ref}^{commit}`], `resolve ${ref}`);
+  }
+}
+
+/** What an upgrade between two refs must do, decided before the checkout. */
+interface UpgradePlan {
+  to: string;
+  composeFilesChanged: boolean;
+  /** Locally built services whose build inputs changed (imageRebuilds). */
+  rebuilds: string[];
+  boxArgs: string[];
+}
+
+/** What a (possibly failed) upgrade has done so far, for the rollback it prints. */
+interface UpgradeProgress {
+  stateChanged: boolean;
+  imagesRebuilt: string[];
+}
+
+function restartReason(composeFilesChanged: boolean, stateChanged: boolean): string {
+  if (composeFilesChanged) return 'compose files';
+  return stateChanged ? 'generated state' : 'images';
+}
+
+/**
+ * Checks out `to`, runs `--init` (it may rewrite generated compose inputs), rebuilds the images
+ * whose build inputs changed, restarts the stack when its inputs changed, deploys and checks
+ * health. Returns whether the stack was restarted. Records in `progress` what it has done as soon
+ * as it knows, so a failure later can still say so.
+ */
+async function applyUpgrade(
+  ctx: BoxContext,
+  opts: UpgradeOptions,
+  git: Git,
+  plan: UpgradePlan,
+  progress: UpgradeProgress
+): Promise<boolean> {
+  const pnpm = (args: string[]) => check(ctx.run('pnpm', args), `pnpm ${args.join(' ')}`);
+  const stateDir = composeStateDirOverride(ctx);
+  const composeEnv =
+    stateDir === null ? undefined : { ...process.env, SAM_SELFHOST_STATE_DIR: stateDir };
+  const docker = (args: string[]) =>
+    check(
+      ctx.run('docker', composeArgs(ctx, args), composeEnv),
+      `docker compose ${args.join(' ')}`
+    );
+  git(['checkout', '--detach', plan.to]);
+  pnpm(['install', '--frozen-lockfile']);
+  const before = stateFingerprint(ctx.stateDir);
+  pnpm(['selfhost:deploy', '--init', ...plan.boxArgs]);
+  const stateChanged = stateFingerprint(ctx.stateDir) !== before;
+  progress.stateChanged = stateChanged;
+  if (plan.rebuilds.length > 0) {
+    // Only services the box runs (its COMPOSE_PROFILES): sam-mx is not built on a box without
+    // inbound mail.
+    const active = new Set(docker(['config', '--services']).split('\n').filter(Boolean));
+    progress.imagesRebuilt = plan.rebuilds.filter((service) => active.has(service));
+    if (progress.imagesRebuilt.length > 0) {
+      ctx.log(`rebuilding ${progress.imagesRebuilt.join(', ')} (build inputs changed)`);
+      docker(['build', ...progress.imagesRebuilt]);
+    }
+  }
+  let composeRestarted = false;
+  if (plan.composeFilesChanged || stateChanged || progress.imagesRebuilt.length > 0) {
+    ctx.log(
+      `restarting the stack (${restartReason(plan.composeFilesChanged, stateChanged)} changed)`
+    );
+    docker(['up', '-d']);
+    composeRestarted = true;
+  } else {
+    ctx.log('compose inputs unchanged; the stack keeps running');
+  }
+  pnpm(['selfhost:deploy', ...plan.boxArgs]);
+  if (!(await opts.checkHealth())) throw new Error('the API is not healthy after the upgrade');
+  return composeRestarted;
+}
+
 export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise<UpgradeResult> {
-  const git = (args: string[], what = `git ${args.join(' ')}`) => check(ctx.run('git', args), what);
+  const git: Git = (args, what = `git ${args.join(' ')}`) => check(ctx.run('git', args), what);
 
   if (git(['status', '--porcelain', '--untracked-files=no']) !== '') {
     throw new Error(
@@ -129,90 +380,92 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
     );
   }
   git(['fetch', '--tags', 'origin']);
-  const from = git(['rev-parse', 'HEAD']);
-  let to: string;
-  try {
-    to = git(['rev-parse', '--verify', `origin/${opts.to}^{commit}`]);
-  } catch {
-    to = git(['rev-parse', '--verify', `${opts.to}^{commit}`], `resolve ${opts.to}`);
-  }
-  const changed = git(['diff', '--name-only', from, to]).split('\n').filter(Boolean);
-  const composeFilesChanged = changed.some(
-    (f) => f.startsWith('deploy/selfhost/') && !f.endsWith('.md')
-  );
-  const migrationsChanged = changed.some((f) => f.startsWith(MIGRATIONS_DIR));
-  ctx.log(
-    `upgrade ${from.slice(0, 12)} -> ${to.slice(0, 12)}: ${changed.length} files, ` +
-      `compose inputs ${composeFilesChanged ? 'changed' : 'unchanged'}, ` +
-      `D1 migrations ${migrationsChanged ? 'included' : 'none'}`
-  );
-  if (from === to) {
+  const head = git(['rev-parse', 'HEAD']);
+  const pendingFrom = readPendingFrom(ctx.stateDir);
+  // A pending record means the checkout may be ahead of what is deployed: start from the record.
+  const from = pendingFrom ?? head;
+  const to = resolveUpgradeTarget(git, opts.to);
+  if (pendingFrom === null && head === to) {
     ctx.log('already at that ref; nothing to do');
     return {
       from,
       to,
-      backupDir: null,
+      imagesRebuilt: [],
       composeRestarted: false,
       migrationsChanged: false,
       rollback: [],
     };
   }
+  const changed = git(['diff', '--name-only', from, to]).split('\n').filter(Boolean);
+  // Resuming: the failed run may have restarted the stack on files this diff no longer shows.
+  const composeFilesChanged =
+    pendingFrom !== null || composeInputsChanged(changed, ctx.composeFiles);
+  const migrationsChanged = changed.some((f) => f.startsWith(MIGRATIONS_DIR));
+  const fileAt = (ref: string, path = COMPOSE_PATH): string | null => {
+    const shown = ctx.run('git', ['show', `${ref}:${path}`]);
+    return shown.status === 0 ? shown.stdout : null;
+  };
+  const composeTo = fileAt(to);
+  if (composeTo === null) throw new Error(`${to} has no ${COMPOSE_PATH}`);
+  const rebuilds = imageRebuilds(
+    changed,
+    fileAt(from),
+    composeTo,
+    (path) => fileAt(to, path),
+    composeOverlays(ctx.composeFiles, from, to, fileAt)
+  );
+  if (pendingFrom !== null) {
+    ctx.log(`resuming an unfinished upgrade that started from ${pendingFrom.slice(0, 12)}`);
+  }
+  ctx.log(
+    `upgrade ${from.slice(0, 12)} -> ${to.slice(0, 12)}: ${changed.length} files, ` +
+      `compose inputs ${composeFilesChanged ? 'changed' : 'unchanged'}, ` +
+      `D1 migrations ${migrationsChanged ? 'included' : 'none'}`
+  );
+  ctx.log('no backup is taken: keep your own copy of the fleet bucket and .state before upgrading');
 
-  if (opts.backupDir) runBackup(ctx, opts.backupDir, from);
-
-  let composeRestarted = false;
-  const pnpm = (args: string[]) => check(ctx.run('pnpm', args), `pnpm ${args.join(' ')}`);
+  const boxArgs = deployBoxArgs(ctx);
+  const pendingPath = join(ctx.stateDir, UPGRADE_PENDING_FILE);
+  if (pendingFrom === null) {
+    mkdirSync(ctx.stateDir, { recursive: true, mode: 0o700 });
+    replacePrivateFile(pendingPath, `${JSON.stringify({ from })}\n`);
+  }
+  const progress: UpgradeProgress = { stateChanged: false, imagesRebuilt: [] };
+  let composeRestarted: boolean;
   try {
-    git(['checkout', '--detach', to]);
-    pnpm(['install', '--frozen-lockfile']);
-    const before = stateFingerprint(ctx.stateDir);
-    // A box that still runs on plaintext files stays on them: switching to sealed secrets is
-    // `pnpm selfhost:secrets migrate`, which checks the chain first and rolls back on failure.
-    const hold = holdOnPlaintext(ctx);
-    if (hold) {
-      ctx.log(
-        'this box still has its plaintext secret files: the upgrade keeps it on plaintext deploy ' +
-          'vars; afterwards, `pnpm selfhost:secrets migrate` seals it safely'
-      );
-    }
-    const keyArgs = hold ? ['--key-provider', 'legacy-plaintext'] : [];
-    pnpm(['selfhost:deploy', '--init', ...keyArgs]);
-    const stateChanged = stateFingerprint(ctx.stateDir) !== before;
-    if (composeFilesChanged || stateChanged) {
-      ctx.log(
-        `restarting the stack (${composeFilesChanged ? 'compose files' : 'generated state'} changed)`
-      );
-      check(
-        ctx.run('docker', composeArgs(ctx, ['up', '-d', '--build'])),
-        'docker compose up -d --build'
-      );
-      composeRestarted = true;
-    } else {
-      ctx.log('compose inputs unchanged; the stack keeps running');
-    }
-    pnpm(['selfhost:deploy', ...keyArgs]);
-    if (!(await opts.checkHealth())) throw new Error('the API is not healthy after the upgrade');
+    composeRestarted = await applyUpgrade(
+      ctx,
+      opts,
+      git,
+      { to, composeFilesChanged, rebuilds, boxArgs },
+      progress
+    );
   } catch (error) {
-    const steps = rollbackSteps(from, migrationsChanged, composeFilesChanged, opts.backupDir);
     ctx.log(`upgrade FAILED: ${error instanceof Error ? error.message : String(error)}`);
-    ctx.log('to roll back:');
-    for (const step of steps) ctx.log(`  ${step}`);
+    ctx.log('to retry, run the same selfhost:upgrade again; to roll back:');
+    const rollback = rollbackSteps(
+      ctx,
+      from,
+      migrationsChanged,
+      composeFilesChanged || progress.stateChanged,
+      boxArgs,
+      progress.imagesRebuilt
+    );
+    for (const step of rollback) ctx.log(`  ${step}`);
     throw error;
   }
+  rmSync(pendingPath, { force: true });
 
-  const rollback = rollbackSteps(from, migrationsChanged, composeFilesChanged, opts.backupDir);
-  // A box held on plaintext above, or one sealed whose plaintext files remain: migrate finishes it.
-  if (
-    existsSync(join(ctx.stateDir, 'platform-keys.json')) &&
-    ctx.box.SAM_KEY_PROVIDER?.trim() !== 'legacy-plaintext'
-  ) {
-    ctx.log(
-      'plaintext secrets are still on this box (.state/platform-keys.json, secrets.env): run ' +
-        '`pnpm selfhost:secrets migrate` to seal (or verify) and remove them, then ' +
-        '`pnpm selfhost:secrets plaintext` for the old copies in the bucket and backups'
-    );
-  }
+  const { imagesRebuilt } = progress;
+  const rollback = rollbackSteps(
+    ctx,
+    from,
+    migrationsChanged,
+    composeRestarted,
+    boxArgs,
+    imagesRebuilt
+  );
   ctx.log(`upgraded to ${to}; healthy. To roll back:`);
   for (const step of rollback) ctx.log(`  ${step}`);
-  return { from, to, backupDir: opts.backupDir, composeRestarted, migrationsChanged, rollback };
+  return { from, to, imagesRebuilt, composeRestarted, migrationsChanged, rollback };
 }

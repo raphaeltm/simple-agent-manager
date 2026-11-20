@@ -230,7 +230,7 @@ export const handleInboxGetItem: Handler = (requestId, params, tokenData, env) =
 function assigned(result: AgentAssignResult) {
   const next = !result.created
     ? `This task was already assigned as ${result.ref}; nothing new was filed.`
-    : 'Assigned. It does not block you: keep working. You will be woken in this chat when the person comments, takes it, hands it on, finishes, reopens or archives it.';
+    : 'Assigned. It does not block you: keep working. You will be woken in this chat when the person comments, takes it, hands it on, finishes or reopens it (archiving it wakes no one).';
   const watch = result.watching
     ? ''
     : ' This chat could not be subscribed to the task yet; repeat this assign call with the same idempotencyKey (or title) to subscribe it.';

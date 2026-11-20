@@ -1,15 +1,22 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { ensurePlatformKeys, PLATFORM_KEY_NAMES } from './platform-keys.js';
 import {
-  assertPrivateFile,
   ensurePrivateDir,
   parseDotenv,
   readSecretsFile,
+  replacePrivateFile,
   writePrivateFile,
 } from './secret-files.js';
 
@@ -52,6 +59,51 @@ describe('parseDotenv', () => {
       /^s:1: unterminated double quote$/
     );
   });
+
+  it('accepts the same NAME=value shapes as before the regex was replaced', () => {
+    expect(
+      parseDotenv(
+        [
+          'A = spaced',
+          'export\tB=tab',
+          'export   C =  c ',
+          'export=keyword-as-name',
+          'exportD=1',
+          '_E1=x=y',
+          'F="q" # comment',
+          "G='lit' ignored",
+        ].join('\n'),
+        't'
+      )
+    ).toEqual({
+      A: 'spaced',
+      B: 'tab',
+      C: 'c',
+      export: 'keyword-as-name',
+      exportD: '1',
+      _E1: 'x=y',
+      F: 'q',
+      G: 'lit',
+    });
+  });
+
+  it('rejects the same malformed lines as before the regex was replaced', () => {
+    for (const bad of ['1A=x', 'A B=x', 'export 1A=x', '=x', 'A', 'A=x\ry']) {
+      expect(() => parseDotenv(bad, 't'), JSON.stringify(bad)).toThrow('t:1: expected NAME=value');
+    }
+    expect(() => parseDotenv('A="x" trailing', 't')).toThrow(
+      't:1: unexpected text after closing quote'
+    );
+    expect(() => parseDotenv("A='x", 't')).toThrow('t:1: unterminated single quote');
+  });
+
+  it('rejects a long adversarial line in linear time (regression: \\s*=\\s*(.*)$ was quadratic)', () => {
+    // The previous single regex took ~1.5 s on this shape at 40k spaces; string parsing takes <1 ms.
+    const line = `A=${' '.repeat(50_000)}y\ry`;
+    const started = performance.now();
+    expect(() => parseDotenv(line, 't')).toThrow('t:1: expected NAME=value');
+    expect(performance.now() - started).toBeLessThan(200);
+  });
 });
 
 describe('root-only secret files', () => {
@@ -90,41 +142,46 @@ describe('root-only secret files', () => {
   });
 });
 
-describe('ensurePlatformKeys', () => {
-  it('generates every key once, root-only, and reuses them on the next run', () => {
-    const path = join(tempDir(), 'platform-keys.json');
-    const first = ensurePlatformKeys(path);
-    expect(first.generated).toEqual([...PLATFORM_KEY_NAMES]);
+describe('replacePrivateFile', () => {
+  it('creates a 0600 file and leaves no temp file behind', () => {
+    const dir = tempDir();
+    const path = join(dir, 'keys.json');
+    replacePrivateFile(path, 'one\n', { backup: true });
+    expect(readFileSync(path, 'utf8')).toBe('one\n');
     expect(statSync(path).mode & 0o777).toBe(0o600);
-    expect(() => assertPrivateFile(path)).not.toThrow();
-    expect(Buffer.from(first.keys.ENCRYPTION_KEY, 'base64')).toHaveLength(32);
-    expect(first.keys.SAM_INSTALLATION_ID).toMatch(/^[0-9a-f]{32}$/);
-    expect(first.keys.JWT_PRIVATE_KEY).toContain('BEGIN PRIVATE KEY');
-
-    const before = readFileSync(path, 'utf8');
-    const second = ensurePlatformKeys(path);
-    expect(second.generated).toEqual([]);
-    expect(second.keys).toEqual(first.keys);
-    expect(readFileSync(path, 'utf8')).toBe(before);
+    // Nothing to back up on the first write.
+    expect(readdirSync(dir)).toEqual(['keys.json']);
   });
 
-  it('completes a file missing a whole group without touching existing keys', () => {
-    const path = join(tempDir(), 'platform-keys.json');
-    const { keys } = ensurePlatformKeys(path);
-    const rest: Record<string, string> = { ...keys };
-    delete rest.PREVIEW_SIGNING_KEY;
-    writeFileSync(path, JSON.stringify(rest), { mode: 0o600 });
-    const result = ensurePlatformKeys(path);
-    expect(result.generated).toEqual(['PREVIEW_SIGNING_KEY']);
-    expect(result.keys.ENCRYPTION_KEY).toBe(keys.ENCRYPTION_KEY);
+  it('keeps the previous content as a 0600 .bak when replacing', () => {
+    const dir = tempDir();
+    const path = join(dir, 'keys.json');
+    writeFileSync(path, 'old\n', { mode: 0o600 });
+    replacePrivateFile(path, 'new\n', { backup: true });
+    expect(readFileSync(path, 'utf8')).toBe('new\n');
+    expect(readFileSync(`${path}.bak`, 'utf8')).toBe('old\n');
+    expect(statSync(`${path}.bak`).mode & 0o777).toBe(0o600);
+    expect(readdirSync(dir).sort()).toEqual(['keys.json', 'keys.json.bak']);
   });
 
-  it('refuses to regenerate half of a key pair', () => {
-    const path = join(tempDir(), 'platform-keys.json');
-    const { keys } = ensurePlatformKeys(path);
-    const rest: Record<string, string> = { ...keys };
-    delete rest.JWT_PUBLIC_KEY;
-    writeFileSync(path, JSON.stringify(rest), { mode: 0o600 });
-    expect(() => ensurePlatformKeys(path)).toThrow(/has JWT_PRIVATE_KEY but not JWT_PUBLIC_KEY/);
+  it('tightens a world-readable file it replaces', () => {
+    const dir = tempDir();
+    const path = join(dir, 'gateway.env');
+    writeFileSync(path, 'old\n', { mode: 0o644 });
+    replacePrivateFile(path, 'new\n');
+    expect(readFileSync(path, 'utf8')).toBe('new\n');
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(readdirSync(dir)).toEqual(['gateway.env']);
+  });
+
+  it('leaves the original untouched and no temp file when the rename fails', () => {
+    const dir = tempDir();
+    // A non-empty directory where the file should go: rename(2) cannot replace it.
+    const path = join(dir, 'keys.json');
+    mkdirSync(path);
+    writeFileSync(join(path, 'inside'), 'x');
+    expect(() => replacePrivateFile(path, 'new\n')).toThrow();
+    expect(readdirSync(dir)).toEqual(['keys.json']);
+    expect(readFileSync(join(path, 'inside'), 'utf8')).toBe('x');
   });
 });

@@ -3,7 +3,6 @@ import {
   DEFAULT_GCP_API_TIMEOUT_MS,
   DEFAULT_GCP_SERVICE_ACCOUNT_ID,
   DEFAULT_GCP_WIF_POOL_ID,
-  DEFAULT_GCP_WIF_PROVIDER_ID,
   GCP_CREDENTIAL_VERSION,
   GCP_REQUIRED_APIS,
 } from '@simple-agent-manager/shared';
@@ -12,9 +11,29 @@ import * as v from 'valibot';
 import type { Env } from '../env';
 import { readResponseJson } from '../lib/runtime-validation';
 import { GcpApiError } from './gcp-errors';
-import { fetchWithTimeout, IAM_URL, pollOperation, SERVICE_USAGE_URL } from './gcp-setup-transport';
-
+import {
+  fetchWithTimeout,
+  gcpOperationSchema,
+  IAM_URL,
+  iamBindingSchema,
+  pollOperation,
+  requireOperationName,
+  SERVICE_USAGE_URL,
+} from './gcp-setup-transport';
+import {
+  createOidcProvider,
+  createWifPool,
+  grantWifUserOnSa,
+  installationWifProviderId,
+} from './gcp-wif-setup';
 export { fetchWithTimeout, pollOperation } from './gcp-setup-transport';
+export {
+  createOidcProvider,
+  createWifPool,
+  grantWifUserOnSa,
+  installationWifProviderId,
+  updateOidcProvider,
+} from './gcp-wif-setup';
 
 const RESOURCE_MANAGER_URL = 'https://cloudresourcemanager.googleapis.com/v1';
 
@@ -46,45 +65,11 @@ const gcpProjectListResponseSchema = v.object({
   nextPageToken: v.optional(v.string()),
 });
 
-const gcpOperationSchema = v.object({
-  name: v.optional(v.string()),
-  done: v.optional(v.boolean()),
-  error: v.optional(v.object({ message: v.optional(v.string()) })),
-});
-
-const iamBindingSchema = v.object({
-  role: v.string(),
-  members: v.array(v.string()),
-});
-
-const serviceAccountPolicySchema = v.object({
-  bindings: v.optional(v.array(iamBindingSchema)),
-  etag: v.string(),
-});
-
 const projectPolicySchema = v.object({
   bindings: v.optional(v.array(iamBindingSchema)),
   etag: v.string(),
   version: v.optional(v.number()),
 });
-
-function requireOperationName(op: { name?: string }, context: string): string {
-  if (!op.name) {
-    throw new GcpApiError({ step: context, message: 'GCP operation response missing name' });
-  }
-  return op.name;
-}
-
-/**
- * Validate a value is safe for interpolation into a GCP CEL attribute condition.
- * SAM project IDs are ULIDs (alphanumeric), but this guard enforces the invariant
- * at the function boundary to prevent injection if a non-ULID value is ever passed.
- */
-function assertSafeCelValue(value: string, fieldName: string): void {
-  if (!/^[a-zA-Z0-9_:.-]+$/.test(value)) {
-    throw new Error(`${fieldName} contains characters unsafe for CEL interpolation`);
-  }
-}
 
 /** Status callback for setup progress reporting */
 export type SetupProgressCallback = (
@@ -229,201 +214,6 @@ export async function enableApis(
 }
 
 /**
- * Create a Workload Identity Pool.
- * Returns the pool name or reuses an existing one if it already exists.
- */
-export async function createWifPool(
-  oauthToken: string,
-  projectNumber: string,
-  poolId: string,
-  timeoutMs: number
-): Promise<string> {
-  const url = `${IAM_URL}/projects/${projectNumber}/locations/global/workloadIdentityPools?workloadIdentityPoolId=${poolId}`;
-  const res = await fetchWithTimeout(
-    url,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${oauthToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        displayName: 'Simple Agent Manager',
-        description: 'Workload identity pool for SAM platform',
-      }),
-    },
-    timeoutMs
-  );
-
-  if (res.status === 409) {
-    // Already exists — reuse
-    return `projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}`;
-  }
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new GcpApiError({
-      step: 'create_wif_pool',
-      message: `Failed to create WIF pool (${res.status})`,
-      statusCode: res.status,
-      rawBody: body,
-    });
-  }
-
-  const op = await readResponseJson(res, gcpOperationSchema, 'gcp.iam.create_wif_pool');
-  if (!op.done) {
-    await pollOperation(oauthToken, requireOperationName(op, 'create_wif_pool'), timeoutMs);
-  }
-
-  return `projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}`;
-}
-
-/**
- * Create an OIDC provider in the WIF pool.
- */
-export async function createOidcProvider(
-  oauthToken: string,
-  projectNumber: string,
-  poolId: string,
-  providerId: string,
-  issuerUri: string,
-  timeoutMs: number,
-  samProjectId?: string
-): Promise<void> {
-  // The OIDC provider's allowedAudiences must match the JWT aud claim (https:// scheme).
-  // GCP STS uses the protocol-relative format (//iam.googleapis.com/...) separately in gcp-sts.ts.
-  const wifAudience = `https://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
-
-  // Enforce both issuer and SAM project ID in the attribute condition to prevent
-  // cross-project impersonation within the same WIF pool.
-  if (samProjectId) {
-    assertSafeCelValue(samProjectId, 'samProjectId');
-  }
-  const attributeCondition = samProjectId
-    ? `assertion.iss == '${issuerUri}' && assertion.project_id == '${samProjectId}'`
-    : `assertion.iss == '${issuerUri}'`;
-
-  const url = `${IAM_URL}/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers?workloadIdentityPoolProviderId=${providerId}`;
-  const res = await fetchWithTimeout(
-    url,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${oauthToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        displayName: 'SAM OIDC Provider',
-        description: 'OIDC provider for Simple Agent Manager',
-        attributeMapping: {
-          'google.subject': 'assertion.sub',
-          'attribute.sam_user': 'assertion.user_id',
-          'attribute.sam_project': 'assertion.project_id',
-        },
-        attributeCondition,
-        oidc: {
-          issuerUri,
-          allowedAudiences: [wifAudience],
-        },
-      }),
-    },
-    timeoutMs
-  );
-
-  if (res.status === 409) {
-    // Already exists — update instead
-    await updateOidcProvider(
-      oauthToken,
-      projectNumber,
-      poolId,
-      providerId,
-      issuerUri,
-      timeoutMs,
-      samProjectId
-    );
-    return;
-  }
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new GcpApiError({
-      step: 'create_oidc_provider',
-      message: `Failed to create OIDC provider (${res.status})`,
-      statusCode: res.status,
-      rawBody: body,
-    });
-  }
-
-  const op = await readResponseJson(res, gcpOperationSchema, 'gcp.iam.create_oidc_provider');
-  if (!op.done) {
-    await pollOperation(oauthToken, requireOperationName(op, 'create_oidc_provider'), timeoutMs);
-  }
-}
-
-/**
- * Update an existing OIDC provider (if it already existed).
- */
-export async function updateOidcProvider(
-  oauthToken: string,
-  projectNumber: string,
-  poolId: string,
-  providerId: string,
-  issuerUri: string,
-  timeoutMs: number,
-  samProjectId?: string
-): Promise<void> {
-  const wifAudience = `https://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
-
-  if (samProjectId) {
-    assertSafeCelValue(samProjectId, 'samProjectId');
-  }
-  const attributeCondition = samProjectId
-    ? `assertion.iss == '${issuerUri}' && assertion.project_id == '${samProjectId}'`
-    : `assertion.iss == '${issuerUri}'`;
-
-  const name = `projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
-  const url = `${IAM_URL}/${name}?updateMask=attributeMapping,attributeCondition,oidc`;
-  const res = await fetchWithTimeout(
-    url,
-    {
-      method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${oauthToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        attributeMapping: {
-          'google.subject': 'assertion.sub',
-          'attribute.sam_user': 'assertion.user_id',
-          'attribute.sam_project': 'assertion.project_id',
-        },
-        attributeCondition,
-        oidc: {
-          issuerUri,
-          allowedAudiences: [wifAudience],
-        },
-      }),
-    },
-    timeoutMs
-  );
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new GcpApiError({
-      step: 'update_oidc_provider',
-      message: `Failed to update OIDC provider (${res.status})`,
-      statusCode: res.status,
-      rawBody: body,
-    });
-  }
-
-  const op = await readResponseJson(res, gcpOperationSchema, 'gcp.iam.update_oidc_provider');
-  if (!op.done) {
-    await pollOperation(oauthToken, requireOperationName(op, 'update_oidc_provider'), timeoutMs);
-  }
-}
-
-/**
  * Create a service account for VM management.
  */
 export async function createServiceAccount(
@@ -469,104 +259,6 @@ export async function createServiceAccount(
   }
 
   return email;
-}
-
-/**
- * Grant Workload Identity User on the service account (read-modify-write pattern).
- */
-export async function grantWifUserOnSa(
-  oauthToken: string,
-  projectId: string,
-  projectNumber: string,
-  saEmail: string,
-  poolId: string,
-  timeoutMs: number,
-  samProjectId?: string
-): Promise<void> {
-  // Validate early, before any network calls (fail-fast pattern).
-  if (samProjectId) {
-    assertSafeCelValue(samProjectId, 'samProjectId');
-  }
-
-  const saResource = `projects/${projectId}/serviceAccounts/${saEmail}`;
-
-  // Read current policy
-  const getUrl = `${IAM_URL}/${saResource}:getIamPolicy`;
-  const getRes = await fetchWithTimeout(
-    getUrl,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${oauthToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: '{}',
-    },
-    timeoutMs
-  );
-
-  if (!getRes.ok) {
-    const body = await getRes.text();
-    throw new GcpApiError({
-      step: 'grant_wif_user',
-      message: `Failed to get SA IAM policy (${getRes.status})`,
-      statusCode: getRes.status,
-      rawBody: body,
-    });
-  }
-
-  const policy = await readResponseJson(
-    getRes,
-    serviceAccountPolicySchema,
-    'gcp.iam.service_account_policy'
-  );
-
-  // Use subject-scoped principal to prevent cross-project impersonation.
-  // The `sub` claim in the identity token is `project:${samProjectId}`, so the principal
-  // matches only tokens issued for this specific SAM project.
-  const member = samProjectId
-    ? `principal://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/subject/project:${samProjectId}`
-    : `principalSet://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/*`;
-  const role = 'roles/iam.workloadIdentityUser';
-
-  // Check if binding already exists
-  const existingBinding = (policy.bindings || []).find((b) => b.role === role);
-  if (existingBinding?.members?.includes(member)) {
-    return; // Already granted
-  }
-
-  // Add our binding
-  const bindings = [...(policy.bindings || [])];
-  if (existingBinding) {
-    existingBinding.members.push(member);
-  } else {
-    bindings.push({ role, members: [member] });
-  }
-
-  // Write updated policy
-  const setUrl = `${IAM_URL}/${saResource}:setIamPolicy`;
-  const setRes = await fetchWithTimeout(
-    setUrl,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${oauthToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ policy: { bindings, etag: policy.etag } }),
-    },
-    timeoutMs
-  );
-
-  if (!setRes.ok) {
-    const body = await setRes.text();
-    throw new GcpApiError({
-      step: 'grant_wif_user',
-      message: `Failed to set SA IAM policy (${setRes.status})`,
-      statusCode: setRes.status,
-      rawBody: body,
-    });
-  }
 }
 
 /**
@@ -662,23 +354,36 @@ export async function grantProjectRoles(
   }
 }
 
+/** The SAM user a user-level guided setup is for. */
+export interface GcpUserSetupScope {
+  userId: string;
+  /**
+   * Called with the pool once the project number is known, before SAM creates or changes any
+   * Google resource. Throws to stop a setup that would take over another owner's pool.
+   */
+  assertPoolAvailable?: (pool: { gcpProjectNumber: string; wifPoolId: string }) => Promise<void>;
+}
+
 /**
  * Full GCP OIDC setup orchestrator.
  * Takes a Google OAuth access token and project ID, then configures all GCP resources.
+ * The provider and service-account binding admit only tokens SAM signs for `scope.userId`.
  */
 export async function runGcpSetup(
   oauthToken: string,
   gcpProjectId: string,
   defaultZone: string,
   env: Env,
-  onProgress?: SetupProgressCallback,
-  samProjectId?: string
+  scope: GcpUserSetupScope,
+  onProgress?: SetupProgressCallback
 ): Promise<GcpOidcCredential> {
+  const trustScope = { kind: 'user', userId: scope.userId } as const;
   const timeoutMs = env.GCP_API_TIMEOUT_MS
     ? parseInt(env.GCP_API_TIMEOUT_MS, 10)
     : DEFAULT_GCP_API_TIMEOUT_MS;
   const poolId = env.GCP_WIF_POOL_ID || DEFAULT_GCP_WIF_POOL_ID;
-  const providerId = env.GCP_WIF_PROVIDER_ID || DEFAULT_GCP_WIF_PROVIDER_ID;
+  // Per installation: a provider trusts one issuer, and installations may share a project.
+  const providerId = env.GCP_WIF_PROVIDER_ID || (await installationWifProviderId(env.BASE_DOMAIN));
   const saAccountId = env.GCP_SERVICE_ACCOUNT_ID || DEFAULT_GCP_SERVICE_ACCOUNT_ID;
   const issuerUri = `https://api.${env.BASE_DOMAIN}`;
 
@@ -686,6 +391,7 @@ export async function runGcpSetup(
   onProgress?.('get_project_number', 'in_progress');
   const projectNumber = await getProjectNumber(oauthToken, gcpProjectId, timeoutMs);
   onProgress?.('get_project_number', 'done');
+  await scope.assertPoolAvailable?.({ gcpProjectNumber: projectNumber, wifPoolId: poolId });
 
   // Step 2: Enable APIs
   onProgress?.('enable_apis', 'in_progress');
@@ -706,7 +412,7 @@ export async function runGcpSetup(
     providerId,
     issuerUri,
     timeoutMs,
-    samProjectId
+    trustScope
   );
   onProgress?.('create_oidc_provider', 'done');
 
@@ -724,7 +430,7 @@ export async function runGcpSetup(
     saEmail,
     poolId,
     timeoutMs,
-    samProjectId
+    trustScope
   );
   onProgress?.('grant_wif_user', 'done');
 

@@ -42,6 +42,12 @@
 	# celld never compresses responses.
 	encode zstd gzip
 
+	# Client-supplied X-SAM-* headers (SAM's gateway routing and credential headers) never reach
+	# celld or a node, on any route, the catch-all below included. `request_header` sorts before
+	# every `handle`, so this runs before node-ws.caddy's forward_auth copies the Worker's own
+	# X-SAM-* answer onto the request.
+	request_header -X-SAM-*
+
 	# The mail collector's UI on its own host when the `mail-collector` profile is on
 	# (caddy/start.sh); an empty file otherwise.
 	import mail-collector/{$SAM_MAIL_COLLECTOR:off}.caddy

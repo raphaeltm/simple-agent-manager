@@ -1,16 +1,15 @@
 /**
- * The Cloudflare build must not contain code or storage classes only the self-host build needs
- * (owner decision, November 14, 2026: two builds rather than dormant code in production). It runs
- * with the API unit tests so any change under apps/api triggers it: an import added to any shared
- * module could pull the self-host-only code back into the Cloudflare bundle.
+ * The Cloudflare build must not contain code only the self-host build needs (owner decision,
+ * November 14, 2026: two builds rather than dormant code in production). It runs with the API unit
+ * tests so any change under apps/api triggers it: an import added to any shared module could pull
+ * the self-host-only code back into the Cloudflare bundle.
  *
  * - The shared entry `apps/api/src/index.ts` (wrangler.toml's `main`) must not reach
- *   `SELFHOST_ONLY_PATHS` or pako.
- * - `apps/api/wrangler.toml` must not declare a self-host-only binding, class or migration.
- * - The self-host module must still reach the Durable Object, so this guard cannot pass because
- *   the walker went blind, and must export every class and the mount function the generated
- *   celld entry names. (The celld config's own declarations are tested in
- *   scripts/selfhost/celld-config.test.ts.)
+ *   `CLOUDFLARE_ENTRY_FORBIDDEN_PATHS`: the self-host-only code (`apps/api/src/selfhost/build.ts`
+ *   included) and the operator tooling under `scripts/` (scripts/selfhost/ included).
+ * - The generated celld entry (scripts/selfhost/celld-project.ts `renderCelldMain`) is what reaches
+ *   them: it imports `selfhost/build.ts`, whose graph the walker must see, so this guard cannot
+ *   pass because the walker went blind.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -19,69 +18,74 @@ import * as TOML from '@iarna/toml';
 import { describe, expect, it } from 'vitest';
 
 import type { WranglerToml } from '../../../../../scripts/deploy/types';
-import {
-  SELFHOST_DURABLE_OBJECTS,
-  SELFHOST_ENTRY_MODULE,
-  SELFHOST_MOUNT_FUNCTION,
-} from '../../../../../scripts/selfhost/selfhost-durable-objects';
+import { renderCelldMain, SOURCE_LINK } from '../../../../../scripts/selfhost/celld-project';
 import {
   API_SRC,
+  CLOUDFLARE_ENTRY_FORBIDDEN_PATHS,
   collectImportGraph,
   REPO_ROOT,
   selfhostOnlyFindings,
 } from '../../helpers/selfhost-only-modules';
 
-const WRANGLER_TOML = resolve(REPO_ROOT, 'apps/api/wrangler.toml');
+const SELFHOST_BUILD = 'apps/api/src/selfhost/build.ts';
 
-function loadWranglerToml(): WranglerToml {
-  return TOML.parse(readFileSync(WRANGLER_TOML, 'utf8')) as unknown as WranglerToml;
+/** The apps/api/src modules the generated celld entry imports, as absolute paths. */
+function celldEntryImports(): string[] {
+  const prefix = `./${SOURCE_LINK}/`;
+  return [...renderCelldMain().matchAll(/from '([^']+)'/g)]
+    .map((match) => match[1]!)
+    .filter((specifier) => specifier.startsWith(prefix))
+    .map((specifier) => resolve(API_SRC, specifier.slice(prefix.length)));
 }
 
+/** Walking a >1,000-file import graph takes several seconds on a loaded CI runner. */
+const GRAPH_WALK_TIMEOUT_MS = 60_000;
+
 describe('self-host-only code stays out of the Cloudflare Worker', () => {
-  it('the shared entry reaches no self-host-only module or package', () => {
-    expect(loadWranglerToml().main).toBe('src/index.ts');
-    const graph = collectImportGraph(resolve(API_SRC, 'index.ts'));
-    // A walker that resolved nothing would pass the assertion below; the entry reaches well
-    // over a thousand files.
-    expect(graph.files.length).toBeGreaterThan(1000);
+  it(
+    'the shared entry reaches no self-host-only module, package or script',
+    { timeout: GRAPH_WALK_TIMEOUT_MS },
+    () => {
+      const toml = TOML.parse(
+        readFileSync(resolve(REPO_ROOT, 'apps/api/wrangler.toml'), 'utf8')
+      ) as unknown as WranglerToml;
+      expect(toml.main).toBe('src/index.ts');
+      const graph = collectImportGraph(resolve(API_SRC, 'index.ts'));
+      // A walker that resolved nothing would pass the assertion below; the entry reaches well
+      // over a thousand files.
+      expect(graph.files.length).toBeGreaterThan(1000);
+      expect(graph.files).not.toContain(SELFHOST_BUILD);
+      expect(selfhostOnlyFindings(graph, CLOUDFLARE_ENTRY_FORBIDDEN_PATHS)).toEqual([]);
+    }
+  );
+
+  it('control: the Cloudflare list forbids scripts/, which the self-host list allows', () => {
+    // No real Worker file imports scripts/, so prove the prefix itself is live on a graph that does.
+    const graph = {
+      files: ['apps/api/src/index.ts', 'scripts/selfhost/secret-files.ts'],
+      packages: new Map<string, string>(),
+    };
+    expect(selfhostOnlyFindings(graph, CLOUDFLARE_ENTRY_FORBIDDEN_PATHS)).toEqual([
+      'scripts/selfhost/secret-files.ts',
+    ]);
     expect(selfhostOnlyFindings(graph)).toEqual([]);
   });
 
-  it('the self-host module reaches the Durable Object, dgit and pako (the walker can see them)', () => {
-    const findings = selfhostOnlyFindings(
-      collectImportGraph(resolve(API_SRC, 'selfhost/hosted-git.ts'))
-    );
-    expect(findings).toEqual(
-      expect.arrayContaining([
-        'apps/api/src/durable-objects/hosted-git-repo.ts',
-        'apps/api/src/vendor/dgit/git/zlib.ts',
-        'package pako (imported by apps/api/src/vendor/dgit/git/packstore.ts)',
-      ])
-    );
-  });
-
-  it('wrangler.toml declares no self-host-only binding, class or migration', () => {
-    const toml = loadWranglerToml();
-    const bindings = toml.durable_objects?.bindings ?? [];
-    const migrations = toml.migrations ?? [];
-    for (const object of SELFHOST_DURABLE_OBJECTS) {
-      expect(bindings.map((b) => b.name)).not.toContain(object.binding);
-      expect(bindings.map((b) => b.class_name)).not.toContain(object.className);
-      expect(migrations.map((m) => m.tag)).not.toContain(object.migrationTag);
-      expect(
-        migrations.flatMap((m) => [...(m.new_sqlite_classes ?? []), ...(m.new_classes ?? [])])
-      ).not.toContain(object.className);
+  it(
+    'positive control: the celld entry reaches the self-host build and its modules',
+    { timeout: GRAPH_WALK_TIMEOUT_MS },
+    () => {
+      const imports = celldEntryImports();
+      expect(imports).toContain(resolve(REPO_ROOT, SELFHOST_BUILD));
+      const findings = imports.flatMap((entry) => selfhostOnlyFindings(collectImportGraph(entry)));
+      expect(findings).toEqual(
+        expect.arrayContaining([
+          SELFHOST_BUILD,
+          'apps/api/src/selfhost/analytics/index.ts',
+          'apps/api/src/selfhost/speech/index.ts',
+          'apps/api/src/selfhost/reverse-tunnel/entry.ts',
+        ])
+      );
     }
-  });
-
-  it('the self-host module exports every class and the mount function the celld entry names', async () => {
-    const module = (await import(resolve(API_SRC, SELFHOST_ENTRY_MODULE))) as Record<
-      string,
-      unknown
-    >;
-    expect(typeof module[SELFHOST_MOUNT_FUNCTION]).toBe('function');
-    for (const object of SELFHOST_DURABLE_OBJECTS) {
-      expect(typeof module[object.className], object.className).toBe('function');
-    }
-  });
+  );
 });

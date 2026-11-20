@@ -43,20 +43,11 @@ export async function deleteNode(id: string): Promise<{ success: boolean }> {
   });
 }
 
-/**
- * Removes a node SAM failed to delete, once the owner confirms they deleted its server. On
- * SAM-managed capacity only a superadmin may, and the API may answer
- * `OPERATOR_CONFIRMATION_REQUIRED`; the retry then carries the node name they typed.
- */
-export async function confirmNodeManualDeletion(
-  id: string,
-  confirmNodeName?: string
-): Promise<{ success: boolean }> {
+/** Removes a node SAM failed to delete, once the owner confirms they deleted its server. */
+export async function confirmNodeManualDeletion(id: string): Promise<{ success: boolean }> {
   return request<{ success: boolean }>(`/api/nodes/${id}/manual-deletion`, {
     method: 'POST',
-    body: JSON.stringify(
-      confirmNodeName === undefined ? { confirmed: true } : { confirmed: true, confirmNodeName }
-    ),
+    body: JSON.stringify({ confirmed: true }),
   });
 }
 

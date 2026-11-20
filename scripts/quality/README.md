@@ -61,8 +61,9 @@ download several runs' `workers-timings-*` artifacts and run
   (`packages/worker-core/src/shared-flight.ts`). On the self-hosted celld runtime such a promise never
   settles once its starter's client disconnects, and a request that resumes on its settlement
   runs as part of the starter's request and loses its later D1 calls, fetches and timers when
-  the starter answers; the helpers wait under the joiner's own timer and, on celld, resume it on
-  that timer. Flagged: an `await`/`return` of the shared promise, a `.then`/`.catch`/`.finally`
+  the starter answers; the helpers wait under the joiner's own timer. Resuming the joiner on that
+  timer is opt-in and off by default: only the self-host build's generated celld entry turns it on
+  (`resumeSharedFlightJoinsOnOwnTimer()`), so a deployment without that entry does not get it. Flagged: an `await`/`return` of the shared promise, a `.then`/`.catch`/`.finally`
   on it (awaited or not), and handing it to any other function (a `Promise.race`, a timeout
   wrapper). Shared state is module-scope state, or a field of a class with an instance held in
   module scope (the admin-settings cache). Mark a reviewed exception with
@@ -70,7 +71,10 @@ download several runs' `workers-timings-*` artifacts and run
   module-scope variable that holds a promise. It does not follow state reached through a
   function parameter (a helper handed a shared entry object is trusted), iteration over a shared
   collection, Durable Object fields (an object's ops survive one of its requests
-  answering on celld 0.6.3), or `for await`.
+  answering on celld 0.6.3), `for await`, or a flight held inside a library (jose's JWKS fetch).
+  The parameter-reached sites (AdminSettingsCache, the LLM endpoint snapshot, compact-r2) have
+  behavioural abandonment tests instead
+  (`apps/api/tests/unit/services/shared-flight-abandonment.test.ts`).
 - `pnpm lint:oxlint` is report-only. Promotion is forbidden until
   `scripts/quality/lint-adoption-evidence.json` records finding, fix-diff, scope, template,
   suppression, and cold-performance parity. Type-aware Oxlint is disabled.

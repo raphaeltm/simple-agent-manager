@@ -22,6 +22,7 @@ import {
   CELLD_MAIN,
   listMigrationFiles,
   prepareCelldProject,
+  renderCelldMain,
   writeCelldConfig,
 } from './celld-project.js';
 
@@ -47,15 +48,24 @@ function fakeWebDist(): string {
 }
 
 describe('prepareCelldProject', () => {
-  it('writes the celld entry in both key modes, so the runtime switches are always on', () => {
-    for (const runtimeSecrets of [true, false]) {
-      const projectDir = join(mkdtempSync(join(tmpdir(), 'sam-celld-')), 'project');
-      prepareCelldProject({ apiDir: API_DIR, projectDir, plan: plan(), runtimeSecrets });
-      const main = readFileSync(join(projectDir, CELLD_MAIN), 'utf8');
-      expect(main).toContain('resumeSharedFlightJoinsOnOwnTimer();');
-      expect(main.includes('wrapWorker(withSelfHostBuild(worker))')).toBe(runtimeSecrets);
-      expect(main).toContain('withSelfHostBuild(worker)');
+  it('writes the plain celld entry: the shared entry, the runtime switch and the self-host build', () => {
+    const projectDir = join(mkdtempSync(join(tmpdir(), 'sam-celld-')), 'project');
+    prepareCelldProject({ apiDir: API_DIR, projectDir, plan: plan() });
+    const main = readFileSync(join(projectDir, CELLD_MAIN), 'utf8');
+    expect(main).toBe(renderCelldMain());
+    expect(main).toContain("import worker from './src/index.ts';");
+    expect(main).toContain('resumeSharedFlightJoinsOnOwnTimer();');
+    expect(main).toContain("export * from './src/index.ts';");
+    expect(main).toContain('export default withSelfHostBuild(worker);');
+    // Every module the entry imports exists in apps/api (the symlinked src).
+    const specifiers = [...main.matchAll(/from '\.\/src\/([^']+)'/g)].map((m) => m[1]!);
+    expect(specifiers.length).toBeGreaterThanOrEqual(3);
+    for (const specifier of specifiers) {
+      expect(existsSync(join(API_DIR, 'src', specifier)), specifier).toBe(true);
     }
+    // Nothing but the shared entry's own exports and the default.
+    expect(main.match(/^export /gm)).toHaveLength(2);
+    expect(statSync(join(projectDir, CELLD_MAIN)).mode & 0o777).toBe(0o600);
   });
 
   it('builds flat per-database migration dirs from the real migrations without moving them', () => {
@@ -80,7 +90,7 @@ describe('prepareCelldProject', () => {
     expect(readlinkSync(join(mainDir!, leases))).toBe(
       join(API_DIR, 'src/selfhost/migrations', leases)
     );
-    // OBSERVABILITY_DATABASE likewise carries the self-host-only D1 analytics sink table (L20),
+    // OBSERVABILITY_DATABASE likewise carries the self-host-only D1 analytics sink table,
     // which the shared observability directory (wrangler.toml) no longer holds.
     const analytics = '0002_analytics_events.sql';
     expect(observability).not.toContain(analytics);

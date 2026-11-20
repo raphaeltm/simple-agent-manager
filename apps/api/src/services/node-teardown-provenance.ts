@@ -2,7 +2,8 @@
  * Server-written proof that SAM owns a managed node and can finish tearing it down.
  *
  * A node qualifies through either:
- * - a task that auto-provisioned it (`tasks.auto_provisioned_node_id`), or
+ * - a task that auto-provisioned it (`tasks.auto_provisioned_node_id`, or the released
+ *   node-local `task_provisioned` proof), or
  * - its own server-written pool/credential snapshot. Direct and pool-placed provisioning has
  *   no task link, and a woken conversation clears the one it had, so the snapshot is the
  *   durable proof. It is independent of current pool revisions so retiring a source cannot
@@ -42,10 +43,7 @@ export function cleanupNodeProvenanceSql(
   ]
     .map((column) => `NULLIF(TRIM(${alias}.${column}), '') IS NOT NULL`)
     .join('\n         AND ');
-  return `(EXISTS (
-    SELECT 1 FROM tasks auto_task
-    WHERE auto_task.auto_provisioned_node_id = ${alias}.id
-  ) OR (
+  return `(${taskProvisionedNodeConditionSql(alias)} OR (
     ${alias}.status IN (${managedPoolStatuses})
     AND ${alias}.node_class = 'managed'
     AND ${alias}.runtime = 'vm'
@@ -111,4 +109,12 @@ export async function isNodeCapacitySourceReleased(
     .bind(node.id, node.capacityPoolCandidateId)
     .first<{ released: number }>();
   return row?.released === 1;
+}
+
+/** Historical auto-provisioning proof only: never use this in active ownership/adoption gates. */
+export function taskProvisionedNodeConditionSql(alias: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) throw new Error('Unsafe SQL alias');
+  return `(COALESCE(${alias}.task_provisioned, 0) = 1 OR EXISTS (
+    SELECT 1 FROM tasks auto_task WHERE auto_task.auto_provisioned_node_id = ${alias}.id
+  ))`;
 }

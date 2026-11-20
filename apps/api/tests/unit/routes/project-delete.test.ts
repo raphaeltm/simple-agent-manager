@@ -48,7 +48,11 @@ describe('DELETE /api/projects/:id', () => {
         const selectChain: any = {};
         let reservationQuery = false;
         selectChain.from = vi.fn((table: any) => {
-          reservationQuery = table?.[Symbol.for('drizzle:Name')] === 'deployment_publish_jobs';
+          // Reservation and GCP-credential pre-checks answer "none" and do not consume the
+          // queued results the task queries expect.
+          reservationQuery = ['deployment_publish_jobs', 'credentials'].includes(
+            table?.[Symbol.for('drizzle:Name')]
+          );
           return selectChain;
         });
         selectChain.where = vi.fn(() => selectChain);
