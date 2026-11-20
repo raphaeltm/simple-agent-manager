@@ -17,7 +17,7 @@ const scan = (file: string, text: string) => scanText(file, text, () => false).f
 function removeGuard(text: string, name: string): string {
   const source = ts.createSourceFile('operator.ts', text, ts.ScriptTarget.Latest, true);
   const fn = source.statements.find(
-    (s) => ts.isFunctionDeclaration(s) && s.name?.text === name
+    (s) => ts.isFunctionDeclaration(s) && s.name?.text === name && s.body !== undefined
   ) as ts.FunctionDeclaration;
   const guard = fn.body!.statements[0];
   expect(guard.getText(source)).toBe('assertOperatorExecution();');
@@ -78,7 +78,7 @@ describe('L24 operator-only backup scanner exception (policy 795e72a6)', () => {
       expect(scan(file, attached).some((f) => f.rule === 'decryption')).toBe(true);
 
       expect(
-        scan(file, text.replace(`function ${fn}(`, 'function differentFunction(')).some(
+        scan(file, text.replaceAll(`function ${fn}(`, 'function differentFunction(')).some(
           (f) => f.rule === 'decryption'
         )
       ).toBe(true);
