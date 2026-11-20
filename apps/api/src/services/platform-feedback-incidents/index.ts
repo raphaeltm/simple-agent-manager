@@ -41,8 +41,8 @@ export {
   defaultIncidentReadContext,
   getIncidentDetail,
   hasDispatchablePendingIncidents,
-  listDispatchableIncidentQueue,
   type IncidentListSort,
+  listDispatchableIncidentQueue,
   listIncidentQueue,
   type ListIncidentQueueOptions,
 } from './queries';

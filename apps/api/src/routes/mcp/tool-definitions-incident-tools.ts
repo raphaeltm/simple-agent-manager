@@ -99,7 +99,8 @@ export const INCIDENT_TOOLS = [
         },
         outcome: {
           type: 'string',
-          description: 'Outcome: resolved and rejected end the incident; watching keeps measuring it.',
+          description:
+            'Outcome: resolved and rejected end the incident; watching keeps measuring it.',
           enum: ['resolved', 'rejected', 'watching'],
         },
         note: {

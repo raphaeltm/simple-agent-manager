@@ -137,7 +137,7 @@ export const FLEET_OPS_SETTINGS = [
     key: 'incidentWatchRecentWindowHours',
     defaultValue: DEFAULT_INCIDENT_WATCH_RECENT_WINDOW_HOURS,
     description:
-      'Hours of history behind a watched incident\'s recent occurrence count (list_incident_queue, get_incident, its idea). Hourly counts older than this are dropped.',
+      "Hours of history behind a watched incident's recent occurrence count (list_incident_queue, get_incident, its idea). Hourly counts older than this are dropped.",
     range: { min: 24, max: 30 * 24 },
   },
   {
@@ -145,7 +145,7 @@ export const FLEET_OPS_SETTINGS = [
     key: 'incidentWatchSpikeWindowHours',
     defaultValue: DEFAULT_INCIDENT_WATCH_SPIKE_WINDOW_HOURS,
     description:
-      'Hours over which a watched incident\'s occurrences are counted to detect a spike. Capped at the recent window.',
+      "Hours over which a watched incident's occurrences are counted to detect a spike. Capped at the recent window.",
     range: { min: 1, max: 7 * 24 },
   },
   {
@@ -161,7 +161,7 @@ export const FLEET_OPS_SETTINGS = [
     key: 'incidentWatchSpikeBaselineMultiplier',
     defaultValue: DEFAULT_INCIDENT_WATCH_SPIKE_BASELINE_MULTIPLIER,
     description:
-      'A spike must also reach this many times the incident\'s average count per spike window over the rest of the recent window, so a steadily noisy watched incident is not re-queued for being noisy.',
+      "A spike must also reach this many times the incident's average count per spike window over the rest of the recent window, so a steadily noisy watched incident is not re-queued for being noisy.",
     range: { min: 1, max: 100 },
   },
   {

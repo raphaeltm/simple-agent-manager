@@ -10,14 +10,14 @@ import type { Env } from '../../env';
 import {
   claimIncident,
   configuredFeedbackProjectId,
+  getIncidentConfig,
   getIncidentDetail,
   INCIDENT_QUEUE_STATES,
+  type IncidentListSort,
   type IncidentQueueState,
+  type IncidentReadContext,
   type IncidentResolutionReferenceInput,
   IncidentResolutionValidationError,
-  getIncidentConfig,
-  type IncidentListSort,
-  type IncidentReadContext,
   listIncidentQueue,
   loadWatchConfig,
   resolveIncident,
@@ -338,7 +338,12 @@ export async function handleResolveIncident(
 async function handleWatchIncident(
   requestId: string | number | null,
   env: Env,
-  input: { incidentId: string; claimToken: string; note: string | undefined; tokenData: McpTokenData }
+  input: {
+    incidentId: string;
+    claimToken: string;
+    note: string | undefined;
+    tokenData: McpTokenData;
+  }
 ): Promise<JsonRpcResponse> {
   if (!input.note) {
     return jsonRpcError(
@@ -373,7 +378,7 @@ async function handleWatchIncident(
             outcome: 'watching',
             watchedByTaskId: input.tokenData.taskId,
             behaviour:
-              'Recurrences now only update this signature\'s counts and idea. A spike returns it to the triage queue; no occurrence for the quiet period expires it.',
+              "Recurrences now only update this signature's counts and idea. A spike returns it to the triage queue; no occurrence for the quiet period expires it.",
           },
           null,
           2

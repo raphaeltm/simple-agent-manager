@@ -108,10 +108,7 @@ export function recentOccurrenceCount(
   now: number,
   recentWindowMs: number
 ): number {
-  return countSince(
-    parseHourlyCounts(raw),
-    Math.floor((now - recentWindowMs) / HOUR_MS) * HOUR_MS
-  );
+  return countSince(parseHourlyCounts(raw), Math.floor((now - recentWindowMs) / HOUR_MS) * HOUR_MS);
 }
 
 export interface SpikeVerdict {

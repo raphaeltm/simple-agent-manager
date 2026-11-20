@@ -98,7 +98,7 @@ export const DEFAULT_PLATFORM_FEEDBACK_INCIDENT_TRIGGER_TEMPLATE = [
   '',
   'If you cannot classify an incident with the available evidence, leave it claimed and say why in your summary; its claim expires and it returns to the queue.',
   '',
-  'Always finish the run by calling complete_task with a short summary of each incident\'s outcome, including any you left claimed. This trigger runs one triage at a time, so a run that ends without complete_task blocks every later run until it is cancelled.',
+  "Always finish the run by calling complete_task with a short summary of each incident's outcome, including any you left claimed. This trigger runs one triage at a time, so a run that ends without complete_task blocks every later run until it is cancelled.",
 ].join('\n');
 
 /** Default max generated title length. Override via TASK_TITLE_MAX_LENGTH env var. */

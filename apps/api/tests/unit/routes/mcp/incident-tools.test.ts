@@ -272,4 +272,105 @@ describe('MCP incident tools', () => {
       queue_state: 'rejected',
     });
   });
+
+  it('sets a claimed incident to watching with a required reason', async () => {
+    const { sqlite, env } = setup();
+    const claim = parseToolText(
+      await handleClaimIncident('1', { incidentId: 'incident-a' }, token(), env)
+    );
+
+    const missingReason = await handleResolveIncident(
+      '2',
+      { incidentId: 'incident-a', claimToken: claim.claimToken, outcome: 'watching' },
+      token(),
+      env
+    );
+    expect(missingReason.error?.message).toContain('Watching requires a one-line reason');
+    const wrongClaim = await handleResolveIncident(
+      '3',
+      { incidentId: 'incident-a', claimToken: 'wrong', outcome: 'watching', note: 'benign' },
+      token(),
+      env
+    );
+    expect(wrongClaim.error?.message).toContain('verify the claim token');
+
+    const watched = parseToolText(
+      await handleResolveIncident(
+        '4',
+        {
+          incidentId: 'incident-a',
+          claimToken: claim.claimToken,
+          outcome: 'watching',
+          note: 'Real but harmless retry noise',
+        },
+        token(),
+        env
+      )
+    );
+    expect(watched).toMatchObject({ incidentId: 'incident-a', outcome: 'watching' });
+    expect(
+      sqlite
+        .prepare(
+          `SELECT queue_state, watch_reason, incident_claim_token, dispatch_attempts, resolved_at
+           FROM platform_feedback_triages`
+        )
+        .get()
+    ).toEqual({
+      queue_state: 'watching',
+      watch_reason: 'Real but harmless retry noise',
+      incident_claim_token: null,
+      dispatch_attempts: 0,
+      resolved_at: null,
+    });
+
+    // Watching is out of the default list and returned when asked for.
+    const defaults = parseToolText(await handleListIncidentQueue('5', {}, token(), env));
+    expect(defaults.count).toBe(0);
+    const listed = parseToolText(
+      await handleListIncidentQueue('6', { state: 'watching' }, token(), env)
+    );
+    expect(listed.count).toBe(1);
+  });
+
+  it('ranks watched incidents by recent frequency with their frequency fields', async () => {
+    const { sqlite, env } = setup();
+    const hour = Math.floor(Date.now() / 3_600_000);
+    const insert = sqlite.prepare(
+      `INSERT INTO platform_feedback_triages
+        (signature, source, summary, first_seen_at, last_seen_at, occurrence_count, evidence_refs,
+         queue_state, queued_at, watching_since, watch_reason, watch_hourly_counts)
+       VALUES (?, 'api', ?, 1000, ?, ?, '[]', 'watching', 1000, ?, 'watch reason', ?)`
+    );
+    // Most total occurrences but nothing recent; recent counts outside the window are ignored.
+    insert.run('old-flood', 'old flood', 2000, 900, 1000, JSON.stringify({ [hour - 400]: 900 }));
+    insert.run('busy', 'busy', 3000, 40, 1000, JSON.stringify({ [hour - 2]: 25, [hour - 30]: 15 }));
+    insert.run('quiet', 'quiet', 4000, 5, 1000, JSON.stringify({ [hour - 1]: 5 }));
+    insert.run('malformed', 'malformed', 5000, 3, 1000, 'not json');
+
+    const listed = parseToolText(
+      await handleListIncidentQueue('1', { state: 'watching', sort: 'frequency' }, token(), env)
+    );
+    const incidents = listed.incidents as Array<Record<string, unknown>>;
+    expect(incidents.map((item) => item.id)).toEqual(['busy', 'quiet', 'old-flood', 'malformed']);
+    expect(incidents[0]).toMatchObject({
+      queueState: 'watching',
+      occurrenceCount: 40,
+      firstSeenAt: 1000,
+      lastSeenAt: 3000,
+      recentOccurrenceCount: 40,
+      recentWindowHours: 168,
+      watchingSince: 1000,
+      watchReason: 'watch reason',
+    });
+    expect(incidents[2]).toMatchObject({ recentOccurrenceCount: 0, occurrenceCount: 900 });
+
+    const invalidSort = await handleListIncidentQueue('2', { sort: 'loudest' }, token(), env);
+    expect(invalidSort.error?.message).toContain('sort must be');
+
+    const detail = parseToolText(
+      await handleGetIncident('3', { incidentId: 'busy' }, token(), env)
+    );
+    expect(detail.incident).toMatchObject({ recentOccurrenceCount: 40, queueState: 'watching' });
+    expect(JSON.stringify(detail)).toContain('Occurrences in the last 168h while watching: 40');
+  });
 });
