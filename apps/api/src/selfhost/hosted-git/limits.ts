@@ -79,6 +79,25 @@ export function hostedGitPushTooLargeMessage(maxBytes: number): string {
   return `SAM: push refused: the pack is larger than the ${mib(maxBytes)} limit for one push to a SAM-hosted repository; push in smaller pieces`;
 }
 
+/** SQLite page reserved for each new ref, including index overhead. */
+const REF_RESERVATION_BYTES = 4096;
+
+/** Bytes to reserve for the refs a push would create (deletions earn nothing). */
+export function hostedGitNewRefBytes(
+  existing: readonly { name: string }[],
+  commands: readonly { ref: string; next: string }[]
+): number {
+  const refs = new Set(existing.map((ref) => ref.name));
+  let additions = 0;
+  for (const command of commands) {
+    if (command.next !== '0'.repeat(40) && !refs.has(command.ref)) {
+      additions++;
+      refs.add(command.ref);
+    }
+  }
+  return additions * REF_RESERVATION_BYTES;
+}
+
 /** Check ref-only pushes too. Reserve a SQLite page per new ref, including index overhead. */
 export function hostedGitRefRefusal(
   existing: readonly { name: string }[],
@@ -101,7 +120,7 @@ export function hostedGitRefRefusal(
   if (!writes) return null;
   if (refs.size > limits.maxRepoRefs)
     return `SAM: push refused: repository exceeds its ${limits.maxRepoRefs}-ref limit`;
-  if (currentBytes + additions * 4096 >= limits.maxRepoBytes)
+  if (currentBytes + additions * REF_RESERVATION_BYTES >= limits.maxRepoBytes)
     return 'SAM: push refused: repository storage limit leaves no room for ref updates';
   return null;
 }

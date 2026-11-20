@@ -751,3 +751,38 @@ describe('GC reclaims packs without inflating and drops delta-only bases', () =>
     expect(kept.loose.has(kept.ids.b1)).toBe(true);
   });
 });
+
+describe('upload request lists and ref reservations', () => {
+  it('deduplicates and caps wants, haves and shallow lines while parsing (Codex r4637122054, r4637332208)', async () => {
+    const { MAX_UPLOAD_OIDS, parseUploadRequest } =
+      await import('../../../src/vendor/dgit/git/protocol');
+    const { pkt, FLUSH } = await import('../../../src/vendor/dgit/git/pktline');
+    const { concat } = await import('../../../src/vendor/dgit/git/util');
+    const a = 'a'.repeat(40);
+    const lines = [pkt(`want ${a} side-band-64k\n`)];
+    for (let i = 0; i < 1000; i++)
+      lines.push(pkt(`want ${a}\n`), pkt(`have ${a}\n`), pkt(`shallow ${a}\n`));
+    for (let i = 0; i < MAX_UPLOAD_OIDS + 5; i++)
+      lines.push(pkt(`have ${i.toString(16).padStart(40, '0')}\n`));
+    const req = parseUploadRequest(concat([...lines, FLUSH]));
+    expect(req.wants).toEqual([a]);
+    expect(req.clientShallows).toEqual([a]);
+    expect(req.haves).toHaveLength(MAX_UPLOAD_OIDS);
+    expect(new Set(req.haves).size).toBe(MAX_UPLOAD_OIDS);
+    expect(req.caps.has('side-band-64k')).toBe(true);
+  });
+
+  it('reserves a page per new ref and nothing for updates or deletions (Codex r4637332217)', async () => {
+    const { hostedGitNewRefBytes } = await import('../../../src/selfhost/hosted-git/limits');
+    const existing = [{ name: 'refs/heads/main' }];
+    expect(
+      hostedGitNewRefBytes(existing, [
+        { ref: 'refs/heads/main', next: 'b'.repeat(40) },
+        { ref: 'refs/heads/new', next: 'c'.repeat(40) },
+        { ref: 'refs/heads/new', next: 'd'.repeat(40) },
+        { ref: 'refs/heads/gone', next: ZERO },
+        { ref: 'refs/tags/v1', next: 'e'.repeat(40) },
+      ])
+    ).toBe(2 * 4096);
+  });
+});

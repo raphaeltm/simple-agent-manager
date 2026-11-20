@@ -11,7 +11,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
 import * as schema from '../../db/schema';
-import { getUserId } from '../../middleware/auth';
+import { assertNotAgentSignInSession, getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
 import type { HostedGitEnv as Env } from './env';
@@ -21,6 +21,9 @@ import { mintHostedGitToken } from './tokens';
 const hostedGitTokenRoutes = new Hono<{ Bindings: Env }>();
 
 hostedGitTokenRoutes.post('/:id/hosted-git/token', async (c) => {
+  // A personal clone/push credential outlives the session that mints it, so an agent sign-in
+  // session (hard-expiring, workload identity) may not create one.
+  assertNotAgentSignInSession(c);
   const userId = getUserId(c);
   const projectId = c.req.param('id');
   const scope = c.req.query('scope') === 'write' ? 'write' : 'read';

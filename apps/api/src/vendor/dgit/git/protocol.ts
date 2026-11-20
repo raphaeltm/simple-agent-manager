@@ -189,6 +189,12 @@ interface UploadRequest {
   caps: Set<string>;
 }
 
+/**
+ * SAM: most distinct wants, haves or shallow lines one upload request may list. Above SAM's
+ * 30,000-object and 10,000-ref repository caps, so no legitimate request reaches it.
+ */
+export const MAX_UPLOAD_OIDS = 32768;
+
 export function parseUploadRequest(body: Uint8Array): UploadRequest {
   const parser = new PktParser(body);
   const req: UploadRequest = {
@@ -200,6 +206,18 @@ export function parseUploadRequest(body: Uint8Array): UploadRequest {
     deepen: 0,
     caps: new Set(),
   };
+  // SAM: each listed oid later costs a synchronous store lookup, so duplicates are dropped
+  // and each list is capped while parsing; a 16 MiB request could otherwise queue ~335k
+  // lookups. Past the cap extra haves/shallows are ignored (negotiation stays correct, the
+  // pack is just larger) and extra wants cannot be advertised refs anyway.
+  const seenWants = new Set<string>();
+  const seenHaves = new Set<string>();
+  const seenShallows = new Set<string>();
+  const addUnique = (list: string[], seen: Set<string>, oid: string) => {
+    if (list.length >= MAX_UPLOAD_OIDS || seen.has(oid)) return;
+    seen.add(oid);
+    list.push(oid);
+  };
   for (let p = parser.read(); p !== null; p = parser.read()) {
     if (p.kind !== "line") continue;
     const line = p.text;
@@ -208,13 +226,13 @@ export function parseUploadRequest(body: Uint8Array): UploadRequest {
     } else if (line === "no-progress" || line === "symrefs" || line === "peel") {
       req.caps.add(line);
     } else if (line.startsWith("want ")) {
-      req.wants.push(line.slice(5, 45));
+      addUnique(req.wants, seenWants, line.slice(5, 45));
       // capabilities ride on the first want line
       for (const cap of line.slice(45).trim().split(" ")) if (cap) req.caps.add(cap);
     } else if (line.startsWith("have ")) {
-      req.haves.push(line.slice(5, 45));
+      addUnique(req.haves, seenHaves, line.slice(5, 45));
     } else if (line.startsWith("shallow ")) {
-      req.clientShallows.push(line.slice(8, 48));
+      addUnique(req.clientShallows, seenShallows, line.slice(8, 48));
     } else if (line.startsWith("deepen ")) {
       req.deepen = parseInt(line.slice(7), 10) || 0;
     } else if (line === "done") {

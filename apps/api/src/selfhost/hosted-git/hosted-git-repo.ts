@@ -47,6 +47,7 @@ import {
 import { filterLsRefsResponse, lsRefsPrefixes } from './hosted-git-ls-refs';
 import {
   type HostedGitLimits,
+  hostedGitNewRefBytes,
   hostedGitPushByteBudget,
   hostedGitPushRefusal,
   hostedGitPushTooLargeMessage,
@@ -291,7 +292,9 @@ export class HostedGitRepo extends DurableObject {
   private async receive(req: Request): Promise<Response> {
     const limits = await resolveHostedGitLimits(this.settingsEnv);
     const declared = parseInt(req.headers.get('content-length') ?? '', 10);
-    if (Number.isFinite(declared) && declared > limits.maxPushBytes) {
+    // The command section has its own cap (MAX_COMMAND_SECTION_BYTES) and ingest budgets the pack,
+    // so a lowered push limit still admits a packless deletion that frees space.
+    if (Number.isFinite(declared) && declared > limits.maxPushBytes + MAX_COMMAND_SECTION_BYTES) {
       return new Response(`error: ${hostedGitPushTooLargeMessage(limits.maxPushBytes)}\n`, {
         status: 413,
         headers: { 'content-type': 'text/plain; charset=utf-8' },
@@ -341,7 +344,10 @@ export class HostedGitRepo extends DurableObject {
     let body: ChunkBuffer;
     if (req.headers.get('content-encoding')?.includes('gzip')) {
       body = new ChunkBuffer(
-        gunzipLimited(await readBodyBounded(req, limits.maxPushBytes), limits.maxPushBytes)
+        gunzipLimited(
+          await readBodyBounded(req, limits.maxPushBytes + MAX_COMMAND_SECTION_BYTES),
+          limits.maxPushBytes + MAX_COMMAND_SECTION_BYTES
+        )
       );
     } else {
       reader = req.body?.getReader() ?? null;
@@ -411,7 +417,8 @@ export class HostedGitRepo extends DurableObject {
           });
           // Final reservation: the byte budget covered the raw pack, not its index rows and
           // page overhead. Refuse the push and drop its pack if the stored total crossed the cap.
-          const stored = this.store.dbSize();
+          // The ref rows this push adds are written after this check, so reserve them here too.
+          const stored = this.store.dbSize() + hostedGitNewRefBytes(this.store.refs(), commands);
           if (stored > limits.maxRepoBytes) {
             await this.store.packs.dropPack(ingested.packId);
             unpackError = hostedGitStoredOverCapMessage(stored, limits);

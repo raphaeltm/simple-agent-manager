@@ -610,6 +610,13 @@ describe('member clone credentials (POST /api/projects/:id/hosted-git/token)', (
     await gitOk(['commit', '-m', 'human'], work);
     await gitOk(['push', 'origin', 'HEAD'], work);
 
+    // An agent sign-in session cannot mint a credential that outlives it (Codex r4637122062).
+    const agentSession = await runtime.fetch(`/api/projects/${project.id}/hosted-git/token?scope=read`, {
+      method: 'POST',
+      headers: { 'x-test-user-id': owner, 'x-test-agent-sign-in': '1' },
+    });
+    expect(agentSession.status).toBe(403);
+
     const stranger = await createEmailOnlyUser();
     const denied = await runtime.fetch(`/api/projects/${project.id}/hosted-git/token`, {
       method: 'POST',
@@ -874,6 +881,31 @@ describe('repository cleanup through real SQLite', () => {
     const check = await freshDir('gc-budget-check');
     await gitOk(['clone', localRemote(project.repository, token), check]);
     expect((await readFile(join(check, 'big.txt'), 'utf8')).length).toBe(5 * 1024 * 1024);
+  });
+
+  it('lets a packless ref deletion through a lowered push limit (Codex r4637032838)', async () => {
+    const project = await createHostedProject(await createEmailOnlyUser(), 'Delete under limit');
+    const token = await mintToken(project, 'write');
+    const work = await freshDir('delete-under-limit');
+    await gitOk(['clone', localRemote(project.repository, token), work]);
+    await gitOk(['push', 'origin', 'HEAD:refs/heads/to-delete'], work);
+    await runtime.DATABASE.prepare(
+      "INSERT INTO platform_settings (key,value,updated_at) VALUES ('repositories.maxPushBytes',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+    )
+      .bind(JSON.stringify(1), Date.now())
+      .run();
+    await runtime.fetch('/__test/invalidate-settings', { method: 'POST' });
+    try {
+      await gitOk(['push', 'origin', '--delete', 'to-delete'], work);
+      expect((await gitOk(['ls-remote', 'origin'], work)).stdout).not.toContain('refs/heads/to-delete');
+      // Control: a push that carries a pack is still held to the 1-byte limit.
+      await gitOk(['commit', '--allow-empty', '-q', '-m', 'blocked'], work);
+      const refused = await git(['push', 'origin', 'HEAD:refs/heads/blocked'], work);
+      expect(refused.code).not.toBe(0);
+    } finally {
+      await runtime.DATABASE.prepare("DELETE FROM platform_settings WHERE key='repositories.maxPushBytes'").run();
+      await runtime.fetch('/__test/invalidate-settings', { method: 'POST' });
+    }
   });
 
   it('refuses and drops a pack whose index overhead takes stored size past the cap (Codex r4636923076)', async () => {

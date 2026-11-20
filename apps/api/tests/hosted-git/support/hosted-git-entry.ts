@@ -34,19 +34,33 @@ export class HostedGitRepoTest extends HostedGitRepo {
       await this.ctx.storage.deleteAlarm();
       return new Response('ok');
     }
-    if (new URL(req.url).pathname === '/__test/alarm' || new URL(req.url).pathname === '/__test/alarm-fail') {
-      const store = (this as unknown as { store: { get: (...args: unknown[]) => Promise<unknown> } }).store;
+    if (
+      new URL(req.url).pathname === '/__test/alarm' ||
+      new URL(req.url).pathname === '/__test/alarm-fail'
+    ) {
+      const store = (
+        this as unknown as { store: { get: (...args: unknown[]) => Promise<unknown> } }
+      ).store;
       const get = store.get;
-      if (new URL(req.url).pathname.endsWith('-fail')) store.get = async () => { throw new Error('injected transient read failure'); };
+      if (new URL(req.url).pathname.endsWith('-fail'))
+        store.get = async () => {
+          throw new Error('injected transient read failure');
+        };
       await this.ctx.storage.deleteAlarm();
-      try { await this.alarm(); } finally { store.get = get; }
+      try {
+        await this.alarm();
+      } finally {
+        store.get = get;
+      }
       return new Response('ok');
     }
     if (new URL(req.url).pathname.startsWith('/__test/fail-read/')) {
       // One-shot: the next read of this object throws, as a storage fault or an exhausted work
       // budget would, so a push fails after its pack was ingested but before any ref decision.
       const oid = new URL(req.url).pathname.slice('/__test/fail-read/'.length);
-      const store = (this as unknown as { store: { get: (oid: string, ...rest: unknown[]) => Promise<unknown> } }).store;
+      const store = (
+        this as unknown as { store: { get: (oid: string, ...rest: unknown[]) => Promise<unknown> } }
+      ).store;
       const get = store.get;
       store.get = async (target: string, ...rest: unknown[]) => {
         if (target !== oid) return get.call(store, target, ...rest);
@@ -61,7 +75,12 @@ export class HostedGitRepoTest extends HostedGitRepo {
       return Response.json({ has: store.has(oid) });
     }
     if (new URL(req.url).pathname === '/__test/gc-state') {
-      return Response.json({ pending: this.ctx.storage.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key='gc-pending'").toArray()[0]?.value, alarm: await this.ctx.storage.getAlarm() });
+      return Response.json({
+        pending: this.ctx.storage.sql
+          .exec<{ value: string }>("SELECT value FROM meta WHERE key='gc-pending'")
+          .toArray()[0]?.value,
+        alarm: await this.ctx.storage.getAlarm(),
+      });
     }
     return super.fetch(req);
   }
@@ -74,7 +93,15 @@ const projects = new Hono<{ Bindings: Env }>();
 projects.use('*', async (c, next) => {
   const userId = c.req.header('x-test-user-id');
   if (!userId) return c.json({ error: 'UNAUTHORIZED' }, 401);
-  c.set('auth' as never, { user: { id: userId, role: 'user', status: 'active' } } as never);
+  // `x-test-agent-sign-in: 1` stands in for a workload-identity agent sign-in session.
+  const agentSignIn = c.req.header('x-test-agent-sign-in') === '1';
+  c.set(
+    'auth' as never,
+    {
+      user: { id: userId, role: 'user', status: 'active' },
+      session: { id: `test-session-${userId}`, agentSignIn, hardExpiresAt: null },
+    } as never
+  );
   await next();
 });
 registerProjectCreateRoute(projects);
@@ -129,20 +156,28 @@ app.get('/__test/gc-state/:repo', async (c) => {
 });
 app.delete('/__test/repository/:repo', async (c) => {
   const ns = c.env.HOSTED_GIT!;
-  return ns.get(ns.idFromName(c.req.param('repo'))).fetch('https://hosted-git/', { method: 'DELETE' });
+  return ns
+    .get(ns.idFromName(c.req.param('repo')))
+    .fetch('https://hosted-git/', { method: 'DELETE' });
 });
 
 app.get('/__test/has/:repo/:oid', (c) => {
   const ns = c.env.HOSTED_GIT!;
-  return ns.get(ns.idFromName(c.req.param('repo'))).fetch(`https://hosted-git/__test/has/${c.req.param('oid')}`);
+  return ns
+    .get(ns.idFromName(c.req.param('repo')))
+    .fetch(`https://hosted-git/__test/has/${c.req.param('oid')}`);
 });
 
 app.post('/__test/fail-read/:repo/:oid', (c) => {
   const ns = c.env.HOSTED_GIT!;
-  return ns.get(ns.idFromName(c.req.param('repo'))).fetch(`https://hosted-git/__test/fail-read/${c.req.param('oid')}`);
+  return ns
+    .get(ns.idFromName(c.req.param('repo')))
+    .fetch(`https://hosted-git/__test/fail-read/${c.req.param('oid')}`);
 });
 
 app.post('/__test/alarm/:repo/:mode', (c) => {
   const ns = c.env.HOSTED_GIT!;
-  return ns.get(ns.idFromName(c.req.param('repo'))).fetch('https://hosted-git/__test/alarm' + (c.req.param('mode') === 'fail' ? '-fail' : ''));
+  return ns
+    .get(ns.idFromName(c.req.param('repo')))
+    .fetch('https://hosted-git/__test/alarm' + (c.req.param('mode') === 'fail' ? '-fail' : ''));
 });
