@@ -40,9 +40,9 @@ retired by running `rotate --all` on a box.
 - [x] `rotate` command in secrets.ts; plaintext-scan `rotationAdvice` and README point at `rotate`
 - [x] runtime-tunables baseline, Caddy fragment + live test, backlog follow-ups from the branch
 - [x] Full local quality suite (lint, typecheck, API unit 18.4k, selfhost 1.2k; reruns after fixes)
-- [ ] Security-auditor (control endpoint auth/replay/callers, fallback scoping) + other reviewers
-- [ ] Staging: sign-in + authed call, stored credential decrypt + use, JWT callbacks verify
-- [ ] Box: `rotate --all` from main; data decrypts, sign-in, hosted-git clone, old copies dead; kill+resume; failed-run rollback
+- [x] Security-auditor PASS; cloudflare-specialist and task-completion-validator ADDRESSED
+- [x] Staging: sign-in + authed call, stored credential decrypt + use, JWT callbacks verify (PR body)
+- [x] Box: `rotate --all` from main; data decrypts, sign-in, hosted-git clone, old copies dead; kill+resume; failed-run rollback (PR body)
 - [ ] PR, CI, merge, Deploy Production job
 
 ## Acceptance criteria
@@ -51,3 +51,8 @@ retired by running `rotate --all` on a box.
 - No new required Worker vars/secrets; no extra hot-path I/O.
 - On the box: every platform key rotated, data intact, old plaintext copies no longer work,
   interrupted run resumes, failed verification rolls back.
+
+## Box notes
+
+- Found on the box and fixed: main's backups are always encrypted, so `rotate` needed
+  `--encryption-key-file` (or `SAM_BACKUP_KEY_FILE`) for its first backup.
