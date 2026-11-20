@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { projectsRoutes } from '../../../src/routes/projects';
-import { registerArtifactsBackendFallback } from '../../../src/services/hosted-git/backend';
+import { registerArtifactsBackendFallback } from '../../../src/services/artifacts/backend';
 
 const mocks = vi.hoisted(() => ({
   requireProjectCapability: vi.fn(),

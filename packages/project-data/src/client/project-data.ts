@@ -2869,6 +2869,17 @@ export async function getSessionState(env: Env, projectId: string, sessionId: st
   );
 }
 
+/** Awake chats whose agent is mid-turn (`do/session-state-read.ts`). */
+export async function listWorkingChatSessionIds(env: Env, projectId: string): Promise<string[]> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'listWorkingChatSessionIds',
+    (stub) => stub.listWorkingChatSessionIds(),
+    'idempotent_read'
+  );
+}
+
 export async function registerTaskWait(env: Env, projectId: string, input: RegisterTaskWaitInput) {
   return callProjectDataWithRetry(env, projectId, 'registerTaskWait', (stub) =>
     stub.registerTaskWait(input)

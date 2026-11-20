@@ -17,6 +17,7 @@ Use this file as a compact Codex routing layer. `CLAUDE.md` remains Claude Code'
 - Measure instruction surface with `pnpm quality:agent-context-budget` when changing Codex/Claude steering docs or a rule's `paths` scope; `--check` enforces the size ceilings, including the 32 KiB Codex project-doc cap on this file. For Codex, verify active instruction files from a target path with `codex --cd <path> ...` or session logs.
 - Keep new standing guidance concise. If it needs examples, incidents, or long checklists, put those behind a path-scoped rule, skill, or reference file and link to it.
 - For long `/do` work, keep `.do-state.md` and the PR body current so compaction does not erase phase, reviewer, or CodeRabbit state.
+- Once you open a PR, subscribe to its events (`create_project_event_subscription`: `source: github`, `subjectType: pull_request`, `subjectId: <PR number>`) so Codex, CodeRabbit and human reviews/comments reach you; address or reply to every finding before merge.
 
 Route common questions to the smallest durable source first:
 

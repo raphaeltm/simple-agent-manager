@@ -1,4 +1,5 @@
 # Operator configuration and box state (platform keys, secrets.env, gateway.env): never commit.
 .env
 .state/
+*.restore-progress.json
 backups/

@@ -9,6 +9,47 @@ import type {
   SessionStateSnapshot,
 } from '@simple-agent-manager/shared';
 
+import { WORKING_ACTIVITIES } from './session-state-prompt';
+
+/**
+ * A chat's activity, resolved the way the chat view resolves it (`resolveChatAgentState` in
+ * apps/api `routes/chat-agent-state.ts`): the newest ACP session's state row, else the row
+ * keyed by the chat itself. Over `cs` = chat_sessions. "Newest" is `created_at DESC, id DESC`,
+ * the same order `listAcpSessions` (`acp-sessions.ts`) uses, so a same-millisecond tie resolves
+ * to the same session in both.
+ */
+const CHAT_ACTIVITY_SQL = `COALESCE(
+    (SELECT s.activity FROM session_state s
+      WHERE s.session_id = (SELECT a.id FROM acp_sessions a
+                             WHERE a.chat_session_id = cs.id
+                             ORDER BY a.created_at DESC, a.id DESC LIMIT 1)),
+    (SELECT s.activity FROM session_state s WHERE s.session_id = cs.id))`;
+
+/**
+ * Awake chats whose agent is mid-turn: the activity mirror says a prompt is in flight
+ * (`WORKING_ACTIVITIES`). This is the Project Overview's "Running now" signal. It replaced a
+ * predicate on `tasks.execution_step` and `chat_sessions.agent_completed_at`: the step latches
+ * at `awaiting_followup` after the first turn and nothing writes `agent_completed_at`, so that
+ * predicate meant "still on its first turn" (rule 74).
+ *
+ * Bounded by `status = 'active'`: each awake chat holds a live runtime, so the set is the
+ * project's running agents, not its history (`idx_chat_sessions_status`).
+ */
+export function listWorkingChatSessionIds(sql: SqlStorage): string[] {
+  // Assembled only from module constants; every value is bound. Named `whereClause` because
+  // `scripts/quality/ast-checks.ts` allowlists that identifier for exactly this shape.
+  const whereClause = `cs.status = 'active' AND ${CHAT_ACTIVITY_SQL} IN (${WORKING_ACTIVITIES.map(() => '?').join(', ')})`;
+  const rows = sql
+    .exec(
+      `SELECT cs.id FROM chat_sessions cs WHERE ${whereClause} ORDER BY cs.id`,
+      ...WORKING_ACTIVITIES
+    )
+    .toArray();
+  return rows
+    .map((row) => row.id)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
+}
+
 export function getSessionState(sql: SqlStorage, sessionId: string): SessionStateSnapshot | null {
   const rows = sql
     .exec(

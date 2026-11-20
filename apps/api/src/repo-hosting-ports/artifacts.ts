@@ -1,7 +1,7 @@
 import type { ArtifactsBackendPort } from '@simple-agent-manager/repo-hosting/ports';
 
 import type { Env } from '../env';
-import { resolveArtifactsBackend } from '../services/hosted-git/backend';
+import { resolveArtifactsBackend } from '../services/artifacts/backend';
 
 /**
  * Repo hosting resolves the SAM-native repository backend through the worker's hosted-git seam:

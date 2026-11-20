@@ -1,7 +1,14 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
   "extends": "../deploy/tsconfig.json",
-  "compilerOptions": { "allowImportingTsExtensions": true },
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "@/*": ["./*"],
+      "@simple-agent-manager/providers": ["../../packages/providers/src/index.ts"],
+      "@simple-agent-manager/shared": ["../../packages/shared/src/index.ts"]
+    }
+  },
   "include": ["**/*.ts"],
   // live/ imports API modules that resolve workspace packages through their built dist/, so it
   // has its own project, checked by the Self-host Live job after it builds them.
