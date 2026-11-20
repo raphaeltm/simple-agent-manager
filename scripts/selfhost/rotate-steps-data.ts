@@ -153,11 +153,21 @@ async function migrateUntilProven(
     }
   }
   let last: PassTotals | null = null;
-  for (let round = (step.migrateRounds ?? 0) + 1; round <= MAX_MIGRATE_ROUNDS; round += 1) {
-    const migrated = await pass(`migrate:${round}`, 'migrate');
-    deps.log(`  round ${round}: ${migrated.migrated} value(s) re-encrypted`);
-    step.migrateRounds = round;
-    ctx.save();
+  let round = step.migrateRounds ?? 0;
+  // A run that stopped after a round's migrate was recorded finishes that round's verify first
+  // (runPass resumes it from its cursors), instead of starting the next round: in the last round
+  // that would verify nothing and roll back a migration that had in fact completed.
+  let verifyRecordedRound = round > 0;
+  for (;;) {
+    if (!verifyRecordedRound) {
+      round += 1;
+      if (round > MAX_MIGRATE_ROUNDS) break;
+      const migrated = await pass(`migrate:${round}`, 'migrate');
+      deps.log(`  round ${round}: ${migrated.migrated} value(s) re-encrypted`);
+      step.migrateRounds = round;
+      ctx.save();
+    }
+    verifyRecordedRound = false;
     last = await pass(`verify:${round}`, 'verify');
     if (!withinBaseline(last, step.baseline)) {
       return `${last.unreadable} value(s) are unreadable under both keys (${step.baseline?.unreadable ?? 0} were before the rotation)`;

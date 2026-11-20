@@ -42,7 +42,11 @@ import { completeSealedPlatformKeys } from '../../../../../scripts/selfhost/plat
 import type { RotateDeps } from '../../../../../scripts/selfhost/rotate-apply';
 import { formatRotationStatus } from '../../../../../scripts/selfhost/rotate-report';
 import { runRotate } from '../../../../../scripts/selfhost/rotate-run';
-import { openRotationStore, readJournal } from '../../../../../scripts/selfhost/rotate-store';
+import {
+  openRotationStore,
+  readJournal,
+  writeJournal,
+} from '../../../../../scripts/selfhost/rotate-store';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import {
@@ -415,6 +419,41 @@ describe('rotate encryption-key', () => {
     }
   });
 
+  it('resumes an interrupted verify pass of the recorded round instead of starting a new round (Codex P2)', async () => {
+    const old = deployed.ENCRYPTION_KEY!;
+    for (let i = 0; i < 3; i += 1) await seedCredential(`c-${i}`, `secret-${i}`, old);
+    let migratedD1 = false;
+    let thrown = false;
+    controlHook = async (body) => {
+      if (body.target !== 'd1') return;
+      if (body.mode === 'migrate') migratedD1 = true;
+      // The first verify page after round 1's migrate: the box stops mid-verify.
+      if (body.mode === 'verify' && migratedD1 && !thrown) {
+        thrown = true;
+        throw new Error('box lost power during verify');
+      }
+    };
+    await expect(runRotate(input({ names: ['encryption-key'] }), deps())).rejects.toThrow(
+      'box lost power during verify'
+    );
+    const stopped = readJournal(stateDir)?.steps['encryption-key'];
+    expect(stopped?.migrateRounds).toBe(1);
+    expect(stopped?.pass).toContain('verify:1');
+    controlHook = null;
+    logs = [];
+    await runRotate(input({ resume: true }), deps());
+    // Round 1's verify finished; no extra migrate round was started and nothing rolled back.
+    expect(logs.some((line) => line.includes('round 2'))).toBe(false);
+    expect(logs.some((line) => line.includes('FAILED'))).toBe(false);
+    expect(readJournal(stateDir)?.steps['encryption-key']?.phase).toBe('waiting');
+    const current = (await head()).ENCRYPTION_KEY!;
+    for (let i = 0; i < 3; i += 1) {
+      expect(
+        await decryptWithKeyOnly(credential(`c-${i}`).c, credential(`c-${i}`).iv, current)
+      ).toBe(`secret-${i}`);
+    }
+  });
+
   it('migrates a value written under the old key after verification before it retires the old key', async () => {
     const old = deployed.ENCRYPTION_KEY!;
     await seedCredential('c-agent', 'sk-agent', old);
@@ -569,6 +608,23 @@ describe('the rotation lock', () => {
 });
 
 describe('rotate jwt-keys', () => {
+  it('does not retire the old key when a run stopped before the overlap deadline was recorded (Codex P1)', async () => {
+    clock = Date.now();
+    await runRotate(input({ names: ['jwt-keys'], jwtOverlapHours: 25 }), deps());
+    const journal = readJournal(stateDir)!;
+    const step = journal.steps['jwt-keys']!;
+    expect(step.phase).toBe('waiting');
+    const recorded = step.waitUntil;
+    // The state a stop leaves between the overlap deploy and the deadline save.
+    delete step.waitUntil;
+    writeJournal(stateDir, journal);
+    await runRotate(input({ resume: true }), deps());
+    // Still in the overlap: the previous key is kept and the deadline is recorded again.
+    expect((await head()).JWT_PUBLIC_KEY_PREVIOUS).toBeDefined();
+    expect(readJournal(stateDir)?.steps['jwt-keys']?.phase).toBe('waiting');
+    expect(readJournal(stateDir)?.steps['jwt-keys']?.waitUntil).toBe(recorded);
+  });
+
   it('accepts tokens signed with the old key during the overlap, refuses them after it, and finishes on resume', async () => {
     clock = Date.now();
     vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true });

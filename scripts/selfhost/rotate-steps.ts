@@ -195,6 +195,27 @@ async function jwksKids(ctx: StepContext): Promise<string[]> {
 }
 
 /**
+ * Checks the deployed overlap and records its deadline (`step.waitUntil`). The Worker publishes
+ * only the current key: VM agents and relying parties never trust the old one (it is accepted
+ * only for callback tokens, by the Worker itself). Throws when the JWKS or the deadline is wrong.
+ */
+async function recordOverlapDeadline(ctx: StepContext): Promise<void> {
+  const head = (await ctx.store.head()).secrets;
+  const kids = await jwksKids(ctx);
+  if (kids.length !== 1 || kids[0] !== head.JWT_KEY_ID) {
+    throw new ApplyFailedError(
+      `the JWKS publishes ${kids.join(', ') || 'nothing'}, expected only ${head.JWT_KEY_ID}`
+    );
+  }
+  const until = head.JWT_PUBLIC_KEY_PREVIOUS_UNTIL;
+  if (!until || !Number.isFinite(Date.parse(until))) {
+    throw new ApplyFailedError('the deployed bundle has no valid JWT_PUBLIC_KEY_PREVIOUS_UNTIL');
+  }
+  ctx.step.waitUntil = until;
+  ctx.save();
+}
+
+/**
  * New key pair with its own kid; the old public key stays accepted (and published) until
  * JWT_PUBLIC_KEY_PREVIOUS_UNTIL. `rotate --resume` after that time removes it.
  */
@@ -223,20 +244,16 @@ export async function advanceOverlap(ctx: StepContext, overlapHours: number): Pr
         },
         'waiting'
       );
-      const head = (await ctx.store.head()).secrets;
-      // The Worker publishes only the current key: VM agents and relying parties never trust
-      // the old one (it is accepted only for callback tokens, by the Worker itself).
-      const kids = await jwksKids(ctx);
-      if (kids.length !== 1 || kids[0] !== head.JWT_KEY_ID) {
-        throw new ApplyFailedError(
-          `the JWKS publishes ${kids.join(', ') || 'nothing'}, expected only ${head.JWT_KEY_ID}`
-        );
-      }
-      step.waitUntil = head.JWT_PUBLIC_KEY_PREVIOUS_UNTIL;
-      ctx.save();
+      await recordOverlapDeadline(ctx);
     } catch (error) {
       return await rollBack(ctx, names, message(error));
     }
+  }
+  if (step.phase === 'waiting' && !Number.isFinite(Date.parse(step.waitUntil ?? ''))) {
+    // Stopped after the overlap deployed but before its deadline was recorded: finish that check
+    // now. Never read a missing deadline as "past", which would retire the old key unverified
+    // and cut off nodes still holding callback tokens it signed.
+    await recordOverlapDeadline(ctx);
   }
   if (step.phase === 'waiting' || (step.phase === 'staging' && step.stagedFor === 'done')) {
     if (step.phase === 'waiting' && deps.now() < Date.parse(step.waitUntil ?? '')) return;
