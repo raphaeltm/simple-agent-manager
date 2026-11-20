@@ -2,7 +2,8 @@
  * projectOverviewGet against a real SQL engine. "Running" is a SQL predicate over the D1 chat
  * index and the task table, and the project scope is a join condition, so a foreign project's
  * rows are seeded beside the owner's and must never appear (rule 11, rule 28 section 5). The
- * ProjectData idea snapshot is an external boundary and is mocked.
+ * ProjectData object is an external boundary and is mocked: its idea snapshot, and which chats
+ * its activity mirror reports as mid-turn (`listWorkingChatSessionIds`).
  */
 import type { OperationContext } from '@simple-agent-manager/operations';
 import { projectOverviewGet } from '@simple-agent-manager/operations';
@@ -18,10 +19,11 @@ import {
   createSqliteD1,
 } from '../../helpers/sqlite-d1';
 
-const mocks = vi.hoisted(() => ({ snapshots: vi.fn() }));
+const mocks = vi.hoisted(() => ({ snapshots: vi.fn(), working: vi.fn() }));
 vi.mock('../../../src/services/project-data', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/services/project-data')>()),
   getIdeaWorkSnapshots: mocks.snapshots,
+  listWorkingChatSessionIds: mocks.working,
 }));
 
 const NOW = 1_794_000_000_000;
@@ -30,6 +32,8 @@ const HOUR = 3_600_000;
 describe('projectOverviewGet', () => {
   let sqlite: Database.Database;
   let env: Env;
+  /** Chats the ProjectData activity mirror reports as mid-turn. */
+  let working: Set<string>;
 
   function ctx(userId = 'owner'): OperationContext {
     return {
@@ -84,18 +88,26 @@ describe('projectOverviewGet', () => {
     });
   }
 
-  /** A chat and its task, the way every chat is task-backed. */
+  /**
+   * A chat and its task, the way every chat is task-backed. Its agent is mid-turn unless
+   * `agent: 'idle'` (the activity mirror then does not report it).
+   */
   function running(
     id: string,
     chatFields: Record<string, string | number | null> = {},
-    taskFields: Record<string, string | number | null> = {}
+    taskFields: Record<string, string | number | null> = {},
+    { agent = 'working' }: { agent?: 'working' | 'idle' } = {}
   ): void {
     task(`task-${id}`, { chat_session_id: id, ...taskFields });
     chat(id, chatFields);
+    if (agent === 'working') working.add(id);
   }
+  const IDLE = { agent: 'idle' } as const;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    working = new Set();
+    mocks.working.mockImplementation(async () => [...working]);
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
     sqlite.exec(`
@@ -131,23 +143,30 @@ describe('projectOverviewGet', () => {
 
   it('lists working, starting and waiting chats and leaves idle, sleeping and finished ones out', async () => {
     running('working');
-    running('starting', { agent_completed_at: null }, { status: 'queued', execution_step: null });
-    running('waiting', {
-      agent_completed_at: NOW - 120_000,
-      attention_json: JSON.stringify({ markerId: 'm1', kind: 'needs_input' }),
-    });
-    running('idle', { agent_completed_at: NOW - 120_000 });
+    running('starting', {}, { status: 'queued', execution_step: null }, IDLE);
+    running(
+      'waiting',
+      { attention_json: JSON.stringify({ markerId: 'm1', kind: 'needs_input' }) },
+      {},
+      IDLE
+    );
+    running('idle', {}, {}, IDLE);
+    // The activity mirror says working, but the chat or task is asleep: not running.
     running('sleeping-chat', { status: 'sleeping' });
     running('sleeping-task', {}, { status: 'sleeping' });
     // The chat index still says active, but its task finished: not running.
     running('finished', {}, { status: 'completed', execution_step: null });
-    running('awaiting', {}, { execution_step: 'awaiting_followup' });
+    // The incident (2026-11-20): every chat past its first turn has its task's step latched at
+    // `awaiting_followup`. Mid-turn is the activity mirror's call, not the step's.
+    running('later-turn', {}, { execution_step: 'awaiting_followup' });
+    running('later-turn-idle', {}, { execution_step: 'awaiting_followup' }, IDLE);
 
     const result = await projectOverviewGet(ctx(), { projectId: 'p' });
 
     const byId = new Map(result.running.items.map((item) => [item.sessionId, item]));
-    expect([...byId.keys()].sort()).toEqual(['starting', 'waiting', 'working']);
-    expect(result.running.total).toBe(3);
+    expect([...byId.keys()].sort()).toEqual(['later-turn', 'starting', 'waiting', 'working']);
+    expect(result.running.total).toBe(4);
+    expect(byId.get('later-turn')?.state).toBe('working');
     expect(byId.get('working')).toMatchObject({
       state: 'working',
       topic: 'Chat working',
@@ -162,10 +181,7 @@ describe('projectOverviewGet', () => {
   });
 
   it('says a question is the viewer’s only when the viewer started the chat', async () => {
-    running('waiting', {
-      agent_completed_at: NOW - 1,
-      attention_json: JSON.stringify({ markerId: 'm1' }),
-    });
+    running('waiting', { attention_json: JSON.stringify({ markerId: 'm1' }) }, {}, IDLE);
     const result = await projectOverviewGet(ctx('teammate'), { projectId: 'p' });
     expect(result.running.items).toEqual([
       expect.objectContaining({ sessionId: 'waiting', state: 'waiting', waitingOnViewer: false }),
@@ -232,23 +248,35 @@ describe('projectOverviewGet', () => {
     for (let i = 0; i < 8; i++) running(`busy-${i}`, { last_message_at: NOW - i * 1000 });
     // Older than every busy chat: by recency alone it would fall behind the cap of five.
     const question = JSON.stringify({ markerId: 'm1' });
-    running('old-question', {
-      last_message_at: NOW - HOUR,
-      agent_completed_at: NOW - HOUR,
-      attention_json: question,
-    });
-    running('older-question', {
-      last_message_at: NOW - 2 * HOUR,
-      agent_completed_at: NOW - 2 * HOUR,
-      attention_json: question,
-    });
+    running(
+      'old-question',
+      {
+        last_message_at: NOW - HOUR,
+        attention_json: question,
+      },
+      {},
+      IDLE
+    );
+    running(
+      'older-question',
+      {
+        last_message_at: NOW - 2 * HOUR,
+        attention_json: question,
+      },
+      {},
+      IDLE
+    );
     // Control: a teammate's waiting chat is not the owner's to answer and is not lifted.
-    running('mates-question', {
-      last_message_at: NOW - 3 * HOUR,
-      agent_completed_at: NOW - 3 * HOUR,
-      attention_json: question,
-      created_by_user_id: 'teammate',
-    });
+    running(
+      'mates-question',
+      {
+        last_message_at: NOW - 3 * HOUR,
+        attention_json: question,
+        created_by_user_id: 'teammate',
+      },
+      {},
+      IDLE
+    );
 
     const result = await projectOverviewGet(ctx(), { projectId: 'p' });
 
@@ -293,20 +321,20 @@ describe('projectOverviewGet', () => {
 
   it('reads a chat paused on an open question ask as waiting, ranked first and counted', async () => {
     // Idle chats with no attention marker: only the ask can make them show.
-    const idle = { agent_completed_at: NOW - 120_000, last_message_at: NOW - 10 * HOUR };
-    running('asked', idle);
+    const idle = { last_message_at: NOW - 10 * HOUR };
+    running('asked', idle, {}, IDLE);
     question('ask-1', 'asked');
     running('fresh', {}, {});
     // Controls: an expired and an answered question leave the chat idle (not shown).
-    running('expired-q', idle);
+    running('expired-q', idle, {}, IDLE);
     question('ask-expired', 'expired-q', { expires_at: Date.now() - 1 });
-    running('answered-q', idle);
+    running('answered-q', idle, {}, IDLE);
     question('ask-answered', 'answered-q', { status: 'answered' });
     // Attack: another project's open question naming this project's chat id.
-    running('foreign-q', idle);
+    running('foreign-q', idle, {}, IDLE);
     question('ask-foreign', 'foreign-q', { project_id: 'foreign' });
     // A non-blocking ask (inbox slice D) does not pause its chat: it stays idle (not shown).
-    running('nonblocking-q', idle);
+    running('nonblocking-q', idle, {}, IDLE);
     question('ask-nonblocking', 'nonblocking-q', { blocking: 0, expires_at: null });
 
     const result = await projectOverviewGet(ctx(), { projectId: 'p', runningLimit: 1 });
@@ -345,16 +373,16 @@ describe('projectOverviewGet', () => {
   it('keeps a chat paused on a pending secret request in Running now, as waiting (slice F2)', async () => {
     // The agent ended its turn after asking: without the request the chat is idle and hidden,
     // while the inbox still calls it "paused on this".
-    const idle = { agent_completed_at: NOW - 120_000, last_message_at: NOW - 10 * HOUR };
-    running('secret-wait', idle);
+    const idle = { last_message_at: NOW - 10 * HOUR };
+    running('secret-wait', idle, {}, IDLE);
     secretRequest('sr-1', 'secret-wait');
     // Controls: expired and fulfilled requests leave the chat idle (not shown).
-    running('secret-expired', idle);
+    running('secret-expired', idle, {}, IDLE);
     secretRequest('sr-expired', 'secret-expired', { expires_at: Date.now() - 1 });
-    running('secret-done', idle);
+    running('secret-done', idle, {}, IDLE);
     secretRequest('sr-done', 'secret-done', { status: 'fulfilled' });
     // Attack: another project's pending request naming this project's chat id.
-    running('secret-foreign', idle);
+    running('secret-foreign', idle, {}, IDLE);
     secretRequest('sr-foreign', 'secret-foreign', { project_id: 'foreign' });
 
     const result = await projectOverviewGet(ctx(), { projectId: 'p' });
@@ -371,7 +399,11 @@ describe('projectOverviewGet', () => {
     // A teammate sees the chat as paused too, but not on them: it is the creator's to answer.
     const mate = await projectOverviewGet(ctx('teammate'), { projectId: 'p' });
     expect(mate.running.items).toEqual([
-      expect.objectContaining({ sessionId: 'secret-wait', state: 'waiting', waitingOnViewer: false }),
+      expect.objectContaining({
+        sessionId: 'secret-wait',
+        state: 'waiting',
+        waitingOnViewer: false,
+      }),
     ]);
     expect(mate.running.waitingOnViewerTotal).toBe(0);
   });
@@ -465,6 +497,16 @@ describe('projectOverviewGet', () => {
     expect(result.running.items.map((item) => item.sessionId)).toEqual(['working']);
   });
 
+  it('says Running now is unavailable when the activity read fails, instead of calling every chat idle', async () => {
+    running('working');
+    mocks.working.mockRejectedValue(new Error('ProjectData unavailable'));
+    const result = await projectOverviewGet(ctx(), { projectId: 'p' });
+    expect(result.unavailable).toContain('running');
+    expect(result.running).toEqual({ items: [], total: 0, waitingOnViewerTotal: 0 });
+    // Control: the other sections still load.
+    expect(result.unavailable).not.toContain('pullRequests');
+  });
+
   it('stays within the dashboard round-trip budget with ideas that have linked work', async () => {
     running('working');
     for (let i = 0; i < 3; i++) {
@@ -527,10 +569,12 @@ describe('projectOverviewGet', () => {
 
     expect(result.unavailable).toEqual([]);
     expect(result.recent.ideas).toHaveLength(3);
-    const doCalls = mocks.snapshots.mock.calls.length;
+    const doCalls = mocks.snapshots.mock.calls.length + mocks.working.mock.calls.length;
     // .claude/rules/60: a dashboard read spends at most 20 D1 + DO round trips.
     expect(d1Reads + doCalls).toBeLessThanOrEqual(20);
-    expect(doCalls).toBe(1);
+    // One idea snapshot and one activity read, shared by Running now and the brief.
+    expect(mocks.snapshots).toHaveBeenCalledTimes(1);
+    expect(mocks.working).toHaveBeenCalledTimes(1);
   });
 
   it('reads the newest merged pull requests from an index, without sorting the project history', async () => {

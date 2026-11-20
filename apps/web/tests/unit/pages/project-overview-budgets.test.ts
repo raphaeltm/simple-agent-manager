@@ -7,7 +7,10 @@ import {
   usageWords,
 } from '../../../src/components/project-chat/profile-picker/usage';
 import type { UsageWindowReading } from '../../../src/components/project-chat/profile-picker/usage-windows';
-import { budgetAccounts } from '../../../src/pages/project-overview/BudgetsSection';
+import {
+  budgetAccounts,
+  budgetTileLabel,
+} from '../../../src/pages/project-overview/BudgetsSection';
 
 function reading(
   label: string,
@@ -86,29 +89,34 @@ describe('budgetAccounts', () => {
       ['b', usage({})],
       ['c', usage({ accountLabel: 'Work Pro', accountKey: 'cc:work', accountId: 'cfg-work' })],
     ]);
-    const { accounts, exceptions } = budgetAccounts(profiles, usages);
+    const { accounts, noAccount } = budgetAccounts(profiles, usages);
     expect(accounts.map((a) => [a.label, a.profiles.map((p) => p.name)])).toEqual([
       ['Personal Max', ['Opus Build', 'Sonnet Chat']],
       ['Work Pro', ['Codex']],
     ]);
-    expect(exceptions).toEqual([]);
+    // Calm accounts carry no status: just the ring and the name.
+    expect(accounts.map((a) => a.status)).toEqual([null, null]);
+    expect(noAccount).toEqual([]);
   });
 
-  it('puts words only on exceptions: a low window named in full, a paused account, no account', () => {
+  it('gives each exception one short status on its own tile, with the full words as its detail', () => {
     const profiles = [
       profile('a', 'Opus Build'),
       profile('b', 'Codex'),
       profile('c', 'Kimi'),
       profile('d', 'Gemma'),
+      profile('e', 'Sonnet'),
     ];
     const usages = new Map<string, ProfileUsage>([
       [
         'a',
         usage({
           state: 'out',
-          left: 6,
+          left: 0,
+          color: 'red',
+          resetIn: '2d 4h',
           session: reading('5h', 60),
-          week: reading('Week', 6, '2d 4h'),
+          week: reading('Week', 0, '2d 4h'),
           urgent: true,
         }),
       ],
@@ -123,14 +131,54 @@ describe('budgetAccounts', () => {
       ],
       ['c', usage({ state: 'none', accountLabel: null, accountKey: null, accountId: null })],
       ['d', usage({ state: 'platform', accountLabel: null, accountKey: null, accountId: null })],
+      [
+        'e',
+        usage({
+          state: 'low',
+          left: 13,
+          accountLabel: 'Team Max',
+          accountKey: 'cc:team',
+          accountId: 'cfg-team',
+          session: reading('5h', 70),
+          week: reading('Week', 13, '2d 5h'),
+        }),
+      ],
     ]);
-    const { accounts, exceptions } = budgetAccounts(profiles, usages);
-    expect(accounts.map((a) => a.label)).toEqual(['Personal Max', 'SAM platform', 'Work Pro']);
-    expect(exceptions.map((e) => e.text)).toEqual([
-      'Personal Max: Weekly window · 6% left · resets 2d 4h',
-      'Work Pro is paused',
-      'No account connected for Kimi',
+    const { accounts, noAccount } = budgetAccounts(profiles, usages);
+    expect(accounts.map((a) => [a.label, a.status?.text ?? null])).toEqual([
+      ['Personal Max', 'Out · 2d 4h'],
+      ['SAM platform', null],
+      ['Team Max', '13% left'],
+      ['Work Pro', 'Paused'],
     ]);
+    const team = accounts.find((a) => a.label === 'Team Max')!;
+    // The week's health colours the short status; the detail names the window in full.
+    expect(team.status?.color).not.toBeNull();
+    expect(team.status?.detail).toBe('Weekly window · 13% left · resets 2d 5h');
+    expect(budgetTileLabel(team)).toBe(
+      'Team Max, Weekly window · 13% left · resets 2d 5h, used by Sonnet'
+    );
+    expect(accounts.find((a) => a.label === 'Personal Max')?.status?.detail).toBe(
+      'Weekly window used up · back in 2d 4h'
+    );
+    expect(noAccount).toEqual(['Kimi']);
+  });
+
+  it('keeps a low session alone neutral: only the week carries a colour', () => {
+    const { accounts } = budgetAccounts(
+      [profile('a', 'Opus Build')],
+      new Map([
+        [
+          'a',
+          usage({ state: 'low', left: 38, session: reading('5h', 38), week: reading('Week', 70) }),
+        ],
+      ])
+    );
+    expect(accounts[0]?.status).toEqual({
+      text: '38% left',
+      color: null,
+      detail: '5-hour window · 38% left · resets 1h 20m',
+    });
   });
 
   it('leaves out profiles whose usage has not loaded', () => {

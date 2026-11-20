@@ -7,10 +7,11 @@
  * those models and their cached reads rather than restating the rules on the server.
  *
  * Round trips: authorization (1, the access port's membership read), then in parallel the
- * running query (1), the merged pull requests (1) and the recent ideas
- * (`listRecentIdeasWithDerivedStatus`: rows, repository, the ProjectData snapshot, and up to four
- * evidence reads, so at most 7), and the brief (1: its stored row and which of the items it names
- * are still open, one statement; settings are cached per isolate). About 11, within the 20 a
+ * running query (2: the ProjectData read of which chats are mid-turn, then one statement), the
+ * merged pull requests (1) and the recent ideas (`listRecentIdeasWithDerivedStatus`: rows,
+ * repository, the ProjectData snapshot, and up to four evidence reads, so at most 7), and the
+ * brief (1: its stored row and which of the items it names are still open, one statement; it
+ * shares the running query's ProjectData read; settings are cached per isolate). About 12, within the 20 a
  * dashboard read may spend (`.claude/rules/60`). The brief is only read here: making one runs
  * after the response, in the background (`refreshProjectBriefIfDue`, apps/api).
  */
@@ -34,6 +35,7 @@ import { getProjectBriefSettings } from './project-brief-settings';
 import {
   OVERVIEW_RUNNING_TASK_STATUSES,
   OVERVIEW_STARTING_TASK_STATUSES,
+  OVERVIEW_WORKING_SESSIONS_SQL,
   overviewChatRunningSql,
   overviewPausedSessionsSql,
 } from './project-overview-statuses';
@@ -65,9 +67,8 @@ const WAITING_ON_VIEWER_SQL = `(CASE WHEN ${PAUSED_ON_PERSON_SQL} AND ss.created
 
 /**
  * Awake chats (`session_summaries.status = 'active'`, the D1 index the DO keeps in sync) whose
- * task is in a running status, and that are either still being placed, mid-turn
- * (`agent_completed_at IS NULL`, the same rule the chat list uses for "idle"), or paused on an
- * open question. The task join carries `project_id` so a task id cannot reach across projects
+ * task is in a running status, and that are either still being placed, mid-turn (the ids in
+ * `working_sessions`, read from the ProjectData activity mirror), or paused on an open question. The task join carries `project_id` so a task id cannot reach across projects
  * (rule 11), and a profile name is shown only for this project's profiles or the task creator's
  * own global ones, so a hint naming someone else's global profile reveals nothing. `COUNT(*) OVER ()` gives the total without a second round trip.
  * `paused_sessions` reads this project's open, unexpired question asks (`idx_asks_open_question`)
@@ -77,9 +78,11 @@ const WAITING_ON_VIEWER_SQL = `(CASE WHEN ${PAUSED_ON_PERSON_SQL} AND ss.created
 const RUNNING_SQL = `
   WITH paused_sessions AS (
     ${overviewPausedSessionsSql('?')}
+  ), working_sessions AS (
+    ${OVERVIEW_WORKING_SESSIONS_SQL}
   )
   SELECT ss.id, ss.task_id, ss.topic, ss.started_at, ss.created_at, ss.last_message_at,
-         ss.agent_completed_at, ss.created_by_user_id,
+         ss.created_by_user_id,
          CASE WHEN ${PAUSED_ON_PERSON_SQL} THEN 1 ELSE 0 END AS has_attention,
          t.status AS task_status, t.agent_profile_hint,
          ap.name AS profile_name,
@@ -91,7 +94,10 @@ const RUNNING_SQL = `
       ON ap.id = t.agent_profile_hint
      AND (ap.project_id = ss.project_id OR (ap.project_id IS NULL AND ap.user_id = t.user_id))
    WHERE ss.project_id = ?
-     AND ${overviewChatRunningSql('SELECT session_id FROM paused_sessions')}
+     AND ${overviewChatRunningSql(
+       'SELECT session_id FROM paused_sessions',
+       'SELECT session_id FROM working_sessions'
+     )}
    ORDER BY ${WAITING_ON_VIEWER_SQL} DESC,
             COALESCE(ss.last_message_at, ss.created_at, ss.started_at) DESC, ss.id DESC
    LIMIT ?`;
@@ -112,7 +118,6 @@ const RunningRowSchema = v.object({
   started_at: v.number(),
   created_at: v.nullable(v.number()),
   last_message_at: v.nullable(v.number()),
-  agent_completed_at: v.nullable(v.number()),
   created_by_user_id: v.nullable(v.string()),
   has_attention: v.number(),
   task_status: v.picklist(OVERVIEW_RUNNING_TASK_STATUSES),
@@ -168,20 +173,32 @@ function toRunningChat(
 /**
  * Running now for one viewer. `viewerId` only decides which rows are "waiting on the viewer" (and
  * ranks them first); pass an id that matches nobody for a viewer-neutral read, as the brief's
- * facts do (`project-brief-facts.ts`).
+ * facts do (`project-brief-facts.ts`). `workingSessionIds` are the chats whose agent is mid-turn,
+ * from the ProjectData object (`listWorkingChatSessionIds`).
  */
 export async function readRunningChats(
   db: D1Database,
   projectId: string,
   viewerId: string,
-  limit: number
+  limit: number,
+  workingSessionIds: readonly string[]
 ): Promise<ProjectOverviewResponse['running']> {
   const now = Date.now();
   const result = await db
     .prepare(RUNNING_SQL)
     // Placeholders in order: project and clock (open questions), project and clock (pending
-    // secret requests), viewer (sum), project, viewer (ranking), limit.
-    .bind(projectId, now, projectId, now, viewerId, projectId, viewerId, limit)
+    // secret requests), working chat ids (JSON), viewer (sum), project, viewer (ranking), limit.
+    .bind(
+      projectId,
+      now,
+      projectId,
+      now,
+      JSON.stringify(workingSessionIds),
+      viewerId,
+      projectId,
+      viewerId,
+      limit
+    )
     .all<Record<string, unknown>>();
   const rows = result.results ?? [];
   const items: OverviewRunningChat[] = [];
@@ -290,12 +307,23 @@ export async function projectOverviewGet(
   const recentLimit = clampLimit(input.recentLimit, DEFAULT_PROJECT_OVERVIEW_RECENT_LIMIT);
 
   const unavailable: ProjectOverviewSection[] = [];
+  // Read once, used by Running now and by the brief's re-check of the chats it names. If it
+  // fails, both sections are unavailable rather than reporting every chat as idle.
+  const working = ctx.ports.projectData.listWorkingChatSessionIds(projectId);
+  working.catch(() => undefined); // Each section reports its own failure.
   const [running, ideas, mergedPullRequests, brief] = await Promise.all([
     section(
       'running',
       projectId,
       { items: [], total: 0, waitingOnViewerTotal: 0 },
-      () => readRunningChats(ctx.env.DATABASE, projectId, ctx.actor.userId, runningLimit),
+      async () =>
+        readRunningChats(
+          ctx.env.DATABASE,
+          projectId,
+          ctx.actor.userId,
+          runningLimit,
+          await working
+        ),
       unavailable
     ),
     section(
@@ -320,7 +348,7 @@ export async function projectOverviewGet(
       null,
       async () =>
         (await getProjectBriefSettings(ctx)).enabled
-          ? readProjectBrief(ctx.env.DATABASE, projectId, Date.now())
+          ? readProjectBrief(ctx.env.DATABASE, projectId, Date.now(), await working)
           : null,
       unavailable
     ),
