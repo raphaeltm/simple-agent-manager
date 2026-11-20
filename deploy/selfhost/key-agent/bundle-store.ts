@@ -45,6 +45,16 @@ export interface BundleStoreConfig {
   dir: string;
 }
 
+/** fsync a directory, so names created, renamed or removed in it survive a power loss. */
+function syncDirectory(dir: string): void {
+  const fd = openSync(dir, 'r');
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /** The one place a bundle location is chosen. */
 export function openBundleStore(config: BundleStoreConfig): BundleStore {
   return localBundleStore(config.dir);
@@ -92,9 +102,13 @@ function localBundleStore(dir: string): BundleStore {
         closeSync(fd);
       }
       renameSync(temp, target);
+      // The rename is durable only once the directory is: until then a power loss can drop the
+      // new name, after the deploy published this id and migrate removed the plaintext files.
+      syncDirectory(dir);
     },
     async remove(bundleId) {
       rmSync(pathOf(bundleId), { force: true });
+      syncDirectory(dir);
     },
   };
 }
