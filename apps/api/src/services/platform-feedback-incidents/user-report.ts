@@ -9,8 +9,8 @@ import { getIncidentConfig, type IncidentConfig } from '../platform-feedback-inc
 import { parseStoredIncidentResolutionReferences } from '../platform-feedback-incident-resolution-references';
 import { formatUntrustedIdeaContent } from '../untrusted-idea-content';
 import { REPORT_SOURCE } from './constants';
-import { readIncidentRow } from './rows';
 import { updateOwnedIncidentIdea } from './idea-writes';
+import { readIncidentRow } from './rows';
 import { isActiveIncidentState, shouldReopenIncidentForOccurrence } from './state';
 import {
   boundedEvidenceRefs,

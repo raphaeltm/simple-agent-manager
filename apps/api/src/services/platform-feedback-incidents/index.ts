@@ -21,8 +21,8 @@ export {
   explainUndispatchableIncidents,
   INCIDENT_DISPATCH_BLOCK_REASONS,
   type IncidentDispatchBlockReason,
-  type IncidentDispatchBreakdown,
   incidentDispatchBlockReasonSql,
+  type IncidentDispatchBreakdown,
 } from './dispatch-diagnostics';
 export {
   IDEA_RELEASED_MARKER,

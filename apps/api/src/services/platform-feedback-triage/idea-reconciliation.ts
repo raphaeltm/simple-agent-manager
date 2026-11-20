@@ -23,6 +23,7 @@
  */
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { resolveFleetOpsSettings } from '../fleet-ops/settings';
 import {
   cancelOwnedIncidentIdea,
   configuredFeedbackProjectId,
@@ -33,7 +34,6 @@ import {
   readIdeaEngagement,
   releaseEngagedIncidentIdeas,
 } from '../platform-feedback-incidents';
-import { resolveFleetOpsSettings } from '../fleet-ops/settings';
 import {
   DEFAULT_PLATFORM_FEEDBACK_TRIAGE_IDEA_TITLE_MAX_LENGTH,
   displayPlatformErrorMessage,

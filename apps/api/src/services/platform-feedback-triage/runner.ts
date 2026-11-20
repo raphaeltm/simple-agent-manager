@@ -16,8 +16,8 @@ import { runDebugDiagnosis, SCHEDULED_TRIAGE_DEBUG_FEATURE_KEY } from '../debug-
 import { configuredFeedbackProjectId } from '../platform-feedback-incidents';
 import {
   classifyBudgetBlock,
-  groupPlatformErrors,
   DEFAULT_PLATFORM_FEEDBACK_TRIAGE_IDEA_TITLE_MAX_LENGTH,
+  groupPlatformErrors,
   ideaDescription,
   isLegacyGenericSummary,
   nextUtcDayStart,

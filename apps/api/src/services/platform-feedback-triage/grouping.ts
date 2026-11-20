@@ -192,12 +192,15 @@ export function isLegacyGenericSummary(summary: string | null | undefined): bool
  */
 export function displayPlatformErrorMessage(message: string): string {
   const redacted = String(redactSensitiveData(message));
+  const printable = Array.from(normalizeTextTokens(normalizeEmbeddedJson(redacted), true, false))
+    .map((ch) => {
+      const code = ch.codePointAt(0) ?? 0;
+      return code < 32 || code === 127 ? ' ' : ch;
+    })
+    .join('');
   return (
-    normalizeTextTokens(normalizeEmbeddedJson(redacted), true, false)
-      .replace(/[\u0000-\u001f\u007f]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, PLATFORM_ERROR_MESSAGE_GROUP_MAX_LENGTH) || 'redacted platform error'
+    printable.replace(/\s+/g, ' ').trim().slice(0, PLATFORM_ERROR_MESSAGE_GROUP_MAX_LENGTH) ||
+    'redacted platform error'
   );
 }
 
