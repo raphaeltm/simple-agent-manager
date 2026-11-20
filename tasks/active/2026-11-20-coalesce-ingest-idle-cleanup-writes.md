@@ -53,24 +53,35 @@ the deadline moves by only a few seconds each time against a 15-minute timeout.
 
 ## Implementation checklist
 
-- [ ] `resetIdleCleanup(sql, env, sessionId, options?)`: optional `extendIntervalMs` (absent or 0 =
+- [x] `resetIdleCleanup(sql, env, sessionId, options?)`: optional `extendIntervalMs` (absent or 0 =
       today's exact behaviour); skip when the armed, non-retrying deadline already covers
       `now + timeout`; otherwise write `now + timeout + interval`. Report whether it wrote.
-- [ ] Batch path passes the configured interval and recalculates the alarm only after a write.
-- [ ] `MessageMergeConfig.idleExtendIntervalMs` + default (60 s) in `DEFAULT_MESSAGE_MERGE_CONFIG`.
-- [ ] Admin setting `chat.idleCleanupExtendIntervalMs` (0–300000), resolved in `operationsPort`.
-- [ ] Tests (real workerd, real RPC): steady batches within the interval write no idle rows and
+- [x] Batch path passes the configured interval and recalculates the alarm only after a write.
+- [x] `MessageMergeConfig.idleExtendIntervalMs` + default (60 s) in `DEFAULT_MESSAGE_MERGE_CONFIG`.
+- [x] Admin setting `chat.idleCleanupExtendIntervalMs` (0–300000), resolved in `operationsPort`.
+- [x] Tests (real workerd, real RPC): steady batches within the interval write no idle rows and
       no alarm; a batch after the interval extends; deadline never earlier than
       `last message + timeout`; retry state still reset; interval 0 restores per-batch writes;
       single-message and prompt-delivery paths unchanged; row-cost profile snapshot updated.
-- [ ] Discrimination: remove the skip, confirm the coalescing tests go red.
-- [ ] Docs: admin settings guide / any doc describing idle cleanup extension.
+- [x] Discrimination: remove the skip, confirm the coalescing tests go red.
+- [x] Docs: admin settings guide / any doc describing idle cleanup extension.
 
 ## Acceptance criteria
 
-- [ ] A steady merged batch inside the interval writes 4 fewer rows (idle 3 + alarm 1) in real workerd.
-- [ ] Idle cleanup never fires before `last message + timeout`; at most `interval` later.
-- [ ] Setting the interval to 0 restores the per-batch extension exactly.
+- [x] A steady merged batch inside the interval writes 4 fewer rows (idle 3 + alarm 1) in real workerd.
+- [x] Idle cleanup never fires before `last message + timeout`; at most `interval` later.
+- [x] Setting the interval to 0 restores the per-batch extension exactly.
 - [ ] Staging: measured `persistMessageBatch` writes per call before and after on a real agent
       chat, and the idle cleanup still fires for an idle task session.
 - [ ] Raphaël asked via inbox before merge (merge not authorized yet).
+
+## Implementation notes
+
+- Measured in workerd (merged steady batch, prompting, idle armed): 12 rows → 8 rows, 0 alarm writes.
+- Discrimination: disabling the skip turned exactly the 2 coalescing tests red; removing the retry
+  conjuncts turned exactly the retry test red.
+- `project-data-ingest-cost` snapshot changed only in the idle-schedule SELECT text (the fixture has
+  no armed schedule, so its write counts are unchanged).
+- The two archive Workers tests that failed in a 32-file parallel run pass alone (timeouts under load).
+- `idleDurationMs` in the idle-terminal diagnostic is derived from `cleanup_at - timeout`, so it can
+  understate idle time by up to the interval. Diagnostic text only.
