@@ -9,6 +9,7 @@ import {
   ensureMailCollectorPassword,
   mailCollectorEnabled,
   mailCollectorPorts,
+  mailEgressEndpoints,
   renderMailCollectorEnv,
   smtpWorkerVars,
   writeMailCollectorFiles,
@@ -240,5 +241,39 @@ describe('collector ports', () => {
     [{ MAIL_COLLECTOR_SMTP_PORT: '2525', MAIL_COLLECTOR_UI_PORT: '2525' }, 'must differ'],
   ])('refuses %o', (ports, message) => {
     expect(() => mailCollectorPorts({ ...COLLECTOR, ...ports })).toThrow(message);
+  });
+});
+
+describe('SMTP fence endpoints', () => {
+  it.each([
+    [{ SMTP_HOST: '127.0.0.2', SMTP_TLS: 'none', SMTP_PORT: '2525' }, '127.0.0.2', 2525],
+    [{ SMTP_HOST: '[::1]', SMTP_TLS: 'tls' }, '::1', 465],
+    [{ SMTP_HOST: '10.42.0.5' }, '10.42.0.5', 587],
+  ] as const)('uses the Worker routing defaults for %o', async (settings, address, port) => {
+    expect(
+      await mailEgressEndpoints({
+        ...settings,
+        SMTP_FROM: 'sign-in@sam.example.com',
+        SMTP_USERNAME: 'authenticated-relay',
+      })
+    ).toEqual([{ address, port }]);
+  });
+
+  it('resolves every relay address and uses only the configured port', async () => {
+    const queried: string[] = [];
+    expect(
+      await mailEgressEndpoints({ ...RELAY, SMTP_PORT: '2465', SMTP_TLS: 'tls' }, async (host) => {
+        queried.push(host);
+        return ['10.42.0.5', 'fd00::5'];
+      })
+    ).toEqual([
+      { address: '10.42.0.5', port: 2465 },
+      { address: 'fd00::5', port: 2465 },
+    ]);
+    expect(queried).toEqual(['smtp.example.com']);
+  });
+
+  it('fails when a configured relay resolves to no addresses', async () => {
+    await expect(mailEgressEndpoints(RELAY, async () => [])).rejects.toThrow(/did not resolve/);
   });
 });

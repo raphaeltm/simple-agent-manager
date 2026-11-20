@@ -17,12 +17,22 @@ import { networkInterfaces } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
-import { composeArgs, composeFilesFor } from './backup-lib.js';
-import { resolveTunnelPortRange } from './box-settings.js';
+import { composeFilesFor } from './compose-env.js';
+
+function composeArgs(input: { composeFiles: string[]; envFile: string }, args: string[]): string[] {
+  return [
+    'compose',
+    '--env-file',
+    input.envFile,
+    ...input.composeFiles.flatMap((file) => ['-f', file]),
+    ...args,
+  ];
+}
+import { loadBoxEnv, resolveTunnelPortRange } from './box-settings.js';
 import { EGRESS_FENCE_TABLE, parseNameservers } from './egress-fence.js';
 import { buildProbeScript, parseProbeOutput, type ProbeOutcome } from './fence-probes.js';
 import {
-  attestationProblem,
+  boxAttestationProblem,
   dnsChainAddresses,
   judgeTargets,
   missingNameservers,
@@ -30,7 +40,6 @@ import {
   type VerifyTarget,
   verifyTargets,
 } from './fence-verify.js';
-import { parseDotenv } from './secret-files.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../..');
 const SELFHOST_DIR = join(REPO_ROOT, 'deploy/selfhost');
@@ -40,8 +49,6 @@ const DEFAULT_PUBLIC_NAME = 'example.com';
 const CONTROL_UID = 65534;
 /** Above the ~1 s a refused TCP connect() takes (it is reported on the first SYN retransmit). */
 const DEFAULT_PROBE_TIMEOUT_SECONDS = 4;
-/** Same default as SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS in docker-compose.yml. */
-const DEFAULT_ATTESTATION_MAX_AGE_SECONDS = 20;
 const ATTESTATION_PATH = '/run/sam-egress-fence/attestation';
 
 interface Run {
@@ -56,7 +63,7 @@ function run(command: string, args: string[]): Run {
 
 /** Compose with every file the box runs with (its COMPOSE_FILE), as the stack was started. */
 function compose(envFile: string, args: string[]): Run {
-  const box = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
+  const box = loadBoxEnv(envFile, SELFHOST_DIR);
   return run(
     'docker',
     composeArgs({ composeFiles: composeFilesFor(box, SELFHOST_DIR), envFile }, args)
@@ -92,8 +99,15 @@ function probe(
   targets: readonly VerifyTarget[],
   user?: number
 ): Map<number, ProbeOutcome> {
-  const script = buildProbeScript(probeSpecs(targets), DEFAULT_PROBE_TIMEOUT_SECONDS);
-  return parseProbeOutput(inContainer(name, ['bash', '-c', script], user).output);
+  const specs = probeSpecs(targets);
+  const script = buildProbeScript(specs, DEFAULT_PROBE_TIMEOUT_SECONDS);
+  const run = inContainer(name, ['bash', '-c', script], user);
+  if (run.status !== 0) throw new Error('fence probe execution failed');
+  const results = parseProbeOutput(run.output);
+  if (results.size !== specs.length || specs.some((_, index) => !results.has(index))) {
+    throw new Error('fence probe results are incomplete');
+  }
+  return results;
 }
 
 /** The nameservers chain `dns` of the applied fence opens, from the fence service; null if unreadable. */
@@ -115,14 +129,34 @@ function appliedNameservers(envFile: string): string[] | null {
 /** celld's resolv.conf: the running celld container's, else the probe container's. */
 function celldNameservers(envFile: string, probeContainer: string): string[] {
   const running = compose(envFile, ['exec', '-T', 'celld', 'cat', '/etc/resolv.conf']);
-  const text =
-    running.status === 0
-      ? running.output
-      : inContainer(probeContainer, ['cat', '/etc/resolv.conf']).output;
-  return parseNameservers(text);
+  let text = running.output;
+  if (running.status !== 0) {
+    const state = compose(envFile, ['ps', '--status', 'running', '--quiet', 'celld']);
+    if (state.status !== 0 || state.output.trim()) {
+      throw new Error('cannot read resolver configuration from running celld');
+    }
+    const fallback = inContainer(probeContainer, ['cat', '/etc/resolv.conf']);
+    if (fallback.status !== 0) throw new Error('cannot read probe resolver configuration');
+    text = fallback.output;
+  }
+  const servers = parseNameservers(text);
+  if (servers.length === 0) throw new Error('resolver configuration contains no nameservers');
+  return servers;
 }
 
 function checkService(envFile: string, probeContainer: string, failures: string[]): void {
+  const checked = compose(envFile, [
+    'exec',
+    '-T',
+    'egress-fence',
+    '/bin/sh',
+    '/usr/local/bin/sam-egress-fence',
+    'check',
+  ]);
+  if (checked.status !== 0) {
+    failures.push('the fence service check failed: rules changed or fence loss is latched');
+    return;
+  }
   const applied = appliedNameservers(envFile);
   if (applied === null) {
     failures.push(
@@ -135,14 +169,14 @@ function checkService(envFile: string, probeContainer: string, failures: string[
   if (missing.length > 0) {
     failures.push(
       `resolver drift: celld uses ${missing.join(', ')}, which the fence's DNS sets do not ` +
-        'open; the egress-fence service syncs them from resolv.conf within its recheck interval'
+        'open; run pnpm selfhost:deploy --init to regenerate and reconcile the fence, then rerun verification'
     );
   }
   const attestation = compose(envFile, ['exec', '-T', 'egress-fence', 'cat', ATTESTATION_PATH]);
-  const problem = attestationProblem(
+  const problem = boxAttestationProblem(
     attestation.output,
     Math.floor(Date.now() / 1000),
-    DEFAULT_ATTESTATION_MAX_AGE_SECONDS
+    loadBoxEnv(envFile, SELFHOST_DIR)
   );
   if (problem) failures.push(`${problem}; celld stops serving without it`);
 }
@@ -155,13 +189,14 @@ function localAddresses(): string[] {
 }
 
 async function verify(envFile: string, publicProbe: string, publicName: string): Promise<string[]> {
-  const box = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
+  const box = loadBoxEnv(envFile, SELFHOST_DIR);
   const own = localAddresses();
   const targets = await verifyTargets({
     box,
     range: resolveTunnelPortRange(box),
     publicProbe,
     localAddresses: own,
+    resolvConf: readFileSync('/etc/resolv.conf', 'utf8'),
   });
   const name = startProbeContainer(envFile);
   try {
@@ -211,8 +246,10 @@ async function main(): Promise<void> {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) {
-  main().catch((error: unknown) => {
+  try {
+    await main();
+  } catch (error: unknown) {
     console.error(`[selfhost] ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
-  });
+  }
 }

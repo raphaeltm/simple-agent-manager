@@ -41,15 +41,22 @@ function ensureMetadataProxySecret(stateDir: string): string {
  * pointed at a proxy that is not running; with it and no gs:// bucket the proxy has no config.
  */
 export function assertComposeProfiles(box: Readonly<Record<string, string>>): void {
-  const profiles = (box.COMPOSE_PROFILES ?? '').split(',').map((profile) => profile.trim());
+  const profiles = new Set(
+    (box.COMPOSE_PROFILES ?? '').split(',').map((profile) => profile.trim())
+  );
+  if (profiles.has('*')) {
+    throw new Error(
+      'COMPOSE_PROFILES=* cannot safely select the optional metadata proxy; list profiles explicitly'
+    );
+  }
   const wanted = metadataProxyEnabled(box);
-  if (wanted && !profiles.includes(GCE_PROFILE)) {
+  if (wanted && !profiles.has(GCE_PROFILE)) {
     throw new Error(
       'a gs:// bucket uses the GCE metadata token proxy: add `gce` to COMPOSE_PROFILES ' +
         '(or set GCE_METADATA_PROXY=off when celld gets Google credentials another way)'
     );
   }
-  if (!wanted && profiles.includes(GCE_PROFILE)) {
+  if (!wanted && profiles.has(GCE_PROFILE)) {
     throw new Error('COMPOSE_PROFILES has `gce` but the metadata token proxy is off; remove it');
   }
 }
@@ -64,6 +71,8 @@ export async function writeFenceFiles(input: {
   box: Readonly<Record<string, string>>;
   leaseRange: PortRange;
   resolvConf?: string;
+  /** Persist recovery intent synchronously before either live input changes. */
+  beforeWrite?: (changed: readonly string[]) => void;
 }): Promise<FenceFilesResult> {
   const { stateDir, box, leaseRange } = input;
   assertComposeProfiles(box);
@@ -72,29 +81,28 @@ export async function writeFenceFiles(input: {
     leaseRange,
     resolvConf: input.resolvConf ?? readFileSync('/etc/resolv.conf', 'utf8'),
     objectStore: await resolveObjectStoreEndpoints(box),
-    serviceEndpoints: mailEgressEndpoints(box),
+    serviceEndpoints: await mailEgressEndpoints(box),
     localAddresses: Object.values(networkInterfaces())
       .flat()
       .map((entry) => entry?.address ?? '')
       .filter(Boolean),
   });
-  const changed: string[] = [];
-
-  // Not secret, and read by the fence container's root, which has no DAC_OVERRIDE: 0644.
   const rulesPath = join(stateDir, 'egress-fence.nft');
   const rules = renderFenceRuleset(plan);
-  if (readIfExists(rulesPath) !== rules) {
-    writeFileSync(rulesPath, rules, { mode: 0o644 });
-    chmodSync(rulesPath, 0o644);
-    changed.push(rulesPath);
-  }
-
   const envPath = join(stateDir, 'celld.env');
   const secret = metadataProxyEnabled(box) ? ensureMetadataProxySecret(stateDir) : '';
   const env = renderCelldEnv(box, plan, secret);
-  if (readIfExists(envPath) !== env) {
-    writePrivateFile(envPath, env);
-    changed.push(envPath);
+  const changed = [
+    ...(readIfExists(rulesPath) !== rules ? [rulesPath] : []),
+    ...(readIfExists(envPath) !== env ? [envPath] : []),
+  ];
+  input.beforeWrite?.(changed);
+
+  // Not secret, and read by the fence container's root, which has no DAC_OVERRIDE: 0644.
+  if (changed.includes(rulesPath)) {
+    writeFileSync(rulesPath, rules, { mode: 0o644 });
+    chmodSync(rulesPath, 0o644);
   }
+  if (changed.includes(envPath)) writePrivateFile(envPath, env);
   return { changed };
 }

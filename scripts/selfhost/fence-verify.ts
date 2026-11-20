@@ -16,8 +16,10 @@ import {
   composePort,
   metadataProxyEnabled,
   metadataProxyPort,
+  parseNameservers,
   resolveObjectStoreEndpoints,
 } from './egress-fence.js';
+import { ipv6Groups, resolverNeedsDenialProbe } from './fence-addresses.js';
 import { hostAddresses, type ProbeOutcome, type ProbeSpec, REMOTE_PROBES } from './fence-probes.js';
 import { mailEgressEndpoints } from './mail-settings.js';
 
@@ -26,6 +28,7 @@ export interface VerifyTarget {
   host: string;
   port: number;
   expect: 'blocked' | 'reachable';
+  protocol?: 'tcp' | 'udp';
 }
 
 export interface Verdict {
@@ -45,7 +48,11 @@ function isLocalHost(host: string, localAddresses: ReadonlySet<string>): boolean
 /** Every probe a target needs: TCP always, plus UDP for a forbidden one. */
 export function probeSpecs(targets: readonly VerifyTarget[]): ProbeSpec[] {
   return targets.flatMap((target): ProbeSpec[] => {
-    const tcp: ProbeSpec = { host: target.host, port: target.port, protocol: 'tcp' };
+    const tcp: ProbeSpec = {
+      host: target.host,
+      port: target.port,
+      protocol: target.protocol ?? 'tcp',
+    };
     return target.expect === 'blocked' ? [tcp, { ...tcp, protocol: 'udp' }] : [tcp];
   });
 }
@@ -74,6 +81,11 @@ export function judgeTargets(
   localAddresses: ReadonlySet<string> = new Set()
 ): Verdict {
   const verdict: Verdict = { failures: [], notes: [] };
+  const specs = probeSpecs(targets);
+  if (specs.some((_, index) => !control.has(index))) {
+    verdict.failures.push('control probe results are incomplete');
+    return verdict;
+  }
   let index = 0;
   for (const target of targets) {
     const seen: Outcomes = { tcp: results.get(index), controlTcp: control.get(index) };
@@ -105,6 +117,7 @@ export interface TargetInput {
   publicProbe: string;
   /** This host's interface addresses (os.networkInterfaces()). */
   localAddresses: readonly string[];
+  resolvConf?: string;
 }
 
 function localTargets(
@@ -196,6 +209,20 @@ export async function verifyTargets(input: TargetInput): Promise<VerifyTarget[]>
   const targets: VerifyTarget[] = [
     ...localTargets(box, own),
     ...remoteTargets(box, input.localAddresses),
+    { label: 'DNS on a non-resolver', host: '10.255.255.1', port: 53, expect: 'blocked' },
+    ...parseNameservers(input.resolvConf ?? '').flatMap((host) => [
+      { label: 'configured resolver TCP', host, port: 53, expect: 'reachable' as const },
+      {
+        label: 'configured resolver UDP',
+        host,
+        port: 53,
+        protocol: 'udp' as const,
+        expect: 'reachable' as const,
+      },
+      ...(resolverNeedsDenialProbe(host, input.localAddresses)
+        ? [{ label: 'resolver non-DNS service', host, port: 2019, expect: 'blocked' as const }]
+        : []),
+    ]),
     allow('node tunnel lease port', '127.0.0.1', range.start),
     allow('public internet', publicHost, Number(publicPort)),
     ...own.map((host) =>
@@ -208,8 +235,8 @@ export async function verifyTargets(input: TargetInput): Promise<VerifyTarget[]>
   if (metadataProxyEnabled(box)) {
     targets.push(allow('metadata token proxy', '127.0.0.1', metadataProxyPort(box)));
   }
-  for (const endpoint of mailEgressEndpoints(box)) {
-    targets.push(allow('mail collector SMTP', endpoint.address, endpoint.port));
+  for (const endpoint of await mailEgressEndpoints(box)) {
+    targets.push(allow('SMTP relay', endpoint.address, endpoint.port));
   }
   return targets;
 }
@@ -219,8 +246,10 @@ export function missingNameservers(
   celldResolvConf: readonly string[],
   applied: readonly string[]
 ): string[] {
-  const open = new Set(applied);
-  return celldResolvConf.filter((server) => !open.has(server));
+  const key = (address: string) =>
+    isIP(address) === 6 ? (ipv6Groups(address)?.join(':') ?? address) : address;
+  const open = new Set(applied.map(key));
+  return celldResolvConf.filter((server) => !open.has(key(server)));
 }
 
 /** Why the fence service's attestation (`ok <epoch>`) is not current, or null. */
@@ -232,9 +261,24 @@ export function attestationProblem(
   const match = /^ok (\d+)\s*$/.exec(text);
   if (!match) return `the fence service has not attested (got "${text.trim().slice(0, 40)}")`;
   const age = nowSeconds - Number(match[1]);
+  if (age < 0) return 'the fence service attestation is in the future';
   return age > maxAgeSeconds
     ? `the fence service's attestation is ${age}s old (limit ${maxAgeSeconds}s)`
     : null;
+}
+
+/** Match Compose's celld entrypoint age setting, including its validated default. */
+export function boxAttestationProblem(
+  text: string,
+  nowSeconds: number,
+  box: Readonly<Record<string, string>>
+): string | null {
+  const raw = box.SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS || '2';
+  const maxAge = Number(raw);
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(maxAge) || maxAge <= 0) {
+    throw new Error('SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS must be a positive integer');
+  }
+  return attestationProblem(text, nowSeconds, maxAge);
 }
 
 /** Nameserver addresses opened by chain `dns` in `nft list chain inet <table> dns` output. */

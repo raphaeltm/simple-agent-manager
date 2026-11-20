@@ -6,9 +6,14 @@
  * Every forbidden target has a listener (in the peer namespace, or on this namespace's own
  * addresses), so the control uid reaches it and only the fence can explain a refusal.
  */
-import { type ChildProcess } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -27,12 +32,12 @@ import {
   type ProbeSpec,
   startCheckProbes,
 } from '../fence-probes.js';
-import { dnsChainAddresses } from '../fence-verify.js';
 import { FENCED_PUBLIC_ADDRESS, labUnavailableReason, NetnsLab } from './netns-lab.js';
 
 const REPO = resolve(import.meta.dirname, '../../..');
-const FENCED_UID = 7101;
+const FENCED_UID = 7103;
 const CONTROL_UID = 65534;
+const LOG_SECRET = 'bc'.repeat(32);
 /** Same as verify-fence: a refused TCP connect is reported ~1 s in (first SYN retransmit). */
 const PROBE_TIMEOUT_SECONDS = 4;
 const unavailable = labUnavailableReason();
@@ -41,7 +46,7 @@ if (unavailable && process.env.CI)
   throw new Error(`fence netns lab unavailable in CI: ${unavailable}`);
 
 const plan = buildFencePlan({
-  box: { SAM_EGRESS_ALLOW: '192.168.255.1:8000' },
+  box: { SAM_EGRESS_ALLOW: '192.168.255.1:8000,127.0.0.1:20005' },
   leaseRange: { start: 20000, end: 20009 },
   resolvConf: 'nameserver 10.99.0.2\n',
   objectStore: [],
@@ -104,13 +109,16 @@ const CASES: Case[] = [
   allowed("Caddy on this host's own private address", '10.99.0.1', 80),
   allowed('SAM_EGRESS_ALLOW entry at its exact address and port', '192.168.255.1', 8000),
   allowed('DNS to the configured nameserver', '10.99.0.2', 53),
+  { ...allowed('UDP DNS to configured resolver', '10.99.0.2', 53), protocol: 'udp' },
+  blocked('UDP DNS to non-resolver', '10.255.255.1', 53, 'udp'),
   allowed('public IPv4 (stand-in)', '93.184.216.34', 80),
   allowed('public IPv6 (stand-in)', '2606:2800:220:1::1', 80),
 ];
 
 describe.skipIf(unavailable !== null)('egress fence in a network namespace', () => {
   const lab = new NetnsLab();
-  const dir = mkdtempSync(join(tmpdir(), 'fence-netns-'));
+  mkdirSync(resolve('.tmp'), { recursive: true });
+  const dir = mkdtempSync(resolve('.tmp/fence-netns-'));
   chmodSync(dir, 0o755);
   const rulesFile = join(dir, 'egress-fence.nft');
   writeFileSync(rulesFile, RULES, { mode: 0o644 });
@@ -170,161 +178,42 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
     });
   });
 
-  describe('fence.sh and celld/start.sh', () => {
-    const attestation = join(dir, 'attestation');
-    /** An attestation the test writes itself (fence.sh's file is root-owned). */
-    const manual = join(dir, 'manual-attestation');
-    const resolvFile = join(dir, 'resolv.conf');
-    let fence: ChildProcess;
-
-    const startFence = (): ChildProcess =>
-      lab.spawn(
+  describe('fence loss and operator recovery', () => {
+    async function startPair() {
+      const state = mkdtempSync(join(dir, 'state-'));
+      chmodSync(state, 0o755);
+      const attestation = join(state, 'attestation');
+      const env = {
+        PATH: '/usr/sbin:/usr/bin:/sbin:/bin',
+        SAM_EGRESS_FENCE_RULES: rulesFile,
+        SAM_EGRESS_FENCE_STATE: join(state, 'applied'),
+        SAM_EGRESS_FENCE_ATTESTATION: attestation,
+        SAM_EGRESS_FENCE_RECHECK_SECONDS: '0.1',
+      };
+      const fence = lab.spawn(
         lab.fenced,
-        ['/bin/sh', join(REPO, 'deploy/selfhost/egress-fence/fence.sh'), 'run'],
-        {
-          SAM_EGRESS_FENCE_RULES: rulesFile,
-          SAM_EGRESS_FENCE_STATE: join(dir, 'applied'),
-          SAM_EGRESS_FENCE_ATTESTATION: attestation,
-          SAM_EGRESS_FENCE_RESOLV_FILES: resolvFile,
-          SAM_EGRESS_FENCE_RECHECK_SECONDS: '1',
-          PATH: '/usr/sbin:/usr/bin:/sbin:/bin',
-        }
+        ['/bin/sh', join(REPO, 'deploy/selfhost/egress-fence/fence.sh')],
+        env
       );
-    const table = (): string =>
-      lab.exec(lab.fenced, ['/usr/sbin/nft', 'list', 'table', 'inet', 'sam_celld_egress']).output;
-
-    beforeAll(async () => {
-      writeFileSync(resolvFile, 'nameserver 10.99.0.2\n');
-      lab.nft(lab.fenced, ['flush', 'ruleset']);
-      fence = startFence();
-      await waitFor(() => existsSync(attestation));
-    });
-
-    it('applies the table and attests to it', () => {
-      expect(table()).toContain('meta skuid 7101 jump celld');
-      expect(readFileSync(attestation, 'utf8')).toMatch(/^ok \d+\n$/);
-    });
-
-    it('re-applies the table after a firewall reload flushes the ruleset', async () => {
-      lab.nft(lab.fenced, ['flush', 'ruleset']);
-      expect(table()).not.toContain('jump celld');
-      await waitFor(() => table().includes('meta skuid 7101 jump celld'), 5000);
-      expect(probe([{ host: '10.255.255.1', port: 80 }], FENCED_UID).get(0)).toBe('blocked');
-    });
-
-    it('follows a nameserver change, so DNS is not cut off silently', async () => {
-      writeFileSync(resolvFile, 'nameserver 192.168.255.1\n');
-      await waitFor(() => /chain dns \{\n[^\n]*192\.168\.255\.1[^\n]*dport 53/.test(table()), 5000);
-      expect(probe([{ host: '192.168.255.1', port: 53 }], FENCED_UID).get(0)).not.toBe('blocked');
-      expect(probe([{ host: '10.99.0.2', port: 53 }], FENCED_UID).get(0)).toBe('blocked');
-      writeFileSync(resolvFile, 'nameserver 10.99.0.2\n');
-      await waitFor(() => /chain dns \{\n[^\n]*10\.99\.0\.2[^\n]*dport 53/.test(table()), 5000);
-    });
-
-    it('celld starts under the full fence, and is killed within the check window when it goes', async () => {
-      const run = startCelld();
-      await waitFor(() => existsSync(run.pidFile), 10_000);
-      const pid = Number(readFileSync(run.pidFile, 'utf8'));
-      expect(existsSync(`/proc/${pid}`)).toBe(true);
-      fence.kill('SIGKILL');
-      lab.killInNamespace(lab.fenced, 'egress-fence/fence.sh');
-      const removedAt = Date.now();
-      lab.nft(lab.fenced, ['flush', 'ruleset']);
-      const status = await run.exited;
-      const window = Date.now() - removedAt;
-      expect(status).toBe(1);
-      expect(run.output()).toMatch(
-        /egress fence is gone \(loopback-v4 \(127\.0\.0\.1:7001\): .*\); killed celld/
+      let fenceOutput = '';
+      fence.stderr?.on('data', (b) => {
+        fenceOutput += b.toString();
+      });
+      await waitFor(
+        () => existsSync(attestation) && readFileSync(attestation, 'utf8').startsWith('ok ')
       );
-      expect(existsSync(`/proc/${pid}`)).toBe(false);
-      // By construction one check interval (1 s) plus two probe rounds; measured 0.1-0.8 s. The
-      // bound is loose so a loaded runner does not flake; the README states the real figure.
-      expect(window).toBeLessThan(4000);
-      console.log(`[fence-netns] celld killed ${window} ms after the table was flushed`);
-    });
-
-    it('celld is killed when the fence service stops attesting, even with the table intact', async () => {
-      lab.nft(lab.fenced, ['-f', rulesFile]);
-      // Fresh enough for the start check, stale a few seconds later; nothing refreshes it.
-      writeFileSync(manual, `ok ${Math.floor(Date.now() / 1000)}\n`, { mode: 0o644 });
-      const run = startCelld({
-        SAM_EGRESS_FENCE_ATTESTATION: manual,
-        SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS: '5',
-      });
-      await waitFor(() => existsSync(run.pidFile), 10_000);
-      expect(await run.exited).toBe(1);
-      expect(run.output()).toMatch(
-        /egress fence is gone \(attestation 'ok \d+' is not a recent ok/
-      );
-    });
-
-    it.each([
-      ['missing', null, /no attestation at /],
-      ['not ok', 'stale 9999999999\n', /attestation 'stale \d+' is not a recent ok/],
-      ['garbage', 'ok soon\n', /attestation 'ok soon' is not a recent ok/],
-    ])('celld does not start when the attestation is %s', async (_name, content, message) => {
-      lab.nft(lab.fenced, ['-f', rulesFile]);
-      const file = join(dir, `attestation-${_name}`);
-      if (content !== null) writeFileSync(file, content, { mode: 0o644 });
-      const run = startCelld({
-        SAM_EGRESS_FENCE_ATTESTATION: file,
-        SAM_EGRESS_FENCE_WAIT_SECONDS: '2',
-      });
-      expect(await run.exited).toBe(1);
-      expect(run.output()).toMatch(message);
-      expect(existsSync(run.pidFile)).toBe(false);
-    });
-
-    it('verify-fence reads the DNS rule from real nft output', () => {
-      lab.nft(lab.fenced, ['-f', rulesFile]);
-      const listing = lab.exec(lab.fenced, [
-        '/usr/sbin/nft',
-        'list',
-        'chain',
-        'inet',
-        'sam_celld_egress',
-        'dns',
-      ]).output;
-      expect(dnsChainAddresses(listing)).toEqual(['10.99.0.2']);
-    });
-
-    it.each([
-      ['the private-range rule', 'ip daddr {', 'private-v4'],
-      ['the IPv6 rule', 'ip6 daddr {', 'unique-local-v6'],
-      // Loopback and private local addresses are still refused by the range rules; the public
-      // address on the NIC is what only the local-address rule covers.
-      ['the local-address rule', 'fib daddr type local counter reject', 'host-address-v4'],
-    ])('celld does not start when the table lacks %s', async (_name, prefix, probeName) => {
-      const partial = RULES.split('\n')
-        .filter((line) => !(line.trim().startsWith(prefix) && line.includes('reject')))
-        .join('\n');
-      const partialFile = join(dir, `partial-${probeName}.nft`);
-      writeFileSync(partialFile, partial, { mode: 0o644 });
-      lab.nft(lab.fenced, ['-f', partialFile]);
-      writeFileSync(manual, `ok ${Math.floor(Date.now() / 1000) + 3600}\n`, { mode: 0o644 });
-      const run = startCelld({
-        SAM_EGRESS_FENCE_ATTESTATION: manual,
-        SAM_EGRESS_FENCE_WAIT_SECONDS: '2',
-      });
-      expect(await run.exited).toBe(1);
-      expect(run.output()).toMatch(new RegExp(`egress fence is not in effect \\(${probeName} `));
-      expect(existsSync(run.pidFile)).toBe(false);
-    });
-
-    function startCelld(env: Record<string, string> = {}) {
-      // Written by the fake celld, which runs as the fenced uid.
+      return { state, attestation, env, fence, output: () => fenceOutput };
+    }
+    function startCelld(attestation: string) {
       const pidDir = mkdtempSync(join(dir, 'pid-'));
       chmodSync(pidDir, 0o777);
-      const pidFile = join(pidDir, 'celld.pid');
-      const fake = join(dir, 'fake-celld.sh');
-      // Ignores SIGTERM, as celld does while it drains for up to its shutdown budget.
-      writeFileSync(fake, '#!/bin/bash\ntrap "" TERM\necho $$ > "$1"\nexec sleep 300\n', {
-        mode: 0o755,
-      });
-      const start = join(dir, 'start.sh');
-      writeFileSync(start, readFileSync(join(REPO, 'deploy/selfhost/celld/start.sh')), {
-        mode: 0o755,
-      });
+      const pidFile = join(pidDir, 'pid');
+      const fake = join(pidDir, 'fake-celld.sh');
+      writeFileSync(
+        fake,
+        '#!/bin/bash\necho $$ > "$1"\nprintf \'native stdout %s\\n\' "$GCE_METADATA_PROXY_SECRET"\nprintf \'native stderr %s\\n\' "$GCE_METADATA_PROXY_SECRET" >&2\nexec sleep 300\n',
+        { mode: 0o755 }
+      );
       const child = lab.spawn(
         lab.fenced,
         [
@@ -333,25 +222,201 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
           `--regid=${FENCED_UID}`,
           '--clear-groups',
           '/bin/bash',
-          start,
+          join(REPO, 'deploy/selfhost/celld/start.sh'),
           pidFile,
         ],
         {
           PATH: '/usr/sbin:/usr/bin:/sbin:/bin',
           SAM_CELLD_BIN: fake,
+          GCE_METADATA_PROXY_SECRET: LOG_SECRET,
           SAM_EGRESS_FENCE_PROBES: formatProbes(startCheckProbes(plan)),
           SAM_EGRESS_FENCE_ATTESTATION: attestation,
-          SAM_EGRESS_FENCE_CHECK_SECONDS: '1',
-          SAM_EGRESS_FENCE_WAIT_SECONDS: '10',
-          ...env,
+          SAM_EGRESS_FENCE_CHECK_SECONDS: '0.1',
+          SAM_EGRESS_FENCE_WAIT_SECONDS: '2',
+          SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS: '2',
         }
       );
       let output = '';
-      child.stdout?.on('data', (chunk: Buffer) => (output += chunk.toString()));
-      child.stderr?.on('data', (chunk: Buffer) => (output += chunk.toString()));
+      child.stderr?.on('data', (b) => {
+        output += b.toString();
+      });
+      child.stdout?.on('data', (b) => {
+        output += b.toString();
+      });
       const exited = new Promise<number | null>((done) => child.once('exit', (code) => done(code)));
-      return { pidFile, exited, output: () => output };
+      return { child, pidFile, exited, output: () => output };
     }
+    function stopFence() {
+      lab.killInNamespace(lab.fenced, 'egress-fence/fence.sh');
+      lab.killInNamespace(lab.fenced, 'nft monitor');
+    }
+
+    it('starts fully fenced, stops within one second after flush, stays stopped, then recovers only on verified operator restart', async () => {
+      const pair = await startPair();
+      const run = startCelld(pair.attestation);
+      await waitFor(() => existsSync(run.pidFile));
+      await waitFor(
+        () =>
+          run.output().includes('native stdout [REDACTED]') &&
+          run.output().includes('native stderr [REDACTED]')
+      );
+      expect(run.output()).not.toContain(LOG_SECRET);
+      const pid = Number(readFileSync(run.pidFile, 'utf8'));
+      const removedAt = Date.now();
+      lab.nft(lab.fenced, ['flush', 'ruleset']);
+      expect(await run.exited).toBe(1);
+      const elapsed = Date.now() - removedAt;
+      expect(elapsed).toBeLessThanOrEqual(1000);
+      expect(existsSync(`/proc/${pid}`)).toBe(false);
+      expect(run.output()).toContain('egress_fence.celld_killed');
+      await waitFor(() => existsSync(join(pair.state, 'lost')));
+      expect(pair.output()).toContain('"level":"error","event":"egress_fence.lost"');
+      expect(
+        lab.exec(
+          lab.fenced,
+          ['/bin/sh', join(REPO, 'deploy/selfhost/egress-fence/fence.sh'), 'check'],
+          undefined
+        ).status
+      ).not.toBe(0);
+      const retry = startCelld(pair.attestation);
+      expect(await retry.exited).toBe(1);
+      expect(existsSync(retry.pidFile)).toBe(false);
+      // No automatic repair: even several check cycles leave the table absent.
+      expect(
+        lab.exec(lab.fenced, ['/usr/sbin/nft', 'list', 'table', 'inet', 'sam_celld_egress']).status
+      ).not.toBe(0);
+      stopFence();
+      const recovered = await startPair();
+      const normal = startCelld(recovered.attestation);
+      await waitFor(() => existsSync(normal.pidFile));
+      expect(probe([{ host: '10.255.255.1', port: 80, protocol: 'udp' }], FENCED_UID).get(0)).toBe(
+        'blocked'
+      );
+      normal.child.kill('SIGTERM');
+      stopFence();
+      console.log(`[fence-netns] flush-to-stop ${elapsed}ms`);
+    });
+
+    it('keeps serving past the two-second healthy interval, then stops when attestations expire with rules intact', async () => {
+      const pair = await startPair();
+      const run = startCelld(pair.attestation);
+      await waitFor(() => existsSync(run.pidFile));
+      const pid = Number(readFileSync(run.pidFile, 'utf8'));
+      // Longer than the explicit production max age: healthy re-attestation must keep it alive.
+      await new Promise((done) => setTimeout(done, 2200));
+      expect(run.child.exitCode).toBeNull();
+      expect(existsSync(`/proc/${pid}`)).toBe(true);
+      expect(readFileSync(pair.attestation, 'utf8')).toMatch(/^ok \d+\n$/);
+      stopFence();
+      const stoppedAt = Date.now();
+      // Kill the sidecar plus observer, preserving the table and exercising expiry, not a latch.
+      expect(existsSync(join(pair.state, 'lost'))).toBe(false);
+      expect(probe([{ host: '10.255.255.1', port: 80, protocol: 'udp' }], FENCED_UID).get(0)).toBe(
+        'blocked'
+      );
+      await waitFor(() => run.child.exitCode !== null, 4000);
+      expect(await run.exited).toBe(1);
+      expect(Date.now() - stoppedAt).toBeLessThanOrEqual(4000);
+      expect(run.output()).toContain('egress_fence.celld_killed');
+      expect(existsSync(`/proc/${pid}`)).toBe(false);
+      expect(existsSync(join(pair.state, 'lost'))).toBe(false);
+      expect(probe([{ host: '10.255.255.1', port: 80, protocol: 'udp' }], FENCED_UID).get(0)).toBe(
+        'blocked'
+      );
+    });
+
+    it('latches a transient flush-and-restore from the kernel event stream', async () => {
+      const pair = await startPair();
+      lab.nft(lab.fenced, ['-f', rulesFile]);
+      await waitFor(
+        () =>
+          existsSync(join(pair.state, 'lost')) &&
+          readFileSync(pair.attestation, 'utf8') === 'lost\n'
+      );
+      expect(readFileSync(pair.attestation, 'utf8')).toBe('lost\n');
+      expect(readFileSync(join(pair.state, 'events.jsonl'), 'utf8')).toContain('egress_fence.lost');
+      stopFence();
+    });
+
+    it('fails closed when the kernel event observer exits', async () => {
+      const pair = await startPair();
+      lab.killInNamespace(lab.fenced, 'nft monitor');
+      await waitFor(
+        () =>
+          existsSync(join(pair.state, 'lost')) &&
+          readFileSync(pair.attestation, 'utf8') === 'lost\n'
+      );
+      expect(readFileSync(pair.attestation, 'utf8')).toBe('lost\n');
+      stopFence();
+    });
+
+    it.each([
+      ['private-v4', 'ip daddr {'],
+      ['unique-local-v6', 'ip6 daddr {'],
+      ['host-address-v4', 'fib daddr type local counter reject'],
+    ])('does not start when the %s rule class is absent', async (name, prefix) => {
+      const state = mkdtempSync(join(dir, 'partial-'));
+      chmodSync(state, 0o755);
+      const file = join(state, 'attestation');
+      writeFileSync(file, `ok ${Math.floor(Date.now() / 1000)}\n`, { mode: 0o644 });
+      const partial = RULES.split('\n')
+        .filter((line) => !(line.trim().startsWith(prefix) && line.includes('reject')))
+        .join('\n');
+      const rules = join(state, 'partial.nft');
+      writeFileSync(rules, partial);
+      lab.nft(lab.fenced, ['-f', rules]);
+      const run = startCelld(file);
+      expect(await run.exited).toBe(1);
+      expect(existsSync(run.pidFile)).toBe(false);
+      expect(run.output()).toContain(name);
+      lab.nft(lab.fenced, ['-f', rulesFile]);
+    });
+
+    it('cannot change the firewall as the workload uid', () => {
+      expect(
+        lab.exec(lab.fenced, ['/usr/sbin/nft', 'flush', 'ruleset'], FENCED_UID).status
+      ).not.toBe(0);
+      expect(probe([{ host: '10.255.255.1', port: 80 }], FENCED_UID).get(0)).toBe('blocked');
+    });
+
+    it('does not preserve an established forbidden connection after rule recovery', async () => {
+      const client = join(dir, 'connection.cjs');
+      const result = join(dir, 'connection-result');
+      chmodSync(dir, 0o777);
+      writeFileSync(
+        client,
+        `const net=require('node:net'),fs=require('node:fs');
+const s=net.connect(8001,'10.99.0.2');s.on('error',()=>{});
+s.on('connect',()=>{fs.writeFileSync(process.argv[2],'connected');setTimeout(()=>s.write('after'),1000);});`
+      );
+      // Dedicated echo socket remains established during restoration.
+      const server = lab.spawn(lab.peer, [
+        process.execPath,
+        '-e',
+        "require('node:net').createServer(s=>s.on('data',b=>process.stdout.write(b))).listen(8001,'0.0.0.0')",
+      ]);
+      let received = '';
+      server.stdout?.on('data', (b) => {
+        received += b.toString();
+      });
+      await new Promise((done) => setTimeout(done, 100));
+      lab.nft(lab.fenced, ['flush', 'ruleset']);
+      const connection = lab.spawn(lab.fenced, [
+        '/usr/bin/setpriv',
+        `--reuid=${FENCED_UID}`,
+        `--regid=${FENCED_UID}`,
+        '--clear-groups',
+        process.execPath,
+        client,
+        result,
+      ]);
+      await waitFor(() => existsSync(result));
+      lab.nft(lab.fenced, ['-f', rulesFile]);
+      await new Promise((done) => setTimeout(done, 1500));
+      expect(received).toBe('');
+      connection.kill('SIGKILL');
+      server.kill('SIGKILL');
+    });
   });
 });
 

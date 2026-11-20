@@ -32,6 +32,7 @@ let diff: string[];
 let dirty: boolean;
 let failDeploy: boolean;
 let initRewritesState: boolean;
+let initRewritesFence: boolean;
 /** What the fake checkout has checked out (`git checkout --detach` moves it). */
 let head: string;
 /** docker-compose.yml at each ref, and the services `docker compose config --services` lists. */
@@ -76,7 +77,9 @@ function run(command: string, args: string[], env?: NodeJS.ProcessEnv): RunResul
     if (args[0] === 'show') {
       const [ref = '', path = ''] = (args[1] ?? '').split(':');
       const text =
-        path === 'deploy/selfhost/docker-compose.yml'
+        path === 'deploy/selfhost/docker-compose.yml' ||
+        path === 'scripts/selfhost/compose.yml' ||
+        path === 'compose.yml'
           ? composeAt[ref]
           : (trackedAt[path]?.[ref] ?? (ref === TO ? FILES_AT_TO[path] : undefined));
       return text === undefined || text === null
@@ -90,6 +93,9 @@ function run(command: string, args: string[], env?: NodeJS.ProcessEnv): RunResul
   const deploy = command === 'pnpm' && args[0] === 'selfhost:deploy';
   if (deploy && args.includes('--init') && initRewritesState) {
     writeFileSync(join(root, 'state/gateway.env'), 'FRPS_PORT_RANGE=21000-21999\n');
+  }
+  if (deploy && args.includes('--init') && initRewritesFence) {
+    writeFileSync(join(root, 'state/egress-fence.nft'), 'table inet changed {}\n');
   }
   if (command === 'docker' && args.includes('config')) return ok(activeServices.join('\n'));
   if (deploy && !args.includes('--init') && failDeploy) {
@@ -128,6 +134,7 @@ beforeEach(() => {
   dirty = false;
   failDeploy = false;
   initRewritesState = false;
+  initRewritesFence = false;
   head = FROM;
   composeAt = { [FROM]: COMPOSE(), [TO]: COMPOSE() };
   trackedAt = {};
@@ -143,6 +150,17 @@ const compact = () =>
   steps.map((s) => (s.startsWith('docker compose') ? s.replace(/ -f .* --env-file \S+/, '') : s));
 
 describe('runUpgrade', () => {
+  it('recreates the fence before restarting the stack after a generated nft-only change', async () => {
+    initRewritesFence = true;
+    const result = await upgrade();
+    expect(result.composeRestarted).toBe(true);
+    const order = compact();
+    expect(order).toContain('docker compose up -d --force-recreate egress-fence');
+    expect(order.indexOf('docker compose up -d --force-recreate egress-fence')).toBeLessThan(
+      order.indexOf('docker compose up -d')
+    );
+  });
+
   it('checks out, migrates and deploys with no backup, and leaves the stack running when compose inputs are unchanged', async () => {
     const result = await upgrade();
     // No backup step: nothing touches the bucket and the celld container is never stopped.
@@ -489,6 +507,38 @@ services:
     expect(built().map((s) => s.split(' ').at(-1))).toEqual(['caddy']);
   });
 
+  it('rollback retains a service defined only by the selected old overlay', async () => {
+    trackedAt[OVERLAY] = {
+      [FROM]: 'services:\n  custom-relay:\n    build: ./relay-old\n',
+      [TO]: 'services:\n  custom-relay:\n    build: ./relay-new\n  new-sidecar:\n    build: ./new-sidecar\n',
+    };
+    diff = [OVERLAY];
+    activeServices = ['celld', 'custom-relay', 'new-sidecar'];
+    const result = await runUpgrade(boxWithOverlay(), { to: 'v1', checkHealth: async () => true });
+    expect(result.imagesRebuilt).toEqual(['custom-relay', 'new-sidecar']);
+    const rebuild = result.rollback.find((step) => step.includes(' build '));
+    expect(rebuild).toContain('docker-compose.override.yml');
+    expect(rebuild?.split(' build ')[1]).toBe('custom-relay');
+  });
+
+  it('rollback excludes services found only in an unselected default compose file', async () => {
+    const envFile = join(root, 'custom-box.env');
+    writeFileSync(envFile, `CELLD_BUCKET=gs://fleet/celld\nCOMPOSE_FILE=../../ops/custom.yml\n`, {
+      mode: 0o600,
+    });
+    trackedAt['ops/custom.yml'] = {
+      [FROM]: 'services:\n  celld:\n    image: existing\n',
+      [TO]: 'services:\n  celld:\n    image: existing\n  caddy:\n    build: ./custom-caddy\n',
+    };
+    diff = ['ops/custom.yml'];
+    const result = await runUpgrade(
+      { ...loadBox(envFile, join(root, 'state')), run, log: (m) => logs.push(m) },
+      { to: 'v1', checkHealth: async () => true }
+    );
+    expect(result.imagesRebuilt).toEqual(['caddy']);
+    expect(result.rollback.some((step) => step.includes(' build '))).toBe(false);
+  });
+
   it('control: an overlay change that leaves every build section alone rebuilds nothing', async () => {
     diff = [OVERLAY];
     trackedAt[OVERLAY] = { [FROM]: overlay('mod@v1'), [TO]: `${overlay('mod@v1')}  celld: {}\n` };
@@ -538,6 +588,27 @@ describe('runUpgrade image builds', () => {
     ]);
   });
 
+  it.each([false, true])(
+    'rollback filters newly added services from the old ref (migration=%s)',
+    async (migrated) => {
+      composeAt[TO] =
+        `${COMPOSE()}  egress-fence:\n    build: ./egress-fence\n  gce-metadata-proxy:\n    build: ./metadata-proxy\n`;
+      diff = [
+        'deploy/selfhost/docker-compose.yml',
+        'deploy/selfhost/caddy/Dockerfile',
+        ...(migrated ? ['apps/api/src/db/migrations/9999_test.sql'] : []),
+      ];
+      activeServices = ['celld', 'caddy', 'egress-fence', 'gce-metadata-proxy'];
+      const result = await upgrade();
+      expect(result.imagesRebuilt).toEqual(['caddy', 'egress-fence', 'gce-metadata-proxy']);
+      const rebuild = result.rollback.find((step) => step.includes(' build '));
+      expect(rebuild).toBeDefined();
+      // Model the old Compose command's required service lookup. Both new names are absent.
+      const requested = rebuild!.split(' build ')[1]!.split(' ');
+      expect(requested).toEqual(['caddy']);
+    }
+  );
+
   it('rebuilds caddy when the compose build args changed (a new pinned module)', async () => {
     diff = ['deploy/selfhost/docker-compose.yml'];
     composeAt[TO] = COMPOSE('github.com/caddy-dns/googleclouddns@v1.2.0');
@@ -574,6 +645,18 @@ describe('runUpgrade image builds', () => {
     expect(printed).toContain(
       'docker compose -f compose.yml --env-file <root>/box.env build caddy'
     );
+  });
+
+  it('filters unavailable old services from rollback after a failed upgraded deploy', async () => {
+    composeAt[TO] = `${COMPOSE()}  new-sidecar:\n    build: ./new-sidecar\n`;
+    diff = ['deploy/selfhost/docker-compose.yml', 'deploy/selfhost/caddy/Dockerfile'];
+    activeServices = ['celld', 'caddy', 'new-sidecar'];
+    failDeploy = true;
+    await expect(upgrade()).rejects.toThrow(/migration 0219 failed/);
+    const rollbackBuild = logs.find(
+      (line) => line.trimStart().startsWith('docker compose') && line.includes(' build ')
+    );
+    expect(rollbackBuild?.split(' build ')[1]).toBe('caddy');
   });
 
   it('never passes --build to docker compose', async () => {
