@@ -119,7 +119,10 @@ a chat opened directly on a workspace has no inbox to file into.
 Each item carries a one-sentence title, the agent's context (markdown), and links to ideas, Library files,
 policies, knowledge, other chats, pull requests of the project's repository, or previews of its
 workspaces. Each link is checked to belong to the project when the item is filed, and opens with
-your own access. Related items from one chat share a group and stack together. When an agent files
+your own access. A Library file opens in a preview over the Inbox rather than on the Library page:
+close it (the x, Escape, or Back on a phone) and you are back on the item, with anything you had
+typed still there. **Open in Library** in the preview's header goes to the file in the Library.
+Library links in chat messages, idea pages, the Comments page and workflow outputs open the same way. Related items from one chat share a group and stack together. When an agent files
 an item that looks like one already open (same group, or a title with most words in common), it is
 shown the open one so it can point you there instead of filing a duplicate.
 

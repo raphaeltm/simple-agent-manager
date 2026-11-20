@@ -201,7 +201,9 @@ export function FilePreviewModal({
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1">
           <h3
             id="preview-modal-title"
-            className="m-0 truncate text-sm font-semibold text-fg-primary md:text-[15px]"
+            // Wraps to two lines rather than truncating: on a phone the controls leave the name
+            // little room, and a one-line ellipsis there hides which file is open.
+            className="m-0 line-clamp-2 break-words text-sm leading-snug font-semibold text-fg-primary [overflow-wrap:anywhere] md:text-[15px]"
             title={file.filename}
           >
             {file.filename}
