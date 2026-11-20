@@ -51,6 +51,7 @@ import {
   hostedGitPushRefusal,
   hostedGitPushTooLargeMessage,
   hostedGitRefRefusal,
+  hostedGitStoredOverCapMessage,
 } from './limits';
 import { resolveHostedGitLimits } from './policy';
 import { HostedGitUploads } from './uploads';
@@ -408,7 +409,15 @@ export class HostedGitRepo extends DurableObject {
             flush: () => this.ctx.storage.sync(),
             collisionDetect: false,
           });
-          packId = ingested.packId;
+          // Final reservation: the byte budget covered the raw pack, not its index rows and
+          // page overhead. Refuse the push and drop its pack if the stored total crossed the cap.
+          const stored = this.store.dbSize();
+          if (stored > limits.maxRepoBytes) {
+            await this.store.packs.dropPack(ingested.packId);
+            unpackError = hostedGitStoredOverCapMessage(stored, limits);
+          } else {
+            packId = ingested.packId;
+          }
         } catch (err) {
           // Ingest writes chunks before checksum/index validation. Reclaim those rows now,
           // before the next push's quota check; retain an alarm if storage cleanup itself fails.

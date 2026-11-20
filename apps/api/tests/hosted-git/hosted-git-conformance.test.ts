@@ -876,6 +876,63 @@ describe('repository cleanup through real SQLite', () => {
     expect((await readFile(join(check, 'big.txt'), 'utf8')).length).toBe(5 * 1024 * 1024);
   });
 
+  it('refuses and drops a pack whose index overhead takes stored size past the cap (Codex r4636923076)', async () => {
+    const project = await createHostedProject(await createEmailOnlyUser(), 'Cap at final write');
+    const token = await mintToken(project, 'write');
+    const work = await freshDir('cap-final');
+    await gitOk(['clone', localRemote(project.repository, token), work]);
+    // Thousands of tiny objects: the index rows dwarf the compressed pack, beyond free pages.
+    await mkdir(join(work, 'many'), { recursive: true });
+    for (let i = 0; i < 3000; i++) await writeFile(join(work, 'many', `f${i}`), `${i} ${randomBytes(4).toString('hex')}\n`);
+    await gitOk(['add', 'many'], work);
+    await gitOk(['commit', '-q', '-m', 'noise'], work);
+    const commit = (await gitOk(['rev-parse', 'HEAD'], work)).stdout.trim();
+    const objects = (await gitOk(['rev-list', '--objects', commit, '^HEAD~1'], work)).stdout
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => line.split(' ')[0]!);
+    const pack = spawnSync('git', ['pack-objects', '--stdout'], {
+      cwd: work,
+      input: `${objects.join('\n')}\n`,
+      maxBuffer: 16 * 1024 * 1024,
+    }).stdout;
+    const info = async () =>
+      (await (await runtime.fetch(`/__test/info/${project.artifactsRepoId}`)).json()) as { bytes: number };
+    const send = () =>
+      runtime.fetch(`/git/${project.artifactsRepoId}.git/git-receive-pack`, {
+        method: 'POST',
+        headers: { authorization: `Basic ${Buffer.from(`x:${token}`).toString('base64')}` },
+        body: buildReceivePackRequest(commit, 'noise', pack) as BodyInit,
+      });
+    const setCap = async (cap: number) => {
+      await runtime.DATABASE.prepare(
+        "INSERT INTO platform_settings (key,value,updated_at) VALUES ('repositories.maxRepoBytes',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+      )
+        .bind(JSON.stringify(cap), Date.now())
+        .run();
+      await runtime.fetch('/__test/invalidate-settings', { method: 'POST' });
+    };
+    const before = await info();
+    try {
+      // The raw pack fits the byte budget exactly; its index rows and pages do not.
+      await setCap(before.bytes + pack.length);
+      const refused = await (await send()).text();
+      expect(refused).toContain('over its');
+      expect(refused).toContain('storage limit');
+      expect((await gitOk(['ls-remote', localRemote(project.repository, token)])).stdout).not.toContain(
+        'refs/heads/noise'
+      );
+      // The pack was dropped at once, not left holding bytes until GC.
+      expect((await info()).bytes).toBeLessThanOrEqual(before.bytes + pack.length);
+      // Control: with headroom for the index the same push is accepted.
+      await setCap(before.bytes + pack.length + 4 * 1024 * 1024);
+      expect(await (await send()).text()).toContain('ok refs/heads/noise');
+    } finally {
+      await runtime.DATABASE.prepare("DELETE FROM platform_settings WHERE key='repositories.maxRepoBytes'").run();
+      await runtime.fetch('/__test/invalidate-settings', { method: 'POST' });
+    }
+  });
+
   it('reclaims failed-ingest pack rows before the next push quota check', async () => {
     const project = await createHostedProject(await createEmailOnlyUser(), 'Failed ingest');
     const token = await mintToken(project, 'write');

@@ -57,6 +57,20 @@ export function hostedGitPushRefusal(
 }
 
 /** The most bytes this push may stream: the push cap, or less when the repository is nearly full. */
+/**
+ * The refusal when a pack that fit the raw byte budget pushed stored size over the cap once its
+ * index rows and page overhead were written (enforced at the final write, after ingest).
+ */
+export function hostedGitStoredOverCapMessage(
+  storedBytes: number,
+  limits: HostedGitLimits
+): string {
+  return (
+    `SAM: push refused: storing this pack would bring this repository to ${mib(storedBytes)}, ` +
+    `over its ${mib(limits.maxRepoBytes)} storage limit`
+  );
+}
+
 export function hostedGitPushByteBudget(currentBytes: number, limits: HostedGitLimits): number {
   return Math.max(0, Math.min(limits.maxPushBytes, limits.maxRepoBytes - currentBytes));
 }

@@ -219,6 +219,8 @@ push checks quota. Defaults are 64 MiB per push, 30,000 objects
 10,000 refs and 256 MiB stored per repository, 16 MiB per inflated object, 128 MiB cumulative inflation
 per request, delta depth 100 and 120 seconds per git operation. Operators can lower these
 limits; raising them needs measured capacity review. Rejected pushes leave existing refs intact.
+The storage limit is checked again after a pack and its index are stored; a push that crosses it
+is refused and its pack dropped at once.
 GC first drops whole packs that hold nothing reachable (for example a rejected push) without
 inflating them. Known limit: moving the remaining reachable packed objects to loose storage
 inflates each one under the same decompression budget, so that step cannot finish while more than

@@ -150,3 +150,7 @@ Seven Codex findings were reconciled:
 - **P2 r4636751970:** the personal token route honors `ARTIFACTS_TOKEN_TTL_SECONDS`; the test runtime now sets 900 s and asserts the expiry.
 
 Tests: prefix cap, cancel-on-abandon with a read-to-end control, `ChunkBuffer` copy bound for 1 MiB arriving one byte at a time, GC whole-pack drop before any read, base retention in both GC modes, a real-git rejected pack reclaimed under a 2 MiB budget, and the TTL route. Every guard was mutated once and its test went red; with exact-size growth the buffer test took 95 s and failed.
+
+## Codex r4636923076 on 1bbf2aeb (01:00 UTC)
+
+The byte budget covered the raw pack, not its index rows and page overhead. Following rule 69, `processReceive` now re-checks `dbSize()` after ingest. A push that crossed the cap is refused, and its pack is dropped immediately with `dropPack`. Real-git test: 3,000 tiny objects with a cap of the current size plus the raw pack size is refused, and the ref and bytes are not kept. The control with headroom is accepted. Removing the check turns the test red. Main 20675016f, a workflow action bump, was merged.
