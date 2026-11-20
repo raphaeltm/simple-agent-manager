@@ -139,7 +139,7 @@ export function metadataProxyEnabled(box: Readonly<Record<string, string>>): boo
 }
 
 export function metadataProxyPort(box: Readonly<Record<string, string>>): number {
-  return boxListenerPorts(box).GCE_METADATA_PROXY_PORT!;
+  return boxListenerPorts(box).GCE_METADATA_PROXY_PORT;
 }
 
 /** Nameservers from resolv.conf text, IP literals only (zone ids dropped). */
