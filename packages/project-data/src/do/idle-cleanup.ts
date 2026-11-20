@@ -201,6 +201,12 @@ export function cancelIdleCleanup(sql: SqlStorage, sessionId: string): void {
  * later. Absent or 0, every call writes `now + timeout`, as before. A schedule that is
  * retrying (`retry_count > 0` or `last_error` set) is always rewritten, so activity still
  * clears its retry state.
+ *
+ * The deadline is no longer monotone: an exact caller (no interval) can lower a slack
+ * deadline to `now + timeout`, which still covers the activity. Skipping the alarm re-arm is
+ * safe because the idle alarm section only ever moves earlier between alarms
+ * (`ProjectDataAlarmSectionScheduler.observe`): an alarm that fires before the stored deadline
+ * finds nothing expired and re-arms at `MIN(cleanup_at)`.
  */
 export function resetIdleCleanup(
   sql: SqlStorage,
@@ -213,7 +219,8 @@ export function resetIdleCleanup(
     DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES
   );
   const covered = Date.now() + timeoutMinutes * 60 * 1000;
-  const extendIntervalMs = Math.max(0, Math.floor(options.extendIntervalMs ?? 0));
+  const requested = options.extendIntervalMs ?? 0;
+  const extendIntervalMs = Number.isFinite(requested) ? Math.max(0, Math.floor(requested)) : 0;
 
   const existing = sql
     .exec(

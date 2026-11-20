@@ -85,3 +85,11 @@ the deadline moves by only a few seconds each time against a 15-minute timeout.
 - The two archive Workers tests that failed in a 32-file parallel run pass alone (timeouts under load).
 - `idleDurationMs` in the idle-terminal diagnostic is derived from `cleanup_at - timeout`, so it can
   understate idle time by up to the interval. Diagnostic text only.
+- Review round (cloudflare-specialist, task-completion-validator, constitution-validator; no CRITICAL/HIGH):
+  added a real-alarm test on a controlled clock (no sweep before last batch + timeout, sweep after
+  the stored deadline), an unmocked-default test, an admin-settings override-to-0 test through
+  `updateAdminSettings`, retry cases for error-only and count-only, an upper bound on steady
+  batches, a NaN guard, and a wider (2 s) interval in the re-extension test. An early-biased
+  mutant (skip within `covered - interval`, write `covered`) turns 3 tests red, including the
+  real-alarm test. The prompt-delivery caller (`durability-foundation.ts`) passes no option; its
+  code path is unchanged and not separately tested here.

@@ -39,7 +39,7 @@ export const MESSAGE_MERGE_SETTINGS: AdminSettingDefinition[] = [
     'chat.idleCleanupExtendIntervalMs',
     DEFAULT_MESSAGE_MERGE_CONFIG.idleExtendIntervalMs,
     'Operations',
-    'How often agent chat output extends an idle chat session’s cleanup deadline, in milliseconds. Each extension adds this much slack, so cleanup never fires early and at most this much late; 0 extends on every message batch.',
+    'How often agent chat output extends an idle chat session’s cleanup deadline, in milliseconds. Each extension adds this much slack, so cleanup never fires early and at most this much late; keep it well below the idle timeout. 0 extends on every message batch.',
     { min: 0, max: 300_000 }
   ),
 ];

@@ -10,12 +10,17 @@ import type {
   RowUsageTotals,
 } from '@simple-agent-manager/project-data/internal/do/row-usage';
 import { DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES } from '@simple-agent-manager/shared';
-import { env, runInDurableObject } from 'cloudflare:test';
+import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { Env } from '../../src/env';
+import { invalidateAdminSettings, updateAdminSettings } from '../../src/services/admin-settings';
 import { projectDataStub } from './helpers/archive-fixtures';
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 // The same resolution `resetIdleCleanup` performs against the Worker env the DO receives.
 const TIMEOUT_MS =
@@ -156,11 +161,15 @@ describe('chat ingest idle-cleanup extension coalescing', () => {
     expect(after.cleanupAt).toBe(extended.cleanupAt);
     // Never early: the deadline still covers the last batch by the full timeout.
     expect(after.cleanupAt).toBeGreaterThanOrEqual(steady[1]!.after + TIMEOUT_MS);
+    // At most one interval late, measured from the last skipped batch.
+    expect(after.cleanupAt).toBeLessThanOrEqual(steady[1]!.before + TIMEOUT_MS + 60_000);
     await cleanup();
   });
 
   it('extends again once activity passes the covered window', async () => {
-    const interval = 300;
+    // Wide enough that the RPCs between the first and the inside batch cannot cross it on a
+    // loaded runner.
+    const interval = 2_000;
     mockIngestConfig(interval);
     const { batch, schedule, cleanup } = await armedSession();
     await batch('first');
@@ -169,7 +178,7 @@ describe('chat ingest idle-cleanup extension coalescing', () => {
     expect(inside.alarmWrites).toBe(0);
     expect((await schedule()).cleanupAt).toBe(covered.cleanupAt);
 
-    await sleep(interval + 100);
+    await sleep(interval + 200);
     const outside = await batch('outside');
     expect(outside.alarmWrites).toBe(1);
     const moved = await schedule();
@@ -179,26 +188,35 @@ describe('chat ingest idle-cleanup extension coalescing', () => {
     await cleanup();
   });
 
-  it('always rewrites a retrying schedule, so activity clears its retry state', async () => {
-    mockIngestConfig(60_000);
-    const { stub, session, batch, schedule, cleanup } = await armedSession();
-    await batch('first');
-    const covered = await schedule();
-    // Precondition: the idle sweep recorded a failed attempt on a schedule that still covers.
-    await runInDurableObject(stub, (_instance, state) => {
-      state.storage.sql.exec(
-        `UPDATE idle_cleanup_schedule SET retry_count = 2, last_error = 'stop failed'
+  it.each([
+    ['retry count and error', 2, 'stop failed'],
+    ['error only', 0, 'reporter_identity_incomplete'],
+    ['retry count only', 1, null],
+  ])(
+    'always rewrites a retrying schedule (%s), so activity clears its retry state',
+    async (_label, retryCount, lastError) => {
+      mockIngestConfig(60_000);
+      const { stub, session, batch, schedule, cleanup } = await armedSession();
+      await batch('first');
+      const covered = await schedule();
+      // Precondition: the idle sweep recorded a failed attempt on a schedule that still covers.
+      await runInDurableObject(stub, (_instance, state) => {
+        state.storage.sql.exec(
+          `UPDATE idle_cleanup_schedule SET retry_count = ?, last_error = ?
          WHERE session_id = ?`,
-        session
-      );
-    });
-    const result = await batch('after-retry');
-    expect(result.alarmWrites).toBe(1);
-    const cleared = await schedule();
-    expect(cleared).toMatchObject({ retryCount: 0, lastError: null });
-    expect(cleared.cleanupAt).toBeGreaterThanOrEqual(covered.cleanupAt);
-    await cleanup();
-  });
+          retryCount,
+          lastError,
+          session
+        );
+      });
+      const result = await batch('after-retry');
+      expect(result.alarmWrites).toBe(1);
+      const cleared = await schedule();
+      expect(cleared).toMatchObject({ retryCount: 0, lastError: null });
+      expect(cleared.cleanupAt).toBeGreaterThanOrEqual(covered.cleanupAt);
+      await cleanup();
+    }
+  );
 
   it.each([
     ['0', 0],
@@ -215,6 +233,85 @@ describe('chat ingest idle-cleanup extension coalescing', () => {
       expect(cleanupAt).toBeLessThanOrEqual(result.after + TIMEOUT_MS);
     }
     await cleanup();
+  });
+
+  it('drives the real alarm: no cleanup before last activity + timeout, cleanup after the slack', async () => {
+    mockIngestConfig(60_000);
+    const { stub, batch, schedule, cleanup } = await armedSession();
+    // A controlled clock spreads the batches across the interval, as a real turn does, so an
+    // implementation that let the deadline trail the last batch would be caught below.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const start = Date.now();
+    vi.setSystemTime(start);
+    await batch('first');
+    vi.setSystemTime(start + 20_000);
+    const steady1 = await batch('steady-1');
+    vi.setSystemTime(start + 40_000);
+    const steady2 = await batch('steady-2');
+    expect([steady1.alarmWrites, steady2.alarmWrites]).toEqual([0, 0]);
+    const covered = await schedule();
+    const lastActivity = start + 40_000;
+
+    // One second before the idle timeout measured from the LAST batch: the sweep must not act.
+    vi.setSystemTime(lastActivity + TIMEOUT_MS - 1_000);
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
+    expect(await schedule()).toEqual(covered);
+
+    // Past the stored deadline (timeout plus at most one interval of slack): the sweep acts.
+    vi.setSystemTime(covered.cleanupAt + 1_000);
+    await runInDurableObject(stub, async (_instance, state) => {
+      // The early alarm above re-armed at MIN(cleanup_at); keep the sweep reachable.
+      expect(await state.storage.getAlarm()).not.toBeNull();
+    });
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
+    const swept = await runInDurableObject(
+      stub,
+      (_instance, state) =>
+        state.storage.sql
+          .exec(
+            'SELECT cleanup_at, last_error, terminal_state FROM idle_cleanup_schedule WHERE session_id IN (SELECT id FROM chat_sessions)'
+          )
+          .toArray()[0]
+    );
+    // Selected and processed: the row was terminalized, deleted, or rescheduled with a reason.
+    expect(swept === undefined || swept.terminal_state !== null || swept.last_error !== null).toBe(
+      true
+    );
+    vi.useRealTimers();
+    await cleanup();
+  });
+
+  it('coalesces with the real admin-settings default, without a mocked config', async () => {
+    const { batch, cleanup } = await armedSession();
+    await batch('first');
+    const steady = await batch('steady');
+    expect(steady.rowsWritten).toBeGreaterThan(0);
+    expect(steady.alarmWrites).toBe(0);
+    await cleanup();
+  });
+
+  it('restores per-batch extension when an operator sets the interval to 0 in admin settings', async () => {
+    const actor = `idle-coalesce-admin-${crypto.randomUUID()}`;
+    await env.DATABASE.prepare("INSERT INTO users(id,email,name,status) VALUES(?,?,?,'active')")
+      .bind(actor, `${actor}@example.test`, 'Idle coalesce admin')
+      .run();
+    const testEnv = env as unknown as Env;
+    try {
+      await updateAdminSettings(testEnv, {
+        actorUserId: actor,
+        changes: [{ name: 'chat.idleCleanupExtendIntervalMs', value: 0 }],
+      });
+      const { batch, cleanup } = await armedSession();
+      await batch('first');
+      const steady = await batch('steady');
+      expect(steady.alarmWrites).toBe(1);
+      await cleanup();
+    } finally {
+      await env.DATABASE.prepare('DELETE FROM platform_settings WHERE key=?')
+        .bind('chat.idleCleanupExtendIntervalMs')
+        .run();
+      invalidateAdminSettings(testEnv);
+    }
   });
 
   it('resolves the default interval through the real admin-settings port', async () => {
