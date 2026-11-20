@@ -127,8 +127,10 @@ export interface SpikeVerdict {
 
 /**
  * A spike counts only occurrences after the latest watch decision, so a burst triage already
- * looked at (and chose to keep watching) cannot re-queue it. Buckets are hourly: those starting
- * before `watchingSince` are excluded, which can under-count by less than an hour.
+ * looked at (and chose to keep watching) cannot re-queue it. Buckets are hourly, so the bucket
+ * of the decision's hour is counted minus `watchSpikeOffset`, the occurrences it already held
+ * when the decision was made (`watchIncident`). A burst right after the decision therefore
+ * counts in full.
  *
  * The baseline is the average per spike window over the rest of the recent window. It covers
  * the hours since watching began (or since the earliest recorded bucket, when a re-watch kept
@@ -139,10 +141,13 @@ export function evaluateSpike(
   counts: Map<number, number>,
   now: number,
   watchingSince: number | null,
-  config: WatchConfig
+  config: WatchConfig,
+  watchSpikeOffset = 0
 ): SpikeVerdict {
-  const spikeStart = Math.max(now - config.spikeWindowMs, watchingSince ?? 0);
-  const spikeCount = countSince(counts, spikeStart);
+  const watchHourStart = watchingSince === null ? 0 : Math.floor(watchingSince / HOUR_MS) * HOUR_MS;
+  const spikeStart = Math.max(now - config.spikeWindowMs, watchHourStart);
+  const offset = watchingSince !== null && watchHourStart >= spikeStart ? watchSpikeOffset : 0;
+  const spikeCount = Math.max(0, countSince(counts, spikeStart) - Math.max(0, offset));
   const baselineEnd = now - config.spikeWindowMs;
   const earliestBucket = Math.min(...[...counts.keys()].map((hour) => hour * HOUR_MS), Infinity);
   const observedSince = Math.min(earliestBucket, watchingSince ?? Infinity);
@@ -194,6 +199,7 @@ interface WatchedRow {
   watch_hourly_counts: string | null;
   watch_count_floor: number | null;
   watch_counted_ids: string | null;
+  watch_spike_offset: number | null;
 }
 
 /** Counted error id -> timestamp. Malformed storage reads as empty. */
@@ -236,7 +242,7 @@ export async function recordWatchedRecurrence(
   const none = { recorded: false, newOccurrences: 0, escalated: false, escalationReason: null };
   const row = await env.DATABASE.prepare(
     `SELECT queue_state, last_seen_at, watching_since, watch_hourly_counts,
-       watch_count_floor, watch_counted_ids
+       watch_count_floor, watch_counted_ids, watch_spike_offset
      FROM platform_feedback_triages WHERE signature = ?`
   )
     .bind(input.signature)
@@ -264,7 +270,13 @@ export async function recordWatchedRecurrence(
   const oldestKept = Math.floor((input.now - input.config.recentWindowMs) / HOUR_MS);
   for (const hour of [...counts.keys()]) if (hour < oldestKept) counts.delete(hour);
 
-  const verdict = evaluateSpike(counts, input.now, row.watching_since, input.config);
+  const verdict = evaluateSpike(
+    counts,
+    input.now,
+    row.watching_since,
+    input.config,
+    row.watch_spike_offset ?? 0
+  );
   const timestamps = fresh.map((item) => item.timestamp);
   const escalate = verdict.spike ? 1 : 0;
   const result = await env.DATABASE.prepare(
@@ -354,6 +366,8 @@ export async function watchIncident(
        watching_since = ?, watch_reason = ?, resolution_note = ?,
        watch_hourly_counts = COALESCE(watch_hourly_counts, '{}'),
        watch_count_floor = last_seen_at, watch_counted_ids = '{}',
+       watch_spike_offset = CASE WHEN json_valid(watch_hourly_counts)
+         THEN COALESCE(json_extract(watch_hourly_counts, ?), 0) ELSE 0 END,
        dispatch_attempts = 0, budget_deferred_until = NULL, budget_deferred_reason = NULL,
        incident_claim_token = NULL, incident_claim_expires_at = NULL,
        incident_claimed_by_task_id = NULL, incident_claimed_at = NULL,
@@ -368,7 +382,16 @@ export async function watchIncident(
        AND incident_claimed_by_task_id = ?
        AND incident_claim_expires_at >= ?`
   )
-    .bind(now, sanitizedReason, sanitizedReason, signature, claimToken, taskId, now)
+    .bind(
+      now,
+      sanitizedReason,
+      sanitizedReason,
+      `$."${Math.floor(now / HOUR_MS)}"`,
+      signature,
+      claimToken,
+      taskId,
+      now
+    )
     .run();
   return (result.meta.changes ?? 0) === 1;
 }

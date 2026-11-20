@@ -72,7 +72,7 @@ function setup(extraEnv: Record<string, string> = {}) {
       resolution_references TEXT, expired_at INTEGER,
       watching_since INTEGER, watch_reason TEXT, watch_hourly_counts TEXT,
       watch_escalated_at INTEGER, watch_escalation_reason TEXT,
-      watch_count_floor INTEGER, watch_counted_ids TEXT,
+      watch_count_floor INTEGER, watch_counted_ids TEXT, watch_spike_offset INTEGER,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
     CREATE UNIQUE INDEX idx_platform_feedback_triages_canonical_signature
       ON platform_feedback_triages(canonical_signature) WHERE canonical_signature IS NOT NULL;
@@ -293,6 +293,18 @@ describe('incident WATCHING disposition', () => {
       context: { now: t2 + 5 * 60_000, recentWindowMs: 7 * DAY },
     });
     expect(listed[0]?.recentOccurrenceCount).toBe(65);
+  });
+
+  it('a burst in the same hour as the watch decision escalates', async () => {
+    const h = setup();
+    const message = 'burst right after triage chose to watch';
+    const signature = await seedWatched(h, message); // watched at 10:02
+    h.addErrors(message, spread(T0 + 10 * 60_000, 55));
+    const now = T0 + 20 * 60_000;
+    const result = await h.run(now);
+    expect(result.watchedEscalated).toBe(1);
+    expect(h.row(signature)).toMatchObject({ queue_state: 'pending', queued_at: now });
+    expect(h.row(signature).watch_escalation_reason).toContain('spike: 55 occurrences');
   });
 
   it('a steadily noisy watched signature is not re-queued for its usual rate', async () => {
@@ -758,6 +770,20 @@ describe('watch spike arithmetic', () => {
     expect(evaluateSpike(noisy, now, T0, config).spike).toBe(true); // 60 >= 3 * 20
     noisy.set(hour(now - 4 * DAY), 300);
     expect(evaluateSpike(noisy, now, T0, config).spike).toBe(false);
+  });
+
+  it('counts the watch decision hour minus what it already held', () => {
+    const now = T0 + DAY + 30 * 60_000; // 10:30
+    const counts = new Map([[hour(now), 60]]);
+    const watchedAt = now - 10 * 60_000; // 10:20, same hour
+    expect(evaluateSpike(counts, now, watchedAt, config, 0)).toMatchObject({
+      spike: true,
+      spikeCount: 60,
+    });
+    expect(evaluateSpike(counts, now, watchedAt, config, 20)).toMatchObject({
+      spike: false,
+      spikeCount: 40,
+    });
   });
 
   it('ignores occurrences from before the latest watch decision', () => {

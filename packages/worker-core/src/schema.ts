@@ -5323,6 +5323,8 @@ export const platformFeedbackTriages = sqliteTable(
     /** Migration 0265: last_seen_at when watching began, and ids counted since (JSON). */
     watchCountFloor: integer('watch_count_floor'),
     watchCountedIds: text('watch_counted_ids'),
+    /** Migration 0266: occurrences already in the watch decision's hour bucket. */
+    watchSpikeOffset: integer('watch_spike_offset'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
