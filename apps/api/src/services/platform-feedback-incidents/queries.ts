@@ -34,15 +34,19 @@ export function defaultIncidentReadContext(now: number = Date.now()): IncidentRe
 
 /**
  * Occurrences recorded while watching since `cutoffHour`, computed in SQL so a list can be
- * ordered by it before LIMIT. Malformed stored JSON counts as empty rather than failing the
- * whole list (rule 50); CASE evaluates lazily, so json_type never sees invalid JSON.
+ * ordered by it before LIMIT. Same rules as `parseHourlyCounts` (canonical integer key,
+ * positive integer value), so the ranking matches the returned count. Malformed stored JSON
+ * counts as empty rather than failing the whole list (rule 50); CASE evaluates lazily, so
+ * json_type never sees invalid JSON.
  */
 const RECENT_WATCH_OCCURRENCES_SQL = `(
   SELECT COALESCE(SUM(CAST(bucket.value AS INTEGER)), 0)
   FROM json_each(CASE WHEN json_valid(watch_hourly_counts)
     THEN CASE WHEN json_type(watch_hourly_counts) = 'object' THEN watch_hourly_counts ELSE '{}' END
     ELSE '{}' END) bucket
-  WHERE CAST(bucket.key AS INTEGER) >= ?
+  WHERE bucket.type = 'integer' AND bucket.value > 0
+    AND CAST(CAST(bucket.key AS INTEGER) AS TEXT) = bucket.key
+    AND CAST(bucket.key AS INTEGER) >= ?
 )`;
 
 export type IncidentListSort = 'priority' | 'frequency';

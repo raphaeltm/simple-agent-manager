@@ -23,6 +23,8 @@ export interface WatchedRecurrenceContext {
   projectId: string;
   now: number;
   watchConfig: WatchConfig;
+  /** How long counted error ids are remembered (two triage windows). */
+  dedupeHorizonMs: number;
   ideaTitleMaxLength: number;
   readEngagement?: IdeaWorkSnapshotReader;
 }
@@ -42,11 +44,12 @@ export async function processWatchedRecurrence(
 ): Promise<WatchedRecurrenceResult> {
   const outcome = await recordWatchedRecurrence(env, {
     signature: group.signature,
-    occurrenceTimestamps: group.occurrenceTimestamps ?? [],
+    occurrences: group.occurrences ?? [],
     severity: group.severity,
     evidenceRefs: JSON.stringify(group.evidence),
     now: ctx.now,
     config: ctx.watchConfig,
+    dedupeHorizonMs: ctx.dedupeHorizonMs,
   });
   const recorded = outcome.recorded && outcome.newOccurrences > 0;
   if (!recorded || !existing.idea_id || !refreshIdea) {
@@ -81,26 +84,25 @@ export interface WatchedRecorderContext extends WatchedRecurrenceContext {
 }
 
 /**
- * Records watched recurrences for one runner pass into `result`. Per run: at most
- * `watchConfig.maxRecordsPerRun` signatures (2 D1 statements each) and `ideaRefreshLimit`
- * idea refreshes (about 4 D1 statements and 1 Durable Object read each). At the defaults
- * (25 and 5) that is at most ~70 D1 statements and 5 Durable Object reads an hour. Every
- * signature is isolated, so one failing write cannot stop the others, the ordinary triage
- * groups or the quiet expiry (rule 53).
+ * Records watched recurrences for one runner pass into `result`. Every watched signature in
+ * the window is recorded (2 D1 statements each, at most one per distinct signature in the
+ * triage error-limit window: 100 rows by default, so at most ~200 statements and typically a
+ * handful), because a recurrence not recorded now is not in the next window. Idea refreshes
+ * (about 4 D1 statements and one Durable Object read each) are capped at `ideaRefreshLimit`;
+ * a skipped refresh happens at the next recurrence and the counts are already stored.
+ *
+ * Each signature is isolated, so one failing write cannot stop the others, the ordinary triage
+ * groups or the quiet expiry (rule 53). Signatures whose recording failed are kept in
+ * `unrecorded` so the quiet expiry does not end a watch that just recurred.
  */
 export function createWatchedRecorder(
   env: Env,
   result: FeedbackTriageResult,
   ctx: WatchedRecorderContext
 ) {
-  let recordsLeft = ctx.watchConfig.maxRecordsPerRun;
   let refreshesLeft = ctx.ideaRefreshLimit;
+  const unrecorded: string[] = [];
   const record = async (group: FeedbackErrorGroup, existing: ExistingTriagePriorityRow) => {
-    if (recordsLeft <= 0) {
-      result.groupsSkipped += 1;
-      return;
-    }
-    recordsLeft -= 1;
     try {
       const outcome = await processWatchedRecurrence(env, group, existing, ctx, refreshesLeft > 0);
       if (outcome.recorded) result.watchedRecurrences += 1;
@@ -112,6 +114,7 @@ export function createWatchedRecorder(
         result.groupsSkipped += 1;
       }
     } catch (cause) {
+      unrecorded.push(group.signature);
       const reason = sanitizeFailureReason(cause, ctx.failureReasonMaxLength);
       result.groupsFailed += 1;
       result.failureReasons.push(reason);
@@ -123,19 +126,14 @@ export function createWatchedRecorder(
       });
     }
   };
-  /** Oldest occurrence in the window first: it is the one the next window will not see. */
   const recordAll = async (
     groups: readonly FeedbackErrorGroup[],
     rows: ReadonlyMap<string, ExistingTriagePriorityRow>
   ) => {
-    const ordered = [...groups].sort(
-      (left, right) =>
-        left.firstSeenAt - right.firstSeenAt || left.signature.localeCompare(right.signature)
-    );
-    for (const group of ordered) {
+    for (const group of groups) {
       const existing = rows.get(group.signature);
       if (existing) await record(group, existing);
     }
   };
-  return { record, recordAll };
+  return { record, recordAll, unrecorded };
 }

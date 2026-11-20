@@ -134,10 +134,15 @@ export async function handleListIncidentQueue(
     return jsonRpcError(requestId, INVALID_PARAMS, 'sort must be "priority" or "frequency"');
   }
 
-  const incidents = await listIncidentQueue(env, states, boundedLimit(params, env), {
+  // One extra row tells the caller whether the ranked set is complete.
+  const limit = boundedLimit(params, env);
+  const fetched = await listIncidentQueue(env, states, limit + 1, {
     context: await readContext(env),
     sort: sort as IncidentListSort,
   });
+  const incidents = fetched.slice(0, limit);
+  const hasMore = fetched.length > limit;
+  const maxLimit = getMcpLimits(env).incidentListMax;
   return jsonRpcSuccess(requestId, {
     content: [
       {
@@ -147,6 +152,15 @@ export async function handleListIncidentQueue(
             projectId: tokenData.projectId,
             incidents,
             count: incidents.length,
+            hasMore,
+            ...(hasMore
+              ? {
+                  more:
+                    limit < maxLimit
+                      ? `More incidents match. Call list_incident_queue again with a larger limit (up to ${maxLimit}).`
+                      : `More than ${maxLimit} incidents match; the list is the top ${maxLimit} by this sort. Narrow it with state filters.`,
+                }
+              : {}),
             sort,
             defaultStates: states.length ? undefined : ['pending', 'dispatched', 'claimed'],
             privacy:
@@ -345,27 +359,29 @@ async function handleWatchIncident(
     tokenData: McpTokenData;
   }
 ): Promise<JsonRpcResponse> {
-  if (!input.note) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'Watching requires a one-line reason in note: why this defect is real but not urgent.'
+  let watched: boolean;
+  try {
+    watched = await watchIncident(
+      env,
+      input.incidentId,
+      input.claimToken,
+      input.tokenData.taskId,
+      input.note ?? '',
+      Date.now(),
+      getIncidentConfig(env).resolutionNoteMaxLength
     );
+  } catch (error) {
+    // An empty reason, including one that sanitizes to nothing.
+    if (error instanceof IncidentResolutionValidationError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, error.message);
+    }
+    throw error;
   }
-  const watched = await watchIncident(
-    env,
-    input.incidentId,
-    input.claimToken,
-    input.tokenData.taskId,
-    input.note,
-    Date.now(),
-    getIncidentConfig(env).resolutionNoteMaxLength
-  );
   if (!watched) {
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'Incident was not set to watching; verify the claim token, task ownership, lease, and state'
+      "Incident was not set to watching; verify the claim token, task ownership, lease and state. A person's report (source user-report) cannot be watched."
     );
   }
   return jsonRpcSuccess(requestId, {

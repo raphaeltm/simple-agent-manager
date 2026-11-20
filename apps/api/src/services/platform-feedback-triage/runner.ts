@@ -137,8 +137,8 @@ export async function runPlatformFeedbackTriage(
     env,
     candidateGroups.map((group) => group.signature)
   );
-  // Watched signatures are recorded outside the group limit (no diagnosis; a recurrence missed
-  // in its window is lost for good, as the next window starts after it), up to their own cap.
+  // Watched signatures are recorded outside the group limit: no diagnosis, and a recurrence
+  // not recorded in its window is not in the next one (`createWatchedRecorder`).
   const isWatched = (signature: string) =>
     existingPriorityRows.get(signature)?.queue_state === 'watching';
   const watchedGroups = candidateGroups.filter((group) => isWatched(group.signature));
@@ -153,6 +153,7 @@ export async function runPlatformFeedbackTriage(
     projectId: project.id,
     now,
     watchConfig,
+    dedupeHorizonMs: 2 * windowMinutes * 60_000,
     ideaTitleMaxLength,
     ideaRefreshLimit: groupLimit,
     readEngagement: deps.readEngagement,
@@ -193,7 +194,7 @@ export async function runPlatformFeedbackTriage(
       latestExisting ?? existingPriorityRows.get(group.signature),
       group
     );
-    await env.DATABASE.prepare(
+    const ordinaryUpdate = await env.DATABASE.prepare(
       `UPDATE platform_feedback_triages SET first_seen_at = MIN(first_seen_at, ?),
       last_seen_at = MAX(last_seen_at, ?), occurrence_count = MAX(occurrence_count, ?),
       evidence_refs = ?, summary = COALESCE(?, summary),
@@ -229,6 +230,13 @@ export async function runPlatformFeedbackTriage(
         group.signature
       )
       .run();
+    if ((ordinaryUpdate.meta.changes ?? 0) === 0) {
+      // The row became watching between the read above and this update: record it as watched.
+      const current = await readExistingTriageRow(env, group.signature);
+      if (current?.queue_state === 'watching') await watched.record(group, current);
+      else result.groupsSkipped += 1;
+      continue;
+    }
     if (
       latestExisting &&
       ['resolved', 'expired'].includes(latestExisting.queue_state ?? '') &&
@@ -425,7 +433,12 @@ export async function runPlatformFeedbackTriage(
   }
   // After this window's recurrences are recorded, so a still-recurring signature stays watched.
   try {
-    result.watchedExpired = await expireQuietWatchedIncidents(env, now, watchConfig);
+    result.watchedExpired = await expireQuietWatchedIncidents(
+      env,
+      now,
+      watchConfig,
+      watched.unrecorded
+    );
   } catch (error) {
     result.watchedExpired = undefined;
     log.warn('platform-feedback-triage.watch-expiry-failed', {

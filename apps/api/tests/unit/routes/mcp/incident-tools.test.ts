@@ -37,6 +37,7 @@ function setup() {
       resolution_references TEXT, expired_at INTEGER,
       watching_since INTEGER, watch_reason TEXT, watch_hourly_counts TEXT,
       watch_escalated_at INTEGER, watch_escalation_reason TEXT,
+      watch_count_floor INTEGER, watch_counted_ids TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
     INSERT INTO platform_feedback_triages
       (signature, source, summary, first_seen_at, last_seen_at, occurrence_count, evidence_refs,
@@ -287,6 +288,18 @@ describe('MCP incident tools', () => {
       env
     );
     expect(missingReason.error?.message).toContain('Watching requires a one-line reason');
+    const blankReason = await handleResolveIncident(
+      '2b',
+      {
+        incidentId: 'incident-a',
+        claimToken: claim.claimToken,
+        outcome: 'watching',
+        note: '  \u0007 ',
+      },
+      token(),
+      env
+    );
+    expect(blankReason.error?.message).toContain('Watching requires a one-line reason');
     const wrongClaim = await handleResolveIncident(
       '3',
       { incidentId: 'incident-a', claimToken: 'wrong', outcome: 'watching', note: 'benign' },
@@ -347,12 +360,28 @@ describe('MCP incident tools', () => {
     insert.run('busy', 'busy', 3000, 40, 1000, JSON.stringify({ [hour - 2]: 25, [hour - 30]: 15 }));
     insert.run('quiet', 'quiet', 4000, 5, 1000, JSON.stringify({ [hour - 1]: 5 }));
     insert.run('malformed', 'malformed', 5000, 3, 1000, 'not json');
+    // A string count is malformed: the SQL ranking ignores it exactly as the parser does.
+    insert.run(
+      'string-count',
+      'string count',
+      6000,
+      2,
+      1000,
+      JSON.stringify({ [hour - 1]: '1000' })
+    );
 
     const listed = parseToolText(
       await handleListIncidentQueue('1', { state: 'watching', sort: 'frequency' }, token(), env)
     );
     const incidents = listed.incidents as Array<Record<string, unknown>>;
-    expect(incidents.map((item) => item.id)).toEqual(['busy', 'quiet', 'old-flood', 'malformed']);
+    expect(incidents.map((item) => item.id)).toEqual([
+      'busy',
+      'quiet',
+      'old-flood',
+      'malformed',
+      'string-count',
+    ]);
+    expect(listed.hasMore).toBe(false);
     expect(incidents[0]).toMatchObject({
       queueState: 'watching',
       occurrenceCount: 40,
@@ -364,6 +393,17 @@ describe('MCP incident tools', () => {
       watchReason: 'watch reason',
     });
     expect(incidents[2]).toMatchObject({ recentOccurrenceCount: 0, occurrenceCount: 900 });
+
+    const truncated = parseToolText(
+      await handleListIncidentQueue(
+        '5',
+        { state: 'watching', sort: 'frequency', limit: 2 },
+        token(),
+        env
+      )
+    );
+    expect(truncated).toMatchObject({ count: 2, hasMore: true });
+    expect(String(truncated.more)).toContain('larger limit');
 
     const invalidSort = await handleListIncidentQueue('2', { sort: 'loudest' }, token(), env);
     expect(invalidSort.error?.message).toContain('sort must be');

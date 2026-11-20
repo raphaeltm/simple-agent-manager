@@ -37,6 +37,10 @@ export interface FeedbackErrorEvidence extends IncidentReopenEvidence {
   errorId: string;
   nodeId?: string;
 }
+export interface FeedbackOccurrence {
+  id: string;
+  timestamp: number;
+}
 export interface FeedbackErrorGroup {
   signature: string;
   canonicalSignature?: string;
@@ -51,11 +55,10 @@ export interface FeedbackErrorGroup {
   evidence: FeedbackErrorEvidence[];
   count: number;
   /**
-   * Timestamp of every error in this window (bounded by the triage error limit). Watched
-   * incidents count only those newer than the stored last occurrence; absent for groups
-   * rebuilt from storage.
+   * Id and timestamp of every error in this window (bounded by the triage error limit).
+   * Watched incidents count each id once; absent for groups rebuilt from storage.
    */
-  occurrenceTimestamps?: number[];
+  occurrences?: FeedbackOccurrence[];
 }
 export interface ExistingTriagePriorityRow {
   signature: string;

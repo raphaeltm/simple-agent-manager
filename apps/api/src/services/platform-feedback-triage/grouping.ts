@@ -345,7 +345,7 @@ export async function groupPlatformErrors(
       current.firstSeenAt = Math.min(current.firstSeenAt, row.timestamp);
       current.lastSeenAt = Math.max(current.lastSeenAt, row.timestamp);
       if (current.evidence.length < evidenceLimit) current.evidence.push(evidence);
-      current.occurrenceTimestamps?.push(row.timestamp);
+      current.occurrences?.push({ id: row.id, timestamp: row.timestamp });
     } else {
       const message = displayPlatformErrorMessage(row.message);
       groups.set(key, {
@@ -357,7 +357,7 @@ export async function groupPlatformErrors(
         lastSeenAt: row.timestamp,
         evidence: [evidence],
         count: 1,
-        occurrenceTimestamps: [row.timestamp],
+        occurrences: [{ id: row.id, timestamp: row.timestamp }],
         legacyKeys: new Set([legacyKey]),
       });
     }

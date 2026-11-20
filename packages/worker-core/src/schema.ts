@@ -5320,6 +5320,9 @@ export const platformFeedbackTriages = sqliteTable(
     watchHourlyCounts: text('watch_hourly_counts'),
     watchEscalatedAt: integer('watch_escalated_at'),
     watchEscalationReason: text('watch_escalation_reason'),
+    /** Migration 0265: last_seen_at when watching began, and ids counted since (JSON). */
+    watchCountFloor: integer('watch_count_floor'),
+    watchCountedIds: text('watch_counted_ids'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),

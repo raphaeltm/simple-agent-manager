@@ -72,6 +72,7 @@ function setup(extraEnv: Record<string, string> = {}) {
       resolution_references TEXT, expired_at INTEGER,
       watching_since INTEGER, watch_reason TEXT, watch_hourly_counts TEXT,
       watch_escalated_at INTEGER, watch_escalation_reason TEXT,
+      watch_count_floor INTEGER, watch_counted_ids TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
     CREATE UNIQUE INDEX idx_platform_feedback_triages_canonical_signature
       ON platform_feedback_triages(canonical_signature) WHERE canonical_signature IS NOT NULL;
@@ -380,18 +381,19 @@ describe('incident WATCHING robustness', () => {
       [ideaId()]: { sessions: [], updates: 1, fileIds: [], pullRequestUrls: [] },
     });
 
-  it('two overlapping recordings add a window once (compare-and-set on last_seen_at)', async () => {
+  it('two overlapping recordings add a window once (compare-and-set on the counted ids)', async () => {
     const h = setup();
     const message = 'overlapping hourly windows race on the same signature';
     const signature = await seedWatched(h, message);
     const config = watchConfigFromSettings(FLEET_OPS_DEFAULTS);
     const input = {
       signature,
-      occurrenceTimestamps: spread(T0 + HOUR, 5),
+      occurrences: spread(T0 + HOUR, 5).map((timestamp) => ({ id: randomUUID(), timestamp })),
       severity: 'error',
       evidenceRefs: '[]',
       now: T0 + 2 * HOUR,
       config,
+      dedupeHorizonMs: 2 * HOUR,
     };
     const outcomes = await Promise.all([
       recordWatchedRecurrence(h.env, input),
@@ -417,7 +419,7 @@ describe('incident WATCHING robustness', () => {
       ...database,
       prepare(sql: string) {
         const statement = database.prepare(sql);
-        if (!sql.includes("queue_state = 'watching' AND last_seen_at = ?")) return statement;
+        if (!sql.includes('watch_counted_ids IS ?')) return statement;
         return {
           ...statement,
           bind(...values: unknown[]) {
@@ -441,6 +443,119 @@ describe('incident WATCHING robustness', () => {
     expect(h.row(brokenSignature).occurrence_count).toBe(1);
     expect(result.watchedExpired).toBe(1);
     expect(h.row(quietSignature).queue_state).toBe('expired');
+  });
+
+  it('counts a late-committed error with an older timestamp and same-millisecond errors once each', async () => {
+    const h = setup();
+    const message = 'errors that commit out of order';
+    const signature = await seedWatched(h, message);
+    const t1 = T0 + 2 * HOUR;
+    h.addErrors(message, [t1 + 30 * 60_000, t1 + 30 * 60_000]); // same millisecond
+    await h.run(t1 + 40 * 60_000);
+    expect(h.row(signature).occurrence_count).toBe(3);
+    // A row that commits after that run, with an earlier timestamp still inside the next window.
+    h.addErrors(message, [t1 + 20 * 60_000]);
+    await h.run(t1 + 70 * 60_000);
+    expect(h.row(signature).occurrence_count).toBe(4);
+    // A manual run over the same window adds nothing.
+    await h.run(t1 + 75 * 60_000);
+    expect(h.row(signature).occurrence_count).toBe(4);
+  });
+
+  it('does not recount errors from before the watch decision', async () => {
+    const h = setup();
+    const message = 'errors just before the watch decision';
+    h.addErrors(message, [T0, T0 + 1_000]);
+    await h.run(T0 + 60_000);
+    const signature = h.signatureFor(message);
+    const claim = await claimIncident(h.env, signature, TRIAGE_TASK, T0 + 120_000);
+    await watchIncident(
+      h.env,
+      signature,
+      claim!.claimToken,
+      TRIAGE_TASK,
+      'watch',
+      T0 + 130_000,
+      2_000
+    );
+    // The next run's window still contains both pre-watch errors plus one new one.
+    h.addErrors(message, [T0 + 10 * 60_000]);
+    await h.run(T0 + 30 * 60_000);
+    expect(h.row(signature).occurrence_count).toBe(3);
+  });
+
+  it('a watched signature whose recording failed is not quiet-expired in that run', async () => {
+    const h = setup();
+    const message = 'old watch that recurs while its write fails';
+    const signature = await seedWatched(h, message, T0 - 15 * DAY);
+    const database = h.env.DATABASE;
+    h.env.DATABASE = {
+      ...database,
+      prepare(sql: string) {
+        const statement = database.prepare(sql);
+        if (!sql.includes('watch_counted_ids IS ?')) return statement;
+        return {
+          ...statement,
+          bind: (...values: unknown[]) => ({
+            ...statement.bind(...values),
+            run: async () => Promise.reject(new Error('D1 write failed')),
+          }),
+        };
+      },
+    } as unknown as Env['DATABASE'];
+    h.addErrors(message, [T0 + 1_000]);
+    const result = await h.run(T0 + 5 * 60_000);
+    expect(result).toMatchObject({ groupsFailed: 1, watchedExpired: 0 });
+    expect(h.row(signature).queue_state).toBe('watching');
+  });
+
+  it('records a signature that became watching between selection and the ordinary update', async () => {
+    const h = setup();
+    const message = 'watched by a concurrent triage mid-run';
+    h.addErrors(message, [T0]);
+    await h.run(T0 + 60_000);
+    const signature = h.signatureFor(message);
+    const claim = await claimIncident(h.env, signature, TRIAGE_TASK, T0 + 120_000);
+    const database = h.env.DATABASE;
+    let flipped = false;
+    h.env.DATABASE = {
+      ...database,
+      prepare(sql: string) {
+        const statement = database.prepare(sql);
+        if (flipped || !sql.includes("queue_state <> 'watching'")) return statement;
+        return {
+          ...statement,
+          bind: (...values: unknown[]) => {
+            const bound = statement.bind(...values);
+            return {
+              ...bound,
+              run: async () => {
+                // The concurrent triage task commits its watch decision first.
+                flipped = true;
+                await watchIncident(
+                  h.env,
+                  signature,
+                  claim!.claimToken,
+                  TRIAGE_TASK,
+                  'concurrent watch',
+                  T0 + 130_000,
+                  2_000
+                );
+                return bound.run();
+              },
+            };
+          },
+        };
+      },
+    } as unknown as Env['DATABASE'];
+
+    h.addErrors(message, [T0 + 20 * 60_000]);
+    const result = await h.run(T0 + 30 * 60_000);
+
+    expect(flipped).toBe(true);
+    expect(result.watchedRecurrences).toBe(1);
+    expect(h.row(signature)).toMatchObject({ queue_state: 'watching', occurrence_count: 2 });
+    expect(h.diagnose).toHaveBeenCalledTimes(1);
   });
 
   it('records counts but leaves an engaged idea alone and releases it', async () => {
@@ -514,22 +629,6 @@ describe('incident WATCHING robustness', () => {
     const result = await h.run(t1 + 2 * DAY);
     expect(result.watchedExpired).toBe(1);
     expect(h.row(controlSignature).queue_state).toBe('expired');
-  });
-
-  it('caps watched recordings per run, oldest occurrence first', async () => {
-    const h = setup();
-    h.setSetting('operations.incidentWatchMaxRecordsPerRun', '1');
-    const first = 'alpha watched signature in the window';
-    const second = 'bravo watched signature in the window';
-    const firstSignature = await seedWatched(h, first);
-    const secondSignature = await seedWatched(h, second, T0 + 1_000);
-    const t1 = T0 + 2 * HOUR;
-    h.addErrors(second, [t1 + 2_000]);
-    h.addErrors(first, [t1 + 1_000]);
-    const result = await h.run(t1 + 5 * 60_000);
-    expect(result.watchedRecurrences).toBe(1);
-    expect(h.row(firstSignature).occurrence_count).toBe(2);
-    expect(h.row(secondSignature).occurrence_count).toBe(1);
   });
 
   it('falls back to default settings when settings cannot be read', async () => {
@@ -645,7 +744,6 @@ describe('watch spike arithmetic', () => {
     spikeMinOccurrences: 50,
     spikeBaselineMultiplier: 3,
     quietExpiryMs: 14 * DAY,
-    maxRecordsPerRun: 25,
   };
   const hour = (at: number) => Math.floor(at / HOUR);
 
@@ -672,6 +770,8 @@ describe('watch spike arithmetic', () => {
   it('reads malformed stored buckets as empty', () => {
     expect(parseHourlyCounts('not json').size).toBe(0);
     expect(parseHourlyCounts('[1,2]').size).toBe(0);
-    expect([...parseHourlyCounts('{"10":3,"x":4,"11":-1,"12":"5"}')]).toEqual([[10, 3]]);
+    expect([
+      ...parseHourlyCounts('{"10":3,"x":4,"11":-1,"12":"5","13":2.5,"014":4,"15.0":1}'),
+    ]).toEqual([[10, 3]]);
   });
 });
