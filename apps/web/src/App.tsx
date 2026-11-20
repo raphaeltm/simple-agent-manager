@@ -241,6 +241,11 @@ const SettingsNotifications = lazyNamed(
   'SettingsNotifications'
 );
 const Setup = lazyNamed(() => import('./pages/Setup'), 'Setup');
+// PROTOTYPE ONLY: remove before merging to main (.claude/rules/37-prototype-development.md).
+const InboxThreadPrototype = lazyNamed(
+  () => import('./pages/inbox-thread-prototype'),
+  'InboxThreadPrototype'
+);
 const TaskRedirect = lazyNamed(() => import('./pages/TaskRedirect'), 'TaskRedirect');
 const Tools = lazyNamed(() => import('./pages/Tools'), 'Tools');
 const ToolsCli = lazyNamed(() => import('./pages/ToolsCli'), 'ToolsCli');
@@ -319,6 +324,10 @@ export default function App() {
                     <Route path="/oauth/consent" element={page(<ConnectorConsent />)} />
                     <Route path="/device" element={page(<DeviceAuth />)} />
                     <Route path="/setup" element={page(<Setup />)} />
+                    <Route
+                      path="/prototype/inbox-thread"
+                      element={page(<InboxThreadPrototype />)}
+                    />
                     {showDevOnlyRoutes && (
                       <>
                         <Route
