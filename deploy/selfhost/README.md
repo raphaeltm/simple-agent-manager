@@ -213,6 +213,9 @@ the bundles it sealed once the plaintext version runs again, so a retry seals th
 are then.
 The plaintext files go last, and with the file key only once `--key-copy` proves a matching copy
 exists (`scripts/selfhost/secrets-migrate.ts`).
+If that removal is interrupted, the next run finishes it, but only when a marker file shows it was
+this command's removal, the sealed version is running, and the sealed bundle holds every value
+still in `secrets.env`. A sealed box's own `secrets.env` is never removed.
 
 ### Old plaintext copies
 

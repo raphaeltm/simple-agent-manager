@@ -410,6 +410,16 @@ describe("the agent's copy age (Codex P2: the two stale windows must not add up)
     await expect(loadRuntimeSecrets(e())).rejects.toThrow(/unreachable/);
   });
 
+  it('re-checks the stale bound after a failed attempt that outlasted it (Codex P2)', async () => {
+    fetchMock.mockImplementationOnce(ok({ K: 'v1' })).mockImplementation(async () => {
+      now += 2; // the attempt itself carries the copy past the bound before it fails
+      throw new TypeError('connection refused');
+    });
+    await loadRuntimeSecrets(e());
+    now += 4999; // within the bound when the request starts
+    await expect(loadRuntimeSecrets(e())).rejects.toThrow(/unreachable/);
+  });
+
   it('control: a fresh answer (ageMs 0 or absent) keeps the full stale window', async () => {
     fetchMock
       .mockImplementationOnce(answer({ K: 'v1' }, { ageMs: 0 }))

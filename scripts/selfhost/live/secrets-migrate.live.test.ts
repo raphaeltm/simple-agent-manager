@@ -28,7 +28,7 @@ import { createFileProvider } from '../../../deploy/selfhost/key-agent/provider-
 import { bundleStoreFor, listBundles } from '../key-service.js';
 import { ensurePlatformKeys } from '../platform-keys.js';
 import { parseDotenv } from '../secret-files.js';
-import { type MigrateDeps, runMigration } from '../secrets-migrate.js';
+import { CLEANUP_MARKER, type MigrateDeps, runMigration } from '../secrets-migrate.js';
 import { preflightSealedSecrets } from '../secrets-preflight.js';
 import { holdOnPlaintext } from '../upgrade-sealing.js';
 
@@ -301,33 +301,74 @@ describe('secrets migrate', () => {
   });
 
   // Codex P2 on #2933: a run interrupted between its two removals left secrets.env alone, and
-  // every retry said "nothing to migrate" because platform-keys.json was gone.
-  it('a retry finishes a removal interrupted after platform-keys.json, once the sealed version runs', async () => {
-    expect(await runMigration({ box: box(), stateDir: state }, deps())).toBe('migrated-files-kept');
-    rmSync(join(state, 'platform-keys.json')); // the interrupted run's first removal
-    const copy = join(dir, 'kek-copy');
-    writeFileSync(copy, readFileSync(join(state, 'key-agent/kek')), { mode: 0o600 });
-    const sealedRuns = deps({
-      currentVersionSecrets: async () => {
-        steps.push('scan current');
-        return [];
-      },
+  // every retry said "nothing to migrate". Codex P1: the retry must remove only what is that run's
+  // leftover (its marker) and whose values the sealed bundle holds.
+  describe('a retry after a removal interrupted after platform-keys.json', () => {
+    const sealedRuns = () =>
+      deps({
+        currentVersionSecrets: async () => {
+          steps.push('scan current');
+          return [];
+        },
+      });
+    async function interrupted(): Promise<string> {
+      expect(await runMigration({ box: box(), stateDir: state }, deps())).toBe(
+        'migrated-files-kept'
+      );
+      // What the interrupted run left: its marker, then the first removal.
+      writeFileSync(join(state, CLEANUP_MARKER), 'secrets.env\nplatform-keys.json\n');
+      rmSync(join(state, 'platform-keys.json'));
+      const copy = join(dir, 'kek-copy');
+      writeFileSync(copy, readFileSync(join(state, 'key-agent/kek')), { mode: 0o600 });
+      return copy;
+    }
+
+    it('finishes it once the sealed version runs and the bundle holds the file', async () => {
+      const copy = await interrupted();
+      expect(await runMigration({ box: box(), stateDir: state, keyCopy: copy }, sealedRuns())).toBe(
+        'migrated'
+      );
+      expect(plaintextLeft()).toEqual([]);
+      expect(existsSync(join(state, CLEANUP_MARKER))).toBe(false);
     });
-    // Control: while the running version still holds secret vars, nothing is removed.
-    const stillPlain = deps({
-      currentVersionSecrets: async () => {
-        steps.push('scan current');
-        return ['ENCRYPTION_KEY'];
-      },
+
+    it('refuses while the running version still holds secret vars', async () => {
+      const copy = await interrupted();
+      const stillPlain = deps({
+        currentVersionSecrets: async () => {
+          steps.push('scan current');
+          return ['ENCRYPTION_KEY'];
+        },
+      });
+      await expect(
+        runMigration({ box: box(), stateDir: state, keyCopy: copy }, stillPlain)
+      ).rejects.toThrow(/not sealed and healthy/);
+      expect(plaintextLeft()).toEqual(['secrets.env']);
     });
-    expect(await runMigration({ box: box(), stateDir: state, keyCopy: copy }, stillPlain)).toBe(
-      'nothing-to-migrate'
-    );
-    expect(plaintextLeft()).toEqual(['secrets.env']);
-    expect(await runMigration({ box: box(), stateDir: state, keyCopy: copy }, sealedRuns)).toBe(
-      'migrated'
-    );
-    expect(plaintextLeft()).toEqual([]);
+
+    it('never deletes a credential added to secrets.env since, that the bundle does not hold', async () => {
+      const copy = await interrupted();
+      writeFileSync(
+        join(state, 'secrets.env'),
+        `${OPERATOR}NEW_UNSEALED=${randomBytes(8).toString('hex')}\n`,
+        {
+          mode: 0o600,
+        }
+      );
+      await expect(
+        runMigration({ box: box(), stateDir: state, keyCopy: copy }, sealedRuns())
+      ).rejects.toThrow(/NEW_UNSEALED/);
+      expect(plaintextLeft()).toEqual(['secrets.env']);
+    });
+
+    it('without the marker, a sealed box keeps its secrets.env (ordinary operator input)', async () => {
+      const copy = await interrupted();
+      rmSync(join(state, CLEANUP_MARKER));
+      expect(await runMigration({ box: box(), stateDir: state, keyCopy: copy }, sealedRuns())).toBe(
+        'nothing-to-migrate'
+      );
+      expect(plaintextLeft()).toEqual(['secrets.env']);
+    });
   });
 
   it('refuses while .env says legacy-plaintext, and has nothing to do on a sealed box', async () => {

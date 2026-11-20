@@ -388,10 +388,13 @@ export async function loadRuntimeSecrets(env: KeyAgentEnv): Promise<RuntimeSecre
     fetched = await fetchSecrets(agent);
   } catch (error) {
     // A due copy survives only an unreachable agent; a refusal or an unverified answer ends it.
+    // The bound is checked again here: the failed attempt itself (up to SAM_KEY_AGENT_TIMEOUT_MS)
+    // can carry the copy past it.
     if (
       cached?.bundleId === agent.bundleId &&
       error instanceof RuntimeSecretsUnavailableError &&
-      error.code === 'KEY_AGENT_UNREACHABLE'
+      error.code === 'KEY_AGENT_UNREACHABLE' &&
+      (cachedStaleAgeMs() ?? Number.POSITIVE_INFINITY) < maxStaleMs(env)
     ) {
       return cached.secrets;
     }

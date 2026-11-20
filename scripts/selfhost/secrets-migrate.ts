@@ -17,7 +17,7 @@
  * A failure after step 4 started redeploys the previous behaviour
  * (`pnpm selfhost:deploy --key-provider legacy-plaintext`), whose plaintext files are still there.
  */
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { explicitKeyProvider, keyChoicePath, readKeyChoice } from './key-choice';
@@ -51,6 +51,13 @@ export interface MigrateInput {
 
 export type MigrateOutcome = 'nothing-to-migrate' | 'migrated' | 'migrated-files-kept';
 
+/**
+ * Written just before step 6 removes the plaintext files and removed after the last one goes: the
+ * evidence that a leftover secrets.env is this command's unfinished removal, not a sealed box's
+ * ordinary operator input (deploy seals secrets.env on every run).
+ */
+export const CLEANUP_MARKER = 'migrate-cleanup.pending';
+
 function plaintext(stateDir: string): Record<string, string> {
   const keys = join(stateDir, 'platform-keys.json');
   return {
@@ -76,14 +83,20 @@ export async function runMigration(
     (a, b) => Number(a === 'platform-keys.json') - Number(b === 'platform-keys.json')
   );
   if (!existsSync(join(stateDir, 'platform-keys.json'))) {
-    // An earlier run that stopped between its removals left secrets.env: finish once the running
-    // version is confirmed sealed.
-    if (files.length > 0 && readKeyChoice(stateDir) !== null) {
+    // A run that stopped between its removals (its marker says so) left secrets.env: finish once
+    // the sealed version runs AND the sealed bundle holds every value the file holds now, so a
+    // credential added or changed since is never deleted unsealed.
+    if (files.length > 0 && existsSync(join(stateDir, CLEANUP_MARKER))) {
       const running = await deps.adoptAndCheck();
-      if (running.healthy && (await deps.currentVersionSecrets()).length === 0) {
-        log('a previous migrate stopped before removing every plaintext file; finishing that');
-        return removePlaintext(input, files, log);
+      if (!running.healthy || (await deps.currentVersionSecrets()).length > 0) {
+        throw new Error(
+          `a previous migrate stopped while removing the plaintext files, but the running version ` +
+            `is not sealed and healthy (${running.detail}); nothing removed`
+        );
       }
+      await deps.preflight({ box: input.box, stateDir, expected: plaintext(stateDir) });
+      log('a previous migrate stopped before removing every plaintext file; finishing that');
+      return removePlaintext(input, files, log);
     }
     log('no platform-keys.json on this box: it is already sealed (or new). Nothing to migrate.');
     log('Old copies may remain in the bucket and backups: pnpm selfhost:secrets plaintext');
@@ -203,7 +216,10 @@ function removePlaintext(
     }
     log(copy.message);
   }
+  const marker = join(stateDir, CLEANUP_MARKER);
+  writeFileSync(marker, `${files.join('\n')}\n`, { mode: 0o600 });
   for (const name of files) rmSync(join(stateDir, name));
+  rmSync(marker);
   log(`6/6 removed ${files.join(', ')}; the box's Worker secrets are sealed (${provider})`);
   log('Old copies remain in the bucket and backups: pnpm selfhost:secrets plaintext');
   return 'migrated';
