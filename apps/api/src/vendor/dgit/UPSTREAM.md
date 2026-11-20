@@ -35,7 +35,7 @@ SQL identifiers use static allowlisted statements, and variable-sized bind lists
 
 - PackStore exposes its existing incomplete-pack sweep as `cleanupOrphans`, so failed uploads can reclaim quota immediately and GC can retry storage cleanup independently of another admitted push.
 
-- Ref admission rejects `.lock` suffixes on every path component and a final dot, matching Git check-ref-format; the full rule matrix also retains SAM conservative character and length bounds.
+- Ref admission rejects `.lock` suffixes on every path component and a final dot, matching Git check-ref-format; the full rule matrix also retains SAM conservative character and length bounds. The predicate lives in `apps/api/src/lib/git-ref-name.ts` (`isValidGitRefName`), which project creation also uses, so a default branch SAM accepts can always be pushed.
 
 - Push connectivity is proven per command by walking from the new tip until it reaches an existing ref tip, with or without a reachable cache. Each walk collects into a scratch set and joins the trusted set only when its closure is complete, so a failed command cannot vouch for a later one. Upstream's cache-less SQL check (`packComplete`, `push_edges`) is removed: it trusted every object outside the new pack, and SAM keeps a rejected pack's objects until GC.
 

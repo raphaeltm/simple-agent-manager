@@ -5,6 +5,7 @@ import { concat, isOid, ZERO_OID, te } from "./util";
 import { pkt, FLUSH, PktParser } from "./pktline";
 import { GitStore } from "./store";
 import { PackWriter } from "./pack";
+import { isValidGitRefName } from "../../../lib/git-ref-name";
 import { OidSet } from "./oidset";
 import { MultipartCapture, MultipartPackUpload } from "./multipart";
 import { GitParseError, parseCommit, parseTag, parseTree, isGitlinkMode, isTreeMode, TYPE_NUM, NUM_TYPE, ObjType } from "./objects";
@@ -1125,9 +1126,6 @@ export function parsePushCommands(section: Uint8Array): { commands: PushCommand[
   return { commands, caps };
 }
 
-/** Characters git's check_ref_format rejects, plus HTML-dangerous ones. */
-const BAD_REF = /[\s~^:?*\[\\'"<>&`\x00-\x1f\x7f]/;
-
 /**
  * Every object in the closure of `tip` is present, so setting a ref to it
  * cannot brick the repo. A thin/broken pack that fails to close over its new
@@ -1496,11 +1494,7 @@ export async function validatePush(
       decisions.push({ ref: cmd.ref, expectedOld: cmd.old, reject: "unpacker error" });
       continue;
     }
-    const bad = !cmd.ref.startsWith("refs/") || cmd.ref.includes("..") || BAD_REF.test(cmd.ref)
-      || cmd.ref.endsWith(".lock") || cmd.ref.includes("@{") || cmd.ref.includes("//")
-      || cmd.ref.endsWith("/") || cmd.ref.endsWith(".") || cmd.ref.length > 255
-      || cmd.ref.split("/").some((c) => c.startsWith(".") || c.endsWith(".lock"));
-    if (bad) {
+    if (!isValidGitRefName(cmd.ref)) {
       decisions.push({ ref: cmd.ref, expectedOld: cmd.old, reject: "funny refname" });
       continue;
     }

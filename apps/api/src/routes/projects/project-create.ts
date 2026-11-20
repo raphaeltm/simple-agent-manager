@@ -6,6 +6,7 @@ import { type Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { isValidGitBranchName } from '../../lib/git-ref-name';
 import { log } from '../../lib/logger';
 import { toProjectResponse } from '../../lib/mappers';
 import { ulid } from '../../lib/ulid';
@@ -125,6 +126,13 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
       if (defaultBranch.length > 255 || !/^[a-zA-Z0-9._\-/]+$/.test(defaultBranch)) {
         throw errors.badRequest(
           'defaultBranch contains invalid characters. Only alphanumeric, hyphens, underscores, slashes, and dots are allowed (max 255 chars).'
+        );
+      }
+      // The repository's first push writes this branch; refuse names git itself rejects
+      // (`foo.lock`, `.hidden`, `a..b`, `trailing.`) here rather than fail the seed push.
+      if (!isValidGitBranchName(defaultBranch)) {
+        throw errors.badRequest(
+          'defaultBranch is not a valid git branch name (see git check-ref-format).'
         );
       }
 

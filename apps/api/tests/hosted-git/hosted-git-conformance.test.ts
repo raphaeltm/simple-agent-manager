@@ -1276,6 +1276,39 @@ describe('push connectivity admission (closure must be complete per command)', (
     await assertCleanClone(remote);
   });
 
+  it('refuses a default branch git rejects with a 400, before any repository exists', async () => {
+    const userId = await createEmailOnlyUser();
+    const create = (defaultBranch: string) =>
+      runtime.fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-test-user-id': userId },
+        body: JSON.stringify({ name: `Branch ${defaultBranch}`, repoProvider: 'artifacts', defaultBranch }),
+      });
+    for (const branch of ['foo.lock', '.hidden', 'a..b', 'trailing.']) {
+      const res = await create(branch);
+      const body = await res.text();
+      expect(res.status, `${branch}: ${body}`).toBe(400);
+      expect(body).toContain('not a valid git branch name');
+    }
+    const projects = await runtime.DATABASE.prepare('SELECT count(*) AS n FROM projects WHERE user_id = ?')
+      .bind(userId)
+      .first<{ n: number }>();
+    expect(projects?.n).toBe(0);
+    // Control: a nested branch name that passes check-ref-format creates and seeds the repository.
+    const ok = await create('feature/seeded');
+    expect(ok.status, await ok.clone().text()).toBe(201);
+    const { id } = (await ok.json()) as { id: string };
+    const row = await runtime.DATABASE.prepare(
+      'SELECT repository, artifacts_repo_id AS repo, default_branch AS branch FROM projects WHERE id = ?'
+    )
+      .bind(id)
+      .first<{ repository: string; repo: string; branch: string }>();
+    expect(row?.branch).toBe('feature/seeded');
+    const token = await mintToken({ artifactsRepoId: row!.repo, ownerId: userId }, 'read');
+    const refs = await gitOk(['ls-remote', localRemote(row!.repository, token)]);
+    expect(refs.stdout).toContain('refs/heads/feature/seeded');
+  });
+
   it('refuses a push whose object SHA-1DC flags as a collision attack, before any ref', async () => {
     const project = await createHostedProject(await createEmailOnlyUser(), 'Collision screen');
     const token = await mintToken(project, 'write');
