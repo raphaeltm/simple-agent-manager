@@ -512,4 +512,32 @@ describe.skipIf(skipWithoutDocker)('legacy compose adoption (real Docker)', () =
     expect(docker(['volume', 'inspect', `${canonical}_celld-data`]).status).toBe(0);
     docker(['volume', 'rm', `${canonical}_celld-data`]);
   });
+  it('restarts a legacy celld that a killed backup left stopped, then completes', async () => {
+    seedData(fixture);
+    let captured: AdoptionJournal | null = null;
+    // The backup stops celld for its delta copy; the run dies before it restarts it.
+    await expect(
+      adopt(new FakeGit(TO), {
+        backup: (() => {
+          dockerOk(composeCli(fixture, fixture.legacyProject, ['stop', 'celld']));
+          captured = readAdoptionJournal(fixture.stateDir);
+          throw new Error('backup died with celld stopped');
+        }) as never,
+      })
+    ).rejects.toThrow(/backup died/);
+    // A returned failure: celld is running again and nothing else changed.
+    expect(containerOf(fixture.legacyProject, 'celld')).not.toBe('');
+    expect(existsSync(join(fixture.stateDir, ADOPTION_JOURNAL_FILE))).toBe(false);
+    expect((captured as unknown as AdoptionJournal).backupStarted).toBe(true);
+
+    // A kill instead: the journal survives and celld stays stopped.
+    writeAdoptionJournal(fixture.stateDir, captured as unknown as AdoptionJournal);
+    dockerOk(composeCli(fixture, fixture.legacyProject, ['stop', 'celld']));
+    expect(containerOf(fixture.legacyProject, 'celld')).toBe('');
+    const backups: string[] = [];
+    await adopt(new FakeGit(TO), { backup: fakeBackup(backups) });
+    expect(backups).toHaveLength(1);
+    expect(containerOf(canonical, 'celld')).not.toBe('');
+    expect(readVolumeFile(`${canonical}_celld-data`, 'do/marker')).toBe('7103:7103:640\ndurable');
+  });
 });

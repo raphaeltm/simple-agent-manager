@@ -349,7 +349,8 @@ killed, check out the target ref again and rerun the identical command:
 - it resumes at the recorded step;
 - it removes any helper container the killed run left (only those with its adoption id);
 - it recopies an unfinished volume from scratch;
-- a backup interrupted mid-way is kept and a new one is taken;
+- a backup interrupted mid-way is kept and a new one is taken, after restarting the legacy celld
+  it may have left stopped;
 - a stop that completed before its phase was journaled resumes from the stopped stack;
 - a rollback that was interrupted is finished as a rollback, never resumed forward;
 - an upgrade that already completed is not run again.

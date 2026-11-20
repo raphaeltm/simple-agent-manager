@@ -219,6 +219,9 @@ async function adopt(ctx: BoxContext, opts: AdoptionOptions, journal: AdoptionJo
   ))
     removeStaleHelper(ctx, helper, name);
   const stopped = phaseAtLeast(journal, 'stopped') || journal.stopRequested === true;
+  // A kill inside the backup can leave the legacy celld stopped for its delta copy.
+  if (!stopped && journal.backupStarted && !phaseAtLeast(journal, 'backed-up'))
+    restartLegacyCelld(ctx, journal);
   const inventory = proveLegacyOwnership(legacy, {
     legacyProject: journal.legacyProject,
     checkoutRoot: opts.checkoutRoot ?? REPO_ROOT,
@@ -260,6 +263,7 @@ async function adopt(ctx: BoxContext, opts: AdoptionOptions, journal: AdoptionJo
           ? fresh
           : journal.backupDir;
     journal.backupDir = resolve(dest);
+    journal.backupStarted = true;
     save();
     (opts.backup ?? runBackup)(backupCtx(legacy), journal.backupDir, journal.from);
     journal.phase = 'backed-up';
@@ -339,6 +343,15 @@ async function adopt(ctx: BoxContext, opts: AdoptionOptions, journal: AdoptionJo
   save();
   removeLegacyContainers(ctx, journal);
   ctx.log(`adopted: compose project ${journal.canonicalProject} is healthy with its receipts`);
+}
+
+/** `compose start celld` for the legacy project: a no-op when celld already runs. */
+function restartLegacyCelld(ctx: BoxContext, journal: AdoptionJournal): void {
+  compose(
+    withProject(ctx, journal.legacyProject),
+    ['start', 'celld'],
+    'restart legacy celld after an interrupted backup'
+  );
 }
 
 /** The stopped legacy containers, by their proved IDs only; volumes are kept. Idempotent. */
@@ -468,7 +481,10 @@ export async function runLegacyAdoption(ctx: BoxContext, opts: AdoptionOptions):
         !journal.stopRequested &&
         !phaseAtLeast(journal, 'stopped')
       ) {
-        // Nothing moved yet: return the operator's checkout and forget the attempt.
+        // Nothing moved yet: return the operator's checkout and forget the attempt. The backup
+        // restarts celld itself; this covers a failure it could not recover. If celld cannot be
+        // restarted, the journal is kept so the next run restarts it before anything else.
+        if (journal.backupStarted) restartLegacyCelld(ctx, journal);
         clearAdoptionJournal(ctx.stateDir);
         git(ctx, ['checkout', '--detach', journal.to], 'restore target checkout');
       }

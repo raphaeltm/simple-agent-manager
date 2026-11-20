@@ -47,6 +47,8 @@ export interface AdoptionJournal {
   volumes: AdoptionVolume[];
   /** Set before the canonical stack is first started: its celld may have written the bucket. */
   canonicalStarted: boolean;
+  /** Set before the backup runs: it stops celld for its delta copy, and a kill can leave it so. */
+  backupStarted?: boolean;
   /** Set before `compose stop`: a kill after the stop must not look like an untouched stack. */
   stopRequested?: boolean;
   /** Set before rollback starts: a killed rollback resumes as a rollback, never forward. */
@@ -123,7 +125,7 @@ export function readAdoptionJournal(stateDir: string): AdoptionJournal | null {
       validVolume(v, j.legacyProject as string, j.canonicalProject as string)
     ) ||
     typeof j.canonicalStarted !== 'boolean' ||
-    !['stopRequested', 'rollingBack', 'upgraded'].every(
+    !['backupStarted', 'stopRequested', 'rollingBack', 'upgraded'].every(
       (key) => j[key] === undefined || typeof j[key] === 'boolean'
     )
   )
