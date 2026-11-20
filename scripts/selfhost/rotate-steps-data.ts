@@ -315,10 +315,13 @@ export async function advanceData(
     const anchor = step.reverse ? step.reverseSwitchedAt : step.switchedAt;
     const switched = Date.parse(anchor ?? new Date(deps.now()).toISOString());
     step.verifiedAt = new Date(deps.now()).toISOString();
-    const lifetime =
-      step.reverse || kind === 'better-auth' ? 0 : await storedLifetimeMinutes(ctx, waitMinutes);
-    // A rollback drains too: requests on the forward deployment may write under the new value.
-    const waitFor = Math.max(lifetime, drainMinutes);
+    // Requests still running on the other deployment can write under the value being retired
+    // until the drain ends, and such a write to KV or a Durable Object (no pass reaches those)
+    // lives for the stored-value lifetime after it: the old value stays readable for both,
+    // added, in either direction (a rollback retires the new value the same way). BetterAuth's
+    // values all live in D1, which the retire proof re-reads, so it needs only the drain.
+    const lifetime = kind === 'better-auth' ? 0 : await storedLifetimeMinutes(ctx, waitMinutes);
+    const waitFor = drainMinutes + lifetime;
     step.waitUntil = new Date(switched + waitFor * 60_000).toISOString();
     step.phase = 'waiting';
     ctx.save();

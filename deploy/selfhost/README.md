@@ -297,10 +297,11 @@ If that step stops, the summary says the old key is not retired.
 Library files are written back only if the object store honours conditional get and put (checked
 before the first write; celld 0.6.3 does, `scripts/selfhost/live/key-rotation.live.test.ts`), and
 every file body is checked against its file key, so a damaged file is reported, never re-paired.
-Every retirement (this one and `better-auth-secret`) also waits at least for requests still running
-on the previous version to finish: celld finishes them there, and they may write under the old
-value. That drain is the box's `CELLD_HANDLER_BUDGET_S` (default 300 s) plus 1 min; a run waits it
-out itself. The wait before `rotate --resume` is 5 h 15 min, or longer when the Worker's
+Every retirement (this one and `better-auth-secret`, and a rollback too) first waits for requests
+still running on the previous version to finish: celld finishes them there, and they may write
+under the old value. That drain is the box's `CELLD_HANDLER_BUDGET_S` (default 300 s) plus 1 min.
+For `encryption-key` the value-lifetime wait below is added to it, in both directions, because such a
+late write to KV or a Durable Object then lives that long. A drain alone is waited out in the run. The wait before `rotate --resume` is the drain plus 5 h 15 min, or longer when the Worker's
 `ACP_INTERACTION_MAX_DEADLINE_MS`, `ACP_INTERACTION_SENSITIVE_PURGE_MS` or
 `BOOTSTRAP_TOKEN_TTL_SECONDS` say values outside D1 and R2 live longer (`--stored-lifetime-minutes`
 overrides it).

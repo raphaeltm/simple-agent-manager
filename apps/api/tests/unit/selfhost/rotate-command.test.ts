@@ -499,13 +499,17 @@ describe('rotate encryption-key', () => {
         clock += 10 * 60_000; // the forward migration outlasts the drain
       }
     };
-    await expect(runRotate(input({ names: ['encryption-key'] }), deps())).rejects.toThrow(
-      /rolled back/
-    );
+    // The rollback keeps the new value readable for the drain plus the stored-value lifetime.
+    await runRotate(input({ names: ['encryption-key'] }), deps());
+    expect(readJournal(stateDir)?.steps['encryption-key']?.reverse).toBe(true);
+    expect(readJournal(stateDir)?.steps['encryption-key']?.phase).toBe('waiting');
+    controlHook = null;
+    clock += 6 * HOUR;
+    await expect(runRotate(input({ resume: true }), deps())).rejects.toThrow(/rolled back/);
     const step = readJournal(stateDir)?.steps['encryption-key'];
     expect(step?.phase).toBe('rolled-back');
     expect(Date.parse(step?.waitUntil ?? '') - Date.parse(step?.reverseSwitchedAt ?? '')).toBe(
-      drainMinutes({}) * 60_000
+      (drainMinutes({}) + 5 * 60 + 15) * 60_000
     );
     expect(Date.parse(step?.reverseSwitchedAt ?? '')).toBeGreaterThan(
       Date.parse(step?.switchedAt ?? '') + drainMinutes({}) * 60_000
@@ -526,9 +530,13 @@ describe('rotate encryption-key', () => {
         reverse = true;
       if (!reverse && body.mode === 'verify') await seedCredential('c-agent', 'sk-agent', old);
     };
-    await expect(runRotate(input({ names: ['encryption-key'] }), deps())).rejects.toThrow(
-      /rolled back/
-    );
+    // The rollback keeps the new value readable for the drain plus the stored-value lifetime.
+    await runRotate(input({ names: ['encryption-key'] }), deps());
+    expect(readJournal(stateDir)?.steps['encryption-key']?.reverse).toBe(true);
+    expect(readJournal(stateDir)?.steps['encryption-key']?.phase).toBe('waiting');
+    controlHook = null;
+    clock += 6 * HOUR;
+    await expect(runRotate(input({ resume: true }), deps())).rejects.toThrow(/rolled back/);
     const after = await head();
     expect(readJournal(stateDir)?.steps['encryption-key']?.phase).toBe('rolled-back');
     expect(after.ENCRYPTION_KEY).toBe(old);
@@ -822,7 +830,7 @@ describe('rotate encryption-key: the wait for values outside D1 and R2 (review V
     workerVars = { ACP_INTERACTION_MAX_DEADLINE_MS: String(10 * HOUR) };
     await runRotate(input({ names: ['encryption-key'] }), deps());
     // 10 h deadline + 1 h sensitive purge + 15 min margin.
-    expect(waitMinutes()).toBe(11 * 60 + 15);
+    expect(waitMinutes()).toBe(drainMinutes({}) + 11 * 60 + 15);
     clock += 6 * HOUR; // past the default wait: not yet
     await runRotate(input({ resume: true }), deps());
     expect((await head()).ENCRYPTION_KEY_PREVIOUS).toBeDefined();
@@ -830,7 +838,7 @@ describe('rotate encryption-key: the wait for values outside D1 and R2 (review V
 
   it('keeps the default floor when the Worker uses the defaults (control)', async () => {
     await runRotate(input({ names: ['encryption-key'] }), deps());
-    expect(waitMinutes()).toBe(5 * 60 + 15);
+    expect(waitMinutes()).toBe(drainMinutes({}) + 5 * 60 + 15);
   });
 
   it('stops instead of guessing when the Worker cannot report the lifetime', async () => {
@@ -843,7 +851,7 @@ describe('rotate encryption-key: the wait for values outside D1 and R2 (review V
     expect(readJournal(stateDir)?.steps['encryption-key']?.waitUntil).toBeUndefined();
     controlHook = null;
     await runRotate(input({ resume: true }), deps());
-    expect(waitMinutes()).toBe(5 * 60 + 15);
+    expect(waitMinutes()).toBe(drainMinutes({}) + 5 * 60 + 15);
   });
 
   it('a resume keeps the --stored-lifetime-minutes the run started with (Codex P1)', async () => {
@@ -857,7 +865,7 @@ describe('rotate encryption-key: the wait for values outside D1 and R2 (review V
     ).rejects.toThrow();
     controlHook = null;
     await runRotate(input({ resume: true }), deps());
-    expect(waitMinutes()).toBe(600);
+    expect(waitMinutes()).toBe(drainMinutes({}) + 600);
     clock += 6 * HOUR; // past the default wait, inside the requested one: the old key stays
     await runRotate(input({ resume: true }), deps());
     expect((await head()).ENCRYPTION_KEY_PREVIOUS).toBeDefined();
@@ -875,7 +883,7 @@ describe('rotate encryption-key: the wait for values outside D1 and R2 (review V
   it('an explicit --stored-lifetime-minutes wins', async () => {
     workerVars = { ACP_INTERACTION_MAX_DEADLINE_MS: String(10 * HOUR) };
     await runRotate(input({ names: ['encryption-key'], storedLifetimeMinutes: 30 }), deps());
-    expect(waitMinutes()).toBe(30);
+    expect(waitMinutes()).toBe(drainMinutes({}) + 30);
   });
 });
 
