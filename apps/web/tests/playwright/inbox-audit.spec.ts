@@ -5,7 +5,12 @@
  */
 import { expect, type Page, test } from '@playwright/test';
 
-import { assertNoClippedOverflow, assertNoOverflow, screenshot } from './audit-helpers';
+import {
+  assertNoClippedOverflow,
+  assertNoOverflow,
+  assertNoScrollingGlassPanes,
+  screenshot,
+} from './audit-helpers';
 import { type InboxMockState, KIND_ITEMS, MANY_ITEMS, setupInboxMocks } from './inbox-fixtures';
 
 function state(items = MANY_ITEMS, extra: Partial<InboxMockState> = {}): InboxMockState {
@@ -33,6 +38,34 @@ async function expectControlsPinned(page: Page) {
   expect(mainOverflow).toBeLessThanOrEqual(1);
 }
 
+/**
+ * Scrolls the inbox list with the wheel, as a user does, and asserts the content moved while
+ * the pane itself did not. The pane's rim and frost are pinned to the pane's own scroll origin,
+ * so a pane that scrolls carries them away with the list (the rim's bottom edge then crosses
+ * the middle of the list).
+ */
+async function expectListScrollsInsideFixedPane(page: Page, name: string) {
+  const pane = page.getByRole('region', { name: 'Inbox list' });
+  await expect(pane).toBeVisible();
+  const box = (await pane.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, 900);
+  const scrollOf = () =>
+    pane.evaluate((el) => ({
+      pane: el.scrollTop,
+      // Whatever scrolled: the pane itself or a scroller inside it.
+      any: Math.max(
+        el.scrollTop,
+        ...Array.from(el.querySelectorAll<HTMLElement>('*')).map((child) => child.scrollTop)
+      ),
+    }));
+  // Liveness: the list did scroll, so the pane staying at 0 is not a list that never moved.
+  await expect.poll(async () => (await scrollOf()).any).toBeGreaterThan(100);
+  expect((await scrollOf()).pane, 'the pane scrolled, carrying its rim and frost away').toBe(0);
+  await assertNoScrollingGlassPanes(page);
+  await screenshot(page, name);
+}
+
 const KIND_REFS: { name: string; ref: string; project: string }[] = KIND_ITEMS.map((item) => ({
   name:
     String(item.kind) +
@@ -53,6 +86,11 @@ test.describe('Inbox — Mobile', () => {
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
     await screenshot(page, 'inbox-list-many');
+  });
+
+  test('list scrolls inside its pane; the rim stays on the pane', async ({ page }) => {
+    await openInbox(page, state());
+    await expectListScrollsInsideFixedPane(page, 'inbox-list-scrolled');
   });
 
   test('active chip scrolls into view', async ({ page }) => {
@@ -170,6 +208,11 @@ test.describe('Inbox — Desktop', () => {
       await screenshot(page, `inbox-desktop-item-${kind.name}`);
     });
   }
+
+  test('list scrolls inside its pane; the rim stays on the pane', async ({ page }) => {
+    await openInbox(page, state());
+    await expectListScrollsInsideFixedPane(page, 'inbox-desktop-list-scrolled');
+  });
 
   test('the ⋯ menu paints over the panes and opens Archived', async ({ page }) => {
     await openInbox(page, state());
