@@ -8,10 +8,17 @@
  * Everything below runs the real scheduled entry point (`runNodeCleanupSweep`) against a real SQL
  * engine; only provider and Cloudflare HTTP and ProjectData transport are replaced.
  */
+import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import { runNodeCleanupSweep } from '../../../src/scheduled/node-cleanup';
+import { diagnoseCleanupRefusal } from '../../../src/scheduled/node-cleanup/cleanup-refusal';
 import { clearCapacityCatalogCache } from '../../../src/services/default-capacity-source-credentials';
+import { findAnomalies } from '../../../src/services/fleet-ops/anomalies';
+import { FLEET_OPS_DEFAULTS } from '../../../src/services/fleet-ops/settings-definitions';
+import { isNeverRequestedVmPlaceholder } from '../../../src/services/node-never-requested-placeholder';
+import { provisionNode } from '../../../src/services/node-provisioning';
 import { handoffFixture } from './node-cleanup-handoff-fixture';
 
 vi.mock('../../../src/services/jwt', () => ({
@@ -44,7 +51,7 @@ async function placeholderFixture(options: {
     .prepare(
       `UPDATE nodes SET status = ?, provider_instance_id = NULL, transport = NULL,
          placement_credential_fingerprint = CASE WHEN ? THEN placement_credential_fingerprint END,
-         ip_address = NULL,
+         ip_address = NULL, last_heartbeat_at = NULL, health_status = 'stale',
          created_at = ?, updated_at = ?, runtime_termination_confirmed_at = ?,
          cleanup_backoff_until = NULL, error_message = 'Node allocation plan is no longer current'
        WHERE id = 'host'`
@@ -173,6 +180,104 @@ describe('never-requested providerless placeholder rows', () => {
     });
     expect(Date.parse(hostRow(f).cleanup_backoff_until!)).toBeGreaterThanOrEqual(NOW + HOUR_MS);
     expect(f.providerDeletes).toEqual([]);
+  });
+});
+
+describe('refusal diagnosis of a never-requested row', () => {
+  it('does not report provenance for a placeholder that lacks a placement fingerprint', async () => {
+    const f = await placeholderFixture({ status: 'destroying', taskLinked: false });
+    const node = { id: 'host', user_id: 'user-1', status: 'destroying' };
+    const iso = new Date(NOW).toISOString();
+    expect((await diagnoseCleanupRefusal(f.env, node, iso, iso))?.reasons).not.toContain(
+      'provenance'
+    );
+    // Control: the same row once claimed for a create is a genuine provenance refusal.
+    f.sqlite.exec(`UPDATE nodes SET transport = 'vm-public-dns' WHERE id = 'host'`);
+    expect((await diagnoseCleanupRefusal(f.env, node, iso, iso))?.reasons).toContain('provenance');
+  });
+});
+
+describe('the provider identity claim ends the never-requested state', () => {
+  // The safety argument rests on one invariant: the claim that precedes every provider create
+  // takes the row out of the placeholder shape in the same write. Drive the real claim and hold
+  // the create request open, so the row is observed after the claim and before any VM exists.
+  it('a row is no longer a placeholder once provisionNode has claimed it for a create', async () => {
+    const f = await placeholderFixture({
+      status: 'creating',
+      taskLinked: true,
+      keepFingerprint: true,
+    });
+    f.sqlite.exec(`UPDATE nodes SET runtime_incarnation_id = 'incarnation-host' WHERE id = 'host'`);
+    const row = async () =>
+      (await f.db.select().from(schema.nodes).where(eq(schema.nodes.id, 'host')))[0]!;
+    expect(isNeverRequestedVmPlaceholder(await row())).toBe(true);
+
+    let entered!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => (entered = resolve));
+    const barrier = new Promise<void>((resolve) => (release = resolve));
+    f.setCreateBarrier(async () => {
+      entered();
+      await barrier;
+      throw new TypeError('Provider response was lost after allocation');
+    });
+    vi.useRealTimers();
+    const allocation = provisionNode('host', f.env);
+    await started;
+    try {
+      const claimed = await row();
+      expect(claimed.transport).not.toBeNull();
+      expect(claimed.runtimeTerminationConfirmedAt).toBeNull();
+      expect(isNeverRequestedVmPlaceholder(claimed)).toBe(false);
+    } finally {
+      release();
+      await allocation.catch(() => undefined);
+    }
+    expect(isNeverRequestedVmPlaceholder(await row())).toBe(false);
+  });
+});
+
+describe('bounded escape for a row that cannot be classified', () => {
+  it('surfaces the parked row to operators and retries it once per failure backoff', async () => {
+    const f = await placeholderFixture({ status: 'error', taskLinked: true });
+    // A proof written after the insert: a create was attempted, and no placement proves its absence.
+    f.sqlite.exec(
+      `UPDATE nodes SET runtime_termination_confirmed_at = '${LATER_PROOF}' WHERE id = 'host'`
+    );
+    const destroyingAnomalies = async (now: number) =>
+      (
+        await findAnomalies(f.env, FLEET_OPS_DEFAULTS, {
+          now,
+          classes: ['node_destroying_too_long'],
+        })
+      ).classes[0]!.findings.map((finding) => finding.ids.nodeId);
+
+    // An `error` row is invisible to the anomaly; that is how production rows retried unseen.
+    expect(await destroyingAnomalies(NOW)).toEqual([]);
+
+    await runNodeCleanupSweep(f.env);
+    expect(hostRow(f)).toMatchObject({
+      status: 'destroying',
+      cleanup_backoff_until: new Date(NOW + 30 * 60 * 1000).toISOString(),
+    });
+    expect(await destroyingAnomalies(NOW)).toEqual(['host']);
+
+    // Past the stranded deadline the refusal cadence writes a zero backoff; a failed attempt
+    // must still wait its one-hour failure backoff. Run the 5-minute cron for two hours after
+    // the deadline: attempts stay about hourly, never one per tick, and nothing is retired.
+    let failedAttempts = 0;
+    for (let minute = 30; minute <= 150; minute += 5) {
+      vi.setSystemTime(NOW + minute * 60 * 1000 + 1);
+      failedAttempts += (await runNodeCleanupSweep(f.env)).errors;
+    }
+    expect(failedAttempts).toBeGreaterThanOrEqual(1);
+    expect(failedAttempts).toBeLessThanOrEqual(3);
+    expect(hostRow(f)).toMatchObject({
+      status: 'destroying',
+      runtime_termination_confirmed_at: LATER_PROOF,
+    });
+    expect(f.providerDeletes).toEqual([]);
+    expect(await destroyingAnomalies(NOW + 150 * 60 * 1000)).toEqual(['host']);
   });
 });
 

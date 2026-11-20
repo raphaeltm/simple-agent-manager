@@ -182,15 +182,16 @@ export async function sweepStrandedNodes(
       );
       if (!authority || refusal.reasons.includes('provenance')) {
         await alertBlockedNode(env, node, refusal, now, config.ownershipAlertIntervalMs);
+        // A re-check cadence, so it only ever moves the retry later: a failed attempt earlier in
+        // this tick recorded its own failure backoff, and pulling it back to the re-check interval
+        // retried that attempt on every tick (rule 47, `failureRetryAt` in `cleanup-outcome.ts`).
+        const recheckAt = new Date(now.getTime() + config.refusalWarnAfterMs).toISOString();
         await env.DATABASE.prepare(
-          'UPDATE nodes SET cleanup_backoff_until=? WHERE id=? AND user_id=? AND status=?'
+          `UPDATE nodes SET cleanup_backoff_until=?
+          WHERE id=? AND user_id=? AND status=?
+            AND (cleanup_backoff_until IS NULL OR cleanup_backoff_until < ?)`
         )
-          .bind(
-            new Date(now.getTime() + config.refusalWarnAfterMs).toISOString(),
-            node.id,
-            node.user_id,
-            node.status
-          )
+          .bind(recheckAt, node.id, node.user_id, node.status, recheckAt)
           .run();
         continue;
       }

@@ -121,7 +121,7 @@ const PENDING_DELETION_SQL =
  * (idea 01M7GVRC956Q8JMGCRP1PQ4R5B).
  */
 const PARK_UNCERTAIN_PROVIDERLESS_SQL =
-  "runtime = 'vm' AND node_class = 'managed' AND provider_instance_id IS NULL";
+  "runtime = 'vm' AND node_class = 'managed' AND node_role = 'workspace' AND provider_instance_id IS NULL";
 
 /** Returns the status the row was released to, or null when no row matched. */
 export async function releaseNodeCleanupClaim(
