@@ -201,7 +201,8 @@ function deps(log: string[], breakAgent = false): MigrateDeps {
   return {
     log: (m) => log.push(m),
     init: async () => {
-      const init = await runDeploy(envFile, ['--init']);
+      // --seal: what secrets migrate passes (box-deps.ts); a plain --init keeps a plaintext box plaintext.
+      const init = await runDeploy(envFile, ['--init', '--seal']);
       if (init.status !== 0) throw new Error(init.out);
     },
     preflight: preflightSealedSecrets,
