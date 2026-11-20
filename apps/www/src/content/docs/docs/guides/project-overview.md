@@ -69,8 +69,10 @@ waiting, the section is a single line, **Nothing needs you.**
 
 ### Running now
 
-Chats in this project that an agent is working on now. Each row shows the chat's topic, then how
-long it has been running and the profile it runs with, for example **1h 20m · Opus 5.5 Build**.
+Chats in this project that an agent is working on now: the agent is in the middle of a turn, as
+the chat itself shows it. Each row shows the chat's topic on one line (hover it for the whole
+topic), then how long it has been running and the profile it runs with, for example
+**1h 20m · Opus 5.5 Build**.
 
 - **Starting** means SAM is still finding or preparing a machine for it.
 - **Paused on this** (amber) means the agent is stopped on something you need to answer, which is
@@ -97,12 +99,14 @@ work. **Insights** opens the full
 
 ### Budgets
 
-One ring per account your project's profiles run on: the ring is the usage left on that account,
-the same ring the profile picker shows. Calm accounts are just a ring. Words appear only when
-something needs your attention, and they name the window, for example
-**Personal Max: Weekly window · 6% left · resets 2d 3h**, an account that is paused, or a profile
-with no account connected. **Accounts** opens the project's **Settings → Accounts**, where you connect and switch them. See
-[Usage limits](/docs/guides/agents/#usage-limits).
+One ring per account your project's profiles run on, with the account's name under it: the ring is
+the usage left on that account, the same ring the profile picker shows. Calm accounts are just a
+ring and a name. An account that needs your attention adds one short line under its name, in the
+window's colour: how much is left (**6% left**), **Out** with when it is back, or **Paused**. Hover
+a ring, or listen to it with a screen reader, for the full words, which name the window, for
+example **Weekly window · 6% left · resets 2d 3h**. A profile with no account connected is named on
+one line under the rings. **Accounts** opens the project's **Settings → Accounts**, where you
+connect and switch them. See [Usage limits](/docs/guides/agents/#usage-limits).
 
 ### Automations
 
