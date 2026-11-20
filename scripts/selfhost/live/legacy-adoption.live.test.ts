@@ -19,7 +19,7 @@ import {
   readAdoptionJournal,
   writeAdoptionJournal,
 } from '../legacy-adoption-journal.js';
-import { helperName } from '../legacy-adoption-volumes.js';
+import { helperName, returnHelperName } from '../legacy-adoption-volumes.js';
 import { readPrivateJson } from '../secret-files.js';
 import { UPGRADE_PENDING_FILE } from '../upgrade-journal.js';
 import type { BoxContext, UpgradeOptions } from '../upgrade-lib.js';
@@ -228,13 +228,21 @@ describe.skipIf(skipWithoutDocker)('legacy compose adoption (real Docker)', () =
       adopt(git, {
         checkHealth: async () => {
           if (calls++ > 0) return real();
-          // The canonical celld writes before verification fails: that state must not be lost.
+          // The canonical stack writes before verification fails: none of it may be lost (with
+          // `local-store` the bucket itself is such a volume).
           dockerOk([
             'exec',
             containerOf(canonical, 'celld'),
             'sh',
             '-c',
             'echo newer > /var/lib/celld/do/after',
+          ]);
+          dockerOk([
+            'exec',
+            containerOf(canonical, 'caddy'),
+            'sh',
+            '-c',
+            'echo renewed > /data/renewed.pem',
           ]);
           return false;
         },
@@ -250,11 +258,14 @@ describe.skipIf(skipWithoutDocker)('legacy compose adoption (real Docker)', () =
     expect(containerOf(canonical, 'celld')).toBe('');
     expect(volumesOf(canonical)).toEqual([]);
     expect(readVolumeFile(`${fixture.legacyProject}_caddy-data`, 'cert.pem')).toBe('0:0:600\ncert');
-    // The canonical cache (the newest local celld state) was carried back to the legacy cache.
+    // Every canonical volume (the newest state) was carried back over its legacy volume.
     expect(readVolumeFile(`${fixture.legacyProject}_celld-data`, 'do/marker')).toBe(
       '7103:7103:640\ndurable'
     );
     expect(readVolumeFile(`${fixture.legacyProject}_celld-data`, 'do/after')).toContain('newer');
+    expect(readVolumeFile(`${fixture.legacyProject}_caddy-data`, 'renewed.pem')).toContain(
+      'renewed'
+    );
     expect(existsSync(join(fixture.stateDir, ADOPTION_JOURNAL_FILE))).toBe(false);
     expect(git.head).toBe(FROM);
   });
@@ -352,7 +363,7 @@ describe.skipIf(skipWithoutDocker)('legacy compose adoption (real Docker)', () =
     seedData(fixture, 4000, 256);
     const child = spawnChild(fixture, 0, 'unhealthy');
     const exited = new Promise((done) => child.on('exit', done));
-    const helper = helperName(canonical, 'cache-return');
+    const helper = returnHelperName(canonical, 'celld-data');
     let killed = false;
     const deadline = Date.now() + 120_000;
     while (Date.now() < deadline && child.exitCode === null) {

@@ -6,9 +6,9 @@
  * Adoption changes no SAM code and deploys nothing: it proves ownership, takes the encrypted
  * snapshot, stops the legacy stack, copies its volumes, writes COMPOSE_PROJECT_NAME, starts the
  * same deployed version under the new name, verifies health and writes the creation receipts.
- * Any failure before verified health rolls back to the legacy project (its volumes are never
- * changed, except that a stale disposable celld cache is emptied). Every step is journaled
- * (legacy-adoption-journal.ts), so a killed run resumes where it stopped.
+ * Any failure before verified health rolls back to the legacy project (its volumes are only
+ * read, unless the canonical stack ran: then its newer copies are carried back first). Every
+ * step is journaled (legacy-adoption-journal.ts), so a killed run resumes where it stopped.
  */
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
@@ -44,6 +44,7 @@ import {
   ownedCanonicalVolume,
   removeStaleHelper,
   removeVolume,
+  returnHelperName,
 } from './legacy-adoption-volumes';
 import { assertOperatorExecution } from './operator-only';
 import { readPrivateJson, replacePrivateFile } from './secret-files';
@@ -353,10 +354,9 @@ function removeLegacyContainers(ctx: BoxContext, journal: AdoptionJournal): void
 class RollbackIncomplete extends Error {}
 
 /**
- * Back to the legacy project. Its volumes were only read, except the celld cache: when the
- * canonical celld ran, its cache is the newest local state, so it is copied back over the legacy
- * cache (nothing celld kept locally is lost, whatever its flush semantics) before the canonical
- * volumes are removed.
+ * Back to the legacy project. Before the canonical stack starts, the legacy volumes were only
+ * read. Once it ran, its copies hold the newest state, so each is copied back over its legacy
+ * volume (digest-verified) before the canonical volumes are removed.
  */
 async function rollbackToLegacy(ctx: BoxContext, opts: AdoptionOptions, journal: AdoptionJournal) {
   ctx.log('legacy adoption failed; restoring the legacy compose project');
@@ -383,15 +383,18 @@ async function rollbackToLegacy(ctx: BoxContext, opts: AdoptionOptions, journal:
         volume.createdAt
       ),
     }));
-    const cache = owned.find((o) => o.volume.suffix === 'celld-data');
-    if (journal.canonicalStarted && cache?.present)
-      copyVolume(
-        ctx,
-        helper,
-        cache.present.name,
-        cache.volume.legacy,
-        helperName(journal.canonicalProject, 'cache-return')
-      );
+    // Once the canonical stack ran, every one of its volumes holds the newest state (the celld
+    // cache, renewed certificates, and with `local-store` the bucket itself): all of it goes back.
+    if (journal.canonicalStarted)
+      for (const { volume, present } of owned)
+        if (present)
+          copyVolume(
+            ctx,
+            helper,
+            present.name,
+            volume.legacy,
+            returnHelperName(journal.canonicalProject, volume.suffix)
+          );
     for (const { present } of owned) if (present) removeVolume(ctx, present.name);
     if (phaseAtLeast(journal, 'switched') || existsSync(join(ctx.stateDir, ADOPTION_ENV_FILE)))
       replacePrivateFile(ctx.envFile, readOriginalEnv(ctx.stateDir));

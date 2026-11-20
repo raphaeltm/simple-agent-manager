@@ -361,13 +361,14 @@ A refusal or failure before the legacy stack stopped returns the checkout to the
 discards the journal. A later failure, or an unhealthy new project, rolls back to `sam-selfhost`:
 
 - it journals the rollback first, so a killed rollback is finished on the next run;
+- if the new stack ran, it first copies each of its volumes back over the legacy one,
+  digest-verified: the celld cache, Caddy's certificates and, with `local-store`, the bundled
+  bucket itself, so nothing the new stack wrote is lost;
 - it removes the canonical containers and the volumes it created;
-- if the new celld ran, it first copies the new project's celld cache back over the legacy one, so
-  nothing celld kept locally is lost;
 - it restores `.env` byte for byte and restarts the legacy stack.
 
-The other legacy volumes are only read. Adoption never restores the bucket: the same deployed
-version kept writing it. After such a rollback the checkout stays at `--from`, which matches the
+Before the new stack starts, the legacy volumes are only read. Adoption never restores the bucket
+from its snapshot: the same deployed version kept writing it. After such a rollback the checkout stays at `--from`, which matches the
 running stack. If the rollback itself fails, the journal, the `.env` copy and the legacy volumes
 are kept. Inspect the stack (`docker compose -p sam-selfhost ps`) before rerunning, and do not
 delete those files to get past the error.

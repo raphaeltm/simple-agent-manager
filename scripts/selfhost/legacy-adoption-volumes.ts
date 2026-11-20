@@ -39,16 +39,18 @@ export function helperName(canonicalProject: string, suffix: string): string {
   return `${canonicalProject}-legacy-adoption-${suffix}`;
 }
 
+/** The helper that copies a canonical volume back over its legacy volume during rollback. */
+export function returnHelperName(canonicalProject: string, suffix: string): string {
+  return `${helperName(canonicalProject, suffix)}-return`;
+}
+
 /** Every helper container name an adoption of these volumes can leave behind. */
 export function helperNames(canonicalProject: string, suffixes: readonly string[]): string[] {
-  return [
-    ...suffixes.flatMap((suffix) => {
-      const name = helperName(canonicalProject, suffix);
-      return [name, `${name}-digest`];
-    }),
-    helperName(canonicalProject, 'cache-return'),
-    `${helperName(canonicalProject, 'cache-return')}-digest`,
-  ];
+  return suffixes.flatMap((suffix) => {
+    const forward = helperName(canonicalProject, suffix);
+    const back = returnHelperName(canonicalProject, suffix);
+    return [forward, `${forward}-digest`, back, `${back}-digest`];
+  });
 }
 
 export interface Helper {
