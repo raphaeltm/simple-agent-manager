@@ -598,7 +598,7 @@ importers:
         version: 3.7.4
       '@astrojs/starlight':
         specifier: 0.43.1
-        version: 0.43.1(astro@7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.1)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))(typescript@5.9.3)
+        version: 0.43.1(astro@7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.2)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))(typescript@5.9.3)
       '@expressive-code/plugin-line-numbers':
         specifier: 0.44.4
         version: 0.44.4
@@ -607,7 +607,7 @@ importers:
         version: link:../../packages/ui
       astro:
         specifier: 7.4.12
-        version: 7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.1)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)
+        version: 7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.2)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)
       mermaid:
         specifier: 12.3.0
         version: 12.3.0
@@ -625,8 +625,8 @@ importers:
         specifier: 'catalog:'
         version: 4.1.7(vitest@4.1.5)
       esbuild:
-        specifier: 0.28.1
-        version: 0.28.1
+        specifier: 0.28.2
+        version: 0.28.2
       sharp:
         specifier: 0.35.5
         version: 0.35.5(@types/node@26.5.0)
@@ -10646,11 +10646,11 @@ snapshots:
       github-slugger: 2.0.0
       satteri: 0.11.7
 
-  '@astrojs/mdx@8.1.6(@astrojs/markdown-satteri@0.4.10)(astro@7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.1)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))':
+  '@astrojs/mdx@8.1.6(@astrojs/markdown-satteri@0.4.10)(astro@7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.2)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))':
     dependencies:
       '@astrojs/internal-helpers': 0.13.2
       '@astrojs/markdown-satteri': 0.4.10
-      astro: 7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.1)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)
+      astro: 7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.2)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)
       es-module-lexer: 3.0.5
 
   '@astrojs/prism@4.1.2':
@@ -10667,16 +10667,16 @@ snapshots:
       sitemap: 9.0.1
       zod: 4.5.4
 
-  '@astrojs/starlight@0.43.1(astro@7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.1)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))(typescript@5.9.3)':
+  '@astrojs/starlight@0.43.1(astro@7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.2)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))(typescript@5.9.3)':
     dependencies:
       '@astrojs/markdown-satteri': 0.4.10
-      '@astrojs/mdx': 8.1.6(@astrojs/markdown-satteri@0.4.10)(astro@7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.1)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+      '@astrojs/mdx': 8.1.6(@astrojs/markdown-satteri@0.4.10)(astro@7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.2)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
       '@astrojs/sitemap': 3.7.4
       '@pagefind/default-ui': 1.4.0
       '@types/hast': 3.0.5
       '@types/mdast': 4.0.4
-      astro: 7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.1)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)
-      astro-expressive-code: 0.44.4(astro@7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.1)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+      astro: 7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.2)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)
+      astro-expressive-code: 0.44.4(astro@7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.2)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
       bcp-47: 2.1.0
       hast-util-format: 1.1.0
       hast-util-select: 6.0.4
@@ -10707,19 +10707,6 @@ snapshots:
       dset: 3.1.4
       is-docker: 4.0.0
       package-manager-detector: 1.9.0
-
-  '@astrojs/vite-plugin-astro@0.1.3(vite@8.3.8(@types/node@26.5.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))':
-    dependencies:
-      '@astrojs/compiler-rs': 0.5.3
-      '@astrojs/internal-helpers': 0.13.2
-      '@astrojs/runtime': 0.1.2
-      common-ancestor-path: 2.0.0
-      devalue: 6.0.3
-      magic-string: 1.4.5
-      rolldown: 1.2.19
-      smol-toml: 1.9.1
-      vite: 8.3.8(@types/node@26.5.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)
-      zod: 4.6.7
 
   '@astrojs/vite-plugin-astro@0.1.3(vite@8.3.8(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))':
     dependencies:
@@ -14601,100 +14588,11 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  astro-expressive-code@0.44.4(astro@7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.1)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)):
+  astro-expressive-code@0.44.4(astro@7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.2)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)):
     dependencies:
-      astro: 7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.1)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)
+      astro: 7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.2)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)
       rehype-expressive-code: 0.44.4
       url-extras: 0.1.0
-
-  astro@7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.1)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1):
-    dependencies:
-      '@astrojs/compiler-rs': 0.5.3
-      '@astrojs/internal-helpers': 0.13.2
-      '@astrojs/markdown-satteri': 0.4.10
-      '@astrojs/runtime': 0.1.2
-      '@astrojs/telemetry': 3.4.2
-      '@astrojs/vite-plugin-astro': 0.1.3(vite@8.3.8(@types/node@26.5.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
-      '@capsizecss/unpack': 4.0.1
-      '@clack/prompts': 1.9.0
-      '@oslojs/encoding': 1.1.0
-      am-i-vibing: 0.5.0
-      aria-query: 5.3.2
-      axobject-query: 4.1.0
-      ci-info: 4.5.0
-      cookie: 2.0.2
-      devalue: 6.0.3
-      diff: 9.0.0
-      dset: 3.1.4
-      es-module-lexer: 3.0.5
-      flattie: 1.1.1
-      fontace: 0.4.1
-      get-tsconfig: 5.0.0-beta.6
-      github-slugger: 2.0.0
-      html-escaper: 3.0.3
-      http-cache-semantics: 4.3.0
-      jsonc-parser: 3.3.1
-      magic-string: 1.4.5
-      magicast: 0.5.5
-      mri: 1.2.0
-      mrmime: 2.0.1
-      neotraverse: 1.0.2
-      obug: 3.0.0
-      p-limit: 7.3.3
-      p-queue: 10.0.0
-      package-manager-detector: 1.9.0
-      piccolore: 0.1.3
-      picomatch: 4.0.7
-      rolldown: 1.2.19
-      shiki: 4.6.0
-      smol-toml: 1.9.1
-      svgo: 4.1.0
-      tinyclip: 1.0.3
-      tinyexec: 1.3.1
-      tinyglobby: 0.2.17
-      tinyps: 0.5.2
-      ultrahtml: 1.7.0
-      unifont: 1.0.3
-      unstorage: 1.17.6(aws4fetch@1.0.20)(idb-keyval@6.3.0)
-      verkit: 0.5.0
-      vite: 8.3.8(@types/node@26.5.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)
-      vitefu: 1.1.4(vite@8.3.8(@types/node@26.5.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
-      xxhash-wasm: 1.1.0
-      zod: 4.6.7
-    optionalDependencies:
-      sharp: 0.35.5(@types/node@26.5.0)
-    transitivePeerDependencies:
-      - '@azure/app-configuration'
-      - '@azure/cosmos'
-      - '@azure/data-tables'
-      - '@azure/identity'
-      - '@azure/keyvault-secrets'
-      - '@azure/storage-blob'
-      - '@capacitor/preferences'
-      - '@deno/kv'
-      - '@netlify/blobs'
-      - '@planetscale/database'
-      - '@types/node'
-      - '@upstash/redis'
-      - '@vercel/blob'
-      - '@vercel/functions'
-      - '@vercel/kv'
-      - '@vitejs/devtools'
-      - aws4fetch
-      - db0
-      - esbuild
-      - idb-keyval
-      - ioredis
-      - jiti
-      - less
-      - sass
-      - sass-embedded
-      - stylus
-      - sugarss
-      - terser
-      - tsx
-      - uploadthing
-      - yaml
 
   astro@7.4.12(@types/node@26.5.0)(aws4fetch@1.0.20)(esbuild@0.28.2)(idb-keyval@6.3.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1):
     dependencies:
@@ -19153,7 +19051,7 @@ snapshots:
       '@vitest/expect': 3.2.4
       '@vitest/spy': 3.2.4
       '@webcontainer/env': 1.1.1
-      esbuild: 0.28.1
+      esbuild: 0.28.2
       jsonc-parser: 3.3.1
       open: 10.2.0
       oxc-parser: 0.127.0
@@ -19793,22 +19691,6 @@ snapshots:
       tsx: 4.23.1
       yaml: 2.9.1
 
-  vite@8.3.8(@types/node@26.5.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1):
-    dependencies:
-      lightningcss: 1.33.0
-      picomatch: 4.0.7
-      postcss: 8.5.33
-      rolldown: 1.2.19
-      tinyglobby: 0.2.17
-    optionalDependencies:
-      '@types/node': 26.5.0
-      esbuild: 0.28.1
-      fsevents: 2.3.3
-      jiti: 2.7.0
-      terser: 5.46.0
-      tsx: 4.23.1
-      yaml: 2.9.1
-
   vite@8.3.8(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1):
     dependencies:
       lightningcss: 1.33.0
@@ -19824,10 +19706,6 @@ snapshots:
       terser: 5.46.0
       tsx: 4.23.1
       yaml: 2.9.1
-
-  vitefu@1.1.4(vite@8.3.8(@types/node@26.5.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)):
-    optionalDependencies:
-      vite: 8.3.8(@types/node@26.5.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)
 
   vitefu@1.1.4(vite@8.3.8(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)):
     optionalDependencies:
