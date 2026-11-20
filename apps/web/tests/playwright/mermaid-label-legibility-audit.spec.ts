@@ -140,6 +140,8 @@ for (const [viewportName, viewport, isMobile] of [
         if (request.resourceType() === 'script') scripts.push(new URL(request.url()).pathname);
       });
       await openDiagrams(page);
+      // A lazy chunk is requested while the diagrams render; let it settle.
+      await page.waitForLoadState('networkidle');
 
       const flowchart = page.locator(
         '[data-testid="mermaid-diagram-svg"] > svg[aria-roledescription="flowchart-v2"]'

@@ -29,6 +29,12 @@ roughly 500 kB gzipped because Mermaid 12 bundles ELK.
 - **Browser floor.** Mermaid 12 targets ES2024 / Safari 17.4+. Mermaid loads lazily in the app and
   a render failure falls back to the existing error card, so older browsers lose diagrams only.
 - `Durable Object Workers` failed only because it aggregates `playwright-visual=failure`.
+- Pre-existing, unrelated: the docs overview page scrolls horizontally on main too
+  (`tasks/backlog/2026-11-20-docs-overview-horizontal-overflow.md`), and the docs loader draws
+  diagrams in Mermaid's dark theme on light Starlight pages
+  (`tasks/backlog/2026-11-20-docs-mermaid-theme-follows-starlight.md`).
+- If `import('mermaid')` fails (for example a browser below Mermaid 12's ES2024 floor), the docs
+  and blog code fences stay as plain code; the app shows its existing diagram error card.
 
 ## Checklist
 

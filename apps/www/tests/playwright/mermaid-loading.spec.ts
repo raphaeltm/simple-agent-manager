@@ -6,6 +6,7 @@ import { expect, test } from './fixtures';
 // layout. The marketing site keeps Mermaid off pages without diagrams and keeps
 // the dagre layout, so ELK is never fetched for an ordinary diagram.
 
+// Real content pages: if one gains or loses a diagram, pick another page here.
 const DOCS_WITHOUT_DIAGRAMS = '/docs/guides/agent-context/';
 const DOCS_FLOWCHART = '/docs/architecture/overview/';
 const BLOG_FLOWCHART = '/blog/sams-journal-a-deploy-could-recover/';
