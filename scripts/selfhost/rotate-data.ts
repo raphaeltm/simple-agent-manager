@@ -75,9 +75,13 @@ export async function rotationTargets(
   const status = (await call({ op: 'status' })) as {
     roles?: Record<string, boolean>;
     locations?: string[];
+    previousKeys?: string[];
   };
   const roles = status.roles ?? {};
   if (!Object.values(roles).some(Boolean)) {
+    // A key no stored role resolves through (ENCRYPTION_KEY while both purpose keys are set to
+    // their own values) still protects values outside D1/R2: an expiry-only rotation, no rows.
+    if (status.previousKeys?.length) return [];
     throw new Error(
       'the Worker reports no AES key rotating: the transitional bundle is not deployed'
     );

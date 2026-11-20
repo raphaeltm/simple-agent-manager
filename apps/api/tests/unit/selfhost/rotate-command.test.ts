@@ -836,6 +836,25 @@ describe('rotate encryption-key with a purpose key of the same value (Codex P1)'
     ).rejects.toThrow(/LIBRARY_ENCRYPTION_KEY holds the same value as CREDENTIAL_ENCRYPTION_KEY/);
   });
 
+  it('rotates encryption-key alone when both purpose keys have their own values (Codex P1)', async () => {
+    const current = await store().head();
+    await store().write(
+      await store().seal({
+        ...current.secrets,
+        CREDENTIAL_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64'),
+        LIBRARY_ENCRYPTION_KEY: Buffer.alloc(32, 2).toString('base64'),
+      })
+    );
+    await runRotate(input({ names: ['encryption-key'] }), deps());
+    // No stored row resolves through ENCRYPTION_KEY: an expiry-only rotation, not a stuck one.
+    const step = readJournal(stateDir)?.steps['encryption-key'];
+    expect(step?.phase).toBe('waiting');
+    expect((await head()).ENCRYPTION_KEY_PREVIOUS).toBe(current.secrets.ENCRYPTION_KEY);
+    clock += 6 * HOUR;
+    await runRotate(input({ resume: true }), deps());
+    expect((await head()).ENCRYPTION_KEY_PREVIOUS).toBeUndefined();
+  });
+
   it('accepts both in one run (control)', async () => {
     await withCredentialKeyEqualToRoot();
     await runRotate(input({ names: ['encryption-key', 'credential-encryption-key'], dryRun: true }), deps());

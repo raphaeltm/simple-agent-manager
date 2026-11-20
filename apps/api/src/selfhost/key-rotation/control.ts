@@ -23,7 +23,7 @@ import { BETTER_AUTH_LOCATION, betterAuthRotating, runBetterAuthPass } from './b
 import { KEY_ROTATION_AUTH_HEADER, verifyKeyRotationRequest } from './control-auth';
 import { D1_LOCATIONS, d1Location } from './d1-locations';
 import { type PassMode, runD1Pass } from './d1-pass';
-import { type AesKeyEnv, type AesKeyRole, roleKeys } from './keys';
+import { type AesKeyEnv, type AesKeyRole, roleKeys,ROTATABLE_AES_KEY_NAMES } from './keys';
 import { LIBRARY_LOCATION, runLibraryPass } from './library-pass';
 
 export interface KeyRotationEnv
@@ -141,6 +141,11 @@ async function statusReply(env: KeyRotationEnv, input: Record<string, unknown>) 
   return reply(200, {
     unreachableValueLifetimeMs: unreachableValueLifetimeMs(env),
     roles: rotatingRoles(env),
+    // The deployed `<NAME>_PREVIOUS` values: proof the transitional bundle is live even when no
+    // stored role resolves through the rotating key (all purpose keys overridden).
+    previousKeys: ROTATABLE_AES_KEY_NAMES.filter(
+      (name) => typeof (env as unknown as Record<string, unknown>)[`${name}_PREVIOUS`] === 'string'
+    ),
     betterAuth: betterAuthRotating(env),
     locations: [...D1_LOCATIONS.map((l) => l.name), LIBRARY_LOCATION, BETTER_AUTH_LOCATION],
     legacyTunnelLeases: await legacyTunnelLeases(
