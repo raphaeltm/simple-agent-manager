@@ -385,8 +385,10 @@ export {
   archiveInboxItem,
   getInboxCount,
   getInboxItem,
+  type InboxConversationCursor,
   listInbox,
   reassignInboxTask,
+  replyToInboxItem,
 } from './inbox';
 export { getProjectAccounts, getProjectFlow, getProjectPeople, getProjectSetups } from './insights';
 export { getRunReceipt } from './insights-receipt';

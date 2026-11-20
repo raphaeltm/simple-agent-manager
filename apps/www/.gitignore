@@ -5,8 +5,7 @@ node_modules/
 # Compiled from src/scripts/tracker.ts by build:tracker script
 public/scripts/tracker.js
 
-# Compiled from src/scripts/blog-mermaid.ts by build:blog-mermaid script
+# Compiled from src/scripts/blog-mermaid.ts and docs-mermaid.ts by the build:mermaid script
 public/scripts/blog-mermaid.js
-
-# Compiled from src/scripts/docs-mermaid.ts by build:docs-mermaid script
 public/scripts/docs-mermaid.js
+public/scripts/mermaid-chunks/

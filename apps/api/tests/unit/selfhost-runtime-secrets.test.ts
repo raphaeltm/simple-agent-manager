@@ -19,6 +19,10 @@ import {
 } from '../../src/selfhost/runtime-secrets';
 import { wrapDurableObject } from '../../src/selfhost/runtime-secrets-durable-object';
 import { wrapWorker } from '../../src/selfhost/runtime-secrets-worker';
+import {
+  previousEncryptionKeyFor,
+  resetSelfHostRotationScopeForTests,
+} from '../../src/services/encryption-key-fallback';
 
 type Envelope = Record<string, unknown>;
 type Agent = (request: Record<string, unknown>) => Promise<Envelope>;
@@ -119,6 +123,7 @@ beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
 });
 afterEach(() => {
+  resetSelfHostRotationScopeForTests();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -539,6 +544,21 @@ describe('wrapDurableObject', () => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(object.env.ENCRYPTION_KEY).toBe('k2');
       expect(object.env.DATABASE).toEqual({ binding: 'db' });
+    });
+
+    it('refreshes the rotation read fallback with the new bundle (Codex P1)', async () => {
+      // A rotation's transitional bundle reaches an object built before it, through the refresh.
+      fetchMock
+        .mockImplementationOnce(ok({ ENCRYPTION_KEY: 'k1' }))
+        .mockImplementation(ok({ ENCRYPTION_KEY: 'k2', ENCRYPTION_KEY_PREVIOUS: 'k1' }));
+      const object = await resident();
+      expect(previousEncryptionKeyFor('k1')).toBeUndefined();
+      now += 1001;
+      expect(object.env.ENCRYPTION_KEY).toBe('k1');
+      await settle();
+      await settle();
+      expect(object.env.ENCRYPTION_KEY).toBe('k2');
+      expect(previousEncryptionKeyFor('k2')).toBe('k1');
     });
 
     it('loses its secrets once the agent refuses (revocation reaches a resident object)', async () => {

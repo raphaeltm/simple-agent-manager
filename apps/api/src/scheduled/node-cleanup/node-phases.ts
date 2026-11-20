@@ -103,6 +103,10 @@ export async function sweepStaleWarmNodes(
       failureRecoveryType: 'stale_warm_node_cleanup_failure',
       failureBackoffMs: config.failureBackoffMs,
       level: 'info',
+      // The resolved admin settings, not the defaults: a row parked in `destroying` by a failure
+      // retries against the configured stranded-node deadline (`failureRetryAt`).
+      blockedRetirementMs: config.blockedRetirementMs,
+      refusalWarnAfterMs: config.refusalWarnAfterMs,
       workspaceIdleThresholdIso: workspaceIdleThreshold,
       context: {
         warmSince: node.warm_since,
@@ -231,6 +235,10 @@ export async function sweepMaxLifetimeNodes(
       failureRecoveryType: 'max_lifetime_node_cleanup_failure',
       failureBackoffMs: config.failureBackoffMs,
       allowActiveWorkspaces: false,
+      // The resolved admin settings, not the defaults: a row parked in `destroying` by a failure
+      // retries against the configured stranded-node deadline (`failureRetryAt`).
+      blockedRetirementMs: config.blockedRetirementMs,
+      refusalWarnAfterMs: config.refusalWarnAfterMs,
       requireWorkspaceIdle: viaAbsoluteCeiling,
       workspaceIdleThresholdIso: idleThreshold,
       context: {
@@ -426,6 +434,10 @@ export async function sweepIdleOrphanNodes(
       recoveryType: 'idle_orphan_node_cleanup',
       failureRecoveryType: 'idle_orphan_node_cleanup_failure',
       failureBackoffMs: config.failureBackoffMs,
+      // The resolved admin settings, not the defaults: a row parked in `destroying` by a failure
+      // retries against the configured stranded-node deadline (`failureRetryAt`).
+      blockedRetirementMs: config.blockedRetirementMs,
+      refusalWarnAfterMs: config.refusalWarnAfterMs,
       workspaceIdleThresholdIso: idleThreshold,
       context: {
         createdAt: node.created_at,

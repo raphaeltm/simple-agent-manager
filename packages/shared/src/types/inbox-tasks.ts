@@ -86,6 +86,8 @@ export interface InboxTaskAssignee {
 /** One discussion thread on an inbox item (anchored comment core, anchor kind `inbox_item`). */
 export interface InboxItemCommentThread {
   id: string;
+  /** Cursor for item discussion pagination. */
+  sequence?: number;
   itemId: string;
   author: CommentAuthor;
   body: string;

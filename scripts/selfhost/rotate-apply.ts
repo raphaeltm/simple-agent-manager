@@ -29,6 +29,8 @@ export interface RotateDeps {
   getJson: (path: string) => Promise<{ status: number; body: unknown }>;
   /** HTTP status the Worker answers frps's plugin call with this gateway secret. */
   probeGateway: (secret: string) => Promise<number>;
+  /** Waits `ms` (a short drain before a retirement); absent, such waits end the run instead. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface Patch {
@@ -79,7 +81,7 @@ export async function applyPatch(ctx: StepContext, patch: Patch, then: Phase): P
   const { step, store, deps } = ctx;
   let bundleId =
     step.phase === 'staging' && step.stagedFor === then ? step.stagedBundleId : undefined;
-  if (bundleId && !store.hasBundle(bundleId)) bundleId = undefined;
+  if (bundleId && !(await store.hasBundle(bundleId))) bundleId = undefined;
   if (bundleId) {
     const head = await store.head();
     if (head.bundle.bundleId !== bundleId) {
@@ -97,7 +99,7 @@ export async function applyPatch(ctx: StepContext, patch: Patch, then: Phase): P
     step.stagedFor = then;
     step.phase = 'staging';
     ctx.save();
-    store.write(bundle);
+    await store.write(bundle);
     bundleId = bundle.bundleId;
     // The deploy runs with the newest bundle by createdAt: a clock that stepped back would
     // make it pick another one, so never deploy unless this one is the newest.
@@ -116,7 +118,7 @@ export async function applyPatch(ctx: StepContext, patch: Patch, then: Phase): P
   delete step.stagedFor;
   delete step.stagedFrom;
   ctx.save();
-  const removed = store.prune([bundleId]);
+  const removed = await store.prune([bundleId]);
   if (removed.length === 0) return;
   for (const id of removed) {
     deps.log(`  removed old bundle ${id} (the box keeps the newest ${DEFAULT_KEPT_BUNDLES})`);

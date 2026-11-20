@@ -30,7 +30,8 @@ describe('pnpm selfhost:secrets', () => {
       expect(result.status, result.out).toBe(0);
       expect(result.out).toContain('pnpm selfhost:secrets <command>');
       expect(result.out).toContain('plaintext [--backups');
-      expect(result.out).not.toMatch(/rotate|--purge/);
+      expect(result.out).toContain('rotate --all | <key>');
+      expect(result.out).not.toMatch(/--purge/);
       expect(result.out).not.toMatch(/\n\s+at /);
     }
   );

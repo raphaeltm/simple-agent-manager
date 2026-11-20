@@ -13,7 +13,11 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { runDebugDiagnosis, SCHEDULED_TRIAGE_DEBUG_FEATURE_KEY } from '../debug-agent';
-import { configuredFeedbackProjectId } from '../platform-feedback-incidents';
+import {
+  configuredFeedbackProjectId,
+  expireQuietWatchedIncidents,
+  loadWatchConfig,
+} from '../platform-feedback-incidents';
 import {
   classifyBudgetBlock,
   DEFAULT_PLATFORM_FEEDBACK_TRIAGE_IDEA_TITLE_MAX_LENGTH,
@@ -37,6 +41,7 @@ import {
 } from './persistence';
 import { prioritizeFeedbackGroups, shouldReopenExistingTriage } from './prioritization';
 import type { ErrorRow, FeedbackTriageResult, FeedbackTriageTrigger, TriageDeps } from './types';
+import { createWatchedRecorder } from './watched-recurrence';
 
 export async function runPlatformFeedbackTriage(
   env: Env,
@@ -53,6 +58,9 @@ export async function runPlatformFeedbackTriage(
     groupsSkipped: 0,
     groupsFailed: 0,
     groupsBudgetDeferred: 0,
+    watchedRecurrences: 0,
+    watchedEscalated: 0,
+    watchedExpired: 0,
     failureReasons: [],
   };
   if (!projectId) return base;
@@ -62,6 +70,7 @@ export async function runPlatformFeedbackTriage(
   if (!project)
     throw new Error('Configured Operations project does not reference an existing project');
   const now = deps.now?.() ?? Date.now();
+  const watchConfig = await loadWatchConfig(env);
   const windowMinutes = positive(
     env.PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES,
     DEFAULT_PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES
@@ -128,12 +137,30 @@ export async function runPlatformFeedbackTriage(
     env,
     candidateGroups.map((group) => group.signature)
   );
-  const groups = prioritizeFeedbackGroups(candidateGroups, existingPriorityRows, now).slice(
-    0,
-    groupLimit
-  );
-  const result = { ...base, groupsFound: groups.length };
+  // Watched signatures are recorded outside the group limit: no diagnosis, and a recurrence
+  // not recorded in its window is not in the next one (`createWatchedRecorder`).
+  const isWatched = (signature: string) =>
+    existingPriorityRows.get(signature)?.queue_state === 'watching';
+  const watchedGroups = candidateGroups.filter((group) => isWatched(group.signature));
+  const groups = prioritizeFeedbackGroups(
+    candidateGroups.filter((group) => !isWatched(group.signature)),
+    existingPriorityRows,
+    now
+  ).slice(0, groupLimit);
+  const result = { ...base, groupsFound: groups.length + watchedGroups.length };
   const diagnose = deps.diagnose ?? runDebugDiagnosis;
+  const watched = createWatchedRecorder(env, result, {
+    projectId: project.id,
+    now,
+    watchConfig,
+    dedupeHorizonMs: 2 * windowMinutes * 60_000,
+    ideaTitleMaxLength,
+    ideaRefreshLimit: groupLimit,
+    readEngagement: deps.readEngagement,
+    trigger,
+    failureReasonMaxLength,
+  });
+  await watched.recordAll(watchedGroups, existingPriorityRows);
 
   for (const [index, group] of groups.entries()) {
     const refs = JSON.stringify(group.evidence);
@@ -157,12 +184,17 @@ export async function runPlatformFeedbackTriage(
       )
       .run();
     const latestExisting = await readExistingTriageRow(env, group.signature);
+    if (latestExisting?.queue_state === 'watching') {
+      // Became watching after selection: count the recurrence; never reopen or re-triage.
+      await watched.record(group, latestExisting);
+      continue;
+    }
     const reopenTerminal = shouldReopenExistingTriage(
       env,
       latestExisting ?? existingPriorityRows.get(group.signature),
       group
     );
-    await env.DATABASE.prepare(
+    const ordinaryUpdate = await env.DATABASE.prepare(
       `UPDATE platform_feedback_triages SET first_seen_at = MIN(first_seen_at, ?),
       last_seen_at = MAX(last_seen_at, ?), occurrence_count = MAX(occurrence_count, ?),
       evidence_refs = ?, summary = COALESCE(?, summary),
@@ -179,7 +211,7 @@ export async function runPlatformFeedbackTriage(
         ELSE queued_at
       END,
       expired_at = CASE WHEN queue_state = 'expired' AND ? THEN NULL ELSE expired_at END,
-      updated_at = CURRENT_TIMESTAMP WHERE signature = ?`
+      updated_at = CURRENT_TIMESTAMP WHERE signature = ? AND queue_state <> 'watching'`
     )
       .bind(
         group.firstSeenAt,
@@ -198,6 +230,13 @@ export async function runPlatformFeedbackTriage(
         group.signature
       )
       .run();
+    if ((ordinaryUpdate.meta.changes ?? 0) === 0) {
+      // The row became watching between the read above and this update: record it as watched.
+      const current = await readExistingTriageRow(env, group.signature);
+      if (current?.queue_state === 'watching') await watched.record(group, current);
+      else result.groupsSkipped += 1;
+      continue;
+    }
     if (
       latestExisting &&
       ['resolved', 'expired'].includes(latestExisting.queue_state ?? '') &&
@@ -391,6 +430,35 @@ export async function runPlatformFeedbackTriage(
         rejected: marked.rejected,
       });
     }
+  }
+  // After this window's recurrences are recorded, so a still-recurring signature stays watched.
+  // A full error window may have hidden a watched signature's recurrence behind a noisier one
+  // (the fetch is newest-first, capped at the error limit), so expiry waits for a window that
+  // shows everything.
+  const errorWindowTruncated = (query.results ?? []).length >= errorLimit;
+  if (errorWindowTruncated) {
+    result.watchedExpired = 0;
+    result.watchExpirySkipped = 'error_window_truncated';
+    log.info('platform-feedback-triage.watch-expiry-skipped', {
+      trigger,
+      reason: 'error_window_truncated',
+      errorLimit,
+    });
+    return result;
+  }
+  try {
+    result.watchedExpired = await expireQuietWatchedIncidents(
+      env,
+      now,
+      watchConfig,
+      watched.unrecorded
+    );
+  } catch (error) {
+    result.watchedExpired = undefined;
+    log.warn('platform-feedback-triage.watch-expiry-failed', {
+      trigger,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
   return result;
 }

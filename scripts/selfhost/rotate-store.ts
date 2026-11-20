@@ -33,7 +33,7 @@ import {
   listBundles,
   pruneBundles,
 } from './key-service';
-import { ensurePrivateDir, writePrivateFile } from './secret-files';
+import { ensurePrivateDir, replacePrivateFile } from './secret-files';
 
 export const JOURNAL_FORMAT = 'sam-key-rotation/1';
 export const ROTATION_DIR = 'rotation';
@@ -68,6 +68,8 @@ export interface StepState {
   /** What the staged bundle does: the next phase once it is deployed and healthy. */
   stagedFor?: Phase;
   switchedAt?: string;
+  /** When a rollback's reverse deployment (old value current again) was adopted: its drain starts here. */
+  reverseSwitchedAt?: string;
   /** reencrypt / better-auth: rows unreadable under both keys at the first verify (pre-existing). */
   baseline?: { unreadable: number; rows: RowRef[]; complete: boolean };
   /** Per location: the last id done in the current pass (null = start). */
@@ -112,6 +114,17 @@ export interface Journal {
    * (key-service.ts), and each step seals one, so a rotation removes the bundles from before it.
    */
   removedBundles?: string[];
+  /**
+   * The timing options the run started with, used by every resume: a resume without the flags
+   * must not fall back to the defaults (a 13 h JWT overlap after a requested hard cut, or a
+   * shorter wait than the operator asked for). Absent only in journals from before this field.
+   */
+  options?: {
+    jwtOverlapHours: number;
+    storedLifetimeMinutes: number | null;
+    /** The request drain the run started with (rotate-run.ts drainMinutes); absent in older journals. */
+    drainMinutes?: number;
+  };
 }
 
 export function rotationDir(stateDir: string): string {
@@ -143,7 +156,8 @@ export function readJournal(stateDir: string): Journal | null {
 
 export function writeJournal(stateDir: string, journal: Journal): void {
   ensurePrivateDir(rotationDir(stateDir));
-  writePrivateFile(journalPath(stateDir), `${JSON.stringify(journal, null, 2)}\n`);
+  // Atomic (temp file, fsync, rename): a stop mid-write leaves the old or the new journal whole.
+  replacePrivateFile(journalPath(stateDir), `${JSON.stringify(journal, null, 2)}\n`);
 }
 
 /** Moves a finished journal aside, so the next `rotate` starts a new one. */
@@ -151,7 +165,7 @@ export function archiveJournal(stateDir: string, journal: Journal): string {
   const dir = join(rotationDir(stateDir), journal.id);
   ensurePrivateDir(dir);
   const path = join(dir, 'journal.json');
-  writePrivateFile(path, `${JSON.stringify(journal, null, 2)}\n`);
+  replacePrivateFile(path, `${JSON.stringify(journal, null, 2)}\n`);
   rmSync(journalPath(stateDir), { force: true });
   return path;
 }
@@ -161,12 +175,12 @@ export interface RotationStore {
   settings: KeyServiceSettings;
   /** The newest bundle and its contents: what the next deploy runs with. */
   head(): Promise<{ bundle: SealedBundle; secrets: Secrets }>;
-  hasBundle(bundleId: string): boolean;
+  hasBundle(bundleId: string): Promise<boolean>;
   /** Seals in memory and proves the result opens to the same secrets. Writes nothing. */
   seal(secrets: Secrets): Promise<SealedBundle>;
-  write(bundle: SealedBundle): void;
-  remove(bundleId: string): void;
-  prune(keepIds: readonly string[]): string[];
+  write(bundle: SealedBundle): Promise<void>;
+  remove(bundleId: string): Promise<void>;
+  prune(keepIds: readonly string[]): Promise<string[]>;
   writeSnapshot(rotationId: string, name: string, secrets: Secrets): Promise<void>;
   readSnapshot(rotationId: string, name: string): Promise<Secrets>;
 }
@@ -191,7 +205,6 @@ export function openRotationStore(
   const settings = keyServiceSettings(applyKeyChoice(box, choice), stateDir);
   if (!settings) throw new Error('this box does not seal its secrets');
   const keyProvider = provider ?? createKeyProvider(settings.hostEnv);
-  const bundlePath = (id: string) => join(settings.bundleDir, `${id}.json`);
   const snapshotPath = (rotationId: string, name: string) =>
     join(rotationDir(stateDir), rotationId, `${name}.before.json`);
 
@@ -199,11 +212,11 @@ export function openRotationStore(
     provider: keyProvider,
     settings,
     async head() {
-      const bundle = listBundles(settings.bundleDir)[0];
-      if (!bundle) throw new Error(`no sealed bundle in ${settings.bundleDir}`);
+      const bundle = (await listBundles(settings.bundles))[0];
+      if (!bundle) throw new Error(`no sealed bundle in ${settings.bundles.location}`);
       return { bundle, secrets: await openBundle(bundle, keyProvider) };
     },
-    hasBundle: (bundleId) => existsSync(bundlePath(bundleId)),
+    hasBundle: async (bundleId) => (await settings.bundles.read(bundleId)) !== null,
     async seal(secrets) {
       const installationId = secrets.SAM_INSTALLATION_ID ?? '';
       if (!/^[0-9a-f]{32}$/.test(installationId)) throw new Error('SAM_INSTALLATION_ID is missing');
@@ -213,16 +226,13 @@ export function openRotationStore(
       }
       return bundle;
     },
-    write(bundle) {
-      ensurePrivateDir(settings.bundleDir);
-      writePrivateFile(bundlePath(bundle.bundleId), `${JSON.stringify(bundle, null, 2)}\n`);
-    },
-    remove: (bundleId) => rmSync(bundlePath(bundleId), { force: true }),
-    prune(keepIds) {
-      const newest = listBundles(settings.bundleDir)
+    write: (bundle) => settings.bundles.write(bundle),
+    remove: (bundleId) => settings.bundles.remove(bundleId),
+    async prune(keepIds) {
+      const newest = (await listBundles(settings.bundles))
         .slice(0, DEFAULT_KEPT_BUNDLES)
         .map((b) => b.bundleId);
-      return pruneBundles(settings.bundleDir, [...new Set([...newest, ...keepIds])]);
+      return await pruneBundles(settings.bundles, [...new Set([...newest, ...keepIds])]);
     },
     async writeSnapshot(rotationId, name, secrets) {
       const path = snapshotPath(rotationId, name);
@@ -230,7 +240,8 @@ export function openRotationStore(
       if (existsSync(path)) return;
       const sealed = await store.seal(secrets);
       ensurePrivateDir(join(rotationDir(stateDir), rotationId));
-      writePrivateFile(path, `${JSON.stringify(sealed, null, 2)}\n`);
+      // Atomic: writeSnapshot never rewrites an existing snapshot, so a partial one would be permanent.
+      replacePrivateFile(path, `${JSON.stringify(sealed, null, 2)}\n`);
     },
     async readSnapshot(rotationId, name) {
       const path = snapshotPath(rotationId, name);

@@ -99,9 +99,12 @@ export function isRenderableInboxItem(value: unknown): value is InboxItem {
   );
 }
 
-/** The agent is stopped on this item: the one state worth amber. */
+/**
+ * The agent is stopped on this item: the one state worth amber. Not while a reply is with the
+ * agent: it has the person's message, so nothing waits on them.
+ */
 export function isPausedOnItem(item: InboxItem): boolean {
-  return item.agentState === 'waiting' && item.status === 'open';
+  return item.agentState === 'waiting' && item.status === 'open' && item.withAgent !== true;
 }
 
 /** Time left before a live deadline ("4m", "1h 30m"), or null when there is none (or it passed). */
@@ -121,6 +124,8 @@ export function isIrreversibleApproval(spec: InboxAnswerSpec): boolean {
 
 /** Short agent state for a row ("paused on this"), or null when unknown. */
 export function agentStateShort(item: InboxItem): string | null {
+  // The row's reply line says "With the agent".
+  if (item.withAgent) return null;
   switch (item.agentState) {
     case 'waiting':
       return 'paused on this';
@@ -137,6 +142,7 @@ export function agentStateShort(item: InboxItem): string | null {
 
 /** Long agent state for the item meta line ("Paused, waiting on this"). */
 export function agentStateLong(item: InboxItem): string | null {
+  if (item.withAgent) return 'With the agent';
   switch (item.agentState) {
     case 'waiting':
       return 'Paused, waiting on this';
@@ -183,27 +189,21 @@ export function readErrorActions(item: InboxItem): InboxErrorActionModel[] | nul
 }
 
 /**
- * Whether an item has an answer area to pin. Open human tasks and SAM's own error items have
- * nothing to answer yet (Open chat is in the top bar), so they show no empty control strip.
+ * Whether an item shows answer controls (`InboxAnswerControls` renders something). Open human
+ * tasks and SAM's own error items have nothing to answer yet (Open chat is in the top bar); a
+ * free-text question and a settled permission are answered by replying in the composer.
  */
-export function hasPinnedControls(item: InboxItem): boolean {
-  if (item.status !== 'open' || !item.canAct) return true;
+export function hasAnswerControls(item: InboxItem): boolean {
+  if (item.status !== 'open') return !item.canReply;
+  if (!item.canAct) return true;
   if (readErrorActions(item)) return true;
+  if (item.answerSpec.type === 'text') return !item.canReply;
   return !(item.answerSpec.type === 'acknowledge' && !isAcknowledgeable(item));
 }
 
 /** Reviews and results are answered from the inbox: "Looks good" / "Got it", or a reply. */
 export function isAcknowledgeable(item: InboxItem): boolean {
   return item.kind === 'review' || item.kind === 'result';
-}
-
-/**
- * Whether a reply can still reach the agent. A reply is delivered only while the filing task is
- * live (`sourceTaskGuardForClaim`, `inbox_ask`); once it has finished the server refuses a reply
- * (`answerAsk`), so the person continues in the chat instead.
- */
-export function canReplyToAgent(item: InboxItem): boolean {
-  return item.agentState !== 'finished';
 }
 
 /** The one-tap acknowledgement for a review or a result. */
@@ -294,7 +294,7 @@ export function linkIcon(link: InboxLink): LucideIcon {
 export function linkTarget(
   projectId: string,
   link: InboxLink
-): { href: string; external: boolean; host?: string } | null {
+): { href: string; external: boolean; host?: string; libraryFileId?: string } | null {
   // A dot segment would climb out of the intended path once the router resolves it.
   if (!link.id || link.id === '.' || link.id === '..') return null;
   switch (link.kind) {
@@ -302,7 +302,12 @@ export function linkTarget(
       return { href: projectIdeaPath(projectId, link.id), external: false };
     case 'file':
     case 'library':
-      return { href: projectLibraryFilePath(projectId, link.id), external: false };
+      // The chip opens the file's preview in place; the href is its fallback (a new tab).
+      return {
+        href: projectLibraryFilePath(projectId, link.id),
+        external: false,
+        libraryFileId: link.id,
+      };
     case 'chat':
     case 'session':
       return { href: projectChatPath(projectId, link.id), external: false };

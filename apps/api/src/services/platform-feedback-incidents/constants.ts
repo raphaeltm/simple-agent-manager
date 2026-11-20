@@ -7,6 +7,11 @@ export const INCIDENT_QUEUE_STATES = [
   'resolved',
   'rejected',
   'expired',
+  // Neither active nor terminal: a genuine defect triage chose to measure rather than fix now.
+  // Recurrences only update counts (`watching.ts`); a spike returns it to `pending`, and a quiet
+  // period expires it. Every predicate over this column is an allowlist of active or terminal
+  // states, so watching is excluded from dispatch, claim, reopen and idea close by construction.
+  'watching',
 ] as const;
 export type IncidentQueueState = (typeof INCIDENT_QUEUE_STATES)[number];
 

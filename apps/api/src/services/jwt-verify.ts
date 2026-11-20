@@ -106,6 +106,18 @@ function isSignatureFailure(error: unknown): boolean {
  * treat a 401 as terminal. Every other token is short-lived and re-minted by its holder, so a
  * rotation (which replaces a key believed exposed) must not keep accepting it for those.
  */
+/**
+ * A broken JWT_PUBLIC_KEY is a server fault, not a bad token. Callers that map verification
+ * failures to 401 rethrow `cause` unchanged, as main did when the key was imported outside their
+ * `try` (the import failure surfaced as a 500).
+ */
+export class JwtKeyConfigError extends Error {
+  constructor(readonly cause: unknown) {
+    super('JWT_PUBLIC_KEY could not be imported');
+    this.name = 'JwtKeyConfigError';
+  }
+}
+
 export async function verifyPlatformJwt(
   token: string,
   env: Env,
@@ -113,7 +125,12 @@ export async function verifyPlatformJwt(
   nowMs: number = Date.now(),
   allowPrevious = false
 ): Promise<JWTVerifyResult> {
-  const currentKey = await importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
+  let currentKey: CryptoKey;
+  try {
+    currentKey = await importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
+  } catch (importError) {
+    throw new JwtKeyConfigError(importError);
+  }
   try {
     return await jwtVerify(token, currentKey, options);
   } catch (currentError) {
@@ -181,6 +198,7 @@ export async function verifyCallbackToken(
       true
     ));
   } catch (error) {
+    if (error instanceof JwtKeyConfigError) throw error.cause;
     if (isJoseVerificationFailure(error)) {
       throw callbackTokenUnauthorized();
     }
@@ -237,16 +255,6 @@ export async function verifyCallbackToken(
   };
 }
 
-/**
- * Verify a browser-to-workspace terminal token.
- *
- * These tokens are minted after normal app authentication by
- * POST /api/terminal/token, then sent directly to workspace subdomains as a
- * query parameter because WebSocket upgrades cannot reliably attach custom
- * headers. The API workspace proxy verifies the token before forwarding the
- * request to the VM agent so token-only project chat connections do not depend
- * on cross-subdomain app cookies.
- */
 /** Verify only publish-job claims. Callers must additionally bind these claims to
  * the current non-terminal job row and attempt in publish-job-token.ts. Generic
  * workspace/node callback sinks continue to reject the publish-job scope. */
@@ -258,7 +266,8 @@ export async function verifyPublishJobClaims(env: Env, token: string) {
       issuer: getIssuer(env),
       audience: CALLBACK_AUDIENCE,
     }));
-  } catch {
+  } catch (error) {
+    if (error instanceof JwtKeyConfigError) throw error.cause;
     throw new AppError(401, 'UNAUTHORIZED', 'Invalid or expired publish job token');
   }
   if (
@@ -285,6 +294,16 @@ export async function verifyPublishJobClaims(env: Env, token: string) {
   };
 }
 
+/**
+ * Verify a browser-to-workspace terminal token.
+ *
+ * These tokens are minted after normal app authentication by
+ * POST /api/terminal/token, then sent directly to workspace subdomains as a
+ * query parameter because WebSocket upgrades cannot reliably attach custom
+ * headers. The API workspace proxy verifies the token before forwarding the
+ * request to the VM agent so token-only project chat connections do not depend
+ * on cross-subdomain app cookies.
+ */
 export async function verifyTerminalToken(token: string, env: Env): Promise<TerminalTokenPayload> {
   const issuer = getIssuer(env);
 

@@ -47,6 +47,7 @@ export type {
   UserMessage,
   UserMessageAttribution,
   UserMessageDelivery,
+  UserMessageInboxReply,
 } from './useAcpMessages.types';
 
 /**

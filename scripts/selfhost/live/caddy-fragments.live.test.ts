@@ -11,7 +11,8 @@
  * (encodings at any depth, backslash separators, dot segments, absolute-form targets), that paths
  * merely containing "self-host" still reach celld, the per-address rate limit on frp connections
  * (/~!frp), the stripping of client X-SAM-* headers before forward_auth and before the node, and
- * the 101 Set-Cookie rule for port-preview sockets.
+ * the 101 Set-Cookie rule for port-preview sockets, and the public 404 for the key-rotation
+ * control path (/__sam-selfhost/) with its auth header stripped.
  *
  * Image: the box's Caddy image, built from deploy/selfhost/caddy/Dockerfile as compose builds it,
  * started through start.sh with the frp rate limit lowered to FRP_LOGIN_LIMIT.
@@ -286,6 +287,34 @@ describe.skipIf(skipWithoutDocker)('the box Caddy routes (live)', () => {
     it.each(PUBLIC)('control: %s%s reaches celld', async (host, path) => {
       expect((await send(host, path)).status, `${host}${path}`).toBe(200);
       expect(celldSeen.map((seen) => seen.url)).toEqual([path]);
+    });
+  });
+
+  describe('the key-rotation control path is never served publicly', () => {
+    // The Worker matches the path exactly (selfhost/key-rotation/control-auth.ts KEY_ROTATION_PATH);
+    // Caddy refuses the canonical forms before celld (sam.d/key-rotation.caddy).
+    it.each(
+      ['api', 'app', 'API'].flatMap((host) =>
+        ['/__sam-selfhost/key-rotation', '/__sam-selfhost/', '/__sam-selfhost/key-rotation?x=1'].map(
+          (path) => [host, path] as const
+        )
+      )
+    )('404 on %s for %s', async (host, path) => {
+      const reply = await send(host, path, {}, false);
+      expect(reply.status, `${host}${path}`).toBe(404);
+      expect(celldSeen.filter((seen) => seen.url.includes('__sam-selfhost'))).toEqual([]);
+    });
+
+    it('strips the control auth header from every external request', async () => {
+      const reply = await send('api', '/api/projects', {
+        'X-Sam-Key-Rotation': 'forged',
+        'X-Other': 'kept',
+      });
+      expect(reply.status).toBe(200);
+      // Liveness: the request reached celld, with an ordinary header intact.
+      expect(celldSeen).toHaveLength(1);
+      expect(celldSeen[0]?.headers['x-other']).toBe('kept');
+      expect(celldSeen[0]?.headers['x-sam-key-rotation']).toBeUndefined();
     });
   });
 

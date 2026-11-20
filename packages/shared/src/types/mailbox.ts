@@ -113,6 +113,7 @@ export const DELIVERY_TERMINAL_STATES: readonly DeliveryState[] = [
 
 export const PROMPT_DELIVERY_SOURCES = [
   'user_followup',
+  'inbox_reply',
   'comment_directive',
   'agent_mailbox',
   'orchestration_handoff',

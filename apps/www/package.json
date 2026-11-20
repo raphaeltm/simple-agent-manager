@@ -5,9 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm build:assets && astro dev",
-    "build:assets": "pnpm build:tracker && pnpm build:blog-mermaid && pnpm build:docs-mermaid",
-    "build:blog-mermaid": "pnpm exec esbuild src/scripts/blog-mermaid.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=public/scripts/blog-mermaid.js",
-    "build:docs-mermaid": "pnpm exec esbuild src/scripts/docs-mermaid.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=public/scripts/docs-mermaid.js",
+    "build:assets": "pnpm build:tracker && pnpm build:mermaid",
+    "build:mermaid": "node -e \"require('node:fs').rmSync('public/scripts/mermaid-chunks',{recursive:true,force:true})\" && pnpm exec esbuild src/scripts/blog-mermaid.ts src/scripts/docs-mermaid.ts --bundle --splitting --format=esm --platform=browser --target=es2022 --outdir=public/scripts --chunk-names=mermaid-chunks/[name]-[hash]",
     "build:tracker": "npx tsx scripts/build-tracker.ts",
     "test": "pnpm build:tracker && vitest run --exclude=tests/playwright/**",
     "test:coverage": "pnpm build:tracker && vitest run --coverage --exclude=tests/playwright/**",
@@ -28,14 +27,14 @@
     "@expressive-code/plugin-line-numbers": "0.44.4",
     "@simple-agent-manager/ui": "workspace:*",
     "astro": "7.4.12",
-    "mermaid": "11.14.0"
+    "mermaid": "12.3.0"
   },
   "devDependencies": {
     "@astrojs/check": "catalog:",
     "@axe-core/playwright": "4.14.0",
     "@playwright/test": "1.65.0",
     "@vitest/coverage-v8": "catalog:",
-    "esbuild": "0.28.1",
+    "esbuild": "0.28.2",
     "sharp": "0.35.5",
     "tsx": "catalog:",
     "typescript": "catalog:",

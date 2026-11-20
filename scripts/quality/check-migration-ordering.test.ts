@@ -85,6 +85,13 @@ describe('D1 migration ordering check', () => {
     ]);
   });
 
+  it('preserves only the exact staging2-applied inbox reply migration pair', () => {
+    expectOnlyTheseDuplicateFiles('0263', [
+      '0263_inbox_replies.sql',
+      '0263_platform_feedback_triage_idea_ownership.sql',
+    ]);
+  });
+
   it('fails on migration filenames without a sortable numeric prefix', () => {
     const dir = makeDir();
     writeFileSync(join(dir, '0001_initial.sql'), 'CREATE TABLE first (id TEXT PRIMARY KEY);');

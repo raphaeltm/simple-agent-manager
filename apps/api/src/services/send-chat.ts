@@ -1,3 +1,4 @@
+import type { InboxChatDelivery } from '@simple-agent-manager/operations';
 import { drizzle } from 'drizzle-orm/d1';
 import type * as v from 'valibot';
 
@@ -79,8 +80,9 @@ export async function sendChat(
   sessionId: string,
   body: v.InferOutput<typeof SendChatMessageSchema>,
   authorized?: AuthorizedSendChat,
-  assertEffectAllowed?: () => Promise<void>
+  options: { assertEffectAllowed?: () => Promise<void>; inboxReply?: InboxChatDelivery } = {}
 ) {
+  const { assertEffectAllowed, inboxReply } = options;
   const db = drizzle(env.DATABASE, { schema });
 
   const { writer, wake } = matchesRequest(authorized, userId, projectId, sessionId)
@@ -88,13 +90,14 @@ export async function sendChat(
     : await authorizeSendChat(env, userId, projectId, sessionId);
   const shared = writer.role === 'grantee';
 
-  const content = validateSendChatContent(body);
+  const validatedContent = validateSendChatContent(body);
+  const content = inboxReply ? (body.content ?? validatedContent) : validatedContent;
   const deliveryIntent = body.deliveryIntent ?? 'queue';
 
   // Every refusal comes before the first side effect (validating uploads, cancelling a
   // scheduled sleep), so a refused prompt changes nothing.
   const durableConfig = resolveDurableExecutionConfig(env);
-  if (assertEffectAllowed && !durableConfig.deliveryEnabled)
+  if ((assertEffectAllowed || inboxReply) && !durableConfig.deliveryEnabled)
     throw errors.conflict('SAM follow-ups require durable prompt delivery');
   const attachments = body.attachments ?? [];
   if (shared && !durableConfig.deliveryEnabled) {
@@ -141,18 +144,38 @@ export async function sendChat(
       ? `${buildSharedSessionSpeakerLine(names)}\n\n${enrichedMessage}`
       : enrichedMessage;
     await assertEffectAllowed?.();
+    await inboxReply?.beforeDelivery();
+    const header = inboxReply
+      ? `The person replied about your inbox item ${JSON.stringify(inboxReply.title)} (${inboxReply.ref}).
+Reply message id: ${inboxReply.deliveryId}. Pass this exact id as replyMessageId when responding, updating or resolving this reply; never acknowledge a reply you have not received.
+It is out of their inbox until you act on it.
+Decide what it means: if it answers the item, call inbox_write resolve { ref, replyMessageId } (asks only; secrets and approvals need the person). To respond, call inbox_write respond { ref, body, replyMessageId }; to change the ask, call update { ref, replyMessageId, title / why / links }. A response or update brings it back once all outstanding replies are handled. If the tool returns withAgent: true, use inbox_read get { ref }, follow conversation cursors, and handle the pendingReplyIds you have read, including earlier failed deliveries. Reading does not acknowledge them. Otherwise carry on; it stays out. Do not file a new item for the same thing.
+
+Their message:
+
+`
+      : '';
     const accepted = await projectDataService.acceptPromptDelivery(env, projectId, {
+      ...(inboxReply ? { deliveryId: inboxReply.deliveryId } : {}),
       targetSessionId: sessionId,
       displayContent: buildVisibleInitialPrompt({ message: content, attachments }),
-      deliveryContent: buildVisibleInitialPrompt({ message: deliveryMessage, attachments }),
+      deliveryContent: buildVisibleInitialPrompt({
+        message: header + deliveryMessage,
+        attachments,
+      }),
       senderType: 'human',
       senderId: userId,
       messageClass: 'deliver',
       deliveryIntent,
-      sourceKind: 'user_followup',
+      sourceKind: inboxReply ? 'inbox_reply' : 'user_followup',
       ttlMs: durableConfig.ttlMs,
       metadata: {
         userId,
+        // The title as it was when the person replied: the chat's "Re:" chip names the item
+        // without a second read. Agent-written, rendered as text only.
+        ...(inboxReply ? { inboxRef: inboxReply.ref, inboxTitle: inboxReply.title } : {}),
+        ...(inboxReply?.fingerprint ? { inboxReplyFingerprint: inboxReply.fingerprint } : {}),
+        ...(inboxReply?.permission ? { inboxReplyPermission: inboxReply.permission } : {}),
         wake: agentWakeRecord(wake),
         ...(names
           ? {
@@ -164,6 +187,7 @@ export async function sendChat(
         ...(attachments.length > 0 ? { attachments } : {}),
       },
     });
+    await inboxReply?.afterAcceptance?.();
     return {
       accepted: true,
       status: 'queued',

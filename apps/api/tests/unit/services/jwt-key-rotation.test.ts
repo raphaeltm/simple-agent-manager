@@ -23,6 +23,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import {
+  enableSelfHostRotationScope,
+  resetSelfHostRotationScopeForTests,
+} from '../../../src/services/encryption-key-fallback';
+import {
   getJWKS,
   shouldRefreshCallbackToken,
   signCallbackToken,
@@ -47,6 +51,12 @@ import {
   signWorkloadIdentityToken,
 } from '../../../src/services/workload-identity-token';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+
+// These tests model a self-hosted box: the celld wrapper turns the rotation scope on
+// (selfhost/runtime-secrets.ts registerRotationKeys). Cloudflare, where it stays off, is covered
+// by tests/unit/services/rotation-scope-cloudflare.test.ts.
+beforeEach(() => enableSelfHostRotationScope());
+afterEach(() => resetSelfHostRotationScopeForTests());
 
 interface PemPair {
   privateKey: string;

@@ -61,9 +61,9 @@ const DIRECTIVE_LOCKED_KEYS = [
 const SVG_LABEL_CSS = [
   // Journey section titles otherwise take the section's fill colour.
   `text.journey-section { fill: ${MERMAID_TEXT_COLOR}; }`,
-  // The mindmap root circle places its label from the centre, and the dark
-  // theme draws that label dark grey on the blue circle.
-  `.mindmap-node.section-root text { text-anchor: middle; fill: ${MERMAID_TEXT_COLOR}; }`,
+  // The dark theme draws the mindmap root label dark grey on the blue circle.
+  // Mermaid 12.2+ centres it itself; a `text-anchor` here would shift it again.
+  `.mindmap-node.section-root text { fill: ${MERMAID_TEXT_COLOR}; }`,
 ].join(' ');
 
 const MERMAID_CONFIG: MermaidConfig = {
@@ -71,6 +71,11 @@ const MERMAID_CONFIG: MermaidConfig = {
   securityLevel: 'strict',
   logLevel: 5,
   theme: 'dark',
+  // Mermaid 12 defaults most diagrams to the `neo` look and the ELK layout, which
+  // restyles every diagram and fetches the multi-megabyte ELK chunk for each
+  // flowchart. Keep the classic dagre rendering; a diagram may still ask for ELK.
+  look: 'classic',
+  layout: 'dagre',
   fontFamily: MERMAID_FONT,
   themeVariables: {
     darkMode: true,

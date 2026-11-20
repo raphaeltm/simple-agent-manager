@@ -5313,6 +5313,18 @@ export const platformFeedbackTriages = sqliteTable(
     resolutionNote: text('resolution_note'),
     resolutionReferences: text('resolution_references'),
     expiredAt: integer('expired_at'),
+    /** Watching disposition (migration 0264): the latest watch decision, epoch ms. */
+    watchingSince: integer('watching_since'),
+    watchReason: text('watch_reason'),
+    /** JSON object of epoch hour -> occurrences recorded while watching. */
+    watchHourlyCounts: text('watch_hourly_counts'),
+    watchEscalatedAt: integer('watch_escalated_at'),
+    watchEscalationReason: text('watch_escalation_reason'),
+    /** Migration 0265: last_seen_at when watching began, and ids counted since (JSON). */
+    watchCountFloor: integer('watch_count_floor'),
+    watchCountedIds: text('watch_counted_ids'),
+    /** Migration 0266: occurrences already in the watch decision's hour bucket. */
+    watchSpikeOffset: integer('watch_spike_offset'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -6261,3 +6273,31 @@ export const installationCostSync = sqliteTable('installation_cost_sync', {
   lastDay: text('last_day'),
   rowsWritten: integer('rows_written').notNull().default(0),
 });
+
+/** Inbox visibility ledger; bodies remain canonical ProjectData chat messages (0263). */
+export const inboxReplies = sqliteTable(
+  'inbox_replies',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    itemRef: text('item_ref').notNull(),
+    userId: text('user_id').notNull(),
+    messageId: text('message_id').notNull(),
+    repliedAt: integer('replied_at').notNull(),
+    agentActedAt: integer('agent_acted_at'),
+    permissionRejected: integer('permission_rejected').notNull().default(0),
+  },
+  (table) => ({
+    messageIdx: uniqueIndex('idx_inbox_replies_message').on(
+      table.projectId,
+      table.itemRef,
+      table.messageId
+    ),
+    latestIdx: index('idx_inbox_replies_latest').on(table.projectId, table.itemRef, table.id),
+    permissionIdx: index('idx_inbox_replies_permissions')
+      .on(table.projectId, table.itemRef, table.repliedAt)
+      .where(sql`permission_rejected = 1`),
+  })
+);

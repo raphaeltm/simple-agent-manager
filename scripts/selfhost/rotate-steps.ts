@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import type { Secrets } from '../../deploy/selfhost/key-agent/bundle.ts';
 import { ApplyFailedError, applyPatch, type Patch, type StepContext } from './rotate-apply';
 import { jwtKeyId } from './rotate-catalog';
-import { writePrivateFile } from './secret-files';
+import { replacePrivateFile } from './secret-files';
 
 export const GATEWAY_SECRET = 'REVERSE_TUNNEL_GATEWAY_SECRET';
 export const GATEWAY_ALTERNATE = 'REVERSE_TUNNEL_GATEWAY_SECRET_ALTERNATE';
@@ -19,15 +19,32 @@ export const JWT_OVERLAP_NAMES = [
   'JWT_PREVIOUS_KEY_ID',
   'JWT_PUBLIC_KEY_PREVIOUS_UNTIL',
 ] as const;
+/** The Worker's callback-token lifetime when CALLBACK_TOKEN_EXPIRY_MS is unset (services/jwt.ts). */
+export const DEFAULT_CALLBACK_TOKEN_LIFETIME_MS = 24 * 3_600_000;
 /**
- * How long the Worker still accepts callback tokens signed with the old key. Nodes get a new-key
- * token on their next heartbeat (shouldRefreshCallbackToken refreshes a non-current kid), but a
- * VM agent offers a workspace callback token for renewal only after half its 24 h lifetime
- * (CALLBACK_TOKEN_EXPIRY_MS, ratio 0.5): 12 h plus a margin. Terminal, port and local-forward
- * tokens never use the old key. 0 is a hard cut: running nodes lose their control-plane
- * connection and must be replaced.
+ * The latest point in a workspace callback token's life at which a VM agent offers it for
+ * renewal: the top of the ratio range the agent accepts (WORKSPACE_CALLBACK_TOKEN_REFRESH_RATIO,
+ * MaxWorkspaceCallbackTokenRefreshRatio in packages/vm-agent/internal/config/callback_token_renewal.go).
  */
-export const DEFAULT_JWT_OVERLAP_HOURS = 13;
+export const MAX_AGENT_RENEWAL_RATIO = 0.9;
+export const JWT_OVERLAP_MARGIN_HOURS = 1;
+
+/**
+ * How long the Worker still accepts callback tokens signed with the old key, unless
+ * --jwt-overlap-hours says otherwise. Nodes get a new-key token on their next heartbeat
+ * (shouldRefreshCallbackToken refreshes a non-current kid), but a VM agent offers a workspace
+ * callback token for renewal only once it has used MAX_AGENT_RENEWAL_RATIO of its lifetime at
+ * the latest, so the overlap covers that point of the deployed lifetime (the bundle's
+ * CALLBACK_TOKEN_EXPIRY_MS, else the Worker default) plus a margin: 23 h with the defaults.
+ * Terminal, port and local-forward tokens never use the old key. 0 is a hard cut: running nodes
+ * lose their control-plane connection and must be replaced.
+ */
+export function defaultJwtOverlapHours(bundle: Readonly<Record<string, string>>): number {
+  const configured = Number.parseInt(bundle.CALLBACK_TOKEN_EXPIRY_MS ?? '', 10);
+  const lifetimeMs =
+    Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_CALLBACK_TOKEN_LIFETIME_MS;
+  return Math.ceil((lifetimeMs * MAX_AGENT_RENEWAL_RATIO) / 3_600_000) + JWT_OVERLAP_MARGIN_HOURS;
+}
 
 /** Sets `names` back to their snapshot values; names the snapshot lacks are removed. */
 export function restorePatch(snapshot: Secrets, names: readonly string[]): Patch {
@@ -103,13 +120,20 @@ function writeGatewayEnv(ctx: StepContext, secret: string): boolean {
   // A replacer function: a `$` in the value must not be read as a replacement pattern.
   const next = text.replace(line, () => `${GATEWAY_SECRET}=${secret}`);
   if (next === text) return false;
-  writePrivateFile(path, next);
+  replacePrivateFile(path, next);
   return true;
 }
 
 async function expectGateway(ctx: StepContext, secret: string, accepted: boolean, what: string) {
   const status = await ctx.deps.probeGateway(secret);
-  if ((status !== 401) !== accepted) {
+  // Only the plugin's documented answers prove anything: 200 (authenticated verdict) or 401
+  // (refused before authentication). A 5xx after authentication is not acceptance.
+  if (status !== 200 && status !== 401) {
+    throw new ApplyFailedError(
+      `the gateway probe for the ${what} secret answered HTTP ${status}, expected 200 or 401`
+    );
+  }
+  if ((status === 200) !== accepted) {
     throw new ApplyFailedError(
       `the Worker ${accepted ? 'refused' : 'still accepts'} the ${what} gateway secret (HTTP ${status})`
     );
@@ -124,20 +148,27 @@ async function expectGateway(ctx: StepContext, secret: string, accepted: boolean
 export async function advanceGateway(ctx: StepContext): Promise<void> {
   const { step, key, deps } = ctx;
   const names = [GATEWAY_SECRET, GATEWAY_ALTERNATE];
-  const restoreConsumers = async () => {
+  // `always`: on a resumed rollback gateway.env may already hold the old value while the restart
+  // that should have loaded it failed, so restart regardless of whether the file changed.
+  const restoreConsumers = async (always: boolean) => {
     const snapshot = await ctx.store.readSnapshot(ctx.journal.id, key.name);
-    if (writeGatewayEnv(ctx, snapshot[GATEWAY_SECRET] ?? '')) await deps.restartGatewayConsumers();
+    const changed = writeGatewayEnv(ctx, snapshot[GATEWAY_SECRET] ?? '');
+    if (changed || always) await deps.restartGatewayConsumers();
   };
-  if (isResumingRollback(ctx)) {
-    await restoreConsumers();
+  // A recorded failure that has not reached `rolled-back` is a rollback the run did not finish
+  // (restoring the consumers failed, or the process stopped): finish it rather than carry on.
+  if (isResumingRollback(ctx) || (step.error !== undefined && step.phase !== 'rolled-back')) {
+    await restoreConsumers(true);
     return await rollBack(ctx, names, step.error ?? 'interrupted');
   }
+  // Outside the rollback catch: a failure before the snapshot exists changed nothing, so the step
+  // stays pending and a resume simply starts it again.
+  if (step.phase === 'pending') await snapshotOnce(ctx);
   try {
     if (
       step.phase === 'pending' ||
       (step.phase === 'staging' && step.stagedFor === 'accepting-both')
     ) {
-      if (step.phase === 'pending') await snapshotOnce(ctx);
       await applyPatch(
         ctx,
         { set: { [GATEWAY_ALTERNATE]: key.generate()[GATEWAY_SECRET] ?? '' } },
@@ -176,8 +207,12 @@ export async function advanceGateway(ctx: StepContext): Promise<void> {
       ctx.save();
     }
   } catch (error) {
-    await restoreConsumers();
-    await rollBack(ctx, names, message(error));
+    // Record the rollback before touching gateway.env: if restoring the consumers fails, a
+    // resume must finish the rollback, not verify the new secret and mark the step done.
+    step.error = message(error);
+    ctx.save();
+    await restoreConsumers(false);
+    await rollBack(ctx, names, step.error);
   }
 }
 
@@ -195,6 +230,64 @@ async function jwksKids(ctx: StepContext): Promise<string[]> {
 }
 
 /**
+ * Checks the deployed overlap and records its deadline (`step.waitUntil`). The Worker publishes
+ * only the current key: VM agents and relying parties never trust the old one (it is accepted
+ * only for callback tokens, by the Worker itself). Throws when the JWKS or the deadline is wrong.
+ */
+async function recordOverlapDeadline(ctx: StepContext): Promise<void> {
+  const head = (await ctx.store.head()).secrets;
+  const kids = await jwksKids(ctx);
+  if (kids.length !== 1 || kids[0] !== head.JWT_KEY_ID) {
+    throw new ApplyFailedError(
+      `the JWKS publishes ${kids.join(', ') || 'nothing'}, expected only ${head.JWT_KEY_ID}`
+    );
+  }
+  const until = head.JWT_PUBLIC_KEY_PREVIOUS_UNTIL;
+  if (!until || !Number.isFinite(Date.parse(until))) {
+    throw new ApplyFailedError('the deployed bundle has no valid JWT_PUBLIC_KEY_PREVIOUS_UNTIL');
+  }
+  ctx.step.waitUntil = until;
+  ctx.save();
+}
+
+/**
+ * Resuming an overlap bundle that was sealed but whose deploy never finished: the deadline
+ * sealed into it started running at sealing time, while the box was offline. Deploying it as
+ * recorded could install an already-expired previous key and retire it at once, cutting off
+ * nodes whose callback tokens the old key signed. Reseal it with the deadline counted from now,
+ * keeping its key pair (the new key may already have signed tokens if the deploy got that far).
+ * Returns true when the step was rolled back instead.
+ */
+async function reanchorStagedOverlap(
+  ctx: StepContext,
+  overlapHours: number,
+  names: string[]
+): Promise<boolean> {
+  const { step, store, deps } = ctx;
+  if (!step.stagedBundleId || !(await store.hasBundle(step.stagedBundleId))) return false;
+  const head = await store.head();
+  // Another bundle sealed meanwhile: applyPatch refuses that, as before.
+  if (head.bundle.bundleId !== step.stagedBundleId) return false;
+  const until = deps.now() + overlapHours * 3_600_000;
+  const sealed = Date.parse(head.secrets.JWT_PUBLIC_KEY_PREVIOUS_UNTIL ?? '');
+  if (Number.isFinite(sealed) && sealed >= until) return false;
+  delete step.stagedBundleId; // seal a fresh bundle on top of the recorded one
+  ctx.save();
+  try {
+    await applyPatch(
+      ctx,
+      { set: { JWT_PUBLIC_KEY_PREVIOUS_UNTIL: new Date(until).toISOString() } },
+      'waiting'
+    );
+    await recordOverlapDeadline(ctx);
+  } catch (error) {
+    await rollBack(ctx, names, message(error));
+    return true;
+  }
+  return false;
+}
+
+/**
  * New key pair with its own kid; the old public key stays accepted (and published) until
  * JWT_PUBLIC_KEY_PREVIOUS_UNTIL. `rotate --resume` after that time removes it.
  */
@@ -202,6 +295,9 @@ export async function advanceOverlap(ctx: StepContext, overlapHours: number): Pr
   const { step, key, deps } = ctx;
   const names = [...key.secrets, ...JWT_OVERLAP_NAMES];
   if (isResumingRollback(ctx)) return await rollBack(ctx, names, step.error ?? 'interrupted');
+  if (step.phase === 'staging' && step.stagedFor === 'waiting') {
+    if (await reanchorStagedOverlap(ctx, overlapHours, names)) return;
+  }
   if (step.phase === 'pending' || (step.phase === 'staging' && step.stagedFor === 'waiting')) {
     const base =
       step.phase === 'pending'
@@ -223,20 +319,16 @@ export async function advanceOverlap(ctx: StepContext, overlapHours: number): Pr
         },
         'waiting'
       );
-      const head = (await ctx.store.head()).secrets;
-      // The Worker publishes only the current key: VM agents and relying parties never trust
-      // the old one (it is accepted only for callback tokens, by the Worker itself).
-      const kids = await jwksKids(ctx);
-      if (kids.length !== 1 || kids[0] !== head.JWT_KEY_ID) {
-        throw new ApplyFailedError(
-          `the JWKS publishes ${kids.join(', ') || 'nothing'}, expected only ${head.JWT_KEY_ID}`
-        );
-      }
-      step.waitUntil = head.JWT_PUBLIC_KEY_PREVIOUS_UNTIL;
-      ctx.save();
+      await recordOverlapDeadline(ctx);
     } catch (error) {
       return await rollBack(ctx, names, message(error));
     }
+  }
+  if (step.phase === 'waiting' && !Number.isFinite(Date.parse(step.waitUntil ?? ''))) {
+    // Stopped after the overlap deployed but before its deadline was recorded: finish that check
+    // now. Never read a missing deadline as "past", which would retire the old key unverified
+    // and cut off nodes still holding callback tokens it signed.
+    await recordOverlapDeadline(ctx);
   }
   if (step.phase === 'waiting' || (step.phase === 'staging' && step.stagedFor === 'done')) {
     if (step.phase === 'waiting' && deps.now() < Date.parse(step.waitUntil ?? '')) return;

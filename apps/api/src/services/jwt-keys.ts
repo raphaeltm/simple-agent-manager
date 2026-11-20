@@ -13,9 +13,11 @@
  * short-lived tokens VM agents verify against that set.
  *
  * With none of the rotation variables set, behaviour is exactly the pre-rotation behaviour: one
- * key, kid `key-YYYY-MM`.
+ * key, kid `key-YYYY-MM`. Outside the self-host rotation scope (encryption-key-fallback.ts), that
+ * is, on Cloudflare, the variables are ignored even when set.
  */
 import type { Env } from '../env';
+import { selfHostRotationScopeEnabled } from './encryption-key-fallback';
 
 // Legacy key ID format: key-YYYY-MM, fixed at module load. Used whenever JWT_KEY_ID is unset.
 export const LEGACY_JWT_KEY_ID = `key-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
@@ -41,7 +43,15 @@ function nonEmpty(value: string | undefined): string | undefined {
 
 /** kid stamped on tokens signed with the current key, and published for it in /.well-known/jwks.json. */
 export function currentJwtKeyId(env: Env): string {
-  return nonEmpty(env.JWT_KEY_ID) ?? LEGACY_JWT_KEY_ID;
+  return configuredJwtKeyId(env) ?? LEGACY_JWT_KEY_ID;
+}
+
+/**
+ * JWT_KEY_ID when a self-hosted rotation set it, else undefined. Read only inside the self-host
+ * rotation scope (encryption-key-fallback.ts): on Cloudflare the var is ignored.
+ */
+export function configuredJwtKeyId(env: Env): string | undefined {
+  return selfHostRotationScopeEnabled() ? nonEmpty(env.JWT_KEY_ID) : undefined;
 }
 
 // An explicit offset is required: an ISO-8601 instant without one is local time, and the
@@ -73,6 +83,8 @@ export interface PreviousJwtKey {
  * means the previous key is ignored entirely, so a rotation can never leave an unbounded overlap.
  */
 export function activePreviousJwtKey(env: Env, nowMs: number): PreviousJwtKey | null {
+  // Cloudflare never enables the scope: a JWT_PUBLIC_KEY_PREVIOUS set there is ignored.
+  if (!selfHostRotationScopeEnabled()) return null;
   const publicKeyPem = nonEmpty(env.JWT_PUBLIC_KEY_PREVIOUS);
   if (!publicKeyPem) return null;
   const untilMs = parsePreviousJwtKeyUntil(env.JWT_PUBLIC_KEY_PREVIOUS_UNTIL);

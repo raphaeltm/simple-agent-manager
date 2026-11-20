@@ -228,10 +228,130 @@ pnpm selfhost:secrets plaintext [--backups <dir or gs://|s3:// url> ...]   # rea
 It lists every deploy version in the fleet bucket that holds secret vars (names only, never
 values), which ones celld still reads, and the backups holding `platform-keys.json`, `secrets.env`,
 the key file or plaintext deploy versions. It deletes nothing: celld documents `deploy/` as not to
-be deleted by operators. **Platform-key rotation is not available yet**, so until it lands the
-copies made before sealing stay readable by anyone holding the bucket credential (or a backup and
-its key). Rotate what you can rotate yourself (GitHub App secrets, OAuth client secrets, the SMTP
-password) by putting the new value in `secrets.env` and deploying.
+be deleted by operators. Rotating is the fix that does not depend on deleting anything: run
+`pnpm selfhost:secrets rotate --all` ([Rotating platform keys](#rotating-platform-keys)) and the
+platform keys in those copies are retired. Rotate what SAM cannot rotate for you (GitHub App
+secrets, OAuth client secrets, the SMTP password) by putting the new value in `secrets.env` and
+deploying. Old backups still hold data encrypted under the old `ENCRYPTION_KEY`, so they stay as
+sensitive as before.
+
+### Rotating platform keys
+
+```bash
+pnpm selfhost:secrets rotate --all --dry-run       # the plan, and what users notice per key
+pnpm selfhost:secrets rotate --all --encryption-key-file "$HOME/.config/sam/backup.key"
+                                                   # or: rotate encryption-key jwt-keys ...
+pnpm selfhost:secrets rotate --status              # where a rotation is
+pnpm selfhost:secrets rotate --resume              # after an interruption, or to finish a waiting key
+# --resume keeps the run's --jwt-overlap-hours / --stored-lifetime-minutes (recorded in the journal)
+```
+
+If you lowered `CALLBACK_TOKEN_EXPIRY_MS` less than one previous lifetime ago, tokens issued under the
+longer setting are still live: pass `--jwt-overlap-hours` covering 90% of the previous lifetime plus 1 h
+(the default is derived from the current setting only).
+
+It needs a sealed box (`secrets migrate` first) with no `platform-keys.json` and no rotated name in
+`.state/secrets.env`, and a healthy install. It takes a backup first (`--skip-backup` to skip), then
+rotates each key in this order. The backup is encrypted like every backup: pass
+`--encryption-key-file` (or set `SAM_BACKUP_KEY_FILE` in `.env`). Every new value exists only in sealed bundles; the journal
+(`.state/key-agent/rotation/journal.json`) holds names, phases, bundle ids and cursors, never a
+value. Before a key's first change its old values are sealed again to
+`.state/key-agent/rotation/<id>/<key>.before.json`: the rollback source, kept until you delete it.
+A dry run only reads: it creates no file or directory and takes no lock.
+
+Each step seals a new bundle, and every seal on the box keeps only the newest 3 bundles
+(`DEFAULT_KEPT_BUNDLES`, `scripts/selfhost/key-service.ts`), the same rule as every deploy. So a
+rotation removes the bundles that existed before it, including one sealed by another key provider
+before a `switch`. That is intended: the old values stay in the `*.before.json` snapshots and in
+backups, not in bundles the key agent would still open. The plan lists the bundles that will go and
+the summary (and `rotate --status`) lists the ones that went.
+
+After every deploy the run asks celld to adopt the version and checks the API's health, retrying
+for up to 30 s (`SELFHOST_ADOPT_CHECK_WINDOW_MS`, every `SELFHOST_HEALTH_POLL_INTERVAL_MS`), so a
+short celld stall while it adopts a version does not stop the run. A version still unhealthy after
+the window is rolled back as before. If a run stops anyway, `rotate --status` shows the step and the
+bundle it sealed, including the final reseal, and `rotate --resume` deploys that recorded bundle
+again.
+
+| Key                                                                                                 | How                                                                                                                                                                                                                                                                                                                                                                                                                              | Users notice                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Downtime                                    |
+| --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `agent-signing-key`                                                                                 | new bundle, deploy                                                                                                                                                                                                                                                                                                                                                                                                               | nothing (each Worker version verifies the agent with its own bundle's key)                                                                                                                                                                                                                                                                                                                                                                                                                            | none                                        |
+| `preview-signing-key`                                                                               | new value, deploy                                                                                                                                                                                                                                                                                                                                                                                                                | a file preview opened in the last 5 min stops loading; reopen it                                                                                                                                                                                                                                                                                                                                                                                                                                      | none                                        |
+| `deploy-signing-keys`                                                                               | new pair, deploy                                                                                                                                                                                                                                                                                                                                                                                                                 | deployment nodes take the new public key on their next heartbeat; a release fetched just before the switch can be refused once                                                                                                                                                                                                                                                                                                                                                                        | none                                        |
+| `vapid-keys`                                                                                        | new pair, deploy                                                                                                                                                                                                                                                                                                                                                                                                                 | push notifications stop on every browser subscribed before, until the user turns notifications off and on in Settings                                                                                                                                                                                                                                                                                                                                                                                 | none                                        |
+| `gateway-secret`                                                                                    | Worker accepts old and new; `gateway.env` gets the new value and Caddy, frps and sam-mx are recreated; Worker accepts only the new one                                                                                                                                                                                                                                                                                           | node tunnels reconnect (frpc retries by itself); open terminals and agent WebSockets reconnect                                                                                                                                                                                                                                                                                                                                                                                                        | a few seconds of HTTPS while Caddy restarts |
+| `encryption-key` (and `credential-encryption-key`, `library-encryption-key` if the bundle has them) | new key current, old key a read fallback; every stored value re-encrypted online in bounded pages through a loopback-only control endpoint; verified; then `rotate --resume` after the values it cannot reach have expired (at least 5 h 16 min: interaction details, bootstrap tokens); verified again; old key retired; chains `better-auth-secret` when `BETTER_AUTH_SECRET` was unset                                        | none while it runs, except a sign-out of everyone when it chains `better-auth-secret`. A git command started before the switch may need repeating; an exhaustive project-archive search continued across the switch starts over (its continuation cursor is signed with `ENCRYPTION_KEY`); a node being provisioned at that moment fails and is retried; a webhook delivery retried across the switch with the same `Idempotency-Key` is not recognised as a duplicate and can start a second task (its fingerprints stay on `ENCRYPTION_KEY` on purpose: they hash IP addresses and request bodies, which the old key could confirm offline) | none                                        |
+| `better-auth-secret`                                                                                | BetterAuth versioned secret; stored GitHub sign-in tokens re-encrypted; old secret retired                                                                                                                                                                                                                                                                                                                                       | every user is signed out once and signs in again                                                                                                                                                                                                                                                                                                                                                                                                                                                      | none                                        |
+| `jwt-keys`                                                                                          | new pair with its own `kid`, published alone in both JWKS documents; the Worker still accepts _callback_ tokens signed with the old key until `JWT_PUBLIC_KEY_PREVIOUS_UNTIL` (90% of the deployed `CALLBACK_TOKEN_EXPIRY_MS` plus 1 h, the latest point a VM agent renews: 23 h by default; `--jwt-overlap-hours` overrides it, `0` is a hard cut). Nodes get a new-key callback token on their next heartbeat; workspace tokens move when the VM agent renews them (by default at half their life). `rotate --resume` after the overlap removes the old key | nothing, if finished after the overlap. Terminal, preview and local-forward tokens are re-minted with the new key by the app. During the overlap whoever holds the old key can still forge a callback token; a hard cut (`0`) removes that and cuts every running node off (replace them)                                                                                                                                                                                                             | none                                        |
+
+`encryption-key` details. Rows are re-encrypted with compare-and-set on the exact value read, so a
+value saved meanwhile is never overwritten. Copies of a credential in `cc_credentials` are rewritten
+with the identical new value, and `nodes.placement_credential_fingerprint` moves with it (the
+plaintext is unchanged, so strict teardown still recognises the account). Library files keep their
+body; only the wrapped file key is rewritten, conditional on the object's etag. A value that opens
+under neither key is reported by table and id and never touched. The old key leaves the Worker only
+after a complete verification, run at that moment, finds nothing left under it; a value that was
+written under the old key after the first proof is migrated first. If verification fails three
+rounds, the same migration runs in reverse and the key rolls back; if even that cannot be proven the
+step stops as `blocked` with both keys readable. It first pins `TOKEN_HASH_KEY` to the current value,
+which changes nothing. When `BETTER_AUTH_SECRET` was unset (it then falls back to `ENCRYPTION_KEY`),
+the old key also signs every session: `rotate encryption-key` then runs `better-auth-secret` first in
+the same run (everyone signs in again once), so the old key never signs a session after the switch.
+If that step stops, the summary says the old key is not retired.
+Library files are written back only if the object store honours conditional get and put (checked
+before the first write; celld 0.6.3 does, `scripts/selfhost/live/key-rotation.live.test.ts`), and
+every file body is checked against its file key, so a damaged file is reported, never re-paired.
+Every retirement (this one and `better-auth-secret`, and a rollback too) first waits for requests
+still running on the previous version to finish: celld finishes them there, and they may write
+under the old value. That drain is the box's `CELLD_HANDLER_BUDGET_S` (default 300 s) plus 1 min.
+For `encryption-key` the value-lifetime wait below is added to it, in both directions, because such a
+late write to KV or a Durable Object then lives that long. A drain alone is waited out in the run. The wait before `rotate --resume` is the drain plus 5 h 16 min, or longer when the Worker's
+`ACP_INTERACTION_MAX_DEADLINE_MS`, `ACP_INTERACTION_SENSITIVE_PURGE_MS` or
+`BOOTSTRAP_TOKEN_TTL_SECONDS` say values outside D1 and R2 live longer (`--stored-lifetime-minutes`
+overrides it).
+Throughput: about 200-1000 values per second on celld's local SQLite (a large install with 100k
+values: a few minutes); library files are bound by the object store, a head, get and put each.
+
+Kept on purpose:
+
+- `TOKEN_HASH_KEY`, the HMAC key of API token, invite link and webhook URL lookups. Those tokens are
+  random values stored only as hashes (256-bit with the default `API_TOKEN_BYTES` and
+  `PROJECT_INVITE_TOKEN_BYTES` of 32; lowering either weakens this), so the key cannot recover or
+  forge one, and a new key would invalidate every token users hold. After a rotation it holds the old
+  `ENCRYPTION_KEY`, the value you may be rotating because it leaked: never use it for anything else.
+- `SAM_INSTALLATION_ID` (not a secret: it labels this install's VMs) and `AGENT_SIGN_IN_TRUST` (trust
+  configuration, no key).
+- Reverse-tunnel nodes created before the rotation (or during its request drain) keep their tunnel credential, an HMAC under the
+  old `ENCRYPTION_KEY`, until they are replaced: whoever holds that key and an old backup can still
+  log in to frps as them. The run counts them and says so at retirement; delete those nodes (SAM
+  provisions new ones on demand). Re-credentialing live nodes needs a VM-agent change
+  (`tasks/backlog/2026-11-13-selfhost-recredential-tunnel-nodes.md`).
+
+Not rotated by this command (the end of a run lists the ones your bundle holds):
+
+- GitHub App client secret, private key and webhook secret: GitHub, Settings, Developer settings,
+  GitHub Apps, your app ("Generate a new client secret", "Generate a private key", webhook secret).
+  Put the new value in `.state/secrets.env`, `pnpm selfhost:deploy`, then revoke the old one.
+- Google or GitLab OAuth client secrets: the provider console (Google Cloud, APIs & Services,
+  Credentials; GitLab, Applications), then `.state/secrets.env` or Admin settings, deploy.
+- SMTP password: at your relay, then `.state/secrets.env` or Admin settings, deploy.
+- R2 presign credential and the fleet bucket credential: a new scoped credential at your object
+  store, `.state/secrets.env` (or `.env` and `docker compose up -d` for the fleet one), then revoke.
+- Credentials users stored in SAM (cloud tokens, agent keys) are in old backups under the old key:
+  have users replace them at their providers.
+
+When every key is done the bundle is sealed once more without any transitional value, and the
+run says so. From then on the old copies `pnpm selfhost:secrets plaintext` lists hold only retired
+keys; deleting the backups taken before the rotation is worth doing (they still hold data encrypted
+under the old key). Code: `scripts/selfhost/rotate-run.ts` (steps in
+`rotate-steps.ts`, `rotate-steps-data.ts`), `apps/api/src/selfhost/key-rotation/` (Worker side,
+served only by the celld entry; Caddy refuses `/__sam-selfhost/*` publicly and strips the
+endpoint's auth header from every external request).
+
+Cloudflare installs are not changed by any of this: the read fallbacks are registered only by the
+celld entry, and every new variable is unset there. A Cloudflare operator could reuse the Worker
+side (`apps/api/src/selfhost/key-rotation/`: the passes take a D1 database, an R2 bucket and the
+keys) from their own entry point, with the previous key set as a Worker secret.
 
 ### Cloud key, one-time setup
 
@@ -797,8 +917,6 @@ push before creating replacements; an unvalidated deletion does not reserve spac
 
 Missing:
 
-- **Platform-key rotation**: deploy versions and backups made before a box was sealed keep its
-  platform keys in plaintext until rotation lands ([Old plaintext copies](#old-plaintext-copies)).
 - **Guided credential login** (sandboxed agent sign-in on the box).
 
 Do not put data on this box that you could not afford to lose or leak.

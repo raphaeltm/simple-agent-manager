@@ -141,7 +141,12 @@ export const D1_LOCATIONS: readonly D1Location[] = [
 ];
 
 /** `iv` columns that are deliberately not here, with the reason (checked by the same test). */
-export const NOT_ROTATED_IV_COLUMNS: Readonly<Record<string, string>> = {};
+export const NOT_ROTATED_IV_COLUMNS: Readonly<Record<string, string>> = {
+  // Not ciphertext: the IV of the credential row an ownership check last indexed
+  // (services/gcp-wif-pool-ownership-sql.ts). Re-encryption gives the row a new IV, so the next
+  // ownership check re-indexes it by decrypting under the current key; nothing to rewrite here.
+  'gcp_wif_pool_index.iv': 'index marker of the indexed ciphertext generation, not ciphertext',
+};
 
 /** The primary-key column a location is paged and written by. */
 export function locationIdColumn(location: D1Location): string {

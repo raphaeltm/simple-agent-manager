@@ -4,7 +4,7 @@ import { Plus, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { updateFileTags } from '../../lib/api';
-import { type FileWithTags,FOCUS_RING } from './types';
+import { type FileWithTags, FOCUS_RING } from './types';
 
 export interface TagEditorProps {
   file: FileWithTags;

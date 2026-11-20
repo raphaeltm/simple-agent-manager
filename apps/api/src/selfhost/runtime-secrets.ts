@@ -36,6 +36,11 @@
 import { log } from '../lib/logger';
 import { type JsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import {
+  enableSelfHostRotationScope,
+  setPreviousEncryptionKeys,
+} from '../services/encryption-key-fallback';
+import { type AesKeyEnv, previousKeyPairs } from './key-rotation/keys';
+import {
   encodeKeyAgentFrame,
   readFrame,
   RuntimeSecretsUnavailableError,
@@ -417,6 +422,9 @@ export async function loadRuntimeSecrets(env: KeyAgentEnv): Promise<RuntimeSecre
     loadedAt,
     openedAt: loadedAt - fetched.ageMs,
   };
+  // Every load, a background refresh of a resident Durable Object included, re-registers the
+  // rotation read fallback for the bundle it installed, so the map never lags the secrets.
+  registerRotationKeys({ ...fetched.secrets });
   return fetched.secrets;
 }
 
@@ -430,7 +438,22 @@ export function withRuntimeSecrets<E extends object>(env: E, secrets: RuntimeSec
     const existing = merged[name];
     if (existing === undefined || typeof existing === 'string') merged[name] = value;
   }
+  registerRotationKeys(merged);
   return merged as E;
+}
+
+/**
+ * Registers this bundle's previous AES keys, if a platform-key rotation is in progress
+ * (`<NAME>_PREVIOUS`, key-rotation/keys.ts), as the read fallback of `decrypt` / `decryptFile`
+ * (services/encryption-key-fallback.ts), and clears them when the bundle has none. Pure CPU: no
+ * I/O. Also turns on the rotation scope, so the JWT and BetterAuth rotation variables are
+ * honoured. Only this self-host module calls it, so on Cloudflare the scope stays off and the
+ * fallback map empty.
+ */
+export function registerRotationKeys(env: Record<string, unknown>): void {
+  enableSelfHostRotationScope();
+  if (typeof env.ENCRYPTION_KEY !== 'string') return;
+  setPreviousEncryptionKeys(previousKeyPairs(env as unknown as AesKeyEnv));
 }
 
 /** One refresh at a time for resident objects; its own timeout (exchange) always settles it. */

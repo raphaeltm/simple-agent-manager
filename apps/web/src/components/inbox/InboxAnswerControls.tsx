@@ -1,7 +1,7 @@
 import type { InboxItem } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
 import { MessageSquare, RefreshCw } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router';
 
 import { answerInboxItem } from '../../lib/api';
@@ -26,7 +26,6 @@ import {
 } from './inbox-actions';
 import {
   acknowledgeLabel,
-  canReplyToAgent,
   type InboxErrorActionModel,
   isAcknowledgeable,
   isIrreversibleApproval,
@@ -182,7 +181,10 @@ function StaleNotice({ onStale }: { onStale: () => void }) {
   );
 }
 
-/** A review ("Looks good") or a result ("Got it"), each with Reply. */
+/**
+ * A review ("Looks good") or a result ("Got it"). Anything more than that is a reply, written in
+ * the chat composer under the item, so there is one way to write to the agent.
+ */
 function AcknowledgeControls({
   item,
   handlers,
@@ -191,84 +193,15 @@ function AcknowledgeControls({
   handlers: InboxAnswerHandlers;
 }) {
   const { busy, error, send } = useInboxSend(item, handlers);
-  const ackLabel = acknowledgeLabel(item);
-  const [replying, setReplying] = useState(false);
-  const [text, setText] = useState('');
-  const replyRef = useRef<HTMLTextAreaElement>(null);
-  // The Reply button unmounts as the form mounts; keep keyboard and screen-reader focus with it.
-  useEffect(() => {
-    if (replying) replyRef.current?.focus();
-  }, [replying]);
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      {/* If the agent finishes while a reply is being written, the form gives way to Open chat;
-          the draft stays in state. */}
-      {replying && canReplyToAgent(item) ? (
-        <form
-          className="flex min-w-0 flex-col gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const reply = text.trim();
-            if (reply)
-              void send('reply', { answer: reply }, (r) => `Sent your reply${deliveryNote(r)}`);
-          }}
-        >
-          <label htmlFor={`reply-${item.ref}`} className="text-xs text-fg-muted">
-            Your reply
-          </label>
-          <textarea
-            ref={replyRef}
-            id={`reply-${item.ref}`}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            rows={2}
-            disabled={busy !== null}
-            className="w-full min-w-0 rounded-md border border-border-default bg-inset p-2 text-base text-fg-primary sm:text-sm"
-          />
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="submit"
-              size="sm"
-              disabled={!text.trim() || busy !== null}
-              className="min-h-11"
-            >
-              {busy === 'reply' ? 'Sending…' : 'Send reply'}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => setReplying(false)}
-              className="min-h-11"
-            >
-              Cancel
-            </Button>
-          </div>
-        </form>
-      ) : (
-        <div className="grid min-w-0 grid-cols-2 gap-2">
-          <Button
-            disabled={busy !== null}
-            onClick={() => void send('ack', {}, (r) => acknowledgeReceipt(item, r))}
-            className="min-h-11"
-          >
-            {busy === 'ack' ? 'Sending…' : ackLabel}
-          </Button>
-          {canReplyToAgent(item) ? (
-            <Button
-              variant="secondary"
-              disabled={busy !== null}
-              onClick={() => setReplying(true)}
-              className="min-h-11"
-            >
-              Reply
-            </Button>
-          ) : (
-            // The agent has finished, so a reply would reach no one: continue in the chat.
-            <OpenChatButton item={item} label="Open chat" />
-          )}
-        </div>
-      )}
+      <Button
+        disabled={busy !== null}
+        onClick={() => void send('ack', {}, (r) => acknowledgeReceipt(item, r))}
+        className="min-h-11 w-fit min-w-[9rem]"
+      >
+        {busy === 'ack' ? 'Sending…' : acknowledgeLabel(item)}
+      </Button>
       <ErrorLine error={error} />
     </div>
   );
@@ -343,7 +276,7 @@ function ErrorActionControls({
 }
 
 /**
- * The pinned answer area of an inbox item, chosen by `answerSpec.type` so every kind is handled
+ * The answer controls of an inbox item (inside the agent's newest turn), chosen by `answerSpec.type` so every kind is handled
  * generically. Every answer goes to the record the agent reads, through the slice A routes (the
  * secret form keeps its own route to the same request, so the value never enters a cache).
  */
@@ -356,6 +289,9 @@ export function InboxAnswerControls({
   permission: ReturnType<typeof useInboxPermissionDetail>;
   handlers: InboxAnswerHandlers;
 }) {
+  // A settled permission the person declined by replying: its conversation stays open for more
+  // replies, with no buttons (the request is no longer answerable).
+  if (item.status !== 'open' && item.canReply) return null;
   if (item.status !== 'open')
     return (
       <p role="status" className="m-0 text-sm text-fg-muted">
@@ -377,6 +313,9 @@ export function InboxAnswerControls({
   switch (spec.type) {
     case 'options':
     case 'text':
+      // Typed answers are replies, written in the composer under the item. The old free-text
+      // answer stays only where there is no composer (an item with no chat to reply in).
+      if (spec.type === 'text' && item.canReply) return null;
       return (
         <AttentionAnswerControls
           key={item.ref}
@@ -385,7 +324,7 @@ export function InboxAnswerControls({
           sessionId={item.sessionId ?? ''}
           markerId={item.ref}
           options={spec.type === 'options' ? spec.options : []}
-          allowCustom={spec.type === 'text' || spec.allowText}
+          allowCustom={!item.canReply && (spec.type === 'text' || spec.allowText)}
           submit={async (answer) => {
             try {
               const response = await answerInboxItem(item.projectId, item.ref, { answer });
@@ -421,7 +360,7 @@ export function InboxAnswerControls({
       return <ApprovalControls key={item.ref} item={item} handlers={handlers} />;
     case 'acknowledge':
       // Human tasks and SAM's own error items are read-only here until their slices ship
-      // (`hasPinnedControls` hides their strip); Open chat is in the top bar.
+      // (`hasAnswerControls` says so); Open chat is in the top bar.
       return isAcknowledgeable(item) ? (
         <AcknowledgeControls key={item.ref} item={item} handlers={handlers} />
       ) : null;

@@ -131,7 +131,8 @@ export interface InstallationNewMachineReasons {
   otherReasons: number;
 }
 
-export type InstallationLatencyIncidentState = 'pending' | 'dispatched' | 'claimed';
+/** Open incident states; `watching` is a defect triage chose to measure rather than fix now. */
+export type InstallationLatencyIncidentState = 'pending' | 'dispatched' | 'claimed' | 'watching';
 
 /** An open platform-feedback incident raised by the lifecycle latency watchdog or daily check. */
 export interface InstallationLatencyIncident {

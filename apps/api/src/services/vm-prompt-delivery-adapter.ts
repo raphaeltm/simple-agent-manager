@@ -14,6 +14,7 @@ import type { PromptDeliveryResult } from '../durable-objects/project-data/promp
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
 import { commitContainerWake } from './container-wake-commit';
+import { rejectInboxReplyPermission } from './inbox/reject-reply-permission';
 import { NodeAgentHttpError, sendPromptToAgentOnNode } from './node-agent';
 import { transferPromptAttachments } from './prompt-attachments';
 import { SubmitResponseSchema } from './vm-prompt-delivery-adapter-schemas';
@@ -71,6 +72,17 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         capabilities: VmPromptDeliveryCapabilities;
       }
   > {
+    // A permission reply must reject through the existing answer path before target
+    // resolution can wake an agent or submission can deliver the person's reason.
+    if (
+      input.claim.message.sourceKind === 'inbox_reply' &&
+      input.claim.message.metadata?.inboxReplyPermission !== undefined
+    ) {
+      const denied = await runSideEffectGuard(input);
+      if (denied) return denied;
+      const rejection = await rejectInboxReplyPermission(this.env, input);
+      if (rejection) return rejection;
+    }
     const resolution: TargetResolution = input.resolvedTarget
       ? { kind: 'ready', target: input.resolvedTarget }
       : await this.resolveTarget(input.projectId, input.claim.message.targetSessionId, input);

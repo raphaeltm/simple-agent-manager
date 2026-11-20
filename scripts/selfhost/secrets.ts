@@ -15,7 +15,12 @@
  *                             plaintext secrets (names and locations, never values). There is no
  *                             purge: celld forbids deleting under `deploy/` (finding F10), and
  *                             rotating the secrets, not deleting copies, is what makes them
- *                             worthless. Platform-key rotation is not available yet.
+ *                             worthless: run `rotate` (below).
+ *   rotate --all | <key> ... [--dry-run] [--skip-backup | --encryption-key-file <path>]
+ *          [--jwt-overlap-hours N] [--stored-lifetime-minutes N]
+ *   rotate --resume | --status
+ *                             replace platform keys (rotate-run.ts); --dry-run prints the plan
+ *                             and what users notice per key
  *
  * Every command prints names, paths, fingerprints and ids only: never a key or a secret value.
  */
@@ -32,6 +37,9 @@ import {
   scanDeployVersions,
   scanRemoteBackups,
 } from './plaintext-scan';
+import { boxRotateDeps } from './rotate-box-deps';
+import { formatRotationStatus } from './rotate-report';
+import { runRotate } from './rotate-run';
 import { assertPrivateFile, parseDotenv } from './secret-files';
 import { boxMigrateDeps, boxSwitchDeps } from './secrets-box-deps';
 import { describeKeyFile, verifyKeyCopy } from './secrets-keyfile';
@@ -51,6 +59,10 @@ const USAGE = `usage: pnpm selfhost:secrets <command> [--box-env <path>] [--stat
   reseal                    seal again with the same provider (new data key, current KEK)
   plaintext [--backups DIR|gs://...|s3://... ...]
                             read only: old deploy versions and backups holding plaintext secrets
+  rotate --all | <key> ... [--dry-run] [--skip-backup | --encryption-key-file <path>]
+         [--jwt-overlap-hours N] [--stored-lifetime-minutes N]
+  rotate --resume | --status
+                            replace platform keys; --dry-run prints the plan and what users notice
 
 Never prints a key or a secret value. deploy/selfhost/README.md has the details.`;
 
@@ -65,6 +77,14 @@ function parseCommandLine() {
         'key-copy': { type: 'string' },
         to: { type: 'string' },
         'dry-run': { type: 'boolean', default: false },
+        all: { type: 'boolean', default: false },
+        resume: { type: 'boolean', default: false },
+        status: { type: 'boolean', default: false },
+        'skip-backup': { type: 'boolean', default: false },
+        'jwt-overlap-hours': { type: 'string' },
+        'stored-lifetime-minutes': { type: 'string' },
+        // The backup a rotation takes first is encrypted like every backup (backup-lib.ts).
+        'encryption-key-file': { type: 'string' },
         help: { type: 'boolean', short: 'h', default: false },
       },
     });
@@ -81,6 +101,19 @@ const { values, positionals } = parseCommandLine();
 if (values.help) {
   console.log(USAGE);
   process.exit(0);
+}
+
+function positiveNumber(
+  value: string | undefined,
+  flag: string,
+  allowZero = false
+): number | undefined {
+  if (value === undefined) return undefined;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || (n === 0 && !allowZero)) {
+    throw new Error(`${flag} must be a ${allowZero ? 'non-negative' : 'positive'} number`);
+  }
+  return n;
 }
 
 const envFile = resolve(values['box-env'] ?? join(SELFHOST_DIR, '.env'));
@@ -162,6 +195,37 @@ try {
         locations.join(', ')
       );
       for (const line of lines) console.log(line);
+      break;
+    }
+    case 'rotate': {
+      if (values.status) {
+        for (const line of formatRotationStatus(stateDir)) console.log(line);
+        break;
+      }
+      const ctx = loadBox(
+        envFile,
+        values['state-dir'],
+        values['encryption-key-file']
+          ? resolve(process.env.INIT_CWD ?? process.cwd(), values['encryption-key-file'])
+          : undefined
+      );
+      await runRotate(
+        {
+          box,
+          stateDir,
+          names: positionals.slice(1),
+          all: values.all,
+          dryRun: values['dry-run'],
+          resume: values.resume,
+          skipBackup: values['skip-backup'],
+          jwtOverlapHours: positiveNumber(values['jwt-overlap-hours'], '--jwt-overlap-hours', true),
+          storedLifetimeMinutes: positiveNumber(
+            values['stored-lifetime-minutes'],
+            '--stored-lifetime-minutes'
+          ),
+        },
+        boxRotateDeps(ctx)
+      );
       break;
     }
     default:
