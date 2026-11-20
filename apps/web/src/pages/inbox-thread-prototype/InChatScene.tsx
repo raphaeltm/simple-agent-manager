@@ -1,20 +1,27 @@
 /**
- * PROTOTYPE ONLY: how an inbox side-chat shows up in the agent's own chat. The exchange happened
- * in the inbox, so the chat shows it folded into one card at the point it happened, instead of
- * splicing loose messages into the agent's main thread. Never ship to production.
+ * PROTOTYPE ONLY: an inbox reply as it lands in the agent's own chat. It is an ordinary chat
+ * message from the person; a small chip says which inbox item it is about and opens it. The
+ * agent then decides what to do (here: respond on the item). Never ship to production.
  */
 import { Pane } from '@simple-agent-manager/ui';
-import { ChevronDown, Inbox, MessageCircleQuestion } from 'lucide-react';
+import { Bot, FileImage, Inbox, MessageCircleQuestion, Wrench } from 'lucide-react';
 
 import { RenderedMarkdown } from '../../components/MarkdownRenderer';
-import { QUESTION_THREAD } from './mock-data';
-import { Thread } from './SideChat';
+import { QUESTION, QUESTION_REPLY_TEXT } from './mock-data';
 
 function AgentMessage({ text }: { text: string }) {
   return (
     <div className="min-w-0 text-[15px] text-fg-secondary">
       <RenderedMarkdown content={text} inline />
     </div>
+  );
+}
+
+function ToolLine({ text }: { text: string }) {
+  return (
+    <p className="m-0 flex items-center gap-1.5 text-xs text-fg-muted">
+      <Wrench size={12} aria-hidden="true" /> {text}
+    </p>
   );
 }
 
@@ -40,38 +47,46 @@ export function InChatScene() {
               className="mt-0.5 shrink-0 text-warning-fg"
             />
             <div className="min-w-0 flex-1">
-              <p className="m-0 text-xs text-fg-muted">Asked you in the inbox · paused on this</p>
+              <p className="m-0 text-xs text-fg-muted">Asked you in the inbox · 25m ago</p>
               <p className="m-0 text-sm font-medium break-words text-fg-primary">
-                Should the retry cap apply per node or per project?
+                {QUESTION.title}
               </p>
             </div>
           </div>
+          <ToolLine text="Ran tests · 2 files changed" />
 
-          {/* The side-chat, folded: one card at the point it happened, expandable. */}
-          <div className="flex min-w-0 flex-col gap-3 rounded-xl border border-[var(--sam-hairline)] px-3 py-3">
+          {/* The inbox reply: an ordinary message from the person, with a pointer chip. */}
+          <div className="flex min-w-0 flex-col items-end gap-1.5">
             <button
               type="button"
-              aria-expanded="true"
-              className="flex min-h-11 w-full min-w-0 cursor-pointer items-center gap-2 border-0 bg-transparent p-0 text-left"
+              className="flex min-h-9 max-w-[85%] cursor-pointer items-center gap-1.5 rounded-full border border-[var(--sam-hairline)] bg-transparent px-3 text-[12px] text-fg-secondary"
             >
-              <Inbox size={15} aria-hidden="true" className="shrink-0 text-fg-muted" />
-              <span className="min-w-0 flex-1 text-sm text-fg-primary">
-                <span className="font-medium">Side-chat from your inbox</span>
-                <span className="text-fg-muted"> · 3 messages · 12m ago</span>
-              </span>
-              <ChevronDown
-                size={16}
-                aria-hidden="true"
-                className="shrink-0 rotate-180 text-fg-muted"
-              />
+              <Inbox size={13} aria-hidden="true" className="shrink-0" />
+              <span className="min-w-0 truncate">Re: {QUESTION.title}</span>
             </button>
-            <Thread entries={QUESTION_THREAD} />
+            <div className="sam-raised max-w-[85%] rounded-2xl rounded-br-md px-3 py-2 text-[15px] break-words text-fg-primary">
+              {QUESTION_REPLY_TEXT}
+            </div>
+            <span className="flex max-w-[85%] items-center gap-1.5 rounded-lg border border-[var(--sam-hairline)] px-2.5 py-1.5 text-[13px] text-fg-secondary">
+              <FileImage size={14} aria-hidden="true" className="shrink-0" />
+              retry-graph-week-46.png
+            </span>
+            <span className="text-[11px] text-fg-muted">You · from the inbox · 12m</span>
           </div>
 
-          <p className="m-0 text-sm text-[var(--sam-status-success-fg)]">
-            You answered: Per project
-          </p>
-          <AgentMessage text="Switching the cap to per project. Existing nodes keep their counts, as discussed. Pushing now." />
+          <div className="flex min-w-0 items-start gap-2.5">
+            <span
+              aria-hidden="true"
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[var(--sam-person-auto)] text-[var(--sam-separator)]"
+            >
+              <Bot size={15} />
+            </span>
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <ToolLine text="Read retry-graph-week-46.png · read 3 files" />
+              <AgentMessage text="Good question. It changes the answer slightly, so I've responded on the inbox item and I'm waiting there for your decision." />
+              <ToolLine text="Responded on the inbox item" />
+            </div>
+          </div>
         </div>
       </Pane>
     </>

@@ -1,8 +1,8 @@
 /**
- * PROTOTYPE ONLY: /prototype/inbox-thread?scene=<scene>. An inbox item as a short conversation
- * with the agent that filed it: ask it to clarify, answer in your own words, add follow-ups,
- * ask about a secret it requested. Built from the real inbox components with mock data.
- * Never ship to production.
+ * PROTOTYPE ONLY: /prototype/inbox-thread?scene=<scene>. Replying to an inbox item works like
+ * sending a message in the agent's chat, with a pointer to the item. Once you reply, the item
+ * leaves your inbox until the agent responds on it or changes the ask. Built from the real
+ * inbox and chat components with mock data. Never ship to production.
  */
 import type { InboxItem } from '@simple-agent-manager/shared';
 import { Button, IconButton, Pane } from '@simple-agent-manager/ui';
@@ -17,62 +17,92 @@ import {
 import { type ReactNode, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
-import { buildRows } from '../../components/inbox/inbox-model';
+import { buildRows, type InboxView } from '../../components/inbox/inbox-model';
 import { InboxFilterBar } from '../../components/inbox/InboxFilterBar';
+import { InboxReceiptLine } from '../../components/inbox/InboxItemView';
 import { InboxRow } from '../../components/inbox/InboxRow';
 import { SecretRequestForm } from '../../components/project-message-view/tool-cards/SecretRequestForm';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { InChatScene } from './InChatScene';
 import {
-  ANSWERED_THREAD,
   LIST_ITEMS,
-  LONG_QUESTION,
   PROTO_NOW,
   QUESTION,
   QUESTION_THREAD,
   RESULT,
-  RESULT_THREAD,
-  REVIEW,
-  REVIEW_THREAD,
   SECRET,
   SECRET_REQUEST,
   SECRET_THREAD,
   type ThreadEntry,
+  WITH_AGENT_ITEMS,
 } from './mock-data';
-import { AskTurn, MessageBox, Thread, ThreadRowHint } from './SideChat';
+import { AskTurn, ItemComposer, Thread, ThreadRowHint } from './SideChat';
 
 const noop = () => undefined;
 
-/** Per-row conversation hint, keyed by item ref. */
-const ROW_HINTS: Record<string, ReactNode> = {
-  [QUESTION.ref]: (
-    <ThreadRowHint unread tone="active" text="Agent: They keep their count… I’d go per project." />
-  ),
-  [SECRET.ref]: <ThreadRowHint unread tone="active" text="Agent: They live per project, not…" />,
-  [REVIEW.ref]: <ThreadRowHint text="You asked · agent is looking" />,
-  [RESULT.ref]: <ThreadRowHint text="2 follow-ups · 1 working, 1 queued" />,
-};
+type ListState = 'before' | 'sent' | 'back' | 'archived';
 
-function ListPane({ selectedRef }: { selectedRef: string | null }) {
-  const rows = buildRows(LIST_ITEMS);
+/** Row hints per list state, keyed by item ref. */
+function rowHints(state: ListState): Record<string, ReactNode> {
+  if (state === 'archived')
+    return {
+      [QUESTION.ref]: <ThreadRowHint text="You replied 2m ago · with the agent" />,
+      [RESULT.ref]: <ThreadRowHint text="You replied 30m ago · agent is working on it" />,
+    };
+  if (state === 'back')
+    return {
+      [QUESTION.ref]: (
+        <ThreadRowHint unread tone="active" text="Agent responded: They keep their count…" />
+      ),
+      [SECRET.ref]: (
+        <ThreadRowHint unread tone="active" text="Agent responded: They live per project…" />
+      ),
+    };
+  return {};
+}
+
+function listItems(state: ListState): InboxItem[] {
+  if (state === 'archived') return WITH_AGENT_ITEMS;
+  if (state === 'sent') return LIST_ITEMS.filter((item) => item.ref !== QUESTION.ref);
+  if (state === 'back')
+    // Back on top: the agent's response is the newest thing on the item.
+    return [QUESTION, ...LIST_ITEMS.filter((item) => item.ref !== QUESTION.ref)];
+  return LIST_ITEMS;
+}
+
+function ListPane({ state, selectedRef }: { state: ListState; selectedRef: string | null }) {
+  const rows = buildRows(listItems(state));
+  const hints = rowHints(state);
   return (
-    <ul className="m-0 flex flex-col gap-1 p-2" aria-label="Items">
-      {rows.map((row) => {
-        const ref = row.type === 'item' ? row.item.ref : row.items[0]?.ref;
-        return (
-          <InboxRow
-            key={row.key}
-            row={row}
-            selectedRef={selectedRef}
-            showProject={false}
-            now={PROTO_NOW}
-            onOpen={noop}
-          >
-            {ref ? ROW_HINTS[ref] : null}
-          </InboxRow>
-        );
-      })}
-    </ul>
+    <>
+      {state === 'sent' && (
+        <InboxReceiptLine
+          receipt={{
+            id: 1,
+            tone: 'success',
+            text: 'Sent to the agent’s chat. This comes back if it responds.',
+            onUndo: noop,
+          }}
+        />
+      )}
+      <ul className="m-0 flex flex-col gap-1 p-2" aria-label="Items">
+        {rows.map((row) => {
+          const ref = row.type === 'item' ? row.item.ref : row.items[0]?.ref;
+          return (
+            <InboxRow
+              key={row.key}
+              row={row}
+              selectedRef={selectedRef}
+              showProject={false}
+              now={PROTO_NOW}
+              onOpen={noop}
+            >
+              {ref ? hints[ref] : null}
+            </InboxRow>
+          );
+        })}
+      </ul>
+    </>
   );
 }
 
@@ -96,7 +126,6 @@ function ItemTopBar() {
   );
 }
 
-/** Inline answer controls, sized for a message rather than a pinned bar. */
 function OptionOffers({ options }: { options: string[] }) {
   return (
     <div className="flex min-w-0 flex-wrap gap-2">
@@ -106,14 +135,6 @@ function OptionOffers({ options }: { options: string[] }) {
         </Button>
       ))}
     </div>
-  );
-}
-
-function AckOffer({ label }: { label: string }) {
-  return (
-    <Button variant="raised" size="sm">
-      {label}
-    </Button>
   );
 }
 
@@ -131,20 +152,19 @@ function SecretOffer() {
   );
 }
 
-/** One item as a conversation: the ask, the thread, and the message box pinned below. */
+/** One open item: the ask, what happened on it since, and the chat composer pinned below. */
 function ItemConversation({
   item,
   thread = [],
   offers,
-  pending,
-  box,
+  draft,
+  attachmentNames,
 }: {
   item: InboxItem;
   thread?: ThreadEntry[];
-  /** The item's answer controls; drawn on the ask, or on the latest agent turn that offers them. */
   offers?: ReactNode;
-  pending?: string;
-  box?: ReactNode;
+  draft?: string;
+  attachmentNames?: string[];
 }) {
   // Scrolled into the conversation: the ask stays visible as one sticky line.
   const [scrolled, setScrolled] = useState(false);
@@ -166,81 +186,56 @@ function ItemConversation({
         )}
         <div className="mx-auto flex w-full max-w-[680px] min-w-0 flex-col gap-5 px-4 py-4">
           <AskTurn item={item} offers={offerMovedDown ? undefined : offers} />
-          <Thread entries={thread} offers={offers} pending={pending} />
+          <Thread entries={thread} offers={offers} />
         </div>
       </div>
-      <div className="shrink-0 border-t border-[var(--sam-hairline)] px-4 py-3">
-        <div className="mx-auto w-full max-w-[680px] min-w-0">{box ?? <MessageBox />}</div>
+      <div className="shrink-0 border-t border-[var(--sam-hairline)]">
+        <div className="mx-auto w-full max-w-[712px] min-w-0 px-1 py-1">
+          <ItemComposer draft={draft} attachmentNames={attachmentNames} />
+        </div>
       </div>
     </>
   );
 }
 
-const SCENES = {
-  fresh: () => (
+const ITEM_SCENES = {
+  open: () => (
     <ItemConversation
-      item={LONG_QUESTION}
-      offers={<OptionOffers options={['Recreate it', 'Keep and re-grant']} />}
+      item={QUESTION}
+      offers={<OptionOffers options={['Per node', 'Per project']} />}
     />
   ),
-  question: () => (
+  compose: () => (
+    <ItemConversation
+      item={QUESTION}
+      offers={<OptionOffers options={['Per node', 'Per project']} />}
+      draft="What happens to nodes that are already mid-retry if we switch to per project? Screenshot of the retry graph from last week attached."
+      attachmentNames={['retry-graph-week-46.png']}
+    />
+  ),
+  responded: () => (
     <ItemConversation
       item={QUESTION}
       thread={QUESTION_THREAD}
       offers={<OptionOffers options={['Per node', 'Per project']} />}
     />
   ),
-  answered: () => (
-    <ItemConversation
-      item={{ ...QUESTION, status: 'answered', agentState: 'working' }}
-      thread={ANSWERED_THREAD}
-      box={<MessageBox placeholder="Anything else about this?" />}
-    />
-  ),
   secret: () => <ItemConversation item={SECRET} thread={SECRET_THREAD} offers={<SecretOffer />} />,
-  'secret-guard': () => (
-    <ItemConversation
-      item={SECRET}
-      thread={SECRET_THREAD}
-      offers={<SecretOffer />}
-      box={<MessageBox guard />}
-    />
-  ),
-  thinking: () => (
-    <ItemConversation
-      item={REVIEW}
-      thread={REVIEW_THREAD}
-      offers={<AckOffer label="Looks good" />}
-      pending="Opening the Insights page with an empty project…"
-    />
-  ),
-  followup: () => (
-    <ItemConversation
-      item={RESULT}
-      thread={RESULT_THREAD}
-      offers={<AckOffer label="Got it" />}
-      box={<MessageBox placeholder="Ask, or add more work…" />}
-    />
-  ),
 } satisfies Record<string, () => ReactNode>;
 
-type ItemScene = keyof typeof SCENES;
-
-const SCENE_SELECTED: Record<ItemScene, string> = {
-  fresh: LONG_QUESTION.ref,
-  question: QUESTION.ref,
-  answered: QUESTION.ref,
-  secret: SECRET.ref,
-  'secret-guard': SECRET.ref,
-  thinking: REVIEW.ref,
-  followup: RESULT.ref,
+type ItemScene = keyof typeof ITEM_SCENES;
+const LIST_SCENES: Record<string, ListState> = {
+  list: 'before',
+  sent: 'sent',
+  back: 'back',
+  archived: 'archived',
 };
 
 function isItemScene(scene: string): scene is ItemScene {
-  return scene in SCENES;
+  return scene in ITEM_SCENES;
 }
 
-function PageHeader() {
+function PageHeader({ view }: { view: InboxView }) {
   return (
     <Pane
       as="header"
@@ -252,9 +247,9 @@ function PageHeader() {
         <p className="m-0 mt-0.5 text-sm text-fg-muted">What your agents need from you in SAM.</p>
       </div>
       <InboxFilterBar
-        value="needs_you"
+        value={view}
         onChange={noop}
-        counts={{ needs_you: 7, blocking: 3, updates: 3 }}
+        counts={{ needs_you: view === 'archived' ? 6 : 7, blocking: 3, updates: 3 }}
       />
     </Pane>
   );
@@ -273,41 +268,46 @@ export function InboxThreadPrototype() {
   const [params] = useSearchParams();
   const scene = params.get('scene') ?? 'list';
   const isMobile = useIsMobile();
+  const listState = LIST_SCENES[scene] ?? 'before';
+  const view: InboxView = listState === 'archived' ? 'archived' : 'needs_you';
 
   let content: ReactNode;
-  if (scene === 'in-chat') {
+  if (scene === 'chat') {
     content = <InChatScene />;
   } else if (isMobile) {
     content = isItemScene(scene) ? (
       <Pane className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label="Inbox item">
-        {SCENES[scene]()}
+        {ITEM_SCENES[scene]()}
       </Pane>
     ) : (
       <>
         <MobileAppBar />
-        <PageHeader />
+        <PageHeader view={view} />
         <Pane
           className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto"
           aria-label="Inbox list"
         >
-          <ListPane selectedRef={null} />
+          <ListPane state={listState} selectedRef={null} />
         </Pane>
       </>
     );
   } else {
-    const itemScene: ItemScene = isItemScene(scene) ? scene : 'question';
+    const itemScene: ItemScene = isItemScene(scene) ? scene : 'open';
+    const selected = itemScene === 'secret' ? SECRET.ref : QUESTION.ref;
+    const deskList: ListState =
+      itemScene === 'responded' || itemScene === 'secret' ? 'back' : listState;
     content = (
       <>
-        <PageHeader />
+        <PageHeader view={view} />
         <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,360px)_minmax(0,1fr)] gap-[var(--sam-space-gutter)]">
           <Pane
             className="relative flex min-h-0 min-w-0 flex-col overflow-y-auto"
             aria-label="Inbox list"
           >
-            <ListPane selectedRef={SCENE_SELECTED[itemScene]} />
+            <ListPane state={deskList} selectedRef={selected} />
           </Pane>
           <Pane className="flex min-h-0 min-w-0 flex-col" aria-label="Inbox item">
-            {SCENES[itemScene]()}
+            {ITEM_SCENES[itemScene]()}
           </Pane>
         </div>
       </>

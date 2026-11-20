@@ -168,59 +168,35 @@ export const LIST_ITEMS: InboxItem[] = [
 ];
 
 /**
- * One turn in an item's conversation. The ask itself is the first agent turn (rendered from the
- * item). `offers` puts the item's answer controls on this turn: the decision follows the
- * conversation down instead of being pinned. `note` is what SAM understood the person's message
- * to be, inferred from the message itself (no mode switch).
+ * What the inbox item shows below the ask. A reply is a chat message in the agent's session
+ * (shown here because it points at this item); an agent response is something the agent posted
+ * on the item. `offers` puts the item's answer controls on that response, so there is one copy.
  */
 export type ThreadEntry =
-  | {
-      kind: 'you';
-      id: string;
-      text: string;
-      at: string;
-      note?: { text: string; undo?: boolean };
-    }
+  | { kind: 'you'; id: string; text: string; at: string; attachments?: string[] }
   | { kind: 'agent'; id: string; text: string; at: string; offers?: boolean }
-  | { kind: 'activity'; id: string; text: string; at: string }
-  | {
-      kind: 'followup';
-      id: string;
-      text: string;
-      at: string;
-      state: 'queued' | 'started' | 'done';
-      route: 'this-agent' | 'new-task';
-      chatLabel?: string;
-    };
+  | { kind: 'activity'; id: string; text: string; at: string };
+
+export const QUESTION_REPLY_TEXT =
+  'What happens to nodes that are already mid-retry if we switch to per project? Screenshot of the retry graph from last week attached.';
 
 export const QUESTION_THREAD: ThreadEntry[] = [
   {
     kind: 'you',
     id: 't1',
-    text: 'What happens to nodes that are already mid-retry if we switch to per project?',
+    text: QUESTION_REPLY_TEXT,
     at: ago(12),
+    attachments: ['retry-graph-week-46.png'],
   },
-  { kind: 'activity', id: 't2', text: 'Read 3 files · ran 1 query on staging', at: ago(11) },
   {
     kind: 'agent',
     id: 't3',
     text:
       'They keep their count. The cap is checked **before the next attempt**, so a node at 3/5 ' +
-      'just becomes one of the project’s 5. The most nodes any project had retrying at once this ' +
-      'month was **4**, so per project costs almost nothing. I’d go per project.',
+      'just becomes one of the project’s 5. Your graph peaks at **4** nodes retrying at once, so ' +
+      'per project costs almost nothing. I’d go per project.',
     at: ago(10),
     offers: true,
-  },
-];
-
-export const ANSWERED_THREAD: ThreadEntry[] = [
-  ...QUESTION_THREAD,
-  {
-    kind: 'you',
-    id: 't4',
-    text: 'Ok, per project. But log a warning whenever a project hits the cap.',
-    at: ago(1),
-    note: { text: 'Answered: Per project, and log a warning at the cap', undo: true },
   },
 ];
 
@@ -239,66 +215,14 @@ export const SECRET_THREAD: ThreadEntry[] = [
       '1. Open [console.hetzner.cloud](https://console.hetzner.cloud) and pick the **SAM staging** project.\n' +
       '2. **Security → API tokens → Generate API token**.\n' +
       '3. Name it `sam-firewall-test`, choose **Read & Write**, and copy it. Hetzner shows it only once.\n\n' +
-      'Paste it below. It goes straight to the project’s secret store, never into this chat.',
+      'Paste it below. It goes straight to the project’s secret store, never into the chat.',
     at: ago(5),
     offers: true,
   },
 ];
 
-export const RESULT_THREAD: ThreadEntry[] = [
-  {
-    kind: 'you',
-    id: 'r1',
-    text: 'Nice. Did the other two flaky tests have the same race?',
-    at: ago(70),
-  },
-  {
-    kind: 'agent',
-    id: 'r2',
-    text: 'One did (`staging-lease.test.ts`). The other is a real timeout on a slow runner, different cause.',
-    at: ago(64),
-  },
-  {
-    kind: 'you',
-    id: 'r3',
-    text: 'Fix the lease one too, separately.',
-    at: ago(61),
-    note: { text: 'Started as a new task' },
-  },
-  {
-    kind: 'followup',
-    id: 'r4',
-    text: 'Fix the same race in staging-lease.test.ts',
-    at: ago(60),
-    state: 'started',
-    route: 'new-task',
-    chatLabel: 'Fix lease race in staging-lease test',
-  },
-  {
-    kind: 'you',
-    id: 'r5',
-    text: 'And add a note to the CI troubleshooting guide: wait on lease events, never sleep.',
-    at: ago(2),
-    note: { text: 'Follow-up for this agent. It was finished, so this wakes it.' },
-  },
-  {
-    kind: 'followup',
-    id: 'r6',
-    text: 'Add a note to the CI troubleshooting guide about waiting on lease events, not sleeps',
-    at: ago(2),
-    state: 'queued',
-    route: 'this-agent',
-  },
+/** Items the person replied to and the agent has not responded to yet (Archived view). */
+export const WITH_AGENT_ITEMS: InboxItem[] = [
+  { ...QUESTION, status: 'archived', agentState: 'working', updatedAt: ago(2) },
+  { ...RESULT, status: 'archived', updatedAt: ago(30) },
 ];
-
-export const REVIEW_THREAD: ThreadEntry[] = [
-  {
-    kind: 'you',
-    id: 'v1',
-    text: 'What does it show for a brand new project with zero tasks?',
-    at: ago(20),
-  },
-];
-
-/** What the person pasted into the message box in the secret-guard scene (fake). */
-export const PASTED_TOKEN = 'here it is: hc_test_0000000000000000000000000000000000';
