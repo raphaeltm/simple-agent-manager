@@ -182,6 +182,11 @@ export interface FencePlanInput {
   serviceEndpoints?: FenceEndpoint[];
   /** This host's interface addresses (os.networkInterfaces()). */
   localAddresses?: string[];
+  /**
+   * The key agent's loopback port on a box that seals its secrets (key-box.ts
+   * sealedKeyAgentPort), else null: the Worker reaches the agent there over a raw socket.
+   */
+  keyAgentPort?: number | null;
 }
 
 /**
@@ -211,6 +216,7 @@ export function buildFencePlan({
   objectStore,
   serviceEndpoints = [],
   localAddresses,
+  keyAgentPort,
 }: FencePlanInput): EgressFencePlan {
   const loopbackPorts: number[] = [];
   const endpoints: FenceEndpoint[] = [];
@@ -229,6 +235,15 @@ export function buildFencePlan({
       throw new Error('metadata proxy port must be outside the node tunnel lease range');
     }
     loopbackPorts.push(port);
+  }
+  // The key agent (key-service.ts), only on a sealed box. The agent refuses every peer uid but
+  // celld's and answers only its framed protocol, so opening the port lets in nothing else.
+  if (keyAgentPort !== undefined && keyAgentPort !== null) {
+    // A node's frpc can lease a port in the range: it must never be able to answer as the agent.
+    if (inRange(keyAgentPort, leaseRange)) {
+      throw new Error(`SAM_KEY_AGENT_PORT ${keyAgentPort} is inside the node lease port range`);
+    }
+    loopbackPorts.push(keyAgentPort);
   }
   const dnsServers = parseNameservers(resolvConf);
   if (dnsServers.length === 0) throw new Error('no nameserver in resolv.conf; celld needs DNS');

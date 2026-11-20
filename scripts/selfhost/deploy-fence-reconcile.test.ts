@@ -96,9 +96,12 @@ describe(
       ]);
     });
 
+    // Stops at the plaintext path's secrets check, which runs after reconciliation (a sealed box
+    // checks secrets.env while sealing, before it).
     it('ordinary deploy reloads env-only changes into proxy and celld without recreating the fence', async () => {
-      expect((await init()).status).toBe(0);
+      expect((await init(['SAM_KEY_PROVIDER=legacy-plaintext'])).status).toBe(0);
       envFile = writeBox(dir, [
+        'SAM_KEY_PROVIDER=legacy-plaintext',
         'COMPOSE_PROFILES=tunnel,gce',
         'CELLD_BUCKET=gs://fleet-bucket',
         'GCE_METADATA_PROXY_SCOPES=https://www.googleapis.com/auth/devstorage.read_only',

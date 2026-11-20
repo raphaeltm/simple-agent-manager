@@ -17,6 +17,7 @@ import {
   resolveObjectStoreEndpoints,
 } from './egress-fence.js';
 import { mailEgressEndpoints } from './mail-settings.js';
+import { sealedKeyAgentPort } from './key-box.js';
 import { writePrivateFile } from './secret-files.js';
 
 /** Compose profile that runs the metadata token proxy. */
@@ -86,6 +87,7 @@ export async function writeFenceFiles(input: {
       .flat()
       .map((entry) => entry?.address ?? '')
       .filter(Boolean),
+    keyAgentPort: sealedKeyAgentPort(box, stateDir),
   });
   const rulesPath = join(stateDir, 'egress-fence.nft');
   const rules = renderFenceRuleset(plan);

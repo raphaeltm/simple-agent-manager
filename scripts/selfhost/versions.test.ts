@@ -24,6 +24,7 @@ const LOCAL: Record<string, string> = {
   'sam-selfhost-sam-mx:local': 'sam-mx/Dockerfile',
   'sam-selfhost-egress-fence:local': 'egress-fence/Dockerfile',
   'sam-selfhost-metadata-proxy:local': 'metadata-proxy/Dockerfile',
+  'sam-selfhost-key-agent:local': 'key-agent/Dockerfile',
 };
 
 describe('pinned versions', () => {

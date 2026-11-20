@@ -10,6 +10,7 @@ One Linux VM runs the whole control plane with Docker Compose (`docker-compose.y
 | Service          | What it does                                                                |
 | ---------------- | --------------------------------------------------------------------------- |
 | `celld`          | Runs the API Worker and serves the web UI, on `127.0.0.1:8080`              |
+| `key-agent`      | Opens the sealed Worker secrets for celld only ([Sealed secrets](#sealed-secrets)) |
 | `caddy`          | TLS on 80/443 for `*.SAM_DOMAIN`, proxies to celld; carries node WebSockets |
 | `frps`           | Reverse tunnels from workspace nodes (profile `tunnel`), loopback only      |
 | `objectstore`    | Bundled MinIO for trials (profile `local-store`)                            |
@@ -50,13 +51,14 @@ From the repository root on the VM:
    the directory first with `mkdir -m 700 deploy/selfhost/.state`), for
    example `SMTP_PASSWORD=...` and `BOOTSTRAP_OWNER_EMAIL=you@example.com`. With an owner email set,
    only that address can claim the new install by signing in with an emailed code.
-4. `pnpm selfhost:deploy --init`: generates the platform keys (`.state/platform-keys.json`; back
-   it up), `.state/gateway.env` (the reverse-tunnel gateway secret and lease port range) and the
-   mail-collector files. Set `COMPOSE_PROJECT_NAME` in `.env` to the installation-specific name
-   this command prints, before running Compose. Keep that name with this install; another install
+4. `pnpm selfhost:deploy --init`: chooses the key provider and seals newly generated platform keys
+   into `.state/key-agent/bundles/` ([Sealed secrets](#sealed-secrets); no key setup needed),
+   writes `.state/gateway.env` (the reverse-tunnel gateway secret and lease port range), the key
+   agent's `agent.env` and the mail-collector files. Set `COMPOSE_PROJECT_NAME` and
+   `SAM_KEY_AGENT_UID` in `.env` to the two lines this command prints, before running Compose. Keep that name with this install; another install
    needs its own state directory and project name. Run init again after changing the port range
    or turning a profile on (`scripts/selfhost/install-record.ts:expectedComposeProjectFor`).
-5. `(cd deploy/selfhost && docker compose build)`: builds the local images (`egress-fence`, `gce-metadata-proxy`, `caddy`, and
+5. `(cd deploy/selfhost && docker compose build)`: builds the local images (`egress-fence`, `key-agent`, `gce-metadata-proxy`, `caddy`, and
    `sam-mx` when `mail-in` is on). See [Image builds](#image-builds).
 6. `(cd deploy/selfhost && docker compose up -d)`. Run compose from `deploy/selfhost/`, as every
    compose command in this README assumes: there it reads `.env`, including any `COMPOSE_FILE`
@@ -95,9 +97,181 @@ From the repository root on the VM:
 
 `pnpm selfhost:deploy --dry-run` prints the Worker configuration it would deploy, secrets redacted.
 
+## Sealed secrets
+
+On by default. The deploy passes celld no secret: it seals the platform keys and `secrets.env`
+into `.state/key-agent/bundles/<id>.json` (AES-256-GCM under a random data key, the data key
+wrapped by a key provider), and the Worker gets them at runtime from the `key-agent` service.
+The deployed vars carry only `SAM_KEY_AGENT_ADDRESS` (`127.0.0.1:SAM_KEY_AGENT_PORT`, 7190), the
+bundle id and the agent's public verify key, so the bucket's `deploy/` manifests hold no secret.
+If the agent is down the API answers 503 `SECRETS_UNAVAILABLE` (`docker compose ps key-agent`).
+Code: `scripts/selfhost/key-service.ts`, `scripts/selfhost/key-choice.ts`,
+`deploy/selfhost/key-agent/`, `apps/api/src/selfhost/runtime-secrets.ts`.
+
+**The channel.** The Worker connects to the agent with a raw TCP socket (`cloudflare:sockets`),
+not `fetch`, and speaks a framed protocol whose first byte is NUL. No HTTP request can start that
+way, so nothing the Worker can be made to fetch (any URL, headers, body, redirect or DNS answer)
+can ask the agent for secrets. The agent also answers only celld's uid (checked in
+`/proc/net/tcp`), and signs every answer over the Worker's nonce with a key sealed in the bundle,
+so a process that takes the port while the agent is down cannot answer as it. Each fresh Worker
+isolate pays one loopback round trip; the agent keeps an opened bundle for 300 s, serves that copy
+while an unreachable or slow key service is retried (`SAM_KEY_AGENT_STALE_WAIT_MS`, 1000 ms), and
+drops it when the key service refuses.
+
+**The agent runs as the owner of `.state`**, from the start: never root, no capabilities, a
+read-only root file system. Docker Compose takes the uid from `SAM_KEY_AGENT_UID` in `.env`;
+`--init` prints the line (`id -u` of the user that owns `.state`) and every sealing deploy refuses
+a missing or different value. The deploy never edits `.env`.
+
+**Which key provider.** `pnpm selfhost:deploy --init` chooses once, records the choice and why in
+`.state/key-agent/choice.json`, and every deploy prints it (`key provider: file (...)`).
+`pnpm selfhost:secrets status` shows it later with the key reference and the bundles (never key
+material). The automatic choice: bundles already on the box decide; otherwise `--init` asks the
+instance metadata services which cloud this VM is on (Google, AWS IMDSv2, Azure IMDS,
+`SAM_METADATA_PROBE_TIMEOUT_MS`, default 1500 ms each), tries this install's cloud key through the
+VM's own identity (the key in `.env`, else the conventional one below) and takes it only if a real
+wrap and unwrap succeeds. It falls back to a key file on the box only when nothing better was set
+up, and never to a weaker key by itself: a configured key that fails, or a key that exists but
+cannot be used, stops `--init` with the reason (`sealingFloorRefusal` in `key-choice.ts`).
+`SAM_KEY_PROVIDER` in `.env` overrides the choice:
+
+| `SAM_KEY_PROVIDER` | Key                                                                                   | Settings                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| unset (default)    | chosen by `--init`                                                                    |                                                                                                |
+| `file`             | 32 bytes in `.state/key-agent/kek`, created at the first seal                         |                                                                                                |
+| `gcp-kms`          | Cloud KMS key, the VM's service account                                               | `SAM_GCP_KMS_KEY`                                                                              |
+| `aws-kms`          | KMS symmetric key, the instance role through IMDSv2; **not yet run against real AWS** | `SAM_AWS_KMS_KEY_ID`, `SAM_AWS_KMS_REGION`                                                     |
+| `azure-kv`         | Key Vault key, the VM's managed identity; **not yet run against real Azure**          | `SAM_AZURE_KEY_VAULT_URL`, `SAM_AZURE_KEY_NAME`                                                |
+| `transit`          | Vault or OpenBao transit key, off the box                                             | `SAM_TRANSIT_ADDR`, `SAM_TRANSIT_KEY`, `SAM_TRANSIT_ROLE_ID` (secret id in `credentials/`)    |
+| `legacy-plaintext` | **none: LEGACY.** Every Worker secret is a deploy var, in plaintext in the bucket     |                                                                                                |
+
+**A box sealed with the file key can never be replaced or rebuilt on another machine.** The key
+that opens its bundles exists only on that box, and backups leave it out
+(`.state/key-agent/kek` and `.state/key-agent/credentials/` are excluded). Keep a copy off the box
+(`pnpm selfhost:secrets key-file` prints where it is and its fingerprint,
+`pnpm selfhost:secrets verify-key-copy <path>` checks a copy; neither prints the key): without it,
+losing the box loses every stored credential. To make a box replaceable, seal with a key held off
+it (a cloud key or Vault): `pnpm selfhost:secrets switch --to auto` after the one-time setup below.
+`pnpm selfhost:secrets status` says the same on a file-key box.
+
+**Removing a sealed value.** Each deploy lays `secrets.env` over the newest bundle, so deleting a
+line does not remove a value sealed before. Delete the line, then deploy once with
+`pnpm selfhost:deploy --unset NAME` (repeat `--unset` for more). It refuses a name still in
+`secrets.env` and SAM's own generated keys. The two older bundles kept for rollback, and any
+backup, still hold the value until later seals replace them.
+
+**Switching providers** is never a silent change at a deploy:
+
+```bash
+pnpm selfhost:secrets switch --to auto --dry-run    # or --to gcp-kms|aws-kms|azure-kv|transit|file
+pnpm selfhost:secrets switch --to auto
+pnpm selfhost:secrets reseal                        # same provider: new data key, current KEK version
+```
+
+It opens the secrets with the current provider, checks the target with a round trip, seals them
+with it and moves the install over; while the new Worker version deploys, the agent opens each
+bundle with the provider its header names. If the first request to the new version is not healthy
+it restores the previous provider and redeploys (`scripts/selfhost/secrets-switch.ts`).
+
+### Moving an existing install to sealed secrets
+
+A box installed before sealed secrets keeps its secrets in `.state/platform-keys.json` and
+`secrets.env`, and `pnpm selfhost:upgrade` keeps it that way (it never makes this switch by
+itself; it tells you to run `migrate`). One command moves it:
+
+```bash
+pnpm selfhost:secrets migrate                          # seal, check, switch, verify
+pnpm selfhost:secrets migrate --key-copy <path>        # file key: also removes the plaintext files
+```
+
+It seals the existing files unchanged, proves the chain before anything switches (the agent's code
+answers the Worker's real loader with every secret the files hold), starts the key agent and the
+updated fence, deploys the Worker without secret vars, makes celld adopt it at once and requires
+the first request to be healthy and the current deploy version in the bucket to hold no secret.
+Any failure after the switch redeploys with `--key-provider legacy-plaintext` and removes nothing.
+The plaintext files go last, and with the file key only once `--key-copy` proves a matching copy
+exists (`scripts/selfhost/secrets-migrate.ts`).
+
+### Old plaintext copies
+
+Sealing stops new plaintext. Copies made before stay where they are:
+
+```bash
+pnpm selfhost:secrets plaintext [--backups <dir or gs://|s3:// url> ...]   # read only
+```
+
+It lists every deploy version in the fleet bucket that holds secret vars (names only, never
+values), which ones celld still reads, and the backups holding `platform-keys.json`, `secrets.env`,
+the key file or plaintext deploy versions. It deletes nothing: celld documents `deploy/` as not to
+be deleted by operators. **Platform-key rotation is not available yet**, so until it lands the
+copies made before sealing stay readable by anyone holding the bucket credential (or a backup and
+its key). Rotate what you can rotate yourself (GitHub App secrets, OAuth client secrets, the SMTP
+password) by putting the new value in `secrets.env` and deploying.
+
+### Cloud key, one-time setup
+
+Set the key up once, then run `pnpm selfhost:deploy --init` on a new box (it finds the key by
+itself), or `pnpm selfhost:secrets switch --to auto` on a box sealed with the file key. The default
+key name is `sam-` plus 8 hex digits derived from your domain:
+
+```bash
+NAME=sam-$(printf 'https://api.%s' "$SAM_DOMAIN" | sha256sum | cut -c1-8)
+```
+
+**Google Cloud** (as a project owner; the box VM needs the `cloud-platform` access scope):
+
+```bash
+PROJECT=<the box project>; BOX_SA=<the box VM's service account email>
+gcloud kms keyrings create sam-selfhost --location global --project "$PROJECT"
+gcloud kms keys create "$NAME" --keyring sam-selfhost --location global --purpose encryption \
+  --labels sam-install="${NAME#sam-}" --project "$PROJECT"
+gcloud kms keys add-iam-policy-binding "$NAME" --keyring sam-selfhost --location global \
+  --member "serviceAccount:$BOX_SA" --role roles/cloudkms.cryptoKeyEncrypterDecrypter --project "$PROJECT"
+```
+
+The grant is on that key only. `--init` finds `projects/$PROJECT/locations/global/keyRings/sam-selfhost/cryptoKeys/$NAME`
+by itself (`SAM_GCP_KMS_LOCATION` for another location), or set `SAM_GCP_KMS_KEY` in `.env`.
+
+**AWS** (an EC2 instance with an instance profile):
+
+```bash
+REGION=<the box's region>; ROLE=<the box instance profile's role name>
+KEY_ID=$(aws kms create-key --region "$REGION" --description "SAM sealed secrets $SAM_DOMAIN" \
+  --tags TagKey=sam-install,TagValue="${NAME#sam-}" --query KeyMetadata.KeyId --output text)
+aws kms create-alias --region "$REGION" --alias-name "alias/$NAME" --target-key-id "$KEY_ID"
+KEY_ARN=$(aws kms describe-key --region "$REGION" --key-id "$KEY_ID" --query KeyMetadata.Arn --output text)
+aws iam put-role-policy --role-name "$ROLE" --policy-name sam-sealed-secrets --policy-document \
+  "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"kms:Encrypt\",\"kms:Decrypt\"],\"Resource\":\"$KEY_ARN\"}]}"
+```
+
+**Azure** (a system-assigned managed identity on the box VM):
+
+```bash
+RG=<resource group>; VM=<box VM>; VAULT=<a new, globally unique vault name>
+az keyvault create --name "$VAULT" --resource-group "$RG" --enable-rbac-authorization true \
+  --enable-purge-protection true
+az keyvault key create --vault-name "$VAULT" --name "$NAME" --kty RSA --size 3072 --ops wrapKey unwrapKey
+PRINCIPAL=$(az vm identity assign --resource-group "$RG" --name "$VM" --query systemAssignedIdentity -o tsv)
+az role assignment create --assignee-object-id "$PRINCIPAL" --assignee-principal-type ServicePrincipal \
+  --role "Key Vault Crypto Service Encryption User" --scope "$(az keyvault show --name "$VAULT" --query id -o tsv)/keys/$NAME"
+echo "SAM_AZURE_KEY_VAULT_URL=https://$VAULT.vault.azure.net"   # put this line in .env
+```
+
+**Removing a key is destructive**: every bundle, and every backup, sealed with it becomes
+unrecoverable. Remove the grant first; keep the key until the box and its backups are gone. A box
+cannot go back to plaintext deploy vars once `platform-keys.json` is gone
+(`SAM_KEY_PROVIDER=legacy-plaintext` then refuses, because it would generate new platform keys).
+
+**Agent VMs never receive the bucket or KMS credentials.** Only the box's key agent and the deploy
+hold a key provider's credential; workspace nodes get neither, and the Worker never sees one
+(`apps/api/tests/unit/selfhost-agent-vm-credentials.test.ts`).
+
 ## Backup and restore
 
-The fleet bucket contains Worker secrets as well as application data. The backup command encrypts
+On a sealed box the backup holds the sealed bundles but leaves out the file key and key-service
+credentials (`.state/key-agent/kek`, `.state/key-agent/credentials/`): a restore needs the key
+copy you kept off the box, or the cloud key. On a `legacy-plaintext` box, or for deploy versions
+made before sealing, the fleet bucket contains Worker secrets as well as application data. The backup command encrypts
 **the entire backup**, including the bucket, `.state/`, `.env` and its manifest, with AES-256-GCM.
 Restored files retain owner execution when needed, with mode 0700 for tools and 0600 for other
 files; group and world access are never restored. Rebuildable `go-cache` data is excluded.
@@ -474,10 +648,10 @@ push before creating replacements; an unvalidated deletion does not reserve spac
 
 ## Not included yet
 
-This version runs in plaintext mode: celld keeps every Worker secret in plaintext in the fleet
-bucket's deploy manifests, so the bucket credential is the install's master key. Also missing:
+Missing:
 
-- **Sealed secrets**: no key agent or KMS-backed encryption of the Worker's secrets.
+- **Platform-key rotation**: deploy versions and backups made before a box was sealed keep its
+  platform keys in plaintext until rotation lands ([Old plaintext copies](#old-plaintext-copies)).
 - **Guided credential login** (sandboxed agent sign-in on the box).
 
 Do not put data on this box that you could not afford to lose or leak.
@@ -534,8 +708,8 @@ Metadata `scopes` alone is not used as a security boundary; Google's current
 [metadata documentation](https://docs.cloud.google.com/compute/docs/metadata/querying-metadata)
 also requires `enforce_scopes=true` and scopes supported by the instance.
 
-The SAM API Worker is trusted with fleet authority. The fleet bucket still contains plaintext
-deployment manifests and secrets, and fleet write authority is powerful; CAB does not establish
+The SAM API Worker is trusted with fleet authority. On a sealed box the fleet bucket's deployment
+manifests hold no secret, but those made before sealing still do, and fleet write authority is powerful; CAB does not establish
 isolation between mutually untrusted Workers. Safety from broad VM permissions does not depend on
 hiding the broker path. The pinned runtime test `live/metadata-proxy.live.test.ts` nevertheless
 proves an exact native canary is absent from Worker process env (unknown keys return shim functions),

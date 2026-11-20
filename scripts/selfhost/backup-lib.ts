@@ -24,6 +24,7 @@ import { assertOperatorExecution } from './operator-only';
 import { removePrivateTree } from './private-tree';
 import { projectRestoreIdentity, restoreSourceInstallationId } from './restore-identity';
 import { restoreProgress } from './restore-progress';
+import { KEY_SERVICE_BACKUP_EXCLUDES } from './key-service';
 import { ensurePrivateDir } from './secret-files';
 
 /**
@@ -32,6 +33,16 @@ import { ensurePrivateDir } from './secret-files';
  * and the state copy runs while celld is stopped, so it also lengthened every backup's downtime.
  */
 export const STATE_CACHE_EXCLUDES = ['go-cache'];
+
+/**
+ * The key file and key-service credentials stay out of every backup: with sealed secrets they are
+ * what turns the bundles (which the backup does hold) into plaintext. Keep them apart, off the box
+ * (`pnpm selfhost:secrets key-file`).
+ */
+export function isKeyServiceSecretPath(stateDir: string, src: string): boolean {
+  const rel = relative(stateDir, src);
+  return KEY_SERVICE_BACKUP_EXCLUDES.some((path) => rel === path || rel.startsWith(`${path}/`));
+}
 
 export function isRebuildableCachePath(stateDir: string, src: string): boolean {
   const rel = relative(stateDir, src);
@@ -350,6 +361,7 @@ function runPlainBackup(
       preserveTimestamps: true,
       filter: (src) => {
         if (isRebuildableCachePath(ctx.stateDir, src)) return false;
+        if (isKeyServiceSecretPath(ctx.stateDir, src)) return false;
         if (!lstatSync(src).isSymbolicLink()) return true;
         // prepareCelldProject regenerates source/migration links from the recorded SAM ref.
         if (relative(ctx.stateDir, src).startsWith('project/')) return false;

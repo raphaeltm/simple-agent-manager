@@ -5,6 +5,7 @@
  * CELLD_BUCKET in the target .env must hold no objects and the target .state/ no platform keys.
  * Supply an existing private target .env with its fresh bucket settings; it is never overwritten.
  */
+import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -31,6 +32,14 @@ if (values['print-project']) {
 }
 const manifest = runRestore(ctx, from);
 log(`restored backup of ${manifest.createdAt} (SAM ${manifest.samCommit ?? 'unknown commit'})`);
+if (existsSync(join(ctx.stateDir, 'key-agent', 'bundles'))) {
+  // A sealed backup holds no key (backup-lib.ts isKeyServiceSecretPath): the clone needs one.
+  log(
+    'This backup is sealed. Before --init, give the target the key: with the file key, copy the ' +
+      `copy you kept off the box to ${join(ctx.stateDir, 'key-agent', 'kek')} (mode 0600); with a ` +
+      "cloud key, grant this VM's identity the same key. --init then seals the clone's own identity."
+  );
+}
 log('Recover with the SAME SAM checkout the backup was taken with:');
 if (manifest.samCommit) log(`  git checkout ${manifest.samCommit}`);
 log(
