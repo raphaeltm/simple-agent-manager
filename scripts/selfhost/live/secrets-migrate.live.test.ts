@@ -1,7 +1,8 @@
 /**
  * `pnpm selfhost:secrets migrate` (secrets-migrate.ts) with the real `deploy.ts --init` (a child
  * process on a throwaway box) and the real contract check (the agent's code answering the
- * Worker's real loader). The steps that need a running box (compose, the deploy, celld's reload
+ * Worker's real loader). In the live suite because the loader imports built workspace packages
+ * (worker-core), which Validate Deploy Scripts does not build; it needs no Docker. The steps that need a running box (compose, the deploy, celld's reload
  * and the bucket) are recorded fakes, so each failure point can be driven.
  */
 import { randomBytes } from 'node:crypto';
@@ -17,16 +18,16 @@ import {
   noStackDocker,
   runDeploy as harnessRunDeploy,
   writeBox,
-} from './deploy-harness.js';
+} from '../deploy-harness.js';
 
 /** The real deploy entry; a second `--init` on the same state sees no running stack. */
 const runDeploy = (envFile: string, args: string[], env: NodeJS.ProcessEnv = {}) =>
   harnessRunDeploy(envFile, args, { ...noStackDocker(dirname(envFile)), ...env });
-import { ensurePlatformKeys } from './platform-keys.js';
-import { parseDotenv } from './secret-files.js';
-import { type MigrateDeps, runMigration } from './secrets-migrate.js';
-import { preflightSealedSecrets } from './secrets-preflight.js';
-import { holdOnPlaintext } from './upgrade-sealing.js';
+import { ensurePlatformKeys } from '../platform-keys.js';
+import { parseDotenv } from '../secret-files.js';
+import { type MigrateDeps, runMigration } from '../secrets-migrate.js';
+import { preflightSealedSecrets } from '../secrets-preflight.js';
+import { holdOnPlaintext } from '../upgrade-sealing.js';
 
 vi.setConfig({ testTimeout: CHILD_TEST_TIMEOUT_MS });
 
