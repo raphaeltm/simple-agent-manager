@@ -27,13 +27,41 @@ export function clearUpgradeJournal(stateDir: string): void {
 }
 export function completeUpgradeJournal(
   stateDir: string,
-  record: { from: string; to: string; backupDir: string }
+  record: { from: string; to: string; backupDir: string },
+  beforeClear?: () => void
 ): void {
   replacePrivateFile(
     join(stateDir, UPGRADE_PENDING_FILE),
     JSON.stringify({ ...record, phase: 'completed' })
   );
+  // A caller's own completion record lands while this completed marker still proves success.
+  beforeClear?.();
   clearUpgradeJournal(stateDir);
+}
+
+/** The durable completed marker of a healthy upgrade to `to`, validated as readPendingFrom does. */
+export function upgradeCompletedTo(stateDir: string, to: string): boolean {
+  const path = join(stateDir, UPGRADE_PENDING_FILE);
+  if (!existsSync(path)) return false;
+  try {
+    const stat = lstatSync(path);
+    if (!stat.isFile() || stat.isSymbolicLink()) return false;
+    assertPrivateFile(path);
+    const raw: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+    const record = raw as Record<string, unknown>;
+    return (
+      record.phase === 'completed' &&
+      record.to === to &&
+      typeof record.from === 'string' &&
+      /^[0-9a-f]{40}$/.test(record.from) &&
+      record.from !== to &&
+      typeof record.backupDir === 'string' &&
+      isAbsolute(record.backupDir)
+    );
+  } catch {
+    return false;
+  }
 }
 /** A terminal marker authorizes cleanup, never restoration of its old snapshot. */
 export function readPendingFrom(stateDir: string, head: string): string | null {

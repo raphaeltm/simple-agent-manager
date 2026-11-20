@@ -88,6 +88,8 @@ export interface UpgradeOptions {
   to: string;
   backupDir?: string | null;
   checkHealth: () => Promise<boolean>;
+  /** Runs while the healthy upgrade's completed marker is durable, before it is cleared. */
+  onCompleted?: () => void;
 }
 
 export interface UpgradeResult {
@@ -484,7 +486,7 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
   }
 
   // Completion/cleanup failure must never enter automatic rollback after health succeeded.
-  completeUpgradeJournal(ctx.stateDir, { from, to, backupDir });
+  completeUpgradeJournal(ctx.stateDir, { from, to, backupDir }, opts.onCompleted);
 
   const { imagesRebuilt } = progress;
   const rollback = rollbackSteps(ctx, from, backupDir, imagesRebuilt);

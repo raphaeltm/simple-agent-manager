@@ -421,7 +421,7 @@ including `selfhost-hosted-git-v1` when present in that checkout, participate in
 (`scripts/selfhost/upgrade-migrations.ts:installedMigrations`, `assertMigrationProgression`).
 
 The command requires a clean tracked checkout and an installation-specific Compose project with
-creation receipts. It checks out the target, runs `deploy --init`, rebuilds changed local images,
+creation receipts (an older `sam-selfhost` install first needs `--adopt-legacy`, below). It checks out the target, runs `deploy --init`, rebuilds changed local images,
 restarts Compose when its inputs changed, deploys and checks health. Failure automatically restores
 the encrypted snapshot and previous code/dependencies before starting the previous version.
 The recovery checks the original installation, bucket, state and Compose ownership before removing
@@ -467,9 +467,97 @@ and Compose operation uses that installation's environment and overlays. Set
 `SAM_SELFHOST_STATE_DIR` to an absolute path when running Compose manually.
 
 Older installs using the shared `sam-selfhost` project may set `COMPOSE_PROJECT_NAME=sam-selfhost`
-explicitly for backup. Upgrades and destructive teardown refuse that shared identity. Move to a
-separate, installation-specific Compose project through an operator-controlled migration first;
-these commands do not adopt or automatically migrate the old project.
+explicitly for backup. Upgrades and destructive teardown refuse that shared identity. Move such an
+install to its installation-specific project with legacy adoption (below) first.
+
+### Upgrade an install created before the shared project was retired
+
+Installs created before `pnpm selfhost:upgrade` gained snapshots run under the fixed Compose
+project `sam-selfhost` and have no compose creation receipt, so a plain upgrade refuses them. Their
+own checkout also still holds the old upgrade tool. Check out the new SAM ref, then let its tool
+adopt the install and upgrade it in one command. `--from` is the full 40-character commit the
+stack runs now, and `--to` must resolve to the checked-out ref:
+
+```sh
+git fetch origin && git checkout --detach <target-ref> && pnpm install --frozen-lockfile
+pnpm selfhost:upgrade --adopt-legacy --from <deployed-full-sha> --to <target-ref> \
+  --encryption-key-file "$HOME/.config/sam/backup.key"
+```
+
+`--adoption-backup-to` chooses the adoption snapshot's path (default
+`backups/pre-adoption-<timestamp>` next to the state directory). `--backup-to` applies to the
+upgrade that follows. `--from` and `--adoption-backup-to` require `--adopt-legacy`, which cannot
+be combined with `--rollback-from` or `--rebuild`. The checkout must be clean for tracked files.
+The shell must not set `COMPOSE_PROJECT_NAME`, and the box `.env` must leave it unset or set it to
+`sam-selfhost`. An install that already has its compose creation receipt is refused: use the plain
+upgrade.
+
+The running stack is not touched by the checkout. Adoption changes no SAM code and deploys
+nothing (`scripts/selfhost/legacy-adoption.ts:runLegacyAdoption`):
+
+1. It checks out `--from` again, so the compose files and bind mounts match the running stack.
+2. It proves ownership (`legacy-adoption-inventory.ts:proveLegacyOwnership`):
+   - every container of the `sam-selfhost` project carries this checkout's compose directory,
+     compose files and `.env`; a missing label refuses;
+   - bind mounts stay inside this checkout or its state directory;
+   - each project volume is used only by those containers;
+   - each container's config hash equals `--from`'s compose configuration;
+   - there is exactly one running celld;
+   - the canonical project is empty.
+
+   Another checkout on the same host using `sam-selfhost`, or a wrong `--from`, refuses before
+   any change.
+
+3. It takes the encrypted backup from the live legacy stack.
+4. It stops the legacy stack, journaling the intent first. It copies each volume into
+   `<canonical>_<volume>` with a digest-pinned Alpine image, the egress fence's own base, which it
+   pulls before changing anything if the box does not have it. The helper runs with no network,
+   all capabilities dropped except the file-ownership ones a faithful copy needs, and a label
+   carrying a random adoption id. Each copy is verified by a digest of every path's type, owner and
+   mode and every file's content.
+5. It writes `COMPOSE_PROJECT_NAME=<canonical>` into `.env`, keeping every other byte, then starts
+   the same version under that project and checks health. After health it writes the installation
+   and compose-project creation receipts and removes the stopped legacy containers.
+6. It runs the normal upgrade from `--from` to the target, with its own fresh snapshot, automatic
+   rollback and printed rollback command.
+
+Each step is journaled (phases `proving`, `backed-up`, `stopped`, `switched`, `adopted`) in
+`legacy-adoption.json` in the state directory, beside `legacy-adoption.env`, a private copy of the
+original `.env`. Both are removed when the run succeeds or rolls back completely. If the process is
+killed, check out the target ref again and rerun the identical command:
+
+- it resumes at the recorded step;
+- it removes any helper container the killed run left (only those with its adoption id);
+- it recopies an unfinished volume from scratch;
+- a backup interrupted mid-way is kept and a new one is taken, after restarting the legacy celld
+  it may have left stopped;
+- a stop that completed before its phase was journaled resumes from the stopped stack;
+- a rollback that was interrupted is finished as a rollback, never resumed forward;
+- an upgrade that already completed is not run again.
+
+The upgrade marks the adoption journal while its own completed marker is still durable, so a
+re-checkout of the target cannot make a finished upgrade look unstarted.
+
+A refusal or failure before the legacy stack stopped returns the checkout to the target and
+discards the journal. A later failure, or an unhealthy new project, rolls back to `sam-selfhost`:
+
+- it journals the rollback first, so a killed rollback is finished on the next run;
+- if the new stack ran, it first copies each of its volumes back over the legacy one,
+  digest-verified: the celld cache, Caddy's certificates and, with `local-store`, the bundled
+  bucket itself, so nothing the new stack wrote is lost;
+- it removes the canonical containers and the volumes it created;
+- it restores `.env` byte for byte and restarts the legacy stack.
+
+Before the new stack starts, the legacy volumes are only read. Adoption never restores the bucket
+from its snapshot: the same deployed version kept writing it. After such a rollback the checkout stays at `--from`, which matches the
+running stack. If the rollback itself fails, the journal, the `.env` copy and the legacy volumes
+are kept. Inspect the stack (`docker compose -p sam-selfhost ps`) before rerunning, and do not
+delete those files to get past the error.
+
+If the upgrade step fails, its automatic rollback restores `--from` under the adopted project; the
+adoption stands and its journal remains. Check out the target and rerun the same command to retry
+the upgrade. After a successful run the legacy volumes remain until you remove them with the
+`docker volume rm` command it prints.
 
 ## Teardown
 
