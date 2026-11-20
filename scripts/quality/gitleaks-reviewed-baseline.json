@@ -244,6 +244,25 @@
       "reviewedAt": "2026-11-19T08:20:34.012Z",
       "expiresAt": "2026-12-19T08:20:34.012Z",
       "digests": ["bf079eb1d64eb9f1ada2812def7fc669b390aaa9b56fc1010923fe4095706b31"]
+    },
+    {
+      "classification": "documented-example",
+      "reason": "Self-host AWS KMS provider (sealed secrets): scripts/selfhost/testdata/aws-sigv4/get-vanilla-with-session-token holds AWS's published SigV4 test-suite example session token (awslabs/aws-c-auth, AKIDEXAMPLE credentials), copied byte-exact so the signer is checked against AWS's own vectors. Not a credential. Exact current findings only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-20T08:00:00.000Z",
+      "expiresAt": "2026-12-20T08:00:00.000Z",
+      "digests": [
+        "2f680fbf092613edf6d693f56b9f6935342a3210f0d3bc2f14c5c4a6f68aefb2",
+        "89e46bd75a609cb349a30aa5488628928ae95c50aa7f3c8f1161f1857f539762"
+      ]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Intermediate PR-range bytes only (sealed secrets landing slice): scripts/selfhost/agent-vm-credentials.test.ts briefly held a fixed, human-readable fake bucket secret; the tip generates it with randomBytes at test time. No credential. Exact rule/path/line/bytes only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-20T08:00:00.000Z",
+      "expiresAt": "2026-12-20T08:00:00.000Z",
+      "digests": ["e5bd003b9f7208606c3924b881aa5a4e175bcddcf7332b53fa8dffe22f517066"]
     }
   ]
 }

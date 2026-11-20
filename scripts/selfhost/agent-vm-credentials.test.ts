@@ -8,6 +8,7 @@
  * file, the file key). celld's own process env (where the bucket key lives) is not the Worker's:
  * live/metadata-proxy.live.test.ts proves a native env canary is absent from Worker code.
  */
+import { randomBytes } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,9 +21,10 @@ import { CHILD_TEST_TIMEOUT_MS, noStackDocker, runDeploy, writeBox } from './dep
 
 vi.setConfig({ testTimeout: CHILD_TEST_TIMEOUT_MS });
 
-const BUCKET_KEY_ID = 'fleet-key-id-for-agent-vm-test';
-const BUCKET_SECRET = 'fleet-bucket-secret-0123456789abcdef';
-const TRANSIT_SECRET_ID = 'approle-secret-id-0123456789abcdef';
+/** Random per run: they stand for the box's real bucket and key-service credentials. */
+const BUCKET_KEY_ID = `fleet-key-${randomBytes(8).toString('hex')}`;
+const BUCKET_SECRET = randomBytes(24).toString('hex');
+const TRANSIT_SECRET_ID = randomBytes(24).toString('hex');
 const KMS_SETTINGS = [
   'SAM_GCP_KMS_KEY=projects/p/locations/global/keyRings/sam-selfhost/cryptoKeys/sam-decoy',
   'SAM_AWS_KMS_KEY_ID=alias/sam-decoy-agent-vm',
