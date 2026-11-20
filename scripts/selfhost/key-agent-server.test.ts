@@ -339,6 +339,22 @@ describe('cache and key-service failures', () => {
     expect((await ask()).status).toBe(503);
   });
 
+  it('does not serve a copy the stale wait itself carried past the maximum stale age (Codex P2)', async () => {
+    const state: Hang = { release: null, calls: 0 };
+    const { ask, advance, logs } = await setup({
+      wrap: hanging(state),
+      staleWaitMs: 50,
+      maxStaleMs: 5000,
+    });
+    expect((await ask()).status).toBe(200);
+    advance(4990); // within the bound when the request arrives
+    setTimeout(() => advance(20), 10); // and past it by the time the stale wait ends
+    const res = await within(300, ask());
+    expect(res).toBe('timed out'); // still waiting on the refresh, not serving the over-age copy
+    expect(logs).not.toContainEqual(expect.objectContaining({ event: 'key_agent.serving_stale' }));
+    state.release?.(new KeyProviderError('denied', 'HTTP 403'));
+  });
+
   it('control: with no copy in hand a hung key service is waited for, not skipped', async () => {
     const state: Hang = { release: null, calls: 1 }; // the first unwrap already hangs
     const { ask } = await setup({ wrap: hanging(state), staleWaitMs: 50 });

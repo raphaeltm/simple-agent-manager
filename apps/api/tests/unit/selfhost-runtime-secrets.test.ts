@@ -420,6 +420,16 @@ describe("the agent's copy age (Codex P2: the two stale windows must not add up)
     await expect(loadRuntimeSecrets(e())).rejects.toThrow(/unreachable/);
   });
 
+  it("refuses an agent answer already past this Worker's stale bound, every time (Codex P2)", async () => {
+    fetchMock.mockImplementation(answer({ K: 'v1' }, { ageMs: 5000 }));
+    await expect(loadRuntimeSecrets(e())).rejects.toThrow(/past this Worker's stale bound/);
+    await expect(loadRuntimeSecrets(e())).rejects.toThrow(/past this Worker's stale bound/);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Control: one millisecond younger is accepted.
+    fetchMock.mockImplementation(answer({ K: 'v1' }, { ageMs: 4999 }));
+    expect((await loadRuntimeSecrets(e())).K).toBe('v1');
+  });
+
   it('control: a fresh answer (ageMs 0 or absent) keeps the full stale window', async () => {
     fetchMock
       .mockImplementationOnce(answer({ K: 'v1' }, { ageMs: 0 }))

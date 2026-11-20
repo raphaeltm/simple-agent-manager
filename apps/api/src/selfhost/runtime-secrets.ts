@@ -401,6 +401,15 @@ export async function loadRuntimeSecrets(env: KeyAgentEnv): Promise<RuntimeSecre
     if (cached?.bundleId === agent.bundleId) cached = null;
     throw error;
   }
+  // The agent's own stale bound can be longer than this one: an answer already older than ours is
+  // refused, not cached, so it cannot be used again and again until the agent's bound ends.
+  if (fetched.ageMs >= maxStaleMs(env)) {
+    if (cached?.bundleId === agent.bundleId) cached = null;
+    throw new RuntimeSecretsUnavailableError(
+      'SECRETS_EXPIRED',
+      `the key agent answered with a copy ${fetched.ageMs} ms old, past this Worker's stale bound`
+    );
+  }
   const loadedAt = Date.now();
   cached = {
     bundleId: agent.bundleId,

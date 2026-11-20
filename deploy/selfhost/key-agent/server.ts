@@ -263,6 +263,9 @@ export function createKeyAgent(options: AgentOptions): Server {
     try {
       const first = await Promise.race([attempt, slow]);
       if (first !== STALE) return first;
+      // The wait itself can carry the copy past the stale bound: then keep waiting for the
+      // refresh instead (its own timeout settles it) rather than serving an over-age copy.
+      if (!mayServeStale(cached.openedAt)) return await attempt;
       log({
         event: 'key_agent.serving_stale',
         bundleId,
