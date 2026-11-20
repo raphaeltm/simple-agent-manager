@@ -1,4 +1,4 @@
-# Phase-0 measured Docker29.9.3 / Compose5.7.0 / Buildx0.38.2.
+# Reviewed toolchain: Docker29.10.0 / Compose5.7.1 / Buildx0.39.0.
 # Keep the reviewed digest: root DinD with overlayfs, not rootless or vfs.
 # Rootful DinD is required by the measured recipe. The isolated, one-job
 # Cloudflare microVM is the trust boundary; no broad credential is delivered.
