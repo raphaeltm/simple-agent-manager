@@ -23,6 +23,9 @@ The adversarial review of the push admission path in PR #2907 (H2, SAM-hosted gi
    - **Command lines dropped silently.** Unmatched command pkt-lines are skipped with no `ng`, and invalid UTF-8 ref bytes alias to U+FFFD.
    - **Gzip buffering.** The gzip push path buffers about 3× `maxPushBytes`.
    - **Quadratic copying.** `need()` concatenates repeatedly while reading the command section.
+7. **SHA-1DC ingest notes** (security delta review of the SHA-1DC change in #2907):
+   - **Shared streaming hasher.** The streamed full-object path in `packstore.ts` feeds the module-level `streamSha` across awaits, so a concurrent ingest in the same isolate could reset it mid-object. This is unreachable on celld today: `maxObjectBytes` (16 MiB max) is below the 32 MiB streaming threshold. Use a per-entry `Sha1Dc` before either limit changes.
+   - **R2 raw object leak.** If an R2-backed ingest fails before it writes any pack rows, `cleanupOrphans` cannot find the raw object. The problem predates the SHA-1DC change, and celld stores packs in SQLite.
 
 ## Context
 
@@ -46,4 +49,5 @@ Who can trigger them:
 - [ ] A push forking from an old, heavy commit succeeds within the budget. A real-git test proves it, and a stale or poisoned cache cannot vouch for a missing object.
 - [ ] Decide whether to bound tree depth or total path length; 1,500 nested directories break checkout of the default branch.
 - [ ] Optionally accept uppercase-hex oids in commit and tag headers, as git does (`isOid` is lowercase-only).
+- [ ] Give the streamed ingest path its own SHA-1DC hasher, and reclaim R2 raw objects of packs that fail before any rows (item 7).
 - [ ] Optionally reject the remaining fsck error-level shapes that default clients tolerate but `transfer.fsckObjects=true` clients refuse: unsorted trees, malformed idents, CR in headers.
