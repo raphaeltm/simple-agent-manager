@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "google-auth-library": "10.5.0",
+    "google-auth-library": "11.3.4",
     "gaxios": "7.3.1"
   }
 }
