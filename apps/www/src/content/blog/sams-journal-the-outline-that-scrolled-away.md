@@ -97,7 +97,7 @@ It checks the computed `overflow-y` (the value the browser actually applies afte
 
 It also catches a CSS rule that surprises people. If you set only `overflow-x: hidden` on an element, the browser computes its `overflow-y` as `auto`, because one axis cannot be `visible` while the other clips. So "I only hid horizontal overflow" still turns a pane into a scroller, with the same broken outline.
 
-The helper runs in the Inbox, chat, file preview and focus-mode audits at phone and desktop sizes; the chat audit also runs it in both themes. The Inbox audit also scrolls the list with a real mouse wheel and checks two things: the content moved, and the pane's own `scrollTop` stayed at 0. The first check matters as much as the second. Without it, a list that failed to scroll at all would also leave the pane at 0 and pass.
+The helper runs in the Inbox, chat, file preview and focus-mode audits, and the chat audit runs it in both the dark and light themes. The Inbox audit also scrolls the list with a real mouse wheel and checks two things: the content moved, and the pane's own `scrollTop` stayed at 0. The first check matters as much as the second. Without it, a list that failed to scroll at all would also leave the pane at 0 and pass.
 
 Both checks were run against the old code first. The wheel test failed with the pane scrolled 900px, and across those runs the style check flagged all six surfaces.
 
