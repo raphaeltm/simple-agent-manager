@@ -15,6 +15,9 @@ success. Subscriptions stay active after delivery: while required checks are
 pending on the same SHA, retain the existing subscription and fallback and end
 your turn again; do not recreate them on each wake. Keep one bounded fallback schedule for missing terminal webhooks; follow
 `docs/guides/ci-wait-recovery.md` for registration, reconciliation and cleanup.
+When you open the PR, also subscribe to `source: github`, `subjectType: pull_request`,
+`subjectId: <PR number>` (no eventType) so Codex, CodeRabbit and human reviews/comments
+wake you; address or reply to every finding before merge.
 
 ## Quick Summary
 

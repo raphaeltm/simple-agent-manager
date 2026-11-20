@@ -152,7 +152,7 @@ When a task asks you to review a previous session or recover context from recent
 
 ### Why This Matters
 
-Without the `/do` instruction, a dispatched agent may skip critical phases like staging verification, specialist review, or proper PR creation. The `/do` workflow enforces all quality gates defined in this project's rules.
+Without `/do`, a dispatched agent may skip staging verification, specialist review, or proper PR creation.
 
 ## Integration with Other Systems
 
@@ -162,7 +162,9 @@ Without the `/do` instruction, a dispatched agent may skip critical phases like 
 
 ## CI Wait Recovery
 
-CI: `check_suite.completed` + `workflow_run.completed` on full
-SHA; opt in to `check_run.completed` for early per-job failure/progress. Follow
+CI: `check_suite.completed` + `workflow_run.completed` on full SHA; opt in to
+`check_run.completed` for early per-job failure. Follow
 [CI wait recovery](../../docs/guides/ci-wait-recovery.md): reconcile GitHub on
-resume; retain the active subscription/fallback while checks pend. Expiry is no wake.
+resume; keep the subscription/fallback while checks pend. Expiry is no wake.
+On opening a PR, subscribe to `subjectType: pull_request`, `subjectId: <PR #>` so
+Codex/CodeRabbit reviews and comments reach you; answer each finding.
