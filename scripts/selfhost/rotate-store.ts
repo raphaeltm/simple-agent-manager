@@ -68,6 +68,8 @@ export interface StepState {
   /** What the staged bundle does: the next phase once it is deployed and healthy. */
   stagedFor?: Phase;
   switchedAt?: string;
+  /** When a rollback's reverse deployment (old value current again) was adopted: its drain starts here. */
+  reverseSwitchedAt?: string;
   /** reencrypt / better-auth: rows unreadable under both keys at the first verify (pre-existing). */
   baseline?: { unreadable: number; rows: RowRef[]; complete: boolean };
   /** Per location: the last id done in the current pass (null = start). */

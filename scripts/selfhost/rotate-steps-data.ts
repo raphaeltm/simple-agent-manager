@@ -282,7 +282,8 @@ export async function advanceData(
       step.reverse ? await reversePatch(ctx, kind) : await forwardPatch(ctx, kind),
       'migrating'
     );
-    if (!step.reverse) step.switchedAt = new Date(deps.now()).toISOString();
+    if (step.reverse) step.reverseSwitchedAt = new Date(deps.now()).toISOString();
+    else step.switchedAt = new Date(deps.now()).toISOString();
     ctx.save();
     deps.log(`  ${ctx.key.name}: the Worker writes under the new value and reads both`);
   }
@@ -305,9 +306,14 @@ export async function advanceData(
       resetData(step);
       ctx.save();
       await applyPatch(ctx, await reversePatch(ctx, kind), 'migrating');
+      step.reverseSwitchedAt = new Date(deps.now()).toISOString();
+      ctx.save();
       return await advanceData(ctx, kind, waitMinutes, drainMinutes);
     }
-    const switched = Date.parse(step.switchedAt ?? new Date(deps.now()).toISOString());
+    // A rollback drains from its own (reverse) deployment: requests still running on the forward
+    // deployment may write under the new value until then.
+    const anchor = step.reverse ? step.reverseSwitchedAt : step.switchedAt;
+    const switched = Date.parse(anchor ?? new Date(deps.now()).toISOString());
     step.verifiedAt = new Date(deps.now()).toISOString();
     const lifetime =
       step.reverse || kind === 'better-auth' ? 0 : await storedLifetimeMinutes(ctx, waitMinutes);

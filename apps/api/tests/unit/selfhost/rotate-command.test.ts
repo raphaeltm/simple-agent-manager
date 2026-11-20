@@ -487,6 +487,31 @@ describe('rotate encryption-key', () => {
     );
   });
 
+  it('drains a rollback from its reverse deployment, not from the forward switch (Codex P1)', async () => {
+    const old = deployed.ENCRYPTION_KEY!;
+    await seedCredential('c-agent', 'sk-agent', old);
+    let reverse = false;
+    controlHook = async (body) => {
+      if (!reverse && body.mode === 'verify' && readJournal(stateDir)?.steps['encryption-key']?.reverse)
+        reverse = true;
+      if (!reverse && body.mode === 'verify') {
+        await seedCredential('c-agent', 'sk-agent', old);
+        clock += 10 * 60_000; // the forward migration outlasts the drain
+      }
+    };
+    await expect(runRotate(input({ names: ['encryption-key'] }), deps())).rejects.toThrow(
+      /rolled back/
+    );
+    const step = readJournal(stateDir)?.steps['encryption-key'];
+    expect(step?.phase).toBe('rolled-back');
+    expect(Date.parse(step?.waitUntil ?? '') - Date.parse(step?.reverseSwitchedAt ?? '')).toBe(
+      drainMinutes({}) * 60_000
+    );
+    expect(Date.parse(step?.reverseSwitchedAt ?? '')).toBeGreaterThan(
+      Date.parse(step?.switchedAt ?? '') + drainMinutes({}) * 60_000
+    );
+  });
+
   it('rolls back when verification keeps failing: the old key is current again and every value reads under it', async () => {
     const old = deployed.ENCRYPTION_KEY!;
     await seedCredential('c-agent', 'sk-agent', old);
