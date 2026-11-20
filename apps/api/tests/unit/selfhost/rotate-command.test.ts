@@ -45,6 +45,7 @@ import { drainMinutes, runRotate } from '../../../../../scripts/selfhost/rotate-
 import {
   openRotationStore,
   readJournal,
+  rotationDir,
   writeJournal,
 } from '../../../../../scripts/selfhost/rotate-store';
 import * as schema from '../../../src/db/schema';
@@ -796,12 +797,35 @@ describe('rotate gateway-secret', () => {
     expect(readJournal(stateDir)?.steps['gateway-secret']?.phase).not.toBe('rolled-back');
     restarts = [];
     await expect(runRotate(input({ resume: true }), deps())).rejects.toThrow(/rolled back/);
-    // The resume restored gateway.env and the Worker to the old secret instead of marking it done.
+    // The resume restored gateway.env and the Worker to the old secret instead of marking it done,
+    // and restarted the consumers even though gateway.env already held the old value (Codex P1).
+    expect(restarts.at(-1)).toContain(`REVERSE_TUNNEL_GATEWAY_SECRET=${old}`);
     expect(readJournal(stateDir)?.steps['gateway-secret']?.phase).toBe('rolled-back');
     expect(deployed.REVERSE_TUNNEL_GATEWAY_SECRET).toBe(old);
     expect(readFileSync(join(stateDir, 'gateway.env'), 'utf8')).toContain(
       `REVERSE_TUNNEL_GATEWAY_SECRET=${old}`
     );
+  });
+
+  it('leaves the step pending when it fails before its snapshot exists (Codex P2)', async () => {
+    const old = deployed.REVERSE_TUNNEL_GATEWAY_SECRET!;
+    const failing = deps();
+    // Just before the step starts, make its snapshot directory impossible to create.
+    failing.log = (line) => {
+      logs.push(line);
+      const id = readJournal(stateDir)?.id;
+      if (line.startsWith('gateway-secret (') && id)
+        writeFileSync(join(rotationDir(stateDir), id), '');
+    };
+    await expect(runRotate(input({ names: ['gateway-secret'] }), failing)).rejects.toThrow();
+    const stopped = readJournal(stateDir)!;
+    expect(stopped.steps['gateway-secret']?.phase).toBe('pending');
+    expect(stopped.steps['gateway-secret']?.error).toBeUndefined();
+    rmSync(join(rotationDir(stateDir), stopped.id), { force: true });
+    await runRotate(input({ resume: true }), deps());
+    // Control: the resume ran the whole rotation.
+    expect(readJournal(stateDir)).toBeNull();
+    expect(deployed.REVERSE_TUNNEL_GATEWAY_SECRET).not.toBe(old);
   });
 
   it('restarts the consumers once with the new value while the Worker accepts both, then accepts only the new one', async () => {

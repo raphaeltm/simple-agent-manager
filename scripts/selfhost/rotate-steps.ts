@@ -148,22 +148,27 @@ async function expectGateway(ctx: StepContext, secret: string, accepted: boolean
 export async function advanceGateway(ctx: StepContext): Promise<void> {
   const { step, key, deps } = ctx;
   const names = [GATEWAY_SECRET, GATEWAY_ALTERNATE];
-  const restoreConsumers = async () => {
+  // `always`: on a resumed rollback gateway.env may already hold the old value while the restart
+  // that should have loaded it failed, so restart regardless of whether the file changed.
+  const restoreConsumers = async (always: boolean) => {
     const snapshot = await ctx.store.readSnapshot(ctx.journal.id, key.name);
-    if (writeGatewayEnv(ctx, snapshot[GATEWAY_SECRET] ?? '')) await deps.restartGatewayConsumers();
+    const changed = writeGatewayEnv(ctx, snapshot[GATEWAY_SECRET] ?? '');
+    if (changed || always) await deps.restartGatewayConsumers();
   };
   // A recorded failure that has not reached `rolled-back` is a rollback the run did not finish
   // (restoring the consumers failed, or the process stopped): finish it rather than carry on.
   if (isResumingRollback(ctx) || (step.error !== undefined && step.phase !== 'rolled-back')) {
-    await restoreConsumers();
+    await restoreConsumers(true);
     return await rollBack(ctx, names, step.error ?? 'interrupted');
   }
+  // Outside the rollback catch: a failure before the snapshot exists changed nothing, so the step
+  // stays pending and a resume simply starts it again.
+  if (step.phase === 'pending') await snapshotOnce(ctx);
   try {
     if (
       step.phase === 'pending' ||
       (step.phase === 'staging' && step.stagedFor === 'accepting-both')
     ) {
-      if (step.phase === 'pending') await snapshotOnce(ctx);
       await applyPatch(
         ctx,
         { set: { [GATEWAY_ALTERNATE]: key.generate()[GATEWAY_SECRET] ?? '' } },
@@ -206,7 +211,7 @@ export async function advanceGateway(ctx: StepContext): Promise<void> {
     // resume must finish the rollback, not verify the new secret and mark the step done.
     step.error = message(error);
     ctx.save();
-    await restoreConsumers();
+    await restoreConsumers(false);
     await rollBack(ctx, names, step.error);
   }
 }
