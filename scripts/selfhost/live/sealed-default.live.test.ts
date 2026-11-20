@@ -36,9 +36,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { pingKeyAgent } from '../../../deploy/selfhost/key-agent/healthcheck.ts';
 import { runCommand } from '../backup-cli';
 import type { BoxContext } from '../backup-lib';
+import { readObject } from '../bucket-objects';
 import { ensureCelldBinary } from '../celld-binary.js';
 import { CLOSED_HOST, noStackDocker, runDeploy as harnessRunDeploy } from '../deploy-harness.js';
-import { knownSecrets, scanDeployVersions } from '../plaintext-scan';
+import { knownSecrets, manifestVars, scanDeployVersions } from '../plaintext-scan';
 import { ensurePlatformKeys } from '../platform-keys';
 import { parseDotenv, readPrivateJson } from '../secret-files';
 import { type MigrateDeps, runMigration } from '../secrets-migrate';
@@ -217,6 +218,15 @@ function deps(log: string[], breakAgent = false): MigrateDeps {
       const versions = scanDeployVersions(ctx(), await knownSecrets(box(), state));
       return (
         versions.find((v) => v.referencedBy.includes('deploy/current.json'))?.secretNames ?? []
+      );
+    },
+    currentVersionBundleId: async () => {
+      const versions = scanDeployVersions(ctx(), await knownSecrets(box(), state));
+      const current = versions.find((v) => v.referencedBy.includes('deploy/current.json'));
+      if (!current) return null;
+      return (
+        manifestVars(readObject(ctx(), `${current.prefix}/manifest.json`)).SAM_SECRET_BUNDLE_ID ??
+        null
       );
     },
   };

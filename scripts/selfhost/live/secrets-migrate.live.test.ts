@@ -46,6 +46,7 @@ let dir: string;
 let state: string;
 let envFile: string;
 let steps: string[];
+let runningBundle: string | null;
 let logs: string[];
 
 function box(): Record<string, string> {
@@ -79,6 +80,9 @@ function deps(overrides: Partial<MigrateDeps> = {}): MigrateDeps {
       // Before the sealed deploy the running version still has its secret vars.
       return steps.includes('deploy sealed') ? [] : ['ENCRYPTION_KEY'];
     },
+    // The running version names the newest bundle unless a test pins an older one.
+    currentVersionBundleId: async () =>
+      runningBundle ?? (await listBundles(bundleStoreFor(state)))[0]?.bundleId ?? null,
     ...overrides,
   };
 }
@@ -92,6 +96,7 @@ beforeEach(() => {
   writeFileSync(join(state, 'secrets.env'), OPERATOR, { mode: 0o600 });
   steps = [];
   logs = [];
+  runningBundle = null;
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -138,6 +143,39 @@ describe('secrets migrate', () => {
     expect(plaintextLeft()).toEqual([]);
     const kek = readFileSync(join(state, 'key-agent/kek'), 'utf8').trim();
     expect(logs.join('\n')).not.toContain(kek);
+  });
+
+  // Codex P2 on #2933: secrets.env changed after a migrate that kept the files sealed a new bundle,
+  // but the retry saw a sealed running version and removed the files without deploying it.
+  it('deploys the newly sealed bundle before removing the files when the running one is older', async () => {
+    expect(await runMigration({ box: box(), stateDir: state }, deps())).toBe('migrated-files-kept');
+    const [first] = await listBundles(bundleStoreFor(state));
+    runningBundle = first?.bundleId ?? null;
+    writeFileSync(
+      join(state, 'secrets.env'),
+      `GITHUB_CLIENT_SECRET=${randomBytes(16).toString('hex')}\n`,
+      { mode: 0o600 }
+    );
+    const copy = join(dir, 'kek-copy');
+    writeFileSync(copy, readFileSync(join(state, 'key-agent/kek')), { mode: 0o600 });
+    steps = [];
+    const sealedRuns = deps({
+      currentVersionSecrets: async () => {
+        steps.push('scan current');
+        return [];
+      },
+      deploy: async (legacy) => {
+        steps.push(legacy ? 'deploy legacy' : 'deploy sealed');
+        runningBundle = (await listBundles(bundleStoreFor(state)))[0]?.bundleId ?? null;
+      },
+    });
+    expect(await runMigration({ box: box(), stateDir: state, keyCopy: copy }, sealedRuns)).toBe(
+      'migrated'
+    );
+    expect(steps).toContain('deploy sealed');
+    expect(steps).not.toContain('deploy legacy');
+    expect(runningBundle).not.toBe(first?.bundleId);
+    expect(plaintextLeft()).toEqual([]);
   });
 
   it('a key copy that does not match keeps the files', async () => {

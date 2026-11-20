@@ -7,10 +7,11 @@ import { spawnSync } from 'node:child_process';
 import { pingKeyAgent } from '../../deploy/selfhost/key-agent/healthcheck.ts';
 import { REPO_ROOT } from './backup-cli';
 import { type BoxContext, composeArgs } from './backup-lib';
+import { readObject } from './bucket-objects';
 import { adoptAndCheck } from './celld-adopt';
 import { detectKeyCandidates } from './key-platforms';
 import { keyAgentPort } from './key-service';
-import { knownSecrets, scanDeployVersions } from './plaintext-scan';
+import { knownSecrets, manifestVars, scanDeployVersions } from './plaintext-scan';
 import type { MigrateDeps } from './secrets-migrate';
 import { preflightSealedSecrets } from './secrets-preflight';
 import type { SwitchDeps } from './secrets-switch';
@@ -57,6 +58,12 @@ export function boxSwitchDeps(ctx: BoxContext): SwitchDeps {
 export function boxMigrateDeps(ctx: BoxContext): MigrateDeps {
   const { box, envFile } = ctx;
   const deployArgs = ['selfhost:deploy', '--env-file', envFile];
+  const currentVersion = async () => {
+    const versions = scanDeployVersions(ctx, await knownSecrets(box, ctx.stateDir));
+    const current = versions.find((v) => v.referencedBy.includes('deploy/current.json'));
+    if (!current) throw new Error('deploy/current.json names no version in the bucket');
+    return current;
+  };
   return {
     log: ctx.log,
     // --seal: this is the one deploy allowed to seal a box running on plaintext deploy vars.
@@ -69,11 +76,10 @@ export function boxMigrateDeps(ctx: BoxContext): MigrateDeps {
     deploy: async (legacy) =>
       visible('pnpm', [...deployArgs, ...(legacy ? ['--key-provider', 'legacy-plaintext'] : [])]),
     adoptAndCheck: async () => adoptAndCheck(box),
-    currentVersionSecrets: async () => {
-      const versions = scanDeployVersions(ctx, await knownSecrets(box, ctx.stateDir));
-      const current = versions.find((v) => v.referencedBy.includes('deploy/current.json'));
-      if (!current) throw new Error('deploy/current.json names no version in the bucket');
-      return current.secretNames;
+    currentVersionSecrets: async () => (await currentVersion()).secretNames,
+    currentVersionBundleId: async () => {
+      const manifest = `${(await currentVersion()).prefix}/manifest.json`;
+      return manifestVars(readObject(ctx, manifest)).SAM_SECRET_BUNDLE_ID ?? null;
     },
   };
 }

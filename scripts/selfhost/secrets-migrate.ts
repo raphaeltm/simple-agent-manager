@@ -40,6 +40,8 @@ export interface MigrateDeps {
   adoptAndCheck: () => Promise<{ healthy: boolean; detail: string }>;
   /** Secret names in the deploy version deploy/current.json names (plaintext-scan.ts). */
   currentVersionSecrets: () => Promise<string[]>;
+  /** SAM_SECRET_BUNDLE_ID of that version, or null when it names none. */
+  currentVersionBundleId: () => Promise<string | null>;
 }
 
 export interface MigrateInput {
@@ -125,12 +127,14 @@ export async function runMigration(
   };
 
   let alreadySealed = false;
+  let bundleId = '';
   try {
     log('1/6 choosing the key provider and sealing the existing secrets (selfhost:deploy --init)');
     await deps.init();
     log('2/6 contract check: key agent -> Worker loader, every secret unchanged');
     const checked = await deps.preflight({ box: input.box, stateDir, expected });
-    log(`    bundle ${checked.bundleId}: the Worker gets ${checked.checked} secrets`);
+    bundleId = checked.bundleId;
+    log(`    bundle ${bundleId}: the Worker gets ${checked.checked} secrets`);
     log('3/6 starting the key agent and the updated fence (docker compose up -d --build)');
     await deps.startStack();
     // Already switched (a selfhost:upgrade ran the sealed deploy, or an earlier migrate kept the
@@ -142,8 +146,16 @@ export async function runMigration(
     throw error;
   }
 
-  // Verify what runs and go straight to the removal.
+  // Verify what runs and go straight to the removal. If the running version names an older bundle
+  // (secrets.env changed since an earlier migrate kept the files), the checked bundle is deployed
+  // first: the files may go only once the Worker runs the bundle that holds them. The box already
+  // runs sealed, so a failure here leaves it as it is (no plaintext rollback) and removes nothing.
   if (alreadySealed) {
+    const runningBundle = await deps.currentVersionBundleId();
+    if (runningBundle !== bundleId) {
+      log(`4/6 the running version uses bundle ${runningBundle}; deploying ${bundleId} first`);
+      await deps.deploy(false);
+    }
     const running = await deps.adoptAndCheck();
     if (!running.healthy) {
       throw new Error(
