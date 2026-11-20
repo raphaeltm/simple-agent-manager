@@ -6,7 +6,12 @@ import type {
   InboxReplyRequest,
   InboxReplyResponse,
 } from '@simple-agent-manager/shared';
+import {
+  AcpInteractionBrowserAnswerSchema,
+  AcpInteractionIdSchema,
+} from '@simple-agent-manager/shared';
 import { ulid } from '@simple-agent-manager/worker-core';
+import * as v from 'valibot';
 
 import { OperationError } from './errors';
 import { requireActable } from './inbox-write-core';
@@ -43,9 +48,32 @@ export async function replyToInboxItem(
   )
     .bind(item.projectId, item.ref, ctx.actor.userId)
     .first<{ id: number; message_id: string; agent_acted_at: number | null }>();
+  let resumeId: string | undefined;
+  let retryPermission: { interactionId: string; answer: AcpInteractionBrowserAnswer } | undefined;
   if (prior?.agent_acted_at === null) {
     // If this read fails the ledger remains intact and no second delivery is created.
     const message = await ctx.ports.chat.getInboxReplyDelivery(item.projectId, prior.message_id);
+    if (
+      message &&
+      (message.deliveryState === 'failed' || message.deliveryState === 'expired') &&
+      item.kind === 'permission' &&
+      message.metadata?.inboxReplyPermission !== undefined
+    ) {
+      assertReplySource(message, binding);
+      const parsed = v.safeParse(
+        v.object({
+          interactionId: AcpInteractionIdSchema,
+          answer: AcpInteractionBrowserAnswerSchema,
+        }),
+        message.metadata.inboxReplyPermission
+      );
+      if (!parsed.success || parsed.output.answer.decision.kind !== 'selected_option')
+        throw new OperationError(
+          'conflict',
+          'The previous permission reply could not be reconciled'
+        );
+      retryPermission = parsed.output;
+    }
     if (message?.metadata?.inboxReplyFingerprint === fingerprint) {
       assertReplyBinding(message, binding);
       // Only a new human POST may retry a terminal delivery. Retain its ledger: a delivery
@@ -54,17 +82,23 @@ export async function replyToInboxItem(
       if (message.deliveryState !== 'failed' && message.deliveryState !== 'expired')
         return acceptedReply(message, binding);
     }
-    // This may be another request between its D1 reservation and DO acceptance. Only
-    // that request can roll back its own reservation after a definitive failed acceptance.
-    if (!message)
-      throw new OperationError(
-        'conflict',
-        'The previous inbox reply is still being accepted; retry shortly'
-      );
+    // Absence cannot prove an older RPC will never commit. Resume the same delivery ID:
+    // ProjectData's acceptance transaction chooses one payload and deduplicates both writers.
+    if (!message) resumeId = prior.message_id;
   }
+  if (resumeId && item.kind === 'permission' && item.status !== 'open')
+    throw new OperationError(
+      'conflict',
+      'The permission was answered before this reply was accepted; inspect its chat'
+    );
   const preparedPermission =
     ref.store === 'attention' ? await prepareReplyPermission(ctx, item, sessionId) : null;
-  const messageId = ulid();
+  const permission =
+    retryPermission ??
+    (preparedPermission && item.answerSpec.type === 'interaction'
+      ? { interactionId: item.answerSpec.interactionId ?? '', answer: preparedPermission }
+      : undefined);
+  const messageId = resumeId ?? ulid();
   let recorded = false;
   try {
     const accepted = await send.send(
@@ -75,12 +109,9 @@ export async function replyToInboxItem(
         title: item.title,
         deliveryId: messageId,
         fingerprint,
-        ...(preparedPermission && item.answerSpec.type === 'interaction'
+        ...(permission
           ? {
-              permission: {
-                interactionId: item.answerSpec.interactionId ?? '',
-                answer: preparedPermission,
-              },
+              permission,
               async afterAcceptance() {
                 // The canonical prompt is already durable. A failed immediate rejection is
                 // retried by the delivery adapter before it can deliver this prompt.
@@ -89,10 +120,8 @@ export async function replyToInboxItem(
                     ctx.actor.userId,
                     item.projectId,
                     sessionId,
-                    item.answerSpec.type === 'interaction'
-                      ? (item.answerSpec.interactionId ?? '')
-                      : '',
-                    preparedPermission
+                    permission.interactionId,
+                    permission.answer
                   );
                 } catch (error) {
                   console.warn(
@@ -125,26 +154,46 @@ export async function replyToInboxItem(
               "AND EXISTS (SELECT 1 FROM operations_action_approvals WHERE id = ? AND requesting_project_id = ? AND requesting_session_id = ? AND status = 'pending' AND expires_at > ?)";
             sourceGuard.values = [ref.id, item.projectId, sessionId, new Date().toISOString()];
           }
-          const reservation = await ctx.env.DATABASE.prepare(
-            `INSERT INTO inbox_replies (project_id, item_ref, user_id, message_id, replied_at, permission_rejected)
+          const reservation = resumeId
+            ? await ctx.env.DATABASE.prepare(
+                `UPDATE inbox_replies SET id = id
+                 WHERE project_id = ? AND item_ref = ? AND user_id = ? AND id = ? AND message_id = ?
+                   AND agent_acted_at IS NULL AND id = (SELECT MAX(id) FROM inbox_replies
+                     WHERE project_id = ? AND item_ref = ? AND user_id = ?)
+                   ${sourceGuard.sql}`
+              )
+                .bind(
+                  item.projectId,
+                  item.ref,
+                  ctx.actor.userId,
+                  prior?.id ?? 0,
+                  messageId,
+                  item.projectId,
+                  item.ref,
+                  ctx.actor.userId,
+                  ...sourceGuard.values
+                )
+                .run()
+            : await ctx.env.DATABASE.prepare(
+                `INSERT INTO inbox_replies (project_id, item_ref, user_id, message_id, replied_at, permission_rejected)
              SELECT ?, ?, ?, ?, ?, ? WHERE COALESCE((SELECT MAX(id) FROM inbox_replies
                WHERE project_id = ? AND item_ref = ? AND user_id = ?), 0) = ?
                ${sourceGuard.sql}`
-          )
-            .bind(
-              item.projectId,
-              item.ref,
-              ctx.actor.userId,
-              messageId,
-              Date.now(),
-              item.kind === 'permission' ? 1 : 0,
-              item.projectId,
-              item.ref,
-              ctx.actor.userId,
-              prior?.id ?? 0,
-              ...sourceGuard.values
-            )
-            .run();
+              )
+                .bind(
+                  item.projectId,
+                  item.ref,
+                  ctx.actor.userId,
+                  messageId,
+                  Date.now(),
+                  item.kind === 'permission' ? 1 : 0,
+                  item.projectId,
+                  item.ref,
+                  ctx.actor.userId,
+                  prior?.id ?? 0,
+                  ...sourceGuard.values
+                )
+                .run();
           if (reservation.meta.changes !== 1)
             throw new OperationError(
               'conflict',
@@ -156,24 +205,21 @@ export async function replyToInboxItem(
     );
     if (typeof accepted.messageId !== 'string' || typeof accepted.deliveryId !== 'string')
       throw new OperationError('conflict', 'Inbox replies require durable chat delivery');
-    return {
-      ref: item.ref,
-      sessionId: item.sessionId,
-      status: 'queued',
-      messageId: accepted.messageId,
-      deliveryId: accepted.deliveryId,
-    };
+    // Either writer can win fixed-ID acceptance, whose intent comparison excludes trusted
+    // metadata. Validate the canonical winner before either original or resumed POST says 202.
+    const message = await ctx.ports.chat.getInboxReplyDelivery(item.projectId, messageId);
+    if (!message)
+      throw new OperationError(
+        'conflict',
+        'Inbox reply acceptance is not yet available; retry shortly'
+      );
+    return acceptedReply(message, binding);
   } catch (error) {
     if (recorded) {
-      // SQL acceptance precedes fallible finalizers in ProjectData. Only a definitive
-      // absence authorizes rollback; an unavailable lookup retains the durable ledger.
+      // A failed or absent receipt cannot fence a delayed RPC. Keep this reservation so an
+      // explicit retry resumes the same ID instead of racing a second canonical delivery.
       const message = await ctx.ports.chat.getInboxReplyDelivery(item.projectId, messageId);
       if (message) return acceptedReply(message, binding);
-      await ctx.env.DATABASE.prepare(
-        'DELETE FROM inbox_replies WHERE project_id = ? AND item_ref = ? AND message_id = ?'
-      )
-        .bind(item.projectId, item.ref, messageId)
-        .run();
     }
     throw error;
   }
@@ -186,15 +232,19 @@ interface ReplyBinding {
   fingerprint: string;
 }
 
-function assertReplyBinding(message: AgentMailboxMessage, binding: ReplyBinding): void {
+function assertReplySource(message: AgentMailboxMessage, binding: ReplyBinding): void {
   if (
     message.sourceKind !== 'inbox_reply' ||
     message.targetSessionId !== binding.sessionId ||
     message.senderType !== 'human' ||
     message.senderId !== binding.userId ||
-    message.metadata?.inboxRef !== binding.ref ||
-    message.metadata?.inboxReplyFingerprint !== binding.fingerprint
+    message.metadata?.inboxRef !== binding.ref
   )
+    throw new OperationError('conflict', 'The previous inbox reply could not be reconciled');
+}
+function assertReplyBinding(message: AgentMailboxMessage, binding: ReplyBinding): void {
+  assertReplySource(message, binding);
+  if (message.metadata?.inboxReplyFingerprint !== binding.fingerprint)
     throw new OperationError('conflict', 'The previous inbox reply could not be reconciled');
 }
 function acceptedReply(message: AgentMailboxMessage, binding: ReplyBinding): InboxReplyResponse {

@@ -145,9 +145,10 @@ file a duplicate item for the same conversation. An agent must handle outstandin
 withdrawing the item with `cancel`.
 
 A failed or expired delivery does not bring the item back. Sending the reply again explicitly
-creates a new delivery; expiry does not prove the earlier message was never received. If delivery
-is ambiguous, inspect the source chat before sending again; the endpoint returns a conflict
-rather than enqueueing another copy.
+creates a new delivery; expiry does not prove the earlier message was never received. If acceptance
+was interrupted before a canonical message exists, an explicit retry resumes the same delivery id.
+Concurrent attempts are deduplicated, and a conflicting receipt is rejected. If delivery remains
+ambiguous, inspect the source chat before sending again.
 
 The backend supports these replies through `POST /api/projects/:projectId/inbox/items/:ref/reply`.
 The conversation composer in the item is being delivered separately; the existing answer buttons

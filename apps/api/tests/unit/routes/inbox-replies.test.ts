@@ -123,6 +123,66 @@ function insert(table: string, row: Record<string, unknown>) {
     .prepare(`INSERT INTO ${table} (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`)
     .run(...Object.values(row));
 }
+function permission() {
+  const ref = 'attention:chat:marker';
+  const marker = {
+    id: 'marker',
+    sessionId: 'chat',
+    taskId: 'task',
+    source: 'acp_interaction',
+    reason: 'acp_interaction_pending',
+    metadata: JSON.stringify({
+      source: 'acp_interaction',
+      interactionId: '11111111-1111-4111-8111-111111111111',
+      kind: 'permission',
+    }),
+    createdAt: 1000,
+    expiresAt: null,
+    resolvedAt: null as number | null,
+    inboxArchivedAt: null,
+  };
+  insert('session_summaries', {
+    id: 'chat',
+    project_id: 'p',
+    created_by_user_id: 'owner',
+    updated_at: 1000,
+    attention_json: JSON.stringify({
+      markerId: 'marker',
+      kind: 'needs_input',
+      createdAt: 1000,
+      expiresAt: null,
+      source: 'acp_interaction',
+      reason: 'acp_interaction_pending',
+      interactionId: '11111111-1111-4111-8111-111111111111',
+      interactionKind: 'permission',
+    }),
+  });
+  edge.marker.mockImplementation(async () => ({
+    session: { topic: 'Chat' },
+    marker,
+    canRead: true,
+    writer: true,
+  }));
+  edge.reject.mockResolvedValue([
+    {
+      interactionId: '11111111-1111-4111-8111-111111111111',
+      answerOptions: [
+        { id: 'allow', kind: 'allow_once' },
+        { id: 'reject-specific', kind: 'reject_once' },
+      ],
+    },
+  ]);
+  edge.answer.mockImplementation(async (_env, _user, _project, _chat, _interaction, answer) => {
+    expect(answer.decision).toMatchObject({
+      kind: 'selected_option',
+      optionId: 'reject-specific',
+    });
+    marker.resolvedAt = Date.now();
+    sqlite.prepare('UPDATE session_summaries SET attention_json = NULL').run();
+  });
+  return { ref, marker };
+}
+
 function pauseSendAuthorization() {
   const authorize = edge.writer.getMockImplementation()!;
   let entered!: () => void;
@@ -234,8 +294,19 @@ beforeEach(() => {
     };
   });
   edge.accept.mockImplementation(async (_env, _projectId, input) => {
+    const existing = edge.deliveries.get(input.deliveryId);
+    if (existing) {
+      if (
+        existing.content !== input.deliveryContent ||
+        existing.targetSessionId !== input.targetSessionId ||
+        existing.sourceKind !== input.sourceKind
+      )
+        throw new Error('deliveryId already belongs to a different prompt intent');
+      return { message: { id: input.deliveryId }, transcriptMessageId: input.deliveryId };
+    }
     edge.deliveries.set(input.deliveryId, {
       id: input.deliveryId,
+      content: input.deliveryContent,
       promptMessageId: input.deliveryId,
       sourceKind: input.sourceKind,
       targetSessionId: input.targetSessionId,
@@ -958,10 +1029,11 @@ describe('inbox replies through the real route on SQLite', () => {
     try {
       expect(edge.deliveries.size).toBe(0);
       const second = await req(path(ref, '/reply'), { content: 'Use the project setting.' });
-      expect(second.status).toBe(409);
+      expect(second.status).toBe(202);
+      expect(second.body.deliveryId).toBe((reservation as { message_id: string }).message_id);
       expect(sqlite.prepare('SELECT message_id FROM inbox_replies').all()).toEqual([reservation]);
-      expect(edge.accept).toHaveBeenCalledTimes(1);
-      expect(edge.messages).toHaveLength(0);
+      expect(edge.accept).toHaveBeenCalledTimes(2);
+      expect(edge.messages).toHaveLength(1);
     } finally {
       release();
     }
@@ -995,6 +1067,158 @@ describe('inbox replies through the real route on SQLite', () => {
     expect(edge.accept).toHaveBeenCalledTimes(1);
   });
 
+  it('refuses a missing permission receipt after another answer settles its request', async () => {
+    const { ref, marker } = permission();
+    edge.accept.mockRejectedValueOnce(new Error('accept disconnected'));
+    edge.getDelivery.mockRejectedValueOnce(new Error('lookup unavailable'));
+    const payload = { content: 'Please use a safer command.' };
+    expect((await req(path(ref, '/reply'), payload)).status).toBe(500);
+    marker.resolvedAt = Date.now();
+    sqlite.prepare('UPDATE session_summaries SET attention_json = NULL').run();
+    expect((await req(path(ref, '/reply'), payload)).status).toBe(409);
+    expect(edge.accept).toHaveBeenCalledTimes(1);
+    expect(edge.answer).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM inbox_replies').get()).toEqual({ n: 1 });
+  });
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ])(
+    'a terminal permission resend retains the reject receipt; competing: %s, changed content: %s',
+    async (competing, changed) => {
+      const { ref } = permission();
+      const payload = { content: 'Please use a safer command.' };
+      const first = await req(path(ref, '/reply'), payload);
+      expect(first.status).toBe(202);
+      const guard = edge.deliveries.get(first.body.deliveryId)!.metadata as {
+        inboxReplyPermission: unknown;
+      };
+      edge.deliveries.get(first.body.deliveryId)!.deliveryState = 'failed';
+      if (competing) edge.answer.mockRejectedValue(errors.conflict('another decision won'));
+      const second = await req(
+        path(ref, '/reply'),
+        changed ? { content: 'Please use read-only commands instead.' } : payload
+      );
+      expect(second.status).toBe(202);
+      expect(second.body.deliveryId).not.toBe(first.body.deliveryId);
+      const delivery = edge.deliveries.get(second.body.deliveryId)!;
+      expect(delivery.metadata).toMatchObject({ inboxReplyPermission: guard.inboxReplyPermission });
+      const rejection = await rejectInboxReplyPermission(env, {
+        projectId: 'p',
+        claim: { message: delivery } as unknown as VmPromptDeliveryAdapterInput['claim'],
+      });
+      if (competing)
+        expect(rejection).toMatchObject({ kind: 'failed', reason: 'delivery_conflict' });
+      else expect(rejection).toBeNull();
+    }
+  );
+  it.each(['failed', 'expired'])(
+    'a resumed receipt becoming %s cannot report queued',
+    async (state) => {
+      const ref = ask();
+      const payload = { content: 'Please use the original reservation.' };
+      const accept = edge.accept.getMockImplementation()!;
+      edge.accept.mockRejectedValueOnce(new Error('accept disconnected'));
+      edge.getDelivery.mockRejectedValueOnce(new Error('lookup unavailable'));
+      expect((await req(path(ref, '/reply'), payload)).status).toBe(500);
+      const originalId = replyMessageId(ref)!;
+      edge.accept.mockImplementationOnce(async (...args) => {
+        const accepted = await accept(...args);
+        edge.deliveries.get(originalId)!.deliveryState = state;
+        return accepted;
+      });
+      expect((await req(path(ref, '/reply'), payload)).status).toBe(409);
+      expect(replyMessageId(ref)).toBe(originalId);
+      const explicit = await req(path(ref, '/reply'), payload);
+      expect(explicit.status).toBe(202);
+      expect(explicit.body.deliveryId).not.toBe(originalId);
+    }
+  );
+  it('the original sender validates the canonical fingerprint before returning queued', async () => {
+    const ref = ask();
+    const accept = edge.accept.getMockImplementation()!;
+    edge.accept.mockImplementationOnce(async (...args) => {
+      const accepted = await accept(...args);
+      const metadata = edge.deliveries.get(String(accepted.message.id))!.metadata as Record<
+        string,
+        unknown
+      >;
+      metadata.inboxReplyFingerprint = 'different winner';
+      return accepted;
+    });
+    expect((await req(path(ref, '/reply'), { content: 'Original content' })).status).toBe(409);
+    expect(edge.messages).toHaveLength(1);
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM inbox_replies').get()).toEqual({ n: 1 });
+  });
+  it('resumes the same reserved ID after both acceptance and its cleanup lookup fail', async () => {
+    const ref = ask();
+    edge.accept.mockRejectedValueOnce(new Error('accept RPC disconnected before receipt'));
+    edge.getDelivery.mockRejectedValueOnce(new Error('cleanup lookup unavailable'));
+    const payload = { content: 'Keep the original reservation.' };
+    expect((await req(path(ref, '/reply'), payload)).status).toBe(500);
+    const prior = sqlite.prepare('SELECT * FROM inbox_replies').get() as { message_id: string };
+    expect(edge.messages).toHaveLength(0);
+    const retry = await req(path(ref, '/reply'), payload);
+    expect(retry.status).toBe(202);
+    expect(retry.body.deliveryId).toBe(prior.message_id);
+    expect(sqlite.prepare('SELECT * FROM inbox_replies').all()).toEqual([prior]);
+    expect(edge.messages).toHaveLength(1);
+  });
+  it.each(['answered', 'expired', 'moved', 'acknowledged', 'superseded'] as const)(
+    'refuses resuming a missing delivery if its reservation is %s during send preparation',
+    async (change) => {
+      const ref = ask();
+      edge.accept.mockRejectedValueOnce(new Error('no acceptance receipt'));
+      edge.getDelivery.mockRejectedValueOnce(new Error('lookup unavailable'));
+      const payload = { content: 'Keep the reservation.' };
+      expect((await req(path(ref, '/reply'), payload)).status).toBe(500);
+      const lookup = edge.getDelivery.getMockImplementation()!;
+      edge.getDelivery.mockImplementationOnce(async (...args) => {
+        // The retry has read the outstanding ledger and is now checking the canonical receipt.
+        if (change === 'answered') sqlite.prepare("UPDATE asks SET status = 'answered'").run();
+        if (change === 'expired')
+          sqlite.prepare('UPDATE asks SET expires_at = ?').run(Date.now() - 1);
+        if (change === 'moved')
+          sqlite.prepare("UPDATE asks SET source_session_id = 'other-chat'").run();
+        if (change === 'acknowledged')
+          sqlite.prepare('UPDATE inbox_replies SET agent_acted_at = ?').run(Date.now());
+        if (change === 'superseded')
+          sqlite
+            .prepare(
+              "INSERT INTO inbox_replies (project_id,item_ref,user_id,message_id,replied_at) VALUES ('p',?,'owner','later-id',?)"
+            )
+            .run(ref, Date.now());
+        return lookup(...args);
+      });
+      expect((await req(path(ref, '/reply'), payload)).status).toBe(409);
+      expect(edge.accept).toHaveBeenCalledTimes(1);
+      expect(edge.messages).toHaveLength(0);
+    }
+  );
+  it('a different payload losing fixed-ID acceptance returns conflict without replacing the receipt', async () => {
+    const ref = ask();
+    const accept = edge.accept.getMockImplementation()!;
+    edge.accept.mockRejectedValueOnce(new Error('acceptance response lost'));
+    edge.getDelivery.mockRejectedValueOnce(new Error('cleanup unavailable'));
+    expect((await req(path(ref, '/reply'), { content: 'Original payload' })).status).toBe(500);
+    const originalId = replyMessageId(ref)!;
+    // Its absence read races the original handler finally committing the old request.
+    const lookup = edge.getDelivery.getMockImplementation()!;
+    edge.getDelivery.mockImplementationOnce(async () => {
+      await accept(...edge.accept.mock.calls[0]!);
+      return null;
+    });
+    expect((await req(path(ref, '/reply'), { content: 'Different retry payload' })).status).toBe(
+      409
+    );
+    edge.getDelivery.mockImplementation(lookup);
+    expect(replyMessageId(ref)).toBe(originalId);
+    expect(edge.messages).toHaveLength(1);
+    expect(edge.messages[0].content).toBe('Original payload');
+    expect((await req(path(ref))).body.item.withAgent).toBe(true);
+  });
   it('preserves the ledger on an unknown acceptance and reconciles the same delivery on retry', async () => {
     const ref = ask();
     const accept = edge.accept.getMockImplementation()!;
@@ -1316,7 +1540,7 @@ describe('inbox replies through the real route on SQLite', () => {
     expect((await req('?filter=archived')).body.items[0].withAgent).toBe(false);
   });
 
-  it('a refused delivery restores the item; foreign project, nonwriter and missing-chat requests write nothing', async () => {
+  it('a refused delivery retains a recoverable reservation; foreign project, nonwriter and missing-chat requests write nothing', async () => {
     const ref = ask();
     const foreign = await req(path(ref, '/reply'), { content: 'No' }, 'stranger', 'other');
     expect(foreign.status).toBe(404);
@@ -1324,8 +1548,8 @@ describe('inbox replies through the real route on SQLite', () => {
     expect((await req(path(ref, '/reply'), { content: 'No' }, 'mate')).status).toBe(403);
     edge.accept.mockRejectedValue(new Error('DO unavailable'));
     expect((await req(path(ref, '/reply'), { content: 'Try this' })).status).toBe(500);
-    expect(sqlite.prepare('SELECT count(*) AS n FROM inbox_replies').get()).toEqual({ n: 0 });
-    expect((await req('/count')).body.needsYou).toBe(1);
+    expect(sqlite.prepare('SELECT count(*) AS n FROM inbox_replies').get()).toEqual({ n: 1 });
+    expect((await req('/count')).body.needsYou).toBe(0);
     sqlite.prepare('UPDATE asks SET source_session_id = NULL').run();
     expect((await req(path(ref, '/reply'), { content: 'Hi' })).status).toBe(400);
   });
@@ -1395,69 +1619,14 @@ describe('inbox replies through the real route on SQLite', () => {
   });
 
   it('rejects a permission before delivery, retains its settled conversation under Archived, and brings a response back without restoring permission buttons', async () => {
-    const ref = 'attention:chat:marker';
-    const marker = {
-      id: 'marker',
-      sessionId: 'chat',
-      taskId: 'task',
-      source: 'acp_interaction',
-      reason: 'acp_interaction_pending',
-      metadata: JSON.stringify({
-        source: 'acp_interaction',
-        interactionId: '11111111-1111-4111-8111-111111111111',
-        kind: 'permission',
-      }),
-      createdAt: 1000,
-      expiresAt: null,
-      resolvedAt: null as number | null,
-      inboxArchivedAt: null,
-    };
-    insert('session_summaries', {
-      id: 'chat',
-      project_id: 'p',
-      created_by_user_id: 'owner',
-      updated_at: 1000,
-      attention_json: JSON.stringify({
-        markerId: 'marker',
-        kind: 'needs_input',
-        createdAt: 1000,
-        expiresAt: null,
-        source: 'acp_interaction',
-        reason: 'acp_interaction_pending',
-        interactionId: '11111111-1111-4111-8111-111111111111',
-        interactionKind: 'permission',
-      }),
-    });
-    edge.marker.mockImplementation(async () => ({
-      session: { topic: 'Chat' },
-      marker,
-      canRead: true,
-      writer: true,
-    }));
-    edge.reject.mockResolvedValue([
-      {
-        interactionId: '11111111-1111-4111-8111-111111111111',
-        answerOptions: [
-          { id: 'allow', kind: 'allow_once' },
-          { id: 'reject-specific', kind: 'reject_once' },
-        ],
-      },
-    ]);
-    edge.answer.mockImplementation(async (_env, _user, _project, _chat, _interaction, answer) => {
-      expect(answer.decision).toMatchObject({
-        kind: 'selected_option',
-        optionId: 'reject-specific',
-      });
-      marker.resolvedAt = Date.now();
-      sqlite.prepare('UPDATE session_summaries SET attention_json = NULL').run();
-    });
+    const { ref, marker } = permission();
     // A refused durable acceptance must leave the permission untouched and retryable.
     edge.accept.mockRejectedValueOnce(new Error('ProjectData unavailable'));
     const failed = await req(path(ref, '/reply'), { content: 'Please use a safer command.' });
     expect(failed.status).toBe(500);
     expect(edge.answer).not.toHaveBeenCalled();
     expect(marker.resolvedAt).toBeNull();
-    expect((await req('/count')).body).toEqual({ needsYou: 1, blocking: 1 });
+    expect((await req('/count')).body).toEqual({ needsYou: 0, blocking: 0 });
     // Acceptance succeeds but the immediate rejection fails; its durable metadata
     // lets the delivery adapter repair the rejection before forwarding the message.
     edge.answer.mockRejectedValueOnce(new Error('InteractionStore unavailable'));

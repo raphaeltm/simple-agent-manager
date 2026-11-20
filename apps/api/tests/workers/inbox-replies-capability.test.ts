@@ -70,6 +70,55 @@ async function expectInbox(s: Seeded, refs: string[], blocking: number) {
 }
 
 describe('inbox reply capability through real routes and Durable Objects', () => {
+  it('deduplicates concurrent fixed-ID acceptance in ProjectData and preserves the canonical winner', async () => {
+    const s = await seed();
+    const deliveryId = crypto.randomUUID();
+    const input = {
+      deliveryId,
+      targetSessionId: s.chatSessionId,
+      displayContent: 'One canonical reply',
+      deliveryContent: 'SAM inbox header\n\nOne canonical reply',
+      senderType: 'human' as const,
+      senderId: s.ownerId,
+      sourceKind: 'inbox_reply' as const,
+      metadata: { inboxRef: 'ask:fixed-id', inboxReplyFingerprint: 'original' },
+    };
+    const [first, second] = await Promise.all([
+      s.project.acceptPromptDelivery(input),
+      s.project.acceptPromptDelivery(input),
+    ]);
+    expect(first.message.id).toBe(deliveryId);
+    expect(second.message.id).toBe(deliveryId);
+    expect([first.transcriptInserted, second.transcriptInserted].sort()).toEqual([false, true]);
+    // Catch inside the DO so workerd's intentional rejected-RPC logging is not mistaken for
+    // an unhandled test rejection. This still invokes the real acceptance method and lock.
+    const rejectedIntent = await runInDurableObject(s.project, async (instance) => {
+      try {
+        await instance.acceptPromptDelivery({ ...input, deliveryContent: 'Different payload' });
+        return null;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    });
+    expect(rejectedIntent).toContain('different prompt intent');
+    // Render-equivalent metadata does not replace the canonical receipt. The route must
+    // validate that receipt's fingerprint rather than trusting fixed-ID intent deduplication.
+    const replay = await s.project.acceptPromptDelivery({
+      ...input,
+      metadata: { ...input.metadata, inboxReplyFingerprint: 'different' },
+    });
+    expect(replay.message.metadata?.inboxReplyFingerprint).toBe('original');
+    const counts = await runInDurableObject(s.project, async (_instance, state) => ({
+      transcript: state.storage.sql
+        .exec('SELECT COUNT(*) AS n FROM chat_messages WHERE id = ?', deliveryId)
+        .one().n,
+      mailbox: state.storage.sql
+        .exec('SELECT COUNT(*) AS n FROM session_inbox WHERE id = ?', deliveryId)
+        .one().n,
+    }));
+    expect(counts).toEqual({ transcript: 1, mailbox: 1 });
+  });
+
   beforeEach(() => {
     fetchMock.mockReset();
     fetchMock.mockImplementation(async () => Response.json({ ok: true }));
