@@ -44,10 +44,16 @@ import { refreshOwnedIdea } from './idea-refresh';
 import { positive } from './numbers';
 import type { FeedbackErrorGroup } from './types';
 
-/** Generated body markers of a pre-ownership idea (`ideaDescription` before 2026-11). */
-const LEGACY_BODY_PREFIX =
-  '## Maintainer Instructions%Triage this automated platform feedback report%';
-const LEGACY_TITLE_PATTERN = 'Recurring % platform error';
+/**
+ * Generated body markers of a pre-ownership idea (`ideaDescription` before 2026-11). Matched
+ * with `substr`/`instr`, not `LIKE`: D1 rejects LIKE patterns longer than
+ * `D1_MAX_LIKE_PATTERN_BYTES` ("LIKE or GLOB pattern too complex"), which local SQLite allows.
+ */
+export const LEGACY_BODY_HEADING = '## Maintainer Instructions';
+export const LEGACY_BODY_SUMMARY = 'Triage this automated platform feedback report';
+export const LEGACY_TITLE_PATTERN = 'Recurring % platform error';
+/** D1's LIKE pattern ceiling (SQLITE_LIMIT_LIKE_PATTERN_LENGTH on Cloudflare D1). */
+export const D1_MAX_LIKE_PATTERN_BYTES = 50;
 const TERMINAL_INCIDENT_SQL = "('resolved', 'rejected', 'expired')";
 
 export interface IncidentIdeaReconciliationResult {
@@ -117,12 +123,20 @@ async function adoptLegacyIdeas(ctx: StepContext): Promise<void> {
          AND idea.triggered_by = '${PIPELINE_IDEA_TRIGGERED_BY}'
          AND idea.status = 'draft' AND idea.priority = 0
          AND idea.title LIKE ?
-         AND idea.description LIKE ?
+         AND substr(idea.description, 1, ?) = ?
+         AND instr(idea.description, ?) > 0
          AND substr(rtrim(idea.description, char(9, 10, 13, 32)), -3) = '\`\`\`'
        ORDER BY triage.signature
        LIMIT ?`
     )
-      .bind(ctx.projectId, LEGACY_TITLE_PATTERN, LEGACY_BODY_PREFIX, ctx.batchSize)
+      .bind(
+        ctx.projectId,
+        LEGACY_TITLE_PATTERN,
+        LEGACY_BODY_HEADING.length,
+        LEGACY_BODY_HEADING,
+        LEGACY_BODY_SUMMARY,
+        ctx.batchSize
+      )
       .all<Candidate & { updated_at: string }>();
     const batch = rows.results ?? [];
     if (batch.length === 0) return;

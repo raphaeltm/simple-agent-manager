@@ -4,6 +4,8 @@
  * hourly diagnosis runner creates the idea, the real incident sweep decides dispatch, and the
  * hourly reconciliation closes or adopts ideas. Only the Durable Object link read is faked.
  */
+import { readFileSync } from 'node:fs';
+
 import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -19,6 +21,10 @@ import {
   reconcileIncidentIdeas,
   runPlatformFeedbackTriage,
 } from '../../../src/services/platform-feedback-triage';
+import {
+  D1_MAX_LIKE_PATTERN_BYTES,
+  LEGACY_TITLE_PATTERN,
+} from '../../../src/services/platform-feedback-triage/idea-reconciliation';
 import { setup } from '../../helpers/incident-trigger-fixtures';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -495,6 +501,30 @@ describe('incident idea ownership', () => {
     // Control: an untouched legacy idea with a trailing newline is adopted and closed.
     w.sqlite.prepare("UPDATE tasks SET description = ? WHERE id = 'legacy'").run(body);
     expect(await w.reconcile(T0 + HOUR)).toMatchObject({ adopted: 1, cancelled: 1 });
+  });
+});
+
+describe('D1 limits', () => {
+  it('keeps every LIKE pattern in the reconciliation under the D1 ceiling', () => {
+    // Local SQLite accepts long LIKE patterns; D1 rejects them at runtime ("LIKE or GLOB pattern
+    // too complex"). A 79-byte body pattern failed the adoption step on staging (2026-11-20)
+    // while every test here passed.
+    const source = readFileSync(
+      new URL(
+        '../../../src/services/platform-feedback-triage/idea-reconciliation.ts',
+        import.meta.url
+      ),
+      'utf8'
+    );
+    expect(new TextEncoder().encode(LEGACY_TITLE_PATTERN).length).toBeLessThanOrEqual(
+      D1_MAX_LIKE_PATTERN_BYTES
+    );
+    // Every LIKE binds that one checked constant; there are no inline or other patterns.
+    const likes = (source.match(/\bLIKE \?/g) ?? []).length;
+    const binds = (source.match(/\bLEGACY_TITLE_PATTERN\b(?!\s*=)/g) ?? []).length;
+    expect(likes).toBe(3);
+    expect(binds).toBe(likes);
+    expect(source).not.toMatch(/\bLIKE\s+'/);
   });
 });
 
