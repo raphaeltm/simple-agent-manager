@@ -163,3 +163,19 @@ describe('caddy/start.sh', () => {
     expect(run.out).toMatch(message);
   });
 });
+
+describe('Caddy rejects metadata broker listener collisions', () => {
+  it.each(Object.keys(BOX_RESERVED_PORTS).filter((name) => name !== 'GCE_METADATA_PROXY_PORT'))(
+    'refuses a shell override matching %s',
+    (name) => {
+      const run = startSh({
+        ...composeEnv(),
+        GCE_METADATA_PROXY_PORT: '31000',
+        [name]: BOX_LISTEN_ADDRESSES.includes(name) ? ':31000' : '31000',
+      });
+      expect(run.status, run.out).toBe(64);
+      expect(run.out).toContain('collides with ' + name);
+      expect(run.out).not.toContain('caddy run');
+    }
+  );
+});

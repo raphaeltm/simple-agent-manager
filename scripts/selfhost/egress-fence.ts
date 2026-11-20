@@ -37,7 +37,7 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
-import type { PortRange } from './box-settings.js';
+import { boxListenerPorts, type PortRange } from './box-settings.js';
 import { assertOpenable, FORBIDDEN_IPV4, FORBIDDEN_IPV6 } from './fence-addresses.js';
 export { FORBIDDEN_IPV4, FORBIDDEN_IPV6 } from './fence-addresses.js';
 import { formatProbes, startCheckProbes } from './fence-probes.js';
@@ -139,12 +139,7 @@ export function metadataProxyEnabled(box: Readonly<Record<string, string>>): boo
 }
 
 export function metadataProxyPort(box: Readonly<Record<string, string>>): number {
-  return intSetting(
-    box.GCE_METADATA_PROXY_PORT,
-    DEFAULT_GCE_METADATA_PROXY_PORT,
-    'GCE_METADATA_PROXY_PORT',
-    1024
-  );
+  return boxListenerPorts(box).GCE_METADATA_PROXY_PORT!;
 }
 
 /** Nameservers from resolv.conf text, IP literals only (zone ids dropped). */

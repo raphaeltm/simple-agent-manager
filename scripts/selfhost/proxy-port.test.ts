@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveTunnelPortRange } from './box-settings.js';
+import {
+  BOX_LISTEN_ADDRESSES,
+  BOX_RESERVED_PORTS,
+  resolveTunnelPortRange,
+} from './box-settings.js';
 import { buildFencePlan } from './egress-fence.js';
 
 const range = { start: 20000, end: 29999 };
@@ -42,5 +46,33 @@ describe('metadata proxy listener reservation', () => {
       objectStore: [],
     });
     expect(plan.loopbackPorts).toContain(30000);
+  });
+});
+
+describe('metadata broker and managed listener collisions', () => {
+  it.each(Object.keys(BOX_RESERVED_PORTS).filter((name) => name !== 'GCE_METADATA_PROXY_PORT'))(
+    'rejects broker overlap with %s',
+    (name) => {
+      const box = {
+        CELLD_BUCKET: 'gs://fleet',
+        GCE_METADATA_PROXY_PORT: '31000',
+        [name]: BOX_LISTEN_ADDRESSES.includes(name) ? ':31000' : '31000',
+      };
+      expect(() => resolveTunnelPortRange(box)).toThrow(/collides/);
+      expect(() =>
+        buildFencePlan({
+          box,
+          leaseRange: range,
+          resolvConf: 'nameserver 127.0.0.53\n',
+          objectStore: [],
+        })
+      ).toThrow(/collides/);
+    }
+  );
+
+  it('reserves disabled optional listener ports against future broker impersonation', () => {
+    expect(() =>
+      resolveTunnelPortRange({ GCE_METADATA_PROXY: 'off', GCE_METADATA_PROXY_PORT: '1025' })
+    ).toThrow(/MAIL_COLLECTOR_SMTP_PORT/);
   });
 });

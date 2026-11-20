@@ -195,6 +195,25 @@ function boxPort(box: Readonly<Record<string, string>>, name: string, fallback: 
   return integer(port, fallback, name, bounds);
 }
 
+/** Effective managed listeners share one parser and cannot impersonate the metadata broker. */
+export function boxListenerPorts(
+  box: Readonly<Record<string, string>>
+): Readonly<Record<string, number>> {
+  const ports = Object.fromEntries(
+    Object.entries(BOX_RESERVED_PORTS).map(([name, fallback]) => [
+      name,
+      boxPort(box, name, fallback),
+    ])
+  );
+  const broker = ports.GCE_METADATA_PROXY_PORT;
+  for (const [name, port] of Object.entries(ports)) {
+    if (name !== 'GCE_METADATA_PROXY_PORT' && port === broker) {
+      throw new Error(`GCE_METADATA_PROXY_PORT (${broker}) collides with ${name}`);
+    }
+  }
+  return ports;
+}
+
 export function resolveTunnelPortRange(box: Readonly<Record<string, string>>): PortRange {
   const start = integer(
     box.REVERSE_TUNNEL_PORT_RANGE_START,
@@ -214,8 +233,7 @@ export function resolveTunnelPortRange(box: Readonly<Record<string, string>>): P
       `REVERSE_TUNNEL_PORT_RANGE_START.._END may hold at most ${MAX_REVERSE_TUNNEL_PORT_RANGE_SIZE} ports (the Worker refuses larger ranges)`
     );
   }
-  for (const [name, fallback] of Object.entries(BOX_RESERVED_PORTS)) {
-    const port = boxPort(box, name, fallback);
+  for (const [name, port] of Object.entries(boxListenerPorts(box))) {
     if (port >= start && port <= end) {
       throw new Error(
         `REVERSE_TUNNEL_PORT_RANGE ${start}-${end} contains ${name} (${port}); a node could bind it`
