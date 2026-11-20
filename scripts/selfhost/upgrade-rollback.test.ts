@@ -4,7 +4,12 @@ import { join, resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { finishRollbackCache, refreshRollbackCacheReceipt, runRollback } from './backup-lib.js';
+import {
+  beginRollbackCacheStart,
+  finishRollbackCache,
+  refreshRollbackCacheReceipt,
+  runRollback,
+} from './backup-lib.js';
 import { rollbackSteps } from './upgrade-instructions.js';
 import { type BoxContext, UPGRADE_PENDING_FILE } from './upgrade-lib.js';
 import { runManualRollback } from './upgrade-rollback.js';
@@ -12,6 +17,7 @@ import { runManualRollback } from './upgrade-rollback.js';
 vi.mock('./backup-lib.js', async (original) => ({
   ...(await original<typeof import('./backup-lib.js')>()),
   runRollback: vi.fn(),
+  beginRollbackCacheStart: vi.fn(),
   refreshRollbackCacheReceipt: vi.fn(),
   finishRollbackCache: vi.fn(),
 }));
@@ -41,6 +47,7 @@ beforeEach(() => {
   stateEnvs = [];
   dirty = false;
   vi.mocked(refreshRollbackCacheReceipt).mockReset();
+  vi.mocked(beginRollbackCacheStart).mockReset();
   vi.mocked(finishRollbackCache).mockReset();
   ctx = {
     box: { COMPOSE_PROJECT_NAME: 'owned-manual' },
@@ -77,6 +84,62 @@ const rollback = (checkHealth = async () => true) =>
   });
 
 describe('manual owned rollback', () => {
+  it.each([
+    'checkout',
+    'dependencies',
+    'services',
+    'build',
+    'intent',
+    'up-status',
+    'up-throw',
+    'refresh',
+    'health',
+    'finish',
+  ])(
+    'retries a recovery interrupted at the %s boundary without skipping snapshot restoration',
+    async (phase) => {
+      const runner = ctx.run;
+      let failed = false;
+      ctx.run = (command, args, env) => {
+        const matches =
+          (phase === 'checkout' && command === 'git' && args[0] === 'checkout') ||
+          (phase === 'dependencies' && command === 'pnpm' && args[0] === 'install') ||
+          (phase === 'services' && args.includes('config')) ||
+          (phase === 'build' && args.includes('build')) ||
+          (phase.startsWith('up-') && args.includes('up'));
+        if (matches && !failed) {
+          failed = true;
+          if (phase === 'up-throw') throw new Error('transport unavailable');
+          return { status: 1, stdout: '', stderr: 'withheld' };
+        }
+        return runner(command, args, env);
+      };
+      if (phase === 'intent')
+        vi.mocked(beginRollbackCacheStart).mockImplementationOnce(() => {
+          throw new Error('cannot persist intent');
+        });
+      if (phase === 'refresh')
+        vi.mocked(refreshRollbackCacheReceipt).mockImplementationOnce(() => {
+          throw new Error('cannot inspect replacement');
+        });
+      if (phase === 'finish')
+        vi.mocked(finishRollbackCache).mockImplementationOnce(() => {
+          throw new Error('cannot clear progress');
+        });
+      const health = vi
+        .fn()
+        .mockResolvedValueOnce(phase !== 'health')
+        .mockResolvedValue(true);
+      await expect(rollback(health)).rejects.toThrow(/Manual rollback did not complete/);
+      expect(existsSync(join(ctx.stateDir, UPGRADE_PENDING_FILE))).toBe(true);
+      if (phase !== 'finish') expect(finishRollbackCache).not.toHaveBeenCalled();
+      await rollback(health);
+      expect(runRollback).toHaveBeenCalledTimes(2);
+      expect(existsSync(join(ctx.stateDir, UPGRADE_PENDING_FILE))).toBe(false);
+      expect(steps.filter((step) => step === 'OWNED_SNAPSHOT_RESTORE')).toHaveLength(2);
+    }
+  );
+
   it('retries after dependency failure with the removed cache receipt still retained', async () => {
     const receipt = join(ctx.stateDir, 'rollback-cache-pending.json');
     let removed = false;

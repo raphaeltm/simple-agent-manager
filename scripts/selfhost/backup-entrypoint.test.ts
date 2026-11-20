@@ -125,6 +125,41 @@ afterEach(() => {
 });
 
 describe('selfhost:backup and selfhost:restore (real entry points, fake gcloud)', () => {
+  it('prints only the authenticated final project without target writes or runtime/store calls', () => {
+    const dest = join(root, 'project-backup');
+    expect(
+      run('backup.ts', [
+        '--to',
+        dest,
+        '--box-env',
+        join(root, 'box.env'),
+        '--state-dir',
+        join(root, 'state'),
+        '--encryption-key-file',
+        join(root, 'backup-key'),
+      ]).status
+    ).toBe(0);
+    writeFileSync(join(root, 'fresh.env'), 'CELLD_BUCKET=gs://fresh/celld\n', { mode: 0o600 });
+    writeFileSync(join(root, 'fake/calls.log'), '');
+    const output = run('restore.ts', [
+      '--from',
+      dest,
+      '--print-project',
+      '--box-env',
+      join(root, 'fresh.env'),
+      '--state-dir',
+      join(root, 'fresh-state'),
+      '--encryption-key-file',
+      join(root, 'backup-key'),
+    ]);
+    expect(output.status).toBe(0);
+    expect(output.stderr).toBe('');
+    expect(output.stdout).toMatch(/^sam-selfhost-[a-f0-9]{12}\n$/);
+    expect(readFileSync(join(root, 'fake/calls.log'), 'utf8')).toBe('');
+    expect(existsSync(join(root, 'fresh-state'))).toBe(false);
+    expect(existsSync(join(root, 'gcs/fresh'))).toBe(false);
+    expect(existsSync(join(root, 'fresh-state.restore-progress.json'))).toBe(false);
+  });
   it('uses a clean full copy after the stopped pass hits the confirmed POSIX stat of a missing finalized file', () => {
     writeFileSync(
       join(root, 'fake/posix-fail-once.json'),

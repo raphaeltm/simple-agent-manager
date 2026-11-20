@@ -77,6 +77,10 @@ it('preserves provider, pool and account after a failed binding, then completes 
         stdout: JSON.stringify(value),
         stderr: '',
       });
+      if (cmd.startsWith('projects get-iam-policy'))
+        return ok({
+          bindings: [{ role: 'roles/compute.securityAdmin', members: ['serviceAccount:acct'] }],
+        });
       if (cmd.startsWith('projects remove-iam-policy-binding')) {
         if (failBinding) {
           failBinding = false;

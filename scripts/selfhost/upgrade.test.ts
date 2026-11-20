@@ -28,6 +28,7 @@ vi.mock('./backup-lib.js', async (original) => ({
   runBackup: vi.fn(),
   assertRollbackCacheReady: vi.fn(),
   runRollback: vi.fn(),
+  beginRollbackCacheStart: vi.fn(),
   refreshRollbackCacheReceipt: vi.fn(),
   finishRollbackCache: vi.fn(),
 }));

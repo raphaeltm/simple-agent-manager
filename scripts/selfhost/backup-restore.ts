@@ -7,32 +7,16 @@ import {
   type BoxContext,
   BUCKET_DIR,
   bucketIsEmpty,
-  check,
   pullBucket,
   pushBucket,
   readManifest,
   STATE_DIR,
 } from './backup-lib';
-import { composeProjectFor, expectedComposeProjectFor } from './install-record';
 import { assertOperatorExecution } from './operator-only';
 import { projectRestoreIdentity } from './restore-identity';
 import { assertRestoreSubset, restoreProgress } from './restore-progress';
+import { assertRestoreRuntime } from './restore-runtime';
 import { ensurePrivateDir } from './secret-files';
-
-function assertEmptyRuntime(ctx: BoxContext, identity: string): void {
-  const projects = new Set([
-    composeProjectFor(ctx.box, ctx.stateDir),
-    expectedComposeProjectFor(ctx.box, ctx.stateDir, identity),
-  ]);
-  for (const project of projects) {
-    const containers = check(
-      ctx.run('docker', ['ps', '-aq', '--filter', `label=com.docker.compose.project=${project}`]),
-      'check empty restore runtime'
-    );
-    if (containers.stdout.trim())
-      throw new Error('Restore target already has containers; use a fresh installation');
-  }
-}
 
 export function restoreBackup(ctx: BoxContext, plain: string, encrypted: string): BackupManifest {
   assertOperatorExecution();
@@ -51,9 +35,9 @@ export function restoreBackup(ctx: BoxContext, plain: string, encrypted: string)
       throw new Error('Restore bucket is not empty: restore only into an empty bucket');
   }
   // Inspect by labels: parsing Compose before gateway.env exists would reject a fresh install.
-  assertEmptyRuntime(ctx, identity);
+  assertRestoreRuntime(ctx, identity);
   if (progress.resume) {
-    assertRestoreSubset(ctx.stateDir, join(plain, STATE_DIR));
+    assertRestoreSubset(ctx.stateDir, join(plain, STATE_DIR), true);
     const current = join(plain, '.restore-current-bucket');
     pullBucket(ctx, current);
     assertRestoreSubset(current, join(plain, BUCKET_DIR));

@@ -46,6 +46,7 @@ import { prepareCelldProject, writeCelldConfig } from './celld-project';
 import { runDeploy, runTsx, writeBox } from './deploy-harness';
 import { composeProjectFor, expectedComposeProjectFor, recordInstall } from './install-record';
 import { restoredInstallationId } from './restore-identity';
+import { recoverUpgrade } from './upgrade-lib';
 
 vi.mock('node:fs', async (importOriginal) => ({
   ...(await importOriginal<typeof import('node:fs')>()),
@@ -924,6 +925,104 @@ describe('runRollback', () => {
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     );
   });
+
+  it.each(['replacement', 'volume-only', 'no-resources'])(
+    'retries partial Compose %s creation after a failed start and ownership refresh',
+    async (partial) => {
+      const context = ctx('gs://fleet/celld', join(root, 'state'));
+      const snapshot = join(root, 'partial-compose-snapshot');
+      const source = 'a'.repeat(40);
+      runBackup(context, snapshot, source);
+      const invoke = context.run;
+      let container = 'c'.repeat(64);
+      let volume = true;
+      let created = '2026-11-19T01:00:00Z';
+      let starts = 0;
+      let inspectFailure = partial === 'replacement';
+      const deleted: string[] = [];
+      context.run = (command, args, env) => {
+        if (command === 'git' || command === 'pnpm') return { status: 0, stdout: '', stderr: '' };
+        const result = invoke(command, args, env);
+        if (command !== 'docker') return result;
+        if (args.includes('up')) {
+          starts++;
+          container = (starts === 1 ? 'd' : 'e').repeat(64);
+          created = new Date().toISOString();
+          volume = true;
+          if (starts === 1 && partial !== 'replacement') container = '';
+          if (starts === 1 && partial === 'no-resources') volume = false;
+          return { ...result, status: starts === 1 ? 1 : 0 };
+        }
+        if (args[0] === 'compose' && args.includes('ps')) return { ...result, stdout: container };
+        if (args[0] === 'container' && args[1] === 'rm') {
+          deleted.push(args[3]!);
+          container = '';
+        }
+        if (args[0] === 'volume' && args[1] === 'rm') volume = false;
+        if (args[0] === 'volume' && args[1] === 'ls')
+          return { ...result, stdout: volume ? `${selectedProject}_celld-data` : '' };
+        if (args[0] === 'volume' && args[1] === 'inspect') {
+          const value = JSON.parse(result.stdout);
+          value[0].CreatedAt = created;
+          return { ...result, stdout: JSON.stringify(value) };
+        }
+        if (args[0] === 'inspect' && args[2]?.includes('{{json .Id}}')) {
+          if (inspectFailure) {
+            inspectFailure = false;
+            return { ...result, status: 1 };
+          }
+          return {
+            ...result,
+            stdout: JSON.stringify({
+              Id: container,
+              Created: created,
+              Config: {
+                Labels: {
+                  'com.docker.compose.project': selectedProject,
+                  'com.docker.compose.service': 'celld',
+                  'com.docker.compose.project.config_files': context.composeFiles
+                    .map((p) => resolve(p))
+                    .join(','),
+                  'com.docker.compose.project.working_dir': resolve(context.composeFiles[0]!, '..'),
+                },
+              },
+            }),
+          };
+        }
+        return result;
+      };
+      const upgradeContext = { ...context, composeFiles: context.composeFiles };
+      const health = vi.fn(async () => true);
+      await expect(
+        recoverUpgrade(upgradeContext, source, snapshot, [], { to: source, checkHealth: health })
+      ).rejects.toThrow(/restore previous stack failed/);
+      const receipt = join(context.stateDir, 'rollback-cache-pending.json');
+      const authorized = readFileSync(receipt, 'utf8');
+      const unstarted = JSON.parse(authorized);
+      expect(unstarted.startingAt).toBeTruthy();
+      expect(health).not.toHaveBeenCalled();
+      // Negative control: without durable start authorization the replacement must remain foreign.
+      if (partial !== 'no-resources') {
+        delete unstarted.startingAt;
+        writeFileSync(receipt, JSON.stringify(unstarted));
+        await expect(
+          recoverUpgrade(upgradeContext, source, snapshot, [], { to: source, checkHealth: health })
+        ).rejects.toThrow(/cache identity changed/);
+        expect(deleted).toEqual(['c'.repeat(64)]);
+        writeFileSync(receipt, authorized);
+      }
+      await recoverUpgrade(upgradeContext, source, snapshot, [], {
+        to: source,
+        checkHealth: health,
+      });
+      expect(starts).toBe(2);
+      expect(deleted).toEqual(
+        partial === 'replacement' ? ['c'.repeat(64), 'd'.repeat(64)] : ['c'.repeat(64)]
+      );
+      expect(health).toHaveBeenCalledOnce();
+      expect(existsSync(receipt)).toBe(false);
+    }
+  );
 
   it('retains current backup/cloud receipts and removal markers instead of reviving snapshot history', () => {
     const context = ctx('gs://fleet/celld', join(root, 'state'));

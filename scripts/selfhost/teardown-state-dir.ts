@@ -21,6 +21,7 @@ import { STATE_CACHE_EXCLUDES } from './backup-lib';
 import { RECORD_FILE } from './install-record';
 import type { TeardownContext } from './teardown-box';
 import { both, type Item, STEPS } from './teardown-model';
+import { updateRemovalProof } from './teardown-record';
 
 const KEY_FILE = join('key-agent', 'kek');
 const LEGACY_KEYS = 'platform-keys.json';
@@ -131,6 +132,10 @@ function isGone(path: string): boolean {
 /** Everything in .state except the record, and the keys when they are kept. */
 function clearState(ctx: TeardownContext, keepKey: boolean): void {
   assertStateDir(ctx);
+  if (!keepKey)
+    updateRemovalProof(ctx.recordFile, 'state-dir', ctx.stateDir, {
+      destroyKeysAuthorized: ctx.installationId ?? '',
+    });
   const left = clearStateEntries(ctx.stateDir, keepKey, ctx.removeTree);
   if (left.length > 0) throw new Error(describeLeftovers(ctx.stateDir, left));
 }
@@ -283,6 +288,7 @@ function assertStateDir(ctx: TeardownContext): void {
     if (identity !== ctx.installationId)
       throw new Error('Refused: platform identity disagrees with installation receipt');
   } else if (
+    states[0]?.attributes?.destroyKeysAuthorized !== ctx.installationId &&
     !record.some(
       (r) =>
         r.cloud === 'box' &&

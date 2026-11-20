@@ -70,6 +70,20 @@ export function expectedComposeProjectFor(
   }
   if (installationId !== undefined && !/^[a-f0-9]{32}$/.test(installationId))
     throw new Error('Invalid persisted installation identity for Compose');
+  return projectForIdentity(box, stateDir, installation);
+}
+/** Empty-state canonical project without reading a possibly interrupted restored keys file. */
+export function uninitializedComposeProjectFor(
+  box: Readonly<Record<string, string>>,
+  stateDir: string
+): string {
+  return projectForIdentity(box, stateDir, '');
+}
+function projectForIdentity(
+  box: Readonly<Record<string, string>>,
+  stateDir: string,
+  installation: string
+): string {
   const suffix = createHash('sha256')
     .update(`${box.SAM_DOMAIN ?? ''}\n${resolve(stateDir)}\n${installation}`)
     .digest('hex')

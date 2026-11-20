@@ -3,7 +3,7 @@
  * mode decides about it, and the order and bookkeeping of a removal. Nothing here knows a cloud;
  * cloud specifics live in adapters (teardown-gcp.ts) that return items of this shape.
  */
-import { addResource, markRemoved, readRecord } from '../../deploy/selfhost/created-resources.mjs';
+import { completeRemoval } from './teardown-record';
 
 export type Mode = 'keep-data' | 'remove-everything';
 export const MODES: readonly Mode[] = ['keep-data', 'remove-everything'];
@@ -161,31 +161,22 @@ function executeItem(
   const error = runAction(item, items, ran);
   if (error && !item.goneDespiteGroupFailure?.())
     return { item, status: 'failed', why: error.message };
-  const settled = item.settle?.() ?? { removed: true };
-  if (!settled.removed) return { item, status: 'kept', why: settled.why };
-  for (const ref of [item.record ?? []].flat()) markInRecord(recordFile, ref);
-  return { item, status: 'removed' };
+  try {
+    const settled = item.settle?.() ?? { removed: true };
+    if (!settled.removed) return { item, status: 'kept', why: settled.why };
+    completeRemoval(recordFile, [item.record ?? []].flat());
+    return { item, status: 'removed' };
+  } catch {
+    return {
+      item,
+      status: 'failed',
+      why: 'cannot verify or persist removal completion; retry to finish bookkeeping',
+    };
+  }
 }
 
 function statusOf(decision: Exclude<Decision, { act: 'remove' }>): Outcome['status'] {
   return decision.act === 'keep' ? 'kept' : decision.act;
-}
-
-function markInRecord(file: string, ref: RecordRef): void {
-  const known = readRecord(file).resources.some(
-    (r) => r.cloud === ref.cloud && r.kind === ref.kind && r.name === ref.name
-  );
-  if (!known) {
-    addResource(file, {
-      cloud: ref.cloud,
-      kind: ref.kind,
-      name: ref.name,
-      action: 'created',
-      createdBy: ref.createdBy ?? 'discovered-by-teardown',
-      attributes: ref.attributes ?? {},
-    });
-  }
-  markRemoved(file, ref.cloud, ref.kind, ref.name);
 }
 
 /** Inventory: everything found, where it is, how it would go, and what each mode does with it. */

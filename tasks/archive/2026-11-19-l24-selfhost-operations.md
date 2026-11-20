@@ -26,17 +26,17 @@ The historical backup failed on the actual BOX during a stopped gcloud copy. Ret
 - [x] Keep-data retains storage, keys and WIF/service-account access; same-step failure blocks new destructive actions immediately.
 - [x] Retained keys keep active ownership receipts for a later env-absent destroy-key retry. Backup deletion requires active exact directory/inventory inode/hash proof, rechecked at deletion.
 - [x] Documentation matches actual key separation, restore identity, retry, migration, rollback and teardown behavior.
-- [x] Independent security, documentation and implementation-completion review passed on tested source39f3fa951c104e410d1feb43123c8166580da727.
+- [x] Independent security, documentation and implementation-completion review passed on the combined operations tree, including the comprehensive interruption/retry audit; exact release head is recorded in PR2918.
 - [x] Required real BOX backup, fresh restore/data verification, valid/refused upgrade and automatic rollback passed.
 - [x] Disposable keep-data/restart and two-step full teardown passed; all created resources cleaned; shared BOX healthy and BOX FREE posted.
 
 ## Automated validation
 
-Full self-host suite648PASS/1conditional skip across36files. The root-only foreign-owner setup skips for an unprivileged runner; the actual foreign-owned `/tmp` preservation control passes. The entire suite also passed with `packages/providers/dist` physically absent, proving clean-checkout CLI/Vitest resolution through the explicit self-host source configuration. Typecheck, focused lint, formatting and diff checks pass. Secret scanner reports zero findings;187 scanner/exception controls passed. Real MinIO backup/restore and injected partial upload/resume tests passed and cleaned their resources. Projection, guard removal, cache retry and read-only cleanup fault controls fail when their respective protections are removed.
+Final combined self-host suite730PASS/1conditional skip across43files. The root-only foreign-owner setup skips for an unprivileged runner; the actual foreign-owned `/tmp` preservation control passes. The entire suite also passed with `packages/providers/dist` physically absent, proving clean-checkout CLI/Vitest resolution through the explicit self-host source configuration. Typecheck, focused lint, formatting and diff checks pass. Secret scanner reports zero findings;187 scanner/exception controls passed. Real MinIO backup/restore and injected partial upload/resume tests passed and cleaned their resources. Projection, guard removal, cache retry and read-only cleanup fault controls fail when their respective protections are removed.
 
 Repository lint23packages, typecheck38packages and build19packages passed. Root tests40/41tasks passed, with API17902passed and one timeout in an unchanged test; that entire file passed12/12 on retry. Type-boundary ratchet has zero blocking findings. Current-head CI is tracked separately before merge.
 
-All11 Codex findings were fixed with focused regressions and replies; their threads were resolved. CodeRabbit was requested through the trusted label workflow at ready23:03UTC Nov19 and returned a review-limit/rate-limit response; the wait ended on that response, with no CodeRabbit finding or waiver.
+All11 earlier Codex findings were fixed with focused regressions and resolved threads. Three additional findings (interrupted Compose replacement, bundled-store restore bootstrap and completion-journal durability) are fixed with discriminating retries; final review reconciliation is recorded in PR2918. CodeRabbit was requested through the trusted label workflow at ready23:03UTC Nov19 and returned a review-limit/rate-limit response; the wait ended on that response, with no CodeRabbit finding or waiver.
 
 ## BOX evidence and cleanup
 
@@ -53,7 +53,17 @@ Final tested operations source39f3fa951c104e410d1feb43123c8166580da727:
 
 All18547 objects under the uniquely owned task prefix were deleted with generation conditions; existing shared bucket and `/celld` data were preserved. Removed the owned worktree, scratch tree, decrypted plaintext, backups, key,14 uploaded files, exact metadata SSH key and immutable-id-verified SSH firewall. Verified metadata-key absence and firewall404, then deleted local token/private key. Final shared checkout and four original services were unchanged, APIHTTP200. BOX FREE sequence422/eventef041954-cde5-4ebb-951f-4bbd9d95adeb; coordinator and next H2 task notified.
 
-Latest main20675016f (Claude action dependency bump only) was merged before release. Self-host source after synchronization is byte-identical to the tested39f source; final evidence/archive changes are documentation only. Current-head specialist/CI evidence and merge/deploy receipts live in PR2918 and `.do-state.md`.
+Latest main20675016f (Claude action dependency bump only) was merged before release. Subsequent changes cover failure/retry bookkeeping and the formerly blocked bundled-store restore path. The existing GCS happy-path projection/data and migration algorithms are unchanged. Under the coordinator’s explicit exception, those failure-only changes are covered by real-filesystem/store tests and the canonical local-store path by real MinIO, without reacquiring BOX. Current-head specialist/CI evidence and merge/deploy receipts live in PR2918 and `.do-state.md`.
+
+## Comprehensive interruption and retry audit
+
+The final audit traced backup, restore, upgrade/rollback and keep/full teardown through interruption and retry, rather than addressing only review examples. Backup restarts its exact writer even when stop returns failure after taking effect; copied read-only plaintext scratch is removed without following symlinks or changing foreign directories. Surgical controls confirm both protections are necessary. A killed process still requires documented operator inspection/restart and a fresh destination.
+
+Restore durably records ownership before target writes, re-syncs a surviving journal on retry, and retains a durable completion receipt before unlinking progress. Real filesystem fault tests cover initial write/file-sync/directory-sync, completion link/unlink/sync and torn state copies. Only exact authenticated state prefixes may resume; bucket objects require complete equality. Read-only `--print-project` authenticates first and allows the canonical bundled store to bootstrap under the final projected identity; strict runtime inspection refuses app/foreign containers and mismatched mounts, labels, config or images. Three real MinIO tests cover canonical Compose with custom ports, restore, real deployment init, retained volume/data and actual app-container refusal. The pinned store healthcheck now uses its configured IPv4 port. All containers and named/anonymous fixture volumes were removed with exact ownership proof.
+
+Upgrade persists a snapshot-bound cache recreation intent before Compose. Partial container/volume creation, failed command response and failed inspection can recover only with exact project, service, paths, mount and creation-time proof. Ten boundary faults, three encrypted repeated-attempt scenarios and changed-target A→B→C controls pass; no replacement cache is adopted without its durable intent.
+
+Teardown durably records original Docker inventories, key-removal authorization and backup inode proof before mutation. Partial deletes and lost receipt saves resume only remaining original resources, while replacements refuse. Atomic grouped tombstones halt later destructive steps on save failure; identity survives key/env cleanup, and exact absent IAM grants settle lost-success responses. Eight teardown files/81 tests include actual CLI filesystem faults and Docker/IAM adapters. The audit matrix is retained locally with PR evidence; no new BOX/cloud resources were used.
 
 ## Post-mortem
 

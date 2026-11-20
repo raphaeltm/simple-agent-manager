@@ -332,7 +332,15 @@ services:
     volumes:
       - objectstore-data:/data
     healthcheck:
-      test: ['CMD', 'mc', 'ready', 'local']
+      test:
+        [
+          'CMD',
+          'curl',
+          '--fail',
+          '--silent',
+          '--show-error',
+          'http://127.0.0.1:${OBJECTSTORE_PORT:-9000}/minio/health/ready',
+        ]
       interval: 5s
       retries: 30
     stop_grace_period: 30s

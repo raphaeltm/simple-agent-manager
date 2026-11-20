@@ -15,6 +15,7 @@ import { expectedComposeProjectFor } from './install-record';
 const { values } = parseArgs({
   options: {
     from: { type: 'string' },
+    'print-project': { type: 'boolean', default: false },
     'encryption-key-file': { type: 'string' },
     'box-env': { type: 'string' },
     'state-dir': { type: 'string' },
@@ -24,6 +25,10 @@ if (!values.from) throw new Error('--from <backup directory> is required');
 const from = resolve(values.from);
 const envFile = resolve(values['box-env'] ?? join(SELFHOST_DIR, '.env'));
 const ctx = loadBox(envFile, values['state-dir'], values['encryption-key-file']);
+if (values['print-project']) {
+  process.stdout.write(`${runRestore(ctx, from, 'project')}\n`);
+  process.exit(0);
+}
 const manifest = runRestore(ctx, from);
 log(`restored backup of ${manifest.createdAt} (SAM ${manifest.samCommit ?? 'unknown commit'})`);
 log('Recover with the SAME SAM checkout the backup was taken with:');

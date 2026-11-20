@@ -15,11 +15,14 @@ import { dirname, join, relative, resolve } from 'node:path';
 
 import { prepareBackupParent } from './backup-destination';
 import { decryptBackupTree, encryptBackupTree, readBackupKey } from './backup-encryption';
+import { readManifest } from './backup-manifest';
 import { assertBackupOutside, assertOperationPaths } from './backup-paths';
 import { restoreBackup } from './backup-restore';
 import { requireRunningCelld } from './backup-runtime';
-import { composeProjectFor, recordBackup } from './install-record';
+import { composeProjectFor, expectedComposeProjectFor, recordBackup } from './install-record';
 import { assertOperatorExecution } from './operator-only';
+import { removePrivateTree } from './private-tree';
+import { projectRestoreIdentity } from './restore-identity';
 import { ensurePrivateDir } from './secret-files';
 
 /**
@@ -319,11 +322,12 @@ function runPlainBackup(
   }
 
   ctx.log('stopping celld for the delta copy');
-  compose(ctx, ['stop', 'celld']);
-  const stoppedAt = ctx.now();
+  let stoppedAt = ctx.now();
   let deltaCopyMs = 0;
   let startedAt = stoppedAt;
   try {
+    compose(ctx, ['stop', 'celld']);
+    stoppedAt = ctx.now();
     // With celld stopped the bucket is the consistent state. The mirror (with deletion) converges
     // the local tree on exactly that: objects celld removed after the pre-copy are deleted here.
     try {
@@ -427,12 +431,18 @@ export function runBackup(
     ctx.log(`encrypted backup complete -> ${dest}`);
     return manifest;
   } finally {
-    rmSync(temp, { recursive: true, force: true });
+    removePrivateTree(temp);
   }
 }
 
 /** Authenticate every byte before any target bucket or compose operation. */
-export function runRestore(ctx: BoxContext, from: string): BackupManifest {
+export function runRestore(ctx: BoxContext, from: string): BackupManifest;
+export function runRestore(ctx: BoxContext, from: string, mode: 'project'): string;
+export function runRestore(
+  ctx: BoxContext,
+  from: string,
+  mode?: 'project'
+): BackupManifest | string {
   assertOperatorExecution();
   const key = backupKey(ctx);
   assertBackupOutside(ctx, from);
@@ -440,9 +450,14 @@ export function runRestore(ctx: BoxContext, from: string): BackupManifest {
   try {
     const plain = join(temp, 'plain');
     decryptBackupTree(from, plain, key);
+    if (mode === 'project') {
+      readManifest(plain);
+      const identity = projectRestoreIdentity(ctx, join(plain, STATE_DIR));
+      return expectedComposeProjectFor(ctx.box, ctx.stateDir, identity);
+    }
     return restoreBackup(ctx, plain, from);
   } finally {
-    rmSync(temp, { recursive: true, force: true });
+    removePrivateTree(temp);
   }
 }
 
@@ -450,6 +465,7 @@ export { readManifest } from './backup-manifest';
 export { assertBackupOutside } from './backup-paths';
 export {
   assertRollbackCacheReady,
+  beginRollbackCacheStart,
   finishRollbackCache,
   refreshRollbackCacheReceipt,
   runRollback,

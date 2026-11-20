@@ -10,6 +10,7 @@ import { dirname, join, resolve } from 'node:path';
 
 import {
   assertRollbackCacheReady,
+  beginRollbackCacheStart,
   type BoxContext as BackupContext,
   composeArgs,
   composeRunEnv,
@@ -206,8 +207,8 @@ export async function recoverUpgrade(
   finishRollbackCache(backupContext(ctx));
 }
 
-/** A partial start may have replaced the cache; retain its exact identity for another retry. */
 function startRecoveredStack(ctx: BoxContext, backupDir: string, env?: NodeJS.ProcessEnv): void {
+  beginRollbackCacheStart(backupContext(ctx), backupDir);
   try {
     check(ctx.run('docker', composeArgs(ctx, ['up', '-d']), env), 'restore previous stack');
   } catch (error) {

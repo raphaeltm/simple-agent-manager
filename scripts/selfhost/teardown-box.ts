@@ -3,15 +3,17 @@
  * the box is Docker Compose and files; the bucket goes through bucket-objects.ts, which already
  * speaks gs:// and s3://. Cloud resources are teardown-gcp.ts's (and any later adapter's).
  */
-import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 
 import { type CreatedResource, readRecord } from '../../deploy/selfhost/created-resources.mjs';
 import { type BoxContext, composeArgs, MANIFEST_NAME, parseBucketUrl } from './backup-lib';
 import { assertBackupOwnership } from './backup-ownership';
-import { composeProjectFor, expectedComposeProjectFor, usesBundledStore } from './install-record';
+import { usesBundledStore } from './install-record';
 import { readComposeInventory, removeContainers, stopContainers } from './teardown-compose';
+import { expectedTeardownProject, selectedTeardownProject } from './teardown-identity';
 import { both, type Item, type Mode, STEPS } from './teardown-model';
+import { updateRemovalProof } from './teardown-record';
 import { isProtectedDir, stateItems } from './teardown-state-dir';
 
 export interface TeardownOptions {
@@ -43,11 +45,9 @@ export function recorded(ctx: TeardownContext, kind: string, name?: string) {
 
 function composeItems(ctx: TeardownContext): { items: Item[]; owned: boolean } {
   const items: Item[] = [];
-  const projectName = composeProjectFor(ctx.box, ctx.stateDir);
+  const projectName = selectedTeardownProject(ctx);
   const project = recorded(ctx, 'compose-project', projectName);
-  const owned =
-    project?.action === 'created' &&
-    projectName === expectedComposeProjectFor(ctx.box, ctx.stateDir);
+  const owned = project?.action === 'created' && projectName === expectedTeardownProject(ctx);
   const composeGone = project?.removedAt ?? (existsSync(ctx.envFile) ? undefined : 'no .env left');
   const composeCmd = `docker ${composeArgs(ctx, []).join(' ')}`;
   const everything = ctx.mode === 'remove-everything';
@@ -174,14 +174,12 @@ export function boxItems(ctx: TeardownContext): Item[] {
 }
 
 /** A backup runBackup wrote: an absolute, unprotected directory with a version-1 manifest. */
-function isBackupDir(path: string, ctx: TeardownContext): boolean {
-  if (!isAbsolute(path) || isProtectedDir(path, ctx.selfhostDir)) return false;
-  if (resolve(path) === resolve(ctx.stateDir)) return false;
-  try {
-    return existsSync(join(path, '.sam-backup-manifest'));
-  } catch {
-    return false;
-  }
+function safeBackupPath(path: string, ctx: TeardownContext): boolean {
+  return (
+    isAbsolute(path) &&
+    !isProtectedDir(path, ctx.selfhostDir) &&
+    resolve(path) !== resolve(ctx.stateDir)
+  );
 }
 
 function endpointHost(endpoint: string | undefined): string {
@@ -208,18 +206,43 @@ function backupPaths(ctx: TeardownContext): Map<string, CreatedResource | undefi
 
 function hasBackupOwnership(path: string, entry?: CreatedResource): boolean {
   try {
-    assertBackupOwnership(path, entry);
+    assertBackupRemoval(path, entry);
     return true;
   } catch {
     return false;
   }
 }
+function assertBackupRemoval(path: string, entry?: CreatedResource): void {
+  if (!entry || entry.action !== 'created' || entry.removedAt || entry.createdBy !== 'backup')
+    throw new Error('Refused: no active backup creation receipt');
+  const proof = entry.attributes;
+  const authorized = !!proof?.identity && proof.removalAuthorized === proof.identity;
+  const stat = lstatSync(path, { throwIfNoEntry: false });
+  if (!stat) {
+    if (!authorized) throw new Error('Refused: backup disappeared without a removal authorization');
+    return;
+  }
+  if (authorized && !lstatSync(join(path, '.sam-backup-manifest'), { throwIfNoEntry: false })) {
+    if (
+      !stat.isDirectory() ||
+      stat.isSymbolicLink() ||
+      realpathSync(path) !== resolve(path) ||
+      stat.dev.toString() !== proof.device ||
+      stat.ino.toString() !== proof.inode ||
+      (process.getuid !== undefined && stat.uid !== process.getuid())
+    )
+      throw new Error('Refused: interrupted backup directory identity changed');
+    return;
+  }
+  assertBackupOwnership(path, entry);
+}
 
 function backupPlan(ctx: TeardownContext, path: string, entry?: CreatedResource): Item['plan'] {
-  if (!existsSync(path)) return both({ act: 'keep', why: 'no longer on disk' });
+  if (!lstatSync(path, { throwIfNoEntry: false }) && !entry?.attributes?.removalAuthorized)
+    return both({ act: 'keep', why: 'no longer on disk' });
   const kept = { act: 'keep' as const, why: 'keep my data keeps backups' };
   const removal =
-    !isBackupDir(path, ctx) || !hasBackupOwnership(path, entry)
+    !safeBackupPath(path, ctx) || !hasBackupOwnership(path, entry)
       ? {
           act: 'refused' as const,
           why: 'backup needs an active creation receipt with matching directory and encrypted inventory identity; legacy or replaced paths are retained',
@@ -250,10 +273,24 @@ function backupItems(ctx: TeardownContext): Item[] {
         const live = readRecord(ctx.recordFile).resources.find(
           (r) => r.cloud === 'box' && r.kind === 'backup' && r.name === path
         );
-        if (!isBackupDir(path, ctx) || live?.attributes?.identity !== entry?.attributes?.identity)
+        if (
+          !safeBackupPath(path, ctx) ||
+          live?.attributes?.identity !== entry?.attributes?.identity
+        )
           throw new Error('Refused: backup ownership changed after inventory');
-        assertBackupOwnership(path, live);
+        assertBackupRemoval(path, live);
+        updateRemovalProof(ctx.recordFile, 'backup', path, {
+          removalAuthorized: live?.attributes?.identity ?? '',
+        });
+        assertBackupRemoval(
+          path,
+          readRecord(ctx.recordFile).resources.find(
+            (r) => r.cloud === 'box' && r.kind === 'backup' && r.name === path
+          )
+        );
         rmSync(path, { recursive: true, force: true });
+        if (lstatSync(path, { throwIfNoEntry: false }))
+          throw new Error('Backup removal incomplete');
       },
       record: { cloud: 'box', kind: 'backup', name: path, createdBy: 'backup' },
     });
@@ -276,13 +313,8 @@ export function bucketItems(ctx: TeardownContext): Item[] {
   if (!url) return [];
   const entry = recorded(ctx, 'bucket', url);
   const contents = recorded(ctx, 'bucket-contents', url);
-  const project = recorded(
-    ctx,
-    'compose-project',
-    expectedComposeProjectFor(ctx.box, ctx.stateDir)
-  );
-  const owned =
-    project?.action === 'created' && composeProjectFor(ctx.box, ctx.stateDir) === project.name;
+  const project = recorded(ctx, 'compose-project', expectedTeardownProject(ctx));
+  const owned = project?.action === 'created' && selectedTeardownProject(ctx) === project.name;
   if (usesBundledStore(ctx.box)) {
     return [
       {

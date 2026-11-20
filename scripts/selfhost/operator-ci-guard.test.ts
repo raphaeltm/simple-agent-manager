@@ -8,6 +8,7 @@ import { loadBox } from './backup-cli';
 import { decryptBackupTree, encryptBackupTree, readBackupKey } from './backup-encryption';
 import {
   assertRollbackCacheReady,
+  beginRollbackCacheStart,
   type BoxContext,
   runBackup,
   runRestore,
@@ -16,6 +17,7 @@ import {
 import { restoreBackup } from './backup-restore';
 import { projectRestoreIdentity, restoredInstallationId } from './restore-identity';
 import { assertRestoreSubset, restoreProgress } from './restore-progress';
+import { assertRestoreRuntime } from './restore-runtime';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const ABSENT = resolve(ROOT, '.tmp/nonexistent-operator-guard-sentinel');
@@ -57,6 +59,8 @@ describe('operator commands never read secret files in CI', () => {
         () => encryptBackupTree(ABSENT, ABSENT, ABSENT),
         () => decryptBackupTree(ABSENT, ABSENT, ABSENT),
         () => assertRollbackCacheReady(context),
+        () => beginRollbackCacheStart(context, ABSENT),
+        () => assertRestoreRuntime(context, 'a'.repeat(32)),
         () => runBackup(context, ABSENT),
         () => runRestore(context, ABSENT),
         () => runRollback(context, ABSENT),
@@ -72,6 +76,7 @@ describe('operator commands never read secret files in CI', () => {
       for (const [script, args] of [
         ['backup.ts', ['--to', ABSENT]],
         ['restore.ts', ['--from', ABSENT]],
+        ['restore.ts', ['--from', ABSENT, '--print-project']],
         ['upgrade.ts', ['--to', 'main']],
       ] as const) {
         const result = spawnSync(

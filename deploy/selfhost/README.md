@@ -132,6 +132,29 @@ the original backup. Prepare an existing mode-0600 target `.env` with its own do
 settings and absolute state path. Its state directory
 must be empty or absent, and its bucket/prefix must contain no objects. For an `s3://` store,
 set `R2_S3_REGION` as well as `S3_ENDPOINT` and its credentials.
+For the bundled store, first authenticate the backup and print the final target Compose project:
+
+```sh
+pnpm --silent selfhost:restore --from /absolute/path/to/backup --print-project \
+  --box-env /absolute/path/to/target.env --state-dir /absolute/path/to/fresh-state \
+  --encryption-key-file "$HOME/.config/sam/backup.key"
+```
+
+This prints only the public project name; it makes no target, runtime or store changes. Put that
+name in the target `.env` as `COMPOSE_PROJECT_NAME`, keep `COMPOSE_PROFILES=local-store` (plus any
+other desired profiles), and start only the bundled store and its initializer:
+
+```sh
+docker compose --env-file /absolute/path/to/target.env \
+  -f deploy/selfhost/docker-compose.yml --profile local-store up -d objectstore objectstore-init
+```
+
+Wait for the store to be healthy and the initializer to exit successfully, then run the restore
+below. Its store-only exception verifies the final canonical project, selected canonical Compose
+file, pinned image, ownership labels and exact data/script mounts. It refuses application or
+foreign containers, overlays and a store started under the pre-key project. The same project
+keeps the restored store volume when you initialize and start the application afterward. The
+store healthcheck uses IPv4 loopback and `OBJECTSTORE_PORT`, including a custom port.
 
 ```sh
 pnpm selfhost:restore --from /absolute/path/to/backup \
@@ -143,8 +166,15 @@ Restore authenticates the complete encrypted inventory and every file before tou
 If a copy fails, retain `<state-dir>.restore-progress.json` and retry the exact same command and
 backup. This private journal binds the original empty target and authenticated snapshot. A retry
 refuses changed, additional, linked or foreign-owned partial files before copying again; do not
-start the target or remove its journal to bypass a refusal. The journal is removed after success.
-It refuses a target project with existing containers, copies state and bucket data, keeps the
+start the target or remove its journal to bypass a refusal. State files interrupted mid-copy may
+be retried only when their bytes are an exact prefix of the authenticated source; bucket objects
+still require complete byte equality. Before removing the progress journal, restore durably links
+a private `<state-dir>.restore-complete.json` receipt. Keep that completion receipt until a fresh
+deploy and health/data checks succeed: the same restore can safely retry after a completion error,
+even when progress-journal removal succeeded but its directory sync failed. Both receipts must
+match if present. A completed retry still refuses changed data or an application runtime. After
+verification, remove these exact operator-owned metadata files manually; teardown retains them.
+It permits only the verified bundled-store bootstrap described above, copies state and bucket data, keeps the
 target `.env`, strips the source installation's creation receipts, and does not start celld.
 A fresh restore assigns a distinct `SAM_INSTALLATION_ID`, stable for retries of the same target,
 while preserving all cryptographic keys needed to read the restored data. The generated local
@@ -161,7 +191,17 @@ to retain the restored keys and establish new target ownership receipts. Set the
 persisted installation id, domain and state directory. Repeat init with that setting, then start
 that target's Compose stack, deploy and verify its data (`scripts/selfhost/backup-lib.ts:runRestore`,
 `scripts/selfhost/install-record.ts:recordInstall`).
-This command refuses an occupied target; it does not overwrite an existing fleet.
+This command refuses an occupied application target; it does not overwrite an existing fleet.
+
+A killed backup process cannot run its restart handler. If interrupted while celld was stopped,
+inspect the exact installation's containers and restart only that installation's celld explicitly,
+then use a fresh backup destination. Normal backup refuses a missing or stopped writer; it never
+guesses which other installation to start. A partial ciphertext directory is not reusable, and a
+fully encrypted backup whose receipt write failed is retained for operator inspection and restore;
+it is not automatically adopted for destructive cleanup. An interrupted initial journal write
+before target writes can leave an invalid progress receipt: restore refuses to adopt it. Verify
+that both target state and bucket are still empty before manually removing that exact receipt and
+retrying. Preserve populated or unverified targets for inspection instead of bypassing ownership.
 
 ## Upgrade
 

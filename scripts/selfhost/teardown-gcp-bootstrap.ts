@@ -2,6 +2,7 @@
 import type { CreatedResource } from '../../deploy/selfhost/created-resources.mjs';
 import { check } from './backup-lib';
 import type { TeardownContext } from './teardown-box';
+import { cloudMetadata, grantPresent } from './teardown-gcp-grants';
 import { type Item, STEPS } from './teardown-model';
 
 export const BOOTSTRAP = 'gcp-bootstrap';
@@ -75,8 +76,17 @@ export function bootstrapItems(ctx: TeardownContext, project: string): Item[] {
           if (!owned) throw new Error('refused: missing creation ownership');
           const pool = attrs.pool;
           const { describe, remove, expected } = bootstrapOperation(entry, project, issuer);
+          if (
+            entry.kind === 'iam-binding' &&
+            !grantPresent(ctx, ['projects', 'get-iam-policy', project], attrs.role, attrs.member)
+          )
+            return;
           const result = gcloud(ctx, [...describe, '--format=json']);
-          if (result.status !== 0 && gcloudNotFound(result.stderr)) return;
+          if (result.status !== 0 && gcloudNotFound(result.stderr)) {
+            if (entry.kind === 'iam-binding')
+              throw new Error('Refused: IAM grant account identity is unavailable');
+            return;
+          }
           check(result, 'read recorded resource before deletion');
           let current: Record<string, unknown>;
           try {
@@ -103,8 +113,11 @@ export function bootstrapItems(ctx: TeardownContext, project: string): Item[] {
               pool,
               entry.kind === 'service-account' ? entry.name : attrs.account
             );
-          if (entry.kind === 'service-account-iam-binding')
-            assertServiceAccountGrant(ctx, project, entry);
+          if (
+            entry.kind === 'service-account-iam-binding' &&
+            !assertServiceAccountGrant(ctx, project, entry)
+          )
+            return;
           check(gcloud(ctx, remove), 'delete recorded resource');
         },
         record: entry,
@@ -131,7 +144,7 @@ function assertPoolProviders(
     '--format=json',
   ]);
   check(providers, 'check pool providers before deletion');
-  const parsed: unknown = JSON.parse(providers.stdout);
+  const parsed: unknown = cloudMetadata(providers.stdout);
   const known = new Set(
     ctx.record
       .filter(
@@ -171,7 +184,7 @@ function assertAccountExclusive(
     '--format=json',
   ]);
   check(policy, 'check account grants before deletion');
-  const parsed: unknown = JSON.parse(policy.stdout);
+  const parsed: unknown = cloudMetadata(policy.stdout);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
     throw new Error('refused: unreadable account grants');
   const bindings = (parsed as { bindings?: unknown }).bindings ?? [];
@@ -201,7 +214,7 @@ function assertAccountExclusive(
     '--format=json',
   ]);
   check(keys, 'check account keys before deletion');
-  const parsedKeys: unknown = JSON.parse(keys.stdout);
+  const parsedKeys: unknown = cloudMetadata(keys.stdout);
   if (!Array.isArray(parsedKeys) || parsedKeys.length)
     throw new Error('refused: account has user-managed keys');
 }
@@ -323,7 +336,7 @@ function assertServiceAccountGrant(
   ctx: TeardownContext,
   project: string,
   entry: CreatedResource
-): void {
+): boolean {
   const attrs = entry.attributes ?? {};
   const pools = ctx.record.filter(
     (r) =>
@@ -344,35 +357,10 @@ function assertServiceAccountGrant(
     attrs.member !== `principalSet://iam.googleapis.com/${identity}/*`
   )
     throw new Error('refused: service account grant pool identity changed');
-  const policy = check(
-    gcloud(ctx, [
-      'iam',
-      'service-accounts',
-      'get-iam-policy',
-      attrs.account,
-      `--project=${project}`,
-      '--format=json',
-    ]),
-    'read service account grant before deletion'
+  return grantPresent(
+    ctx,
+    ['iam', 'service-accounts', 'get-iam-policy', attrs.account, `--project=${project}`],
+    attrs.role,
+    attrs.member
   );
-  try {
-    const value: unknown = JSON.parse(policy.stdout);
-    if (!value || typeof value !== 'object' || Array.isArray(value))
-      throw new Error('Invalid policy');
-    const bindings = (value as { bindings?: unknown }).bindings ?? [];
-    if (
-      !Array.isArray(bindings) ||
-      bindings.some(
-        (b) =>
-          !b ||
-          typeof b.role !== 'string' ||
-          !Array.isArray(b.members) ||
-          b.members.some((m: unknown) => typeof m !== 'string') ||
-          (b.role === attrs.role && b.members.includes(attrs.member) && !!b.condition)
-      )
-    )
-      throw new Error('Invalid grant');
-  } catch {
-    throw new Error('refused: unreadable or conditional service account grant');
-  }
 }

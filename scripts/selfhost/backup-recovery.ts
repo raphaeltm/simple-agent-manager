@@ -1,11 +1,9 @@
 /** Restore an upgrade's authenticated snapshot to the same owned installation. */
 import {
-  chmodSync,
   cpSync,
   existsSync,
   lstatSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -33,6 +31,12 @@ import {
 } from './backup-lib';
 import { composeProjectFor, recordInstall, SELFHOST_ENVIRONMENT } from './install-record';
 import { assertOperatorExecution } from './operator-only';
+import { removePrivateTree } from './private-tree';
+import {
+  type CacheStartProof,
+  cacheStartTime,
+  recoverCacheStart,
+} from './rollback-cache-transition';
 import { assertPrivateFile, replacePrivateFile } from './secret-files';
 import { assertRollbackReady } from './upgrade-preflight';
 function compose(ctx: BoxContext, args: string[]): void {
@@ -183,11 +187,17 @@ export function assertRollbackCacheReady(ctx: BoxContext): RollbackCacheProof {
 
 /** A private receipt permits retry after this process removed only part of the cache. */
 const CACHE_PENDING = 'rollback-cache-pending.json';
-function pendingCache(ctx: BoxContext, from: string): RollbackCacheProof | null {
+function pendingCache(ctx: BoxContext, from: string): CacheStartProof | null {
   const path = join(ctx.stateDir, CACHE_PENDING);
   if (!existsSync(path)) return null;
   assertPrivateFile(path);
-  let value: { snapshot?: unknown; name?: unknown; createdAt?: unknown; container?: unknown };
+  let value: {
+    snapshot?: unknown;
+    name?: unknown;
+    createdAt?: unknown;
+    container?: unknown;
+    startingAt?: unknown;
+  };
   try {
     value = JSON.parse(readFileSync(path, 'utf8'));
   } catch {
@@ -199,10 +209,17 @@ function pendingCache(ctx: BoxContext, from: string): RollbackCacheProof | null 
     typeof value.createdAt !== 'string' ||
     !Number.isFinite(Date.parse(value.createdAt)) ||
     typeof value.container !== 'string' ||
-    !/^[a-f0-9]{64}$/.test(value.container)
+    !/^[a-f0-9]{64}$/.test(value.container) ||
+    (value.startingAt !== undefined &&
+      (typeof value.startingAt !== 'string' || !Number.isFinite(Date.parse(value.startingAt))))
   )
     throw new Error('Invalid rollback cache recovery receipt');
-  return { name: value.name, createdAt: value.createdAt, container: value.container };
+  return {
+    name: value.name,
+    createdAt: value.createdAt,
+    container: value.container,
+    ...(typeof value.startingAt === 'string' ? { startingAt: value.startingAt } : {}),
+  };
 }
 function cachePresence(
   ctx: BoxContext,
@@ -265,10 +282,30 @@ function discardCelldCache(ctx: BoxContext, expected: RollbackCacheProof, from: 
 }
 
 /** After an authorized Compose recreation, bind retry to its newly observed exact cache. */
+export function beginRollbackCacheStart(ctx: BoxContext, from: string): void {
+  assertOperatorExecution();
+  const pending = pendingCache(ctx, from);
+  if (!pending) throw new Error('Missing rollback cache recovery receipt');
+  const present = cachePresence(ctx, pending);
+  if (present.container || present.volume)
+    throw new Error('Recovery start requires the previous cache to be absent');
+  currentLedger(
+    ctx,
+    String(readIdentity(join(ctx.stateDir, 'platform-keys.json')).SAM_INSTALLATION_ID)
+  );
+  replacePrivateFile(
+    join(ctx.stateDir, CACHE_PENDING),
+    JSON.stringify({ ...pending, snapshot: resolve(from), startingAt: cacheStartTime() })
+  );
+}
+
 export function refreshRollbackCacheReceipt(ctx: BoxContext, from: string): void {
   assertOperatorExecution();
-  if (!pendingCache(ctx, from)) throw new Error('Missing rollback cache recovery receipt');
-  const proof = assertRollbackCacheReady(ctx);
+  const pending = pendingCache(ctx, from);
+  if (!pending) throw new Error('Missing rollback cache recovery receipt');
+  const proof = pending.startingAt
+    ? recoverCacheStart(ctx, pending, inspectCacheVolume, assertRollbackCacheReady, true)
+    : assertRollbackCacheReady(ctx);
   replacePrivateFile(
     join(ctx.stateDir, CACHE_PENDING),
     JSON.stringify({ ...proof, snapshot: resolve(from) })
@@ -283,21 +320,6 @@ export function finishRollbackCache(ctx: BoxContext): void {
   assertPrivateFile(path);
   rmSync(path);
 }
-/** Go module caches contain read-only directories. Only chmod directories in our private,
- * just-created stage; never follow a symlink or change a directory owned by another uid. */
-function removeRollbackStage(path: string): void {
-  const writable = (directory: string): void => {
-    const stat = lstatSync(directory);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) return;
-    if (process.getuid && stat.uid !== process.getuid())
-      throw new Error('Rollback cleanup directory belongs to another user');
-    if ((stat.mode & 0o700) !== 0o700) chmodSync(directory, stat.mode | 0o700);
-    for (const entry of readdirSync(directory)) writable(join(directory, entry));
-  };
-  writable(path);
-  rmSync(path, { recursive: true, force: true });
-}
-
 /** Stage the full replacement before swapping directories; failed copying retains live state. */
 function restoreState(
   ctx: BoxContext,
@@ -336,7 +358,7 @@ function restoreState(
       throw error;
     }
   } finally {
-    removeRollbackStage(stage);
+    removePrivateTree(stage);
   }
 }
 
@@ -367,7 +389,14 @@ export function runRollback(ctx: BoxContext, from: string, expectedSamCommit?: s
     }
     assertStateReceipt(join(plain, STATE_DIR), ctx.stateDir, oldKeys.SAM_INSTALLATION_ID);
     currentLedger(ctx, oldKeys.SAM_INSTALLATION_ID);
-    const pending = pendingCache(ctx, from);
+    let pending = pendingCache(ctx, from);
+    if (pending?.startingAt) {
+      pending = recoverCacheStart(ctx, pending, inspectCacheVolume, assertRollbackCacheReady);
+      replacePrivateFile(
+        join(ctx.stateDir, CACHE_PENDING),
+        JSON.stringify({ ...pending, snapshot: resolve(from) })
+      );
+    }
     const cache = pending ?? assertRollbackCacheReady(ctx);
     if (pending) cachePresence(ctx, pending);
     compose(ctx, ['stop', 'celld']);
@@ -415,6 +444,6 @@ export function runRollback(ctx: BoxContext, from: string, expectedSamCommit?: s
     replacePrivateFile(ctx.envFile, readFileSync(join(plain, ENV_FILE), 'utf8'));
     discardCelldCache(ctx, cache, from);
   } finally {
-    rmSync(temp, { recursive: true, force: true });
+    removePrivateTree(temp);
   }
 }

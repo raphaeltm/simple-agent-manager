@@ -74,16 +74,24 @@ const fs = require('node:fs');
 const cp = require('node:child_process');
 const { syncBuiltinESMExports } = require('node:module');
 const original = cp.spawnSync;
+let container = 'c'.repeat(64);
+let volume = true;
+let created = '2026-11-19T00:00:00Z';
 cp.spawnSync = (command, args, options) => {
   if (!['git', 'pnpm', 'docker', 'gcloud'].includes(command)) return original(command,args,options);
   fs.appendFileSync(${JSON.stringify(join(root, 'calls'))}, command+' '+args.join(' ')+'\\n');
   let stdout = '';
   if(command === 'git' && args[0] === 'rev-parse') stdout = 'b'.repeat(40);
   if (command === 'docker') {
-    if(args.includes('ps')) stdout = 'c'.repeat(64);
-    if(args[0]==='inspect') stdout = JSON.stringify([{Destination:'/var/lib/celld', Type:'volume', Name:${JSON.stringify(`${project}_celld-data`)}}]);
-    if(args[0]==='volume' && args[1]==='ls') stdout = ${JSON.stringify(`${project}_celld-data`)};
-    if(args[0]==='volume' && args[1]==='inspect') stdout = JSON.stringify([{Name:${JSON.stringify(`${project}_celld-data`)},CreatedAt:'2026-11-19T00:00:00Z',Labels:{'com.docker.compose.project':${JSON.stringify(project)},'com.docker.compose.volume':'celld-data'}}]);
+    if(args[0]==='container' && args[1]==='rm') container='';
+    if(args[0]==='volume' && args[1]==='rm') volume=false;
+    if(args.includes('up')) { container='d'.repeat(64); volume=true; created=new Date().toISOString(); }
+    if(args.includes('ps')) stdout = container;
+    if(args[0]==='inspect') stdout = args[2]?.includes('{{json .Id}}')
+      ? JSON.stringify({Id:container,Created:created,Config:{Labels:{'com.docker.compose.project':${JSON.stringify(project)},'com.docker.compose.service':'celld','com.docker.compose.project.config_files':${JSON.stringify(resolve('deploy/selfhost/docker-compose.yml'))},'com.docker.compose.project.working_dir':${JSON.stringify(resolve('deploy/selfhost'))}}}})
+      : JSON.stringify([{Destination:'/var/lib/celld', Type:'volume', Name:${JSON.stringify(`${project}_celld-data`)}}]);
+    if(args[0]==='volume' && args[1]==='ls') stdout = volume ? ${JSON.stringify(`${project}_celld-data`)} : '';
+    if(args[0]==='volume' && args[1]==='inspect') stdout = JSON.stringify([{Name:${JSON.stringify(`${project}_celld-data`)},CreatedAt:created,Labels:{'com.docker.compose.project':${JSON.stringify(project)},'com.docker.compose.volume':'celld-data'}}]);
     if(args.includes('config')) stdout='celld\\ncaddy';
   }
   if(command === 'gcloud') {

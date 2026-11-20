@@ -3,8 +3,13 @@ import { dirname, resolve } from 'node:path';
 
 import { readRecord } from '../../deploy/selfhost/created-resources.mjs';
 import { check } from './backup-lib';
-import { composeProjectFor, expectedComposeProjectFor } from './install-record';
 import type { TeardownContext } from './teardown-box';
+import {
+  assertPendingComposeInventory,
+  authorizeComposeRemoval,
+  finishKeepDataRemoval,
+} from './teardown-compose-progress';
+import { expectedTeardownProject, selectedTeardownProject } from './teardown-identity';
 
 interface Container {
   id: string;
@@ -43,8 +48,8 @@ function parse(text: string): Record<string, unknown> {
   }
 }
 function projectProof(ctx: TeardownContext): string {
-  const project = composeProjectFor(ctx.box, ctx.stateDir);
-  if (project !== expectedComposeProjectFor(ctx.box, ctx.stateDir) || !ctx.installationId)
+  const project = selectedTeardownProject(ctx);
+  if (project !== expectedTeardownProject(ctx) || !ctx.installationId)
     throw new Error('Refused: no exact installation Compose identity');
   const record = readRecord(ctx.recordFile).resources;
   const installs = record.filter(
@@ -146,13 +151,17 @@ export function readComposeInventory(ctx: TeardownContext): ComposeInventory {
     throw new Error('Refused: duplicate Docker volume inventory');
   containers.sort((a, b) => a.id.localeCompare(b.id));
   volumes.sort((a, b) => a.name.localeCompare(b.name));
-  return { containers, volumes };
+  const inventory = { containers, volumes };
+  assertPendingComposeInventory(ctx, inventory);
+  return inventory;
 }
 export function assertComposeInventory(ctx: TeardownContext, expected: ComposeInventory): void {
   if (JSON.stringify(readComposeInventory(ctx)) !== JSON.stringify(expected))
     throw new Error('Refused: Docker identities or ownership changed since inventory');
 }
 export function stopContainers(ctx: TeardownContext, inventory: ComposeInventory): void {
+  assertComposeInventory(ctx, inventory);
+  authorizeComposeRemoval(ctx, inventory);
   assertComposeInventory(ctx, inventory);
   if (inventory.containers.length)
     check(
@@ -165,6 +174,8 @@ export function removeContainers(
   inventory: ComposeInventory,
   volumes: boolean
 ): void {
+  assertComposeInventory(ctx, inventory);
+  authorizeComposeRemoval(ctx, inventory);
   assertComposeInventory(ctx, inventory);
   // Exact ids, individually re-fetched just above, cannot select a replacement container.
   if (inventory.containers.length)
@@ -179,4 +190,5 @@ export function removeContainers(
         throw new Error('Refused: Docker volume identity changed before removal');
       check(ctx.run('docker', ['volume', 'rm', volume.name]), 'remove owned volume');
     }
+  else finishKeepDataRemoval(ctx);
 }
