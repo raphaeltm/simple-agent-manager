@@ -24,7 +24,7 @@ import { createFileProvider } from '../../deploy/selfhost/key-agent/provider-fil
 import type { WranglerToml } from '../deploy/types.js';
 import { buildCelldConfig } from './celld-config.js';
 import { renderCelldMain } from './celld-project.js';
-import { resolveBoxKeys } from './deploy-keys.js';
+import { refuseRootUnlessPlaintext, resolveBoxKeys } from './deploy-keys.js';
 import { buildFencePlan } from './egress-fence.js';
 import { agentVerifyKey, celldDeployConfig, resolveSealedSecrets } from './key-seal.js';
 import {
@@ -131,6 +131,27 @@ describe('settings', () => {
       vi.spyOn(process, 'getuid').mockReturnValue(0);
       await expect(init()).rejects.toThrow(/not root/);
       expect(existsSync(join(state, 'key-agent'))).toBe(false);
+    });
+
+    // Codex P2 on #2933: deploy.ts calls this before it creates the state dir or records a choice.
+    it('refuses root before the deploy writes anything, unless the box stays on plaintext', () => {
+      const fresh = join(state, 'not-created-yet');
+      expect(() => refuseRootUnlessPlaintext({ box: {}, stateDir: fresh }, 0)).toThrow(/not root/);
+      expect(() =>
+        refuseRootUnlessPlaintext({ box: { SAM_KEY_PROVIDER: 'file' }, stateDir: fresh }, 0)
+      ).toThrow(/not root/);
+      expect(existsSync(fresh)).toBe(false);
+      // Controls: plaintext stays allowed for root, and the state owner is never refused.
+      expect(() =>
+        refuseRootUnlessPlaintext({ box: {}, keyProvider: 'legacy-plaintext', stateDir: fresh }, 0)
+      ).not.toThrow();
+      expect(() =>
+        refuseRootUnlessPlaintext(
+          { box: { SAM_KEY_PROVIDER: 'legacy-plaintext' }, stateDir: fresh },
+          0
+        )
+      ).not.toThrow();
+      expect(() => refuseRootUnlessPlaintext({ box: {}, stateDir: fresh }, 1000)).not.toThrow();
     });
 
     it('control: the state owner seals', async () => {

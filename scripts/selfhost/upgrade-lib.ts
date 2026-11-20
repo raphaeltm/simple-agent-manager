@@ -54,6 +54,7 @@ export { composeInputsChanged, composeOverlays } from './upgrade-compose.js';
 import {
   assertPendingUpgradeTarget,
   assertRollbackReady,
+  assertSealedStateOwner,
   pendingBackupDirectory,
   pendingUpgradeTarget,
 } from './upgrade-preflight.js';
@@ -383,6 +384,7 @@ async function rollbackFailedUpgrade(
 export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise<UpgradeResult> {
   assertOperatorExecution();
   recoverRollbackState(ctx);
+  assertSealedStateOwner(ctx.stateDir);
   assertRollbackReady(ctx);
   const git: Git = (args, what = `git ${args.join(' ')}`) => check(ctx.run('git', args), what);
 

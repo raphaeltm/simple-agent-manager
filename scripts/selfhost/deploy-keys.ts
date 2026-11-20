@@ -3,14 +3,16 @@
  * its platform keys and sealed bundle, and the Worker vars that point the Worker at the key
  * agent. Split from deploy.ts, which keeps the order of the steps.
  */
-import { resolveKeyProviderBox } from './key-choice.js';
+import { readKeyChoice, resolveKeyProviderBox } from './key-choice.js';
 import { detectKeyCandidates } from './key-platforms.js';
 import { agentVerifyKey, resolveDeployKeys, type ResolvedSecrets } from './key-seal.js';
 import {
   assertKeyAgentUid,
+  assertNotRootForSealing,
   keyAgentAddress,
   keyAgentUidLine,
   type KeyServiceSettings,
+  LEGACY_KEY_PROVIDER,
 } from './key-service.js';
 import type { PlatformKeysMode } from './platform-keys.js';
 
@@ -41,6 +43,22 @@ export async function resolveDeployBox(input: {
     log: input.log,
   });
   return box;
+}
+
+/**
+ * Root is refused before the deploy writes anything (the state dir, the recorded key choice)
+ * unless the box stays on plaintext deploy vars: a sealed box is set up by its state owner, and
+ * root-owned state would need manual ownership repair before the owner could retry.
+ */
+export function refuseRootUnlessPlaintext(
+  input: { box: Box; keyProvider?: string; stateDir: string },
+  uid = process.getuid?.()
+): void {
+  if (uid !== 0) return;
+  const named = input.keyProvider?.trim() || input.box.SAM_KEY_PROVIDER?.trim();
+  if (named === LEGACY_KEY_PROVIDER) return;
+  if (!named && readKeyChoice(input.stateDir)?.provider === LEGACY_KEY_PROVIDER) return;
+  assertNotRootForSealing(input.stateDir, uid);
 }
 
 export type DeployKeys = Awaited<ReturnType<typeof resolveDeployKeys>>;

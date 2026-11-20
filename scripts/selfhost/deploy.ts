@@ -70,7 +70,12 @@ import {
 import { ASSETS_DIR, CELLD_MAIN, prepareCelldProject, writeCelldConfig } from './celld-project.js';
 import { buildApiDependencies, buildWeb, publishVmAgent } from './deploy-build.js';
 import { writeAndReconcileFence } from './deploy-fence-reconcile.js';
-import { resolveBoxKeys, resolveDeployBox, sealedWorkerVars } from './deploy-keys.js';
+import {
+  refuseRootUnlessPlaintext,
+  resolveBoxKeys,
+  resolveDeployBox,
+  sealedWorkerVars,
+} from './deploy-keys.js';
 import {
   applyAllMigrations,
   bucketOf,
@@ -179,7 +184,9 @@ async function readDeployInputs(): Promise<DeployInputs> {
     values['state-dir'] ?? envBox.SAM_SELFHOST_STATE_DIR ?? '.state'
   );
   const dryRun = values['dry-run'] ?? false;
-  // A dry run writes nothing, not even the state dir.
+  // A dry run writes nothing, not even the state dir; root is refused before the first write.
+  if (!dryRun)
+    refuseRootUnlessPlaintext({ box: envBox, keyProvider: values['key-provider'], stateDir });
   if (!dryRun) ensurePrivateDir(stateDir);
   // Which key provider seals the secrets (key-choice.ts): `--init` chooses when none is recorded.
   const box = await resolveDeployBox({
