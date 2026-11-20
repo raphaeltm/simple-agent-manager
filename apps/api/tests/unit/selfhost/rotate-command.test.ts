@@ -933,6 +933,33 @@ describe('rotate better-auth-secret', () => {
     expect((await head()).BETTER_AUTH_SECRET_PREVIOUS).toBeDefined();
   });
 
+  it('a resume keeps the drain the run started with (Codex P1)', async () => {
+    const { symmetricEncrypt } = await import('better-auth/crypto');
+    sqlite
+      .prepare(`INSERT INTO accounts (id, access_token) VALUES ('a1', ?)`)
+      .run(await symmetricEncrypt({ key: deployed.ENCRYPTION_KEY!, data: 'gho_x' }));
+    // The run stops mid-migration, before the drain's end is recorded.
+    controlHook = async (body) => {
+      if (body.mode === 'migrate') throw new Error('box lost power');
+    };
+    await expect(runRotate(input({ names: ['better-auth-secret'] }), deps())).rejects.toThrow(
+      'box lost power'
+    );
+    expect(readJournal(stateDir)?.options?.drainMinutes).toBe(drainMinutes({}));
+    controlHook = null;
+    // The operator lowers the budget before resuming: the recorded drain still applies.
+    const noSleep = deps();
+    delete noSleep.sleep;
+    await runRotate(
+      { ...input({ resume: true }), box: { ...BOX, CELLD_HANDLER_BUDGET_S: '30' } },
+      noSleep
+    );
+    const step = readJournal(stateDir)?.steps['better-auth-secret'];
+    expect(Date.parse(step?.waitUntil ?? '') - Date.parse(step?.switchedAt ?? '')).toBe(
+      drainMinutes({}) * 60_000
+    );
+  });
+
   it('derives the drain from the box CELLD_HANDLER_BUDGET_S', () => {
     expect(drainMinutes({})).toBe(6);
     expect(drainMinutes({ CELLD_HANDLER_BUDGET_S: '900' })).toBe(16);

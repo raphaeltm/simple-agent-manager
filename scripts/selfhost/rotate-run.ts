@@ -183,6 +183,14 @@ export function drainMinutes(box: Readonly<Record<string, string | undefined>>):
   return Math.ceil(seconds / 60) + DRAIN_MARGIN_MINUTES;
 }
 
+/**
+ * The request drain a run started with: a resume keeps it even if CELLD_HANDLER_BUDGET_S changed
+ * since (requests on the old deployment run under the budget they started with).
+ */
+function runDrainMinutes(journal: Journal, input: RotateInput): number {
+  return journal.options?.drainMinutes ?? drainMinutes(input.box);
+}
+
 /** The timing options a run started with (recorded in its journal), or from the command line. */
 function runOptions(journal: Journal, input: RotateInput): NonNullable<Journal['options']> {
   return (
@@ -229,10 +237,10 @@ async function advance(ctx: StepContext, input: RotateInput): Promise<void> {
         ctx,
         'aes',
         runOptions(ctx.journal, input).storedLifetimeMinutes,
-        drainMinutes(input.box)
+        runDrainMinutes(ctx.journal, input)
       );
     case 'better-auth':
-      return await advanceData(ctx, 'better-auth', 0, drainMinutes(input.box));
+      return await advanceData(ctx, 'better-auth', 0, runDrainMinutes(ctx.journal, input));
   }
 }
 
@@ -267,6 +275,7 @@ async function startJournal(
     options: {
       jwtOverlapHours: input.jwtOverlapHours ?? defaultJwtOverlapHours(head.secrets),
       storedLifetimeMinutes: input.storedLifetimeMinutes ?? null,
+      drainMinutes: drainMinutes(input.box),
     },
     steps: Object.fromEntries(
       keys.map((k) => [k.name, { name: k.name, phase: 'pending' } as StepState])

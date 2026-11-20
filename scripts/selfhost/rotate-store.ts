@@ -119,7 +119,12 @@ export interface Journal {
    * must not fall back to the defaults (a 13 h JWT overlap after a requested hard cut, or a
    * shorter wait than the operator asked for). Absent only in journals from before this field.
    */
-  options?: { jwtOverlapHours: number; storedLifetimeMinutes: number | null };
+  options?: {
+    jwtOverlapHours: number;
+    storedLifetimeMinutes: number | null;
+    /** The request drain the run started with (rotate-run.ts drainMinutes); absent in older journals. */
+    drainMinutes?: number;
+  };
 }
 
 export function rotationDir(stateDir: string): string {
