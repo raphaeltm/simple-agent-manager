@@ -16,8 +16,8 @@
  *                             purge: celld forbids deleting under `deploy/` (finding F10), and
  *                             rotating the secrets, not deleting copies, is what makes them
  *                             worthless: run `rotate` (below).
- *   rotate --all | <key> ... [--dry-run] [--skip-backup] [--jwt-overlap-hours N]
- *          [--stored-lifetime-minutes N]
+ *   rotate --all | <key> ... [--dry-run] [--skip-backup | --encryption-key-file <path>]
+ *          [--jwt-overlap-hours N] [--stored-lifetime-minutes N]
  *   rotate --resume | --status
  *                             replace platform keys (rotate-run.ts); --dry-run prints the plan
  *                             and what users notice per key
@@ -59,7 +59,8 @@ const USAGE = `usage: pnpm selfhost:secrets <command> [--box-env <path>] [--stat
   reseal                    seal again with the same provider (new data key, current KEK)
   plaintext [--backups DIR|gs://...|s3://... ...]
                             read only: old deploy versions and backups holding plaintext secrets
-  rotate --all | <key> ... [--dry-run] [--skip-backup] [--jwt-overlap-hours N] [--stored-lifetime-minutes N]
+  rotate --all | <key> ... [--dry-run] [--skip-backup | --encryption-key-file <path>]
+         [--jwt-overlap-hours N] [--stored-lifetime-minutes N]
   rotate --resume | --status
                             replace platform keys; --dry-run prints the plan and what users notice
 
@@ -82,6 +83,8 @@ function parseCommandLine() {
         'skip-backup': { type: 'boolean', default: false },
         'jwt-overlap-hours': { type: 'string' },
         'stored-lifetime-minutes': { type: 'string' },
+        // The backup a rotation takes first is encrypted like every backup (backup-lib.ts).
+        'encryption-key-file': { type: 'string' },
         help: { type: 'boolean', short: 'h', default: false },
       },
     });
@@ -199,7 +202,13 @@ try {
         for (const line of formatRotationStatus(stateDir)) console.log(line);
         break;
       }
-      const ctx = loadBox(envFile, values['state-dir']);
+      const ctx = loadBox(
+        envFile,
+        values['state-dir'],
+        values['encryption-key-file']
+          ? resolve(process.env.INIT_CWD ?? process.cwd(), values['encryption-key-file'])
+          : undefined
+      );
       await runRotate(
         {
           box,

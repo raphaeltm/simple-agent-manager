@@ -239,14 +239,16 @@ sensitive as before.
 
 ```bash
 pnpm selfhost:secrets rotate --all --dry-run       # the plan, and what users notice per key
-pnpm selfhost:secrets rotate --all                 # or: rotate encryption-key jwt-keys ...
+pnpm selfhost:secrets rotate --all --encryption-key-file "$HOME/.config/sam/backup.key"
+                                                   # or: rotate encryption-key jwt-keys ...
 pnpm selfhost:secrets rotate --status              # where a rotation is
 pnpm selfhost:secrets rotate --resume              # after an interruption, or to finish a waiting key
 ```
 
 It needs a sealed box (`secrets migrate` first) with no `platform-keys.json` and no rotated name in
 `.state/secrets.env`, and a healthy install. It takes a backup first (`--skip-backup` to skip), then
-rotates each key in this order. Every new value exists only in sealed bundles; the journal
+rotates each key in this order. The backup is encrypted like every backup: pass
+`--encryption-key-file` (or set `SAM_BACKUP_KEY_FILE` in `.env`). Every new value exists only in sealed bundles; the journal
 (`.state/key-agent/rotation/journal.json`) holds names, phases, bundle ids and cursors, never a
 value. Before a key's first change its old values are sealed again to
 `.state/key-agent/rotation/<id>/<key>.before.json`: the rollback source, kept until you delete it.
