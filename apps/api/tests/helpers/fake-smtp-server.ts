@@ -105,7 +105,7 @@ export interface FakeSmtpOptions {
   /**
    * Accept the connection and never write a byte (deadline tests): no greeting, and incoming
    * bytes are drained without being parsed, so a TLS ClientHello whose random bytes happen to
-   * contain CRLF cannot draw a plaintext "502" reply.
+   * contain CRLF cannot draw a plaintext "502" reply. Takes precedence over `rawGreeting`.
    */
   silent?: boolean;
 }

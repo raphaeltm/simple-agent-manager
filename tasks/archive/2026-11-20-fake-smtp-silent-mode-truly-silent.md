@@ -36,3 +36,13 @@ OpenSSL "wrong version number" instead of "timed out after 300 ms".
 - [x] The test fails against the pre-fix helper
 - [x] Existing silent-mode deadline tests still pass
 - [x] No change to `packages/agent-email/src/smtp-client.ts`
+
+## Evidence
+
+- Pre-fix run of `tests/unit/helpers/fake-smtp-server.test.ts`: the silent case FAILED and received
+  `502 5.5.2 Command not recognized` ×2, `250-fake.example.com`, `250 8BITMIME`, `221 2.0.0 Bye`;
+  the non-silent control passed.
+- Post-fix: `fake-smtp-server.test.ts` + `smtp-client.test.ts` + `email-sign-in-smtp.test.ts`
+  47/47 passed; `smtp-client-workerd.test.ts` (sam-runtime config) 6/6 passed.
+- Stress: "gives up at the deadline during a stalled TLS handshake" ran 25 times, 0 failures.
+- Reviewers: task-completion-validator PASS, test-engineer PASS (no CRITICAL/HIGH).
