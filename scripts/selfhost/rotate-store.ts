@@ -33,7 +33,7 @@ import {
   listBundles,
   pruneBundles,
 } from './key-service';
-import { ensurePrivateDir, writePrivateFile } from './secret-files';
+import { ensurePrivateDir, replacePrivateFile } from './secret-files';
 
 export const JOURNAL_FORMAT = 'sam-key-rotation/1';
 export const ROTATION_DIR = 'rotation';
@@ -112,6 +112,12 @@ export interface Journal {
    * (key-service.ts), and each step seals one, so a rotation removes the bundles from before it.
    */
   removedBundles?: string[];
+  /**
+   * The timing options the run started with, used by every resume: a resume without the flags
+   * must not fall back to the defaults (a 13 h JWT overlap after a requested hard cut, or a
+   * shorter wait than the operator asked for). Absent only in journals from before this field.
+   */
+  options?: { jwtOverlapHours: number; storedLifetimeMinutes: number | null };
 }
 
 export function rotationDir(stateDir: string): string {
@@ -143,7 +149,8 @@ export function readJournal(stateDir: string): Journal | null {
 
 export function writeJournal(stateDir: string, journal: Journal): void {
   ensurePrivateDir(rotationDir(stateDir));
-  writePrivateFile(journalPath(stateDir), `${JSON.stringify(journal, null, 2)}\n`);
+  // Atomic (temp file, fsync, rename): a stop mid-write leaves the old or the new journal whole.
+  replacePrivateFile(journalPath(stateDir), `${JSON.stringify(journal, null, 2)}\n`);
 }
 
 /** Moves a finished journal aside, so the next `rotate` starts a new one. */
@@ -151,7 +158,7 @@ export function archiveJournal(stateDir: string, journal: Journal): string {
   const dir = join(rotationDir(stateDir), journal.id);
   ensurePrivateDir(dir);
   const path = join(dir, 'journal.json');
-  writePrivateFile(path, `${JSON.stringify(journal, null, 2)}\n`);
+  replacePrivateFile(path, `${JSON.stringify(journal, null, 2)}\n`);
   rmSync(journalPath(stateDir), { force: true });
   return path;
 }
@@ -226,7 +233,8 @@ export function openRotationStore(
       if (existsSync(path)) return;
       const sealed = await store.seal(secrets);
       ensurePrivateDir(join(rotationDir(stateDir), rotationId));
-      writePrivateFile(path, `${JSON.stringify(sealed, null, 2)}\n`);
+      // Atomic: writeSnapshot never rewrites an existing snapshot, so a partial one would be permanent.
+      replacePrivateFile(path, `${JSON.stringify(sealed, null, 2)}\n`);
     },
     async readSnapshot(rotationId, name) {
       const path = snapshotPath(rotationId, name);

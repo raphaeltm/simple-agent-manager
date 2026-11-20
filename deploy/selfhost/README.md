@@ -243,6 +243,7 @@ pnpm selfhost:secrets rotate --all --encryption-key-file "$HOME/.config/sam/back
                                                    # or: rotate encryption-key jwt-keys ...
 pnpm selfhost:secrets rotate --status              # where a rotation is
 pnpm selfhost:secrets rotate --resume              # after an interruption, or to finish a waiting key
+# --resume keeps the run's --jwt-overlap-hours / --stored-lifetime-minutes (recorded in the journal)
 ```
 
 It needs a sealed box (`secrets migrate` first) with no `platform-keys.json` and no rotated name in

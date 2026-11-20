@@ -744,6 +744,32 @@ describe('rotate encryption-key: the wait for values outside D1 and R2 (review V
     expect(waitMinutes()).toBe(5 * 60 + 15);
   });
 
+  it('a resume keeps the --stored-lifetime-minutes the run started with (Codex P1)', async () => {
+    // The run stops mid-migration, before the wait is computed; the resume passes no flag.
+    await seedCredential('c-opt', 'secret-opt', deployed.ENCRYPTION_KEY!);
+    controlHook = async (body) => {
+      if (body.mode === 'migrate' && body.target === 'd1') throw new Error('box lost power');
+    };
+    await expect(
+      runRotate(input({ names: ['encryption-key'], storedLifetimeMinutes: 600 }), deps())
+    ).rejects.toThrow();
+    controlHook = null;
+    await runRotate(input({ resume: true }), deps());
+    expect(waitMinutes()).toBe(600);
+    clock += 6 * HOUR; // past the default wait, inside the requested one: the old key stays
+    await runRotate(input({ resume: true }), deps());
+    expect((await head()).ENCRYPTION_KEY_PREVIOUS).toBeDefined();
+  });
+
+  it('refuses a resume that passes a different timing flag than the run started with', async () => {
+    await runRotate(input({ names: ['encryption-key'], storedLifetimeMinutes: 600 }), deps());
+    await expect(
+      runRotate(input({ resume: true, storedLifetimeMinutes: 30 }), deps())
+    ).rejects.toThrow(/started with --stored-lifetime-minutes 600/);
+    // The same value is accepted.
+    await runRotate(input({ resume: true, storedLifetimeMinutes: 600 }), deps());
+  });
+
   it('an explicit --stored-lifetime-minutes wins', async () => {
     workerVars = { ACP_INTERACTION_MAX_DEADLINE_MS: String(10 * HOUR) };
     await runRotate(input({ names: ['encryption-key'], storedLifetimeMinutes: 30 }), deps());

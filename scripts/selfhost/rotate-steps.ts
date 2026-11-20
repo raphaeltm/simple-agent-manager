@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import type { Secrets } from '../../deploy/selfhost/key-agent/bundle.ts';
 import { ApplyFailedError, applyPatch, type Patch, type StepContext } from './rotate-apply';
 import { jwtKeyId } from './rotate-catalog';
-import { writePrivateFile } from './secret-files';
+import { replacePrivateFile } from './secret-files';
 
 export const GATEWAY_SECRET = 'REVERSE_TUNNEL_GATEWAY_SECRET';
 export const GATEWAY_ALTERNATE = 'REVERSE_TUNNEL_GATEWAY_SECRET_ALTERNATE';
@@ -103,7 +103,7 @@ function writeGatewayEnv(ctx: StepContext, secret: string): boolean {
   // A replacer function: a `$` in the value must not be read as a replacement pattern.
   const next = text.replace(line, () => `${GATEWAY_SECRET}=${secret}`);
   if (next === text) return false;
-  writePrivateFile(path, next);
+  replacePrivateFile(path, next);
   return true;
 }
 

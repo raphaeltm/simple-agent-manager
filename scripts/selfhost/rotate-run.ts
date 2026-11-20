@@ -152,6 +152,38 @@ function stepContext(
   return { journal, step, key, store, deps, stateDir, save: () => writeJournal(stateDir, journal) };
 }
 
+/** The timing options a run started with (recorded in its journal), or from the command line. */
+function runOptions(journal: Journal, input: RotateInput): NonNullable<Journal['options']> {
+  return (
+    journal.options ?? {
+      jwtOverlapHours: input.jwtOverlapHours ?? DEFAULT_JWT_OVERLAP_HOURS,
+      storedLifetimeMinutes: input.storedLifetimeMinutes ?? null,
+    }
+  );
+}
+
+/**
+ * A resume continues with the options the run started with. A flag given again with another
+ * value is refused rather than silently applied or ignored.
+ */
+function assertResumeOptions(journal: Journal, input: RotateInput): void {
+  const recorded = journal.options;
+  if (!recorded) return;
+  const conflicts: string[] = [];
+  if (input.jwtOverlapHours !== undefined && input.jwtOverlapHours !== recorded.jwtOverlapHours)
+    conflicts.push(`--jwt-overlap-hours ${recorded.jwtOverlapHours}`);
+  if (
+    input.storedLifetimeMinutes !== undefined &&
+    input.storedLifetimeMinutes !== recorded.storedLifetimeMinutes
+  )
+    conflicts.push(`--stored-lifetime-minutes ${recorded.storedLifetimeMinutes ?? '(derived)'}`);
+  if (conflicts.length > 0) {
+    throw new Error(
+      `rotation ${journal.id} started with ${conflicts.join(' and ')}; resume without these flags (or with the same values)`
+    );
+  }
+}
+
 async function advance(ctx: StepContext, input: RotateInput): Promise<void> {
   switch (ctx.key.procedure) {
     case 'swap':
@@ -159,10 +191,10 @@ async function advance(ctx: StepContext, input: RotateInput): Promise<void> {
     case 'gateway':
       return await advanceGateway(ctx);
     case 'overlap':
-      return await advanceOverlap(ctx, input.jwtOverlapHours ?? DEFAULT_JWT_OVERLAP_HOURS);
+      return await advanceOverlap(ctx, runOptions(ctx.journal, input).jwtOverlapHours);
     case 'reencrypt':
-      // Unset: derived from the deployed Worker's own settings (rotate-steps-data.ts).
-      return await advanceData(ctx, 'aes', input.storedLifetimeMinutes ?? null);
+      // Null: derived from the deployed Worker's own settings (rotate-steps-data.ts).
+      return await advanceData(ctx, 'aes', runOptions(ctx.journal, input).storedLifetimeMinutes);
     case 'better-auth':
       return await advanceData(ctx, 'better-auth', 0);
   }
@@ -196,6 +228,10 @@ async function startJournal(
     startedAt: started.toISOString(),
     backupDir,
     keys: keys.map((k) => k.name),
+    options: {
+      jwtOverlapHours: input.jwtOverlapHours ?? DEFAULT_JWT_OVERLAP_HOURS,
+      storedLifetimeMinutes: input.storedLifetimeMinutes ?? null,
+    },
     steps: Object.fromEntries(
       keys.map((k) => [k.name, { name: k.name, phase: 'pending' } as StepState])
     ),
@@ -260,6 +296,7 @@ async function runRotateLocked(input: RotateInput, deps: RotateDeps): Promise<Jo
     );
   }
   if (!existing && input.resume) throw new Error('no rotation in progress to resume');
+  if (existing) assertResumeOptions(existing, input);
   const journal = existing ?? (await startJournal(input, deps, store));
   if (!journal) return null;
   const failures: string[] = [];
