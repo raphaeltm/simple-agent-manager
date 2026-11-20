@@ -180,6 +180,35 @@ describe('a preview replaced by another file', () => {
   });
 });
 
+describe('a preview opened from inside another viewer', () => {
+  it('returns focus into that viewer after a replaced preview closes', async () => {
+    let open: OpenLibraryFile | null = null;
+    function Capture() {
+      open = useLibraryPreview();
+      return null;
+    }
+    // Stands in for the Library page's own viewer, which carries the same root marker.
+    renderInPlace(
+      <div data-library-preview-root="">
+        <button type="button">Link in the Library viewer</button>
+        <Capture />
+      </div>
+    );
+    const underlying = screen.getByRole('button', { name: 'Link in the Library viewer' });
+    underlying.focus();
+    act(() => open!({ projectId: 'p1', fileId: 'A', filename: 'a.md' }));
+    const first = await screen.findByRole('dialog', { name: 'a.md' });
+    within(first).getByRole('button', { name: 'Close preview' }).focus();
+    act(() => open!({ projectId: 'p1', fileId: 'B', filename: 'b.md' }));
+    expect(await screen.findByRole('dialog', { name: 'b.md' })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(underlying).toHaveFocus();
+  });
+});
+
 describe('parseLibraryFileHref', () => {
   const origin = 'https://app.example.org';
   it('reads the file, project and thread from a Library preview link', () => {

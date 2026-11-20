@@ -56,17 +56,20 @@ export function LibraryPreviewProvider({ children }: Readonly<{ children: ReactN
 
   const openLibraryFile = useCallback(
     (request: LibraryPreviewRequest) => {
-      const active = document.activeElement;
-      if (active instanceof HTMLElement && !active.closest('[data-library-preview-root]')) {
-        openerRef.current = active;
-      }
       const current = locationRef.current;
+      const replacing = readPreview(current.state) !== null;
+      // A new session records its opener, wherever it is (it may sit in the Library page's own
+      // viewer); a replacement keeps the session's opener.
+      if (!replacing) {
+        openerRef.current =
+          document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      }
       const base = withoutPreview(current.state) ?? {};
       navigate(
         { pathname: current.pathname, search: current.search, hash: current.hash },
         // Opening over an open preview replaces it, so one Back still returns to the page.
         {
-          replace: readPreview(current.state) !== null,
+          replace: replacing,
           state: { ...base, [LIBRARY_PREVIEW_STATE_KEY]: request },
         }
       );
