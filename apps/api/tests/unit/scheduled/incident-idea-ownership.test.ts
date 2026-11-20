@@ -425,9 +425,17 @@ describe('incident idea ownership', () => {
       throw new Error('ProjectData unavailable');
     };
 
+    const warn = vi.spyOn(log, 'warn');
     expect(await w.sweep(T0 + HOUR, failing)).toMatchObject({ fired: 0, skipped: 1 });
+    // Held this way past the stall window, the dispatchable incident warns.
+    expect(await w.sweep(T0 + 25 * HOUR, failing)).toMatchObject({ fired: 0, stalledIncidents: 1 });
+    expect(warn).toHaveBeenCalledWith(
+      'incident_trigger_sweep.dispatch_stalled',
+      expect.objectContaining({ cause: 'not_admitted' })
+    );
+    warn.mockRestore();
     expect(w.submitter).not.toHaveBeenCalled();
-    expect(await w.sweep(T0 + HOUR + 60_000)).toMatchObject({ fired: 1 });
+    expect(await w.sweep(T0 + 25 * HOUR + 60_000)).toMatchObject({ fired: 1 });
   });
 
   it('does not refresh an owned idea that has a chat link, and releases it', async () => {

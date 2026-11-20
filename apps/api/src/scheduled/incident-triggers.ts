@@ -296,6 +296,7 @@ export async function runIncidentTriggerSweep(
   const submitter = deps.submitter;
   const summaryOptions = { expireStale: false, reclaimClaims: false };
 
+  let declineLogged = false;
   for (const trigger of triggers) {
     let summary = await buildIncidentBacklogSummary(
       env,
@@ -310,6 +311,7 @@ export async function runIncidentTriggerSweep(
         ...declineContext,
         cause: 'no_dispatchable_incidents',
       });
+      declineLogged = true;
       break;
     }
     if (!incidentDispatchAdmissionReady(summary, config, now)) {
@@ -348,8 +350,9 @@ export async function runIncidentTriggerSweep(
     base.releasedIdeas += recheck.released;
     if (!recheck.summary) {
       // The read failed: dispatching could hand someone's in-progress work to a triage run.
+      // Every trigger would read the same object, so stop for this tick.
       base.skipped += 1;
-      continue;
+      break;
     }
     summary = recheck.summary;
     if (summary.pendingCount === 0) {
@@ -357,6 +360,7 @@ export async function runIncidentTriggerSweep(
         ...declineContext,
         cause: 'no_dispatchable_incidents',
       });
+      declineLogged = true;
       break;
     }
 
@@ -443,6 +447,16 @@ export async function runIncidentTriggerSweep(
     }
 
     base.skipped += 1;
+  }
+
+  // Dispatchable incidents existed but no trigger took them (admission deferral, rate limit,
+  // engagement read failure, inactive or skipped trigger): log the breakdown once per sweep, so
+  // a dispatchable incident held this way past the stall window warns.
+  if (!declineLogged && base.fired === 0 && base.pendingIncidents > 0) {
+    base.stalledIncidents = await logIncidentDispatchDecline(env, {
+      ...declineContext,
+      cause: 'not_admitted',
+    });
   }
 
   return base;

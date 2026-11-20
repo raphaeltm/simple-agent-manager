@@ -16,7 +16,11 @@ import {
 
 const HOUR_MS = 60 * 60 * 1000;
 
-export type IncidentSweepDeclineCause = 'no_dispatchable_incidents' | 'no_active_trigger';
+export type IncidentSweepDeclineCause =
+  | 'no_dispatchable_incidents'
+  | 'no_active_trigger'
+  /** Dispatchable incidents existed, but admission, rate limit or a check held them back. */
+  | 'not_admitted';
 
 /** Holds that are deliberate: they do not warn even when old (the anomaly still lists them). */
 const EXPECTED_HOLDS = new Set([
@@ -32,7 +36,7 @@ const EXPECTED_HOLDS = new Set([
  * Logs why the sweep is not dispatching (rule 70 requirement 3): one aggregate read over the
  * pending queue, naming the filter that holds each incident back. Warns when an incident that is
  * NOT under a deliberate hold has waited past the stall window without a single dispatch
- * (nothing would dispatch it: no active trigger, admission or rate limit). Every stalled
+ * (no active trigger, or admission, rate limit or a failed check kept holding it). Every stalled
  * incident, whatever holds it, is listed by the `incident_dispatch_stalled` anomaly. Logging
  * never aborts the sweep. Returns the stalled count.
  */
