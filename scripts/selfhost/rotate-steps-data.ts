@@ -103,13 +103,17 @@ async function reversePatch(ctx: StepContext, kind: Kind): Promise<Patch> {
     const name = keyName(ctx);
     return { set: { [name]: snapshot[name] ?? '', [`${name}_PREVIOUS`]: head[name] ?? '' } };
   }
-  const version = versionOf(head[BA.version]);
+  const attempted = versionOf(head[BA.version]);
+  // The old secret goes back under its own version: tokens still enveloped as `$ba$<that>$`
+  // (the ones the forward migration could not move) must keep a matching key. Only an
+  // unversioned original (bare-hex tokens, read with the current secret as legacy) gets a new one.
+  const original = versionOf(snapshot[BA.version]);
   return {
     set: {
       [BA.secret]: snapshot[BA.secret] || snapshot.ENCRYPTION_KEY || '',
-      [BA.version]: String(version + 1),
+      [BA.version]: String(original > 0 ? original : attempted + 1),
       [BA.previous]: head[BA.secret] ?? '',
-      [BA.previousVersion]: String(version),
+      [BA.previousVersion]: String(attempted),
     },
   };
 }

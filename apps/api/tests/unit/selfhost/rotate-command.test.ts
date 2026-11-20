@@ -930,6 +930,41 @@ describe('rotate better-auth-secret', () => {
     const key = { keys: new Map([[1, after.BETTER_AUTH_SECRET!]]), currentVersion: 1 };
     expect(await symmetricDecrypt({ key, data: stored })).toBe('gho_x');
   });
+
+  it('a rollback of a later rotation restores the old secret under its own version (Codex P1)', async () => {
+    const { symmetricEncrypt, symmetricDecrypt } = await import('better-auth/crypto');
+    sqlite
+      .prepare(`INSERT INTO accounts (id, access_token) VALUES ('a1', ?)`)
+      .run(await symmetricEncrypt({ key: deployed.ENCRYPTION_KEY!, data: 'gho_x' }));
+    await runRotate(input({ names: ['better-auth-secret'] }), deps());
+    const v1 = await head();
+    expect(v1.BETTER_AUTH_SECRET_VERSION).toBe('1');
+    const keyV1 = { keys: new Map([[1, v1.BETTER_AUTH_SECRET!]]), currentVersion: 1 };
+    // During the second rotation's forward migration, a writer keeps adding version-1 tokens.
+    let reverse = false;
+    controlHook = async (body) => {
+      if (readJournal(stateDir)?.steps['better-auth-secret']?.reverse) reverse = true;
+      if (!reverse && body.mode === 'verify') {
+        sqlite
+          .prepare(`INSERT OR REPLACE INTO accounts (id, access_token) VALUES ('a2', ?)`)
+          .run(await symmetricEncrypt({ key: keyV1, data: 'gho_late' }));
+      }
+    };
+    await expect(runRotate(input({ names: ['better-auth-secret'] }), deps())).rejects.toThrow(
+      /rolled back/
+    );
+    const after = await head();
+    // Back where it started: the original secret under its original version, nothing previous.
+    expect(after.BETTER_AUTH_SECRET).toBe(v1.BETTER_AUTH_SECRET);
+    expect(after.BETTER_AUTH_SECRET_VERSION).toBe('1');
+    expect(after.BETTER_AUTH_SECRET_PREVIOUS).toBeUndefined();
+    for (const id of ['a1', 'a2']) {
+      const row = sqlite.prepare(`SELECT access_token AS t FROM accounts WHERE id = ?`).get(id) as {
+        t: string;
+      };
+      await expect(symmetricDecrypt({ key: keyV1, data: row.t })).resolves.toMatch(/^gho_/);
+    }
+  });
 });
 
 /** Archived rotation directories (each holds its journal). */
