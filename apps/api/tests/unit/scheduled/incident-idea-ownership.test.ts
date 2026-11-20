@@ -15,7 +15,10 @@ import { runIncidentTriggerSweep } from '../../../src/scheduled/incident-trigger
 import { findAnomalies } from '../../../src/services/fleet-ops/anomalies';
 import { FLEET_OPS_DEFAULTS } from '../../../src/services/fleet-ops/settings-definitions';
 import type { IdeaWorkSnapshotReader } from '../../../src/services/platform-feedback-incidents';
-import { buildIncidentBacklogSummary } from '../../../src/services/platform-feedback-incidents';
+import {
+  buildIncidentBacklogSummary,
+  listDispatchableIncidentQueue,
+} from '../../../src/services/platform-feedback-incidents';
 import {
   groupPlatformErrors,
   reconcileIncidentIdeas,
@@ -457,6 +460,59 @@ describe('incident idea ownership', () => {
     expect(result).toMatchObject({ ideasUpdated: 0 });
     expect(w.idea()).toEqual([before]);
     expect(w.triageRow().idea_owned_at).toBe('released');
+  });
+
+  it('adopts legacy ideas stored with the old column default, which unblocks their dispatch', async () => {
+    // Production shape (2026-11-20): 305 legacy pipeline ideas carried triggered_by = 'user',
+    // so adoption never matched them and every pending error incident read as tracked work.
+    const w = world();
+    const body = [
+      '## Maintainer Instructions',
+      '',
+      'Triage this automated platform feedback report. Raw observability messages were normalized/redacted before grouping.',
+      '',
+      '```',
+      '- evidence',
+      '```',
+    ].join('\n');
+    const seed = (id: string, description: string) => {
+      w.sqlite
+        .prepare(
+          `INSERT INTO tasks (id, triggered_by, project_id, user_id, title, description, status,
+             priority, task_mode, dispatch_depth, created_by, created_at, updated_at, is_idea)
+           VALUES (?, 'user', 'feedback-project', 'owner-1', 'Recurring api platform error', ?,
+             'draft', 0, 'task', 0, 'owner-1', '2026-10-01T00:00:00.000Z', '2026-10-01T01:00:00.000Z', 1)`
+        )
+        .run(id, description);
+      w.sqlite
+        .prepare(
+          `INSERT INTO platform_feedback_triages (signature, source, summary, first_seen_at,
+             last_seen_at, occurrence_count, evidence_refs, severity, idea_id, queue_state, queued_at)
+           VALUES (?, 'api', 'Recurring api platform error', ?, ?, 5, '[]', 'error', ?, 'pending', ?)`
+        )
+        .run(`sig-${id}`, T0 - 10 * HOUR, T0 - 9 * HOUR, id, T0 - 10 * HOUR);
+    };
+    seed('legacy-user', body);
+    // Control: a person edited this one; it stays tracked work.
+    seed('legacy-user-edited', `${body}\n\nA person added a note.`);
+    const dispatchable = async () =>
+      (await listDispatchableIncidentQueue(w.env, 10, T0)).map((item) => item.id).sort();
+    expect(await dispatchable()).toEqual([]);
+
+    const result = await w.reconcile(T0);
+
+    expect(result).toMatchObject({ adopted: 1, failedSteps: [] });
+    expect(
+      w.sqlite.prepare('SELECT id, triggered_by, updated_at FROM tasks ORDER BY id').all()
+    ).toEqual([
+      { id: 'legacy-user', triggered_by: 'incident', updated_at: '2026-10-01T01:00:00.000Z' },
+      {
+        id: 'legacy-user-edited',
+        triggered_by: 'user',
+        updated_at: '2026-10-01T01:00:00.000Z',
+      },
+    ]);
+    expect(await dispatchable()).toEqual(['sig-legacy-user']);
   });
 
   it('does not adopt a legacy idea edited while the Durable Object was being read', async () => {
