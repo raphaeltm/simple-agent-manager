@@ -8,13 +8,20 @@
  * is subscribed to the task's `sam.inbox` events, so it is woken when the person comments, takes
  * it, hands it on, finishes or reopens it (archiving it wakes no one).
  */
-import type { InboxAgentItem, InboxTaskDetail } from '@simple-agent-manager/shared';
+import type {
+  InboxAgentItem,
+  InboxAgentReplyItem,
+  InboxTaskDetail,
+} from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import { OperationError } from './errors';
+import { inboxAgentReplyState } from './inbox-agent-conversation';
 import { AgentLinkInputSchema, checkedLinks } from './inbox-agent-core';
 import { type AgentInboxSource, findSimilarAsks, getAgentAsk } from './inbox-agent-reads';
+import { requireSourceItem } from './inbox-agent-replies';
 import { createAsk } from './inbox-ask-create-core';
+import { parseRefOrNotFound } from './inbox-item-core';
 import { getInboxLimits, type InboxLimits } from './inbox-settings';
 import { buildTaskDetail } from './inbox-task-core';
 import { activityStatement, loadTaskForAgent, type TaskRow } from './inbox-task-rows';
@@ -344,13 +351,56 @@ export async function agentTaskDetail(
   return buildTaskDetail(ctx, row, { userId: null, canWrite: false });
 }
 
-/** `inbox_read get`: the item, and for a task its steps, assignee, claim, activity and discussion. */
+/** `inbox_read get`: existing item/task reads plus the source chat's canonical reply pages. */
+export const AgentGetInputSchema = v.object({
+  ref: v.string(),
+  replyCursor: v.optional(v.string()),
+  responseCursor: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
+});
+
 export async function getAgentItem(
   ctx: OperationContext,
   source: AgentInboxSource,
-  input: { ref: string }
-): Promise<InboxAgentItem> {
-  const item = await getAgentAsk(ctx, source, input);
-  if (item.kind !== 'task') return item;
-  return { ...item, task: await agentTaskDetail(ctx, source, askIdOf(input.ref)) };
+  raw: v.InferInput<typeof AgentGetInputSchema>
+): Promise<InboxAgentItem | InboxAgentReplyItem> {
+  const input = v.parse(AgentGetInputSchema, raw);
+  const parsed = parseRefOrNotFound(input.ref);
+  let item: InboxAgentItem | InboxAgentReplyItem;
+  if (parsed.store === 'ask') {
+    item = await getAgentAsk(ctx, source, input);
+    if (item.kind === 'task')
+      item = { ...item, task: await agentTaskDetail(ctx, source, askIdOf(input.ref)) };
+    // Preserve other chats' existing ask/task metadata reads without exposing their transcript.
+    if (!item.fromThisChat) return item;
+  } else {
+    await requireSourceItem(ctx, source, input.ref);
+    item = {
+      ref: input.ref,
+      kind: parsed.store,
+      sessionId: source.sessionId,
+      fromThisChat: true,
+      untrustedContent: true,
+      conversation: null,
+      withAgent: false,
+      pendingReplyIds: [],
+    };
+  }
+  const context = await ctx.ports.inbox.context({
+    projectId: source.projectId,
+    sessionId: source.sessionId,
+    userId: source.userId,
+    askedAt: 0,
+    inboxRef: input.ref,
+    replyCursor: input.replyCursor,
+    responseCursor: input.responseCursor,
+    includeContext: false,
+  });
+  const conversation = context?.conversation ?? null;
+  const state = await inboxAgentReplyState(
+    ctx,
+    source.projectId,
+    input.ref,
+    conversation?.replies.map((reply) => reply.id) ?? []
+  );
+  return { ...item, conversation, ...state };
 }

@@ -3,6 +3,7 @@
  * `node-phases.ts` (`.claude/rules/18-file-size-limits.md`).
  */
 import type { Env } from '../../env';
+import { neverRequestedVmPlaceholderSql } from '../../services/node-never-requested-placeholder';
 import { taskProvisionedNodeConditionSql } from '../../services/node-teardown-provenance';
 import {
   boundedWarmPlacementClaimGuardSql,
@@ -46,7 +47,7 @@ export async function selectMaxLifetimeCandidates(
        WHERE n.status NOT IN ('stopped', 'destroying', 'deleted')
          AND n.node_role = 'workspace'
          AND n.node_class != 'user-owned'
-         AND ${taskProvisionedNodeConditionSql('n')}
+         AND (${taskProvisionedNodeConditionSql('n')} OR ${neverRequestedVmPlaceholderSql('n')})
          AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
          ${boundedWarmPlacementClaimGuardSql('n.id')}
          ${sleepingContainerRetentionGuardSql('n')}

@@ -29,6 +29,7 @@ import {
 import type { ComponentType } from 'react';
 import { Link } from 'react-router';
 
+import { LibraryFileLink } from '../../../components/library/LibraryFileLink';
 import type { OutputLink } from './links';
 import { RUN_STATUS_META, stepStatusMeta, type Tone } from './model';
 
@@ -175,6 +176,12 @@ export function OutputChip({ link }: { link: OutputLink }) {
   const box =
     'flex min-h-11 min-w-0 max-w-full items-center gap-2 rounded-lg border border-solid border-border-default px-3 py-1.5 no-underline';
   if (!link.href) return <span className={box}>{body}</span>;
+  if (link.libraryFile)
+    return (
+      <LibraryFileLink {...link.libraryFile} className={`${box} hover:bg-surface-hover`}>
+        {body}
+      </LibraryFileLink>
+    );
   if (link.external)
     return (
       <a

@@ -6261,3 +6261,31 @@ export const installationCostSync = sqliteTable('installation_cost_sync', {
   lastDay: text('last_day'),
   rowsWritten: integer('rows_written').notNull().default(0),
 });
+
+/** Inbox visibility ledger; bodies remain canonical ProjectData chat messages (0263). */
+export const inboxReplies = sqliteTable(
+  'inbox_replies',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    itemRef: text('item_ref').notNull(),
+    userId: text('user_id').notNull(),
+    messageId: text('message_id').notNull(),
+    repliedAt: integer('replied_at').notNull(),
+    agentActedAt: integer('agent_acted_at'),
+    permissionRejected: integer('permission_rejected').notNull().default(0),
+  },
+  (table) => ({
+    messageIdx: uniqueIndex('idx_inbox_replies_message').on(
+      table.projectId,
+      table.itemRef,
+      table.messageId
+    ),
+    latestIdx: index('idx_inbox_replies_latest').on(table.projectId, table.itemRef, table.id),
+    permissionIdx: index('idx_inbox_replies_permissions')
+      .on(table.projectId, table.itemRef, table.repliedAt)
+      .where(sql`permission_rejected = 1`),
+  })
+);

@@ -6,6 +6,7 @@ import {
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { neverRequestedVmPlaceholderSql } from '../../services/node-never-requested-placeholder';
 import { cleanupNodeProvenanceSql } from '../../services/node-teardown-provenance';
 import { handOffEmptyWorkspaceNode } from '../../services/node-warm-handoff';
 import { workspaceArtifactsRetirementGuardSql } from '../../services/node-workspace-retirement-guard';
@@ -55,7 +56,7 @@ export async function diagnoseCleanupRefusal(
       WHERE w.node_id=n.id AND w.status='sleeping')) AS sleeping_container_retention,
     NOT (1=1 ${boundedWarmPlacementClaimGuardSql('n.id')}) AS warm_placement_claim,
     (NOT (${cleanupNodeProvenanceSql('n', options.allowManagedRunningProvenance)})
-      OR (n.runtime='vm' AND (n.placement_credential_source IS NULL
+      OR (n.runtime='vm' AND NOT ${neverRequestedVmPlaceholderSql('n')} AND (n.placement_credential_source IS NULL
         OR n.placement_credential_source NOT IN ('user','project','platform')
         OR NULLIF(TRIM(n.placement_credential_reference),'') IS NULL
         OR NULLIF(TRIM(n.runtime_incarnation_id),'') IS NULL))) AS provenance,

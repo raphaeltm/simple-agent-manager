@@ -2,6 +2,8 @@ import type { InboxItem } from '@simple-agent-manager/shared';
 import { Inbox } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
 
+import { useQueryScope } from '../../hooks/useQueryScope';
+import { rowReplyHint } from './inbox-conversation-model';
 import {
   agentStateShort,
   formatAge,
@@ -87,6 +89,36 @@ export function InboxMetaLine({
 }
 
 /**
+ * Third line once someone replied: "With the agent" while the agent has the reply (listed under
+ * Archived), or a green dot when the agent responded and the item came back.
+ */
+export function InboxReplyLine({ item, now }: { item: InboxItem; now: number }) {
+  const viewerId = useQueryScope();
+  const hint = rowReplyHint(item, viewerId, now);
+  if (!hint) return null;
+  return (
+    <span className="mt-1 flex min-w-0 items-center gap-1.5 text-xs" data-testid="inbox-reply-hint">
+      {item.withAgent && (
+        <span className="sam-raised shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium text-fg-secondary">
+          With the agent
+        </span>
+      )}
+      {hint.fresh && (
+        <span
+          aria-hidden="true"
+          className="h-2 w-2 shrink-0 rounded-full bg-[var(--sam-count-active)]"
+        />
+      )}
+      <span
+        className={`min-w-0 truncate ${hint.fresh ? 'font-medium text-fg-primary' : 'text-fg-muted'}`}
+      >
+        {hint.text}
+      </span>
+    </span>
+  );
+}
+
+/**
  * One inbox row: kind icon, the ask in one sentence, then where it came from and the agent's
  * state. A stack (several items from one chat) shows its first item and "3 from <chat>".
  * Reused by the Inbox page, the quick view and (later) "Needs you" on the Project Overview.
@@ -166,6 +198,7 @@ export const InboxRow = memo(function InboxRow({
             ) : (
               <InboxMetaLine item={first} showProject={showProject} now={now} />
             )}
+            <InboxReplyLine item={first} now={now} />
           </span>
         </button>
         {children}
@@ -186,7 +219,10 @@ const EMPTY_COPY: Record<InboxView, { title: string; body: string }> = {
     title: 'No updates',
     body: 'Finished tasks, pull requests and mentions show up here.',
   },
-  archived: { title: 'Nothing archived', body: 'Items you archive are listed here.' },
+  archived: {
+    title: 'Nothing archived',
+    body: 'Items you archive, and items you replied to that are with the agent, are listed here.',
+  },
 };
 
 export function InboxEmptyState({

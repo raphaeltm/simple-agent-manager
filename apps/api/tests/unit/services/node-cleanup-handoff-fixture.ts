@@ -27,6 +27,7 @@ export async function handoffFixture(scope: 'user' | 'installation' = 'user') {
     .run(token.ciphertext, token.iv);
   const providerDeletes: string[] = [];
   const rejectedProviderIds = new Set<string>();
+  const unavailableProviderIds = new Set<string>();
   const rejectedInventoryNodeIds = new Set<string>();
   const inventoryModeByNodeId = new Map<
     string,
@@ -89,6 +90,12 @@ export async function handoffFixture(scope: 'user' | 'installation' = 'user') {
         if (hangingProviderIds.has(url.split('/').at(-1)!)) {
           providerSignals.push(init.signal!);
           return waitForAbort(init.signal!);
+        }
+        if (unavailableProviderIds.has(url.split('/').at(-1)!)) {
+          return Response.json(
+            { error: { code: 'unavailable', message: 'Provider is unavailable' } },
+            { status: 503 }
+          );
         }
         if (rejectedProviderIds.has(url.split('/').at(-1)!)) {
           return Response.json(
@@ -216,8 +223,12 @@ export async function handoffFixture(scope: 'user' | 'installation' = 'user') {
   f.sqlite
     .prepare('UPDATE nodes SET placement_credential_fingerprint = ?')
     .run(await fingerprintEncryptedProviderCredential(token.ciphertext, token.iv));
+  // The provider identity claim stamps `transport` before any create, so a provisioned host
+  // never matches the never-requested placeholder shape (`neverRequestedVmPlaceholderSql`).
   f.sqlite
-    .prepare("UPDATE nodes SET status = 'stopped', created_at = ?, updated_at = ?")
+    .prepare(
+      "UPDATE nodes SET status = 'stopped', transport = 'vm-public-dns', created_at = ?, updated_at = ?"
+    )
     .run(OLD, OLD);
   f.sqlite
     .prepare(
@@ -276,6 +287,7 @@ export async function handoffFixture(scope: 'user' | 'installation' = 'user') {
       rejectCreateDuringDestroy = true;
     },
     rejectedProviderIds,
+    unavailableProviderIds,
     rejectedInventoryNodeIds,
     providerDeletes,
     stopSession,

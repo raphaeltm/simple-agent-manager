@@ -4884,7 +4884,7 @@ export function archiveSourceReadMessages(
   roles: string[] | undefined,
   compact: boolean,
   order: 'asc' | 'desc'
-): { messages: Record<string, unknown>[]; hasMore: boolean } {
+): messages.MessagePageResult {
   validateRootSourceOwner({
     projectId: input.projectId,
     sourceOwnerName: input.ownerName,
@@ -5022,7 +5022,7 @@ export async function archiveTargetReadMessages(
   env: Env,
   input: ProjectDataArchiveExactReadInput,
   options: compactArchive.CompactRawPageOptions & { compact: boolean }
-): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
+): Promise<messages.MessagePageResult> {
   const { limit, before, after, roles, compact, order } = options;
   validateTargetOwner(readTargetSession(sql, input.sessionId), {
     projectId: input.projectId,

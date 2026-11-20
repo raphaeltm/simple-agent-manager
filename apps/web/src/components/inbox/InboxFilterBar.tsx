@@ -12,7 +12,8 @@ const CHIP =
 
 /**
  * One scrolling chip row: Needs you, Blocking, Tasks, Reviews, Updates. Archived is rare, so it
- * lives behind ⋯ instead of costing a chip. The active chip scrolls into view, so a filter chosen
+ * lives behind ⋯ instead of costing a chip; ⋯ sits right after the last chip (the group is
+ * content-width and only shrinks to scroll when the row is too narrow). The active chip scrolls into view, so a filter chosen
  * off-screen at 375px is never hidden. The chips are toggle buttons (`aria-pressed`): each one
  * filters the same list, so they are not tabs over separate panels.
  */
@@ -57,7 +58,7 @@ export function InboxFilterBar({
       <div
         role="group"
         aria-label="Inbox filters"
-        className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto py-0.5 [scrollbar-width:none]"
+        className="flex min-w-0 flex-initial gap-1.5 overflow-x-auto py-0.5 [scrollbar-width:none]"
       >
         {chips.map((chip) => {
           const current = chip.value === value;

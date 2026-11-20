@@ -53,6 +53,8 @@ function base(overrides: Partial<Item> & { ref: string }): Item {
     },
     links: [],
     canAct: true,
+    // Items with a source chat take replies (the backend sets this for open, actable items).
+    canReply: true,
     untrustedContent: true,
     ...overrides,
   } as Item;
@@ -220,6 +222,151 @@ export const MANY_ITEMS: Item[] = [
   ),
 ];
 
+const agentResponse = (id: string, body: string, minutesAgo: number) => ({
+  id,
+  itemId: 'conv',
+  author: { kind: 'agent', id: 'agent', name: 'Agent' },
+  body,
+  status: 'open',
+  createdAt: NOW - minutesAgo * MIN,
+  updatedAt: NOW - minutesAgo * MIN,
+  replies: [],
+});
+const personReply = (
+  id: string,
+  content: string,
+  minutesAgo: number,
+  attachments: Record<string, unknown>[] = [],
+  userId = INBOX_USER.user.id
+) => ({ id, content, createdAt: NOW - minutesAgo * MIN, userId, attachments });
+
+/**
+ * Items that have been replied to (inbox replies, idea 01M7N16AF5HDPH1ZND4D4RJ00J): a long
+ * conversation, a settled declined permission, one back from the agent, one still with it.
+ */
+export const REPLY_ITEMS: Item[] = [
+  base({
+    ref: 'ask:conv',
+    projectId: 'p-billing',
+    topic: 'Workspace deletion retries',
+    title: 'Should the retry cap apply per node or per project?',
+    body: 'Retries are now capped and logged per attempt. **Per node** keeps noisy nodes from starving others; **per project** is simpler to reason about.',
+    answerSpec: { type: 'options', options: ['Per node', 'Per project'], allowText: false },
+    latestReply: {
+      userId: 'user-dana',
+      name: 'Dana Reyes',
+      messageId: 'r-3',
+      repliedAt: new Date(NOW - 6 * MIN).toISOString(),
+    },
+    withAgent: false,
+    createdAt: new Date(NOW - 90 * MIN).toISOString(),
+  }),
+  base({
+    ref: 'attention:s-perm:m-settled',
+    store: 'attention',
+    kind: 'permission',
+    projectId: 'p-infra',
+    topic: 'Database cleanup',
+    title: 'Allow dropping the legacy_sessions table on production?',
+    body: 'You declined this from the inbox.',
+    status: 'done',
+    canAct: false,
+    canReply: true,
+    blocking: false,
+    agentState: 'working',
+    answerSpec: {
+      type: 'interaction',
+      interactionId: 'int-settled',
+      interactionKind: 'permission',
+    },
+    latestReply: {
+      userId: INBOX_USER.user.id,
+      name: 'Inbox Tester',
+      messageId: 'p-1',
+      repliedAt: new Date(NOW - 20 * MIN).toISOString(),
+    },
+  }),
+  base({
+    ref: 'ask:with-agent',
+    projectId: 'p-site',
+    kind: 'review',
+    topic: 'Pricing page rewrite',
+    title:
+      'Check the new pricing page copy before it ships, especially the enterprise tier wording that legal flagged last quarter',
+    answerSpec: { type: 'acknowledge' },
+    blocking: false,
+    withAgent: true,
+    latestReply: {
+      userId: INBOX_USER.user.id,
+      name: 'Inbox Tester',
+      messageId: 'w-1',
+      repliedAt: new Date(NOW - 2 * MIN).toISOString(),
+    },
+  }),
+];
+
+const LONG_REPLY =
+  'What happens to nodes that are already mid-retry if we switch to per project? Here is the graph from last week, and the raw log line: https://logs.example.com/a/very/long/unbroken/path/segment/that/should/never/push/the/layout/sideways';
+
+export const CONVERSATIONS: Record<string, Record<string, unknown>> = {
+  'ask:conv': {
+    replies: [
+      personReply(
+        'r-1',
+        'Per node sounds right, but how many nodes hit the cap today?',
+        80,
+        [],
+        'user-dana'
+      ),
+      personReply(
+        'r-2',
+        `${LONG_REPLY}\n\n## Attached Files\n\nThe following files have been uploaded…`,
+        40,
+        [
+          {
+            uploadId: 'u-1',
+            filename: 'retry-graph-week-46.png',
+            size: 240_000,
+            contentType: 'image/png',
+          },
+          {
+            uploadId: 'u-2',
+            filename: 'a-very-long-attachment-file-name-from-the-ops-export-2026-11-19.csv',
+            size: 1_800_000,
+            contentType: 'text/csv',
+          },
+        ]
+      ),
+      personReply('r-3', 'Ok, go with per node.', 6, [], 'user-dana'),
+    ],
+    responses: [
+      agentResponse('c-1', 'Three nodes hit it today, all on the same flaky provider region.', 70),
+      agentResponse(
+        'c-2',
+        'Mid-retry nodes **keep their current count**; the new cap applies from their next attempt. Nothing is reset.\n\n- per node: 3 nodes affected\n- per project: 1 project affected\n\n```\nretry_cap{scope="node",node="01M7WXC7W20AZRP11K9YB3QCSZ-very-long-node-identifier"} 3 attempts_remaining=0 next_attempt_at=2026-11-20T17:05:00Z\n```',
+        30
+      ),
+      agentResponse('c-3', 'Noted. One last check before I push: per node it is?', 4),
+    ],
+    nextReplyCursor: null,
+    nextResponseCursor: null,
+    hasMore: false,
+  },
+  'attention:s-perm:m-settled': {
+    replies: [personReply('p-1', 'Not on production. Use the staging copy first.', 20)],
+    responses: [
+      agentResponse(
+        'c-p',
+        'Understood. I ran it on staging instead; nothing on production changed.',
+        12
+      ),
+    ],
+    nextReplyCursor: null,
+    nextResponseCursor: null,
+    hasMore: false,
+  },
+};
+
 export const UPDATES = [
   {
     id: 'n-1',
@@ -274,6 +421,10 @@ export interface InboxMockState {
   listStatus?: number;
   answered: string[];
   archived: string[];
+  /** Refs replied to this run: they leave Needs you and list under Archived as with the agent. */
+  replied?: string[];
+  /** Reply request bodies, in order. */
+  replyBodies?: unknown[];
 }
 
 export async function setupInboxMocks(page: Page, state: InboxMockState) {
@@ -282,8 +433,14 @@ export async function setupInboxMocks(page: Page, state: InboxMockState) {
   }, INBOX_USER.user.id);
   const open = () =>
     state.items.filter(
-      (item) => !state.answered.includes(item.ref) && !state.archived.includes(item.ref)
+      (item) =>
+        !state.answered.includes(item.ref) &&
+        !state.archived.includes(item.ref) &&
+        !(state.replied ?? []).includes(item.ref) &&
+        item.withAgent !== true
     );
+  const withAgent = (item: Item) =>
+    item.withAgent === true || (state.replied ?? []).includes(item.ref);
   await setupAuditRoutes(page, (path, respond, route) => {
     const method = route.request().method();
     if (path.startsWith('/api/notifications')) {
@@ -324,14 +481,18 @@ export async function setupInboxMocks(page: Page, state: InboxMockState) {
               ? scoped.filter((item) => item.kind === 'review')
               : filter === 'archived'
                 ? state.items
-                    .filter((item) => state.archived.includes(item.ref))
-                    .map((item) => ({ ...item, status: 'archived' }))
+                    .filter((item) => state.archived.includes(item.ref) || withAgent(item))
+                    .map((item) =>
+                      withAgent(item)
+                        ? { ...item, withAgent: true }
+                        : { ...item, status: 'archived' }
+                    )
                 : scoped;
       return respond(200, { items, nextCursor: null, skipped: 0 });
     }
 
     const itemRoute = path.match(
-      /^\/api\/projects\/([^/]+)\/inbox\/items\/([^/]+)(\/answer|\/archive)?$/
+      /^\/api\/projects\/([^/]+)\/inbox\/items\/([^/]+)(\/answer|\/archive|\/reply)?$/
     );
     if (itemRoute) {
       const ref = decodeURIComponent(itemRoute[2]!);
@@ -345,8 +506,26 @@ export async function setupInboxMocks(page: Page, state: InboxMockState) {
         state.archived.push(ref);
         return respond(200, { ref, outcome: 'archived', agentNotified: true });
       }
+      if (itemRoute[3] === '/reply') {
+        (state.replied ??= []).push(ref);
+        (state.replyBodies ??= []).push(route.request().postDataJSON());
+        return respond(202, {
+          ref,
+          sessionId: item.sessionId,
+          status: 'queued',
+          messageId: `msg-${state.replied.length}`,
+          deliveryId: `del-${state.replied.length}`,
+        });
+      }
       return respond(200, {
-        item,
+        item: withAgent(item) ? { ...item, withAgent: true } : item,
+        conversation: CONVERSATIONS[ref] ?? {
+          replies: [],
+          responses: [],
+          nextReplyCursor: null,
+          nextResponseCursor: null,
+          hasMore: false,
+        },
         context: {
           before: [
             {
