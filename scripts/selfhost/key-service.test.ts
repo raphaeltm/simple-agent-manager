@@ -4,18 +4,27 @@
  * leave the box: the config celld stores in the fleet bucket, and a backup. The real-runtime
  * version is live/key-agent-celld.live.test.ts.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import * as TOML from '@iarna/toml';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { openBundle } from '../../deploy/selfhost/key-agent/bundle.ts';
 import { createFileProvider } from '../../deploy/selfhost/key-agent/provider-file.ts';
 import type { WranglerToml } from '../deploy/types.js';
 import { buildCelldConfig } from './celld-config.js';
 import { renderCelldMain } from './celld-project.js';
+import { resolveBoxKeys } from './deploy-keys.js';
 import { buildFencePlan } from './egress-fence.js';
 import { agentVerifyKey, celldDeployConfig, resolveSealedSecrets } from './key-seal.js';
 import {
@@ -102,6 +111,32 @@ describe('settings', () => {
       assertKeyAgentUid({ SAM_KEY_PROVIDER: 'file', SAM_KEY_AGENT_UID: `${uid}1` }, state)
     ).toThrow(/SAM_KEY_AGENT_UID/);
     expect(() => assertKeyAgentUid(box(), state)).not.toThrow();
+  });
+
+  // Codex P2 on #2933: a root --init used to create the key file and bundle as root, then only
+  // log the SAM_KEY_AGENT_UID advice, leaving state the root-refusing agent can never use.
+  describe('a sealed --init as root', () => {
+    afterEach(() => vi.restoreAllMocks());
+    const init = () =>
+      resolveBoxKeys({
+        box: box(),
+        stateDir: state,
+        secretsPath: join(state, 'secrets.env'),
+        mode: 'init',
+        unset: [],
+        log: () => undefined,
+      });
+
+    it('is refused before anything is written', async () => {
+      vi.spyOn(process, 'getuid').mockReturnValue(0);
+      await expect(init()).rejects.toThrow(/not root/);
+      expect(existsSync(join(state, 'key-agent'))).toBe(false);
+    });
+
+    it('control: the state owner seals', async () => {
+      await init();
+      expect(existsSync(join(state, 'key-agent/kek'))).toBe(true);
+    });
   });
 
   it('writes the agent env with container paths and no secret, and the KEK once (0600)', async () => {
@@ -225,6 +260,22 @@ describe('resolveSealedSecrets', () => {
     // A lost key file is never replaced while bundles exist: a new one could not open them.
     rmSync(join(state, 'key-agent/kek'));
     await expect(settings()).rejects.toThrow(/key file was lost/);
+    // ...but bundles sealed only by another provider do not need it (secrets switch --to file),
+    // and an unreadable bundle still counts as needing it.
+    const bundles = join(state, 'key-agent/bundles');
+    const [name] = readdirSync(bundles);
+    const path = join(bundles, name ?? '');
+    const sealedWithFile = readFileSync(path, 'utf8');
+    writeFileSync(
+      path,
+      JSON.stringify({ ...(JSON.parse(sealedWithFile) as object), provider: 'gcp-kms' })
+    );
+    await settings();
+    expect(existsSync(join(state, 'key-agent/kek'))).toBe(true);
+    rmSync(join(state, 'key-agent/kek'));
+    writeFileSync(path, '{not json');
+    await expect(settings()).rejects.toThrow(/key file was lost/);
+    writeFileSync(path, sealedWithFile);
     writeFileSync(join(state, 'key-agent/kek'), `${Buffer.alloc(32, 9).toString('base64')}\n`, {
       mode: 0o600,
     });

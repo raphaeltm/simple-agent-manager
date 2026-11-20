@@ -164,15 +164,23 @@ export function bundleStoreFor(stateDir: string): BundleStore {
  * state owner, so its own uid is the only right value. Docker Compose reads it from `.env`; the
  * deploy never edits `.env`, so `--init` prints the line and every sealing deploy checks it.
  */
-export function assertKeyAgentUid(box: Box, stateDir: string): void {
-  const uid = process.getuid?.();
-  if (uid === undefined) return;
+/**
+ * A sealed box is never set up as root: the key agent runs as the state owner and refuses uid 0,
+ * so a root-owned key file and bundles would need manual ownership repair. Checked before writing.
+ */
+export function assertNotRootForSealing(stateDir: string, uid = process.getuid?.()): void {
   if (uid === 0) {
     throw new Error(
       `sealed secrets: run the deploy as the user that owns ${stateDir}, not root (the key agent ` +
         'runs as that user and refuses root)'
     );
   }
+}
+
+export function assertKeyAgentUid(box: Box, stateDir: string): void {
+  const uid = process.getuid?.();
+  if (uid === undefined) return;
+  assertNotRootForSealing(stateDir, uid);
   const pinned = box.SAM_KEY_AGENT_UID?.trim();
   if (pinned !== String(uid)) {
     throw new Error(
@@ -232,7 +240,13 @@ export async function ensureKeyServiceFiles(
   ensurePrivateDir(settings.dir);
   const keyFile = settings.hostEnv.SAM_KEY_FILE ?? '';
   if (settings.provider === 'file' && !existsSync(keyFile)) {
-    if ((await settings.bundles.listIds()).length > 0) {
+    // Lost only if a bundle needs it: a box sealed with a cloud key may switch to a new key file
+    // (secrets switch --to file). An unreadable bundle counts as needing it.
+    let unreadable = false;
+    const bundles = await listBundles(settings.bundles, () => {
+      unreadable = true;
+    });
+    if (unreadable || bundles.some((bundle) => bundle.provider === 'file')) {
       throw new Error(
         `${keyFile} is missing but ${settings.bundles.location} holds sealed bundles: the key ` +
           'file was lost. Restore it from the copy you kept off the box; a new key could not ' +

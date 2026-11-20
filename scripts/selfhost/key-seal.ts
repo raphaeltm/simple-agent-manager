@@ -18,6 +18,7 @@ import type { KeyProvider } from '../../deploy/selfhost/key-agent/provider.ts';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
 import { SIGNING_KEY_NAME } from '../../deploy/selfhost/key-agent/server.ts';
 import {
+  assertNotRootForSealing,
   DEFAULT_KEPT_BUNDLES,
   ensureKeyServiceFiles,
   ensureLegacyAgentEnv,
@@ -360,6 +361,8 @@ export async function resolveDeployKeys(input: {
     );
     return { keyService, keys: ensured.keys, sealed: null, generated: ensured.generated };
   }
+  // Before anything is written: a root --init would leave root-owned state the agent cannot use.
+  if (!dryRun) assertNotRootForSealing(stateDir);
   if (!dryRun) {
     // Only --init creates the file key (security review L-2): a plain deploy with no key file
     // stops instead of writing one that could never open a restored bundle.

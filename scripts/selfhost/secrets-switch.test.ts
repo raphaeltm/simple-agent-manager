@@ -197,6 +197,21 @@ describe('secrets switch', () => {
     expect(down.provider).toBe('file');
   });
 
+  // Codex P2 on #2933: a box sealed only with a cloud key has no key file, and switching it to the
+  // file key used to fail as "the key file was lost".
+  it('moves a box sealed only with Cloud KMS to a new key file', async () => {
+    await runSwitch({ box: box(), stateDir: state, to: 'gcp-kms' }, deps());
+    const bundles = join(state, 'key-agent/bundles');
+    const fileBundle = readdirSync(bundles).find((n) => read(`bundles/${n}`).includes('"file"'));
+    rmSync(join(bundles, fileBundle ?? ''));
+    rmSync(join(state, 'key-agent/kek'));
+    const down = await runSwitch({ box: box(), stateDir: state, to: 'file' }, deps());
+    expect(down.provider).toBe('file');
+    expect(existsSync(join(state, 'key-agent/kek'))).toBe(true);
+    expect(bundleProviders()).toEqual(['file', 'gcp-kms']);
+    // The lost-key refusal itself is pinned in key-service.test.ts.
+  });
+
   it('reseal: same provider, a new bundle and data key, no previous provider', async () => {
     const before = readdirSync(join(state, 'key-agent/bundles'));
     await runSwitch({ box: box(), stateDir: state, to: null }, deps());
