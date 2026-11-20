@@ -23,6 +23,7 @@ export async function replyToInboxItem(
     throw new OperationError('forbidden', 'You cannot reply to this item');
   if (!item.sessionId)
     throw new OperationError('invalid_input', 'This inbox item has no source chat');
+  const sessionId = item.sessionId;
   ctx.ports.chat.validateSendContent(input);
   const send = await ctx.ports.chat.authorizeSend(ctx.actor.userId, item.projectId, item.sessionId);
   const digest = new Uint8Array(
@@ -49,7 +50,7 @@ export async function replyToInboxItem(
       );
     return {
       ref: item.ref,
-      sessionId: item.sessionId!,
+      sessionId,
       status: 'queued',
       messageId: message.promptMessageId,
       deliveryId: message.id,
@@ -115,7 +116,6 @@ export async function replyToInboxItem(
   }
   const preparedPermission = permission;
   const messageId = ulid();
-  const sessionId = item.sessionId;
   let recorded = false;
   try {
     const accepted = await send.send(
