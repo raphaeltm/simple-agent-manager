@@ -1,7 +1,6 @@
 import type {
   InboxConversation,
   InboxItem,
-  InboxItemCommentThread,
   InboxItemContext,
   InboxReplyMessage,
 } from '@simple-agent-manager/shared';
@@ -20,7 +19,6 @@ import {
 import { formatFileSize } from '../../lib/file-utils';
 import { RenderedMarkdown } from '../MarkdownRenderer';
 import {
-  conversationEntries,
   type InboxConversationEntry,
   latestResponseId,
   replierName,
@@ -123,63 +121,71 @@ function ReplyTurn({
   );
 }
 
-/** The agent's response on the item (an anchored comment thread), with any follow-ups in it. */
+/** The agent's response on the item (an anchored comment, or a follow-up in its thread). */
 const ResponseTurn = forwardRef<
   HTMLDivElement,
-  { response: InboxItemCommentThread; now: number; controls?: ReactNode }
->(function ResponseTurn({ response, now, controls }, ref) {
+  { body: string; at: number; now: number; controls?: ReactNode }
+>(function ResponseTurn({ body, at, now, controls }, ref) {
   return (
     <AgentTurn
       ref={ref}
       testId="inbox-response"
       controls={controls}
-      meta={`Responded on this item · ${ago(response.createdAt, now)}`}
+      meta={`Responded on this item · ${ago(at, now)}`}
     >
       <span className="sr-only">The agent responded:</span>
       {/* Agent-written markdown: the renderer never renders raw HTML and sanitizes links. */}
       <div className="min-w-0 text-[15px] text-fg-secondary">
-        <RenderedMarkdown content={response.body} inline />
+        <RenderedMarkdown content={body} inline />
       </div>
-      {response.replies.map((followUp) =>
-        followUp.author.kind === 'agent' ? (
-          <div key={followUp.id} className="min-w-0 text-[15px] text-fg-secondary">
-            <RenderedMarkdown content={followUp.body} inline />
-          </div>
-        ) : (
-          // A person's comment in the thread (a task discussion): theirs, not the agent's.
-          <div
-            key={followUp.id}
-            className="sam-well min-w-0 rounded-xl px-3 py-2"
-            data-testid="inbox-response-person-comment"
-          >
-            <p className="m-0 mb-1 text-xs font-medium text-fg-secondary">
-              {followUp.author.name?.trim() || 'A teammate'} commented
-            </p>
-            <div className="min-w-0 text-[15px] text-fg-primary">
-              <RenderedMarkdown content={followUp.body} inline />
-            </div>
-          </div>
-        )
-      )}
     </AgentTurn>
   );
 });
 
+/** A person's comment in a response thread (a task discussion): theirs, not the agent's. */
+function CommentTurn({
+  body,
+  name,
+  at,
+  now,
+}: {
+  body: string;
+  name: string | null;
+  at: number;
+  now: number;
+}) {
+  const who = name ?? 'A teammate';
+  return (
+    <div
+      className="flex min-w-0 flex-col items-end gap-1.5"
+      data-testid="inbox-response-person-comment"
+    >
+      <span className="sr-only">{who} commented:</span>
+      <div className="sam-raised max-w-[85%] min-w-0 rounded-2xl rounded-br-md px-3 py-2 text-[15px] text-fg-primary">
+        <RenderedMarkdown content={body} inline />
+      </div>
+      <span className="text-xs text-fg-muted">
+        {who} commented on this item · {ago(at, now)}
+      </span>
+    </div>
+  );
+}
+
 /**
  * Opening an item the agent has responded on starts at its latest response, where the answer
- * buttons are; a response that arrives while the item is open is announced. Both key on the
- * first page of the conversation (the item read), so reading more pages announces nothing.
- * Runs once per item: the thread is keyed by ref, and a refetch never moves the reader.
+ * buttons are; a response that arrives while the item is open is announced. Both wait until the
+ * newest response is known (`settled`), so pages read to find it announce nothing. Runs once per
+ * item: the thread is keyed by ref, and a refetch never moves the reader.
  */
 function useResponseArrivals(
-  conversation: InboxConversation | null,
+  settled: boolean,
+  latest: string | null,
   latestRef: RefObject<HTMLDivElement | null>
 ): string {
   const seen = useRef<string | null | undefined>(undefined);
   const [announcement, setAnnouncement] = useState('');
-  const latest = conversation ? latestResponseId(conversationEntries([conversation])) : null;
   useEffect(() => {
-    if (!conversation) return;
+    if (!settled) return;
     if (seen.current === undefined) {
       seen.current = latest;
       if (latest) latestRef.current?.scrollIntoView?.({ block: 'start' });
@@ -189,7 +195,7 @@ function useResponseArrivals(
       seen.current = latest;
       setAnnouncement('The agent responded on this item.');
     }
-  }, [conversation, latest, latestRef]);
+  }, [settled, latest, latestRef]);
   return announcement;
 }
 
@@ -233,7 +239,7 @@ export function InboxConversationThread({
     [latestReply]
   );
   const latestRef = useRef<HTMLDivElement>(null);
-  const announcement = useResponseArrivals(conversation, latestRef);
+  const announcement = useResponseArrivals(thread.settled, lastResponse, latestRef);
   return (
     <div className="flex min-w-0 flex-col gap-5" data-testid="inbox-conversation">
       <p role="status" className="sr-only">
@@ -267,25 +273,41 @@ export function InboxConversationThread({
           </button>
         </div>
       )}
-      {thread.entries.map((entry: InboxConversationEntry) =>
-        entry.kind === 'reply' ? (
-          <ReplyTurn
-            key={`reply:${entry.id}`}
-            reply={entry.reply}
-            viewerId={viewerId}
-            names={names}
-            now={now}
-          />
-        ) : (
-          <ResponseTurn
-            key={`response:${entry.id}`}
-            ref={entry.id === lastResponse ? latestRef : undefined}
-            response={entry.response}
-            now={now}
-            controls={entry.id === lastResponse ? controls : undefined}
-          />
-        )
-      )}
+      {thread.entries.map((entry: InboxConversationEntry) => {
+        switch (entry.kind) {
+          case 'reply':
+            return (
+              <ReplyTurn
+                key={`reply:${entry.id}`}
+                reply={entry.reply}
+                viewerId={viewerId}
+                names={names}
+                now={now}
+              />
+            );
+          case 'comment':
+            return (
+              <CommentTurn
+                key={`comment:${entry.id}`}
+                body={entry.body}
+                name={entry.name}
+                at={entry.at}
+                now={now}
+              />
+            );
+          case 'response':
+            return (
+              <ResponseTurn
+                key={`response:${entry.id}`}
+                ref={entry.id === lastResponse ? latestRef : undefined}
+                body={entry.body}
+                at={entry.at}
+                now={now}
+                controls={entry.id === lastResponse ? controls : undefined}
+              />
+            );
+        }
+      })}
     </div>
   );
 }

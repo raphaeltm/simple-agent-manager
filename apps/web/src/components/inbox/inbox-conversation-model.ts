@@ -14,10 +14,37 @@ import { formatAge } from './inbox-model';
  * responses (comment threads anchored on the item), in time order.
  */
 
-/** One turn after the ask. */
+/**
+ * One turn after the ask. An agent response is a comment thread anchored on the item; its
+ * follow-ups are turns of their own, placed by their own time (a follow-up can come long after
+ * later turns). `response` is the agent's text; `comment` is a person's comment in a thread.
+ */
 export type InboxConversationEntry =
   | { kind: 'reply'; id: string; at: number; reply: InboxReplyMessage }
-  | { kind: 'response'; id: string; at: number; response: InboxItemCommentThread };
+  | { kind: 'response'; id: string; at: number; body: string }
+  | { kind: 'comment'; id: string; at: number; body: string; name: string | null };
+
+function threadEntries(thread: InboxItemCommentThread): InboxConversationEntry[] {
+  const out: InboxConversationEntry[] = [];
+  if (typeof thread?.id !== 'string' || typeof thread.createdAt !== 'number') return out;
+  out.push({ kind: 'response', id: thread.id, at: thread.createdAt, body: thread.body ?? '' });
+  for (const followUp of thread.replies ?? []) {
+    if (typeof followUp?.id !== 'string' || typeof followUp.createdAt !== 'number') continue;
+    const id = `${thread.id}/${followUp.id}`;
+    out.push(
+      followUp.author?.kind === 'agent'
+        ? { kind: 'response', id, at: followUp.createdAt, body: followUp.body ?? '' }
+        : {
+            kind: 'comment',
+            id,
+            at: followUp.createdAt,
+            body: followUp.body ?? '',
+            name: followUp.author?.name?.trim() || null,
+          }
+    );
+  }
+  return out;
+}
 
 /**
  * Merge every page read so far. Reply pages walk back through earlier chat history and response
@@ -34,14 +61,8 @@ export function conversationEntries(
       if (typeof reply?.id !== 'string' || typeof reply.createdAt !== 'number') continue;
       byId.set(`reply:${reply.id}`, { kind: 'reply', id: reply.id, at: reply.createdAt, reply });
     }
-    for (const response of page.responses ?? []) {
-      if (typeof response?.id !== 'string' || typeof response.createdAt !== 'number') continue;
-      byId.set(`response:${response.id}`, {
-        kind: 'response',
-        id: response.id,
-        at: response.createdAt,
-        response,
-      });
+    for (const thread of page.responses ?? []) {
+      for (const entry of threadEntries(thread)) byId.set(`${entry.kind}:${entry.id}`, entry);
     }
   }
   return [...byId.values()].sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
@@ -61,7 +82,7 @@ export function nextConversationCursor(
   return cursor.replyCursor !== undefined || cursor.responseCursor !== undefined ? cursor : null;
 }
 
-/** The id of the newest agent response, which carries the answer controls; null keeps them on the ask. */
+/** The id of the newest agent turn, which carries the answer controls; null keeps them on the ask. */
 export function latestResponseId(entries: InboxConversationEntry[]): string | null {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index];

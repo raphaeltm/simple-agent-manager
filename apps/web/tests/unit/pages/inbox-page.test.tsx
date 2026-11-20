@@ -1136,7 +1136,7 @@ describe('InboxPage — the item as a conversation', () => {
     ).toBeTruthy();
   });
 
-  it('reads more of the conversation with only the cursors the server returned', async () => {
+  it('reads later responses straight away, so the controls land on the newest one', async () => {
     server.items = [item({ ref: 'ask:q', canReply: true })];
     server.conversations = {
       'ask:q': {
@@ -1151,10 +1151,11 @@ describe('InboxPage — the item as a conversation', () => {
     };
     installFetch(server);
     renderInbox();
-    await screen.findByText('First response');
-    expect(screen.queryByText('A later response')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Show more of the conversation' }));
-    await screen.findByText('A later response');
+    const later = await screen.findByText('A later response');
+    // The answer buttons sit on the newest response, not on the first page's.
+    const latestTurn = later.closest('[data-testid="inbox-response"]') as HTMLElement;
+    expect(within(latestTurn).getByRole('button', { name: 'Yes' })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Yes' })).toHaveLength(1);
     const continuation = (fetch as unknown as { mock: { calls: [RequestInfo | URL][] } }).mock.calls
       .map(([input]) => new URL(typeof input === 'string' ? input : input.toString()))
       .find((url) => url.searchParams.has('responseCursor'));
@@ -1162,9 +1163,36 @@ describe('InboxPage — the item as a conversation', () => {
     // The exhausted reply stream is not restarted, and no transcript context is re-read.
     expect(continuation?.searchParams.has('replyCursor')).toBe(false);
     expect(continuation?.searchParams.has('context')).toBe(false);
-    // Both pages are one conversation, and nothing more is offered.
-    expect(screen.getByText('First response')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Show more of the conversation' })).toBeNull();
+  });
+
+  it('reads earlier replies only when asked, with only the reply cursor', async () => {
+    server.items = [item({ ref: 'ask:q', canReply: true })];
+    server.conversations = {
+      'ask:q': {
+        ...empty,
+        replies: [reply('m2', 'A recent reply', 5)],
+        nextReplyCursor: 'cur-1',
+        hasMore: true,
+      },
+    };
+    server.conversationPages = {
+      'cur-1|': { ...empty, replies: [reply('m1', 'An early reply', 50)] },
+    };
+    installFetch(server);
+    renderInbox();
+    await screen.findByText('A recent reply');
+    expect(screen.queryByText('An early reply')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Show more of the conversation' }));
+    await screen.findByText('An early reply');
+    const continuation = (fetch as unknown as { mock: { calls: [RequestInfo | URL][] } }).mock.calls
+      .map(([input]) => new URL(typeof input === 'string' ? input : input.toString()))
+      .find((url) => url.searchParams.has('replyCursor'));
+    expect(continuation?.searchParams.get('replyCursor')).toBe('cur-1');
+    expect(continuation?.searchParams.has('responseCursor')).toBe(false);
+    // In time order: the earlier reply first.
+    const replies = screen.getAllByTestId('inbox-reply').map((node) => node.textContent);
+    expect(replies[0]).toContain('An early reply');
   });
 
   it('shows a reply without the file list the chat appends for the agent', async () => {
@@ -1483,5 +1511,46 @@ describe('InboxPage — the item as a conversation', () => {
     const comment = await screen.findByTestId('inbox-response-person-comment');
     expect(comment.textContent).toContain('Dana Reyes commented');
     expect(comment.textContent).toContain('Thanks, noted.');
+    // Not under the agent's avatar or its "The agent responded" label.
+    expect(comment.closest('[data-testid="inbox-response"]')).toBeNull();
+  });
+
+  it('places a follow-up in a thread by its own time, after later turns', async () => {
+    server.items = [item({ ref: 'ask:q', canReply: true })];
+    server.conversations = {
+      'ask:q': {
+        ...empty,
+        replies: [reply('m1', 'A reply in between', 10)],
+        responses: [
+          {
+            ...response('c1', 'Old response', 30),
+            replies: [
+              {
+                id: 'f1',
+                author: { kind: 'agent' as const, id: 'agent' },
+                body: 'A late follow-up',
+                createdAt: minutesAgo(2),
+              },
+            ],
+          },
+        ],
+      },
+    };
+    installFetch(server);
+    renderInbox();
+    await screen.findByText('A late follow-up');
+    const order = Array.from(
+      itemPane().querySelectorAll('[data-testid="inbox-reply"], [data-testid="inbox-response"]')
+    ).map((node) => node.textContent ?? '');
+    expect(
+      order.map((text) =>
+        text.includes('Old response') ? 'old' : text.includes('in between') ? 'reply' : 'late'
+      )
+    ).toEqual(['old', 'reply', 'late']);
+    // The controls follow the newest agent turn: the follow-up.
+    const late = screen
+      .getByText('A late follow-up')
+      .closest('[data-testid="inbox-response"]') as HTMLElement;
+    expect(within(late).getByRole('button', { name: 'Yes' })).toBeTruthy();
   });
 });
