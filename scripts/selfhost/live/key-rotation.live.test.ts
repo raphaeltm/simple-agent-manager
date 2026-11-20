@@ -21,16 +21,15 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { sealSecrets } from '../../../deploy/selfhost/key-agent/bundle.ts';
+import { pingKeyAgent } from '../../../deploy/selfhost/key-agent/healthcheck.ts';
 import { createKeyProvider } from '../../../deploy/selfhost/key-agent/providers.ts';
 import { runCommand } from '../backup-cli';
 import type { BoxContext } from '../backup-lib';
 import { ensureCelldBinary } from '../celld-binary.js';
 import { KEY_CHOICE_FORMAT, writeKeyChoice } from '../key-choice';
-import { generateAgentSigningKey } from '../key-seal';
+import { agentVerifyKey, generateAgentSigningKey } from '../key-seal';
 import {
-  agentVerifyKey,
   ensureKeyServiceFiles,
-  keyAgentUrl,
   keyServiceSettings,
 } from '../key-service';
 import { completeSealedPlatformKeys } from '../platform-keys';
@@ -42,12 +41,11 @@ import { parseDotenv } from '../secret-files';
 import {
   type CelldNode,
   celldNode,
-  hasDocker,
   type ObjectStore,
   startObjectStore,
   writeProject,
 } from './celld-lab';
-import { freePort, LIVE_TMP, REPO_ROOT, type Running, waitFor } from './harness';
+import { freePort, hasDocker, LIVE_TMP, REPO_ROOT, type Running, waitFor } from './harness';
 
 const KEY = 'sam-live-rotate';
 const SECRET = 'live-rotate-store-0123456789';
@@ -81,7 +79,7 @@ function ctx(): BoxContext {
 
 /** The probe: the API's runtime-secrets wrapper around a Worker that seeds and reads credentials. */
 const PROBE = `
-import { wrapWorker } from ${JSON.stringify(join(API_SRC, 'selfhost/runtime-secrets.ts'))};
+import { wrapWorker } from ${JSON.stringify(join(API_SRC, 'selfhost/runtime-secrets-socket.ts'))};
 import { D1_LOCATIONS } from ${JSON.stringify(join(API_SRC, 'selfhost/key-rotation/d1-locations.ts'))};
 import { decrypt, encrypt } from ${JSON.stringify(join(API_SRC, 'services/encryption.ts'))};
 import { decryptFile, encryptFile, metadataToR2CustomMetadata, r2CustomMetadataToMetadata } from ${JSON.stringify(join(API_SRC, 'services/file-encryption.ts'))};
@@ -136,7 +134,7 @@ async function deployProbe(): Promise<void> {
       r2_buckets: [{ binding: 'R2', bucket_name: 'files' }],
     },
     vars: {
-      SAM_KEY_AGENT_URL: keyAgentUrl({ port: agentPort }),
+      SAM_KEY_AGENT_ADDRESS: `127.0.0.1:${agentPort}`,
       SAM_SECRET_BUNDLE_ID: head.bundle.bundleId,
       SAM_KEY_AGENT_VERIFY_KEY: agentVerifyKey(head.secrets),
       SAM_INSTALLATION_ID: head.secrets.SAM_INSTALLATION_ID,
@@ -274,13 +272,9 @@ describe.skipIf(!hasDocker && !process.env.CI)('encryption-key rotation on celld
         '--network',
         'host',
         '--user',
-        '0',
+        `${uid}:${process.getgid?.() ?? 0}`,
         '--cap-drop',
         'ALL',
-        '--cap-add',
-        'SETUID',
-        '--cap-add',
-        'SETGID',
         '--security-opt',
         'no-new-privileges:true',
         '--read-only',
@@ -300,7 +294,7 @@ describe.skipIf(!hasDocker && !process.env.CI)('encryption-key rotation on celld
     agentContainer = run.stdout.trim();
     await waitFor(
       'the key agent',
-      async () => (await fetch(`http://127.0.0.1:${agentPort}/healthz`).catch(() => null))?.ok
+      async () => (await pingKeyAgent(agentPort).catch(() => null))?.sealed === true
     );
     await deployProbe();
     await waitFor(
