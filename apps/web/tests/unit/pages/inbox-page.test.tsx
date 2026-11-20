@@ -664,6 +664,32 @@ describe('InboxPage — navigation, filters and freshness', () => {
     );
   });
 
+  it("keeps the page's purpose behind the ? instead of a subtitle", async () => {
+    server.items = [item({ ref: 'ask:a' })];
+    installFetch(server);
+    renderInbox('/projects/p1/inbox');
+    await screen.findByRole('button', { name: /Title ask:a/ });
+    // Liveness: the header rendered its title and chips while the explanation stays hidden.
+    expect(screen.getAllByRole('heading', { level: 1, name: 'Inbox' }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('group', { name: 'Inbox filters' })).toBeInTheDocument();
+    const purpose = 'What your agents need from you in Acme.';
+    expect(screen.queryByText(purpose)).not.toBeInTheDocument();
+
+    const help = screen.getByRole('button', { name: 'About the inbox' });
+    expect(help).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(help);
+    expect(help).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('note')).toHaveTextContent(purpose);
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByText(purpose)).not.toBeInTheDocument();
+    expect(help).toHaveFocus();
+
+    fireEvent.click(help);
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByText(purpose)).not.toBeInTheDocument();
+  });
+
   it('refreshes on window focus, without polling', async () => {
     server.items = [item({ ref: 'ask:a' })];
     installFetch(server);

@@ -15,6 +15,7 @@ SAM Glass is how the app looks: glass surfaces floating over an open, dark green
 5. **Panes are frosted glass.** Every pane blurs the void behind it, so the edge glow shows through each one, softened, and you can tell the panes are glass. A pane inside a pane doesn't blur again; an overlay (a drawer, a sheet, `.sam-glass-live`) blurs the content it covers. The void stays plain static gradients: blurred panes over animated or layered backgrounds made Chrome on macOS flicker the whole page.
 6. **People have colours.** You are green (`--sam-person-you`). Teammates get cyan, violet and rose in the order they joined the project (`--sam-person-1` to `-3`), stable per project. Automations are grey (`--sam-person-auto`). A colour says who, never what state.
 7. **Amber means it's waiting on you.** `--sam-color-warning` is for "needs input", notification counts and attention. Green is for things working. Neither is decoration.
+8. **Spend the screen on the task.** For every screen ask: is there more text than necessary, and is anything that is not central to what the person came to do taking space? A page header is one row where it fits: title, then its tabs or filters and actions beside it, not stacked under it. A sentence explaining what the page is for goes behind a `?` note beside the title, not in a permanent subtitle (the inbox header, `InboxHelpButton`).
 
 ## Layers
 

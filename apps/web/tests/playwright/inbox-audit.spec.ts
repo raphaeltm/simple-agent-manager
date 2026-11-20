@@ -186,6 +186,60 @@ test.describe('Inbox — Desktop', () => {
     );
   });
 
+  test('header is one row; the purpose sits behind ?', async ({ page }) => {
+    await openInbox(page, state(), '/projects/p-billing/inbox');
+    const header = page
+      .locator('header')
+      .filter({ has: page.getByRole('group', { name: 'Inbox filters' }) });
+    const title = await page.getByRole('heading', { level: 1, name: 'Inbox' }).boundingBox();
+    const help = page.getByRole('button', { name: 'About the inbox' });
+    const helpBox = await help.boundingBox();
+    const chips = await page.getByRole('group', { name: 'Inbox filters' }).boundingBox();
+    const more = await page.getByRole('button', { name: 'More filters' }).boundingBox();
+    const headerBox = await header.boundingBox();
+    const centre = (b: { y: number; height: number }) => b.y + b.height / 2;
+    // Title, ?, chips and ⋯ share one row, left to right.
+    for (const box of [helpBox!, chips!, more!]) {
+      expect(Math.abs(centre(box) - centre(title!))).toBeLessThanOrEqual(4);
+    }
+    expect(title!.x + title!.width).toBeLessThanOrEqual(helpBox!.x + 1);
+    expect(helpBox!.x + helpBox!.width).toBeLessThanOrEqual(chips!.x + 1);
+    expect(chips!.x + chips!.width).toBeLessThanOrEqual(more!.x + 1);
+    expect(headerBox!.height).toBeLessThanOrEqual(72);
+    await expect(page.getByText(/What your agents need from you/)).toHaveCount(0);
+    await screenshot(page, 'inbox-desktop-header');
+
+    await help.click();
+    const note = page.getByRole('note');
+    await expect(note).toHaveText(/What your agents need from you in /);
+    // Paints over the panes below: a real hit test at the note's centre lands on the note.
+    const noteBox = await note.boundingBox();
+    const hit = await page.evaluate(
+      ({ x, y }) => document.elementFromPoint(x, y)?.closest('[role="note"]') !== null,
+      { x: noteBox!.x + noteBox!.width / 2, y: noteBox!.y + noteBox!.height / 2 }
+    );
+    expect(hit).toBe(true);
+    await assertNoOverflow(page);
+    await screenshot(page, 'inbox-desktop-help-open');
+    await page.keyboard.press('Escape');
+    await expect(note).toHaveCount(0);
+    await expect(help).toBeFocused();
+  });
+
+  test('narrow desktop: chips scroll inside the one-row header', async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 700 });
+    await openInbox(page, state(), '/projects/p-billing/inbox');
+    const title = await page.getByRole('heading', { level: 1, name: 'Inbox' }).boundingBox();
+    const more = await page.getByRole('button', { name: 'More filters' }).boundingBox();
+    expect(
+      Math.abs(title!.y + title!.height / 2 - (more!.y + more!.height / 2))
+    ).toBeLessThanOrEqual(4);
+    expect(more!.x + more!.width).toBeLessThanOrEqual(800);
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, 'inbox-narrow-desktop-header');
+  });
+
   test('context expanded', async ({ page }) => {
     const params = new URLSearchParams({ item: 'ask:q-vat', project: 'p-billing' });
     await openInbox(page, state(), `/inbox?${params.toString()}`);
