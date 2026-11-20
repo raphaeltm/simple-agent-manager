@@ -1,3 +1,5 @@
+import { neverRequestedVmPlaceholderSql } from './node-never-requested-placeholder';
+
 /**
  * Server-written proof that SAM owns a managed node and can finish tearing it down.
  *
@@ -21,6 +23,10 @@
  * `capacity_pools` do, and a pool cascade leaves `capacity_source_id` set). Every other server-written
  * snapshot field is still required, so the release grants no admission a placed node lacked.
  *
+ * A third branch admits a row whose provider create was never requested
+ * (`neverRequestedVmPlaceholderSql`): it has no VM anywhere, so its teardown deletes nothing at a
+ * provider and needs no placement or credential proof.
+ *
  * The snapshot branch admits `stopped` and `destroying` nodes (the NodeLifecycle and cleanup
  * handoffs), plus `running` nodes only when the caller opts in. Only a node this predicate
  * admits may be handed to NodeLifecycle: once its warm timer moves it to `stopped`, the cleanup
@@ -43,7 +49,7 @@ export function cleanupNodeProvenanceSql(
   ]
     .map((column) => `NULLIF(TRIM(${alias}.${column}), '') IS NOT NULL`)
     .join('\n         AND ');
-  return `(${taskProvisionedNodeConditionSql(alias)} OR (
+  return `(${taskProvisionedNodeConditionSql(alias)} OR ${neverRequestedVmPlaceholderSql(alias)} OR (
     ${alias}.status IN (${managedPoolStatuses})
     AND ${alias}.node_class = 'managed'
     AND ${alias}.runtime = 'vm'
