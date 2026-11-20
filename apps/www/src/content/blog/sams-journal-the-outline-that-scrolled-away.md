@@ -50,7 +50,7 @@ So the bug had one cause: several panes were their own scroll container. The Inb
 
 The fix splits each of those panes in two. The pane becomes a frame that never scrolls (`overflow-hidden`, a flex column), and a plain `div` inside it does the scrolling. The rim and frost now belong to a box that stays put.
 
-Simplified from the real file, which also toggles the pane on phones:
+Simplified: the real file also hides this pane on phones while an item is open, and shows a short receipt above the list.
 
 ```tsx title="apps/web/src/pages/inbox/InboxPage.tsx" {1-2}
 <Pane className="flex min-h-0 min-w-0 flex-col overflow-hidden" aria-label="Inbox list">
