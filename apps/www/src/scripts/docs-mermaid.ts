@@ -1,9 +1,6 @@
-import mermaid from 'mermaid';
-
-mermaid.initialize({
-  startOnLoad: false,
-  theme: 'dark',
-});
+// Starlight injects this script on every docs page, so Mermaid itself is loaded only
+// on a page that has a diagram.
+export {};
 
 // Starlight renders code blocks as: <figure class="frame"><pre data-language="mermaid"><code>...</code></pre></figure>
 // wrapped in <div class="expressive-code">
@@ -12,6 +9,16 @@ const blocks = document.querySelectorAll<HTMLPreElement>(
 );
 
 if (blocks.length > 0) {
+  const { default: mermaid } = await import('mermaid');
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'dark',
+    // Mermaid 12 otherwise draws most diagrams in the `neo` look and lays them out
+    // with ELK, a multi-megabyte chunk. Keep the classic dagre rendering.
+    look: 'classic',
+    layout: 'dagre',
+  });
+
   for (const [index, pre] of Array.from(blocks).entries()) {
     // Starlight's expressive-code renders each line as a <div class="ec-line">.
     // textContent collapses them without newlines, which breaks Mermaid parsing.

@@ -132,6 +132,23 @@ for (const [viewportName, viewport, isMobile] of [
       expect(Math.abs(offset)).toBeLessThanOrEqual(1);
     });
 
+    test('keep the classic dagre flowchart without fetching ELK', async ({ page }) => {
+      // Mermaid 12 defaults flowcharts to the `neo` look and the ELK layout, a
+      // multi-megabyte chunk. The renderer pins the classic dagre rendering.
+      const scripts: string[] = [];
+      page.on('request', (request) => {
+        if (request.resourceType() === 'script') scripts.push(new URL(request.url()).pathname);
+      });
+      await openDiagrams(page);
+
+      const flowchart = page.locator(
+        '[data-testid="mermaid-diagram-svg"] > svg[aria-roledescription="flowchart-v2"]'
+      );
+      await expect(flowchart.locator('[data-look="classic"]').first()).toBeAttached();
+      await expect(flowchart.locator('[data-look="neo"]')).toHaveCount(0);
+      expect(scripts.filter((path) => /\/elk[-.]/i.test(path))).toEqual([]);
+    });
+
     test('draw journey labels in the diagram font', async ({ page }) => {
       await openDiagrams(page);
 
