@@ -714,6 +714,12 @@ describe('rotate swap keys', () => {
     healthy = () => true;
     expect((await head()).VAPID_PUBLIC_KEY).toBe(old);
     expect(readJournal(stateDir)?.steps['vapid-keys']?.phase).toBe('rolled-back');
+    // The resume finishes the run (reseal) but still fails: the key was never replaced (Codex P1).
+    await expect(runRotate(input({ resume: true }), deps())).rejects.toThrow(
+      /vapid-keys: rolled back, not replaced/
+    );
+    expect(readJournal(stateDir)).toBeNull(); // the run is closed, not left in progress
+    expect((await head()).VAPID_PUBLIC_KEY).toBe(old);
   });
 
   it('replaces the VAPID pair and the agent signing key, and the Worker serves the new public key', async () => {
@@ -758,6 +764,20 @@ describe('rotate encryption-key with a purpose key of the same value (Codex P1)'
       /CREDENTIAL_ENCRYPTION_KEY holds the same value as ENCRYPTION_KEY/
     );
     expect(readJournal(stateDir)).toBeNull();
+  });
+
+  it('refuses to rotate one purpose key alone while its sibling holds the same value (Codex P1)', async () => {
+    const current = await store().head();
+    await store().write(
+      await store().seal({
+        ...current.secrets,
+        CREDENTIAL_ENCRYPTION_KEY: 'c'.repeat(43) + '=',
+        LIBRARY_ENCRYPTION_KEY: 'c'.repeat(43) + '=',
+      })
+    );
+    await expect(
+      runRotate(input({ names: ['credential-encryption-key'], dryRun: true }), deps())
+    ).rejects.toThrow(/LIBRARY_ENCRYPTION_KEY holds the same value as CREDENTIAL_ENCRYPTION_KEY/);
   });
 
   it('accepts both in one run (control)', async () => {

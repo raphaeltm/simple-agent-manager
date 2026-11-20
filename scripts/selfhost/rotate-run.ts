@@ -93,16 +93,19 @@ export function selectKeys(
     // to it): replace the sign-in secret in the same run (review V1 M2).
     chosen.push(signIn);
   }
-  const rootKey = rotatableKey('encryption-key');
-  if (rootKey && chosen.includes(rootKey)) {
-    // A purpose key holding the same value would keep the old key in the bundle (and in use)
-    // after encryption-key reports it retired: rotate it in the same run.
-    for (const name of ['credential-encryption-key', 'library-encryption-key']) {
-      const purpose = rotatableKey(name);
-      const secret = purpose?.secrets[0] ?? '';
-      if (purpose && bundle[secret] && bundle[secret] === bundle.ENCRYPTION_KEY && !chosen.includes(purpose)) {
+  // An AES key holding the same value as an unselected one would keep that value in the bundle,
+  // still encrypting data for the other purpose, after the selected key reports it retired.
+  const aesKeys = ['encryption-key', 'credential-encryption-key', 'library-encryption-key']
+    .map((name) => rotatableKey(name))
+    .filter((key): key is RotatableKey => key !== undefined);
+  for (const selected of aesKeys.filter((key) => chosen.includes(key))) {
+    const value = bundle[selected.secrets[0] ?? ''];
+    if (!value) continue;
+    for (const other of aesKeys.filter((key) => !chosen.includes(key))) {
+      const secret = other.secrets[0] ?? '';
+      if (bundle[secret] === value) {
         throw new Error(
-          `${secret} holds the same value as ENCRYPTION_KEY: rotate both in one run (rotate encryption-key ${name}, or --all)`
+          `${secret} holds the same value as ${selected.secrets[0]}: rotate both in one run (rotate ${selected.name} ${other.name}, or --all)`
         );
       }
     }
@@ -360,9 +363,19 @@ async function runRotateLocked(input: RotateInput, deps: RotateDeps): Promise<Jo
     }
     if (step.phase === 'rolled-back') failures.push(`${name}: rolled back (${step.error ?? ''})`);
   }
+  // A key rolled back by an earlier invocation was never replaced: a resume that finishes the run
+  // still reports it, so the exit status never says a compromised key was retired when it was not.
+  const rolledBackEarlier = journal.keys.filter(
+    (name) =>
+      journal.steps[name]?.phase === 'rolled-back' && !failures.some((f) => f.startsWith(`${name}:`))
+  );
+  const carried = rolledBackEarlier.map(
+    (name) => `${name}: rolled back, not replaced (${journal.steps[name]?.error ?? ''})`
+  );
   const settled = journal.keys.every((name) =>
     ['done', 'rolled-back'].includes(journal.steps[name]?.phase ?? '')
   );
+  // Rolled-back keys do not stop the final reseal (it only drops transitional values).
   if (settled && failures.length === 0) {
     const finalStep = (journal.steps[FINAL] ??= { name: FINAL, phase: 'pending' });
     if (finalStep.phase !== 'done') {
@@ -378,6 +391,7 @@ async function runRotateLocked(input: RotateInput, deps: RotateDeps): Promise<Jo
   const head = await store.head();
   for (const line of formatSummary(journal, head.secrets, input.stateDir)) deps.log(line);
   if (journal.finishedAt) archiveJournal(input.stateDir, journal);
-  if (failures.length > 0) throw new Error(`rotation incomplete:\n  ${failures.join('\n  ')}`);
+  const reported = [...failures, ...carried];
+  if (reported.length > 0) throw new Error(`rotation incomplete:\n  ${reported.join('\n  ')}`);
   return journal;
 }
