@@ -485,4 +485,20 @@ describe.skipIf(skipWithoutDocker)('legacy compose adoption (real Docker)', () =
     expect(readVolumeFile(`${canonical}_celld-data`, 'do/marker')).toBe('7103:7103:640\ndurable');
     expect(containerOf(canonical, 'celld')).not.toBe('');
   });
+  it('refuses an unlabelled volume at a canonical name before the backup or the stop', async () => {
+    seedData(fixture);
+    const legacyCelld = containerOf(fixture.legacyProject, 'celld');
+    dockerOk(['volume', 'create', `${canonical}_celld-data`]);
+    const backups: string[] = [];
+    await expect(adopt(new FakeGit(TO), { backup: fakeBackup(backups) })).rejects.toThrow(
+      /exists but was not created by this adoption/
+    );
+    expect(backups).toEqual([]);
+    expect(containerOf(fixture.legacyProject, 'celld')).toBe(legacyCelld);
+    expect(readFileSync(fixture.envFile, 'utf8')).toBe(fixture.envText);
+    expect(existsSync(join(fixture.stateDir, ADOPTION_JOURNAL_FILE))).toBe(false);
+    // The foreign volume is untouched.
+    expect(docker(['volume', 'inspect', `${canonical}_celld-data`]).status).toBe(0);
+    docker(['volume', 'rm', `${canonical}_celld-data`]);
+  });
 });

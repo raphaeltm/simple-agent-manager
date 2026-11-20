@@ -3,7 +3,7 @@
  * other byte, and the ownership proof refuses each ambiguous shape. The end-to-end behaviour on
  * real Docker is in live/legacy-adoption.live.test.ts.
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -269,6 +269,12 @@ describe('runLegacyAdoption argument guards', () => {
   it('refuses to resume an adoption with a different --from', async () => {
     writeAdoptionJournal(state(), journal());
     await expect(adopt({ from: 'a'.repeat(40) })).rejects.toThrow(/pass the same --from/);
+  });
+  it('removes a leftover .env copy identical to .env (a kill between the two removals)', async () => {
+    writeFileSync(join(state(), 'legacy-adoption.env'), 'SAM_DOMAIN=x.test\n', { mode: 0o600 });
+    // It gets past the copy to the next precondition, which this fixture lacks.
+    await expect(adopt()).rejects.toThrow(/no platform-keys.json/);
+    expect(existsSync(join(state(), 'legacy-adoption.env'))).toBe(false);
   });
   it('refuses an orphaned .env copy left without its journal', async () => {
     writeFileSync(join(state(), 'legacy-adoption.env'), 'A=1\n', { mode: 0o600 });

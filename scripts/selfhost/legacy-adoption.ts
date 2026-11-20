@@ -11,7 +11,7 @@
  * (legacy-adoption-journal.ts), so a killed run resumes where it stopped.
  */
 import { randomBytes } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 import { check, composeArgs, composeRunEnv, runBackup } from './backup-lib';
@@ -130,7 +130,12 @@ function startJournal(ctx: BoxContext, opts: AdoptionOptions, to: string): Adopt
     throw new Error(
       'Legacy adoption refused: an unfinished upgrade record exists; inspect it before adopting'
     );
-  if (existsSync(join(ctx.stateDir, ADOPTION_ENV_FILE)))
+  const envCopy = join(ctx.stateDir, ADOPTION_ENV_FILE);
+  // A completed run removes its journal first, so a kill can leave only the copy behind. When it
+  // is byte-identical to .env it records nothing that is not already there.
+  if (existsSync(envCopy) && readOriginalEnv(ctx.stateDir) === readFileSync(ctx.envFile, 'utf8'))
+    rmSync(envCopy);
+  if (existsSync(envCopy))
     throw new Error(
       `Legacy adoption refused: ${ctx.stateDir}/${ADOPTION_ENV_FILE} exists without its journal; inspect it (it is a copy of an earlier .env) and remove it`
     );
@@ -187,6 +192,18 @@ function assertCanonicalClear(ctx: BoxContext, journal: AdoptionJournal): void {
     );
     if (volume && !owned.createdAt) owned.createdAt = volume.createdAt;
   }
+  // A label filter misses an unlabelled volume at a canonical name: inspect every expected name,
+  // so a collision refuses before the backup and the stop instead of stranding the rollback.
+  for (const volume of journal.volumes) {
+    const present = ownedCanonicalVolume(
+      ctx,
+      journal.canonicalProject,
+      volume.suffix,
+      journal.adoptionId,
+      volume.createdAt
+    );
+    if (present && !volume.createdAt) volume.createdAt = present.createdAt;
+  }
 }
 
 async function adopt(ctx: BoxContext, opts: AdoptionOptions, journal: AdoptionJournal) {
@@ -207,7 +224,6 @@ async function adopt(ctx: BoxContext, opts: AdoptionOptions, journal: AdoptionJo
     configHashOutput: compose(legacy, ['config', '--hash', '*'], 'read legacy config hashes'),
     requireRunningCelld: !stopped,
   });
-  assertCanonicalClear(ctx, journal);
   if (journal.volumes.length === 0) {
     journal.legacyContainers = inventory.containers.map((c) => c.id);
     journal.volumes = inventory.volumes.map((v) => ({
@@ -224,6 +240,7 @@ async function adopt(ctx: BoxContext, opts: AdoptionOptions, journal: AdoptionJo
       'Legacy adoption refused: the legacy project changed since this adoption began'
     );
   }
+  assertCanonicalClear(ctx, journal);
   save();
 
   ensureHelperImage(ctx, helper.image);

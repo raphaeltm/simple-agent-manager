@@ -155,9 +155,13 @@ export function readOriginalEnv(stateDir: string): string {
   return readFileSync(path, 'utf8');
 }
 
+/**
+ * The journal goes first: a kill in between leaves only the .env copy, which a later run removes
+ * when it equals .env (never a journal whose rollback can no longer restore .env).
+ */
 export function clearAdoptionJournal(stateDir: string): void {
-  rmSync(join(stateDir, ADOPTION_ENV_FILE), { force: true });
   rmSync(join(stateDir, ADOPTION_JOURNAL_FILE), { force: true });
+  rmSync(join(stateDir, ADOPTION_ENV_FILE), { force: true });
 }
 
 /** .env with COMPOSE_PROJECT_NAME set to `project`, every other byte preserved. */

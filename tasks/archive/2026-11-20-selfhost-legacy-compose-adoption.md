@@ -52,7 +52,11 @@ egress-fence-attestation}`, 8 containers (including the one-shot `celld-data-own
 - [x] Live real-Docker tests: adopt-then-upgrade (the L24 preflight passes afterwards), kill
       mid-copy then resume, ambiguous-ownership refusal (another checkout on the same project),
       failed verify rolls back to legacy; plus unit tests for argument and journal validation
-- [x] Box adoption from the PR head before merge (staging gate, coordinator): PASS at 80cce88ea on 2026-11-20 06:27-06:33 UTC (evidence in PR #2932). After merge, the normal L24 upgrade to main and the forced-verify rollback (smoke steps 1, 2 and 4) are reported to the coordinator and the channel.
+- [x] Box adoption from the PR head before merge (this feature's staging gate, per the
+      coordinator): PASS at 80cce88ea on 2026-11-20 06:27-06:33 UTC, evidence in PR #2932. The
+      post-merge upgrade to main and the forced-verify rollback belong to the original smoke
+      task 01M7VQQR2VBF219A7MJWMAWSZA (combined L23+L24 smoke), which reports them to the
+      coordinator; they are not gates of this task.
 - [x] Security review (security-auditor PASS: 3 MEDIUM and 4 LOW fixed in the second commit)
 
 ## Acceptance criteria
@@ -61,7 +65,8 @@ egress-fence-attestation}`, 8 containers (including the one-shot `celld-data-own
 - A kill during a volume copy resumes to a verified complete copy.
 - A legacy project also used by another checkout is refused with no change.
 - A failed health verification leaves the legacy project running, its data and .env unchanged.
-- sam-box is adopted and upgraded to main; smoke steps 1, 2 and 4 pass.
+- sam-box is adopted from the PR head and upgraded; data survives (PASS). Smoke steps 1, 2 and 4 on
+  main are the smoke task's, after merge.
 
 ## Outcome
 
