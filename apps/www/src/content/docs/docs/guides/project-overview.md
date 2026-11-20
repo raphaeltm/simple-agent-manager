@@ -112,8 +112,9 @@ connect and switch them. See [Usage limits](/docs/guides/agents/#usage-limits).
 
 Each automation that is failing gets one line with its fix, the same one the
 [Automation](/docs/guides/triggers/) page offers (for example **Resume** for an automation SAM
-paused after repeated failures). Below that is the next automation due to run. **All** opens the
-Automation page.
+paused after repeated failures). Reminders agents set to message their own chats are not
+counted: when one doesn't run, there is nothing for you to fix. Below that is the next automation
+due to run. **All** opens the Automation page.
 
 ### Recently
 
