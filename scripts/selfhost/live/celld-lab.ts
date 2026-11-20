@@ -120,7 +120,8 @@ export interface CelldNode {
 export async function celldNode(
   binary: string,
   store: ObjectStore,
-  bucket = 's3://fleet'
+  bucket = 's3://fleet',
+  nativeEnv: Record<string, string> = {}
 ): Promise<CelldNode> {
   const port = await freePort();
   const internalPort = await freePort();
@@ -139,7 +140,7 @@ export async function celldNode(
           '--internal-listen',
           `127.0.0.1:${internalPort}`,
         ],
-        store.env()
+        { ...store.env(), ...nativeEnv }
       ),
     deploy: (project) =>
       spawnSync(binary, ['deploy', project, ...bucketArgs()], {

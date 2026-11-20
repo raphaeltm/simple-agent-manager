@@ -58,24 +58,16 @@ function npmGlobalInstallSpecs(files: string[], packageName: string): string[] {
   return specs;
 }
 
-function dockerFromRefs(files: string[]): string[] {
-  return files.flatMap((file) =>
-    read(file)
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.startsWith('FROM '))
-      .map((line) => line.split(/\s+/)[1]!)
-  );
+function dockerRefs(contents: string): string[] {
+  return contents
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => /^FROM\s+\S+/i.test(line))
+    .map((line) => line.split(/\s+/)[1]!);
 }
 
-function dockerRefsInTextFiles(files: string[]): string[] {
-  return files.flatMap((file) =>
-    read(file)
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => /^FROM\s+\S+/.test(line))
-      .map((line) => line.replace(/^FROM\s+/, '').split(/\s+/)[0]!)
-  );
+function dockerFromRefs(files: string[]): string[] {
+  return files.flatMap((file) => dockerRefs(read(file)));
 }
 
 describe('dependency governance', () => {
@@ -121,19 +113,28 @@ describe('dependency governance', () => {
     );
   });
 
+  it('includes mixed-case FROM instructions in the digest inventory', () => {
+    expect(
+      dockerRefs('FROM image-one\nfrom image-two\n  FrOm\timage-three AS build\n# FROM ignored')
+    ).toEqual(['image-one', 'image-two', 'image-three']);
+  });
+
   it('prevents Docker base-image drift with digest pins and updater coverage', () => {
     const dockerfiles = walk('.', (path) => /(^|\/)Dockerfile(\.|$)/.test(path));
     const workflowFiles = walk(
       '.github/workflows',
       (path) => path.endsWith('.yml') || path.endsWith('.yaml')
     );
-    const refs = [...dockerFromRefs(dockerfiles), ...dockerRefsInTextFiles(workflowFiles)];
+    const refs = [...dockerFromRefs(dockerfiles), ...dockerFromRefs(workflowFiles)];
 
     expect(dockerfiles).toEqual([
       'apps/api/Dockerfile.compose-builder',
       'apps/api/Dockerfile.sandbox',
       'apps/api/Dockerfile.vm-agent-container',
       'deploy/selfhost/caddy/Dockerfile',
+      'deploy/selfhost/egress-fence/Dockerfile',
+      'deploy/selfhost/egress-fence/Dockerfile.lab',
+      'deploy/selfhost/metadata-proxy/Dockerfile',
       'deploy/selfhost/sam-mx/Dockerfile',
       'scripts/e2e/workspace-mock/Dockerfile',
     ]);
@@ -142,6 +143,8 @@ describe('dependency governance', () => {
     expect([...extractDependabotDirectories('docker')].sort()).toEqual([
       '/apps/api',
       '/deploy/selfhost/caddy',
+      '/deploy/selfhost/egress-fence',
+      '/deploy/selfhost/metadata-proxy',
       '/deploy/selfhost/sam-mx',
       '/scripts/e2e/workspace-mock',
     ]);

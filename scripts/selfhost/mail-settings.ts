@@ -12,7 +12,9 @@
  * Both at once is refused: one install, one place its codes go.
  */
 import { randomBytes } from 'node:crypto';
+import { lookup } from 'node:dns/promises';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { isIP } from 'node:net';
 import { join } from 'node:path';
 
 import { resolveSmtpConfig } from '../../packages/agent-email/src/smtp-config.js';
@@ -251,4 +253,31 @@ export function writeMailCollectorFiles(
     changed.push(uiEnv);
   }
   return changed;
+}
+
+/** Exact SMTP destinations; authentication secrets are irrelevant to routing and never read. */
+export async function mailEgressEndpoints(
+  box: Box,
+  resolve: (host: string) => Promise<string[]> = async (host) =>
+    (await lookup(host, { all: true })).map((entry) => entry.address)
+): Promise<Array<{ address: string; port: number }>> {
+  if (mailCollectorEnabled(box)) {
+    if (box.SMTP_HOST?.trim()) throw new Error('choose one place for sign-in codes');
+    return [{ address: '127.0.0.1', port: mailCollectorPorts(box).smtp }];
+  }
+  // Use the Worker's host normalization, TLS validation and default submission ports.
+  // Credentials are validated separately by smtpWorkerVars with secrets.env available.
+  const result = resolveSmtpConfig({
+    SMTP_HOST: box.SMTP_HOST,
+    SMTP_PORT: box.SMTP_PORT,
+    SMTP_TLS: box.SMTP_TLS,
+    SMTP_FROM: box.SMTP_FROM,
+  });
+  if (result.status === 'absent') return [];
+  if (result.status === 'invalid') throw new Error(`SMTP settings: ${result.problem}`);
+  const { host, port } = result.config;
+  const addresses = isIP(host) ? [host] : await resolve(host);
+  if (addresses.length === 0) throw new Error(`SMTP_HOST ${host} did not resolve`);
+  // The central buildFencePlan choke point validates every resolved address and port.
+  return [...new Set(addresses)].map((address) => ({ address, port }));
 }

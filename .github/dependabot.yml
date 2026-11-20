@@ -61,3 +61,15 @@ updates:
     directory: '/deploy/selfhost/caddy'
     schedule:
       interval: weekly
+  - package-ecosystem: 'docker'
+    directory: '/deploy/selfhost/egress-fence'
+    schedule:
+      interval: weekly
+  - package-ecosystem: 'docker'
+    directory: '/deploy/selfhost/metadata-proxy'
+    schedule:
+      interval: weekly
+  - package-ecosystem: 'npm'
+    directory: '/deploy/selfhost/metadata-proxy'
+    schedule:
+      interval: weekly
