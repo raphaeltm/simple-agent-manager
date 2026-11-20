@@ -25,7 +25,15 @@ import { log, REPO_ROOT, SELFHOST_DIR } from './deploy-steps.js';
 import { COMPOSE_PATH, imageRebuilds } from './image-rebuilds.js';
 import { assertOperatorExecution } from './operator-only.js';
 import { assertPrivateFile, replacePrivateFile } from './secret-files.js';
-import { composeInputsChanged, composeOverlays, stateFingerprint } from './upgrade-compose.js';
+import {
+  composeInputsChanged,
+  composeOverlays,
+  composeStateDirOverride,
+  fenceState,
+  recreateFence,
+  restartReason,
+  stateFingerprint,
+} from './upgrade-compose.js';
 import { rollbackSteps } from './upgrade-instructions.js';
 import {
   assertMigrationProgression,
@@ -95,19 +103,6 @@ function runCommand(command: string, args: string[], env?: NodeJS.ProcessEnv): R
   });
   if (result.error) throw result.error;
   return { status: result.status ?? 1, stdout: result.stdout, stderr: result.stderr };
-}
-
-/**
- * The state directory docker compose must read for this box, when it differs from the one compose
- * would read on its own: compose resolves `${SAM_SELFHOST_STATE_DIR:-./.state}` against the
- * compose file's directory, while the deploy resolves the state dir against the .env's directory
- * or takes `--state-dir`. A shell variable beats the .env in compose, so every compose command
- * this upgrade runs or prints sets it; otherwise Caddy and frps would read another box's (or no)
- * gateway.env. Null when compose already reads `ctx.stateDir`.
- */
-function composeStateDirOverride(ctx: Pick<BoxContext, 'box' | 'stateDir'>): string | null {
-  const composeReads = resolve(SELFHOST_DIR, ctx.box.SAM_SELFHOST_STATE_DIR || '.state');
-  return resolve(ctx.stateDir) === composeReads ? null : resolve(ctx.stateDir);
 }
 
 /** The box context from an .env file (which must exist and be private: it holds the bucket key). */
@@ -210,6 +205,9 @@ export async function recoverUpgrade(
 function startRecoveredStack(ctx: BoxContext, backupDir: string, env?: NodeJS.ProcessEnv): void {
   beginRollbackCacheStart(backupContext(ctx), backupDir);
   try {
+    recreateFence(ctx.stateDir, undefined, (args) =>
+      check(ctx.run('docker', composeArgs(ctx, args), env), 'restore previous fence')
+    );
     check(ctx.run('docker', composeArgs(ctx, ['up', '-d']), env), 'restore previous stack');
   } catch (error) {
     try {
@@ -269,11 +267,6 @@ interface UpgradeProgress {
   imagesRebuilt: string[];
 }
 
-function restartReason(composeFilesChanged: boolean, stateChanged: boolean): string {
-  if (composeFilesChanged) return 'compose files';
-  return stateChanged ? 'generated state' : 'images';
-}
-
 /**
  * Checks out `to`, runs `--init` (it may rewrite generated compose inputs), rebuilds the images
  * whose build inputs changed, restarts the stack when its inputs changed, deploys and checks
@@ -301,6 +294,7 @@ async function applyUpgrade(
   assertMigrationProgression(plan.installed, sourceMigrations(backupContext(ctx)));
   ctx.log('DO migration preflight passed against the active deployment and target checkout');
   const before = stateFingerprint(ctx.stateDir);
+  const fenceBefore = fenceState(ctx.stateDir);
   progress.deploymentStarted = true;
   pnpm(['selfhost:deploy', '--init', ...plan.boxArgs]);
   const stateChanged = stateFingerprint(ctx.stateDir) !== before;
@@ -315,6 +309,7 @@ async function applyUpgrade(
       docker(['build', ...progress.imagesRebuilt]);
     }
   }
+  recreateFence(ctx.stateDir, fenceBefore, docker);
   let composeRestarted = false;
   if (plan.composeFilesChanged || stateChanged || progress.imagesRebuilt.length > 0) {
     ctx.log(

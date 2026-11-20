@@ -16,7 +16,7 @@ let volume: string;
 let metadata: { Id: string; Created: string; Config: { Labels: Record<string, string> } };
 let volumeCreated: string;
 let inspectVolume: Mock<(ctx: BoxContext) => { name: string; createdAt: string }>;
-let inspectCache: Mock<(ctx: BoxContext) => { name: string; createdAt: string; container: string }>;
+let inspectCache: Mock<(ctx: BoxContext) => CacheStartProof>;
 beforeEach(() => {
   for (const name of Object.keys(process.env)) {
     if (name === 'CI' || name === 'GITHUB_ACTIONS' || name.startsWith('RUNNER_'))
@@ -42,11 +42,14 @@ beforeEach(() => {
     run: (_command, args) => ({
       status: 0,
       stderr: '',
-      stdout: args.includes('ps')
-        ? selected
-        : args.includes('ls')
-          ? volume
-          : JSON.stringify(metadata),
+      stdout:
+        args[0] === 'ps'
+          ? ''
+          : args.includes('ps')
+            ? selected
+            : args.includes('ls')
+              ? volume
+              : JSON.stringify(metadata),
     }),
   };
   metadata = {
@@ -71,6 +74,47 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 const recover = (requireContainer = false) =>
   recoverCacheStart(ctx, proof, inspectVolume, inspectCache, requireContainer);
+
+it.each(['new', 'old', 'changed-during-proof'] as const)(
+  'binds recovery helper %s to the authorized creation intent',
+  (kind) => {
+    const helper = {
+      container: 'e'.repeat(64),
+      createdAt: kind === 'old' ? proof.createdAt : new Date(Date.now() - 500).toISOString(),
+    };
+    const original = ctx.run;
+    ctx.run = (command, args, env) => {
+      if (args.includes('label=com.docker.compose.service=celld-data-owner'))
+        return { status: 0, stdout: helper.container, stderr: '' };
+      if (args[0] === 'container' && args[1] === 'inspect')
+        return {
+          status: 0,
+          stderr: '',
+          stdout: JSON.stringify({
+            id: helper.container,
+            createdAt: helper.createdAt,
+            image: 'sam-selfhost-egress-fence:local',
+            labels: { ...metadata.Config.Labels, 'com.docker.compose.service': 'celld-data-owner' },
+            entrypoint: ['chown', '-R', '7103:7103', '/var/lib/celld'],
+            mounts: [
+              { Type: 'volume', Name: 'owned_celld-data', Destination: '/var/lib/celld', RW: true },
+            ],
+          }),
+        };
+      return original(command, args, env);
+    };
+    inspectCache.mockReturnValue({
+      name: proof.name,
+      createdAt: volumeCreated,
+      container: replacement,
+      helpers: [
+        kind === 'changed-during-proof' ? { ...helper, container: 'f'.repeat(64) } : helper,
+      ],
+    });
+    if (kind === 'new') expect(recover().helpers).toEqual([helper]);
+    else expect(recover).toThrow(kind === 'old' ? /predates/ : /changed during/);
+  }
+);
 
 it('binds a newly created canonical container and volume only after exact scope and mount proof', () => {
   expect(recover()).toEqual({ name: proof.name, createdAt: volumeCreated, container: replacement });
@@ -134,12 +178,22 @@ it('refuses ambiguous mount proof or a cache replaced during observation', () =>
 it('can retry an intent interrupted before resource creation, but cannot declare startup successful', () => {
   selected = '';
   volume = '';
-  expect(recover()).toEqual({ name: proof.name, createdAt: proof.createdAt, container: original });
+  expect(recover()).toEqual({
+    name: proof.name,
+    createdAt: proof.createdAt,
+    container: original,
+    helpers: [],
+  });
   expect(() => recover(true)).toThrow(/no celld container/);
 });
 it('handles a volume-only partial creation using exact scope/time proof, without inventing a container', () => {
   selected = '';
-  expect(recover()).toEqual({ name: proof.name, createdAt: volumeCreated, container: original });
+  expect(recover()).toEqual({
+    name: proof.name,
+    createdAt: volumeCreated,
+    container: original,
+    helpers: [],
+  });
   expect(inspectCache).not.toHaveBeenCalled();
   expect(() => recover(true)).toThrow(/no celld container/);
 });

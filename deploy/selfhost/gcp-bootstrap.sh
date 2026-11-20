@@ -317,11 +317,14 @@ if [[ "$sa_existed" -eq 1 ]]; then
       let policy;
       try { policy = JSON.parse(text); } catch { process.exit(2); }
       if (policy === null || typeof policy !== "object" || Array.isArray(policy)) process.exit(2);
-      const bindings = policy.bindings ?? [];
+      const bindings = policy.bindings === undefined ? [] : policy.bindings;
       if (!Array.isArray(bindings)) process.exit(2);
       for (const binding of bindings) {
         if (!binding || typeof binding.role !== "string" || !Array.isArray(binding.members)) process.exit(2);
-        if (binding.condition) process.exit(3);
+        if (binding.condition !== undefined) {
+          if (!binding.condition || typeof binding.condition !== "object" || Array.isArray(binding.condition) || typeof binding.condition.expression !== "string") process.exit(2);
+          process.exit(3);
+        }
         for (const member of binding.members) {
           if (typeof member !== "string") process.exit(2);
           const ours = binding.role === "roles/iam.workloadIdentityUser" && member === process.env.POOL_PRINCIPAL;
@@ -370,6 +373,7 @@ if [[ "$DRY_RUN" -eq 0 && -n "$INSTALLATION_ID" ]]; then
   record_resource service-account "$SA_EMAIL" "$sa_action" "$sa_identity"
 fi
 
+# --condition=None adds an unconditional grant; a conditional sibling is not that grant.
 for role in "${NODE_ROLES[@]}"; do
   grant_action=reused
   if [[ "$DRY_RUN" -eq 0 && -n "$INSTALLATION_ID" ]]; then
@@ -377,8 +381,14 @@ for role in "${NODE_ROLES[@]}"; do
     grant_status=0
     printf '%s' "$policy" | ROLE="$role" MEMBER="serviceAccount:$SA_EMAIL" node -e '
       let text=""; process.stdin.on("data", x=>text+=x); process.stdin.on("end", ()=>{
-        let p; try {p=JSON.parse(text)} catch {process.exit(2)}; if (!p || !Array.isArray(p.bindings ?? [])) process.exit(2);
-        process.exit((p.bindings ?? []).some(b=>b.role===process.env.ROLE && b.members?.includes(process.env.MEMBER)) ? 0 : 10);
+        let p; try {p=JSON.parse(text)} catch {process.exit(2)};
+        if (!p || typeof p!=="object" || Array.isArray(p) || !Array.isArray(p.bindings===undefined ? [] : p.bindings)) process.exit(2);
+        const bindings=p.bindings===undefined ? [] : p.bindings;
+        for (const b of bindings) {
+          if (!b || typeof b.role!=="string" || !Array.isArray(b.members) || b.members.some(m=>typeof m!=="string")) process.exit(2);
+          if (b.condition!==undefined && (!b.condition || typeof b.condition!=="object" || Array.isArray(b.condition) || typeof b.condition.expression!=="string")) process.exit(2);
+        }
+        process.exit(bindings.some(b=>b.condition===undefined && b.role===process.env.ROLE && b.members.includes(process.env.MEMBER)) ? 0 : 10);
       });' || grant_status=$?
     case "$grant_status" in
       0) ;;
@@ -405,8 +415,8 @@ if [[ "$DRY_RUN" -eq 0 && -n "$INSTALLATION_ID" && "$sa_existed" -eq 1 ]]; then
   printf '%s' "$sa_policy" | POOL_PRINCIPAL="$POOL_PRINCIPAL" node -e '
     let text=""; process.stdin.on("data", x=>text+=x); process.stdin.on("end", ()=>{
       let p; try {p=JSON.parse(text)} catch {process.exit(2)};
-      if (!p || !Array.isArray(p.bindings ?? [])) process.exit(2);
-      process.exit((p.bindings ?? []).some(b=>!b.condition && b.role==="roles/iam.workloadIdentityUser" && b.members?.includes(process.env.POOL_PRINCIPAL)) ? 0 : 10);
+      if (!p || typeof p!=="object" || Array.isArray(p) || !Array.isArray(p.bindings===undefined ? [] : p.bindings)) process.exit(2);
+      process.exit((p.bindings===undefined ? [] : p.bindings).some(b=>b.condition===undefined && b.role==="roles/iam.workloadIdentityUser" && b.members?.includes(process.env.POOL_PRINCIPAL)) ? 0 : 10);
     });' || sa_grant_status=$?
   case "$sa_grant_status" in
     0) sa_grant_action=reused ;;

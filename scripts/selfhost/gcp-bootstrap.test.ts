@@ -3,11 +3,10 @@
  * Google Cloud state as files, so a second run sees what the first created.
  */
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GCP_REQUIRED_APIS } from '../../packages/shared/src/constants/gcp-required-apis';
 
@@ -32,12 +31,18 @@ let state: string;
 let bin: string;
 
 beforeEach(() => {
-  state = mkdtempSync(join(tmpdir(), 'gcp-bootstrap-state-'));
-  bin = mkdtempSync(join(tmpdir(), 'gcp-bootstrap-bin-'));
+  mkdirSync(resolve('.tmp'), { recursive: true });
+  state = mkdtempSync(resolve('.tmp/gcp-bootstrap-state-'));
+  bin = mkdtempSync(resolve('.tmp/gcp-bootstrap-bin-'));
   writeFileSync(join(bin, 'gcloud'), FAKE_GCLOUD);
   writeFileSync(join(bin, 'curl'), FAKE_CURL);
   chmodSync(join(bin, 'gcloud'), 0o755);
   chmodSync(join(bin, 'curl'), 0o755);
+});
+
+afterEach(() => {
+  rmSync(state, { recursive: true, force: true });
+  rmSync(bin, { recursive: true, force: true });
 });
 
 function run(args: string[], advertisedIssuer = ISSUER, env: NodeJS.ProcessEnv = {}) {

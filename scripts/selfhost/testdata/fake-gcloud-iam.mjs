@@ -144,10 +144,14 @@ else if (cmd.startsWith('compute firewall-rules')) {
     save();
   } else fail(`unexpected ${cmd}`);
 } else if (cmd.startsWith('projects get-iam-policy')) {
+  if (process.env.FAKE_GCLOUD_PROJECT_POLICY_RAW !== undefined) {
+    process.stdout.write(process.env.FAKE_GCLOUD_PROJECT_POLICY_RAW);
+    process.exit(0);
+  }
   const bindings = db.bindings
     .filter((x) => x.startsWith(`project:${words[2]} `))
     .map((x) => ({ role: x.split(' ')[1], members: [x.split(' ')[2]] }));
-  out(JSON.stringify({ bindings }));
+  out(JSON.stringify({ bindings: [...bindings, ...(db.projectExtraBindings ?? [])] }));
 } else if (cmd.startsWith('projects add-iam-policy-binding')) {
   const entry = `project:${words[2]} ${flag('role')} ${flag('member')}`;
   if (!db.bindings.includes(entry)) db.bindings.push(entry);

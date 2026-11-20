@@ -34,10 +34,10 @@ log(`restored backup of ${manifest.createdAt} (SAM ${manifest.samCommit ?? 'unkn
 log('Recover with the SAME SAM checkout the backup was taken with:');
 if (manifest.samCommit) log(`  git checkout ${manifest.samCommit}`);
 log(
-  `  pnpm selfhost:deploy --init --env-file '${envFile.replaceAll("'", "'\"'\"'")}' --state-dir '${ctx.stateDir.replaceAll("'", "'\"'\"'")}'`
+  `  Set COMPOSE_PROJECT_NAME in the target .env to ${expectedComposeProjectFor(ctx.box, ctx.stateDir)} before running --init`
 );
 log(
-  `  Set COMPOSE_PROJECT_NAME in the target .env to ${expectedComposeProjectFor(ctx.box, ctx.stateDir)}, then repeat --init to record the target identity`
+  `  pnpm selfhost:deploy --init --env-file '${envFile.replaceAll("'", "'\"'\"'")}' --state-dir '${ctx.stateDir.replaceAll("'", "'\"'\"'")}'`
 );
 log(
   `  SAM_SELFHOST_STATE_DIR='${ctx.stateDir.replaceAll("'", "'\"'\"'")}' docker ${composeArgs(

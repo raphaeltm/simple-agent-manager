@@ -5,6 +5,7 @@ import { type BoxContext, check, composeArgs, composeRunEnv } from './backup-lib
 import type { RollbackCacheProof } from './backup-recovery';
 import { composeProjectFor } from './install-record';
 import { assertOperatorExecution } from './operator-only';
+import { readCacheHelpers } from './rollback-cache-helper';
 import { assertRollbackReady } from './upgrade-preflight';
 
 export interface CacheStartProof extends RollbackCacheProof {
@@ -89,8 +90,21 @@ export function recoverCacheStart(
     'inspect starting cache'
   ).stdout.trim();
   if (requireContainer && !selected) throw new Error('Recovery start has no celld container');
+  const helpers = readCacheHelpers(ctx);
+  for (const helper of helpers) {
+    if (pending.helpers?.some((old) => old.container === helper.container))
+      throw new Error('Replacement cache helper predates recovery');
+    createdAfter(helper.createdAt, start);
+  }
+  if (!selected && !volumes && helpers.length)
+    throw new Error('Cache helper has no authorized recovery volume');
   if (!selected && !volumes)
-    return { name: pending.name, createdAt: pending.createdAt, container: pending.container };
+    return {
+      name: pending.name,
+      createdAt: pending.createdAt,
+      container: pending.container,
+      helpers,
+    };
   if (
     volumes !== pending.name ||
     (selected && (!/^[a-f0-9]{64}$/.test(selected) || selected === pending.container))
@@ -98,10 +112,14 @@ export function recoverCacheStart(
     throw new Error('Ambiguous replacement cache identity');
   const volume = inspectVolume(ctx);
   createdAfter(volume.createdAt, start);
-  if (!selected) return { ...volume, container: pending.container };
+  if (!selected) return { ...volume, container: pending.container, helpers };
   proveContainer(ctx, selected, start);
   const proof = inspectCache(ctx);
-  if (proof.container !== selected || proof.createdAt !== volume.createdAt)
+  if (
+    proof.container !== selected ||
+    proof.createdAt !== volume.createdAt ||
+    JSON.stringify(proof.helpers ?? []) !== JSON.stringify(helpers)
+  )
     throw new Error('Replacement cache changed during ownership proof');
   return proof;
 }

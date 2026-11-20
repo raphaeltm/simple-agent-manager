@@ -86,7 +86,7 @@ cp.spawnSync = (command, args, options) => {
     if(args[0]==='container' && args[1]==='rm') container='';
     if(args[0]==='volume' && args[1]==='rm') volume=false;
     if(args.includes('up')) { container='d'.repeat(64); volume=true; created=new Date().toISOString(); }
-    if(args.includes('ps')) stdout = container;
+    if(args.includes('ps')) stdout = args.includes('label=com.docker.compose.service=celld-data-owner') ? '' : container;
     if(args[0]==='inspect') stdout = args[2]?.includes('{{json .Id}}')
       ? JSON.stringify({Id:container,Created:created,Config:{Labels:{'com.docker.compose.project':${JSON.stringify(project)},'com.docker.compose.service':'celld','com.docker.compose.project.config_files':${JSON.stringify(resolve('deploy/selfhost/docker-compose.yml'))},'com.docker.compose.project.working_dir':${JSON.stringify(resolve('deploy/selfhost'))}}}})
       : JSON.stringify([{Destination:'/var/lib/celld', Type:'volume', Name:${JSON.stringify(`${project}_celld-data`)}}]);

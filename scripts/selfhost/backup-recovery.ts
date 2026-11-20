@@ -33,6 +33,13 @@ import { composeProjectFor, recordInstall, SELFHOST_ENVIRONMENT } from './instal
 import { assertOperatorExecution } from './operator-only';
 import { removePrivateTree } from './private-tree';
 import {
+  assertCacheHelpers,
+  type CacheHelperProof,
+  parseCacheHelpers,
+  readCacheHelpers,
+  removeCacheHelpers,
+} from './rollback-cache-helper';
+import {
   type CacheStartProof,
   cacheStartTime,
   recoverCacheStart,
@@ -116,6 +123,7 @@ export interface RollbackCacheProof {
   name: string;
   createdAt: string;
   container: string;
+  helpers?: CacheHelperProof[];
 }
 
 function inspectCacheVolume(ctx: BoxContext): { name: string; createdAt: string } {
@@ -182,7 +190,7 @@ export function assertRollbackCacheReady(ctx: BoxContext): RollbackCacheProof {
   const proof = inspectCacheVolume(ctx);
   if (caches.length !== 1 || caches[0]?.Type !== 'volume' || caches[0]?.Name !== proof.name)
     throw new Error('Selected celld cache mount is not the canonical owned volume');
-  return { ...proof, container };
+  return { ...proof, container, helpers: readCacheHelpers(ctx) };
 }
 
 /** A private receipt permits retry after this process removed only part of the cache. */
@@ -197,6 +205,7 @@ function pendingCache(ctx: BoxContext, from: string): CacheStartProof | null {
     createdAt?: unknown;
     container?: unknown;
     startingAt?: unknown;
+    helpers?: unknown;
   };
   try {
     value = JSON.parse(readFileSync(path, 'utf8'));
@@ -218,6 +227,7 @@ function pendingCache(ctx: BoxContext, from: string): CacheStartProof | null {
     name: value.name,
     createdAt: value.createdAt,
     container: value.container,
+    helpers: parseCacheHelpers(value.helpers),
     ...(typeof value.startingAt === 'string' ? { startingAt: value.startingAt } : {}),
   };
 }
@@ -226,6 +236,7 @@ function cachePresence(
   expected: RollbackCacheProof
 ): { container: boolean; volume: boolean } {
   assertRollbackReady(ctx);
+  assertCacheHelpers(ctx, expected.helpers ?? []);
   const selected = check(
     ctx.run(
       'docker',
@@ -272,6 +283,7 @@ function discardCelldCache(ctx: BoxContext, expected: RollbackCacheProof, from: 
       ctx.run('docker', ['container', 'rm', '--force', expected.container]),
       'remove exact rollback celld container'
     );
+  removeCacheHelpers(ctx, expected.helpers ?? []);
   if (present.volume) {
     const after = inspectCacheVolume(ctx);
     if (after.createdAt !== expected.createdAt)

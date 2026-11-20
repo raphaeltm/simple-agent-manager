@@ -50,6 +50,8 @@ function run(command: string, args: string[], env?: NodeJS.ProcessEnv): RunResul
       : args;
   const line = `${command} ${commandArgs.join(' ')}`;
   steps.push(line);
+  if (command === 'docker' && args.includes('label=com.docker.compose.service=celld-data-owner'))
+    return ok();
   if (command === 'git') {
     if (args[0] === 'status') return ok(dirty ? ' M file' : '');
     if (args[0] === 'rev-parse' && args[1] === 'HEAD') return ok(FROM);

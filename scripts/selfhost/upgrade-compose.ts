@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 
-import { REPO_ROOT } from './deploy-steps.js';
+import { REPO_ROOT, SELFHOST_DIR } from './deploy-steps.js';
 import { COMPOSE_PATH, type ComposeOverlay } from './image-rebuilds.js';
 
 /**
@@ -47,7 +47,7 @@ export function stateFingerprint(stateDir: string): string {
   const hash = createHash('sha256');
   if (!existsSync(stateDir)) return '';
   for (const name of readdirSync(stateDir).sort()) {
-    if (!name.endsWith(GENERATED_STATE_FILE_SUFFIX)) continue;
+    if (!name.endsWith(GENERATED_STATE_FILE_SUFFIX) && name !== 'egress-fence.nft') continue;
     try {
       hash.update(name).update(readFileSync(join(stateDir, name)));
     } catch {
@@ -55,4 +55,40 @@ export function stateFingerprint(stateDir: string): string {
     }
   }
   return hash.digest('hex');
+}
+
+/** Generated firewall rules are bind-mounted: Compose does not notice their bytes changing. */
+export function fenceState(stateDir: string): string | null {
+  const file = join(stateDir, 'egress-fence.nft');
+  return existsSync(file) ? readFileSync(file, 'utf8') : null;
+}
+
+/** Undefined previous state means recovery: recreate only if the old configuration has a fence. */
+export function recreateFence(
+  stateDir: string,
+  before: string | null | undefined,
+  docker: (args: string[]) => string
+): void {
+  const after = fenceState(stateDir);
+  if (after === null || before === after) return;
+  if (
+    before === undefined &&
+    !docker(['config', '--services']).split('\n').includes('egress-fence')
+  )
+    return;
+  docker(['up', '-d', '--force-recreate', 'egress-fence']);
+}
+
+export function restartReason(composeFilesChanged: boolean, stateChanged: boolean): string {
+  if (composeFilesChanged) return 'compose files';
+  return stateChanged ? 'generated state' : 'images';
+}
+
+/** Point every Compose command at the selected box's generated state. */
+export function composeStateDirOverride(ctx: {
+  box: Readonly<Record<string, string>>;
+  stateDir: string;
+}): string | null {
+  const composeReads = resolve(SELFHOST_DIR, ctx.box.SAM_SELFHOST_STATE_DIR || '.state');
+  return resolve(ctx.stateDir) === composeReads ? null : resolve(ctx.stateDir);
 }

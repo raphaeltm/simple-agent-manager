@@ -824,7 +824,20 @@ describe('runRestore', () => {
     expect({ ...cloneKeys, SAM_INSTALLATION_ID: sourceKeys.SAM_INSTALLATION_ID }).toEqual(
       sourceKeys
     );
-    const initialized = await runDeploy(targetEnv, ['--init']);
+    writeFileSync(
+      targetEnv,
+      `${readFileSync(targetEnv, 'utf8')}\nCOMPOSE_PROJECT_NAME=${expectedComposeProjectFor({ SAM_DOMAIN: 'sam.example.com' }, targetState, cloneKeys.SAM_INSTALLATION_ID)}\n`
+    );
+    const initBin = join(root, 'clone-init-bin');
+    mkdirSync(initBin);
+    writeFileSync(
+      join(initBin, 'docker'),
+      '#!/usr/bin/env node\nif(process.argv.includes("ps"))console.log("[]");else process.exit(2);\n',
+      { mode: 0o755 }
+    );
+    const initialized = await runDeploy(targetEnv, ['--init'], {
+      PATH: `${initBin}:${process.env.PATH}`,
+    });
     expect(initialized.status, initialized.out).toBe(0);
     expect(
       readRecord(join(targetState, 'created-resources.json')).resources.find(
@@ -925,6 +938,97 @@ describe('runRollback', () => {
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     );
   });
+
+  it.each([false, true])(
+    'binds cache-owner helpers in the durable rollback receipt and retries safely (replacement=%s)',
+    (replacement) => {
+      const context = ctx('gs://fleet/celld', join(root, 'state')),
+        snapshot = join(root, 'helper-rollback');
+      runBackup(context, snapshot);
+      const project = composeProjectFor(context.box, context.stateDir),
+        name = `${project}_celld-data`,
+        original = context.run;
+      let helper = 'e'.repeat(64),
+        helperPresent = true,
+        celldPresent = true,
+        volumePresent = true,
+        failVolume = true,
+        pushes = 0;
+      const removed: string[] = [];
+      context.run = (command, args, env) => {
+        const ok = { status: 0, stderr: '', stdout: '' };
+        if (args.includes('label=com.docker.compose.service=celld-data-owner'))
+          return { ...ok, stdout: helperPresent ? helper : '' };
+        if (args[0] === 'container' && args[1] === 'inspect')
+          return {
+            ...ok,
+            stdout: JSON.stringify({
+              id: helper,
+              createdAt: '2026-11-01T00:00:00Z',
+              image: 'sam-selfhost-egress-fence:local',
+              labels: {
+                'com.docker.compose.project': project,
+                'com.docker.compose.service': 'celld-data-owner',
+                'com.docker.compose.project.config_files': context.composeFiles
+                  .map((p) => resolve(p))
+                  .join(','),
+                'com.docker.compose.project.working_dir': resolve(
+                  context.composeFiles[0] ?? '',
+                  '..'
+                ),
+              },
+              entrypoint: ['chown', '-R', '7103:7103', '/var/lib/celld'],
+              mounts: [{ Type: 'volume', Destination: '/var/lib/celld', Name: name, RW: true }],
+            }),
+          };
+        if (args[0] === 'compose' && args.includes('ps') && args.includes('-q')) {
+          selectedProject = project;
+          return { ...ok, stdout: celldPresent ? 'c'.repeat(64) : '' };
+        }
+        if (args[0] === 'container' && args[1] === 'rm') {
+          const id = args.at(-1) ?? '';
+          removed.push(id);
+          if (id === helper) helperPresent = false;
+          else celldPresent = false;
+          return ok;
+        }
+        if (args[0] === 'volume' && args[1] === 'ls')
+          return { ...ok, stdout: volumePresent ? name : '' };
+        if (args[0] === 'volume' && args[1] === 'rm') {
+          expect(helperPresent).toBe(false);
+          if (failVolume) {
+            failVolume = false;
+            return { ...ok, status: 1 };
+          }
+          volumePresent = false;
+          return ok;
+        }
+        if (command === 'gcloud' && args[1] === 'rsync' && !args.at(-2)?.startsWith('gs://'))
+          pushes++;
+        return original(command, args, env);
+      };
+      expect(() => runRollback(context, snapshot)).toThrow('remove owned celld cache');
+      const receipt = JSON.parse(
+        readFileSync(join(context.stateDir, 'rollback-cache-pending.json'), 'utf8')
+      );
+      expect(receipt.helpers).toEqual([
+        { container: 'e'.repeat(64), createdAt: '2026-11-01T00:00:00Z' },
+      ]);
+      expect(removed).toEqual(['c'.repeat(64), 'e'.repeat(64)]);
+      pushes = 0;
+      if (replacement) {
+        helper = 'f'.repeat(64);
+        helperPresent = true;
+        expect(() => runRollback(context, snapshot)).toThrow(/helper identity/);
+        expect(pushes).toBe(0);
+        expect(removed).not.toContain(helper);
+      } else {
+        runRollback(context, snapshot);
+        expect(volumePresent).toBe(false);
+        expect(helperPresent).toBe(false);
+      }
+    }
+  );
 
   it.each(['replacement', 'volume-only', 'no-resources'])(
     'retries partial Compose %s creation after a failed start and ownership refresh',

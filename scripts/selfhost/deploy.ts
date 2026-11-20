@@ -65,6 +65,7 @@ import {
 } from './celld-config.js';
 import { ASSETS_DIR, CELLD_MAIN, prepareCelldProject, writeCelldConfig } from './celld-project.js';
 import { commandPath } from './command-path.js';
+import { writeAndReconcileFence } from './deploy-fence-reconcile.js';
 import {
   applyAllMigrations,
   bucketOf,
@@ -394,6 +395,14 @@ async function main(): Promise<void> {
   const { box, stateDir, projectDir, baseDomain } = inputs;
   const { keys, tunnelSettings, collectorPasswordPath, collectorPassword } =
     prepareBoxState(inputs);
+  if (!inputs.dryRun) {
+    await writeAndReconcileFence({
+      stateDir,
+      box,
+      envFile: inputs.envFile,
+      leaseRange: tunnelSettings.range,
+    });
+  }
   if (inputs.init) return;
   const { installationId, secrets } = resolveWorkerSecrets(inputs, keys);
   const { plan, vmAgentRelease } = planWorker(inputs, tunnelSettings, installationId, secrets);
