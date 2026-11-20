@@ -5,7 +5,13 @@
  */
 import { expect, type Page, test } from '@playwright/test';
 
-import { assertNoClippedOverflow, assertNoOverflow, screenshot } from './audit-helpers';
+import {
+  assertNoClippedOverflow,
+  assertNoOverflow,
+  expectThemePoll,
+  screenshot,
+  seedTheme,
+} from './audit-helpers';
 import { type InboxMockState, KIND_ITEMS, MANY_ITEMS, setupInboxMocks } from './inbox-fixtures';
 
 function state(items = MANY_ITEMS, extra: Partial<InboxMockState> = {}): InboxMockState {
@@ -205,6 +211,8 @@ test.describe('Inbox — Desktop', () => {
     expect(title!.x + title!.width).toBeLessThanOrEqual(helpBox!.x + 1);
     expect(helpBox!.x + helpBox!.width).toBeLessThanOrEqual(chips!.x + 1);
     expect(chips!.x + chips!.width).toBeLessThanOrEqual(more!.x + 1);
+    // ⋯ follows the last chip rather than sitting at the far edge of the row.
+    expect(more!.x - (chips!.x + chips!.width)).toBeLessThanOrEqual(12);
     expect(headerBox!.height).toBeLessThanOrEqual(72);
     await expect(page.getByText(/What your agents need from you/)).toHaveCount(0);
     await screenshot(page, 'inbox-desktop-header');
@@ -238,6 +246,43 @@ test.describe('Inbox — Desktop', () => {
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
     await screenshot(page, 'inbox-narrow-desktop-header');
+  });
+
+  for (const width of [800, 1024]) {
+    test(`from Overview at ${width}px: back is icon-only and the row still holds`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 700 });
+      await openInbox(page, state(), '/projects/p-billing/inbox?from=overview');
+      const back = page.getByRole('button', { name: 'Back to Overview' });
+      await expect(back).toBeVisible();
+      const backBox = await back.boundingBox();
+      const title = await page.getByRole('heading', { level: 1, name: 'Inbox' }).boundingBox();
+      const chips = await page.getByRole('group', { name: 'Inbox filters' }).boundingBox();
+      const more = await page.getByRole('button', { name: 'More filters' }).boundingBox();
+      const centre = (b: { y: number; height: number }) => b.y + b.height / 2;
+      for (const box of [backBox!, chips!, more!]) {
+        expect(Math.abs(centre(box) - centre(title!))).toBeLessThanOrEqual(4);
+      }
+      // Icon-only below lg: the label costs no width there.
+      expect(backBox!.width).toBeLessThanOrEqual(width < 1024 ? 44 : 200);
+      // At least two whole chips stay visible beside the title.
+      expect(chips!.width).toBeGreaterThanOrEqual(180);
+      expect(more!.x + more!.width).toBeLessThanOrEqual(width);
+      await assertNoOverflow(page);
+      await assertNoClippedOverflow(page);
+      await screenshot(page, `inbox-from-overview-header-${width}`);
+    });
+  }
+
+  test('light theme: header and the open ? note', async ({ page }) => {
+    await seedTheme(page, 'light');
+    await openInbox(page, state(), '/projects/p-billing/inbox');
+    await expectThemePoll(page, 'light');
+    await page.getByRole('button', { name: 'About the inbox' }).click();
+    await expect(page.getByRole('note')).toBeVisible();
+    await assertNoOverflow(page);
+    await screenshot(page, 'inbox-desktop-help-open-light');
   });
 
   test('context expanded', async ({ page }) => {

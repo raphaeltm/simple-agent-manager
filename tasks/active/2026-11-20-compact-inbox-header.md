@@ -35,6 +35,7 @@ do here taking too much space?"
 - [x] Unit test: purpose hidden by default, `?` opens it, Escape closes and refocuses, click outside closes
 - [x] Playwright: one-row coordinates at 1280 and 800, note paints over panes, mobile/desktop screenshots
 - [x] Update SAM Glass skill + design guide with the "less text" rule
+- [x] Review fixes: ⋯ follows the last chip; "Back to Overview" icon-only between md and lg; ? note closes on focus loss; Playwright covers from-Overview at 800/1024px and the light theme
 - [ ] PR, review, staging verification, merge, production deploy
 
 ## Acceptance criteria

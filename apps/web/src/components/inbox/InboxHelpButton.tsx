@@ -21,7 +21,14 @@ export function InboxHelpButton({ text }: { text: string }) {
   useEscapeKey(closeAndRefocus, open);
 
   return (
-    <div ref={rootRef} className="relative shrink-0">
+    <div
+      ref={rootRef}
+      className="relative shrink-0"
+      // Tabbing away closes the note, so it never sits over the chips or list unattended.
+      onBlur={(event) => {
+        if (!rootRef.current?.contains(event.relatedTarget as Node | null)) close();
+      }}
+    >
       <button
         ref={buttonRef}
         type="button"
@@ -37,6 +44,8 @@ export function InboxHelpButton({ text }: { text: string }) {
         <div
           id={panelId}
           role="note"
+          // Focusable so a click inside (e.g. to select the text) keeps focus within the root.
+          tabIndex={-1}
           className="sam-glass sam-glass-rim sam-glass-live absolute top-full left-0 z-50 mt-1 w-64 rounded-[14px] px-3 py-2 text-sm text-fg-primary"
         >
           {text}

@@ -688,6 +688,14 @@ describe('InboxPage — navigation, filters and freshness', () => {
     fireEvent.click(help);
     fireEvent.mouseDown(document.body);
     expect(screen.queryByText(purpose)).not.toBeInTheDocument();
+
+    // Focus moving into the note keeps it open; tabbing on to the chips closes it.
+    fireEvent.click(help);
+    const note = screen.getByRole('note');
+    fireEvent.blur(help, { relatedTarget: note });
+    expect(screen.getByRole('note')).toHaveTextContent(purpose);
+    fireEvent.blur(help, { relatedTarget: screen.getByRole('button', { name: /^Needs you/ }) });
+    expect(screen.queryByText(purpose)).not.toBeInTheDocument();
   });
 
   it('refreshes on window focus, without polling', async () => {

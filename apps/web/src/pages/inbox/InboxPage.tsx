@@ -341,7 +341,8 @@ export function InboxPage({
             className="-my-1 -ml-1 flex min-h-11 w-fit shrink-0 cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent px-1 text-sm text-fg-muted hover:text-fg-primary"
           >
             <ArrowLeft size={16} aria-hidden="true" />
-            Back to Overview
+            {/* Icon-only between md and lg, so the one-row header leaves the chips room. */}
+            <span className="md:max-lg:sr-only">Back to Overview</span>
           </button>
         )}
         <div className="hidden shrink-0 items-center gap-0.5 md:flex">
