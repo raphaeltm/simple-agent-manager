@@ -31,6 +31,8 @@ const ISO_NOW = new Date(NOW).toISOString();
 describe('project brief facts and read', () => {
   let sqlite: Database.Database;
   let db: D1Database;
+  /** What the ProjectData activity mirror reports as mid-turn (`listWorkingChatSessionIds`). */
+  let working: string[] = [];
 
   function insert(table: string, row: Record<string, string | number | null>): void {
     const columns = Object.keys(row);
@@ -57,7 +59,9 @@ describe('project brief facts and read', () => {
     });
   }
 
+  /** A chat whose agent is mid-turn. A foreign chat is reported too, so the D1 scope must hold. */
   function runningChat(id: string, projectId = 'p'): void {
+    working.push(id);
     insert('tasks', {
       id: `task-${id}`,
       project_id: projectId,
@@ -139,6 +143,7 @@ describe('project brief facts and read', () => {
   }
 
   beforeEach(() => {
+    working = [];
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
     sqlite.exec(`
@@ -165,7 +170,7 @@ describe('project brief facts and read', () => {
       ask('answered', { status: 'answered' });
       ask('expired', { expires_at: NOW - 1 });
       ask('foreign-ask', { project_id: 'foreign', assignee_user_id: 'outsider' });
-      const facts = await readBriefFacts(db, 'p', NOW);
+      const facts = await readBriefFacts(db, 'p', NOW, working);
       expect(facts.asks.map((a) => a.id)).toEqual(['mine']);
     });
 
@@ -178,7 +183,7 @@ describe('project brief facts and read', () => {
         claimed_by_user_id: 'owner',
       });
       ask('team', { assignee_kind: 'team', assignee_user_id: null });
-      const facts = await readBriefFacts(db, 'p', NOW);
+      const facts = await readBriefFacts(db, 'p', NOW, working);
       expect(facts.asks.map((a) => a.id)).toEqual(['team']);
     });
 
@@ -190,7 +195,7 @@ describe('project brief facts and read', () => {
         status: 'removed',
       });
       ask('mine');
-      expect((await readBriefFacts(db, 'p', NOW)).asks.map((a) => a.id)).toEqual(['mine']);
+      expect((await readBriefFacts(db, 'p', NOW, working)).asks.map((a) => a.id)).toEqual(['mine']);
     });
 
     it('cleans and caps titles, blocking first, and gives ages in words', async () => {
@@ -199,7 +204,7 @@ describe('project brief facts and read', () => {
         title: `Line one\nline two\u0007 ${'x'.repeat(300)}`,
         created_at: NOW - 30 * 60_000,
       });
-      const facts = await readBriefFacts(db, 'p', NOW);
+      const facts = await readBriefFacts(db, 'p', NOW, working);
       expect(facts.asks.map((a) => [a.id, a.blocking, a.age])).toEqual([
         ['long', true, 'just now'],
         ['later', false, 'this week'],
@@ -226,7 +231,7 @@ describe('project brief facts and read', () => {
     window('reset-cred', 'platform', 'rejected', { resets_at: NOW - 1 });
     window('calm-cred', 'project', 'ok');
 
-    const facts = await readBriefFacts(db, 'p', NOW);
+    const facts = await readBriefFacts(db, 'p', NOW, working);
     expect(facts.runningChats.map((c) => c.id)).toEqual(['live']);
     expect(facts.failingAutomations.map((a) => a.id)).toEqual(['broken']);
     expect(facts.accounts.map((a) => [a.id, a.level])).toEqual([
@@ -237,12 +242,12 @@ describe('project brief facts and read', () => {
   });
 
   it('is quiet with nothing open and nothing running, and the fingerprint follows only material changes', async () => {
-    const empty = await readBriefFacts(db, 'p', NOW);
+    const empty = await readBriefFacts(db, 'p', NOW, working);
     expect(briefFactsAreQuiet(empty)).toBe(true);
 
     ask('a');
     runningChat('live');
-    const before = await briefFactsFingerprint(await readBriefFacts(db, 'p', NOW));
+    const before = await briefFactsFingerprint(await readBriefFacts(db, 'p', NOW, working));
     // A new idea is an input but not a reason to regenerate.
     insert('tasks', {
       id: 'idea-1',
@@ -254,19 +259,21 @@ describe('project brief facts and read', () => {
       created_at: ISO_NOW,
       updated_at: ISO_NOW,
     });
-    const withIdea = await readBriefFacts(db, 'p', NOW);
+    const withIdea = await readBriefFacts(db, 'p', NOW, working);
     expect(withIdea.newIdeas.map((i) => i.id)).toEqual(['idea-1']);
     expect(await briefFactsFingerprint(withIdea)).toBe(before);
     // Answering the ask is.
     sqlite.prepare(`UPDATE asks SET status = 'answered' WHERE id = 'a'`).run();
-    expect(await briefFactsFingerprint(await readBriefFacts(db, 'p', NOW))).not.toBe(before);
+    expect(await briefFactsFingerprint(await readBriefFacts(db, 'p', NOW, working))).not.toBe(
+      before
+    );
   });
 
   it('ranks accounts by urgency before the cap, so an account out of usage is never dropped', async () => {
     for (let i = 0; i < 9; i += 1) window(`a-warning-${i}`, 'project', 'warning');
     window('z-rejected', 'platform', 'rejected');
     window('y-critical', 'project', 'critical');
-    const facts = await readBriefFacts(db, 'p', NOW);
+    const facts = await readBriefFacts(db, 'p', NOW, working);
     expect(facts.accounts.map((a) => a.id).slice(0, 2)).toEqual(['z-rejected', 'y-critical']);
     expect(facts.accounts).toHaveLength(8);
     expect(facts.moreNotShown).toContain('accounts');
@@ -275,12 +282,12 @@ describe('project brief facts and read', () => {
   it('says which lists were capped, and only those (rule 65)', async () => {
     for (let i = 0; i < 9; i += 1) ask(`ask-${i}`, { created_at: NOW - (i + 1) * 60_000 });
     trigger('broken', ['failed', 'failed', 'failed']);
-    const facts = await readBriefFacts(db, 'p', NOW);
+    const facts = await readBriefFacts(db, 'p', NOW, working);
     expect(facts.asks).toHaveLength(8);
     expect(facts.moreNotShown).toEqual(['asks']);
     // Control: at the cap exactly, nothing is said to be missing.
     sqlite.prepare(`DELETE FROM asks WHERE id = 'ask-0'`).run();
-    expect((await readBriefFacts(db, 'p', NOW)).moreNotShown).toEqual([]);
+    expect((await readBriefFacts(db, 'p', NOW, working)).moreNotShown).toEqual([]);
   });
 
   describe('readProjectBrief', () => {
@@ -315,7 +322,7 @@ describe('project brief facts and read', () => {
         [about('ask', 'open-ask'), about('ask', 'answered-ask'), about('ask', 'foreign-open')],
         { asks: ['open-ask', 'answered-ask', 'foreign-open'] }
       );
-      const brief = await readProjectBrief(db, 'p', NOW);
+      const brief = await readProjectBrief(db, 'p', NOW, working);
       expect(
         brief?.sentences.map((s) => ('ref' in s.parts[0]! ? s.parts[0].ref.id : null))
       ).toEqual(['open-ask']);
@@ -325,11 +332,9 @@ describe('project brief facts and read', () => {
     it('drops a running-chat claim when the agent finished its turn (Running now no longer lists it), keeps it while paused on a question', async () => {
       runningChat('finished-turn');
       runningChat('paused');
-      sqlite
-        .prepare(
-          `UPDATE session_summaries SET agent_completed_at = ? WHERE id IN ('finished-turn', 'paused')`
-        )
-        .run(NOW - 1_000);
+      // Both turns ended: the activity mirror reports neither as working. The latched
+      // execution step is not evidence either way.
+      working = [];
       sqlite
         .prepare(
           `UPDATE tasks SET execution_step = 'awaiting_followup' WHERE id = 'task-finished-turn'`
@@ -340,7 +345,7 @@ describe('project brief facts and read', () => {
         chats: ['finished-turn', 'paused'],
         asks: [],
       });
-      const brief = await readProjectBrief(db, 'p', NOW);
+      const brief = await readProjectBrief(db, 'p', NOW, working);
       expect(
         brief?.sentences.map((x) => ('ref' in x.parts[0]! ? x.parts[0].ref.id : null))
       ).toEqual(['paused']);
@@ -352,7 +357,7 @@ describe('project brief facts and read', () => {
       storeBrief([about('automation', 'broken'), about('automation', 'fixed')], {
         automations: ['broken', 'fixed'],
       });
-      const brief = await readProjectBrief(db, 'p', NOW);
+      const brief = await readProjectBrief(db, 'p', NOW, working);
       expect(
         brief?.sentences.map((x) => ('ref' in x.parts[0]! ? x.parts[0].ref.id : null))
       ).toEqual(['broken']);
@@ -366,7 +371,7 @@ describe('project brief facts and read', () => {
       storeBrief([about('chat', 'live'), about('chat', 'ended'), about('chat', 'failed-earlier')], {
         chats: ['live', 'ended'],
       });
-      const brief = await readProjectBrief(db, 'p', NOW);
+      const brief = await readProjectBrief(db, 'p', NOW, working);
       expect(
         brief?.sentences.map((s) => ('ref' in s.parts[0]! ? s.parts[0].ref.id : null))
       ).toEqual(['live', 'failed-earlier']);
@@ -377,7 +382,7 @@ describe('project brief facts and read', () => {
           JSON.stringify({ sentences: [about('chat', 'foreign-live'), about('chat', 'live')] }),
           JSON.stringify(['foreign-live', 'live'])
         );
-      const scoped = await readProjectBrief(db, 'p', NOW);
+      const scoped = await readProjectBrief(db, 'p', NOW, working);
       expect(
         scoped?.sentences.map((s) => ('ref' in s.parts[0]! ? s.parts[0].ref.id : null))
       ).toEqual(['live']);
@@ -386,14 +391,14 @@ describe('project brief facts and read', () => {
     it('is fresh when every claim still holds, and null when none does', async () => {
       ask('open-ask');
       storeBrief([about('ask', 'open-ask')], { asks: ['open-ask'] });
-      expect(await readProjectBrief(db, 'p', NOW)).toEqual({
+      expect(await readProjectBrief(db, 'p', NOW, working)).toEqual({
         sentences: [about('ask', 'open-ask')],
         generatedAt: new Date(NOW - 60_000).toISOString(),
         stale: false,
         refreshing: false,
       });
       sqlite.prepare(`UPDATE asks SET status = 'archived'`).run();
-      expect(await readProjectBrief(db, 'p', NOW)).toBeNull();
+      expect(await readProjectBrief(db, 'p', NOW, working)).toBeNull();
     });
 
     it('says refreshing while a generation is in flight, and not after it is abandoned', async () => {
@@ -403,8 +408,11 @@ describe('project brief facts and read', () => {
         { asks: ['open-ask'] },
         { pending_since: NOW - 10_000 }
       );
-      expect(await readProjectBrief(db, 'p', NOW)).toMatchObject({ stale: true, refreshing: true });
-      expect(await readProjectBrief(db, 'p', NOW + 10 * 60_000)).toMatchObject({
+      expect(await readProjectBrief(db, 'p', NOW, working)).toMatchObject({
+        stale: true,
+        refreshing: true,
+      });
+      expect(await readProjectBrief(db, 'p', NOW + 10 * 60_000, working)).toMatchObject({
         refreshing: false,
       });
     });
@@ -416,34 +424,34 @@ describe('project brief facts and read', () => {
         { asks: ['open-ask'] },
         { stale: 1, last_error_at: NOW - 1_000 }
       );
-      expect(await readProjectBrief(db, 'p', NOW)).toBeNull();
+      expect(await readProjectBrief(db, 'p', NOW, working)).toBeNull();
       sqlite
         .prepare(
           `UPDATE project_briefs SET stale = 0, last_error_at = NULL, brief_json = '{"sentences":[{"parts":[{"ref":{"kind":"evil","id":"x","label":"x"}}]}]}'`
         )
         .run();
-      expect(await readProjectBrief(db, 'p', NOW)).toBeNull();
+      expect(await readProjectBrief(db, 'p', NOW, working)).toBeNull();
       sqlite
         .prepare(
           `UPDATE project_briefs SET brief_json = '{"sentences":[{"parts":[{"ref":{"kind":"pullRequest","id":"1","label":"x","url":"javascript:alert(1)"}}]}]}'`
         )
         .run();
-      expect(await readProjectBrief(db, 'p', NOW)).toBeNull();
+      expect(await readProjectBrief(db, 'p', NOW, working)).toBeNull();
     });
 
     it('drops an ask claim once a second member joins: they must not see, through the brief, an ask their inbox hides (owner control first)', async () => {
       ask('mine');
       storeBrief([about('ask', 'mine')], { asks: ['mine'] });
-      expect(await readProjectBrief(db, 'p', NOW)).not.toBeNull();
+      expect(await readProjectBrief(db, 'p', NOW, working)).not.toBeNull();
       addTeammate();
-      expect(await readProjectBrief(db, 'p', NOW)).toBeNull();
+      expect(await readProjectBrief(db, 'p', NOW, working)).toBeNull();
     });
 
     it('drops a claim about an expired ask the sweep has not closed yet', async () => {
       ask('expiring', { expires_at: NOW + 1_000 });
       storeBrief([about('ask', 'expiring')], { asks: ['expiring'] });
-      expect(await readProjectBrief(db, 'p', NOW)).not.toBeNull();
-      expect(await readProjectBrief(db, 'p', NOW + 2_000)).toBeNull();
+      expect(await readProjectBrief(db, 'p', NOW, working)).not.toBeNull();
+      expect(await readProjectBrief(db, 'p', NOW + 2_000, working)).toBeNull();
     });
 
     it('re-checks a named account, and never sends its credential reference to the page', async () => {
@@ -465,20 +473,20 @@ describe('project brief facts and read', () => {
         ],
         { accounts: ['cc_credentials:shared-anthropic'] }
       );
-      const brief = await readProjectBrief(db, 'p', NOW);
+      const brief = await readProjectBrief(db, 'p', NOW, working);
       expect(brief?.sentences[0]?.parts[0]).toEqual({
         ref: { kind: 'account', id: 'account', label: "the project's anthropic account" },
       });
       expect(JSON.stringify(brief)).not.toContain('cc_credentials:');
       // Back to calm: the claim is no longer true.
       sqlite.prepare(`UPDATE credential_limit_windows SET last_event_level = 'ok'`).run();
-      expect(await readProjectBrief(db, 'p', NOW)).toBeNull();
+      expect(await readProjectBrief(db, 'p', NOW, working)).toBeNull();
     });
 
     it('reads a malformed ref list as empty instead of failing the read', async () => {
       ask('open-ask');
       storeBrief([about('chat', 'failed-earlier')], {}, { ref_asks_json: 'not json' });
-      expect(await readProjectBrief(db, 'p', NOW)).not.toBeNull();
+      expect(await readProjectBrief(db, 'p', NOW, working)).not.toBeNull();
     });
   });
 
