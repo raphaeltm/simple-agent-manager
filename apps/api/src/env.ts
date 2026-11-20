@@ -194,9 +194,17 @@ export interface Env
   PLATFORM_FEEDBACK_INCIDENT_TRIGGER_TEMPLATE?: string;
   JWT_PRIVATE_KEY: string;
   JWT_PUBLIC_KEY: string;
+  // Self-hosted JWT key rotation (services/jwt-keys.ts). Unset = one key, kid `key-YYYY-MM`.
+  JWT_KEY_ID?: string; // kid for the current key when signing and in /.well-known/jwks.json; unset = `key-YYYY-MM`
+  JWT_PUBLIC_KEY_PREVIOUS?: string; // SPKI PEM of the previous public key: still accepted for callback tokens while the window is open, never published in a JWKS
+  JWT_PREVIOUS_KEY_ID?: string; // label of the previous key in logs only (never published); unset = `key-YYYY-MM` (the kid old tokens carry)
+  JWT_PUBLIC_KEY_PREVIOUS_UNTIL?: string; // ISO-8601 instant with offset ending the overlap; absent/unparseable = previous key ignored
   ENCRYPTION_KEY: string;
   // Purpose-specific secret overrides (fall back to ENCRYPTION_KEY when unset)
   BETTER_AUTH_SECRET?: string; // BetterAuth session management
+  BETTER_AUTH_SECRET_VERSION?: string; // Positive integer; set to enable versioned BetterAuth secrets (rotation)
+  BETTER_AUTH_SECRET_PREVIOUS?: string; // Previous BetterAuth secret, kept so stored OAuth tokens still decrypt
+  BETTER_AUTH_SECRET_PREVIOUS_VERSION?: string; // Version the previous secret ran under; unset = it was unversioned
   CREDENTIAL_ENCRYPTION_KEY?: string; // AES-GCM user credential encryption
   GITHUB_WEBHOOK_SECRET?: string; // GitHub webhook HMAC verification
   BOOTSTRAP_OWNER_EMAIL?: string; // Installer-only first-admin binding; must match a verified login email
@@ -1320,6 +1328,13 @@ export interface Env
   ATTACHMENT_TRANSFER_TIMEOUT_MS?: string;
   // Project file library (all configurable per constitution Principle XI)
   LIBRARY_ENCRYPTION_KEY?: string; // Purpose-specific KEK for file library (falls back to ENCRYPTION_KEY)
+  // Self-hosted platform-key rotation (scripts/selfhost/rotate-*.ts). Root secrets from the
+  // sealed bundle; never set on Cloudflare.
+  ENCRYPTION_KEY_PREVIOUS?: string; // Old ENCRYPTION_KEY, read-only fallback while rows are re-encrypted
+  CREDENTIAL_ENCRYPTION_KEY_PREVIOUS?: string; // Old CREDENTIAL_ENCRYPTION_KEY, same
+  LIBRARY_ENCRYPTION_KEY_PREVIOUS?: string; // Old LIBRARY_ENCRYPTION_KEY, same
+  TOKEN_HASH_KEY?: string; // HMAC key for bearer-token lookup hashes (lib/secrets.ts getTokenHashKey)
+  SAM_KEY_ROTATION_CONTROL_KEY?: string; // Authenticates the rotation control endpoint (selfhost/key-rotation)
   LIBRARY_UPLOAD_MAX_BYTES?: string; // Max file size per upload (default: 50MB)
   FILE_PREVIEW_MAX_BYTES?: string; // Max file size for inline preview (default: 50MB)
   LIBRARY_MAX_FILES_PER_PROJECT?: string; // Max files per project (default: 10000)

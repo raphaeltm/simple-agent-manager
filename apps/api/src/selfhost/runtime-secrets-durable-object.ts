@@ -8,6 +8,7 @@ import {
   type KeyAgentEnv,
   loadRuntimeSecrets,
   refreshInBackground,
+  registerRotationKeys,
   type RuntimeSecrets,
   RuntimeSecretsUnavailableError,
 } from './runtime-secrets';
@@ -39,6 +40,8 @@ function defineResidentSecrets(
   env: KeyAgentEnv & Record<string, unknown>,
   secrets: RuntimeSecrets
 ): void {
+  // Same rotation read fallback the Worker handlers register (runtime-secrets.ts).
+  registerRotationKeys({ ...env, ...secrets });
   for (const name of Object.keys(secrets)) {
     const existing = env[name];
     if (existing !== undefined && typeof existing !== 'string') continue;

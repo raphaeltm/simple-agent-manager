@@ -3,6 +3,7 @@
  * its env (runtime-secrets.ts), or not at all.
  */
 import { log } from '../lib/logger';
+import { KEY_ROTATION_PATH } from './key-rotation/control-auth';
 import {
   type KeyAgentEnv,
   loadRuntimeSecrets,
@@ -50,7 +51,18 @@ export function wrapWorker<E extends object>(worker: WorkerHandlers<E>): WorkerH
       } catch (error) {
         return unavailableResponse(error);
       }
-      return await inner(request, withRuntimeSecrets(env, secrets), ctx);
+      const merged = withRuntimeSecrets(env, secrets);
+      // The rotation's control path never reaches the app (key-rotation/control.ts). Loaded on
+      // demand: the handler pulls in the passes and their dependencies, which no other request
+      // (and no tool that loads this module, like the migration preflight) needs.
+      if (new URL(request.url).pathname === KEY_ROTATION_PATH) {
+        const control = await import('./key-rotation/control');
+        return await control.handleKeyRotationRequest(
+          request,
+          merged as unknown as import('./key-rotation/control').KeyRotationEnv
+        );
+      }
+      return await inner(request, merged, ctx);
     };
   }
   if (worker.scheduled) {

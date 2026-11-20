@@ -8,6 +8,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { maybeJsonRecord } from '../lib/runtime-validation';
+import { getTokenHashKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { ensureTaskRunnerStarted } from './task-runner-do';
 import { getWebhookTriggerLimits } from './webhook-trigger-config';
@@ -45,7 +46,7 @@ export async function findWebhookTriggerByToken(
   env: Env,
   rawToken: string
 ): Promise<ResolvedWebhookTrigger | null> {
-  const tokenHash = await hashWebhookToken(rawToken, env.ENCRYPTION_KEY);
+  const tokenHash = await hashWebhookToken(rawToken, getTokenHashKey(env));
   const db = drizzle(env.DATABASE, { schema });
   const row = await db
     .select({
@@ -73,7 +74,7 @@ export async function rotateWebhookToken(
   projectId: string,
   triggerId: string
 ): Promise<WebhookTokenMaterial | null> {
-  const token = await createWebhookTokenMaterial(env.ENCRYPTION_KEY);
+  const token = await createWebhookTokenMaterial(getTokenHashKey(env));
   const result = await env.DATABASE.prepare(
     `UPDATE webhook_trigger_configs
        SET token_hash = ?, token_last_four = ?, token_created_at = ?, token_rotated_at = ?, updated_at = ?,

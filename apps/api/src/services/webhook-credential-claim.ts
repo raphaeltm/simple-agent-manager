@@ -3,6 +3,7 @@ import { DEFAULT_WEBHOOK_CREDENTIAL_CLAIM_TTL_SECONDS } from '@simple-agent-mana
 
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { getTokenHashKey } from '../lib/secrets';
 import { buildTrustedApiUrl } from '../lib/trusted-origins';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
@@ -49,7 +50,7 @@ export function prepareWebhookClaim(env: Env, token: McpTokenData) {
 
 export async function redeemWebhookClaim(env: Env, claimId: string, token: McpTokenData) {
   const sessionId = webhookClaimSession(token);
-  const material = await createWebhookTokenMaterial(env.ENCRYPTION_KEY);
+  const material = await createWebhookTokenMaterial(getTokenHashKey(env));
   const roles = projectMemberRolesWithCapability('task:write');
   // One statement is the linearization point: no separate read/delete race, no
   // retrievable plaintext, and no losing request can rotate the winning token.
