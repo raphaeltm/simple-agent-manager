@@ -241,7 +241,7 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
     expect(await getUser('real-1')).toMatchObject(expected);
   });
 
-  it('promotes the sole user even when REQUIRE_APPROVAL is unset (open registration)', async () => {
+  it('promotes the sole user even when REQUIRE_APPROVAL is unset (approval on by default)', async () => {
     await insertUser('real-1', { role: 'user', status: 'active' });
     // Omit REQUIRE_APPROVAL entirely — the self-heal is ungated and must still fire.
     const hook = await getSessionAfterHook({ REQUIRE_APPROVAL: undefined });
@@ -249,6 +249,29 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
     await hook({ userId: 'real-1' });
 
     expect(await getUser('real-1')).toMatchObject({ role: 'superadmin', status: 'active' });
+  });
+
+  it('lets the first user of a fresh install with REQUIRE_APPROVAL unset in as an active superadmin', async () => {
+    // Approval is on by default, so the real create hook makes the first account pending...
+    const auth = await createAuth(authEnv({ REQUIRE_APPROVAL: undefined }) as never);
+    const hooks = (
+      auth.options as {
+        databaseHooks?: {
+          user?: { create?: { before?: (u: Record<string, unknown>) => Promise<unknown> } };
+          session?: { create?: { before?: (s: { userId: string }) => Promise<unknown> } };
+        };
+      }
+    ).databaseHooks;
+    const created = (await hooks?.user?.create?.before?.({ id: 'first-user' })) as {
+      data: { role?: string; status?: string };
+    };
+    expect(created.data).toMatchObject({ role: 'user', status: 'pending' });
+    await insertUser('first-user', { role: created.data.role, status: created.data.status });
+
+    // ...and its first session elects it, so the owner is never locked out of Admin -> Users.
+    await hooks?.session?.create?.before?.({ userId: 'first-user' });
+
+    expect(await getUser('first-user')).toMatchObject({ role: 'superadmin', status: 'active' });
   });
 
   it('never mutates the sentinel even if its id is passed as the login user', async () => {

@@ -100,8 +100,9 @@ address `https://api.<your domain>/api/auth/callback/google`.
 **Let other people in.** An emailed code only creates the administrator's account: everyone else
 needs another way to sign in the first time. Once you're in, add GitHub, Google or GitLab sign-in
 in **Admin → Integrations** (see [Platform integrations after deploy](/docs/guides/self-hosting/#platform-integrations-after-deploy)),
-then invite people to your projects. If you turned on signup approval, approve them in **Admin →
-Users**.
+then invite people to your projects. Signup approval is on by default (`envRequiresApproval` in
+`apps/api/src/services/signup-approval.ts`), so approve them in **Admin → Users**, or turn approval
+off there.
 
 ### If the review is blocked
 
