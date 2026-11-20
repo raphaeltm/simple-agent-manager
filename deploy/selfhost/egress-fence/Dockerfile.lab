@@ -1,5 +1,5 @@
 # Isolated privileged netns test runner; never a deployed service.
-FROM docker.io/library/node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436
+FROM docker.io/library/node:26-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         iproute2 \
