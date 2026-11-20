@@ -261,6 +261,22 @@ requires inspection as described above; a valid completed marker permits cleanup
 `--to`, a moved branch/tag, or an older journal without a target requires the explicit rollback
 command before choosing another target.
 Do not delete the pending record to bypass a failed recovery.
+
+**One-time case when upgrading to the rollback fence fix.** A rollback runs the tool of the version
+you upgrade from. On a version before this fix, a failed upgrade's automatic rollback restores
+`.state/egress-fence.nft` at 0600. The egress-fence container then crash-loops with
+`Could not open file "/etc/sam/egress-fence.nft": Permission denied`, celld stays stopped and the
+upgrade reports that automatic rollback did not complete. Restore the file's mode and rerun the
+same command (the documented retry of the same target):
+
+```sh
+chmod 644 deploy/selfhost/.state/egress-fence.nft   # or "$SAM_SELFHOST_STATE_DIR/egress-fence.nft"
+pnpm selfhost:upgrade --to <same-target> --encryption-key-file "$HOME/.config/sam/backup.key"
+```
+
+The retry restores the snapshot again, so repeat the `chmod` if the fence restarts with the same
+error before celld comes up. Upgrades that start from a fixed version restore the mode
+themselves (`fence-state.ts:repairFenceRulesMode`).
 Rollback also keeps a private sibling `.<state-directory-name>.rollback-state.json` receipt
 while replacing local state. Retry reconciles an interrupted directory swap before reading
 installation metadata, and refuses changed directory identities. Keep that receipt and its
