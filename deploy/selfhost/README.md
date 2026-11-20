@@ -287,9 +287,57 @@ and Compose operation uses that installation's environment and overlays. Set
 `SAM_SELFHOST_STATE_DIR` to an absolute path when running Compose manually.
 
 Older installs using the shared `sam-selfhost` project may set `COMPOSE_PROJECT_NAME=sam-selfhost`
-explicitly for backup. Upgrades and destructive teardown refuse that shared identity. Move to a
-separate, installation-specific Compose project through an operator-controlled migration first;
-these commands do not adopt or automatically migrate the old project.
+explicitly for backup. Upgrades and destructive teardown refuse that shared identity. Move such an
+install to its installation-specific project with legacy adoption (below) first.
+
+### Upgrade an install created before the shared project was retired
+
+Installs created before `pnpm selfhost:upgrade` gained snapshots run under the fixed Compose
+project `sam-selfhost` and have no compose creation receipt, so a plain upgrade refuses them. Their
+own checkout also still holds the old upgrade tool. Check out the new SAM ref, then let its tool
+adopt the install and upgrade it in one command; `--from` is the full commit the stack runs now:
+
+```sh
+git fetch origin && git checkout --detach <target-ref> && pnpm install --frozen-lockfile
+pnpm selfhost:upgrade --adopt-legacy --from <deployed-full-sha> --to <target-ref> \
+  --encryption-key-file "$HOME/.config/sam/backup.key"
+```
+
+The running stack is not touched by the checkout. Adoption changes no SAM code and deploys
+nothing (`scripts/selfhost/legacy-adoption.ts:runLegacyAdoption`):
+
+1. It checks out `--from` again, so the compose files and bind mounts match the running stack.
+2. It proves ownership (`legacy-adoption-inventory.ts:proveLegacyOwnership`): every container of
+   the `sam-selfhost` project carries this checkout's compose directory, compose files and `.env`;
+   bind mounts stay inside this checkout or its state directory; each project volume is used only
+   by those containers; each container's config hash equals `--from`'s compose configuration; and
+   the canonical project is empty. Another checkout on the same host using `sam-selfhost`, or a
+   wrong `--from`, refuses before any change. A shell `COMPOSE_PROJECT_NAME` also refuses.
+3. It takes the encrypted backup (`--adoption-backup-to`, default
+   `backups/pre-adoption-<timestamp>`) from the live legacy stack.
+4. It stops the legacy stack and copies each volume into `<canonical>_<volume>` with the locally
+   built egress-fence image (no network, labelled with a random adoption id), verified by a digest of
+   every path's type, owner and mode and every file's content.
+5. It writes `COMPOSE_PROJECT_NAME=<canonical>` into `.env` (every other byte kept), starts the
+   same version under that project and checks health. It then writes the installation and
+   compose-project creation receipts and removes the stopped legacy containers.
+6. It runs the normal upgrade from `--from` to the target, with its own fresh snapshot
+   (`--backup-to`), automatic rollback and printed rollback command.
+
+Each step is journaled in `.state/legacy-adoption.json`, beside a private copy of the original
+`.env`. If the process is killed, check out the target ref again and rerun the identical command:
+it resumes at the recorded step, removes any copy helper the killed run left and recopies an
+unfinished volume from scratch. If adoption fails or the new project is unhealthy, it rolls back
+to `sam-selfhost`: it removes the canonical containers and the volumes it created, restores `.env`
+byte for byte and restarts the legacy stack. The legacy volumes are only read, except that the
+disposable celld cache is emptied when the new celld already ran, because the fleet bucket may then
+be newer than that cache. Adoption never restores the bucket: the same deployed version kept
+writing it. After a rollback the checkout stays at `--from`, which matches the running stack.
+
+If the upgrade step fails, its automatic rollback restores `--from` under the adopted project; the
+adoption stands and its journal remains. Check out the target and rerun the same command to retry
+the upgrade. After a successful run the legacy volumes remain until you remove them with the
+`docker volume rm` command it prints.
 
 ## Teardown
 
