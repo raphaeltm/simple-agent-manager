@@ -101,6 +101,38 @@ describe('Running now follows the agent activity mirror', () => {
     expect(await runningIds(s)).toEqual([s.chatSessionId]);
   });
 
+  it('breaks a same-millisecond tie the way the chat view does, so both read the same session', async () => {
+    const s = await seed();
+    for (const id of ['acp-tie-a', 'acp-tie-b']) {
+      await s.project.createAcpSession({
+        chatSessionId: s.chatSessionId,
+        initialPrompt: null,
+        agentType: 'claude-code',
+        id,
+      });
+    }
+    await runInDurableObject(s.project, async (_instance, state) => {
+      state.storage.sql.exec(
+        `UPDATE acp_sessions SET created_at = ? WHERE chat_session_id = ?`,
+        Date.now(),
+        s.chatSessionId
+      );
+    });
+    // The chat view's newest session (`resolveChatAgentState` reads `listAcpSessions`, limit 1).
+    const { sessions } = await s.project.listAcpSessions({
+      chatSessionId: s.chatSessionId,
+      limit: 1,
+    });
+    expect(sessions[0]?.id).toBe('acp-tie-b');
+
+    await s.project.reportActivity('acp-tie-a', 'prompting');
+    await s.project.reportActivity('acp-tie-b', 'idle');
+    expect(await runningIds(s)).toEqual([]);
+    // Control: the session both readers call newest is working.
+    await s.project.reportActivity('acp-tie-b', 'prompting');
+    expect(await runningIds(s)).toEqual([s.chatSessionId]);
+  });
+
   it('falls back to the chat-keyed row when the chat has no agent session yet', async () => {
     const s = await seed();
     await s.project.reportActivity(s.chatSessionId, 'prompting');

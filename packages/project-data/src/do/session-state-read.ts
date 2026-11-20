@@ -14,7 +14,9 @@ import { WORKING_ACTIVITIES } from './session-state-prompt';
 /**
  * A chat's activity, resolved the way the chat view resolves it (`resolveChatAgentState` in
  * apps/api `routes/chat-agent-state.ts`): the newest ACP session's state row, else the row
- * keyed by the chat itself. Over `cs` = chat_sessions.
+ * keyed by the chat itself. Over `cs` = chat_sessions. "Newest" is `created_at DESC, id DESC`,
+ * the same order `listAcpSessions` (`acp-sessions.ts`) uses, so a same-millisecond tie resolves
+ * to the same session in both.
  */
 const CHAT_ACTIVITY_SQL = `COALESCE(
     (SELECT s.activity FROM session_state s
