@@ -41,18 +41,23 @@ export async function requireSourceItem(
     return;
   }
   let query: string;
+  const bindings: (string | number)[] = [parsed.id, source.projectId, source.sessionId];
   if (parsed.store === 'ask') {
     query = `SELECT id FROM asks WHERE id = ? AND project_id = ? AND source_session_id = ?
-      AND kind IN ('question', 'review', 'result', 'task') AND status = 'open'`;
+      AND kind IN ('question', 'review', 'result', 'task') AND status = 'open'
+      AND (expires_at IS NULL OR expires_at > ?)`;
+    bindings.push(Date.now());
   } else if (parsed.store === 'secret') {
     query = `SELECT id FROM runtime_secret_requests WHERE id = ? AND project_id = ?
-      AND requesting_chat_session_id = ? AND status = 'pending' AND expires_at > ${Date.now()}`;
+      AND requesting_chat_session_id = ? AND status = 'pending' AND expires_at > ?`;
+    bindings.push(Date.now());
   } else {
     query = `SELECT id FROM operations_action_approvals WHERE id = ? AND requesting_project_id = ?
-      AND requesting_session_id = ? AND status = 'pending'`;
+      AND requesting_session_id = ? AND status = 'pending' AND expires_at > ?`;
+    bindings.push(new Date().toISOString());
   }
   const row = await ctx.env.DATABASE.prepare(query)
-    .bind(parsed.id, source.projectId, source.sessionId)
+    .bind(...bindings)
     .first();
   if (!row) throw new OperationError('not_found', 'Inbox item not found');
 }
@@ -128,6 +133,7 @@ export async function resolveAgentInboxItem(
       resolved_at = ?, updated_at = ?, notified_at = ?
       WHERE id = ? AND project_id = ? AND source_session_id = ? AND status = 'open'
         AND kind IN ('question', 'review', 'result')
+        AND (expires_at IS NULL OR expires_at > ?)
         AND EXISTS (SELECT 1 FROM inbox_replies WHERE project_id = asks.project_id AND item_ref = ? AND id = ?)
         AND NOT EXISTS (SELECT 1 FROM inbox_replies WHERE project_id = asks.project_id
           AND item_ref = ? AND id != ? AND agent_acted_at IS NULL)
@@ -143,6 +149,7 @@ export async function resolveAgentInboxItem(
     parsed.id,
     source.projectId,
     source.sessionId,
+    now,
     input.ref,
     observedReplyId,
     input.ref,

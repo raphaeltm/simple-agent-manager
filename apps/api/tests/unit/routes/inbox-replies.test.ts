@@ -1,5 +1,6 @@
 /** Real inbox route → operations → sendChat on SQLite; only auth session and DO/VM edges fake. */
 import {
+  getAgentItem,
   type OperationContext,
   resolveAgentInboxItem,
   respondToAgentInboxItem,
@@ -241,6 +242,113 @@ afterEach(() => {
 });
 
 describe('inbox replies through the real route on SQLite', () => {
+  it.each(['respond', 'update', 'resolve'] as const)(
+    'refuses %s on an expired ask without changing or acknowledging it',
+    async (method) => {
+      const ref = ask();
+      const sent = await req(path(ref, '/reply'), { content: 'Use the smaller limit.' });
+      expect(sent.status).toBe(202);
+      const context = ctx();
+      context.ports.inboxTasks.createComment = vi
+        .fn()
+        .mockResolvedValue({ thread: { id: 'response' } });
+      sqlite.prepare('UPDATE asks SET expires_at = ? WHERE id = ?').run(Date.now() - 1, 'q');
+      const input = { ref, replyMessageId: sent.body.messageId };
+      const action =
+        method === 'respond'
+          ? respondToAgentInboxItem(context, source, { ...input, body: 'Understood.' })
+          : method === 'update'
+            ? updateAgentAsk(context, source, { ...input, title: 'Changed title' })
+            : resolveAgentInboxItem(context, source, input);
+      await expect(action).rejects.toThrow();
+      expect(context.ports.inboxTasks.createComment).not.toHaveBeenCalled();
+      expect(sqlite.prepare('SELECT agent_acted_at FROM inbox_replies').get()).toEqual({
+        agent_acted_at: null,
+      });
+      expect(sqlite.prepare('SELECT status, title FROM asks').get()).toEqual({
+        status: 'open',
+        title: 'Choose the retry cap?',
+      });
+      expect((await req('/count')).body.needsYou).toBe(0);
+    }
+  );
+  it('refuses a reply when its ask expires during send authorization', async () => {
+    const ref = ask();
+    const authorize = edge.writer.getMockImplementation()!;
+    let entered!: () => void;
+    let release!: () => void;
+    const paused = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    edge.writer.mockImplementation(async (...args) => {
+      entered();
+      await held;
+      return authorize(...args);
+    });
+    const reply = req(path(ref, '/reply'), { content: 'Use the smaller limit.' });
+    await paused;
+    try {
+      sqlite.prepare('UPDATE asks SET expires_at = ? WHERE id = ?').run(Date.now() - 1, 'q');
+    } finally {
+      release();
+    }
+    expect((await reply).status).toBe(409);
+    expect(edge.accept).not.toHaveBeenCalled();
+    expect(edge.messages).toHaveLength(0);
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM inbox_replies').get()).toEqual({ n: 0 });
+  });
+  it.each(['get', 'respond'] as const)(
+    'refuses agent %s on an expired approval without acknowledging its reply',
+    async (method) => {
+      insert('operations_action_approvals', {
+        id: 'approval',
+        requesting_project_id: 'p',
+        requesting_session_id: 'chat',
+        requesting_task_id: 'task',
+        action: 'restart',
+        target_type: 'node',
+        target_id: 'node',
+        reason: 'Need restart',
+        status: 'pending',
+        created_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 3600000).toISOString(),
+      });
+      const ref = 'approval:approval';
+      const sent = await req(path(ref, '/reply'), { content: 'Why is this necessary?' });
+      expect(sent.status).toBe(202);
+      const context = ctx();
+      context.ports.inboxTasks.createComment = vi
+        .fn()
+        .mockResolvedValue({ thread: { id: 'response' } });
+      await expect(getAgentItem(context, source, { ref })).resolves.toMatchObject({
+        ref,
+        withAgent: true,
+      });
+      sqlite
+        .prepare('UPDATE operations_action_approvals SET expires_at = ? WHERE id = ?')
+        .run(new Date(Date.now() - 1).toISOString(), 'approval');
+      const action =
+        method === 'get'
+          ? getAgentItem(context, source, { ref })
+          : respondToAgentInboxItem(context, source, {
+              ref,
+              replyMessageId: sent.body.messageId,
+              body: 'Retry the restart.',
+            });
+      await expect(action).rejects.toMatchObject({ code: 'not_found' });
+      expect(context.ports.inboxTasks.createComment).not.toHaveBeenCalled();
+      expect(sqlite.prepare('SELECT agent_acted_at FROM inbox_replies').get()).toEqual({
+        agent_acted_at: null,
+      });
+      expect(sqlite.prepare('SELECT status FROM operations_action_approvals').get()).toEqual({
+        status: 'pending',
+      });
+      expect((await req('/count')).body.needsYou).toBe(0);
+    }
+  );
   it.each([
     ['secret', 'fulfilled'],
     ['secret', 'expired'],

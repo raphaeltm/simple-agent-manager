@@ -392,7 +392,7 @@ export async function updateAgentAsk(
             links_json = CASE WHEN ? THEN ? ELSE links_json END,
             updated_at = ?
       WHERE id = ? AND project_id = ? AND source_session_id = ? AND ${AGENT_KINDS_SQL}
-        AND status = 'open'`
+        AND status = 'open' AND (expires_at IS NULL OR expires_at > ?)`
   ).bind(
     title,
     why === undefined ? 0 : 1,
@@ -402,7 +402,8 @@ export async function updateAgentAsk(
     actedAt,
     askId,
     source.projectId,
-    source.sessionId
+    source.sessionId,
+    actedAt
   );
   // Wording and resurfacing are one mutation: a failed acknowledgement must not leave
   // changed wording hidden in Archived. Only the explicitly observed reply is acknowledged.
@@ -412,7 +413,8 @@ export async function updateAgentAsk(
       `UPDATE inbox_replies SET agent_acted_at = ?
        WHERE project_id = ? AND item_ref = ? AND id = ?
          AND EXISTS (SELECT 1 FROM asks WHERE id = ? AND project_id = ?
-           AND source_session_id = ? AND ${AGENT_KINDS_SQL} AND status = 'open')`
+           AND source_session_id = ? AND ${AGENT_KINDS_SQL} AND status = 'open'
+           AND (expires_at IS NULL OR expires_at > ?))`
     ).bind(
       actedAt,
       source.projectId,
@@ -420,7 +422,8 @@ export async function updateAgentAsk(
       observedReplyId,
       askId,
       source.projectId,
-      source.sessionId
+      source.sessionId,
+      actedAt
     ),
   ]);
   if ((results[0]?.meta?.changes ?? 0) !== 1) await explainNoMatch(ctx, source, askId);

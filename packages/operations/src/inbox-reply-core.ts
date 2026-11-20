@@ -114,8 +114,8 @@ export async function replyToInboxItem(
           const sourceGuard: { sql: string; values: (string | number)[] } = { sql: '', values: [] };
           if (ref.store === 'ask') {
             sourceGuard.sql =
-              "AND EXISTS (SELECT 1 FROM asks WHERE id = ? AND project_id = ? AND source_session_id = ? AND status = 'open')";
-            sourceGuard.values = [ref.id, item.projectId, sessionId];
+              "AND EXISTS (SELECT 1 FROM asks WHERE id = ? AND project_id = ? AND source_session_id = ? AND status = 'open' AND (expires_at IS NULL OR expires_at > ?))";
+            sourceGuard.values = [ref.id, item.projectId, sessionId, Date.now()];
           } else if (ref.store === 'secret') {
             sourceGuard.sql =
               "AND EXISTS (SELECT 1 FROM runtime_secret_requests WHERE id = ? AND project_id = ? AND requesting_chat_session_id = ? AND status = 'pending' AND expires_at > ?)";
