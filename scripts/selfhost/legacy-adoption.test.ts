@@ -317,8 +317,9 @@ describe('stale adoption helper removal', () => {
   function removal(stderr: string, status = 1, owner = adoptionId) {
     const calls: string[][] = [];
     const ctx = {
-      run: (_command: string, args: string[]): RunResult => {
+      run: (command: string, args: string[]): RunResult => {
         calls.push(args);
+        if (command === 'sleep') return { status: 0, stdout: '', stderr: '' };
         if (args[0] === 'inspect') {
           // Match the production inspection contract while exercising removal by identity.
           const format = args[args.indexOf('--format') + 1] ?? '';
@@ -357,6 +358,80 @@ describe('stale adoption helper removal', () => {
       expect(fixture.calls).toHaveLength(2);
     }
   );
+
+  it.each(['absent', 'removed'])('waits for concurrent removal to finish: %s', (outcome) => {
+    const calls: string[][] = [];
+    let removals = 0;
+    removeStaleHelper(
+      {
+        run: (_command, args): RunResult => {
+          calls.push(args);
+          if (args[0] === 'inspect')
+            return { status: 0, stdout: `${containerId} ${adoptionId}`, stderr: '' };
+          if (args[0] === '0.1') return { status: 0, stdout: '', stderr: '' };
+          if (++removals < 3)
+            return {
+              status: 1,
+              stdout: '',
+              stderr: `removal of container ${containerId} is already in progress`,
+            };
+          return outcome === 'absent'
+            ? { status: 1, stdout: '', stderr: 'No such container' }
+            : { status: 0, stdout: containerId, stderr: '' };
+        },
+      },
+      helper,
+      name
+    );
+    expect(removals).toBe(3);
+    expect(calls.filter((args) => args[0] === '0.1')).toHaveLength(2);
+    expect(calls.filter((args) => args[0] === 'rm')).toEqual(
+      Array.from({ length: 3 }, () => ['rm', '--force', containerId])
+    );
+  });
+
+  it('fails closed when concurrent removal never finishes', () => {
+    const fixture = removal(`removal of container ${containerId} is already in progress`);
+    expect(fixture.run).toThrow(/remove stale adoption helper failed/);
+    expect(fixture.calls.filter((args) => args[0] === 'rm')).toHaveLength(20);
+    expect(fixture.calls.filter((args) => args[0] === '0.1')).toHaveLength(19);
+  });
+
+  it.each(['sleep', 'permission'])('fails closed after a conflict when %s fails', (failure) => {
+    let removals = 0;
+    let delays = 0;
+    expect(() =>
+      removeStaleHelper(
+        {
+          run: (command, args): RunResult => {
+            if (command === 'sleep') {
+              delays++;
+              return { status: failure === 'sleep' ? 1 : 0, stdout: '', stderr: 'delay failed' };
+            }
+            if (args[0] === 'inspect')
+              return { status: 0, stdout: `${containerId} ${adoptionId}`, stderr: '' };
+            removals++;
+            return {
+              status: 1,
+              stdout: '',
+              stderr:
+                removals === 1
+                  ? `removal of container ${containerId} is already in progress`
+                  : 'permission denied',
+            };
+          },
+        },
+        helper,
+        name
+      )
+    ).toThrow(
+      failure === 'sleep'
+        ? /wait for adoption helper removal failed/
+        : /remove stale adoption helper failed/
+    );
+    expect(removals).toBe(failure === 'sleep' ? 1 : 2);
+    expect(delays).toBe(1);
+  });
 
   it('refuses another adoption before removal', () => {
     const fixture = removal('', 0, 'b'.repeat(32));

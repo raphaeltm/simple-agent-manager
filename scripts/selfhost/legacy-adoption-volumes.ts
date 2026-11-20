@@ -191,9 +191,22 @@ export function removeStaleHelper(
     throw new Error(`Legacy adoption refused: container ${name} is not this adoption's helper`);
   // A killed CLI can leave its --rm helper finishing in the daemon. Remove the inspected
   // identity, never a replacement at its name; auto-removal already satisfies this cleanup.
-  const removed = ctx.run('docker', ['rm', '--force', containerId]);
-  if (removed.status !== 0 && /no such (object|container)/i.test(removed.stderr)) return;
-  check(removed, 'remove stale adoption helper');
+  // At most 20 removals, spaced 100ms apart (1.9s total backoff). A daemon still
+  // removing after this bound remains a failure; do not race a new same-name helper.
+  const maxRemovalAttempts = 20;
+  const removalRetryDelaySeconds = '0.1';
+  for (let attempt = 1; attempt <= maxRemovalAttempts; attempt++) {
+    const removed = ctx.run('docker', ['rm', '--force', containerId]);
+    if (removed.status === 0 || /no such (object|container)/i.test(removed.stderr)) return;
+    if (
+      removed.stderr.includes(`removal of container ${containerId} is already in progress`) &&
+      attempt < maxRemovalAttempts
+    ) {
+      check(ctx.run('sleep', [removalRetryDelaySeconds]), 'wait for adoption helper removal');
+      continue;
+    }
+    check(removed, 'remove stale adoption helper');
+  }
 }
 
 export function volumeDigest(
