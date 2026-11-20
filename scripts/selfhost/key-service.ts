@@ -234,7 +234,11 @@ export function ensureLegacyAgentEnv(stateDir: string, port: number): string[] {
  */
 export async function ensureKeyServiceFiles(
   settings: KeyServiceSettings,
-  options: { createKeyFile?: boolean } = {}
+  options: {
+    createKeyFile?: boolean;
+    /** false: only the key file (secrets switch writes agent.env itself, after saving the old). */
+    writeAgentEnv?: boolean;
+  } = {}
 ): Promise<string[]> {
   const written: string[] = [];
   ensurePrivateDir(settings.dir);
@@ -261,6 +265,7 @@ export async function ensureKeyServiceFiles(
     writePrivateFile(keyFile, `${generateFileKek()}\n`);
     written.push(keyFile);
   }
+  if (options.writeAgentEnv === false) return written;
   const envPath = join(settings.dir, 'agent.env');
   const env = renderKeyAgentEnv(settings);
   if (!existsSync(envPath) || readFileSync(envPath, 'utf8') !== env) {

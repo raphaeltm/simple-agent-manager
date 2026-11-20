@@ -20,7 +20,7 @@
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { explicitKeyProvider, readKeyChoice } from './key-choice';
+import { explicitKeyProvider, keyChoicePath, readKeyChoice } from './key-choice';
 import { LEGACY_KEY_PROVIDER } from './key-service';
 import { readPrivateJson, readSecretsFile } from './secret-files';
 import { keyFileNotice, keyFilePath, verifyKeyCopy } from './secrets-keyfile';
@@ -77,14 +77,26 @@ export async function runMigration(
     return 'nothing-to-migrate';
   }
   const expected = plaintext(stateDir);
+  // The recorded choice is what tells selfhost:upgrade this box is sealed (upgrade-sealing.ts).
+  // A migration that stops before the sealed version is live forgets a choice it made itself, so
+  // the next upgrade keeps the box on plaintext instead of sealing it outside this command.
+  const choiceRecordedBefore = existsSync(keyChoicePath(stateDir));
+  const forgetNewChoice = () => {
+    if (!choiceRecordedBefore) rmSync(keyChoicePath(stateDir), { force: true });
+  };
 
-  log('1/6 choosing the key provider and sealing the existing secrets (selfhost:deploy --init)');
-  await deps.init();
-  log('2/6 contract check: key agent -> Worker loader, every secret unchanged');
-  const checked = await deps.preflight({ box: input.box, stateDir, expected });
-  log(`    bundle ${checked.bundleId}: the Worker gets ${checked.checked} secrets`);
-  log('3/6 starting the key agent and the updated fence (docker compose up -d --build)');
-  await deps.startStack();
+  try {
+    log('1/6 choosing the key provider and sealing the existing secrets (selfhost:deploy --init)');
+    await deps.init();
+    log('2/6 contract check: key agent -> Worker loader, every secret unchanged');
+    const checked = await deps.preflight({ box: input.box, stateDir, expected });
+    log(`    bundle ${checked.bundleId}: the Worker gets ${checked.checked} secrets`);
+    log('3/6 starting the key agent and the updated fence (docker compose up -d --build)');
+    await deps.startStack();
+  } catch (error) {
+    forgetNewChoice();
+    throw error;
+  }
 
   // Already switched (a selfhost:upgrade ran the sealed deploy, or an earlier migrate kept the
   // files): verify what runs and go straight to the removal.
@@ -117,6 +129,7 @@ export async function runMigration(
     log(`migration FAILED: ${reason}`);
     log(`rolling back: selfhost:deploy --key-provider ${LEGACY_KEY_PROVIDER}`);
     await deps.deploy(true);
+    forgetNewChoice();
     const back = await deps.adoptAndCheck();
     log(
       back.healthy

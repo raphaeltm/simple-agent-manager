@@ -140,7 +140,8 @@ export async function runSwitch(input: SwitchInput, deps: SwitchDeps): Promise<K
     if (input.dryRun) {
       log(`would create the key file ${newSettings.hostEnv.SAM_KEY_FILE}`);
     } else {
-      await ensureKeyServiceFiles(newSettings);
+      // Only the key file: agent.env changes below, after the old one is saved for the rollback.
+      await ensureKeyServiceFiles(newSettings, { writeAgentEnv: false });
     }
   }
   let newProvider: KeyProvider | null = null;

@@ -26,6 +26,7 @@ import { ensurePlatformKeys } from './platform-keys.js';
 import { parseDotenv } from './secret-files.js';
 import { type MigrateDeps, runMigration } from './secrets-migrate.js';
 import { preflightSealedSecrets } from './secrets-preflight.js';
+import { holdOnPlaintext } from './upgrade-sealing.js';
 
 vi.setConfig({ testTimeout: CHILD_TEST_TIMEOUT_MS });
 
@@ -109,6 +110,8 @@ describe('secrets migrate', () => {
     // File key and no proven copy: the plaintext files are the only other copy, so they stay,
     // and the notice is the last thing the operator reads.
     expect(plaintextLeft()).toEqual(['platform-keys.json', 'secrets.env']);
+    // Control: the sealed version is live, so the upgrade must not put it back on plaintext.
+    expect(holdOnPlaintext({ box: box(), stateDir: state })).toBe(false);
     expect(logs.join('\n')).toContain('KEY FILE CREATED');
     expect(logs.at(-1)).toContain('pnpm selfhost:secrets migrate --key-copy');
 
@@ -159,6 +162,8 @@ describe('secrets migrate', () => {
     );
     expect(steps).toEqual(['init', 'preflight']);
     expect(plaintextLeft()).toHaveLength(2);
+    // Codex P2 on #2933: the next selfhost:upgrade must still see a plaintext box.
+    expect(holdOnPlaintext({ box: box(), stateDir: state })).toBe(true);
   });
 
   it('rolls back when the first request to the new version is not healthy', async () => {
@@ -185,6 +190,7 @@ describe('secrets migrate', () => {
     expect(logs.join('\n')).toContain(
       'rolled back: the install runs on plaintext deploy vars again'
     );
+    expect(holdOnPlaintext({ box: box(), stateDir: state })).toBe(true);
   });
 
   it('rolls back when the deployed version still holds secret vars', async () => {

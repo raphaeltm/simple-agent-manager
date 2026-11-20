@@ -212,6 +212,26 @@ describe('secrets switch', () => {
     // The lost-key refusal itself is pinned in key-service.test.ts.
   });
 
+  // Codex P1 on #2933: creating the key file used to rewrite agent.env for the file key before the
+  // switch saved it, so a failed switch "restored" the file-key env and the old bundle could not
+  // be opened.
+  it('a failed switch from Cloud KMS to a new key file restores the Cloud KMS agent', async () => {
+    await runSwitch({ box: box(), stateDir: state, to: 'gcp-kms' }, deps());
+    const bundles = join(state, 'key-agent/bundles');
+    const fileBundle = readdirSync(bundles).find((n) => read(`bundles/${n}`).includes('"file"'));
+    rmSync(join(bundles, fileBundle ?? ''));
+    rmSync(join(state, 'key-agent/kek'));
+    const before = { choice: read('choice.json'), agentEnv: read('agent.env') };
+    expect(before.agentEnv).toContain(`SAM_GCP_KMS_KEY=${GCP_KEY}`);
+    steps = [];
+    await expect(
+      runSwitch({ box: box(), stateDir: state, to: 'file' }, deps([false, true]))
+    ).rejects.toThrow(/switch rolled back/);
+    expect(read('agent.env')).toBe(before.agentEnv);
+    expect(read('choice.json')).toBe(before.choice);
+    expect(bundleProviders()).toEqual(['gcp-kms']);
+  });
+
   it('reseal: same provider, a new bundle and data key, no previous provider', async () => {
     const before = readdirSync(join(state, 'key-agent/bundles'));
     await runSwitch({ box: box(), stateDir: state, to: null }, deps());

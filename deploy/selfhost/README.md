@@ -274,7 +274,9 @@ hold a key provider's credential; workspace nodes get neither, and the Worker ne
 
 On a sealed box the backup holds the sealed bundles but leaves out the file key and key-service
 credentials (`.state/key-agent/kek`, `.state/key-agent/credentials/`): a restore needs the key
-copy you kept off the box, or the cloud key. On a `legacy-plaintext` box, or for deploy versions
+copy you kept off the box, the Vault/OpenBao or AWS credential file (`transit-secret-id`,
+`transit-token`, `aws-credentials`) restored into `.state/key-agent/credentials/` from a separate
+secure copy, or access to the cloud key. `pnpm selfhost:restore` prints which. On a `legacy-plaintext` box, or for deploy versions
 made before sealing, the fleet bucket contains Worker secrets as well as application data. The backup command encrypts
 **the entire backup**, including the bucket, `.state/`, `.env` and its manifest, with AES-256-GCM.
 Restored files retain owner execution when needed, with mode 0700 for tools and 0600 for other

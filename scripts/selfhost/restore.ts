@@ -35,10 +35,14 @@ const manifest = runRestore(ctx, from);
 log(`restored backup of ${manifest.createdAt} (SAM ${manifest.samCommit ?? 'unknown commit'})`);
 if (existsSync(join(ctx.stateDir, LOCAL_BUNDLE_SUBDIR))) {
   // A sealed backup holds no key (backup-lib.ts isKeyServiceSecretPath): the clone needs one.
+  const credentials = join(ctx.stateDir, 'key-agent', 'credentials');
   log(
     'This backup is sealed. Before --init, give the target the key: with the file key, copy the ' +
       `copy you kept off the box to ${join(ctx.stateDir, 'key-agent', 'kek')} (mode 0600); with a ` +
-      "cloud key, grant this VM's identity the same key. --init then seals the clone's own identity."
+      `Vault/OpenBao transit key or stored AWS credentials, restore transit-secret-id, ` +
+      `transit-token or aws-credentials from your separate secure copy into ${credentials}/ ` +
+      "(directory 0700, files 0600); with a cloud key, grant this VM's identity the same key. " +
+      "--init then seals the clone's own identity."
   );
 }
 log('Recover with the SAME SAM checkout the backup was taken with:');
