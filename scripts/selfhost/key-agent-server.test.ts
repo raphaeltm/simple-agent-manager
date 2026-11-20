@@ -371,6 +371,19 @@ describe('cache and key-service failures', () => {
     expect(await ask()).toEqual({ status: 503, error: 'key_service_unavailable' });
   });
 
+  it('a cache window above the maximum stale age is capped by it (Codex P2)', async () => {
+    const state: { fail: KeyProviderError | null; calls: number } = { fail: null, calls: 0 };
+    const { ask, advance } = await setup({ wrap: flaky(state), cacheMs: 60_000, maxStaleMs: 5000 });
+    await ask();
+    advance(4999);
+    await ask();
+    expect(state.calls).toBe(1); // control: inside both bounds, served from cache
+    advance(1);
+    state.fail = new KeyProviderError('denied', 'HTTP 403');
+    expect(await ask()).toEqual({ status: 503, error: 'key_service_denied' });
+    expect(state.calls).toBe(2);
+  });
+
   it('drops the copy when the key service refuses (revocation takes effect)', async () => {
     const state: { fail: KeyProviderError | null; calls: number } = { fail: null, calls: 0 };
     const { ask, advance } = await setup({ wrap: flaky(state) });

@@ -9,6 +9,7 @@ import { agentVerifyKey, resolveDeployKeys, type ResolvedSecrets } from './key-s
 import {
   assertKeyAgentUid,
   assertNotRootForSealing,
+  bundleStoreFor,
   keyAgentAddress,
   keyAgentUidLine,
   type KeyServiceSettings,
@@ -81,8 +82,10 @@ export function refuseRootUnlessPlaintext(
 export type DeployKeys = Awaited<ReturnType<typeof resolveDeployKeys>>;
 
 /**
- * Platform keys and, on a sealed box, the bundle. `--init` prints the `.env` line the key-agent
- * container needs when it is missing; every other sealing run refuses without it.
+ * Platform keys and, on a sealed box, the bundle. A first sealing `--init` prints the `.env` line
+ * the key-agent container needs when it is missing; every other sealing run refuses without it,
+ * including the `--init` an upgrade runs on a box already sealed: recreating the stack with the
+ * wrong uid would leave the agent unable to read its state, and a rollback would use the same .env.
  */
 export async function resolveBoxKeys(input: {
   box: Box;
@@ -92,9 +95,10 @@ export async function resolveBoxKeys(input: {
   unset: readonly string[];
   log: (message: string) => void;
 }): Promise<DeployKeys> {
+  const alreadySealed = (await bundleStoreFor(input.stateDir).listIds()).length > 0;
   const resolved = await resolveDeployKeys(input);
   if (resolved.keyService && input.mode !== 'dry-run') {
-    if (input.mode === 'init') {
+    if (input.mode === 'init' && !alreadySealed) {
       try {
         assertKeyAgentUid(input.box, input.stateDir);
       } catch {

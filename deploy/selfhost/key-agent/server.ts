@@ -247,7 +247,10 @@ export function createKeyAgent(options: AgentOptions): Server {
 
   async function open(bundleId: string): Promise<Opened> {
     const cached = cache.get(bundleId);
-    if (cached && ageOf(cached.openedAt) < options.cacheMs) return cached.opened;
+    // A cache window above the stale bound is capped by it: revocation reaches a cached copy too.
+    if (cached && ageOf(cached.openedAt) < Math.min(options.cacheMs, maxStaleMs)) {
+      return cached.opened;
+    }
     const attempt = opening.get(bundleId) ?? refresh(bundleId);
     if (!cached || !mayServeStale(cached.openedAt)) return await attempt;
     // A stale copy is in hand: do not let a hung key service outlast the Worker's wait.

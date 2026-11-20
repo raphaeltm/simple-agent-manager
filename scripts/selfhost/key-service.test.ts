@@ -6,6 +6,7 @@
  */
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -152,6 +153,27 @@ describe('settings', () => {
         )
       ).not.toThrow();
       expect(() => refuseRootUnlessPlaintext({ box: {}, stateDir: fresh }, 1000)).not.toThrow();
+    });
+
+    // Codex P2 on #2933: the --init an upgrade runs on a sealed box used to log the uid advice
+    // and carry on, so the stack was recreated with a key agent that cannot read its state.
+    it('a missing SAM_KEY_AGENT_UID is advice on a first --init and fatal once the box is sealed', async () => {
+      const lines: string[] = [];
+      const noUid = () =>
+        resolveBoxKeys({
+          box: { SAM_KEY_PROVIDER: 'file' },
+          stateDir: state,
+          secretsPath: join(state, 'secrets.env'),
+          mode: 'init',
+          unset: [],
+          log: (line) => lines.push(line),
+        });
+      await noUid();
+      expect(lines.join('\n')).toContain('SAM_KEY_AGENT_UID');
+      expect(await bundles()).toHaveLength(1);
+      await expect(noUid()).rejects.toThrow(/SAM_KEY_AGENT_UID/);
+      // Control: with the right uid the sealed box's --init passes.
+      await expect(init()).resolves.toBeDefined();
     });
 
     it('control: the state owner seals', async () => {
@@ -368,6 +390,15 @@ describe('removing a sealed value (pnpm selfhost:deploy --unset NAME)', () => {
     // Control: once the damaged file is dealt with, the deploy runs again.
     rmSync(path);
     await expect(seal({ ...OPERATOR })).resolves.toMatchObject({ bundleId: expect.any(String) });
+  });
+
+  it('refuses when the newest bundle exists but the file system cannot read it (Codex P2)', async () => {
+    await seal({ ...OPERATOR, PROVIDER_ORPHAN_MIN_AGE_MS: '900000' });
+    const removed = await seal({ ...OPERATOR }, ['PROVIDER_ORPHAN_MIN_AGE_MS']);
+    const path = join(state, 'key-agent', 'bundles', `${removed.bundleId}.json`);
+    rmSync(path);
+    mkdirSync(path); // readFileSync fails with EISDIR, not ENOENT
+    await expect(seal({ ...OPERATOR })).rejects.toThrow(/cannot be read.*refusing to deploy/s);
   });
 
   it('reproduces R16: a deleted secrets.env line survives in the sealed secrets', async () => {

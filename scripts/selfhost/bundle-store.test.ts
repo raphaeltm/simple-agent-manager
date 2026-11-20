@@ -3,7 +3,7 @@
  * #2933): fsyncing the temp file does not commit the rename, so a power loss after a seal could
  * drop the bundle the deploy had already published while migrate removed the plaintext files.
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -73,5 +73,14 @@ describe('local bundle store durability', () => {
     const target = join(dir, `${ID}.json`);
     expect(ops).toEqual([`rm ${target}`, `fsync ${dir}`]);
     expect(await store.listIds()).toEqual([]);
+  });
+
+  it('reports a bundle that cannot be read as an error, and only a missing one as absent', async () => {
+    const store = openBundleStore({ dir });
+    await store.write(bundle);
+    expect(await store.read('cd'.repeat(16))).toBeNull();
+    // A name the store cannot read as a file (EISDIR here; EACCES or EIO on a box).
+    mkdirSync(join(dir, `${'ef'.repeat(16)}.json`));
+    await expect(store.read('ef'.repeat(16))).rejects.toThrow(/EISDIR/);
   });
 });

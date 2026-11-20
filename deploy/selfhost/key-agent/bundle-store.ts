@@ -80,8 +80,11 @@ function localBundleStore(dir: string): BundleStore {
     async read(bundleId) {
       try {
         return readFileSync(pathOf(bundleId), 'utf8');
-      } catch {
-        return null;
+      } catch (error) {
+        // Only a missing file is "no such bundle". Any other failure (permissions, I/O) is an
+        // unreadable bundle and must surface, or a deploy could fall back to an older one.
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw error;
       }
     },
     async write(bundle) {
