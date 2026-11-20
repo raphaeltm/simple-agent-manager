@@ -47,6 +47,11 @@ const idempotencyKey = {
     'Any unique string; a retried call with the same key returns the item already filed.',
 };
 const ref = { type: 'string', description: 'Item reference, `ask:<id>`, as returned when filed.' };
+const replyMessageId = {
+  type: 'string',
+  description:
+    'Exact reply message id from the inbox reply header you received. Required to act on outstanding replies; never guess the latest queued id.',
+};
 const wakeOnSteps = {
   type: 'boolean',
   description:
@@ -177,18 +182,41 @@ export const INBOX_TOOLS = [
     },
   },
   {
+    name: 'inbox_respond',
+    description:
+      'Respond on an item this chat filed, including a pending secret or approval request. The response brings it back to the person’s inbox. Never file a duplicate item.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { ref, body: { type: 'string' }, replyMessageId },
+      required: ['ref', 'body'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'inbox_resolve',
+    description:
+      'Treat the observed reply identified by replyMessageId as the answer to this chat’s open question, review or result. Refuses while another reply is outstanding. References its chat message; stays out of their inbox. Cannot resolve secrets, approvals or human tasks.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { ref, replyMessageId },
+      required: ['ref', 'replyMessageId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'inbox_update_item',
     description: 'Edit the title, reason or links of an open item this chat filed.',
     inputSchema: {
       type: 'object' as const,
-      properties: { ref, title, why, links },
+      properties: { ref, title, why, links, replyMessageId },
       required: ['ref'],
       additionalProperties: false,
     },
   },
   {
     name: 'inbox_cancel_item',
-    description: 'Close an open item this chat filed because it is moot. Records why.',
+    description:
+      'Close an open item this chat filed because it is moot. Records why. Refuses while a person’s reply is outstanding; handle each reply with respond or update first.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -215,10 +243,20 @@ export const INBOX_TOOLS = [
   {
     name: 'inbox_get_item',
     description:
-      "One item of this project with its status, the person's answer and the outcome; for a task also its steps, assignee, who took it, activity and discussion.",
+      "One item of this project with its status and outcome; for a task also its progress. Source-chat items include canonical conversation and pendingReplyIds visible on this page, including replies whose delivery failed. Follow conversation cursors while hasMore. Reading observes these replies but does not acknowledge them; explicitly respond/update/resolve with a read reply's id.",
     inputSchema: {
       type: 'object' as const,
-      properties: { ref },
+      properties: {
+        ref,
+        replyCursor: {
+          type: 'string',
+          description: 'conversation.nextReplyCursor from the previous get.',
+        },
+        responseCursor: {
+          type: 'number',
+          description: 'conversation.nextResponseCursor from the previous get.',
+        },
+      },
       required: ['ref'],
       additionalProperties: false,
     },

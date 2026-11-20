@@ -269,7 +269,12 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
       expect(elapsed).toBeLessThanOrEqual(1000);
       expect(existsSync(`/proc/${pid}`)).toBe(false);
       expect(run.output()).toContain('egress_fence.celld_killed');
-      await waitFor(() => existsSync(join(pair.state, 'lost')));
+      // The latch is written before the sidecar emits stderr; wait for both observations.
+      await waitFor(
+        () =>
+          existsSync(join(pair.state, 'lost')) &&
+          pair.output().includes('"level":"error","event":"egress_fence.lost"')
+      );
       expect(pair.output()).toContain('"level":"error","event":"egress_fence.lost"');
       expect(
         lab.exec(

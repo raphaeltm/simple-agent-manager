@@ -21,6 +21,14 @@ export interface UserMessage {
   attribution?: UserMessageAttribution;
   /** Present when the sender asked to steer the agent's running turn. */
   delivery?: UserMessageDelivery;
+  /** Present when the message is a reply to an inbox item, sent from the inbox. */
+  inboxReply?: UserMessageInboxReply;
+}
+
+/** The inbox item a user message replies to. `title` is the item's title when the reply was sent. */
+export interface UserMessageInboxReply {
+  ref: string;
+  title: string | null;
 }
 
 /**

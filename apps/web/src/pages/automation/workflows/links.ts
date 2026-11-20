@@ -5,6 +5,7 @@
  */
 import type { WorkflowArtifactRef } from '@simple-agent-manager/shared';
 
+import { projectLibraryFilePath } from '../../../lib/project-routes';
 import { sanitizeUrl } from '../../../lib/url-utils';
 
 export interface OutputLink {
@@ -15,11 +16,9 @@ export interface OutputLink {
   detail: string;
   href: string | null;
   external: boolean;
+  /** A Library file, which the chip opens in place (its `href` is the Library fallback). */
+  libraryFile?: { projectId: string; fileId: string };
 }
-
-/** A Library file in this project, opened in the Library's preview. */
-export const libraryFilePath = (projectId: string, fileId: string) =>
-  `/projects/${encodeURIComponent(projectId)}/library?${new URLSearchParams({ preview: fileId })}`;
 
 /** Library file IDs are ULIDs. */
 const LIBRARY_ID = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
@@ -61,8 +60,9 @@ export function artifactLink(ref: WorkflowArtifactRef, projectId: string): Outpu
       kind: 'library',
       label: 'Library file',
       detail: value,
-      href: libraryFilePath(projectId, value),
+      href: projectLibraryFilePath(projectId, value),
       external: false,
+      libraryFile: { projectId, fileId: value },
     };
   return {
     kind: 'text',

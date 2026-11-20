@@ -95,6 +95,8 @@ afterEach(() => {
 
 const INBOX_LISTS = ['auth', 'user-1', 'inbox', 'list'];
 const INBOX_COUNTS = ['auth', 'user-1', 'inbox', 'count'];
+// The open item, so an agent's response shows in its conversation.
+const INBOX_ITEMS = ['auth', 'user-1', 'inbox', 'item'];
 const NOTIFICATIONS = ['auth', 'user-1', 'notifications'];
 
 describe('useNotificationSocket', () => {
@@ -104,7 +106,7 @@ describe('useNotificationSocket', () => {
     await frame(socket, { type: 'notification.new', notification: notification('secret_request') });
     expect(invalidated).toEqual([]);
     await settle();
-    expect(invalidated).toEqual([NOTIFICATIONS, INBOX_LISTS, INBOX_COUNTS]);
+    expect(invalidated).toEqual([NOTIFICATIONS, INBOX_LISTS, INBOX_COUNTS, INBOX_ITEMS]);
   });
 
   it('an FYI notification refreshes only the notification lists', async () => {
@@ -121,7 +123,7 @@ describe('useNotificationSocket', () => {
     expect(invalidated).toEqual([]);
     act(() => socket.onopen?.());
     await settle();
-    expect(invalidated).toEqual([NOTIFICATIONS, INBOX_LISTS, INBOX_COUNTS]);
+    expect(invalidated).toEqual([NOTIFICATIONS, INBOX_LISTS, INBOX_COUNTS, INBOX_ITEMS]);
   });
 
   it('drops malformed frames and logs them', async () => {

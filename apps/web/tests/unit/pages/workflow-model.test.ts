@@ -5,11 +5,7 @@
 import type { WorkflowRunDetail, WorkflowStepDetail } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
-import {
-  artifactLink,
-  libraryFilePath,
-  pullRequestLink,
-} from '../../../src/pages/automation/workflows/links';
+import { artifactLink, pullRequestLink } from '../../../src/pages/automation/workflows/links';
 import {
   activityText,
   attentionStep,
@@ -349,10 +345,10 @@ describe('output links', () => {
       artifactLink({ type: 'library_file', ref: '01M5H0Z9X1Y2Z3A4B5C6D7E8F9' }, 'p1')
     ).toMatchObject({
       kind: 'library',
-      href: libraryFilePath('p1', '01M5H0Z9X1Y2Z3A4B5C6D7E8F9'),
+      href: '/projects/p1/library?preview=01M5H0Z9X1Y2Z3A4B5C6D7E8F9',
+      libraryFile: { projectId: 'p1', fileId: '01M5H0Z9X1Y2Z3A4B5C6D7E8F9' },
       external: false,
     });
-    expect(libraryFilePath('p1', 'F1')).toBe('/projects/p1/library?preview=F1');
     expect(
       artifactLink({ type: 'pr', ref: 'https://github.com/acme/repo/pull/12' }, 'p1')
     ).toMatchObject({

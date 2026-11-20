@@ -520,9 +520,24 @@ exact credential it was created with could prove no server exists:
 - `teardown_credential_generation_changed`: that platform credential was re-saved or rotated
   since. A re-saved credential is never accepted as proof: SAM cannot show it is the same
   provider account.
-- `teardown_allocation_unresolved`: the create failed before SAM got a server ID, and the
-  credential's complete inventory shows no server. SAM keeps retrying (a late server would
-  still be found and deleted) but never treats an empty list as proof.
+- `teardown_allocation_unresolved`: the create failed before SAM got a server ID, and either
+  the credential's complete inventory shows no server (Hetzner), or the provider's inventory
+  cannot be read as complete at all (GCP and the other providers;
+  `reconcileStrictProviderlessVm()`). SAM keeps retrying once per failure backoff (a late
+  server would still be found and deleted) but never treats an empty list as proof.
+
+A node whose provisioning stopped before the provider identity claim is not stuck: it still
+carries the absence proof written when its row was created, and the cleanup sweep removes it on
+its first pass without asking the provider (`isNeverRequestedVmPlaceholder()` in
+`apps/api/src/services/node-never-requested-placeholder.ts`). A typical cause is **Node
+allocation plan is no longer current** reported by the first plan check. A failure after that
+claim but before the create (the second plan check, or tunnel preparation) is not recognised:
+the claim has already cleared the proof, so the row is treated like one whose create may have
+been sent. A node in `error` whose create may have been sent and that has no server ID
+is moved to `destroying` after its first failed cleanup attempt
+(`releaseNodeCleanupClaim()`). It then shows its cleanup-blocked reason, is listed here when it
+runs on SAM's own capacity, and appears in the `node_destroying_too_long` anomaly, rather than
+retrying unseen.
 
 **Remove…** is offered only when the refusal means SAM cannot see the server
 (`OPERATOR_REMOVABLE_BLOCK_REASONS` in `packages/shared`: the two above,
@@ -969,6 +984,11 @@ attempts count).
 | `operations.opsAnomalyIncidentDispatchStallHours` | 24         | 1–720         | Hours a pending private incident may wait without ever being dispatched to incident triage before the queue is reported (`incident_dispatch_stalled`) and the incident sweep warns                              |
 | `operations.incidentIdeaReconcileBatchSize`       | 25         | 1–100         | Incident Ideas the hourly reconciliation checks per batch (one Durable Object read each) when it closes Ideas of ended incidents and adopts or retitles older ones                                              |
 | `operations.incidentIdeaReconcileDeadlineMs`      | 20,000     | 1,000–120,000 | Milliseconds the hourly incident-Idea reconciliation keeps running batches; the rest continues the next hour                                                                                                    |
+| `operations.incidentWatchRecentWindowHours`       | 168        | 24–720        | Hours behind a watched incident's recent occurrence count (`list_incident_queue`, `get_incident`, its Idea); older hourly counts are dropped                                                                    |
+| `operations.incidentWatchSpikeWindowHours`        | 24         | 1–168         | Hours over which a watched incident's occurrences are counted to detect a spike (capped at the recent window)                                                                                                   |
+| `operations.incidentWatchSpikeMinOccurrences`     | 50         | 1–1,000,000   | Occurrences in the spike window, since the latest watch decision, that return a watched incident to triage                                                                                                      |
+| `operations.incidentWatchSpikeBaselineMultiplier` | 3          | 1–100         | A spike must also reach this multiple of the incident's earlier average per spike window, so a steadily noisy watched incident is not re-queued                                                                 |
+| `operations.incidentWatchQuietExpiryHours`        | 336        | 24–2,160      | Hours without an occurrence after which a watched incident expires and its Idea is closed                                                                                                                       |
 | `operations.opsAnomalyMaxPerClass`                | 25         | 1–200         | Findings returned per anomaly type; each type still reports its total                                                                                                                                           |
 | `operations.opsNodeLogMaxLines`                   | 200        | 1–1,000       | Most log lines one `ops_node_logs` call returns                                                                                                                                                                 |
 | `operations.opsNodeLogMaxBytes`                   | 65,536     | 1 KiB–1 MiB   | Most bytes of log text one `ops_node_logs` call returns                                                                                                                                                         |

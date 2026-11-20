@@ -134,7 +134,8 @@ const MESSAGES = [
     content:
       'Replace the fixed wait with an explicit wait for the cart total, and run the suite 20 times.',
     toolMetadata: durable({
-      source: 'user_followup',
+      source: 'inbox_reply',
+      inboxRef: 'ask:reply-attribution-audit',
       userId: 'grantee-1',
       senderName: LONG_GRANTEE,
       onBehalfOfUserId: 'owner-1',
@@ -226,7 +227,11 @@ const GIT_STATUS = {
   untracked: [{ path: 'tests/checkout/empty-cart.test.ts', status: '??' }],
 };
 
-async function setupMocks(page: Page, session: ReturnType<typeof makeSession>) {
+async function setupMocks(
+  page: Page,
+  session: ReturnType<typeof makeSession>,
+  messages = MESSAGES
+) {
   const wide = (page.viewportSize()?.width ?? 0) >= 1024;
   await page.addInitScript(
     ({ userId, labelledRail }) => {
@@ -277,9 +282,9 @@ async function setupMocks(page: Page, session: ReturnType<typeof makeSession>) {
       return respond(200, { sessions: [session], total: 1, hasMore: false });
     }
     if (subPath === `/sessions/${SESSION_ID}`) {
-      return respond(200, { session, messages: MESSAGES, hasMore: false });
+      return respond(200, { session, messages, hasMore: false });
     }
-    if (subPath.match(/^\/sessions\/[^/]+\/messages/)) return respond(200, MESSAGES);
+    if (subPath.match(/^\/sessions\/[^/]+\/messages/)) return respond(200, messages);
     if (subPath === '/members') return respond(200, { members: [], invites: [] });
     if (subPath === '/tasks') return respond(200, { tasks: [], nextCursor: null });
     if (subPath === '/agent-profiles') return respond(200, { items: [] });
@@ -376,6 +381,25 @@ function slug(viewer: string, page: Page) {
 }
 
 test.describe('Shared session — what each viewer sees', () => {
+  test('an inbox reply identifies its shared writer', async ({ page }) => {
+    await setupMocks(
+      page,
+      makeSession('owner'),
+      MESSAGES.filter((message) => message.id === 'msg-grantee')
+    );
+    await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
+    const label = page.getByTestId('user-message-attribution');
+    await expect(label).toHaveText(`${LONG_GRANTEE} · shared access`);
+    await expect(label).toBeVisible();
+    await expect(
+      page.getByText(
+        'Replace the fixed wait with an explicit wait for the cart total, and run the suite 20 times.'
+      )
+    ).toBeVisible();
+    await assertNoOverflow(page);
+    await screenshot(page, slug('inbox-reply-attribution', page));
+  });
+
   test('a teammate it was shared with: notice, composer, and attributed messages', async ({
     page,
   }) => {

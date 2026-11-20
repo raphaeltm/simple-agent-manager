@@ -234,7 +234,13 @@ export async function resolveInboxItem(
 
 export async function getInboxItem(
   ctx: OperationContext,
-  input: { projectId: string; ref: string; context?: boolean }
+  input: {
+    projectId: string;
+    ref: string;
+    context?: boolean;
+    replyCursor?: string;
+    responseCursor?: number;
+  }
 ): Promise<InboxItemResponse> {
   const { item, ref } = await resolveInboxItem(ctx, input);
   // A human task's steps, assignee, claim, activity and discussion (slice H1). The transcript
@@ -243,14 +249,53 @@ export async function getInboxItem(
     item.kind === 'task' && ref.store === 'ask'
       ? await getTaskDetailForPerson(ctx, { projectId: item.projectId, askId: ref.id })
       : null;
-  const context =
-    input.context && item.sessionId
-      ? await ctx.ports.inbox.context({
-          projectId: item.projectId,
-          sessionId: item.sessionId,
-          askedAt: Date.parse(item.createdAt),
-          userId: ctx.actor.userId,
-        })
-      : null;
-  return { item, context, task };
+  const context = item.sessionId
+    ? await ctx.ports.inbox.context({
+        projectId: item.projectId,
+        sessionId: item.sessionId,
+        askedAt: Date.parse(item.createdAt),
+        userId: ctx.actor.userId,
+        inboxRef: item.ref,
+        replyCursor: input.replyCursor,
+        responseCursor: input.responseCursor,
+        includeContext: input.context === true,
+      })
+    : null;
+  const latest = await ctx.env.DATABASE.prepare(
+    `SELECT r.user_id, u.name, r.message_id, r.replied_at, r.permission_rejected, r.agent_acted_at,
+      EXISTS (SELECT 1 FROM inbox_replies h WHERE h.project_id = r.project_id
+        AND h.item_ref = r.item_ref AND h.agent_acted_at IS NULL) AS with_agent
+     FROM inbox_replies r LEFT JOIN users u ON u.id = r.user_id
+     WHERE r.project_id = ? AND r.item_ref = ? ORDER BY r.id DESC LIMIT 1`
+  )
+    .bind(item.projectId, item.ref)
+    .first<Record<string, unknown>>();
+  if (
+    latest &&
+    typeof latest.user_id === 'string' &&
+    typeof latest.message_id === 'string' &&
+    typeof latest.replied_at === 'number'
+  ) {
+    item.withAgent = latest.with_agent === 1;
+    if (typeof latest.agent_acted_at === 'number')
+      item.updatedAt = new Date(
+        Math.max(Date.parse(item.updatedAt), latest.agent_acted_at)
+      ).toISOString();
+    if (item.kind === 'permission' && item.status === 'done')
+      item.canReply = latest.permission_rejected === 1;
+    item.latestReply = {
+      userId: latest.user_id,
+      name: typeof latest.name === 'string' ? latest.name : null,
+      messageId: latest.message_id,
+      repliedAt: new Date(latest.replied_at).toISOString(),
+    };
+  }
+  const conversation = context?.conversation ?? null;
+  // Conversation is top-level only; context keeps its existing before/since contract.
+  return {
+    item,
+    context: input.context && context ? { before: context.before, since: context.since } : null,
+    task,
+    conversation,
+  };
 }

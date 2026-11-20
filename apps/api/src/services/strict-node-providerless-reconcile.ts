@@ -135,9 +135,14 @@ export async function reconcileStrictProviderlessVm(
   // Only Hetzner currently guarantees that a successful filtered inventory read is
   // complete. Other adapters may deliberately return partial multi-region inventory,
   // so an empty generic list cannot prove provider-side absence.
+  // No later attempt can change that, so this is a named refusal for an operator to resolve
+  // (attest, or remove the VM by hand), recorded once and retried on the full failure backoff,
+  // not a transient error retried within minutes (idea 01M7GVRC956Q8JMGCRP1PQ4R5B).
   if (node.cloudProvider !== 'hetzner') {
-    throw new Error(
-      `Cannot reconcile providerless VM ${node.id}: provider inventory completeness is not guaranteed`
+    throw new NodeTeardownBlockedError(
+      'teardown_allocation_unresolved',
+      `node=${node.id} provider=${node.cloudProvider ?? 'unknown'}: provider inventory ` +
+        'completeness is not guaranteed, so an empty list cannot prove the create never produced a server'
     );
   }
   const installationId = resolveInstallationId(env);

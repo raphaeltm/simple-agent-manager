@@ -250,6 +250,32 @@ describe('readLifecycleLatencyRange', () => {
     );
   });
 
+  it('links a watched incident: a defect triage chose to measure is still open', async () => {
+    const stoppingSignature = await platformErrorSignature(
+      'api',
+      slowStateMessage('workspace', 'stopping')
+    );
+    const creatingSignature = await platformErrorSignature(
+      'api',
+      slowStateMessage('node', 'creating')
+    );
+    await triage(stoppingSignature, 'watching', 'idea-1');
+    await triage(creatingSignature, 'expired', null); // ended: not linked
+
+    const result = await readLifecycleLatencyRange(
+      env,
+      { sinceMs: NOW - 7 * DAY, untilMs: NOW },
+      { ...LIFECYCLE_LATENCY_DEFAULTS }
+    );
+
+    expect(
+      result.states.find((s) => s.entityType === 'workspace' && s.status === 'stopping')?.incidents
+    ).toEqual([expect.objectContaining({ signature: stoppingSignature, state: 'watching' })]);
+    expect(
+      result.states.find((s) => s.entityType === 'node' && s.status === 'creating')?.incidents
+    ).toEqual([]);
+  });
+
   it('leaves out states whose budget is 0 (watch turned off)', async () => {
     const result = await readLifecycleLatencyRange(
       env,

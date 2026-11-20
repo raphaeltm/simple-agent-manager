@@ -7,6 +7,7 @@ coverage/
 apps/www/.astro/
 apps/www/public/scripts/blog-mermaid.js
 apps/www/public/scripts/docs-mermaid.js
+apps/www/public/scripts/mermaid-chunks/
 apps/www/public/scripts/tracker.js
 package-lock.json
 yarn.lock

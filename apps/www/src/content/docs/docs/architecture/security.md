@@ -417,7 +417,7 @@ Library files, repository files, workspace files, and chat messages can all be w
 
 **Mermaid diagrams** in chat and in library markdown render through one pipeline (`renderMermaidSvg` in `packages/acp-client/src/mermaid.ts`):
 
-- Mermaid draws labels as SVG text, so its output contains no `<foreignObject>` or HTML. A diagram's own directives cannot re-enable HTML labels, inject CSS (`themeCSS`, `fontFamily`), or make marker references absolute. Features that can only draw text as HTML lose that text: Venn member lists, architecture text icons, and KaTeX math.
+- Mermaid is configured to draw labels as SVG text (`htmlLabels: false`). A few diagram types still emit `<foreignObject>` or HTML for some text (for example event-modeling boxes); the sanitizer below drops it, so that text is lost rather than rendered as HTML. A diagram's own directives cannot re-enable HTML labels, inject CSS (`themeCSS`, `fontFamily`), or make marker references absolute. Features that can only draw text as HTML lose that text: Venn member lists, architecture text icons, and KaTeX math.
 - The SVG is sanitized to an SVG-only allowlist in which every reference stays inside the document. An `href` must be a `#fragment`, or an inline raster image on `<image>`. CSS that names a remote resource is dropped.
 
 Mermaid lays a diagram out in the live page before it is sanitized, so a remote image named in diagram syntax can still be fetched once while the diagram renders. Markdown images (`![](…)`) are also shown as written. A platform-wide policy for remote resources in agent content, including scripts inside previewed PDFs, is tracked separately.

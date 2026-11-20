@@ -82,6 +82,9 @@ function setup() {
       resolution_note TEXT,
       resolution_references TEXT,
       expired_at INTEGER,
+      watching_since INTEGER, watch_reason TEXT, watch_hourly_counts TEXT,
+      watch_escalated_at INTEGER, watch_escalation_reason TEXT,
+      watch_count_floor INTEGER, watch_counted_ids TEXT, watch_spike_offset INTEGER,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (idea_id) REFERENCES tasks(id) ON DELETE SET NULL

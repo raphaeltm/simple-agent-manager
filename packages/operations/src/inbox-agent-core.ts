@@ -29,6 +29,7 @@ import {
 } from './inbox-agent-reads';
 import { createAsk } from './inbox-ask-create-core';
 import { questionSchedule } from './inbox-question-schedule';
+import { inboxObservedReplyId } from './inbox-reply-core';
 import { inboxTitle } from './inbox-rows';
 import { getInboxLimits, type InboxLimits } from './inbox-settings';
 import { recordActivity } from './inbox-task-rows';
@@ -351,6 +352,7 @@ async function explainNoMatch(
 
 export const AgentUpdateInputSchema = v.object({
   ref: v.string(),
+  replyMessageId: v.optional(v.string()),
   title: v.optional(v.string()),
   why: v.optional(v.string()),
   links: v.optional(v.array(AgentLinkInputSchema)),
@@ -375,28 +377,56 @@ export async function updateAgentAsk(
     input.links === undefined
       ? undefined
       : await checkedLinks(ctx, source.projectId, input.links, limits);
-  const result = await ctx.env.DATABASE.prepare(
+  const observedReplyId = await inboxObservedReplyId(
+    ctx,
+    source.projectId,
+    input.ref,
+    source.sessionId,
+    input.replyMessageId
+  );
+  const actedAt = Date.now();
+  const update = ctx.env.DATABASE.prepare(
     `UPDATE asks
         SET title = COALESCE(?, title),
             body_md = CASE WHEN ? THEN ? ELSE body_md END,
             links_json = CASE WHEN ? THEN ? ELSE links_json END,
             updated_at = ?
       WHERE id = ? AND project_id = ? AND source_session_id = ? AND ${AGENT_KINDS_SQL}
-        AND status = 'open'`
-  )
-    .bind(
-      title,
-      why === undefined ? 0 : 1,
-      why || null,
-      links === undefined ? 0 : 1,
-      links && links.length > 0 ? JSON.stringify(links) : null,
-      Date.now(),
+        AND status = 'open' AND (expires_at IS NULL OR expires_at > ?)`
+  ).bind(
+    title,
+    why === undefined ? 0 : 1,
+    why || null,
+    links === undefined ? 0 : 1,
+    links && links.length > 0 ? JSON.stringify(links) : null,
+    actedAt,
+    askId,
+    source.projectId,
+    source.sessionId,
+    actedAt
+  );
+  // Wording and resurfacing are one mutation: a failed acknowledgement must not leave
+  // changed wording hidden in Archived. Only the explicitly observed reply is acknowledged.
+  const results = await ctx.env.DATABASE.batch([
+    update,
+    ctx.env.DATABASE.prepare(
+      `UPDATE inbox_replies SET agent_acted_at = ?
+       WHERE project_id = ? AND item_ref = ? AND id = ?
+         AND EXISTS (SELECT 1 FROM asks WHERE id = ? AND project_id = ?
+           AND source_session_id = ? AND ${AGENT_KINDS_SQL} AND status = 'open'
+           AND (expires_at IS NULL OR expires_at > ?))`
+    ).bind(
+      actedAt,
+      source.projectId,
+      input.ref,
+      observedReplyId,
       askId,
       source.projectId,
-      source.sessionId
-    )
-    .run();
-  if ((result.meta?.changes ?? 0) !== 1) await explainNoMatch(ctx, source, askId);
+      source.sessionId,
+      actedAt
+    ),
+  ]);
+  if ((results[0]?.meta?.changes ?? 0) !== 1) await explainNoMatch(ctx, source, askId);
   return { ref: input.ref, status: 'open' };
 }
 
@@ -424,6 +454,8 @@ export async function cancelAgentAsk(
         SET status = 'cancelled', answer_json = ?, resolved_at = ?, updated_at = ?, notified_at = ?
       WHERE id = ? AND project_id = ? AND source_session_id = ? AND ${AGENT_KINDS_SQL}
         AND status = 'open'
+        AND NOT EXISTS (SELECT 1 FROM inbox_replies WHERE project_id = asks.project_id
+          AND item_ref = ? AND agent_acted_at IS NULL)
       RETURNING kind, blocking`
   )
     .bind(
@@ -433,10 +465,24 @@ export async function cancelAgentAsk(
       now,
       askId,
       source.projectId,
-      source.sessionId
+      source.sessionId,
+      input.ref
     )
     .first<{ kind: string; blocking: number }>();
-  if (!closed) return explainNoMatch(ctx, source, askId);
+  if (!closed) {
+    const pending = await ctx.env.DATABASE.prepare(
+      `SELECT id FROM inbox_replies WHERE project_id = ? AND item_ref = ? AND agent_acted_at IS NULL
+         AND EXISTS (SELECT 1 FROM asks WHERE id = ? AND project_id = ? AND source_session_id = ? AND ${AGENT_KINDS_SQL}) LIMIT 1`
+    )
+      .bind(source.projectId, input.ref, askId, source.projectId, source.sessionId)
+      .first();
+    if (pending)
+      throw new OperationError(
+        'conflict',
+        'Handle outstanding replies before cancelling this item'
+      );
+    return explainNoMatch(ctx, source, askId);
+  }
   if (closed.kind === 'task') {
     // A moot human task leaves the person's list; its history says why, and its watches wind
     // down like a closed task's.

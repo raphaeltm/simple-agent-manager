@@ -59,6 +59,9 @@ export function useNotificationSocket(): void {
       if (inbox) {
         void queryClient.invalidateQueries({ queryKey: inboxQueryKeys.lists(queryScope) });
         void queryClient.invalidateQueries({ queryKey: inboxQueryKeys.counts(queryScope) });
+        // The open item too: an agent's response lands in its conversation. Only a mounted
+        // item read refetches; cached ones are marked stale.
+        void queryClient.invalidateQueries({ queryKey: inboxQueryKeys.items(queryScope) });
       }
     };
     const schedule = (inbox: boolean) => {

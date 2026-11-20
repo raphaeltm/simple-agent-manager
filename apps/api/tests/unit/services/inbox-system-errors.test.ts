@@ -27,6 +27,9 @@ vi.mock('../../../src/services/project-data', async () => ({
     '../../../src/services/project-data'
   )),
   acceptPromptDelivery: edges.acceptPromptDelivery,
+  // These D1 filing/tenancy cases do not grant transcript access; the real DO read is
+  // exercised separately by inbox-replies-capability.test.ts.
+  getSessionAccess: vi.fn().mockResolvedValue({ session: null, access: null }),
 }));
 vi.mock('../../../src/durable-objects/sam-session/tools/retry-subtask', () => ({
   retrySubtask: edges.retrySubtask,

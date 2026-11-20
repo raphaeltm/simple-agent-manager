@@ -5,6 +5,8 @@ import type {
   InboxFilter,
   InboxItemResponse,
   InboxListResponse,
+  InboxReplyRequest,
+  InboxReplyResponse,
   InboxTaskActionResponse,
 } from '@simple-agent-manager/shared';
 
@@ -43,12 +45,46 @@ export function getInboxCount(
   return request<InboxCountResponse>(`${inboxBase(projectId)}/count`, { signal });
 }
 
+/** Where a conversation read continues. Only the streams with a cursor advance. */
+export interface InboxConversationCursor {
+  replyCursor?: string;
+  responseCursor?: number;
+}
+
+/**
+ * One item. Without `cursor` it is the first read (transcript context included); with one it is a
+ * continuation of the item's conversation only.
+ */
 export function getInboxItem(
   projectId: string,
   ref: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  cursor?: InboxConversationCursor
 ): Promise<InboxItemResponse> {
-  return request<InboxItemResponse>(`${itemPath(projectId, ref)}?context=true`, { signal });
+  const query = new URLSearchParams();
+  if (cursor) {
+    if (cursor.replyCursor) query.set('replyCursor', cursor.replyCursor);
+    if (cursor.responseCursor !== undefined)
+      query.set('responseCursor', String(cursor.responseCursor));
+  } else {
+    query.set('context', 'true');
+  }
+  return request<InboxItemResponse>(`${itemPath(projectId, ref)}?${query.toString()}`, { signal });
+}
+
+/**
+ * Reply to an item: the message goes to the agent's chat through its own delivery path, and the
+ * item leaves the inbox until the agent responds on it (`POST …/inbox/items/:ref/reply`, 202).
+ */
+export function replyToInboxItem(
+  projectId: string,
+  ref: string,
+  body: InboxReplyRequest
+): Promise<InboxReplyResponse> {
+  return request<InboxReplyResponse>(`${itemPath(projectId, ref)}/reply`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }
 
 export function answerInboxItem(

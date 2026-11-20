@@ -55,12 +55,32 @@ export function useInboxList(projectId: string | null, filter: InboxFilter, enab
   return { ...query, items, loaded: query.data !== undefined };
 }
 
+/**
+ * How often an open item that is with the agent re-reads its conversation, so the agent's
+ * response shows without a reload even when no notification reaches this tab. Only while the
+ * tab is visible (TanStack pauses intervals in the background). Override with
+ * VITE_INBOX_WITH_AGENT_REFRESH_MS; 0 turns it off.
+ */
+const DEFAULT_INBOX_WITH_AGENT_REFRESH_MS = 30_000;
+const configuredWithAgentMs = Number.parseInt(
+  import.meta.env.VITE_INBOX_WITH_AGENT_REFRESH_MS ?? '',
+  10
+);
+export const INBOX_WITH_AGENT_REFRESH_MS =
+  Number.isFinite(configuredWithAgentMs) && configuredWithAgentMs >= 0
+    ? configuredWithAgentMs
+    : DEFAULT_INBOX_WITH_AGENT_REFRESH_MS;
+
 /** One item with its transcript context. */
 export function useInboxItem(projectId: string | null, ref: string | null) {
   const scope = useQueryScope();
   return useQuery({
     ...inboxItemQueryOptions(scope, projectId ?? '', ref ?? ''),
     enabled: Boolean(scope && projectId && ref),
+    refetchInterval: (query) =>
+      query.state.data?.item.withAgent === true && INBOX_WITH_AGENT_REFRESH_MS > 0
+        ? INBOX_WITH_AGENT_REFRESH_MS
+        : false,
   });
 }
 

@@ -12,7 +12,7 @@ import { FileText, History, Lightbulb } from 'lucide-react';
 import { describeRelations, LinkedWorkRow } from '../../components/linked-work';
 import { RenderedMarkdown } from '../../components/MarkdownRenderer';
 import type { IdeaDetail } from '../../lib/api';
-import { projectIdeaPath, projectLibraryFilePath } from '../../lib/project-routes';
+import { projectIdeaPath } from '../../lib/project-routes';
 import { Panel, SectionTitle } from '../automation/ui';
 import { IdeaActionControl, type IdeaActionHandlers, IdeaStateIcon, LiveDot } from './parts';
 import {
@@ -197,7 +197,7 @@ export function IdeaRelated({
                 title={file.filename}
                 meta={describeRelations(file.relations)}
                 secondaryMeta={file.directory}
-                to={projectLibraryFilePath(projectId, file.fileId)}
+                libraryFile={{ projectId, fileId: file.fileId, filename: file.filename }}
               />
             ))}
             {ideas.map((related) => (
