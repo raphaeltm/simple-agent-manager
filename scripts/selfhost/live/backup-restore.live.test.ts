@@ -213,7 +213,14 @@ describe.skipIf(!hasDocker && !process.env.CI)(
       const complete = join(root, 'retry-complete-check');
       pullBucket(target, complete);
       expect(tree(complete)).toEqual(tree(seed));
-      expect(tree(target.stateDir)).toEqual({ 'platform-keys.json': PLATFORM_KEYS });
+      const restoredKeys = JSON.parse(tree(target.stateDir)['platform-keys.json']!);
+      expect(restoredKeys).toEqual({
+        ...JSON.parse(PLATFORM_KEYS),
+        SAM_INSTALLATION_ID: expect.stringMatching(/^[a-f0-9]{32}$/),
+      });
+      expect(restoredKeys.SAM_INSTALLATION_ID).not.toBe(
+        JSON.parse(PLATFORM_KEYS).SAM_INSTALLATION_ID
+      );
       expect(existsSync(`${target.stateDir}.restore-progress.json`)).toBe(false);
     });
 
@@ -242,7 +249,14 @@ describe.skipIf(!hasDocker && !process.env.CI)(
       const check = join(root, 'check');
       pullBucket(ctx('s3://fresh/celld', newState), check);
       expect(tree(check)).toEqual(tree(seed));
-      expect(tree(newState)).toEqual({ 'platform-keys.json': PLATFORM_KEYS });
+      const restoredKeys = JSON.parse(tree(newState)['platform-keys.json']!);
+      expect(restoredKeys).toEqual({
+        ...JSON.parse(PLATFORM_KEYS),
+        SAM_INSTALLATION_ID: expect.stringMatching(/^[a-f0-9]{32}$/),
+      });
+      expect(restoredKeys.SAM_INSTALLATION_ID).not.toBe(
+        JSON.parse(PLATFORM_KEYS).SAM_INSTALLATION_ID
+      );
 
       // A second restore into the now non-empty bucket is refused.
       expect(() => runRestore(ctx('s3://fresh/celld', join(root, 'other-state')), dest)).toThrow(

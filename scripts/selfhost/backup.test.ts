@@ -43,7 +43,9 @@ import {
 import { finishRollbackCache, refreshRollbackCacheReceipt } from './backup-recovery';
 import { buildCelldConfig } from './celld-config';
 import { prepareCelldProject, writeCelldConfig } from './celld-project';
+import { runDeploy, runTsx, writeBox } from './deploy-harness';
 import { composeProjectFor, expectedComposeProjectFor, recordInstall } from './install-record';
+import { restoredInstallationId } from './restore-identity';
 
 vi.mock('node:fs', async (importOriginal) => ({
   ...(await importOriginal<typeof import('node:fs')>()),
@@ -588,10 +590,18 @@ describe('runRestore', () => {
     expect(existsSync(`${target.stateDir}.restore-progress.json`)).toBe(true);
     // Simulate a prior interrupted state copy as an exact subset of the same authenticated state.
     mkdirSync(target.stateDir, { mode: 0o700 });
-    writeFileSync(join(target.stateDir, 'platform-keys.json'), PLATFORM_KEYS, { mode: 0o600 });
+    writeFileSync(
+      join(target.stateDir, 'platform-keys.json'),
+      JSON.stringify({ SAM_INSTALLATION_ID: restoredInstallationId(target, 'a'.repeat(32)) }),
+      { mode: 0o600 }
+    );
     runRestore(target, snapshot);
     expect(tree(join(root, 'store/fresh/celld'))).toEqual(tree(join(root, 'store/fleet/celld')));
-    expect(tree(target.stateDir)).toEqual({ 'platform-keys.json': PLATFORM_KEYS });
+    expect(tree(target.stateDir)).toEqual({
+      'platform-keys.json': JSON.stringify({
+        SAM_INSTALLATION_ID: restoredInstallationId(target, 'a'.repeat(32)),
+      }),
+    });
     expect(existsSync(`${target.stateDir}.restore-progress.json`)).toBe(false);
   });
 
@@ -644,7 +654,11 @@ describe('runRestore', () => {
     runBackup(ctx('s3://fleet/celld', join(root, 'state')), snapshot);
     const target = ctx('s3://fresh/celld', join(root, 'new-state'));
     const preKey = composeProjectFor(target.box, target.stateDir);
-    const finalProject = expectedComposeProjectFor(target.box, target.stateDir, 'a'.repeat(32));
+    const finalProject = expectedComposeProjectFor(
+      target.box,
+      target.stateDir,
+      restoredInstallationId(target, 'a'.repeat(32))
+    );
     expect(finalProject).not.toBe(preKey);
     occupiedProject = finalProject;
     targetContainers = 'fixture-final-project-container\n';
@@ -734,6 +748,135 @@ describe('runRestore', () => {
     expect(existsSync(join(root, 'new-state'))).toBe(false);
   });
 
+  it.each(['box', 'shell', 'secrets'] as const)(
+    'refuses a %s installation identity override before target writes',
+    (kind) => {
+      const snapshot = join(root, 'identity-override');
+      runBackup(ctx('s3://fleet/celld', join(root, 'state')), snapshot);
+      const target = ctx('s3://fresh/celld', join(root, 'new-state'));
+      if (kind === 'box') target.box = { ...target.box, SAM_INSTALLATION_ID: 'a'.repeat(32) };
+      else if (kind === 'shell') vi.stubEnv('SAM_INSTALLATION_ID', 'a'.repeat(32));
+      else {
+        const plain = join(root, 'override-plain');
+        decryptBackupTree(snapshot, plain, join(root, 'backup-key'));
+        writeFileSync(join(plain, 'state/secrets.env'), 'SAM_INSTALLATION_ID=' + 'a'.repeat(32), {
+          mode: 0o600,
+        });
+        rmSync(snapshot, { recursive: true });
+        encryptBackupTree(plain, snapshot, join(root, 'backup-key'));
+      }
+      calls = [];
+      expect(() => runRestore(target, snapshot)).toThrow('explicit installation identity override');
+      expect(calls).toHaveLength(0);
+      expect(existsSync(target.stateDir)).toBe(false);
+    }
+  );
+
+  it('fresh restore and real deploy init establish ownership that refuses the source VM at teardown', async () => {
+    rmSync(join(root, 'state/platform-keys.json'));
+    const sourceEnv = writeBox(root);
+    const sourceInit = await runDeploy(sourceEnv, ['--init', '--state-dir', join(root, 'state')]);
+    expect(sourceInit.status, sourceInit.out).toBe(0);
+    const sourceKeys = JSON.parse(readFileSync(join(root, 'state/platform-keys.json'), 'utf8'));
+    mkdirSync(join(root, 'store/fleet/celld/deploy/version'), { recursive: true });
+    writeFileSync(
+      join(root, 'store/fleet/celld/deploy/current.json'),
+      JSON.stringify({ prefix: 'deploy/version' })
+    );
+    writeFileSync(
+      join(root, 'store/fleet/celld/deploy/version/manifest.json'),
+      JSON.stringify({ vars: { SAM_INSTALLATION_ID: sourceKeys.SAM_INSTALLATION_ID } })
+    );
+    mkdirSync(join(root, 'state/project'), { recursive: true });
+    writeFileSync(
+      join(root, 'state/project/wrangler.json'),
+      JSON.stringify({
+        vars: {
+          SAM_INSTALLATION_ID: sourceKeys.SAM_INSTALLATION_ID,
+          ENCRYPTION_KEY: sourceKeys.ENCRYPTION_KEY,
+        },
+      }),
+      { mode: 0o600 }
+    );
+    const snapshot = join(root, 'clone-snapshot');
+    runBackup({ ...ctx('s3://fleet/celld', join(root, 'state')), envFile: sourceEnv }, snapshot);
+    const targetDir = join(root, 'clone');
+    mkdirSync(targetDir);
+    const targetEnv = writeBox(targetDir, [
+      'GCP_PROJECT=sam-test-proj',
+      'CELLD_BUCKET=s3://fresh/celld',
+    ]);
+    const targetState = join(targetDir, '.state');
+    runRestore({ ...ctx('s3://fresh/celld', targetState), envFile: targetEnv }, snapshot);
+    expect(existsSync(join(root, 'store/fresh/celld/deploy/current.json'))).toBe(false);
+    expect(
+      readFileSync(join(root, 'store/fresh/celld/deploy/version/manifest.json'), 'utf8')
+    ).toContain(sourceKeys.SAM_INSTALLATION_ID);
+    expect(inspectBackup(snapshot, 'bucket')).toHaveProperty('deploy/current.json');
+    const cloneKeys = JSON.parse(readFileSync(join(targetState, 'platform-keys.json'), 'utf8'));
+    expect(cloneKeys.SAM_INSTALLATION_ID).not.toBe(sourceKeys.SAM_INSTALLATION_ID);
+    const projectedConfig = JSON.parse(
+      readFileSync(join(targetState, 'project/wrangler.json'), 'utf8')
+    );
+    expect(projectedConfig.vars.SAM_INSTALLATION_ID).toBe(cloneKeys.SAM_INSTALLATION_ID);
+    expect(projectedConfig.vars.ENCRYPTION_KEY).toBe(sourceKeys.ENCRYPTION_KEY);
+    expect({ ...cloneKeys, SAM_INSTALLATION_ID: sourceKeys.SAM_INSTALLATION_ID }).toEqual(
+      sourceKeys
+    );
+    const initialized = await runDeploy(targetEnv, ['--init']);
+    expect(initialized.status, initialized.out).toBe(0);
+    expect(
+      readRecord(join(targetState, 'created-resources.json')).resources.find(
+        (r) => r.kind === 'installation'
+      )?.name
+    ).toBe(cloneKeys.SAM_INSTALLATION_ID);
+    const bin = join(root, 'clone-bin');
+    mkdirSync(bin);
+    const cloudCalls = join(root, 'clone-cloud-calls');
+    const vm = {
+      id: '123456',
+      name: 'sam-source-node',
+      zone: 'projects/sam-test-proj/zones/europe-west1-b',
+      labels: {
+        managed: 'simple-agent-manager',
+        installation: sourceKeys.SAM_INSTALLATION_ID,
+        env: 'selfhost',
+        node: 'node-id',
+      },
+      disks: [],
+      tags: { items: ['sam-agent'] },
+      networkInterfaces: [{ network: 'x/networks/default' }],
+    };
+    writeFileSync(
+      join(bin, 'gcloud'),
+      `#!/usr/bin/env node
+import fs from 'node:fs'; const a=process.argv.slice(2).join(' ');fs.appendFileSync(process.env.CLONE_CALLS,a+'\\n');if(a.startsWith('compute instances list'))console.log(process.env.SOURCE_VM);else if(a.includes('delete'))process.exit(99);else process.exit(98);`,
+      { mode: 0o755 }
+    );
+    writeFileSync(join(bin, 'docker'), '#!/usr/bin/env node\n', { mode: 0o755 });
+    const teardown = await runTsx(
+      resolve(import.meta.dirname, 'teardown.ts'),
+      [
+        '--box-env',
+        targetEnv,
+        '--state-dir',
+        targetState,
+        '--keep-data',
+        '--confirm',
+        'sam.example.com',
+      ],
+      { PATH: `${bin}:${process.env.PATH}`, CLONE_CALLS: cloudCalls, SOURCE_VM: JSON.stringify(vm) }
+    );
+    expect(teardown.status, teardown.out).toBe(1);
+    expect(teardown.out).toContain('installation');
+    expect(existsSync(cloudCalls), teardown.out).toBe(true);
+    expect(readFileSync(cloudCalls, 'utf8')).toContain('compute instances list');
+    expect(readFileSync(cloudCalls, 'utf8')).not.toContain('delete');
+    expect(readFileSync(join(root, 'state/platform-keys.json'), 'utf8')).toContain(
+      sourceKeys.SAM_INSTALLATION_ID
+    );
+  }, 120_000);
+
   it('restores bucket and state into an empty install (round trip)', () => {
     const dest = join(root, 'backups/b1');
     runBackup(ctx('s3://fleet/celld', join(root, 'state')), dest);
@@ -742,7 +885,14 @@ describe('runRestore', () => {
     runRestore(ctx('s3://fresh/celld', newState), dest);
 
     expect(tree(join(root, 'store/fresh/celld'))).toEqual(tree(join(root, 'store/fleet/celld')));
-    expect(tree(newState)).toEqual({ 'platform-keys.json': PLATFORM_KEYS });
+    expect(tree(newState)).toEqual({
+      'platform-keys.json': JSON.stringify({
+        SAM_INSTALLATION_ID: restoredInstallationId(
+          ctx('s3://fresh/celld', newState),
+          'a'.repeat(32)
+        ),
+      }),
+    });
   });
 
   it('refuses a bucket that already holds objects', () => {

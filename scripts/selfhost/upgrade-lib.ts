@@ -34,10 +34,15 @@ import {
 } from './upgrade-migrations.js';
 
 export { composeInputsChanged, composeOverlays } from './upgrade-compose.js';
-import { assertRollbackReady, pendingBackupDirectory } from './upgrade-preflight.js';
+import {
+  assertPendingUpgradeTarget,
+  assertRollbackReady,
+  pendingBackupDirectory,
+  pendingUpgradeTarget,
+} from './upgrade-preflight.js';
 
 const MIGRATIONS_DIR = 'apps/api/src/db/migrations/';
-/** In the state dir while an upgrade has not finished: `{ "from": "<sha>" }`. */
+/** Pending original source/target SHAs and encrypted snapshot path, retained through recovery. */
 export const UPGRADE_PENDING_FILE = 'upgrade-pending.json';
 
 export interface RunResult {
@@ -169,10 +174,14 @@ export async function recoverUpgrade(
   opts: UpgradeOptions
 ): Promise<void> {
   assertOperatorExecution();
+  const pendingPath = join(ctx.stateDir, UPGRADE_PENDING_FILE);
+  const to = existsSync(pendingPath)
+    ? pendingUpgradeTarget(JSON.parse(readFileSync(pendingPath, 'utf8')))
+    : null;
   runRollback(backupContext(ctx), backupDir, from);
   replacePrivateFile(
     join(ctx.stateDir, UPGRADE_PENDING_FILE),
-    `${JSON.stringify({ from, backupDir })}\n`
+    `${JSON.stringify({ from, backupDir, ...(to ? { to } : {}) })}\n`
   );
   check(ctx.run('git', ['checkout', '--detach', from]), 'restore previous checkout');
   check(ctx.run('pnpm', ['install', '--frozen-lockfile']), 'restore previous dependencies');
@@ -392,6 +401,11 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
   // A pending record means the checkout may be ahead of what is deployed: start from the record.
   const from = pendingFrom ?? head;
   const to = resolveUpgradeTarget(git, opts.to);
+  if (pendingFrom !== null)
+    assertPendingUpgradeTarget(
+      JSON.parse(readFileSync(join(ctx.stateDir, UPGRADE_PENDING_FILE), 'utf8')),
+      to
+    );
   if (pendingFrom === null && head === to) {
     ctx.log('already at that ref; nothing to do');
     return {
@@ -454,7 +468,7 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
   const pendingPath = join(ctx.stateDir, UPGRADE_PENDING_FILE);
   if (pendingFrom === null) {
     mkdirSync(ctx.stateDir, { recursive: true, mode: 0o700 });
-    replacePrivateFile(pendingPath, `${JSON.stringify({ from, backupDir })}\n`);
+    replacePrivateFile(pendingPath, `${JSON.stringify({ from, backupDir, to })}\n`);
   }
   const progress: UpgradeProgress = {
     deploymentStarted: false,

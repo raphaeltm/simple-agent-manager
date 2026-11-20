@@ -6,7 +6,7 @@
  * whose build inputs changed (never `up --build`), that interrupted recovery retains its original snapshot for retry, and that
  * the printed rollback selects the same box and matches whether the upgrade carried a D1 migration.
  */
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -280,6 +280,52 @@ describe('runUpgrade', () => {
     expect((await upgrade()).rollback).toEqual([]);
     expect(steps).toEqual(['git fetch --tags origin']);
   });
+
+  it('refuses A-to-C retry after an interrupted A-to-B image rebuild before starting A with B images', async () => {
+    diff = ['deploy/selfhost/caddy/Dockerfile'];
+    failDeploy = true;
+    vi.mocked(runRollback).mockImplementationOnce(() => {
+      throw new Error('interrupted');
+    });
+    await expect(upgrade()).rejects.toThrow(/automatic rollback did not complete/);
+    expect(steps.some((step) => step.includes('build caddy'))).toBe(true);
+    const pending = JSON.parse(readFileSync(join(root, 'state', UPGRADE_PENDING_FILE), 'utf8'));
+    expect(pending.to).toBe(TO);
+    const priorRestores = vi.mocked(runRollback).mock.calls.length;
+    steps = [];
+    const next = ctx();
+    next.run = (command, args, env) =>
+      command === 'git' && args[0] === 'rev-parse' && args[1] !== 'HEAD'
+        ? { status: 0, stdout: 'c'.repeat(40), stderr: '' }
+        : run(command, args, env);
+    await expect(
+      runUpgrade(next, { to: 'release-c', checkHealth: async () => true })
+    ).rejects.toThrow(/target differs/);
+    expect(vi.mocked(runRollback).mock.calls.length).toBe(priorRestores);
+    expect(steps).toEqual(['git fetch --tags origin']);
+    expect(head).toBe(TO);
+  });
+
+  it('retains the original target if snapshot recovery succeeds but old health fails', async () => {
+    failDeploy = true;
+    await expect(upgrade(false)).rejects.toThrow(/automatic rollback did not complete/);
+    const pending = JSON.parse(readFileSync(join(root, 'state', UPGRADE_PENDING_FILE), 'utf8'));
+    expect(pending.to).toBe(TO);
+  });
+
+  it.each([undefined, 'main', 'unknown'])(
+    'refuses legacy or malformed pending target %s before any recovery or checkout',
+    async (to) => {
+      writeFileSync(
+        join(root, 'state', UPGRADE_PENDING_FILE),
+        JSON.stringify({ from: FROM, backupDir: join(root, 'snapshot'), to })
+      );
+      await expect(upgrade()).rejects.toThrow(/target differs or is unrecorded/);
+      expect(runRollback).not.toHaveBeenCalled();
+      expect(steps).toEqual(['git fetch --tags origin']);
+      expect(head).toBe(FROM);
+    }
+  );
 
   it('refuses a pending record it did not write before touching the checkout', async () => {
     writeFileSync(join(root, 'state', UPGRADE_PENDING_FILE), '{"from":"HEAD~1"}\n');

@@ -298,7 +298,14 @@ describe('selfhost:backup and selfhost:restore (real entry points, fake gcloud)'
       expect(restore.stderr).toBe('');
       expect(restore.status).toBe(0);
       expect(tree(join(root, 'gcs/fresh/celld'))).toEqual(afterStop);
-      expect(tree(join(root, 'new-state'))).toEqual({ 'platform-keys.json': PLATFORM_KEYS });
+      const restoredKeys = JSON.parse(tree(join(root, 'new-state'))['platform-keys.json']!);
+      expect(restoredKeys).toEqual({
+        ...JSON.parse(PLATFORM_KEYS),
+        SAM_INSTALLATION_ID: expect.stringMatching(/^[a-f0-9]{32}$/),
+      });
+      expect(restoredKeys.SAM_INSTALLATION_ID).not.toBe(
+        JSON.parse(PLATFORM_KEYS).SAM_INSTALLATION_ID
+      );
     }
   );
 });

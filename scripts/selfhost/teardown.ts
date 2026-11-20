@@ -182,6 +182,8 @@ async function main(): Promise<number> {
   const recordedId = resolved.recordedId;
   const installationId = resolved.id;
   const domain = box.SAM_DOMAIN ?? install?.attributes?.domain ?? '';
+  // A first teardown may remove .env while deliberately keeping keys and their active proof.
+  if (!existsSync(envFile) && domain) box.SAM_DOMAIN = domain;
   if (resolved.problem) log(`node VMs will not be touched: ${resolved.problem}`);
   const gcpProjects = resolveGcpProjects(values['gcp-project'], box.GCP_PROJECT, envFile);
   if (gcpProjects.projects.length > 0) {

@@ -22,6 +22,7 @@ import {
   type CreatedResource,
   readRecord,
 } from '../../deploy/selfhost/created-resources.mjs';
+import { backupOwnership } from './backup-ownership';
 import { assertOperatorExecution } from './operator-only';
 
 export const RECORD_FILE = 'created-resources.json';
@@ -147,7 +148,7 @@ export function recordBackup(stateDir: string, dest: string): void {
     name: dest,
     action: 'created',
     createdBy: 'backup',
-    attributes: {},
+    attributes: backupOwnership(dest),
   });
 }
 

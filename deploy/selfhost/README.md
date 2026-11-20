@@ -145,7 +145,17 @@ backup. This private journal binds the original empty target and authenticated s
 refuses changed, additional, linked or foreign-owned partial files before copying again; do not
 start the target or remove its journal to bypass a refusal. The journal is removed after success.
 It refuses a target project with existing containers, copies state and bucket data, keeps the
-target `.env`, strips the source installation's creation receipts, and does not start celld. On the original SAM ref, run `selfhost:deploy --init`
+target `.env`, strips the source installation's creation receipts, and does not start celld.
+A fresh restore assigns a distinct `SAM_INSTALLATION_ID`, stable for retries of the same target,
+while preserving all cryptographic keys needed to read the restored data. The generated local
+config receives that new ID. Restore omits the source bucket's active `deploy/current.json`
+pointer but retains immutable deployment objects and application data, so starting celld cannot
+execute source Worker code or its Durable Object alarms. Run a fresh deploy before serving the
+restored application; that deploy creates the target's active pointer and Worker identity. Do not set an installation
+ID in the target environment; restore refuses explicit overrides. Source VMs and their ownership
+labels are retained: the replacement must provision its own nodes, and its teardown cannot adopt or
+delete the source fleet. This also applies to disaster recovery; retire surviving source resources
+separately using their original installation records. On the original SAM ref, run `selfhost:deploy --init`
 to retain the restored keys and establish new target ownership receipts. Set the target `.env`'s
 `COMPOSE_PROJECT_NAME` to the canonical project name init prints; the name incorporates the
 persisted installation id, domain and state directory. Repeat init with that setting, then start
@@ -181,8 +191,10 @@ current resource creation/removal receipts survive rollback (`scripts/selfhost/u
 migration.
 
 An unfinished operation retains `.state/upgrade-pending.json` with the previous ref and encrypted
-snapshot path. Keep celld stopped if automatic recovery fails; retain the snapshot and key, and
-retry the same upgrade command to recover the original install before attempting a new upgrade.
+snapshot path and resolved target SHA. Keep celld stopped if automatic recovery fails; retain the
+snapshot and key, and retry the same resolved target to recover the original install. A changed
+`--to`, a moved branch/tag, or an older journal without a target requires the explicit rollback
+command before choosing another target.
 Do not delete the pending record to bypass a failed recovery.
 
 After a successful upgrade, its printed rollback command restores the populated installation

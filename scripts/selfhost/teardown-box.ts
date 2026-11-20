@@ -6,8 +6,9 @@
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 
-import type { CreatedResource } from '../../deploy/selfhost/created-resources.mjs';
+import { type CreatedResource, readRecord } from '../../deploy/selfhost/created-resources.mjs';
 import { type BoxContext, composeArgs, MANIFEST_NAME, parseBucketUrl } from './backup-lib';
+import { assertBackupOwnership } from './backup-ownership';
 import { composeProjectFor, expectedComposeProjectFor, usesBundledStore } from './install-record';
 import { readComposeInventory, removeContainers, stopContainers } from './teardown-compose';
 import { both, type Item, type Mode, STEPS } from './teardown-model';
@@ -205,18 +206,29 @@ function backupPaths(ctx: TeardownContext): Map<string, CreatedResource | undefi
   return paths;
 }
 
+function hasBackupOwnership(path: string, entry?: CreatedResource): boolean {
+  try {
+    assertBackupOwnership(path, entry);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function backupPlan(ctx: TeardownContext, path: string, entry?: CreatedResource): Item['plan'] {
   if (!existsSync(path)) return both({ act: 'keep', why: 'no longer on disk' });
-  if (entry?.action !== 'created' || !isBackupDir(path, ctx)) {
-    return both({
-      act: 'refused',
-      why: `not proven a backup (needs an absolute path, a version-1 ${MANIFEST_NAME}, and not /, home or the checkout)`,
-    });
-  }
+  const kept = { act: 'keep' as const, why: 'keep my data keeps backups' };
+  const removal =
+    !isBackupDir(path, ctx) || !hasBackupOwnership(path, entry)
+      ? {
+          act: 'refused' as const,
+          why: 'backup needs an active creation receipt with matching directory and encrypted inventory identity; legacy or replaced paths are retained',
+        }
+      : { act: 'remove' as const };
   return {
-    'keep-data': { act: 'keep', why: 'keep my data keeps backups' },
+    'keep-data': kept,
     'remove-everything': ctx.options.deleteBackups
-      ? { act: 'remove' }
+      ? removal
       : { act: 'keep', why: 'pass --delete-backups to delete backups' },
   };
 }
@@ -234,7 +246,15 @@ function backupItems(ctx: TeardownContext): Item[] {
       step: STEPS.cleanup,
       plan: backupPlan(ctx, path, entry),
       forGood: 'this backup can never be restored',
-      run: () => rmSync(path, { recursive: true, force: true }),
+      run: () => {
+        const live = readRecord(ctx.recordFile).resources.find(
+          (r) => r.cloud === 'box' && r.kind === 'backup' && r.name === path
+        );
+        if (!isBackupDir(path, ctx) || live?.attributes?.identity !== entry?.attributes?.identity)
+          throw new Error('Refused: backup ownership changed after inventory');
+        assertBackupOwnership(path, live);
+        rmSync(path, { recursive: true, force: true });
+      },
       record: { cloud: 'box', kind: 'backup', name: path, createdBy: 'backup' },
     });
   }

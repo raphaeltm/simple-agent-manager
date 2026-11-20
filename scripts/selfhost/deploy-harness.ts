@@ -47,7 +47,11 @@ export function runTsx(
       ...Object.keys(BOX_RESERVED_PORTS),
     ];
     for (const name of composeNames) delete inherited[name];
-    const child = spawn(TSX, [script, ...args], { env: { ...inherited, ...env } });
+    const child = spawn(
+      TSX,
+      ['--tsconfig', resolve(import.meta.dirname, 'tsconfig.json'), script, ...args],
+      { env: { ...inherited, ...env } }
+    );
     let out = '';
     child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString()));
     child.stderr.on('data', (chunk: Buffer) => (out += chunk.toString()));

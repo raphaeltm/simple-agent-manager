@@ -14,6 +14,7 @@ import {
   runRollback,
 } from './backup-lib';
 import { restoreBackup } from './backup-restore';
+import { projectRestoreIdentity, restoredInstallationId } from './restore-identity';
 import { assertRestoreSubset, restoreProgress } from './restore-progress';
 
 const ROOT = resolve(import.meta.dirname, '../..');
@@ -48,6 +49,8 @@ describe('operator commands never read secret files in CI', () => {
       for (const invoke of [
         () => loadBox(ABSENT),
         () => restoreBackup(context, ABSENT, ABSENT),
+        () => projectRestoreIdentity(context, ABSENT),
+        () => restoredInstallationId(context, ''),
         () => restoreProgress(context, ABSENT),
         () => assertRestoreSubset(ABSENT, ABSENT),
         () => readBackupKey(ABSENT),

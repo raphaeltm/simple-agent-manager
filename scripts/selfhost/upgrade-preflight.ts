@@ -51,3 +51,16 @@ export function pendingBackupDirectory(pending: unknown): string {
   }
   return pending.backupDir;
 }
+
+/** Legacy records cannot prove which image changes an interrupted deployment applied. */
+export function pendingUpgradeTarget(pending: unknown): string | null {
+  if (typeof pending !== 'object' || pending === null || !('to' in pending)) return null;
+  return typeof pending.to === 'string' && /^[a-f0-9]{40}$/.test(pending.to) ? pending.to : null;
+}
+
+export function assertPendingUpgradeTarget(pending: unknown, to: string): void {
+  if (pendingUpgradeTarget(pending) !== to)
+    throw new Error(
+      'Unfinished upgrade target differs or is unrecorded; recover with the explicit rollback command before choosing another target'
+    );
+}

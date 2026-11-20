@@ -90,13 +90,17 @@ export function stateItems(ctx: TeardownContext): Item[] {
       removedAt: state?.removedAt,
       runKey: 'state',
       run: () => clearState(ctx, keepKey),
-      record: [
-        { cloud: 'box', kind: 'state-dir', name: ctx.stateDir, createdBy: 'deploy' },
-        // The install itself is gone with its state; the id stays readable for a resumed run.
-        ...ctx.record
-          .filter((r) => r.cloud === 'box' && r.kind === 'installation')
-          .map((r) => ({ cloud: 'box', kind: 'installation', name: r.name })),
-      ],
+      // Retained keys still need the active state/installation proof for a later --destroy-key.
+      record:
+        keepKey && (existsSync(keyFile) || existsSync(legacyKeys))
+          ? []
+          : [
+              { cloud: 'box', kind: 'state-dir', name: ctx.stateDir, createdBy: 'deploy' },
+              // The install itself is gone with its state; the id stays readable for a resumed run.
+              ...ctx.record
+                .filter((r) => r.cloud === 'box' && r.kind === 'installation')
+                .map((r) => ({ cloud: 'box', kind: 'installation', name: r.name })),
+            ],
     },
     {
       id: 'box:record',
