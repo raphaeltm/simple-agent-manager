@@ -49,7 +49,7 @@ function setup(options: { withTrigger?: boolean } = {}) {
     CREATE TABLE platform_feedback_triages (
       signature TEXT PRIMARY KEY, source TEXT NOT NULL, summary TEXT NOT NULL,
       first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, occurrence_count INTEGER NOT NULL,
-      severity TEXT NOT NULL DEFAULT 'error', evidence_refs TEXT NOT NULL, diagnosis_id TEXT, idea_id TEXT, claim_token TEXT,
+      severity TEXT NOT NULL DEFAULT 'error', evidence_refs TEXT NOT NULL, diagnosis_id TEXT, idea_id TEXT, idea_owned_at TEXT, claim_token TEXT,
       claim_expires_at INTEGER, failure_count INTEGER NOT NULL DEFAULT 0,
       last_failure_reason TEXT, last_failed_at INTEGER, rejected_at INTEGER,
       budget_deferred_until INTEGER, budget_deferred_reason TEXT,

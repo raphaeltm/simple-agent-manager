@@ -45,10 +45,18 @@ function normalizeLegacyMessage(message: string): string {
     .slice(0, PLATFORM_ERROR_MESSAGE_GROUP_MAX_LENGTH);
 }
 
-function normalizeTextTokens(value: string, normalizeQuotedValues = true): string {
-  let normalized = value
-    .toLowerCase()
-    .replace(/https?:\/\/\S+/g, '[url]')
+/**
+ * Replaces variable tokens (ids, urls, numbers, durations, quoted values) with placeholders.
+ * The signature uses the lowercased form; readable titles keep the original case
+ * (`lowercase: false`). Every pattern is case-insensitive, so both forms replace the same tokens.
+ */
+function normalizeTextTokens(
+  value: string,
+  normalizeQuotedValues = true,
+  lowercase = true
+): string {
+  let normalized = (lowercase ? value.toLowerCase() : value)
+    .replace(/https?:\/\/\S+/gi, '[url]')
     .replace(/\b[a-z0-9.!#$%&*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi, '[email]')
     .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[ip]')
     .replace(/\b\d{4}-\d{2}-\d{2}[t ]\d{2}:\d{2}:\d{2}(?:\.\d+)?z?\b/gi, '[timestamp]')
@@ -164,6 +172,47 @@ function normalizeMessage(message: string): string {
   );
 }
 
+/** Idea title cap when `SAM_IDEA_TITLE_MAX_LENGTH` is unset. */
+export const DEFAULT_PLATFORM_FEEDBACK_TRIAGE_IDEA_TITLE_MAX_LENGTH = 200;
+
+/** Longest readable incident summary (idea title, queue summary, triage prompt line). */
+export const DEFAULT_PLATFORM_FEEDBACK_SUMMARY_MAX_LENGTH = 140;
+
+/** The pre-2026-11 summary every machine-grouped incident shared. */
+const LEGACY_GENERIC_SUMMARY = /^Recurring [a-z-]+ platform error$/;
+
+export function isLegacyGenericSummary(summary: string | null | undefined): boolean {
+  return LEGACY_GENERIC_SUMMARY.test(summary ?? '');
+}
+
+/**
+ * The redacted, normalized message in its original case: the same redaction and token
+ * placeholders as the signature, so it never carries ids, urls, emails, numbers or quoted
+ * values. Control characters are dropped because it becomes an idea title.
+ */
+export function displayPlatformErrorMessage(message: string): string {
+  const redacted = String(redactSensitiveData(message));
+  return (
+    normalizeTextTokens(normalizeEmbeddedJson(redacted), true, false)
+      .replace(/[\u0000-\u001f\u007f]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, PLATFORM_ERROR_MESSAGE_GROUP_MAX_LENGTH) || 'redacted platform error'
+  );
+}
+
+/** `<source>: <message>`, bounded, e.g. `api: Failed to destroy max-lifetime node: …`. */
+export function platformErrorSummary(
+  source: string,
+  displayMessage: string,
+  maxLength: number = DEFAULT_PLATFORM_FEEDBACK_SUMMARY_MAX_LENGTH
+): string {
+  // Backticks would open code spans or fences wherever a title is rendered as markdown.
+  const full = `${source}: ${displayMessage.replace(/`+/g, "'")}`;
+  if (full.length <= maxLength) return full;
+  return `${full.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…`;
+}
+
 export function parseStoredEvidenceRefs(
   raw: string,
   evidenceLimit: number
@@ -246,7 +295,6 @@ export async function groupPlatformErrors(
     const { source, key } = platformErrorGroupKey(row.source, row.message);
     const severity = normalizeSeverity(row.level);
     const legacyNormalized = normalizeLegacyMessage(row.message) || 'redacted platform error';
-    const summary = `Recurring ${source} platform error`;
     const legacyKey = `${source}\n${legacyNormalized}`;
     const current = groups.get(key);
     const safeErrorId =
@@ -272,10 +320,12 @@ export async function groupPlatformErrors(
       current.lastSeenAt = Math.max(current.lastSeenAt, row.timestamp);
       if (current.evidence.length < evidenceLimit) current.evidence.push(evidence);
     } else {
+      const message = displayPlatformErrorMessage(row.message);
       groups.set(key, {
         source,
         severity,
-        summary,
+        summary: platformErrorSummary(source, message),
+        message,
         firstSeenAt: row.timestamp,
         lastSeenAt: row.timestamp,
         evidence: [evidence],
@@ -298,25 +348,47 @@ export async function groupPlatformErrors(
     })
   );
 }
-export function ideaDescription(group: FeedbackErrorGroup, diagnosisId: string): string {
+export interface IdeaOccurrenceStats {
+  /** Total occurrences recorded for the incident, across every window. */
+  occurrenceCount: number;
+  firstSeenAt: number;
+  lastSeenAt: number;
+}
+
+/**
+ * The body of an incident's idea. The normalized message and counts are what a reader needs to
+ * decide whether the signature matters; the error ids let an operator pull the raw records.
+ * The message is log-derived, so it stays inside the untrusted evidence block.
+ */
+export function ideaDescription(
+  group: FeedbackErrorGroup,
+  diagnosisId: string,
+  stats: IdeaOccurrenceStats = {
+    occurrenceCount: group.count,
+    firstSeenAt: group.firstSeenAt,
+    lastSeenAt: group.lastSeenAt,
+  }
+): string {
   const refs = group.evidence
     .map((item) => `- ${item.errorId} at ${new Date(item.timestamp).toISOString()}`)
     .join('\n');
 
   return formatUntrustedIdeaContent({
     trustedSummary:
-      'Triage this automated platform feedback report. Raw observability messages were normalized/redacted before grouping; only allowlisted bounded metadata is stored below.',
+      'Automated platform error report, one idea per error signature. Raw observability messages were redacted and normalized (ids, urls, numbers and quoted values replaced) before grouping. Read the incident with get_incident; the incident triage closes this idea when the incident is resolved, rejected or expires.',
     trustedDetails: [
       `Signature ref: ${group.signature.slice(0, 16)}`,
       `Persisted diagnosis ref: ${diagnosisId}`,
-      `Summary: ${group.summary}`,
       `Severity: ${group.severity}`,
+      `Occurrences: ${stats.occurrenceCount}`,
+      `First seen: ${new Date(stats.firstSeenAt).toISOString()}`,
+      `Last seen: ${new Date(stats.lastSeenAt).toISOString()}`,
     ],
-    evidenceLabel: 'Platform Feedback Metadata and Evidence Refs',
+    evidenceLabel: 'Normalized Error Signature and Evidence Refs',
     evidence: [
       `Source: ${group.source}`,
-      `Window: ${new Date(group.firstSeenAt).toISOString()} – ${new Date(group.lastSeenAt).toISOString()}`,
-      `Matching errors in latest window: ${group.count}`,
+      `Normalized message: ${group.message ?? group.summary}`,
+      `Latest window: ${new Date(group.firstSeenAt).toISOString()} – ${new Date(group.lastSeenAt).toISOString()} (${group.count} errors)`,
       '',
       'Bounded evidence references:',
       refs || '- none',

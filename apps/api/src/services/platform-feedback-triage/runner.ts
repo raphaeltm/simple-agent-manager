@@ -17,10 +17,13 @@ import { configuredFeedbackProjectId } from '../platform-feedback-incidents';
 import {
   classifyBudgetBlock,
   groupPlatformErrors,
+  DEFAULT_PLATFORM_FEEDBACK_TRIAGE_IDEA_TITLE_MAX_LENGTH,
   ideaDescription,
+  isLegacyGenericSummary,
   nextUtcDayStart,
   sanitizeFailureReason,
 } from './grouping';
+import { refreshOwnedIdea } from './idea-refresh';
 import { positive } from './numbers';
 import {
   annotateNodeAgentVersions,
@@ -34,8 +37,6 @@ import {
 } from './persistence';
 import { prioritizeFeedbackGroups, shouldReopenExistingTriage } from './prioritization';
 import type { ErrorRow, FeedbackTriageResult, FeedbackTriageTrigger, TriageDeps } from './types';
-
-const DEFAULT_PLATFORM_FEEDBACK_TRIAGE_IDEA_TITLE_MAX_LENGTH = 200;
 
 export async function runPlatformFeedbackTriage(
   env: Env,
@@ -164,7 +165,7 @@ export async function runPlatformFeedbackTriage(
     await env.DATABASE.prepare(
       `UPDATE platform_feedback_triages SET first_seen_at = MIN(first_seen_at, ?),
       last_seen_at = MAX(last_seen_at, ?), occurrence_count = MAX(occurrence_count, ?),
-      evidence_refs = ?,
+      evidence_refs = ?, summary = COALESCE(?, summary),
       severity = CASE WHEN ? = 'error' THEN 'error' ELSE severity END,
       queue_state = CASE
         WHEN rejected_at IS NOT NULL THEN 'rejected'
@@ -185,6 +186,9 @@ export async function runPlatformFeedbackTriage(
         group.lastSeenAt,
         group.count,
         refs,
+        // A group rebuilt from a pre-2026-11 row still carries the generic summary; keep the
+        // stored value rather than writing that back.
+        isLegacyGenericSummary(group.summary) ? null : group.summary,
         group.severity,
         reopenTerminal ? 1 : 0,
         reopenTerminal ? 1 : 0,
@@ -224,23 +228,19 @@ export async function runPlatformFeedbackTriage(
       continue;
     }
     if (existing?.idea_id) {
-      const update = await env.DATABASE.prepare(
-        `UPDATE tasks SET description = ?, updated_at = ?
-        WHERE id = ? AND project_id = ? AND status = 'draft'`
-      )
-        .bind(
-          ideaDescription(group, existing.diagnosis_id ?? 'pending'),
-          new Date(now).toISOString(),
-          existing.idea_id,
-          project.id
-        )
-        .run();
-      if ((update.meta.changes ?? 0) === 1) {
-        result.ideasUpdated += 1;
-      } else {
-        // The triage row remains the bounded diagnosis annotation when the linked Idea was promoted/deleted.
-        result.groupsSkipped += 1;
-      }
+      // One idea per signature: a re-occurrence refreshes the idea the pipeline still owns and
+      // leaves an idea someone has taken up exactly as they left it.
+      const updated = await refreshOwnedIdea(env, {
+        group,
+        signature: group.signature,
+        ideaId: existing.idea_id,
+        projectId: project.id,
+        diagnosisId: existing.diagnosis_id ?? 'pending',
+        ideaTitleMaxLength,
+        writtenAt: new Date(now).toISOString(),
+      });
+      if (updated) result.ideasUpdated += 1;
+      else result.groupsSkipped += 1;
       continue;
     }
     if (existing?.budget_deferred_until && existing.budget_deferred_until > now) {
@@ -324,10 +324,11 @@ export async function runPlatformFeedbackTriage(
           claimToken
         ),
         env.DATABASE.prepare(
-          `UPDATE platform_feedback_triages SET diagnosis_id = ?, idea_id = ?, claim_token = NULL,
-          claim_expires_at = NULL, budget_deferred_until = NULL, budget_deferred_reason = NULL,
-          updated_at = CURRENT_TIMESTAMP WHERE signature = ? AND claim_token = ?`
-        ).bind(diagnosis.id, ideaId, group.signature, claimToken),
+          `UPDATE platform_feedback_triages SET diagnosis_id = ?, idea_id = ?, idea_owned_at = ?,
+          claim_token = NULL, claim_expires_at = NULL, budget_deferred_until = NULL,
+          budget_deferred_reason = NULL, updated_at = CURRENT_TIMESTAMP
+          WHERE signature = ? AND claim_token = ?`
+        ).bind(diagnosis.id, ideaId, isoNow, group.signature, claimToken),
       ]);
       const insertChanges = committed[0]?.meta.changes ?? 0;
       const linkChanges = committed[1]?.meta.changes ?? 0;

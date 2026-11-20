@@ -92,6 +92,10 @@ export const DEFAULT_PLATFORM_FEEDBACK_INCIDENT_TRIGGER_TEMPLATE = [
   '5. Resolve only with structured ship-or-track evidence: fixPrUrl for a merged/open PR, dispatchedTaskId for an implementation task, or linkedRecordId for an existing Idea/task. Never resolve by citing a local branch, unpushed commit, or code changed in this triage session.',
   '',
   'Use resolve_incident with outcome "rejected" only for expected behavior, duplicates that should not be fixed, or intentionally declined work; include the justification in note. Do not post machine-generated diagnostic or feedback content to public GitHub issues.',
+  '',
+  'If you cannot classify an incident with the available evidence, leave it claimed and say why in your summary; its claim expires and it returns to the queue.',
+  '',
+  'Always finish the run by calling complete_task with a short summary of each incident\'s outcome, including any you left claimed. This trigger runs one triage at a time, so a run that ends without complete_task blocks every later run until it is cancelled.',
 ].join('\n');
 
 /** Default max generated title length. Override via TASK_TITLE_MAX_LENGTH env var. */

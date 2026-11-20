@@ -35,6 +35,8 @@ export interface FeedbackErrorGroup {
   source: string;
   severity: FeedbackSeverity;
   summary: string;
+  /** Redacted, normalized message in original case; absent for groups rebuilt from storage. */
+  message?: string;
   firstSeenAt: number;
   lastSeenAt: number;
   evidence: FeedbackErrorEvidence[];
