@@ -12,11 +12,11 @@
  * Any failure answers 401 with a Basic challenge (git then reports "Authentication failed"),
  * without saying which check failed.
  */
-import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { projectRoleHasCapability } from '../../middleware/project-auth';
-import { nodeStatusTerminatesCallbacks } from '../node-callback-auth';
-import { WORKSPACE_CALLBACK_ACTIVE_STATUSES } from '../workspace-callback-identity';
+import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
+import { WORKSPACE_CALLBACK_ACTIVE_STATUSES } from '../../services/workspace-callback-identity';
+import type { HostedGitEnv as Env } from './env';
 import { type HostedGitTokenClaims, isHostedGitRepoName, verifyHostedGitToken } from './tokens';
 
 export const HOSTED_GIT_PATH_PREFIX = '/git/';

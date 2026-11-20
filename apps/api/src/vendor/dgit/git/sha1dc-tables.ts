@@ -1,5 +1,5 @@
-// @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 /* eslint-disable */
+// @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 // GENERATED — do not edit by hand.
 // Transcribed from sha1collisiondetection/lib/ubc_check.c (Marc Stevens, Dan
 // Shumow; MIT). Regenerate with scripts/gen-sha1dc-tables.mjs.

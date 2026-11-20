@@ -36,9 +36,9 @@ export { SandboxDO } from './durable-objects/sandbox-do';
 export { VmAgentContainer } from './durable-objects/vm-agent-container';
 export type { Env } from './env';
 
+import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
-import { app } from './app';
 import type { Env } from './env';
 import { applyCacheHeaders } from './lib/cache-headers';
 import { withRequestScopedD1Bindings } from './lib/d1-session';
@@ -190,6 +190,8 @@ import { handleInboundAgentEmail } from './services/agent-email/inbound';
 import { agentEmailConfig } from './services/agent-email/setup-state';
 import { isAgentSignInEnabled } from './services/agent-sign-in/config';
 import { isInstantRuntimeAvailable } from './services/vm-agent-container';
+
+export const app = new Hono<{ Bindings: Env }>();
 
 // Global error handler — catches errors from all routes including subrouters.
 // Must use app.onError() instead of middleware try/catch because Hono's

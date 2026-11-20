@@ -1,5 +1,6 @@
-// @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 /* eslint-disable */
+// @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
+import { gitWorkLimits } from "./budget";
 import { concat, te, sha1hex } from "./util";
 import { deflate, inflate } from "./zlib";
 import { ObjType } from "./objects";
@@ -33,6 +34,8 @@ const CACHE_BUDGET = typeof caches !== "undefined" ? 16 * 1024 * 1024 : 128 * 10
 export class GitStore {
   readonly packs: PackStore;
   readonly cache = new ObjCache(CACHE_BUDGET);
+  /** SAM: bumped by each saveReachable; only the latest save may keep writing or stamp. */
+  private reachableSaveGeneration = 0;
   /**
    * Whether the loose `objects` table holds anything. A pushed repo is
    * pack-native — loose objects only appear after a gc migration (see
@@ -78,9 +81,6 @@ export class GitStore {
         data TEXT NOT NULL,
         PRIMARY KEY (tip_oid, period)
       );
-      CREATE TABLE IF NOT EXISTS push_edges (
-        child TEXT NOT NULL
-      );
     `);
     const flag = this.getMeta("has-loose");
     if (flag === null) {
@@ -115,6 +115,10 @@ export class GitStore {
       .exec<{ type: ObjType; size: number }>("SELECT type, size FROM objects WHERE oid = ?", oid)
       .toArray();
     if (!rows.length) return null;
+    const size = rows[0].size;
+    if (!Number.isSafeInteger(size) || size < 0 || size > gitWorkLimits().maxObjectBytes) {
+      throw new Error("git object exceeds inflated size limit");
+    }
     const chunks = this.sql
       .exec<{ data: ArrayBuffer }>("SELECT data FROM chunks WHERE oid = ? ORDER BY seq", oid)
       .toArray();
@@ -155,57 +159,6 @@ export class GitStore {
     return this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM objects").one().n + this.packs.countObjects();
   }
 
-  // --- push connectivity ---------------------------------------------------
-  // Connectivity of a fresh push is checked in SQL, not by an in-memory graph
-  // walk: the pushed pack must be complete, i.e. every object it introduces
-  // must have its referenced children in `pack_objects` ∪ `objects`. Children
-  // are staged into `push_edges` in bounded batches and each batch is
-  // anti-joined against the stores, so the check costs O(batch) rows of scratch
-  // rather than an OidSet that scales with the object count.
-
-  /** A page of a pack's non-blob oids after `after` (keyset, so the scan holds
-   * one page, never the whole pack). Empty array ends the walk. */
-  packNonBlobOidsAfter(packId: number, after: string, limit: number): string[] {
-    return this.sql
-      .exec<{ oid: string }>(
-        "SELECT oid FROM pack_objects WHERE pack_id = ? AND type != 'blob' AND oid > ? ORDER BY oid LIMIT ?",
-        packId,
-        after,
-        limit,
-      )
-      .toArray()
-      .map((r) => r.oid);
-  }
-
-  resetPushEdges(): void {
-    this.sql.exec("DELETE FROM push_edges");
-  }
-
-  /** Stage referenced child oids, chunked under the DO's ~100 bound-variable
-   * statement cap. */
-  addPushEdges(children: string[]): void {
-    for (let i = 0; i < children.length; i += 64) {
-      const batch = children.slice(i, i + 64);
-      const values = batch.map(() => "(?)").join(",");
-      this.sql.exec(`INSERT INTO push_edges (child) VALUES ${values}`, ...batch);
-    }
-  }
-
-  /** The first staged child absent from both stores, or null when every staged
-   * child is present. SQLite runs the membership test over its own indexes, so
-   * no oid set is built in the isolate. */
-  firstMissingPushEdge(): string | null {
-    const rows = this.sql
-      .exec<{ child: string }>(
-        `SELECT e.child FROM push_edges e
-         WHERE NOT EXISTS (SELECT 1 FROM pack_objects p WHERE p.oid = e.child)
-           AND NOT EXISTS (SELECT 1 FROM objects o WHERE o.oid = e.child)
-         LIMIT 1`,
-      )
-      .toArray();
-    return rows.length ? rows[0].child : null;
-  }
-
   /** Resolve an abbreviated oid; null if unknown or ambiguous. */
   findOid(prefix: string): string | null {
     if (!/^[0-9a-f]{4,40}$/.test(prefix)) return null;
@@ -233,9 +186,13 @@ export class GitStore {
   }
 
   wipe(): void {
-    for (const t of ["objects", "chunks", "refs", "meta", "reachable", "peeled", "stats_cache"]) {
-      this.sql.exec(`DROP TABLE IF EXISTS ${t}`);
-    }
+    this.sql.exec("DROP TABLE IF EXISTS objects");
+    this.sql.exec("DROP TABLE IF EXISTS chunks");
+    this.sql.exec("DROP TABLE IF EXISTS refs");
+    this.sql.exec("DROP TABLE IF EXISTS meta");
+    this.sql.exec("DROP TABLE IF EXISTS reachable");
+    this.sql.exec("DROP TABLE IF EXISTS peeled");
+    this.sql.exec("DROP TABLE IF EXISTS stats_cache");
     this.packs.wipe();
     // meta (with the flag) is gone; a fresh empty repo has no loose objects
     this.hasLoose = false;
@@ -372,18 +329,31 @@ export class GitStore {
    * landing during a cold clone) the version guard abandons the stamp, leaving
    * the half-written table unversioned and thus ignored until it is rebuilt.
    */
-  async saveReachable(set: OidSet): Promise<void> {
-    const version = this.reachableVersion();
+  async saveReachable(set: OidSet, version: string = this.reachableVersion()): Promise<void> {
+    // SAM: `version` is the ref version the walk that built `set` started from.
+    // A push that moved refs during that walk (the walk yields) makes `set`
+    // describe old refs; stamping it with the new version would let a stranded,
+    // later-collected object pass for reachable.
+    if (this.reachableVersion() !== version) return;
+    // Single-flight: a later save's DELETE wipes this one's rows, so a superseded
+    // save must neither keep inserting nor stamp what is left.
+    const generation = ++this.reachableSaveGeneration;
+    const current = () => this.reachableSaveGeneration === generation && this.reachableVersion() === version;
+    // Unstamp before rewriting: while this rewrite yields, a stamp left from an earlier
+    // save would present the partial table as the whole reachable set, and a push in the
+    // window would extend that partial table and re-stamp it valid.
+    this.setMeta("reachable-version", "");
     this.sql.exec("DELETE FROM reachable");
     const n = set.markedSize;
     for (let i = 0; i < n; i++) {
       this.sql.exec("INSERT OR IGNORE INTO reachable (oid) VALUES (?)", set.markedAtHex(i));
       if ((i & 8191) === 8191) {
-        if (this.reachableVersion() !== version) return;
+        if (!current()) return;
         await new Promise((r) => setTimeout(r, 0));
+        if (!current()) return;
       }
     }
-    if (this.reachableVersion() !== version) return;
+    if (!current()) return;
     this.setMeta("reachable-version", version);
   }
 

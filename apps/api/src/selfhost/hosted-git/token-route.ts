@@ -11,16 +11,19 @@ import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
 import * as schema from '../../db/schema';
-import type { Env } from '../../env';
-import { getUserId } from '../../middleware/auth';
+import { assertNotAgentSignInSession, getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
-import { hostedGitHost, isLocalHostedGitActive } from '../../services/hosted-git/local-backend';
-import { mintHostedGitToken } from '../../services/hosted-git/tokens';
+import type { HostedGitEnv as Env } from './env';
+import { hostedGitHost, isLocalHostedGitActive } from './local-backend';
+import { mintHostedGitToken } from './tokens';
 
 const hostedGitTokenRoutes = new Hono<{ Bindings: Env }>();
 
 hostedGitTokenRoutes.post('/:id/hosted-git/token', async (c) => {
+  // A personal clone/push credential outlives the session that mints it, so an agent sign-in
+  // session (hard-expiring, workload identity) may not create one.
+  assertNotAgentSignInSession(c);
   const userId = getUserId(c);
   const projectId = c.req.param('id');
   const scope = c.req.query('scope') === 'write' ? 'write' : 'read';
@@ -42,6 +45,9 @@ hostedGitTokenRoutes.post('/:id/hosted-git/token', async (c) => {
     repo: project.artifactsRepoId,
     scope,
     userId,
+    // The same operator setting that bounds workspace and browsing credentials; an absent or
+    // invalid value falls back to the default inside clampHostedGitTokenTtl.
+    ttlSeconds: Number.parseInt(c.env.ARTIFACTS_TOKEN_TTL_SECONDS ?? '', 10),
   });
   return c.json({
     cloneUrl: project.repository,

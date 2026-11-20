@@ -4,9 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { runtimeRoutes } from '../../../src/routes/workspaces/runtime';
+import { registerArtifactsBackendFallback } from '../../../src/services/artifacts/backend';
 import { getInstallationToken } from '../../../src/services/github-app';
 import { GitHubCliPolicyError } from '../../../src/services/github-cli-policy';
-import { registerArtifactsBackendFallback } from '../../../src/services/hosted-git/backend';
 
 const mocks = vi.hoisted(() => ({
   getInstallationToken: vi.fn(),

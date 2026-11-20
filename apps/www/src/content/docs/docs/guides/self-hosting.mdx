@@ -866,7 +866,11 @@ Notes:
 
 ### Signup approval
 
-When signup approval is on (`REQUIRE_APPROVAL`, or the runtime switch in **Admin → Users**), new accounts are created **pending** (the very first is promoted to an active superadmin when its first session starts) and stay pending until a superadmin approves them there. Accounts created while approval was off stay active. A pending account can sign in, see that it is waiting for approval, sign out, and link its own GitHub App installation. SAM's features answer `403 APPROVAL_REQUIRED` until the account is approved, including the SAM and project agent chats, API token management, every project route, and browser-session workspace access. This also applies to pending accounts that already own resources when approval is turned on. Admins and superadmins are never held for approval, and suspended accounts are refused on authenticated account surfaces. Publicly published workspace ports and valid port-access links use their own anonymous or capability access model.
+Signup approval is **on by default**. To let new accounts in without approval, turn it off with the switch in **Admin → Users**, or set the `REQUIRE_APPROVAL` GitHub Environment variable to `false`; the switch overrides the variable (`getSignupApprovalConfig`, `apps/api/src/services/signup-approval.ts`). Any value other than `false`, including unset, keeps approval on.
+
+**Upgrading:** before November 2026, approval was off unless `REQUIRE_APPROVAL` was `true`. An installation that never set the variable and never used the switch now creates new accounts as pending. Existing accounts are unchanged.
+
+When signup approval is on, new accounts are created **pending** (the very first is promoted to an active superadmin when its first session starts) and stay pending until a superadmin approves them there. Accounts created while approval was off stay active. A pending account can sign in, see that it is waiting for approval, sign out, and link its own GitHub App installation. SAM's features answer `403 APPROVAL_REQUIRED` until the account is approved, including the SAM and project agent chats, API token management, every project route, and browser-session workspace access. This also applies to pending accounts that already own resources when approval is turned on. Admins and superadmins are never held for approval, and suspended accounts are refused on authenticated account surfaces. Publicly published workspace ports and valid port-access links use their own anonymous or capability access model.
 
 ### Storage and archive circuit breakers
 

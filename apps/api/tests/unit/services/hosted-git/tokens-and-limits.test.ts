@@ -1,29 +1,28 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Env } from '../../../../src/env';
-import {
-  isArtifactsAvailable,
-  registerArtifactsBackendFallback,
-  resolveArtifactsBackend,
-} from '../../../../src/services/hosted-git/backend';
-import { parseHostedGitPath } from '../../../../src/services/hosted-git/http';
-import { parseHostedGitImportUrl } from '../../../../src/services/hosted-git/import';
+import type { HostedGitEnv as Env } from '../../../../src/selfhost/hosted-git/env';
+import { parseHostedGitPath } from '../../../../src/selfhost/hosted-git/http';
 import {
   DEFAULT_HOSTED_GIT_LIMITS,
   hostedGitPushByteBudget,
   hostedGitPushRefusal,
-} from '../../../../src/services/hosted-git/limits';
+} from '../../../../src/selfhost/hosted-git/limits';
 import {
   createDurableObjectArtifactsBackend,
   isLocalHostedGitActive,
   localHostedGitBackendFallback,
-} from '../../../../src/services/hosted-git/local-backend';
+} from '../../../../src/selfhost/hosted-git/local-backend';
 import {
   clampHostedGitTokenTtl,
   MAX_HOSTED_GIT_TOKEN_TTL_SECONDS,
   mintHostedGitToken,
   verifyHostedGitToken,
-} from '../../../../src/services/hosted-git/tokens';
+} from '../../../../src/selfhost/hosted-git/tokens';
+import {
+  isArtifactsAvailable,
+  registerArtifactsBackendFallback,
+  resolveArtifactsBackend,
+} from '../../../../src/services/artifacts/backend';
 
 const env = { ENCRYPTION_KEY: 'test-encryption-key-for-hosted-git' };
 const otherEnv = { ENCRYPTION_KEY: 'a-different-installation-key' };
@@ -174,28 +173,30 @@ describe('backend resolution', () => {
   });
 });
 
-describe('import URL allowlist', () => {
-  it('accepts public forge https URLs and normalizes the host', () => {
-    expect(parseHostedGitImportUrl('https://GitHub.com/owner/repo.git')).toBe(
-      'https://github.com/owner/repo.git'
-    );
-    expect(parseHostedGitImportUrl('https://codeberg.org/owner/repo')).toBe(
-      'https://codeberg.org/owner/repo'
-    );
-  });
-
-  it.each([
-    'http://github.com/o/r.git',
-    'https://127.0.0.1/o/r.git',
-    'https://[::1]/o/r.git',
-    'https://169.254.169.254/latest/meta-data',
-    'https://metadata.google.internal/x',
-    'https://github.com:22/o/r.git',
-    'https://u:p@github.com/o/r.git',
-    'https://github.com.evil.example/o/r.git',
-    'https://github.com/o/r.git?x=1',
-    'not a url',
-  ])('rejects %s', (url) => {
-    expect(() => parseHostedGitImportUrl(url)).toThrow();
+describe('workspace identity through the generic backend seam', () => {
+  it('binds a repository credential to its user and current workspace generation', async () => {
+    const backend = createDurableObjectArtifactsBackend({
+      ...env,
+      BASE_DOMAIN: 'example.test',
+      HOSTED_GIT_BACKEND: 'durable-object',
+      HOSTED_GIT: {
+        idFromName: (name: string) => name,
+        get: () => ({ fetch: async () => Response.json({ head: 'refs/heads/main' }) }),
+      },
+    } as unknown as Env);
+    const repo = await backend.get('demo-01abc');
+    const result = await repo.createToken('write', 60, {
+      userId: 'u1',
+      workspaceId: 'w1',
+      callbackGeneration: 'g2',
+    });
+    const claims = await verifyHostedGitToken(env, result.plaintext);
+    expect(claims).toMatchObject({
+      repo: 'demo-01abc',
+      scope: 'write',
+      userId: 'u1',
+      workspaceId: 'w1',
+      callbackGeneration: 'g2',
+    });
   });
 });

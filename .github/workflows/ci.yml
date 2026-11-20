@@ -54,7 +54,6 @@ jobs:
     outputs:
       api: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.api }}
       api-unit: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.api-unit }}
-      hosted-git: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.hosted-git }}
       web: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.web }}
       public-site: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.public-site }}
       packages: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.packages }}
@@ -117,8 +116,6 @@ jobs:
             # ci-suite-selection.test.ts scans the tests and their imports for these.
             api-unit:
               - *api
-              - 'scripts/selfhost/**'
-              - 'deploy/selfhost/**'
               # Go sources, Makefile and `go test` runs in cross-boundary contract tests.
               - 'packages/vm-agent/**'
               # Omitted-worker-var defaults scan the tail worker's sources.
@@ -140,19 +137,8 @@ jobs:
               - 'scripts/deploy/durable-object-migrations.ts'
               - 'scripts/deploy/types.ts'
               - 'scripts/deploy/vapid-keys.ts'
-              # Self-host build tests import the celld generator, presign vars, SMTP settings and
-              # account SQL: these modules plus the scripts/selfhost modules they import. The
-              # transitive ones are listed by hand: ci-suite-selection.test.ts checks the direct
-              # imports but does not follow `./x.js` specifiers to `x.ts`.
-              - 'scripts/selfhost/account-sql.ts'
-              - 'scripts/selfhost/box-settings.ts'
-              - 'scripts/selfhost/celld-config.ts'
-              - 'scripts/selfhost/celld-project.ts'
-              - 'scripts/selfhost/mail-settings.ts'
-              - 'scripts/selfhost/observability-migrations.ts'
-              - 'scripts/selfhost/reverse-tunnel-migrations.ts'
-              - 'scripts/selfhost/secret-files.ts'
-              - 'scripts/selfhost/selfhost-migrations.ts'
+              # API build/conformance tests import the celld generator and its helpers.
+              - 'scripts/selfhost/**'
               # selfhost-inbound-email.test.ts builds this receiver (Self-host Email job only).
               - 'deploy/selfhost/sam-mx/**'
               # The self-host access-log redaction guard scans the API routes against this filter.
@@ -167,11 +153,6 @@ jobs:
               - 'tests/fixtures/deploy-release/**'
               - 'tests/fixtures/durable-execution-protocol-v1.json'
               - 'tests/fixtures/session-snapshot-restore-transcript-only-v1.json'
-            # The conformance suite also builds the self-host entry/configuration.
-            hosted-git:
-              - *api
-              - 'scripts/selfhost/**'
-              - 'deploy/selfhost/**'
             web:
               - *workspace-root
               - 'apps/web/**'
@@ -596,6 +577,11 @@ jobs:
           --coverage --coverage.reporter=text-summary
           --coverage.thresholds.statements=0 --coverage.thresholds.branches=0
           --coverage.thresholds.functions=0 --coverage.thresholds.lines=0
+
+      # One shard owns the real-git suite; the dedicated config launches its own runtime.
+      - name: Hosted git conformance and celld bundle
+        if: matrix.shard == 1
+        run: pnpm --filter @simple-agent-manager/api test:hosted-git
 
       - name: Upload API blob report
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -1160,7 +1146,6 @@ jobs:
       - code-quality
       - go-vulnerability-diff
       - durable-object-worker-shards
-      - hosted-git
       - pulumi-infra
       - vm-agent-test
       - selfhost-email
@@ -1199,35 +1184,6 @@ jobs:
             exit 1
           fi
           echo "Every CI job passed or was skipped by its path filter."
-
-  # SAM-hosted git exists only in the self-host build: the real git CLI against the HostedGitRepo
-  # Durable Object in Miniflare (apps/api/vitest.hosted-git.config.ts). Gated on the whole API
-  # dependency closure because the route's auth path reaches shared modules (project auth,
-  # workspace callback identity, node callback auth), plus the self-host entry/configuration.
-  hosted-git:
-    name: Hosted git conformance (self-host)
-    needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.hosted-git == 'true'
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build the API Worker's workspace dependencies
-        run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...
-
-      - name: Run hosted git conformance tests
-        run: pnpm --filter @simple-agent-manager/api test:hosted-git
 
   pulumi-infra:
     name: Pulumi Infrastructure Tests

@@ -94,7 +94,8 @@
     },
     "@types/pako": {
       "registryUrl": "https://www.npmjs.com/package/@types/pako",
-      "necessity": "Type declarations for pako, used by the vendored dgit git core."
+      "homepageUrl": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/pako",
+      "necessity": "Type declarations for the pako incremental compression API used by the self-host git engine and its resource-boundary tests."
     },
     "@typescript-eslint/eslint-plugin": {
       "registryUrl": "https://www.npmjs.com/package/@typescript-eslint/eslint-plugin",
@@ -183,7 +184,7 @@
     "pako": {
       "registryUrl": "https://www.npmjs.com/package/pako",
       "homepageUrl": "https://github.com/nodeca/pako",
-      "necessity": "zlib inflate/deflate for the vendored dgit git core behind SAM-hosted repositories (apps/api/src/vendor/dgit); git packs and loose objects are zlib streams and Workers have no synchronous zlib."
+      "necessity": "Incremental zlib Inflate callbacks let the self-host-only git engine enforce output budgets before retaining decompressed objects; native one-shot decompression cannot apply those bounds. Excluded from the Cloudflare import graph."
     },
     "postal-mime": {
       "registryUrl": "https://www.npmjs.com/package/postal-mime",

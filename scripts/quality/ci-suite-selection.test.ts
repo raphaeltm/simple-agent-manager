@@ -28,21 +28,6 @@ import { workflowSource } from './workflow-test-helpers';
 const REPO_ROOT = join(__dirname, '..', '..');
 const SCOPE = '@simple-agent-manager/';
 
-// CI checks out tracked inputs. Local build outputs and screenshot scratch files must
-// never change the dependency scan or require broader CI filters.
-const tracked = spawnSync('git', ['ls-files', '-z'], { cwd: REPO_ROOT, encoding: 'utf8' });
-if (tracked.status !== 0) throw new Error(`Cannot list tracked CI inputs: ${tracked.stderr}`);
-const TRACKED_FILES = new Set(tracked.stdout.split('\0').filter(Boolean));
-const TRACKED_DIRS = new Set<string>();
-for (const file of TRACKED_FILES) {
-  for (let dir = dirname(file); dir !== '.'; dir = dirname(dir)) TRACKED_DIRS.add(dir);
-}
-
-function isTrackedInput(path: string): boolean {
-  const repoPath = relative(REPO_ROOT, path);
-  return TRACKED_FILES.has(repoPath) || TRACKED_DIRS.has(repoPath);
-}
-
 /** Root files every package's tests read (lockfile, workspace, TypeScript and Vitest bases). */
 const ROOT_INPUTS = [
   'package.json',
@@ -237,34 +222,6 @@ function suitesFor(paths: string[], eventName: Scenario['eventName'] = 'pull_req
 }
 
 describe('glob matcher (sanity, so coverage checks cannot pass vacuously)', () => {
-  it.each(['scripts/selfhost/celld-config.ts', 'deploy/selfhost/key-agent/server.ts'])(
-    '%s selects API unit and hosted-git checks without the Workers suite',
-    (path) => {
-      const results = simulate({ eventName: 'pull_request', filters: filtersFor([path]) });
-      expect(results.get('test-api')).toBe('success');
-      expect(results.get('hosted-git')).toBe('success');
-      expect(results.get('durable-object-worker-shards')).toBe('skipped');
-    }
-  );
-
-  it('lineage-only web contracts do not select hosted-git conformance', () => {
-    const results = simulate({
-      eventName: 'pull_request',
-      filters: filtersFor(['apps/web/src/pages/project-chat/lineageUtils.ts']),
-    });
-    expect(results.get('test-api')).toBe('success');
-    expect(results.get('hosted-git')).toBe('skipped');
-  });
-
-  it('scans tracked input files and directories, excluding generated and scratch paths', () => {
-    expect(isTrackedInput(join(REPO_ROOT, 'apps/api/src/index.ts'))).toBe(true);
-    expect(isTrackedInput(join(REPO_ROOT, 'apps/api/src'))).toBe(true);
-    for (const path of ['node_modules', '.codex/tmp/playwright-screenshots', '.tmp',
-      'apps/www/public/scripts/blog-mermaid.js', 'apps/www/public/scripts/docs-mermaid.js']) {
-      expect(isTrackedInput(join(REPO_ROOT, path)), path).toBe(false);
-    }
-  });
-
   it.each([
     ['apps/api/**', 'apps/api/src/index.ts', true],
     ['apps/api/**', 'apps/api-x/src/index.ts', false],
@@ -352,9 +309,9 @@ function resolveExisting(candidate: string, imported = false): string | undefine
   const indexes = imported ? ['/index.ts', '/index.tsx'] : [];
   for (const suffix of ['', '.ts', '.tsx', '.mjs', '.js', '.json', ...indexes]) {
     const path = `${candidate}${suffix}`;
-    if (isTrackedInput(path) && existsSync(path) && (suffix !== '' || statSync(path).isFile())) return path;
+    if (existsSync(path) && (suffix !== '' || statSync(path).isFile())) return path;
   }
-  return isTrackedInput(candidate) && existsSync(candidate) ? candidate : undefined;
+  return existsSync(candidate) ? candidate : undefined;
 }
 
 const CODE_FILE = /\.(?:[cm]?[jt]sx?|astro)$/u;
@@ -418,9 +375,9 @@ function crossReads(
   const walk = (current: string) => {
     if (!existsSync(current)) return;
     for (const entry of readdirSync(current)) {
-      if (['node_modules', 'dist', '.astro', 'coverage', 'test-results'].includes(entry)) continue;
+      if (['node_modules', 'dist', '.astro', '.tmp', 'coverage', 'test-results'].includes(entry))
+        continue;
       const full = join(current, entry);
-      if (!isTrackedInput(full)) continue;
       if (statSync(full).isDirectory()) walk(full);
       else if (CODE_FILE.test(entry)) queue.push(full);
     }
@@ -433,6 +390,8 @@ function crossReads(
     for (const { path, imported } of references(file)) {
       const repoPath = relative(REPO_ROOT, path);
       if (repoPath === '' || repoPath.startsWith('..')) continue;
+      // Generated scratch is output, never a checked-in suite input.
+      if (repoPath === '.tmp' || repoPath.startsWith('.tmp/')) continue;
       if (repoPath.startsWith(`${scanned}/`)) {
         if (imported && CODE_FILE.test(path) && statSync(path).isFile() && !seen.has(path)) {
           seen.add(path);
@@ -464,6 +423,18 @@ function suiteReads(suite: (typeof SUITES)[number]): Array<{ file: string; path:
 }
 
 describe('every file a suite reads outside its package is in its filter', () => {
+  it('runs real git through its dedicated config exactly once in the selected API matrix', () => {
+    const job = loadWorkflow().jobs['test-api']!;
+    const step = job.steps!.find(
+      (entry) => entry.name === 'Hosted git conformance and celld bundle'
+    )!;
+    expect(job.if).toContain("needs.changes.outputs.api-unit == 'true'");
+    expect(step.if).toBe('matrix.shard == 1');
+    expect(step.run).toBe('pnpm --filter @simple-agent-manager/api test:hosted-git');
+    const buildIndex = job.steps!.findIndex((entry) => entry.name === 'Build API dependencies');
+    expect(buildIndex).toBeGreaterThanOrEqual(0);
+    expect(job.steps!.findIndex((entry) => entry === step)).toBeGreaterThan(buildIndex);
+  });
   it.each(SUITES.map((suite) => [suite.output, suite] as const))(
     '%s',
     (_, suite) => {
@@ -496,6 +467,8 @@ describe('every file a suite reads outside its package is in its filter', () => 
     );
     expect(apiReads.some((path) => path.startsWith('packages/vm-agent/'))).toBe(true);
     expect(apiReads).toContain('apps/tail-worker/src/x');
+    expect(apiReads.some((path) => path === '.tmp' || path.startsWith('.tmp/'))).toBe(false);
+    expect(apiReads).toContain('scripts/selfhost/celld-binary.ts');
     // Reached only by following a web module's own imports (lineage test -> useTaskGroups).
     expect(apiReads).toContain('apps/web/src/lib/api/client.ts');
     // Without the vm-agent extra the API unit filter would miss them.
@@ -670,10 +643,10 @@ describe('runner budget (jobs a ready PR starts)', () => {
     jobCount(simulate({ eventName: 'pull_request', filters: filtersFor(paths) }));
 
   it.each([
-    ['API only', ['apps/api/src/index.ts'], 20],
+    ['API only', ['apps/api/src/index.ts'], 19],
     ['web only', ['apps/web/src/App.tsx'], 11],
-    ['shared package', ['packages/shared/src/index.ts'], 23],
-    ['lockfile', ['pnpm-lock.yaml'], 23],
+    ['shared package', ['packages/shared/src/index.ts'], 22],
+    ['lockfile', ['pnpm-lock.yaml'], 22],
     ['public site or docs', ['apps/www/src/content/docs/docs/index.mdx'], 7],
   ])('a ready %s PR starts the recorded number of jobs', (_, paths, expected) => {
     expect(count(paths)).toBe(expected);
@@ -686,8 +659,7 @@ describe('runner budget (jobs a ready PR starts)', () => {
   // Realistic multi-area PRs, with their limits. The four-area shape of baseline run
   // 43734352275 is above 26: 23 before, 27 now. The seventh Workers shard
   // is what brings an API PR to about 10 min, since the Workers shards run alongside the
-  // 8.4 min Test api shards. Self-host integration adds one hosted-git conformance
-  // job to API-affected changes; web-only and public-site-only budgets stay unchanged.
+  // 8.4 min Test api shards.
   it.each([
     [
       'API, web, VM agent and docs',
@@ -697,12 +669,12 @@ describe('runner budget (jobs a ready PR starts)', () => {
         'packages/vm-agent/main.go',
         'apps/www/src/content/docs/docs/index.mdx',
       ],
-      28,
+      27,
     ],
     [
       'shared package and VM agent',
       ['packages/shared/src/index.ts', 'packages/vm-agent/main.go'],
-      26,
+      25,
     ],
     // 27: packages/vm-agent/go.mod also starts Validate Deploy Scripts, whose
     // vm-agent-artifacts.test.ts pins the Go build image to the go directive (a real Go
@@ -717,12 +689,11 @@ describe('runner budget (jobs a ready PR starts)', () => {
   });
 
   // 32: the Self-host Email job (landing plan F12) runs only on self-host email paths.
-  // 33 on main with the Self-host Live job (landing plan D9); 34 on the self-host integration
-  // branch, which also has the Hosted git conformance job (self-host build only).
-  it('a PR that matches every filter starts at most 34 jobs (27 before: four more Workers shards, Self-host Email, Self-host Live, hosted git)', () => {
+  // 33: the Self-host Live job (landing plan D9) runs only on self-host paths.
+  it('a PR that matches every filter starts at most 33 jobs (27 before: four more Workers shards, Self-host Email, Self-host Live)', () => {
     expect(
       jobCount(simulate({ eventName: 'pull_request', filters: allFilters() }))
-    ).toBeLessThanOrEqual(34);
+    ).toBeLessThanOrEqual(33);
   });
 
   it('the Self-host Live job starts only for self-host paths (D9)', () => {

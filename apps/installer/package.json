@@ -21,7 +21,7 @@
     "wrangler": "catalog:",
     "@playwright/test": "1.65.0",
     "tsx": "catalog:",
-    "astro": "6.4.8",
+    "astro": "7.4.12",
     "@astrojs/check": "catalog:"
   }
 }

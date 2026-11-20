@@ -6,6 +6,7 @@ import { type Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { isValidGitBranchName } from '../../lib/git-ref-name';
 import { log } from '../../lib/logger';
 import { toProjectResponse } from '../../lib/mappers';
 import { ulid } from '../../lib/ulid';
@@ -13,6 +14,7 @@ import { getUserId } from '../../middleware/auth';
 import { AppError, errors } from '../../middleware/error';
 import { createOwnerProjectMembership } from '../../middleware/project-auth';
 import { CreateProjectSchema, jsonValidator } from '../../schemas';
+import { artifactsBackendExtensions, resolveArtifactsBackend } from '../../services/artifacts/backend';
 import { seedArtifactsReadme } from '../../services/artifacts/seed-readme';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import {
@@ -20,16 +22,6 @@ import {
   requireGitLabUserAccessToken,
   verifyGitLabProjectAccess,
 } from '../../services/gitlab';
-import { resolveArtifactsBackend } from '../../services/hosted-git/backend';
-import {
-  importIntoHostedRepository,
-  parseHostedGitImportUrl,
-  resolveImportDefaultBranch,
-} from '../../services/hosted-git/import';
-import {
-  artifactsRemoteFetch,
-  isLocalHostedGitActive,
-} from '../../services/hosted-git/local-backend';
 import { getRuntimeLimits } from '../../services/limits';
 import {
   assertRepositoryAccess,
@@ -112,18 +104,16 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
         throw errors.badRequest(`Maximum ${maxRepos} Artifacts-backed projects allowed`);
       }
 
-      // Import from a public repository: only on this install's own git server (self-host).
-      const importUrl = body.importUrl?.trim() ? parseHostedGitImportUrl(body.importUrl) : null;
-      if (importUrl && !isLocalHostedGitActive(c.env)) {
-        throw errors.badRequest(
-          'importUrl is only supported for SAM-hosted repositories on a self-hosted install'
-        );
+      const importUrl = body.importUrl?.trim() || null;
+      const extensions = artifactsBackendExtensions(c.env, artifacts);
+      const importer = extensions.importSource;
+      if (importUrl && !importer) {
+        throw errors.badRequest('This repository backend does not support importUrl');
       }
-      const importBranch = importUrl ? await resolveImportDefaultBranch(importUrl) : null;
+      const importBranch = importUrl && importer ? await importer.defaultBranch(importUrl) : null;
       if (importUrl && !importBranch) {
         throw errors.badRequest('Could not read the default branch of the repository at importUrl');
       }
-
       const defaultBranch =
         importBranch ||
         body.defaultBranch?.trim() ||
@@ -136,6 +126,13 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
       if (defaultBranch.length > 255 || !/^[a-zA-Z0-9._\-/]+$/.test(defaultBranch)) {
         throw errors.badRequest(
           'defaultBranch contains invalid characters. Only alphanumeric, hyphens, underscores, slashes, and dots are allowed (max 255 chars).'
+        );
+      }
+      // The repository's first push writes this branch; refuse names git itself rejects
+      // (`foo.lock`, `.hidden`, `a..b`, `trailing.`) here rather than fail the seed push.
+      if (!isValidGitBranchName(defaultBranch)) {
+        throw errors.badRequest(
+          'defaultBranch is not a valid git branch name (see git check-ref-format).'
         );
       }
 
@@ -155,13 +152,12 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
       // also orients agents (project name, description, SAM MCP tools). If seeding
       // fails the repo is unusable, so we abort creation and log the orphan.
       try {
-        if (importUrl) {
-          await importIntoHostedRepository({
+        if (importUrl && importer) {
+          await importer.populate({
             sourceUrl: importUrl,
             branch: defaultBranch,
             remote: created.remote,
             token: created.token,
-            remoteFetch: artifactsRemoteFetch(c.env),
           });
         } else {
           await seedArtifactsReadme({
@@ -170,7 +166,7 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
             branch: defaultBranch,
             projectName: name,
             description,
-            fetchImpl: artifactsRemoteFetch(c.env),
+            fetchImpl: extensions.remoteFetch,
           });
         }
       } catch (seedError) {
@@ -192,7 +188,6 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
             action: 'orphaned_artifacts_repo_cleanup_failed',
           });
         }
-        // An import refusal (too large, unreadable, over a cap) is the caller's to fix.
         if (importUrl && seedError instanceof AppError) throw seedError;
         throw errors.internal('Failed to initialize Artifacts repository');
       }

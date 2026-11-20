@@ -12,7 +12,7 @@
  * project, that the user is still an active member, and that a workspace-bound token's workspace
  * is still active on its current runtime (callback generation).
  */
-import type { Env } from '../../env';
+import type { HostedGitEnv as Env } from './env';
 
 export type HostedGitScope = 'read' | 'write';
 

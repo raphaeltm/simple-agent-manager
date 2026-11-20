@@ -63,6 +63,6 @@
     "vite": "catalog:",
     "vitest": "catalog:",
     "@astrojs/check": "catalog:",
-    "astro": "6.4.8"
+    "astro": "7.4.12"
   }
 }

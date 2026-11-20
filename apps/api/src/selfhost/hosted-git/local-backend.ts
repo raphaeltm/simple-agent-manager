@@ -3,16 +3,16 @@
  *
  * `backend.ts` is the seam: it selects the Cloudflare Artifacts binding, else the fallback a
  * self-host build registered. This module is that fallback: the four `Env.ARTIFACTS` methods SAM
- * calls, implemented against the `HostedGitRepo` Durable Object (`durable-objects/hosted-git-repo.ts`)
+ * calls, implemented against the `HostedGitRepo` Durable Object (`selfhost/hosted-git/hosted-git-repo.ts`)
  * through the `HOSTED_GIT` namespace binding only. It never imports the class. The self-host build
  * registers it (`selfhost/hosted-git.ts`); only that build sets `HOSTED_GIT_BACKEND` and binds the
  * class (`scripts/selfhost/celld-config.ts`, `selfhost-durable-objects.ts`), so on Cloudflare
  * `isLocalHostedGitActive` is always false.
  */
-import type { Env } from '../../env';
-import type { ArtifactsBackend } from './backend';
+import type { ArtifactsBackend } from '../../services/artifacts/backend';
+import type { HostedGitEnv as Env } from './env';
 import { handleHostedGitRequest, HOSTED_GIT_PATH_PREFIX } from './http';
-import { clampHostedGitTokenTtl, type HostedGitScope, mintHostedGitToken } from './tokens';
+import { clampHostedGitTokenTtl, mintHostedGitToken } from './tokens';
 
 type BackendEnv = Pick<
   Env,
@@ -55,6 +55,9 @@ function requireEncryptionKey(env: BackendEnv): Pick<Env, 'ENCRYPTION_KEY'> {
 export function createDurableObjectArtifactsBackend(env: BackendEnv): ArtifactsBackend {
   const keyEnv = () => requireEncryptionKey(env);
   return {
+    remoteFetch: artifactsRemoteFetch(env),
+    // Import stays unregistered until tasks/backlog/2026-11-19-bounded-selfhost-git-import.md
+    // bounds decompression before the importer materializes untrusted objects.
     async create(name, opts) {
       const defaultBranch = opts?.setDefaultBranch || 'main';
       const res = await repoStub(env, name).fetch('https://hosted-git/init', {
@@ -84,10 +87,11 @@ export function createDurableObjectArtifactsBackend(env: BackendEnv): ArtifactsB
         name,
         remote: hostedGitRemote(env, name),
         defaultBranch,
-        async createToken(scope?: HostedGitScope, ttl?: number) {
+        async createToken(scope, ttl, context) {
           const minted = await mintHostedGitToken(keyEnv(), {
             repo: name,
             scope: scope ?? 'read',
+            ...context,
             ttlSeconds: clampHostedGitTokenTtl(ttl),
           });
           return {

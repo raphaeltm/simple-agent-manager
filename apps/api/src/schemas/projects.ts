@@ -16,6 +16,7 @@ const AgentDefaultEntrySchema = v.object({
 const AgentDefaultsSchema = v.record(v.string(), AgentDefaultEntrySchema);
 
 export const CreateProjectSchema = v.object({
+  importUrl: v.optional(v.string()),
   name: v.string(),
   description: v.optional(v.string()),
   installationId: v.optional(v.string()),

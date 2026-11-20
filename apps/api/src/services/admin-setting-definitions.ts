@@ -19,6 +19,7 @@ import { type OutboundSettingName } from './admin-settings-outbound-definitions'
 import { type AgentEmailSettingName } from './agent-email/setting-definitions';
 import { type AgentModelSettingKey } from './agent-models/settings-definition';
 import type { AiProxySettingName } from './ai-proxy-settings';
+import type { RepositorySettingName } from './artifacts/settings';
 import { type ConnectorReadSettingName } from './connector-read-settings-definition';
 import {
   CONNECTOR_DEFAULTS,
@@ -75,6 +76,7 @@ export type AdminSettingName =
   | InfomaniakSettingName
   | InstructionBudgetSettingName
   | OperationsTelemetrySettingName
+  | RepositorySettingName
   | OutboundSettingName
   | 'operations.projectDataRowUsageIntervalMs'
   | 'chat.profileUsageWindowDays'

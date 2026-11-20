@@ -18,6 +18,7 @@ import { OUTBOUND_SETTINGS } from './admin-settings-outbound-definitions';
 import { OVERVIEW_BRIEF_SETTINGS } from './admin-settings-overview-brief-definitions';
 import { PROJECT_EVENT_SETTINGS } from './admin-settings-project-event-definitions';
 import { AI_PROXY_SETTINGS } from './ai-proxy-settings';
+import { REPOSITORY_SETTINGS } from './artifacts/settings';
 import { llmEndpointSettingDefinitions } from './llm-endpoint-settings';
 import { STALLED_CLASSIFIER_ENDPOINT_SETTINGS } from './stalled-task-classifier-endpoint-settings';
 export {
@@ -36,6 +37,7 @@ export {
   OPERATOR_DEFAULTS,
 } from './admin-setting-definitions';
 const definitions = [
+  ...REPOSITORY_SETTINGS,
   ...LIBRARY_MULTIPART_SETTINGS,
   ...ACCOUNT_LINKING_SETTINGS,
   ...llmEndpointSettingDefinitions(),

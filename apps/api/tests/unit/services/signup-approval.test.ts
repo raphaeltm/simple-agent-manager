@@ -55,7 +55,7 @@ import {
   setSignupApprovalConfig,
 } from '../../../src/services/signup-approval';
 
-function testEnv(requireApproval: 'true' | 'false') {
+function testEnv(requireApproval: string | undefined) {
   return {
     DATABASE: {},
     BASE_DOMAIN: 'test.example.com',
@@ -71,7 +71,7 @@ type UserCreateBeforeHook = (
 ) => Promise<{ data: Record<string, unknown> }>;
 
 async function getUserCreateBeforeHook(
-  requireApproval: 'true' | 'false'
+  requireApproval: string | undefined
 ): Promise<UserCreateBeforeHook> {
   const auth = await createAuth(testEnv(requireApproval) as never);
   const hook = (
@@ -103,6 +103,44 @@ describe('signup approval runtime config', () => {
       requireApproval: false,
       source: 'environment',
     });
+  });
+
+  it('requires approval by default when REQUIRE_APPROVAL is unset', async () => {
+    await expect(getSignupApprovalConfig(testEnv(undefined) as never)).resolves.toMatchObject({
+      requireApproval: true,
+      source: 'environment',
+    });
+  });
+
+  it.each([
+    { value: 'true', requireApproval: true },
+    { value: '', requireApproval: true },
+    { value: 'yes', requireApproval: true },
+    { value: 'flase', requireApproval: true },
+    { value: 'false', requireApproval: false },
+    { value: ' FALSE ', requireApproval: false },
+  ])('treats REQUIRE_APPROVAL=$value as requireApproval=$requireApproval', async (c) => {
+    await expect(getSignupApprovalConfig(testEnv(c.value) as never)).resolves.toMatchObject({
+      requireApproval: c.requireApproval,
+      source: 'environment',
+    });
+  });
+
+  it('creates new accounts as pending on a fresh install with REQUIRE_APPROVAL unset', async () => {
+    existingUsers = [{ id: 'existing-user' }];
+    const hook = await getUserCreateBeforeHook(undefined);
+    await expect(hook({ id: 'new-default-user' })).resolves.toEqual({
+      data: { id: 'new-default-user', role: 'user', status: 'pending' },
+    });
+    await expect(
+      assertSessionUserApproved(testEnv(undefined) as never, { role: 'user', status: 'pending' })
+    ).rejects.toMatchObject({ statusCode: 403, error: 'APPROVAL_REQUIRED' });
+  });
+
+  it('keeps open registration when REQUIRE_APPROVAL=false is set explicitly', async () => {
+    existingUsers = [{ id: 'existing-user' }];
+    const hook = await getUserCreateBeforeHook('false');
+    await expect(hook({ id: 'new-open-user' })).resolves.toEqual({ data: { id: 'new-open-user' } });
   });
 
   it('persists a runtime override with update metadata', async () => {
