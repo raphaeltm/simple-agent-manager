@@ -9,7 +9,9 @@ import {
   assertNoClippedOverflow,
   assertNoOverflow,
   assertNoScrollingGlassPanes,
+  expectThemePoll,
   screenshot,
+  seedTheme,
 } from './audit-helpers';
 import { type InboxMockState, KIND_ITEMS, MANY_ITEMS, setupInboxMocks } from './inbox-fixtures';
 
@@ -229,6 +231,99 @@ test.describe('Inbox — Desktop', () => {
     );
   });
 
+  test('header is one row; the purpose sits behind ?', async ({ page }) => {
+    await openInbox(page, state(), '/projects/p-billing/inbox');
+    const header = page
+      .locator('header')
+      .filter({ has: page.getByRole('group', { name: 'Inbox filters' }) });
+    const title = await page.getByRole('heading', { level: 1, name: 'Inbox' }).boundingBox();
+    const help = page.getByRole('button', { name: 'About the inbox' });
+    const helpBox = await help.boundingBox();
+    const chips = await page.getByRole('group', { name: 'Inbox filters' }).boundingBox();
+    const more = await page.getByRole('button', { name: 'More filters' }).boundingBox();
+    const headerBox = await header.boundingBox();
+    const centre = (b: { y: number; height: number }) => b.y + b.height / 2;
+    // Title, ?, chips and ⋯ share one row, left to right.
+    for (const box of [helpBox!, chips!, more!]) {
+      expect(Math.abs(centre(box) - centre(title!))).toBeLessThanOrEqual(4);
+    }
+    expect(title!.x + title!.width).toBeLessThanOrEqual(helpBox!.x + 1);
+    expect(helpBox!.x + helpBox!.width).toBeLessThanOrEqual(chips!.x + 1);
+    expect(chips!.x + chips!.width).toBeLessThanOrEqual(more!.x + 1);
+    // ⋯ follows the last chip rather than sitting at the far edge of the row.
+    expect(more!.x - (chips!.x + chips!.width)).toBeLessThanOrEqual(12);
+    expect(headerBox!.height).toBeLessThanOrEqual(72);
+    await expect(page.getByText(/What your agents need from you/)).toHaveCount(0);
+    await screenshot(page, 'inbox-desktop-header');
+
+    await help.click();
+    const note = page.getByRole('note');
+    await expect(note).toHaveText(/What your agents need from you in /);
+    // Paints over the panes below: a real hit test at the note's centre lands on the note.
+    const noteBox = await note.boundingBox();
+    const hit = await page.evaluate(
+      ({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest('[role="note"]')),
+      { x: noteBox!.x + noteBox!.width / 2, y: noteBox!.y + noteBox!.height / 2 }
+    );
+    expect(hit).toBe(true);
+    await assertNoOverflow(page);
+    await screenshot(page, 'inbox-desktop-help-open');
+    await page.keyboard.press('Escape');
+    await expect(note).toHaveCount(0);
+    await expect(help).toBeFocused();
+  });
+
+  test('narrow desktop: chips scroll inside the one-row header', async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 700 });
+    await openInbox(page, state(), '/projects/p-billing/inbox');
+    const title = await page.getByRole('heading', { level: 1, name: 'Inbox' }).boundingBox();
+    const more = await page.getByRole('button', { name: 'More filters' }).boundingBox();
+    expect(
+      Math.abs(title!.y + title!.height / 2 - (more!.y + more!.height / 2))
+    ).toBeLessThanOrEqual(4);
+    expect(more!.x + more!.width).toBeLessThanOrEqual(800);
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, 'inbox-narrow-desktop-header');
+  });
+
+  for (const width of [800, 1024]) {
+    test(`from Overview at ${width}px: back is icon-only and the row still holds`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 700 });
+      await openInbox(page, state(), '/projects/p-billing/inbox?from=overview');
+      const back = page.getByRole('button', { name: 'Back to Overview' });
+      await expect(back).toBeVisible();
+      const backBox = await back.boundingBox();
+      const title = await page.getByRole('heading', { level: 1, name: 'Inbox' }).boundingBox();
+      const chips = await page.getByRole('group', { name: 'Inbox filters' }).boundingBox();
+      const more = await page.getByRole('button', { name: 'More filters' }).boundingBox();
+      const centre = (b: { y: number; height: number }) => b.y + b.height / 2;
+      for (const box of [backBox!, chips!, more!]) {
+        expect(Math.abs(centre(box) - centre(title!))).toBeLessThanOrEqual(4);
+      }
+      // Icon-only below lg: the label costs no width there.
+      expect(backBox!.width).toBeLessThanOrEqual(width < 1024 ? 44 : 200);
+      // At least two whole chips stay visible beside the title.
+      expect(chips!.width).toBeGreaterThanOrEqual(180);
+      expect(more!.x + more!.width).toBeLessThanOrEqual(width);
+      await assertNoOverflow(page);
+      await assertNoClippedOverflow(page);
+      await screenshot(page, `inbox-from-overview-header-${width}`);
+    });
+  }
+
+  test('light theme: header and the open ? note', async ({ page }) => {
+    await seedTheme(page, 'light');
+    await openInbox(page, state(), '/projects/p-billing/inbox');
+    await expectThemePoll(page, 'light');
+    await page.getByRole('button', { name: 'About the inbox' }).click();
+    await expect(page.getByRole('note')).toBeVisible();
+    await assertNoOverflow(page);
+    await screenshot(page, 'inbox-desktop-help-open-light');
+  });
+
   test('context expanded', async ({ page }) => {
     const params = new URLSearchParams({ item: 'ask:q-vat', project: 'p-billing' });
     await openInbox(page, state(), `/inbox?${params.toString()}`);
@@ -270,5 +365,45 @@ test.describe('Inbox — Desktop', () => {
     const projectNav = page.getByRole('navigation', { name: 'Project navigation' });
     await expect(projectNav.getByRole('link', { name: /^Inbox, \d+$/ })).toBeVisible();
     await screenshot(page, 'inbox-desktop-nav');
+  });
+});
+
+/** Point 4px outside the ? button's left edge, vertically centred. */
+async function justOutsideHelp(page: Page) {
+  const box = await page.getByRole('button', { name: 'About the inbox' }).boundingBox();
+  return { x: box!.x - 4, y: box!.y + box!.height / 2 };
+}
+
+const hitsHelp = (page: Page, point: { x: number; y: number }) =>
+  page.evaluate(
+    ({ x, y }) =>
+      Boolean(document.elementFromPoint(x, y)?.closest('button[aria-label="About the inbox"]')),
+    point
+  );
+
+test.describe('Inbox — touch tablet', () => {
+  test.use({ viewport: { width: 820, height: 1180 }, isMobile: false, hasTouch: true });
+
+  test('the ? has a 44px touch target around its compact glyph', async ({ page }) => {
+    await openInbox(page, state(), '/projects/p-billing/inbox');
+    const point = await justOutsideHelp(page);
+    expect(await hitsHelp(page, point)).toBe(true);
+    await page.touchscreen.tap(point.x, point.y);
+    await expect(page.getByRole('note')).toHaveText(/What your agents need from you/);
+    await screenshot(page, 'inbox-tablet-help-open');
+  });
+});
+
+test.describe('Inbox — mouse pointer control', () => {
+  test.use({ viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false });
+
+  test('with a mouse the ? hit area stays the 32px glyph', async ({ page }) => {
+    await openInbox(page, state(), '/projects/p-billing/inbox');
+    // Liveness: the button itself is hit at its centre.
+    const box = await page.getByRole('button', { name: 'About the inbox' }).boundingBox();
+    expect(await hitsHelp(page, { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 })).toBe(
+      true
+    );
+    expect(await hitsHelp(page, await justOutsideHelp(page))).toBe(false);
   });
 });

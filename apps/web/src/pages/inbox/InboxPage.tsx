@@ -11,6 +11,7 @@ import {
   InboxPermissionSummary,
 } from '../../components/inbox/InboxAnswerControls';
 import { InboxFilterBar } from '../../components/inbox/InboxFilterBar';
+import { InboxHelpButton } from '../../components/inbox/InboxHelpButton';
 import {
   InboxItemBody,
   type InboxReceipt,
@@ -328,29 +329,36 @@ export function InboxPage({
       <Pane
         as="header"
         variant="slab"
-        // relative z-20: the ⋯ menu drops out of this pane and must paint over the panes below.
-        className={`relative z-20 shrink-0 flex-col gap-3 px-3 py-3 md:flex md:px-5 md:py-4 ${itemOpenOnPhone ? 'hidden' : 'flex'}`}
+        // relative z-20: the ⋯ menu and the ? note drop out of this pane and must paint over the
+        // panes below. Desktop keeps everything on one row (title, ?, chips, ⋯) so the header
+        // does not spend lines on chrome; the page's purpose sits behind the ?.
+        className={`relative z-20 shrink-0 flex-col gap-3 px-3 py-3 md:flex md:flex-row md:items-center md:gap-3 md:px-5 ${itemOpenOnPhone ? 'hidden' : 'flex'}`}
       >
-        <div className="hidden md:block">
-          <h1 className="m-0 text-2xl font-bold text-fg-primary">Inbox</h1>
-          <p className="m-0 mt-0.5 text-sm text-fg-muted">
-            {projectId
-              ? `What your agents need from you in ${projectName ?? 'this project'}.`
-              : 'Everything your agents need from you, across projects.'}
-          </p>
-        </div>
-        <h1 className="sr-only md:hidden">Inbox</h1>
         {fromOverview && (
           <button
             type="button"
             onClick={returnToOverview}
-            className="-my-1 -ml-1 flex min-h-11 w-fit cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent px-1 text-sm text-fg-muted hover:text-fg-primary"
+            className="-my-1 -ml-1 flex min-h-11 w-fit shrink-0 cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent px-1 text-sm text-fg-muted hover:text-fg-primary"
           >
             <ArrowLeft size={16} aria-hidden="true" />
-            Back to Overview
+            {/* Icon-only between md and lg, so the one-row header leaves the chips room. */}
+            <span className="md:max-lg:sr-only">Back to Overview</span>
           </button>
         )}
-        <InboxFilterBar value={walk.view} onChange={walk.setView} counts={counts} />
+        <div className="hidden shrink-0 items-center gap-0.5 md:flex">
+          <h1 className="m-0 text-2xl font-bold text-fg-primary">Inbox</h1>
+          <InboxHelpButton
+            text={
+              projectId
+                ? `What your agents need from you in ${projectName ?? 'this project'}.`
+                : 'Everything your agents need from you, across projects.'
+            }
+          />
+        </div>
+        <h1 className="sr-only md:hidden">Inbox</h1>
+        <div className="min-w-0 md:flex-1">
+          <InboxFilterBar value={walk.view} onChange={walk.setView} counts={counts} />
+        </div>
       </Pane>
       <div
         className={`grid min-h-0 flex-1 gap-[var(--sam-space-gutter)] ${
