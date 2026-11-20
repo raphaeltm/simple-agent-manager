@@ -422,6 +422,9 @@ export async function loadRuntimeSecrets(env: KeyAgentEnv): Promise<RuntimeSecre
     loadedAt,
     openedAt: loadedAt - fetched.ageMs,
   };
+  // Every load, a background refresh of a resident Durable Object included, re-registers the
+  // rotation read fallback for the bundle it installed, so the map never lags the secrets.
+  registerRotationKeys({ ...fetched.secrets });
   return fetched.secrets;
 }
 

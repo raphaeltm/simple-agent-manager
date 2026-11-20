@@ -149,7 +149,7 @@ export const ROTATABLE_KEYS: readonly RotatableKey[] = [
       return { JWT_PRIVATE_KEY: pair.privateKey, JWT_PUBLIC_KEY: pair.publicKey };
     },
     impact:
-      'none for users: terminals and previews get new-key tokens from the app. Nodes switch to new-key callback tokens on their next heartbeat; workspace callback tokens switch when the VM agent renews them (at half their 24 h life), so the Worker keeps accepting callback tokens signed with the old key until the overlap ends (13 h, --jwt-overlap-hours). During the overlap whoever holds the old key can still forge a callback token; --jwt-overlap-hours 0 removes that window but cuts every running node off (replace them)',
+      'none for users: terminals and previews get new-key tokens from the app. Nodes switch to new-key callback tokens on their next heartbeat; workspace callback tokens switch when the VM agent renews them (by default at half their 24 h life, at most at 90%), so the Worker keeps accepting callback tokens signed with the old key until the overlap ends (90% of the deployed callback-token lifetime plus 1 h: 23 h by default; --jwt-overlap-hours). During the overlap whoever holds the old key can still forge a callback token; --jwt-overlap-hours 0 removes that window but cuts every running node off (replace them)',
     downtime: 'none',
   },
 ];

@@ -290,7 +290,19 @@ describe('rotate --dry-run', () => {
     expect(text).not.toContain('after the 0 h overlap');
     logs = [];
     await runRotate(input({ names: ['jwt-keys'], dryRun: true }), deps());
-    expect(logs.join('\n')).toContain('after the 13 h overlap');
+    // 90% of the default 24 h callback-token lifetime, plus 1 h.
+    expect(logs.join('\n')).toContain('after the 23 h overlap');
+  });
+
+  it('derives the JWT overlap from the deployed callback-token lifetime (Codex P1)', async () => {
+    const current = await store().head();
+    const bundle = await store().seal({ ...current.secrets, CALLBACK_TOKEN_EXPIRY_MS: String(48 * HOUR) });
+    await store().write(bundle);
+    await runRotate(input({ names: ['jwt-keys'] }), deps());
+    // A 48 h token renewed as late as 90% of its life: 43.2 h, rounded up, plus 1 h.
+    expect(readJournal(stateDir)?.options?.jwtOverlapHours).toBe(45);
+    const step = readJournal(stateDir)?.steps['jwt-keys'];
+    expect(Date.parse(step?.waitUntil ?? '') - clock).toBe(45 * HOUR);
   });
 
   it('names the bundles the run will remove (the box keeps the newest 3)', async () => {
@@ -544,7 +556,7 @@ describe('rotate --all', () => {
     expect(journal.steps['jwt-keys']?.phase).toBe('waiting');
     expect(journal.steps['gateway-secret']?.phase).toBe('done');
 
-    clock += 14 * HOUR;
+    clock += 24 * HOUR; // past the default JWT overlap (23 h) and the encryption-key wait
     await runRotate(input({ resume: true }), deps());
     expect(readJournal(stateDir)).toBeNull();
     const after = await head();

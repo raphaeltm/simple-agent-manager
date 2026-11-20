@@ -22,7 +22,7 @@ import {
   advanceGateway,
   advanceOverlap,
   advanceSwap,
-  DEFAULT_JWT_OVERLAP_HOURS,
+  defaultJwtOverlapHours,
   message,
 } from './rotate-steps';
 import { advanceData, CONTROL_KEY } from './rotate-steps-data';
@@ -156,7 +156,7 @@ function stepContext(
 function runOptions(journal: Journal, input: RotateInput): NonNullable<Journal['options']> {
   return (
     journal.options ?? {
-      jwtOverlapHours: input.jwtOverlapHours ?? DEFAULT_JWT_OVERLAP_HOURS,
+      jwtOverlapHours: input.jwtOverlapHours ?? defaultJwtOverlapHours({}),
       storedLifetimeMinutes: input.storedLifetimeMinutes ?? null,
     }
   );
@@ -229,7 +229,7 @@ async function startJournal(
     backupDir,
     keys: keys.map((k) => k.name),
     options: {
-      jwtOverlapHours: input.jwtOverlapHours ?? DEFAULT_JWT_OVERLAP_HOURS,
+      jwtOverlapHours: input.jwtOverlapHours ?? defaultJwtOverlapHours(head.secrets),
       storedLifetimeMinutes: input.storedLifetimeMinutes ?? null,
     },
     steps: Object.fromEntries(

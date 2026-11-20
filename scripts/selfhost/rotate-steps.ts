@@ -19,15 +19,32 @@ export const JWT_OVERLAP_NAMES = [
   'JWT_PREVIOUS_KEY_ID',
   'JWT_PUBLIC_KEY_PREVIOUS_UNTIL',
 ] as const;
+/** The Worker's callback-token lifetime when CALLBACK_TOKEN_EXPIRY_MS is unset (services/jwt.ts). */
+export const DEFAULT_CALLBACK_TOKEN_LIFETIME_MS = 24 * 3_600_000;
 /**
- * How long the Worker still accepts callback tokens signed with the old key. Nodes get a new-key
- * token on their next heartbeat (shouldRefreshCallbackToken refreshes a non-current kid), but a
- * VM agent offers a workspace callback token for renewal only after half its 24 h lifetime
- * (CALLBACK_TOKEN_EXPIRY_MS, ratio 0.5): 12 h plus a margin. Terminal, port and local-forward
- * tokens never use the old key. 0 is a hard cut: running nodes lose their control-plane
- * connection and must be replaced.
+ * The latest point in a workspace callback token's life at which a VM agent offers it for
+ * renewal: the top of the ratio range the agent accepts (WORKSPACE_CALLBACK_TOKEN_REFRESH_RATIO,
+ * MaxWorkspaceCallbackTokenRefreshRatio in packages/vm-agent/internal/config/callback_token_renewal.go).
  */
-export const DEFAULT_JWT_OVERLAP_HOURS = 13;
+export const MAX_AGENT_RENEWAL_RATIO = 0.9;
+export const JWT_OVERLAP_MARGIN_HOURS = 1;
+
+/**
+ * How long the Worker still accepts callback tokens signed with the old key, unless
+ * --jwt-overlap-hours says otherwise. Nodes get a new-key token on their next heartbeat
+ * (shouldRefreshCallbackToken refreshes a non-current kid), but a VM agent offers a workspace
+ * callback token for renewal only once it has used MAX_AGENT_RENEWAL_RATIO of its lifetime at
+ * the latest, so the overlap covers that point of the deployed lifetime (the bundle's
+ * CALLBACK_TOKEN_EXPIRY_MS, else the Worker default) plus a margin: 23 h with the defaults.
+ * Terminal, port and local-forward tokens never use the old key. 0 is a hard cut: running nodes
+ * lose their control-plane connection and must be replaced.
+ */
+export function defaultJwtOverlapHours(bundle: Readonly<Record<string, string>>): number {
+  const configured = Number.parseInt(bundle.CALLBACK_TOKEN_EXPIRY_MS ?? '', 10);
+  const lifetimeMs =
+    Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_CALLBACK_TOKEN_LIFETIME_MS;
+  return Math.ceil((lifetimeMs * MAX_AGENT_RENEWAL_RATIO) / 3_600_000) + JWT_OVERLAP_MARGIN_HOURS;
+}
 
 /** Sets `names` back to their snapshot values; names the snapshot lacks are removed. */
 export function restorePatch(snapshot: Secrets, names: readonly string[]): Patch {

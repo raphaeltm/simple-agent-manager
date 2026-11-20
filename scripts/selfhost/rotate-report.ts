@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import type { SealedBundle } from '../../deploy/selfhost/key-agent/bundle.ts';
 import { DEFAULT_KEPT_BUNDLES } from './key-service';
 import { EXTERNAL_SECRETS, NOT_ROTATED, type RotatableKey } from './rotate-catalog';
+import { defaultJwtOverlapHours } from './rotate-steps';
 import { DEFAULT_STORED_LIFETIME_MINUTES } from './rotate-steps-data';
 import { type Journal, readJournal } from './rotate-store';
 
@@ -111,7 +112,7 @@ export function formatPlan(
       lines.push(
         options.jwtOverlapHours === 0
           ? '     finishes: in this run (--jwt-overlap-hours 0 is a hard cut): the old key is removed in this run and stops verifying callback tokens at once, so every running node is cut off (replace them)'
-          : `     finishes: \`rotate --resume\` after the ${options.jwtOverlapHours ?? 13} h overlap; until then the old key still verifies callback tokens`
+          : `     finishes: \`rotate --resume\` after the ${options.jwtOverlapHours ?? defaultJwtOverlapHours(bundle)} h overlap; until then the old key still verifies callback tokens`
       );
     }
   });
