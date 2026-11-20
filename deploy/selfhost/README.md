@@ -329,11 +329,12 @@ nothing (`scripts/selfhost/legacy-adoption.ts:runLegacyAdoption`):
    any change.
 
 3. It takes the encrypted backup from the live legacy stack.
-4. It stops the legacy stack. It copies each volume into `<canonical>_<volume>` with the
-   `sam-selfhost-egress-fence:local` image the legacy deploy already built. Adoption builds no
-   image. The helper runs with no network, all capabilities dropped except the file-ownership
-   ones a faithful copy needs, and a label carrying a random adoption id. Each copy is verified by
-   a digest of every path's type, owner and mode and every file's content.
+4. It stops the legacy stack, journaling the intent first. It copies each volume into
+   `<canonical>_<volume>` with a digest-pinned Alpine image, the egress fence's own base, which it
+   pulls before changing anything if the box does not have it. The helper runs with no network,
+   all capabilities dropped except the file-ownership ones a faithful copy needs, and a label
+   carrying a random adoption id. Each copy is verified by a digest of every path's type, owner and
+   mode and every file's content.
 5. It writes `COMPOSE_PROJECT_NAME=<canonical>` into `.env`, keeping every other byte, then starts
    the same version under that project and checks health. After health it writes the installation
    and compose-project creation receipts and removes the stopped legacy containers.
@@ -348,11 +349,18 @@ killed, check out the target ref again and rerun the identical command:
 - it resumes at the recorded step;
 - it removes any helper container the killed run left (only those with its adoption id);
 - it recopies an unfinished volume from scratch;
-- a backup interrupted mid-way is kept and a new one is taken.
+- a backup interrupted mid-way is kept and a new one is taken;
+- a stop that completed before its phase was journaled resumes from the stopped stack;
+- a rollback that was interrupted is finished as a rollback, never resumed forward;
+- an upgrade that already completed is not run again.
+
+The upgrade marks the adoption journal while its own completed marker is still durable, so a
+re-checkout of the target cannot make a finished upgrade look unstarted.
 
 A refusal or failure before the legacy stack stopped returns the checkout to the target and
 discards the journal. A later failure, or an unhealthy new project, rolls back to `sam-selfhost`:
 
+- it journals the rollback first, so a killed rollback is finished on the next run;
 - it removes the canonical containers and the volumes it created;
 - if the new celld ran, it first copies the new project's celld cache back over the legacy one, so
   nothing celld kept locally is lost;

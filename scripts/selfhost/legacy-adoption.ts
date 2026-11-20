@@ -37,6 +37,7 @@ import {
   copyVolume,
   createCanonicalVolume,
   DEFAULT_ADOPTION_HELPER_IMAGE,
+  ensureHelperImage,
   type Helper,
   helperName,
   helperNames,
@@ -46,7 +47,7 @@ import {
 } from './legacy-adoption-volumes';
 import { assertOperatorExecution } from './operator-only';
 import { readPrivateJson, replacePrivateFile } from './secret-files';
-import { UPGRADE_PENDING_FILE } from './upgrade-journal';
+import { readPendingFrom, UPGRADE_PENDING_FILE, upgradeCompletedTo } from './upgrade-journal';
 import type { BoxContext, UpgradeOptions } from './upgrade-lib';
 
 export interface AdoptionOptions {
@@ -195,7 +196,7 @@ async function adopt(ctx: BoxContext, opts: AdoptionOptions, journal: AdoptionJo
     journal.volumes.map((v) => v.suffix)
   ))
     removeStaleHelper(ctx, helper, name);
-  const stopped = phaseAtLeast(journal, 'stopped');
+  const stopped = phaseAtLeast(journal, 'stopped') || journal.stopRequested === true;
   const inventory = proveLegacyOwnership(legacy, {
     legacyProject: journal.legacyProject,
     checkoutRoot: opts.checkoutRoot ?? REPO_ROOT,
@@ -221,6 +222,8 @@ async function adopt(ctx: BoxContext, opts: AdoptionOptions, journal: AdoptionJo
   }
   save();
 
+  ensureHelperImage(ctx, helper.image);
+
   if (!phaseAtLeast(journal, 'backed-up')) {
     // A run killed mid-backup leaves an unproven partial: it is kept, never reused.
     const fresh = join(
@@ -243,6 +246,8 @@ async function adopt(ctx: BoxContext, opts: AdoptionOptions, journal: AdoptionJo
 
   try {
     if (!phaseAtLeast(journal, 'stopped')) {
+      journal.stopRequested = true;
+      save();
       compose(legacy, ['stop'], 'stop legacy stack');
       journal.phase = 'stopped';
       save();
@@ -285,6 +290,18 @@ async function adopt(ctx: BoxContext, opts: AdoptionOptions, journal: AdoptionJo
       journal.phase = 'switched';
       save();
     }
+    // Compose would silently recreate a missing volume empty: every copy must still be there.
+    for (const volume of journal.volumes)
+      if (
+        !ownedCanonicalVolume(
+          ctx,
+          journal.canonicalProject,
+          volume.suffix,
+          journal.adoptionId,
+          volume.createdAt
+        )
+      )
+        throw new Error(`Legacy adoption: the copy ${volume.canonical} is missing`);
     journal.canonicalStarted = true;
     save();
     compose(canonical, ['up', '-d'], 'start canonical stack');
@@ -322,6 +339,8 @@ class RollbackIncomplete extends Error {}
  */
 async function rollbackToLegacy(ctx: BoxContext, opts: AdoptionOptions, journal: AdoptionJournal) {
   ctx.log('legacy adoption failed; restoring the legacy compose project');
+  journal.rollingBack = true;
+  writeAdoptionJournal(ctx.stateDir, journal);
   const legacy = withProject(ctx, journal.legacyProject);
   const canonical = withProject(ctx, journal.canonicalProject);
   const helper = helperOf(opts, journal);
@@ -395,6 +414,15 @@ export async function runLegacyAdoption(ctx: BoxContext, opts: AdoptionOptions):
     )
       throw new Error(`check out ${journal.to} (the adoption target) before resuming`);
     ctx.log(`resuming legacy adoption at phase ${journal.phase}`);
+    if (journal.rollingBack) {
+      // Finish the interrupted rollback; never resume forward from a half-removed copy.
+      if (head !== journal.from)
+        git(ctx, ['checkout', '--detach', journal.from], 'check out --from');
+      await rollbackToLegacy(ctx, opts, journal);
+      throw new Error(
+        'legacy adoption was rolled back after an interrupted rollback; rerun to retry'
+      );
+    }
   } else {
     if (head === opts.from)
       throw new Error('check out the target SAM ref first; --from is the commit the stack runs');
@@ -410,7 +438,12 @@ export async function runLegacyAdoption(ctx: BoxContext, opts: AdoptionOptions):
     try {
       await adopt(ctx, opts, journal);
     } catch (error) {
-      if (!(error instanceof RollbackIncomplete) && !phaseAtLeast(journal, 'stopped')) {
+      if (
+        !(error instanceof RollbackIncomplete) &&
+        !journal.rollingBack &&
+        !journal.stopRequested &&
+        !phaseAtLeast(journal, 'stopped')
+      ) {
         // Nothing moved yet: return the operator's checkout and forget the attempt.
         clearAdoptionJournal(ctx.stateDir);
         git(ctx, ['checkout', '--detach', journal.to], 'restore target checkout');
@@ -420,24 +453,36 @@ export async function runLegacyAdoption(ctx: BoxContext, opts: AdoptionOptions):
   }
 
   removeLegacyContainers(ctx, journal);
-  const adopted = withProject(ctx, journal.canonicalProject);
-  if (
-    !existsSync(join(ctx.stateDir, UPGRADE_PENDING_FILE)) &&
-    git(ctx, ['rev-parse', 'HEAD'], 'git rev-parse HEAD') !== journal.from
-  )
-    git(ctx, ['checkout', '--detach', journal.from], 'check out --from');
-  try {
-    await opts.upgrade(adopted, {
-      to: journal.to,
-      checkHealth: opts.checkHealth,
-      ...(opts.upgradeBackupDir ? { backupDir: opts.upgradeBackupDir } : {}),
-    });
-  } catch (error) {
-    ctx.log(
-      `adoption is complete (project ${journal.canonicalProject}); the upgrade failed. Check out ${journal.to} and rerun the same command to retry it`
-    );
-    throw error;
+  const pendingPath = join(ctx.stateDir, UPGRADE_PENDING_FILE);
+  // The upgrade's own completed marker (or ours, written inside its window) proves it finished:
+  // an operator's re-checkout of the target makes HEAD useless as that evidence.
+  if (!journal.upgraded && !upgradeCompletedTo(ctx.stateDir, journal.to)) {
+    if (
+      !existsSync(pendingPath) &&
+      git(ctx, ['rev-parse', 'HEAD'], 'git rev-parse HEAD') !== journal.from
+    )
+      git(ctx, ['checkout', '--detach', journal.from], 'check out --from');
+    const finished = journal;
+    try {
+      await opts.upgrade(withProject(ctx, journal.canonicalProject), {
+        to: journal.to,
+        checkHealth: opts.checkHealth,
+        onCompleted: () => {
+          finished.upgraded = true;
+          writeAdoptionJournal(ctx.stateDir, finished);
+        },
+        ...(opts.upgradeBackupDir ? { backupDir: opts.upgradeBackupDir } : {}),
+      });
+    } catch (error) {
+      ctx.log(
+        `adoption is complete (project ${journal.canonicalProject}); the upgrade failed. Check out ${journal.to} and rerun the same command to retry it`
+      );
+      throw error;
+    }
   }
+  // A completed marker left by a kill is cleaned up the way the upgrade itself would.
+  if (upgradeCompletedTo(ctx.stateDir, journal.to))
+    readPendingFrom(ctx.stateDir, git(ctx, ['rev-parse', 'HEAD'], 'git rev-parse HEAD'));
   clearAdoptionJournal(ctx.stateDir);
   ctx.log('legacy volumes are kept until you remove them after checking the upgraded install:');
   ctx.log(`  docker volume rm ${journal.volumes.map((v) => v.legacy).join(' ')}`);

@@ -6,21 +6,28 @@
  * (rolled back to the legacy project, data and .env unchanged).
  */
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { expectedComposeProjectFor } from '../install-record.js';
 import { runLegacyAdoption } from '../legacy-adoption.js';
-import { ADOPTION_JOURNAL_FILE, readAdoptionJournal } from '../legacy-adoption-journal.js';
+import {
+  ADOPTION_JOURNAL_FILE,
+  type AdoptionJournal,
+  readAdoptionJournal,
+  writeAdoptionJournal,
+} from '../legacy-adoption-journal.js';
 import { helperName } from '../legacy-adoption-volumes.js';
 import { readPrivateJson } from '../secret-files.js';
+import { UPGRADE_PENDING_FILE } from '../upgrade-journal.js';
 import type { BoxContext, UpgradeOptions } from '../upgrade-lib.js';
 import { assertRollbackReady } from '../upgrade-preflight.js';
 import { childEnv, REPO_ROOT, skipWithoutDocker } from './harness.js';
 import {
   ALPINE,
+  composeCli,
   containerOf,
   createFixture,
   docker,
@@ -54,13 +61,14 @@ function canonicalFor(f: Fixture): string {
 }
 
 /** One adoption in its own process group, so the test can SIGKILL it and any child. */
-function spawnChild(f: Fixture, healthDelayMs: number) {
+function spawnChild(f: Fixture, healthDelayMs: number, health: 'real' | 'unhealthy' = 'real') {
   return spawn(
     resolve(REPO_ROOT, 'node_modules/.bin/tsx'),
     [
       resolve(import.meta.dirname, 'legacy-adoption-child.ts'),
       JSON.stringify(f),
       String(healthDelayMs),
+      health,
     ],
     { cwd: REPO_ROOT, env: childEnv(), stdio: 'ignore', detached: true }
   );
@@ -339,5 +347,96 @@ describe.skipIf(skipWithoutDocker)('legacy compose adoption (real Docker)', () =
     expect(count(`${canonical}_celld-data`)).toBe(count(`${fixture.legacyProject}_celld-data`));
     expect(containerOf(canonical, 'celld')).not.toBe('');
     expect(existsSync(join(fixture.stateDir, ADOPTION_JOURNAL_FILE))).toBe(false);
+  });
+  it('finishes an interrupted rollback as a rollback, never resuming forward', async () => {
+    seedData(fixture, 4000, 256);
+    const child = spawnChild(fixture, 0, 'unhealthy');
+    const exited = new Promise((done) => child.on('exit', done));
+    const helper = helperName(canonical, 'cache-return');
+    let killed = false;
+    const deadline = Date.now() + 120_000;
+    while (Date.now() < deadline && child.exitCode === null) {
+      const journal = existsSync(join(fixture.stateDir, ADOPTION_JOURNAL_FILE))
+        ? readAdoptionJournal(fixture.stateDir)
+        : null;
+      const copying = docker(['ps', '-q', '--filter', `name=^${helper}$`]).stdout.trim() !== '';
+      if (journal?.rollingBack && copying) {
+        process.kill(-(child.pid as number), 'SIGKILL');
+        killed = true;
+        break;
+      }
+      await new Promise((done) => setTimeout(done, 20));
+    }
+    await exited;
+    expect(killed).toBe(true);
+    expect(readAdoptionJournal(fixture.stateDir)?.rollingBack).toBe(true);
+
+    const upgrades: string[] = [];
+    const logs: string[] = [];
+    await expect(
+      adopt(new FakeGit(TO), { upgrade: async () => void upgrades.push('called') }, logs)
+    ).rejects.toThrow(/rolled back after an interrupted rollback/);
+    expect(upgrades).toEqual([]);
+    expect(readFileSync(fixture.envFile, 'utf8')).toBe(fixture.envText);
+    expect(containerOf(fixture.legacyProject, 'celld')).not.toBe('');
+    expect(containerOf(canonical, 'celld')).toBe('');
+    expect(volumesOf(canonical)).toEqual([]);
+    expect(readVolumeFile(`${fixture.legacyProject}_celld-data`, 'do/marker')).toBe(
+      '7103:7103:640\ndurable'
+    );
+    expect(existsSync(join(fixture.stateDir, ADOPTION_JOURNAL_FILE))).toBe(false);
+  });
+
+  it('resumes after a kill between the legacy stop and its journal entry', async () => {
+    seedData(fixture);
+    let captured: AdoptionJournal | null = null;
+    // A first run journals its inventory, then stops at the backup (nothing moved yet).
+    await expect(
+      adopt(new FakeGit(TO), {
+        backup: ((_ctx: BoxContext, dest: string) => {
+          captured = readAdoptionJournal(fixture.stateDir);
+          mkdirSync(dest, { recursive: true });
+          throw new Error('stop here');
+        }) as never,
+      })
+    ).rejects.toThrow(/stop here/);
+    expect(captured).not.toBeNull();
+    // The state a kill right after `compose stop` leaves: stop intent journaled, phase not yet.
+    const journal = captured as unknown as AdoptionJournal;
+    writeAdoptionJournal(fixture.stateDir, { ...journal, phase: 'backed-up', stopRequested: true });
+    dockerOk(composeCli(fixture, fixture.legacyProject, ['stop']));
+    expect(containerOf(fixture.legacyProject, 'celld')).toBe('');
+
+    await adopt(new FakeGit(TO));
+    expect(containerOf(canonical, 'celld')).not.toBe('');
+    expect(readVolumeFile(`${canonical}_celld-data`, 'do/marker')).toBe('7103:7103:640\ndurable');
+    expect(existsSync(join(fixture.stateDir, ADOPTION_JOURNAL_FILE))).toBe(false);
+  });
+
+  it.each([
+    ['its own completion flag', 'flag'],
+    ["the upgrade's durable completed marker", 'marker'],
+  ])('never replays an upgrade that completed before a kill (%s)', async (_name, evidence) => {
+    seedData(fixture);
+    await expect(
+      adopt(new FakeGit(TO), {
+        upgrade: async (ctx: BoxContext, opts: UpgradeOptions) => {
+          if (evidence === 'flag') opts.onCompleted?.();
+          else
+            writeFileSync(
+              join(ctx.stateDir, UPGRADE_PENDING_FILE),
+              JSON.stringify({ from: FROM, to: TO, backupDir: '/x', phase: 'completed' }),
+              { mode: 0o600 }
+            );
+          throw new Error('killed after the upgrade completed');
+        },
+      })
+    ).rejects.toThrow(/killed after the upgrade completed/);
+
+    const replays: string[] = [];
+    await adopt(new FakeGit(TO), { upgrade: async () => void replays.push('replayed') });
+    expect(replays).toEqual([]);
+    expect(existsSync(join(fixture.stateDir, ADOPTION_JOURNAL_FILE))).toBe(false);
+    expect(existsSync(join(fixture.stateDir, UPGRADE_PENDING_FILE))).toBe(false);
   });
 });

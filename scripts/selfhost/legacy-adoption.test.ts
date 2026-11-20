@@ -18,6 +18,8 @@ import {
   saveOriginalEnv,
   writeAdoptionJournal,
 } from './legacy-adoption-journal.js';
+import { DEFAULT_ADOPTION_HELPER_IMAGE, ensureHelperImage } from './legacy-adoption-volumes.js';
+import { completeUpgradeJournal, upgradeCompletedTo } from './upgrade-journal.js';
 import type { RunResult } from './upgrade-lib.js';
 
 let root: string;
@@ -271,5 +273,53 @@ describe('runLegacyAdoption argument guards', () => {
   it('refuses an orphaned .env copy left without its journal', async () => {
     writeFileSync(join(state(), 'legacy-adoption.env'), 'A=1\n', { mode: 0o600 });
     await expect(adopt()).rejects.toThrow(/exists without its journal/);
+  });
+});
+
+describe('adoption helper image', () => {
+  it('is the egress fence base image, pinned by digest', () => {
+    const dockerfile = readFileSync(resolve('deploy/selfhost/egress-fence/Dockerfile'), 'utf8');
+    const base = /^FROM\s+(\S+)/m.exec(dockerfile)?.[1];
+    expect(DEFAULT_ADOPTION_HELPER_IMAGE).toBe(base);
+    expect(DEFAULT_ADOPTION_HELPER_IMAGE).toMatch(/@sha256:[a-f0-9]{64}$/);
+  });
+  it('is pulled before any change when it is not present locally', () => {
+    const calls: string[] = [];
+    ensureHelperImage(
+      {
+        run: (_c, args) => {
+          calls.push(args.slice(0, 2).join(' '));
+          return { status: args[0] === 'image' ? 1 : 0, stdout: '', stderr: '' };
+        },
+      },
+      DEFAULT_ADOPTION_HELPER_IMAGE
+    );
+    expect(calls).toEqual(['image inspect', 'pull --quiet']);
+  });
+});
+
+describe('upgrade completion marker', () => {
+  it('is durable while the completion hook runs, then cleared', () => {
+    let seen = false;
+    completeUpgradeJournal(
+      state(),
+      { from: 'f'.repeat(40), to: 'e'.repeat(40), backupDir: '/b' },
+      () => {
+        seen = upgradeCompletedTo(state(), 'e'.repeat(40));
+      }
+    );
+    expect(seen).toBe(true);
+    expect(upgradeCompletedTo(state(), 'e'.repeat(40))).toBe(false);
+  });
+  it('does not count a recovery to the previous version as an upgrade', () => {
+    let seen = true;
+    completeUpgradeJournal(
+      state(),
+      { from: 'f'.repeat(40), to: 'f'.repeat(40), backupDir: '/b' },
+      () => {
+        seen = upgradeCompletedTo(state(), 'f'.repeat(40));
+      }
+    );
+    expect(seen).toBe(false);
   });
 });

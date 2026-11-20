@@ -8,10 +8,18 @@
 import { type BoxContext, check } from './backup-lib';
 
 /**
- * Alpine with busybox (sh, cp, find, stat, sha256sum), built locally on every box from
- * deploy/selfhost/egress-fence (its celld-data-owner service already uses it on the cache volume).
+ * Digest-pinned Alpine (busybox: sh, cp, find, stat, sha256sum): the egress fence's own base
+ * (deploy/selfhost/egress-fence/Dockerfile, kept equal by a test). Installs older than the fence
+ * never built a local image, so the pinned base is pulled before adoption changes anything.
  */
-export const DEFAULT_ADOPTION_HELPER_IMAGE = 'sam-selfhost-egress-fence:local';
+export const DEFAULT_ADOPTION_HELPER_IMAGE =
+  'alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f';
+
+/** Present or pulled before any mutation, so a missing image cannot strand a stopped stack. */
+export function ensureHelperImage(ctx: Pick<BoxContext, 'run'>, image: string): void {
+  if (ctx.run('docker', ['image', 'inspect', '--format', '{{.Id}}', image]).status === 0) return;
+  check(ctx.run('docker', ['pull', '--quiet', image]), 'pull adoption helper image');
+}
 /** Marks a canonical volume this adoption created, with the journal's random adoption id. */
 export const ADOPTION_LABEL = 'sam.selfhost.legacy-adoption';
 

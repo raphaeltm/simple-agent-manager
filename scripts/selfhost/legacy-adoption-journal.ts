@@ -47,6 +47,12 @@ export interface AdoptionJournal {
   volumes: AdoptionVolume[];
   /** Set before the canonical stack is first started: its celld may have written the bucket. */
   canonicalStarted: boolean;
+  /** Set before `compose stop`: a kill after the stop must not look like an untouched stack. */
+  stopRequested?: boolean;
+  /** Set before rollback starts: a killed rollback resumes as a rollback, never forward. */
+  rollingBack?: boolean;
+  /** Set while the chained upgrade's completed marker is still durable (upgrade-journal.ts). */
+  upgraded?: boolean;
 }
 
 const SHA = /^[a-f0-9]{40}$/;
@@ -116,7 +122,10 @@ export function readAdoptionJournal(stateDir: string): AdoptionJournal | null {
     !j.volumes.every((v) =>
       validVolume(v, j.legacyProject as string, j.canonicalProject as string)
     ) ||
-    typeof j.canonicalStarted !== 'boolean'
+    typeof j.canonicalStarted !== 'boolean' ||
+    !['stopRequested', 'rollingBack', 'upgraded'].every(
+      (key) => j[key] === undefined || typeof j[key] === 'boolean'
+    )
   )
     return invalid(path);
   return raw as AdoptionJournal;

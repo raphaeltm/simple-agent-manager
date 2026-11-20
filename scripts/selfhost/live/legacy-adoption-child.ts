@@ -32,6 +32,7 @@ if (
   throw new Error('legacy-adoption-child: invalid fixture argument');
 const fixture = parsed as Fixture;
 const delay = Number(process.argv[3] ?? '0');
+const unhealthy = process.argv[4] === 'unhealthy';
 const health = projectHealth(fixture);
 const git = new FakeGit(TO);
 const ctx = fixtureContext(fixture, git, []);
@@ -41,7 +42,7 @@ await runLegacyAdoption(ctx, {
   checkHealth: async () => {
     // A slow health check gives the test a window to kill the run after the .env switch.
     await new Promise((done) => setTimeout(done, delay));
-    return health();
+    return unhealthy ? false : health();
   },
   backup: fakeBackup([]),
   upgrade: async () => {},
