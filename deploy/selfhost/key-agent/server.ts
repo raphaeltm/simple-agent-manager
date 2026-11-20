@@ -237,12 +237,17 @@ export function createKeyAgent(options: AgentOptions): Server {
   const staleWaitMs = options.staleWaitMs ?? DEFAULT_STALE_WAIT_MS;
   const connectionTimeoutMs = options.connectionTimeoutMs ?? DEFAULT_CONNECTION_TIMEOUT_MS;
   const maxStaleMs = options.maxStaleMs ?? DEFAULT_MAX_STALE_MS;
+  /** A copy's age; a clock that moved backwards counts as expired, never as fresh. */
+  const ageOf = (openedAt: number): number => {
+    const age = now() - openedAt;
+    return age < 0 ? Number.POSITIVE_INFINITY : age;
+  };
   /** Whether a copy opened at `openedAt` may still stand in for a refresh that failed. */
-  const mayServeStale = (openedAt: number): boolean => now() - openedAt < maxStaleMs;
+  const mayServeStale = (openedAt: number): boolean => ageOf(openedAt) < maxStaleMs;
 
   async function open(bundleId: string): Promise<Opened> {
     const cached = cache.get(bundleId);
-    if (cached && now() - cached.openedAt < options.cacheMs) return cached.opened;
+    if (cached && ageOf(cached.openedAt) < options.cacheMs) return cached.opened;
     const attempt = opening.get(bundleId) ?? refresh(bundleId);
     if (!cached || !mayServeStale(cached.openedAt)) return await attempt;
     // A stale copy is in hand: do not let a hung key service outlast the Worker's wait.

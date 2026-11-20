@@ -359,6 +359,18 @@ describe('cache and key-service failures', () => {
     expect(await ask()).toEqual({ status: 503, error: 'key_service_unavailable' });
   });
 
+  it('a clock that moved backwards neither skips the refresh nor extends the stale bound', async () => {
+    const state: { fail: KeyProviderError | null; calls: number } = { fail: null, calls: 0 };
+    const { ask, advance } = await setup({ wrap: flaky(state), maxStaleMs: 5000 });
+    await ask();
+    advance(-60_000);
+    await ask();
+    expect(state.calls).toBe(2); // the backwards copy was not treated as fresh
+    state.fail = new KeyProviderError('unavailable', 'kms down');
+    advance(-60_000);
+    expect(await ask()).toEqual({ status: 503, error: 'key_service_unavailable' });
+  });
+
   it('drops the copy when the key service refuses (revocation takes effect)', async () => {
     const state: { fail: KeyProviderError | null; calls: number } = { fail: null, calls: 0 };
     const { ask, advance } = await setup({ wrap: flaky(state) });

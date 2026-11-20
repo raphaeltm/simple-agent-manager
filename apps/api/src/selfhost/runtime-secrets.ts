@@ -109,6 +109,8 @@ const NO_SOCKET: KeyAgentConnect = () => {
 };
 let connectSocket: KeyAgentConnect = NO_SOCKET;
 let cached: { bundleId: string; secrets: RuntimeSecrets; loadedAt: number } | null = null;
+/** A resident object's background refresh in flight (residentSecret), or null. */
+let backgroundRefresh: Promise<unknown> | null = null;
 
 /** Sets how this isolate reaches the agent (runtime-secrets-socket.ts on celld). */
 export function useKeyAgentSocket(socket: KeyAgentConnect): void {
@@ -118,6 +120,7 @@ export function useKeyAgentSocket(socket: KeyAgentConnect): void {
 /** For tests: forget this isolate's copy, as a fresh isolate would, and set the socket. */
 export function resetRuntimeSecretsForTests(socket?: KeyAgentConnect): void {
   cached = null;
+  backgroundRefresh = null;
   connectSocket = socket ?? NO_SOCKET;
 }
 
@@ -204,11 +207,24 @@ function maxStaleMs(env: KeyAgentEnv): number {
   return positiveMs(env.SAM_RUNTIME_SECRETS_MAX_STALE_MS, DEFAULT_RUNTIME_SECRETS_MAX_STALE_MS);
 }
 
+/**
+ * Age of this isolate's copy, or null when it has none. A clock that moved backwards gives a
+ * negative age; that copy counts as expired, so a clock correction cannot stretch either bound.
+ */
+function cachedAgeMs(): number | null {
+  if (!cached) return null;
+  const age = Date.now() - cached.loadedAt;
+  return age < 0 ? Number.POSITIVE_INFINITY : age;
+}
+
 /** This isolate's secrets if loaded for the deployment's bundle and not yet due, else null. */
 export function cachedRuntimeSecrets(env: KeyAgentEnv): RuntimeSecrets | null {
+  const age = cachedAgeMs();
+  // Due at the TTL or the stale bound, whichever comes first: a TTL above the bound is capped.
   return cached &&
     cached.bundleId === env.SAM_SECRET_BUNDLE_ID &&
-    Date.now() - cached.loadedAt < ttlMs(env)
+    age !== null &&
+    age < Math.min(ttlMs(env), maxStaleMs(env))
     ? cached.secrets
     : null;
 }
@@ -338,7 +354,7 @@ export async function loadRuntimeSecrets(env: KeyAgentEnv): Promise<RuntimeSecre
   if (hit) return hit;
   const agent = settings(env);
   // Past the stale bound the copy is gone before the agent is asked: nothing can revive it.
-  if (cached && Date.now() - cached.loadedAt >= maxStaleMs(env)) cached = null;
+  if ((cachedAgeMs() ?? 0) >= maxStaleMs(env)) cached = null;
   let secrets: RuntimeSecrets;
   try {
     secrets = await fetchSecrets(agent);
@@ -431,32 +447,32 @@ export function wrapWorker<E extends object>(worker: WorkerHandlers<E>): WorkerH
   return wrapped;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- a mixin constructor must accept any arguments
-type DurableObjectClass = abstract new (...args: any[]) => object;
+/** One refresh at a time for resident objects; its own timeout (exchange) always settles it. */
+export function refreshInBackground(env: KeyAgentEnv): void {
+  if (backgroundRefresh) return;
+  backgroundRefresh = loadRuntimeSecrets(env)
+    .catch(() => undefined)
+    .finally(() => {
+      backgroundRefresh = null;
+    });
+}
 
 /**
- * A Durable Object class whose instances see the runtime secrets in `env`. The constructor gets
- * a copy of the runtime's env; when this isolate already has the secrets they are in it before
- * the original constructor runs, otherwise `blockConcurrencyWhile` holds every event until they
- * are, and a failure there fails the object's events (fail closed). An object keeps the secrets
- * it started with until celld evicts it: revoking the key service stops new objects and isolates
- * (SAM_RUNTIME_SECRETS_TTL_MS), not one already running.
+ * This isolate's copy for the deployment's bundle with its age (a backwards clock counts as
+ * expired), and the two bounds; for the Durable Object wrapper (runtime-secrets-durable-object.ts).
  */
-export function wrapDurableObject<C extends DurableObjectClass>(Base: C): C {
-  // @ts-expect-error -- TS cannot type a mixin over an abstract constructor with a custom constructor
-  class WithRuntimeSecrets extends Base {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- forwards the runtime's arguments
-    constructor(...args: any[]) {
-      const [ctx, env] = args as [DurableObjectState, KeyAgentEnv & Record<string, unknown>];
-      const hit = cachedRuntimeSecrets(env);
-      const merged: Record<string, unknown> = hit ? withRuntimeSecrets(env, hit) : { ...env };
-      super(ctx, merged, ...args.slice(2));
-      if (!hit) {
-        void ctx.blockConcurrencyWhile(async () => {
-          Object.assign(merged, withRuntimeSecrets(env, await loadRuntimeSecrets(env)));
-        });
-      }
-    }
-  }
-  return WithRuntimeSecrets as unknown as C;
+export function currentRuntimeSecrets(env: KeyAgentEnv): {
+  secrets: RuntimeSecrets | null;
+  ageMs: number;
+  ttlMs: number;
+  maxStaleMs: number;
+} {
+  const age = cachedAgeMs();
+  const current = cached?.bundleId === env.SAM_SECRET_BUNDLE_ID && age !== null ? cached : null;
+  return {
+    secrets: current ? current.secrets : null,
+    ageMs: age ?? Number.POSITIVE_INFINITY,
+    ttlMs: ttlMs(env),
+    maxStaleMs: maxStaleMs(env),
+  };
 }

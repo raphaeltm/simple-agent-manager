@@ -6,7 +6,8 @@
 // eslint-disable-next-line sam/no-unguarded-outbound-fetch -- runtime-secrets.ts connects only to the deploy-pinned loopback agent (127.0.0.1:<port>, checked in its settings())
 import { connect } from 'cloudflare:sockets';
 
-import { useKeyAgentSocket, wrapDurableObject, wrapWorker } from './runtime-secrets';
+import { useKeyAgentSocket, wrapWorker } from './runtime-secrets';
+import { wrapDurableObject } from './runtime-secrets-durable-object';
 
 useKeyAgentSocket(connect);
 

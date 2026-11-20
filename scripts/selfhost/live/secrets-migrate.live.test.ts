@@ -23,6 +23,9 @@ import {
 /** The real deploy entry; a second `--init` on the same state sees no running stack. */
 const runDeploy = (envFile: string, args: string[], env: NodeJS.ProcessEnv = {}) =>
   harnessRunDeploy(envFile, args, { ...noStackDocker(dirname(envFile)), ...env });
+import { openBundle } from '../../../deploy/selfhost/key-agent/bundle.ts';
+import { createFileProvider } from '../../../deploy/selfhost/key-agent/provider-file.ts';
+import { bundleStoreFor, listBundles } from '../key-service.js';
 import { ensurePlatformKeys } from '../platform-keys.js';
 import { parseDotenv } from '../secret-files.js';
 import { type MigrateDeps, runMigration } from '../secrets-migrate.js';
@@ -207,6 +210,81 @@ describe('secrets migrate', () => {
     expect(logs.join('\n')).toContain(
       'rolled back: the install runs on plaintext deploy vars again'
     );
+    expect(holdOnPlaintext({ box: box(), stateDir: state })).toBe(true);
+  });
+
+  const bundleIds = async () => bundleStoreFor(state).listIds();
+
+  // Codex P2 on #2933: a leftover bundle from a failed attempt was the next attempt's base, so a
+  // secret the operator deleted from secrets.env in between survived into the sealed set.
+  it('a retry after a failed attempt seals only what the plaintext files hold then', async () => {
+    const retired = `RETIRED_SETTING=${randomBytes(8).toString('hex')}\n`;
+    writeFileSync(join(state, 'secrets.env'), OPERATOR + retired, { mode: 0o600 });
+    const failing = deps({
+      preflight: async () => {
+        steps.push('preflight');
+        throw new Error('contract check failed');
+      },
+    });
+    await expect(runMigration({ box: box(), stateDir: state }, failing)).rejects.toThrow(
+      /contract check failed/
+    );
+    expect(await bundleIds()).toEqual([]);
+    // The operator removes the line, then retries.
+    writeFileSync(join(state, 'secrets.env'), OPERATOR, { mode: 0o600 });
+    expect(await runMigration({ box: box(), stateDir: state }, deps())).toBe(
+      'migrated-files-kept'
+    );
+    const [newest] = await listBundles(bundleStoreFor(state));
+    if (!newest) throw new Error('no bundle');
+    const sealed = await openBundle(
+      newest,
+      createFileProvider({ SAM_KEY_FILE: join(state, 'key-agent', 'kek') })
+    );
+    expect(sealed.GITHUB_CLIENT_SECRET).toBeDefined();
+    expect(sealed.RETIRED_SETTING).toBeUndefined();
+  });
+
+  it('a healthy rollback removes the bundles the failed attempt sealed; an unhealthy one keeps them', async () => {
+    const leaky = (backHealthy: boolean) =>
+      deps({
+        currentVersionSecrets: async () => {
+          steps.push('scan current');
+          return ['ENCRYPTION_KEY'];
+        },
+        adoptAndCheck: async () => {
+          steps.push('reload+health');
+          return steps.includes('deploy legacy') && !backHealthy
+            ? { healthy: false, detail: 'HTTP 502' }
+            : { healthy: true, detail: 'HTTP 200' };
+        },
+      });
+    await expect(runMigration({ box: box(), stateDir: state }, leaky(true))).rejects.toThrow(
+      /rolled back/
+    );
+    expect(await bundleIds()).toEqual([]);
+    steps = [];
+    // Control: while the plaintext version is not shown running again, the bundle stays.
+    await expect(runMigration({ box: box(), stateDir: state }, leaky(false))).rejects.toThrow(
+      /rolled back/
+    );
+    expect(await bundleIds()).toHaveLength(1);
+  });
+
+  // Codex P2 on #2933: a rollback deploy that also fails must not leave the box looking sealed.
+  it('a failed rollback deploy still leaves the next upgrade on plaintext', async () => {
+    const bothFail = deps({
+      deploy: async (legacy) => {
+        steps.push(legacy ? 'deploy legacy' : 'deploy sealed');
+        if (legacy) throw new Error('fleet bucket unavailable');
+      },
+      adoptAndCheck: async () => ({ healthy: false, detail: 'HTTP 503' }),
+    });
+    await expect(runMigration({ box: box(), stateDir: state }, bothFail)).rejects.toThrow(
+      /fleet bucket unavailable/
+    );
+    expect(steps.at(-1)).toBe('deploy legacy');
+    expect(plaintextLeft()).toHaveLength(2);
     expect(holdOnPlaintext({ box: box(), stateDir: state })).toBe(true);
   });
 

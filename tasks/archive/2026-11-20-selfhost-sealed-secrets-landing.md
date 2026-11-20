@@ -60,7 +60,12 @@ Land it on main, self-host only, with no Cloudflare behaviour change.
       protected names in secrets.env (L-4), sanitized agent error text (L-5), uid seam, bundle
       path constant everywhere
 - [x] Staging2 smoke (no Cloudflare change): sign-in, health, me, projects, nodes, capabilities
-- [ ] Box proof (held by the coordinator until the legacy adoption path lands), merge, deploy
+- [x] Box proof on app.vmtest.sam2.party (2026-11-20). Details are in the PR body, "Self-host box run":
+  - The upgrade from main stays plaintext. The first attempt rolled back automatically; fixed in bfcc791d with the `--seal` hold.
+  - migrate chose gcp-kms (real Cloud KMS, auto).
+  - Sign-in, a secret-reading feature, the hosted-git clone, F9 and the sealed upgrade all PASS. Back-out is refused, as documented.
+  - The heap window seen once after the sealed upgrade was investigated and not reproduced in 2 tries: the cause points at celld's KV cell. Idea 01M7W6ZTZETXE75N8NRKR3R0CF; README troubleshooting note added.
+- [ ] Merge, Deploy Production, upgrade the box to main (done after this file is archived; recorded in the PR)
 
 ## Acceptance criteria
 

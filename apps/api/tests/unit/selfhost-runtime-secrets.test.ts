@@ -16,9 +16,9 @@ import {
   type KeyAgentSocket,
   loadRuntimeSecrets,
   resetRuntimeSecretsForTests,
-  wrapDurableObject,
   wrapWorker,
 } from '../../src/selfhost/runtime-secrets';
+import { wrapDurableObject } from '../../src/selfhost/runtime-secrets-durable-object';
 
 type Envelope = Record<string, unknown>;
 type Agent = (request: Record<string, unknown>) => Promise<Envelope>;
@@ -354,6 +354,41 @@ describe('refresh after SAM_RUNTIME_SECRETS_TTL_MS (security review M-2)', () =>
   });
 });
 
+describe('cache bounds (Codex P2s)', () => {
+  let now = 1_000_000;
+  beforeEach(() => {
+    now = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+  });
+
+  it('treats a clock that went backwards as expired, not fresh', async () => {
+    fetchMock
+      .mockImplementationOnce(ok({ K: 'v1' }))
+      .mockImplementation(ok({ K: 'v2' }));
+    const e = { ...env(), SAM_RUNTIME_SECRETS_TTL_MS: '1000' };
+    await loadRuntimeSecrets(e);
+    now -= 60_000;
+    expect((await loadRuntimeSecrets(e)).K).toBe('v2');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('a TTL longer than max-stale cannot serve past max-stale', async () => {
+    fetchMock
+      .mockImplementationOnce(ok({ K: 'v1' }))
+      .mockImplementation(ok({ K: 'v2' }));
+    const e = {
+      ...env(),
+      SAM_RUNTIME_SECRETS_TTL_MS: '60000',
+      SAM_RUNTIME_SECRETS_MAX_STALE_MS: '5000',
+    };
+    await loadRuntimeSecrets(e);
+    now += 4999;
+    expect((await loadRuntimeSecrets(e)).K).toBe('v1');
+    now += 1;
+    expect((await loadRuntimeSecrets(e)).K).toBe('v2');
+  });
+});
+
 describe('wrapDurableObject', () => {
   class Probe {
     env: Record<string, unknown>;
@@ -404,5 +439,72 @@ describe('wrapDurableObject', () => {
     const object = new Wrapped(state, env());
     await expect(held[0]).rejects.toThrow(/unreachable/);
     expect(object.env.ENCRYPTION_KEY).toBeUndefined();
+  });
+  describe('a resident object (Codex P1: it must not keep secrets past the loader bounds)', () => {
+    const boundedEnv = () => ({
+      ...env(),
+      SAM_RUNTIME_SECRETS_TTL_MS: '1000',
+      SAM_RUNTIME_SECRETS_MAX_STALE_MS: '5000',
+    });
+    let now = 1_000_000;
+    beforeEach(() => {
+      now = 1_000_000;
+      vi.spyOn(Date, 'now').mockImplementation(() => now);
+    });
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    async function resident() {
+      await loadRuntimeSecrets(boundedEnv());
+      const Wrapped = wrapDurableObject(Probe);
+      return new Wrapped(fakeState().state, boundedEnv());
+    }
+
+    it('reads its copy within the TTL without asking the agent again', async () => {
+      fetchMock.mockImplementation(ok({ ENCRYPTION_KEY: 'k1' }));
+      const object = await resident();
+      now += 999;
+      expect(object.env.ENCRYPTION_KEY).toBe('k1');
+      await settle();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('picks up a rotated value once due (refreshed in the background)', async () => {
+      fetchMock
+        .mockImplementationOnce(ok({ ENCRYPTION_KEY: 'k1' }))
+        .mockImplementation(ok({ ENCRYPTION_KEY: 'k2' }));
+      const object = await resident();
+      now += 1001;
+      expect(object.env.ENCRYPTION_KEY).toBe('k1');
+      await settle();
+      await settle();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(object.env.ENCRYPTION_KEY).toBe('k2');
+      expect(object.env.DATABASE).toEqual({ binding: 'db' });
+    });
+
+    it('loses its secrets once the agent refuses (revocation reaches a resident object)', async () => {
+      fetchMock
+        .mockImplementationOnce(ok({ ENCRYPTION_KEY: 'k1' }))
+        .mockImplementation(async () => ({ status: 503, error: 'sealed' }));
+      const object = await resident();
+      now += 1001;
+      void object.env.ENCRYPTION_KEY;
+      await settle();
+      await settle();
+      expect(() => object.env.ENCRYPTION_KEY).toThrow(/no longer available/);
+    });
+
+    it('loses its secrets past max-stale while the agent is unreachable', async () => {
+      fetchMock
+        .mockImplementationOnce(ok({ ENCRYPTION_KEY: 'k1' }))
+        .mockRejectedValue(new TypeError('connection refused'));
+      const object = await resident();
+      now += 4999;
+      expect(object.env.ENCRYPTION_KEY).toBe('k1');
+      await settle();
+      await settle();
+      now += 1;
+      expect(() => object.env.ENCRYPTION_KEY).toThrow(/no longer available/);
+    });
   });
 });

@@ -21,7 +21,7 @@ import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { explicitKeyProvider, keyChoicePath, readKeyChoice } from './key-choice';
-import { LEGACY_KEY_PROVIDER } from './key-service';
+import { bundleStoreFor, LEGACY_KEY_PROVIDER } from './key-service';
 import { readPrivateJson, readSecretsFile } from './secret-files';
 import { keyFileNotice, keyFilePath, verifyKeyCopy } from './secrets-keyfile';
 import { type preflightSealedSecrets } from './secrets-preflight';
@@ -84,6 +84,19 @@ export async function runMigration(
   const forgetNewChoice = () => {
     if (!choiceRecordedBefore) rmSync(keyChoicePath(stateDir), { force: true });
   };
+  // A failed attempt also removes the bundles it sealed. A retry must start from the plaintext
+  // files as they are then: a leftover bundle would be its base, and a secret the operator deleted
+  // from secrets.env in between would survive into the sealed set. No running version names a
+  // bundle this attempt created (it never switched, or it was rolled back first).
+  const store = bundleStoreFor(stateDir);
+  const bundlesBefore = new Set(await store.listIds());
+  const forgetNewBundles = async () => {
+    for (const id of await store.listIds()) {
+      if (bundlesBefore.has(id)) continue;
+      await store.remove(id);
+      log(`    removed bundle ${id}, sealed by this failed attempt`);
+    }
+  };
 
   let alreadySealed = false;
   try {
@@ -99,6 +112,7 @@ export async function runMigration(
     alreadySealed = (await deps.currentVersionSecrets()).length === 0;
   } catch (error) {
     forgetNewChoice();
+    await forgetNewBundles();
     throw error;
   }
 
@@ -130,10 +144,14 @@ export async function runMigration(
     if (!switched) throw error;
     const reason = error instanceof Error ? error.message : String(error);
     log(`migration FAILED: ${reason}`);
+    // Forgotten first: should the rollback deploy fail too, the box (still on its plaintext files)
+    // must not look sealed to the next selfhost:upgrade.
+    forgetNewChoice();
     log(`rolling back: selfhost:deploy --key-provider ${LEGACY_KEY_PROVIDER}`);
     await deps.deploy(true);
-    forgetNewChoice();
     const back = await deps.adoptAndCheck();
+    // Only once the plaintext version is running again does no version need the new bundles.
+    if (back.healthy) await forgetNewBundles();
     log(
       back.healthy
         ? 'rolled back: the install runs on plaintext deploy vars again, nothing was removed'

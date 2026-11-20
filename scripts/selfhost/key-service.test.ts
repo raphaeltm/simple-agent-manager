@@ -358,6 +358,18 @@ describe('removing a sealed value (pnpm selfhost:deploy --unset NAME)', () => {
     );
   };
 
+  it('refuses to deploy from an older bundle when the newest cannot be read (Codex P2)', async () => {
+    await seal({ ...OPERATOR, PROVIDER_ORPHAN_MIN_AGE_MS: '900000' });
+    const removed = await seal({ ...OPERATOR }, ['PROVIDER_ORPHAN_MIN_AGE_MS']);
+    // The newest bundle (the one without the retired value) is truncated on disk.
+    const path = join(state, 'key-agent', 'bundles', `${removed.bundleId}.json`);
+    writeFileSync(path, readFileSync(path, 'utf8').slice(0, 40));
+    await expect(seal({ ...OPERATOR })).rejects.toThrow(/cannot be read.*refusing to deploy/s);
+    // Control: once the damaged file is dealt with, the deploy runs again.
+    rmSync(path);
+    await expect(seal({ ...OPERATOR })).resolves.toMatchObject({ bundleId: expect.any(String) });
+  });
+
   it('reproduces R16: a deleted secrets.env line survives in the sealed secrets', async () => {
     await seal({ PROVIDER_ORPHAN_MIN_AGE_MS: '900000' });
     const after = await seal({});

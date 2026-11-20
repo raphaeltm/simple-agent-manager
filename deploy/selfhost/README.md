@@ -120,9 +120,16 @@ while the agent is unreachable it keeps its copy for at most `SAM_RUNTIME_SECRET
 The agent keeps an opened bundle for 300 s, serves that copy while an unreachable or slow key
 service is retried (`SAM_KEY_AGENT_STALE_WAIT_MS`, 1000 ms), for at most
 `SAM_KEY_AGENT_MAX_STALE_SECONDS` (6 h) after it opened it, and drops it when the key service
-refuses. So revoking the box's key access reaches running Worker isolates within one refresh; a
-Durable Object already running keeps the secrets it started with until celld evicts it. The other
-limits are in `.env.example`.
+refuses. So revoking the box's key access reaches running Worker isolates within one refresh.
+A Durable Object that stays resident reads each secret from its isolate's copy under the same two
+bounds: past the TTL the copy is refreshed in the background, and once the agent refuses or the
+copy passes `SAM_RUNTIME_SECRETS_MAX_STALE_MS`, reading a secret throws and the object's event
+fails (`apps/api/src/selfhost/runtime-secrets-durable-object.ts`). A clock that moves backwards
+counts a copy as expired, on both sides. The other limits are in `.env.example`.
+
+**A bundle that cannot be read stops the deploy.** It might be the newest, so deploying from the
+next readable one could bring back a changed or removed secret. Restore it from a backup, or
+remove it if you know it is not the newest.
 
 **The agent runs as the owner of `.state`**, from the start: never root, no capabilities, a
 read-only root file system. Docker Compose takes the uid from `SAM_KEY_AGENT_UID` in `.env`;
@@ -198,7 +205,11 @@ It seals the existing files unchanged, proves the chain before anything switches
 answers the Worker's real loader with every secret the files hold), starts the key agent and the
 updated fence, deploys the Worker without secret vars, makes celld adopt it at once and requires
 the first request to be healthy and the current deploy version in the bucket to hold no secret.
-Any failure after the switch redeploys with `--key-provider legacy-plaintext` and removes nothing.
+Any failure after the switch redeploys with `--key-provider legacy-plaintext` and removes no
+plaintext file. A failed attempt forgets the key choice it recorded (before the rollback deploy,
+so a rollback that also fails still leaves the box on plaintext for the next upgrade), and removes
+the bundles it sealed once the plaintext version runs again, so a retry seals the files as they
+are then.
 The plaintext files go last, and with the file key only once `--key-copy` proves a matching copy
 exists (`scripts/selfhost/secrets-migrate.ts`).
 

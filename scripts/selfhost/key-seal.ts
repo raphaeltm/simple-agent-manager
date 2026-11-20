@@ -167,7 +167,18 @@ export async function resolveSealedSecrets(input: ResolveSecretsInput): Promise<
   // Created only when needed: a dry run on a fresh box has no key file to read yet.
   let created: KeyProvider | undefined = input.provider;
   const provider = (): KeyProvider => (created ??= createKeyProvider(settings.hostEnv));
-  const latest = (await listBundles(settings.bundles))[0];
+  // An unreadable bundle has no trustworthy date, so it may be the newest: deploying from the next
+  // readable one could roll back a changed credential or bring back an unset one. Refuse instead.
+  const unreadable: string[] = [];
+  const latest = (await listBundles(settings.bundles, (message) => unreadable.push(message)))[0];
+  if (unreadable.length > 0) {
+    throw new Error(
+      `${settings.bundles.location} holds a sealed bundle that cannot be read, so the newest ` +
+        `secrets are unknown; refusing to deploy from an older one.\n${unreadable.join('\n')}\n` +
+        'Restore that bundle from backup (pnpm selfhost:restore), or remove it if you know it is ' +
+        'not the newest.'
+    );
+  }
   const current = latest ? await openBundle(latest, provider()) : {};
   const record = readRestoredIdentity(input.stateDir, latest, current);
   if (record === 'done' && input.mode !== 'dry-run') {
