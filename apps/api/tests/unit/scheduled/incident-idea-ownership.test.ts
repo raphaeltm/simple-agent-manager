@@ -515,6 +515,50 @@ describe('incident idea ownership', () => {
     expect(await dispatchable()).toEqual(['sig-legacy-user']);
   });
 
+  it('releases, and does not adopt, a legacy user-default idea someone engaged with', async () => {
+    const w = world();
+    const body = [
+      '## Maintainer Instructions',
+      '',
+      'Triage this automated platform feedback report.',
+      '',
+      '```',
+      '- evidence',
+      '```',
+    ].join('\n');
+    w.sqlite
+      .prepare(
+        `INSERT INTO tasks (id, triggered_by, project_id, user_id, title, description, status,
+           priority, task_mode, dispatch_depth, created_by, created_at, updated_at, is_idea)
+         VALUES ('engaged', 'user', 'feedback-project', 'owner-1', 'Recurring api platform error', ?,
+           'draft', 0, 'task', 0, 'owner-1', '2026-10-01T00:00:00.000Z', '2026-10-01T01:00:00.000Z', 1)`
+      )
+      .run(body);
+    w.sqlite
+      .prepare(
+        `INSERT INTO platform_feedback_triages (signature, source, summary, first_seen_at,
+           last_seen_at, occurrence_count, evidence_refs, severity, idea_id, queue_state, queued_at)
+         VALUES ('sig-engaged', 'api', 'Recurring api platform error', 1, 2, 5, '[]', 'error',
+           'engaged', 'pending', 1)`
+      )
+      .run();
+    const linked: IdeaWorkSnapshotReader = async (_env, _project, ids) =>
+      Object.fromEntries(
+        ids.map((id) => [
+          id,
+          { sessions: [{ strong: true }], updates: 0, fileIds: [], pullRequestUrls: [] },
+        ])
+      );
+
+    const result = await w.reconcile(T0, linked);
+
+    expect(result).toMatchObject({ adopted: 0, released: 1 });
+    expect(w.sqlite.prepare("SELECT triggered_by FROM tasks WHERE id = 'engaged'").get()).toEqual({
+      triggered_by: 'user',
+    });
+    expect(w.triageRow().idea_owned_at).toBe('released');
+  });
+
   it('does not adopt a legacy idea edited while the Durable Object was being read', async () => {
     const w = world();
     const body = [
