@@ -50,14 +50,23 @@ under them that repeat each account's name.
 
 ## Checklist
 
-- [ ] DO: `listWorkingChatSessionIds` (project-data `do/`), DO method, client wrapper, operations port, api operation-ports wiring
-- [ ] operations: `overviewChatRunningSql(paused, working)`; `readRunningChats` + `readProjectBrief` + `readBriefFacts` take working ids; overview get fetches once and shares; failure -> sections unavailable
-- [ ] apps/api brief refresh passes working ids
-- [ ] Tests: DO read against real DO SQLite (workers test) incl. newest-ACP precedence, chat-keyed fallback, sleeping chat excluded; overview SQL against real SQLite: latched `awaiting_followup` + working -> listed (fails pre-fix), idle -> not listed (control), starting/paused still listed
-- [ ] Budgets tile status line + remove exception list; unit tests updated
-- [ ] Rail rows tightened (Running now, Recently)
-- [ ] Playwright audit (project-overview-audit.spec.ts) mobile + desktop, screenshots checked
-- [ ] Docs: any doc describing Running now's rule updated
+- [x] DO: `listWorkingChatSessionIds` (project-data `do/`), DO method, client wrapper, operations port, api operation-ports wiring
+- [x] operations: `overviewChatRunningSql(paused, working)`; `readRunningChats` + `readProjectBrief` + `readBriefFacts` take working ids; overview get fetches once and shares; failure -> sections unavailable
+- [x] apps/api brief refresh passes working ids
+- [x] Tests: DO read against real DO SQLite (workers test) incl. newest-ACP precedence, chat-keyed fallback, sleeping chat excluded; overview SQL against real SQLite: latched `awaiting_followup` + working -> listed (fails pre-fix), idle -> not listed (control), starting/paused still listed
+- [x] Budgets tile status line + remove exception list; unit tests updated
+- [x] Rail rows tightened (Running now, Recently)
+- [x] Playwright audit (project-overview-audit.spec.ts) mobile + desktop, screenshots checked
+- [x] Docs: any doc describing Running now's rule updated
+
+## Implementation notes
+
+- Commits on PR #2921. Discrimination: restoring the old predicate turns the `later-turn` overview
+  unit test (plus two idle-paused cases) red.
+- Review: task-completion-validator PASS; cloudflare-specialist PASS (MEDIUM: a wedged `prompting`
+  row lists a chat, same as the chat view, healed by rule-57 reconciliation; kept); ui-ux-specialist
+  PASS, its two MEDIUMs fixed (visible status in the accessible name; number and colour from one window).
+- Deferred: `markAgentCompleted` has no callers -> `tasks/backlog/2026-11-20-agent-completed-at-has-no-writer.md`.
 
 ## Acceptance criteria
 

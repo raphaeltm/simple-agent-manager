@@ -158,10 +158,37 @@ describe('budgetAccounts', () => {
     expect(budgetTileLabel(team)).toBe(
       'Team Max, Weekly window · 13% left · resets 2d 5h, used by Sonnet'
     );
-    expect(accounts.find((a) => a.label === 'Personal Max')?.status?.detail).toBe(
-      'Weekly window used up · back in 2d 4h'
+    const personal = accounts.find((a) => a.label === 'Personal Max')!;
+    expect(personal.status?.detail).toBe('Weekly window used up · back in 2d 4h');
+    // The visible status is part of the accessible name (WCAG 2.5.3, label in name).
+    expect(budgetTileLabel(personal)).toBe(
+      'Personal Max, Out · 2d 4h, Weekly window used up · back in 2d 4h, used by Opus Build'
     );
+    for (const account of accounts) {
+      if (account.status) expect(budgetTileLabel(account)).toContain(account.status.text);
+    }
     expect(noAccount).toEqual(['Kimi']);
+  });
+
+  it('takes the number and its colour from the same window: a tighter session stays neutral', () => {
+    const { accounts } = budgetAccounts(
+      [profile('a', 'Opus Build')],
+      new Map([
+        [
+          'a',
+          usage({
+            state: 'low',
+            left: 4,
+            color: 'amber',
+            session: reading('5h', 4),
+            week: reading('Week', 40),
+          }),
+        ],
+      ])
+    );
+    // 4% is the session's; the week's amber must not paint it.
+    expect(accounts[0]?.status?.text).toBe('4% left');
+    expect(accounts[0]?.status?.color).toBeNull();
   });
 
   it('keeps a low session alone neutral: only the week carries a colour', () => {

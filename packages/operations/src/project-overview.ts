@@ -68,12 +68,14 @@ const WAITING_ON_VIEWER_SQL = `(CASE WHEN ${PAUSED_ON_PERSON_SQL} AND ss.created
 /**
  * Awake chats (`session_summaries.status = 'active'`, the D1 index the DO keeps in sync) whose
  * task is in a running status, and that are either still being placed, mid-turn (the ids in
- * `working_sessions`, read from the ProjectData activity mirror), or paused on an open question. The task join carries `project_id` so a task id cannot reach across projects
- * (rule 11), and a profile name is shown only for this project's profiles or the task creator's
- * own global ones, so a hint naming someone else's global profile reveals nothing. `COUNT(*) OVER ()` gives the total without a second round trip.
- * `paused_sessions` reads this project's open, unexpired question asks (`idx_asks_open_question`)
- * and its pending, unexpired secret requests (`idx_runtime_secret_requests_status_expires`; few are
- * ever pending) once, both bound to the project like every other predicate here.
+ * `working_sessions`, read from the ProjectData activity mirror), or paused on an open question.
+ * The task join carries `project_id` so a task id cannot reach across projects (rule 11), and a
+ * profile name is shown only for this project's profiles or the task creator's own global ones,
+ * so a hint naming someone else's global profile reveals nothing. `COUNT(*) OVER ()` gives the
+ * total without a second round trip. `paused_sessions` reads this project's open, unexpired
+ * question asks (`idx_asks_open_question`) and its pending, unexpired secret requests
+ * (`idx_runtime_secret_requests_status_expires`; few are ever pending) once, both bound to the
+ * project like every other predicate here.
  */
 const RUNNING_SQL = `
   WITH paused_sessions AS (
@@ -309,7 +311,10 @@ export async function projectOverviewGet(
   const unavailable: ProjectOverviewSection[] = [];
   // Read once, used by Running now and by the brief's re-check of the chats it names. If it
   // fails, both sections are unavailable rather than reporting every chat as idle.
-  const working = ctx.ports.projectData.listWorkingChatSessionIds(projectId);
+  // `then`: a port that throws synchronously still becomes a rejection the sections catch.
+  const working = Promise.resolve().then(() =>
+    ctx.ports.projectData.listWorkingChatSessionIds(projectId)
+  );
   working.catch(() => undefined); // Each section reports its own failure.
   const [running, ideas, mergedPullRequests, brief] = await Promise.all([
     section(

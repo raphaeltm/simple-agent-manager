@@ -743,6 +743,16 @@ test.describe('Project Overview', () => {
     await capture(page, 'overview-many-accounts');
   });
 
+  test('many accounts, light theme: the status colours stay readable', async ({ page }) => {
+    await seedTheme(page, 'light');
+    await setupScene(page, { scene: 'normal', budget: 'many', automations: 'normal' });
+    await page.goto(BASE);
+    const budgets = page.getByRole('region', { name: 'Budgets' });
+    await expect(budgets.getByTestId('overview-budget-status').first()).toBeVisible();
+    await budgets.scrollIntoViewIfNeeded();
+    await capture(page, 'overview-many-accounts-light');
+  });
+
   test('sending a task keeps you on the page', async ({ page }, testInfo) => {
     await setupScene(page, {
       scene: 'normal',

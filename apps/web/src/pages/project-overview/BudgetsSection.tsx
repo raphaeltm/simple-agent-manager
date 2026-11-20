@@ -19,6 +19,10 @@ import {
   usageSpoken,
   usageWords,
 } from '../../components/project-chat/profile-picker';
+import {
+  healthColor,
+  USAGE_HEALTH,
+} from '../../components/project-chat/profile-picker/usage-windows';
 import { Section, SectionHead, SectionNote } from './sections';
 
 export interface BudgetStatus {
@@ -49,16 +53,31 @@ export function budgetStatus(usage: ProfileUsage): BudgetStatus | null {
   const words = usageWords(usage, { namedWindows: true });
   if (words.length === 0) return null;
   const detail = words.map((word) => word.text).join(' · ');
-  // The week's word carries the health colour; a low session alone stays neutral.
-  const color = words.find((word) => word.color)?.color ?? null;
   if (usage.state === 'out') {
-    return {
-      text: usage.resetIn ? `Out · ${usage.resetIn}` : 'Out',
-      color: color ?? usage.color,
-      detail,
-    };
+    return { text: usage.resetIn ? `Out · ${usage.resetIn}` : 'Out', color: usage.color, detail };
   }
-  return { text: usage.left === null ? 'Low' : `${usage.left}% left`, color, detail };
+  // The number and its colour come from one window: the tightest of those the words show (the
+  // same "half left" bar, `USAGE_HEALTH.calm`). A low session alone stays neutral, as in the
+  // composer; the week carries its health colour.
+  const shown = [
+    { reading: usage.session, color: null },
+    { reading: usage.week, color: usage.week ? healthColor(usage.week.left) : null },
+  ].flatMap(({ reading, color }) =>
+    reading && reading.left !== null && reading.left <= USAGE_HEALTH.calm
+      ? [{ left: reading.left, color }]
+      : []
+  );
+  const tightest = shown.reduce<(typeof shown)[number] | undefined>(
+    (best, next) => (!best || next.left <= best.left ? next : best),
+    undefined
+  );
+  if (tightest) return { text: `${tightest.left}% left`, color: tightest.color, detail };
+  // No session or week window explains it: the words name the account's own reading.
+  return {
+    text: usage.left === null ? 'Low' : `${usage.left}% left`,
+    color: words[0]?.color ?? null,
+    detail,
+  };
 }
 
 /**
@@ -104,11 +123,20 @@ export function budgetAccounts(
   return { accounts, noAccount };
 }
 
-/** What a screen reader hears for a tile: the account, what is left, and who uses it. */
+/**
+ * What a screen reader hears for a tile: the account, the status it shows, the full words when
+ * they say more, and who uses it. The visible status is always part of the name (WCAG 2.5.3), so
+ * "Out · 2d 4h" can be spoken to select the tile.
+ */
 export function budgetTileLabel(account: BudgetAccount): string {
-  const left =
-    account.status?.detail ??
-    (account.usage.state === 'platform' ? null : usageSpoken(account.usage));
+  const status = account.status;
+  const left = status
+    ? status.detail.includes(status.text)
+      ? status.detail
+      : `${status.text}, ${status.detail}`
+    : account.usage.state === 'platform'
+      ? null
+      : usageSpoken(account.usage);
   const users = account.profiles.map((profile) => profile.name).join(', ');
   return [account.label, left, `used by ${users}`].filter(Boolean).join(', ');
 }
@@ -154,7 +182,7 @@ export function BudgetsSection({
                 </span>
                 {account.status && (
                   <span
-                    className={`w-full truncate text-[11.5px] leading-tight ${account.status.color ? '' : 'text-fg-muted'}`}
+                    className={`w-full truncate text-xs leading-tight ${account.status.color ? '' : 'text-fg-muted'}`}
                     style={account.status.color ? { color: account.status.color } : undefined}
                     data-testid="overview-budget-status"
                   >
