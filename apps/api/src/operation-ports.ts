@@ -121,6 +121,7 @@ export function createOperationPorts(env: Env): OperationPorts {
       resolveTranscriptOwner: (...a) => projectData.resolveTranscriptOwner(env, ...a),
       getMailboxMessage: (...a) => projectData.getMailboxMessage(env, ...a),
       listActiveAttentionMarkers: (...a) => projectData.listActiveAttentionMarkers(env, ...a),
+      listWorkingChatSessionIds: (...a) => projectData.listWorkingChatSessionIds(env, ...a),
       getRunReceiptFacts: (...a) => projectData.getRunReceiptFacts(env, ...a),
       countRunNudges: (...a) => projectData.countRunNudges(env, ...a),
       searchKnowledgeObservations: (...a) => projectData.searchKnowledgeObservations(env, ...a),

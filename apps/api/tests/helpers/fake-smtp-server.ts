@@ -102,7 +102,11 @@ export interface FakeSmtpOptions {
   dropOnQuit?: boolean;
   /** Extra bytes sent right after "220 Ready to start TLS" (STARTTLS injection). */
   injectAfterStartTls?: string;
-  /** Never answer the greeting (deadline tests). */
+  /**
+   * Accept the connection and never write a byte (deadline tests): no greeting, and incoming
+   * bytes are drained without being parsed, so a TLS ClientHello whose random bytes happen to
+   * contain CRLF cannot draw a plaintext "502" reply. Takes precedence over `rawGreeting`.
+   */
   silent?: boolean;
 }
 
@@ -218,10 +222,15 @@ export async function startFakeSmtpServer(options: FakeSmtpOptions): Promise<Fak
         onLine(line);
       }
     };
-    socket.on('data', onData);
     socket.on('error', () => undefined);
+    if (options.silent) {
+      // Drain without parsing: anything parsed could be answered, and a silent server must not.
+      socket.on('data', () => undefined);
+      return;
+    }
+    socket.on('data', onData);
     if (options.rawGreeting !== undefined) socket.write(options.rawGreeting);
-    else if (!options.silent) write('220 fake.example.com ESMTP test');
+    else write('220 fake.example.com ESMTP test');
   };
 
   const server =

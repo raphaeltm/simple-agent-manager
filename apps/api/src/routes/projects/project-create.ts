@@ -6,13 +6,15 @@ import { type Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { isValidGitBranchName } from '../../lib/git-ref-name';
 import { log } from '../../lib/logger';
 import { toProjectResponse } from '../../lib/mappers';
 import { ulid } from '../../lib/ulid';
 import { getUserId } from '../../middleware/auth';
-import { errors } from '../../middleware/error';
+import { AppError, errors } from '../../middleware/error';
 import { createOwnerProjectMembership } from '../../middleware/project-auth';
 import { CreateProjectSchema, jsonValidator } from '../../schemas';
+import { artifactsBackendExtensions, resolveArtifactsBackend } from '../../services/artifacts/backend';
 import { seedArtifactsReadme } from '../../services/artifacts/seed-readme';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import {
@@ -20,7 +22,6 @@ import {
   requireGitLabUserAccessToken,
   verifyGitLabProjectAccess,
 } from '../../services/gitlab';
-import { resolveArtifactsBackend } from '../../services/hosted-git/backend';
 import { getRuntimeLimits } from '../../services/limits';
 import {
   assertRepositoryAccess,
@@ -103,7 +104,18 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
         throw errors.badRequest(`Maximum ${maxRepos} Artifacts-backed projects allowed`);
       }
 
+      const importUrl = body.importUrl?.trim() || null;
+      const extensions = artifactsBackendExtensions(c.env, artifacts);
+      const importer = extensions.importSource;
+      if (importUrl && !importer) {
+        throw errors.badRequest('This repository backend does not support importUrl');
+      }
+      const importBranch = importUrl && importer ? await importer.defaultBranch(importUrl) : null;
+      if (importUrl && !importBranch) {
+        throw errors.badRequest('Could not read the default branch of the repository at importUrl');
+      }
       const defaultBranch =
+        importBranch ||
         body.defaultBranch?.trim() ||
         c.env.ARTIFACTS_DEFAULT_BRANCH ||
         ARTIFACTS_DEFAULTS.DEFAULT_BRANCH;
@@ -114,6 +126,13 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
       if (defaultBranch.length > 255 || !/^[a-zA-Z0-9._\-/]+$/.test(defaultBranch)) {
         throw errors.badRequest(
           'defaultBranch contains invalid characters. Only alphanumeric, hyphens, underscores, slashes, and dots are allowed (max 255 chars).'
+        );
+      }
+      // The repository's first push writes this branch; refuse names git itself rejects
+      // (`foo.lock`, `.hidden`, `a..b`, `trailing.`) here rather than fail the seed push.
+      if (!isValidGitBranchName(defaultBranch)) {
+        throw errors.badRequest(
+          'defaultBranch is not a valid git branch name (see git check-ref-format).'
         );
       }
 
@@ -133,13 +152,23 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
       // also orients agents (project name, description, SAM MCP tools). If seeding
       // fails the repo is unusable, so we abort creation and log the orphan.
       try {
-        await seedArtifactsReadme({
-          remote: created.remote,
-          token: created.token,
-          branch: defaultBranch,
-          projectName: name,
-          description,
-        });
+        if (importUrl && importer) {
+          await importer.populate({
+            sourceUrl: importUrl,
+            branch: defaultBranch,
+            remote: created.remote,
+            token: created.token,
+          });
+        } else {
+          await seedArtifactsReadme({
+            remote: created.remote,
+            token: created.token,
+            branch: defaultBranch,
+            projectName: name,
+            description,
+            fetchImpl: extensions.remoteFetch,
+          });
+        }
       } catch (seedError) {
         log.error('project_create.artifacts_seed_failed', {
           projectId,
@@ -159,6 +188,7 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
             action: 'orphaned_artifacts_repo_cleanup_failed',
           });
         }
+        if (importUrl && seedError instanceof AppError) throw seedError;
         throw errors.internal('Failed to initialize Artifacts repository');
       }
 

@@ -4,7 +4,7 @@
  * bucket, the metadata token proxy's address and secret). See egress-fence.ts.
  */
 import { randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, readFileSync, writeFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 
@@ -61,6 +61,33 @@ export function assertComposeProfiles(box: Readonly<Record<string, string>>): vo
   }
 }
 
+/** The rendered nft rules: bind-mounted read-only into the fence container (docker-compose.yml). */
+export const FENCE_RULES_FILE = 'egress-fence.nft';
+/**
+ * The fence container's root reads the rules without DAC_OVERRIDE, so they must be world
+ * readable. They hold addresses and ports only, never a secret.
+ */
+export const FENCE_RULES_MODE = 0o644;
+
+/**
+ * Restores the rules file's required mode, for paths that write state without it (a snapshot
+ * restore writes every file 0600). Only a regular file this user owns is touched; a symlink or a
+ * foreign file is refused. Returns whether the mode changed.
+ */
+export function repairFenceRulesMode(stateDir: string): boolean {
+  const path = join(stateDir, FENCE_RULES_FILE);
+  const stat = lstatSync(path, { throwIfNoEntry: false });
+  if (!stat) return false;
+  if (!stat.isFile() || stat.isSymbolicLink())
+    throw new Error(`${path} is not a regular file; refusing to change its mode`);
+  const uid = process.getuid?.();
+  if (uid !== undefined && stat.uid !== uid)
+    throw new Error(`${path} is owned by uid ${stat.uid}, not the operator (${uid})`);
+  if ((stat.mode & 0o777) === FENCE_RULES_MODE) return false;
+  chmodSync(path, FENCE_RULES_MODE);
+  return true;
+}
+
 export interface FenceFilesResult {
   changed: string[];
 }
@@ -87,7 +114,7 @@ export async function writeFenceFiles(input: {
       .map((entry) => entry?.address ?? '')
       .filter(Boolean),
   });
-  const rulesPath = join(stateDir, 'egress-fence.nft');
+  const rulesPath = join(stateDir, FENCE_RULES_FILE);
   const rules = renderFenceRuleset(plan);
   const envPath = join(stateDir, 'celld.env');
   const secret = metadataProxyEnabled(box) ? ensureMetadataProxySecret(stateDir) : '';
@@ -100,8 +127,11 @@ export async function writeFenceFiles(input: {
 
   // Not secret, and read by the fence container's root, which has no DAC_OVERRIDE: 0644.
   if (changed.includes(rulesPath)) {
-    writeFileSync(rulesPath, rules, { mode: 0o644 });
-    chmodSync(rulesPath, 0o644);
+    writeFileSync(rulesPath, rules, { mode: FENCE_RULES_MODE });
+    chmodSync(rulesPath, FENCE_RULES_MODE);
+  } else {
+    // Unchanged rules can still carry a wrong mode (a snapshot restore writes 0600).
+    repairFenceRulesMode(stateDir);
   }
   if (changed.includes(envPath)) writePrivateFile(envPath, env);
   return { changed };

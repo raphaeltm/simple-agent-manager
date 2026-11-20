@@ -11,8 +11,13 @@ const log = createModuleLogger('signup-approval');
 
 export const SIGNUP_APPROVAL_SETTING_KEY = 'signup.requireApproval';
 
+/**
+ * Signup approval is on unless the deployment explicitly opts out with `REQUIRE_APPROVAL=false`.
+ * Any other value, including unset or a typo, keeps it on: an internet-facing installation must not
+ * hand active accounts to anyone who can sign in by default.
+ */
 function envRequiresApproval(env: Env): boolean {
-  return env.REQUIRE_APPROVAL === 'true';
+  return env.REQUIRE_APPROVAL?.trim().toLowerCase() !== 'false';
 }
 
 function parseStoredBoolean(value: string | null | undefined): boolean | null {

@@ -3390,6 +3390,11 @@ export class ProjectData extends DurableObject<Env> {
     return sessionState.getSessionState(this.sql, sessionId);
   }
 
+  /** Awake chats whose agent is mid-turn (the Project Overview's Running now). */
+  listWorkingChatSessionIds(): string[] {
+    return sessionState.listWorkingChatSessionIds(this.sql);
+  }
+
   /**
    * Record a control-plane-observed turn ending (cancel, force-stop, dead
    * target). Idempotent and compare-and-set: a working state that began after

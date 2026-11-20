@@ -21,7 +21,11 @@ import {
   BRIEF_ASK_VISIBLE_SQL,
   BRIEF_AUTOMATION_FAILING_SQL,
 } from './project-brief-sql';
-import { overviewChatRunningSql, overviewPausedSessionsSql } from './project-overview-statuses';
+import {
+  OVERVIEW_WORKING_SESSIONS_SQL,
+  overviewChatRunningSql,
+  overviewPausedSessionsSql,
+} from './project-overview-statuses';
 
 /** At most this many sentences are stored, and so shown (three on desktop, two on a phone). */
 export const BRIEF_MAX_SENTENCES = 3;
@@ -59,8 +63,9 @@ const refs = (column: string) =>
  * a shared account near its limit (`BRIEF_ACCOUNT_LIVE_SQL`). Every subquery binds the row's own
  * `project_id`, so a ref can never resolve another project's item (rule 11). A chat named as
  * running must still pass Running now's own rule (`overviewChatRunningSql`), and an automation
- * named as failing must still be failing (`BRIEF_AUTOMATION_FAILING_SQL`). Binds `now` four times
- * (asks; the paused-chat sets twice; accounts), then the project.
+ * named as failing must still be failing (`BRIEF_AUTOMATION_FAILING_SQL`). Binds, in order: `now`
+ * three times (asks; the paused-chat sets twice), the mid-turn chat ids as JSON, `now` (accounts),
+ * then the project.
  */
 const BRIEF_SQL = `
   SELECT b.brief_json, b.generated_at, b.stale, b.pending_since, b.last_error_at,
@@ -70,7 +75,10 @@ const BRIEF_SQL = `
     (SELECT json_group_array(ss.id) FROM session_summaries ss
        JOIN tasks t ON t.id = ss.task_id AND t.project_id = ss.project_id
       WHERE ss.project_id = b.project_id
-        AND ${overviewChatRunningSql(overviewPausedSessionsSql('b.project_id'))}
+        AND ${overviewChatRunningSql(
+          overviewPausedSessionsSql('b.project_id'),
+          OVERVIEW_WORKING_SESSIONS_SQL
+        )}
         AND ss.id IN (SELECT value FROM ${refs('ref_chats_json')})) AS running_chats,
     (SELECT json_group_array(t.id) FROM triggers t
       WHERE t.project_id = b.project_id AND ${BRIEF_AUTOMATION_FAILING_SQL}
@@ -128,11 +136,13 @@ function withOpaqueAccountIds(sentence: OverviewBriefSentence): OverviewBriefSen
 export async function readProjectBrief(
   db: D1Database,
   projectId: string,
-  now: number
+  now: number,
+  /** Chats whose agent is mid-turn (`listWorkingChatSessionIds`), for Running now's rule. */
+  workingSessionIds: readonly string[]
 ): Promise<OverviewBrief | null> {
   const raw = await db
     .prepare(BRIEF_SQL)
-    .bind(now, now, now, now, projectId)
+    .bind(now, now, now, JSON.stringify(workingSessionIds), now, projectId)
     .first<Record<string, unknown>>();
   if (!raw) return null;
   const row = v.safeParse(RowSchema, raw);

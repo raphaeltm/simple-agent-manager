@@ -1,8 +1,11 @@
 /**
  * Budgets: one usage ring per account the project's profiles run on (the approved ring,
- * `ProfileUsageAvatar`). Calm accounts are just the ring; words appear only for exceptions, and
- * they name the window in full ("5-hour window · 38% left") because this page is read out of
- * the composer's context.
+ * `ProfileUsageAvatar`). Calm accounts are just the ring and the account's name; an account that
+ * needs attention carries one short status under its name ("6% left", "Out · 2d 4h", "Paused"),
+ * in the window's colour. The full words, which name the window ("Weekly window · 6% left ·
+ * resets 2d 4h"), are the tile's tooltip and accessible name, because this page is read out of
+ * the composer's context. Raphaël (2026-11-20) found the earlier list of sentences under the
+ * rings too busy: it repeated every account's name a second time.
  *
  * The usage comes from `useProfileUsages`, the same model and cached reads the task box's own
  * ring uses, so this section adds no request and cannot disagree with the composer.
@@ -16,7 +19,20 @@ import {
   usageSpoken,
   usageWords,
 } from '../../components/project-chat/profile-picker';
+import {
+  healthColor,
+  USAGE_HEALTH,
+} from '../../components/project-chat/profile-picker/usage-windows';
 import { Section, SectionHead, SectionNote } from './sections';
+
+export interface BudgetStatus {
+  /** What the tile shows: "6% left", "Out · 2d 4h", "Paused". */
+  text: string;
+  /** Null: neutral text. A colour: the window's health. */
+  color: string | null;
+  /** The same in full words, naming the window: the tooltip and the accessible name. */
+  detail: string;
+}
 
 export interface BudgetAccount {
   key: string;
@@ -25,31 +41,61 @@ export interface BudgetAccount {
   first: AgentProfile;
   profiles: AgentProfile[];
   usage: ProfileUsage;
+  /** Null while the account is calm. */
+  status: BudgetStatus | null;
 }
 
-export interface BudgetException {
-  key: string;
-  text: string;
-  /** Null: neutral text. A colour: the window's health. */
-  color: string | null;
+/** The one short status a tile shows, or null for a calm account. */
+export function budgetStatus(usage: ProfileUsage): BudgetStatus | null {
+  if (usage.state === 'paused') {
+    return { text: 'Paused', color: null, detail: 'Paused' };
+  }
+  const words = usageWords(usage, { namedWindows: true });
+  if (words.length === 0) return null;
+  const detail = words.map((word) => word.text).join(' · ');
+  if (usage.state === 'out') {
+    return { text: usage.resetIn ? `Out · ${usage.resetIn}` : 'Out', color: usage.color, detail };
+  }
+  // The number and its colour come from one window: the tightest of those the words show (the
+  // same "half left" bar, `USAGE_HEALTH.calm`). A low session alone stays neutral, as in the
+  // composer; the week carries its health colour.
+  const shown = [
+    { reading: usage.session, color: null },
+    { reading: usage.week, color: usage.week ? healthColor(usage.week.left) : null },
+  ].flatMap(({ reading, color }) =>
+    reading && reading.left !== null && reading.left <= USAGE_HEALTH.calm
+      ? [{ left: reading.left, color }]
+      : []
+  );
+  const tightest = shown.reduce<(typeof shown)[number] | undefined>(
+    (best, next) => (!best || next.left <= best.left ? next : best),
+    undefined
+  );
+  if (tightest) return { text: `${tightest.left}% left`, color: tightest.color, detail };
+  // No session or week window explains it: the words name the account's own reading.
+  return {
+    text: usage.left === null ? 'Low' : `${usage.left}% left`,
+    color: words[0]?.color ?? null,
+    detail,
+  };
 }
 
 /**
  * Group profiles by the account they run on. The platform is one account; profiles whose usage
- * is unknown (still loading, or a provider without readings) and those with no account are
- * left out of the rings, and a profile with no account becomes an exception instead.
+ * is unknown (still loading, or a provider without readings) are left out of the rings, and the
+ * names of profiles with no account connected are returned for one line under them.
  */
 export function budgetAccounts(
   profiles: readonly AgentProfile[],
   usages: ReadonlyMap<string, ProfileUsage>
-): { accounts: BudgetAccount[]; exceptions: BudgetException[] } {
+): { accounts: BudgetAccount[]; noAccount: string[] } {
   const byKey = new Map<string, BudgetAccount>();
-  const noAccount: AgentProfile[] = [];
+  const noAccount: string[] = [];
   for (const profile of profiles) {
     const usage = usages.get(profile.id);
     if (!usage) continue;
     if (usage.state === 'none') {
-      noAccount.push(profile);
+      noAccount.push(profile.name);
       continue;
     }
     const key =
@@ -70,37 +116,27 @@ export function budgetAccounts(
       first: profile,
       profiles: [profile],
       usage,
+      status: budgetStatus(usage),
     });
   }
   const accounts = [...byKey.values()].sort((a, b) => a.label.localeCompare(b.label));
-  const exceptions: BudgetException[] = [];
-  for (const account of accounts) {
-    if (account.usage.state === 'paused') {
-      exceptions.push({ key: account.key, text: `${account.label} is paused`, color: null });
-      continue;
-    }
-    for (const [index, word] of usageWords(account.usage, { namedWindows: true }).entries()) {
-      exceptions.push({
-        key: `${account.key}:${index}`,
-        text: `${account.label}: ${word.text}`,
-        color: word.color,
-      });
-    }
-  }
-  if (noAccount.length > 0) {
-    const names = noAccount.map((profile) => profile.name).join(', ');
-    exceptions.push({
-      key: 'no-account',
-      text: `No account connected for ${names}`,
-      color: null,
-    });
-  }
-  return { accounts, exceptions };
+  return { accounts, noAccount };
 }
 
-/** What a screen reader hears for a tile: the account, what is left, and who uses it. */
+/**
+ * What a screen reader hears for a tile: the account, the status it shows, the full words when
+ * they say more, and who uses it. The visible status is always part of the name (WCAG 2.5.3), so
+ * "Out · 2d 4h" can be spoken to select the tile.
+ */
 export function budgetTileLabel(account: BudgetAccount): string {
-  const left = account.usage.state === 'platform' ? null : usageSpoken(account.usage);
+  const status = account.status;
+  const left = status
+    ? status.detail.includes(status.text)
+      ? status.detail
+      : `${status.text}, ${status.detail}`
+    : account.usage.state === 'platform'
+      ? null
+      : usageSpoken(account.usage);
   const users = account.profiles.map((profile) => profile.name).join(', ');
   return [account.label, left, `used by ${users}`].filter(Boolean).join(', ');
 }
@@ -118,34 +154,41 @@ export function BudgetsSection({
   className?: string;
 }) {
   const accountsPage = `/projects/${projectId}/settings/accounts`;
-  const { accounts, exceptions } = usages
+  const { accounts, noAccount } = usages
     ? budgetAccounts(profiles, usages)
-    : { accounts: [], exceptions: [] };
+    : { accounts: [], noAccount: [] };
   return (
     <Section label="Budgets" className={className}>
       <SectionHead title="Budgets" to={accountsPage} linkLabel="Accounts" />
       {accounts.length > 0 ? (
         <ul
-          className="m-0 grid grid-cols-[repeat(auto-fill,minmax(6.5rem,1fr))] gap-1 p-0"
+          className="m-0 grid grid-cols-[repeat(auto-fill,minmax(5rem,1fr))] gap-0.5 p-0"
           data-testid="overview-budgets"
         >
           {accounts.map((account) => (
             <li key={account.key} className="flex min-w-0 list-none">
               <Link
                 to={accountsPage}
-                className="flex min-h-11 min-w-0 flex-1 flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-center no-underline hover:bg-surface-hover"
+                className="flex min-h-11 min-w-0 flex-1 flex-col items-center gap-0.5 rounded-lg px-1 py-1 text-center no-underline hover:bg-surface-hover"
                 // The ring is decorative, so the label carries what is left (rule 80, item 7).
                 aria-label={budgetTileLabel(account)}
+                title={[account.label, account.status?.detail].filter(Boolean).join(' · ')}
+                data-testid="overview-budget-tile"
               >
-                <ProfileUsageAvatar profile={account.first} usage={account.usage} />
-                <span className="line-clamp-1 w-full break-all text-[13px] font-medium text-fg-primary">
+                <ProfileUsageAvatar profile={account.first} usage={account.usage} size="sm" />
+                {/* One line, ellipsised: the full name is the tile's tooltip and accessible name. */}
+                <span className="w-full truncate text-[12.5px] font-medium leading-tight text-fg-primary">
                   {account.label}
                 </span>
-                <span className="line-clamp-1 w-full break-all text-[11px] text-fg-muted">
-                  {account.profiles.length === 1
-                    ? account.first.name
-                    : `${account.profiles.length} profiles`}
-                </span>
+                {account.status && (
+                  <span
+                    className={`w-full truncate text-xs leading-tight ${account.status.color ? '' : 'text-fg-muted'}`}
+                    style={account.status.color ? { color: account.status.color } : undefined}
+                    data-testid="overview-budget-status"
+                  >
+                    {account.status.text}
+                  </span>
+                )}
               </Link>
             </li>
           ))}
@@ -159,21 +202,13 @@ export function BudgetsSection({
               : 'No account usage to show.'}
         </SectionNote>
       )}
-      {exceptions.length > 0 && (
-        <ul
-          className="m-0 flex flex-col gap-0.5 px-2 pt-1 pb-0.5"
-          data-testid="overview-budget-exceptions"
+      {noAccount.length > 0 && (
+        <p
+          className="m-0 px-2 pt-1 text-[12.5px] break-words text-fg-muted"
+          data-testid="overview-budget-no-account"
         >
-          {exceptions.map((exception) => (
-            <li
-              key={exception.key}
-              className="list-none text-[13px] break-words"
-              style={exception.color ? { color: exception.color } : undefined}
-            >
-              <span className={exception.color ? '' : 'text-fg-secondary'}>{exception.text}</span>
-            </li>
-          ))}
-        </ul>
+          No account connected for {noAccount.join(', ')}
+        </p>
       )}
     </Section>
   );

@@ -105,7 +105,13 @@ beforeEach(async () => {
        VALUES ('project-1', 'user-1', 'owner', 'active')`
     )
     .run();
-  env = { DATABASE: createSqliteD1(sqlite), KV: createJsonKv() } as unknown as Env;
+  // Model an installation that opted out of signup approval; tests turn it on through the runtime
+  // row. The unset (default-on) case is covered explicitly below.
+  env = {
+    DATABASE: createSqliteD1(sqlite),
+    KV: createJsonKv(),
+    REQUIRE_APPROVAL: 'false',
+  } as unknown as Env;
   await storeMcpToken(env.KV, TOKEN, TOKEN_DATA);
 });
 
@@ -290,6 +296,17 @@ describe('validateActiveWorkspaceMcpToken', () => {
 
     setSignupApprovalSetting('false');
     await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(TOKEN_DATA);
+  });
+
+  it('rejects a pending owner by default when REQUIRE_APPROVAL is unset and no runtime row exists', async () => {
+    env = { ...env, REQUIRE_APPROVAL: undefined } as Env;
+    setUserStatus('pending');
+    seed({ status: 'running' });
+    expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).toBeNull();
+    expect(await tokenStillStored()).toBe(true);
+
+    setUserStatus('active');
+    expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).not.toBeNull();
   });
 
   it('falls back to REQUIRE_APPROVAL when no runtime setting row exists, and the row overrides it', async () => {
