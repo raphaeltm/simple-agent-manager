@@ -292,7 +292,7 @@ describe('callback identity fence (rule 49) sees a replaced runtime', () => {
 describe('every callback credential is verified where the generation is checked', () => {
   // The generation check lives in verifyCallbackToken so that every sink inherits it.
   // A module that verified a callback JWT itself would silently skip it (rule 61).
-  it('no source module outside services/jwt.ts verifies a JWT signature', () => {
+  it('no source module outside services/jwt-verify.ts verifies a JWT signature', () => {
     const files = collectSourceFiles();
     expect(files.length).toBeGreaterThan(500);
     const verifiers = files.filter((file) => {
@@ -304,7 +304,7 @@ describe('every callback credential is verified where the generation is checked'
     // audience and `type: workload-identity` required, so a SAM callback token cannot pass it.
     expect(verifiers.map((file) => path.relative(SRC_ROOT, file)).sort()).toEqual([
       'services/agent-sign-in/verify.ts',
-      'services/jwt.ts',
+      'services/jwt-verify.ts',
     ]);
   });
 });
