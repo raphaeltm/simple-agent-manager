@@ -13,7 +13,7 @@ import { type BoxContext, check } from './backup-lib';
  * never built a local image, so the pinned base is pulled before adoption changes anything.
  */
 export const DEFAULT_ADOPTION_HELPER_IMAGE =
-  'alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f';
+  'alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf';
 
 /** Present or pulled before any mutation, so a missing image cannot strand a stopped stack. */
 export function ensureHelperImage(ctx: Pick<BoxContext, 'run'>, image: string): void {
