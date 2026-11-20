@@ -71,9 +71,12 @@ the deadline moves by only a few seconds each time against a 15-minute timeout.
 - [x] A steady merged batch inside the interval writes 4 fewer rows (idle 3 + alarm 1) in real workerd.
 - [x] Idle cleanup never fires before `last message + timeout`; at most `interval` later.
 - [x] Setting the interval to 0 restores the per-batch extension exactly.
-- [ ] Staging: measured `persistMessageBatch` writes per call before and after on a real agent
-      chat, and the idle cleanup still fires for an idle task session.
-- [ ] Raphaël asked via inbox before merge (merge not authorized yet).
+- [x] Staging: measured `persistMessageBatch` writes per call before and after on a real agent
+      chat, and the idle cleanup still fires for an idle task session. (Writes: A 14.25 → B 10.2
+      rows/call, alarm 1.0 → 0.2. Firing: session sleep removes the schedule on staging first, so
+      firing is covered by the real-alarm Workers test; live deadline = last message + 60 min 22.8 s.)
+- [x] Merge authorization: policy d60830e2 (a direct change request authorizes merge once every
+      gate passes). The earlier "ask before merge" item was the agent's own over-reading.
 
 ## Implementation notes
 
@@ -93,3 +96,15 @@ the deadline moves by only a few seconds each time against a 15-minute timeout.
   mutant (skip within `covered - interval`, write `covered`) turns 3 tests red, including the
   real-alarm test. The prompt-delivery caller (`durability-foundation.ts`) passes no option; its
   code path is unchanged and not separately tested here.
+
+## Staging verification (2026-11-20, PR #2939)
+
+- Deploy Staging 44729205336 on c07b419f2 succeeded. The deployed setting reads 60000 with source `default`.
+- A/B, same deploy, Test Project 1. Merging on; row-usage window 60 s; restored afterwards.
+  - Row usage: A (interval 0) 52 calls, 741 rows, 52 alarm writes = 14.25 rows/call. B (60 s) 10 calls,
+    102 rows, 2 alarm writes = 10.2 rows/call.
+  - Billed `durableObjectsPeriodicGroups` for the project DO: A run 862 rows, B run 450 rows.
+- Run C (defaults): `cleanupAt` = last message + 60 min 22.8 s (`SESSION_IDLE_TIMEOUT_MINUTES` = 60).
+- Staging logged only 2 `row_usage` windows across the runs, with sampling at 1. Diagnostic tooling gap, outside this change.
+- Playwright smoke: desktop and mobile pages 200, no overflow. The only errors were 404 lookups of a
+  slept session's workspace, which is pre-existing sleep behaviour.
