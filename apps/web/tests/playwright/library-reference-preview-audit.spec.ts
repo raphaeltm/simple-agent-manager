@@ -8,7 +8,12 @@ import { deflateSync } from 'node:zlib';
 
 import { expect, type Page, test } from '@playwright/test';
 
-import { assertNoClippedOverflow, assertNoOverflow, screenshot } from './audit-helpers';
+import {
+  assertNoClippedOverflow,
+  assertNoOverflow,
+  assertNoScrollingGlassPanes,
+  screenshot,
+} from './audit-helpers';
 import { type InboxMockState, KIND_ITEMS, setupInboxMocks } from './inbox-fixtures';
 
 // The app's service worker would answer the file preview requests itself, past these mocks.
@@ -205,6 +210,7 @@ for (const viewport of [
         await expect(dialog).toHaveClass(/sam-glass-live/);
       }
       await assertNoOverflow(page);
+      await assertNoScrollingGlassPanes(page);
       await screenshot(page, 'library-ref-preview-image-long-name');
 
       await page.getByRole('button', { name: 'Close preview' }).click();
@@ -219,6 +225,7 @@ for (const viewport of [
       await openChip(page, FILES[1]!);
       await expectDialogInViewport(page);
       await assertNoOverflow(page);
+      await assertNoScrollingGlassPanes(page);
       await screenshot(page, 'library-ref-preview-pdf');
     });
 
@@ -228,6 +235,7 @@ for (const viewport of [
       await expect(dialog.getByRole('button', { name: /Download/ }).first()).toBeVisible();
       await expectDialogInViewport(page);
       await assertNoOverflow(page);
+      await assertNoScrollingGlassPanes(page);
       await screenshot(page, 'library-ref-preview-unsupported');
     });
 
@@ -237,6 +245,7 @@ for (const viewport of [
       await expect(dialog.getByRole('heading', { name: 'Rollout plan' })).toBeVisible();
       await expectDialogInViewport(page);
       await assertNoOverflow(page);
+      await assertNoScrollingGlassPanes(page);
       await assertNoClippedOverflow(page);
       await screenshot(page, 'library-ref-preview-markdown');
 
@@ -249,6 +258,7 @@ for (const viewport of [
     test('the inbox item with its Library chips', async ({ page }) => {
       await openItem(page);
       await assertNoOverflow(page);
+      await assertNoScrollingGlassPanes(page);
       await assertNoClippedOverflow(page);
       await screenshot(page, 'library-ref-inbox-item');
     });
@@ -315,6 +325,7 @@ test.describe('Library reference preview — light theme', () => {
       await openChip(page, FILES[3]!);
       await expectDialogInViewport(page);
       await assertNoOverflow(page);
+      await assertNoScrollingGlassPanes(page);
       await screenshot(page, 'library-ref-preview-markdown-light');
       await context.close();
     });
