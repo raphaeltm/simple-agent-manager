@@ -34,6 +34,8 @@ function setup() {
       incident_claimed_by_task_id TEXT, incident_claimed_at INTEGER,
       resolved_at INTEGER, resolved_by_task_id TEXT, resolution_note TEXT,
       resolution_references TEXT, expired_at INTEGER,
+      watching_since INTEGER, watch_reason TEXT, watch_hourly_counts TEXT,
+      watch_escalated_at INTEGER, watch_escalation_reason TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
     INSERT INTO platform_feedback_triages
       (signature, source, summary, first_seen_at, last_seen_at, occurrence_count, evidence_refs,

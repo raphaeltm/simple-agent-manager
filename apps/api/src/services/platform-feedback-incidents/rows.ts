@@ -15,6 +15,8 @@ export async function readIncidentRow(env: Env, signature: string): Promise<Inci
         triage.incident_claimed_by_task_id, triage.incident_claimed_at, triage.resolved_at,
         triage.resolved_by_task_id, resolved_task.output_pr_url AS resolved_task_output_pr_url,
         triage.resolution_note, triage.resolution_references, triage.expired_at,
+        triage.watching_since, triage.watch_reason, triage.watch_hourly_counts,
+        triage.watch_escalated_at, triage.watch_escalation_reason,
         triage.created_at, triage.updated_at
        FROM platform_feedback_triages triage
        LEFT JOIN tasks resolved_task ON resolved_task.id = triage.resolved_by_task_id

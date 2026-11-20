@@ -15,8 +15,13 @@ import {
   type IncidentQueueState,
   type IncidentResolutionReferenceInput,
   IncidentResolutionValidationError,
+  getIncidentConfig,
+  type IncidentListSort,
+  type IncidentReadContext,
   listIncidentQueue,
+  loadWatchConfig,
   resolveIncident,
+  watchIncident,
 } from '../../services/platform-feedback-incidents';
 import {
   getMcpLimits,
@@ -29,7 +34,14 @@ import {
 } from './_helpers';
 
 const VALID_QUEUE_STATES = new Set<string>(INCIDENT_QUEUE_STATES);
-const VALID_RESOLUTION_OUTCOMES = new Set(['resolved', 'rejected']);
+const VALID_RESOLUTION_OUTCOMES = new Set(['resolved', 'rejected', 'watching']);
+const VALID_SORTS = new Set<string>(['priority', 'frequency']);
+
+/** Recent-frequency window from the admin setting, read once per call. */
+async function readContext(env: Env): Promise<IncidentReadContext> {
+  const watch = await loadWatchConfig(env);
+  return { now: Date.now(), recentWindowMs: watch.recentWindowMs };
+}
 
 async function requireFeedbackProjectScope(
   requestId: string | number | null,
@@ -117,7 +129,15 @@ export async function handleListIncidentQueue(
     );
   }
 
-  const incidents = await listIncidentQueue(env, states, boundedLimit(params, env));
+  const sort = params.sort === undefined ? 'priority' : params.sort;
+  if (typeof sort !== 'string' || !VALID_SORTS.has(sort)) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'sort must be "priority" or "frequency"');
+  }
+
+  const incidents = await listIncidentQueue(env, states, boundedLimit(params, env), {
+    context: await readContext(env),
+    sort: sort as IncidentListSort,
+  });
   return jsonRpcSuccess(requestId, {
     content: [
       {
@@ -127,6 +147,7 @@ export async function handleListIncidentQueue(
             projectId: tokenData.projectId,
             incidents,
             count: incidents.length,
+            sort,
             defaultStates: states.length ? undefined : ['pending', 'dispatched', 'claimed'],
             privacy:
               'Private incident backlog. Do not copy machine-generated diagnostics or feedback into public GitHub issues.',
@@ -153,7 +174,7 @@ export async function handleGetIncident(
     return jsonRpcError(requestId, INVALID_PARAMS, 'incidentId is required');
   }
 
-  const incident = await getIncidentDetail(env, incidentId);
+  const incident = await getIncidentDetail(env, incidentId, await readContext(env));
   if (!incident) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'Incident not found in this project');
   }
@@ -244,9 +265,16 @@ export async function handleResolveIncident(
   if (!incidentId) return jsonRpcError(requestId, INVALID_PARAMS, 'incidentId is required');
   if (!claimToken) return jsonRpcError(requestId, INVALID_PARAMS, 'claimToken is required');
   if (!VALID_RESOLUTION_OUTCOMES.has(outcome)) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'outcome must be "resolved" or "rejected"');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'outcome must be "resolved", "rejected" or "watching"'
+    );
   }
   if (note === null) return jsonRpcError(requestId, INVALID_PARAMS, 'note must be a string');
+  if (outcome === 'watching') {
+    return handleWatchIncident(requestId, env, { incidentId, claimToken, note, tokenData });
+  }
   if (fixPrUrl === null)
     return jsonRpcError(requestId, INVALID_PARAMS, 'fixPrUrl must be a string');
   if (dispatchedTaskId === null) {
@@ -297,6 +325,55 @@ export async function handleResolveIncident(
             outcome,
             resolvedByTaskId: tokenData.taskId,
             resolutionReferences,
+          },
+          null,
+          2
+        ),
+      },
+    ],
+  });
+}
+
+/** Watching is not a resolution: it keeps the incident measured instead of ending it. */
+async function handleWatchIncident(
+  requestId: string | number | null,
+  env: Env,
+  input: { incidentId: string; claimToken: string; note: string | undefined; tokenData: McpTokenData }
+): Promise<JsonRpcResponse> {
+  if (!input.note) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Watching requires a one-line reason in note: why this defect is real but not urgent.'
+    );
+  }
+  const watched = await watchIncident(
+    env,
+    input.incidentId,
+    input.claimToken,
+    input.tokenData.taskId,
+    input.note,
+    Date.now(),
+    getIncidentConfig(env).resolutionNoteMaxLength
+  );
+  if (!watched) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Incident was not set to watching; verify the claim token, task ownership, lease, and state'
+    );
+  }
+  return jsonRpcSuccess(requestId, {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify(
+          {
+            incidentId: input.incidentId,
+            outcome: 'watching',
+            watchedByTaskId: input.tokenData.taskId,
+            behaviour:
+              'Recurrences now only update this signature\'s counts and idea. A spike returns it to the triage queue; no occurrence for the quiet period expires it.',
           },
           null,
           2

@@ -47,6 +47,8 @@ function setup() {
       incident_claimed_by_task_id TEXT, incident_claimed_at INTEGER,
       resolved_at INTEGER, resolved_by_task_id TEXT, resolution_note TEXT,
       resolution_references TEXT, expired_at INTEGER,
+      watching_since INTEGER, watch_reason TEXT, watch_hourly_counts TEXT,
+      watch_escalated_at INTEGER, watch_escalation_reason TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
     CREATE UNIQUE INDEX idx_platform_feedback_triages_canonical_signature
       ON platform_feedback_triages(canonical_signature) WHERE canonical_signature IS NOT NULL;

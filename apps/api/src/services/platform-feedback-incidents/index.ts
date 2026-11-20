@@ -38,10 +38,13 @@ export { cancelOwnedIncidentIdea, updateOwnedIncidentIdea } from './idea-writes'
 export { expireStaleIncidents } from './lifecycle';
 export {
   buildIncidentBacklogSummary,
+  defaultIncidentReadContext,
   getIncidentDetail,
   hasDispatchablePendingIncidents,
   listDispatchableIncidentQueue,
+  type IncidentListSort,
   listIncidentQueue,
+  type ListIncidentQueueOptions,
 } from './queries';
 export {
   isActiveIncidentState,
@@ -54,8 +57,21 @@ export type {
   IncidentBacklogSummary,
   IncidentDetail,
   IncidentListItem,
+  IncidentReadContext,
   IncidentReopenCheckInput,
   IncidentReopenEvidence,
   UserReportIncidentInput,
 } from './types';
 export { markIncidentPending, upsertUserReportIncident } from './user-report';
+export {
+  evaluateSpike,
+  expireQuietWatchedIncidents,
+  loadWatchConfig,
+  parseHourlyCounts,
+  recentOccurrenceCount,
+  recordWatchedRecurrence,
+  type WatchConfig,
+  watchConfigFromSettings,
+  type WatchedRecurrenceOutcome,
+  watchIncident,
+} from './watching';

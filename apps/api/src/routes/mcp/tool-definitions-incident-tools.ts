@@ -8,7 +8,10 @@ export const INCIDENT_TOOLS = [
     name: 'list_incident_queue',
     description:
       'List grouped private incidents in the configured Operations project. ' +
-      'The server derives project scope from the MCP token and returns bounded metadata only.',
+      'The server derives project scope from the MCP token and returns bounded metadata only. ' +
+      'Defaults to pending, dispatched and claimed. Pass state "watching" with sort "frequency" to rank watched signatures: ' +
+      'each item carries occurrenceCount, firstSeenAt, lastSeenAt, recentOccurrenceCount (occurrences while watching in the last recentWindowHours), ' +
+      'watchingSince, watchReason, watchEscalatedAt and watchEscalationReason.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -29,6 +32,12 @@ export const INCIDENT_TOOLS = [
           type: 'number',
           description: 'Maximum incidents to return. The server applies a configured cap.',
           minimum: 1,
+        },
+        sort: {
+          type: 'string',
+          description:
+            'Order: "priority" (default: severity, novelty, fewest occurrences) or "frequency" (most recent occurrences first, then total occurrences).',
+          enum: ['priority', 'frequency'],
         },
       },
       additionalProperties: false,
@@ -71,10 +80,12 @@ export const INCIDENT_TOOLS = [
   {
     name: 'resolve_incident',
     description:
-      'Terminally resolve or reject a claimed private incident. ' +
+      'Resolve, reject or watch a claimed private incident. ' +
       'Requires the claim token returned by claim_incident and the same task-scoped MCP token. ' +
       'Resolved outcomes require one ship-or-track reference: fixPrUrl, dispatchedTaskId, or linkedRecordId. ' +
-      'Rejected outcomes require a justification note but no fix reference.',
+      'Rejected outcomes require a justification note but no fix reference. ' +
+      'Watching is for a genuine defect that is not urgent: it requires a one-line reason in note; recurrences then only update the ' +
+      "signature's counts and idea (no re-triage), a spike returns it to the queue, and a quiet period expires it.",
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -88,13 +99,13 @@ export const INCIDENT_TOOLS = [
         },
         outcome: {
           type: 'string',
-          description: 'Terminal outcome.',
-          enum: ['resolved', 'rejected'],
+          description: 'Outcome: resolved and rejected end the incident; watching keeps measuring it.',
+          enum: ['resolved', 'rejected', 'watching'],
         },
         note: {
           type: 'string',
           description:
-            'Short private resolution note. Required for rejected outcomes. The server redacts and bounds it.',
+            'Short private resolution note. Required for rejected outcomes, and the one-line watch reason for watching. The server redacts and bounds it.',
         },
         fixPrUrl: {
           type: 'string',

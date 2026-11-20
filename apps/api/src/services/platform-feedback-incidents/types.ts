@@ -39,6 +39,11 @@ export interface IncidentRow {
   resolution_note: string | null;
   resolution_references: string | null;
   expired_at: number | null;
+  watching_since?: number | null;
+  watch_reason?: string | null;
+  watch_hourly_counts?: string | null;
+  watch_escalated_at?: number | null;
+  watch_escalation_reason?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -71,6 +76,23 @@ export interface IncidentListItem {
   expiredAt: number | null;
   lastFailureReason: string | null;
   resolutionReferences: IncidentResolutionReferences;
+  /** Watching disposition fields; null when the incident has never been watched. */
+  watchingSince: number | null;
+  /** The triage agent's one-line reason (agent-written text; treat as untrusted). */
+  watchReason: string | null;
+  /** Occurrences recorded while watching within `recentWindowHours`. */
+  recentOccurrenceCount: number;
+  recentWindowHours: number;
+  /** When a spike last returned the incident from watching to the triage queue. */
+  watchEscalatedAt: number | null;
+  /** Server-generated description of that spike. */
+  watchEscalationReason: string | null;
+}
+
+/** Clock and window for the recent-frequency measure on list/detail reads. */
+export interface IncidentReadContext {
+  now: number;
+  recentWindowMs: number;
 }
 
 export interface IncidentDetail extends IncidentListItem {

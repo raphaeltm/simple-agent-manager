@@ -13,7 +13,11 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { runDebugDiagnosis, SCHEDULED_TRIAGE_DEBUG_FEATURE_KEY } from '../debug-agent';
-import { configuredFeedbackProjectId } from '../platform-feedback-incidents';
+import {
+  configuredFeedbackProjectId,
+  expireQuietWatchedIncidents,
+  loadWatchConfig,
+} from '../platform-feedback-incidents';
 import {
   classifyBudgetBlock,
   DEFAULT_PLATFORM_FEEDBACK_TRIAGE_IDEA_TITLE_MAX_LENGTH,
@@ -37,6 +41,7 @@ import {
 } from './persistence';
 import { prioritizeFeedbackGroups, shouldReopenExistingTriage } from './prioritization';
 import type { ErrorRow, FeedbackTriageResult, FeedbackTriageTrigger, TriageDeps } from './types';
+import { processWatchedRecurrence } from './watched-recurrence';
 
 export async function runPlatformFeedbackTriage(
   env: Env,
@@ -53,6 +58,9 @@ export async function runPlatformFeedbackTriage(
     groupsSkipped: 0,
     groupsFailed: 0,
     groupsBudgetDeferred: 0,
+    watchedRecurrences: 0,
+    watchedEscalated: 0,
+    watchedExpired: 0,
     failureReasons: [],
   };
   if (!projectId) return base;
@@ -62,6 +70,7 @@ export async function runPlatformFeedbackTriage(
   if (!project)
     throw new Error('Configured Operations project does not reference an existing project');
   const now = deps.now?.() ?? Date.now();
+  const watchConfig = await loadWatchConfig(env);
   const windowMinutes = positive(
     env.PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES,
     DEFAULT_PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES
@@ -128,12 +137,41 @@ export async function runPlatformFeedbackTriage(
     env,
     candidateGroups.map((group) => group.signature)
   );
-  const groups = prioritizeFeedbackGroups(candidateGroups, existingPriorityRows, now).slice(
-    0,
-    groupLimit
-  );
-  const result = { ...base, groupsFound: groups.length };
+  // Watched signatures are counted outside the group limit: recording them is two D1
+  // statements and no diagnosis, and a recurrence that missed its window would be lost for
+  // good (the next window starts after it), which could let a still-recurring signature
+  // quiet-expire. At most one per distinct signature in the error-limit window.
+  const isWatched = (signature: string) =>
+    existingPriorityRows.get(signature)?.queue_state === 'watching';
+  const watchedGroups = candidateGroups.filter((group) => isWatched(group.signature));
+  const groups = prioritizeFeedbackGroups(
+    candidateGroups.filter((group) => !isWatched(group.signature)),
+    existingPriorityRows,
+    now
+  ).slice(0, groupLimit);
+  const result = { ...base, groupsFound: groups.length + watchedGroups.length };
   const diagnose = deps.diagnose ?? runDebugDiagnosis;
+  const watchContext = {
+    projectId: project.id,
+    now,
+    watchConfig,
+    ideaTitleMaxLength,
+    readEngagement: deps.readEngagement,
+  };
+  const recordWatched = async (
+    group: (typeof candidateGroups)[number],
+    existing: NonNullable<ReturnType<typeof existingPriorityRows.get>>
+  ) => {
+    const watched = await processWatchedRecurrence(env, group, existing, watchContext);
+    if (watched.recorded) result.watchedRecurrences += 1;
+    if (watched.escalated) result.watchedEscalated += 1;
+    if (watched.ideaUpdated) result.ideasUpdated += 1;
+    else result.groupsSkipped += 1;
+  };
+  for (const group of watchedGroups) {
+    const existing = existingPriorityRows.get(group.signature);
+    if (existing) await recordWatched(group, existing);
+  }
 
   for (const [index, group] of groups.entries()) {
     const refs = JSON.stringify(group.evidence);
@@ -157,6 +195,11 @@ export async function runPlatformFeedbackTriage(
       )
       .run();
     const latestExisting = await readExistingTriageRow(env, group.signature);
+    if (latestExisting?.queue_state === 'watching') {
+      // Became watching after selection: count the recurrence; never reopen or re-triage.
+      await recordWatched(group, latestExisting);
+      continue;
+    }
     const reopenTerminal = shouldReopenExistingTriage(
       env,
       latestExisting ?? existingPriorityRows.get(group.signature),
@@ -391,6 +434,16 @@ export async function runPlatformFeedbackTriage(
         rejected: marked.rejected,
       });
     }
+  }
+  // After this window's recurrences are recorded, so a still-recurring signature stays watched.
+  try {
+    result.watchedExpired = await expireQuietWatchedIncidents(env, now, watchConfig);
+  } catch (error) {
+    result.watchedExpired = undefined;
+    log.warn('platform-feedback-triage.watch-expiry-failed', {
+      trigger,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
   return result;
 }

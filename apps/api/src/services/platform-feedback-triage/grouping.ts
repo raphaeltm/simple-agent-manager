@@ -345,6 +345,7 @@ export async function groupPlatformErrors(
       current.firstSeenAt = Math.min(current.firstSeenAt, row.timestamp);
       current.lastSeenAt = Math.max(current.lastSeenAt, row.timestamp);
       if (current.evidence.length < evidenceLimit) current.evidence.push(evidence);
+      current.occurrenceTimestamps?.push(row.timestamp);
     } else {
       const message = displayPlatformErrorMessage(row.message);
       groups.set(key, {
@@ -356,6 +357,7 @@ export async function groupPlatformErrors(
         lastSeenAt: row.timestamp,
         evidence: [evidence],
         count: 1,
+        occurrenceTimestamps: [row.timestamp],
         legacyKeys: new Set([legacyKey]),
       });
     }
@@ -375,10 +377,36 @@ export async function groupPlatformErrors(
   );
 }
 export interface IdeaOccurrenceStats {
-  /** Total occurrences recorded for the incident, across every window. */
+  /**
+   * Occurrences stored for the incident: the largest single window while it is open, and a
+   * running total while it is watched (`recordWatchedRecurrence`).
+   */
   occurrenceCount: number;
   firstSeenAt: number;
   lastSeenAt: number;
+  /** Present while the incident is watched or after a spike returned it to triage. */
+  watch?: IdeaWatchStats;
+}
+
+export interface IdeaWatchStats {
+  watching: boolean;
+  watchingSince: number | null;
+  /** Agent-written; rendered inside the untrusted evidence block. */
+  reason: string | null;
+  recentOccurrenceCount: number;
+  recentWindowHours: number;
+  escalationReason: string | null;
+}
+
+function watchDetails(watch: IdeaWatchStats | undefined): string[] {
+  if (!watch) return [];
+  return [
+    watch.watching
+      ? `Disposition: watching since ${watch.watchingSince ? new Date(watch.watchingSince).toISOString() : 'unknown'} (recurrences update these counts; no re-triage)`
+      : 'Disposition: returned from watching to triage',
+    `Occurrences in the last ${watch.recentWindowHours}h while watching: ${watch.recentOccurrenceCount}`,
+    ...(watch.escalationReason ? [`Latest spike: ${watch.escalationReason}`] : []),
+  ];
 }
 
 /**
@@ -409,6 +437,7 @@ export function ideaDescription(
       `Occurrences: ${stats.occurrenceCount}`,
       `First seen: ${new Date(stats.firstSeenAt).toISOString()}`,
       `Last seen: ${new Date(stats.lastSeenAt).toISOString()}`,
+      ...watchDetails(stats.watch),
     ],
     evidenceLabel: 'Normalized Error Signature and Evidence Refs',
     evidence: [
@@ -418,6 +447,7 @@ export function ideaDescription(
       '',
       'Bounded evidence references:',
       refs || '- none',
+      ...(stats.watch?.reason ? ['', `Watch reason (agent-written): ${stats.watch.reason}`] : []),
     ].join('\n'),
   });
 }
