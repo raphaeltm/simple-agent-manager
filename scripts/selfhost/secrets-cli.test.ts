@@ -2,13 +2,14 @@
  * `pnpm selfhost:secrets` argument handling through the real entry point. Box round R11:
  * `pnpm selfhost:secrets --help` crashed with a Node stack trace (ERR_PARSE_ARGS_UNKNOWN_OPTION).
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CHILD_TEST_TIMEOUT_MS, runTsx, writeBox } from './deploy-harness.js';
+import { ensurePlatformKeys } from './platform-keys.js';
 
 vi.setConfig({ testTimeout: CHILD_TEST_TIMEOUT_MS });
 
@@ -60,5 +61,19 @@ describe('pnpm selfhost:secrets', () => {
     const result = await runTsx(SECRETS, ['status', '--box-env', writeBox(dir)]);
     expect(result.status, result.out).toBe(0);
     expect(result.out).toContain('key provider: none chosen yet');
+  });
+
+  // Box round on #2933: a plaintext box is sealed only by migrate, so status must say so.
+  it('status on a box running on plaintext deploy vars points at migrate, not --init', async () => {
+    const envFile = writeBox(dir);
+    const state = join(dir, '.state');
+    mkdirSync(state, { recursive: true, mode: 0o700 });
+    ensurePlatformKeys(state, 'init');
+    const result = await runTsx(SECRETS, ['status', '--box-env', envFile]);
+    expect(result.status, result.out).toBe(0);
+    expect(result.out).toContain(
+      'runs on plaintext deploy vars. Run `pnpm selfhost:secrets migrate`'
+    );
+    expect(result.out).not.toContain('selfhost:deploy --init` to choose one and seal');
   });
 });

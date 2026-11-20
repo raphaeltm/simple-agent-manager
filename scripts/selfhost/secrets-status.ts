@@ -23,6 +23,7 @@ import {
   LEGACY_KEY_PROVIDER,
   listBundles,
 } from './key-service.js';
+import { PLATFORM_KEYS_FILE } from './platform-keys.js';
 
 type Box = Readonly<Record<string, string>>;
 
@@ -47,6 +48,13 @@ export async function describeKeyStatus(box: Box, stateDir: string): Promise<str
   const explicit = explicitKeyProvider(box);
   const recorded = readKeyChoice(stateDir);
   if (!explicit && !recorded) {
+    // A box already on plaintext deploy vars is sealed only by migrate (deploy-keys.ts holdsPlaintext).
+    if (existsSync(join(stateDir, PLATFORM_KEYS_FILE))) {
+      return [
+        'key provider: none chosen yet; this box runs on plaintext deploy vars. Run ' +
+          '`pnpm selfhost:secrets migrate` to seal it.',
+      ];
+    }
     return [
       'key provider: none chosen yet. Run `pnpm selfhost:deploy --init` to choose one and seal.',
     ];
