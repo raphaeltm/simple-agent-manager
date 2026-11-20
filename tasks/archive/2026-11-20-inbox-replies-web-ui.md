@@ -45,7 +45,7 @@ item detail `conversation`. The web app has no UI for it.
 - [x] Docs: `apps/www/src/content/docs/docs/guides/inbox.md`
 - [x] Tests driving the real reply → refetch path (rule 62)
 - [x] Playwright audit 375/1280 with diverse data
-- [ ] Staging: real reply to a real agent item end to end
+- [x] Staging: real reply to a real agent item end to end (staging2, PR #2953 body)
 
 ## Acceptance criteria
 - Opening an item shows the ask as the agent's first message, then replies and responses in order.
