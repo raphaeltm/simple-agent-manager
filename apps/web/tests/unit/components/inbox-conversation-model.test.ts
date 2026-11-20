@@ -9,6 +9,11 @@ import {
   replyDisplayText,
   rowReplyHint,
 } from '../../../src/components/inbox/inbox-conversation-model';
+import {
+  agentStateLong,
+  agentStateShort,
+  isPausedOnItem,
+} from '../../../src/components/inbox/inbox-model';
 
 const page = (overrides: Partial<InboxConversation> = {}): InboxConversation => ({
   replies: [],
@@ -113,5 +118,19 @@ describe('rowReplyHint', () => {
   it('names a teammate, or a teammate without a name', () => {
     expect(replierName({ userId: 'u2', name: 'Dana' }, 'me')).toBe('Dana');
     expect(replierName({ userId: 'u2', name: null }, 'me')).toBe('A teammate');
+  });
+});
+
+describe('an item with the agent is not waiting on the person', () => {
+  const waiting = { agentState: 'waiting', status: 'open' } as InboxItem;
+  it('is amber "paused on this" until the person replies', () => {
+    expect(isPausedOnItem(waiting)).toBe(true);
+    expect(agentStateShort(waiting)).toBe('paused on this');
+  });
+  it('drops the amber state while the reply is with the agent', () => {
+    const replied = { ...waiting, withAgent: true };
+    expect(isPausedOnItem(replied)).toBe(false);
+    expect(agentStateShort(replied)).toBeNull();
+    expect(agentStateLong(replied)).toBe('With the agent');
   });
 });

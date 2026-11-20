@@ -6,7 +6,7 @@ import type {
   InboxReplyMessage,
 } from '@simple-agent-manager/shared';
 import { Bot, MessageSquare, Paperclip } from 'lucide-react';
-import type { ReactNode, Ref } from 'react';
+import { type ReactNode, type Ref, useMemo } from 'react';
 
 import { formatFileSize } from '../../lib/file-utils';
 import { RenderedMarkdown } from '../MarkdownRenderer';
@@ -78,17 +78,25 @@ function ReplyAttachments({ reply }: { reply: InboxReplyMessage }) {
 }
 
 /** The person's reply: an ordinary message in the agent's chat, shown here on the right. */
+/** "12m ago" for a millisecond timestamp. */
+function ago(at: number, now: number): string {
+  return `${formatAge(new Date(at).toISOString(), now)} ago`;
+}
+
 function ReplyTurn({
   reply,
   viewerId,
+  names,
   now,
 }: {
   reply: InboxReplyMessage;
   viewerId: string;
+  /** Names the item read knows (the latest replier); a reply message carries only a user id. */
+  names: ReadonlyMap<string, string | null>;
   now: number;
 }) {
   const text = replyDisplayText(reply);
-  const who = replierName(reply, viewerId);
+  const who = replierName({ userId: reply.userId, name: names.get(reply.userId ?? '') }, viewerId);
   return (
     <div className="flex min-w-0 flex-col items-end gap-1.5" data-testid="inbox-reply">
       <span className="sr-only">{who} replied:</span>
@@ -100,8 +108,7 @@ function ReplyTurn({
       <ReplyAttachments reply={reply} />
       <span className="flex items-center gap-1 text-[11px] text-fg-muted">
         <MessageSquare size={11} aria-hidden="true" />
-        {who === 'You' ? '' : `${who} · `}Sent in the agent’s chat ·{' '}
-        {formatAge(new Date(reply.createdAt).toISOString(), now)}
+        {who === 'You' ? '' : `${who} · `}Sent in the agent’s chat · {ago(reply.createdAt, now)}
       </span>
     </div>
   );
@@ -121,7 +128,7 @@ function ResponseTurn({
     <AgentTurn
       testId="inbox-response"
       controls={controls}
-      meta={`Responded on this item · ${formatAge(new Date(response.createdAt).toISOString(), now)}`}
+      meta={`Responded on this item · ${ago(response.createdAt, now)}`}
     >
       <span className="sr-only">The agent responded:</span>
       {/* Agent-written markdown: the renderer never renders raw HTML and sanitizes links. */}
@@ -171,6 +178,11 @@ export function InboxConversationThread({
     first: conversation,
   });
   const lastResponse = latestResponseId(thread.entries);
+  const latestReply = item.latestReply;
+  const names = useMemo(
+    () => new Map(latestReply ? [[latestReply.userId, latestReply.name]] : []),
+    [latestReply]
+  );
   return (
     <div className="flex min-w-0 flex-col gap-5" data-testid="inbox-conversation">
       <AgentTurn testId="inbox-ask" controls={lastResponse === null ? controls : undefined}>
@@ -204,7 +216,13 @@ export function InboxConversationThread({
       )}
       {thread.entries.map((entry: InboxConversationEntry) =>
         entry.kind === 'reply' ? (
-          <ReplyTurn key={`reply:${entry.id}`} reply={entry.reply} viewerId={viewerId} now={now} />
+          <ReplyTurn
+            key={`reply:${entry.id}`}
+            reply={entry.reply}
+            viewerId={viewerId}
+            names={names}
+            now={now}
+          />
         ) : (
           <ResponseTurn
             key={`response:${entry.id}`}

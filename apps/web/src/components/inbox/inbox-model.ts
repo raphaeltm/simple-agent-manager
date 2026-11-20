@@ -99,9 +99,12 @@ export function isRenderableInboxItem(value: unknown): value is InboxItem {
   );
 }
 
-/** The agent is stopped on this item: the one state worth amber. */
+/**
+ * The agent is stopped on this item: the one state worth amber. Not while a reply is with the
+ * agent: it has the person's message, so nothing waits on them.
+ */
 export function isPausedOnItem(item: InboxItem): boolean {
-  return item.agentState === 'waiting' && item.status === 'open';
+  return item.agentState === 'waiting' && item.status === 'open' && item.withAgent !== true;
 }
 
 /** Time left before a live deadline ("4m", "1h 30m"), or null when there is none (or it passed). */
@@ -121,6 +124,8 @@ export function isIrreversibleApproval(spec: InboxAnswerSpec): boolean {
 
 /** Short agent state for a row ("paused on this"), or null when unknown. */
 export function agentStateShort(item: InboxItem): string | null {
+  // The row's reply line says "With the agent".
+  if (item.withAgent) return null;
   switch (item.agentState) {
     case 'waiting':
       return 'paused on this';
@@ -137,6 +142,7 @@ export function agentStateShort(item: InboxItem): string | null {
 
 /** Long agent state for the item meta line ("Paused, waiting on this"). */
 export function agentStateLong(item: InboxItem): string | null {
+  if (item.withAgent) return 'With the agent';
   switch (item.agentState) {
     case 'waiting':
       return 'Paused, waiting on this';

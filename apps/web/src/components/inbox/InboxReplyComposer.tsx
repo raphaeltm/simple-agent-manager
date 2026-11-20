@@ -89,7 +89,7 @@ export function InboxReplyComposer({
         onChange={setText}
         onSend={() => void send()}
         sending={sending}
-        placeholder={declines ? 'Why decline? Tell the agent…' : 'Reply to the agent about this…'}
+        placeholder={declines ? 'Why decline? Tell the agent…' : 'Reply to the agent…'}
         inputLabel="Reply to the agent"
         transcribeApiUrl={transcribeApiUrl}
         slashCommands={slashCommands}
