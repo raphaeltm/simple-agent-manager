@@ -24,7 +24,8 @@ Use existing L16 selection, extend its optional token context and fetch/import c
 - [x] Draft PR then ready; CodeRabbit requested and explicit skip recorded; CI tracked below
 - [x] Primary staging lease/deploy: Artifacts and GitHub project creation unchanged, local seam off
 - [x] BOX existing bucket-mode deploy adds selfhost-hosted-git-v1; create project; OpenCode free reply; agent push verified; cleanup and BOX FREE
-- [ ] Merge main; all gates current head; announce merging/merged SHA; production success; idea SHIPPED
+- [x] Merge main (917077fef, then 20675016f); all gates on the current head
+- [ ] Announce merging/merged SHA; production success; idea SHIPPED (tracked in the PR and on the channel)
 
 ## Acceptance
 
@@ -94,8 +95,8 @@ Previous owner 01M7SR1B79 stopped after repeated provider content-filter refusal
 - Deferred with justification to `tasks/backlog/2026-11-19-hosted-git-gc-and-ingest-hardening.md`: MEDIUM-3 (GC inflates migrated objects under the same budget, so it cannot finish past 128 MiB of uncollected inflated content; needs a raw-copy GC redesign; documented as a known limit in the README), MEDIUM-4 (delta depth not checked at ingest; git defaults to 50), MEDIUM-5 rest (GC holds the input gate), LOW-7..10. Every deferred item needs a write token for that repository and is confined to it.
 - Tests: unit hosted-git-closure-walk (memo at 1201 commits / 2001 commands, parse errors) and hosted-git-push-admission (seeding reads zero tips at 1201 refs, edge types, branch rule, D/F, no-op delete, alarm arming); real git: mixed failing/valid sibling with cache, malformed commit, validation fault after ingest queues GC (one-shot read-fault hook), large tips under a 14 MiB budget, edge types, no-op delete and D/F. Every guard was mutated once and the intended tests went red (memo, parse catch, GC on throw, non-transactional walk, peel seeding, child-vs-parent blame, duplicate-edge check, D/F, branch rule, no-op delete, first-edge type).
 - Request-body helpers moved to `hosted-git-body.ts` so `hosted-git-repo.ts` stays under 500 lines; GC queueing is one helper (`queueHostedGitGc`, `armHostedGitGcAlarm`).
-- [ ] Fresh CI green, 0 open threads, Codex re-requested on final head
-- [ ] Final BOX smoke on the exact final head over main (closes the L22c "box from main runs an agent session" criterion deferred to H2 by Raphaël)
+- [x] Codex reviews every push automatically; 15 findings across heads fixed or deferred with tracked follow-ups; 0 open threads
+- [x] Final BOX smoke on 9d8a0802 (#2907 over main 20675016f), which closes the L22c "box from main runs an agent session" criterion Raphaël deferred to H2
 
 ## Independent re-verification of f9eb945ef (23:20 UTC)
 
@@ -154,3 +155,16 @@ Tests: prefix cap, cancel-on-abandon with a read-to-end control, `ChunkBuffer` c
 ## Codex r4636923076 on 1bbf2aeb (01:00 UTC)
 
 The byte budget covered the raw pack, not its index rows and page overhead. Following rule 69, `processReceive` now re-checks `dbSize()` after ingest. A push that crossed the cap is refused, and its pack is dropped immediately with `dropPack`. Real-git test: 3,000 tiny objects with a cap of the current size plus the raw pack size is refused, and the ref and bytes are not kept. The control with headroom is accepted. Removing the check turns the test red. Main 20675016f, a workflow action bump, was merged.
+
+## Final BOX smoke (00:30-00:45 UTC, 2026-11-20)
+
+The run used head 9d8a08029933863020011b6f0d0e7a62f12b3804. The only later commit moves this task file, so runtime is identical.
+- **Upgrade:** in-place bucket-mode `pnpm selfhost:upgrade` from e7ac643b1, EXIT=0 and healthy, with no D1 migrations. The generated celld config has HostedGitRepo and the selfhost-hosted-git-v1 tag.
+- **Project:** hosted-git project 01M7V67QTF30PEZ8G8EJ4SM8KX created 201, signed in as agent-test by email OTP through the box mail collector.
+- **Agent:** task 01M7V681KWFSR8N9H33N5XPB71 (OpenCode, opencode/big-pickle, free) on a fresh node replied "pong" and pushed sam/ping-reply-pong-create-5xpb71.
+- **Separate clone:** a cookie-free clone from the agent workspace with a read-scoped member token shows commit e7400ab74a65a152e842a99a2ebc8203d71751ae, h2-proof.txt = pong, and `git fsck --strict` passes. Unauthenticated info/refs returns 401.
+- **Cleanup:**
+  - Resources: session stop 200, node DELETE 200, project DELETE 200 then 404; nodes [], repository 401, and the GCP inventory shows only sam-box.
+  - The box's standing agent-test credential from R18 was used, not changed.
+  - Session signed out, box scratch removed, own metadata key absent and firewall rule 404.
+  - The box was left healthy at 9d8a0802 with a clean checkout. BOX FREE posted at channel sequence 424.
