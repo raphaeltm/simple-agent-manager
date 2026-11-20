@@ -42,7 +42,7 @@ underneath never remounts. Closing goes back one entry. Desktop shows the viewer
 - [x] Unit tests: chip click opens preview, URL path unchanged, close returns focus to chip, inbox still rendered; Back closes
 - [x] Playwright audit at 375/1280: long filename, large image, PDF, unsupported type
 - [x] Docs sync (user docs mentioning library links)
-- [ ] Staging: real inbox item linking a real Library file
+- [x] Staging: real inbox item linking a real Library file (staging, 2026-11-20, finishing task 01M7X258S8A0VC6329MQVX5H9Z: path unchanged while open, x and Back return to the inbox item with focus on the chip, Open in Library works, 375 + 1280, zero console errors)
 
 ## Acceptance criteria
 
@@ -64,3 +64,11 @@ underneath never remounts. Closing goes back one entry. Desktop shows the viewer
   comment and closes the comments panel first, phone header gets a second row, segmented control
   sized to labels ("Rendered" no longer cut), `useId` title. Not changed: the shared
   SegmentedControl `lg` height (40px) is pre-existing and used app-wide.
+
+## Finishing notes (task 01M7X258S8A0VC6329MQVX5H9Z)
+
+- Rebased onto main after #2943 and #2953. Re-applied #2943's inner scroller in `FilePreviewModal`;
+  the page-underneath audit types into #2953's reply composer. #2953's conversation view renders
+  `InboxItemBody` → `InboxLinkChips`, so its Library chips open in place.
+- Follow-up: plain-text files (`.txt`) have no in-app preview in the Library viewer (pre-existing,
+  `previewKindOf`); tracked as a SAM idea.
