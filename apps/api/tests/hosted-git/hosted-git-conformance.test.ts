@@ -1276,6 +1276,27 @@ describe('push connectivity admission (closure must be complete per command)', (
     await assertCleanClone(remote);
   });
 
+  it('refuses a push whose object SHA-1DC flags as a collision attack, before any ref', async () => {
+    const project = await createHostedProject(await createEmailOnlyUser(), 'Collision screen');
+    const token = await mintToken(project, 'write');
+    const remote = localRemote(project.repository, token);
+    const work = await freshDir('collision');
+    await gitOk(['clone', remote, work]);
+    await commitFile(work, 'collide.txt');
+    const blob = await rev(work, 'HEAD:collide.txt');
+    // The detector's verdict for this one object is forced (see flagCollisionOnce): a real git
+    // object cannot carry the published SHAttered blocks.
+    await runtime.fetch(`/__test/flag-collision/${project.artifactsRepoId}/${blob}`, { method: 'POST' });
+    const refused = await git(['push', 'origin', 'HEAD:refs/heads/collide'], work);
+    expect(refused.code).not.toBe(0);
+    expect(refused.stderr).toContain(`object ${blob.slice(0, 12)} triggered SHA-1 collision detection`);
+    expect((await gitOk(['ls-remote', 'origin'], work)).stdout).not.toContain('refs/heads/collide');
+    expect((await gcState(project)).pending).toBe('1');
+    // Control: the same push, unflagged, is accepted, so the refusal came from the detector alone.
+    await gitOk(['push', 'origin', 'HEAD:refs/heads/collide'], work);
+    expect((await gitOk(['ls-remote', 'origin'], work)).stdout).toContain('refs/heads/collide');
+  });
+
   it('queues GC for an ingested pack when validation fails before any ref decision', async () => {
     const project = await createHostedProject(await createEmailOnlyUser(), 'Closure validate fault');
     const token = await mintToken(project, 'write');

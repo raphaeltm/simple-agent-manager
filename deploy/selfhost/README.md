@@ -220,6 +220,8 @@ per request, delta depth 100 and 120 seconds per git operation. Operators can lo
 limits; raising them needs measured capacity review. Rejected pushes leave existing refs intact.
 The storage limit is checked again after a pack and its index are stored; a push that crosses it
 is refused and its pack dropped at once.
+Like git, push ingest hashes every object with SHA-1 collision detection (SHA-1DC) and refuses
+a push carrying a SHA-1 collision-attack block before any ref changes.
 GC first drops whole packs that hold nothing reachable (for example a rejected push) without
 inflating them. Known limit: moving the remaining reachable packed objects to loose storage
 inflates each one under the same decompression budget, so that step cannot finish while more than

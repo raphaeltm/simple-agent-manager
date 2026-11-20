@@ -413,7 +413,11 @@ export class HostedGitRepo extends DurableObject {
             cache: new ObjCache(INGEST_CACHE_BYTES),
             onProgress: progress,
             flush: () => this.ctx.storage.sync(),
-            collisionDetect: false,
+            // Pushes are untrusted: screen every object with SHA-1DC as git does, so an object
+            // carrying a collision-attack block is refused before any ref can point at it. The
+            // JS hasher runs at about 130 MiB/s; inflated bytes per push are already capped by
+            // maxInflatedBytes (128 MiB default), so this adds about 1 s at the cap.
+            collisionDetect: true,
           });
           // Final reservation: the byte budget covered the raw pack, not its index rows and
           // page overhead. Refuse the push and drop its pack if the stored total crossed the cap.

@@ -22,6 +22,42 @@ import { hostedGitTokenRoutes } from '../../../src/selfhost/hosted-git/token-rou
 import { type HostedGitScope, mintHostedGitToken } from '../../../src/selfhost/hosted-git/tokens';
 import { invalidateAdminSettings } from '../../../src/services/admin-settings-resolution';
 import { signCurrentWorkspaceCallbackToken } from '../../../src/services/jwt';
+import { Sha1Dc } from '../../../src/vendor/dgit/git/sha1';
+
+/**
+ * Test-only: SHA-1DC reports a collision for the next object hashed to `target`. A real git
+ * object cannot carry a published collision (its `type size\0` header shifts the attack blocks
+ * off the chaining state they were built for), so this stands in for the detector's verdict;
+ * tests/unit/selfhost/hosted-git-sha1dc.test.ts proves the detector on the SHAttered blocks.
+ * The flag reaches push ingest only when it hashes through SHA-1DC: with collision detection
+ * off, objects hash through crypto.subtle and this hook is never consulted.
+ */
+function flagCollisionOnce(target: string): void {
+  const proto = Sha1Dc.prototype as unknown as {
+    digest: (this: object) => Uint8Array;
+  };
+  const collision = Object.getOwnPropertyDescriptor(Sha1Dc.prototype, 'collision')!;
+  const digest = proto.digest;
+  const restore = () => {
+    proto.digest = digest;
+    Object.defineProperty(Sha1Dc.prototype, 'collision', collision);
+  };
+  const flagged = new WeakSet<object>();
+  proto.digest = function (this: object) {
+    const out = digest.call(this);
+    if (Array.from(out, (b) => b.toString(16).padStart(2, '0')).join('') === target)
+      flagged.add(this);
+    return out;
+  };
+  Object.defineProperty(Sha1Dc.prototype, 'collision', {
+    configurable: true,
+    get(this: object) {
+      if (!flagged.has(this)) return collision.get!.call(this) as boolean;
+      restore();
+      return true;
+    },
+  });
+}
 
 /** Test-only: run the GC alarm on demand (production schedules it 5 minutes after a push). */
 export class HostedGitRepoTest extends HostedGitRepo {
@@ -67,6 +103,10 @@ export class HostedGitRepoTest extends HostedGitRepo {
         store.get = get;
         throw new Error('injected read failure during push validation');
       };
+      return new Response('ok');
+    }
+    if (new URL(req.url).pathname.startsWith('/__test/flag-collision/')) {
+      flagCollisionOnce(new URL(req.url).pathname.slice('/__test/flag-collision/'.length));
       return new Response('ok');
     }
     if (new URL(req.url).pathname.startsWith('/__test/has/')) {
@@ -173,6 +213,13 @@ app.post('/__test/fail-read/:repo/:oid', (c) => {
   return ns
     .get(ns.idFromName(c.req.param('repo')))
     .fetch(`https://hosted-git/__test/fail-read/${c.req.param('oid')}`);
+});
+
+app.post('/__test/flag-collision/:repo/:oid', (c) => {
+  const ns = c.env.HOSTED_GIT!;
+  return ns
+    .get(ns.idFromName(c.req.param('repo')))
+    .fetch(`https://hosted-git/__test/flag-collision/${c.req.param('oid')}`);
 });
 
 app.post('/__test/alarm/:repo/:mode', (c) => {
