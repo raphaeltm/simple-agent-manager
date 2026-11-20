@@ -13,7 +13,7 @@ import { type BoxContext, check } from './backup-lib';
  * never built a local image, so the pinned base is pulled before adoption changes anything.
  */
 export const DEFAULT_ADOPTION_HELPER_IMAGE =
-  'alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f';
+  'alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf';
 
 /** Present or pulled before any mutation, so a missing image cannot strand a stopped stack. */
 export function ensureHelperImage(ctx: Pick<BoxContext, 'run'>, image: string): void {
@@ -179,16 +179,34 @@ export function removeStaleHelper(
     '--type',
     'container',
     '--format',
-    `{{index .Config.Labels "${ADOPTION_LABEL}"}}`,
+    `{{.Id}} {{index .Config.Labels "${ADOPTION_LABEL}"}}`,
     name,
   ]);
   if (result.status !== 0) {
     if (/no such (object|container)/i.test(result.stderr)) return;
     check(result, 'inspect adoption helper');
   }
-  if (result.stdout.trim() !== helper.adoptionId)
+  const [containerId, adoptionId] = result.stdout.trim().split(/\s+/);
+  if (!containerId || !/^[a-f0-9]{64}$/.test(containerId) || adoptionId !== helper.adoptionId)
     throw new Error(`Legacy adoption refused: container ${name} is not this adoption's helper`);
-  check(ctx.run('docker', ['rm', '--force', name]), 'remove stale adoption helper');
+  // A killed CLI can leave its --rm helper finishing in the daemon. Remove the inspected
+  // identity, never a replacement at its name; auto-removal already satisfies this cleanup.
+  // At most 20 removals, spaced 100ms apart (1.9s total backoff). A daemon still
+  // removing after this bound remains a failure; do not race a new same-name helper.
+  const maxRemovalAttempts = 20;
+  const removalRetryDelaySeconds = '0.1';
+  for (let attempt = 1; attempt <= maxRemovalAttempts; attempt++) {
+    const removed = ctx.run('docker', ['rm', '--force', containerId]);
+    if (removed.status === 0 || /no such (object|container)/i.test(removed.stderr)) return;
+    if (
+      removed.stderr.includes(`removal of container ${containerId} is already in progress`) &&
+      attempt < maxRemovalAttempts
+    ) {
+      check(ctx.run('sleep', [removalRetryDelaySeconds]), 'wait for adoption helper removal');
+      continue;
+    }
+    check(removed, 'remove stale adoption helper');
+  }
 }
 
 export function volumeDigest(

@@ -53,6 +53,7 @@ function setup() {
       evidence_refs TEXT NOT NULL,
       diagnosis_id TEXT,
       idea_id TEXT,
+      idea_owned_at TEXT,
       claim_token TEXT,
       claim_expires_at INTEGER,
       failure_count INTEGER NOT NULL DEFAULT 0,

@@ -89,11 +89,14 @@ export function ZenPeekRail({
         {open && (
           <aside
             // The peek is the screen's one overlay (SAM Glass): a pane with the live blur,
-            // inset from the edge like every other pane.
-            className={`absolute left-3 ${isTop ? 'top-2' : 'bottom-2'} ${paneClassName('overlay')} flex flex-col overflow-x-hidden overflow-y-auto`}
+            // inset from the edge like every other pane. The pane is the frame and the inner
+            // div scrolls, so its rim stays put (sam-glass-design-system.md, "Scrolling panes").
+            className={`absolute left-3 ${isTop ? 'top-2' : 'bottom-2'} ${paneClassName('overlay')} flex flex-col overflow-hidden`}
             style={{ width: panelWidth, height: 'calc(200% - 1rem)' }}
           >
-            {children}
+            <div className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
+              {children}
+            </div>
           </aside>
         )}
       </div>

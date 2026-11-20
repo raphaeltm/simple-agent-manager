@@ -12,7 +12,7 @@
  */
 import { expect, type Locator, type Page, test } from '@playwright/test';
 
-import { assertNoOverflow, screenshot } from './audit-helpers';
+import { assertNoOverflow, assertNoScrollingGlassPanes, screenshot } from './audit-helpers';
 import { GLASS_PROJECT_ID, GLASS_SESSION_ID, setupGlassChatMocks } from './sam-glass-fixtures';
 
 test.use({ timezoneId: 'UTC', locale: 'en-US' });
@@ -300,6 +300,7 @@ for (const theme of ['dark', 'light'] as const) {
         const target = await surface.open(page);
         await page.waitForTimeout(350);
         await capture(page, surface.name, theme, target);
+        await assertNoScrollingGlassPanes(page);
       });
     }
   });
@@ -332,6 +333,8 @@ test.describe('SAM Glass chat — failed chat', () => {
       // ...and the failure card keeps at least its first line; the rest scrolls.
       const failureHeight = (await page.getByTestId('failure-card-shell').boundingBox())!.height;
       expect(failureHeight).toBeGreaterThanOrEqual(40);
+      // The card scrolls inside its slab, so the slab's rim stays on the slab.
+      await assertNoScrollingGlassPanes(page);
       await capture(page, 'failed-chat', theme);
     });
   }

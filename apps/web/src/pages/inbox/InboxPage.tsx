@@ -367,14 +367,18 @@ export function InboxPage({
             : 'md:grid-cols-[minmax(0,320px)_minmax(0,1fr)] xl:grid-cols-[400px_minmax(0,1fr)]'
         }`}
       >
+        {/* The pane is the frame, the inner div scrolls: a pane that scrolls itself carries its
+            rim and blur away with the content (sam-glass-design-system.md, "Scrolling panes"). */}
         <Pane
-          className={`relative min-h-0 min-w-0 flex-col overflow-y-auto md:flex ${itemOpenOnPhone && !updates ? 'hidden' : 'flex'}`}
+          className={`min-h-0 min-w-0 flex-col overflow-hidden md:flex ${itemOpenOnPhone && !updates ? 'hidden' : 'flex'}`}
           aria-label="Inbox list"
         >
-          {/* On a phone with nothing open the receipt shows above the list; on desktop the item
-              pane shows it. */}
-          {isMobile && <InboxReceiptRegion receipt={walk.itemParam ? null : walk.receipt} />}
-          <ListPane walk={walk} showProject={showProject} projectId={projectId} now={now} />
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
+            {/* On a phone with nothing open the receipt shows above the list; on desktop the
+                item pane shows it. */}
+            {isMobile && <InboxReceiptRegion receipt={walk.itemParam ? null : walk.receipt} />}
+            <ListPane walk={walk} showProject={showProject} projectId={projectId} now={now} />
+          </div>
         </Pane>
         {!updates && (
           <Pane
