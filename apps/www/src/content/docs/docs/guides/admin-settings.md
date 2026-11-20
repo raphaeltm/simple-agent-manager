@@ -84,11 +84,12 @@ value and **Source** after the reload, nothing was saved: check the value and tr
 
 The **Operations** category includes these chat storage settings:
 
-| Setting                        | Code default | Effect                                                                                                                                              |
-| ------------------------------ | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `chat.messageMergingEnabled`   | `false`      | Combine new consecutive assistant text chunks under the first chunk's message ID.                                                                   |
-| `chat.messageMergeMaxRowBytes` | `65536`      | Serialized merged-row cap, from 1 KiB to 256 KiB. Also supplies the admission budget for retry state; batches that cannot fit keep individual rows. |
-| `chat.messageMergeRecentIds`   | `200`        | Recent reporter IDs retained across credential rotation, from 50 to 2,000; a complete received batch is always retained.                            |
+| Setting                            | Code default | Effect                                                                                                                                                                                                                               |
+| ---------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `chat.messageMergingEnabled`       | `false`      | Combine new consecutive assistant text chunks under the first chunk's message ID.                                                                                                                                                    |
+| `chat.messageMergeMaxRowBytes`     | `65536`      | Serialized merged-row cap, from 1 KiB to 256 KiB. Also supplies the admission budget for retry state; batches that cannot fit keep individual rows.                                                                                  |
+| `chat.messageMergeRecentIds`       | `200`        | Recent reporter IDs retained across credential rotation, from 50 to 2,000; a complete received batch is always retained.                                                                                                             |
+| `chat.idleCleanupExtendIntervalMs` | `60000`      | How often agent output extends an idle chat session's cleanup deadline, from 0 to 300,000 ms. Each extension adds this much slack, so idle cleanup never fires early and at most this much late. `0` extends on every message batch. |
 
 Merging requires an updated reporter that sends its durable outbox incarnation. Older reporters,
 and requests with a missing or malformed incarnation, keep individual inserts and provide **zero

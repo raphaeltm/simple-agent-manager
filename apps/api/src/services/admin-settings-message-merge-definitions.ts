@@ -35,4 +35,11 @@ export const MESSAGE_MERGE_SETTINGS: AdminSettingDefinition[] = [
     'Recent reporter message IDs retained across callback credential rotation; at least a complete received batch is retained.',
     { min: 50, max: 2000 }
   ),
+  integerDefinition(
+    'chat.idleCleanupExtendIntervalMs',
+    DEFAULT_MESSAGE_MERGE_CONFIG.idleExtendIntervalMs,
+    'Operations',
+    'How often agent chat output extends an idle chat session’s cleanup deadline, in milliseconds. Each extension adds this much slack, so cleanup never fires early and at most this much late; keep it well below the idle timeout. 0 extends on every message batch.',
+    { min: 0, max: 300_000 }
+  ),
 ];

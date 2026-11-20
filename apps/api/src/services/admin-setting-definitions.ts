@@ -52,6 +52,7 @@ export type AdminSettingName =
   | 'chat.toolCallMergingEnabled'
   | 'chat.messageMergeMaxRowBytes'
   | 'chat.messageMergeRecentIds'
+  | 'chat.idleCleanupExtendIntervalMs'
   | 'insights.runUsageMaxRowsPerSession'
   | `workflow.${keyof typeof WORKFLOW_DEFAULTS}`
   | `lifecycleLatency.${LifecycleLatencySettingKey}`

@@ -14,17 +14,20 @@ export const operationsPort: OperationsPort = {
   skipUnsubscribedGitHubCi: async (env) =>
     (await resolveAdminSetting(workerEnv(env), 'events.skipUnsubscribedGitHubCi')) === true,
   messageMergeConfig: async (env) => {
-    const [enabled, maxRowBytes, recentIds, toolUpdatesEnabled] = await Promise.all([
-      resolveAdminSetting(workerEnv(env), 'chat.messageMergingEnabled'),
-      resolveAdminSetting(workerEnv(env), 'chat.messageMergeMaxRowBytes'),
-      resolveAdminSetting(workerEnv(env), 'chat.messageMergeRecentIds'),
-      resolveAdminSetting(workerEnv(env), 'chat.toolCallMergingEnabled'),
-    ]);
+    const [enabled, maxRowBytes, recentIds, toolUpdatesEnabled, idleExtendIntervalMs] =
+      await Promise.all([
+        resolveAdminSetting(workerEnv(env), 'chat.messageMergingEnabled'),
+        resolveAdminSetting(workerEnv(env), 'chat.messageMergeMaxRowBytes'),
+        resolveAdminSetting(workerEnv(env), 'chat.messageMergeRecentIds'),
+        resolveAdminSetting(workerEnv(env), 'chat.toolCallMergingEnabled'),
+        resolveAdminSetting(workerEnv(env), 'chat.idleCleanupExtendIntervalMs'),
+      ]);
     return {
       enabled: enabled === true,
       toolUpdatesEnabled: toolUpdatesEnabled === true,
       maxRowBytes: Number(maxRowBytes),
       recentIds: Number(recentIds),
+      idleExtendIntervalMs: Number(idleExtendIntervalMs),
     };
   },
   rowUsageIntervalMs: async (env) =>
