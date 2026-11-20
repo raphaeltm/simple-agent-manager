@@ -7,7 +7,15 @@ import {
   INCIDENT_QUEUE_STATES,
   TERMINAL_INCIDENT_STATES,
 } from './constants';
-import type { IncidentListItem, IncidentReopenCheckInput, IncidentRow } from './types';
+import type {
+  IncidentListItem,
+  IncidentReadContext,
+  IncidentReopenCheckInput,
+  IncidentRow,
+} from './types';
+import { recentOccurrenceCount } from './watching';
+
+const HOUR_MS = 60 * 60 * 1000;
 
 export function placeholders(values: readonly unknown[]): string {
   return values.map(() => '?').join(', ');
@@ -74,7 +82,7 @@ export function shouldReopenIncidentForOccurrence(input: IncidentReopenCheckInpu
   return true;
 }
 
-export function toListItem(row: IncidentRow): IncidentListItem {
+export function toListItem(row: IncidentRow, context: IncidentReadContext): IncidentListItem {
   return {
     id: row.signature,
     source: row.source,
@@ -97,6 +105,16 @@ export function toListItem(row: IncidentRow): IncidentListItem {
     expiredAt: row.expired_at,
     lastFailureReason: row.last_failure_reason,
     resolutionReferences: parseStoredIncidentResolutionReferences(row.resolution_references),
+    watchingSince: row.watching_since ?? null,
+    watchReason: row.watch_reason ?? null,
+    recentOccurrenceCount: recentOccurrenceCount(
+      row.watch_hourly_counts,
+      context.now,
+      context.recentWindowMs
+    ),
+    recentWindowHours: Math.round(context.recentWindowMs / HOUR_MS),
+    watchEscalatedAt: row.watch_escalated_at ?? null,
+    watchEscalationReason: row.watch_escalation_reason ?? null,
   };
 }
 

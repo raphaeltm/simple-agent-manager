@@ -14,6 +14,14 @@ export interface FeedbackTriageResult {
   groupsSkipped: number;
   groupsFailed: number;
   groupsBudgetDeferred: number;
+  /** Watched incidents whose recurrence was recorded (counts only, no re-triage). */
+  watchedRecurrences: number;
+  /** Watched incidents a spike returned to the triage queue. */
+  watchedEscalated: number;
+  /** Watched incidents expired after the quiet period; undefined when that step failed. */
+  watchedExpired: number | undefined;
+  /** Set when quiet expiry did not run this pass, and why. */
+  watchExpirySkipped?: 'error_window_truncated';
   failureReasons: string[];
 }
 export interface ErrorRow {
@@ -31,6 +39,10 @@ export interface FeedbackErrorEvidence extends IncidentReopenEvidence {
   errorId: string;
   nodeId?: string;
 }
+export interface FeedbackOccurrence {
+  id: string;
+  timestamp: number;
+}
 export interface FeedbackErrorGroup {
   signature: string;
   canonicalSignature?: string;
@@ -44,6 +56,11 @@ export interface FeedbackErrorGroup {
   lastSeenAt: number;
   evidence: FeedbackErrorEvidence[];
   count: number;
+  /**
+   * Id and timestamp of every error in this window (bounded by the triage error limit).
+   * Watched incidents count each id once; absent for groups rebuilt from storage.
+   */
+  occurrences?: FeedbackOccurrence[];
 }
 export interface ExistingTriagePriorityRow {
   signature: string;

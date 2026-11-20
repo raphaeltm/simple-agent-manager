@@ -5313,6 +5313,18 @@ export const platformFeedbackTriages = sqliteTable(
     resolutionNote: text('resolution_note'),
     resolutionReferences: text('resolution_references'),
     expiredAt: integer('expired_at'),
+    /** Watching disposition (migration 0264): the latest watch decision, epoch ms. */
+    watchingSince: integer('watching_since'),
+    watchReason: text('watch_reason'),
+    /** JSON object of epoch hour -> occurrences recorded while watching. */
+    watchHourlyCounts: text('watch_hourly_counts'),
+    watchEscalatedAt: integer('watch_escalated_at'),
+    watchEscalationReason: text('watch_escalation_reason'),
+    /** Migration 0265: last_seen_at when watching began, and ids counted since (JSON). */
+    watchCountFloor: integer('watch_count_floor'),
+    watchCountedIds: text('watch_counted_ids'),
+    /** Migration 0266: occurrences already in the watch decision's hour bucket. */
+    watchSpikeOffset: integer('watch_spike_offset'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),

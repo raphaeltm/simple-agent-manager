@@ -12,4 +12,14 @@ describe('default incident trigger template', () => {
     expect(template).toContain('{{incident.backlogSummary}}');
     expect(template.indexOf('complete_task')).toBeGreaterThan(template.indexOf('resolve_incident'));
   });
+
+  it('classifies each signature as fix-now or watching and keeps the ship-or-track rules', () => {
+    const template = DEFAULT_PLATFORM_FEEDBACK_INCIDENT_TRIGGER_TEMPLATE;
+    expect(template).toContain('FIX NOW: data loss or security exposure');
+    expect(template).toContain('money burning');
+    expect(template).toContain('fast-climbing rate');
+    expect(template).toContain('outcome "watching" and a one-line reason');
+    expect(template).toContain('Resolve only with structured ship-or-track evidence');
+    expect(template).toContain('Execute this task using the /do skill.');
+  });
 });
