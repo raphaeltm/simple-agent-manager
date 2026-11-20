@@ -9,11 +9,19 @@ function readRepoFile(path: string): string {
   return readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
 }
 
-function expectGoModDirectives(path: string, languageDirective: string): void {
+function expectGoModDirectives(
+  path: string,
+  languageDirective: string,
+  toolchainDirective: string | null = patchedGoToolchain
+): void {
   const content = readRepoFile(path);
 
   expect(content).toContain(`go ${languageDirective}\n`);
-  expect(content).toContain(`toolchain ${patchedGoToolchain}\n`);
+  if (toolchainDirective === null) {
+    expect(content).not.toMatch(/^toolchain /m);
+  } else {
+    expect(content).toContain(`toolchain ${toolchainDirective}\n`);
+  }
 }
 
 function expectWorkflowUsesPinnedGo(path: string): void {
@@ -29,7 +37,9 @@ function expectWorkflowUsesPinnedGo(path: string): void {
 
 describe('Go toolchain floor', () => {
   it('pins patched toolchains alongside each module source language minimum', () => {
-    expectGoModDirectives('packages/vm-agent/go.mod', '1.26.0');
+    // compose-go requires the selected compiler as the module minimum; a matching
+    // toolchain directive is redundant and removed by go mod tidy.
+    expectGoModDirectives('packages/vm-agent/go.mod', goVersion, null);
     expectGoModDirectives('packages/cli/go.mod', '1.24.0');
     expectGoModDirectives('scripts/quality/govulncheck-tool/go.mod', '1.25.0');
   });
