@@ -11,7 +11,13 @@ import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CHILD_TEST_TIMEOUT_MS, CLOSED_HOST, noStackDocker, runDeploy as harnessRunDeploy, writeBox } from './deploy-harness.js';
+import {
+  CHILD_TEST_TIMEOUT_MS,
+  CLOSED_HOST,
+  noStackDocker,
+  runDeploy as harnessRunDeploy,
+  writeBox,
+} from './deploy-harness.js';
 
 /** The real deploy entry; a second `--init` on the same state sees no running stack. */
 const runDeploy = (envFile: string, args: string[], env: NodeJS.ProcessEnv = {}) =>

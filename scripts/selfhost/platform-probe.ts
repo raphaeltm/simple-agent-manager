@@ -31,8 +31,8 @@ export type PlatformFacts =
   | {
       platform: 'gcp';
       projectId: string;
-      /** This VM's name and zone, when the metadata service names them (for printed commands). */
-      instance?: { name: string; zone: string };
+      /** This VM's service account, when the metadata service names it (for printed commands). */
+      serviceAccount?: string;
     }
   | { platform: 'aws'; region: string; accountId: string }
   | { platform: 'azure'; location: string; subscriptionId: string };
@@ -122,38 +122,31 @@ async function probeGce(box: Box, timeoutMs: number): Promise<PlatformFacts> {
   }
   const projectId = text.trim();
   if (!/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(projectId)) throw new Error('no project id');
-  const instance = await gceInstance(box, timeoutMs);
-  return { platform: 'gcp', projectId, ...(instance ? { instance } : {}) };
+  const serviceAccount = await gceServiceAccount(box, timeoutMs);
+  return { platform: 'gcp', projectId, ...(serviceAccount ? { serviceAccount } : {}) };
 }
 
-/** Compute Engine resource names (RFC 1035), as instance names and zones are. */
-const GCE_NAME = /^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$/;
+/** A service account email; anything else is never pasted into a printed command. */
+const SERVICE_ACCOUNT =
+  /^[a-z0-9-]{6,30}@[a-z][a-z0-9-]{4,28}[a-z0-9]\.iam\.gserviceaccount\.com$|^[0-9]{6,20}-compute@developer\.gserviceaccount\.com$/;
 
 /**
- * The VM's own name and zone, only to fill printed commands in for the operator (never used to
- * decide anything). Best effort: any miss leaves the placeholders in the command.
+ * The VM's default service account, only to fill the grant command printed for the operator
+ * (never used to decide anything). Best effort: any miss leaves the placeholder in the command.
  */
-async function gceInstance(
-  box: Box,
-  timeoutMs: number
-): Promise<{ name: string; zone: string } | null> {
-  const read = async (path: string): Promise<string | null> => {
-    try {
-      const { response, text } = await call(
-        `http://${host(box, 'SAM_GCE_METADATA_HOST')}/computeMetadata/v1/instance/${path}`,
-        { headers: { 'Metadata-Flavor': 'Google' } },
-        timeoutMs
-      );
-      if (!response.ok || response.headers.get('metadata-flavor') !== 'Google') return null;
-      return text.trim();
-    } catch {
-      return null;
-    }
-  };
-  const [name, zonePath] = await Promise.all([read('name'), read('zone')]);
-  // The zone answer is `projects/<number>/zones/<zone>`.
-  const zone = zonePath?.split('/').pop() ?? null;
-  return name && zone && GCE_NAME.test(name) && GCE_NAME.test(zone) ? { name, zone } : null;
+async function gceServiceAccount(box: Box, timeoutMs: number): Promise<string | null> {
+  try {
+    const { response, text } = await call(
+      `http://${host(box, 'SAM_GCE_METADATA_HOST')}/computeMetadata/v1/instance/service-accounts/default/email`,
+      { headers: { 'Metadata-Flavor': 'Google' } },
+      timeoutMs
+    );
+    if (!response.ok || response.headers.get('metadata-flavor') !== 'Google') return null;
+    const email = text.trim();
+    return SERVICE_ACCOUNT.test(email) ? email : null;
+  } catch {
+    return null;
+  }
 }
 
 async function probeAws(box: Box, timeoutMs: number): Promise<PlatformFacts> {

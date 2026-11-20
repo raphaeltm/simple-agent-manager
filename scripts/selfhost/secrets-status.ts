@@ -10,14 +10,12 @@ import { join } from 'node:path';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
 import {
   applyKeyChoice,
-  candidateFix,
   type ChooseInput,
-  configuredKeyFloors,
   explicitKeyProvider,
   readKeyChoice,
-  sealingStrength,
   tryKeyCandidate,
 } from './key-choice.js';
+import { candidateFix, configuredKeyFloors, sealingStrength } from './key-floors.js';
 import {
   bundleStoreFor,
   keyAgentUidLine,

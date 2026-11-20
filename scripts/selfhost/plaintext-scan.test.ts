@@ -76,8 +76,6 @@ const ctx = (): BoxContext => ({
   now: () => 0,
   log: () => undefined,
 });
-/** The fake listing dates objects 2026-11-1x; a clock well after that makes them old enough. */
-const OLD_ENOUGH = { now: Date.parse('2026-12-31T00:00:00Z') };
 const secrets: KnownSecrets = {
   names: new Set(['ENCRYPTION_KEY', 'GITHUB_CLIENT_SECRET']),
   values: [SECRET_VALUE],

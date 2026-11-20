@@ -20,11 +20,11 @@ import { assertBackupOutside, assertOperationPaths } from './backup-paths';
 import { restoreBackup } from './backup-restore';
 import { requireRunningCelld } from './backup-runtime';
 import { composeProjectFor, expectedComposeProjectFor, recordBackup } from './install-record';
+import { KEY_SERVICE_BACKUP_EXCLUDES } from './key-service';
 import { assertOperatorExecution } from './operator-only';
 import { removePrivateTree } from './private-tree';
 import { projectRestoreIdentity, restoreSourceInstallationId } from './restore-identity';
 import { restoreProgress } from './restore-progress';
-import { KEY_SERVICE_BACKUP_EXCLUDES } from './key-service';
 import { ensurePrivateDir } from './secret-files';
 
 /**

@@ -11,7 +11,10 @@ export interface NodeKeyAgentSocket {
   close(): Promise<void>;
 }
 
-export function nodeKeyAgentSocket(address: { hostname: string; port: number }): NodeKeyAgentSocket {
+export function nodeKeyAgentSocket(address: {
+  hostname: string;
+  port: number;
+}): NodeKeyAgentSocket {
   const raw = connect({ host: address.hostname, port: address.port });
   const web = Duplex.toWeb(raw) as unknown as {
     readable: ReadableStream<Uint8Array>;

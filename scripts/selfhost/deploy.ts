@@ -86,7 +86,8 @@ import {
 } from './deploy-steps.js';
 import { inboundMailWorkerVars } from './inbound-mail-settings.js';
 import { expectedComposeProjectFor, recordInstall } from './install-record.js';
-import { assertKeyAgentUp, celldDeployConfig, unsetForThisRun } from './key-service.js';
+import { celldDeployConfig, unsetForThisRun } from './key-seal.js';
+import { assertKeyAgentUp } from './key-service.js';
 import {
   ensureMailCollectorPassword,
   MAIL_COLLECTOR_PASSWORD_FILE,
@@ -409,7 +410,13 @@ async function main(): Promise<void> {
   }
   const webDist = inputs.webDist ? resolve(inputs.webDist) : buildWeb(baseDomain);
   buildApiDependencies();
-  prepareCelldProject({ apiDir: API_DIR, projectDir, plan, webDist, runtimeSecrets: Boolean(sealed) });
+  prepareCelldProject({
+    apiDir: API_DIR,
+    projectDir,
+    plan,
+    webDist,
+    runtimeSecrets: Boolean(sealed),
+  });
 
   const celld = await ensureCelldBinary(join(stateDir, 'bin'));
   const env = celldChildEnv(process.env, box, resolveEsbuild(API_DIR));

@@ -4,31 +4,21 @@
  * leave the box: the config celld stores in the fleet bucket, and a backup. The real-runtime
  * version is live/key-agent-celld.live.test.ts.
  */
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import * as TOML from '@iarna/toml';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { openBundle, parseBundle } from '../../deploy/selfhost/key-agent/bundle.ts';
+import { openBundle } from '../../deploy/selfhost/key-agent/bundle.ts';
 import { createFileProvider } from '../../deploy/selfhost/key-agent/provider-file.ts';
 import type { WranglerToml } from '../deploy/types.js';
 import { buildCelldConfig } from './celld-config.js';
 import { renderCelldMain } from './celld-project.js';
 import { buildFencePlan } from './egress-fence.js';
+import { agentVerifyKey, celldDeployConfig, resolveSealedSecrets } from './key-seal.js';
 import {
-  agentVerifyKey,
-  celldDeployConfig,
   assertKeyAgentUid,
   bundleStoreFor,
   ensureKeyServiceFiles,
@@ -36,7 +26,6 @@ import {
   keyServiceSettings,
   listBundles,
   renderKeyAgentEnv,
-  resolveSealedSecrets,
 } from './key-service.js';
 import { ensurePlatformKeys, PLATFORM_KEY_NAMES } from './platform-keys.js';
 import { SELFHOST_DURABLE_OBJECTS } from './selfhost-durable-objects.js';
@@ -76,14 +65,6 @@ async function sealInput(
 }
 
 const bundles = async () => listBundles(bundleStoreFor(state));
-
-function filesUnder(dir: string): string[] {
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir).flatMap((name) => {
-    const path = join(dir, name);
-    return statSync(path).isDirectory() ? filesUnder(path) : [path];
-  });
-}
 
 /** Every secret value, raw and in the encodings a careless copy might use. */
 function leaks(text: string, secrets: Record<string, string>): string[] {

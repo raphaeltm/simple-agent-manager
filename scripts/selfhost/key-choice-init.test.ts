@@ -22,7 +22,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { openBundle, parseBundle } from '../../deploy/selfhost/key-agent/bundle.ts';
 import { createFileProvider } from '../../deploy/selfhost/key-agent/provider-file.ts';
-import { CHILD_TEST_TIMEOUT_MS, CLOSED_HOST, noStackDocker, runDeploy as harnessRunDeploy, runTsx, writeBox as write } from './deploy-harness.js';
+import {
+  CHILD_TEST_TIMEOUT_MS,
+  CLOSED_HOST,
+  noStackDocker,
+  runDeploy as harnessRunDeploy,
+  runTsx,
+  writeBox as write,
+} from './deploy-harness.js';
 
 /** The real deploy entry; a second `--init` on the same state sees no running stack. */
 const runDeploy = (envFile: string, args: string[], env: NodeJS.ProcessEnv = {}) =>

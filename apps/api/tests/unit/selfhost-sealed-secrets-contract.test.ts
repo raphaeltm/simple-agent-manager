@@ -27,12 +27,11 @@ import {
   KEY_AGENT_PREAMBLE as AGENT_PREAMBLE,
   SIGNING_KEY_NAME,
 } from '../../../../deploy/selfhost/key-agent/server.ts';
+import { agentVerifyKey, resolveSealedSecrets } from '../../../../scripts/selfhost/key-seal';
 import {
-  agentVerifyKey,
   ensureKeyServiceFiles,
   keyAgentAddress,
   keyServiceSettings,
-  resolveSealedSecrets,
 } from '../../../../scripts/selfhost/key-service';
 import { ensurePlatformKeys, PLATFORM_KEY_NAMES } from '../../../../scripts/selfhost/platform-keys';
 import {

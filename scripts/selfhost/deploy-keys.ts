@@ -5,14 +5,12 @@
  */
 import { resolveKeyProviderBox } from './key-choice.js';
 import { detectKeyCandidates } from './key-platforms.js';
+import { agentVerifyKey, resolveDeployKeys, type ResolvedSecrets } from './key-seal.js';
 import {
-  agentVerifyKey,
   assertKeyAgentUid,
   keyAgentAddress,
   keyAgentUidLine,
   type KeyServiceSettings,
-  resolveDeployKeys,
-  type ResolvedSecrets,
 } from './key-service.js';
 import type { PlatformKeysMode } from './platform-keys.js';
 
@@ -31,7 +29,9 @@ export async function resolveDeployBox(input: {
   keyProvider: string | undefined;
   log: (message: string) => void;
 }): Promise<Box> {
-  const base = input.keyProvider ? { ...input.box, SAM_KEY_PROVIDER: input.keyProvider } : input.box;
+  const base = input.keyProvider
+    ? { ...input.box, SAM_KEY_PROVIDER: input.keyProvider }
+    : input.box;
   const { box } = await resolveKeyProviderBox({
     box: base,
     stateDir: input.stateDir,

@@ -33,10 +33,10 @@ import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { pingKeyAgent } from '../../../deploy/selfhost/key-agent/healthcheck.ts';
 import { runCommand } from '../backup-cli';
 import type { BoxContext } from '../backup-lib';
 import { ensureCelldBinary } from '../celld-binary.js';
-import { pingKeyAgent } from '../../../deploy/selfhost/key-agent/healthcheck.ts';
 import { CLOSED_HOST, noStackDocker, runDeploy as harnessRunDeploy } from '../deploy-harness.js';
 import { knownSecrets, scanDeployVersions } from '../plaintext-scan';
 import { ensurePlatformKeys } from '../platform-keys';

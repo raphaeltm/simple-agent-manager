@@ -4,7 +4,7 @@
  *
  * A key is either configured in `.env` (`configuredBy` names the setting), or the one the
  * documented one-time setup creates under a name derived from this install (`installKeyName`):
- * `pnpm selfhost:gcp-bootstrap -- --kms` on Google Cloud, the README's commands on AWS and Azure.
+ * the README's commands (Cloud key, one-time setup) on Google Cloud, AWS and Azure.
  * Either way it is only a candidate: the choice selects it after a real wrap and unwrap round trip.
  * Only a conventional-name key that does not exist falls back to the file key; any other failure
  * stops `--init` (sealingFloorRefusal in key-choice.ts).
@@ -47,7 +47,7 @@ export function candidatesFor(facts: PlatformFacts, box: Box): PlatformCandidate
       settings: { SAM_GCP_KMS_KEY: key },
       label: `Cloud KMS key ${key}`,
       ...(configured ? { configuredBy: 'SAM_GCP_KMS_KEY' } : {}),
-      ...(facts.instance ? { boxInstance: facts.instance } : {}),
+      ...(facts.serviceAccount ? { boxServiceAccount: facts.serviceAccount } : {}),
     };
     return { platform, candidates: [candidate] };
   }

@@ -109,7 +109,10 @@ beforeEach(() => {
   connect = fakeConnect((request) => fetchMock(request));
   resetRuntimeSecretsForTests(connect);
   // The loader never uses fetch: any call fails the test.
-  vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('fetch must not be used'))));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => Promise.reject(new Error('fetch must not be used')))
+  );
   vi.spyOn(console, 'log').mockImplementation(() => undefined);
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
 });
@@ -190,11 +193,7 @@ describe('wrapWorker fetch', () => {
 
   const impostor = generateKeyPairSync('ed25519');
   it.each([
-    [
-      'a refusal',
-      async () => ({ status: 403, error: 'peer_refused' }),
-      'KEY_AGENT_REFUSED',
-    ],
+    ['a refusal', async () => ({ status: 403, error: 'peer_refused' }), 'KEY_AGENT_REFUSED'],
     [
       'an unsigned answer (an impostor on the port)',
       answer({ A: 'v' }, { unsigned: true }),
