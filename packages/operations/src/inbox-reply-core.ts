@@ -38,12 +38,12 @@ export async function replyToInboxItem(
   // A prior acceptance may have committed while its RPC completion failed. Reconcile it
   // before minting another id or preparing a permission that may already be rejected.
   const prior = await ctx.env.DATABASE.prepare(
-    `SELECT message_id FROM inbox_replies WHERE project_id = ? AND item_ref = ?
-      AND user_id = ? AND agent_acted_at IS NULL ORDER BY id DESC LIMIT 1`
+    `SELECT id, message_id, agent_acted_at FROM inbox_replies WHERE project_id = ? AND item_ref = ?
+      AND user_id = ? ORDER BY id DESC LIMIT 1`
   )
     .bind(item.projectId, item.ref, ctx.actor.userId)
-    .first<{ message_id: string }>();
-  if (prior) {
+    .first<{ id: number; message_id: string; agent_acted_at: number | null }>();
+  if (prior?.agent_acted_at === null) {
     // If this read fails the ledger remains intact and no second delivery is created.
     const message = await ctx.ports.chat.getInboxReplyDelivery(item.projectId, prior.message_id);
     if (message?.metadata?.inboxReplyFingerprint === fingerprint) {
@@ -109,8 +109,12 @@ export async function replyToInboxItem(
           : {}),
         async beforeDelivery() {
           // Before acceptance: even an immediate agent respond/update observes this reply.
-          await ctx.env.DATABASE.prepare(
-            'INSERT INTO inbox_replies (project_id, item_ref, user_id, message_id, replied_at, permission_rejected) VALUES (?, ?, ?, ?, ?, ?)'
+          // Compare the same person's ledger position captured before the async send
+          // preparation. A concurrent reply must reserve a new epoch before either can send.
+          const reservation = await ctx.env.DATABASE.prepare(
+            `INSERT INTO inbox_replies (project_id, item_ref, user_id, message_id, replied_at, permission_rejected)
+             SELECT ?, ?, ?, ?, ?, ? WHERE COALESCE((SELECT MAX(id) FROM inbox_replies
+               WHERE project_id = ? AND item_ref = ? AND user_id = ?), 0) = ?`
           )
             .bind(
               item.projectId,
@@ -118,9 +122,18 @@ export async function replyToInboxItem(
               ctx.actor.userId,
               messageId,
               Date.now(),
-              item.kind === 'permission' ? 1 : 0
+              item.kind === 'permission' ? 1 : 0,
+              item.projectId,
+              item.ref,
+              ctx.actor.userId,
+              prior?.id ?? 0
             )
             .run();
+          if (reservation.meta.changes !== 1)
+            throw new OperationError(
+              'conflict',
+              'Another inbox reply was accepted; retry after it finishes'
+            );
           recorded = true;
         },
       }

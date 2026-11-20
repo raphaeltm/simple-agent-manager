@@ -231,6 +231,63 @@ afterEach(() => {
 });
 
 describe('inbox replies through the real route on SQLite', () => {
+  it('admits only one overlapping reply from the same ledger epoch and allows later reply epochs', async () => {
+    const ref = ask();
+    const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+    let reads = 0;
+    let release!: () => void;
+    const bothRead = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const prepareSpy = vi.spyOn(env.DATABASE, 'prepare').mockImplementation((sql) => {
+      const statement = prepare(sql);
+      if (!sql.includes('SELECT id, message_id, agent_acted_at FROM inbox_replies'))
+        return statement;
+      const bind = statement.bind.bind(statement);
+      vi.spyOn(statement, 'bind').mockImplementation((...values) => {
+        const bound = bind(...values);
+        const first = bound.first.bind(bound);
+        vi.spyOn(bound, 'first').mockImplementation(async (column) => {
+          // Execute real SQL first, then hold its result: both requests observed no prior row.
+          const row = await first(column);
+          if (++reads === 2) release();
+          await bothRead;
+          return row;
+        });
+        return bound;
+      });
+      return statement;
+    });
+    const payload = { content: 'Use the project setting.' };
+    const results = await Promise.all([
+      req(path(ref, '/reply'), payload),
+      req(path(ref, '/reply'), payload),
+    ]);
+    prepareSpy.mockRestore();
+    expect(reads).toBe(2);
+    expect(results.map((result) => result.status).sort()).toEqual([202, 409]);
+    expect(edge.accept).toHaveBeenCalledTimes(1);
+    expect(edge.messages).toHaveLength(1);
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM inbox_replies').get()).toEqual({ n: 1 });
+    expect((await req('/count')).body.needsYou).toBe(0);
+    // A later, different message is a legitimate new reply, even before the agent acts.
+    expect(
+      (await req(path(ref, '/reply'), { content: 'Also check the user override.' })).status
+    ).toBe(202);
+    expect(edge.messages).toHaveLength(2);
+    const context = ctx();
+    context.ports.inboxTasks.createComment = vi
+      .fn()
+      .mockResolvedValue({ thread: { id: 'response' } });
+    await respondToAgentInboxItem(context, source, { ref, body: 'I checked both overrides.' });
+    expect((await req('/count')).body.needsYou).toBe(1);
+    // The same text after an agent response belongs to another epoch and must be delivered.
+    expect((await req(path(ref, '/reply'), payload)).status).toBe(202);
+    expect(edge.messages).toHaveLength(3);
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM inbox_replies').get()).toEqual({ n: 3 });
+    expect((await req('/count')).body.needsYou).toBe(0);
+  });
+
   it('preserves an in-flight reply reservation when a concurrent retry sees no mailbox receipt yet', async () => {
     const ref = ask();
     const accept = edge.accept.getMockImplementation()!;
