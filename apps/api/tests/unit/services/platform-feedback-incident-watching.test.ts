@@ -570,6 +570,48 @@ describe('incident WATCHING robustness', () => {
     expect(h.diagnose).toHaveBeenCalledTimes(1);
   });
 
+  it('does not quiet-expire while a full error window may hide a recurrence', async () => {
+    const h = setup({ PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT: '2' });
+    const quiet = 'watched signature possibly hidden by a flood';
+    const signature = await seedWatched(h, quiet, T0 - 15 * DAY);
+    const now = T0;
+    h.addErrors('a noisy unrelated flood', [now - 3_000, now - 2_000, now - 1_000]);
+    const flooded = await h.run(now);
+    expect(flooded).toMatchObject({
+      watchedExpired: 0,
+      watchExpirySkipped: 'error_window_truncated',
+    });
+    expect(h.row(signature).queue_state).toBe('watching');
+    // Control: once a window shows everything, the quiet watch expires.
+    const clear = await h.run(now + 2 * HOUR);
+    expect(clear.watchExpirySkipped).toBeUndefined();
+    expect(clear.watchedExpired).toBe(1);
+    expect(h.row(signature).queue_state).toBe('expired');
+  });
+
+  it('spends the idea-refresh budget on every attempt, not only on successful writes', async () => {
+    const h = setup({ PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT: '1' });
+    const first = 'alpha engaged watched signature';
+    const second = 'bravo engaged watched signature';
+    const firstSignature = await seedWatched(h, first);
+    const secondSignature = await seedWatched(h, second, T0 + 1_000);
+    const reads: string[][] = [];
+    const engaged: IdeaWorkSnapshotReader = async (_env, _project, ideaIds) => {
+      reads.push([...ideaIds]);
+      return Object.fromEntries(
+        ideaIds.map((id) => [id, { sessions: [], updates: 1, fileIds: [], pullRequestUrls: [] }])
+      );
+    };
+    const t1 = T0 + 2 * HOUR;
+    h.addErrors(first, [t1]);
+    h.addErrors(second, [t1 + 1_000]);
+    const result = await h.run(t1 + 5 * 60_000, engaged);
+    expect(result.watchedRecurrences).toBe(2);
+    expect(reads).toHaveLength(1);
+    expect(h.row(firstSignature).occurrence_count).toBe(2);
+    expect(h.row(secondSignature).occurrence_count).toBe(2);
+  });
+
   it('records counts but leaves an engaged idea alone and releases it', async () => {
     const h = setup();
     const message = 'watched signature whose idea someone took up';

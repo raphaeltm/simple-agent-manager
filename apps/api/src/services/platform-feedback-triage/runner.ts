@@ -432,6 +432,20 @@ export async function runPlatformFeedbackTriage(
     }
   }
   // After this window's recurrences are recorded, so a still-recurring signature stays watched.
+  // A full error window may have hidden a watched signature's recurrence behind a noisier one
+  // (the fetch is newest-first, capped at the error limit), so expiry waits for a window that
+  // shows everything.
+  const errorWindowTruncated = (query.results ?? []).length >= errorLimit;
+  if (errorWindowTruncated) {
+    result.watchedExpired = 0;
+    result.watchExpirySkipped = 'error_window_truncated';
+    log.info('platform-feedback-triage.watch-expiry-skipped', {
+      trigger,
+      reason: 'error_window_truncated',
+      errorLimit,
+    });
+    return result;
+  }
   try {
     result.watchedExpired = await expireQuietWatchedIncidents(
       env,

@@ -20,6 +20,8 @@ export interface FeedbackTriageResult {
   watchedEscalated: number;
   /** Watched incidents expired after the quiet period; undefined when that step failed. */
   watchedExpired: number | undefined;
+  /** Set when quiet expiry did not run this pass, and why. */
+  watchExpirySkipped?: 'error_window_truncated';
   failureReasons: string[];
 }
 export interface ErrorRow {

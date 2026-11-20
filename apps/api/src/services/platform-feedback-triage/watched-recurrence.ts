@@ -32,6 +32,8 @@ export interface WatchedRecurrenceContext {
 export interface WatchedRecurrenceResult {
   recorded: boolean;
   escalated: boolean;
+  /** An idea refresh was attempted (Durable Object read and write); spends the run's budget. */
+  ideaRefreshAttempted: boolean;
   ideaUpdated: boolean;
 }
 
@@ -53,7 +55,12 @@ export async function processWatchedRecurrence(
   });
   const recorded = outcome.recorded && outcome.newOccurrences > 0;
   if (!recorded || !existing.idea_id || !refreshIdea) {
-    return { recorded, escalated: outcome.escalated, ideaUpdated: false };
+    return {
+      recorded,
+      escalated: outcome.escalated,
+      ideaRefreshAttempted: false,
+      ideaUpdated: false,
+    };
   }
   const untouched = await ownedIdeaStillUntouched(
     env,
@@ -73,7 +80,7 @@ export async function processWatchedRecurrence(
       writtenAt: new Date(ctx.now).toISOString(),
       readContext: { now: ctx.now, recentWindowMs: ctx.watchConfig.recentWindowMs },
     }));
-  return { recorded, escalated: outcome.escalated, ideaUpdated };
+  return { recorded, escalated: outcome.escalated, ideaRefreshAttempted: true, ideaUpdated };
 }
 
 export interface WatchedRecorderContext extends WatchedRecurrenceContext {
@@ -107,8 +114,9 @@ export function createWatchedRecorder(
       const outcome = await processWatchedRecurrence(env, group, existing, ctx, refreshesLeft > 0);
       if (outcome.recorded) result.watchedRecurrences += 1;
       if (outcome.escalated) result.watchedEscalated += 1;
+      // Any attempt spends the budget: an engaged or refused idea still cost the reads.
+      if (outcome.ideaRefreshAttempted) refreshesLeft -= 1;
       if (outcome.ideaUpdated) {
-        refreshesLeft -= 1;
         result.ideasUpdated += 1;
       } else {
         result.groupsSkipped += 1;
