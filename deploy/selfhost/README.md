@@ -100,7 +100,10 @@ From the repository root on the VM:
 The fleet bucket contains Worker secrets as well as application data. The backup command encrypts
 **the entire backup**, including the bucket, `.state/`, `.env` and its manifest, with AES-256-GCM.
 Restored files retain owner execution when needed, with mode 0700 for tools and 0600 for other
-files; group and world access are never restored. Rebuildable `go-cache` data is excluded.
+files; group and world access are never restored. The one exception is `.state/egress-fence.nft`:
+the fence container's root reads it without `DAC_OVERRIDE`, so every restore and rollback puts it
+back at deploy's 0644 (`fence-state.ts:repairFenceRulesMode`). It holds addresses and ports, never
+a secret. Rebuildable `go-cache` data is excluded.
 It first requires exactly one running celld in the selected Compose project, then briefly stops
 it for a consistent second bucket copy and restarts it even if that copy
 fails (`scripts/selfhost/backup-lib.ts:runBackup`, `runPlainBackup`). Temporary plaintext lives
@@ -599,7 +602,8 @@ No guided-login or untrusted app containers run on this box in this slice.
 or observer failure latch a structured `egress_fence.lost` error in container logs and
 `egress-fence-attestation/events.jsonl`. `docker compose ps` reports the fence unhealthy and celld
 stays stopped/restarting; the front door cannot serve the API. There is no automatic rule repair.
-Recover as the installation operator: regenerate with `pnpm selfhost:deploy --init`, then
+Recover as the installation operator: regenerate with `pnpm selfhost:deploy --init` (which also
+restores the rules file's 0644 mode when its content is unchanged), then
 `docker compose restart egress-fence`, wait for healthy, and run `pnpm selfhost:verify-fence`.
 Only verified startup clears the loss latch; event history remains. After resolver changes, regenerate
 and restart the fence too. An `iptables -F` does not erase this native nft table; full native ruleset
