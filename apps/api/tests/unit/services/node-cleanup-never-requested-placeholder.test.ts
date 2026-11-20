@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import { runNodeCleanupSweep } from '../../../src/scheduled/node-cleanup';
 import { diagnoseCleanupRefusal } from '../../../src/scheduled/node-cleanup/cleanup-refusal';
+import { invalidateAdminSettings } from '../../../src/services/admin-settings';
 import { clearCapacityCatalogCache } from '../../../src/services/default-capacity-source-credentials';
 import { findAnomalies } from '../../../src/services/fleet-ops/anomalies';
 import { FLEET_OPS_DEFAULTS } from '../../../src/services/fleet-ops/settings-definitions';
@@ -278,6 +279,31 @@ describe('bounded escape for a row that cannot be classified', () => {
     });
     expect(f.providerDeletes).toEqual([]);
     expect(await destroyingAnomalies(NOW + 150 * 60 * 1000)).toEqual(['host']);
+  });
+});
+
+describe('the max-lifetime phase uses the configured retirement deadline', () => {
+  it('a parked row retries against the admin-configured deadline, not the 30-minute default', async () => {
+    const f = await placeholderFixture({ status: 'error', taskLinked: true });
+    f.sqlite.exec(
+      `UPDATE nodes SET runtime_termination_confirmed_at = '${LATER_PROOF}' WHERE id = 'host'`
+    );
+    // Two hours: longer than the one-hour failure backoff, so the full backoff applies.
+    f.sqlite
+      .prepare('INSERT INTO platform_settings(key,value,updated_at) VALUES (?,?,?)')
+      .run(
+        'operations.nodeCleanupBlockedRetirementMs',
+        String(2 * HOUR_MS),
+        new Date(NOW).toISOString()
+      );
+    invalidateAdminSettings(f.env);
+
+    await runNodeCleanupSweep(f.env);
+
+    expect(hostRow(f)).toMatchObject({
+      status: 'destroying',
+      cleanup_backoff_until: new Date(NOW + HOUR_MS).toISOString(),
+    });
   });
 });
 
