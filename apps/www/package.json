@@ -24,10 +24,10 @@
   },
   "dependencies": {
     "@astrojs/sitemap": "3.7.4",
-    "@astrojs/starlight": "0.40.0",
-    "@expressive-code/plugin-line-numbers": "0.43.1",
+    "@astrojs/starlight": "0.43.1",
+    "@expressive-code/plugin-line-numbers": "0.44.4",
     "@simple-agent-manager/ui": "workspace:*",
-    "astro": "6.4.8",
+    "astro": "7.4.12",
     "mermaid": "11.14.0"
   },
   "devDependencies": {
