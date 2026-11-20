@@ -194,7 +194,11 @@ export async function persistMessageBatchWithSideEffects(
   for (const message of result.persistedMessages) {
     observeReconciliationMessage(sql, env, sessionId, message, hooks.broadcastEvent);
   }
-  const idleReset = idleCleanup.resetIdleCleanup(sql, env, sessionId);
+  // Batches arrive every few seconds during a turn; coalesce the deadline extension and the
+  // alarm re-arm it needs (`resetIdleCleanup`), instead of 4 row writes per batch.
+  const idleReset = idleCleanup.resetIdleCleanup(sql, env, sessionId, {
+    extendIntervalMs: merge?.config.idleExtendIntervalMs,
+  });
   if (idleReset.cleanupAt > 0) await hooks.recalculateAlarm();
 
   // Extract latest plan message from the batch to update session state

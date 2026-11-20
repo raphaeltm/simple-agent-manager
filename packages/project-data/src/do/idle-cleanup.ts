@@ -189,28 +189,55 @@ export function cancelIdleCleanup(sql: SqlStorage, sessionId: string): void {
   sql.exec('DELETE FROM idle_cleanup_schedule WHERE session_id = ?', sessionId);
 }
 
+/**
+ * Push an armed idle-cleanup deadline out to `now + timeout`, because the session just showed
+ * activity. Returns `cleanupAt: 0` when nothing was written (no armed schedule, or the
+ * deadline already covers the new activity), so callers re-arm the alarm only after a write.
+ *
+ * `extendIntervalMs` (chat ingest only) coalesces the extension. A batch whose activity the
+ * stored deadline already covers writes nothing; otherwise the deadline moves to
+ * `now + timeout + extendIntervalMs`, which covers the next interval of batches. The deadline
+ * is therefore never earlier than `last activity + timeout` and at most `extendIntervalMs`
+ * later. Absent or 0, every call writes `now + timeout`, as before. A schedule that is
+ * retrying (`retry_count > 0` or `last_error` set) is always rewritten, so activity still
+ * clears its retry state.
+ */
 export function resetIdleCleanup(
   sql: SqlStorage,
   env: Env,
-  sessionId: string
+  sessionId: string,
+  options: { extendIntervalMs?: number } = {}
 ): { cleanupAt: number } {
   const timeoutMinutes = parsePositiveInt(
     env.SESSION_IDLE_TIMEOUT_MINUTES,
     DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES
   );
-  const cleanupAt = Date.now() + timeoutMinutes * 60 * 1000;
+  const covered = Date.now() + timeoutMinutes * 60 * 1000;
+  const extendIntervalMs = Math.max(0, Math.floor(options.extendIntervalMs ?? 0));
 
   const existing = sql
     .exec(
-      'SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL',
+      `SELECT cleanup_at, retry_count, last_error FROM idle_cleanup_schedule
+       WHERE session_id = ? AND terminal_state IS NULL`,
       sessionId
     )
-    .toArray();
+    .toArray()[0];
 
-  if (existing.length === 0) {
+  if (!existing) {
     return { cleanupAt: 0 };
   }
 
+  if (
+    extendIntervalMs > 0 &&
+    typeof existing.cleanup_at === 'number' &&
+    existing.cleanup_at >= covered &&
+    Number(existing.retry_count ?? 0) === 0 &&
+    existing.last_error === null
+  ) {
+    return { cleanupAt: 0 };
+  }
+
+  const cleanupAt = covered + extendIntervalMs;
   sql.exec(
     `UPDATE idle_cleanup_schedule
      SET cleanup_at = ?, retry_count = 0, last_error = NULL

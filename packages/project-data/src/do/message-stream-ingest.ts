@@ -17,6 +17,7 @@ export const DEFAULT_MESSAGE_MERGE_CONFIG = {
   toolUpdatesEnabled: false,
   maxRowBytes: 64 * 1024,
   recentIds: 200,
+  idleExtendIntervalMs: 60_000,
 } as const;
 export interface MessageMergeConfig {
   enabled: boolean;
@@ -24,6 +25,11 @@ export interface MessageMergeConfig {
   toolLegacyClient?: boolean;
   maxRowBytes: number;
   recentIds: number;
+  /**
+   * Coalescing interval for the idle-cleanup deadline extension on batch ingest
+   * (`resetIdleCleanup`). Absent or 0 extends on every batch.
+   */
+  idleExtendIntervalMs?: number;
 }
 /** Supplied by the authenticated callback adapter, never by the message body. */
 export interface MessageIngestSource {
