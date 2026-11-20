@@ -39,6 +39,10 @@ export const projectInboxItemFromOverviewPath = (projectId: string, ref: string)
   return `${projectRoot(projectId)}/inbox?${params.toString()}`;
 };
 
+/** One item in the project inbox's item view. */
+export const projectInboxItemPath = (projectId: string, ref: string) =>
+  `${projectRoot(projectId)}/inbox?${new URLSearchParams({ item: ref }).toString()}`;
+
 /** A chat in the project: the chats automations start, and the chats linked work points at. */
 export const projectChatPath = (projectId: string, sessionId: string) =>
   `${projectRoot(projectId)}/chat/${encodeURIComponent(sessionId)}`;

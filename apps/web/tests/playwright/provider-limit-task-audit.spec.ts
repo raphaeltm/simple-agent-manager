@@ -77,7 +77,7 @@ for (const theme of ['sam', 'sam-light'] as const) {
       const wizard = page.getByTestId('onboarding-wizard');
       if (await wizard.isVisible()) await page.getByRole('button', { name: 'Exit setup' }).click();
       await expect(wizard).not.toBeVisible();
-      await expect(page.getByRole('heading', { name: 'Active Tasks' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Active Tasks', exact: true })).toBeVisible();
       if (scenario === 'normal' || scenario === 'stress') {
         await expect(
           page.getByRole('status').filter({ hasText: 'Waiting for provider limit reset' }).first()

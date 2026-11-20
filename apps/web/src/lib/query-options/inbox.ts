@@ -1,7 +1,7 @@
-import type { InboxFilter } from '@simple-agent-manager/shared';
+import type { InboxConversation, InboxFilter } from '@simple-agent-manager/shared';
 import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query';
 
-import { getInboxCount, getInboxItem, listInbox } from '../api';
+import { getInboxCount, getInboxItem, type InboxConversationCursor, listInbox } from '../api';
 
 /**
  * Inbox queries (slice C). Keys follow the `['auth', scope, domain, …]` invariant documented in
@@ -19,8 +19,22 @@ export const inboxQueryKeys = {
   counts: (queryScope: string) => [...inboxQueryKeys.all(queryScope), 'count'] as const,
   count: (queryScope: string, projectId: string | null) =>
     [...inboxQueryKeys.counts(queryScope), projectId ?? 'all'] as const,
+  items: (queryScope: string) => [...inboxQueryKeys.all(queryScope), 'item'] as const,
   item: (queryScope: string, projectId: string, ref: string) =>
-    [...inboxQueryKeys.all(queryScope), 'item', projectId, ref] as const,
+    [...inboxQueryKeys.items(queryScope), projectId, ref] as const,
+  /** Pages of an item's conversation after the first read, starting at `from`. */
+  conversation: (
+    queryScope: string,
+    projectId: string,
+    ref: string,
+    from: InboxConversationCursor
+  ) =>
+    [
+      ...inboxQueryKeys.item(queryScope, projectId, ref),
+      'conversation',
+      from.replyCursor ?? null,
+      from.responseCursor ?? null,
+    ] as const,
 };
 
 export function inboxCountQueryOptions(queryScope: string, projectId: string | null) {
@@ -55,5 +69,26 @@ export function inboxItemQueryOptions(queryScope: string, projectId: string, ref
     // A closed or missing item is an answer, not a transient failure.
     retry: false,
     refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * The rest of an item's conversation, read only when the person asks for it. The first page is
+ * the item read itself; this continues from its cursors. Invalidating the item refetches it too.
+ */
+export function inboxConversationQueryOptions(
+  queryScope: string,
+  projectId: string,
+  ref: string,
+  from: InboxConversationCursor,
+  nextCursor: (page: InboxConversation | null) => InboxConversationCursor | null
+) {
+  return infiniteQueryOptions({
+    queryKey: inboxQueryKeys.conversation(queryScope, projectId, ref, from),
+    queryFn: async ({ pageParam, signal }) =>
+      (await getInboxItem(projectId, ref, signal, pageParam)).conversation ?? null,
+    initialPageParam: from,
+    getNextPageParam: (last) => nextCursor(last) ?? undefined,
+    retry: false,
   });
 }

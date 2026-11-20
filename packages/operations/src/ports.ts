@@ -17,8 +17,10 @@ import type {
   AcpInteractionSafeSummary,
   AcpInteractionState,
   AgentEffort,
+  AgentMailboxMessage,
   AgentProfile,
   CredentialLimitsResponse,
+  InboxConversation,
   InboxItemContext,
   InboxLink,
   InstallationLifecycleLatency,
@@ -26,6 +28,7 @@ import type {
   NotificationType,
   SessionStateSnapshot,
   SubmitTaskResponse,
+  TaskAttachment,
   TaskStatus,
   TriggerStatus,
   UserAiBudgetSettings,
@@ -127,11 +130,26 @@ export interface SessionWriter {
   ownerUserId: string;
 }
 
+/** Trusted server context; never accepted from a chat request body. */
+export interface InboxChatDelivery {
+  ref: string;
+  title: string;
+  deliveryId: string;
+  /** Hash of the person's exact content and attachments, used only to reconcile ambiguous sends. */
+  fingerprint?: string;
+  /** Persisted with the prompt so its delivery owns a retryable permission rejection. */
+  permission?: { interactionId: string; answer: AcpInteractionBrowserAnswer };
+  afterAcceptance?: () => Promise<void>;
+  /** Runs once after send validation, before accepting the durable message. */
+  beforeDelivery: () => Promise<void>;
+}
+
 /** A chat send that has passed authorization; `send` delivers with that authorization. */
 export interface AuthorizedChatSend {
   send(
-    body: { content: string },
-    assertEffectAllowed?: () => Promise<void>
+    body: { content: string; attachments?: TaskAttachment[] },
+    assertEffectAllowed?: () => Promise<void>,
+    inboxReply?: InboxChatDelivery
   ): Promise<Record<string, unknown>>;
 }
 
@@ -211,6 +229,7 @@ export interface OperationConnectorPort {
 export interface OperationChatPort {
   /** Authorizes a send now; the returned `send` delivers under that authorization. */
   authorizeSend(userId: string, projectId: string, sessionId: string): Promise<AuthorizedChatSend>;
+  getInboxReplyDelivery(projectId: string, deliveryId: string): Promise<AgentMailboxMessage | null>;
   /** Validates message content before a receipt is reserved; returns the trimmed content. */
   validateSendContent(body: { content?: string }): string;
   stop(
@@ -483,7 +502,12 @@ export interface OperationInboxPort {
     sessionId: string;
     askedAt: number;
     userId: string;
-  }): Promise<InboxItemContext | null>;
+    /** When given, read only the canonical replies carrying this ref and item comments. */
+    inboxRef?: string;
+    replyCursor?: string;
+    responseCursor?: number;
+    includeContext?: boolean;
+  }): Promise<(InboxItemContext & { conversation?: InboxConversation }) | null>;
   /**
    * Resolve a question with reason `archived`; the agent is not told, and SAM's check-ins stay
    * off the chat until `hold.holdCheckinsUntil` or until the person writes in it.

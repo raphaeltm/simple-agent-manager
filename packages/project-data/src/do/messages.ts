@@ -2,7 +2,7 @@
  * Message storage, retrieval, batch persistence, and sequencing. Search lives in
  * `message-search.ts`; its DO-facing entry points are re-exported here.
  */
-import type { MessageCursor } from '@simple-agent-manager/shared';
+import type { MessageCursor, MessagePosition } from '@simple-agent-manager/shared';
 import { log } from '@simple-agent-manager/worker-core';
 
 import { messageBoundsClause } from './message-cursor';
@@ -98,6 +98,14 @@ export function estimateRowBytes(row: Record<string, unknown>): number {
   return size;
 }
 
+export interface MessagePageResult {
+  messages: Record<string, unknown>[];
+  hasMore: boolean;
+  skippedMessages?: number;
+  /** Last raw row scanned in query order, even when row validation removed the entire page. */
+  scanCursor?: MessagePosition;
+}
+
 export function getMessages(
   sql: SqlStorage,
   sessionId: string,
@@ -108,7 +116,7 @@ export function getMessages(
   compact: boolean = false,
   order: 'asc' | 'desc' = 'desc',
   compactOptions?: CompactMessageOptions
-): { messages: Record<string, unknown>[]; hasMore: boolean; skippedMessages?: number } {
+): MessagePageResult {
   let query =
     'SELECT id, session_id, role, content, tool_metadata, created_at, sequence, origin FROM chat_messages WHERE session_id = ?';
   const params: (string | number)[] = [sessionId];
@@ -158,7 +166,7 @@ export function formatMessageRows(
   compact: boolean,
   order: 'asc' | 'desc',
   compactOptions?: CompactMessageOptions
-): { messages: Record<string, unknown>[]; hasMore: boolean; skippedMessages?: number } {
+): MessagePageResult {
   let hasMore = rows.length > limit;
   const candidateRows = hasMore ? rows.slice(0, limit) : rows;
 
@@ -186,6 +194,17 @@ export function formatMessageRows(
   }
 
   const trimmedRows = candidateRows.slice(0, safeCount);
+  const scanEdge = trimmedRows.at(-1);
+  const scanCursor =
+    scanEdge &&
+    typeof scanEdge.created_at === 'number' &&
+    Number.isSafeInteger(scanEdge.created_at) &&
+    typeof scanEdge.sequence === 'number' &&
+    Number.isSafeInteger(scanEdge.sequence) &&
+    typeof scanEdge.id === 'string' &&
+    scanEdge.id.length > 0
+      ? { createdAt: scanEdge.created_at, sequence: scanEdge.sequence, id: scanEdge.id }
+      : undefined;
 
   const orderedRows = trimmedRows;
   if (order === 'desc') orderedRows.reverse();
@@ -213,6 +232,7 @@ export function formatMessageRows(
     messages,
     hasMore,
     ...(skipped > 0 ? { skippedMessages: skipped } : {}),
+    ...(hasMore && skipped > 0 && scanCursor ? { scanCursor } : {}),
   };
 }
 

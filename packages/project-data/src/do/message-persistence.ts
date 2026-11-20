@@ -93,7 +93,10 @@ export async function runPersistedMessageSideEffects(
   }
 ): Promise<void> {
   const attentionResolution = resolveAttentionForRoles(sql, hooks, sessionId, [
-    { id: result.id, role },
+    {
+      id: result.id,
+      role: isInboxReply(parseToolMetadata(result.toolMetadata, sessionId)) ? 'inbox_reply' : role,
+    },
   ]);
   observeReconciliationMessage(
     sql,
@@ -138,7 +141,12 @@ export async function runPersistedMessageSideEffects(
     sessionId
   );
   await closeQuestionsForHumanMessage(hooks, sessionId, [
-    { id: result.id, role, createdAt: result.now },
+    {
+      id: result.id,
+      role,
+      createdAt: result.now,
+      toolMetadata: parseToolMetadata(result.toolMetadata, sessionId),
+    },
   ]);
 }
 
@@ -244,9 +252,16 @@ async function resolveAttentionForRoles(
   sql: SqlStorage,
   hooks: MessagePersistenceHooks,
   sessionId: string,
-  persistedMessages: Array<{ id: string; role: string; origin?: string | null }>
+  persistedMessages: Array<{
+    id: string;
+    role: string;
+    origin?: string | null;
+    toolMetadata?: unknown;
+  }>
 ): Promise<void> {
-  const firstUserMsg = persistedMessages.find((m) => m.role === 'user' && m.origin !== 'system');
+  const firstUserMsg = persistedMessages.find(
+    (m) => m.role === 'user' && m.origin !== 'system' && !isInboxReply(m.toolMetadata)
+  );
   const firstAssistantMsg = persistedMessages.find((m) => m.role === 'assistant');
   let resolved = 0;
   let reason: string | null = null;
@@ -290,13 +305,25 @@ async function closeQuestionsForHumanMessage(
     id: string;
     role: string;
     origin?: string | null;
+    toolMetadata?: unknown;
     createdAt: number;
   }>
 ): Promise<void> {
-  const firstUserMsg = persistedMessages.find((m) => m.role === 'user' && m.origin !== 'system');
+  const firstUserMsg = persistedMessages.find(
+    (m) => m.role === 'user' && m.origin !== 'system' && !isInboxReply(m.toolMetadata)
+  );
   if (firstUserMsg) {
     await hooks.closeQuestionAsks?.(sessionId, firstUserMsg.id, firstUserMsg.createdAt);
   }
+}
+
+function isInboxReply(metadata: unknown): boolean {
+  return Boolean(
+    metadata &&
+    typeof metadata === 'object' &&
+    'source' in metadata &&
+    metadata.source === 'inbox_reply'
+  );
 }
 
 function parseToolMetadata(toolMetadata: string | null, sessionId: string): unknown {
