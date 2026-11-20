@@ -27,7 +27,8 @@ export const INBOX_TURN_END_INSTRUCTION =
   'Use a blocking ask only when you cannot continue; otherwise keep working. ' +
   'You will be woken in this chat when the person answers or replies. ' +
   'An inbox reply arrives as a chat message naming the item; it leaves everyone’s inbox until you act. ' +
-  'Decide what it means: use inbox_write resolve { ref } if it answers your question, review or result (references their reply); ' +
-  'respond { ref, body } to respond on the same item, or update { ref, title / why / links } to change your ask. Respond and update bring it back. ' +
+  'Decide what it means: use inbox_write resolve { ref, replyMessageId } if it answers your question, review or result (references their reply); ' +
+  'respond { ref, body, replyMessageId } to respond on the same item, or update { ref, replyMessageId, title / why / links } to change your ask. Respond and update bring it back. ' +
+  'Use the exact replyMessageId from the received header; later queued replies remain with you. Resolve refuses if a newer reply is outstanding. ' +
   'Secrets still need the secure field and Operations approvals a person’s decision; you cannot resolve them. A reply to a permission declines it first. ' +
   'Otherwise carry on; it stays archived, even when your task ends. Never file a new item for the same thing.';

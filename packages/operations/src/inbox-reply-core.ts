@@ -114,7 +114,8 @@ export async function replyToInboxItem(
           const reservation = await ctx.env.DATABASE.prepare(
             `INSERT INTO inbox_replies (project_id, item_ref, user_id, message_id, replied_at, permission_rejected)
              SELECT ?, ?, ?, ?, ?, ? WHERE COALESCE((SELECT MAX(id) FROM inbox_replies
-               WHERE project_id = ? AND item_ref = ? AND user_id = ?), 0) = ?`
+               WHERE project_id = ? AND item_ref = ? AND user_id = ?), 0) = ?
+               ${ref.store === 'ask' ? "AND EXISTS (SELECT 1 FROM asks WHERE id = ? AND project_id = ? AND source_session_id = ? AND status = 'open')" : ''}`
           )
             .bind(
               item.projectId,
@@ -126,13 +127,14 @@ export async function replyToInboxItem(
               item.projectId,
               item.ref,
               ctx.actor.userId,
-              prior?.id ?? 0
+              prior?.id ?? 0,
+              ...(ref.store === 'ask' ? [ref.id, item.projectId, sessionId] : [])
             )
             .run();
           if (reservation.meta.changes !== 1)
             throw new OperationError(
               'conflict',
-              'Another inbox reply was accepted; retry after it finishes'
+              'The item changed or another inbox reply was accepted; refresh before retrying'
             );
           recorded = true;
         },
@@ -244,18 +246,43 @@ async function prepareReplyPermission(
   );
 }
 
-/** Capture before an agent response awaits another store. A later human reply must stay hidden. */
+/** An explicit observed delivery fences acknowledgements against later queued replies. */
 export async function inboxReplyWatermark(
   ctx: OperationContext,
   projectId: string,
-  ref: string
+  ref: string,
+  sessionId: string,
+  replyMessageId?: string
 ): Promise<number> {
+  if (replyMessageId === undefined) {
+    const pending = await ctx.env.DATABASE.prepare(
+      'SELECT id FROM inbox_replies WHERE project_id = ? AND item_ref = ? AND agent_acted_at IS NULL LIMIT 1'
+    )
+      .bind(projectId, ref)
+      .first();
+    if (pending)
+      throw new OperationError(
+        'conflict',
+        'Pass replyMessageId from the inbox reply header you received'
+      );
+    return 0;
+  }
   const row = await ctx.env.DATABASE.prepare(
-    'SELECT COALESCE(MAX(id), 0) AS watermark FROM inbox_replies WHERE project_id = ? AND item_ref = ?'
+    'SELECT id FROM inbox_replies WHERE project_id = ? AND item_ref = ? AND message_id = ?'
   )
-    .bind(projectId, ref)
-    .first<{ watermark: number }>();
-  return Number(row?.watermark ?? 0);
+    .bind(projectId, ref, replyMessageId)
+    .first<{ id: number }>();
+  if (!row) throw new OperationError('not_found', 'Inbox reply not found');
+  const message = await ctx.ports.chat.getInboxReplyDelivery(projectId, replyMessageId);
+  if (
+    !message ||
+    message.sourceKind !== 'inbox_reply' ||
+    message.targetSessionId !== sessionId ||
+    message.senderType !== 'human' ||
+    message.metadata?.inboxRef !== ref
+  )
+    throw new OperationError('conflict', 'Inbox reply does not belong to this chat and item');
+  return row.id;
 }
 
 /** Only agent respond/update acknowledges replies, never a person's task edit or a heartbeat. */

@@ -134,8 +134,11 @@ decline a secret request, or approve an Operations action. Replying to a pending
 **decline that permission first**, so the agent can read your message.
 
 An agent uses `inbox_write` method `respond` with `ref` and `body` to respond on that item, or
-`update` to change its ask. Either brings the item back. Method `resolve` treats the latest reply
-as the answer to a question, review or result and keeps it out of your inbox. It cannot resolve
+`update` to change its ask. The agent passes `replyMessageId` from the received SAM header, so
+a later queued reply stays with the agent until it handles that reply too. With no outstanding
+replies, ordinary responses and updates need no message id. Method `resolve` treats the observed reply
+as the answer to a question, review or result and keeps it out of your inbox. It requires that
+message id and refuses while a newer reply is outstanding. It cannot resolve
 secrets, Operations approvals or tasks assigned to people. If the agent carries on without acting
 on the reply, the item stays with the agent, including after its task finishes. It should never
 file a duplicate item for the same conversation.

@@ -10,8 +10,12 @@ import { getInboxLimits } from './inbox-settings';
 import { sanitizeUserInput } from './sanitize-user-input';
 import type { OperationContext } from './types';
 
-export const AgentRespondInputSchema = v.object({ ref: v.string(), body: v.string() });
-export const AgentResolveInputSchema = v.object({ ref: v.string() });
+export const AgentRespondInputSchema = v.object({
+  ref: v.string(),
+  body: v.string(),
+  replyMessageId: v.optional(v.string()),
+});
+export const AgentResolveInputSchema = v.object({ ref: v.string(), replyMessageId: v.string() });
 
 /** Existing tasks use the raw ask id; other stores get a namespaced anchor. */
 export function inboxCommentAnchor(ref: string): string {
@@ -63,7 +67,13 @@ export async function respondToAgentInboxItem(
       `body must contain 1 to ${limits.answerMaxChars} characters`
     );
   await requireSourceItem(ctx, source, input.ref);
-  const watermark = await inboxReplyWatermark(ctx, source.projectId, input.ref);
+  const watermark = await inboxReplyWatermark(
+    ctx,
+    source.projectId,
+    input.ref,
+    source.sessionId,
+    input.replyMessageId
+  );
   // Repeating this response in the same reply epoch repairs a failed D1 acknowledgement
   // through the comment core's durable receipt, without creating a second response thread.
   const digest = new Uint8Array(
@@ -95,32 +105,44 @@ export async function resolveAgentInboxItem(
       'forbidden',
       'Only questions, reviews and results can be resolved by an agent'
     );
+  const watermark = await inboxReplyWatermark(
+    ctx,
+    source.projectId,
+    input.ref,
+    source.sessionId,
+    input.replyMessageId
+  );
   const now = Date.now();
-  // Select the latest reply in the same statement that closes the ask. No human notice: the
+  // Select the observed reply in the same statement that closes the ask. No human notice: the
   // agent already read the reply. Never resolve a different chat's item or a human task.
   const close = ctx.env.DATABASE.prepare(
     `UPDATE asks SET status = 'answered',
       answer_json = json_object('messageId', (SELECT message_id FROM inbox_replies
-        WHERE project_id = asks.project_id AND item_ref = ?
-        ORDER BY id DESC LIMIT 1)),
+        WHERE project_id = asks.project_id AND item_ref = ? AND id = ?)),
       resolved_by_user_id = (SELECT user_id FROM inbox_replies
-        WHERE project_id = asks.project_id AND item_ref = ?
-        ORDER BY id DESC LIMIT 1),
+        WHERE project_id = asks.project_id AND item_ref = ? AND id = ?),
       resolved_at = ?, updated_at = ?, notified_at = ?
       WHERE id = ? AND project_id = ? AND source_session_id = ? AND status = 'open'
         AND kind IN ('question', 'review', 'result')
-        AND EXISTS (SELECT 1 FROM inbox_replies WHERE project_id = asks.project_id AND item_ref = ?)
+        AND EXISTS (SELECT 1 FROM inbox_replies WHERE project_id = asks.project_id AND item_ref = ? AND id = ?)
+        AND NOT EXISTS (SELECT 1 FROM inbox_replies WHERE project_id = asks.project_id
+          AND item_ref = ? AND id > ? AND agent_acted_at IS NULL)
       RETURNING answer_json, kind, blocking`
   ).bind(
     input.ref,
+    watermark,
     input.ref,
+    watermark,
     now,
     now,
     now,
     parsed.id,
     source.projectId,
     source.sessionId,
-    input.ref
+    input.ref,
+    watermark,
+    input.ref,
+    watermark
   );
   // Closing the ask and acknowledging its replies are one D1 transaction. Bound the
   // acknowledgement to the selected answer, so a concurrently admitted later reply is untouched.
@@ -159,7 +181,7 @@ export async function resolveAgentInboxItem(
   if (!closed)
     throw new OperationError(
       'conflict',
-      'No open question, review or result with a reply belongs to this chat'
+      'No matching open item, or a newer reply must be handled first'
     );
   const answer = v.parse(v.object({ messageId: v.string() }), JSON.parse(closed.answer_json));
   if (closed.kind === 'question' && closed.blocking === 1)

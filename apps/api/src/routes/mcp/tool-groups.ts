@@ -147,7 +147,7 @@ export const MCP_TOOL_GROUPS: readonly McpToolGroup[] = [
       resolve: {
         tool: 'inbox_resolve',
         summary:
-          'treat the latest reply as the answer to your question, review or result; keeps it out of the inbox',
+          'treat the observed replyMessageId as the answer; refuses while a newer reply is outstanding',
       },
       update: {
         tool: 'inbox_update_item',

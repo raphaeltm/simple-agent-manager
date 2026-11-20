@@ -121,6 +121,16 @@ function insert(table: string, row: Record<string, unknown>) {
     .prepare(`INSERT INTO ${table} (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`)
     .run(...Object.values(row));
 }
+function replyMessageId(ref: string): string | undefined {
+  return (
+    sqlite
+      .prepare(
+        'SELECT message_id FROM inbox_replies WHERE project_id = ? AND item_ref = ? ORDER BY id DESC LIMIT 1'
+      )
+      .get('p', ref) as { message_id: string } | undefined
+  )?.message_id;
+}
+
 function ask(id = 'q', team = false) {
   insert('asks', {
     id,
@@ -231,6 +241,155 @@ afterEach(() => {
 });
 
 describe('inbox replies through the real route on SQLite', () => {
+  it('refuses a reply whose open-item preflight raced the agent resolving the ask', async () => {
+    const ref = ask();
+    const first = await req(path(ref, '/reply'), { content: 'Reply A' });
+    const authorize = edge.writer.getMockImplementation()!;
+    let entered!: () => void;
+    let release!: () => void;
+    const paused = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    edge.writer.mockImplementation(async (...args) => {
+      entered();
+      await held;
+      return authorize(...args);
+    });
+    // requireActable already loaded an open ask before chat send authorization pauses.
+    const second = req(path(ref, '/reply'), { content: 'Reply B' });
+    await paused;
+    try {
+      await expect(
+        resolveAgentInboxItem(ctx(), source, {
+          ref,
+          replyMessageId: first.body.messageId,
+        })
+      ).resolves.toMatchObject({ status: 'answered', messageId: first.body.messageId });
+    } finally {
+      release();
+    }
+    expect((await second).status).toBe(409);
+    expect(edge.accept).toHaveBeenCalledTimes(1);
+    expect(edge.messages).toHaveLength(1);
+    expect(sqlite.prepare('SELECT message_id FROM inbox_replies').all()).toEqual([
+      { message_id: first.body.messageId },
+    ]);
+    expect(sqlite.prepare('SELECT status FROM asks WHERE id = ?').get('q')).toEqual({
+      status: 'answered',
+    });
+  });
+  it.each(['respond', 'update', 'resolve'] as const)(
+    '%s requires the observed reply id and refuses another item’s reply',
+    async (method) => {
+      const ref = ask();
+      const foreignRef = ask('foreign-item');
+      const first = await req(path(ref, '/reply'), { content: 'Reply to the first item' });
+      const foreign = await req(path(foreignRef, '/reply'), { content: 'Reply to another item' });
+      const context = ctx();
+      context.ports.inboxTasks.createComment = vi
+        .fn()
+        .mockResolvedValue({ thread: { id: 'response' } });
+      const act = (observedId?: string) => {
+        const input = { ref, ...(observedId ? { replyMessageId: observedId } : {}) };
+        if (method === 'respond')
+          return respondToAgentInboxItem(context, source, { ...input, body: 'Response' });
+        if (method === 'update')
+          return updateAgentAsk(context, source, { ...input, why: 'Updated ask' });
+        return resolveAgentInboxItem(context, source, input);
+      };
+      await expect(act()).rejects.toThrow();
+      await expect(act(foreign.body.messageId)).rejects.toThrow();
+      expect(context.ports.inboxTasks.createComment).not.toHaveBeenCalled();
+      expect(sqlite.prepare('SELECT status FROM asks WHERE id = ?').get('q')).toEqual({
+        status: 'open',
+      });
+      expect(
+        sqlite.prepare('SELECT COUNT(*) AS n FROM inbox_replies WHERE agent_acted_at IS NULL').get()
+      ).toEqual({ n: 2 });
+      await expect(act(first.body.messageId)).resolves.toBeDefined();
+      expect(
+        sqlite
+          .prepare('SELECT agent_acted_at FROM inbox_replies WHERE message_id = ?')
+          .get(foreign.body.messageId)
+      ).toEqual({ agent_acted_at: null });
+    }
+  );
+  it.each(['respond', 'update'] as const)(
+    '%s acknowledges only the reply the agent observed when a later reply was already queued',
+    async (method) => {
+      const ref = ask();
+      const first = await req(path(ref, '/reply'), { content: 'Reply A' });
+      const second = await req(path(ref, '/reply'), { content: 'Reply B' });
+      expect(first.status).toBe(202);
+      expect(second.status).toBe(202);
+      const context = ctx();
+      context.ports.inboxTasks.createComment = vi
+        .fn()
+        .mockResolvedValue({ thread: { id: 'response' } });
+      if (method === 'respond') {
+        await respondToAgentInboxItem(context, source, {
+          ref,
+          replyMessageId: first.body.messageId,
+          body: 'Responding to A',
+        });
+      } else {
+        await updateAgentAsk(context, source, {
+          ref,
+          replyMessageId: first.body.messageId,
+          why: 'Updating after A',
+        });
+      }
+      const rows = sqlite
+        .prepare('SELECT message_id, agent_acted_at FROM inbox_replies ORDER BY id')
+        .all() as { message_id: string; agent_acted_at: number | null }[];
+      expect(rows).toEqual([
+        { message_id: first.body.messageId, agent_acted_at: expect.any(Number) },
+        { message_id: second.body.messageId, agent_acted_at: null },
+      ]);
+      expect((await req('')).body.items).toHaveLength(0);
+      expect((await req('/count')).body).toEqual({ needsYou: 0, blocking: 0 });
+      expect((await req('?filter=archived')).body.items[0]).toMatchObject({ ref, withAgent: true });
+    }
+  );
+
+  it('cannot resolve observed reply A while B is outstanding; resolving B closes the ask with B’s message', async () => {
+    const ref = ask();
+    const first = await req(path(ref, '/reply'), { content: 'Reply A' });
+    const second = await req(path(ref, '/reply'), { content: 'Reply B' });
+    await expect(
+      resolveAgentInboxItem(ctx(), source, {
+        ref,
+        replyMessageId: first.body.messageId,
+      })
+    ).rejects.toMatchObject({ code: 'conflict' });
+    expect(sqlite.prepare('SELECT status, answer_json FROM asks WHERE id = ?').get('q')).toEqual({
+      status: 'open',
+      answer_json: null,
+    });
+    expect(
+      sqlite.prepare('SELECT COUNT(*) AS n FROM inbox_replies WHERE agent_acted_at IS NULL').get()
+    ).toEqual({ n: 2 });
+    expect((await req('/count')).body).toEqual({ needsYou: 0, blocking: 0 });
+    expect((await req('?filter=archived')).body.items[0]).toMatchObject({ ref, withAgent: true });
+    await expect(
+      resolveAgentInboxItem(ctx(), source, {
+        ref,
+        replyMessageId: second.body.messageId,
+      })
+    ).resolves.toMatchObject({ status: 'answered', messageId: second.body.messageId });
+    const row = sqlite.prepare('SELECT status, answer_json FROM asks WHERE id = ?').get('q') as {
+      status: string;
+      answer_json: string;
+    };
+    expect(row.status).toBe('answered');
+    expect(JSON.parse(row.answer_json)).toEqual({ messageId: second.body.messageId });
+    expect(
+      sqlite.prepare('SELECT COUNT(*) AS n FROM inbox_replies WHERE agent_acted_at IS NULL').get()
+    ).toEqual({ n: 0 });
+  });
   it('admits only one overlapping reply from the same ledger epoch and allows later reply epochs', async () => {
     const ref = ask();
     const prepare = env.DATABASE.prepare.bind(env.DATABASE);
@@ -279,7 +438,11 @@ describe('inbox replies through the real route on SQLite', () => {
     context.ports.inboxTasks.createComment = vi
       .fn()
       .mockResolvedValue({ thread: { id: 'response' } });
-    await respondToAgentInboxItem(context, source, { ref, body: 'I checked both overrides.' });
+    await respondToAgentInboxItem(context, source, {
+      ref,
+      replyMessageId: replyMessageId(ref),
+      body: 'I checked both overrides.',
+    });
     expect((await req('/count')).body.needsYou).toBe(1);
     // The same text after an agent response belongs to another epoch and must be delivered.
     expect((await req(path(ref, '/reply'), payload)).status).toBe(202);
@@ -395,6 +558,7 @@ describe('inbox replies through the real route on SQLite', () => {
         .mockResolvedValue({ thread: { id: 'response' } });
       await respondToAgentInboxItem(context, source, {
         ref,
+        replyMessageId: replyMessageId(ref),
         body: 'I will use the project setting.',
       });
       expect((await req('')).body.items[0]).toMatchObject({ ref, withAgent: false });
@@ -451,7 +615,11 @@ describe('inbox replies through the real route on SQLite', () => {
       commentId: 'thread',
       idempotent: false,
     });
-    await respondToAgentInboxItem(context, source, { ref, body: 'Yes, per project.' });
+    await respondToAgentInboxItem(context, source, {
+      ref,
+      replyMessageId: replyMessageId(ref),
+      body: 'Yes, per project.',
+    });
     expect(context.ports.inboxTasks.createComment).toHaveBeenCalledWith(
       'p',
       expect.objectContaining({ askId: 'q', body: 'Yes, per project.' })
@@ -503,6 +671,7 @@ describe('inbox replies through the real route on SQLite', () => {
     context.ports.inboxTasks.createComment = vi.fn().mockResolvedValue({ thread: { id: 't' } });
     await respondToAgentInboxItem(context, source, {
       ref: 'secret:secret',
+      replyMessageId: replyMessageId('secret:secret'),
       body: 'In your provider settings.',
     });
     expect((await req('/count')).body.needsYou).toBe(1);
@@ -516,10 +685,16 @@ describe('inbox replies through the real route on SQLite', () => {
     const ref = ask();
     const sent = await req(path(ref, '/reply'), { content: 'Per project.' });
     await expect(
-      resolveAgentInboxItem(ctx(), { ...source, sessionId: 'foreign' }, { ref })
+      resolveAgentInboxItem(
+        ctx(),
+        { ...source, sessionId: 'foreign' },
+        { ref, replyMessageId: replyMessageId(ref) }
+      )
     ).rejects.toThrow();
     expect((await req('?filter=archived')).body.items[0].status).toBe('open');
-    await expect(resolveAgentInboxItem(ctx(), source, { ref })).resolves.toMatchObject({
+    await expect(
+      resolveAgentInboxItem(ctx(), source, { ref, replyMessageId: replyMessageId(ref) })
+    ).resolves.toMatchObject({
       status: 'answered',
       messageId: sent.body.messageId,
     });
@@ -554,13 +729,21 @@ describe('inbox replies through the real route on SQLite', () => {
     sqlite.exec(`CREATE TRIGGER fail_ack BEFORE UPDATE OF agent_acted_at ON inbox_replies
       BEGIN SELECT RAISE(ABORT, 'ack unavailable'); END`);
     await expect(
-      respondToAgentInboxItem(context, source, { ref, body: 'Yes, use the override.' })
+      respondToAgentInboxItem(context, source, {
+        ref,
+        replyMessageId: replyMessageId(ref),
+        body: 'Yes, use the override.',
+      })
     ).rejects.toThrow('ack unavailable');
     expect(threads.size).toBe(1);
     expect((await req('/count')).body.needsYou).toBe(0);
     sqlite.exec('DROP TRIGGER fail_ack');
     await expect(
-      respondToAgentInboxItem(context, source, { ref, body: 'Yes, use the override.' })
+      respondToAgentInboxItem(context, source, {
+        ref,
+        replyMessageId: replyMessageId(ref),
+        body: 'Yes, use the override.',
+      })
     ).resolves.toMatchObject({ thread: { id: 'thread-1' } });
     expect(threads.size).toBe(1);
     const calls = vi.mocked(context.ports.inboxTasks.createComment).mock.calls;
@@ -578,7 +761,12 @@ describe('inbox replies through the real route on SQLite', () => {
     sqlite.exec(`CREATE TRIGGER fail_ack BEFORE UPDATE OF agent_acted_at ON inbox_replies
       BEGIN SELECT RAISE(ABORT, 'ack unavailable'); END`);
     await expect(
-      updateAgentAsk(ctx(), source, { ref, title: 'Updated question?', why: 'More context' })
+      updateAgentAsk(ctx(), source, {
+        ref,
+        replyMessageId: replyMessageId(ref),
+        title: 'Updated question?',
+        why: 'More context',
+      })
     ).rejects.toThrow('ack unavailable');
     expect(
       sqlite
@@ -596,13 +784,22 @@ describe('inbox replies through the real route on SQLite', () => {
     sqlite.exec('DROP TRIGGER fail_ack');
     // Another chat cannot acknowledge the reply through the update batch.
     await expect(
-      updateAgentAsk(ctx(), { ...source, sessionId: 'foreign' }, { ref, why: 'Foreign edit' })
+      updateAgentAsk(
+        ctx(),
+        { ...source, sessionId: 'foreign' },
+        { ref, replyMessageId: replyMessageId(ref), why: 'Foreign edit' }
+      )
     ).rejects.toThrow();
     expect(sqlite.prepare('SELECT agent_acted_at FROM inbox_replies').get()).toEqual({
       agent_acted_at: null,
     });
     await expect(
-      updateAgentAsk(ctx(), source, { ref, title: 'Updated question?', why: 'More context' })
+      updateAgentAsk(ctx(), source, {
+        ref,
+        replyMessageId: replyMessageId(ref),
+        title: 'Updated question?',
+        why: 'More context',
+      })
     ).resolves.toMatchObject({ status: 'open' });
     expect((await req('')).body.items[0]).toMatchObject({
       title: 'Updated question?',
@@ -617,11 +814,15 @@ describe('inbox replies through the real route on SQLite', () => {
     await req(path(ref, '/reply'), { content: 'Per project.' });
     sqlite.exec(`CREATE TRIGGER fail_ack BEFORE UPDATE OF agent_acted_at ON inbox_replies
       BEGIN SELECT RAISE(ABORT, 'ack unavailable'); END`);
-    await expect(resolveAgentInboxItem(ctx(), source, { ref })).rejects.toThrow('ack unavailable');
+    await expect(
+      resolveAgentInboxItem(ctx(), source, { ref, replyMessageId: replyMessageId(ref) })
+    ).rejects.toThrow('ack unavailable');
     expect(sqlite.prepare('SELECT status FROM asks').get()).toEqual({ status: 'open' });
     expect((await req('?filter=archived')).body.items[0].withAgent).toBe(true);
     sqlite.exec('DROP TRIGGER fail_ack');
-    await expect(resolveAgentInboxItem(ctx(), source, { ref })).resolves.toMatchObject({
+    await expect(
+      resolveAgentInboxItem(ctx(), source, { ref, replyMessageId: replyMessageId(ref) })
+    ).resolves.toMatchObject({
       status: 'answered',
     });
     expect((await req('?filter=archived')).body.items[0].withAgent).toBe(false);
@@ -645,7 +846,11 @@ describe('inbox replies through the real route on SQLite', () => {
     vi.setSystemTime(new Date('2026-11-20T10:00:00Z'));
     const ref = ask();
     await req(path(ref, '/reply'), { content: 'First reply' });
-    await updateAgentAsk(ctx(), source, { ref, why: 'Updated ask' });
+    await updateAgentAsk(ctx(), source, {
+      ref,
+      replyMessageId: replyMessageId(ref),
+      why: 'Updated ask',
+    });
     expect((await req('/count')).body.needsYou).toBe(1);
     await req(path(ref, '/reply'), { content: 'Second reply' });
     const context = ctx();
@@ -654,7 +859,11 @@ describe('inbox replies through the real route on SQLite', () => {
       await req(path(ref, '/reply'), { content: 'Third reply, newer than the response' });
       return { thread: { id: 'thread' }, commentId: 'thread' };
     });
-    await respondToAgentInboxItem(context, source, { ref, body: 'Answering the second reply' });
+    await respondToAgentInboxItem(context, source, {
+      ref,
+      replyMessageId: replyMessageId(ref),
+      body: 'Answering the second reply',
+    });
     expect((await req('/count')).body.needsYou).toBe(0);
     expect((await req('?filter=archived')).body.items[0]).toMatchObject({ ref, withAgent: true });
     expect(
@@ -688,6 +897,7 @@ describe('inbox replies through the real route on SQLite', () => {
     context.ports.inboxTasks.createComment = vi.fn().mockResolvedValue({ thread: { id: 't' } });
     await respondToAgentInboxItem(context, source, {
       ref: 'approval:approval',
+      replyMessageId: replyMessageId('approval:approval'),
       body: 'To recover the worker.',
     });
     expect((await req('/count')).body.needsYou).toBe(1);
@@ -793,6 +1003,7 @@ describe('inbox replies through the real route on SQLite', () => {
     context.ports.inboxTasks.createComment = vi.fn().mockResolvedValue({ thread: { id: 't' } });
     await respondToAgentInboxItem(context, source, {
       ref,
+      replyMessageId: replyMessageId(ref),
       body: 'I will use a read-only command.',
     });
     expect((await req('/count')).body).toEqual({ needsYou: 1, blocking: 0 });
@@ -843,7 +1054,9 @@ describe('inbox replies through the real route on SQLite', () => {
       second.body.messageId
     );
     expect((await req(path(ref))).body.item.latestReply?.messageId).toBe(second.body.messageId);
-    await expect(resolveAgentInboxItem(ctx(), source, { ref })).resolves.toMatchObject({
+    await expect(
+      resolveAgentInboxItem(ctx(), source, { ref, replyMessageId: replyMessageId(ref) })
+    ).resolves.toMatchObject({
       messageId: second.body.messageId,
     });
   });

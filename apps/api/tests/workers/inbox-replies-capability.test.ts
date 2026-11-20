@@ -259,6 +259,7 @@ describe('inbox reply capability through real routes and Durable Objects', () =>
       method: 'respond',
       ref: item.ref,
       body: 'Only the retry policy changed.',
+      replyMessageId: first.body.messageId,
     });
     expect(responded).toMatchObject({ ref: item.ref });
     await expectInbox(s, [item.ref], 1);
@@ -283,13 +284,18 @@ describe('inbox reply capability through real routes and Durable Objects', () =>
       method: 'update',
       ref: item.ref,
       title: 'Deploy to staging?',
+      replyMessageId: second.body.messageId,
     });
     await expectInbox(s, [item.ref], 1);
     const third = await post(`${itemPath(s, item.ref)}/reply`, s.ownerCookie, {
       content: 'Yes, staging is approved.',
     });
     expect(third.status).toBe(202);
-    const resolved = await callTool(s.token, 'inbox_write', { method: 'resolve', ref: item.ref });
+    const resolved = await callTool(s.token, 'inbox_write', {
+      method: 'resolve',
+      ref: item.ref,
+      replyMessageId: third.body.messageId,
+    });
     expect(resolved).toEqual({
       ref: item.ref,
       status: 'answered',

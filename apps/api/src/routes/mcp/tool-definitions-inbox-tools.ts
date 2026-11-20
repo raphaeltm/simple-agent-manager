@@ -47,6 +47,11 @@ const idempotencyKey = {
     'Any unique string; a retried call with the same key returns the item already filed.',
 };
 const ref = { type: 'string', description: 'Item reference, `ask:<id>`, as returned when filed.' };
+const replyMessageId = {
+  type: 'string',
+  description:
+    'Exact reply message id from the inbox reply header you received. Required to act on outstanding replies; never guess the latest queued id.',
+};
 const wakeOnSteps = {
   type: 'boolean',
   description:
@@ -182,7 +187,7 @@ export const INBOX_TOOLS = [
       'Respond on an item this chat filed, including a pending secret or approval request. The response brings it back to the person’s inbox. Never file a duplicate item.',
     inputSchema: {
       type: 'object' as const,
-      properties: { ref, body: { type: 'string' } },
+      properties: { ref, body: { type: 'string' }, replyMessageId },
       required: ['ref', 'body'],
       additionalProperties: false,
     },
@@ -190,11 +195,11 @@ export const INBOX_TOOLS = [
   {
     name: 'inbox_resolve',
     description:
-      'Treat the person’s latest reply as the answer to this chat’s open question, review or result. References its chat message; stays out of their inbox. Cannot resolve secrets, approvals or human tasks.',
+      'Treat the observed reply identified by replyMessageId as the answer to this chat’s open question, review or result. Refuses while a newer reply is outstanding. References its chat message; stays out of their inbox. Cannot resolve secrets, approvals or human tasks.',
     inputSchema: {
       type: 'object' as const,
-      properties: { ref },
-      required: ['ref'],
+      properties: { ref, replyMessageId },
+      required: ['ref', 'replyMessageId'],
       additionalProperties: false,
     },
   },
@@ -203,7 +208,7 @@ export const INBOX_TOOLS = [
     description: 'Edit the title, reason or links of an open item this chat filed.',
     inputSchema: {
       type: 'object' as const,
-      properties: { ref, title, why, links },
+      properties: { ref, title, why, links, replyMessageId },
       required: ['ref'],
       additionalProperties: false,
     },

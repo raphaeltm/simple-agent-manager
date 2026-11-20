@@ -352,6 +352,7 @@ async function explainNoMatch(
 
 export const AgentUpdateInputSchema = v.object({
   ref: v.string(),
+  replyMessageId: v.optional(v.string()),
   title: v.optional(v.string()),
   why: v.optional(v.string()),
   links: v.optional(v.array(AgentLinkInputSchema)),
@@ -376,7 +377,13 @@ export async function updateAgentAsk(
     input.links === undefined
       ? undefined
       : await checkedLinks(ctx, source.projectId, input.links, limits);
-  const watermark = await inboxReplyWatermark(ctx, source.projectId, input.ref);
+  const watermark = await inboxReplyWatermark(
+    ctx,
+    source.projectId,
+    input.ref,
+    source.sessionId,
+    input.replyMessageId
+  );
   const actedAt = Date.now();
   const update = ctx.env.DATABASE.prepare(
     `UPDATE asks
