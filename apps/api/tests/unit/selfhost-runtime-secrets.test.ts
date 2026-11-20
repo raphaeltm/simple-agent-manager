@@ -362,9 +362,7 @@ describe('cache bounds (Codex P2s)', () => {
   });
 
   it('treats a clock that went backwards as expired, not fresh', async () => {
-    fetchMock
-      .mockImplementationOnce(ok({ K: 'v1' }))
-      .mockImplementation(ok({ K: 'v2' }));
+    fetchMock.mockImplementationOnce(ok({ K: 'v1' })).mockImplementation(ok({ K: 'v2' }));
     const e = { ...env(), SAM_RUNTIME_SECRETS_TTL_MS: '1000' };
     await loadRuntimeSecrets(e);
     now -= 60_000;
@@ -373,9 +371,7 @@ describe('cache bounds (Codex P2s)', () => {
   });
 
   it('a TTL longer than max-stale cannot serve past max-stale', async () => {
-    fetchMock
-      .mockImplementationOnce(ok({ K: 'v1' }))
-      .mockImplementation(ok({ K: 'v2' }));
+    fetchMock.mockImplementationOnce(ok({ K: 'v1' })).mockImplementation(ok({ K: 'v2' }));
     const e = {
       ...env(),
       SAM_RUNTIME_SECRETS_TTL_MS: '60000',

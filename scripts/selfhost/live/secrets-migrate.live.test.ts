@@ -232,9 +232,7 @@ describe('secrets migrate', () => {
     expect(await bundleIds()).toEqual([]);
     // The operator removes the line, then retries.
     writeFileSync(join(state, 'secrets.env'), OPERATOR, { mode: 0o600 });
-    expect(await runMigration({ box: box(), stateDir: state }, deps())).toBe(
-      'migrated-files-kept'
-    );
+    expect(await runMigration({ box: box(), stateDir: state }, deps())).toBe('migrated-files-kept');
     const [newest] = await listBundles(bundleStoreFor(state));
     if (!newest) throw new Error('no bundle');
     const sealed = await openBundle(
