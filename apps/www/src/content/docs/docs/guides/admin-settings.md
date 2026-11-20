@@ -525,12 +525,14 @@ exact credential it was created with could prove no server exists:
   `reconcileStrictProviderlessVm()`). SAM keeps retrying once per failure backoff (a late
   server would still be found and deleted) but never treats an empty list as proof.
 
-A node whose create was never sent to the provider at all is not stuck: it still carries the
-absence proof written when its row was created, and the cleanup sweep removes it on its first
-pass without asking the provider (`isNeverRequestedVmPlaceholder()` in
-`apps/api/src/services/node-never-requested-placeholder.ts`). This is the usual outcome of a
-provisioning attempt that stopped before its create, for example **Node allocation plan is no
-longer current**. A node in `error` whose create may have been sent and that has no server ID
+A node whose provisioning stopped before the provider identity claim is not stuck: it still
+carries the absence proof written when its row was created, and the cleanup sweep removes it on
+its first pass without asking the provider (`isNeverRequestedVmPlaceholder()` in
+`apps/api/src/services/node-never-requested-placeholder.ts`). A typical cause is **Node
+allocation plan is no longer current** reported by the first plan check. A failure after that
+claim but before the create (the second plan check, or tunnel preparation) is not recognised:
+the claim has already cleared the proof, so the row is treated like one whose create may have
+been sent. A node in `error` whose create may have been sent and that has no server ID
 is moved to `destroying` after its first failed cleanup attempt
 (`releaseNodeCleanupClaim()`). It then shows its cleanup-blocked reason, is listed here when it
 runs on SAM's own capacity, and appears in the `node_destroying_too_long` anomaly, rather than
