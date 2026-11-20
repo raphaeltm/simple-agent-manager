@@ -55,6 +55,7 @@ describe('buildCelldConfig against the real apps/api/wrangler.toml', () => {
   it('drops every Cloudflare-only key and reports why', () => {
     for (const key of [
       'port',
+      'upload_source_maps',
       'limits',
       'alias',
       'artifacts',
