@@ -375,4 +375,53 @@ describe('inbox reply capability through real routes and Durable Objects', () =>
       else testEnv.CHAT_SESSION_MESSAGE_LIMIT = previousLimit;
     }
   });
+
+  it('continues past empty malformed message pages to an older canonical reply', async () => {
+    const previousLimit = testEnv.CHAT_SESSION_MESSAGE_LIMIT;
+    testEnv.CHAT_SESSION_MESSAGE_LIMIT = '2';
+    try {
+      const s = await seed();
+      const item = await ask(s, 'Which release should we ship?');
+      const ids: string[] = [];
+      for (let index = 0; index < 5; index += 1) {
+        const sent = await post(`${itemPath(s, item.ref)}/reply`, s.ownerCookie, {
+          content: `Reply ${index}`,
+        });
+        expect(sent.status).toBe(202);
+        ids.push(String(sent.body.messageId));
+      }
+      await runInDurableObject(s.project, async (_instance, state) => {
+        // SQLite permits a BLOB in this nullable TEXT column; the real row parser rejects it.
+        state.storage.sql.exec(
+          "UPDATE chat_messages SET tool_metadata = X'00' WHERE id IN (?, ?, ?, ?)",
+          ...ids.slice(1)
+        );
+      });
+      let cursor: string | null = null;
+      const cursors: string[] = [];
+      for (let pageIndex = 0; pageIndex < 3; pageIndex += 1) {
+        const suffix = cursor ? `?replyCursor=${encodeURIComponent(cursor)}` : '';
+        const page = await get<InboxItemResponse>(
+          `${itemPath(s, item.ref)}${suffix}`,
+          s.ownerCookie
+        );
+        expect(page.status).toBe(200);
+        const conversation = page.body.conversation!;
+        expect(conversation.replies.map((reply) => reply.id)).toEqual(
+          pageIndex < 2 ? [] : [ids[0]]
+        );
+        expect(conversation.hasMore).toBe(pageIndex < 2);
+        cursor = conversation.nextReplyCursor;
+        if (pageIndex < 2) {
+          expect(cursor).toBeTypeOf('string');
+          expect(cursors).not.toContain(cursor);
+          cursors.push(cursor!);
+        }
+      }
+      expect(cursor).toBeNull();
+    } finally {
+      if (previousLimit === undefined) delete testEnv.CHAT_SESSION_MESSAGE_LIMIT;
+      else testEnv.CHAT_SESSION_MESSAGE_LIMIT = previousLimit;
+    }
+  });
 });

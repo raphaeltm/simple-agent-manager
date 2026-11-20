@@ -1112,7 +1112,7 @@ export async function getMessages(
   roles?: string[],
   compact: boolean = false,
   order: 'asc' | 'desc' = 'desc'
-): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
+): Promise<Awaited<ReturnType<ProjectData['getMessages']>>> {
   const owner = await resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId);
   return callProjectDataOwnerWithRetry(
     env,

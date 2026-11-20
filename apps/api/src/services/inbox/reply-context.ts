@@ -55,7 +55,7 @@ export async function readInboxConversation(
   }
   // getMessages selects newest first but returns each page in chronological order.
   // Continue before its oldest scanned row, including rows belonging to another inbox item.
-  const oldest = page.messages[0];
+  const oldest = page.scanCursor ?? page.messages[0];
   const nextReplyCursor =
     page.hasMore &&
     oldest &&
