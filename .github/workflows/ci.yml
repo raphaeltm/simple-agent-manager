@@ -137,19 +137,8 @@ jobs:
               - 'scripts/deploy/durable-object-migrations.ts'
               - 'scripts/deploy/types.ts'
               - 'scripts/deploy/vapid-keys.ts'
-              # Self-host build tests import the celld generator, presign vars, SMTP settings and
-              # account SQL: these modules plus the scripts/selfhost modules they import. The
-              # transitive ones are listed by hand: ci-suite-selection.test.ts checks the direct
-              # imports but does not follow `./x.js` specifiers to `x.ts`.
-              - 'scripts/selfhost/account-sql.ts'
-              - 'scripts/selfhost/box-settings.ts'
-              - 'scripts/selfhost/celld-config.ts'
-              - 'scripts/selfhost/celld-project.ts'
-              - 'scripts/selfhost/mail-settings.ts'
-              - 'scripts/selfhost/observability-migrations.ts'
-              - 'scripts/selfhost/reverse-tunnel-migrations.ts'
-              - 'scripts/selfhost/secret-files.ts'
-              - 'scripts/selfhost/selfhost-migrations.ts'
+              # API build/conformance tests import the celld generator and its helpers.
+              - 'scripts/selfhost/**'
               # selfhost-inbound-email.test.ts builds this receiver (Self-host Email job only).
               - 'deploy/selfhost/sam-mx/**'
               # The self-host access-log redaction guard scans the API routes against this filter.
@@ -588,6 +577,11 @@ jobs:
           --coverage --coverage.reporter=text-summary
           --coverage.thresholds.statements=0 --coverage.thresholds.branches=0
           --coverage.thresholds.functions=0 --coverage.thresholds.lines=0
+
+      # One shard owns the real-git suite; the dedicated config launches its own runtime.
+      - name: Hosted git conformance and celld bundle
+        if: matrix.shard == 1
+        run: pnpm --filter @simple-agent-manager/api test:hosted-git
 
       - name: Upload API blob report
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

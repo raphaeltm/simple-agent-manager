@@ -1,5 +1,24 @@
 /** The Cloudflare Artifacts binding (SAM-native Git repositories). */
+/** Identity of the caller minting a repository credential. Backends may bind it to a runtime. */
+export interface ArtifactsTokenContext {
+  userId: string;
+  workspaceId?: string;
+  callbackGeneration?: string | null;
+}
+
 export type ArtifactsBinding = {
+  /** Optional in-process transport registered by a self-host backend. */
+  remoteFetch?: typeof fetch;
+  /** Optional import capability; absent on the Cloudflare binding. */
+  importSource?: {
+    defaultBranch(sourceUrl: string): Promise<string | null>;
+    populate(params: {
+      sourceUrl: string;
+      branch: string;
+      remote: string;
+      token: string;
+    }): Promise<void>;
+  };
   create(
     name: string,
     opts?: { description?: string; setDefaultBranch?: string }
@@ -18,7 +37,8 @@ export type ArtifactsBinding = {
     defaultBranch: string;
     createToken(
       scope?: 'read' | 'write',
-      ttl?: number
+      ttl?: number,
+      context?: ArtifactsTokenContext
     ): Promise<{
       id: string;
       plaintext: string;

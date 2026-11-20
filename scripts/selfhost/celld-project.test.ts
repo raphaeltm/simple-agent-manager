@@ -53,18 +53,18 @@ describe('prepareCelldProject', () => {
     prepareCelldProject({ apiDir: API_DIR, projectDir, plan: plan() });
     const main = readFileSync(join(projectDir, CELLD_MAIN), 'utf8');
     expect(main).toBe(renderCelldMain());
-    expect(main).toContain("import worker from './src/index.ts';");
+    expect(main).toContain("import worker, { app } from './src/index.ts';");
     expect(main).toContain('resumeSharedFlightJoinsOnOwnTimer();');
     expect(main).toContain("export * from './src/index.ts';");
-    expect(main).toContain('export default withSelfHostBuild(worker);');
+    expect(main).toContain('export default withSelfHostBuild(worker, app);');
     // Every module the entry imports exists in apps/api (the symlinked src).
     const specifiers = [...main.matchAll(/from '\.\/src\/([^']+)'/g)].map((m) => m[1]!);
     expect(specifiers.length).toBeGreaterThanOrEqual(3);
     for (const specifier of specifiers) {
       expect(existsSync(join(API_DIR, 'src', specifier)), specifier).toBe(true);
     }
-    // Nothing but the shared entry's own exports and the default.
-    expect(main.match(/^export /gm)).toHaveLength(2);
+    // Shared exports, the self-host-only DO, and the default.
+    expect(main.match(/^export /gm)).toHaveLength(3);
     expect(statSync(join(projectDir, CELLD_MAIN)).mode & 0o777).toBe(0o600);
   });
 

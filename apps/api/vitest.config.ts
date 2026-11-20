@@ -20,7 +20,7 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./tests/setup/project-data-ports.ts', './tests/setup/repo-hosting-ports.ts'],
     include: ['tests/**/*.test.ts'],
-    exclude: ['tests/workers/**'],
+    exclude: ['tests/workers/**', 'tests/hosted-git/**'],
     coverage: coverageConfig(['src/**/*.ts'], {
       statements: 45,
       branches: 40,

@@ -24,12 +24,7 @@ import type {
 
 import { accountRows, mergeRows } from '../unit/components/accounts/fixtures';
 import { acmeBillingProject, acmeBillingUser } from './acme-billing-fixtures';
-import {
-  assertNoClippedOverflow,
-  assertNoOverflow,
-  screenshot,
-  seedTheme,
-} from './audit-helpers';
+import { assertNoClippedOverflow, assertNoOverflow, screenshot, seedTheme } from './audit-helpers';
 import { RUNS, SCHEDULES, TRIGGERS } from './automation-fixtures';
 import { docsShot } from './docs-shot';
 import { KIND_ITEMS, MANY_ITEMS } from './inbox-fixtures';
@@ -146,9 +141,65 @@ function usage(
   };
 }
 
-type Budget = 'healthy' | 'normal' | 'stressed';
+type Budget = 'healthy' | 'normal' | 'stressed' | 'many';
+
+/**
+ * Eight accounts, each with its own profile pinned to it, at the spread Raphaël's own project had
+ * on 2026-11-20: three calm, the rest low on a 5-hour or weekly window, one with a long name.
+ * Each entry: [id, name, 5-hour used %, week used %].
+ */
+const MANY_ACCOUNTS: Array<[string, string, number, number]> = [
+  ['agy', 'AGY Prod', 10, 20],
+  ['ec', 'EC Claude', 15, 30],
+  ['billing', 'OpenAI Codex account for the billing team', 20, 35],
+  ['opencode', 'OpenCode API key', 30, 98],
+  ['samc', 'SAM Claude', 40, 69],
+  ['samsam', 'Sam Sam', 20, 87],
+  ['social', 'Sam Social', 30, 92],
+  ['support', 'Sam Support', 55, 82],
+];
+const MANY_PROFILES = MANY_ACCOUNTS.map(([id, name]) =>
+  profile(`p-${id}`, `${name} profile`, 'claude-code', 'claude-opus-5-5')
+);
+const MANY_ROWS = mergeRows(
+  ...MANY_ACCOUNTS.map(([id, name]) =>
+    accountRows({
+      id,
+      name,
+      kind: 'agent',
+      target: 'claude-code',
+      credentialKind: 'oauth-token',
+    })
+  )
+);
+const MANY_PINS = MANY_ACCOUNTS.map(([id, name]) => ({
+  id: `pin-${id}`,
+  configurationId: `cfg-${id}`,
+  agentProfileId: `p-${id}`,
+  profileName: `${name} profile`,
+  projectId: PROJECT_ID,
+  projectName: 'Acme billing',
+  consumerKind: 'agent',
+  consumerTarget: 'claude-code',
+  isActive: true,
+  createdAt: '2026-10-01T00:00:00Z',
+  updatedAt: '2026-10-01T00:00:00Z',
+}));
+const levelFor = (used: number): CredentialLimitLevel =>
+  used >= 90 ? 'critical' : used >= 75 ? 'warning' : 'ok';
 
 function limits(kind: Budget, now: number) {
+  if (kind === 'many') {
+    return [
+      ...limits('normal', now),
+      ...MANY_ACCOUNTS.map(([id, , session, week]) =>
+        usage(`cred-${id}`, 'claude-code', [
+          limitWindow('claude.five_hour', session, levelFor(session), 2 * HOUR, now),
+          limitWindow('claude.seven_day', week, levelFor(week), (50 + session) * HOUR, now),
+        ])
+      ),
+    ];
+  }
   const claude =
     kind === 'stressed'
       ? [
@@ -382,12 +433,15 @@ async function setupScene(page: Page, options: SceneOptions) {
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
+    const many = options.budget === 'many';
+    const rows = many ? mergeRows(ROWS, MANY_ROWS) : ROWS;
     if (path === '/api/cc/credentials')
-      return respond(200, { credentials: options.brandNew ? [] : ROWS.credentials });
+      return respond(200, { credentials: options.brandNew ? [] : rows.credentials });
     if (path === '/api/cc/configurations')
-      return respond(200, { configurations: ROWS.configurations });
-    if (path === '/api/cc/attachments') return respond(200, { attachments: ROWS.attachments });
-    if (path === '/api/cc/profile-attachments') return respond(200, { attachments: [] });
+      return respond(200, { configurations: rows.configurations });
+    if (path === '/api/cc/attachments') return respond(200, { attachments: rows.attachments });
+    if (path === '/api/cc/profile-attachments')
+      return respond(200, { attachments: many ? MANY_PINS : [] });
     if (path === '/api/credentials/resolution-status') return respond(200, { consumers: [] });
     if (path === '/api/credentials/limits')
       return respond(200, {
@@ -484,7 +538,13 @@ async function setupScene(page: Page, options: SceneOptions) {
           )
         );
       if (sub === '/agent-profiles')
-        return respond(200, { items: options.brandNew ? [] : PROFILES });
+        return respond(200, {
+          items: options.brandNew
+            ? []
+            : options.budget === 'many'
+              ? [...PROFILES, ...MANY_PROFILES]
+              : PROFILES,
+        });
       if (sub === '/agent-profiles/picker')
         return respond(200, { usageWindowDays: 30, usage: [], hiddenProfileIds: [] });
       if (sub === '/skills') return respond(200, { items: [] });
@@ -589,7 +649,10 @@ test.describe('Project Overview', () => {
     // The inbox's own phrase: its item is in Needs you.
     await expect(running.getByText('Paused on this')).toBeVisible();
     await expect(page.getByTestId('overview-budgets')).toBeVisible();
-    await expect(page.getByTestId('overview-budget-exceptions')).toContainText('5-hour window');
+    // The low 5-hour window is the tile's own short status; the full words are its name.
+    const personal = page.getByTestId('overview-budget-tile').filter({ hasText: 'Personal Max' });
+    await expect(personal.getByTestId('overview-budget-status')).toHaveText('38% left');
+    await expect(personal).toHaveAttribute('aria-label', /5-hour window · 38% left/);
     await expect(page.getByTestId('overview-automation-failing')).toBeVisible();
     await expect(page.getByTestId('overview-recent-ideas')).toBeVisible();
     const week = page.getByRole('region', { name: 'This week' });
@@ -623,9 +686,9 @@ test.describe('Project Overview', () => {
     await expect(
       running.getByRole('link', { name: /7 more running\s?· 2 waiting on you/ })
     ).toBeVisible();
-    await expect(page.getByTestId('overview-budget-exceptions')).toContainText(
-      'Weekly window · 6% left'
-    );
+    const personal = page.getByTestId('overview-budget-tile').filter({ hasText: 'Personal Max' });
+    await expect(personal.getByTestId('overview-budget-status')).toHaveText('6% left');
+    await expect(personal).toHaveAttribute('aria-label', /Weekly window · 6% left/);
     await expect(
       page.getByTestId('overview-automation-failing').getByTestId('automation-attention-line')
     ).toHaveCount(2);
@@ -644,8 +707,50 @@ test.describe('Project Overview', () => {
     );
     // Healthy accounts get rings and no words.
     await expect(page.getByTestId('overview-budgets')).toBeVisible();
-    await expect(page.getByTestId('overview-budget-exceptions')).toHaveCount(0);
+    await expect(page.getByTestId('overview-budget-tile')).toHaveCount(2);
+    await expect(page.getByTestId('overview-budget-status')).toHaveCount(0);
     await capture(page, 'overview-quiet');
+  });
+
+  test('many accounts: one short status per tile, no sentence list under the rings', async ({
+    page,
+  }) => {
+    await setupScene(page, { scene: 'normal', budget: 'many', automations: 'normal' });
+    await page.goto(BASE);
+    const budgets = page.getByRole('region', { name: 'Budgets' });
+    // Two default accounts plus the eight pinned ones.
+    await expect(budgets.getByTestId('overview-budget-tile')).toHaveCount(10);
+    const tile = (name: string) =>
+      budgets.getByTestId('overview-budget-tile').filter({ hasText: name });
+    await expect(tile('OpenCode API key').getByTestId('overview-budget-status')).toHaveText(
+      '2% left'
+    );
+    await expect(tile('AGY Prod').getByTestId('overview-budget-status')).toHaveCount(0);
+    // The account's name appears once in the pane: no second line of sentences naming it again.
+    await expect(budgets.getByText('Sam Social')).toHaveCount(1);
+    // Every tile is inside the pane, and the pane holds ten accounts in at most three rows.
+    const pane = await budgets.boundingBox();
+    const tiles = await budgets
+      .getByTestId('overview-budget-tile')
+      .evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().top));
+    expect(new Set(tiles.map((top) => Math.round(top))).size).toBeLessThanOrEqual(3);
+    for (const box of await budgets.getByTestId('overview-budget-tile').all()) {
+      const b = await box.boundingBox();
+      expect(b!.x).toBeGreaterThanOrEqual(pane!.x);
+      expect(b!.x + b!.width).toBeLessThanOrEqual(pane!.x + pane!.width + 1);
+    }
+    await budgets.scrollIntoViewIfNeeded();
+    await capture(page, 'overview-many-accounts');
+  });
+
+  test('many accounts, light theme: the status colours stay readable', async ({ page }) => {
+    await seedTheme(page, 'light');
+    await setupScene(page, { scene: 'normal', budget: 'many', automations: 'normal' });
+    await page.goto(BASE);
+    const budgets = page.getByRole('region', { name: 'Budgets' });
+    await expect(budgets.getByTestId('overview-budget-status').first()).toBeVisible();
+    await budgets.scrollIntoViewIfNeeded();
+    await capture(page, 'overview-many-accounts-light');
   });
 
   test('sending a task keeps you on the page', async ({ page }, testInfo) => {
