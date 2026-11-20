@@ -20,6 +20,8 @@ import type {
   AgentProfile,
   CredentialLimitsResponse,
   InboxItemContext,
+  InboxConversation,
+  TaskAttachment,
   InboxLink,
   InstallationLifecycleLatency,
   NotificationResponse,
@@ -127,11 +129,21 @@ export interface SessionWriter {
   ownerUserId: string;
 }
 
+/** Trusted server context; never accepted from a chat request body. */
+export interface InboxChatDelivery {
+  ref: string;
+  title: string;
+  deliveryId: string;
+  /** Runs once after send validation, before accepting the durable message. */
+  beforeDelivery: () => Promise<void>;
+}
+
 /** A chat send that has passed authorization; `send` delivers with that authorization. */
 export interface AuthorizedChatSend {
   send(
-    body: { content: string },
-    assertEffectAllowed?: () => Promise<void>
+    body: { content: string; attachments?: TaskAttachment[] },
+    assertEffectAllowed?: () => Promise<void>,
+    inboxReply?: InboxChatDelivery
   ): Promise<Record<string, unknown>>;
 }
 
@@ -483,7 +495,11 @@ export interface OperationInboxPort {
     sessionId: string;
     askedAt: number;
     userId: string;
-  }): Promise<InboxItemContext | null>;
+    /** When given, read only the canonical replies carrying this ref and item comments. */
+    inboxRef?: string;
+    replyCursor?: string;
+    includeContext?: boolean;
+  }): Promise<(InboxItemContext & { conversation?: InboxConversation }) | null>;
   /**
    * Resolve a question with reason `archived`; the agent is not told, and SAM's check-ins stay
    * off the chat until `hold.holdCheckinsUntil` or until the person writes in it.

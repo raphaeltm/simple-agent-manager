@@ -20,6 +20,8 @@ import {
   listAgentAsks,
   type OperationContext,
   OperationError,
+  resolveAgentInboxItem,
+  respondToAgentInboxItem,
   updateAgentAsk,
 } from '@simple-agent-manager/operations';
 import { ValiError } from 'valibot';
@@ -267,3 +269,10 @@ export const handleInboxAttach: Handler = (requestId, params, tokenData, env) =>
   run(requestId, 'inbox_write attach', tokenData, env, (ctx, source) =>
     attachAgentTask(ctx, source, params as Parameters<typeof attachAgentTask>[2])
   );
+
+export const handleInboxRespond = (requestId: number | string, params: Record<string, unknown>, tokenData: McpTokenData, env: Env) =>
+  run(requestId, 'inbox_write respond', tokenData, env, (ctx, source) =>
+    respondToAgentInboxItem(ctx, source, params as Parameters<typeof respondToAgentInboxItem>[2]));
+export const handleInboxResolve = (requestId: number | string, params: Record<string, unknown>, tokenData: McpTokenData, env: Env) =>
+  run(requestId, 'inbox_write resolve', tokenData, env, (ctx, source) =>
+    resolveAgentInboxItem(ctx, source, params as Parameters<typeof resolveAgentInboxItem>[2]));

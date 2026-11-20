@@ -89,9 +89,9 @@ export function inboxItemsSql(
     const scope = projectScope('a.project_id');
     const status =
       input.filter === 'archived'
-        ? `a.status = 'archived'`
+        ? `(a.status IN ('archived', 'answered') OR (a.status = 'open' AND (a.expires_at IS NULL OR a.expires_at > ?)))`
         : `a.status = 'open' AND (a.expires_at IS NULL OR a.expires_at > ?)`;
-    const statusParams = input.filter === 'archived' ? [] : [input.now];
+    const statusParams = [input.now];
     const kind =
       input.filter === 'tasks'
         ? ` AND a.kind = 'task'`
@@ -119,7 +119,7 @@ export function inboxItemsSql(
     });
   }
 
-  const openStoresIncluded = input.filter === 'needs_you' || input.filter === 'blocking';
+  const openStoresIncluded = input.filter === 'needs_you' || input.filter === 'blocking' || input.filter === 'archived';
   if (openStoresIncluded) {
     // Questions and permissions, from the chat index. A row whose JSON cannot be read is still
     // selected for a list page so the reader logs and skips it (rule 50); a count leaves it out.
@@ -192,9 +192,30 @@ export function inboxItemsSql(
   }
 
   return {
-    sql: parts.map((part) => part.sql).join('\nUNION ALL\n'),
+    sql: `SELECT base.*, lr.user_id AS reply_user_id, u.name AS reply_name,
+      lr.message_id AS reply_message_id, lr.replied_at AS replied_at,
+      CASE WHEN EXISTS (SELECT 1 FROM inbox_replies pending
+        WHERE pending.project_id = base.project_id AND pending.item_ref = ${replyRefSql('base')}
+          AND pending.agent_acted_at IS NULL) THEN 1 ELSE 0 END AS with_agent
+      FROM (${parts.map((part) => part.sql).join('\nUNION ALL\n')}) base
+      LEFT JOIN inbox_replies lr ON lr.project_id = base.project_id
+        AND lr.item_ref = ${replyRefSql('base')}
+        AND lr.message_id = (SELECT latest.message_id FROM inbox_replies latest
+          WHERE latest.project_id = base.project_id AND latest.item_ref = ${replyRefSql('base')}
+          ORDER BY latest.replied_at DESC, latest.message_id DESC LIMIT 1)
+      LEFT JOIN users u ON u.id = lr.user_id
+      WHERE ${input.filter === 'archived'
+        ? "(base.status IN ('archived', 'answered') OR EXISTS (SELECT 1 FROM inbox_replies hidden WHERE hidden.project_id = base.project_id AND hidden.item_ref = " + replyRefSql('base') + " AND hidden.agent_acted_at IS NULL))"
+        : "NOT EXISTS (SELECT 1 FROM inbox_replies hidden WHERE hidden.project_id = base.project_id AND hidden.item_ref = " + replyRefSql('base') + " AND hidden.agent_acted_at IS NULL)"}`,
     params: parts.flatMap((part) => part.params),
   };
+}
+
+/** Must match formatInboxRef; the same predicate wraps list and badge count. */
+function replyRefSql(alias: string): string {
+  return `CASE WHEN ${alias}.store = 'attention'
+    THEN 'attention:' || ${alias}.item_id || ':' || ${alias}.marker_id
+    ELSE ${alias}.store || ':' || ${alias}.item_id END`;
 }
 
 function parseCursor(cursor: string | undefined) {

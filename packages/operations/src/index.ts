@@ -357,3 +357,8 @@ export {
 export { samUsageGet, usageOperations } from './usage-operations';
 export { utf8ByteLength } from './utf8';
 export { readArchivedToolPayloads, readResourceHistory } from './workspace-history';
+
+export { replyToInboxItem } from './inbox-reply-core';
+export type { InboxChatDelivery } from './ports';
+
+export { respondToAgentInboxItem, resolveAgentInboxItem } from './inbox-agent-replies';

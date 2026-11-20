@@ -1,3 +1,4 @@
+import type { InboxChatDelivery } from '@simple-agent-manager/operations';
 import { drizzle } from 'drizzle-orm/d1';
 import type * as v from 'valibot';
 
@@ -79,7 +80,8 @@ export async function sendChat(
   sessionId: string,
   body: v.InferOutput<typeof SendChatMessageSchema>,
   authorized?: AuthorizedSendChat,
-  assertEffectAllowed?: () => Promise<void>
+  assertEffectAllowed?: () => Promise<void>,
+  inboxReply?: InboxChatDelivery
 ) {
   const db = drizzle(env.DATABASE, { schema });
 
@@ -88,13 +90,14 @@ export async function sendChat(
     : await authorizeSendChat(env, userId, projectId, sessionId);
   const shared = writer.role === 'grantee';
 
-  const content = validateSendChatContent(body);
+  const validatedContent = validateSendChatContent(body);
+  const content = inboxReply ? body.content! : validatedContent;
   const deliveryIntent = body.deliveryIntent ?? 'queue';
 
   // Every refusal comes before the first side effect (validating uploads, cancelling a
   // scheduled sleep), so a refused prompt changes nothing.
   const durableConfig = resolveDurableExecutionConfig(env);
-  if (assertEffectAllowed && !durableConfig.deliveryEnabled)
+  if ((assertEffectAllowed || inboxReply) && !durableConfig.deliveryEnabled)
     throw errors.conflict('SAM follow-ups require durable prompt delivery');
   const attachments = body.attachments ?? [];
   if (shared && !durableConfig.deliveryEnabled) {
@@ -141,18 +144,30 @@ export async function sendChat(
       ? `${buildSharedSessionSpeakerLine(names)}\n\n${enrichedMessage}`
       : enrichedMessage;
     await assertEffectAllowed?.();
+    await inboxReply?.beforeDelivery();
+    const header = inboxReply
+      ? `The person replied about your inbox item ${JSON.stringify(inboxReply.title)} (${inboxReply.ref}).
+It is out of their inbox until you act on it.
+Decide what it means: if it answers the item, call inbox_write resolve { ref } (asks only; secrets and approvals need the person). To respond, call inbox_write respond { ref, body }; to change the ask, call update { ref, title / why / links }. A response or update brings it back. Otherwise carry on; it stays out. Do not file a new item for the same thing.
+
+Their message:
+
+`
+      : '';
     const accepted = await projectDataService.acceptPromptDelivery(env, projectId, {
+      ...(inboxReply ? { deliveryId: inboxReply.deliveryId } : {}),
       targetSessionId: sessionId,
       displayContent: buildVisibleInitialPrompt({ message: content, attachments }),
-      deliveryContent: buildVisibleInitialPrompt({ message: deliveryMessage, attachments }),
+      deliveryContent: buildVisibleInitialPrompt({ message: header + deliveryMessage, attachments }),
       senderType: 'human',
       senderId: userId,
       messageClass: 'deliver',
       deliveryIntent,
-      sourceKind: 'user_followup',
+      sourceKind: inboxReply ? 'inbox_reply' : 'user_followup',
       ttlMs: durableConfig.ttlMs,
       metadata: {
         userId,
+        ...(inboxReply ? { inboxRef: inboxReply.ref } : {}),
         wake: agentWakeRecord(wake),
         ...(names
           ? {

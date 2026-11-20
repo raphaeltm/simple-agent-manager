@@ -39,7 +39,7 @@ export interface InboxAnswerInput {
   secret?: { value: string; replaceExisting?: boolean; expectedExistingVersion?: string };
 }
 
-async function requireActable(
+export async function requireActable(
   ctx: OperationContext,
   input: { projectId: string; ref: string }
 ): Promise<{ item: InboxItem; ref: ParsedInboxRef }> {

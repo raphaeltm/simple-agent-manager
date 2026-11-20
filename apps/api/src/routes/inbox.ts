@@ -24,6 +24,7 @@ import {
   INBOX_SETTINGS,
   type InboxAnswerInput,
   listInbox,
+  replyToInboxItem,
   toOperationHttpError,
 } from '@simple-agent-manager/operations';
 import {
@@ -46,6 +47,7 @@ import {
 } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { webOperationContext } from '../operation-ports';
+import { jsonValidator, SendChatMessageSchema } from '../schemas';
 import { getRuntimeLimits } from '../services/limits';
 import {
   assertBrowserJsonWrite,
@@ -211,6 +213,7 @@ projectInboxRoutes.get('/items/:ref', ...session, async (c) => {
         projectId: requireRouteParam(c, 'projectId'),
         ref: requireRouteParam(c, 'ref'),
         context: c.req.query('context') === 'true',
+        replyCursor: c.req.query('replyCursor') || undefined,
       })
     )
   );
@@ -256,3 +259,15 @@ async function isErrorItemRef(env: Env, projectId: string, ref: string): Promise
     .first();
   return Boolean(row);
 }
+
+projectInboxRoutes.post('/items/:ref/reply', ...session, jsonValidator(SendChatMessageSchema), async (c) => {
+  assertBrowserJsonWrite(c, 'inbox');
+  const body = c.req.valid('json');
+  const ctx = webOperationContext(c, getUserId(c));
+  return c.json(await run(() => replyToInboxItem(ctx, {
+    content: body.content ?? '',
+    attachments: body.attachments,
+    projectId: requireRouteParam(c, 'projectId'),
+    ref: requireRouteParam(c, 'ref'),
+  })), 202);
+});

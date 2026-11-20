@@ -21,6 +21,7 @@ import {
 import * as v from 'valibot';
 
 import { OperationError } from './errors';
+import { markInboxAgentActed } from './inbox-reply-core';
 import {
   AGENT_ITEM_NOT_FOUND,
   agentAskId,
@@ -375,6 +376,7 @@ export async function updateAgentAsk(
     input.links === undefined
       ? undefined
       : await checkedLinks(ctx, source.projectId, input.links, limits);
+  const actedAt = Date.now();
   const result = await ctx.env.DATABASE.prepare(
     `UPDATE asks
         SET title = COALESCE(?, title),
@@ -390,13 +392,14 @@ export async function updateAgentAsk(
       why || null,
       links === undefined ? 0 : 1,
       links && links.length > 0 ? JSON.stringify(links) : null,
-      Date.now(),
+      actedAt,
       askId,
       source.projectId,
       source.sessionId
     )
     .run();
   if ((result.meta?.changes ?? 0) !== 1) await explainNoMatch(ctx, source, askId);
+  await markInboxAgentActed(ctx, source.projectId, input.ref, actedAt);
   return { ref: input.ref, status: 'open' };
 }
 

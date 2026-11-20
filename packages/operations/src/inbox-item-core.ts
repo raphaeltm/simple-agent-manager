@@ -234,7 +234,7 @@ export async function resolveInboxItem(
 
 export async function getInboxItem(
   ctx: OperationContext,
-  input: { projectId: string; ref: string; context?: boolean }
+  input: { projectId: string; ref: string; context?: boolean; replyCursor?: string }
 ): Promise<InboxItemResponse> {
   const { item, ref } = await resolveInboxItem(ctx, input);
   // A human task's steps, assignee, claim, activity and discussion (slice H1). The transcript
@@ -244,13 +244,29 @@ export async function getInboxItem(
       ? await getTaskDetailForPerson(ctx, { projectId: item.projectId, askId: ref.id })
       : null;
   const context =
-    input.context && item.sessionId
+    item.sessionId
       ? await ctx.ports.inbox.context({
           projectId: item.projectId,
           sessionId: item.sessionId,
           askedAt: Date.parse(item.createdAt),
           userId: ctx.actor.userId,
+          inboxRef: item.ref,
+          replyCursor: input.replyCursor,
+          includeContext: input.context === true,
         })
       : null;
-  return { item, context, task };
+  const latest = await ctx.env.DATABASE.prepare(
+    `SELECT r.user_id, u.name, r.message_id, r.replied_at,
+      EXISTS (SELECT 1 FROM inbox_replies h WHERE h.project_id = r.project_id
+        AND h.item_ref = r.item_ref AND h.agent_acted_at IS NULL) AS with_agent
+     FROM inbox_replies r LEFT JOIN users u ON u.id = r.user_id
+     WHERE r.project_id = ? AND r.item_ref = ? ORDER BY r.replied_at DESC, r.message_id DESC LIMIT 1`
+  ).bind(item.projectId, item.ref).first<Record<string, unknown>>();
+  if (latest && typeof latest.user_id === 'string' && typeof latest.message_id === 'string' &&
+      typeof latest.replied_at === 'number') {
+    item.withAgent = latest.with_agent === 1;
+    item.latestReply = { userId: latest.user_id, name: typeof latest.name === 'string' ? latest.name : null,
+      messageId: latest.message_id, repliedAt: new Date(latest.replied_at).toISOString() };
+  }
+  return { item, context: input.context ? context : null, task, conversation: context?.conversation ?? null };
 }

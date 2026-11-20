@@ -47,6 +47,11 @@ export const InboxRowSchema = v.object({
   // `asks` rows only (other stores select NULL).
   updated_at: v.optional(v.nullable(int), null),
   failure_count: v.optional(v.nullable(int), null),
+  with_agent: v.optional(v.union([v.literal(0), v.literal(1)]), 0),
+  reply_user_id: v.optional(nullableText, null),
+  reply_name: v.optional(nullableText, null),
+  reply_message_id: v.optional(nullableText, null),
+  replied_at: v.optional(v.nullable(int), null),
 });
 export type InboxRow = v.InferOutput<typeof InboxRowSchema>;
 
@@ -249,6 +254,11 @@ export function inboxItemFromRow(row: InboxRow, now: number): InboxItem {
     answerSpec,
     links,
     canAct: row.can_act === 1 && status === 'open' && (expiresAt === null || expiresAt > now),
+    withAgent: row.with_agent === 1,
+    latestReply: row.reply_user_id && row.reply_message_id && row.replied_at !== null ? {
+      userId: row.reply_user_id, name: row.reply_name, messageId: row.reply_message_id,
+      repliedAt: new Date(row.replied_at).toISOString(),
+    } : null,
     untrustedContent: true,
   };
 }

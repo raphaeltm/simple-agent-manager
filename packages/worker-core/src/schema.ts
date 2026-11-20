@@ -6259,3 +6259,16 @@ export const installationCostSync = sqliteTable('installation_cost_sync', {
   lastDay: text('last_day'),
   rowsWritten: integer('rows_written').notNull().default(0),
 });
+
+/** Inbox visibility ledger; bodies remain canonical ProjectData chat messages (0263). */
+export const inboxReplies = sqliteTable('inbox_replies', {
+  projectId: text('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  itemRef: text('item_ref').notNull(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  messageId: text('message_id').notNull(),
+  repliedAt: integer('replied_at').notNull(),
+  agentActedAt: integer('agent_acted_at'),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.projectId, table.itemRef, table.messageId] }),
+  latestIdx: index('idx_inbox_replies_latest').on(table.projectId, table.itemRef, table.repliedAt, table.messageId),
+}));

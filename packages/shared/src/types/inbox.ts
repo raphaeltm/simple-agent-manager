@@ -11,7 +11,8 @@
  * - `approval`: D1 `operations_action_approvals`
  */
 
-import type { InboxTaskDetail } from './inbox-tasks';
+import type { InboxItemCommentThread, InboxTaskDetail } from './inbox-tasks';
+import type { TaskAttachment } from './task';
 
 export const INBOX_STORES = ['ask', 'attention', 'secret', 'approval'] as const;
 export type InboxStore = (typeof INBOX_STORES)[number];
@@ -142,7 +143,48 @@ export interface InboxItem {
   links: InboxLink[];
   /** Whether this viewer may answer or archive it. */
   canAct: boolean;
+  /** True while a person's reply is awaiting action from the agent. Store status is unchanged. */
+  withAgent?: boolean;
+  latestReply?: InboxReplyAttribution | null;
   untrustedContent: true;
+}
+
+export interface InboxReplyAttribution {
+  userId: string;
+  name: string | null;
+  messageId: string;
+  repliedAt: string;
+}
+
+export interface InboxReplyRequest {
+  content: string;
+  attachments?: TaskAttachment[];
+}
+
+export interface InboxReplyResponse {
+  ref: string;
+  sessionId: string;
+  status: 'queued';
+  messageId: string;
+  deliveryId: string;
+}
+
+/** Canonical chat messages, not copied reply bodies. */
+export interface InboxReplyMessage {
+  id: string;
+  content: string;
+  createdAt: number;
+  userId: string | null;
+  attachments: TaskAttachment[];
+}
+
+export interface InboxConversation {
+  replies: InboxReplyMessage[];
+  responses: InboxItemCommentThread[];
+  /** Pass as replyCursor to the item detail endpoint to scan earlier canonical chat history. */
+  nextReplyCursor: string | null;
+  /** Reply/context or comment read is partial. */
+  hasMore: boolean;
 }
 
 export interface InboxListResponse {
@@ -187,6 +229,8 @@ export interface InboxItemResponse {
   task?: InboxTaskDetail | null;
   /** Null when not requested or the reader has no access to the source chat. */
   context: InboxItemContext | null;
+  /** Null if the person cannot read the source chat. */
+  conversation?: InboxConversation | null;
 }
 
 /** POST .../inbox/items/:ref/answer. Fields by `answerSpec.type`. */

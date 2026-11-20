@@ -875,3 +875,8 @@ credentials; keep the short-lived token private. This personal token is not work
 Returns `401` for missing authentication, `403` for insufficient capability, and `404` when
 the project is absent or does not use this installation's local hosted Git backend. Cloudflare
 Workers do not register this endpoint and return `404`; their Artifacts and forge behavior is unchanged.
+
+
+### Reply to an inbox item
+
+`POST /api/projects/:projectId/inbox/items/:ref/reply` accepts `{ content: string, attachments?: TaskAttachment[] }` and returns HTTP 202 with `{ ref, sessionId, status: 'queued', messageId, deliveryId }`. Requires an actable item with a source chat and the chat’s ordinary send authorization. A pending permission is rejected before the reply is queued. Other store statuses remain unchanged. The canonical transcript carries `inboxRef` in its tool metadata; item list and counts exclude items awaiting agent action, including team items for all members. Item detail adds `conversation` (canonical replies and anchored agent responses), `withAgent` and `latestReply`. `replyCursor` continues bounded reply history reads.

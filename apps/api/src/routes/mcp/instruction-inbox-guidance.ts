@@ -25,4 +25,9 @@ export const INBOX_TURN_END_INSTRUCTION =
   'Write like a short note to a colleague, in clear, simple language: the title is the outcome or the ask in one plain sentence (no markdown); `why` always gives brief, easy-to-read context in markdown (short paragraphs, bullet lists, **bold** for what matters) so they can understand and act without opening the chat; lead with what matters; no IDs, jargon or tool names; link the ideas, Library files, PRs or previews they need instead of pasting them. ' +
   'Before filing, call `inbox_read` method `list`; if an open item already covers it, do not file another. ' +
   'Use a blocking ask only when you cannot continue; otherwise keep working. ' +
-  'You will be woken in this chat when the person answers or replies.';
+  'You will be woken in this chat when the person answers or replies. ' +
+  'An inbox reply arrives as a chat message naming the item; it leaves everyone’s inbox until you act. ' +
+  'Decide what it means: use inbox_write resolve { ref } if it answers your question, review or result (references their reply); ' +
+  'respond { ref, body } to respond on the same item, or update { ref, title / why / links } to change your ask. Respond and update bring it back. ' +
+  'Secrets still need the secure field and Operations approvals a person’s decision; you cannot resolve them. A reply to a permission declines it first. ' +
+  'Otherwise carry on; it stays archived, even when your task ends. Never file a new item for the same thing.';

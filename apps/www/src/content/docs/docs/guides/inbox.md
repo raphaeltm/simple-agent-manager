@@ -101,9 +101,7 @@ a chat opened directly on a workspace has no inbox to file into.
   preview. Answer **Looks good** or reply. It never expires.
 - **Result** (`result`): what you asked for, such as the answer to a question, a finding, or work
   that is done. The title is the outcome and the details follow. **Got it** closes it and leaves
-  the agent alone; a reply wakes the agent's chat with your reply. A reply reaches the agent only
-  while its task is still running: once it has finished, the item offers **Open chat** instead of
-  **Reply** (`canReplyToAgent`, and `answerAsk` refuses the reply). It never blocks the agent and
+  the agent alone; a reply wakes the agent's chat with your reply. The reply endpoint follows the same access and wake rules as sending a message in its chat, including a sleeping agent. It never blocks the agent and
   never expires. You get a push titled **Result ready** that opens the item.
 - **Task** (`assign`): work only a person can do, such as adding a production secret or deciding a
   price. It never blocks the agent and never expires; a soft due date only sorts and highlights it.
@@ -123,6 +121,28 @@ An item you answer in the chat card or in the Inbox is the same record: answerin
 both, and the agent is woken in its chat with your answer. **Got it** on a result is the exception:
 there is nothing for the agent to do, so its chat is not woken (`answerAsk`,
 `packages/operations/src/inbox-write-core.ts`).
+
+## Replies and the agent’s response
+
+A reply sends your message and attachments to the item’s source chat. The agent receives the item
+reference and decides whether your message answers the ask, needs a response, or changes the ask.
+Your chat transcript keeps your original message; the item guidance is delivered only to the agent.
+
+While your reply is **with the agent**, the open item leaves Needs you and Blocking and appears in
+Archived with who replied. A team item leaves everyone’s inbox. This does not close the ask,
+decline a secret request, or approve an Operations action. Replying to a pending permission does
+**decline that permission first**, so the agent can read your message.
+
+An agent uses `inbox_write` method `respond` with `ref` and `body` to respond on that item, or
+`update` to change its ask. Either brings the item back. Method `resolve` treats the latest reply
+as the answer to a question, review or result and keeps it out of your inbox. It cannot resolve
+secrets, Operations approvals or tasks assigned to people. If the agent carries on without acting
+on the reply, the item stays with the agent, including after its task finishes. It should never
+file a duplicate item for the same conversation.
+
+The backend supports these replies through `POST /api/projects/:projectId/inbox/items/:ref/reply`.
+The conversation composer in the item is being delivered separately; the existing answer buttons
+keep their current behavior until that web update ships.
 
 ## Tasks for people
 

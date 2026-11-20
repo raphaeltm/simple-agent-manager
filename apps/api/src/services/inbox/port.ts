@@ -39,6 +39,7 @@ import {
   withdrawAgentQuestion,
 } from './agent-asks';
 import { readAskContext } from './ask-context';
+import { readInboxConversation } from './reply-context';
 import { deliverInboxAskNotice } from './ask-notice';
 
 function metadataFields(metadata: string | null) {
@@ -102,11 +103,16 @@ export function createInboxPort(env: Env): OperationInboxPort {
       };
     },
 
-    async context({ projectId, sessionId, askedAt, userId }) {
+    async context({ projectId, sessionId, askedAt, userId, inboxRef, replyCursor, includeContext }) {
       // The transcript is for readers of the source chat only (spec section 3.5).
       const access = await loadSessionReadAccess(env, projectId, sessionId, userId);
       if (!access) return null;
-      return readAskContext(env, { projectId, sessionId, askedAt });
+      const [context, conversation] = await Promise.all([
+        includeContext === false ? Promise.resolve({ before: [], since: { messages: [], activityCount: 0, truncated: false } })
+          : readAskContext(env, { projectId, sessionId, askedAt }),
+        inboxRef ? readInboxConversation(env, { projectId, sessionId, inboxRef, replyCursor }) : Promise.resolve(undefined),
+      ]);
+      return { ...context, ...(conversation ? { conversation } : {}) };
     },
 
     archiveAttention: (userId, projectId, sessionId, markerId, hold) =>

@@ -37,6 +37,8 @@ import {
   handleInboxResult,
   handleInboxReview,
   handleInboxUpdateItem,
+  handleInboxRespond,
+  handleInboxResolve,
 } from './inbox-tools';
 import {
   handleClaimIncident,
@@ -216,6 +218,8 @@ export const MCP_TOOL_HANDLERS: ReadonlyMap<string, McpToolHandler> = new Map<
   ['inbox_review', handleInboxReview],
   ['inbox_result', handleInboxResult],
   ['inbox_update_item', handleInboxUpdateItem],
+  ['inbox_respond', handleInboxRespond],
+  ['inbox_resolve', handleInboxResolve],
   ['inbox_cancel_item', handleInboxCancelItem],
   ['inbox_assign', handleInboxAssign],
   ['inbox_comment', handleInboxComment],
