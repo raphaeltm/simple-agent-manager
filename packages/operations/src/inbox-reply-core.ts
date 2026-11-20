@@ -1,6 +1,7 @@
 /** Inbox replies use the authorized chat send and never archive the underlying request. */
 import type {
   AcpInteractionBrowserAnswer,
+  AgentMailboxMessage,
   InboxReplyRequest,
   InboxReplyResponse,
 } from '@simple-agent-manager/shared';
@@ -24,6 +25,56 @@ export async function replyToInboxItem(
     throw new OperationError('invalid_input', 'This inbox item has no source chat');
   ctx.ports.chat.validateSendContent(input);
   const send = await ctx.ports.chat.authorizeSend(ctx.actor.userId, item.projectId, item.sessionId);
+  const digest = new Uint8Array(
+    await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode(JSON.stringify([input.content, input.attachments ?? []]))
+    )
+  );
+  const fingerprint = Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  const acceptedReply = (message: AgentMailboxMessage): InboxReplyResponse => {
+    if (
+      message.sourceKind !== 'inbox_reply' ||
+      message.targetSessionId !== item.sessionId ||
+      message.senderType !== 'human' ||
+      message.senderId !== ctx.actor.userId ||
+      message.metadata?.inboxRef !== item.ref ||
+      message.metadata?.inboxReplyFingerprint !== fingerprint
+    )
+      throw new OperationError('conflict', 'The previous inbox reply could not be reconciled');
+    if (message.deliveryState === 'failed' || message.deliveryState === 'expired')
+      throw new OperationError(
+        'conflict',
+        'The previous inbox reply is no longer queued; inspect its chat before replying again'
+      );
+    return {
+      ref: item.ref,
+      sessionId: item.sessionId!,
+      status: 'queued',
+      messageId: message.promptMessageId,
+      deliveryId: message.id,
+    };
+  };
+  // A prior acceptance may have committed while its RPC completion failed. Reconcile it
+  // before minting another id or preparing a permission that may already be rejected.
+  const prior = await ctx.env.DATABASE.prepare(
+    `SELECT message_id FROM inbox_replies WHERE project_id = ? AND item_ref = ?
+      AND user_id = ? AND agent_acted_at IS NULL ORDER BY id DESC LIMIT 1`
+  )
+    .bind(item.projectId, item.ref, ctx.actor.userId)
+    .first<{ message_id: string }>();
+  if (prior) {
+    // If this read fails the ledger remains intact and no second delivery is created.
+    const message = await ctx.ports.chat.getInboxReplyDelivery(item.projectId, prior.message_id);
+    if (message?.metadata?.inboxReplyFingerprint === fingerprint) return acceptedReply(message);
+    // This may be another request between its D1 reservation and DO acceptance. Only
+    // that request can roll back its own reservation after a definitive failed acceptance.
+    if (!message)
+      throw new OperationError(
+        'conflict',
+        'The previous inbox reply is still being accepted; retry shortly'
+      );
+  }
   // Preflight permission rejection through the existing answer preparation. Its reject option
   // is authoritative; never guess an option id or send an implicit grant.
   let permission: AcpInteractionBrowserAnswer | null = null;
@@ -74,6 +125,7 @@ export async function replyToInboxItem(
         ref: item.ref,
         title: item.title,
         deliveryId: messageId,
+        fingerprint,
         ...(preparedPermission && item.answerSpec.type === 'interaction'
           ? {
               permission: {
@@ -134,13 +186,17 @@ export async function replyToInboxItem(
       deliveryId: accepted.deliveryId,
     };
   } catch (error) {
-    // A failed acceptance must not strand the item outside the inbox. Never delete other replies.
-    if (recorded)
+    if (recorded) {
+      // SQL acceptance precedes fallible finalizers in ProjectData. Only a definitive
+      // absence authorizes rollback; an unavailable lookup retains the durable ledger.
+      const message = await ctx.ports.chat.getInboxReplyDelivery(item.projectId, messageId);
+      if (message) return acceptedReply(message);
       await ctx.env.DATABASE.prepare(
         'DELETE FROM inbox_replies WHERE project_id = ? AND item_ref = ? AND message_id = ?'
       )
         .bind(item.projectId, item.ref, messageId)
         .run();
+    }
     throw error;
   }
 }

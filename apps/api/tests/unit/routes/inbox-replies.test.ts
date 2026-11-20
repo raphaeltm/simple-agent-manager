@@ -22,6 +22,8 @@ const edge = vi.hoisted(() => ({
   reject: vi.fn(),
   answer: vi.fn(),
   comments: vi.fn(),
+  getDelivery: vi.fn(),
+  deliveries: new Map<string, Record<string, unknown>>(),
   messages: [] as Record<string, unknown>[],
   ids: [] as string[],
 }));
@@ -49,6 +51,7 @@ vi.mock('../../../src/services/mention-enrichment', () => ({
 vi.mock('../../../src/services/project-data', async (original) => ({
   ...(await original<typeof import('../../../src/services/project-data')>()),
   acceptPromptDelivery: edge.accept,
+  getMailboxMessage: edge.getDelivery,
   getMessages: async () => ({ messages: [...edge.messages], hasMore: false }),
   getSessionAccess: async () => ({ session: { id: 'chat' }, access: { found: true } }),
   listInboxItemCommentThreads: edge.comments,
@@ -182,6 +185,10 @@ beforeEach(() => {
     DURABLE_PROMPT_DELIVERY_ENABLED: 'true',
   } as unknown as Env;
   edge.messages = [];
+  edge.deliveries.clear();
+  edge.getDelivery.mockImplementation(
+    async (_env, _project, id) => edge.deliveries.get(id) ?? null
+  );
   edge.ids = [];
   edge.comments.mockResolvedValue({ threads: [], hasMore: false });
   edge.writer.mockImplementation(async (_env, projectId, sessionId, actorUserId) => {
@@ -197,6 +204,16 @@ beforeEach(() => {
     };
   });
   edge.accept.mockImplementation(async (_env, _projectId, input) => {
+    edge.deliveries.set(input.deliveryId, {
+      id: input.deliveryId,
+      promptMessageId: input.deliveryId,
+      sourceKind: input.sourceKind,
+      targetSessionId: input.targetSessionId,
+      senderType: input.senderType,
+      senderId: input.senderId,
+      metadata: input.metadata,
+      deliveryState: 'queued',
+    });
     edge.messages.push({
       id: input.deliveryId,
       role: 'user',
@@ -214,6 +231,91 @@ afterEach(() => {
 });
 
 describe('inbox replies through the real route on SQLite', () => {
+  it('preserves an in-flight reply reservation when a concurrent retry sees no mailbox receipt yet', async () => {
+    const ref = ask();
+    const accept = edge.accept.getMockImplementation()!;
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const accepting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let accepts = 0;
+    edge.accept.mockImplementation(async (...args) => {
+      if (++accepts === 1) {
+        entered();
+        await held;
+      }
+      return accept(...args);
+    });
+    const first = req(path(ref, '/reply'), { content: 'Use the project setting.' });
+    await accepting;
+    const reservation = sqlite.prepare('SELECT message_id FROM inbox_replies').get();
+    try {
+      expect(edge.deliveries.size).toBe(0);
+      const second = await req(path(ref, '/reply'), { content: 'Use the project setting.' });
+      expect(second.status).toBe(409);
+      expect(sqlite.prepare('SELECT message_id FROM inbox_replies').all()).toEqual([reservation]);
+      expect(edge.accept).toHaveBeenCalledTimes(1);
+      expect(edge.messages).toHaveLength(0);
+    } finally {
+      release();
+    }
+    const accepted = await first;
+    expect(accepted.status).toBe(202);
+    expect(reservation).toEqual({ message_id: accepted.body.deliveryId });
+    expect(edge.messages).toHaveLength(1);
+    expect((await req('/count')).body.needsYou).toBe(0);
+  });
+
+  it('returns the committed delivery after acceptance finalization throws and deduplicates the person’s retry', async () => {
+    const ref = ask();
+    const accept = edge.accept.getMockImplementation()!;
+    edge.accept.mockImplementation(async (...args) => {
+      await accept(...args);
+      throw new Error('alarm finalization failed after SQL commit');
+    });
+    const first = await req(path(ref, '/reply'), { content: 'Use the project setting.' });
+    expect(first.status).toBe(202);
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM inbox_replies').get()).toEqual({ n: 1 });
+    expect((await req('/count')).body.needsYou).toBe(0);
+    const retry = await req(path(ref, '/reply'), { content: 'Use the project setting.' });
+    expect(retry.status).toBe(202);
+    expect(retry.body.deliveryId).toBe(first.body.deliveryId);
+    expect(edge.accept).toHaveBeenCalledTimes(1);
+    expect(edge.messages).toHaveLength(1);
+    edge.deliveries.get(first.body.deliveryId)!.senderType = 'agent';
+    expect((await req(path(ref, '/reply'), { content: 'Use the project setting.' })).status).toBe(
+      409
+    );
+    expect(edge.accept).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves the ledger on an unknown acceptance and reconciles the same delivery on retry', async () => {
+    const ref = ask();
+    const accept = edge.accept.getMockImplementation()!;
+    edge.accept.mockImplementation(async (...args) => {
+      await accept(...args);
+      throw new Error('connection lost after commit');
+    });
+    edge.getDelivery.mockRejectedValueOnce(new Error('lookup temporarily unavailable'));
+    const first = await req(path(ref, '/reply'), { content: 'Use the project setting.' });
+    expect(first.status).toBe(500);
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM inbox_replies').get()).toEqual({ n: 1 });
+    expect((await req('/count')).body.needsYou).toBe(0);
+    const retry = await req(path(ref, '/reply'), { content: 'Use the project setting.' });
+    expect(retry.status).toBe(202);
+    expect(retry.body.deliveryId).toBe(edge.messages[0].id);
+    expect(edge.accept).toHaveBeenCalledTimes(1);
+    // A terminal receipt is never presented as a new queued acceptance.
+    edge.deliveries.get(retry.body.deliveryId)!.deliveryState = 'expired';
+    expect((await req(path(ref, '/reply'), { content: 'Use the project setting.' })).status).toBe(
+      409
+    );
+    expect(edge.accept).toHaveBeenCalledTimes(1);
+  });
   it('hides and counts a reply, returns the canonical transcript without the header, and respond brings it back', async () => {
     const ref = ask();
     expect((await req('/count')).body.needsYou).toBe(1);

@@ -17,6 +17,7 @@ import type {
   AcpInteractionSafeSummary,
   AcpInteractionState,
   AgentEffort,
+  AgentMailboxMessage,
   AgentProfile,
   CredentialLimitsResponse,
   InboxConversation,
@@ -134,6 +135,8 @@ export interface InboxChatDelivery {
   ref: string;
   title: string;
   deliveryId: string;
+  /** Hash of the person's exact content and attachments, used only to reconcile ambiguous sends. */
+  fingerprint?: string;
   /** Persisted with the prompt so its delivery owns a retryable permission rejection. */
   permission?: { interactionId: string; answer: AcpInteractionBrowserAnswer };
   afterAcceptance?: () => Promise<void>;
@@ -226,6 +229,7 @@ export interface OperationConnectorPort {
 export interface OperationChatPort {
   /** Authorizes a send now; the returned `send` delivers under that authorization. */
   authorizeSend(userId: string, projectId: string, sessionId: string): Promise<AuthorizedChatSend>;
+  getInboxReplyDelivery(projectId: string, deliveryId: string): Promise<AgentMailboxMessage | null>;
   /** Validates message content before a receipt is reserved; returns the trimmed content. */
   validateSendContent(body: { content?: string }): string;
   stop(

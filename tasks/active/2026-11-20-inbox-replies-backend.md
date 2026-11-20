@@ -20,7 +20,7 @@ Migration lesson: rule 31 parent DROP incident; use additive CREATE TABLE only. 
 - [x] Update tool definitions, instructions and public docs
 - [x] Route capability tests on createSqliteD1 plus real DO tests and controls
 - [ ] Full relevant checks, specialist reviews, CI and best-effort CodeRabbit
-- [ ] Real-agent staging awake/asleep reply/respond round trips
+- [x] Real-agent staging awake/asleep reply/respond round trips
 - [ ] Merge, production deployment and basic smoke; publish final contract/evidence
 
 ## Acceptance
@@ -40,3 +40,9 @@ Codex review found four valid edges, all fixed before merge: chronological chat 
 Final focused evidence: 12 SQLite route cases including denied-acceptance and reject-retry controls; 5 adapter rejection cases plus72 existing adapter tests; 5 workerd cases including real self-RPC rejection replay and3-page canonical transcript pagination. Surgical reversions proved pagination and rejection guard tests discriminate. All local specialists completed follow-up fixes/reviews.
 Initial full suite exposed two old fixtures (new table missing, no source-chat DO mock), both corrected (69 tests pass). A subsequent full run overlapped ongoing reviewer source/dist edits; final stable candidate gets a clean full run before merge.
 Staging fixture: Claude Instant task01M7WA5TH84FA2HE05ZW9WVPY4, session113a3bb4-11a7-47fb-888e-9f0fa71ab9bf, ask01M7WA6KSXJZKMTM2YJ25HJZGD. Initial deploy44722979487 passed; final reviewed candidate redeploy and awake/asleep round trips pending.
+
+## Stable validation and live staging evidence
+Stable full `pnpm test` passed41 workspace tasks; API1184 files/18089 tests. Root build19/19, typecheck38/38, lint23/23 passed. Real-agent staging2 on51ed08940: session sleeping before ASLEEP_2940_1126 reply11:26:09,202→count6to5/ArchivedwithAgent; realClaude respond11:26:33→itemreturns/count6. Same session active before AWAKE_2940_1127 reply11:27:38,202→hide/count5; respond11:27:43→return/count6. Canonical detail includes both replies+anchored responses; transcript exact nonce content without SAM header. Playwright dashboard/projects/settings/project overview200, no pageerrors. Final candidate pipeline green and fixturecleanup pending.
+Another valid PRP1: ProjectData can commit acceptance then throw in finalizer. Recovery must check the canonical fixed delivery ID before ledger cleanup, preserve unknown outcomes, and reuse prior accepted receipt for matching retries. Concurrency review additionally requires a prior ledger with no committed receipt to fail closed while its first acceptance is in flight. Focused failure/concurrency tests and final candidate checks required before merge.
+
+Final recovery fix: existing canonical mailbox lookup reconciles fixed delivery IDs after committed acceptance errors; trusted exact-input fingerprint reuses the same accepted reply on retry. Unknown outcomes retain the ledger, and a concurrently in-flight reservation returns409 without deleting it or creating another prompt. Receipt binding includes human sender, session, ref and fingerprint. Final realSQLite route15/15, operationsbuild and APItypecheck pass; targeted guard bypass produced expected failures for committed acceptance, unknown outcomes, in-flight retry and nonhuman receipts, then restored passes. Security final review PASS; no shared type/schema change.

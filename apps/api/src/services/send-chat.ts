@@ -171,6 +171,7 @@ Their message:
       metadata: {
         userId,
         ...(inboxReply ? { inboxRef: inboxReply.ref } : {}),
+        ...(inboxReply?.fingerprint ? { inboxReplyFingerprint: inboxReply.fingerprint } : {}),
         ...(inboxReply?.permission ? { inboxReplyPermission: inboxReply.permission } : {}),
         wake: agentWakeRecord(wake),
         ...(names

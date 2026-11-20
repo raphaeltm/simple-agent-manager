@@ -182,6 +182,8 @@ export function createOperationPorts(env: Env): OperationPorts {
         };
       },
       validateSendContent: validateSendChatContent,
+      getInboxReplyDelivery: (projectId, deliveryId) =>
+        projectData.getMailboxMessage(env, projectId, deliveryId),
       stop: (...a) => stopChat(env, ...a),
       interrupt: (...a) => interruptChat(env, ...a),
       answerAttention: (...a) => answerAttention(env, ...a),
