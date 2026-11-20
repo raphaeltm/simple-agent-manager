@@ -276,6 +276,19 @@ cannot go back to plaintext deploy vars once `platform-keys.json` is gone
 hold a key provider's credential; workspace nodes get neither, and the Worker never sees one
 (`scripts/selfhost/agent-vm-credentials.test.ts`).
 
+**Troubleshooting: sign-in or rate-limited routes return 500 after an upgrade.** If `/health`
+answers 200 but email sign-in (and other routes that read KV) answer `500 INTERNAL_ERROR`, look in
+the admin error list (Admin → Errors; celld's own log redacts the message) for `the isolate is over its V8 heap limit, so it stopped materializing a
+result set`. This was seen once on the test box, for about 10 minutes after a stack restart; the
+failing read was in celld's KV store, not in the Worker or the key agent. Restart celld to clear it:
+
+```bash
+docker compose restart celld
+```
+
+Tracked in idea `01M7W6ZTZETXE75N8NRKR3R0CF`. Note that the upgrade's own health check reads
+`/health`, which does not use KV, so it does not catch this.
+
 ## Backup and restore
 
 On a sealed box the backup holds the sealed bundles but leaves out the file key and key-service
