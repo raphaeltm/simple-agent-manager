@@ -42,6 +42,9 @@ hostedGitTokenRoutes.post('/:id/hosted-git/token', async (c) => {
     repo: project.artifactsRepoId,
     scope,
     userId,
+    // The same operator setting that bounds workspace and browsing credentials; an absent or
+    // invalid value falls back to the default inside clampHostedGitTokenTtl.
+    ttlSeconds: Number.parseInt(c.env.ARTIFACTS_TOKEN_TTL_SECONDS ?? '', 10),
   });
   return c.json({
     cloneUrl: project.repository,

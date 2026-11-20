@@ -137,3 +137,16 @@ Deferred to the backlog: path depth, and accepting uppercase-hex oids. Each guar
 - LOW: the `.gitmodules` symlink check now covers `gitmod~1` and `.gitmodules:` streams.
 
 Unit tests cover overlapping saves (only the latest stamps; the superseded save stops after one batch), the commit-time re-check with a control, and the NTFS forms. Each guard was mutated once and its test went red. The admission HIGHs were independently verified closed; these last cache fixes have discriminating tests but no further review round.
+
+## Codex threads on dc8e9e4c (00:40 UTC)
+
+Seven Codex findings were reconciled:
+- **P1 r4636317748:** at most 256 `ref-prefix` arguments are honored; past that the answer is unfiltered, as git does.
+- **P2 r4636466068:** an abandoned upstream fetch stream is now cancelled, so an upload slot is released.
+- **P1 r4636595142 (partly addressed):** GC drops whole unreferenced packs before inflating anything, which reclaims rejected-push packs even when migration exceeds the budget. Resumable migration is in the backlog.
+- **P2 r4636595147:** delta bases are kept only while packs are kept, so migration no longer preserves delta-only bases.
+- **P2 r4636595152 (deferred):** delta depth at ingest is in the backlog.
+- **P2 r4636751965:** `ChunkBuffer` grows geometrically, so command-section copying is linear.
+- **P2 r4636751970:** the personal token route honors `ARTIFACTS_TOKEN_TTL_SECONDS`; the test runtime now sets 900 s and asserts the expiry.
+
+Tests: prefix cap, cancel-on-abandon with a read-to-end control, `ChunkBuffer` copy bound for 1 MiB arriving one byte at a time, GC whole-pack drop before any read, base retention in both GC modes, a real-git rejected pack reclaimed under a 2 MiB budget, and the TTL route. Every guard was mutated once and its test went red; with exact-size growth the buffer test took 95 s and failed.

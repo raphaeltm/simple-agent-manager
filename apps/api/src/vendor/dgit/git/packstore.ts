@@ -295,6 +295,38 @@ export class PackStore {
     }
   }
 
+  /** SAM: ids of the stored packs. */
+  packIds(): number[] {
+    return this.sql
+      .exec<{ pack_id: number }>("SELECT pack_id FROM pack_meta ORDER BY pack_id")
+      .toArray()
+      .map((r) => r.pack_id);
+  }
+
+  /** SAM: the oids one pack stores. */
+  packObjectOids(packId: number): string[] {
+    return this.sql
+      .exec<{ oid: string }>("SELECT oid FROM pack_objects WHERE pack_id = ?", packId)
+      .toArray()
+      .map((r) => r.oid);
+  }
+
+  /**
+   * SAM: drop one whole pack. GC calls this only for a pack it proved holds no reachable
+   * object and no delta base, so no object is inflated to reclaim it.
+   */
+  async dropPack(packId: number): Promise<void> {
+    const r2 = this.backendOf(packId) === "r2";
+    this.sql.exec("DELETE FROM pack_meta WHERE pack_id = ?", packId);
+    this.sql.exec("DELETE FROM pack_data WHERE pack_id = ?", packId);
+    this.sql.exec("DELETE FROM pack_objects WHERE pack_id = ?", packId);
+    this.sql.exec("DELETE FROM pack_pending WHERE pack_id = ?", packId);
+    // the pack id can be handed out again by the next ingest: drop cached rows for it
+    this.chunks.clear();
+    this.backend.clear();
+    if (r2) await this.deleteR2Packs([packId]);
+  }
+
   countObjects(): number {
     return this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM pack_objects").one().n;
   }

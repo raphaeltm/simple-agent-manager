@@ -581,6 +581,7 @@ describe('reachable cache stamping and GC', () => {
         get: async () => null,
         packs: {
           baseOids: () => [],
+          packIds: () => [],
           countObjects: () => 0,
           totalPackBytes: () => 0,
           lookup: () => null,
@@ -660,5 +661,93 @@ describe('reachable cache writers check validity when they write', () => {
     const steady = await run(true);
     expect(steady.extendReachable).toHaveBeenCalledOnce();
     expect(steady.invalidateReachable).not.toHaveBeenCalled();
+  });
+});
+
+describe('GC reclaims packs without inflating and drops delta-only bases', () => {
+  /**
+   * A fake object store with packs and loose objects. A ref points at commit C; C's tree T holds
+   * blob B2, which is stored as a delta on blob B1 (unreachable). Pack 1 holds C, T, B2 and B1;
+   * pack 2 is a rejected push's pack holding only unreachable X.
+   */
+  function gcFixture(opts: { noHeadroom?: boolean } = {}) {
+    const repo = new Repo();
+    const b1 = repo.blob('base-blob');
+    const b2 = repo.blob('delta-blob');
+    const tree = repo.tree('gc-tree', [treeEntry('100644', 'f', b2)]);
+    const commit = repo.commit('gc-commit', tree);
+    const x = repo.blob('rejected');
+    repo.refs.set('refs/heads/main', commit);
+    const packs = new Map<number, string[]>([
+      [1, [commit, tree, b2, b1]],
+      [2, [x]],
+    ]);
+    const loose = new Map<string, true>();
+    const dropped: number[] = [];
+    const migrated: string[] = [];
+    const reads: string[] = [];
+    const store = {
+      ...(repo.store() as unknown as Record<string, unknown>),
+      objectCount: () => [...packs.values()].flat().length + loose.size,
+      get: async (oid: string) => {
+        reads.push(oid);
+        return repo.objects.get(oid) ?? null;
+      },
+      packs: {
+        baseOids: () => [b1],
+        packIds: () => [...packs.keys()],
+        packObjectOids: (id: number) => packs.get(id) ?? [],
+        dropPack: async (id: number) => {
+          dropped.push(id);
+          packs.delete(id);
+        },
+        countObjects: () => [...packs.values()].flat().length,
+        totalPackBytes: () => (opts.noHeadroom ? 11 * 1024 ** 3 : 0),
+        lookup: (oid: string) => ([...packs.values()].some((o) => o.includes(oid)) ? {} : null),
+        reset: () => packs.clear(),
+      },
+      dbSize: () => 0,
+      put: (oid: string) => {
+        migrated.push(oid);
+        loose.set(oid, true);
+      },
+      allOids: () => [...loose.keys()],
+      deleteObject: (oid: string) => loose.delete(oid),
+      invalidateReachable: () => undefined,
+    } as unknown as GitStore;
+    return { store, ids: { b1, b2, tree, commit, x }, dropped, migrated, reads, loose };
+  }
+
+  it('drops a pack with nothing reachable before reading any pack object', async () => {
+    const { runHostedGitGc } = await import('../../../src/selfhost/hosted-git/hosted-git-gc');
+    const f = gcFixture();
+    let readsAtDrop = -1;
+    const packs = (f.store as unknown as { packs: { dropPack: (id: number) => Promise<void> } })
+      .packs;
+    const drop = packs.dropPack;
+    packs.dropPack = async (id) => {
+      readsAtDrop = f.reads.filter((oid) => oid === f.ids.b2).length;
+      await drop(id);
+    };
+    await runHostedGitGc(f.store);
+    expect(f.dropped).toEqual([2]);
+    // The rejected pack went before migration inflated any blob.
+    expect(readsAtDrop).toBe(0);
+  });
+
+  it('does not keep a delta-only base after migrating, but keeps a loose base while packs stay', async () => {
+    const { runHostedGitGc } = await import('../../../src/selfhost/hosted-git/hosted-git-gc');
+    const migrating = gcFixture();
+    await runHostedGitGc(migrating.store);
+    expect(migrating.migrated.sort()).toEqual(
+      [migrating.ids.commit, migrating.ids.tree, migrating.ids.b2].sort()
+    );
+    expect(migrating.loose.has(migrating.ids.b1)).toBe(false);
+
+    const kept = gcFixture({ noHeadroom: true });
+    kept.loose.set(kept.ids.b1, true); // a loose base that pack deltas still use
+    const result = await runHostedGitGc(kept.store);
+    expect(result.skipped).toBe(true);
+    expect(kept.loose.has(kept.ids.b1)).toBe(true);
   });
 });

@@ -30,7 +30,13 @@ import { GitStore } from '../../vendor/dgit/git/store';
 import { concat, te } from '../../vendor/dgit/git/util';
 import { gunzipLimited } from '../../vendor/dgit/git/zlib';
 import type { HostedGitEnv } from './env';
-import { drainBounded, pktLength, readBodyBounded, RequestTooLargeError } from './hosted-git-body';
+import {
+  ChunkBuffer,
+  drainBounded,
+  pktLength,
+  readBodyBounded,
+  RequestTooLargeError,
+} from './hosted-git-body';
 import {
   armHostedGitGcAlarm,
   GC_DELAY_MS,
@@ -331,28 +337,30 @@ export class HostedGitRepo extends DurableObject {
     const currentBytes = this.store.dbSize();
     const maxBytes = hostedGitPushByteBudget(currentBytes, limits);
     let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-    let buf: Uint8Array;
+    let body: ChunkBuffer;
     if (req.headers.get('content-encoding')?.includes('gzip')) {
-      buf = gunzipLimited(await readBodyBounded(req, limits.maxPushBytes), limits.maxPushBytes);
+      body = new ChunkBuffer(
+        gunzipLimited(await readBodyBounded(req, limits.maxPushBytes), limits.maxPushBytes)
+      );
     } else {
       reader = req.body?.getReader() ?? null;
-      buf = new Uint8Array(0);
+      body = new ChunkBuffer();
     }
 
     // The pkt-line command section is small; everything after it is the pack.
     let pos = 0;
     const need = async (n: number): Promise<boolean> => {
-      while (buf.length - pos < n) {
+      while (body.length - pos < n) {
         if (!reader) return false;
         const { done, value } = await readGitChunk(reader);
         if (done) return false;
-        if (value?.length) buf = concat([buf, value]);
+        if (value?.length) body.append(value);
       }
       return true;
     };
     for (;;) {
       if (!(await need(4))) break;
-      const len = pktLength(buf.subarray(pos, pos + 4));
+      const len = pktLength(body.view(pos, pos + 4));
       if (len === 0) {
         pos += 4;
         break;
@@ -361,7 +369,7 @@ export class HostedGitRepo extends DurableObject {
       if (!(await need(len))) throw new Error('truncated push request');
       pos += len;
     }
-    const { commands, caps } = parsePushCommands(buf.subarray(0, pos));
+    const { commands, caps } = parsePushCommands(body.view(0, pos));
     const sideband = caps.includes('side-band-64k');
     const progress = (msg: string) => {
       if (!sideband) return;
@@ -370,11 +378,11 @@ export class HostedGitRepo extends DurableObject {
 
     // Read up to the pack header so the declared object count can be checked before storing.
     const packStart = pos;
-    const hasPack = (await need(PACK_HEADER_BYTES)) || buf.length > packStart;
+    const hasPack = (await need(PACK_HEADER_BYTES)) || body.length > packStart;
     let unpackError = hostedGitRefRefusal(this.store.refs(), commands, currentBytes, limits);
     let packId: number | null = null;
     if (hasPack) {
-      const header = buf.subarray(packStart, packStart + PACK_HEADER_BYTES);
+      const header = body.view(packStart, packStart + PACK_HEADER_BYTES);
       const incomingObjects =
         header.length === PACK_HEADER_BYTES
           ? new DataView(header.buffer, header.byteOffset, header.byteLength).getUint32(8)
@@ -390,7 +398,7 @@ export class HostedGitRepo extends DurableObject {
         unpackError = refusal;
       } else {
         try {
-          const ingested = await this.store.packs.ingest(buf.subarray(packStart), reader, {
+          const ingested = await this.store.packs.ingest(body.view(packStart), reader, {
             maxBytes,
             sizeHint: Number.isFinite(parseInt(req.headers.get('content-length') ?? '', 10))
               ? parseInt(req.headers.get('content-length') ?? '', 10)

@@ -28,13 +28,21 @@ async function* streamChunks(
 ): AsyncGenerator<Uint8Array> {
   if (!stream) return;
   const reader = stream.getReader();
+  let finished = false;
   try {
     for (;;) {
       const { done, value } = await reader.read();
-      if (done) return;
+      if (done) {
+        finished = true;
+        return;
+      }
       if (value) yield value;
     }
   } finally {
+    // A consumer that stops early (isomorphic-git abandons the iterator when pack parsing
+    // throws) must cancel the response, or its producer, such as a hosted repository's
+    // upload slot, stays held until the stream is garbage collected.
+    if (!finished) await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
 }

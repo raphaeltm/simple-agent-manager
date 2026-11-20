@@ -8,7 +8,7 @@ The adversarial review of the push admission path in PR #2907 (H2, SAM-hosted gi
    - highly compressible blobs (14 blobs of 15 MiB stored in about 0.4 MiB);
    - more than 128 MiB of inflated pack content accumulated between collections.
 
-   GC then fails on every attempt, garbage packs are never reclaimed, and the repository drifts towards `maxRepoBytes`, where every push is refused. The reviewer reproduced this at 268 MB of a 268.4 MB cap. Raising the budget only moves the bound, since a compression bomb can exceed any inflation or deadline cap.
+   Since #2907, GC drops whole packs with nothing reachable and no delta base before inflating anything, so a rejected push's pack is always reclaimed. Migrating the reachable packed objects can still exceed the budget. GC then fails on every attempt, garbage mixed into reachable packs (after a force push) is never reclaimed, and the repository drifts towards `maxRepoBytes`, where every push is refused. The reviewer reproduced this at 268 MB of a 268.4 MB cap. Raising the budget only moves the bound, since a compression bomb can exceed any inflation or deadline cap.
 2. **Delta depth is enforced on read but not at ingest** (review M4). `packstore.ts` resolves deltas eagerly at ingest without checking `maxDeltaDepth`, so a pack built with `--depth=250` is accepted. Cold reads then throw `delta chain exceeds depth`, and a shallow clone aborts with `early EOF` until GC rewrites the objects loose. The exception is thrown inside the upload response stream and is not caught.
 3. **GC holds the input gate for the whole sweep** (review M5, the part not fixed in #2907). `gc()` runs under `blockConcurrencyWhile` for up to `workTimeoutMs` (120 s), blocking every other request to that repository, reads included.
 4. **Pushes over heavy history without a reachable cache** (re-verification F1, the part not fixed in #2907).
@@ -36,7 +36,7 @@ Who can trigger them:
 
 ## Acceptance Criteria
 
-- [ ] GC reclaims unreachable packs without inflating reachable objects (copy raw pack entries, or drop packs whose objects no ref reaches), and completes for a repository whose reachable content inflates past `maxInflatedBytes`. A real-git test proves it.
+- [ ] GC completes migration for a repository whose reachable packed content inflates past `maxInflatedBytes` (copy raw pack entries, or make migration resumable across alarms). A real-git test proves it. Whole unreferenced packs are already dropped without inflating.
 - [ ] GC work is deadline-bounded and resumable, with throughput stated at the 30,000-object / 256 MiB envelope (`.claude/rules/81-work-bounds-must-state-throughput.md`).
 - [ ] Ingest records delta depth and refuses a pack whose chains exceed `maxDeltaDepth`. A real-git test pushes `--depth=250` and is refused, and a normal pack is accepted.
 - [ ] Errors raised while streaming an upload-pack response end the stream cleanly.

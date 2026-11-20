@@ -12,6 +12,12 @@ import { concat } from '../../vendor/dgit/git/util';
 
 /** Upper bound on one ls-refs answer the filter buffers (refs only, no objects). */
 const MAX_LS_REFS_RESPONSE_BYTES = 16 * 1024 * 1024;
+/**
+ * Most `ref-prefix` arguments honored. Past this the request is answered unfiltered, as git does
+ * past its own limit (upload-pack TOO_MANY_PREFIXES), which bounds the filter at this many prefix
+ * checks per ref instead of one per packet a 16 MiB request can carry. Clients send a handful.
+ */
+export const MAX_LS_REFS_PREFIXES = 256;
 
 /**
  * The `ref-prefix` arguments of a protocol v2 `ls-refs` request, or null when the request is not
@@ -24,7 +30,10 @@ export function lsRefsPrefixes(body: Uint8Array): string[] | null {
   for (let p = parser.read(); p !== null; p = parser.read()) {
     if (p.kind !== 'line') continue;
     if (p.text === 'command=ls-refs') lsRefs = true;
-    else if (p.text.startsWith('ref-prefix ')) prefixes.push(p.text.slice('ref-prefix '.length));
+    else if (p.text.startsWith('ref-prefix ')) {
+      if (prefixes.length === MAX_LS_REFS_PREFIXES) return null; // too many: show every ref
+      prefixes.push(p.text.slice('ref-prefix '.length));
+    }
   }
   return lsRefs && prefixes.length > 0 ? prefixes : null;
 }

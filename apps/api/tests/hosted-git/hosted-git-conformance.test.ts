@@ -29,6 +29,7 @@ import {
 import { buildReceivePackRequest,buildSeedPack } from '../../src/services/artifacts/seed-readme';
 import {
   HOSTED_GIT_TEST_BASE_DOMAIN,
+  HOSTED_GIT_TEST_TOKEN_TTL_SECONDS,
   type HostedGitRuntime,
   startHostedGitRuntime,
 } from './support/hosted-git-runtime';
@@ -593,9 +594,15 @@ describe('member clone credentials (POST /api/projects/:id/hosted-git/token)', (
       method: 'POST',
       headers: { 'x-test-user-id': owner },
     });
-    const body = (await res.json()) as { token: string; cloneUrl: string; host: string };
+    const requestedAt = Date.now();
+    const body = (await res.json()) as { token: string; cloneUrl: string; host: string; expiresAt: string };
     expect(res.status, JSON.stringify(body)).toBe(200);
     expect(body.cloneUrl).toBe(project.repository);
+    // The personal credential honors the operator's ARTIFACTS_TOKEN_TTL_SECONDS (900 s here),
+    // like workspace and browsing credentials, rather than the one-hour default.
+    const lifetimeSeconds = (Date.parse(body.expiresAt) - requestedAt) / 1000;
+    expect(lifetimeSeconds).toBeGreaterThan(HOSTED_GIT_TEST_TOKEN_TTL_SECONDS - 60);
+    expect(lifetimeSeconds).toBeLessThanOrEqual(HOSTED_GIT_TEST_TOKEN_TTL_SECONDS + 1);
     const work = await freshDir('member');
     await gitOk(['clone', localRemote(body.cloneUrl, body.token), work]);
     await writeFile(join(work, 'human.txt'), 'from a laptop\n');
@@ -817,6 +824,56 @@ describe('repository cleanup through real SQLite', () => {
     expect(queued.pending).toBe('1'); expect(queued.alarm).not.toBeNull();
     await runtime.fetch(`/__test/gc/${project.artifactsRepoId}`, { method: 'POST' });
     expect((await info()).objects).toBe(before.objects);
+  });
+
+  it('reclaims a rejected push pack even when migrating the reachable packs exceeds the budget', async () => {
+    const project = await createHostedProject(await createEmailOnlyUser(), 'GC budget');
+    const token = await mintToken(project, 'write');
+    const work = await freshDir('gc-budget');
+    await gitOk(['clone', localRemote(project.repository, token), work]);
+    // A reachable 5 MiB blob (a few KB packed) that GC would have to inflate to migrate.
+    await writeFile(join(work, 'big.txt'), 'b'.repeat(5 * 1024 * 1024));
+    await gitOk(['add', 'big.txt'], work);
+    await gitOk(['commit', '-q', '-m', 'big'], work);
+    await gitOk(['push', 'origin', 'HEAD:refs/heads/main'], work);
+    const info = async () =>
+      (await (await runtime.fetch(`/__test/info/${project.artifactsRepoId}`)).json()) as { objects: number };
+    const beforeRejected = await info();
+    const { pack, commitOid } = await buildSeedPack({ projectName: 'Rejected under budget' });
+    const rejected = await runtime.fetch(`/git/${project.artifactsRepoId}.git/git-receive-pack`, {
+      method: 'POST',
+      headers: { authorization: `Basic ${Buffer.from(`x:${token}`).toString('base64')}` },
+      body: buildReceivePackRequest(commitOid, 'main', pack) as BodyInit,
+    });
+    expect(await rejected.text()).toContain('ng refs/heads/main');
+    expect((await info()).objects).toBeGreaterThan(beforeRejected.objects);
+    const gcStateOf = async (p: CreatedProject) =>
+      (await (await runtime.fetch(`/__test/gc-state/${p.artifactsRepoId}`)).json()) as { pending: string };
+    const setting = "INSERT INTO platform_settings (key,value,updated_at) VALUES ('repositories.maxInflatedBytes',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value";
+    await runtime.DATABASE.prepare(setting).bind(JSON.stringify(2 * 1024 * 1024), Date.now()).run();
+    await runtime.fetch('/__test/invalidate-settings', { method: 'POST' });
+    try {
+      // Migration inflates the 5 MiB blob past the 2 MiB budget and fails; the rejected pack
+      // was already dropped whole, without inflating anything.
+      const has = async (oid: string) =>
+        ((await (await runtime.fetch(`/__test/has/${project.artifactsRepoId}/${oid}`)).json()) as { has: boolean }).has;
+      expect(await has(commitOid)).toBe(true);
+      await runtime.fetch(`/__test/gc/${project.artifactsRepoId}`, { method: 'POST' });
+      // GC failed on the budget (the work is retried), yet the rejected pack is gone. A failed
+      // migration can leave loose copies of objects it already moved, so object counts would
+      // not show this; the next successful GC removes those copies.
+      expect(await has(commitOid)).toBe(false);
+      expect((await gcStateOf(project)).pending).toBe('1');
+    } finally {
+      await runtime.DATABASE.prepare("DELETE FROM platform_settings WHERE key='repositories.maxInflatedBytes'").run();
+      await runtime.fetch('/__test/invalidate-settings', { method: 'POST' });
+    }
+    // With the default budget the rest of the cleanup completes and the repository still clones.
+    await runtime.fetch(`/__test/gc/${project.artifactsRepoId}`, { method: 'POST' });
+    expect((await info()).objects).toBe(beforeRejected.objects);
+    const check = await freshDir('gc-budget-check');
+    await gitOk(['clone', localRemote(project.repository, token), check]);
+    expect((await readFile(join(check, 'big.txt'), 'utf8')).length).toBe(5 * 1024 * 1024);
   });
 
   it('reclaims failed-ingest pack rows before the next push quota check', async () => {

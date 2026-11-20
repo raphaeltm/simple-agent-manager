@@ -62,3 +62,38 @@ export async function drainBounded(
     // The client may already be gone.
   }
 }
+
+/**
+ * A byte buffer that grows geometrically as chunks arrive, so reading a body in many small chunks
+ * copies O(total) bytes rather than re-copying everything read so far on every chunk.
+ */
+export class ChunkBuffer {
+  private bytes: Uint8Array;
+  length: number;
+  /** Bytes copied so far, for tests that bound the work. */
+  copied = 0;
+
+  constructor(initial: Uint8Array = new Uint8Array(0)) {
+    this.bytes = initial;
+    this.length = initial.length;
+  }
+
+  append(chunk: Uint8Array): void {
+    if (this.length + chunk.length > this.bytes.length) {
+      const grown = new Uint8Array(
+        Math.max(this.bytes.length * 2, this.length + chunk.length, 4096)
+      );
+      grown.set(this.bytes.subarray(0, this.length));
+      this.copied += this.length;
+      this.bytes = grown;
+    }
+    this.bytes.set(chunk, this.length);
+    this.length += chunk.length;
+    this.copied += chunk.length;
+  }
+
+  /** The bytes in [start, end), clamped to what has been read. */
+  view(start = 0, end = this.length): Uint8Array {
+    return this.bytes.subarray(start, Math.min(end, this.length));
+  }
+}

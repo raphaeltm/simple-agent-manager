@@ -28,6 +28,7 @@ const { Miniflare } = createRequire(import.meta.resolve('@cloudflare/vitest-pool
 );
 
 export const HOSTED_GIT_TEST_BASE_DOMAIN = 'sam.test.example';
+export const HOSTED_GIT_TEST_TOKEN_TTL_SECONDS = 900;
 
 export interface HostedGitRuntime {
   /** e.g. http://127.0.0.1:41234 */
@@ -91,6 +92,8 @@ export async function startHostedGitRuntime(
       ENCRYPTION_KEY: randomBytes(32).toString('base64'),
       ARTIFACTS_ENABLED: 'true',
       HOSTED_GIT_BACKEND: 'durable-object',
+      // Non-default, so tests can see every credential route honor the operator's lifetime.
+      ARTIFACTS_TOKEN_TTL_SECONDS: String(HOSTED_GIT_TEST_TOKEN_TTL_SECONDS),
       JWT_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
       JWT_PUBLIC_KEY: publicKey.export({ type: 'spki', format: 'pem' }).toString(),
     },

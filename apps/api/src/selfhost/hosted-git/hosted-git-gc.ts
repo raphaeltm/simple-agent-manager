@@ -76,14 +76,26 @@ export async function runHostedGitGc(store: GitStore): Promise<HostedGitGcResult
       }
     }
   }
-  // Thin-pack delta bases are a second reference edge, often unreachable from any ref.
-  for (const b of store.packs.baseOids()) reachable.addHex(b);
+  // Thin-pack delta bases are a second reference edge, often unreachable from any ref. They
+  // matter only while packs are kept: migration stores every reachable object whole.
+  const bases = new Set<string>(store.packs.baseOids());
+  let removed = 0;
+
+  // Reclaim whole packs that hold nothing reachable and no delta base before inflating
+  // anything. A rejected push's pack is reclaimed this way even when migrating the rest
+  // would exceed the work budget.
+  for (const packId of store.packs.packIds()) {
+    const oids = store.packs.packObjectOids(packId);
+    if (oids.some((oid) => reachable.hasHex(oid) || bases.has(oid))) continue;
+    await store.packs.dropPack(packId);
+    removed += oids.length;
+  }
 
   const packCount = store.packs.countObjects();
   const noHeadroom =
     packCount > 0 && store.dbSize() + store.packs.totalPackBytes() > DO_STORAGE_CAP;
-  let removed = 0;
-  if (packCount > 0 && !noHeadroom) {
+  const migrate = packCount > 0 && !noHeadroom;
+  if (migrate) {
     // Migrate reachable pack objects to loose storage first, then drop the packs.
     let migrated = 0;
     for (let i = 0; i < reachable.size; i++) {
@@ -100,7 +112,8 @@ export async function runHostedGitGc(store: GitStore): Promise<HostedGitGcResult
     store.packs.reset();
   }
   for (const oid of store.allOids()) {
-    if (!reachable.hasHex(oid)) {
+    // While packs stay (no headroom to migrate), a loose delta base they use must stay too.
+    if (!reachable.hasHex(oid) && (migrate || !bases.has(oid))) {
       store.deleteObject(oid);
       removed++;
     }

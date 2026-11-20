@@ -219,9 +219,10 @@ push checks quota. Defaults are 64 MiB per push, 30,000 objects
 10,000 refs and 256 MiB stored per repository, 16 MiB per inflated object, 128 MiB cumulative inflation
 per request, delta depth 100 and 120 seconds per git operation. Operators can lower these
 limits; raising them needs measured capacity review. Rejected pushes leave existing refs intact.
-Known limit: GC inflates every object it moves, under the same decompression budget, so it
-cannot finish while more than `repositories.maxInflatedBytes` of pushed content waits for
-collection. Unreclaimed packs then count toward the storage limit. Tracked in
+GC first drops whole packs that hold nothing reachable (for example a rejected push) without
+inflating them. Known limit: moving the remaining reachable packed objects to loose storage
+inflates each one under the same decompression budget, so that step cannot finish while more than
+`repositories.maxInflatedBytes` of reachable pushed content waits for collection. Tracked in
 `tasks/backlog/2026-11-19-hosted-git-gc-and-ingest-hardening.md`.
 Clone/push credentials expire and runtime credentials also require the same active workspace
 and callback generation. Deleting a project removes its hosted repository. At the ref limit, delete old refs in a separate

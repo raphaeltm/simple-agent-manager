@@ -55,6 +55,11 @@ export class HostedGitRepoTest extends HostedGitRepo {
       };
       return new Response('ok');
     }
+    if (new URL(req.url).pathname.startsWith('/__test/has/')) {
+      const oid = new URL(req.url).pathname.slice('/__test/has/'.length);
+      const store = (this as unknown as { store: { has: (oid: string) => boolean } }).store;
+      return Response.json({ has: store.has(oid) });
+    }
     if (new URL(req.url).pathname === '/__test/gc-state') {
       return Response.json({ pending: this.ctx.storage.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key='gc-pending'").toArray()[0]?.value, alarm: await this.ctx.storage.getAlarm() });
     }
@@ -125,6 +130,11 @@ app.get('/__test/gc-state/:repo', async (c) => {
 app.delete('/__test/repository/:repo', async (c) => {
   const ns = c.env.HOSTED_GIT!;
   return ns.get(ns.idFromName(c.req.param('repo'))).fetch('https://hosted-git/', { method: 'DELETE' });
+});
+
+app.get('/__test/has/:repo/:oid', (c) => {
+  const ns = c.env.HOSTED_GIT!;
+  return ns.get(ns.idFromName(c.req.param('repo'))).fetch(`https://hosted-git/__test/has/${c.req.param('oid')}`);
 });
 
 app.post('/__test/fail-read/:repo/:oid', (c) => {

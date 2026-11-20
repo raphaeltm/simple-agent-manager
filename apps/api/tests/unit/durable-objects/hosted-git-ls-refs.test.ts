@@ -89,3 +89,17 @@ it('rejects an oversized advertisement with a readable response', async () => {
   expect(response.status).toBe(413);
   expect(await response.text()).toContain('advertisement exceeds');
 });
+
+describe('ls-refs ref-prefix count bound (Codex r4636317748)', () => {
+  it('honors up to the bound and answers unfiltered past it, as git does', async () => {
+    const { MAX_LS_REFS_PREFIXES } =
+      await import('../../../src/selfhost/hosted-git/hosted-git-ls-refs');
+    const prefixes = (n: number) =>
+      Array.from({ length: n }, (_, i) => `ref-prefix refs/heads/p${i}/`);
+    expect(lsRefsPrefixes(lsRefsRequest(...prefixes(MAX_LS_REFS_PREFIXES)))).toHaveLength(
+      MAX_LS_REFS_PREFIXES
+    );
+    // One more and the filter is skipped, so its cost is bounded by the cap, not the request size.
+    expect(lsRefsPrefixes(lsRefsRequest(...prefixes(MAX_LS_REFS_PREFIXES + 1)))).toBeNull();
+  });
+});
