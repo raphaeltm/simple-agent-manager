@@ -8,7 +8,7 @@ import { ChevronDown, Inbox, MessageCircleQuestion } from 'lucide-react';
 
 import { RenderedMarkdown } from '../../components/MarkdownRenderer';
 import { QUESTION_THREAD } from './mock-data';
-import { ThreadView } from './SideChat';
+import { Thread } from './SideChat';
 
 function AgentMessage({ text }: { text: string }) {
   return (
@@ -65,7 +65,7 @@ export function InChatScene() {
                 className="shrink-0 rotate-180 text-fg-muted"
               />
             </button>
-            <ThreadView entries={QUESTION_THREAD} heading={false} />
+            <Thread entries={QUESTION_THREAD} />
           </div>
 
           <p className="m-0 text-sm text-[var(--sam-status-success-fg)]">

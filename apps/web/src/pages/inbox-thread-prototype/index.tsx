@@ -1,7 +1,8 @@
 /**
- * PROTOTYPE ONLY: /prototype/inbox-thread?scene=<scene>. A side-chat on an inbox item: ask the
- * agent to clarify, add follow-ups, without leaving the inbox. Built from the real inbox
- * components (InboxRow, InboxItemBody, InboxFilterBar) with mock data. Never ship to production.
+ * PROTOTYPE ONLY: /prototype/inbox-thread?scene=<scene>. An inbox item as a short conversation
+ * with the agent that filed it: ask it to clarify, answer in your own words, add follow-ups,
+ * ask about a secret it requested. Built from the real inbox components with mock data.
+ * Never ship to production.
  */
 import type { InboxItem } from '@simple-agent-manager/shared';
 import { Button, IconButton, Pane } from '@simple-agent-manager/ui';
@@ -12,20 +13,18 @@ import {
   ChevronRight,
   Inbox as InboxIcon,
   MessageSquare,
-  MessagesSquare,
-  Moon,
-  X,
 } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { buildRows } from '../../components/inbox/inbox-model';
 import { InboxFilterBar } from '../../components/inbox/InboxFilterBar';
-import { InboxItemBody } from '../../components/inbox/InboxItemView';
 import { InboxRow } from '../../components/inbox/InboxRow';
+import { SecretRequestForm } from '../../components/project-message-view/tool-cards/SecretRequestForm';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { InChatScene } from './InChatScene';
 import {
+  ANSWERED_THREAD,
   LIST_ITEMS,
   LONG_QUESTION,
   PROTO_NOW,
@@ -35,24 +34,21 @@ import {
   RESULT_THREAD,
   REVIEW,
   REVIEW_THREAD,
+  SECRET,
+  SECRET_REQUEST,
+  SECRET_THREAD,
+  type ThreadEntry,
 } from './mock-data';
-import {
-  type ComposerMode,
-  DEFAULT_SUGGESTIONS,
-  FollowupRoutePicker,
-  SideChatComposer,
-  ThreadRowHint,
-  ThreadStarter,
-  ThreadView,
-} from './SideChat';
+import { AskTurn, MessageBox, Thread, ThreadRowHint } from './SideChat';
 
 const noop = () => undefined;
 
-/** Per-row side-chat hint, keyed by item ref. */
+/** Per-row conversation hint, keyed by item ref. */
 const ROW_HINTS: Record<string, ReactNode> = {
   [QUESTION.ref]: (
-    <ThreadRowHint unread tone="active" text="Agent replied: They keep their current count…" />
+    <ThreadRowHint unread tone="active" text="Agent: They keep their count… I’d go per project." />
   ),
+  [SECRET.ref]: <ThreadRowHint unread tone="active" text="Agent: They live per project, not…" />,
   [REVIEW.ref]: <ThreadRowHint text="You asked · agent is looking" />,
   [RESULT.ref]: <ThreadRowHint text="2 follow-ups · 1 working, 1 queued" />,
 };
@@ -80,7 +76,7 @@ function ListPane({ selectedRef }: { selectedRef: string | null }) {
   );
 }
 
-function ItemTopBar({ extra }: { extra?: ReactNode }) {
+function ItemTopBar() {
   return (
     <div className="flex shrink-0 items-center gap-0.5 border-b border-[var(--sam-hairline)] px-1 py-1">
       <IconButton
@@ -91,21 +87,21 @@ function ItemTopBar({ extra }: { extra?: ReactNode }) {
       />
       <span className="flex flex-1 items-center justify-center md:justify-start">
         <IconButton label="Previous item" icon={<ChevronLeft size={20} />} showTooltip={false} />
-        <span className="font-mono text-xs text-fg-muted">2/6</span>
+        <span className="font-mono text-xs text-fg-muted">2/7</span>
         <IconButton label="Next item" icon={<ChevronRight size={20} />} showTooltip={false} />
       </span>
-      {extra}
       <IconButton label="Archive: close it" icon={<Archive size={18} />} showTooltip={false} />
       <IconButton label="Open chat" icon={<MessageSquare size={18} />} showTooltip={false} />
     </div>
   );
 }
 
-function OptionAnswers({ options }: { options: string[] }) {
+/** Inline answer controls, sized for a message rather than a pinned bar. */
+function OptionOffers({ options }: { options: string[] }) {
   return (
-    <div className="flex min-w-0 gap-2">
-      {options.map((option, i) => (
-        <Button key={option} variant={i === 0 ? 'accent' : 'raised'} className="min-w-0 flex-1">
+    <div className="flex min-w-0 flex-wrap gap-2">
+      {options.map((option) => (
+        <Button key={option} variant="raised" size="sm">
           {option}
         </Button>
       ))}
@@ -113,35 +109,49 @@ function OptionAnswers({ options }: { options: string[] }) {
   );
 }
 
-function AckAnswer({ label }: { label: string }) {
+function AckOffer({ label }: { label: string }) {
   return (
-    <div className="flex min-w-0 gap-2">
-      <Button variant="accent" className="flex-1">
-        {label}
-      </Button>
+    <Button variant="raised" size="sm">
+      {label}
+    </Button>
+  );
+}
+
+/** The real secure field from the chat's secret card, inside the message. */
+function SecretOffer() {
+  return (
+    <div className="sam-well rounded-xl px-3 py-3">
+      <SecretRequestForm
+        projectId={SECRET_REQUEST.projectId}
+        request={SECRET_REQUEST}
+        existing={null}
+        onResolved={noop}
+      />
     </div>
   );
 }
 
-/** The open item: top bar, scrolling body with the side-chat under the ask, pinned composer. */
-function ItemPane({
+/** One item as a conversation: the ask, the thread, and the message box pinned below. */
+function ItemConversation({
   item,
-  thread,
-  composer,
+  thread = [],
+  offers,
   pending,
-  topExtra,
+  box,
 }: {
   item: InboxItem;
-  thread?: ReactNode;
-  composer: ReactNode;
+  thread?: ThreadEntry[];
+  /** The item's answer controls; drawn on the ask, or on the latest agent turn that offers them. */
+  offers?: ReactNode;
   pending?: string;
-  topExtra?: ReactNode;
+  box?: ReactNode;
 }) {
   // Scrolled into the conversation: the ask stays visible as one sticky line.
   const [scrolled, setScrolled] = useState(false);
+  const offerMovedDown = thread.some((entry) => entry.kind === 'agent' && entry.offers);
   return (
     <>
-      <ItemTopBar extra={topExtra} />
+      <ItemTopBar />
       <div
         className="relative min-h-0 flex-1 overflow-y-auto"
         data-item-scroll
@@ -150,163 +160,84 @@ function ItemPane({
         {scrolled && (
           <div className="sticky top-0 z-10 border-b border-[var(--sam-hairline)] bg-[var(--sam-separator)] px-4 py-2">
             <p className="m-0 mx-auto line-clamp-2 max-w-[680px] text-[13px] leading-snug font-medium break-words text-fg-primary">
-              <span className="text-fg-muted">
-                {item.kind === 'question' ? 'Question' : 'About'}:{' '}
-              </span>
               {item.title}
             </p>
           </div>
         )}
-        <div className="mx-auto flex w-full max-w-[680px] min-w-0 flex-col gap-4 px-4 py-4">
-          <InboxItemBody item={item} context={null} now={PROTO_NOW} stackPosition={null} />
-          {thread}
-          {pending && !thread && <ThreadView entries={[]} pending={pending} />}
+        <div className="mx-auto flex w-full max-w-[680px] min-w-0 flex-col gap-5 px-4 py-4">
+          <AskTurn item={item} offers={offerMovedDown ? undefined : offers} />
+          <Thread entries={thread} offers={offers} pending={pending} />
         </div>
       </div>
       <div className="shrink-0 border-t border-[var(--sam-hairline)] px-4 py-3">
-        <div className="mx-auto w-full max-w-[680px] min-w-0">{composer}</div>
+        <div className="mx-auto w-full max-w-[680px] min-w-0">{box ?? <MessageBox />}</div>
       </div>
     </>
   );
 }
 
-type Scene = 'list' | 'fresh' | 'question' | 'thinking' | 'followup' | 'drawer' | 'in-chat';
-
-/** An item nobody has talked about yet: the starter prompts sit under the ask. */
-function freshScene() {
-  return (
-    <ItemPane
+const SCENES = {
+  fresh: () => (
+    <ItemConversation
       item={LONG_QUESTION}
-      thread={<ThreadStarter suggestions={DEFAULT_SUGGESTIONS} />}
-      composer={
-        <SideChatComposer
-          answer={<OptionAnswers options={['Recreate it', 'Keep and re-grant']} />}
-          mode="ask"
-          modes={['ask', 'followup', 'answer']}
-        />
-      }
+      offers={<OptionOffers options={['Recreate it', 'Keep and re-grant']} />}
     />
-  );
-}
+  ),
+  question: () => (
+    <ItemConversation
+      item={QUESTION}
+      thread={QUESTION_THREAD}
+      offers={<OptionOffers options={['Per node', 'Per project']} />}
+    />
+  ),
+  answered: () => (
+    <ItemConversation
+      item={{ ...QUESTION, status: 'answered', agentState: 'working' }}
+      thread={ANSWERED_THREAD}
+      box={<MessageBox placeholder="Anything else about this?" />}
+    />
+  ),
+  secret: () => <ItemConversation item={SECRET} thread={SECRET_THREAD} offers={<SecretOffer />} />,
+  'secret-guard': () => (
+    <ItemConversation
+      item={SECRET}
+      thread={SECRET_THREAD}
+      offers={<SecretOffer />}
+      box={<MessageBox guard />}
+    />
+  ),
+  thinking: () => (
+    <ItemConversation
+      item={REVIEW}
+      thread={REVIEW_THREAD}
+      offers={<AckOffer label="Looks good" />}
+      pending="Opening the Insights page with an empty project…"
+    />
+  ),
+  followup: () => (
+    <ItemConversation
+      item={RESULT}
+      thread={RESULT_THREAD}
+      offers={<AckOffer label="Got it" />}
+      box={<MessageBox placeholder="Ask, or add more work…" />}
+    />
+  ),
+} satisfies Record<string, () => ReactNode>;
 
-function sceneItem(scene: Scene) {
-  switch (scene) {
-    case 'fresh':
-      return freshScene();
-    case 'thinking':
-      return thinkingScene();
-    case 'followup':
-      return followupScene();
-    default:
-      return questionScene();
-  }
-}
+type ItemScene = keyof typeof SCENES;
 
-const SCENE_SELECTED: Partial<Record<Scene, string>> = {
+const SCENE_SELECTED: Record<ItemScene, string> = {
   fresh: LONG_QUESTION.ref,
+  question: QUESTION.ref,
+  answered: QUESTION.ref,
+  secret: SECRET.ref,
+  'secret-guard': SECRET.ref,
   thinking: REVIEW.ref,
   followup: RESULT.ref,
 };
 
-function questionScene(mode: ComposerMode = 'ask', draft = '') {
-  return (
-    <ItemPane
-      item={QUESTION}
-      thread={<ThreadView entries={QUESTION_THREAD} />}
-      composer={
-        <SideChatComposer
-          answer={<OptionAnswers options={['Per node', 'Per project']} />}
-          mode={mode}
-          modes={['ask', 'followup', 'answer']}
-          draft={draft}
-        />
-      }
-    />
-  );
-}
-
-function thinkingScene() {
-  return (
-    <ItemPane
-      item={REVIEW}
-      thread={
-        <ThreadView
-          entries={REVIEW_THREAD}
-          pending="Opening the Insights page with an empty project…"
-        />
-      }
-      composer={
-        <SideChatComposer
-          answer={<AckAnswer label="Looks good" />}
-          mode="ask"
-          modes={['ask', 'followup']}
-        />
-      }
-    />
-  );
-}
-
-function followupScene() {
-  return (
-    <ItemPane
-      item={RESULT}
-      thread={<ThreadView entries={RESULT_THREAD} />}
-      composer={
-        <SideChatComposer
-          mode="followup"
-          modes={['ask', 'followup']}
-          draft="Also backport the fix to the release-2026.11 branch"
-          notice={
-            <p className="m-0 flex items-center gap-1.5 text-xs text-warning-fg">
-              <Moon size={13} aria-hidden="true" /> This agent finished 2h ago. Sending wakes it in
-              its chat.
-            </p>
-          }
-          routePicker={<FollowupRoutePicker agentFinished />}
-        />
-      }
-    />
-  );
-}
-
-/** Variant B, desktop only: the side-chat as its own pane beside the item. */
-function DrawerScene() {
-  return (
-    <div className="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)_380px] gap-[var(--sam-space-gutter)]">
-      <Pane
-        className="relative flex min-h-0 min-w-0 flex-col overflow-y-auto"
-        aria-label="Inbox list"
-      >
-        <ListPane selectedRef={QUESTION.ref} />
-      </Pane>
-      <Pane className="flex min-h-0 min-w-0 flex-col" aria-label="Inbox item">
-        <ItemTopBar />
-        <div className="relative min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex w-full max-w-[680px] min-w-0 flex-col gap-4 px-5 py-4">
-            <InboxItemBody item={QUESTION} context={null} now={PROTO_NOW} stackPosition={null} />
-          </div>
-        </div>
-        <div className="shrink-0 border-t border-[var(--sam-hairline)] px-5 py-3">
-          <OptionAnswers options={['Per node', 'Per project']} />
-        </div>
-      </Pane>
-      <Pane variant="quiet" className="flex min-h-0 min-w-0 flex-col" aria-label="Side-chat">
-        <div className="flex shrink-0 items-center gap-2 border-b border-[var(--sam-hairline)] py-1 pr-1 pl-4">
-          <MessagesSquare size={16} aria-hidden="true" className="text-fg-muted" />
-          <span className="flex-1 text-sm font-semibold text-fg-primary">
-            Discuss with the agent
-          </span>
-          <IconButton label="Close side-chat" icon={<X size={18} />} showTooltip={false} />
-        </div>
-        <div className="relative min-h-0 flex-1 overflow-y-auto px-4 py-4">
-          <ThreadView entries={QUESTION_THREAD} heading={false} />
-        </div>
-        <div className="shrink-0 border-t border-[var(--sam-hairline)] px-4 py-3">
-          <SideChatComposer mode="ask" modes={['ask', 'followup', 'answer']} showHint={false} />
-        </div>
-      </Pane>
-    </div>
-  );
+function isItemScene(scene: string): scene is ItemScene {
+  return scene in SCENES;
 }
 
 function PageHeader() {
@@ -323,7 +254,7 @@ function PageHeader() {
       <InboxFilterBar
         value="needs_you"
         onChange={noop}
-        counts={{ needs_you: 6, blocking: 2, updates: 3 }}
+        counts={{ needs_you: 7, blocking: 3, updates: 3 }}
       />
     </Pane>
   );
@@ -340,24 +271,16 @@ function MobileAppBar() {
 
 export function InboxThreadPrototype() {
   const [params] = useSearchParams();
-  const scene = (params.get('scene') ?? 'list') as Scene;
+  const scene = params.get('scene') ?? 'list';
   const isMobile = useIsMobile();
 
   let content: ReactNode;
   if (scene === 'in-chat') {
     content = <InChatScene />;
-  } else if (scene === 'drawer' && !isMobile) {
-    content = (
-      <>
-        <PageHeader />
-        <DrawerScene />
-      </>
-    );
   } else if (isMobile) {
-    const item = scene === 'list' ? null : sceneItem(scene);
-    content = item ? (
+    content = isItemScene(scene) ? (
       <Pane className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label="Inbox item">
-        {item}
+        {SCENES[scene]()}
       </Pane>
     ) : (
       <>
@@ -372,8 +295,7 @@ export function InboxThreadPrototype() {
       </>
     );
   } else {
-    const item = sceneItem(scene);
-    const selected = SCENE_SELECTED[scene] ?? QUESTION.ref;
+    const itemScene: ItemScene = isItemScene(scene) ? scene : 'question';
     content = (
       <>
         <PageHeader />
@@ -382,10 +304,10 @@ export function InboxThreadPrototype() {
             className="relative flex min-h-0 min-w-0 flex-col overflow-y-auto"
             aria-label="Inbox list"
           >
-            <ListPane selectedRef={selected} />
+            <ListPane selectedRef={SCENE_SELECTED[itemScene]} />
           </Pane>
           <Pane className="flex min-h-0 min-w-0 flex-col" aria-label="Inbox item">
-            {item}
+            {SCENES[itemScene]()}
           </Pane>
         </div>
       </>

@@ -1,30 +1,32 @@
 /**
- * PROTOTYPE ONLY: the side-chat on one inbox item. Never ship to production.
+ * PROTOTYPE ONLY: an inbox item as a short conversation. Never ship to production.
  *
- * Three intents share one composer, picked with a segmented control:
- * - Ask: a clarifying question. The item stays open; the agent answers inside the item.
- * - Follow-up: more work. Goes to the same agent (waking it if it finished) or a new task.
- * - Answer: only for items that take a typed answer; closes the item like today.
+ * - The ask is the agent's first message. Its answer controls (options, Looks good, the secure
+ *   secret field) sit inside that message, not pinned to the bottom.
+ * - When the agent replies and still needs the decision, the controls move down to its latest
+ *   message: there is only ever one copy, on the newest turn that offers it.
+ * - One plain message box. Whether a message is a question, an answer in words or a follow-up
+ *   is read from the message itself; a small note under it says what SAM understood, with Undo.
  */
-import { Button, Chip, SegmentedControl } from '@simple-agent-manager/ui';
+import type { InboxItem } from '@simple-agent-manager/shared';
+import { Button, Chip } from '@simple-agent-manager/ui';
 import {
   ArrowUp,
   Bot,
   CheckCircle2,
   CircleDashed,
-  CornerDownRight,
+  KeyRound,
   ListPlus,
   Loader2,
-  Moon,
   Sparkles,
+  Undo2,
   Wrench,
 } from 'lucide-react';
 import { type ReactNode } from 'react';
 
+import { InboxItemBody } from '../../components/inbox/InboxItemView';
 import { RenderedMarkdown } from '../../components/MarkdownRenderer';
 import { PROTO_NOW, type ThreadEntry } from './mock-data';
-
-export type ComposerMode = 'ask' | 'followup' | 'answer';
 
 function age(at: string): string {
   const minutes = Math.max(1, Math.round((PROTO_NOW - Date.parse(at)) / 60_000));
@@ -35,19 +37,49 @@ function AgentAvatar() {
   return (
     <span
       aria-hidden="true"
-      className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[var(--sam-person-auto,#38bdf8)] text-[#04121b] ring-2 ring-[var(--sam-separator)]"
+      className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[var(--sam-person-auto)] text-[var(--sam-separator)] ring-2 ring-[var(--sam-separator)]"
     >
       <Bot size={15} strokeWidth={2.2} />
     </span>
   );
 }
 
+/** An agent turn: avatar in the gutter, content, then the controls it offers, if any. */
+function AgentTurn({
+  children,
+  offers,
+  meta,
+}: {
+  children: ReactNode;
+  offers?: ReactNode;
+  meta?: string;
+}) {
+  return (
+    <div className="flex min-w-0 items-start gap-2.5">
+      <AgentAvatar />
+      <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+        {children}
+        {offers && <div className="min-w-0 pt-0.5">{offers}</div>}
+        {meta && <span className="text-[11px] text-fg-muted">{meta}</span>}
+      </div>
+    </div>
+  );
+}
+
+/** The ask itself, as the opening agent message. */
+export function AskTurn({ item, offers }: { item: InboxItem; offers?: ReactNode }) {
+  return (
+    <AgentTurn offers={offers}>
+      <InboxItemBody item={item} context={null} now={PROTO_NOW} stackPosition={null} />
+    </AgentTurn>
+  );
+}
+
 const FOLLOWUP_STATE: Record<
   Extract<ThreadEntry, { kind: 'followup' }>['state'],
-  { label: string; tone: 'neutral' | 'warning' | 'success' | 'info'; icon: ReactNode }
+  { label: string; tone: 'neutral' | 'success'; icon: ReactNode }
 > = {
   queued: { label: 'Queued', tone: 'neutral', icon: <CircleDashed size={12} /> },
-  sent: { label: 'Sent', tone: 'info', icon: <CornerDownRight size={12} /> },
   started: { label: 'Working', tone: 'success', icon: <Loader2 size={12} /> },
   done: { label: 'Done', tone: 'success', icon: <CheckCircle2 size={12} /> },
 };
@@ -55,54 +87,50 @@ const FOLLOWUP_STATE: Record<
 function FollowupCard({ entry }: { entry: Extract<ThreadEntry, { kind: 'followup' }> }) {
   const state = FOLLOWUP_STATE[entry.state];
   return (
-    <div className="sam-well flex min-w-0 flex-col gap-2 rounded-xl px-3 py-2.5">
+    <div className="ml-9 flex min-w-0 flex-col gap-1.5 rounded-xl border border-[var(--sam-hairline)] px-3 py-2.5">
       <div className="flex min-w-0 items-center gap-2 text-xs text-fg-muted">
         <ListPlus size={14} aria-hidden="true" className="shrink-0" />
-        <span className="shrink-0 font-medium whitespace-nowrap text-fg-secondary">
-          {entry.route === 'new-task' ? 'Follow-up · new task' : 'Follow-up · this agent'}
+        <span className="min-w-0 flex-1 truncate">
+          {entry.route === 'new-task' ? 'New task' : 'Next for this agent'}
         </span>
-        <span className="ml-auto shrink-0">
-          <Chip tone={state.tone} size="sm" icon={state.icon}>
-            {state.label}
-          </Chip>
-        </span>
+        <Chip tone={state.tone} size="sm" icon={state.icon}>
+          {state.label}
+        </Chip>
       </div>
       <p className="m-0 text-sm break-words text-fg-primary [overflow-wrap:anywhere]">
         {entry.text}
       </p>
       {entry.chatLabel && (
-        <span className="flex min-h-9 w-fit max-w-full items-center gap-1.5 rounded-full border border-[var(--sam-chip-edge,var(--sam-hairline))] bg-[var(--sam-chip-bg,transparent)] px-3 text-[13px] text-fg-primary">
-          <Sparkles size={13} aria-hidden="true" className="shrink-0 text-fg-muted" />
-          <span className="min-w-0 truncate">{entry.chatLabel}</span>
+        <span className="flex min-h-9 w-fit max-w-full items-center gap-1.5 text-[13px] text-accent">
+          <Sparkles size={13} aria-hidden="true" className="shrink-0" />
+          <span className="min-w-0 truncate">Open “{entry.chatLabel}”</span>
         </span>
       )}
     </div>
   );
 }
 
-/** The conversation on one item, oldest first. */
-export function ThreadView({
+/**
+ * The conversation after the ask. `offers` renders on the latest agent turn that has
+ * `offers: true`; earlier copies are not drawn.
+ */
+export function Thread({
   entries,
+  offers,
   pending,
-  heading = true,
 }: {
   entries: ThreadEntry[];
-  /** The agent is answering right now: what it is doing, one line. */
+  offers?: ReactNode;
+  /** The agent is answering right now: what it is doing, in one line. */
   pending?: string;
-  heading?: boolean;
 }) {
+  let lastOffer = -1;
+  entries.forEach((entry, index) => {
+    if (entry.kind === 'agent' && entry.offers) lastOffer = index;
+  });
   return (
-    <section aria-label="Conversation about this item" className="flex min-w-0 flex-col gap-3">
-      {heading && (
-        <div className="flex items-center gap-2 pt-1">
-          <span className="h-px flex-1 bg-[var(--sam-hairline)]" />
-          <span className="text-[11px] font-medium tracking-wide text-fg-muted uppercase">
-            About this item
-          </span>
-          <span className="h-px flex-1 bg-[var(--sam-hairline)]" />
-        </div>
-      )}
-      {entries.map((entry) => {
+    <>
+      {entries.map((entry, index) => {
         switch (entry.kind) {
           case 'you':
             return (
@@ -110,20 +138,41 @@ export function ThreadView({
                 <div className="sam-raised max-w-[85%] rounded-2xl rounded-br-md px-3 py-2 text-[15px] break-words text-fg-primary [overflow-wrap:anywhere]">
                   {entry.text}
                 </div>
-                <span className="text-[11px] text-fg-muted">You · {age(entry.at)}</span>
+                {entry.note ? (
+                  <span className="flex max-w-[85%] items-center justify-end gap-2 text-[11px]">
+                    <span className="min-w-0 text-right text-[var(--sam-status-success-fg)]">
+                      <CheckCircle2
+                        size={12}
+                        aria-hidden="true"
+                        className="mr-1 inline-block align-[-2px]"
+                      />
+                      {entry.note.text}
+                    </span>
+                    {entry.note.undo && (
+                      <button
+                        type="button"
+                        className="flex min-h-8 shrink-0 cursor-pointer items-center gap-0.5 border-0 bg-transparent px-1 font-semibold text-fg-primary"
+                      >
+                        <Undo2 size={12} aria-hidden="true" /> Undo
+                      </button>
+                    )}
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-fg-muted">{age(entry.at)}</span>
+                )}
               </div>
             );
           case 'agent':
             return (
-              <div key={entry.id} className="flex min-w-0 items-start gap-2">
-                <AgentAvatar />
-                <div className="flex min-w-0 flex-1 flex-col gap-1">
-                  <div className="min-w-0 text-[15px] text-fg-secondary">
-                    <RenderedMarkdown content={entry.text} inline />
-                  </div>
-                  <span className="text-[11px] text-fg-muted">Agent · {age(entry.at)}</span>
+              <AgentTurn
+                key={entry.id}
+                offers={index === lastOffer ? offers : undefined}
+                meta={age(entry.at)}
+              >
+                <div className="min-w-0 text-[15px] text-fg-secondary">
+                  <RenderedMarkdown content={entry.text} inline />
                 </div>
-              </div>
+              </AgentTurn>
             );
           case 'activity':
             return (
@@ -136,16 +185,10 @@ export function ThreadView({
             );
           case 'followup':
             return <FollowupCard key={entry.id} entry={entry} />;
-          case 'answer':
-            return (
-              <p key={entry.id} className="m-0 text-sm text-[var(--sam-status-success-fg)]">
-                You answered: {entry.text}
-              </p>
-            );
         }
       })}
       {pending && (
-        <div className="flex min-w-0 items-start gap-2" role="status">
+        <div className="flex min-w-0 items-start gap-2.5" role="status">
           <AgentAvatar />
           <div className="flex min-w-0 flex-col gap-1.5 pt-1">
             <span className="flex gap-1" aria-hidden="true">
@@ -157,93 +200,66 @@ export function ThreadView({
           </div>
         </div>
       )}
-    </section>
+    </>
   );
 }
 
-const MODE_HINT: Record<ComposerMode, string> = {
-  ask: 'The agent answers here. This item stays open.',
-  followup: 'Adds work. Nothing here is lost when you close the item.',
-  answer: 'Answers the question and closes the item.',
-};
-
-const MODE_PLACEHOLDER: Record<ComposerMode, string> = {
-  ask: 'Ask about this (it stays open)…',
-  followup: 'What else should be done?',
-  answer: 'Type your answer (closes it)…',
-};
-
-/** One-tap prompts for the common clarifications. */
-export const DEFAULT_SUGGESTIONS = [
-  'Explain it simpler',
-  'What do you recommend?',
-  'Show me the evidence',
-  'What could go wrong?',
-];
-
 /**
- * The pinned bottom of an item: the item's own answer (options, Looks good…), then one composer
- * for talking about it. The answer stays first: the side-chat never hides the decision.
+ * The one message box. No modes: SAM reads the message. `guard` replaces the send action when
+ * the draft looks like a secret, so a key never lands in the chat.
  */
-export function SideChatComposer({
-  answer,
-  mode,
-  modes,
+export function MessageBox({
   draft = '',
-  notice,
-  routePicker,
-  showHint = true,
+  placeholder = 'Message the agent about this…',
+  guard = false,
 }: {
-  /** The item's existing answer controls. */
-  answer?: ReactNode;
-  mode: ComposerMode;
-  modes: ComposerMode[];
   draft?: string;
-  /** One line above the input, e.g. "This agent finished; sending wakes it". */
-  notice?: ReactNode;
-  /** Follow-up only: where it goes. */
-  routePicker?: ReactNode;
-  /** Narrow columns (the desktop side pane) drop the one-line hint. */
-  showHint?: boolean;
+  placeholder?: string;
+  guard?: boolean;
 }) {
-  const labels: Record<ComposerMode, string> = {
-    ask: 'Ask',
-    followup: 'Follow-up',
-    answer: 'Answer',
-  };
   return (
-    <div className="flex min-w-0 flex-col gap-2.5">
-      {answer}
-      {notice}
-      {routePicker}
-      <div className="flex min-w-0 items-center gap-2">
-        <SegmentedControl
-          label="What this message is"
-          value={mode}
-          onChange={() => undefined}
-          className="w-full shrink-0 md:w-[280px]"
-          options={modes.map((value) => ({ value, label: labels[value] }))}
-        />
-        {showHint && (
-          <span className="hidden min-w-0 flex-1 truncate text-xs text-fg-muted md:block">
-            {MODE_HINT[mode]}
-          </span>
-        )}
-      </div>
+    <div className="flex min-w-0 flex-col gap-2">
+      {guard && (
+        <div
+          role="alert"
+          className="flex min-w-0 flex-col gap-2 rounded-xl bg-warning-tint px-3 py-2.5 text-sm text-warning-fg"
+        >
+          <p className="m-0 flex items-start gap-1.5">
+            <KeyRound size={15} aria-hidden="true" className="mt-0.5 shrink-0" />
+            <span>
+              That looks like a key. Messages are kept in the chat, so send it through the secure
+              field instead.
+            </span>
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="accent" size="sm">
+              Move it to the secure field
+            </Button>
+            <Button variant="raised" size="sm">
+              It isn’t a secret
+            </Button>
+          </div>
+        </div>
+      )}
       <div className="sam-well flex min-w-0 items-end gap-1.5 rounded-2xl p-1.5">
         <textarea
-          aria-label={MODE_PLACEHOLDER[mode]}
-          rows={draft ? 2 : 1}
-          defaultValue={draft}
-          placeholder={MODE_PLACEHOLDER[mode]}
-          className="min-h-10 min-w-0 flex-1 resize-none border-0 bg-transparent px-2 py-2 text-base text-fg-primary outline-none placeholder:text-fg-muted md:text-[15px]"
+          aria-label={placeholder}
+          rows={1}
+          defaultValue={guard ? '' : draft}
+          placeholder={guard ? '' : placeholder}
+          className={`min-h-10 min-w-0 flex-1 resize-none border-0 bg-transparent px-2 py-2 text-base text-fg-primary outline-none placeholder:text-fg-muted md:text-[15px] ${guard ? 'hidden' : ''}`}
         />
+        {guard && (
+          <span className="flex min-h-10 min-w-0 flex-1 items-center px-2 text-base text-fg-secondary md:text-[15px]">
+            <span className="min-w-0 truncate">here it is: ••••••••••••••••</span>
+          </span>
+        )}
         <Button
           variant="accent"
           size="sm"
           aria-label="Send"
           className="h-10 w-10 shrink-0 !px-0"
-          disabled={!draft}
+          disabled={guard || !draft}
         >
           <ArrowUp size={18} aria-hidden="true" />
         </Button>
@@ -252,56 +268,7 @@ export function SideChatComposer({
   );
 }
 
-/** When nothing has been said about the item yet: an invitation with one-tap prompts. */
-export function ThreadStarter({ suggestions }: { suggestions: string[] }) {
-  return (
-    <section aria-label="Ask about this item" className="flex min-w-0 flex-col gap-2 pt-1">
-      <p className="m-0 text-xs text-fg-muted">Not sure yet? Ask the agent first:</p>
-      <div className="flex min-w-0 flex-wrap gap-1.5">
-        {suggestions.map((s) => (
-          <button
-            key={s}
-            type="button"
-            className="flex h-9 shrink-0 cursor-pointer items-center rounded-full border border-[var(--sam-hairline)] bg-transparent px-3 text-[13px] text-fg-secondary"
-          >
-            {s}
-          </button>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-/** Follow-up destination: this agent (queued or waking it) or a fresh task. */
-export function FollowupRoutePicker({ agentFinished }: { agentFinished: boolean }) {
-  const option =
-    'flex min-h-11 min-w-0 flex-1 cursor-pointer flex-col items-start justify-center gap-0.5 rounded-xl border-0 px-3 py-2 text-left';
-  return (
-    <div role="radiogroup" aria-label="Send the follow-up to" className="flex min-w-0 gap-2">
-      <button type="button" role="radio" aria-checked="true" className={`${option} sam-raised`}>
-        <span className="flex items-center gap-1.5 text-sm font-semibold text-fg-primary">
-          {agentFinished && <Moon size={14} aria-hidden="true" />} This agent
-        </span>
-        <span className="text-xs text-fg-muted">
-          {agentFinished ? 'Wakes it with the full context' : 'Queued after its current work'}
-        </span>
-      </button>
-      <button
-        type="button"
-        role="radio"
-        aria-checked="false"
-        className={`${option} bg-transparent`}
-      >
-        <span className="flex items-center gap-1.5 text-sm font-semibold text-fg-primary">
-          <Sparkles size={14} aria-hidden="true" /> New task
-        </span>
-        <span className="text-xs text-fg-muted">A fresh agent, linked to this item</span>
-      </button>
-    </div>
-  );
-}
-
-/** Under an inbox row: the side-chat's latest state at a glance. */
+/** Under an inbox row: the conversation's latest state at a glance. */
 export function ThreadRowHint({
   text,
   unread,
@@ -312,7 +279,7 @@ export function ThreadRowHint({
   tone?: 'muted' | 'active';
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-1.5 pr-3 pb-2.5 pl-14 text-xs">
+    <div className="-mt-1 flex min-w-0 items-center gap-1.5 pr-3 pb-2.5 pl-14 text-xs">
       {unread && (
         <span
           aria-label="New reply"
