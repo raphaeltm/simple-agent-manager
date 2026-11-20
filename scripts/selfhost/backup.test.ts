@@ -4,7 +4,7 @@
  * and executed against a directory standing in for the bucket. The real-store version of the
  * round trip is live/backup-restore.live.test.ts (pinned MinIO image, Docker).
  */
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import {
   chmodSync,
@@ -46,6 +46,7 @@ import { prepareCelldProject, writeCelldConfig } from './celld-project';
 import { runDeploy, runTsx, writeBox } from './deploy-harness';
 import { composeProjectFor, expectedComposeProjectFor, recordInstall } from './install-record';
 import { restoredInstallationId } from './restore-identity';
+import { ownershipRefusal } from './teardown-gcp';
 import { recoverUpgrade } from './upgrade-lib';
 
 vi.mock('node:fs', async (importOriginal) => ({
@@ -549,6 +550,108 @@ describe('runBackup', () => {
 });
 
 describe('runRestore', () => {
+  it('reserves different fleet identities on independent hosts with identical source, path and bucket', () => {
+    const snapshot = join(root, 'same-input-snapshot');
+    runBackup(ctx('s3://fleet/celld', join(root, 'state')), snapshot);
+    const target = ctx('s3://fresh/celld', join(root, 'new-state'));
+    const journal = `${target.stateDir}.restore-progress.json`;
+    const firstProject = runRestore(target, snapshot, 'project');
+    const firstId = restoredInstallationId(target, 'a'.repeat(32));
+    // Host-local receipts are the only difference: both hosts use the same conventional paths.
+    // Retain host one's local filesystem while exposing an empty local filesystem for host two.
+    if (existsSync(journal)) renameSync(journal, join(root, 'host-one-journal'));
+    const secondProject = runRestore(target, snapshot, 'project');
+    const secondId = restoredInstallationId(target, 'a'.repeat(32));
+    expect(secondId).not.toBe(firstId);
+    expect(secondProject).not.toBe(firstProject);
+    expect(firstId).toMatch(/^[a-f0-9]{32}$/);
+    expect(secondId).toMatch(/^[a-f0-9]{32}$/);
+    expect(firstId).not.toBe('a'.repeat(32));
+    expect(secondId).not.toBe('a'.repeat(32));
+    expect(runRestore(target, snapshot, 'project')).toBe(secondProject);
+    const vm = {
+      id: '12345',
+      name: 'sam-host-one',
+      zone: 'europe-west1-b',
+      disks: [],
+      tags: [],
+      networks: [],
+      labels: {
+        managed: 'simple-agent-manager',
+        installation: firstId,
+        env: 'selfhost',
+        node: 'node-one',
+      },
+    };
+    expect(ownershipRefusal(vm, firstId)).toBeNull();
+    expect(ownershipRefusal(vm, secondId)).toContain('another install');
+    renameSync(journal, join(root, 'host-two-journal'));
+    renameSync(join(root, 'host-one-journal'), journal);
+    expect(runRestore(target, snapshot, 'project')).toBe(firstProject);
+    expect(restoredInstallationId(target, 'a'.repeat(32))).toBe(firstId);
+    runRestore(target, snapshot);
+    expect(
+      JSON.parse(readFileSync(join(target.stateDir, 'platform-keys.json'), 'utf8'))
+        .SAM_INSTALLATION_ID
+    ).toBe(firstId);
+    expect(runRestore(target, snapshot, 'project')).toBe(firstProject);
+    runRestore(target, snapshot);
+    expect(
+      JSON.parse(readFileSync(join(target.stateDir, 'platform-keys.json'), 'utf8'))
+        .SAM_INSTALLATION_ID
+    ).toBe(firstId);
+  });
+
+  it.each(['state', 'bucket'] as const)(
+    'a print-project reservation cannot authorize overwriting populated %s',
+    (occupied) => {
+      const snapshot = join(root, 'reserved-snapshot');
+      runBackup(ctx('s3://fleet/celld', join(root, 'state')), snapshot);
+      const target = ctx('s3://fresh/celld', join(root, 'new-state'));
+      const project = runRestore(target, snapshot, 'project');
+      expect(project).toMatch(/^sam-selfhost-[a-f0-9]{12}$/);
+      const path = occupied === 'state' ? target.stateDir : join(root, 'store/fresh/celld');
+      mkdirSync(path, { recursive: true });
+      // A valid snapshot subset would be accepted by the started-resume path. A mere
+      // print reservation must still require emptiness, even when those bytes match.
+      const marker = join(path, occupied === 'state' ? 'platform-keys.json' : 'current.json');
+      const retained =
+        occupied === 'state'
+          ? JSON.stringify({ SAM_INSTALLATION_ID: restoredInstallationId(target, 'a'.repeat(32)) })
+          : '{"v":3}';
+      writeFileSync(marker, retained, { mode: 0o600 });
+      calls = [];
+      expect(() => runRestore(target, snapshot)).toThrow(/not empty|empty install/);
+      expect(readFileSync(marker, 'utf8')).toBe(retained);
+      expect(calls.some((call) => call.args.includes('mirror'))).toBe(false);
+      expect(existsSync(`${target.stateDir}.restore-progress.json`)).toBe(true);
+    }
+  );
+
+  it('refuses a legacy deterministic-identity journal before any target runner call', () => {
+    const snapshot = join(root, 'legacy-journal-snapshot');
+    runBackup(ctx('s3://fleet/celld', join(root, 'state')), snapshot);
+    const target = ctx('s3://fresh/celld', join(root, 'new-state'));
+    const journal = `${target.stateDir}.restore-progress.json`;
+    const legacy = JSON.stringify({
+      format: 'sam-restore-progress/1',
+      bucket: target.box.CELLD_BUCKET,
+      state: resolve(target.stateDir),
+      backup: resolve(snapshot),
+      snapshot: createHash('sha256')
+        .update(readFileSync(join(snapshot, '.sam-backup-manifest')))
+        .digest('hex'),
+    });
+    mkdirSync(join(root, 'store/fresh/celld'), { recursive: true });
+    writeFileSync(journal, legacy, { mode: 0o600 });
+    calls = [];
+    expect(() => runRestore(target, snapshot)).toThrow(/ownership|legacy|identity|journal/);
+    expect(calls).toHaveLength(0);
+    expect(readFileSync(journal, 'utf8')).toBe(legacy);
+    expect(existsSync(target.stateDir)).toBe(false);
+    expect(tree(join(root, 'store/fresh/celld'))).toEqual({});
+  });
+
   it('refuses a hard-linked partial state file before copying over an external inode', () => {
     const snapshot = join(root, 'retry-hardlink-snapshot');
     runBackup(ctx('s3://fleet/celld', join(root, 'state')), snapshot);
@@ -655,11 +758,7 @@ describe('runRestore', () => {
     runBackup(ctx('s3://fleet/celld', join(root, 'state')), snapshot);
     const target = ctx('s3://fresh/celld', join(root, 'new-state'));
     const preKey = composeProjectFor(target.box, target.stateDir);
-    const finalProject = expectedComposeProjectFor(
-      target.box,
-      target.stateDir,
-      restoredInstallationId(target, 'a'.repeat(32))
-    );
+    const finalProject = runRestore(target, snapshot, 'project');
     expect(finalProject).not.toBe(preKey);
     occupiedProject = finalProject;
     targetContainers = 'fixture-final-project-container\n';

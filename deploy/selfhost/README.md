@@ -140,7 +140,7 @@ pnpm --silent selfhost:restore --from /absolute/path/to/backup --print-project \
   --encryption-key-file "$HOME/.config/sam/backup.key"
 ```
 
-This prints only the public project name; it makes no target, runtime or store changes. Put that
+This prints only the public project name; it writes a private sibling identity reservation but makes no target state, runtime or store changes. Put that
 name in the target `.env` as `COMPOSE_PROJECT_NAME`, keep `COMPOSE_PROFILES=local-store` (plus any
 other desired profiles), and start only the bundled store and its initializer:
 
@@ -164,7 +164,8 @@ pnpm selfhost:restore --from /absolute/path/to/backup \
 
 Restore authenticates the complete encrypted inventory and every file before touching the target.
 If a copy fails, retain `<state-dir>.restore-progress.json` and retry the exact same command and
-backup. This private journal binds the original empty target and authenticated snapshot. A retry
+backup. This private journal binds the target and authenticated snapshot; its started phase records that
+the target passed the empty-state and empty-bucket checks. A retry
 refuses changed, additional, linked or foreign-owned partial files before copying again; do not
 start the target or remove its journal to bypass a refusal. State files interrupted mid-copy may
 be retried only when their bytes are an exact prefix of the authenticated source; bucket objects
@@ -176,7 +177,8 @@ match if present. A completed retry still refuses changed data or an application
 verification, remove these exact operator-owned metadata files manually; teardown retains them.
 It permits only the verified bundled-store bootstrap described above, copies state and bucket data, keeps the
 target `.env`, strips the source installation's creation receipts, and does not start celld.
-A fresh restore assigns a distinct `SAM_INSTALLATION_ID`, stable for retries of the same target,
+A fresh restore reserves a random `SAM_INSTALLATION_ID` in private target-local metadata,
+distinct even for independent hosts using identical paths and bucket names and stable for retries,
 while preserving all cryptographic keys needed to read the restored data. The generated local
 config receives that new ID. Restore omits the source bucket's active `deploy/current.json`
 pointer but retains immutable deployment objects and application data, so starting celld cannot
@@ -187,7 +189,12 @@ labels are retained: the replacement must provision its own nodes, and its teard
 delete the source fleet. This also applies to disaster recovery; retire surviving source resources
 separately using their original installation records. For every store type, set the target `.env`'s
 `COMPOSE_PROJECT_NAME` to the canonical name restore prints **before** running `selfhost:deploy --init`.
-You can also derive it beforehand with the authenticated, read-only `--print-project` command.
+You can also reserve it beforehand with the authenticated `--print-project` command. That command
+creates only the private sibling identity reservation; it does not write target state or bucket data
+or start a runtime. A reservation alone never permits restoring into occupied state or a bucket.
+Keep the reservation on the target host and reuse the exact command and backup. Older v1 journals
+are refused because they cannot prove an independent clone identity; preserve their target and
+receipts for inspection instead of deleting metadata to bypass the check.
 The name incorporates the restored installation ID, domain and state directory. On the original
 SAM ref, run init with that setting to retain the keys and establish target ownership receipts, then start
 that target's Compose stack, deploy and verify its data (`scripts/selfhost/backup-lib.ts:runRestore`,
@@ -199,10 +206,11 @@ inspect the exact installation's containers and restart only that installation's
 then use a fresh backup destination. Normal backup refuses a missing or stopped writer; it never
 guesses which other installation to start. A partial ciphertext directory is not reusable, and a
 fully encrypted backup whose receipt write failed is retained for operator inspection and restore;
-it is not automatically adopted for destructive cleanup. An interrupted initial journal write
-before target writes can leave an invalid progress receipt: restore refuses to adopt it. Verify
-that both target state and bucket are still empty before manually removing that exact receipt and
-retrying. Preserve populated or unverified targets for inspection instead of bypassing ownership.
+it is not automatically adopted for destructive cleanup. Restore writes and syncs the complete
+private journal before atomically publishing it, so an interrupted initial write can be retried
+without adopting partial metadata. A published journal is revalidated and synced before any
+target write. Invalid or legacy metadata still causes refusal: preserve the target and receipts
+for inspection instead of bypassing ownership.
 
 ## Upgrade
 
@@ -554,3 +562,8 @@ addresses and protected local listeners remain forbidden for relays.
 
 The broker port must also differ from every other managed box listener, including disabled
 optional services. Deploy, fence planning and Caddy startup all check this reservation.
+
+GCP bootstrap requires a dedicated `--state-dir` receipt path for each GCP project. It refuses
+active GCP receipts for a different or unrecorded project before making issuer or cloud calls,
+including in dry-run mode. Preserve existing receipts; use a separate state directory for another
+project. Removed resource receipts do not block reuse.

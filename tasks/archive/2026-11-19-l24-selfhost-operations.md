@@ -93,6 +93,16 @@ Ten real-CLI scenarios cover uninterrupted recovery, SIGKILL after receipt publi
 
 Final delta validation: full self-host suite 995 passed, four conditional skips, 56 files; TypeScript, focused lint, formatting, diff and secret-readback scanner pass. Independent security and completion/documentation/constitution delta reviews pass with no unresolved finding. FIFO receipts refuse before opening and malformed key diagnostics withhold source contents.
 
+## Independent clone and GCP receipt scope review delta
+
+Review 4638509411 found that deterministic IDs could collide across independent hosts with identical target paths and bucket names. Restore now persists a random 128-bit target identity in the existing private v2 journal. Authenticated print-project reserves that identity without writing state or bucket data; reserved phase still requires empty state and bucket checks. Started phase is durable before target writes. Atomic no-replace publication preserves a concurrent reservation winner; actual restore safely refuses a competing publication rather than changing an already projected identity. Retries bind the snapshot and target scope and preserve the ID. Legacy v1 journals fail closed and remain available for inspection.
+
+Identity tests failed five cases on the old implementation, then passed with the fix: identical-path independent hosts, stable print/restore/retry, cross-clone VM deletion refusal with own-clone liveness, occupied state and bucket after reservation, and legacy-journal refusal. The emitted CLI asserts that print-project creates only private sibling metadata. Initial-journal write/sync fault injection follows the actual temporary descriptor and verifies no target writes before durable publication and retry sync.
+
+Review 4638509415 found shared receipt keys could replace another GCP project's pool/provider/firewall proof. Bootstrap now refuses all active GCP receipts for different or unrecorded projects before issuer or cloud calls, even without installation ID and in dry-run mode. Five refusal controls failed on old code; all 54 bootstrap tests pass, including same-project and removed-record controls. Refusal preserves exact receipt bytes and cloud state. Per-project receipt namespacing is deferred to idea 01M7VMRP6RY7EHCHDCN49VT0FT alongside earlier crash-window follow-up 01M7VB4538WSGP3QBP8EBDVTZA; operators use separate state directories now.
+
+Full self-host suite: 1006 passed, four conditional skips, 56 files. TypeScript, focused lint, formatting, diff check and secret-readback scan pass. Independent security, task completion, doc-sync and constitution delta reviews pass. Original BOX evidence remains valid; the accepted coordinator-owned combined H2/L24 post-merge upgrade/rollback smoke remains owed.
+
 ## References
 
 PR https://github.com/raphaeltm/simple-agent-manager/pull/2918; idea01M72M9AEB933ZY8269D376DKC LANDING PLAN part6; SAM task01M7TTKAS78AMJ3853S5N4BYAK; coordinator01M7JMXS2JRW6QQMB1356ENPM3; policy795e72a6; rule56; `/do`.

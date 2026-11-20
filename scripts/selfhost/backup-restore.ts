@@ -13,7 +13,7 @@ import {
   STATE_DIR,
 } from './backup-lib';
 import { assertOperatorExecution } from './operator-only';
-import { projectRestoreIdentity } from './restore-identity';
+import { projectRestoreIdentity, restoreSourceInstallationId } from './restore-identity';
 import { assertRestoreSubset, restoreProgress } from './restore-progress';
 import { assertRestoreRuntime } from './restore-runtime';
 import { ensurePrivateDir } from './secret-files';
@@ -21,10 +21,14 @@ import { ensurePrivateDir } from './secret-files';
 export function restoreBackup(ctx: BoxContext, plain: string, encrypted: string): BackupManifest {
   assertOperatorExecution();
   const manifest = readManifest(plain);
-  const identity = projectRestoreIdentity(ctx, join(plain, STATE_DIR));
+  const progress = restoreProgress(
+    ctx,
+    encrypted,
+    restoreSourceInstallationId(ctx, join(plain, STATE_DIR))
+  );
+  const identity = projectRestoreIdentity(ctx, join(plain, STATE_DIR), progress.installationId);
   // No source Worker (including its Durable Object alarms) may run before a fresh target deploy.
   rmSync(join(plain, BUCKET_DIR, 'deploy', 'current.json'), { force: true });
-  const progress = restoreProgress(ctx, encrypted);
   const state = lstatSync(ctx.stateDir, { throwIfNoEntry: false });
   if (state && process.getuid !== undefined && state.uid !== process.getuid())
     throw new Error('Restore target state is owned by another user');

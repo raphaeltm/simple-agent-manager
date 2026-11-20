@@ -151,6 +151,10 @@ change_retry() {
   return 1
 }
 
+# Validate the existing ledger before any issuer/cloud call, including dry-run and no-ID modes.
+node "$SCRIPT_DIR/created-resources.mjs" assert-project "$STATE_DIR/created-resources.json" "$PROJECT" \
+  || die "cannot use this receipt path for the requested GCP project"
+
 command -v gcloud >/dev/null 2>&1 || die "gcloud is not installed or not on PATH"
 
 # Receipts contain public resource identifiers only, never credentials. Reuse never becomes

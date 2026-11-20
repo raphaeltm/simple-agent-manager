@@ -11,6 +11,7 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -125,7 +126,7 @@ afterEach(() => {
 });
 
 describe('selfhost:backup and selfhost:restore (real entry points, fake gcloud)', () => {
-  it('prints only the authenticated final project without target writes or runtime/store calls', () => {
+  it('reserves the authenticated final project without target state, bucket or runtime writes', () => {
     const dest = join(root, 'project-backup');
     expect(
       run('backup.ts', [
@@ -141,7 +142,7 @@ describe('selfhost:backup and selfhost:restore (real entry points, fake gcloud)'
     ).toBe(0);
     writeFileSync(join(root, 'fresh.env'), 'CELLD_BUCKET=gs://fresh/celld\n', { mode: 0o600 });
     writeFileSync(join(root, 'fake/calls.log'), '');
-    const output = run('restore.ts', [
+    const args = [
       '--from',
       dest,
       '--print-project',
@@ -151,14 +152,25 @@ describe('selfhost:backup and selfhost:restore (real entry points, fake gcloud)'
       join(root, 'fresh-state'),
       '--encryption-key-file',
       join(root, 'backup-key'),
-    ]);
+    ];
+    const output = run('restore.ts', args);
     expect(output.status).toBe(0);
     expect(output.stderr).toBe('');
     expect(output.stdout).toMatch(/^sam-selfhost-[a-f0-9]{12}\n$/);
     expect(readFileSync(join(root, 'fake/calls.log'), 'utf8')).toBe('');
     expect(existsSync(join(root, 'fresh-state'))).toBe(false);
     expect(existsSync(join(root, 'gcs/fresh'))).toBe(false);
-    expect(existsSync(join(root, 'fresh-state.restore-progress.json'))).toBe(false);
+    const receipt = join(root, 'fresh-state.restore-progress.json');
+    expect(existsSync(receipt)).toBe(true);
+    expect(lstatSync(receipt).mode & 0o777).toBe(0o600);
+    const reserved = readFileSync(receipt, 'utf8');
+    const repeated = run('restore.ts', args);
+    expect(repeated.status).toBe(0);
+    expect(repeated.stdout).toBe(output.stdout);
+    expect(readFileSync(receipt, 'utf8')).toBe(reserved);
+    expect(readFileSync(join(root, 'fake/calls.log'), 'utf8')).toBe('');
+    expect(existsSync(join(root, 'fresh-state'))).toBe(false);
+    expect(existsSync(join(root, 'gcs/fresh'))).toBe(false);
   });
   it('uses a clean full copy after the stopped pass hits the confirmed POSIX stat of a missing finalized file', () => {
     writeFileSync(

@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
@@ -81,8 +81,31 @@ it.each(['write', 'file-sync', 'parent-sync'] as const)(
     let failed = false;
     const originalWrite = fs.writeSync,
       originalSync = fs.fsyncSync;
+    const trackJournalDescriptors = () => {
+      const descriptors = new Set<number>();
+      const originalOpen = fs.openSync,
+        originalClose = fs.closeSync;
+      vi.spyOn(fs, 'openSync').mockImplementation((...args: Parameters<typeof fs.openSync>) => {
+        const fd = Reflect.apply(originalOpen, fs, args);
+        const path = String(args[0]);
+        if (
+          path === progress ||
+          (dirname(path) === dirname(progress) &&
+            basename(path).startsWith(`.${basename(progress)}.`) &&
+            path.endsWith('.tmp'))
+        )
+          descriptors.add(fd);
+        return fd;
+      });
+      vi.spyOn(fs, 'closeSync').mockImplementation((fd) => {
+        descriptors.delete(fd);
+        return originalClose(fd);
+      });
+      return descriptors;
+    };
+    let journalDescriptors = trackJournalDescriptors();
     vi.spyOn(fs, 'writeSync').mockImplementation((...args: Parameters<typeof fs.writeSync>) => {
-      if (!failed && boundary === 'write' && fs.existsSync(progress)) {
+      if (!failed && boundary === 'write' && journalDescriptors.has(args[0])) {
         failed = true;
         originalWrite(args[0], Buffer.from('partial'));
         throw Error('Injected initial journal write');
@@ -92,8 +115,9 @@ it.each(['write', 'file-sync', 'parent-sync'] as const)(
     vi.spyOn(fs, 'fsyncSync').mockImplementation((fd) => {
       if (
         !failed &&
-        fs.existsSync(progress) &&
-        (fs.fstatSync(fd).isDirectory() ? boundary === 'parent-sync' : boundary === 'file-sync')
+        (fs.fstatSync(fd).isDirectory()
+          ? boundary === 'parent-sync' && fs.existsSync(progress)
+          : boundary === 'file-sync' && journalDescriptors.has(fd))
       ) {
         failed = true;
         throw Error('Injected initial journal sync');
@@ -105,13 +129,12 @@ it.each(['write', 'file-sync', 'parent-sync'] as const)(
     expect(fs.existsSync(context.stateDir)).toBe(false);
     expect(fs.existsSync(join(root, 'store/fresh/celld/data/value'))).toBe(false);
     vi.restoreAllMocks();
+    journalDescriptors = trackJournalDescriptors();
     let fileSynced = false,
       parentSynced = false;
     vi.spyOn(fs, 'fsyncSync').mockImplementation((fd) => {
-      if (fs.existsSync(progress)) {
-        if (fs.fstatSync(fd).isDirectory()) parentSynced = true;
-        else fileSynced = true;
-      }
+      if (fs.fstatSync(fd).isDirectory() && fs.existsSync(progress)) parentSynced = true;
+      else if (journalDescriptors.has(fd)) fileSynced = true;
       return originalSync(fd);
     });
     const originalRun = context.run;

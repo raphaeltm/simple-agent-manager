@@ -22,7 +22,8 @@ import { requireRunningCelld } from './backup-runtime';
 import { composeProjectFor, expectedComposeProjectFor, recordBackup } from './install-record';
 import { assertOperatorExecution } from './operator-only';
 import { removePrivateTree } from './private-tree';
-import { projectRestoreIdentity } from './restore-identity';
+import { projectRestoreIdentity, restoreSourceInstallationId } from './restore-identity';
+import { restoreProgress } from './restore-progress';
 import { ensurePrivateDir } from './secret-files';
 
 /**
@@ -452,7 +453,13 @@ export function runRestore(
     decryptBackupTree(from, plain, key);
     if (mode === 'project') {
       readManifest(plain);
-      const identity = projectRestoreIdentity(ctx, join(plain, STATE_DIR));
+      const progress = restoreProgress(
+        ctx,
+        from,
+        restoreSourceInstallationId(ctx, join(plain, STATE_DIR))
+      );
+      progress.reserve();
+      const identity = projectRestoreIdentity(ctx, join(plain, STATE_DIR), progress.installationId);
       return expectedComposeProjectFor(ctx.box, ctx.stateDir, identity);
     }
     return restoreBackup(ctx, plain, from);

@@ -1,5 +1,5 @@
 /** Private retry ownership for a restore that started from an empty bucket and state directory. */
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   closeSync,
   constants,
@@ -15,12 +15,12 @@ import {
   type Stats,
   writeSync,
 } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 import { prepareBackupParent } from './backup-destination';
 import { assertBackupOutside, type BoxContext } from './backup-lib';
 import { assertOperatorExecution } from './operator-only';
-import { assertPrivateFile } from './secret-files';
+import { assertPrivateFile, replacePrivateFile } from './secret-files';
 
 function digest(path: string): string {
   const input = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -99,15 +99,88 @@ export function assertRestoreSubset(current: string, expected: string, partialSt
   }
 }
 
+interface TargetRecord {
+  format: 'sam-restore-progress/2';
+  source: string;
+  bucket: string | undefined;
+  state: string;
+  environment: string;
+  domain: string;
+  endpoint: string;
+  backup: string;
+  snapshot: string;
+  targetInstallation: string;
+  phase: 'reserved' | 'started';
+}
+function targetScope(ctx: BoxContext, source: string) {
+  return {
+    format: 'sam-restore-progress/2' as const,
+    source,
+    bucket: ctx.box.CELLD_BUCKET,
+    state: resolve(ctx.stateDir),
+    environment: resolve(ctx.envFile),
+    domain: ctx.box.SAM_DOMAIN ?? '',
+    endpoint: ctx.box.S3_ENDPOINT ?? '',
+  };
+}
+function journalPaths(ctx: BoxContext): { progress: string; complete: string } {
+  return {
+    progress: `${resolve(ctx.stateDir)}.restore-progress.json`,
+    complete: `${resolve(ctx.stateDir)}.restore-complete.json`,
+  };
+}
+function readTarget(ctx: BoxContext, source: string, path: string): TargetRecord {
+  try {
+    const stat = lstatSync(path);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Invalid journal');
+    assertPrivateFile(path);
+    const raw: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid journal');
+    const value = raw as Partial<TargetRecord>;
+    const scope = targetScope(ctx, source);
+    if (
+      Object.entries(scope).some(
+        ([key, expected]) => value[key as keyof TargetRecord] !== expected
+      ) ||
+      typeof value.backup !== 'string' ||
+      resolve(value.backup) !== value.backup ||
+      typeof value.snapshot !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(value.snapshot) ||
+      typeof value.targetInstallation !== 'string' ||
+      !/^[a-f0-9]{32}$/.test(value.targetInstallation) ||
+      value.targetInstallation === source ||
+      !['reserved', 'started'].includes(value.phase ?? '')
+    )
+      throw new Error('Invalid journal');
+    return value as TargetRecord;
+  } catch {
+    throw new Error(
+      'Cannot verify restore retry ownership or target identity; preserve the target and its receipts for inspection'
+    );
+  }
+}
+/** Read a reservation already made by authenticated print-project/restore, never derive a clone ID. */
+export function readRestoredInstallationId(ctx: BoxContext, source: string): string {
+  assertOperatorExecution();
+  const paths = journalPaths(ctx);
+  const path = lstatSync(paths.progress, { throwIfNoEntry: false })
+    ? paths.progress
+    : paths.complete;
+  return readTarget(ctx, source, path).targetInstallation;
+}
 export interface RestoreProgress {
-  resume: boolean;
+  readonly resume: boolean;
+  readonly installationId: string;
+  reserve(): void;
   begin(): void;
   finish(): void;
 }
-export function restoreProgress(ctx: BoxContext, backup: string): RestoreProgress {
+export function restoreProgress(ctx: BoxContext, backup: string, source = ''): RestoreProgress {
   assertOperatorExecution();
-  const progressPath = `${resolve(ctx.stateDir)}.restore-progress.json`;
-  const complete = `${resolve(ctx.stateDir)}.restore-complete.json`;
+  if (!/^[a-f0-9]{32}$/.test(source)) throw new Error('Invalid backup installation identity');
+  const paths = journalPaths(ctx);
+  const progressPath = paths.progress,
+    complete = paths.complete;
   let journal =
     lstatSync(progressPath, { throwIfNoEntry: false }) ||
     !lstatSync(complete, { throwIfNoEntry: false })
@@ -115,28 +188,35 @@ export function restoreProgress(ctx: BoxContext, backup: string): RestoreProgres
       : complete;
   assertBackupOutside(ctx, progressPath);
   assertBackupOutside(ctx, complete);
-  const expected = JSON.stringify({
-    format: 'sam-restore-progress/1',
-    bucket: ctx.box.CELLD_BUCKET,
-    state: resolve(ctx.stateDir),
+  let identity = lstatSync(journal, { throwIfNoEntry: false });
+  const expectedScope = {
+    ...targetScope(ctx, source),
     backup: resolve(backup),
     snapshot: digest(join(backup, '.sam-backup-manifest')),
-  });
-  const existing = lstatSync(journal, { throwIfNoEntry: false });
+  };
+  let record: TargetRecord = identity
+    ? readTarget(ctx, source, journal)
+    : { ...expectedScope, targetInstallation: randomBytes(16).toString('hex'), phase: 'reserved' };
+  if (record.targetInstallation === source)
+    throw new Error('Restore installation identity collision');
   const validate = (path = journal): void => {
-    try {
-      if (lstatSync(path).isSymbolicLink()) throw new Error('Invalid journal');
-      assertPrivateFile(path);
-      if (readFileSync(path, 'utf8') !== expected) throw new Error('Different restore');
-    } catch {
+    const current = readTarget(ctx, source, path);
+    if (
+      JSON.stringify(current) !== JSON.stringify(record) ||
+      Object.entries(expectedScope).some(
+        ([key, value]) => current[key as keyof TargetRecord] !== value
+      )
+    )
       throw new Error(
         'Cannot verify restore retry ownership; preserve the partial target for inspection'
       );
-    }
   };
-  if (existing) validate();
-  if (lstatSync(complete, { throwIfNoEntry: false })) validate(complete);
-  let identity = existing;
+  if (identity) validate();
+  if (lstatSync(complete, { throwIfNoEntry: false })) {
+    validate(complete);
+    if (record.phase !== 'started')
+      throw new Error('Invalid completed restore identity reservation');
+  }
   const syncParent = (): void => {
     const fd = openSync(dirname(journal), 'r');
     try {
@@ -145,68 +225,92 @@ export function restoreProgress(ctx: BoxContext, backup: string): RestoreProgres
       closeSync(fd);
     }
   };
-  const persist = (path: string): void => {
-    prepareBackupParent(path);
-    const fd = openSync(path, 'wx', 0o600);
-    const created = fstatSync(fd);
+  const verifyIdentity = (): void => {
+    validate();
+    const current = lstatSync(journal);
+    if (current.dev !== identity?.dev || current.ino !== identity?.ino)
+      throw new Error('Restore retry ownership changed');
+    const fd = openSync(journal, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
-      const data = Buffer.from(expected);
-      let offset = 0;
-      while (offset < data.length) {
-        const written = writeSync(fd, data, offset, data.length - offset);
-        if (written === 0) throw new Error('Cannot persist restore retry ownership');
-        offset += written;
-      }
+      const opened = fstatSync(fd);
+      if (opened.dev !== identity?.dev || opened.ino !== identity?.ino)
+        throw new Error('Restore retry ownership changed');
       fsyncSync(fd);
-    } catch (error) {
-      // No target writes precede this initial receipt. Remove only this attempt's fresh inode.
-      const current = lstatSync(path, { throwIfNoEntry: false });
-      if (current?.dev === created.dev && current.ino === created.ino) rmSync(path);
-      throw error;
     } finally {
       closeSync(fd);
     }
+    syncParent();
+    validate();
+  };
+  const persist = (): void => {
+    prepareBackupParent(journal);
+    const temp = join(
+      dirname(journal),
+      `.${basename(journal)}.${randomBytes(16).toString('hex')}.tmp`
+    );
+    const fd = openSync(temp, 'wx', 0o600);
+    try {
+      const data = Buffer.from(JSON.stringify(record));
+      let offset = 0;
+      while (offset < data.length) {
+        const written = writeSync(fd, data, offset, data.length - offset);
+        if (!written) throw new Error('Cannot persist restore retry ownership');
+        offset += written;
+      }
+      fsyncSync(fd);
+      // No replace: concurrent reservations cannot overwrite the winning random identity.
+      linkSync(temp, journal);
+    } finally {
+      closeSync(fd);
+      rmSync(temp, { force: true });
+    }
+    identity = lstatSync(journal);
+    syncParent();
+    validate();
   };
   return {
-    resume: Boolean(existing),
-    begin() {
-      if (existing) {
-        validate();
-        const current = lstatSync(journal);
-        if (current.dev !== identity?.dev || current.ino !== identity?.ino)
-          throw new Error('Restore retry ownership changed');
-        const fd = openSync(journal, constants.O_RDONLY | constants.O_NOFOLLOW);
+    get resume() {
+      return Boolean(identity && record.phase === 'started');
+    },
+    get installationId() {
+      return record.targetInstallation;
+    },
+    reserve() {
+      if (identity) verifyIdentity();
+      else {
         try {
-          const opened = fstatSync(fd);
-          if (opened.dev !== identity?.dev || opened.ino !== identity?.ino)
-            throw new Error('Restore retry ownership changed');
-          fsyncSync(fd);
-        } finally {
-          closeSync(fd);
+          persist();
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+          // Read and durably reuse the winner rather than replacing its nonce.
+          record = readTarget(ctx, source, journal);
+          identity = lstatSync(journal);
+          verifyIdentity();
         }
-        syncParent();
-        validate();
-        return;
       }
-      persist(journal);
-      identity = lstatSync(journal);
-      syncParent();
-      validate();
+    },
+    begin() {
+      if (identity) {
+        verifyIdentity();
+        if (record.phase === 'reserved') {
+          record = { ...record, phase: 'started' };
+          replacePrivateFile(journal, JSON.stringify(record));
+          identity = lstatSync(journal);
+          validate();
+        }
+      } else {
+        record = { ...record, phase: 'started' };
+        persist();
+      }
     },
     finish() {
-      validate();
-      const current = lstatSync(journal);
-      if (current.dev !== identity?.dev || current.ino !== identity?.ino)
-        throw new Error('Restore retry ownership changed');
+      if (record.phase !== 'started') throw new Error('Restore has not started');
+      verifyIdentity();
       if (!lstatSync(complete, { throwIfNoEntry: false })) linkSync(journal, complete);
       validate(complete);
-      // Make completion durable before unlinking progress: every error leaves a retry receipt.
       syncParent();
       if (journal === progressPath) {
-        validate();
-        const live = lstatSync(journal);
-        if (live.dev !== identity?.dev || live.ino !== identity?.ino)
-          throw new Error('Restore retry ownership changed');
+        verifyIdentity();
         rmSync(journal);
         journal = complete;
         identity = lstatSync(complete);

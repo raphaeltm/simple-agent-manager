@@ -24,6 +24,7 @@ const FAKE_GCLOUD = `#!/usr/bin/env bash
 exec node ${JSON.stringify(resolve(import.meta.dirname, 'testdata/fake-gcloud-iam.mjs'))} "$@"
 `;
 const FAKE_CURL = `#!/usr/bin/env bash
+printf 'issuer check\\n' >> "$STATE/issuer-calls"
 printf '{"issuer":"%s","jwks_uri":"%s/.well-known/jwks.json"}' "$FAKE_ISSUER" "$FAKE_ISSUER"
 `;
 
@@ -99,6 +100,103 @@ function calls(): string[] {
 
 const MUTATING =
   /^(services enable|iam workload-identity-pools( providers)? (create|update)|iam service-accounts create|projects add-iam-policy-binding|iam service-accounts add-iam-policy-binding)/;
+
+describe('bootstrap project scope at the same state directory', () => {
+  const args = (project: string, installation = true) => [
+    '--project',
+    project,
+    '--api-url',
+    ISSUER,
+    '--state-dir',
+    state,
+    ...(installation ? ['--installation-id', 'a'.repeat(32)] : []),
+  ];
+  const receiptFile = () => join(state, 'created-resources.json');
+  function seed() {
+    const first = run(args('sam-vm-test'));
+    expect(first.status, first.stderr).toBe(0);
+    expect(first.calls.some((call) => MUTATING.test(call))).toBe(true);
+    const record = JSON.parse(readFileSync(receiptFile(), 'utf8'));
+    expect(
+      record.resources.some(
+        (r: { attributes?: { project?: string } }) => r.attributes?.project === 'sam-vm-test'
+      )
+    ).toBe(true);
+    return record;
+  }
+  it.each([
+    { name: 'default-name collisions in another project', installation: true, dryRun: false },
+    { name: 'omitted installation ID', installation: false, dryRun: false },
+    { name: 'dry run', installation: true, dryRun: true },
+  ])(
+    'refuses $name before issuer or cloud access and preserves original receipts',
+    ({ installation, dryRun }) => {
+      seed();
+      const original = readFileSync(receiptFile(), 'utf8');
+      const cloud = readFileSync(join(state, 'gcp.json'), 'utf8');
+      const before = calls();
+      const issuerCalls = readFileSync(join(state, 'issuer-calls'), 'utf8');
+      const result = run([
+        ...args('second-project', installation),
+        ...(dryRun ? ['--dry-run'] : []),
+      ]);
+      expect(result.status, result.stderr).not.toBe(0);
+      expect(result.stderr).toMatch(/project|scope/i);
+      expect(readFileSync(receiptFile(), 'utf8')).toBe(original);
+      expect(readFileSync(join(state, 'gcp.json'), 'utf8')).toBe(cloud);
+      expect(calls()).toEqual(before);
+      expect(readFileSync(join(state, 'issuer-calls'), 'utf8')).toBe(issuerCalls);
+    }
+  );
+  it.each(['missing', 'malformed'])(
+    'refuses an active receipt with %s project scope before external access',
+    (scope) => {
+      const record = seed();
+      const active = record.resources.find(
+        (r: { cloud: string; removedAt?: string }) => r.cloud === 'gcp' && !r.removedAt
+      );
+      if (scope === 'missing') delete active.attributes.project;
+      else active.attributes.project = { invalid: true };
+      writeFileSync(receiptFile(), JSON.stringify(record));
+      const original = readFileSync(receiptFile(), 'utf8');
+      const cloud = readFileSync(join(state, 'gcp.json'), 'utf8');
+      const before = calls();
+      const issuerCalls = readFileSync(join(state, 'issuer-calls'), 'utf8');
+      const result = run(args('sam-vm-test'));
+      expect(result.status).not.toBe(0);
+      expect(readFileSync(receiptFile(), 'utf8')).toBe(original);
+      expect(readFileSync(join(state, 'gcp.json'), 'utf8')).toBe(cloud);
+      expect(calls()).toEqual(before);
+      expect(readFileSync(join(state, 'issuer-calls'), 'utf8')).toBe(issuerCalls);
+    }
+  );
+  it('allows an exact same-project retry and preserves created ownership', () => {
+    seed();
+    const before = calls().length;
+    const result = run(args('sam-vm-test'));
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.calls.length).toBeGreaterThan(before);
+    expect(result.calls.slice(before).filter((call) => / (create|update)/.test(call))).toEqual([]);
+    const record = JSON.parse(readFileSync(receiptFile(), 'utf8'));
+    expect(
+      record.resources.every(
+        (r: { action: string; attributes: { project: string } }) =>
+          r.action === 'created' && r.attributes.project === 'sam-vm-test'
+      )
+    ).toBe(true);
+  });
+  it('allows project reuse when every old GCP receipt is removed', () => {
+    const record = seed();
+    for (const resource of record.resources) resource.removedAt = new Date().toISOString();
+    writeFileSync(receiptFile(), JSON.stringify(record));
+    const before = calls().length;
+    const result = run(args('second-project'));
+    expect(result.status, result.stderr).toBe(0);
+    expect(
+      result.calls.slice(before).some((call) => call.includes('--project=second-project'))
+    ).toBe(true);
+  });
+});
 
 describe('pnpm selfhost:gcp-bootstrap', () => {
   it('creates the pool, issuer-scoped provider, service account and bindings, and prints the five form values', () => {

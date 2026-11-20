@@ -71,6 +71,16 @@ export function readRecord(file) {
   return parsed;
 }
 
+/** Bare GCP resource names may repeat across projects; never replace another project's proof. */
+export function assertProject(file, project) {
+  for (const resource of readRecord(file).resources) {
+    if (resource.cloud === 'gcp' && !resource.removedAt && resource.attributes?.project !== project)
+      throw new Error(
+        'GCP receipt belongs to a different or unrecorded project; use a separate --state-dir and preserve the existing receipts'
+      );
+  }
+}
+
 function writeRecord(file, record) {
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.tmp-${process.pid}-${randomUUID()}`;
@@ -205,7 +215,11 @@ export function markRemoved(file, cloud, kind, name, now = new Date()) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [command, file, ...rest] = process.argv.slice(2);
   try {
-    if (command === 'add' || command === 'grant-intent') {
+    if (command === 'assert-project') {
+      const [project] = rest;
+      if (!project) throw new Error('assert-project requires a GCP project');
+      assertProject(file, project);
+    } else if (command === 'add' || command === 'grant-intent') {
       const [cloud, kind, name, action, createdBy, ...pairs] = rest;
       if (!cloud || !kind || !name || !['created', 'reused'].includes(action) || !createdBy) {
         throw new Error(
