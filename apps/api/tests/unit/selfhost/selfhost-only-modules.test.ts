@@ -58,6 +58,20 @@ describe('self-host-only code stays out of the Cloudflare Worker', () => {
     }
   });
 
+  it('control: the actual metadata broker graph is forbidden to the Worker', () => {
+    const graph = collectImportGraph(
+      resolve(REPO_ROOT, 'deploy/selfhost/metadata-proxy/server.ts')
+    );
+    expect(graph.files).toContain('deploy/selfhost/metadata-proxy/token.ts');
+    expect(selfhostOnlyFindings(graph, CLOUDFLARE_ENTRY_FORBIDDEN_PATHS)).toEqual(
+      expect.arrayContaining([
+        'deploy/selfhost/metadata-proxy/server.ts',
+        'deploy/selfhost/metadata-proxy/token.ts',
+        'deploy/selfhost/metadata-proxy/peer.ts',
+      ])
+    );
+  });
+
   it(
     'the shared entry reaches no self-host-only module, package or script',
     { timeout: GRAPH_WALK_TIMEOUT_MS },

@@ -90,7 +90,8 @@ case "${SAM_MX_LISTEN:-}" in
 	exit 64
 	;;
 esac
-for name in HTTP_PORT HTTPS_PORT CELLD_PORT CELLD_INTERNAL_PORT FRPS_BIND_PORT OBJECTSTORE_PORT \
+proxy_port=
+for name in GCE_METADATA_PROXY_PORT HTTP_PORT HTTPS_PORT CELLD_PORT CELLD_INTERNAL_PORT FRPS_BIND_PORT OBJECTSTORE_PORT \
 	OBJECTSTORE_CONSOLE_PORT MAIL_COLLECTOR_SMTP_PORT MAIL_COLLECTOR_UI_PORT SAM_MX_LISTEN; do
 	eval "port=\"\${$name:-}\""
 	port="${port##*:}"
@@ -105,11 +106,17 @@ for name in HTTP_PORT HTTPS_PORT CELLD_PORT CELLD_INTERNAL_PORT FRPS_BIND_PORT O
 	# override a port the deploy never saw. Services with no capability cannot bind below 1024.
 	min=1
 	case "$name" in
-	CELLD_PORT | CELLD_INTERNAL_PORT | FRPS_BIND_PORT | MAIL_COLLECTOR_SMTP_PORT | MAIL_COLLECTOR_UI_PORT) min=1024 ;;
+	CELLD_PORT | CELLD_INTERNAL_PORT | FRPS_BIND_PORT | GCE_METADATA_PROXY_PORT | MAIL_COLLECTOR_SMTP_PORT | MAIL_COLLECTOR_UI_PORT) min=1024 ;;
 	*) ;;
 	esac
 	if [ "${#port}" -gt 5 ] || [ "$port" -lt "$min" ] || [ "$port" -gt 65535 ]; then
 		echo "caddy: $name ($port) must be a port between $min and 65535" >&2
+		exit 64
+	fi
+	if [ "$name" = GCE_METADATA_PROXY_PORT ]; then
+		proxy_port="$port"
+	elif [ "$port" -eq "$proxy_port" ]; then
+		echo "caddy: GCE_METADATA_PROXY_PORT ($proxy_port) collides with $name" >&2
 		exit 64
 	fi
 	if [ "$port" -ge "$start" ] && [ "$port" -le "$end" ]; then
@@ -117,5 +124,5 @@ for name in HTTP_PORT HTTPS_PORT CELLD_PORT CELLD_INTERNAL_PORT FRPS_BIND_PORT O
 		exit 64
 	fi
 done
-unset start end bound name port min
+unset start end bound name port min proxy_port
 exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile

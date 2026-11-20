@@ -37,6 +37,7 @@ export const SELFHOST_ONLY_PATHS: readonly string[] = [
 export const CLOUDFLARE_ENTRY_FORBIDDEN_PATHS: readonly string[] = [
   ...SELFHOST_ONLY_PATHS,
   'scripts/',
+  'deploy/selfhost/',
 ];
 
 /** npm packages only the self-host build may import (pako 2 is dgit's compression library). */

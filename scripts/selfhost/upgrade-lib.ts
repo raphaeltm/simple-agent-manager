@@ -36,6 +36,8 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
+import { parse as parseYaml } from 'yaml';
+
 import { loadBoxEnv } from './box-settings.js';
 import { composeFilesFor } from './compose-env.js';
 import { log, REPO_ROOT, SELFHOST_DIR } from './deploy-steps.js';
@@ -159,7 +161,7 @@ function stateFingerprint(stateDir: string): string {
   const hash = createHash('sha256');
   if (!existsSync(stateDir)) return '';
   for (const name of readdirSync(stateDir).sort()) {
-    if (!name.endsWith(GENERATED_STATE_FILE_SUFFIX)) continue;
+    if (!name.endsWith(GENERATED_STATE_FILE_SUFFIX) && name !== 'egress-fence.nft') continue;
     try {
       hash.update(name).update(readFileSync(join(stateDir, name)));
     } catch {
@@ -183,6 +185,17 @@ function deployBoxArgs(ctx: Pick<BoxContext, 'envFile' | 'stateDir' | 'secretsFi
 /** `value` as one POSIX shell word, for the printed rollback commands. */
 function shellWord(value: string): string {
   return /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+/** Old-ref Compose service names, including services contributed by the selected overlays. */
+function rollbackServiceNames(composes: readonly (string | null)[]): Set<string> {
+  const services = new Set<string>();
+  for (const text of composes) {
+    if (text === null) continue;
+    const parsed = parseYaml(text) as { services?: Record<string, unknown> } | null;
+    for (const name of Object.keys(parsed?.services ?? {})) services.add(name);
+  }
+  return services;
 }
 
 /**
@@ -343,6 +356,8 @@ async function applyUpgrade(
   git(['checkout', '--detach', plan.to]);
   pnpm(['install', '--frozen-lockfile']);
   const before = stateFingerprint(ctx.stateDir);
+  const fenceFile = join(ctx.stateDir, 'egress-fence.nft');
+  const fenceBefore = existsSync(fenceFile) ? readFileSync(fenceFile, 'utf8') : null;
   pnpm(['selfhost:deploy', '--init', ...plan.boxArgs]);
   const stateChanged = stateFingerprint(ctx.stateDir) !== before;
   progress.stateChanged = stateChanged;
@@ -355,6 +370,12 @@ async function applyUpgrade(
       ctx.log(`rebuilding ${progress.imagesRebuilt.join(', ')} (build inputs changed)`);
       docker(['build', ...progress.imagesRebuilt]);
     }
+  }
+  const fenceAfter = existsSync(fenceFile) ? readFileSync(fenceFile, 'utf8') : null;
+  if (fenceAfter !== null && fenceBefore !== fenceAfter) {
+    // Bind-file changes do not alter Compose's service hash. The immutable watcher is latched
+    // unhealthy, so recreate it explicitly before the rest of the stack waits for healthy.
+    docker(['up', '-d', '--force-recreate', 'egress-fence']);
   }
   let composeRestarted = false;
   if (plan.composeFilesChanged || stateChanged || progress.imagesRebuilt.length > 0) {
@@ -407,12 +428,25 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
   };
   const composeTo = fileAt(to);
   if (composeTo === null) throw new Error(`${to} has no ${COMPOSE_PATH}`);
+  const composeFrom = fileAt(from);
+  const overlays = composeOverlays(ctx.composeFiles, from, to, fileAt);
+  const selectedBase = ctx.composeFiles.some(
+    (file) => relative(REPO_ROOT, resolve(file)) === COMPOSE_PATH
+  );
+  const rollbackServices = rollbackServiceNames([
+    ...(selectedBase ? [composeFrom] : []),
+    ...overlays.map((file) => file.from),
+  ]);
+  // Rollback checks out the old ref before building: services introduced by this upgrade
+  // cannot appear in that command. Keep overlay-defined services and the original file order.
+  const rollbackImages = (images: readonly string[]) =>
+    images.filter((name) => rollbackServices.has(name));
   const rebuilds = imageRebuilds(
     changed,
-    fileAt(from),
+    composeFrom,
     composeTo,
     (path) => fileAt(to, path),
-    composeOverlays(ctx.composeFiles, from, to, fileAt)
+    overlays
   );
   if (pendingFrom !== null) {
     ctx.log(`resuming an unfinished upgrade that started from ${pendingFrom.slice(0, 12)}`);
@@ -449,7 +483,7 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
       migrationsChanged,
       composeFilesChanged || progress.stateChanged,
       boxArgs,
-      progress.imagesRebuilt
+      rollbackImages(progress.imagesRebuilt)
     );
     for (const step of rollback) ctx.log(`  ${step}`);
     throw error;
@@ -463,7 +497,7 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
     migrationsChanged,
     composeRestarted,
     boxArgs,
-    imagesRebuilt
+    rollbackImages(imagesRebuilt)
   );
   ctx.log(`upgraded to ${to}; healthy. To roll back:`);
   for (const step of rollback) ctx.log(`  ${step}`);
