@@ -4,6 +4,6 @@
   "type": "module",
   "dependencies": {
     "google-auth-library": "10.5.0",
-    "gaxios": "7.3.1"
+    "gaxios": "8.3.3"
   }
 }
