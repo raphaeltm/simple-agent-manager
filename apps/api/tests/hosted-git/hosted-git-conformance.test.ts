@@ -1295,6 +1295,22 @@ describe('push connectivity admission (closure must be complete per command)', (
     // Control: the same push, unflagged, is accepted, so the refusal came from the detector alone.
     await gitOk(['push', 'origin', 'HEAD:refs/heads/collide'], work);
     expect((await gitOk(['ls-remote', 'origin'], work)).stdout).toContain('refs/heads/collide');
+
+    // A delta-resolved object is screened too: git sends this edit of a large file as a thin-pack
+    // delta against the blob the server already has.
+    const big = Array.from({ length: 400 }, (_, i) => `line ${i} ${'x'.repeat(40)}`).join('\n');
+    await writeFile(join(work, 'big.txt'), `${big}\n`);
+    await gitOk(['add', 'big.txt'], work);
+    await gitOk(['commit', '-m', 'big'], work);
+    await gitOk(['push', 'origin', 'HEAD:refs/heads/collide'], work);
+    await writeFile(join(work, 'big.txt'), `${big}\nappended\n`);
+    await gitOk(['commit', '-am', 'edit'], work);
+    const edited = await rev(work, 'HEAD:big.txt');
+    await runtime.fetch(`/__test/flag-collision/${project.artifactsRepoId}/${edited}`, { method: 'POST' });
+    const deltaRefused = await git(['push', 'origin', 'HEAD:refs/heads/collide-delta'], work);
+    expect(deltaRefused.code).not.toBe(0);
+    expect(deltaRefused.stderr).toContain(`object ${edited.slice(0, 12)} triggered SHA-1 collision detection`);
+    expect((await gitOk(['ls-remote', 'origin'], work)).stdout).not.toContain('refs/heads/collide-delta');
   });
 
   it('queues GC for an ingested pack when validation fails before any ref decision', async () => {
