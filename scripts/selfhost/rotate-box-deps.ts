@@ -94,6 +94,7 @@ export function boxRotateDeps(ctx: BoxContext): RotateDeps {
       });
       return { status: response.status, body: await response.json().catch(() => null) };
     },
+    sleep: async (ms) => await new Promise((resolve) => setTimeout(resolve, ms)),
     probeGateway: async (secret) => {
       // frps's plugin call shape (deploy/selfhost/frps/frps.toml); an empty body is refused
       // with a 200 verdict after authentication, a wrong secret with 401 before it.

@@ -29,6 +29,8 @@ export interface RotateDeps {
   getJson: (path: string) => Promise<{ status: number; body: unknown }>;
   /** HTTP status the Worker answers frps's plugin call with this gateway secret. */
   probeGateway: (secret: string) => Promise<number>;
+  /** Waits `ms` (a short drain before a retirement); absent, such waits end the run instead. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface Patch {

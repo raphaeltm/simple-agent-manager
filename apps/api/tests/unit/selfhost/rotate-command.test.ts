@@ -41,7 +41,7 @@ import {
 import { completeSealedPlatformKeys } from '../../../../../scripts/selfhost/platform-keys';
 import type { RotateDeps } from '../../../../../scripts/selfhost/rotate-apply';
 import { formatRotationStatus } from '../../../../../scripts/selfhost/rotate-report';
-import { runRotate } from '../../../../../scripts/selfhost/rotate-run';
+import { drainMinutes, runRotate } from '../../../../../scripts/selfhost/rotate-run';
 import {
   openRotationStore,
   readJournal,
@@ -91,6 +91,7 @@ let healthy: () => boolean;
 let restarts: string[];
 let controlHook: ((body: Record<string, unknown>) => Promise<void>) | null;
 let logs: string[];
+let sleeps: number[] = [];
 /** Worker settings beyond the bundle (vars a deploy would set). */
 let workerVars: Record<string, string>;
 
@@ -109,6 +110,10 @@ function deps(): RotateDeps {
   return {
     log: (line) => logs.push(line),
     now: () => clock,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      clock += ms;
+    },
     backup: () => join(stateDir, 'backup-marker'),
     deploy: async () => {
       deployed = await head();
@@ -194,6 +199,7 @@ beforeEach(async () => {
   restarts = [];
   controlHook = null;
   logs = [];
+  sleeps = [];
   workerVars = {};
   writeKeyChoice(stateDir, {
     format: KEY_CHOICE_FORMAT,
@@ -735,6 +741,32 @@ describe('rotate swap keys', () => {
   });
 });
 
+describe('rotate encryption-key with a purpose key of the same value (Codex P1)', () => {
+  async function withCredentialKeyEqualToRoot() {
+    const current = await store().head();
+    await store().write(
+      await store().seal({
+        ...current.secrets,
+        CREDENTIAL_ENCRYPTION_KEY: current.secrets.ENCRYPTION_KEY!,
+      })
+    );
+  }
+
+  it('refuses to rotate encryption-key alone, since the old value would stay in use', async () => {
+    await withCredentialKeyEqualToRoot();
+    await expect(runRotate(input({ names: ['encryption-key'] }), deps())).rejects.toThrow(
+      /CREDENTIAL_ENCRYPTION_KEY holds the same value as ENCRYPTION_KEY/
+    );
+    expect(readJournal(stateDir)).toBeNull();
+  });
+
+  it('accepts both in one run (control)', async () => {
+    await withCredentialKeyEqualToRoot();
+    await runRotate(input({ names: ['encryption-key', 'credential-encryption-key'], dryRun: true }), deps());
+    expect(logs.join('\n')).toContain('credential-encryption-key');
+  });
+});
+
 describe('rotate encryption-key: the wait for values outside D1 and R2 (review V1 L4)', () => {
   const waitMinutes = () => {
     const step = readJournal(stateDir)?.steps['encryption-key'];
@@ -803,6 +835,33 @@ describe('rotate encryption-key: the wait for values outside D1 and R2 (review V
 });
 
 describe('rotate better-auth-secret', () => {
+  it('keeps the old secret until requests on the previous version have drained (Codex P1)', async () => {
+    await runRotate(input({ names: ['better-auth-secret'] }), deps());
+    const step = readJournal(stateDir)?.steps['better-auth-secret'] ?? null;
+    // Finished in this run (the drain is waited out in-process), but never before the drain.
+    expect(readJournal(stateDir)).toBeNull();
+    expect(sleeps.reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(drainMinutes({}) * 60_000 - 1000);
+    expect(step).toBeNull();
+    expect((await head()).BETTER_AUTH_SECRET_PREVIOUS).toBeUndefined();
+  });
+
+  it('without an in-process wait, stops in waiting with the old secret still readable (control)', async () => {
+    const noSleep = deps();
+    delete noSleep.sleep;
+    await runRotate(input({ names: ['better-auth-secret'] }), noSleep);
+    const step = readJournal(stateDir)?.steps['better-auth-secret'];
+    expect(step?.phase).toBe('waiting');
+    expect(Date.parse(step?.waitUntil ?? '') - Date.parse(step?.switchedAt ?? '')).toBe(
+      drainMinutes({}) * 60_000
+    );
+    expect((await head()).BETTER_AUTH_SECRET_PREVIOUS).toBeDefined();
+  });
+
+  it('derives the drain from the box CELLD_HANDLER_BUDGET_S', () => {
+    expect(drainMinutes({})).toBe(6);
+    expect(drainMinutes({ CELLD_HANDLER_BUDGET_S: '900' })).toBe(16);
+  });
+
   it('moves stored OAuth tokens to the new versioned secret and ends with no previous secret', async () => {
     const { symmetricEncrypt, symmetricDecrypt } = await import('better-auth/crypto');
     const old = deployed.ENCRYPTION_KEY!; // unset BETTER_AUTH_SECRET falls back to it

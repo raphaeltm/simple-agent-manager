@@ -26,6 +26,8 @@ import type { RowRef, StepState } from './rotate-store';
 
 export const CONTROL_KEY = 'SAM_KEY_ROTATION_CONTROL_KEY';
 export const MAX_MIGRATE_ROUNDS = 3;
+/** A wait up to this long is waited out in the run; a longer one ends the run until `--resume`. */
+export const MAX_IN_RUN_WAIT_MS = 15 * 60_000;
 /**
  * Values outside D1/R2 that expire on their own: ACP interaction details (InteractionStore DO,
  * DEFAULT_ACP_INTERACTION_MAX_DEADLINE_MS 4 h + DEFAULT_ACP_INTERACTION_SENSITIVE_PURGE_MS 1 h)
@@ -260,7 +262,13 @@ export async function advanceData(
   ctx: StepContext,
   kind: Kind,
   /** aes only: minutes to wait after the switch; null derives it (storedLifetimeMinutes). */
-  waitMinutes: number | null
+  waitMinutes: number | null,
+  /**
+   * The least time between the switch and the retirement: a request that started on the
+   * previous deployment still finishes on it (celld) and may write under the old value, so the
+   * old value stays readable until every such request is past its handler budget.
+   */
+  drainMinutes: number
 ): Promise<void> {
   const { step, deps } = ctx;
   const tag = step.reverse ? 'reverse' : 'forward';
@@ -297,21 +305,31 @@ export async function advanceData(
       resetData(step);
       ctx.save();
       await applyPatch(ctx, await reversePatch(ctx, kind), 'migrating');
-      return await advanceData(ctx, kind, waitMinutes);
+      return await advanceData(ctx, kind, waitMinutes, drainMinutes);
     }
     const switched = Date.parse(step.switchedAt ?? new Date(deps.now()).toISOString());
     step.verifiedAt = new Date(deps.now()).toISOString();
-    const waitFor =
+    const lifetime =
       step.reverse || kind === 'better-auth' ? 0 : await storedLifetimeMinutes(ctx, waitMinutes);
-    step.waitUntil = new Date(
-      waitFor === 0 ? deps.now() : switched + waitFor * 60_000
-    ).toISOString();
+    // A rollback drains too: requests on the forward deployment may write under the new value.
+    const waitFor = Math.max(lifetime, drainMinutes);
+    step.waitUntil = new Date(switched + waitFor * 60_000).toISOString();
     step.phase = 'waiting';
     ctx.save();
   }
   const finalPhase = step.reverse ? 'rolled-back' : 'done';
   if (step.phase === 'waiting' || (step.phase === 'staging' && step.stagedFor === finalPhase)) {
-    if (step.phase === 'waiting' && deps.now() < Date.parse(step.waitUntil ?? '')) return;
+    if (step.phase === 'waiting') {
+      const remaining = Date.parse(step.waitUntil ?? '') - deps.now();
+      // A short wait (the request drain) is waited out in this run; a long one needs a resume.
+      if (remaining > 0 && (!deps.sleep || remaining > MAX_IN_RUN_WAIT_MS)) return;
+      if (remaining > 0 && deps.sleep) {
+        deps.log(
+          `  ${ctx.key.name}: waiting ${Math.ceil(remaining / 1000)} s for requests still running on the previous version`
+        );
+        await deps.sleep(remaining);
+      }
+    }
     // Proven right before the old key leaves, also when resuming an interrupted retire.
     try {
       await assertRetireProof(ctx, kind, tag);

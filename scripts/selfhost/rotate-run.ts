@@ -93,6 +93,20 @@ export function selectKeys(
     // to it): replace the sign-in secret in the same run (review V1 M2).
     chosen.push(signIn);
   }
+  const rootKey = rotatableKey('encryption-key');
+  if (rootKey && chosen.includes(rootKey)) {
+    // A purpose key holding the same value would keep the old key in the bundle (and in use)
+    // after encryption-key reports it retired: rotate it in the same run.
+    for (const name of ['credential-encryption-key', 'library-encryption-key']) {
+      const purpose = rotatableKey(name);
+      const secret = purpose?.secrets[0] ?? '';
+      if (purpose && bundle[secret] && bundle[secret] === bundle.ENCRYPTION_KEY && !chosen.includes(purpose)) {
+        throw new Error(
+          `${secret} holds the same value as ENCRYPTION_KEY: rotate both in one run (rotate encryption-key ${name}, or --all)`
+        );
+      }
+    }
+  }
   for (const key of chosen) {
     const missing = key.secrets.filter((name) => !bundle[name] && name !== 'BETTER_AUTH_SECRET');
     if (missing.length > 0) {
@@ -152,6 +166,20 @@ function stepContext(
   return { journal, step, key, store, deps, stateDir, save: () => writeJournal(stateDir, journal) };
 }
 
+/** celld's per-request handler budget when CELLD_HANDLER_BUDGET_S is unset (its documented default). */
+export const DEFAULT_CELLD_HANDLER_BUDGET_S = 300;
+const DRAIN_MARGIN_MINUTES = 1;
+
+/**
+ * How long a request that started on the previous deployment can still run (celld finishes it
+ * there) and write under the old value: the box's CELLD_HANDLER_BUDGET_S plus a margin.
+ */
+export function drainMinutes(box: Readonly<Record<string, string | undefined>>): number {
+  const configured = Number.parseInt(box.CELLD_HANDLER_BUDGET_S ?? '', 10);
+  const seconds = Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_CELLD_HANDLER_BUDGET_S;
+  return Math.ceil(seconds / 60) + DRAIN_MARGIN_MINUTES;
+}
+
 /** The timing options a run started with (recorded in its journal), or from the command line. */
 function runOptions(journal: Journal, input: RotateInput): NonNullable<Journal['options']> {
   return (
@@ -194,9 +222,14 @@ async function advance(ctx: StepContext, input: RotateInput): Promise<void> {
       return await advanceOverlap(ctx, runOptions(ctx.journal, input).jwtOverlapHours);
     case 'reencrypt':
       // Null: derived from the deployed Worker's own settings (rotate-steps-data.ts).
-      return await advanceData(ctx, 'aes', runOptions(ctx.journal, input).storedLifetimeMinutes);
+      return await advanceData(
+        ctx,
+        'aes',
+        runOptions(ctx.journal, input).storedLifetimeMinutes,
+        drainMinutes(input.box)
+      );
     case 'better-auth':
-      return await advanceData(ctx, 'better-auth', 0);
+      return await advanceData(ctx, 'better-auth', 0, drainMinutes(input.box));
   }
 }
 
