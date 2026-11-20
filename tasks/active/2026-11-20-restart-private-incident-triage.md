@@ -48,20 +48,20 @@ Raphaël decided 2026-11-20 to restart automated incident triage and accept its 
 
 ## Checklist
 
-- [ ] Migration: add `idea_owned_at` column (ADD COLUMN only)
-- [ ] Shared ownership SQL + tracked-work predicate change
-- [ ] Readable title/body (grouping.ts) and summary refresh on re-occurrence
-- [ ] Runner create/update writes fingerprint; updates only owned ideas; reopens pipeline-cancelled idea
-- [ ] User-report path writes fingerprint; updates only owned ideas
-- [ ] Release engaged ideas (DO snapshot) before dispatch
-- [ ] Reconciliation sweep: cancel terminal-incident ideas, adopt/retitle legacy ideas, deadline bounded
-- [ ] Sweep decline-reason logging + stall setting
-- [ ] Anomaly class `incident_dispatch_stalled`
-- [ ] Backlog summary neutralizes untrusted summary text
-- [ ] Trigger template: complete_task at the end
-- [ ] Tests on real SQLite: self-blocking regression, promoted/edited/linked still block, titles, one idea
+- [x] Migration: add `idea_owned_at` column (ADD COLUMN only)
+- [x] Shared ownership SQL + tracked-work predicate change
+- [x] Readable title/body (grouping.ts) and summary refresh on re-occurrence
+- [x] Runner create/update writes fingerprint; updates only owned ideas; reopens pipeline-cancelled idea
+- [x] User-report path writes fingerprint; updates only owned ideas
+- [x] Release engaged ideas (DO snapshot) before dispatch
+- [x] Reconciliation sweep: cancel terminal-incident ideas, adopt/retitle legacy ideas, deadline bounded
+- [x] Sweep decline-reason logging + stall setting
+- [x] Anomaly class `incident_dispatch_stalled`
+- [x] Backlog summary neutralizes untrusted summary text
+- [x] Trigger template: complete_task at the end
+- [x] Tests on real SQLite: self-blocking regression, promoted/edited/linked still block, titles, one idea
       per signature, cleanup never touches edited/linked ideas, stall anomaly, decline log
-- [ ] Docs updated
+- [x] Docs updated
 - [ ] Post-deploy: update live trigger template, verify trigger fires, run completes, queue drains
 
 ## Acceptance criteria
