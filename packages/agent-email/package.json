@@ -28,7 +28,7 @@
     "@simple-agent-manager/shared": "workspace:*",
     "@simple-agent-manager/worker-core": "workspace:*",
     "drizzle-orm": "catalog:",
-    "postal-mime": "4.0.11",
+    "postal-mime": "4.2.1",
     "valibot": "catalog:"
   },
   "devDependencies": {

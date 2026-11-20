@@ -331,6 +331,30 @@ describe('self-hosted inbound agent email', () => {
     expect(await control.json()).toEqual({ outcome: 'accepted' });
   });
 
+  it.each([
+    'alice@example.com .evil.example',
+    'alice@example.com(comment).evil.example',
+    'ali\u0001ce@example.com',
+  ])('refuses ambiguous From despite an authenticated allowed mailbox: %s', async (from) => {
+    const response = await gatewayRequest(rawEmail({ from }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      outcome: 'rejected',
+      reason: 'Sender authentication failed',
+    });
+    expect(submitter).not.toHaveBeenCalled();
+    expect(taskCount()).toBe(0);
+    expect(sqlite.prepare('SELECT count(*) AS n FROM trigger_email_messages').get()).toEqual({
+      n: 0,
+    });
+
+    const control = await gatewayRequest(rawEmail({ messageId: '<control@example.com>' }));
+    expect(await control.json()).toEqual({ outcome: 'accepted' });
+    expect(submitter).toHaveBeenCalledTimes(1);
+    expect(taskCount()).toBe(1);
+  });
+
   it('refuses requests without sender-authentication results', async () => {
     for (const headers of [
       { 'X-SAM-Mail-Auth': null },

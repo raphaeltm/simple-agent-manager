@@ -1324,6 +1324,22 @@ describe('agent email vertical slice', () => {
       expect(sqlite.prepare('SELECT count(*) AS n FROM tasks').get()).toEqual({ n: 0 });
     });
 
+    it.each([
+      'alice@example.com .evil.example',
+      'alice@example.com(comment).evil.example',
+      'ali\u0001ce@example.com',
+    ])('does not admit an ambiguous From through email(): %s', async (from) => {
+      const message = inbound(rawEmail({ from }));
+
+      await expect(deliver(message)).resolves.toBeUndefined();
+
+      expect(message.setReject).toHaveBeenCalledWith('Sender not allowed');
+      expect(sqlite.prepare('SELECT count(*) AS n FROM trigger_email_messages').get()).toEqual({
+        n: 0,
+      });
+      expect(sqlite.prepare('SELECT count(*) AS n FROM tasks').get()).toEqual({ n: 0 });
+    });
+
     it('fails the delivery back to the sender only when the email cannot be stored', async () => {
       const base = env.DATABASE;
       type Statement = { bind: (...params: unknown[]) => Record<string, unknown> };
