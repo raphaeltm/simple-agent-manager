@@ -11,13 +11,19 @@
  * rows, comment threads, workflow outputs, markdown links) calls `useLibraryPreview()` rather than
  * each mounting `LibraryFilePreview` itself.
  */
-import { type ReactNode, useCallback, useRef } from 'react';
+import { lazy, type ReactNode, Suspense, useCallback, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import * as v from 'valibot';
 
+import { importWithRetry } from '../../lib/lazy-with-retry';
 import { projectLibraryFilePath } from '../../lib/project-routes';
 import { LibraryPreviewContext, type LibraryPreviewRequest } from './library-preview-context';
-import { LibraryFilePreview } from './LibraryFilePreview';
+
+// The viewer (markdown, media, comments) loads when a file is first opened, not with the app
+// shell this provider sits in.
+const LibraryFilePreview = lazy(async () => ({
+  default: (await importWithRetry(() => import('./LibraryFilePreview'))).LibraryFilePreview,
+}));
 
 /** The history-state key holding the open preview. */
 export const LIBRARY_PREVIEW_STATE_KEY = 'samLibraryPreview';
@@ -98,17 +104,19 @@ export function LibraryPreviewProvider({ children }: Readonly<{ children: ReactN
     <LibraryPreviewContext.Provider value={openLibraryFile}>
       {children}
       {preview && (
-        <LibraryFilePreview
-          // A different file or thread opens a fresh viewer, so its panel and focus start anew.
-          key={`${preview.projectId}:${preview.fileId}:${preview.commentThreadId ?? ''}`}
-          projectId={preview.projectId}
-          fileId={preview.fileId}
-          filename={preview.filename}
-          commentThreadId={preview.commentThreadId ?? null}
-          presentation="overlay"
-          onOpenInLibrary={openInLibrary}
-          onClose={close}
-        />
+        <Suspense fallback={null}>
+          <LibraryFilePreview
+            // A different file or thread opens a fresh viewer, so its panel and focus start anew.
+            key={`${preview.projectId}:${preview.fileId}:${preview.commentThreadId ?? ''}`}
+            projectId={preview.projectId}
+            fileId={preview.fileId}
+            filename={preview.filename}
+            commentThreadId={preview.commentThreadId ?? null}
+            presentation="overlay"
+            onOpenInLibrary={openInLibrary}
+            onClose={close}
+          />
+        </Suspense>
       )}
     </LibraryPreviewContext.Provider>
   );
