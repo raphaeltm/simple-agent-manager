@@ -8,12 +8,14 @@
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -29,6 +31,8 @@ import {
   runRestore,
   type RunResult,
 } from '../backup-lib';
+import { FENCE_RULES_FILE, FENCE_RULES_MODE } from '../fence-state';
+import { DEFAULT_ADOPTION_HELPER_IMAGE } from '../legacy-adoption-volumes';
 import { freePort, LIVE_TMP } from './harness';
 
 const PLATFORM_KEYS = JSON.stringify({
@@ -143,6 +147,8 @@ describe.skipIf(!hasDocker && !process.env.CI)(
           'src/fleet',
           'src/fresh',
           'src/retry',
+          'src/fencesrc',
+          'src/fencedst',
         ],
         env
       );
@@ -222,6 +228,48 @@ describe.skipIf(!hasDocker && !process.env.CI)(
         JSON.parse(PLATFORM_KEYS).SAM_INSTALLATION_ID
       );
       expect(existsSync(`${target.stateDir}.restore-progress.json`)).toBe(false);
+    });
+
+    it('restores the fence rules readable by the fence container (root without capabilities)', () => {
+      const seed = join(root, 'fence-seed');
+      mkdirSync(seed, { recursive: true });
+      writeFileSync(join(seed, 'current.json'), '{"v":1}');
+      pushBucket(ctx('s3://fencesrc/celld', join(root, 'fence-unused')), seed);
+      const state = join(root, 'fence-source-state');
+      mkdirSync(state, { mode: 0o700 });
+      writeFileSync(join(state, 'platform-keys.json'), PLATFORM_KEYS, { mode: 0o600 });
+      // As deploy writes it (fence-state.ts): not secret, read by the fence container's root.
+      const rules = 'table inet sam_egress_fence {}\n';
+      writeFileSync(join(state, FENCE_RULES_FILE), rules, { mode: FENCE_RULES_MODE });
+      chmodSync(join(state, FENCE_RULES_FILE), FENCE_RULES_MODE);
+      writeFileSync(join(root, 'box.env'), 'CELLD_BUCKET=s3://fencesrc/celld\n', { mode: 0o600 });
+      const snapshot = join(root, 'fence-backup');
+      runBackup(ctx('s3://fencesrc/celld', state), snapshot);
+
+      const restored = join(root, 'fence-restored-state');
+      runRestore(ctx('s3://fencedst/celld', restored), snapshot);
+      // The fence service mounts the rules read-only and reads them as root with no
+      // DAC_OVERRIDE (docker-compose.yml egress-fence). On main the restore left them 0600 and
+      // this read failed with "Permission denied", exactly as on the box.
+      const read = run('docker', [
+        'run',
+        '--rm',
+        '--network',
+        'none',
+        '--cap-drop',
+        'ALL',
+        '-v',
+        `${join(restored, FENCE_RULES_FILE)}:/etc/sam/egress-fence.nft:ro`,
+        DEFAULT_ADOPTION_HELPER_IMAGE,
+        'cat',
+        '/etc/sam/egress-fence.nft',
+      ]);
+      // A cold cache writes pull progress to stderr; only the read failure matters.
+      expect(read.stderr).not.toMatch(/Permission denied/);
+      expect(read.status).toBe(0);
+      expect(read.stdout).toBe(rules);
+      // Control: secret-bearing state stays private.
+      expect(statSync(join(restored, 'platform-keys.json')).mode & 0o777).toBe(0o600);
     });
 
     it('round-trips the fleet bucket and box state into an empty install', () => {

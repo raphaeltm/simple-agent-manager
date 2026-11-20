@@ -12,6 +12,7 @@ import {
   readManifest,
   STATE_DIR,
 } from './backup-lib';
+import { repairFenceRulesMode } from './fence-state';
 import { assertOperatorExecution } from './operator-only';
 import { projectRestoreIdentity, restoreSourceInstallationId } from './restore-identity';
 import { assertRestoreSubset, restoreProgress } from './restore-progress';
@@ -55,6 +56,8 @@ export function restoreBackup(ctx: BoxContext, plain: string, encrypted: string)
   ensurePrivateDir(ctx.stateDir);
   cpSync(join(plain, STATE_DIR), ctx.stateDir, { recursive: true, preserveTimestamps: true });
   rmSync(join(ctx.stateDir, 'created-resources.json'), { force: true });
+  // The snapshot keeps only the exec bit: files a container reads as another user need their mode.
+  repairFenceRulesMode(ctx.stateDir);
   progress.finish();
   return manifest;
 }
