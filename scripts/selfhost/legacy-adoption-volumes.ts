@@ -179,16 +179,21 @@ export function removeStaleHelper(
     '--type',
     'container',
     '--format',
-    `{{index .Config.Labels "${ADOPTION_LABEL}"}}`,
+    `{{.Id}} {{index .Config.Labels "${ADOPTION_LABEL}"}}`,
     name,
   ]);
   if (result.status !== 0) {
     if (/no such (object|container)/i.test(result.stderr)) return;
     check(result, 'inspect adoption helper');
   }
-  if (result.stdout.trim() !== helper.adoptionId)
+  const [containerId, adoptionId] = result.stdout.trim().split(/\s+/);
+  if (!containerId || !/^[a-f0-9]{64}$/.test(containerId) || adoptionId !== helper.adoptionId)
     throw new Error(`Legacy adoption refused: container ${name} is not this adoption's helper`);
-  check(ctx.run('docker', ['rm', '--force', name]), 'remove stale adoption helper');
+  // A killed CLI can leave its --rm helper finishing in the daemon. Remove the inspected
+  // identity, never a replacement at its name; auto-removal already satisfies this cleanup.
+  const removed = ctx.run('docker', ['rm', '--force', containerId]);
+  if (removed.status !== 0 && /no such (object|container)/i.test(removed.stderr)) return;
+  check(removed, 'remove stale adoption helper');
 }
 
 export function volumeDigest(

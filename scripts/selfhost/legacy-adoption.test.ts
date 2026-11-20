@@ -18,7 +18,11 @@ import {
   saveOriginalEnv,
   writeAdoptionJournal,
 } from './legacy-adoption-journal.js';
-import { DEFAULT_ADOPTION_HELPER_IMAGE, ensureHelperImage } from './legacy-adoption-volumes.js';
+import {
+  DEFAULT_ADOPTION_HELPER_IMAGE,
+  ensureHelperImage,
+  removeStaleHelper,
+} from './legacy-adoption-volumes.js';
 import { completeUpgradeJournal, upgradeCompletedTo } from './upgrade-journal.js';
 import type { RunResult } from './upgrade-lib.js';
 
@@ -301,6 +305,63 @@ describe('adoption helper image', () => {
       DEFAULT_ADOPTION_HELPER_IMAGE
     );
     expect(calls).toEqual(['image inspect', 'pull --quiet']);
+  });
+});
+
+describe('stale adoption helper removal', () => {
+  const adoptionId = 'a'.repeat(32);
+  const containerId = 'c'.repeat(64);
+  const helper = { adoptionId, image: DEFAULT_ADOPTION_HELPER_IMAGE };
+  const name = 'sam-adoption-owned-copy';
+
+  function removal(stderr: string, status = 1, owner = adoptionId) {
+    const calls: string[][] = [];
+    const ctx = {
+      run: (_command: string, args: string[]): RunResult => {
+        calls.push(args);
+        if (args[0] === 'inspect') {
+          // Match the production inspection contract while exercising removal by identity.
+          const format = args[args.indexOf('--format') + 1] ?? '';
+          return {
+            status: 0,
+            stdout: format.includes('.Id') ? `${containerId} ${owner}\n` : owner,
+            stderr: '',
+          };
+        }
+        return { status, stdout: '', stderr };
+      },
+    };
+    return { calls, run: () => removeStaleHelper(ctx, helper, name) };
+  }
+
+  it.each(['No such container', 'No such object'])(
+    'accepts auto-removal after owned inspection: %s',
+    (message) => {
+      const fixture = removal(`Error response from daemon: ${message}: ${containerId}`);
+      expect(fixture.run).not.toThrow();
+      expect(fixture.calls.at(-1)).toEqual(['rm', '--force', containerId]);
+    }
+  );
+
+  it('removes the inspected immutable ID so a replacement at the name is untouched', () => {
+    const fixture = removal('', 0);
+    fixture.run();
+    expect(fixture.calls.at(-1)).toEqual(['rm', '--force', containerId]);
+  });
+
+  it.each(['permission denied', 'Cannot connect to the Docker daemon', 'request timed out'])(
+    'retains removal failure: %s',
+    (message) => {
+      const fixture = removal(message);
+      expect(fixture.run).toThrow(/remove stale adoption helper failed/);
+      expect(fixture.calls).toHaveLength(2);
+    }
+  );
+
+  it('refuses another adoption before removal', () => {
+    const fixture = removal('', 0, 'b'.repeat(32));
+    expect(fixture.run).toThrow(/not this adoption/);
+    expect(fixture.calls).toHaveLength(1);
   });
 });
 
