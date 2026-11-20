@@ -52,8 +52,9 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 describe('selfhost:deploy', { timeout: CHILD_TEST_TIMEOUT_MS }, () => {
+  // The legacy-plaintext path (key-service.ts): platform-keys.json and plaintext Worker vars.
   it('--init writes the platform keys and gateway.env once; --dry-run renders them as redacted vars', async () => {
-    const envFile = writeBox(dir);
+    const envFile = writeBox(dir, ['SAM_KEY_PROVIDER=legacy-plaintext']);
     const init = await runDeploy(envFile, ['--init']);
     expect(init.status, init.out).toBe(0);
     const keysPath = join(state, PLATFORM_KEYS_FILE);
@@ -67,7 +68,7 @@ describe('selfhost:deploy', { timeout: CHILD_TEST_TIMEOUT_MS }, () => {
     // Follow init's public project guidance before existing-install Compose reconciliation.
     const project = /Compose project: (sam-selfhost-[a-f0-9]+)/.exec(init.out)?.[1];
     expect(project).toBeTruthy();
-    writeBox(dir, [`COMPOSE_PROJECT_NAME=${project}`]);
+    writeBox(dir, ['SAM_KEY_PROVIDER=legacy-plaintext', `COMPOSE_PROJECT_NAME=${project}`]);
     const bin = join(dir, 'bin');
     mkdirSync(bin);
     writeFileSync(
@@ -113,7 +114,7 @@ process.stdout.write('[]');
   });
 
   it('a deploy without --init on a fresh dir generates no keys', async () => {
-    const envFile = writeBox(dir);
+    const envFile = writeBox(dir, ['SAM_KEY_PROVIDER=legacy-plaintext']);
     mkdirSync(state, { mode: 0o700 });
     const result = await runDeploy(envFile, ['--skip-vm-agent']);
     expect(result.status).toBe(1);
@@ -122,7 +123,10 @@ process.stdout.write('[]');
   });
 
   it('--dry-run on a fresh dir writes nothing and shows placeholders for the keys', async () => {
-    const envFile = writeBox(dir, ['COMPOSE_PROFILES=tunnel,local-store,mail-collector']);
+    const envFile = writeBox(dir, [
+      'COMPOSE_PROFILES=tunnel,local-store,mail-collector',
+      'SAM_KEY_PROVIDER=legacy-plaintext',
+    ]);
     mkdirSync(state, { mode: 0o700 });
     const { out, config } = await dryRun(envFile);
     expect(readdirSync(state)).toEqual([]);

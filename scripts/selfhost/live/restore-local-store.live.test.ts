@@ -8,7 +8,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 import { encryptBackupTree } from '../backup-encryption';
 import { type BoxContext, composeArgs, composeRunEnv, pullBucket, runRestore } from '../backup-lib';
-import { runDeploy } from '../deploy-harness';
+import { CLOSED_HOST, runDeploy } from '../deploy-harness';
 import { freePort, LIVE_TMP, skipWithoutDocker } from './harness';
 
 let root = '',
@@ -73,6 +73,11 @@ it.skipIf(skipWithoutDocker)(
       AWS_SECRET_ACCESS_KEY: 'restore-local-secret-at-least24chars',
       OBJECTSTORE_PORT: String(port),
       OBJECTSTORE_CONSOLE_PORT: String(consolePort),
+      // Hermetic key choice: the runner's own metadata service (a CI host can look like AWS) must
+      // not decide how --init seals the restored box.
+      SAM_GCE_METADATA_HOST: CLOSED_HOST,
+      SAM_AWS_IMDS_HOST: CLOSED_HOST,
+      SAM_AZURE_IMDS_HOST: CLOSED_HOST,
     };
     const context: BoxContext = {
       box,

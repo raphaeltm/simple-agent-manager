@@ -43,6 +43,8 @@ export function composeOverlays(
 }
 /** Generated env files are compose inputs, even when the compose source did not change. */
 const GENERATED_STATE_FILE_SUFFIX = '.env';
+/** Generated env files below the state dir's top level: the key agent's (key-service.ts). */
+const GENERATED_NESTED_FILES = ['key-agent/agent.env'];
 export function stateFingerprint(stateDir: string): string {
   const hash = createHash('sha256');
   if (!existsSync(stateDir)) return '';
@@ -53,6 +55,10 @@ export function stateFingerprint(stateDir: string): string {
     } catch {
       // a directory or unreadable entry is not a compose input
     }
+  }
+  for (const name of GENERATED_NESTED_FILES) {
+    const file = join(stateDir, name);
+    if (existsSync(file)) hash.update(name).update(readFileSync(file));
   }
   return hash.digest('hex');
 }

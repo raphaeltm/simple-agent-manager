@@ -9,7 +9,7 @@
       "@simple-agent-manager/shared": ["../../packages/shared/src/index.ts"]
     }
   },
-  "include": ["**/*.ts"],
+  "include": ["**/*.ts", "../../deploy/selfhost/key-agent/*.ts"],
   // live/ imports API modules that resolve workspace packages through their built dist/, so it
   // has its own project, checked by the Self-host Live job after it builds them.
   "exclude": ["node_modules", "dist", "live"]

@@ -48,11 +48,13 @@ import {
   installedMigrations,
   sourceMigrations,
 } from './upgrade-migrations.js';
+import { plaintextLeftNotice, upgradeKeyArgs } from './upgrade-sealing.js';
 
 export { composeInputsChanged, composeOverlays } from './upgrade-compose.js';
 import {
   assertPendingUpgradeTarget,
   assertRollbackReady,
+  assertSealedStateOwner,
   pendingBackupDirectory,
   pendingUpgradeTarget,
 } from './upgrade-preflight.js';
@@ -382,6 +384,7 @@ async function rollbackFailedUpgrade(
 export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise<UpgradeResult> {
   assertOperatorExecution();
   recoverRollbackState(ctx);
+  assertSealedStateOwner(ctx.stateDir);
   assertRollbackReady(ctx);
   const git: Git = (args, what = `git ${args.join(' ')}`) => check(ctx.run('git', args), what);
 
@@ -459,7 +462,7 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
   const installed = installedMigrations(backupContext(ctx));
   runBackup(backupContext(ctx), backupDir, from);
 
-  const boxArgs = deployBoxArgs(ctx);
+  const boxArgs = [...deployBoxArgs(ctx), ...upgradeKeyArgs(ctx, ctx.log)];
   const pendingPath = join(ctx.stateDir, UPGRADE_PENDING_FILE);
   if (pendingFrom === null) {
     mkdirSync(ctx.stateDir, { recursive: true, mode: 0o700 });
@@ -489,6 +492,8 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
 
   const { imagesRebuilt } = progress;
   const rollback = rollbackSteps(ctx, from, backupDir, imagesRebuilt);
+  const plaintextLeft = plaintextLeftNotice(ctx);
+  if (plaintextLeft) ctx.log(plaintextLeft);
   ctx.log(`upgraded to ${to}; healthy. To roll back:`);
   for (const step of rollback) ctx.log(`  ${step}`);
   return { from, to, backupDir, imagesRebuilt, composeRestarted, migrationsChanged, rollback };

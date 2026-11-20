@@ -298,6 +298,27 @@ function inspectBackup(dest: string, part: string): Record<string, string> {
 }
 
 describe('runBackup', () => {
+  it('a sealed box: keeps the bundles, leaves out the file key and key-service credentials', () => {
+    const keyAgent = join(root, 'state/key-agent');
+    mkdirSync(join(keyAgent, 'bundles'), { recursive: true });
+    mkdirSync(join(keyAgent, 'credentials'));
+    writeFileSync(join(keyAgent, 'bundles', `${'a'.repeat(32)}.json`), '{"ciphertext":"x"}');
+    writeFileSync(join(keyAgent, 'kek'), 'file-key-material-0123456789', { mode: 0o600 });
+    writeFileSync(join(keyAgent, 'credentials/transit-secret-id'), 'approle-secret', {
+      mode: 0o600,
+    });
+    writeFileSync(join(keyAgent, 'agent.env'), 'SAM_KEY_PROVIDER=file\n', { mode: 0o600 });
+    const snapshot = join(root, 'sealed-backup');
+    runBackup(ctx('s3://fleet/celld', join(root, 'state')), snapshot);
+    const state = inspectBackup(snapshot, 'state');
+    // Liveness: the bundle and the agent env are there.
+    expect(state[`key-agent/bundles/${'a'.repeat(32)}.json`]).toBe('{"ciphertext":"x"}');
+    expect(state['key-agent/agent.env']).toBe('SAM_KEY_PROVIDER=file\n');
+    expect(Object.keys(state).filter((name) => /key-agent\/(kek|credentials)/.test(name))).toEqual(
+      []
+    );
+  });
+
   it('preserves an operator parent mode1777 through the public backup entry', () => {
     const parent = join(root, 'operator-parent');
     mkdirSync(parent);
@@ -873,9 +894,10 @@ describe('runRestore', () => {
     }
   );
 
+  // The legacy-plaintext path (platform-keys.json); the sealed path is the next test.
   it('fresh restore and real deploy init establish ownership that refuses the source VM at teardown', async () => {
     rmSync(join(root, 'state/platform-keys.json'));
-    const sourceEnv = writeBox(root);
+    const sourceEnv = writeBox(root, ['SAM_KEY_PROVIDER=legacy-plaintext']);
     const sourceInit = await runDeploy(sourceEnv, ['--init', '--state-dir', join(root, 'state')]);
     expect(sourceInit.status, sourceInit.out).toBe(0);
     const sourceKeys = JSON.parse(readFileSync(join(root, 'state/platform-keys.json'), 'utf8'));
@@ -904,6 +926,7 @@ describe('runRestore', () => {
     const targetDir = join(root, 'clone');
     mkdirSync(targetDir);
     const targetEnv = writeBox(targetDir, [
+      'SAM_KEY_PROVIDER=legacy-plaintext',
       'GCP_PROJECT=sam-test-proj',
       'CELLD_BUCKET=s3://fresh/celld',
     ]);
@@ -989,6 +1012,88 @@ import fs from 'node:fs'; const a=process.argv.slice(2).join(' ');fs.appendFileS
     expect(readFileSync(join(root, 'state/platform-keys.json'), 'utf8')).toContain(
       sourceKeys.SAM_INSTALLATION_ID
     );
+  }, 120_000);
+
+  // Sealed by default: the backup holds the bundles but no key, so the restore records the clone's
+  // identity and the target's --init, given the key copy, seals it in. Without the copy it stops.
+  it('restores a sealed install: --init with the key copy seals the clone its own identity', async () => {
+    rmSync(join(root, 'state/platform-keys.json'));
+    const sourceState = join(root, 'state');
+    const sourceEnv = writeBox(root);
+    const sourceInit = await runDeploy(sourceEnv, ['--init', '--state-dir', sourceState]);
+    expect(sourceInit.status, sourceInit.out).toBe(0);
+    expect(existsSync(join(sourceState, 'platform-keys.json'))).toBe(false);
+    const [sourceBundle] = readdirSync(join(sourceState, 'key-agent/bundles'));
+    const sourceHeader = JSON.parse(
+      readFileSync(join(sourceState, 'key-agent/bundles', sourceBundle ?? ''), 'utf8')
+    ) as { installationId: string };
+    const snapshot = join(root, 'sealed-snapshot');
+    runBackup({ ...ctx('s3://fleet/celld', sourceState), envFile: sourceEnv }, snapshot);
+    const targetDir = join(root, 'sealed-clone');
+    mkdirSync(targetDir);
+    const targetEnv = writeBox(targetDir, ['CELLD_BUCKET=s3://fresh/celld']);
+    const targetState = join(targetDir, '.state');
+    runRestore({ ...ctx('s3://fresh/celld', targetState), envFile: targetEnv }, snapshot);
+    const raw = JSON.parse(
+      readFileSync(join(targetState, 'key-agent/restored-identity.json'), 'utf8')
+    ) as Record<string, string>;
+    const record = {
+      from: raw.SOURCE_INSTALLATION_ID ?? '',
+      installationId: raw.SAM_INSTALLATION_ID ?? '',
+    };
+    expect(record.from).toBe(sourceHeader.installationId);
+    expect(record.installationId).toMatch(/^[0-9a-f]{32}$/);
+    expect(record.installationId).not.toBe(sourceHeader.installationId);
+    expect(existsSync(join(targetState, 'key-agent/kek'))).toBe(false);
+    const project = expectedComposeProjectFor(
+      { SAM_DOMAIN: 'sam.example.com' },
+      targetState,
+      record.installationId
+    );
+    writeFileSync(targetEnv, `${readFileSync(targetEnv, 'utf8')}COMPOSE_PROJECT_NAME=${project}\n`);
+    const bin = join(root, 'sealed-clone-bin');
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, 'docker'),
+      '#!/usr/bin/env node\nif(process.argv.includes("ps"))console.log("[]");else process.exit(2);\n',
+      { mode: 0o755 }
+    );
+    const env = { PATH: `${bin}:${process.env.PATH}` };
+    // No key copy yet: refused, nothing sealed or generated.
+    const refused = await runDeploy(targetEnv, ['--init'], env);
+    expect(refused.status).toBe(1);
+    expect(refused.out).toContain('the key file was lost');
+    expect(readdirSync(join(targetState, 'key-agent/bundles'))).toEqual([sourceBundle]);
+    // With the copy the operator kept off the box.
+    writeFileSync(
+      join(targetState, 'key-agent/kek'),
+      readFileSync(join(sourceState, 'key-agent/kek')),
+      { mode: 0o600 }
+    );
+    const initialized = await runDeploy(targetEnv, ['--init'], env);
+    expect(initialized.status, initialized.out).toBe(0);
+    expect(existsSync(join(targetState, 'key-agent/restored-identity.json'))).toBe(false);
+    const bundles = readdirSync(join(targetState, 'key-agent/bundles'));
+    expect(bundles).toHaveLength(1);
+    expect(bundles).not.toContain(sourceBundle);
+    const cloneHeader = JSON.parse(
+      readFileSync(join(targetState, 'key-agent/bundles', bundles[0] ?? ''), 'utf8')
+    ) as { installationId: string };
+    expect(cloneHeader.installationId).toBe(record.installationId);
+    // Security review L-1: an --init that sealed but stopped before removing the record is not a
+    // dead end. The next --init sees the bundle already carries the clone's identity and goes on.
+    writeFileSync(join(targetState, 'key-agent/restored-identity.json'), JSON.stringify(raw), {
+      mode: 0o600,
+    });
+    const again = await runDeploy(targetEnv, ['--init'], env);
+    expect(again.status, again.out).toBe(0);
+    expect(existsSync(join(targetState, 'key-agent/restored-identity.json'))).toBe(false);
+    expect(readdirSync(join(targetState, 'key-agent/bundles'))).toEqual(bundles);
+    expect(
+      readRecord(join(targetState, 'created-resources.json')).resources.find(
+        (r) => r.kind === 'installation'
+      )?.name
+    ).toBe(record.installationId);
   }, 120_000);
 
   it('restores bucket and state into an empty install (round trip)', () => {
@@ -1298,6 +1403,60 @@ describe('runRollback', () => {
       expect(calls).toEqual([]);
     }
   );
+
+  // Codex P1s on #2933: a sealed box has no platform-keys.json (migrate removes it), and its
+  // snapshot holds no file key or key-service credentials (isKeyServiceSecretPath). Rollback must
+  // still find the installation, and must keep the live key so the agent can open the bundles.
+  it('rolls back a sealed install: identity from the bundle header, live file key and credentials kept', () => {
+    const context = ctx('gs://fleet/celld', join(root, 'state'));
+    const keyAgent = join(context.stateDir, 'key-agent');
+    rmSync(join(context.stateDir, 'platform-keys.json'));
+    mkdirSync(join(keyAgent, 'bundles'), { recursive: true });
+    mkdirSync(join(keyAgent, 'credentials'), { mode: 0o700 });
+    const bundle = JSON.stringify({
+      format: 1,
+      installationId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      createdAt: '2026-11-20T00:00:00.000Z',
+      ciphertext: 'sealed-before-upgrade',
+    });
+    writeFileSync(join(keyAgent, 'bundles', `${'b'.repeat(32)}.json`), bundle);
+    const kek = randomBytes(32).toString('base64');
+    const credential = randomBytes(24).toString('hex');
+    writeFileSync(join(keyAgent, 'kek'), kek, { mode: 0o600 });
+    writeFileSync(join(keyAgent, 'credentials/transit-secret-id'), credential, { mode: 0o600 });
+    const snapshot = join(root, 'sealed-rollback');
+    runBackup(context, snapshot);
+    // The failed upgrade wrote a new bundle; the rollback returns the pre-upgrade one.
+    writeFileSync(join(keyAgent, 'bundles', `${'c'.repeat(32)}.json`), bundle);
+    runRollback(context, snapshot);
+    expect(readdirSync(join(keyAgent, 'bundles'))).toEqual([`${'b'.repeat(32)}.json`]);
+    expect(readFileSync(join(keyAgent, 'kek'), 'utf8')).toBe(kek);
+    expect(statSync(join(keyAgent, 'kek')).mode & 0o777).toBe(0o600);
+    expect(readFileSync(join(keyAgent, 'credentials/transit-secret-id'), 'utf8')).toBe(credential);
+    expect(existsSync(join(context.stateDir, 'platform-keys.json'))).toBe(false);
+  });
+
+  it('refuses a sealed rollback whose snapshot names a different installation', () => {
+    const context = ctx('gs://fleet/celld', join(root, 'state'));
+    const bundles = join(context.stateDir, 'key-agent/bundles');
+    rmSync(join(context.stateDir, 'platform-keys.json'));
+    mkdirSync(bundles, { recursive: true });
+    const header = (installationId: string, createdAt: string) =>
+      JSON.stringify({ format: 1, installationId, createdAt, ciphertext: 'x' });
+    writeFileSync(
+      join(bundles, `${'b'.repeat(32)}.json`),
+      header('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-11-20T00:00:00.000Z')
+    );
+    const snapshot = join(root, 'sealed-foreign');
+    runBackup(context, snapshot);
+    writeFileSync(
+      join(bundles, `${'c'.repeat(32)}.json`),
+      header('dddddddddddddddddddddddddddddddd', '2026-11-21T00:00:00.000Z')
+    );
+    calls = [];
+    expect(() => runRollback(context, snapshot)).toThrow(/different installation/);
+    expect(calls.filter((call) => call.args.includes('rsync'))).toEqual([]);
+  });
 
   it('restores after a real Go module cache made read-only directories in the old state', () => {
     const context = ctx('gs://fleet/celld', join(root, 'state'));

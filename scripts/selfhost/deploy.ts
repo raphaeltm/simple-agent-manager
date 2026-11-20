@@ -4,13 +4,18 @@
  *
  *   pnpm selfhost:deploy [--env-file deploy/selfhost/.env] [--state-dir <env dir>/.state]
  *                        [--secrets <state-dir>/secrets.env] [--web-dist DIR] [--dry-run] [--init]
- *                        [--skip-vm-agent]
+ *                        [--skip-vm-agent] [--key-provider NAME] [--seal] [--unset NAME ...]
  *
- * `--init` generates the platform keys (`<state-dir>/platform-keys.json`, platform-keys.ts), and
- * writes `<state-dir>/gateway.env` (the shared secret docker compose hands to frps and Caddy) and
- * the mail-collector files; run it once before the first `docker compose up`. Only `--init` on a
- * state dir with no trace of an earlier deploy creates platform-keys.json; otherwise a missing
- * file stops the deploy (restore it from backup). A key added to an existing file by a newer
+ * A box on plaintext deploy vars (no recorded key choice) stays on them unless `--seal` (secrets
+ * migrate): an upgrader from before sealing passes no key flag (deploy-keys.ts holdsPlaintext).
+ *
+ * `--init` chooses the key provider that seals the Worker secrets when none is recorded
+ * (key-choice.ts), generates the platform keys into the sealed bundle (key-service.ts; on a
+ * `legacy-plaintext` box into `<state-dir>/platform-keys.json`, platform-keys.ts), and writes
+ * `<state-dir>/gateway.env` (the shared secret docker compose hands to frps and Caddy), the key
+ * agent's `agent.env` and the mail-collector files; run it once before the first
+ * `docker compose up`. Only `--init` on a state dir with no trace of an earlier deploy creates
+ * keys; otherwise missing keys stop the deploy (restore them from backup). A key added by a newer
  * version is likewise generated only by `--init`; a lost ENCRYPTION_KEY or SAM_INSTALLATION_ID
  * is never regenerated.
  *
@@ -19,9 +24,11 @@
  *
  * Re-runnable: platform keys are generated once and kept, the project directory is rebuilt,
  * D1 migrations are applied idempotently, and `celld deploy` publishes a new version that the
- * node adopts in place. celld has no secrets store for real nodes: the platform keys and
- * secrets.env are rendered into the Worker's `vars`, which celld keeps in the fleet bucket. The
- * fleet bucket credential can therefore read every Worker secret.
+ * node adopts in place. celld has no secrets store for real nodes, and it keeps every deployed
+ * version's `vars` in the fleet bucket, so the Worker gets its secrets at runtime from the box's
+ * key agent and the vars carry none (runtime-secrets.ts). Only on a `legacy-plaintext` box are
+ * the platform keys and secrets.env rendered into the vars, where the fleet bucket credential can
+ * read them.
  *
  * Nodes download the vm-agent from this install, so the deploy builds it (pinned Go image) and
  * publishes it into the fleet bucket the way the Cloudflare pipeline does, then pins
@@ -64,8 +71,14 @@ import {
   type CelldWranglerConfig,
 } from './celld-config.js';
 import { ASSETS_DIR, CELLD_MAIN, prepareCelldProject, writeCelldConfig } from './celld-project.js';
-import { commandPath } from './command-path.js';
+import { buildApiDependencies, buildWeb, publishVmAgent } from './deploy-build.js';
 import { writeAndReconcileFence } from './deploy-fence-reconcile.js';
+import {
+  refuseRootUnlessPlaintext,
+  resolveBoxKeys,
+  resolveDeployBox,
+  sealedWorkerVars,
+} from './deploy-keys.js';
 import {
   applyAllMigrations,
   bucketOf,
@@ -81,6 +94,8 @@ import {
 } from './deploy-steps.js';
 import { inboundMailWorkerVars } from './inbound-mail-settings.js';
 import { expectedComposeProjectFor, recordInstall } from './install-record.js';
+import { celldDeployConfig, unsetForThisRun } from './key-seal.js';
+import { assertKeyAgentUp } from './key-service.js';
 import {
   ensureMailCollectorPassword,
   MAIL_COLLECTOR_PASSWORD_FILE,
@@ -91,21 +106,17 @@ import {
 } from './mail-settings.js';
 import {
   assertSecretsKeepPlatformKeys,
-  ensurePlatformKeys,
   type PlatformKeysMode,
   type PlatformKeysResult,
 } from './platform-keys.js';
 import { assertPrivateFile, ensurePrivateDir, readSecretsFile } from './secret-files.js';
 import {
   buildVmAgentBinaries,
-  publishVmAgentArtifacts,
-  removeVmAgentBuild,
   resolveVmAgentRelease,
   type VmAgentRelease,
 } from './vm-agent-artifacts.js';
 
 const API_DIR = join(REPO_ROOT, 'apps/api');
-const WEB_DIR = join(REPO_ROOT, 'apps/web');
 
 /** Upper bound on captured celld output (bundle reports are a few KiB). */
 const CHILD_OUTPUT_MAX_BYTES = 64 * 1024 * 1024;
@@ -132,37 +143,6 @@ function run(command: string, args: string[], env: NodeJS.ProcessEnv, cwd = REPO
   return { status: result.status ?? 1, output };
 }
 
-function buildWeb(baseDomain: string): string {
-  log(`building apps/web for https://api.${baseDomain}`);
-  const env = { ...process.env, VITE_API_URL: `https://api.${baseDomain}` };
-  const result = spawnSync(
-    commandPath('pnpm'),
-    ['exec', 'turbo', 'run', 'build', '--filter=@simple-agent-manager/web'],
-    {
-      cwd: REPO_ROOT,
-      env,
-      stdio: 'inherit',
-    }
-  );
-  if (result.status !== 0) throw new Error('apps/web build failed');
-  return join(WEB_DIR, 'dist');
-}
-
-/**
- * celld bundles `apps/api/src` with its own esbuild, which resolves the workspace packages
- * (`shared`, `providers`, `cloud-init`) through their built `dist/` entry points. A fresh
- * checkout has none, so build the API's dependencies (not the API itself) first.
- */
-function buildApiDependencies(): void {
-  log("building the API Worker's workspace dependencies");
-  const result = spawnSync(
-    commandPath('pnpm'),
-    ['exec', 'turbo', 'run', 'build', '--filter=@simple-agent-manager/api^...'],
-    { cwd: REPO_ROOT, stdio: 'inherit' }
-  );
-  if (result.status !== 0) throw new Error('building the API Worker dependencies failed');
-}
-
 interface DeployInputs {
   envFile: string;
   box: Record<string, string>;
@@ -174,10 +154,11 @@ interface DeployInputs {
   init: boolean;
   skipVmAgent: boolean;
   webDist: string | undefined;
+  unset: string[];
 }
 
 /** Parses the CLI flags and the box .env, and creates the state dir unless this is a dry run. */
-function readDeployInputs(): DeployInputs {
+async function readDeployInputs(): Promise<DeployInputs> {
   const { values } = parseArgs({
     options: {
       'env-file': { type: 'string' },
@@ -187,6 +168,10 @@ function readDeployInputs(): DeployInputs {
       'dry-run': { type: 'boolean', default: false },
       init: { type: 'boolean', default: false },
       'skip-vm-agent': { type: 'boolean', default: false },
+      'key-provider': { type: 'string' },
+      seal: { type: 'boolean', default: false },
+      // Remove a sealed value whose secrets.env line was deleted (key-service.ts assertUnsettable).
+      unset: { type: 'string', multiple: true },
     },
   });
   const envFile = resolve(values['env-file'] ?? join(SELFHOST_DIR, '.env'));
@@ -194,17 +179,21 @@ function readDeployInputs(): DeployInputs {
   assertPrivateFile(envFile);
   // The box as docker compose will run it (a shell variable any compose file interpolates beats
   // the .env, F21 L5), its ports checked against the lease range before anything is written.
-  const box = loadBoxEnv(envFile, SELFHOST_DIR, process.env, (name) =>
+  const envBox = loadBoxEnv(envFile, SELFHOST_DIR, process.env, (name) =>
     log(`${name} from the shell environment overrides ${envFile}`)
   );
   // Same default and base directory docker compose uses for SAM_SELFHOST_STATE_DIR.
   const stateDir = resolve(
     dirname(envFile),
-    values['state-dir'] ?? box.SAM_SELFHOST_STATE_DIR ?? '.state'
+    values['state-dir'] ?? envBox.SAM_SELFHOST_STATE_DIR ?? '.state'
   );
   const dryRun = values['dry-run'] ?? false;
-  // A dry run writes nothing, not even the state dir.
+  const keys = { box: envBox, stateDir, keyProvider: values['key-provider'], seal: values.seal };
+  // A dry run writes nothing, not even the state dir; root is refused before the first write.
+  if (!dryRun) refuseRootUnlessPlaintext(keys);
   if (!dryRun) ensurePrivateDir(stateDir);
+  // Which key provider seals the secrets (key-choice.ts): `--init` chooses when none is recorded.
+  const box = await resolveDeployBox({ ...keys, init: values.init ?? false, dryRun, log });
   const secretsPath = resolve(values.secrets ?? join(stateDir, 'secrets.env'));
   const baseDomain = box.SAM_DOMAIN;
   if (!baseDomain) throw new Error(`${envFile}: SAM_DOMAIN is required`);
@@ -220,6 +209,7 @@ function readDeployInputs(): DeployInputs {
     init: values.init ?? false,
     skipVmAgent: values['skip-vm-agent'] ?? false,
     webDist: values['web-dist'],
+    unset: values.unset ?? [],
   };
 }
 
@@ -230,15 +220,26 @@ function platformKeysMode(inputs: DeployInputs): PlatformKeysMode {
 
 interface BoxState {
   keys: PlatformKeysResult['keys'];
+  deployKeys: Awaited<ReturnType<typeof resolveBoxKeys>>;
   tunnelSettings: TunnelSettings;
   collectorPasswordPath: string;
   collectorPassword: string | null;
 }
 
 /** Platform keys, then the files docker compose hands to frps, Caddy and the mail collector. */
-function prepareBoxState(inputs: DeployInputs): BoxState {
+async function prepareBoxState(inputs: DeployInputs): Promise<BoxState> {
   const { box, stateDir, dryRun, init } = inputs;
-  const { keys, generated } = ensurePlatformKeys(stateDir, platformKeysMode(inputs));
+  // Sealed secrets (key-service.ts): the platform keys and secrets.env go into a bundle only the
+  // key agent can open, and no secret is passed to celld. legacy-plaintext: platform-keys.json.
+  const deployKeys = await resolveBoxKeys({
+    box,
+    stateDir,
+    secretsPath: inputs.secretsPath,
+    mode: platformKeysMode(inputs),
+    unset: unsetForThisRun(inputs.unset, dryRun, inputs.secretsPath, log),
+    log,
+  });
+  const { keys, generated } = deployKeys;
   if (generated.length > 0) {
     log(
       dryRun
@@ -256,7 +257,7 @@ function prepareBoxState(inputs: DeployInputs): BoxState {
       `dry run: gateway.env and the mail-collector files in ${stateDir} are not written; ` +
         'a real run rewrites them only where they differ'
     );
-    return { keys, tunnelSettings, collectorPasswordPath, collectorPassword: null };
+    return { keys, deployKeys, tunnelSettings, collectorPasswordPath, collectorPassword: null };
   }
   recordInstall(stateDir, inputs.envFile, box, keys.SAM_INSTALLATION_ID);
   log(
@@ -272,24 +273,30 @@ function prepareBoxState(inputs: DeployInputs): BoxState {
   for (const path of writeMailCollectorFiles(stateDir, box, collectorPassword)) {
     log(`wrote ${path}; restart the stack so it applies: docker compose up -d`);
   }
-  return { keys, tunnelSettings, collectorPasswordPath, collectorPassword };
+  return { keys, deployKeys, tunnelSettings, collectorPasswordPath, collectorPassword };
 }
 
 /** The Worker's secrets: platform keys plus secrets.env, which may not replace a key. */
 function resolveWorkerSecrets(
   inputs: DeployInputs,
-  keys: PlatformKeysResult['keys']
+  { keys, deployKeys }: Pick<BoxState, 'keys' | 'deployKeys'>
 ): { installationId: string; secrets: Record<string, string> } {
   const { box, secretsPath } = inputs;
   const operatorSecrets = readSecretsFile(secretsPath);
   // VM_AGENT_REQUIRED_VERSION must name the release this deploy published (or stay unset).
   assertOperatorSecretsAllowed(operatorSecrets, secretsPath);
-  // secrets.env is rendered over the keys below; it may not replace one.
+  // secrets.env is laid over the keys; it may not replace one.
   assertSecretsKeepPlatformKeys(operatorSecrets, keys, secretsPath);
-  assertPresignCredentialIsScoped(box, operatorSecrets);
+  const sealed = deployKeys.sealed;
+  assertPresignCredentialIsScoped(box, sealed ? sealed.secrets : operatorSecrets);
   const { SAM_INSTALLATION_ID, ...platformSecrets } = keys;
-  // What the Worker runs with, rendered into its `vars` by planWorker.
-  const secrets: Record<string, string> = { ...platformSecrets, ...operatorSecrets };
+  // What the Worker runs with. Sealed: the bundle's secrets, which reach it from the key agent
+  // (the installation id is a var, never in the agent's answer). Otherwise rendered into `vars`.
+  const secrets: Record<string, string> = sealed
+    ? Object.fromEntries(
+        Object.entries(sealed.secrets).filter(([name]) => name !== 'SAM_INSTALLATION_ID')
+      )
+    : { ...platformSecrets, ...operatorSecrets };
   // The fleet bucket credential reaches celld's environment; scrub it from celld's output too.
   knownSecrets = [
     ...Object.values(secrets),
@@ -303,7 +310,8 @@ function planWorker(
   inputs: DeployInputs,
   tunnelSettings: TunnelSettings,
   installationId: string,
-  secrets: Record<string, string>
+  secrets: Record<string, string>,
+  sealedVars: Record<string, string>
 ): { plan: CelldConfigPlan; vmAgentRelease: VmAgentRelease | null } {
   const { box, baseDomain } = inputs;
   const smtpVars = smtpWorkerVars(box, secrets, baseDomain);
@@ -318,6 +326,8 @@ function planWorker(
       ...tunnelWorkerVars(tunnelSettings),
       ...smtpVars,
       ...inboundMailWorkerVars(box, smtpVars),
+      // Sealed: where the key agent is, which bundle, and the agent's verify key (no secret).
+      ...sealedVars,
     },
   });
   const vmAgentRelease = inputs.skipVmAgent ? null : resolveVmAgentRelease(REPO_ROOT);
@@ -326,32 +336,6 @@ function planWorker(
   Object.assign(plan.config.vars, presignVars(box, plan.config.vars.R2_BUCKET_NAME ?? ''));
   for (const line of plan.report) log(line);
   return { plan, vmAgentRelease };
-}
-
-/** Publishes the built vm-agent into the fleet bucket, then removes the build. */
-function publishVmAgent(
-  config: CelldWranglerConfig,
-  celld: string,
-  env: NodeJS.ProcessEnv,
-  binDir: string,
-  release: string
-): void {
-  const agentBucket = config.r2_buckets.find((bucket) => bucket.binding === 'R2');
-  if (!agentBucket) throw new Error('the Worker has no R2 binding to serve the vm-agent from');
-  try {
-    publishVmAgentArtifacts({
-      celld,
-      env,
-      fleetBucket: bucketOf(env),
-      r2BucketName: agentBucket.bucket_name,
-      binDir,
-      release,
-      redact: (text) => redactSecrets(text, knownSecrets),
-      log,
-    });
-  } finally {
-    removeVmAgentBuild(binDir);
-  }
 }
 
 /**
@@ -391,10 +375,11 @@ function celldDeploy(
 }
 
 async function main(): Promise<void> {
-  const inputs = readDeployInputs();
+  const inputs = await readDeployInputs();
   const { box, stateDir, projectDir, baseDomain } = inputs;
-  const { keys, tunnelSettings, collectorPasswordPath, collectorPassword } =
-    prepareBoxState(inputs);
+  const state = await prepareBoxState(inputs);
+  const { tunnelSettings, collectorPasswordPath, collectorPassword } = state;
+  const { keyService, sealed } = state.deployKeys;
   if (!inputs.dryRun) {
     await writeAndReconcileFence({
       stateDir,
@@ -404,14 +389,18 @@ async function main(): Promise<void> {
     });
   }
   if (inputs.init) return;
-  const { installationId, secrets } = resolveWorkerSecrets(inputs, keys);
-  const { plan, vmAgentRelease } = planWorker(inputs, tunnelSettings, installationId, secrets);
-  // What `celld deploy` gets, and celld stores in the fleet bucket for this version. Only this
-  // in-memory copy and a transient project file (celldDeploy) carry the secrets.
-  const withSecrets: CelldWranglerConfig = {
-    ...plan.config,
-    vars: { ...plan.config.vars, ...secrets },
-  };
+  const { installationId, secrets } = resolveWorkerSecrets(inputs, state);
+  const { plan, vmAgentRelease } = planWorker(
+    inputs,
+    tunnelSettings,
+    installationId,
+    secrets,
+    sealedWorkerVars(keyService, sealed, box)
+  );
+  // What `celld deploy` gets, and celld stores in the fleet bucket for this version. Sealed: no
+  // secret at all. legacy-plaintext: only this in-memory copy and a transient project file
+  // (celldDeploy) carry the secrets.
+  const withSecrets: CelldWranglerConfig = celldDeployConfig(plan.config, secrets, Boolean(sealed));
 
   if (inputs.dryRun) {
     console.log(JSON.stringify(redact(withSecrets, new Set(Object.keys(secrets))), null, 2));
@@ -425,14 +414,22 @@ async function main(): Promise<void> {
   }
   const webDist = inputs.webDist ? resolve(inputs.webDist) : buildWeb(baseDomain);
   buildApiDependencies();
-  prepareCelldProject({ apiDir: API_DIR, projectDir, plan, webDist });
+  prepareCelldProject({
+    apiDir: API_DIR,
+    projectDir,
+    plan,
+    webDist,
+    runtimeSecrets: Boolean(sealed),
+  });
 
   const celld = await ensureCelldBinary(join(stateDir, 'bin'));
   const env = celldChildEnv(process.env, box, resolveEsbuild(API_DIR));
 
   // Before the Worker that pins VM_AGENT_REQUIRED_VERSION is published, as on Cloudflare.
   if (vmAgentRelease && vmAgentBinDir) {
-    publishVmAgent(plan.config, celld, env, vmAgentBinDir, vmAgentRelease.release);
+    publishVmAgent(plan.config, celld, env, vmAgentBinDir, vmAgentRelease.release, (text) =>
+      redactSecrets(text, knownSecrets)
+    );
   }
 
   // The secrets-free config is what stays on disk: migrations and operator `celld d1`/`kv`
@@ -456,6 +453,8 @@ async function main(): Promise<void> {
   if (preDeploy === 'no-leases')
     log('no node holds a lease yet (first deploy?); deploying before migrating');
 
+  // A Worker without its key agent answers 503 to everything; say why before deploying.
+  if (keyService) await assertKeyAgentUp(keyService.port);
   celldDeploy(celld, projectDir, plan.config, withSecrets, env);
 
   if (preDeploy === 'no-leases') {

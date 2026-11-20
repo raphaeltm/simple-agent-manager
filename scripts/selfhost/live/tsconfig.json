@@ -1,6 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
   "extends": "../../deploy/tsconfig.json",
+  // The key agent runs under Node type stripping and imports its siblings with `.ts`.
+  "compilerOptions": { "allowImportingTsExtensions": true, "noEmit": true },
   "include": ["**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }
