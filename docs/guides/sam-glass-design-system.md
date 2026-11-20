@@ -30,6 +30,8 @@ SAM Glass is how the app looks: glass surfaces floating over an open, dark green
 
 Radii: panes `--sam-radius-pane` (20px), slabs `--sam-radius-slab` (22px), controls `--sam-radius-control` (12px). Frame: 16px from the screen edge. Gutters: 14px.
 
+**Scrolling panes.** A pane must never be its own scroll container. Its rim (`.sam-glass-rim::before`) and its frost (`.sam-glass::after`) are absolutely positioned at `inset: 0`. Inside a scroller, that places them against the content at scroll position 0, so they scroll away with it. The user sees the rim's bottom edge cross the middle of the list, and the frost ends where it does. Give the pane `overflow-hidden` and a flex column, and put the scrolling (and the padding) on a child: `<Pane className="flex flex-col overflow-hidden"><div className="relative min-h-0 flex-1 overflow-y-auto">…</div></Pane>`. The shell's content pane in `AppShell` is built this way. `assertNoScrollingGlassPanes` in `apps/web/tests/playwright/audit-helpers.ts` fails any glass element whose computed `overflow-y` is `auto` or `scroll`. Note that `overflow-x: hidden` on its own makes `overflow-y` compute to `auto`.
+
 These replace the older glass utilities over time: `.glass-chrome` and `.glass-surface` become a pane, `.glass-modal` becomes an overlay. Don't mix the two systems on one screen.
 
 ## Tokens
@@ -88,14 +90,14 @@ Build these in `packages/ui/src/components/` with Tailwind and the tokens above,
 
 ## Data the designs need
 
-| Design                                        | Status                                                                                            |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Owner on each session (`createdBy`, `isMine`) | Exists.                                                                                           |
-| Mine / All filter                             | Exists (`scope=my` or `scope=all`).                                                               |
-| Others, and one person's sessions             | Needs an API option; filtering "all" in the browser can miss sessions because the list is capped. |
-| "Shared with" avatars on rows                 | Grants exist (`SessionAccessSummary`), but the list response doesn't include them yet.            |
+| Design                                        | Status                                                                                                                                                               |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Owner on each session (`createdBy`, `isMine`) | Exists.                                                                                                                                                              |
+| Mine / All filter                             | Exists (`scope=my` or `scope=all`).                                                                                                                                  |
+| Others, and one person's sessions             | Needs an API option; filtering "all" in the browser can miss sessions because the list is capped.                                                                    |
+| "Shared with" avatars on rows                 | Grants exist (`SessionAccessSummary`), but the list response doesn't include them yet.                                                                               |
 | Stable person colours                         | Needs a per-project join order (or a stored colour index per member). Until then `personSlotFor()` hashes the user id, so a person keeps one colour on every screen. |
-| "Jonas is writing", live cursors              | New realtime presence. Not designed into data yet.                                                |
+| "Jonas is writing", live cursors              | New realtime presence. Not designed into data yet.                                                                                                                   |
 
 ## Writing
 
