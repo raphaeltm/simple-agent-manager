@@ -23,6 +23,11 @@ retired by running `rotate --all` on a box.
 - Branch read JWT/BetterAuth `*_PREVIOUS` straight from env in shared code, so a Cloudflare env with
   them set WOULD enable fallback. Fixed: every rotation variable is honoured only inside the self-host
   rotation scope, turned on solely by `registerRotationKeys` in the celld wrapper.
+- Branch task `2026-11-14-selfhost-f2-rotation-teardown-defects.md`: its rotation items (K1-K6: dry run
+  creates nothing, status names the staged reseal, etc.) came with the ported code and tests; its teardown
+  items (T1-T3) are not rotation and are out of scope for this slice.
+- `TOKEN_HASH_KEY` is also read only inside the rotation scope (validator MEDIUM), so a Cloudflare Worker
+  ignores it like every other rotation variable.
 - Hot-path I/O: none added. Cloudflare: one boolean check per decrypt failure / JWT verify / auth
   options build. celld: `previousKeyPairs` (3 string compares) per request.
 
@@ -34,7 +39,7 @@ retired by running `rotate --all` on a box.
 - [x] Self-host-only rotation scope; Cloudflare-proof tests, each gate proven discriminating
 - [x] `rotate` command in secrets.ts; plaintext-scan `rotationAdvice` and README point at `rotate`
 - [x] runtime-tunables baseline, Caddy fragment + live test, backlog follow-ups from the branch
-- [ ] Full local quality suite
+- [x] Full local quality suite (lint, typecheck, API unit 18.4k, selfhost 1.2k; reruns after fixes)
 - [ ] Security-auditor (control endpoint auth/replay/callers, fallback scoping) + other reviewers
 - [ ] Staging: sign-in + authed call, stored credential decrypt + use, JWT callbacks verify
 - [ ] Box: `rotate --all` from main; data decrypts, sign-in, hosted-git clone, old copies dead; kill+resume; failed-run rollback

@@ -17,6 +17,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { betterAuthSecretOptions } from '../../../src/lib/better-auth-secrets';
+import { getTokenHashKey } from '../../../src/lib/secrets';
 import { withRuntimeSecrets } from '../../../src/selfhost/runtime-secrets';
 import { decrypt, encrypt } from '../../../src/services/encryption';
 import {
@@ -108,6 +109,7 @@ function cloudflareEnvWithEveryRotationVar(): Env {
     BETTER_AUTH_SECRET_VERSION: '2',
     BETTER_AUTH_SECRET_PREVIOUS: 'old-better-auth-secret-0123456789abcdef',
     BETTER_AUTH_SECRET_PREVIOUS_VERSION: '1',
+    TOKEN_HASH_KEY: OLD_AES,
   } as unknown as Env;
 }
 
@@ -235,6 +237,16 @@ describe('a misconfigured JWT_PUBLIC_KEY stays a server fault (as on main)', () 
       expect(error).toBeInstanceOf(Error);
       expect((error as { statusCode?: number }).statusCode).toBeUndefined();
     }
+  });
+});
+
+describe('bearer-token lookup key (lib/secrets.ts getTokenHashKey)', () => {
+  it('stays ENCRYPTION_KEY on Cloudflare even when TOKEN_HASH_KEY is set', () => {
+    expect(getTokenHashKey(cloudflareEnvWithEveryRotationVar())).toBe(NEW_AES);
+  });
+
+  it('control: inside the self-host scope the pinned TOKEN_HASH_KEY is used', () => {
+    expect(getTokenHashKey(selfHostEnv())).toBe(OLD_AES);
   });
 });
 
