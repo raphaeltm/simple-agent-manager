@@ -4,14 +4,21 @@
  * Fetch and check out a SAM git ref, migrate, deploy, restart the stack only when its compose
  * inputs changed, verify health and print how to roll back (upgrade-lib.ts).
  *
- * It takes NO automatic backup. Copy the fleet bucket (CELLD_BUCKET) and the .state directory
- * yourself first: an upgrade that carries a D1 migration can only be rolled back from such a copy.
+ * Every upgrade takes an encrypted snapshot and automatically restores it on failure.
+ *
+ * `--adopt-legacy --from <deployed full sha>` first moves a pre-L24 install off the shared
+ * `sam-selfhost` Compose project (legacy-adoption.ts), then upgrades it the same way.
  */
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
-import { celldPort, SELFHOST_DIR } from './deploy-steps.js';
+import { celldPort, SELFHOST_DIR, waitForHealth } from './deploy-steps.js';
+import { runLegacyAdoption } from './legacy-adoption.js';
+import { assertOperatorExecution } from './operator-only.js';
 import { loadBox, runUpgrade } from './upgrade-lib.js';
+import { runManualRollback } from './upgrade-rollback.js';
+
+assertOperatorExecution();
 
 const { values } = parseArgs({
   options: {
@@ -19,29 +26,62 @@ const { values } = parseArgs({
     'box-env': { type: 'string' },
     'state-dir': { type: 'string' },
     secrets: { type: 'string' },
+    'backup-to': { type: 'string' },
+    'rollback-from': { type: 'string' },
+    rebuild: { type: 'string', multiple: true },
+    'encryption-key-file': { type: 'string' },
+    'adopt-legacy': { type: 'boolean', default: false },
+    from: { type: 'string' },
+    'adoption-backup-to': { type: 'string' },
   },
 });
-if (!values.to) {
-  throw new Error(
-    '--to <git ref> is required (a tag, branch or commit). selfhost:upgrade takes no automatic ' +
-      'backup: copy the fleet bucket and .state first'
-  );
-}
+if (!values.to) throw new Error('--to <git ref> is required (a tag, branch or commit)');
 // Each is passed on to every `pnpm selfhost:deploy` the upgrade runs (upgrade-lib.ts).
 const ctx = loadBox(
   resolve(values['box-env'] ?? join(SELFHOST_DIR, '.env')),
   values['state-dir'],
-  values.secrets
+  values.secrets,
+  values['encryption-key-file']
 );
 const port = celldPort(ctx.box);
 
-await runUpgrade(ctx, {
-  to: values.to,
-  checkHealth: async () => {
-    // Same probe selfhost:deploy uses: the Worker on loopback, addressed as api.<domain>.
-    const res = await fetch(`http://127.0.0.1:${port}/health`, {
-      headers: { host: `api.${ctx.box.SAM_DOMAIN ?? ''}`, 'x-forwarded-proto': 'https' },
-    }).catch(() => null);
-    return res?.ok ?? false;
-  },
-});
+const checkHealth = async () => {
+  try {
+    await waitForHealth(port, ctx.box.SAM_DOMAIN ?? '');
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+if (values['adopt-legacy'] && values['rollback-from'])
+  throw new Error('--adopt-legacy and --rollback-from cannot be combined');
+if (!values['adopt-legacy'] && (values.from || values['adoption-backup-to']))
+  throw new Error('--from and --adoption-backup-to are only used with --adopt-legacy');
+
+if (values['adopt-legacy']) {
+  if (!values.from) throw new Error('--adopt-legacy needs --from <full SHA the stack runs>');
+  if (values.rebuild?.length) throw new Error('--rebuild is only used with --rollback-from');
+  await runLegacyAdoption(ctx, {
+    to: values.to,
+    from: values.from,
+    checkHealth,
+    upgrade: runUpgrade,
+    ...(values['adoption-backup-to'] ? { backupDir: resolve(values['adoption-backup-to']) } : {}),
+    ...(values['backup-to'] ? { upgradeBackupDir: resolve(values['backup-to']) } : {}),
+  });
+} else if (values['rollback-from']) {
+  await runManualRollback(ctx, {
+    from: values.to,
+    backupDir: resolve(values['rollback-from']),
+    rebuilds: values.rebuild ?? [],
+    checkHealth,
+  });
+} else {
+  if (values.rebuild?.length) throw new Error('--rebuild is only used with --rollback-from');
+  await runUpgrade(ctx, {
+    to: values.to,
+    ...(values['backup-to'] ? { backupDir: resolve(values['backup-to']) } : {}),
+    checkHealth,
+  });
+}

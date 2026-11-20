@@ -2,7 +2,7 @@
  * deploy/selfhost/created-resources.mjs: what the record says after a resource a teardown removed
  * is recorded again (security review of F3, M4: a re-added grant must not read as removed).
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -51,4 +51,38 @@ describe('addResource after a teardown removed the entry', () => {
     addResource(file, entry('reused'));
     expect(only()).toMatchObject({ action: 'created' });
   });
+});
+
+it('a replacement found at a created name is reused, not adopted', () => {
+  addResource(file, { ...entry('created'), attributes: { identity: 'one' } });
+  addResource(file, { ...entry('reused'), attributes: { identity: 'two' } });
+  expect(only()).toMatchObject({ action: 'reused', attributes: { identity: 'two' } });
+});
+it('refuses duplicate receipts before any destructive decisions', () => {
+  writeFileSync(
+    file,
+    JSON.stringify({
+      format: 'sam-created-resources/1',
+      resources: [entry('created'), entry('created')],
+    })
+  );
+  expect(() => readRecord(file)).toThrow('duplicate');
+});
+it('refuses malformed receipts', () => {
+  writeFileSync(file, JSON.stringify({ format: 'sam-created-resources/1', resources: [null] }));
+  expect(() => readRecord(file)).toThrow('invalid');
+});
+
+it('never rewrites live creation proof for a second installation', () => {
+  addResource(file, {
+    ...entry('created'),
+    attributes: { identity: 'one', installation: 'first', environment: 'selfhost' },
+  });
+  expect(() =>
+    addResource(file, {
+      ...entry('reused'),
+      attributes: { identity: 'one', installation: 'other', environment: 'selfhost' },
+    })
+  ).toThrow('ownership scope changed');
+  expect(only().attributes?.installation).toBe('first');
 });

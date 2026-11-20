@@ -71,12 +71,13 @@ const UNPRIVILEGED_LISTENERS: ReadonlySet<string> = new Set([
 
 /**
  * Compose's own control variables that the box .env may set and the scripts read: which files
- * (COMPOSE_FILE, COMPOSE_PATH_SEPARATOR) and which profiles (COMPOSE_PROFILES: the mail collector,
+ * (COMPOSE_FILE, COMPOSE_PATH_SEPARATOR), the project (COMPOSE_PROJECT_NAME), and profiles (COMPOSE_PROFILES: the mail collector,
  * inbound mail) the stack runs with. Compose takes them from the shell before the .env, like an
  * interpolated variable, but no compose file references them, so they are named here.
  */
 export const COMPOSE_CONTROL_VARIABLES: readonly string[] = [
   'COMPOSE_FILE',
+  'COMPOSE_PROJECT_NAME',
   'COMPOSE_PATH_SEPARATOR',
   'COMPOSE_PROFILES',
 ];

@@ -1,21 +1,6 @@
-/**
- * Google Cloud adapter for `pnpm selfhost:teardown` (teardown.ts). Everything Google-specific in
- * teardown lives here; the core (teardown-model.ts, teardown-box.ts) only sees items.
- *
- * - Node VMs: listed by the labels SAM's provider puts on every VM it creates
- *   (`buildNodeProviderLabels`, apps/api/src/services/node-provider-labels.ts). One is this
- *   install's only when `managed`, `installation` and `env` all equal this install's values, the
- *   exact predicate the app's own label matcher applies (`nodeProviderLabelsMatch`). The VM
- *   is described again right before the delete and must still carry the same id and labels. Boot
- *   disks go with the VM (autoDelete); a disk of that VM without autoDelete is deleted after it
- *   only when no other VM uses it.
- * - Firewall rules (`sam-allow-agent`, `sam-allow-app-routes`, gcp-firewall.ts): one fixed name per
- *   project shared by every SAM install there, with no install identity on them. Teardown cannot
- *   prove one is this install's, so it never deletes them; it prints the command, and says which
- *   other VMs the rule applies to (its network and target tags, read from the rule itself), so a VM
- *   that merely carries SAM labels without the rule's tag is not reported as using it.
- * - Workload identity, node service account, KMS key: removed by the bootstrap's own teardown
- *   (deploy/selfhost/gcp-teardown.sh), which re-proves each recorded resource first.
+/** Google Cloud teardown: exact installation labels + immutable ids before VM deletion;
+ * recorded creator scope + no remaining users before firewall deletion. Legacy shared
+ * resources remain operator-owned. WIF receipts are handled by teardown-gcp-bootstrap.
  */
 import {
   normalizeInstallationId,
@@ -35,7 +20,10 @@ import {
   gcloudNotFound,
   gcloudReason,
 } from './teardown-gcp-bootstrap';
+import { type GcpFirewallTargets, parseFirewallTargets } from './teardown-gcp-targets';
 import { both, type Item, STEPS } from './teardown-model';
+
+export { parseFirewallTargets } from './teardown-gcp-targets';
 
 /**
  * The firewall rule names SAM's GCP provider ensures (SAM_AGENT_FIREWALL_RULE_NAME and
@@ -59,14 +47,6 @@ interface GcpInstance {
   tags: string[];
   /** Names (last path segment) of the networks its interfaces are on. */
   networks: string[];
-}
-
-/** What a firewall rule applies to (gcloud `firewall-rules describe --format=json`). */
-interface GcpFirewallTargets {
-  network: string | null;
-  targetTags: string[];
-  /** Rules selecting by service account are not modelled: report them as unknown. */
-  targetServiceAccounts: boolean;
 }
 
 export function gcpItems(ctx: TeardownContext): Item[] {
@@ -95,9 +75,11 @@ export function gcpItems(ctx: TeardownContext): Item[] {
       throw new Error(`invalid Google Cloud project id: ${project}`);
     }
     const listed = listInstances(ctx, project);
-    items.push(...instanceItems(ctx, project, listed));
-    items.push(...firewallItems(ctx, project, listed));
-    items.push(...bootstrapItems(ctx, project));
+    items.push(
+      ...instanceItems(ctx, project, listed),
+      ...firewallItems(ctx, project, listed),
+      ...bootstrapItems(ctx, project)
+    );
   }
   return items;
 }
@@ -112,22 +94,39 @@ function listInstances(ctx: TeardownContext, project: string): GcpInstance[] | E
     '--format=json',
   ]);
   if (result.status !== 0) {
-    return new Error(`gcloud compute instances list failed: ${result.stderr.trim().slice(0, 400)}`);
+    return new Error(`gcloud compute instances list failed: ${gcloudReason(result.stderr)}`);
   }
   try {
     const parsed = JSON.parse(result.stdout) as unknown;
     if (!Array.isArray(parsed)) throw new Error('not a list');
-    return parsed.map(parseInstance);
-  } catch (error) {
-    return new Error(
-      `unreadable instance list: ${error instanceof Error ? error.message : String(error)}`
-    );
+    return parseUniqueInstances(parsed);
+  } catch {
+    return new Error('unreadable instance list: invalid inventory metadata');
   }
+}
+
+function parseUniqueInstances(values: unknown[]): GcpInstance[] {
+  const instances = values.map(parseInstance);
+  const ids = new Set<string>(),
+    names = new Set<string>();
+  for (const instance of instances) {
+    const scope = `${instance.zone}/${instance.name}`;
+    if (ids.has(instance.id) || names.has(scope))
+      throw new Error('duplicate or conflicting instance inventory');
+    ids.add(instance.id);
+    names.add(scope);
+  }
+  return instances;
 }
 
 function parseInstance(value: unknown): GcpInstance {
   const v = value as Record<string, unknown>;
-  if (typeof v?.name !== 'string' || typeof v.zone !== 'string' || typeof v.id !== 'string') {
+  if (
+    typeof v?.name !== 'string' ||
+    typeof v.zone !== 'string' ||
+    typeof v.id !== 'string' ||
+    !/^\d+$/.test(v.id)
+  ) {
     throw new Error('instance without name, zone or id');
   }
   const labels: Record<string, string> = {};
@@ -142,7 +141,8 @@ function parseInstance(value: unknown): GcpInstance {
         .filter((d) => typeof d?.source === 'string')
         .map((d) => ({ source: d.source as string, autoDelete: d.autoDelete === true }))
     : [];
-  if (!GCE_NAME.test(v.name)) throw new Error(`unexpected instance name ${JSON.stringify(v.name)}`);
+  if (!GCE_NAME.test(v.name) || !GCE_NAME.test(lastSegment(v.zone)))
+    throw new Error(`unexpected instance name ${JSON.stringify(v.name)}`);
   const tagItems = (v.tags as { items?: unknown } | undefined)?.items;
   const tags = Array.isArray(tagItems) ? tagItems.filter((t) => typeof t === 'string') : [];
   const networks = Array.isArray(v.networkInterfaces)
@@ -227,10 +227,13 @@ function instanceItems(
     const refusal = ownershipRefusal(instance, ctx.installationId);
     const path = `projects/${project}/zones/${instance.zone}/instances/${instance.name}`;
     const keptDisks = instance.disks.filter((d) => !d.autoDelete);
+    const diskDescription = keptDisks.length
+      ? ` (${keptDisks.length} disk(s) without auto-delete are retained)`
+      : ', boot disk with it';
     return {
       id: `gcp:${path}`,
       place: 'in your cloud, made by SAM at runtime',
-      what: `node VM ${instance.name} (${project}, ${instance.zone}, node ${instance.labels[SAM_NODE_LABEL_KEY] ?? '?'})${keptDisks.length ? ` and ${keptDisks.length} disk(s) without auto-delete` : ', boot disk with it'}`,
+      what: `node VM ${instance.name} (${project}, ${instance.zone}, node ${instance.labels[SAM_NODE_LABEL_KEY] ?? '?'})${diskDescription}`,
       provenance: 'discovered, not recorded',
       how: `gcloud compute instances delete ${instance.name} --zone=${instance.zone} --project=${project}, after checking its id and labels again`,
       step: STEPS.compute,
@@ -265,7 +268,12 @@ function deleteInstance(ctx: TeardownContext, project: string, listed: GcpInstan
     if (/not found|was not found|404/i.test(described.stderr)) return; // already gone
     check(described, `gcloud compute instances describe ${listed.name}`);
   }
-  const current = parseInstance(JSON.parse(described.stdout) as unknown);
+  let current: GcpInstance;
+  try {
+    current = parseInstance(JSON.parse(described.stdout) as unknown);
+  } catch {
+    throw new Error('refused: unreadable instance ownership metadata');
+  }
   // The same VM (immutable id), still this install's, at the moment of deletion.
   if (current.id !== listed.id) {
     throw new Error(
@@ -278,39 +286,8 @@ function deleteInstance(ctx: TeardownContext, project: string, listed: GcpInstan
     gcloud(ctx, ['compute', 'instances', 'delete', listed.name, ...where, '--quiet']),
     `gcloud compute instances delete ${listed.name}`
   );
-  for (const disk of current.disks.filter((d) => !d.autoDelete)) {
-    const name = disk.source.split('/').pop() ?? '';
-    if (!GCE_NAME.test(name))
-      throw new Error(`refused: unexpected disk name ${JSON.stringify(name)}`);
-    const zone = disk.source.match(/\/zones\/([^/]+)\//)?.[1] ?? listed.zone;
-    const users = gcloud(ctx, [
-      'compute',
-      'disks',
-      'describe',
-      name,
-      `--zone=${zone}`,
-      `--project=${project}`,
-      '--format=value(users)',
-    ]);
-    if (users.status !== 0) {
-      if (/not found|was not found|404/i.test(users.stderr)) continue; // gone with the VM
-      check(users, `gcloud compute disks describe ${name}`);
-    }
-    if (users.stdout.trim())
-      throw new Error(`refused: disk ${name} is attached to ${users.stdout.trim()}`);
-    check(
-      gcloud(ctx, [
-        'compute',
-        'disks',
-        'delete',
-        name,
-        `--zone=${zone}`,
-        `--project=${project}`,
-        '--quiet',
-      ]),
-      `gcloud compute disks delete ${name}`
-    );
-  }
+  // A disk attached without autoDelete may have been supplied by the operator. An attachment
+  // proves use, not creation: preserve it; only Compute Engine's autoDelete disks go with a VM.
 }
 
 function firewallItems(
@@ -355,6 +332,32 @@ function firewallItems(
       listed,
       ctx.installationId
     );
+    const receipt = ctx.record.find(
+      (r) =>
+        r.cloud === 'gcp' &&
+        r.kind === 'firewall-rule' &&
+        r.name === rule &&
+        r.createdBy === BOOTSTRAP &&
+        r.action === 'created' &&
+        r.attributes?.project === project &&
+        r.attributes?.installation === ctx.installationId &&
+        r.attributes?.environment === SELFHOST_ENVIRONMENT &&
+        r.attributes?.install === `https://api.${ctx.domain}`
+    );
+    const description = `SAM installation=${ctx.installationId} environment=selfhost issuer=https://api.${ctx.domain}`;
+    let metadata: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(found.stdout);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+        metadata = parsed as Record<string, unknown>;
+    } catch {
+      /* malformed metadata never authorizes deletion */
+    }
+    const safe =
+      !!receipt?.attributes?.identity &&
+      metadata.id === receipt.attributes.identity &&
+      metadata.description === description &&
+      usage.startsWith('no existing VM');
     items.push({
       id: `gcp:${project}:firewall:${rule}`,
       place: 'in your cloud, made by SAM at runtime',
@@ -365,10 +368,59 @@ function firewallItems(
       plan: {
         'keep-data': { act: 'keep', why: 'the next node needs it' },
         'remove-everything': {
-          act: 'operator',
-          why: "one fixed name per project, shared by every SAM install there; it carries no install identity, so teardown cannot prove it is this install's",
+          ...(safe
+            ? { act: 'remove' as const }
+            : {
+                act: 'refused' as const,
+                why: 'no exclusive, current creation proof; shared or legacy rules are preserved',
+              }),
         },
       },
+      run: () => {
+        const current = gcloud(ctx, [
+          'compute',
+          'firewall-rules',
+          'describe',
+          rule,
+          `--project=${project}`,
+          '--format=json',
+        ]);
+        check(current, 'read firewall before deletion');
+        let raw: Record<string, unknown>;
+        try {
+          const parsed: unknown = JSON.parse(current.stdout);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+            throw new Error('Invalid ownership metadata shape');
+          raw = parsed as Record<string, unknown>;
+        } catch {
+          throw new Error('Refused: unreadable firewall identity');
+        }
+        const users = firewallUsage(
+          parseFirewallTargets(current.stdout),
+          listAllInstances(ctx, project),
+          [],
+          ctx.installationId
+        );
+        if (
+          !receipt ||
+          raw.id !== receipt.attributes?.identity ||
+          raw.description !== description ||
+          !users.startsWith('no existing VM')
+        )
+          throw new Error('refused: firewall identity, owner or usage changed');
+        check(
+          gcloud(ctx, [
+            'compute',
+            'firewall-rules',
+            'delete',
+            rule,
+            `--project=${project}`,
+            '--quiet',
+          ]),
+          'delete owned firewall'
+        );
+      },
+      record: receipt,
     });
   }
   return items;
@@ -386,30 +438,9 @@ function listAllInstances(ctx: TeardownContext, project: string): GcpInstance[] 
   try {
     const parsed = JSON.parse(result.stdout) as unknown;
     if (!Array.isArray(parsed)) throw new Error('not a list');
-    return parsed.map(parseInstance);
-  } catch (error) {
-    return new Error(
-      `unreadable instance list: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
-}
-
-export function parseFirewallTargets(json: string): GcpFirewallTargets | null {
-  try {
-    const raw: unknown = JSON.parse(json);
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-    const v = raw as Record<string, unknown>;
-    const targetTags = Array.isArray(v.targetTags)
-      ? v.targetTags.filter((t): t is string => typeof t === 'string')
-      : [];
-    return {
-      network: typeof v.network === 'string' ? lastSegment(v.network) : null,
-      targetTags,
-      targetServiceAccounts:
-        Array.isArray(v.targetServiceAccounts) && v.targetServiceAccounts.length > 0,
-    };
+    return parseUniqueInstances(parsed);
   } catch {
-    return null;
+    return new Error('unreadable instance list: invalid inventory metadata');
   }
 }
 

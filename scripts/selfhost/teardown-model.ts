@@ -3,7 +3,7 @@
  * mode decides about it, and the order and bookkeeping of a removal. Nothing here knows a cloud;
  * cloud specifics live in adapters (teardown-gcp.ts) that return items of this shape.
  */
-import { addResource, markRemoved, readRecord } from '../../deploy/selfhost/created-resources.mjs';
+import { completeRemoval } from './teardown-record';
 
 export type Mode = 'keep-data' | 'remove-everything';
 export const MODES: readonly Mode[] = ['keep-data', 'remove-everything'];
@@ -22,7 +22,7 @@ export const PLACES: readonly Place[] = [
   'outside SAM',
 ];
 
-/** recorded: in created-resources.json. discovered: found by the exact names or labels the install sets. */
+/** recorded: in created-resources.json. discovered: found using live exact installation/environment ownership labels. */
 /** setup steps: made by you following SAM's instructions, outside anything teardown can read. */
 export type Provenance = 'recorded' | 'discovered, not recorded' | 'from the setup steps';
 
@@ -42,7 +42,9 @@ export const STEPS = {
   identity: 3,
   bucket: 4,
   box: 5,
-  outside: 6,
+  state: 6,
+  cleanup: 7,
+  outside: 8,
 } as const;
 export const STEP_NAMES: Record<number, string> = {
   1: 'stop taking new work',
@@ -50,7 +52,9 @@ export const STEP_NAMES: Record<number, string> = {
   3: 'cloud identity and keys',
   4: 'bucket contents',
   5: 'the box',
-  6: 'outside SAM',
+  6: 'installation state',
+  7: 'local cleanup',
+  8: 'outside SAM',
 };
 
 export interface RecordRef {
@@ -102,79 +106,77 @@ export function decide(item: Item, mode: Mode): Decision {
 }
 
 /**
- * Runs every item the mode removes, step by step. A failure ends the run after its step: later
- * steps (which would remove the means to clean up what failed, such as the cloud identity behind
- * undeleted VMs) are reported as not attempted, and a second run continues from there.
+ * Runs every item the mode removes, step by step. A failure stops new actions immediately,
+ * including dependent resources in the same step. Already-run shared actions still settle their
+ * individual results; unattempted actions remain available for a later retry.
  */
 export function execute(items: Item[], mode: Mode, recordFile: string): Outcome[] {
   const outcomes: Outcome[] = [];
-  const ordered = [...items].sort((a, b) => a.step - b.step);
+  const ordered = [...items];
+  ordered.sort((a, b) => a.step - b.step);
   let failedStep: number | null = null;
   const ran = new Map<string, Error | null>();
-  for (const step of [...new Set(ordered.map((i) => i.step))]) {
-    const inStep = ordered.filter((i) => i.step === step);
-    for (const item of inStep) {
-      const decision = decide(item, mode);
-      if (decision.act !== 'remove') {
-        outcomes.push({ item, status: statusOf(decision), why: decision.why });
-        continue;
-      }
-      if (item.removedAt) {
-        outcomes.push({ item, status: 'already removed', why: item.removedAt });
-        continue;
-      }
-      if (failedStep !== null) {
-        outcomes.push({ item, status: 'not attempted', why: `step ${failedStep} failed` });
-        continue;
-      }
-      const key = item.runKey ?? item.id;
-      if (!ran.has(key)) {
-        // The group's action may sit on another item of the group (a volume goes with compose down).
-        const runner = item.run ?? items.find((i) => (i.runKey ?? i.id) === key && i.run)?.run;
-        try {
-          runner?.();
-          ran.set(key, null);
-        } catch (error) {
-          ran.set(key, error instanceof Error ? error : new Error(String(error)));
-        }
-      }
-      const error = ran.get(key);
-      if (error && !item.goneDespiteGroupFailure?.()) {
-        outcomes.push({ item, status: 'failed', why: error.message });
-        continue;
-      }
-      const settled = item.settle?.() ?? { removed: true };
-      if (!settled.removed) {
-        outcomes.push({ item, status: 'kept', why: settled.why });
-        continue;
-      }
-      for (const ref of [item.record ?? []].flat()) markInRecord(recordFile, ref);
-      outcomes.push({ item, status: 'removed' });
+  for (const step of new Set(ordered.map((i) => i.step))) {
+    for (const item of ordered.filter((i) => i.step === step)) {
+      const outcome = executeItem(item, items, mode, recordFile, failedStep, ran);
+      outcomes.push(outcome);
+      if (outcome.status === 'failed') failedStep = step;
     }
-    if (outcomes.some((o) => o.status === 'failed' && o.item.step === step)) failedStep = step;
   }
   return outcomes;
 }
 
-function statusOf(decision: Exclude<Decision, { act: 'remove' }>): Outcome['status'] {
-  return decision.act === 'keep' ? 'kept' : decision.act;
+function runAction(
+  item: Item,
+  items: Item[],
+  ran: Map<string, Error | null>
+): Error | null | undefined {
+  const key = item.runKey ?? item.id;
+  if (!ran.has(key)) {
+    // A group's runner may live on another item (a volume shares its container cleanup).
+    const runner = item.run ?? items.find((i) => (i.runKey ?? i.id) === key && i.run)?.run;
+    try {
+      runner?.();
+      ran.set(key, null);
+    } catch (error) {
+      ran.set(key, error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+  return ran.get(key);
 }
 
-function markInRecord(file: string, ref: RecordRef): void {
-  const known = readRecord(file).resources.some(
-    (r) => r.cloud === ref.cloud && r.kind === ref.kind && r.name === ref.name
-  );
-  if (!known) {
-    addResource(file, {
-      cloud: ref.cloud,
-      kind: ref.kind,
-      name: ref.name,
-      action: 'created',
-      createdBy: ref.createdBy ?? 'discovered-by-teardown',
-      attributes: ref.attributes ?? {},
-    });
+function executeItem(
+  item: Item,
+  items: Item[],
+  mode: Mode,
+  recordFile: string,
+  failedStep: number | null,
+  ran: Map<string, Error | null>
+): Outcome {
+  const decision = decide(item, mode);
+  if (decision.act !== 'remove') return { item, status: statusOf(decision), why: decision.why };
+  if (item.removedAt) return { item, status: 'already removed', why: item.removedAt };
+  if (failedStep !== null && !ran.has(item.runKey ?? item.id))
+    return { item, status: 'not attempted', why: `step ${failedStep} failed` };
+  const error = runAction(item, items, ran);
+  if (error && !item.goneDespiteGroupFailure?.())
+    return { item, status: 'failed', why: error.message };
+  try {
+    const settled = item.settle?.() ?? { removed: true };
+    if (!settled.removed) return { item, status: 'kept', why: settled.why };
+    completeRemoval(recordFile, [item.record ?? []].flat());
+    return { item, status: 'removed' };
+  } catch {
+    return {
+      item,
+      status: 'failed',
+      why: 'cannot verify or persist removal completion; retry to finish bookkeeping',
+    };
   }
-  markRemoved(file, ref.cloud, ref.kind, ref.name);
+}
+
+function statusOf(decision: Exclude<Decision, { act: 'remove' }>): Outcome['status'] {
+  return decision.act === 'keep' ? 'kept' : decision.act;
 }
 
 /** Inventory: everything found, where it is, how it would go, and what each mode does with it. */
@@ -186,9 +188,9 @@ export function renderInventory(items: Item[]): string {
     lines.push('', capitalise(place));
     for (const item of here) {
       const gone = item.removedAt ? ` (removed ${item.removedAt})` : '';
-      lines.push(`  - ${item.what} [${item.provenance}]${gone}`);
-      lines.push(`      how: ${item.how}`);
       lines.push(
+        `  - ${item.what} [${item.provenance}]${gone}`,
+        `      how: ${item.how}`,
         `      keep my data: ${describe(item.plan['keep-data'])}; remove everything: ${describe(item.plan['remove-everything'])}`
       );
       if (item.forGood) lines.push(`      destroys for good: ${item.forGood}`);
@@ -233,21 +235,27 @@ export function renderSummary(outcomes: Outcome[]): string {
     const hits = outcomes.filter((o) => statuses.includes(o.status));
     if (hits.length === 0) continue;
     lines.push(`${title}:`);
-    for (const { item, status, why } of hits) {
-      const extra = status === 'operator' ? `\n      ${item.how}` : '';
-      lines.push(
-        `  - ${item.what}${why ? ` (${status === 'already removed' ? 'earlier, ' : ''}${why})` : ''}${extra}`
-      );
-    }
+    for (const outcome of hits) lines.push(renderOutcome(outcome));
   }
   lines.push(
     '',
-    notRemoved.length === 0
-      ? 'Teardown removed everything it lists.'
-      : `Not removed: the ${notRemoved.length} item${notRemoved.length === 1 ? '' : 's'} above under Left by choice, Left for you, Refused, Failed and Not attempted; each says how to remove it.`,
-    'Teardown knows only what .state/created-resources.json records and what SAM labels or names. Anything else you made by hand for this install (another bucket, for example one for backups) is not listed: remove it yourself.'
+    removalSummary(notRemoved.length),
+    'Teardown knows only what .state/created-resources.json records and resources with live exact SAM ownership labels. Anything else you made by hand for this install (another bucket, for example one for backups) is not listed: remove it yourself.'
   );
   return lines.join('\n');
+}
+
+function renderOutcome({ item, status, why }: Outcome): string {
+  const extra = status === 'operator' ? `\n      ${item.how}` : '';
+  const earlier = status === 'already removed' ? 'earlier, ' : '';
+  const reason = why ? ` (${earlier}${why})` : '';
+  return `  - ${item.what}${reason}${extra}`;
+}
+
+function removalSummary(count: number): string {
+  if (count === 0) return 'Teardown removed everything it lists.';
+  const plural = count === 1 ? '' : 's';
+  return `Not removed: the ${count} item${plural} above under Left by choice, Left for you, Refused, Failed and Not attempted; each says how to remove it.`;
 }
 
 function describe(decision: Decision): string {

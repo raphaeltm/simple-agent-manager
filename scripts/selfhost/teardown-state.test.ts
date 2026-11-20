@@ -20,15 +20,20 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { addResource } from '../../deploy/selfhost/created-resources.mjs';
-import { boxItems, type TeardownContext } from './teardown-box';
+import { readRecord } from '../../deploy/selfhost/created-resources.mjs';
+import { recordInstall } from './install-record';
+import { type TeardownContext } from './teardown-box';
 import { execute, renderSummary } from './teardown-model';
-import { clearStateEntries, removeTree } from './teardown-state-dir';
+import { clearStateEntries, removeTree, stateItems } from './teardown-state-dir';
 
 let root: string;
 let state: string;
 
 function seedState(): void {
+  writeFileSync(
+    join(state, 'platform-keys.json'),
+    JSON.stringify({ SAM_INSTALLATION_ID: 'a'.repeat(32) })
+  );
   mkdirSync(join(state, 'key-agent', 'bundles'), { recursive: true });
   writeFileSync(join(state, 'key-agent', 'kek'), 'fake-key-material');
   writeFileSync(join(state, 'key-agent', 'bundles', 'b1.sealed'), 'fake-sealed');
@@ -40,14 +45,7 @@ function seedState(): void {
 
 function context(remove: (path: string) => void): TeardownContext {
   const recordFile = join(state, 'created-resources.json');
-  addResource(recordFile, {
-    cloud: 'box',
-    kind: 'state-dir',
-    name: state,
-    action: 'created',
-    createdBy: 'deploy',
-    attributes: {},
-  });
+  recordInstall(state, join(root, '.env'), { SAM_DOMAIN: 'sam.example.com' }, 'a'.repeat(32));
   return {
     box: {},
     envFile: join(root, '.env'),
@@ -59,19 +57,10 @@ function context(remove: (path: string) => void): TeardownContext {
     log: () => {},
     mode: 'remove-everything',
     options: { deleteBackups: false, destroyKey: true, adoptDiscovered: false, gcpProjects: [] },
-    record: [
-      {
-        cloud: 'box',
-        kind: 'state-dir',
-        name: state,
-        action: 'created',
-        createdBy: 'deploy',
-        attributes: {},
-      },
-    ],
+    record: readRecord(recordFile).resources,
     recordFile,
     domain: 'sam.example.com',
-    installationId: null,
+    installationId: 'a'.repeat(32),
     selfhostDir: join(root, 'checkout', 'deploy', 'selfhost'),
     removeTree: remove,
   };
@@ -94,7 +83,9 @@ describe('emptying .state when an entry cannot be removed', () => {
   it('removes the secrets first and names the cache that is left', () => {
     const ctx = context(failOn('go-cache'));
     const outcomes = execute(
-      boxItems(ctx).filter((i) => i.id.startsWith('box:key') || i.id === 'box:state'),
+      stateItems(ctx).filter(
+        (i) => i.id.startsWith('box:key') || i.id === 'box:platform-keys' || i.id === 'box:state'
+      ),
       'remove-everything',
       ctx.recordFile
     );
@@ -115,7 +106,9 @@ describe('emptying .state when an entry cannot be removed', () => {
   it('says plainly when what is left is not a cache', () => {
     const ctx = context(failOn('project'));
     const outcomes = execute(
-      boxItems(ctx).filter((i) => i.id.startsWith('box:key') || i.id === 'box:state'),
+      stateItems(ctx).filter(
+        (i) => i.id.startsWith('box:key') || i.id === 'box:platform-keys' || i.id === 'box:state'
+      ),
       'remove-everything',
       ctx.recordFile
     );
@@ -148,7 +141,9 @@ describe('emptying .state when an entry cannot be removed', () => {
     });
     try {
       const again = execute(
-        boxItems(blocked).filter((i) => i.id.startsWith('box:key') || i.id === 'box:state'),
+        stateItems(blocked).filter(
+          (i) => i.id.startsWith('box:key') || i.id === 'box:platform-keys' || i.id === 'box:state'
+        ),
         'remove-everything',
         blocked.recordFile
       );
@@ -174,7 +169,7 @@ describe('emptying .state when an entry cannot be removed', () => {
       },
     ];
     const outcomes = execute(
-      boxItems(ctx).filter((i) => i.id === 'box:state'),
+      stateItems(ctx).filter((i) => i.id === 'box:state'),
       'remove-everything',
       ctx.recordFile
     );
@@ -188,3 +183,31 @@ describe('emptying .state when an entry cannot be removed', () => {
     expect(readdirSync(join(state, 'key-agent'))).toEqual(['kek']);
   });
 });
+
+it.each(['missing', 'inactive', 'foreign', 'replaced-directory', 'foreign-platform'])(
+  'refuses %s state ownership before removing any file',
+  (defect) => {
+    const ctx = context(removeTree);
+    const file = ctx.recordFile;
+    const data = readRecord(file);
+    const stateReceipt = data.resources.find((r) => r.kind === 'state-dir')!;
+    if (defect === 'missing') data.resources = data.resources.filter((r) => r !== stateReceipt);
+    else if (defect === 'inactive') stateReceipt.removedAt = new Date().toISOString();
+    else if (defect === 'foreign') stateReceipt.attributes!.installation = 'b'.repeat(32);
+    else if (defect === 'replaced-directory') stateReceipt.attributes!.inode = 'invalid';
+    else
+      writeFileSync(
+        join(state, 'platform-keys.json'),
+        JSON.stringify({ SAM_INSTALLATION_ID: 'b'.repeat(32) })
+      );
+    writeFileSync(file, JSON.stringify(data));
+    const outcomes = execute(
+      stateItems(ctx).filter((i) => i.id === 'box:state'),
+      'remove-everything',
+      file
+    );
+    expect(outcomes[0]?.status).toBe('failed');
+    expect(existsSync(join(state, 'secrets.env'))).toBe(true);
+    expect(existsSync(join(state, 'platform-keys.json'))).toBe(true);
+  }
+);

@@ -283,6 +283,10 @@ const RULES: Readonly<Record<string, Rule>> = {
     apply: (v, ctx) => (ctx.out.compatibility_flags = stringArray(v, 'compatibility_flags')),
   },
   port: { kind: 'drop', reason: 'wrangler dev port; celld listens where the node is started' },
+  upload_source_maps: {
+    kind: 'drop',
+    reason: 'Cloudflare source-map upload setting; celld does not upload a Worker to Cloudflare',
+  },
   limits: { kind: 'drop', reason: 'no celld equivalent (CELLD_HANDLER_BUDGET_S is node-wide)' },
   alias: { kind: 'drop', reason: "celld's own esbuild bundles apps/api without the shim" },
   vars: {

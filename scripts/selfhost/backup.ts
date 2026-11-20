@@ -14,11 +14,16 @@ import { runBackup } from './backup-lib';
 const { values } = parseArgs({
   options: {
     to: { type: 'string' },
+    'encryption-key-file': { type: 'string' },
     'box-env': { type: 'string' },
     'state-dir': { type: 'string' },
   },
 });
-const ctx = loadBox(resolve(values['box-env'] ?? join(SELFHOST_DIR, '.env')), values['state-dir']);
+const ctx = loadBox(
+  resolve(values['box-env'] ?? join(SELFHOST_DIR, '.env')),
+  values['state-dir'],
+  values['encryption-key-file']
+);
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const dest = resolve(values.to ?? join(SELFHOST_DIR, 'backups', stamp));
 runBackup(ctx, dest, gitCommit());

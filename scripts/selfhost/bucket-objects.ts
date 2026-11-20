@@ -21,6 +21,29 @@ function base(ctx: BoxContext): { scheme: 'gs' | 's3'; root: string } {
   };
 }
 
+function gcsObject(line: string, root: string): BucketObject | undefined {
+  const fields = line.trim().split(/\s+/);
+  const [size, modified, url] = fields;
+  if (fields.length !== 3 || !size || !/^\d+$/.test(size) || !url?.startsWith(`${root}/`))
+    return undefined;
+  return { key: url.slice(root.length + 1), size: Number(size), lastModified: modified ?? '' };
+}
+function s3Object(line: string, prefix: string): BucketObject | undefined {
+  if (!line.trim()) return undefined;
+  let entry: unknown;
+  try {
+    entry = JSON.parse(line);
+  } catch {
+    throw new Error('Invalid object listing from store');
+  }
+  if (typeof entry !== 'object' || entry === null) return undefined;
+  const record = entry as Record<string, unknown>;
+  if (record.type !== 'file' || typeof record.key !== 'string') return undefined;
+  const lastModified = record.lastModified ?? '';
+  if (typeof lastModified !== 'string') throw new Error('Invalid object timestamp from store');
+  return { key: `${prefix}${record.key}`, size: Number(record.size ?? 0), lastModified };
+}
+
 /** Every object whose key starts with `prefix` (e.g. `deploy/`). */
 export function listObjects(ctx: BoxContext, prefix: string): BucketObject[] {
   const { scheme, root } = base(ctx);
@@ -28,17 +51,10 @@ export function listObjects(ctx: BoxContext, prefix: string): BucketObject[] {
     const result = ctx.run('gcloud', ['storage', 'ls', '--long', `${root}/${prefix}**`]);
     if (result.status !== 0 && /matched no objects/i.test(result.stderr)) return [];
     check(result, 'gcloud storage ls');
-    const objects: BucketObject[] = [];
-    for (const line of result.stdout.split('\n')) {
-      const match = /^\s*(\d+)\s+(\S+)\s+(gs:\/\/\S+)\s*$/.exec(line);
-      if (!match?.[3]?.startsWith(`${root}/`)) continue;
-      objects.push({
-        key: match[3].slice(root.length + 1),
-        size: Number(match[1]),
-        lastModified: match[2] ?? '',
-      });
-    }
-    return objects;
+    return result.stdout.split('\n').flatMap((line) => {
+      const object = gcsObject(line, root);
+      return object ? [object] : [];
+    });
   }
   const result = check(
     ctx.run(
@@ -48,20 +64,10 @@ export function listObjects(ctx: BoxContext, prefix: string): BucketObject[] {
     ),
     'mc ls'
   );
-  const objects: BucketObject[] = [];
-  for (const line of result.stdout.split('\n')) {
-    if (!line.trim()) continue;
-    const entry = JSON.parse(line) as unknown;
-    if (typeof entry !== 'object' || entry === null) continue;
-    const record = entry as Record<string, unknown>;
-    if (record.type !== 'file' || typeof record.key !== 'string') continue;
-    objects.push({
-      key: `${prefix}${record.key}`,
-      size: Number(record.size ?? 0),
-      lastModified: String(record.lastModified ?? ''),
-    });
-  }
-  return objects;
+  return result.stdout.split('\n').flatMap((line) => {
+    const object = s3Object(line, prefix);
+    return object ? [object] : [];
+  });
 }
 
 export function readObject(ctx: BoxContext, key: string): string {
