@@ -66,6 +66,13 @@ under them that repeat each account's name.
 - Review: task-completion-validator PASS; cloudflare-specialist PASS (MEDIUM: a wedged `prompting`
   row lists a chat, same as the chat view, healed by rule-57 reconciliation; kept); ui-ux-specialist
   PASS, its two MEDIUMs fixed (visible status in the accessible name; number and colour from one window).
+- Staging (sammy.party, deploy of e5133b500, project Potato, Claude Code conversation profile):
+  turn 1 listed as starting during provisioning, then working, then dropped at turn end; the
+  follow-up turn was listed as working while `tasks.execution_step` read `awaiting_followup`
+  (the incident shape), then dropped at turn end; no console errors. A first run with the default
+  OpenCode profile hit "Agent request failed" on staging (unrelated); Running now still dropped it.
+- CodeRabbit: two minor findings fixed in 093fa6d3d (brief clock after the activity wait; the
+  cross-project test reports its attack chats as mid-turn, proven red without the join).
 - Deferred: `markAgentCompleted` has no callers -> `tasks/backlog/2026-11-20-agent-completed-at-has-no-writer.md`.
 
 ## Acceptance criteria
