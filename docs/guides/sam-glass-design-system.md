@@ -89,14 +89,14 @@ Build these in `packages/ui/src/components/` with Tailwind and the tokens above,
 
 ## Data the designs need
 
-| Design                                        | Status                                                                                            |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Owner on each session (`createdBy`, `isMine`) | Exists.                                                                                           |
-| Mine / All filter                             | Exists (`scope=my` or `scope=all`).                                                               |
-| Others, and one person's sessions             | Needs an API option; filtering "all" in the browser can miss sessions because the list is capped. |
-| "Shared with" avatars on rows                 | Grants exist (`SessionAccessSummary`), but the list response doesn't include them yet.            |
+| Design                                        | Status                                                                                                                                                               |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Owner on each session (`createdBy`, `isMine`) | Exists.                                                                                                                                                              |
+| Mine / All filter                             | Exists (`scope=my` or `scope=all`).                                                                                                                                  |
+| Others, and one person's sessions             | Needs an API option; filtering "all" in the browser can miss sessions because the list is capped.                                                                    |
+| "Shared with" avatars on rows                 | Grants exist (`SessionAccessSummary`), but the list response doesn't include them yet.                                                                               |
 | Stable person colours                         | Needs a per-project join order (or a stored colour index per member). Until then `personSlotFor()` hashes the user id, so a person keeps one colour on every screen. |
-| "Jonas is writing", live cursors              | New realtime presence. Not designed into data yet.                                                |
+| "Jonas is writing", live cursors              | New realtime presence. Not designed into data yet.                                                                                                                   |
 
 ## Writing
 
