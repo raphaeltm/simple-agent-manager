@@ -95,7 +95,9 @@ describe('build pins', () => {
       resolve(import.meta.dirname, '../../packages/vm-agent/go.mod'),
       'utf8'
     );
-    const toolchain = /^toolchain go([0-9.]+)$/m.exec(goMod)?.[1];
+    // A module whose minimum is the selected compiler omits the redundant toolchain directive.
+    const toolchain =
+      /^toolchain go([0-9.]+)$/m.exec(goMod)?.[1] ?? /^go ([0-9.]+)$/m.exec(goMod)?.[1];
     expect(toolchain).toBeDefined();
     expect(VM_AGENT_BUILD_IMAGE).toMatch(
       new RegExp(`^golang:${toolchain!.replaceAll('.', '\\.')}-bookworm@sha256:[0-9a-f]{64}$`)
