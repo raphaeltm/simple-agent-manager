@@ -38,8 +38,10 @@ box. L24's automatic rollback then failed:
   - symlink refusal;
   - secrets stay 0600.
 - [x] README: restore mode exception and fence recovery note.
-- [ ] Box proof before merge: an upgrade main → head with a forced verify failure, then an
-      automatic rollback that succeeds without a manual chmod.
+- [x] Box proof before merge: PASS (2026-11-20 08:19–08:26 UTC). The box was upgraded main →
+      7ba650f2c; then, from that head, an upgrade to main with a forced verify failure ran.
+      "automatic rollback completed" with no manual chmod: back on 7ba650f2c, rules 0644,
+      journal clean, fence healthy, health 200, data intact (evidence in PR #2934).
 
 ## Acceptance criteria
 

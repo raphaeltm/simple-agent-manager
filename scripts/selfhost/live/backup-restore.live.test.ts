@@ -264,7 +264,8 @@ describe.skipIf(!hasDocker && !process.env.CI)(
         'cat',
         '/etc/sam/egress-fence.nft',
       ]);
-      expect(read.stderr).toBe('');
+      // A cold cache writes pull progress to stderr; only the read failure matters.
+      expect(read.stderr).not.toMatch(/Permission denied/);
       expect(read.status).toBe(0);
       expect(read.stdout).toBe(rules);
       // Control: secret-bearing state stays private.
