@@ -106,6 +106,17 @@ function countSince(counts: Map<number, number>, since: number, before = Infinit
   return total;
 }
 
+/** Occurrences in [start, end), counting a bucket in proportion to its hour's overlap. */
+function countOverlap(counts: Map<number, number>, start: number, end: number): number {
+  let total = 0;
+  for (const [hour, n] of counts) {
+    const bucketStart = hour * HOUR_MS;
+    const overlap = Math.min(end, bucketStart + HOUR_MS) - Math.max(start, bucketStart);
+    if (overlap > 0) total += (n * overlap) / HOUR_MS;
+  }
+  return total;
+}
+
 /**
  * Occurrences recorded while watching in the recent window. The bucket of the hour that
  * contains the window start is included, so the measure covers at least the full window.
@@ -127,15 +138,17 @@ export interface SpikeVerdict {
 
 /**
  * A spike counts only occurrences after the latest watch decision, so a burst triage already
- * looked at (and chose to keep watching) cannot re-queue it. Buckets are hourly, so the bucket
- * of the decision's hour is counted minus `watchSpikeOffset`, the occurrences it already held
- * when the decision was made (`watchIncident`). A burst right after the decision therefore
- * counts in full.
+ * looked at (and chose to keep watching) cannot re-queue it. When the decision is inside the
+ * spike window, the count starts at the decision's hour bucket minus `watchSpikeOffset` (what
+ * that bucket already held when the decision was made, `watchIncident`), so a burst right after
+ * the decision counts in full. Otherwise the window boundary falls inside an hourly bucket,
+ * which counts in proportion to the part of its hour inside the window (an estimate: buckets
+ * do not record minutes).
  *
- * The baseline is the average per spike window over the rest of the recent window. It covers
- * the hours since watching began (or since the earliest recorded bucket, when a re-watch kept
- * older history), so a young watch is not compared with days it was not watched, and an empty
- * hour while watched counts as a zero-rate hour rather than shrinking the denominator.
+ * The baseline is the average per spike window over the rest of the recent window, with the
+ * same proportional boundary. It covers the hours since watching began (or since the earliest
+ * recorded bucket, when a re-watch kept older history), so a young watch is not compared with
+ * days it was not watched, and an empty hour while watched counts as a zero-rate hour.
  */
 export function evaluateSpike(
   counts: Map<number, number>,
@@ -144,18 +157,26 @@ export function evaluateSpike(
   config: WatchConfig,
   watchSpikeOffset = 0
 ): SpikeVerdict {
-  const watchHourStart = watchingSince === null ? 0 : Math.floor(watchingSince / HOUR_MS) * HOUR_MS;
-  const spikeStart = Math.max(now - config.spikeWindowMs, watchHourStart);
-  const offset = watchingSince !== null && watchHourStart >= spikeStart ? watchSpikeOffset : 0;
-  const spikeCount = Math.max(0, countSince(counts, spikeStart) - Math.max(0, offset));
-  const baselineEnd = now - config.spikeWindowMs;
+  const windowStart = now - config.spikeWindowMs;
+  // Decision inside the window: count from its hour, minus what that hour already held (exact).
+  // Otherwise the window starts mid-bucket, and the boundary bucket counts in proportion to the
+  // part of its hour inside the window: hourly buckets cannot place occurrences more finely.
+  const spikeCount =
+    watchingSince !== null && watchingSince >= windowStart
+      ? Math.max(
+          0,
+          countSince(counts, Math.floor(watchingSince / HOUR_MS) * HOUR_MS) -
+            Math.max(0, watchSpikeOffset)
+        )
+      : countOverlap(counts, windowStart, Infinity);
+  const baselineEnd = windowStart;
   const earliestBucket = Math.min(...[...counts.keys()].map((hour) => hour * HOUR_MS), Infinity);
   const observedSince = Math.min(earliestBucket, watchingSince ?? Infinity);
   const baselineStart = Math.max(now - config.recentWindowMs, observedSince);
   const coveredMs = baselineEnd - baselineStart;
   const baselinePerWindow =
     coveredMs > 0
-      ? (countSince(counts, baselineStart, baselineEnd) * config.spikeWindowMs) / coveredMs
+      ? (countOverlap(counts, baselineStart, baselineEnd) * config.spikeWindowMs) / coveredMs
       : 0;
   const spike =
     spikeCount >= config.spikeMinOccurrences &&
@@ -166,7 +187,7 @@ export function evaluateSpike(
     spikeCount,
     baselinePerWindow,
     reason: spike
-      ? `spike: ${spikeCount} occurrences in the last ${hours}h while watching ` +
+      ? `spike: ${Math.round(spikeCount)} occurrences in the last ${hours}h while watching ` +
         `(threshold ${config.spikeMinOccurrences}, earlier rate ${baselinePerWindow.toFixed(1)} per ${hours}h)`
       : null,
   };
@@ -232,13 +253,36 @@ const COUNTED_ID_MAX_LENGTH = 64;
  * Not covered: errors the triage fetch never returns (more than the triage error limit in one
  * window). That bound is shared with the whole triage pipeline.
  *
- * The write is a compare-and-set on the stored id set, so two concurrent runs cannot both
- * add the same window.
+ * The write is a compare-and-set on the stored id set. A run that loses it (another run wrote
+ * first) re-reads the ids and merges its own still-unseen occurrences, up to
+ * WATCHED_RECORD_MAX_ATTEMPTS times, so two overlapping runs never double-count or drop each
+ * other's occurrences.
  */
+/** Compare-and-set attempts per recording: a lost race re-reads the ids and merges its own. */
+const WATCHED_RECORD_MAX_ATTEMPTS = 3;
+const LOST_RACE = Symbol('lost-race');
+
 export async function recordWatchedRecurrence(
   env: Env,
   input: WatchedRecurrenceInput
 ): Promise<WatchedRecurrenceOutcome> {
+  for (let attempt = 1; attempt <= WATCHED_RECORD_MAX_ATTEMPTS; attempt += 1) {
+    const outcome = await attemptWatchedRecord(env, input);
+    if (outcome !== LOST_RACE) return outcome;
+  }
+  // Another run kept winning: its write holds most of this window; report this one unrecorded.
+  log.warn('platform_feedback_incident.watch_record_lost_race', {
+    signature: input.signature.slice(0, 16),
+    attempts: WATCHED_RECORD_MAX_ATTEMPTS,
+    action: 'skipped',
+  });
+  return { recorded: false, newOccurrences: 0, escalated: false, escalationReason: null };
+}
+
+async function attemptWatchedRecord(
+  env: Env,
+  input: WatchedRecurrenceInput
+): Promise<WatchedRecurrenceOutcome | typeof LOST_RACE> {
   const none = { recorded: false, newOccurrences: 0, escalated: false, escalationReason: null };
   const row = await env.DATABASE.prepare(
     `SELECT queue_state, last_seen_at, watching_since, watch_hourly_counts,
@@ -314,14 +358,8 @@ export async function recordWatchedRecurrence(
       row.watch_counted_ids
     )
     .run();
-  if ((result.meta.changes ?? 0) !== 1) {
-    // Another run recorded this row first; the next window re-reads its counted ids.
-    log.info('platform_feedback_incident.watch_record_lost_race', {
-      signature: input.signature.slice(0, 16),
-      action: 'skipped',
-    });
-    return none;
-  }
+  // Another run recorded this row first: re-read its counted ids and merge ours.
+  if ((result.meta.changes ?? 0) !== 1) return LOST_RACE;
   if (verdict.spike) {
     log.warn('platform_feedback_incident.watch_spike_requeued', {
       signature: input.signature.slice(0, 16),

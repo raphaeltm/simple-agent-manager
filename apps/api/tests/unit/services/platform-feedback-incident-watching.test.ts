@@ -311,18 +311,21 @@ describe('incident WATCHING disposition', () => {
     const h = setup();
     const message = 'client reported websocket reconnect storm';
     const signature = await seedWatched(h, message);
-    // 40 a day for six days: each day alone is under the threshold.
-    for (let day = 1; day <= 6; day += 1) {
-      const at = T0 + day * DAY;
-      h.addErrors(message, spread(at, 40));
-      await h.run(at + 5 * 60_000);
+    // Two an hour for six days through the real hourly runs: 48 a day, under the threshold.
+    for (let hourIndex = 1; hourIndex <= 6 * 24; hourIndex += 1) {
+      const at = T0 + hourIndex * HOUR;
+      h.addErrors(message, [at + 10 * 60_000, at + 20 * 60_000]);
+      await h.run(at + 30 * 60_000);
     }
     expect(h.row(signature).queue_state).toBe('watching');
-    // 60 on day seven crosses the absolute threshold but not 3x the earlier ~40/day.
-    const day7 = T0 + 7 * DAY;
-    h.addErrors(message, spread(day7, 60));
-    await h.run(day7 + 5 * 60_000);
-    expect(h.row(signature).queue_state).toBe('watching');
+    // A burst of 60 in one hour: 106 in 24h, over the threshold but not 3x the usual 48.
+    const burst = T0 + (6 * 24 + 1) * HOUR;
+    h.addErrors(message, spread(burst + 10 * 60_000, 60));
+    await h.run(burst + 30 * 60_000);
+    expect(h.row(signature)).toMatchObject({
+      queue_state: 'watching',
+      occurrence_count: 1 + 6 * 48 + 60,
+    });
   });
 
   it('expires a quiet watched signature and closes its idea; a recurring one stays watched', async () => {
@@ -398,24 +401,25 @@ describe('incident WATCHING robustness', () => {
     const message = 'overlapping hourly windows race on the same signature';
     const signature = await seedWatched(h, message);
     const config = watchConfigFromSettings(FLEET_OPS_DEFAULTS);
-    const input = {
+    const occurrences = spread(T0 + HOUR, 8).map((timestamp) => ({ id: randomUUID(), timestamp }));
+    const base = {
       signature,
-      occurrences: spread(T0 + HOUR, 5).map((timestamp) => ({ id: randomUUID(), timestamp })),
       severity: 'error',
       evidenceRefs: '[]',
       now: T0 + 2 * HOUR,
       config,
       dedupeHorizonMs: 2 * HOUR,
     };
+    // Two runs over overlapping but different windows: ids 0-4 and 3-7.
     const outcomes = await Promise.all([
-      recordWatchedRecurrence(h.env, input),
-      recordWatchedRecurrence(h.env, input),
+      recordWatchedRecurrence(h.env, { ...base, occurrences: occurrences.slice(0, 5) }),
+      recordWatchedRecurrence(h.env, { ...base, occurrences: occurrences.slice(3) }),
     ]);
-    expect(outcomes.filter((outcome) => outcome.recorded)).toHaveLength(1);
-    expect(outcomes.find((outcome) => !outcome.recorded)).toMatchObject({ newOccurrences: 0 });
-    expect(h.row(signature).occurrence_count).toBe(6);
+    expect(outcomes.every((outcome) => outcome.recorded)).toBe(true);
+    expect(outcomes.reduce((sum, outcome) => sum + outcome.newOccurrences, 0)).toBe(8);
+    expect(h.row(signature).occurrence_count).toBe(9);
     const buckets = parseHourlyCounts(h.row(signature).watch_hourly_counts as string);
-    expect([...buckets.values()].reduce((sum, n) => sum + n, 0)).toBe(5);
+    expect([...buckets.values()].reduce((sum, n) => sum + n, 0)).toBe(8);
   });
 
   it('one failing watched signature does not stop the others, new triage or quiet expiry', async () => {
@@ -812,6 +816,19 @@ describe('watch spike arithmetic', () => {
     expect(evaluateSpike(noisy, now, T0, config).spike).toBe(true); // 60 >= 3 * 20
     noisy.set(hour(now - 4 * DAY), 300);
     expect(evaluateSpike(noisy, now, T0, config).spike).toBe(false);
+  });
+
+  it('counts the boundary hour of the spike window in proportion to its overlap', () => {
+    const now = T0 + 2 * DAY + 30 * 60_000; // 10:30
+    // Yesterday's 10:00 bucket is half inside the 24h window; today's bucket is whole.
+    const counts = new Map([
+      [hour(now - DAY), 60],
+      [hour(now), 20],
+    ]);
+    // Neither dropped (20) nor counted whole (80); the other half falls in the baseline.
+    expect(evaluateSpike(counts, now, T0, { ...config, spikeBaselineMultiplier: 1 })).toMatchObject(
+      { spike: true, spikeCount: 50 }
+    );
   });
 
   it('counts the watch decision hour minus what it already held', () => {
