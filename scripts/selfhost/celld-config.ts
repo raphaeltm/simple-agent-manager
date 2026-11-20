@@ -14,11 +14,14 @@
 
 import { resolveDurableObjectMigrations } from '../deploy/durable-object-migrations.js';
 import type { MigrationEntry, WranglerToml } from '../deploy/types.js';
+import { appendSelfhostDurableObjects } from './selfhost-durable-objects.js';
 
 /** Worker vars set for every celld deployment, overriding wrangler.toml [vars]. */
 export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
   // Cloudflare Containers: Instant sessions and the Sandbox SDK. celld's container fence
   // blocks container -> host traffic on a one-box install (idea 01M72M9AEB933ZY8269D376DKC).
+  HOSTED_GIT_BACKEND: 'durable-object',
+  ARTIFACTS_ENABLED: 'true',
   CF_CONTAINER_ENABLED: 'false',
   SANDBOX_ENABLED: 'false',
   // Managed devcontainer cache uses the Cloudflare container registry API.
@@ -280,6 +283,10 @@ const RULES: Readonly<Record<string, Rule>> = {
     apply: (v, ctx) => (ctx.out.compatibility_flags = stringArray(v, 'compatibility_flags')),
   },
   port: { kind: 'drop', reason: 'wrangler dev port; celld listens where the node is started' },
+  upload_source_maps: {
+    kind: 'drop',
+    reason: 'Cloudflare source-map upload setting; celld does not upload a Worker to Cloudflare',
+  },
   limits: { kind: 'drop', reason: 'no celld equivalent (CELLD_HANDLER_BUDGET_S is node-wide)' },
   alias: { kind: 'drop', reason: "celld's own esbuild bundles apps/api without the shim" },
   vars: {
@@ -425,6 +432,7 @@ export function buildCelldConfig(
   const ctx = translateTopLevelKeys(source, options);
 
   const out = ctx.out as CelldWranglerConfig;
+  appendSelfhostDurableObjects(out, ctx.plan.report);
   out.compatibility_flags ??= [];
   const r2 = out.r2_buckets.find((bucket) => bucket.binding === 'R2');
   out.vars = {

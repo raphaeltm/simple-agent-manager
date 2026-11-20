@@ -92,7 +92,8 @@ describe('workspace subdomain proxy ownership', () => {
     };
     platformSettingResult = null;
     mockGetSession.mockResolvedValue({
-      user: { id: 'user-owner' },
+      // A real BetterAuth user row always carries status; signup approval is on by default.
+      user: { id: 'user-owner', role: 'user', status: 'active' },
       session: { id: 'session-owner', token: 'token-owner', expiresAt: new Date() },
     });
     mockVerifyTerminalToken.mockResolvedValue({

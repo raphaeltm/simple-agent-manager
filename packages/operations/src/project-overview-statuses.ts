@@ -32,20 +32,34 @@ export function overviewPausedSessionsSql(projectSql: string): string {
 }
 
 /**
+ * The chats whose agent is mid-turn, bound as one JSON array parameter (the ids come from the
+ * ProjectData object, `listWorkingChatSessionIds`). One bind whatever the count, so a busy
+ * project cannot reach D1's bound-parameter limit.
+ */
+export const OVERVIEW_WORKING_SESSIONS_SQL = 'SELECT value AS session_id FROM json_each(?)';
+
+/**
  * A chat is running (Running now's own rule, over `ss` = session_summaries and `t` = its task):
  * awake, its task in a running status, and either still being placed, paused on a person
- * (`pausedSessionsSql` selects those chats' ids), or mid-turn (`agent_completed_at IS NULL`,
- * not awaiting a follow-up). The Overview read and the brief's re-check share it, so a chat the
- * page no longer lists can never be called running by the brief.
+ * (`pausedSessionsSql` selects those chats' ids), or mid-turn (`workingSessionsSql` selects the
+ * chats whose agent the ProjectData activity mirror says is working). The Overview read and the
+ * brief's re-check share it, so a chat the page no longer lists can never be called running by
+ * the brief.
+ *
+ * Mid-turn is read from the activity mirror, not from D1: `tasks.execution_step` latches at
+ * `awaiting_followup` after a chat's first turn and `agent_completed_at` is never written, so a
+ * predicate on those columns listed only chats still on their first turn (rule 74).
  */
-export function overviewChatRunningSql(pausedSessionsSql: string): string {
+export function overviewChatRunningSql(
+  pausedSessionsSql: string,
+  workingSessionsSql: string
+): string {
   return `(ss.status = 'active'
      AND t.status IN (${sqlList(OVERVIEW_RUNNING_TASK_STATUSES)})
      AND (
        t.status IN (${sqlList(OVERVIEW_STARTING_TASK_STATUSES)})
        OR ss.attention_json IS NOT NULL
        OR ss.id IN (${pausedSessionsSql})
-       OR (ss.agent_completed_at IS NULL
-           AND (t.execution_step IS NULL OR t.execution_step <> 'awaiting_followup'))
+       OR ss.id IN (${workingSessionsSql})
      ))`;
 }

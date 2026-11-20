@@ -29,7 +29,7 @@
     "@simple-agent-manager/worker-core": "workspace:*",
     "diff": "^9.0.0",
     "drizzle-orm": "catalog:",
-    "isomorphic-git": "1.44.12",
+    "isomorphic-git": "1.44.15",
     "jose": "catalog:",
     "valibot": "catalog:"
   },
