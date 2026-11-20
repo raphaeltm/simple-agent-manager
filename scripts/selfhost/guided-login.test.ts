@@ -54,13 +54,13 @@ describe('guidedLoginSettings', () => {
 
   it('keeps the proxy uid (in the Docker socket group) apart from celld and sam-mx', () => {
     const on = { SAM_GUIDED_LOGIN: 'on' };
-    // Compose defaults: celld 7101, sam-mx 7102, proxy 7103.
+    // Compose defaults: celld 7103 (main's egress-fence DEFAULT_CELLD_UID), sam-mx 7102, proxy 7104.
     expect(guidedLoginSettings(on)).not.toBeNull();
     expect(() => guidedLoginSettings({ ...on, SAM_DOCKER_PROXY_UID: '7102' })).toThrow(
       /SAM_MX_UID/
     );
-    expect(() => guidedLoginSettings({ ...on, SAM_DOCKER_PROXY_UID: '7101' })).toThrow(/CELLD_UID/);
-    expect(() => guidedLoginSettings({ ...on, CELLD_UID: '7103' })).toThrow(/CELLD_UID/);
+    expect(() => guidedLoginSettings({ ...on, SAM_DOCKER_PROXY_UID: '7103' })).toThrow(/CELLD_UID/);
+    expect(() => guidedLoginSettings({ ...on, CELLD_UID: '7104' })).toThrow(/CELLD_UID/);
     expect(() => guidedLoginSettings({ ...on, SAM_DOCKER_PROXY_UID: '0' })).toThrow(/root/);
     expect(() => guidedLoginSettings({ ...on, SAM_DOCKER_PROXY_UID: 'x' })).toThrow(/numeric/);
     expect(guidedLoginSettings({ ...on, SAM_DOCKER_PROXY_UID: '7200' })).not.toBeNull();

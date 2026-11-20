@@ -116,6 +116,9 @@ jobs:
             # ci-suite-selection.test.ts scans the tests and their imports for these.
             api-unit:
               - *api
+              # Self-host integration branch: tests/unit/selfhost/node-transport-config.test.ts reads
+              # the box's frps.toml and Caddy fragments.
+              - 'deploy/selfhost/**'
               # Go sources, Makefile and `go test` runs in cross-boundary contract tests.
               - 'packages/vm-agent/**'
               # Omitted-worker-var defaults scan the tail worker's sources.

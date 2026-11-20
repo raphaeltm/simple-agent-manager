@@ -271,7 +271,7 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
     mkdirSync(DIR); // not recursive: fails rather than reuse a directory this run did not make
     mkdirSync(join(DIR, 'sock'), { recursive: true });
     mkdirSync(join(DIR, 'policy'), { recursive: true });
-    chmodSync(join(DIR, 'sock'), 0o777); // the proxy runs as uid 7103
+    chmodSync(join(DIR, 'sock'), 0o777); // the proxy runs as uid 7104
     writeFileSync(RESOLV_HOST, 'nameserver 1.1.1.1\n', { mode: 0o644 });
     writeFileSync(
       join(DIR, 'policy', 'policy.json'),

@@ -51,25 +51,9 @@ updates:
     directory: '/scripts/e2e/workspace-mock'
     schedule:
       interval: weekly
-  # Self-hosted one-box Caddy build (DNS-01 module); compose images are pinned in
-  # deploy/selfhost/docker-compose.yml and checked by scripts/selfhost/versions.test.ts.
-  - package-ecosystem: 'docker'
-    directory: '/deploy/selfhost/caddy'
-    schedule:
-      interval: weekly
-  # Self-hosted celld egress fence (alpine + nftables).
-  - package-ecosystem: 'docker'
-    directory: '/deploy/selfhost/egress-fence'
-    schedule:
-      interval: weekly
-  # Self-hosted guided-login Docker API proxy (node, pinned by digest).
+  # Self-hosted guided-login Docker API proxy (node, pinned by digest; integration branch only).
   - package-ecosystem: 'docker'
     directory: '/deploy/selfhost/docker-proxy'
-    schedule:
-      interval: weekly
-  # Self-hosted key agent for sealed Worker secrets (node, pinned by digest).
-  - package-ecosystem: 'docker'
-    directory: '/deploy/selfhost/key-agent'
     schedule:
       interval: weekly
   # Self-hosted sam-mx build (golang + alpine, both pinned by digest).
