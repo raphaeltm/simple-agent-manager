@@ -385,7 +385,18 @@ describe.skipIf(skipWithoutDocker)('legacy compose adoption (real Docker)', () =
     const upgrades: string[] = [];
     const logs: string[] = [];
     await expect(
-      adopt(new FakeGit(TO), { upgrade: async () => void upgrades.push('called') }, logs)
+      adopt(new FakeGit(TO), { upgrade: async () => void upgrades.push('called') }, logs).catch(
+        (error: unknown) => {
+          // Rollback step messages contain operation names, never tool output or secrets.
+          const steps = logs.filter((line) => line.startsWith('rollback step failed: '));
+          if (steps.length > 0) {
+            throw new Error(
+              `${error instanceof Error ? error.message : 'adoption failed'}; ${steps.join('; ')}`
+            );
+          }
+          throw error;
+        }
+      )
     ).rejects.toThrow(/rolled back after an interrupted rollback/);
     expect(upgrades).toEqual([]);
     expect(readFileSync(fixture.envFile, 'utf8')).toBe(fixture.envText);
