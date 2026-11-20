@@ -332,6 +332,97 @@ afterEach(() => {
 });
 
 describe('inbox replies through the real route on SQLite', () => {
+  it('an error item reply is recoverable through agent get and respond without changing its status', async () => {
+    const ref = ask('error-item');
+    sqlite.prepare("UPDATE asks SET kind = 'error' WHERE id = ?").run('error-item');
+    expect((await req('/count')).body).toMatchObject({ needsYou: 1 });
+    const sent = await req(path(ref, '/reply'), { content: 'Please investigate this failure.' });
+    expect(sent.status).toBe(202);
+    expect((await req('')).body.items).toHaveLength(0);
+    expect((await req('/count')).body.needsYou).toBe(0);
+    const context = ctx();
+    context.ports.inboxTasks.createComment = vi
+      .fn()
+      .mockResolvedValue({ thread: { id: 'error-response' } });
+    const read = await getAgentItem(context, source, { ref });
+    expect(read).toMatchObject({
+      kind: 'error',
+      withAgent: true,
+      pendingReplyIds: [sent.body.messageId],
+      conversation: {
+        replies: [expect.objectContaining({ content: 'Please investigate this failure.' })],
+      },
+    });
+    const recoveredId = 'pendingReplyIds' in read ? read.pendingReplyIds[0] : undefined;
+    await expect(
+      respondToAgentInboxItem(context, source, {
+        ref,
+        replyMessageId: recoveredId,
+        body: 'I found the failure and am retrying.',
+      })
+    ).resolves.toMatchObject({ ref });
+    expect(context.ports.inboxTasks.createComment).toHaveBeenCalledWith(
+      'p',
+      expect.objectContaining({ askId: 'error-item', body: 'I found the failure and am retrying.' })
+    );
+    expect((await req('')).body.items).toEqual([
+      expect.objectContaining({ ref, kind: 'error', status: 'open', withAgent: false }),
+    ]);
+    expect((await req('/count')).body.needsYou).toBe(1);
+    expect(sqlite.prepare('SELECT status FROM asks').get()).toEqual({ status: 'open' });
+  });
+  it.each(['foreign-source', 'closed', 'expired'] as const)(
+    'refuses an error response when its source is %s',
+    async (change) => {
+      const ref = ask('error-item');
+      sqlite.prepare("UPDATE asks SET kind = 'error' WHERE id = ?").run('error-item');
+      const sent = await req(path(ref, '/reply'), { content: 'Please investigate this failure.' });
+      expect(sent.status).toBe(202);
+      if (change === 'foreign-source')
+        sqlite.prepare("UPDATE asks SET source_session_id = 'other-chat'").run();
+      if (change === 'closed') sqlite.prepare("UPDATE asks SET status = 'answered'").run();
+      if (change === 'expired')
+        sqlite.prepare('UPDATE asks SET expires_at = ?').run(Date.now() - 1);
+      const context = ctx();
+      context.ports.inboxTasks.createComment = vi.fn();
+      await expect(
+        respondToAgentInboxItem(context, source, {
+          ref,
+          replyMessageId: sent.body.messageId,
+          body: 'Retrying.',
+        })
+      ).rejects.toMatchObject({ code: 'not_found' });
+      expect(context.ports.inboxTasks.createComment).not.toHaveBeenCalled();
+      expect(sqlite.prepare('SELECT agent_acted_at FROM inbox_replies').get()).toEqual({
+        agent_acted_at: null,
+      });
+    }
+  );
+  it.each(['update', 'resolve', 'cancel'] as const)(
+    'respond eligibility does not authorize agent %s of an error item',
+    async (method) => {
+      const ref = ask('error-item');
+      sqlite.prepare("UPDATE asks SET kind = 'error' WHERE id = ?").run('error-item');
+      const sent = await req(path(ref, '/reply'), { content: 'Please investigate this failure.' });
+      expect(sent.status).toBe(202);
+      const input = { ref, replyMessageId: sent.body.messageId };
+      const action =
+        method === 'update'
+          ? updateAgentAsk(ctx(), source, { ...input, title: 'Changed error' })
+          : method === 'resolve'
+            ? resolveAgentInboxItem(ctx(), source, input)
+            : cancelAgentAsk(ctx(), source, { ref, reason: 'No longer needed' });
+      await expect(action).rejects.toThrow();
+      expect(sqlite.prepare('SELECT kind, status FROM asks').get()).toEqual({
+        kind: 'error',
+        status: 'open',
+      });
+      expect(sqlite.prepare('SELECT agent_acted_at FROM inbox_replies').get()).toEqual({
+        agent_acted_at: null,
+      });
+    }
+  );
+
   it('responds before any human reply without requiring a ledger acknowledgement', async () => {
     const ref = ask();
     const context = ctx();

@@ -68,7 +68,7 @@ function sourceItemQuery(source: AgentInboxSource, ref: string) {
   const bindings: (string | number)[] = [parsed.id, source.projectId, source.sessionId];
   if (parsed.store === 'ask') {
     query = `SELECT id FROM asks WHERE id = ? AND project_id = ? AND source_session_id = ?
-      AND kind IN ('question', 'review', 'result', 'task') AND status = 'open'
+      AND kind IN ('question', 'review', 'result', 'task', 'error') AND status = 'open'
       AND (expires_at IS NULL OR expires_at > ?)`;
     bindings.push(Date.now());
   } else if (parsed.store === 'secret') {
