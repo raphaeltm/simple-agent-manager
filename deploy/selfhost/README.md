@@ -214,6 +214,17 @@ for inspection instead of bypassing ownership.
 
 ## Upgrade
 
+After target deployment or restoration of the previous version, upgrade durably records that
+health verification is in progress. If
+verification is interrupted, a retry refuses automatic snapshot recovery: preserve live data and
+inspect the stack before choosing an explicit rollback. A returned health failure still triggers
+automatic rollback. Once health succeeds, both a successful upgrade and recovery of the previous version durably
+commit completion before removing their recovery marker and syncing the state directory. A stale completed marker permits cleanup only,
+never restoration of the pre-upgrade snapshot. An invalid phase or different checkout refuses.
+If deployment is interrupted before health verification begins, retry still recovers the original
+snapshot. **Writes accepted during that unverified upgrade window are discarded on rollback.**
+Holding traffic until verification is tracked separately; schedule upgrades accordingly.
+
 ```sh
 pnpm selfhost:upgrade --to <git-ref> --encryption-key-file "$HOME/.config/sam/backup.key"
 ```
@@ -241,7 +252,9 @@ migration.
 
 An unfinished operation retains `.state/upgrade-pending.json` with the previous ref and encrypted
 snapshot path and resolved target SHA. Keep celld stopped if automatic recovery fails; retain the
-snapshot and key, and retry the same resolved target to recover the original install. A changed
+snapshot and key. A pre-verification pending record permits retrying the same resolved target
+to recover the original install. An interrupted verification or uncertain completion instead
+requires inspection as described above; a valid completed marker permits cleanup only. A changed
 `--to`, a moved branch/tag, or an older journal without a target requires the explicit rollback
 command before choosing another target.
 Do not delete the pending record to bypass a failed recovery.

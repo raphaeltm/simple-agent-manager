@@ -236,7 +236,7 @@ describe('manual owned rollback', () => {
     const pending = JSON.parse(
       readFileSync(join(ctx.stateDir, UPGRADE_PENDING_FILE), 'utf8')
     ) as unknown;
-    expect(pending).toEqual({ from: FROM, backupDir: join(root, 'snapshot') });
+    expect(pending).toEqual({ from: FROM, backupDir: join(root, 'snapshot'), phase: 'verifying' });
     expect(steps.at(-3)).toMatch(/ stop celld$/);
     expect(steps.slice(-2)).toEqual([
       `git checkout --detach ${OPERATOR_REF}`,

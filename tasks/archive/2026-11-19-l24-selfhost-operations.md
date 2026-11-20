@@ -103,6 +103,14 @@ Review 4638509415 found shared receipt keys could replace another GCP project's 
 
 Full self-host suite: 1006 passed, four conditional skips, 56 files. TypeScript, focused lint, formatting, diff check and secret-readback scan pass. Independent security, task completion, doc-sync and constitution delta reviews pass. Original BOX evidence remains valid; the accepted coordinator-owned combined H2/L24 post-merge upgrade/rollback smoke remains owed.
 
+## Healthy upgrade and recovery completion delta
+
+Review 4638641086 exposed stale pending metadata after healthy upgrade cleanup. A retry could restore the original snapshot and discard accepted live writes. Upgrade now durably records verification before health; interruption or unknown phases refuse automatic recovery. A successful new version or recovered old version commits a private completed phase before cleanup, followed by state-directory sync. Completed retry validates full source/target refs, snapshot path, private ownership and actual checkout before cleanup only; it never replays the old snapshot. Recovery owns terminal cleanup once, with no outer duplicate deletion. Completion failure after health cannot enter automatic rollback. A returned unhealthy result still follows the normal rollback path.
+
+Thirteen new controls include real unlink, file/parent sync faults, invalid completion scope/private modes and two recovered-version cleanup interruptions. Six completion controls failed on old code, including two direct accepted-write sentinel losses; both adjacent recovery controls independently reproduced accepted recovery writes overwritten by snapshot rows. All 69 upgrade tests and 24 manual rollback tests pass after both fixes. Final full suite: 1019 passed, four conditional skips, 56 files (two workers). TypeScript, focused lint, formatting, diff and secret-readback checks pass. Security, task completion, doc-sync and constitution delta reviews pass.
+
+The coordinator explicitly retains the earlier unverified deployment recovery policy: writes accepted before verification can be discarded on snapshot rollback. README states this plainly; traffic fencing is tracked in idea 01M7VNSGPNHEZHKD9P021128YR. Security review did not classify this intentional existing operational tradeoff HIGH/CRITICAL. The adjacent recovered-version completion issue from idea 01M7VNSH879F53JTQA5AQ5YWJ0 is fixed in this delta.
+
 ## References
 
 PR https://github.com/raphaeltm/simple-agent-manager/pull/2918; idea01M72M9AEB933ZY8269D376DKC LANDING PLAN part6; SAM task01M7TTKAS78AMJ3853S5N4BYAK; coordinator01M7JMXS2JRW6QQMB1356ENPM3; policy795e72a6; rule56; `/do`.

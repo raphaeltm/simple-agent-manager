@@ -6,6 +6,7 @@
  * whose build inputs changed (never `up --build`), that interrupted recovery retains its original snapshot for retry, and that
  * the printed rollback selects the same box and matches whether the upgrade carried a D1 migration.
  */
+import * as fs from 'node:fs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
@@ -23,6 +24,8 @@ import {
   runUpgrade,
   UPGRADE_PENDING_FILE,
 } from './upgrade-lib.js';
+
+vi.mock('node:fs', async (original) => ({ ...(await original<typeof import('node:fs')>()) }));
 
 vi.mock('./backup-lib.js', async (original) => ({
   ...(await original<typeof import('./backup-lib.js')>()),
@@ -175,6 +178,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   rmSync(root, { recursive: true, force: true });
 });
@@ -373,6 +377,172 @@ describe('runUpgrade', () => {
     await expect(upgrade()).rejects.toThrow(/not a record this upgrade wrote/);
     expect(steps).toEqual(['git fetch --tags origin']);
   });
+
+  it.each([
+    'unlink-before',
+    'unlink-lost',
+    'completion-file-sync',
+    'completion-parent-sync',
+    'unlink-parent-sync',
+  ] as const)(
+    'preserves accepted live writes after successful health and interrupted %s',
+    async (boundary) => {
+      const pending = join(root, 'state', UPGRADE_PENDING_FILE);
+      const data = join(root, 'state/accepted-data');
+      let healthy = false,
+        injected = false,
+        completionWritten = false;
+      const originalRm = fs.rmSync,
+        originalSync = fs.fsyncSync,
+        originalWrite = fs.writeSync;
+      vi.spyOn(fs, 'writeSync').mockImplementation((...args: Parameters<typeof fs.writeSync>) => {
+        const result = Reflect.apply(originalWrite, fs, args);
+        if (healthy && /"phase"\s*:\s*"completed"/.test(String(args[1]))) completionWritten = true;
+        return result;
+      });
+      vi.spyOn(fs, 'rmSync').mockImplementation((path, options) => {
+        if (
+          !injected &&
+          healthy &&
+          String(path) === pending &&
+          ['unlink-before', 'unlink-lost'].includes(boundary)
+        ) {
+          injected = true;
+          if (boundary === 'unlink-before') throw new Error('Injected pending unlink failure');
+          const retained = readFileSync(pending, 'utf8');
+          originalRm(path, options);
+          // Model the directory entry reappearing after a power loss without parent fsync.
+          writeFileSync(pending, retained, { mode: 0o600 });
+          return;
+        }
+        return originalRm(path, options);
+      });
+      vi.spyOn(fs, 'fsyncSync').mockImplementation((fd) => {
+        originalSync(fd);
+        if (injected || !healthy) return;
+        const directory = fs.fstatSync(fd).isDirectory();
+        const completed =
+          existsSync(pending) && /"phase"\s*:\s*"completed"/.test(readFileSync(pending, 'utf8'));
+        if (
+          (boundary === 'completion-file-sync' && !directory && completionWritten) ||
+          (boundary === 'completion-parent-sync' && directory && completed) ||
+          (boundary === 'unlink-parent-sync' &&
+            directory &&
+            completionWritten &&
+            !existsSync(pending))
+        ) {
+          injected = true;
+          throw new Error('Injected completion durability failure');
+        }
+      });
+      vi.mocked(runRollback).mockImplementation(() => writeFileSync(data, 'old snapshot rows'));
+      const health = vi.fn(async () => {
+        healthy = true;
+        writeFileSync(data, 'accepted live writes');
+        return true;
+      });
+      try {
+        await runUpgrade(ctx(), { to: 'v2026.11.12', checkHealth: health });
+      } catch {
+        /* A completion durability failure must remain safe to retry. */
+      }
+      expect(health).toHaveBeenCalledOnce();
+      expect(injected).toBe(true);
+      expect(head).toBe(TO);
+      expect(readFileSync(data, 'utf8')).toBe('accepted live writes');
+      expect(runRollback).not.toHaveBeenCalled();
+      vi.restoreAllMocks();
+      vi.mocked(runBackup).mockClear();
+      vi.mocked(runRollback).mockClear();
+      steps = [];
+      const retryHealth = vi.fn(async () => true);
+      let retryError: unknown;
+      try {
+        await runUpgrade(ctx(), { to: 'v2026.11.12', checkHealth: retryHealth });
+      } catch (error) {
+        retryError = error;
+      }
+      if (boundary === 'completion-file-sync') {
+        if (retryError) expect(String(retryError)).toMatch(/verification|completion/);
+      } else expect(retryError).toBeUndefined();
+      expect(readFileSync(data, 'utf8')).toBe('accepted live writes');
+      expect(head).toBe(TO);
+      expect(runRollback).not.toHaveBeenCalled();
+      expect(runBackup).not.toHaveBeenCalled();
+      expect(retryHealth).not.toHaveBeenCalled();
+      expect(steps.some((step) => /selfhost:deploy|checkout|docker/.test(step))).toBe(false);
+      if (boundary !== 'completion-file-sync') expect(existsSync(pending)).toBe(false);
+    }
+  );
+
+  it.each(['before-unlink', 'lost-unlink'] as const)(
+    'never replays the snapshot after healthy automatic recovery and %s interruption',
+    async (boundary) => {
+      const pending = join(root, 'state', UPGRADE_PENDING_FILE);
+      const data = join(root, 'state/recovered-live-data');
+      let healthCalls = 0,
+        injected = false;
+      const originalRm = fs.rmSync;
+      vi.mocked(runRollback).mockImplementation(() => writeFileSync(data, 'old snapshot rows'));
+      vi.spyOn(fs, 'rmSync').mockImplementation((path, options) => {
+        if (!injected && healthCalls === 2 && String(path) === pending) {
+          injected = true;
+          if (boundary === 'before-unlink')
+            throw new Error('Injected recovered cleanup interruption');
+          const retained = readFileSync(pending, 'utf8');
+          originalRm(path, options);
+          writeFileSync(pending, retained, { mode: 0o600 });
+          return;
+        }
+        return originalRm(path, options);
+      });
+      const health = vi.fn(async () => {
+        healthCalls += 1;
+        if (healthCalls === 1) return false;
+        writeFileSync(data, 'accepted recovery writes');
+        return true;
+      });
+      await expect(runUpgrade(ctx(), { to: 'v2026.11.12', checkHealth: health })).rejects.toThrow();
+      expect(health).toHaveBeenCalledTimes(2);
+      expect(injected).toBe(true);
+      expect(head).toBe(FROM);
+      expect(readFileSync(data, 'utf8')).toBe('accepted recovery writes');
+      expect(runRollback).toHaveBeenCalledOnce();
+      expect(existsSync(pending)).toBe(true);
+      vi.restoreAllMocks();
+      vi.mocked(runRollback).mockClear();
+      await runUpgrade(ctx(), { to: 'v2026.11.12', checkHealth: async () => true });
+      expect(readFileSync(data, 'utf8')).toBe('accepted recovery writes');
+      expect(runRollback).not.toHaveBeenCalled();
+      expect(head).toBe(TO);
+      expect(existsSync(pending)).toBe(false);
+    }
+  );
+
+  it.each(['source', 'target', 'snapshot', 'phase', 'head', 'public-file'] as const)(
+    'refuses a completed marker with invalid %s without restoring or deploying',
+    async (defect) => {
+      head = defect === 'head' ? FROM : TO;
+      const originalHead = head;
+      const pending = join(root, 'state', UPGRADE_PENDING_FILE);
+      const marker = {
+        from: defect === 'source' ? 'HEAD~1' : FROM,
+        to: defect === 'target' ? 'c'.repeat(40) : TO,
+        backupDir: defect === 'snapshot' ? 'relative/path' : join(root, 'snapshot'),
+        phase: defect === 'phase' ? 'unrecognized' : 'completed',
+      };
+      const bytes = JSON.stringify(marker);
+      writeFileSync(pending, bytes, { mode: defect === 'public-file' ? 0o644 : 0o600 });
+      const health = vi.fn(async () => true);
+      await expect(runUpgrade(ctx(), { to: 'v2026.11.12', checkHealth: health })).rejects.toThrow();
+      expect(readFileSync(pending, 'utf8')).toBe(bytes);
+      expect(head).toBe(originalHead);
+      expect(runRollback).not.toHaveBeenCalled();
+      expect(runBackup).not.toHaveBeenCalled();
+      expect(health).not.toHaveBeenCalled();
+      expect(steps.some((step) => /selfhost:deploy|checkout|docker/.test(step))).toBe(false);
+    }
+  );
 
   it('control: a completed upgrade leaves no pending record and is not repeated', async () => {
     await upgrade();

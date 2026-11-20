@@ -5,7 +5,7 @@
  * record; retry recovers the old installation first, then starts a fresh upgrade.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 import {
@@ -37,6 +37,12 @@ import {
 } from './upgrade-compose.js';
 import { rollbackSteps } from './upgrade-instructions.js';
 import {
+  clearUpgradeJournal,
+  completeUpgradeJournal,
+  readPendingFrom,
+  UPGRADE_PENDING_FILE,
+} from './upgrade-journal.js';
+import {
   assertMigrationProgression,
   type DoMigration,
   installedMigrations,
@@ -53,7 +59,7 @@ import {
 
 const MIGRATIONS_DIR = 'apps/api/src/db/migrations/';
 /** Pending original source/target SHAs and encrypted snapshot path, retained through recovery. */
-export const UPGRADE_PENDING_FILE = 'upgrade-pending.json';
+export { UPGRADE_PENDING_FILE } from './upgrade-journal.js';
 
 export interface RunResult {
   status: number;
@@ -200,8 +206,13 @@ export async function recoverUpgrade(
       );
   }
   startRecoveredStack(ctx, backupDir, env);
+  replacePrivateFile(
+    pendingPath,
+    JSON.stringify({ from, ...(to ? { to } : {}), backupDir, phase: 'verifying' })
+  );
   if (!(await opts.checkHealth())) throw new Error('previous version health check failed');
   finishRollbackCache(backupContext(ctx));
+  completeUpgradeJournal(ctx.stateDir, { from, to: from, backupDir });
 }
 
 function startRecoveredStack(ctx: BoxContext, backupDir: string, env?: NodeJS.ProcessEnv): void {
@@ -220,26 +231,6 @@ function startRecoveredStack(ctx: BoxContext, backupDir: string, env?: NodeJS.Pr
     throw error;
   }
   refreshRollbackCacheReceipt(backupContext(ctx), backupDir);
-}
-
-/** The ref an unfinished upgrade started from (`UPGRADE_PENDING_FILE`), or null. */
-function readPendingFrom(stateDir: string): string | null {
-  const path = join(stateDir, UPGRADE_PENDING_FILE);
-  if (!existsSync(path)) return null;
-  let from: unknown;
-  try {
-    const record = JSON.parse(readFileSync(path, 'utf8')) as unknown;
-    if (typeof record === 'object' && record !== null && 'from' in record) from = record.from;
-  } catch {
-    from = undefined;
-  }
-  if (typeof from !== 'string' || !/^[0-9a-f]{40}$/.test(from)) {
-    throw new Error(
-      `${path} is not a record this upgrade wrote; check which ref the box last deployed ` +
-        'successfully, check it out, and delete the file'
-    );
-  }
-  return from;
 }
 
 type Git = (args: string[], what?: string) => string;
@@ -323,6 +314,10 @@ async function applyUpgrade(
     ctx.log('compose inputs unchanged; the stack keeps running');
   }
   pnpm(['selfhost:deploy', ...plan.boxArgs]);
+  // A killed health check may already have admitted writes: never infer rollback is safe.
+  const pendingPath = join(ctx.stateDir, UPGRADE_PENDING_FILE);
+  const pending = JSON.parse(readFileSync(pendingPath, 'utf8'));
+  replacePrivateFile(pendingPath, JSON.stringify({ ...pending, phase: 'verifying' }));
   if (!(await opts.checkHealth())) throw new Error('the API is not healthy after the upgrade');
   return composeRestarted;
 }
@@ -342,10 +337,9 @@ async function recoverPendingUpgrade(
   } catch {
     stopCelldAfterFailure(ctx);
     throw new Error(
-      'unfinished upgrade recovery failed; keep celld stopped and retry using the recorded encrypted snapshot'
+      'unfinished upgrade recovery failed; keep celld stopped, inspect the journal and live data before explicit recovery'
     );
   }
-  rmSync(pendingPath, { force: true });
 }
 
 function stopCelldAfterFailure(ctx: BoxContext): void {
@@ -372,13 +366,13 @@ async function rollbackFailedUpgrade(
     } else {
       git(['checkout', '--detach', from]);
       check(ctx.run('pnpm', ['install', '--frozen-lockfile']), 'restore previous dependencies');
+      clearUpgradeJournal(ctx.stateDir);
     }
-    rmSync(join(ctx.stateDir, UPGRADE_PENDING_FILE), { force: true });
     ctx.log('automatic rollback completed');
   } catch {
     if (progress.deploymentStarted) stopCelldAfterFailure(ctx);
     throw new Error(
-      'upgrade failed and automatic rollback did not complete; keep celld stopped and retry using the recorded encrypted snapshot'
+      'upgrade failed and automatic rollback did not complete; keep celld stopped, inspect the journal and live data before explicit recovery'
     );
   }
 }
@@ -396,7 +390,7 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
   }
   git(['fetch', '--tags', 'origin']);
   const head = git(['rev-parse', 'HEAD']);
-  const pendingFrom = readPendingFrom(ctx.stateDir);
+  const pendingFrom = readPendingFrom(ctx.stateDir, head);
   // A pending record means the checkout may be ahead of what is deployed: start from the record.
   const from = pendingFrom ?? head;
   const to = resolveUpgradeTarget(git, opts.to);
@@ -488,7 +482,8 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
     throw error;
   }
 
-  rmSync(pendingPath, { force: true });
+  // Completion/cleanup failure must never enter automatic rollback after health succeeded.
+  completeUpgradeJournal(ctx.stateDir, { from, to, backupDir });
 
   const { imagesRebuilt } = progress;
   const rollback = rollbackSteps(ctx, from, backupDir, imagesRebuilt);
