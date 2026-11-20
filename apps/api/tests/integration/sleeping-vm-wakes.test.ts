@@ -15,6 +15,8 @@ import {
 import {
   OWNER_ONLY_SCHEDULE,
   requireScheduleAction,
+  SCHEDULE_CREATOR_AUTHORITY_ENDED,
+  SCHEDULE_TARGET_TASK_ENDED,
 } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-authority';
 import { runScheduleAlarm } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-runner';
 import {
@@ -29,6 +31,7 @@ import {
   runProjectEventWakeMaterializationBatch,
   selectProjectEventWakeMaterializationCandidates,
 } from '@simple-agent-manager/project-data/internal/do/project-events-materialization';
+import { stopSession } from '@simple-agent-manager/project-data/internal/do/sessions';
 import type { ProjectScheduledAction } from '@simple-agent-manager/shared';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -194,16 +197,28 @@ describe('a slept VM task is woken through the durable prompt queue', () => {
       });
     });
 
+    function finishedAt(scheduleId: string) {
+      return doDb
+        .prepare('SELECT execution_finished_at AS finishedAt FROM project_schedules WHERE id = ?')
+        .get(scheduleId) as { finishedAt: number | null };
+    }
+
+    // The chat ending first is a normal end: nothing is left to wake and no one can fix it, so
+    // it is recorded like a cancellation rather than as a failure that asks for attention.
     it.each([
       [
         'the task completed',
         () => d1.prepare("UPDATE tasks SET status = 'completed' WHERE id = ?").run(TASK),
       ],
       [
-        'the creator was suspended',
-        () => d1.prepare("UPDATE project_members SET status = 'suspended'").run(),
+        'the task was cancelled',
+        () => d1.prepare("UPDATE tasks SET status = 'cancelled' WHERE id = ?").run(TASK),
       ],
-    ])('still refuses the self-wake when %s while it slept', async (_label, change) => {
+      [
+        'the task failed',
+        () => d1.prepare("UPDATE tasks SET status = 'failed' WHERE id = ?").run(TASK),
+      ],
+    ])('records the self-wake as cancelled when %s before it was due', async (_label, change) => {
       const schedule = await scheduleWhileAwake();
       await sleepTheTask();
       change();
@@ -211,9 +226,42 @@ describe('a slept VM task is woken through the durable prompt queue', () => {
       await fireSchedule();
 
       expect(getSchedule(sql, PROJECT, schedule.id)).toMatchObject({
-        state: 'failed',
-        lastError: 'Scheduled target or creator authority is no longer active',
+        state: 'cancelled',
+        lastError: SCHEDULE_TARGET_TASK_ENDED,
+        nextAttemptAt: null,
       });
+      expect(finishedAt(schedule.id).finishedAt).toEqual(expect.any(Number));
+      expect(inbox('scheduled_action')).toEqual([]);
+      await runDeliveryAlarm();
+      expect(recovery.ensure).not.toHaveBeenCalled();
+    });
+
+    it('records the self-wake as cancelled when the chat itself stopped before it was due', async () => {
+      const schedule = await scheduleWhileAwake();
+      await sleepTheTask();
+      expect(stopSession(sql, CHAT)).not.toBeNull();
+
+      await fireSchedule();
+
+      expect(getSchedule(sql, PROJECT, schedule.id)).toMatchObject({
+        state: 'cancelled',
+        lastError: 'Scheduled target session is no longer active or recoverable',
+      });
+      expect(inbox('scheduled_action')).toEqual([]);
+    });
+
+    it('still records a failure when the creator lost access while the chat is live', async () => {
+      const schedule = await scheduleWhileAwake();
+      await sleepTheTask();
+      d1.prepare("UPDATE project_members SET status = 'suspended'").run();
+
+      await fireSchedule();
+
+      expect(getSchedule(sql, PROJECT, schedule.id)).toMatchObject({
+        state: 'failed',
+        lastError: SCHEDULE_CREATOR_AUTHORITY_ENDED,
+      });
+      expect(finishedAt(schedule.id).finishedAt).toBeNull();
       expect(inbox('scheduled_action')).toEqual([]);
       await runDeliveryAlarm();
       expect(recovery.ensure).not.toHaveBeenCalled();

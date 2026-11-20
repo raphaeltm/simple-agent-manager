@@ -586,6 +586,66 @@ describe('Project Overview', () => {
     );
   });
 
+  it("does not count an agent's own wake-up that did not run as failing", async () => {
+    const failedSchedule = (fields: Record<string, unknown>) => ({
+      projectId: PROJECT_ID,
+      creatorUserId: 'user-1',
+      state: 'failed',
+      dueAt: Date.now() - 3_600_000,
+      displayTimezone: 'UTC',
+      expiresAt: Date.now() + 86_400_000,
+      version: 1,
+      createdAt: Date.now() - 7_200_000,
+      updatedAt: Date.now() - 3_600_000,
+      nextAttemptAt: null,
+      attemptCount: 1,
+      eventId: null,
+      deliveryId: null,
+      resultTaskId: null,
+      resultSessionId: null,
+      watchId: null,
+      sourceEventId: null,
+      ...fields,
+    });
+    extraRoutes = {
+      ...AUTOMATION_ROUTES,
+      [`/api/projects/${PROJECT_ID}/schedules`]: {
+        schedules: [
+          // The production shape: an agent's fallback wake-up into its own chat.
+          failedSchedule({
+            id: 'sch-own',
+            creatorChatSessionId: 'chat-agent',
+            promptAuthor: 'agent',
+            reason: 'Canonical24h history recheck after original node errors age',
+            action: { kind: 'message_session', sessionId: 'chat-agent', prompt: 'Recheck.' },
+            idempotencyKey: 'own',
+            lastError: 'Schedule creator can no longer message the target chat',
+          }),
+          // A person's schedule that did not run still needs them.
+          failedSchedule({
+            id: 'sch-person',
+            creatorChatSessionId: null,
+            promptAuthor: 'human',
+            reason: 'Remind the release chat about the changelog',
+            action: { kind: 'message_session', sessionId: 'chat-release', prompt: 'Changelog?' },
+            idempotencyKey: 'person',
+            lastError: 'Schedule creator can no longer message the target chat',
+          }),
+        ],
+        nextCursor: null,
+      },
+    };
+    renderOverview();
+    const automations = await screen.findByRole('region', { name: 'Automations' });
+    await within(automations).findByText('2 failing');
+    const lines = within(automations).getAllByTestId('automation-attention-line');
+    expect(lines.map((line) => line.textContent)).toEqual([
+      expect.stringContaining('Remind the release chat about the changelog'),
+      expect.stringContaining('Nightly dependency audit'),
+    ]);
+    expect(within(automations).queryByText(/Canonical24h history recheck/)).toBeNull();
+  });
+
   it('links recent ideas to their pages and merged pull requests to GitHub', async () => {
     overviewBody = {
       ...overview([EXISTING]),

@@ -95,6 +95,7 @@ function schedule(overrides: Partial<ProjectSchedule> = {}): ProjectSchedule {
     projectId: 'proj-1',
     creatorUserId: 'user-1',
     creatorChatSessionId: null,
+    promptAuthor: null,
     reason: null,
     action: { kind: 'message_session', sessionId: 'chat-1', prompt: 'Check the release\nmore' },
     state: 'pending',
@@ -334,6 +335,69 @@ describe('one-time schedules', () => {
     );
     expect(old.attention).toBeNull();
     expect(old.state).toBe('done');
+  });
+});
+
+describe("a chat's own reminders", () => {
+  const own = (overrides: Partial<ProjectSchedule> = {}) =>
+    schedule({
+      promptAuthor: 'agent',
+      creatorChatSessionId: 'chat-1',
+      action: { kind: 'message_session', sessionId: 'chat-1', prompt: 'Check CI' },
+      state: 'failed',
+      lastError: 'Schedule creator can no longer message the target chat',
+      updatedAt: NOW - HOUR,
+      ...overrides,
+    });
+
+  it.each(['failed', 'ambiguous', 'expired'] as const)(
+    'never asks for attention when an agent reminder into its own chat is %s',
+    (state) => {
+      const item = fromSchedule(own({ state }), NOW, WINDOW);
+      expect(item.attention).toBeNull();
+      // Its outcome still shows on the item and in History.
+      expect(item.stateNote).toBeTruthy();
+      expect(attentionItems([item])).toEqual([]);
+    }
+  );
+
+  it("treats SAM's own continuation into a chat the same way", () => {
+    expect(fromSchedule(own({ promptAuthor: 'sam' }), NOW, WINDOW).attention).toBeNull();
+  });
+
+  it.each<[string, Partial<ProjectSchedule>]>([
+    ['a person wrote it', { promptAuthor: 'human' }],
+    ['the author is unknown', { promptAuthor: null }],
+    [
+      'an agent aimed it at another chat',
+      { action: { kind: 'message_session', sessionId: 'chat-2', prompt: 'Ping' } },
+    ],
+    ['it was not made from a chat', { creatorChatSessionId: null }],
+    [
+      'it starts a new chat',
+      {
+        action: { kind: 'start_session', prompt: 'Go', agentProfileId: null, skillId: null },
+      },
+    ],
+  ])('still asks for attention when %s', (_label, overrides) => {
+    expect(fromSchedule(own(overrides), NOW, WINDOW).attention).toMatchObject({
+      title: 'Did not run',
+    });
+  });
+
+  it('lists a target-ended schedule as cancelled with its reason, not as a problem', () => {
+    const item = fromSchedule(
+      schedule({
+        state: 'cancelled',
+        lastError: 'The chat it was meant to message had already ended',
+        updatedAt: NOW - HOUR,
+      }),
+      NOW,
+      WINDOW
+    );
+    expect(item.attention).toBeNull();
+    expect(item.state).toBe('cancelled');
+    expect(item.stateNote).toBe('Reason: The chat it was meant to message had already ended');
   });
 });
 

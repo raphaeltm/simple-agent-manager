@@ -11,6 +11,7 @@ import { admitScheduleClaim, scheduledTaskPrompt } from './project-event-schedul
 import { requireScheduleAction, scheduleSharedAccess } from './project-event-schedules-authority';
 import { boundedScheduleTaskLabel, scheduleLimits } from './project-event-schedules-config';
 import { getSchedule, scheduleSharedAccessGrantId } from './project-event-schedules-storage';
+import { ScheduleTargetEndedError } from './project-event-schedules-target-ended';
 import { ProjectEventValidationError } from './project-events-contracts';
 import { stableStringify } from './project-events-values';
 import { loadSharedSessionNames } from './shared-session-names';
@@ -386,17 +387,24 @@ export async function runScheduleAlarm(
         if (delivery)
           await finalizeAcceptedPromptDelivery(sql, env, hooks, delivery.input, delivery.accepted);
       } catch (error) {
+        // The target chat ending first is a normal end, recorded like a cancellation, not a
+        // failure: nothing is left to wake and no one can fix it.
+        const targetEnded = error instanceof ScheduleTargetEndedError;
         const permanent = error instanceof ProjectEventValidationError;
+        const now = Date.now();
         sql.exec(
           `UPDATE project_schedules SET state = ?, next_attempt_at = ?, last_error = ?,
-          claim_token = NULL, claim_until = NULL, updated_at = ?
+          claim_token = NULL, claim_until = NULL, updated_at = ?,
+          execution_finished_at = CASE WHEN ? = 1 THEN ? ELSE execution_finished_at END
           WHERE project_id = ? AND id = ? AND state = 'processing' AND claim_token = ?`,
-          permanent ? 'failed' : 'pending',
-          permanent ? null : Date.now() + limits.retryBaseMs,
+          targetEnded ? 'cancelled' : permanent ? 'failed' : 'pending',
+          permanent ? null : now + limits.retryBaseMs,
           error instanceof Error
             ? error.message.slice(0, limits.promptBytes)
             : 'Schedule admission failed',
-          Date.now(),
+          now,
+          targetEnded ? 1 : 0,
+          now,
           projectId,
           id,
           claim.token

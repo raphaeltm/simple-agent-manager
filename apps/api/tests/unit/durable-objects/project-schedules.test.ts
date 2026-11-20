@@ -388,8 +388,10 @@ describe('project schedules — real migrations, CRUD and canonical admission', 
       await alarm;
       expect(f.effects()).toEqual({ events: [], mailbox: [], transcript: [] });
       expect(submitReservedTaskMock).not.toHaveBeenCalled();
+      // The chat or its task ending first is a cancellation, not a failure; only a creator who
+      // lost access while the chat is live records a failure.
       expect(getSchedule(f.sql, PROJECT, schedule.id)?.state).toBe(
-        change === 'cancel schedule' || change === 'cancel start schedule' ? 'cancelled' : 'failed'
+        change === 'suspend member' ? 'failed' : 'cancelled'
       );
     }
   );

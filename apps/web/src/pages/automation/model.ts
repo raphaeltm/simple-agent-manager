@@ -26,6 +26,7 @@ import {
   webhookScheme,
   webhookTriggerWhen,
 } from './describe';
+import { isChatOwnReminder } from './own-reminder';
 import { dateTimeLabel, viewerZone } from './time';
 
 /** What starts an automation, which is also how the overview groups it. */
@@ -255,6 +256,7 @@ export function scheduleAttention(
   windowMs: number
 ): Attention | null {
   if (now - schedule.updatedAt > windowMs) return null;
+  if (isChatOwnReminder(schedule)) return null;
   if (schedule.state === 'ambiguous') {
     return {
       tone: 'warning',

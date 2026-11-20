@@ -226,6 +226,47 @@ describe('scheduled actions public boundaries', () => {
     expect((await f.tool('create_project_standing_watch', {})).error).toBeDefined();
   });
 
+  it('records a wake-up whose chat ended first as cancelled, and the REST list says so', async () => {
+    const f = await fixture();
+    const created = await service.createProjectSchedule(testEnv, f.projectId, {
+      userId: f.userId,
+      creatorChatSessionId: f.sessionId,
+      creator: 'agent',
+      promptAuthor: 'agent',
+      request: request(f.sessionId),
+    });
+    // The agent's task is cancelled before its own wake-up is due.
+    await testEnv.DATABASE.prepare(`UPDATE tasks SET status = 'cancelled' WHERE id = ?`)
+      .bind(f.taskId)
+      .run();
+    await runInDurableObject(f.stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `UPDATE project_schedules SET due_at = ?, next_attempt_at = ? WHERE id = ?`,
+        Date.now() - 1,
+        Date.now() - 1,
+        created.schedule.id
+      );
+      await runScheduleAlarm(state.storage.sql, testEnv, {
+        getProjectId: () => f.projectId,
+        transactionSync: (callback) => state.storage.transactionSync(callback),
+        waitUntil: () => {},
+        recalculateAlarm: async () => {},
+        scheduleSummarySync: () => {},
+        broadcastEvent: () => {},
+      });
+    });
+    const response = await browser(f.projectId, f.userId);
+    expect(response.status).toBe(200);
+    const listed = (await response.json<{ schedules: Array<Record<string, unknown>> }>()).schedules;
+    expect(listed.find((schedule) => schedule.id === created.schedule.id)).toMatchObject({
+      state: 'cancelled',
+      lastError: 'The chat it was meant to message had already ended',
+      promptAuthor: 'agent',
+      creatorChatSessionId: f.sessionId,
+      deliveryId: null,
+    });
+  });
+
   it('atomically records a due event and prompt using real workerd SQLite within the same chat', async () => {
     const f = await fixture();
     const created = await service.createProjectSchedule(testEnv, f.projectId, {
