@@ -12,7 +12,18 @@ const file = join(STATE, 'gcp.json');
 const db = existsSync(file)
   ? JSON.parse(readFileSync(file, 'utf8'))
   : { pools: {}, providers: {}, accounts: {}, bindings: [] };
-const save = () => writeFileSync(file, JSON.stringify(db, null, 2));
+const save = () => {
+  writeFileSync(file, JSON.stringify(db, null, 2));
+  if (
+    process.env.FAKE_GCLOUD_AFTER_GRANT &&
+    cmd.startsWith(process.env.FAKE_GCLOUD_AFTER_GRANT) &&
+    !existsSync(join(STATE, 'grant-effect'))
+  ) {
+    writeFileSync(join(STATE, 'grant-effect'), cmd);
+    if (process.env.FAKE_GCLOUD_GRANT_FAILURE === 'kill') process.kill(process.ppid, 'SIGKILL');
+    else process.exit(1);
+  }
+};
 const flag = (name) => {
   const hit = args.find((a) => a.startsWith(`--${name}=`));
   if (hit) return hit.slice(name.length + 3);

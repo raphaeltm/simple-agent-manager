@@ -21,7 +21,18 @@
 //   created-resources.mjs add <file> <cloud> <kind> <name> <created|reused> <createdBy> [k=v ...]
 //   created-resources.mjs list <file> <cloud> <createdBy>   -> kind<TAB>name<TAB>action<TAB>removedAt
 //   created-resources.mjs removed <file> <cloud> <kind> <name>
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeSync,
+} from 'node:fs';
 import { dirname } from 'node:path';
 
 export const FORMAT = 'sam-created-resources/1';
@@ -62,9 +73,78 @@ export function readRecord(file) {
 
 function writeRecord(file, record) {
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-  const tmp = `${file}.tmp-${process.pid}`;
-  writeFileSync(tmp, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+  const tmp = `${file}.tmp-${process.pid}-${randomUUID()}`;
+  const fd = openSync(tmp, 'wx', 0o600);
+  try {
+    const data = Buffer.from(`${JSON.stringify(record, null, 2)}\n`);
+    let offset = 0;
+    while (offset < data.length) {
+      const count = writeSync(fd, data, offset, data.length - offset);
+      if (!count) throw new Error('Cannot persist resource receipt');
+      offset += count;
+    }
+    fsyncSync(fd);
+  } catch (error) {
+    rmSync(tmp, { force: true });
+    throw error;
+  } finally {
+    closeSync(fd);
+  }
   renameSync(tmp, file);
+  const parent = openSync(dirname(file), 'r');
+  try {
+    fsyncSync(parent);
+  } finally {
+    closeSync(parent);
+  }
+}
+
+/** Absence was checked before an exact unconditional IAM mutation; retain that intent on retry. */
+export function grantIntent(file, entry) {
+  const attrs = entry.attributes ?? {};
+  const required = [
+    'project',
+    'install',
+    'identity',
+    'pool',
+    'environment',
+    'installation',
+    'account',
+    'member',
+    'role',
+    'condition',
+  ];
+  if (
+    entry.cloud !== 'gcp' ||
+    entry.createdBy !== 'gcp-bootstrap' ||
+    !['created', 'reused'].includes(entry.action) ||
+    !['iam-binding', 'service-account-iam-binding'].includes(entry.kind) ||
+    required.some((key) => typeof attrs[key] !== 'string' || !attrs[key]) ||
+    attrs.condition !== 'None'
+  )
+    throw new Error('Incomplete unconditional IAM grant intent');
+  const prior = readRecord(file).resources.find(
+    (r) => r.cloud === entry.cloud && r.kind === entry.kind && r.name === entry.name
+  );
+  if (prior && !prior.removedAt) {
+    if (
+      (prior.attributes?.grantPending &&
+        prior.attributes.grantPending !== 'unconditional-grant/1') ||
+      prior.createdBy !== entry.createdBy ||
+      required.some(
+        (key) =>
+          (prior.attributes?.[key] ?? (key === 'condition' ? 'None' : undefined)) !== attrs[key]
+      )
+    )
+      throw new Error('IAM grant identity or ownership scope changed; refusing intent adoption');
+    // A present preexisting grant stays reused. An observed absent grant is a new creation.
+    if (prior.action === 'created') entry.action = 'created';
+  }
+  entry.attributes = {
+    ...attrs,
+    grantPending: entry.action === 'created' ? 'unconditional-grant/1' : '',
+  };
+  addResource(file, entry);
 }
 
 /**
@@ -125,7 +205,7 @@ export function markRemoved(file, cloud, kind, name, now = new Date()) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [command, file, ...rest] = process.argv.slice(2);
   try {
-    if (command === 'add') {
+    if (command === 'add' || command === 'grant-intent') {
       const [cloud, kind, name, action, createdBy, ...pairs] = rest;
       if (!cloud || !kind || !name || !['created', 'reused'].includes(action) || !createdBy) {
         throw new Error(
@@ -135,7 +215,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       const attributes = Object.fromEntries(
         pairs.map((pair) => [pair.slice(0, pair.indexOf('=')), pair.slice(pair.indexOf('=') + 1)])
       );
-      addResource(file, { cloud, kind, name, attributes, createdBy, action });
+      const entry = { cloud, kind, name, attributes, createdBy, action };
+      if (command === 'grant-intent') grantIntent(file, entry);
+      else addResource(file, entry);
     } else if (command === 'list') {
       const [cloud, createdBy] = rest;
       for (const r of readRecord(file).resources) {

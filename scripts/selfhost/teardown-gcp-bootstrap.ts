@@ -221,6 +221,12 @@ function assertAccountExclusive(
 
 function bootstrapOperation(entry: CreatedResource, project: string, issuer: string) {
   const attrs = entry.attributes ?? {};
+  if (
+    ['iam-binding', 'service-account-iam-binding'].includes(entry.kind) &&
+    attrs.condition !== undefined &&
+    attrs.condition !== 'None'
+  )
+    throw new Error('Refused: grant receipt does not prove an unconditional binding');
   const pool = attrs.pool;
   const where = [`--project=${project}`];
   let describe: string[];

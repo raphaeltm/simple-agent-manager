@@ -30,3 +30,8 @@ export function markRemoved(
   name: string,
   now?: Date
 ): void;
+
+export function grantIntent(
+  file: string,
+  entry: Omit<CreatedResource, 'createdAt' | 'removedAt'>
+): void;

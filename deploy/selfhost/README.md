@@ -306,6 +306,30 @@ other VM users; it preserves shared or legacy rules (`deploy/selfhost/gcp-bootst
 `scripts/selfhost/teardown-gcp.ts:firewallItems`). Keep `.state/created-resources.json` after a
 partial teardown: it is the receipt used to resume cleanup.
 
+Keep that receipt after interrupted bootstrap too: project and service-account IAM grants have
+an exact, durable intent before mutation, so retrying can preserve their creation proof
+(`deploy/selfhost/created-resources.mjs:grantIntent`, `gcp-bootstrap.sh:record_resource`).
+Pool, provider, service-account and optional firewall creation still have a post-create receipt
+window: interruption before the receipt is saved can leave an unrecorded resource that retry
+preserves as reused. Teardown will not adopt it. Inspect these public inventories in the node
+project before manual cleanup:
+
+```sh
+gcloud iam workload-identity-pools list --project <node-project> --location global --show-deleted
+gcloud iam workload-identity-pools providers list --project <node-project> --location global --workload-identity-pool <pool-id> --show-deleted
+gcloud iam service-accounts list --project <node-project>
+gcloud compute firewall-rules list --project <node-project>
+```
+
+Cross-check immutable IDs, issuer/description, creation time and the creator in Cloud Audit Logs
+against your setup; a familiar name is insufficient. Inspect pool providers, account grants/keys
+and firewall users before deleting anything. Remove only resources you can prove this install
+created and exclusively uses; retain ambiguous/shared resources for inspection. A leftover
+bootstrap firewall retains its original target tags, source ranges and TCP ports: agent ingress
+8080/8443 from the selected ranges, or public app ingress 80/443. It does not widen them, but it
+continues admitting matching traffic until you remove the proven-owned rule. These limitations
+follow the create/describe/record sequence in `deploy/selfhost/gcp-bootstrap.sh`.
+
 ## Image builds
 
 `caddy` and `sam-mx` are built on the box; every other image is pulled by digest. Builds are

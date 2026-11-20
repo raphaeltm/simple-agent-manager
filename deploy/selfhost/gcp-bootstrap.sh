@@ -157,10 +157,14 @@ command -v gcloud >/dev/null 2>&1 || die "gcloud is not installed or not on PATH
 # creation proof; teardown will preserve resources that existed before this install.
 record_resource() {
   local resource_kind="$1" resource_name="$2" resource_action="$3" resource_identity="$4"
-  local resource_member="${5:-}" resource_role="${6:-}"
+  local resource_member="${5:-}" resource_role="${6:-}" resource_operation="${7:-add}"
+  local grant_attributes=()
+  if [[ "$resource_kind" == iam-binding || "$resource_kind" == service-account-iam-binding ]]; then
+    grant_attributes=("condition=None" "grantPending=")
+  fi
   [[ "$DRY_RUN" -eq 0 && -n "$INSTALLATION_ID" ]] || return 0
-  node "$SCRIPT_DIR/created-resources.mjs" add "$STATE_DIR/created-resources.json" gcp "$resource_kind" "$resource_name" "$resource_action" gcp-bootstrap \
-    "project=$PROJECT" "install=$ISSUER" "identity=$resource_identity" "pool=$POOL_ID" "environment=selfhost" "installation=$INSTALLATION_ID" "account=$SA_EMAIL" "member=$resource_member" "role=$resource_role"
+  node "$SCRIPT_DIR/created-resources.mjs" "$resource_operation" "$STATE_DIR/created-resources.json" gcp "$resource_kind" "$resource_name" "$resource_action" gcp-bootstrap \
+    "project=$PROJECT" "install=$ISSUER" "identity=$resource_identity" "pool=$POOL_ID" "environment=selfhost" "installation=$INSTALLATION_ID" "account=$SA_EMAIL" "member=$resource_member" "role=$resource_role" "${grant_attributes[@]}"
 }
 
 # The OIDC provider trusts the issuer the install advertises: check it before trusting it.
@@ -396,6 +400,7 @@ for role in "${NODE_ROLES[@]}"; do
       *) die "cannot parse project IAM policy" ;;
     esac
   fi
+  record_resource iam-binding "projects/$PROJECT#$role#serviceAccount:$SA_EMAIL" "$grant_action" "${sa_identity:-}" "serviceAccount:$SA_EMAIL" "$role" grant-intent
   change_retry projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:${SA_EMAIL}" \
     --role="$role" --condition=None --quiet --format=none
   if [[ "$DRY_RUN" -eq 0 && -n "$INSTALLATION_ID" ]]; then
@@ -424,6 +429,7 @@ if [[ "$DRY_RUN" -eq 0 && -n "$INSTALLATION_ID" && "$sa_existed" -eq 1 ]]; then
     *) die "cannot parse service account IAM policy" ;;
   esac
 fi
+record_resource service-account-iam-binding "$SA_EMAIL#roles/iam.workloadIdentityUser#$POOL_PRINCIPAL" "$sa_grant_action" "${sa_identity:-}" "$POOL_PRINCIPAL" roles/iam.workloadIdentityUser grant-intent
 change_retry iam service-accounts add-iam-policy-binding "$SA_EMAIL" --project="$PROJECT" \
   --role=roles/iam.workloadIdentityUser --member="$POOL_PRINCIPAL" \
   --condition=None --quiet --format=none
