@@ -8,14 +8,14 @@
 import { IconButton, paneClassName, Spinner } from '@simple-agent-manager/ui';
 import { useQuery } from '@tanstack/react-query';
 import { X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { downloadLibraryFile, getLibraryFilePreviewUrl } from '../../lib/api/library';
 import { libraryFileQueryOptions } from '../../lib/query-options';
 import { useDialogFocusTrap } from '../chat/useDialogFocusTrap';
 import { FilePreviewModal } from './FilePreviewModal';
-import { PreviewFrame, type PreviewPresentation } from './PreviewFrame';
+import { isTopmostPreview, PreviewFrame, type PreviewPresentation } from './PreviewFrame';
 
 export interface LibraryFilePreviewProps {
   projectId: string;
@@ -45,7 +45,8 @@ function PreviewPlaceholder({
 }>) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  useDialogFocusTrap(dialogRef, onClose);
+  const isTopmost = useCallback(() => isTopmostPreview(dialogRef.current), []);
+  useDialogFocusTrap(dialogRef, onClose, true, isTopmost);
 
   // Hand focus back to the opener on unmount. React runs this cleanup before the real viewer's
   // mount effect, so the viewer records the opener — not this frame — as where focus returns.
@@ -77,7 +78,7 @@ function PreviewPlaceholder({
         className={`${paneClassName('quiet')} flex min-h-0 flex-1 items-center justify-center p-8 text-center`}
       >
         {error ? (
-          <p className="m-0 max-w-sm text-sm text-fg-muted">
+          <p role="alert" className="m-0 max-w-sm text-sm text-fg-muted">
             This file couldn&apos;t be opened. It may have been deleted.
           </p>
         ) : (

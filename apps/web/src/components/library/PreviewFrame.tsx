@@ -19,8 +19,9 @@ export type PreviewPresentation = 'screen' | 'overlay';
 const ROOT_ATTRIBUTE = 'data-library-preview-root';
 
 /**
- * Whether `dialog` belongs to the most recently opened viewer. A markdown file can link another
- * Library file, which opens a second viewer over the first; Escape closes only the top one.
+ * Whether `dialog` belongs to the most recently opened viewer. On the Library page its own viewer
+ * can show a markdown file that links another Library file; that link opens the app-level
+ * viewer over it, and Escape and Tab belong to the top one only.
  */
 export function isTopmostPreview(dialog: HTMLElement | null): boolean {
   if (!dialog) return false;

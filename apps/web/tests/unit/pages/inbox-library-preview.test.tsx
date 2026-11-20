@@ -233,6 +233,33 @@ describe('Library references in the inbox open in place', () => {
     expect(location.pathname).toBe('/inbox');
   });
 
+  it('Escape closes an open comments panel before the preview, and never a typed answer', async () => {
+    renderInbox();
+    fireEvent.click(await fileChip());
+    const dialog = await previewDialog();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Show comments' }));
+    expect(await screen.findByRole('complementary', { name: 'File comments' })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    await waitFor(() =>
+      expect(screen.queryByRole('complementary', { name: 'File comments' })).not.toBeInTheDocument()
+    );
+    expect(screen.getByRole('dialog', { name: FILENAME })).toBeInTheDocument();
+
+    // Focus in a field with text: Escape leaves everything open.
+    const box = document.createElement('textarea');
+    box.value = 'half a comment';
+    dialog.appendChild(box);
+    box.focus();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.getByRole('dialog', { name: FILENAME })).toBeInTheDocument();
+    box.remove();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
   it('on a phone the preview is full screen with a visible close control', async () => {
     mobile.value = true;
     renderInbox();

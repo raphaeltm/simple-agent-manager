@@ -111,8 +111,8 @@ const ITEM = {
   links: FILES.map((file) => ({ kind: 'file', id: file.id, label: file.label })),
 };
 
-async function openItem(page: Page) {
-  const state: InboxMockState = { items: [ITEM], answered: [], archived: [] };
+async function openItem(page: Page, item = ITEM) {
+  const state: InboxMockState = { items: [item], answered: [], archived: [] };
   await setupInboxMocks(page, state);
   // Registered after the inbox mocks, so these take precedence for Library URLs.
   const png = largePng();
@@ -155,7 +155,7 @@ async function openItem(page: Page) {
   });
   const params = new URLSearchParams({ item: ITEM.ref, project: PROJECT });
   await page.goto(`/inbox?${params.toString()}`);
-  await expect(page.getByRole('heading', { name: ITEM.title })).toBeVisible();
+  await expect(page.getByRole('heading', { name: item.title })).toBeVisible();
 }
 
 async function openChip(page: Page, file: MockFile) {
@@ -196,6 +196,14 @@ for (const viewport of [
       const { chip, dialog } = await openChip(page, FILES[0]!);
       await expect(dialog.locator('img')).toBeVisible();
       await expectDialogInViewport(page);
+      // Desktop floats the viewer in a live glass overlay over the page; phones keep a screen.
+      const root = page.getByTestId('library-preview-root');
+      if (viewport.touch) {
+        await expect(root).toHaveAttribute('data-presentation', 'screen');
+      } else {
+        await expect(root).toHaveAttribute('data-presentation', 'overlay');
+        await expect(dialog).toHaveClass(/sam-glass-live/);
+      }
       await assertNoOverflow(page);
       await screenshot(page, 'library-ref-preview-image-long-name');
 
@@ -244,3 +252,69 @@ for (const viewport of [
     });
   });
 }
+
+test.describe('Library reference preview — page underneath is untouched', () => {
+  test.use({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
+
+  test('scroll position and a half-typed answer survive opening and closing a preview', async ({
+    page,
+  }) => {
+    // A long reason, so the item pane scrolls before the chips.
+    const longBody = Array.from(
+      { length: 14 },
+      (_, i) => `Paragraph ${i + 1}: the totals moved after the VAT change, see the files below.`
+    ).join('\n\n');
+    await openItem(page, { ...ITEM, body: longBody });
+    await page.getByRole('button', { name: 'Type a different answer' }).click();
+    const answer = page.getByRole('textbox').last();
+    await answer.fill('Mostly, but the VAT line');
+    // Scroll the item pane so the chips are in view, then remember where it was.
+    const chip = page.getByRole('link', { name: FILES[3]!.label });
+    await chip.scrollIntoViewIfNeeded();
+    const scrollBefore = await page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>('*'))
+        .filter((el) => el.scrollTop > 0)
+        .map((el) => el.scrollTop)
+    );
+    // Liveness: something really is scrolled, so equal positions below are not two empty lists.
+    expect(scrollBefore.length).toBeGreaterThan(0);
+    await chip.click();
+    await expect(page.getByRole('dialog', { name: FILES[3]!.filename })).toBeVisible();
+    await page.goBack();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(answer).toHaveValue('Mostly, but the VAT line');
+    const scrollAfter = await page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>('*'))
+        .filter((el) => el.scrollTop > 0)
+        .map((el) => el.scrollTop)
+    );
+    expect(scrollAfter).toEqual(scrollBefore);
+  });
+});
+
+test.describe('Library reference preview — light theme', () => {
+  test.use({ colorScheme: 'light' });
+
+  for (const viewport of [
+    { size: { width: 375, height: 667 }, touch: true },
+    { size: { width: 1280, height: 800 }, touch: false },
+  ]) {
+    test(`markdown preview over the inbox at ${viewport.size.width}px`, async ({ browser }) => {
+      const context = await browser.newContext({
+        viewport: viewport.size,
+        isMobile: viewport.touch,
+        hasTouch: viewport.touch,
+        colorScheme: 'light',
+        serviceWorkers: 'block',
+      });
+      const page = await context.newPage();
+      await openItem(page);
+      await expect(page.locator('html')).toHaveAttribute('data-ui-theme', 'sam-light');
+      await openChip(page, FILES[3]!);
+      await expectDialogInViewport(page);
+      await assertNoOverflow(page);
+      await screenshot(page, 'library-ref-preview-markdown-light');
+      await context.close();
+    });
+  }
+});

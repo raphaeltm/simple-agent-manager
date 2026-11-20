@@ -1,11 +1,12 @@
 import { IconButton, paneClassName, SegmentedControl } from '@simple-agent-manager/ui';
 import { Code, Download, Eye, FolderOpen, MessageSquare, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
 import { useFileTextContent } from '../../hooks/useFileTextContent';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import { formatFileSize } from '../../lib/file-utils';
+import { useDialogFocusTrap } from '../chat/useDialogFocusTrap';
 import type { UiCommentThread } from '../project-message-view/comments/comment-utils';
 import {
   SelectionActionBar,
@@ -48,6 +49,7 @@ export function FilePreviewModal({
   onOpenInLibrary,
 }: FilePreviewModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
   const isMobile = useIsMobile();
   const [commentsOpen, setCommentsOpen] = useState(Boolean(initialCommentThreadId));
   const [focusedThreadId, setFocusedThreadId] = useState<string | null>(initialCommentThreadId);
@@ -111,52 +113,32 @@ export function FilePreviewModal({
     error: htmlSourceError,
   } = useFileTextContent(previewUrl, isHtml && htmlViewMode === 'source');
 
-  // Escape key handler
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isTopmostPreview(dialogRef.current)) {
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
-
   // Prevent body scroll — always active while this modal is mounted
   useScrollLock(true);
 
-  // Focus trap: cycle Tab between focusable elements within the dialog
-  const handleTabTrap = useCallback((e: KeyboardEvent) => {
-    if (e.key !== 'Tab') return;
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-
-    const focusable = dialog.querySelectorAll<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    );
-    if (focusable.length === 0) return;
-
-    const first = focusable[0] as HTMLElement | undefined;
-    const last = focusable[focusable.length - 1] as HTMLElement | undefined;
-    if (!first || !last) return;
-
-    if (e.shiftKey) {
-      if (document.activeElement === first || document.activeElement === dialog) {
-        e.preventDefault();
-        last.focus();
-      }
-    } else {
-      if (document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
+  const closeComments = useCallback(() => {
+    setPendingQuote(null);
+    setFocusedThreadId(null);
+    setCommentsOpen(false);
   }, []);
 
-  useEffect(() => {
-    document.addEventListener('keydown', handleTabTrap);
-    return () => document.removeEventListener('keydown', handleTabTrap);
-  }, [handleTabTrap]);
+  // Escape steps back one layer and never throws away typing: a half-written comment stays, an
+  // open comments panel closes before the viewer does.
+  const handleEscape = useCallback(() => {
+    const active = document.activeElement;
+    if (
+      (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) &&
+      active.value.trim() !== ''
+    ) {
+      return;
+    }
+    if (commentsOpen) {
+      closeComments();
+      return;
+    }
+    onClose();
+  }, [closeComments, commentsOpen, onClose]);
+  const isTopmost = useCallback(() => isTopmostPreview(dialogRef.current), []);
 
   // Focus dialog on mount and return focus on close
   const previousFocusRef = useRef<HTMLElement | null>(null);
@@ -167,6 +149,9 @@ export function FilePreviewModal({
       previousFocusRef.current?.focus();
     };
   }, []);
+  // Tab stays inside the viewer (and is pulled back in if focus strayed), Escape as above. Only
+  // the topmost viewer listens, when one file's markdown opened another over it.
+  useDialogFocusTrap(dialogRef, handleEscape, true, isTopmost);
 
   const showMdToggle = kind === 'markdown' && mdContent !== null;
   const showHtmlToggle = kind === 'html' && !isTooLargeToPreview(kind, file.sizeBytes);
@@ -176,7 +161,7 @@ export function FilePreviewModal({
       presentation={presentation}
       dialogRef={dialogRef}
       onClose={onClose}
-      aria-labelledby="preview-modal-title"
+      aria-labelledby={titleId}
       outside={
         selection &&
         (coarsePointer ? (
@@ -194,16 +179,18 @@ export function FilePreviewModal({
         ))
       }
     >
-      {/* One slab: name and size, where the file came from, then the controls. */}
+      {/* One slab: name and size, where the file came from, then the controls. On a phone the
+          controls take a second row, so the name keeps the width it needs to be read; Close
+          stays on the first row, in the corner where a phone user looks for it. */}
       <header
-        className={`${paneClassName('slab')} relative z-10 flex shrink-0 items-center gap-1 py-1 pl-3.5 pr-1 md:pl-4`}
+        className={`${paneClassName('slab')} relative z-10 grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-1 py-1 pl-3.5 pr-1 md:flex md:pl-4`}
       >
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1">
           <h3
-            id="preview-modal-title"
-            // Wraps to two lines rather than truncating: on a phone the controls leave the name
-            // little room, and a one-line ellipsis there hides which file is open.
-            className="m-0 line-clamp-2 break-words text-sm leading-snug font-semibold text-fg-primary [overflow-wrap:anywhere] md:text-[15px]"
+            id={titleId}
+            // Wraps rather than truncating: a one-line ellipsis hides which file is open, and a
+            // phone has no hover to read the `title` tooltip.
+            className="m-0 line-clamp-3 break-words md:line-clamp-2 text-sm leading-snug font-semibold text-fg-primary [overflow-wrap:anywhere] md:text-[15px]"
             title={file.filename}
           >
             {file.filename}
@@ -214,80 +201,85 @@ export function FilePreviewModal({
           </div>
         </div>
 
-        {/* Rendered/source: one control for markdown and HTML, so both behave alike. */}
-        {showMdToggle && (
-          <SegmentedControl
-            label="Markdown view"
-            size={isMobile ? 'lg' : 'md'}
-            className="shrink-0"
-            value={mdViewMode}
-            onChange={setMdViewMode}
-            options={[
-              {
-                value: 'rendered',
-                ariaLabel: 'Rendered view',
-                icon: <Eye size={14} aria-hidden="true" />,
-                label: <span className="max-md:hidden">Rendered</span>,
-              },
-              {
-                value: 'source',
-                ariaLabel: 'Source view',
-                icon: <Code size={14} aria-hidden="true" />,
-                label: <span className="max-md:hidden">Source</span>,
-              },
-            ]}
-          />
-        )}
-        {showHtmlToggle && (
-          <SegmentedControl
-            label="HTML view"
-            size={isMobile ? 'lg' : 'md'}
-            className="shrink-0"
-            value={htmlViewMode}
-            onChange={setHtmlViewMode}
-            options={[
-              {
-                value: 'preview',
-                ariaLabel: 'Interactive preview',
-                icon: <Eye size={14} aria-hidden="true" />,
-                label: <span className="max-md:hidden">Preview</span>,
-              },
-              {
-                value: 'source',
-                ariaLabel: 'Source view',
-                icon: <Code size={14} aria-hidden="true" />,
-                label: <span className="max-md:hidden">Source</span>,
-              },
-            ]}
-          />
-        )}
+        <div className="col-span-2 flex items-center justify-end gap-1 pb-0.5 md:contents">
+          {/* Rendered/source: one control for markdown and HTML, so both behave alike. */}
+          {showMdToggle && (
+            <SegmentedControl
+              label="Markdown view"
+              size={isMobile ? 'lg' : 'md'}
+              // Segments sized to their labels, so "Rendered" is not cut to fit "Source".
+              className="shrink-0 [&>button]:flex-auto"
+              value={mdViewMode}
+              onChange={setMdViewMode}
+              options={[
+                {
+                  value: 'rendered',
+                  ariaLabel: 'Rendered view',
+                  icon: <Eye size={14} aria-hidden="true" />,
+                  label: <span className="max-md:hidden">Rendered</span>,
+                },
+                {
+                  value: 'source',
+                  ariaLabel: 'Source view',
+                  icon: <Code size={14} aria-hidden="true" />,
+                  label: <span className="max-md:hidden">Source</span>,
+                },
+              ]}
+            />
+          )}
+          {showHtmlToggle && (
+            <SegmentedControl
+              label="HTML view"
+              size={isMobile ? 'lg' : 'md'}
+              // Segments sized to their labels, so "Rendered" is not cut to fit "Source".
+              className="shrink-0 [&>button]:flex-auto"
+              value={htmlViewMode}
+              onChange={setHtmlViewMode}
+              options={[
+                {
+                  value: 'preview',
+                  ariaLabel: 'Interactive preview',
+                  icon: <Eye size={14} aria-hidden="true" />,
+                  label: <span className="max-md:hidden">Preview</span>,
+                },
+                {
+                  value: 'source',
+                  ariaLabel: 'Source view',
+                  icon: <Code size={14} aria-hidden="true" />,
+                  label: <span className="max-md:hidden">Source</span>,
+                },
+              ]}
+            />
+          )}
 
-        {onOpenInLibrary && (
+          {onOpenInLibrary && (
+            <IconButton
+              label="Open in Library"
+              icon={<FolderOpen size={18} aria-hidden="true" />}
+              onClick={onOpenInLibrary}
+            />
+          )}
           <IconButton
-            label="Open in Library"
-            icon={<FolderOpen size={18} aria-hidden="true" />}
-            onClick={onOpenInLibrary}
+            label={`Download ${file.filename}`}
+            icon={<Download size={18} aria-hidden="true" />}
+            onClick={onDownload}
           />
-        )}
-        <IconButton
-          label={`Download ${file.filename}`}
-          icon={<Download size={18} aria-hidden="true" />}
-          onClick={onDownload}
-        />
-        <IconButton
-          label={commentsOpen ? 'Hide comments' : 'Show comments'}
-          icon={<MessageSquare size={18} aria-hidden="true" />}
-          aria-pressed={commentsOpen}
-          raised={commentsOpen}
-          onClick={() => {
-            if (commentsOpen) setFocusedThreadId(null);
-            setCommentsOpen(!commentsOpen);
-          }}
-        />
+          <IconButton
+            label={commentsOpen ? 'Hide comments' : 'Show comments'}
+            icon={<MessageSquare size={18} aria-hidden="true" />}
+            aria-pressed={commentsOpen}
+            raised={commentsOpen}
+            onClick={() => {
+              if (commentsOpen) setFocusedThreadId(null);
+              setCommentsOpen(!commentsOpen);
+            }}
+          />
+        </div>
         <IconButton
           label="Close preview"
           icon={<X size={18} aria-hidden="true" />}
           onClick={onClose}
+          className="max-md:col-start-2 max-md:row-start-1"
         />
       </header>
 
