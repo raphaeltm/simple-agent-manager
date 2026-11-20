@@ -25,20 +25,26 @@ async function openInbox(page: Page, mock: InboxMockState, path = '/inbox') {
   await expect(page.getByTestId('inbox-page')).toBeVisible();
 }
 
-/** The pinned answer area's bottom edge meets its pane: nothing dragged it up or off-screen. */
-async function expectControlsPinned(page: Page) {
-  const controls = page.getByTestId('inbox-pinned-controls');
-  await expect(controls).toBeVisible();
-  const box = await controls.boundingBox();
-  const viewport = page.viewportSize();
-  expect(box).not.toBeNull();
-  expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height + 1);
+/**
+ * The reply composer is pinned at the bottom of the item: its bottom edge meets the pane's, and
+ * the shell's main area has no scrollable overflow that could drag it up or off-screen.
+ */
+async function expectComposerPinned(page: Page) {
+  const area = page.getByTestId('inbox-reply-area');
+  await expect(area).toBeVisible();
+  const box = (await area.boundingBox())!;
+  const pane = (await page.getByRole('region', { name: 'Inbox item' }).boundingBox())!;
+  expect(Math.abs(box.y + box.height - (pane.y + pane.height))).toBeLessThanOrEqual(2);
+  expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height + 1);
   const mainOverflow = await page.evaluate(() => {
     const main = document.querySelector('#main-content');
     return main ? main.scrollHeight - main.clientHeight : 0;
   });
   expect(mainOverflow).toBeLessThanOrEqual(1);
 }
+
+/** Kinds answered only by a reply (a free-text question) or not at all yet (a human task). */
+const NO_CONTROLS = new Set(['task', 'question-long']);
 
 /**
  * Scrolls the inbox list with the wheel, as a user does, and asserts the content moved while
@@ -128,12 +134,16 @@ test.describe('Inbox — Mobile', () => {
       const params = new URLSearchParams({ item: kind.ref, project: kind.project });
       await openInbox(page, state(), `/inbox?${params.toString()}`);
       await expect(page.getByTestId('inbox-item-body')).toBeVisible();
-      if (kind.name === 'task') {
-        // Nothing to answer yet: no empty control strip (Open chat is in the top bar).
-        await expect(page.getByTestId('inbox-pinned-controls')).toHaveCount(0);
+      if (NO_CONTROLS.has(kind.name)) {
+        // No empty control strip: the composer is the way to answer.
+        await expect(page.getByTestId('inbox-answer-controls')).toHaveCount(0);
       } else {
-        await expectControlsPinned(page);
+        // The controls sit inside the ask, the agent's first message.
+        await expect(
+          page.getByTestId('inbox-ask').getByTestId('inbox-answer-controls')
+        ).toBeVisible();
       }
+      await expectComposerPinned(page);
       await assertNoOverflow(page);
       await assertNoClippedOverflow(page);
       await screenshot(page, `inbox-item-${kind.name}`);
@@ -188,7 +198,7 @@ test.describe('Inbox — Desktop', () => {
     const list = await page.getByRole('region', { name: 'Inbox list' }).boundingBox();
     const item = await page.getByRole('region', { name: 'Inbox item' }).boundingBox();
     expect(list!.x + list!.width).toBeLessThanOrEqual(item!.x);
-    await expectControlsPinned(page);
+    await expectComposerPinned(page);
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
     await screenshot(page, 'inbox-desktop-list');
@@ -199,12 +209,16 @@ test.describe('Inbox — Desktop', () => {
       const params = new URLSearchParams({ item: kind.ref, project: kind.project });
       await openInbox(page, state(), `/inbox?${params.toString()}`);
       await expect(page.getByTestId('inbox-item-body')).toBeVisible();
-      if (kind.name === 'task') {
-        // Nothing to answer yet: no empty control strip (Open chat is in the top bar).
-        await expect(page.getByTestId('inbox-pinned-controls')).toHaveCount(0);
+      if (NO_CONTROLS.has(kind.name)) {
+        // No empty control strip: the composer is the way to answer.
+        await expect(page.getByTestId('inbox-answer-controls')).toHaveCount(0);
       } else {
-        await expectControlsPinned(page);
+        // The controls sit inside the ask, the agent's first message.
+        await expect(
+          page.getByTestId('inbox-ask').getByTestId('inbox-answer-controls')
+        ).toBeVisible();
       }
+      await expectComposerPinned(page);
       await assertNoOverflow(page);
       await assertNoClippedOverflow(page);
       await screenshot(page, `inbox-desktop-item-${kind.name}`);

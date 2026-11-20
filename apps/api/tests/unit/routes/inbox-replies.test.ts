@@ -1395,7 +1395,11 @@ describe('inbox replies through the real route on SQLite', () => {
     const sent = await req(path(ref, '/reply'), { content: '  Can we do this per project?\n' });
     expect(sent.status).toBe(202);
     const delivery = edge.accept.mock.calls[0]![2];
-    expect(delivery).toMatchObject({ sourceKind: 'inbox_reply', metadata: { inboxRef: ref } });
+    expect(delivery).toMatchObject({
+      sourceKind: 'inbox_reply',
+      // The chat's "Re:" chip reads the title snapshot from the transcript row's metadata.
+      metadata: { inboxRef: ref, inboxTitle: 'Choose the retry cap?' },
+    });
     expect(delivery.displayContent).toBe('  Can we do this per project?\n');
     expect(delivery.deliveryContent).toContain('Choose the retry cap?');
     expect(delivery.deliveryContent).toContain('inbox_write resolve');

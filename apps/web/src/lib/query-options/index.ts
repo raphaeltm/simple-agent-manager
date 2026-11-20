@@ -130,6 +130,7 @@ export {
   ideaUpdatesQueryOptions,
 } from './ideas';
 export {
+  inboxConversationQueryOptions,
   inboxCountQueryOptions,
   inboxItemQueryOptions,
   inboxListQueryOptions,
