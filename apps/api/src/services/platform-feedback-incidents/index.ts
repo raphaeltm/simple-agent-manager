@@ -17,6 +17,24 @@ export {
   releaseIncidentDispatch,
   reserveIncidentDispatch,
 } from './dispatch';
+export {
+  explainUndispatchableIncidents,
+  INCIDENT_DISPATCH_BLOCK_REASONS,
+  type IncidentDispatchBlockReason,
+  incidentDispatchBlockReasonSql,
+  type IncidentDispatchBreakdown,
+} from './dispatch-diagnostics';
+export {
+  IDEA_RELEASED_MARKER,
+  ideaHasEngagement,
+  type IdeaWorkSnapshotReader,
+  loadOwnedIdeas,
+  PIPELINE_IDEA_TRIGGERED_BY,
+  pipelineOwnsIdeaSql,
+  readIdeaEngagement,
+  releaseEngagedIncidentIdeas,
+} from './idea-ownership';
+export { cancelOwnedIncidentIdea, updateOwnedIncidentIdea } from './idea-writes';
 export { expireStaleIncidents } from './lifecycle';
 export {
   buildIncidentBacklogSummary,
