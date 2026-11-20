@@ -297,6 +297,24 @@ describe('Library references in the inbox open in place', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  it('"Open in Library" keeps the comment thread the preview was opened on', async () => {
+    renderInbox([
+      {
+        pathname: '/inbox',
+        search: '?item=ask%3Aa&project=p1',
+        state: {
+          [LIBRARY_PREVIEW_STATE_KEY]: { projectId: 'p1', fileId: FILE_ID, commentThreadId: 't9' },
+        },
+      },
+    ]);
+    const dialog = await previewDialog();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Open in Library' }));
+
+    expect(await screen.findByRole('heading', { name: 'Library page' })).toBeInTheDocument();
+    expect(location.search).toBe(`?preview=${FILE_ID}&commentThread=t9`);
+  });
+
   it('keeps the page own history state while open, and removes only the preview on close', async () => {
     renderInbox([
       { pathname: '/inbox', search: '?item=ask%3Aa&project=p1', state: { pageKey: true } },

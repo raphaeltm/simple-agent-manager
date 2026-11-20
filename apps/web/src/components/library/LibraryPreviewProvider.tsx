@@ -99,7 +99,14 @@ export function LibraryPreviewProvider({ children }: Readonly<{ children: ReactN
 
   const openInLibrary = useCallback(() => {
     if (!preview) return;
-    navigate(projectLibraryFilePath(preview.projectId, preview.fileId));
+    // Keep the thread a comment link opened on, so the Library opens with it too.
+    navigate(
+      projectLibraryFilePath(
+        preview.projectId,
+        preview.fileId,
+        preview.commentThreadId ?? undefined
+      )
+    );
   }, [navigate, preview]);
 
   return (
