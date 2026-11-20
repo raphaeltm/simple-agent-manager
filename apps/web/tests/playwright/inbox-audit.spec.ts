@@ -223,7 +223,7 @@ test.describe('Inbox — Desktop', () => {
     // Paints over the panes below: a real hit test at the note's centre lands on the note.
     const noteBox = await note.boundingBox();
     const hit = await page.evaluate(
-      ({ x, y }) => document.elementFromPoint(x, y)?.closest('[role="note"]') !== null,
+      ({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest('[role="note"]')),
       { x: noteBox!.x + noteBox!.width / 2, y: noteBox!.y + noteBox!.height / 2 }
     );
     expect(hit).toBe(true);
@@ -326,5 +326,45 @@ test.describe('Inbox — Desktop', () => {
     const projectNav = page.getByRole('navigation', { name: 'Project navigation' });
     await expect(projectNav.getByRole('link', { name: /^Inbox, \d+$/ })).toBeVisible();
     await screenshot(page, 'inbox-desktop-nav');
+  });
+});
+
+/** Point 4px outside the ? button's left edge, vertically centred. */
+async function justOutsideHelp(page: Page) {
+  const box = await page.getByRole('button', { name: 'About the inbox' }).boundingBox();
+  return { x: box!.x - 4, y: box!.y + box!.height / 2 };
+}
+
+const hitsHelp = (page: Page, point: { x: number; y: number }) =>
+  page.evaluate(
+    ({ x, y }) =>
+      Boolean(document.elementFromPoint(x, y)?.closest('button[aria-label="About the inbox"]')),
+    point
+  );
+
+test.describe('Inbox — touch tablet', () => {
+  test.use({ viewport: { width: 820, height: 1180 }, isMobile: false, hasTouch: true });
+
+  test('the ? has a 44px touch target around its compact glyph', async ({ page }) => {
+    await openInbox(page, state(), '/projects/p-billing/inbox');
+    const point = await justOutsideHelp(page);
+    expect(await hitsHelp(page, point)).toBe(true);
+    await page.touchscreen.tap(point.x, point.y);
+    await expect(page.getByRole('note')).toHaveText(/What your agents need from you/);
+    await screenshot(page, 'inbox-tablet-help-open');
+  });
+});
+
+test.describe('Inbox — mouse pointer control', () => {
+  test.use({ viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false });
+
+  test('with a mouse the ? hit area stays the 32px glyph', async ({ page }) => {
+    await openInbox(page, state(), '/projects/p-billing/inbox');
+    // Liveness: the button itself is hit at its centre.
+    const box = await page.getByRole('button', { name: 'About the inbox' }).boundingBox();
+    expect(await hitsHelp(page, { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 })).toBe(
+      true
+    );
+    expect(await hitsHelp(page, await justOutsideHelp(page))).toBe(false);
   });
 });

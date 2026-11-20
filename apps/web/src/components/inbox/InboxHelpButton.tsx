@@ -6,7 +6,7 @@ import { useCallback, useId, useRef, useState } from 'react';
  * A "?" beside the Inbox title that explains the page on demand, so the header stays one row
  * instead of spending a line on a subtitle people only need once.
  */
-export function InboxHelpButton({ text }: { text: string }) {
+export function InboxHelpButton({ text }: Readonly<{ text: string }>) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -29,6 +29,8 @@ export function InboxHelpButton({ text }: { text: string }) {
         if (!rootRef.current?.contains(event.relatedTarget as Node | null)) close();
       }}
     >
+      {/* Compact 32px glyph; on touch screens an invisible ::after widens the hit area to 44px
+          (rule 80), without making the lowest-priority control in the row look bigger. */}
       <button
         ref={buttonRef}
         type="button"
@@ -36,7 +38,7 @@ export function InboxHelpButton({ text }: { text: string }) {
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         onClick={() => setOpen((value) => !value)}
-        className="grid h-8 w-8 cursor-pointer place-items-center rounded-full border-0 bg-transparent text-fg-muted hover:text-fg-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+        className="relative grid h-8 w-8 cursor-pointer place-items-center rounded-full border-0 bg-transparent after:absolute after:-inset-1.5 after:content-[''] pointer-fine:after:hidden text-fg-muted hover:text-fg-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
       >
         <CircleHelp size={16} aria-hidden="true" />
       </button>
@@ -46,7 +48,7 @@ export function InboxHelpButton({ text }: { text: string }) {
           role="note"
           // Focusable so a click inside (e.g. to select the text) keeps focus within the root.
           tabIndex={-1}
-          className="sam-glass sam-glass-rim sam-glass-live absolute top-full left-0 z-50 mt-1 w-64 rounded-[14px] px-3 py-2 text-sm text-fg-primary"
+          className="sam-glass sam-glass-rim sam-glass-live absolute top-full left-0 z-50 mt-1 w-64 break-words rounded-[14px] px-3 py-2 text-sm text-fg-primary"
         >
           {text}
         </div>
