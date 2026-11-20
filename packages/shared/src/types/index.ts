@@ -1268,6 +1268,7 @@ export type {
   InboxActionResponse,
   InboxAgentItem,
   InboxAgentLinkKind,
+  InboxAgentReplyItem,
   InboxAgentState,
   InboxAnswerRequest,
   InboxAnswerSpec,

@@ -5,7 +5,7 @@ import * as v from 'valibot';
 import { OperationError } from './errors';
 import type { AgentInboxSource } from './inbox-agent-reads';
 import { parseRefOrNotFound } from './inbox-item-core';
-import { inboxReplyWatermark, markInboxAgentActed } from './inbox-reply-core';
+import { inboxObservedReplyId, markInboxAgentActed } from './inbox-reply-core';
 import { getInboxLimits } from './inbox-settings';
 import { sanitizeUserInput } from './sanitize-user-input';
 import type { OperationContext } from './types';
@@ -23,7 +23,11 @@ export function inboxCommentAnchor(ref: string): string {
   return parsed.store === 'ask' ? parsed.id : ref;
 }
 
-async function requireSourceItem(ctx: OperationContext, source: AgentInboxSource, ref: string) {
+export async function requireSourceItem(
+  ctx: OperationContext,
+  source: AgentInboxSource,
+  ref: string
+) {
   const parsed = parseRefOrNotFound(ref);
   if (parsed.store === 'attention') {
     const marker = await ctx.ports.inbox.attentionMarker(
@@ -67,7 +71,7 @@ export async function respondToAgentInboxItem(
       `body must contain 1 to ${limits.answerMaxChars} characters`
     );
   await requireSourceItem(ctx, source, input.ref);
-  const watermark = await inboxReplyWatermark(
+  const observedReplyId = await inboxObservedReplyId(
     ctx,
     source.projectId,
     input.ref,
@@ -79,7 +83,7 @@ export async function respondToAgentInboxItem(
   const digest = new Uint8Array(
     await crypto.subtle.digest(
       'SHA-256',
-      new TextEncoder().encode(JSON.stringify([source.sessionId, input.ref, watermark, body]))
+      new TextEncoder().encode(JSON.stringify([source.sessionId, input.ref, observedReplyId, body]))
     )
   );
   const clientMutationId = `inbox-response:${Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
@@ -89,7 +93,7 @@ export async function respondToAgentInboxItem(
     clientMutationId,
     actor: { kind: 'agent', id: source.sessionId, name: null },
   });
-  await markInboxAgentActed(ctx, source.projectId, input.ref, watermark);
+  await markInboxAgentActed(ctx, source.projectId, input.ref, observedReplyId);
   return { ref: input.ref, thread: created.thread };
 }
 
@@ -105,7 +109,7 @@ export async function resolveAgentInboxItem(
       'forbidden',
       'Only questions, reviews and results can be resolved by an agent'
     );
-  const watermark = await inboxReplyWatermark(
+  const observedReplyId = await inboxObservedReplyId(
     ctx,
     source.projectId,
     input.ref,
@@ -126,13 +130,13 @@ export async function resolveAgentInboxItem(
         AND kind IN ('question', 'review', 'result')
         AND EXISTS (SELECT 1 FROM inbox_replies WHERE project_id = asks.project_id AND item_ref = ? AND id = ?)
         AND NOT EXISTS (SELECT 1 FROM inbox_replies WHERE project_id = asks.project_id
-          AND item_ref = ? AND id > ? AND agent_acted_at IS NULL)
+          AND item_ref = ? AND id != ? AND agent_acted_at IS NULL)
       RETURNING answer_json, kind, blocking`
   ).bind(
     input.ref,
-    watermark,
+    observedReplyId,
     input.ref,
-    watermark,
+    observedReplyId,
     now,
     now,
     now,
@@ -140,17 +144,17 @@ export async function resolveAgentInboxItem(
     source.projectId,
     source.sessionId,
     input.ref,
-    watermark,
+    observedReplyId,
     input.ref,
-    watermark
+    observedReplyId
   );
-  // Closing the ask and acknowledging its replies are one D1 transaction. Bound the
-  // acknowledgement to the selected answer, so a concurrently admitted later reply is untouched.
+  // Closing the ask and acknowledging its replies are one D1 transaction. Acknowledge only the
+  // selected answer; every other unobserved reply must remain outstanding.
   const results = await ctx.env.DATABASE.batch([
     close,
     ctx.env.DATABASE.prepare(
       `UPDATE inbox_replies SET agent_acted_at = ?
-       WHERE project_id = ? AND item_ref = ? AND id <= (
+       WHERE project_id = ? AND item_ref = ? AND id = (
          SELECT r.id FROM asks a JOIN inbox_replies r
            ON r.project_id = a.project_id AND r.item_ref = ?
              AND r.message_id = json_extract(a.answer_json, '$.messageId')

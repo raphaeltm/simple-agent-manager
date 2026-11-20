@@ -195,7 +195,7 @@ export const INBOX_TOOLS = [
   {
     name: 'inbox_resolve',
     description:
-      'Treat the observed reply identified by replyMessageId as the answer to this chat’s open question, review or result. Refuses while a newer reply is outstanding. References its chat message; stays out of their inbox. Cannot resolve secrets, approvals or human tasks.',
+      'Treat the observed reply identified by replyMessageId as the answer to this chat’s open question, review or result. Refuses while another reply is outstanding. References its chat message; stays out of their inbox. Cannot resolve secrets, approvals or human tasks.',
     inputSchema: {
       type: 'object' as const,
       properties: { ref, replyMessageId },
@@ -242,10 +242,20 @@ export const INBOX_TOOLS = [
   {
     name: 'inbox_get_item',
     description:
-      "One item of this project with its status, the person's answer and the outcome; for a task also its steps, assignee, who took it, activity and discussion.",
+      "One item of this project with its status and outcome; for a task also its progress. Source-chat items include canonical conversation and pendingReplyIds visible on this page, including replies whose delivery failed. Follow conversation cursors while hasMore. Reading observes these replies but does not acknowledge them; explicitly respond/update/resolve with a read reply's id.",
     inputSchema: {
       type: 'object' as const,
-      properties: { ref },
+      properties: {
+        ref,
+        replyCursor: {
+          type: 'string',
+          description: 'conversation.nextReplyCursor from the previous get.',
+        },
+        responseCursor: {
+          type: 'number',
+          description: 'conversation.nextResponseCursor from the previous get.',
+        },
+      },
       required: ['ref'],
       additionalProperties: false,
     },

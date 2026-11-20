@@ -29,6 +29,7 @@ export const INBOX_TURN_END_INSTRUCTION =
   'An inbox reply arrives as a chat message naming the item; it leaves everyone’s inbox until you act. ' +
   'Decide what it means: use inbox_write resolve { ref, replyMessageId } if it answers your question, review or result (references their reply); ' +
   'respond { ref, body, replyMessageId } to respond on the same item, or update { ref, replyMessageId, title / why / links } to change your ask. Respond and update bring it back. ' +
-  'Use the exact replyMessageId from the received header; later queued replies remain with you. Resolve refuses if a newer reply is outstanding. ' +
+  'Use the exact replyMessageId from the received header; other queued replies remain with you. Resolve refuses if another reply is outstanding. ' +
   'Secrets still need the secure field and Operations approvals a person’s decision; you cannot resolve them. A reply to a permission declines it first. ' +
+  'Respond/update returns withAgent: true while other replies remain. Use inbox_read get for the ref and follow conversation cursors to read pendingReplyIds, including earlier failed deliveries; explicitly handle each observed reply. Reading acknowledges nothing. ' +
   'Otherwise carry on; it stays archived, even when your task ends. Never file a new item for the same thing.';

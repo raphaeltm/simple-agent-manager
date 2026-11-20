@@ -72,7 +72,7 @@ export async function readInboxConversation(
     replies,
     responses: comments.threads.filter((t) => t.author.kind === 'agent'),
     nextReplyCursor,
-    nextResponseCursor: comments.hasMore ? (comments.threads.at(-1)?.sequence ?? null) : null,
+    nextResponseCursor: comments.hasMore ? comments.scanCursor : null,
     hasMore: page.hasMore || comments.hasMore,
   };
 }

@@ -8,6 +8,7 @@ import * as v from 'valibot';
 
 import type { PromptDeliveryResult } from '../../durable-objects/project-data/prompt-delivery';
 import type { Env } from '../../env';
+import { AppError } from '../../middleware/error';
 import { answerAgentInteraction } from '../../routes/chat-acp-interactions';
 
 const PermissionReplySchema = v.object({
@@ -44,7 +45,21 @@ export async function rejectInboxReplyPermission(
       parsed.answer
     );
     return null;
-  } catch {
+  } catch (error) {
+    // These refusals originate in the canonical answer path after the DO returns its
+    // decision. Retrying the same prepared answer cannot change a committed decision.
+    if (error instanceof AppError && [400, 401, 403, 404, 409].includes(error.statusCode))
+      return {
+        kind: 'failed',
+        reason:
+          error.statusCode === 401 || error.statusCode === 403
+            ? 'sender_unauthorized'
+            : 'delivery_conflict',
+        error:
+          'Inbox reply permission could not be declined; inspect the chat before replying again',
+        runtimeIdentity: null,
+        capabilities: null,
+      };
     // Never include interaction payloads in persisted delivery diagnostics. A transient
     // rejection failure leaves the already-persisted reason queued for the next attempt.
     return {

@@ -135,10 +135,10 @@ decline a secret request, or approve an Operations action. Replying to a pending
 
 An agent uses `inbox_write` method `respond` with `ref` and `body` to respond on that item, or
 `update` to change its ask. The agent passes `replyMessageId` from the received SAM header, so
-a later queued reply stays with the agent until it handles that reply too. With no outstanding
+any other queued reply stays with the agent until it handles that reply too. With no outstanding
 replies, ordinary responses and updates need no message id. Method `resolve` treats the observed reply
 as the answer to a question, review or result and keeps it out of your inbox. It requires that
-message id and refuses while a newer reply is outstanding. It cannot resolve
+message id and refuses while another reply is outstanding. It cannot resolve
 secrets, Operations approvals or tasks assigned to people. If the agent carries on without acting
 on the reply, the item stays with the agent, including after its task finishes. It should never
 file a duplicate item for the same conversation.
@@ -261,3 +261,9 @@ The Inbox reads the record each ask lives in; it keeps no copy. It refreshes whe
 you come back to the tab, and when a new notification arrives over the app's live connection.
 [Web Push](/docs/guides/notifications/#delivery-channels) and notification preferences work as
 before.
+
+If a permission decision changes before the queued reply can decline it, that delivery fails
+with an inspectable conflict. SAM does not retry the conflicting decision or automatically
+resurface the item. Inspect the chat before sending another reply.
+
+Agent responses and updates return `withAgent`. When true, other replies remain outstanding: `inbox_read` method `get` on the item returns the source chat’s canonical `conversation` and `pendingReplyIds` visible on that page. Follow `replyCursor` / `responseCursor` with the returned conversation cursors to read more, including earlier failed deliveries. Reading acknowledges nothing; handle each observed reply explicitly before resolving the ask. Other chats’ existing item reads do not expose the source conversation.

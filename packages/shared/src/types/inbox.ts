@@ -352,5 +352,22 @@ export interface InboxAgentItem {
   cancelReason: string | null;
   /** Kind `task` only: steps, assignee, claim, activity and discussion (slice H1). */
   task?: InboxTaskDetail;
+  /** Source-chat agents can inspect replies that failed delivery or remain outstanding. */
+  conversation?: InboxConversation | null;
+  withAgent?: boolean;
+  /** Outstanding ids among this conversation page's canonical replies. Follow its cursors for more. */
+  pendingReplyIds?: string[];
   untrustedContent: true;
+}
+
+/** Conversation-only read for source-owned requests outside the asks store. */
+export interface InboxAgentReplyItem {
+  ref: string;
+  kind: string;
+  sessionId: string;
+  fromThisChat: true;
+  untrustedContent: true;
+  conversation: InboxConversation | null;
+  withAgent: boolean;
+  pendingReplyIds: string[];
 }

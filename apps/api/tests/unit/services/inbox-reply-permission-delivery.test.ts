@@ -14,6 +14,7 @@ vi.mock('../../../src/services/node-agent', () => ({
 vi.mock('../../../src/services/project-data', () => ({ wakeSession: vi.fn() }));
 
 import type { Env } from '../../../src/env';
+import { AppError } from '../../../src/middleware/error';
 import {
   DefaultVmPromptDeliveryAdapter,
   type VmPromptDeliveryAdapterInput,
@@ -112,6 +113,31 @@ beforeEach(() => {
 });
 
 describe('permission rejection owned by a durable inbox reply', () => {
+  it.each([400, 404, 409, 401, 403])(
+    'does not retry a permanent permission answer refusal (%s)',
+    async (status) => {
+      const { adapter, input, prepare } = harness();
+      edge.answer.mockRejectedValue(new AppError(status, 'REFUSED', 'private decision payload'));
+      const result = await adapter.submit(input);
+      expect(result).toMatchObject({
+        kind: 'failed',
+        reason: status === 401 || status === 403 ? 'sender_unauthorized' : 'delivery_conflict',
+      });
+      expect(JSON.stringify(result)).not.toContain('private decision payload');
+      expect(edge.answer).toHaveBeenCalledOnce();
+      expect(prepare).not.toHaveBeenCalled();
+      expect(edge.send).not.toHaveBeenCalled();
+    }
+  );
+
+  it('keeps a server-side permission failure retryable', async () => {
+    const { adapter, input } = harness();
+    edge.answer.mockRejectedValueOnce(new AppError(503, 'UPSTREAM', 'private transport payload'));
+    expect(await adapter.submit(input)).toMatchObject({ kind: 'retry', reason: 'not_ready' });
+    expect(edge.send).not.toHaveBeenCalled();
+    expect(await adapter.submit(input)).toMatchObject({ kind: 'accepted' });
+  });
+
   it('retries before resolving or sending, replays the same answer key, then delivers after acceptance', async () => {
     const { adapter, input, prepare, env } = harness();
     edge.answer.mockRejectedValueOnce(new Error('private upstream payload'));
@@ -141,15 +167,13 @@ describe('permission rejection owned by a durable inbox reply', () => {
 
   it('withholds permission rejection and send when the side-effect fence refuses', async () => {
     const { adapter, input, prepare } = harness();
-    input.beforeSideEffect = vi
-      .fn()
-      .mockResolvedValue({
-        kind: 'retry',
-        reason: 'not_ready',
-        error: 'Authority changed',
-        runtimeIdentity: null,
-        capabilities: null,
-      });
+    input.beforeSideEffect = vi.fn().mockResolvedValue({
+      kind: 'retry',
+      reason: 'not_ready',
+      error: 'Authority changed',
+      runtimeIdentity: null,
+      capabilities: null,
+    });
     expect(await adapter.submit(input)).toMatchObject({
       kind: 'retry',
       error: 'Authority changed',

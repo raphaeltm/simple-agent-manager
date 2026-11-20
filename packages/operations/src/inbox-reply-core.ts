@@ -246,8 +246,8 @@ async function prepareReplyPermission(
   );
 }
 
-/** An explicit observed delivery fences acknowledgements against later queued replies. */
-export async function inboxReplyWatermark(
+/** Resolve exactly the delivery the agent observed, independent of reservation or acceptance order. */
+export async function inboxObservedReplyId(
   ctx: OperationContext,
   projectId: string,
   ref: string,
@@ -290,12 +290,12 @@ export async function markInboxAgentActed(
   ctx: OperationContext,
   projectId: string,
   ref: string,
-  watermark: number
+  observedReplyId: number
 ): Promise<void> {
   await ctx.env.DATABASE.prepare(
     `UPDATE inbox_replies SET agent_acted_at = ?
-      WHERE project_id = ? AND item_ref = ? AND id <= ?`
+      WHERE project_id = ? AND item_ref = ? AND id = ?`
   )
-    .bind(Date.now(), projectId, ref, watermark)
+    .bind(Date.now(), projectId, ref, observedReplyId)
     .run();
 }

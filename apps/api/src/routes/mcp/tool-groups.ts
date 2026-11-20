@@ -147,7 +147,7 @@ export const MCP_TOOL_GROUPS: readonly McpToolGroup[] = [
       resolve: {
         tool: 'inbox_resolve',
         summary:
-          'treat the observed replyMessageId as the answer; refuses while a newer reply is outstanding',
+          'treat the observed replyMessageId as the answer; refuses while another reply is outstanding',
       },
       update: {
         tool: 'inbox_update_item',

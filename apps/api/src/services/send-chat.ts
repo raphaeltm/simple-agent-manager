@@ -149,7 +149,7 @@ export async function sendChat(
       ? `The person replied about your inbox item ${JSON.stringify(inboxReply.title)} (${inboxReply.ref}).
 Reply message id: ${inboxReply.deliveryId}. Pass this exact id as replyMessageId when responding, updating or resolving this reply; never acknowledge a reply you have not received.
 It is out of their inbox until you act on it.
-Decide what it means: if it answers the item, call inbox_write resolve { ref, replyMessageId } (asks only; secrets and approvals need the person). To respond, call inbox_write respond { ref, body, replyMessageId }; to change the ask, call update { ref, replyMessageId, title / why / links }. A response or update brings it back. Otherwise carry on; it stays out. Do not file a new item for the same thing.
+Decide what it means: if it answers the item, call inbox_write resolve { ref, replyMessageId } (asks only; secrets and approvals need the person). To respond, call inbox_write respond { ref, body, replyMessageId }; to change the ask, call update { ref, replyMessageId, title / why / links }. A response or update brings it back once all outstanding replies are handled. If the tool returns withAgent: true, use inbox_read get { ref }, follow conversation cursors, and handle the pendingReplyIds you have read, including earlier failed deliveries. Reading does not acknowledge them. Otherwise carry on; it stays out. Do not file a new item for the same thing.
 
 Their message:
 

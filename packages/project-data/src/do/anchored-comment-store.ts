@@ -290,7 +290,7 @@ export function listThreadRecords(
   sql: SqlStorage,
   scope: CommentAnchorScope,
   filter: ListThreadRecordsFilter
-): { threads: CommentThreadRecord[]; hasMore: boolean } {
+): { threads: CommentThreadRecord[]; hasMore: boolean; scanCursor: number | null } {
   const { anchorKind, scopeKey } = anchorScopeParams(scope);
   const conditions = [ANCHOR_SCOPE_PREDICATE];
   const params: Array<string | number> = [anchorKind, scopeKey];
@@ -322,7 +322,15 @@ export function listThreadRecords(
     )
     .toArray();
   const hasMore = rows.length > filter.limit;
-  return { threads: hydrateThreadRows(sql, hasMore ? rows.slice(0, filter.limit) : rows), hasMore };
+  const scannedRows = hasMore ? rows.slice(0, filter.limit) : rows;
+  // Advance over malformed rows too; hydration can remove the entire bounded page.
+  // The lookahead row belongs to the next page and must not enter this cursor.
+  const sequence = scannedRows.at(-1)?.sequence;
+  return {
+    threads: hydrateThreadRows(sql, scannedRows),
+    hasMore,
+    scanCursor: typeof sequence === 'number' ? sequence : null,
+  };
 }
 
 /**

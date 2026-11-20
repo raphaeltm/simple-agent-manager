@@ -2369,7 +2369,7 @@ export async function listInboxItemCommentThreads(
   env: Env,
   projectId: string,
   input: ListInboxItemCommentThreadsInput
-): Promise<{ threads: InboxItemCommentThread[]; hasMore: boolean }> {
+): Promise<{ threads: InboxItemCommentThread[]; hasMore: boolean; scanCursor: number | null }> {
   return callProjectDataWithRetry(
     env,
     projectId,

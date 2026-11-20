@@ -1,4 +1,6 @@
 /** Real browser routes → operations → D1 / ProjectData, plus the real MCP agent tools. */
+import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data';
+import { expireDuePromptDeliveries } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
 import type {
   InboxCountResponse,
   InboxItemResponse,
@@ -13,6 +15,8 @@ import type { Env } from '../../src/env';
 import { getCredentialEncryptionKey } from '../../src/lib/secrets';
 import { handleAppError } from '../../src/middleware/app-error-handler';
 import { requireApproved, requireAuth } from '../../src/middleware/auth';
+import { createOperationPorts } from '../../src/operation-ports';
+import { answerAgentInteraction } from '../../src/routes/chat-acp-interactions';
 import { registerChatPromptRoute } from '../../src/routes/chat-prompt-route';
 import { acpInteractionCallbackRoute } from '../../src/routes/projects/acp-interaction-callback';
 import { decrypt } from '../../src/services/encryption';
@@ -166,6 +170,94 @@ describe('inbox reply capability through real routes and Durable Objects', () =>
         .one()
     );
     expect(afterReplay).toEqual(interaction);
+
+    // Another permission can be answered between preparing the reply's reject receipt and
+    // delivery. The stale reject must terminalize without replacing the person's decision.
+    const competingId = crypto.randomUUID();
+    const competing = await callbacks.request(
+      `/api/projects/${s.projectId}/workspaces/${s.workspaceId}/acp-interactions`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${callbackToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          protocolVersion: 1,
+          interactionId: competingId,
+          generation: crypto.randomUUID(),
+          runtimeIdentity: 'inbox-reply-runtime',
+          agentSessionId: s.agentSessionId,
+          kind: 'permission',
+          payloadHash: 'b'.repeat(64),
+          detail: {
+            permissionName: 'Competing decision',
+            options: [
+              { id: 'yes-specific', kind: 'allow_once', name: 'Allow once' },
+              { id: 'no-specific', kind: 'reject_once', name: 'Decline once' },
+            ],
+          },
+          safeSummary: { toolCallId: 'competing-tool', optionCount: 2 },
+          deadlineAt: Date.now() + 60_000,
+        }),
+      },
+      testEnv
+    );
+    expect(competing.status).toBe(201);
+    const connector = createOperationPorts(testEnv).connector;
+    const staleRejection = await connector.prepareAgentAnswer(
+      s.projectId,
+      s.chatSessionId,
+      competingId,
+      { optionId: 'no-specific' }
+    );
+    const winningAnswer = await connector.prepareAgentAnswer(
+      s.projectId,
+      s.chatSessionId,
+      competingId,
+      { optionId: 'yes-specific' }
+    );
+    await answerAgentInteraction(
+      testEnv,
+      s.ownerId,
+      s.projectId,
+      s.chatSessionId,
+      competingId,
+      winningAnswer
+    );
+    fetchMock.mockClear();
+    const refused = await runInDurableObject(s.project, async () =>
+      rejectInboxReplyPermission(testEnv, {
+        projectId: s.projectId,
+        claim: {
+          message: {
+            ...delivery,
+            metadata: {
+              ...delivery.metadata,
+              inboxReplyPermission: { interactionId: competingId, answer: staleRejection },
+            },
+          },
+          attemptId: 'competing-answer',
+          mode: 'submit',
+        },
+      })
+    );
+    expect(refused).toMatchObject({ kind: 'failed', reason: 'delivery_conflict' });
+    expect(fetchMock).not.toHaveBeenCalled();
+    const winner = await runInDurableObject(store, async (_instance, state) =>
+      state.storage.sql
+        .exec(
+          'SELECT encrypted_decision, decision_iv FROM interactions WHERE interaction_id = ?',
+          competingId
+        )
+        .one()
+    );
+    expect(
+      JSON.parse(
+        await decrypt(
+          String(winner.encrypted_decision),
+          String(winner.decision_iv),
+          getCredentialEncryptionKey(testEnv)
+        )
+      )
+    ).toMatchObject({ kind: 'selected_option', optionId: 'yes-specific' });
   });
 
   it('preserves every open question, keeps the header out of the transcript, and ordinary chat still closes questions', async () => {
@@ -339,6 +431,117 @@ describe('inbox reply capability through real routes and Durable Objects', () =>
     ]);
     expect(second.body.conversation?.nextResponseCursor).toBeNull();
   });
+
+  it('responding to B does not acknowledge A; updating A then allows resolution of B', async () => {
+    const s = await seed();
+    const item = await ask(s, 'Which release should we ship?');
+    const first = await post(`${itemPath(s, item.ref)}/reply`, s.ownerCookie, {
+      content: 'Reply A',
+    });
+    const second = await post(`${itemPath(s, item.ref)}/reply`, s.ownerCookie, {
+      content: 'Reply B',
+    });
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(202);
+    await callTool(s.token, 'inbox_write', {
+      method: 'respond',
+      ref: item.ref,
+      replyMessageId: second.body.messageId,
+      body: 'I have read B.',
+    });
+    await expectInbox(s, [], 0);
+    const rows = await testEnv.DATABASE.prepare(
+      'SELECT message_id, agent_acted_at FROM inbox_replies WHERE project_id = ? AND item_ref = ? ORDER BY id'
+    )
+      .bind(s.projectId, item.ref)
+      .all();
+    expect(rows.results).toEqual([
+      { message_id: first.body.messageId, agent_acted_at: null },
+      { message_id: second.body.messageId, agent_acted_at: expect.any(Number) },
+    ]);
+    await callTool(s.token, 'inbox_write', {
+      method: 'update',
+      ref: item.ref,
+      replyMessageId: first.body.messageId,
+      why: 'I have now read A too.',
+    });
+    await expectInbox(s, [item.ref], 1);
+    const resolved = await callTool(s.token, 'inbox_write', {
+      method: 'resolve',
+      ref: item.ref,
+      replyMessageId: second.body.messageId,
+    });
+    expect(resolved).toMatchObject({ status: 'answered', messageId: second.body.messageId });
+    await expectInbox(s, [], 0);
+  });
+
+  it.each(['failed', 'expired'] as const)(
+    'recovers an older %s reply through the agent get tool after responding to its resend',
+    async (terminalState) => {
+      const s = await seed();
+      const item = await ask(s, 'Which setting should we use?');
+      const payload = { content: 'Use the project override.' };
+      const first = await post(`${itemPath(s, item.ref)}/reply`, s.ownerCookie, payload);
+      expect(first.status).toBe(202);
+      const config = resolveDurableExecutionConfig(testEnv);
+      await runInDurableObject(s.project, async (_instance, state) => {
+        if (terminalState === 'expired') {
+          state.storage.sql.exec(
+            'UPDATE session_inbox SET expires_at = ? WHERE id = ?',
+            Date.now() - 1,
+            first.body.deliveryId
+          );
+        } else {
+          state.storage.sql.exec(
+            'UPDATE session_inbox SET delivery_attempts = ? WHERE id = ?',
+            config.maxAttempts,
+            first.body.deliveryId
+          );
+        }
+        expireDuePromptDeliveries(state.storage.sql, config);
+      });
+      const snapshot = await s.project.getDurableExecutionSnapshot(s.chatSessionId);
+      expect(
+        snapshot.deliveries.find((message) => message.id === first.body.deliveryId)?.deliveryState
+      ).toBe(terminalState);
+      const resent = await post(`${itemPath(s, item.ref)}/reply`, s.ownerCookie, payload);
+      expect(resent.status).toBe(202);
+      const response = await callTool(s.token, 'inbox_write', {
+        method: 'respond',
+        ref: item.ref,
+        replyMessageId: resent.body.messageId,
+        body: 'I read the resent message.',
+      });
+      expect(response.withAgent).toBe(true);
+      expect(response.message).toContain('inbox_read get');
+      await expectInbox(s, [], 0);
+      const read = await callTool(s.token, 'inbox_read', { method: 'get', ref: item.ref });
+      const recovered = read.item as {
+        withAgent: boolean;
+        pendingReplyIds: string[];
+        conversation: { replies: { id: string; content: string }[] };
+      };
+      expect(recovered.withAgent).toBe(true);
+      expect(recovered.pendingReplyIds).toHaveLength(1);
+      // The agent gets this identifier from its tool response, not the person’s POST fixture.
+      const recoveredId = recovered.pendingReplyIds[0]!;
+      expect(recoveredId).not.toBe(resent.body.messageId);
+      expect(
+        recovered.conversation.replies.find((reply) => reply.id === recoveredId)?.content
+      ).toBe(payload.content);
+      await expectInbox(s, [], 0); // Reading alone never acknowledges an outstanding reply.
+      const handled = await callTool(s.token, 'inbox_write', {
+        method: 'respond',
+        ref: item.ref,
+        replyMessageId: recoveredId,
+        body: 'I have now read the original message too.',
+      });
+      expect(handled.withAgent).toBe(false);
+      await expectInbox(s, [item.ref], 1);
+      const after = await callTool(s.token, 'inbox_read', { method: 'get', ref: item.ref });
+      expect(after.item).toMatchObject({ withAgent: false, pendingReplyIds: [] });
+    }
+  );
 
   it('pages canonical replies backwards without duplicates and keeps each page chronological', async () => {
     const previousLimit = testEnv.CHAT_SESSION_MESSAGE_LIMIT;

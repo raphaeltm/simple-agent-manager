@@ -29,7 +29,7 @@ import {
 } from './inbox-agent-reads';
 import { createAsk } from './inbox-ask-create-core';
 import { questionSchedule } from './inbox-question-schedule';
-import { inboxReplyWatermark } from './inbox-reply-core';
+import { inboxObservedReplyId } from './inbox-reply-core';
 import { inboxTitle } from './inbox-rows';
 import { getInboxLimits, type InboxLimits } from './inbox-settings';
 import { recordActivity } from './inbox-task-rows';
@@ -377,7 +377,7 @@ export async function updateAgentAsk(
     input.links === undefined
       ? undefined
       : await checkedLinks(ctx, source.projectId, input.links, limits);
-  const watermark = await inboxReplyWatermark(
+  const observedReplyId = await inboxObservedReplyId(
     ctx,
     source.projectId,
     input.ref,
@@ -405,19 +405,19 @@ export async function updateAgentAsk(
     source.sessionId
   );
   // Wording and resurfacing are one mutation: a failed acknowledgement must not leave
-  // changed wording hidden in Archived. A newer reply remains outside this watermark.
+  // changed wording hidden in Archived. Only the explicitly observed reply is acknowledged.
   const results = await ctx.env.DATABASE.batch([
     update,
     ctx.env.DATABASE.prepare(
       `UPDATE inbox_replies SET agent_acted_at = ?
-       WHERE project_id = ? AND item_ref = ? AND id <= ?
+       WHERE project_id = ? AND item_ref = ? AND id = ?
          AND EXISTS (SELECT 1 FROM asks WHERE id = ? AND project_id = ?
            AND source_session_id = ? AND ${AGENT_KINDS_SQL} AND status = 'open')`
     ).bind(
       actedAt,
       source.projectId,
       input.ref,
-      watermark,
+      observedReplyId,
       askId,
       source.projectId,
       source.sessionId

@@ -63,6 +63,7 @@ export {
   validateIdeaStatusTransition,
 } from './idea-transitions';
 export { addIdeaUpdate, deleteIdeaUpdate, listIdeaUpdates } from './idea-update-core';
+export { inboxAgentReplyState } from './inbox-agent-conversation';
 export {
   type AgentAskInput,
   AgentAskInputSchema,
@@ -87,7 +88,7 @@ export {
   listAgentAsks,
   titleSimilarity,
 } from './inbox-agent-reads';
-export { resolveAgentInboxItem,respondToAgentInboxItem } from './inbox-agent-replies';
+export { resolveAgentInboxItem, respondToAgentInboxItem } from './inbox-agent-replies';
 export {
   type AgentAssignInput,
   type AgentAssignResult,

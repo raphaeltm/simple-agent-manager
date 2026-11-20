@@ -87,7 +87,7 @@ export function listInboxItemCommentThreads(
   sql: SqlStorage,
   env: Env,
   input: ListInboxItemCommentThreadsInput
-): { threads: InboxItemCommentThread[]; hasMore: boolean } {
+): { threads: InboxItemCommentThread[]; hasMore: boolean; scanCursor: number | null } {
   const result = listThreadRecords(sql, itemScope(input.itemId), {
     status: null,
     afterSequence: input.afterSequence ?? null,
@@ -96,6 +96,7 @@ export function listInboxItemCommentThreads(
   return {
     threads: result.threads.flatMap((record) => toInboxItemCommentThread(record) ?? []),
     hasMore: result.hasMore,
+    scanCursor: result.scanCursor,
   };
 }
 
