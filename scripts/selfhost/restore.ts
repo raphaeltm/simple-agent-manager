@@ -53,4 +53,9 @@ log(
 log(
   `  pnpm selfhost:deploy --env-file '${envFile.replaceAll("'", "'\"'\"'")}' --state-dir '${ctx.stateDir.replaceAll("'", "'\"'\"'")}'`
 );
-log(`  curl -fsS https://api.$SAM_DOMAIN/health`);
+if (ctx.box.SAM_DOMAIN) {
+  const health = `https://api.${ctx.box.SAM_DOMAIN}/health`;
+  log(`  curl -fsS '${health.replaceAll("'", "'\"'\"'")}'`);
+} else {
+  log('Set SAM_DOMAIN in the target .env before checking the restored API health');
+}

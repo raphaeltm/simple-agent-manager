@@ -36,7 +36,7 @@ Final main-integrated self-host suite973PASS/4conditional skips across55files. T
 
 Repository lint23packages, typecheck38packages and build19packages passed. Root tests40/41tasks passed, with API17902passed and one timeout in an unchanged test; that entire file passed12/12 on retry. Type-boundary ratchet has zero blocking findings. Current-head CI is tracked separately before merge.
 
-All11 earlier Codex findings were fixed with focused regressions and resolved threads. Four additional findings (interrupted Compose replacement, bundled-store restore bootstrap, completion-journal durability and conditional IAM ownership) are fixed with discriminating retries; final review reconciliation is recorded in PR2918. No further Codex request is required by the coordinator. CodeRabbit was requested through the trusted label workflow at ready23:03UTC Nov19 and returned a review-limit/rate-limit response; the wait ended on that response, with no CodeRabbit finding or waiver.
+All11 earlier Codex findings were fixed with focused regressions and resolved threads. Five additional findings (interrupted Compose replacement, bundled-store restore bootstrap, completion-journal durability, conditional IAM ownership and the target health-command domain) are fixed with discriminating retries; final review reconciliation is recorded in PR2918. No further Codex request is required by the coordinator. CodeRabbit was requested through the trusted label workflow at ready23:03UTC Nov19 and returned a review-limit/rate-limit response; the wait ended on that response, with no CodeRabbit finding or waiver.
 
 ## BOX evidence and cleanup
 
@@ -72,6 +72,8 @@ Final Codex review identified a conditional project IAM binding misclassified as
 Main L23 `860718dc3878095322772c43cc7d385ba35aeb16` was integrated before final CI, preserving fence fingerprint/force recreation and filtering image rebuilds against old active services. Integration exposed its exited data-owner helper retaining Docker’s cache-volume reference; recovery requires exact owned-helper cleanup before deleting that cache. Real Docker helper recovery (one test) and canonical local MinIO (three tests) pass with owned resources cleaned. The final combined suite passes973tests across55files, with four conditional skips; TypeScript, lint, formatting and secret scanner pass. The test fixtures model the new helper metadata boundary and follow canonical-project setup before repeated init.
 
 The coordinator explicitly accepted that the combined L23+L24 upgrade has not been proven live before merge: this self-host-only integration has no Cloudflare impact. H2’s post-merge BOX smoke on the resulting main supplies the combined live upgrade proof; any upgrade/rollback failure remains this slice owner’s follow-up responsibility. This is an accepted validation gap, not a claim that the combined source is byte-identical to BOX39.
+
+An incremental review also corrected the printed health check to use the shell-quoted target domain read from its private .env, instead of an unexported shell variable. The actual CLI regression clears the shell variable and verifies the emitted target URL; five CLI tests, typecheck and lint pass. Independent security/completion/docs delta review passed; operation and data algorithms are unchanged.
 
 ## Post-mortem
 

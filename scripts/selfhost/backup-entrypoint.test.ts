@@ -319,7 +319,12 @@ describe('selfhost:backup and selfhost:restore (real entry points, fake gcloud)'
       expect(operations[3]).toMatch(/start celld$/);
 
       // Restore into an empty install: new bucket, no platform keys yet.
-      writeFileSync(join(root, 'new.env'), 'CELLD_BUCKET=gs://fresh/celld\n', { mode: 0o600 });
+      writeFileSync(
+        join(root, 'new.env'),
+        'CELLD_BUCKET=gs://fresh/celld\nSAM_DOMAIN=restore.example.org\n',
+        { mode: 0o600 }
+      );
+      delete env.SAM_DOMAIN; // The target domain exists only in its private .env.
       const restore = run('restore.ts', [
         '--from',
         dest,
@@ -332,6 +337,8 @@ describe('selfhost:backup and selfhost:restore (real entry points, fake gcloud)'
       ]);
       expect(restore.stderr).toBe('');
       expect(restore.status).toBe(0);
+      expect(restore.stdout).toContain("curl -fsS 'https://api.restore.example.org/health'");
+      expect(restore.stdout).not.toContain('$SAM_DOMAIN');
       expect(tree(join(root, 'gcs/fresh/celld'))).toEqual(afterStop);
       const restoredKeys = JSON.parse(tree(join(root, 'new-state'))['platform-keys.json']!);
       expect(restoredKeys).toEqual({
