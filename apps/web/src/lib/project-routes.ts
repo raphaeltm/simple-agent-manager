@@ -75,3 +75,42 @@ export const projectLibraryFilePath = (
   if (commentThreadId) params.set(LIBRARY_COMMENT_THREAD_PARAM, commentThreadId);
   return `${projectRoot(projectId)}/library?${params.toString()}`;
 };
+
+export interface LibraryFileReference {
+  projectId: string;
+  fileId: string;
+  commentThreadId: string | null;
+}
+
+const LIBRARY_PATH = /^\/projects\/([^/]+)\/library\/?$/;
+
+/**
+ * The file a Library preview link points at, or null when `href` is anything else.
+ *
+ * Accepts the in-app path `projectLibraryFilePath` builds, relative or absolute on `origin` (the
+ * app's own origin). A link to another origin is not ours to open in place, even when its path
+ * looks the same.
+ */
+export function parseLibraryFileHref(href: string, origin: string): LibraryFileReference | null {
+  let url: URL;
+  try {
+    url = new URL(href, origin);
+  } catch {
+    return null;
+  }
+  if (url.origin !== origin) return null;
+  const match = LIBRARY_PATH.exec(url.pathname);
+  const fileId = url.searchParams.get('preview');
+  if (!match?.[1] || !fileId) return null;
+  let projectId: string;
+  try {
+    projectId = decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+  return {
+    projectId,
+    fileId,
+    commentThreadId: url.searchParams.get(LIBRARY_COMMENT_THREAD_PARAM),
+  };
+}

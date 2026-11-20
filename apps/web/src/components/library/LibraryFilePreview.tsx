@@ -9,13 +9,13 @@ import { IconButton, paneClassName, Spinner } from '@simple-agent-manager/ui';
 import { useQuery } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { downloadLibraryFile, getLibraryFilePreviewUrl } from '../../lib/api/library';
 import { libraryFileQueryOptions } from '../../lib/query-options';
 import { useDialogFocusTrap } from '../chat/useDialogFocusTrap';
 import { FilePreviewModal } from './FilePreviewModal';
+import { PreviewFrame, type PreviewPresentation } from './PreviewFrame';
 
 export interface LibraryFilePreviewProps {
   projectId: string;
@@ -24,6 +24,10 @@ export interface LibraryFilePreviewProps {
   filename?: string;
   /** Open the comments panel on this thread, from a comment deep link. */
   commentThreadId?: string | null;
+  /** See `PreviewFrame`. The Library page shows its own files as a screen. */
+  presentation?: PreviewPresentation;
+  /** Offered as "Open in Library" when the preview was opened from elsewhere. */
+  onOpenInLibrary?: () => void;
   onClose: () => void;
 }
 
@@ -31,8 +35,14 @@ export interface LibraryFilePreviewProps {
 function PreviewPlaceholder({
   title,
   error,
+  presentation,
   onClose,
-}: Readonly<{ title: string; error: boolean; onClose: () => void }>) {
+}: Readonly<{
+  title: string;
+  error: boolean;
+  presentation: PreviewPresentation;
+  onClose: () => void;
+}>) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
   useDialogFocusTrap(dialogRef, onClose);
@@ -43,43 +53,38 @@ function PreviewPlaceholder({
   const [opener] = useState(() => document.activeElement as HTMLElement | null);
   useEffect(() => () => opener?.focus(), [opener]);
 
-  return createPortal(
-    <div className="sam-void fixed inset-0 z-dialog-backdrop flex flex-col overflow-hidden pb-[max(env(safe-area-inset-bottom),0.375rem)] pl-[max(env(safe-area-inset-left),0.375rem)] pr-[max(env(safe-area-inset-right),0.375rem)] pt-[max(env(safe-area-inset-top),0.375rem)] md:p-2.5">
-      <div
-        ref={dialogRef}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className="relative z-dialog flex min-h-0 flex-1 flex-col gap-1.5 outline-none md:gap-2.5"
-        data-testid="library-file-preview-placeholder"
+  return (
+    <PreviewFrame
+      presentation={presentation}
+      dialogRef={dialogRef}
+      onClose={onClose}
+      aria-label={title}
+      data-testid="library-file-preview-placeholder"
+    >
+      <header
+        className={`${paneClassName('slab')} flex shrink-0 items-center gap-1 py-1 pl-3.5 pr-1 md:pl-4`}
       >
-        <header
-          className={`${paneClassName('slab')} flex shrink-0 items-center gap-1 py-1 pl-3.5 pr-1 md:pl-4`}
-        >
-          <h3 className="m-0 min-w-0 flex-1 truncate py-1 text-sm font-semibold text-fg-primary md:text-[15px]">
-            {title}
-          </h3>
-          <IconButton
-            label="Close preview"
-            icon={<X size={18} aria-hidden="true" />}
-            onClick={onClose}
-          />
-        </header>
-        <section
-          className={`${paneClassName('quiet')} flex min-h-0 flex-1 items-center justify-center p-8 text-center`}
-        >
-          {error ? (
-            <p className="m-0 max-w-sm text-sm text-fg-muted">
-              This file couldn&apos;t be opened. It may have been deleted.
-            </p>
-          ) : (
-            <Spinner size="lg" />
-          )}
-        </section>
-      </div>
-    </div>,
-    document.body
+        <h3 className="m-0 min-w-0 flex-1 truncate py-1 text-sm font-semibold text-fg-primary md:text-[15px]">
+          {title}
+        </h3>
+        <IconButton
+          label="Close preview"
+          icon={<X size={18} aria-hidden="true" />}
+          onClick={onClose}
+        />
+      </header>
+      <section
+        className={`${paneClassName('quiet')} flex min-h-0 flex-1 items-center justify-center p-8 text-center`}
+      >
+        {error ? (
+          <p className="m-0 max-w-sm text-sm text-fg-muted">
+            This file couldn&apos;t be opened. It may have been deleted.
+          </p>
+        ) : (
+          <Spinner size="lg" />
+        )}
+      </section>
+    </PreviewFrame>
   );
 }
 
@@ -88,6 +93,8 @@ export function LibraryFilePreview({
   fileId,
   filename,
   commentThreadId = null,
+  presentation = 'screen',
+  onOpenInLibrary,
   onClose,
 }: LibraryFilePreviewProps) {
   const queryScope = useQueryScope();
@@ -101,6 +108,7 @@ export function LibraryFilePreview({
       <PreviewPlaceholder
         title={filename ?? 'Opening file'}
         error={metadata.isError}
+        presentation={presentation}
         onClose={onClose}
       />
     );
@@ -114,6 +122,8 @@ export function LibraryFilePreview({
       onClose={onClose}
       onDownload={() => downloadLibraryFile(projectId, fileId)}
       initialCommentThreadId={commentThreadId}
+      presentation={presentation}
+      onOpenInLibrary={onOpenInLibrary}
     />
   );
 }

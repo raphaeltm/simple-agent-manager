@@ -57,6 +57,10 @@ vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => ({
   TypewriterText: ({ text }: { text: string }) => <span>{text}</span>,
 }));
 
+import {
+  LIBRARY_PREVIEW_STATE_KEY,
+  LibraryPreviewProvider,
+} from '../../../src/components/library/LibraryPreviewProvider';
 import type { ChatMessageResponse, MessageCommentThread } from '../../../src/lib/api';
 import { ApiClientError } from '../../../src/lib/api';
 import { ProjectCommentReader } from '../../../src/pages/comment-reader';
@@ -133,8 +137,10 @@ function inboxOf(threads: MessageCommentThread[]) {
   };
 }
 
+let lastLocationState: unknown = null;
 function LocationProbe() {
   const location = useLocation();
+  lastLocationState = location.state;
   return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
 }
 
@@ -145,14 +151,17 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <QueryClientProvider client={client}>
         <ProjectContext.Provider value={projectContext}>
-          <Routes>
-            <Route path="/projects/:id/comments" element={<ProjectComments />} />
-            <Route
-              path="/projects/:id/comments/:sessionId/:threadId"
-              element={<ProjectCommentReader />}
-            />
-            <Route path="*" element={null} />
-          </Routes>
+          {/* As in the app (`App.tsx` ProtectedLayout): Library references open in place. */}
+          <LibraryPreviewProvider>
+            <Routes>
+              <Route path="/projects/:id/comments" element={<ProjectComments />} />
+              <Route
+                path="/projects/:id/comments/:sessionId/:threadId"
+                element={<ProjectCommentReader />}
+              />
+              <Route path="*" element={null} />
+            </Routes>
+          </LibraryPreviewProvider>
           <LocationProbe />
         </ProjectContext.Provider>
       </QueryClientProvider>
@@ -513,7 +522,7 @@ describe('comment quotes in the reader and on the Comments page', () => {
     await waitFor(() => expect(highlights?.otherQuotes()).toEqual(['It retries because']));
   });
 
-  it('opens a library comment from the Comments page on its file, with the thread', async () => {
+  it('opens a library comment from the Comments page over the page, on its thread', async () => {
     const fileThread = {
       id: 'file-thread-1',
       clientId: null,
@@ -537,8 +546,17 @@ describe('comment quotes in the reader and on the Comments page', () => {
     renderAt(`/projects/${PROJECT}/comments`);
     fireEvent.click(await screen.findByRole('button', { name: /Is a week realistic\?/ }));
 
-    expect(screen.getByTestId('location')).toHaveTextContent(
-      `/projects/${PROJECT}/library?preview=file-7&commentThread=file-thread-1`
-    );
+    // The file opens over the Comments page (the viewer's frame shows while its metadata loads);
+    // the URL stays on the Comments page, and the preview carries the thread to open.
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent(`/projects/${PROJECT}/comments`);
+    expect(screen.getByTestId('location')).not.toHaveTextContent('/library');
+    expect(lastLocationState).toMatchObject({
+      [LIBRARY_PREVIEW_STATE_KEY]: {
+        projectId: PROJECT,
+        fileId: 'file-7',
+        commentThreadId: 'file-thread-1',
+      },
+    });
   });
 });

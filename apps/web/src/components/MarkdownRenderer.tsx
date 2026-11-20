@@ -15,6 +15,9 @@ import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown'
 import remarkGfm from 'remark-gfm';
 
 import { importWithRetry } from '../lib/lazy-with-retry';
+import { parseLibraryFileHref } from '../lib/project-routes';
+import { useLibraryPreview } from './library/library-preview-context';
+import { LibraryFileLink } from './library/LibraryFileLink';
 
 const SAFE_MARKDOWN_URL_PROTOCOLS = new Set(['http:', 'https:']);
 
@@ -36,6 +39,45 @@ function sanitizeMarkdownHref(href: string | undefined): string {
   } catch {
     return '#';
   }
+}
+
+const MARKDOWN_LINK_STYLE: CSSProperties = { overflowWrap: 'anywhere' };
+
+/**
+ * A markdown link. A link to a Library file in this app opens the file's preview over the page
+ * (`LibraryFileLink`) instead of a new tab on the Library; every other link opens in a new tab.
+ */
+function MarkdownLink({ href, children }: Readonly<{ href?: string; children?: ReactNode }>) {
+  const safeHref = sanitizeMarkdownHref(href);
+  const openLibraryFile = useLibraryPreview();
+  const libraryFile =
+    openLibraryFile && safeHref !== '#'
+      ? parseLibraryFileHref(safeHref, window.location.origin)
+      : null;
+  if (libraryFile) {
+    return (
+      <LibraryFileLink
+        projectId={libraryFile.projectId}
+        fileId={libraryFile.fileId}
+        commentThreadId={libraryFile.commentThreadId}
+        className="text-tn-blue"
+        style={MARKDOWN_LINK_STYLE}
+      >
+        {children}
+      </LibraryFileLink>
+    );
+  }
+  return (
+    <a
+      href={safeHref}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="text-tn-blue"
+      style={MARKDOWN_LINK_STYLE}
+    >
+      {children}
+    </a>
+  );
 }
 
 // ---------- Mermaid Loading ----------
@@ -271,17 +313,7 @@ export const MARKDOWN_COMPONENTS: Components = {
       {children}
     </blockquote>
   ),
-  a: ({ href, children }) => (
-    <a
-      href={sanitizeMarkdownHref(href)}
-      target="_blank"
-      rel="noreferrer noopener"
-      className="text-tn-blue"
-      style={{ overflowWrap: 'anywhere' }}
-    >
-      {children}
-    </a>
-  ),
+  a: ({ href, children }) => <MarkdownLink href={href}>{children}</MarkdownLink>,
   table: ({ children }) => (
     <div className="overflow-x-auto mb-3 max-w-full">
       <table className="border-collapse w-full min-w-80">{children}</table>

@@ -1,7 +1,6 @@
 import { IconButton, paneClassName, SegmentedControl } from '@simple-agent-manager/ui';
-import { Code, Download, Eye, MessageSquare, X } from 'lucide-react';
+import { Code, Download, Eye, FolderOpen, MessageSquare, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 
 import { useFileTextContent } from '../../hooks/useFileTextContent';
 import { useIsMobile } from '../../hooks/useIsMobile';
@@ -20,6 +19,7 @@ import {
 import { FileCommentPanel } from './FileCommentPanel';
 import { FileLinkedWorkSection } from './FileLinkedWorkSection';
 import { FilePreviewContent, isTooLargeToPreview, previewKindOf } from './FilePreviewContent';
+import { isTopmostPreview, PreviewFrame, type PreviewPresentation } from './PreviewFrame';
 import type { FileWithTags } from './types';
 import { useLibraryFileComments } from './useLibraryFileComments';
 
@@ -31,6 +31,10 @@ export interface FilePreviewModalProps {
   onDownload: () => void;
   /** Open with the comments panel showing this thread, from a comment deep link. */
   initialCommentThreadId?: string | null;
+  /** `overlay` floats over the referencing page on wider screens (`PreviewFrame`). */
+  presentation?: PreviewPresentation;
+  /** Shown as "Open in Library" when the viewer was opened from outside the Library. */
+  onOpenInLibrary?: () => void;
 }
 
 export function FilePreviewModal({
@@ -40,6 +44,8 @@ export function FilePreviewModal({
   onClose,
   onDownload,
   initialCommentThreadId = null,
+  presentation = 'screen',
+  onOpenInLibrary,
 }: FilePreviewModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
@@ -108,7 +114,7 @@ export function FilePreviewModal({
   // Escape key handler
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && isTopmostPreview(dialogRef.current)) {
         onClose();
       }
     };
@@ -165,166 +171,14 @@ export function FilePreviewModal({
   const showMdToggle = kind === 'markdown' && mdContent !== null;
   const showHtmlToggle = kind === 'html' && !isTooLargeToPreview(kind, file.sizeBytes);
 
-  return createPortal(
-    // The viewer is its own screen: a void with the header slab and the artifact pane floating
-    // on it. The frame and gutter are the shell's immersive ones, so the artifact keeps nearly
-    // the whole viewport.
-    <div className="sam-void fixed inset-0 z-dialog-backdrop flex flex-col overflow-hidden pb-[max(env(safe-area-inset-bottom),0.375rem)] pl-[max(env(safe-area-inset-left),0.375rem)] pr-[max(env(safe-area-inset-right),0.375rem)] pt-[max(env(safe-area-inset-top),0.375rem)] md:p-2.5">
-      <div
-        ref={dialogRef}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="preview-modal-title"
-        className="relative z-dialog flex min-h-0 flex-1 flex-col gap-1.5 outline-none md:gap-2.5"
-      >
-        {/* One slab: name and size, where the file came from, then the controls. */}
-        <header
-          className={`${paneClassName('slab')} relative z-10 flex shrink-0 items-center gap-1 py-1 pl-3.5 pr-1 md:pl-4`}
-        >
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1">
-            <h3
-              id="preview-modal-title"
-              className="m-0 truncate text-sm font-semibold text-fg-primary md:text-[15px]"
-              title={file.filename}
-            >
-              {file.filename}
-            </h3>
-            <div className="flex min-w-0 items-center gap-1.5 text-xs text-fg-muted">
-              <span className="shrink-0 font-mono">{formatFileSize(file.sizeBytes)}</span>
-              <FileLinkedWorkSection projectId={projectId} fileId={file.id} />
-            </div>
-          </div>
-
-          {/* Rendered/source: one control for markdown and HTML, so both behave alike. */}
-          {showMdToggle && (
-            <SegmentedControl
-              label="Markdown view"
-              size={isMobile ? 'lg' : 'md'}
-              className="shrink-0"
-              value={mdViewMode}
-              onChange={setMdViewMode}
-              options={[
-                {
-                  value: 'rendered',
-                  ariaLabel: 'Rendered view',
-                  icon: <Eye size={14} aria-hidden="true" />,
-                  label: <span className="max-md:hidden">Rendered</span>,
-                },
-                {
-                  value: 'source',
-                  ariaLabel: 'Source view',
-                  icon: <Code size={14} aria-hidden="true" />,
-                  label: <span className="max-md:hidden">Source</span>,
-                },
-              ]}
-            />
-          )}
-          {showHtmlToggle && (
-            <SegmentedControl
-              label="HTML view"
-              size={isMobile ? 'lg' : 'md'}
-              className="shrink-0"
-              value={htmlViewMode}
-              onChange={setHtmlViewMode}
-              options={[
-                {
-                  value: 'preview',
-                  ariaLabel: 'Interactive preview',
-                  icon: <Eye size={14} aria-hidden="true" />,
-                  label: <span className="max-md:hidden">Preview</span>,
-                },
-                {
-                  value: 'source',
-                  ariaLabel: 'Source view',
-                  icon: <Code size={14} aria-hidden="true" />,
-                  label: <span className="max-md:hidden">Source</span>,
-                },
-              ]}
-            />
-          )}
-
-          <IconButton
-            label={`Download ${file.filename}`}
-            icon={<Download size={18} aria-hidden="true" />}
-            onClick={onDownload}
-          />
-          <IconButton
-            label={commentsOpen ? 'Hide comments' : 'Show comments'}
-            icon={<MessageSquare size={18} aria-hidden="true" />}
-            aria-pressed={commentsOpen}
-            raised={commentsOpen}
-            onClick={() => {
-              if (commentsOpen) setFocusedThreadId(null);
-              setCommentsOpen(!commentsOpen);
-            }}
-          />
-          <IconButton
-            label="Close preview"
-            icon={<X size={18} aria-hidden="true" />}
-            onClick={onClose}
-          />
-        </header>
-
-        {/* The artifact pane, and the comments pane beside it (over it on phones). */}
-        <div className="relative flex min-h-0 flex-1 gap-2.5 md:gap-[var(--sam-space-gutter)]">
-          <section
-            ref={previewPaneRef}
-            aria-label={`Preview of ${file.filename}`}
-            className={`${paneClassName('quiet')} relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden`}
-          >
-            {/* The pane is the frame and this div scrolls, so the rim and frost stay put
-                (sam-glass-design-system.md, "Scrolling panes"). HTML needs a flex column so its
-                iframe can claim the full height; the other viewers scroll. */}
-            <div
-              className={`relative min-h-0 flex-1 ${
-                kind === 'html' ? 'flex flex-col overflow-hidden' : 'overflow-auto'
-              }`}
-            >
-              <FilePreviewContent
-                file={file}
-                kind={kind}
-                previewUrl={previewUrl}
-                onDownload={onDownload}
-                markdown={{
-                  mode: mdViewMode,
-                  content: mdContent,
-                  loading: mdLoading,
-                  error: mdError,
-                  bodyRef: previewBodyRef,
-                }}
-                html={{
-                  mode: htmlViewMode,
-                  source: htmlSource,
-                  loading: htmlSourceLoading,
-                  error: htmlSourceError,
-                }}
-              />
-            </div>
-          </section>
-
-          {commentsOpen && (
-            <aside
-              aria-label="File comments"
-              className={`${paneClassName(isMobile ? 'overlay' : 'pane')} absolute inset-0 z-10 overflow-hidden md:relative md:inset-auto md:w-80 md:shrink-0 lg:w-96`}
-            >
-              <FileCommentPanel
-                fileComments={fileComments}
-                focusedThreadId={focusedThreadId}
-                pendingQuote={pendingQuote}
-                onClearPendingQuote={() => setPendingQuote(null)}
-                onClose={() => {
-                  setPendingQuote(null);
-                  setFocusedThreadId(null);
-                  setCommentsOpen(false);
-                }}
-              />
-            </aside>
-          )}
-        </div>
-      </div>
-
-      {selection &&
+  return (
+    <PreviewFrame
+      presentation={presentation}
+      dialogRef={dialogRef}
+      onClose={onClose}
+      aria-labelledby="preview-modal-title"
+      outside={
+        selection &&
         (coarsePointer ? (
           <SelectionActionBar
             quote={selection.quote}
@@ -337,8 +191,155 @@ export function FilePreviewModal({
           />
         ) : (
           <SelectionPopover x={selection.x} y={selection.y} onComment={startQuotedComment} />
-        ))}
-    </div>,
-    document.body
+        ))
+      }
+    >
+      {/* One slab: name and size, where the file came from, then the controls. */}
+      <header
+        className={`${paneClassName('slab')} relative z-10 flex shrink-0 items-center gap-1 py-1 pl-3.5 pr-1 md:pl-4`}
+      >
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1">
+          <h3
+            id="preview-modal-title"
+            className="m-0 truncate text-sm font-semibold text-fg-primary md:text-[15px]"
+            title={file.filename}
+          >
+            {file.filename}
+          </h3>
+          <div className="flex min-w-0 items-center gap-1.5 text-xs text-fg-muted">
+            <span className="shrink-0 font-mono">{formatFileSize(file.sizeBytes)}</span>
+            <FileLinkedWorkSection projectId={projectId} fileId={file.id} />
+          </div>
+        </div>
+
+        {/* Rendered/source: one control for markdown and HTML, so both behave alike. */}
+        {showMdToggle && (
+          <SegmentedControl
+            label="Markdown view"
+            size={isMobile ? 'lg' : 'md'}
+            className="shrink-0"
+            value={mdViewMode}
+            onChange={setMdViewMode}
+            options={[
+              {
+                value: 'rendered',
+                ariaLabel: 'Rendered view',
+                icon: <Eye size={14} aria-hidden="true" />,
+                label: <span className="max-md:hidden">Rendered</span>,
+              },
+              {
+                value: 'source',
+                ariaLabel: 'Source view',
+                icon: <Code size={14} aria-hidden="true" />,
+                label: <span className="max-md:hidden">Source</span>,
+              },
+            ]}
+          />
+        )}
+        {showHtmlToggle && (
+          <SegmentedControl
+            label="HTML view"
+            size={isMobile ? 'lg' : 'md'}
+            className="shrink-0"
+            value={htmlViewMode}
+            onChange={setHtmlViewMode}
+            options={[
+              {
+                value: 'preview',
+                ariaLabel: 'Interactive preview',
+                icon: <Eye size={14} aria-hidden="true" />,
+                label: <span className="max-md:hidden">Preview</span>,
+              },
+              {
+                value: 'source',
+                ariaLabel: 'Source view',
+                icon: <Code size={14} aria-hidden="true" />,
+                label: <span className="max-md:hidden">Source</span>,
+              },
+            ]}
+          />
+        )}
+
+        {onOpenInLibrary && (
+          <IconButton
+            label="Open in Library"
+            icon={<FolderOpen size={18} aria-hidden="true" />}
+            onClick={onOpenInLibrary}
+          />
+        )}
+        <IconButton
+          label={`Download ${file.filename}`}
+          icon={<Download size={18} aria-hidden="true" />}
+          onClick={onDownload}
+        />
+        <IconButton
+          label={commentsOpen ? 'Hide comments' : 'Show comments'}
+          icon={<MessageSquare size={18} aria-hidden="true" />}
+          aria-pressed={commentsOpen}
+          raised={commentsOpen}
+          onClick={() => {
+            if (commentsOpen) setFocusedThreadId(null);
+            setCommentsOpen(!commentsOpen);
+          }}
+        />
+        <IconButton
+          label="Close preview"
+          icon={<X size={18} aria-hidden="true" />}
+          onClick={onClose}
+        />
+      </header>
+
+      {/* The artifact pane, and the comments pane beside it (over it on phones). */}
+      <div className="relative flex min-h-0 flex-1 gap-2.5 md:gap-[var(--sam-space-gutter)]">
+        <section
+          ref={previewPaneRef}
+          aria-label={`Preview of ${file.filename}`}
+          className={`${paneClassName('quiet')} relative min-h-0 min-w-0 flex-1 ${
+            // HTML needs a flex column so its iframe can claim the full height; the other
+            // viewers scroll inside the pane.
+            kind === 'html' ? 'flex flex-col overflow-hidden' : 'overflow-auto'
+          }`}
+        >
+          <FilePreviewContent
+            file={file}
+            kind={kind}
+            previewUrl={previewUrl}
+            onDownload={onDownload}
+            markdown={{
+              mode: mdViewMode,
+              content: mdContent,
+              loading: mdLoading,
+              error: mdError,
+              bodyRef: previewBodyRef,
+            }}
+            html={{
+              mode: htmlViewMode,
+              source: htmlSource,
+              loading: htmlSourceLoading,
+              error: htmlSourceError,
+            }}
+          />
+        </section>
+
+        {commentsOpen && (
+          <aside
+            aria-label="File comments"
+            className={`${paneClassName(isMobile ? 'overlay' : 'pane')} absolute inset-0 z-10 overflow-hidden md:relative md:inset-auto md:w-80 md:shrink-0 lg:w-96`}
+          >
+            <FileCommentPanel
+              fileComments={fileComments}
+              focusedThreadId={focusedThreadId}
+              pendingQuote={pendingQuote}
+              onClearPendingQuote={() => setPendingQuote(null)}
+              onClose={() => {
+                setPendingQuote(null);
+                setFocusedThreadId(null);
+                setCommentsOpen(false);
+              }}
+            />
+          </aside>
+        )}
+      </div>
+    </PreviewFrame>
   );
 }

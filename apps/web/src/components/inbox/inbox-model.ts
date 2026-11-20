@@ -294,7 +294,7 @@ export function linkIcon(link: InboxLink): LucideIcon {
 export function linkTarget(
   projectId: string,
   link: InboxLink
-): { href: string; external: boolean; host?: string } | null {
+): { href: string; external: boolean; host?: string; libraryFileId?: string } | null {
   // A dot segment would climb out of the intended path once the router resolves it.
   if (!link.id || link.id === '.' || link.id === '..') return null;
   switch (link.kind) {
@@ -302,7 +302,12 @@ export function linkTarget(
       return { href: projectIdeaPath(projectId, link.id), external: false };
     case 'file':
     case 'library':
-      return { href: projectLibraryFilePath(projectId, link.id), external: false };
+      // The chip opens the file's preview in place; the href is its fallback (a new tab).
+      return {
+        href: projectLibraryFilePath(projectId, link.id),
+        external: false,
+        libraryFileId: link.id,
+      };
     case 'chat':
     case 'session':
       return { href: projectChatPath(projectId, link.id), external: false };

@@ -14,8 +14,9 @@ import type { LinkedFile } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
 import { FileText, GitPullRequest, Lightbulb, Link2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router';
 
-import { projectIdeaPath } from '../../lib/project-routes';
+import { projectIdeaPath, projectLibraryFilePath } from '../../lib/project-routes';
 import { LibraryFilePreview } from '../library/LibraryFilePreview';
 import {
   describeRelations,
@@ -182,6 +183,7 @@ export function SessionLinkedWorkDrawer({
 }: Readonly<{ projectId: string; linkedWork: SessionLinkedWork; onClose: () => void }>) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [previewFile, setPreviewFile] = useState<LinkedFile | null>(null);
+  const navigate = useNavigate();
   useDialogFocusTrap(panelRef, onClose, previewFile === null);
 
   // The preview hands focus back to the row that opened it. If a refetch removed that row in
@@ -244,6 +246,8 @@ export function SessionLinkedWorkDrawer({
           projectId={projectId}
           fileId={previewFile.fileId}
           filename={previewFile.filename}
+          presentation="overlay"
+          onOpenInLibrary={() => navigate(projectLibraryFilePath(projectId, previewFile.fileId))}
           onClose={() => setPreviewFile(null)}
         />
       )}
