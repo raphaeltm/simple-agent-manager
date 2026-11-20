@@ -59,7 +59,8 @@ export function boxMigrateDeps(ctx: BoxContext): MigrateDeps {
   const deployArgs = ['selfhost:deploy', '--env-file', envFile];
   return {
     log: ctx.log,
-    init: async () => visible('pnpm', [...deployArgs, '--init']),
+    // --seal: this is the one deploy allowed to seal a box running on plaintext deploy vars.
+    init: async () => visible('pnpm', [...deployArgs, '--init', '--seal']),
     preflight: preflightSealedSecrets,
     startStack: async () => {
       visible('docker', composeArgs(ctx, ['up', '-d', '--build']));

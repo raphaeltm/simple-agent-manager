@@ -181,7 +181,11 @@ it restores the previous provider and redeploys (`scripts/selfhost/secrets-switc
 
 A box installed before sealed secrets keeps its secrets in `.state/platform-keys.json` and
 `secrets.env`, and `pnpm selfhost:upgrade` keeps it that way (it never makes this switch by
-itself; it tells you to run `migrate`). One command moves it:
+itself; it tells you to run `migrate`). So does `pnpm selfhost:deploy`, `--init` included: a box
+with plaintext platform keys and no recorded key choice is sealed only with `--seal`, which
+`migrate` passes after its contract check (`scripts/selfhost/deploy-keys.ts` `holdsPlaintext`).
+That holds when the upgrade is run by a version from before sealed secrets, which knows no key
+flags. One command moves it:
 
 ```bash
 pnpm selfhost:secrets migrate                          # seal, check, switch, verify

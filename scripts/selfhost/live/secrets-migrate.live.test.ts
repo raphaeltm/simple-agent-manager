@@ -54,7 +54,7 @@ function deps(overrides: Partial<MigrateDeps> = {}): MigrateDeps {
     log: (message) => logs.push(message),
     init: async () => {
       steps.push('init');
-      const result = await runDeploy(envFile, ['--init']);
+      const result = await runDeploy(envFile, ['--init', '--seal']);
       if (result.status !== 0) throw new Error(result.out);
     },
     preflight: async (input) => {

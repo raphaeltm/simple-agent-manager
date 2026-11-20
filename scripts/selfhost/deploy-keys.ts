@@ -15,6 +15,7 @@ import {
   LEGACY_KEY_PROVIDER,
 } from './key-service.js';
 import type { PlatformKeysMode } from './platform-keys.js';
+import { holdOnPlaintext } from './upgrade-sealing.js';
 
 type Box = Record<string, string>;
 
@@ -29,11 +30,18 @@ export async function resolveDeployBox(input: {
   init: boolean;
   dryRun: boolean;
   keyProvider: string | undefined;
+  /** `--seal`: seal a box that runs on plaintext deploy vars (secrets migrate). */
+  seal?: boolean;
   log: (message: string) => void;
 }): Promise<Box> {
-  const base = input.keyProvider
-    ? { ...input.box, SAM_KEY_PROVIDER: input.keyProvider }
-    : input.box;
+  const provider = input.keyProvider ?? (holdsPlaintext(input) ? LEGACY_KEY_PROVIDER : undefined);
+  if (!input.keyProvider && provider) {
+    input.log(
+      'this box runs on plaintext deploy vars and stays on them; `pnpm selfhost:secrets migrate` ' +
+        'seals it safely'
+    );
+  }
+  const base = provider ? { ...input.box, SAM_KEY_PROVIDER: provider } : input.box;
   const { box } = await resolveKeyProviderBox({
     box: base,
     stateDir: input.stateDir,
@@ -46,15 +54,24 @@ export async function resolveDeployBox(input: {
 }
 
 /**
+ * A box already on plaintext deploy vars stays there unless sealing is asked for (`--seal`):
+ * an upgrader from before sealing runs this deploy with no key flag (deploy.ts module comment).
+ */
+function holdsPlaintext(input: { box: Box; stateDir: string; seal?: boolean }): boolean {
+  return !input.seal && holdOnPlaintext({ box: input.box, stateDir: input.stateDir });
+}
+
+/**
  * Root is refused before the deploy writes anything (the state dir, the recorded key choice)
  * unless the box stays on plaintext deploy vars: a sealed box is set up by its state owner, and
  * root-owned state would need manual ownership repair before the owner could retry.
  */
 export function refuseRootUnlessPlaintext(
-  input: { box: Box; keyProvider?: string; stateDir: string },
+  input: { box: Box; keyProvider?: string; seal?: boolean; stateDir: string },
   uid = process.getuid?.()
 ): void {
   if (uid !== 0) return;
+  if (!input.keyProvider?.trim() && holdsPlaintext(input)) return;
   const named = input.keyProvider?.trim() || input.box.SAM_KEY_PROVIDER?.trim();
   if (named === LEGACY_KEY_PROVIDER) return;
   if (!named && readKeyChoice(input.stateDir)?.provider === LEGACY_KEY_PROVIDER) return;

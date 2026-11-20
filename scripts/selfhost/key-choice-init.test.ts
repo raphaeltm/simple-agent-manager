@@ -161,7 +161,8 @@ describe('pnpm selfhost:deploy --init (sealed secrets by default)', () => {
     writeFileSync(join(state, 'secrets.env'), `GITHUB_CLIENT_SECRET=${OPERATOR_SECRET}\n`, {
       mode: 0o600,
     });
-    const init = await runDeploy(envFile, ['--init']);
+    // --seal: what `secrets migrate` passes; a plain --init keeps it plaintext (deploy-hold-plaintext.test.ts).
+    const init = await runDeploy(envFile, ['--init', '--seal']);
     expect(init.status, init.out).toBe(0);
     const secrets = await sealedSecrets();
     expect(secrets.ENCRYPTION_KEY).toBe(legacy.ENCRYPTION_KEY);

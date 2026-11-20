@@ -4,7 +4,10 @@
  *
  *   pnpm selfhost:deploy [--env-file deploy/selfhost/.env] [--state-dir <env dir>/.state]
  *                        [--secrets <state-dir>/secrets.env] [--web-dist DIR] [--dry-run] [--init]
- *                        [--skip-vm-agent] [--key-provider NAME] [--unset NAME ...]
+ *                        [--skip-vm-agent] [--key-provider NAME] [--seal] [--unset NAME ...]
+ *
+ * A box on plaintext deploy vars (no recorded key choice) stays on them unless `--seal` (secrets
+ * migrate): an upgrader from before sealing passes no key flag (deploy-keys.ts holdsPlaintext).
  *
  * `--init` chooses the key provider that seals the Worker secrets when none is recorded
  * (key-choice.ts), generates the platform keys into the sealed bundle (key-service.ts; on a
@@ -166,6 +169,7 @@ async function readDeployInputs(): Promise<DeployInputs> {
       init: { type: 'boolean', default: false },
       'skip-vm-agent': { type: 'boolean', default: false },
       'key-provider': { type: 'string' },
+      seal: { type: 'boolean', default: false },
       // Remove a sealed value whose secrets.env line was deleted (key-service.ts assertUnsettable).
       unset: { type: 'string', multiple: true },
     },
@@ -184,19 +188,12 @@ async function readDeployInputs(): Promise<DeployInputs> {
     values['state-dir'] ?? envBox.SAM_SELFHOST_STATE_DIR ?? '.state'
   );
   const dryRun = values['dry-run'] ?? false;
+  const keys = { box: envBox, stateDir, keyProvider: values['key-provider'], seal: values.seal };
   // A dry run writes nothing, not even the state dir; root is refused before the first write.
-  if (!dryRun)
-    refuseRootUnlessPlaintext({ box: envBox, keyProvider: values['key-provider'], stateDir });
+  if (!dryRun) refuseRootUnlessPlaintext(keys);
   if (!dryRun) ensurePrivateDir(stateDir);
   // Which key provider seals the secrets (key-choice.ts): `--init` chooses when none is recorded.
-  const box = await resolveDeployBox({
-    box: envBox,
-    stateDir,
-    init: values.init ?? false,
-    dryRun,
-    keyProvider: values['key-provider'],
-    log,
-  });
+  const box = await resolveDeployBox({ ...keys, init: values.init ?? false, dryRun, log });
   const secretsPath = resolve(values.secrets ?? join(stateDir, 'secrets.env'));
   const baseDomain = box.SAM_DOMAIN;
   if (!baseDomain) throw new Error(`${envFile}: SAM_DOMAIN is required`);
