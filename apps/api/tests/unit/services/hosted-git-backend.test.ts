@@ -16,7 +16,7 @@ import {
   isArtifactsAvailable,
   registerArtifactsBackendFallback,
   resolveArtifactsBackend,
-} from '../../../src/services/hosted-git/backend';
+} from '../../../src/services/artifacts/backend';
 
 function backend(label: string): ArtifactsBackend {
   return {
