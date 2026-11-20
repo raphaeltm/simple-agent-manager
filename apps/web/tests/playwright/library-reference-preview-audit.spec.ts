@@ -236,6 +236,8 @@ for (const viewport of [
       const { dialog } = await openChip(page, FILES[3]!);
       await expect(dialog.getByRole('heading', { name: 'Rollout plan' })).toBeVisible();
       await expectDialogInViewport(page);
+      await assertNoOverflow(page);
+      await assertNoClippedOverflow(page);
       await screenshot(page, 'library-ref-preview-markdown');
 
       await page.goBack();

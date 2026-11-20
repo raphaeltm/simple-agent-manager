@@ -52,7 +52,7 @@ function MarkdownLink({ href, children }: Readonly<{ href?: string; children?: R
   const openLibraryFile = useLibraryPreview();
   const libraryFile =
     openLibraryFile && safeHref !== '#'
-      ? parseLibraryFileHref(safeHref, window.location.origin)
+      ? parseLibraryFileHref(safeHref, window.location.origin, window.location.href)
       : null;
   if (libraryFile) {
     return (

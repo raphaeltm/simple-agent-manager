@@ -18,9 +18,12 @@ import {
   within,
 } from '@testing-library/react';
 import type { ReactElement, ReactNode } from 'react';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, type NavigateFunction, useNavigate } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { LibraryPreviewProvider } from '../../../../src/components/library/LibraryPreviewProvider';
+// The provider lazy-loads the viewer; load it once up front so no test is timed on it.
+await import('../../../../src/components/library/LibraryFilePreview');
 import { ProjectMessageView } from '../../../../src/components/project-message-view';
 import { linkedWorkQueryKeys } from '../../../../src/lib/query-options';
 
@@ -216,13 +219,26 @@ function makeSession(overrides: Record<string, unknown> = {}) {
   };
 }
 
+let navigate: NavigateFunction = () => undefined;
+function NavigateProbe() {
+  navigate = useNavigate();
+  return null;
+}
+
 function render(ui: ReactElement) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
   });
+  // As in the app (`App.tsx` ProtectedLayout): Library files open over the page through the
+  // history-backed provider.
   const Wrapper = ({ children }: { children: ReactNode }) => (
     <MemoryRouter>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        <LibraryPreviewProvider>
+          {children}
+          <NavigateProbe />
+        </LibraryPreviewProvider>
+      </QueryClientProvider>
     </MemoryRouter>
   );
   return { ...rtlRender(ui, { wrapper: Wrapper }), queryClient };
@@ -306,10 +322,11 @@ describe('chat linked work — the Related panel', () => {
       'href',
       `/projects/${PROJECT_ID}/ideas/idea-1`
     );
-    // A file opens in place (see the preview tests below), so its row is a button, not a link.
+    // A file opens in place (see the preview tests below); its row is still a real link to the
+    // Library, for a modified click or a new tab.
     const file = within(drawer).getByTestId('linked-work-file');
-    expect(file.tagName).toBe('BUTTON');
-    expect(file).not.toHaveAttribute('href');
+    expect(file).toHaveAttribute('href', `/projects/${PROJECT_ID}/library?preview=file-1`);
+    expect(file).toHaveAttribute('aria-haspopup', 'dialog');
     const pr = within(drawer).getByTestId('linked-work-pr');
     expect(pr).toHaveAttribute('href', PR_URL);
     expect(pr).toHaveAttribute('rel', expect.stringContaining('noopener'));
@@ -353,6 +370,21 @@ describe('chat linked work — the Related panel', () => {
     await waitFor(() =>
       expect(screen.queryByTestId('session-linked-work-drawer')).not.toBeInTheDocument()
     );
+  });
+
+  it("a phone's Back closes the preview and leaves the chat and the Related panel open", async () => {
+    await renderChat();
+    const drawer = await openRelated();
+    fireEvent.click(within(drawer).getByTestId('linked-work-file'));
+    await screen.findByRole('region', { name: 'Preview of report.png' });
+
+    act(() => navigate(-1));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'report.png' })).not.toBeInTheDocument()
+    );
+    expect(screen.getByTestId('session-linked-work-drawer')).toBeInTheDocument();
+    expect(screen.getByTestId('session-tool-related')).toBeInTheDocument();
   });
 
   it('keeps focus in the panel when the row that opened the preview has since gone', async () => {

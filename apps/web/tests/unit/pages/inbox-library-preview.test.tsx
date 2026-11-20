@@ -28,8 +28,12 @@ vi.mock('../../../src/components/AuthProvider', async (importOriginal) => ({
 }));
 
 const { InboxPage } = await import('../../../src/pages/inbox/InboxPage');
-const { LibraryPreviewProvider, LIBRARY_PREVIEW_STATE_KEY } =
+// The provider lazy-loads the viewer; load it once up front so the first test is not timed on it.
+await import('../../../src/components/library/LibraryFilePreview');
+const { LibraryPreviewProvider } =
   await import('../../../src/components/library/LibraryPreviewProvider');
+const { LIBRARY_PREVIEW_STATE_KEY } =
+  await import('../../../src/components/library/library-preview-context');
 
 const FILE_ID = 'F1';
 const FILENAME = 'quarterly-roadmap-screenshot.png';

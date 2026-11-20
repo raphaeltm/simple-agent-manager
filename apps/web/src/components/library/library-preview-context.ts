@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react';
+import * as v from 'valibot';
 
 /** One Library file to show in the in-place preview. */
 export interface LibraryPreviewRequest {
@@ -20,4 +21,26 @@ export const LibraryPreviewContext = createContext<OpenLibraryFile | null>(null)
  */
 export function useLibraryPreview(): OpenLibraryFile | null {
   return useContext(LibraryPreviewContext);
+}
+
+/** The history-state key holding the open preview (`LibraryPreviewProvider`). */
+export const LIBRARY_PREVIEW_STATE_KEY = 'samLibraryPreview';
+
+// History state survives reloads and is shared with every page's own keys, so it is read through
+// a schema rather than trusted (a malformed value opens nothing).
+const PreviewStateSchema = v.object({
+  projectId: v.pipe(v.string(), v.minLength(1)),
+  fileId: v.pipe(v.string(), v.minLength(1)),
+  filename: v.optional(v.string()),
+  commentThreadId: v.optional(v.nullable(v.string())),
+});
+
+/** The preview a history entry's state holds open, or null. */
+export function readLibraryPreview(state: unknown): LibraryPreviewRequest | null {
+  if (!state || typeof state !== 'object') return null;
+  const parsed = v.safeParse(
+    PreviewStateSchema,
+    (state as Record<string, unknown>)[LIBRARY_PREVIEW_STATE_KEY]
+  );
+  return parsed.success ? parsed.output : null;
 }

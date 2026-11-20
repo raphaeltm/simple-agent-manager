@@ -11,40 +11,23 @@
  * rows, comment threads, workflow outputs, markdown links) calls `useLibraryPreview()` rather than
  * each mounting `LibraryFilePreview` itself.
  */
-import { lazy, type ReactNode, Suspense, useCallback, useRef } from 'react';
+import { lazy, type ReactNode, Suspense, useCallback, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import * as v from 'valibot';
 
 import { importWithRetry } from '../../lib/lazy-with-retry';
 import { projectLibraryFilePath } from '../../lib/project-routes';
-import { LibraryPreviewContext, type LibraryPreviewRequest } from './library-preview-context';
+import {
+  LIBRARY_PREVIEW_STATE_KEY,
+  LibraryPreviewContext,
+  type LibraryPreviewRequest,
+  readLibraryPreview as readPreview,
+} from './library-preview-context';
 
 // The viewer (markdown, media, comments) loads when a file is first opened, not with the app
 // shell this provider sits in.
 const LibraryFilePreview = lazy(async () => ({
   default: (await importWithRetry(() => import('./LibraryFilePreview'))).LibraryFilePreview,
 }));
-
-/** The history-state key holding the open preview. */
-export const LIBRARY_PREVIEW_STATE_KEY = 'samLibraryPreview';
-
-// History state survives reloads and is shared with every page's own keys, so it is read through
-// a schema rather than trusted (a malformed value opens nothing).
-const PreviewStateSchema = v.object({
-  projectId: v.pipe(v.string(), v.minLength(1)),
-  fileId: v.pipe(v.string(), v.minLength(1)),
-  filename: v.optional(v.string()),
-  commentThreadId: v.optional(v.nullable(v.string())),
-});
-
-function readPreview(state: unknown): LibraryPreviewRequest | null {
-  if (!state || typeof state !== 'object') return null;
-  const parsed = v.safeParse(
-    PreviewStateSchema,
-    (state as Record<string, unknown>)[LIBRARY_PREVIEW_STATE_KEY]
-  );
-  return parsed.success ? parsed.output : null;
-}
 
 function withoutPreview(state: unknown): Record<string, unknown> | null {
   if (!state || typeof state !== 'object') return null;
@@ -66,8 +49,17 @@ export function LibraryPreviewProvider({ children }: Readonly<{ children: ReactN
   const locationRef = useRef(location);
   locationRef.current = location;
 
+  // What had focus on the page when the preview session began. A link inside one preview can
+  // replace it with another file; focus must still go back to the page control, not to a link in
+  // a viewer that no longer exists.
+  const openerRef = useRef<HTMLElement | null>(null);
+
   const openLibraryFile = useCallback(
     (request: LibraryPreviewRequest) => {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && !active.closest('[data-library-preview-root]')) {
+        openerRef.current = active;
+      }
       const current = locationRef.current;
       const base = withoutPreview(current.state) ?? {};
       navigate(
@@ -94,6 +86,16 @@ export function LibraryPreviewProvider({ children }: Readonly<{ children: ReactN
       { replace: true, state: withoutPreview(location.state) }
     );
   }, [location.hash, location.key, location.pathname, location.search, location.state, navigate]);
+
+  const isOpen = preview !== null;
+  useEffect(() => {
+    if (isOpen) return;
+    // The viewer hands focus back to whatever it captured on mount; after a replaced preview that
+    // is gone, so return it to the page control that started the session.
+    const opener = openerRef.current;
+    openerRef.current = null;
+    if (opener?.isConnected && document.activeElement !== opener) opener.focus();
+  }, [isOpen]);
 
   const openInLibrary = useCallback(() => {
     if (!preview) return;

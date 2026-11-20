@@ -87,14 +87,19 @@ const LIBRARY_PATH = /^\/projects\/([^/]+)\/library\/?$/;
 /**
  * The file a Library preview link points at, or null when `href` is anything else.
  *
- * Accepts the in-app path `projectLibraryFilePath` builds, relative or absolute on `origin` (the
- * app's own origin). A link to another origin is not ours to open in place, even when its path
+ * Accepts the in-app path `projectLibraryFilePath` builds, relative (to `base`, the page the link
+ * is on) or absolute on `origin` (the app's own origin). A link to another origin is not ours to open in place, even when its path
  * looks the same.
  */
-export function parseLibraryFileHref(href: string, origin: string): LibraryFileReference | null {
+export function parseLibraryFileHref(
+  href: string,
+  origin: string,
+  /** Where a relative href is resolved from: the page it appears on. Defaults to the origin. */
+  base: string = origin
+): LibraryFileReference | null {
   let url: URL;
   try {
-    url = new URL(href, origin);
+    url = new URL(href, base);
   } catch {
     return null;
   }

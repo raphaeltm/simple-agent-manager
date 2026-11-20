@@ -4,7 +4,7 @@
  * chip itself is covered end to end in `tests/unit/pages/inbox-library-preview.test.tsx`.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FileText } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { MemoryRouter, Outlet, Route, Routes, useLocation } from 'react-router';
@@ -15,9 +15,17 @@ vi.mock('../../../src/components/AuthProvider', async (importOriginal) => ({
   useAuth: () => ({ user: { id: 'user-1' }, isSuperadmin: false, isLoading: false }),
 }));
 
-const { LibraryPreviewProvider, LIBRARY_PREVIEW_STATE_KEY } =
+// The provider lazy-loads the viewer; load it once up front so the first test is not timed on it.
+await import('../../../src/components/library/LibraryFilePreview');
+const { LibraryPreviewProvider } =
   await import('../../../src/components/library/LibraryPreviewProvider');
+const { LIBRARY_PREVIEW_STATE_KEY } =
+  await import('../../../src/components/library/library-preview-context');
 const { RenderedMarkdown } = await import('../../../src/components/MarkdownRenderer');
+const { LibraryFileLink } = await import('../../../src/components/library/LibraryFileLink');
+const { useLibraryPreview } =
+  await import('../../../src/components/library/library-preview-context');
+type OpenLibraryFile = NonNullable<ReturnType<typeof useLibraryPreview>>;
 const { LinkedWorkRow } = await import('../../../src/components/linked-work');
 const { OutputChip } = await import('../../../src/pages/automation/workflows/ui');
 const { artifactLink } = await import('../../../src/pages/automation/workflows/links');
@@ -139,6 +147,39 @@ describe('Related rows and workflow outputs', () => {
   });
 });
 
+describe('a preview replaced by another file', () => {
+  it('returns focus to the page control that opened the first one', async () => {
+    let open: OpenLibraryFile | null = null;
+    function Capture() {
+      open = useLibraryPreview();
+      return null;
+    }
+    renderInPlace(
+      <>
+        <LibraryFileLink projectId="p1" fileId="A" filename="a.md">
+          Plan A
+        </LibraryFileLink>
+        <Capture />
+      </>
+    );
+    const chip = screen.getByRole('link', { name: 'Plan A' });
+    chip.focus();
+    fireEvent.click(chip);
+    const first = await screen.findByRole('dialog', { name: 'a.md' });
+
+    // A link inside the first viewer has focus when it opens file B in its place.
+    within(first).getByRole('button', { name: 'Close preview' }).focus();
+    act(() => open!({ projectId: 'p1', fileId: 'B', filename: 'b.md' }));
+    expect(await screen.findByRole('dialog', { name: 'b.md' })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(chip).toHaveFocus();
+    expect(location.pathname).toBe('/projects/p1/chat/s1');
+  });
+});
+
 describe('parseLibraryFileHref', () => {
   const origin = 'https://app.example.org';
   it('reads the file, project and thread from a Library preview link', () => {
@@ -150,6 +191,12 @@ describe('parseLibraryFileHref', () => {
       fileId: 'F1',
       commentThreadId: null,
     });
+  });
+
+  it('resolves a relative link against the page it is on', () => {
+    expect(
+      parseLibraryFileHref('../library?preview=F1', origin, `${origin}/projects/p1/ideas/i1`)
+    ).toEqual({ projectId: 'p1', fileId: 'F1', commentThreadId: null });
   });
 
   it('rejects other origins, other pages and links without a file', () => {

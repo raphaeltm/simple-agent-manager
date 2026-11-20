@@ -57,10 +57,10 @@ vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => ({
   TypewriterText: ({ text }: { text: string }) => <span>{text}</span>,
 }));
 
-import {
-  LIBRARY_PREVIEW_STATE_KEY,
-  LibraryPreviewProvider,
-} from '../../../src/components/library/LibraryPreviewProvider';
+import { LIBRARY_PREVIEW_STATE_KEY } from '../../../src/components/library/library-preview-context';
+import { LibraryPreviewProvider } from '../../../src/components/library/LibraryPreviewProvider';
+// The provider lazy-loads the viewer; load it once up front so no test is timed on it.
+await import('../../../src/components/library/LibraryFilePreview');
 import type { ChatMessageResponse, MessageCommentThread } from '../../../src/lib/api';
 import { ApiClientError } from '../../../src/lib/api';
 import { ProjectCommentReader } from '../../../src/pages/comment-reader';
