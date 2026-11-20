@@ -1457,4 +1457,31 @@ describe('InboxPage — the item as a conversation', () => {
     await waitFor(() => expect(reads()).toBeGreaterThan(before));
     expect(await screen.findByText('Here is my answer.')).toBeTruthy();
   });
+
+  it('shows a person’s comment in an agent response thread as theirs', async () => {
+    server.items = [item({ ref: 'ask:q', canReply: true })];
+    server.conversations = {
+      'ask:q': {
+        ...empty,
+        responses: [
+          {
+            ...response('c1', 'Agent says hi.', 5),
+            replies: [
+              {
+                id: 'f1',
+                author: { kind: 'user' as const, id: 'u2', name: 'Dana Reyes' },
+                body: 'Thanks, noted.',
+                createdAt: minutesAgo(4),
+              },
+            ],
+          },
+        ],
+      },
+    };
+    installFetch(server);
+    renderInbox();
+    const comment = await screen.findByTestId('inbox-response-person-comment');
+    expect(comment.textContent).toContain('Dana Reyes commented');
+    expect(comment.textContent).toContain('Thanks, noted.');
+  });
 });

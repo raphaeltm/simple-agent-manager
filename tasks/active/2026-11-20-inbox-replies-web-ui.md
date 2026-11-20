@@ -29,22 +29,22 @@ item detail `conversation`. The web app has no UI for it.
   (linkTarget); keep those regions untouched.
 
 ## Checklist
-- [ ] API client: `replyToInboxItem`, item read with `replyCursor`/`responseCursor`
-- [ ] API: `inboxTitle` in inbox reply delivery metadata (+ test)
-- [ ] Conversation model (merge pages, timeline, attachment-block stripping, row hint) + unit tests
-- [ ] `useInboxConversation` (TanStack infinite query for older/later pages)
-- [ ] Item view as conversation: ask as agent's first message, replies + responses in time order,
+- [x] API client: `replyToInboxItem`, item read with `replyCursor`/`responseCursor`
+- [x] API: `inboxTitle` in inbox reply delivery metadata (+ test)
+- [x] Conversation model (merge pages, timeline, attachment-block stripping, row hint) + unit tests
+- [x] `useInboxConversation` (TanStack infinite query for older/later pages)
+- [x] Item view as conversation: ask as agent's first message, replies + responses in time order,
       controls on the latest agent turn, load-more
-- [ ] Reply composer (ProjectChatComposer + attachments) pinned at bottom, only when `canReply`;
+- [x] Reply composer (ProjectChatComposer + attachments) pinned at bottom, only when `canReply`;
       permission decline notice
-- [ ] Receipt + leave list (needs_you) / stay (archived); invalidate inbox queries; no reload
-- [ ] Remove Reply form / free-text answer; remove `canReplyToAgent`
-- [ ] Walk: settled permission with canReply stays open
-- [ ] Row preview from `latestReply`/`withAgent`; Archived "With the agent" label
-- [ ] "Re:" chip on inbox-reply user messages in the project chat, opens the item
-- [ ] Docs: `apps/www/src/content/docs/docs/guides/inbox.md`
-- [ ] Tests driving the real reply → refetch path (rule 62)
-- [ ] Playwright audit 375/1280 with diverse data
+- [x] Receipt + leave list (needs_you) / stay (archived); invalidate inbox queries; no reload
+- [x] Remove Reply form / free-text answer; remove `canReplyToAgent`
+- [x] Walk: settled permission with canReply stays open
+- [x] Row preview from `latestReply`/`withAgent`; Archived "With the agent" label
+- [x] "Re:" chip on inbox-reply user messages in the project chat, opens the item
+- [x] Docs: `apps/www/src/content/docs/docs/guides/inbox.md`
+- [x] Tests driving the real reply → refetch path (rule 62)
+- [x] Playwright audit 375/1280 with diverse data
 - [ ] Staging: real reply to a real agent item end to end
 
 ## Acceptance criteria
@@ -55,3 +55,13 @@ item detail `conversation`. The web app has no UI for it.
   and can still be replied to.
 - Rows show who replied / agent responded; Archived shows "With the agent".
 - Project chat shows a "Re: <title>" chip on inbox replies that opens the item.
+
+## Notes
+- Review (ui-ux-specialist, task-completion-validator, Codex) addressed in a969df43a: open at latest
+  response, announce new responses, refresh open item on inbox notifications + 30s while with the
+  agent, keep closed items opened by link, lastIndexOf for the attachment section, decline notice only
+  with a draft, 44px solid Re: chip, light theme in the audit.
+- Kept on purpose: the free-text answer remains only for items with `canReply: false` (no chat to
+  reply in). Row hint infers "agent responded" from `withAgent:false` + `canReply` (no response text
+  in the list contract). Teammate reply bubbles are not person-coloured (no join-order colour index on
+  the inbox shapes); names are shown in the meta line.

@@ -140,11 +140,27 @@ const ResponseTurn = forwardRef<
       <div className="min-w-0 text-[15px] text-fg-secondary">
         <RenderedMarkdown content={response.body} inline />
       </div>
-      {response.replies.map((followUp) => (
-        <div key={followUp.id} className="min-w-0 text-[15px] text-fg-secondary">
-          <RenderedMarkdown content={followUp.body} inline />
-        </div>
-      ))}
+      {response.replies.map((followUp) =>
+        followUp.author.kind === 'agent' ? (
+          <div key={followUp.id} className="min-w-0 text-[15px] text-fg-secondary">
+            <RenderedMarkdown content={followUp.body} inline />
+          </div>
+        ) : (
+          // A person's comment in the thread (a task discussion): theirs, not the agent's.
+          <div
+            key={followUp.id}
+            className="sam-well min-w-0 rounded-xl px-3 py-2"
+            data-testid="inbox-response-person-comment"
+          >
+            <p className="m-0 mb-1 text-xs font-medium text-fg-secondary">
+              {followUp.author.name?.trim() || 'A teammate'} commented
+            </p>
+            <div className="min-w-0 text-[15px] text-fg-primary">
+              <RenderedMarkdown content={followUp.body} inline />
+            </div>
+          </div>
+        )
+      )}
     </AgentTurn>
   );
 });
