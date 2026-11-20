@@ -656,6 +656,20 @@ describe('the rotation lock', () => {
     await runRotate(input({ names: ['preview-signing-key'] }), deps());
     expect(existsSync(join(lockDir, 'lock'))).toBe(false);
   });
+
+  it('takes over a stale lock only exclusively (Codex P2)', async () => {
+    const lockDir = join(stateDir, 'key-agent', 'rotation');
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(join(lockDir, 'lock'), '999999999'); // a crashed run
+    // Another run is in the middle of taking the same stale lock over.
+    writeFileSync(join(lockDir, 'lock.takeover'), '');
+    await expect(runRotate(input({ names: ['preview-signing-key'] }), deps())).rejects.toThrow(
+      /taking over a stale lock/
+    );
+    // Neither the stale lock nor the other run's takeover was touched.
+    expect(readFileSync(join(lockDir, 'lock'), 'utf8')).toBe('999999999');
+    expect(existsSync(join(lockDir, 'lock.takeover'))).toBe(true);
+  });
 });
 
 describe('rotate jwt-keys', () => {

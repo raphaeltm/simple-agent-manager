@@ -280,6 +280,36 @@ async function startJournal(
  * One `rotate` at a time per box: an O_EXCL lock file holding the pid. A lock whose process is
  * gone (a crash) is taken over; a live one stops the second run.
  */
+/**
+ * Removes a lock left by a dead process, but only under an exclusive takeover file and only if
+ * the lock still holds what was read: two runs that both saw the same stale lock cannot both
+ * remove it, and neither can remove the lock the other just created.
+ */
+function takeOverStaleLock(path: string, stale: string): void {
+  const takeover = `${path}.takeover`;
+  let fd: number;
+  try {
+    fd = openSync(takeover, 'wx', 0o600);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    throw new Error(
+      `another pnpm selfhost:secrets rotate is taking over a stale lock (${takeover}); if none is running, remove that file and retry`
+    );
+  }
+  try {
+    let current: string | null = null;
+    try {
+      current = readFileSync(path, 'utf8').trim();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    if (current === stale) rmSync(path, { force: true });
+  } finally {
+    closeSync(fd);
+    rmSync(takeover, { force: true });
+  }
+}
+
 function acquireLock(stateDir: string): () => void {
   ensurePrivateDir(rotationDir(stateDir));
   const path = join(rotationDir(stateDir), 'lock');
@@ -300,7 +330,7 @@ function acquireLock(stateDir: string): () => void {
         alive = false;
       }
       if (alive) throw new Error(`another pnpm selfhost:secrets rotate is running (pid ${pid})`);
-      rmSync(path, { force: true });
+      takeOverStaleLock(path, readFileSync(path, 'utf8').trim());
     }
   }
   throw new Error(`could not take the rotation lock ${path}`);
