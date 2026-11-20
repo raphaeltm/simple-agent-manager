@@ -10,6 +10,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { recoverLegacyDeploymentBinding } from './deployment-legacy-binding';
 import { captureNodeLogsBeforeTeardown } from './node-log-capture';
+import { isNeverRequestedVmPlaceholder } from './node-never-requested-placeholder';
 import {
   boundedConfirmationError,
   clearProviderDeletionRecord,
@@ -280,10 +281,14 @@ export async function deleteNodeResourcesStrict(
   const node = await claimManagedNodeDeletion(db, initialNode);
 
   if (node.runtimeTerminationConfirmedAt) {
+    // A providerless proof is trusted from an exact managed placement, or when the row never
+    // requested a create at all: the insert-time absence proof survives only until the provider
+    // identity claim, so nothing can exist at the provider (`isNeverRequestedVmPlaceholder`).
     if (
       initialNode.status === 'destroying' &&
       node.runtime === 'vm' &&
       !node.providerInstanceId &&
+      !isNeverRequestedVmPlaceholder(initialNode) &&
       !hasManagedVmPlacementProof(
         initialNode,
         await isNodeCapacitySourceReleased(env.DATABASE, initialNode)

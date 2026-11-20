@@ -111,28 +111,45 @@ export async function claimNodeForCleanup(
 const PENDING_DELETION_SQL =
   'provider_deletion_requested_at IS NOT NULL AND runtime_termination_confirmed_at IS NULL';
 
+/**
+ * A providerless VM row that was `error` when claimed: its create failed after the provider
+ * identity claim, so a server may exist with no recorded ID (a never-requested row is retired
+ * instead, see `neverRequestedVmPlaceholderSql`). Restoring `error` would hand it back to the
+ * max-lifetime sweep, which retries it with no blocked clock, alert or anomaly. It stays
+ * `destroying`, the state machine built to bound exactly this row: the destroying handoff phase,
+ * the stranded-node deadline alert and the `node_destroying_too_long` anomaly
+ * (idea 01M7GVRC956Q8JMGCRP1PQ4R5B).
+ */
+const PARK_UNCERTAIN_PROVIDERLESS_SQL =
+  "runtime = 'vm' AND node_class = 'managed' AND node_role = 'workspace' AND provider_instance_id IS NULL";
+
+/** Returns the status the row was released to, or null when no row matched. */
 export async function releaseNodeCleanupClaim(
   env: Env,
   node: CleanupNode,
   nowIso: string,
   backoffUntil: string
-): Promise<void> {
+): Promise<string | null> {
   // A node whose provider deletion was already sent (two-phase write-ahead record) stays
   // `destroying` and due: the confirm phase owns it and must read the provider's record next
   // tick. Returning it to `stopped` would leave it in no phase's selection, since every other
   // phase excludes nodes with a record.
-  await env.DATABASE.prepare(
+  const released = await env.DATABASE.prepare(
     `UPDATE nodes
-     SET status = CASE WHEN ${PENDING_DELETION_SQL} THEN 'destroying' ELSE ? END,
+     SET status = CASE WHEN ${PENDING_DELETION_SQL} THEN 'destroying'
+         WHEN ? = 'error' AND ${PARK_UNCERTAIN_PROVIDERLESS_SQL} THEN 'destroying'
+         ELSE ? END,
        cleanup_blocked_since = NULL, cleanup_blocked_reason = NULL,
        cleanup_backoff_until = CASE WHEN ${PENDING_DELETION_SQL} THEN NULL ELSE ? END,
        updated_at = ?
      WHERE id = ?
        AND user_id = ?
-       AND status = 'destroying'`
+       AND status = 'destroying'
+     RETURNING status`
   )
-    .bind(node.status, backoffUntil, nowIso, node.id, node.user_id)
-    .run();
+    .bind(node.status, node.status, backoffUntil, nowIso, node.id, node.user_id)
+    .first<{ status: string }>();
+  return released?.status ?? null;
 }
 
 /**
