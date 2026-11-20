@@ -357,7 +357,11 @@ async function rollbackToLegacy(ctx: BoxContext, opts: AdoptionOptions, journal:
       replacePrivateFile(ctx.envFile, readOriginalEnv(ctx.stateDir));
     compose(legacy, ['up', '-d'], 'restart legacy stack');
     if (!(await opts.checkHealth())) throw new Error('legacy stack is not healthy');
-  } catch {
+  } catch (rollbackError) {
+    // check() never relays tool output, so these messages carry no secrets.
+    ctx.log(
+      `rollback step failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
+    );
     throw new RollbackIncomplete(
       `legacy adoption failed and rollback did not complete; keep ${ctx.stateDir}/legacy-adoption.json, its legacy-adoption.env and the legacy volumes, then inspect the stack`
     );
