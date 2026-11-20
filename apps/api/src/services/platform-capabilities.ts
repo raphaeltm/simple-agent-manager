@@ -12,7 +12,7 @@ import { cache } from './admin-settings-resolution';
 import { emailTransportKind } from './agent-email/provider';
 import { hasInboundAgentEmail } from './agent-email/self-host-inbound';
 import { activeLocalAnalyticsSink } from './analytics-sink';
-import { isArtifactsAvailable } from './hosted-git/backend';
+import { isArtifactsAvailable } from './artifacts/backend';
 import { validLlmBaseUrl } from './llm-endpoint-settings';
 import { resolveR2PresignConfig } from './r2-presign-config';
 import { getTTSConfig } from './tts-config';
@@ -61,7 +61,7 @@ export type PlatformCapabilities = Readonly<Record<PlatformCapability, boolean>>
 
 /**
  * The Worker environment. Analytics availability can consult a local sink the self-host build
- * installs (services/analytics-sink.ts), and Artifacts availability (`hosted-git/backend.ts`) a
+ * installs (services/analytics-sink.ts), and Artifacts availability (`artifacts/backend.ts`) a
  * backend it registers; both read their own bindings, so this takes the whole Env.
  */
 type CapabilityEnv = Env;
