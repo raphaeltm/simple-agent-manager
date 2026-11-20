@@ -267,6 +267,34 @@ describe('scheduled actions public boundaries', () => {
     });
   });
 
+  it('still refuses to create a schedule into an ended chat with the same 400 across the DO hop', async () => {
+    const f = await fixture();
+    await testEnv.DATABASE.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`)
+      .bind(f.taskId)
+      .run();
+    const refused = await browser(
+      f.projectId,
+      f.userId,
+      '/schedules',
+      'POST',
+      request(f.sessionId)
+    );
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toMatchObject({
+      message: expect.stringContaining('The chat it was meant to message had already ended'),
+    });
+    // Control: the same request into a live chat is accepted.
+    const live = await fixture();
+    const accepted = await browser(
+      live.projectId,
+      live.userId,
+      '/schedules',
+      'POST',
+      request(live.sessionId)
+    );
+    expect(accepted.status).toBe(201);
+  });
+
   it('atomically records a due event and prompt using real workerd SQLite within the same chat', async () => {
     const f = await fixture();
     const created = await service.createProjectSchedule(testEnv, f.projectId, {

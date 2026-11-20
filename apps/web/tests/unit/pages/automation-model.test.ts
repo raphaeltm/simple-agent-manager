@@ -355,9 +355,16 @@ describe("a chat's own reminders", () => {
     (state) => {
       const item = fromSchedule(own({ state }), NOW, WINDOW);
       expect(item.attention).toBeNull();
-      // Its outcome still shows on the item and in History.
-      expect(item.stateNote).toBeTruthy();
       expect(attentionItems([item])).toEqual([]);
+      // Its outcome still shows on its own page.
+      expect(item.state).toBe(state === 'expired' ? 'ended' : 'done');
+      expect(item.stateNote).toBe(
+        {
+          failed: 'Did not run',
+          ambiguous: 'Ran, but could not be confirmed',
+          expired: 'Expired before it could run',
+        }[state]
+      );
     }
   );
 
@@ -385,13 +392,9 @@ describe("a chat's own reminders", () => {
     });
   });
 
-  it('lists a target-ended schedule as cancelled with its reason, not as a problem', () => {
+  it('shows an own reminder the runner cancelled with its reason, not as a problem', () => {
     const item = fromSchedule(
-      schedule({
-        state: 'cancelled',
-        lastError: 'The chat it was meant to message had already ended',
-        updatedAt: NOW - HOUR,
-      }),
+      own({ state: 'cancelled', lastError: 'The chat it was meant to message had already ended' }),
       NOW,
       WINDOW
     );

@@ -1,4 +1,4 @@
-import type { ProjectSchedule } from '@simple-agent-manager/shared';
+import { isChatOwnReminder, type ProjectSchedule } from '@simple-agent-manager/shared';
 import { ulid } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
@@ -387,9 +387,11 @@ export async function runScheduleAlarm(
         if (delivery)
           await finalizeAcceptedPromptDelivery(sql, env, hooks, delivery.input, delivery.accepted);
       } catch (error) {
-        // The target chat ending first is a normal end, recorded like a cancellation, not a
-        // failure: nothing is left to wake and no one can fix it.
-        const targetEnded = error instanceof ScheduleTargetEndedError;
+        // An agent's reminder into its own chat that finds the chat ended is a normal end,
+        // recorded like a cancellation: nothing is left to wake and no one can fix it. A
+        // person's or a watch's schedule into an ended chat stays a failure they should see.
+        const targetEnded =
+          error instanceof ScheduleTargetEndedError && isChatOwnReminder(claim.schedule);
         const permanent = error instanceof ProjectEventValidationError;
         const now = Date.now();
         sql.exec(

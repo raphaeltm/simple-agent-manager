@@ -388,11 +388,54 @@ describe('project schedules — real migrations, CRUD and canonical admission', 
       await alarm;
       expect(f.effects()).toEqual({ events: [], mailbox: [], transcript: [] });
       expect(submitReservedTaskMock).not.toHaveBeenCalled();
-      // The chat or its task ending first is a cancellation, not a failure; only a creator who
-      // lost access while the chat is live records a failure.
+      // This fixture's schedules have no recorded author, so they are not a chat's own reminder:
+      // only an explicit cancel records cancelled. The agent-reminder case is below.
       expect(getSchedule(f.sql, PROJECT, schedule.id)?.state).toBe(
-        change === 'suspend member' ? 'failed' : 'cancelled'
+        change === 'cancel schedule' || change === 'cancel start schedule' ? 'cancelled' : 'failed'
       );
+    }
+  );
+
+  it.each(['archive chat', 'cancel task'] as const)(
+    "records an agent's own reminder as cancelled when the chat ends (%s) during the held authority read",
+    async (change) => {
+      const f = fixture();
+      const schedule = f.hooks.transactionSync(() =>
+        createSchedule(
+          f.sql,
+          f.env,
+          PROJECT,
+          { ...creator, promptAuthor: 'agent' },
+          {
+            action: messageAction,
+            dueAt: Date.now(),
+            displayTimezone: 'UTC',
+            idempotencyKey: 'own-reminder',
+          },
+          Date.now()
+        )
+      ).schedule;
+      const entered = deferred(),
+        released = deferred();
+      f.faults.beforeAuthority = async () => {
+        entered.resolve();
+        await released.promise;
+      };
+      const alarm = runScheduleAlarm(f.sql, f.env, f.hooks);
+      await entered.promise;
+      if (change === 'archive chat')
+        f.sql.exec("UPDATE chat_sessions SET status = 'archived' WHERE id = ?", CHAT);
+      else f.d1.prepare("UPDATE tasks SET status = 'cancelled' WHERE id = ?").run(TASK);
+      released.resolve();
+      await alarm;
+      expect(f.effects()).toEqual({ events: [], mailbox: [], transcript: [] });
+      expect(getSchedule(f.sql, PROJECT, schedule.id)).toMatchObject({
+        state: 'cancelled',
+        lastError:
+          change === 'archive chat'
+            ? 'Scheduled target session is no longer active or recoverable'
+            : 'The chat it was meant to message had already ended',
+      });
     }
   );
 

@@ -62,6 +62,23 @@ export type ProjectSchedule = {
   execution?: ProjectScheduleExecution;
 };
 
+/**
+ * A reminder an agent (or SAM itself) set to message its own chat later, usually a fallback
+ * check on CI or a queue. When one cannot run because its chat has ended, nothing is lost and no
+ * person can act on it: the runner records it as cancelled, and the Automation views never ask
+ * for attention about it. One predicate for both, so the two cannot disagree.
+ */
+export function isChatOwnReminder(
+  schedule: Pick<ProjectSchedule, 'promptAuthor' | 'action' | 'creatorChatSessionId'>
+): boolean {
+  return (
+    (schedule.promptAuthor === 'agent' || schedule.promptAuthor === 'sam') &&
+    schedule.action.kind === 'message_session' &&
+    schedule.creatorChatSessionId !== null &&
+    schedule.action.sessionId === schedule.creatorChatSessionId
+  );
+}
+
 export type CreateProjectScheduleRequest = {
   action: ProjectScheduledAction;
   dueAt: number;

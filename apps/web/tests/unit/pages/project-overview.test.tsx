@@ -621,6 +621,17 @@ describe('Project Overview', () => {
             idempotencyKey: 'own',
             lastError: 'Schedule creator can no longer message the target chat',
           }),
+          // The other production shape: an own reminder SAM could not confirm.
+          failedSchedule({
+            id: 'sch-own-unconfirmed',
+            state: 'ambiguous',
+            creatorChatSessionId: 'chat-other-agent',
+            promptAuthor: 'agent',
+            reason: 'Authoritative staging2 queue advanced ours 5th to 4th',
+            action: { kind: 'message_session', sessionId: 'chat-other-agent', prompt: 'Turn.' },
+            idempotencyKey: 'own-unconfirmed',
+            lastError: 'Scheduled delivery is ambiguous',
+          }),
           // A person's schedule that did not run still needs them.
           failedSchedule({
             id: 'sch-person',
@@ -644,6 +655,7 @@ describe('Project Overview', () => {
       expect.stringContaining('Nightly dependency audit'),
     ]);
     expect(within(automations).queryByText(/Canonical24h history recheck/)).toBeNull();
+    expect(within(automations).queryByText(/Authoritative staging2 queue/)).toBeNull();
   });
 
   it('links recent ideas to their pages and merged pull requests to GitHub', async () => {

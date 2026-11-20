@@ -39,17 +39,17 @@ Agents create dozens of such wake-ups a day as CI/staging fallbacks. A person ca
 
 ## Checklist
 
-- [ ] Authority: `ScheduleTargetEndedError` subclass; throw it only on positive evidence the
+- [x] Authority: `ScheduleTargetEndedError` subclass; throw it only on positive evidence the
       target ended (task row exists and is not wakeable; chat session row exists and is not
       active/sleeping). Creator-authority failure gets its own message.
-- [ ] Runner: target-ended → `cancelled` with reason, `execution_finished_at` set; other
+- [x] Runner: target-ended → `cancelled` with reason, `execution_finished_at` set; other
       validation errors stay `failed`.
-- [ ] Web: a chat's own reminder (`promptAuthor` agent/sam, `message_session` to
+- [x] Web: a chat's own reminder (`promptAuthor` agent/sam, `message_session` to
       `creatorChatSessionId`) never raises attention; history/detail still show the outcome.
-- [ ] Tests: integration (real runner + SQLite/D1) for completed, cancelled task, stopped
+- [x] Tests: integration (real runner + SQLite/D1) for completed, cancelled task, stopped
       chat → cancelled; creator suspended → failed; model unit tests; Overview vertical slice
       through mocked API showing human failure counted and self-reminder not counted.
-- [ ] Docs: automation docs mention of failing/attention, if any.
+- [x] Docs: automation docs mention of failing/attention, if any.
 
 ## Acceptance criteria
 
@@ -64,3 +64,18 @@ Agents create dozens of such wake-ups a day as CI/staging fallbacks. A person ca
 
 Raphaël authorized (inbox reply, 2026-11-20): skip staging, rely on vertical-slice tests, merge
 and ship to production.
+
+## Outcome
+
+- Review round (task-completion-validator, cloudflare-specialist, test-engineer) found the first
+  cut cancelled **every** schedule into an ended chat, including a person's or a watch's, which
+  hid a signal a person can act on. The runner now cancels only a chat's own reminder, using one
+  shared predicate (`isChatOwnReminder` in `packages/shared/src/types/project-event-schedules.ts`)
+  for both the runner and the web attention model. A person's schedule into an ended chat still
+  fails, now with the precise reason "The chat it was meant to message had already ended".
+- "Ended" is an allowlist of terminal task statuses (`TASK_TERMINAL_STATUSES`), not "not
+  wakeable"; a missing/rebound task row or a draft task keeps the combined refusal.
+- Not done (justified): MCP `sam_schedule_*` projection still nulls `lastError` for cancelled
+  rows. The only agent that would read a runner-cancelled own reminder is the one whose chat
+  ended. History does not list cancelled schedules (same as user cancels); docs say the outcome
+  shows on the schedule's own page.

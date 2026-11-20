@@ -16,6 +16,7 @@ import {
   OWNER_ONLY_SCHEDULE,
   requireScheduleAction,
   SCHEDULE_CREATOR_AUTHORITY_ENDED,
+  SCHEDULE_TARGET_OR_CREATOR_ENDED,
   SCHEDULE_TARGET_TASK_ENDED,
 } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-authority';
 import { runScheduleAlarm } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-runner';
@@ -126,14 +127,15 @@ describe('a slept VM task is woken through the durable prompt queue', () => {
   }
 
   describe('scheduled message_session self-wake', () => {
-    async function scheduleWhileAwake() {
+    /** The production shape by default: an agent's reminder into its own chat. */
+    async function scheduleWhileAwake(promptAuthor: 'agent' | 'human' = 'agent') {
       await requireScheduleAction(sql, env as never, PROJECT, USER, selfWake, OWNER_ONLY_SCHEDULE);
       return hooks.transactionSync(() =>
         createSchedule(
           sql,
           env as never,
           PROJECT,
-          { userId: USER, chatSessionId: CHAT },
+          { userId: USER, chatSessionId: CHAT, promptAuthor },
           {
             action: selfWake,
             dueAt: Date.now() + 10 * MINUTE,
@@ -230,7 +232,7 @@ describe('a slept VM task is woken through the durable prompt queue', () => {
         lastError: SCHEDULE_TARGET_TASK_ENDED,
         nextAttemptAt: null,
       });
-      expect(finishedAt(schedule.id).finishedAt).toEqual(expect.any(Number));
+      expect(finishedAt(schedule.id).finishedAt).toBe(START.getTime() + 11 * MINUTE);
       expect(inbox('scheduled_action')).toEqual([]);
       await runDeliveryAlarm();
       expect(recovery.ensure).not.toHaveBeenCalled();
@@ -247,6 +249,55 @@ describe('a slept VM task is woken through the durable prompt queue', () => {
         state: 'cancelled',
         lastError: 'Scheduled target session is no longer active or recoverable',
       });
+      expect(inbox('scheduled_action')).toEqual([]);
+    });
+
+    it("still records a failure a person can see when a person's schedule finds the chat ended", async () => {
+      const schedule = await scheduleWhileAwake('human');
+      await sleepTheTask();
+      d1.prepare("UPDATE tasks SET status = 'cancelled' WHERE id = ?").run(TASK);
+
+      await fireSchedule();
+
+      expect(getSchedule(sql, PROJECT, schedule.id)).toMatchObject({
+        state: 'failed',
+        lastError: SCHEDULE_TARGET_TASK_ENDED,
+      });
+      expect(finishedAt(schedule.id).finishedAt).toBeNull();
+      expect(inbox('scheduled_action')).toEqual([]);
+    });
+
+    // Without positive evidence the chat ended, the refusal stays a failure (rule 74).
+    it.each([
+      [
+        'the task row is gone',
+        () => d1.prepare('DELETE FROM tasks WHERE id = ?').run(TASK),
+        SCHEDULE_TARGET_OR_CREATOR_ENDED,
+      ],
+      [
+        'the task no longer points at this chat',
+        () => d1.prepare('UPDATE tasks SET chat_session_id = NULL WHERE id = ?').run(TASK),
+        SCHEDULE_TARGET_OR_CREATOR_ENDED,
+      ],
+      [
+        'the task went back to draft',
+        () => d1.prepare("UPDATE tasks SET status = 'draft' WHERE id = ?").run(TASK),
+        SCHEDULE_TARGET_OR_CREATOR_ENDED,
+      ],
+      [
+        'the chat has no task',
+        () => doDb.prepare('UPDATE chat_sessions SET task_id = NULL WHERE id = ?').run(CHAT),
+        'Scheduled target session is no longer active or recoverable',
+      ],
+    ])('still records a failure when %s', async (_label, change, lastError) => {
+      const schedule = await scheduleWhileAwake();
+      await sleepTheTask();
+      change();
+
+      await fireSchedule();
+
+      expect(getSchedule(sql, PROJECT, schedule.id)).toMatchObject({ state: 'failed', lastError });
+      expect(finishedAt(schedule.id).finishedAt).toBeNull();
       expect(inbox('scheduled_action')).toEqual([]);
     });
 

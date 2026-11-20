@@ -1,4 +1,4 @@
-import type { ProjectScheduledAction } from '@simple-agent-manager/shared';
+import { type ProjectScheduledAction, TASK_TERMINAL_STATUSES } from '@simple-agent-manager/shared';
 
 import { projectDataPorts } from './ports';
 import { ScheduleTargetEndedError } from './project-event-schedules-target-ended';
@@ -209,17 +209,20 @@ async function throwScheduleTargetRefusal(
     .bind(targetTaskId, projectId, sessionId)
     .first<Record<string, unknown>>();
   const status = typeof row?.status === 'string' ? row.status : null;
-  // A missing task row proves nothing either way, so it keeps the combined refusal.
-  if (status === null) throw new ProjectEventValidationError(SCHEDULE_TARGET_OR_CREATOR_ENDED);
-  // A task that exists and is past waking is evidence the chat ended first.
-  if (!projectDataPorts().tasks.wakeableStatuses.includes(status)) {
+  // Only a task that exists and is finished is evidence the chat ended first.
+  if (status !== null && (TASK_TERMINAL_STATUSES as readonly string[]).includes(status)) {
     throw new ScheduleTargetEndedError(SCHEDULE_TARGET_TASK_ENDED);
   }
-  throw new ProjectEventValidationError(SCHEDULE_CREATOR_AUTHORITY_ENDED);
+  // A live task means the creator lost the right to write to it. Anything else (a missing or
+  // rebound task row, a task back in draft) proves neither, so it keeps the combined refusal.
+  if (status !== null && projectDataPorts().tasks.wakeableStatuses.includes(status)) {
+    throw new ProjectEventValidationError(SCHEDULE_CREATOR_AUTHORITY_ENDED);
+  }
+  throw new ProjectEventValidationError(SCHEDULE_TARGET_OR_CREATOR_ENDED);
 }
 
 export const SCHEDULE_TARGET_TASK_ENDED = 'The chat it was meant to message had already ended';
 export const SCHEDULE_CREATOR_AUTHORITY_ENDED =
   'Schedule creator can no longer message the target chat';
-const SCHEDULE_TARGET_OR_CREATOR_ENDED =
+export const SCHEDULE_TARGET_OR_CREATOR_ENDED =
   'Scheduled target or creator authority is no longer active';
