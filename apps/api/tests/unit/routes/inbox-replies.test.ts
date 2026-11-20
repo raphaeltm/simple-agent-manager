@@ -122,6 +122,24 @@ function insert(table: string, row: Record<string, unknown>) {
     .prepare(`INSERT INTO ${table} (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`)
     .run(...Object.values(row));
 }
+function pauseSendAuthorization() {
+  const authorize = edge.writer.getMockImplementation()!;
+  let entered!: () => void;
+  let release!: () => void;
+  const paused = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  edge.writer.mockImplementation(async (...args) => {
+    entered();
+    await held;
+    return authorize(...args);
+  });
+  return { paused, release };
+}
+
 function replyMessageId(ref: string): string | undefined {
   return (
     sqlite
@@ -274,20 +292,7 @@ describe('inbox replies through the real route on SQLite', () => {
   );
   it('refuses a reply when its ask expires during send authorization', async () => {
     const ref = ask();
-    const authorize = edge.writer.getMockImplementation()!;
-    let entered!: () => void;
-    let release!: () => void;
-    const paused = new Promise<void>((resolve) => {
-      entered = resolve;
-    });
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    edge.writer.mockImplementation(async (...args) => {
-      entered();
-      await held;
-      return authorize(...args);
-    });
+    const { paused, release } = pauseSendAuthorization();
     const reply = req(path(ref, '/reply'), { content: 'Use the smaller limit.' });
     await paused;
     try {
@@ -387,20 +392,7 @@ describe('inbox replies through the real route on SQLite', () => {
           expires_at: new Date(Date.now() + 3600000).toISOString(),
         });
       }
-      const authorize = edge.writer.getMockImplementation()!;
-      let entered!: () => void;
-      let release!: () => void;
-      const paused = new Promise<void>((resolve) => {
-        entered = resolve;
-      });
-      const held = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      edge.writer.mockImplementation(async (...args) => {
-        entered();
-        await held;
-        return authorize(...args);
-      });
+      const { paused, release } = pauseSendAuthorization();
       const reply = req(path(`${store}:race`, '/reply'), { content: 'Please explain this.' });
       await paused;
       try {
@@ -533,20 +525,7 @@ describe('inbox replies through the real route on SQLite', () => {
   it('refuses a reply whose open-item preflight raced the agent resolving the ask', async () => {
     const ref = ask();
     const first = await req(path(ref, '/reply'), { content: 'Reply A' });
-    const authorize = edge.writer.getMockImplementation()!;
-    let entered!: () => void;
-    let release!: () => void;
-    const paused = new Promise<void>((resolve) => {
-      entered = resolve;
-    });
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    edge.writer.mockImplementation(async (...args) => {
-      entered();
-      await held;
-      return authorize(...args);
-    });
+    const { paused, release } = pauseSendAuthorization();
     // requireActable already loaded an open ask before chat send authorization pauses.
     const second = req(path(ref, '/reply'), { content: 'Reply B' });
     await paused;

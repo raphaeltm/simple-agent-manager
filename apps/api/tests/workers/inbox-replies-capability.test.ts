@@ -42,6 +42,21 @@ function itemPath(s: Seeded, ref: string) {
   return `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(ref)}`;
 }
 
+/** Two full pages and a remainder exercise the real cap with distinct canonical messages. */
+async function seedReplyPages() {
+  const s = await seed();
+  const item = await ask(s, 'Which release should we ship?');
+  const ids: string[] = [];
+  for (let index = 0; index < 5; index += 1) {
+    const sent = await post(`${itemPath(s, item.ref)}/reply`, s.ownerCookie, {
+      content: `Reply ${index}`,
+    });
+    expect(sent.status).toBe(202);
+    ids.push(String(sent.body.messageId));
+  }
+  return { s, item, ids };
+}
+
 async function expectInbox(s: Seeded, refs: string[], blocking: number) {
   const list = await get<InboxListResponse>(`/api/projects/${s.projectId}/inbox`, s.ownerCookie);
   expect(list.status).toBe(200);
@@ -547,17 +562,7 @@ describe('inbox reply capability through real routes and Durable Objects', () =>
     const previousLimit = testEnv.CHAT_SESSION_MESSAGE_LIMIT;
     testEnv.CHAT_SESSION_MESSAGE_LIMIT = '2';
     try {
-      const s = await seed();
-      const item = await ask(s, 'Which release should we ship?');
-      const ids: string[] = [];
-      // Two full pages and a remainder exercise the real chat page cap and exact cursor.
-      for (let index = 0; index < 5; index += 1) {
-        const sent = await post(`${itemPath(s, item.ref)}/reply`, s.ownerCookie, {
-          content: `Reply ${index}`,
-        });
-        expect(sent.status).toBe(202);
-        ids.push(String(sent.body.messageId));
-      }
+      const { s, item, ids } = await seedReplyPages();
       let cursor: string | null = null;
       const received: string[] = [];
       for (const expected of [ids.slice(3), ids.slice(1, 3), ids.slice(0, 1)]) {
@@ -589,16 +594,7 @@ describe('inbox reply capability through real routes and Durable Objects', () =>
     const previousLimit = testEnv.CHAT_SESSION_MESSAGE_LIMIT;
     testEnv.CHAT_SESSION_MESSAGE_LIMIT = '2';
     try {
-      const s = await seed();
-      const item = await ask(s, 'Which release should we ship?');
-      const ids: string[] = [];
-      for (let index = 0; index < 5; index += 1) {
-        const sent = await post(`${itemPath(s, item.ref)}/reply`, s.ownerCookie, {
-          content: `Reply ${index}`,
-        });
-        expect(sent.status).toBe(202);
-        ids.push(String(sent.body.messageId));
-      }
+      const { s, item, ids } = await seedReplyPages();
       await runInDurableObject(s.project, async (_instance, state) => {
         // SQLite permits a BLOB in this nullable TEXT column; the real row parser rejects it.
         state.storage.sql.exec(
