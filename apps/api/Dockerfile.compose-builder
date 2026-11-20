@@ -2,7 +2,7 @@
 # Keep the reviewed digest: root DinD with overlayfs, not rootless or vfs.
 # Rootful DinD is required by the measured recipe. The isolated, one-job
 # Cloudflare microVM is the trust boundary; no broad credential is delivered.
-FROM docker.io/library/docker@sha256:7bf70dcb85c822e3fa6f2d332143e474b99147b9d7b39102b0cfe8b04a7dd61b
+FROM docker.io/library/docker@sha256:4bbc7223f81db790097c6dea42fb93e05b8fead4f0431fbe6ccaba6e8473201c
 COPY container-artifacts/sam-builder-linux-amd64 /usr/local/bin/sam-builder
 COPY container-entrypoints/compose-builder.sh /usr/local/bin/compose-builder
 RUN chmod 0755 /usr/local/bin/sam-builder /usr/local/bin/compose-builder
