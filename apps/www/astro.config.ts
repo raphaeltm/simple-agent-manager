@@ -5,6 +5,9 @@ import { defineConfig } from 'astro/config';
 import { expressiveCode } from './src/lib/expressive-code';
 
 export default defineConfig({
+  // Astro 7 defaults to 'jsx', which drops the newline between an inline element and the
+  // next word in templates ("<code>x</code>⏎but" renders "xbut"). Keep HTML-aware compression.
+  compressHTML: true,
   site: process.env.SITE_URL || 'https://www.simple-agent-manager.org',
   server: {
     allowedHosts: true,

@@ -59,7 +59,7 @@ const formattedDate = date.toLocaleDateString('en-US', {
     </div>
   </main>
   <CtaFooter />
-  <script type="module">
+  <script is:inline type="module">
     if (document.querySelector('.post-body [data-language="mermaid"]')) {
       import('/scripts/blog-mermaid.js');
     }

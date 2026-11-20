@@ -12,7 +12,7 @@ Public user instructions: [Installer guide](https://www.simple-agent-manager.org
 
 ## Deploy your own installer
 
-Requires Node 22+, pnpm 9.15.9, a Cloudflare account with Workers Paid (SQLite Durable Objects), an active domain in that account, and a deployment token with Account Settings Read, Workers Scripts Write/Edit, and the zone permissions needed for Workers Custom Domains and Workers Routes. Creating an OAuth client or changing its consent scopes also requires OAuth Client Read/Write. An already configured Worker with both OAuth secret bindings and unchanged scopes can redeploy without OAuth client-management access. Use the smallest account/zone scope possible and consult Cloudflare's current permission names.
+Requires Node 22.23.4+ (or 24+), pnpm 9.15.9, a Cloudflare account with Workers Paid (SQLite Durable Objects), an active domain in that account, and a deployment token with Account Settings Read, Workers Scripts Write/Edit, and the zone permissions needed for Workers Custom Domains and Workers Routes. Creating an OAuth client or changing its consent scopes also requires OAuth Client Read/Write. An already configured Worker with both OAuth secret bindings and unchanged scopes can redeploy without OAuth client-management access. Use the smallest account/zone scope possible and consult Cloudflare's current permission names.
 
 ```sh
 pnpm install --frozen-lockfile
