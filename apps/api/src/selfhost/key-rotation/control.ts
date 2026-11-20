@@ -23,7 +23,7 @@ import { BETTER_AUTH_LOCATION, betterAuthRotating, runBetterAuthPass } from './b
 import { KEY_ROTATION_AUTH_HEADER, verifyKeyRotationRequest } from './control-auth';
 import { D1_LOCATIONS, d1Location } from './d1-locations';
 import { type PassMode, runD1Pass } from './d1-pass';
-import { type AesKeyEnv, type AesKeyRole, roleKeys,ROTATABLE_AES_KEY_NAMES } from './keys';
+import { type AesKeyEnv, type AesKeyRole, roleKeys, ROTATABLE_AES_KEY_NAMES } from './keys';
 import { LIBRARY_LOCATION, runLibraryPass } from './library-pass';
 
 export interface KeyRotationEnv
@@ -129,12 +129,18 @@ function parseObject(body: string): Record<string, unknown> | null {
 /**
  * How long a value encrypted under the old key can live where no pass reaches it, from this
  * Worker's own resolved settings: a pending ACP interaction's details (InteractionStore DO) live
- * until its deadline plus the sensitive purge, a bootstrap token (KV) until its TTL. The CLI waits
- * at least this long before it retires the old key (rotate-steps-data.ts, review V1 L4).
+ * until its deadline (the maximum plus, for a URL, the deadline margin) and the sensitive purge, a
+ * bootstrap token (KV) until its TTL. The CLI waits at least this long before it retires the old
+ * key (rotate-steps-data.ts, review V1 L4).
  */
 export function unreachableValueLifetimeMs(env: KeyRotationEnv): number {
   const acp = getAcpInteractionConfig(env);
-  return Math.max(acp.maxDeadlineMs + acp.sensitivePurgeMs, getBootstrapTTL(env) * 1000);
+  // A URL interaction may be created with a deadline up to the margin past the maximum
+  // (interaction-store.ts validateCreateInput), so its details live that much longer.
+  return Math.max(
+    acp.maxDeadlineMs + acp.deadlineMarginMs + acp.sensitivePurgeMs,
+    getBootstrapTTL(env) * 1000
+  );
 }
 
 async function statusReply(env: KeyRotationEnv, input: Record<string, unknown>) {

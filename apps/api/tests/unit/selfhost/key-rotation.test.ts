@@ -19,6 +19,7 @@ import { betterAuthSymmetricKey } from '../../../src/lib/better-auth-secrets';
 import {
   handleKeyRotationRequest,
   type KeyRotationEnv,
+  unreachableValueLifetimeMs,
 } from '../../../src/selfhost/key-rotation/control';
 import {
   KEY_ROTATION_AUTH_HEADER,
@@ -661,6 +662,18 @@ describe('purpose-specific key overrides', () => {
 });
 
 describe('the control endpoint', () => {
+  it('waits out a URL interaction created with the deadline margin (Codex P1)', () => {
+    const settings = {
+      ACP_INTERACTION_MAX_DEADLINE_MS: String(24 * 3_600_000),
+      ACP_INTERACTION_URL_DEADLINE_MS: String(24 * 3_600_000),
+      ACP_INTERACTION_DEADLINE_MARGIN_MS: String(2 * 3_600_000),
+      ACP_INTERACTION_SENSITIVE_PURGE_MS: String(60_000),
+    };
+    const lifetime = unreachableValueLifetimeMs({ ...env, ...settings } as KeyRotationEnv);
+    // The longest a URL interaction may live: its deadline (maximum plus margin), then the purge.
+    expect(lifetime).toBeGreaterThanOrEqual(26 * 3_600_000 + 60_000);
+  });
+
   it('does not exist without a control key in the bundle', async () => {
     env.SAM_KEY_ROTATION_CONTROL_KEY = undefined;
     expect((await call({ op: 'status' })).status).toBe(404);
