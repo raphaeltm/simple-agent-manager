@@ -299,6 +299,17 @@ async function section<T>(
   }
 }
 
+/**
+ * Run a read once the mid-turn ids are known, so its clock is taken after that wait, the same
+ * side of an ask's expiry as Running now's own clock (`readRunningChats`).
+ */
+async function readBriefAfter<T>(
+  working: Promise<string[]>,
+  read: (ids: string[]) => Promise<T>
+): Promise<T> {
+  return read(await working);
+}
+
 export async function projectOverviewGet(
   ctx: OperationContext,
   input: ProjectOverviewInput
@@ -353,7 +364,9 @@ export async function projectOverviewGet(
       null,
       async () =>
         (await getProjectBriefSettings(ctx)).enabled
-          ? readProjectBrief(ctx.env.DATABASE, projectId, Date.now(), await working)
+          ? await readBriefAfter(working, (ids) =>
+              readProjectBrief(ctx.env.DATABASE, projectId, Date.now(), ids)
+            )
           : null,
       unavailable
     ),

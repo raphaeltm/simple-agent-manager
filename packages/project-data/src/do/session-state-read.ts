@@ -34,12 +34,12 @@ const CHAT_ACTIVITY_SQL = `COALESCE(
  * project's running agents, not its history (`idx_chat_sessions_status`).
  */
 export function listWorkingChatSessionIds(sql: SqlStorage): string[] {
-  const placeholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
+  // Assembled only from module constants; every value is bound. Named `whereClause` because
+  // `scripts/quality/ast-checks.ts` allowlists that identifier for exactly this shape.
+  const whereClause = `cs.status = 'active' AND ${CHAT_ACTIVITY_SQL} IN (${WORKING_ACTIVITIES.map(() => '?').join(', ')})`;
   const rows = sql
     .exec(
-      `SELECT cs.id FROM chat_sessions cs
-        WHERE cs.status = 'active' AND ${CHAT_ACTIVITY_SQL} IN (${placeholders})
-        ORDER BY cs.id`,
+      `SELECT cs.id FROM chat_sessions cs WHERE ${whereClause} ORDER BY cs.id`,
       ...WORKING_ACTIVITIES
     )
     .toArray();

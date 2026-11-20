@@ -198,9 +198,12 @@ describe('projectOverviewGet', () => {
       user_id: 'outsider',
       task_id: 'task-foreign-chat',
     });
+    // Both attack chats are reported mid-turn, so only the project predicates can keep them out.
+    working.add('foreign-chat');
     // Attack 2: our chat row pointing at a foreign project's running task.
     task('task-borrowed', { project_id: 'foreign', user_id: 'outsider' });
     chat('borrowed', { task_id: 'task-borrowed' });
+    working.add('borrowed');
     // Attack 3: our task naming a foreign project's profile.
     running('foreign-profile', {}, { agent_profile_hint: 'profile-foreign' });
     // Attack 4: a task naming another member's private global profile.
