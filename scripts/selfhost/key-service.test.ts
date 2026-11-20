@@ -245,6 +245,36 @@ describe('resolveSealedSecrets', () => {
     ).resolves.toMatchObject({ bundleId: first.bundleId });
   });
 
+  // Codex P2 on #2933: pruning sorted by createdAt alone dropped the bundle just written when the
+  // host clock had moved backwards, while the deploy still named it.
+  it('keeps the bundle just written even when older bundles carry later timestamps', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2030-01-01T00:00:00Z'));
+      for (let i = 0; i < 3; i += 1) {
+        await resolveSealedSecrets(
+          await sealInput({
+            platformKeysFile: null,
+            operatorSecrets: { GITHUB_CLIENT_SECRET: `future-secret-${i}-abcdef` },
+          })
+        );
+      }
+      vi.setSystemTime(new Date('2026-11-20T00:00:00Z'));
+      const r = await resolveSealedSecrets(
+        await sealInput({
+          platformKeysFile: null,
+          operatorSecrets: { GITHUB_CLIENT_SECRET: 'after-clock-rollback-abcdef' },
+        })
+      );
+      expect(r.sealed).toBe(true);
+      const kept = (await bundles()).map((b) => b.bundleId);
+      expect(kept).toContain(r.bundleId);
+      expect(kept).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('an operator edit seals a new bundle (new data key); the last three are kept', async () => {
     const ids: string[] = [];
     for (let i = 0; i < 5; i += 1) {

@@ -245,12 +245,15 @@ export async function resolveSealedSecrets(input: ResolveSecretsInput): Promise<
   log(
     `sealed ${Object.keys(secrets).length} secrets into bundle ${bundle.bundleId} (${provider().name} ${provider().keyRef})`
   );
-  // After a restore, every older bundle carries the source install's identity: none is kept.
+  // After a restore, every older bundle carries the source install's identity: none is kept. The
+  // bundle just written is always kept, whatever its timestamp says: a host clock that moved
+  // backwards must not prune the bundle this deploy is about to name (the Worker would 503).
+  const older = (await listBundles(settings.bundles))
+    .map((b) => b.bundleId)
+    .filter((id) => id !== bundle.bundleId);
   const keepIds = restored
     ? [bundle.bundleId]
-    : (await listBundles(settings.bundles))
-        .slice(0, input.keep ?? DEFAULT_KEPT_BUNDLES)
-        .map((b) => b.bundleId);
+    : [bundle.bundleId, ...older].slice(0, input.keep ?? DEFAULT_KEPT_BUNDLES);
   for (const id of await pruneBundles(settings.bundles, keepIds)) log(`removed old bundle ${id}`);
   if (restored) {
     rmSync(join(input.stateDir, RESTORED_IDENTITY_FILE));

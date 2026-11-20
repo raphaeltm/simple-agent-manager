@@ -85,6 +85,7 @@ export async function runMigration(
     if (!choiceRecordedBefore) rmSync(keyChoicePath(stateDir), { force: true });
   };
 
+  let alreadySealed = false;
   try {
     log('1/6 choosing the key provider and sealing the existing secrets (selfhost:deploy --init)');
     await deps.init();
@@ -93,14 +94,16 @@ export async function runMigration(
     log(`    bundle ${checked.bundleId}: the Worker gets ${checked.checked} secrets`);
     log('3/6 starting the key agent and the updated fence (docker compose up -d --build)');
     await deps.startStack();
+    // Already switched (a selfhost:upgrade ran the sealed deploy, or an earlier migrate kept the
+    // files) when the running version holds no secret vars. A failed scan is still pre-switch.
+    alreadySealed = (await deps.currentVersionSecrets()).length === 0;
   } catch (error) {
     forgetNewChoice();
     throw error;
   }
 
-  // Already switched (a selfhost:upgrade ran the sealed deploy, or an earlier migrate kept the
-  // files): verify what runs and go straight to the removal.
-  if ((await deps.currentVersionSecrets()).length === 0) {
+  // Verify what runs and go straight to the removal.
+  if (alreadySealed) {
     const running = await deps.adoptAndCheck();
     if (!running.healthy) {
       throw new Error(

@@ -167,6 +167,22 @@ describe('secrets migrate', () => {
     expect(holdOnPlaintext({ box: box(), stateDir: state })).toBe(true);
   });
 
+  // Codex P2 on #2933: the pre-switch scan of the running version can fail too (bucket down).
+  it('a failed pre-switch scan also leaves the next upgrade on plaintext', async () => {
+    const scanFails = deps({
+      currentVersionSecrets: async () => {
+        steps.push('scan current');
+        throw new Error('fleet bucket unavailable');
+      },
+    });
+    await expect(runMigration({ box: box(), stateDir: state }, scanFails)).rejects.toThrow(
+      /fleet bucket unavailable/
+    );
+    expect(steps).toEqual(['init', 'preflight', 'compose up', 'scan current']);
+    expect(plaintextLeft()).toHaveLength(2);
+    expect(holdOnPlaintext({ box: box(), stateDir: state })).toBe(true);
+  });
+
   it('rolls back when the first request to the new version is not healthy', async () => {
     let checks = 0;
     const unhealthy = deps({
