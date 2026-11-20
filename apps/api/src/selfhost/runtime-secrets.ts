@@ -35,6 +35,18 @@
 
 import { log } from '../lib/logger';
 import { type JsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
+import {
+  encodeKeyAgentFrame,
+  readFrame,
+  RuntimeSecretsUnavailableError,
+} from './runtime-secrets-frame';
+
+export {
+  encodeKeyAgentFrame,
+  KEY_AGENT_PREAMBLE,
+  MAX_KEY_AGENT_RESPONSE_BYTES,
+  RuntimeSecretsUnavailableError,
+} from './runtime-secrets-frame';
 
 export const DEFAULT_KEY_AGENT_TIMEOUT_MS = 3000;
 /**
@@ -45,13 +57,12 @@ export const DEFAULT_KEY_AGENT_TIMEOUT_MS = 3000;
  */
 export const DEFAULT_RUNTIME_SECRETS_TTL_MS = 5 * 60_000;
 /**
- * First bytes of every request on the agent's socket (deploy/selfhost/key-agent/server.ts has the
- * same constant; apps/api/tests/unit/selfhost-sealed-secrets-contract.test.ts pins both). NUL
- * first: no HTTP request line can start with it.
+ * The longest an isolate serves its copy past the TTL while the agent stays unreachable
+ * (SAM_RUNTIME_SECRETS_MAX_STALE_MS), counted from when it was loaded. Matches the agent's own
+ * SAM_KEY_AGENT_MAX_STALE_SECONDS default: past it the copy is dropped and requests fail closed,
+ * so a stopped agent cannot keep revoked credentials alive in a busy isolate indefinitely.
  */
-export const KEY_AGENT_PREAMBLE = '\u0000SAMKA2\n';
-/** Largest answer accepted: a bundle holds a few dozen secrets of a few KiB at most. */
-export const MAX_KEY_AGENT_RESPONSE_BYTES = 1024 * 1024;
+export const DEFAULT_RUNTIME_SECRETS_MAX_STALE_MS = 6 * 60 * 60_000;
 const AGENT_ADDRESS = /^127\.0\.0\.1:(\d{1,5})$/;
 const BUNDLE_ID = /^[0-9a-f]{32}$/;
 const SECRET_NAME = /^[A-Z_][A-Z0-9_]*$/;
@@ -67,6 +78,7 @@ export interface KeyAgentEnv {
   SAM_INSTALLATION_ID?: string;
   SAM_KEY_AGENT_TIMEOUT_MS?: string;
   SAM_RUNTIME_SECRETS_TTL_MS?: string;
+  SAM_RUNTIME_SECRETS_MAX_STALE_MS?: string;
 }
 
 /** Names the agent's answer may never set: the channel's own settings. */
@@ -76,19 +88,11 @@ const PROTECTED_NAMES = new Set([
   'SAM_KEY_AGENT_VERIFY_KEY',
   'SAM_KEY_AGENT_TIMEOUT_MS',
   'SAM_RUNTIME_SECRETS_TTL_MS',
+  'SAM_RUNTIME_SECRETS_MAX_STALE_MS',
   'SAM_INSTALLATION_ID',
 ]);
 
 export type RuntimeSecrets = Readonly<Record<string, string>>;
-
-export class RuntimeSecretsUnavailableError extends Error {
-  readonly code: string;
-  constructor(code: string, message: string) {
-    super(message);
-    this.name = 'RuntimeSecretsUnavailableError';
-    this.code = code;
-  }
-}
 
 /** The slice of a `cloudflare:sockets` socket this loader uses. */
 export interface KeyAgentSocket {
@@ -187,9 +191,17 @@ async function verifySignature(
   }
 }
 
+function positiveMs(raw: string | undefined, fallback: number): number {
+  const value = Number.parseInt(raw ?? '', 10);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
+
 function ttlMs(env: KeyAgentEnv): number {
-  const ttl = Number.parseInt(env.SAM_RUNTIME_SECRETS_TTL_MS ?? '', 10);
-  return Number.isSafeInteger(ttl) && ttl > 0 ? ttl : DEFAULT_RUNTIME_SECRETS_TTL_MS;
+  return positiveMs(env.SAM_RUNTIME_SECRETS_TTL_MS, DEFAULT_RUNTIME_SECRETS_TTL_MS);
+}
+
+function maxStaleMs(env: KeyAgentEnv): number {
+  return positiveMs(env.SAM_RUNTIME_SECRETS_MAX_STALE_MS, DEFAULT_RUNTIME_SECRETS_MAX_STALE_MS);
 }
 
 /** This isolate's secrets if loaded for the deployment's bundle and not yet due, else null. */
@@ -199,66 +211,6 @@ export function cachedRuntimeSecrets(env: KeyAgentEnv): RuntimeSecrets | null {
     Date.now() - cached.loadedAt < ttlMs(env)
     ? cached.secrets
     : null;
-}
-
-/** A request frame: the preamble, a 4-byte big-endian length, then the JSON body. */
-export function encodeKeyAgentFrame(body: string, preamble = KEY_AGENT_PREAMBLE): Uint8Array {
-  const head = new TextEncoder().encode(preamble);
-  const json = new TextEncoder().encode(body);
-  const frame = new Uint8Array(head.length + 4 + json.length);
-  frame.set(head, 0);
-  new DataView(frame.buffer).setUint32(head.length, json.length);
-  frame.set(json, head.length + 4);
-  return frame;
-}
-
-/** Reads one length-prefixed answer, refusing anything larger than the cap. */
-async function readFrame(readable: ReadableStream<Uint8Array>): Promise<string> {
-  const reader = readable.getReader();
-  const chunks: Uint8Array[] = [];
-  let received = 0;
-  let expected = -1;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (value) {
-        chunks.push(value);
-        received += value.length;
-      }
-      if (expected < 0 && received >= 4) {
-        const all = concat(chunks, received);
-        expected = new DataView(all.buffer, all.byteOffset, 4).getUint32(0);
-        if (expected > MAX_KEY_AGENT_RESPONSE_BYTES) {
-          throw new RuntimeSecretsUnavailableError(
-            'KEY_AGENT_BAD_RESPONSE',
-            'key agent answer is larger than allowed'
-          );
-        }
-      }
-      if (expected >= 0 && received >= 4 + expected) {
-        const all = concat(chunks, received);
-        return new TextDecoder().decode(all.subarray(4, 4 + expected));
-      }
-      if (done) {
-        throw new RuntimeSecretsUnavailableError(
-          'KEY_AGENT_BAD_RESPONSE',
-          'key agent closed the connection before answering'
-        );
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-function concat(chunks: Uint8Array[], length: number): Uint8Array {
-  const out = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return out;
 }
 
 /** One request/answer on a fresh socket, bounded by the agent timeout. */
@@ -385,6 +337,8 @@ export async function loadRuntimeSecrets(env: KeyAgentEnv): Promise<RuntimeSecre
   const hit = cachedRuntimeSecrets(env);
   if (hit) return hit;
   const agent = settings(env);
+  // Past the stale bound the copy is gone before the agent is asked: nothing can revive it.
+  if (cached && Date.now() - cached.loadedAt >= maxStaleMs(env)) cached = null;
   let secrets: RuntimeSecrets;
   try {
     secrets = await fetchSecrets(agent);

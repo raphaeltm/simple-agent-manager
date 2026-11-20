@@ -111,7 +111,11 @@ export async function resolveBoxKeys(input: {
 }
 
 /** The Worker's own sealed-secrets tunables (runtime-secrets.ts), passed through from `.env`. */
-const WORKER_SETTINGS = ['SAM_KEY_AGENT_TIMEOUT_MS', 'SAM_RUNTIME_SECRETS_TTL_MS'] as const;
+const WORKER_SETTINGS = [
+  'SAM_KEY_AGENT_TIMEOUT_MS',
+  'SAM_RUNTIME_SECRETS_TTL_MS',
+  'SAM_RUNTIME_SECRETS_MAX_STALE_MS',
+] as const;
 
 /**
  * The Worker vars of a sealed deploy: where the agent is, which bundle, its verify key, and the

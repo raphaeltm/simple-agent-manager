@@ -114,7 +114,9 @@ way, so nothing the Worker can be made to fetch (any URL, headers, body, redirec
 can ask the agent for secrets. The agent also answers only celld's uid (checked in
 `/proc/net/tcp`), and signs every answer over the Worker's nonce with a key sealed in the bundle,
 so a process that takes the port while the agent is down cannot answer as it. Each fresh Worker
-isolate pays one loopback round trip and asks again every `SAM_RUNTIME_SECRETS_TTL_MS` (5 min).
+isolate pays one loopback round trip and asks again every `SAM_RUNTIME_SECRETS_TTL_MS` (5 min);
+while the agent is unreachable it keeps its copy for at most `SAM_RUNTIME_SECRETS_MAX_STALE_MS`
+(6 h) after loading it, then fails closed.
 The agent keeps an opened bundle for 300 s, serves that copy while an unreachable or slow key
 service is retried (`SAM_KEY_AGENT_STALE_WAIT_MS`, 1000 ms), for at most
 `SAM_KEY_AGENT_MAX_STALE_SECONDS` (6 h) after it opened it, and drops it when the key service

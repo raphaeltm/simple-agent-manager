@@ -49,6 +49,7 @@ const CHANNEL_VARS = new Set([
   'SAM_KEY_AGENT_VERIFY_KEY',
   'SAM_KEY_AGENT_TIMEOUT_MS',
   'SAM_RUNTIME_SECRETS_TTL_MS',
+  'SAM_RUNTIME_SECRETS_MAX_STALE_MS',
 ]);
 
 function sameSecrets(a: Secrets, b: Secrets): boolean {

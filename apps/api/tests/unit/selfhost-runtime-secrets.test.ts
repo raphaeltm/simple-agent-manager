@@ -326,6 +326,32 @@ describe('refresh after SAM_RUNTIME_SECRETS_TTL_MS (security review M-2)', () =>
     now += 1001;
     expect((await loadRuntimeSecrets(ttlEnv())).K).toBe('v1');
   });
+
+  // Codex P1 on #2933: an agent that stays unreachable must not keep a copy alive forever.
+  it('an unreachable agent keeps the copy only up to SAM_RUNTIME_SECRETS_MAX_STALE_MS, then fails closed', async () => {
+    const staleEnv = () => ({ ...ttlEnv(), SAM_RUNTIME_SECRETS_MAX_STALE_MS: '5000' });
+    fetchMock
+      .mockImplementationOnce(ok({ K: 'v1' }))
+      .mockRejectedValue(new TypeError('connection refused'));
+    await loadRuntimeSecrets(staleEnv());
+    now += 4999;
+    expect((await loadRuntimeSecrets(staleEnv())).K).toBe('v1');
+    now += 1;
+    await expect(loadRuntimeSecrets(staleEnv())).rejects.toThrow(/unreachable/);
+    // Stays ended: a later request does not revive it.
+    await expect(loadRuntimeSecrets(staleEnv())).rejects.toThrow(/unreachable/);
+  });
+
+  it('the default stale bound is 6 h, resolved when the var is unset', async () => {
+    fetchMock
+      .mockImplementationOnce(ok({ K: 'v1' }))
+      .mockRejectedValue(new TypeError('connection refused'));
+    await loadRuntimeSecrets(ttlEnv());
+    now += 6 * 60 * 60_000 - 1;
+    expect((await loadRuntimeSecrets(ttlEnv())).K).toBe('v1');
+    now += 1;
+    await expect(loadRuntimeSecrets(ttlEnv())).rejects.toThrow(/unreachable/);
+  });
 });
 
 describe('wrapDurableObject', () => {
