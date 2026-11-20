@@ -111,11 +111,25 @@ export async function replyToInboxItem(
           // Before acceptance: even an immediate agent respond/update observes this reply.
           // Compare the same person's ledger position captured before the async send
           // preparation. A concurrent reply must reserve a new epoch before either can send.
+          const sourceGuard: { sql: string; values: (string | number)[] } = { sql: '', values: [] };
+          if (ref.store === 'ask') {
+            sourceGuard.sql =
+              "AND EXISTS (SELECT 1 FROM asks WHERE id = ? AND project_id = ? AND source_session_id = ? AND status = 'open')";
+            sourceGuard.values = [ref.id, item.projectId, sessionId];
+          } else if (ref.store === 'secret') {
+            sourceGuard.sql =
+              "AND EXISTS (SELECT 1 FROM runtime_secret_requests WHERE id = ? AND project_id = ? AND requesting_chat_session_id = ? AND status = 'pending' AND expires_at > ?)";
+            sourceGuard.values = [ref.id, item.projectId, sessionId, Date.now()];
+          } else if (ref.store === 'approval') {
+            sourceGuard.sql =
+              "AND EXISTS (SELECT 1 FROM operations_action_approvals WHERE id = ? AND requesting_project_id = ? AND requesting_session_id = ? AND status = 'pending' AND expires_at > ?)";
+            sourceGuard.values = [ref.id, item.projectId, sessionId, new Date().toISOString()];
+          }
           const reservation = await ctx.env.DATABASE.prepare(
             `INSERT INTO inbox_replies (project_id, item_ref, user_id, message_id, replied_at, permission_rejected)
              SELECT ?, ?, ?, ?, ?, ? WHERE COALESCE((SELECT MAX(id) FROM inbox_replies
                WHERE project_id = ? AND item_ref = ? AND user_id = ?), 0) = ?
-               ${ref.store === 'ask' ? "AND EXISTS (SELECT 1 FROM asks WHERE id = ? AND project_id = ? AND source_session_id = ? AND status = 'open')" : ''}`
+               ${sourceGuard.sql}`
           )
             .bind(
               item.projectId,
@@ -128,7 +142,7 @@ export async function replyToInboxItem(
               item.ref,
               ctx.actor.userId,
               prior?.id ?? 0,
-              ...(ref.store === 'ask' ? [ref.id, item.projectId, sessionId] : [])
+              ...sourceGuard.values
             )
             .run();
           if (reservation.meta.changes !== 1)

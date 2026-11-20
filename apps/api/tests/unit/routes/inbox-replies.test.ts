@@ -241,6 +241,100 @@ afterEach(() => {
 });
 
 describe('inbox replies through the real route on SQLite', () => {
+  it.each([
+    ['secret', 'fulfilled'],
+    ['secret', 'expired'],
+    ['secret', 'other-session'],
+    ['approval', 'approved'],
+    ['approval', 'expired'],
+    ['approval', 'other-session'],
+  ] as const)(
+    'refuses a %s reply when its source becomes %s after preflight',
+    async (store, change) => {
+      if (store === 'secret') {
+        insert('runtime_secret_requests', {
+          id: 'race',
+          project_id: 'p',
+          env_key: 'KEY',
+          reason: 'Need access',
+          requester_user_id: 'owner',
+          requesting_chat_session_id: 'chat',
+          status: 'pending',
+          created_at: 1000,
+          updated_at: 1000,
+          expires_at: Date.now() + 3600000,
+        });
+      } else {
+        insert('operations_action_approvals', {
+          id: 'race',
+          requesting_project_id: 'p',
+          requesting_session_id: 'chat',
+          requesting_task_id: 'task',
+          action: 'restart',
+          target_type: 'node',
+          target_id: 'node',
+          reason: 'Need restart',
+          status: 'pending',
+          created_at: new Date().toISOString(),
+          expires_at: new Date(Date.now() + 3600000).toISOString(),
+        });
+      }
+      const authorize = edge.writer.getMockImplementation()!;
+      let entered!: () => void;
+      let release!: () => void;
+      const paused = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      edge.writer.mockImplementation(async (...args) => {
+        entered();
+        await held;
+        return authorize(...args);
+      });
+      const reply = req(path(`${store}:race`, '/reply'), { content: 'Please explain this.' });
+      await paused;
+      try {
+        if (store === 'secret') {
+          if (change === 'expired')
+            sqlite
+              .prepare('UPDATE runtime_secret_requests SET expires_at = ? WHERE id = ?')
+              .run(Date.now() - 1, 'race');
+          else if (change === 'other-session')
+            sqlite
+              .prepare(
+                'UPDATE runtime_secret_requests SET requesting_chat_session_id = ? WHERE id = ?'
+              )
+              .run('other-chat', 'race');
+          else
+            sqlite
+              .prepare("UPDATE runtime_secret_requests SET status = 'fulfilled' WHERE id = ?")
+              .run('race');
+        } else if (change === 'expired') {
+          sqlite
+            .prepare('UPDATE operations_action_approvals SET expires_at = ? WHERE id = ?')
+            .run(new Date(Date.now() - 1).toISOString(), 'race');
+        } else if (change === 'other-session') {
+          sqlite
+            .prepare(
+              'UPDATE operations_action_approvals SET requesting_session_id = ? WHERE id = ?'
+            )
+            .run('other-chat', 'race');
+        } else {
+          sqlite
+            .prepare("UPDATE operations_action_approvals SET status = 'approved' WHERE id = ?")
+            .run('race');
+        }
+      } finally {
+        release();
+      }
+      expect((await reply).status).toBe(409);
+      expect(edge.accept).not.toHaveBeenCalled();
+      expect(edge.messages).toHaveLength(0);
+      expect(sqlite.prepare('SELECT COUNT(*) AS n FROM inbox_replies').get()).toEqual({ n: 0 });
+    }
+  );
   it.each(['respond', 'update', 'resolve'] as const)(
     '%s never acknowledges an earlier reservation whose reply has not reached the agent',
     async (method) => {

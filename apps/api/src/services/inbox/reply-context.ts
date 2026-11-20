@@ -24,22 +24,30 @@ export async function readInboxConversation(
 ): Promise<InboxConversation> {
   const before = getMessageCursor('before', input.replyCursor);
   const anchor = input.inboxRef.startsWith('ask:') ? input.inboxRef.slice(4) : input.inboxRef;
+  // A continuation names the streams to advance. An omitted cursor must not restart
+  // an exhausted stream while the other still has pages. The initial read includes both.
+  const readReplies = input.responseCursor === undefined || input.replyCursor !== undefined;
+  const readResponses = input.replyCursor === undefined || input.responseCursor !== undefined;
   const [page, comments] = await Promise.all([
-    projectDataService.getMessages(
-      env,
-      input.projectId,
-      input.sessionId,
-      getSessionMessageLimit(env),
-      before,
-      null,
-      ['user'],
-      false,
-      'desc'
-    ),
-    projectDataService.listInboxItemCommentThreads(env, input.projectId, {
-      itemId: anchor,
-      afterSequence: input.responseCursor,
-    }),
+    readReplies
+      ? projectDataService.getMessages(
+          env,
+          input.projectId,
+          input.sessionId,
+          getSessionMessageLimit(env),
+          before,
+          null,
+          ['user'],
+          false,
+          'desc'
+        )
+      : { messages: [], hasMore: false, scanCursor: null },
+    readResponses
+      ? projectDataService.listInboxItemCommentThreads(env, input.projectId, {
+          itemId: anchor,
+          afterSequence: input.responseCursor,
+        })
+      : { threads: [], hasMore: false, scanCursor: null },
   ]);
   const replies: InboxConversation['replies'] = [];
   for (const row of page.messages) {

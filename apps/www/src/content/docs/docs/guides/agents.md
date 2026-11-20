@@ -915,3 +915,5 @@ If a chat reports that its **agent connection is missing or rejected**, the sess
 An agent that reports it has no SAM tools is worth [reporting](/docs/guides/reporting-issues/) — it is not expected behavior on either runtime.
 
 Agent responses and updates return `withAgent`. When true, other replies remain outstanding: `inbox_read` method `get` on the item returns the source chat’s canonical `conversation` and `pendingReplyIds` visible on that page. Follow `replyCursor` / `responseCursor` with the returned conversation cursors to read more, including earlier failed deliveries. Reading acknowledges nothing; handle each observed reply explicitly before resolving the ask. Other chats’ existing item reads do not expose the source conversation.
+
+Conversation pagination reads both streams initially. On continuation, supply only non-null returned cursors: `replyCursor` advances replies and `responseCursor` advances responses. An omitted stream is skipped on that continuation, preventing already-exhausted replies or responses from restarting. `hasMore` covers the streams requested in that call.
