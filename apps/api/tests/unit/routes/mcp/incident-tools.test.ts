@@ -9,6 +9,7 @@ import {
   handleListIncidentQueue,
   handleResolveIncident,
 } from '../../../../src/routes/mcp/incident-tools';
+import { INCIDENT_TOOLS } from '../../../../src/routes/mcp/tool-definitions-incident-tools';
 import { createSqliteD1 } from '../../../helpers/sqlite-d1';
 
 const IMPLEMENTATION_TASK_ID = '01M0YGSPRC0E17FPQMZYW012R8';
@@ -372,5 +373,20 @@ describe('MCP incident tools', () => {
     );
     expect(detail.incident).toMatchObject({ recentOccurrenceCount: 40, queueState: 'watching' });
     expect(JSON.stringify(detail)).toContain('Occurrences in the last 168h while watching: 40');
+  });
+
+  it('advertises the watching outcome and frequency sort the handlers accept', () => {
+    const byName = Object.fromEntries(INCIDENT_TOOLS.map((tool) => [tool.name, tool]));
+    const resolveProps = byName.resolve_incident?.inputSchema.properties as Record<
+      string,
+      { enum?: string[] }
+    >;
+    const listProps = byName.list_incident_queue?.inputSchema.properties as Record<
+      string,
+      { enum?: string[] }
+    >;
+    expect(resolveProps.outcome?.enum).toEqual(['resolved', 'rejected', 'watching']);
+    expect(listProps.sort?.enum).toEqual(['priority', 'frequency']);
+    expect(listProps.state?.enum).toContain('watching');
   });
 });

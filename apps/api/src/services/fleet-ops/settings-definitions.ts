@@ -24,6 +24,8 @@ export const DEFAULT_INCIDENT_WATCH_SPIKE_WINDOW_HOURS = 24;
 export const DEFAULT_INCIDENT_WATCH_SPIKE_MIN_OCCURRENCES = 50;
 /** How many times its earlier rate the spike window must reach to count as a spike. */
 export const DEFAULT_INCIDENT_WATCH_SPIKE_BASELINE_MULTIPLIER = 3;
+/** Watched signatures whose recurrence one hourly triage run records. */
+export const DEFAULT_INCIDENT_WATCH_MAX_RECORDS_PER_RUN = 25;
 /** Hours without an occurrence after which a watched incident expires (14 days). */
 export const DEFAULT_INCIDENT_WATCH_QUIET_EXPIRY_HOURS = 14 * 24;
 
@@ -162,6 +164,14 @@ export const FLEET_OPS_SETTINGS = [
     defaultValue: DEFAULT_INCIDENT_WATCH_SPIKE_BASELINE_MULTIPLIER,
     description:
       "A spike must also reach this many times the incident's average count per spike window over the rest of the recent window, so a steadily noisy watched incident is not re-queued for being noisy.",
+    range: { min: 1, max: 100 },
+  },
+  {
+    name: 'operations.incidentWatchMaxRecordsPerRun',
+    key: 'incidentWatchMaxRecordsPerRun',
+    defaultValue: DEFAULT_INCIDENT_WATCH_MAX_RECORDS_PER_RUN,
+    description:
+      'Watched incidents whose recurrence one hourly triage run records (two D1 statements each). Those with the oldest occurrence in the window go first; the rest of their recurrence is missed for that hour. Idea refreshes are further capped by the triage group limit.',
     range: { min: 1, max: 100 },
   },
   {

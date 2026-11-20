@@ -44,22 +44,22 @@ shared predicate that drives an action).
 
 ## Checklist
 
-- [ ] Migration 0264: `watching_since`, `watch_reason`, `watch_hourly_counts` (JSON epoch-hour → count), `watch_escalated_at`, `watch_escalation_reason`; schema.ts
-- [ ] `INCIDENT_QUEUE_STATES` gains `watching`; neither active nor terminal
-- [ ] Settings: recent window hours (168), spike window hours (24), spike min occurrences (50), spike baseline multiplier (3), quiet expiry hours (336)
-- [ ] `watchIncident` (claimed → watching, requires note, resets dispatch_attempts, keeps buckets)
-- [ ] `resolve_incident` outcome `watching` (tool definition + handler)
-- [ ] Runner: watching rows record exact new occurrences into hourly buckets, CAS on last_seen_at, refresh the owned idea, never reopen / diagnose / claim
-- [ ] Spike: count since max(now − spike window, watching_since) ≥ min and ≥ multiplier × baseline → pending with reason, queued_at = now
-- [ ] Quiet expiry after recurrences in the hourly run; existing idea close cancels the idea
-- [ ] Read surface: list_incident_queue / get_incident return watchingSince, watchReason, recentOccurrenceCount, recentWindowHours, escalatedAt, escalationReason; `sort: "frequency"`
-- [ ] Backlog summary line names a spike re-queue reason
-- [ ] Idea body shows disposition and recent count
-- [ ] range-report + shared type include watching
-- [ ] Trigger template (code default) gains FIX NOW / WATCHING rules
-- [ ] Tests (runner path, spike + control, expiry + control, resolved still reopens, MCP, real SQL), discrimination checks
-- [ ] Docs: reporting-issues.md, admin-settings.md
-- [ ] Live trigger 01M0Y4KTQAVKTG7VVWNWXD89Y8 updated after production deploy
+- [x] Migration 0264: `watching_since`, `watch_reason`, `watch_hourly_counts` (JSON epoch-hour → count), `watch_escalated_at`, `watch_escalation_reason`; schema.ts
+- [x] `INCIDENT_QUEUE_STATES` gains `watching`; neither active nor terminal
+- [x] Settings: recent window hours (168), spike window hours (24), spike min occurrences (50), spike baseline multiplier (3), quiet expiry hours (336)
+- [x] `watchIncident` (claimed → watching, requires note, resets dispatch_attempts, keeps buckets)
+- [x] `resolve_incident` outcome `watching` (tool definition + handler)
+- [x] Runner: watching rows record exact new occurrences into hourly buckets, CAS on last_seen_at, refresh the owned idea, never reopen / diagnose / claim
+- [x] Spike: count since max(now − spike window, watching_since) ≥ min and ≥ multiplier × baseline → pending with reason, queued_at = now
+- [x] Quiet expiry after recurrences in the hourly run; existing idea close cancels the idea
+- [x] Read surface: list_incident_queue / get_incident return watchingSince, watchReason, recentOccurrenceCount, recentWindowHours, escalatedAt, escalationReason; `sort: "frequency"`
+- [x] Backlog summary line names a spike re-queue reason
+- [x] Idea body shows disposition and recent count
+- [x] range-report + shared type include watching
+- [x] Trigger template (code default) gains FIX NOW / WATCHING rules
+- [x] Tests (runner path, spike + control, expiry + control, resolved still reopens, MCP, real SQL), discrimination checks
+- [x] Docs: reporting-issues.md, admin-settings.md
+- [ ] (post-deploy, this task) Live trigger 01M0Y4KTQAVKTG7VVWNWXD89Y8 updated after production deploy
 
 ## Throughput (rule 81)
 

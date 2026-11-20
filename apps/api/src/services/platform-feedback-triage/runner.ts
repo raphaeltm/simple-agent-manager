@@ -41,7 +41,7 @@ import {
 } from './persistence';
 import { prioritizeFeedbackGroups, shouldReopenExistingTriage } from './prioritization';
 import type { ErrorRow, FeedbackTriageResult, FeedbackTriageTrigger, TriageDeps } from './types';
-import { processWatchedRecurrence } from './watched-recurrence';
+import { createWatchedRecorder } from './watched-recurrence';
 
 export async function runPlatformFeedbackTriage(
   env: Env,
@@ -137,10 +137,8 @@ export async function runPlatformFeedbackTriage(
     env,
     candidateGroups.map((group) => group.signature)
   );
-  // Watched signatures are counted outside the group limit: recording them is two D1
-  // statements and no diagnosis, and a recurrence that missed its window would be lost for
-  // good (the next window starts after it), which could let a still-recurring signature
-  // quiet-expire. At most one per distinct signature in the error-limit window.
+  // Watched signatures are recorded outside the group limit (no diagnosis; a recurrence missed
+  // in its window is lost for good, as the next window starts after it), up to their own cap.
   const isWatched = (signature: string) =>
     existingPriorityRows.get(signature)?.queue_state === 'watching';
   const watchedGroups = candidateGroups.filter((group) => isWatched(group.signature));
@@ -151,27 +149,17 @@ export async function runPlatformFeedbackTriage(
   ).slice(0, groupLimit);
   const result = { ...base, groupsFound: groups.length + watchedGroups.length };
   const diagnose = deps.diagnose ?? runDebugDiagnosis;
-  const watchContext = {
+  const watched = createWatchedRecorder(env, result, {
     projectId: project.id,
     now,
     watchConfig,
     ideaTitleMaxLength,
+    ideaRefreshLimit: groupLimit,
     readEngagement: deps.readEngagement,
-  };
-  const recordWatched = async (
-    group: (typeof candidateGroups)[number],
-    existing: NonNullable<ReturnType<typeof existingPriorityRows.get>>
-  ) => {
-    const watched = await processWatchedRecurrence(env, group, existing, watchContext);
-    if (watched.recorded) result.watchedRecurrences += 1;
-    if (watched.escalated) result.watchedEscalated += 1;
-    if (watched.ideaUpdated) result.ideasUpdated += 1;
-    else result.groupsSkipped += 1;
-  };
-  for (const group of watchedGroups) {
-    const existing = existingPriorityRows.get(group.signature);
-    if (existing) await recordWatched(group, existing);
-  }
+    trigger,
+    failureReasonMaxLength,
+  });
+  await watched.recordAll(watchedGroups, existingPriorityRows);
 
   for (const [index, group] of groups.entries()) {
     const refs = JSON.stringify(group.evidence);
@@ -197,7 +185,7 @@ export async function runPlatformFeedbackTriage(
     const latestExisting = await readExistingTriageRow(env, group.signature);
     if (latestExisting?.queue_state === 'watching') {
       // Became watching after selection: count the recurrence; never reopen or re-triage.
-      await recordWatched(group, latestExisting);
+      await watched.record(group, latestExisting);
       continue;
     }
     const reopenTerminal = shouldReopenExistingTriage(
@@ -222,7 +210,7 @@ export async function runPlatformFeedbackTriage(
         ELSE queued_at
       END,
       expired_at = CASE WHEN queue_state = 'expired' AND ? THEN NULL ELSE expired_at END,
-      updated_at = CURRENT_TIMESTAMP WHERE signature = ?`
+      updated_at = CURRENT_TIMESTAMP WHERE signature = ? AND queue_state <> 'watching'`
     )
       .bind(
         group.firstSeenAt,

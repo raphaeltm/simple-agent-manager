@@ -10,16 +10,21 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import type { runDebugDiagnosis } from '../../../src/services/debug-agent';
+import { FLEET_OPS_DEFAULTS } from '../../../src/services/fleet-ops/settings-definitions';
+import type { IdeaWorkSnapshotReader } from '../../../src/services/platform-feedback-incidents';
 import {
   buildIncidentBacklogSummary,
   claimIncident,
   evaluateSpike,
+  explainUndispatchableIncidents,
   getIncidentConfig,
   hasDispatchablePendingIncidents,
   listDispatchableIncidentQueue,
   listIncidentQueue,
   parseHourlyCounts,
+  recordWatchedRecurrence,
   resolveIncident,
+  watchConfigFromSettings,
   watchIncident,
 } from '../../../src/services/platform-feedback-incidents';
 import {
@@ -87,12 +92,19 @@ function setup(extraEnv: Record<string, string> = {}) {
     id: `diagnosis-${randomUUID()}`,
     diagnosis: 'redacted',
   })) as unknown as typeof runDebugDiagnosis & ReturnType<typeof vi.fn>;
-  const run = (now: number) =>
+  const run = (now: number, readEngagement: IdeaWorkSnapshotReader = noEngagement) =>
     runPlatformFeedbackTriage(env, 'cron', {
       now: () => now,
       diagnose,
-      readEngagement: noEngagement,
+      readEngagement,
     });
+  const setSetting = (name: string, value: string) =>
+    main
+      .prepare(
+        `INSERT OR REPLACE INTO platform_settings (key, value, updated_at, updated_by)
+         VALUES (?, ?, '2026-11-01T00:00:00Z', 'superadmin-1')`
+      )
+      .run(name, value);
   const addErrors = (message: string, timestamps: number[]) => {
     const insert = observability.prepare(
       'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
@@ -122,7 +134,7 @@ function setup(extraEnv: Record<string, string> = {}) {
         .prepare('SELECT signature FROM platform_feedback_triages WHERE summary LIKE ?')
         .get(`%${message.slice(0, 20)}%`) as { signature: string }
     ).signature;
-  return { main, env, diagnose, run, addErrors, row, idea, signatureFor };
+  return { main, env, diagnose, run, addErrors, row, idea, signatureFor, setSetting };
 }
 
 type Harness = ReturnType<typeof setup>;
@@ -184,6 +196,14 @@ describe('incident WATCHING disposition', () => {
     // Not dispatchable, and not counted twice when the next hourly window overlaps.
     expect(await listDispatchableIncidentQueue(h.env, 10, t1 + 10 * 60_000)).toEqual([]);
     expect(await hasDispatchablePendingIncidents(h.env, getIncidentConfig(h.env), t1)).toBe(false);
+    // Deliberately held, not stalled: the decline breakdown and stall anomaly read pending only.
+    const breakdown = await explainUndispatchableIncidents(
+      h.env,
+      getIncidentConfig(h.env),
+      t1 + 30 * DAY,
+      HOUR
+    );
+    expect(breakdown).toMatchObject({ pending: 0, stalled: 0 });
     await h.run(t1 + 20 * 60_000);
     expect(h.row(signature).occurrence_count).toBe(4);
   });
@@ -353,6 +373,271 @@ describe('incident WATCHING disposition', () => {
   });
 });
 
+describe('incident WATCHING robustness', () => {
+  const engagedReader =
+    (ideaId: () => string): IdeaWorkSnapshotReader =>
+    async () => ({
+      [ideaId()]: { sessions: [], updates: 1, fileIds: [], pullRequestUrls: [] },
+    });
+
+  it('two overlapping recordings add a window once (compare-and-set on last_seen_at)', async () => {
+    const h = setup();
+    const message = 'overlapping hourly windows race on the same signature';
+    const signature = await seedWatched(h, message);
+    const config = watchConfigFromSettings(FLEET_OPS_DEFAULTS);
+    const input = {
+      signature,
+      occurrenceTimestamps: spread(T0 + HOUR, 5),
+      severity: 'error',
+      evidenceRefs: '[]',
+      now: T0 + 2 * HOUR,
+      config,
+    };
+    const outcomes = await Promise.all([
+      recordWatchedRecurrence(h.env, input),
+      recordWatchedRecurrence(h.env, input),
+    ]);
+    expect(outcomes.filter((outcome) => outcome.recorded)).toHaveLength(1);
+    expect(outcomes.find((outcome) => !outcome.recorded)).toMatchObject({ newOccurrences: 0 });
+    expect(h.row(signature).occurrence_count).toBe(6);
+    const buckets = parseHourlyCounts(h.row(signature).watch_hourly_counts as string);
+    expect([...buckets.values()].reduce((sum, n) => sum + n, 0)).toBe(5);
+  });
+
+  it('one failing watched signature does not stop the others, new triage or quiet expiry', async () => {
+    const h = setup();
+    const broken = 'broken: watched signature whose write keeps failing';
+    const healthy = 'healthy: watched signature that records normally';
+    const quiet = 'quiet: watched signature that went quiet long ago';
+    const quietSignature = await seedWatched(h, quiet, T0 - 14 * DAY + HOUR);
+    const brokenSignature = await seedWatched(h, broken);
+    const healthySignature = await seedWatched(h, healthy, T0 + 1_000);
+    const database = h.env.DATABASE;
+    h.env.DATABASE = {
+      ...database,
+      prepare(sql: string) {
+        const statement = database.prepare(sql);
+        if (!sql.includes("queue_state = 'watching' AND last_seen_at = ?")) return statement;
+        return {
+          ...statement,
+          bind(...values: unknown[]) {
+            const bound = statement.bind(...values);
+            if (!values.includes(brokenSignature)) return bound;
+            return { ...bound, run: async () => Promise.reject(new Error('D1 write failed')) };
+          },
+        };
+      },
+    } as unknown as Env['DATABASE'];
+
+    const t1 = T0 + 2 * HOUR;
+    h.addErrors(broken, [t1]);
+    h.addErrors(healthy, [t1 + 1_000]);
+    h.addErrors('a novel failure in the same window', [t1 + 2_000]);
+    const result = await h.run(t1 + 5 * 60_000);
+
+    expect(result).toMatchObject({ groupsFailed: 1, watchedRecurrences: 1, ideasCreated: 1 });
+    expect(result.failureReasons).toEqual(['D1 write failed']);
+    expect(h.row(healthySignature).occurrence_count).toBe(2);
+    expect(h.row(brokenSignature).occurrence_count).toBe(1);
+    expect(result.watchedExpired).toBe(1);
+    expect(h.row(quietSignature).queue_state).toBe('expired');
+  });
+
+  it('records counts but leaves an engaged idea alone and releases it', async () => {
+    const h = setup();
+    const message = 'watched signature whose idea someone took up';
+    const signature = await seedWatched(h, message);
+    const ideaId = () => h.row(signature).idea_id as string;
+    const before = h.idea(signature).description;
+
+    const t1 = T0 + 2 * HOUR;
+    h.addErrors(message, [t1, t1 + 1_000]);
+    const result = await h.run(t1 + 5 * 60_000, engagedReader(ideaId));
+
+    expect(result).toMatchObject({ watchedRecurrences: 1, ideasUpdated: 0 });
+    expect(h.row(signature)).toMatchObject({ queue_state: 'watching', occurrence_count: 3 });
+    expect(h.idea(signature).description).toBe(before);
+    expect(
+      h.main
+        .prepare('SELECT idea_owned_at FROM platform_feedback_triages WHERE signature = ?')
+        .get(signature)
+    ).toEqual({ idea_owned_at: 'released' });
+  });
+
+  it('records counts for a watched signature with no idea', async () => {
+    const h = setup();
+    const message = 'watched signature without an idea';
+    const signature = await seedWatched(h, message);
+    h.main
+      .prepare('UPDATE platform_feedback_triages SET idea_id = NULL WHERE signature = ?')
+      .run(signature);
+    const t1 = T0 + 2 * HOUR;
+    h.addErrors(message, [t1]);
+    const result = await h.run(t1 + 5 * 60_000);
+    expect(result).toMatchObject({ watchedRecurrences: 1, groupsFailed: 0 });
+    expect(h.row(signature).occurrence_count).toBe(2);
+  });
+
+  it('a few old occurrences do not inflate the baseline and hide a burst', async () => {
+    const h = setup();
+    const message = 'a few stray errors then a real burst';
+    const signature = await seedWatched(h, message);
+    // Watched since T0; three stray errors on day three, then a burst of 50 just over a day later.
+    const stray = T0 + 3 * DAY;
+    h.addErrors(message, spread(stray, 3));
+    await h.run(stray + 5 * 60_000);
+    // Earlier rate since the watch began: 3 in ~73h, about 1 a day. Measured only from the
+    // stray hour it would look like ~70 a day and hide the burst.
+    const burst = stray + 25 * HOUR;
+    h.addErrors(message, spread(burst, 50));
+    await h.run(burst + 5 * 60_000);
+    expect(h.row(signature).queue_state).toBe('pending');
+  });
+
+  it('uses the admin settings: a lower spike threshold, a shorter quiet period, a record cap', async () => {
+    const h = setup();
+    h.setSetting('operations.incidentWatchSpikeMinOccurrences', '5');
+    h.setSetting('operations.incidentWatchQuietExpiryHours', '24');
+    const spiking = 'settings-driven spike signature';
+    const control = 'settings-driven control signature';
+    const spikingSignature = await seedWatched(h, spiking);
+    const controlSignature = await seedWatched(h, control, T0 + 1_000);
+
+    const t1 = T0 + 2 * HOUR;
+    h.addErrors(spiking, spread(t1, 6));
+    h.addErrors(control, spread(t1 + 10_000, 4));
+    await h.run(t1 + 5 * 60_000);
+    expect(h.row(spikingSignature).queue_state).toBe('pending');
+    expect(h.row(controlSignature).queue_state).toBe('watching');
+
+    // 24h quiet period: the control expires two days later.
+    const result = await h.run(t1 + 2 * DAY);
+    expect(result.watchedExpired).toBe(1);
+    expect(h.row(controlSignature).queue_state).toBe('expired');
+  });
+
+  it('caps watched recordings per run, oldest occurrence first', async () => {
+    const h = setup();
+    h.setSetting('operations.incidentWatchMaxRecordsPerRun', '1');
+    const first = 'alpha watched signature in the window';
+    const second = 'bravo watched signature in the window';
+    const firstSignature = await seedWatched(h, first);
+    const secondSignature = await seedWatched(h, second, T0 + 1_000);
+    const t1 = T0 + 2 * HOUR;
+    h.addErrors(second, [t1 + 2_000]);
+    h.addErrors(first, [t1 + 1_000]);
+    const result = await h.run(t1 + 5 * 60_000);
+    expect(result.watchedRecurrences).toBe(1);
+    expect(h.row(firstSignature).occurrence_count).toBe(2);
+    expect(h.row(secondSignature).occurrence_count).toBe(1);
+  });
+
+  it('falls back to default settings when settings cannot be read', async () => {
+    const h = setup();
+    const message = 'watched while the settings store is unavailable';
+    const warn = vi.spyOn(console, 'warn');
+    // A stored row the settings cache cannot parse makes the whole settings read fail.
+    h.main
+      .prepare(
+        `INSERT INTO platform_settings (key, value, updated_at, updated_by)
+         VALUES ('operations.incidentWatchSpikeMinOccurrences', '5', NULL, NULL)`
+      )
+      .run();
+    const signature = await seedWatched(h, message);
+    const t1 = T0 + 2 * HOUR;
+    h.addErrors(message, spread(t1, 10));
+    const result = await h.run(t1 + 5 * 60_000);
+    expect(result.watchedRecurrences).toBe(1);
+    // Defaults apply: 10 is under the default 50, while the unreadable stored 5 would spike.
+    expect(h.row(signature)).toMatchObject({ queue_state: 'watching', occurrence_count: 11 });
+    expect(JSON.stringify(warn.mock.calls)).toContain('watch_settings_read_failed');
+    warn.mockRestore();
+  });
+
+  it('expiry is one-shot, and a later recurrence reopens the signature and its idea', async () => {
+    const h = setup();
+    const message = 'quiet signature that comes back much later';
+    const signature = await seedWatched(h, message);
+    const expiredAt = T0 + 15 * DAY;
+    expect((await h.run(expiredAt)).watchedExpired).toBe(1);
+    expect((await h.run(expiredAt + HOUR)).watchedExpired).toBe(0);
+    expect(h.row(signature)).toMatchObject({ queue_state: 'expired', expired_at: expiredAt });
+    await reconcileIncidentIdeas(h.env, {
+      now: () => expiredAt + HOUR,
+      readEngagement: noEngagement,
+      batchSize: 10,
+      deadlineMs: 10_000,
+    });
+    expect(h.idea(signature).status).toBe('cancelled');
+
+    const back = expiredAt + 2 * HOUR;
+    h.addErrors(message, [back]);
+    await h.run(back + 60_000);
+    expect(h.row(signature)).toMatchObject({ queue_state: 'pending', queued_at: back + 60_000 });
+    expect(h.idea(signature).status).toBe('draft');
+  });
+
+  it('watchIncident enforces the claim fence and clears dispatch bookkeeping', async () => {
+    const h = setup();
+    const message = 'claim fence for the watching transition';
+    h.addErrors(message, [T0]);
+    await h.run(T0 + 60_000);
+    const signature = h.signatureFor(message);
+    const watch = (token: string, task: string, at: number) =>
+      watchIncident(h.env, signature, token, task, 'reason', at, 2_000);
+
+    // Not claimed: refused.
+    expect(await watch('none', TRIAGE_TASK, T0 + 90_000)).toBe(false);
+    const claim = await claimIncident(h.env, signature, TRIAGE_TASK, T0 + 120_000);
+    h.main
+      .prepare(
+        `UPDATE platform_feedback_triages SET dispatch_attempts = 2, budget_deferred_until = ?,
+           dispatch_lease_token = 'lease', dispatched_task_id = 'dispatched-task' WHERE signature = ?`
+      )
+      .run(T0 + DAY, signature);
+    expect(await watch(claim!.claimToken, 'another-task', T0 + 130_000)).toBe(false);
+    expect(await watch('wrong-token', TRIAGE_TASK, T0 + 130_000)).toBe(false);
+    expect(await watch(claim!.claimToken, TRIAGE_TASK, T0 + 10 * DAY)).toBe(false); // lease expired
+    expect(h.row(signature).queue_state).toBe('claimed');
+
+    expect(await watch(claim!.claimToken, TRIAGE_TASK, T0 + 130_000)).toBe(true);
+    expect(
+      h.main
+        .prepare(
+          `SELECT queue_state, dispatch_attempts, budget_deferred_until, dispatch_lease_token,
+             dispatched_task_id, incident_claim_token FROM platform_feedback_triages WHERE signature = ?`
+        )
+        .get(signature)
+    ).toEqual({
+      queue_state: 'watching',
+      dispatch_attempts: 0,
+      budget_deferred_until: null,
+      dispatch_lease_token: null,
+      dispatched_task_id: null,
+      incident_claim_token: null,
+    });
+    // A watched row cannot be claimed or resolved.
+    expect(await claimIncident(h.env, signature, TRIAGE_TASK, T0 + DAY)).toBeNull();
+  });
+
+  it("a person's report cannot be watched", async () => {
+    const h = setup();
+    h.main
+      .prepare(
+        `INSERT INTO platform_feedback_triages
+          (signature, source, summary, first_seen_at, last_seen_at, occurrence_count, evidence_refs,
+           queue_state, queued_at)
+         VALUES ('report-1', 'user-report', 'User report', ?, ?, 1, '[]', 'pending', ?)`
+      )
+      .run(T0, T0, T0);
+    const claim = await claimIncident(h.env, 'report-1', TRIAGE_TASK, T0 + 1_000);
+    expect(
+      await watchIncident(h.env, 'report-1', claim!.claimToken, TRIAGE_TASK, 'r', T0 + 2_000, 2_000)
+    ).toBe(false);
+    expect(h.row('report-1').queue_state).toBe('claimed');
+  });
+});
+
 describe('watch spike arithmetic', () => {
   const config = {
     recentWindowMs: 7 * DAY,
@@ -360,6 +645,7 @@ describe('watch spike arithmetic', () => {
     spikeMinOccurrences: 50,
     spikeBaselineMultiplier: 3,
     quietExpiryMs: 14 * DAY,
+    maxRecordsPerRun: 25,
   };
   const hour = (at: number) => Math.floor(at / HOUR);
 

@@ -16,6 +16,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { resolveFleetOpsSettings } from '../fleet-ops/settings';
 import { FLEET_OPS_DEFAULTS, type FleetOpsSettings } from '../fleet-ops/settings-definitions';
+import { REPORT_SOURCE } from './constants';
 import { sanitizeText } from './text';
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -26,6 +27,7 @@ export interface WatchConfig {
   spikeMinOccurrences: number;
   spikeBaselineMultiplier: number;
   quietExpiryMs: number;
+  maxRecordsPerRun: number;
 }
 
 type WatchSettings = Pick<
@@ -35,6 +37,7 @@ type WatchSettings = Pick<
   | 'incidentWatchSpikeMinOccurrences'
   | 'incidentWatchSpikeBaselineMultiplier'
   | 'incidentWatchQuietExpiryHours'
+  | 'incidentWatchMaxRecordsPerRun'
 >;
 
 export function watchConfigFromSettings(settings: WatchSettings): WatchConfig {
@@ -45,6 +48,7 @@ export function watchConfigFromSettings(settings: WatchSettings): WatchConfig {
     spikeMinOccurrences: settings.incidentWatchSpikeMinOccurrences,
     spikeBaselineMultiplier: settings.incidentWatchSpikeBaselineMultiplier,
     quietExpiryMs: settings.incidentWatchQuietExpiryHours * HOUR_MS,
+    maxRecordsPerRun: settings.incidentWatchMaxRecordsPerRun,
   };
 }
 
@@ -64,7 +68,11 @@ export async function loadWatchConfig(env: Env): Promise<WatchConfig> {
   }
 }
 
-/** Epoch hour -> occurrences. Malformed storage reads as empty rather than failing the row. */
+/**
+ * Epoch hour -> occurrences. Malformed storage reads as empty rather than failing the row.
+ * The SQL ranking (`RECENT_WATCH_OCCURRENCES_SQL`, queries.ts) casts values instead of
+ * dropping them, so the two can disagree only on malformed rows this module never writes.
+ */
 export function parseHourlyCounts(raw: string | null | undefined): Map<number, number> {
   const counts = new Map<number, number>();
   if (!raw) return counts;
@@ -123,9 +131,10 @@ export interface SpikeVerdict {
  * looked at (and chose to keep watching) cannot re-queue it. Buckets are hourly: those starting
  * before `watchingSince` are excluded, which can under-count by less than an hour.
  *
- * The baseline is the average per spike window over the rest of the recent window, measured
- * only over the hours actually covered by buckets, so a young watch is not compared with
- * empty days.
+ * The baseline is the average per spike window over the rest of the recent window. It covers
+ * the hours since watching began (or since the earliest recorded bucket, when a re-watch kept
+ * older history), so a young watch is not compared with days it was not watched, and an empty
+ * hour while watched counts as a zero-rate hour rather than shrinking the denominator.
  */
 export function evaluateSpike(
   counts: Map<number, number>,
@@ -137,7 +146,8 @@ export function evaluateSpike(
   const spikeCount = countSince(counts, spikeStart);
   const baselineEnd = now - config.spikeWindowMs;
   const earliestBucket = Math.min(...[...counts.keys()].map((hour) => hour * HOUR_MS), Infinity);
-  const baselineStart = Math.max(now - config.recentWindowMs, earliestBucket);
+  const observedSince = Math.min(earliestBucket, watchingSince ?? Infinity);
+  const baselineStart = Math.max(now - config.recentWindowMs, observedSince);
   const coveredMs = baselineEnd - baselineStart;
   const baselinePerWindow =
     coveredMs > 0
@@ -250,7 +260,14 @@ export async function recordWatchedRecurrence(
       row.last_seen_at
     )
     .run();
-  if ((result.meta.changes ?? 0) !== 1) return none;
+  if ((result.meta.changes ?? 0) !== 1) {
+    // Another writer moved last_seen_at or the state; the next window re-reads it.
+    log.info('platform_feedback_incident.watch_record_lost_race', {
+      signature: input.signature.slice(0, 16),
+      action: 'skipped',
+    });
+    return none;
+  }
   if (verdict.spike) {
     log.warn('platform_feedback_incident.watch_spike_requeued', {
       signature: input.signature.slice(0, 16),
@@ -269,6 +286,9 @@ export async function recordWatchedRecurrence(
 
 /**
  * Moves a claimed incident to watching. The claim fence is the same as `resolveIncident`'s.
+ * A person's report (`source = 'user-report'`) cannot be watched: its recurrences arrive
+ * through `upsertUserReportIncident`, which does not record watched occurrences, and a report
+ * deserves a fix or an explicit rejection.
  * Dispatch attempts reset because the triage episode succeeded (rule 61). Hourly counts are
  * kept, so a re-watch after a spike keeps its history and its earlier rate.
  */
@@ -295,6 +315,7 @@ export async function watchIncident(
      WHERE signature = ?
        AND queue_state = 'claimed'
        AND rejected_at IS NULL
+       AND source <> '${REPORT_SOURCE}'
        AND incident_claim_token = ?
        AND incident_claimed_by_task_id = ?
        AND incident_claim_expires_at >= ?`
