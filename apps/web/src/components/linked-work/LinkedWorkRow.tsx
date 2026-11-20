@@ -18,6 +18,8 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
 import { sanitizeUrl } from '../../lib/url-utils';
+import type { LibraryPreviewRequest } from '../library/library-preview-context';
+import { LibraryFileLink } from '../library/LibraryFileLink';
 
 const ROW_CLASS =
   'group flex w-full min-w-0 items-center gap-3 border-0 border-b border-solid border-border-default bg-transparent px-3 py-2.5 text-left no-underline last:border-b-0 hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent-primary';
@@ -41,12 +43,14 @@ export interface LinkedWorkRowProps {
    * baseline so a wrapping title does not drag it down the row.
    */
   timestamp?: ReactNode;
-  /** In-app destination. Exactly one of `to` / `href` / `onClick` must be given. */
+  /** In-app destination. Exactly one of `to` / `href` / `onClick` / `libraryFile` must be given. */
   to?: string;
   /** External destination (a pull request), opened in a new tab. Sanitised before use. */
   href?: string;
   /** Opens the item in place — a library file's preview — instead of navigating away. */
   onClick?: () => void;
+  /** A Library file: opens its preview over the page, and links to the Library as a fallback. */
+  libraryFile?: LibraryPreviewRequest;
   testId?: string;
 }
 
@@ -99,7 +103,14 @@ function RowBody({
 }
 
 export function LinkedWorkRow(props: LinkedWorkRowProps) {
-  const { to, href, onClick, testId } = props;
+  const { to, href, onClick, libraryFile, testId } = props;
+  if (libraryFile) {
+    return (
+      <LibraryFileLink {...libraryFile} className={ROW_CLASS} data-testid={testId}>
+        <RowBody {...props} />
+      </LibraryFileLink>
+    );
+  }
   if (onClick) {
     return (
       <button

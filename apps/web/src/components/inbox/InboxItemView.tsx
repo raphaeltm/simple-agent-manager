@@ -3,6 +3,7 @@ import { Check, ChevronDown, CircleAlert, Undo2, X } from 'lucide-react';
 import { type ReactNode, type Ref, useState } from 'react';
 import { Link } from 'react-router';
 
+import { LibraryFileLink } from '../library/LibraryFileLink';
 import { RenderedMarkdown } from '../MarkdownRenderer';
 import {
   agentStateLong,
@@ -54,6 +55,16 @@ export function InboxLinkChips({ item }: { item: InboxItem }) {
               <span className="shrink-0 text-[11px] text-fg-muted">· {target.host}</span>
             )}
           </a>
+        ) : target.libraryFileId ? (
+          <LibraryFileLink
+            key={key}
+            projectId={item.projectId}
+            fileId={target.libraryFileId}
+            filename={link.label?.trim() || undefined}
+            className={chip}
+          >
+            {content}
+          </LibraryFileLink>
         ) : (
           <Link key={key} to={target.href} className={chip}>
             {content}

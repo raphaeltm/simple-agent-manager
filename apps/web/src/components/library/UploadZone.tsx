@@ -20,7 +20,7 @@ export function UploadZone({ onFiles }: UploadZoneProps) {
       const files = Array.from(e.dataTransfer.files);
       if (files.length > 0) onFiles(files);
     },
-    [onFiles],
+    [onFiles]
   );
 
   const handleChange = useCallback(
@@ -30,7 +30,7 @@ export function UploadZone({ onFiles }: UploadZoneProps) {
       // Reset so same file can be re-selected
       e.target.value = '';
     },
-    [onFiles],
+    [onFiles]
   );
 
   return (
@@ -54,11 +54,7 @@ export function UploadZone({ onFiles }: UploadZoneProps) {
           : 'border-border-default hover:border-accent/50 bg-surface-inset'
       } ${FOCUS_RING}`}
     >
-      <Upload
-        size={24}
-        className={dragOver ? 'text-accent' : 'text-fg-muted'}
-        aria-hidden="true"
-      />
+      <Upload size={24} className={dragOver ? 'text-accent' : 'text-fg-muted'} aria-hidden="true" />
       <p className="text-sm text-fg-muted m-0">Drop files here or click to browse</p>
       <p className="text-xs text-fg-muted m-0">
         Max {formatFileSize(LIBRARY_DEFAULTS.UPLOAD_MAX_BYTES)} per file

@@ -14,6 +14,7 @@ import { AppShell } from './components/AppShell';
 import { AuthProvider, useAuth } from './components/AuthProvider';
 import { BackgroundFetchIndicator } from './components/BackgroundFetchIndicator';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { LibraryPreviewProvider } from './components/library/LibraryPreviewProvider';
 import { PageViewTracker } from './components/PageViewTracker';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { RouteFallback } from './components/RouteFallback';
@@ -264,9 +265,12 @@ function page(element: ReactNode, fallback: ReactNode = <RouteFallback />) {
 function ProtectedLayout() {
   return (
     <ProtectedRoute>
-      <AppShell>
-        <Outlet />
-      </AppShell>
+      {/* Library references open over the page that made them, not on the Library. */}
+      <LibraryPreviewProvider>
+        <AppShell>
+          <Outlet />
+        </AppShell>
+      </LibraryPreviewProvider>
     </ProtectedRoute>
   );
 }

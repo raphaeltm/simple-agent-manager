@@ -570,8 +570,11 @@ test.describe('Linked work — chat Related panel', () => {
       'href',
       `/projects/${PROJECT_ID}/ideas/idea-1`
     );
-    // A file opens in place; see "a file opens in the chat's preview" below.
-    await expect(drawer.getByTestId('linked-work-file').first()).not.toHaveAttribute('href');
+    // A plain click opens the file in place (see "a file opens in the chat's preview" below);
+    // the row stays a real link to the Library for a modified click or a new tab.
+    const file = drawer.getByTestId('linked-work-file').first();
+    await expect(file).toHaveAttribute('href', /\/library\?preview=/);
+    await expect(file).toHaveAttribute('aria-haspopup', 'dialog');
     const pr = drawer.getByTestId('linked-work-pr').first();
     await expect(pr).toHaveAttribute('href', prUrl(2425));
     await expect(pr).toHaveAttribute('target', '_blank');

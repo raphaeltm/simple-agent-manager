@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { useAuth } from '../components/AuthProvider';
+import { useLibraryPreview } from '../components/library/library-preview-context';
 import {
   COMMENT_BUCKET_COLORS,
   COMMENT_BUCKET_LABELS,
@@ -35,6 +36,7 @@ import { useProjectContext } from './ProjectContext';
 export function ProjectComments() {
   const { projectId } = useProjectContext();
   const navigate = useNavigate();
+  const openLibraryFile = useLibraryPreview();
   const { user } = useAuth();
   const viewerId = user?.id ?? null;
 
@@ -59,8 +61,15 @@ export function ProjectComments() {
     if (item.source.kind === 'session') {
       // The reader opens the conversation on the commented words, with the thread beside it.
       navigate(commentReaderPath(projectId, item.source.sessionId, item.thread.id));
+    } else if (openLibraryFile) {
+      // The file opens over this list with its comments panel on this thread and the quoted
+      // words painted; closing it returns here.
+      openLibraryFile({
+        projectId,
+        fileId: item.source.fileId,
+        commentThreadId: item.thread.id,
+      });
     } else {
-      // The file opens with its comments panel on this thread and the quoted words painted.
       navigate(projectLibraryFilePath(projectId, item.source.fileId, item.thread.id));
     }
   };
