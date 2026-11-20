@@ -186,7 +186,10 @@ beforeEach(async () => {
   // The lease table exists only on a self-host box (self-host migration, not the shared schema).
   sqlite.exec(
     readFileSync(
-      new URL('../../../src/selfhost/migrations/0255_node_reverse_tunnel_leases.sql', import.meta.url),
+      new URL(
+        '../../../src/selfhost/migrations/0255_node_reverse_tunnel_leases.sql',
+        import.meta.url
+      ),
       'utf8'
     )
   );
@@ -252,9 +255,7 @@ describe('rotate --dry-run', () => {
     expect(text).toContain('users notice:');
     expect(text).toContain('GitHub App secret and private key');
     expect(readJournal(stateDir)).toBeNull();
-    expect((await listBundles(bundleStoreFor(stateDir))).map((b) => b.bundleId)).toEqual(
-      before
-    );
+    expect((await listBundles(bundleStoreFor(stateDir))).map((b) => b.bundleId)).toEqual(before);
   });
 
   it('creates nothing on disk, not even the rotation directory (box round R9/R11)', async () => {
@@ -280,9 +281,7 @@ describe('rotate --dry-run', () => {
       /--dry-run previews a new rotation/
     );
     expect(JSON.stringify(readJournal(stateDir))).toBe(before);
-    expect((await listBundles(bundleStoreFor(stateDir))).map((b) => b.bundleId)).toEqual(
-      bundles
-    );
+    expect((await listBundles(bundleStoreFor(stateDir))).map((b) => b.bundleId)).toEqual(bundles);
     // Control: the real resume still finishes it.
     await runRotate(input({ resume: true }), deps());
     expect(readJournal(stateDir)).toBeNull();
@@ -302,7 +301,10 @@ describe('rotate --dry-run', () => {
 
   it('derives the JWT overlap from the deployed callback-token lifetime (Codex P1)', async () => {
     const current = await store().head();
-    const bundle = await store().seal({ ...current.secrets, CALLBACK_TOKEN_EXPIRY_MS: String(48 * HOUR) });
+    const bundle = await store().seal({
+      ...current.secrets,
+      CALLBACK_TOKEN_EXPIRY_MS: String(48 * HOUR),
+    });
     await store().write(bundle);
     await runRotate(input({ names: ['jwt-keys'] }), deps());
     // A 48 h token renewed as late as 90% of its life: 43.2 h, rounded up, plus 1 h.
@@ -414,7 +416,9 @@ describe('rotate encryption-key', () => {
     expect(credential('c-broken').c).toBe(btoa('z'.repeat(32)));
     expect(logs.join('\n')).toContain('credentials/c-broken.encrypted_token');
     // The node whose tunnel credential is still derived from the old key is named, not hidden.
-    expect(logs.join('\n')).toContain('2 reverse-tunnel node(s) created before the switch or during its drain');
+    expect(logs.join('\n')).toContain(
+      '2 reverse-tunnel node(s) created before the switch or during its drain'
+    );
     // The old key is still in the sealed snapshot until the operator deletes it.
     const journalDir = join(stateDir, 'key-agent', 'rotation');
     const id = readFileSync(join(journalDir, readdir(journalDir)[0]!, 'journal.json'), 'utf8');
@@ -501,7 +505,11 @@ describe('rotate encryption-key', () => {
     await seedCredential('c-agent', 'sk-agent', old);
     let reverse = false;
     controlHook = async (body) => {
-      if (!reverse && body.mode === 'verify' && readJournal(stateDir)?.steps['encryption-key']?.reverse)
+      if (
+        !reverse &&
+        body.mode === 'verify' &&
+        readJournal(stateDir)?.steps['encryption-key']?.reverse
+      )
         reverse = true;
       if (!reverse && body.mode === 'verify') {
         await seedCredential('c-agent', 'sk-agent', old);
@@ -699,6 +707,31 @@ describe('rotate jwt-keys', () => {
     expect(readJournal(stateDir)?.steps['jwt-keys']?.waitUntil).toBe(recorded);
   });
 
+  it('counts the overlap from the resume when a run died between sealing and deploying (Codex P1)', async () => {
+    clock = Date.now();
+    const oldKey = deployed.JWT_PUBLIC_KEY;
+    // The process dies inside the overlap deploy: the bundle is sealed and recorded, never deployed.
+    const dying = { ...deps(), deploy: () => new Promise<void>(() => {}) };
+    void runRotate(input({ names: ['jwt-keys'], jwtOverlapHours: 25 }), dying);
+    await vi.waitFor(() =>
+      expect(readJournal(stateDir)?.steps['jwt-keys']?.stagedFor).toBe('waiting')
+    );
+    const staged = await head();
+    rmSync(join(stateDir, 'key-agent', 'rotation', 'lock'), { force: true });
+
+    clock += 30 * HOUR; // offline past the deadline sealed into the staged bundle
+    await runRotate(input({ resume: true }), deps());
+    const after = await head();
+    const step = readJournal(stateDir)?.steps['jwt-keys'];
+    expect(step?.phase).toBe('waiting');
+    // The old key is still the accepted previous key, with the overlap counted from the resume.
+    expect(after.JWT_PUBLIC_KEY_PREVIOUS).toBe(oldKey);
+    expect(Date.parse(step!.waitUntil!)).toBe(clock + 25 * HOUR);
+    // The staged key pair was kept (it may already have signed tokens).
+    expect(after.JWT_PUBLIC_KEY).toBe(staged.JWT_PUBLIC_KEY);
+    expect(Date.parse(after.JWT_PUBLIC_KEY_PREVIOUS_UNTIL!)).toBe(clock + 25 * HOUR);
+  });
+
   it('accepts tokens signed with the old key during the overlap, refuses them after it, and finishes on resume', async () => {
     clock = Date.now();
     vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true });
@@ -857,7 +890,10 @@ describe('rotate encryption-key with a purpose key of the same value (Codex P1)'
 
   it('accepts both in one run (control)', async () => {
     await withCredentialKeyEqualToRoot();
-    await runRotate(input({ names: ['encryption-key', 'credential-encryption-key'], dryRun: true }), deps());
+    await runRotate(
+      input({ names: ['encryption-key', 'credential-encryption-key'], dryRun: true }),
+      deps()
+    );
     expect(logs.join('\n')).toContain('credential-encryption-key');
   });
 });
@@ -935,7 +971,9 @@ describe('rotate better-auth-secret', () => {
     const step = readJournal(stateDir)?.steps['better-auth-secret'] ?? null;
     // Finished in this run (the drain is waited out in-process), but never before the drain.
     expect(readJournal(stateDir)).toBeNull();
-    expect(sleeps.reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(drainMinutes({}) * 60_000 - 1000);
+    expect(sleeps.reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(
+      drainMinutes({}) * 60_000 - 1000
+    );
     expect(step).toBeNull();
     expect((await head()).BETTER_AUTH_SECRET_PREVIOUS).toBeUndefined();
   });

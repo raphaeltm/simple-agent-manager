@@ -240,6 +240,43 @@ async function recordOverlapDeadline(ctx: StepContext): Promise<void> {
 }
 
 /**
+ * Resuming an overlap bundle that was sealed but whose deploy never finished: the deadline
+ * sealed into it started running at sealing time, while the box was offline. Deploying it as
+ * recorded could install an already-expired previous key and retire it at once, cutting off
+ * nodes whose callback tokens the old key signed. Reseal it with the deadline counted from now,
+ * keeping its key pair (the new key may already have signed tokens if the deploy got that far).
+ * Returns true when the step was rolled back instead.
+ */
+async function reanchorStagedOverlap(
+  ctx: StepContext,
+  overlapHours: number,
+  names: string[]
+): Promise<boolean> {
+  const { step, store, deps } = ctx;
+  if (!step.stagedBundleId || !(await store.hasBundle(step.stagedBundleId))) return false;
+  const head = await store.head();
+  // Another bundle sealed meanwhile: applyPatch refuses that, as before.
+  if (head.bundle.bundleId !== step.stagedBundleId) return false;
+  const until = deps.now() + overlapHours * 3_600_000;
+  const sealed = Date.parse(head.secrets.JWT_PUBLIC_KEY_PREVIOUS_UNTIL ?? '');
+  if (Number.isFinite(sealed) && sealed >= until) return false;
+  delete step.stagedBundleId; // seal a fresh bundle on top of the recorded one
+  ctx.save();
+  try {
+    await applyPatch(
+      ctx,
+      { set: { JWT_PUBLIC_KEY_PREVIOUS_UNTIL: new Date(until).toISOString() } },
+      'waiting'
+    );
+    await recordOverlapDeadline(ctx);
+  } catch (error) {
+    await rollBack(ctx, names, message(error));
+    return true;
+  }
+  return false;
+}
+
+/**
  * New key pair with its own kid; the old public key stays accepted (and published) until
  * JWT_PUBLIC_KEY_PREVIOUS_UNTIL. `rotate --resume` after that time removes it.
  */
@@ -247,6 +284,9 @@ export async function advanceOverlap(ctx: StepContext, overlapHours: number): Pr
   const { step, key, deps } = ctx;
   const names = [...key.secrets, ...JWT_OVERLAP_NAMES];
   if (isResumingRollback(ctx)) return await rollBack(ctx, names, step.error ?? 'interrupted');
+  if (step.phase === 'staging' && step.stagedFor === 'waiting') {
+    if (await reanchorStagedOverlap(ctx, overlapHours, names)) return;
+  }
   if (step.phase === 'pending' || (step.phase === 'staging' && step.stagedFor === 'waiting')) {
     const base =
       step.phase === 'pending'
