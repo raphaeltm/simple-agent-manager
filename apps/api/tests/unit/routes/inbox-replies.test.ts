@@ -309,12 +309,61 @@ describe('inbox replies through the real route on SQLite', () => {
     expect(retry.status).toBe(202);
     expect(retry.body.deliveryId).toBe(edge.messages[0].id);
     expect(edge.accept).toHaveBeenCalledTimes(1);
-    // A terminal receipt is never presented as a new queued acceptance.
-    edge.deliveries.get(retry.body.deliveryId)!.deliveryState = 'expired';
-    expect((await req(path(ref, '/reply'), { content: 'Use the project setting.' })).status).toBe(
-      409
-    );
+  });
+
+  it.each(['failed', 'expired'])(
+    'allows an explicit resend after %s while retaining both replies until an agent responds',
+    async (state) => {
+      const ref = ask();
+      const payload = { content: 'Use the project setting.' };
+      const first = await req(path(ref, '/reply'), payload);
+      expect(first.status).toBe(202);
+      edge.deliveries.get(first.body.deliveryId)!.deliveryState = state;
+      // Delivery failure alone never returns an item to the inbox or sends another prompt.
+      expect((await req('/count')).body.needsYou).toBe(0);
+      expect((await req('?filter=archived')).body.items[0]).toMatchObject({ ref, withAgent: true });
+      expect(edge.accept).toHaveBeenCalledTimes(1);
+      const resent = await req(path(ref, '/reply'), payload);
+      expect(resent.status).toBe(202);
+      expect(resent.body.deliveryId).not.toBe(first.body.deliveryId);
+      expect(resent.body.messageId).not.toBe(first.body.messageId);
+      expect(edge.accept).toHaveBeenCalledTimes(2);
+      expect(edge.messages).toHaveLength(2);
+      expect(sqlite.prepare('SELECT COUNT(*) AS n FROM inbox_replies').get()).toEqual({ n: 2 });
+      expect((await req('/count')).body.needsYou).toBe(0);
+      expect((await req('?filter=archived')).body.items[0]).toMatchObject({ ref, withAgent: true });
+      const context = ctx();
+      context.ports.inboxTasks.createComment = vi
+        .fn()
+        .mockResolvedValue({ thread: { id: 'response' } });
+      await respondToAgentInboxItem(context, source, {
+        ref,
+        body: 'I will use the project setting.',
+      });
+      expect((await req('')).body.items[0]).toMatchObject({ ref, withAgent: false });
+      expect((await req('/count')).body.needsYou).toBe(1);
+      expect(
+        sqlite
+          .prepare('SELECT COUNT(*) AS n FROM inbox_replies WHERE agent_acted_at IS NOT NULL')
+          .get()
+      ).toEqual({ n: 2 });
+    }
+  );
+
+  it('refuses to re-enqueue an ambiguous delivery and preserves its archived reply', async () => {
+    const ref = ask();
+    const payload = { content: 'Use the project setting.' };
+    const first = await req(path(ref, '/reply'), payload);
+    expect(first.status).toBe(202);
+    edge.deliveries.get(first.body.deliveryId)!.deliveryState = 'ambiguous';
+    expect((await req(path(ref, '/reply'), payload)).status).toBe(409);
     expect(edge.accept).toHaveBeenCalledTimes(1);
+    expect(edge.messages).toHaveLength(1);
+    expect(sqlite.prepare('SELECT message_id, agent_acted_at FROM inbox_replies').all()).toEqual([
+      { message_id: first.body.deliveryId, agent_acted_at: null },
+    ]);
+    expect((await req('/count')).body.needsYou).toBe(0);
+    expect((await req('?filter=archived')).body.items[0]).toMatchObject({ ref, withAgent: true });
   });
   it('hides and counts a reply, returns the canonical transcript without the header, and respond brings it back', async () => {
     const ref = ask();
@@ -461,6 +510,49 @@ describe('inbox replies through the real route on SQLite', () => {
     expect(calls[0][1].clientMutationId).toBeTruthy();
     expect(calls[1][1].clientMutationId).toBe(calls[0][1].clientMutationId);
     expect((await req('/count')).body.needsYou).toBe(1);
+  });
+
+  it('rolls back an agent update if acknowledging replies fails, then updates and resurfaces atomically', async () => {
+    const ref = ask();
+    await req(path(ref, '/reply'), { content: 'Can you change the question?' });
+    const original = sqlite
+      .prepare('SELECT title, body_md, links_json, updated_at FROM asks WHERE id = ?')
+      .get('q');
+    sqlite.exec(`CREATE TRIGGER fail_ack BEFORE UPDATE OF agent_acted_at ON inbox_replies
+      BEGIN SELECT RAISE(ABORT, 'ack unavailable'); END`);
+    await expect(
+      updateAgentAsk(ctx(), source, { ref, title: 'Updated question?', why: 'More context' })
+    ).rejects.toThrow('ack unavailable');
+    expect(
+      sqlite
+        .prepare('SELECT title, body_md, links_json, updated_at FROM asks WHERE id = ?')
+        .get('q')
+    ).toEqual(original);
+    expect(sqlite.prepare('SELECT agent_acted_at FROM inbox_replies').get()).toEqual({
+      agent_acted_at: null,
+    });
+    expect((await req('/count')).body.needsYou).toBe(0);
+    expect((await req('?filter=archived')).body.items[0]).toMatchObject({
+      title: 'Choose the retry cap?',
+      withAgent: true,
+    });
+    sqlite.exec('DROP TRIGGER fail_ack');
+    // Another chat cannot acknowledge the reply through the update batch.
+    await expect(
+      updateAgentAsk(ctx(), { ...source, sessionId: 'foreign' }, { ref, why: 'Foreign edit' })
+    ).rejects.toThrow();
+    expect(sqlite.prepare('SELECT agent_acted_at FROM inbox_replies').get()).toEqual({
+      agent_acted_at: null,
+    });
+    await expect(
+      updateAgentAsk(ctx(), source, { ref, title: 'Updated question?', why: 'More context' })
+    ).resolves.toMatchObject({ status: 'open' });
+    expect((await req('')).body.items[0]).toMatchObject({
+      title: 'Updated question?',
+      withAgent: false,
+    });
+    expect((await req('/count')).body.needsYou).toBe(1);
+    expect((await req('?filter=archived')).body.items).toHaveLength(0);
   });
 
   it('rolls back ask resolution if acknowledging its replies fails', async () => {

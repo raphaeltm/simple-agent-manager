@@ -29,7 +29,7 @@ import {
 } from './inbox-agent-reads';
 import { createAsk } from './inbox-ask-create-core';
 import { questionSchedule } from './inbox-question-schedule';
-import { inboxReplyWatermark, markInboxAgentActed } from './inbox-reply-core';
+import { inboxReplyWatermark } from './inbox-reply-core';
 import { inboxTitle } from './inbox-rows';
 import { getInboxLimits, type InboxLimits } from './inbox-settings';
 import { recordActivity } from './inbox-task-rows';
@@ -378,7 +378,7 @@ export async function updateAgentAsk(
       : await checkedLinks(ctx, source.projectId, input.links, limits);
   const watermark = await inboxReplyWatermark(ctx, source.projectId, input.ref);
   const actedAt = Date.now();
-  const result = await ctx.env.DATABASE.prepare(
+  const update = ctx.env.DATABASE.prepare(
     `UPDATE asks
         SET title = COALESCE(?, title),
             body_md = CASE WHEN ? THEN ? ELSE body_md END,
@@ -386,21 +386,37 @@ export async function updateAgentAsk(
             updated_at = ?
       WHERE id = ? AND project_id = ? AND source_session_id = ? AND ${AGENT_KINDS_SQL}
         AND status = 'open'`
-  )
-    .bind(
-      title,
-      why === undefined ? 0 : 1,
-      why || null,
-      links === undefined ? 0 : 1,
-      links && links.length > 0 ? JSON.stringify(links) : null,
+  ).bind(
+    title,
+    why === undefined ? 0 : 1,
+    why || null,
+    links === undefined ? 0 : 1,
+    links && links.length > 0 ? JSON.stringify(links) : null,
+    actedAt,
+    askId,
+    source.projectId,
+    source.sessionId
+  );
+  // Wording and resurfacing are one mutation: a failed acknowledgement must not leave
+  // changed wording hidden in Archived. A newer reply remains outside this watermark.
+  const results = await ctx.env.DATABASE.batch([
+    update,
+    ctx.env.DATABASE.prepare(
+      `UPDATE inbox_replies SET agent_acted_at = ?
+       WHERE project_id = ? AND item_ref = ? AND id <= ?
+         AND EXISTS (SELECT 1 FROM asks WHERE id = ? AND project_id = ?
+           AND source_session_id = ? AND ${AGENT_KINDS_SQL} AND status = 'open')`
+    ).bind(
       actedAt,
+      source.projectId,
+      input.ref,
+      watermark,
       askId,
       source.projectId,
       source.sessionId
-    )
-    .run();
-  if ((result.meta?.changes ?? 0) !== 1) await explainNoMatch(ctx, source, askId);
-  await markInboxAgentActed(ctx, source.projectId, input.ref, watermark);
+    ),
+  ]);
+  if ((results[0]?.meta?.changes ?? 0) !== 1) await explainNoMatch(ctx, source, askId);
   return { ref: input.ref, status: 'open' };
 }
 

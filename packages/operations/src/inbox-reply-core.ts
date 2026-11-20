@@ -2,6 +2,7 @@
 import type {
   AcpInteractionBrowserAnswer,
   AgentMailboxMessage,
+  InboxItem,
   InboxReplyRequest,
   InboxReplyResponse,
 } from '@simple-agent-manager/shared';
@@ -33,7 +34,7 @@ export async function replyToInboxItem(
     )
   );
   const fingerprint = Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
-  const acceptedReply = (message: AgentMailboxMessage): InboxReplyResponse => {
+  const assertReplyBinding = (message: AgentMailboxMessage): void => {
     if (
       message.sourceKind !== 'inbox_reply' ||
       message.targetSessionId !== item.sessionId ||
@@ -43,6 +44,14 @@ export async function replyToInboxItem(
       message.metadata?.inboxReplyFingerprint !== fingerprint
     )
       throw new OperationError('conflict', 'The previous inbox reply could not be reconciled');
+  };
+  const acceptedReply = (message: AgentMailboxMessage): InboxReplyResponse => {
+    assertReplyBinding(message);
+    if (message.deliveryState === 'ambiguous')
+      throw new OperationError(
+        'conflict',
+        'The previous inbox reply may have reached the agent; inspect its chat before sending it again'
+      );
     if (message.deliveryState === 'failed' || message.deliveryState === 'expired')
       throw new OperationError(
         'conflict',
@@ -67,7 +76,14 @@ export async function replyToInboxItem(
   if (prior) {
     // If this read fails the ledger remains intact and no second delivery is created.
     const message = await ctx.ports.chat.getInboxReplyDelivery(item.projectId, prior.message_id);
-    if (message?.metadata?.inboxReplyFingerprint === fingerprint) return acceptedReply(message);
+    if (message?.metadata?.inboxReplyFingerprint === fingerprint) {
+      assertReplyBinding(message);
+      // Only a new human POST may retry a terminal delivery. Retain its ledger: a delivery
+      // outcome never brings the item back; only an agent response/update does that.
+      // Expiry is not proof of nonreceipt, so this is an explicit resend, not an automatic retry.
+      if (message.deliveryState !== 'failed' && message.deliveryState !== 'expired')
+        return acceptedReply(message);
+    }
     // This may be another request between its D1 reservation and DO acceptance. Only
     // that request can roll back its own reservation after a definitive failed acceptance.
     if (!message)
@@ -76,45 +92,8 @@ export async function replyToInboxItem(
         'The previous inbox reply is still being accepted; retry shortly'
       );
   }
-  // Preflight permission rejection through the existing answer preparation. Its reject option
-  // is authoritative; never guess an option id or send an implicit grant.
-  let permission: AcpInteractionBrowserAnswer | null = null;
-  if (
-    ref.store === 'attention' &&
-    item.kind === 'permission' &&
-    item.status === 'open' &&
-    item.answerSpec.type === 'interaction'
-  ) {
-    const pending = await ctx.ports.connector.pendingInteractions(item.projectId, item.sessionId);
-    const interactionId = item.answerSpec.interactionId;
-    const request = pending.find((p) => p.interactionId === interactionId);
-    const options = (request?.answerOptions ?? []).flatMap((option) => {
-      if (
-        !option ||
-        typeof option !== 'object' ||
-        !('id' in option) ||
-        !('kind' in option) ||
-        typeof option.id !== 'string'
-      )
-        return [];
-      return option.kind === 'reject_once' || option.kind === 'reject_always'
-        ? [{ id: option.id, kind: option.kind }]
-        : [];
-    });
-    const reject = options.find((o) => o.kind === 'reject_once') ?? options[0];
-    if (!reject)
-      throw new OperationError(
-        'conflict',
-        'This permission has no reject option; answer it in the chat'
-      );
-    permission = await ctx.ports.connector.prepareAgentAnswer(
-      item.projectId,
-      item.sessionId,
-      item.answerSpec.interactionId ?? '',
-      { optionId: reject.id }
-    );
-  }
-  const preparedPermission = permission;
+  const preparedPermission =
+    ref.store === 'attention' ? await prepareReplyPermission(ctx, item, sessionId) : null;
   const messageId = ulid();
   let recorded = false;
   try {
@@ -199,6 +178,48 @@ export async function replyToInboxItem(
     }
     throw error;
   }
+}
+
+/** Prepare the request's own reject option without deciding what the person's reply means. */
+async function prepareReplyPermission(
+  ctx: OperationContext,
+  item: InboxItem,
+  sessionId: string
+): Promise<AcpInteractionBrowserAnswer | null> {
+  if (
+    item.kind !== 'permission' ||
+    item.status !== 'open' ||
+    item.answerSpec.type !== 'interaction'
+  )
+    return null;
+  const pending = await ctx.ports.connector.pendingInteractions(item.projectId, sessionId);
+  const interactionId = item.answerSpec.interactionId;
+  const request = pending.find((p) => p.interactionId === interactionId);
+  const options = (request?.answerOptions ?? []).flatMap((option) => {
+    if (
+      !option ||
+      typeof option !== 'object' ||
+      !('id' in option) ||
+      !('kind' in option) ||
+      typeof option.id !== 'string'
+    )
+      return [];
+    return option.kind === 'reject_once' || option.kind === 'reject_always'
+      ? [{ id: option.id, kind: option.kind }]
+      : [];
+  });
+  const reject = options.find((o) => o.kind === 'reject_once') ?? options[0];
+  if (!reject)
+    throw new OperationError(
+      'conflict',
+      'This permission has no reject option; answer it in the chat'
+    );
+  return await ctx.ports.connector.prepareAgentAnswer(
+    item.projectId,
+    sessionId,
+    item.answerSpec.interactionId ?? '',
+    { optionId: reject.id }
+  );
 }
 
 /** Capture before an agent response awaits another store. A later human reply must stay hidden. */

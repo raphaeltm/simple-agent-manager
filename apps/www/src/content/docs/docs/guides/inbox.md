@@ -140,6 +140,11 @@ secrets, Operations approvals or tasks assigned to people. If the agent carries 
 on the reply, the item stays with the agent, including after its task finishes. It should never
 file a duplicate item for the same conversation.
 
+A failed or expired delivery does not bring the item back. Sending the reply again explicitly
+creates a new delivery; expiry does not prove the earlier message was never received. If delivery
+is ambiguous, inspect the source chat before sending again; the endpoint returns a conflict
+rather than enqueueing another copy.
+
 The backend supports these replies through `POST /api/projects/:projectId/inbox/items/:ref/reply`.
 The conversation composer in the item is being delivered separately; the existing answer buttons
 keep their current behavior until that web update ships.
