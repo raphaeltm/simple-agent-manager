@@ -62,11 +62,6 @@
   letter-spacing: -0.02em;
 }
 
-/* Make the search button match the brand */
-starlight-menu-button + div button[data-open-modal] {
-  border-color: var(--sl-color-gray-4);
-}
-
 /* Improve code block appearance */
 .expressive-code {
   --ec-brdCol: var(--sl-color-gray-4) !important;
