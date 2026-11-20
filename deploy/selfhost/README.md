@@ -280,7 +280,10 @@ secure copy, or access to the cloud key. `pnpm selfhost:restore` prints which. O
 made before sealing, the fleet bucket contains Worker secrets as well as application data. The backup command encrypts
 **the entire backup**, including the bucket, `.state/`, `.env` and its manifest, with AES-256-GCM.
 Restored files retain owner execution when needed, with mode 0700 for tools and 0600 for other
-files; group and world access are never restored. Rebuildable `go-cache` data is excluded.
+files; group and world access are never restored. The one exception is `.state/egress-fence.nft`:
+the fence container's root reads it without `DAC_OVERRIDE`, so every restore and rollback puts it
+back at deploy's 0644 (`fence-state.ts:repairFenceRulesMode`). It holds addresses and ports, never
+a secret. Rebuildable `go-cache` data is excluded.
 It first requires exactly one running celld in the selected Compose project, then briefly stops
 it for a consistent second bucket copy and restarts it even if that copy
 fails (`scripts/selfhost/backup-lib.ts:runBackup`, `runPlainBackup`). Temporary plaintext lives
@@ -438,6 +441,22 @@ requires inspection as described above; a valid completed marker permits cleanup
 `--to`, a moved branch/tag, or an older journal without a target requires the explicit rollback
 command before choosing another target.
 Do not delete the pending record to bypass a failed recovery.
+
+**One-time case when upgrading to the rollback fence fix.** A rollback runs the tool of the version
+you upgrade from. On a version before this fix, a failed upgrade's automatic rollback restores
+`.state/egress-fence.nft` at 0600. The egress-fence container then crash-loops with
+`Could not open file "/etc/sam/egress-fence.nft": Permission denied`, celld stays stopped and the
+upgrade reports that automatic rollback did not complete. Restore the file's mode and rerun the
+same command (the documented retry of the same target):
+
+```sh
+chmod 644 deploy/selfhost/.state/egress-fence.nft   # or "$SAM_SELFHOST_STATE_DIR/egress-fence.nft"
+pnpm selfhost:upgrade --to <same-target> --encryption-key-file "$HOME/.config/sam/backup.key"
+```
+
+The retry restores the snapshot again, so repeat the `chmod` if the fence restarts with the same
+error before celld comes up. Upgrades that start from a fixed version restore the mode
+themselves (`fence-state.ts:repairFenceRulesMode`).
 Rollback also keeps a private sibling `.<state-directory-name>.rollback-state.json` receipt
 while replacing local state. Retry reconciles an interrupted directory swap before reading
 installation metadata, and refuses changed directory identities. Keep that receipt and its
@@ -779,7 +798,8 @@ No guided-login or untrusted app containers run on this box in this slice.
 or observer failure latch a structured `egress_fence.lost` error in container logs and
 `egress-fence-attestation/events.jsonl`. `docker compose ps` reports the fence unhealthy and celld
 stays stopped/restarting; the front door cannot serve the API. There is no automatic rule repair.
-Recover as the installation operator: regenerate with `pnpm selfhost:deploy --init`, then
+Recover as the installation operator: regenerate with `pnpm selfhost:deploy --init` (which also
+restores the rules file's 0644 mode when its content is unchanged), then
 `docker compose restart egress-fence`, wait for healthy, and run `pnpm selfhost:verify-fence`.
 Only verified startup clears the loss latch; event history remains. After resolver changes, regenerate
 and restart the fence too. An `iptables -F` does not erase this native nft table; full native ruleset

@@ -29,6 +29,7 @@ import {
   readManifest,
   STATE_DIR,
 } from './backup-lib';
+import { repairFenceRulesMode } from './fence-state';
 import { composeProjectFor, SELFHOST_ENVIRONMENT } from './install-record';
 import { KEY_SERVICE_BACKUP_EXCLUDES } from './key-service';
 import { assertOperatorExecution } from './operator-only';
@@ -456,6 +457,8 @@ export function runRollback(ctx: BoxContext, from: string, expectedSamCommit?: s
       );
     }
     restoreState(ctx, join(plain, STATE_DIR), installation, pending, from);
+    // The snapshot keeps only the exec bit: files a container reads as another user need their mode.
+    repairFenceRulesMode(ctx.stateDir);
     // A previous partial cache deletion must remain retryable even if copying the env fails.
     if (pending)
       replacePrivateFile(

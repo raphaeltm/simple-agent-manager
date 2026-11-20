@@ -44,6 +44,7 @@ import { finishRollbackCache, refreshRollbackCacheReceipt } from './backup-recov
 import { buildCelldConfig } from './celld-config';
 import { prepareCelldProject, writeCelldConfig } from './celld-project';
 import { runDeploy, runTsx, writeBox } from './deploy-harness';
+import { FENCE_RULES_FILE, FENCE_RULES_MODE } from './fence-state';
 import { composeProjectFor, expectedComposeProjectFor, recordInstall } from './install-record';
 import { restoredInstallationId } from './restore-identity';
 import { ownershipRefusal } from './teardown-gcp';
@@ -1331,6 +1332,21 @@ describe('runRollback', () => {
       expect(existsSync(receipt)).toBe(false);
     }
   );
+
+  it('restores the fence rules readable by the fence container after an in-place rollback', () => {
+    const context = ctx('gs://fleet/celld', join(root, 'state'));
+    const rules = join(context.stateDir, FENCE_RULES_FILE);
+    writeFileSync(rules, 'table inet sam_egress_fence {}\n', { mode: FENCE_RULES_MODE });
+    chmodSync(rules, FENCE_RULES_MODE);
+    const snapshot = join(root, 'fence-snapshot');
+    runBackup(context, snapshot);
+    runRollback(context, snapshot);
+    // The snapshot keeps only the exec bit; before the fix this came back 0600 and the fence
+    // container could not read it ("Permission denied" on the box, idea 01M7VZV7KAHHHQYACHBJB96R2K).
+    expect(statSync(rules).mode & 0o777).toBe(FENCE_RULES_MODE);
+    // Control: secret-bearing state stays private.
+    expect(statSync(join(context.stateDir, 'platform-keys.json')).mode & 0o777).toBe(0o600);
+  });
 
   it('retains current backup/cloud receipts and removal markers instead of reviving snapshot history', () => {
     const context = ctx('gs://fleet/celld', join(root, 'state'));
