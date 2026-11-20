@@ -1,5 +1,6 @@
 /** Real inbox route → operations → sendChat on SQLite; only auth session and DO/VM edges fake. */
 import {
+  cancelAgentAsk,
   getAgentItem,
   type OperationContext,
   resolveAgentInboxItem,
@@ -260,6 +261,205 @@ afterEach(() => {
 });
 
 describe('inbox replies through the real route on SQLite', () => {
+  it('responds before any human reply without requiring a ledger acknowledgement', async () => {
+    const ref = ask();
+    const context = ctx();
+    context.ports.inboxTasks.createComment = vi
+      .fn()
+      .mockResolvedValue({ thread: { id: 'first-response' } });
+    await expect(
+      respondToAgentInboxItem(context, source, { ref, body: 'Additional context.' })
+    ).resolves.toMatchObject({ ref });
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM inbox_replies').get()).toEqual({ n: 0 });
+  });
+  it.each(['resolvedAt', 'inboxArchivedAt', 'expiresAt', 'unchanged'] as const)(
+    'respond rechecks canonical attention %s after the comment await',
+    async (change) => {
+      const ref = 'attention:chat:question-marker';
+      const marker = {
+        id: 'question-marker',
+        sessionId: 'chat',
+        taskId: 'task',
+        source: 'agent',
+        reason: 'question',
+        metadata: null,
+        createdAt: 1000,
+        expiresAt: null as number | null,
+        resolvedAt: null as number | null,
+        inboxArchivedAt: null as number | null,
+      };
+      insert('session_summaries', {
+        id: 'chat',
+        project_id: 'p',
+        created_by_user_id: 'owner',
+        updated_at: 1000,
+      });
+      edge.marker.mockImplementation(async () => ({
+        session: { topic: 'Chat' },
+        marker,
+        canRead: true,
+        writer: true,
+      }));
+      const sent = await req(path(ref, '/reply'), { content: 'Please explain the question.' });
+      expect(sent.status).toBe(202);
+      const context = ctx();
+      context.ports.inboxTasks.createComment = vi.fn().mockImplementation(async () => {
+        if (change !== 'unchanged') marker[change] = Date.now() - 1;
+        return { thread: { id: 'response' } };
+      });
+      const response = respondToAgentInboxItem(context, source, {
+        ref,
+        replyMessageId: sent.body.messageId,
+        body: 'Here is the explanation.',
+      });
+      if (change === 'unchanged') await expect(response).resolves.toMatchObject({ ref });
+      else await expect(response).rejects.toMatchObject({ code: 'conflict' });
+      const ledger = sqlite.prepare('SELECT agent_acted_at FROM inbox_replies').get() as {
+        agent_acted_at: number | null;
+      };
+      expect(ledger.agent_acted_at === null).toBe(change !== 'unchanged');
+      expect(context.ports.inboxTasks.createComment).toHaveBeenCalledOnce();
+    }
+  );
+
+  it.each([true, false])('cancel refuses outstanding replies: %s', async (pending) => {
+    const ref = ask();
+    if (pending)
+      expect((await req(path(ref, '/reply'), { content: 'Please explain.' })).status).toBe(202);
+    const cancellation = cancelAgentAsk(ctx(), source, { ref, reason: 'No longer needed' });
+    if (pending) {
+      await expect(cancellation).rejects.toMatchObject({ code: 'conflict' });
+      expect(sqlite.prepare('SELECT status FROM asks').get()).toEqual({ status: 'open' });
+      expect(sqlite.prepare('SELECT agent_acted_at FROM inbox_replies').get()).toEqual({
+        agent_acted_at: null,
+      });
+      expect((await req(path(ref))).body.item).toMatchObject({ withAgent: true });
+    } else {
+      await expect(cancellation).resolves.toMatchObject({ status: 'cancelled' });
+    }
+  });
+  it('refuses a late reply reservation after cancellation wins during authorization', async () => {
+    const ref = ask();
+    const { paused, release } = pauseSendAuthorization();
+    const reply = req(path(ref, '/reply'), { content: 'Please explain.' });
+    await paused;
+    try {
+      await expect(
+        cancelAgentAsk(ctx(), source, { ref, reason: 'No longer needed' })
+      ).resolves.toMatchObject({ status: 'cancelled' });
+    } finally {
+      release();
+    }
+    expect((await reply).status).toBe(409);
+    expect(edge.accept).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM inbox_replies').get()).toEqual({ n: 0 });
+  });
+  it.each(['ask', 'secret', 'approval'] as const)(
+    'respond rechecks %s eligibility after persisting the comment',
+    async (store) => {
+      const id = 'response-race';
+      const ref = `${store}:${id}`;
+      if (store === 'ask') ask(id);
+      else if (store === 'secret')
+        insert('runtime_secret_requests', {
+          id,
+          project_id: 'p',
+          env_key: 'KEY',
+          reason: 'Need access',
+          requester_user_id: 'owner',
+          requesting_chat_session_id: 'chat',
+          status: 'pending',
+          created_at: 1000,
+          updated_at: 1000,
+          expires_at: Date.now() + 3600000,
+        });
+      else
+        insert('operations_action_approvals', {
+          id,
+          requesting_project_id: 'p',
+          requesting_session_id: 'chat',
+          requesting_task_id: 'task',
+          action: 'restart',
+          target_type: 'node',
+          target_id: 'node',
+          reason: 'Need restart',
+          status: 'pending',
+          created_at: new Date().toISOString(),
+          expires_at: new Date(Date.now() + 3600000).toISOString(),
+        });
+      // Each change lands inside the comment-port await, after the initial source read.
+      for (const change of ['settled', 'expired', 'other-session', 'unchanged'] as const) {
+        const sent = await req(path(ref, '/reply'), { content: `Question before ${change}` });
+        expect(sent.status).toBe(202);
+        const context = ctx();
+        context.ports.inboxTasks.createComment = vi.fn().mockImplementation(async () => {
+          const table =
+            store === 'ask'
+              ? 'asks'
+              : store === 'secret'
+                ? 'runtime_secret_requests'
+                : 'operations_action_approvals';
+          if (change === 'settled')
+            sqlite
+              .prepare(`UPDATE ${table} SET status = ? WHERE id = ?`)
+              .run(
+                store === 'ask' ? 'answered' : store === 'secret' ? 'fulfilled' : 'approved',
+                id
+              );
+          if (change === 'expired')
+            sqlite
+              .prepare(`UPDATE ${table} SET expires_at = ? WHERE id = ?`)
+              .run(
+                store === 'approval' ? new Date(Date.now() - 1).toISOString() : Date.now() - 1,
+                id
+              );
+          if (change === 'other-session') {
+            const column =
+              store === 'ask'
+                ? 'source_session_id'
+                : store === 'secret'
+                  ? 'requesting_chat_session_id'
+                  : 'requesting_session_id';
+            sqlite.prepare(`UPDATE ${table} SET ${column} = ? WHERE id = ?`).run('other-chat', id);
+          }
+          return { thread: { id: `response-${change}` } };
+        });
+        const response = respondToAgentInboxItem(context, source, {
+          ref,
+          replyMessageId: sent.body.messageId,
+          body: 'I have read this.',
+        });
+        if (change === 'unchanged') await expect(response).resolves.toMatchObject({ ref });
+        else await expect(response).rejects.toMatchObject({ code: 'conflict' });
+        expect(context.ports.inboxTasks.createComment).toHaveBeenCalledOnce();
+        const ledger = sqlite
+          .prepare('SELECT agent_acted_at FROM inbox_replies WHERE message_id = ?')
+          .get(sent.body.messageId) as { agent_acted_at: number | null };
+        expect(ledger.agent_acted_at === null).toBe(change !== 'unchanged');
+        // Restore only fixture source state: failed response acknowledgement remains outstanding.
+        if (store === 'ask')
+          sqlite
+            .prepare(
+              "UPDATE asks SET status = 'open', expires_at = NULL, source_session_id = 'chat' WHERE id = ?"
+            )
+            .run(id);
+        else if (store === 'secret')
+          sqlite
+            .prepare(
+              "UPDATE runtime_secret_requests SET status = 'pending', expires_at = ?, requesting_chat_session_id = 'chat' WHERE id = ?"
+            )
+            .run(Date.now() + 3600000, id);
+        else
+          sqlite
+            .prepare(
+              "UPDATE operations_action_approvals SET status = 'pending', expires_at = ?, requesting_session_id = 'chat' WHERE id = ?"
+            )
+            .run(new Date(Date.now() + 3600000).toISOString(), id);
+        expect((await req(path(ref))).body.item).toMatchObject({ withAgent: true });
+      }
+    }
+  );
+
   it.each(['respond', 'update', 'resolve'] as const)(
     'refuses %s on an expired ask without changing or acknowledging it',
     async (method) => {

@@ -454,6 +454,8 @@ export async function cancelAgentAsk(
         SET status = 'cancelled', answer_json = ?, resolved_at = ?, updated_at = ?, notified_at = ?
       WHERE id = ? AND project_id = ? AND source_session_id = ? AND ${AGENT_KINDS_SQL}
         AND status = 'open'
+        AND NOT EXISTS (SELECT 1 FROM inbox_replies WHERE project_id = asks.project_id
+          AND item_ref = ? AND agent_acted_at IS NULL)
       RETURNING kind, blocking`
   )
     .bind(
@@ -463,10 +465,24 @@ export async function cancelAgentAsk(
       now,
       askId,
       source.projectId,
-      source.sessionId
+      source.sessionId,
+      input.ref
     )
     .first<{ kind: string; blocking: number }>();
-  if (!closed) return explainNoMatch(ctx, source, askId);
+  if (!closed) {
+    const pending = await ctx.env.DATABASE.prepare(
+      `SELECT id FROM inbox_replies WHERE project_id = ? AND item_ref = ? AND agent_acted_at IS NULL
+         AND EXISTS (SELECT 1 FROM asks WHERE id = ? AND project_id = ? AND source_session_id = ? AND ${AGENT_KINDS_SQL}) LIMIT 1`
+    )
+      .bind(source.projectId, input.ref, askId, source.projectId, source.sessionId)
+      .first();
+    if (pending)
+      throw new OperationError(
+        'conflict',
+        'Handle outstanding replies before cancelling this item'
+      );
+    return explainNoMatch(ctx, source, askId);
+  }
   if (closed.kind === 'task') {
     // A moot human task leaves the person's list; its history says why, and its watches wind
     // down like a closed task's.

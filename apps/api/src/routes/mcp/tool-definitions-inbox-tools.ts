@@ -215,7 +215,8 @@ export const INBOX_TOOLS = [
   },
   {
     name: 'inbox_cancel_item',
-    description: 'Close an open item this chat filed because it is moot. Records why.',
+    description:
+      'Close an open item this chat filed because it is moot. Records why. Refuses while a person’s reply is outstanding; handle each reply with respond or update first.',
     inputSchema: {
       type: 'object' as const,
       properties: {

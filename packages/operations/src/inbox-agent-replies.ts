@@ -38,8 +38,32 @@ export async function requireSourceItem(
     );
     if (parsed.sessionId !== source.sessionId || !marker)
       throw new OperationError('not_found', 'Inbox item not found');
+    if (
+      marker.resolvedAt != null ||
+      marker.inboxArchivedAt != null ||
+      (marker.expiresAt != null && marker.expiresAt <= Date.now())
+    ) {
+      const rejected = await ctx.env.DATABASE.prepare(
+        'SELECT id FROM inbox_replies WHERE project_id = ? AND item_ref = ? AND permission_rejected = 1 LIMIT 1'
+      )
+        .bind(source.projectId, ref)
+        .first();
+      if (!rejected) throw new OperationError('not_found', 'Inbox item not found');
+    }
     return;
   }
+  const guard = sourceItemQuery(source, ref);
+  const row = await ctx.env.DATABASE.prepare(guard.sql)
+    .bind(...guard.values)
+    .first();
+  if (!row) throw new OperationError('not_found', 'Inbox item not found');
+}
+
+/** Shared D1 eligibility for the initial read and the final atomic reply acknowledgement. */
+function sourceItemQuery(source: AgentInboxSource, ref: string) {
+  const parsed = parseRefOrNotFound(ref);
+  if (parsed.store === 'attention')
+    throw new OperationError('invalid_input', 'Attention eligibility belongs to ProjectData');
   let query: string;
   const bindings: (string | number)[] = [parsed.id, source.projectId, source.sessionId];
   if (parsed.store === 'ask') {
@@ -56,10 +80,7 @@ export async function requireSourceItem(
       AND requesting_session_id = ? AND status = 'pending' AND expires_at > ?`;
     bindings.push(new Date().toISOString());
   }
-  const row = await ctx.env.DATABASE.prepare(query)
-    .bind(...bindings)
-    .first();
-  if (!row) throw new OperationError('not_found', 'Inbox item not found');
+  return { sql: query, values: bindings };
 }
 
 export async function respondToAgentInboxItem(
@@ -98,7 +119,27 @@ export async function respondToAgentInboxItem(
     clientMutationId,
     actor: { kind: 'agent', id: source.sessionId, name: null },
   });
-  await markInboxAgentActed(ctx, source.projectId, input.ref, observedReplyId);
+  const parsed = parseRefOrNotFound(input.ref);
+  if (parsed.store === 'attention' || observedReplyId === 0) {
+    // Attention is canonical in ProjectData, so re-read after the comment await. A permission
+    // rejected by this reply stays eligible for an agent response after its marker settles.
+    try {
+      await requireSourceItem(ctx, source, input.ref);
+    } catch (error) {
+      if (!(error instanceof OperationError) || error.code !== 'not_found') throw error;
+      throw new OperationError('conflict', 'The inbox item changed while storing the response');
+    }
+  }
+  if (observedReplyId !== 0) {
+    const guard =
+      parsed.store === 'attention'
+        ? {
+            sql: 'SELECT id FROM session_summaries WHERE project_id = ? AND id = ?',
+            values: [source.projectId, source.sessionId],
+          }
+        : sourceItemQuery(source, input.ref);
+    await markInboxAgentActed(ctx, source.projectId, input.ref, observedReplyId, guard);
+  }
   return { ref: input.ref, thread: created.thread };
 }
 

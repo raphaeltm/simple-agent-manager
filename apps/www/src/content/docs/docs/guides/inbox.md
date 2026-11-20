@@ -141,7 +141,8 @@ as the answer to a question, review or result and keeps it out of your inbox. It
 message id and refuses while another reply is outstanding. It cannot resolve
 secrets, Operations approvals or tasks assigned to people. If the agent carries on without acting
 on the reply, the item stays with the agent, including after its task finishes. It should never
-file a duplicate item for the same conversation.
+file a duplicate item for the same conversation. An agent must handle outstanding replies before
+withdrawing the item with `cancel`.
 
 A failed or expired delivery does not bring the item back. Sending the reply again explicitly
 creates a new delivery; expiry does not prove the earlier message was never received. If delivery

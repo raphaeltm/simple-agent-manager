@@ -304,12 +304,15 @@ export async function markInboxAgentActed(
   ctx: OperationContext,
   projectId: string,
   ref: string,
-  observedReplyId: number
+  observedReplyId: number,
+  sourceGuard: { sql: string; values: (string | number)[] }
 ): Promise<void> {
-  await ctx.env.DATABASE.prepare(
+  const result = await ctx.env.DATABASE.prepare(
     `UPDATE inbox_replies SET agent_acted_at = ?
-      WHERE project_id = ? AND item_ref = ? AND id = ?`
+      WHERE project_id = ? AND item_ref = ? AND id = ? AND EXISTS (${sourceGuard.sql})`
   )
-    .bind(Date.now(), projectId, ref, observedReplyId)
+    .bind(Date.now(), projectId, ref, observedReplyId, ...sourceGuard.values)
     .run();
+  if ((result.meta?.changes ?? 0) !== 1)
+    throw new OperationError('conflict', 'The inbox item changed while storing the response');
 }
