@@ -149,6 +149,14 @@ const LEGACY_ALLOWED_DUPLICATE_FILES = new Map<string, Map<string, Set<string>>>
         '0257',
         new Set(['0257_node_task_provisioned.sql', '0257_provider_limit_recovery_scan_index.sql']),
       ],
+      // PR #2940's inbox replies migration was applied to staging2 (sam2-staging2) as
+      // d1_migrations id 282 at 2026-11-20 11:00:58 UTC, before main claimed prefix
+      // 0263 for platform feedback triage ownership. Wrangler tracks exact filenames;
+      // renumbering would replay CREATE TABLE inbox_replies against its populated ledger.
+      [
+        '0263',
+        new Set(['0263_inbox_replies.sql', '0263_platform_feedback_triage_idea_ownership.sql']),
+      ],
     ]),
   ],
 ]);

@@ -181,7 +181,8 @@ function runAcceptedPromptDeliveryHooks(
         sessionId: input.targetSessionId,
         messageId: accepted.transcriptMessageId,
         role: 'user',
-        content: input.displayContent.trim(),
+        content:
+          input.sourceKind === 'inbox_reply' ? input.displayContent : input.displayContent.trim(),
         // The same builder as the persisted row, so a live client sees the steer state and
         // the notice exactly as a reload would.
         toolMetadata: promptDeliveryToolMetadata(

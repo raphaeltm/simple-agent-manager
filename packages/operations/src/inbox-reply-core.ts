@@ -34,37 +34,7 @@ export async function replyToInboxItem(
     )
   );
   const fingerprint = Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
-  const assertReplyBinding = (message: AgentMailboxMessage): void => {
-    if (
-      message.sourceKind !== 'inbox_reply' ||
-      message.targetSessionId !== item.sessionId ||
-      message.senderType !== 'human' ||
-      message.senderId !== ctx.actor.userId ||
-      message.metadata?.inboxRef !== item.ref ||
-      message.metadata?.inboxReplyFingerprint !== fingerprint
-    )
-      throw new OperationError('conflict', 'The previous inbox reply could not be reconciled');
-  };
-  const acceptedReply = (message: AgentMailboxMessage): InboxReplyResponse => {
-    assertReplyBinding(message);
-    if (message.deliveryState === 'ambiguous')
-      throw new OperationError(
-        'conflict',
-        'The previous inbox reply may have reached the agent; inspect its chat before sending it again'
-      );
-    if (message.deliveryState === 'failed' || message.deliveryState === 'expired')
-      throw new OperationError(
-        'conflict',
-        'The previous inbox reply is no longer queued; inspect its chat before replying again'
-      );
-    return {
-      ref: item.ref,
-      sessionId,
-      status: 'queued',
-      messageId: message.promptMessageId,
-      deliveryId: message.id,
-    };
-  };
+  const binding = { ref: item.ref, sessionId, userId: ctx.actor.userId, fingerprint };
   // A prior acceptance may have committed while its RPC completion failed. Reconcile it
   // before minting another id or preparing a permission that may already be rejected.
   const prior = await ctx.env.DATABASE.prepare(
@@ -77,12 +47,12 @@ export async function replyToInboxItem(
     // If this read fails the ledger remains intact and no second delivery is created.
     const message = await ctx.ports.chat.getInboxReplyDelivery(item.projectId, prior.message_id);
     if (message?.metadata?.inboxReplyFingerprint === fingerprint) {
-      assertReplyBinding(message);
+      assertReplyBinding(message, binding);
       // Only a new human POST may retry a terminal delivery. Retain its ledger: a delivery
       // outcome never brings the item back; only an agent response/update does that.
       // Expiry is not proof of nonreceipt, so this is an explicit resend, not an automatic retry.
       if (message.deliveryState !== 'failed' && message.deliveryState !== 'expired')
-        return acceptedReply(message);
+        return acceptedReply(message, binding);
     }
     // This may be another request between its D1 reservation and DO acceptance. Only
     // that request can roll back its own reservation after a definitive failed acceptance.
@@ -169,7 +139,7 @@ export async function replyToInboxItem(
       // SQL acceptance precedes fallible finalizers in ProjectData. Only a definitive
       // absence authorizes rollback; an unavailable lookup retains the durable ledger.
       const message = await ctx.ports.chat.getInboxReplyDelivery(item.projectId, messageId);
-      if (message) return acceptedReply(message);
+      if (message) return acceptedReply(message, binding);
       await ctx.env.DATABASE.prepare(
         'DELETE FROM inbox_replies WHERE project_id = ? AND item_ref = ? AND message_id = ?'
       )
@@ -178,6 +148,45 @@ export async function replyToInboxItem(
     }
     throw error;
   }
+}
+
+interface ReplyBinding {
+  ref: string;
+  sessionId: string;
+  userId: string;
+  fingerprint: string;
+}
+
+function assertReplyBinding(message: AgentMailboxMessage, binding: ReplyBinding): void {
+  if (
+    message.sourceKind !== 'inbox_reply' ||
+    message.targetSessionId !== binding.sessionId ||
+    message.senderType !== 'human' ||
+    message.senderId !== binding.userId ||
+    message.metadata?.inboxRef !== binding.ref ||
+    message.metadata?.inboxReplyFingerprint !== binding.fingerprint
+  )
+    throw new OperationError('conflict', 'The previous inbox reply could not be reconciled');
+}
+function acceptedReply(message: AgentMailboxMessage, binding: ReplyBinding): InboxReplyResponse {
+  assertReplyBinding(message, binding);
+  if (message.deliveryState === 'ambiguous')
+    throw new OperationError(
+      'conflict',
+      'The previous inbox reply may have reached the agent; inspect its chat before sending it again'
+    );
+  if (message.deliveryState === 'failed' || message.deliveryState === 'expired')
+    throw new OperationError(
+      'conflict',
+      'The previous inbox reply is no longer queued; inspect its chat before replying again'
+    );
+  return {
+    ref: binding.ref,
+    sessionId: binding.sessionId,
+    status: 'queued',
+    messageId: message.promptMessageId,
+    deliveryId: message.id,
+  };
 }
 
 /** Prepare the request's own reject option without deciding what the person's reply means. */
