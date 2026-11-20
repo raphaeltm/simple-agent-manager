@@ -37,14 +37,21 @@ const scratch = mkdtempSync(join(tmpdir(), 'sam-celld-entry-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 describe('generated celld project', () => {
-  it('bundles with the HostedGitRepo binding', async () => {
+  // Plain (legacy-plaintext) and sealed: the sealed entry wraps every handler and Durable Object
+  // with runtime-secrets-socket.ts, which imports `cloudflare:sockets` (scripts/selfhost/key-service.ts).
+  it.each([
+    ['plain', false],
+    ['sealed', true],
+  ])('bundles the %s entry with the HostedGitRepo binding', async (name, runtimeSecrets) => {
     const plan = buildCelldConfig(
       TOML.parse(readFileSync(join(API_DIR, 'wrangler.toml'), 'utf8')) as unknown as WranglerToml,
       { main: CELLD_MAIN, baseDomain: 'box.example.com' }
     );
-    const projectDir = join(scratch, 'plain');
-    prepareCelldProject({ apiDir: API_DIR, projectDir, plan });
+    const projectDir = join(scratch, name);
+    prepareCelldProject({ apiDir: API_DIR, projectDir, plan, runtimeSecrets });
     writeCelldConfig(projectDir, plan.config);
+    const entry = readFileSync(join(projectDir, CELLD_MAIN), 'utf8');
+    expect(entry.includes('runtime-secrets-socket.ts')).toBe(runtimeSecrets);
 
     const celld = await ensureCelldBinary(join(tmpdir(), 'sam-celld-bin'));
     const result = spawnSync(

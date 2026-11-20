@@ -10,12 +10,14 @@
 # WebSockets to the same port. Everything except Caddy (and sam-mx on port 25) listens on
 # 127.0.0.1 only.
 #
-# Plaintext mode: celld keeps every Worker secret in plaintext in the fleet bucket's deploy
-# manifests. The UID egress fence protects box/private endpoints; treat the fleet bucket
-# credential and the box as one installation secret.
+# Sealed secrets (README "Sealed secrets", on by default): the deploy passes celld no secret; the
+# Worker gets them at runtime from the `key-agent` service over a loopback socket. Only a box set
+# to SAM_KEY_PROVIDER=legacy-plaintext keeps every Worker secret in plaintext in the fleet bucket's
+# deploy manifests. The UID egress fence protects box/private endpoints.
 #
 # Usage (README.md): cp .env.example .env && chmod 600 .env && edit it;
-# `pnpm selfhost:deploy --init` (platform keys + .state/gateway.env); `docker compose build`;
+# `pnpm selfhost:deploy --init` (key provider, sealed platform keys, .state/gateway.env; it prints
+# the COMPOSE_PROJECT_NAME and SAM_KEY_AGENT_UID lines for .env); `docker compose build`;
 # `docker compose up -d`; then `pnpm selfhost:deploy`.
 #
 # Images: pulled images are pinned by digest. The two built here (caddy, sam-mx) pin their base
@@ -45,6 +47,8 @@ services:
       objectstore-init:
         condition: service_completed_successfully
         required: false # only with the local-store profile
+      key-agent:
+        condition: service_healthy
     environment:
       HOME: /var/lib/celld
       SAM_EGRESS_FENCE_CHECK_SECONDS: ${SAM_EGRESS_FENCE_CHECK_SECONDS:-0.1}
@@ -87,6 +91,41 @@ services:
     stop_grace_period: 50s
     # celld docs: restart without an attempt limit. An immediate restart can hit
     # "Address already in use"; Docker's restart backoff covers that.
+    restart: unless-stopped
+
+  # Sealed Worker secrets (scripts/selfhost/key-service.ts, on by default). Holds the key provider
+  # `pnpm selfhost:deploy --init` chose (key-choice.ts) and opens the sealed bundle for celld's
+  # Worker over a raw 127.0.0.1 socket (a framed protocol, never HTTP: key-agent/server.ts),
+  # refusing every peer uid but celld's (key-agent/peer.ts). It runs as the owner of .state from
+  # the start, never as root, with no capabilities and a read-only root; server.ts refuses uid 0
+  # and a uid that cannot read its state. The egress fence does not apply to it (it matches
+  # celld's uid), so it can reach a key service. On a `legacy-plaintext` box it only answers its
+  # health check, and the fence gives celld no route to it.
+  key-agent:
+    build: ./key-agent
+    image: sam-selfhost-key-agent:local
+    pull_policy: never # built here, never pulled
+    network_mode: host
+    # `pnpm selfhost:deploy --init` prints the line (the uid that owns .state); every sealing
+    # deploy refuses a missing or different one. Unset, the agent runs as nobody and a sealed box
+    # fails its health check with that reason in `docker compose logs key-agent`.
+    user: '${SAM_KEY_AGENT_UID:-65534}:${SAM_KEY_AGENT_UID:-65534}'
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    read_only: true
+    env_file:
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/key-agent/agent.env
+        required: true
+    environment:
+      SAM_KEY_AGENT_ALLOWED_UIDS: ${CELLD_UID:-7103}
+      SAM_KEY_AGENT_STATE_DIR: /etc/sam/key-agent
+    volumes:
+      - ${SAM_SELFHOST_STATE_DIR:-./.state}/key-agent:/etc/sam/key-agent:ro
+    healthcheck:
+      test: ['CMD', 'node', '/opt/sam-key-agent/healthcheck.ts']
+      interval: 5s
+      timeout: 3s
+      retries: 12
     restart: unless-stopped
 
   # Kernel OUTPUT fence, immutable while serving. Only this service gets host NET_ADMIN.

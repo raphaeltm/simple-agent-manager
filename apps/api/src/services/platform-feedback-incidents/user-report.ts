@@ -9,8 +9,9 @@ import { getIncidentConfig, type IncidentConfig } from '../platform-feedback-inc
 import { parseStoredIncidentResolutionReferences } from '../platform-feedback-incident-resolution-references';
 import { formatUntrustedIdeaContent } from '../untrusted-idea-content';
 import { REPORT_SOURCE } from './constants';
+import { updateOwnedIncidentIdea } from './idea-writes';
 import { readIncidentRow } from './rows';
-import { shouldReopenIncidentForOccurrence } from './state';
+import { isActiveIncidentState, shouldReopenIncidentForOccurrence } from './state';
 import {
   boundedEvidenceRefs,
   evidenceRefsToText,
@@ -209,11 +210,14 @@ export async function upsertUserReportIncident(
       .run();
 
     try {
+      // `idea_owned_at` records the pipeline's write so the idea is not counted as tracked
+      // work until someone engages with it (`idea-ownership.ts`).
       const linked = await env.DATABASE.prepare(
-        `UPDATE platform_feedback_triages SET idea_id = ?, updated_at = CURRENT_TIMESTAMP
+        `UPDATE platform_feedback_triages SET idea_id = ?, idea_owned_at = ?,
+           updated_at = CURRENT_TIMESTAMP
          WHERE signature = ? AND idea_id IS NULL`
       )
-        .bind(ideaId, signature)
+        .bind(ideaId, nowIso, signature)
         .run();
 
       if ((linked.meta.changes ?? 0) === 1) {
@@ -234,14 +238,16 @@ export async function upsertUserReportIncident(
   const current = await readIncidentRow(env, signature);
   const ideaId = current?.idea_id ?? row.idea_id ?? signature;
   let updatedIdea = false;
-  if (ideaId !== signature) {
-    const update = await env.DATABASE.prepare(
-      `UPDATE tasks SET description = ?, updated_at = ?
-       WHERE id = ? AND project_id = ? AND status = 'draft'`
-    )
-      .bind(ideaContent, nowIso, ideaId, input.feedbackProjectId)
-      .run();
-    updatedIdea = (update.meta.changes ?? 0) === 1;
+  // Only the pipeline's own idea is rewritten, and only while the incident is open: a report
+  // that lands after the incident ended (inside its reopen cooldown) must not reopen an idea the
+  // reconciliation sweep closed.
+  if (ideaId !== signature && current && isActiveIncidentState(current.queue_state)) {
+    updatedIdea = await updateOwnedIncidentIdea(
+      env,
+      { signature, ideaId, projectId: input.feedbackProjectId },
+      { description: ideaContent },
+      nowIso
+    );
   }
   return { incidentId: signature, ideaId, createdIdea: false, updatedIdea };
 }

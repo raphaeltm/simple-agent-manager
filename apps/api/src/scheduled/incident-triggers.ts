@@ -1,4 +1,5 @@
 /** Incident source adapter. Backlog grouping stays in D1; execution policy lives in trigger-admission. */
+import { neutralizeUntrustedText } from '@simple-agent-manager/operations';
 import { DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT } from '@simple-agent-manager/shared';
 
 import type * as schema from '../db/schema';
@@ -13,6 +14,7 @@ import {
   expireStaleIncidents,
   getIncidentConfig,
   hasDispatchablePendingIncidents,
+  type IdeaWorkSnapshotReader,
   reclaimExpiredIncidentClaims,
   reclaimExpiredIncidentDispatches,
   releaseIncidentDispatch,
@@ -27,6 +29,10 @@ import {
   resolveMaxTriggersPerProject,
 } from '../services/trigger-limits';
 import { renderTemplate } from '../services/trigger-template';
+import {
+  logIncidentDispatchDecline,
+  releaseEngagedIdeasUntilStable,
+} from './incident-trigger-diagnostics';
 
 export interface IncidentTriggerSweepStats {
   enabled: boolean;
@@ -42,11 +48,16 @@ export interface IncidentTriggerSweepStats {
   autoTriggerCreated: number;
   deferredDispatches: number;
   rateLimitedDispatches: number;
+  /** Pending incidents never dispatched for longer than the stall window. */
+  stalledIncidents: number;
+  /** Incidents whose own idea someone engaged with, released just before dispatch. */
+  releasedIdeas: number;
 }
 
 interface IncidentTriggerSweepDeps {
   now?: () => number;
   submitter?: TriggerTaskSubmitter;
+  readEngagement?: IdeaWorkSnapshotReader;
 }
 
 interface ProjectRow {
@@ -220,7 +231,7 @@ function buildIncidentContext(input: {
       incidents: input.summary.incidents.map((incident) => ({
         id: incident.id,
         source: incident.source,
-        summary: incident.summary,
+        summary: neutralizeUntrustedText(incident.summary),
         severity: incident.severity,
         occurrenceCount: incident.occurrenceCount,
         firstSeenAt: new Date(incident.firstSeenAt).toISOString(),
@@ -251,6 +262,8 @@ export async function runIncidentTriggerSweep(
     autoTriggerCreated: 0,
     deferredDispatches: 0,
     rateLimitedDispatches: 0,
+    stalledIncidents: 0,
+    releasedIdeas: 0,
   };
   if (!projectId) return base;
 
@@ -271,17 +284,36 @@ export async function runIncidentTriggerSweep(
 
   const triggers = await loadIncidentTriggers(env, projectId, config.triggerLimit);
   base.checked = triggers.length;
-  if (triggers.length === 0) return base;
+  const declineContext = { projectId, config, now, triggerIds: triggers.map((t) => t.id) };
+  if (triggers.length === 0) {
+    base.stalledIncidents = await logIncidentDispatchDecline(env, {
+      ...declineContext,
+      cause: 'no_active_trigger',
+    });
+    return base;
+  }
 
   const submitter = deps.submitter;
+  const summaryOptions = { expireStale: false, reclaimClaims: false };
 
+  let declineLogged = false;
   for (const trigger of triggers) {
-    const summary = await buildIncidentBacklogSummary(env, config.summaryLimit, now, config, {
-      expireStale: false,
-      reclaimClaims: false,
-    });
+    let summary = await buildIncidentBacklogSummary(
+      env,
+      config.summaryLimit,
+      now,
+      config,
+      summaryOptions
+    );
     base.pendingIncidents = Math.max(base.pendingIncidents, summary.pendingCount);
-    if (summary.pendingCount === 0) break;
+    if (summary.pendingCount === 0) {
+      base.stalledIncidents = await logIncidentDispatchDecline(env, {
+        ...declineContext,
+        cause: 'no_dispatchable_incidents',
+      });
+      declineLogged = true;
+      break;
+    }
     if (!incidentDispatchAdmissionReady(summary, config, now)) {
       base.deferredDispatches += 1;
       log.info('incident_trigger_sweep.deferred', {
@@ -304,6 +336,32 @@ export async function runIncidentTriggerSweep(
         dispatchRateWindowMs: config.dispatchRateWindowMs,
       });
       continue;
+    }
+
+    // Only now, when this tick would actually dispatch, read the Durable Object for chats,
+    // notes, files or pull requests on the incidents' own ideas (`idea-ownership.ts`).
+    const recheck = await releaseEngagedIdeasUntilStable(env, {
+      projectId,
+      summary,
+      rebuild: () =>
+        buildIncidentBacklogSummary(env, config.summaryLimit, now, config, summaryOptions),
+      readEngagement: deps.readEngagement,
+    });
+    base.releasedIdeas += recheck.released;
+    if (!recheck.summary) {
+      // The read failed: dispatching could hand someone's in-progress work to a triage run.
+      // Every trigger would read the same object, so stop for this tick.
+      base.skipped += 1;
+      break;
+    }
+    summary = recheck.summary;
+    if (summary.pendingCount === 0) {
+      base.stalledIncidents = await logIncidentDispatchDecline(env, {
+        ...declineContext,
+        cause: 'no_dispatchable_incidents',
+      });
+      declineLogged = true;
+      break;
     }
 
     const signatures = summary.incidents.map((incident) => incident.id);
@@ -389,6 +447,16 @@ export async function runIncidentTriggerSweep(
     }
 
     base.skipped += 1;
+  }
+
+  // Dispatchable incidents existed but no trigger took them (admission deferral, rate limit,
+  // engagement read failure, inactive or skipped trigger): log the breakdown once per sweep, so
+  // a dispatchable incident held this way past the stall window warns.
+  if (!declineLogged && base.fired === 0 && base.pendingIncidents > 0) {
+    base.stalledIncidents = await logIncidentDispatchDecline(env, {
+      ...declineContext,
+      cause: 'not_admitted',
+    });
   }
 
   return base;

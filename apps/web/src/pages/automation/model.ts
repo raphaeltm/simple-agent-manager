@@ -9,6 +9,7 @@
 import {
   DEFAULT_PROJECT_EVENT_WATCH_MAX_EXECUTIONS,
   DEFAULT_TRIGGER_AUTO_PAUSE_AFTER_FAILURES,
+  isChatOwnReminder,
   type ProjectSchedule,
   type ProjectScheduledAction,
   type ProjectStandingWatch,
@@ -255,6 +256,8 @@ export function scheduleAttention(
   windowMs: number
 ): Attention | null {
   if (now - schedule.updatedAt > windowMs) return null;
+  // Its outcome still shows on its own page; see isChatOwnReminder.
+  if (isChatOwnReminder(schedule)) return null;
   if (schedule.state === 'ambiguous') {
     return {
       tone: 'warning',

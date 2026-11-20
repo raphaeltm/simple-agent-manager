@@ -63,8 +63,9 @@ export function FloatingHeader({
   // edge is lit green. The shell scrolls itself so a long report cannot push the
   // conversation off screen.
   // The failure card scrolls, so it gives up height before the session header does, down to
-  // its first line.
-  const failureShellClassName = `${paneClassName('slab')} min-h-11 max-h-[40vh] shrink overflow-y-auto px-3 py-2 ${
+  // its first line. The slab is the frame and an inner div scrolls, so the slab's rim stays put
+  // (sam-glass-design-system.md, "Scrolling panes").
+  const failureShellClassName = `${paneClassName('slab')} flex min-h-11 max-h-[40vh] shrink flex-col overflow-hidden ${
     failureClassification?.diagnosable
       ? 'shadow-[inset_0_-1px_0_var(--sam-danger-edge),var(--sam-glass-v2-depth-slab)]'
       : ''
@@ -103,15 +104,17 @@ export function FloatingHeader({
       />
       {lc.taskEmbed?.errorMessage && (
         <div data-testid="failure-card-shell" className={failureShellClassName}>
-          <FailureCard
-            projectId={projectId}
-            taskEmbed={lc.taskEmbed}
-            sessionId={lc.session?.id}
-            workspaceId={lc.workspace?.id ?? lc.session?.workspaceId}
-            nodeId={lc.node?.id ?? lc.workspace?.nodeId}
-            recoverable={hasRecoverableTaskError}
-            isSessionCreator={lc.session.isMine === true}
-          />
+          <div className="relative min-h-0 flex-1 overflow-y-auto px-3 py-2">
+            <FailureCard
+              projectId={projectId}
+              taskEmbed={lc.taskEmbed}
+              sessionId={lc.session?.id}
+              workspaceId={lc.workspace?.id ?? lc.session?.workspaceId}
+              nodeId={lc.node?.id ?? lc.workspace?.nodeId}
+              recoverable={hasRecoverableTaskError}
+              isSessionCreator={lc.session.isMine === true}
+            />
+          </div>
         </div>
       )}
       {lc.taskEmbed?.outputSummary && (

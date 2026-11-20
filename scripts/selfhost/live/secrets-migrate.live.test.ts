@@ -1,0 +1,422 @@
+/**
+ * `pnpm selfhost:secrets migrate` (secrets-migrate.ts) with the real `deploy.ts --init` (a child
+ * process on a throwaway box) and the real contract check (the agent's code answering the
+ * Worker's real loader). In the live suite because the loader imports built workspace packages
+ * (worker-core), which Validate Deploy Scripts does not build; it needs no Docker. The steps that need a running box (compose, the deploy, celld's reload
+ * and the bucket) are recorded fakes, so each failure point can be driven.
+ */
+import { randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  CHILD_TEST_TIMEOUT_MS,
+  CLOSED_HOST,
+  noStackDocker,
+  runDeploy as harnessRunDeploy,
+  writeBox,
+} from '../deploy-harness.js';
+
+/** The real deploy entry; a second `--init` on the same state sees no running stack. */
+const runDeploy = (envFile: string, args: string[], env: NodeJS.ProcessEnv = {}) =>
+  harnessRunDeploy(envFile, args, { ...noStackDocker(dirname(envFile)), ...env });
+import { openBundle } from '../../../deploy/selfhost/key-agent/bundle.ts';
+import { createFileProvider } from '../../../deploy/selfhost/key-agent/provider-file.ts';
+import { bundleStoreFor, listBundles } from '../key-service.js';
+import { ensurePlatformKeys } from '../platform-keys.js';
+import { parseDotenv } from '../secret-files.js';
+import { CLEANUP_MARKER, type MigrateDeps, runMigration } from '../secrets-migrate.js';
+import { preflightSealedSecrets } from '../secrets-preflight.js';
+import { holdOnPlaintext } from '../upgrade-sealing.js';
+
+vi.setConfig({ testTimeout: CHILD_TEST_TIMEOUT_MS });
+
+const NO_CLOUD = [
+  `SAM_GCE_METADATA_HOST=${CLOSED_HOST}`,
+  `SAM_AWS_IMDS_HOST=${CLOSED_HOST}`,
+  `SAM_AZURE_IMDS_HOST=${CLOSED_HOST}`,
+];
+/** Generated per run: no secret-looking literal in the source. */
+const OPERATOR = `GITHUB_CLIENT_SECRET=${randomBytes(16).toString('hex')}\n`;
+
+let dir: string;
+let state: string;
+let envFile: string;
+let steps: string[];
+let runningBundle: string | null;
+let logs: string[];
+
+function box(): Record<string, string> {
+  return parseDotenv(readFileSync(envFile, 'utf8'), envFile);
+}
+
+function deps(overrides: Partial<MigrateDeps> = {}): MigrateDeps {
+  return {
+    log: (message) => logs.push(message),
+    init: async () => {
+      steps.push('init');
+      const result = await runDeploy(envFile, ['--init', '--seal']);
+      if (result.status !== 0) throw new Error(result.out);
+    },
+    preflight: async (input) => {
+      steps.push('preflight');
+      return await preflightSealedSecrets(input);
+    },
+    startStack: async () => {
+      steps.push('compose up');
+    },
+    deploy: async (legacy) => {
+      steps.push(legacy ? 'deploy legacy' : 'deploy sealed');
+    },
+    adoptAndCheck: async () => {
+      steps.push('reload+health');
+      return { healthy: true, detail: 'HTTP 200' };
+    },
+    currentVersionSecrets: async () => {
+      steps.push('scan current');
+      // Before the sealed deploy the running version still has its secret vars.
+      return steps.includes('deploy sealed') ? [] : ['ENCRYPTION_KEY'];
+    },
+    // The running version names the newest bundle unless a test pins an older one.
+    currentVersionBundleId: async () =>
+      runningBundle ?? (await listBundles(bundleStoreFor(state)))[0]?.bundleId ?? null,
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'sam-migrate-'));
+  state = join(dir, '.state');
+  envFile = writeBox(dir, NO_CLOUD);
+  mkdirSync(state, { mode: 0o700 });
+  ensurePlatformKeys(state, 'init');
+  writeFileSync(join(state, 'secrets.env'), OPERATOR, { mode: 0o600 });
+  steps = [];
+  logs = [];
+  runningBundle = null;
+});
+afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+const plaintextLeft = () =>
+  ['platform-keys.json', 'secrets.env'].filter((f) => existsSync(join(state, f)));
+
+describe('secrets migrate', () => {
+  it('seals, checks the contract, switches, verifies, then removes the files once a key copy matches', async () => {
+    const kept = await runMigration({ box: box(), stateDir: state }, deps());
+    expect(kept).toBe('migrated-files-kept');
+    expect(steps).toEqual([
+      'init',
+      'preflight',
+      'compose up',
+      'scan current',
+      'deploy sealed',
+      'reload+health',
+      'scan current',
+    ]);
+    // File key and no proven copy: the plaintext files are the only other copy, so they stay,
+    // and the notice is the last thing the operator reads.
+    expect(plaintextLeft()).toEqual(['platform-keys.json', 'secrets.env']);
+    // Control: the sealed version is live, so the upgrade must not put it back on plaintext.
+    expect(holdOnPlaintext({ box: box(), stateDir: state })).toBe(false);
+    expect(logs.join('\n')).toContain('KEY FILE CREATED');
+    expect(logs.at(-1)).toContain('pnpm selfhost:secrets migrate --key-copy');
+
+    const copy = join(dir, 'kek-copy');
+    writeFileSync(copy, readFileSync(join(state, 'key-agent/kek')), { mode: 0o600 });
+    steps = [];
+    const done = await runMigration(
+      { box: box(), stateDir: state, keyCopy: copy },
+      deps({
+        // The sealed version is already current from the first run.
+        currentVersionSecrets: async () => {
+          steps.push('scan current');
+          return [];
+        },
+      })
+    );
+    expect(done).toBe('migrated');
+    // No second switch: verified what runs, then removed.
+    expect(steps).toEqual(['init', 'preflight', 'compose up', 'scan current', 'reload+health']);
+    expect(plaintextLeft()).toEqual([]);
+    const kek = readFileSync(join(state, 'key-agent/kek'), 'utf8').trim();
+    expect(logs.join('\n')).not.toContain(kek);
+  });
+
+  // Codex P2 on #2933: secrets.env changed after a migrate that kept the files sealed a new bundle,
+  // but the retry saw a sealed running version and removed the files without deploying it.
+  it('deploys the newly sealed bundle before removing the files when the running one is older', async () => {
+    expect(await runMigration({ box: box(), stateDir: state }, deps())).toBe('migrated-files-kept');
+    const [first] = await listBundles(bundleStoreFor(state));
+    runningBundle = first?.bundleId ?? null;
+    writeFileSync(
+      join(state, 'secrets.env'),
+      `GITHUB_CLIENT_SECRET=${randomBytes(16).toString('hex')}\n`,
+      { mode: 0o600 }
+    );
+    const copy = join(dir, 'kek-copy');
+    writeFileSync(copy, readFileSync(join(state, 'key-agent/kek')), { mode: 0o600 });
+    steps = [];
+    const sealedRuns = deps({
+      currentVersionSecrets: async () => {
+        steps.push('scan current');
+        return [];
+      },
+      deploy: async (legacy) => {
+        steps.push(legacy ? 'deploy legacy' : 'deploy sealed');
+        runningBundle = (await listBundles(bundleStoreFor(state)))[0]?.bundleId ?? null;
+      },
+    });
+    expect(await runMigration({ box: box(), stateDir: state, keyCopy: copy }, sealedRuns)).toBe(
+      'migrated'
+    );
+    expect(steps).toContain('deploy sealed');
+    expect(steps).not.toContain('deploy legacy');
+    expect(runningBundle).not.toBe(first?.bundleId);
+    expect(plaintextLeft()).toEqual([]);
+  });
+
+  it('a key copy that does not match keeps the files', async () => {
+    const wrong = join(dir, 'wrong');
+    writeFileSync(wrong, Buffer.alloc(32, 9).toString('base64'), { mode: 0o600 });
+    expect(await runMigration({ box: box(), stateDir: state, keyCopy: wrong }, deps())).toBe(
+      'migrated-files-kept'
+    );
+    expect(plaintextLeft()).toHaveLength(2);
+    expect(logs.join('\n')).toContain('does NOT match');
+  });
+
+  it('stops before switching when the contract check fails (nothing deployed, nothing removed)', async () => {
+    const failing = deps({
+      preflight: async (input) => {
+        steps.push('preflight');
+        // The Worker must get every plaintext value back unchanged; ask for one it cannot.
+        return await preflightSealedSecrets({
+          ...input,
+          expected: { ...input.expected, GITHUB_CLIENT_SECRET: 'a-different-value' },
+        });
+      },
+    });
+    await expect(runMigration({ box: box(), stateDir: state }, failing)).rejects.toThrow(
+      /would not get these secrets unchanged: GITHUB_CLIENT_SECRET/
+    );
+    expect(steps).toEqual(['init', 'preflight']);
+    expect(plaintextLeft()).toHaveLength(2);
+    // Codex P2 on #2933: the next selfhost:upgrade must still see a plaintext box.
+    expect(holdOnPlaintext({ box: box(), stateDir: state })).toBe(true);
+  });
+
+  // Codex P2 on #2933: the pre-switch scan of the running version can fail too (bucket down).
+  it('a failed pre-switch scan also leaves the next upgrade on plaintext', async () => {
+    const scanFails = deps({
+      currentVersionSecrets: async () => {
+        steps.push('scan current');
+        throw new Error('fleet bucket unavailable');
+      },
+    });
+    await expect(runMigration({ box: box(), stateDir: state }, scanFails)).rejects.toThrow(
+      /fleet bucket unavailable/
+    );
+    expect(steps).toEqual(['init', 'preflight', 'compose up', 'scan current']);
+    expect(plaintextLeft()).toHaveLength(2);
+    expect(holdOnPlaintext({ box: box(), stateDir: state })).toBe(true);
+  });
+
+  it('rolls back when the first request to the new version is not healthy', async () => {
+    let checks = 0;
+    const unhealthy = deps({
+      adoptAndCheck: async () => {
+        steps.push('reload+health');
+        checks += 1;
+        return checks === 1
+          ? { healthy: false, detail: 'HTTP 503 KEY_AGENT_BAD_RESPONSE' }
+          : { healthy: true, detail: 'HTTP 200' };
+      },
+    });
+    await expect(runMigration({ box: box(), stateDir: state }, unhealthy)).rejects.toThrow(
+      /rolled back: the new version is not healthy: HTTP 503 KEY_AGENT_BAD_RESPONSE/
+    );
+    expect(steps.slice(-4)).toEqual([
+      'deploy sealed',
+      'reload+health',
+      'deploy legacy',
+      'reload+health',
+    ]);
+    expect(plaintextLeft()).toHaveLength(2);
+    expect(logs.join('\n')).toContain(
+      'rolled back: the install runs on plaintext deploy vars again'
+    );
+    expect(holdOnPlaintext({ box: box(), stateDir: state })).toBe(true);
+  });
+
+  const bundleIds = async () => bundleStoreFor(state).listIds();
+
+  // Codex P2 on #2933: a leftover bundle from a failed attempt was the next attempt's base, so a
+  // secret the operator deleted from secrets.env in between survived into the sealed set.
+  it('a retry after a failed attempt seals only what the plaintext files hold then', async () => {
+    const retired = `RETIRED_SETTING=${randomBytes(8).toString('hex')}\n`;
+    writeFileSync(join(state, 'secrets.env'), OPERATOR + retired, { mode: 0o600 });
+    const failing = deps({
+      preflight: async () => {
+        steps.push('preflight');
+        throw new Error('contract check failed');
+      },
+    });
+    await expect(runMigration({ box: box(), stateDir: state }, failing)).rejects.toThrow(
+      /contract check failed/
+    );
+    expect(await bundleIds()).toEqual([]);
+    // The operator removes the line, then retries.
+    writeFileSync(join(state, 'secrets.env'), OPERATOR, { mode: 0o600 });
+    expect(await runMigration({ box: box(), stateDir: state }, deps())).toBe('migrated-files-kept');
+    const [newest] = await listBundles(bundleStoreFor(state));
+    if (!newest) throw new Error('no bundle');
+    const sealed = await openBundle(
+      newest,
+      createFileProvider({ SAM_KEY_FILE: join(state, 'key-agent', 'kek') })
+    );
+    expect(sealed.GITHUB_CLIENT_SECRET).toBeDefined();
+    expect(sealed.RETIRED_SETTING).toBeUndefined();
+  });
+
+  it('a healthy rollback removes the bundles the failed attempt sealed; an unhealthy one keeps them', async () => {
+    const leaky = (backHealthy: boolean) =>
+      deps({
+        currentVersionSecrets: async () => {
+          steps.push('scan current');
+          return ['ENCRYPTION_KEY'];
+        },
+        adoptAndCheck: async () => {
+          steps.push('reload+health');
+          return steps.includes('deploy legacy') && !backHealthy
+            ? { healthy: false, detail: 'HTTP 502' }
+            : { healthy: true, detail: 'HTTP 200' };
+        },
+      });
+    await expect(runMigration({ box: box(), stateDir: state }, leaky(true))).rejects.toThrow(
+      /rolled back/
+    );
+    expect(await bundleIds()).toEqual([]);
+    steps = [];
+    // Control: while the plaintext version is not shown running again, the bundle stays.
+    await expect(runMigration({ box: box(), stateDir: state }, leaky(false))).rejects.toThrow(
+      /rolled back/
+    );
+    expect(await bundleIds()).toHaveLength(1);
+  });
+
+  // Codex P2 on #2933: a rollback deploy that also fails must not leave the box looking sealed.
+  it('a failed rollback deploy still leaves the next upgrade on plaintext', async () => {
+    const bothFail = deps({
+      deploy: async (legacy) => {
+        steps.push(legacy ? 'deploy legacy' : 'deploy sealed');
+        if (legacy) throw new Error('fleet bucket unavailable');
+      },
+      adoptAndCheck: async () => ({ healthy: false, detail: 'HTTP 503' }),
+    });
+    await expect(runMigration({ box: box(), stateDir: state }, bothFail)).rejects.toThrow(
+      /fleet bucket unavailable/
+    );
+    expect(steps.at(-1)).toBe('deploy legacy');
+    expect(plaintextLeft()).toHaveLength(2);
+    expect(holdOnPlaintext({ box: box(), stateDir: state })).toBe(true);
+  });
+
+  it('rolls back when the deployed version still holds secret vars', async () => {
+    const leaky = deps({
+      currentVersionSecrets: async () => {
+        steps.push('scan current');
+        return ['ENCRYPTION_KEY'];
+      },
+    });
+    await expect(runMigration({ box: box(), stateDir: state }, leaky)).rejects.toThrow(
+      /still holds secret vars: ENCRYPTION_KEY/
+    );
+    expect(steps.at(-2)).toBe('deploy legacy');
+    expect(plaintextLeft()).toHaveLength(2);
+  });
+
+  // Codex P2 on #2933: a run interrupted between its two removals left secrets.env alone, and
+  // every retry said "nothing to migrate". Codex P1: the retry must remove only what is that run's
+  // leftover (its marker) and whose values the sealed bundle holds.
+  describe('a retry after a removal interrupted after platform-keys.json', () => {
+    const sealedRuns = () =>
+      deps({
+        currentVersionSecrets: async () => {
+          steps.push('scan current');
+          return [];
+        },
+      });
+    async function interrupted(): Promise<string> {
+      expect(await runMigration({ box: box(), stateDir: state }, deps())).toBe(
+        'migrated-files-kept'
+      );
+      // What the interrupted run left: its marker, then the first removal.
+      writeFileSync(join(state, CLEANUP_MARKER), 'secrets.env\nplatform-keys.json\n');
+      rmSync(join(state, 'platform-keys.json'));
+      const copy = join(dir, 'kek-copy');
+      writeFileSync(copy, readFileSync(join(state, 'key-agent/kek')), { mode: 0o600 });
+      return copy;
+    }
+
+    it('finishes it once the sealed version runs and the bundle holds the file', async () => {
+      const copy = await interrupted();
+      expect(await runMigration({ box: box(), stateDir: state, keyCopy: copy }, sealedRuns())).toBe(
+        'migrated'
+      );
+      expect(plaintextLeft()).toEqual([]);
+      expect(existsSync(join(state, CLEANUP_MARKER))).toBe(false);
+    });
+
+    it('refuses while the running version still holds secret vars', async () => {
+      const copy = await interrupted();
+      const stillPlain = deps({
+        currentVersionSecrets: async () => {
+          steps.push('scan current');
+          return ['ENCRYPTION_KEY'];
+        },
+      });
+      await expect(
+        runMigration({ box: box(), stateDir: state, keyCopy: copy }, stillPlain)
+      ).rejects.toThrow(/not sealed and healthy/);
+      expect(plaintextLeft()).toEqual(['secrets.env']);
+    });
+
+    it('never deletes a credential added to secrets.env since, that the bundle does not hold', async () => {
+      const copy = await interrupted();
+      writeFileSync(
+        join(state, 'secrets.env'),
+        `${OPERATOR}NEW_UNSEALED=${randomBytes(8).toString('hex')}\n`,
+        {
+          mode: 0o600,
+        }
+      );
+      await expect(
+        runMigration({ box: box(), stateDir: state, keyCopy: copy }, sealedRuns())
+      ).rejects.toThrow(/NEW_UNSEALED/);
+      expect(plaintextLeft()).toEqual(['secrets.env']);
+    });
+
+    it('without the marker, a sealed box keeps its secrets.env (ordinary operator input)', async () => {
+      const copy = await interrupted();
+      rmSync(join(state, CLEANUP_MARKER));
+      expect(await runMigration({ box: box(), stateDir: state, keyCopy: copy }, sealedRuns())).toBe(
+        'nothing-to-migrate'
+      );
+      expect(plaintextLeft()).toEqual(['secrets.env']);
+    });
+  });
+
+  it('refuses while .env says legacy-plaintext, and has nothing to do on a sealed box', async () => {
+    envFile = writeBox(dir, [...NO_CLOUD, 'SAM_KEY_PROVIDER=legacy-plaintext']);
+    await expect(runMigration({ box: box(), stateDir: state }, deps())).rejects.toThrow(
+      /remove that line/
+    );
+    envFile = writeBox(dir, NO_CLOUD);
+    rmSync(join(state, 'platform-keys.json'));
+    expect(await runMigration({ box: box(), stateDir: state }, deps())).toBe('nothing-to-migrate');
+    expect(steps).toEqual([]);
+  });
+});

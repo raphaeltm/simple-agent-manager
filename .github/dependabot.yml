@@ -87,6 +87,10 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: 'docker'
+    directory: '/deploy/selfhost/key-agent'
+    schedule:
+      interval: weekly
+  - package-ecosystem: 'docker'
     directory: '/deploy/selfhost/metadata-proxy'
     schedule:
       interval: weekly

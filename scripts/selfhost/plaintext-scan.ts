@@ -1,10 +1,10 @@
 /**
- * `pnpm selfhost:secrets plaintext [--backups DIR] [--purge --confirm <CELLD_BUCKET>]`
+ * `pnpm selfhost:secrets plaintext [--backups DIR]`: read only.
  *
  * Before sealed secrets, every deploy passed the Worker secrets as vars, and celld keeps each
  * deployed version's config, vars included, under `deploy/<script>/<version>/manifest.json` in
- * the fleet bucket. This lists those versions and the backups that still hold plaintext, says
- * which secrets to rotate and how, and (opt-in) deletes the versions celld no longer reads.
+ * the fleet bucket. This lists those versions and the backups that still hold plaintext: which
+ * secret names each holds and where, never a value.
  *
  * What celld still needs (celld v0.6.3 source, read 2026-11-12): a node loads the deployment that
  * `deploy/current.json` names (fleet.rs load_current_worker), service bindings through
@@ -14,31 +14,33 @@
  * versions. So a version named by no pointer and no attachment is never read again.
  *
  * But celld's documentation (docs/guarantees.md) says an operator must not delete objects under
- * `deploy/`, with no exception for old versions. The purge therefore: runs only on the pinned
- * celld version this analysis was made for; deletes only versions that hold plaintext secrets and
- * that no pointer or attachment names, re-read just before each deletion; refuses while the
- * current version itself still holds plaintext; and needs `--confirm <bucket url>`. The safest
- * course needs no deletion at all: rotate every secret the listing names, which makes the old
- * copies worthless.
+ * `deploy/`, with no exception for old versions, so SAM does not delete them (finding F10: the
+ * integration branch had an opt-in purge; it did not land). Rotating every secret the listing
+ * names is what makes the old copies worthless. Platform-key rotation is not available yet (see
+ * PLATFORM_KEY_ROTATION_PENDING): until it lands, those copies stay readable by anyone with the
+ * bucket credential.
  */
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { openBundle } from '../../deploy/selfhost/key-agent/bundle.ts';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
 import { SIGNING_KEY_NAME } from '../../deploy/selfhost/key-agent/server.ts';
 import { type BoxContext, readManifest } from './backup-lib';
-import { deleteObjects, listObjects, readObject } from './bucket-objects';
+import { listObjects, readObject } from './bucket-objects';
 import { applyKeyChoice, explicitKeyProvider, readKeyChoice } from './key-choice';
-import { KEY_AGENT_DIR, keyServiceSettings, listBundles } from './key-service';
+import { bundleStoreFor, KEY_AGENT_DIR, keyServiceSettings, listBundles } from './key-service';
 import { PLATFORM_KEY_NAMES } from './platform-keys';
 import { parseDotenv, readPrivateJson } from './secret-files';
-import { CELLD_VERSION } from './versions';
 
-/** The celld release whose bucket readers the purge rule above was derived from. */
-export const PURGE_VERIFIED_CELLD_VERSION = '0.6.3';
+/** Said wherever rotation would be the answer: SAM cannot rotate its own platform keys yet (idea 01M7VTNAG1HMCE18GCNPS052X3). */
+export const PLATFORM_KEY_ROTATION_PENDING =
+  'platform-key rotation is not available yet (a later self-host release adds it); until then ' +
+  'every copy listed here stays readable by anyone holding the bucket credential or the backup';
 /** Values shorter than this are not matched by content (too many false hits); names still are. */
 const MIN_MATCH_LENGTH = 12;
+/** Stable, locale-free ordering for names and paths in the listing. */
+const byCodePoint = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 const NOT_SECRET = new Set(['SAM_INSTALLATION_ID']);
 
 export interface KnownSecrets {
@@ -60,7 +62,7 @@ export async function knownSecrets(
   const secretsFile = join(stateDir, 'secrets.env');
   if (existsSync(secretsFile))
     Object.assign(all, parseDotenv(readFileSync(secretsFile, 'utf8'), secretsFile));
-  const newest = listBundles(join(stateDir, KEY_AGENT_DIR, 'bundles'), () => undefined)[0];
+  const newest = (await listBundles(bundleStoreFor(stateDir), () => undefined))[0];
   if (newest) {
     const choice = readKeyChoice(stateDir);
     const effective = !explicitKeyProvider(box) && choice ? applyKeyChoice(box, choice) : box;
@@ -126,7 +128,7 @@ function secretsIn(text: string, secrets: KnownSecrets): string[] {
     if (secrets.names.has(name) && value !== '') found.add(name);
   }
   if (secrets.values.some((value) => text.includes(value))) found.add('(a known secret value)');
-  return [...found].sort();
+  return [...found].sort(byCodePoint);
 }
 
 /** Every version prefix that a pointer or queue attachment names, with who names it. */
@@ -142,7 +144,7 @@ function isHolder(key: string): boolean {
 export interface References {
   /** Version prefix -> the holder files that name it. */
   byPrefix: Map<string, string[]>;
-  /** Holder files in which no known version could be recognised (the purge refuses then). */
+  /** Holder files in which no known version could be recognised (reported, never guessed). */
   unrecognised: string[];
 }
 
@@ -230,34 +232,53 @@ function filesUnder(dir: string): string[] {
   );
 }
 
-/** Local backups (backup-lib.ts layout) and what plaintext each holds. */
+/** The marker backup-encryption.ts writes at the top of an encrypted backup. */
+const ENCRYPTED_BACKUP_MARKER = '.sam-backup-manifest';
+
+/**
+ * Local backups and what plaintext each holds. A backup is a plain tree (backup-lib.ts layout,
+ * `backup-manifest.json`) or one encrypted under the operator's backup key (backup-encryption.ts:
+ * same file names, encrypted contents). An encrypted backup's deploy versions cannot be read
+ * without that key, so they are reported as unchecked rather than clean.
+ */
 export function scanBackups(root: string, secrets: KnownSecrets): BackupFinding[] {
   if (!existsSync(root)) return [];
   const findings: BackupFinding[] = [];
   for (const name of readdirSync(root).sort()) {
     const dir = join(root, name);
+    const encrypted = existsSync(join(dir, ENCRYPTED_BACKUP_MARKER));
     const manifestPath = join(dir, 'backup-manifest.json');
-    if (!existsSync(manifestPath)) continue;
+    if (!encrypted && !existsSync(manifestPath)) continue;
     let createdAt = '';
     try {
-      createdAt = readManifest(dir).createdAt;
+      createdAt = encrypted ? statSync(dir).mtime.toISOString() : readManifest(dir).createdAt;
     } catch {
       createdAt = '(unreadable manifest)';
     }
+    const sealedUnder = encrypted ? ' (encrypted under the backup key)' : '';
     const holds: string[] = [];
     for (const file of ['platform-keys.json', 'secrets.env']) {
-      if (existsSync(join(dir, 'state', file))) holds.push(`state/${file}`);
+      if (existsSync(join(dir, 'state', file))) holds.push(`state/${file}${sealedUnder}`);
     }
     if (existsSync(join(dir, 'state', KEY_AGENT_DIR, 'kek')))
-      holds.push('the file key (state/key-agent/kek)');
-    const exposed = new Set<string>();
-    for (const file of filesUnder(join(dir, 'bucket', 'deploy'))) {
-      if (!file.endsWith('/manifest.json')) continue;
-      for (const n of secretsIn(readFileSync(join(dir, 'bucket', 'deploy', file), 'utf8'), secrets))
-        exposed.add(n);
+      holds.push(`the file key (state/key-agent/kek)${sealedUnder}`);
+    if (encrypted) {
+      if (existsSync(join(dir, 'bucket', 'deploy'))) {
+        holds.push(
+          'bucket deploy versions, not checked (encrypted; one taken before sealing holds every ' +
+            'Worker secret, readable with the backup key)'
+        );
+      }
+    } else {
+      const exposed = new Set<string>();
+      for (const file of filesUnder(join(dir, 'bucket', 'deploy'))) {
+        if (!file.endsWith('/manifest.json')) continue;
+        const text = readFileSync(join(dir, 'bucket', 'deploy', file), 'utf8');
+        for (const n of secretsIn(text, secrets)) exposed.add(n);
+      }
+      if (exposed.size > 0) holds.push(`bucket deploy versions with ${[...exposed].join(', ')}`);
     }
-    if (exposed.size > 0) holds.push(`bucket deploy versions with ${[...exposed].join(', ')}`);
-    if (existsSync(join(dir, 'env'))) holds.push('env (the bucket credential, in every backup)');
+    if (existsSync(join(dir, 'env'))) holds.push(`env (the bucket credential)${sealedUnder}`);
     findings.push({ dir, createdAt, holds });
   }
   return findings;
@@ -296,25 +317,27 @@ export function scanRemoteBackups(
     }
     groups.set(group, entry);
   }
-  return [...groups.entries()].sort().map(([group, entry]) => ({
-    dir: `${url.replace(/\/+$/, '')}/${group}`,
-    createdAt: entry.latest,
-    holds: [
-      ...[...entry.holds].sort(),
-      ...(entry.exposed.size > 0
-        ? [`deploy versions with ${[...entry.exposed].sort().join(', ')}`]
-        : []),
-    ],
-  }));
+  return [...groups.entries()]
+    .sort(([a], [b]) => byCodePoint(a, b))
+    .map(([group, entry]) => ({
+      dir: `${url.replace(/\/+$/, '')}/${group}`,
+      createdAt: entry.latest,
+      holds: [
+        ...[...entry.holds].sort(byCodePoint),
+        ...(entry.exposed.size > 0
+          ? [`deploy versions with ${[...entry.exposed].sort(byCodePoint).join(', ')}`]
+          : []),
+      ],
+    }));
 }
 
 /** How to rotate each kind of secret the listing names. */
 export function rotationAdvice(name: string): string {
   if (name === 'ENCRYPTION_KEY' || name.startsWith('ENCRYPTION_KEY_')) {
-    return 'rotate it with pnpm selfhost:secrets rotate encryption-key (dry run first; stored credentials are re-encrypted online). Backups taken before then still hold data under the old key: treat the credentials users stored in SAM as exposed and have them replace cloud tokens and agent keys.';
+    return `the key every stored credential is encrypted under: ${PLATFORM_KEY_ROTATION_PENDING}. Treat the credentials users stored in SAM as exposed and have them replace cloud tokens and agent keys.`;
   }
   if (PLATFORM_KEY_NAMES.includes(name as (typeof PLATFORM_KEY_NAMES)[number])) {
-    return 'a generated platform key: rotate it with pnpm selfhost:secrets rotate --all (dry run first). Until then, exposure lets someone sign tokens or push messages as this install.';
+    return `a generated platform key: ${PLATFORM_KEY_ROTATION_PENDING}. Exposure lets someone sign tokens or push messages as this install.`;
   }
   if (name.startsWith('GITHUB_')) {
     return 'regenerate it in the GitHub App settings (client secret, private key or webhook secret), put the new value in .state/secrets.env, run pnpm selfhost:deploy, then delete the old one at GitHub.';
@@ -325,90 +348,6 @@ export function rotationAdvice(name: string): string {
     return 'create a new scoped bucket credential, put it in .state/secrets.env, deploy, then revoke the old one.';
   }
   return 'issue a new value where it comes from, put it in .state/secrets.env, deploy, then revoke the old one.';
-}
-
-export interface PurgeResult {
-  deleted: string[];
-  skipped: string[];
-}
-
-/** Deletes old versions that hold plaintext and that nothing references (module comment). */
-/** Versions younger than this are never purged: a deploy may still be writing them. */
-export const DEFAULT_PURGE_MIN_AGE_MS = 24 * 3600_000;
-
-export interface PurgeOptions {
-  /** Default DEFAULT_PURGE_MIN_AGE_MS; `--min-age-hours` sets it. */
-  minAgeMs?: number;
-  now?: number;
-}
-
-export function purgeVersions(
-  ctx: BoxContext,
-  secrets: KnownSecrets,
-  confirm: string | undefined,
-  options: PurgeOptions = {}
-): PurgeResult {
-  if (confirm !== ctx.box.CELLD_BUCKET) {
-    throw new Error(
-      `--purge needs --confirm ${ctx.box.CELLD_BUCKET} (the CELLD_BUCKET it deletes from)`
-    );
-  }
-  if (CELLD_VERSION !== PURGE_VERIFIED_CELLD_VERSION) {
-    throw new Error(
-      `the purge rule was verified against celld ${PURGE_VERIFIED_CELLD_VERSION}; this box pins ${CELLD_VERSION}. Re-check celld's readers of deploy/ before purging`
-    );
-  }
-  const minAgeMs = options.minAgeMs ?? DEFAULT_PURGE_MIN_AGE_MS;
-  const now = options.now ?? Date.now();
-  const versions = scanDeployVersions(ctx, secrets);
-  const current = versions.find((v) => v.referencedBy.includes('deploy/current.json'));
-  if (!current)
-    throw new Error('deploy/current.json names no version in this bucket; refusing to purge');
-  if (current.secretNames.length > 0) {
-    throw new Error(
-      'the current deploy version still holds plaintext secrets: run the sealed deploy (pnpm selfhost:secrets migrate) first'
-    );
-  }
-  const result: PurgeResult = { deleted: [], skipped: [] };
-  for (const version of versions) {
-    if (version.secretNames.length === 0) continue;
-    if (version.referencedBy.length > 0) {
-      result.skipped.push(`${version.prefix} (still referenced)`);
-      continue;
-    }
-    const written = Date.parse(version.lastModified);
-    if (!Number.isFinite(written) || now - written < minAgeMs) {
-      result.skipped.push(
-        `${version.prefix} (written less than ${Math.round(minAgeMs / 3600_000)} h ago)`
-      );
-      continue;
-    }
-    // Shell-style wildcards in a key would make `gcloud storage rm` match siblings: leave it.
-    if (version.keys.some((key) => /[*?[\]]/.test(key))) {
-      result.skipped.push(`${version.prefix} (a key with wildcard characters)`);
-      continue;
-    }
-    // Re-read right before deleting: a deploy may have moved a pointer, or be writing here.
-    const objects = listObjects(ctx, 'deploy/');
-    const keysListed = objects.map((o) => o.key);
-    const fresh = referencedPrefixes(ctx, keysListed, versionPrefixes(keysListed));
-    if (fresh.unrecognised.length > 0) {
-      throw new Error(
-        `refusing to purge: no known deploy version is named in ${fresh.unrecognised.join(', ')}`
-      );
-    }
-    const keysNow = keysListed.filter((key) => key.startsWith(`${version.prefix}/`)).sort();
-    if (
-      fresh.byPrefix.has(version.prefix) ||
-      keysNow.join('\n') !== [...version.keys].sort().join('\n')
-    ) {
-      result.skipped.push(`${version.prefix} (changed since the scan)`);
-      continue;
-    }
-    deleteObjects(ctx, version.keys);
-    result.deleted.push(version.prefix);
-  }
-  return result;
 }
 
 /** The listing as printed by `pnpm selfhost:secrets plaintext`: names, paths and dates only. */
@@ -430,7 +369,7 @@ export function formatPlaintextReport(
       v.referencedBy.length > 0
         ? `in use (${v.referencedBy.join(', ')})`
         : v.secretNames.length > 0
-          ? 'not read by celld; purgeable'
+          ? 'not read by celld; still holds plaintext'
           : 'not read by celld; clean';
     const holds = v.secretNames.length > 0 ? `holds ${v.secretNames.join(', ')}` : 'no secrets';
     lines.push(`  ${v.prefix}  ${v.lastModified}  ${state}; ${holds}`);
@@ -447,14 +386,13 @@ export function formatPlaintextReport(
   );
   if (exposedNames.size > 0) {
     lines.push('Rotate what these copies hold (deleting a copy does not undo an earlier read):');
-    for (const name of [...exposedNames].sort()) lines.push(`  ${name}: ${rotationAdvice(name)}`);
+    for (const name of [...exposedNames].sort(byCodePoint))
+      lines.push(`  ${name}: ${rotationAdvice(name)}`);
   }
-  if (dirty.some((v) => v.referencedBy.length === 0)) {
+  if (dirty.length > 0) {
     lines.push(
-      `To delete the purgeable versions: pnpm selfhost:secrets plaintext --purge --confirm ${bucket}` +
-        ' (read the README first: celld documents deploy/ as not to be deleted by operators). ' +
-        'A bucket with soft delete or object versioning keeps deleted objects for its retention ' +
-        'period: rotation, not deletion, is what makes the old copies worthless.'
+      'SAM does not delete old deploy versions: celld documents deploy/ as not to be deleted by ' +
+        'operators. These copies stay until the secrets they hold are rotated.'
     );
   }
   return lines;

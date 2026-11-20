@@ -130,8 +130,8 @@ export async function runSwitch(input: SwitchInput, deps: SwitchDeps): Promise<K
   }
   const oldSettings = settingsFor(box, stateDir, current.provider, applyKeyChoice({}, current));
   const oldProvider = createKeyProvider(oldSettings.hostEnv);
-  const newest = listBundles(oldSettings.bundleDir)[0];
-  if (!newest) throw new Error(`no sealed bundle in ${oldSettings.bundleDir}`);
+  const newest = (await listBundles(oldSettings.bundles))[0];
+  if (!newest) throw new Error(`no sealed bundle in ${oldSettings.bundles.location}`);
   const secrets = await openBundle(newest, oldProvider);
 
   const target = await targetChoice(input, current, deps);
@@ -140,7 +140,8 @@ export async function runSwitch(input: SwitchInput, deps: SwitchDeps): Promise<K
     if (input.dryRun) {
       log(`would create the key file ${newSettings.hostEnv.SAM_KEY_FILE}`);
     } else {
-      ensureKeyServiceFiles(newSettings);
+      // Only the key file: agent.env changes below, after the old one is saved for the rollback.
+      await ensureKeyServiceFiles(newSettings, { writeAgentEnv: false });
     }
   }
   let newProvider: KeyProvider | null = null;
@@ -178,12 +179,11 @@ export async function runSwitch(input: SwitchInput, deps: SwitchDeps): Promise<K
   ) {
     throw new Error('the new bundle did not open to the same secrets; nothing was changed');
   }
-  const bundlePath = join(newSettings.bundleDir, `${bundle.bundleId}.json`);
   const agentEnvPath = join(newSettings.dir, 'agent.env');
   const previousPath = join(newSettings.dir, PREVIOUS_PROVIDER_ENV);
   const savedChoice = readFileSync(keyChoicePath(stateDir), 'utf8');
   const savedAgentEnv = readFileSync(agentEnvPath, 'utf8');
-  writePrivateFile(bundlePath, `${JSON.stringify(bundle, null, 2)}\n`);
+  await newSettings.bundles.write(bundle);
   if (!same) writePrivateFile(previousPath, renderKeyAgentEnv(oldSettings));
   writeKeyChoice(stateDir, target);
   writePrivateFile(agentEnvPath, renderKeyAgentEnv(newSettings));
@@ -200,7 +200,7 @@ export async function runSwitch(input: SwitchInput, deps: SwitchDeps): Promise<K
     writePrivateFile(keyChoicePath(stateDir), savedChoice);
     writePrivateFile(agentEnvPath, savedAgentEnv);
     rmSync(previousPath, { force: true });
-    rmSync(bundlePath, { force: true });
+    await newSettings.bundles.remove(bundle.bundleId);
     await deps.restartAgent();
     await deps.deploy();
     const back = await deps.adoptAndCheck();

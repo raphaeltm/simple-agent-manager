@@ -1,17 +1,20 @@
 /**
  * The key agent's request handling (deploy/selfhost/key-agent/server.ts) and its peer lookup
- * (peer.ts): who may ask, what the request must look like, and what the cache does when the key
- * service is down or refuses. Real-socket version: live/key-agent-celld.live.test.ts.
+ * (peer.ts): who may ask, what the request must look like (a framed protocol over raw TCP, never
+ * HTTP: finding F9), and what the cache does when the key service is down or refuses. Real-socket
+ * version against celld: live/key-agent-celld.live.test.ts.
  */
 import { generateKeyPairSync, type KeyObject, randomBytes, verify } from 'node:crypto';
 import { mkdtempSync, writeFileSync } from 'node:fs';
-import type { AddressInfo } from 'node:net';
+import { type AddressInfo, connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { sealSecrets } from '../../deploy/selfhost/key-agent/bundle.ts';
+import { openBundleStore } from '../../deploy/selfhost/key-agent/bundle-store.ts';
+import { pingKeyAgent } from '../../deploy/selfhost/key-agent/healthcheck.ts';
 import { loopbackPeerUid } from '../../deploy/selfhost/key-agent/peer.ts';
 import { type KeyProvider, KeyProviderError } from '../../deploy/selfhost/key-agent/provider.ts';
 import {
@@ -19,11 +22,11 @@ import {
   generateFileKek,
 } from '../../deploy/selfhost/key-agent/provider-file.ts';
 import {
+  assertRunsAsStateOwner,
   createKeyAgent,
   createLegacyAgent,
-  dropToOwnerOf,
+  KEY_AGENT_PREAMBLE,
   previousProvider,
-  SIGNATURE_HEADER,
 } from '../../deploy/selfhost/key-agent/server.ts';
 
 const INSTALL = 'e'.repeat(32);
@@ -34,12 +37,44 @@ afterEach(() => {
   for (const s of servers.splice(0)) s.close();
 });
 
+/** Every byte the agent sends back on one connection, until it closes it. */
+function exchangeRaw(port: number, bytes: Buffer): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const socket = connect({ host: '127.0.0.1', port });
+    const chunks: Buffer[] = [];
+    socket.setTimeout(3000, () => {
+      socket.destroy();
+      reject(new Error('the agent neither answered nor closed'));
+    });
+    socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+    socket.on('close', () => resolve(Buffer.concat(chunks)));
+    socket.on('error', () => undefined);
+    socket.once('connect', () => socket.write(bytes));
+  });
+}
+
+function frame(body: unknown, preamble: Buffer = KEY_AGENT_PREAMBLE): Buffer {
+  const json = Buffer.from(typeof body === 'string' ? body : JSON.stringify(body), 'utf8');
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(json.length);
+  return Buffer.concat([preamble, length, json]);
+}
+
+/** One framed request; the answer envelope, or null when the agent closed without answering. */
+async function askFramed(port: number, body: unknown, preamble?: Buffer) {
+  const raw = await exchangeRaw(port, frame(body, preamble));
+  if (raw.length === 0) return null;
+  const size = raw.readUInt32BE(0);
+  return JSON.parse(raw.subarray(4, 4 + size).toString('utf8')) as Record<string, unknown>;
+}
+
 async function setup(
   options: {
     uid?: number | null;
     wrap?: (p: KeyProvider) => KeyProvider;
     cacheMs?: number;
     staleWaitMs?: number;
+    maxStaleMs?: number;
     noSigningKey?: boolean;
   } = {}
 ) {
@@ -56,40 +91,39 @@ async function setup(
   const logs: Array<Record<string, unknown>> = [];
   const server = createKeyAgent({
     provider: options.wrap ? options.wrap(real) : real,
-    bundleDir: dir,
+    bundles: openBundleStore({ dir }),
     allowedUids: new Set([7101]),
     cacheMs: options.cacheMs ?? 1000,
     staleWaitMs: options.staleWaitMs,
+    maxStaleMs: options.maxStaleMs,
+    connectionTimeoutMs: 500,
     peerUid: () => (options.uid === undefined ? 7101 : options.uid),
     now: () => now,
     log: (event) => logs.push(event),
   });
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
   servers.push(server);
-  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const ask = (
-    init: {
-      bundleId?: string;
-      installationId?: string;
-      nonce?: string;
-      headers?: Record<string, string>;
-      method?: string;
-      path?: string;
-    } = {}
-  ) =>
-    fetch(`${url}${init.path ?? '/v1/secrets'}`, {
-      method: init.method ?? 'POST',
-      headers: init.headers ?? { 'content-type': 'application/json', 'x-sam-key-agent': '1' },
-      body:
-        (init.method ?? 'POST') === 'GET'
-          ? undefined
-          : JSON.stringify({
-              bundleId: init.bundleId ?? bundle.bundleId,
-              nonce: init.nonce ?? NONCE,
-              installationId: init.installationId ?? INSTALL,
-            }),
-    });
-  return { ask, bundle, logs, publicKey: pair.publicKey, advance: (ms: number) => (now += ms) };
+  const port = (server.address() as AddressInfo).port;
+  const request = (init: { bundleId?: string; installationId?: string; nonce?: string } = {}) => ({
+    op: 'secrets',
+    bundleId: init.bundleId ?? bundle.bundleId,
+    nonce: init.nonce ?? NONCE,
+    installationId: init.installationId ?? INSTALL,
+  });
+  const ask = async (init: Parameters<typeof request>[0] = {}) => {
+    const envelope = await askFramed(port, request(init));
+    if (!envelope) throw new Error('the agent closed without answering');
+    return envelope;
+  };
+  return {
+    ask,
+    port,
+    request,
+    bundle,
+    logs,
+    publicKey: pair.publicKey,
+    advance: (ms: number) => (now += ms),
+  };
 }
 
 describe('who may ask', () => {
@@ -97,14 +131,14 @@ describe('who may ask', () => {
     const { ask, bundle, publicKey } = await setup();
     const res = await ask();
     expect(res.status).toBe(200);
-    expect(res.headers.get('cache-control')).toBe('no-store');
-    const text = await res.text();
+    const text = String(res.body);
     expect(JSON.parse(text)).toEqual({
       bundleId: bundle.bundleId,
       nonce: NONCE,
+      ageMs: 0,
       secrets: { ENCRYPTION_KEY: 'sealed-value-123456' },
     });
-    const signature = Buffer.from(res.headers.get(SIGNATURE_HEADER) ?? '', 'base64');
+    const signature = Buffer.from(String(res.signature), 'base64');
     expect(verify(null, Buffer.from(text), publicKey as KeyObject, signature)).toBe(true);
     // Control: the signature does not verify for another body.
     expect(
@@ -112,11 +146,55 @@ describe('who may ask', () => {
     ).toBe(false);
   });
 
+  // F9 (security review MEDIUM-3 on #2680): the bundle id is in the bucket's deploy vars, so with
+  // the old HTTP channel an SSRF from the Worker that could set headers and a JSON body read every
+  // secret. Against the HTTP agent this exact request answered 200 with the secrets.
+  it('F9: gives nothing to the old HTTP request, even with the real bundle id and headers', async () => {
+    const { port, request, bundle, logs } = await setup();
+    const body = JSON.stringify({
+      bundleId: bundle.bundleId,
+      nonce: NONCE,
+      installationId: INSTALL,
+    });
+    const http = Buffer.from(
+      [
+        'POST /v1/secrets HTTP/1.1',
+        `Host: 127.0.0.1:${port}`,
+        'content-type: application/json',
+        'x-sam-key-agent: 1',
+        `content-length: ${Buffer.byteLength(body)}`,
+        '',
+        body,
+      ].join('\r\n')
+    );
+    const answer = await exchangeRaw(port, http);
+    expect(answer).toHaveLength(0);
+    expect(answer.toString('latin1')).not.toContain('sealed-value');
+    // The same through fetch, as a steered Worker request would be: it gets no response at all.
+    await expect(
+      fetch(`http://127.0.0.1:${port}/v1/secrets`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-sam-key-agent': '1' },
+        body,
+      })
+    ).rejects.toThrow();
+    // An HTTP request with the framed body inside it is refused just the same.
+    expect(
+      await exchangeRaw(
+        port,
+        Buffer.concat([Buffer.from('POST / HTTP/1.1\r\n\r\n'), frame(request())])
+      )
+    ).toHaveLength(0);
+    expect(logs.filter((event) => event.event === 'key_agent.bundle_opened')).toHaveLength(0);
+    // Liveness: the agent answers the framed request on the same port.
+    expect((await askFramed(port, request()))?.status).toBe(200);
+  });
+
   it('refuses a bundle sealed for another installation', async () => {
     const { ask, logs } = await setup();
     const res = await ask({ installationId: 'f'.repeat(32) });
     expect(res.status).toBe(409);
-    expect(await res.text()).not.toContain('sealed-value');
+    expect(JSON.stringify(res)).not.toContain('sealed-value');
     expect(logs).toContainEqual(
       expect.objectContaining({ event: 'key_agent.installation_mismatch' })
     );
@@ -124,38 +202,49 @@ describe('who may ask', () => {
 
   it('refuses to serve a bundle that carries no signing key (fail closed)', async () => {
     const { ask } = await setup({ noSigningKey: true });
-    const res = await ask();
-    expect(res.status).toBe(503);
-    expect(await res.json()).toEqual({ error: 'key_service_invalid' });
+    expect(await ask()).toEqual({ status: 503, error: 'key_service_invalid' });
   });
 
-  it.each([[0], [1000], [null]])('refuses uid %s, before reading the request', async (uid) => {
+  it.each([[0], [1000], [null]])('refuses uid %s', async (uid) => {
     const { ask, logs } = await setup({ uid });
     const res = await ask();
-    expect(res.status).toBe(403);
-    expect(await res.text()).not.toContain('sealed-value');
+    expect(res).toEqual({ status: 403, error: 'peer_refused' });
     expect(logs).toContainEqual(expect.objectContaining({ event: 'key_agent.peer_refused', uid }));
   });
 
-  it.each([
-    ['GET', { method: 'GET' }],
-    ['no marker header', { headers: { 'content-type': 'application/json' } }],
-    [
-      'a form body',
-      { headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-sam-key-agent': '1' } },
-    ],
-    ['a path traversal id', { bundleId: '../kek' }],
-    ['no nonce', { nonce: '' }],
-  ])('refuses %s (the fixed request shape is the SSRF guard)', async (_label, init) => {
-    const { ask } = await setup();
-    const res = await ask(init);
-    expect(res.status).toBe(400);
+  it('answers a ping to anyone, with no secret', async () => {
+    const { port } = await setup({ uid: 1000 });
+    expect(await askFramed(port, { op: 'ping' })).toEqual({ status: 200, ok: true, sealed: true });
+    await expect(pingKeyAgent(port)).resolves.toEqual({ sealed: true });
   });
 
-  it('answers 404 for an unknown bundle and for other paths', async () => {
+  it.each([
+    ['another preamble', { preamble: Buffer.from('\u0000SAMKA1\n') }],
+    ['a path traversal id', { body: { bundleId: '../kek' } }],
+    ['no nonce', { body: { nonce: '' } }],
+    ['an unknown op', { body: { op: 'dump' } }],
+    ['a body that is not JSON', { raw: 'not json' }],
+  ])('closes the connection for %s, answering nothing', async (_label, init) => {
+    const { port, request } = await setup();
+    const body = 'raw' in init ? init.raw : { ...request(), ...('body' in init ? init.body : {}) };
+    expect(await askFramed(port, body, 'preamble' in init ? init.preamble : undefined)).toBeNull();
+  });
+
+  it('closes a connection whose declared length is over the cap, or that never finishes', async () => {
+    const { port } = await setup();
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(1 << 20);
+    expect(await exchangeRaw(port, Buffer.concat([KEY_AGENT_PREAMBLE, length]))).toHaveLength(0);
+    // Half a frame: closed after the connection timeout (500 ms here), not held open.
+    expect(await exchangeRaw(port, KEY_AGENT_PREAMBLE)).toHaveLength(0);
+  });
+
+  it('answers 404 for an unknown bundle', async () => {
     const { ask } = await setup();
-    expect((await ask({ bundleId: 'f'.repeat(32) })).status).toBe(404);
-    expect((await ask({ path: '/v1/secrets/' })).status).toBe(404);
+    expect(await ask({ bundleId: 'f'.repeat(32) })).toEqual({
+      status: 404,
+      error: 'bundle_not_found',
+    });
   });
 });
 
@@ -236,7 +325,7 @@ describe('cache and key-service failures', () => {
     advance(1001);
     const res = await within(1000, ask());
     expect(res).not.toBe('timed out');
-    expect((res as Response).status).toBe(200);
+    expect((res as { status: unknown }).status).toBe(200);
     expect(logs).toContainEqual(
       expect.objectContaining({
         event: 'key_agent.serving_stale',
@@ -250,6 +339,22 @@ describe('cache and key-service failures', () => {
     expect((await ask()).status).toBe(503);
   });
 
+  it('does not serve a copy the stale wait itself carried past the maximum stale age (Codex P2)', async () => {
+    const state: Hang = { release: null, calls: 0 };
+    const { ask, advance, logs } = await setup({
+      wrap: hanging(state),
+      staleWaitMs: 50,
+      maxStaleMs: 5000,
+    });
+    expect((await ask()).status).toBe(200);
+    advance(4990); // within the bound when the request arrives
+    setTimeout(() => advance(20), 10); // and past it by the time the stale wait ends
+    const res = await within(300, ask());
+    expect(res).toBe('timed out'); // still waiting on the refresh, not serving the over-age copy
+    expect(logs).not.toContainEqual(expect.objectContaining({ event: 'key_agent.serving_stale' }));
+    state.release?.(new KeyProviderError('denied', 'HTTP 403'));
+  });
+
   it('control: with no copy in hand a hung key service is waited for, not skipped', async () => {
     const state: Hang = { release: null, calls: 1 }; // the first unwrap already hangs
     const { ask } = await setup({ wrap: hanging(state), staleWaitMs: 50 });
@@ -259,15 +364,61 @@ describe('cache and key-service failures', () => {
     expect((await pending).status).toBe(200);
   });
 
+  // Security review M-2: an unreachable key service is ridden out only so long.
+  it('stops serving a stale copy older than the maximum stale age', async () => {
+    const state: { fail: KeyProviderError | null; calls: number } = { fail: null, calls: 0 };
+    const { ask, advance } = await setup({ wrap: flaky(state), maxStaleMs: 5000 });
+    await ask();
+    state.fail = new KeyProviderError('unavailable', 'kms down');
+    advance(1001);
+    expect((await ask()).status).toBe(200); // within the stale age: served
+    advance(5000);
+    expect(await ask()).toEqual({ status: 503, error: 'key_service_unavailable' });
+  });
+
+  it('a clock that moved backwards neither skips the refresh nor extends the stale bound', async () => {
+    const state: { fail: KeyProviderError | null; calls: number } = { fail: null, calls: 0 };
+    const { ask, advance } = await setup({ wrap: flaky(state), maxStaleMs: 5000 });
+    await ask();
+    advance(-60_000);
+    await ask();
+    expect(state.calls).toBe(2); // the backwards copy was not treated as fresh
+    state.fail = new KeyProviderError('unavailable', 'kms down');
+    advance(-60_000);
+    expect(await ask()).toEqual({ status: 503, error: 'key_service_unavailable' });
+  });
+
+  it('a cache window above the maximum stale age is capped by it (Codex P2)', async () => {
+    const state: { fail: KeyProviderError | null; calls: number } = { fail: null, calls: 0 };
+    const { ask, advance } = await setup({ wrap: flaky(state), cacheMs: 60_000, maxStaleMs: 5000 });
+    await ask();
+    advance(4999);
+    await ask();
+    expect(state.calls).toBe(1); // control: inside both bounds, served from cache
+    advance(1);
+    state.fail = new KeyProviderError('denied', 'HTTP 403');
+    expect(await ask()).toEqual({ status: 503, error: 'key_service_denied' });
+    expect(state.calls).toBe(2);
+  });
+
+  it('tells the Worker how old a stale copy is, inside the signed body (Codex P2)', async () => {
+    const state: { fail: KeyProviderError | null; calls: number } = { fail: null, calls: 0 };
+    const { ask, advance } = await setup({ wrap: flaky(state), maxStaleMs: 60_000 });
+    expect(JSON.parse(String((await ask()).body)).ageMs).toBe(0);
+    state.fail = new KeyProviderError('unavailable', 'kms down');
+    advance(4000);
+    const stale = await ask();
+    expect(stale.status).toBe(200);
+    expect(JSON.parse(String(stale.body)).ageMs).toBe(4000);
+  });
+
   it('drops the copy when the key service refuses (revocation takes effect)', async () => {
     const state: { fail: KeyProviderError | null; calls: number } = { fail: null, calls: 0 };
     const { ask, advance } = await setup({ wrap: flaky(state) });
     await ask();
     state.fail = new KeyProviderError('denied', 'HTTP 403');
     advance(1001);
-    const res = await ask();
-    expect(res.status).toBe(503);
-    expect(await res.json()).toEqual({ error: 'key_service_denied' });
+    expect(await ask()).toEqual({ status: 503, error: 'key_service_denied' });
     state.fail = new KeyProviderError('unavailable', 'kms down');
     expect((await ask()).status).toBe(503); // nothing stale left to serve
   });
@@ -313,7 +464,7 @@ describe('during a provider switch (previous.env)', () => {
     const server = createKeyAgent({
       provider: setup.newKey,
       previousProvider: previous ? previousProvider(setup.dir) : undefined,
-      bundleDir: setup.dir,
+      bundles: openBundleStore({ dir: setup.dir }),
       allowedUids: new Set([7101]),
       cacheMs: 0,
       peerUid: () => 7101,
@@ -321,49 +472,59 @@ describe('during a provider switch (previous.env)', () => {
     });
     await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
     servers.push(server);
-    return await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/secrets`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-sam-key-agent': '1' },
-      body: JSON.stringify({ bundleId, nonce: NONCE, installationId: INSTALL }),
+    return await askFramed((server.address() as AddressInfo).port, {
+      op: 'secrets',
+      bundleId,
+      nonce: NONCE,
+      installationId: INSTALL,
     });
   }
 
   it("opens the running version's old bundle with the previous provider and the new one with the new", async () => {
     const setup = await twoKeys();
-    expect((await ask(true, setup.oldId, setup)).status).toBe(200);
-    expect((await ask(true, setup.newId, setup)).status).toBe(200);
+    expect((await ask(true, setup.oldId, setup))?.status).toBe(200);
+    expect((await ask(true, setup.newId, setup))?.status).toBe(200);
   });
 
   it('control: without previous.env the old bundle is refused (the switch window is what serves it)', async () => {
     const setup = await twoKeys();
-    const refused = await ask(false, setup.oldId, setup);
-    expect(refused.status).toBe(503);
-    expect(await refused.json()).toEqual({ error: 'key_service_config' });
-    expect((await ask(false, setup.newId, setup)).status).toBe(200);
+    expect(await ask(false, setup.oldId, setup)).toEqual({
+      status: 503,
+      error: 'key_service_config',
+    });
+    expect((await ask(false, setup.newId, setup))?.status).toBe(200);
   });
 });
 
 describe('legacy-plaintext box and start-up', () => {
   it('stays healthy for compose but refuses every secrets request', async () => {
-    const server = createLegacyAgent();
+    const server = createLegacyAgent(500);
     await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
     servers.push(server);
-    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    const health = await fetch(`${url}/healthz`);
-    expect(health.status).toBe(200);
-    expect(await health.json()).toEqual({ ok: true, sealed: false });
-    const asked = await fetch(`${url}/v1/secrets`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-sam-key-agent': '1' },
-      body: JSON.stringify({ bundleId: 'a'.repeat(32), nonce: NONCE, installationId: INSTALL }),
-    });
-    expect(asked.status).toBe(503);
-    expect(await asked.json()).toEqual({ error: 'sealed_secrets_off' });
+    const port = (server.address() as AddressInfo).port;
+    await expect(pingKeyAgent(port)).resolves.toEqual({ sealed: false });
+    expect(
+      await askFramed(port, {
+        op: 'secrets',
+        bundleId: 'a'.repeat(32),
+        nonce: NONCE,
+        installationId: INSTALL,
+      })
+    ).toEqual({ status: 503, error: 'sealed_secrets_off' });
   });
 
-  it('does not change uid unless it runs as root', () => {
-    if (process.getuid?.() === 0) return; // the root path is exercised by the compose live test
-    expect(dropToOwnerOf(tmpdir())).toBeNull();
+  // F10: the agent no longer starts as root to drop privileges; it refuses root outright.
+  it('refuses to run as root, and as a user that cannot read its state', () => {
+    if (process.getuid?.() === 0) {
+      expect(() => assertRunsAsStateOwner(tmpdir())).toThrow(/must not run as root/);
+      return;
+    }
+    expect(() =>
+      assertRunsAsStateOwner(mkdtempSync(join(tmpdir(), 'sam-agent-own-')))
+    ).not.toThrow();
+    expect(() => assertRunsAsStateOwner(join(tmpdir(), 'sam-agent-missing-dir'))).toThrow(
+      /cannot read/
+    );
   });
 });
 

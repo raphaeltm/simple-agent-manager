@@ -10,31 +10,51 @@ import { join } from 'node:path';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
 import {
   applyKeyChoice,
-  candidateFix,
   type ChooseInput,
-  configuredKeyFloors,
   explicitKeyProvider,
   readKeyChoice,
-  sealingStrength,
   tryKeyCandidate,
 } from './key-choice.js';
+import { candidateFix, configuredKeyFloors, sealingStrength } from './key-floors.js';
 import {
-  KEY_AGENT_DIR,
+  bundleStoreFor,
+  keyAgentUidLine,
   keyServiceSettings,
   LEGACY_KEY_PROVIDER,
   listBundles,
 } from './key-service.js';
+import { PLATFORM_KEYS_FILE } from './platform-keys.js';
 
 type Box = Readonly<Record<string, string>>;
 
 /** Files that hold Worker secrets in plaintext on a box that has not finished migrating. */
 export const PLAINTEXT_SECRET_FILES = ['platform-keys.json', 'secrets.env'] as const;
 
-export function describeKeyStatus(box: Box, stateDir: string): string[] {
+/**
+ * What a box sealed with the key file can never do, said wherever its provider is shown
+ * (README "Sealed secrets" says the same). The key that opens its bundles exists only on this
+ * box (and in whatever copy the operator kept), so another machine cannot open them: the box
+ * cannot be replaced, rebuilt or moved, and losing its disk without that copy loses every
+ * stored credential.
+ */
+export const FILE_PROVIDER_NOT_REPLACEABLE =
+  'NOT REPLACEABLE: this box can never be replaced or rebuilt on another machine. Only the key ' +
+  'file opens its sealed secrets, and it lives on this box. Keep a copy off the box ' +
+  '(`pnpm selfhost:secrets key-file`); to make the box replaceable, move it to a key held off ' +
+  'the box (`pnpm selfhost:secrets switch --to auto`, or a cloud KMS / Vault provider).';
+
+export async function describeKeyStatus(box: Box, stateDir: string): Promise<string[]> {
   const lines: string[] = [];
   const explicit = explicitKeyProvider(box);
   const recorded = readKeyChoice(stateDir);
   if (!explicit && !recorded) {
+    // A box already on plaintext deploy vars is sealed only by migrate (deploy-keys.ts holdsPlaintext).
+    if (existsSync(join(stateDir, PLATFORM_KEYS_FILE))) {
+      return [
+        'key provider: none chosen yet; this box runs on plaintext deploy vars. Run ' +
+          '`pnpm selfhost:secrets migrate` to seal it.',
+      ];
+    }
     return [
       'key provider: none chosen yet. Run `pnpm selfhost:deploy --init` to choose one and seal.',
     ];
@@ -63,13 +83,21 @@ export function describeKeyStatus(box: Box, stateDir: string): string[] {
           lines.push(
             `  key file:   ${settings.hostEnv.SAM_KEY_FILE} (not in backups; keep a copy off this box)`
           );
+          lines.push(`  ${FILE_PROVIDER_NOT_REPLACEABLE}`);
         }
+        const uid = box.SAM_KEY_AGENT_UID?.trim();
+        lines.push(
+          `  agent uid:  ${uid ? uid : 'not set'}` +
+            (`SAM_KEY_AGENT_UID=${uid ?? ''}` === keyAgentUidLine()
+              ? ' (owns the state directory)'
+              : ` (set ${keyAgentUidLine()} in .env)`)
+        );
       }
     } catch (error) {
       lines.push(`  key:        unavailable (${error instanceof Error ? error.message : error})`);
     }
   }
-  const bundles = listBundles(join(stateDir, KEY_AGENT_DIR, 'bundles'), () => undefined);
+  const bundles = await listBundles(bundleStoreFor(stateDir), () => undefined);
   lines.push(`bundles: ${bundles.length}`);
   for (const bundle of bundles) {
     lines.push(`  ${bundle.bundleId}  ${bundle.createdAt}  ${bundle.provider} ${bundle.keyRef}`);
@@ -79,6 +107,13 @@ export function describeKeyStatus(box: Box, stateDir: string): string[] {
     lines.push(
       `plaintext secret files still on the box: ${plaintext.join(', ')} ` +
         '(pnpm selfhost:secrets migrate verifies the sealed deploy and removes them)'
+    );
+  }
+  if (provider !== LEGACY_KEY_PROVIDER) {
+    lines.push(
+      'older copies: deploy versions and backups made before this box was sealed still hold ' +
+        'plaintext secrets until those secrets are rotated (`pnpm selfhost:secrets plaintext` ' +
+        'lists where, without values)'
     );
   }
   return lines;

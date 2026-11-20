@@ -16,6 +16,7 @@ import {
   renderFenceRuleset,
   resolveObjectStoreEndpoints,
 } from './egress-fence.js';
+import { sealedKeyAgentPort } from './key-box.js';
 import { mailEgressEndpoints } from './mail-settings.js';
 import { writePrivateFile } from './secret-files.js';
 
@@ -113,6 +114,7 @@ export async function writeFenceFiles(input: {
       .flat()
       .map((entry) => entry?.address ?? '')
       .filter(Boolean),
+    keyAgentPort: sealedKeyAgentPort(box, stateDir),
   });
   const rulesPath = join(stateDir, FENCE_RULES_FILE);
   const rules = renderFenceRuleset(plan);

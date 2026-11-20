@@ -3,9 +3,15 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { BoxContext } from './backup-lib';
+import { RESTORED_IDENTITY_FILE } from './key-service';
 import { assertOperatorExecution } from './operator-only';
 import { readRestoredInstallationId } from './restore-progress';
 import { readPrivateJson, readSecretsFile, writePrivateFile } from './secret-files';
+import { sealedInstallationId } from './state-installation';
+
+// A sealed box keeps its platform keys in sealed bundles the restore cannot open (the key file and
+// key-service credentials are never in a backup). The restore records the clone's new identity in
+// RESTORED_IDENTITY_FILE instead, and the target's `pnpm selfhost:deploy --init` seals it in.
 
 /** Stable for a retry of this target; never adopts the source fleet's VM ownership labels. */
 export function restoredInstallationId(ctx: BoxContext, source: string): string {
@@ -27,7 +33,10 @@ function sourceKeys(ctx: BoxContext, state: string): Record<string, string> {
   if (operatorSecrets.SAM_INSTALLATION_ID !== undefined)
     throw new Error('Restore refuses an explicit installation identity override');
   const path = join(state, 'platform-keys.json');
-  const keys = readPrivateJson(path);
+  // A sealed backup: the identity is in the bundles' headers, the keys stay sealed.
+  const keys = existsSync(path)
+    ? readPrivateJson(path)
+    : { SAM_INSTALLATION_ID: sealedInstallationId(state) ?? '' };
   if (!/^[a-f0-9]{32}$/.test(keys.SAM_INSTALLATION_ID ?? ''))
     throw new Error('Invalid backup installation identity');
   return keys;
@@ -44,7 +53,14 @@ export function projectRestoreIdentity(ctx: BoxContext, state: string, target?: 
   if (!/^[a-f0-9]{32}$/.test(identity) || identity === keys.SAM_INSTALLATION_ID)
     throw new Error('Invalid restore target installation identity');
   const path = join(state, 'platform-keys.json');
-  writePrivateFile(path, JSON.stringify({ ...keys, SAM_INSTALLATION_ID: identity }));
+  if (existsSync(path)) {
+    writePrivateFile(path, JSON.stringify({ ...keys, SAM_INSTALLATION_ID: identity }));
+  } else {
+    writePrivateFile(
+      join(state, RESTORED_IDENTITY_FILE),
+      `${JSON.stringify({ SOURCE_INSTALLATION_ID: keys.SAM_INSTALLATION_ID, SAM_INSTALLATION_ID: identity })}\n`
+    );
+  }
   const configPath = join(state, 'project', 'wrangler.json');
   if (existsSync(configPath)) {
     let config: { vars?: Record<string, unknown> };

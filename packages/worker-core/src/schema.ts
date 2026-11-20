@@ -5273,6 +5273,8 @@ export const platformFeedbackTriages = sqliteTable(
     evidenceRefs: text('evidence_refs').notNull(),
     diagnosisId: text('diagnosis_id').references(() => debugDiagnoses.id, { onDelete: 'set null' }),
     ideaId: text('idea_id').references(() => tasks.id, { onDelete: 'set null' }),
+    /** `tasks.updated_at` the pipeline last wrote to `idea_id`, `'released'`, or NULL (legacy). */
+    ideaOwnedAt: text('idea_owned_at'),
     claimToken: text('claim_token'),
     claimExpiresAt: integer('claim_expires_at'),
     failureCount: integer('failure_count').notNull().default(0),

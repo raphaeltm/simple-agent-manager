@@ -16,6 +16,7 @@ export const ANOMALY_CLASSES = [
   'session_wake_stalled',
   'workspace_deletion_quarantine',
   'pending_incident',
+  'incident_dispatch_stalled',
 ] as const;
 export type AnomalyClass = (typeof ANOMALY_CLASSES)[number];
 

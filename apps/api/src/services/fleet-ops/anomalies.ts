@@ -22,6 +22,7 @@ import { log } from '../../lib/logger';
 import { resolveCleanupConfig } from '../../scheduled/node-cleanup/config';
 import { deriveNodeHealth } from '../node-health';
 import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../workspace-reservation-usage';
+import { incidentDispatchStalled, pendingIncidents } from './anomalies-incidents';
 import { snapshotFailures, stalledWakes } from './anomalies-sessions';
 import {
   ANOMALY_CLASSES,
@@ -308,31 +309,6 @@ async function deletionQuarantine(ctx: SweepContext): Promise<AnomalyClassResult
   };
 }
 
-async function pendingIncidents(ctx: SweepContext): Promise<AnomalyClassResult> {
-  const rows = await ctx.env.DATABASE.prepare(
-    `SELECT signature, source, severity, occurrence_count, last_seen_at,
-            COUNT(*) OVER () AS total
-     FROM platform_feedback_triages
-     WHERE queue_state = 'pending'
-     ORDER BY CASE severity WHEN 'error' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END ASC,
-       last_seen_at DESC, signature ASC
-     LIMIT ?`
-  )
-    .bind(ctx.cap)
-    .all<Row>();
-  return result('pending_incident', rows.results ?? [], (row) => {
-    const lastSeen = int(row.last_seen_at);
-    return {
-      // Signatures derive from reported error text; strip control characters and markers.
-      ids: { signature: neutralizeUntrustedText(text(row.signature) ?? '') || null },
-      reason:
-        `Pending ${text(row.severity) ?? 'unknown'} incident from ${text(row.source) ?? 'unknown'} ` +
-        `seen ${int(row.occurrence_count)} time(s) (read with get_incident).`,
-      observedAt: lastSeen ? new Date(lastSeen).toISOString() : null,
-    };
-  });
-}
-
 const SWEEPS: Record<AnomalyClass, (ctx: SweepContext) => Promise<AnomalyClassResult>> = {
   empty_node_past_warm_grace: emptyNodes,
   stale_node_heartbeat: staleHeartbeats,
@@ -343,6 +319,7 @@ const SWEEPS: Record<AnomalyClass, (ctx: SweepContext) => Promise<AnomalyClassRe
   session_wake_stalled: stalledWakes,
   workspace_deletion_quarantine: deletionQuarantine,
   pending_incident: pendingIncidents,
+  incident_dispatch_stalled: incidentDispatchStalled,
 };
 
 export async function findAnomalies(
@@ -377,6 +354,7 @@ export async function findAnomalies(
       destroyingNodeHours: settings.destroyingNodeHours,
       lookbackHours: settings.lookbackHours,
       wakingMinutes: settings.wakingMinutes,
+      incidentDispatchStallHours: settings.incidentDispatchStallHours,
       maxPerClass: ctx.cap,
     },
     classes,

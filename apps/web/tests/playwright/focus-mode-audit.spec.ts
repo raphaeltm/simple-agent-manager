@@ -1,6 +1,10 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-import { assertNoClippedOverflow, assertNoOverflow } from './audit-helpers';
+import {
+  assertNoClippedOverflow,
+  assertNoOverflow,
+  assertNoScrollingGlassPanes,
+} from './audit-helpers';
 
 test.use({
   video: process.env.ZEN_RECORD_VIDEO ? { mode: 'on', size: { width: 1280, height: 800 } } : 'off',
@@ -218,6 +222,7 @@ test.describe('Focus Mode sidebars — Desktop', () => {
       page.getByRole('button', { name: 'Default', exact: true, pressed: true })
     ).toBeVisible();
     await assertNoOverflow(page);
+    await assertNoScrollingGlassPanes(page);
     await screenshot(page, 'focus-mode-default-desktop');
   });
 
@@ -262,6 +267,8 @@ test.describe('Focus Mode sidebars — Desktop', () => {
       page.getByRole('button', { name: 'Zen', exact: true, pressed: true })
     ).toBeVisible();
     await assertNoClippedOverflow(page);
+    // The peek overlay is open here: its content scrolls inside it, not the overlay itself.
+    await assertNoScrollingGlassPanes(page);
     await screenshot(page, 'zen-navigation-project-desktop');
     for (let i = 0; i < 3; i++) {
       await page.getByRole('button', { name: 'Show global navigation' }).click();

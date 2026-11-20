@@ -1,5 +1,5 @@
 /** Drive the production upgrade trigger with a deployed-state store and command runner. */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -164,12 +164,28 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
   rmSync(root, { recursive: true, force: true });
 });
 
 const deployedSteps = () => steps.filter((step) => !step.startsWith('pnpm exec '));
 
 describe('runUpgrade', () => {
+  // Coordinator check on #2933 (same bug class as the fence-mode rollback finding): a sealed box's
+  // key agent runs as the state owner. An upgrade by another uid (root via sudo) would snapshot
+  // and roll back as that user, leaving key-agent/ files the agent cannot read.
+  it('refuses a sealed box upgraded by a uid other than the state owner, before any step', async () => {
+    mkdirSync(join(root, 'state/key-agent/bundles'), { recursive: true });
+    const owner = statSync(join(root, 'state')).uid;
+    const getuid = vi.spyOn(process, 'getuid').mockReturnValue(owner + 1);
+    await expect(upgrade()).rejects.toThrow(/secrets are sealed; run it as the owner/);
+    expect(steps).toEqual([]);
+    getuid.mockReturnValue(owner);
+    // Control: the owner passes the same gate and the upgrade runs.
+    await upgrade();
+    expect(steps).toContain('pnpm selfhost:deploy');
+  });
+
   it('backs up after checking active state, then checks target tags before any deployment', async () => {
     const result = await upgrade();
     expect(steps.indexOf('BACKUP')).toBeGreaterThan(

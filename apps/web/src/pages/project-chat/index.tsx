@@ -292,55 +292,58 @@ export function ProjectChat() {
         {state.showNewChatInput ? (
           /* New chat / empty state */
           <div className={`flex min-h-0 flex-1 flex-col ${COLUMN_GAP}`}>
-            <Pane
-              variant="quiet"
-              className={`flex min-h-0 flex-1 flex-col items-center gap-3 overflow-y-auto ${isMobile ? 'justify-start p-4 pb-8' : 'justify-center p-8'}`}
-            >
-              {state.provisioning ? (
-                <ProvisioningIndicator
-                  state={state.provisioning}
-                  bootLogCount={state.bootLogs.length}
-                  onViewLogs={() => state.setBootLogPanelOpen(true)}
-                  className="w-full max-w-[720px]"
-                />
-              ) : showProfileCards ? (
-                <NewChatProfileCards
-                  profiles={state.agentProfiles}
-                  pickerState={state.profilePicker.state}
-                  loading={state.profilePicker.picker.status === 'loading'}
-                  selectedProfileId={state.selectedProfileId}
-                  usages={profileUsages}
-                  onSelect={state.setSelectedProfileId}
-                  onShowAll={() => state.openProfileSheet(null)}
-                />
-              ) : (
-                <>
-                  <img
-                    src="/sam-head.png"
-                    alt=""
-                    aria-hidden="true"
-                    className="mb-1 h-12 w-12 object-contain drop-shadow-[0_6px_18px_rgb(34_197_94/0.35)]"
+            {/* The pane is the frame, the inner div scrolls (sam-glass-design-system.md,
+                "Scrolling panes"). */}
+            <Pane variant="quiet" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <div
+                className={`relative flex min-h-0 flex-1 flex-col items-center gap-3 overflow-y-auto ${isMobile ? 'justify-start p-4 pb-8' : 'justify-center p-8'}`}
+              >
+                {state.provisioning ? (
+                  <ProvisioningIndicator
+                    state={state.provisioning}
+                    bootLogCount={state.bootLogs.length}
+                    onViewLogs={() => state.setBootLogPanelOpen(true)}
+                    className="w-full max-w-[720px]"
                   />
-                  <span className="text-xl font-semibold text-fg-primary">
-                    What do you want to build?
-                  </span>
-                  <span className="max-w-[400px] text-center text-sm text-fg-muted">
-                    Describe the task and an agent will start working on it automatically.
-                  </span>
-                  <div className="mt-3 grid w-full max-w-[560px] grid-cols-1 gap-2.5 sm:grid-cols-2">
-                    {starterPrompts.map((prompt) => (
-                      <button
-                        key={prompt}
-                        type="button"
-                        onClick={() => state.setMessage(prompt)}
-                        className="sam-raised min-h-[48px] cursor-pointer rounded-[14px] border-0 px-4 py-2.5 text-left text-sm text-fg-primary transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
-                      >
-                        {prompt}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
+                ) : showProfileCards ? (
+                  <NewChatProfileCards
+                    profiles={state.agentProfiles}
+                    pickerState={state.profilePicker.state}
+                    loading={state.profilePicker.picker.status === 'loading'}
+                    selectedProfileId={state.selectedProfileId}
+                    usages={profileUsages}
+                    onSelect={state.setSelectedProfileId}
+                    onShowAll={() => state.openProfileSheet(null)}
+                  />
+                ) : (
+                  <>
+                    <img
+                      src="/sam-head.png"
+                      alt=""
+                      aria-hidden="true"
+                      className="mb-1 h-12 w-12 object-contain drop-shadow-[0_6px_18px_rgb(34_197_94/0.35)]"
+                    />
+                    <span className="text-xl font-semibold text-fg-primary">
+                      What do you want to build?
+                    </span>
+                    <span className="max-w-[400px] text-center text-sm text-fg-muted">
+                      Describe the task and an agent will start working on it automatically.
+                    </span>
+                    <div className="mt-3 grid w-full max-w-[560px] grid-cols-1 gap-2.5 sm:grid-cols-2">
+                      {starterPrompts.map((prompt) => (
+                        <button
+                          key={prompt}
+                          type="button"
+                          onClick={() => state.setMessage(prompt)}
+                          className="sam-raised min-h-[48px] cursor-pointer rounded-[14px] border-0 px-4 py-2.5 text-left text-sm text-fg-primary transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                        >
+                          {prompt}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             </Pane>
             {state.pendingDerived && (
               <DerivedSessionBanner

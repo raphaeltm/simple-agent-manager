@@ -16,7 +16,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -25,10 +25,15 @@ import { createFileProvider } from '../../deploy/selfhost/key-agent/provider-fil
 import {
   CHILD_TEST_TIMEOUT_MS,
   CLOSED_HOST,
-  runDeploy,
+  noStackDocker,
+  runDeploy as harnessRunDeploy,
   runTsx,
   writeBox as write,
 } from './deploy-harness.js';
+
+/** The real deploy entry; a second `--init` on the same state sees no running stack. */
+const runDeploy = (envFile: string, args: string[], env: NodeJS.ProcessEnv = {}) =>
+  harnessRunDeploy(envFile, args, { ...noStackDocker(dirname(envFile)), ...env });
 
 vi.setConfig({ testTimeout: CHILD_TEST_TIMEOUT_MS });
 import { ensurePlatformKeys } from './platform-keys.js';
@@ -43,7 +48,8 @@ const NO_CLOUD = [
   `SAM_AWS_IMDS_HOST=${CLOSED_HOST}`,
   `SAM_AZURE_IMDS_HOST=${CLOSED_HOST}`,
 ];
-const writeBox = (target: string, extra: string[] = []) => write(target, [...NO_CLOUD, ...extra]);
+const writeBox = (target: string, extra: string[] = []) =>
+  write(target, [...NO_CLOUD, `SAM_KEY_AGENT_UID=${process.getuid?.() ?? 0}`, ...extra]);
 
 function bundles(): string[] {
   const path = join(state, 'key-agent/bundles');
@@ -98,7 +104,7 @@ describe('pnpm selfhost:deploy --init (sealed secrets by default)', () => {
     expect(readFileSync(join(state, 'egress-fence.nft'), 'utf8')).toContain('7190');
 
     const vars = await dryRunVars(envFile);
-    expect(vars.SAM_KEY_AGENT_URL).toBe('http://127.0.0.1:7190/v1/secrets');
+    expect(vars.SAM_KEY_AGENT_ADDRESS).toBe('127.0.0.1:7190');
     const rendered = JSON.stringify(vars);
     for (const [name, value] of Object.entries(secrets)) {
       if (name === 'SAM_INSTALLATION_ID') continue;
@@ -120,7 +126,7 @@ describe('pnpm selfhost:deploy --init (sealed secrets by default)', () => {
   });
 
   it('refuses a plain deploy when no provider was ever chosen', async () => {
-    const result = await runDeploy(writeBox(dir), ['--dry-run', '--skip-vm-agent']);
+    const result = await runDeploy(writeBox(dir), ['--skip-vm-agent']);
     expect(result.status).not.toBe(0);
     expect(result.out).toContain('pnpm selfhost:deploy --init');
     expect(existsSync(join(state, 'key-agent/choice.json'))).toBe(false);
@@ -139,7 +145,7 @@ describe('pnpm selfhost:deploy --init (sealed secrets by default)', () => {
     expect(readFileSync(join(state, 'egress-fence.nft'), 'utf8')).not.toContain('7190');
     const vars = await dryRunVars(envFile);
     expect(vars.ENCRYPTION_KEY).toBe('<redacted>');
-    expect(vars.SAM_KEY_AGENT_URL).toBeUndefined();
+    expect(vars.SAM_KEY_AGENT_ADDRESS).toBeUndefined();
   });
 
   it('refuses the spike-era `off` with the new name', async () => {
@@ -151,11 +157,12 @@ describe('pnpm selfhost:deploy --init (sealed secrets by default)', () => {
   it('seals an existing plaintext install unchanged (its keys and secrets.env)', async () => {
     const envFile = writeBox(dir);
     mkdirSync(state, { mode: 0o700 });
-    const legacy = ensurePlatformKeys(join(state, 'platform-keys.json')).keys;
+    const legacy = ensurePlatformKeys(state, 'init').keys;
     writeFileSync(join(state, 'secrets.env'), `GITHUB_CLIENT_SECRET=${OPERATOR_SECRET}\n`, {
       mode: 0o600,
     });
-    const init = await runDeploy(envFile, ['--init']);
+    // --seal: what `secrets migrate` passes; a plain --init keeps it plaintext (deploy-hold-plaintext.test.ts).
+    const init = await runDeploy(envFile, ['--init', '--seal']);
     expect(init.status, init.out).toBe(0);
     const secrets = await sealedSecrets();
     expect(secrets.ENCRYPTION_KEY).toBe(legacy.ENCRYPTION_KEY);
@@ -235,7 +242,7 @@ describe('pnpm selfhost:deploy --init (sealed secrets by default)', () => {
     writeBox(dir, ['SAM_KEY_PROVIDER=legacy-plaintext']);
     const result = await runDeploy(envFile, ['--init']);
     expect(result.status).not.toBe(0);
-    expect(result.out).toContain('lose every stored credential');
+    expect(result.out).toContain('every stored credential unreadable');
     expect(existsSync(join(state, 'platform-keys.json'))).toBe(false);
     expect((await sealedSecrets()).ENCRYPTION_KEY).toBe(sealed.ENCRYPTION_KEY);
     // The refused override left the recorded choice alone: removing the line just works again.

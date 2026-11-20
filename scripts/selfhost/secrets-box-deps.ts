@@ -4,12 +4,14 @@
  */
 import { spawnSync } from 'node:child_process';
 
+import { pingKeyAgent } from '../../deploy/selfhost/key-agent/healthcheck.ts';
 import { REPO_ROOT } from './backup-cli';
 import { type BoxContext, composeArgs } from './backup-lib';
+import { readObject } from './bucket-objects';
 import { adoptAndCheck } from './celld-adopt';
 import { detectKeyCandidates } from './key-platforms';
 import { keyAgentPort } from './key-service';
-import { knownSecrets, scanDeployVersions } from './plaintext-scan';
+import { knownSecrets, manifestVars, scanDeployVersions } from './plaintext-scan';
 import type { MigrateDeps } from './secrets-migrate';
 import { preflightSealedSecrets } from './secrets-preflight';
 import type { SwitchDeps } from './secrets-switch';
@@ -30,12 +32,8 @@ function visible(command: string, args: string[]): void {
 async function waitForSealedAgent(port: number): Promise<void> {
   const deadline = Date.now() + DEFAULT_AGENT_WAIT_MS;
   for (;;) {
-    const response = await fetch(`http://127.0.0.1:${port}/healthz`, {
-      signal: AbortSignal.timeout(3000),
-    }).catch(() => null);
-    const body = response?.ok ? ((await response.json()) as { sealed?: unknown }) : null;
     // The agent of a sealed box; a legacy one answers `sealed: false`.
-    if (body && body.sealed !== false) return;
+    if ((await pingKeyAgent(port).catch(() => null))?.sealed) return;
     if (Date.now() > deadline)
       throw new Error(`the key agent did not come up on 127.0.0.1:${port}`);
     await sleep(POLL_MS);
@@ -60,9 +58,16 @@ export function boxSwitchDeps(ctx: BoxContext): SwitchDeps {
 export function boxMigrateDeps(ctx: BoxContext): MigrateDeps {
   const { box, envFile } = ctx;
   const deployArgs = ['selfhost:deploy', '--env-file', envFile];
+  const currentVersion = async () => {
+    const versions = scanDeployVersions(ctx, await knownSecrets(box, ctx.stateDir));
+    const current = versions.find((v) => v.referencedBy.includes('deploy/current.json'));
+    if (!current) throw new Error('deploy/current.json names no version in the bucket');
+    return current;
+  };
   return {
     log: ctx.log,
-    init: async () => visible('pnpm', [...deployArgs, '--init']),
+    // --seal: this is the one deploy allowed to seal a box running on plaintext deploy vars.
+    init: async () => visible('pnpm', [...deployArgs, '--init', '--seal']),
     preflight: preflightSealedSecrets,
     startStack: async () => {
       visible('docker', composeArgs(ctx, ['up', '-d', '--build']));
@@ -71,11 +76,10 @@ export function boxMigrateDeps(ctx: BoxContext): MigrateDeps {
     deploy: async (legacy) =>
       visible('pnpm', [...deployArgs, ...(legacy ? ['--key-provider', 'legacy-plaintext'] : [])]),
     adoptAndCheck: async () => adoptAndCheck(box),
-    currentVersionSecrets: async () => {
-      const versions = scanDeployVersions(ctx, await knownSecrets(box, ctx.stateDir));
-      const current = versions.find((v) => v.referencedBy.includes('deploy/current.json'));
-      if (!current) throw new Error('deploy/current.json names no version in the bucket');
-      return current.secretNames;
+    currentVersionSecrets: async () => (await currentVersion()).secretNames,
+    currentVersionBundleId: async () => {
+      const manifest = `${(await currentVersion()).prefix}/manifest.json`;
+      return manifestVars(readObject(ctx, manifest)).SAM_SECRET_BUNDLE_ID ?? null;
     },
   };
 }

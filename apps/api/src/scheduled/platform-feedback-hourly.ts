@@ -1,22 +1,30 @@
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { runMonthlyCostAggregation } from '../services/ai-monthly-cost-cron';
-import { runPlatformFeedbackTriage } from '../services/platform-feedback-triage';
+import {
+  reconcileIncidentIdeas,
+  runPlatformFeedbackTriage,
+} from '../services/platform-feedback-triage';
 
 export const PLATFORM_FEEDBACK_HOURLY_CRON = '30 * * * *';
 
 export interface HourlyMaintenanceDeps {
   monthlyCost?: typeof runMonthlyCostAggregation;
   feedbackTriage?: typeof runPlatformFeedbackTriage;
+  incidentIdeas?: typeof reconcileIncidentIdeas;
 }
 
-/** Runs independent hourly jobs without allowing one failure to suppress the other. */
+/** Runs independent hourly jobs without allowing one failure to suppress another. */
 export async function runHourlyPlatformMaintenance(env: Env, deps: HourlyMaintenanceDeps = {}) {
   const [monthlyCost, feedbackTriage] = await Promise.allSettled([
     (deps.monthlyCost ?? runMonthlyCostAggregation)(env),
     (deps.feedbackTriage ?? runPlatformFeedbackTriage)(env, 'cron'),
   ]);
-  return { monthlyCost, feedbackTriage };
+  // After triage, so ideas created or reopened this hour are reconciled in the same run.
+  const [incidentIdeas] = await Promise.allSettled([
+    (deps.incidentIdeas ?? reconcileIncidentIdeas)(env),
+  ]);
+  return { monthlyCost, feedbackTriage, incidentIdeas };
 }
 
 export function isHourlyPlatformMaintenanceCron(cron: string): boolean {
@@ -36,6 +44,8 @@ export function scheduleHourlyPlatformMaintenance(
       const result = hourly.monthlyCost.status === 'fulfilled' ? hourly.monthlyCost.value : null;
       const feedbackTriage =
         hourly.feedbackTriage.status === 'fulfilled' ? hourly.feedbackTriage.value : null;
+      const incidentIdeas =
+        hourly.incidentIdeas.status === 'fulfilled' ? hourly.incidentIdeas.value : null;
       log.info('cron.completed', {
         cron,
         type: 'monthly-cost-aggregation',
@@ -51,6 +61,13 @@ export function scheduleHourlyPlatformMaintenance(
         feedbackTriageGroupsFailed: feedbackTriage?.groupsFailed ?? 0,
         feedbackTriageGroupsBudgetDeferred: feedbackTriage?.groupsBudgetDeferred ?? 0,
         feedbackTriageFailureReasons: feedbackTriage?.failureReasons ?? [],
+        incidentIdeasFailed: hourly.incidentIdeas.status === 'rejected',
+        incidentIdeasAdopted: incidentIdeas?.adopted ?? 0,
+        incidentIdeasCancelled: incidentIdeas?.cancelled ?? 0,
+        incidentIdeasRetitled: incidentIdeas?.retitled ?? 0,
+        incidentIdeasReleased: incidentIdeas?.released ?? 0,
+        incidentIdeasFailedSteps: incidentIdeas?.failedSteps ?? [],
+        incidentIdeasDeadlineReached: incidentIdeas?.deadlineReached ?? false,
         monthlyCostUsersUpdated: result?.usersUpdated ?? 0,
         monthlyCostTotalEntries: result?.totalEntries ?? 0,
         monthlyCostErrors: result?.errors ?? 0,

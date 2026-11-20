@@ -1,0 +1,13 @@
+-- The `tasks.updated_at` value the incident pipeline last wrote to its own idea
+-- (`platform_feedback_triages.idea_id`). While the idea's `updated_at` still equals this value and
+-- the idea was filed by the pipeline (`tasks.triggered_by = 'incident'`), nobody else has edited,
+-- promoted or reprioritised it, so it is the pipeline's bookkeeping rather than tracked work.
+--
+-- Values: an ISO timestamp (owned), 'released' (a person or agent engaged with the idea; the
+-- pipeline never writes to it again), or NULL (the row predates this column).
+--
+-- Existing rows stay NULL and therefore count as tracked work, exactly as before. Code adopts a
+-- legacy idea only after proving it untouched: generated title and body, priority 0, draft, and
+-- no chat links, notes, files or pull requests in the project's Durable Object
+-- (services/platform-feedback-triage/idea-reconciliation.ts). No data is rewritten here.
+ALTER TABLE platform_feedback_triages ADD COLUMN idea_owned_at TEXT;

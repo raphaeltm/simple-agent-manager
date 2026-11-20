@@ -23,6 +23,7 @@ import { celldPort, intEnv, sleep, waitForHealth } from './deploy-steps.js';
 const DEFAULT_ADOPT_CHECK_WINDOW_MS = 30_000;
 const DEFAULT_ADOPT_POLL_INTERVAL_MS = 2000;
 const DEFAULT_RELOAD_REQUEST_TIMEOUT_MS = 60_000;
+const DEFAULT_HEALTH_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_ROUTE_REQUEST_TIMEOUT_MS = 10_000;
 /** The agent sign-in exchange route (apps/api/src/services/agent-sign-in/config.ts). */
 export const AGENT_SIGN_IN_PATH = '/api/auth/workload-identity-login';
@@ -51,7 +52,7 @@ function apiHeaders(box: Box): Record<string, string> {
 }
 
 /** One `POST /reload` on celld's internal listener. Never throws. */
-async function requestAdoption(box: Box): Promise<AdoptionResult> {
+export async function requestAdoption(box: Box): Promise<AdoptionResult> {
   const internal = box.CELLD_INTERNAL_PORT || '7001';
   const reload = await fetch(`http://127.0.0.1:${internal}/reload`, {
     method: 'POST',
@@ -125,6 +126,41 @@ export async function adoptNewDeployment(box: Box): Promise<string> {
     `${result.detail}. celld adopts it by itself within CELLD_DEPLOY_POLL_S (default 30 s); ` +
       'check docker compose ps and the celld log, then run pnpm selfhost:deploy again.'
   );
+}
+
+/**
+ * celld adopts the newest deployment now; then the API must answer its health check. Both are
+ * retried until the window ends (the reload only re-reads deploy/current.json, so repeating it is
+ * safe), as `pnpm selfhost:deploy`'s own health wait does (waitForHealth in deploy-steps.ts).
+ * `pnpm selfhost:secrets migrate` and `switch` use the answer to decide whether to roll back.
+ */
+export async function adoptAndCheck(box: Box): Promise<{ healthy: boolean; detail: string }> {
+  const result = await pollWithinWindow(
+    () => adoptAndCheckOnce(box),
+    (r) => r.healthy || Boolean(r.final),
+    windowDeadline()
+  );
+  return { healthy: result.healthy, detail: result.detail };
+}
+
+/** `final`: a version that did not build; retrying cannot change the answer. */
+async function adoptAndCheckOnce(
+  box: Box
+): Promise<{ healthy: boolean; detail: string; final?: boolean }> {
+  const adoption = await requestAdoption(box);
+  if (!adoption.adopted) {
+    return { healthy: false, detail: adoption.detail, final: adoption.buildFailed };
+  }
+  const health = await fetch(`http://127.0.0.1:${celldPort(box)}/health`, {
+    headers: apiHeaders(box),
+    signal: AbortSignal.timeout(DEFAULT_HEALTH_REQUEST_TIMEOUT_MS),
+  }).catch((error: unknown) => error);
+  if (!(health instanceof Response)) return { healthy: false, detail: String(health) };
+  if (health.ok) return { healthy: true, detail: 'HTTP 200' };
+  const body = (await health.text()).slice(0, MAX_DETAIL_CHARS);
+  const code = /"code"\s*:\s*"([A-Z_]+)"/.exec(body)?.[1];
+  const suffix = code ? ` ${code}` : '';
+  return { healthy: false, detail: `HTTP ${health.status}${suffix}` };
 }
 
 /** One POST of an empty body to the agent sign-in route: present, or what answered instead. */

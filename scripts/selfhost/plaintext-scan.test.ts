@@ -1,8 +1,9 @@
 /**
- * The plaintext listing and purge over the gs:// path (`gcloud storage ls --long`, `cat`, `rm`),
- * with an in-memory bucket. The live suite runs the same code on a real celld bucket over s3://
- * (live/plaintext-purge.live.test.ts); this covers the references that suite cannot easily
- * produce: a queue attachment and a named pointer naming an old plaintext version.
+ * The read-only plaintext listing over the gs:// path (`gcloud storage ls --long`, `cat`), with an
+ * in-memory bucket: which deploy versions and backups hold plaintext secrets (names, never
+ * values), and that the listing deletes nothing (finding F10: celld forbids deleting under
+ * `deploy/`, so the integration branch's purge did not land). The live suite runs the listing on
+ * a real celld bucket (live/sealed-default.live.test.ts).
  */
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -16,7 +17,6 @@ import {
   formatPlaintextReport,
   type KnownSecrets,
   manifestVars,
-  purgeVersions,
   scanBackups,
   scanDeployVersions,
   scanRemoteBackups,
@@ -76,8 +76,6 @@ const ctx = (): BoxContext => ({
   now: () => 0,
   log: () => undefined,
 });
-/** The fake listing dates objects 2026-11-1x; a clock well after that makes them old enough. */
-const OLD_ENOUGH = { now: Date.parse('2026-12-31T00:00:00Z') };
 const secrets: KnownSecrets = {
   names: new Set(['ENCRYPTION_KEY', 'GITHUB_CLIENT_SECRET']),
   values: [SECRET_VALUE],
@@ -98,7 +96,7 @@ beforeEach(() => {
   put('deploy/workspaces-api/v2/worker.js', 'code');
   put(
     'deploy/workspaces-api/v3/manifest.json',
-    manifest({ SAM_KEY_AGENT_URL: 'http://127.0.0.1:7190' })
+    manifest({ SAM_KEY_AGENT_ADDRESS: '127.0.0.1:7190' })
   );
   put('deploy/workspaces-api/v3/worker.js', 'code');
   const pointer = JSON.stringify({ version: 'v3', prefix: 'deploy/workspaces-api/v3' });
@@ -131,7 +129,9 @@ describe('plaintext listing', () => {
     ]);
     const report = formatPlaintextReport(ROOT, versions, [], '/backups').join('\n');
     expect(report).toContain('2 with plaintext secrets');
-    expect(report).toContain('ENCRYPTION_KEY: rotate it with pnpm selfhost:secrets rotate encryption-key');
+    expect(report).toContain('ENCRYPTION_KEY: the key every stored credential is encrypted under');
+    expect(report).toContain('platform-key rotation is not available yet');
+    expect(report).not.toContain('selfhost:secrets rotate');
     expect(report).toContain('GITHUB_CLIENT_SECRET: regenerate it in the GitHub App settings');
     expect(report).not.toContain(SECRET_VALUE);
   });
@@ -180,66 +180,24 @@ describe('backups in another bucket', () => {
   });
 });
 
-describe('purge', () => {
-  it('deletes the unreferenced plaintext versions only, object by object', () => {
-    const result = purgeVersions(ctx(), secrets, ROOT, OLD_ENOUGH);
-    expect(result.deleted.sort()).toEqual(['deploy/workspaces-api/v1', 'deploy/workspaces-api/v2']);
-    expect(deleted.sort()).toEqual([
-      'deploy/workspaces-api/v1/manifest.json',
-      'deploy/workspaces-api/v1/worker.js',
-      'deploy/workspaces-api/v2/manifest.json',
-      'deploy/workspaces-api/v2/worker.js',
-    ]);
-    expect(objects.has(`${ROOT}/deploy/images/abc.tar`)).toBe(true);
-  });
-
-  it('never deletes a plaintext version a queue attachment still names', () => {
-    put(
-      'deploy/queues/jobs/consumer.json',
-      JSON.stringify({
-        consumer: {
-          script_name: 'workspaces-api',
-          version: 'v1',
-          prefix: 'deploy/workspaces-api/v1',
-        },
-      })
-    );
-    const result = purgeVersions(ctx(), secrets, ROOT, OLD_ENOUGH);
-    expect(result.deleted).toEqual(['deploy/workspaces-api/v2']);
-    expect(result.skipped).toEqual(['deploy/workspaces-api/v1 (still referenced)']);
-    expect(objects.has(`${ROOT}/deploy/workspaces-api/v1/manifest.json`)).toBe(true);
-  });
-
-  it('refuses without the exact bucket confirmation, and while the current version holds plaintext', () => {
-    expect(() => purgeVersions(ctx(), secrets, 'gs://other')).toThrow(
-      /--confirm gs:\/\/fleet\/celld/
-    );
-    put('deploy/current.json', JSON.stringify({ prefix: 'deploy/workspaces-api/v1' }));
-    expect(() => purgeVersions(ctx(), secrets, ROOT, OLD_ENOUGH)).toThrow(
-      /current deploy version still holds plaintext/
-    );
+// F10: the listing never deletes. Before, an opt-in `--purge` deleted old versions under
+// `deploy/`, which celld's documentation forbids operators to touch; its report advertised it.
+describe('deletes nothing', () => {
+  it('lists every plaintext version (liveness) without one delete, and offers no purge', () => {
+    const versions = scanDeployVersions(ctx(), secrets);
+    expect(versions.filter((v) => v.secretNames.length > 0)).toHaveLength(2);
+    const report = formatPlaintextReport(ROOT, versions, [], '/backups').join('\n');
+    expect(report).toContain('not read by celld; still holds plaintext');
+    expect(report).toContain('SAM does not delete old deploy versions');
+    expect(report).not.toMatch(/--purge|purgeable/);
     expect(deleted).toEqual([]);
+    expect(
+      [...objects.keys()].filter((k) => k.includes('/v1/') || k.includes('/v2/'))
+    ).toHaveLength(4);
   });
 
-  it('counts a holder that names only the version id as a reference (fails toward keeping)', () => {
-    put('deploy/workspaces-api/current.json', JSON.stringify({ version: 'v2' }));
-    put('deploy/current.json', JSON.stringify({ version: 'v3' }));
-    const result = purgeVersions(ctx(), secrets, ROOT, OLD_ENOUGH);
-    expect(result.deleted).toEqual(['deploy/workspaces-api/v1']);
-    expect(objects.has(`${ROOT}/deploy/workspaces-api/v2/manifest.json`)).toBe(true);
-  });
-
-  it('refuses when a pointer or attachment names no version it can recognise', () => {
-    put('deploy/queues/jobs/consumer.json', JSON.stringify({ consumer: { script_name: 'x' } }));
-    expect(() => purgeVersions(ctx(), secrets, ROOT, OLD_ENOUGH)).toThrow(
-      /no known deploy version is named in deploy\/queues\/jobs\/consumer\.json/
-    );
-    expect(deleted).toEqual([]);
-  });
-
-  it('never deletes a version written within the minimum age (a deploy may still be writing it)', () => {
-    const result = purgeVersions(ctx(), secrets, ROOT, { now: Date.parse('2026-11-10T12:00:00Z') });
-    expect(result.deleted).toEqual([]);
-    expect(result.skipped.every((line) => line.includes('written less than 24 h ago'))).toBe(true);
+  it('exports no deletion at all', async () => {
+    const module = await import('./plaintext-scan');
+    expect(Object.keys(module).filter((name) => /purge|delete/i.test(name))).toEqual([]);
   });
 });
