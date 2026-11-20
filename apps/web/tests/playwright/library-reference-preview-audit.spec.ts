@@ -268,7 +268,7 @@ for (const viewport of [
 test.describe('Library reference preview — page underneath is untouched', () => {
   test.use({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
 
-  test('scroll position and a half-typed answer survive opening and closing a preview', async ({
+  test('scroll position and a half-typed reply survive opening and closing a preview', async ({
     page,
   }) => {
     // A long reason, so the item pane scrolls before the chips.
@@ -277,8 +277,7 @@ test.describe('Library reference preview — page underneath is untouched', () =
       (_, i) => `Paragraph ${i + 1}: the totals moved after the VAT change, see the files below.`
     ).join('\n\n');
     await openItem(page, { ...ITEM, body: longBody });
-    await page.getByRole('button', { name: 'Type a different answer' }).click();
-    const answer = page.getByRole('textbox').last();
+    const answer = page.getByRole('combobox', { name: 'Reply to the agent' });
     await answer.fill('Mostly, but the VAT line');
     // Scroll the item pane so the chips are in view, then remember where it was.
     const chip = page.getByRole('link', { name: FILES[3]!.label });
