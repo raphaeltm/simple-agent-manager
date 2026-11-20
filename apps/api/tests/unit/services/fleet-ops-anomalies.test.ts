@@ -96,6 +96,7 @@ beforeEach(() => {
     schema.workspaces,
     schema.tasks,
     schema.sessionSnapshots,
+    schema.debugDiagnoses,
     schema.platformFeedbackTriages,
   ]);
   createSchemaTables(obs, [platformErrors]);
@@ -113,7 +114,7 @@ describe('findAnomalies', () => {
 
     const report = await findAnomalies(env, FLEET_OPS_DEFAULTS, { now: NOW });
 
-    expect(report.classes).toHaveLength(9);
+    expect(report.classes).toHaveLength(10);
     for (const entry of report.classes) {
       expect(entry.error, entry.class).toBeUndefined();
       expect(entry.findings, entry.class).toEqual([]);
