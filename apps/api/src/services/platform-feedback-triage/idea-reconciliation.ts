@@ -57,8 +57,9 @@ export const D1_MAX_LIKE_PATTERN_BYTES = 50;
 const TERMINAL_INCIDENT_SQL = "('resolved', 'rejected', 'expired')";
 /**
  * `tasks.triggered_by` values a legacy pipeline idea can carry. Ideas filed before the pipeline
- * set `triggered_by = 'incident'` kept the column default, 'user' (305 of the 320 legacy ideas
- * in production on 2026-11-20). Adoption still requires the exact generated title and body, a
+ * set `triggered_by = 'incident'` kept the column default, 'user': on 2026-11-20 production had
+ * 320 unowned legacy ideas with 'user' (305 of them in the exact generated shape) and 1 with
+ * 'incident'. Adoption still requires the exact generated title and body, a
  * draft at priority 0, the triage row's own link and no Durable Object engagement, and it
  * rewrites the column to 'incident' in the same transaction so `pipelineOwnsIdeaSql` holds.
  */
@@ -154,15 +155,18 @@ async function adoptLegacyIdeas(ctx: StepContext): Promise<void> {
       // Compare-and-set on the `updated_at` read with the candidate: an edit that lands while
       // the Durable Object is being read moves it, and that idea is not adopted. It then fails
       // the selector's shape checks or stays NULL until the next run re-reads it.
-      // One transaction per idea: mark the idea as the pipeline's (the column legacy ideas
-      // lack), then record ownership only if that exact, unedited idea was marked.
+      // One transaction for the batch; per idea, mark it as the pipeline's (the column legacy
+      // ideas lack) only while its triage row is still unowned, then record ownership only if
+      // that exact, unedited idea was marked.
       const results = await ctx.env.DATABASE.batch(
         untouched.flatMap((row) => [
           ctx.env.DATABASE.prepare(
             `UPDATE tasks SET triggered_by = '${PIPELINE_IDEA_TRIGGERED_BY}'
              WHERE id = ? AND updated_at = ? AND status = 'draft' AND priority = 0
-               AND triggered_by IN ${LEGACY_PIPELINE_IDEA_TRIGGERED_BY_SQL}`
-          ).bind(row.idea_id, updatedAt.get(row.signature)),
+               AND triggered_by IN ${LEGACY_PIPELINE_IDEA_TRIGGERED_BY_SQL}
+               AND EXISTS (SELECT 1 FROM platform_feedback_triages
+                           WHERE signature = ? AND idea_id = ? AND idea_owned_at IS NULL)`
+          ).bind(row.idea_id, updatedAt.get(row.signature), row.signature, row.idea_id),
           ctx.env.DATABASE.prepare(
             `UPDATE platform_feedback_triages SET idea_owned_at = ?, updated_at = CURRENT_TIMESTAMP
              WHERE signature = ? AND idea_id = ? AND idea_owned_at IS NULL

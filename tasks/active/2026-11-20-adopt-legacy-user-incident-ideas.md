@@ -32,3 +32,14 @@ draft ideas that the reconciliation could not close.
 At the default 25 per batch and 20 s deadline, the 305 production ideas clear in one or two
 hourly runs (one Durable Object read per batch). Closing the 282 expired ones follows in the same
 or next run, as #2938 intended (approved by Raphaël 2026-11-20).
+
+## Residual risk (review)
+
+Adoption checks the generated heading, summary sentence, closing fence, title, draft status and
+priority 0, plus Durable Object engagement (links, notes, files, PRs). It does not compare the
+full body, so a person's edit inside the body of a pipeline-created idea that keeps that shape
+would be adopted and could later be closed with its incident. Same check #2938 applies to
+'incident' rows; every candidate is the pipeline's own idea (triage row link). Accepted.
+
+The first reconciliation after deploy adopts the ~305 ideas and then cancels the ~282 whose
+incidents ended, in batches of at most 25 within the 20 s deadline.
