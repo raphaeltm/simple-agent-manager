@@ -304,3 +304,6 @@ profile is disabled. Deploy and Caddy refuse a conflicting range before serving.
 Configured SMTP relay hostnames are resolved at deploy, opening only their exact TCP endpoints.
 After relay DNS changes, rerun `pnpm selfhost:deploy --init` to reconcile the fence. Metadata
 addresses and protected local listeners remain forbidden for relays.
+
+The broker port must also differ from every other managed box listener, including disabled
+optional services. Deploy, fence planning and Caddy startup all check this reservation.
