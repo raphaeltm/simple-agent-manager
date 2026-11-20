@@ -520,9 +520,24 @@ exact credential it was created with could prove no server exists:
 - `teardown_credential_generation_changed`: that platform credential was re-saved or rotated
   since. A re-saved credential is never accepted as proof: SAM cannot show it is the same
   provider account.
-- `teardown_allocation_unresolved`: the create failed before SAM got a server ID, and the
-  credential's complete inventory shows no server. SAM keeps retrying (a late server would
-  still be found and deleted) but never treats an empty list as proof.
+- `teardown_allocation_unresolved`: the create failed before SAM got a server ID, and either
+  the credential's complete inventory shows no server (Hetzner), or the provider's inventory
+  cannot be read as complete at all (GCP and the other providers;
+  `reconcileStrictProviderlessVm()`). SAM keeps retrying once per failure backoff (a late
+  server would still be found and deleted) but never treats an empty list as proof.
+
+A node whose provisioning stopped before the provider identity claim is not stuck: it still
+carries the absence proof written when its row was created, and the cleanup sweep removes it on
+its first pass without asking the provider (`isNeverRequestedVmPlaceholder()` in
+`apps/api/src/services/node-never-requested-placeholder.ts`). A typical cause is **Node
+allocation plan is no longer current** reported by the first plan check. A failure after that
+claim but before the create (the second plan check, or tunnel preparation) is not recognised:
+the claim has already cleared the proof, so the row is treated like one whose create may have
+been sent. A node in `error` whose create may have been sent and that has no server ID
+is moved to `destroying` after its first failed cleanup attempt
+(`releaseNodeCleanupClaim()`). It then shows its cleanup-blocked reason, is listed here when it
+runs on SAM's own capacity, and appears in the `node_destroying_too_long` anomaly, rather than
+retrying unseen.
 
 **Remove…** is offered only when the refusal means SAM cannot see the server
 (`OPERATOR_REMOVABLE_BLOCK_REASONS` in `packages/shared`: the two above,
