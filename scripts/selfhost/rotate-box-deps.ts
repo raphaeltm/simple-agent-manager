@@ -12,6 +12,7 @@ import {
 } from '../../apps/api/src/selfhost/key-rotation/control-auth.ts';
 import { gitCommit, SELFHOST_DIR } from './backup-cli';
 import { type BoxContext, composeArgs, runBackup } from './backup-lib';
+import { boxDnsEnabled } from './dns-settings';
 import type { RotateDeps } from './rotate-apply';
 import { boxMigrateDeps } from './secrets-box-deps';
 
@@ -113,6 +114,7 @@ export function boxRotateDeps(ctx: BoxContext): RotateDeps {
       return { status: response.status, body: await response.json().catch(() => null) };
     },
     sleep: async (ms) => await new Promise((resolve) => setTimeout(resolve, ms)),
+    dnsProfileActive: () => boxDnsEnabled(ctx.box),
     restartDnsConsumers: async () => {
       const running = runningServices(ctx);
       recreate(

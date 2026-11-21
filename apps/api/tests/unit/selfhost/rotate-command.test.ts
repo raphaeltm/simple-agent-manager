@@ -154,6 +154,7 @@ function deps(): RotateDeps {
       return { status: 404, body: null };
     },
     probeGateway: async (secret) => (isAcceptedGatewaySecret(workerEnv(), secret) ? 200 : 401),
+    dnsProfileActive: () => true,
     // A fake sam-dns and Caddy: they read dns.env only when (re)started, as the real ones do.
     restartDnsConsumers: async () => {
       dnsRestarts++;
@@ -816,6 +817,38 @@ describe('rotate dns-update-key', () => {
     expect((await head()).SAM_DNS_TSIG_SECRET).toBe(old);
     expect(dnsEnvKey()).toBe(old);
     expect(dnsRunningKey).toBe(old);
+  });
+
+  it('on a box without the dns profile, --all stores a new key without touching sam-dns', async () => {
+    // --init stores a TSIG key on every box, but sam-dns runs only under the dns profile. The
+    // rotation must not exec into a service that is not there, or `--all` rolls back.
+    const old = (await head()).SAM_DNS_TSIG_SECRET;
+    const off = deps();
+    off.dnsProfileActive = () => false;
+    off.restartDnsConsumers = async () => {
+      throw new Error('restarted DNS consumers with the dns profile off');
+    };
+    off.probeDnsUpdate = async () => {
+      throw new Error('probed sam-dns with the dns profile off');
+    };
+    await runRotate(input({ names: ['dns-update-key'] }), off);
+    const now = (await head()).SAM_DNS_TSIG_SECRET;
+    expect(now).toBeTruthy();
+    expect(now).not.toBe(old);
+    expect(readJournal(stateDir)).toBeNull();
+    expect(logs.join('\n')).toContain('the dns profile is off');
+  });
+
+  it('with the dns profile on, a sam-dns that does not answer still rolls the key back', async () => {
+    const old = (await head()).SAM_DNS_TSIG_SECRET;
+    const down = deps();
+    down.probeDnsUpdate = async () => {
+      throw new Error('sam-dns probe-update failed (exit 1): service "sam-dns" is not running');
+    };
+    await expect(runRotate(input({ names: ['dns-update-key'] }), down)).rejects.toThrow(
+      /rolled back/
+    );
+    expect((await head()).SAM_DNS_TSIG_SECRET).toBe(old);
   });
 
   it('is not offered on a box whose bundle has no TSIG key (it predates DNS on the box)', async () => {

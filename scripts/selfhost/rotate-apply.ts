@@ -29,6 +29,12 @@ export interface RotateDeps {
   getJson: (path: string) => Promise<{ status: number; body: unknown }>;
   /** HTTP status the Worker answers frps's plugin call with this gateway secret. */
   probeGateway: (secret: string) => Promise<number>;
+  /**
+   * Whether the box runs DNS on the box (the `dns` compose profile). Off, nothing reads the TSIG key
+   * (no dns.env, no sam-dns), so a rotation only stores it. Keyed on the profile, not on sam-dns
+   * running: with the profile on, a stopped sam-dns must fail the probe and roll back.
+   */
+  dnsProfileActive: () => boolean;
   /** Recreates the containers that read dns.env (Caddy, and sam-dns when running). */
   restartDnsConsumers: () => Promise<void>;
   /** Whether the running sam-dns accepts an RFC 2136 update signed with this TSIG key. */

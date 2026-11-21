@@ -7,8 +7,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { Secrets } from '../../deploy/selfhost/key-agent/bundle.ts';
-import { ApplyFailedError, applyPatch, type Patch, type StepContext } from './rotate-apply';
 import { DNS_ENV_FILE, renderDnsEnv } from './dns-settings';
+import { ApplyFailedError, applyPatch, type Patch, type StepContext } from './rotate-apply';
 import { jwtKeyId } from './rotate-catalog';
 import { replacePrivateFile } from './secret-files';
 
@@ -393,6 +393,15 @@ export async function advanceDnsKey(ctx: StepContext): Promise<void> {
   try {
     if (step.phase === 'pending' || step.phase === 'staging') {
       await applyPatch(ctx, { set: key.generate() }, 'switched');
+    }
+    if (step.phase === 'switched' && !deps.dnsProfileActive()) {
+      // --init stores a key on every box; without the dns profile nothing uses it, so there is
+      // no consumer to restart and no sam-dns to probe. The new key is in the bundle for when
+      // the profile is turned on (the next deploy writes dns.env from it).
+      deps.log('  the dns profile is off: the new TSIG key is stored, nothing reads it yet');
+      step.phase = 'done';
+      ctx.save();
+      return;
     }
     if (step.phase === 'switched') {
       writeDnsEnv(ctx, (await ctx.store.head()).secrets[DNS_SECRET] ?? '');
