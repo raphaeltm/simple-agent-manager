@@ -70,7 +70,7 @@ catalog:
 
   # === Terminal ===
   '@xterm/xterm': 5.5.0
-  '@xterm/addon-fit': 0.10.0
+  '@xterm/addon-fit': 0.11.0
 
   # === Types ===
   '@types/node': 22.19.7
