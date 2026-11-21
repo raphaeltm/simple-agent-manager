@@ -10,6 +10,7 @@ import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { readResponseJson } from '../lib/runtime-validation';
+import { boxDnsBackendFor } from './dns-provider';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 
 export const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4';
@@ -184,6 +185,8 @@ export class DNSService implements DNSServiceInterface {
  * Uses Cloudflare proxy for automatic HTTPS.
  */
 export async function createDNSRecord(workspaceId: string, ip: string, env: Env): Promise<string> {
+  const box = boxDnsBackendFor(env);
+  if (box) return await box.upsertARecord(`ws-${workspaceId}`, ip, env);
   const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
   const response = await fetchWithTimeout(
     `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records`,
@@ -226,6 +229,11 @@ export async function deleteDNSRecord(
   env: Env,
   signal?: AbortSignal
 ): Promise<void> {
+  const box = boxDnsBackendFor(env);
+  if (box) {
+    if (signal?.aborted) throw signal.reason;
+    return await box.deleteRecord(recordId, env);
+  }
   if (signal?.aborted) throw signal.reason;
   const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
   const response = await fetchWithTimeout(
@@ -258,6 +266,8 @@ export async function deleteDNSRecord(
  * Update a DNS record with a new IP address.
  */
 export async function updateDNSRecord(recordId: string, ip: string, env: Env): Promise<void> {
+  const box = boxDnsBackendFor(env);
+  if (box) return await box.updateRecordContent(recordId, ip, env);
   const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
   const response = await fetchWithTimeout(
     `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records/${recordId}`,
@@ -302,6 +312,11 @@ export async function findDNSRecordMatchesByName(
   env: Env,
   signal?: AbortSignal
 ): Promise<DNSRecordMatch[]> {
+  const box = boxDnsBackendFor(env);
+  if (box) {
+    if (signal?.aborted) throw signal.reason;
+    return await box.findARecordsByName(recordName, env);
+  }
   const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
   const searchUrl = `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records?type=A&name=${encodeURIComponent(recordName)}`;
   const response = await fetchWithTimeout(

@@ -22,6 +22,7 @@ import {
   readCloudflareErrorDetail,
   updateDNSRecord,
 } from './dns-core';
+import { boxDnsBackendFor } from './dns-provider';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 
 /**
@@ -60,6 +61,22 @@ export async function createNodeBackendDNSRecord(
 ): Promise<string> {
   if (signal?.aborted) throw signal.reason;
   const hostname = getNodeBackendHostname(nodeId, env.BASE_DOMAIN);
+  const box = boxDnsBackendFor(env);
+  if (box) {
+    // Box nodes normally reach the box through the reverse tunnel and never get this record;
+    // it is routed here so no DNS record call on a box reaches Cloudflare. A durable replay holds an
+    // existing record to the same identity check as the Cloudflare path (rule 75 §7), except
+    // `proxied`, which has no meaning in the box's zone.
+    if (!recoverExisting) return await box.upsertARecord(hostname, ip, env);
+    // Insert-if-absent, never upsert: a concurrent replay with another IP must not have its
+    // record replaced. Whoever lost meets the winner's record and holds it to the identity check.
+    const inserted = await box.insertARecordIfAbsent(hostname, ip, env);
+    if (inserted) return inserted;
+    const existing = (await box.findARecordsByName(hostname, env))[0];
+    if (!existing) throw new Error('Backend DNS record vanished during recovery');
+    assertRecoveredBackendDNSIdentity({ ...existing, proxied: true }, hostname, ip);
+    return existing.id;
+  }
   if (recoverExisting) {
     const existing = await findDNSRecordByName(hostname, env, signal, true);
     if (existing) {

@@ -84,12 +84,15 @@ describe('prepareCelldProject', () => {
     );
     // The primary database also carries the self-host-only reverse-tunnel lease migration, the
     // only source of node_reverse_tunnel_leases since the shared 0232 copy was removed.
+    // It also carries the box's own DNS zone (selfhost/dns/), which Cloudflare never applies.
     const leases = '0255_node_reverse_tunnel_leases.sql';
+    const boxDns = '0267_selfhost_dns_records.sql';
     expect(main).not.toContain(leases);
-    expect(readdirSync(mainDir!).sort()).toEqual([...main, leases].sort());
-    expect(readlinkSync(join(mainDir!, leases))).toBe(
-      join(API_DIR, 'src/selfhost/migrations', leases)
-    );
+    expect(main).not.toContain(boxDns);
+    expect(readdirSync(mainDir!).sort()).toEqual([...main, leases, boxDns].sort());
+    for (const file of [leases, boxDns]) {
+      expect(readlinkSync(join(mainDir!, file))).toBe(join(API_DIR, 'src/selfhost/migrations', file));
+    }
     // OBSERVABILITY_DATABASE likewise carries the self-host-only D1 analytics sink table,
     // which the shared observability directory (wrangler.toml) no longer holds.
     const analytics = '0002_analytics_events.sql';

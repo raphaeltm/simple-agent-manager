@@ -13,6 +13,8 @@
  *
  * - `POST {prefix}/inbound-email`: the box's sam-mx SMTP receiver hands over one inbound agent
  *   email (`inbound-email.ts`). Same secret header, plus its own on-switch.
+ * - `GET {prefix}/dns-records`: the box's sam-dns server reads the zone it serves
+ *   (`../dns/gateway-route.ts`). Same secret header; off unless SAM_DNS_PROVIDER="box".
  *
  * frps and Caddy call celld on loopback; the box's Caddy answers 404 for this prefix on its
  * public listener (L22 owns that matcher). Both routes also fail closed here: no (or a
@@ -31,6 +33,7 @@ import {
   isGatewayDecisionFor,
   markGatewayAuthorizationRequest,
 } from '../../services/node-websocket-gateway';
+import { handleDnsRecordsGateway } from '../dns/gateway-route';
 import { authorizeFrpsPluginRequest, type FrpsPluginDecision } from './authz';
 import { getReverseTunnelGatewaySecret, isAcceptedGatewaySecret } from './config';
 import type { ReverseTunnelEnv } from './env';
@@ -190,6 +193,7 @@ export function createSelfHostGatewayRoutes(
   routes.notFound(notFound);
 
   routes.post('/inbound-email', (c) => handleInboundEmailGateway(c, options.inboundEmailDeps));
+  routes.get('/dns-records', (c) => handleDnsRecordsGateway(c));
 
   routes.post('/frps-plugin', async (c) => {
     if (!getReverseTunnelGatewaySecret(c.env)) return notFound();

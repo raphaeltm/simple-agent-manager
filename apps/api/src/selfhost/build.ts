@@ -8,7 +8,8 @@
  * - product analytics in OBSERVABILITY_DATABASE when ANALYTICS_SINK="d1" (`analytics/`),
  *   with its `analytics.d1.*` retention settings;
  * - the reverse-tunnel transport, gateway routes and lease sweep (`reverse-tunnel/entry.ts`),
- *   with the shared cloud-init generator as the frpc boot renderer.
+ *   with the shared cloud-init generator as the frpc boot renderer;
+ * - the box's own DNS zone when SAM_DNS_PROVIDER="box" (`dns/`, served by deploy/selfhost/sam-dns).
  */
 import { generateCloudInit } from '@simple-agent-manager/cloud-init';
 import type { Hono } from 'hono';
@@ -20,6 +21,7 @@ import { hostedGitTokenRoutes } from './hosted-git/token-route';
 export { HostedGitRepo } from './hosted-git';
 
 import { installAnalyticsD1Sink } from './analytics';
+import { installBoxDns } from './dns';
 import { type SharedWorkerEntry, withReverseTunnel } from './reverse-tunnel/entry';
 import { installSpeechEndpoints } from './speech';
 
@@ -36,5 +38,6 @@ export function withSelfHostBuild<T extends SharedWorkerEntry>(
   }
   installSpeechEndpoints();
   installAnalyticsD1Sink();
+  installBoxDns();
   return withReverseTunnel(worker, generateCloudInit);
 }
