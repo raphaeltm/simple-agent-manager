@@ -16,11 +16,11 @@
  * SAM_DNS_SIDECAR_TESTS=1 pnpm vitest run tests/integration/selfhost-dns-sidecar.test.ts
  */
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
+import { Resolver } from 'node:dns/promises';
 import { readFileSync } from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
-import { Resolver } from 'node:dns/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
