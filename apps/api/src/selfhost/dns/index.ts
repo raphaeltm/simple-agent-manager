@@ -5,9 +5,10 @@
  * `installBoxDns()` once before any request; the shared Worker entry never imports this directory,
  * so the Cloudflare bundle does not contain it.
  *
- * Active only when the deployment also sets `SAM_DNS_PROVIDER="box"` (the box deploy writes it when
- * `.env` says so, scripts/selfhost/box-settings.ts). A box without it keeps calling Cloudflare,
- * exactly as before, so an existing box changes nothing until its operator switches.
+ * Active only when the deployment also sets `SAM_DNS_PROVIDER="box"`. Nothing sets it yet: the box
+ * deploy will write it together with the sam-dns sidecar (task 2026-11-21-selfhost-box-dns, PR b).
+ * A box without it keeps calling Cloudflare, exactly as before, so an existing box changes nothing
+ * until its operator switches.
  */
 import type { Env } from '../../env';
 import { type BoxDnsBackend, installBoxDnsBackend } from '../../services/dns-provider';

@@ -9,7 +9,8 @@
  *
  * Response 200:
  * - `{ serial, unchanged: true }` when `serial` matches and no `after` is given (one D1 read);
- * - else `{ serial, records: [{name, type, content}], nextCursor }`. Each page carries the serial
+ * - else `{ serial, records: [{name, type, content}], nextCursor, skipped }` (`skipped`: malformed
+ *   rows left out of the page, logged). Each page carries the serial
  *   it was read with; sam-dns starts over if the serial changes between its pages.
  *
  * Trust: only box processes reach this route (Caddy answers 404 for the gateway prefix publicly,
@@ -70,7 +71,7 @@ export async function handleDnsRecordsGateway(
   }
   try {
     const page = await readBoxZonePage(c.env, after, limit);
-    return json({ serial: page.serial, records: page.records, nextCursor: page.nextCursor });
+    return json({ ...page });
   } catch (error) {
     if (error instanceof BoxDnsRecordError) {
       return json({ error: 'BAD_REQUEST', message: error.message }, 400);

@@ -74,32 +74,72 @@ describe('box record writes', () => {
     ]);
     expect(await readBoxZoneSerial(env)).toBe(serial0 + 2);
 
-    await updateBoxRecordContent(id, '198.51.100.7', env);
-    expect(rows()[0]?.content).toBe('198.51.100.7');
-    expect(await readBoxZoneSerial(env)).toBe(serial0 + 3);
-
     const found = await findBoxARecordsByName('r1-web.apps', env);
     expect(found).toEqual([
       {
         id,
         name: 'r1-web.apps.box.example.test',
         type: 'A',
-        content: '198.51.100.7',
+        content: '203.0.113.11',
         proxied: false,
       },
     ]);
 
     await deleteBoxRecord(id, env);
     expect(rows()).toEqual([]);
+    expect(await readBoxZoneSerial(env)).toBe(serial0 + 3);
     // A second delete of the same id is success, as Cloudflare's 404 is.
     await expect(deleteBoxRecord(id, env)).resolves.toBeUndefined();
   });
 
+  it('updates a node-backend record by id, and refuses to repoint any other record by id', async () => {
+    const node = await upsertBoxARecord('node1.vm', '203.0.113.10', env);
+    const route = await upsertBoxARecord('r1-web.apps', '203.0.113.20', env);
+    const ws = await upsertBoxARecord('ws-one', '203.0.113.30', env);
+    const serial = await readBoxZoneSerial(env);
+
+    // Owner path: the heartbeat's IP change on a node backend.
+    await updateBoxRecordContent(node, '198.51.100.7', env);
+    expect(await readBoxZoneSerial(env)).toBe(serial + 1);
+
+    // A stale or wrong id cannot repoint an app route or a workspace record.
+    await expect(updateBoxRecordContent(route, '198.51.100.66', env)).rejects.toThrow(
+      /No box node-backend DNS record/
+    );
+    await expect(updateBoxRecordContent(ws, '198.51.100.66', env)).rejects.toThrow(
+      /No box node-backend DNS record/
+    );
+    expect(rows()).toEqual([
+      { name: 'node1.vm.box.example.test', type: 'A', content: '198.51.100.7' },
+      { name: 'r1-web.apps.box.example.test', type: 'A', content: '203.0.113.20' },
+      { name: 'ws-one.box.example.test', type: 'A', content: '203.0.113.30' },
+    ]);
+  });
+
+  it('writes only the names the Worker owns (never the apex, api, app or ns names)', async () => {
+    for (const reserved of ['box.example.test', 'api', 'app', 'ns1', 'mail', 'x.app', 'a.b.apps']) {
+      await expect(upsertBoxARecord(reserved, '203.0.113.1', env), reserved).rejects.toThrow(
+        /may not write/
+      );
+      await expect(deleteBoxRecordsByName(reserved, env), reserved).rejects.toThrow(
+        /may not delete/
+      );
+    }
+    // Owner control: each namespace the Worker does write.
+    for (const owned of ['ws-abc', 'node1.vm', 'r1-web-3000-env.apps']) {
+      await expect(upsertBoxARecord(owned, '203.0.113.1', env), owned).resolves.toMatch(/^box_/);
+    }
+    // The pre-migration backend name is deletable (cleanup), never writable.
+    await expect(upsertBoxARecord('vm-abc', '203.0.113.1', env)).rejects.toThrow(/may not write/);
+    await expect(deleteBoxRecordsByName('vm-abc', env)).resolves.toBe(0);
+    expect(rows()).toHaveLength(3);
+  });
+
   it('refuses a non-IPv4 address and an update of a missing record', async () => {
-    await expect(upsertBoxARecord('x', 'not-an-ip', env)).rejects.toThrow(/IPv4/);
-    await expect(upsertBoxARecord('x', '256.1.1.1', env)).rejects.toThrow(/IPv4/);
+    await expect(upsertBoxARecord('ws-x', 'not-an-ip', env)).rejects.toThrow(/IPv4/);
+    await expect(upsertBoxARecord('ws-x', '256.1.1.1', env)).rejects.toThrow(/IPv4/);
     await expect(updateBoxRecordContent('box_missing', '203.0.113.1', env)).rejects.toThrow(
-      /No box DNS record/
+      /No box node-backend DNS record/
     );
     expect(rows()).toEqual([]);
   });
@@ -139,26 +179,27 @@ describe('box zone pages', () => {
 
   it('skips a malformed row and keeps the rows around it (good/bad/good)', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    await upsertBoxARecord('a-good', '203.0.113.1', env);
+    await upsertBoxARecord('ws-a-good', '203.0.113.1', env);
     sqlite
       .prepare(
-        "INSERT INTO selfhost_dns_records VALUES ('box_bad', 'b-bad.box.example.test', 'A', 'not-ip', 'x', 'x')"
+        "INSERT INTO selfhost_dns_records VALUES ('box_bad', 'ws-b-bad.box.example.test', 'A', 'not-ip', 'x', 'x')"
       )
       .run();
-    await upsertBoxARecord('c-good', '203.0.113.3', env);
+    await upsertBoxARecord('ws-c-good', '203.0.113.3', env);
 
     const page = await readBoxZonePage(env, null, 10);
     expect(page.records.map((r) => r.name)).toEqual([
-      'a-good.box.example.test',
-      'c-good.box.example.test',
+      'ws-a-good.box.example.test',
+      'ws-c-good.box.example.test',
     ]);
+    expect(page.skipped).toBe(1);
     expect(JSON.stringify(warn.mock.calls)).toContain('selfhost_dns.record_row_skipped');
 
     // The bad row also does not end paging early: it is the last row of a page of 2.
     const first = await readBoxZonePage(env, null, 2);
-    expect(first.records.map((r) => r.name)).toEqual(['a-good.box.example.test']);
+    expect(first.records.map((r) => r.name)).toEqual(['ws-a-good.box.example.test']);
     const second = await readBoxZonePage(env, first.nextCursor, 2);
-    expect(second.records.map((r) => r.name)).toEqual(['c-good.box.example.test']);
+    expect(second.records.map((r) => r.name)).toEqual(['ws-c-good.box.example.test']);
     expect(second.nextCursor).toBeNull();
   });
 
@@ -171,6 +212,7 @@ describe('box zone pages', () => {
       .run();
     const page = await readBoxZonePage(env, null, 10);
     expect(page.records).toEqual([]);
+    expect(page.skipped).toBe(1);
     expect(page.nextCursor).toBeNull();
   });
 });

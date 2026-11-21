@@ -136,7 +136,10 @@ function boxEnv(): Env {
 
 beforeEach(() => {
   sqlite = new Database(':memory:');
-  applySqliteMigration(sqlite, new URL('../../../src/selfhost/migrations/0267_selfhost_dns_records.sql', import.meta.url));
+  applySqliteMigration(
+    sqlite,
+    new URL('../../../src/selfhost/migrations/0267_selfhost_dns_records.sql', import.meta.url)
+  );
   resetBoxDnsBackendForTests();
   installBoxDns();
   vi.stubGlobal(
@@ -228,8 +231,12 @@ describe('the dns-records gateway route fails closed', () => {
   it('answers 404 without a gateway secret or with the box zone off, 401 for a wrong secret', async () => {
     const env = boxEnv();
     const secret = { 'X-SAM-Gateway-Secret': SECRET };
-    expect((await get({ ...env, REVERSE_TUNNEL_GATEWAY_SECRET: undefined } as Env, secret)).status).toBe(404);
-    expect((await get({ ...env, SAM_DNS_PROVIDER: undefined } as unknown as Env, secret)).status).toBe(404);
+    expect(
+      (await get({ ...env, REVERSE_TUNNEL_GATEWAY_SECRET: undefined } as Env, secret)).status
+    ).toBe(404);
+    expect(
+      (await get({ ...env, SAM_DNS_PROVIDER: undefined } as unknown as Env, secret)).status
+    ).toBe(404);
     expect((await get(env, { 'X-SAM-Gateway-Secret': 'b'.repeat(64) })).status).toBe(401);
     expect((await get(env, {})).status).toBe(401);
     // Owner control: the right secret with the zone on is served.

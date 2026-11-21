@@ -21,6 +21,20 @@ const MAX_NAME_LENGTH = 253;
 const LABEL_RE = /^[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9])?$/;
 const IPV4_RE = /^(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 
+/**
+ * The only names the Worker writes in the box's zone, relative to the apex: workspace records
+ * (`ws-<id>`, createDNSRecord), node backends (`<id>.vm`, createNodeBackendDNSRecord) and app routes
+ * (`<label>.apps`, buildRouteHostname). The apex, `api`, `app`, `ns1` and everything else belong
+ * to sam-dns's static records, so a writer bug can never repoint them (defence in depth: every
+ * caller today passes a server-built name). `vm-<id>` is the pre-migration backend name, which
+ * cleanup may still delete.
+ */
+const WRITABLE_RELATIVE_NAME_RE = /^(?:ws-[a-z0-9_-]+|[a-z0-9_-]+\.vm|[a-z0-9_-]+\.apps)$/;
+const DELETABLE_RELATIVE_NAME_RE =
+  /^(?:ws-[a-z0-9_-]+|vm-[a-z0-9_-]+|[a-z0-9_-]+\.vm|[a-z0-9_-]+\.apps)$/;
+/** Node-backend records: the only kind updated by id (heartbeat IP change). */
+const NODE_BACKEND_SUFFIX = '.vm.';
+
 const BUMP_SERIAL_SQL = 'UPDATE selfhost_dns_zone SET serial = serial + 1 WHERE id = 1';
 
 export class BoxDnsRecordError extends Error {
@@ -52,6 +66,21 @@ export function boxRecordName(name: string, env: BoxDnsEnv): string {
   return fqdn;
 }
 
+function assertInNamespace(fqdn: string, env: BoxDnsEnv, pattern: RegExp, action: string): string {
+  const apex = zoneApex(env);
+  const relative = fqdn === apex ? '' : fqdn.slice(0, -(apex.length + 1));
+  if (!pattern.test(relative)) {
+    throw new BoxDnsRecordError(
+      `The Worker may not ${action} ${fqdn.slice(0, 255)}: only ws-*, *.vm and *.apps names are its own`
+    );
+  }
+  return fqdn;
+}
+
+function nodeBackendSuffix(env: BoxDnsEnv): string {
+  return `${NODE_BACKEND_SUFFIX}${zoneApex(env)}`;
+}
+
 function assertIpv4(ip: string): string {
   const value = ip.trim();
   if (!IPV4_RE.test(value)) throw new BoxDnsRecordError(`Not an IPv4 address: ${ip.slice(0, 64)}`);
@@ -60,7 +89,7 @@ function assertIpv4(ip: string): string {
 
 /** Creates or replaces the A record for `name`; returns its id (kept when it already existed). */
 export async function upsertBoxARecord(name: string, ip: string, env: BoxDnsEnv): Promise<string> {
-  const fqdn = boxRecordName(name, env);
+  const fqdn = assertInNamespace(boxRecordName(name, env), env, WRITABLE_RELATIVE_NAME_RE, 'write');
   const content = assertIpv4(ip);
   const now = new Date().toISOString();
   const [upsert] = await env.DATABASE.batch([
@@ -77,7 +106,12 @@ export async function upsertBoxARecord(name: string, ip: string, env: BoxDnsEnv)
   return id;
 }
 
-/** Points the record `id` at `ip`. A missing id is an error, as Cloudflare's PATCH is. */
+/**
+ * Points the node-backend record `id` at `ip`. Only node backends are updated by id (the heartbeat's
+ * IP change, routes/node-heartbeat-ip.ts), so the predicate also requires that namespace: a stale or
+ * wrong id cannot repoint an app route or a workspace record. A missing id is an error, as
+ * Cloudflare's PATCH is.
+ */
 export async function updateBoxRecordContent(
   id: string,
   ip: string,
@@ -86,12 +120,13 @@ export async function updateBoxRecordContent(
   const content = assertIpv4(ip);
   const [update] = await env.DATABASE.batch([
     env.DATABASE.prepare(
-      'UPDATE selfhost_dns_records SET content = ?, updated_at = ? WHERE id = ?'
-    ).bind(content, new Date().toISOString(), id),
+      `UPDATE selfhost_dns_records SET content = ?, updated_at = ?
+       WHERE id = ? AND substr(name, -length(?)) = ?`
+    ).bind(content, new Date().toISOString(), id, nodeBackendSuffix(env), nodeBackendSuffix(env)),
     env.DATABASE.prepare(BUMP_SERIAL_SQL),
   ]);
   if ((update?.meta?.changes ?? 0) === 0) {
-    throw new BoxDnsRecordError(`No box DNS record with id ${id.slice(0, 64)}`);
+    throw new BoxDnsRecordError(`No box node-backend DNS record with id ${id.slice(0, 64)}`);
   }
 }
 
@@ -107,7 +142,7 @@ export async function deleteBoxRecord(id: string, env: BoxDnsEnv): Promise<void>
 export async function deleteBoxRecordsByName(name: string, env: BoxDnsEnv): Promise<number> {
   const [deleted] = await env.DATABASE.batch([
     env.DATABASE.prepare('DELETE FROM selfhost_dns_records WHERE name = ?').bind(
-      boxRecordName(name, env)
+      assertInNamespace(boxRecordName(name, env), env, DELETABLE_RELATIVE_NAME_RE, 'delete')
     ),
     env.DATABASE.prepare(BUMP_SERIAL_SQL),
   ]);
@@ -163,7 +198,12 @@ export function parseRecordRow(row: unknown, context: string): BoxDnsRecord | nu
     });
     return null;
   }
-  return { id: r.id as string, name: r.name as string, type: r.type as string, content: r.content as string };
+  return {
+    id: r.id as string,
+    name: r.name as string,
+    type: r.type as string,
+    content: r.content as string,
+  };
 }
 
 export interface BoxDnsZonePage {
@@ -171,6 +211,8 @@ export interface BoxDnsZonePage {
   records: Array<Pick<BoxDnsRecord, 'name' | 'type' | 'content'>>;
   /** Continue with `after` set to this; null when this page is the last. */
   nextCursor: string | null;
+  /** Malformed rows left out of this page (logged), so a shrinking zone is visible to sam-dns. */
+  skipped: number;
 }
 
 /** Keyset cursor over (name, type), the unique key, so pages never overlap or skip. */
@@ -187,7 +229,9 @@ function decodeCursor(cursor: string | null): { name: string; type: string } | n
 
 /** The zone serial (bumped by every write). */
 export async function readBoxZoneSerial(env: Pick<Env, 'DATABASE'>): Promise<number> {
-  const row = await env.DATABASE.prepare('SELECT serial FROM selfhost_dns_zone WHERE id = 1').first<{
+  const row = await env.DATABASE.prepare(
+    'SELECT serial FROM selfhost_dns_zone WHERE id = 1'
+  ).first<{
     serial: unknown;
   }>();
   const serial = Number(row?.serial);
@@ -208,9 +252,9 @@ export async function readBoxZonePage(
   const records = cursor
     ? env.DATABASE.prepare(
         `SELECT id, name, type, content FROM selfhost_dns_records
-         WHERE name > ? OR (name = ? AND type > ?)
+         WHERE (name, type) > (?, ?)
          ORDER BY name, type LIMIT ?`
-      ).bind(cursor.name, cursor.name, cursor.type, limit + 1)
+      ).bind(cursor.name, cursor.type, limit + 1)
     : env.DATABASE.prepare(
         'SELECT id, name, type, content FROM selfhost_dns_records ORDER BY name, type LIMIT ?'
       ).bind(limit + 1);
@@ -223,14 +267,16 @@ export async function readBoxZonePage(
   const rows = recordsResult?.results ?? [];
   const pageRows = rows.slice(0, limit);
   const page: BoxDnsZonePage['records'] = [];
+  let skipped = 0;
   for (const row of pageRows) {
     const record = parseRecordRow(row, 'zone_page');
     if (record) page.push({ name: record.name, type: record.type, content: record.content });
+    else skipped++;
   }
   const last = pageRows[pageRows.length - 1] as { name?: unknown; type?: unknown } | undefined;
   const nextCursor =
     rows.length > limit && typeof last?.name === 'string' && typeof last.type === 'string'
       ? encodeCursor(last.name, last.type)
       : null;
-  return { serial, records: page, nextCursor };
+  return { serial, records: page, nextCursor, skipped };
 }

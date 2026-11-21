@@ -68,6 +68,19 @@ function cloudflareEnv(extra: Record<string, string> = {}): Env {
   } as unknown as Env;
 }
 
+/** A Cloudflare env whose D1 throws on any use: the Cloudflare DNS path must never touch it. */
+function untouchableDatabaseEnv(extra: Record<string, string> = {}): Env {
+  const untouchable = new Proxy(
+    {},
+    {
+      get: (_target, property) => {
+        throw new Error(`the Cloudflare DNS path touched DATABASE.${String(property)}`);
+      },
+    }
+  );
+  return { ...cloudflareEnv(extra), DATABASE: untouchable } as unknown as Env;
+}
+
 /** Every exported DNS primitive once, as production calls them. */
 async function exerciseEveryPrimitive(env: Env): Promise<void> {
   await upsertAppRouteDNSRecord('r1-web-3000-env1.apps.example.com', '203.0.113.10', env);
@@ -78,6 +91,69 @@ async function exerciseEveryPrimitive(env: Env): Promise<void> {
   await cleanupAppRouteDNSRecords(['r1-web-3000-env1.apps.example.com'], env);
   await cleanupWorkspaceDNSRecords('ws1', env);
 }
+
+/**
+ * The exact Cloudflare requests `exerciseEveryPrimitive` made on origin/main before the seam existed
+ * (captured 2026-11-21 from a clean origin/main worktree; byte-identical to this branch).
+ */
+const MAIN_CLOUDFLARE_REQUESTS = [
+  {
+    method: 'GET',
+    url: 'https://api.cloudflare.com/client/v4/zones/zone-1/dns_records?type=A&name=r1-web-3000-env1.apps.example.com',
+    body: null,
+  },
+  {
+    method: 'POST',
+    url: 'https://api.cloudflare.com/client/v4/zones/zone-1/dns_records',
+    body: {
+      type: 'A',
+      name: 'r1-web-3000-env1.apps.example.com',
+      content: '203.0.113.10',
+      ttl: 120,
+      proxied: false,
+    },
+  },
+  {
+    method: 'POST',
+    url: 'https://api.cloudflare.com/client/v4/zones/zone-1/dns_records',
+    body: { type: 'A', name: 'ws-ws1', content: '203.0.113.11', ttl: 120, proxied: true },
+  },
+  {
+    method: 'POST',
+    url: 'https://api.cloudflare.com/client/v4/zones/zone-1/dns_records',
+    body: { type: 'A', name: 'node1.vm', content: '203.0.113.12', ttl: 120, proxied: true },
+  },
+  {
+    method: 'PATCH',
+    url: 'https://api.cloudflare.com/client/v4/zones/zone-1/dns_records/cf-1',
+    body: { content: '203.0.113.13' },
+  },
+  {
+    method: 'DELETE',
+    url: 'https://api.cloudflare.com/client/v4/zones/zone-1/dns_records/cf-2',
+    body: null,
+  },
+  {
+    method: 'GET',
+    url: 'https://api.cloudflare.com/client/v4/zones/zone-1/dns_records?type=A&name=r1-web-3000-env1.apps.example.com',
+    body: null,
+  },
+  {
+    method: 'GET',
+    url: 'https://api.cloudflare.com/client/v4/zones/zone-1/dns_records?name=ws-ws1.example.com',
+    body: null,
+  },
+  {
+    method: 'GET',
+    url: 'https://api.cloudflare.com/client/v4/zones/zone-1/dns_records?name=vm-ws1.example.com',
+    body: null,
+  },
+  {
+    method: 'GET',
+    url: 'https://api.cloudflare.com/client/v4/zones/zone-1/dns_records?name=ws1.vm.example.com',
+    body: null,
+  },
+];
 
 function installSelfHostBuild(): void {
   // The real self-host entry: the same call the generated celld main makes.
@@ -111,15 +187,17 @@ describe('DNS provider resolution on Cloudflare (nothing installed)', () => {
     expect(resolveDnsProvider(cloudflareEnv({ SAM_DNS_PROVIDER: 'box' }))).toBe('cloudflare');
   });
 
-  it('makes byte-identical Cloudflare requests when the env carries SAM_DNS_PROVIDER=box', async () => {
-    await exerciseEveryPrimitive(cloudflareEnv());
+  it('makes the same Cloudflare requests as main, and touches no D1, with or without the box setting', async () => {
+    await exerciseEveryPrimitive(untouchableDatabaseEnv());
     const baseline = calls;
-    expect(baseline.length).toBeGreaterThanOrEqual(10);
+    expect(baseline.map(({ method, url, body }) => ({ method, url, body }))).toEqual(
+      MAIN_CLOUDFLARE_REQUESTS
+    );
     expect(baseline.every((call) => call.url.startsWith('https://api.cloudflare.com/'))).toBe(true);
     expect(baseline.every((call) => call.auth === 'Bearer cf-token')).toBe(true);
 
     stubCloudflare();
-    await exerciseEveryPrimitive(cloudflareEnv({ SAM_DNS_PROVIDER: 'box' }));
+    await exerciseEveryPrimitive(untouchableDatabaseEnv({ SAM_DNS_PROVIDER: 'box' }));
     expect(calls).toEqual(baseline);
     expect(boxRows()).toEqual([]);
   });
@@ -164,7 +242,7 @@ describe('DNS provider resolution in the self-host build', () => {
       '203.0.113.10',
       env
     );
-    const wsId = await createDNSRecord('ws1', '203.0.113.11', env);
+    await createDNSRecord('ws1', '203.0.113.11', env);
     const nodeId = await createNodeBackendDNSRecord('NODE1', '203.0.113.12', env);
     expect(boxRows()).toEqual([
       { name: 'node1.vm.example.com', content: '203.0.113.12' },
@@ -180,7 +258,7 @@ describe('DNS provider resolution in the self-host build', () => {
       createNodeBackendDNSRecord('NODE1', '203.0.113.99', env, undefined, true)
     ).rejects.toThrow(/differs from the recovered allocation/);
 
-    await updateDNSRecord(wsId, '198.51.100.1', env);
+    await updateDNSRecord(nodeId, '198.51.100.1', env);
     await deleteDNSRecord(nodeId, env);
     expect(await cleanupAppRouteDNSRecords(['r1-web-3000-env1.apps.example.com'], env)).toBe(1);
     expect(await cleanupWorkspaceDNSRecords('ws1', env)).toBe(1);

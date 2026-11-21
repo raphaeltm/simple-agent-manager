@@ -41,8 +41,10 @@ export async function cleanupWorkspaceDNSRecords(
 
   const box = boxDnsBackendFor(env);
   if (box) {
-    for (const recordName of recordNames) deleted += await box.deleteRecordsByName(recordName, env);
-    return deleted;
+    const counts = await Promise.all(
+      recordNames.map((recordName) => box.deleteRecordsByName(recordName, env))
+    );
+    return counts.reduce((sum, count) => sum + count, 0);
   }
 
   for (const recordName of recordNames) {

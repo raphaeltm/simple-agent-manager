@@ -64,7 +64,7 @@ export async function createNodeBackendDNSRecord(
   const box = boxDnsBackendFor(env);
   if (box) {
     // Box nodes normally reach the box through the reverse tunnel and never get this record;
-    // it is routed here so nothing on a box can call Cloudflare. A durable replay holds an
+    // it is routed here so no DNS record call on a box reaches Cloudflare. A durable replay holds an
     // existing record to the same identity check as the Cloudflare path (rule 75 §7), except
     // `proxied`, which has no meaning in the box's zone.
     if (recoverExisting) {
