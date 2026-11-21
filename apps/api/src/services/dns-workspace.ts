@@ -13,6 +13,7 @@ import {
   deleteDNSRecord,
   dnsRecordListResponseSchema,
 } from './dns-core';
+import { boxDnsBackendFor } from './dns-provider';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 
 /**
@@ -37,6 +38,12 @@ export async function cleanupWorkspaceDNSRecords(
     `${id}.vm.${baseDomain}`,       // current backend (two-level subdomain)
   ];
   let deleted = 0;
+
+  const box = boxDnsBackendFor(env);
+  if (box) {
+    for (const recordName of recordNames) deleted += await box.deleteRecordsByName(recordName, env);
+    return deleted;
+  }
 
   for (const recordName of recordNames) {
     const searchUrl = `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records?name=${encodeURIComponent(recordName)}`;

@@ -21,6 +21,7 @@ import {
   isDuplicateRecordConflict,
   readCloudflareErrorDetail,
 } from './dns-core';
+import { boxDnsBackendFor } from './dns-provider';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 
 /**
@@ -34,6 +35,10 @@ export async function upsertAppRouteDNSRecord(
   ip: string,
   env: Env,
 ): Promise<string> {
+  // On a box the record goes to the box's own zone (selfhost/dns/). Its upsert is a single
+  // INSERT ... ON CONFLICT, so the create race below cannot happen there.
+  const box = boxDnsBackendFor(env);
+  if (box) return await box.upsertARecord(hostname, ip, env);
   // Check-then-act across an await: concurrent callers can both observe "no
   // record" and both POST, and Cloudflare rejects the loser as a duplicate.
   // This is reachable in production — `deploy-release-callback.ts` upserts every

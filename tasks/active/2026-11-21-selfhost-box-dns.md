@@ -122,16 +122,21 @@ New attack surface: a public UDP/TCP 53 listener, and a loopback RFC 2136 update
 ## Implementation checklist
 
 ### PR (a): Worker seam and record sync
-- [ ] `services/dns-provider.ts` registry; route every exported primitive in dns-core,
+- [x] `services/dns-provider.ts` registry; route every exported primitive in dns-core,
       dns-app-routes, dns-node-backend, dns-workspace through it (Cloudflare code unchanged)
-- [ ] `selfhost/dns/` D1 backend + migration (self-host list) + installed by `withSelfHostBuild`
-- [ ] Gateway route `GET /api/self-host/gateway/dns-records` (paged, serial, secret)
-- [ ] Tests: resolver through real entry for Cloudflare env, Cloudflare env + `SAM_DNS_PROVIDER=box`
+- [x] `selfhost/dns/` D1 backend + migration (self-host list) + installed by `withSelfHostBuild`
+- [x] Gateway route `GET /api/self-host/gateway/dns-records` (paged, serial, secret)
+- [x] Tests: resolver through real entry for Cloudflare env, Cloudflare env + `SAM_DNS_PROVIDER=box`
       still Cloudflare (divergence), installed + box var -> box (convergence), installed without
       the var -> Cloudflare; Cloudflare request shapes unchanged; D1 backend on real SQLite;
-      release callback -> D1 -> gateway route with more records than one page (rule 81)
-- [ ] Box deploy passes `SAM_DNS_PROVIDER` / TTL vars from .env
+      release callback -> D1 -> gateway route with more records than one page (rule 81).
+      Divergence/convergence proven discriminating by surgical reverts (dns-provider.ts gate
+      removed -> "stays on Cloudflare" red; shared code reading the var -> 3 divergence tests red;
+      slice without installBoxDns -> slice red).
 - [ ] Staging: Cloudflare path (workspace DNS record, app-route record created and resolves)
+- Moved to PR (b): the box deploy writes `SAM_DNS_PROVIDER=box` when the `dns` compose profile is
+  on (pattern of `inboundMailWorkerVars`), so the switch ships together with the server that
+  answers for the records. PR (a) is inert on every deployment: nothing sets the var.
 
 ### PR (b): sidecar, Caddy, box proof
 - [ ] `deploy/selfhost/sam-dns` Go sidecar (miekg/dns), tests incl. sync > one page, AXFR/IXFR
