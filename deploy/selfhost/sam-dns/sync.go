@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -39,7 +40,8 @@ type Syncer struct {
 	cfg    *Config
 	zone   *atomic.Pointer[Zone]
 	client *http.Client
-	serial int64 // the D1 serial of the served zone; 0 before the first sync
+	serial int64 // the D1 serial of the served zone
+	synced bool  // false until the first successful sync (a cached zone does not count)
 }
 
 func NewSyncer(cfg *Config, zone *atomic.Pointer[Zone]) *Syncer {
@@ -52,7 +54,7 @@ func NewSyncer(cfg *Config, zone *atomic.Pointer[Zone]) *Syncer {
 
 func (s *Syncer) page(ctx context.Context, serial int64, after string) (*gatewayPage, error) {
 	q := url.Values{"limit": {strconv.Itoa(s.cfg.SyncPageSize)}}
-	if serial > 0 && after == "" {
+	if serial > 0 && after == "" && s.synced {
 		q.Set("serial", strconv.FormatInt(serial, 10))
 	}
 	if after != "" {
@@ -90,6 +92,9 @@ func (s *Syncer) page(ctx context.Context, serial int64, after string) (*gateway
 	if err := json.Unmarshal(body, &page); err != nil {
 		return nil, fmt.Errorf("gateway page is not JSON: %w", err)
 	}
+	if page.Serial <= 0 || page.Serial > math.MaxUint32 {
+		return nil, fmt.Errorf("gateway serial %d is out of range", page.Serial)
+	}
 	return &page, nil
 }
 
@@ -106,7 +111,8 @@ func (s *Syncer) readZone(ctx context.Context, known int64) ([]SyncedRecord, int
 	records := append([]SyncedRecord(nil), first.Records...)
 	skipped := first.Skipped
 	for next := first.NextCursor; next != nil && *next != ""; {
-		p, err := s.page(ctx, 0, *next)
+		previous := *next
+		p, err := s.page(ctx, 0, previous)
 		if err != nil {
 			return nil, 0, 0, err
 		}
@@ -116,6 +122,9 @@ func (s *Syncer) readZone(ctx context.Context, known int64) ([]SyncedRecord, int
 		records = append(records, p.Records...)
 		skipped += p.Skipped
 		next = p.NextCursor
+		if next != nil && *next == previous {
+			return nil, 0, 0, fmt.Errorf("gateway cursor did not advance")
+		}
 	}
 	return records, first.Serial, skipped, nil
 }
@@ -129,17 +138,23 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 	for {
 		records, serial, skipped, err := s.readZone(ctx, s.serial)
 		if errors.Is(err, errSerialMoved) {
+			select { // a short pause, so constant churn does not spin requests
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(100 * time.Millisecond):
+			}
 			continue
 		}
 		if err != nil {
 			return err
 		}
-		if records == nil && serial == s.serial {
+		if s.synced && records == nil && serial == s.serial {
 			return nil
 		}
 		zone, invalid := BuildZone(s.cfg, uint32(serial), records)
 		s.zone.Store(zone)
 		s.serial = serial
+		s.synced = true
 		slog.Info("sam-dns: zone synced", "serial", serial, "records", len(records),
 			"skippedByWorker", skipped, "skippedHere", invalid)
 		if s.cfg.CacheFile != "" {
@@ -158,6 +173,9 @@ func (s *Syncer) Run(ctx context.Context) {
 	failing := false
 	for {
 		if err := s.SyncOnce(ctx); err != nil {
+			if ctx.Err() != nil {
+				return // shutting down
+			}
 			if !failing { // log the transition, not every tick
 				slog.Error("sam-dns: zone sync failed; serving the last good zone",
 					"servedSerial", s.serial, "error", err.Error())
@@ -193,6 +211,10 @@ func writeCache(path string, serial int64, records []SyncedRecord) error {
 	}
 	defer os.Remove(tmp.Name())
 	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil { // the rename must not publish an empty file after a crash
 		tmp.Close()
 		return err
 	}

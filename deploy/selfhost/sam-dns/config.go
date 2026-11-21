@@ -63,11 +63,11 @@ const minGatewaySecretLength = 32
 const minTSIGSecretBytes = 32
 
 type Config struct {
-	Zone            string // FQDN, lowercase, trailing dot
+	Zone string // FQDN, lowercase, trailing dot
 	// NameServer is the zone's NS name (FQDN). ns1.<zone> by default, served with its own A record
 	// (the parent zone needs matching glue). A name outside the zone needs no glue in the parent:
 	// the operator keeps its A record wherever that name lives.
-	NameServer string
+	NameServer      string
 	PublicIPv4      net.IP
 	PublicIPv6      net.IP // optional
 	Listen          []string

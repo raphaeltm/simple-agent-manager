@@ -44,7 +44,20 @@ func startTestServer(t *testing.T, cfg *Config) *testServer {
 			_ = s.Shutdown()
 		}
 	})
-	time.Sleep(50 * time.Millisecond) // let ActivateAndServe start
+	// Wait until both listeners answer, rather than sleeping for a guess.
+	for _, addr := range []string{pub[0].PacketConn.LocalAddr().String(), upd[0].PacketConn.LocalAddr().String()} {
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			m := new(dns.Msg)
+			m.SetQuestion(cfg.Zone, dns.TypeSOA)
+			if _, _, err := (&dns.Client{Timeout: 200 * time.Millisecond}).Exchange(m, addr); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("server at %s never answered", addr)
+			}
+		}
+	}
 	return &testServer{
 		cfg: cfg, zone: &zone, challenges: ch,
 		publicUDP: pub[0].PacketConn.LocalAddr().String(), publicTCP: pub[1].Listener.Addr().String(),
@@ -126,8 +139,8 @@ func TestUpdatesOnlyOnLoopbackWithTSIG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("public update exchange: %v", err)
 	}
-	if r.Rcode == dns.RcodeSuccess {
-		t.Fatalf("public listener accepted an update: %v", r)
+	if r.Rcode != dns.RcodeNotImplemented {
+		t.Fatalf("public listener answered an update with %s, want NOTIMP (refused before parsing)", dns.RcodeToString[r.Rcode])
 	}
 
 	// Unsigned update on loopback: refused.
@@ -231,4 +244,88 @@ func TestProbeUpdateTellsWhichKeyTheServerAccepts(t *testing.T) {
 	if err != nil || ok {
 		t.Fatalf("old key: ok=%v err=%v, want refused", ok, err)
 	}
+}
+
+func TestUpdateWithAnOversizedFudgeIsRefused(t *testing.T) {
+	cfg := testConfig(t, nil)
+	s := startTestServer(t, cfg)
+	m := new(dns.Msg)
+	m.SetUpdate(cfg.Zone)
+	m.Insert([]dns.RR{challengeTXT("_acme-challenge.box.example.test.", "replayable")})
+	m.SetTsig(cfg.TSIGKeyName, dns.HmacSHA256, 3600, time.Now().Unix())
+	r, _, err := tsigClient(cfg).Exchange(m, s.updateTCP)
+	if (err == nil && r.Rcode == dns.RcodeSuccess) || len(s.challenges.Values("_acme-challenge.box.example.test.")) != 0 {
+		t.Fatalf("update with a one-hour fudge accepted: %v %v", r, err)
+	}
+}
+
+// fakeListener hands out pipe connections from chosen remote addresses.
+type fakeListener struct{ conns chan net.Conn }
+
+func (f *fakeListener) Accept() (net.Conn, error) { return <-f.conns, nil }
+func (f *fakeListener) Close() error              { return nil }
+func (f *fakeListener) Addr() net.Addr            { return &net.TCPAddr{} }
+
+type addrConn struct {
+	net.Conn
+	remote net.Addr
+}
+
+func (c addrConn) RemoteAddr() net.Addr { return c.remote }
+
+func TestLimitedListenerCapsPerPrefixAndReleasesOnce(t *testing.T) {
+	fake := &fakeListener{conns: make(chan net.Conn, 16)}
+	ln := newLimitedListener(fake, 3, 2)
+	dial := func(ip string) net.Conn {
+		a, b := net.Pipe()
+		t.Cleanup(func() { b.Close() })
+		fake.conns <- addrConn{Conn: a, remote: &net.TCPAddr{IP: net.ParseIP(ip), Port: 1}}
+		return b
+	}
+	accept := func() net.Conn {
+		c, err := ln.Accept()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	first := func() net.Conn { dial("2001:db8:0:1::1"); return accept() }()
+	dial("2001:db8:0:1::2") // same /56: the second for that prefix
+	second := accept()
+	// A third from the same /56 is refused; the next accepted is from another prefix.
+	dial("2001:db8:0:1::3")
+	dial("198.51.100.1")
+	third := accept()
+	if third.RemoteAddr().String() != "198.51.100.1:1" {
+		t.Fatalf("accepted %s past the per-prefix cap", third.RemoteAddr())
+	}
+	// Total cap: nothing more until a connection closes; closing twice releases once.
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_ = first.Close()
+	dial("203.0.113.1")
+	fourth := accept()
+	dial("203.0.113.2")
+	done := make(chan net.Conn, 1)
+	go func() { c, _ := ln.Accept(); done <- c }()
+	select {
+	case c := <-done:
+		t.Fatalf("accepted %s past the total cap of 3", c.RemoteAddr())
+	case <-time.After(100 * time.Millisecond):
+	}
+	// The over-cap connection was refused (closed), not queued. Once a slot is released, the next
+	// connection is accepted.
+	_ = second.Close()
+	dial("203.0.113.3")
+	select {
+	case c := <-done:
+		if c.RemoteAddr().String() != "203.0.113.3:1" {
+			t.Fatalf("accepted %s, want the connection made after the release", c.RemoteAddr())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("a released slot was not reused")
+	}
+	_ = third.Close()
+	_ = fourth.Close()
 }

@@ -76,10 +76,11 @@ describe('dns.env', () => {
     expect(statSync(path).mtimeMs).toBe(before);
   });
 
-  it('is skipped on a box without the key, and the dns profile refuses to deploy without it', () => {
+  it('is not written with the profile off (key or not), and the profile refuses to deploy without the key', () => {
     const dir = tempDir();
     const path = join(dir, DNS_ENV_FILE);
     expect(() => syncDnsEnv(path, { COMPOSE_PROFILES: 'tunnel' }, undefined)).not.toThrow();
+    expect(() => syncDnsEnv(path, { COMPOSE_PROFILES: 'tunnel' }, KEY)).not.toThrow();
     expect(() => statSync(path)).toThrow();
     expect(() => syncDnsEnv(path, ON, undefined)).toThrow(/--init/);
   });

@@ -55,24 +55,22 @@ export function syncGatewayEnv(path: string, content: string, init: boolean): vo
 }
 
 /**
- * dns.env for sam-dns and Caddy (DNS on the box). Written whenever the box has the TSIG key, so
- * switching the profile on needs no extra step; a box whose keys predate it gets the key from
- * `--init`, and the profile refuses to deploy without it. Only sam-dns and Caddy read the file
- * (the Worker never uses the key), so a change only asks for their restart.
+ * dns.env for sam-dns and Caddy (DNS on the box), written only while the `dns` profile is on, so
+ * Caddy does not carry the key on a box that does not use it. A box whose keys predate the profile
+ * gets the key from `--init`, and the profile refuses to deploy without it. Only sam-dns and Caddy
+ * read the file (the Worker never uses the key), so a change only asks for their restart.
  */
 export function syncDnsEnv(
   path: string,
   box: Readonly<Record<string, string>>,
   tsigSecret: string | undefined
 ): void {
+  if (!boxDnsEnabled(box)) return;
   if (!tsigSecret) {
-    if (boxDnsEnabled(box)) {
-      throw new Error(
-        `the ${DNS_PROFILE} profile needs ${DNS_TSIG_SECRET}, which this box does not have yet: ` +
-          'run pnpm selfhost:deploy --init (it adds the key), then deploy again'
-      );
-    }
-    return;
+    throw new Error(
+      `the ${DNS_PROFILE} profile needs ${DNS_TSIG_SECRET}, which this box does not have yet: ` +
+        'run pnpm selfhost:deploy --init (it adds the key), then deploy again'
+    );
   }
   const content = renderDnsEnv(tsigSecret);
   const existing = existsSync(path) ? readFileSync(path, 'utf8') : null;

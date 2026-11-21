@@ -61,3 +61,19 @@ func TestRateLimiterTableIsBounded(t *testing.T) {
 		t.Fatal("overflow bucket did not limit")
 	}
 }
+
+func TestRateLimiterEvictsIdleBucketsBeforeOverflowing(t *testing.T) {
+	cfg := testConfig(t, map[string]string{"SAM_DNS_RATE_TRACKED_PREFIXES": "2", "SAM_DNS_RATE_BURST": "1", "SAM_DNS_RATE_LIMIT": "1"})
+	l := NewRateLimiter(cfg)
+	now := time.Unix(1_800_000_000, 0)
+	l.now = func() time.Time { return now }
+	l.Allow(net.IPv4(10, 0, 0, 1))
+	l.Allow(net.IPv4(10, 0, 1, 1))
+	now = now.Add(5 * time.Second) // both buckets refilled: idle, evictable
+	if v := l.Allow(net.IPv4(10, 0, 2, 1)); v != rateAllow {
+		t.Fatalf("new prefix after eviction: %v", v)
+	}
+	if l.overflow != nil {
+		t.Fatal("used the overflow bucket although idle buckets could be evicted")
+	}
+}

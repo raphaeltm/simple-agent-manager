@@ -27,16 +27,16 @@ import (
 	"github.com/miekg/dns"
 )
 
-// limitedListener caps concurrent TCP connections, in total and per client address, so a client
-// cannot exhaust the server by opening connections.
+// limitedListener caps concurrent TCP connections, in total and per client prefix (/24 IPv4,
+// /56 IPv6, as the rate limiter), so a client cannot exhaust the server by opening connections
+// from many addresses of its own network.
 type limitedListener struct {
 	net.Listener
-	mu      sync.Mutex
-	total   int
-	perIP   map[string]int
-	max     int
-	maxPer  int
-	refused atomic.Int64
+	mu     sync.Mutex
+	total  int
+	perIP  map[string]int
+	max    int
+	maxPer int
 }
 
 type limitedConn struct {
@@ -60,11 +60,14 @@ func (l *limitedListener) Accept() (net.Conn, error) {
 		if err != nil {
 			return nil, err
 		}
-		host, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
+		var ip net.IP
+		if addr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+			ip = addr.IP
+		}
+		host := prefixKey(ip)
 		l.mu.Lock()
 		if l.total >= l.max || l.perIP[host] >= l.maxPer {
 			l.mu.Unlock()
-			l.refused.Add(1)
 			_ = conn.Close()
 			continue
 		}
@@ -82,7 +85,7 @@ func (l *limitedListener) Accept() (net.Conn, error) {
 	}
 }
 
-// serverSet starts one UDP and one TCP server per address.
+// startServers starts one UDP and one TCP server per address.
 func startServers(addrs []string, handler dns.Handler, cfg *Config, accept dns.MsgAcceptFunc, tsig map[string]string) ([]*dns.Server, error) {
 	var servers []*dns.Server
 	for _, addr := range addrs {
@@ -158,10 +161,12 @@ func main() {
 		os.Exit(64)
 	}
 	if len(os.Args) > 1 && os.Args[1] == "probe-update" {
-		// The key to try comes from the environment, never argv.
+		// The key to try comes from the environment, never argv, and must be given: falling back
+		// to the server's own key would make the rotation's "new key accepted" check vacuous.
 		secret := os.Getenv("SAM_DNS_PROBE_TSIG_SECRET")
 		if secret == "" {
-			secret = cfg.TSIGSecret
+			fmt.Fprintln(os.Stderr, "sam-dns probe-update: SAM_DNS_PROBE_TSIG_SECRET is not set")
+			os.Exit(64)
 		}
 		ok, err := probeUpdate(cfg, secret)
 		if err != nil {
@@ -211,13 +216,19 @@ func main() {
 		slog.Error("sam-dns: listen failed", "error", err.Error())
 		os.Exit(1)
 	}
+	// The addresses are resolved once: after the box gains or changes an address, restart sam-dns.
 	slog.Info("sam-dns: serving", "zone", cfg.Zone, "public", publicAddrs, "update", cfg.UpdateListen,
 		"ttl", cfg.TTL)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
-	go syncer.Run(ctx)
+	synced := make(chan struct{})
+	go func() {
+		defer close(synced)
+		syncer.Run(ctx)
+	}()
 	<-ctx.Done()
+	<-synced // a cache write in progress finishes (or removes its temp file) first
 	shutdown, done := context.WithTimeout(context.Background(), cfg.ShutdownGrace)
 	defer done()
 	for _, s := range servers {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"regexp"
 	"strings"
 
 	"github.com/miekg/dns"
@@ -113,6 +114,14 @@ func BuildZone(cfg *Config, serial uint32, synced []SyncedRecord) (*Zone, int) {
 	return z, skipped
 }
 
+var workerOwnedRelative = regexp.MustCompile(`^(?:ws-[a-z0-9_-]+|[a-z0-9_-]+\.vm|[a-z0-9_-]+\.apps)$`)
+
+// workerOwnedName: ws-<id>, <id>.vm or <label>.apps directly below the zone.
+func workerOwnedName(name string, cfg *Config) bool {
+	relative := strings.TrimSuffix(strings.TrimSuffix(name, cfg.Zone), ".")
+	return workerOwnedRelative.MatchString(relative)
+}
+
 func syncedRR(record SyncedRecord, cfg *Config) (dns.RR, error) {
 	name := dns.CanonicalName(record.Name)
 	if _, ok := dns.IsDomainName(name); !ok || !dns.IsSubDomain(cfg.Zone, name) || name == cfg.Zone {
@@ -120,6 +129,11 @@ func syncedRR(record SyncedRecord, cfg *Config) (dns.RR, error) {
 	}
 	if reservedOwner(name, cfg) {
 		return nil, fmt.Errorf("a reserved name")
+	}
+	// The Worker writes only these names (apps/api/src/selfhost/dns/records.ts); refusing the rest
+	// here too means a bad D1 row can never repoint api., app. or any other wildcard name.
+	if !workerOwnedName(name, cfg) {
+		return nil, fmt.Errorf("not a name the Worker writes")
 	}
 	if record.Type != "A" {
 		return nil, fmt.Errorf("unsupported type")
@@ -138,9 +152,6 @@ func (z *Zone) add(rr dns.RR) {
 	}
 	z.records[h.Name][h.Rrtype] = append(z.records[h.Name][h.Rrtype], rr)
 }
-
-// RecordCount is the number of synced and static owner names, for logs.
-func (z *Zone) RecordCount() int { return len(z.records) }
 
 func parentName(name string) string {
 	i := strings.IndexByte(name, '.')
@@ -189,7 +200,9 @@ func (z *Zone) Lookup(qname string, qtype uint16, challenges *Challenges) Answer
 	}
 	node := z.records[q]
 	txt := challenges.Values(q)
-	if node != nil || len(txt) > 0 || z.ents[q] || challenges.HasBelow(q) {
+	// A challenge name answers its TXT; it never makes its parent an empty non-terminal, so a TSIG
+	// key holder cannot hide a name from the wildcard by writing below it.
+	if node != nil || len(txt) > 0 || z.ents[q] {
 		if qtype == dns.TypeANY {
 			return Answer{Rcode: dns.RcodeSuccess, Answer: rfc8482(q, z.soa.Hdr.Ttl)}
 		}
@@ -206,8 +219,7 @@ func (z *Zone) Lookup(qname string, qtype uint16, challenges *Challenges) Answer
 	// synthesized from *.<apex> exactly when nothing between the name and the apex exists.
 	encloser := parentName(q)
 	for encloser != z.apex && encloser != "" {
-		if _, ok := z.records[encloser]; ok || z.ents[encloser] || challenges.HasBelow(encloser) ||
-			len(challenges.Values(encloser)) > 0 {
+		if _, ok := z.records[encloser]; ok || z.ents[encloser] {
 			return z.negative(dns.RcodeNameError)
 		}
 		encloser = parentName(encloser)

@@ -16,7 +16,7 @@ const challengePrefix = "_acme-challenge."
 // live in memory only and never reach D1: a challenge lasts seconds, and a box restart mid-order
 // just makes Caddy retry.
 type Challenges struct {
-	mu        sync.Mutex
+	mu        sync.RWMutex
 	values    map[string]map[string]challengeValue // name -> joined TXT strings -> value
 	ttl       uint32
 	maxAge    time.Duration
@@ -59,35 +59,26 @@ func (c *Challenges) pruneLocked() {
 }
 
 // Values is the TXT RRset served for name (nil when there is none). Safe on a nil receiver.
+// Read-only: expired values are skipped here and pruned by apply, so queries never take the write
+// lock (one read lock per lookup).
 func (c *Challenges) Values(name string) []dns.RR {
 	if c == nil {
 		return nil
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.pruneLocked()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if len(c.values) == 0 {
+		return nil
+	}
+	cutoff := c.now().Add(-c.maxAge)
 	var out []dns.RR
 	for _, v := range c.values[name] {
+		if v.added.Before(cutoff) {
+			continue
+		}
 		out = append(out, &dns.TXT{Hdr: rrHeader(name, dns.TypeTXT, c.ttl), Txt: append([]string(nil), v.txt...)})
 	}
 	return out
-}
-
-// HasBelow reports whether a challenge name lies strictly below name (so name is an empty
-// non-terminal and must not be answered from the wildcard).
-func (c *Challenges) HasBelow(name string) bool {
-	if c == nil {
-		return false
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.pruneLocked()
-	for owner := range c.values {
-		if owner != name && dns.IsSubDomain(name, owner) {
-			return true
-		}
-	}
-	return false
 }
 
 type challengeOp struct {
@@ -121,7 +112,7 @@ func parseUpdate(r *dns.Msg, zone string) ([]challengeOp, bool) {
 			ops = append(ops, challengeOp{name: name, add: true, txt: txt.Txt})
 		case h.Class == dns.ClassNONE && h.Rrtype == dns.TypeTXT:
 			txt, ok := rr.(*dns.TXT)
-			if !ok {
+			if !ok || len(txt.Txt) == 0 { // a value delete needs the value
 				return nil, false
 			}
 			ops = append(ops, challengeOp{name: name, txt: txt.Txt})
@@ -184,21 +175,20 @@ func (h *Handler) handleUpdate(w dns.ResponseWriter, r *dns.Msg) {
 	reply := new(dns.Msg)
 	reply.SetReply(r)
 	tsig := r.IsTsig()
+	// The fudge is the client's: cap it, so a captured update cannot be replayed for hours.
 	if tsig == nil || w.TsigStatus() != nil ||
 		dns.CanonicalName(tsig.Hdr.Name) != h.cfg.TSIGKeyName ||
-		!strings.EqualFold(tsig.Algorithm, dns.HmacSHA256) {
+		!strings.EqualFold(tsig.Algorithm, dns.HmacSHA256) || tsig.Fudge > DefaultTSIGFudge {
 		slog.Warn("sam-dns: update refused: missing or invalid TSIG", "action", "rejected")
 		reply.Rcode = dns.RcodeNotAuth
 		_ = w.WriteMsg(reply) // unsigned: we cannot sign for a key we did not verify
 		return
 	}
-	reply.SetTsig(h.cfg.TSIGKeyName, dns.HmacSHA256, 300, time.Now().Unix())
+	reply.SetTsig(h.cfg.TSIGKeyName, dns.HmacSHA256, DefaultTSIGFudge, time.Now().Unix())
 	zone := r.Question[0]
 	switch {
 	case zone.Qtype != dns.TypeSOA || zone.Qclass != dns.ClassINET || dns.CanonicalName(zone.Name) != h.cfg.Zone:
 		reply.Rcode = dns.RcodeNotAuth // not our zone
-	case len(r.Answer) > 0:
-		reply.Rcode = dns.RcodeRefused // prerequisites are not supported
 	default:
 		ops, ok := parseUpdate(r, h.cfg.Zone)
 		if !ok {

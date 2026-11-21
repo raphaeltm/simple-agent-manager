@@ -12,7 +12,9 @@ tls {$ACME_EMAIL} {
 	dns rfc2136 {
 		key_name {$SAM_DNS_TSIG_KEY_NAME:sam-acme.}
 		key_alg hmac-sha256
-		key {$SAM_DNS_TSIG_SECRET}
+		# A runtime placeholder, resolved when the module is provisioned: the key never appears in the
+		# adapted config that Caddy's admin API serves.
+		key {env.SAM_DNS_TSIG_SECRET}
 		server 127.0.0.1:{$SAM_DNS_UPDATE_PORT:8053}
 	}
 	resolvers 127.0.0.1:{$SAM_DNS_UPDATE_PORT:8053}

@@ -124,10 +124,17 @@ func TestSyncedRecordsCannotTakeStaticOrChallengeNames(t *testing.T) {
 		{Name: "other.example.com", Type: "A", Content: "192.0.2.66"},
 		{Name: "bad-ip.apps.box.example.test", Type: "A", Content: "not-an-ip"},
 		{Name: "v6.apps.box.example.test", Type: "AAAA", Content: "2001:db8::1"},
+		{Name: "api.box.example.test", Type: "A", Content: "192.0.2.66"},
+		{Name: "app.box.example.test", Type: "A", Content: "192.0.2.66"},
+		{Name: "a.b.apps.box.example.test", Type: "A", Content: "192.0.2.66"},
 		{Name: "ok.apps.box.example.test", Type: "A", Content: "192.0.2.10"},
 	})
-	if skipped != 7 {
-		t.Fatalf("skipped %d, want 7", skipped)
+	if skipped != 10 {
+		t.Fatalf("skipped %d, want 10", skipped)
+	}
+	// api. is still the box (the wildcard), never the bad row.
+	if got := aContents(zone.Lookup("api.box.example.test.", dns.TypeA, nil).Answer); strings.Join(got, ",") != "api.box.example.test.=203.0.113.5" {
+		t.Fatalf("api overridden: %v", got)
 	}
 	if got := aContents(zone.Lookup("ns1.box.example.test.", dns.TypeA, nil).Answer); strings.Join(got, ",") != "ns1.box.example.test.=203.0.113.5" {
 		t.Fatalf("glue overridden: %v", got)
@@ -154,6 +161,11 @@ func TestChallengesServeTXTAndExpire(t *testing.T) {
 	// The challenge name is a real node: A is NODATA, not the wildcard.
 	if a := zone.Lookup("_acme-challenge.box.example.test.", dns.TypeA, ch); len(a.Answer) != 0 || a.Rcode != dns.RcodeSuccess {
 		t.Fatalf("challenge name A: %v %d", a.Answer, a.Rcode)
+	}
+	// A challenge never hides its parent from the wildcard (security review L1).
+	ch.apply([]challengeOp{{name: "_acme-challenge.app.box.example.test.", add: true, txt: []string{"x"}}})
+	if got := aContents(zone.Lookup("app.box.example.test.", dns.TypeA, ch).Answer); len(got) != 1 {
+		t.Fatalf("app. shadowed by a challenge below it: %v", got)
 	}
 	now = now.Add(cfg.ChallengeMaxAge + time.Second)
 	if got := zone.Lookup("_acme-challenge.box.example.test.", dns.TypeTXT, ch); len(got.Answer) != 0 {

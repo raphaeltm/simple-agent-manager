@@ -29,6 +29,9 @@ type RateLimiter struct {
 	buckets  map[string]*bucket
 	overflow *bucket
 	now      func() time.Time
+	// lastEvict bounds the full-table scan to once per second, so a flood of new prefixes
+	// against a full table cannot turn every packet into a 50,000-entry walk.
+	lastEvict time.Time
 }
 
 type bucket struct {
@@ -83,7 +86,8 @@ func (l *RateLimiter) Allow(ip net.IP) rateVerdict {
 	key := prefixKey(ip)
 	b := l.buckets[key]
 	if b == nil {
-		if len(l.buckets) >= l.max {
+		if len(l.buckets) >= l.max && now.Sub(l.lastEvict) >= time.Second {
+			l.lastEvict = now
 			l.evictLocked(now)
 		}
 		if len(l.buckets) >= l.max {

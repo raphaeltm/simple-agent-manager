@@ -338,6 +338,15 @@ services:
     # Faces the internet: bound its memory and processes so a flood cannot reach celld or Caddy.
     mem_limit: ${SAM_DNS_MEM_LIMIT:-128m}
     pids_limit: 64
+    cpus: ${SAM_DNS_CPUS:-1}
+    ulimits:
+      nofile: 4096
+    # Refused updates and skipped records are logged: cap the log on disk.
+    logging:
+      driver: json-file
+      options:
+        max-size: ${SAM_DNS_LOG_MAX_SIZE:-10m}
+        max-file: '3'
     depends_on: [celld]
     # REVERSE_TUNNEL_GATEWAY_SECRET (the gateway route's shared secret) and the TSIG key.
     # Written by `pnpm selfhost:deploy`; the profile refuses to deploy without the key.
