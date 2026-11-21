@@ -55,6 +55,35 @@ export const LEGACY_TITLE_PATTERN = 'Recurring % platform error';
 /** D1's LIKE pattern ceiling (SQLITE_LIMIT_LIKE_PATTERN_LENGTH on Cloudflare D1). */
 export const D1_MAX_LIKE_PATTERN_BYTES = 50;
 const TERMINAL_INCIDENT_SQL = "('resolved', 'rejected', 'expired')";
+/**
+ * `tasks.triggered_by` values a legacy pipeline idea can carry. Ideas filed before the pipeline
+ * set `triggered_by = 'incident'` kept the column default, 'user': on 2026-11-20 production had
+ * 320 unowned legacy ideas with 'user' (305 of them in the exact generated shape) and 1 with
+ * 'incident'. Adoption still requires the exact generated title and body, a
+ * draft at priority 0, the triage row's own link and no Durable Object engagement, and it
+ * rewrites the column to 'incident' in the same transaction so `pipelineOwnsIdeaSql` holds.
+ */
+const LEGACY_PIPELINE_IDEA_TRIGGERED_BY_SQL = `('${PIPELINE_IDEA_TRIGGERED_BY}', 'user')`;
+
+/** Minute of the hour the hourly triage and reconciliation run (`PLATFORM_FEEDBACK_HOURLY_CRON`). */
+export const PLATFORM_FEEDBACK_HOURLY_CRON_MINUTE = 30;
+/** Minutes after the cron minute a pipeline write to a legacy idea can still land. */
+const LEGACY_PIPELINE_WRITE_WINDOW_MINUTES = 4;
+
+/**
+ * A 'user' legacy idea is adopted only when nothing but the pipeline can have written it last:
+ * it was never edited (`updated_at = created_at`), or its last write fell in the hourly run's
+ * window, when the old pipeline refreshed it. A person's description edit leaves no other trace
+ * (the Durable Object records notes, links, files and pull requests, not edits), so any other
+ * last-write time keeps it as tracked work. Production 2026-11-20: of 305 candidates, 219 were
+ * never edited, 75 last written at :30-:31 and 11 at other minutes.
+ */
+const LEGACY_USER_IDEA_LAST_WRITTEN_BY_PIPELINE_SQL = `(
+  idea.triggered_by = '${PIPELINE_IDEA_TRIGGERED_BY}'
+  OR idea.updated_at = idea.created_at
+  OR CAST(substr(idea.updated_at, 15, 2) AS INTEGER) BETWEEN ${PLATFORM_FEEDBACK_HOURLY_CRON_MINUTE}
+     AND ${PLATFORM_FEEDBACK_HOURLY_CRON_MINUTE + LEGACY_PIPELINE_WRITE_WINDOW_MINUTES}
+)`;
 
 export interface IncidentIdeaReconciliationResult {
   enabled: boolean;
@@ -120,7 +149,8 @@ async function adoptLegacyIdeas(ctx: StepContext): Promise<void> {
        JOIN tasks idea ON idea.id = triage.idea_id
        WHERE triage.idea_owned_at IS NULL
          AND idea.project_id = ?
-         AND idea.triggered_by = '${PIPELINE_IDEA_TRIGGERED_BY}'
+         AND idea.triggered_by IN ${LEGACY_PIPELINE_IDEA_TRIGGERED_BY_SQL}
+         AND ${LEGACY_USER_IDEA_LAST_WRITTEN_BY_PIPELINE_SQL}
          AND idea.status = 'draft' AND idea.priority = 0
          AND idea.title LIKE ?
          AND substr(idea.description, 1, ?) = ?
@@ -146,23 +176,36 @@ async function adoptLegacyIdeas(ctx: StepContext): Promise<void> {
       // Compare-and-set on the `updated_at` read with the candidate: an edit that lands while
       // the Durable Object is being read moves it, and that idea is not adopted. It then fails
       // the selector's shape checks or stays NULL until the next run re-reads it.
+      // One transaction for the batch; per idea, mark it as the pipeline's (the column legacy
+      // ideas lack) only while its triage row is still unowned, then record ownership only if
+      // that exact, unedited idea was marked.
       const results = await ctx.env.DATABASE.batch(
-        untouched.map((row) =>
+        untouched.flatMap((row) => [
+          ctx.env.DATABASE.prepare(
+            `UPDATE tasks SET triggered_by = '${PIPELINE_IDEA_TRIGGERED_BY}'
+             WHERE id = ? AND updated_at = ? AND status = 'draft' AND priority = 0
+               AND triggered_by IN ${LEGACY_PIPELINE_IDEA_TRIGGERED_BY_SQL}
+               AND EXISTS (SELECT 1 FROM platform_feedback_triages
+                           WHERE signature = ? AND idea_id = ? AND idea_owned_at IS NULL)`
+          ).bind(row.idea_id, updatedAt.get(row.signature), row.signature, row.idea_id),
           ctx.env.DATABASE.prepare(
             `UPDATE platform_feedback_triages SET idea_owned_at = ?, updated_at = CURRENT_TIMESTAMP
              WHERE signature = ? AND idea_id = ? AND idea_owned_at IS NULL
                AND EXISTS (SELECT 1 FROM tasks WHERE id = ? AND updated_at = ?
-                           AND status = 'draft' AND priority = 0)`
+                           AND status = 'draft' AND priority = 0
+                           AND triggered_by = '${PIPELINE_IDEA_TRIGGERED_BY}')`
           ).bind(
             updatedAt.get(row.signature),
             row.signature,
             row.idea_id,
             row.idea_id,
             updatedAt.get(row.signature)
-          )
-        )
+          ),
+        ])
       );
-      const adopted = results.reduce((sum, item) => sum + (item.meta.changes ?? 0), 0);
+      // Ownership writes are every second statement.
+      const ownership = results.filter((_, index) => index % 2 === 1);
+      const adopted = ownership.reduce((sum, item) => sum + (item.meta.changes ?? 0), 0);
       ctx.result.adopted += adopted;
       // A lost compare leaves the row selectable; stop rather than spin on it this run.
       if (adopted < untouched.length) return;

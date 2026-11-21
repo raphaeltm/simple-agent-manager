@@ -15,7 +15,10 @@ import { runIncidentTriggerSweep } from '../../../src/scheduled/incident-trigger
 import { findAnomalies } from '../../../src/services/fleet-ops/anomalies';
 import { FLEET_OPS_DEFAULTS } from '../../../src/services/fleet-ops/settings-definitions';
 import type { IdeaWorkSnapshotReader } from '../../../src/services/platform-feedback-incidents';
-import { buildIncidentBacklogSummary } from '../../../src/services/platform-feedback-incidents';
+import {
+  buildIncidentBacklogSummary,
+  listDispatchableIncidentQueue,
+} from '../../../src/services/platform-feedback-incidents';
 import {
   groupPlatformErrors,
   reconcileIncidentIdeas,
@@ -137,6 +140,48 @@ function humanEdit(sqlite: Database.Database, ideaId: string, set: string) {
   sqlite
     .prepare(`UPDATE tasks SET ${set}, updated_at = ? WHERE id = ?`)
     .run('2026-11-20T10:30:00.123Z', ideaId);
+}
+
+/** Legacy pipeline ideas in the production shape: the column default triggered_by = 'user'. */
+const USER_LEGACY_BODY = [
+  '## Maintainer Instructions',
+  '',
+  'Triage this automated platform feedback report. Raw observability messages were normalized/redacted before grouping.',
+  '',
+  '```',
+  '- evidence',
+  '```',
+].join('\n');
+const USER_LEGACY_CREATED_AT = '2026-10-01T00:30:02.000Z';
+/** A write inside the hourly run's window, as the old pipeline refreshed ideas. */
+const PIPELINE_WRITE_AT = '2026-10-01T01:30:05.000Z';
+
+function seedUserLegacyIdea(
+  w: { sqlite: Database.Database },
+  id: string,
+  options: { updatedAt: string; body?: string }
+) {
+  w.sqlite
+    .prepare(
+      `INSERT INTO tasks (id, triggered_by, project_id, user_id, title, description, status,
+         priority, task_mode, dispatch_depth, created_by, created_at, updated_at, is_idea)
+       VALUES (?, 'user', 'feedback-project', 'owner-1', 'Recurring api platform error', ?,
+         'draft', 0, 'task', 0, 'owner-1', ?, ?, 1)`
+    )
+    .run(id, options.body ?? USER_LEGACY_BODY, USER_LEGACY_CREATED_AT, options.updatedAt);
+  w.sqlite
+    .prepare(
+      `INSERT INTO platform_feedback_triages (signature, source, summary, first_seen_at,
+         last_seen_at, occurrence_count, evidence_refs, severity, idea_id, queue_state, queued_at)
+       VALUES (?, 'api', 'Recurring api platform error', ?, ?, 5, '[]', 'error', ?, 'pending', ?)`
+    )
+    .run(`sig-${id}`, T0 - 10 * HOUR, T0 - 9 * HOUR, id, T0 - 10 * HOUR);
+}
+
+function ideaColumns(w: { sqlite: Database.Database }) {
+  return w.sqlite
+    .prepare('SELECT id, triggered_by, updated_at FROM tasks ORDER BY id')
+    .all() as Array<{ id: string; triggered_by: string; updated_at: string }>;
 }
 
 describe('incident idea ownership', () => {
@@ -456,6 +501,82 @@ describe('incident idea ownership', () => {
     });
     expect(result).toMatchObject({ ideasUpdated: 0 });
     expect(w.idea()).toEqual([before]);
+    expect(w.triageRow().idea_owned_at).toBe('released');
+  });
+
+  it('adopts legacy ideas stored with the old column default, which unblocks their dispatch', async () => {
+    // Production shape (2026-11-20): 305 legacy pipeline ideas carried triggered_by = 'user',
+    // so adoption never matched them and every pending error incident read as tracked work.
+    const w = world();
+    seedUserLegacyIdea(w, 'legacy-user', { updatedAt: PIPELINE_WRITE_AT });
+    // Control: a person appended to this one; it stays tracked work.
+    seedUserLegacyIdea(w, 'legacy-user-edited', {
+      updatedAt: PIPELINE_WRITE_AT,
+      body: `${USER_LEGACY_BODY}\n\nA person added a note.`,
+    });
+    const dispatchable = async () =>
+      (await listDispatchableIncidentQueue(w.env, 10, T0)).map((item) => item.id).sort();
+    expect(await dispatchable()).toEqual([]);
+
+    const result = await w.reconcile(T0);
+
+    expect(result).toMatchObject({ adopted: 1, failedSteps: [] });
+    expect(ideaColumns(w)).toEqual([
+      { id: 'legacy-user', triggered_by: 'incident', updated_at: PIPELINE_WRITE_AT },
+      { id: 'legacy-user-edited', triggered_by: 'user', updated_at: PIPELINE_WRITE_AT },
+    ]);
+    expect(await dispatchable()).toEqual(['sig-legacy-user']);
+  });
+
+  it('keeps a user-default legacy idea last written outside the hourly run as tracked work', async () => {
+    // A person's edit inside the generated body leaves no record; a last write at a minute the
+    // pipeline never writes is treated as one. Control: the same idea written at :31 is adopted.
+    const w = world();
+    const editedInsideFence = USER_LEGACY_BODY.replace(
+      '- evidence',
+      '- evidence (a person fixed this)'
+    );
+    seedUserLegacyIdea(w, 'person-edited', {
+      updatedAt: '2026-10-03T10:47:12.000Z',
+      body: editedInsideFence,
+    });
+    seedUserLegacyIdea(w, 'pipeline-refreshed', { updatedAt: '2026-10-03T11:31:09.000Z' });
+
+    expect(await w.reconcile(T0)).toMatchObject({ adopted: 1 });
+    expect(ideaColumns(w).map(({ id, triggered_by }) => ({ id, triggered_by }))).toEqual([
+      { id: 'person-edited', triggered_by: 'user' },
+      { id: 'pipeline-refreshed', triggered_by: 'incident' },
+    ]);
+  });
+
+  it('does not relabel or adopt a user-default legacy idea edited during the read', async () => {
+    const w = world();
+    seedUserLegacyIdea(w, 'raced', { updatedAt: USER_LEGACY_CREATED_AT });
+    const editDuringRead: IdeaWorkSnapshotReader = async () => {
+      humanEdit(w.sqlite, 'raced', 'priority = 0');
+      return {};
+    };
+
+    expect(await w.reconcile(T0, editDuringRead)).toMatchObject({ adopted: 0 });
+    expect(ideaColumns(w)[0]?.triggered_by).toBe('user');
+    expect(w.triageRow().idea_owned_at).toBeNull();
+  });
+
+  it('releases, and does not adopt, a legacy user-default idea someone engaged with', async () => {
+    const w = world();
+    seedUserLegacyIdea(w, 'engaged', { updatedAt: USER_LEGACY_CREATED_AT });
+    const linked: IdeaWorkSnapshotReader = async (_env, _project, ids) =>
+      Object.fromEntries(
+        ids.map((id) => [
+          id,
+          { sessions: [{ strong: true }], updates: 0, fileIds: [], pullRequestUrls: [] },
+        ])
+      );
+
+    const result = await w.reconcile(T0, linked);
+
+    expect(result).toMatchObject({ adopted: 0, released: 1 });
+    expect(ideaColumns(w)[0]?.triggered_by).toBe('user');
     expect(w.triageRow().idea_owned_at).toBe('released');
   });
 
