@@ -33,7 +33,7 @@ At the default 25 per batch and 20 s deadline, the 305 production ideas clear in
 hourly runs (one Durable Object read per batch). Closing the 282 expired ones follows in the same
 or next run, as #2938 intended (approved by Raphaël 2026-11-20).
 
-## Last-write guard (Codex P1)
+## Last-write guard (Codex P1) — superseded by the follow-up below
 
 A person's description edit leaves no record the engagement check reads. 'user' rows are adopted
 only if never edited (`updated_at = created_at`) or last written in the hourly run's window
@@ -46,7 +46,7 @@ Adoption checks the generated heading, summary sentence, closing fence, title, d
 priority 0, plus Durable Object engagement (links, notes, files, PRs). It does not compare the
 full body, so a person's edit inside the body of a pipeline-created idea that keeps that shape
 would be adopted and could later be closed with its incident, but only if that edit landed
-inside the hourly run's 5-minute window. Same check #2938 applies to
+inside the hourly run's 5-minute window (superseded: #2958 adopts never-edited rows only). Same check #2938 applies to
 'incident' rows; every candidate is the pipeline's own idea (triage row link). Accepted.
 
 The first reconciliation after deploy adopts the ~305 ideas and then cancels the ~282 whose
@@ -65,3 +65,10 @@ the cancel of deploy run 44848715648 arrived 8 s too late): 86 'user' rows last 
 :30-:34 (68 expired, 18 pending) are adoptable by the 01:30Z run. Evidence they were pipeline
 writes: shared millisecond `updated_at` values across ideas (batch writes) and template-length
 bodies. Recovery point if any must be restored: D1 Time Travel before 2026-11-21T01:30Z.
+
+## Production outcome (2026-11-21 01:30Z, #2957 code)
+
+All remaining legacy draft ideas were adopted, including the 86 window-rule rows. A
+pre-run snapshot of those 86 (Library /engineering/incident-idea-adoption-snapshot-2026-11-21.json)
+shows every body is the generated template and embeds its own signature ref, with no user status
+events, so no person's edit was affected. 100 ended incidents' ideas were closed in that run.
