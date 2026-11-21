@@ -163,10 +163,11 @@ New attack surface: a public UDP/TCP 53 listener, and a loopback RFC 2136 update
       switching an existing box)
 - [x] Disposable box proof (GCP sam-vm-control-plane-test): DNS-01 wildcard via own server, sign-in,
       dig shows recursion + AXFR refused; Worker-written record resolves publicly. Evidence below.
-- [ ] App deployment on the box resolves publicly: BLOCKED by a pre-existing gap. Box deployment nodes are
+- [ ] App deployment on the box resolves publicly: OUT OF SCOPE for step 1 (coordinator, 2026-11-21): a pre-existing gap. Box deployment nodes are
       excluded from the reverse tunnel and need Cloudflare Origin CA, so they cannot boot (idea
       01M7Z0N9ACNE44NC4ZWK3K2QNB; escalated to the coordinator 2026-11-21).
-- [ ] Cleanup of the disposable box recorded (pending the coordinator's answer)
+- [x] Cleanup of the disposable box recorded: VM, firewall `sam-dnsbox-allow`, NS+glue, WIF pool
+      `sam-fe1db321`, SA `sam-dnsbox-nodes` + 2 role bindings deleted 2026-11-21; shared box untouched
 
 ## Acceptance criteria
 - [x] Cloudflare deployments: identical DNS API calls (tests + staging evidence)
