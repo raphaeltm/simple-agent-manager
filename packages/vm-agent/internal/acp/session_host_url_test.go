@@ -18,16 +18,16 @@ import (
 type sdkURLFixtureAgent struct {
 	acpsdk.Agent
 	conn     *acpsdk.AgentSideConnection
-	observed chan acpsdk.UnstableCreateElicitationResponse
+	observed chan acpsdk.CreateElicitationResponse
 }
 
 func (a *sdkURLFixtureAgent) Prompt(ctx context.Context, _ acpsdk.PromptRequest) (acpsdk.PromptResponse, error) {
-	response, err := a.conn.UnstableCreateElicitation(ctx, fixtureURLRequest("https://auth.example.com/approve"))
+	response, err := a.conn.CreateElicitation(ctx, fixtureURLRequest("https://auth.example.com/approve"))
 	if err != nil {
 		return acpsdk.PromptResponse{}, err
 	}
 	a.observed <- response
-	if err := a.conn.UnstableCompleteElicitation(ctx, acpsdk.UnstableCompleteElicitationNotification{ElicitationId: "remote-service-1"}); err != nil {
+	if err := a.conn.CompleteElicitation(ctx, acpsdk.CompleteElicitationNotification{ElicitationId: "remote-service-1"}); err != nil {
 		return acpsdk.PromptResponse{}, err
 	}
 	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
@@ -43,8 +43,8 @@ func testURLConfig() AcpInteractionRuntimeConfig {
 	return config
 }
 
-func fixtureURLRequest(raw string) acpsdk.UnstableCreateElicitationRequest {
-	request := acpsdk.NewUnstableCreateElicitationRequestUrl("remote-service-1", raw)
+func fixtureURLRequest(raw string) acpsdk.CreateElicitationRequest {
+	request := acpsdk.CreateElicitationRequest{Url: &acpsdk.CreateElicitationUrl{Mode: "url", Session: &acpsdk.ElicitationSessionScope{SessionId: "sdk-session-1"}, ElicitationId: "remote-service-1", Url: raw}}
 	request.Url.Message = "Approve remote service"
 	return request
 }
@@ -104,9 +104,9 @@ func TestURLCompletionBeforeAnswerAndNoWaiterRejection(t *testing.T) {
 	host, client := newInteractionHost(recorder)
 	t.Cleanup(host.Stop)
 	host.ConfigureAcpInteractions(testURLConfig())
-	responses := make(chan acpsdk.UnstableCreateElicitationResponse, 1)
+	responses := make(chan acpsdk.CreateElicitationResponse, 1)
 	go func() {
-		response, _ := client.UnstableCreateElicitation(context.Background(), fixtureURLRequest("https://auth.example.com/approve?state=SECRET_URL_CANARY"))
+		response, _ := client.CreateElicitation(context.Background(), fixtureURLRequest("https://auth.example.com/approve?state=SECRET_URL_CANARY"))
 		responses <- response
 	}()
 	created := waitCreate(t, recorder)
@@ -118,7 +118,7 @@ func TestURLCompletionBeforeAnswerAndNoWaiterRejection(t *testing.T) {
 		AcpInteractionAnswerDecision{Kind: "accepted", AnswerHash: strings.Repeat("a", 64)}); status != "stale_generation" {
 		t.Fatalf("stale generation status = %q", status)
 	}
-	if err := client.UnstableCompleteElicitation(context.Background(), acpsdk.UnstableCompleteElicitationNotification{
+	if err := client.CompleteElicitation(context.Background(), acpsdk.CompleteElicitationNotification{
 		ElicitationId: "remote-service-1",
 	}); err != nil {
 		t.Fatal(err)
@@ -131,7 +131,7 @@ func TestURLCompletionBeforeAnswerAndNoWaiterRejection(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("upstream completion did not reach Worker callback")
 	}
-	if err := client.UnstableCompleteElicitation(context.Background(), acpsdk.UnstableCompleteElicitationNotification{
+	if err := client.CompleteElicitation(context.Background(), acpsdk.CompleteElicitationNotification{
 		ElicitationId: "remote-service-1",
 	}); err != nil {
 		t.Fatal(err)
@@ -159,11 +159,11 @@ func TestURLCompletionBeforeAnswerAndNoWaiterRejection(t *testing.T) {
 	}
 	// A second request cannot reuse the completed ID in the same generation:
 	// a late duplicate notification from A would otherwise complete B.
-	reused, err := client.UnstableCreateElicitation(context.Background(), fixtureURLRequest("https://auth.example.com/second"))
+	reused, err := client.CreateElicitation(context.Background(), fixtureURLRequest("https://auth.example.com/second"))
 	if err != nil || reused.Cancel == nil {
 		t.Fatalf("reused elicitation ID = %+v, %v", reused, err)
 	}
-	if err := client.UnstableCompleteElicitation(context.Background(), acpsdk.UnstableCompleteElicitationNotification{
+	if err := client.CompleteElicitation(context.Background(), acpsdk.CompleteElicitationNotification{
 		ElicitationId: "remote-service-1",
 	}); err != nil {
 		t.Fatal(err)
@@ -183,23 +183,23 @@ func TestURLUTF16ElicitationIDBoundaryThroughCompletion(t *testing.T) {
 	t.Cleanup(host.Stop)
 	host.ConfigureAcpInteractions(testURLConfig())
 	tooLong := fixtureURLRequest("https://auth.example.com/approve")
-	tooLong.Url.ElicitationId = acpsdk.UnstableElicitationId(strings.Repeat("😀", 129))
-	response, err := client.UnstableCreateElicitation(context.Background(), tooLong)
+	tooLong.Url.ElicitationId = acpsdk.ElicitationId(strings.Repeat("😀", 129))
+	response, err := client.CreateElicitation(context.Background(), tooLong)
 	if err != nil || response.Cancel == nil {
 		t.Fatalf("129 astral ID should be cancelled: %+v, %v", response, err)
 	}
 	allowed := fixtureURLRequest("https://auth.example.com/approve")
-	allowed.Url.ElicitationId = acpsdk.UnstableElicitationId(strings.Repeat("😀", 128))
-	responses := make(chan acpsdk.UnstableCreateElicitationResponse, 1)
+	allowed.Url.ElicitationId = acpsdk.ElicitationId(strings.Repeat("😀", 128))
+	responses := make(chan acpsdk.CreateElicitationResponse, 1)
 	go func() {
-		result, _ := client.UnstableCreateElicitation(context.Background(), allowed)
+		result, _ := client.CreateElicitation(context.Background(), allowed)
 		responses <- result
 	}()
 	created := waitCreate(t, recorder)
 	if created.Detail.ElicitationID != string(allowed.Url.ElicitationId) {
 		t.Fatal("128 astral ID was not preserved in encrypted create request")
 	}
-	if err := client.UnstableCompleteElicitation(context.Background(), acpsdk.UnstableCompleteElicitationNotification{
+	if err := client.CompleteElicitation(context.Background(), acpsdk.CompleteElicitationNotification{
 		ElicitationId: allowed.Url.ElicitationId,
 	}); err != nil {
 		t.Fatal(err)
@@ -262,7 +262,7 @@ func TestUnsupportedLoopbackURLDoesNotCreateInteraction(t *testing.T) {
 	host, client := newInteractionHost(recorder)
 	t.Cleanup(host.Stop)
 	host.ConfigureAcpInteractions(testURLConfig())
-	response, err := client.UnstableCreateElicitation(context.Background(), fixtureURLRequest(
+	response, err := client.CreateElicitation(context.Background(), fixtureURLRequest(
 		"https://auth.example.com/oauth?redirect_uri=http%3A%2F%2F127.0.0.1%3A7777%2Fcallback"))
 	if err != nil || response.Cancel == nil {
 		t.Fatalf("loopback response = %+v, %v", response, err)
@@ -287,7 +287,7 @@ func TestPinnedSDKURLRequestAndCompletionNotificationWire(t *testing.T) {
 		_ = agentToClientReader.Close()
 		_ = agentToClientWriter.Close()
 	})
-	agent := &sdkURLFixtureAgent{observed: make(chan acpsdk.UnstableCreateElicitationResponse, 1)}
+	agent := &sdkURLFixtureAgent{observed: make(chan acpsdk.CreateElicitationResponse, 1)}
 	agent.conn = acpsdk.NewAgentSideConnection(agent, agentToClientWriter, clientToAgentReader)
 	client := &sessionHostClient{host: host, interactionGeneration: host.interactionGeneration}
 	clientConn := acpsdk.NewClientSideConnection(client, clientToAgentWriter, agentToClientReader)

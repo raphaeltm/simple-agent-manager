@@ -14,8 +14,8 @@ import (
 	"github.com/google/uuid"
 )
 
-func cancelledFormResponse() acpsdk.UnstableCreateElicitationResponse {
-	return acpsdk.NewUnstableCreateElicitationResponseCancel()
+func cancelledFormResponse() acpsdk.CreateElicitationResponse {
+	return acpsdk.CreateElicitationResponse{Cancel: &acpsdk.CreateElicitationCancel{Action: "cancel"}}
 }
 
 func supportedFormRequestMeta(meta map[string]any) bool {
@@ -58,7 +58,7 @@ func (h *SessionHost) registerFormWaiter(id, generation string, attemptID uint64
 }
 
 func (h *SessionHost) requestForm(ctx context.Context, generation string,
-	params acpsdk.UnstableCreateElicitationRequest) (acpsdk.UnstableCreateElicitationResponse, error) {
+	params acpsdk.CreateElicitationRequest) (acpsdk.CreateElicitationResponse, error) {
 	config := h.acpInteractionConfigSnapshot()
 	if params.Form == nil || params.Url != nil || !supportedFormRequestMeta(params.Form.Meta) ||
 		!config.Enabled || !config.FormsEnabled ||
@@ -170,18 +170,18 @@ func (h *SessionHost) requestForm(ctx context.Context, generation string,
 		}
 		if reason == "declined" {
 			settle("completed")
-			return acpsdk.NewUnstableCreateElicitationResponseDecline(), nil
+			return acpsdk.CreateElicitationResponse{Decline: &acpsdk.CreateElicitationDecline{Action: "decline"}}, nil
 		}
 		settle(reason)
 		return cancelledFormResponse(), nil
 	}
 	settle("completed")
-	return acpsdk.UnstableCreateElicitationResponse{Accept: &acpsdk.UnstableCreateElicitationAccept{
+	return acpsdk.CreateElicitationResponse{Accept: &acpsdk.CreateElicitationAccept{
 		Action: "accept", Content: result.content}}, nil
 }
 
-func (c *sessionHostClient) UnstableCreateElicitation(ctx context.Context,
-	params acpsdk.UnstableCreateElicitationRequest) (acpsdk.UnstableCreateElicitationResponse, error) {
+func (c *sessionHostClient) CreateElicitation(ctx context.Context,
+	params acpsdk.CreateElicitationRequest) (acpsdk.CreateElicitationResponse, error) {
 	if params.Url != nil {
 		return c.host.requestURL(ctx, c.interactionGeneration, params)
 	}

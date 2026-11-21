@@ -461,9 +461,8 @@ func isTerminalClaudeTaskStatus(status string) bool {
 }
 
 // acpToolCallStatusCancelled is a terminal tool-call status in the ACP protocol
-// that the pinned SDK (coder/acp-go-sdk v0.13.5) predates, so it has no
-// generated constant. `ToolCallStatus` is a plain string with no runtime enum
-// validation, so a peer sending it unmarshals fine — and treating it as
+// that still has no generated constant in the pinned SDK. `ToolCallStatus`
+// accepts open string values, so a peer sending it unmarshals fine — and treating it as
 // non-terminal would leak the tool call in the exact case where the agent DID
 // tell us the work is over.
 const acpToolCallStatusCancelled acpsdk.ToolCallStatus = "cancelled"

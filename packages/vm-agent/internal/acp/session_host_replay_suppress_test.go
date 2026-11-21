@@ -111,7 +111,7 @@ func TestSessionUpdate_ReplaySuppressedGate(t *testing.T) {
 // run (while replaySuppressed was true).
 //
 // The determinism of the zero-buffer/zero-enqueue assertions depends on this
-// barrier, which is provided by github.com/coder/acp-go-sdk (pinned v0.13.5).
+// barrier, which is provided by github.com/coder/acp-go-sdk (pinned v0.19.0).
 // If a future SDK upgrade makes notification dispatch asynchronous relative to
 // the response, this test would need an explicit synchronization point.
 type loadReplayFakeAgent struct {
