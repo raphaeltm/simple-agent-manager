@@ -108,6 +108,32 @@ export async function upsertBoxARecord(name: string, ip: string, env: BoxDnsEnv)
 }
 
 /**
+ * Creates the A record for `name` unless one exists, without ever replacing it: the durable node
+ * provisioning replay must not overwrite a concurrent allocation's record (rule 75 §7). Returns
+ * the new id, or null when a record was already there. The serial is bumped either way (harmless).
+ */
+export async function insertBoxARecordIfAbsent(
+  name: string,
+  ip: string,
+  env: BoxDnsEnv
+): Promise<string | null> {
+  const fqdn = assertInNamespace(boxRecordName(name, env), env, WRITABLE_RELATIVE_NAME_RE, 'write');
+  const content = assertIpv4(ip);
+  const now = new Date().toISOString();
+  const [insert] = await env.DATABASE.batch([
+    env.DATABASE.prepare(
+      `INSERT INTO selfhost_dns_records (id, name, type, content, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(name, type) DO NOTHING
+       RETURNING id`
+    ).bind(`box_${ulid()}`, fqdn, BOX_DNS_RECORD_TYPE, content, now, now),
+    env.DATABASE.prepare(BUMP_SERIAL_SQL),
+  ]);
+  const id = maybeJsonRecord(insert?.results?.[0])?.id;
+  return typeof id === 'string' ? id : null;
+}
+
+/**
  * Points the node-backend record `id` at `ip`. Only node backends are updated by id (the heartbeat's
  * IP change, routes/node-heartbeat-ip.ts), so the predicate also requires that namespace: a stale or
  * wrong id cannot repoint an app route or a workspace record. A missing id is an error, as
@@ -193,8 +219,20 @@ export function parseRecordRow(row: unknown, context: string): BoxDnsRecord | nu
   ) {
     return { id, name, type, content };
   }
+  // Which field failed, never the rejected value itself (rule 50: diagnosable without the row).
+  const invalidFields = [
+    typeof id === 'string' ? null : 'id',
+    typeof name === 'string' &&
+    name.length <= MAX_NAME_LENGTH &&
+    name.split('.').every((label) => LABEL_RE.test(label))
+      ? null
+      : 'name',
+    type === BOX_DNS_RECORD_TYPE ? null : 'type',
+    typeof content === 'string' && IPV4_RE.test(content) ? null : 'content',
+  ].filter((field): field is string => field !== null);
   log.warn('selfhost_dns.record_row_skipped', {
     context,
+    invalidFields,
     recordId: typeof id === 'string' ? id.slice(0, 64) : null,
     name: typeof name === 'string' ? name.slice(0, 255) : null,
     type: typeof type === 'string' ? type.slice(0, 16) : null,
