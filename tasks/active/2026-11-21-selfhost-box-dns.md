@@ -117,6 +117,12 @@ New attack surface: a public UDP/TCP 53 listener, and a loopback RFC 2136 update
     host network and could reach 127.0.0.1:update, but need the TSIG key, which only Caddy gets.
   - The gateway records route is loopback-only (Caddy 404s the prefix publicly) and secret-checked;
     it is read-only.
+- **Accepted risk (review M1 on #2960):** sam-dns, like sam-mx, holds the shared gateway secret
+  for its loopback sync route. A parser compromise would expose the other gateway routes. Same
+  trade-off as sam-mx; per-sidecar credentials are tracked in idea 01M7YXTPZA414CAN0RF4KHGAVB.
+- **The TSIG key equals certificate issuance for the whole domain** (any name, any ACME account),
+  as `roles/dns.admin` does today. It cannot repoint names: updates are TXT under
+  `_acme-challenge` only, and a challenge name never hides its parent from the wildcard.
 - No new trust boundary beyond the plan: nothing outside the box can write records.
 
 ## Implementation checklist
