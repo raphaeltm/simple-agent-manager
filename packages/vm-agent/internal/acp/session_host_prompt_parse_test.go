@@ -194,14 +194,19 @@ func TestInjectUserMessageNotifications_SDKMarshalPreservesMetadataAndSAMOrigin(
 		if tb.Meta["sam.origin"] != "system" {
 			t.Fatalf("mirror lost content metadata: %v", tb.Meta)
 		}
-		if tb.Annotations == nil || len(tb.Annotations.Audience) != 1 || tb.Annotations.Audience[0] != acpsdk.RoleAssistant {
-			t.Fatalf("mirror lost content annotations: %v", tb.Annotations)
-		}
+		assertMirroredAssistantAudience(t, tb.Annotations)
 		if env.Params.Origin != OriginSystem {
 			t.Fatalf("SAM broadcast origin = %q, want %q", env.Params.Origin, OriginSystem)
 		}
 	}
 	if !sawUserUpdate {
 		t.Fatal("no session/update user_message broadcast found")
+	}
+}
+
+func assertMirroredAssistantAudience(t *testing.T, annotations *acpsdk.Annotations) {
+	t.Helper()
+	if annotations == nil || len(annotations.Audience) != 1 || annotations.Audience[0] != acpsdk.RoleAssistant {
+		t.Fatalf("mirror lost content annotations: %v", annotations)
 	}
 }
