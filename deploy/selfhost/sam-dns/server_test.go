@@ -218,3 +218,17 @@ func TestLargeAnswerIsTruncatedOverUDP(t *testing.T) {
 		t.Fatalf("TCP answer: truncated=%v records=%d", tcp.Truncated, len(tcp.Answer))
 	}
 }
+
+func TestProbeUpdateTellsWhichKeyTheServerAccepts(t *testing.T) {
+	cfg := testConfig(t, nil)
+	s := startTestServer(t, cfg)
+	cfg.UpdateListen = s.updateTCP
+	ok, err := probeUpdate(cfg, cfg.TSIGSecret)
+	if err != nil || !ok {
+		t.Fatalf("current key: ok=%v err=%v", ok, err)
+	}
+	ok, err = probeUpdate(cfg, "d3Jvbmcta2V5LXdyb25nLWtleS13cm9uZy1rZXktd3Jvbmc=")
+	if err != nil || ok {
+		t.Fatalf("old key: ok=%v err=%v, want refused", ok, err)
+	}
+}

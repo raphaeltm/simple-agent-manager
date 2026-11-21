@@ -15,7 +15,9 @@ RUN apk add --no-cache libcap-utils=2.78-r0
 COPY --from=build /out/sam-dns /usr/local/bin/sam-dns
 # The file capability is the only privilege: compose runs it as an unprivileged uid with every
 # other capability dropped (docker-compose.yml, service sam-dns).
-RUN setcap cap_net_bind_service=+ep /usr/local/bin/sam-dns && apk del libcap-utils
+RUN setcap cap_net_bind_service=+ep /usr/local/bin/sam-dns && apk del libcap-utils \
+    && mkdir -p /var/lib/sam-dns && chown 7104:7104 /var/lib/sam-dns
+# /var/lib/sam-dns: the zone cache volume; a new named volume takes this owner.
 # Never root, even without compose's `user:` (which sets the same uid on the box).
 USER 7104:7104
 ENTRYPOINT ["/usr/local/bin/sam-dns"]

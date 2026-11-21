@@ -7,6 +7,8 @@
  * - `swap`: new value(s) in a new bundle, deploy, check. Verification cannot overlap and does
  *   not need to: holders re-fetch, or the old value only ever lived inside one Worker version.
  * - `gateway`: the Worker accepts old and new while frps, Caddy and sam-mx restart.
+ * - `dns-key`: the TSIG key Caddy and sam-dns share; both restart on the new value, then the old
+ *   one is proven refused.
  * - `overlap`: JWT. The Worker keeps accepting the previous key until a bounded time.
  * - `reencrypt`: AES keys. Re-encrypt every stored value, prove it, then retire the old key.
  * - `better-auth`: the BetterAuth secret, with better-auth's versioned secrets.
@@ -22,7 +24,7 @@ import {
 } from '../deploy/generate-keys.js';
 import { generateAgentSigningKey } from './key-seal.js';
 
-export type Procedure = 'swap' | 'gateway' | 'overlap' | 'reencrypt' | 'better-auth';
+export type Procedure = 'swap' | 'gateway' | 'dns-key' | 'overlap' | 'reencrypt' | 'better-auth';
 
 export interface RotatableKey {
   /** The name the operator types: `rotate <name>`. */
@@ -103,6 +105,18 @@ export const ROTATABLE_KEYS: readonly RotatableKey[] = [
       'frps, Caddy and sam-mx restart once to load the new value (the Worker accepts both meanwhile): every node tunnel reconnects (frpc retries on its own), open terminals and agent WebSockets drop and reconnect',
     downtime:
       'a few seconds of HTTPS interruption while Caddy restarts; node tunnels down until frpc reconnects (seconds)',
+  },
+  {
+    name: 'dns-update-key',
+    procedure: 'dns-key',
+    secrets: ['SAM_DNS_TSIG_SECRET'],
+    generate: () => ({ SAM_DNS_TSIG_SECRET: random(32, 'base64') }),
+    // Only on boxes that have the key (dns-settings.ts; --init adds it).
+    optional: true,
+    impact:
+      'Caddy and sam-dns restart once to load the new TSIG key (dns.env): a certificate renewal running at that moment fails and Caddy retries it; DNS answers pause for the second sam-dns takes to start',
+    downtime:
+      'a few seconds of HTTPS interruption while Caddy restarts; DNS queries unanswered while sam-dns restarts (resolvers retry, cached answers keep working)',
   },
   {
     name: 'encryption-key',

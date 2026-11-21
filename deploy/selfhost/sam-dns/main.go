@@ -129,12 +129,51 @@ func healthcheck(cfg *Config) error {
 	return nil
 }
 
+// probeUpdate sends a TSIG-signed no-op UPDATE (delete a TXT RRset at a probe name that never
+// holds a live challenge) to the loopback listener. `pnpm selfhost:secrets rotate dns-update-key`
+// runs it to prove which key the running server accepts. Exit 0: accepted; 3: refused (NOTAUTH).
+func probeUpdate(cfg *Config, secret string) (bool, error) {
+	m := new(dns.Msg)
+	m.SetUpdate(cfg.Zone)
+	m.RemoveRRset([]dns.RR{&dns.ANY{Hdr: dns.RR_Header{
+		Name: challengePrefix + "sam-dns-probe." + cfg.Zone, Rrtype: dns.TypeTXT, Class: dns.ClassANY,
+	}}})
+	m.SetTsig(cfg.TSIGKeyName, dns.HmacSHA256, 300, time.Now().Unix())
+	c := &dns.Client{Net: "tcp", Timeout: 3 * time.Second, TsigSecret: map[string]string{cfg.TSIGKeyName: secret}}
+	reply, _, err := c.Exchange(m, cfg.UpdateListen)
+	if reply != nil && reply.Rcode == dns.RcodeNotAuth {
+		return false, nil // refused before the reply could be signed with our key
+	}
+	if err != nil {
+		return false, err
+	}
+	return reply.Rcode == dns.RcodeSuccess, nil
+}
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	cfg, err := LoadConfig(os.Getenv)
 	if err != nil {
 		slog.Error("sam-dns: configuration error", "error", err.Error())
 		os.Exit(64)
+	}
+	if len(os.Args) > 1 && os.Args[1] == "probe-update" {
+		// The key to try comes from the environment, never argv.
+		secret := os.Getenv("SAM_DNS_PROBE_TSIG_SECRET")
+		if secret == "" {
+			secret = cfg.TSIGSecret
+		}
+		ok, err := probeUpdate(cfg, secret)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "sam-dns probe-update:", err)
+			os.Exit(1)
+		}
+		if !ok {
+			fmt.Println("refused")
+			os.Exit(3)
+		}
+		fmt.Println("accepted")
+		return
 	}
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		if err := healthcheck(cfg); err != nil {

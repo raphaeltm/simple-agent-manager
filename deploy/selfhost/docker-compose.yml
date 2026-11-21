@@ -237,6 +237,10 @@ services:
         required: true
       - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/mail-collector.env
         required: false
+      # dns.env: the TSIG key for RFC 2136 updates to sam-dns (SAM_TLS_MODE=dns-rfc2136 only).
+      # Written by pnpm selfhost:deploy whenever the box has the key.
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/dns.env
+        required: false
     environment:
       SAM_DOMAIN: ${SAM_DOMAIN:?set SAM_DOMAIN in .env}
       SAM_TLS_MODE: ${SAM_TLS_MODE:?set SAM_TLS_MODE in .env (internal or dns-<provider>)}
@@ -259,6 +263,9 @@ services:
       MAIL_COLLECTOR_UI_PORT: ${MAIL_COLLECTOR_UI_PORT:-8025}
       # sam-mx's public listen address; start.sh checks the port after the last ':'.
       SAM_MX_LISTEN: ${SAM_MX_LISTEN:-:25}
+      # sam-dns's loopback RFC 2136 listener (profile dns): tls/dns-rfc2136.caddy sends the
+      # signed ACME challenge updates there.
+      SAM_DNS_UPDATE_PORT: ${SAM_DNS_UPDATE_PORT:-8053}
       # Keep-warm for celld's stateless Worker isolate (caddy/keep-warm/on.caddy): on unless set
       # to off; the interval (1s-6s) sets how long a cold window follows each 30 s celld pool tick.
       # start.sh validates both.
@@ -305,6 +312,65 @@ services:
     cap_drop: [ALL]
     security_opt: ['no-new-privileges:true']
     read_only: true
+    restart: unless-stopped
+
+  # DNS on the box (profile `dns`, off by default): sam-dns (./sam-dns) answers for SAM_DOMAIN
+  # once the operator delegates it to the box (README "DNS on the box"). It serves the records the
+  # Worker keeps in D1, synced from the loopback gateway route (never per query), and takes ACME
+  # challenge TXT records from Caddy over RFC 2136 with TSIG on 127.0.0.1 only. Authoritative
+  # only: no recursion, no zone transfers. Needs inbound UDP and TCP 53 to the box.
+  sam-dns:
+    profiles: [dns]
+    # Built only by `docker compose build sam-dns` (or when the image is missing):
+    # sam-dns/Dockerfile pins both base images by digest; go.sum pins every module.
+    build: ./sam-dns
+    image: sam-selfhost-sam-dns:local
+    pull_policy: never
+    # Host network: it answers on the box's own addresses and calls celld on 127.0.0.1, and the
+    # rate limiter needs each client's real address.
+    network_mode: host
+    user: '${SAM_DNS_UID:-7104}:${SAM_DNS_UID:-7104}'
+    # The binary's file capability binds port 53; every other capability is dropped.
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ['no-new-privileges:true']
+    read_only: true
+    # Faces the internet: bound its memory and processes so a flood cannot reach celld or Caddy.
+    mem_limit: ${SAM_DNS_MEM_LIMIT:-128m}
+    pids_limit: 64
+    depends_on: [celld]
+    # REVERSE_TUNNEL_GATEWAY_SECRET (the gateway route's shared secret) and the TSIG key.
+    # Written by `pnpm selfhost:deploy`; the profile refuses to deploy without the key.
+    env_file:
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/gateway.env
+        required: true
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/dns.env
+        required: true
+    environment:
+      SAM_DOMAIN: ${SAM_DOMAIN:?set SAM_DOMAIN in .env}
+      CELLD_PORT: ${CELLD_PORT:-8080}
+      # The box's public addresses: the ns1 glue and *.SAM_DOMAIN point at them.
+      SAM_DNS_PUBLIC_IPV4: ${SAM_DNS_PUBLIC_IPV4:-}
+      SAM_DNS_PUBLIC_IPV6: ${SAM_DNS_PUBLIC_IPV6:-}
+      # `auto`: every non-loopback address of the box, on port 53.
+      SAM_DNS_LISTEN: ${SAM_DNS_LISTEN:-auto}
+      SAM_DNS_UPDATE_LISTEN: 127.0.0.1:${SAM_DNS_UPDATE_PORT:-8053}
+      # Long by default (3600 s): app routes keep resolving through a short box outage.
+      SAM_DNS_TTL: ${SAM_DNS_TTL:-}
+      SAM_DNS_NEGATIVE_TTL: ${SAM_DNS_NEGATIVE_TTL:-}
+      SAM_DNS_SYNC_INTERVAL: ${SAM_DNS_SYNC_INTERVAL:-}
+      SAM_DNS_RATE_LIMIT: ${SAM_DNS_RATE_LIMIT:-}
+      SAM_DNS_RATE_BURST: ${SAM_DNS_RATE_BURST:-}
+      # The last good zone, so a restart while celld is down still answers.
+      SAM_DNS_CACHE_FILE: /var/lib/sam-dns/zone.json
+      GOMEMLIMIT: ${SAM_DNS_GOMEMLIMIT:-100MiB}
+    volumes:
+      - sam-dns-data:/var/lib/sam-dns
+    healthcheck:
+      test: ['CMD', '/usr/local/bin/sam-dns', 'healthcheck']
+      interval: 10s
+      timeout: 3s
+      retries: 3
     restart: unless-stopped
 
   # Mail collector for TEST installs (profile `mail-collector`, off by default): catches every
@@ -488,3 +554,5 @@ volumes:
   caddy-config:
   objectstore-data:
   egress-fence-attestation:
+  # sam-dns's last good zone (a cache: the fleet bucket's D1 is the durable copy).
+  sam-dns-data:

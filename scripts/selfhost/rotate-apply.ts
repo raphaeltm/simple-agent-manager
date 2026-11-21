@@ -29,6 +29,10 @@ export interface RotateDeps {
   getJson: (path: string) => Promise<{ status: number; body: unknown }>;
   /** HTTP status the Worker answers frps's plugin call with this gateway secret. */
   probeGateway: (secret: string) => Promise<number>;
+  /** Recreates the containers that read dns.env (Caddy, and sam-dns when running). */
+  restartDnsConsumers: () => Promise<void>;
+  /** Whether the running sam-dns accepts an RFC 2136 update signed with this TSIG key. */
+  probeDnsUpdate: (secret: string) => Promise<'accepted' | 'refused'>;
   /** Waits `ms` (a short drain before a retirement); absent, such waits end the run instead. */
   sleep?: (ms: number) => Promise<void>;
 }

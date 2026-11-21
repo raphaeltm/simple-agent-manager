@@ -30,6 +30,7 @@ import {
   renderGatewayEnv,
   resolveTunnelSettings,
 } from '../../../../../scripts/selfhost/box-settings';
+import { DNS_ENV_FILE, renderDnsEnv } from '../../../../../scripts/selfhost/dns-settings';
 import { KEY_CHOICE_FORMAT, writeKeyChoice } from '../../../../../scripts/selfhost/key-choice';
 import { generateAgentSigningKey } from '../../../../../scripts/selfhost/key-seal';
 import {
@@ -90,6 +91,9 @@ let deployed: Record<string, string>;
 let clock: number;
 let healthy: () => boolean;
 let restarts: string[];
+/** The TSIG key the fake sam-dns loaded from dns.env when it last (re)started. */
+let dnsRunningKey: string;
+let dnsRestarts: number;
 let controlHook: ((body: Record<string, unknown>) => Promise<void>) | null;
 let logs: string[];
 let sleeps: number[] = [];
@@ -150,7 +154,18 @@ function deps(): RotateDeps {
       return { status: 404, body: null };
     },
     probeGateway: async (secret) => (isAcceptedGatewaySecret(workerEnv(), secret) ? 200 : 401),
+    // A fake sam-dns and Caddy: they read dns.env only when (re)started, as the real ones do.
+    restartDnsConsumers: async () => {
+      dnsRestarts++;
+      dnsRunningKey = dnsEnvKey();
+    },
+    probeDnsUpdate: async (secret) => (secret === dnsRunningKey ? 'accepted' : 'refused'),
   };
+}
+
+function dnsEnvKey(): string {
+  const text = readFileSync(join(stateDir, DNS_ENV_FILE), 'utf8');
+  return /^SAM_DNS_TSIG_SECRET=(.*)$/m.exec(text)?.[1] ?? '';
 }
 
 const input = (extra: Partial<Parameters<typeof runRotate>[0]> = {}) => ({
@@ -228,6 +243,11 @@ beforeEach(async () => {
     renderGatewayEnv(secrets.REVERSE_TUNNEL_GATEWAY_SECRET, resolveTunnelSettings({})),
     { mode: 0o600 }
   );
+  writeFileSync(join(stateDir, DNS_ENV_FILE), renderDnsEnv(secrets.SAM_DNS_TSIG_SECRET!), {
+    mode: 0o600,
+  });
+  dnsRunningKey = secrets.SAM_DNS_TSIG_SECRET!;
+  dnsRestarts = 0;
   deployed = secrets;
   setPreviousEncryptionKeys(new Map());
 });
@@ -603,6 +623,7 @@ describe('rotate --all', () => {
       'deploy-signing-keys',
       'vapid-keys',
       'gateway-secret',
+      'dns-update-key',
       // BETTER_AUTH_SECRET was unset: the sign-in secret moves before the key it fell back to.
       'better-auth-secret',
       'encryption-key',
@@ -612,6 +633,7 @@ describe('rotate --all', () => {
     expect(journal.steps['better-auth-secret']?.phase).toBe('done');
     expect(journal.steps['jwt-keys']?.phase).toBe('waiting');
     expect(journal.steps['gateway-secret']?.phase).toBe('done');
+    expect(journal.steps['dns-update-key']?.phase).toBe('done');
 
     clock += 24 * HOUR; // past the default JWT overlap (23 h) and the encryption-key wait
     await runRotate(input({ resume: true }), deps());
@@ -759,6 +781,55 @@ describe('rotate jwt-keys', () => {
     await runRotate(input({ resume: true }), deps());
     expect((await head()).JWT_PUBLIC_KEY_PREVIOUS).toBeUndefined();
     expect((await getJWKS(workerEnv())).keys).toHaveLength(1);
+  });
+});
+
+describe('rotate dns-update-key', () => {
+  it('moves Caddy and sam-dns to a new TSIG key and proves the old one refused', async () => {
+    const old = dnsRunningKey;
+    await runRotate(input({ names: ['dns-update-key'] }), deps());
+    const now = (await head()).SAM_DNS_TSIG_SECRET!;
+    expect(now).not.toBe(old);
+    expect(dnsEnvKey()).toBe(now);
+    expect(dnsRunningKey).toBe(now);
+    expect(dnsRestarts).toBe(1);
+    expect(readJournal(stateDir)).toBeNull();
+    // The key never reaches the log.
+    expect(logs.join('\n')).not.toContain(now);
+    expect(logs.join('\n')).not.toContain(old);
+  });
+
+  it('rolls back dns.env, the bundle and the running key when the new key is not accepted', async () => {
+    const old = dnsRunningKey;
+    const failing = deps();
+    // sam-dns failed to load the new file: it keeps answering for the old key.
+    failing.restartDnsConsumers = async () => {
+      dnsRestarts++;
+      if (dnsRestarts > 1) dnsRunningKey = dnsEnvKey();
+    };
+    await expect(runRotate(input({ names: ['dns-update-key'] }), failing)).rejects.toThrow(
+      /rolled back/
+    );
+    expect(readJournal(stateDir)?.steps['dns-update-key']?.error).toMatch(
+      /refused an update signed with the new/
+    );
+    expect((await head()).SAM_DNS_TSIG_SECRET).toBe(old);
+    expect(dnsEnvKey()).toBe(old);
+    expect(dnsRunningKey).toBe(old);
+  });
+
+  it('is not offered on a box whose bundle has no TSIG key (it predates DNS on the box)', async () => {
+    const without = { ...(await head()) };
+    delete without.SAM_DNS_TSIG_SECRET;
+    const settings = keyServiceSettings({ SAM_KEY_PROVIDER: 'file' }, stateDir)!;
+    await settings.bundles.write(
+      await sealSecrets(without, createKeyProvider(settings.hostEnv), {
+        installationId: without.SAM_INSTALLATION_ID,
+      })
+    );
+    await runRotate(input({ all: true, dryRun: true }), deps());
+    expect(logs.join('\n')).not.toContain('. dns-update-key:');
+    expect(logs.join('\n')).toContain('. gateway-secret:');
   });
 });
 

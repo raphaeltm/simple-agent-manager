@@ -22,6 +22,7 @@ const services = (parse(COMPOSE) as { services: Record<string, Service> }).servi
 const LOCAL: Record<string, string> = {
   'sam-selfhost-caddy:local': 'caddy/Dockerfile',
   'sam-selfhost-sam-mx:local': 'sam-mx/Dockerfile',
+  'sam-selfhost-sam-dns:local': 'sam-dns/Dockerfile',
   'sam-selfhost-egress-fence:local': 'egress-fence/Dockerfile',
   'sam-selfhost-metadata-proxy:local': 'metadata-proxy/Dockerfile',
   'sam-selfhost-key-agent:local': 'key-agent/Dockerfile',
@@ -93,9 +94,9 @@ describe('locally built images', () => {
     expect(read('caddy/Dockerfile')).not.toMatch(/^(COPY|ADD)\s+(?!--from=)/m);
   });
 
-  it('builds sam-mx from go.sum-pinned modules', () => {
-    const dockerfile = read('sam-mx/Dockerfile');
+  it.each(['sam-mx', 'sam-dns'])('builds %s from go.sum-pinned modules', (dir) => {
+    const dockerfile = read(`${dir}/Dockerfile`);
     expect(dockerfile).toMatch(/^COPY go\.mod go\.sum \.\/$/m);
-    expect(read('sam-mx/go.sum').trim().length).toBeGreaterThan(0);
+    expect(read(`${dir}/go.sum`).trim().length).toBeGreaterThan(0);
   });
 });

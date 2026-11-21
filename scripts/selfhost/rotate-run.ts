@@ -19,6 +19,7 @@ import { applyPatch, type RotateDeps, type StepContext } from './rotate-apply';
 import { ROTATABLE_KEYS, type RotatableKey, rotatableKey } from './rotate-catalog';
 import { formatPlan, formatSummary, RESEAL_STEP, transitionalNames } from './rotate-report';
 import {
+  advanceDnsKey,
   advanceGateway,
   advanceOverlap,
   advanceSwap,
@@ -229,6 +230,8 @@ async function advance(ctx: StepContext, input: RotateInput): Promise<void> {
       return await advanceSwap(ctx);
     case 'gateway':
       return await advanceGateway(ctx);
+    case 'dns-key':
+      return await advanceDnsKey(ctx);
     case 'overlap':
       return await advanceOverlap(ctx, runOptions(ctx.journal, input).jwtOverlapHours);
     case 'reencrypt':

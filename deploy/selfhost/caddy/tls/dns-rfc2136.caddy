@@ -1,0 +1,20 @@
+# Let's Encrypt wildcard certificate through a DNS-01 challenge against the box's own DNS server
+# (sam-dns, compose profile `dns`), over RFC 2136 with TSIG. No cloud DNS account and no
+# roles/dns.admin: SAM_DOMAIN is delegated to the box (README "DNS on the box").
+#
+# Build Caddy with CADDY_DNS_MODULE=github.com/caddy-dns/rfc2136@v1.0.0 (docker compose build caddy).
+# The key comes from dns.env (written by pnpm selfhost:deploy). Updates go to sam-dns's loopback
+# listener only; the public port 53 never accepts them. `resolvers` points the zone lookup at the
+# same listener, and `propagation_timeout -1` skips the propagation poll: sam-dns serves the record
+# as soon as it accepts the update, and the box may not be able to reach its own public address.
+tls {$ACME_EMAIL} {
+	ca {$ACME_CA:https://acme-v02.api.letsencrypt.org/directory}
+	dns rfc2136 {
+		key_name {$SAM_DNS_TSIG_KEY_NAME:sam-acme.}
+		key_alg hmac-sha256
+		key {$SAM_DNS_TSIG_SECRET}
+		server 127.0.0.1:{$SAM_DNS_UPDATE_PORT:8053}
+	}
+	resolvers 127.0.0.1:{$SAM_DNS_UPDATE_PORT:8053}
+	propagation_timeout -1
+}

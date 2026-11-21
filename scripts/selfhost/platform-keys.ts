@@ -73,6 +73,7 @@ export const PLATFORM_KEY_NAMES = [
   'PREVIEW_SIGNING_KEY',
   'SAM_INSTALLATION_ID',
   'REVERSE_TUNNEL_GATEWAY_SECRET',
+  'SAM_DNS_TSIG_SECRET',
 ] as const;
 
 type PlatformKeyName = (typeof PLATFORM_KEY_NAMES)[number];
@@ -87,6 +88,12 @@ const GENERATORS: ReadonlyArray<{
    * not set this, so `--init` can complete it on boxes created before it existed.
    */
   identity?: true;
+  /**
+   * Needed only by an optional feature (the `dns` profile): a plain deploy of a box whose keys
+   * predate it skips the group instead of asking for --init, so the box deploys unchanged.
+   * --init generates it; the feature refuses to start without it (dns-settings.ts).
+   */
+  optional?: true;
 }> = [
   {
     names: ['ENCRYPTION_KEY'],
@@ -134,6 +141,14 @@ const GENERATORS: ReadonlyArray<{
   {
     names: ['REVERSE_TUNNEL_GATEWAY_SECRET'],
     generate: () => ({ REVERSE_TUNNEL_GATEWAY_SECRET: randomBytes(32).toString('hex') }),
+  },
+  // The TSIG key Caddy signs its RFC 2136 updates to sam-dns with (DNS on the box,
+  // dns-settings.ts), rendered to dns.env for those two only. HMAC-SHA256, so 32 bytes (RFC 8945
+  // section 6). Not an identity: --init adds it to boxes created before it existed.
+  {
+    names: ['SAM_DNS_TSIG_SECRET'],
+    optional: true,
+    generate: () => ({ SAM_DNS_TSIG_SECRET: randomBytes(32).toString('base64') }),
   },
 ];
 
@@ -240,6 +255,7 @@ function completeKeyGroups(
           'restore the missing value from a backup instead of regenerating the pair'
       );
     }
+    if (fileExists && group.optional && mode === 'deploy') continue;
     if (fileExists) assertMayCompleteGroup(group, path, mode);
     if (mode === 'dry-run') {
       for (const name of group.names) keys[name] = DRY_RUN_KEY_PLACEHOLDER;

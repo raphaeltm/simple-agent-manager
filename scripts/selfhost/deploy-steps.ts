@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 
 import { BOX_RESERVED_PORTS, gatewayEnvAction } from './box-settings.js';
 import type { CelldWranglerConfig } from './celld-config.js';
+import { boxDnsEnabled, DNS_PROFILE, DNS_TSIG_SECRET, renderDnsEnv } from './dns-settings.js';
 import { replacePrivateFile } from './secret-files.js';
 
 /** The repository checkout the self-host scripts run from. */
@@ -51,6 +52,33 @@ export function syncGatewayEnv(path: string, content: string, init: boolean): vo
         'then run pnpm selfhost:deploy again; the Worker is not updated before they agree.'
     );
   }
+}
+
+/**
+ * dns.env for sam-dns and Caddy (DNS on the box). Written whenever the box has the TSIG key, so
+ * switching the profile on needs no extra step; a box whose keys predate it gets the key from
+ * `--init`, and the profile refuses to deploy without it. Only sam-dns and Caddy read the file
+ * (the Worker never uses the key), so a change only asks for their restart.
+ */
+export function syncDnsEnv(
+  path: string,
+  box: Readonly<Record<string, string>>,
+  tsigSecret: string | undefined
+): void {
+  if (!tsigSecret) {
+    if (boxDnsEnabled(box)) {
+      throw new Error(
+        `the ${DNS_PROFILE} profile needs ${DNS_TSIG_SECRET}, which this box does not have yet: ` +
+          'run pnpm selfhost:deploy --init (it adds the key), then deploy again'
+      );
+    }
+    return;
+  }
+  const content = renderDnsEnv(tsigSecret);
+  const existing = existsSync(path) ? readFileSync(path, 'utf8') : null;
+  if (existing === content) return;
+  replacePrivateFile(path, content);
+  log(`wrote ${path}; restart sam-dns and Caddy so they use it: docker compose up -d`);
 }
 
 /** Runs a command with secret values scrubbed from its printed output (deploy.ts `run`). */
