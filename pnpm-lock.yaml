@@ -643,8 +643,8 @@ importers:
   infra:
     dependencies:
       '@pulumi/cloudflare':
-        specifier: 6.23.3
-        version: 6.23.3(typescript@5.9.3)
+        specifier: 6.24.0
+        version: 6.24.0(typescript@5.9.3)
       '@pulumi/pulumi':
         specifier: 3.270.0
         version: 3.270.0(typescript@5.9.3)
@@ -4249,8 +4249,8 @@ packages:
   '@protobufjs/utf8@1.1.2':
     resolution: {integrity: sha512-b1UQwcEZ4yCnMCD8DAL1VlbvBJE9/IX4FTIp7BG1xYpf29SLazLSrqUkj4w7Y5y7cCVP6E5tcqqcI0xemPkHug==}
 
-  '@pulumi/cloudflare@6.23.3':
-    resolution: {integrity: sha512-etEo7csPhmv2K2dbRfyj9lCKcka5vTH9qowVufK9b+iDB2qEta9M/CPo+2QgsaANeEmxRTztqg+pIi+Xtzhjow==}
+  '@pulumi/cloudflare@6.24.0':
+    resolution: {integrity: sha512-UsgQbHLExQgIFLoGjACgpTeRp359khU6wCNyQ7CNqK6hzgRgyOWKRXg1GqZYOKLEXmA/nKv32p+2S3gM0Va1Vg==}
 
   '@pulumi/pulumi@3.270.0':
     resolution: {integrity: sha512-k2GSGtoP2yrkIe4r+1YvyKL6k7mM6SYnySv6tSzGrv/oTY7WemEmvNEvn7Qd/JbkCMmYeBhWULDS5qB9qpvgkg==}
@@ -7669,6 +7669,9 @@ packages:
 
   js-tokens@10.0.0:
     resolution: {integrity: sha512-lM/UBzQmfJRo9ABXbPWemivdCW8V2G8FHaHdypQaIy523snUjog0W71ayWXTjiR+ixeMyVHN2XcpnTd/liPg/Q==}
+
+  js-tokens@10.0.1:
+    resolution: {integrity: sha512-XMt+uh+yEs6srFvEb/pEe4IMvbtoXVdNxF7lZFU+I9sdWI641L97L+gXQMTGm1x3RjPUVizNVjHueclXr0U7sw==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -12944,7 +12947,7 @@ snapshots:
 
   '@protobufjs/utf8@1.1.2': {}
 
-  '@pulumi/cloudflare@6.23.3(typescript@5.9.3)':
+  '@pulumi/cloudflare@6.24.0(typescript@5.9.3)':
     dependencies:
       '@pulumi/pulumi': 3.270.0(typescript@5.9.3)
     transitivePeerDependencies:
@@ -14376,7 +14379,7 @@ snapshots:
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       estree-walker: 3.0.3
-      js-tokens: 10.0.0
+      js-tokens: 10.0.1
     optional: true
 
   astro-eslint-parser@1.4.0:
@@ -16734,6 +16737,9 @@ snapshots:
   jpeg-js@0.4.4: {}
 
   js-tokens@10.0.0: {}
+
+  js-tokens@10.0.1:
+    optional: true
 
   js-tokens@4.0.0: {}
 
