@@ -270,25 +270,27 @@ async function gotoChat(page: Page) {
  * The working button straddles the message-box slab's top edge, where the slab
  * paints its rim light (`.sam-glass-rim::before`). The button must stack above
  * that rim, or its 1px line is drawn across the button. Asserts the overlap is
- * real (so the check cannot pass vacuously) and that the button wins it.
+ * real (so the check cannot pass vacuously) and that the button wins it. Both
+ * share the slab's isolated stacking context, so their z-indexes compare directly.
  */
 async function assertInterruptAboveSlabRim(page: Page) {
   const button = page.getByRole('button', { name: 'Interrupt agent' });
-  // The rise animation must finish before measuring the button's resting position.
-  await page.waitForTimeout(600);
-  const result = await button.evaluate((el) => {
-    const slab = el.closest('.sam-glass-rim');
-    if (!slab) return null;
-    const b = el.getBoundingClientRect();
-    const s = slab.getBoundingClientRect();
-    return {
-      straddles: b.top < s.top && b.bottom > s.top,
-      buttonZ: Number(getComputedStyle(el).zIndex),
-      rimZ: Number(getComputedStyle(slab, '::before').zIndex),
-    };
-  });
+  const measure = () =>
+    button.evaluate((el) => {
+      const slab = el.closest('.sam-glass-rim');
+      if (!slab) return null;
+      const b = el.getBoundingClientRect();
+      const s = slab.getBoundingClientRect();
+      return {
+        straddles: b.top < s.top && b.bottom > s.top,
+        buttonZ: Number(getComputedStyle(el).zIndex),
+        rimZ: Number(getComputedStyle(slab, '::before').zIndex),
+      };
+    });
+  // Poll until the rise animation has brought the button onto the slab's edge.
+  await expect.poll(async () => (await measure())?.straddles).toBe(true);
+  const result = await measure();
   expect(result).not.toBeNull();
-  expect(result!.straddles).toBe(true);
   expect(result!.buttonZ).toBeGreaterThan(result!.rimZ);
 }
 
