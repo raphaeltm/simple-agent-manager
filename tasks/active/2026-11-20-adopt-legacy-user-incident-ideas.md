@@ -70,5 +70,5 @@ bodies. Recovery point if any must be restored: D1 Time Travel before 2026-11-21
 
 All remaining legacy draft ideas were adopted, including the 86 window-rule rows. A
 pre-run snapshot of those 86 (Library /engineering/incident-idea-adoption-snapshot-2026-11-21.json)
-shows every body is the generated template and embeds its own signature ref, with no user status
-events, so no person's edit was affected. 100 ended incidents' ideas were closed in that run.
+found no evidence of a user edit: every body, normalized (ids, timestamps, numbers, evidence lines), matches the generated template and embeds its own signature ref, with no user status
+events. Edits that change only those normalized values are not ruled out. 100 ended incidents' ideas were closed in that run.
