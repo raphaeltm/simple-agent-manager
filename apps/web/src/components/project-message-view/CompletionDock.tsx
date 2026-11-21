@@ -31,6 +31,12 @@ const TOP_PAD = Math.ceil(BUTTON_CLEARANCE) + 12; // room above the bar for the 
 
 const EASE_DURATION_MS = 420;
 
+// The slab's rim light (`.sam-glass-rim::before`, packages/ui/src/glass/glass.css) is
+// painted at z-index 3 inside the slab's isolated stacking context. The working button
+// straddles the slab's top edge, so it must sit above the rim or the rim's 1px line
+// crosses the button.
+const CENTER_BUTTON_Z = 4;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -363,7 +369,7 @@ export function CompletionDock({
             background: centerBg,
             boxShadow: working ? '0 6px 20px rgba(239,68,68,0.35)' : '0 4px 14px rgba(0,0,0,0.4)',
             transition: 'background 300ms ease, box-shadow 300ms ease',
-            zIndex: 2,
+            zIndex: CENTER_BUTTON_Z,
           }}
           title={centerTitle}
         >
