@@ -117,8 +117,20 @@ func runPinnedCodexProcessCase(t *testing.T, completionBeforeAnswer, withoutComp
 		var request struct {
 			Model string `json:"model"`
 		}
-		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&request); err != nil || request.Model != "gpt-6.1-sol" {
-			t.Errorf("expected exact Sol 6.1 model in provider request, got %q (decode: %v)", request.Model, err)
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&request); err != nil {
+			t.Errorf("decode provider request: %v", err)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		// The pinned adapter generates a title after a completed turn. Keep that
+		// auxiliary request separate from the main model continuation counter.
+		if request.Model == "gpt-5.6-luna" {
+			writeResponsesTurn(w, 1000, map[string]any{"type": "message", "role": "assistant", "id": "title-message",
+				"content": []any{map[string]any{"type": "output_text", "text": `{"title":"Local fixture interaction"}`}}})
+			return
+		}
+		if request.Model != "gpt-6.1-sol" {
+			t.Errorf("expected exact Sol 6.1 model in provider request, got %q", request.Model)
 			http.Error(w, "wrong model", http.StatusBadRequest)
 			return
 		}
