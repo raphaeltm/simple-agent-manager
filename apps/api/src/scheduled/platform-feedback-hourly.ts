@@ -2,11 +2,13 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { runMonthlyCostAggregation } from '../services/ai-monthly-cost-cron';
 import {
+  PLATFORM_FEEDBACK_HOURLY_CRON_MINUTE,
   reconcileIncidentIdeas,
   runPlatformFeedbackTriage,
 } from '../services/platform-feedback-triage';
 
-export const PLATFORM_FEEDBACK_HOURLY_CRON = '30 * * * *';
+/** Must match a cron in wrangler.toml; legacy-idea adoption reads its minute. */
+export const PLATFORM_FEEDBACK_HOURLY_CRON = `${PLATFORM_FEEDBACK_HOURLY_CRON_MINUTE} * * * *`;
 
 export interface HourlyMaintenanceDeps {
   monthlyCost?: typeof runMonthlyCostAggregation;

@@ -481,7 +481,7 @@ describe('incident idea ownership', () => {
           `INSERT INTO tasks (id, triggered_by, project_id, user_id, title, description, status,
              priority, task_mode, dispatch_depth, created_by, created_at, updated_at, is_idea)
            VALUES (?, 'user', 'feedback-project', 'owner-1', 'Recurring api platform error', ?,
-             'draft', 0, 'task', 0, 'owner-1', '2026-10-01T00:00:00.000Z', '2026-10-01T01:00:00.000Z', 1)`
+             'draft', 0, 'task', 0, 'owner-1', '2026-10-01T00:00:00.000Z', '2026-10-01T01:30:05.000Z', 1)`
         )
         .run(id, description);
       w.sqlite
@@ -505,14 +505,54 @@ describe('incident idea ownership', () => {
     expect(
       w.sqlite.prepare('SELECT id, triggered_by, updated_at FROM tasks ORDER BY id').all()
     ).toEqual([
-      { id: 'legacy-user', triggered_by: 'incident', updated_at: '2026-10-01T01:00:00.000Z' },
+      { id: 'legacy-user', triggered_by: 'incident', updated_at: '2026-10-01T01:30:05.000Z' },
       {
         id: 'legacy-user-edited',
         triggered_by: 'user',
-        updated_at: '2026-10-01T01:00:00.000Z',
+        updated_at: '2026-10-01T01:30:05.000Z',
       },
     ]);
     expect(await dispatchable()).toEqual(['sig-legacy-user']);
+  });
+
+  it('keeps a user-default legacy idea last written outside the hourly run as tracked work', async () => {
+    // A person's description edit leaves no record; a last write at a minute the pipeline never
+    // writes is treated as one. Control: the same idea written at :31 is adopted.
+    const w = world();
+    const body = [
+      '## Maintainer Instructions',
+      '',
+      'Triage this automated platform feedback report.',
+      '',
+      '```',
+      '- evidence',
+      '```',
+    ].join('\n');
+    const seed = (id: string, updatedAt: string) => {
+      w.sqlite
+        .prepare(
+          `INSERT INTO tasks (id, triggered_by, project_id, user_id, title, description, status,
+             priority, task_mode, dispatch_depth, created_by, created_at, updated_at, is_idea)
+           VALUES (?, 'user', 'feedback-project', 'owner-1', 'Recurring api platform error', ?,
+             'draft', 0, 'task', 0, 'owner-1', '2026-10-01T00:30:02.000Z', ?, 1)`
+        )
+        .run(id, body, updatedAt);
+      w.sqlite
+        .prepare(
+          `INSERT INTO platform_feedback_triages (signature, source, summary, first_seen_at,
+             last_seen_at, occurrence_count, evidence_refs, severity, idea_id, queue_state, queued_at)
+           VALUES (?, 'api', 'Recurring api platform error', 1, 2, 5, '[]', 'error', ?, 'pending', 1)`
+        )
+        .run(`sig-${id}`, id);
+    };
+    seed('person-edited', '2026-10-03T10:47:12.000Z');
+    seed('pipeline-refreshed', '2026-10-03T11:31:09.000Z');
+
+    expect(await w.reconcile(T0)).toMatchObject({ adopted: 1 });
+    expect(w.sqlite.prepare('SELECT id, triggered_by FROM tasks ORDER BY id').all()).toEqual([
+      { id: 'person-edited', triggered_by: 'user' },
+      { id: 'pipeline-refreshed', triggered_by: 'incident' },
+    ]);
   });
 
   it('does not relabel or adopt a user-default legacy idea edited during the read', async () => {
@@ -531,7 +571,7 @@ describe('incident idea ownership', () => {
         `INSERT INTO tasks (id, triggered_by, project_id, user_id, title, description, status,
            priority, task_mode, dispatch_depth, created_by, created_at, updated_at, is_idea)
          VALUES ('raced', 'user', 'feedback-project', 'owner-1', 'Recurring api platform error', ?,
-           'draft', 0, 'task', 0, 'owner-1', '2026-10-01T00:00:00.000Z', '2026-10-01T01:00:00.000Z', 1)`
+           'draft', 0, 'task', 0, 'owner-1', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', 1)`
       )
       .run(body);
     w.sqlite
@@ -570,7 +610,7 @@ describe('incident idea ownership', () => {
         `INSERT INTO tasks (id, triggered_by, project_id, user_id, title, description, status,
            priority, task_mode, dispatch_depth, created_by, created_at, updated_at, is_idea)
          VALUES ('engaged', 'user', 'feedback-project', 'owner-1', 'Recurring api platform error', ?,
-           'draft', 0, 'task', 0, 'owner-1', '2026-10-01T00:00:00.000Z', '2026-10-01T01:00:00.000Z', 1)`
+           'draft', 0, 'task', 0, 'owner-1', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', 1)`
       )
       .run(body);
     w.sqlite
