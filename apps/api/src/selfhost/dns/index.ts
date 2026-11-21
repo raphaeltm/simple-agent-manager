@@ -16,6 +16,7 @@ import {
   deleteBoxRecord,
   deleteBoxRecordsByName,
   findBoxARecordsByName,
+  insertBoxARecordIfAbsent,
   updateBoxRecordContent,
   upsertBoxARecord,
 } from './records';
@@ -35,6 +36,7 @@ export function isBoxDnsEnabled(env: Env): boolean {
 export const boxDnsBackend: BoxDnsBackend = {
   active: (env) => isBoxDnsEnabled(env),
   upsertARecord: (name, ip, env) => upsertBoxARecord(name, ip, env),
+  insertARecordIfAbsent: (name, ip, env) => insertBoxARecordIfAbsent(name, ip, env),
   updateRecordContent: (id, ip, env) => updateBoxRecordContent(id, ip, env),
   deleteRecord: (id, env) => deleteBoxRecord(id, env),
   findARecordsByName: (name, env) => findBoxARecordsByName(name, env),

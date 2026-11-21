@@ -30,6 +30,11 @@ export interface BoxDnsBackend {
    * Cloudflare API accepts) and returns its id.
    */
   upsertARecord(name: string, ip: string, env: Env): Promise<string>;
+  /**
+   * Creates the A record for `name` only if none exists; returns its id, or null when another
+   * caller's record is already there (the durable replay then checks that record's identity).
+   */
+  insertARecordIfAbsent(name: string, ip: string, env: Env): Promise<string | null>;
   /** Points an existing record at `ip`. A missing id is an error, as Cloudflare's PATCH is. */
   updateRecordContent(id: string, ip: string, env: Env): Promise<void>;
   /** Deletes a record by id; a missing id is success (Cloudflare's 404 is ignored too). */

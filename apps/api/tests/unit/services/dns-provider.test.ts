@@ -258,6 +258,21 @@ describe('DNS provider resolution in the self-host build', () => {
       createNodeBackendDNSRecord('NODE1', '203.0.113.99', env, undefined, true)
     ).rejects.toThrow(/differs from the recovered allocation/);
 
+    // Two overlapping durable replays with different IPs (CodeRabbit on #2959): exactly one wins,
+    // the other meets the winner's record and is refused; the winner's IP is never replaced.
+    const raced = await Promise.allSettled([
+      createNodeBackendDNSRecord('NODE2', '203.0.113.21', env, undefined, true),
+      createNodeBackendDNSRecord('NODE2', '203.0.113.22', env, undefined, true),
+    ]);
+    expect(raced.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+    const winner = raced.findIndex((r) => r.status === 'fulfilled');
+    expect(
+      sqlite
+        .prepare("SELECT content FROM selfhost_dns_records WHERE name = 'node2.vm.example.com'")
+        .get()
+    ).toEqual({ content: winner === 0 ? '203.0.113.21' : '203.0.113.22' });
+    await deleteDNSRecord((raced[winner] as PromiseFulfilledResult<string>).value, env);
+
     await updateDNSRecord(nodeId, '198.51.100.1', env);
     await deleteDNSRecord(nodeId, env);
     expect(await cleanupAppRouteDNSRecords(['r1-web-3000-env1.apps.example.com'], env)).toBe(1);

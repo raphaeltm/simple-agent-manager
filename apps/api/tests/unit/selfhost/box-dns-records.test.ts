@@ -194,6 +194,12 @@ describe('box zone pages', () => {
     ]);
     expect(page.skipped).toBe(1);
     expect(JSON.stringify(warn.mock.calls)).toContain('selfhost_dns.record_row_skipped');
+    // The log names the failed field, never the rejected value (rule 50).
+    const skipped = warn.mock.calls
+      .map((call) => JSON.parse(String(call[0])) as Record<string, unknown>)
+      .filter((entry) => JSON.stringify(entry).includes('selfhost_dns.record_row_skipped'));
+    expect(skipped.map((entry) => entry.invalidFields)).toContainEqual(['content']);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('not-ip');
 
     // The bad row also does not end paging early: it is the last row of a page of 2.
     const first = await readBoxZonePage(env, null, 2);
