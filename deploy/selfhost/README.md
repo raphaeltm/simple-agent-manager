@@ -526,7 +526,10 @@ switch back, undo the delegation first, because the parent zone sends every look
 2. Wait for the old NS TTL (the parent's, often 1 to 2 days at the registrar), then check
    `dig +short NS SAM_DOMAIN` from outside no longer names the box. Until then, keep sam-dns
    running: resolvers that still hold the delegation need it to answer.
-3. Set `SAM_TLS_MODE=dns-googleclouddns`, remove `dns` from `COMPOSE_PROFILES` and redeploy. The
+3. Set `SAM_TLS_MODE=dns-googleclouddns`, set `CADDY_DNS_MODULE=github.com/caddy-dns/googleclouddns@v1.1.0`
+   (or remove the line: that is the default), run `docker compose build caddy`, remove `dns`
+   from `COMPOSE_PROFILES` and redeploy. The deploy refuses a TLS mode whose Caddy module is
+   missing. The
    deploy stops writing `SAM_DNS_PROVIDER=box`, so the Worker writes records to the cloud provider
    again, and it removes `.state/dns.env`.
 4. Stop and remove the service the profile no longer starts (`docker compose up -d` leaves it

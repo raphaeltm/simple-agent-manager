@@ -27,6 +27,7 @@ const ON = {
   COMPOSE_PROFILES: 'tunnel,dns',
   SAM_DNS_PUBLIC_IPV4: '203.0.113.5',
   SAM_TLS_MODE: 'dns-rfc2136',
+  CADDY_DNS_MODULE: 'github.com/caddy-dns/rfc2136@v1.0.0',
 };
 
 function tempDir(): string {
@@ -53,12 +54,40 @@ describe('Worker vars for DNS on the box', () => {
     expect(() => assertBoxDnsSettings({ ...ON, SAM_DNS_PUBLIC_IPV4: '2001:db8::1' })).toThrow(
       /SAM_DNS_PUBLIC_IPV4/
     );
-    expect(() => assertBoxDnsSettings({ ...ON, SAM_TLS_MODE: 'dns-googleclouddns' })).toThrow(
-      /dns-rfc2136/
-    );
     expect(() =>
-      assertBoxDnsSettings({ COMPOSE_PROFILES: 'tunnel', SAM_TLS_MODE: 'dns-rfc2136' })
+      assertBoxDnsSettings({ ...ON, SAM_TLS_MODE: 'dns-googleclouddns', CADDY_DNS_MODULE: '' })
+    ).toThrow(/dns-rfc2136/);
+    expect(() =>
+      assertBoxDnsSettings({
+        COMPOSE_PROFILES: 'tunnel',
+        SAM_TLS_MODE: 'dns-rfc2136',
+        CADDY_DNS_MODULE: ON.CADDY_DNS_MODULE,
+      })
     ).toThrow(/COMPOSE_PROFILES/);
+  });
+
+  it('refuses a TLS mode whose Caddy DNS module is not built in, in both directions', () => {
+    // Liveness: a matching module passes, including the compose default for Cloud DNS.
+    expect(() => assertBoxDnsSettings(ON)).not.toThrow();
+    expect(() =>
+      assertBoxDnsSettings({ COMPOSE_PROFILES: 'tunnel', SAM_TLS_MODE: 'dns-googleclouddns' })
+    ).not.toThrow();
+    // Switching back to Cloud DNS without rebuilding Caddy.
+    expect(() =>
+      assertBoxDnsSettings({
+        COMPOSE_PROFILES: 'tunnel',
+        SAM_TLS_MODE: 'dns-googleclouddns',
+        CADDY_DNS_MODULE: 'github.com/caddy-dns/rfc2136@v1.0.0',
+      })
+    ).toThrow(/caddy-dns\/googleclouddns.*docker compose build caddy/);
+    // Turning DNS on the box on with the default (Cloud DNS) module.
+    expect(() => assertBoxDnsSettings({ ...ON, CADDY_DNS_MODULE: '' })).toThrow(
+      /caddy-dns\/rfc2136/
+    );
+    // Modes that do not use a DNS provider are not affected.
+    expect(() =>
+      assertBoxDnsSettings({ COMPOSE_PROFILES: 'tunnel', SAM_TLS_MODE: 'internal' })
+    ).not.toThrow();
   });
 });
 

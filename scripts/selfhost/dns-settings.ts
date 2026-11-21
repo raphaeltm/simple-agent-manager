@@ -30,9 +30,33 @@ export function boxDnsEnabled(box: Box): boolean {
   return composeProfileEnabled(box, DNS_PROFILE);
 }
 
+/** The compose default for CADDY_DNS_MODULE (docker-compose.yml, caddy build args). */
+const DEFAULT_CADDY_DNS_MODULE = 'github.com/caddy-dns/googleclouddns@v1.1.0';
+
+/**
+ * `SAM_TLS_MODE=dns-<provider>` loads `caddy/tls/dns-<provider>.caddy`, which only a Caddy built
+ * with `github.com/caddy-dns/<provider>` can run. A mismatch (switching back from DNS on the box
+ * without rebuilding Caddy, or the reverse) leaves the box without a certificate, so refuse it
+ * before the deploy recreates Caddy.
+ */
+function assertCaddyDnsModuleMatchesTlsMode(box: Box, tlsMode: string): void {
+  if (!tlsMode.startsWith('dns-')) return;
+  const provider = tlsMode.slice('dns-'.length);
+  const module = box.CADDY_DNS_MODULE?.trim() || DEFAULT_CADDY_DNS_MODULE;
+  const modulePath = module.split('@')[0] ?? '';
+  if (modulePath !== `github.com/caddy-dns/${provider}`) {
+    throw new Error(
+      `SAM_TLS_MODE=${tlsMode} needs Caddy built with github.com/caddy-dns/${provider}, but ` +
+        `CADDY_DNS_MODULE is ${module}: set CADDY_DNS_MODULE=github.com/caddy-dns/${provider}@<version> ` +
+        'in .env and run docker compose build caddy'
+    );
+  }
+}
+
 /** Checks the box's DNS settings agree with each other; throws with the fix. */
 export function assertBoxDnsSettings(box: Box): void {
   const tlsMode = box.SAM_TLS_MODE?.trim() ?? '';
+  assertCaddyDnsModuleMatchesTlsMode(box, tlsMode);
   if (!boxDnsEnabled(box)) {
     if (tlsMode === 'dns-rfc2136') {
       throw new Error(
