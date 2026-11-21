@@ -43,8 +43,8 @@ func addressRRs(name string, cfg *Config) []dns.RR {
 	return out
 }
 
-// nameServer is the box's own name server name; its glue goes in the parent zone.
-func nameServer(cfg *Config) string { return "ns1." + cfg.Zone }
+// nameServer is the zone's NS name (SAM_DNS_NAMESERVER, ns1.<zone> by default).
+func nameServer(cfg *Config) string { return cfg.NameServer }
 
 // reservedOwner reports whether a synced record may not use this name: the static names, the
 // wildcard owner, and the ACME challenge names, which only the TSIG update channel writes.
@@ -81,8 +81,12 @@ func BuildZone(cfg *Config, serial uint32, synced []SyncedRecord) (*Zone, int) {
 	}
 	z.add(z.soa)
 	z.add(&dns.NS{Hdr: rrHeader(cfg.Zone, dns.TypeNS, cfg.TTL), Ns: nameServer(cfg)})
-	for _, rr := range addressRRs(nameServer(cfg), cfg) {
-		z.add(rr)
+	// The name server's address only when it is inside the zone (then the parent holds glue);
+	// an outside name is answered by whoever serves that name.
+	if dns.IsSubDomain(cfg.Zone, nameServer(cfg)) {
+		for _, rr := range addressRRs(nameServer(cfg), cfg) {
+			z.add(rr)
+		}
 	}
 	for _, rr := range addressRRs("*."+cfg.Zone, cfg) {
 		z.wildcard[rr.Header().Rrtype] = append(z.wildcard[rr.Header().Rrtype], rr)

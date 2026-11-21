@@ -352,6 +352,8 @@ services:
       # The box's public addresses: the ns1 glue and *.SAM_DOMAIN point at them.
       SAM_DNS_PUBLIC_IPV4: ${SAM_DNS_PUBLIC_IPV4:-}
       SAM_DNS_PUBLIC_IPV6: ${SAM_DNS_PUBLIC_IPV6:-}
+      # The zone's NS name: ns1.SAM_DOMAIN (needs glue in the parent) or a name outside the zone.
+      SAM_DNS_NAMESERVER: ${SAM_DNS_NAMESERVER:-}
       # `auto`: every non-loopback address of the box, on port 53.
       SAM_DNS_LISTEN: ${SAM_DNS_LISTEN:-auto}
       SAM_DNS_UPDATE_LISTEN: 127.0.0.1:${SAM_DNS_UPDATE_PORT:-8053}

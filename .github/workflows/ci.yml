@@ -70,6 +70,7 @@ jobs:
       browser-install: ${{ steps.filter.outputs.browser-install }}
       go-modules: ${{ steps.filter.outputs.go-modules }}
       selfhost-email: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.selfhost-email }}
+      selfhost-dns: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.selfhost-dns }}
       # Path-filtered on main pushes too: the live suite runs only for self-host changes (D9).
       selfhost-live: ${{ steps.filter.outputs.selfhost-live }}
     steps:
@@ -143,6 +144,8 @@ jobs:
               - 'deploy/selfhost/key-agent/**'
               # selfhost-inbound-email.test.ts builds this receiver (Self-host Email job only).
               - 'deploy/selfhost/sam-mx/**'
+              # selfhost-dns-sidecar.test.ts builds this server (Self-host DNS job only).
+              - 'deploy/selfhost/sam-dns/**'
               # The self-host access-log redaction guard scans the API routes against this filter.
               - 'deploy/selfhost/caddy/log-redaction.caddy'
               # gcp-bootstrap-credential.test.ts runs the bootstrap against the fake gcloud and parses
@@ -344,6 +347,16 @@ jobs:
               - 'apps/api/tests/workers/smtp-client-workerd.test.ts'
               - 'apps/api/tests/workers/support/smtp-native-entry.ts'
               - '.github/workflows/selfhost-email-tests.yml'
+            # Self-host DNS on the box: the sam-dns server and the Worker's box zone it syncs.
+            selfhost-dns:
+              - 'deploy/selfhost/sam-dns/**'
+              - 'apps/api/src/selfhost/dns/**'
+              - 'apps/api/src/selfhost/dns-migrations.ts'
+              - 'apps/api/src/selfhost/migrations/0267_selfhost_dns_records.sql'
+              - 'apps/api/src/selfhost/reverse-tunnel/gateway.ts'
+              - 'apps/api/src/services/dns*.ts'
+              - 'apps/api/tests/integration/selfhost-dns-sidecar.test.ts'
+              - '.github/workflows/ci.yml'
             # Self-host box runtime: the Docker live suite (landing plan D9). Self-host paths
             # only: not packages/cloud-init (whose frpc.toml one live test renders) and not nightly.
             selfhost-live:
@@ -1151,6 +1164,7 @@ jobs:
       - pulumi-infra
       - vm-agent-test
       - selfhost-email
+      - selfhost-dns
       - selfhost-live
       - cli-test
       - vm-agent-integration
@@ -1245,6 +1259,60 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.selfhost-email == 'true' && !github.event.pull_request.draft
     uses: ./.github/workflows/selfhost-email-tests.yml
+
+  # DNS on the box: sam-dns's Go tests (authoritative-only behaviour, TSIG updates, sync), then the
+  # real binary against the Worker's gateway route and box zone (selfhost-dns-sidecar.test.ts).
+  selfhost-dns:
+    name: Self-host DNS (sam-dns)
+    needs: [changes]
+    if: needs.changes.outputs.selfhost-dns == 'true' && !github.event.pull_request.draft
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: deploy/selfhost/sam-dns/go.sum
+
+      - name: Vet sam-dns
+        working-directory: deploy/selfhost/sam-dns
+        run: go vet ./...
+
+      - name: Test sam-dns
+        working-directory: deploy/selfhost/sam-dns
+        run: go test -race ./...
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Build trusted native dependencies
+        run: pnpm --filter @simple-agent-manager/api rebuild better-sqlite3 esbuild
+
+      - name: Build API dependencies
+        run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...
+
+      # SAM_DNS_SIDECAR_TESTS=1 makes the real-binary block run, and fail rather than skip if the
+      # Go toolchain is missing.
+      - name: Worker box zone and the real sam-dns binary
+        working-directory: apps/api
+        env:
+          SAM_DNS_SIDECAR_TESTS: '1'
+        run: >-
+          pnpm exec vitest run
+          tests/integration/selfhost-dns-sidecar.test.ts
+          tests/unit/selfhost/box-dns-records.test.ts
+          tests/unit/selfhost/box-dns-app-route-slice.test.ts
+          tests/unit/services/dns-provider.test.ts
 
   # The box runtime on real software (scripts/selfhost/live): Caddy built from
   # deploy/selfhost/caddy/Dockerfile running the box's Caddyfile and start.sh (gateway 404s and

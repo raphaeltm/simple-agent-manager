@@ -200,3 +200,23 @@ func TestConfigRefusesUnsafeSettings(t *testing.T) {
 		t.Fatalf("defaults refused: %v", err)
 	}
 }
+
+func TestOutOfZoneNameServerNeedsNoGlue(t *testing.T) {
+	cfg := testConfig(t, map[string]string{"SAM_DNS_NAMESERVER": "sam-ns.example.test"})
+	zone, _ := BuildZone(cfg, 1, nil)
+	ns := zone.Lookup("box.example.test.", dns.TypeNS, nil)
+	if len(ns.Answer) != 1 || ns.Answer[0].(*dns.NS).Ns != "sam-ns.example.test." {
+		t.Fatalf("NS: %v", ns.Answer)
+	}
+	soa := zone.Lookup("box.example.test.", dns.TypeSOA, nil)
+	if soa.Answer[0].(*dns.SOA).Ns != "sam-ns.example.test." {
+		t.Fatalf("SOA mname: %v", soa.Answer)
+	}
+	// ns1.<zone> is no longer special: it is an ordinary wildcard name.
+	if got := aContents(zone.Lookup("ns1.box.example.test.", dns.TypeA, nil).Answer); len(got) != 1 {
+		t.Fatalf("ns1 via wildcard: %v", got)
+	}
+	if _, err := LoadConfig(testEnv(map[string]string{"SAM_DNS_NAMESERVER": "localhost"})); err == nil {
+		t.Fatal("single-label name server accepted")
+	}
+}

@@ -285,6 +285,11 @@
       "registryUrl": "https://pkg.go.dev/golang.org/x/net",
       "homepageUrl": "https://go.googlesource.com/net",
       "necessity": "sam-mx uses publicsuffix.EffectiveTLDPlusOne to find the organizational domain for relaxed DMARC alignment and the DMARC record fallback (auth.go)."
+    },
+    "github.com/miekg/dns": {
+      "registryUrl": "https://pkg.go.dev/github.com/miekg/dns",
+      "homepageUrl": "https://github.com/miekg/dns",
+      "necessity": "sam-dns (self-host authoritative DNS, compose profile dns) needs a DNS wire-format server: UDP/TCP listeners, message parsing and truncation, and TSIG verification for the RFC 2136 updates Caddy sends; Caddy's own rfc2136 module uses the same library (main.go, handler.go, update.go)."
     }
   }
 }

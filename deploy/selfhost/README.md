@@ -16,6 +16,7 @@ One Linux VM runs the whole control plane with Docker Compose (`docker-compose.y
 | `objectstore`    | Bundled MinIO for trials (profile `local-store`)                                   |
 | `mail-collector` | Catches sign-in email for test installs (profile `mail-collector`)                 |
 | `sam-mx`         | Inbound agent email on port 25 (profile `mail-in`)                                 |
+| `sam-dns`        | Answers DNS for `SAM_DOMAIN` on port 53 (profile `dns`)                            |
 
 Workspace nodes are cloud VMs that dial back to `wss://api.SAM_DOMAIN/~!frp`; they need no public
 DNS of their own. The fleet bucket (`CELLD_BUCKET`) is the durable copy of everything celld stores.
@@ -27,12 +28,15 @@ DNS of their own. The fleet bucket (`CELLD_BUCKET`) is the durable copy of every
   `apt-get install build-essential`: `pnpm install` compiles `better-sqlite3`), and a checkout of
   this repository.
 - A domain with a wildcard record `*.SAM_DOMAIN` pointing at the VM. SAM serves `api.`, `app.`,
-  `ws-<id>.` and `ws-<id>--<port>.` under it; the apex is unused.
+  `ws-<id>.` and `ws-<id>--<port>.` under it; the apex is unused. Or delegate `SAM_DOMAIN` to the
+  box once and let it answer for itself ([DNS on the box](#dns-on-the-box)): then no wildcard
+  record, no Cloud DNS and no DNS API token are needed, and app deployments work.
 - Inbound TCP 80 and 443 to the VM (and 25 for inbound agent email).
 - A fleet bucket: `gs://` (the VM's service account needs `roles/storage.objectAdmin` on it),
   any `s3://` store, or the bundled store for a trial (`local-store` profile).
-- TLS: `SAM_TLS_MODE=dns-googleclouddns` gets a Let's Encrypt wildcard through Cloud DNS (the VM's
-  service account needs `roles/dns.admin` on the zone's project, `GCP_PROJECT` names it).
+- TLS: `SAM_TLS_MODE=dns-rfc2136` gets a Let's Encrypt wildcard from the box's own DNS server
+  ([DNS on the box](#dns-on-the-box)). `dns-googleclouddns` gets it through Cloud DNS instead (the
+  VM's service account needs `roles/dns.admin` on the zone's project, `GCP_PROJECT` names it).
   `internal` uses Caddy's own CA, for local proofs only.
 - A way to send sign-in codes: an SMTP relay (`SMTP_*`), or the mail collector on a test box.
 - For GCP workspace nodes: `gcloud`, authenticated as an owner of the nodes' project.
@@ -423,6 +427,91 @@ docker compose restart celld
 
 Tracked in idea `01M7W6ZTZETXE75N8NRKR3R0CF`. Note that the upgrade's own health check reads
 `/health`, which does not use KV, so it does not catch this.
+
+## DNS on the box
+
+With the `dns` profile the box answers DNS for `SAM_DOMAIN` itself (`sam-dns`, `./sam-dns`). The
+operator delegates the name once; after that SAM needs no DNS account anywhere:
+
+- `api.`, `app.`, `ws-*` and every other name resolve to the box (`*.SAM_DOMAIN`);
+- app deployment routes (`r<n>-<service>-<port>-<env>.apps.SAM_DOMAIN`) resolve to the node that
+  runs them. The Worker keeps these records in D1 (`apps/api/src/selfhost/dns/`, active with
+  `SAM_DNS_PROVIDER=box`, which the deploy sets for this profile) and sam-dns syncs them over
+  loopback; it never asks the Worker per query;
+- Caddy gets the wildcard certificate by DNS-01 against sam-dns over RFC 2136
+  (`SAM_TLS_MODE=dns-rfc2136`), so `roles/dns.admin` and Cloud DNS are not needed.
+
+Answers carry a one-hour TTL (`SAM_DNS_TTL`): while the box is down, resolvers keep the answers
+they have, but names nobody looked up recently stop resolving. A second name server is planned.
+
+### Set it up
+
+1. In `.env`: add `dns` to `COMPOSE_PROFILES`, set `SAM_DNS_PUBLIC_IPV4` to the box's public
+   IPv4 address, `SAM_TLS_MODE=dns-rfc2136` and
+   `CADDY_DNS_MODULE=github.com/caddy-dns/rfc2136@v1.0.0`.
+2. `pnpm selfhost:deploy --init` (adds the TSIG key on a box created before this existed and
+   writes `.state/dns.env`), `(cd deploy/selfhost && docker compose build caddy sam-dns)`, then
+   `docker compose up -d` and `pnpm selfhost:deploy`.
+3. Open inbound **UDP 53 and TCP 53** to the box (GCE:
+   `gcloud compute firewall-rules create sam-dns --allow udp:53,tcp:53 --target-tags <box tag>`).
+   Nothing else: the update listener is on `127.0.0.1` only.
+4. Check the box answers before delegating:
+   `dig @<box IP> api.SAM_DOMAIN A +norecurse` returns the box IP with the `aa` flag.
+5. Delegate `SAM_DOMAIN` in its parent zone. For `SAM_DOMAIN=sam.example.com`, box
+   `203.0.113.5`, in the `example.com` zone:
+
+   ```
+   sam.example.com.      3600  IN  NS  ns1.sam.example.com.
+   ns1.sam.example.com.  3600  IN  A   203.0.113.5
+   ```
+
+   The second record is the glue. If your DNS host will not create a record below a name it
+   delegates, use a name outside `SAM_DOMAIN` instead: set
+   `SAM_DNS_NAMESERVER=sam-ns.example.com` in `.env` (redeploy), and create
+   `sam.example.com. NS sam-ns.example.com.` plus `sam-ns.example.com. A 203.0.113.5`. Remove
+   any old `*.sam.example.com` record: below a delegation it is never answered.
+6. Restart Caddy (`docker compose up -d caddy`) so it requests the certificate through sam-dns.
+   `docker compose logs caddy` shows `certificate obtained successfully` for `*.SAM_DOMAIN`.
+
+### Verify
+
+```sh
+dig +short NS sam.example.com                 # the delegation, from any resolver
+dig +short api.sam.example.com                # the box address
+dig @203.0.113.5 example.org A                # status: REFUSED (no recursion)
+dig @203.0.113.5 sam.example.com AXFR         # Transfer failed / REFUSED (no zone transfer)
+dig @203.0.113.5 sam.example.com ANY          # one HINFO "RFC8482" answer
+```
+
+After an app deployment, `dig +short r1-<service>-<port>-<env>.apps.sam.example.com` returns the
+deployment node's address.
+
+### What it accepts, and from whom
+
+- Port 53 on the box's addresses answers queries for `SAM_DOMAIN` only: everything else is
+  REFUSED, there is no recursion and no cache, zone transfers (AXFR/IXFR), NOTIFY and UPDATE are
+  refused, ANY gets the minimal RFC 8482 answer, UDP answers are capped at 1232 bytes (larger ones
+  set TC), and each client prefix (/24, /56) is rate limited (`SAM_DNS_RATE_LIMIT`, 20/s) with
+  every second excess answer sent truncated. TCP connections are capped in total and per address.
+- Record changes come from two places only. The Worker's D1 records reach sam-dns through the
+  loopback gateway route (`GET /api/self-host/gateway/dns-records`, gateway secret, hidden from the
+  internet by Caddy). Caddy's ACME challenges arrive on `127.0.0.1:SAM_DNS_UPDATE_PORT` (8053) as
+  RFC 2136 updates signed with TSIG (HMAC-SHA256); only TXT records under `_acme-challenge.` are
+  accepted, kept in memory, bounded, and expire after an hour.
+- The TSIG key is a platform key: generated by `--init`, sealed with the others, rendered to
+  `.state/dns.env` (mode 0600) for Caddy and sam-dns only, and rotated by
+  `pnpm selfhost:secrets rotate dns-update-key` (Caddy and sam-dns restart once).
+- The egress fence never opens port 8053 to celld, and `verify-fence` probes it. Workspace nodes
+  reach the box only through frps (one TCP proxy on their own lease port) and HTTPS.
+
+### Switching an existing box from Cloud DNS
+
+The `dns` profile is off by default; a box that does not set it deploys exactly as before
+(`dns-googleclouddns`, the operator's wildcard record). To switch: follow the steps above, and
+delegate last, so the old records keep working until the box answers. Records the box created in
+Cloudflare before the switch (none on a reverse-tunnel box) stay there; delete them by hand. To
+switch back: restore the wildcard record and `SAM_TLS_MODE=dns-googleclouddns`, remove `dns` from
+`COMPOSE_PROFILES`, redeploy.
 
 ## Backup and restore
 

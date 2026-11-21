@@ -690,10 +690,26 @@ describe('runner budget (jobs a ready PR starts)', () => {
 
   // 32: the Self-host Email job (landing plan F12) runs only on self-host email paths.
   // 33: the Self-host Live job (landing plan D9) runs only on self-host paths.
-  it('a PR that matches every filter starts at most 33 jobs (27 before: four more Workers shards, Self-host Email, Self-host Live)', () => {
+  // 34: the Self-host DNS job (multi-box step 1) runs only on box DNS paths.
+  it('a PR that matches every filter starts at most 34 jobs (27 before: four more Workers shards, Self-host Email, Self-host Live, Self-host DNS)', () => {
     expect(
       jobCount(simulate({ eventName: 'pull_request', filters: allFilters() }))
-    ).toBeLessThanOrEqual(33);
+    ).toBeLessThanOrEqual(34);
+  });
+
+  it('the Self-host DNS job starts only for box DNS paths', () => {
+    const dnsJob = (paths: string[]) =>
+      simulate({ eventName: 'pull_request', filters: filtersFor(paths) }).get('selfhost-dns');
+    for (const path of [
+      'deploy/selfhost/sam-dns/zone.go',
+      'apps/api/src/selfhost/dns/records.ts',
+      'apps/api/src/services/dns-app-routes.ts',
+    ]) {
+      expect(dnsJob([path]), path).toBe('success');
+    }
+    for (const path of ['deploy/selfhost/sam-mx/main.go', 'apps/web/src/App.tsx']) {
+      expect(dnsJob([path]), path).not.toBe('success');
+    }
   });
 
   it('the Self-host Live job starts only for self-host paths (D9)', () => {

@@ -43,6 +43,11 @@ updates:
     directory: '/deploy/selfhost/sam-mx'
     schedule:
       interval: weekly
+  # Self-hosted authoritative DNS server (compose profile `dns`).
+  - package-ecosystem: 'gomod'
+    directory: '/deploy/selfhost/sam-dns'
+    schedule:
+      interval: weekly
   - package-ecosystem: 'docker'
     directory: '/apps/api'
     schedule:
@@ -54,6 +59,11 @@ updates:
   # Self-hosted sam-mx build (golang + alpine, both pinned by digest).
   - package-ecosystem: 'docker'
     directory: '/deploy/selfhost/sam-mx'
+    schedule:
+      interval: weekly
+  # Self-hosted sam-dns build (golang + alpine, both pinned by digest).
+  - package-ecosystem: 'docker'
+    directory: '/deploy/selfhost/sam-dns'
     schedule:
       interval: weekly
   # Self-hosted Caddy build (caddy builder + runtime, both pinned by digest).

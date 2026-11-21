@@ -64,6 +64,10 @@ const minTSIGSecretBytes = 32
 
 type Config struct {
 	Zone            string // FQDN, lowercase, trailing dot
+	// NameServer is the zone's NS name (FQDN). ns1.<zone> by default, served with its own A record
+	// (the parent zone needs matching glue). A name outside the zone needs no glue in the parent:
+	// the operator keeps its A record wherever that name lives.
+	NameServer string
 	PublicIPv4      net.IP
 	PublicIPv6      net.IP // optional
 	Listen          []string
@@ -139,6 +143,15 @@ func LoadConfig(get func(string) string) (*Config, error) {
 		return nil, fmt.Errorf("SAM_DOMAIN %q is not a domain name", domain)
 	}
 	cfg.Zone = dns.Fqdn(domain)
+
+	cfg.NameServer = "ns1." + cfg.Zone
+	if raw := strings.TrimSpace(get("SAM_DNS_NAMESERVER")); raw != "" {
+		ns := dns.CanonicalName(raw)
+		if _, ok := dns.IsDomainName(ns); !ok || strings.Count(ns, ".") < 2 || strings.Contains(ns, "*") {
+			return nil, fmt.Errorf("SAM_DNS_NAMESERVER %q is not a host name", raw)
+		}
+		cfg.NameServer = ns
+	}
 
 	cfg.PublicIPv4 = net.ParseIP(strings.TrimSpace(get("SAM_DNS_PUBLIC_IPV4"))).To4()
 	if cfg.PublicIPv4 == nil {
