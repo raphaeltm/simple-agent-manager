@@ -112,8 +112,8 @@ catalogs:
       specifier: 8.5.1
       version: 8.5.1
     react-virtuoso:
-      specifier: 4.18.13
-      version: 4.18.13
+      specifier: 4.18.23
+      version: 4.18.23
     remark-gfm:
       specifier: 4.0.1
       version: 4.0.1
@@ -510,7 +510,7 @@ importers:
         version: 8.5.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react-virtuoso:
         specifier: 'catalog:'
-        version: 4.18.13(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        version: 4.18.23(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       recharts:
         specifier: 3.10.1
         version: 3.10.1(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react-is@17.0.2)(react@19.3.1)(redux@5.0.1)
@@ -690,7 +690,7 @@ importers:
         version: 10.1.0(@types/react@19.3.0)(react@19.3.1)
       react-virtuoso:
         specifier: 'catalog:'
-        version: 4.18.13(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        version: 4.18.23(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       remark-gfm:
         specifier: 'catalog:'
         version: 4.0.1
@@ -8992,8 +8992,8 @@ packages:
       react-dom:
         optional: true
 
-  react-virtuoso@4.18.13:
-    resolution: {integrity: sha512-M4kP7zbV7JmLrnJYs0X2FBA8gnNlHisSYuKMyeJVYtWz31CAJeP57dgPJzfneUdKDKmL9SiqvcBQ32si8CfQSQ==}
+  react-virtuoso@4.18.23:
+    resolution: {integrity: sha512-J/FpyeLUbU6uEXiMsTKjlJaSMqpjxPCanjSYRxFKobLhP73Wo4gloFldDD7osmFUEv2VMF8Ki/YScofwa3ymyw==}
     peerDependencies:
       react: '>=16 || >=17 || >= 18 || >= 19'
       react-dom: '>=16 || >=17 || >= 18 || >=19'
@@ -18425,7 +18425,7 @@ snapshots:
       '@types/react-dom': 19.3.0(@types/react@19.3.0)
       react-dom: 19.3.1(react@19.3.1)
 
-  react-virtuoso@4.18.13(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
+  react-virtuoso@4.18.23(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
     dependencies:
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
