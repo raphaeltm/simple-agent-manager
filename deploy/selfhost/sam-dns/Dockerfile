@@ -1,7 +1,7 @@
 # sam-dns: the box's authoritative DNS server (compose profile `dns`). Both images are pinned by
 # digest; Go modules are pinned by go.sum. Same base images as sam-mx.
 # Go 1.26.11-alpine. Use the digest as the single authoritative image reference.
-FROM golang@sha256:ae52b5bc6ed045a9ed26ab03dc19327a802a9cc9aa8b27ed57f5c6b60579b0bb AS build
+FROM golang@sha256:205c7636d74e0ffbe3d007162df7d74f859f5a8c8322dfb9f907977686c126cf AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
