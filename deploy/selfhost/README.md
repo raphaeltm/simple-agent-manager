@@ -518,8 +518,27 @@ The `dns` profile is off by default; a box that does not set it deploys exactly 
 (`dns-googleclouddns`, the operator's wildcard record). To switch: follow the steps above, and
 delegate last, so the old records keep working until the box answers. Records the box created in
 Cloudflare before the switch (none on a reverse-tunnel box) stay there; delete them by hand. To
-switch back: restore the wildcard record and `SAM_TLS_MODE=dns-googleclouddns`, remove `dns` from
-`COMPOSE_PROFILES`, redeploy.
+switch back, undo the delegation first, because the parent zone sends every lookup for
+`SAM_DOMAIN` to the box for as long as it delegates:
+
+1. In the parent zone, add the wildcard record (`*.SAM_DOMAIN` A, pointing at the box) and delete
+   the `SAM_DOMAIN` NS record and the `ns1.SAM_DOMAIN` glue.
+2. Wait for the old NS TTL (the parent's, often 1 to 2 days at the registrar), then check
+   `dig +short NS SAM_DOMAIN` from outside no longer names the box. Until then, keep sam-dns
+   running: resolvers that still hold the delegation need it to answer.
+3. Set `SAM_TLS_MODE=dns-googleclouddns`, remove `dns` from `COMPOSE_PROFILES` and redeploy. The
+   deploy stops writing `SAM_DNS_PROVIDER=box`, so the Worker writes records to the cloud provider
+   again, and it removes `.state/dns.env`.
+4. Stop and remove the service the profile no longer starts (`docker compose up -d` leaves it
+   running): `docker compose rm --stop --force sam-dns`, then `docker compose up -d` to recreate
+   Caddy without the TSIG key.
+5. Close UDP and TCP 53 in the VM's firewall.
+
+Records the box zone held (app routes, node records) are not copied to the cloud provider, and the
+Worker does not recreate them by itself: a node keeps the record id it was given
+(`reconcileHeartbeatDns` in `apps/api/src/routes/node-heartbeat-ip.ts` only backfills a node that
+has none). Before switching back, delete the nodes and deployment environments created while the box
+served DNS, and create them again afterwards.
 
 ## Backup and restore
 
