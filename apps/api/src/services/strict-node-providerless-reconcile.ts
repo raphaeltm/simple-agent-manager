@@ -17,7 +17,6 @@ import { hasExactProviderCredentialGenerationProof } from './provider-credential
 import { diagnoseExactCredentialUnresolved } from './provider-credential-exact-diagnosis';
 import { createProviderForUser } from './provider-credentials';
 import {
-  COMPLETE_INVENTORY_PROVIDERS,
   describeMissingExactBinding,
   getStrictNodeCredentialContext,
   hasManagedVmPlacementProof,
@@ -103,8 +102,8 @@ async function requirePinnedProviderlessCredential(
  * resolve the exact credential generation used for allocation. Provider filtering is
  * never trusted by itself; every returned server must repeat the node, incarnation,
  * environment, installation, role, and managed labels locally. A discovered server is
- * re-read immediately before deletion. Only inventories that are complete or fail closed
- * are accepted here (`COMPLETE_INVENTORY_PROVIDERS`). Empty inventory cannot prove allocation finality;
+ * re-read immediately before deletion. Only Hetzner's fail-closed, fully paginated
+ * inventory is accepted here. Empty inventory cannot prove allocation finality;
  * retain the unresolved record so a late resource remains discoverable.
  */
 export async function reconcileStrictProviderlessVm(
@@ -133,13 +132,13 @@ export async function reconcileStrictProviderlessVm(
   ) {
     throw new Error('Node allocation is still within its provisioning recovery window');
   }
-  // Only providers whose filtered inventory is complete or fails closed may answer "which VM is
-  // this node's" (`COMPLETE_INVENTORY_PROVIDERS`: Hetzner and GCP). Other adapters may deliberately
-  // return partial multi-region inventory, so an empty generic list cannot prove provider-side
-  // absence. No later attempt can change that, so this is a named refusal for an operator to
-  // resolve (attest, or remove the VM by hand), recorded once and retried on the full failure
-  // backoff, not a transient error retried within minutes (idea 01M7GVRC956Q8JMGCRP1PQ4R5B).
-  if (!COMPLETE_INVENTORY_PROVIDERS.has(node.cloudProvider ?? '')) {
+  // Only Hetzner currently guarantees that a successful filtered inventory read is
+  // complete. Other adapters may deliberately return partial multi-region inventory,
+  // so an empty generic list cannot prove provider-side absence.
+  // No later attempt can change that, so this is a named refusal for an operator to resolve
+  // (attest, or remove the VM by hand), recorded once and retried on the full failure backoff,
+  // not a transient error retried within minutes (idea 01M7GVRC956Q8JMGCRP1PQ4R5B).
+  if (node.cloudProvider !== 'hetzner') {
     throw new NodeTeardownBlockedError(
       'teardown_allocation_unresolved',
       `node=${node.id} provider=${node.cloudProvider ?? 'unknown'}: provider inventory ` +

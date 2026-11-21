@@ -200,12 +200,3 @@ export function describeMissingExactBinding(
   }
   return missing.join(', ');
 }
-
-/**
- * Providers whose filtered inventory read is complete or fails closed. Hetzner: fully paginated,
- * fail-closed list. GCP: fully paginated aggregated list that throws when any zone is
- * unreachable (`listGcpInstances` in packages/providers/src/gcp-instance-lookup.ts). A GCP node
- * whose create response was cut can reach `destroying` without `provider_instance_id`
- * (self-host box, 2026-11-11); its VM is found here by its exact ownership labels.
- */
-export const COMPLETE_INVENTORY_PROVIDERS = new Set(['hetzner', 'gcp']);

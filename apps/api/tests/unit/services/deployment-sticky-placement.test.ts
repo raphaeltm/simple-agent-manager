@@ -80,7 +80,12 @@ function fixture(exclusive = false) {
   const sqlite = new Database(':memory:');
   databases.push(sqlite);
   createAllSchemaTables(sqlite, schema);
-  const env = { DATABASE: createSqliteD1(sqlite) } as Env;
+  // A Cloudflare install has DNS, so the app-deployments capability gate admits provisioning.
+  const env = {
+    DATABASE: createSqliteD1(sqlite),
+    CF_API_TOKEN: 'test-token',
+    CF_ZONE_ID: 'test-zone',
+  } as Env;
   const db = drizzle(env.DATABASE, { schema });
   const old = candidate('hetzner');
   const top = {
