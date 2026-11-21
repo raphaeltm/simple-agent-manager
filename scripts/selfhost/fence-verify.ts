@@ -11,7 +11,7 @@
  */
 import { isIP } from 'node:net';
 
-import { type PortRange } from './box-settings.js';
+import { boxListenerPorts, type PortRange } from './box-settings.js';
 import {
   composePort,
   metadataProxyEnabled,
@@ -137,6 +137,7 @@ function localTargets(
     at('frps control port', '127.0.0.1', composePort(box, 'FRPS_BIND_PORT')),
     at('object store console', '127.0.0.1', composePort(box, 'OBJECTSTORE_CONSOLE_PORT')),
     at('Caddy admin API', '127.0.0.1', 2019),
+    at('sam-dns RFC 2136 update listener', '127.0.0.1', boxListenerPorts(box).SAM_DNS_UPDATE_PORT),
     at('Caddy HTTPS port on loopback', '127.0.0.1', composePort(box, 'HTTPS_PORT')),
     at('another loopback address', '127.0.0.2', operator),
     at('IPv6 loopback', '::1', operator),

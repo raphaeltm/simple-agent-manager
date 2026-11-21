@@ -262,6 +262,8 @@ export function buildFencePlan({
       CELLD_INTERNAL_PORT: composePort(box, 'CELLD_INTERNAL_PORT'),
       FRPS_BIND_PORT: composePort(box, 'FRPS_BIND_PORT'),
       OBJECTSTORE_CONSOLE_PORT: composePort(box, 'OBJECTSTORE_CONSOLE_PORT'),
+      // sam-dns's RFC 2136 listener: TSIG protects it, and Worker code must not reach it anyway.
+      SAM_DNS_UPDATE_PORT: boxListenerPorts(box).SAM_DNS_UPDATE_PORT,
     },
     localAddresses: localAddresses ?? [],
   };

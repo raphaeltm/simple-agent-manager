@@ -18,6 +18,8 @@ const PROCEDURE_TEXT: Record<RotatableKey['procedure'], string> = {
   swap: 'new value, deploy, check',
   gateway:
     'Worker accepts old and new, restart Caddy/frps/sam-mx with the new value, Worker accepts only the new one',
+  'dns-key':
+    'new TSIG key, dns.env rewritten, Caddy and sam-dns restarted, the new key proven accepted and the old one refused',
   overlap:
     'new key pair with its own kid, published alone; the Worker still accepts callback tokens signed with the old key until the overlap ends, then `rotate --resume` removes it',
   reencrypt:

@@ -1,11 +1,12 @@
 /**
  * Small steps of `pnpm selfhost:deploy` (deploy.ts), kept apart so the orchestration stays short.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { BOX_RESERVED_PORTS, gatewayEnvAction } from './box-settings.js';
 import type { CelldWranglerConfig } from './celld-config.js';
+import { boxDnsEnabled, DNS_PROFILE, DNS_TSIG_SECRET, renderDnsEnv } from './dns-settings.js';
 import { replacePrivateFile } from './secret-files.js';
 
 /** The repository checkout the self-host scripts run from. */
@@ -51,6 +52,39 @@ export function syncGatewayEnv(path: string, content: string, init: boolean): vo
         'then run pnpm selfhost:deploy again; the Worker is not updated before they agree.'
     );
   }
+}
+
+/**
+ * dns.env for sam-dns and Caddy (DNS on the box), written only while the `dns` profile is on, so
+ * Caddy does not carry the key on a box that does not use it. Turning the profile off removes the
+ * file: Caddy reads it whenever it exists (`required: false`), so a stale copy would keep the
+ * certificate-issuance key in Caddy's environment. A box whose keys predate the profile
+ * gets the key from `--init`, and the profile refuses to deploy without it. Only sam-dns and Caddy
+ * read the file (the Worker never uses the key), so a change only asks for their restart.
+ */
+export function syncDnsEnv(
+  path: string,
+  box: Readonly<Record<string, string>>,
+  tsigSecret: string | undefined
+): void {
+  if (!boxDnsEnabled(box)) {
+    if (existsSync(path)) {
+      rmSync(path);
+      log(`removed ${path} (the ${DNS_PROFILE} profile is off); recreate Caddy: docker compose up -d`);
+    }
+    return;
+  }
+  if (!tsigSecret) {
+    throw new Error(
+      `the ${DNS_PROFILE} profile needs ${DNS_TSIG_SECRET}, which this box does not have yet: ` +
+        'run pnpm selfhost:deploy --init (it adds the key), then deploy again'
+    );
+  }
+  const content = renderDnsEnv(tsigSecret);
+  const existing = existsSync(path) ? readFileSync(path, 'utf8') : null;
+  if (existing === content) return;
+  replacePrivateFile(path, content);
+  log(`wrote ${path}; restart sam-dns and Caddy so they use it: docker compose up -d`);
 }
 
 /** Runs a command with secret values scrubbed from its printed output (deploy.ts `run`). */

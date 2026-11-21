@@ -263,6 +263,14 @@
       "reviewedAt": "2026-11-20T08:00:00.000Z",
       "expiresAt": "2026-12-20T08:00:00.000Z",
       "digests": ["e5bd003b9f7208606c3924b881aa5a4e175bcddcf7332b53fa8dffe22f517066"]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "PR #2960 history only: commit 8d4c598d9 added a test-only TSIG key constant in deploy/selfhost/sam-dns/zone_test.go:12 (base64 of a readable 'sam-dns-test-key' phrase, never used outside go test). The tree now builds it at run time; this digest covers only the historical commit, which cannot be rewritten without a force push. Exact rule/path/line/bytes only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-21T12:15:00.000Z",
+      "expiresAt": "2026-12-21T12:15:00.000Z",
+      "digests": ["3a21e85ace0487849684219c304ea50f026912329b377658c85ba2caba14b8dc"]
     }
   ]
 }

@@ -47,6 +47,9 @@ export const BOX_RESERVED_PORTS: Readonly<Record<string, number>> = {
   // sam-mx's public SMTP listener (profile mail-in), a listen address: see BOX_LISTEN_ADDRESSES.
   // Reserved even with the profile off, like the collector.
   SAM_MX_LISTEN: 25,
+  // sam-dns's loopback RFC 2136 update listener (profile dns). Reserved even with the profile
+  // off: a node tunnel must never hold the port Caddy sends its signed updates to.
+  SAM_DNS_UPDATE_PORT: 8053,
 };
 
 /**

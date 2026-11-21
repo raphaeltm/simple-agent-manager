@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { Secrets } from '../../deploy/selfhost/key-agent/bundle.ts';
+import { DNS_ENV_FILE, renderDnsEnv } from './dns-settings';
 import { ApplyFailedError, applyPatch, type Patch, type StepContext } from './rotate-apply';
 import { jwtKeyId } from './rotate-catalog';
 import { replacePrivateFile } from './secret-files';
@@ -345,4 +346,82 @@ export async function advanceOverlap(ctx: StepContext, overlapHours: number): Pr
 
 export function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+const DNS_SECRET = 'SAM_DNS_TSIG_SECRET';
+
+function dnsEnvPath(ctx: StepContext): string {
+  return join(ctx.stateDir, DNS_ENV_FILE);
+}
+
+/** dns.env rendered exactly as the deploy writes it, for `secret`; true when it changed. */
+function writeDnsEnv(ctx: StepContext, secret: string): boolean {
+  const path = dnsEnvPath(ctx);
+  const next = renderDnsEnv(secret);
+  if (existsSync(path) && readFileSync(path, 'utf8') === next) return false;
+  replacePrivateFile(path, next);
+  return true;
+}
+
+async function expectDnsUpdate(ctx: StepContext, secret: string, want: 'accepted' | 'refused') {
+  const got = await ctx.deps.probeDnsUpdate(secret);
+  if (got !== want) {
+    throw new ApplyFailedError(
+      `sam-dns ${got} an update signed with the ${want === 'accepted' ? 'new' : 'old'} TSIG key`
+    );
+  }
+}
+
+/**
+ * The TSIG key Caddy signs its RFC 2136 updates to sam-dns with. Nothing stored depends on it and
+ * the Worker never uses it: new bundle, dns.env rewritten, Caddy and sam-dns restarted together
+ * (they read it only at start), then the new key must be accepted and the old one refused.
+ */
+export async function advanceDnsKey(ctx: StepContext): Promise<void> {
+  const { step, key, deps } = ctx;
+  const restoreConsumers = async (always: boolean) => {
+    const snapshot = await ctx.store.readSnapshot(ctx.journal.id, key.name);
+    const old = snapshot[DNS_SECRET];
+    const changed = old ? writeDnsEnv(ctx, old) : false;
+    if (changed || always) await deps.restartDnsConsumers();
+  };
+  if (isResumingRollback(ctx) || (step.error !== undefined && step.phase !== 'rolled-back')) {
+    await restoreConsumers(true);
+    return await rollBack(ctx, key.secrets, step.error ?? 'interrupted');
+  }
+  if (step.phase === 'pending') await snapshotOnce(ctx);
+  try {
+    if (step.phase === 'pending' || step.phase === 'staging') {
+      await applyPatch(ctx, { set: key.generate() }, 'switched');
+    }
+    if (step.phase === 'switched' && !deps.dnsProfileActive()) {
+      // --init stores a key on every box; without the dns profile nothing uses it, so there is
+      // no consumer to restart and no sam-dns to probe. The new key is in the bundle for when
+      // the profile is turned on (the next deploy writes dns.env from it).
+      deps.log('  the dns profile is off: the new TSIG key is stored, nothing reads it yet');
+      step.phase = 'done';
+      ctx.save();
+      return;
+    }
+    if (step.phase === 'switched') {
+      writeDnsEnv(ctx, (await ctx.store.head()).secrets[DNS_SECRET] ?? '');
+      deps.log('  restarting Caddy and sam-dns with the new TSIG key');
+      await deps.restartDnsConsumers();
+      step.phase = 'consumers-restarted';
+      ctx.save();
+    }
+    if (step.phase === 'consumers-restarted') {
+      const snapshot = await ctx.store.readSnapshot(ctx.journal.id, key.name);
+      await expectDnsUpdate(ctx, (await ctx.store.head()).secrets[DNS_SECRET] ?? '', 'accepted');
+      await expectDnsUpdate(ctx, snapshot[DNS_SECRET] ?? '', 'refused');
+      step.phase = 'done';
+      ctx.save();
+    }
+  } catch (error) {
+    // Recorded before dns.env is touched: a resume finishes the rollback (as advanceGateway).
+    step.error = message(error);
+    ctx.save();
+    await restoreConsumers(false);
+    await rollBack(ctx, key.secrets, step.error);
+  }
 }

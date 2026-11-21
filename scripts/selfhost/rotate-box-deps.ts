@@ -12,6 +12,7 @@ import {
 } from '../../apps/api/src/selfhost/key-rotation/control-auth.ts';
 import { gitCommit, SELFHOST_DIR } from './backup-cli';
 import { type BoxContext, composeArgs, runBackup } from './backup-lib';
+import { boxDnsEnabled } from './dns-settings';
 import type { RotateDeps } from './rotate-apply';
 import { boxMigrateDeps } from './secrets-box-deps';
 
@@ -19,6 +20,24 @@ import { boxMigrateDeps } from './secrets-box-deps';
 const DEFAULT_CONTROL_TIMEOUT_MS = 60_000;
 /** Services that read gateway.env (docker-compose.yml `env_file`). */
 const GATEWAY_CONSUMERS = ['caddy', 'frps', 'sam-mx'] as const;
+/** Services that read dns.env (docker-compose.yml `env_file`). */
+const DNS_CONSUMERS = ['caddy', 'sam-dns'] as const;
+/** sam-dns probe-update exit codes (deploy/selfhost/sam-dns/main.go). */
+const PROBE_ACCEPTED = 0;
+const PROBE_REFUSED = 3;
+
+function recreate(ctx: BoxContext, services: readonly string[]): void {
+  if (services.length === 0) return;
+  const result = ctx.run(
+    'docker',
+    composeArgs(ctx, ['up', '-d', '--force-recreate', '--no-deps', ...services])
+  );
+  if (result.status !== 0) {
+    throw new Error(
+      `docker compose up failed (exit ${result.status}): ${result.stderr.trim().slice(-2000)}`
+    );
+  }
+}
 
 function celld(ctx: BoxContext, path: string): string {
   return `http://127.0.0.1:${ctx.box.CELLD_PORT || '8080'}${path}`;
@@ -95,6 +114,36 @@ export function boxRotateDeps(ctx: BoxContext): RotateDeps {
       return { status: response.status, body: await response.json().catch(() => null) };
     },
     sleep: async (ms) => await new Promise((resolve) => setTimeout(resolve, ms)),
+    dnsProfileActive: () => boxDnsEnabled(ctx.box),
+    restartDnsConsumers: async () => {
+      const running = runningServices(ctx);
+      recreate(
+        ctx,
+        DNS_CONSUMERS.filter((name) => running.includes(name))
+      );
+    },
+    probeDnsUpdate: async (secret) => {
+      // The key goes to the container through the environment (`-e NAME` takes the value from
+      // this process's env), never on a command line.
+      const result = ctx.run(
+        'docker',
+        composeArgs(ctx, [
+          'exec',
+          '-T',
+          '-e',
+          'SAM_DNS_PROBE_TSIG_SECRET',
+          'sam-dns',
+          '/usr/local/bin/sam-dns',
+          'probe-update',
+        ]),
+        { ...process.env, SAM_DNS_PROBE_TSIG_SECRET: secret }
+      );
+      if (result.status === PROBE_ACCEPTED) return 'accepted';
+      if (result.status === PROBE_REFUSED) return 'refused';
+      throw new Error(
+        `sam-dns probe-update failed (exit ${result.status}): ${result.stderr.trim().slice(-500)}`
+      );
+    },
     probeGateway: async (secret) => {
       // frps's plugin call shape (deploy/selfhost/frps/frps.toml); an empty body is refused
       // with a 200 verdict after authentication, a wrong secret with 401 before it.

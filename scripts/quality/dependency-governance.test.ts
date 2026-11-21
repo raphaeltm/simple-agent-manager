@@ -136,6 +136,7 @@ describe('dependency governance', () => {
       'deploy/selfhost/egress-fence/Dockerfile.lab',
       'deploy/selfhost/key-agent/Dockerfile',
       'deploy/selfhost/metadata-proxy/Dockerfile',
+      'deploy/selfhost/sam-dns/Dockerfile',
       'deploy/selfhost/sam-mx/Dockerfile',
       'scripts/e2e/workspace-mock/Dockerfile',
     ]);
@@ -147,6 +148,7 @@ describe('dependency governance', () => {
       '/deploy/selfhost/egress-fence',
       '/deploy/selfhost/key-agent',
       '/deploy/selfhost/metadata-proxy',
+      '/deploy/selfhost/sam-dns',
       '/deploy/selfhost/sam-mx',
       '/scripts/e2e/workspace-mock',
     ]);

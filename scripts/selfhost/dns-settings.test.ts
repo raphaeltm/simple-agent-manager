@@ -1,0 +1,210 @@
+/**
+ * DNS on the box (dns-settings.ts and its wiring): the Worker var follows the compose profile, the
+ * profile refuses settings that cannot work once SAM_DOMAIN is delegated, dns.env is written for
+ * sam-dns and Caddy, the TSIG key is a platform key that an old box's plain deploy does not need,
+ * and the egress fence keeps Worker code off the RFC 2136 listener.
+ */
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
+
+import { boxListenerPorts, resolveTunnelPortRange } from './box-settings.js';
+import { syncDnsEnv } from './deploy-steps.js';
+import {
+  assertBoxDnsSettings,
+  boxDnsWorkerVars,
+  DNS_ENV_FILE,
+  renderDnsEnv,
+} from './dns-settings.js';
+import { buildFencePlan } from './egress-fence.js';
+import { verifyTargets } from './fence-verify.js';
+import { ensurePlatformKeys, PLATFORM_KEY_NAMES, PLATFORM_KEYS_FILE } from './platform-keys.js';
+
+const KEY = Buffer.alloc(32, 7).toString('base64');
+const ON = {
+  COMPOSE_PROFILES: 'tunnel,dns',
+  SAM_DNS_PUBLIC_IPV4: '203.0.113.5',
+  SAM_TLS_MODE: 'dns-rfc2136',
+  CADDY_DNS_MODULE: 'github.com/caddy-dns/rfc2136@v1.0.0',
+};
+
+function tempDir(): string {
+  return mkdtempSync(join(tmpdir(), 'sam-selfhost-dns-'));
+}
+
+describe('Worker vars for DNS on the box', () => {
+  it('leaves an existing box (no dns profile, Cloud DNS TLS) exactly as it was', () => {
+    const box = { COMPOSE_PROFILES: 'tunnel,gce', SAM_TLS_MODE: 'dns-googleclouddns' };
+    expect(boxDnsWorkerVars(box)).toEqual({});
+  });
+
+  it('switches the Worker to the box zone with the profile on', () => {
+    expect(boxDnsWorkerVars(ON)).toEqual({ SAM_DNS_PROVIDER: 'box' });
+    expect(boxDnsWorkerVars({ ...ON, SAM_TLS_MODE: 'internal' })).toEqual({
+      SAM_DNS_PROVIDER: 'box',
+    });
+  });
+
+  it('refuses settings that cannot work once the zone is delegated to the box', () => {
+    expect(() => assertBoxDnsSettings({ ...ON, SAM_DNS_PUBLIC_IPV4: '' })).toThrow(
+      /SAM_DNS_PUBLIC_IPV4/
+    );
+    expect(() => assertBoxDnsSettings({ ...ON, SAM_DNS_PUBLIC_IPV4: '2001:db8::1' })).toThrow(
+      /SAM_DNS_PUBLIC_IPV4/
+    );
+    expect(() =>
+      assertBoxDnsSettings({ ...ON, SAM_TLS_MODE: 'dns-googleclouddns', CADDY_DNS_MODULE: '' })
+    ).toThrow(/dns-rfc2136/);
+    expect(() =>
+      assertBoxDnsSettings({
+        COMPOSE_PROFILES: 'tunnel',
+        SAM_TLS_MODE: 'dns-rfc2136',
+        CADDY_DNS_MODULE: ON.CADDY_DNS_MODULE,
+      })
+    ).toThrow(/COMPOSE_PROFILES/);
+  });
+
+  it('refuses a TLS mode whose Caddy DNS module is not built in, in both directions', () => {
+    // Liveness: a matching module passes, including the compose default for Cloud DNS.
+    expect(() => assertBoxDnsSettings(ON)).not.toThrow();
+    expect(() =>
+      assertBoxDnsSettings({ COMPOSE_PROFILES: 'tunnel', SAM_TLS_MODE: 'dns-googleclouddns' })
+    ).not.toThrow();
+    // Switching back to Cloud DNS without rebuilding Caddy.
+    expect(() =>
+      assertBoxDnsSettings({
+        COMPOSE_PROFILES: 'tunnel',
+        SAM_TLS_MODE: 'dns-googleclouddns',
+        CADDY_DNS_MODULE: 'github.com/caddy-dns/rfc2136@v1.0.0',
+      })
+    ).toThrow(/caddy-dns\/googleclouddns.*docker compose build caddy/);
+    // Turning DNS on the box on with the default (Cloud DNS) module.
+    expect(() => assertBoxDnsSettings({ ...ON, CADDY_DNS_MODULE: '' })).toThrow(
+      /caddy-dns\/rfc2136/
+    );
+    // Modes that do not use a DNS provider are not affected.
+    expect(() =>
+      assertBoxDnsSettings({ COMPOSE_PROFILES: 'tunnel', SAM_TLS_MODE: 'internal' })
+    ).not.toThrow();
+  });
+});
+
+describe('dns.env', () => {
+  it('holds the TSIG key and key name, private, rewritten only on change', () => {
+    const dir = tempDir();
+    const path = join(dir, DNS_ENV_FILE);
+    syncDnsEnv(path, ON, KEY);
+    expect(readFileSync(path, 'utf8')).toBe(
+      `SAM_DNS_TSIG_SECRET=${KEY}\nSAM_DNS_TSIG_KEY_NAME=sam-acme.\n`
+    );
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    const before = statSync(path).mtimeMs;
+    syncDnsEnv(path, ON, KEY);
+    expect(statSync(path).mtimeMs).toBe(before);
+  });
+
+  it('is not written with the profile off (key or not), and the profile refuses to deploy without the key', () => {
+    const dir = tempDir();
+    const path = join(dir, DNS_ENV_FILE);
+    expect(() => syncDnsEnv(path, { COMPOSE_PROFILES: 'tunnel' }, undefined)).not.toThrow();
+    expect(() => syncDnsEnv(path, { COMPOSE_PROFILES: 'tunnel' }, KEY)).not.toThrow();
+    expect(() => statSync(path)).toThrow();
+    expect(() => syncDnsEnv(path, ON, undefined)).toThrow(/--init/);
+  });
+
+  it('is removed when the profile is turned off, so Caddy stops carrying the key', () => {
+    const dir = tempDir();
+    const path = join(dir, DNS_ENV_FILE);
+    syncDnsEnv(path, ON, KEY);
+    expect(readFileSync(path, 'utf8')).toContain(KEY); // liveness: it was written while on
+    syncDnsEnv(path, { COMPOSE_PROFILES: 'tunnel' }, KEY);
+    expect(() => statSync(path)).toThrow();
+  });
+
+  it('refuses a key that is not 32 bytes of base64', () => {
+    expect(() => renderDnsEnv('short')).toThrow(/32 bytes/);
+    expect(() => renderDnsEnv(Buffer.alloc(16).toString('base64'))).toThrow(/32 bytes/);
+  });
+});
+
+describe('the TSIG platform key', () => {
+  it('is generated by --init, as 32 random bytes', () => {
+    const dir = tempDir();
+    const { keys } = ensurePlatformKeys(dir, 'init');
+    expect(Buffer.from(keys.SAM_DNS_TSIG_SECRET, 'base64')).toHaveLength(32);
+    expect(() => renderDnsEnv(keys.SAM_DNS_TSIG_SECRET)).not.toThrow();
+  });
+
+  it('does not stop a plain deploy of a box whose keys predate it, and --init adds it', () => {
+    const dir = tempDir();
+    const { keys } = ensurePlatformKeys(dir, 'init');
+    const old = { ...keys } as Record<string, string>;
+    delete old.SAM_DNS_TSIG_SECRET;
+    writeFileSync(join(dir, PLATFORM_KEYS_FILE), JSON.stringify(old), { mode: 0o600 });
+
+    const plain = ensurePlatformKeys(dir, 'deploy');
+    expect(plain.generated).toEqual([]);
+    expect(plain.keys.SAM_DNS_TSIG_SECRET).toBeUndefined();
+    // Liveness: every other key is still there.
+    for (const name of PLATFORM_KEY_NAMES.filter((n) => n !== 'SAM_DNS_TSIG_SECRET')) {
+      expect(plain.keys[name], name).toBe(old[name]);
+    }
+
+    const init = ensurePlatformKeys(dir, 'init');
+    expect(init.generated).toEqual(['SAM_DNS_TSIG_SECRET']);
+    expect(init.keys.ENCRYPTION_KEY).toBe(old.ENCRYPTION_KEY);
+  });
+
+  it('still refuses a plain deploy that lacks a required key group (control)', () => {
+    const dir = tempDir();
+    const { keys } = ensurePlatformKeys(dir, 'init');
+    const old = { ...keys } as Record<string, string>;
+    delete old.PREVIEW_SIGNING_KEY;
+    writeFileSync(join(dir, PLATFORM_KEYS_FILE), JSON.stringify(old), { mode: 0o600 });
+    expect(() => ensurePlatformKeys(dir, 'deploy')).toThrow(/PREVIEW_SIGNING_KEY/);
+  });
+});
+
+describe('the update listener is a box port the Worker never reaches', () => {
+  it('is reserved, so a node tunnel can never be leased it', () => {
+    expect(boxListenerPorts({}).SAM_DNS_UPDATE_PORT).toBe(8053);
+    expect(() =>
+      resolveTunnelPortRange({
+        REVERSE_TUNNEL_PORT_RANGE_START: '8050',
+        REVERSE_TUNNEL_PORT_RANGE_END: '8060',
+      })
+    ).toThrow(/SAM_DNS_UPDATE_PORT/);
+  });
+
+  it('is forbidden in the fence plan and probed by verify-fence', async () => {
+    const plan = buildFencePlan({
+      box: { SAM_DNS_UPDATE_PORT: '8053' },
+      leaseRange: { start: 20000, end: 20999 },
+      resolvConf: 'nameserver 169.254.169.254\n',
+      objectStore: [],
+    });
+    expect(plan.forbiddenLoopbackPorts.SAM_DNS_UPDATE_PORT).toBe(8053);
+    expect(plan.loopbackPorts).not.toContain(8053);
+    // An operator allowance that would open it is refused.
+    expect(() =>
+      buildFencePlan({
+        box: { SAM_EGRESS_ALLOW: '127.0.0.1:8053' },
+        leaseRange: { start: 20000, end: 20999 },
+        resolvConf: 'nameserver 169.254.169.254\n',
+        objectStore: [],
+      })
+    ).toThrow();
+    const targets = await verifyTargets({
+      box: {},
+      range: { start: 20000, end: 20999 },
+      publicProbe: 'example.com:443',
+      localAddresses: [],
+      resolvConf: 'nameserver 169.254.169.254\n',
+    });
+    expect(targets).toContainEqual(
+      expect.objectContaining({ host: '127.0.0.1', port: 8053, expect: 'blocked' })
+    );
+  });
+});

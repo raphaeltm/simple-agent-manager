@@ -199,6 +199,55 @@ email is on only when `AGENT_EMAIL_INBOUND_SMTP=true` (the receiver is installed
 secret is set and an SMTP relay works. The admin loopback test needs Email Routing and is refused
 on a box; send a test email from an allowed sender instead.
 
+## DNS on a single-box build
+
+A Cloudflare deployment keeps its DNS records in its Cloudflare zone, and nothing below changes
+that: the DNS functions in `apps/api/src/services/dns-core.ts`, `dns-app-routes.ts`,
+`dns-node-backend.ts` and `dns-workspace.ts` make the same Cloudflare API calls as before.
+
+A single-box build can answer DNS for its own domain instead. The self-host entry installs a box
+backend (`installBoxDns()` in `apps/api/src/selfhost/dns/`), active only when the box sets
+`SAM_DNS_PROVIDER=box`. The box deploy sets it when its `dns` compose profile is on. Then:
+
+- the records SAM writes, such as app deployment routes
+  (`r<n>-<service>-<port>-<env>.apps.<BASE_DOMAIN>`), go to a table in the box's own database
+  instead of the Cloudflare API (`upsertBoxARecord()` in `apps/api/src/selfhost/dns/records.ts`);
+- the box's DNS server, `sam-dns` (`deploy/selfhost/sam-dns`), syncs them over a loopback-only,
+  secret-checked route (`GET /api/self-host/gateway/dns-records`), and answers for the whole domain:
+  every other name points at the box;
+- Caddy gets the wildcard certificate by DNS-01 against `sam-dns` over RFC 2136, signed with a
+  TSIG key SAM generates (`SAM_TLS_MODE=dns-rfc2136`). No cloud DNS account is involved.
+
+**One-time setup.** Delegate the domain to the box in its parent zone, and open inbound UDP and TCP
+port 53 to the box. For `BASE_DOMAIN=sam.example.com` on a box at `203.0.113.5`, the parent zone
+`example.com` gets:
+
+```
+sam.example.com.      3600  IN  NS  ns1.sam.example.com.
+ns1.sam.example.com.  3600  IN  A   203.0.113.5
+```
+
+If your DNS host does not allow the second record (glue below a delegated name), set
+`SAM_DNS_NAMESERVER` to a name outside the domain, such as `sam-ns.example.com`, and give that name
+the A record instead. The step-by-step guide, the settings and the switch from Cloud DNS are in
+`deploy/selfhost/README.md` ("DNS on the box").
+
+**Verify.** `dig +short api.sam.example.com` returns the box address; `dig @203.0.113.5
+example.org` is `REFUSED` (no recursion); `dig @203.0.113.5 sam.example.com AXFR` fails (no zone
+transfers). A deployment node's `<node-id>.vm.` record resolves to the node.
+
+App deployments do not run on a single box yet. Deployment nodes still need a Cloudflare Origin CA
+certificate for their agent, so without `CF_API_TOKEN` a release fails at node boot
+(`origin_ca_bootstrap`).
+
+**What the box accepts.** `sam-dns` is authoritative only: it answers for its domain and refuses
+every other name, never recurses, refuses zone transfers, NOTIFY and UPDATE on port 53, gives ANY
+the minimal RFC 8482 answer, truncates UDP answers above 1232 bytes, and rate limits each client
+network (/24 for IPv4, /56 for IPv6). Updates are accepted only on `127.0.0.1`, only with the TSIG
+key, and only for `_acme-challenge` TXT records, which live in memory. The egress fence keeps
+Worker code away from that port. Answers carry a one-hour TTL, so names resolvers recently looked
+up keep resolving through a short box outage; a second name server is planned.
+
 ## Prerequisites
 
 | Requirement              | Purpose                   | Tier                 |

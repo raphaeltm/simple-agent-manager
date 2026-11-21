@@ -117,6 +117,12 @@ New attack surface: a public UDP/TCP 53 listener, and a loopback RFC 2136 update
     host network and could reach 127.0.0.1:update, but need the TSIG key, which only Caddy gets.
   - The gateway records route is loopback-only (Caddy 404s the prefix publicly) and secret-checked;
     it is read-only.
+- **Accepted risk (review M1 on #2960):** sam-dns, like sam-mx, holds the shared gateway secret
+  for its loopback sync route. A parser compromise would expose the other gateway routes. Same
+  trade-off as sam-mx; per-sidecar credentials are tracked in idea 01M7YXTPZA414CAN0RF4KHGAVB.
+- **The TSIG key equals certificate issuance for the whole domain** (any name, any ACME account),
+  as `roles/dns.admin` does today. It cannot repoint names: updates are TXT under
+  `_acme-challenge` only, and a challenge name never hides its parent from the wildcard.
 - No new trust boundary beyond the plan: nothing outside the box can write records.
 
 ## Implementation checklist
@@ -133,29 +139,72 @@ New attack surface: a public UDP/TCP 53 listener, and a loopback RFC 2136 update
       Divergence/convergence proven discriminating by surgical reverts (dns-provider.ts gate
       removed -> "stays on Cloudflare" red; shared code reading the var -> 3 divergence tests red;
       slice without installBoxDns -> slice red).
-- [ ] Staging: Cloudflare path (workspace DNS record, app-route record created and resolves)
+- [x] Staging: Cloudflare path. #2959 on primary staging (runs 44893171918, 44898636651): a real deployment
+      release wrote the grey-cloud app-route A record (TTL 60, proxied=false); it resolved via 1.1.1.1 and
+      Google DoH and served nginx over HTTPS; delete removed it (`dnsRecordsDeleted: 1`); staging D1 has no
+      `selfhost_dns*` tables. Staging nodes use the tunnel CNAME, so the workspace and node primitives were
+      not driven live; they are pinned by the byte-identical 10-request Cloudflare sequence test.
+      PR (b) changes no Worker runtime code (`git diff origin/main --stat -- apps/api/src` is empty), so its
+      live verification is the disposable box below.
 - Moved to PR (b): the box deploy writes `SAM_DNS_PROVIDER=box` when the `dns` compose profile is
   on (pattern of `inboundMailWorkerVars`), so the switch ships together with the server that
   answers for the records. PR (a) is inert on every deployment: nothing sets the var.
 
 ### PR (b): sidecar, Caddy, box proof
-- [ ] `deploy/selfhost/sam-dns` Go sidecar (miekg/dns), tests incl. sync > one page, AXFR/IXFR
-      refused, no recursion, ANY minimal, rate limit, UPDATE refused publicly, TSIG required on loopback
-- [ ] compose service (profile `dns`), digest pins, dependabot + dependency-governance entries
-- [ ] Caddy `tls/dns-rfc2136.caddy` + module build arg; Cloud DNS mode untouched
-- [ ] TSIG platform key (`SAM_DNS_TSIG_SECRET`), dns.env rendering, rotation catalog entry
-- [ ] Fence: update port reserved + forbidden + verify-fence probe
-- [ ] Docs: deploy/selfhost/README.md + public self-hosting docs (delegation, NS/glue, ports, verify,
+- [x] `deploy/selfhost/sam-dns` Go sidecar (miekg/dns), tests incl. sync > one page, AXFR/IXFR
+      refused, no recursion, ANY minimal, rate limit, UPDATE refused publicly, TSIG required on loopback;
+      UDP flood limited through the real handler (`TestPublicUDPFloodIsLimitedThroughTheHandler`, red with
+      the limiter unwired)
+- [x] compose service (profile `dns`), digest pins, dependabot + dependency-governance entries
+- [x] Caddy `tls/dns-rfc2136.caddy` + module build arg; Cloud DNS mode untouched
+- [x] TSIG platform key (`SAM_DNS_TSIG_SECRET`), dns.env rendering, rotation catalog entry
+- [x] Fence: update port reserved + forbidden + verify-fence probe
+- [x] Docs: deploy/selfhost/README.md + public self-hosting docs (delegation, NS/glue, ports, verify,
       switching an existing box)
-- [ ] Disposable box proof (GCP sam-vm-control-plane-test): DNS-01 wildcard via own server, sign-in,
-      app deployment resolves publicly, dig shows recursion + AXFR refused; cleanup recorded
+- [x] Disposable box proof (GCP sam-vm-control-plane-test): DNS-01 wildcard via own server, sign-in,
+      dig shows recursion + AXFR refused; Worker-written record resolves publicly. Evidence below.
+- [ ] App deployment on the box resolves publicly: OUT OF SCOPE for step 1 (coordinator, 2026-11-21): a pre-existing gap. Box deployment nodes are
+      excluded from the reverse tunnel and need Cloudflare Origin CA, so they cannot boot (idea
+      01M7Z0N9ACNE44NC4ZWK3K2QNB; escalated to the coordinator 2026-11-21).
+- [x] Cleanup of the disposable box recorded: VM, firewall `sam-dnsbox-allow`, NS+glue, WIF pool
+      `sam-fe1db321`, SA `sam-dnsbox-nodes` + 2 role bindings deleted 2026-11-21; shared box untouched
 
 ## Acceptance criteria
-- [ ] Cloudflare deployments: identical DNS API calls (tests + staging evidence)
-- [ ] Box with `SAM_DNS_PROVIDER=box`: app-route records land in D1 and are served by sam-dns
-- [ ] Wildcard certificate issued by DNS-01 against the box's own server, no Cloud DNS
-- [ ] Recursion, AXFR, IXFR and public UPDATE refused (dig evidence)
-- [ ] Existing Cloud DNS boxes keep working with no change
+- [x] Cloudflare deployments: identical DNS API calls (tests + staging evidence)
+- [x] Box with `SAM_DNS_PROVIDER=box`: app-route records land in D1 and are served by sam-dns
+      (`selfhost-dns-sidecar.test.ts`: real writer -> D1 -> gateway -> real binary). Live: a Worker-written
+      record resolved publicly; the deployment-driven leg is blocked as noted above.
+- [x] Wildcard certificate issued by DNS-01 against the box's own server, no Cloud DNS
+- [x] Recursion, AXFR, IXFR and public UPDATE refused (dig evidence)
+- [x] Existing Cloud DNS boxes keep working with no change
+
+## Disposable box proof (2026-11-21)
+
+- Box `sam-dnsbox` (e2, europe-west1-b, 34.62.30.204), `SAM_DOMAIN=dnsbox.vmtest.sam2.party`, profiles
+  `tunnel,local-store,mail-collector,dns`, built from this branch. The shared box was not touched.
+- Delegation in the Cloud DNS zone `vmtest-sam2-party`: `dnsbox NS ns1.dnsbox.vmtest.sam2.party.` plus glue
+  `ns1.dnsbox A 34.62.30.204`. The CF BYOC token was invalid, so the parent zone used was Cloud DNS. That is
+  the parent's delegation only; the box zone itself is served by sam-dns.
+- Caddy obtained a production Let's Encrypt wildcard `*.dnsbox.vmtest.sam2.party` (issuer YE1) by DNS-01
+  over RFC 2136 to sam-dns on 127.0.0.1:8053 with TSIG. `curl` verified it with no `-k`.
+- Owner sign-in through email OTP: dashboard loads, session 200.
+- dig against public 53 (`.tmp/dns/gcp/dig-evidence.txt`):
+  - SOA has `aa`.
+  - Recursion for `example.com`: REFUSED, with no `ra` flag.
+  - AXFR: "Transfer failed".
+  - IXFR: REFUSED.
+  - ANY: one `HINFO "RFC8482"`.
+  - Out-of-zone: REFUSED.
+  - `version.bind CH`: REFUSED.
+- Box Worker → D1 → sam-dns → public resolution:
+  - A GCP platform credential plus an installation pool led to a release on a new deployment node.
+  - The box Worker wrote `01m7yzzypvm428wmmsm7kdr1av.vm.dnsbox… A 35.241.162.1` (TTL 3600).
+  - sam-dns logged `zone synced serial=2 records=1`.
+  - The record resolved from 8.8.8.8 and 1.1.1.1.
+  - No Cloudflare or Cloud DNS record exists for that name.
+- The release never applied: the node failed boot with `origin_ca_bootstrap` (`CF_API_TOKEN is required to
+  issue node Origin CA certificates`). That is the gap in idea 01M7Z0N9ACNE44NC4ZWK3K2QNB. The test environment
+  and node were deleted through the API, and the GCP instance is gone.
 
 ## References
 - `.claude/rules/19-external-service-integration.md`, `74`, `81`, `62`, `41`/`50` (row isolation)
