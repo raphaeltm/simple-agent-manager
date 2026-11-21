@@ -329,3 +329,37 @@ func TestLimitedListenerCapsPerPrefixAndReleasesOnce(t *testing.T) {
 	_ = third.Close()
 	_ = fourth.Close()
 }
+
+// The limiter is wired into the public handler: a UDP flood from one prefix is mostly dropped,
+// every slip-th over-limit query gets an empty truncated reply (no amplification), and the same
+// client still gets a full answer over TCP, which the limiter does not gate.
+func TestPublicUDPFloodIsLimitedThroughTheHandler(t *testing.T) {
+	cfg := testConfig(t, map[string]string{"SAM_DNS_RATE_LIMIT": "1", "SAM_DNS_RATE_BURST": "3", "SAM_DNS_RATE_SLIP": "2"})
+	s := startTestServer(t, cfg) // its readiness probe spends one token of 127.0.0.0/24
+	client := &dns.Client{Timeout: 150 * time.Millisecond}
+	var answered, slipped, dropped int
+	for i := 0; i < 10; i++ {
+		reply, _, err := client.Exchange(query("r1-web-80-env1.apps.box.example.test.", dns.TypeA), s.publicUDP)
+		switch {
+		case err != nil:
+			dropped++
+		case reply.Truncated && len(reply.Answer) == 0:
+			slipped++
+		case len(reply.Answer) == 1:
+			answered++
+		default:
+			t.Fatalf("unexpected reply: %v", reply)
+		}
+	}
+	// Liveness: the burst left after the probe was answered in full.
+	if answered < 2 || answered > 3 {
+		t.Fatalf("answered %d, want the remaining burst of 2 (3 with one refill)", answered)
+	}
+	if slipped == 0 || dropped == 0 {
+		t.Fatalf("over-limit queries: %d slipped, %d dropped; want both", slipped, dropped)
+	}
+	tcp := exchange(t, "tcp", s.publicTCP, query("r1-web-80-env1.apps.box.example.test.", dns.TypeA))
+	if len(tcp.Answer) != 1 || tcp.Truncated {
+		t.Fatalf("TCP answer was limited: %v", tcp)
+	}
+}
