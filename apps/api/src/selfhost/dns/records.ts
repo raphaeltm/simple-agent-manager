@@ -11,6 +11,7 @@ import { ulid } from '@simple-agent-manager/worker-core';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { maybeJsonRecord } from '../../lib/runtime-validation';
 import type { BoxDnsRecordMatch } from '../../services/dns-provider';
 
 export type BoxDnsEnv = Pick<Env, 'DATABASE' | 'BASE_DOMAIN'>;
@@ -101,7 +102,7 @@ export async function upsertBoxARecord(name: string, ip: string, env: BoxDnsEnv)
     ).bind(`box_${ulid()}`, fqdn, BOX_DNS_RECORD_TYPE, content, now, now),
     env.DATABASE.prepare(BUMP_SERIAL_SQL),
   ]);
-  const id = (upsert?.results?.[0] as { id?: unknown } | undefined)?.id;
+  const id = maybeJsonRecord(upsert?.results?.[0])?.id;
   if (typeof id !== 'string') throw new Error('Box DNS upsert returned no record id');
   return id;
 }
@@ -179,31 +180,27 @@ export interface BoxDnsRecord {
  * from syncing (.claude/rules/50).
  */
 export function parseRecordRow(row: unknown, context: string): BoxDnsRecord | null {
-  const r = (row ?? {}) as Record<string, unknown>;
-  const valid =
-    typeof r.id === 'string' &&
-    typeof r.name === 'string' &&
-    r.type === BOX_DNS_RECORD_TYPE &&
-    typeof r.content === 'string' &&
-    IPV4_RE.test(r.content) &&
-    r.name.length <= MAX_NAME_LENGTH &&
-    r.name.split('.').every((label) => LABEL_RE.test(label));
-  if (!valid) {
-    log.warn('selfhost_dns.record_row_skipped', {
-      context,
-      recordId: typeof r.id === 'string' ? r.id.slice(0, 64) : null,
-      name: typeof r.name === 'string' ? r.name.slice(0, 255) : null,
-      type: typeof r.type === 'string' ? r.type.slice(0, 16) : null,
-      action: 'skipped',
-    });
-    return null;
+  const r = maybeJsonRecord(row) ?? {};
+  const { id, name, type, content } = r;
+  if (
+    typeof id === 'string' &&
+    typeof name === 'string' &&
+    type === BOX_DNS_RECORD_TYPE &&
+    typeof content === 'string' &&
+    IPV4_RE.test(content) &&
+    name.length <= MAX_NAME_LENGTH &&
+    name.split('.').every((label) => LABEL_RE.test(label))
+  ) {
+    return { id, name, type, content };
   }
-  return {
-    id: r.id as string,
-    name: r.name as string,
-    type: r.type as string,
-    content: r.content as string,
-  };
+  log.warn('selfhost_dns.record_row_skipped', {
+    context,
+    recordId: typeof id === 'string' ? id.slice(0, 64) : null,
+    name: typeof name === 'string' ? name.slice(0, 255) : null,
+    type: typeof type === 'string' ? type.slice(0, 16) : null,
+    action: 'skipped',
+  });
+  return null;
 }
 
 export interface BoxDnsZonePage {
@@ -262,7 +259,7 @@ export async function readBoxZonePage(
     env.DATABASE.prepare('SELECT serial FROM selfhost_dns_zone WHERE id = 1'),
     records,
   ]);
-  const serial = Number((serialResult?.results?.[0] as { serial?: unknown } | undefined)?.serial);
+  const serial = Number(maybeJsonRecord(serialResult?.results?.[0])?.serial);
   if (!Number.isSafeInteger(serial)) throw new Error('The box DNS zone has no serial row');
   const rows = recordsResult?.results ?? [];
   const pageRows = rows.slice(0, limit);
@@ -273,7 +270,7 @@ export async function readBoxZonePage(
     if (record) page.push({ name: record.name, type: record.type, content: record.content });
     else skipped++;
   }
-  const last = pageRows[pageRows.length - 1] as { name?: unknown; type?: unknown } | undefined;
+  const last = maybeJsonRecord(pageRows[pageRows.length - 1]);
   const nextCursor =
     rows.length > limit && typeof last?.name === 'string' && typeof last.type === 'string'
       ? encodeCursor(last.name, last.type)
