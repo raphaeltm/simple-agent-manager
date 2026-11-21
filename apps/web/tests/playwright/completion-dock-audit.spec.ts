@@ -266,6 +266,32 @@ async function gotoChat(page: Page) {
   await page.waitForTimeout(1500);
 }
 
+/**
+ * The working button straddles the message-box slab's top edge, where the slab
+ * paints its rim light (`.sam-glass-rim::before`). The button must stack above
+ * that rim, or its 1px line is drawn across the button. Asserts the overlap is
+ * real (so the check cannot pass vacuously) and that the button wins it.
+ */
+async function assertInterruptAboveSlabRim(page: Page) {
+  const button = page.getByRole('button', { name: 'Interrupt agent' });
+  // The rise animation must finish before measuring the button's resting position.
+  await page.waitForTimeout(600);
+  const result = await button.evaluate((el) => {
+    const slab = el.closest('.sam-glass-rim');
+    if (!slab) return null;
+    const b = el.getBoundingClientRect();
+    const s = slab.getBoundingClientRect();
+    return {
+      straddles: b.top < s.top && b.bottom > s.top,
+      buttonZ: Number(getComputedStyle(el).zIndex),
+      rimZ: Number(getComputedStyle(slab, '::before').zIndex),
+    };
+  });
+  expect(result).not.toBeNull();
+  expect(result!.straddles).toBe(true);
+  expect(result!.buttonZ).toBeGreaterThan(result!.rimZ);
+}
+
 // ---------------------------------------------------------------------------
 // Audit matrix: {dark, light} x {mobile, desktop} x {idle, working}
 // ---------------------------------------------------------------------------
@@ -321,6 +347,7 @@ for (const theme of ['dark', 'light'] as const) {
       await gotoChat(page);
       await expect(page.getByRole('button', { name: 'Interrupt agent' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'View plan' })).toBeVisible();
+      await assertInterruptAboveSlabRim(page);
       await screenshot(page, `completion-dock-working-${theme}-desktop`);
       await assertNoOverflow(page);
     });
@@ -383,6 +410,7 @@ for (const theme of ['dark', 'light'] as const) {
       await setupApiMocks(page, { mode: 'working' });
       await gotoChat(page);
       await expect(page.getByRole('button', { name: 'Interrupt agent' })).toBeVisible();
+      await assertInterruptAboveSlabRim(page);
       await screenshot(page, `completion-dock-working-${theme}-mobile`);
       await assertNoOverflow(page);
     });
