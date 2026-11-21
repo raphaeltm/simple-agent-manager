@@ -24,7 +24,7 @@ draft ideas that the reconciliation could not close.
 
 - [x] Selector and adoption write
 - [x] Test in the production row shape; reaches dispatchability; edited control; guards proven discriminating
-- [ ] Staging: reconciliation adopts staging legacy rows
+- [x] Staging: reconciliation adopts staging legacy rows (70 -> 3 unowned 'user'; 63 ended ideas cancelled; dispatch resumed)
 - [ ] Production: legacy ideas adopted, error incidents dispatchable, a triage run follows
 
 ## Throughput
