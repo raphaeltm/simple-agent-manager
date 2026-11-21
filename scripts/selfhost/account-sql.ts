@@ -135,14 +135,16 @@ export interface AccountReport {
 
 /**
  * The account row from `celld d1 execute`'s table output: the line that starts with a generated
- * id followed by exactly this address. Null when the report has no such row (nothing usable was
+ * id followed by this address. Null when the report has no such row (nothing usable was
  * written). Matching the whole row, not the address anywhere in the output, keeps an echoed SQL
- * statement from passing for a result.
+ * statement from passing for a result. The address is compared the way `MATCH` selected the row,
+ * case-insensitively (the whitespace split already trims it), so a stored `Dev@Example.com` the
+ * SQL matched and promoted is reported, not mistaken for nothing written.
  */
 export function parseAccountReport(output: string, email: string): AccountReport | null {
   for (const line of output.split('\n')) {
     const [id = '', address, role = '', status = ''] = line.trim().split(/\s+/);
-    if (/^[A-Za-z0-9]{1,64}$/.test(id) && address === email && role && status) {
+    if (/^[A-Za-z0-9]{1,64}$/.test(id) && address?.toLowerCase() === email && role && status) {
       return { id, role, status };
     }
   }

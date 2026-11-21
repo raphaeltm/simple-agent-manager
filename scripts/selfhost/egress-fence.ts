@@ -29,41 +29,32 @@
  * Worker code and celld's own storage client are one process, so the fence cannot tell them
  * apart: whatever celld needs, the Worker can reach too. That is why the object store is allowed
  * only at its exact address and port, and why the metadata server sits behind a proxy that
- * answers only celld (its secret path is in celld's environment, which Worker code cannot read:
- * verified on celld 0.6.3, where process.env is an empty stub and node:fs a virtual filesystem).
+ * accepts only the native celld socket uid and returns only a fleet-bucket CAB token. The SAM
+ * API Worker is trusted with fleet authority; safety does not depend on hiding the proxy path.
+ * Pinned runtime isolation evidence: live/metadata-proxy.live.test.ts (exact native canary
+ * comparison, empty process.env keys, inaccessible host/proc files and process execution).
  */
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
-import type { PortRange } from './box-settings.js';
-import { assertOpenable } from './fence-addresses.js';
+import { boxListenerPorts, type PortRange } from './box-settings.js';
+import { assertOpenable, FORBIDDEN_IPV4, FORBIDDEN_IPV6 } from './fence-addresses.js';
+export { FORBIDDEN_IPV4, FORBIDDEN_IPV6 } from './fence-addresses.js';
 import { formatProbes, startCheckProbes } from './fence-probes.js';
-import {
-  CELLD_CONTAINER_BRIDGE,
-  CELLD_SANDBOX_BRIDGES,
-  guidedLoginSettings,
-} from './guided-login.js';
-import { keyAgentPort, keyServiceEnabled } from './key-service.js';
-
 /** nftables table name; the start check and the verify command look for it. */
 export const EGRESS_FENCE_TABLE = 'sam_celld_egress';
 
 /** uid (and gid) celld runs as; the fence matches its sockets. */
-export const DEFAULT_CELLD_UID = 7101;
+export const DEFAULT_CELLD_UID = 7103;
 
-/**
- * OAuth scope the GCE metadata token proxy requests for celld: Cloud Storage read/write, which is
- * what celld's bucket client needs (objects, conditional writes, deletes of superseded LTX files).
- * The real GCE metadata server ignores `scopes` for the default service account (verified on GCE
- * 2026-11-11: the token carried the VM's `cloud-platform` scope), so this narrows nothing there;
- * the service account's IAM grants are what bound the token (README "metadata token proxy").
+/** Storage scope selects CAB objectViewer or objectAdmin on the fleet bucket only.
+ * No token from the metadata server is ever returned directly (metadata-proxy/token.ts).
  */
 export const DEFAULT_GCE_METADATA_PROXY_SCOPES =
   'https://www.googleapis.com/auth/devstorage.read_write';
 
 /** Scopes GCE_METADATA_PROXY_SCOPES may name: Cloud Storage ones only. */
-const STORAGE_SCOPE =
-  /^https:\/\/www\.googleapis\.com\/auth\/devstorage\.(read_only|read_write|full_control)$/;
+const STORAGE_SCOPE = /^https:\/\/www\.googleapis\.com\/auth\/devstorage\.(read_only|read_write)$/;
 
 /** The proxy's forced scopes; anything but Cloud Storage scopes is refused. */
 export function metadataProxyScopes(box: Readonly<Record<string, string>>): string {
@@ -73,7 +64,9 @@ export function metadataProxyScopes(box: Readonly<Record<string, string>>): stri
   if (bad !== undefined) {
     throw new Error(`GCE_METADATA_PROXY_SCOPES: "${bad}" is not a Cloud Storage scope`);
   }
-  return scopes.join(',');
+  if (scopes.length !== 1)
+    throw new Error('GCE_METADATA_PROXY_SCOPES requires exactly one storage scope');
+  return scopes[0] ?? DEFAULT_GCE_METADATA_PROXY_SCOPES;
 }
 
 /** Loopback port of the GCE metadata token proxy (profile `gce`). */
@@ -95,46 +88,6 @@ const COMPOSE_PORT_DEFAULTS = {
 
 type ComposePort = keyof typeof COMPOSE_PORT_DEFAULTS;
 
-/** IPv4 destinations celld may never open a connection to (besides this host's own addresses). */
-export const FORBIDDEN_IPV4 = [
-  '0.0.0.0/8',
-  '10.0.0.0/8',
-  '100.64.0.0/10', // carrier-grade NAT, incl. Alibaba metadata 100.100.100.200
-  '168.63.129.16/32', // Azure WireServer (a public address; DNS to it is allowed above)
-  '127.0.0.0/8',
-  '169.254.0.0/16', // link-local, cloud metadata
-  '172.16.0.0/12',
-  '192.0.0.0/24',
-  '192.0.2.0/24', // documentation
-  '192.88.99.0/24', // 6to4 relay anycast
-  '192.168.0.0/16',
-  '198.18.0.0/15',
-  '198.51.100.0/24', // documentation
-  '203.0.113.0/24', // documentation
-  '224.0.0.0/3', // multicast and reserved
-];
-
-/**
- * The same ranges packages/worker-core/src/network-hosts refuses, plus every IPv6 form that embeds an
- * IPv4 address or tunnels to one (6to4, Teredo), refused wholesale: the kernel would route them
- * to a relay, where the embedded address is out of the fence's sight.
- */
-export const FORBIDDEN_IPV6 = [
-  '::/96', // unspecified, loopback and IPv4-compatible
-  '::ffff:0:0/96', // IPv4-mapped
-  '::ffff:0:0:0/96', // IPv4-translated
-  '64:ff9b::/96', // NAT64
-  '64:ff9b:1::/48',
-  '100::/64',
-  '2001::/32', // Teredo
-  '2001:db8::/32', // documentation
-  '2002::/16', // 6to4
-  'fc00::/7', // unique-local (incl. AWS IMDS fd00:ec2::254, GCE fd20:ce::254)
-  'fe80::/10', // link-local
-  'fec0::/10',
-  'ff00::/8',
-];
-
 export interface FenceEndpoint {
   address: string;
   port: number;
@@ -154,18 +107,6 @@ export interface EgressFencePlan {
   forbiddenLoopbackPorts: Record<string, number>;
   /** This host's own addresses: an endpoint on one of them is checked like a loopback one. */
   localAddresses: string[];
-  /**
-   * celld's container bridge interfaces celld may connect into (guided login). celld reaches the
-   * sandbox at its bridge address in 172.16/12; celld's own fence keeps the container off the box.
-   */
-  containerBridges: string[];
-  /**
-   * Interfaces of celld's sandbox bridges (guided login). Traffic arriving on them may answer
-   * connections the host opened and may be forwarded to the Internet, nothing else. celld installs
-   * equivalent rules through its fence container, but the proxy cannot make celld run that
-   * container first, so the operator-owned fence holds the boundary on its own.
-   */
-  sandboxBridges: string[];
 }
 
 function intSetting(raw: string | undefined, fallback: number, name: string, min = 1): number {
@@ -182,7 +123,11 @@ export function composePort(box: Readonly<Record<string, string>>, name: Compose
 }
 
 export function celldUid(box: Readonly<Record<string, string>>): number {
-  return intSetting(box.CELLD_UID, DEFAULT_CELLD_UID, 'CELLD_UID', 1000);
+  const uid = intSetting(box.CELLD_UID, DEFAULT_CELLD_UID, 'CELLD_UID', 1000);
+  if ([7101, Number(box.SAM_MX_UID || 7102), 65532, 65534].includes(uid)) {
+    throw new Error('CELLD_UID collides with another box service identity');
+  }
+  return uid;
 }
 
 /** Whether the GCE metadata token proxy runs: on for a gs:// bucket unless turned off. */
@@ -194,12 +139,7 @@ export function metadataProxyEnabled(box: Readonly<Record<string, string>>): boo
 }
 
 export function metadataProxyPort(box: Readonly<Record<string, string>>): number {
-  return intSetting(
-    box.GCE_METADATA_PROXY_PORT,
-    DEFAULT_GCE_METADATA_PROXY_PORT,
-    'GCE_METADATA_PROXY_PORT',
-    1024
-  );
+  return boxListenerPorts(box).GCE_METADATA_PROXY_PORT;
 }
 
 /** Nameservers from resolv.conf text, IP literals only (zone ids dropped). */
@@ -242,6 +182,11 @@ export interface FencePlanInput {
   serviceEndpoints?: FenceEndpoint[];
   /** This host's interface addresses (os.networkInterfaces()). */
   localAddresses?: string[];
+  /**
+   * The key agent's loopback port on a box that seals its secrets (key-box.ts
+   * sealedKeyAgentPort), else null: the Worker reaches the agent there over a raw socket.
+   */
+  keyAgentPort?: number | null;
 }
 
 /**
@@ -271,6 +216,7 @@ export function buildFencePlan({
   objectStore,
   serviceEndpoints = [],
   localAddresses,
+  keyAgentPort,
 }: FencePlanInput): EgressFencePlan {
   const loopbackPorts: number[] = [];
   const endpoints: FenceEndpoint[] = [];
@@ -278,38 +224,46 @@ export function buildFencePlan({
   for (const endpoint of [...objectStore, ...serviceEndpoints, ...allowed]) {
     // The one choke point for every endpoint the fence opens, whatever produced it.
     assertOpenable(endpoint.address, 'egress fence endpoint');
+    if (endpoint.port === 2019)
+      throw new Error('egress fence never opens the Caddy admin port (2019)');
     if (endpoint.address === '127.0.0.1') loopbackPorts.push(endpoint.port);
     else endpoints.push(endpoint);
   }
-  if (metadataProxyEnabled(box)) loopbackPorts.push(metadataProxyPort(box));
-  // The key agent (key-service.ts): the one new loopback port, and only with SAM_KEY_PROVIDER set.
-  // The agent itself refuses every peer uid but celld's, so opening it here lets in nothing else.
-  if (keyServiceEnabled(box)) {
-    const port = keyAgentPort(box);
-    // A node's frpc can lease a port in the range: it must never be able to answer as the agent.
+  if (metadataProxyEnabled(box)) {
+    const port = metadataProxyPort(box);
     if (inRange(port, leaseRange)) {
-      throw new Error(`SAM_KEY_AGENT_PORT ${port} is inside the node lease port range`);
+      throw new Error('metadata proxy port must be outside the node tunnel lease range');
     }
     loopbackPorts.push(port);
+  }
+  // The key agent (key-service.ts), only on a sealed box. The agent refuses every peer uid but
+  // celld's and answers only its framed protocol, so opening the port lets in nothing else.
+  if (keyAgentPort !== undefined && keyAgentPort !== null) {
+    // A node's frpc can lease a port in the range: it must never be able to answer as the agent.
+    if (inRange(keyAgentPort, leaseRange)) {
+      throw new Error(`SAM_KEY_AGENT_PORT ${keyAgentPort} is inside the node lease port range`);
+    }
+    loopbackPorts.push(keyAgentPort);
   }
   const dnsServers = parseNameservers(resolvConf);
   if (dnsServers.length === 0) throw new Error('no nameserver in resolv.conf; celld needs DNS');
   const plan: EgressFencePlan = {
     celldUid: celldUid(box),
     leaseRange,
-    loopbackPorts: [...new Set(loopbackPorts)].sort((a, b) => a - b),
+    loopbackPorts: [...new Set(loopbackPorts)]
+      .filter((port) => !inRange(port, leaseRange))
+      .sort((a, b) => a - b),
     endpoints,
     dnsServers,
     localPublicPorts: [composePort(box, 'HTTP_PORT'), composePort(box, 'HTTPS_PORT')],
     forbiddenLoopbackPorts: {
+      CADDY_ADMIN_PORT: 2019,
       CELLD_PORT: composePort(box, 'CELLD_PORT'),
       CELLD_INTERNAL_PORT: composePort(box, 'CELLD_INTERNAL_PORT'),
       FRPS_BIND_PORT: composePort(box, 'FRPS_BIND_PORT'),
       OBJECTSTORE_CONSOLE_PORT: composePort(box, 'OBJECTSTORE_CONSOLE_PORT'),
     },
     localAddresses: localAddresses ?? [],
-    containerBridges: guidedLoginSettings(box) ? [CELLD_CONTAINER_BRIDGE] : [],
-    sandboxBridges: guidedLoginSettings(box) ? [...CELLD_SANDBOX_BRIDGES] : [],
   };
   assertFencePlan(plan);
   return plan;
@@ -320,7 +274,12 @@ function inRange(port: number, range: PortRange): boolean {
 }
 
 function isLoopback(address: string): boolean {
-  return address === '::1' || address.startsWith('127.');
+  return (
+    address === '::1' ||
+    address.startsWith('127.') ||
+    address.startsWith('::ffff:127.') ||
+    /^::ffff:7f[0-9a-f]{2}:/i.test(address)
+  );
 }
 
 /**
@@ -387,15 +346,9 @@ export function renderFenceRuleset(plan: EgressFencePlan): string {
     // interface (a public IP on the NIC, or a LAN install). Loopback is not that path.
     `ip daddr != 127.0.0.0/8 fib daddr type local tcp dport ${caddy} accept comment "Caddy on this host's own addresses"`,
     `ip6 daddr != ::1 fib daddr type local tcp dport ${caddy} accept comment "Caddy on this host's own addresses"`,
-    // Matched on the egress interface, so only a route into celld's own bridge qualifies; the
-    // same private range anywhere else (another Docker network, the VPC) is still refused.
-    ...plan.containerBridges.map(
-      (bridge) =>
-        `oifname "${bridge}" ip daddr 172.16.0.0/12 meta l4proto tcp accept comment "celld containers (guided login)"`
-    ),
   ];
   const body = [
-    'ct state established,related accept',
+    'ct direction reply ct state established,related accept',
     ...allowLines,
     `fib daddr type local ${REFUSE} comment "anything else on this host"`,
     `ip daddr ${nftSet(FORBIDDEN_IPV4)} ${REFUSE} comment "private, link-local, metadata, reserved"`,
@@ -419,32 +372,9 @@ export function renderFenceRuleset(plan: EgressFencePlan): string {
     '  chain celld {',
     ...body.map((line) => `    ${line}`),
     '  }',
-    ...renderSandboxChains(plan.sandboxBridges),
     '}',
     '',
   ].join('\n');
-}
-
-/**
- * Sandbox containers (guided login): to this host only replies to connections the host opened
- * (celld driving the sandbox); forwarded only to addresses outside the forbidden ranges. Base
- * chains in every table must accept a packet, so these hold whatever celld's own table says.
- */
-export function renderSandboxChains(bridges: readonly string[]): string[] {
-  if (bridges.length === 0) return [];
-  const from = `iifname ${nftSet(bridges.map((bridge) => `"${bridge}"`))}`;
-  return [
-    '  chain sandbox_input {',
-    '    type filter hook input priority filter; policy accept;',
-    `    ${from} ct state established,related accept`,
-    `    ${from} ${REFUSE} comment "celld sandboxes: nothing on this host"`,
-    '  }',
-    '  chain sandbox_forward {',
-    '    type filter hook forward priority filter; policy accept;',
-    `    ${from} ip daddr ${nftSet(FORBIDDEN_IPV4)} ${REFUSE} comment "celld sandboxes: private, link-local, metadata, reserved"`,
-    `    ${from} ip6 daddr ${nftSet(FORBIDDEN_IPV6)} ${REFUSE} comment "celld sandboxes: private, link-local, transition, reserved"`,
-    '  }',
-  ];
 }
 
 /** celld.env: the start check's canary and, on a gs:// bucket, the metadata token proxy. */
@@ -470,8 +400,19 @@ export function renderCelldEnv(
     values.GCE_METADATA_PROXY_SECRET = metadataProxySecret;
     values.GCE_METADATA_PROXY_PORT = String(metadataProxyPort(box));
     values.GCE_METADATA_PROXY_SCOPES = metadataProxyScopes(box);
+    values.GCE_METADATA_PROXY_BUCKET = metadataProxyBucket(box);
   }
   return Object.entries(values)
     .map(([name, value]) => `${name}=${value}\n`)
     .join('');
+}
+
+/** Fixed CAB resource: never supplied by the token request. */
+export function metadataProxyBucket(box: Readonly<Record<string, string>>): string {
+  const bucket = /^gs:\/\/([a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(?:\/[^?#]*)?$/.exec(
+    box.CELLD_BUCKET ?? ''
+  )?.[1];
+  if (!bucket || bucket.includes('..'))
+    throw new Error('metadata proxy requires a valid gs:// CELLD_BUCKET');
+  return bucket;
 }

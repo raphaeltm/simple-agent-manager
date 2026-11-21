@@ -1,5 +1,6 @@
-// @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 /* eslint-disable */
+// @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
+import { chargeGitWork } from "./budget";
 import { te, fromHex, Sha1 } from "./util";
 import { deflate } from "./zlib";
 import { ObjType, TYPE_NUM } from "./objects";
@@ -24,7 +25,7 @@ export function applyDelta(base: Uint8Array, delta: Uint8Array): Uint8Array {
   const srcSize = varint();
   const tgtSize = varint();
   if (srcSize !== base.length) throw new Error("delta base size mismatch");
-  if (tgtSize > 512 * 1024 * 1024) throw new Error("delta target too large");
+  chargeGitWork(tgtSize);
   const out = new Uint8Array(tgtSize);
   let op = 0;
   while (pos < delta.length) {

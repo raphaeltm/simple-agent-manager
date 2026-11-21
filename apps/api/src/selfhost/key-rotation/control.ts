@@ -23,7 +23,7 @@ import { BETTER_AUTH_LOCATION, betterAuthRotating, runBetterAuthPass } from './b
 import { KEY_ROTATION_AUTH_HEADER, verifyKeyRotationRequest } from './control-auth';
 import { D1_LOCATIONS, d1Location } from './d1-locations';
 import { type PassMode, runD1Pass } from './d1-pass';
-import { type AesKeyEnv, type AesKeyRole, roleKeys } from './keys';
+import { type AesKeyEnv, type AesKeyRole, roleKeys, ROTATABLE_AES_KEY_NAMES } from './keys';
 import { LIBRARY_LOCATION, runLibraryPass } from './library-pass';
 
 export interface KeyRotationEnv
@@ -63,7 +63,8 @@ function rotatingRoles(env: KeyRotationEnv): Record<AesKeyRole, boolean> {
 }
 
 /**
- * Active reverse-tunnel leases created before `before` (the switch to the new key): their frp
+ * Active reverse-tunnel leases created before `before` (the switch to the new key plus the request
+ * drain, set by the CLI, rotate-steps-data.ts recordLegacyTunnelLeases): their frp
  * credential is an HMAC under the old ENCRYPTION_KEY (selfhost/reverse-tunnel/config.ts), so whoever
  * holds that key and the lease ids can still log in to frps as those nodes until they are
  * replaced. Reported, not fixed: re-credentialing a live node needs the VM agent. Null when
@@ -128,18 +129,29 @@ function parseObject(body: string): Record<string, unknown> | null {
 /**
  * How long a value encrypted under the old key can live where no pass reaches it, from this
  * Worker's own resolved settings: a pending ACP interaction's details (InteractionStore DO) live
- * until its deadline plus the sensitive purge, a bootstrap token (KV) until its TTL. The CLI waits
- * at least this long before it retires the old key (rotate-steps-data.ts, review V1 L4).
+ * until its deadline (the maximum plus, for a URL, the deadline margin) and the sensitive purge, a
+ * bootstrap token (KV) until its TTL. The CLI waits at least this long before it retires the old
+ * key (rotate-steps-data.ts, review V1 L4).
  */
 export function unreachableValueLifetimeMs(env: KeyRotationEnv): number {
   const acp = getAcpInteractionConfig(env);
-  return Math.max(acp.maxDeadlineMs + acp.sensitivePurgeMs, getBootstrapTTL(env) * 1000);
+  // A URL interaction may be created with a deadline up to the margin past the maximum
+  // (interaction-store.ts validateCreateInput), so its details live that much longer.
+  return Math.max(
+    acp.maxDeadlineMs + acp.deadlineMarginMs + acp.sensitivePurgeMs,
+    getBootstrapTTL(env) * 1000
+  );
 }
 
 async function statusReply(env: KeyRotationEnv, input: Record<string, unknown>) {
   return reply(200, {
     unreachableValueLifetimeMs: unreachableValueLifetimeMs(env),
     roles: rotatingRoles(env),
+    // The deployed `<NAME>_PREVIOUS` values: proof the transitional bundle is live even when no
+    // stored role resolves through the rotating key (all purpose keys overridden).
+    previousKeys: ROTATABLE_AES_KEY_NAMES.filter(
+      (name) => typeof (env as unknown as Record<string, unknown>)[`${name}_PREVIOUS`] === 'string'
+    ),
     betterAuth: betterAuthRotating(env),
     locations: [...D1_LOCATIONS.map((l) => l.name), LIBRARY_LOCATION, BETTER_AUTH_LOCATION],
     legacyTunnelLeases: await legacyTunnelLeases(

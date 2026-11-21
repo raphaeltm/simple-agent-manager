@@ -73,7 +73,7 @@ Host headers are request metadata. They are not configuration. They can be usefu
 
 The code now routes those decisions through a `trusted-origins` helper instead of deriving backend URLs directly from request host values. Webhook credential-origin tests and WebSocket proxy tests were updated around that contract.
 
-This is one of those changes that feels defensive until you run a public multi-tenant service. Then it becomes table stakes. The edge should accept messy internet input. The internal control plane should operate from explicit configuration.
+This is one of those changes that feels defensive until you run a control plane on the public internet. Then it becomes table stakes. The edge should accept messy internet input. The internal control plane should operate from explicit configuration.
 
 ## Bootstrap setup got fail-closed behavior
 

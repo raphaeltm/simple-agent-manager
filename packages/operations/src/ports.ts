@@ -17,8 +17,10 @@ import type {
   AcpInteractionSafeSummary,
   AcpInteractionState,
   AgentEffort,
+  AgentMailboxMessage,
   AgentProfile,
   CredentialLimitsResponse,
+  InboxConversation,
   InboxItemContext,
   InboxLink,
   InstallationLifecycleLatency,
@@ -26,6 +28,7 @@ import type {
   NotificationType,
   SessionStateSnapshot,
   SubmitTaskResponse,
+  TaskAttachment,
   TaskStatus,
   TriggerStatus,
   UserAiBudgetSettings,
@@ -127,11 +130,26 @@ export interface SessionWriter {
   ownerUserId: string;
 }
 
+/** Trusted server context; never accepted from a chat request body. */
+export interface InboxChatDelivery {
+  ref: string;
+  title: string;
+  deliveryId: string;
+  /** Hash of the person's exact content and attachments, used only to reconcile ambiguous sends. */
+  fingerprint?: string;
+  /** Persisted with the prompt so its delivery owns a retryable permission rejection. */
+  permission?: { interactionId: string; answer: AcpInteractionBrowserAnswer };
+  afterAcceptance?: () => Promise<void>;
+  /** Runs once after send validation, before accepting the durable message. */
+  beforeDelivery: () => Promise<void>;
+}
+
 /** A chat send that has passed authorization; `send` delivers with that authorization. */
 export interface AuthorizedChatSend {
   send(
-    body: { content: string },
-    assertEffectAllowed?: () => Promise<void>
+    body: { content: string; attachments?: TaskAttachment[] },
+    assertEffectAllowed?: () => Promise<void>,
+    inboxReply?: InboxChatDelivery
   ): Promise<Record<string, unknown>>;
 }
 
@@ -211,6 +229,7 @@ export interface OperationConnectorPort {
 export interface OperationChatPort {
   /** Authorizes a send now; the returned `send` delivers under that authorization. */
   authorizeSend(userId: string, projectId: string, sessionId: string): Promise<AuthorizedChatSend>;
+  getInboxReplyDelivery(projectId: string, deliveryId: string): Promise<AgentMailboxMessage | null>;
   /** Validates message content before a receipt is reserved; returns the trimmed content. */
   validateSendContent(body: { content?: string }): string;
   stop(
@@ -433,6 +452,8 @@ export interface InboxAttentionMarker {
   createdAt: number;
   expiresAt: number | null;
   resolvedAt: number | null;
+  /** Archived from the inbox while still pending in its chat (ACP interactions). */
+  inboxArchivedAt: number | null;
   topic: string | null;
   /** The reader may read the chat (owner or an active grantee). */
   canRead: boolean;
@@ -458,7 +479,8 @@ export interface InboxAskNoticeRow {
   assigneeUserId: string | null;
 }
 
-export type InboxAskNoticeOutcome = 'answered' | 'done' | 'archived' | 'expired';
+/** What closed an ask the agent is told about. An archive tells the agent nothing (2026-11-17). */
+export type InboxAskNoticeOutcome = 'answered' | 'done' | 'expired';
 
 /**
  * The inbox's reach into other areas (`apps/api/src/services/inbox/`). Every answer and archive
@@ -480,7 +502,12 @@ export interface OperationInboxPort {
     sessionId: string;
     askedAt: number;
     userId: string;
-  }): Promise<InboxItemContext | null>;
+    /** When given, read only the canonical replies carrying this ref and item comments. */
+    inboxRef?: string;
+    replyCursor?: string;
+    responseCursor?: number;
+    includeContext?: boolean;
+  }): Promise<(InboxItemContext & { conversation?: InboxConversation }) | null>;
   /**
    * Resolve a question with reason `archived`; the agent is not told, and SAM's check-ins stay
    * off the chat until `hold.holdCheckinsUntil` or until the person writes in it.
@@ -492,6 +519,16 @@ export interface OperationInboxPort {
     markerId: string,
     hold: ArchiveCheckinHold
   ): Promise<{ agentNotified: boolean }>;
+  /**
+   * Remove a pending ACP interaction (permission, form, link) from the inbox. Nothing is
+   * answered: the agent is not told, and the interaction stays answerable in its chat.
+   */
+  archiveInteraction(
+    userId: string,
+    projectId: string,
+    sessionId: string,
+    markerId: string
+  ): Promise<void>;
   fulfilSecret(
     userId: string,
     projectId: string,
@@ -503,12 +540,16 @@ export interface OperationInboxPort {
     projectId: string,
     requestId: string
   ): Promise<{ agentNotified: boolean }>;
+  /** Close a pending secret request as declined without telling the agent. */
+  archiveSecret(userId: string, projectId: string, requestId: string): Promise<void>;
   decideApproval(
     userId: string,
     approvalId: string,
     decision: 'approve' | 'deny',
     note: string | null
   ): Promise<{ outcome: string; agentNotified: boolean }>;
+  /** Deny an Operations approval without telling the agent. */
+  archiveApproval(userId: string, approvalId: string): Promise<{ outcome: string }>;
   /** Authorizes waking the agent in a chat for this actor (`authorizeAgentWake`); throws when refused. */
   authorizeAnswerWake(projectId: string, sessionId: string, userId: string): Promise<void>;
   /**

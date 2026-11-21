@@ -1,7 +1,9 @@
-// @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 /* eslint-disable */
-// FILE SIZE EXCEPTION: vendored third-party code kept identical to upstream dgit (see ../UPSTREAM.md)
+// @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
+// FILE SIZE EXCEPTION: vendored dgit core with SAM resource bounds and static SQL identifiers (see ../UPSTREAM.md)
 import pako from "pako";
+import { inflate as inflateAll } from "./zlib";
+import { chargeGitWork, gitWorkLimits, readGitChunk } from "./budget";
 import { td, concat, toHex, Sha1 } from "./util";
 import { Sha1Dc, Sha1CollisionError } from "./sha1";
 import { ObjType, NUM_TYPE, objectHeader } from "./objects";
@@ -34,7 +36,7 @@ const RAW_CHUNK_CACHE = TIGHT_MEMORY ? 4 : 8;
  * base walk is iterative (not recursive) and separately cycle-checked via a
  * seen-set, so this bounds chain length rather than guarding stack depth.
  */
-const MAX_DELTA_DEPTH = 50000;
+
 /**
  * pako output-chunk size. The default (64 KiB) is large enough that V8 keeps
  * every inflate's backing store in its array-buffer arena, so streaming a pack
@@ -44,12 +46,6 @@ const MAX_DELTA_DEPTH = 50000;
  * size.
  */
 const INFLATE_CHUNK = 16 * 1024;
-const inflateAll = (data: Uint8Array): Uint8Array => {
-  const inf = new pako.Inflate({ chunkSize: INFLATE_CHUNK });
-  inf.push(data, true);
-  if (inf.err) throw new Error(`inflate failed: ${inf.msg}`);
-  return inf.result as Uint8Array;
-};
 
 export interface ObjRec {
   type: ObjType;
@@ -147,6 +143,8 @@ class PackReader {
   constructor(private load: (seq: number) => Promise<Uint8Array>, readonly size: number) {}
 
   private async ensure(): Promise<void> {
+    gitWorkLimits();
+    if (this.pos >= this.size) throw new Error("truncated pack entry");
     const want = Math.floor(this.pos / PACK_CHUNK);
     if (want !== this.seq) {
       this.chunk = await this.load(want);
@@ -262,9 +260,10 @@ export class PackStore {
   }
 
   wipe(): void {
-    for (const t of ["pack_meta", "pack_data", "pack_objects", "pack_pending"]) {
-      this.sql.exec(`DROP TABLE IF EXISTS ${t}`);
-    }
+    this.sql.exec("DROP TABLE IF EXISTS pack_meta");
+    this.sql.exec("DROP TABLE IF EXISTS pack_data");
+    this.sql.exec("DROP TABLE IF EXISTS pack_objects");
+    this.sql.exec("DROP TABLE IF EXISTS pack_pending");
     this.chunks.clear(); // pack ids restart from 1: cached rows would be stale
     this.backend.clear();
   }
@@ -296,6 +295,38 @@ export class PackStore {
     }
   }
 
+  /** SAM: ids of the stored packs. */
+  packIds(): number[] {
+    return this.sql
+      .exec<{ pack_id: number }>("SELECT pack_id FROM pack_meta ORDER BY pack_id")
+      .toArray()
+      .map((r) => r.pack_id);
+  }
+
+  /** SAM: the oids one pack stores. */
+  packObjectOids(packId: number): string[] {
+    return this.sql
+      .exec<{ oid: string }>("SELECT oid FROM pack_objects WHERE pack_id = ?", packId)
+      .toArray()
+      .map((r) => r.oid);
+  }
+
+  /**
+   * SAM: drop one whole pack. GC calls this only for a pack it proved holds no reachable
+   * object and no delta base, so no object is inflated to reclaim it.
+   */
+  async dropPack(packId: number): Promise<void> {
+    const r2 = this.backendOf(packId) === "r2";
+    this.sql.exec("DELETE FROM pack_meta WHERE pack_id = ?", packId);
+    this.sql.exec("DELETE FROM pack_data WHERE pack_id = ?", packId);
+    this.sql.exec("DELETE FROM pack_objects WHERE pack_id = ?", packId);
+    this.sql.exec("DELETE FROM pack_pending WHERE pack_id = ?", packId);
+    // the pack id can be handed out again by the next ingest: drop cached rows for it
+    this.chunks.clear();
+    this.backend.clear();
+    if (r2) await this.deleteR2Packs([packId]);
+  }
+
   countObjects(): number {
     return this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM pack_objects").one().n;
   }
@@ -316,6 +347,7 @@ export class PackStore {
   }
 
   lookup(oid: string): PackedEntry | null {
+    gitWorkLimits();
     const rows = this.sql
       .exec<{
         pack_id: number; offset: number; data_off: number; data_len: number;
@@ -361,6 +393,7 @@ export class PackStore {
    * runtime's result-set size cap (celld materializes blob rows as JSON).
    */
   async readRaw(packId: number, off: number, len: number): Promise<Uint8Array> {
+    gitWorkLimits();
     const first = Math.floor(off / PACK_CHUNK);
     const last = Math.floor((off + len - 1) / PACK_CHUNK);
     const out = new Uint8Array(len);
@@ -426,6 +459,7 @@ export class PackStore {
    * a time. This caps both stack depth and peak memory regardless of input.
    */
   async getObject(oid: string, cache: ObjCache): Promise<ObjRec | null> {
+    gitWorkLimits();
     const cached = cache.get(oid);
     if (cached) return cached;
     const first = this.lookup(oid);
@@ -445,7 +479,7 @@ export class PackStore {
         base = { type: cur.type, data: inflateAll(await this.readRaw(cur.packId, cur.dataOff, cur.dataLen)) };
         break;
       }
-      if (chain.length >= MAX_DELTA_DEPTH) throw new Error(`delta chain exceeds depth ${MAX_DELTA_DEPTH} at ${oid}`);
+      if (chain.length >= gitWorkLimits().maxDeltaDepth) throw new Error(`delta chain exceeds depth ${gitWorkLimits().maxDeltaDepth} at ${oid}`);
       chain.push(cur);
       const cachedBase = cache.get(cur.baseOid);
       if (cachedBase) { base = cachedBase; break; }
@@ -479,6 +513,39 @@ export class PackStore {
    * bases hot — so the straggler pass afterwards is nearly empty. Memory
    * stays bounded regardless of pack size.
    */
+  /** Reclaim incomplete packs without requiring another admitted upload. Caller owns the write slot. */
+  async cleanupOrphans(): Promise<void> {
+    // a failed or interrupted ingest leaves rows (or an R2 raw object) without a
+    // pack_meta entry; reclaim that space before starting (pack_meta is only
+    // written on success). Union across every per-pack table so an R2 ingest that
+    // died mid-index — whose bytes are in R2, not pack_data — is caught too.
+    const orphans = this.sql
+      .exec<{ pack_id: number }>(
+        `SELECT pack_id FROM (
+           SELECT DISTINCT pack_id FROM pack_data
+           UNION SELECT DISTINCT pack_id FROM pack_objects
+           UNION SELECT DISTINCT pack_id FROM pack_pending
+         ) WHERE pack_id NOT IN (SELECT pack_id FROM pack_meta)`
+      )
+      .toArray();
+    for (const o of orphans) {
+      this.sql.exec("DELETE FROM pack_data WHERE pack_id = ?", o.pack_id);
+      this.sql.exec("DELETE FROM pack_objects WHERE pack_id = ?", o.pack_id);
+      this.sql.exec("DELETE FROM pack_pending WHERE pack_id = ?", o.pack_id);
+      // an interrupted R2 ingest may have left a completed raw object; delete it
+      if (this.r2) {
+        try {
+          await this.r2.bucket.delete(this.rawKey(o.pack_id));
+        } catch {
+          // best effort: the packId is reused next and its raw key overwritten
+        }
+      }
+    }
+    // the reclaimed pack id is about to be handed out again: drop anything the
+    // chunk LRU still holds for it (and for anything else — it is only a cache)
+    if (orphans.length) this.chunks.clear();
+  }
+
   async ingest(
     firstBytes: Uint8Array,
     reader: ReadableStreamDefaultReader<Uint8Array> | null,
@@ -501,35 +568,7 @@ export class PackStore {
     }
   ): Promise<{ packId: number; count: number }> {
     const cd = opts.collisionDetect ?? false;
-    // a failed or interrupted ingest leaves rows (or an R2 raw object) without a
-    // pack_meta entry; reclaim that space before starting (pack_meta is only
-    // written on success). Union across every per-pack table so an R2 ingest that
-    // died mid-index — whose bytes are in R2, not pack_data — is caught too.
-    const orphans = this.sql
-      .exec<{ pack_id: number }>(
-        `SELECT pack_id FROM (
-           SELECT DISTINCT pack_id FROM pack_data
-           UNION SELECT DISTINCT pack_id FROM pack_objects
-           UNION SELECT DISTINCT pack_id FROM pack_pending
-         ) WHERE pack_id NOT IN (SELECT pack_id FROM pack_meta)`
-      )
-      .toArray();
-    for (const o of orphans) {
-      for (const t of ["pack_data", "pack_objects", "pack_pending"]) {
-        this.sql.exec(`DELETE FROM ${t} WHERE pack_id = ?`, o.pack_id);
-      }
-      // an interrupted R2 ingest may have left a completed raw object; delete it
-      if (this.r2) {
-        try {
-          await this.r2.bucket.delete(this.rawKey(o.pack_id));
-        } catch {
-          // best effort: the packId is reused next and its raw key overwritten
-        }
-      }
-    }
-    // the reclaimed pack id is about to be handed out again: drop anything the
-    // chunk LRU still holds for it (and for anything else — it is only a cache)
-    if (orphans.length) this.chunks.clear();
+    await this.cleanupOrphans();
     const packId =
       (this.sql.exec<{ m: number | null }>("SELECT MAX(pack_id) AS m FROM pack_meta").one().m ?? 0) + 1;
     const started = Date.now();
@@ -616,7 +655,7 @@ export class PackStore {
     if (firstBytes.length) await feedSliced(firstBytes);
     if (reader) {
       for (;;) {
-        const { done, value } = await reader.read();
+        const { done, value } = await readGitChunk(reader);
         if (done) break;
         if (value?.length) await feedSliced(value);
       }
@@ -670,9 +709,9 @@ export class PackStore {
     let objBatchRows = 0;
     const flushObjects = () => {
       if (!objBatchRows) return;
-      const values = Array(objBatchRows).fill("(?,?,?,?,?,?,?,?,?)").join(",");
+      const placeholders = Array(objBatchRows).fill("(?,?,?,?,?,?,?,?,?)").join(",");
       this.sql.exec(
-        `INSERT OR IGNORE INTO pack_objects (oid, pack_id, offset, data_off, data_len, type, size, entry_size, base_oid) VALUES ${values}`,
+        `INSERT OR IGNORE INTO pack_objects (oid, pack_id, offset, data_off, data_len, type, size, entry_size, base_oid) VALUES ${placeholders}`,
         ...objBatch
       );
       objBatch = [];
@@ -711,6 +750,7 @@ export class PackStore {
 
     let pendingCount = 0;
     for (let i = 0; i < count; i++) {
+      gitWorkLimits();
       const offset = r.pos;
       let byte = await r.byte();
       const type = (byte >> 4) & 7;
@@ -720,6 +760,9 @@ export class PackStore {
         byte = await r.byte();
         entrySize += (byte & 0x7f) * 2 ** shift;
         shift += 7;
+      }
+      if (!Number.isSafeInteger(entrySize) || entrySize < 0 || entrySize > gitWorkLimits().maxObjectBytes) {
+        throw new Error("git object exceeds inflated size limit");
       }
       let baseOid: string | null = null;
       let baseOffset: number | null = null;
@@ -753,6 +796,8 @@ export class PackStore {
       let inflated = 0;
       const inf = new pako.Inflate({ chunkSize: INFLATE_CHUNK });
       (inf as unknown as { onData: (c: Uint8Array) => void }).onData = (c: Uint8Array) => {
+        if (inflated + c.length > entrySize) throw new Error("entry size mismatch");
+        chargeGitWork(c.length);
         if (content) content.set(c, inflated);
         else if (isFull) (cd ? streamSha : streamShaPlain).update(c);
         inflated += c.length;

@@ -12,12 +12,17 @@ import {
   existsSync,
   fchmodSync,
   fstatSync,
+  fsyncSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
+  renameSync,
+  rmSync,
   statSync,
   writeSync,
 } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 
 import * as v from 'valibot';
 
@@ -63,6 +68,64 @@ export function writePrivateFile(path: string, content: string): void {
   }
 }
 
+/** Writes `content` to a new file (mode 0600, refusing an existing one) and fsyncs it. */
+function writeNewPrivateFileSynced(path: string, content: string): void {
+  const fd = openSync(path, 'wx', 0o600);
+  try {
+    fchmodSync(fd, 0o600);
+    writeSync(fd, content);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function fsyncDir(dir: string): void {
+  const fd = openSync(dir, 'r');
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Replaces `path` with `content` so a crash leaves either the old or the new file, never a torn
+ * one, and a concurrent reader (docker compose reading an env_file) sees one of them whole: a
+ * 0600 temp file in the same directory is written and fsynced, then renamed over `path`. An
+ * existing `path` owned by another user is refused first. With `backup`, an existing file's
+ * content is first kept as `<path>.bak` (0600, same way).
+ */
+export function replacePrivateFile(
+  path: string,
+  content: string,
+  options: { backup?: boolean } = {}
+): void {
+  const current = lstatSync(path, { throwIfNoEntry: false });
+  const uid = process.getuid?.();
+  if (current && uid !== undefined && current.uid !== uid) {
+    throw new Error(`${path} is owned by uid ${current.uid}, not the deploying user (${uid})`);
+  }
+  const dir = dirname(path);
+  const temp = join(dir, `.${basename(path)}.${process.pid}.tmp`);
+  const stage = (target: string, text: string): void => {
+    rmSync(temp, { force: true });
+    try {
+      writeNewPrivateFileSynced(temp, text);
+      renameSync(temp, target);
+    } catch (error) {
+      rmSync(temp, { force: true });
+      throw error;
+    }
+  };
+  if (options.backup && existsSync(path)) {
+    assertPrivateFile(path);
+    stage(`${path}.bak`, readFileSync(path, 'utf8'));
+  }
+  stage(path, content);
+  fsyncDir(dir);
+}
+
 /** Creates `dir` (mode 0700) or tightens an existing one, and checks it belongs to this user. */
 export function ensurePrivateDir(dir: string): void {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -92,6 +155,68 @@ function closingQuoteIndex(body: string): number {
   return -1;
 }
 
+const DOTENV_NAME = /^[A-Za-z_]\w*$/;
+/** Characters `.` does not match: the old single-regex parser refused a line containing one. */
+const LINE_BREAK = /[\n\r\u2028\u2029]/;
+const LEADING_SPACE = /^\s/;
+
+/**
+ * Splits `[export ]NAME = rest` into the name and the value text, or returns null. Plain string
+ * parsing: a single regex with `\s*=\s*(.*)` backtracks super-linearly on adversarial input.
+ */
+function splitAssignment(line: string): { name: string; rest: string } | null {
+  const eq = line.indexOf('=');
+  if (eq === -1) return null;
+  const rest = line.slice(eq + 1).trimStart();
+  if (LINE_BREAK.test(rest)) return null;
+  const lhs = line.slice(0, eq).trimEnd();
+  if (DOTENV_NAME.test(lhs)) return { name: lhs, rest };
+  const afterExport = lhs.slice('export'.length);
+  if (lhs.startsWith('export') && LEADING_SPACE.test(afterExport)) {
+    const name = afterExport.trimStart();
+    if (DOTENV_NAME.test(name)) return { name, rest };
+  }
+  return null;
+}
+
+/**
+ * Reads a double-quoted value that opens on `lines[start]` and may span lines (a PEM pasted
+ * as-is). Returns the value and the index of the line holding the closing quote.
+ */
+function readDoubleQuoted(
+  lines: readonly string[],
+  start: number,
+  rest: string,
+  source: string
+): { value: string; lastLine: number } {
+  const lineNo = start + 1;
+  let last = start;
+  let body = rest.slice(1);
+  let end = closingQuoteIndex(body);
+  while (end === -1) {
+    last += 1;
+    if (last >= lines.length) throw new Error(`${source}:${lineNo}: unterminated double quote`);
+    body += `\n${lines[last]}`;
+    end = closingQuoteIndex(body);
+  }
+  const trailing = body.slice(end + 1).trim();
+  if (trailing !== '' && !trailing.startsWith('#')) {
+    throw new Error(`${source}:${lineNo}: unexpected text after closing quote`);
+  }
+  return { value: unescapeDoubleQuoted(body.slice(0, end)), lastLine: last };
+}
+
+/** Reads a `'literal'` or unquoted value; an unquoted value ends at a ` #` comment. */
+function readSingleLineValue(rest: string, lineNo: number, source: string): string {
+  if (rest.startsWith("'")) {
+    const end = rest.indexOf("'", 1);
+    if (end === -1) throw new Error(`${source}:${lineNo}: unterminated single quote`);
+    return rest.slice(1, end);
+  }
+  const hash = rest.search(/\s#/);
+  return (hash === -1 ? rest : rest.slice(0, hash)).trim();
+}
+
 /**
  * Parses a dotenv file: `NAME=value`, `export NAME=value`, `#` comments, `'literal'`, and
  * `"double"` values with `\n` escapes that may also span lines (multi-line PEM keys).
@@ -100,40 +225,21 @@ function closingQuoteIndex(body: string): number {
 export function parseDotenv(text: string, source: string): Record<string, string> {
   const values: Record<string, string> = {};
   const lines = text.split(/\r?\n/);
-  for (let i = 0; i < lines.length; i += 1) {
+  let i = 0;
+  while (i < lines.length) {
     const line = (lines[i] ?? '').trim();
-    if (line === '' || line.startsWith('#')) continue;
-    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
-    if (!match) throw new Error(`${source}:${i + 1}: expected NAME=value`);
-    const [, name = '', matchedRest = ''] = match;
-    let rest = matchedRest;
-    let value: string;
-    if (rest.startsWith('"')) {
-      const lineNo = i + 1;
-      let body = rest.slice(1);
-      let end = closingQuoteIndex(body);
-      // A double-quoted value may span lines (a PEM pasted as-is).
-      while (end === -1) {
-        i += 1;
-        if (i >= lines.length) throw new Error(`${source}:${lineNo}: unterminated double quote`);
-        body += `\n${lines[i]}`;
-        end = closingQuoteIndex(body);
+    if (line !== '' && !line.startsWith('#')) {
+      const assignment = splitAssignment(line);
+      if (!assignment) throw new Error(`${source}:${i + 1}: expected NAME=value`);
+      if (assignment.rest.startsWith('"')) {
+        const quoted = readDoubleQuoted(lines, i, assignment.rest, source);
+        values[assignment.name] = quoted.value;
+        i = quoted.lastLine;
+      } else {
+        values[assignment.name] = readSingleLineValue(assignment.rest, i + 1, source);
       }
-      const trailing = body.slice(end + 1).trim();
-      if (trailing !== '' && !trailing.startsWith('#')) {
-        throw new Error(`${source}:${lineNo}: unexpected text after closing quote`);
-      }
-      value = unescapeDoubleQuoted(body.slice(0, end));
-    } else if (rest.startsWith("'")) {
-      const end = rest.indexOf("'", 1);
-      if (end === -1) throw new Error(`${source}:${i + 1}: unterminated single quote`);
-      value = rest.slice(1, end);
-    } else {
-      const hash = rest.search(/\s#/);
-      if (hash !== -1) rest = rest.slice(0, hash);
-      value = rest.trim();
     }
-    values[name] = value;
+    i += 1;
   }
   return values;
 }

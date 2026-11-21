@@ -17,13 +17,34 @@ export {
   releaseIncidentDispatch,
   reserveIncidentDispatch,
 } from './dispatch';
+export {
+  explainUndispatchableIncidents,
+  INCIDENT_DISPATCH_BLOCK_REASONS,
+  type IncidentDispatchBlockReason,
+  incidentDispatchBlockReasonSql,
+  type IncidentDispatchBreakdown,
+} from './dispatch-diagnostics';
+export {
+  IDEA_RELEASED_MARKER,
+  ideaHasEngagement,
+  type IdeaWorkSnapshotReader,
+  loadOwnedIdeas,
+  PIPELINE_IDEA_TRIGGERED_BY,
+  pipelineOwnsIdeaSql,
+  readIdeaEngagement,
+  releaseEngagedIncidentIdeas,
+} from './idea-ownership';
+export { cancelOwnedIncidentIdea, updateOwnedIncidentIdea } from './idea-writes';
 export { expireStaleIncidents } from './lifecycle';
 export {
   buildIncidentBacklogSummary,
+  defaultIncidentReadContext,
   getIncidentDetail,
   hasDispatchablePendingIncidents,
+  type IncidentListSort,
   listDispatchableIncidentQueue,
   listIncidentQueue,
+  type ListIncidentQueueOptions,
 } from './queries';
 export {
   isActiveIncidentState,
@@ -36,8 +57,21 @@ export type {
   IncidentBacklogSummary,
   IncidentDetail,
   IncidentListItem,
+  IncidentReadContext,
   IncidentReopenCheckInput,
   IncidentReopenEvidence,
   UserReportIncidentInput,
 } from './types';
 export { markIncidentPending, upsertUserReportIncident } from './user-report';
+export {
+  evaluateSpike,
+  expireQuietWatchedIncidents,
+  loadWatchConfig,
+  parseHourlyCounts,
+  recentOccurrenceCount,
+  recordWatchedRecurrence,
+  type WatchConfig,
+  watchConfigFromSettings,
+  type WatchedRecurrenceOutcome,
+  watchIncident,
+} from './watching';

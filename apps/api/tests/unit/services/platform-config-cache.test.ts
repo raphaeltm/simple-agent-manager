@@ -297,6 +297,8 @@ describe('account-denial gates are not affected by the platform config cache', (
   it('re-reads the signup-approval gate from D1 on every call, even with platform config cached', async () => {
     const { env, counter } = createEnv();
 
+    // Approval is on by default; start from an admin having turned it off.
+    await setSignupApprovalConfig(env, { requireApproval: false, updatedBy: 'admin-user' });
     // Warm the platform config cache first.
     await createAuth(env);
     expect(await isSignupApprovalRequired(env)).toBe(false);

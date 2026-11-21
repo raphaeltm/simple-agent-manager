@@ -31,17 +31,23 @@ import {
   resolveTunnelSettings,
 } from '../../../../../scripts/selfhost/box-settings';
 import { KEY_CHOICE_FORMAT, writeKeyChoice } from '../../../../../scripts/selfhost/key-choice';
+import { generateAgentSigningKey } from '../../../../../scripts/selfhost/key-seal';
 import {
+  bundleStoreFor,
   ensureKeyServiceFiles,
-  generateAgentSigningKey,
   keyServiceSettings,
   listBundles,
 } from '../../../../../scripts/selfhost/key-service';
-import { completePlatformKeys } from '../../../../../scripts/selfhost/platform-keys';
+import { completeSealedPlatformKeys } from '../../../../../scripts/selfhost/platform-keys';
 import type { RotateDeps } from '../../../../../scripts/selfhost/rotate-apply';
 import { formatRotationStatus } from '../../../../../scripts/selfhost/rotate-report';
-import { runRotate } from '../../../../../scripts/selfhost/rotate-run';
-import { openRotationStore, readJournal } from '../../../../../scripts/selfhost/rotate-store';
+import { drainMinutes, runRotate } from '../../../../../scripts/selfhost/rotate-run';
+import {
+  openRotationStore,
+  readJournal,
+  rotationDir,
+  writeJournal,
+} from '../../../../../scripts/selfhost/rotate-store';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import {
@@ -57,11 +63,21 @@ import { previousKeyPairs } from '../../../src/selfhost/key-rotation/keys';
 import { isAcceptedGatewaySecret } from '../../../src/selfhost/reverse-tunnel/config';
 import { getDecryptedAgentKey } from '../../../src/services/agent-key-resolution';
 import { decryptWithKeyOnly, encrypt } from '../../../src/services/encryption';
-import { setPreviousEncryptionKeys } from '../../../src/services/encryption-key-fallback';
+import {
+  enableSelfHostRotationScope,
+  resetSelfHostRotationScopeForTests,
+  setPreviousEncryptionKeys,
+} from '../../../src/services/encryption-key-fallback';
 import { signNodeCallbackToken } from '../../../src/services/jwt';
 import { getJWKS, verifyCallbackToken } from '../../../src/services/jwt-verify';
 import { ConditionalR2 } from '../../helpers/conditional-r2';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+
+// These tests model a self-hosted box: the celld wrapper turns the rotation scope on
+// (selfhost/runtime-secrets.ts registerRotationKeys). Cloudflare, where it stays off, is covered
+// by tests/unit/services/rotation-scope-cloudflare.test.ts.
+beforeEach(() => enableSelfHostRotationScope());
+afterEach(() => resetSelfHostRotationScopeForTests());
 
 const ALL_TABLES = Object.values(schema).filter((t): t is SQLiteTable => is(t, SQLiteTable));
 const BOX = { SAM_DOMAIN: 'example.com', CELLD_BUCKET: 's3://fleet/celld' };
@@ -76,6 +92,7 @@ let healthy: () => boolean;
 let restarts: string[];
 let controlHook: ((body: Record<string, unknown>) => Promise<void>) | null;
 let logs: string[];
+let sleeps: number[] = [];
 /** Worker settings beyond the bundle (vars a deploy would set). */
 let workerVars: Record<string, string>;
 
@@ -94,6 +111,10 @@ function deps(): RotateDeps {
   return {
     log: (line) => logs.push(line),
     now: () => clock,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      clock += ms;
+    },
     backup: () => join(stateDir, 'backup-marker'),
     deploy: async () => {
       deployed = await head();
@@ -166,7 +187,10 @@ beforeEach(async () => {
   // The lease table exists only on a self-host box (self-host migration, not the shared schema).
   sqlite.exec(
     readFileSync(
-      new URL('../../../src/selfhost/migrations/0255_node_reverse_tunnel_leases.sql', import.meta.url),
+      new URL(
+        '../../../src/selfhost/migrations/0255_node_reverse_tunnel_leases.sql',
+        import.meta.url
+      ),
       'utf8'
     )
   );
@@ -179,6 +203,7 @@ beforeEach(async () => {
   restarts = [];
   controlHook = null;
   logs = [];
+  sleeps = [];
   workerVars = {};
   writeKeyChoice(stateDir, {
     format: KEY_CHOICE_FORMAT,
@@ -189,17 +214,15 @@ beforeEach(async () => {
     chosenAt: new Date(clock).toISOString(),
   });
   const settings = keyServiceSettings({ SAM_KEY_PROVIDER: 'file' }, stateDir)!;
-  ensureKeyServiceFiles(settings);
+  await ensureKeyServiceFiles(settings);
   const secrets = {
-    ...completePlatformKeys({}).keys,
+    ...completeSealedPlatformKeys(stateDir, {}, 'test', 'init').keys,
     SAM_KEY_AGENT_SIGNING_KEY: generateAgentSigningKey(),
   };
   const bundle = await sealSecrets(secrets, createKeyProvider(settings.hostEnv), {
     installationId: secrets.SAM_INSTALLATION_ID,
   });
-  writeFileSync(join(settings.bundleDir, `${bundle.bundleId}.json`), JSON.stringify(bundle), {
-    mode: 0o600,
-  });
+  await settings.bundles.write(bundle);
   writeFileSync(
     join(stateDir, 'gateway.env'),
     renderGatewayEnv(secrets.REVERSE_TUNNEL_GATEWAY_SECRET, resolveTunnelSettings({})),
@@ -218,7 +241,7 @@ afterEach(() => {
 
 describe('rotate --dry-run', () => {
   it('prints the plan and the user impact per key, and changes nothing', async () => {
-    const before = listBundles(join(stateDir, 'key-agent', 'bundles')).map((b) => b.bundleId);
+    const before = (await listBundles(bundleStoreFor(stateDir))).map((b) => b.bundleId);
     expect(await runRotate(input({ all: true, dryRun: true }), deps())).toBeNull();
     const text = logs.join('\n');
     for (const name of [
@@ -233,9 +256,7 @@ describe('rotate --dry-run', () => {
     expect(text).toContain('users notice:');
     expect(text).toContain('GitHub App secret and private key');
     expect(readJournal(stateDir)).toBeNull();
-    expect(listBundles(join(stateDir, 'key-agent', 'bundles')).map((b) => b.bundleId)).toEqual(
-      before
-    );
+    expect((await listBundles(bundleStoreFor(stateDir))).map((b) => b.bundleId)).toEqual(before);
   });
 
   it('creates nothing on disk, not even the rotation directory (box round R9/R11)', async () => {
@@ -255,15 +276,13 @@ describe('rotate --dry-run', () => {
     healthy = () => !logs.some((l) => l.startsWith('reseal:'));
     await expect(runRotate(input({ names: ['vapid-keys'] }), deps())).rejects.toThrow();
     const before = JSON.stringify(readJournal(stateDir));
-    const bundles = listBundles(join(stateDir, 'key-agent', 'bundles')).map((b) => b.bundleId);
+    const bundles = (await listBundles(bundleStoreFor(stateDir))).map((b) => b.bundleId);
     healthy = () => true;
     await expect(runRotate(input({ resume: true, dryRun: true }), deps())).rejects.toThrow(
       /--dry-run previews a new rotation/
     );
     expect(JSON.stringify(readJournal(stateDir))).toBe(before);
-    expect(listBundles(join(stateDir, 'key-agent', 'bundles')).map((b) => b.bundleId)).toEqual(
-      bundles
-    );
+    expect((await listBundles(bundleStoreFor(stateDir))).map((b) => b.bundleId)).toEqual(bundles);
     // Control: the real resume still finishes it.
     await runRotate(input({ resume: true }), deps());
     expect(readJournal(stateDir)).toBeNull();
@@ -277,11 +296,26 @@ describe('rotate --dry-run', () => {
     expect(text).not.toContain('after the 0 h overlap');
     logs = [];
     await runRotate(input({ names: ['jwt-keys'], dryRun: true }), deps());
-    expect(logs.join('\n')).toContain('after the 13 h overlap');
+    // 90% of the default 24 h callback-token lifetime, plus 1 h.
+    expect(logs.join('\n')).toContain('after the 23 h overlap');
+  });
+
+  it('derives the JWT overlap from the deployed callback-token lifetime (Codex P1)', async () => {
+    const current = await store().head();
+    const bundle = await store().seal({
+      ...current.secrets,
+      CALLBACK_TOKEN_EXPIRY_MS: String(48 * HOUR),
+    });
+    await store().write(bundle);
+    await runRotate(input({ names: ['jwt-keys'] }), deps());
+    // A 48 h token renewed as late as 90% of its life: 43.2 h, rounded up, plus 1 h.
+    expect(readJournal(stateDir)?.options?.jwtOverlapHours).toBe(45);
+    const step = readJournal(stateDir)?.steps['jwt-keys'];
+    expect(Date.parse(step?.waitUntil ?? '') - clock).toBe(45 * HOUR);
   });
 
   it('names the bundles the run will remove (the box keeps the newest 3)', async () => {
-    const existing = listBundles(join(stateDir, 'key-agent', 'bundles')).map((b) => b.bundleId);
+    const existing = (await listBundles(bundleStoreFor(stateDir))).map((b) => b.bundleId);
     await runRotate(input({ all: true, dryRun: true }), deps());
     const text = logs.join('\n');
     expect(text).toMatch(/keeps only the newest 3/);
@@ -352,6 +386,15 @@ describe('rotate encryption-key', () => {
       )
     ).toBe('sk-agent');
 
+    // A lease request that started on the old deployment commits during the drain (Codex P1).
+    const switchedAt = Date.parse(readJournal(stateDir)!.steps['encryption-key']!.switchedAt!);
+    const inDrain = new Date(switchedAt + 60_000).toISOString();
+    sqlite
+      .prepare(
+        `INSERT INTO node_reverse_tunnel_leases (id, node_id, user_id, runtime_incarnation_id, port, credential_hash, status, created_at, updated_at)
+         VALUES ('lease-drain', 'n-drain', 'u1', 'inc', 20002, 'h', 'active', ?, ?)`
+      )
+      .run(inDrain, inDrain);
     // Too early: nothing changes.
     await runRotate(input({ resume: true }), deps());
     expect((await head()).ENCRYPTION_KEY_PREVIOUS).toBe(old);
@@ -374,7 +417,9 @@ describe('rotate encryption-key', () => {
     expect(credential('c-broken').c).toBe(btoa('z'.repeat(32)));
     expect(logs.join('\n')).toContain('credentials/c-broken.encrypted_token');
     // The node whose tunnel credential is still derived from the old key is named, not hidden.
-    expect(logs.join('\n')).toContain('1 reverse-tunnel node(s) created before the switch');
+    expect(logs.join('\n')).toContain(
+      '2 reverse-tunnel node(s) created before the switch or during its drain'
+    );
     // The old key is still in the sealed snapshot until the operator deletes it.
     const journalDir = join(stateDir, 'key-agent', 'rotation');
     const id = readFileSync(join(journalDir, readdir(journalDir)[0]!, 'journal.json'), 'utf8');
@@ -406,6 +451,41 @@ describe('rotate encryption-key', () => {
     }
   });
 
+  it('resumes an interrupted verify pass of the recorded round instead of starting a new round (Codex P2)', async () => {
+    const old = deployed.ENCRYPTION_KEY!;
+    for (let i = 0; i < 3; i += 1) await seedCredential(`c-${i}`, `secret-${i}`, old);
+    let migratedD1 = false;
+    let thrown = false;
+    controlHook = async (body) => {
+      if (body.target !== 'd1') return;
+      if (body.mode === 'migrate') migratedD1 = true;
+      // The first verify page after round 1's migrate: the box stops mid-verify.
+      if (body.mode === 'verify' && migratedD1 && !thrown) {
+        thrown = true;
+        throw new Error('box lost power during verify');
+      }
+    };
+    await expect(runRotate(input({ names: ['encryption-key'] }), deps())).rejects.toThrow(
+      'box lost power during verify'
+    );
+    const stopped = readJournal(stateDir)?.steps['encryption-key'];
+    expect(stopped?.migrateRounds).toBe(1);
+    expect(stopped?.pass).toContain('verify:1');
+    controlHook = null;
+    logs = [];
+    await runRotate(input({ resume: true }), deps());
+    // Round 1's verify finished; no extra migrate round was started and nothing rolled back.
+    expect(logs.some((line) => line.includes('round 2'))).toBe(false);
+    expect(logs.some((line) => line.includes('FAILED'))).toBe(false);
+    expect(readJournal(stateDir)?.steps['encryption-key']?.phase).toBe('waiting');
+    const current = (await head()).ENCRYPTION_KEY!;
+    for (let i = 0; i < 3; i += 1) {
+      expect(
+        await decryptWithKeyOnly(credential(`c-${i}`).c, credential(`c-${i}`).iv, current)
+      ).toBe(`secret-${i}`);
+    }
+  });
+
   it('migrates a value written under the old key after verification before it retires the old key', async () => {
     const old = deployed.ENCRYPTION_KEY!;
     await seedCredential('c-agent', 'sk-agent', old);
@@ -418,6 +498,39 @@ describe('rotate encryption-key', () => {
     expect((await head()).ENCRYPTION_KEY_PREVIOUS).toBeUndefined();
     expect(await decryptWithKeyOnly(credential('c-late').c, credential('c-late').iv, current)).toBe(
       'late-secret'
+    );
+  });
+
+  it('drains a rollback from its reverse deployment, not from the forward switch (Codex P1)', async () => {
+    const old = deployed.ENCRYPTION_KEY!;
+    await seedCredential('c-agent', 'sk-agent', old);
+    let reverse = false;
+    controlHook = async (body) => {
+      if (
+        !reverse &&
+        body.mode === 'verify' &&
+        readJournal(stateDir)?.steps['encryption-key']?.reverse
+      )
+        reverse = true;
+      if (!reverse && body.mode === 'verify') {
+        await seedCredential('c-agent', 'sk-agent', old);
+        clock += 10 * 60_000; // the forward migration outlasts the drain
+      }
+    };
+    // The rollback keeps the new value readable for the drain plus the stored-value lifetime.
+    await runRotate(input({ names: ['encryption-key'] }), deps());
+    expect(readJournal(stateDir)?.steps['encryption-key']?.reverse).toBe(true);
+    expect(readJournal(stateDir)?.steps['encryption-key']?.phase).toBe('waiting');
+    controlHook = null;
+    clock += 6 * HOUR;
+    await expect(runRotate(input({ resume: true }), deps())).rejects.toThrow(/rolled back/);
+    const step = readJournal(stateDir)?.steps['encryption-key'];
+    expect(step?.phase).toBe('rolled-back');
+    expect(Date.parse(step?.waitUntil ?? '') - Date.parse(step?.reverseSwitchedAt ?? '')).toBe(
+      (drainMinutes({}) + 5 * 60 + 16) * 60_000
+    );
+    expect(Date.parse(step?.reverseSwitchedAt ?? '')).toBeGreaterThan(
+      Date.parse(step?.switchedAt ?? '') + drainMinutes({}) * 60_000
     );
   });
 
@@ -435,9 +548,13 @@ describe('rotate encryption-key', () => {
         reverse = true;
       if (!reverse && body.mode === 'verify') await seedCredential('c-agent', 'sk-agent', old);
     };
-    await expect(runRotate(input({ names: ['encryption-key'] }), deps())).rejects.toThrow(
-      /rolled back/
-    );
+    // The rollback keeps the new value readable for the drain plus the stored-value lifetime.
+    await runRotate(input({ names: ['encryption-key'] }), deps());
+    expect(readJournal(stateDir)?.steps['encryption-key']?.reverse).toBe(true);
+    expect(readJournal(stateDir)?.steps['encryption-key']?.phase).toBe('waiting');
+    controlHook = null;
+    clock += 6 * HOUR;
+    await expect(runRotate(input({ resume: true }), deps())).rejects.toThrow(/rolled back/);
     const after = await head();
     expect(readJournal(stateDir)?.steps['encryption-key']?.phase).toBe('rolled-back');
     expect(after.ENCRYPTION_KEY).toBe(old);
@@ -460,9 +577,9 @@ describe('rotate encryption-key', () => {
 
 describe('rotate: which sealed bundles it removed', () => {
   it('lists the pre-rotation bundles the newest-3 rule removed in the summary and the journal', async () => {
-    const existing = listBundles(join(stateDir, 'key-agent', 'bundles')).map((b) => b.bundleId);
+    const existing = (await listBundles(bundleStoreFor(stateDir))).map((b) => b.bundleId);
     const journal = await runRotate(input({ names: ['vapid-keys', 'agent-signing-key'] }), deps());
-    const remaining = listBundles(join(stateDir, 'key-agent', 'bundles')).map((b) => b.bundleId);
+    const remaining = (await listBundles(bundleStoreFor(stateDir))).map((b) => b.bundleId);
     for (const id of existing) expect(remaining).not.toContain(id);
     expect(journal?.removedBundles).toEqual(expect.arrayContaining(existing));
     const text = logs.join('\n');
@@ -496,7 +613,7 @@ describe('rotate --all', () => {
     expect(journal.steps['jwt-keys']?.phase).toBe('waiting');
     expect(journal.steps['gateway-secret']?.phase).toBe('done');
 
-    clock += 14 * HOUR;
+    clock += 24 * HOUR; // past the default JWT overlap (23 h) and the encryption-key wait
     await runRotate(input({ resume: true }), deps());
     expect(readJournal(stateDir)).toBeNull();
     const after = await head();
@@ -557,9 +674,65 @@ describe('the rotation lock', () => {
     await runRotate(input({ names: ['preview-signing-key'] }), deps());
     expect(existsSync(join(lockDir, 'lock'))).toBe(false);
   });
+
+  it('takes over a stale lock only exclusively (Codex P2)', async () => {
+    const lockDir = join(stateDir, 'key-agent', 'rotation');
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(join(lockDir, 'lock'), '999999999'); // a crashed run
+    // Another run is in the middle of taking the same stale lock over.
+    writeFileSync(join(lockDir, 'lock.takeover'), '');
+    await expect(runRotate(input({ names: ['preview-signing-key'] }), deps())).rejects.toThrow(
+      /taking over a stale lock/
+    );
+    // Neither the stale lock nor the other run's takeover was touched.
+    expect(readFileSync(join(lockDir, 'lock'), 'utf8')).toBe('999999999');
+    expect(existsSync(join(lockDir, 'lock.takeover'))).toBe(true);
+  });
 });
 
 describe('rotate jwt-keys', () => {
+  it('does not retire the old key when a run stopped before the overlap deadline was recorded (Codex P1)', async () => {
+    clock = Date.now();
+    await runRotate(input({ names: ['jwt-keys'], jwtOverlapHours: 25 }), deps());
+    const journal = readJournal(stateDir)!;
+    const step = journal.steps['jwt-keys']!;
+    expect(step.phase).toBe('waiting');
+    const recorded = step.waitUntil;
+    // The state a stop leaves between the overlap deploy and the deadline save.
+    delete step.waitUntil;
+    writeJournal(stateDir, journal);
+    await runRotate(input({ resume: true }), deps());
+    // Still in the overlap: the previous key is kept and the deadline is recorded again.
+    expect((await head()).JWT_PUBLIC_KEY_PREVIOUS).toBeDefined();
+    expect(readJournal(stateDir)?.steps['jwt-keys']?.phase).toBe('waiting');
+    expect(readJournal(stateDir)?.steps['jwt-keys']?.waitUntil).toBe(recorded);
+  });
+
+  it('counts the overlap from the resume when a run died between sealing and deploying (Codex P1)', async () => {
+    clock = Date.now();
+    const oldKey = deployed.JWT_PUBLIC_KEY;
+    // The process dies inside the overlap deploy: the bundle is sealed and recorded, never deployed.
+    const dying = { ...deps(), deploy: () => new Promise<void>(() => {}) };
+    void runRotate(input({ names: ['jwt-keys'], jwtOverlapHours: 25 }), dying);
+    await vi.waitFor(() =>
+      expect(readJournal(stateDir)?.steps['jwt-keys']?.stagedFor).toBe('waiting')
+    );
+    const staged = await head();
+    rmSync(join(stateDir, 'key-agent', 'rotation', 'lock'), { force: true });
+
+    clock += 30 * HOUR; // offline past the deadline sealed into the staged bundle
+    await runRotate(input({ resume: true }), deps());
+    const after = await head();
+    const step = readJournal(stateDir)?.steps['jwt-keys'];
+    expect(step?.phase).toBe('waiting');
+    // The old key is still the accepted previous key, with the overlap counted from the resume.
+    expect(after.JWT_PUBLIC_KEY_PREVIOUS).toBe(oldKey);
+    expect(Date.parse(step!.waitUntil!)).toBe(clock + 25 * HOUR);
+    // The staged key pair was kept (it may already have signed tokens).
+    expect(after.JWT_PUBLIC_KEY).toBe(staged.JWT_PUBLIC_KEY);
+    expect(Date.parse(after.JWT_PUBLIC_KEY_PREVIOUS_UNTIL!)).toBe(clock + 25 * HOUR);
+  });
+
   it('accepts tokens signed with the old key during the overlap, refuses them after it, and finishes on resume', async () => {
     clock = Date.now();
     vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true });
@@ -590,6 +763,71 @@ describe('rotate jwt-keys', () => {
 });
 
 describe('rotate gateway-secret', () => {
+  it('does not count a 5xx from the authenticated plugin path as acceptance (Codex P2)', async () => {
+    const old = deployed.REVERSE_TUNNEL_GATEWAY_SECRET!;
+    const failing = deps();
+    // The Worker authenticates the new secret but its plugin path then fails.
+    failing.probeGateway = async (secret) =>
+      isAcceptedGatewaySecret(workerEnv(), secret) ? (secret === old ? 200 : 500) : 401;
+    await expect(runRotate(input({ names: ['gateway-secret'] }), failing)).rejects.toThrow(
+      /rolled back/
+    );
+    expect(readJournal(stateDir)?.steps['gateway-secret']?.error).toMatch(/HTTP 500/);
+    expect(deployed.REVERSE_TUNNEL_GATEWAY_SECRET).toBe(old);
+  });
+
+  it('finishes the rollback on resume when restoring the consumers failed (Codex P1)', async () => {
+    const old = deployed.REVERSE_TUNNEL_GATEWAY_SECRET!;
+    const failing = deps();
+    // After the switch the Worker seems to still accept the old secret: the step fails.
+    failing.probeGateway = async (secret) =>
+      secret === old && restarts.length > 0
+        ? 200
+        : isAcceptedGatewaySecret(workerEnv(), secret)
+          ? 200
+          : 401;
+    // ...and restarting the consumers back onto the old secret fails too.
+    failing.restartGatewayConsumers = async () => {
+      restarts.push(readFileSync(join(stateDir, 'gateway.env'), 'utf8'));
+      if (restarts.length > 1) throw new Error('systemctl restart frps failed');
+    };
+    await expect(runRotate(input({ names: ['gateway-secret'] }), failing)).rejects.toThrow(
+      /systemctl restart frps failed/
+    );
+    expect(readJournal(stateDir)?.steps['gateway-secret']?.phase).not.toBe('rolled-back');
+    restarts = [];
+    await expect(runRotate(input({ resume: true }), deps())).rejects.toThrow(/rolled back/);
+    // The resume restored gateway.env and the Worker to the old secret instead of marking it done,
+    // and restarted the consumers even though gateway.env already held the old value (Codex P1).
+    expect(restarts.at(-1)).toContain(`REVERSE_TUNNEL_GATEWAY_SECRET=${old}`);
+    expect(readJournal(stateDir)?.steps['gateway-secret']?.phase).toBe('rolled-back');
+    expect(deployed.REVERSE_TUNNEL_GATEWAY_SECRET).toBe(old);
+    expect(readFileSync(join(stateDir, 'gateway.env'), 'utf8')).toContain(
+      `REVERSE_TUNNEL_GATEWAY_SECRET=${old}`
+    );
+  });
+
+  it('leaves the step pending when it fails before its snapshot exists (Codex P2)', async () => {
+    const old = deployed.REVERSE_TUNNEL_GATEWAY_SECRET!;
+    const failing = deps();
+    // Just before the step starts, make its snapshot directory impossible to create.
+    failing.log = (line) => {
+      logs.push(line);
+      const id = readJournal(stateDir)?.id;
+      if (line.startsWith('gateway-secret (') && id)
+        writeFileSync(join(rotationDir(stateDir), id), '');
+    };
+    await expect(runRotate(input({ names: ['gateway-secret'] }), failing)).rejects.toThrow();
+    const stopped = readJournal(stateDir)!;
+    expect(stopped.steps['gateway-secret']?.phase).toBe('pending');
+    expect(stopped.steps['gateway-secret']?.error).toBeUndefined();
+    rmSync(join(rotationDir(stateDir), stopped.id), { force: true });
+    await runRotate(input({ resume: true }), deps());
+    // Control: the resume ran the whole rotation.
+    expect(readJournal(stateDir)).toBeNull();
+    expect(deployed.REVERSE_TUNNEL_GATEWAY_SECRET).not.toBe(old);
+  });
+
   it('restarts the consumers once with the new value while the Worker accepts both, then accepts only the new one', async () => {
     const old = deployed.REVERSE_TUNNEL_GATEWAY_SECRET!;
     await runRotate(input({ names: ['gateway-secret'] }), deps());
@@ -618,6 +856,12 @@ describe('rotate swap keys', () => {
     healthy = () => true;
     expect((await head()).VAPID_PUBLIC_KEY).toBe(old);
     expect(readJournal(stateDir)?.steps['vapid-keys']?.phase).toBe('rolled-back');
+    // The resume finishes the run (reseal) but still fails: the key was never replaced (Codex P1).
+    await expect(runRotate(input({ resume: true }), deps())).rejects.toThrow(
+      /vapid-keys: rolled back, not replaced/
+    );
+    expect(readJournal(stateDir)).toBeNull(); // the run is closed, not left in progress
+    expect((await head()).VAPID_PUBLIC_KEY).toBe(old);
   });
 
   it('replaces the VAPID pair and the agent signing key, and the Worker serves the new public key', async () => {
@@ -645,6 +889,68 @@ describe('rotate swap keys', () => {
   });
 });
 
+describe('rotate encryption-key with a purpose key of the same value (Codex P1)', () => {
+  async function withCredentialKeyEqualToRoot() {
+    const current = await store().head();
+    await store().write(
+      await store().seal({
+        ...current.secrets,
+        CREDENTIAL_ENCRYPTION_KEY: current.secrets.ENCRYPTION_KEY!,
+      })
+    );
+  }
+
+  it('refuses to rotate encryption-key alone, since the old value would stay in use', async () => {
+    await withCredentialKeyEqualToRoot();
+    await expect(runRotate(input({ names: ['encryption-key'] }), deps())).rejects.toThrow(
+      /CREDENTIAL_ENCRYPTION_KEY holds the same value as ENCRYPTION_KEY/
+    );
+    expect(readJournal(stateDir)).toBeNull();
+  });
+
+  it('refuses to rotate one purpose key alone while its sibling holds the same value (Codex P1)', async () => {
+    const current = await store().head();
+    await store().write(
+      await store().seal({
+        ...current.secrets,
+        CREDENTIAL_ENCRYPTION_KEY: 'c'.repeat(43) + '=',
+        LIBRARY_ENCRYPTION_KEY: 'c'.repeat(43) + '=',
+      })
+    );
+    await expect(
+      runRotate(input({ names: ['credential-encryption-key'], dryRun: true }), deps())
+    ).rejects.toThrow(/LIBRARY_ENCRYPTION_KEY holds the same value as CREDENTIAL_ENCRYPTION_KEY/);
+  });
+
+  it('rotates encryption-key alone when both purpose keys have their own values (Codex P1)', async () => {
+    const current = await store().head();
+    await store().write(
+      await store().seal({
+        ...current.secrets,
+        CREDENTIAL_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64'),
+        LIBRARY_ENCRYPTION_KEY: Buffer.alloc(32, 2).toString('base64'),
+      })
+    );
+    await runRotate(input({ names: ['encryption-key'] }), deps());
+    // No stored row resolves through ENCRYPTION_KEY: an expiry-only rotation, not a stuck one.
+    const step = readJournal(stateDir)?.steps['encryption-key'];
+    expect(step?.phase).toBe('waiting');
+    expect((await head()).ENCRYPTION_KEY_PREVIOUS).toBe(current.secrets.ENCRYPTION_KEY);
+    clock += 6 * HOUR;
+    await runRotate(input({ resume: true }), deps());
+    expect((await head()).ENCRYPTION_KEY_PREVIOUS).toBeUndefined();
+  });
+
+  it('accepts both in one run (control)', async () => {
+    await withCredentialKeyEqualToRoot();
+    await runRotate(
+      input({ names: ['encryption-key', 'credential-encryption-key'], dryRun: true }),
+      deps()
+    );
+    expect(logs.join('\n')).toContain('credential-encryption-key');
+  });
+});
+
 describe('rotate encryption-key: the wait for values outside D1 and R2 (review V1 L4)', () => {
   const waitMinutes = () => {
     const step = readJournal(stateDir)?.steps['encryption-key'];
@@ -654,8 +960,8 @@ describe('rotate encryption-key: the wait for values outside D1 and R2 (review V
   it('waits as long as the Worker says a pending interaction can live when that was raised', async () => {
     workerVars = { ACP_INTERACTION_MAX_DEADLINE_MS: String(10 * HOUR) };
     await runRotate(input({ names: ['encryption-key'] }), deps());
-    // 10 h deadline + 1 h sensitive purge + 15 min margin.
-    expect(waitMinutes()).toBe(11 * 60 + 15);
+    // 10 h deadline + 1 min URL deadline margin + 1 h sensitive purge + 15 min margin.
+    expect(waitMinutes()).toBe(drainMinutes({}) + 11 * 60 + 16);
     clock += 6 * HOUR; // past the default wait: not yet
     await runRotate(input({ resume: true }), deps());
     expect((await head()).ENCRYPTION_KEY_PREVIOUS).toBeDefined();
@@ -663,7 +969,7 @@ describe('rotate encryption-key: the wait for values outside D1 and R2 (review V
 
   it('keeps the default floor when the Worker uses the defaults (control)', async () => {
     await runRotate(input({ names: ['encryption-key'] }), deps());
-    expect(waitMinutes()).toBe(5 * 60 + 15);
+    expect(waitMinutes()).toBe(drainMinutes({}) + 5 * 60 + 16);
   });
 
   it('stops instead of guessing when the Worker cannot report the lifetime', async () => {
@@ -676,17 +982,99 @@ describe('rotate encryption-key: the wait for values outside D1 and R2 (review V
     expect(readJournal(stateDir)?.steps['encryption-key']?.waitUntil).toBeUndefined();
     controlHook = null;
     await runRotate(input({ resume: true }), deps());
-    expect(waitMinutes()).toBe(5 * 60 + 15);
+    expect(waitMinutes()).toBe(drainMinutes({}) + 5 * 60 + 16);
+  });
+
+  it('a resume keeps the --stored-lifetime-minutes the run started with (Codex P1)', async () => {
+    // The run stops mid-migration, before the wait is computed; the resume passes no flag.
+    await seedCredential('c-opt', 'secret-opt', deployed.ENCRYPTION_KEY!);
+    controlHook = async (body) => {
+      if (body.mode === 'migrate' && body.target === 'd1') throw new Error('box lost power');
+    };
+    await expect(
+      runRotate(input({ names: ['encryption-key'], storedLifetimeMinutes: 600 }), deps())
+    ).rejects.toThrow();
+    controlHook = null;
+    await runRotate(input({ resume: true }), deps());
+    expect(waitMinutes()).toBe(drainMinutes({}) + 600);
+    clock += 6 * HOUR; // past the default wait, inside the requested one: the old key stays
+    await runRotate(input({ resume: true }), deps());
+    expect((await head()).ENCRYPTION_KEY_PREVIOUS).toBeDefined();
+  });
+
+  it('refuses a resume that passes a different timing flag than the run started with', async () => {
+    await runRotate(input({ names: ['encryption-key'], storedLifetimeMinutes: 600 }), deps());
+    await expect(
+      runRotate(input({ resume: true, storedLifetimeMinutes: 30 }), deps())
+    ).rejects.toThrow(/started with --stored-lifetime-minutes 600/);
+    // The same value is accepted.
+    await runRotate(input({ resume: true, storedLifetimeMinutes: 600 }), deps());
   });
 
   it('an explicit --stored-lifetime-minutes wins', async () => {
     workerVars = { ACP_INTERACTION_MAX_DEADLINE_MS: String(10 * HOUR) };
     await runRotate(input({ names: ['encryption-key'], storedLifetimeMinutes: 30 }), deps());
-    expect(waitMinutes()).toBe(30);
+    expect(waitMinutes()).toBe(drainMinutes({}) + 30);
   });
 });
 
 describe('rotate better-auth-secret', () => {
+  it('keeps the old secret until requests on the previous version have drained (Codex P1)', async () => {
+    await runRotate(input({ names: ['better-auth-secret'] }), deps());
+    const step = readJournal(stateDir)?.steps['better-auth-secret'] ?? null;
+    // Finished in this run (the drain is waited out in-process), but never before the drain.
+    expect(readJournal(stateDir)).toBeNull();
+    expect(sleeps.reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(
+      drainMinutes({}) * 60_000 - 1000
+    );
+    expect(step).toBeNull();
+    expect((await head()).BETTER_AUTH_SECRET_PREVIOUS).toBeUndefined();
+  });
+
+  it('without an in-process wait, stops in waiting with the old secret still readable (control)', async () => {
+    const noSleep = deps();
+    delete noSleep.sleep;
+    await runRotate(input({ names: ['better-auth-secret'] }), noSleep);
+    const step = readJournal(stateDir)?.steps['better-auth-secret'];
+    expect(step?.phase).toBe('waiting');
+    expect(Date.parse(step?.waitUntil ?? '') - Date.parse(step?.switchedAt ?? '')).toBe(
+      drainMinutes({}) * 60_000
+    );
+    expect((await head()).BETTER_AUTH_SECRET_PREVIOUS).toBeDefined();
+  });
+
+  it('a resume keeps the drain the run started with (Codex P1)', async () => {
+    const { symmetricEncrypt } = await import('better-auth/crypto');
+    sqlite
+      .prepare(`INSERT INTO accounts (id, access_token) VALUES ('a1', ?)`)
+      .run(await symmetricEncrypt({ key: deployed.ENCRYPTION_KEY!, data: 'gho_x' }));
+    // The run stops mid-migration, before the drain's end is recorded.
+    controlHook = async (body) => {
+      if (body.mode === 'migrate') throw new Error('box lost power');
+    };
+    await expect(runRotate(input({ names: ['better-auth-secret'] }), deps())).rejects.toThrow(
+      'box lost power'
+    );
+    expect(readJournal(stateDir)?.options?.drainMinutes).toBe(drainMinutes({}));
+    controlHook = null;
+    // The operator lowers the budget before resuming: the recorded drain still applies.
+    const noSleep = deps();
+    delete noSleep.sleep;
+    await runRotate(
+      { ...input({ resume: true }), box: { ...BOX, CELLD_HANDLER_BUDGET_S: '30' } },
+      noSleep
+    );
+    const step = readJournal(stateDir)?.steps['better-auth-secret'];
+    expect(Date.parse(step?.waitUntil ?? '') - Date.parse(step?.switchedAt ?? '')).toBe(
+      drainMinutes({}) * 60_000
+    );
+  });
+
+  it('derives the drain from the box CELLD_HANDLER_BUDGET_S', () => {
+    expect(drainMinutes({})).toBe(6);
+    expect(drainMinutes({ CELLD_HANDLER_BUDGET_S: '900' })).toBe(16);
+  });
+
   it('moves stored OAuth tokens to the new versioned secret and ends with no previous secret', async () => {
     const { symmetricEncrypt, symmetricDecrypt } = await import('better-auth/crypto');
     const old = deployed.ENCRYPTION_KEY!; // unset BETTER_AUTH_SECRET falls back to it
@@ -701,6 +1089,41 @@ describe('rotate better-auth-secret', () => {
       .t;
     const key = { keys: new Map([[1, after.BETTER_AUTH_SECRET!]]), currentVersion: 1 };
     expect(await symmetricDecrypt({ key, data: stored })).toBe('gho_x');
+  });
+
+  it('a rollback of a later rotation restores the old secret under its own version (Codex P1)', async () => {
+    const { symmetricEncrypt, symmetricDecrypt } = await import('better-auth/crypto');
+    sqlite
+      .prepare(`INSERT INTO accounts (id, access_token) VALUES ('a1', ?)`)
+      .run(await symmetricEncrypt({ key: deployed.ENCRYPTION_KEY!, data: 'gho_x' }));
+    await runRotate(input({ names: ['better-auth-secret'] }), deps());
+    const v1 = await head();
+    expect(v1.BETTER_AUTH_SECRET_VERSION).toBe('1');
+    const keyV1 = { keys: new Map([[1, v1.BETTER_AUTH_SECRET!]]), currentVersion: 1 };
+    // During the second rotation's forward migration, a writer keeps adding version-1 tokens.
+    let reverse = false;
+    controlHook = async (body) => {
+      if (readJournal(stateDir)?.steps['better-auth-secret']?.reverse) reverse = true;
+      if (!reverse && body.mode === 'verify') {
+        sqlite
+          .prepare(`INSERT OR REPLACE INTO accounts (id, access_token) VALUES ('a2', ?)`)
+          .run(await symmetricEncrypt({ key: keyV1, data: 'gho_late' }));
+      }
+    };
+    await expect(runRotate(input({ names: ['better-auth-secret'] }), deps())).rejects.toThrow(
+      /rolled back/
+    );
+    const after = await head();
+    // Back where it started: the original secret under its original version, nothing previous.
+    expect(after.BETTER_AUTH_SECRET).toBe(v1.BETTER_AUTH_SECRET);
+    expect(after.BETTER_AUTH_SECRET_VERSION).toBe('1');
+    expect(after.BETTER_AUTH_SECRET_PREVIOUS).toBeUndefined();
+    for (const id of ['a1', 'a2']) {
+      const row = sqlite.prepare(`SELECT access_token AS t FROM accounts WHERE id = ?`).get(id) as {
+        t: string;
+      };
+      await expect(symmetricDecrypt({ key: keyV1, data: row.t })).resolves.toMatch(/^gho_/);
+    }
   });
 });
 

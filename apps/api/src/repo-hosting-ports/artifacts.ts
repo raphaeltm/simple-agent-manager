@@ -1,8 +1,7 @@
 import type { ArtifactsBackendPort } from '@simple-agent-manager/repo-hosting/ports';
 
 import type { Env } from '../env';
-import { resolveArtifactsBackend } from '../services/hosted-git/backend';
-import { artifactsRemoteFetch, isLocalHostedGitActive } from '../services/hosted-git/local-backend';
+import { resolveArtifactsBackend } from '../services/artifacts/backend';
 
 /**
  * Repo hosting resolves the SAM-native repository backend through the worker's hosted-git seam:
@@ -11,7 +10,4 @@ import { artifactsRemoteFetch, isLocalHostedGitActive } from '../services/hosted
  */
 export const artifactsPort: ArtifactsBackendPort = {
   resolve: (env) => resolveArtifactsBackend(env as Env),
-  // SAM-hosted repositories (self-host only) are read in-process, not through the public ingress.
-  localRemoteFetch: (env) =>
-    isLocalHostedGitActive(env as Env) ? artifactsRemoteFetch(env as Env) : null,
 };

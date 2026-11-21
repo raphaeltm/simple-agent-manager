@@ -16,12 +16,15 @@
  * interval past the bound before it reads the answers.
  *
  * Proven discriminating (F1): removing the abandonment retry in `credentialRows` / `legacyKv` /
- * `resolveLegacyPlatformConfig` turns the matching case red. (The ProjectData ensure memo no
+ * `resolveLegacyPlatformConfig` turns the matching case red. The AdminSettingsCache and LLM
+ * endpoint snapshot cases (L22a) cover the two sites the static check cannot see, because their
+ * cache entry reaches the join through a function parameter. (The ProjectData ensure memo no
  * longer shares in-flight ensures, so it has no abandonment branch to test here.)
  */
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { Env } from '../../../src/env';
 import {
   __setSharedFlightResumeOnOwnTimerForTest,
   DEFAULT_SHARED_FLIGHT_JOIN_GRACE_MS,
@@ -33,6 +36,8 @@ import {
   credentialRows,
 } from '../../../src/services/admin-settings-resolution';
 import { DEFAULT_CONFIG_READ_TIMEOUT_MS } from '../../../src/services/config-read-deadline';
+import { IoTimeoutError } from '../../../src/services/fetch-timeout';
+import { resolveLlmEndpointSettings } from '../../../src/services/llm-endpoint-snapshot';
 import {
   __resetPlatformConfigCacheForTest,
   resolvePlatformConfig,
@@ -99,6 +104,45 @@ async function startAndDrop(start: () => Promise<unknown>, inFlight: () => boole
   await vi.advanceTimersByTimeAsync(0);
   await advanceUntil(inFlight);
   vi.clearAllTimers();
+}
+
+/** The statements one legacy platform-config read runs. */
+const isLegacyConfigRead = (sql: string) => /WHERE key = \?|AS encryptedToken/.test(sql);
+
+/**
+ * A counting env whose admin-settings caches are warm, so only the legacy platform-config read
+ * runs below, plus how many statements that read takes. The platform-config cache is cleared.
+ */
+async function warmPlatformConfigEnv() {
+  const { env, counter } = createEnv();
+  await untilSettled(resolvePlatformConfig(env));
+  __resetPlatformConfigCacheForTest();
+  counter.reset();
+  await untilSettled(resolvePlatformConfig(env));
+  const perRead = counter.executed.filter(isLegacyConfigRead).length;
+  expect(perRead).toBeGreaterThan(0);
+  __resetPlatformConfigCacheForTest();
+  counter.reset();
+  return { env, counter, perRead };
+}
+
+/**
+ * Lands a settings write (the revocation invalidatePlatformConfigCache performs) at the start of
+ * each of the first `reads` legacy reads. Returns the count of legacy statements run since.
+ */
+function revokePlatformConfigReads(env: Env, perRead: number, reads: number): () => number {
+  let statements = 0;
+  const realPrepare = env.DATABASE.prepare.bind(env.DATABASE);
+  env.DATABASE.prepare = ((sql: string) => {
+    if (isLegacyConfigRead(sql)) {
+      if (statements % perRead === 0 && statements / perRead < reads) {
+        __resetPlatformConfigCacheForTest();
+      }
+      statements += 1;
+    }
+    return realPrepare(sql);
+  }) as typeof env.DATABASE.prepare;
+  return () => statements;
 }
 
 describe.each([
@@ -183,20 +227,87 @@ describe.each([
     });
   });
 
+  describe('AdminSettingsCache: joiners of a dropped overrides read', () => {
+    it('wait out its deadline, then share one replacement read', async () => {
+      const { sqlite, env } = createAdminSettingsEnv();
+      open.push(sqlite);
+      const expected = await untilSettled(resolveAdminSetting(env, 'connector.enabled'));
+      __resetAdminSettingsCacheForTest();
+      let reads = 0;
+      const realPrepare = env.DATABASE.prepare.bind(env.DATABASE);
+      env.DATABASE.prepare = ((sql: string) => {
+        const statement = realPrepare(sql);
+        if (!sql.startsWith('SELECT key, value, updated_at AS updatedAt')) return statement;
+        return {
+          all: () => {
+            reads += 1;
+            return reads === 1 ? never() : statement.all();
+          },
+        };
+      }) as typeof env.DATABASE.prepare;
+
+      await startAndDrop(
+        () => resolveAdminSetting(env, 'connector.enabled'),
+        () => reads >= 1
+      );
+      expect(reads).toBe(1);
+
+      const joiners = [
+        resolveAdminSetting(env, 'connector.enabled'),
+        resolveAdminSetting(env, 'connector.enabled'),
+      ];
+      const settled = watch(joiners);
+      await vi.advanceTimersByTimeAsync(JOIN_BOUND_MS - 1);
+      expect(settled).toEqual([false, false]);
+      expect(reads).toBe(1);
+
+      await advanceUntil(() => settled.every(Boolean));
+      await expect(Promise.all(joiners)).resolves.toEqual([expected, expected]);
+      expect(reads).toBe(2);
+    });
+  });
+
+  describe('LLM endpoint snapshot: joiners of a dropped snapshot read', () => {
+    it('wait out its deadline, then share one replacement read', async () => {
+      const { sqlite, env } = createAdminSettingsEnv();
+      open.push(sqlite);
+      const names = ['llm.openAICompatible.baseUrl', 'outbound.maxRedirects'] as const;
+      const expected = await untilSettled(resolveLlmEndpointSettings(env, [...names]));
+      // A fresh binding identity is not available here, so drop the cached snapshot by
+      // invalidating the admin-settings generation it is keyed on.
+      __resetAdminSettingsCacheForTest();
+      let reads = 0;
+      const realBatch = env.DATABASE.batch.bind(env.DATABASE);
+      env.DATABASE.batch = ((statements: Parameters<typeof realBatch>[0]) => {
+        reads += 1;
+        return reads === 1 ? never() : realBatch(statements);
+      }) as typeof env.DATABASE.batch;
+
+      await startAndDrop(
+        () => resolveLlmEndpointSettings(env, [...names]),
+        () => reads >= 1
+      );
+      expect(reads).toBe(1);
+
+      const joiners = [
+        resolveLlmEndpointSettings(env, [...names]),
+        resolveLlmEndpointSettings(env, [...names]),
+      ];
+      const settled = watch(joiners);
+      await vi.advanceTimersByTimeAsync(JOIN_BOUND_MS - 1);
+      expect(settled).toEqual([false, false]);
+      expect(reads).toBe(1);
+
+      await advanceUntil(() => settled.every(Boolean));
+      await expect(Promise.all(joiners)).resolves.toEqual([expected, expected]);
+      expect(reads).toBe(2);
+    });
+  });
+
   describe('platform config: joiners of a dropped legacy-config read', () => {
     it('wait out its deadline, then share one replacement read', async () => {
-      const { env, counter } = createEnv();
-      // Warm the admin-settings caches so only the legacy platform-config read is in flight below.
-      await untilSettled(resolvePlatformConfig(env));
-      __resetPlatformConfigCacheForTest();
-      counter.reset();
-      await untilSettled(resolvePlatformConfig(env));
-      const legacyReads = () =>
-        counter.executed.filter((sql) => /WHERE key = \?|AS encryptedToken/.test(sql)).length;
-      const perRead = legacyReads();
-      expect(perRead).toBeGreaterThan(0);
-      __resetPlatformConfigCacheForTest();
-      counter.reset();
+      const { env, counter, perRead } = await warmPlatformConfigEnv();
+      const legacyReads = () => counter.executed.filter(isLegacyConfigRead).length;
 
       const gate = counter.stall();
       await startAndDrop(
@@ -221,6 +332,31 @@ describe.each([
       counter.reset();
       await untilSettled(resolvePlatformConfig(env));
       expect(legacyReads()).toBe(0);
+    });
+
+    it('after three revoked reads, answers from one read of its own that it does not publish', async () => {
+      const { env, perRead } = await warmPlatformConfigEnv();
+      // A settings write lands during each of the first three reads, so each loses its right
+      // to publish.
+      const statements = revokePlatformConfigReads(env, perRead, 3);
+
+      const config = await untilSettled(resolvePlatformConfig(env));
+      expect(config.github.appSlug.value).toBe('env-app-slug');
+      // Three revoked reads, then exactly one more: the bounded fallback, not a fourth retry.
+      expect(statements()).toBe(4 * perRead);
+
+      // The fallback read was not published, so the next caller reads again.
+      await untilSettled(resolvePlatformConfig(env));
+      expect(statements()).toBe(5 * perRead);
+    });
+
+    it('refuses the fallback read when a write also lands while it is pending', async () => {
+      const { env, perRead } = await warmPlatformConfigEnv();
+      // A write lands during all four reads, the fallback included.
+      const statements = revokePlatformConfigReads(env, perRead, Number.POSITIVE_INFINITY);
+
+      await expect(untilSettled(resolvePlatformConfig(env))).rejects.toBeInstanceOf(IoTimeoutError);
+      expect(statements()).toBe(4 * perRead);
     });
   });
 });

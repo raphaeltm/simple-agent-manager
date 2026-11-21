@@ -17,9 +17,12 @@ import {
   fileAgentResult,
   fileAgentReview,
   getAgentItem,
+  inboxAgentReplyState,
   listAgentAsks,
   type OperationContext,
   OperationError,
+  resolveAgentInboxItem,
+  respondToAgentInboxItem,
   updateAgentAsk,
 } from '@simple-agent-manager/operations';
 import { ValiError } from 'valibot';
@@ -200,9 +203,14 @@ export const handleInboxResult: Handler = (requestId, params, tokenData, env) =>
   );
 
 export const handleInboxUpdateItem: Handler = (requestId, params, tokenData, env) =>
-  run(requestId, 'inbox_write update', tokenData, env, (ctx, source) =>
-    updateAgentAsk(ctx, source, params as Parameters<typeof updateAgentAsk>[2])
-  );
+  run(requestId, 'inbox_write update', tokenData, env, async (ctx, source) => {
+    const result = await updateAgentAsk(
+      ctx,
+      source,
+      params as Parameters<typeof updateAgentAsk>[2]
+    );
+    return withReplyState(ctx, source, result);
+  });
 
 export const handleInboxCancelItem: Handler = (requestId, params, tokenData, env) =>
   run(requestId, 'inbox_write cancel', tokenData, env, (ctx, source) =>
@@ -223,6 +231,10 @@ export const handleInboxGetItem: Handler = (requestId, params, tokenData, env) =
   run(requestId, 'inbox_read get', tokenData, env, async (ctx, source) => ({
     item: await getAgentItem(ctx, source, {
       ref: typeof params.ref === 'string' ? params.ref : '',
+      ...(params.replyCursor === undefined ? {} : { replyCursor: params.replyCursor as string }),
+      ...(params.responseCursor === undefined
+        ? {}
+        : { responseCursor: params.responseCursor as number }),
     }),
   }));
 
@@ -230,7 +242,7 @@ export const handleInboxGetItem: Handler = (requestId, params, tokenData, env) =
 function assigned(result: AgentAssignResult) {
   const next = !result.created
     ? `This task was already assigned as ${result.ref}; nothing new was filed.`
-    : 'Assigned. It does not block you: keep working. You will be woken in this chat when the person comments, takes it, hands it on, finishes, reopens or archives it.';
+    : 'Assigned. It does not block you: keep working. You will be woken in this chat when the person comments, takes it, hands it on, finishes or reopens it (archiving it wakes no one).';
   const watch = result.watching
     ? ''
     : ' This chat could not be subscribed to the task yet; repeat this assign call with the same idempotencyKey (or title) to subscribe it.';
@@ -267,3 +279,35 @@ export const handleInboxAttach: Handler = (requestId, params, tokenData, env) =>
   run(requestId, 'inbox_write attach', tokenData, env, (ctx, source) =>
     attachAgentTask(ctx, source, params as Parameters<typeof attachAgentTask>[2])
   );
+
+export const handleInboxRespond: Handler = (requestId, params, tokenData, env) =>
+  run(requestId, 'inbox_write respond', tokenData, env, async (ctx, source) => {
+    const result = await respondToAgentInboxItem(
+      ctx,
+      source,
+      params as Parameters<typeof respondToAgentInboxItem>[2]
+    );
+    return withReplyState(ctx, source, result);
+  });
+export const handleInboxResolve: Handler = (requestId, params, tokenData, env) =>
+  run(requestId, 'inbox_write resolve', tokenData, env, (ctx, source) =>
+    resolveAgentInboxItem(ctx, source, params as Parameters<typeof resolveAgentInboxItem>[2])
+  );
+
+async function withReplyState<T extends { ref: string }>(
+  ctx: OperationContext,
+  source: AgentInboxSource,
+  result: T
+) {
+  const state = await inboxAgentReplyState(ctx, source.projectId, result.ref);
+  return {
+    ...result,
+    withAgent: state.withAgent,
+    ...(state.withAgent
+      ? {
+          message:
+            'Other replies are still outstanding. Read inbox_read get for this ref, follow conversation cursors, and explicitly handle its pendingReplyIds. Reading does not acknowledge them.',
+        }
+      : {}),
+  };
+}

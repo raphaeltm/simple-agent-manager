@@ -5,7 +5,14 @@
  */
 import { expect, type Page, test } from '@playwright/test';
 
-import { assertNoClippedOverflow, assertNoOverflow, screenshot } from './audit-helpers';
+import {
+  assertNoClippedOverflow,
+  assertNoOverflow,
+  assertNoScrollingGlassPanes,
+  expectThemePoll,
+  screenshot,
+  seedTheme,
+} from './audit-helpers';
 import { type InboxMockState, KIND_ITEMS, MANY_ITEMS, setupInboxMocks } from './inbox-fixtures';
 
 function state(items = MANY_ITEMS, extra: Partial<InboxMockState> = {}): InboxMockState {
@@ -18,19 +25,53 @@ async function openInbox(page: Page, mock: InboxMockState, path = '/inbox') {
   await expect(page.getByTestId('inbox-page')).toBeVisible();
 }
 
-/** The pinned answer area's bottom edge meets its pane: nothing dragged it up or off-screen. */
-async function expectControlsPinned(page: Page) {
-  const controls = page.getByTestId('inbox-pinned-controls');
-  await expect(controls).toBeVisible();
-  const box = await controls.boundingBox();
-  const viewport = page.viewportSize();
-  expect(box).not.toBeNull();
-  expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height + 1);
+/**
+ * The reply composer is pinned at the bottom of the item: its bottom edge meets the pane's, and
+ * the shell's main area has no scrollable overflow that could drag it up or off-screen.
+ */
+async function expectComposerPinned(page: Page) {
+  const area = page.getByTestId('inbox-reply-area');
+  await expect(area).toBeVisible();
+  const box = (await area.boundingBox())!;
+  const pane = (await page.getByRole('region', { name: 'Inbox item' }).boundingBox())!;
+  expect(Math.abs(box.y + box.height - (pane.y + pane.height))).toBeLessThanOrEqual(2);
+  expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height + 1);
   const mainOverflow = await page.evaluate(() => {
     const main = document.querySelector('#main-content');
     return main ? main.scrollHeight - main.clientHeight : 0;
   });
   expect(mainOverflow).toBeLessThanOrEqual(1);
+}
+
+/** Kinds answered only by a reply (a free-text question) or not at all yet (a human task). */
+const NO_CONTROLS = new Set(['task', 'question-long']);
+
+/**
+ * Scrolls the inbox list with the wheel, as a user does, and asserts the content moved while
+ * the pane itself did not. The pane's rim and frost are pinned to the pane's own scroll origin,
+ * so a pane that scrolls carries them away with the list (the rim's bottom edge then crosses
+ * the middle of the list).
+ */
+async function expectListScrollsInsideFixedPane(page: Page, name: string) {
+  const pane = page.getByRole('region', { name: 'Inbox list' });
+  await expect(pane).toBeVisible();
+  const box = (await pane.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, 900);
+  const scrollOf = () =>
+    pane.evaluate((el) => ({
+      pane: el.scrollTop,
+      // Whatever scrolled: the pane itself or a scroller inside it.
+      any: Math.max(
+        el.scrollTop,
+        ...Array.from(el.querySelectorAll<HTMLElement>('*')).map((child) => child.scrollTop)
+      ),
+    }));
+  // Liveness: the list did scroll, so the pane staying at 0 is not a list that never moved.
+  await expect.poll(async () => (await scrollOf()).any).toBeGreaterThan(100);
+  expect((await scrollOf()).pane, 'the pane scrolled, carrying its rim and frost away').toBe(0);
+  await assertNoScrollingGlassPanes(page);
+  await screenshot(page, name);
 }
 
 const KIND_REFS: { name: string; ref: string; project: string }[] = KIND_ITEMS.map((item) => ({
@@ -53,6 +94,11 @@ test.describe('Inbox — Mobile', () => {
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
     await screenshot(page, 'inbox-list-many');
+  });
+
+  test('list scrolls inside its pane; the rim stays on the pane', async ({ page }) => {
+    await openInbox(page, state());
+    await expectListScrollsInsideFixedPane(page, 'inbox-list-scrolled');
   });
 
   test('active chip scrolls into view', async ({ page }) => {
@@ -88,12 +134,16 @@ test.describe('Inbox — Mobile', () => {
       const params = new URLSearchParams({ item: kind.ref, project: kind.project });
       await openInbox(page, state(), `/inbox?${params.toString()}`);
       await expect(page.getByTestId('inbox-item-body')).toBeVisible();
-      if (kind.name === 'task') {
-        // Nothing to answer yet: no empty control strip (Open chat is in the top bar).
-        await expect(page.getByTestId('inbox-pinned-controls')).toHaveCount(0);
+      if (NO_CONTROLS.has(kind.name)) {
+        // No empty control strip: the composer is the way to answer.
+        await expect(page.getByTestId('inbox-answer-controls')).toHaveCount(0);
       } else {
-        await expectControlsPinned(page);
+        // The controls sit inside the ask, the agent's first message.
+        await expect(
+          page.getByTestId('inbox-ask').getByTestId('inbox-answer-controls')
+        ).toBeVisible();
       }
+      await expectComposerPinned(page);
       await assertNoOverflow(page);
       await assertNoClippedOverflow(page);
       await screenshot(page, `inbox-item-${kind.name}`);
@@ -148,7 +198,7 @@ test.describe('Inbox — Desktop', () => {
     const list = await page.getByRole('region', { name: 'Inbox list' }).boundingBox();
     const item = await page.getByRole('region', { name: 'Inbox item' }).boundingBox();
     expect(list!.x + list!.width).toBeLessThanOrEqual(item!.x);
-    await expectControlsPinned(page);
+    await expectComposerPinned(page);
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
     await screenshot(page, 'inbox-desktop-list');
@@ -159,17 +209,26 @@ test.describe('Inbox — Desktop', () => {
       const params = new URLSearchParams({ item: kind.ref, project: kind.project });
       await openInbox(page, state(), `/inbox?${params.toString()}`);
       await expect(page.getByTestId('inbox-item-body')).toBeVisible();
-      if (kind.name === 'task') {
-        // Nothing to answer yet: no empty control strip (Open chat is in the top bar).
-        await expect(page.getByTestId('inbox-pinned-controls')).toHaveCount(0);
+      if (NO_CONTROLS.has(kind.name)) {
+        // No empty control strip: the composer is the way to answer.
+        await expect(page.getByTestId('inbox-answer-controls')).toHaveCount(0);
       } else {
-        await expectControlsPinned(page);
+        // The controls sit inside the ask, the agent's first message.
+        await expect(
+          page.getByTestId('inbox-ask').getByTestId('inbox-answer-controls')
+        ).toBeVisible();
       }
+      await expectComposerPinned(page);
       await assertNoOverflow(page);
       await assertNoClippedOverflow(page);
       await screenshot(page, `inbox-desktop-item-${kind.name}`);
     });
   }
+
+  test('list scrolls inside its pane; the rim stays on the pane', async ({ page }) => {
+    await openInbox(page, state());
+    await expectListScrollsInsideFixedPane(page, 'inbox-desktop-list-scrolled');
+  });
 
   test('the ⋯ menu paints over the panes and opens Archived', async ({ page }) => {
     await openInbox(page, state());
@@ -184,6 +243,99 @@ test.describe('Inbox — Desktop', () => {
       'aria-pressed',
       'true'
     );
+  });
+
+  test('header is one row; the purpose sits behind ?', async ({ page }) => {
+    await openInbox(page, state(), '/projects/p-billing/inbox');
+    const header = page
+      .locator('header')
+      .filter({ has: page.getByRole('group', { name: 'Inbox filters' }) });
+    const title = await page.getByRole('heading', { level: 1, name: 'Inbox' }).boundingBox();
+    const help = page.getByRole('button', { name: 'About the inbox' });
+    const helpBox = await help.boundingBox();
+    const chips = await page.getByRole('group', { name: 'Inbox filters' }).boundingBox();
+    const more = await page.getByRole('button', { name: 'More filters' }).boundingBox();
+    const headerBox = await header.boundingBox();
+    const centre = (b: { y: number; height: number }) => b.y + b.height / 2;
+    // Title, ?, chips and ⋯ share one row, left to right.
+    for (const box of [helpBox!, chips!, more!]) {
+      expect(Math.abs(centre(box) - centre(title!))).toBeLessThanOrEqual(4);
+    }
+    expect(title!.x + title!.width).toBeLessThanOrEqual(helpBox!.x + 1);
+    expect(helpBox!.x + helpBox!.width).toBeLessThanOrEqual(chips!.x + 1);
+    expect(chips!.x + chips!.width).toBeLessThanOrEqual(more!.x + 1);
+    // ⋯ follows the last chip rather than sitting at the far edge of the row.
+    expect(more!.x - (chips!.x + chips!.width)).toBeLessThanOrEqual(12);
+    expect(headerBox!.height).toBeLessThanOrEqual(72);
+    await expect(page.getByText(/What your agents need from you/)).toHaveCount(0);
+    await screenshot(page, 'inbox-desktop-header');
+
+    await help.click();
+    const note = page.getByRole('note');
+    await expect(note).toHaveText(/What your agents need from you in /);
+    // Paints over the panes below: a real hit test at the note's centre lands on the note.
+    const noteBox = await note.boundingBox();
+    const hit = await page.evaluate(
+      ({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest('[role="note"]')),
+      { x: noteBox!.x + noteBox!.width / 2, y: noteBox!.y + noteBox!.height / 2 }
+    );
+    expect(hit).toBe(true);
+    await assertNoOverflow(page);
+    await screenshot(page, 'inbox-desktop-help-open');
+    await page.keyboard.press('Escape');
+    await expect(note).toHaveCount(0);
+    await expect(help).toBeFocused();
+  });
+
+  test('narrow desktop: chips scroll inside the one-row header', async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 700 });
+    await openInbox(page, state(), '/projects/p-billing/inbox');
+    const title = await page.getByRole('heading', { level: 1, name: 'Inbox' }).boundingBox();
+    const more = await page.getByRole('button', { name: 'More filters' }).boundingBox();
+    expect(
+      Math.abs(title!.y + title!.height / 2 - (more!.y + more!.height / 2))
+    ).toBeLessThanOrEqual(4);
+    expect(more!.x + more!.width).toBeLessThanOrEqual(800);
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, 'inbox-narrow-desktop-header');
+  });
+
+  for (const width of [800, 1024]) {
+    test(`from Overview at ${width}px: back is icon-only and the row still holds`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 700 });
+      await openInbox(page, state(), '/projects/p-billing/inbox?from=overview');
+      const back = page.getByRole('button', { name: 'Back to Overview' });
+      await expect(back).toBeVisible();
+      const backBox = await back.boundingBox();
+      const title = await page.getByRole('heading', { level: 1, name: 'Inbox' }).boundingBox();
+      const chips = await page.getByRole('group', { name: 'Inbox filters' }).boundingBox();
+      const more = await page.getByRole('button', { name: 'More filters' }).boundingBox();
+      const centre = (b: { y: number; height: number }) => b.y + b.height / 2;
+      for (const box of [backBox!, chips!, more!]) {
+        expect(Math.abs(centre(box) - centre(title!))).toBeLessThanOrEqual(4);
+      }
+      // Icon-only below lg: the label costs no width there.
+      expect(backBox!.width).toBeLessThanOrEqual(width < 1024 ? 44 : 200);
+      // At least two whole chips stay visible beside the title.
+      expect(chips!.width).toBeGreaterThanOrEqual(180);
+      expect(more!.x + more!.width).toBeLessThanOrEqual(width);
+      await assertNoOverflow(page);
+      await assertNoClippedOverflow(page);
+      await screenshot(page, `inbox-from-overview-header-${width}`);
+    });
+  }
+
+  test('light theme: header and the open ? note', async ({ page }) => {
+    await seedTheme(page, 'light');
+    await openInbox(page, state(), '/projects/p-billing/inbox');
+    await expectThemePoll(page, 'light');
+    await page.getByRole('button', { name: 'About the inbox' }).click();
+    await expect(page.getByRole('note')).toBeVisible();
+    await assertNoOverflow(page);
+    await screenshot(page, 'inbox-desktop-help-open-light');
   });
 
   test('context expanded', async ({ page }) => {
@@ -227,5 +379,45 @@ test.describe('Inbox — Desktop', () => {
     const projectNav = page.getByRole('navigation', { name: 'Project navigation' });
     await expect(projectNav.getByRole('link', { name: /^Inbox, \d+$/ })).toBeVisible();
     await screenshot(page, 'inbox-desktop-nav');
+  });
+});
+
+/** Point 4px outside the ? button's left edge, vertically centred. */
+async function justOutsideHelp(page: Page) {
+  const box = await page.getByRole('button', { name: 'About the inbox' }).boundingBox();
+  return { x: box!.x - 4, y: box!.y + box!.height / 2 };
+}
+
+const hitsHelp = (page: Page, point: { x: number; y: number }) =>
+  page.evaluate(
+    ({ x, y }) =>
+      Boolean(document.elementFromPoint(x, y)?.closest('button[aria-label="About the inbox"]')),
+    point
+  );
+
+test.describe('Inbox — touch tablet', () => {
+  test.use({ viewport: { width: 820, height: 1180 }, isMobile: false, hasTouch: true });
+
+  test('the ? has a 44px touch target around its compact glyph', async ({ page }) => {
+    await openInbox(page, state(), '/projects/p-billing/inbox');
+    const point = await justOutsideHelp(page);
+    expect(await hitsHelp(page, point)).toBe(true);
+    await page.touchscreen.tap(point.x, point.y);
+    await expect(page.getByRole('note')).toHaveText(/What your agents need from you/);
+    await screenshot(page, 'inbox-tablet-help-open');
+  });
+});
+
+test.describe('Inbox — mouse pointer control', () => {
+  test.use({ viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false });
+
+  test('with a mouse the ? hit area stays the 32px glyph', async ({ page }) => {
+    await openInbox(page, state(), '/projects/p-billing/inbox');
+    // Liveness: the button itself is hit at its centre.
+    const box = await page.getByRole('button', { name: 'About the inbox' }).boundingBox();
+    expect(await hitsHelp(page, { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 })).toBe(
+      true
+    );
+    expect(await hitsHelp(page, await justOutsideHelp(page))).toBe(false);
   });
 });

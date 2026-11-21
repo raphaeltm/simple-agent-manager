@@ -26,13 +26,16 @@ import type { RowRef, StepState } from './rotate-store';
 
 export const CONTROL_KEY = 'SAM_KEY_ROTATION_CONTROL_KEY';
 export const MAX_MIGRATE_ROUNDS = 3;
+/** A wait up to this long is waited out in the run; a longer one ends the run until `--resume`. */
+export const MAX_IN_RUN_WAIT_MS = 15 * 60_000;
 /**
  * Values outside D1/R2 that expire on their own: ACP interaction details (InteractionStore DO,
- * DEFAULT_ACP_INTERACTION_MAX_DEADLINE_MS 4 h + DEFAULT_ACP_INTERACTION_SENSITIVE_PURGE_MS 1 h)
+ * DEFAULT_ACP_INTERACTION_MAX_DEADLINE_MS 4 h + DEFAULT_ACP_INTERACTION_DEADLINE_MARGIN_MS 1 min
+ * + DEFAULT_ACP_INTERACTION_SENSITIVE_PURGE_MS 1 h)
  * and bootstrap tokens (KV, BOOTSTRAP_TOKEN_TTL_SECONDS 15 min), plus a margin. The floor of the
  * wait: an install that raised those settings waits for what its Worker reports instead.
  */
-export const DEFAULT_STORED_LIFETIME_MINUTES = 5 * 60 + 15;
+export const DEFAULT_STORED_LIFETIME_MINUTES = 5 * 60 + 16;
 /** Added to the lifetime the Worker reports (clock skew, a value written just after the switch). */
 export const STORED_LIFETIME_MARGIN_MINUTES = 15;
 
@@ -101,13 +104,17 @@ async function reversePatch(ctx: StepContext, kind: Kind): Promise<Patch> {
     const name = keyName(ctx);
     return { set: { [name]: snapshot[name] ?? '', [`${name}_PREVIOUS`]: head[name] ?? '' } };
   }
-  const version = versionOf(head[BA.version]);
+  const attempted = versionOf(head[BA.version]);
+  // The old secret goes back under its own version: tokens still enveloped as `$ba$<that>$`
+  // (the ones the forward migration could not move) must keep a matching key. Only an
+  // unversioned original (bare-hex tokens, read with the current secret as legacy) gets a new one.
+  const original = versionOf(snapshot[BA.version]);
   return {
     set: {
       [BA.secret]: snapshot[BA.secret] || snapshot.ENCRYPTION_KEY || '',
-      [BA.version]: String(version + 1),
+      [BA.version]: String(original > 0 ? original : attempted + 1),
       [BA.previous]: head[BA.secret] ?? '',
-      [BA.previousVersion]: String(version),
+      [BA.previousVersion]: String(attempted),
     },
   };
 }
@@ -153,11 +160,21 @@ async function migrateUntilProven(
     }
   }
   let last: PassTotals | null = null;
-  for (let round = (step.migrateRounds ?? 0) + 1; round <= MAX_MIGRATE_ROUNDS; round += 1) {
-    const migrated = await pass(`migrate:${round}`, 'migrate');
-    deps.log(`  round ${round}: ${migrated.migrated} value(s) re-encrypted`);
-    step.migrateRounds = round;
-    ctx.save();
+  let round = step.migrateRounds ?? 0;
+  // A run that stopped after a round's migrate was recorded finishes that round's verify first
+  // (runPass resumes it from its cursors), instead of starting the next round: in the last round
+  // that would verify nothing and roll back a migration that had in fact completed.
+  let verifyRecordedRound = round > 0;
+  for (;;) {
+    if (!verifyRecordedRound) {
+      round += 1;
+      if (round > MAX_MIGRATE_ROUNDS) break;
+      const migrated = await pass(`migrate:${round}`, 'migrate');
+      deps.log(`  round ${round}: ${migrated.migrated} value(s) re-encrypted`);
+      step.migrateRounds = round;
+      ctx.save();
+    }
+    verifyRecordedRound = false;
     last = await pass(`verify:${round}`, 'verify');
     if (!withinBaseline(last, step.baseline)) {
       return `${last.unreadable} value(s) are unreadable under both keys (${step.baseline?.unreadable ?? 0} were before the rotation)`;
@@ -219,20 +236,30 @@ async function storedLifetimeMinutes(ctx: StepContext, explicit: number | null):
 }
 
 /** Nodes whose tunnel credential is still derived from the old key (reported, see control.ts). */
-async function recordLegacyTunnelLeases(ctx: StepContext): Promise<void> {
+async function recordLegacyTunnelLeases(ctx: StepContext, drainMinutes: number): Promise<void> {
   const { step, deps } = ctx;
   const call = await controlCall(ctx);
-  const status = (await call({ op: 'status', before: step.switchedAt })) as {
+  // A lease request that started on the previous deployment can commit its row up to the drain
+  // after the switch, with a credential derived from the old key: count those too. A lease the
+  // new deployment created in that window is counted as well (a needless replacement, never a
+  // missed one).
+  const switched = Date.parse(step.switchedAt ?? '');
+  const before = Number.isFinite(switched)
+    ? new Date(switched + drainMinutes * 60_000).toISOString()
+    : step.switchedAt;
+  const status = (await call({ op: 'status', before })) as {
     legacyTunnelLeases?: unknown;
   };
   const count = typeof status.legacyTunnelLeases === 'number' ? status.legacyTunnelLeases : null;
   step.legacyTunnelLeases = count;
   ctx.save();
   if (count === null) {
-    deps.log('  WARNING: could not count reverse-tunnel nodes created before the switch');
+    deps.log(
+      '  WARNING: could not count reverse-tunnel nodes created before the switch (or during its drain)'
+    );
   } else if (count > 0) {
     deps.log(
-      `  WARNING: ${count} reverse-tunnel node(s) created before the switch keep a tunnel credential derived from the old ENCRYPTION_KEY: whoever holds that key and an old backup can still log in to frps as them. Replace them (delete each node; SAM provisions new ones on demand).`
+      `  WARNING: ${count} reverse-tunnel node(s) created before the switch or during its drain keep a tunnel credential derived from the old ENCRYPTION_KEY: whoever holds that key and an old backup can still log in to frps as them. Replace them (delete each node; SAM provisions new ones on demand).`
     );
   }
 }
@@ -250,7 +277,13 @@ export async function advanceData(
   ctx: StepContext,
   kind: Kind,
   /** aes only: minutes to wait after the switch; null derives it (storedLifetimeMinutes). */
-  waitMinutes: number | null
+  waitMinutes: number | null,
+  /**
+   * The least time between the switch and the retirement: a request that started on the
+   * previous deployment still finishes on it (celld) and may write under the old value, so the
+   * old value stays readable until every such request is past its handler budget.
+   */
+  drainMinutes: number
 ): Promise<void> {
   const { step, deps } = ctx;
   const tag = step.reverse ? 'reverse' : 'forward';
@@ -264,7 +297,8 @@ export async function advanceData(
       step.reverse ? await reversePatch(ctx, kind) : await forwardPatch(ctx, kind),
       'migrating'
     );
-    if (!step.reverse) step.switchedAt = new Date(deps.now()).toISOString();
+    if (step.reverse) step.reverseSwitchedAt = new Date(deps.now()).toISOString();
+    else step.switchedAt = new Date(deps.now()).toISOString();
     ctx.save();
     deps.log(`  ${ctx.key.name}: the Worker writes under the new value and reads both`);
   }
@@ -287,21 +321,39 @@ export async function advanceData(
       resetData(step);
       ctx.save();
       await applyPatch(ctx, await reversePatch(ctx, kind), 'migrating');
-      return await advanceData(ctx, kind, waitMinutes);
+      step.reverseSwitchedAt = new Date(deps.now()).toISOString();
+      ctx.save();
+      return await advanceData(ctx, kind, waitMinutes, drainMinutes);
     }
-    const switched = Date.parse(step.switchedAt ?? new Date(deps.now()).toISOString());
+    // A rollback drains from its own (reverse) deployment: requests still running on the forward
+    // deployment may write under the new value until then.
+    const anchor = step.reverse ? step.reverseSwitchedAt : step.switchedAt;
+    const switched = Date.parse(anchor ?? new Date(deps.now()).toISOString());
     step.verifiedAt = new Date(deps.now()).toISOString();
-    const waitFor =
-      step.reverse || kind === 'better-auth' ? 0 : await storedLifetimeMinutes(ctx, waitMinutes);
-    step.waitUntil = new Date(
-      waitFor === 0 ? deps.now() : switched + waitFor * 60_000
-    ).toISOString();
+    // Requests still running on the other deployment can write under the value being retired
+    // until the drain ends, and such a write to KV or a Durable Object (no pass reaches those)
+    // lives for the stored-value lifetime after it: the old value stays readable for both,
+    // added, in either direction (a rollback retires the new value the same way). BetterAuth's
+    // values all live in D1, which the retire proof re-reads, so it needs only the drain.
+    const lifetime = kind === 'better-auth' ? 0 : await storedLifetimeMinutes(ctx, waitMinutes);
+    const waitFor = drainMinutes + lifetime;
+    step.waitUntil = new Date(switched + waitFor * 60_000).toISOString();
     step.phase = 'waiting';
     ctx.save();
   }
   const finalPhase = step.reverse ? 'rolled-back' : 'done';
   if (step.phase === 'waiting' || (step.phase === 'staging' && step.stagedFor === finalPhase)) {
-    if (step.phase === 'waiting' && deps.now() < Date.parse(step.waitUntil ?? '')) return;
+    if (step.phase === 'waiting') {
+      const remaining = Date.parse(step.waitUntil ?? '') - deps.now();
+      // A short wait (the request drain) is waited out in this run; a long one needs a resume.
+      if (remaining > 0 && (!deps.sleep || remaining > MAX_IN_RUN_WAIT_MS)) return;
+      if (remaining > 0 && deps.sleep) {
+        deps.log(
+          `  ${ctx.key.name}: waiting ${Math.ceil(remaining / 1000)} s for requests still running on the previous version`
+        );
+        await deps.sleep(remaining);
+      }
+    }
     // Proven right before the old key leaves, also when resuming an interrupted retire.
     try {
       await assertRetireProof(ctx, kind, tag);
@@ -313,7 +365,7 @@ export async function advanceData(
       throw error;
     }
     if (kind === 'aes' && keyName(ctx) === 'ENCRYPTION_KEY' && !step.reverse) {
-      await recordLegacyTunnelLeases(ctx);
+      await recordLegacyTunnelLeases(ctx, drainMinutes);
     }
     await applyPatch(ctx, { remove: previousNames(ctx, kind) }, finalPhase);
     deps.log(`  ${ctx.key.name}: the old value is retired from the Worker`);

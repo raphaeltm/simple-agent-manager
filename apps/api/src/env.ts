@@ -85,12 +85,6 @@ export interface Env
   AGENT_EMAIL_INBOUND_SMTP?: string;
   // Cloudflare Artifacts for SAM-native Git repos (optional — absent when ARTIFACTS_ENABLED is falsy)
   ARTIFACTS?: ArtifactsBinding;
-  // SAM-hosted git repositories (self-host build only): the Durable Object git server behind the
-  // local ARTIFACTS backend (services/hosted-git/backend.ts). Bound only by the celld config
-  // (scripts/selfhost/selfhost-durable-objects.ts), never by wrangler.toml, and used only when
-  // HOSTED_GIT_BACKEND is "durable-object" and no Cloudflare Artifacts binding exists.
-  HOSTED_GIT?: DurableObjectNamespace;
-  HOSTED_GIT_BACKEND?: string;
   // Analytics Engine for usage tracking (optional — binding absent in local dev / Miniflare)
   ANALYTICS?: AnalyticsEngineDataset;
   // Observability D1 (error storage — spec 023)
@@ -1151,14 +1145,7 @@ export interface Env
   TTS_RETRY_ATTEMPTS?: string;
   TTS_RETRY_BASE_DELAY_MS?: string;
   // Managed VM transport (new nodes only; legacy nodes and instant containers keep their transport)
-  VM_AGENT_TRANSPORT?: string; // "vm-public-dns" (default), "cloudflare-tunnel", or "reverse-tunnel" (self-hosted box with frps)
-  // Reverse-tunnel transport (self-hosted control plane; read only when VM_AGENT_TRANSPORT="reverse-tunnel")
-  REVERSE_TUNNEL_GATEWAY_SECRET?: string; // Secret shared with the box's frps plugin and Caddy forward_auth; required for reverse-tunnel
-  REVERSE_TUNNEL_GATEWAY_SECRET_ALTERNATE?: string; // Self-host rotation only: a second gateway secret accepted while frps/Caddy switch over
-  REVERSE_TUNNEL_PORT_RANGE_START?: string; // Default: 20000. First loopback port leased to nodes; must match frps allowPorts
-  REVERSE_TUNNEL_PORT_RANGE_END?: string; // Default: 29999. Last loopback port leased to nodes; must match frps allowPorts
-  REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS?: string; // Default: 90. frps heartbeatTimeout; the self-host deploy writes the same value to frps and the Worker
-  REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS?: string; // Default: 180 (2 x heartbeat timeout, also the floor). A released port is not reissued before this age
+  VM_AGENT_TRANSPORT?: string; // "vm-public-dns" (default) or "cloudflare-tunnel"
   VM_AGENT_TUNNEL_PORT?: string; // Dedicated loopback tunnel ingress port (default: 8444)
   CLOUDFLARED_VERSION?: string; // Pinned connector release supported by cloud-init (default: 2026.10.7)
   VM_AGENT_TUNNEL_LISTENER_WAIT_SECONDS?: string; // Default: 120. Elapsed connector startup wait for the loopback agent listener (1-3600 seconds).
@@ -1342,7 +1329,7 @@ export interface Env
   ATTACHMENT_TRANSFER_TIMEOUT_MS?: string;
   // Project file library (all configurable per constitution Principle XI)
   LIBRARY_ENCRYPTION_KEY?: string; // Purpose-specific KEK for file library (falls back to ENCRYPTION_KEY)
-  // Self-hosted platform-key rotation (scripts/selfhost/secrets-rotate*.ts). Root secrets from the
+  // Self-hosted platform-key rotation (scripts/selfhost/rotate-*.ts). Root secrets from the
   // sealed bundle; never set on Cloudflare.
   ENCRYPTION_KEY_PREVIOUS?: string; // Old ENCRYPTION_KEY, read-only fallback while rows are re-encrypted
   CREDENTIAL_ENCRYPTION_KEY_PREVIOUS?: string; // Old CREDENTIAL_ENCRYPTION_KEY, same

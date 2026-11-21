@@ -17,17 +17,22 @@ import { REVERSE_TUNNEL_MIGRATIONS } from '../../../src/selfhost/reverse-tunnel-
 import {
   API_SRC,
   collectImportGraph,
+  GRAPH_WALK_TIMEOUT_MS,
   REPO_ROOT,
   selfhostOnlyFindings,
 } from '../../helpers/selfhost-only-modules';
 
 describe('self-host-only placement', () => {
-  it('keeps reverse implementation out of the real Worker import graph', () => {
-    const graph = collectImportGraph(resolve(API_SRC, 'index.ts'));
-    expect(graph.files.length).toBeGreaterThan(100);
-    expect(graph.files).toContain('apps/api/src/services/node-provisioning-ingress.ts');
-    expect(selfhostOnlyFindings(graph)).toEqual([]);
-  });
+  it(
+    'keeps reverse implementation out of the real Worker import graph',
+    () => {
+      const graph = collectImportGraph(resolve(API_SRC, 'index.ts'));
+      expect(graph.files.length).toBeGreaterThan(100);
+      expect(graph.files).toContain('apps/api/src/services/node-provisioning-ingress.ts');
+      expect(selfhostOnlyFindings(graph)).toEqual([]);
+    },
+    GRAPH_WALK_TIMEOUT_MS
+  );
   it('follows forbidden imports from a neutral entry and recognizes package imports', () => {
     const scratchRoot = join(REPO_ROOT, '.tmp');
     mkdirSync(scratchRoot, { recursive: true });

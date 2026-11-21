@@ -1,6 +1,7 @@
-import type { ProjectScheduledAction } from '@simple-agent-manager/shared';
+import { type ProjectScheduledAction, TASK_TERMINAL_STATUSES } from '@simple-agent-manager/shared';
 
 import { projectDataPorts } from './ports';
+import { ScheduleTargetEndedError } from './project-event-schedules-target-ended';
 import { ProjectEventValidationError } from './project-events-contracts';
 import {
   grantEndedReason,
@@ -38,9 +39,11 @@ export function requireScheduleTarget(sql: SqlStorage, sessionId: string): strin
     typeof target.task_id !== 'string' ||
     (target.status !== 'active' && target.status !== 'sleeping')
   ) {
-    throw new ProjectEventValidationError(
-      'Scheduled target session is no longer active or recoverable'
-    );
+    // Only a chat that exists and has stopped is evidence it ended. A missing row or a chat
+    // with no task is not, so those stay ordinary validation failures.
+    const ended = Boolean(target) && typeof target?.task_id === 'string';
+    const Refusal = ended ? ScheduleTargetEndedError : ProjectEventValidationError;
+    throw new Refusal('Scheduled target session is no longer active or recoverable');
   }
   return target.task_id;
 }
@@ -173,10 +176,7 @@ export async function requireScheduleAction(
   )
     .bind(userId, targetTaskId, projectId, action.sessionId, ...wakeable)
     .first<{ id: string; user_id: string | null }>();
-  if (!task)
-    throw new ProjectEventValidationError(
-      'Scheduled target or creator authority is no longer active'
-    );
+  if (!task) return throwScheduleTargetRefusal(env, projectId, targetTaskId, action.sessionId);
   // A cancellation or archive may land during either distributed read.
   if (requireScheduleTarget(sql, action.sessionId) !== targetTaskId) {
     throw new ProjectEventValidationError('Scheduled target task changed during admission');
@@ -191,3 +191,38 @@ export async function requireScheduleAction(
   );
   return { targetTaskId, writer };
 }
+
+/**
+ * Say which condition refused a scheduled message (rule 74): the target chat's task has ended,
+ * or the creator may no longer write to it. Runs only after the combined check above refused,
+ * so a schedule that is allowed to fire pays no extra read.
+ */
+async function throwScheduleTargetRefusal(
+  env: Env,
+  projectId: string,
+  targetTaskId: string,
+  sessionId: string
+): Promise<never> {
+  const row = await env.DATABASE.prepare(
+    `SELECT status FROM tasks WHERE id = ? AND project_id = ? AND chat_session_id = ? LIMIT 1`
+  )
+    .bind(targetTaskId, projectId, sessionId)
+    .first<Record<string, unknown>>();
+  const status = typeof row?.status === 'string' ? row.status : null;
+  // Only a task that exists and is finished is evidence the chat ended first.
+  if (status !== null && (TASK_TERMINAL_STATUSES as readonly string[]).includes(status)) {
+    throw new ScheduleTargetEndedError(SCHEDULE_TARGET_TASK_ENDED);
+  }
+  // A live task means the creator lost the right to write to it. Anything else (a missing or
+  // rebound task row, a task back in draft) proves neither, so it keeps the combined refusal.
+  if (status !== null && projectDataPorts().tasks.wakeableStatuses.includes(status)) {
+    throw new ProjectEventValidationError(SCHEDULE_CREATOR_AUTHORITY_ENDED);
+  }
+  throw new ProjectEventValidationError(SCHEDULE_TARGET_OR_CREATOR_ENDED);
+}
+
+export const SCHEDULE_TARGET_TASK_ENDED = 'The chat it was meant to message had already ended';
+export const SCHEDULE_CREATOR_AUTHORITY_ENDED =
+  'Schedule creator can no longer message the target chat';
+export const SCHEDULE_TARGET_OR_CREATOR_ENDED =
+  'Scheduled target or creator authority is no longer active';

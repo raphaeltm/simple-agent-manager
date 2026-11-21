@@ -11,7 +11,6 @@ import {
   parseStoredResolvedReservationJson,
   ResourceRequirementsValidationError,
 } from '@simple-agent-manager/scheduler-core';
-import type { CredentialProvider } from '@simple-agent-manager/shared';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Hono } from 'hono';
@@ -27,6 +26,8 @@ import { resolveCleanupConfig } from '../scheduled/node-cleanup/config';
 import { buildDeploymentEnvironmentResponse } from '../services/deployment-environment-summary';
 import { cleanupDeploymentNode } from '../services/deployment-node-cleanup';
 import { provisionDeploymentNode } from '../services/deployment-provisioning';
+import { resolveVolumePlacementConstraint } from '../services/deployment-volume-placement';
+export { resolveVolumePlacementConstraint } from '../services/deployment-volume-placement';
 import {
   attachEnvironmentVolumesToLinkedNode,
   detachEnvironmentVolumes,
@@ -43,11 +44,6 @@ import {
   markEnvironmentStopped,
   teardownLinkedDeploymentNode,
 } from './deployment-environment-stop';
-
-interface VolumePlacementConstraint {
-  provider: CredentialProvider;
-  location: string;
-}
 
 async function requireDeploymentEnvironment(
   db: DeploymentDb,
@@ -84,26 +80,6 @@ async function cleanupDeploymentNodeIfUnassigned(
     retryAfterMs: config.failureBackoffMs,
     requestTimeoutMs: config.stoppedHandoffRequestTimeoutMs,
   });
-}
-
-export function resolveVolumePlacementConstraint(
-  volumes: schema.DeploymentVolumeRow[]
-): VolumePlacementConstraint | null {
-  const first = volumes[0];
-  if (!first) return null;
-
-  for (const volume of volumes) {
-    if (volume.providerName !== first.providerName || volume.location !== first.location) {
-      throw errors.conflict(
-        'Deployment environment volumes must all use the same provider and location before the environment can be started.'
-      );
-    }
-  }
-
-  return {
-    provider: first.providerName as CredentialProvider,
-    location: first.location,
-  };
 }
 
 async function markEnvironmentStartFailed(

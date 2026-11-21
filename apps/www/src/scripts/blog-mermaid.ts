@@ -45,6 +45,10 @@ const initializeMermaid = (theme: 'light' | 'dark') => {
     startOnLoad: false,
     securityLevel: 'loose',
     theme: 'base',
+    // Mermaid 12 otherwise draws most diagrams in the `neo` look and lays them out
+    // with ELK, a multi-megabyte chunk. Keep the classic dagre rendering.
+    look: 'classic',
+    layout: 'dagre',
     themeVariables:
       theme === 'light' ? LIGHT_THEME_VARIABLES : DARK_THEME_VARIABLES,
     flowchart: {

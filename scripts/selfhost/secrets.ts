@@ -10,11 +10,14 @@
  *   switch --to <provider|auto> [--dry-run]
  *                             seal again with another key provider and move the box over
  *   reseal                    seal again with the same provider (new data key, current KEK)
- *   plaintext [--backups DIR|gs://...|s3://... ...] [--purge --confirm <CELLD_BUCKET> [--min-age-hours N]]
- *                             old deploy versions and backups holding plaintext secrets, what to
- *                             rotate; with --purge, delete the versions celld no longer reads
- *   rotate --all | <key> ... [--dry-run] [--skip-backup] [--jwt-overlap-hours N]
- *          [--stored-lifetime-minutes N]
+ *   plaintext [--backups DIR|gs://...|s3://... ...]
+ *                             read only: where old deploy versions and backups still hold
+ *                             plaintext secrets (names and locations, never values). There is no
+ *                             purge: celld forbids deleting under `deploy/` (finding F10), and
+ *                             rotating the secrets, not deleting copies, is what makes them
+ *                             worthless: run `rotate` (below).
+ *   rotate --all | <key> ... [--dry-run] [--skip-backup | --encryption-key-file <path>]
+ *          [--jwt-overlap-hours N] [--stored-lifetime-minutes N]
  *   rotate --resume | --status
  *                             replace platform keys (rotate-run.ts); --dry-run prints the plan
  *                             and what users notice per key
@@ -30,7 +33,6 @@ import { detectKeyCandidates } from './key-platforms';
 import {
   formatPlaintextReport,
   knownSecrets,
-  purgeVersions,
   scanBackups,
   scanDeployVersions,
   scanRemoteBackups,
@@ -55,9 +57,10 @@ const USAGE = `usage: pnpm selfhost:secrets <command> [--box-env <path>] [--stat
   switch --to <file|gcp-kms|aws-kms|azure-kv|transit|auto> [--dry-run]
                             seal again with another key provider and move the box over
   reseal                    seal again with the same provider (new data key, current KEK)
-  plaintext [--backups DIR|gs://...|s3://... ...] [--purge --confirm <CELLD_BUCKET> [--min-age-hours N]]
-                            old deploy versions and backups holding plaintext secrets
-  rotate --all | <key> ... [--dry-run] [--skip-backup] [--jwt-overlap-hours N] [--stored-lifetime-minutes N]
+  plaintext [--backups DIR|gs://...|s3://... ...]
+                            read only: old deploy versions and backups holding plaintext secrets
+  rotate --all | <key> ... [--dry-run] [--skip-backup | --encryption-key-file <path>]
+         [--jwt-overlap-hours N] [--stored-lifetime-minutes N]
   rotate --resume | --status
                             replace platform keys; --dry-run prints the plan and what users notice
 
@@ -71,9 +74,6 @@ function parseCommandLine() {
         'box-env': { type: 'string' },
         'state-dir': { type: 'string' },
         backups: { type: 'string', multiple: true },
-        purge: { type: 'boolean', default: false },
-        confirm: { type: 'string' },
-        'min-age-hours': { type: 'string' },
         'key-copy': { type: 'string' },
         to: { type: 'string' },
         'dry-run': { type: 'boolean', default: false },
@@ -83,6 +83,8 @@ function parseCommandLine() {
         'skip-backup': { type: 'boolean', default: false },
         'jwt-overlap-hours': { type: 'string' },
         'stored-lifetime-minutes': { type: 'string' },
+        // The backup a rotation takes first is encrypted like every backup (backup-lib.ts).
+        'encryption-key-file': { type: 'string' },
         help: { type: 'boolean', short: 'h', default: false },
       },
     });
@@ -113,6 +115,7 @@ function positiveNumber(
   }
   return n;
 }
+
 const envFile = resolve(values['box-env'] ?? join(SELFHOST_DIR, '.env'));
 assertPrivateFile(envFile);
 const box = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
@@ -125,7 +128,7 @@ const [command, argument] = positionals;
 try {
   switch (command) {
     case 'status':
-      for (const line of describeKeyStatus(box, stateDir)) console.log(line);
+      for (const line of await describeKeyStatus(box, stateDir)) console.log(line);
       for (const line of await cloudKeyWarnings(box, stateDir, detectKeyCandidates)) {
         console.log(line);
       }
@@ -185,18 +188,6 @@ try {
           ? scanRemoteBackups(ctx, location, secrets)
           : scanBackups(resolve(process.env.INIT_CWD ?? process.cwd(), location), secrets)
       );
-      if (values.purge) {
-        const hours =
-          values['min-age-hours'] === undefined ? undefined : Number(values['min-age-hours']);
-        if (hours !== undefined && !(Number.isFinite(hours) && hours >= 0)) {
-          throw new Error('--min-age-hours must be a number of hours (0 or more)');
-        }
-        const result = purgeVersions(ctx, secrets, values.confirm, {
-          minAgeMs: hours === undefined ? undefined : hours * 3600_000,
-        });
-        for (const prefix of result.deleted) console.log(`deleted ${prefix}`);
-        for (const line of result.skipped) console.log(`kept ${line}`);
-      }
       const lines = formatPlaintextReport(
         box.CELLD_BUCKET ?? '',
         scanDeployVersions(ctx, secrets),
@@ -211,7 +202,13 @@ try {
         for (const line of formatRotationStatus(stateDir)) console.log(line);
         break;
       }
-      const ctx = loadBox(envFile, values['state-dir']);
+      const ctx = loadBox(
+        envFile,
+        values['state-dir'],
+        values['encryption-key-file']
+          ? resolve(process.env.INIT_CWD ?? process.cwd(), values['encryption-key-file'])
+          : undefined
+      );
       await runRotate(
         {
           box,

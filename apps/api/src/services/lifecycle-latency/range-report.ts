@@ -31,11 +31,16 @@ import {
   resolveLifecycleLatencySettings,
 } from './watches';
 
-/** Open incident queue states (`ACTIVE_INCIDENT_STATES`, platform-feedback-incidents). */
+/**
+ * Incident queue states that mean the latency defect is still open: the active states
+ * (`ACTIVE_INCIDENT_STATES`, platform-feedback-incidents) plus `watching`, a defect triage chose
+ * to measure rather than fix now.
+ */
 const OPEN_INCIDENT_STATES: readonly InstallationLatencyIncidentState[] = [
   'pending',
   'dispatched',
   'claimed',
+  'watching',
 ];
 
 interface EpisodeRow {

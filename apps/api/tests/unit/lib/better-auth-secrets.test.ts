@@ -13,8 +13,18 @@ import {
   betterAuthSymmetricKey,
 } from '../../../src/lib/better-auth-secrets';
 import { getBetterAuthSecret } from '../../../src/lib/secrets';
+import {
+  enableSelfHostRotationScope,
+  resetSelfHostRotationScopeForTests,
+} from '../../../src/services/encryption-key-fallback';
 import { __resetPlatformConfigCacheForTest } from '../../../src/services/platform-config';
 import { createEnv } from '../../helpers/platform-config-counting-fixture';
+
+// These tests model a self-hosted box: the celld wrapper turns the rotation scope on
+// (selfhost/runtime-secrets.ts registerRotationKeys). Cloudflare, where it stays off, is covered
+// by tests/unit/services/rotation-scope-cloudflare.test.ts.
+beforeEach(() => enableSelfHostRotationScope());
+afterEach(() => resetSelfHostRotationScopeForTests());
 
 // Throwaway test values, long enough that better-auth does not warn about length.
 const ENCRYPTION_KEY = 'test-encryption-key-0000000000000000000000000000';

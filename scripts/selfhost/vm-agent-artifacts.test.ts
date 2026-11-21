@@ -1,13 +1,17 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import {
+  bindMount,
+  buildVmAgentBinaries,
   decideVmAgentPublish,
   isR2NoObjectError,
   parseVmAgentRelease,
   VM_AGENT_BUILD_IMAGE,
+  vmAgentBuildRunArgs,
   vmAgentLegacyKey,
   vmAgentReleaseKey,
 } from './vm-agent-artifacts.js';
@@ -91,15 +95,36 @@ describe('build pins', () => {
       resolve(import.meta.dirname, '../../packages/vm-agent/go.mod'),
       'utf8'
     );
-    const toolchain = /^toolchain go([0-9.]+)$/m.exec(goMod)?.[1];
+    // A module whose minimum is the selected compiler omits the redundant toolchain directive.
+    const toolchain =
+      /^toolchain go([0-9.]+)$/m.exec(goMod)?.[1] ?? /^go ([0-9.]+)$/m.exec(goMod)?.[1];
     expect(toolchain).toBeDefined();
     expect(VM_AGENT_BUILD_IMAGE).toMatch(
       new RegExp(`^golang:${toolchain!.replaceAll('.', '\\.')}-bookworm@sha256:[0-9a-f]{64}$`)
     );
   });
 
+  // Go enables cgo only for a native build: without this the amd64 bytes depend on the
+  // builder's architecture, and the immutable release key refuses the second builder.
+  it('builds with cgo disabled for every target, whatever the builder architecture', () => {
+    const args = vmAgentBuildRunArgs('/src-dir', '/cache-dir', 1000, 1000);
+    const env = args.flatMap((arg, i) => (args[i - 1] === '-e' ? [arg] : []));
+    expect(env).toContain('CGO_ENABLED=0');
+    expect(env).toContain('GOTOOLCHAIN=local');
+    // The Makefile's targets must not set CGO_ENABLED themselves, or the container env is moot.
+    const makefile = readFileSync(
+      resolve(import.meta.dirname, '../../packages/vm-agent/Makefile'),
+      'utf8'
+    );
+    for (const target of ['build-linux-amd64', 'build-linux-arm64']) {
+      const recipe = new RegExp(`^${target}:\\n\\t(.*)$`, 'm').exec(makefile)?.[1];
+      expect(recipe).toContain('$(GO) build');
+      expect(recipe).not.toContain('CGO_ENABLED');
+    }
+  });
+
   it("treats only celld's missing-object error for this exact key and bucket as absent", () => {
-    // Captured from celld 0.6.3 on the T4 box (`celld r2 get workspaces-dev-assets agents/nope`).
+    // Captured from celld 0.6.3 on a GCS-backed box (`celld r2 get workspaces-dev-assets agents/nope`).
     const real = 'Error: no object "agents/nope" in r2 bucket "workspaces-dev-assets"';
     const logged = `2026-11-10T19:36:40Z  INFO object_store::gcp::credential: fetching token\n${real}\n`;
     expect(isR2NoObjectError(logged, 'workspaces-dev-assets', 'agents/nope')).toBe(true);
@@ -109,5 +134,24 @@ describe('build pins', () => {
     expect(
       isR2NoObjectError('Error: no node leases in the bucket', 'workspaces-dev-assets', 'k')
     ).toBe(false);
+  });
+});
+
+describe('docker bind mounts', () => {
+  it('refuses a cache dir containing a comma before creating or mounting anything', () => {
+    const cacheDir = join(tmpdir(), `sam-go-cache-${process.pid},readonly=false`);
+    expect(() =>
+      buildVmAgentBinaries('/nonexistent-repo', cacheDir, {
+        release: RELEASE,
+        buildDate: '2026-11-10T12:23:48Z',
+      })
+    ).toThrow(/may not contain a comma/);
+    expect(existsSync(cacheDir)).toBe(false);
+  });
+
+  it('renders a plain path, and refuses a comma on either side', () => {
+    expect(bindMount('/state/go-cache', '/cache')).toBe('type=bind,src=/state/go-cache,dst=/cache');
+    expect(() => bindMount('/state/a,dst=/etc', '/cache')).toThrow(/comma/);
+    expect(() => bindMount('/state/a', '/cache,ro')).toThrow(/comma/);
   });
 });

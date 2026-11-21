@@ -46,7 +46,7 @@ export const DEFAULT_GUIDED_LOGIN_INSTANCE_TYPE = 'basic';
  * in the Docker socket's group; sharing it with celld (the egress fence's uid) or sam-mx would put
  * that process on the far side of the boundary the proxy exists to enforce.
  */
-export const DEFAULT_DOCKER_PROXY_UID = 7103;
+export const DEFAULT_DOCKER_PROXY_UID = 7104;
 const DEFAULT_SAM_MX_UID = 7102;
 
 const INSTANCE_TYPES = new Set([

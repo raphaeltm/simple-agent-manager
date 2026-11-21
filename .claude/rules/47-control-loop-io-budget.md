@@ -169,6 +169,12 @@ until the budget refreshes and must not silently drop the candidate.
     `NodeLifecycleWorkspaceDeletionQueue.schedule`, passed by `sweepStaleStoppedWorkspaces`.
     Test it through the real cron after real failed attempts, and assert the entry is
     unchanged (`tests/workers/scheduled-node-cleanup.test.ts`).
+    The same holds inside one owner: a refusal re-check cadence must not replace a failed
+    attempt's backoff. Incident (2026-11-20): `handleCleanupFailure` logged a one-hour
+    backoff, then its own refusal diagnosis rewrote it to five minutes, so two production
+    nodes failed every 5-10 minutes for five days (436 of 700 sampled API errors). Fix:
+    `failureRetryAt` in `scheduled/node-cleanup/cleanup-outcome.ts`; two-sweep test in
+    `tests/unit/services/node-cleanup-never-requested-placeholder.test.ts`.
 
 ## Required Tests
 

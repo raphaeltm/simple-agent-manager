@@ -8,7 +8,11 @@ import { isExpiredTask, type SessionUndeliveredPrompt } from '@simple-agent-mana
 
 import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
-import { userMessageAttribution, userMessageDelivery } from './message-attribution';
+import {
+  userMessageAttribution,
+  userMessageDelivery,
+  userMessageInboxReply,
+} from './message-attribution';
 import {
   samNoticeForMessage,
   systemRowNoticeForMessage,
@@ -235,6 +239,7 @@ export function chatMessagesToConversationItems(
     if (msg.role === 'user') {
       const attribution = userMessageAttribution(msg, undelivered.get(msg.id));
       const delivery = userMessageDelivery(msg);
+      const inboxReply = userMessageInboxReply(msg);
       const item: ConversationItem = {
         kind: 'user_message',
         id: msg.id,
@@ -243,6 +248,7 @@ export function chatMessagesToConversationItems(
         origin: msg.origin === 'system' ? 'system' : 'user',
         ...(attribution ? { attribution } : {}),
         ...(delivery ? { delivery } : {}),
+        ...(inboxReply ? { inboxReply } : {}),
       };
       // A message SAM delivered renders as a notice row, not as the owner's bubble.
       const notice = samNoticeForMessage(msg);

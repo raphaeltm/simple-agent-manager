@@ -10,7 +10,6 @@
     "dev": "wrangler dev --port ${WRANGLER_PORT:-8787}",
     "test": "vitest run",
     "test:debugging-workers": "vitest run --config vitest.debugging.workers.config.ts",
-    "test:hosted-git": "vitest run --config vitest.hosted-git.config.ts",
     "test:workers": "node tests/workers/run-workers-tests.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -19,7 +18,8 @@
     "openapi:generate": "tsx scripts/generate-openapi.ts",
     "openapi:check": "tsx scripts/generate-openapi.ts --check",
     "deploy": "wrangler deploy",
-    "deploy:staging": "wrangler deploy --env staging"
+    "deploy:staging": "wrangler deploy --env staging",
+    "test:hosted-git": "vitest run --config vitest.hosted-git.config.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "2.0.87",
@@ -29,7 +29,7 @@
     "@cloudflare/sandbox": "0.12.10",
     "@cloudflare/workers-oauth-provider": "1.2.4",
     "@hono/node-server": "1.19.9",
-    "@hono/valibot-validator": "0.6.1",
+    "@hono/valibot-validator": "0.6.2",
     "@mastra/core": "1.84.0",
     "@modelcontextprotocol/server": "2.3.1",
     "@remix-run/multipart-parser": "1.1.1",
@@ -51,7 +51,6 @@
     "better-auth-cloudflare": "0.3.1",
     "drizzle-orm": "catalog:",
     "hono": "4.13.4",
-    "isomorphic-git": "1.44.12",
     "jose": "catalog:",
     "pako": "^2.1.0",
     "tsx": "catalog:",

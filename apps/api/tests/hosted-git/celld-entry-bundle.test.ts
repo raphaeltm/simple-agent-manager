@@ -10,7 +10,13 @@
  */
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync } from 'node:fs';
+import { resolve as scratchResolve } from 'node:path';
+const tmpdir = () => {
+  const dir = scratchResolve(import.meta.dirname, '../../../../.tmp');
+  mkdirSync(dir, { recursive: true });
+  return dir;
+};
 import { join, resolve } from 'node:path';
 
 import * as TOML from '@iarna/toml';
@@ -31,36 +37,36 @@ const scratch = mkdtempSync(join(tmpdir(), 'sam-celld-entry-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 describe('generated celld project', () => {
+  // Plain (legacy-plaintext) and sealed: the sealed entry wraps every handler and Durable Object
+  // with runtime-secrets-socket.ts, which imports `cloudflare:sockets` (scripts/selfhost/key-service.ts).
   it.each([
-    ['sealed (runtime secrets)', true],
     ['plain', false],
-  ])(
-    'bundles in %s mode with the HostedGitRepo binding',
-    async (_mode, runtimeSecrets) => {
-      const plan = buildCelldConfig(
-        TOML.parse(readFileSync(join(API_DIR, 'wrangler.toml'), 'utf8')) as unknown as WranglerToml,
-        { main: CELLD_MAIN, baseDomain: 'box.example.com' }
-      );
-      const projectDir = join(scratch, runtimeSecrets ? 'sealed' : 'plain');
-      prepareCelldProject({ apiDir: API_DIR, projectDir, plan, runtimeSecrets });
-      writeCelldConfig(projectDir, plan.config);
+    ['sealed', true],
+  ])('bundles the %s entry with the HostedGitRepo binding', async (name, runtimeSecrets) => {
+    const plan = buildCelldConfig(
+      TOML.parse(readFileSync(join(API_DIR, 'wrangler.toml'), 'utf8')) as unknown as WranglerToml,
+      { main: CELLD_MAIN, baseDomain: 'box.example.com' }
+    );
+    const projectDir = join(scratch, name);
+    prepareCelldProject({ apiDir: API_DIR, projectDir, plan, runtimeSecrets });
+    writeCelldConfig(projectDir, plan.config);
+    const entry = readFileSync(join(projectDir, CELLD_MAIN), 'utf8');
+    expect(entry.includes('runtime-secrets-socket.ts')).toBe(runtimeSecrets);
 
-      const celld = await ensureCelldBinary(join(tmpdir(), 'sam-celld-bin'));
-      const result = spawnSync(
-        celld,
-        ['deploy', projectDir, '--dry-run', '--bucket', 's3://dry-run-not-written'],
-        {
-          encoding: 'utf8',
-          timeout: 300_000,
-          env: { ...process.env, CELLD_ESBUILD: resolveEsbuild(API_DIR) },
-        }
-      );
-      const output = `${result.stdout}${result.stderr}`;
-      expect(result.status, output.slice(-4000)).toBe(0);
-      expect(output).toContain('Bundled workspaces-api');
-      expect(output).toMatch(/env\.HOSTED_GIT \(HostedGitRepo\)\s+Durable Object \(SQLite\)/);
-      expect(output).toMatch(/env\.HOSTED_GIT_BACKEND \(Text\)/);
-    },
-    600_000
-  );
+    const celld = await ensureCelldBinary(join(tmpdir(), 'sam-celld-bin'));
+    const result = spawnSync(
+      celld,
+      ['deploy', projectDir, '--dry-run', '--bucket', 's3://dry-run-not-written'],
+      {
+        encoding: 'utf8',
+        timeout: 300_000,
+        env: { ...process.env, CELLD_ESBUILD: resolveEsbuild(API_DIR) },
+      }
+    );
+    const output = `${result.stdout}${result.stderr}`;
+    expect(result.status, output.slice(-4000)).toBe(0);
+    expect(output).toContain('Bundled workspaces-api');
+    expect(output).toMatch(/env\.HOSTED_GIT \(HostedGitRepo\)\s+Durable Object \(SQLite\)/);
+    expect(output).toMatch(/env\.HOSTED_GIT_BACKEND \(Text\)/);
+  }, 600_000);
 });

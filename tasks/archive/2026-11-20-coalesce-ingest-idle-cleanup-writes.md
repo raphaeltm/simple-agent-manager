@@ -1,0 +1,110 @@
+# Coalesce the idle-cleanup deadline extension on chat ingest
+
+SAM task `01M7W2DZ0EM364H7QSF7PXKW3C`. Item D of idea `01M7CX61WVX72T7CFQNRTX0DVM`.
+
+## Problem
+
+Raphaël, 2026-11-20: "Start it. Get it tested in staging." (merge to production not yet
+authorized). Chat ingest (`persistMessageBatch`) is about 44% of the ProjectData Durable Object
+rows written in production (2026-11-19 readout, ~14.6 writes per call). Most of a batch's writes
+are bookkeeping, not messages.
+
+Measured locally in real workerd (merged single-row assistant batch, prompting turn, idle-cleanup
+schedule armed — the production shape), each batch writes 12 rows:
+
+| Statement                                                                | Rows |
+| ------------------------------------------------------------------------ | ---: |
+| `chat_messages` append                                                   |    1 |
+| `chat_sessions` counters + `updated_at` (3 indexes include `updated_at`) |    4 |
+| `idle_cleanup_schedule` deadline extension (`resetIdleCleanup`)          |    3 |
+| `session_state` activity/work clocks                                     |    2 |
+| `workspace_activity` upsert                                              |    1 |
+| native alarm re-arm (`recalculateAlarm`)                                 |    1 |
+
+The idle-cleanup extension and the alarm re-arm it triggers (4 of 12) run on every batch, although
+the deadline moves by only a few seconds each time against a 15-minute timeout.
+
+## Research findings
+
+- `resetIdleCleanup()` (`packages/project-data/src/do/idle-cleanup.ts`) rewrites `cleanup_at`,
+  `retry_count`, `last_error` whenever a schedule is armed; `cleanup_at` is indexed, so 3 rows.
+  The batch path then calls `recalculateAlarm()` (1 native alarm write).
+- Callers: batch ingest (`persistMessageBatchWithSideEffects`), single-message persist
+  (`runPersistedMessageSideEffects`), accepted prompt delivery (`durability-foundation.ts`). Only
+  the batch path is hot; the others are once per human/delivered prompt and stay exact.
+- Readers of `cleanup_at`: `processExpiredCleanups` (`cleanup_at <= now`, and
+  `idleDurationMs = now - (cleanup_at - timeout)` for diagnostics), `computeIdleCleanupAlarmTime`,
+  session list (`session-reads.ts`, displayed countdown).
+- Condition vs signal (rule 74): the condition is "no message for the idle timeout"; the signal
+  is `cleanup_at`. Coalescing must never make cleanup fire before `last message + timeout`.
+  Design: when the stored deadline already covers `now + timeout`, skip the write; when it does
+  not, write `now + timeout + interval`. Cleanup is therefore never early and at most `interval`
+  late. A schedule in retry (`retry_count > 0` or `last_error`) is always rewritten, as today.
+- Rejected for this change (state in PR):
+  - `chat_sessions.updated_at`: the D1 summary delta (`SESSION_SUMMARY_DELTA_SQL`) depends on
+    every write advancing it; widening its floor would re-upsert active sessions to D1 on every
+    5 s sync, costing more D1 writes than the DO writes saved.
+  - `workspace_activity.last_message_at`: read by task reconciliation as last activity with a
+    5-minute idle threshold; a stale value moves checks earlier.
+  - `session_state` clocks: read by the probe CAS, the sleep idle clock and the stale-turn bound.
+- Tunables go in the admin settings registry (rule 07). The batch path already resolves the chat
+  ingest settings through `projectDataPorts().operations.messageMergeConfig`; the interval joins
+  that config (`MessageMergeConfig`), default in `DEFAULT_MESSAGE_MERGE_CONFIG`.
+
+## Implementation checklist
+
+- [x] `resetIdleCleanup(sql, env, sessionId, options?)`: optional `extendIntervalMs` (absent or 0 =
+      today's exact behaviour); skip when the armed, non-retrying deadline already covers
+      `now + timeout`; otherwise write `now + timeout + interval`. Report whether it wrote.
+- [x] Batch path passes the configured interval and recalculates the alarm only after a write.
+- [x] `MessageMergeConfig.idleExtendIntervalMs` + default (60 s) in `DEFAULT_MESSAGE_MERGE_CONFIG`.
+- [x] Admin setting `chat.idleCleanupExtendIntervalMs` (0–300000), resolved in `operationsPort`.
+- [x] Tests (real workerd, real RPC): steady batches within the interval write no idle rows and
+      no alarm; a batch after the interval extends; deadline never earlier than
+      `last message + timeout`; retry state still reset; interval 0 restores per-batch writes;
+      single-message and prompt-delivery paths unchanged; row-cost profile snapshot updated.
+- [x] Discrimination: remove the skip, confirm the coalescing tests go red.
+- [x] Docs: admin settings guide / any doc describing idle cleanup extension.
+
+## Acceptance criteria
+
+- [x] A steady merged batch inside the interval writes 4 fewer rows (idle 3 + alarm 1) in real workerd.
+- [x] Idle cleanup never fires before `last message + timeout`; at most `interval` later.
+- [x] Setting the interval to 0 restores the per-batch extension exactly.
+- [x] Staging: measured `persistMessageBatch` writes per call before and after on a real agent
+      chat, and the idle cleanup still fires for an idle task session. (Writes: A 14.25 → B 10.2
+      rows/call, alarm 1.0 → 0.2. Firing: session sleep removes the schedule on staging first, so
+      firing is covered by the real-alarm Workers test; live deadline = last message + 60 min 22.8 s.)
+- [x] Merge authorization: policy d60830e2 (a direct change request authorizes merge once every
+      gate passes). The earlier "ask before merge" item was the agent's own over-reading.
+
+## Implementation notes
+
+- Measured in workerd (merged steady batch, prompting, idle armed): 12 rows → 8 rows, 0 alarm writes.
+- Discrimination: disabling the skip turned exactly the 2 coalescing tests red; removing the retry
+  conjuncts turned exactly the retry test red.
+- `project-data-ingest-cost` snapshot changed only in the idle-schedule SELECT text (the fixture has
+  no armed schedule, so its write counts are unchanged).
+- The two archive Workers tests that failed in a 32-file parallel run pass alone (timeouts under load).
+- `idleDurationMs` in the idle-terminal diagnostic is derived from `cleanup_at - timeout`, so it can
+  understate idle time by up to the interval. Diagnostic text only.
+- Review round (cloudflare-specialist, task-completion-validator, constitution-validator; no CRITICAL/HIGH):
+  added a real-alarm test on a controlled clock (no sweep before last batch + timeout, sweep after
+  the stored deadline), an unmocked-default test, an admin-settings override-to-0 test through
+  `updateAdminSettings`, retry cases for error-only and count-only, an upper bound on steady
+  batches, a NaN guard, and a wider (2 s) interval in the re-extension test. An early-biased
+  mutant (skip within `covered - interval`, write `covered`) turns 3 tests red, including the
+  real-alarm test. The prompt-delivery caller (`durability-foundation.ts`) passes no option; its
+  code path is unchanged and not separately tested here.
+
+## Staging verification (2026-11-20, PR #2939)
+
+- Deploy Staging 44729205336 on c07b419f2 succeeded. The deployed setting reads 60000 with source `default`.
+- A/B, same deploy, Test Project 1. Merging on; row-usage window 60 s; restored afterwards.
+  - Row usage: A (interval 0) 52 calls, 741 rows, 52 alarm writes = 14.25 rows/call. B (60 s) 10 calls,
+    102 rows, 2 alarm writes = 10.2 rows/call.
+  - Billed `durableObjectsPeriodicGroups` for the project DO: A run 862 rows, B run 450 rows.
+- Run C (defaults): `cleanupAt` = last message + 60 min 22.8 s (`SESSION_IDLE_TIMEOUT_MINUTES` = 60).
+- Staging logged only 2 `row_usage` windows across the runs, with sampling at 1. Diagnostic tooling gap, outside this change.
+- Playwright smoke: desktop and mobile pages 200, no overflow. The only errors were 404 lookups of a
+  slept session's workspace, which is pre-existing sleep behaviour.

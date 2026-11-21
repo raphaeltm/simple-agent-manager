@@ -383,3 +383,36 @@ func TestCollectorRetainsComposeProjectIdentity(t *testing.T) {
 		})
 	}
 }
+
+// Exercise Compose resource validation through the production collection entry point.
+func TestComposeMemoryCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		memory  string
+		wantErr string
+	}{
+		{name: "valid limits", memory: "    mem_limit: 512m\n    mem_reservation: 256m\n"},
+		{name: "negative limit", memory: "    mem_limit: -1\n", wantErr: "mem_limit"},
+		{name: "negative reservation", memory: "    mem_reservation: -1\n", wantErr: "mem_reservation"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			compose := "services:\n  web:\n    build: ./app\n" + tc.memory
+			root := fixture(t, map[string]string{
+				"compose.yaml":   compose,
+				"app/Dockerfile": "FROM scratch\n",
+				"app/source":     "build input",
+			})
+			if tc.wantErr != "" {
+				_, err := Collect(context.Background(), Options{Root: testRoot(t, root)}, io.Discard)
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("expected %s validation error, got %v", tc.wantErr, err)
+				}
+				return
+			}
+			files := bundle(t, root)
+			if files["app/source"] != "build input" || files["compose.yaml"] != compose {
+				t.Fatal("valid Compose memory settings or build inputs changed during collection")
+			}
+		})
+	}
+}

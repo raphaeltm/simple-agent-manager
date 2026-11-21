@@ -13,7 +13,7 @@ import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
-const SUDO = '/usr/bin/sudo';
+const ROOT = process.getuid?.() === 0;
 const IP = '/usr/sbin/ip';
 const TOOLS = ['/usr/sbin/ip', '/usr/sbin/nft', '/usr/bin/setpriv', '/bin/bash'];
 
@@ -38,13 +38,13 @@ export const PEER_TARGETS = [
 /** Why the lab cannot run here, or null. */
 export function labUnavailableReason(): string | null {
   if (process.platform !== 'linux') return 'not Linux';
-  if (spawnSync(SUDO, ['-n', 'true']).status !== 0) return 'no passwordless sudo';
-  const missing = TOOLS.filter((tool) => spawnSync(SUDO, ['-n', 'test', '-x', tool]).status !== 0);
+  if (!ROOT) return 'requires root in the isolated test runner';
+  const missing = TOOLS.filter((tool) => spawnSync('/usr/bin/test', ['-x', tool]).status !== 0);
   return missing.length > 0 ? `missing ${missing.join(', ')}` : null;
 }
 
 function run(args: string[], input?: string): string {
-  const result = spawnSync(SUDO, ['-n', ...args], { encoding: 'utf8', input });
+  const result = spawnSync(args[0] ?? '/bin/false', args.slice(1), { encoding: 'utf8', input });
   if (result.status !== 0) {
     throw new Error(`${args.join(' ')} failed (${result.status}): ${result.stderr}`);
   }
@@ -53,7 +53,7 @@ function run(args: string[], input?: string): string {
 
 /** Node one-liner: TCP listeners on every address (dual stack) that answer and close. */
 function listenerScript(ports: number[]): string {
-  return `const net=require('net');for(const p of ${JSON.stringify(ports)}){net.createServer(s=>{s.on('error',()=>{});s.end('ok\\n')}).listen(p,'::')}`;
+  return String.raw`const net=require('net'),dgram=require('dgram');for(const p of ${JSON.stringify(ports)}){net.createServer(s=>{s.on('error',()=>{});s.end('ok\n')}).listen(p,'::');if(p===53){const u=dgram.createSocket('udp4');u.on('message',(b,r)=>u.send(b,r.port,r.address));u.bind(p,'0.0.0.0')}}`;
 }
 
 export class NetnsLab {
@@ -117,7 +117,7 @@ export class NetnsLab {
   /** A long-running root process in `ns`; stopped by teardown. */
   spawn(ns: string, args: string[], env: Record<string, string> = {}): ChildProcess {
     const envArgs = Object.entries(env).map(([name, value]) => `${name}=${value}`);
-    const child = spawn(SUDO, ['-n', IP, 'netns', 'exec', ns, 'env', ...envArgs, ...args], {
+    const child = spawn(IP, ['netns', 'exec', ns, 'env', ...envArgs, ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     this.children.push(child);
@@ -136,19 +136,8 @@ export class NetnsLab {
         ? []
         : ['/usr/bin/setpriv', `--reuid=${uid}`, `--regid=${uid}`, '--clear-groups'];
     const result = spawnSync(
-      SUDO,
-      [
-        '-n',
-        IP,
-        'netns',
-        'exec',
-        ns,
-        ...asUser,
-        'env',
-        '-i',
-        'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
-        ...args,
-      ],
+      IP,
+      ['netns', 'exec', ns, ...asUser, 'env', '-i', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin', ...args],
       { encoding: 'utf8', input }
     );
     return { status: result.status ?? 1, output: `${result.stdout}${result.stderr}` };
@@ -163,12 +152,12 @@ export class NetnsLab {
       } catch {
         continue; // already gone
       }
-      if (cmdline.includes(fragment)) spawnSync(SUDO, ['-n', 'kill', '-KILL', pid]);
+      if (cmdline.includes(fragment)) spawnSync('/bin/kill', ['-KILL', pid]);
     }
   }
 
   private pids(ns: string): string[] {
-    const result = spawnSync(SUDO, ['-n', IP, 'netns', 'pids', ns], { encoding: 'utf8' });
+    const result = spawnSync(IP, ['netns', 'pids', ns], { encoding: 'utf8' });
     return (result.stdout ?? '').split('\n').filter(Boolean);
   }
 
@@ -178,13 +167,12 @@ export class NetnsLab {
 
   teardown(): void {
     for (const child of this.children) {
-      if (child.pid !== undefined)
-        spawnSync(SUDO, ['-n', 'pkill', '-KILL', '-P', String(child.pid)]);
+      if (child.pid !== undefined) spawnSync('/usr/bin/pkill', ['-KILL', '-P', String(child.pid)]);
       child.kill('SIGKILL');
     }
     for (const ns of [this.fenced, this.peer]) {
-      for (const pid of this.pids(ns)) spawnSync(SUDO, ['-n', 'kill', '-KILL', pid]);
-      spawnSync(SUDO, ['-n', IP, 'netns', 'del', ns]);
+      for (const pid of this.pids(ns)) spawnSync('/bin/kill', ['-KILL', pid]);
+      spawnSync(IP, ['netns', 'del', ns]);
     }
   }
 }

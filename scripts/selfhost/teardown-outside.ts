@@ -3,9 +3,6 @@
  * which teardown cannot reach. Each is printed with the place to click or the command to run and
  * listed as "left for you" in the summary.
  */
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-
 import type { TeardownContext } from './teardown-box';
 import { both, type Item, STEPS } from './teardown-model';
 
@@ -83,60 +80,5 @@ export function outsideItems(ctx: TeardownContext): Item[] {
       plan: operator('you created them by hand (README, Inbound agent email)'),
     });
   }
-  const { provider, gcpKey } = keyChoice(ctx.stateDir);
-  if (provider === 'gcp-kms' && gcpKey) {
-    // Listed from the box's recorded choice: the bootstrap that made the key may have run
-    // elsewhere (Cloud Shell), so its record is not here. teardown.ts drops this item when the
-    // bootstrap's own record or discovery already lists the same key.
-    const project = /^projects\/([^/]+)\//.exec(gcpKey)?.[1] ?? '<project>';
-    items.push({
-      id: `outside:gcp-kms:${gcpKey}`,
-      place: 'outside SAM',
-      what: `the Cloud KMS key ${gcpKey} that seals this box, and the box VM account's grant on it (not recorded on this box)`,
-      provenance: 'from the setup steps',
-      how: `where the bootstrap ran (its .state/created-resources.json is there, for example Cloud Shell): pnpm selfhost:gcp-bootstrap -- --project ${project} --api-url https://api.${domain} --teardown (add --destroy-key-versions <key> to schedule the key's destruction); README, Removing what setup created`,
-      step: STEPS.outside,
-      plan: {
-        'keep-data': { act: 'keep', why: 'keep my data keeps the key' },
-        'remove-everything': ctx.options.destroyKey
-          ? { act: 'operator', why: 'not recorded on this box; remove it where it was created' }
-          : { act: 'keep', why: 'pass --destroy-key to be told how to delete it' },
-      },
-      forGood: 'every sealed bundle and every backup sealed with it becomes unrecoverable',
-    });
-  }
-  if (provider === 'aws-kms' || provider === 'azure-kv') {
-    items.push({
-      id: `outside:${provider}`,
-      place: 'outside SAM',
-      what: `the ${provider === 'aws-kms' ? 'AWS KMS' : 'Azure Key Vault'} key that seals this box`,
-      provenance: 'from the setup steps',
-      how: 'README, Removing what setup created: the AWS or Azure commands',
-      step: STEPS.outside,
-      plan: {
-        'keep-data': { act: 'keep', why: 'keep my data keeps the key' },
-        'remove-everything': ctx.options.destroyKey
-          ? { act: 'operator', why: 'you created it; no bootstrap for this cloud yet' }
-          : { act: 'keep', why: 'pass --destroy-key to be told how to delete it' },
-      },
-      forGood: 'every sealed bundle and every backup sealed with it becomes unrecoverable',
-    });
-  }
   return items;
-}
-
-function keyChoice(stateDir: string): { provider: string | null; gcpKey: string | null } {
-  try {
-    const choice = JSON.parse(
-      readFileSync(join(stateDir, 'key-agent', 'choice.json'), 'utf8')
-    ) as unknown;
-    const { provider, settings } = choice as { provider?: unknown; settings?: unknown };
-    const key = (settings as { SAM_GCP_KMS_KEY?: unknown } | undefined)?.SAM_GCP_KMS_KEY;
-    return {
-      provider: typeof provider === 'string' ? provider : null,
-      gcpKey: typeof key === 'string' && key ? key : null,
-    };
-  } catch {
-    return { provider: null, gcpKey: null };
-  }
 }

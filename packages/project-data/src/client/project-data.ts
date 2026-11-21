@@ -1112,7 +1112,7 @@ export async function getMessages(
   roles?: string[],
   compact: boolean = false,
   order: 'asc' | 'desc' = 'desc'
-): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
+): Promise<Awaited<ReturnType<ProjectData['getMessages']>>> {
   const owner = await resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId);
   return callProjectDataOwnerWithRetry(
     env,
@@ -2369,7 +2369,7 @@ export async function listInboxItemCommentThreads(
   env: Env,
   projectId: string,
   input: ListInboxItemCommentThreadsInput
-): Promise<{ threads: InboxItemCommentThread[]; hasMore: boolean }> {
+): Promise<{ threads: InboxItemCommentThread[]; hasMore: boolean; scanCursor: number | null }> {
   return callProjectDataWithRetry(
     env,
     projectId,
@@ -2865,6 +2865,17 @@ export async function getSessionState(env: Env, projectId: string, sessionId: st
     projectId,
     'getSessionState',
     (stub) => stub.getSessionState(sessionId),
+    'idempotent_read'
+  );
+}
+
+/** Awake chats whose agent is mid-turn (`do/session-state-read.ts`). */
+export async function listWorkingChatSessionIds(env: Env, projectId: string): Promise<string[]> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'listWorkingChatSessionIds',
+    (stub) => stub.listWorkingChatSessionIds(),
     'idempotent_read'
   );
 }
@@ -3556,6 +3567,26 @@ export async function recordQuestionAsked(
     projectId,
     'recordQuestionAsked',
     (stub) => stub.recordQuestionAsked(input),
+    'mutation'
+  );
+}
+
+/**
+ * The person archived a pending ACP interaction (a permission, form or link request) from their
+ * inbox: it leaves the inbox, its marker stays unresolved, and the interaction stays pending and
+ * answerable in the chat. Returns rows changed (0 when already archived or resolved).
+ */
+export async function archiveInteractionMarker(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  markerId: string
+): Promise<number> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'archiveInteractionMarkerFromInbox',
+    (stub) => stub.archiveInteractionMarkerFromInbox(sessionId, markerId),
     'mutation'
   );
 }

@@ -121,6 +121,7 @@ export function createOperationPorts(env: Env): OperationPorts {
       resolveTranscriptOwner: (...a) => projectData.resolveTranscriptOwner(env, ...a),
       getMailboxMessage: (...a) => projectData.getMailboxMessage(env, ...a),
       listActiveAttentionMarkers: (...a) => projectData.listActiveAttentionMarkers(env, ...a),
+      listWorkingChatSessionIds: (...a) => projectData.listWorkingChatSessionIds(env, ...a),
       getRunReceiptFacts: (...a) => projectData.getRunReceiptFacts(env, ...a),
       countRunNudges: (...a) => projectData.countRunNudges(env, ...a),
       searchKnowledgeObservations: (...a) => projectData.searchKnowledgeObservations(env, ...a),
@@ -173,11 +174,16 @@ export function createOperationPorts(env: Env): OperationPorts {
       authorizeSend: async (userId, projectId, sessionId) => {
         const authorized = await authorizeSendChat(env, userId, projectId, sessionId);
         return {
-          send: (body, ...assertEffectAllowed) =>
-            sendChat(env, userId, projectId, sessionId, body, authorized, ...assertEffectAllowed),
+          send: (body, assertEffectAllowed, inboxReply) =>
+            sendChat(env, userId, projectId, sessionId, body, authorized, {
+              assertEffectAllowed,
+              inboxReply,
+            }),
         };
       },
       validateSendContent: validateSendChatContent,
+      getInboxReplyDelivery: (projectId, deliveryId) =>
+        projectData.getMailboxMessage(env, projectId, deliveryId),
       stop: (...a) => stopChat(env, ...a),
       interrupt: (...a) => interruptChat(env, ...a),
       answerAttention: (...a) => answerAttention(env, ...a),

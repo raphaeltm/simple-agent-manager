@@ -1,5 +1,8 @@
 import { configureProjectDataPort } from '@simple-agent-manager/project-data';
-import { processPromptDeliveryAlarm } from '@simple-agent-manager/project-data/internal/do/durability-foundation';
+import {
+  acceptPromptDelivery as acceptPromptDeliveryWithHooks,
+  processPromptDeliveryAlarm,
+} from '@simple-agent-manager/project-data/internal/do/durability-foundation';
 import type { DurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
 import * as mailbox from '@simple-agent-manager/project-data/internal/do/mailbox';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
@@ -136,6 +139,52 @@ describe('ProjectData durable prompt delivery', () => {
       Date.now()
     );
   }
+
+  it.each(['inbox_reply', 'user_followup'] as const)(
+    'broadcasts %s with the same whitespace as its canonical transcript',
+    async (sourceKind) => {
+      const content = '  Please explain this.\n\nKeep the indentation.  ';
+      const expected = sourceKind === 'inbox_reply' ? content : content.trim();
+      const broadcastEvent = vi.fn();
+      const accepted = await acceptPromptDeliveryWithHooks(
+        sql,
+        {},
+        {
+          getProjectId: () => null,
+          transactionSync: (callback) => db.transaction(callback)(),
+          waitUntil: () => {},
+          recalculateAlarm: async () => {},
+          scheduleSummarySync: () => {},
+          broadcastEvent,
+          armIdleCleanup: () => {},
+          nudgeDeliveries: () => 0,
+        },
+        {
+          targetSessionId: 'chat-1',
+          displayContent: content,
+          deliveryContent: `SAM delivery guidance\n\n${content}`,
+          senderType: 'human',
+          senderId: 'user-1',
+          messageClass: 'deliver',
+          sourceKind,
+          ttlMs: config.ttlMs,
+        }
+      );
+      const transcript = sql
+        .exec('SELECT content FROM chat_messages WHERE id = ?', accepted.transcriptMessageId)
+        .toArray()[0];
+      expect(transcript?.content).toBe(expected);
+      expect(broadcastEvent).toHaveBeenCalledWith(
+        'message.new',
+        expect.objectContaining({
+          sessionId: 'chat-1',
+          messageId: accepted.transcriptMessageId,
+          content: expected,
+        }),
+        'chat-1'
+      );
+    }
+  );
 
   function acceptParentWake(deliveryId: string) {
     acceptPromptDelivery(

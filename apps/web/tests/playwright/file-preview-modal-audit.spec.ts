@@ -2,7 +2,12 @@ import { deflateSync } from 'node:zlib';
 
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-import { assertNoOverflow, screenshot, setupProjectChatMocks } from './audit-helpers';
+import {
+  assertNoOverflow,
+  assertNoScrollingGlassPanes,
+  screenshot,
+  setupProjectChatMocks,
+} from './audit-helpers';
 
 const PROJECT_ID = 'proj-preview-v2';
 const SESSION_ID = 'sess-preview-v2';
@@ -446,6 +451,7 @@ async function openModalAndCapture(page: Page, fileName: string, screenshotName:
   await page.waitForTimeout(700);
   await screenshot(page, screenshotName);
   await assertNoOverflow(page);
+  await assertNoScrollingGlassPanes(page);
   await page.getByRole('button', { name: 'Close preview' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
 }

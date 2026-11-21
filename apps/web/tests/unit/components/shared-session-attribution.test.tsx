@@ -57,25 +57,28 @@ describe('user message attribution', () => {
     expect(screen.queryByTestId('user-message-attribution')).toBeNull();
   });
 
-  it('names a teammate who sent a prompt through shared access', () => {
-    renderRows([
-      userRow(
-        'shared',
-        delivery({
-          source: 'user_followup',
-          userId: 'grantee-1',
-          senderName: 'Ana Ruiz',
-          onBehalfOfUserId: 'owner-1',
-          grantId: 'grant-1',
-        })
-      ),
-    ]);
+  it.each(['user_followup', 'inbox_reply'])(
+    'names a teammate who sent %s through shared access',
+    (source) => {
+      renderRows([
+        userRow(
+          'shared',
+          delivery({
+            source,
+            userId: 'grantee-1',
+            senderName: 'Ana Ruiz',
+            onBehalfOfUserId: 'owner-1',
+            grantId: 'grant-1',
+          })
+        ),
+      ]);
 
-    expect(screen.getByTestId('user-message-attribution')).toHaveTextContent(
-      'Ana Ruiz · shared access'
-    );
-    expect(screen.getByText('Message shared')).toBeInTheDocument();
-  });
+      expect(screen.getByTestId('user-message-attribution')).toHaveTextContent(
+        'Ana Ruiz · shared access'
+      );
+      expect(screen.getByText('Message shared')).toBeInTheDocument();
+    }
+  );
 
   it('names a teammate whose scheduled message arrived, and marks it scheduled', () => {
     renderRows([

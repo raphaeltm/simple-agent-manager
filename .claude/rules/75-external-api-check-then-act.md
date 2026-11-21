@@ -117,6 +117,8 @@ Tells:
    (`packages/repo-hosting/src/github-app-branches.ts`) already solved this class against the GitHub API,
    treating a `422` on create as `status: 'exists'`. Match the existing shape.
 
+- A setup conflict must read and validate the existing resource's installation identity before updating it. For OIDC providers, refuse a different issuer; never repoint another installation's trust after an HTTP 409. Test two installations sharing one cloud project and provider name, alongside a same-installation retry.
+
 ## Required Tests
 
 - **The race, per tolerated code:** lookup returns empty, create returns the conflict,

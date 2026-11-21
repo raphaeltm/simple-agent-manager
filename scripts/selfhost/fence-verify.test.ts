@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { buildProbeScript, parseProbeOutput, type ProbeOutcome } from './fence-probes.js';
 import {
   attestationProblem,
+  boxAttestationProblem,
   dnsChainAddresses,
   judgeTargets,
   missingNameservers,
@@ -39,6 +40,24 @@ const results = (...outcomes: ProbeOutcome[]): Map<number, ProbeOutcome> =>
   new Map(outcomes.map((outcome, index) => [index, outcome]));
 
 describe('verify-fence judging', () => {
+  it('rejects missing control output even when every workload denial is correct', () => {
+    expect(judgeTargets([LOCAL], results('blocked', 'blocked'), results()).failures).toEqual([
+      'control probe results are incomplete',
+    ]);
+  });
+
+  it('compares IPv6 resolver spellings by address value and keeps IPv4 matching unchanged', () => {
+    expect(
+      missingNameservers(
+        ['2001:4860:4860:0:0:0:0:8888', '8.8.8.8'],
+        ['2001:4860:4860::8888', '8.8.8.8']
+      )
+    ).toEqual([]);
+    expect(
+      missingNameservers(['2001:4860:4860::8844', '1.1.1.1'], ['2001:4860:4860::8888', '8.8.8.8'])
+    ).toEqual(['2001:4860:4860::8844', '1.1.1.1']);
+  });
+
   it('probes every forbidden target over TCP and UDP, an allowed one over TCP', () => {
     expect(probeSpecs([LOCAL, LEASE])).toEqual([
       { host: '127.0.0.1', port: 7001, protocol: 'tcp' },
@@ -113,7 +132,7 @@ describe('verify-fence judging', () => {
     expect(judgeTargets([LEASE], results('blocked'), results('open')).failures).toEqual([
       'node tunnel lease port (127.0.0.1:20000) should be reachable: blocked',
     ]);
-    expect(judgeTargets([LOCAL], new Map(), new Map()).failures).toEqual([
+    expect(judgeTargets([LOCAL], new Map(), results('open', 'refused')).failures).toEqual([
       'celld operator listener (127.0.0.1:7001) is NOT fenced: UDP no result',
     ]);
   });
@@ -234,7 +253,7 @@ describe('verify-fence and the mail collector', () => {
       localAddresses: [],
     });
     expect(targets).toContainEqual({
-      label: 'mail collector SMTP',
+      label: 'SMTP relay',
       host: '127.0.0.1',
       port: 1025,
       expect: 'reachable',
@@ -347,5 +366,56 @@ describe('probe script classification (real bash, canned kernel errors)', () => 
     expect(verdict.failures).toEqual([
       'private-v4 (10.255.255.1:80) is NOT fenced: UDP unreachable',
     ]);
+  });
+});
+
+describe('public resolver verification', () => {
+  it('permits public resolver TCP and UDP without a false non-DNS denial expectation', async () => {
+    const targets = await verifyTargets({
+      box: {},
+      range: RANGE,
+      publicProbe: '1.1.1.1:443',
+      localAddresses: [],
+      resolvConf: 'nameserver 1.1.1.1\n',
+    });
+    const dns = targets.filter((t) => t.host === '1.1.1.1' && t.port === 53);
+    expect(dns).toHaveLength(2);
+    expect(dns.every((t) => t.expect === 'reachable')).toBe(true);
+    expect(targets.some((t) => t.host === '1.1.1.1' && t.port === 2019)).toBe(false);
+  });
+});
+
+describe('configured attestation age', () => {
+  it('honors longer and shorter box settings and the compose default', () => {
+    const text = 'ok 1000\n';
+    expect(
+      boxAttestationProblem(text, 1003, { SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS: '5' })
+    ).toBeNull();
+    expect(
+      boxAttestationProblem(text, 1002, { SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS: '1' })
+    ).toMatch(/limit 1s/);
+    expect(boxAttestationProblem(text, 1002, {})).toBeNull();
+    expect(boxAttestationProblem(text, 1003, {})).toMatch(/limit 2s/);
+    expect(boxAttestationProblem(text, 999, {})).toMatch(/future/);
+  });
+  it.each(['0', '-1', '0.5', 'bad', '9007199254740992'])('refuses invalid age %s', (age) => {
+    expect(() =>
+      boxAttestationProblem('ok 1000', 1000, { SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS: age })
+    ).toThrow(/positive integer/);
+  });
+});
+
+it('checks a configured private SMTP relay as a positive control', async () => {
+  const targets = await verifyTargets({
+    box: { SMTP_HOST: '10.42.0.5', SMTP_TLS: 'tls', SMTP_FROM: 'sign-in@sam.example.com' },
+    range: { start: 20000, end: 29999 },
+    publicProbe: '1.1.1.1:443',
+    localAddresses: [],
+  });
+  expect(targets).toContainEqual({
+    label: 'SMTP relay',
+    host: '10.42.0.5',
+    port: 465,
+    expect: 'reachable',
   });
 });

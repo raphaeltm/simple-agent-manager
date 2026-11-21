@@ -1,10 +1,7 @@
 #!/usr/bin/env node
-// Fake `gcloud` for gcp-bootstrap.test.ts: the IAM, workload identity, Compute and Cloud KMS
-// commands deploy/selfhost/gcp-bootstrap.sh and gcp-teardown.sh run. State is one JSON file
-// ($STATE/gcp.json), so a later run sees what an earlier one did; every call is appended to
-// $STATE/calls. Cloud KMS follows the documented rules: a version is deleted only once DESTROYED,
-// a key only with no versions left, a ring only with no keys left; a restored version comes back
-// DISABLED and must be enabled; `primary` names the key's primary version (empty: none).
+// Fake `gcloud` for gcp-bootstrap.test.ts: the IAM and workload identity commands
+// deploy/selfhost/gcp-bootstrap.sh runs. State is one JSON file ($STATE/gcp.json), so a later run
+// sees what an earlier one did; every call is appended to $STATE/calls.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -14,70 +11,93 @@ appendFileSync(join(STATE, 'calls'), `${args.join(' ')}\n`);
 const file = join(STATE, 'gcp.json');
 const db = existsSync(file)
   ? JSON.parse(readFileSync(file, 'utf8'))
-  : { pools: {}, providers: {}, accounts: {}, bindings: [], rings: {}, keys: {} };
-// Compute and Cloud Storage for teardown.test.ts: instances, disks, firewall rules, objects.
-db.instances ??= [];
-db.disks ??= {};
-db.firewalls ??= {};
-db.objects ??= {};
-const save = () => writeFileSync(file, JSON.stringify(db, null, 2));
+  : { pools: {}, providers: {}, accounts: {}, bindings: [] };
+const save = () => {
+  writeFileSync(file, JSON.stringify(db, null, 2));
+  if (
+    process.env.FAKE_GCLOUD_AFTER_GRANT &&
+    cmd.startsWith(process.env.FAKE_GCLOUD_AFTER_GRANT) &&
+    !existsSync(join(STATE, 'grant-effect'))
+  ) {
+    writeFileSync(join(STATE, 'grant-effect'), cmd);
+    if (process.env.FAKE_GCLOUD_GRANT_FAILURE === 'kill') process.kill(process.ppid, 'SIGKILL');
+    else process.exit(1);
+  }
+};
 const flag = (name) => {
   const hit = args.find((a) => a.startsWith(`--${name}=`));
   if (hit) return hit.slice(name.length + 3);
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? args[i + 1] : undefined;
 };
-const words = args.filter(
-  (a, i) =>
-    !a.startsWith('--') && !(args[i - 1] ?? '').match(/^--(key|keyring|location|project|zone)$/)
-);
+const words = args.filter((a, i) => !a.startsWith('--') && (args[i - 1] ?? '') !== '--project');
 const cmd = words.slice(0, 4).join(' ');
 const fail = (message) => {
   process.stderr.write(`ERROR: ${message}\n`);
   process.exit(1);
 };
 const out = (text) => process.stdout.write(`${text}\n`);
-// FAKE_GCLOUD_DENY: a regex over the command; matching calls fail as an account without the
-// permission would (the box VM's own service account, for example).
-if (process.env.FAKE_GCLOUD_DENY && new RegExp(process.env.FAKE_GCLOUD_DENY).test(args.join(' '))) {
-  fail(`(gcloud.${words.slice(0, 3).join('.')}) PERMISSION_DENIED: Permission denied on resource`);
+// FAKE_GCLOUD_FAIL_ONCE=<command prefix>: the first matching call fails, as a new service
+// account's first IAM binding does on real GCP while it propagates.
+const failOnce = process.env.FAKE_GCLOUD_FAIL_ONCE;
+if (failOnce && cmd.startsWith(failOnce) && !existsSync(join(STATE, 'failed-once'))) {
+  writeFileSync(join(STATE, 'failed-once'), cmd);
+  fail('Service account does not exist (propagating)');
 }
 const format = flag('format') ?? '';
-// $STATE/fail-once holds one operation that fails the first time it is attempted (resume tests).
-function failOnce(operation) {
-  const marker = join(STATE, 'fail-once');
-  if (existsSync(marker) && readFileSync(marker, 'utf8').trim() === operation) {
-    writeFileSync(marker, '');
-    fail(`injected failure: ${operation}`);
-  }
-}
-const keyPath = (key) => `${flag('keyring')}/${key ?? flag('key')}`;
-
-function binding(add) {
-  const resource = cmd.startsWith('kms keys') ? `key:${keyPath(words[3])}` : `project:${words[2]}`;
-  const entry = `${resource} ${flag('role')} ${flag('member')}`;
-  if (add) {
-    if (!db.bindings.includes(entry)) db.bindings.push(entry);
-  } else {
-    if (!db.bindings.includes(entry)) fail(`policy has no binding ${entry}`);
-    db.bindings = db.bindings.filter((b) => b !== entry);
-  }
-  save();
-}
 
 if (cmd.startsWith('projects describe')) out('123456789012');
 else if (cmd.startsWith('services enable')) save();
-else if (cmd.startsWith('iam workload-identity-pools providers')) {
-  const [, , , op, id] = words;
+else if (cmd.startsWith('compute firewall-rules')) {
+  const [, , op, id] = words;
+  db.firewalls ??= {};
   if (op === 'describe') {
+    if (!db.firewalls[id]) fail('NOT_FOUND');
+    if (format === 'value(id)') out(db.firewalls[id].id);
+    else out(JSON.stringify(db.firewalls[id]));
+  } else if (op === 'create') {
+    if (db.firewalls[id]) fail('already exists');
+    db.firewalls[id] = {
+      id: String(Object.keys(db.firewalls).length + 100),
+      name: id,
+      description: flag('description'),
+      targetTags: flag('target-tags').split(','),
+      sourceRanges: flag('source-ranges').split(','),
+      allowed: flag('allow'),
+    };
+    save();
+  } else fail(`unexpected ${cmd}`);
+} else if (cmd.startsWith('iam workload-identity-pools providers')) {
+  const [, , , op, id] = words;
+  const pool = flag('workload-identity-pool');
+  if (op === 'list') {
+    // value(name,oidc.issuerUri): the full resource name, a tab, the issuer.
+    for (const [providerId, provider] of Object.entries(db.providers)) {
+      if (provider.pool !== pool) continue;
+      const name = `projects/123456789012/locations/global/workloadIdentityPools/${pool}/providers/${providerId}`;
+      out(`${name}\t${provider.issuer ?? ''}`);
+    }
+  } else if (op === 'describe') {
     if (!db.providers[id]) fail('not found');
+    if (format === 'value(name)')
+      out(`projects/123456789012/locations/global/workloadIdentityPools/${pool}/providers/${id}`);
     if (format.includes('issuerUri')) out(db.providers[id].issuer);
     if (format.includes('state')) out(db.providers[id].state ?? 'ACTIVE');
+    if (format.includes('attributeCondition')) out(db.providers[id].condition ?? '');
+    if (format.includes('disabled')) out(db.providers[id].disabled ? 'True' : 'False');
+    if (format.includes('allowedAudiences')) out(db.providers[id].audience ?? '');
   } else if (op === 'create-oidc') {
-    db.providers[id] = { issuer: flag('issuer-uri') };
+    db.providers[id] = {
+      issuer: flag('issuer-uri'),
+      pool,
+      condition: flag('attribute-condition'),
+      audience: flag('allowed-audiences'),
+    };
     save();
-  } else if (op === 'delete') {
-    delete db.providers[id];
+  } else if (op === 'update-oidc') {
+    if (!db.providers[id]) fail('not found');
+    db.providers[id].condition = flag('attribute-condition');
+    db.providers[id].audience = flag('allowed-audiences');
     save();
   } else fail(`unexpected ${cmd}`);
 } else if (cmd.startsWith('iam workload-identity-pools')) {
@@ -85,163 +105,66 @@ else if (cmd.startsWith('iam workload-identity-pools providers')) {
   if (op === 'describe') {
     // A deleted pool still describes, with state DELETED, for 30 days (as Google keeps it).
     if (!db.pools[id]) fail('not found');
-    if (format.includes('description')) out(db.pools[id].description);
+    if (format === 'value(name)')
+      out(`projects/123456789012/locations/global/workloadIdentityPools/${id}`);
     if (format.includes('state')) out(db.pools[id].state ?? 'ACTIVE');
+    if (format.includes('disabled')) out(db.pools[id].disabled ? 'True' : 'False');
   } else if (op === 'create') {
     db.pools[id] = { description: flag('description') };
     save();
-  } else if (op === 'delete') {
-    delete db.pools[id];
-    save();
   } else fail(`unexpected ${cmd}`);
-} else if (cmd.startsWith('iam service-accounts add-iam-policy-binding')) save();
-else if (cmd.startsWith('iam service-accounts')) {
+} else if (cmd.startsWith('iam service-accounts add-iam-policy-binding')) {
+  const email = words[3];
+  db.saBindings = db.saBindings ?? {};
+  const members = (db.saBindings[email] = db.saBindings[email] ?? []);
+  const member = flag('member');
+  if (flag('role') === 'roles/iam.workloadIdentityUser' && !members.includes(member)) {
+    members.push(member);
+  }
+  save();
+} else if (cmd.startsWith('iam service-accounts keys list')) {
+  // --managed-by=user --format=json: the keys a test put in saKeys; FAKE_GCLOUD_KEYS_RAW replaces
+  // the output entirely (malformed-output tests).
+  if (process.env.FAKE_GCLOUD_KEYS_RAW !== undefined) {
+    process.stdout.write(process.env.FAKE_GCLOUD_KEYS_RAW);
+  } else {
+    out(JSON.stringify(db.saKeys?.[flag('iam-account')] ?? []));
+  }
+} else if (cmd.startsWith('iam service-accounts get-iam-policy')) {
+  // --format=json, as real gcloud prints a policy: the workloadIdentityUser members this fake
+  // recorded, plus any bindings a test put in saExtraBindings. FAKE_GCLOUD_POLICY_RAW replaces
+  // the output entirely (malformed-output tests).
+  if (process.env.FAKE_GCLOUD_POLICY_RAW !== undefined) {
+    process.stdout.write(process.env.FAKE_GCLOUD_POLICY_RAW);
+  } else {
+    const email = words[3];
+    const bindings = [...(db.saExtraBindings?.[email] ?? [])];
+    const wiu = db.saBindings?.[email] ?? [];
+    if (wiu.length > 0) bindings.push({ role: 'roles/iam.workloadIdentityUser', members: wiu });
+    out(JSON.stringify({ etag: 'BwYfake=', version: 1, ...(bindings.length ? { bindings } : {}) }));
+  }
+} else if (cmd.startsWith('iam service-accounts')) {
   const [, , op, id] = words;
   const email = id.includes('@') ? id : `${id}@${flag('project')}.iam.gserviceaccount.com`;
   if (op === 'describe') {
     if (!db.accounts[email]) fail('not found');
-    if (format.includes('description')) out(db.accounts[email].description);
+    if (format === 'value(uniqueId)') out(db.accounts[email].uniqueId ?? '123456789');
+    if (format.includes('disabled')) out(db.accounts[email].disabled ? 'True' : 'False');
   } else if (op === 'create') {
     db.accounts[email] = { description: flag('description') };
     save();
-  } else if (op === 'delete') {
-    delete db.accounts[email];
-    save();
   } else fail(`unexpected ${cmd}`);
-} else if (cmd.startsWith('projects add-iam-policy-binding')) binding(true);
-else if (cmd.startsWith('projects remove-iam-policy-binding')) binding(false);
-else if (cmd.startsWith('compute instances list')) {
-  // Only the label filter teardown uses is modelled; without --filter every VM is listed.
-  const filter = flag('filter');
-  out(
-    JSON.stringify(
-      filter
-        ? db.instances.filter((i) => i.labels?.managed === 'simple-agent-manager')
-        : db.instances
-    )
-  );
-} else if (cmd.startsWith('compute instances describe') && format === 'json') {
-  const hit = db.instances.find((i) => i.name === words[3] && i.zone.endsWith(`/${flag('zone')}`));
-  if (!hit) fail(`The resource '${words[3]}' was not found`);
-  out(JSON.stringify(hit));
-} else if (cmd.startsWith('compute instances delete')) {
-  failOnce(`instances delete ${words[3]}`);
-  const hit = db.instances.find((i) => i.name === words[3]);
-  if (!hit) fail(`The resource '${words[3]}' was not found`);
-  for (const d of hit.disks ?? []) if (d.autoDelete) delete db.disks[d.source.split('/').pop()];
-  for (const d of hit.disks ?? []) {
-    const disk = db.disks[d.source.split('/').pop()];
-    if (disk) disk.users = [];
+} else if (cmd.startsWith('projects get-iam-policy')) {
+  if (process.env.FAKE_GCLOUD_PROJECT_POLICY_RAW !== undefined) {
+    process.stdout.write(process.env.FAKE_GCLOUD_PROJECT_POLICY_RAW);
+    process.exit(0);
   }
-  db.instances = db.instances.filter((i) => i !== hit);
+  const bindings = db.bindings
+    .filter((x) => x.startsWith(`project:${words[2]} `))
+    .map((x) => ({ role: x.split(' ')[1], members: [x.split(' ')[2]] }));
+  out(JSON.stringify({ bindings: [...bindings, ...(db.projectExtraBindings ?? [])] }));
+} else if (cmd.startsWith('projects add-iam-policy-binding')) {
+  const entry = `project:${words[2]} ${flag('role')} ${flag('member')}`;
+  if (!db.bindings.includes(entry)) db.bindings.push(entry);
   save();
-} else if (cmd.startsWith('compute disks describe')) {
-  const disk = db.disks[words[3]];
-  if (!disk) fail('not found');
-  out((disk.users ?? []).join(';'));
-} else if (cmd.startsWith('compute disks delete')) {
-  if (!db.disks[words[3]]) fail('not found');
-  delete db.disks[words[3]];
-  save();
-} else if (cmd.startsWith('compute firewall-rules describe')) {
-  if (!db.firewalls[words[3]]) fail('not found');
-  out(format === 'json' ? JSON.stringify({ name: words[3], ...db.firewalls[words[3]] }) : words[3]);
-} else if (cmd.startsWith('compute firewall-rules delete')) {
-  delete db.firewalls[words[3]];
-  save();
-} else if (cmd.startsWith('storage ls')) {
-  const prefix = (args.find((a) => a.startsWith('gs://')) ?? '').replace(/\*\*$/, '');
-  const hits = Object.keys(db.objects).filter((k) => k.startsWith(prefix));
-  if (hits.length === 0) fail('(gcloud.storage.ls) One or more URLs matched no objects.');
-  for (const k of hits) out(`${String(db.objects[k]).padStart(10)}  2026-11-12T00:00:00Z  ${k}`);
-} else if (cmd.startsWith('storage rm')) {
-  failOnce('storage rm');
-  for (const url of args.filter((a) => a.startsWith('gs://'))) delete db.objects[url];
-  save();
-} else if (cmd.startsWith('compute instances describe')) {
-  if (format.includes('email')) out(process.env.FAKE_BOX_SA ?? '');
-  else out(process.env.FAKE_BOX_SCOPES ?? 'https://www.googleapis.com/auth/cloud-platform');
-} else if (cmd.startsWith('kms keyrings')) {
-  const [, , op, ring] = words;
-  if (op === 'describe') {
-    if (!db.rings[ring]) fail('not found');
-  } else if (op === 'create') {
-    db.rings[ring] = {};
-    save();
-  } else if (op === 'delete') {
-    if (Object.keys(db.keys).some((k) => k.startsWith(`${ring}/`))) fail('key ring is not empty');
-    delete db.rings[ring];
-    save();
-  } else fail(`unexpected ${cmd}`);
-} else if (cmd.startsWith('kms keys versions')) {
-  const [, , , op, version] = words;
-  const key = db.keys[keyPath()];
-  if (!key) fail('key not found');
-  if (op === 'list') {
-    for (const [n, state] of Object.entries(key.versions)) {
-      out(`projects/p/locations/l/keyRings/r/cryptoKeys/k/cryptoKeyVersions/${n}\t${state}`);
-    }
-  } else if (op === 'destroy') {
-    key.versions[version] = 'DESTROY_SCHEDULED';
-    save();
-  } else if (op === 'restore') {
-    if (key.versions[version] !== 'DESTROY_SCHEDULED')
-      fail(`version ${version} is ${key.versions[version]}, not DESTROY_SCHEDULED`);
-    key.versions[version] = 'DISABLED';
-    save();
-  } else if (op === 'enable') {
-    if (key.versions[version] !== 'DISABLED')
-      fail(`version ${version} is ${key.versions[version]}`);
-    key.versions[version] = 'ENABLED';
-    save();
-  } else if (op === 'create') {
-    const next = String(Math.max(0, ...Object.keys(key.versions).map(Number)) + 1);
-    key.versions[next] = 'ENABLED';
-    if (args.includes('--primary')) key.primary = next;
-    save();
-  } else if (op === 'delete') {
-    if (key.versions[version] !== 'DESTROYED')
-      fail(`version ${version} is ${key.versions[version]}`);
-    delete key.versions[version];
-    save();
-  } else fail(`unexpected ${cmd}`);
-} else if (cmd.startsWith('kms keys add-iam-policy-binding')) binding(true);
-else if (cmd.startsWith('kms keys remove-iam-policy-binding')) binding(false);
-else if (cmd.startsWith('kms keys list')) {
-  for (const k of Object.keys(db.keys)) if (k.startsWith(`${flag('keyring')}/`)) out(k);
-} else if (cmd.startsWith('kms keys')) {
-  const [, , op, id] = words;
-  const path = keyPath(id);
-  if (op === 'describe') {
-    if (!db.keys[path]) fail('not found');
-    const key = db.keys[path];
-    // Keys from before primary versions were modelled have version 1 as primary.
-    const primary = 'primary' in key ? key.primary : '1';
-    if (format.includes('labels.sam-install')) out(key.labels['sam-install'] ?? '');
-    if (format.includes('primary.state')) out(primary ? (key.versions[primary] ?? '') : '');
-    if (format.includes('primary.name')) {
-      out(
-        primary ? `projects/p/locations/l/keyRings/r/cryptoKeys/k/cryptoKeyVersions/${primary}` : ''
-      );
-    }
-  } else if (op === 'set-primary-version') {
-    const key = db.keys[path];
-    if (!key) fail('not found');
-    if (key.versions[flag('version')] !== 'ENABLED') fail('version is not enabled');
-    key.primary = flag('version');
-    save();
-  } else if (op === 'create') {
-    const labels = Object.fromEntries(
-      (flag('labels') ?? '')
-        .split(',')
-        .filter(Boolean)
-        .map((p) => p.split('='))
-    );
-    db.keys[path] = { labels, versions: { 1: 'ENABLED' }, primary: '1' };
-    save();
-  } else if (op === 'delete') {
-    if (Object.keys(db.keys[path]?.versions ?? {}).length > 0) fail('key has versions');
-    delete db.keys[path];
-    save();
-  } else fail(`unexpected ${cmd}`);
 } else fail(`fake gcloud: unexpected: ${args.join(' ')}`);

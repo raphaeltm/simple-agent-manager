@@ -74,7 +74,7 @@ exports[`message ingest row cost in real workerd > profiles long-session batches
       },
       {
         "read": 0,
-        "statement": "SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "statement": "SELECT cleanup_at, retry_count, last_error FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
         "written": 0,
       },
       {
@@ -142,7 +142,7 @@ exports[`message ingest row cost in real workerd > profiles long-session batches
       },
       {
         "read": 0,
-        "statement": "SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "statement": "SELECT cleanup_at, retry_count, last_error FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
         "written": 0,
       },
       {
@@ -220,7 +220,7 @@ exports[`message ingest row cost in real workerd > profiles long-session batches
       },
       {
         "read": 0,
-        "statement": "SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "statement": "SELECT cleanup_at, retry_count, last_error FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
         "written": 0,
       },
       {
@@ -298,7 +298,7 @@ exports[`message ingest row cost in real workerd > profiles long-session batches
       },
       {
         "read": 0,
-        "statement": "SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "statement": "SELECT cleanup_at, retry_count, last_error FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
         "written": 0,
       },
       {

@@ -8,6 +8,7 @@ import { resolveTunnelPortRange } from './box-settings.js';
 import {
   ensureMailCollectorPassword,
   mailCollectorEnabled,
+  mailCollectorPorts,
   mailEgressEndpoints,
   renderMailCollectorEnv,
   smtpWorkerVars,
@@ -74,12 +75,10 @@ describe('mail collector profile', () => {
     expect(mailCollectorEnabled({})).toBe(false);
   });
 
-  it('asks the egress fence for the collector SMTP port only when it runs', () => {
-    expect(mailEgressEndpoints(COLLECTOR)).toEqual([{ address: '127.0.0.1', port: 1025 }]);
-    expect(mailEgressEndpoints({ ...COLLECTOR, MAIL_COLLECTOR_SMTP_PORT: '2525' })).toEqual([
-      { address: '127.0.0.1', port: 2525 },
-    ]);
-    expect(mailEgressEndpoints({ COMPOSE_PROFILES: 'tunnel' })).toEqual([]);
+  // docker compose reads `*` as every profile, so the collector runs and the deploy must know.
+  it('is on for COMPOSE_PROFILES=*', () => {
+    expect(mailCollectorEnabled({ COMPOSE_PROFILES: '*' })).toBe(true);
+    expect(mailCollectorEnabled({ COMPOSE_PROFILES: 'tunnel, *' })).toBe(true);
   });
 
   it('keeps node lease ranges off the collector ports even with the collector off', () => {
@@ -186,6 +185,15 @@ describe('writeMailCollectorFiles', () => {
     expect(writeMailCollectorFiles(dir, COLLECTOR, password)).toEqual([]);
   });
 
+  it('replaces a changed env file rather than truncating the one compose may be reading', () => {
+    writeMailCollectorFiles(dir, COLLECTOR, password);
+    const path = join(dir, 'mail-collector.env');
+    const before = statSync(path).ino;
+    writeMailCollectorFiles(dir, { COMPOSE_PROFILES: 'tunnel' }, null);
+    expect(statSync(path).ino).not.toBe(before);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
   it('turning the profile off turns the Caddy route off and removes the password copy', () => {
     writeMailCollectorFiles(dir, COLLECTOR, password);
     writeMailCollectorFiles(dir, { COMPOSE_PROFILES: 'tunnel' }, null);
@@ -232,6 +240,40 @@ describe('collector ports', () => {
     [{ MAIL_COLLECTOR_UI_PORT: '80x' }, 'MAIL_COLLECTOR_UI_PORT must be'],
     [{ MAIL_COLLECTOR_SMTP_PORT: '2525', MAIL_COLLECTOR_UI_PORT: '2525' }, 'must differ'],
   ])('refuses %o', (ports, message) => {
-    expect(() => mailEgressEndpoints({ ...COLLECTOR, ...ports })).toThrow(message);
+    expect(() => mailCollectorPorts({ ...COLLECTOR, ...ports })).toThrow(message);
+  });
+});
+
+describe('SMTP fence endpoints', () => {
+  it.each([
+    [{ SMTP_HOST: '127.0.0.2', SMTP_TLS: 'none', SMTP_PORT: '2525' }, '127.0.0.2', 2525],
+    [{ SMTP_HOST: '[::1]', SMTP_TLS: 'tls' }, '::1', 465],
+    [{ SMTP_HOST: '10.42.0.5' }, '10.42.0.5', 587],
+  ] as const)('uses the Worker routing defaults for %o', async (settings, address, port) => {
+    expect(
+      await mailEgressEndpoints({
+        ...settings,
+        SMTP_FROM: 'sign-in@sam.example.com',
+        SMTP_USERNAME: 'authenticated-relay',
+      })
+    ).toEqual([{ address, port }]);
+  });
+
+  it('resolves every relay address and uses only the configured port', async () => {
+    const queried: string[] = [];
+    expect(
+      await mailEgressEndpoints({ ...RELAY, SMTP_PORT: '2465', SMTP_TLS: 'tls' }, async (host) => {
+        queried.push(host);
+        return ['10.42.0.5', 'fd00::5'];
+      })
+    ).toEqual([
+      { address: '10.42.0.5', port: 2465 },
+      { address: 'fd00::5', port: 2465 },
+    ]);
+    expect(queried).toEqual(['smtp.example.com']);
+  });
+
+  it('fails when a configured relay resolves to no addresses', async () => {
+    await expect(mailEgressEndpoints(RELAY, async () => [])).rejects.toThrow(/did not resolve/);
   });
 });

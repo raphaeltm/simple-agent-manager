@@ -10,13 +10,13 @@
  * A file row opens the library's preview over the chat rather than navigating to the library,
  * the same viewer the chat's document cards open.
  */
-import type { LinkedFile } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
 import { FileText, GitPullRequest, Lightbulb, Link2 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
+import { useLocation } from 'react-router';
 
 import { projectIdeaPath } from '../../lib/project-routes';
-import { LibraryFilePreview } from '../library/LibraryFilePreview';
+import { readLibraryPreview } from '../library/library-preview-context';
 import {
   describeRelations,
   formatCappedTotal,
@@ -65,11 +65,9 @@ function metaLine(...parts: Array<string | null | undefined>): string {
 function LinkedWorkSections({
   projectId,
   linkedWork,
-  onOpenFile,
 }: Readonly<{
   projectId: string;
   linkedWork: SessionLinkedWork;
-  onOpenFile: (file: LinkedFile) => void;
 }>) {
   const { ideas, files, pullRequests } = linkedWork;
   return (
@@ -109,7 +107,9 @@ function LinkedWorkSections({
               accent={FILE_ACCENT}
               title={file.filename}
               meta={metaLine(describeRelations(file.relations), file.directory)}
-              onClick={() => onOpenFile(file)}
+              // Opens over the chat through the app's history-backed preview, so a phone's Back
+              // closes the file and leaves the chat and this panel where they were.
+              libraryFile={{ projectId, fileId: file.fileId, filename: file.filename }}
               testId="linked-work-file"
             />
           ))}
@@ -181,16 +181,17 @@ export function SessionLinkedWorkDrawer({
   onClose,
 }: Readonly<{ projectId: string; linkedWork: SessionLinkedWork; onClose: () => void }>) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const [previewFile, setPreviewFile] = useState<LinkedFile | null>(null);
-  useDialogFocusTrap(panelRef, onClose, previewFile === null);
+  // While a file from this panel is open over it, Tab and Escape belong to that viewer.
+  const previewOpen = readLibraryPreview(useLocation().state) !== null;
+  useDialogFocusTrap(panelRef, onClose, !previewOpen);
 
   // The preview hands focus back to the row that opened it. If a refetch removed that row in
   // the meantime, focus would fall to the page, outside this dialog; keep it in the panel.
   useEffect(() => {
-    if (previewFile === null && !panelRef.current?.contains(document.activeElement)) {
+    if (!previewOpen && !panelRef.current?.contains(document.activeElement)) {
       panelRef.current?.focus();
     }
-  }, [previewFile]);
+  }, [previewOpen]);
 
   const hasItems =
     linkedWork.ideas.items.length > 0 ||
@@ -229,24 +230,11 @@ export function SessionLinkedWorkDrawer({
         ) : linkedWork.isError ? (
           <ErrorState onRetry={linkedWork.refetch} />
         ) : hasItems ? (
-          <LinkedWorkSections
-            projectId={projectId}
-            linkedWork={linkedWork}
-            onOpenFile={setPreviewFile}
-          />
+          <LinkedWorkSections projectId={projectId} linkedWork={linkedWork} />
         ) : (
           <EmptyState />
         )}
       </div>
-
-      {previewFile && (
-        <LibraryFilePreview
-          projectId={projectId}
-          fileId={previewFile.fileId}
-          filename={previewFile.filename}
-          onClose={() => setPreviewFile(null)}
-        />
-      )}
     </GlassSheet>
   );
 }

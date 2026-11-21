@@ -1,9 +1,10 @@
 /** Joint endpoint URL/key snapshot: independent caches can mix remote admin generations. */
-import { log, settleSharedFlight } from '@simple-agent-manager/worker-core';
+import { log } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { resolveD1BindingIdentity } from '../lib/d1-session';
+import { settleSharedFlight } from '../lib/shared-flight';
 import { ADMIN_SETTINGS_CACHE_MAX_MS, AdminSettingsUnavailableError } from './admin-settings-cache';
 import { type AdminSettingName } from './admin-settings-registry';
 import { adminSettingsGeneration, requiredDefinition, resolved } from './admin-settings-resolution';
@@ -82,28 +83,38 @@ async function load(env: Env, db: D1Database): Promise<Snapshot> {
   return { rows: rows.output, credentials };
 }
 
+/** The cached load for this generation, or a fresh one when absent, superseded or expired. */
+function currentEntry(env: Env, db: D1Database, generation: number): Entry {
+  const cached = snapshots.get(db);
+  if (cached?.generation === generation && Date.now() < cached.expiresAt) return cached;
+  const entry: Entry = {
+    generation,
+    expiresAt: Date.now() + ADMIN_SETTINGS_CACHE_MAX_MS,
+    deadlineAt: Date.now() + DEFAULT_CONFIG_READ_TIMEOUT_MS,
+    promise: withDeadline(() => load(env, db), DEFAULT_CONFIG_READ_TIMEOUT_MS),
+  };
+  snapshots.set(db, entry);
+  return entry;
+}
+
+/** Drop `entry` from the cache unless another request has already replaced it. */
+function forgetEntry(db: D1Database, entry: Entry): void {
+  if (snapshots.get(db) === entry) snapshots.delete(db);
+}
+
 /** One atomic batch per isolate TTL, shared across purposes and request-scoped D1 facades. */
 export async function resolveLlmEndpointSettings(env: Env, names: AdminSettingName[]) {
   const db = resolveD1BindingIdentity(env.DATABASE);
   for (let attempt = 0; attempt < 3; attempt++) {
     const generation = adminSettingsGeneration(db);
-    let entry = snapshots.get(db);
-    if (!entry || entry.generation !== generation || Date.now() >= entry.expiresAt) {
-      entry = {
-        generation,
-        expiresAt: Date.now() + ADMIN_SETTINGS_CACHE_MAX_MS,
-        deadlineAt: Date.now() + DEFAULT_CONFIG_READ_TIMEOUT_MS,
-        promise: withDeadline(() => load(env, db), DEFAULT_CONFIG_READ_TIMEOUT_MS),
-      };
-      snapshots.set(db, entry);
-    }
+    const entry = currentEntry(env, db, generation);
     try {
       // Another request may have started this load; on a runtime that drops a disconnected
       // request's I/O it can never settle, so join it with a bound (packages/worker-core
       // shared-flight.ts) and start a fresh load if it was abandoned.
       const joined = await settleSharedFlight(entry.promise, entry.deadlineAt);
       if (joined.abandoned) {
-        if (snapshots.get(db) === entry) snapshots.delete(db);
+        forgetEntry(db, entry);
         continue;
       }
       const snapshot = joined.value;
@@ -116,7 +127,7 @@ export async function resolveLlmEndpointSettings(env: Env, names: AdminSettingNa
       if (Date.now() >= entry.expiresAt) throw new AdminSettingsUnavailableError();
       return values;
     } catch (error) {
-      if (snapshots.get(db) === entry) snapshots.delete(db);
+      forgetEntry(db, entry);
       if (generation !== adminSettingsGeneration(db)) continue;
       throw error;
     }

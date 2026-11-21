@@ -54,7 +54,6 @@ jobs:
     outputs:
       api: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.api }}
       api-unit: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.api-unit }}
-      hosted-git: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.hosted-git }}
       web: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.web }}
       public-site: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.public-site }}
       packages: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.packages }}
@@ -71,6 +70,8 @@ jobs:
       browser-install: ${{ steps.filter.outputs.browser-install }}
       go-modules: ${{ steps.filter.outputs.go-modules }}
       selfhost-email: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.selfhost-email }}
+      # Path-filtered on main pushes too: the live suite runs only for self-host changes (D9).
+      selfhost-live: ${{ steps.filter.outputs.selfhost-live }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -115,8 +116,6 @@ jobs:
             # ci-suite-selection.test.ts scans the tests and their imports for these.
             api-unit:
               - *api
-              - 'scripts/selfhost/**'
-              - 'deploy/selfhost/**'
               # Go sources, Makefile and `go test` runs in cross-boundary contract tests.
               - 'packages/vm-agent/**'
               # Omitted-worker-var defaults scan the tail worker's sources.
@@ -134,24 +133,28 @@ jobs:
               - 'apps/web/src/pages/project-chat/lineageUtils.ts'
               - 'apps/web/src/pages/project-chat/useTaskGroups.ts'
               - 'scripts/deploy/deploy-signing-keys.ts'
+              # Imported by scripts/selfhost/celld-config.ts (below).
+              - 'scripts/deploy/durable-object-migrations.ts'
               - 'scripts/deploy/types.ts'
               - 'scripts/deploy/vapid-keys.ts'
-              - 'scripts/selfhost/observability-migrations.ts'
-              - 'scripts/selfhost/reverse-tunnel-migrations.ts'
-              - 'scripts/selfhost/selfhost-migrations.ts'
+              # API build/conformance tests import the celld generator and its helpers.
+              - 'scripts/selfhost/**'
+              # The sealed-secrets key agent: scripts/selfhost imports its bundle store and providers.
+              - 'deploy/selfhost/key-agent/**'
               # selfhost-inbound-email.test.ts builds this receiver (Self-host Email job only).
               - 'deploy/selfhost/sam-mx/**'
+              # The self-host access-log redaction guard scans the API routes against this filter.
+              - 'deploy/selfhost/caddy/log-redaction.caddy'
+              # gcp-bootstrap-credential.test.ts runs the bootstrap against the fake gcloud and parses
+              # its output with the app's credential parser.
+              - 'deploy/selfhost/gcp-bootstrap.sh'
+              - 'scripts/selfhost/testdata/fake-gcloud-iam.mjs'
               - 'scripts/quality/node-pool-boundary.ts'
               - 'scripts/quality/node-pool-boundary/**'
               - 'tests/fixtures/acp-activity-report-v1.json'
               - 'tests/fixtures/deploy-release/**'
               - 'tests/fixtures/durable-execution-protocol-v1.json'
               - 'tests/fixtures/session-snapshot-restore-transcript-only-v1.json'
-            # The conformance suite also builds the self-host entry/configuration.
-            hosted-git:
-              - *api
-              - 'scripts/selfhost/**'
-              - 'deploy/selfhost/**'
             web:
               - *workspace-root
               - 'apps/web/**'
@@ -160,6 +163,8 @@ jobs:
               - 'packages/terminal/**'
               - 'packages/ui/**'
               - 'tests/fixtures/diagnostic-secret-canaries.json'
+              # The self-host access-log redaction guard scans App.tsx against this filter.
+              - 'deploy/selfhost/caddy/log-redaction.caddy'
             # Storybook (packages/ui) and the public site (apps/www, which depends on ui).
             public-site:
               - *workspace-root
@@ -235,6 +240,8 @@ jobs:
               - 'apps/*/package.json'
               - 'packages/*/package.json'
               - 'packages/vm-agent/Makefile'
+              # scripts/selfhost/vm-agent-artifacts.test.ts pins the Go build image to its go directive.
+              - 'packages/vm-agent/go.mod'
               - 'packages/cli/Makefile'
               - 'apps/installer/scripts/**'
               - 'apps/www/scripts/build-tracker.ts'
@@ -243,11 +250,18 @@ jobs:
               - 'apps/api/scripts/**'
               - 'apps/api/container-entrypoints/**'
               - 'scripts/deploy/**'
-              # Self-hosted (celld) packaging: generator, deploy script, one-box stack.
+              # Self-hosted (celld) packaging: config generator, deploy, upgrade, create-account.
               - 'scripts/selfhost/**'
+              # The box files its static tests read: compose, Caddy fragments and start.sh, frps.toml,
+              # gcp-bootstrap.sh, .env.example.
               - 'deploy/selfhost/**'
-              # The live self-host suite runs the frpc.toml cloud-init renders.
-              - 'packages/cloud-init/src/**'
+              # gcp-bootstrap.test.ts pins the script's APIs and roles to the guided setup's.
+              - 'packages/shared/src/constants/gcp-required-apis.ts'
+              - 'apps/api/src/services/gcp-setup.ts'
+              # ...and what its tests read outside it: the self-host migration projection and the
+              # SMTP settings parser.
+              - 'apps/api/src/selfhost/**'
+              - 'packages/agent-email/src/smtp-config.ts'
               # The generated Worker config is built from wrangler.toml, so its text-binding
               # guard and effective-config tests must run when only wrangler.toml changes.
               - 'apps/api/wrangler.toml'
@@ -330,6 +344,12 @@ jobs:
               - 'apps/api/tests/workers/smtp-client-workerd.test.ts'
               - 'apps/api/tests/workers/support/smtp-native-entry.ts'
               - '.github/workflows/selfhost-email-tests.yml'
+            # Self-host box runtime: the Docker live suite (landing plan D9). Self-host paths
+            # only: not packages/cloud-init (whose frpc.toml one live test renders) and not nightly.
+            selfhost-live:
+              - 'deploy/selfhost/**'
+              - 'scripts/selfhost/**'
+              - 'apps/api/src/selfhost/**'
 
   # One job for the PR-body and PR-content checks. They used to be three jobs that each
   # spent a runner slot on checkout and install for a few seconds of work. Each check
@@ -559,6 +579,11 @@ jobs:
           --coverage --coverage.reporter=text-summary
           --coverage.thresholds.statements=0 --coverage.thresholds.branches=0
           --coverage.thresholds.functions=0 --coverage.thresholds.lines=0
+
+      # One shard owns the real-git suite; the dedicated config launches its own runtime.
+      - name: Hosted git conformance and celld bundle
+        if: matrix.shard == 1
+        run: pnpm --filter @simple-agent-manager/api test:hosted-git
 
       - name: Upload API blob report
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -865,18 +890,15 @@ jobs:
       - name: Enforce source file size limits
         run: pnpm quality:file-sizes
 
-      # The self-host scripts and both self-host suites load API modules (runtime-secrets.ts, the
-      # shared-flight helper), which since the worker package split (#2681) import workspace
-      # packages such as worker-core. Those resolve through their built dist/ (types included),
-      # as `pnpm selfhost:deploy` does after building them (deploy.ts buildApiDependencies), so
-      # build before the scripts typecheck and both suites.
-      - name: Build the API Worker's workspace dependencies
-        run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...
+      # No workspace build here: neither these scripts nor their tests import a workspace package
+      # (the self-host tests that do live in the API unit suite and the Self-host Live job).
+      - name: Install isolated metadata broker SDK
+        run: npm ci --prefix deploy/selfhost/metadata-proxy --ignore-scripts --no-audit --no-fund
 
       - name: Type check deployment scripts
         run: |
-          npx tsc --project scripts/deploy/tsconfig.json --noEmit
-          npx tsc --project scripts/selfhost/tsconfig.json --noEmit
+          pnpm exec tsc --project scripts/deploy/tsconfig.json --noEmit
+          pnpm exec tsc --project scripts/selfhost/tsconfig.json --noEmit
 
       - name: Validate script syntax
         run: |
@@ -890,23 +912,10 @@ jobs:
       - name: Run deploy and quality script tests
         run: pnpm quality:scripts:test
 
-      # Before the self-host suites: rendered rulesets go through `nft -c`, and the egress-fence
-      # live suite installs them in a network namespace and probes them as the fenced and a
-      # control uid (sudo, iproute2, nftables, util-linux setpriv). Both fail, not skip, in CI.
-      - name: Install nftables for the egress-fence tests
-        run: command -v nft >/dev/null || (sudo apt-get update && sudo apt-get install -y --no-install-recommends nftables)
-
-      # celld wrangler.json generator, root-only secret files, pinned versions.
+      # celld wrangler.json generator, plaintext deploy (--init/--dry-run), upgrade, root-only
+      # secret files, pinned versions. No Docker, celld or frp: those run on a box.
       - name: Run self-host packaging tests
         run: pnpm selfhost:test
-
-      # Real Caddy (pinned image, Docker host network) running the box's Caddyfile and sam.d
-      # fragments against stub upstreams, and the pinned frpc/frps 0.72.0 (checksum-verified)
-      # with the generated frpc.toml: gateway 404s and path tricks, X-SAM-* stripping, the 101
-      # Set-Cookie rule, frpc certificate verification, the NewWorkConn plugin payload.
-      # The sealed-secrets live tests bundle the same modules with celld's esbuild.
-      - name: Run self-host live tests (Caddy in Docker, real frp, celld, fence in a namespace)
-        run: pnpm selfhost:live-test
 
       - name: Verify installer engine, runtime integrity and bounded proof contracts
         run: |
@@ -976,7 +985,7 @@ jobs:
       # the start: zero findings on the tree and in 25 sampled commits since February 2026,
       # apart from the original incident, which it reports (scripts/quality/README.md).
       - name: Setup Go for the optional-field check
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: false
@@ -1026,7 +1035,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -1139,10 +1148,10 @@ jobs:
       - code-quality
       - go-vulnerability-diff
       - durable-object-worker-shards
-      - hosted-git
       - pulumi-infra
       - vm-agent-test
       - selfhost-email
+      - selfhost-live
       - cli-test
       - vm-agent-integration
       - devcontainer
@@ -1177,35 +1186,6 @@ jobs:
             exit 1
           fi
           echo "Every CI job passed or was skipped by its path filter."
-
-  # SAM-hosted git exists only in the self-host build: the real git CLI against the HostedGitRepo
-  # Durable Object in Miniflare (apps/api/vitest.hosted-git.config.ts). Gated on the whole API
-  # dependency closure because the route's auth path reaches shared modules (project auth,
-  # workspace callback identity, node callback auth), plus the self-host entry/configuration.
-  hosted-git:
-    name: Hosted git conformance (self-host)
-    needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.hosted-git == 'true'
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build the API Worker's workspace dependencies
-        run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...
-
-      - name: Run hosted git conformance tests
-        run: pnpm --filter @simple-agent-manager/api test:hosted-git
 
   pulumi-infra:
     name: Pulumi Infrastructure Tests
@@ -1244,7 +1224,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: packages/vm-agent/go.sum
@@ -1266,6 +1246,66 @@ jobs:
     if: needs.changes.outputs.selfhost-email == 'true' && !github.event.pull_request.draft
     uses: ./.github/workflows/selfhost-email-tests.yml
 
+  # The box runtime on real software (scripts/selfhost/live): Caddy built from
+  # deploy/selfhost/caddy/Dockerfile running the box's Caddyfile and start.sh (gateway 404s and
+  # path tricks, frp rate limit, X-SAM-* stripping, access log, keep-warm, mail collector), the
+  # pinned frpc/frps with the frpc.toml cloud-init renders, and the pinned celld (guarded fetch,
+  # shared in-flight reads). Needs Docker with host networking; no sudo or nftables.
+  selfhost-live:
+    name: Self-host Live (Docker)
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.selfhost-live == 'true'
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      # No lifecycle scripts: nothing in this job needs one. celld runs esbuild's own bin entry
+      # (celld-binary.ts resolveEsbuild), which finds the platform binary without a postinstall.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # celld bundles API modules (worker-core's shared-flight) through their built dist/, and the
+      # live tests type-check against them.
+      - name: Build the API Worker's workspace dependencies
+        run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...
+
+      - name: Type check the live tests
+        run: pnpm exec tsc --project scripts/selfhost/live/tsconfig.json --noEmit
+
+      - name: Run self-host live tests
+        run: pnpm selfhost:live-test
+
+      - name: Check rendered rules with the production nft binary
+        run: |
+          mkdir -p .tmp
+          pnpm exec tsx --eval '
+            import { writeFileSync } from "node:fs";
+            import { buildFencePlan, renderFenceRuleset } from "./scripts/selfhost/egress-fence.ts";
+            const plan = buildFencePlan({
+              box: { GCE_METADATA_PROXY: "off" },
+              leaseRange: { start: 20000, end: 29999 },
+              resolvConf: "nameserver 127.0.0.53\nnameserver 2001:4860:4860::8888\n",
+              objectStore: [{ address: "127.0.0.1", port: 9000 }],
+              localAddresses: ["127.0.0.1", "::1"],
+            });
+            writeFileSync(".tmp/selfhost-production-fence.nft", renderFenceRuleset(plan));
+          '
+          docker build -t sam-fence-production-parser deploy/selfhost/egress-fence
+          docker run --rm --network none --cap-drop ALL --cap-add NET_ADMIN --mount "type=bind,src=$GITHUB_WORKSPACE/.tmp/selfhost-production-fence.nft,dst=/fixture.nft,readonly" --entrypoint nft sam-fence-production-parser -c -f /fixture.nft
+
+      - name: Run isolated egress fence kernel tests
+        run: |
+          docker build -f deploy/selfhost/egress-fence/Dockerfile.lab -t sam-fence-lab deploy/selfhost/egress-fence
+          docker run --rm --privileged --network none -e SAM_FENCE_LAB=1 -e CI=true -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" sam-fence-lab pnpm exec vitest run --config scripts/selfhost/live/vitest.config.ts fence-netns.live.test.ts
+
   cli-test:
     name: CLI Test
     needs: [changes]
@@ -1276,7 +1316,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -1342,7 +1382,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: packages/vm-agent/go.sum

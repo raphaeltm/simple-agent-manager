@@ -449,29 +449,32 @@ export function AppShell({ children }: AppShellProps) {
                 />
               </ZenPeekRail>
             ) : (
-              /* `overflow-y-auto` is a backstop, not the primary scroller — NavSidebar scrolls
-               itself (it carries `flex-1 min-h-0`). It only engages on very short windows,
-               where the header, search, layout control and footer no longer fit, so sign-out
-               stays reachable. */
+              /* The inner div's `overflow-y-auto` is a backstop, not the primary scroller —
+               NavSidebar scrolls itself (it carries `flex-1 min-h-0`). It only engages on very
+               short windows, where the header, search, layout control and footer no longer
+               fit, so sign-out stays reachable. It sits inside the pane, not on it, so the
+               pane's rim and frost stay put (sam-glass-design-system.md, "Scrolling panes"). */
               <aside
                 ref={desktopSidebarRef}
                 aria-label="Sidebar"
-                className="sam-glass sam-glass-rim relative z-30 flex min-h-0 flex-col overflow-x-hidden overflow-y-auto rounded-[var(--sam-radius-pane)]"
+                className="sam-glass sam-glass-rim relative z-30 flex min-h-0 flex-col overflow-hidden rounded-[var(--sam-radius-pane)]"
                 style={{ gridRow: '1' }}
               >
-                <DesktopSidebar
-                  focusMode={focusMode}
-                  onSelectFocusMode={setFocusMode}
-                  onCycleFocusMode={cycleFocusMode}
-                  onOpenCommandPalette={commandPalette.open}
-                  projectName={projectName}
-                  showGlobalNav={showGlobalNav}
-                  onToggleGlobalNav={handleToggleGlobalNav}
-                  projectListSection={desktopProjectListSection}
-                  projectHealthElement={projectHealthElement}
-                  user={user ?? null}
-                  onSignOut={signOutHandler}
-                />
+                <div className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
+                  <DesktopSidebar
+                    focusMode={focusMode}
+                    onSelectFocusMode={setFocusMode}
+                    onCycleFocusMode={cycleFocusMode}
+                    onOpenCommandPalette={commandPalette.open}
+                    projectName={projectName}
+                    showGlobalNav={showGlobalNav}
+                    onToggleGlobalNav={handleToggleGlobalNav}
+                    projectListSection={desktopProjectListSection}
+                    projectHealthElement={projectHealthElement}
+                    user={user ?? null}
+                    onSignOut={signOutHandler}
+                  />
+                </div>
               </aside>
             )}
 

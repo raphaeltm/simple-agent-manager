@@ -176,6 +176,11 @@ export async function decideOperationsAction(
     decision: OperationsApprovalDecision;
     deciderUserId: string;
     note: string | null;
+    /**
+     * `notify_agent` sends the decision to the requesting agent; `silent` records it and tells
+     * no one (an inbox archive, which denies without telling the agent; Raphaël, 2026-11-17).
+     */
+    delivery: 'notify_agent' | 'silent';
   }
 ): Promise<DecideActionOutcome> {
   const result = await decideApproval(env.DATABASE, {
@@ -196,7 +201,10 @@ export async function decideOperationsAction(
     approvalId: result.approval.id,
     detail: { action: result.approval.action },
   });
-  const delivered = await deliverOperationsDecision(env, result.approval);
+  const delivered =
+    input.delivery === 'notify_agent'
+      ? await deliverOperationsDecision(env, result.approval)
+      : false;
   return { ...result, delivered };
 }
 

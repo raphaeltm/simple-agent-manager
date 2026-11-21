@@ -20,7 +20,7 @@ import {
   generateKeyPair,
   generateVapidKeyPair,
 } from '../deploy/generate-keys.js';
-import { generateAgentSigningKey } from './key-service.js';
+import { generateAgentSigningKey } from './key-seal.js';
 
 export type Procedure = 'swap' | 'gateway' | 'overlap' | 'reencrypt' | 'better-auth';
 
@@ -110,7 +110,7 @@ export const ROTATABLE_KEYS: readonly RotatableKey[] = [
     secrets: ['ENCRYPTION_KEY'],
     generate: () => ({ ENCRYPTION_KEY: generateEncryptionKey() }),
     impact:
-      'none while it runs: rows are re-encrypted online and stay readable under either key; the old key is retired only after every row is proven readable under the new one. API tokens, invite links and webhook URLs keep working (their lookup key is kept, see TOKEN_HASH_KEY); a webhook delivery retried across the switch with the same Idempotency-Key is not recognised as a duplicate and can start a second task (its fingerprints stay on ENCRYPTION_KEY on purpose: they hash IP addresses and request bodies, which the old key could confirm offline); a git command that started before the switch may need to be repeated; a node still being provisioned at that moment fails and is retried; reverse-tunnel nodes created before the switch keep their old tunnel credential until they are replaced',
+      'none while it runs: rows are re-encrypted online and stay readable under either key; the old key is retired only after every row is proven readable under the new one. API tokens, invite links and webhook URLs keep working (their lookup key is kept, see TOKEN_HASH_KEY); a webhook delivery retried across the switch with the same Idempotency-Key is not recognised as a duplicate and can start a second task (its fingerprints stay on ENCRYPTION_KEY on purpose: they hash IP addresses and request bodies, which the old key could confirm offline); a git command that started before the switch may need to be repeated; an exhaustive project-archive search continued across the switch starts over (its continuation cursor is signed with ENCRYPTION_KEY); a node still being provisioned at that moment fails and is retried; reverse-tunnel nodes created before the switch keep their old tunnel credential until they are replaced',
     downtime: 'none',
   },
   {
@@ -149,7 +149,7 @@ export const ROTATABLE_KEYS: readonly RotatableKey[] = [
       return { JWT_PRIVATE_KEY: pair.privateKey, JWT_PUBLIC_KEY: pair.publicKey };
     },
     impact:
-      'none for users: terminals and previews get new-key tokens from the app. Nodes switch to new-key callback tokens on their next heartbeat; workspace callback tokens switch when the VM agent renews them (at half their 24 h life), so the Worker keeps accepting callback tokens signed with the old key until the overlap ends (13 h, --jwt-overlap-hours). During the overlap whoever holds the old key can still forge a callback token; --jwt-overlap-hours 0 removes that window but cuts every running node off (replace them)',
+      'none for users: terminals and previews get new-key tokens from the app. Nodes switch to new-key callback tokens on their next heartbeat; workspace callback tokens switch when the VM agent renews them (by default at half their 24 h life, at most at 90%), so the Worker keeps accepting callback tokens signed with the old key until the overlap ends (90% of the deployed callback-token lifetime plus 1 h: 23 h by default; --jwt-overlap-hours). During the overlap whoever holds the old key can still forge a callback token; --jwt-overlap-hours 0 removes that window but cuts every running node off (replace them)',
     downtime: 'none',
   },
 ];

@@ -5,19 +5,25 @@
 import { type ProviderRequestContext, type VMInstance } from '@simple-agent-manager/providers';
 
 import type { Env } from '../env';
+import { getCredentialEncryptionKey } from '../lib/secrets';
 import {
   buildNodeProviderLabels,
   nodeProviderLabelsMatch,
   resolveEnvironmentLabel,
   resolveInstallationId,
 } from './node-provider-labels';
+import { NodeTeardownBlockedError } from './node-teardown-authority';
+import { hasExactProviderCredentialGenerationProof } from './provider-credential-exact';
+import { diagnoseExactCredentialUnresolved } from './provider-credential-exact-diagnosis';
+import { createProviderForUser } from './provider-credentials';
 import {
-  COMPLETE_INVENTORY_PROVIDERS,
+  describeMissingExactBinding,
+  getStrictNodeCredentialContext,
   hasManagedVmPlacementProof,
   type NodeDb,
   type NodeRow,
+  type ProviderForUserResult,
   requireSameNodeIncarnation,
-  requireStrictNodeProvider,
 } from './strict-node-deletion-shared';
 import { getProvisioningTimeoutMs } from './timeout';
 
@@ -30,11 +36,63 @@ function sameProviderInventoryIdentity(current: VMInstance, discovered: VMInstan
   );
 }
 
-/** The owner-attested escape for a node SAM cannot prove gone (`services/node-manual-deletion.ts`). */
-const MANUAL_DELETION_HINT = (nodeId: string) =>
-  `If the server no longer exists at the provider, the owner can remove the node with ` +
-  `"I already deleted this server" on the node page (POST /api/nodes/${nodeId}/manual-deletion); ` +
-  `on SAM-managed capacity a superadmin can, once SAM shows the server is gone.`;
+/**
+ * Resolve ONLY the exact credential generation this node was placed with. A providerless node has
+ * no instance ID, so the only evidence about it is a complete inventory under that same account;
+ * the current-credential fallback strict teardown uses for nodes WITH an instance ID cannot help
+ * (an empty list under another credential proves nothing). When the pinned generation does not
+ * resolve, name why (rule 72): a re-saved or rotated credential can never resolve again, which is
+ * a different recovery action from a removed one.
+ */
+async function requirePinnedProviderlessCredential(
+  db: NodeDb,
+  node: NodeRow,
+  userId: string,
+  env: Env
+): Promise<ProviderForUserResult> {
+  const { targetProvider, attributionUserId, attributionProjectId, exactCredential } =
+    getStrictNodeCredentialContext(node, userId);
+  if (
+    !targetProvider ||
+    !exactCredential ||
+    !hasExactProviderCredentialGenerationProof(exactCredential)
+  ) {
+    throw new Error(
+      `Cannot reconcile providerless VM ${node.id}: exact provider credential binding is missing ` +
+        `(${describeMissingExactBinding(node, targetProvider, exactCredential)})`
+    );
+  }
+  const providerResult = await createProviderForUser(
+    db,
+    attributionUserId,
+    getCredentialEncryptionKey(env),
+    env,
+    targetProvider,
+    attributionProjectId,
+    exactCredential
+  );
+  if (providerResult) return providerResult;
+  const cause = await diagnoseExactCredentialUnresolved(
+    db,
+    attributionUserId,
+    targetProvider,
+    attributionProjectId,
+    exactCredential
+  );
+  if (cause === 'generation_changed') {
+    throw new NodeTeardownBlockedError(
+      'teardown_credential_generation_changed',
+      `node=${node.id} provider=${targetProvider}: the ${exactCredential.credentialSource} ` +
+        'credential this node was placed with was re-saved or rotated, so its inventory can no ' +
+        'longer prove the node has no server'
+    );
+  }
+  throw new NodeTeardownBlockedError(
+    'teardown_credential_unavailable',
+    `node=${node.id} provider=${targetProvider}: the ${exactCredential.credentialSource} ` +
+      'credential this node was placed with was removed or disabled'
+  );
+}
 
 /**
  * Resolve a stale providerless destroy claim against the exact provider inventory.
@@ -44,10 +102,9 @@ const MANUAL_DELETION_HINT = (nodeId: string) =>
  * resolve the exact credential generation used for allocation. Provider filtering is
  * never trusted by itself; every returned server must repeat the node, incarnation,
  * environment, installation, role, and managed labels locally. A discovered server is
- * re-read immediately before deletion. Only inventories that are complete or fail closed
- * are accepted here (`COMPLETE_INVENTORY_PROVIDERS`). Empty inventory cannot prove
- * allocation finality; retain the unresolved record so a late resource remains
- * discoverable, and name the owner-attested escape (`node-manual-deletion.ts`).
+ * re-read immediately before deletion. Only Hetzner's fail-closed, fully paginated
+ * inventory is accepted here. Empty inventory cannot prove allocation finality;
+ * retain the unresolved record so a late resource remains discoverable.
  */
 export async function reconcileStrictProviderlessVm(
   db: NodeDb,
@@ -59,7 +116,7 @@ export async function reconcileStrictProviderlessVm(
 ): Promise<'deleted'> {
   // A node whose capacity source was released is not admitted here: the release means its
   // pinned credential was deleted, and this path resolves only that exact credential
-  // (`requireStrictNodeProvider`). Such a node stays `destroying` and surfaces through
+  // (`requirePinnedProviderlessCredential`). Such a node stays `destroying` and surfaces through
   // `node_destroying_too_long`.
   if (node.status !== 'destroying' || !hasManagedVmPlacementProof(node)) {
     throw new Error(
@@ -73,19 +130,19 @@ export async function reconcileStrictProviderlessVm(
     !Number.isFinite(Date.parse(node.createdAt)) ||
     Date.now() - Date.parse(node.createdAt) < getProvisioningTimeoutMs(env)
   ) {
-    const retryAt = new Date(Date.parse(node.createdAt) + getProvisioningTimeoutMs(env));
-    throw new Error(
-      `Node allocation is still within its provisioning recovery window; ` +
-        `SAM can look the VM up by its labels after ${Number.isFinite(retryAt.getTime()) ? retryAt.toISOString() : 'the window ends'}`
-    );
+    throw new Error('Node allocation is still within its provisioning recovery window');
   }
-  // Only providers whose filtered inventory is complete may answer "which VM is this node's".
-  // Other adapters may deliberately return partial multi-region inventory, which could hide a
-  // duplicate exact match.
-  if (!COMPLETE_INVENTORY_PROVIDERS.has(node.cloudProvider ?? '')) {
-    throw new Error(
-      `Cannot reconcile providerless VM ${node.id}: ${node.cloudProvider ?? 'unknown'} inventory completeness is not guaranteed. ` +
-        MANUAL_DELETION_HINT(node.id)
+  // Only Hetzner currently guarantees that a successful filtered inventory read is
+  // complete. Other adapters may deliberately return partial multi-region inventory,
+  // so an empty generic list cannot prove provider-side absence.
+  // No later attempt can change that, so this is a named refusal for an operator to resolve
+  // (attest, or remove the VM by hand), recorded once and retried on the full failure backoff,
+  // not a transient error retried within minutes (idea 01M7GVRC956Q8JMGCRP1PQ4R5B).
+  if (node.cloudProvider !== 'hetzner') {
+    throw new NodeTeardownBlockedError(
+      'teardown_allocation_unresolved',
+      `node=${node.id} provider=${node.cloudProvider ?? 'unknown'}: provider inventory ` +
+        'completeness is not guaranteed, so an empty list cannot prove the create never produced a server'
     );
   }
   const installationId = resolveInstallationId(env);
@@ -103,7 +160,7 @@ export async function reconcileStrictProviderlessVm(
     installationId,
     runtimeIncarnationId: node.runtimeIncarnationId,
   });
-  const providerResult = await requireStrictNodeProvider(db, node, userId, env);
+  const providerResult = await requirePinnedProviderlessCredential(db, node, userId, env);
   if (providerResult.providerName !== node.cloudProvider) {
     throw new Error(
       `Cannot reconcile providerless VM ${node.id}: persisted provider binding did not resolve exactly`
@@ -126,9 +183,9 @@ export async function reconcileStrictProviderlessVm(
 
   const discovered = servers[0];
   if (!discovered) {
-    throw new Error(
-      `Cannot reconcile providerless VM ${node.id}: allocation remains unresolved despite empty inventory. ` +
-        MANUAL_DELETION_HINT(node.id)
+    throw new NodeTeardownBlockedError(
+      'teardown_allocation_unresolved',
+      `node=${node.id}: allocation remains unresolved despite empty inventory`
     );
   }
   const createdAt = Date.parse(discovered.createdAt);

@@ -15,8 +15,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@cloudflare/sandbox', () => ({ Sandbox: class Sandbox {} }));
 
-const { app } = await import('../../../src/app');
-await import('../../../src/index');
+const { app } = await import('../../../src/index');
 const { mountHostedGitRoute } = await import('../../../src/selfhost/hosted-git');
 
 /** Registration indices of every route in `app.routes` that matches `method path`. */

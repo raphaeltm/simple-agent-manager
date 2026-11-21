@@ -377,9 +377,17 @@ async function resolveLegacyPlatformConfig(
   }
 
   // Past the attempt bound (flights kept being abandoned or revoked): one read of our own, not
-  // registered and not published, so it cannot displace another request's live flight.
+  // registered and not published, so it cannot displace another request's live flight. Like the
+  // starter and joiner paths, it never returns a read a write revoked while it was pending. It
+  // cannot retry (that is what the bound stops), so it fails the same way a read that outlived
+  // its deadline does: config unavailable for this request, which the caller may retry.
   if (joinAttempt >= MAX_PLATFORM_CONFIG_JOIN_ATTEMPTS) {
-    return await withDeadline(() => readPlatformConfigFromStore(env), timeoutMs);
+    const fallbackGeneration = platformConfigCacheGeneration;
+    const config = await withDeadline(() => readPlatformConfigFromStore(env), timeoutMs);
+    if (platformConfigCacheGeneration !== fallbackGeneration) {
+      throw new IoTimeoutError('Platform configuration changed while it was being read');
+    }
+    return config;
   }
 
   const generation = platformConfigCacheGeneration;

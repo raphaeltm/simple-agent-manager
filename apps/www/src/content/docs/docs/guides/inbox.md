@@ -49,18 +49,24 @@ marks it read and opens it. **Archived**, in the **⋯** menu, lists what you ar
 On a phone, select a row to open the item full screen; **‹** and **›** step to the previous and next
 item. On a desktop the open item sits beside the list.
 
-The item shows its kind and the agent's state, the ask, the agent's reason, links to the ideas,
-files or pull requests it mentioned, and **Context**: the messages before the ask and what the agent
-has done since. The answer controls stay pinned at the bottom:
+The item reads as a conversation with the agent. Its first message is the ask: the kind and the
+agent's state, the ask, the agent's reason, links to the ideas, files or pull requests it
+mentioned, and **Context** (the messages before the ask and what the agent has done since). The
+answer controls sit inside that message. Your replies and the agent's responses follow in time
+order, and once the agent responds the controls move to its latest response, so there is only one
+set. **Show more of the conversation** reads earlier replies and later responses. The chat
+composer is pinned at the bottom ([Reply to an item](#reply-to-an-item)).
+
+The answer controls by kind:
 
 | Kind               | Answer                                                                                                                                                                                              |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Question           | One of the agent's options, or **Type a different answer** when it allows free text. With more than five options they become a list with one **Send** button.                                       |
+| Question           | One of the agent's options. With more than five options they become a list with one **Send** button. A typed answer is a reply in the composer.                                                     |
 | Permission         | The exact options the agent's tool offered, such as **Allow once**, **Always allow in this chat** or **Deny**. The command it wants to run is shown above them.                                     |
 | Secret             | The secure value field; it is saved encrypted and never shown to the agent ([details](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret)). **Decline** says you will not supply it. |
 | Approval           | **Approve** or **Deny** (superadmins, Operations project).                                                                                                                                          |
-| Review             | **Looks good**, or **Reply** with a comment.                                                                                                                                                        |
-| Result             | **Got it** closes it without waking the agent. **Reply** sends your reply and wakes its chat while the agent is still running; once it has finished, **Open chat** takes its place.                 |
+| Review             | **Looks good**. Anything more is a reply in the composer.                                                                                                                                           |
+| Result             | **Got it** closes it without waking the agent. Anything more is a reply in the composer.                                                                                                            |
 | Task               | Read-only in the Inbox for now: the task's title, why a person is needed, its steps and links. **Archive** closes it. See [Tasks for people](#tasks-for-people).                                    |
 | Problem            | The fix for what failed, such as **Retry** or **Wake the chat**. See [Problems SAM files for you](#problems-sam-files-for-you).                                                                     |
 | Form, Sign-in link | Answered in the chat: the item says **This request is answered in its chat.** with an **Answer in chat** button.                                                                                    |
@@ -70,7 +76,7 @@ last item of a stack moves on to the next stack; answering the last item leaves 
 the item was answered somewhere else meanwhile (in the chat card, another tab or by a teammate), it
 closes by itself. If sending fails, the item stays open with the error.
 
-![A question opened full screen on a phone: "1 of 3 from Ship billing", the question, the agent's reason, link chips, a collapsed Context line, and the answer buttons pinned at the bottom with Type a different answer.](/images/docs/inbox-item-mobile.png)
+![A question opened full screen on a phone: "1 of 3 from Ship billing", the question, the agent's reason, link chips, a collapsed Context line, and the answer buttons.](/images/docs/inbox-item-mobile.png)
 
 **Open chat** (the speech bubble at the top) opens the conversation the ask came from. An answer
 given in the chat card is the same answer, so the Inbox catches up.
@@ -101,9 +107,7 @@ a chat opened directly on a workspace has no inbox to file into.
   preview. Answer **Looks good** or reply. It never expires.
 - **Result** (`result`): what you asked for, such as the answer to a question, a finding, or work
   that is done. The title is the outcome and the details follow. **Got it** closes it and leaves
-  the agent alone; a reply wakes the agent's chat with your reply. A reply reaches the agent only
-  while its task is still running: once it has finished, the item offers **Open chat** instead of
-  **Reply** (`canReplyToAgent`, and `answerAsk` refuses the reply). It never blocks the agent and
+  the agent alone; a reply wakes the agent's chat with your reply. The reply endpoint follows the same access and wake rules as sending a message in its chat, including a sleeping agent. It never blocks the agent and
   never expires. You get a push titled **Result ready** that opens the item.
 - **Task** (`assign`): work only a person can do, such as adding a production secret or deciding a
   price. It never blocks the agent and never expires; a soft due date only sorts and highlights it.
@@ -115,7 +119,12 @@ a chat opened directly on a workspace has no inbox to file into.
 Each item carries a one-sentence title, the agent's context (markdown), and links to ideas, Library files,
 policies, knowledge, other chats, pull requests of the project's repository, or previews of its
 workspaces. Each link is checked to belong to the project when the item is filed, and opens with
-your own access. Related items from one chat share a group and stack together. When an agent files
+your own access. A Library file opens in a preview over the Inbox rather than on the Library page:
+close it (the x, Escape, or Back on a phone) and you are back on the item, with anything you had
+typed still there. **Open in Library** in the preview's header goes to the file in the Library.
+Library links in chat messages, idea pages, the Comments page and workflow outputs open the same way.
+
+Related items from one chat share a group and stack together. When an agent files
 an item that looks like one already open (same group, or a title with most words in common), it is
 shown the open one so it can point you there instead of filing a duplicate.
 
@@ -123,6 +132,52 @@ An item you answer in the chat card or in the Inbox is the same record: answerin
 both, and the agent is woken in its chat with your answer. **Got it** on a result is the exception:
 there is nothing for the agent to do, so its chat is not woken (`answerAsk`,
 `packages/operations/src/inbox-write-core.ts`).
+
+## Reply to an item
+
+Every item with a chat behind it has the project chat's own composer at the bottom: type, attach
+files, dictate, or paste. **Send** puts your message in the agent's chat with a pointer to the
+item, and a receipt says **Sent to the agent’s chat. This comes back if it responds.** The item
+then leaves Needs you. In the agent's chat your message carries a small **Re:** chip naming the
+item; select it to open the item. On a pending permission the composer says
+**Sending declines this request** before you send: your message goes to the agent as the reason.
+A permission you declined this way keeps its conversation, without the permission buttons, and you
+can still reply to it.
+
+In the list, an item that came back shows a green dot and **The agent responded**, with who
+replied. Items still with the agent are listed under **Archived** with a **With the agent** label.
+
+## Replies and the agent’s response
+
+A reply sends your message and attachments to the item’s source chat. The agent receives the item
+reference and decides whether your message answers the ask, needs a response, or changes the ask.
+Your chat transcript keeps your original message; the item guidance is delivered only to the agent.
+
+While your reply is **with the agent**, the open item leaves Needs you and Blocking and appears in
+Archived with who replied. A team item leaves everyone’s inbox. This does not close the ask,
+decline a secret request, or approve an Operations action. Replying to a pending permission does
+**decline that permission first**, so the agent can read your message.
+
+An agent uses `inbox_write` method `respond` with `ref` and `body` to respond on that item, or
+`update` to change its ask. The agent passes `replyMessageId` from the received SAM header, so
+any other queued reply stays with the agent until it handles that reply too. With no outstanding
+replies, ordinary responses and updates need no message id. Method `resolve` treats the observed reply
+as the answer to a question, review or result and keeps it out of your inbox. It requires that
+message id and refuses while another reply is outstanding. It cannot resolve
+secrets, Operations approvals or tasks assigned to people. If the agent carries on without acting
+on the reply, the item stays with the agent, including after its task finishes. It should never
+file a duplicate item for the same conversation. An agent must handle outstanding replies before
+withdrawing the item with `cancel`. A response on a system error linked to the source chat
+brings it back without closing the error.
+
+A failed or expired delivery does not bring the item back. Sending the reply again explicitly
+creates a new delivery; expiry does not prove the earlier message was never received. If acceptance
+was interrupted before a canonical message exists, an explicit retry resumes the same delivery id.
+Concurrent attempts are deduplicated, and a conflicting receipt is rejected. If delivery remains
+ambiguous, inspect the source chat before sending again.
+
+The composer posts to `POST /api/projects/:projectId/inbox/items/:ref/reply`
+(`InboxReplyComposer`, `apps/web/src/components/inbox/InboxReplyComposer.tsx`).
 
 ## Tasks for people
 
@@ -141,8 +196,9 @@ and the chat it came from. In the app today a task is read-only, so finishing it
    speech bubble at the top) and say so, for example _"done, the key is in the production
    environment"_. Otherwise tell the person who started that chat, or comment on the task through
    the [API](/docs/reference/api/#inbox): a comment from the assignee wakes the agent.
-3. Leave the task open until the agent has picked it up. **Archive** it only once the agent knows,
-   or if you won't do it: archiving tells the agent you will not act on it.
+3. Leave the task open until the agent has picked it up. **Archive** it once the agent knows, or
+   if you won't do it. Archiving tells the agent nothing, so if it should stop waiting, say so in
+   the chat or comment on the task first.
 
 Controls for ticking steps, commenting, marking it **done**, handing it on and **I'll take it** come
 with the task view in the next release; until then they are available through the
@@ -158,14 +214,14 @@ from then on it is theirs, and it no longer counts as waiting on the others. Mem
 cannot write tasks (viewers) can read a task and comment on it, nothing more.
 
 The agent that assigned the task is woken in its chat when you comment, take it, hand it on, mark it
-done, reopen it or archive it. Ticking steps is recorded and does not wake it unless it asked for
+done or reopen it. Archiving it wakes no one. Ticking steps is recorded and does not wake it unless it asked for
 that. A comment wakes it only when it comes from the assignee, the member who took the task, or
 someone who can write in the agent's chat; anyone else's comment is kept, and the agent reads it the
 next time it wakes.
 A comment from someone other than the chat's owner reaches the agent as a teammate's input, not as
 an instruction from the owner. Another chat of the same person can watch the task instead of
-assigning a duplicate (`attach`); it is woken when the task is taken, handed on, finished, reopened
-or archived, and reads the comments at those wakes.
+assigning a duplicate (`attach`); it is woken when the task is taken, handed on, finished or
+reopened, and reads the comments at those wakes.
 
 A teammate who cannot read the agent's chat still sees the task, its steps, links and discussion,
 never the chat transcript. Task discussion also appears on the project's Comments page for the
@@ -211,12 +267,18 @@ item closes by itself. An item you archived stays archived while the thing keeps
 
 ## Archive
 
-**Archive** (the box at the top) means you will not act on the item: it closes. Archiving a
-question, review or result does not tell the agent; it stays where it is until you answer something or
-write in its chat. SAM's automatic check-ins also stay off that chat until you write in it (for up
-to `inbox.archiveCheckinHoldHours`, a week by default), so nothing nudges the agent. A permission is denied, a secret declined and an approval denied, and the agent
-hears that. Archiving a task tells the chats watching it. A Problem has no agent, so archiving it
-tells no one. For a few seconds the
+**Archive** (the box at the top) means you will not act on the item: it leaves your inbox, and no
+agent is told. The agent stays where it is until you answer something or write in its chat.
+Archiving a question also keeps SAM's automatic check-ins off that chat until you write in it (for
+up to `inbox.archiveCheckinHoldHours`, a week by default), so nothing nudges the agent.
+
+- A question, review, result or task closes.
+- A secret request closes as declined and an approval as denied, without telling the agent.
+- A permission request leaves your inbox but is not answered: it stays pending in its chat, where
+  you can still answer it, and the agent keeps waiting until it gives up on it.
+- A Problem has no agent to tell.
+
+For a few seconds the
 receipt offers **Undo**; nothing is sent until that time is up. If you leave the page or close the
 tab first, the archive is sent then.
 
@@ -226,3 +288,11 @@ The Inbox reads the record each ask lives in; it keeps no copy. It refreshes whe
 you come back to the tab, and when a new notification arrives over the app's live connection.
 [Web Push](/docs/guides/notifications/#delivery-channels) and notification preferences work as
 before.
+
+If a permission decision changes before the queued reply can decline it, that delivery fails
+with an inspectable conflict. SAM does not retry the conflicting decision or automatically
+resurface the item. Inspect the chat before sending another reply.
+
+Agent responses and updates return `withAgent`. When true, other replies remain outstanding: `inbox_read` method `get` on the item returns the source chat’s canonical `conversation` and `pendingReplyIds` visible on that page. Follow `replyCursor` / `responseCursor` with the returned conversation cursors to read more, including earlier failed deliveries. Reading acknowledges nothing; handle each observed reply explicitly before resolving the ask. Other chats’ existing item reads do not expose the source conversation.
+
+Conversation pagination reads both streams initially. On continuation, supply only non-null returned cursors: `replyCursor` advances replies and `responseCursor` advances responses. An omitted stream is skipped on that continuation, preventing already-exhausted replies or responses from restarting. `hasMore` covers the streams requested in that call.

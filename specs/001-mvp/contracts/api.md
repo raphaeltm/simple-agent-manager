@@ -858,3 +858,33 @@ The existing publish-job events, artifact init/complete and compose release call
 `POST /api/auth/unlink-account` accepts BetterAuth `{accountId}`. Only the caller's GitHub/GitLab accounts can be removed; removing the last provider requires usable verified email sign-in. The affected account owner receives a linked-provider security notification at their preserved SAM email. Explicit links may have a different provider email; future sign-ins preserve an already-verified SAM email. A lookup failure aborts sign-in rather than replacing identity.
 
 GitHub repository errors distinguish `403 GITHUB_NOT_CONNECTED`, `401 GITHUB_REAUTH_REQUIRED`, `503 GITHUB_UNAVAILABLE`, `409 GITHUB_APP_NOT_CONFIGURED` and `404 FEATURE_UNAVAILABLE`. Only actual authorization failures request reauthentication; provider outages offer retry. Unverified provider-linked accounts receive a provider-sign-in note instead of an email code, and code redemption is refused without deleting links or sessions.
+
+## Self-hosted repository credentials
+
+### POST /api/projects/{id}/hosted-git/token
+
+Available only on self-host installations using the local hosted Git backend. Requires an
+approved, session-authenticated user. The `scope` query parameter is `write` for push access;
+all other values (including omission) select `read`. Read requires `project:read`; write
+requires `workspace:write` on the addressed project. No request body is required.
+
+Returns `200` with `{ cloneUrl, host, username: "x", token, scope, expiresAt }`. `expiresAt`
+is the token's expiry timestamp in ISO 8601 format. Use `username` and `token` as Git HTTP Basic
+credentials; keep the short-lived token private. This personal token is not workspace-bound.
+
+Returns `401` for missing authentication, `403` for insufficient capability, and `404` when
+the project is absent or does not use this installation's local hosted Git backend. Cloudflare
+Workers do not register this endpoint and return `404`; their Artifacts and forge behavior is unchanged.
+
+
+### Reply to an inbox item
+
+`POST /api/projects/:projectId/inbox/items/:ref/reply` accepts `{ content: string, attachments?: TaskAttachment[] }` and returns HTTP 202 with `{ ref, sessionId, status: 'queued', messageId, deliveryId }`. Requires an actable item with a source chat and the chat’s ordinary send authorization. The reply is queued durably before a pending permission is rejected; delivery retries the same rejection receipt and reaches the agent only after rejection succeeds. Other store statuses remain unchanged. The canonical transcript carries `inboxRef` in its tool metadata; item list and counts exclude items awaiting agent action, including team items for all members. Item detail adds `conversation: { replies, responses, nextReplyCursor, nextResponseCursor, hasMore }`, with canonical chat messages as replies and `InboxItemCommentThread` values as responses. `item.withAgent` marks an item awaiting agent action; `item.latestReply` is `{ userId, name, messageId, repliedAt }`. `replyCursor` continues earlier chat history; `responseCursor` continues later anchored response history. Both cursors come from the previous `conversation`. A rejected permission stays `status: 'done'` with `canAct: false`; `canReply: true` permits its conversation to continue. An agent response returns that settled conversation as nonblocking, without restoring permission buttons.
+
+Reply retry recovery reuses a matching accepted delivery receipt. A prior in-flight or ambiguous delivery returns409 without another prompt. A fresh POST may resend a failed/expired delivery under a new ID; its old suppression ledger stays unchanged, so delivery outcomes never automatically resurface an item. Expiry is not proof of nonreceipt. Agent `update` atomically changes the ask and acknowledges replies through its captured watermark.
+
+Agent `inbox_write` methods `respond` and `update` accept `replyMessageId`, required when replies are outstanding; `resolve` always requires it. The id comes from the received inbox reply’s delivery-only SAM header. Actions acknowledge only that exact observed reply. Resolve refuses while another reply is outstanding, and a concurrent human reply cannot reserve against an already-closed ask. No outstanding reply means an ordinary response or update needs no id.
+
+Agent responses and updates return `withAgent`. When true, other replies remain outstanding: `inbox_read` method `get` on the item returns the source chat’s canonical `conversation` and `pendingReplyIds` visible on that page. Follow `replyCursor` / `responseCursor` with the returned conversation cursors to read more, including earlier failed deliveries. Reading acknowledges nothing; handle each observed reply explicitly before resolving the ask. Other chats’ existing item reads do not expose the source conversation.
+
+Conversation pagination reads both streams initially. On continuation, supply only non-null returned cursors: `replyCursor` advances replies and `responseCursor` advances responses. An omitted stream is skipped on that continuation, preventing already-exhausted replies or responses from restarting. `hasMore` covers the streams requested in that call.

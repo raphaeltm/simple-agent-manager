@@ -1,346 +1,372 @@
-/**
- * The bootstrap half of teardown's Google Cloud adapter (teardown-gcp.ts): the workload identity,
- * node service account and KMS key that `pnpm selfhost:gcp-bootstrap` recorded, removed by the
- * bootstrap's own teardown (deploy/selfhost/gcp-teardown.sh), which proves each one this
- * install's again first. An install from before the record is searched by the exact names the
- * bootstrap derives for this issuer, and those are shown as "discovered, not recorded".
- */
-import { createHash } from 'node:crypto';
-import { join } from 'node:path';
-
-import { addResource, readRecord } from '../../deploy/selfhost/created-resources.mjs';
+/** WIF cleanup uses only creation receipts. Existing resources are never adopted by name. */
+import type { CreatedResource } from '../../deploy/selfhost/created-resources.mjs';
 import { check } from './backup-lib';
 import type { TeardownContext } from './teardown-box';
-import { both, type Decision, type Item, type Mode, STEPS } from './teardown-model';
+import { cloudMetadata, grantPresent } from './teardown-gcp-grants';
+import { type Item, STEPS } from './teardown-model';
 
 export const BOOTSTRAP = 'gcp-bootstrap';
-const KEY_RING = 'sam-selfhost';
-const PROVIDER_ID = 'sam-api';
-const NODE_ACCOUNT = 'sam-nodes';
-
-/** Runs gcloud; a missing gcloud reads as a failed command (status 127), not a crash. */
-/**
- * True when gcloud said the resource does not exist. Any other failure (permission denied, network,
- * auth) means teardown could not check, which must be reported rather than read as "absent".
- */
 export function gcloudNotFound(stderr: string): boolean {
   return /not found|NOT_FOUND|notFound|does not exist/i.test(stderr);
 }
-
-/** The first `ERROR:` line of a gcloud failure, for a "could not check" item. */
-export function gcloudReason(stderr: string): string {
-  const line = stderr.split('\n').find((l) => l.includes('ERROR')) ?? stderr.split('\n')[0] ?? '';
-  return line.trim().slice(0, 200) || 'gcloud failed';
+export function gcloudReason(_stderr: string): string {
+  return 'gcloud failed; check authentication and project permissions';
 }
-
 export function gcloud(ctx: TeardownContext, args: string[]) {
   try {
     return ctx.run('gcloud', args);
-  } catch (error) {
-    // spawn failure: gcloud is not installed
-    return {
-      status: 127,
-      stdout: '',
-      stderr: error instanceof Error ? error.message : String(error),
-    };
+  } catch {
+    return { status: 127, stdout: '', stderr: 'gcloud unavailable' };
   }
 }
-
-function installHash(issuer: string): string {
-  return createHash('sha256').update(issuer).digest('hex').slice(0, 8);
-}
-
-function isKms(kind: string, name: string): boolean {
-  return (
-    kind === 'kms-key' ||
-    kind === 'kms-key-ring' ||
-    (kind === 'iam-binding' && name.includes('/cryptoKeys/'))
-  );
-}
-
-function bootstrapPlan(ctx: TeardownContext, kind: string, name: string): Record<Mode, Decision> {
-  const kms = isKms(kind, name);
-  const key = kind === 'kms-key' || kind === 'kms-key-ring';
-  return {
-    'keep-data': kms
-      ? { act: 'keep', why: "keep my data keeps the key and the box's use of it" }
-      : { act: 'remove' },
-    'remove-everything':
-      key && !ctx.options.destroyKey
-        ? { act: 'keep', why: "pass --destroy-key to schedule the key's destruction" }
-        : { act: 'remove' },
-  };
-}
-
-const KEY_FOR_GOOD =
-  'every sealed bundle and every backup sealed with this key becomes unrecoverable once destruction completes (30 days by default; gcloud kms keys versions restore undoes it until then)';
 
 export function bootstrapItems(ctx: TeardownContext, project: string): Item[] {
   const issuer = `https://api.${ctx.domain}`;
-  const entries = ctx.record.filter(
-    (r) => r.cloud === 'gcp' && r.createdBy === BOOTSTRAP && r.attributes?.project === project
-  );
-  const { found: discovered, unchecked } =
-    entries.length === 0 && ctx.domain
-      ? discoverBootstrap(ctx, project, issuer)
-      : { found: [], unchecked: [] };
-  const runKey = `gcp-bootstrap:${project}`;
-  let output = '';
-  const run = () => {
-    for (const d of discovered) {
-      addResource(ctx.recordFile, {
-        cloud: 'gcp',
-        kind: d.kind,
-        name: d.name,
-        action: 'created',
-        createdBy: BOOTSTRAP,
-        attributes: { project, install: issuer, discovered: 'by-name' },
-      });
-    }
-    output = runBootstrapTeardown(ctx, project, issuer, [...entries, ...discovered]);
-  };
-  const settle = (kind: string, name: string) => () => {
-    const entry = readRecord(ctx.recordFile).resources.find(
-      (r) => r.cloud === 'gcp' && r.kind === kind && r.name === name
-    );
-    if (entry?.removedAt) return { removed: true };
-    const line = output
-      .split('\n')
-      .find((l) => l.includes(name.split('#')[0] ?? name) && l.trim().startsWith('-'));
-    return {
-      removed: false,
-      why: line?.trim().replace(/^- /, '') ?? 'left by the bootstrap teardown',
-    };
-  };
-  const how = `pnpm selfhost:gcp-bootstrap -- --project ${project} --api-url ${issuer} --teardown, which proves each one this install's again`;
-  const key = [...entries, ...discovered].find((e) => e.kind === 'kms-key')?.name;
-  const keyGrant = (e: { kind: string; name: string }) =>
-    key !== undefined && e.kind === 'iam-binding' && e.name.startsWith(`${key}#`);
-  const reusedGrant = entries.find((e) => keyGrant(e) && e.action === 'reused');
-  const items: Item[] = entries
-    .filter((entry) => entry !== reusedGrant)
-    .map((entry) => ({
-      id: `gcp:${entry.kind}:${entry.name}`,
-      place: 'in your cloud, made by the bootstrap',
-      what: `${entry.kind} ${entry.name}`,
-      provenance: 'recorded',
-      how,
-      step: STEPS.identity,
-      plan:
-        entry.action === 'reused'
-          ? both({ act: 'keep', why: 'it existed before the bootstrap' })
-          : bootstrapPlan(ctx, entry.kind, entry.name),
-      forGood: entry.kind === 'kms-key' ? KEY_FOR_GOOD : undefined,
-      removedAt: entry.removedAt,
-      runKey,
-      run,
-      settle: settle(entry.kind, entry.name),
-    }));
-  // The bootstrap's teardown removes the box account's grant on the key only when a recorded run
-  // created it (a grant on a key it found may predate SAM). Any other grant, on a key it found or
-  // one the box adopted by name (R13 D6), stays in the key's policy: say so, with the command.
-  if (key !== undefined && !entries.some((e) => keyGrant(e) && e.action === 'created')) {
-    items.push(kmsGrantItem(project, key, reusedGrant?.attributes?.member));
-  }
-  for (const d of discovered) {
-    items.push({
-      id: `gcp:${d.kind}:${d.name}`,
-      place: 'in your cloud, made by the bootstrap',
-      what: `${d.kind} ${d.name} (${d.proof})`,
-      provenance: 'discovered, not recorded',
-      how: `${how}; --adopt-discovered records it first`,
-      step: STEPS.identity,
-      plan: ctx.options.adoptDiscovered
-        ? bootstrapPlan(ctx, d.kind, d.name)
-        : both({
+  return ctx.record
+    .filter(
+      (r) =>
+        r.cloud === 'gcp' &&
+        r.createdBy === BOOTSTRAP &&
+        r.attributes?.project === project &&
+        r.kind !== 'firewall-rule'
+    )
+    .sort(
+      (a, b) =>
+        [
+          'iam-binding',
+          'service-account-iam-binding',
+          'workload-identity-provider',
+          'workload-identity-pool',
+          'service-account',
+        ].indexOf(a.kind) -
+        [
+          'iam-binding',
+          'service-account-iam-binding',
+          'workload-identity-provider',
+          'workload-identity-pool',
+          'service-account',
+        ].indexOf(b.kind)
+    )
+    .map((entry) => {
+      const attrs = entry.attributes ?? {};
+      const owned =
+        entry.action === 'created' &&
+        attrs.install === issuer &&
+        attrs.environment === 'selfhost' &&
+        !!ctx.installationId &&
+        attrs.installation === ctx.installationId;
+      return {
+        id: `gcp:${entry.kind}:${entry.name}`,
+        place: 'in your cloud, made by the bootstrap',
+        what: `${entry.kind} ${entry.name}`,
+        provenance: 'recorded',
+        how: 'revalidate the recorded identity, then delete with gcloud',
+        step: STEPS.identity,
+        removedAt: entry.removedAt,
+        plan: {
+          'keep-data': {
             act: 'keep',
-            why: 'discovered, not recorded: pass --adopt-discovered to remove it',
-          }),
-      forGood: d.kind === 'kms-key' ? KEY_FOR_GOOD : undefined,
-      runKey,
-      run,
-      settle: settle(d.kind, d.name),
+            why: 'the retained data needs its original workload identity and grants',
+          },
+          'remove-everything': owned
+            ? { act: 'remove' }
+            : { act: 'refused', why: 'not recorded as created for this issuer' },
+        },
+        run: () => {
+          if (!owned) throw new Error('refused: missing creation ownership');
+          const pool = attrs.pool;
+          const { describe, remove, expected } = bootstrapOperation(entry, project, issuer);
+          if (
+            entry.kind === 'iam-binding' &&
+            !grantPresent(ctx, ['projects', 'get-iam-policy', project], attrs.role, attrs.member)
+          )
+            return;
+          const result = gcloud(ctx, [...describe, '--format=json']);
+          if (result.status !== 0 && gcloudNotFound(result.stderr)) {
+            if (entry.kind === 'iam-binding')
+              throw new Error('Refused: IAM grant account identity is unavailable');
+            return;
+          }
+          check(result, 'read recorded resource before deletion');
+          let current: Record<string, unknown>;
+          try {
+            const parsed: unknown = JSON.parse(result.stdout);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+              throw new Error('Invalid ownership metadata shape');
+            current = parsed as Record<string, unknown>;
+          } catch {
+            throw new Error('refused: unreadable ownership metadata');
+          }
+          if (Object.entries(expected).some(([key, value]) => !value || current[key] !== value))
+            throw new Error('refused: resource identity or ownership changed');
+          if (
+            entry.kind === 'workload-identity-provider' &&
+            (current.oidc as { issuerUri?: string } | undefined)?.issuerUri !== issuer
+          )
+            throw new Error('refused: provider issuer changed');
+          if (entry.kind === 'workload-identity-pool')
+            assertPoolProviders(ctx, project, entry.name, issuer);
+          if (entry.kind === 'service-account' || entry.kind === 'iam-binding')
+            assertAccountExclusive(
+              ctx,
+              project,
+              pool,
+              entry.kind === 'service-account' ? entry.name : attrs.account
+            );
+          if (
+            entry.kind === 'service-account-iam-binding' &&
+            !assertServiceAccountGrant(ctx, project, entry)
+          )
+            return;
+          check(gcloud(ctx, remove), 'delete recorded resource');
+        },
+        record: entry,
+      } satisfies Item;
     });
-  }
-  if (unchecked.length > 0) {
-    items.push({
-      id: `gcp:${project}:bootstrap-unchecked`,
-      place: 'in your cloud, made by the bootstrap',
-      what: `could not check ${unchecked.map((u) => u.name).join(', ')} (${unchecked[0]?.reason})`,
-      provenance: 'discovered, not recorded',
-      how: `run again with gcloud logged in as a project owner, or ${how} where the bootstrap ran (its record is there)`,
-      step: STEPS.identity,
-      plan: both({
-        act: 'operator',
-        why: 'teardown could not check them with this gcloud account',
-      }),
-    });
-  }
-  return items;
 }
 
-const KMS_ROLE = 'roles/cloudkms.cryptoKeyEncrypterDecrypter';
-
-function kmsGrantItem(project: string, key: string, member: string | undefined): Item {
-  const keyId = key.split('/').pop() ?? key;
-  const location = /\/locations\/([^/]+)\//.exec(key)?.[1] ?? 'global';
-  const ring = /\/keyRings\/([^/]+)\//.exec(key)?.[1] ?? KEY_RING;
-  const who = member ?? 'serviceAccount:<the box VM service account>';
-  const find = member
-    ? ''
-    : ` (find it with: gcloud kms keys get-iam-policy ${keyId} --keyring=${ring} --location=${location} --project=${project})`;
-  return {
-    id: `gcp:kms-grant:${key}`,
-    place: 'in your cloud, made by the bootstrap',
-    what: `the box VM account's ${KMS_ROLE} grant on the KMS key ${key}${member ? ` (${member})` : ''}, not created by a recorded bootstrap run`,
-    provenance: member ? 'recorded' : 'from the setup steps',
-    how: `gcloud kms keys remove-iam-policy-binding ${keyId} --keyring=${ring} --location=${location} --project=${project} --member='${who}' --role=${KMS_ROLE}${find}`,
-    step: STEPS.identity,
-    plan: {
-      'keep-data': { act: 'keep', why: "keep my data keeps the key and the box's use of it" },
-      'remove-everything': {
-        act: 'operator',
-        why: 'teardown removes only a grant a recorded bootstrap run created; this one may predate the install',
-      },
-    },
-  };
-}
-
-interface Discovered {
-  kind: string;
-  name: string;
-  proof: string;
-}
-
-/**
- * An install from before the record: only the exact names the bootstrap derives for this issuer,
- * each with the same proof its teardown checks (description naming the issuer, provider trusting
- * it, key labelled sam-install=<hash>).
- */
-function discoverBootstrap(
+function assertPoolProviders(
   ctx: TeardownContext,
   project: string,
+  poolName: string,
   issuer: string
-): { found: Discovered[]; unchecked: Array<{ name: string; reason: string }> } {
-  const hash = installHash(issuer);
-  const pool = `sam-${hash}`;
-  const found: Discovered[] = [];
-  const unchecked: Array<{ name: string; reason: string }> = [];
-  const value = (args: string[], name: string) => {
-    const r = gcloud(ctx, args);
-    if (r.status === 0) return r.stdout.trim();
-    if (!gcloudNotFound(r.stderr)) unchecked.push({ name, reason: gcloudReason(r.stderr) });
-    return null;
-  };
-  const poolName = `projects/${project}/locations/global/workloadIdentityPools/${pool}`;
-  const poolDescription = value(
-    [
-      'iam',
-      'workload-identity-pools',
-      'describe',
-      pool,
-      `--project=${project}`,
-      '--location=global',
-      '--format=value(description)',
-    ],
-    `workload identity pool ${pool}`
+): void {
+  const where = [`--project=${project}`];
+  const providers = gcloud(ctx, [
+    'iam',
+    'workload-identity-pools',
+    'providers',
+    'list',
+    ...where,
+    '--location=global',
+    `--workload-identity-pool=${poolName}`,
+    '--show-deleted',
+    '--format=json',
+  ]);
+  check(providers, 'check pool providers before deletion');
+  const parsed: unknown = cloudMetadata(providers.stdout);
+  const known = new Set(
+    ctx.record
+      .filter(
+        (r) =>
+          r.cloud === 'gcp' &&
+          r.kind === 'workload-identity-provider' &&
+          r.action === 'created' &&
+          r.attributes?.project === project &&
+          r.attributes?.installation === ctx.installationId &&
+          r.attributes?.environment === 'selfhost' &&
+          r.attributes?.install === issuer
+      )
+      .map((r) => r.attributes?.identity)
+      .filter((name): name is string => typeof name === 'string' && !!name)
   );
-  if (poolDescription?.endsWith(issuer)) {
-    const providerIssuer = value(
-      [
+  if (
+    !Array.isArray(parsed) ||
+    parsed.some(
+      (p) => !p || typeof p.name !== 'string' || !known.has(p.name) || p.oidc?.issuerUri !== issuer
+    )
+  )
+    throw new Error('refused: pool contains unowned or unreadable providers');
+}
+function assertAccountExclusive(
+  ctx: TeardownContext,
+  project: string,
+  pool: string | undefined,
+  account: string
+): void {
+  const where = [`--project=${project}`];
+  const policy = gcloud(ctx, [
+    'iam',
+    'service-accounts',
+    'get-iam-policy',
+    account,
+    ...where,
+    '--format=json',
+  ]);
+  check(policy, 'check account grants before deletion');
+  const parsed: unknown = cloudMetadata(policy.stdout);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+    throw new Error('refused: unreadable account grants');
+  const bindings = (parsed as { bindings?: unknown }).bindings ?? [];
+  const projectNumber = ctx.record
+    .find((r) => r.kind === 'workload-identity-pool' && r.attributes?.pool === pool)
+    ?.attributes?.identity?.split('/')[1];
+  const member = `principalSet://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${pool}/*`;
+  if (
+    !Array.isArray(bindings) ||
+    bindings.some(
+      (b) =>
+        b.condition ||
+        b.role !== 'roles/iam.workloadIdentityUser' ||
+        !Array.isArray(b.members) ||
+        b.members.some((m: unknown) => m !== member)
+    )
+  )
+    throw new Error('refused: account has foreign grants');
+  const keys = gcloud(ctx, [
+    'iam',
+    'service-accounts',
+    'keys',
+    'list',
+    `--iam-account=${account}`,
+    ...where,
+    '--managed-by=user',
+    '--format=json',
+  ]);
+  check(keys, 'check account keys before deletion');
+  const parsedKeys: unknown = cloudMetadata(keys.stdout);
+  if (!Array.isArray(parsedKeys) || parsedKeys.length)
+    throw new Error('refused: account has user-managed keys');
+}
+
+function bootstrapOperation(entry: CreatedResource, project: string, issuer: string) {
+  const attrs = entry.attributes ?? {};
+  if (
+    ['iam-binding', 'service-account-iam-binding'].includes(entry.kind) &&
+    attrs.condition !== undefined &&
+    attrs.condition !== 'None'
+  )
+    throw new Error('Refused: grant receipt does not prove an unconditional binding');
+  const pool = attrs.pool;
+  const where = [`--project=${project}`];
+  let describe: string[];
+  let remove: string[];
+  let expected: Record<string, string>;
+  switch (entry.kind) {
+    case 'workload-identity-pool':
+      describe = [
+        'iam',
+        'workload-identity-pools',
+        'describe',
+        entry.name,
+        ...where,
+        '--location=global',
+      ];
+      remove = [
+        'iam',
+        'workload-identity-pools',
+        'delete',
+        entry.name,
+        ...where,
+        '--location=global',
+        '--quiet',
+      ];
+      expected = {
+        name: attrs.identity,
+        description: `Dedicated to the SAM install whose token issuer is ${issuer}`,
+      };
+      break;
+    case 'workload-identity-provider':
+      if (!pool) throw new Error('refused: missing recorded pool');
+      describe = [
         'iam',
         'workload-identity-pools',
         'providers',
         'describe',
-        PROVIDER_ID,
-        `--project=${project}`,
+        entry.name,
+        ...where,
         '--location=global',
         `--workload-identity-pool=${pool}`,
-        '--format=value(oidc.issuerUri)',
-      ],
-      `provider ${PROVIDER_ID}`
-    );
-    if (providerIssuer === issuer) {
-      found.push({
-        kind: 'workload-identity-provider',
-        name: `${poolName}/providers/${PROVIDER_ID}`,
-        proof: `trusts ${issuer}`,
-      });
+      ];
+      remove = [
+        'iam',
+        'workload-identity-pools',
+        'providers',
+        'delete',
+        entry.name,
+        ...where,
+        '--location=global',
+        `--workload-identity-pool=${pool}`,
+        '--quiet',
+      ];
+      expected = { name: attrs.identity };
+      break;
+    case 'service-account':
+      describe = ['iam', 'service-accounts', 'describe', entry.name, ...where];
+      remove = ['iam', 'service-accounts', 'delete', entry.name, ...where, '--quiet'];
+      expected = {
+        uniqueId: attrs.identity,
+        description: `Creates and deletes SAM workspace VMs and their firewall rules for ${issuer}`,
+      };
+      break;
+    case 'service-account-iam-binding':
+      if (
+        !attrs.account ||
+        !attrs.identity ||
+        !attrs.member ||
+        attrs.role !== 'roles/iam.workloadIdentityUser'
+      )
+        throw new Error('refused: incomplete service account grant receipt');
+      describe = ['iam', 'service-accounts', 'describe', attrs.account, ...where];
+      remove = [
+        'iam',
+        'service-accounts',
+        'remove-iam-policy-binding',
+        attrs.account,
+        ...where,
+        `--member=${attrs.member}`,
+        `--role=${attrs.role}`,
+        '--condition=None',
+        '--quiet',
+        '--format=none',
+      ];
+      expected = { uniqueId: attrs.identity };
+      break;
+    case 'iam-binding': {
+      // Delete an exact grant only, never a project policy replacement. Creation receipt
+      // is linked to the service account's immutable id, checked immediately beforehand.
+      if (!attrs.member || !attrs.role || !attrs.account || !attrs.identity)
+        throw new Error('refused: incomplete grant receipt');
+      describe = ['iam', 'service-accounts', 'describe', attrs.account, ...where];
+      remove = [
+        'projects',
+        'remove-iam-policy-binding',
+        project,
+        `--member=${attrs.member}`,
+        `--role=${attrs.role}`,
+        '--condition=None',
+        '--quiet',
+        '--format=none',
+      ];
+      expected = { uniqueId: attrs.identity };
+      break;
     }
-    found.push({
-      kind: 'workload-identity-pool',
-      name: poolName,
-      proof: `description names ${issuer}`,
-    });
+    default:
+      throw new Error(`refused: unsupported recorded resource kind ${entry.kind}`);
   }
-  const email = `${NODE_ACCOUNT}@${project}.iam.gserviceaccount.com`;
-  const saDescription = value(
-    [
-      'iam',
-      'service-accounts',
-      'describe',
-      email,
-      `--project=${project}`,
-      '--format=value(description)',
-    ],
-    `service account ${email}`
-  );
-  if (saDescription?.endsWith(issuer)) {
-    for (const role of ['roles/compute.instanceAdmin.v1', 'roles/compute.securityAdmin']) {
-      found.push({
-        kind: 'iam-binding',
-        name: `projects/${project}#${role}#serviceAccount:${email}`,
-        proof: `granted to ${email}`,
-      });
-    }
-    found.push({ kind: 'service-account', name: email, proof: `description names ${issuer}` });
-  }
-  const keyLabel = value(
-    [
-      'kms',
-      'keys',
-      'describe',
-      pool,
-      `--keyring=${KEY_RING}`,
-      '--location=global',
-      `--project=${project}`,
-      '--format=value(labels.sam-install)',
-    ],
-    `KMS key ${KEY_RING}/${pool}`
-  );
-  if (keyLabel === hash) {
-    found.push({
-      kind: 'kms-key',
-      name: `projects/${project}/locations/global/keyRings/${KEY_RING}/cryptoKeys/${pool}`,
-      proof: `labelled sam-install=${hash}`,
-    });
-  }
-  return { found, unchecked };
+  return { describe, remove, expected };
 }
 
-function runBootstrapTeardown(
+/** Remove only the receipted unconditional member, even when the account itself was reused. */
+function assertServiceAccountGrant(
   ctx: TeardownContext,
   project: string,
-  issuer: string,
-  entries: Array<{ kind: string; name: string }>
-): string {
-  const args = [
-    join(ctx.selfhostDir, 'gcp-bootstrap.sh'),
-    '--project',
-    project,
-    '--api-url',
-    issuer,
-    '--teardown',
-    '--state-dir',
-    ctx.stateDir,
-  ];
-  if (ctx.mode === 'keep-data') args.push('--keep-kms');
-  const key = entries.find((e) => e.kind === 'kms-key');
-  if (ctx.mode === 'remove-everything' && ctx.options.destroyKey && key) {
-    args.push('--destroy-key-versions', key.name.split('/').pop() ?? '');
-  }
-  const result = ctx.run('bash', args);
-  ctx.log(`gcp-bootstrap teardown (${project}):\n${result.stdout.trimEnd()}`);
-  check(result, 'gcp-bootstrap --teardown');
-  return result.stdout;
+  entry: CreatedResource
+): boolean {
+  const attrs = entry.attributes ?? {};
+  const pools = ctx.record.filter(
+    (r) =>
+      r.kind === 'workload-identity-pool' &&
+      r.cloud === 'gcp' &&
+      r.createdBy === BOOTSTRAP &&
+      !r.removedAt &&
+      r.name === attrs.pool &&
+      r.attributes?.project === project &&
+      r.attributes?.installation === ctx.installationId &&
+      r.attributes?.environment === 'selfhost' &&
+      r.attributes?.install === `https://api.${ctx.domain}`
+  );
+  const identity = pools.length === 1 ? pools[0].attributes?.identity : undefined;
+  if (
+    !identity ||
+    !/^projects\/\d+\/locations\/global\/workloadIdentityPools\/[^/]+$/.test(identity) ||
+    attrs.member !== `principalSet://iam.googleapis.com/${identity}/*`
+  )
+    throw new Error('refused: service account grant pool identity changed');
+  return grantPresent(
+    ctx,
+    ['iam', 'service-accounts', 'get-iam-policy', attrs.account, `--project=${project}`],
+    attrs.role,
+    attrs.member
+  );
 }

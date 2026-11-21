@@ -1,11 +1,15 @@
 /**
- * Static wiring for Caddy's access log and the keep-warm health check (the behaviour itself is
- * proven against the real Caddy image in live/access-log-keep-warm.live.test.ts): compose passes
- * the keep-warm settings with their defaults and caps the Caddy log on disk, and both Caddy
- * loggers import the one redaction filter.
+ * Static wiring in docker-compose.yml. Caddy (its behaviour is proven against the real image in
+ * live/access-log-keep-warm.live.test.ts): compose passes the keep-warm settings with their
+ * defaults and caps the Caddy log on disk, and both Caddy loggers import the one redaction filter.
+ * Which path prefixes the filter rewrites is pinned against the routes themselves in
+ * apps/api/tests/unit/selfhost/caddy-log-redaction-routes.test.ts and
+ * apps/web/tests/unit/selfhost-log-redaction-routes.test.ts, which CI runs on route changes.
+ * Also: the capabilities of celld and frps, and the bundled object store's credential check.
  */
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
@@ -15,6 +19,12 @@ const SELFHOST = resolve(REPO, 'deploy/selfhost');
 
 interface Service {
   environment?: Record<string, string>;
+  cap_drop?: string[];
+  cap_add?: string[];
+  security_opt?: string[];
+  read_only?: boolean;
+  tmpfs?: string[];
+  entrypoint?: string[];
   logging?: { driver?: string; options?: Record<string, string> };
 }
 
@@ -25,38 +35,6 @@ const caddy = compose.services.caddy;
 const caddyfile = readFileSync(`${SELFHOST}/caddy/Caddyfile`, 'utf8');
 const redaction = readFileSync(`${SELFHOST}/caddy/log-redaction.caddy`, 'utf8');
 const keepWarm = readFileSync(`${SELFHOST}/caddy/keep-warm/on.caddy`, 'utf8');
-
-/** Route-definition strings with a path parameter named like a credential. */
-const CREDENTIAL_ROUTE =
-  /(?:\.(?:get|post|put|patch|delete|all|on)\(|path=)\s*['"`]([^'"`]*\/:(?:[a-z]*token|sig|signature|secret|key|code|jwt|nonce)\b[^'"`]*)['"`]/gi;
-
-/** Each known credential route and the logged path prefix the redaction filter rewrites. */
-const KNOWN_CREDENTIAL_ROUTES: Record<string, string> = {
-  'apps/api/src/routes/ai-proxy-passthrough.ts /:wstoken/anthropic/v1/messages': '/ai/proxy/',
-  'apps/api/src/routes/ai-proxy-passthrough.ts /:wstoken/anthropic/v1/messages/count_tokens':
-    '/ai/proxy/',
-  'apps/api/src/routes/ai-proxy-passthrough.ts /:wstoken/openai/v1/chat/completions': '/ai/proxy/',
-  'apps/api/src/routes/bootstrap.ts /:token': '/api/bootstrap/',
-  'apps/api/src/routes/projects/members.ts /invite-links/:token': '/api/projects/invite-links/',
-  'apps/api/src/routes/projects/members.ts /invite-links/:token/request':
-    '/api/projects/invite-links/',
-  'apps/web/src/App.tsx /projects/invite/:token': '/projects/invite/',
-};
-
-const PATH_CREDENTIAL_PREFIXES = [
-  '/ai/proxy/',
-  '/api/bootstrap/',
-  '/api/projects/invite-links/',
-  '/projects/invite/',
-];
-
-function routeFiles(dir: string): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) return routeFiles(path);
-    return path.endsWith('.ts') && !path.endsWith('.test.ts') ? [path] : [];
-  });
-}
 
 describe('Caddy logging and keep-warm wiring', () => {
   it('passes keep-warm on by default, at 5 s', () => {
@@ -76,35 +54,21 @@ describe('Caddy logging and keep-warm wiring', () => {
     expect(caddyfile).toMatch(/\tlog \{\s*output stdout\s*import log-redaction\.caddy/);
   });
 
-  it('the redaction filter drops headers, query strings and path credentials', () => {
+  it('the redaction filter drops headers, query strings and preview paths', () => {
     expect(redaction).toMatch(/^\trequest>headers delete$/m);
     expect(redaction).toMatch(/^\tresp_headers delete$/m);
     expect(redaction).toMatch(/^\theaders delete$/m);
     expect(redaction).toContain('\t\tregexp "\\?.*$" "?<redacted>"');
     expect(redaction).toContain('\t\tregexp "^/p/[^?]*" "/p/<redacted>"');
-    for (const prefix of PATH_CREDENTIAL_PREFIXES) {
-      expect(redaction).toMatch(new RegExp(`regexp "\\^\\([^"]*\\|?${prefix}\\|?[^"]*\\)`));
-    }
   });
 
-  // Every route whose path carries a credential-like parameter must be redacted in the logs.
-  // A new one fails here until it is added to caddy/log-redaction.caddy and to this list.
-  it('every route with a credential in its path is on the redaction list', () => {
-    const found = [
-      ...routeFiles(join(REPO, 'apps/api/src/routes')),
-      join(REPO, 'apps/web/src/App.tsx'),
-    ]
-      .flatMap((file) =>
-        [...readFileSync(file, 'utf8').matchAll(CREDENTIAL_ROUTE)].map(
-          (m) => `${relative(REPO, file)} ${m[1]}`
-        )
-      )
-      .sort();
-    expect(found.length).toBeGreaterThanOrEqual(6); // the scan itself works
-    expect(found).toEqual(Object.keys(KNOWN_CREDENTIAL_ROUTES).sort());
-    for (const prefix of Object.values(KNOWN_CREDENTIAL_ROUTES)) {
-      expect(PATH_CREDENTIAL_PREFIXES).toContain(prefix);
-    }
+  // Proven on the real image in live/caddy-fragments.live.test.ts; pinned here so a compose-only
+  // CI run notices it moving into a handle block or after the fragments.
+  it('strips client X-SAM-* headers at site level, before the sam.d routes', () => {
+    const site = caddyfile.slice(caddyfile.indexOf('*.{$SAM_DOMAIN} {'));
+    const strip = site.indexOf('\n\trequest_header -X-SAM-*\n');
+    expect(strip).toBeGreaterThan(0);
+    expect(strip).toBeLessThan(site.indexOf('import sam.d/*.caddy'));
   });
 
   it('keeps the keep-warm check on a route that never serves a request', () => {
@@ -113,5 +77,72 @@ describe('Caddy logging and keep-warm wiring', () => {
     expect(keepWarm).toContain('handle @sam_keep_warm {');
     expect(keepWarm).toContain('health_uri /health');
     expect(keepWarm).toContain('health_interval {$SAM_KEEP_WARM_INTERVAL:5s}');
+  });
+});
+
+// Every long-running box service on the host network runs without capabilities it does not need.
+// celld and frps listen only on loopback ports above 1023, so they need none; Caddy keeps only
+// NET_BIND_SERVICE for 80/443. Read-only roots: frps writes no file (frps.toml logs to the
+// console); celld writes only its CELLD_WATCH volume (checked on the pinned image).
+describe('box service privileges', () => {
+  it.each(['celld', 'frps'])('%s drops every capability and cannot gain one', (name) => {
+    const service = compose.services[name];
+    expect(service?.cap_drop).toEqual(['ALL']);
+    expect(service?.cap_add).toBeUndefined();
+    expect(service?.security_opt).toEqual(['no-new-privileges:true']);
+    expect(service?.read_only).toBe(true);
+  });
+
+  it('celld writes only its data volume and a tmpfs /tmp', () => {
+    const celld = compose.services.celld as Service & { volumes?: string[] };
+    expect(celld.tmpfs).toEqual(['/tmp']);
+    expect(celld.volumes).toEqual([
+      'celld-data:/var/lib/celld',
+      './celld/start.sh:/etc/sam/celld-start.sh:ro',
+      'egress-fence-attestation:/run/sam-egress-fence:ro',
+    ]);
+    expect(celld.environment?.CELLD_WATCH).toBe('/var/lib/celld');
+  });
+
+  it('control: Caddy keeps only NET_BIND_SERVICE, for 80 and 443', () => {
+    expect(caddy?.cap_drop).toEqual(['ALL']);
+    expect(caddy?.cap_add).toEqual(['NET_BIND_SERVICE']);
+  });
+});
+
+// The bundled store's root credential reads every Worker secret in the fleet bucket. Its
+// entrypoint (run here under /bin/sh, with the image's own entrypoint stubbed) refuses a weak one.
+describe('bundled object store credential', () => {
+  const [shell, flag, script, name] = compose.services.objectstore?.entrypoint ?? [];
+  const run = (user: string, password: string) =>
+    spawnSync(
+      shell!,
+      [
+        flag!,
+        // Compose writes $$ for a literal $; the image's entrypoint becomes a marker.
+        script!.replaceAll('$$', '$').replace('exec /usr/bin/docker-entrypoint.sh', 'echo started'),
+        name!,
+        'server',
+      ],
+      {
+        encoding: 'utf8',
+        env: { PATH: '/usr/bin:/bin', MINIO_ROOT_USER: user, MINIO_ROOT_PASSWORD: password },
+      }
+    );
+
+  it.each([
+    ['an unset secret', 'sam-objectstore', ''],
+    ['the MinIO default', 'minioadmin', 'minioadmin'],
+    ['a 23-character secret', 'sam-objectstore', 'a'.repeat(23)],
+  ])('refuses %s', (_, user, password) => {
+    const result = run(user, password);
+    expect(result.status).toBe(64);
+    expect(result.stdout).not.toContain('started');
+  });
+
+  it('control: starts with a 24-character secret', () => {
+    const result = run('sam-objectstore', 'a'.repeat(24));
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('started');
   });
 });

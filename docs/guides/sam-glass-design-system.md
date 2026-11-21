@@ -15,6 +15,7 @@ SAM Glass is how the app looks: glass surfaces floating over an open, dark green
 5. **Panes are frosted glass.** Every pane blurs the void behind it, so the edge glow shows through each one, softened, and you can tell the panes are glass. A pane inside a pane doesn't blur again; an overlay (a drawer, a sheet, `.sam-glass-live`) blurs the content it covers. The void stays plain static gradients: blurred panes over animated or layered backgrounds made Chrome on macOS flicker the whole page.
 6. **People have colours.** You are green (`--sam-person-you`). Teammates get cyan, violet and rose in the order they joined the project (`--sam-person-1` to `-3`), stable per project. Automations are grey (`--sam-person-auto`). A colour says who, never what state.
 7. **Amber means it's waiting on you.** `--sam-color-warning` is for "needs input", notification counts and attention. Green is for things working. Neither is decoration.
+8. **Spend the screen on the task.** For every screen ask: is there more text than necessary, and is anything that is not central to what the person came to do taking space? A page header is one row where it fits: title, then its tabs or filters and actions beside it, not stacked under it. A sentence explaining what the page is for goes behind a `?` note beside the title, not in a permanent subtitle (the inbox header, `InboxHelpButton`).
 
 ## Layers
 
@@ -29,6 +30,8 @@ SAM Glass is how the app looks: glass surfaces floating over an open, dark green
 | Raised     | `.sam-raised`                                 | Secondary buttons, the chosen segment, the current tab.                                               |
 
 Radii: panes `--sam-radius-pane` (20px), slabs `--sam-radius-slab` (22px), controls `--sam-radius-control` (12px). Frame: 16px from the screen edge. Gutters: 14px.
+
+**Scrolling panes.** A pane must never be its own scroll container. Its rim (`.sam-glass-rim::before`) and its frost (`.sam-glass::after`) are absolutely positioned at `inset: 0`. Inside a scroller, that places them against the content at scroll position 0, so they scroll away with it. The user sees the rim's bottom edge cross the middle of the list, and the frost ends where it does. Give the pane `overflow-hidden` and a flex column, and put the scrolling (and the padding) on a child: `<Pane className="flex flex-col overflow-hidden"><div className="relative min-h-0 flex-1 overflow-y-auto">…</div></Pane>`. The shell's content pane in `AppShell` is built this way. `assertNoScrollingGlassPanes` in `apps/web/tests/playwright/audit-helpers.ts` fails any glass element whose computed `overflow-y` is `auto` or `scroll`. Note that `overflow-x: hidden` on its own makes `overflow-y` compute to `auto`.
 
 These replace the older glass utilities over time: `.glass-chrome` and `.glass-surface` become a pane, `.glass-modal` becomes an overlay. Don't mix the two systems on one screen.
 
@@ -88,14 +91,14 @@ Build these in `packages/ui/src/components/` with Tailwind and the tokens above,
 
 ## Data the designs need
 
-| Design                                        | Status                                                                                            |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Owner on each session (`createdBy`, `isMine`) | Exists.                                                                                           |
-| Mine / All filter                             | Exists (`scope=my` or `scope=all`).                                                               |
-| Others, and one person's sessions             | Needs an API option; filtering "all" in the browser can miss sessions because the list is capped. |
-| "Shared with" avatars on rows                 | Grants exist (`SessionAccessSummary`), but the list response doesn't include them yet.            |
+| Design                                        | Status                                                                                                                                                               |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Owner on each session (`createdBy`, `isMine`) | Exists.                                                                                                                                                              |
+| Mine / All filter                             | Exists (`scope=my` or `scope=all`).                                                                                                                                  |
+| Others, and one person's sessions             | Needs an API option; filtering "all" in the browser can miss sessions because the list is capped.                                                                    |
+| "Shared with" avatars on rows                 | Grants exist (`SessionAccessSummary`), but the list response doesn't include them yet.                                                                               |
 | Stable person colours                         | Needs a per-project join order (or a stored colour index per member). Until then `personSlotFor()` hashes the user id, so a person keeps one colour on every screen. |
-| "Jonas is writing", live cursors              | New realtime presence. Not designed into data yet.                                                |
+| "Jonas is writing", live cursors              | New realtime presence. Not designed into data yet.                                                                                                                   |
 
 ## Writing
 

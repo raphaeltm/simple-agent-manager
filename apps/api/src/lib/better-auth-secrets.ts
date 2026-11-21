@@ -25,6 +25,7 @@
 import type { BetterAuthOptions } from 'better-auth';
 import type { SecretConfig } from 'better-auth/crypto';
 
+import { selfHostRotationScopeEnabled } from '../services/encryption-key-fallback';
 import { getBetterAuthSecret } from './secrets';
 
 export interface BetterAuthSecretsEnv {
@@ -60,6 +61,9 @@ function parseVersion(name: string, raw: string): number {
  */
 export function betterAuthSecretOptions(env: BetterAuthSecretsEnv): BetterAuthSecretOptions {
   const current = getBetterAuthSecret(env);
+  // Versioned secrets are a self-hosted rotation feature: outside its scope (Cloudflare) every
+  // BETTER_AUTH_SECRET_VERSION / _PREVIOUS* var is ignored, exactly as before they existed.
+  if (!selfHostRotationScopeEnabled()) return { secret: current };
   // Truthy checks, matching lib/secrets.ts: empty strings from CI/CD mean "unset".
   const previous = env.BETTER_AUTH_SECRET_PREVIOUS || undefined;
   const previousVersionRaw = env.BETTER_AUTH_SECRET_PREVIOUS_VERSION || undefined;

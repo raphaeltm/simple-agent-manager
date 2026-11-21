@@ -1,55 +1,31 @@
-/**
- * Backup and restore for a one-box install (`pnpm selfhost:backup`, `pnpm selfhost:restore`).
- *
- * What is backed up, and why only this: the fleet bucket (`CELLD_BUCKET`) is celld's durable
- * state, holding every D1 database, Durable Object, R2 object and deployed Worker version; the
- * `celld-data` volume is a cache of it (docker-compose.yml). The box's own state is `.state/`
- * (platform keys, gateway and fence files, operator secrets) and `.env` (domain, bucket and its
- * credential). A backup is those three, nothing else.
- *
- * Consistency: a live copy of a running fleet is not guaranteed consistent by celld. So, as the
- * box agents did by hand: copy the bucket live (long, no downtime), stop celld, copy again (only
- * the delta moves), copy `.state/` and `.env`, start celld. Downtime is the delta copy only and is
- * recorded in the backup's manifest. celld is restarted even when the delta copy fails.
- *
- * Restore goes into an EMPTY install only: an empty target bucket and no platform keys in the
- * target `.state/`. Restoring over a live fleet, or starting an older Worker against a fleet a
- * newer one migrated, is how data is lost; both are refused rather than offered with a flag.
- *
- * The bucket copy is delegated to the tool each store already has on a box: `gcloud storage
- * rsync` for gs://, and `mc mirror` from the objectstore image pinned in docker-compose.yml for
- * s3:// (the bundled store or any S3 endpoint). Credentials reach `mc` through the environment
- * (`-e MC_HOST_src` names the variable; its value never appears on a command line or in a log).
- *
- * A backup contains every Worker secret in plaintext (bucket `deploy/` manifests, `.state/`,
- * `.env`). The backup directory is created mode 0700; keep copies where only the operator can
- * read them.
- */
+/** Encrypted operator backups with a stopped-writer consistency boundary. */
 import {
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
-  readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 
-import { recordBackup } from './install-record';
+import { prepareBackupParent } from './backup-destination';
+import { decryptBackupTree, encryptBackupTree, readBackupKey } from './backup-encryption';
+import { readManifest } from './backup-manifest';
+import { assertBackupOutside, assertOperationPaths } from './backup-paths';
+import { restoreBackup } from './backup-restore';
+import { requireRunningCelld } from './backup-runtime';
+import { composeProjectFor, expectedComposeProjectFor, recordBackup } from './install-record';
 import { KEY_SERVICE_BACKUP_EXCLUDES } from './key-service';
+import { assertOperatorExecution } from './operator-only';
+import { removePrivateTree } from './private-tree';
+import { projectRestoreIdentity, restoreSourceInstallationId } from './restore-identity';
+import { restoreProgress } from './restore-progress';
 import { ensurePrivateDir } from './secret-files';
-
-/** The objectstore image docker-compose.yml pins; `mc` ships in it. */
-/**
- * The key file and key-service credentials stay out of every backup: with sealed secrets they are
- * what turns the bundle (which the backup does hold) into plaintext. Back them up apart, offline.
- */
-export function isKeyServiceSecretPath(stateDir: string, src: string): boolean {
-  const rel = relative(stateDir, src);
-  return KEY_SERVICE_BACKUP_EXCLUDES.some((path) => rel === path || rel.startsWith(`${path}/`));
-}
 
 /**
  * Rebuildable caches under the state dir, left out of every backup. `go-cache` is the vm-agent
@@ -57,6 +33,16 @@ export function isKeyServiceSecretPath(stateDir: string, src: string): boolean {
  * and the state copy runs while celld is stopped, so it also lengthened every backup's downtime.
  */
 export const STATE_CACHE_EXCLUDES = ['go-cache'];
+
+/**
+ * The key file and key-service credentials stay out of every backup: with sealed secrets they are
+ * what turns the bundles (which the backup does hold) into plaintext. Keep them apart, off the box
+ * (`pnpm selfhost:secrets key-file`).
+ */
+export function isKeyServiceSecretPath(stateDir: string, src: string): boolean {
+  const rel = relative(stateDir, src);
+  return KEY_SERVICE_BACKUP_EXCLUDES.some((path) => rel === path || rel.startsWith(`${path}/`));
+}
 
 export function isRebuildableCachePath(stateDir: string, src: string): boolean {
   const rel = relative(stateDir, src);
@@ -97,6 +83,8 @@ export interface BoxContext {
   log: (message: string) => void;
   /** uid:gid for files `mc` writes into a local directory. */
   user?: string;
+  /** Separate operator-owned raw 32-byte encryption key, never backed up. */
+  encryptionKeyFile?: string;
 }
 
 export interface BucketUrl {
@@ -106,26 +94,28 @@ export interface BucketUrl {
 }
 
 export function parseBucketUrl(url: string): BucketUrl {
-  const match = /^(gs|s3):\/\/([^/]+)\/?(.*)$/.exec(url.trim());
-  if (!match) throw new Error(`CELLD_BUCKET must be gs://bucket[/prefix] or s3://bucket[/prefix]`);
-  return {
-    scheme: match[1] as 'gs' | 's3',
-    bucket: match[2] as string,
-    prefix: (match[3] ?? '').replace(/\/+$/, ''),
-  };
+  const value = url.trim();
+  let scheme: 'gs' | 's3';
+  if (value.startsWith('gs://')) scheme = 'gs';
+  else if (value.startsWith('s3://')) scheme = 's3';
+  else throw new Error('CELLD_BUCKET must be gs://bucket[/prefix] or s3://bucket[/prefix]');
+  if (/[\r\n\u2028\u2029]/.test(value))
+    throw new Error('CELLD_BUCKET must be gs://bucket[/prefix] or s3://bucket[/prefix]');
+  const rest = value.slice(5);
+  const slash = rest.indexOf('/');
+  const bucket = slash === -1 ? rest : rest.slice(0, slash);
+  if (!bucket) throw new Error('CELLD_BUCKET must be gs://bucket[/prefix] or s3://bucket[/prefix]');
+  const prefix = slash === -1 ? '' : rest.slice(slash + 1);
+  let end = prefix.length;
+  while (end > 0 && prefix[end - 1] === '/') end--;
+  return { scheme, bucket, prefix: prefix.slice(0, end) };
 }
 
 export function check(result: RunResult, what: string): RunResult {
   if (result.status !== 0) {
-    // stderr of gcloud/mc/docker carries no secret (credentials travel in the environment).
-    // gcloud prints progress first; its ERROR lines are the part worth reporting.
-    const errorLines = result.stderr
-      .split('\n')
-      .filter((line) => /^ERROR\b/.test(line.trim()))
-      .slice(0, 5)
-      .join('\n');
+    // Tool diagnostics may embed signed URLs or credentials. Never relay them.
     throw new Error(
-      `${what} failed (exit ${result.status}): ${(errorLines || result.stderr.trim()).slice(0, 800)}`
+      `${what} failed (exit ${result.status}); inspect the tool locally without sharing secret-bearing output`
     );
   }
   return result;
@@ -236,35 +226,17 @@ export function bucketIsEmpty(ctx: BoxContext): boolean {
   return result.stdout.trim() === '';
 }
 
-/**
- * The compose files a box runs with. `COMPOSE_FILE` in .env adds files to the stack (the README's
- * way to turn on guided login with docker-compose.guided-login.yml), and docker compose reads it
- * only when no `-f` is given: an explicit `-f docker-compose.yml` silently drops every other file,
- * so a recreate loses what they add (celld's DOCKER_HOST). Scripted compose calls must therefore
- * pass this whole list. Split on COMPOSE_PATH_SEPARATOR (default `:`, as compose does on Linux);
- * relative entries are resolved against `composeDir`, the directory holding the compose files.
- */
-export function composeFilesFor(
-  box: Readonly<Record<string, string>>,
-  composeDir: string
-): string[] {
-  const separator = box.COMPOSE_PATH_SEPARATOR || ':';
-  const listed = (box.COMPOSE_FILE ?? '')
-    .split(separator)
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-  return (listed.length > 0 ? listed : ['docker-compose.yml']).map((entry) =>
-    isAbsolute(entry) ? entry : resolve(composeDir, entry)
-  );
-}
+export { composeFilesFor } from './compose-env';
 
 /** `docker compose` arguments for this box: every compose file, then its .env, then `args`. */
 export function composeArgs(
-  ctx: Pick<BoxContext, 'composeFiles' | 'envFile'>,
+  ctx: Pick<BoxContext, 'composeFiles' | 'envFile'> & Partial<Pick<BoxContext, 'box' | 'stateDir'>>,
   args: string[]
 ): string[] {
   return [
     'compose',
+    '--project-name',
+    composeProjectFor(ctx.box ?? {}, ctx.stateDir ?? resolve(dirname(ctx.envFile), '.state')),
     ...ctx.composeFiles.flatMap((file) => ['-f', file]),
     '--env-file',
     ctx.envFile,
@@ -272,8 +244,15 @@ export function composeArgs(
   ];
 }
 
+export function composeRunEnv(ctx: Pick<BoxContext, 'stateDir'>): NodeJS.ProcessEnv {
+  return { ...process.env, SAM_SELFHOST_STATE_DIR: resolve(ctx.stateDir) };
+}
+
 function compose(ctx: BoxContext, args: string[]): void {
-  check(ctx.run('docker', composeArgs(ctx, args)), `docker compose ${args.join(' ')}`);
+  check(
+    ctx.run('docker', composeArgs(ctx, args), composeRunEnv(ctx)),
+    `docker compose ${args.join(' ')}`
+  );
 }
 
 export interface BackupManifest {
@@ -312,7 +291,7 @@ function removeGcloudTemporaries(dir: string): void {
 }
 
 /** Live pre-copy, short stop, delta, restart. Returns the manifest written into `dest`. */
-export function runBackup(
+function runPlainBackup(
   ctx: BoxContext,
   dest: string,
   samCommit: string | null = null
@@ -333,12 +312,11 @@ export function runBackup(
   // The pre-copy only shortens the downtime; the delta copy below, with celld stopped, is the one
   // that must succeed, and it fails loudly if the store itself is unreachable.
   //
-  // The pre-copy goes to its own directory. An aborted gcloud pass leaves state keyed by the
-  // destination path it was writing (resumable-download tracker files, `_.gstmp` temporaries), and
-  // a second rsync into the SAME paths tripped over it on the box: `[Errno 2] No such file or
-  // directory: <backup>/bucket/nodes/node_<id>.json` for objects celld removed between the passes.
-  // Renaming the tree before the delta copy means gcloud has no state for any destination path it
-  // is about to write; only the bytes carry over.
+  // BOX's failed stopped pass reached gcloud's POSIX-metadata step with a missing local node
+  // JSON file (SDK 523: finalize_download can return false, but its caller still stats the file).
+  // Keep partial live downloads and their destination-keyed resumable state out of the stopped
+  // pass: remove temporary files, move only completed bytes to fresh paths, and retain the
+  // untouched-directory fallback if that pass still fails.
   try {
     pullBucket(ctx, liveDir);
   } catch (err) {
@@ -356,11 +334,12 @@ export function runBackup(
   }
 
   ctx.log('stopping celld for the delta copy');
-  compose(ctx, ['stop', 'celld']);
-  const stoppedAt = ctx.now();
+  let stoppedAt = ctx.now();
   let deltaCopyMs = 0;
   let startedAt = stoppedAt;
   try {
+    compose(ctx, ['stop', 'celld']);
+    stoppedAt = ctx.now();
     // With celld stopped the bucket is the consistent state. The mirror (with deletion) converges
     // the local tree on exactly that: objects celld removed after the pre-copy are deleted here.
     try {
@@ -380,8 +359,14 @@ export function runBackup(
     cpSync(ctx.stateDir, join(dest, STATE_DIR), {
       recursive: true,
       preserveTimestamps: true,
-      filter: (src) =>
-        !isKeyServiceSecretPath(ctx.stateDir, src) && !isRebuildableCachePath(ctx.stateDir, src),
+      filter: (src) => {
+        if (isRebuildableCachePath(ctx.stateDir, src)) return false;
+        if (isKeyServiceSecretPath(ctx.stateDir, src)) return false;
+        if (!lstatSync(src).isSymbolicLink()) return true;
+        // prepareCelldProject regenerates source/migration links from the recorded SAM ref.
+        if (relative(ctx.stateDir, src).startsWith('project/')) return false;
+        throw new Error('Installation state contains an unsupported symlink');
+      },
     });
     cpSync(ctx.envFile, join(dest, ENV_FILE), { preserveTimestamps: true });
   } finally {
@@ -404,48 +389,103 @@ export function runBackup(
     mode: 0o600,
   });
   // Listed for `pnpm selfhost:teardown`, which deletes a backup only with --delete-backups.
-  recordBackup(ctx.stateDir, dest);
   ctx.log(
     `backup complete: ${manifest.objectCount} objects, celld down ${(manifest.downtimeMs / 1000).toFixed(1)} s -> ${dest}`
   );
   return manifest;
 }
 
-export function readManifest(dir: string): BackupManifest {
-  const path = join(dir, MANIFEST_NAME);
-  if (!existsSync(path)) throw new Error(`${dir} has no ${MANIFEST_NAME}; not a backup`);
-  const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
-  if (
-    typeof parsed !== 'object' ||
-    parsed === null ||
-    (parsed as { version?: unknown }).version !== 1 ||
-    typeof (parsed as { objectCount?: unknown }).objectCount !== 'number'
-  ) {
-    throw new Error(`${path} is not a version 1 backup manifest`);
-  }
-  return parsed as BackupManifest;
+/** Backups are operator-only: no secret-bearing reads or decryptions in CI. */
+export function backupKey(ctx: BoxContext): string {
+  assertOperatorExecution();
+  if (!ctx.encryptionKeyFile)
+    throw new Error(
+      '--encryption-key-file (or SAM_BACKUP_KEY_FILE) is required; keep this 32-byte key apart from backups'
+    );
+  readBackupKey(ctx.encryptionKeyFile).fill(0);
+  assertOperationPaths(ctx);
+  return ctx.encryptionKeyFile;
 }
 
-/**
- * Restore `from` into an empty install: the target bucket (the CELLD_BUCKET in ctx.box) must be
- * empty and the target `.state/` must have no platform keys. celld stays stopped; the caller
- * prints how to start the stack.
- */
-export function runRestore(ctx: BoxContext, from: string): BackupManifest {
-  const manifest = readManifest(from);
-  if (existsSync(join(ctx.stateDir, 'platform-keys.json'))) {
-    throw new Error(
-      `${ctx.stateDir} already holds platform keys: restore only into an empty install`
-    );
-  }
-  if (!bucketIsEmpty(ctx)) {
-    throw new Error(`${ctx.box.CELLD_BUCKET} is not empty: restore only into an empty bucket`);
-  }
-  // Harmless when the stack is not up; required so no celld writes while the bucket fills.
-  compose(ctx, ['stop', 'celld']);
-  ctx.log(`copying ${manifest.objectCount} objects into ${ctx.box.CELLD_BUCKET}`);
-  pushBucket(ctx, join(from, BUCKET_DIR));
-  ensurePrivateDir(ctx.stateDir);
-  cpSync(join(from, STATE_DIR), ctx.stateDir, { recursive: true, preserveTimestamps: true });
-  return manifest;
+export function backupScratch(): string {
+  const root = resolve(import.meta.dirname, '../../.tmp/selfhost-backups');
+  let existing = root;
+  while (!existsSync(existing)) existing = dirname(existing);
+  if (realpathSync(existing) !== existing) throw new Error('Backup scratch must not use symlinks');
+  ensurePrivateDir(root);
+  if (realpathSync(root) !== root) throw new Error('Backup scratch must not use symlinks');
+  return mkdtempSync(join(root, 'operation-'));
 }
+
+/** Persist only authenticated ciphertext. Temporary plaintext is private and always removed. */
+export function runBackup(
+  ctx: BoxContext,
+  dest: string,
+  samCommit: string | null = null
+): BackupManifest {
+  assertOperatorExecution();
+  const key = backupKey(ctx);
+  assertBackupOutside(ctx, dest);
+  if (existsSync(dest)) throw new Error('Backup destination already exists; choose a fresh path');
+  const keyPath = resolve(key);
+  for (const dir of [ctx.stateDir, dest]) {
+    const rel = relative(resolve(dir), keyPath);
+    if (!rel.startsWith('..') && !rel.startsWith('/'))
+      throw new Error('Keep the backup key outside installation state and backups');
+  }
+  prepareBackupParent(dest);
+  requireRunningCelld(ctx);
+  const temp = backupScratch();
+  try {
+    const plain = join(temp, 'plain');
+    const manifest = runPlainBackup(ctx, plain, samCommit);
+    encryptBackupTree(plain, dest, key);
+    recordBackup(ctx.stateDir, dest);
+    ctx.log(`encrypted backup complete -> ${dest}`);
+    return manifest;
+  } finally {
+    removePrivateTree(temp);
+  }
+}
+
+/** Authenticate every byte before any target bucket or compose operation. */
+export function runRestore(ctx: BoxContext, from: string): BackupManifest;
+export function runRestore(ctx: BoxContext, from: string, mode: 'project'): string;
+export function runRestore(
+  ctx: BoxContext,
+  from: string,
+  mode?: 'project'
+): BackupManifest | string {
+  assertOperatorExecution();
+  const key = backupKey(ctx);
+  assertBackupOutside(ctx, from);
+  const temp = backupScratch();
+  try {
+    const plain = join(temp, 'plain');
+    decryptBackupTree(from, plain, key);
+    if (mode === 'project') {
+      readManifest(plain);
+      const progress = restoreProgress(
+        ctx,
+        from,
+        restoreSourceInstallationId(ctx, join(plain, STATE_DIR))
+      );
+      progress.reserve();
+      const identity = projectRestoreIdentity(ctx, join(plain, STATE_DIR), progress.installationId);
+      return expectedComposeProjectFor(ctx.box, ctx.stateDir, identity);
+    }
+    return restoreBackup(ctx, plain, from);
+  } finally {
+    removePrivateTree(temp);
+  }
+}
+
+export { readManifest } from './backup-manifest';
+export { assertBackupOutside } from './backup-paths';
+export {
+  assertRollbackCacheReady,
+  beginRollbackCacheStart,
+  finishRollbackCache,
+  refreshRollbackCacheReceipt,
+  runRollback,
+} from './backup-recovery';

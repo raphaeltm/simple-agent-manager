@@ -16,6 +16,7 @@ import {
   buildAnyDefaultCapacityPoolExclusionSql,
   buildHigherPrecedenceDefaultCapacityPoolExclusionSql,
 } from './capacity-pool-precedence';
+import { externalCapacitySourceCredentialId } from './default-capacity-pool-helpers';
 
 export type PlacementSqlBind = string | number | null;
 export type PlacementAuthorityNodeClass = 'managed' | 'user-owned';
@@ -185,8 +186,9 @@ export function buildPlacementAuthoritySqlPredicate(
     binds.push(...higherPrecedenceExclusion.binds);
   }
 
-  // Identity is already pinned through node columns above; joins reuse those
-  // columns instead of binding the snapshot values again.
+  // Identity is already pinned through node columns above; joins reuse those columns instead of
+  // binding the snapshot values again. SQLite nests an AND chain one level per term and D1 caps
+  // expression depth at 100, so the pool/source/candidate/credential groups stay parenthesized.
   clauses.push(
     `AND EXISTS (
       SELECT 1
@@ -197,14 +199,14 @@ export function buildPlacementAuthoritySqlPredicate(
         ON c.id = ${nodeAlias}.capacity_pool_candidate_id
        AND c.pool_id = p.id
        AND c.capacity_source_id = s.id
-      WHERE p.id = ${nodeAlias}.capacity_pool_id
+      WHERE (p.id = ${nodeAlias}.capacity_pool_id
         AND p.scope = ${nodeAlias}.capacity_pool_scope
         ${existingNode ? '' : `AND p.revision = ${nodeAlias}.capacity_pool_revision`}
         AND p.status = 'active'
         AND p.configuration_state = 'configured-ready'
         AND p.is_default = 1
-        ${poolScope.sql}
-        AND s.scope = p.scope
+        ${poolScope.sql})
+        AND (s.scope = p.scope
         AND s.source_kind = 'cloud-provider-credential'
         AND s.status = 'active'
         -- A switched-off account keeps its picks but is never placed (new VMs or reuse).
@@ -219,8 +221,8 @@ export function buildPlacementAuthoritySqlPredicate(
         AND (CASE WHEN s.authority_generation > 0 THEN s.authority_generation
              ELSE ${sqliteTimestampVersion('s.updated_at')} END) = ${nodeAlias}.capacity_source_generation
         AND s.external_source_ref IS ${nodeAlias}.capacity_source_external_ref
-        ${sourceScope.sql}
-        AND c.status = 'active'
+        ${sourceScope.sql})
+        AND (c.status = 'active'
         AND c.catalog_availability = 'available'
         AND c.provider = ${nodeAlias}.cloud_provider
         AND c.location = ${nodeAlias}.vm_location
@@ -231,8 +233,8 @@ export function buildPlacementAuthoritySqlPredicate(
         AND c.provider_instance_disk_gb IS ?
         AND c.provider_instance_boot_disk_size_gb IS ${nodeAlias}.provider_instance_boot_disk_size_gb
         AND c.provider_instance_image IS ${nodeAlias}.provider_instance_image
-        AND c.provider_instance_architecture IS ${nodeAlias}.provider_instance_architecture
-        ${credential.sql}
+        AND c.provider_instance_architecture IS ${nodeAlias}.provider_instance_architecture)
+        AND (1 = 1 ${credential.sql})
     )`
   );
   binds.push(
@@ -351,7 +353,9 @@ function buildCredentialAuthoritySql(
   }
 
   if (reference.kind === 'ccCredential') {
-    const attachment = parseComposableAttachmentReference(snapshot.capacitySourceExternalRef);
+    const externalRef = snapshot.capacitySourceExternalRef;
+    if (!externalRef) return null;
+    const attachment = parseComposableAttachmentReference(externalRef);
     if (!attachment) return null;
     if (snapshot.placementCredentialSource === 'project' && !input.projectId) return null;
     const attachmentScope =
@@ -362,8 +366,12 @@ function buildCredentialAuthoritySql(
               AND current_cc_attachment.project_id IS NULL`,
             binds: [],
           };
+    // Reconciliation must satisfy migration 0125's non-null FK with a secret-free anchor.
+    // It is not credential authority: accept only this attachment/version's exact anchor
+    // (or the older null shape), then validate the real cc_* binding below.
+    const anchorId = externalCapacitySourceCredentialId(externalRef, snapshot.placementCredentialVersion);
     return {
-      sql: `AND s.credential_id IS NULL
+      sql: `AND (s.credential_id IS NULL OR s.credential_id = ?)
         AND s.platform_credential_id IS NULL
         AND EXISTS (
           SELECT 1
@@ -387,7 +395,7 @@ function buildCredentialAuthoritySql(
             ${attachmentScope.sql}
             AND ${sqliteTimestampVersion('current_cc_credential.updated_at')} = ${credentialVersionSql}
         )`,
-      binds: [reference.id, attachment.id, ...attachmentScope.binds],
+      binds: [anchorId, reference.id, attachment.id, ...attachmentScope.binds],
     };
   }
 

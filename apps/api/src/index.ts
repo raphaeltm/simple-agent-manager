@@ -36,9 +36,9 @@ export { SandboxDO } from './durable-objects/sandbox-do';
 export { VmAgentContainer } from './durable-objects/vm-agent-container';
 export type { Env } from './env';
 
+import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
-import { app } from './app';
 import type { Env } from './env';
 import { applyCacheHeaders } from './lib/cache-headers';
 import { withRequestScopedD1Bindings } from './lib/d1-session';
@@ -68,6 +68,7 @@ import { adminQuotaRoutes } from './routes/admin-quotas';
 import { adminRuntimeControlRoutes } from './routes/admin-runtime-controls';
 import { adminSandboxRoutes } from './routes/admin-sandbox';
 import { adminSettingsRoutes } from './routes/admin-settings';
+import { adminStrandedNodeRoutes } from './routes/admin-stranded-nodes';
 import { adminUsageRoutes } from './routes/admin-usage';
 import { agentRoutes } from './routes/agent';
 import { agentCredentialSetupSessionsRoutes } from './routes/agent-credential-setup-sessions';
@@ -135,6 +136,7 @@ import { nodesRoutes } from './routes/nodes';
 import { notificationRoutes } from './routes/notifications';
 import { observabilityIngestRoutes } from './routes/observability-ingest';
 import { orchestratorRoutes } from './routes/orchestrator';
+import { ownerSessionSnapshotRoutes } from './routes/owner-session-snapshots';
 import { platformCapabilitiesRoutes } from './routes/platform-capabilities';
 import { policyRoutes } from './routes/policies';
 import { profileRuntimeRoutes } from './routes/profile-runtime';
@@ -188,6 +190,8 @@ import { handleInboundAgentEmail } from './services/agent-email/inbound';
 import { agentEmailConfig } from './services/agent-email/setup-state';
 import { isAgentSignInEnabled } from './services/agent-sign-in/config';
 import { isInstantRuntimeAvailable } from './services/vm-agent-container';
+
+export const app = new Hono<{ Bindings: Env }>();
 
 // Global error handler — catches errors from all routes including subrouters.
 // Must use app.onError() instead of middleware try/catch because Hono's
@@ -440,6 +444,8 @@ app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/operation-receipts', cliOperationReceiptRoutes);
 app.route('/api/projects/:projectId/cli', cliProjectMetadataRoutes);
 app.route('/api/projects/:projectId/sessions', chatStartRoutes);
+// Human-owner retained exports are independent of workspace callback JWT routes.
+app.route('/api/projects/:projectId/sessions', ownerSessionSnapshotRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
 app.route('/api/projects/:projectId/ideas', ideaUpdateRoutes);
 app.route('/api/projects/:projectId/comments', projectCommentRoutes);
@@ -487,6 +493,7 @@ app.route('/api/admin/quotas', adminQuotaRoutes);
 app.route('/api/admin/agent-email', adminAgentEmailRoutes);
 app.route('/api/admin/runtime-controls', adminRuntimeControlRoutes);
 app.route('/api/admin/operations/approvals', adminOperationsApprovalRoutes);
+app.route('/api/admin/nodes', adminStrandedNodeRoutes);
 app.route('/api/admin/settings', adminSettingsRoutes);
 app.route('/api/admin/usage', adminUsageRoutes);
 app.route('/api/admin/costs', adminCostRoutes);

@@ -10,7 +10,6 @@ import { projectCredentialsRoutes } from './credentials';
 import { crudRoutes } from './crud';
 import { devcontainerConfigRoutes } from './devcontainer-configs';
 import { fileProxyRoutes } from './files';
-import { hostedGitTokenRoutes } from './hosted-git-token';
 import { projectMembersRoutes } from './members';
 import { repoBrowseRoutes } from './repo-browse';
 import { repositoryAccessRoutes } from './repository-access';
@@ -29,7 +28,6 @@ projectsRoutes.route('/', devcontainerConfigRoutes);
 projectsRoutes.route('/', repositoryAccessRoutes);
 projectsRoutes.route('/', projectMembersRoutes);
 projectsRoutes.route('/', repoBrowseRoutes);
-projectsRoutes.route('/', hostedGitTokenRoutes);
 projectsRoutes.route('/', projectResourceHistoryRoutes);
 
 export { projectsRoutes };

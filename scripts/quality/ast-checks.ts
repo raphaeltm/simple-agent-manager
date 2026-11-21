@@ -394,6 +394,7 @@ function main() {
       resolve(ROOT, 'packages/repo-hosting/src/**/*.ts'),
       // Lifted from apps/api/src/lib when merging main into the self-host branch; keep their checks.
       resolve(ROOT, 'packages/worker-core/src/network-hosts/**/*.ts'),
+      // The shared in-flight join helper lives in worker-core and runs in this Worker; keep its checks.
       resolve(ROOT, 'packages/worker-core/src/shared-flight.ts'),
       resolve(ROOT, 'packages/cron/src/**/*.ts'),
     ]);

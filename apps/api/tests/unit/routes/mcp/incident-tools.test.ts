@@ -9,6 +9,7 @@ import {
   handleListIncidentQueue,
   handleResolveIncident,
 } from '../../../../src/routes/mcp/incident-tools';
+import { INCIDENT_TOOLS } from '../../../../src/routes/mcp/tool-definitions-incident-tools';
 import { createSqliteD1 } from '../../../helpers/sqlite-d1';
 
 const IMPLEMENTATION_TASK_ID = '01M0YGSPRC0E17FPQMZYW012R8';
@@ -21,7 +22,7 @@ function setup() {
     CREATE TABLE platform_feedback_triages (
       signature TEXT PRIMARY KEY, source TEXT NOT NULL, summary TEXT NOT NULL,
       first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, occurrence_count INTEGER NOT NULL,
-      severity TEXT NOT NULL DEFAULT 'error', evidence_refs TEXT NOT NULL, diagnosis_id TEXT, idea_id TEXT, claim_token TEXT,
+      severity TEXT NOT NULL DEFAULT 'error', evidence_refs TEXT NOT NULL, diagnosis_id TEXT, idea_id TEXT, idea_owned_at TEXT, claim_token TEXT,
       claim_expires_at INTEGER, failure_count INTEGER NOT NULL DEFAULT 0,
       last_failure_reason TEXT, last_failed_at INTEGER, rejected_at INTEGER,
       budget_deferred_until INTEGER, budget_deferred_reason TEXT,
@@ -34,6 +35,9 @@ function setup() {
       incident_claimed_by_task_id TEXT, incident_claimed_at INTEGER,
       resolved_at INTEGER, resolved_by_task_id TEXT, resolution_note TEXT,
       resolution_references TEXT, expired_at INTEGER,
+      watching_since INTEGER, watch_reason TEXT, watch_hourly_counts TEXT,
+      watch_escalated_at INTEGER, watch_escalation_reason TEXT,
+      watch_count_floor INTEGER, watch_counted_ids TEXT, watch_spike_offset INTEGER,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
     INSERT INTO platform_feedback_triages
       (signature, source, summary, first_seen_at, last_seen_at, occurrence_count, evidence_refs,
@@ -269,5 +273,160 @@ describe('MCP incident tools', () => {
     expect(sqlite.prepare('SELECT queue_state FROM platform_feedback_triages').get()).toEqual({
       queue_state: 'rejected',
     });
+  });
+
+  it('sets a claimed incident to watching with a required reason', async () => {
+    const { sqlite, env } = setup();
+    const claim = parseToolText(
+      await handleClaimIncident('1', { incidentId: 'incident-a' }, token(), env)
+    );
+
+    const missingReason = await handleResolveIncident(
+      '2',
+      { incidentId: 'incident-a', claimToken: claim.claimToken, outcome: 'watching' },
+      token(),
+      env
+    );
+    expect(missingReason.error?.message).toContain('Watching requires a one-line reason');
+    const blankReason = await handleResolveIncident(
+      '2b',
+      {
+        incidentId: 'incident-a',
+        claimToken: claim.claimToken,
+        outcome: 'watching',
+        note: '  \u0007 ',
+      },
+      token(),
+      env
+    );
+    expect(blankReason.error?.message).toContain('Watching requires a one-line reason');
+    const wrongClaim = await handleResolveIncident(
+      '3',
+      { incidentId: 'incident-a', claimToken: 'wrong', outcome: 'watching', note: 'benign' },
+      token(),
+      env
+    );
+    expect(wrongClaim.error?.message).toContain('verify the claim token');
+
+    const watched = parseToolText(
+      await handleResolveIncident(
+        '4',
+        {
+          incidentId: 'incident-a',
+          claimToken: claim.claimToken,
+          outcome: 'watching',
+          note: 'Real but harmless retry noise',
+        },
+        token(),
+        env
+      )
+    );
+    expect(watched).toMatchObject({ incidentId: 'incident-a', outcome: 'watching' });
+    expect(
+      sqlite
+        .prepare(
+          `SELECT queue_state, watch_reason, incident_claim_token, dispatch_attempts, resolved_at
+           FROM platform_feedback_triages`
+        )
+        .get()
+    ).toEqual({
+      queue_state: 'watching',
+      watch_reason: 'Real but harmless retry noise',
+      incident_claim_token: null,
+      dispatch_attempts: 0,
+      resolved_at: null,
+    });
+
+    // Watching is out of the default list and returned when asked for.
+    const defaults = parseToolText(await handleListIncidentQueue('5', {}, token(), env));
+    expect(defaults.count).toBe(0);
+    const listed = parseToolText(
+      await handleListIncidentQueue('6', { state: 'watching' }, token(), env)
+    );
+    expect(listed.count).toBe(1);
+  });
+
+  it('ranks watched incidents by recent frequency with their frequency fields', async () => {
+    const { sqlite, env } = setup();
+    const hour = Math.floor(Date.now() / 3_600_000);
+    const insert = sqlite.prepare(
+      `INSERT INTO platform_feedback_triages
+        (signature, source, summary, first_seen_at, last_seen_at, occurrence_count, evidence_refs,
+         queue_state, queued_at, watching_since, watch_reason, watch_hourly_counts)
+       VALUES (?, 'api', ?, 1000, ?, ?, '[]', 'watching', 1000, ?, 'watch reason', ?)`
+    );
+    // Most total occurrences but nothing recent; recent counts outside the window are ignored.
+    insert.run('old-flood', 'old flood', 2000, 900, 1000, JSON.stringify({ [hour - 400]: 900 }));
+    insert.run('busy', 'busy', 3000, 40, 1000, JSON.stringify({ [hour - 2]: 25, [hour - 30]: 15 }));
+    insert.run('quiet', 'quiet', 4000, 5, 1000, JSON.stringify({ [hour - 1]: 5 }));
+    insert.run('malformed', 'malformed', 5000, 3, 1000, 'not json');
+    // A string count is malformed: the SQL ranking ignores it exactly as the parser does.
+    insert.run(
+      'string-count',
+      'string count',
+      6000,
+      2,
+      1000,
+      JSON.stringify({ [hour - 1]: '1000' })
+    );
+
+    const listed = parseToolText(
+      await handleListIncidentQueue('1', { state: 'watching', sort: 'frequency' }, token(), env)
+    );
+    const incidents = listed.incidents as Array<Record<string, unknown>>;
+    expect(incidents.map((item) => item.id)).toEqual([
+      'busy',
+      'quiet',
+      'old-flood',
+      'malformed',
+      'string-count',
+    ]);
+    expect(listed.hasMore).toBe(false);
+    expect(incidents[0]).toMatchObject({
+      queueState: 'watching',
+      occurrenceCount: 40,
+      firstSeenAt: 1000,
+      lastSeenAt: 3000,
+      recentOccurrenceCount: 40,
+      recentWindowHours: 168,
+      watchingSince: 1000,
+      watchReason: 'watch reason',
+    });
+    expect(incidents[2]).toMatchObject({ recentOccurrenceCount: 0, occurrenceCount: 900 });
+
+    const truncated = parseToolText(
+      await handleListIncidentQueue(
+        '5',
+        { state: 'watching', sort: 'frequency', limit: 2 },
+        token(),
+        env
+      )
+    );
+    expect(truncated).toMatchObject({ count: 2, hasMore: true });
+    expect(String(truncated.more)).toContain('larger limit');
+
+    const invalidSort = await handleListIncidentQueue('2', { sort: 'loudest' }, token(), env);
+    expect(invalidSort.error?.message).toContain('sort must be');
+
+    const detail = parseToolText(
+      await handleGetIncident('3', { incidentId: 'busy' }, token(), env)
+    );
+    expect(detail.incident).toMatchObject({ recentOccurrenceCount: 40, queueState: 'watching' });
+    expect(JSON.stringify(detail)).toContain('Occurrences in the last 168h while watching: 40');
+  });
+
+  it('advertises the watching outcome and frequency sort the handlers accept', () => {
+    const byName = Object.fromEntries(INCIDENT_TOOLS.map((tool) => [tool.name, tool]));
+    const resolveProps = byName.resolve_incident?.inputSchema.properties as Record<
+      string,
+      { enum?: string[] }
+    >;
+    const listProps = byName.list_incident_queue?.inputSchema.properties as Record<
+      string,
+      { enum?: string[] }
+    >;
+    expect(resolveProps.outcome?.enum).toEqual(['resolved', 'rejected', 'watching']);
+    expect(listProps.sort?.enum).toEqual(['priority', 'frequency']);
+    expect(listProps.state?.enum).toContain('watching');
   });
 });

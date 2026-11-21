@@ -224,7 +224,9 @@ function accountLabel(source: 'project' | 'platform', provider: string): string 
 export async function readBriefFacts(
   db: D1Database,
   projectId: string,
-  now: number
+  now: number,
+  /** Chats whose agent is mid-turn (ProjectData `listWorkingChatSessionIds`). */
+  workingSessionIds: readonly string[]
 ): Promise<BriefFacts> {
   const limit = BRIEF_FACT_ROWS_MAX;
   const recentCutoff = new Date(now - BRIEF_RECENT_WINDOW_MS).toISOString();
@@ -240,7 +242,7 @@ export async function readBriefFacts(
   const [asks, running, failed, automations, accounts, pulls, ideas] = await Promise.all([
     all(BRIEF_ASKS_SQL, projectId, now, over),
     // A viewer id that matches nobody: the facts are the same for every member.
-    readRunningChats(db, projectId, '', limit),
+    readRunningChats(db, projectId, '', limit, workingSessionIds),
     all(BRIEF_FAILED_CHATS_SQL, projectId, datePrefix(failedCutoff), failedCutoff, over),
     all(BRIEF_FAILING_AUTOMATIONS_SQL, projectId, over),
     all(BRIEF_ACCOUNTS_SQL, projectId, now),

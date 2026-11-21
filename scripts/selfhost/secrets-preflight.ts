@@ -16,13 +16,15 @@ import { pathToFileURL } from 'node:url';
 import { openBundle } from '../../deploy/selfhost/key-agent/bundle.ts';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
 import { createKeyAgent, SIGNING_KEY_NAME } from '../../deploy/selfhost/key-agent/server.ts';
+import { nodeKeyAgentSocket } from './key-agent-node-socket';
 import { applyKeyChoice, explicitKeyProvider, readKeyChoice } from './key-choice';
-import { agentVerifyKey, keyAgentUrl, keyServiceSettings, listBundles } from './key-service';
+import { agentVerifyKey } from './key-seal';
+import { keyAgentAddress, keyServiceSettings, listBundles } from './key-service';
 
 /** The Worker loader's surface used here (apps/api/src/selfhost/runtime-secrets.ts). */
 interface WorkerLoader {
   loadRuntimeSecrets(env: Record<string, string>): Promise<Record<string, string>>;
-  resetRuntimeSecretsForTests(): void;
+  resetRuntimeSecretsForTests(socket?: typeof nodeKeyAgentSocket): void;
 }
 
 const LOADER = new URL('../../apps/api/src/selfhost/runtime-secrets.ts', import.meta.url);
@@ -44,8 +46,9 @@ export async function preflightSealedSecrets(input: {
   const settings = keyServiceSettings(box, input.stateDir);
   if (!settings) throw new Error('this box does not seal its secrets (legacy-plaintext)');
   const provider = createKeyProvider(settings.hostEnv);
-  const bundle = listBundles(settings.bundleDir)[0];
-  if (!bundle) throw new Error(`no sealed bundle in ${settings.bundleDir}: run --init first`);
+  const bundle = (await listBundles(settings.bundles))[0];
+  if (!bundle)
+    throw new Error(`no sealed bundle in ${settings.bundles.location}: run --init first`);
   const sealed = await openBundle(bundle, provider);
   // The real peer check (/proc/net/tcp), allowing only this process's uid: the Worker loader
   // below runs in this process, so nothing else on the box can read the answer meanwhile.
@@ -53,7 +56,7 @@ export async function preflightSealedSecrets(input: {
   if (self === undefined) throw new Error('the contract check needs a POSIX uid (Linux)');
   const agent = createKeyAgent({
     provider,
-    bundleDir: settings.bundleDir,
+    bundles: settings.bundles,
     allowedUids: new Set([self]),
     cacheMs: 0,
     log: () => undefined,
@@ -61,10 +64,11 @@ export async function preflightSealedSecrets(input: {
   await new Promise<void>((done) => agent.listen(0, '127.0.0.1', done));
   const loader = await workerLoader();
   try {
-    loader.resetRuntimeSecretsForTests();
+    // The Worker's own loader over the same framed protocol, through a Node socket.
+    loader.resetRuntimeSecretsForTests(nodeKeyAgentSocket);
     // The vars deploy.ts renders for a sealed Worker, pointed at this agent.
     const answered = await loader.loadRuntimeSecrets({
-      SAM_KEY_AGENT_URL: keyAgentUrl({ port: (agent.address() as AddressInfo).port }),
+      SAM_KEY_AGENT_ADDRESS: keyAgentAddress({ port: (agent.address() as AddressInfo).port }),
       SAM_SECRET_BUNDLE_ID: bundle.bundleId,
       SAM_KEY_AGENT_VERIFY_KEY: agentVerifyKey(sealed),
       SAM_INSTALLATION_ID: sealed.SAM_INSTALLATION_ID ?? '',
@@ -76,7 +80,7 @@ export async function preflightSealedSecrets(input: {
     }
     if (missing.length > 0) {
       throw new Error(
-        `the Worker would not get these secrets unchanged: ${missing.sort().join(', ')}`
+        `the Worker would not get these secrets unchanged: ${missing.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join(', ')}`
       );
     }
     return { bundleId: bundle.bundleId, checked: Object.keys(answered).length };

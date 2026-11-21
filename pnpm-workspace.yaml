@@ -14,7 +14,7 @@ catalog:
   '@astrojs/check': 0.9.10
   eslint: 9.39.5
   eslint-plugin-astro: 1.7.0
-  globals: 17.9.0
+  globals: 17.14.0
   oxlint: 1.77.0
   jsdom: 29.1.1
 
@@ -25,13 +25,13 @@ catalog:
   # === TypeScript ESLint ===
   # Released in lockstep from one monorepo — keep aligned so the parser and plugin
   # always agree on the AST/rule surface. Dependabot only proposes the parser.
-  '@typescript-eslint/eslint-plugin': 8.72.0
-  '@typescript-eslint/parser': 8.72.0
-  typescript-eslint: 8.72.0
+  '@typescript-eslint/eslint-plugin': 8.73.0
+  '@typescript-eslint/parser': 8.73.0
+  typescript-eslint: 8.73.0
 
   # === Cloudflare ===
   '@cloudflare/workers-types': 5.20260707.1
-  wrangler: 4.149.0
+  wrangler: 4.163.0
 
   # === React Ecosystem ===
   react: 19.3.1
@@ -57,11 +57,11 @@ catalog:
   # One drizzle-orm copy in the worker bundle: apps/api and worker-core must never diverge.
   drizzle-orm: 0.45.2
   # One copy each in the worker bundle: apps/api and app-deployment must never diverge.
-  '@aws-sdk/client-s3': 3.1141.0
-  '@aws-sdk/s3-request-presigner': 3.1141.0
+  '@aws-sdk/client-s3': 3.1169.0
+  '@aws-sdk/s3-request-presigner': 3.1169.0
   yaml: 2.9.1
   # One jose copy: the API worker and repo-hosting both sign and verify JWTs.
-  jose: 6.2.3
+  jose: 6.2.17
   execa: 10.2.1
   prism-react-renderer: 2.4.1
   react-markdown: 10.1.0

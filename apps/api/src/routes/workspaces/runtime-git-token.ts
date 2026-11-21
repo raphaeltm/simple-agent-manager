@@ -6,6 +6,10 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { errors } from '../../middleware/error';
+import {
+  createArtifactsRuntimeToken,
+  resolveArtifactsBackend,
+} from '../../services/artifacts/backend';
 import { getInstallationToken, getUserInstallationRepositories } from '../../services/github-app';
 import {
   GitHubCliPolicyError,
@@ -19,9 +23,6 @@ import {
   requireGitLabUserAccessTokenResultForOwner,
   verifyGitLabProjectAccess,
 } from '../../services/gitlab';
-import { resolveArtifactsBackend } from '../../services/hosted-git/backend';
-import { isLocalHostedGitActive } from '../../services/hosted-git/local-backend';
-import { mintHostedGitToken } from '../../services/hosted-git/tokens';
 import { boundArtifactsRepositoryHost } from '../../services/workspace-git-source';
 import { assertRepositoryAccess } from '../projects/_helpers';
 import {
@@ -239,23 +240,11 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     const requestedScope = c.req.query('scope') === 'read' ? ('read' as const) : ('write' as const);
     const repo = await artifacts.get(artifactsRepoId);
     await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'git_token');
-    // SAM-hosted repositories (self-host): the token is bound to this workspace, so the git
-    // server refuses it once the workspace stops (services/hosted-git/http.ts).
-    const localHostedGit = isLocalHostedGitActive(c.env);
-    const tokenResult = localHostedGit
-      ? await mintHostedGitToken(c.env, {
-          repo: artifactsRepoId,
-          scope: requestedScope,
-          ttlSeconds: ttl,
-          workspaceId: workspace.workspaceId,
-          callbackGeneration: workspace.callbackGeneration ?? null,
-          userId: workspace.userId,
-        }).then((minted) => ({
-          plaintext: minted.token,
-          expiresAt: minted.expiresAt,
-          expires_at: undefined,
-        }))
-      : await repo.createToken(requestedScope, ttl);
+    const tokenResult = await createArtifactsRuntimeToken(c.env, repo, requestedScope, ttl, {
+      userId: workspace.userId,
+      workspaceId: workspace.workspaceId,
+      callbackGeneration: workspace.callbackGeneration ?? null,
+    });
 
     // Strip ?expires= suffix from token for git credential use
     const tokenSecret = tokenResult.plaintext.split('?expires=')[0] || tokenResult.plaintext;

@@ -10,7 +10,6 @@ import {
   buildCelldConfig,
   SELFHOST_VAR_OVERRIDES,
 } from './celld-config.js';
-import { SELFHOST_DURABLE_OBJECTS } from './selfhost-durable-objects.js';
 
 const WRANGLER_TOML = resolve(import.meta.dirname, '../../apps/api/wrangler.toml');
 
@@ -54,19 +53,26 @@ describe('buildCelldConfig against the real apps/api/wrangler.toml', () => {
   });
 
   it('drops every Cloudflare-only key and reports why', () => {
-    for (const key of ['port', 'limits', 'alias', 'artifacts', 'analytics_engine_datasets', 'ai']) {
+    for (const key of [
+      'port',
+      'upload_source_maps',
+      'limits',
+      'alias',
+      'artifacts',
+      'analytics_engine_datasets',
+      'ai',
+      'containers',
+    ]) {
       expect(config).not.toHaveProperty(key);
       expect(plan.report.some((line) => line.startsWith(`drop [${key}]`))).toBe(true);
     }
   });
 
-  it('runs no container by default and declares neither class backed', () => {
+  it('runs no container and enables the self-host git fallback', () => {
     expect(config).not.toHaveProperty('containers');
-    for (const className of ['SandboxDO', 'VmAgentContainer']) {
-      expect(plan.report).toContain(`drop container ${className}: stays bound as a plain DO`);
-    }
-    expect(config.vars.CONTAINER_RUNTIME_AVAILABLE).toBe('false');
-    expect(config.vars.SANDBOX_CONTAINER_RUNTIME_AVAILABLE).toBe('false');
+    // The self-host build registers the backend; Cloudflare keeps its own configuration.
+    expect(config.vars.ARTIFACTS_ENABLED).toBe('true');
+    expect(config.vars.HOSTED_GIT_BACKEND).toBe('durable-object');
   });
 
   it('folds every legacy new_classes create into new_sqlite_classes, keeping tag order', () => {
@@ -76,10 +82,10 @@ describe('buildCelldConfig against the real apps/api/wrangler.toml', () => {
       new_sqlite_classes?: string[];
     }>;
     expect(sourceMigrations.some((m) => m.new_classes?.length)).toBe(true);
-    // wrangler.toml's tags in order, then the self-host-only classes' own tags.
+    // Keep shared tags in order, then append the celld-only tag.
     expect(config.migrations.map((m) => m.tag)).toEqual([
       ...sourceMigrations.map((m) => m.tag),
-      ...SELFHOST_DURABLE_OBJECTS.map((object) => object.migrationTag),
+      'selfhost-hosted-git-v1',
     ]);
     for (const migration of config.migrations) {
       expect(Object.keys(migration).sort()).toEqual(['new_sqlite_classes', 'tag']);
@@ -89,28 +95,15 @@ describe('buildCelldConfig against the real apps/api/wrangler.toml', () => {
       ...(m.new_sqlite_classes ?? []),
       ...(m.new_classes ?? []),
     ]);
-    expect(new Set(created)).toEqual(
-      new Set([...expected, ...SELFHOST_DURABLE_OBJECTS.map((object) => object.className)])
-    );
+    expect(new Set(created)).toEqual(new Set([...expected, 'HostedGitRepo']));
   });
 
-  it('declares the self-host-only Durable Objects that wrangler.toml does not', () => {
-    const sourceClasses = (
-      source.durable_objects as { bindings: Array<{ class_name: string }> }
-    ).bindings.map((b) => b.class_name);
-    expect(sourceClasses).not.toContain('HostedGitRepo');
-    expect(config.durable_objects.bindings).toContainEqual({
-      name: 'HOSTED_GIT',
-      class_name: 'HostedGitRepo',
-    });
-    expect(config.migrations.at(-1)).toEqual({
-      tag: 'selfhost-hosted-git-v1',
-      new_sqlite_classes: ['HostedGitRepo'],
-    });
-    expect(config.vars.HOSTED_GIT_BACKEND).toBe('durable-object');
-    expect(plan.report).toContain(
-      'self-host Durable Object HOSTED_GIT (HostedGitRepo), migration selfhost-hosted-git-v1'
-    );
+  it('adds only HostedGitRepo to the shared Durable Object bindings', () => {
+    expect(config.durable_objects.bindings).toEqual([
+      ...(source.durable_objects as { bindings: Array<{ name: string; class_name: string }> })
+        .bindings,
+      { name: 'HOSTED_GIT', class_name: 'HostedGitRepo' },
+    ]);
   });
 
   it('keeps container DO bindings (the classes stay exported) but not their containers', () => {
@@ -230,20 +223,6 @@ describe('buildCelldConfig failure modes', () => {
     });
   });
 
-  it.each([
-    ['binding name', { name: 'HOSTED_GIT', class_name: 'Other' }, undefined],
-    ['class', { name: 'OTHER', class_name: 'HostedGitRepo' }, undefined],
-    ['migration tag', undefined, { tag: 'selfhost-hosted-git-v1', new_sqlite_classes: ['Y'] }],
-    ['migrated class', undefined, { tag: 'v998', new_sqlite_classes: ['HostedGitRepo'] }],
-  ])('refuses a wrangler.toml that declares the self-host-only %s', (_what, binding, migration) => {
-    const source = base();
-    if (binding) {
-      (source.durable_objects as { bindings: unknown[] }).bindings.push(binding);
-    }
-    if (migration) (source.migrations as unknown[]).push(migration);
-    expect(() => buildCelldConfig(source, options)).toThrow(/only the self-host build may declare/);
-  });
-
   it('fails on a Durable Object migration celld cannot apply', () => {
     const source = base();
     (source.migrations as unknown[]).push({
@@ -270,54 +249,10 @@ describe('buildCelldConfig failure modes', () => {
   });
 });
 
-describe('buildCelldConfig with guided login on', () => {
-  const source = loadToml();
-  const plan = buildCelldConfig(source, {
-    ...options,
-    guidedLogin: { runtime: 'runsc', instanceType: 'basic' },
-  });
-
-  it('emits only the sign-in sandbox, under gVisor and the basic type', () => {
-    expect(plan.config.containers).toEqual([
-      {
-        class_name: 'SandboxDO',
-        image: 'containers/sandbox/Dockerfile',
-        instance_type: 'basic',
-        max_instances: 6,
-        runtime: 'runsc',
-      },
-    ]);
-    expect(plan.report).toContain('drop container VmAgentContainer: stays bound as a plain DO');
-  });
-
-  it('declares the sandbox backed and Instant not', () => {
-    expect(plan.config.vars.SANDBOX_CONTAINER_RUNTIME_AVAILABLE).toBe('true');
-    expect(plan.config.vars.CONTAINER_RUNTIME_AVAILABLE).toBe('false');
-    expect(plan.config.vars.CF_CONTAINER_ENABLED).toBe('false');
-  });
-
-  it('always names the runtime (the Docker socket proxy pins it)', () => {
-    const runc = buildCelldConfig(source, {
-      ...options,
-      guidedLogin: { runtime: 'runc', instanceType: 'basic' },
-    });
-    expect(runc.config.containers?.[0]?.runtime).toBe('runc');
-  });
-
-  it('refuses the sandbox declaration from caller vars', () => {
-    expect(() =>
-      buildCelldConfig(source, {
-        ...options,
-        vars: { SANDBOX_CONTAINER_RUNTIME_AVAILABLE: 'true' },
-      })
-    ).toThrow(/generated/);
-  });
-});
-
 describe('operator overrides', () => {
-  it('refuses the container runtime declarations in secrets.env', () => {
-    for (const name of ['CONTAINER_RUNTIME_AVAILABLE', 'SANDBOX_CONTAINER_RUNTIME_AVAILABLE']) {
-      expect(() => assertOperatorSecretsAllowed({ [name]: 'true' }, 'secrets.env')).toThrow(
+  it('refuses the vars the deployment generates in secrets.env', () => {
+    for (const name of ['BASE_DOMAIN', 'R2_BUCKET_NAME', 'VM_AGENT_REQUIRED_VERSION']) {
+      expect(() => assertOperatorSecretsAllowed({ [name]: 'x' }, 'secrets.env')).toThrow(
         new RegExp(`${name} is generated`)
       );
     }

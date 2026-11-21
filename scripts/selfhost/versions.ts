@@ -1,8 +1,7 @@
 /**
  * Pinned celld release used by `scripts/selfhost/deploy.ts` for `celld deploy` and
- * `celld d1 migrations apply`. It must match the image in deploy/selfhost/docker-compose.yml
- * (`versions.test.ts` checks this). 0.6.3 or later: 0.6.2 has a path where a cell whose
- * `own.json` is lost restarts empty.
+ * `celld d1 migrations apply`. It must match the celld image the box's compose stack runs.
+ * 0.6.3 or later: 0.6.2 has a path where a cell whose `own.json` is lost restarts empty.
  */
 
 export const CELLD_VERSION = '0.6.3';

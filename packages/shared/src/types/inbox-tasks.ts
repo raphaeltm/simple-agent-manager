@@ -21,6 +21,8 @@ export const INBOX_TASK_EVENT_TYPES = [
   'inbox.task.reassigned',
   'inbox.task.done',
   'inbox.task.reopened',
+  // No longer emitted: archiving a task is silent (2026-11-17). Kept so events already queued
+  // and existing subscriptions still parse and deliver.
   'inbox.task.archived',
 ] as const;
 export type InboxTaskEventType = (typeof INBOX_TASK_EVENT_TYPES)[number];
@@ -84,6 +86,8 @@ export interface InboxTaskAssignee {
 /** One discussion thread on an inbox item (anchored comment core, anchor kind `inbox_item`). */
 export interface InboxItemCommentThread {
   id: string;
+  /** Cursor for item discussion pagination. */
+  sequence?: number;
   itemId: string;
   author: CommentAuthor;
   body: string;

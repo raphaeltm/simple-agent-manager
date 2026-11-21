@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { artifactsConfigRoutes } from '../../../src/routes/artifacts-config';
-import { registerArtifactsBackendFallback } from '../../../src/services/hosted-git/backend';
+import { registerArtifactsBackendFallback } from '../../../src/services/artifacts/backend';
 
 const app = new Hono<{ Bindings: Env }>();
 app.route('/api/config', artifactsConfigRoutes);

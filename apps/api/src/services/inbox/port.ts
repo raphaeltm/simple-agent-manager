@@ -15,12 +15,17 @@ import {
   hasProjectCapability,
   projectMemberRolesWithCapability,
 } from '../../middleware/project-auth';
-import { archiveAttention, loadAttentionForViewer } from '../../routes/chat-attention';
+import {
+  archiveAttention,
+  archiveInteractionAttention,
+  loadAttentionForViewer,
+} from '../../routes/chat-attention';
 import { authorizeAgentWake } from '../agent-wake-authorization';
 import { decideOperationsAction } from '../operations-actions/service';
 import * as projectDataService from '../project-data';
 import { resolverDisplayName } from '../runtime-secret-request-records';
 import {
+  archiveRuntimeSecretRequest,
   declineRuntimeSecretRequest,
   fulfillRuntimeSecretRequest,
 } from '../runtime-secret-requests';
@@ -35,6 +40,7 @@ import {
 } from './agent-asks';
 import { readAskContext } from './ask-context';
 import { deliverInboxAskNotice } from './ask-notice';
+import { readInboxConversation } from './reply-context';
 
 function metadataFields(metadata: string | null) {
   const empty = {
@@ -90,21 +96,51 @@ export function createInboxPort(env: Env): OperationInboxPort {
         createdAt: marker.createdAt,
         expiresAt: marker.expiresAt,
         resolvedAt: marker.resolvedAt,
+        inboxArchivedAt: marker.inboxArchivedAt,
         topic: typeof viewer.session.topic === 'string' ? viewer.session.topic : null,
         canRead: viewer.canRead,
         canWrite: viewer.writer && viewer.canRead,
       };
     },
 
-    async context({ projectId, sessionId, askedAt, userId }) {
+    async context({
+      projectId,
+      sessionId,
+      askedAt,
+      userId,
+      inboxRef,
+      replyCursor,
+      responseCursor,
+      includeContext,
+    }) {
       // The transcript is for readers of the source chat only (spec section 3.5).
       const access = await loadSessionReadAccess(env, projectId, sessionId, userId);
       if (!access) return null;
-      return readAskContext(env, { projectId, sessionId, askedAt });
+      const [context, conversation] = await Promise.all([
+        includeContext === false
+          ? Promise.resolve({
+              before: [],
+              since: { messages: [], activityCount: 0, truncated: false },
+            })
+          : readAskContext(env, { projectId, sessionId, askedAt }),
+        inboxRef
+          ? readInboxConversation(env, {
+              projectId,
+              sessionId,
+              inboxRef,
+              replyCursor,
+              responseCursor,
+            })
+          : Promise.resolve(undefined),
+      ]);
+      return { ...context, ...(conversation ? { conversation } : {}) };
     },
 
     archiveAttention: (userId, projectId, sessionId, markerId, hold) =>
       archiveAttention(env, userId, projectId, sessionId, markerId, hold),
+
+    archiveInteraction: (userId, projectId, sessionId, markerId) =>
+      archiveInteractionAttention(env, userId, projectId, sessionId, markerId),
 
     async fulfilSecret(userId, projectId, requestId, secret) {
       const database = db();
@@ -129,23 +165,15 @@ export function createInboxPort(env: Env): OperationInboxPort {
       return { agentNotified: result.agentNotified };
     },
 
-    async decideApproval(userId, approvalId, decision, note) {
-      await requireActiveSuperadmin(env, userId);
-      const outcome = await decideOperationsAction(env, {
-        approvalId,
-        decision,
-        deciderUserId: userId,
-        note: note?.trim() || null,
-      });
-      if (outcome.outcome === 'not_found') throw errors.notFound('Inbox item');
-      if (outcome.outcome !== 'decided') {
-        throw errors.conflict(
-          outcome.outcome === 'expired'
-            ? 'This request expired before it was decided'
-            : `This request was already ${outcome.approval.status}`
-        );
-      }
-      return { outcome: outcome.approval.status, agentNotified: outcome.delivered };
+    archiveSecret: (userId, projectId, requestId) =>
+      archiveRuntimeSecretRequest(db(), { projectId, requestId, actorUserId: userId }),
+
+    decideApproval: (userId, approvalId, decision, note) =>
+      decideInboxApproval(env, userId, approvalId, decision, note, 'notify_agent'),
+
+    async archiveApproval(userId, approvalId) {
+      const result = await decideInboxApproval(env, userId, approvalId, 'deny', null, 'silent');
+      return { outcome: result.outcome };
     },
 
     async authorizeAnswerWake(projectId, sessionId, userId) {
@@ -261,4 +289,32 @@ async function loadSessionReadAccess(
     userId
   );
   return Boolean(session) && access.found;
+}
+
+/** An Operations approval decided from the inbox, by an active superadmin. */
+async function decideInboxApproval(
+  env: Env,
+  userId: string,
+  approvalId: string,
+  decision: 'approve' | 'deny',
+  note: string | null,
+  delivery: 'notify_agent' | 'silent'
+): Promise<{ outcome: string; agentNotified: boolean }> {
+  await requireActiveSuperadmin(env, userId);
+  const outcome = await decideOperationsAction(env, {
+    approvalId,
+    decision,
+    deciderUserId: userId,
+    note: note?.trim() || null,
+    delivery,
+  });
+  if (outcome.outcome === 'not_found') throw errors.notFound('Inbox item');
+  if (outcome.outcome !== 'decided') {
+    throw errors.conflict(
+      outcome.outcome === 'expired'
+        ? 'This request expired before it was decided'
+        : `This request was already ${outcome.approval.status}`
+    );
+  }
+  return { outcome: outcome.approval.status, agentNotified: outcome.delivered };
 }

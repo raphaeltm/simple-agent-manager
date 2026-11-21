@@ -12,19 +12,21 @@
  * Both at once is refused: one install, one place its codes go.
  */
 import { randomBytes } from 'node:crypto';
+import { lookup } from 'node:dns/promises';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { isIP } from 'node:net';
 import { join } from 'node:path';
 
 import { resolveSmtpConfig } from '../../packages/agent-email/src/smtp-config.js';
-import { writePrivateFile } from './secret-files.js';
+import { replacePrivateFile, writePrivateFile } from './secret-files.js';
 
-export const MAIL_COLLECTOR_PROFILE = 'mail-collector';
+const MAIL_COLLECTOR_PROFILE = 'mail-collector';
 /** Mailpit's SMTP listener (loopback, no TLS: plaintext SMTP is accepted only to loopback). */
 export const DEFAULT_MAIL_COLLECTOR_SMTP_PORT = 1025;
 /** Mailpit's web UI (loopback; Caddy publishes it behind basic auth). */
 export const DEFAULT_MAIL_COLLECTOR_UI_PORT = 8025;
 /** The collector UI is served at <label>.SAM_DOMAIN. */
-export const DEFAULT_MAIL_COLLECTOR_HOST_LABEL = 'mail';
+const DEFAULT_MAIL_COLLECTOR_HOST_LABEL = 'mail';
 /** Basic-auth user name for the collector UI; the password is generated. */
 export const MAIL_COLLECTOR_UI_USER = 'collector';
 /** Generated UI password length in bytes (hex-encoded, so twice as many characters). */
@@ -34,7 +36,7 @@ export const MAIL_COLLECTOR_PASSWORD_FILE = 'mail-collector-ui-password';
 /** env_file docker compose gives Caddy (caddy/start.sh, caddy/mail-collector/on.caddy). */
 export const MAIL_COLLECTOR_ENV_FILE = 'mail-collector.env';
 /** env_file docker compose gives Mailpit: MP_UI_AUTH, its own check of the same credentials. */
-export const MAIL_COLLECTOR_UI_ENV_FILE = 'mail-collector-ui.env';
+const MAIL_COLLECTOR_UI_ENV_FILE = 'mail-collector-ui.env';
 
 /** Worker vars the box .env may set; SMTP_PASSWORD belongs in secrets.env. */
 const SMTP_VAR_NAMES = [
@@ -63,8 +65,14 @@ export function composeProfiles(box: Box): string[] {
     .filter(Boolean);
 }
 
+/** Whether compose starts `profile`'s services: `COMPOSE_PROFILES=*` enables every profile. */
+export function composeProfileEnabled(box: Box, profile: string): boolean {
+  const profiles = composeProfiles(box);
+  return profiles.includes(profile) || profiles.includes('*');
+}
+
 export function mailCollectorEnabled(box: Box): boolean {
-  return composeProfiles(box).includes(MAIL_COLLECTOR_PROFILE);
+  return composeProfileEnabled(box, MAIL_COLLECTOR_PROFILE);
 }
 
 export function mailCollectorPorts(box: Box): { smtp: number; ui: number } {
@@ -94,6 +102,42 @@ export function mailCollectorHostLabel(box: Box): string {
   return label;
 }
 
+/** SMTP vars set in the .env that no relay will use (a half-applied set). */
+function straySmtpVars(
+  box: Box,
+  secrets: Readonly<Record<string, string>>,
+  configured: boolean,
+  collector: boolean
+): string[] {
+  const stray: string[] = [];
+  if (!configured && !collector) stray.push(...SMTP_VAR_NAMES.filter((name) => box[name]));
+  if (collector) {
+    const relayOnly = SMTP_VAR_NAMES.filter((name) => name !== 'SMTP_FROM' && name !== 'SMTP_HOST');
+    stray.push(...relayOnly.filter((name) => box[name]));
+  }
+  if (!configured && secrets.SMTP_PASSWORD) stray.push('SMTP_PASSWORD');
+  return stray;
+}
+
+/** The collector's relay settings, or the operator's SMTP_* vars. */
+function selectedSmtpVars(
+  box: Box,
+  baseDomain: string,
+  collector: boolean
+): Record<string, string> {
+  if (collector) {
+    return {
+      SMTP_HOST: '127.0.0.1',
+      SMTP_PORT: String(mailCollectorPorts(box).smtp),
+      SMTP_TLS: 'none',
+      SMTP_FROM: box.SMTP_FROM || `sign-in@${baseDomain}`,
+    };
+  }
+  const vars: Record<string, string> = {};
+  for (const name of SMTP_VAR_NAMES) if (box[name]) vars[name] = box[name];
+  return vars;
+}
+
 /**
  * The SMTP Worker vars for this box ({} when it sends no email). Validated with the Worker's own
  * parser, so a setting the Worker would refuse fails the deploy instead of silently turning email
@@ -117,49 +161,18 @@ export function smtpWorkerVars(
     );
   }
   // A half-applied set would deploy with email sign-in silently off (or silently ignored).
-  const relayOnly = SMTP_VAR_NAMES.filter((name) => name !== 'SMTP_FROM' && name !== 'SMTP_HOST');
-  const stray = [
-    ...(configured || collector ? [] : SMTP_VAR_NAMES.filter((name) => box[name])),
-    ...(collector ? relayOnly.filter((name) => box[name]) : []),
-    ...(!configured && secrets.SMTP_PASSWORD ? ['SMTP_PASSWORD'] : []),
-  ];
+  const stray = straySmtpVars(box, secrets, configured, collector);
   if (stray.length > 0) {
     throw new Error(
       `${stray.join(', ')} set without an SMTP relay (SMTP_HOST); remove it or set SMTP_HOST`
     );
   }
-  let vars: Record<string, string> = {};
-  if (collector) {
-    vars = {
-      SMTP_HOST: '127.0.0.1',
-      SMTP_PORT: String(mailCollectorPorts(box).smtp),
-      SMTP_TLS: 'none',
-      SMTP_FROM: box.SMTP_FROM || `sign-in@${baseDomain}`,
-    };
-  } else if (configured) {
-    for (const name of SMTP_VAR_NAMES) if (box[name]) vars[name] = box[name];
-  } else {
-    return {};
-  }
+  if (!collector && !configured) return {};
+  const vars = selectedSmtpVars(box, baseDomain, collector);
   const result = resolveSmtpConfig({ ...vars, SMTP_PASSWORD: secrets.SMTP_PASSWORD });
-  if (result.status !== 'ok') {
-    throw new Error(
-      `SMTP settings: ${result.status === 'invalid' ? result.problem : 'incomplete'}`
-    );
-  }
+  if (result.status === 'invalid') throw new Error(`SMTP settings: ${result.problem}`);
+  if (result.status !== 'ok') throw new Error('SMTP settings: incomplete');
   return vars;
-}
-
-/**
- * Loopback endpoints celld must be allowed to reach for email: the collector's SMTP port when the
- * profile is on. For the celld egress fence (scripts/selfhost/egress-fence.ts, PR #2641), which
- * adds these to its loopback allowlist. A relay on the internet needs no entry; one on a private
- * address needs SAM_EGRESS_ALLOW.
- */
-export function mailEgressEndpoints(box: Box): Array<{ address: string; port: number }> {
-  return mailCollectorEnabled(box)
-    ? [{ address: '127.0.0.1', port: mailCollectorPorts(box).smtp }]
-    : [];
 }
 
 /**
@@ -213,7 +226,8 @@ function dotenv(values: Record<string, string>): string {
 
 function writeIfChanged(path: string, content: string): boolean {
   if (existsSync(path) && readFileSync(path, 'utf8') === content) return false;
-  writePrivateFile(path, content);
+  // Replaced, not rewritten in place: compose reads these as env_files.
+  replacePrivateFile(path, content);
   return true;
 }
 
@@ -239,4 +253,31 @@ export function writeMailCollectorFiles(
     changed.push(uiEnv);
   }
   return changed;
+}
+
+/** Exact SMTP destinations; authentication secrets are irrelevant to routing and never read. */
+export async function mailEgressEndpoints(
+  box: Box,
+  resolve: (host: string) => Promise<string[]> = async (host) =>
+    (await lookup(host, { all: true })).map((entry) => entry.address)
+): Promise<Array<{ address: string; port: number }>> {
+  if (mailCollectorEnabled(box)) {
+    if (box.SMTP_HOST?.trim()) throw new Error('choose one place for sign-in codes');
+    return [{ address: '127.0.0.1', port: mailCollectorPorts(box).smtp }];
+  }
+  // Use the Worker's host normalization, TLS validation and default submission ports.
+  // Credentials are validated separately by smtpWorkerVars with secrets.env available.
+  const result = resolveSmtpConfig({
+    SMTP_HOST: box.SMTP_HOST,
+    SMTP_PORT: box.SMTP_PORT,
+    SMTP_TLS: box.SMTP_TLS,
+    SMTP_FROM: box.SMTP_FROM,
+  });
+  if (result.status === 'absent') return [];
+  if (result.status === 'invalid') throw new Error(`SMTP settings: ${result.problem}`);
+  const { host, port } = result.config;
+  const addresses = isIP(host) ? [host] : await resolve(host);
+  if (addresses.length === 0) throw new Error(`SMTP_HOST ${host} did not resolve`);
+  // The central buildFencePlan choke point validates every resolved address and port.
+  return [...new Set(addresses)].map((address) => ({ address, port }));
 }

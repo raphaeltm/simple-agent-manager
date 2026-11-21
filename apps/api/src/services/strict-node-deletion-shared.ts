@@ -7,14 +7,12 @@ import { and, eq, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
-import type { Env } from '../env';
-import { getCredentialEncryptionKey } from '../lib/secrets';
 import {
   hasExactProviderCredentialGenerationProof,
   isExactCredentialSource,
 } from './provider-credential-exact';
 import {
-  createProviderForUser,
+  type createProviderForUser,
   type ExactProviderCredentialBinding,
   exactProviderCredentialBindingFromPlacementSnapshot,
 } from './provider-credentials';
@@ -105,6 +103,18 @@ export async function requireStrictNode(
   return node;
 }
 
+/**
+ * The node is no longer the exact incarnation the caller loaded, or a proof compare-and-set
+ * refused (its fence or an admission condition no longer holds). The recovery action is "reload
+ * and decide again", unlike a storage or provider fault, so callers can map it on its own.
+ */
+export class NodeIncarnationFenceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NodeIncarnationFenceError';
+  }
+}
+
 export async function requireSameNodeIncarnation(
   db: NodeDb,
   expected: NodeRow,
@@ -112,7 +122,7 @@ export async function requireSameNodeIncarnation(
 ): Promise<NodeRow> {
   const current = await requireStrictNode(db, expected.id, expected.userId);
   if (!isSameNodeIncarnation(current, expected)) {
-    throw new Error(
+    throw new NodeIncarnationFenceError(
       `Strict node deletion lost its incarnation fence before ${phase}: node=${expected.id}`
     );
   }
@@ -190,48 +200,3 @@ export function describeMissingExactBinding(
   }
   return missing.join(', ');
 }
-
-export async function requireStrictNodeProvider(
-  db: NodeDb,
-  node: NodeRow,
-  userId: string,
-  env: Env
-): Promise<ProviderForUserResult> {
-  const { targetProvider, attributionUserId, attributionProjectId, exactCredential } =
-    getStrictNodeCredentialContext(node, userId);
-  // A fingerprint is the preferred generation proof, but requiring it outright strands every
-  // node provisioned before migration 0142 — that column is backfill-proof, so those rows can
-  // never satisfy it. `hasExactProviderCredentialGenerationProof` also accepts the weaker
-  // version snapshot those nodes were placed with; `exactCredentialGenerationMatches` still
-  // refuses a rotated credential on either path, so this stays fail-closed.
-  if (!targetProvider || !hasExactProviderCredentialGenerationProof(exactCredential)) {
-    throw new Error(
-      `Cannot strictly delete node ${node.id}: exact provider credential binding is missing ` +
-        `(${describeMissingExactBinding(node, targetProvider, exactCredential)})`
-    );
-  }
-  const providerResult = await createProviderForUser(
-    db,
-    attributionUserId,
-    getCredentialEncryptionKey(env),
-    env,
-    targetProvider,
-    attributionProjectId,
-    exactCredential
-  );
-  if (!providerResult) {
-    throw new Error(
-      `Cloud provider credentials missing for strict node deletion: node=${node.id} provider=${node.cloudProvider ?? 'unknown'} instance=${node.providerInstanceId}`
-    );
-  }
-  return providerResult;
-}
-
-/**
- * Providers whose filtered inventory read is complete or fails closed. Hetzner: fully paginated,
- * fail-closed list. GCP: fully paginated aggregated list that throws when any zone is
- * unreachable (`listGcpInstances` in packages/providers/src/gcp-instance-lookup.ts). A GCP node
- * whose create response was cut can reach `destroying` without `provider_instance_id`
- * (self-host box, 2026-11-11); its VM is found here by its exact ownership labels.
- */
-export const COMPLETE_INVENTORY_PROVIDERS = new Set(['hetzner', 'gcp']);

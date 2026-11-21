@@ -4,19 +4,36 @@
  * never imports this module, so the Cloudflare bundle carries none of it
  * (tests/unit/selfhost/reverse-tunnel-placement.test.ts).
  *
- * - speech-to-text and read-aloud through admin-configured endpoints (`speech/`, L14);
- * - product analytics in OBSERVABILITY_DATABASE when ANALYTICS_SINK="d1" (`analytics/`, L20),
+ * - speech-to-text and read-aloud through admin-configured endpoints (`speech/`);
+ * - product analytics in OBSERVABILITY_DATABASE when ANALYTICS_SINK="d1" (`analytics/`),
  *   with its `analytics.d1.*` retention settings;
- * - the reverse-tunnel transport, gateway routes and lease sweep (`reverse-tunnel/entry.ts`,
- *   L17b), with the shared cloud-init generator as the frpc boot renderer.
+ * - the reverse-tunnel transport, gateway routes and lease sweep (`reverse-tunnel/entry.ts`),
+ *   with the shared cloud-init generator as the frpc boot renderer.
  */
 import { generateCloudInit } from '@simple-agent-manager/cloud-init';
+import type { Hono } from 'hono';
+
+import type { Env } from '../env';
+import { mountHostedGitRoute } from './hosted-git';
+import { hostedGitTokenRoutes } from './hosted-git/token-route';
+
+export { HostedGitRepo } from './hosted-git';
 
 import { installAnalyticsD1Sink } from './analytics';
 import { type SharedWorkerEntry, withReverseTunnel } from './reverse-tunnel/entry';
 import { installSpeechEndpoints } from './speech';
 
-export function withSelfHostBuild<T extends SharedWorkerEntry>(worker: T): T {
+const mounted = new WeakSet<object>();
+
+export function withSelfHostBuild<T extends SharedWorkerEntry>(
+  worker: T,
+  app: Hono<{ Bindings: Env }>
+): T {
+  if (!mounted.has(app)) {
+    mountHostedGitRoute(app);
+    app.route('/api/projects', hostedGitTokenRoutes);
+    mounted.add(app);
+  }
   installSpeechEndpoints();
   installAnalyticsD1Sink();
   return withReverseTunnel(worker, generateCloudInit);

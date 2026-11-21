@@ -48,7 +48,7 @@ function setup() {
     CREATE TABLE platform_feedback_triages (
       signature TEXT PRIMARY KEY, source TEXT NOT NULL, summary TEXT NOT NULL,
       first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, occurrence_count INTEGER NOT NULL,
-      severity TEXT NOT NULL DEFAULT 'error', evidence_refs TEXT NOT NULL, diagnosis_id TEXT, idea_id TEXT, claim_token TEXT,
+      severity TEXT NOT NULL DEFAULT 'error', evidence_refs TEXT NOT NULL, diagnosis_id TEXT, idea_id TEXT, idea_owned_at TEXT, claim_token TEXT,
       claim_expires_at INTEGER, failure_count INTEGER NOT NULL DEFAULT 0,
       last_failure_reason TEXT, last_failed_at INTEGER, rejected_at INTEGER,
       budget_deferred_until INTEGER, budget_deferred_reason TEXT,
@@ -61,6 +61,9 @@ function setup() {
       incident_claimed_by_task_id TEXT, incident_claimed_at INTEGER,
       resolved_at INTEGER, resolved_by_task_id TEXT, resolution_note TEXT,
       resolution_references TEXT, expired_at INTEGER,
+      watching_since INTEGER, watch_reason TEXT, watch_hourly_counts TEXT,
+      watch_escalated_at INTEGER, watch_escalation_reason TEXT,
+      watch_count_floor INTEGER, watch_counted_ids TEXT, watch_spike_offset INTEGER,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (idea_id) REFERENCES tasks(id) ON DELETE SET NULL);
     INSERT INTO users VALUES ('owner-1'), ('reporter-1'), ('task-1'), ('task-2');
@@ -1032,7 +1035,7 @@ describe('platform feedback incidents', () => {
     const signature = '8f721c70c16aa98a8c398b29708f0ada71d473b24abd7b5b39d6d4c1a9b9a0ef';
     seedIncident(sqlite, { signature });
     const summary = await buildIncidentBacklogSummary(env, 10, 5000);
-    const promptId = summary.rendered.match(/— id ([^,]+),/)?.[1] ?? '';
+    const promptId = summary.rendered.match(/^\d+\. id ([^,]+),/m)?.[1] ?? '';
     expect(promptId).toBe(signature);
     expect(await getIncidentDetail(env, promptId)).toMatchObject({ id: signature });
     expect(await claimIncident(env, promptId, 'task-1', 5000)).not.toBeNull();

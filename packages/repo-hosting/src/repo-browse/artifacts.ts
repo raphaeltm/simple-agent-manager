@@ -25,12 +25,10 @@ const DIR = '/repo';
 type IsoFs = Parameters<typeof git.clone>[0]['fs'];
 type OnAuth = Parameters<typeof git.clone>[0]['onAuth'];
 
-type HttpClient = Parameters<typeof git.clone>[0]['http'];
-
 interface ArtifactsRepoInfo {
   remote: string;
   onAuth: OnAuth;
-  http: HttpClient;
+  http: Parameters<typeof git.clone>[0]['http'];
 }
 
 function countPatchLines(patch: string): { additions: number; deletions: number } {
@@ -181,10 +179,12 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
         if (!remote) {
           throw errors.badRequest('Artifacts repository has no resolvable clone URL');
         }
-        // SAM-hosted repositories are read in-process, not through the public ingress.
-        const localFetch = repoHostingPorts().artifacts.localRemoteFetch?.(this.env) ?? null;
-        const http = localFetch ? createFetchHttpClient(localFetch) : webHttp;
-        return { remote, onAuth, http };
+        return {
+          remote,
+          onAuth,
+          // Native RPC bindings fabricate unknown methods; extensions belong to the fallback.
+          http: !this.env.ARTIFACTS && binding.remoteFetch ? createFetchHttpClient(binding.remoteFetch) : webHttp,
+        };
       })();
     }
     return this.infoPromise;

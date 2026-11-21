@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   filterLsRefsResponse,
   lsRefsPrefixes,
-} from '../../../src/durable-objects/hosted-git-ls-refs';
+} from '../../../src/selfhost/hosted-git/hosted-git-ls-refs';
 import { FLUSH, pkt, PktParser } from '../../../src/vendor/dgit/git/pktline';
 import { concat } from '../../../src/vendor/dgit/git/util';
 
@@ -79,5 +79,27 @@ describe('ls-refs ref-prefix', () => {
       `${B} refs/tags/v1 peeled:${A}`,
       'flush',
     ]);
+  });
+});
+
+it('rejects an oversized advertisement with a readable response', async () => {
+  const response = await filterLsRefsResponse(new Response(new Uint8Array(16 * 1024 * 1024 + 1)), [
+    'refs/heads/',
+  ]);
+  expect(response.status).toBe(413);
+  expect(await response.text()).toContain('advertisement exceeds');
+});
+
+describe('ls-refs ref-prefix count bound (Codex r4636317748)', () => {
+  it('honors up to the bound and answers unfiltered past it, as git does', async () => {
+    const { MAX_LS_REFS_PREFIXES } =
+      await import('../../../src/selfhost/hosted-git/hosted-git-ls-refs');
+    const prefixes = (n: number) =>
+      Array.from({ length: n }, (_, i) => `ref-prefix refs/heads/p${i}/`);
+    expect(lsRefsPrefixes(lsRefsRequest(...prefixes(MAX_LS_REFS_PREFIXES)))).toHaveLength(
+      MAX_LS_REFS_PREFIXES
+    );
+    // One more and the filter is skipped, so its cost is bounded by the cap, not the request size.
+    expect(lsRefsPrefixes(lsRefsRequest(...prefixes(MAX_LS_REFS_PREFIXES + 1)))).toBeNull();
   });
 });

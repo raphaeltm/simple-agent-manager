@@ -16,8 +16,9 @@
  * release key names a commit, so a local edit must not be published under it, and the build
  * container never sees the rest of the checkout (`.state/` holds the platform keys). Modules
  * are fetched in one container; the compile runs in another with no network and no
- * capabilities. `-trimpath -buildvcs=false` (packages/vm-agent/Makefile) plus the pinned image
- * make the bytes reproducible per image, which the immutable-key check depends on.
+ * capabilities. `-trimpath -buildvcs=false` (packages/vm-agent/Makefile), `CGO_ENABLED=0` and
+ * the pinned image make the bytes reproducible per image on any builder architecture, which the
+ * immutable-key check depends on.
  */
 
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
@@ -26,12 +27,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { sha256Hex } from './celld-binary.js';
+import { commandPath } from './command-path.js';
 
-/** Matches `toolchain` in packages/vm-agent/go.mod. */
+/** Matches the compiler selected by `toolchain`, or `go` when no override is needed. */
 export const VM_AGENT_BUILD_IMAGE =
   'golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0';
 
-export const VM_AGENT_ARCHITECTURES = ['amd64', 'arm64'] as const;
+const VM_AGENT_ARCHITECTURES = ['amd64', 'arm64'] as const;
 export type VmAgentArchitecture = (typeof VM_AGENT_ARCHITECTURES)[number];
 
 export interface VmAgentRelease {
@@ -119,18 +121,25 @@ function childFailure(
 }
 
 export function resolveVmAgentRelease(repoRoot: string): VmAgentRelease {
-  const result = spawnSync('bash', ['scripts/deploy/resolve-vm-agent-release.sh', 'HEAD'], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-  });
+  const result = spawnSync(
+    commandPath('bash'),
+    ['scripts/deploy/resolve-vm-agent-release.sh', 'HEAD'],
+    {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    }
+  );
   if (result.status !== 0) throw childFailure('resolve-vm-agent-release.sh', result, (t) => t);
   return parseVmAgentRelease(result.stdout);
 }
 
 function docker(args: string[], what: string): void {
-  const result = spawnSync('docker', args, { stdio: ['ignore', 'inherit', 'inherit'] });
+  const result = spawnSync(commandPath('docker'), args, {
+    stdio: ['ignore', 'inherit', 'inherit'],
+  });
   if (result.status !== 0) {
-    throw new Error(`${what} failed (docker ${result.error?.message ?? `exit ${result.status}`})`);
+    const reason = result.error?.message ?? `exit ${result.status}`;
+    throw new Error(`${what} failed (docker ${reason})`);
   }
 }
 
@@ -144,10 +153,11 @@ export function buildVmAgentBinaries(
   cacheDir: string,
   { release, buildDate }: VmAgentRelease
 ): string {
+  bindMount(cacheDir, '/cache');
   mkdirSync(cacheDir, { recursive: true, mode: 0o700 });
   const workDir = mkdtempSync(join(tmpdir(), 'sam-vm-agent-'));
   const archive = spawnSync(
-    'sh',
+    commandPath('sh'),
     ['-c', 'git archive --format=tar HEAD -- packages/vm-agent | tar -x -C "$1"', 'sh', workDir],
     { cwd: repoRoot, encoding: 'utf8' }
   );
@@ -162,11 +172,35 @@ export function buildVmAgentBinaries(
   return join(src, 'bin');
 }
 
-// GOFLAGS is not passed: the Makefile defines its own, and make exports it to `go`.
-function runVmAgentBuild(src: string, cacheDir: string, { release, buildDate }: VmAgentRelease) {
-  const uid = process.getuid?.() ?? 0;
-  const gid = process.getgid?.() ?? 0;
-  const common = [
+/**
+ * A `docker run --mount` bind value. The value is a comma-separated key=value list, so a comma in
+ * a host path would end `src` and start options of the caller's choosing (`readonly=false`, a
+ * second `dst`); such a path is refused rather than quoted.
+ */
+export function bindMount(src: string, dst: string): string {
+  if (src.includes(',') || dst.includes(',')) {
+    throw new Error(`cannot bind-mount ${src}: docker --mount paths may not contain a comma`);
+  }
+  return `type=bind,src=${src},dst=${dst}`;
+}
+
+/**
+ * The `docker run` arguments both build containers share, up to the image.
+ * GOFLAGS is not passed: the Makefile defines its own, and make exports it to `go`.
+ * CGO_ENABLED=0 is: Go enables cgo only for a native build, so without it the amd64 binary is
+ * cgo-enabled (dynamically linked, and Go records CGO_ENABLED in it) on an amd64 builder and not
+ * on an arm64 one. The same release would then have different bytes depending on where the
+ * operator deploys from, and the immutable release key refuses the second. The Cloudflare
+ * pipeline avoids this by always building on one pinned runner (deploy-reusable.yml); its arm64
+ * binary is already a CGO_ENABLED=0 cross build.
+ */
+export function vmAgentBuildRunArgs(
+  src: string,
+  cacheDir: string,
+  uid = process.getuid?.() ?? 0,
+  gid = process.getgid?.() ?? 0
+): string[] {
+  return [
     'run',
     '--rm',
     '--user',
@@ -176,9 +210,9 @@ function runVmAgentBuild(src: string, cacheDir: string, { release, buildDate }: 
     '--security-opt',
     'no-new-privileges',
     '--mount',
-    `type=bind,src=${src},dst=/src`,
+    bindMount(src, '/src'),
     '--mount',
-    `type=bind,src=${cacheDir},dst=/cache`,
+    bindMount(cacheDir, '/cache'),
     '-e',
     'HOME=/tmp',
     '-e',
@@ -187,9 +221,15 @@ function runVmAgentBuild(src: string, cacheDir: string, { release, buildDate }: 
     'GOMODCACHE=/cache/mod',
     '-e',
     'GOTOOLCHAIN=local',
+    '-e',
+    'CGO_ENABLED=0',
     '-w',
     '/src',
   ];
+}
+
+function runVmAgentBuild(src: string, cacheDir: string, { release, buildDate }: VmAgentRelease) {
+  const common = vmAgentBuildRunArgs(src, cacheDir);
   docker([...common, VM_AGENT_BUILD_IMAGE, 'go', 'mod', 'download'], 'vm-agent module download');
   docker(
     [

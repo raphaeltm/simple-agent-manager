@@ -36,6 +36,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { fetchWorkersAIChatCompletion, WorkersAIGatewayError } from '../ai-proxy-shared';
 import { LlmUnavailableError } from '../llm-chat-target';
+import { listWorkingChatSessionIds } from '../project-data';
 import { getTaskTitleModelControls } from '../task-title';
 import { parseBriefReply } from './parse';
 import { buildBriefPrompt } from './prompt';
@@ -181,7 +182,10 @@ async function refresh(input: BriefRefreshInput): Promise<BriefRefreshOutcome> {
 
   const [stateRaw, facts] = await Promise.all([
     db.prepare(READ_STATE_SQL).bind(projectId).first<Record<string, unknown>>(),
-    readBriefFacts(db, projectId, now),
+    // Running now's mid-turn chats come from the ProjectData activity mirror, as on the page.
+    listWorkingChatSessionIds(env, projectId).then((working) =>
+      readBriefFacts(db, projectId, now, working)
+    ),
   ]);
   const state = v.safeParse(StateRow, stateRaw);
   if (!state.success) throw new Error('project_briefs row unreadable after check claim');

@@ -1,5 +1,5 @@
 // celld dev harness (tests/hosted-git/celld/README.md): the real HostedGitRepo Durable Object behind a bare router (no auth).
-import { HostedGitRepo } from './src/durable-objects/hosted-git-repo';
+import { HostedGitRepo } from './src/selfhost/hosted-git/hosted-git-repo';
 
 export { HostedGitRepo };
 

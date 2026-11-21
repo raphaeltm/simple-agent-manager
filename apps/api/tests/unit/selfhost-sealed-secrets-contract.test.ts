@@ -8,27 +8,41 @@
  * SAM_INSTALLATION_ID. The real bundle carries it, the agent returned it, and the Worker refuses
  * any answer that names a protected var, so the first sealed deploy on a real box answered 503
  * KEY_AGENT_BAD_RESPONSE on every request.
+ *
+ * The Worker side reaches the agent through `cloudflare:sockets`, which this suite maps to real
+ * `node:net` sockets (tests/mocks/cloudflare-sockets.ts): a real TCP connection to the real agent,
+ * the framed protocol both ends implement, and the HTTP refusal that closes finding F9.
  */
 import { mkdtempSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { connect } from 'cloudflare:sockets';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createKeyProvider } from '../../../../deploy/selfhost/key-agent/providers.ts';
-import { createKeyAgent, SIGNING_KEY_NAME } from '../../../../deploy/selfhost/key-agent/server.ts';
 import {
-  agentVerifyKey,
+  createKeyAgent,
+  KEY_AGENT_PREAMBLE as AGENT_PREAMBLE,
+  SIGNING_KEY_NAME,
+} from '../../../../deploy/selfhost/key-agent/server.ts';
+import { agentVerifyKey, resolveSealedSecrets } from '../../../../scripts/selfhost/key-seal';
+import {
   ensureKeyServiceFiles,
+  keyAgentAddress,
   keyServiceSettings,
-  resolveSealedSecrets,
 } from '../../../../scripts/selfhost/key-service';
 import { ensurePlatformKeys, PLATFORM_KEY_NAMES } from '../../../../scripts/selfhost/platform-keys';
 import {
+  KEY_AGENT_PREAMBLE,
+  type KeyAgentConnect,
   loadRuntimeSecrets,
   resetRuntimeSecretsForTests,
 } from '../../src/selfhost/runtime-secrets';
+
+/** The Node-backed `cloudflare:sockets` (vitest alias), as the Worker loader sees it. */
+const realSocket = connect as unknown as KeyAgentConnect;
 
 const CELLD_UID = 7101;
 const OPERATOR = {
@@ -41,7 +55,7 @@ let state: string;
 
 beforeEach(() => {
   state = mkdtempSync(join(tmpdir(), 'sam-contract-'));
-  resetRuntimeSecretsForTests();
+  resetRuntimeSecretsForTests(realSocket);
 });
 afterEach(() => {
   for (const s of servers.splice(0)) s.close();
@@ -55,15 +69,17 @@ async function sealLikeTheDeploy() {
     state
   );
   if (!settings) throw new Error('key service off');
-  ensureKeyServiceFiles(settings);
+  await ensureKeyServiceFiles(settings);
   const resolved = await resolveSealedSecrets({
     settings,
-    platformKeysFile: ensurePlatformKeys(join(state, 'platform-keys.json')).keys,
+    stateDir: state,
+    mode: 'init',
+    platformKeysFile: ensurePlatformKeys(state, 'init').keys,
     operatorSecrets: OPERATOR,
   });
   const agent = createKeyAgent({
     provider: createKeyProvider(settings.hostEnv),
-    bundleDir: settings.bundleDir,
+    bundles: settings.bundles,
     allowedUids: new Set([CELLD_UID]),
     cacheMs: 1000,
     peerUid: () => CELLD_UID,
@@ -74,15 +90,38 @@ async function sealLikeTheDeploy() {
   const port = (agent.address() as AddressInfo).port;
   // The vars the deploy renders for the Worker (deploy.ts, sealed branch).
   const env = {
-    SAM_KEY_AGENT_URL: `http://127.0.0.1:${port}/v1/secrets`,
+    SAM_KEY_AGENT_ADDRESS: keyAgentAddress({ port }),
     SAM_SECRET_BUNDLE_ID: resolved.bundleId,
     SAM_KEY_AGENT_VERIFY_KEY: agentVerifyKey(resolved.secrets),
     SAM_INSTALLATION_ID: resolved.secrets.SAM_INSTALLATION_ID ?? '',
   };
-  return { resolved, env };
+  return { resolved, env, port };
 }
 
 describe('sealed secrets: deploy seal -> key agent -> Worker loader', () => {
+  it('both ends speak the same preamble', () => {
+    expect(AGENT_PREAMBLE.toString('utf8')).toBe(KEY_AGENT_PREAMBLE);
+    expect(AGENT_PREAMBLE[0]).toBe(0);
+  });
+
+  // F9 end to end: the same agent that answers the Worker's socket gives an HTTP client nothing,
+  // even one that sends the real bundle id with the headers and body the HTTP agent accepted.
+  it('F9: the Worker gets its secrets; an HTTP request with the real bundle id gets nothing', async () => {
+    const { resolved, env, port } = await sealLikeTheDeploy();
+    await expect(
+      fetch(`http://127.0.0.1:${port}/v1/secrets`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-sam-key-agent': '1' },
+        body: JSON.stringify({
+          bundleId: resolved.bundleId,
+          nonce: '1'.repeat(32),
+          installationId: env.SAM_INSTALLATION_ID,
+        }),
+      })
+    ).rejects.toThrow();
+    expect((await loadRuntimeSecrets(env)).ENCRYPTION_KEY).toBe(resolved.secrets.ENCRYPTION_KEY);
+  });
+
   it('the bundle the deploy seals holds SAM_INSTALLATION_ID (the case that broke)', async () => {
     const { resolved } = await sealLikeTheDeploy();
     for (const name of PLATFORM_KEY_NAMES) expect(resolved.secrets[name]).toBeTruthy();

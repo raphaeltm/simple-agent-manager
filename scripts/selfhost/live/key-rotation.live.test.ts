@@ -21,33 +21,31 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { sealSecrets } from '../../../deploy/selfhost/key-agent/bundle.ts';
+import { pingKeyAgent } from '../../../deploy/selfhost/key-agent/healthcheck.ts';
 import { createKeyProvider } from '../../../deploy/selfhost/key-agent/providers.ts';
 import { runCommand } from '../backup-cli';
 import type { BoxContext } from '../backup-lib';
 import { ensureCelldBinary } from '../celld-binary.js';
 import { KEY_CHOICE_FORMAT, writeKeyChoice } from '../key-choice';
+import { agentVerifyKey, generateAgentSigningKey } from '../key-seal';
 import {
-  agentVerifyKey,
   ensureKeyServiceFiles,
-  generateAgentSigningKey,
-  keyAgentUrl,
   keyServiceSettings,
 } from '../key-service';
-import { completePlatformKeys } from '../platform-keys';
+import { completeSealedPlatformKeys } from '../platform-keys';
 import type { RotateDeps } from '../rotate-apply';
 import { boxRotateDeps } from '../rotate-box-deps';
-import { runRotate } from '../rotate-run';
+import { drainMinutes, runRotate } from '../rotate-run';
 import { openRotationStore, readJournal } from '../rotate-store';
 import { parseDotenv } from '../secret-files';
 import {
   type CelldNode,
   celldNode,
-  hasDocker,
   type ObjectStore,
   startObjectStore,
   writeProject,
 } from './celld-lab';
-import { freePort, LIVE_TMP, REPO_ROOT, type Running, waitFor } from './harness';
+import { freePort, hasDocker, LIVE_TMP, REPO_ROOT, type Running, waitFor } from './harness';
 
 const KEY = 'sam-live-rotate';
 const SECRET = 'live-rotate-store-0123456789';
@@ -81,7 +79,7 @@ function ctx(): BoxContext {
 
 /** The probe: the API's runtime-secrets wrapper around a Worker that seeds and reads credentials. */
 const PROBE = `
-import { wrapWorker } from ${JSON.stringify(join(API_SRC, 'selfhost/runtime-secrets.ts'))};
+import { wrapWorker } from ${JSON.stringify(join(API_SRC, 'selfhost/runtime-secrets-socket.ts'))};
 import { D1_LOCATIONS } from ${JSON.stringify(join(API_SRC, 'selfhost/key-rotation/d1-locations.ts'))};
 import { decrypt, encrypt } from ${JSON.stringify(join(API_SRC, 'services/encryption.ts'))};
 import { decryptFile, encryptFile, metadataToR2CustomMetadata, r2CustomMetadataToMetadata } from ${JSON.stringify(join(API_SRC, 'services/file-encryption.ts'))};
@@ -136,7 +134,7 @@ async function deployProbe(): Promise<void> {
       r2_buckets: [{ binding: 'R2', bucket_name: 'files' }],
     },
     vars: {
-      SAM_KEY_AGENT_URL: keyAgentUrl({ port: agentPort }),
+      SAM_KEY_AGENT_ADDRESS: `127.0.0.1:${agentPort}`,
       SAM_SECRET_BUNDLE_ID: head.bundle.bundleId,
       SAM_KEY_AGENT_VERIFY_KEY: agentVerifyKey(head.secrets),
       SAM_INSTALLATION_ID: head.secrets.SAM_INSTALLATION_ID,
@@ -163,11 +161,18 @@ async function readProbe(): Promise<{ values: string[]; file: string; rotating: 
   return (await response.json()) as { values: string[]; file: string; rotating: boolean };
 }
 
+const drainWaits: number[] = [];
+
 function deps(log: string[], interruptAfterMigratePages = 0): RotateDeps {
   const real = boxRotateDeps({ ...ctx(), log: (m) => log.push(m) });
   let migratePages = 0;
   return {
     ...real,
+    // No request is in flight in this test, so the request drain is recorded, not slept out
+    // (rotate-steps-data.ts waits it in-run; its timing is covered by rotate-command.test.ts).
+    sleep: async (ms) => {
+      drainWaits.push(ms);
+    },
     backup: () => null,
     deploy: deployProbe,
     adoptAndCheck,
@@ -247,17 +252,15 @@ describe.skipIf(!hasDocker && !process.env.CI)('encryption-key rotation on celld
     });
     const settings = keyServiceSettings({ ...box(), SAM_KEY_PROVIDER: 'file' }, state);
     if (!settings) throw new Error('no key service settings');
-    ensureKeyServiceFiles(settings);
+    await ensureKeyServiceFiles(settings);
     const secrets = {
-      ...completePlatformKeys({}).keys,
+      ...completeSealedPlatformKeys(state, {}, 'live test', 'init').keys,
       SAM_KEY_AGENT_SIGNING_KEY: generateAgentSigningKey(),
     };
     const bundle = await sealSecrets(secrets, createKeyProvider(settings.hostEnv), {
       installationId: secrets.SAM_INSTALLATION_ID,
     });
-    writeFileSync(join(settings.bundleDir, `${bundle.bundleId}.json`), JSON.stringify(bundle), {
-      mode: 0o600,
-    });
+    await settings.bundles.write(bundle);
 
     const build = spawnSync(
       'docker',
@@ -276,13 +279,9 @@ describe.skipIf(!hasDocker && !process.env.CI)('encryption-key rotation on celld
         '--network',
         'host',
         '--user',
-        '0',
+        `${uid}:${process.getgid?.() ?? 0}`,
         '--cap-drop',
         'ALL',
-        '--cap-add',
-        'SETUID',
-        '--cap-add',
-        'SETGID',
         '--security-opt',
         'no-new-privileges:true',
         '--read-only',
@@ -302,7 +301,7 @@ describe.skipIf(!hasDocker && !process.env.CI)('encryption-key rotation on celld
     agentContainer = run.stdout.trim();
     await waitFor(
       'the key agent',
-      async () => (await fetch(`http://127.0.0.1:${agentPort}/healthz`).catch(() => null))?.ok
+      async () => (await pingKeyAgent(agentPort).catch(() => null))?.sealed === true
     );
     await deployProbe();
     await waitFor(
@@ -348,10 +347,12 @@ describe.skipIf(!hasDocker && !process.env.CI)('encryption-key rotation on celld
     expect(mid.values).toEqual(before.values);
     expect(mid.file).toBe('library body');
 
-    await runRotate(rotateInput({ resume: true }), deps(log));
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    // The resume finishes the migration, waits out the drain in-run and retires the old key.
     await runRotate(rotateInput({ resume: true }), deps(log));
     expect(readJournal(state)).toBeNull();
+    // The drain was waited before each retirement (encryption key, then the chained sign-in key).
+    expect(drainWaits.length).toBeGreaterThanOrEqual(2);
+    expect(Math.max(...drainWaits)).toBeGreaterThan(drainMinutes(box()) * 60_000 - 60_000);
 
     const head = (await openRotationStore(box(), state).head()).secrets;
     expect(head.ENCRYPTION_KEY).not.toBe(oldKey);

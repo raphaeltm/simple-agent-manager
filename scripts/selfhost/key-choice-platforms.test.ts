@@ -21,22 +21,27 @@ import {
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { FAKE_AWS_REGION, type FakeAws, startFakeAws } from './fixtures/aws-kms-fake.js';
 import {
   CHILD_TEST_TIMEOUT_MS,
   CLOSED_HOST,
-  runDeploy,
+  noStackDocker,
+  runDeploy as harnessRunDeploy,
   runTsx,
   writeBox,
 } from './deploy-harness.js';
+import { FAKE_AWS_REGION, type FakeAws, startFakeAws } from './fixtures/aws-kms-fake.js';
+
+/** The real deploy entry; a second `--init` on the same state sees no running stack. */
+const runDeploy = (envFile: string, args: string[], env: NodeJS.ProcessEnv = {}) =>
+  harnessRunDeploy(envFile, args, { ...noStackDocker(dirname(envFile)), ...env });
 
 vi.setConfig({ testTimeout: CHILD_TEST_TIMEOUT_MS });
-import { installKeyName } from './key-platforms.js';
 import { type FakeKeyService, startFakeKeyServices } from './fixtures/key-provider-fakes.js';
+import { installKeyName } from './key-platforms.js';
 
 const PROJECT = 'sam-fake-project';
 const KEY_NAME = installKeyName('sam.example.com');
@@ -184,8 +189,8 @@ describe('Google Cloud', () => {
 
   // Box round R14: on a new box whose bootstrap stopped at a destroyed key, the box account has
   // no grant, so Cloud KMS answers 403 instead of FAILED_PRECONDITION. The refusal must name the
-  // dead-key cause too, and print the same --new-key-version command.
-  it('denied: names a destroyed key as a likely cause and prints the --new-key-version command', async () => {
+  // dead-key cause too, and print the commands that fix it.
+  it('denied: names a destroyed key as a likely cause and prints the gcloud commands', async () => {
     fake = await startFakeKeyServices({ gcpProject: PROJECT, existingKeys: [GCP_KEY] });
     fake.setDenied(true);
     const envFile = writeBox(dir, [
@@ -200,23 +205,26 @@ describe('Google Cloud', () => {
     expect(init.out).toContain('denied (403)');
     expect(init.out).toContain('destroyed or scheduled for destruction');
     expect(init.out).toContain(
-      `\`pnpm selfhost:gcp-bootstrap -- --project ${PROJECT} --api-url ` +
-        'https://api.sam.example.com --kms-only --box-instance <box VM> --box-zone <zone> ' +
-        '--new-key-version`'
+      `--keyring sam-selfhost --location global --project ${PROJECT} --primary\``
     );
-    expect(init.out).toContain('--restore-key-version');
+    expect(init.out).toContain(
+      "--member serviceAccount:<the box VM's service account> " +
+        '--role roles/cloudkms.cryptoKeyEncrypterDecrypter`'
+    );
+    // main's gcp-bootstrap has no KMS mode: no advice may name one.
+    expect(init.out).not.toContain('gcp-bootstrap');
     // Still no fallback: nothing on disk.
     expect(init.out).not.toContain('key provider: file');
     expectNothingSealed();
   });
 
   // Box round R15 (G4): the refusal ended "Then run the same command again." right after the
-  // bootstrap command, which read as "run the bootstrap again", and left <box VM> and <zone> blank.
+  // fix command, which read as "run that again", and left the VM's details blank.
   it('names the command to run again and where, and fills this VM in from the metadata server', async () => {
     fake = await startFakeKeyServices({
       gcpProject: PROJECT,
       existingKeys: [GCP_KEY],
-      gceInstance: { name: 'sam-box', zone: 'europe-west1-b' },
+      gceServiceAccount: `sam-box@${PROJECT}.iam.gserviceaccount.com`,
     });
     fake.setDenied(true);
     const envFile = writeBox(dir, [
@@ -228,7 +236,7 @@ describe('Google Cloud', () => {
     const init = await runDeploy(envFile, ['--init']);
     expect(init.status).not.toBe(0);
     expect(init.out).toContain(
-      '--kms-only --box-instance sam-box --box-zone europe-west1-b --new-key-version`'
+      `--member serviceAccount:sam-box@${PROJECT}.iam.gserviceaccount.com --role`
     );
     expect(init.out).toContain(
       'Then run `pnpm selfhost:deploy --init` again on this box, in the SAM checkout.'
@@ -237,11 +245,11 @@ describe('Google Cloud', () => {
     expectNothingSealed();
   });
 
-  it('keeps the placeholders when the metadata answer is not a VM name (it is pasted into a shell)', async () => {
+  it('keeps the placeholder when the metadata answer is not a service account (it is pasted into a shell)', async () => {
     fake = await startFakeKeyServices({
       gcpProject: PROJECT,
       existingKeys: [GCP_KEY],
-      gceInstance: { name: 'x; rm -rf ~', zone: 'europe-west1-b' },
+      gceServiceAccount: 'x; rm -rf ~',
     });
     fake.setDenied(true);
     const envFile = writeBox(dir, [
@@ -252,7 +260,7 @@ describe('Google Cloud', () => {
     ]);
     const init = await runDeploy(envFile, ['--init']);
     expect(init.status).not.toBe(0);
-    expect(init.out).toContain('--box-instance <box VM> --box-zone <zone> --new-key-version`');
+    expect(init.out).toContain("--member serviceAccount:<the box VM's service account> --role");
     expect(init.out).not.toContain('rm -rf');
     expectNothingSealed();
   });
@@ -272,9 +280,8 @@ describe('Google Cloud', () => {
     expect(init.status).not.toBe(0);
     expect(init.out).toContain('SAM_GCP_KMS_KEY is set in .env');
     expect(init.out).toContain(
-      '--kms-only --kms-location europe-west1 --key-ring mine --key box --box-instance <box VM>'
+      `--key box --keyring mine --location europe-west1 --project ${PROJECT} --primary\``
     );
-    expect(init.out).toContain('--new-key-version');
     expectNothingSealed();
   });
 });
@@ -304,7 +311,7 @@ describe('Google Cloud key with no enabled primary version (box round R13)', () 
     expect(init.out).toContain(`Cloud KMS key ${GCP_KEY} is not usable (invalid:`);
     expect(init.out).toContain('FAILED_PRECONDITION');
     expect(init.out).toContain('no enabled primary version');
-    expect(init.out).toContain('--new-key-version');
+    expect(init.out).toContain('gcloud kms keys versions create');
     expect(init.out).toContain('SAM_KEY_PROVIDER=file');
     expectNothingSealed();
   });
@@ -357,7 +364,7 @@ describe('Google Cloud key with no enabled primary version (box round R13)', () 
     expect(broken.status, broken.out).toBe(0);
     expect(broken.out).toContain('sealed by:  a key file on this box');
     expect(broken.out).toContain(`WARNING: Cloud KMS key ${GCP_KEY} exists but is not usable`);
-    expect(broken.out).toContain('--new-key-version');
+    expect(broken.out).toContain('gcloud kms keys versions create');
 
     fake?.setGcpPrimaryState(GCP_KEY, 'ENABLED');
     const usable = await runTsx(SECRETS, ['status', '--box-env', envFile]);

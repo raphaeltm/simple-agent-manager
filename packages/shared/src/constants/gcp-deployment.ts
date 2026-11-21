@@ -5,7 +5,10 @@
 /** Default WIF pool ID for deployment. Override via GCP_DEPLOY_WIF_POOL_ID env var. */
 export const DEFAULT_GCP_DEPLOY_WIF_POOL_ID = 'sam-deploy-pool';
 
-/** Default WIF provider ID for deployment. Override via GCP_DEPLOY_WIF_PROVIDER_ID env var. */
+/**
+ * Provider ID that deployment credentials saved without a recorded provider were created with.
+ * New setup runs derive a per-installation ID (`installationWifProviderId`).
+ */
 export const DEFAULT_GCP_DEPLOY_WIF_PROVIDER_ID = 'sam-oidc';
 
 /** Default service account ID for deployment. Override via GCP_DEPLOY_SERVICE_ACCOUNT_ID env var. */

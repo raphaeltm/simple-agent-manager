@@ -246,11 +246,19 @@
       "digests": ["b6bceca8be9f40c0330d6dbb705f92473f913d88d84c07673d536392d11c114b"]
     },
     {
-      "classification": "documented-example",
-      "reason": "Self-host AWS KMS provider (K1): scripts/selfhost/testdata/aws-sigv4/get-vanilla-with-session-token holds AWS's published SigV4 test-suite example session token (awslabs/aws-c-auth, AKIDEXAMPLE credentials), copied byte-exact so the signer is checked against AWS's own vectors. Not a credential. Exact current findings only.",
+      "classification": "synthetic-test-fixture",
+      "reason": "PR #2906 commit range: scripts/selfhost/deploy-harness.ts BASE_BOX_ENV sets AWS_SECRET_ACCESS_KEY to a fixed, human-readable fleet fixture lengthened to 24+ characters for the objectstore minimum (commit 6ffc0c89d). It is the deploy test harness box .env, never a real credential. Exact finding only.",
       "owner": "security",
-      "reviewedAt": "2026-11-12T13:30:00.000Z",
-      "expiresAt": "2026-12-12T13:30:00.000Z",
+      "reviewedAt": "2026-11-19T08:20:34.012Z",
+      "expiresAt": "2026-12-19T08:20:34.012Z",
+      "digests": ["bf079eb1d64eb9f1ada2812def7fc669b390aaa9b56fc1010923fe4095706b31"]
+    },
+    {
+      "classification": "documented-example",
+      "reason": "Self-host AWS KMS provider (sealed secrets): scripts/selfhost/testdata/aws-sigv4/get-vanilla-with-session-token holds AWS's published SigV4 test-suite example session token (awslabs/aws-c-auth, AKIDEXAMPLE credentials), copied byte-exact so the signer is checked against AWS's own vectors. Not a credential. Exact current findings only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-20T08:00:00.000Z",
+      "expiresAt": "2026-12-20T08:00:00.000Z",
       "digests": [
         "2f680fbf092613edf6d693f56b9f6935342a3210f0d3bc2f14c5c4a6f68aefb2",
         "89e46bd75a609cb349a30aa5488628928ae95c50aa7f3c8f1161f1857f539762"
@@ -258,16 +266,11 @@
     },
     {
       "classification": "synthetic-test-fixture",
-      "reason": "Intermediate PR-range bytes only (K1 sealed secrets branch): synthetic GitHub client secret / encryption key placeholder strings in self-host test files (key-agent-server, key-choice-init, plaintext-scan, sealed-default live test); the tip generates these values with randomBytes at test time. No credential. Exact rule/path/line/bytes only.",
+      "reason": "Intermediate PR-range bytes only (sealed secrets landing slice): scripts/selfhost/agent-vm-credentials.test.ts briefly held a fixed, human-readable fake bucket secret; the tip generates it with randomBytes at test time. No credential. Exact rule/path/line/bytes only.",
       "owner": "security",
-      "reviewedAt": "2026-11-12T13:30:00.000Z",
-      "expiresAt": "2026-12-12T13:30:00.000Z",
-      "digests": [
-        "1320c9b7c015e0661f8c8305f88753e9d6796d3fa53bc269e6ee29188c25e0a2",
-        "06fd4fe297f12a45113f00a61e8874af712602cd924bf83de8e08de3dd221544",
-        "2a6ca68208db99987af7a2c24e9958b1cca104e1585580d87ba0bc3722f7784a",
-        "c44802cc0c13d6fe3ed9675276e563633f113943dc740cf65c5059bdbeee7644"
-      ]
+      "reviewedAt": "2026-11-20T08:00:00.000Z",
+      "expiresAt": "2026-12-20T08:00:00.000Z",
+      "digests": ["e5bd003b9f7208606c3924b881aa5a4e175bcddcf7332b53fa8dffe22f517066"]
     }
   ]
 }

@@ -1,31 +1,30 @@
 /**
  * A celld node on loopback for the live suite: the box's object store (the pinned MinIO image),
- * the pinned celld binary serving from it, and `celld deploy` of a probe project. Shared by every
- * live test that runs a Worker on the real runtime, so each test states only what it probes.
+ * the pinned celld binary serving from it, and `celld deploy` of a probe project, so a test that
+ * runs a Worker on the real runtime states only what it probes (shared-flight-cancel today).
+ * writeProject also serves tests that run `celld dev` on a bare project (celld-redirect).
  */
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+import { parse } from 'yaml';
 
 import { sealSecrets } from '../../../deploy/selfhost/key-agent/bundle.ts';
 import {
   createFileProvider,
   generateFileKek,
 } from '../../../deploy/selfhost/key-agent/provider-file.ts';
-import { OBJECTSTORE_IMAGE } from '../backup-lib';
 import { resolveEsbuild } from '../celld-binary.js';
-import { freePort, REPO_ROOT, type Running, start, waitFor } from './harness';
+import { childEnv, DOCKER, freePort, REPO_ROOT, type Running, start, waitFor } from './harness';
 
-/**
- * The docker CLI from a fixed system directory, never resolved through a caller-controlled PATH
- * (as harness.ts does for tar and openssl). Empty when docker is not installed.
- */
-export const DOCKER =
-  ['/usr/bin/docker', '/usr/local/bin/docker', '/bin/docker'].find((path) => existsSync(path)) ??
-  '';
-export const hasDocker =
-  DOCKER !== '' && spawnSync(DOCKER, ['version'], { stdio: 'ignore' }).status === 0;
+/** The object store image docker-compose.yml pins (digest); `mc` ships in it. */
+export const OBJECTSTORE_IMAGE = (
+  parse(readFileSync(join(REPO_ROOT, 'deploy/selfhost/docker-compose.yml'), 'utf8')) as {
+    services: { objectstore: { image: string } };
+  }
+).services.objectstore.image;
 
 export interface ObjectStore {
   port: number;
@@ -127,7 +126,8 @@ export interface CelldNode {
 export async function celldNode(
   binary: string,
   store: ObjectStore,
-  bucket = 's3://fleet'
+  bucket = 's3://fleet',
+  nativeEnv: Record<string, string> = {}
 ): Promise<CelldNode> {
   const port = await freePort();
   const internalPort = await freePort();
@@ -146,16 +146,15 @@ export async function celldNode(
           '--internal-listen',
           `127.0.0.1:${internalPort}`,
         ],
-        store.env()
+        { ...store.env(), ...nativeEnv }
       ),
     deploy: (project) =>
       spawnSync(binary, ['deploy', project, ...bucketArgs()], {
         encoding: 'utf8',
-        env: {
-          ...process.env,
+        env: childEnv({
           ...store.env(),
           CELLD_ESBUILD: resolveEsbuild(join(REPO_ROOT, 'apps/api')),
-        },
+        }),
       }),
     serve: async (project) => {
       const running = node.start();
@@ -219,6 +218,8 @@ export interface SealedBundle {
   verifyKey: string;
   /** The file provider's key file, as `SAM_KEY_FILE`. */
   kekFile: string;
+  /** The agent's state directory (holds kek and bundles/). */
+  stateDir: string;
   bundleDir: string;
 }
 
@@ -249,7 +250,7 @@ export async function sealBundle(
   writeFileSync(join(bundleDir, `${bundle.bundleId}.json`), JSON.stringify(bundle), {
     mode: 0o600,
   });
-  return { bundleId: bundle.bundleId, verifyKey, kekFile, bundleDir };
+  return { bundleId: bundle.bundleId, verifyKey, kekFile, stateDir, bundleDir };
 }
 
 /** The key agent (deploy/selfhost/key-agent/server.ts), file provider, serving `bundle`. */
@@ -258,6 +259,7 @@ export function startKeyAgent(bundle: SealedBundle, port: number, allowedUid: nu
     SAM_KEY_PROVIDER: 'file',
     SAM_KEY_FILE: bundle.kekFile,
     SAM_KEY_AGENT_PORT: String(port),
+    SAM_KEY_AGENT_STATE_DIR: bundle.stateDir,
     SAM_KEY_AGENT_BUNDLE_DIR: bundle.bundleDir,
     SAM_KEY_AGENT_ALLOWED_UIDS: String(allowedUid),
   });

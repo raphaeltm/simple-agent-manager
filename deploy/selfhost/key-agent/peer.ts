@@ -10,11 +10,11 @@ import { readFileSync } from 'node:fs';
 
 /** `127.0.0.1:port` as /proc/net/tcp writes it: little-endian address word, big-endian port. */
 function procAddress(ipv4: string, port: number): string | null {
-  const octets = ipv4.split('.').map((part) => Number(part));
+  const octets = ipv4.split('.').map(Number);
   if (octets.length !== 4 || octets.some((o) => !Number.isInteger(o) || o < 0 || o > 255))
     return null;
+  octets.reverse();
   const word = octets
-    .reverse()
     .map((o) => o.toString(16).padStart(2, '0'))
     .join('')
     .toUpperCase();

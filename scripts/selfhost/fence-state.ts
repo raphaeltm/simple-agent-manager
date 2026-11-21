@@ -4,7 +4,7 @@
  * bucket, the metadata token proxy's address and secret). See egress-fence.ts.
  */
 import { randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, readFileSync, writeFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 
@@ -16,6 +16,7 @@ import {
   renderFenceRuleset,
   resolveObjectStoreEndpoints,
 } from './egress-fence.js';
+import { sealedKeyAgentPort } from './key-box.js';
 import { mailEgressEndpoints } from './mail-settings.js';
 import { writePrivateFile } from './secret-files.js';
 
@@ -41,17 +42,51 @@ function ensureMetadataProxySecret(stateDir: string): string {
  * pointed at a proxy that is not running; with it and no gs:// bucket the proxy has no config.
  */
 export function assertComposeProfiles(box: Readonly<Record<string, string>>): void {
-  const profiles = (box.COMPOSE_PROFILES ?? '').split(',').map((profile) => profile.trim());
+  const profiles = new Set(
+    (box.COMPOSE_PROFILES ?? '').split(',').map((profile) => profile.trim())
+  );
+  if (profiles.has('*')) {
+    throw new Error(
+      'COMPOSE_PROFILES=* cannot safely select the optional metadata proxy; list profiles explicitly'
+    );
+  }
   const wanted = metadataProxyEnabled(box);
-  if (wanted && !profiles.includes(GCE_PROFILE)) {
+  if (wanted && !profiles.has(GCE_PROFILE)) {
     throw new Error(
       'a gs:// bucket uses the GCE metadata token proxy: add `gce` to COMPOSE_PROFILES ' +
         '(or set GCE_METADATA_PROXY=off when celld gets Google credentials another way)'
     );
   }
-  if (!wanted && profiles.includes(GCE_PROFILE)) {
+  if (!wanted && profiles.has(GCE_PROFILE)) {
     throw new Error('COMPOSE_PROFILES has `gce` but the metadata token proxy is off; remove it');
   }
+}
+
+/** The rendered nft rules: bind-mounted read-only into the fence container (docker-compose.yml). */
+export const FENCE_RULES_FILE = 'egress-fence.nft';
+/**
+ * The fence container's root reads the rules without DAC_OVERRIDE, so they must be world
+ * readable. They hold addresses and ports only, never a secret.
+ */
+export const FENCE_RULES_MODE = 0o644;
+
+/**
+ * Restores the rules file's required mode, for paths that write state without it (a snapshot
+ * restore writes every file 0600). Only a regular file this user owns is touched; a symlink or a
+ * foreign file is refused. Returns whether the mode changed.
+ */
+export function repairFenceRulesMode(stateDir: string): boolean {
+  const path = join(stateDir, FENCE_RULES_FILE);
+  const stat = lstatSync(path, { throwIfNoEntry: false });
+  if (!stat) return false;
+  if (!stat.isFile() || stat.isSymbolicLink())
+    throw new Error(`${path} is not a regular file; refusing to change its mode`);
+  const uid = process.getuid?.();
+  if (uid !== undefined && stat.uid !== uid)
+    throw new Error(`${path} is owned by uid ${stat.uid}, not the operator (${uid})`);
+  if ((stat.mode & 0o777) === FENCE_RULES_MODE) return false;
+  chmodSync(path, FENCE_RULES_MODE);
+  return true;
 }
 
 export interface FenceFilesResult {
@@ -64,6 +99,8 @@ export async function writeFenceFiles(input: {
   box: Readonly<Record<string, string>>;
   leaseRange: PortRange;
   resolvConf?: string;
+  /** Persist recovery intent synchronously before either live input changes. */
+  beforeWrite?: (changed: readonly string[]) => void;
 }): Promise<FenceFilesResult> {
   const { stateDir, box, leaseRange } = input;
   assertComposeProfiles(box);
@@ -72,29 +109,32 @@ export async function writeFenceFiles(input: {
     leaseRange,
     resolvConf: input.resolvConf ?? readFileSync('/etc/resolv.conf', 'utf8'),
     objectStore: await resolveObjectStoreEndpoints(box),
-    serviceEndpoints: mailEgressEndpoints(box),
+    serviceEndpoints: await mailEgressEndpoints(box),
     localAddresses: Object.values(networkInterfaces())
       .flat()
       .map((entry) => entry?.address ?? '')
       .filter(Boolean),
+    keyAgentPort: sealedKeyAgentPort(box, stateDir),
   });
-  const changed: string[] = [];
-
-  // Not secret, and read by the fence container's root, which has no DAC_OVERRIDE: 0644.
-  const rulesPath = join(stateDir, 'egress-fence.nft');
+  const rulesPath = join(stateDir, FENCE_RULES_FILE);
   const rules = renderFenceRuleset(plan);
-  if (readIfExists(rulesPath) !== rules) {
-    writeFileSync(rulesPath, rules, { mode: 0o644 });
-    chmodSync(rulesPath, 0o644);
-    changed.push(rulesPath);
-  }
-
   const envPath = join(stateDir, 'celld.env');
   const secret = metadataProxyEnabled(box) ? ensureMetadataProxySecret(stateDir) : '';
   const env = renderCelldEnv(box, plan, secret);
-  if (readIfExists(envPath) !== env) {
-    writePrivateFile(envPath, env);
-    changed.push(envPath);
+  const changed = [
+    ...(readIfExists(rulesPath) !== rules ? [rulesPath] : []),
+    ...(readIfExists(envPath) !== env ? [envPath] : []),
+  ];
+  input.beforeWrite?.(changed);
+
+  // Not secret, and read by the fence container's root, which has no DAC_OVERRIDE: 0644.
+  if (changed.includes(rulesPath)) {
+    writeFileSync(rulesPath, rules, { mode: FENCE_RULES_MODE });
+    chmodSync(rulesPath, FENCE_RULES_MODE);
+  } else {
+    // Unchanged rules can still carry a wrong mode (a snapshot restore writes 0600).
+    repairFenceRulesMode(stateDir);
   }
+  if (changed.includes(envPath)) writePrivateFile(envPath, env);
   return { changed };
 }

@@ -13,14 +13,21 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { runDebugDiagnosis, SCHEDULED_TRIAGE_DEBUG_FEATURE_KEY } from '../debug-agent';
-import { configuredFeedbackProjectId } from '../platform-feedback-incidents';
+import {
+  configuredFeedbackProjectId,
+  expireQuietWatchedIncidents,
+  loadWatchConfig,
+} from '../platform-feedback-incidents';
 import {
   classifyBudgetBlock,
+  DEFAULT_PLATFORM_FEEDBACK_TRIAGE_IDEA_TITLE_MAX_LENGTH,
   groupPlatformErrors,
   ideaDescription,
+  isLegacyGenericSummary,
   nextUtcDayStart,
   sanitizeFailureReason,
 } from './grouping';
+import { ownedIdeaStillUntouched, refreshOwnedIdea } from './idea-refresh';
 import { positive } from './numbers';
 import {
   annotateNodeAgentVersions,
@@ -34,8 +41,7 @@ import {
 } from './persistence';
 import { prioritizeFeedbackGroups, shouldReopenExistingTriage } from './prioritization';
 import type { ErrorRow, FeedbackTriageResult, FeedbackTriageTrigger, TriageDeps } from './types';
-
-const DEFAULT_PLATFORM_FEEDBACK_TRIAGE_IDEA_TITLE_MAX_LENGTH = 200;
+import { createWatchedRecorder } from './watched-recurrence';
 
 export async function runPlatformFeedbackTriage(
   env: Env,
@@ -52,6 +58,9 @@ export async function runPlatformFeedbackTriage(
     groupsSkipped: 0,
     groupsFailed: 0,
     groupsBudgetDeferred: 0,
+    watchedRecurrences: 0,
+    watchedEscalated: 0,
+    watchedExpired: 0,
     failureReasons: [],
   };
   if (!projectId) return base;
@@ -61,6 +70,7 @@ export async function runPlatformFeedbackTriage(
   if (!project)
     throw new Error('Configured Operations project does not reference an existing project');
   const now = deps.now?.() ?? Date.now();
+  const watchConfig = await loadWatchConfig(env);
   const windowMinutes = positive(
     env.PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES,
     DEFAULT_PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES
@@ -127,12 +137,30 @@ export async function runPlatformFeedbackTriage(
     env,
     candidateGroups.map((group) => group.signature)
   );
-  const groups = prioritizeFeedbackGroups(candidateGroups, existingPriorityRows, now).slice(
-    0,
-    groupLimit
-  );
-  const result = { ...base, groupsFound: groups.length };
+  // Watched signatures are recorded outside the group limit: no diagnosis, and a recurrence
+  // not recorded in its window is not in the next one (`createWatchedRecorder`).
+  const isWatched = (signature: string) =>
+    existingPriorityRows.get(signature)?.queue_state === 'watching';
+  const watchedGroups = candidateGroups.filter((group) => isWatched(group.signature));
+  const groups = prioritizeFeedbackGroups(
+    candidateGroups.filter((group) => !isWatched(group.signature)),
+    existingPriorityRows,
+    now
+  ).slice(0, groupLimit);
+  const result = { ...base, groupsFound: groups.length + watchedGroups.length };
   const diagnose = deps.diagnose ?? runDebugDiagnosis;
+  const watched = createWatchedRecorder(env, result, {
+    projectId: project.id,
+    now,
+    watchConfig,
+    dedupeHorizonMs: 2 * windowMinutes * 60_000,
+    ideaTitleMaxLength,
+    ideaRefreshLimit: groupLimit,
+    readEngagement: deps.readEngagement,
+    trigger,
+    failureReasonMaxLength,
+  });
+  await watched.recordAll(watchedGroups, existingPriorityRows);
 
   for (const [index, group] of groups.entries()) {
     const refs = JSON.stringify(group.evidence);
@@ -156,15 +184,20 @@ export async function runPlatformFeedbackTriage(
       )
       .run();
     const latestExisting = await readExistingTriageRow(env, group.signature);
+    if (latestExisting?.queue_state === 'watching') {
+      // Became watching after selection: count the recurrence; never reopen or re-triage.
+      await watched.record(group, latestExisting);
+      continue;
+    }
     const reopenTerminal = shouldReopenExistingTriage(
       env,
       latestExisting ?? existingPriorityRows.get(group.signature),
       group
     );
-    await env.DATABASE.prepare(
+    const ordinaryUpdate = await env.DATABASE.prepare(
       `UPDATE platform_feedback_triages SET first_seen_at = MIN(first_seen_at, ?),
       last_seen_at = MAX(last_seen_at, ?), occurrence_count = MAX(occurrence_count, ?),
-      evidence_refs = ?,
+      evidence_refs = ?, summary = COALESCE(?, summary),
       severity = CASE WHEN ? = 'error' THEN 'error' ELSE severity END,
       queue_state = CASE
         WHEN rejected_at IS NOT NULL THEN 'rejected'
@@ -178,13 +211,16 @@ export async function runPlatformFeedbackTriage(
         ELSE queued_at
       END,
       expired_at = CASE WHEN queue_state = 'expired' AND ? THEN NULL ELSE expired_at END,
-      updated_at = CURRENT_TIMESTAMP WHERE signature = ?`
+      updated_at = CURRENT_TIMESTAMP WHERE signature = ? AND queue_state <> 'watching'`
     )
       .bind(
         group.firstSeenAt,
         group.lastSeenAt,
         group.count,
         refs,
+        // A group rebuilt from a pre-2026-11 row still carries the generic summary; keep the
+        // stored value rather than writing that back.
+        isLegacyGenericSummary(group.summary) ? null : group.summary,
         group.severity,
         reopenTerminal ? 1 : 0,
         reopenTerminal ? 1 : 0,
@@ -194,6 +230,13 @@ export async function runPlatformFeedbackTriage(
         group.signature
       )
       .run();
+    if ((ordinaryUpdate.meta.changes ?? 0) === 0) {
+      // The row became watching between the read above and this update: record it as watched.
+      const current = await readExistingTriageRow(env, group.signature);
+      if (current?.queue_state === 'watching') await watched.record(group, current);
+      else result.groupsSkipped += 1;
+      continue;
+    }
     if (
       latestExisting &&
       ['resolved', 'expired'].includes(latestExisting.queue_state ?? '') &&
@@ -224,23 +267,27 @@ export async function runPlatformFeedbackTriage(
       continue;
     }
     if (existing?.idea_id) {
-      const update = await env.DATABASE.prepare(
-        `UPDATE tasks SET description = ?, updated_at = ?
-        WHERE id = ? AND project_id = ? AND status = 'draft'`
-      )
-        .bind(
-          ideaDescription(group, existing.diagnosis_id ?? 'pending'),
-          new Date(now).toISOString(),
-          existing.idea_id,
-          project.id
-        )
-        .run();
-      if ((update.meta.changes ?? 0) === 1) {
-        result.ideasUpdated += 1;
-      } else {
-        // The triage row remains the bounded diagnosis annotation when the linked Idea was promoted/deleted.
-        result.groupsSkipped += 1;
-      }
+      // One idea per signature: a re-occurrence refreshes the idea the pipeline still owns and
+      // leaves an idea someone has taken up exactly as they left it.
+      const untouched = await ownedIdeaStillUntouched(
+        env,
+        project.id,
+        group.signature,
+        deps.readEngagement
+      );
+      const updated =
+        untouched &&
+        (await refreshOwnedIdea(env, {
+          group,
+          signature: group.signature,
+          ideaId: existing.idea_id,
+          projectId: project.id,
+          diagnosisId: existing.diagnosis_id ?? 'pending',
+          ideaTitleMaxLength,
+          writtenAt: new Date(now).toISOString(),
+        }));
+      if (updated) result.ideasUpdated += 1;
+      else result.groupsSkipped += 1;
       continue;
     }
     if (existing?.budget_deferred_until && existing.budget_deferred_until > now) {
@@ -324,10 +371,11 @@ export async function runPlatformFeedbackTriage(
           claimToken
         ),
         env.DATABASE.prepare(
-          `UPDATE platform_feedback_triages SET diagnosis_id = ?, idea_id = ?, claim_token = NULL,
-          claim_expires_at = NULL, budget_deferred_until = NULL, budget_deferred_reason = NULL,
-          updated_at = CURRENT_TIMESTAMP WHERE signature = ? AND claim_token = ?`
-        ).bind(diagnosis.id, ideaId, group.signature, claimToken),
+          `UPDATE platform_feedback_triages SET diagnosis_id = ?, idea_id = ?, idea_owned_at = ?,
+          claim_token = NULL, claim_expires_at = NULL, budget_deferred_until = NULL,
+          budget_deferred_reason = NULL, updated_at = CURRENT_TIMESTAMP
+          WHERE signature = ? AND claim_token = ?`
+        ).bind(diagnosis.id, ideaId, isoNow, group.signature, claimToken),
       ]);
       const insertChanges = committed[0]?.meta.changes ?? 0;
       const linkChanges = committed[1]?.meta.changes ?? 0;
@@ -382,6 +430,35 @@ export async function runPlatformFeedbackTriage(
         rejected: marked.rejected,
       });
     }
+  }
+  // After this window's recurrences are recorded, so a still-recurring signature stays watched.
+  // A full error window may have hidden a watched signature's recurrence behind a noisier one
+  // (the fetch is newest-first, capped at the error limit), so expiry waits for a window that
+  // shows everything.
+  const errorWindowTruncated = (query.results ?? []).length >= errorLimit;
+  if (errorWindowTruncated) {
+    result.watchedExpired = 0;
+    result.watchExpirySkipped = 'error_window_truncated';
+    log.info('platform-feedback-triage.watch-expiry-skipped', {
+      trigger,
+      reason: 'error_window_truncated',
+      errorLimit,
+    });
+    return result;
+  }
+  try {
+    result.watchedExpired = await expireQuietWatchedIncidents(
+      env,
+      now,
+      watchConfig,
+      watched.unrecorded
+    );
+  } catch (error) {
+    result.watchedExpired = undefined;
+    log.warn('platform-feedback-triage.watch-expiry-failed', {
+      trigger,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
   return result;
 }

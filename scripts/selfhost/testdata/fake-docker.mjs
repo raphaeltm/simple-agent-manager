@@ -14,8 +14,23 @@ import { dirname, join } from 'node:path';
 const state = process.env.FAKE_STATE;
 const args = process.argv.slice(2);
 appendFileSync(join(state, 'calls.log'), `docker ${args.join(' ')}\n`);
+if (args[0] === 'ps') process.exit(0);
 if (args[0] !== 'compose') process.exit(2);
+// Record only this non-secret path, so the entrypoint test observes compose's selected state.
+appendFileSync(
+  join(state, 'compose-state-dirs.log'),
+  `${process.env.SAM_SELFHOST_STATE_DIR ?? ''}\n`
+);
+const selectedProject = args[args.indexOf('--project-name') + 1];
+const matches =
+  !process.env.FAKE_COMPOSE_PROJECT || process.env.FAKE_COMPOSE_PROJECT === selectedProject;
+if (args.includes('ps')) {
+  if (matches && readFileSync(join(state, 'celld'), 'utf8').trim() === 'running')
+    process.stdout.write('c'.repeat(64) + '\n');
+  process.exit(0);
+}
 const [action, service] = args.slice(-2);
+if (!matches) process.exit(action === 'stop' ? 0 : 1);
 if (service !== 'celld') process.exit(2);
 writeFileSync(join(state, 'celld'), action === 'stop' ? 'stopped' : 'running');
 const onStop = join(state, 'on-stop.json');

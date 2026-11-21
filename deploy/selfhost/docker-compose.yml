@@ -1,4 +1,4 @@
-# One-box self-hosted SAM control plane on celld (https://celld.dev).
+# One-box self-hosted SAM control plane on celld (https://celld.dev). EXPERIMENTAL: see README.md.
 #
 #   browser / nodes --443--> caddy --127.0.0.1:CELLD_PORT--> celld (API Worker + web UI assets)
 #                              |                               |  \--127.0.0.1:<lease port>--> frps --> node
@@ -7,59 +7,57 @@
 #
 # caddy, celld and frps share the host network on purpose: the Worker's fetch to a node's
 # loopback lease port runs in celld's network namespace, and Caddy forward_auth proxies node
-# WebSockets to the same port. Everything except Caddy listens on 127.0.0.1 only.
+# WebSockets to the same port. Everything except Caddy (and sam-mx on port 25) listens on
+# 127.0.0.1 only.
 #
-# Egress fence: celld runs as its own uid (CELLD_UID) and the `egress-fence` service installs an
-# nftables table for that uid (.state/egress-fence.nft, rendered by the deploy script) that keeps
-# Worker code away from loopback services, private ranges and the metadata server. celld's
-# entrypoint (celld/start.sh) starts celld only while the fence is in effect and kills it when the
-# fence goes (see README "Worst-case unfenced window"). Check it any time
-# with `pnpm selfhost:verify-fence`.
+# Sealed secrets (README "Sealed secrets", on by default): the deploy passes celld no secret; the
+# Worker gets them at runtime from the `key-agent` service over a loopback socket. Only a box set
+# to SAM_KEY_PROVIDER=legacy-plaintext keeps every Worker secret in plaintext in the fleet bucket's
+# deploy manifests. The UID egress fence protects box/private endpoints.
 #
-# Usage: cp .env.example .env && chmod 600 .env && edit it; `pnpm selfhost:deploy --init`
-# (platform keys + .state/gateway.env); docker compose up -d; then `pnpm selfhost:deploy`.
-# Images are pinned by digest; the pinned celld version must match CELLD_VERSION in
-# scripts/selfhost/versions.ts, which the deploy script uses for `celld deploy`.
-name: sam-selfhost
+# Usage (README.md): cp .env.example .env && chmod 600 .env && edit it;
+# `pnpm selfhost:deploy --init` (key provider, sealed platform keys, .state/gateway.env; it prints
+# the COMPOSE_PROJECT_NAME and SAM_KEY_AGENT_UID lines for .env); `docker compose build`;
+# `docker compose up -d`; then `pnpm selfhost:deploy`.
+#
+# Images: pulled images are pinned by digest. The two built here (caddy, sam-mx) pin their base
+# images by digest and every module by version, and are built only by an explicit
+# `docker compose build` (or when the image does not exist yet); `pnpm selfhost:upgrade` rebuilds
+# a service only when its build inputs changed. The pinned celld version must match CELLD_VERSION
+# in scripts/selfhost/versions.ts, which the deploy script uses for `celld deploy`.
+name: ${COMPOSE_PROJECT_NAME:?Set the installation-specific project printed by selfhost:deploy --init}
 
 services:
   celld:
     image: ghcr.io/denoland/celld:v0.6.3@sha256:22bca1b40a9e4c434cc149d8913d7eaafa9792961a8c05f9fecf921d416216dc
     network_mode: host
-    # The egress fence matches this uid; celld/start.sh refuses to run as root.
-    user: '${CELLD_UID:-7101}:${CELLD_UID:-7101}'
-    # The fence matches the uid: no capability or setuid path may change it.
-    cap_drop: [ALL]
-    security_opt: ['no-new-privileges:true']
+    user: '${CELLD_UID:-7103}:${CELLD_UID:-7103}'
     entrypoint: ['/bin/bash', '/etc/sam/celld-start.sh']
+    env_file:
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/celld.env
+        required: true
     depends_on:
       egress-fence:
         condition: service_healthy
       celld-data-owner:
         condition: service_completed_successfully
+      gce-metadata-proxy:
+        condition: service_started
+        required: false
       objectstore-init:
         condition: service_completed_successfully
         required: false # only with the local-store profile
-      gce-metadata-proxy:
-        condition: service_started
-        required: false # only with the gce profile
       key-agent:
         condition: service_healthy
-    # SAM_EGRESS_FENCE_PROBES, and on a gs:// bucket GCE_METADATA_HOST/IP pointing at the token
-    # proxy. Written by `pnpm selfhost:deploy --init`.
-    env_file:
-      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/celld.env
-        required: true
     environment:
       HOME: /var/lib/celld
-      # celld/start.sh: wait for the fence at start, then re-check it while celld runs; celld
-      # is killed when a probe is not rejected or the fence service's attestation goes stale.
+      SAM_EGRESS_FENCE_CHECK_SECONDS: ${SAM_EGRESS_FENCE_CHECK_SECONDS:-0.1}
       SAM_EGRESS_FENCE_WAIT_SECONDS: ${SAM_EGRESS_FENCE_WAIT_SECONDS:-60}
-      SAM_EGRESS_FENCE_CHECK_SECONDS: ${SAM_EGRESS_FENCE_CHECK_SECONDS:-1}
       SAM_EGRESS_FENCE_ATTESTATION: /run/sam-egress-fence/attestation
-      SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS: ${SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS:-20}
+      SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS: ${SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS:-2}
       CELLD_BUCKET: ${CELLD_BUCKET:?set CELLD_BUCKET in .env}
-      # Empty means unset: gs:// buckets take no endpoint and use Application Default Credentials.
+      # Empty means unset: gs:// buckets take no endpoint and use Application Default Credentials
+      # (on GCE, the VM's service account through the metadata server).
       S3_ENDPOINT: ${S3_ENDPOINT:-}
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
@@ -77,23 +75,64 @@ services:
       CELLD_FETCH_TIMEOUT_S: ${CELLD_FETCH_TIMEOUT_S:-3600}
       RUST_LOG: ${CELLD_RUST_LOG:-info}
     volumes:
-      # A cache on one node: the bucket is the durable copy and the only thing to back up.
+      # A cache on one node: the bucket is the durable copy.
       - celld-data:/var/lib/celld
       - ./celld/start.sh:/etc/sam/celld-start.sh:ro
       - egress-fence-attestation:/run/sam-egress-fence:ro
+    # Runs the Workers: no capability (its listeners are loopback ports above 1023) and a
+    # read-only root. It writes only CELLD_WATCH (the volume above) and nothing to /tmp; the
+    # tmpfs is there for the runtime's scratch files. Checked on the pinned image: a Worker and a
+    # SQLite Durable Object serve and keep their state across a restart.
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    read_only: true
+    tmpfs: [/tmp]
     # Above CELLD_SHUTDOWN_TOTAL_MS (40 s) so a stop is a clean lease handoff.
     stop_grace_period: 50s
     # celld docs: restart without an attempt limit. An immediate restart can hit
     # "Address already in use"; Docker's restart backoff covers that.
     restart: unless-stopped
 
-  # Installs the celld egress fence in the host's nftables, re-applies it if a firewall reload
-  # removes it, and attests to celld that the table matches the rendered rules. Needs only
-  # NET_ADMIN on the host network. Stopping it leaves the fence in place; celld then stops once
-  # the attestation is older than SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS.
+  # Sealed Worker secrets (scripts/selfhost/key-service.ts, on by default). Holds the key provider
+  # `pnpm selfhost:deploy --init` chose (key-choice.ts) and opens the sealed bundle for celld's
+  # Worker over a raw 127.0.0.1 socket (a framed protocol, never HTTP: key-agent/server.ts),
+  # refusing every peer uid but celld's (key-agent/peer.ts). It runs as the owner of .state from
+  # the start, never as root, with no capabilities and a read-only root; server.ts refuses uid 0
+  # and a uid that cannot read its state. The egress fence does not apply to it (it matches
+  # celld's uid), so it can reach a key service. On a `legacy-plaintext` box it only answers its
+  # health check, and the fence gives celld no route to it.
+  key-agent:
+    build: ./key-agent
+    image: sam-selfhost-key-agent:local
+    pull_policy: never # built here, never pulled
+    network_mode: host
+    # `pnpm selfhost:deploy --init` prints the line (the uid that owns .state); every sealing
+    # deploy refuses a missing or different one. Unset, the agent runs as nobody and a sealed box
+    # fails its health check with that reason in `docker compose logs key-agent`.
+    user: '${SAM_KEY_AGENT_UID:-65534}:${SAM_KEY_AGENT_UID:-65534}'
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    read_only: true
+    env_file:
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/key-agent/agent.env
+        required: true
+    environment:
+      SAM_KEY_AGENT_ALLOWED_UIDS: ${CELLD_UID:-7103}
+      SAM_KEY_AGENT_STATE_DIR: /etc/sam/key-agent
+    volumes:
+      - ${SAM_SELFHOST_STATE_DIR:-./.state}/key-agent:/etc/sam/key-agent:ro
+    healthcheck:
+      test: ['CMD', 'node', '/opt/sam-key-agent/healthcheck.ts']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  # Kernel OUTPUT fence, immutable while serving. Only this service gets host NET_ADMIN.
   egress-fence:
     build: ./egress-fence
     image: sam-selfhost-egress-fence:local
+    pull_policy: never
     network_mode: host
     cap_drop: [ALL]
     cap_add: [NET_ADMIN]
@@ -101,121 +140,97 @@ services:
     read_only: true
     tmpfs: [/tmp]
     environment:
-      SAM_EGRESS_FENCE_RECHECK_SECONDS: ${SAM_EGRESS_FENCE_RECHECK_SECONDS:-5}
+      SAM_EGRESS_FENCE_RECHECK_SECONDS: ${SAM_EGRESS_FENCE_RECHECK_SECONDS:-0.1}
     volumes:
       - ${SAM_SELFHOST_STATE_DIR:-./.state}/egress-fence.nft:/etc/sam/egress-fence.nft:ro
-      # The host's resolver list, so a changed nameserver re-opens DNS (fence.sh sync_dns).
-      - /etc/resolv.conf:/etc/sam/host-resolv.conf:ro
       - egress-fence-attestation:/run/sam-egress-fence
     healthcheck:
       test: ['CMD', '/bin/sh', '/usr/local/bin/sam-egress-fence', 'check']
-      interval: 5s
-      retries: 12
+      interval: 1s
+      start_period: 10s
+      retries: 1
     restart: unless-stopped
 
-  # Gives the celld data volume to CELLD_UID (celld used to run as root). One-shot.
   celld-data-owner:
     image: sam-selfhost-egress-fence:local
-    pull_policy: never # built by the egress-fence service
+    pull_policy: never
     depends_on:
       egress-fence:
         condition: service_started
     network_mode: none
     cap_drop: [ALL]
     cap_add: [CHOWN, FOWNER, DAC_READ_SEARCH]
-    entrypoint:
-      [
-        'find',
-        '/var/lib/celld',
-        '(',
-        '!',
-        '-user',
-        '${CELLD_UID:-7101}',
-        '-o',
-        '!',
-        '-group',
-        '${CELLD_UID:-7101}',
-        ')',
-        '-exec',
-        'chown',
-        '-h',
-        '${CELLD_UID:-7101}:${CELLD_UID:-7101}',
-        '{}',
-        '+',
-      ]
+    entrypoint: ['chown', '-R', '${CELLD_UID:-7103}:${CELLD_UID:-7103}', '/var/lib/celld']
     volumes:
       - celld-data:/var/lib/celld
     restart: 'no'
 
-  # Sealed Worker secrets (scripts/selfhost/key-service.ts, on by default). Holds the key provider
-  # `pnpm selfhost:deploy --init` chose (key-choice.ts) and opens the sealed bundle for celld's
-  # Worker over 127.0.0.1, refusing every peer uid but celld's (key-agent/peer.ts). No
-  # capabilities after start, read-only root; the egress fence does not apply to it (it matches
-  # celld's uid), so it can reach a key service. On a `legacy-plaintext` box it only answers its
-  # health check, and the fence gives celld no route to it.
-  key-agent:
-    build: ./key-agent
-    image: sam-selfhost-key-agent:local
-    network_mode: host
-    # Starts as root only to become the owner of .state/key-agent (server.ts dropToOwnerOf): the
-    # bundles and the key file are that user's mode 0600 files. SETUID/SETGID are lost with the
-    # switch. SAM_KEY_AGENT_UID pins the uid instead (the deploy checks it is the state owner).
-    user: '${SAM_KEY_AGENT_UID:-0}'
-    cap_drop: [ALL]
-    cap_add: [SETUID, SETGID]
-    security_opt: ['no-new-privileges:true']
-    read_only: true
-    env_file:
-      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/key-agent/agent.env
-        required: true
-    environment:
-      SAM_KEY_AGENT_ALLOWED_UIDS: ${CELLD_UID:-7101}
-      SAM_KEY_AGENT_STATE_DIR: /etc/sam/key-agent
-    volumes:
-      - ${SAM_SELFHOST_STATE_DIR:-./.state}/key-agent:/etc/sam/key-agent:ro
-    healthcheck:
-      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:'+(process.env.SAM_KEY_AGENT_PORT||7190)+'/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-    restart: unless-stopped
-
-  # Token proxy for celld's gs:// bucket on GCE (deploy/selfhost/metadata-proxy/Caddyfile): the
-  # fence blocks the metadata server, so celld fetches its access token here instead.
+  # Native celld storage alone uses this fixed-bucket Google CAB broker.
   gce-metadata-proxy:
     profiles: [gce]
-    image: sam-selfhost-caddy:local
-    pull_policy: never # built by the caddy service
+    build: ./metadata-proxy
+    image: sam-selfhost-metadata-proxy:local
+    pull_policy: never
     network_mode: host
+    user: '65532:65532'
     cap_drop: [ALL]
-    # The caddy binary carries the file capability cap_net_bind_service; exec fails without it
-    # in the bounding set. It listens on a high loopback port.
-    cap_add: [NET_BIND_SERVICE]
     security_opt: ['no-new-privileges:true']
     read_only: true
-    tmpfs: [/data, /config]
-    command: ['caddy', 'run', '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile']
     env_file:
       - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/celld.env
         required: true
-    volumes:
-      - ./metadata-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+    environment:
+      GCE_METADATA_PROXY_ALLOWED_UID: ${CELLD_UID:-7103}
+      GCE_METADATA_PROXY_TIMEOUT_MS: ${GCE_METADATA_PROXY_TIMEOUT_MS:-5000}
+      GCE_METADATA_PROXY_MAX_RESPONSE_BYTES: ${GCE_METADATA_PROXY_MAX_RESPONSE_BYTES:-65536}
+      GCE_METADATA_PROXY_REQUEST_TIMEOUT_MS: ${GCE_METADATA_PROXY_REQUEST_TIMEOUT_MS:-15000}
+    mem_limit: 128m
+    pids_limit: 64
     restart: unless-stopped
 
+  # One-shot, before Caddy: Caddy runs as uid 7101 (caddy/Dockerfile), but a box upgraded from a
+  # release whose Caddy ran as root has root-owned files in its volumes, which Caddy could then no
+  # longer read or renew. Hands both volumes to 7101 and exits; idempotent, so it runs every start.
+  # Root only for this, with just the capabilities chown needs (CHOWN, and DAC_READ_SEARCH to walk
+  # directories 7101 already owns with mode 0700).
+  caddy-volumes:
+    image: sam-selfhost-caddy:local
+    pull_policy: never
+    network_mode: none
+    user: '0:0'
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_READ_SEARCH]
+    security_opt: ['no-new-privileges:true']
+    entrypoint: ['/bin/chown', '-R', '7101:7101', '/data', '/config']
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: 'no'
+
   caddy:
+    # Built only by `docker compose build caddy` (or when the image is missing): caddy/Dockerfile
+    # pins both base images by digest and both modules by version. caddy/.dockerignore keeps the
+    # build context empty, so editing the Caddyfile never changes the build.
     build:
       context: ./caddy
       args:
         CADDY_DNS_MODULE: ${CADDY_DNS_MODULE:-github.com/caddy-dns/googleclouddns@v1.1.0}
     image: sam-selfhost-caddy:local
+    pull_policy: never
     network_mode: host
     # Internet-facing and holds the DNS-01 identity: only the capability to bind 80/443.
     cap_drop: [ALL]
     cap_add: [NET_BIND_SERVICE]
-    depends_on: [celld]
-    # Hashes the mail collector's UI password (when that profile is on) before starting Caddy.
+    depends_on:
+      celld:
+        condition: service_started
+      caddy-volumes:
+        condition: service_completed_successfully
+    # Validates its settings (start.sh: mail collector password, keep-warm, frp login rate limit,
+    # and that no box port lies inside the reverse-tunnel range) before starting Caddy.
     entrypoint: ['/bin/sh', '/etc/caddy/start.sh']
-    # REVERSE_TUNNEL_GATEWAY_SECRET (sent on forward_auth). Written by `pnpm selfhost:deploy --init`.
+    # REVERSE_TUNNEL_GATEWAY_SECRET (sent on forward_auth) and the lease port range. Written by
+    # `pnpm selfhost:deploy --init`.
     # mail-collector.env: SAM_MAIL_COLLECTOR=on|off and the collector UI password (on only).
     env_file:
       - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/gateway.env
@@ -228,17 +243,34 @@ services:
       ACME_EMAIL: ${ACME_EMAIL:-}
       ACME_CA: ${ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
       GCP_PROJECT: ${GCP_PROJECT:-}
+      # Every box listener (scripts/selfhost/box-settings.ts BOX_RESERVED_PORTS), with the values
+      # the other services get from the same interpolation. start.sh refuses to start Caddy when
+      # one lies inside the reverse-tunnel range from gateway.env, so a shell override passed
+      # straight to `docker compose` cannot put a box port in the range the deploy checked.
       HTTP_PORT: ${HTTP_PORT:-80}
       HTTPS_PORT: ${HTTPS_PORT:-443}
       CELLD_PORT: ${CELLD_PORT:-8080}
+      CELLD_INTERNAL_PORT: ${CELLD_INTERNAL_PORT:-7001}
       FRPS_BIND_PORT: ${FRPS_BIND_PORT:-7000}
+      GCE_METADATA_PROXY_PORT: ${GCE_METADATA_PROXY_PORT:-7180}
+      OBJECTSTORE_PORT: ${OBJECTSTORE_PORT:-9000}
+      OBJECTSTORE_CONSOLE_PORT: ${OBJECTSTORE_CONSOLE_PORT:-9001}
+      MAIL_COLLECTOR_SMTP_PORT: ${MAIL_COLLECTOR_SMTP_PORT:-1025}
+      MAIL_COLLECTOR_UI_PORT: ${MAIL_COLLECTOR_UI_PORT:-8025}
+      # sam-mx's public listen address; start.sh checks the port after the last ':'.
+      SAM_MX_LISTEN: ${SAM_MX_LISTEN:-:25}
       # Keep-warm for celld's stateless Worker isolate (caddy/keep-warm/on.caddy): on unless set
       # to off; the interval (1s-6s) sets how long a cold window follows each 30 s celld pool tick.
       # start.sh validates both.
       SAM_KEEP_WARM: ${SAM_KEEP_WARM:-on}
       SAM_KEEP_WARM_INTERVAL: ${SAM_KEEP_WARM_INTERVAL:-5s}
-    # The access log goes to stdout (README "Logs"). Docker's default json-file driver never
-    # rotates, so cap this service's log: about CADDY_LOG_MAX_SIZE x CADDY_LOG_MAX_FILES on disk.
+      # frp connections (each one a Login the Worker checks) per client address per window, at
+      # wss://api.SAM_DOMAIN/~!frp (caddy/sam.d/frp.caddy). Nodes multiplex over one connection,
+      # so the default leaves room for a NAT gateway full of nodes reconnecting at once.
+      SAM_FRP_LOGIN_RATE_LIMIT_EVENTS: ${SAM_FRP_LOGIN_RATE_LIMIT_EVENTS:-60}
+      SAM_FRP_LOGIN_RATE_LIMIT_WINDOW: ${SAM_FRP_LOGIN_RATE_LIMIT_WINDOW:-1m}
+    # The access log goes to stdout. Docker's default json-file driver never rotates, so cap
+    # this service's log: about CADDY_LOG_MAX_SIZE x CADDY_LOG_MAX_FILES on disk.
     logging:
       driver: json-file
       options:
@@ -268,6 +300,11 @@ services:
       # same resolved range there and into the Worker's vars (scripts/selfhost/box-settings.ts).
     volumes:
       - ./frps:/etc/frp:ro
+    # No capability (it binds FRPS_BIND_PORT and lease ports, all loopback and above 1023) and
+    # a read-only root: frps.toml logs to the console and frps writes no file.
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    read_only: true
     restart: unless-stopped
 
   # Mail collector for TEST installs (profile `mail-collector`, off by default): catches every
@@ -314,11 +351,13 @@ services:
   # firewall rule (README "Inbound agent email").
   sam-mx:
     profiles: [mail-in]
+    # Built only by `docker compose build sam-mx` (or when the image is missing): sam-mx/Dockerfile
+    # pins both base images by digest; go.sum pins every module.
     build: ./sam-mx
     image: sam-selfhost-sam-mx:local
+    pull_policy: never
     # Host network: it calls celld on 127.0.0.1, and the sender's address must be the real one for
-    # SPF and the per-address limits. Its own uid, not celld's: the egress fence (which matches
-    # celld's uid) does not apply to it, and celld's fence does not let the Worker reach port 25.
+    # SPF and the per-address limits.
     network_mode: host
     user: '${SAM_MX_UID:-7102}:${SAM_MX_UID:-7102}'
     # The binary's file capability binds port 25; every other capability is dropped.
@@ -391,7 +430,8 @@ services:
     # Compose interpolates every service, including ones whose profile is off, so a `:?` here
     # would stop a gs:// or s3:// install that never runs this store. The store checks instead:
     # it refuses an unset credential (MinIO would fall back to minioadmin), MinIO's well-known
-    # default, and a secret under 8 characters. /usr/bin/docker-entrypoint.sh is the image's
+    # default, and a secret under 24 characters (the root credential reads every deployed Worker
+    # secret in the fleet bucket, so it must not be guessable). /usr/bin/docker-entrypoint.sh is the image's
     # own ENTRYPOINT at the pinned digest.
     entrypoint:
       - /bin/sh
@@ -401,8 +441,8 @@ services:
         :* | *: | minioadmin:* | *:minioadmin)
         echo 'objectstore: set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env (not minioadmin)' >&2; exit 64;;
         esac;
-        test "$${#MINIO_ROOT_PASSWORD}" -ge 8 ||
-        { echo 'objectstore: AWS_SECRET_ACCESS_KEY must be at least 8 characters' >&2; exit 64; };
+        test "$${#MINIO_ROOT_PASSWORD}" -ge 24 ||
+        { echo 'objectstore: AWS_SECRET_ACCESS_KEY must be at least 24 characters (openssl rand -hex 24)' >&2; exit 64; };
         exec /usr/bin/docker-entrypoint.sh "$$@"
       - objectstore
     environment:
@@ -411,7 +451,15 @@ services:
     volumes:
       - objectstore-data:/data
     healthcheck:
-      test: ['CMD', 'mc', 'ready', 'local']
+      test:
+        [
+          'CMD',
+          'curl',
+          '--fail',
+          '--silent',
+          '--show-error',
+          'http://127.0.0.1:${OBJECTSTORE_PORT:-9000}/minio/health/ready',
+        ]
       interval: 5s
       retries: 30
     stop_grace_period: 30s
@@ -436,7 +484,7 @@ services:
 
 volumes:
   celld-data:
-  egress-fence-attestation:
   caddy-data:
   caddy-config:
   objectstore-data:
+  egress-fence-attestation:

@@ -22,7 +22,7 @@ import {
   advanceGateway,
   advanceOverlap,
   advanceSwap,
-  DEFAULT_JWT_OVERLAP_HOURS,
+  defaultJwtOverlapHours,
   message,
 } from './rotate-steps';
 import { advanceData, CONTROL_KEY } from './rotate-steps-data';
@@ -93,6 +93,23 @@ export function selectKeys(
     // to it): replace the sign-in secret in the same run (review V1 M2).
     chosen.push(signIn);
   }
+  // An AES key holding the same value as an unselected one would keep that value in the bundle,
+  // still encrypting data for the other purpose, after the selected key reports it retired.
+  const aesKeys = ['encryption-key', 'credential-encryption-key', 'library-encryption-key']
+    .map((name) => rotatableKey(name))
+    .filter((key): key is RotatableKey => key !== undefined);
+  for (const selected of aesKeys.filter((key) => chosen.includes(key))) {
+    const value = bundle[selected.secrets[0] ?? ''];
+    if (!value) continue;
+    for (const other of aesKeys.filter((key) => !chosen.includes(key))) {
+      const secret = other.secrets[0] ?? '';
+      if (bundle[secret] === value) {
+        throw new Error(
+          `${secret} holds the same value as ${selected.secrets[0]}: rotate both in one run (rotate ${selected.name} ${other.name}, or --all)`
+        );
+      }
+    }
+  }
   for (const key of chosen) {
     const missing = key.secrets.filter((name) => !bundle[name] && name !== 'BETTER_AUTH_SECRET');
     if (missing.length > 0) {
@@ -152,6 +169,60 @@ function stepContext(
   return { journal, step, key, store, deps, stateDir, save: () => writeJournal(stateDir, journal) };
 }
 
+/** celld's per-request handler budget when CELLD_HANDLER_BUDGET_S is unset (its documented default). */
+export const DEFAULT_CELLD_HANDLER_BUDGET_S = 300;
+const DRAIN_MARGIN_MINUTES = 1;
+
+/**
+ * How long a request that started on the previous deployment can still run (celld finishes it
+ * there) and write under the old value: the box's CELLD_HANDLER_BUDGET_S plus a margin.
+ */
+export function drainMinutes(box: Readonly<Record<string, string | undefined>>): number {
+  const configured = Number.parseInt(box.CELLD_HANDLER_BUDGET_S ?? '', 10);
+  const seconds = Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_CELLD_HANDLER_BUDGET_S;
+  return Math.ceil(seconds / 60) + DRAIN_MARGIN_MINUTES;
+}
+
+/**
+ * The request drain a run started with: a resume keeps it even if CELLD_HANDLER_BUDGET_S changed
+ * since (requests on the old deployment run under the budget they started with).
+ */
+function runDrainMinutes(journal: Journal, input: RotateInput): number {
+  return journal.options?.drainMinutes ?? drainMinutes(input.box);
+}
+
+/** The timing options a run started with (recorded in its journal), or from the command line. */
+function runOptions(journal: Journal, input: RotateInput): NonNullable<Journal['options']> {
+  return (
+    journal.options ?? {
+      jwtOverlapHours: input.jwtOverlapHours ?? defaultJwtOverlapHours({}),
+      storedLifetimeMinutes: input.storedLifetimeMinutes ?? null,
+    }
+  );
+}
+
+/**
+ * A resume continues with the options the run started with. A flag given again with another
+ * value is refused rather than silently applied or ignored.
+ */
+function assertResumeOptions(journal: Journal, input: RotateInput): void {
+  const recorded = journal.options;
+  if (!recorded) return;
+  const conflicts: string[] = [];
+  if (input.jwtOverlapHours !== undefined && input.jwtOverlapHours !== recorded.jwtOverlapHours)
+    conflicts.push(`--jwt-overlap-hours ${recorded.jwtOverlapHours}`);
+  if (
+    input.storedLifetimeMinutes !== undefined &&
+    input.storedLifetimeMinutes !== recorded.storedLifetimeMinutes
+  )
+    conflicts.push(`--stored-lifetime-minutes ${recorded.storedLifetimeMinutes ?? '(derived)'}`);
+  if (conflicts.length > 0) {
+    throw new Error(
+      `rotation ${journal.id} started with ${conflicts.join(' and ')}; resume without these flags (or with the same values)`
+    );
+  }
+}
+
 async function advance(ctx: StepContext, input: RotateInput): Promise<void> {
   switch (ctx.key.procedure) {
     case 'swap':
@@ -159,12 +230,17 @@ async function advance(ctx: StepContext, input: RotateInput): Promise<void> {
     case 'gateway':
       return await advanceGateway(ctx);
     case 'overlap':
-      return await advanceOverlap(ctx, input.jwtOverlapHours ?? DEFAULT_JWT_OVERLAP_HOURS);
+      return await advanceOverlap(ctx, runOptions(ctx.journal, input).jwtOverlapHours);
     case 'reencrypt':
-      // Unset: derived from the deployed Worker's own settings (rotate-steps-data.ts).
-      return await advanceData(ctx, 'aes', input.storedLifetimeMinutes ?? null);
+      // Null: derived from the deployed Worker's own settings (rotate-steps-data.ts).
+      return await advanceData(
+        ctx,
+        'aes',
+        runOptions(ctx.journal, input).storedLifetimeMinutes,
+        runDrainMinutes(ctx.journal, input)
+      );
     case 'better-auth':
-      return await advanceData(ctx, 'better-auth', 0);
+      return await advanceData(ctx, 'better-auth', 0, runDrainMinutes(ctx.journal, input));
   }
 }
 
@@ -176,7 +252,7 @@ async function startJournal(
   const head = await store.head();
   const keys = selectKeys(input, head.secrets);
   assertNothingOverrides(input.stateDir, keys);
-  const existingBundles = listBundles(store.settings.bundleDir, deps.log);
+  const existingBundles = await listBundles(store.settings.bundles, deps.log);
   for (const line of formatPlan(keys, head.secrets, { ...input, existingBundles })) deps.log(line);
   if (input.dryRun) {
     deps.log('dry run: nothing was changed');
@@ -196,6 +272,11 @@ async function startJournal(
     startedAt: started.toISOString(),
     backupDir,
     keys: keys.map((k) => k.name),
+    options: {
+      jwtOverlapHours: input.jwtOverlapHours ?? defaultJwtOverlapHours(head.secrets),
+      storedLifetimeMinutes: input.storedLifetimeMinutes ?? null,
+      drainMinutes: drainMinutes(input.box),
+    },
     steps: Object.fromEntries(
       keys.map((k) => [k.name, { name: k.name, phase: 'pending' } as StepState])
     ),
@@ -208,6 +289,36 @@ async function startJournal(
  * One `rotate` at a time per box: an O_EXCL lock file holding the pid. A lock whose process is
  * gone (a crash) is taken over; a live one stops the second run.
  */
+/**
+ * Removes a lock left by a dead process, but only under an exclusive takeover file and only if
+ * the lock still holds what was read: two runs that both saw the same stale lock cannot both
+ * remove it, and neither can remove the lock the other just created.
+ */
+function takeOverStaleLock(path: string, stale: string): void {
+  const takeover = `${path}.takeover`;
+  let fd: number;
+  try {
+    fd = openSync(takeover, 'wx', 0o600);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    throw new Error(
+      `another pnpm selfhost:secrets rotate is taking over a stale lock (${takeover}); if none is running, remove that file and retry`
+    );
+  }
+  try {
+    let current: string | null = null;
+    try {
+      current = readFileSync(path, 'utf8').trim();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    if (current === stale) rmSync(path, { force: true });
+  } finally {
+    closeSync(fd);
+    rmSync(takeover, { force: true });
+  }
+}
+
 function acquireLock(stateDir: string): () => void {
   ensurePrivateDir(rotationDir(stateDir));
   const path = join(rotationDir(stateDir), 'lock');
@@ -228,7 +339,7 @@ function acquireLock(stateDir: string): () => void {
         alive = false;
       }
       if (alive) throw new Error(`another pnpm selfhost:secrets rotate is running (pid ${pid})`);
-      rmSync(path, { force: true });
+      takeOverStaleLock(path, readFileSync(path, 'utf8').trim());
     }
   }
   throw new Error(`could not take the rotation lock ${path}`);
@@ -260,6 +371,7 @@ async function runRotateLocked(input: RotateInput, deps: RotateDeps): Promise<Jo
     );
   }
   if (!existing && input.resume) throw new Error('no rotation in progress to resume');
+  if (existing) assertResumeOptions(existing, input);
   const journal = existing ?? (await startJournal(input, deps, store));
   if (!journal) return null;
   const failures: string[] = [];
@@ -290,9 +402,19 @@ async function runRotateLocked(input: RotateInput, deps: RotateDeps): Promise<Jo
     }
     if (step.phase === 'rolled-back') failures.push(`${name}: rolled back (${step.error ?? ''})`);
   }
+  // A key rolled back by an earlier invocation was never replaced: a resume that finishes the run
+  // still reports it, so the exit status never says a compromised key was retired when it was not.
+  const rolledBackEarlier = journal.keys.filter(
+    (name) =>
+      journal.steps[name]?.phase === 'rolled-back' && !failures.some((f) => f.startsWith(`${name}:`))
+  );
+  const carried = rolledBackEarlier.map(
+    (name) => `${name}: rolled back, not replaced (${journal.steps[name]?.error ?? ''})`
+  );
   const settled = journal.keys.every((name) =>
     ['done', 'rolled-back'].includes(journal.steps[name]?.phase ?? '')
   );
+  // Rolled-back keys do not stop the final reseal (it only drops transitional values).
   if (settled && failures.length === 0) {
     const finalStep = (journal.steps[FINAL] ??= { name: FINAL, phase: 'pending' });
     if (finalStep.phase !== 'done') {
@@ -308,6 +430,7 @@ async function runRotateLocked(input: RotateInput, deps: RotateDeps): Promise<Jo
   const head = await store.head();
   for (const line of formatSummary(journal, head.secrets, input.stateDir)) deps.log(line);
   if (journal.finishedAt) archiveJournal(input.stateDir, journal);
-  if (failures.length > 0) throw new Error(`rotation incomplete:\n  ${failures.join('\n  ')}`);
+  const reported = [...failures, ...carried];
+  if (reported.length > 0) throw new Error(`rotation incomplete:\n  ${reported.join('\n  ')}`);
   return journal;
 }

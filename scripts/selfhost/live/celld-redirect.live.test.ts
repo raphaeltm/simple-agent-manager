@@ -6,13 +6,14 @@
  * case records why the guard exists: celld's default fetch follows a 302 to an internal service
  * and hands back its body (res.redirected stays false, so nothing downstream can tell).
  */
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { ensureCelldBinary, resolveEsbuild } from '../celld-binary.js';
+import { writeProject } from './celld-lab';
 import { freePort, LIVE_TMP, REPO_ROOT, type Running, start, waitFor } from './harness';
 
 const NETWORK_HOSTS = join(REPO_ROOT, 'packages/worker-core/src/network-hosts/index.ts');
@@ -75,12 +76,11 @@ beforeAll(async () => {
   await new Promise<void>((done) => edge.listen(ports.edge, '127.0.0.1', done));
 
   mkdirSync(LIVE_TMP, { recursive: true });
-  const project = mkdtempSync(join(LIVE_TMP, 'celld-redirect-'));
-  writeFileSync(
-    join(project, 'wrangler.json'),
-    JSON.stringify({ name: 'redirect-probe', main: 'worker.js', compatibility_date: '2026-01-01' })
-  );
-  writeFileSync(join(project, 'worker.js'), WORKER);
+  const project = writeProject(mkdtempSync(join(LIVE_TMP, 'celld-redirect-')), {
+    name: 'redirect-probe',
+    worker: WORKER,
+    vars: {},
+  });
   const binary = await ensureCelldBinary(join(LIVE_TMP, 'celld-bin'));
   celld = start(
     'bash',

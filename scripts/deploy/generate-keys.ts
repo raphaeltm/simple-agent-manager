@@ -15,9 +15,9 @@
  */
 
 import * as crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 
 import { generateDeploySigningKeyPair } from './deploy-signing-keys';
+import { isEntrypoint } from './entrypoint';
 import { deriveVapidKeyPairFromPem } from './vapid-keys';
 
 /** 32 random bytes, base64. Same shape as the Pulumi-managed `encryption-key`. */
@@ -81,7 +81,7 @@ async function main(): Promise<void> {
 
 // Run only as a CLI, so other scripts (scripts/selfhost/platform-keys.ts) can import the
 // generators without printing keys.
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isEntrypoint(import.meta.url)) {
   main().catch((error) => {
     console.error('❌ Error:', error instanceof Error ? error.message : error);
     process.exit(1);

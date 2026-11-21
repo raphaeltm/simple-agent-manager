@@ -12,6 +12,7 @@ import {
 import { loadCallbackCredentialGeneration } from './callback-token-generation';
 import {
   CALLBACK_AUDIENCE,
+  configuredJwtKeyId,
   currentJwtKeyId,
   getIssuer,
   LOCAL_FORWARD_AUDIENCE,
@@ -346,8 +347,8 @@ export function shouldRefreshCallbackToken(token: string, env: Env): boolean {
   try {
     // After a self-hosted key rotation (JWT_KEY_ID set) a token signed under another kid is
     // refreshed at once, so nodes leave the previous key on their next heartbeat instead of at
-    // half their token's lifetime. Unset JWT_KEY_ID (Cloudflare): unchanged.
-    if (env.JWT_KEY_ID?.trim() && decodeProtectedHeader(token).kid !== currentJwtKeyId(env)) {
+    // half their token's lifetime. Unset JWT_KEY_ID, or Cloudflare (no rotation scope): unchanged.
+    if (configuredJwtKeyId(env) && decodeProtectedHeader(token).kid !== currentJwtKeyId(env)) {
       return true;
     }
     const claims = decodeJwt(token);

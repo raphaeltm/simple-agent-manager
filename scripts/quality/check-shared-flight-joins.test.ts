@@ -163,6 +163,26 @@ describe('shared-flight join guard', () => {
     ]);
   });
 
+  it('flags a shared flight behind a module-scope boolean in && and in a conditional', () => {
+    const { findings } = scan(`${HELPER}
+      let enabled = true;
+      const pending = new Map<string, Promise<string>>();
+      export async function viaAnd(key: string) {
+        return enabled && pending.get(key);
+      }
+      export async function viaConditional(key: string) {
+        return await (enabled ? pending.get(key) : undefined);
+      }
+    `);
+    // The `&&` return (line 8) and the awaited conditional (line 11), each rooted at `pending`.
+    expect(
+      findings.map((f) => [f.line, f.root]).sort((a, b) => Number(a[0]) - Number(b[0]))
+    ).toEqual([
+      [8, 'pending'],
+      [11, 'pending'],
+    ]);
+  });
+
   it('honours a reviewed exception on the line above', () => {
     const { findings } = scan(`${HELPER}
       const ready: Promise<string> = read();

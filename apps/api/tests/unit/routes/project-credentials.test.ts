@@ -21,6 +21,12 @@ import {
 } from '../../../src/services/composable-credentials/resolve';
 
 vi.mock('drizzle-orm/d1');
+// Pool ownership has its own real-SQL suite; here the database is mocked, so spy on the
+// pre-delete reconcile and assert it runs.
+vi.mock('../../../src/services/gcp-wif-pool-ownership', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/gcp-wif-pool-ownership')>()),
+  reconcileGcpWifPoolIndex: vi.fn(async () => undefined),
+}));
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: unknown, next: () => unknown) => next()),
   requireApproved: () => vi.fn((_c: unknown, next: () => unknown) => next()),
@@ -487,6 +493,11 @@ describe('Project Credentials Routes', () => {
 
       expect(res.status).toBe(200);
       expect(kv.delete).toHaveBeenCalledWith('gcp-api-health:v1:project-gcp-cred');
+      const { reconcileGcpWifPoolIndex } = await import(
+        '../../../src/services/gcp-wif-pool-ownership'
+      );
+      // The outgoing pool is recorded before the row is deleted (Google may still trust it).
+      expect(reconcileGcpWifPoolIndex).toHaveBeenCalledWith(env, 'delete_project_gcp_credential');
     });
 
     it('does not touch API health records for other providers', async () => {

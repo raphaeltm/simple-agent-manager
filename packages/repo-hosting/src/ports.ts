@@ -50,16 +50,11 @@ export interface AuthPort {
 
 /**
  * The SAM-native repository backend (`ARTIFACTS`). On Cloudflare it is the Artifacts binding; a
- * self-hosted install may register its own (the worker's `services/hosted-git/backend.ts`).
+ * self-hosted install may register its own (the worker's `services/artifacts/backend.ts`).
  */
 export interface ArtifactsBackendPort {
   /** The backend this install uses for SAM-native repositories, or null when it has none. */
   resolve(env: Env): ArtifactsBinding | null;
-  /**
-   * A fetch that serves this install's own hosted repositories in-process, or null (or absent)
-   * when repositories are read over the network (Cloudflare Artifacts).
-   */
-  localRemoteFetch?(env: Env): typeof fetch | null;
 }
 
 export interface RepoHostingPorts {

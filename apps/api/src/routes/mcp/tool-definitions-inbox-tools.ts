@@ -47,6 +47,11 @@ const idempotencyKey = {
     'Any unique string; a retried call with the same key returns the item already filed.',
 };
 const ref = { type: 'string', description: 'Item reference, `ask:<id>`, as returned when filed.' };
+const replyMessageId = {
+  type: 'string',
+  description:
+    'Exact reply message id from the inbox reply header you received. Required to act on outstanding replies; never guess the latest queued id.',
+};
 const wakeOnSteps = {
   type: 'boolean',
   description:
@@ -112,7 +117,7 @@ export const INBOX_TOOLS = [
   {
     name: 'inbox_assign',
     description:
-      'Hand a person non-blocking work only a person can do (add a production secret, decide a price, record a demo). It goes to their inbox under Tasks; you keep working. You are woken in this chat when they comment, take it, hand it on, finish, reopen or archive it. It never expires.',
+      'Hand a person non-blocking work only a person can do (add a production secret, decide a price, record a demo). It goes to their inbox under Tasks; you keep working. You are woken in this chat when they comment, take it, hand it on, finish or reopen it; archiving it wakes no one. It never expires.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -168,7 +173,7 @@ export const INBOX_TOOLS = [
   {
     name: 'inbox_attach',
     description:
-      'Watch an open task another of your chats assigned instead of assigning a duplicate: this chat is woken when it is taken, handed on, finished, reopened or archived (comments wake the assigning chat; read them with inbox_read get).',
+      'Watch an open task another of your chats assigned instead of assigning a duplicate: this chat is woken when it is taken, handed on, finished or reopened (archiving it wakes no one; comments wake the assigning chat; read them with inbox_read get).',
     inputSchema: {
       type: 'object' as const,
       properties: { ref, wakeOnSteps },
@@ -177,18 +182,41 @@ export const INBOX_TOOLS = [
     },
   },
   {
+    name: 'inbox_respond',
+    description:
+      'Respond on an item this chat filed, including a pending secret or approval request. The response brings it back to the person’s inbox. Never file a duplicate item.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { ref, body: { type: 'string' }, replyMessageId },
+      required: ['ref', 'body'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'inbox_resolve',
+    description:
+      'Treat the observed reply identified by replyMessageId as the answer to this chat’s open question, review or result. Refuses while another reply is outstanding. References its chat message; stays out of their inbox. Cannot resolve secrets, approvals or human tasks.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { ref, replyMessageId },
+      required: ['ref', 'replyMessageId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'inbox_update_item',
     description: 'Edit the title, reason or links of an open item this chat filed.',
     inputSchema: {
       type: 'object' as const,
-      properties: { ref, title, why, links },
+      properties: { ref, title, why, links, replyMessageId },
       required: ['ref'],
       additionalProperties: false,
     },
   },
   {
     name: 'inbox_cancel_item',
-    description: 'Close an open item this chat filed because it is moot. Records why.',
+    description:
+      'Close an open item this chat filed because it is moot. Records why. Refuses while a person’s reply is outstanding; handle each reply with respond or update first.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -215,10 +243,20 @@ export const INBOX_TOOLS = [
   {
     name: 'inbox_get_item',
     description:
-      "One item of this project with its status, the person's answer and the outcome; for a task also its steps, assignee, who took it, activity and discussion.",
+      "One item of this project with its status and outcome; for a task also its progress. Source-chat items include canonical conversation and pendingReplyIds visible on this page, including replies whose delivery failed. Follow conversation cursors while hasMore. Reading observes these replies but does not acknowledge them; explicitly respond/update/resolve with a read reply's id.",
     inputSchema: {
       type: 'object' as const,
-      properties: { ref },
+      properties: {
+        ref,
+        replyCursor: {
+          type: 'string',
+          description: 'conversation.nextReplyCursor from the previous get.',
+        },
+        responseCursor: {
+          type: 'number',
+          description: 'conversation.nextResponseCursor from the previous get.',
+        },
+      },
       required: ['ref'],
       additionalProperties: false,
     },

@@ -10,6 +10,23 @@ const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const MIB = 1024 * 1024;
 
+/** Hours a pending incident may go undispatched before the queue counts as stalled. */
+export const DEFAULT_INCIDENT_DISPATCH_STALL_HOURS = 24;
+/** Incident ideas the hourly reconciliation handles per batch (one Durable Object read each). */
+export const DEFAULT_INCIDENT_IDEA_RECONCILE_BATCH_SIZE = 25;
+/** Milliseconds the hourly incident-idea reconciliation keeps working before it stops. */
+export const DEFAULT_INCIDENT_IDEA_RECONCILE_DEADLINE_MS = 20_000;
+/** Hours of a watched incident's history its recent-frequency measure covers (7 days). */
+export const DEFAULT_INCIDENT_WATCH_RECENT_WINDOW_HOURS = 7 * 24;
+/** Hours over which a watched incident's spike is measured. */
+export const DEFAULT_INCIDENT_WATCH_SPIKE_WINDOW_HOURS = 24;
+/** Occurrences inside the spike window that return a watched incident to triage. */
+export const DEFAULT_INCIDENT_WATCH_SPIKE_MIN_OCCURRENCES = 50;
+/** How many times its earlier rate the spike window must reach to count as a spike. */
+export const DEFAULT_INCIDENT_WATCH_SPIKE_BASELINE_MULTIPLIER = 3;
+/** Hours without an occurrence after which a watched incident expires (14 days). */
+export const DEFAULT_INCIDENT_WATCH_QUIET_EXPIRY_HOURS = 14 * 24;
+
 export const FLEET_OPS_SETTINGS = [
   {
     name: 'operations.debugPackageRetentionDays',
@@ -90,6 +107,70 @@ export const FLEET_OPS_SETTINGS = [
     description:
       'Hours of snapshot failures and deletion-quarantine reports the anomaly sweep looks back over.',
     range: { min: 1, max: 30 * 24 },
+  },
+  {
+    name: 'operations.opsAnomalyIncidentDispatchStallHours',
+    key: 'incidentDispatchStallHours',
+    defaultValue: DEFAULT_INCIDENT_DISPATCH_STALL_HOURS,
+    description:
+      'Hours a pending private incident may wait without ever being dispatched to the incident triage trigger before the anomaly sweep reports the queue as stalled and the incident sweep logs a warning.',
+    range: { min: 1, max: 30 * 24 },
+  },
+  {
+    name: 'operations.incidentIdeaReconcileBatchSize',
+    key: 'incidentIdeaReconcileBatchSize',
+    defaultValue: DEFAULT_INCIDENT_IDEA_RECONCILE_BATCH_SIZE,
+    description:
+      'Incident ideas the hourly reconciliation checks per batch when it closes ideas of ended incidents, adopts legacy ideas and retitles them. Each batch reads chat links and notes once from the project Durable Object.',
+    range: { min: 1, max: 100 },
+  },
+  {
+    name: 'operations.incidentIdeaReconcileDeadlineMs',
+    key: 'incidentIdeaReconcileDeadlineMs',
+    defaultValue: DEFAULT_INCIDENT_IDEA_RECONCILE_DEADLINE_MS,
+    description:
+      'Milliseconds the hourly incident-idea reconciliation keeps running batches before it stops; anything left continues the next hour.',
+    range: { min: 1_000, max: 120_000 },
+  },
+  {
+    name: 'operations.incidentWatchRecentWindowHours',
+    key: 'incidentWatchRecentWindowHours',
+    defaultValue: DEFAULT_INCIDENT_WATCH_RECENT_WINDOW_HOURS,
+    description:
+      "Hours of history behind a watched incident's recent occurrence count (list_incident_queue, get_incident, its idea). Hourly counts older than this are dropped.",
+    range: { min: 24, max: 30 * 24 },
+  },
+  {
+    name: 'operations.incidentWatchSpikeWindowHours',
+    key: 'incidentWatchSpikeWindowHours',
+    defaultValue: DEFAULT_INCIDENT_WATCH_SPIKE_WINDOW_HOURS,
+    description:
+      "Hours over which a watched incident's occurrences are counted to detect a spike. Capped at the recent window.",
+    range: { min: 1, max: 7 * 24 },
+  },
+  {
+    name: 'operations.incidentWatchSpikeMinOccurrences',
+    key: 'incidentWatchSpikeMinOccurrences',
+    defaultValue: DEFAULT_INCIDENT_WATCH_SPIKE_MIN_OCCURRENCES,
+    description:
+      'Occurrences inside the spike window, counted since the latest watch decision, that return a watched incident to the triage queue.',
+    range: { min: 1, max: 1_000_000 },
+  },
+  {
+    name: 'operations.incidentWatchSpikeBaselineMultiplier',
+    key: 'incidentWatchSpikeBaselineMultiplier',
+    defaultValue: DEFAULT_INCIDENT_WATCH_SPIKE_BASELINE_MULTIPLIER,
+    description:
+      "A spike must also reach this many times the incident's average count per spike window over the rest of the recent window, so a steadily noisy watched incident is not re-queued for being noisy.",
+    range: { min: 1, max: 100 },
+  },
+  {
+    name: 'operations.incidentWatchQuietExpiryHours',
+    key: 'incidentWatchQuietExpiryHours',
+    defaultValue: DEFAULT_INCIDENT_WATCH_QUIET_EXPIRY_HOURS,
+    description:
+      'Hours without an occurrence after which a watched incident expires and its automated idea is closed. A recurrence after that reopens it for triage.',
+    range: { min: 24, max: 90 * 24 },
   },
   {
     name: 'operations.opsAnomalyMaxPerClass',
