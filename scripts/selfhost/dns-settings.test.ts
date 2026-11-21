@@ -85,6 +85,15 @@ describe('dns.env', () => {
     expect(() => syncDnsEnv(path, ON, undefined)).toThrow(/--init/);
   });
 
+  it('is removed when the profile is turned off, so Caddy stops carrying the key', () => {
+    const dir = tempDir();
+    const path = join(dir, DNS_ENV_FILE);
+    syncDnsEnv(path, ON, KEY);
+    expect(readFileSync(path, 'utf8')).toContain(KEY); // liveness: it was written while on
+    syncDnsEnv(path, { COMPOSE_PROFILES: 'tunnel' }, KEY);
+    expect(() => statSync(path)).toThrow();
+  });
+
   it('refuses a key that is not 32 bytes of base64', () => {
     expect(() => renderDnsEnv('short')).toThrow(/32 bytes/);
     expect(() => renderDnsEnv(Buffer.alloc(16).toString('base64'))).toThrow(/32 bytes/);

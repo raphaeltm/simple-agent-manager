@@ -1,7 +1,7 @@
 /**
  * Small steps of `pnpm selfhost:deploy` (deploy.ts), kept apart so the orchestration stays short.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { BOX_RESERVED_PORTS, gatewayEnvAction } from './box-settings.js';
@@ -56,7 +56,9 @@ export function syncGatewayEnv(path: string, content: string, init: boolean): vo
 
 /**
  * dns.env for sam-dns and Caddy (DNS on the box), written only while the `dns` profile is on, so
- * Caddy does not carry the key on a box that does not use it. A box whose keys predate the profile
+ * Caddy does not carry the key on a box that does not use it. Turning the profile off removes the
+ * file: Caddy reads it whenever it exists (`required: false`), so a stale copy would keep the
+ * certificate-issuance key in Caddy's environment. A box whose keys predate the profile
  * gets the key from `--init`, and the profile refuses to deploy without it. Only sam-dns and Caddy
  * read the file (the Worker never uses the key), so a change only asks for their restart.
  */
@@ -65,7 +67,13 @@ export function syncDnsEnv(
   box: Readonly<Record<string, string>>,
   tsigSecret: string | undefined
 ): void {
-  if (!boxDnsEnabled(box)) return;
+  if (!boxDnsEnabled(box)) {
+    if (existsSync(path)) {
+      rmSync(path);
+      log(`removed ${path} (the ${DNS_PROFILE} profile is off); recreate Caddy: docker compose up -d`);
+    }
+    return;
+  }
   if (!tsigSecret) {
     throw new Error(
       `the ${DNS_PROFILE} profile needs ${DNS_TSIG_SECRET}, which this box does not have yet: ` +

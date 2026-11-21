@@ -234,7 +234,11 @@ the A record instead. The step-by-step guide, the settings and the switch from C
 
 **Verify.** `dig +short api.sam.example.com` returns the box address; `dig @203.0.113.5
 example.org` is `REFUSED` (no recursion); `dig @203.0.113.5 sam.example.com AXFR` fails (no zone
-transfers). After an app deployment, its route name resolves to the deployment node.
+transfers). A deployment node's `<node-id>.vm.` record resolves to the node.
+
+App deployments do not run on a single box yet. Deployment nodes still need a Cloudflare Origin CA
+certificate for their agent, so without `CF_API_TOKEN` a release fails at node boot
+(`origin_ca_bootstrap`).
 
 **What the box accepts.** `sam-dns` is authoritative only: it answers for its domain and refuses
 every other name, never recurses, refuses zone transfers, NOTIFY and UPDATE on port 53, gives ANY

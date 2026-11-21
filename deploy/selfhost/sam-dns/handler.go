@@ -92,7 +92,8 @@ func (h *Handler) answer(r *dns.Msg, udp bool) *dns.Msg {
 		zone := h.zone.Load()
 		result := zone.Lookup(r.Question[0].Name, r.Question[0].Qtype, h.challenges)
 		reply.Rcode = result.Rcode
-		reply.Authoritative = result.Rcode != dns.RcodeRefused
+		// SERVFAIL (not loaded yet) carries no authoritative data.
+		reply.Authoritative = result.Rcode != dns.RcodeRefused && result.Rcode != dns.RcodeServerFailure
 		reply.Answer = result.Answer
 		reply.Ns = result.Authority
 	}

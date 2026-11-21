@@ -234,3 +234,45 @@ func TestOutOfZoneNameServerNeedsNoGlue(t *testing.T) {
 		t.Fatal("single-label name server accepted")
 	}
 }
+
+// An app route that is not in D1 is NXDOMAIN even when no route exists at all: the apex wildcard
+// must never hand out the box's address for the Worker's namespaces. (Before this, an empty zone
+// let *.<apex> answer r0-...apps.<apex> with the box IP, and the long TTL cached it.)
+func TestWorkerNamespacesAreNeverWildcarded(t *testing.T) {
+	cfg := testConfig(t, nil)
+	zone, _ := BuildZone(cfg, 2, nil)
+	for _, q := range []string{"r0-web-80-env1.apps.box.example.test.", "node1.vm.box.example.test.", "apps.box.example.test."} {
+		got := zone.Lookup(q, dns.TypeA, nil)
+		if len(got.Answer) != 0 {
+			t.Fatalf("%s answered %v; the wildcard covered a Worker namespace", q, got.Answer)
+		}
+		want := dns.RcodeNameError
+		if q == "apps.box.example.test." {
+			want = dns.RcodeSuccess // the namespace itself exists, with no records (NODATA)
+		}
+		if got.Rcode != want {
+			t.Fatalf("%s rcode %s, want %s", q, dns.RcodeToString[got.Rcode], dns.RcodeToString[want])
+		}
+	}
+	// Control: names outside the namespaces still get the box through the wildcard.
+	if got := aContents(zone.Lookup("api.box.example.test.", dns.TypeA, nil).Answer); strings.Join(got, ",") != "api.box.example.test.=203.0.113.5" {
+		t.Fatalf("wildcard control: %v", got)
+	}
+}
+
+// Before the first sync, the Worker's namespaces answer SERVFAIL (retried, not negatively cached)
+// while the static names already answer.
+func TestPlaceholderZoneRefusesToGuessWorkerNames(t *testing.T) {
+	cfg := testConfig(t, nil)
+	placeholder := PlaceholderZone(cfg)
+	if got := placeholder.Lookup("r0-web-80-env1.apps.box.example.test.", dns.TypeA, nil); got.Rcode != dns.RcodeServerFailure || len(got.Answer) != 0 {
+		t.Fatalf("placeholder answered an app route: %s %v", dns.RcodeToString[got.Rcode], got.Answer)
+	}
+	if got := aContents(placeholder.Lookup("api.box.example.test.", dns.TypeA, nil).Answer); strings.Join(got, ",") != "api.box.example.test.=203.0.113.5" {
+		t.Fatalf("placeholder static liveness: %v", got)
+	}
+	loaded, _ := BuildZone(cfg, 2, nil)
+	if got := loaded.Lookup("r0-web-80-env1.apps.box.example.test.", dns.TypeA, nil); got.Rcode != dns.RcodeNameError {
+		t.Fatalf("loaded zone rcode %s, want NXDOMAIN", dns.RcodeToString[got.Rcode])
+	}
+}

@@ -194,8 +194,7 @@ func main() {
 	}
 
 	var zone atomic.Pointer[Zone]
-	initial, _ := BuildZone(cfg, 0, nil)
-	zone.Store(initial)
+	zone.Store(PlaceholderZone(cfg))
 	syncer := NewSyncer(cfg, &zone)
 	syncer.LoadCache()
 

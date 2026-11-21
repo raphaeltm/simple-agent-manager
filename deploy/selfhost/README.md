@@ -30,7 +30,10 @@ DNS of their own. The fleet bucket (`CELLD_BUCKET`) is the durable copy of every
 - A domain with a wildcard record `*.SAM_DOMAIN` pointing at the VM. SAM serves `api.`, `app.`,
   `ws-<id>.` and `ws-<id>--<port>.` under it; the apex is unused. Or delegate `SAM_DOMAIN` to the
   box once and let it answer for itself ([DNS on the box](#dns-on-the-box)): then no wildcard
-  record, no Cloud DNS and no DNS API token are needed, and app deployments work.
+  record, no Cloud DNS and no DNS API token are needed for the box, its certificate or its records.
+  App deployments do not work on a box yet: deployment nodes still need a Cloudflare Origin CA
+  certificate for their agent, so a release fails at node boot (`origin_ca_bootstrap`) without
+  `CF_API_TOKEN`. This is tracked separately.
 - Inbound TCP 80 and 443 to the VM (and 25 for inbound agent email).
 - A fleet bucket: `gs://` (the VM's service account needs `roles/storage.objectAdmin` on it),
   any `s3://` store, or the bundled store for a trial (`local-store` profile).
@@ -485,8 +488,11 @@ dig @203.0.113.5 sam.example.com AXFR         # Transfer failed / REFUSED (no zo
 dig @203.0.113.5 sam.example.com ANY          # one HINFO "RFC8482" answer
 ```
 
-After an app deployment, `dig +short r1-<service>-<port>-<env>.apps.sam.example.com` returns the
-deployment node's address.
+Records the Worker writes resolve the same way. For example, a deployment node's
+`<node-id>.vm.sam.example.com` returns the node's address. App routes
+(`r1-<service>-<port>-<env>.apps.sam.example.com`) will too, once deployment nodes can boot on a box
+(see the note under requirements). A route name that is not in the zone is NXDOMAIN, never the box's
+address.
 
 ### What it accepts, and from whom
 

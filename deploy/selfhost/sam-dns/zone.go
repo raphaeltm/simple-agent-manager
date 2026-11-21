@@ -30,6 +30,34 @@ type Zone struct {
 	wildcard map[uint16][]dns.RR // the *.<apex> RRsets, owner "*.<apex>"
 	soa      *dns.SOA
 	negTTL   uint32
+	// loaded is false only for the placeholder zone served before the first sync or cached zone.
+	// Until then the Worker's namespaces answer SERVFAIL: a resolver retries it, where an NXDOMAIN
+	// would be cached for the negative TTL.
+	loaded bool
+}
+
+// workerNamespaces are the subtrees whose names come only from D1 (app routes, node backends).
+// They always exist as names, so the apex wildcard never answers below them (RFC 4592): an app
+// route that is not in D1 is NXDOMAIN, never the box's address, whether or not other routes exist.
+func workerNamespaces(apex string) []string {
+	return []string{"apps." + apex, "vm." + apex}
+}
+
+func inWorkerNamespace(name, apex string) bool {
+	for _, ns := range workerNamespaces(apex) {
+		if dns.IsSubDomain(ns, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// PlaceholderZone is served from start-up until the first sync (or the cached zone) loads: the
+// static names answer, the Worker's namespaces answer SERVFAIL.
+func PlaceholderZone(cfg *Config) *Zone {
+	z, _ := BuildZone(cfg, 0, nil)
+	z.loaded = false
+	return z
 }
 
 func rrHeader(name string, rrtype uint16, ttl uint32) dns.RR_Header {
@@ -69,6 +97,7 @@ func BuildZone(cfg *Config, serial uint32, synced []SyncedRecord) (*Zone, int) {
 		ents:     map[string]bool{},
 		wildcard: map[uint16][]dns.RR{},
 		negTTL:   cfg.NegativeTTL,
+		loaded:   true,
 	}
 	z.soa = &dns.SOA{
 		Hdr:     rrHeader(cfg.Zone, dns.TypeSOA, cfg.TTL),
@@ -109,6 +138,11 @@ func BuildZone(cfg *Config, serial uint32, synced []SyncedRecord) (*Zone, int) {
 			if _, ok := z.records[parent]; !ok {
 				z.ents[parent] = true
 			}
+		}
+	}
+	for _, ns := range workerNamespaces(z.apex) {
+		if _, ok := z.records[ns]; !ok {
+			z.ents[ns] = true
 		}
 	}
 	return z, skipped
@@ -197,6 +231,9 @@ func (z *Zone) Lookup(qname string, qtype uint16, challenges *Challenges) Answer
 	q := dns.CanonicalName(qname)
 	if !dns.IsSubDomain(z.apex, q) {
 		return Answer{Rcode: dns.RcodeRefused}
+	}
+	if !z.loaded && inWorkerNamespace(q, z.apex) {
+		return Answer{Rcode: dns.RcodeServerFailure}
 	}
 	node := z.records[q]
 	txt := challenges.Values(q)
