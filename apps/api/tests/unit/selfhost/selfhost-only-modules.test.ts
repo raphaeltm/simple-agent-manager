@@ -56,7 +56,9 @@ describe('self-host-only code stays out of the Cloudflare Worker', () => {
     } finally {
       rmSync(scratch, { recursive: true, force: true });
     }
-  });
+    // The first graph walk in the file pays the cold TypeScript program: it timed out at the
+    // 5 s default on a loaded runner (main CI 44899674095), like its siblings it needs the bound.
+  }, GRAPH_WALK_TIMEOUT_MS);
 
   it('control: the actual metadata broker graph is forbidden to the Worker', () => {
     const graph = collectImportGraph(
