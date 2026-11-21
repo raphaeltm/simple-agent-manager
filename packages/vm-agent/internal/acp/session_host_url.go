@@ -168,7 +168,7 @@ func (h *SessionHost) registerURLWaiter(id, elicitationID, generation string, at
 }
 
 func (h *SessionHost) requestURL(ctx context.Context, generation string,
-	params acpsdk.UnstableCreateElicitationRequest) (acpsdk.UnstableCreateElicitationResponse, error) {
+	params acpsdk.CreateElicitationRequest) (acpsdk.CreateElicitationResponse, error) {
 	config := h.acpInteractionConfigSnapshot()
 	if params.Url == nil || params.Form != nil || len(params.Url.Meta) != 0 ||
 		!config.Enabled || !config.URLsEnabled || config.validate() != nil ||
@@ -176,13 +176,13 @@ func (h *SessionHost) requestURL(ctx context.Context, generation string,
 		h.config.RuntimeIdentity == "" || h.callbackToken() == "" || h.config.ControlPlaneURL == "" ||
 		len(params.Url.ElicitationId) == 0 || len(utf16.Encode([]rune(params.Url.ElicitationId))) > config.URLElicitationIDMaxChars ||
 		len(params.Url.Message) > config.RequestMaxBytes {
-		return acpsdk.NewUnstableCreateElicitationResponseCancel(), nil
+		return acpsdk.CreateElicitationResponse{Cancel: &acpsdk.CreateElicitationCancel{Action: "cancel"}}, nil
 	}
 	// Bind diagnostics to the attempt that received this request. A subsequent
 	// prompt in the same connection generation must not inherit its diagnosis.
 	attempt, active := h.activePromptAttempt()
 	if !active {
-		return acpsdk.NewUnstableCreateElicitationResponseCancel(), nil
+		return acpsdk.CreateElicitationResponse{Cancel: &acpsdk.CreateElicitationCancel{Action: "cancel"}}, nil
 	}
 	urlStatus := classifyAcpURLDepth(params.Url.Url, 0, config.URLMaxChars, config.URLRedirectDepth)
 	if urlStatus != acpURLEligible {
@@ -195,27 +195,27 @@ func (h *SessionHost) requestURL(ctx context.Context, generation string,
 				h.reportUnsupportedLoopbackAuth(ctx, generation, attempt.id)
 			}
 		}
-		return acpsdk.NewUnstableCreateElicitationResponseCancel(), nil
+		return acpsdk.CreateElicitationResponse{Cancel: &acpsdk.CreateElicitationCancel{Action: "cancel"}}, nil
 	}
 	urlConfig := config
 	urlConfig.PermissionDeadlineMs = config.URLDeadlineMs
 	deadline, ok := h.permissionDeadline(attempt.ctx, urlConfig)
 	if !ok {
-		return acpsdk.NewUnstableCreateElicitationResponseCancel(), nil
+		return acpsdk.CreateElicitationResponse{Cancel: &acpsdk.CreateElicitationCancel{Action: "cancel"}}, nil
 	}
 	id := uuid.NewString()
 	message := params.Url.Message
 	detail := acpInteractionDetail{Message: &message, URL: params.Url.Url, ElicitationID: string(params.Url.ElicitationId)}
 	encoded, err := json.Marshal(detail)
 	if err != nil || len(encoded) > config.RequestMaxBytes {
-		return acpsdk.NewUnstableCreateElicitationResponseCancel(), nil
+		return acpsdk.CreateElicitationResponse{Cancel: &acpsdk.CreateElicitationCancel{Action: "cancel"}}, nil
 	}
 	request := acpInteractionCreateRequest{ProtocolVersion: acpInteractionProtocolVersion,
 		InteractionID: id, Generation: generation, RuntimeIdentity: h.config.RuntimeIdentity,
 		AgentSessionID: h.config.SessionID, Kind: "url", Detail: detail, DeadlineAt: deadline.UnixMilli()}
 	canonical, err := json.Marshal(request)
 	if err != nil {
-		return acpsdk.NewUnstableCreateElicitationResponseCancel(), nil
+		return acpsdk.CreateElicitationResponse{Cancel: &acpsdk.CreateElicitationCancel{Action: "cancel"}}, nil
 	}
 	digest := sha256.Sum256(canonical)
 	request.PayloadHash = hex.EncodeToString(digest[:])
@@ -232,7 +232,7 @@ func (h *SessionHost) requestURL(ctx context.Context, generation string,
 	defer cancel()
 	waiter, ok := h.registerURLWaiter(id, string(params.Url.ElicitationId), generation, attempt.id, deadline, cancel)
 	if !ok {
-		return acpsdk.NewUnstableCreateElicitationResponseCancel(), nil
+		return acpsdk.CreateElicitationResponse{Cancel: &acpsdk.CreateElicitationCancel{Action: "cancel"}}, nil
 	}
 	createDone := make(chan acpInteractionCreateResult, 1)
 	go func() {
@@ -282,15 +282,15 @@ func (h *SessionHost) requestURL(ctx context.Context, generation string,
 		}
 		h.interactionMu.Unlock()
 		if result.reason == "declined" {
-			return acpsdk.NewUnstableCreateElicitationResponseDecline(), nil
+			return acpsdk.CreateElicitationResponse{Decline: &acpsdk.CreateElicitationDecline{Action: "decline"}}, nil
 		}
-		return acpsdk.NewUnstableCreateElicitationResponseCancel(), nil
+		return acpsdk.CreateElicitationResponse{Cancel: &acpsdk.CreateElicitationCancel{Action: "cancel"}}, nil
 	}
-	return acpsdk.NewUnstableCreateElicitationResponseAccept(), nil
+	return acpsdk.CreateElicitationResponse{Accept: &acpsdk.CreateElicitationAccept{Action: "accept"}}, nil
 }
 
-func (c *sessionHostClient) UnstableCompleteElicitation(_ context.Context,
-	params acpsdk.UnstableCompleteElicitationNotification) error {
+func (c *sessionHostClient) CompleteElicitation(_ context.Context,
+	params acpsdk.CompleteElicitationNotification) error {
 	if len(params.Meta) != 0 {
 		return nil
 	}

@@ -116,7 +116,7 @@ func (h *SessionHost) authenticateACP(ctx context.Context, agentType string, adv
 	}
 	authCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	if _, err := h.acpConn.Authenticate(authCtx, acpsdk.AuthenticateRequest{MethodId: methodID}); err != nil {
+	if _, err := h.acpConn.Authenticate(authCtx, acpsdk.AuthenticateRequest{MethodId: acpsdk.AuthMethodId(methodID)}); err != nil {
 		h.reportLifecycle("warn", "ACP Authenticate failed", map[string]interface{}{
 			"agentType": agentType,
 			"methodId":  methodID,

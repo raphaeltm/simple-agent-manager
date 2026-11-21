@@ -17,7 +17,7 @@ func TestRawFormGuardRejectsConstraintsPinnedSDKWouldDrop(t *testing.T) {
 		if err := json.Unmarshal(guarded, &frame); err != nil {
 			t.Fatal(err)
 		}
-		var request acpsdk.UnstableCreateElicitationRequest
+		var request acpsdk.CreateElicitationRequest
 		if err := json.Unmarshal(frame.Params, &request); err != nil {
 			t.Fatal(err)
 		}
@@ -35,7 +35,7 @@ func TestRawFormGuardRejectsConstraintsPinnedSDKWouldDrop(t *testing.T) {
 	}
 }
 
-func TestRawFormGuardRejectsWrongSessionBeforeSDKDropsScope(t *testing.T) {
+func TestRawFormGuardRejectsWrongSessionBeforeSDKDispatch(t *testing.T) {
 	line := []byte(`{"jsonrpc":"2.0","id":8,"method":"elicitation/create","params":{"mode":"form","sessionId":"old-session","message":"Old question","requestedSchema":{"type":"object","properties":{"question":{"type":"string"}}}}}`)
 	guarded := guardRawElicitationSchema(line, "current-session")
 	var frame struct {
@@ -44,7 +44,7 @@ func TestRawFormGuardRejectsWrongSessionBeforeSDKDropsScope(t *testing.T) {
 	if err := json.Unmarshal(guarded, &frame); err != nil {
 		t.Fatal(err)
 	}
-	var request acpsdk.UnstableCreateElicitationRequest
+	var request acpsdk.CreateElicitationRequest
 	if err := json.Unmarshal(frame.Params, &request); err != nil {
 		t.Fatal(err)
 	}
@@ -57,11 +57,11 @@ func TestRawFormGuardRejectsWrongSessionBeforeSDKDropsScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	if validateAcpFormSchema(schema, acpFormLimits{schemaBytes: 16 * 1024, properties: 20, enum: 50, answerBytes: 16 * 1024, stringBytes: 4 * 1024, keyChars: 128, labelChars: 200}) {
-		t.Fatal("wrong-session form survived SDK scope loss")
+		t.Fatal("wrong-session form survived the raw guard")
 	}
 }
 
-func TestRawURLGuardRejectsUnknownFieldsAndWrongSessionBeforeSDKDropsScope(t *testing.T) {
+func TestRawURLGuardRejectsUnknownFieldsAndWrongSessionBeforeSDKDispatch(t *testing.T) {
 	for _, params := range []string{
 		`{"mode":"url","sessionId":"other-session","message":"Approve","url":"https://auth.example.com/approve","elicitationId":"id-1"}`,
 		`{"mode":"url","sessionId":"current-session","message":"Approve","url":"https://auth.example.com/approve","elicitationId":"id-1","unsupportedCallback":"http://127.0.0.1"}`,
@@ -74,7 +74,7 @@ func TestRawURLGuardRejectsUnknownFieldsAndWrongSessionBeforeSDKDropsScope(t *te
 		if err := json.Unmarshal(guarded, &frame); err != nil {
 			t.Fatal(err)
 		}
-		var request acpsdk.UnstableCreateElicitationRequest
+		var request acpsdk.CreateElicitationRequest
 		if err := json.Unmarshal(frame.Params, &request); err != nil {
 			t.Fatal(err)
 		}

@@ -105,11 +105,9 @@ func acpClientFsCapabilities(agentType string) acpsdk.FileSystemCapabilities {
 func authMethodID(method acpsdk.AuthMethod) string {
 	switch {
 	case method.Agent != nil:
-		return method.Agent.Id
-	case method.EnvVar != nil:
-		return method.EnvVar.Id
+		return string(method.Agent.Id)
 	case method.Terminal != nil:
-		return method.Terminal.Id
+		return string(method.Terminal.Id)
 	}
 	return ""
 }

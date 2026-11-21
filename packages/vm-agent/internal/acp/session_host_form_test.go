@@ -16,11 +16,11 @@ import (
 type sdkFormFixtureAgent struct {
 	acpsdk.Agent
 	conn      *acpsdk.AgentSideConnection
-	responses chan acpsdk.UnstableCreateElicitationResponse
+	responses chan acpsdk.CreateElicitationResponse
 }
 
 func (a *sdkFormFixtureAgent) Prompt(ctx context.Context, _ acpsdk.PromptRequest) (acpsdk.PromptResponse, error) {
-	response, err := a.conn.UnstableCreateElicitation(ctx, fixtureFormRequest())
+	response, err := a.conn.CreateElicitation(ctx, fixtureFormRequest())
 	if err == nil {
 		a.responses <- response
 	}
@@ -40,7 +40,7 @@ func TestFormPinnedSDKWireAndNextPromptOwnership(t *testing.T) {
 		_ = agentToClientReader.Close()
 		_ = agentToClientWriter.Close()
 	})
-	agent := &sdkFormFixtureAgent{responses: make(chan acpsdk.UnstableCreateElicitationResponse, 2)}
+	agent := &sdkFormFixtureAgent{responses: make(chan acpsdk.CreateElicitationResponse, 2)}
 	agent.conn = acpsdk.NewAgentSideConnection(agent, agentToClientWriter, clientToAgentReader)
 	connection := acpsdk.NewClientSideConnection(client, clientToAgentWriter, agentToClientReader)
 
@@ -116,28 +116,27 @@ func TestFormPinnedSDKWireAndNextPromptOwnership(t *testing.T) {
 	}
 }
 
-func TestPinnedSDKFormDecodeScopeFieldsAreOmitted(t *testing.T) {
-	// v0.13.5 omits these wrapper scope fields. The runtime therefore binds a
-	// form to the live prompt attempt and connection generation, never to them.
-	var request acpsdk.UnstableCreateElicitationRequest
+func TestPinnedSDKFormDecodePreservesScopeFields(t *testing.T) {
+	// The stable SDK preserves wrapper scope. Raw guards still validate scope
+	// before dispatch; live prompt attempts and generations fence human answers.
+	var request acpsdk.CreateElicitationRequest
 	input := `{"mode":"form","sessionId":"wrapper-session","toolCallId":"tool-1","message":"Which path?","requestedSchema":{"type":"object","properties":{"question":{"type":"string"}}}}`
 	if err := json.Unmarshal([]byte(input), &request); err != nil {
 		t.Fatal(err)
 	}
-	if request.Form == nil || request.Form.Message != "Which path?" {
-		t.Fatalf("SDK form decode = %+v", request)
+	if request.Form == nil || request.Form.Session == nil || request.Form.Session.SessionId != "wrapper-session" || request.Form.Session.ToolCallId == nil || *request.Form.Session.ToolCallId != "tool-1" {
+		t.Fatalf("SDK scope decode = %+v", request)
 	}
 	encoded, err := json.Marshal(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, omitted := range []string{"sessionId", "toolCallId"} {
-		if string(encoded) == input || json.Valid(encoded) == false {
-			t.Fatalf("SDK re-encode invalid: %s", encoded)
-		}
-		if jsonContainsKey(encoded, omitted) {
-			t.Fatalf("SDK unexpectedly retained %s", omitted)
-		}
+	var roundtrip map[string]any
+	if err := json.Unmarshal(encoded, &roundtrip); err != nil {
+		t.Fatal(err)
+	}
+	if roundtrip["sessionId"] != "wrapper-session" || roundtrip["toolCallId"] != "tool-1" {
+		t.Fatalf("SDK dropped scope: %s", encoded)
 	}
 }
 
@@ -162,8 +161,8 @@ func testFormConfig() AcpInteractionRuntimeConfig {
 	return config
 }
 
-func fixtureFormRequest() acpsdk.UnstableCreateElicitationRequest {
-	request := acpsdk.NewUnstableCreateElicitationRequestForm(acpsdk.UnstableElicitationSchema{
+func fixtureFormRequest() acpsdk.CreateElicitationRequest {
+	request := acpsdk.CreateElicitationRequest{Form: &acpsdk.CreateElicitationForm{Mode: "form", Session: &acpsdk.ElicitationSessionScope{SessionId: "sdk-session-1"}, RequestedSchema: acpsdk.ElicitationSchema{
 		Type: "object",
 		Properties: map[string]any{
 			"question": map[string]any{"type": "string", "oneOf": []any{
@@ -172,7 +171,7 @@ func fixtureFormRequest() acpsdk.UnstableCreateElicitationRequest {
 			}},
 		},
 		Required: []string{"question"},
-	})
+	}}}
 	request.Form.Message = "Which path?"
 	return request
 }
@@ -182,9 +181,9 @@ func TestFormRoundTripThroughCloudflareCallbackRegistry(t *testing.T) {
 	host, client := newInteractionHost(recorder)
 	t.Cleanup(host.Stop)
 	host.ConfigureAcpInteractions(testFormConfig())
-	result := make(chan acpsdk.UnstableCreateElicitationResponse, 1)
+	result := make(chan acpsdk.CreateElicitationResponse, 1)
 	go func() {
-		response, _ := client.UnstableCreateElicitation(context.Background(), fixtureFormRequest())
+		response, _ := client.CreateElicitation(context.Background(), fixtureFormRequest())
 		result <- response
 	}()
 	created := waitCreate(t, recorder)
@@ -219,12 +218,12 @@ func TestFormUnsupportedAndTaskModeCancelWithoutCreate(t *testing.T) {
 	host, client := newInteractionHost(recorder)
 	t.Cleanup(host.Stop)
 	request := fixtureFormRequest()
-	if response, _ := client.UnstableCreateElicitation(context.Background(), request); response.Cancel == nil {
+	if response, _ := client.CreateElicitation(context.Background(), request); response.Cancel == nil {
 		t.Fatalf("task-mode/no-capability response = %+v", response)
 	}
 	host.ConfigureAcpInteractions(testFormConfig())
 	request.Form.RequestedSchema.Properties["question"] = map[string]any{"type": "string", "pattern": "(a+)+$"}
-	if response, _ := client.UnstableCreateElicitation(context.Background(), request); response.Cancel == nil {
+	if response, _ := client.CreateElicitation(context.Background(), request); response.Cancel == nil {
 		t.Fatalf("unsupported constraint response = %+v", response)
 	}
 	select {
@@ -240,8 +239,8 @@ func TestFormInboundCancellationFencesLateAnswer(t *testing.T) {
 	t.Cleanup(host.Stop)
 	host.ConfigureAcpInteractions(testFormConfig())
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan acpsdk.UnstableCreateElicitationResponse, 1)
-	go func() { response, _ := client.UnstableCreateElicitation(ctx, fixtureFormRequest()); done <- response }()
+	done := make(chan acpsdk.CreateElicitationResponse, 1)
+	go func() { response, _ := client.CreateElicitation(ctx, fixtureFormRequest()); done <- response }()
 	created := waitCreate(t, recorder)
 	cancel()
 	select {
@@ -263,9 +262,9 @@ func TestFormAnswerAfterPromptReleaseCannotConsumeWaiter(t *testing.T) {
 	host, client := newInteractionHost(recorder)
 	t.Cleanup(host.Stop)
 	host.ConfigureAcpInteractions(testFormConfig())
-	done := make(chan acpsdk.UnstableCreateElicitationResponse, 1)
+	done := make(chan acpsdk.CreateElicitationResponse, 1)
 	go func() {
-		response, _ := client.UnstableCreateElicitation(context.Background(), fixtureFormRequest())
+		response, _ := client.CreateElicitation(context.Background(), fixtureFormRequest())
 		done <- response
 	}()
 	created := waitCreate(t, recorder)
@@ -297,9 +296,9 @@ func TestCodexFormAutoResolutionTightensRuntimeDeadline(t *testing.T) {
 	request := fixtureFormRequest()
 	request.Form.Meta = map[string]any{"codex": map[string]any{"autoResolutionMs": float64(100)}}
 	started := time.Now()
-	done := make(chan acpsdk.UnstableCreateElicitationResponse, 1)
+	done := make(chan acpsdk.CreateElicitationResponse, 1)
 	go func() {
-		response, _ := client.UnstableCreateElicitation(context.Background(), request)
+		response, _ := client.CreateElicitation(context.Background(), request)
 		done <- response
 	}()
 	created := waitCreate(t, recorder)

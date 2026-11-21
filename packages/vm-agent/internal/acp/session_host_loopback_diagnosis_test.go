@@ -48,11 +48,11 @@ func (r *blockedLoopbackReporter) Enqueue(MessageReportEntry) error {
 type sdkLoopbackFixtureAgent struct {
 	acpsdk.Agent
 	conn     *acpsdk.AgentSideConnection
-	observed chan acpsdk.UnstableCreateElicitationResponse
+	observed chan acpsdk.CreateElicitationResponse
 }
 
 func (a *sdkLoopbackFixtureAgent) Prompt(ctx context.Context, _ acpsdk.PromptRequest) (acpsdk.PromptResponse, error) {
-	response, err := a.conn.UnstableCreateElicitation(ctx,
+	response, err := a.conn.CreateElicitation(ctx,
 		fixtureURLRequest("http://localhost:8765/cb?token=sk-sdk-secret-canary"))
 	if err != nil {
 		return acpsdk.PromptResponse{}, err
@@ -145,7 +145,7 @@ func TestPinnedSDKLoopbackRejectionReachesMessageReporter(t *testing.T) {
 		_ = agentToClientReader.Close()
 		_ = agentToClientWriter.Close()
 	})
-	agent := &sdkLoopbackFixtureAgent{observed: make(chan acpsdk.UnstableCreateElicitationResponse, 1)}
+	agent := &sdkLoopbackFixtureAgent{observed: make(chan acpsdk.CreateElicitationResponse, 1)}
 	agent.conn = acpsdk.NewAgentSideConnection(agent, agentToClientWriter, clientToAgentReader)
 	client := &sessionHostClient{host: host, interactionGeneration: host.interactionGeneration}
 	clientConn := acpsdk.NewClientSideConnection(client, clientToAgentWriter, agentToClientReader)
@@ -223,18 +223,18 @@ func TestLoopbackRejectionDoesNotReportWithoutTrustedRequestContext(t *testing.T
 func TestLoopbackRejectionDoesNotReportMalformedWrapper(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		mutate func(*acpsdk.UnstableCreateElicitationRequest)
+		mutate func(*acpsdk.CreateElicitationRequest)
 	}{
-		{"missing URL variant", func(r *acpsdk.UnstableCreateElicitationRequest) { r.Url = nil }},
-		{"ambiguous form and URL", func(r *acpsdk.UnstableCreateElicitationRequest) { r.Form = &acpsdk.UnstableCreateElicitationForm{} }},
-		{"untrusted wrapper metadata", func(r *acpsdk.UnstableCreateElicitationRequest) {
+		{"missing URL variant", func(r *acpsdk.CreateElicitationRequest) { r.Url = nil }},
+		{"ambiguous form and URL", func(r *acpsdk.CreateElicitationRequest) { r.Form = &acpsdk.CreateElicitationForm{} }},
+		{"untrusted wrapper metadata", func(r *acpsdk.CreateElicitationRequest) {
 			r.Url.Meta = map[string]any{"token": "sk-secret-canary"}
 		}},
-		{"empty elicitation ID", func(r *acpsdk.UnstableCreateElicitationRequest) { r.Url.ElicitationId = "" }},
-		{"oversize wrapper message", func(r *acpsdk.UnstableCreateElicitationRequest) {
+		{"empty elicitation ID", func(r *acpsdk.CreateElicitationRequest) { r.Url.ElicitationId = "" }},
+		{"oversize wrapper message", func(r *acpsdk.CreateElicitationRequest) {
 			r.Url.Message = strings.Repeat("x", testURLConfig().RequestMaxBytes+1)
 		}},
-		{"oversize encoded request", func(r *acpsdk.UnstableCreateElicitationRequest) {
+		{"oversize encoded request", func(r *acpsdk.CreateElicitationRequest) {
 			r.Url.Message = strings.Repeat("x", testURLConfig().RequestMaxBytes-10)
 		}},
 	} {

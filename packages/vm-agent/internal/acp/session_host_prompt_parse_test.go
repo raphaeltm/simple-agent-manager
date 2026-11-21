@@ -12,10 +12,9 @@ import (
 // the vm-agent needs the SAM "system-injected" marker in memory so a future
 // consumer (mirror/persistence) can tag the user message origin=system.
 //
-// NOTE: this only makes the marker AVAILABLE in-process. It does NOT make it
-// survive OUTWARD — see TestContentBlockMarshal_DropsMetaAndAnnotations for the
-// acp-go-sdk marshaling limitation that blocks carrying the marker on the ACP
-// wire (to the agent CLI or via SDK-marshaled broadcasts).
+// The SDK also preserves these optional fields when marshaling outward; see
+// TestContentBlockMarshal_PreservesMetaAndAnnotations. SAM still records message
+// origin independently so untrusted metadata cannot establish a trusted origin.
 func TestParsePromptBlocks_PreservesMetaAndAnnotations(t *testing.T) {
 	params := json.RawMessage(`{
 		"messageId": "m1",
@@ -114,16 +113,10 @@ func TestParsePromptBlocks_SkipsNonTextAndEmpty(t *testing.T) {
 	}
 }
 
-// CHARACTERIZATION (constraint guard): acp-go-sdk v0.13.5's
-// ContentBlock.MarshalJSON reconstructs the text variant as ONLY {type, text},
-// deliberately dropping `_meta` and `annotations`. This is the exact serializer
-// used both when sending a prompt to the agent CLI (acpConn.Prompt) and when the
-// SDK marshals SessionNotification blocks. It means a SAM origin marker CANNOT
-// be carried outward on the ACP content block itself with this SDK version.
-//
-// If this test ever FAILS after an SDK bump, the SDK started preserving these
-// fields — revisit whether the marker can ride the ACP block directly.
-func TestContentBlockMarshal_DropsMetaAndAnnotations(t *testing.T) {
+// The stable SDK preserves content metadata and annotations on both prompt and
+// notification serialization. SAM still carries its authoritative origin field
+// independently; metadata from a peer is never an authorization signal.
+func TestContentBlockMarshal_PreservesMetaAndAnnotations(t *testing.T) {
 	priority := 0.9
 	block := acpsdk.ContentBlock{Text: &acpsdk.ContentBlockText{
 		Type:        "text",
@@ -144,22 +137,17 @@ func TestContentBlockMarshal_DropsMetaAndAnnotations(t *testing.T) {
 	if wire["text"] != "call get_instructions" || wire["type"] != "text" {
 		t.Fatalf("expected type+text to survive, got %v", wire)
 	}
-	if _, ok := wire["_meta"]; ok {
-		t.Fatalf("SDK unexpectedly preserved _meta on the wire: %v — the marker CAN now ride the ACP block; revisit design", wire)
+	if meta, ok := wire["_meta"].(map[string]any); !ok || meta["sam.origin"] != "system" {
+		t.Fatalf("SDK lost content metadata: %v", wire)
 	}
-	if _, ok := wire["annotations"]; ok {
-		t.Fatalf("SDK unexpectedly preserved annotations on the wire: %v — revisit design", wire)
+	if annotations, ok := wire["annotations"].(map[string]any); !ok || annotations["priority"] != priority {
+		t.Fatalf("SDK lost content annotations: %v", wire)
 	}
 }
 
-// CHARACTERIZATION (real mirror path): because the SDK marshaler strips the
-// marker (see above), the live user-message mirror broadcast produced by
-// injectUserMessageNotifications does NOT carry _meta/annotations either, even
-// when the in-memory block has them. The origin-tagging consumer slice must
-// therefore propagate `origin` via the vm-agent's OWN mirror/persistence fields
-// (e.g. an ExtractedMessage.Origin + a distinct broadcast field), NOT by relying
-// on the ACP block's _meta surviving.
-func TestInjectUserMessageNotifications_SDKMarshalStripsMarker(t *testing.T) {
+// The actual mirror keeps ACP metadata while SAM's independent origin field
+// remains authoritative across the vm-agent broadcast and persistence path.
+func TestInjectUserMessageNotifications_SDKMarshalPreservesMetadataAndSAMOrigin(t *testing.T) {
 	host := newTestSessionHost(t)
 	defer host.Stop()
 
@@ -203,17 +191,22 @@ func TestInjectUserMessageNotifications_SDKMarshalStripsMarker(t *testing.T) {
 		if tb == nil || tb.Text != "call get_instructions" {
 			t.Fatalf("mirror dropped the text itself: %+v", tb)
 		}
-		if len(tb.Meta) != 0 {
-			t.Fatalf("unexpected: mirror preserved _meta (%v) — SDK behavior changed, revisit design", tb.Meta)
+		if tb.Meta["sam.origin"] != "system" {
+			t.Fatalf("mirror lost content metadata: %v", tb.Meta)
 		}
-		if tb.Annotations != nil {
-			t.Fatalf("unexpected: mirror preserved annotations (%v) — SDK behavior changed, revisit design", tb.Annotations)
-		}
+		assertMirroredAssistantAudience(t, tb.Annotations)
 		if env.Params.Origin != OriginSystem {
 			t.Fatalf("SAM broadcast origin = %q, want %q", env.Params.Origin, OriginSystem)
 		}
 	}
 	if !sawUserUpdate {
 		t.Fatal("no session/update user_message broadcast found")
+	}
+}
+
+func assertMirroredAssistantAudience(t *testing.T, annotations *acpsdk.Annotations) {
+	t.Helper()
+	if annotations == nil || len(annotations.Audience) != 1 || annotations.Audience[0] != acpsdk.RoleAssistant {
+		t.Fatalf("mirror lost content annotations: %v", annotations)
 	}
 }

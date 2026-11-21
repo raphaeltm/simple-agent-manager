@@ -6,7 +6,7 @@ godebug multipathtcp=0
 
 require (
 	github.com/MicahParks/keyfunc/v3 v3.9.2
-	github.com/coder/acp-go-sdk v0.13.5
+	github.com/coder/acp-go-sdk v0.19.0
 	github.com/compose-spec/compose-go/v2 v2.17.0
 	github.com/creack/pty v1.1.24
 	github.com/golang-jwt/jwt/v5 v5.3.1
