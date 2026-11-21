@@ -65,24 +65,17 @@ const TERMINAL_INCIDENT_SQL = "('resolved', 'rejected', 'expired')";
  */
 const LEGACY_PIPELINE_IDEA_TRIGGERED_BY_SQL = `('${PIPELINE_IDEA_TRIGGERED_BY}', 'user')`;
 
-/** Minute of the hour the hourly triage and reconciliation run (`PLATFORM_FEEDBACK_HOURLY_CRON`). */
-export const PLATFORM_FEEDBACK_HOURLY_CRON_MINUTE = 30;
-/** Minutes after the cron minute a pipeline write to a legacy idea can still land. */
-const LEGACY_PIPELINE_WRITE_WINDOW_MINUTES = 4;
-
 /**
- * A 'user' legacy idea is adopted only when nothing but the pipeline can have written it last:
- * it was never edited (`updated_at = created_at`), or its last write fell in the hourly run's
- * window, when the old pipeline refreshed it. A person's description edit leaves no other trace
- * (the Durable Object records notes, links, files and pull requests, not edits), so any other
- * last-write time keeps it as tracked work. Production 2026-11-20: of 305 candidates, 219 were
- * never edited, 75 last written at :30-:31 and 11 at other minutes.
+ * A 'user' legacy idea is adopted only when it was never written after creation
+ * (`updated_at = created_at`): the pipeline created it, and nothing has changed it since. A
+ * person's description edit leaves no other record (the Durable Object records notes, links,
+ * files and pull requests, not edits), and no timestamp pattern proves who wrote last, so any
+ * later write keeps the idea as tracked work. Production 2026-11-20: 219 of 305 candidates
+ * were never edited; the rest stay tracked.
  */
-const LEGACY_USER_IDEA_LAST_WRITTEN_BY_PIPELINE_SQL = `(
+const LEGACY_USER_IDEA_UNTOUCHED_SQL = `(
   idea.triggered_by = '${PIPELINE_IDEA_TRIGGERED_BY}'
   OR idea.updated_at = idea.created_at
-  OR CAST(substr(idea.updated_at, 15, 2) AS INTEGER) BETWEEN ${PLATFORM_FEEDBACK_HOURLY_CRON_MINUTE}
-     AND ${PLATFORM_FEEDBACK_HOURLY_CRON_MINUTE + LEGACY_PIPELINE_WRITE_WINDOW_MINUTES}
 )`;
 
 export interface IncidentIdeaReconciliationResult {
@@ -150,7 +143,7 @@ async function adoptLegacyIdeas(ctx: StepContext): Promise<void> {
        WHERE triage.idea_owned_at IS NULL
          AND idea.project_id = ?
          AND idea.triggered_by IN ${LEGACY_PIPELINE_IDEA_TRIGGERED_BY_SQL}
-         AND ${LEGACY_USER_IDEA_LAST_WRITTEN_BY_PIPELINE_SQL}
+         AND ${LEGACY_USER_IDEA_UNTOUCHED_SQL}
          AND idea.status = 'draft' AND idea.priority = 0
          AND idea.title LIKE ?
          AND substr(idea.description, 1, ?) = ?

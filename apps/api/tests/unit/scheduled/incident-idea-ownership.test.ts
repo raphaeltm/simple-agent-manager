@@ -153,8 +153,8 @@ const USER_LEGACY_BODY = [
   '```',
 ].join('\n');
 const USER_LEGACY_CREATED_AT = '2026-10-01T00:30:02.000Z';
-/** A write inside the hourly run's window, as the old pipeline refreshed ideas. */
-const PIPELINE_WRITE_AT = '2026-10-01T01:30:05.000Z';
+/** A later write, at the minute the hourly run also writes: not proof of who wrote. */
+const LATER_WRITE_AT = '2026-10-01T01:31:05.000Z';
 
 function seedUserLegacyIdea(
   w: { sqlite: Database.Database },
@@ -504,14 +504,14 @@ describe('incident idea ownership', () => {
     expect(w.triageRow().idea_owned_at).toBe('released');
   });
 
-  it('adopts legacy ideas stored with the old column default, which unblocks their dispatch', async () => {
+  it('adopts never-edited legacy ideas stored with the old column default, unblocking dispatch', async () => {
     // Production shape (2026-11-20): 305 legacy pipeline ideas carried triggered_by = 'user',
     // so adoption never matched them and every pending error incident read as tracked work.
     const w = world();
-    seedUserLegacyIdea(w, 'legacy-user', { updatedAt: PIPELINE_WRITE_AT });
+    seedUserLegacyIdea(w, 'legacy-user', { updatedAt: USER_LEGACY_CREATED_AT });
     // Control: a person appended to this one; it stays tracked work.
     seedUserLegacyIdea(w, 'legacy-user-edited', {
-      updatedAt: PIPELINE_WRITE_AT,
+      updatedAt: LATER_WRITE_AT,
       body: `${USER_LEGACY_BODY}\n\nA person added a note.`,
     });
     const dispatchable = async () =>
@@ -522,30 +522,31 @@ describe('incident idea ownership', () => {
 
     expect(result).toMatchObject({ adopted: 1, failedSteps: [] });
     expect(ideaColumns(w)).toEqual([
-      { id: 'legacy-user', triggered_by: 'incident', updated_at: PIPELINE_WRITE_AT },
-      { id: 'legacy-user-edited', triggered_by: 'user', updated_at: PIPELINE_WRITE_AT },
+      { id: 'legacy-user', triggered_by: 'incident', updated_at: USER_LEGACY_CREATED_AT },
+      { id: 'legacy-user-edited', triggered_by: 'user', updated_at: LATER_WRITE_AT },
     ]);
     expect(await dispatchable()).toEqual(['sig-legacy-user']);
   });
 
-  it('keeps a user-default legacy idea last written outside the hourly run as tracked work', async () => {
-    // A person's edit inside the generated body leaves no record; a last write at a minute the
-    // pipeline never writes is treated as one. Control: the same idea written at :31 is adopted.
+  it('keeps a user-default legacy idea edited after creation as tracked work, even at :31', async () => {
+    // A person's edit inside the generated fence keeps every marker and leaves no record, and a
+    // write at the hourly run's minute does not prove the pipeline wrote it. Control: the
+    // never-edited automatic idea is adopted.
     const w = world();
     const editedInsideFence = USER_LEGACY_BODY.replace(
       '- evidence',
       '- evidence (a person fixed this)'
     );
-    seedUserLegacyIdea(w, 'person-edited', {
-      updatedAt: '2026-10-03T10:47:12.000Z',
+    seedUserLegacyIdea(w, 'person-edited-at-31', {
+      updatedAt: LATER_WRITE_AT,
       body: editedInsideFence,
     });
-    seedUserLegacyIdea(w, 'pipeline-refreshed', { updatedAt: '2026-10-03T11:31:09.000Z' });
+    seedUserLegacyIdea(w, 'automatic', { updatedAt: USER_LEGACY_CREATED_AT });
 
     expect(await w.reconcile(T0)).toMatchObject({ adopted: 1 });
     expect(ideaColumns(w).map(({ id, triggered_by }) => ({ id, triggered_by }))).toEqual([
-      { id: 'person-edited', triggered_by: 'user' },
-      { id: 'pipeline-refreshed', triggered_by: 'incident' },
+      { id: 'automatic', triggered_by: 'incident' },
+      { id: 'person-edited-at-31', triggered_by: 'user' },
     ]);
   });
 

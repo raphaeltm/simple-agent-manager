@@ -51,3 +51,17 @@ inside the hourly run's 5-minute window. Same check #2938 applies to
 
 The first reconciliation after deploy adopts the ~305 ideas and then cancels the ~282 whose
 incidents ended, in batches of at most 25 within the 20 s deadline.
+
+## Follow-up: never-edited only (2026-11-21)
+
+Review after merge: the :30-:34 last-write window correlates with pipeline writes but does not
+prove the writer (rule 74). A person's edit inside the fence at :31 would be adopted, then
+rewritten on recurrence or closed with its incident. The follow-up removes the window: a 'user'
+row is adopted only when `updated_at = created_at`. Regression: an edit inside the fence at :31
+is not adopted; positive control: a never-edited automatic idea is adopted.
+
+Production exposure while #2957 is live (API Worker version for 268186d8 active from 01:21:36Z;
+the cancel of deploy run 44848715648 arrived 8 s too late): 86 'user' rows last written at
+:30-:34 (68 expired, 18 pending) are adoptable by the 01:30Z run. Evidence they were pipeline
+writes: shared millisecond `updated_at` values across ideas (batch writes) and template-length
+bodies. Recovery point if any must be restored: D1 Time Travel before 2026-11-21T01:30Z.
