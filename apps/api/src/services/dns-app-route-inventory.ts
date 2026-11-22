@@ -100,6 +100,8 @@ export function parseAppRouteHostname(
   if (!ENVIRONMENT_ID_LABEL_RE.test(envPart)) return null;
   const service = serviceParts.join('-');
   if (service.length > MAX_SERVICE_LABEL_LENGTH || !SERVICE_RE.test(service)) return null;
+  // The sanitizer strips trailing hyphens; only the cut at exactly the maximum can leave one.
+  if (service.endsWith('-') && service.length !== MAX_SERVICE_LABEL_LENGTH) return null;
   return { environmentId: envPart.toUpperCase() };
 }
 

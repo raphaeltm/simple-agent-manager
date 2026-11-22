@@ -149,9 +149,12 @@ afterEach(() => {
 describe('parseAppRouteHostname', () => {
   it('accepts exactly buildRouteHostname output for this BASE_DOMAIN', () => {
     expect(parseAppRouteHostname(host(ENV_LIVE), BASE)).toEqual({ environmentId: ENV_LIVE });
-    // A truncated service can end in a hyphen.
+    // A service cut at 24 characters can end in a hyphen.
     expect(
-      parseAppRouteHostname(`r12-my-svc--3000-${ENV_LIVE.toLowerCase()}.apps.${BASE}`, BASE)
+      parseAppRouteHostname(
+        `r12-${'my-service-name-is-long'}--3000-${ENV_LIVE.toLowerCase()}.apps.${BASE}`,
+        BASE
+      )
     ).toEqual({
       environmentId: ENV_LIVE,
     });
@@ -965,6 +968,9 @@ describe('Codex review round 5', () => {
   it('accepts only the service part buildRouteHostname can write', () => {
     const name = (service: string) => `r1-${service}-80-${ENV_LIVE.toLowerCase()}.apps.${BASE}`;
     expect(parseAppRouteHostname(name('foo--bar'), BASE)).toBeNull();
+    // A trailing hyphen only survives the cut at exactly 24 characters.
+    expect(parseAppRouteHostname(name('foo-'), BASE)).toBeNull();
+    expect(parseAppRouteHostname(name(`${'a'.repeat(22)}-`), BASE)).toBeNull();
     expect(parseAppRouteHostname(name('a'.repeat(25)), BASE)).toBeNull();
     // Controls: a hyphenated service, and one cut at 24 characters leaving a trailing hyphen.
     expect(parseAppRouteHostname(name('my-api'), BASE)).toEqual({ environmentId: ENV_LIVE });
