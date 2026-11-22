@@ -23,3 +23,10 @@ override; check `DEBUG_AGENT_MODEL` in the staging Worker vars and the GitHub En
 - [ ] Staging triage creates an idea for a new signature again.
 - [ ] Production confirmed unaffected, or fixed in the same change.
 - [ ] If the model was retired, the catalog lifecycle rule (52) is followed.
+
+## Resolution (2026-11-22)
+
+Root cause: `DEFAULT_DEBUG_AGENT_MODEL` was `@cf/zai-org/glm-5.2`, which Cloudflare retired on
+2026-11-20. Production failed the same way from 2026-11-22. Fixed by
+`tasks/active/2026-11-22-finish-retired-workers-ai-migration.md` (debug agent moved to DeepSeek
+V4.1 Flash, retired IDs pruned under rule 52).

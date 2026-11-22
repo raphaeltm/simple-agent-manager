@@ -19,8 +19,13 @@ export const DEFAULT_TASK_TITLE_MODEL = '@cf/google/gemma-4-26b-a4b-it';
  */
 export const DEFAULT_PROJECT_BRIEF_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 
-/** Defaults for the tightly scoped deployment debugging agent. */
-export const DEFAULT_DEBUG_AGENT_MODEL = '@cf/zai-org/glm-5.2';
+/**
+ * Defaults for the tightly scoped deployment debugging agent (interactive diagnosis and the hourly
+ * platform-error triage). DeepSeek V4.1 Flash replaced GLM 5.2 after Cloudflare retired it on
+ * 2026-11-20 (requests returned HTTP 410). Its reasoning effort is set per model in
+ * `debugAgentModelControls()` (apps/api/src/services/debug-agent-common.ts).
+ */
+export const DEFAULT_DEBUG_AGENT_MODEL = '@cf/deepseek-ai/deepseek-v4.1-flash-1017';
 export const DEFAULT_DEBUG_AGENT_MAX_TURNS = 6;
 export const DEFAULT_DEBUG_AGENT_RUN_TOKEN_LIMIT = 96_000;
 export const DEFAULT_DEBUG_AGENT_MODEL_OUTPUT_TOKENS = 4_096;
@@ -190,9 +195,11 @@ export const DEFAULT_TTS_RETRY_BASE_DELAY_MS = 500;
 
 /** Default model for AI proxy inference when no admin override is set.
  * Out-of-box default is a Cloudflare-billed Workers AI model — no separate provider API key required.
+ * Gemma 4 26B has reliable tool calling and a 256K context for coding agents in `sam` mode; it
+ * replaced the retired Qwen 3 30B deployment default (2026-11-20).
  * Admins can override via the AI Proxy admin page (stored in KV) or
  * the AI_PROXY_DEFAULT_MODEL env var. */
-export const DEFAULT_AI_PROXY_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
+export const DEFAULT_AI_PROXY_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 
 /** Default model for Anthropic proxy fallback (Claude Code agent).
  * Override via AI_PROXY_DEFAULT_ANTHROPIC_MODEL env var. */
@@ -361,7 +368,6 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
   workersAIModel({
     id: '@cf/meta/llama-4-scout-17b-16e-instruct',
     label: 'Llama 4 Scout 17B',
-    isDefault: true,
     tier: 'low-cost',
     costPer1kInputTokens: 0.00027,
     costPer1kOutputTokens: 0.00085,
@@ -369,17 +375,6 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'limited',
     intendedRole: 'utility',
     fallbackGroup: 'workers-general',
-  }),
-  workersAIModel({
-    id: '@cf/qwen/qwen3-30b-a3b-fp8',
-    label: 'Qwen 3 30B',
-    tier: 'low-cost',
-    costPer1kInputTokens: 0.000051,
-    costPer1kOutputTokens: 0.000335,
-    contextWindow: 32768,
-    toolCallSupport: 'good',
-    intendedRole: 'workspace-agent',
-    fallbackGroup: 'workers-coding',
   }),
   workersAIModel({
     id: '@cf/qwen/qwen2.5-coder-32b-instruct',
@@ -395,6 +390,7 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
   workersAIModel({
     id: '@cf/google/gemma-4-26b-a4b-it',
     label: 'Gemma 4 26B',
+    isDefault: true,
     tier: 'low-cost',
     costPer1kInputTokens: 0.0001,
     costPer1kOutputTokens: 0.0003,
@@ -406,7 +402,8 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
   }),
   workersAIModel({
     // https://developers.cloudflare.com/workers-ai/models/deepseek-v4.1-flash-1017/
-    // Pricing and limits verified 2026-11-17; USD per 1K tokens.
+    // Pricing and limits verified 2026-11-17 and re-read from the live Workers AI catalog
+    // 2026-11-22 (function calling, reasoning efforts none/low/high/max); USD per 1K tokens.
     id: '@cf/deepseek-ai/deepseek-v4.1-flash-1017',
     label: 'DeepSeek V4.1 Flash 1017',
     tier: 'low-cost',
@@ -414,30 +411,6 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     costPer1kCachedInputTokens: 0.000006,
     costPer1kOutputTokens: 0.0012,
     contextWindow: 1048576,
-    toolCallSupport: 'good',
-    intendedRole: 'utility',
-    fallbackGroup: 'workers-general',
-  }),
-  workersAIModel({
-    // Pricing and limits from the Cloudflare model page, verified 2026-10-21.
-    id: '@cf/zai-org/glm-5.3-flash',
-    label: 'GLM 5.3 Flash',
-    tier: 'low-cost',
-    costPer1kInputTokens: 0.00015,
-    costPer1kCachedInputTokens: 0.00003,
-    costPer1kOutputTokens: 0.0005,
-    contextWindow: 1048576,
-    toolCallSupport: 'good',
-    intendedRole: 'utility',
-    fallbackGroup: 'workers-general',
-  }),
-  workersAIModel({
-    id: '@cf/zai-org/glm-5.2',
-    label: 'GLM 5.2',
-    tier: 'standard',
-    costPer1kInputTokens: 0.0014,
-    costPer1kOutputTokens: 0.0044,
-    contextWindow: 262144,
     toolCallSupport: 'good',
     intendedRole: 'utility',
     fallbackGroup: 'workers-general',

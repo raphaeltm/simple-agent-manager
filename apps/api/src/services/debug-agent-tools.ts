@@ -3,6 +3,7 @@ import { readResponseJson } from '../lib/runtime-validation';
 import {
   type ChatMessage,
   type Completion,
+  debugAgentModelControls,
   type DebugConfig,
   type DebugWindow,
   type ToolCall,
@@ -226,6 +227,7 @@ export async function complete(
         tool_choice: 'auto',
         max_tokens: maxTokens,
         stream: false,
+        ...debugAgentModelControls(config.model),
       }),
     });
     if (!response.ok) {

@@ -1388,7 +1388,7 @@ export interface Env
   SESSION_TASK_REPAIR_BATCH_SIZE?: string; // Max legacy taskless sessions repaired per sweep (default: 25, max: 200)
   // AI Inference Proxy (Cloudflare AI Gateway — Workers AI + Anthropic)
   AI_PROXY_ENABLED?: string; // Kill switch: "false" to disable (default: enabled)
-  AI_PROXY_DEFAULT_MODEL?: string; // Default model for OpenCode (default: claude-haiku-4-5-20251001)
+  AI_PROXY_DEFAULT_MODEL?: string; // Default model for OpenCode (default: DEFAULT_AI_PROXY_MODEL, Gemma 4 26B)
   AI_PROXY_DEFAULT_ANTHROPIC_MODEL?: string; // Default model for Claude Code proxy (default: claude-sonnet-5)
   AI_PROXY_DEFAULT_OPENAI_MODEL?: string; // Default model for Codex proxy (default: gpt-4.1)
   AI_PROXY_ALLOWED_MODELS?: string; // Comma-separated allowed models

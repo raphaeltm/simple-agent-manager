@@ -95,6 +95,56 @@ describe('AI Model Registry', () => {
       }
     });
 
+    it('does not expose Cloudflare models retired on November 20 2026', () => {
+      // https://developers.cloudflare.com/changelog/post/2026-11-05-planned-model-deprecations/
+      // Requests fail with HTTP 410 / error 5028. DEFAULT_DEBUG_AGENT_MODEL stayed on glm-5.2
+      // past the date and broke production incident triage (2026-11-22).
+      const retiredModels = [
+        '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b',
+        '@cf/nvidia/nemotron-3-120b-a12b',
+        '@cf/deepseek-ai/deepseek-v4-pro-0813',
+        '@cf/deepseek-ai/deepseek-v4-flash-0731',
+        '@cf/qwen/qwq-32b',
+        '@cf/qwen/qwen3-30b-a3b-fp8',
+        '@cf/moonshotai/kimi-k2.6',
+        '@cf/moonshotai/kimi-k2.7-code',
+        '@cf/zai-org/glm-5.2',
+        '@cf/zai-org/glm-5.3-flash',
+        '@cf/meta-llama/llama-2-7b-chat-hf-lora',
+        '@cf/google/gemma-2b-it-lora',
+        '@cf/google/gemma-7b-it-lora',
+        '@cf/meta/llama-3.1-8b-instruct-fp8',
+        '@cf/meta/llama-3.2-1b-instruct',
+        '@cf/meta/llama-3.2-3b-instruct',
+        '@cf/myshell-ai/melotts',
+        '@cf/stabilityai/stable-diffusion-xl-base-1.0',
+        '@cf/runwayml/stable-diffusion-v1-5-inpainting',
+        '@cf/bytedance/stable-diffusion-xl-lightning',
+        '@cf/lykon/dreamshaper-8-lcm',
+        '@cf/openai/whisper-tiny-en',
+        '@cf/llava-hf/llava-1.5-7b-hf',
+        '@cf/google/embeddinggemma-300m',
+      ];
+      const activeModelIds = new Set([
+        DEFAULT_AI_PROXY_MODEL,
+        DEFAULT_DEBUG_AGENT_MODEL,
+        DEFAULT_PROJECT_BRIEF_MODEL,
+        DEFAULT_SAM_MODEL,
+        DEFAULT_TASK_TITLE_MODEL,
+        DEFAULT_TTS_CLEANUP_MODEL,
+        ...DEFAULT_AI_PROXY_ALLOWED_MODELS.split(','),
+        ...PLATFORM_AI_MODELS.map((m) => m.id),
+      ]);
+
+      for (const retiredModel of retiredModels) {
+        expect(activeModelIds.has(retiredModel), retiredModel + ' should not be active').toBe(false);
+      }
+    });
+
+    it('marks the AI proxy default as the registry default', () => {
+      expect(PLATFORM_AI_MODELS.find((m) => m.isDefault)?.id).toBe(DEFAULT_AI_PROXY_MODEL);
+    });
+
     it('registers the task title default model', () => {
       expect(PLATFORM_AI_MODELS.some((model) => model.id === DEFAULT_TASK_TITLE_MODEL)).toBe(true);
     });
@@ -134,6 +184,7 @@ describe('AI Model Registry', () => {
         DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
         DEFAULT_SAM_MODEL,
         DEFAULT_PROJECT_BRIEF_MODEL,
+        DEFAULT_DEBUG_AGENT_MODEL,
       };
       for (const [name, modelId] of Object.entries(defaults)) {
         expect(platformIds.has(modelId), `${name} (${modelId}) missing from PLATFORM_AI_MODELS`).toBe(

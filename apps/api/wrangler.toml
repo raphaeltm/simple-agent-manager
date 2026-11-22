@@ -183,7 +183,6 @@ NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS = "86400000"
 NODE_WORKSPACE_IDLE_TIMEOUT_MS = "1800000"
 # AI Inference Proxy (Cloudflare AI Gateway for platform/zero-config users)
 AI_PROXY_ENABLED = "true"
-AI_PROXY_DEFAULT_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
 AI_PROXY_REQUEST_BODY_MAX_BYTES = "1048576"
 AI_GATEWAY_ID = "sam"
 # Triggers (Event-Driven Agent Triggers)

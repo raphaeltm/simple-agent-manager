@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { platformSettings } from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { runDebugDiagnosis } from '../../../src/services/debug-agent';
+import { resolveDebugAgentConfig } from '../../../src/services/debug-agent-common';
+import { complete } from '../../../src/services/debug-agent-tools';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 function createKv(): KVNamespace {
@@ -107,8 +109,11 @@ describe('runDebugDiagnosis vertical slice', () => {
         tool_choice: string;
         tools: Array<{ function: { name: string } }>;
       };
+      // The default model and its explicit reasoning effort reach the wire (DeepSeek would
+      // otherwise default to `high` and spend the per-turn output cap on reasoning).
       expect(payload).toMatchObject({
-        model: '@cf/zai-org/glm-5.2',
+        model: '@cf/deepseek-ai/deepseek-v4.1-flash-1017',
+        reasoning_effort: 'low',
         stream: false,
         tool_choice: 'auto',
       });
@@ -273,5 +278,36 @@ describe('runDebugDiagnosis vertical slice', () => {
       dailyTokenLimit: DEFAULT_DEBUG_AGENT_DAILY_TOKEN_LIMIT,
     });
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('sends no reasoning effort for a DEBUG_AGENT_MODEL override without model controls', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({ choices: [{ message: { content: 'done', tool_calls: [] } }] }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      })
+    );
+    const main = new Database(':memory:');
+    createSchemaTables(main, [platformSettings]);
+    const env = {
+      DATABASE: createSqliteD1(main),
+      KV: createKv(),
+      CF_API_TOKEN: 'server-only-cloudflare-token',
+      CF_ACCOUNT_ID: 'account-1',
+      AI_GATEWAY_ID: 'sam',
+      DEBUG_AGENT_MODEL: '@cf/google/gemma-4-26b-a4b-it',
+    } as Env;
+    const config = resolveDebugAgentConfig(env);
+
+    await complete(env, config, 'deployment-debug-agent', [{ role: 'user', content: 'hi' }], 64);
+
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatchObject({ model: '@cf/google/gemma-4-26b-a4b-it' });
+    expect(bodies[0]).not.toHaveProperty('reasoning_effort');
   });
 });

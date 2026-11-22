@@ -1352,6 +1352,8 @@ describe('Worker vars omitted because they equal the code default', () => {
     const retuned: Record<string, string> = {
       // Replace the assistant model before Cloudflare retires GLM 5.3 Flash (2026-11-20).
       SAM_MODEL: '@cf/deepseek-ai/deepseek-v4.1-flash-1017',
+      // Qwen 3 30B was retired by Cloudflare on 2026-11-20; Gemma 4 26B is now the code default.
+      AI_PROXY_DEFAULT_MODEL: '@cf/google/gemma-4-26b-a4b-it',
       PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '6000000',
       PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS: '540000',
     };
@@ -1395,6 +1397,7 @@ describe('Worker vars omitted because they equal the code default', () => {
           ...checkedIn.vars,
           // Deliberate retirement migration, independently pinned above.
           SAM_MODEL: OMITTED_WORKER_VAR_DEFAULTS.SAM_MODEL,
+          AI_PROXY_DEFAULT_MODEL: OMITTED_WORKER_VAR_DEFAULTS.AI_PROXY_DEFAULT_MODEL,
         },
       });
       const after = varsFor(environment, checkedIn);

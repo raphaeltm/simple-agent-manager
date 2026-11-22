@@ -202,12 +202,6 @@ describe('generateTaskTitle', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('uses the GLM-5.2 non-thinking capability without a null reasoning field', () => {
-    expect(getTaskTitleModelControls('@cf/zai-org/glm-5.2')).toEqual({
-      chatTemplateKwargs: { enable_thinking: false },
-    });
-  });
-
   it('uses the Gemma non-thinking capability with a null reasoning field', () => {
     expect(getTaskTitleModelControls('@cf/google/gemma-4-26b-a4b-it')).toEqual({
       reasoningEffort: null,

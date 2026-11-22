@@ -69,6 +69,20 @@ export function normalizeModelId(model: string): string {
   return resolved;
 }
 
+/**
+ * The AI proxy default below the admin KV override: the `AI_PROXY_DEFAULT_MODEL` var when set,
+ * else `DEFAULT_AI_PROXY_MODEL`. Every reader goes through here so an empty var means unset
+ * everywhere and the omitted-var proof (`omitted-worker-var-defaults.test.ts`) covers one site.
+ */
+export function resolveEnvDefaultAIProxyModel(env: Pick<Env, 'AI_PROXY_DEFAULT_MODEL'>): {
+  model: string;
+  source: 'env' | 'default';
+} {
+  return env.AI_PROXY_DEFAULT_MODEL
+    ? { model: env.AI_PROXY_DEFAULT_MODEL, source: 'env' }
+    : { model: DEFAULT_AI_PROXY_MODEL, source: 'default' };
+}
+
 /** Resolve model from request, falling back to admin KV override > env var > shared constant. */
 export async function resolveModelId(model: string | undefined, env: Env): Promise<string> {
   if (model) return normalizeModelId(model);
@@ -84,7 +98,7 @@ export async function resolveModelId(model: string | undefined, env: Env): Promi
     }
   }
 
-  return normalizeModelId(env.AI_PROXY_DEFAULT_MODEL || DEFAULT_AI_PROXY_MODEL);
+  return normalizeModelId(resolveEnvDefaultAIProxyModel(env).model);
 }
 
 // =============================================================================
