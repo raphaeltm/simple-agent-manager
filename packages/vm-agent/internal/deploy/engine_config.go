@@ -9,17 +9,20 @@ import (
 
 // EngineConfig holds the configuration for the deploy engine.
 type EngineConfig struct {
-	EnvironmentID           string
-	NodeID                  string
-	ControlPlaneURL         string
-	CallbackToken           string
-	ComposeCmd              string // e.g., "docker compose"
-	ComposeProjectName      string
-	CaddyfilePath           string
-	CaddyReloadCmd          string
-	CaddyRestartCmd         string
-	ACMEEmail               string // Contact email for the ACME global options block (optional)
-	ACMECA                  string // ACME CA directory URL override, e.g. LE staging (optional)
+	EnvironmentID      string
+	NodeID             string
+	ControlPlaneURL    string
+	CallbackToken      string
+	ComposeCmd         string // e.g., "docker compose"
+	ComposeProjectName string
+	CaddyfilePath      string
+	CaddyReloadCmd     string
+	CaddyRestartCmd    string
+	ACMEEmail          string // Contact email for the ACME global options block (optional)
+	ACMECA             string // ACME CA directory URL override, e.g. LE staging (optional)
+	// AppIngressLoopbackPort > 0: app traffic arrives through the control plane's tunnel, so Caddy
+	// serves plain HTTP on this loopback port and does no ACME (CaddyfileOptions.LoopbackHTTPPort).
+	AppIngressLoopbackPort  int
 	CaddyReadyTimeout       time.Duration
 	CaddyReadyInterval      time.Duration
 	HealthTimeout           time.Duration

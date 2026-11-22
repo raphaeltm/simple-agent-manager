@@ -45,7 +45,7 @@ func TestGenerateCaddySnippet_RoundTripsMultiRouteConfig(t *testing.T) {
 		{Hostname: "r1-web-env123.apps.example.com", Service: "web", ContainerPort: 3000, HostPort: 35000},
 	}
 
-	caddyfile, err := GenerateCaddySnippet(routes)
+	caddyfile, err := GenerateCaddySnippet(routes, false)
 	if err != nil {
 		t.Fatalf("GenerateCaddySnippet: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestGenerateCaddySnippet_RoundTripsMultiRouteConfig(t *testing.T) {
 func TestGenerateCaddySnippet_EmitsCustomDomainSiteBlock(t *testing.T) {
 	caddyfile, err := GenerateCaddySnippet([]RouteTarget{
 		{Hostname: "app.customer.example.com", Service: "web", ContainerPort: 3000, HostPort: 35000},
-	})
+	}, false)
 	if err != nil {
 		t.Fatalf("GenerateCaddySnippet: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestReloadCaddy_AtomicallyWritesActiveConfigAndInvokesReload(t *testing.T) 
 		t.Fatalf("NewDiskState: %v", err)
 	}
 	state := &ReleaseState{Seq: 1, EnvironmentID: "env", NodeID: "node", Status: StatusApplying}
-	caddyfile, err := GenerateCaddySnippet([]RouteTarget{{Hostname: "app.apps.example.com", ContainerPort: 3000, HostPort: 35000}})
+	caddyfile, err := GenerateCaddySnippet([]RouteTarget{{Hostname: "app.apps.example.com", ContainerPort: 3000, HostPort: 35000}}, false)
 	if err != nil {
 		t.Fatalf("GenerateCaddySnippet: %v", err)
 	}
@@ -472,7 +472,7 @@ func TestGenerateCaddySnippet_RejectsUnsafeRouteTargets(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := GenerateCaddySnippet([]RouteTarget{tc.route}); err == nil {
+			if _, err := GenerateCaddySnippet([]RouteTarget{tc.route}, false); err == nil {
 				t.Fatal("expected invalid route target to be rejected")
 			}
 		})

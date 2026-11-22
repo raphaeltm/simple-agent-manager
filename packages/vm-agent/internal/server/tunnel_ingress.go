@@ -48,7 +48,8 @@ func isTunnelIngress(r *http.Request) bool {
 // after the timeout period.
 func (s *Server) buildHTTPServers(mux *http.ServeMux) {
 	cfg := s.config
-	handler := corsMiddleware(refuseTokenRedirects(mux), cfg.AllowedOrigins)
+	// App ingress (app_ingress.go) runs ahead of the agent's own middleware.
+	handler := s.withAppIngress(corsMiddleware(refuseTokenRedirects(mux), cfg.AllowedOrigins))
 	s.httpServer = &http.Server{
 		Addr:        fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
 		Handler:     handler,

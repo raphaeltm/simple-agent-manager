@@ -181,12 +181,19 @@ const (
 	// DefaultDeployTeardownTimeout bounds per-environment deployment teardown.
 	// Override via DEPLOY_TEARDOWN_TIMEOUT.
 	DefaultDeployTeardownTimeout = 2 * time.Minute
+
+	// DefaultDeployAppIngressPort is the loopback port a tunnel-ingress deployment node's Caddy
+	// serves its app routes on (cloud-init's DEFAULT_DEPLOY_APP_INGRESS_PORT).
+	DefaultDeployAppIngressPort = 8446
 )
 
 // Node role constants.
 const (
 	RoleWorkspace  = "workspace"
 	RoleDeployment = "deployment"
+
+	// DeployAppIngressTunnel is the DEPLOY_APP_INGRESS value for app ingress through the tunnel.
+	DeployAppIngressTunnel = "tunnel"
 	RoleStandalone = "standalone"
 )
 
@@ -519,6 +526,11 @@ type Config struct {
 	DeployACMEEmail       string        // Contact email for ACME/Let's Encrypt account (env: DEPLOY_ACME_EMAIL)
 	DeployACMECA          string        // Optional ACME CA directory URL override, e.g. LE staging (env: DEPLOY_ACME_CA)
 	DeployTeardownTimeout time.Duration // Max time for deployment environment teardown (env: DEPLOY_TEARDOWN_TIMEOUT)
+	// DeployAppIngress is "tunnel" when app traffic arrives through the control plane's tunnel (the
+	// self-host box): Caddy then binds loopback only and does no ACME, and the app-ingress route
+	// serves. Empty: public app ingress with automatic HTTPS. (env: DEPLOY_APP_INGRESS)
+	DeployAppIngress     string
+	DeployAppIngressPort int // Loopback port of Caddy in tunnel app ingress (env: DEPLOY_APP_INGRESS_PORT)
 
 	// Deployment artifact/apply watchdog settings - configurable per constitution principle XI.
 	DeployArtifactDialTimeout           time.Duration // TCP dial timeout for artifact downloads (env: DEPLOY_ARTIFACT_DIAL_TIMEOUT)
@@ -544,4 +556,13 @@ func (c *Config) IsDeploymentMode() bool {
 // single-workspace container without Docker/devcontainer indirection.
 func (c *Config) IsStandaloneMode() bool {
 	return c.Role == RoleStandalone
+}
+
+// AppIngressLoopbackPort is the loopback port a tunnel-ingress deployment node's Caddy serves
+// app routes on, or 0 when app ingress is public (every hosted node).
+func (c *Config) AppIngressLoopbackPort() int {
+	if c.Role != RoleDeployment || c.DeployAppIngress != DeployAppIngressTunnel {
+		return 0
+	}
+	return c.DeployAppIngressPort
 }

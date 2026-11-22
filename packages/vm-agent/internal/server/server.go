@@ -737,6 +737,7 @@ func (s *Server) ensureDeployEngine(environmentID string) *deploy.Engine {
 		ComposeOutputRetentionBytes: s.config.ComposeOutputRetentionBytes,
 		ACMEEmail:                   s.config.DeployACMEEmail,
 		ACMECA:                      s.config.DeployACMECA,
+		AppIngressLoopbackPort:      s.config.AppIngressLoopbackPort(),
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
