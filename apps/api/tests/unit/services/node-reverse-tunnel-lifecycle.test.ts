@@ -41,6 +41,13 @@ const GATEWAY_SECRET = ['gateway', 'fixture', 'value', 'for', 'reverse', 'tunnel
   '-'
 );
 
+// The fixture records cloud-init variables; render them with the real generator.
+const realCloudInit = await vi.importActual<typeof import('@simple-agent-manager/cloud-init')>(
+  '@simple-agent-manager/cloud-init'
+);
+const renderUserData = (vars: Record<string, unknown>) =>
+  realCloudInit.generateCloudInit(vars as Parameters<typeof realCloudInit.generateCloudInit>[0]);
+
 function reverseEnv(overrides: Record<string, string | undefined> = {}) {
   return tunnelEnv({
     VM_AGENT_TRANSPORT: 'reverse-tunnel',
@@ -169,13 +176,53 @@ describe('reverse-tunnel provisioning', () => {
     }
   );
 
-  it('excludes deployment nodes and keeps them on public DNS', async () => {
+  it('boots a deployment node on the tunnel: lease, no Origin CA, no public app ingress, no DNS', async () => {
     const node = await freshNode({ nodeRole: 'deployment' });
-    await provisionNode(node.id, env, undefined, undefined, { environmentId: 'env-1' });
-    expect(readNode(node.id)?.transport).toBe('vm-public-dns');
-    expect(leases(node.id)).toEqual([]);
-    expect(mocks.createARecord).toHaveBeenCalled();
+    await expect(
+      provisionNode(node.id, env, undefined, undefined, { environmentId: 'env-1' })
+    ).resolves.toEqual({ allocationConfirmed: true });
+
+    expect(readNode(node.id)).toMatchObject({ status: 'running', transport: 'reverse-tunnel' });
+    const [lease] = leases(node.id);
+    expect(lease).toMatchObject({ status: 'active' });
+    expect(mocks.createARecord).not.toHaveBeenCalled();
+    expect(cf.calls).toEqual([]);
+
+    const [vars] = mocks.cloudInitVars;
+    expect(vars).toMatchObject({
+      role: 'deployment',
+      reverseTunnelRemotePort: String(lease?.port),
+      originCaCertificateUrl: undefined,
+    });
+    const userData = renderUserData(vars!);
+    expect(userData).not.toContain('origin_ca_bootstrap');
+    expect(userData).not.toContain('origin-ca-certificate');
+    expect(userData).toContain('Environment=DEPLOY_APP_INGRESS=tunnel');
+    expect(userData).toContain('"$VM_AGENT_PORT" "$TUNNEL_PORT" 80 443');
+    // No public 80/443 at the provider either (GCP's app-route network tag keys on this label).
+    const [config] = mocks.createVM.mock.calls[0] ?? [];
+    expect((config as { labels: Record<string, string> }).labels).toMatchObject({
+      role: 'deployment',
+      'app-ingress': 'tunnel',
+    });
   });
+
+  it.each([undefined, 'vm-public-dns'])(
+    'control: with VM_AGENT_TRANSPORT=%j a deployment node keeps public ingress and its Origin CA',
+    async (transport) => {
+      setEnv(reverseEnv({ VM_AGENT_TRANSPORT: transport }));
+      const node = await freshNode({ nodeRole: 'deployment' });
+      await provisionNode(node.id, env, undefined, undefined, { environmentId: 'env-1' });
+      expect(readNode(node.id)?.transport).toBe('vm-public-dns');
+      expect(leases(node.id)).toEqual([]);
+      expect(mocks.createARecord).toHaveBeenCalled();
+      const [vars] = mocks.cloudInitVars;
+      expect(vars?.originCaCertificateUrl).toContain('/origin-ca-certificate');
+      expect(renderUserData(vars!)).not.toContain('DEPLOY_APP_INGRESS');
+      const [config] = mocks.createVM.mock.calls[0] ?? [];
+      expect((config as { labels: Record<string, string> }).labels['app-ingress']).toBeUndefined();
+    }
+  );
 
   it.each([undefined, 'vm-public-dns', 'cloudflare-tunnel'])(
     'durable resume recovers its original reverse lease after transport changes to %j',

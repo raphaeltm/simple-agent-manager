@@ -66,7 +66,13 @@ const BindingSchema = v.object({
 type Binding = v.InferOutput<typeof BindingSchema>;
 
 export type AppRouteDecision =
-  | { allow: true; nodeId: string; upstream: string; upstreamUri: string; nodeAuthorization: string }
+  | {
+      allow: true;
+      nodeId: string;
+      upstream: string;
+      upstreamUri: string;
+      nodeAuthorization: string;
+    }
   | { allow: false; status: 404 | 503; code: string };
 
 /**
@@ -181,8 +187,7 @@ export async function authorizeAppRouteRequest(
 /** The forward_auth answer: 200 with the decision headers, or the refusal for Caddy to send. */
 export function appRouteDecisionResponse(decision: AppRouteDecision): Response {
   if (!decision.allow) {
-    const message =
-      decision.status === 503 ? 'This app is not reachable right now' : 'Not found';
+    const message = decision.status === 503 ? 'This app is not reachable right now' : 'Not found';
     return Response.json(
       { error: decision.status === 503 ? 'APP_UNAVAILABLE' : 'NOT_FOUND', message },
       { status: decision.status, headers: { 'Cache-Control': 'no-store' } }

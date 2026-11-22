@@ -17,6 +17,7 @@ import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { AppError, errors } from '../middleware/error';
+import { upsertReleaseRouteRecords } from '../services/app-route-dns-target';
 import {
   type ComposeImageArtifactDownload,
   createComposeImageArtifactDownloads,
@@ -37,7 +38,6 @@ import {
   type DeploymentRouteTarget,
 } from '../services/deployment-routing';
 import { buildVolumeMountDescriptors } from '../services/deployment-volumes';
-import { upsertReleaseRouteRecords } from '../services/app-route-dns-target';
 import { cleanupAppRouteDNSRecords } from '../services/dns';
 import { verifyCallbackToken } from '../services/jwt';
 import { nodeStatusTerminatesCallbacks } from '../services/node-callback-auth';

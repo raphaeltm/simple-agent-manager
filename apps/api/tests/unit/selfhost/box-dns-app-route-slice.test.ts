@@ -11,6 +11,7 @@
  * the same drizzle mock the route tests use; only the box zone's statements reach SQLite, which is
  * the part under test.
  */
+import { generateCloudInit } from '@simple-agent-manager/cloud-init';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 import { installBoxDns } from '../../../src/selfhost/dns';
 import { createSelfHostGatewayRoutes } from '../../../src/selfhost/reverse-tunnel/gateway';
+import { installReverseTunnelTransport } from '../../../src/selfhost/reverse-tunnel/transport';
 import { resetBoxDnsBackendForTests } from '../../../src/services/dns-provider';
 import { applySqliteMigration, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -78,6 +80,7 @@ const { deployReleaseCallbackRoute } = await import('../../../src/routes/deploy-
 
 const SECRET = 'a'.repeat(64);
 const NODE_IP = '203.0.113.10';
+const BOX_IP = '192.0.2.44';
 const PAGE_SIZE = 10;
 /** 2 * page + 3: two full pages and a remainder. */
 const ROUTE_COUNT = PAGE_SIZE * 2 + 3;
@@ -219,6 +222,46 @@ describe('app deployment routes on a box that serves its own DNS', () => {
       env
     );
     expect(await unchanged.json()).toEqual({ serial, unchanged: true });
+  });
+});
+
+describe('app deployment routes of a deployment node on the reverse tunnel', () => {
+  it('point every record at the box, which carries the app traffic, with no node IP', async () => {
+    installReverseTunnelTransport(generateCloudInit);
+    mockLimit.mockReset();
+    mockLimit
+      .mockResolvedValueOnce([
+        {
+          userId: 'user-1',
+          ipAddress: null,
+          transport: 'reverse-tunnel',
+          providerInstanceId: 'provider-server-current',
+        },
+      ])
+      .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
+      .mockResolvedValueOnce([
+        { id: 'rel-1', manifest: JSON.stringify(manifest()), version: 7, status: 'created' },
+      ]);
+    const env = { ...boxEnv(), SAM_DNS_PUBLIC_IPV4: BOX_IP } as Env;
+    const app = new Hono<{ Bindings: Env }>();
+    app.route('/api/nodes', deployReleaseCallbackRoute);
+    const release = await app.request(
+      '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-1',
+      { headers: { Authorization: 'Bearer callback-token' } },
+      env,
+      { waitUntil: vi.fn(), passThroughOnException: vi.fn() }
+    );
+    const body = (await release.json()) as { routes?: Array<{ hostname: string }> };
+    expect(release.status, JSON.stringify(body)).toBe(200);
+    expect(body.routes).toHaveLength(ROUTE_COUNT);
+
+    const zone = sqlite
+      .prepare(`SELECT name, content FROM selfhost_dns_records ORDER BY name`)
+      .all() as Array<{ name: string; content: string }>;
+    expect(zone.map((record) => record.name).sort()).toEqual(
+      (body.routes ?? []).map((route) => route.hostname).sort()
+    );
+    expect(zone.every((record) => record.content === BOX_IP)).toBe(true);
   });
 });
 
