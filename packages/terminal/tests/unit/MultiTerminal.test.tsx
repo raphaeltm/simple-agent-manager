@@ -22,6 +22,8 @@ vi.mock('@xterm/xterm', () => {
     focus = mockTerminalFocus;
     loadAddon = mockTerminalLoadAddon;
     onData = mockTerminalOnData;
+    attachCustomKeyEventHandler = vi.fn();
+    input = vi.fn();
     get rows() {
       return mockTerminalDimensions.rows;
     }
@@ -186,6 +188,56 @@ describe('MultiTerminal', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  /** jsdom has no layout; give every element a real box, as a visible terminal tab has. */
+  const layOutElements = () => {
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(480);
+  };
+
+  const resizesFor = (sendSpy: { mock: { calls: unknown[][] } }, sessionId: string) =>
+    sendSpy.mock.calls
+      .map(([data]) => JSON.parse(data as string))
+      .filter((message) => message.type === 'resize' && message.sessionId === sessionId);
+
+  it('does not fit or resize an inactive (hidden) tab when it attaches', async () => {
+    const createdAt = new Date().toISOString();
+    MockWebSocket.sessionListResponse = [
+      { sessionId: 'srv-tab-a', name: 'Tab A', status: 'running', createdAt },
+      { sessionId: 'srv-tab-b', name: 'Tab B', status: 'running', createdAt },
+    ];
+    const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
+    render(<MultiTerminal {...defaultProps} />);
+    // Liveness: both tabs reattached and opened into the DOM.
+    await waitFor(() =>
+      expect(
+        sendSpy.mock.calls.filter(([data]) => JSON.parse(data as string).type === 'reattach_session')
+      ).toHaveLength(2)
+    );
+    await waitFor(() => expect(mockTerminalOpen).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+    // jsdom gives every element a zero box, as a display:none tab has. Only the active tab is
+    // fitted (by the activation effect); the inactive one keeps its size until activated.
+    const resized = ['srv-tab-a', 'srv-tab-b'].filter((id) => resizesFor(sendSpy, id).length > 0);
+    expect(resized).toHaveLength(1);
+  });
+
+  it('fits and sends its size when a visible terminal attaches', async () => {
+    layOutElements();
+    MockWebSocket.sessionListResponse = [
+      { sessionId: 'srv-visible', name: 'Visible', status: 'running', createdAt: new Date().toISOString() },
+    ];
+    const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
+    render(<MultiTerminal {...defaultProps} />);
+    await waitFor(() =>
+      expect(resizesFor(sendSpy, 'srv-visible')).toContainEqual(
+        expect.objectContaining({ data: { rows: 24, cols: 80 } })
+      )
+    );
   });
 
   it('does not resend unchanged dimensions during rerender bursts but sends actual changes', async () => {
@@ -222,6 +274,7 @@ describe('MultiTerminal', () => {
   });
 
   it('sends the same dimensions again when the terminal reconnects on a new socket', async () => {
+    layOutElements();
     MockWebSocket.sessionListResponse = [
       {
         sessionId: 'srv-reconnect-size',

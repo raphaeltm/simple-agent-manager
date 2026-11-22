@@ -10,6 +10,7 @@ Shared React terminal component wrapping xterm.js. Provides WebSocket-connected 
 |------|---------|
 | `src/index.ts` | Public exports — Terminal component, hooks, types |
 | `src/Terminal.tsx` | Core terminal component (xterm.js + fit addon) |
+| `src/alt-arrow-keys.ts` | Restores xterm 5 Alt+Arrow word-motion bytes on xterm 6 |
 | `src/MultiTerminal.tsx` | Multi-tab terminal container |
 | `src/useWebSocket.ts` | WebSocket connection hook for terminal I/O |
 | `src/ConnectionOverlay.tsx` | Connection status overlay (connecting/disconnected states) |
@@ -29,14 +30,16 @@ pnpm --filter @simple-agent-manager/terminal lint        # ESLint
 ## Conventions
 
 - React peer dependency — not bundled, provided by consumer
-- xterm.js addons (`@xterm/addon-fit`, `@xterm/addon-attach`) are direct dependencies
+- `@xterm/xterm` and `@xterm/addon-fit` are direct dependencies, pinned together in the `pnpm-workspace.yaml` catalog. Upgrade them as one family (addon-fit 0.11 is the xterm 6 build and reserves xterm 6's 14px overlay scrollbar).
+- xterm 6 no longer maps Alt+Arrow to word motion; `src/alt-arrow-keys.ts` restores the xterm 5 bytes in both terminals
 - Components accept configuration via props, not global state
 - WebSocket URL construction follows the `wss://ws-${id}.${BASE_DOMAIN}` pattern
 
 ## Gotchas
 
 - xterm.js requires a real DOM — tests use `@testing-library/react` with jsdom
-- The fit addon must be called after the terminal element is mounted and visible (timing-sensitive)
+- The fit addon must be called after the terminal element is mounted and visible (timing-sensitive). A `display:none` tab reports its specified `width: 100%` as 100px, so never fit a hidden tab; activation re-fits it
+- `apps/web/tests/playwright/terminal-geometry-audit.spec.ts` checks PTY size against the rendered grid with a fake VM agent
 - UI changes here trigger mandatory Playwright visual audit (rule 17)
 - This is a peer-dependency package — consumers must provide React 19+
 

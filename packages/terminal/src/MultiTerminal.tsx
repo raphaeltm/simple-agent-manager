@@ -11,6 +11,7 @@ import React, {
   useState,
 } from 'react';
 
+import { preserveAltArrowWordNavigation } from './alt-arrow-keys';
 import { TabBar } from './components/TabBar';
 import { useTerminalSessions } from './hooks/useTerminalSessions';
 import {
@@ -185,6 +186,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
 
         const fitAddon = new FitAddon();
         terminal.loadAddon(fitAddon);
+        preserveAltArrowWordNavigation(terminal);
 
         // Handle user input — route through shared WebSocket with sessionId
         terminal.onData((data) => {
@@ -570,9 +572,12 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
           if (!containerEl.querySelector('.xterm')) {
             instance.terminal.open(containerEl);
           }
-          instance.fitAddon.fit();
-
-          sendTerminalResize(sessionId);
+          // A hidden tab (display:none) reports its specified `width: 100%` as 100px, so a
+          // fit here would shrink its PTY to ~10 columns. Activation re-fits it.
+          if (containerEl.offsetWidth > 0 && containerEl.offsetHeight > 0) {
+            instance.fitAddon.fit();
+            sendTerminalResize(sessionId);
+          }
 
           // Add ResizeObserver to handle container size changes (including
           // display:none → display:block transitions on tab switch).

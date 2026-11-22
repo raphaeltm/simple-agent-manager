@@ -62,7 +62,7 @@ export default defineConfig({
   webServer: useLocalWebServer
     ? {
         command:
-          'VITE_API_URL=http://localhost:4173 npx vite build && npx vite preview --port 4173',
+          'VITE_API_URL=http://localhost:4173 VITE_FEATURE_MULTI_TERMINAL=true npx vite build && npx vite preview --port 4173',
         port: 4173,
         reuseExistingServer: true,
         timeout: process.env.CI ? 180000 : 60000,
