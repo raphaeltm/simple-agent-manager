@@ -77,7 +77,12 @@ const RELEASED_NODE_STATUSES: ReadonlySet<string> = new Set([
 ]);
 
 type DanglingReason =
-  'environment_missing' | 'no_linked_node' | 'node_missing' | 'node_released' | 'ip_mismatch';
+  | 'environment_missing'
+  | 'no_linked_node'
+  | 'node_missing'
+  | 'node_released'
+  | 'ip_mismatch'
+  | 'wildcard_covered';
 
 interface RouteTarget {
   nodeId: string | null;
@@ -110,9 +115,10 @@ export function judgeAppRouteRecord(
   if (RELEASED_NODE_STATUSES.has(target.nodeStatus) || target.terminationConfirmedAt) {
     return { live: false, reason: 'node_released' };
   }
-  // A covered node's names resolve through the installation's own wildcard; a record left for
-  // one points at the installation, never at a released provider IP, so it is left alone.
-  if (target.recordAddress.covered) return { live: true };
+  // A covered node's names resolve through the installation's wildcard, and the release fetch
+  // writes no per-route record for them. One that exists is left over from an earlier node (it
+  // overrides the wildcard and may point at that node's released IP), so it goes.
+  if (target.recordAddress.covered) return { live: false, reason: 'wildcard_covered' };
   if (target.recordAddress.address !== record.content) {
     return { live: false, reason: 'ip_mismatch' };
   }
@@ -288,6 +294,27 @@ async function cleanupRecords(
         // Either way the record stops pointing at the released IP.
         // This record itself, not the first record of its name (a live sibling may share it).
         await repointObservedAppRouteDnsRecord(env, record, liveAddress);
+        // The live node may have started teardown between the read above and the update, its
+        // own release cleanup listing before the record pointed at it. Judge once more and, if
+        // the address is no longer live, delete the record now rather than at the next sweep.
+        const after = await loadRouteTargets(env, [record.environmentId]);
+        const repointed = { ...record, content: liveAddress };
+        const afterVerdict = judgeAppRouteRecord(repointed, after.get(record.environmentId));
+        if (afterVerdict && !afterVerdict.live) {
+          const outcome = await deleteObservedAppRouteDnsRecord(env, repointed, input.signal);
+          counts[outcome]++;
+          attempts++;
+          log.info('dns.app_route_repoint_target_released', {
+            trigger: input.trigger,
+            hostname: record.name,
+            recordId: record.id,
+            content: liveAddress,
+            environmentId: record.environmentId,
+            reason: afterVerdict.reason,
+            outcome,
+          });
+          continue;
+        }
         counts.repointed++;
         attempts++;
         log.info('dns.app_route_dangling_repointed', {

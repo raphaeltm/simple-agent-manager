@@ -252,9 +252,12 @@ describe('records of nodes whose transport carries app ingress (self-host box tu
     ).toEqual({ live: false, reason: 'ip_mismatch' });
   });
 
-  it('leaves records alone when the installation wildcard covers the names', () => {
-    expect(judgeAppRouteRecord({ content: BOX_IP }, target({ covered: true }))).toEqual({
-      live: true,
+  it('treats an explicit record under wildcard coverage as left over from an earlier node', () => {
+    // The release fetch writes no per-route record for covered names; one that exists overrides
+    // the wildcard and may still point at a released public IP.
+    expect(judgeAppRouteRecord({ content: RELEASED_IP }, target({ covered: true }))).toEqual({
+      live: false,
+      reason: 'wildcard_covered',
     });
   });
 });
@@ -985,5 +988,29 @@ describe('Codex review round 5', () => {
     const result = await runAppRouteDnsReconciliation(noApi);
     expect(result.stoppedBy).toBe('no_dns_api');
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('Codex review round 6', () => {
+  it('deletes a repointed record at once when its new target starts teardown mid-repoint', async () => {
+    await seedNode('live-node', 'running', LIVE_IP);
+    await seedEnvironment(ENV_LIVE, 'live-node');
+    const zone = createFakeCloudflareDns({
+      zoneId: ZONE,
+      token: TOKEN,
+      seed: [rec('stale', host(ENV_LIVE), RELEASED_IP)],
+      beforeRequest: (method) => {
+        // The repoint lands just as the live node begins its own teardown.
+        if (method === 'PATCH') {
+          sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = 'live-node'").run();
+        }
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn(zone.fetch));
+
+    const result = await runAppRouteDnsReconciliation(env);
+
+    expect(zone.records.has('stale')).toBe(false);
+    expect(result).toMatchObject({ repointed: 0, deleted: 1 });
   });
 });

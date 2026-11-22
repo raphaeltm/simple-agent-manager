@@ -17,6 +17,7 @@ import {
   runAppRouteDnsReconciliation,
 } from '../../../src/services/app-route-dns-reconciliation';
 import { resetBoxDnsBackendForTests } from '../../../src/services/dns-provider';
+import { createFakeCloudflareDns } from '../../helpers/fake-cloudflare-dns';
 import {
   applySqliteMigration,
   createAllSchemaTables,
@@ -140,5 +141,27 @@ describe('dangling app-route sweep on reverse-tunnel deployment nodes', () => {
       })
     ).toBeNull();
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('deletes a per-route record left over when the environment moved under wildcard coverage', async () => {
+    resetBoxDnsBackendForTests();
+    const zone = createFakeCloudflareDns({
+      zoneId: 'zone',
+      token: 'token',
+      // Written while the environment ran on a public node; the tunnel node's names are covered.
+      seed: [{ id: 'left-over', name: host(ENV_LIVE), type: 'A', content: '203.0.113.99' }],
+    });
+    vi.stubGlobal('fetch', vi.fn(zone.fetch));
+    const wildcard = {
+      ...env,
+      SAM_DNS_PROVIDER: undefined,
+      CF_ZONE_ID: 'zone',
+      CF_API_TOKEN: 'token',
+    } as unknown as Env;
+
+    const result = await runAppRouteDnsReconciliation(wildcard);
+
+    expect(zone.records.has('left-over')).toBe(false);
+    expect(result.deleted).toBe(1);
   });
 });
