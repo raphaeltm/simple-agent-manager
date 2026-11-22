@@ -1118,7 +1118,7 @@ or observer failure latch a structured `egress_fence.lost` error in container lo
 `egress-fence-attestation/events.jsonl`. The latch and `ok` publication share a lock on the
 fence's private tmpfs, so once `lost` exists no `ok` is written; `celld/start.sh` and
 `verify-fence` read the attestation first and then check the latch, so an `ok` read just before a
-loss is refused. `docker compose ps` reports the fence unhealthy and celld
+loss is refused. This assumes one fence instance: never `docker compose run` a second one. `docker compose ps` reports the fence unhealthy and celld
 stays stopped/restarting; the front door cannot serve the API. There is no automatic rule repair.
 Recover as the installation operator: regenerate with `pnpm selfhost:deploy --init` (which also
 restores the rules file's 0644 mode when its content is unchanged), then

@@ -21,7 +21,8 @@ event() {
 }
 # Lost is sticky: lost() and publish() hold LOCK, so once $LOST exists no ok is ever written.
 # The latch never depends on the lock: if it cannot be opened or taken, lost() still latches
-# (fail closed), while publish() publishes nothing and the attestation goes stale.
+# (fail closed). publish() never writes ok without it; a failed publish latches and stops.
+# Assumes one fence instance: a second one's startup would clear this one's latch.
 latch() {
   if [ ! -f "$LOST" ]; then
     echo lost >"$LOST"
@@ -75,7 +76,7 @@ case "${1:-run}" in
       if ! kill -0 "$monitor" 2>/dev/null || ! kill -0 "$reader" 2>/dev/null || ! check; then
         lost
       fi
-      publish
+      publish || { lost; exit 1; }
       sleep "$RECHECK"
     done
     ;;
