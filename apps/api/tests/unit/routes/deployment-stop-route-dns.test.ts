@@ -372,6 +372,38 @@ describe('the release fetch re-checks its node right before writing route record
     expect(zone.requests.length).toBe(before);
   });
 
+  it('cleans up after itself when the teardown ran while its write was in flight', async () => {
+    const hostname = routes()[0]!.hostname;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let holding = true;
+    let reachedWrite!: () => void;
+    const writeStarted = new Promise<void>((resolve) => (reachedWrite = resolve));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (holding && url.searchParams.get('name') === hostname) {
+          // Past the pre-write check: the whole teardown runs before this write goes on.
+          holding = false;
+          reachedWrite();
+          await held;
+        }
+        return zone.fetch(input, init);
+      })
+    );
+    const write = upsertReleaseRouteRecords(routes(), node, env, 'node');
+    await writeStarted;
+    const stopped = await stop();
+    expect(stopped.status, await stopped.clone().text()).toBe(200);
+    expect(nodeRow('node')).toMatchObject({ status: 'deleted' });
+    release();
+
+    await expect(write).rejects.toMatchObject({ statusCode: 410 });
+    expect(zone.byName(hostname)).toEqual([]);
+    expect(zone.records.has('other-route')).toBe(true);
+  });
+
   it('refuses once the node carries a termination proof', async () => {
     sqlite
       .prepare("UPDATE nodes SET runtime_termination_confirmed_at = 'now' WHERE id = 'node'")

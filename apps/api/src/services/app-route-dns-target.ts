@@ -17,6 +17,7 @@ import {
 
 import type { Env } from '../env';
 import { errors } from '../middleware/error';
+import { releaseNodeAppRouteDnsRecords } from './app-route-dns-reconciliation';
 import { upsertAppRouteDNSRecord } from './dns-app-routes';
 import { nodeStatusTerminatesCallbacks } from './node-callback-auth';
 import { nodeTransportExtension } from './node-transport-extension';
@@ -45,20 +46,22 @@ export function appRouteRecordAddress(
   return { covered: false, address: address ?? node.ipAddress };
 }
 
-async function assertNodeStillServesRoutes(env: Env, nodeId: string): Promise<void> {
+/** True once the node's teardown has started (claimed, or carrying a termination proof). */
+async function nodeReleaseStarted(env: Env, nodeId: string): Promise<boolean> {
   const row = await env.DATABASE.prepare(
     'SELECT status, runtime_termination_confirmed_at FROM nodes WHERE id = ?'
   )
     .bind(nodeId)
     .first<{ status: string; runtime_termination_confirmed_at: string | null }>();
-  if (!row || nodeStatusTerminatesCallbacks(row.status) || row.runtime_termination_confirmed_at) {
-    throw errors.gone(`Node ${nodeId} is being released; its route records are not written`);
-  }
+  return (
+    !row || nodeStatusTerminatesCallbacks(row.status) || !!row.runtime_termination_confirmed_at
+  );
 }
 
 /**
  * Writes (or, when covered, skips) the A record of every route a release fetch returns. With
- * `nodeId`, refuses (410) once that node's teardown has started.
+ * `nodeId`, refuses (410) once that node's teardown has started, and cleans up after itself when
+ * the teardown started while it was writing.
  */
 export async function upsertReleaseRouteRecords(
   routes: Pick<DeploymentRouteTarget, 'hostname'>[],
@@ -75,11 +78,29 @@ export async function upsertReleaseRouteRecords(
       'Deployment node does not have an IP address yet; retry after provisioning completes'
     );
   }
-  // Fence: the fetch checked the node on entry, but its teardown may have started since. Its
-  // release cleanup lists records before and after the provider deletion, so a write landing
-  // after both would point at an IP the provider has freed. Re-read just before writing.
-  if (nodeId) await assertNodeStillServesRoutes(env, nodeId);
-  await Promise.all(routes.map((route) => upsertAppRouteDNSRecord(route.hostname, target, env)));
+  const refuse = () =>
+    errors.gone(`Node ${nodeId} is being released; its route records are not written`);
+  // The fetch checked the node on entry, but its teardown may have started since; don't write.
+  if (nodeId && (await nodeReleaseStarted(env, nodeId))) throw refuse();
+  try {
+    await Promise.all(routes.map((route) => upsertAppRouteDNSRecord(route.hostname, target, env)));
+  } finally {
+    // Handshake with teardown, which claims the node (`destroying`) and only then lists records
+    // to delete: read the node again once the writes have returned. Still live means the claim
+    // comes later, so its listing sees these records. Released means the claim (and perhaps both
+    // cleanup passes) ran while the writes were in flight, so delete them here. A write SAM gave
+    // up on that the provider commits even later is left to the sweep.
+    if (nodeId && (await nodeReleaseStarted(env, nodeId))) {
+      await releaseNodeAppRouteDnsRecords(env, {
+        id: nodeId,
+        nodeRole: 'deployment',
+        ipAddress: node.ipAddress,
+        transport: node.transport ?? null,
+      });
+      // eslint-disable-next-line no-unsafe-finally -- the refusal replaces any write error
+      throw refuse();
+    }
+  }
 }
 
 /**

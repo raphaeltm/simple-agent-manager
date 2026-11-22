@@ -377,9 +377,9 @@ const MIN_DNS_REQUEST_TIMEOUT_MS = 1000;
 
 /**
  * The env DNS calls run with during cleanup: each request may take at most a quarter of the
- * budget (never more than `CF_API_TIMEOUT_MS`). A request that hangs then fails on its own,
- * counts as a failure (which does not spend the delete cap), and the records after it are still
- * reached in the same run, instead of the hang using up the whole budget every run.
+ * budget (never more than `CF_API_TIMEOUT_MS`). A request that hangs then fails on its own and
+ * counts as a failure (spending the delete cap only once its backoff is recorded), and the
+ * records after it are still reached in the same run, instead of the hang using up the budget.
  */
 export function dnsRequestEnv(env: Env, budgetMs: number): Env {
   const configured = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
