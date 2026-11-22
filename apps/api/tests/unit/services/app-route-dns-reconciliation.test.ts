@@ -183,6 +183,7 @@ describe('judgeAppRouteRecord', () => {
         nodeStatus: 'running',
         ipAddress: LIVE_IP,
         terminationConfirmedAt: null,
+        recordAddress: { covered: false, address: LIVE_IP },
       })
     ).toEqual({ live: true });
     // A stopped node keeps its provider IP; its routes are not dangling.
@@ -192,6 +193,7 @@ describe('judgeAppRouteRecord', () => {
         nodeStatus: 'stopped',
         ipAddress: LIVE_IP,
         terminationConfirmedAt: null,
+        recordAddress: { covered: false, address: LIVE_IP },
       })
     ).toEqual({ live: true });
     // A teardown that failed after the VM was deleted can leave the node in `error`: the proof,
@@ -202,6 +204,7 @@ describe('judgeAppRouteRecord', () => {
         nodeStatus: 'error',
         ipAddress: LIVE_IP,
         terminationConfirmedAt: '2026-11-22T00:00:00.000Z',
+        recordAddress: { covered: false, address: LIVE_IP },
       })
     ).toEqual({ live: false, reason: 'node_released' });
     expect(
@@ -210,6 +213,7 @@ describe('judgeAppRouteRecord', () => {
         nodeStatus: 'error',
         ipAddress: LIVE_IP,
         terminationConfirmedAt: null,
+        recordAddress: { covered: false, address: LIVE_IP },
       })
     ).toEqual({ live: true });
     for (const status of ['destroying', 'deleting', 'deleted', 'destroyed']) {
@@ -219,9 +223,39 @@ describe('judgeAppRouteRecord', () => {
           nodeStatus: status,
           ipAddress: LIVE_IP,
           terminationConfirmedAt: null,
+          recordAddress: { covered: false, address: LIVE_IP },
         })
       ).toEqual({ live: false, reason: 'node_released' });
     }
+  });
+});
+
+describe('records of nodes whose transport carries app ingress (self-host box tunnel)', () => {
+  const BOX_IP = '192.0.2.10';
+  const target = (
+    recordAddress: { covered: true } | { covered: false; address: string | null }
+  ) => ({
+    nodeId: 'n',
+    nodeStatus: 'running',
+    ipAddress: '10.8.0.5',
+    terminationConfirmedAt: null,
+    recordAddress,
+  });
+
+  it('judges a record live when it points where the release fetch writes it (the box)', () => {
+    expect(
+      judgeAppRouteRecord({ content: BOX_IP }, target({ covered: false, address: BOX_IP }))
+    ).toEqual({ live: true });
+    // The node's own IP is not where this transport's records belong.
+    expect(
+      judgeAppRouteRecord({ content: '10.8.0.5' }, target({ covered: false, address: BOX_IP }))
+    ).toEqual({ live: false, reason: 'ip_mismatch' });
+  });
+
+  it('leaves records alone when the installation wildcard covers the names', () => {
+    expect(judgeAppRouteRecord({ content: BOX_IP }, target({ covered: true }))).toEqual({
+      live: true,
+    });
   });
 });
 

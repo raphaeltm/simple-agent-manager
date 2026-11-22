@@ -44,6 +44,7 @@ import {
   APP_ROUTE_DNS_RUNTIME_DEFAULTS,
   type AppRouteDnsSettingName,
 } from './admin-settings-app-route-dns-definitions';
+import { appRouteRecordAddress } from './app-route-dns-target';
 import {
   type AppRouteDnsRecord,
   appRouteNameSuffix,
@@ -81,6 +82,12 @@ interface RouteTarget {
   ipAddress: string | null;
   /** `nodes.runtime_termination_confirmed_at`: set once this VM incarnation is proven deleted. */
   terminationConfirmedAt: string | null;
+  /**
+   * Where this node's app-route records must point (`appRouteRecordAddress`, the same answer the
+   * release fetch writes): the node's IP on public transport, the box on the self-host reverse
+   * tunnel, `covered` when no per-route record is written at all.
+   */
+  recordAddress: { covered: true } | { covered: false; address: string | null };
 }
 
 /** `'unknown'`: the environment's row could not be read, so its records are left alone. */
@@ -100,7 +107,12 @@ export function judgeAppRouteRecord(
   if (RELEASED_NODE_STATUSES.has(target.nodeStatus) || target.terminationConfirmedAt) {
     return { live: false, reason: 'node_released' };
   }
-  if (target.ipAddress !== record.content) return { live: false, reason: 'ip_mismatch' };
+  // A covered node's names resolve through the installation's own wildcard; a record left for
+  // one points at the installation, never at a released provider IP, so it is left alone.
+  if (target.recordAddress.covered) return { live: true };
+  if (target.recordAddress.address !== record.content) {
+    return { live: false, reason: 'ip_mismatch' };
+  }
   return { live: true };
 }
 
@@ -118,7 +130,7 @@ async function loadRouteTargets(env: Env, environmentIds: string[]): Promise<Rou
   if (environmentIds.length === 0) return targets;
   const result = await env.DATABASE.prepare(
     `SELECT de.id AS environmentId, de.node_id AS nodeId, n.status AS nodeStatus,
-            n.ip_address AS ipAddress,
+            n.ip_address AS ipAddress, n.transport AS transport,
             n.runtime_termination_confirmed_at AS terminationConfirmedAt
      FROM deployment_environments de
      LEFT JOIN nodes n ON n.id = de.node_id
@@ -133,19 +145,27 @@ async function loadRouteTargets(env: Env, environmentIds: string[]): Promise<Rou
     const nodeStatus = nullableString(row.nodeStatus);
     const ipAddress = nullableString(row.ipAddress);
     const terminationConfirmedAt = nullableString(row.terminationConfirmedAt);
+    const transport = nullableString(row.transport);
     if (typeof environmentId !== 'string') continue;
     if (
       nodeId === undefined ||
       nodeStatus === undefined ||
       ipAddress === undefined ||
-      terminationConfirmedAt === undefined
+      terminationConfirmedAt === undefined ||
+      transport === undefined
     ) {
       // A row we cannot read is never a reason to delete (.claude/rules/50).
       log.warn('dns.app_route_target_row_skipped', { environmentId, action: 'kept_records' });
       targets.set(environmentId, 'unknown');
       continue;
     }
-    targets.set(environmentId, { nodeId, nodeStatus, ipAddress, terminationConfirmedAt });
+    targets.set(environmentId, {
+      nodeId,
+      nodeStatus,
+      ipAddress,
+      terminationConfirmedAt,
+      recordAddress: appRouteRecordAddress({ transport, ipAddress }, env),
+    });
   }
   return targets;
 }
@@ -242,12 +262,16 @@ async function cleanupRecords(
         continue;
       }
       const target = fresh.get(record.environmentId);
-      if (current.reason === 'ip_mismatch' && target && target !== 'unknown' && target.ipAddress) {
+      const liveAddress =
+        target && target !== 'unknown' && !target.recordAddress.covered
+          ? target.recordAddress.address
+          : null;
+      if (current.reason === 'ip_mismatch' && target && target !== 'unknown' && liveAddress) {
         // The environment runs on a live node at another address, so its release fetch may be
         // upserting this very record right now. Repointing converges with that upsert, where a
         // delete could race it and remove the new route (Cloudflare has no conditional delete).
         // Either way the record stops pointing at the released IP.
-        await upsertAppRouteDNSRecord(record.name, target.ipAddress, env);
+        await upsertAppRouteDNSRecord(record.name, liveAddress, env);
         counts.repointed++;
         attempts++;
         log.info('dns.app_route_dangling_repointed', {
@@ -256,7 +280,7 @@ async function cleanupRecords(
           hostname: record.name,
           recordId: record.id,
           fromContent: record.content,
-          toContent: target.ipAddress,
+          toContent: liveAddress,
           environmentId: record.environmentId,
           liveNodeId: target.nodeId,
         });

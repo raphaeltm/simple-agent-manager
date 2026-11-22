@@ -25,6 +25,25 @@ export interface AppRouteDnsNode {
   ipAddress: string | null;
 }
 
+/**
+ * The address a node's app-route records point at: `covered` when the installation's wildcard
+ * record already serves them (no records are written), else the transport's ingress address or
+ * the node's own IP (null while the node has none yet). The single answer shared by the release
+ * fetch that writes the records and the cleanup that judges them
+ * (`services/app-route-dns-reconciliation.ts`).
+ */
+export function appRouteRecordAddress(
+  node: AppRouteDnsNode,
+  env: Env
+): { covered: true } | { covered: false; address: string | null } {
+  // `?? null`: nodeTransportExtension(undefined) means "the installation's transport", which a
+  // stored node never is; a node row without the column must take the public path.
+  const extension = nodeTransportExtension(node.transport ?? null);
+  const address = extension?.appRouteAddress ? extension.appRouteAddress(env) : undefined;
+  if (address === null) return { covered: true };
+  return { covered: false, address: address ?? node.ipAddress };
+}
+
 /** Writes (or, when covered, skips) the A record of every route a release fetch returns. */
 export async function upsertReleaseRouteRecords(
   routes: Pick<DeploymentRouteTarget, 'hostname'>[],
@@ -32,12 +51,9 @@ export async function upsertReleaseRouteRecords(
   env: Env
 ): Promise<void> {
   if (routes.length === 0) return;
-  // `?? null`: nodeTransportExtension(undefined) means "the installation's transport", which a
-  // stored node never is; a node row without the column must take the public path.
-  const extension = nodeTransportExtension(node.transport ?? null);
-  const address = extension?.appRouteAddress ? extension.appRouteAddress(env) : undefined;
-  if (address === null) return;
-  const target = address ?? node.ipAddress;
+  const resolved = appRouteRecordAddress(node, env);
+  if (resolved.covered) return;
+  const target = resolved.address;
   if (!target) {
     throw errors.conflict(
       'Deployment node does not have an IP address yet; retry after provisioning completes'
