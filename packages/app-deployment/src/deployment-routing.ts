@@ -27,7 +27,8 @@ export const DEFAULT_DEPLOYMENT_ROUTE_PORT_SPAN = 100;
  * that is further mitigated by bridge-network isolation.
  */
 
-const MAX_SERVICE_LABEL_LENGTH = 24;
+/** Longest service part of an app-route label (`buildRouteHostname`). */
+export const MAX_SERVICE_LABEL_LENGTH = 24;
 const MAX_TCP_PORT = 65_535;
 
 export interface DeploymentRouteTarget {

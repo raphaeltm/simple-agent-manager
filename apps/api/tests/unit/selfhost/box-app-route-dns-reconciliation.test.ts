@@ -12,7 +12,10 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { installBoxDns } from '../../../src/selfhost/dns';
 import { installReverseTunnelTransport } from '../../../src/selfhost/reverse-tunnel/transport';
-import { runAppRouteDnsReconciliation } from '../../../src/services/app-route-dns-reconciliation';
+import {
+  releaseNodeAppRouteDnsRecords,
+  runAppRouteDnsReconciliation,
+} from '../../../src/services/app-route-dns-reconciliation';
 import { resetBoxDnsBackendForTests } from '../../../src/services/dns-provider';
 import {
   applySqliteMigration,
@@ -115,5 +118,27 @@ describe('dangling app-route sweep on reverse-tunnel deployment nodes', () => {
       { id: 'live-at-node', content: BOX_IP },
     ]);
     expect(result).toMatchObject({ kept: 1, repointed: 1, deleted: 1, failed: 0 });
+  });
+
+  it('skips release cleanup for wildcard-covered tunnel routes even with a Cloudflare zone', async () => {
+    resetBoxDnsBackendForTests();
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    // Box DNS off: the reverse tunnel's routes are covered by the operator's wildcard.
+    const wildcard = {
+      ...env,
+      SAM_DNS_PROVIDER: undefined,
+      CF_ZONE_ID: 'zone',
+      CF_API_TOKEN: 'token',
+    } as unknown as Env;
+    expect(
+      await releaseNodeAppRouteDnsRecords(wildcard, {
+        id: 'tunnel-node',
+        nodeRole: 'deployment',
+        ipAddress: NODE_IP,
+        transport: 'reverse-tunnel',
+      })
+    ).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

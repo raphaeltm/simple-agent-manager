@@ -10,6 +10,7 @@
  * Both DNS providers go through the same seam (`dns-provider.ts`): Cloudflare's list API, or
  * the self-host box's own zone in D1.
  */
+import { MAX_SERVICE_LABEL_LENGTH } from '@simple-agent-manager/app-deployment';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
@@ -35,8 +36,11 @@ const ROUTE_INDEX_RE = /^r[1-9]\d*$/;
 /** A port as `buildRouteHostname` writes it: canonical decimal (no leading zero), 1-65535. */
 const PORT_RE = /^[1-9]\d{0,4}$/;
 const MAX_PORT = 65535;
-// `buildRouteHostname` truncates the sanitized service, which can leave a trailing hyphen.
-const SERVICE_RE = /^[a-z0-9][a-z0-9-]*$/;
+/**
+ * The service part as `buildRouteHostname` writes it: runs of other characters collapsed to one
+ * hyphen, none leading, then cut to MAX_SERVICE_LABEL_LENGTH (which can leave one trailing).
+ */
+const SERVICE_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*-?$/;
 
 export interface AppRouteDnsRecord {
   id: string;
@@ -52,6 +56,15 @@ export interface AppRouteDnsPage {
   records: AppRouteDnsRecord[];
   /** How many A records the provider returned for this page, before the name re-parse. */
   providerCount: number;
+}
+
+/**
+ * Whether this installation has a DNS API the cleanup can use: the box's own zone, or a
+ * Cloudflare zone and token. A self-host install whose operator manages DNS with a wildcard has
+ * neither, and nothing to clean up: SAM never wrote a per-route record there.
+ */
+export function hasAppRouteDnsApi(env: Env): boolean {
+  return Boolean(boxDnsBackendFor(env)) || Boolean(env.CF_ZONE_ID && env.CF_API_TOKEN);
 }
 
 /** The app-route zone suffix, `.apps.{BASE_DOMAIN}`, or null when BASE_DOMAIN is unset. */
@@ -85,7 +98,8 @@ export function parseAppRouteHostname(
   if (!ROUTE_INDEX_RE.test(routeIndex)) return null;
   if (!PORT_RE.test(port) || Number(port) > MAX_PORT) return null;
   if (!ENVIRONMENT_ID_LABEL_RE.test(envPart)) return null;
-  if (!SERVICE_RE.test(serviceParts.join('-'))) return null;
+  const service = serviceParts.join('-');
+  if (service.length > MAX_SERVICE_LABEL_LENGTH || !SERVICE_RE.test(service)) return null;
   return { environmentId: envPart.toUpperCase() };
 }
 

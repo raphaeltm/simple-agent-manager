@@ -173,6 +173,7 @@ export {
   collectEnvironmentRouteHostnames,
   environmentPortOffset,
   extractComposeRouteHints,
+  MAX_SERVICE_LABEL_LENGTH,
 } from './deployment-routing';
 export type {
   CreateVolumeOptions,

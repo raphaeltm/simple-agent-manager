@@ -49,6 +49,7 @@ import {
   type AppRouteDnsRecord,
   appRouteNameSuffix,
   deleteObservedAppRouteDnsRecord,
+  hasAppRouteDnsApi,
   listAppRouteDnsRecordsPage,
   repointObservedAppRouteDnsRecord,
 } from './dns-app-route-inventory';
@@ -378,13 +379,25 @@ async function settingValue(
  */
 export async function releaseNodeAppRouteDnsRecords(
   env: Env,
-  node: { id: string; nodeRole: string | null; ipAddress: string | null },
+  node: {
+    id: string;
+    nodeRole: string | null;
+    ipAddress: string | null;
+    transport?: string | null;
+  },
   signal?: AbortSignal
 ): Promise<AppRouteCleanupCounts | null> {
   // Only deployment nodes serve app routes; any other node's IP is left to the sweep, so a
   // DNS outage cannot block workspace teardown.
   if (node.nodeRole !== 'deployment' || !node.ipAddress) return null;
-  if (!appRouteNameSuffix(env.BASE_DOMAIN)) return null;
+  if (!appRouteNameSuffix(env.BASE_DOMAIN) || !hasAppRouteDnsApi(env)) return null;
+  // Wildcard-covered routes never had per-route records (`upsertReleaseRouteRecords`).
+  if (
+    appRouteRecordAddress({ transport: node.transport ?? null, ipAddress: node.ipAddress }, env)
+      .covered
+  ) {
+    return null;
+  }
   const [perPage, budgetMs] = await Promise.all([
     settingValue(env, 'sweepPageSize'),
     settingValue(env, 'sweepBudgetMs'),
@@ -443,20 +456,25 @@ export interface AppRouteDnsSweepResult extends AppRouteCleanupCounts {
   startPage: number;
   nextPage: number;
   cycleComplete: boolean;
-  stoppedBy: 'end_of_zone' | 'deadline' | 'delete_limit' | 'no_base_domain';
+  stoppedBy: 'end_of_zone' | 'deadline' | 'delete_limit' | 'no_base_domain' | 'no_dns_api';
 }
 
 /** The cron backstop: scan the zone's app-route records page by page and delete dangling ones. */
 export async function runAppRouteDnsReconciliation(env: Env): Promise<AppRouteDnsSweepResult> {
   const totals = emptyCounts();
-  if (!appRouteNameSuffix(env.BASE_DOMAIN)) {
+  const skipReason = !appRouteNameSuffix(env.BASE_DOMAIN)
+    ? ('no_base_domain' as const)
+    : !hasAppRouteDnsApi(env)
+      ? ('no_dns_api' as const)
+      : null;
+  if (skipReason) {
     const result = {
       ...totals,
       pagesRead: 0,
       startPage: 1,
       nextPage: 1,
       cycleComplete: false,
-      stoppedBy: 'no_base_domain' as const,
+      stoppedBy: skipReason,
     };
     log.info('dns.app_route_sweep_completed', { ...result });
     return result;

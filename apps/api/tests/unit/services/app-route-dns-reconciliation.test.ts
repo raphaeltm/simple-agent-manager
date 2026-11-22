@@ -957,3 +957,33 @@ describe('Codex review round 4', () => {
     expect(zone.records.has('dangling-missing')).toBe(true);
   });
 });
+
+describe('Codex review round 5', () => {
+  it('accepts only the service part buildRouteHostname can write', () => {
+    const name = (service: string) => `r1-${service}-80-${ENV_LIVE.toLowerCase()}.apps.${BASE}`;
+    expect(parseAppRouteHostname(name('foo--bar'), BASE)).toBeNull();
+    expect(parseAppRouteHostname(name('a'.repeat(25)), BASE)).toBeNull();
+    // Controls: a hyphenated service, and one cut at 24 characters leaving a trailing hyphen.
+    expect(parseAppRouteHostname(name('my-api'), BASE)).toEqual({ environmentId: ENV_LIVE });
+    expect(parseAppRouteHostname(name(`${'a'.repeat(23)}-`), BASE)).toEqual({
+      environmentId: ENV_LIVE,
+    });
+  });
+
+  it('does nothing on an installation with no DNS API (operator-managed wildcard DNS)', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const noApi = { ...env, CF_ZONE_ID: undefined, CF_API_TOKEN: undefined } as unknown as Env;
+    await seedNode('releasing', 'destroying', RELEASED_IP);
+    expect(
+      await releaseNodeAppRouteDnsRecords(noApi, {
+        id: 'releasing',
+        nodeRole: 'deployment',
+        ipAddress: RELEASED_IP,
+      })
+    ).toBeNull();
+    const result = await runAppRouteDnsReconciliation(noApi);
+    expect(result.stoppedBy).toBe('no_dns_api');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
