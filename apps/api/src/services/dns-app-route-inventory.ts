@@ -68,8 +68,8 @@ export function parseAppRouteHostname(
   const name = hostname.trim().toLowerCase().replace(/\.$/, '');
   if (!name.endsWith(suffix)) return null;
   const label = name.slice(0, -suffix.length);
-  // One DNS label: `r{n}-{service...}-{port}-{env}`.
-  if (!label || label.length > 63 || label.includes('.')) return null;
+  // One DNS label, `r{n}-{service...}-{port}-{env}`: no part below admits a dot.
+  if (!label || label.length > 63) return null;
   const parts = label.split('-');
   if (parts.length < 4) return null;
   const routeIndex = parts[0] ?? '';
