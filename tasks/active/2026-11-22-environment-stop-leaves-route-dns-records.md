@@ -51,27 +51,40 @@ Found 2026-11-22 during hosted staging verification of PR #2974 (primary staging
 
 ## Implementation checklist
 
-- [ ] `services/dns-app-route-reconcile.ts`: strict hostname parser, paged lister (Cloudflare +
+- [x] `services/dns-app-route-inventory.ts` + `services/app-route-dns-reconciliation.ts`: strict hostname parser, paged lister (Cloudflare +
       box seam), liveness predicate (one D1 query per batch, bind-limit aware), guarded deleter,
       `releaseNodeAppRouteDnsRecords(env, node)` and `runAppRouteDnsReconciliation(env)`
-- [ ] Box backend: `listARecords({ nameSuffix, content, page, perPage })`
-- [ ] Call release cleanup from every proof branch of `deleteNodeResourcesStrict` for VM nodes
+- [x] Box backend: `listARecords({ nameSuffix, content, page, perPage })`
+- [x] Call release cleanup from every proof branch of `deleteNodeResourcesStrict` for VM nodes
       with an IP; failure throws (retryable, fail closed)
-- [ ] Scheduled sweep wired into `scheduled/handler.ts` via `sweeps.isolate`, deadline-bounded,
+- [x] Scheduled sweep wired into the cron (`scheduled/node-teardown-sweeps.ts`) via `sweeps.isolate`, deadline-bounded,
       resumable page cursor in KV, per-tick delete cap, structured per-deletion logs
-- [ ] Configurable knobs with `DEFAULT_*` constants
-- [ ] Fake Cloudflare DNS that enforces the list/delete contract (rule 23)
-- [ ] Tests: stop route on real SQL removes records; start's release-fetch upsert recreates them;
+- [x] Configurable knobs with `DEFAULT_*` constants
+- [x] Fake Cloudflare DNS that enforces the list/delete contract (rule 23)
+- [x] Tests: stop route on real SQL removes records; start's release-fetch upsert recreates them;
       failed start, scheduled cleanup and node delete paths; sweep deletes dangling, keeps live,
       never touches non-app records; box backend path; each guard deleted once
-- [ ] Docs: deployment/self-hosting docs mention the sweep and its config
-- [ ] Staging: stop/start on Test Project 1 `staging` env; sweep removes the dangling record
-- [ ] Production: report swept counts + hostnames (read-only token)
+- [x] Docs: deployment/self-hosting docs mention the sweep and its config
+- [ ] Staging: stop/start on Test Project 1 `staging` env; sweep removes the dangling record (pending: deploy after adversarial review)
+- [ ] Production: report swept counts + hostnames (read-only token) (pending: after merge)
 
 ## Acceptance Criteria
 
-- [ ] Stop deletes every route record of the environment once its node is released, and Start
+- [x] Stop deletes every route record of the environment once its node is released, and Start
       recreates them through the existing release-fetch upsert
-- [ ] A test through the real stop route asserts the records are gone after a stop that deletes the node
-- [ ] A bounded, isolated, logged sweep removes existing dangling app-route records and never
+- [x] A test through the real stop route asserts the records are gone after a stop that deletes the node
+- [x] A bounded, isolated, logged sweep removes existing dangling app-route records and never
       touches records outside SAM's app-route naming
+
+## Implementation notes
+
+- Shared choke point: `deleteNodeResourcesStrict` calls `releaseNodeAppRouteDnsRecords` last in
+  every termination-proof branch. Sweep: `runAppRouteDnsReconciliation` in the node teardown
+  group of the 5-minute cron (`scheduled/node-teardown-sweeps.ts`).
+- Review fixes (a1d54bf8b): termination proof counts as released (status `error` after VM
+  deletion); per-record re-judge on fresh D1 before delete (recycled IP); unreadable rows don't
+  wedge teardown; release bounded by `appRouteDns.sweepBudgetMs`; delete cap default 50.
+- Guard-deletion proofs: every guard's removal turns at least one named test red (recorded in
+  the PR body). The type check and the re-read type check back each other up; removing both
+  turns "never deletes a non-A record" red.
+- Workspace shell `CF_TOKEN` is a placeholder; real values only via `exec_with_secrets`.
