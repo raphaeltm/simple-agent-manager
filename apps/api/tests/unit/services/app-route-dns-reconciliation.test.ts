@@ -602,3 +602,36 @@ describe('released-IP judgement edges', () => {
     expect(result.unparsed).toBe(4);
   });
 });
+
+describe('sweep progress past records that always fail to delete', () => {
+  it('reaches a later dangling record when the records ahead of it always fail to delete', async () => {
+    settings.values.set('appRouteDns.sweepMaxDeletes', 2);
+    const seed = await seedWorld();
+    const zone = createFakeCloudflareDns({ zoneId: ZONE, token: TOKEN, seed });
+    // The first two dangling records in name order can never be deleted.
+    const stuck = new Set(['dangling-stopped', 'dangling-missing']);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+        init?.method === 'DELETE' && [...stuck].some((id) => String(input).endsWith(`/${id}`))
+          ? new Response(JSON.stringify({ errors: [{ code: 10000, message: 'stuck' }] }), {
+              status: 500,
+            })
+          : zone.fetch(input, init)
+      )
+    );
+
+    for (
+      let i = 0;
+      i < 10 && (zone.records.has('dangling-released') || zone.records.has('dangling-mismatch'));
+      i++
+    ) {
+      await runAppRouteDnsReconciliation(env).catch(() => undefined);
+    }
+
+    expect(zone.records.has('dangling-released')).toBe(false);
+    expect(zone.records.has('dangling-mismatch')).toBe(false);
+    for (const id of stuck) expect(zone.records.has(id)).toBe(true);
+    for (const id of KEPT_IDS) expect(zone.records.has(id), id).toBe(true);
+  });
+});

@@ -15,8 +15,13 @@
  * - {@link runAppRouteDnsReconciliation}: the 5-minute cron backstop for records that already
  *   dangle (left by older code, or by a path that skipped the release).
  *
- * A record is live only when its environment exists, is linked to a node whose VM is neither
- * released nor being released, and that node's current IP is the record's content. Anything else
+ * A record is live only when its environment exists, is linked to a node SAM has not released or
+ * started releasing (status, or the termination proof), and that node's current IP is the
+ * record's content. SAM can only judge what it recorded: a VM deleted at the provider behind
+ * SAM's back keeps a `running` row, and its records with it, until a provider-existence check
+ * exists for deployment nodes (idea filed with PR #2976). A release fetch already in flight when
+ * a node is released can also re-create a record after the release cleanup listed; the next
+ * sweep removes it once retirement unlinks the environment. Anything else
  * is deleted, after the record is judged again against fresh D1 state and re-read from DNS with
  * its content unchanged (a release fetch may have repointed it, or a replacement node may have
  * been given the same recycled IP). Cloudflare has no conditional delete, so a repoint landing in
@@ -189,6 +194,9 @@ async function cleanupRecords(
 ): Promise<AppRouteCleanupCounts> {
   const counts = emptyCounts();
   const targets = await loadRouteTargets(env, [...new Set(records.map((r) => r.environmentId))]);
+  // Completed attempts (deleted, absent, changed). A failed delete does not spend the cap, so
+  // records that always fail cannot keep later records from being reached; the deadline still
+  // bounds the time failures can take.
   let attempts = 0;
   for (const record of records) {
     counts.examined++;
@@ -205,7 +213,6 @@ async function cleanupRecords(
       counts.deferred++;
       continue;
     }
-    attempts++;
     try {
       // Judge again on fresh D1 state: a start may have linked this environment to a node since
       // the page was judged, possibly one given the same recycled IP (the release fetch then
@@ -214,10 +221,12 @@ async function cleanupRecords(
       const current = judgeAppRouteRecord(record, fresh.get(record.environmentId));
       if (!current || current.live) {
         counts.changed++;
+        attempts++;
         continue;
       }
       const outcome = await deleteObservedAppRouteDnsRecord(env, record, input.signal);
       counts[outcome]++;
+      attempts++;
       if (outcome === 'deleted') {
         log.info('dns.app_route_dangling_deleted', {
           trigger: input.trigger,
@@ -355,7 +364,7 @@ export async function runAppRouteDnsReconciliation(env: Env): Promise<AppRouteDn
   const deadline = Date.now() + budgetMs;
   const signal = AbortSignal.timeout(budgetMs);
   const startPage = await readCursor(env);
-  const attemptsUsed = () => totals.deleted + totals.failed + totals.changed + totals.absent;
+  const attemptsUsed = () => totals.deleted + totals.changed + totals.absent;
   let page = startPage;
   let pagesRead = 0;
   let cycleComplete = false;
