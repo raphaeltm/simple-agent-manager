@@ -21,7 +21,7 @@ import { runRuntimeSecretRequestSweep } from '../services/runtime-secret-request
 import { checkProvisioningTimeouts } from '../services/timeout';
 import { migrateOrphanedWorkspaces } from '../services/workspace-migration';
 import { runWorkspaceResourceHistoryCleanup } from '../services/workspace-resource-history';
-import { runScheduledCapacityPoolContinuations } from './capacity-pool-continuation';
+import { runCapacityPoolContinuationCron } from './capacity-pool-continuation-cron';
 import { runScheduledCapacityPoolReconciliation } from './capacity-pool-reconciliation';
 import { runScheduledComposeImageArtifactCleanup } from './compose-image-artifact-cleanup';
 import { runComputeUsageCleanup } from './compute-usage-cleanup';
@@ -61,30 +61,7 @@ export async function scheduled(
   ctx: ExecutionContext
 ): Promise<void> {
   if (controller.cron === CAPACITY_POOL_CONTINUATION_CRON) {
-    const type = 'capacity-pool-continuation';
-    log.info('cron.started', { cron: controller.cron, type });
-    const continuationSweeps = createSweepIsolator(env);
-    const result = await continuationSweeps.isolate('capacity_pool_continuation', async () => {
-      if (!(await isOperationalLoopEnabled(env, 'cron'))) {
-        log.info('cron.skipped_disabled', { cron: controller.cron, type, switch: 'cron' });
-        return { resumed: 0, failed: 0, skipped: true };
-      }
-      return { ...(await runScheduledCapacityPoolContinuations(env)), skipped: false };
-    });
-    const failedSweeps = continuationSweeps.failedSweeps();
-    log.info('cron.completed', {
-      cron: controller.cron,
-      type,
-      resumed: result?.resumed ?? null,
-      failed: result?.failed ?? 1,
-      skipped: result?.skipped ?? false,
-      failedSweeps,
-    });
-    if (failedSweeps.length > 0) {
-      await notifyFailedSweeps(env, failedSweeps).catch(() => {
-        log.error('cron.failed_sweep_notification_failed', { type });
-      });
-    }
+    await runCapacityPoolContinuationCron(controller, env);
     return;
   }
   const isDailyForward = controller.cron === DAILY_CRON;
