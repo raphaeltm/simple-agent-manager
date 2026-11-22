@@ -362,3 +362,19 @@ export const TUNNEL_FIREWALL_WRITE_FILE = `  - path: /etc/sam/firewall/setup-fir
       iptables-save > /etc/iptables/rules.v4
       ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
       logger -t sam-firewall "Firewall configured: tunnel node, no public agent/SSH ingress"`;
+
+/**
+ * Reverse-tunnel mode: the tunnel firewall, plus 80 and 443. Nothing on such a node serves them
+ * (a deployment node's Caddy binds loopback; app traffic arrives through the tunnel), so a public
+ * packet to either is dropped too. The Cloudflare-tunnel firewall keeps them open: its deployment
+ * nodes serve app routes on their own public 80/443.
+ */
+export const REVERSE_TUNNEL_FIREWALL_WRITE_FILE = (() => {
+  const loop = '        for port in "$VM_AGENT_PORT" "$TUNNEL_PORT"; do\n';
+  const reverse = TUNNEL_FIREWALL_WRITE_FILE.replace(
+    loop,
+    '        for port in "$VM_AGENT_PORT" "$TUNNEL_PORT" 80 443; do\n'
+  );
+  if (reverse === TUNNEL_FIREWALL_WRITE_FILE) throw new Error('tunnel firewall port loop not found');
+  return reverse;
+})();

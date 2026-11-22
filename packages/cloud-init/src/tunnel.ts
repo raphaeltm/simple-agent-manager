@@ -8,6 +8,7 @@ import {
   ORIGIN_CA_BOOTSTRAP_RUNCMD,
   TUNNEL_BOOTSTRAP_RUNCMD,
   TUNNEL_CONNECTOR_RUNCMD,
+  REVERSE_TUNNEL_FIREWALL_WRITE_FILE,
   TUNNEL_FIREWALL_WRITE_FILE,
   TUNNEL_WRITE_FILES,
 } from './template-ingress';
@@ -186,7 +187,7 @@ export function ingressFragments(variables: CloudInitVariables): Record<string, 
       '{{ ingress_bootstrap_runcmd }}': REVERSE_TUNNEL_BOOTSTRAP_RUNCMD,
       '{{ ingress_connector_runcmd }}': REVERSE_TUNNEL_CONNECTOR_RUNCMD,
       '{{ ingress_write_files }}': REVERSE_TUNNEL_WRITE_FILES,
-      '{{ ingress_firewall_write_file }}': TUNNEL_FIREWALL_WRITE_FILE,
+      '{{ ingress_firewall_write_file }}': REVERSE_TUNNEL_FIREWALL_WRITE_FILE,
     };
   }
   const tunnel = isCloudflareTunnelMode(variables);

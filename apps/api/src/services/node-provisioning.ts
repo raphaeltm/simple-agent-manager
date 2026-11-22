@@ -319,6 +319,7 @@ export async function provisionNode(
           environmentLabel: resolveEnvironmentLabel(env),
           installationId: resolveInstallationId(env),
           runtimeIncarnationId: provisioningRuntimeIncarnationId ?? undefined,
+          transport,
         }),
       },
       node

@@ -37,7 +37,8 @@ import {
   type DeploymentRouteTarget,
 } from '../services/deployment-routing';
 import { buildVolumeMountDescriptors } from '../services/deployment-volumes';
-import { cleanupAppRouteDNSRecords, upsertAppRouteDNSRecord } from '../services/dns';
+import { upsertReleaseRouteRecords } from '../services/app-route-dns-target';
+import { cleanupAppRouteDNSRecords } from '../services/dns';
 import { verifyCallbackToken } from '../services/jwt';
 import { nodeStatusTerminatesCallbacks } from '../services/node-callback-auth';
 import { recordDeploymentReleaseLifecycleEventBestEffort } from '../services/project-lifecycle-events';
@@ -168,6 +169,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       userId: schema.nodes.userId,
       status: schema.nodes.status,
       ipAddress: schema.nodes.ipAddress,
+      transport: schema.nodes.transport,
       providerInstanceId: schema.nodes.providerInstanceId,
     })
     .from(schema.nodes)
@@ -320,17 +322,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       });
     }
 
-    if (routes.length > 0) {
-      const nodeIp = node.ipAddress;
-      if (!nodeIp) {
-        throw errors.conflict(
-          'Deployment node does not have an IP address yet; retry after provisioning completes'
-        );
-      }
-      await Promise.all(
-        routes.map((route) => upsertAppRouteDNSRecord(route.hostname, nodeIp, c.env))
-      );
-    }
+    await upsertReleaseRouteRecords(routes, node, c.env);
   } else {
     const manifest = JSON.parse(release.manifest);
 
@@ -341,18 +333,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
     });
 
-    if (routes.length > 0) {
-      const nodeIp = node.ipAddress;
-      if (!nodeIp) {
-        throw errors.conflict(
-          'Deployment node does not have an IP address yet; retry after provisioning completes'
-        );
-      }
-
-      await Promise.all(
-        routes.map((route) => upsertAppRouteDNSRecord(route.hostname, nodeIp, c.env))
-      );
-    }
+    await upsertReleaseRouteRecords(routes, node, c.env);
 
     // Resolve secret references — inject decrypted values for the node
     const secretNames = collectSecretNames(manifest);

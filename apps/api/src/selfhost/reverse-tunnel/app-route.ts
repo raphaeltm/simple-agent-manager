@@ -1,0 +1,197 @@
+/**
+ * App ingress for deployment nodes on the reverse tunnel (self-host box only).
+ *
+ * A deployment node on the box has no public port and does no ACME. Its app hostnames
+ * (`r<n>-<service>-<port>-<env>.apps.<BASE_DOMAIN>`) resolve to the box. The box's Caddy terminates
+ * TLS with its own `*.apps.` wildcard and asks this decision (forward_auth,
+ * `GET /api/self-host/gateway/app-route`) where to send each request. The answer names the node's
+ * lease upstream (`127.0.0.1:<leasePort>`, frps) and the vm-agent URI
+ * `/deployment/app-ingress/<hostname>/<path>`. It also carries a node-management token for that
+ * node, which Caddy sends in `X-SAM-Node-Authorization` so the app's own Authorization header
+ * reaches the app untouched. The vm-agent re-checks the hostname against the routes it applied and
+ * hands the request to its loopback-only Caddy (`packages/vm-agent/internal/server/app_ingress.go`).
+ *
+ * A hostname reaches a node only when ALL of these hold, read from D1 on every request:
+ * - it is one label directly under `apps.<BASE_DOMAIN>`;
+ * - the label's environment exists, is not stopping or stopped, and is bound to a node
+ *   (`deployment_environments.node_id`); the node comes from that binding, never from the request;
+ * - the environment's project and the node have the same owner;
+ * - the hostname is exactly a route target of the environment's latest release;
+ * - the node is a managed VM deployment node on this transport, not being torn down, with an
+ *   active lease on its current incarnation (`resolveReverseTunnelAgentOrigin`).
+ * Every miss answers the same 404, so the decision never reveals which check failed.
+ */
+import { getEnvironmentPublicRouteTargets } from '@simple-agent-manager/app-deployment';
+import { drizzle } from 'drizzle-orm/d1';
+import * as v from 'valibot';
+
+import * as schema from '../../db/schema';
+import { log } from '../../lib/logger';
+import { signNodeManagementToken } from '../../services/jwt';
+import { NodeAgentRouteError } from '../../services/node-agent-route';
+import { boxPublicIPv4, isBoxDnsEnabled } from '../dns';
+import type { ReverseTunnelEnv as Env } from './env';
+import { resolveReverseTunnelAgentOrigin } from './route';
+
+/** Response headers the box's Caddy copies into the upstream request (caddy/sam.d/app-routes.caddy). */
+export const APP_ROUTE_HEADER = {
+  upstream: 'X-SAM-Upstream',
+  upstreamUri: 'X-SAM-Upstream-Uri',
+  nodeAuthorization: 'X-SAM-Upstream-Node-Authorization',
+  nodeId: 'X-SAM-Node-Id',
+} as const;
+
+/** The vm-agent route that carries app traffic (`server.go`, `handleDeploymentAppIngress`). */
+export const APP_INGRESS_PATH_PREFIX = '/deployment/app-ingress';
+
+/** `r<n>-<service>-<port>-<env id, lowercased>`; the environment part is the last segment. */
+const APP_ROUTE_LABEL_RE = /^r[1-9][0-9]{0,3}-[a-z0-9-]+-[1-9][0-9]{0,4}-([a-z0-9]{1,40})$/;
+
+/** Environments whose routes the node has removed or is removing. */
+const ENVIRONMENT_ROUTES_GONE = new Set(['stopping', 'stopped']);
+const NODE_TEARDOWN_STATUSES = new Set(['deleted', 'stopped', 'destroying']);
+
+const BindingSchema = v.object({
+  environmentId: v.string(),
+  environmentStatus: v.string(),
+  nodeId: v.string(),
+  projectUser: v.string(),
+  nodeUser: v.string(),
+  nodeRole: v.nullable(v.string()),
+  nodeStatus: v.nullable(v.string()),
+  runtime: v.nullable(v.string()),
+  nodeClass: v.nullable(v.string()),
+  transport: v.nullable(v.string()),
+});
+type Binding = v.InferOutput<typeof BindingSchema>;
+
+export type AppRouteDecision =
+  | { allow: true; nodeId: string; upstream: string; upstreamUri: string; nodeAuthorization: string }
+  | { allow: false; status: 404 | 503; code: string };
+
+/**
+ * Where a reverse-tunnel deployment node's app-route records point (the extension's
+ * `appRouteAddress`). With DNS on the box: the box's own address, required, since the records are
+ * the only way the names resolve. Without it: null, because the operator's `*.SAM_DOMAIN` record
+ * already resolves every `*.apps.` name to the box, and the Cloudflare API is not there to call.
+ */
+export function reverseTunnelAppRouteAddress(env: Env): string | null {
+  if (!isBoxDnsEnabled(env)) return null;
+  const address = boxPublicIPv4(env);
+  if (!address) {
+    throw new Error(
+      'Deployment nodes on the reverse tunnel need SAM_DNS_PUBLIC_IPV4 (the box address their app routes resolve to)'
+    );
+  }
+  return address;
+}
+
+/** The environment id a hostname names, or null when it is not one app-route label under apps. */
+export function parseAppRouteHostname(env: Pick<Env, 'BASE_DOMAIN'>, host: string): string | null {
+  const baseDomain = env.BASE_DOMAIN?.trim().toLowerCase();
+  if (!baseDomain || host !== host.toLowerCase()) return null;
+  const suffix = `.apps.${baseDomain}`;
+  if (!host.endsWith(suffix)) return null;
+  const label = host.slice(0, -suffix.length);
+  if (label.length > 63) return null;
+  const match = APP_ROUTE_LABEL_RE.exec(label);
+  // Environment ids are ULIDs; hostnames carry them lowercased (buildRouteHostname).
+  return match?.[1] ? match[1].toUpperCase() : null;
+}
+
+async function readBinding(env: Env, environmentId: string): Promise<Binding | null> {
+  const row = await env.DATABASE.prepare(
+    `SELECT e.id AS environmentId, e.status AS environmentStatus, e.node_id AS nodeId,
+            p.user_id AS projectUser, n.user_id AS nodeUser, n.node_role AS nodeRole,
+            n.status AS nodeStatus, n.runtime AS runtime, n.node_class AS nodeClass,
+            n.transport AS transport
+       FROM deployment_environments e
+       JOIN projects p ON p.id = e.project_id
+       JOIN nodes n ON n.id = e.node_id
+      WHERE e.id = ?`
+  )
+    .bind(environmentId)
+    .first<unknown>();
+  if (!row) return null;
+  const parsed = v.safeParse(BindingSchema, row);
+  if (!parsed.success) {
+    log.warn('self_host_app_route.invalid_binding', { environmentId });
+    return null;
+  }
+  return parsed.output;
+}
+
+function bindingRefusal(binding: Binding): string | null {
+  if (ENVIRONMENT_ROUTES_GONE.has(binding.environmentStatus)) return 'environment_stopped';
+  if (binding.projectUser !== binding.nodeUser) return 'owner_mismatch';
+  if (
+    binding.nodeRole !== 'deployment' ||
+    binding.runtime !== 'vm' ||
+    binding.nodeClass !== 'managed' ||
+    binding.transport !== 'reverse-tunnel'
+  ) {
+    return 'node_not_tunnel_deployment';
+  }
+  if (!binding.nodeStatus || NODE_TEARDOWN_STATUSES.has(binding.nodeStatus)) return 'node_not_live';
+  return null;
+}
+
+function refuse(host: string, code: string, status: 404 | 503 = 404): AppRouteDecision {
+  log.info('self_host_app_route.refused', { host: host.slice(0, 255), code, action: 'rejected' });
+  return { allow: false, status, code };
+}
+
+/**
+ * Decide one app request. `host` is the request's host (lowercase, no port) and `uri` its
+ * path and query, both as Caddy received them.
+ */
+export async function authorizeAppRouteRequest(
+  env: Env,
+  host: string,
+  uri: string
+): Promise<AppRouteDecision> {
+  const environmentId = parseAppRouteHostname(env, host);
+  if (!environmentId || !uri.startsWith('/')) return refuse(host, 'not_an_app_route');
+  const binding = await readBinding(env, environmentId);
+  if (!binding) return refuse(host, 'no_environment_binding');
+  const refusal = bindingRefusal(binding);
+  if (refusal) return refuse(host, refusal);
+
+  const db = drizzle(env.DATABASE, { schema });
+  const targets = await getEnvironmentPublicRouteTargets(db, env, binding.environmentId);
+  if (!targets.some((target) => target.hostname === host)) return refuse(host, 'not_a_route');
+
+  let origin: string;
+  try {
+    origin = await resolveReverseTunnelAgentOrigin(env, binding.nodeId);
+  } catch (err) {
+    if (err instanceof NodeAgentRouteError) return refuse(host, 'node_unreachable', 503);
+    throw err;
+  }
+  const { token } = await signNodeManagementToken(binding.nodeUser, binding.nodeId, null, env);
+  return {
+    allow: true,
+    nodeId: binding.nodeId,
+    upstream: new URL(origin).host,
+    upstreamUri: `${APP_INGRESS_PATH_PREFIX}/${host}${uri}`,
+    nodeAuthorization: `Bearer ${token}`,
+  };
+}
+
+/** The forward_auth answer: 200 with the decision headers, or the refusal for Caddy to send. */
+export function appRouteDecisionResponse(decision: AppRouteDecision): Response {
+  if (!decision.allow) {
+    const message =
+      decision.status === 503 ? 'This app is not reachable right now' : 'Not found';
+    return Response.json(
+      { error: decision.status === 503 ? 'APP_UNAVAILABLE' : 'NOT_FOUND', message },
+      { status: decision.status, headers: { 'Cache-Control': 'no-store' } }
+    );
+  }
+  const headers = new Headers({ 'Cache-Control': 'no-store' });
+  headers.set(APP_ROUTE_HEADER.upstream, decision.upstream);
+  headers.set(APP_ROUTE_HEADER.upstreamUri, decision.upstreamUri);
+  headers.set(APP_ROUTE_HEADER.nodeAuthorization, decision.nodeAuthorization);
+  headers.set(APP_ROUTE_HEADER.nodeId, decision.nodeId);
+  return new Response(null, { status: 200, headers });
+}

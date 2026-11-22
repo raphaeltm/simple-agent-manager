@@ -11,6 +11,8 @@
  *   (`services/node-websocket-gateway.ts`), and returns that handler's refusal for Caddy to
  *   send, or a decision naming the loopback upstream and the headers Caddy must forward.
  *
+ * - `GET {prefix}/app-route`: Caddy forward_auth for every request to a deployment app hostname
+ *   (`*.apps.{BASE_DOMAIN}`), same secret header. Decisions: `app-route.ts`.
  * - `POST {prefix}/inbound-email`: the box's sam-mx SMTP receiver hands over one inbound agent
  *   email (`inbound-email.ts`). Same secret header, plus its own on-switch.
  * - `GET {prefix}/dns-records`: the box's sam-dns server reads the zone it serves
@@ -34,6 +36,7 @@ import {
   markGatewayAuthorizationRequest,
 } from '../../services/node-websocket-gateway';
 import { handleDnsRecordsGateway } from '../dns/gateway-route';
+import { appRouteDecisionResponse, authorizeAppRouteRequest } from './app-route';
 import { authorizeFrpsPluginRequest, type FrpsPluginDecision } from './authz';
 import { getReverseTunnelGatewaySecret, isAcceptedGatewaySecret } from './config';
 import type { ReverseTunnelEnv } from './env';
@@ -212,6 +215,25 @@ export function createSelfHostGatewayRoutes(
       return frpsPluginReply({ allow: false, code: 'malformed', reason });
     }
     return frpsPluginReply(await authorizeFrpsPluginRequest(c.env, c.req.query('op'), body));
+  });
+
+  routes.get('/app-route', async (c) => {
+    if (!getReverseTunnelGatewaySecret(c.env)) return notFound();
+    if (!isAcceptedGatewaySecret(c.env, c.req.header(GATEWAY_SECRET_HEADER) ?? '')) {
+      log.warn('self_host_gateway.app_route_unauthenticated', { action: 'rejected' });
+      return unauthorized();
+    }
+    const host = (c.req.header(GATEWAY_ORIGINAL_HOST_HEADER) ?? '').toLowerCase().replace(/:\d+$/, '');
+    const uri = c.req.header('X-Forwarded-Uri') ?? '';
+    // As for WebSockets: the host must survive URL parsing unchanged, or it is refused.
+    let parsedHost: string | null = null;
+    try {
+      parsedHost = host && uri.startsWith('/') ? new URL(`https://${host}${uri}`).hostname : null;
+    } catch {
+      parsedHost = null;
+    }
+    if (!parsedHost || parsedHost !== host) return notFound();
+    return appRouteDecisionResponse(await authorizeAppRouteRequest(c.env, host, uri));
   });
 
   routes.get('/node-websocket', async (c) => {
