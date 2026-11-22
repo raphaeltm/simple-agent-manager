@@ -150,7 +150,10 @@ export async function listAppRouteDnsRecordsPage(
   );
   if (!response.ok) {
     throw new Error(
-      await readCloudflareError(response, `Failed to list app-route DNS records: ${response.status}`)
+      await readCloudflareError(
+        response,
+        `Failed to list app-route DNS records: ${response.status}`
+      )
     );
   }
   const data = await readResponseJson(

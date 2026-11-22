@@ -51,7 +51,12 @@ const host = (envId: string, index = 1, service = 'web', port = 80) =>
 let sqlite: Database.Database;
 let env: Env;
 
-async function seedNode(id: string, status: string, ipAddress: string | null, nodeRole = 'deployment') {
+async function seedNode(
+  id: string,
+  status: string,
+  ipAddress: string | null,
+  nodeRole = 'deployment'
+) {
   await drizzle(env.DATABASE)
     .insert(schema.nodes)
     .values({
@@ -69,7 +74,13 @@ async function seedNode(id: string, status: string, ipAddress: string | null, no
 async function seedEnvironment(id: string, nodeId: string | null, status = 'active') {
   await drizzle(env.DATABASE)
     .insert(schema.deploymentEnvironments)
-    .values({ id, projectId: 'project', name: id, nodeId, status } as schema.NewDeploymentEnvironmentRow);
+    .values({
+      id,
+      projectId: 'project',
+      name: id,
+      nodeId,
+      status,
+    } as schema.NewDeploymentEnvironmentRow);
 }
 
 function rec(id: string, name: string, content: string, type = 'A'): FakeDnsRecord {
@@ -106,7 +117,12 @@ async function seedWorld() {
   ];
 }
 
-const DANGLING_IDS = ['dangling-stopped', 'dangling-missing', 'dangling-released', 'dangling-mismatch'];
+const DANGLING_IDS = [
+  'dangling-stopped',
+  'dangling-missing',
+  'dangling-released',
+  'dangling-mismatch',
+];
 const KEPT_IDS = ['live', 'live-2', ...FOREIGN_RECORDS.map((r) => r.id)];
 
 beforeEach(() => {
@@ -134,7 +150,9 @@ describe('parseAppRouteHostname', () => {
   it('accepts exactly buildRouteHostname output for this BASE_DOMAIN', () => {
     expect(parseAppRouteHostname(host(ENV_LIVE), BASE)).toEqual({ environmentId: ENV_LIVE });
     // A truncated service can end in a hyphen.
-    expect(parseAppRouteHostname(`r12-my-svc--3000-${ENV_LIVE.toLowerCase()}.apps.${BASE}`, BASE)).toEqual({
+    expect(
+      parseAppRouteHostname(`r12-my-svc--3000-${ENV_LIVE.toLowerCase()}.apps.${BASE}`, BASE)
+    ).toEqual({
       environmentId: ENV_LIVE,
     });
     for (const record of FOREIGN_RECORDS.filter((r) => r.type === 'A')) {
@@ -142,8 +160,12 @@ describe('parseAppRouteHostname', () => {
     }
     expect(parseAppRouteHostname(host(ENV_LIVE), 'other.com')).toBeNull();
     expect(parseAppRouteHostname(host(ENV_LIVE), '')).toBeNull();
-    expect(parseAppRouteHostname(`r0-web-80-${ENV_LIVE.toLowerCase()}.apps.${BASE}`, BASE)).toBeNull();
-    expect(parseAppRouteHostname(`r1-web-x80-${ENV_LIVE.toLowerCase()}.apps.${BASE}`, BASE)).toBeNull();
+    expect(
+      parseAppRouteHostname(`r0-web-80-${ENV_LIVE.toLowerCase()}.apps.${BASE}`, BASE)
+    ).toBeNull();
+    expect(
+      parseAppRouteHostname(`r1-web-x80-${ENV_LIVE.toLowerCase()}.apps.${BASE}`, BASE)
+    ).toBeNull();
   });
 });
 
@@ -151,17 +173,53 @@ describe('judgeAppRouteRecord', () => {
   it('keeps a record it cannot judge and names the reason for each dangling shape', () => {
     const record = { content: LIVE_IP };
     expect(judgeAppRouteRecord(record, 'unknown')).toBeNull();
-    expect(judgeAppRouteRecord(record, undefined)).toEqual({ live: false, reason: 'environment_missing' });
+    expect(judgeAppRouteRecord(record, undefined)).toEqual({
+      live: false,
+      reason: 'environment_missing',
+    });
     expect(
-      judgeAppRouteRecord(record, { nodeId: 'n', nodeStatus: 'running', ipAddress: LIVE_IP })
+      judgeAppRouteRecord(record, {
+        nodeId: 'n',
+        nodeStatus: 'running',
+        ipAddress: LIVE_IP,
+        terminationConfirmedAt: null,
+      })
     ).toEqual({ live: true });
     // A stopped node keeps its provider IP; its routes are not dangling.
     expect(
-      judgeAppRouteRecord(record, { nodeId: 'n', nodeStatus: 'stopped', ipAddress: LIVE_IP })
+      judgeAppRouteRecord(record, {
+        nodeId: 'n',
+        nodeStatus: 'stopped',
+        ipAddress: LIVE_IP,
+        terminationConfirmedAt: null,
+      })
+    ).toEqual({ live: true });
+    // A teardown that failed after the VM was deleted can leave the node in `error`: the proof,
+    // not the status, says the IP is released.
+    expect(
+      judgeAppRouteRecord(record, {
+        nodeId: 'n',
+        nodeStatus: 'error',
+        ipAddress: LIVE_IP,
+        terminationConfirmedAt: '2026-11-22T00:00:00.000Z',
+      })
+    ).toEqual({ live: false, reason: 'node_released' });
+    expect(
+      judgeAppRouteRecord(record, {
+        nodeId: 'n',
+        nodeStatus: 'error',
+        ipAddress: LIVE_IP,
+        terminationConfirmedAt: null,
+      })
     ).toEqual({ live: true });
     for (const status of ['destroying', 'deleting', 'deleted', 'destroyed']) {
       expect(
-        judgeAppRouteRecord(record, { nodeId: 'n', nodeStatus: status, ipAddress: LIVE_IP })
+        judgeAppRouteRecord(record, {
+          nodeId: 'n',
+          nodeStatus: status,
+          ipAddress: LIVE_IP,
+          terminationConfirmedAt: null,
+        })
       ).toEqual({ live: false, reason: 'node_released' });
     }
   });
@@ -176,9 +234,17 @@ describe('runAppRouteDnsReconciliation against Cloudflare', () => {
 
     for (const id of DANGLING_IDS) expect(zone.records.has(id), id).toBe(false);
     for (const id of KEPT_IDS) expect(zone.records.has(id), id).toBe(true);
-    expect(result).toMatchObject({ deleted: 4, kept: 2, failed: 0, cycleComplete: true, stoppedBy: 'end_of_zone' });
+    expect(result).toMatchObject({
+      deleted: 4,
+      kept: 2,
+      failed: 0,
+      cycleComplete: true,
+      stoppedBy: 'end_of_zone',
+    });
     // Every list asked only for A records under the app-route suffix.
-    const lists = zone.requests.filter((r) => r.method === 'GET' && r.url.includes('name.endswith'));
+    const lists = zone.requests.filter(
+      (r) => r.method === 'GET' && r.url.includes('name.endswith')
+    );
     expect(lists.length).toBeGreaterThan(0);
     for (const list of lists) {
       const params = new URL(list.url).searchParams;
@@ -265,7 +331,9 @@ describe('runAppRouteDnsReconciliation against Cloudflare', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
         init?.method === 'DELETE' && String(input).endsWith('/dangling-missing')
-          ? new Response(JSON.stringify({ errors: [{ code: 10000, message: 'boom' }] }), { status: 500 })
+          ? new Response(JSON.stringify({ errors: [{ code: 10000, message: 'boom' }] }), {
+              status: 500,
+            })
           : zone.fetch(input, init)
       )
     );
@@ -330,8 +398,10 @@ describe('releaseNodeAppRouteDnsRecords against Cloudflare', () => {
     });
 
     expect(counts).toMatchObject({ deleted: 3, failed: 0 });
-    for (const id of ['released-1', 'released-2', 'unlinked']) expect(zone.records.has(id), id).toBe(false);
-    for (const id of ['live', ...FOREIGN_RECORDS.map((r) => r.id)]) expect(zone.records.has(id), id).toBe(true);
+    for (const id of ['released-1', 'released-2', 'unlinked'])
+      expect(zone.records.has(id), id).toBe(false);
+    for (const id of ['live', ...FOREIGN_RECORDS.map((r) => r.id)])
+      expect(zone.records.has(id), id).toBe(true);
     const list = zone.requests.find((r) => r.url.includes('content.exact'));
     expect(new URL(list!.url).searchParams.get('content.exact')).toBe(RELEASED_IP);
   });
@@ -342,12 +412,18 @@ describe('releaseNodeAppRouteDnsRecords against Cloudflare', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
         init?.method === 'DELETE'
-          ? new Response(JSON.stringify({ errors: [{ code: 10000, message: 'boom' }] }), { status: 500 })
+          ? new Response(JSON.stringify({ errors: [{ code: 10000, message: 'boom' }] }), {
+              status: 500,
+            })
           : zone.fetch(input, init)
       )
     );
     await expect(
-      releaseNodeAppRouteDnsRecords(env, { id: 'releasing', nodeRole: 'deployment', ipAddress: RELEASED_IP })
+      releaseNodeAppRouteDnsRecords(env, {
+        id: 'releasing',
+        nodeRole: 'deployment',
+        ipAddress: RELEASED_IP,
+      })
     ).rejects.toThrow(/Could not delete 3 app-route DNS record/);
   });
 
@@ -355,7 +431,11 @@ describe('releaseNodeAppRouteDnsRecords against Cloudflare', () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
     expect(
-      await releaseNodeAppRouteDnsRecords(env, { id: 'w', nodeRole: 'workspace', ipAddress: RELEASED_IP })
+      await releaseNodeAppRouteDnsRecords(env, {
+        id: 'w',
+        nodeRole: 'workspace',
+        ipAddress: RELEASED_IP,
+      })
     ).toBeNull();
     expect(
       await releaseNodeAppRouteDnsRecords(env, { id: 'd', nodeRole: 'deployment', ipAddress: null })
@@ -366,7 +446,9 @@ describe('releaseNodeAppRouteDnsRecords against Cloudflare', () => {
 
 describe('on a self-host box that serves its own DNS', () => {
   function boxRows(): Array<{ id: string; name: string; content: string }> {
-    return sqlite.prepare('SELECT id, name, content FROM selfhost_dns_records ORDER BY name').all() as Array<{
+    return sqlite
+      .prepare('SELECT id, name, content FROM selfhost_dns_records ORDER BY name')
+      .all() as Array<{
       id: string;
       name: string;
       content: string;
@@ -396,7 +478,9 @@ describe('on a self-host box that serves its own DNS', () => {
 
     const result = await runAppRouteDnsReconciliation(env);
 
-    const remaining = boxRows().map((r) => r.id).sort();
+    const remaining = boxRows()
+      .map((r) => r.id)
+      .sort();
     expect(result).toMatchObject({ deleted: 4, failed: 0, cycleComplete: true });
     for (const id of DANGLING_IDS) expect(remaining).not.toContain(id);
     for (const id of KEPT_IDS.filter((id) => id !== 'foreign-txt')) {
@@ -412,5 +496,109 @@ describe('on a self-host box that serves its own DNS', () => {
     });
     expect(counts?.deleted).toBe(2);
     expect(boxRows().some((r) => r.content === LIVE_IP)).toBe(false);
+  });
+});
+
+describe('released-IP judgement edges', () => {
+  it('sweeps a record whose node failed teardown after its VM was proven deleted', async () => {
+    await seedNode('half-retired', 'error', RELEASED_IP);
+    sqlite
+      .prepare(
+        "UPDATE nodes SET runtime_termination_confirmed_at = '2026-11-22T00:00:00.000Z' WHERE id = 'half-retired'"
+      )
+      .run();
+    await seedEnvironment(ENV_RELEASED, 'half-retired', 'error');
+    // Control: an `error` node with no proof still holds its IP.
+    await seedNode('erroring', 'error', LIVE_IP);
+    await seedEnvironment(ENV_LIVE, 'erroring', 'error');
+    const zone = createFakeCloudflareDns({
+      zoneId: ZONE,
+      token: TOKEN,
+      seed: [
+        rec('released', host(ENV_RELEASED), RELEASED_IP),
+        rec('live', host(ENV_LIVE), LIVE_IP),
+      ],
+    });
+    vi.stubGlobal('fetch', vi.fn(zone.fetch));
+
+    await runAppRouteDnsReconciliation(env);
+
+    expect(zone.records.has('released')).toBe(false);
+    expect(zone.records.has('live')).toBe(true);
+  });
+
+  it('re-judges each record on fresh D1 state, so a start that reused the IP keeps its route', async () => {
+    const seed = await seedWorld();
+    const zone = createFakeCloudflareDns({
+      zoneId: ZONE,
+      token: TOKEN,
+      seed,
+      beforeRequest: (method, url) => {
+        // While the sweep is deleting the first dangling record, a start links ENV_RELEASED to a
+        // new node that the provider gave the same recycled IP; its release fetch re-upserts the
+        // record with unchanged content, so only D1 can tell the record is live again.
+        if (method === 'GET' && url.searchParams.get('name') === host(ENV_STOPPED)) {
+          sqlite
+            .prepare(
+              "INSERT INTO nodes (id, user_id, name, status, runtime, node_class, node_role, ip_address) VALUES ('reused', 'user', 'reused', 'running', 'vm', 'managed', 'deployment', ?)"
+            )
+            .run(RELEASED_IP);
+          sqlite
+            .prepare(
+              "UPDATE deployment_environments SET node_id = 'reused', status = 'active' WHERE id = ?"
+            )
+            .run(ENV_RELEASED);
+        }
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn(zone.fetch));
+
+    const result = await runAppRouteDnsReconciliation(env);
+
+    expect(zone.records.has('dangling-released')).toBe(true);
+    expect(zone.records.has('dangling-stopped')).toBe(false);
+    expect(result.changed).toBe(1);
+  });
+
+  it('logs an unreadable environment row and leaves its record to the sweep instead of wedging teardown', async () => {
+    await seedNode('releasing', 'destroying', RELEASED_IP);
+    await seedEnvironment(ENV_RELEASED, 'releasing', 'stopping');
+    await seedEnvironment(ENV_UNLINKED_ON_RELEASED, null, 'error');
+    // A node row whose status cannot be read (a BLOB where TEXT belongs).
+    sqlite
+      .prepare(
+        "INSERT INTO nodes (id, user_id, name, status, runtime, node_class, node_role, ip_address) VALUES ('garbled', 'user', 'garbled', X'00', 'vm', 'managed', 'deployment', ?)"
+      )
+      .run(RELEASED_IP);
+    sqlite
+      .prepare("UPDATE deployment_environments SET node_id = 'garbled' WHERE id = ?")
+      .run(ENV_UNLINKED_ON_RELEASED);
+    const zone = createFakeCloudflareDns({
+      zoneId: ZONE,
+      token: TOKEN,
+      seed: [
+        rec('released', host(ENV_RELEASED), RELEASED_IP),
+        rec('unreadable', host(ENV_UNLINKED_ON_RELEASED), RELEASED_IP),
+      ],
+    });
+    vi.stubGlobal('fetch', vi.fn(zone.fetch));
+
+    const counts = await releaseNodeAppRouteDnsRecords(env, {
+      id: 'releasing',
+      nodeRole: 'deployment',
+      ipAddress: RELEASED_IP,
+    });
+
+    expect(counts).toMatchObject({ deleted: 1, unknown: 1 });
+    expect(zone.records.has('released')).toBe(false);
+    expect(zone.records.has('unreadable')).toBe(true);
+  });
+
+  it('counts names under the app-route suffix that are not SAM app routes', async () => {
+    const zone = createFakeCloudflareDns({ zoneId: ZONE, token: TOKEN, seed: await seedWorld() });
+    vi.stubGlobal('fetch', vi.fn(zone.fetch));
+    const result = await runAppRouteDnsReconciliation(env);
+    // foo.apps, x-r1-…, the nested and the short-env names: listed by the suffix, never parsed.
+    expect(result.unparsed).toBe(4);
   });
 });

@@ -21,6 +21,7 @@ import { deployReleaseCallbackRoute } from '../../../src/routes/deploy-release-c
 import { registerDeploymentEnvironmentLifecycleRoutes } from '../../../src/routes/deployment-environment-lifecycle';
 import { runDeploymentNodeCleanup } from '../../../src/scheduled/deployment-node-cleanup';
 import { provisionDeploymentNode } from '../../../src/services/deployment-provisioning';
+import { deleteNodeResources } from '../../../src/services/node-resource-deletion';
 import { exactProviderCredentialBindingFromPlacementSnapshot } from '../../../src/services/provider-credential-exact';
 import { createFakeCloudflareDns, type FakeDnsRecord } from '../../helpers/fake-cloudflare-dns';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -110,9 +111,10 @@ function nodeRow(id: string) {
   return sqlite.prepare('SELECT * FROM nodes WHERE id = ?').get(id) as Record<string, unknown>;
 }
 function environmentRow() {
-  return sqlite
-    .prepare('SELECT * FROM deployment_environments WHERE id = ?')
-    .get(ENV_ID) as Record<string, unknown>;
+  return sqlite.prepare('SELECT * FROM deployment_environments WHERE id = ?').get(ENV_ID) as Record<
+    string,
+    unknown
+  >;
 }
 
 async function seedNode(id: string, ip: string, overrides: Partial<schema.Node> = {}) {
@@ -157,7 +159,11 @@ function manifest() {
     version: 1,
     services: {
       web: {
-        image: { registry: 'docker.io', repository: 'example/web', digest: `sha256:${'a'.repeat(64)}` },
+        image: {
+          registry: 'docker.io',
+          repository: 'example/web',
+          digest: `sha256:${'a'.repeat(64)}`,
+        },
         env: {},
         volumes: [],
       },
@@ -181,7 +187,13 @@ async function seedWorld(): Promise<FakeDnsRecord[]> {
   ] as const) {
     await drizzle(env.DATABASE)
       .insert(schema.deploymentEnvironments)
-      .values({ id, projectId: 'project', name: id, nodeId, status: 'active' } as schema.NewDeploymentEnvironmentRow);
+      .values({
+        id,
+        projectId: 'project',
+        name: id,
+        nodeId,
+        status: 'active',
+      } as schema.NewDeploymentEnvironmentRow);
   }
   sqlite
     .prepare(
@@ -266,12 +278,18 @@ describe('stopping a deployment environment releases its app-route DNS', () => {
       sqlite
         .prepare("UPDATE deployment_environments SET node_id = 'replacement' WHERE id = ?")
         .run(ENV_ID);
-      return { nodeId: 'replacement', provisioningStarted: false, provisioningPromise: Promise.resolve() };
+      return {
+        nodeId: 'replacement',
+        provisioningStarted: false,
+        provisioningPromise: Promise.resolve(),
+      };
     });
     const started = await start();
     expect(started.status, await started.clone().text()).toBe(200);
     const pending = sqlite
-      .prepare("SELECT version FROM deployment_releases WHERE environment_id = ? AND status = 'created'")
+      .prepare(
+        "SELECT version FROM deployment_releases WHERE environment_id = ? AND status = 'created'"
+      )
       .get(ENV_ID) as { version: number } | undefined;
     expect(pending).toBeDefined();
 
@@ -287,7 +305,9 @@ describe('stopping a deployment environment releases its app-route DNS', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
         failDeletes && init?.method === 'DELETE'
-          ? new Response(JSON.stringify({ errors: [{ code: 10000, message: 'dns down' }] }), { status: 500 })
+          ? new Response(JSON.stringify({ errors: [{ code: 10000, message: 'dns down' }] }), {
+              status: 500,
+            })
           : zone.fetch(input, init)
       )
     );
@@ -310,8 +330,12 @@ describe('stopping a deployment environment releases its app-route DNS', () => {
 
 describe('every other deployment-node release path reaches the same cleanup', () => {
   it('a failed start removes the record its replacement node served', async () => {
-    sqlite.prepare("UPDATE deployment_environments SET status = 'stopped', node_id = NULL WHERE id = ?").run(ENV_ID);
-    sqlite.prepare("UPDATE nodes SET status = 'deleted', ip_address = NULL WHERE id = 'node'").run();
+    sqlite
+      .prepare("UPDATE deployment_environments SET status = 'stopped', node_id = NULL WHERE id = ?")
+      .run(ENV_ID);
+    sqlite
+      .prepare("UPDATE nodes SET status = 'deleted', ip_address = NULL WHERE id = 'node'")
+      .run();
     zone.records.delete('route');
     vi.mocked(provisionDeploymentNode).mockImplementation(async () => {
       await seedNode('replacement', NEW_IP);
@@ -342,10 +366,21 @@ describe('every other deployment-node release path reaches the same cleanup', ()
 
   it('the scheduled backstop deletes the records of an interrupted teardown', async () => {
     sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = 'node'").run();
-    sqlite.prepare("UPDATE deployment_environments SET status = 'stopping' WHERE id = ?").run(ENV_ID);
+    sqlite
+      .prepare("UPDATE deployment_environments SET status = 'stopping' WHERE id = ?")
+      .run(ENV_ID);
     expect(await runDeploymentNodeCleanup(env)).toMatchObject({ deleted: 1, failed: 0 });
     expect(zone.byName(routeHost(ENV_ID))).toEqual([]);
     expect(zone.records.has('other-route')).toBe(true);
     expect(zone.records.has('api')).toBe(true);
+  });
+
+  it('node and environment delete (deleteNodeResources) remove the records of the deleted node', async () => {
+    const result = await deleteNodeResources('node', 'user', env);
+    expect(result).toMatchObject({ runtimeTerminationConfirmed: true, errors: [] });
+    expect(zone.byName(routeHost(ENV_ID))).toEqual([]);
+    expect(zone.records.has('other-route')).toBe(true);
+    expect(zone.records.has('api')).toBe(true);
+    expect(zone.records.has('ws')).toBe(true);
   });
 });

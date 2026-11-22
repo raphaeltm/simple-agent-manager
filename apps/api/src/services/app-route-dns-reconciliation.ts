@@ -10,19 +10,26 @@
  *   (`deleteNodeResourcesStrict`, which stop, failed start, environment delete, node delete and
  *   every cleanup sweep go through) deletes the records still pointing at the node's IP. Keyed on
  *   the IP rather than on environment links, so an environment unlinked before teardown is still
- *   covered. A failure throws, keeping the node retryable (fail closed).
+ *   covered. It runs last in each proof branch, and a failed delete throws: the caller then
+ *   cannot retire the node (which clears its IP), so the next attempt repeats it (fail closed).
  * - {@link runAppRouteDnsReconciliation}: the 5-minute cron backstop for records that already
  *   dangle (left by older code, or by a path that skipped the release).
  *
- * A record is live only when its environment exists, is linked to a node that is not being or
- * has not been released, and that node's current IP is the record's content. Anything else is
- * deleted, re-checked against the record's current content right before the delete.
+ * A record is live only when its environment exists, is linked to a node whose VM is neither
+ * released nor being released, and that node's current IP is the record's content. Anything else
+ * is deleted, after the record is judged again against fresh D1 state and re-read from DNS with
+ * its content unchanged (a release fetch may have repointed it, or a replacement node may have
+ * been given the same recycled IP). Cloudflare has no conditional delete, so a repoint landing in
+ * the milliseconds between that re-read and the DELETE remains possible; the next release fetch
+ * recreates such a record.
  *
- * Throughput at the defaults (`appRouteDns.*`, 500 records per page, 20 s budget, 100 deletes):
- * a list call is ~0.3 s, so one sweep reads ~30,000 records; a delete is two calls (~0.4 s), so
- * the budget allows ~50 deletes per sweep, ~600 an hour. At an outer limit of 10,000 dangling
- * records in one zone (production holds a few dozen app routes in total) cleanup takes ~17 hours;
- * a cut-off sweep resumes from its stored page cursor, so every record is reached.
+ * Throughput at the defaults (`appRouteDns.*`: 500 records per page, 20 s budget, 50 deletes): a
+ * list call is ~0.3 s, so one sweep can read ~30,000 records; a delete is one D1 read and two DNS
+ * calls (~0.4 s), so the budget fits the 50-delete cap, ~600 deletes an hour. At an outer limit of
+ * 10,000 dangling records in one zone (production holds a few dozen app routes in total) cleanup
+ * takes ~17 hours. A cut-off sweep resumes from its stored page cursor; records created or
+ * deleted between sweeps shift page offsets, so a record skipped in one cycle is reached in the
+ * next. `cycleComplete` in `dns.app_route_sweep_completed` marks each full pass of the zone.
  */
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -45,7 +52,10 @@ export const APP_ROUTE_DNS_SWEEP_CURSOR_KEY = 'dns:app-route-sweep:next-page';
 /**
  * Node statuses whose IP SAM has given up or is giving up. Not the callback-terminal set
  * (`node-callback-auth.ts`): a `stopped` node keeps its provider IP, so its records are not
- * dangling, and deleting them would break the routes when it restarts.
+ * dangling, and deleting them would break the routes when it restarts. A status is only a proxy
+ * for "the VM is gone" (`.claude/rules/74`): the termination proof is the condition itself, and
+ * {@link judgeAppRouteRecord} treats it as released whatever the status says (a teardown that
+ * failed after the VM was deleted can leave a node in `error`).
  */
 const RELEASED_NODE_STATUSES: ReadonlySet<string> = new Set([
   'destroying',
@@ -55,16 +65,14 @@ const RELEASED_NODE_STATUSES: ReadonlySet<string> = new Set([
 ]);
 
 type DanglingReason =
-  | 'environment_missing'
-  | 'no_linked_node'
-  | 'node_missing'
-  | 'node_released'
-  | 'ip_mismatch';
+  'environment_missing' | 'no_linked_node' | 'node_missing' | 'node_released' | 'ip_mismatch';
 
 interface RouteTarget {
   nodeId: string | null;
   nodeStatus: string | null;
   ipAddress: string | null;
+  /** `nodes.runtime_termination_confirmed_at`: set once this VM incarnation is proven deleted. */
+  terminationConfirmedAt: string | null;
 }
 
 /** `'unknown'`: the environment's row could not be read, so its records are left alone. */
@@ -81,7 +89,9 @@ export function judgeAppRouteRecord(
   if (!target) return { live: false, reason: 'environment_missing' };
   if (!target.nodeId) return { live: false, reason: 'no_linked_node' };
   if (!target.nodeStatus) return { live: false, reason: 'node_missing' };
-  if (RELEASED_NODE_STATUSES.has(target.nodeStatus)) return { live: false, reason: 'node_released' };
+  if (RELEASED_NODE_STATUSES.has(target.nodeStatus) || target.terminationConfirmedAt) {
+    return { live: false, reason: 'node_released' };
+  }
   if (target.ipAddress !== record.content) return { live: false, reason: 'ip_mismatch' };
   return { live: true };
 }
@@ -100,7 +110,8 @@ async function loadRouteTargets(env: Env, environmentIds: string[]): Promise<Rou
   if (environmentIds.length === 0) return targets;
   const result = await env.DATABASE.prepare(
     `SELECT de.id AS environmentId, de.node_id AS nodeId, n.status AS nodeStatus,
-            n.ip_address AS ipAddress
+            n.ip_address AS ipAddress,
+            n.runtime_termination_confirmed_at AS terminationConfirmedAt
      FROM deployment_environments de
      LEFT JOIN nodes n ON n.id = de.node_id
      WHERE de.id IN (SELECT value FROM json_each(?))`
@@ -113,14 +124,20 @@ async function loadRouteTargets(env: Env, environmentIds: string[]): Promise<Rou
     const nodeId = nullableString(row.nodeId);
     const nodeStatus = nullableString(row.nodeStatus);
     const ipAddress = nullableString(row.ipAddress);
+    const terminationConfirmedAt = nullableString(row.terminationConfirmedAt);
     if (typeof environmentId !== 'string') continue;
-    if (nodeId === undefined || nodeStatus === undefined || ipAddress === undefined) {
+    if (
+      nodeId === undefined ||
+      nodeStatus === undefined ||
+      ipAddress === undefined ||
+      terminationConfirmedAt === undefined
+    ) {
       // A row we cannot read is never a reason to delete (.claude/rules/50).
       log.warn('dns.app_route_target_row_skipped', { environmentId, action: 'kept_records' });
       targets.set(environmentId, 'unknown');
       continue;
     }
-    targets.set(environmentId, { nodeId, nodeStatus, ipAddress });
+    targets.set(environmentId, { nodeId, nodeStatus, ipAddress, terminationConfirmedAt });
   }
   return targets;
 }
@@ -130,8 +147,10 @@ export interface AppRouteCleanupCounts {
   kept: number;
   unknown: number;
   deleted: number;
-  /** Repointed between the judgement and the delete; left alone. */
+  /** Live again, or repointed, when re-checked right before the delete; left alone. */
   changed: number;
+  /** Listed under the app-route suffix but not a SAM app-route name; never touched. */
+  unparsed: number;
   absent: number;
   failed: number;
   deferred: number;
@@ -144,6 +163,7 @@ function emptyCounts(): AppRouteCleanupCounts {
     unknown: 0,
     deleted: 0,
     changed: 0,
+    unparsed: 0,
     absent: 0,
     failed: 0,
     deferred: 0,
@@ -187,6 +207,15 @@ async function cleanupRecords(
     }
     attempts++;
     try {
+      // Judge again on fresh D1 state: a start may have linked this environment to a node since
+      // the page was judged, possibly one given the same recycled IP (the release fetch then
+      // re-upserts the same content, which the DNS re-read below cannot tell apart).
+      const fresh = await loadRouteTargets(env, [record.environmentId]);
+      const current = judgeAppRouteRecord(record, fresh.get(record.environmentId));
+      if (!current || current.live) {
+        counts.changed++;
+        continue;
+      }
       const outcome = await deleteObservedAppRouteDnsRecord(env, record, input.signal);
       counts[outcome]++;
       if (outcome === 'deleted') {
@@ -231,10 +260,12 @@ async function settingValue(
 }
 
 /**
- * Delete every app-route record still pointing at a node SAM is releasing. Called from each
+ * Delete every app-route record still pointing at a node SAM is releasing. Called last in each
  * termination-proof branch of `deleteNodeResourcesStrict`, so every release path runs it.
- * Throws when a record could not be deleted, so the node stays in its retryable teardown state
- * instead of being retired with a record pointing at an IP the provider may reassign.
+ * Throws when a record could not be deleted in time, so the node stays in its retryable teardown
+ * state instead of being retired with a record pointing at an IP the provider may reassign.
+ * A record whose environment row cannot be read is logged and left to the sweep rather than
+ * wedging the teardown forever (`.claude/rules/71`).
  */
 export async function releaseNodeAppRouteDnsRecords(
   env: Env,
@@ -245,16 +276,23 @@ export async function releaseNodeAppRouteDnsRecords(
   // DNS outage cannot block workspace teardown.
   if (node.nodeRole !== 'deployment' || !node.ipAddress) return null;
   if (!appRouteNameSuffix(env.BASE_DOMAIN)) return null;
-  const perPage = await settingValue(env, 'sweepPageSize');
+  const [perPage, budgetMs] = await Promise.all([
+    settingValue(env, 'sweepPageSize'),
+    settingValue(env, 'sweepBudgetMs'),
+  ]);
+  // Bounded even when the caller passes no deadline of its own.
+  const effectiveSignal = signal ?? AbortSignal.timeout(budgetMs);
   const records: AppRouteDnsRecord[] = [];
+  let unparsed = 0;
   // Read every page before deleting, so deletions cannot shift a later page.
   for (let page = 1; ; page++) {
     const result = await listAppRouteDnsRecordsPage(
       env,
       { page, perPage, content: node.ipAddress },
-      signal
+      effectiveSignal
     );
     records.push(...result.records);
+    unparsed += result.providerCount - result.records.length;
     if (result.providerCount < perPage) break;
   }
   const counts = await cleanupRecords(env, records, {
@@ -262,11 +300,19 @@ export async function releaseNodeAppRouteDnsRecords(
     nodeId: node.id,
     maxDeletes: Number.POSITIVE_INFINITY,
     deadline: Number.POSITIVE_INFINITY,
-    signal,
+    signal: effectiveSignal,
   });
-  if (counts.failed > 0 || counts.unknown > 0) {
+  counts.unparsed = unparsed;
+  if (counts.unknown > 0) {
+    log.error('dns.app_route_release_unjudged', {
+      nodeId: node.id,
+      unknown: counts.unknown,
+      action: 'left_to_sweep',
+    });
+  }
+  if (counts.failed > 0 || counts.deferred > 0) {
     throw new Error(
-      `Could not delete ${counts.failed + counts.unknown} app-route DNS record(s) pointing at node ${node.id}`
+      `Could not delete ${counts.failed + counts.deferred} app-route DNS record(s) pointing at node ${node.id}`
     );
   }
   return counts;
@@ -323,6 +369,7 @@ export async function runAppRouteDnsReconciliation(env: Env): Promise<AppRouteDn
       }
       const listed = await listAppRouteDnsRecordsPage(env, { page, perPage }, signal);
       pagesRead++;
+      totals.unparsed += listed.providerCount - listed.records.length;
       const counts = await cleanupRecords(env, listed.records, {
         trigger: 'sweep',
         maxDeletes: maxDeletes - attemptsUsed(),
@@ -347,7 +394,7 @@ export async function runAppRouteDnsReconciliation(env: Env): Promise<AppRouteDn
     }
   } catch (error) {
     // The budget's own abort is a clean stop at the deadline, not a sweep failure.
-    if (!(signal.aborted && Date.now() >= deadline)) throw error;
+    if (!signal.aborted) throw error;
     stoppedBy = 'deadline';
   } finally {
     if (page !== startPage) await env.KV.put(APP_ROUTE_DNS_SWEEP_CURSOR_KEY, String(page));

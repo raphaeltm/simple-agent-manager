@@ -7,7 +7,7 @@ import { type AdminSettingDefinition, integerDefinition } from './admin-setting-
 export const APP_ROUTE_DNS_RUNTIME_DEFAULTS = {
   sweepBudgetMs: 20000,
   sweepPageSize: 500,
-  sweepMaxDeletes: 100,
+  sweepMaxDeletes: 50,
 } as const;
 
 export type AppRouteDnsSettingName = `appRouteDns.${keyof typeof APP_ROUTE_DNS_RUNTIME_DEFAULTS}`;

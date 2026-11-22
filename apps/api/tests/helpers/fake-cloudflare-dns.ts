@@ -57,7 +57,9 @@ export function createFakeCloudflareDns(options: {
   const base = `https://api.cloudflare.com/client/v4/zones/${options.zoneId}/dns_records`;
 
   async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+    const url = new URL(
+      typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    );
     const method = (init?.method ?? 'GET').toUpperCase();
     requests.push({ method, url: url.href });
     if (!url.href.startsWith(base)) {
@@ -120,7 +122,13 @@ export function createFakeCloudflareDns(options: {
         (r) => r.name === body.name && r.type === body.type && r.content === body.content
       );
       if (duplicate) return cfError(81058, 'An identical record already exists.', 400);
-      const record = { id: `fake-${nextId++}`, name: body.name, type: body.type, content: body.content, proxied: body.proxied };
+      const record = {
+        id: `fake-${nextId++}`,
+        name: body.name,
+        type: body.type,
+        content: body.content,
+        proxied: body.proxied,
+      };
       records.set(record.id, record);
       return json({ success: true, errors: [], result: record });
     }

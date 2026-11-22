@@ -12,6 +12,7 @@ const {
   sessionSleepMock,
   providerOrphanMock,
   persistErrorMock,
+  appRouteDnsMock,
 } = vi.hoisted(() => ({
   capacityPoolContinuationMock: vi.fn(),
   capacityPoolReconciliationMock: vi.fn(),
@@ -22,6 +23,7 @@ const {
   sessionSleepMock: vi.fn(),
   providerOrphanMock: vi.fn(),
   persistErrorMock: vi.fn().mockResolvedValue(undefined),
+  appRouteDnsMock: vi.fn(),
 }));
 
 vi.mock('../../../src/services/operational-kill-switch', () => ({
@@ -50,6 +52,9 @@ vi.mock('../../../src/scheduled/provider-orphan-reconciliation', () => ({
   runProviderOrphanReconciliation: providerOrphanMock,
 }));
 vi.mock('../../../src/services/observability', () => ({ persistError: persistErrorMock }));
+vi.mock('../../../src/services/app-route-dns-reconciliation', () => ({
+  runAppRouteDnsReconciliation: appRouteDnsMock,
+}));
 vi.mock('../../../src/scheduled/failed-sweep-notifications', () => ({
   notifyFailedSweeps: vi.fn().mockResolvedValue({ notifiedSweeps: 0, notificationsSent: 0 }),
 }));
@@ -200,6 +205,20 @@ describe('scheduled operational sweep kill switch', () => {
     expect(sweepNames.indexOf('deployment_release_retention')).toBeLessThan(
       sweepNames.indexOf('compose_artifact_cleanup')
     );
+    // The dangling app-route DNS sweep runs on every tick, after node teardown has released
+    // this tick's nodes (services/app-route-dns-reconciliation.ts).
+    expect(sweepNames.indexOf('node_tunnel_cleanup')).toBeLessThan(
+      sweepNames.indexOf('app_route_dns_reconciliation')
+    );
+    expect(sweepNames.indexOf('deployment_node_cleanup')).toBeLessThan(
+      sweepNames.indexOf('app_route_dns_reconciliation')
+    );
+    const appRouteDnsCallback = isolateMock.mock.calls.find(
+      ([name]) => name === 'app_route_dns_reconciliation'
+    )?.[1];
+    expect(appRouteDnsCallback).toEqual(expect.any(Function));
+    await appRouteDnsCallback?.();
+    expect(appRouteDnsMock).toHaveBeenCalledWith(env);
     const sleepLifecycleRepairCallback = isolateMock.mock.calls.find(
       ([name]) => name === 'session_sleep_lifecycle_repair'
     )?.[1];
