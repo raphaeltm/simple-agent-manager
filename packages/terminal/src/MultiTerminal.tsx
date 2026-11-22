@@ -11,6 +11,7 @@ import React, {
   useState,
 } from 'react';
 
+import { preserveAltArrowWordNavigation } from './alt-arrow-keys';
 import { TabBar } from './components/TabBar';
 import { useTerminalSessions } from './hooks/useTerminalSessions';
 import {
@@ -41,6 +42,18 @@ import type {
 
 const PING_INTERVAL_MS = 30_000;
 const RECONNECT_DELAY_MS = 3000;
+/** Fit after a resize burst settles, so the measurement reads the final layout. */
+const RESIZE_DEBOUNCE_MS = 100;
+
+/**
+ * Whether a terminal container is rendered. A `display:none` container (an inactive tab, or
+ * the whole terminal view while a chat tab is shown) reports its specified `width: 100%` as
+ * 100px to FitAddon, which would shrink the PTY to ~10x5. Never fit one; the ResizeObserver
+ * fits it when it becomes visible.
+ */
+function hasLayout(el: HTMLElement | null): el is HTMLElement {
+  return !!el && el.offsetWidth > 0 && el.offsetHeight > 0;
+}
 
 /** xterm.js instance + FitAddon pair for a session */
 interface TerminalInstance {
@@ -171,6 +184,26 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       [getOutboundSessionId]
     );
 
+    // A resize sent before the server has the session (a restored tab fits while the socket
+    // is still listing sessions) is dropped by the VM agent, which then creates or reattaches
+    // the PTY at the size in that message. Once the server acknowledges the session, forget
+    // what was sent and send the current size, so the PTY matches the visible grid.
+    const resendSizeAfterServerAck = useCallback(
+      (localSessionId: string) => {
+        const instance = terminalsRef.current.get(localSessionId);
+        if (!instance) return;
+        instance.lastSentResize = undefined;
+        if (!hasLayout(instance.containerEl)) return; // the ResizeObserver sends on reveal
+        try {
+          instance.fitAddon.fit();
+        } catch {
+          return; // terminal disposed
+        }
+        sendTerminalResize(localSessionId);
+      },
+      [sendTerminalResize]
+    );
+
     // Create xterm.js instance for a session (stable — only depends on scrollback config)
     const createTerminalInstance = useCallback(
       (sessionId: string): TerminalInstance => {
@@ -185,6 +218,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
 
         const fitAddon = new FitAddon();
         terminal.loadAddon(fitAddon);
+        preserveAltArrowWordNavigation(terminal);
 
         // Handle user input — route through shared WebSocket with sessionId
         terminal.onData((data) => {
@@ -468,6 +502,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
                     msg.data.workingDirectory
                   );
                 }
+                resendSizeAfterServerAck(localId);
               }
             } else if (isScrollbackMessage(msg) && msg.sessionId && msg.data) {
               // Find the local session mapped to this server session ID and write scrollback
@@ -486,6 +521,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
               if (msg.data.workingDirectory) {
                 latestRef.current.updateSessionWorkingDirectory(localId, msg.data.workingDirectory);
               }
+              resendSizeAfterServerAck(localId);
             } else if (isSessionClosedMessage(msg) && msg.data) {
               const localId = resolveLocalSessionId(msg.data.sessionId) ?? msg.data.sessionId;
               destroyTerminalInstance(localId);
@@ -547,7 +583,13 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
         }
         terminalsMap.clear();
       };
-    }, [wsUrl, createTerminalInstance, destroyTerminalInstance, resolveLocalSessionId]);
+    }, [
+      wsUrl,
+      createTerminalInstance,
+      destroyTerminalInstance,
+      resolveLocalSessionId,
+      resendSizeAfterServerAck,
+    ]);
 
     // Attach/fit xterm.js to DOM container via ref callback
     const attachTerminal = useCallback(
@@ -570,14 +612,14 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
           if (!containerEl.querySelector('.xterm')) {
             instance.terminal.open(containerEl);
           }
-          instance.fitAddon.fit();
+          if (hasLayout(containerEl)) {
+            instance.fitAddon.fit();
+            sendTerminalResize(sessionId);
+          }
 
-          sendTerminalResize(sessionId);
-
-          // Add ResizeObserver to handle container size changes (including
-          // display:none → display:block transitions on tab switch).
-          // Also covers window resize, so acts as safety net alongside the
-          // explicit window resize listener.
+          // The ResizeObserver handles every container size change: window resize and
+          // rotation, panel resize, and display:none → display:block on tab switch. It is
+          // debounced so it reads the settled layout.
           if (instance.resizeObserver) {
             instance.resizeObserver.disconnect();
           }
@@ -587,7 +629,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
             resizeDebounce = setTimeout(() => {
               // Guard: instance may have been destroyed while resize was queued
               if (!terminalsRef.current.has(sessionId)) return;
-              if (containerEl.offsetWidth > 0 && containerEl.offsetHeight > 0) {
+              if (hasLayout(containerEl)) {
                 try {
                   instance.fitAddon.fit();
                 } catch {
@@ -595,7 +637,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
                 }
                 sendTerminalResize(sessionId);
               }
-            }, 100);
+            }, RESIZE_DEBOUNCE_MS);
           });
           instance.resizeObserver.observe(containerEl);
         }
@@ -603,18 +645,31 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       [sendTerminalResize]
     );
 
-    // Fit active terminal on window resize
+    // Window resizes that leave the container box unchanged can still change cell metrics
+    // (devicePixelRatio, zoom), which the ResizeObserver does not see. Fit after the resize
+    // settles, never synchronously: a synchronous fit ran before the breakpoint re-render and
+    // sent the PTY a transient size. Duplicate sizes are dropped by sendTerminalResize.
     useEffect(() => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
       const handleResize = () => {
-        if (!activeSessionId) return;
-        const instance = terminalsRef.current.get(activeSessionId);
-        if (instance && instance.containerEl) {
-          instance.fitAddon.fit();
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          if (!activeSessionId) return;
+          const instance = terminalsRef.current.get(activeSessionId);
+          if (!instance || !hasLayout(instance.containerEl)) return;
+          try {
+            instance.fitAddon.fit();
+          } catch {
+            return; // terminal disposed
+          }
           sendTerminalResize(activeSessionId);
-        }
+        }, RESIZE_DEBOUNCE_MS);
       };
       window.addEventListener('resize', handleResize);
-      return () => window.removeEventListener('resize', handleResize);
+      return () => {
+        clearTimeout(timer);
+        window.removeEventListener('resize', handleResize);
+      };
     }, [activeSessionId, sendTerminalResize]);
 
     // When active tab changes, fit the terminal.
@@ -632,12 +687,15 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
         innerRaf = requestAnimationFrame(() => {
           // Guard: terminal may have been disposed during the two frames
           if (!terminalsRef.current.has(activeSessionId)) return;
+          instance.terminal.focus();
+          // Hidden (e.g. the workspace is showing a chat tab): the ResizeObserver fits it
+          // when it becomes visible.
+          if (!hasLayout(instance.containerEl)) return;
           try {
             instance.fitAddon.fit();
           } catch {
             return; // terminal disposed
           }
-          instance.terminal.focus();
           sendTerminalResize(activeSessionId);
         });
       });
