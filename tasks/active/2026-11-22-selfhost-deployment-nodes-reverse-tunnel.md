@@ -61,12 +61,13 @@ Self-hosting only. Hosted SAM (Cloudflare) must not change.
    node, checks the hostname is a route target of that environment's latest release, and that the
    node is a live reverse-tunnel deployment node with an active lease. It answers with the lease
    upstream, the vm-agent URI `/deployment/app-ingress/<hostname>/<path>` and a short-lived
-   node-management token in `X-SAM-Upstream-Node-Authorization`. Caddy proxies through frps to the
+   short-lived app-ingress token (audience `node-app-ingress`, one node, one hostname) in
+   `X-SAM-Upstream-Node-Authorization`. Caddy proxies through frps to the
    node's vm-agent.
 4. vm-agent, only when `DEPLOY_APP_INGRESS=tunnel` (cloud-init sets it in reverse-tunnel mode):
    - node Caddy runs `auto_https off`, `default_bind 127.0.0.1`, `http_port <DEPLOY_APP_INGRESS_PORT>`,
      with `http://<hostname>` sites: no ACME, no public listener;
-   - `/deployment/app-ingress/{hostname}/{path...}` authenticates the node-management token from
+   - `/deployment/app-ingress/{hostname}/{path...}` authenticates the app-ingress token from
      the SAM header, refuses a hostname not in an active environment's applied routes, strips SAM
      headers, and proxies to node Caddy on loopback with `Host: <hostname>`.
 5. Firewall: in reverse-tunnel mode the tunnel iptables script also drops 80/443, and the
@@ -91,6 +92,10 @@ Self-hosting only. Hosted SAM (Cloudflare) must not change.
   node id against its own id and the hostname against its own applied routes, so a
   decision for node X cannot be replayed through node Y's lease. Custom domains are not served on a
   box (the Worker only authorizes `*.apps.` names); follow-up idea 01M81E6FQQ4EFQJR4Y2J7BX4Y3.
+- **App-ingress credential.** Purpose-limited (security review M1): audience `node-app-ingress`, one
+  node, one hostname, `SELF_HOST_APP_INGRESS_TOKEN_TTL_SECONDS` (300 s). The agent accepts it only on
+  that hostname's app-ingress route; the management API refuses it, and app ingress refuses a
+  management token.
 - **Compromised deployment node.** It holds the same per-node frp credential and node callback JWT
   as a workspace node today, and frps limits it to its one leased port (plugin plus `allowPorts`,
   `maxPortsPerClient = 1`). It can answer its own app hostnames with anything, which it can already

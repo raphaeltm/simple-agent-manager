@@ -73,7 +73,7 @@ it honours the operational cron switch. Its node-transport endpoints:
 - `GET /api/self-host/gateway/app-route`: Caddy `forward_auth` for every request to a deployment
   app hostname (`*.apps.<BASE_DOMAIN>`), same header. It answers 404 (or 503 while the node's
   tunnel is down) or the node's lease upstream, the agent's `/deployment/app-ingress/<host>/...`
-  URI and a node-management token Caddy sends as `X-SAM-Node-Authorization`
+  URI and a short-lived token for that node and hostname, which Caddy sends as `X-SAM-Node-Authorization`
   (`authorizeAppRouteRequest` in `apps/api/src/selfhost/reverse-tunnel/app-route.ts`).
 
 Without a gateway secret of at least 32 characters, every endpoint answers 404; a wrong secret
