@@ -16,16 +16,18 @@
  * - the label's environment exists, is not stopping or stopped, and is bound to a node
  *   (`deployment_environments.node_id`); the node comes from that binding, never from the request;
  * - the environment's project and the node have the same owner;
- * - the hostname is exactly a route target of the environment's latest release;
+ * - the hostname is exactly a route target of the environment's latest release or of its latest
+ *   applied one (`readServableRouteHostnames`);
  * - the node is a managed VM deployment node on this transport, not being torn down, with an
  *   active lease on its current incarnation (`resolveReverseTunnelAgentOrigin`).
  * Every miss answers the same 404, so the decision never reveals which check failed.
  */
-import { getEnvironmentPublicRouteTargets } from '@simple-agent-manager/app-deployment';
-import { drizzle } from 'drizzle-orm/d1';
+import {
+  collectEnvironmentRouteHostnames,
+  routeTargetOptions,
+} from '@simple-agent-manager/app-deployment';
 import * as v from 'valibot';
 
-import * as schema from '../../db/schema';
 import { log } from '../../lib/logger';
 import { NodeAgentRouteError } from '../../services/node-agent-route';
 import { boxPublicIPv4, isBoxDnsEnabled } from '../dns';
@@ -131,6 +133,39 @@ export function isPlainAppPath(uri: string): boolean {
   return !decoded.split('/').some((segment) => segment === '.' || segment === '..');
 }
 
+const ManifestRowSchema = v.object({ manifest: v.string() });
+
+/**
+ * Hostnames the environment may be serving: the routes of its latest release (what the node is
+ * applying, or will apply) and of its latest applied release (what it runs while a newer release
+ * applies, or after a failed apply fell back). The node's own applied routes are the final word
+ * (`Engine.ServesHostname` in the agent), so admitting both never admits more than the node serves.
+ * One read; a malformed manifest contributes no routes.
+ */
+async function readServableRouteHostnames(env: Env, environmentId: string): Promise<Set<string>> {
+  const result = await env.DATABASE.prepare(
+    `SELECT manifest FROM deployment_releases
+      WHERE id IN (
+        SELECT id FROM (SELECT id FROM deployment_releases WHERE environment_id = ?
+                         ORDER BY version DESC LIMIT 1)
+        UNION
+        SELECT id FROM (SELECT id FROM deployment_releases WHERE environment_id = ?
+                           AND status = 'applied' ORDER BY version DESC LIMIT 1)
+      )`
+  )
+    .bind(environmentId, environmentId)
+    .all<unknown>();
+  const manifests: string[] = [];
+  for (const row of result.results ?? []) {
+    const parsed = v.safeParse(ManifestRowSchema, row);
+    if (parsed.success) manifests.push(parsed.output.manifest);
+    else log.warn('self_host_app_route.invalid_release_row', { environmentId });
+  }
+  return new Set(
+    collectEnvironmentRouteHostnames(manifests, routeTargetOptions(env, environmentId))
+  );
+}
+
 async function readBinding(env: Env, environmentId: string): Promise<Binding | null> {
   const row = await env.DATABASE.prepare(
     `SELECT e.id AS environmentId, e.status AS environmentStatus, e.node_id AS nodeId,
@@ -189,9 +224,8 @@ export async function authorizeAppRouteRequest(
   const refusal = bindingRefusal(binding);
   if (refusal) return refuse(host, refusal);
 
-  const db = drizzle(env.DATABASE, { schema });
-  const targets = await getEnvironmentPublicRouteTargets(db, env, binding.environmentId);
-  if (!targets.some((target) => target.hostname === host)) return refuse(host, 'not_a_route');
+  const hostnames = await readServableRouteHostnames(env, binding.environmentId);
+  if (!hostnames.has(host)) return refuse(host, 'not_a_route');
 
   let origin: string;
   try {

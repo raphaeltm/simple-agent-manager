@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/workspace/vm-agent/internal/deploy"
 )
@@ -88,6 +89,13 @@ func (s *Server) handleDeploymentAppIngress(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// The agent's listener bounds a whole request with HTTP_READ_TIMEOUT (15 s by default), a
+	// budget for control-plane calls. An app's request body is the app's own (an upload can take
+	// minutes), as it was when node Caddy faced the internet directly, so app ingress lifts the
+	// read deadline for this request only. Idle connections still end at HTTP_IDLE_TIMEOUT.
+	if err := http.NewResponseController(w).SetReadDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		slog.Warn("app ingress: cannot lift the read deadline", "hostname", host, "error", err)
+	}
 	s.serveAppIngress(w, r, host, port, path, rawPath)
 }
 

@@ -330,3 +330,37 @@ func TestAppIngressTokenIsNotAManagementToken(t *testing.T) {
 		}
 	}
 }
+
+// An app upload slower than the agent's own HTTP_READ_TIMEOUT still reaches the app: the read
+// deadline is lifted for app ingress only.
+func TestAppIngress_SlowUploadOutlivesTheAgentReadTimeout(t *testing.T) {
+	fx := newAppIngressFixture(t, config.DeployAppIngressTunnel)
+	agent := httptest.NewUnstartedServer(fx.handler)
+	agent.Config.ReadTimeout = 300 * time.Millisecond
+	agent.Start()
+	defer agent.Close()
+
+	body, writer := io.Pipe()
+	go func() {
+		for i := 0; i < 5; i++ {
+			_, _ = writer.Write([]byte("chunk-"))
+			time.Sleep(200 * time.Millisecond)
+		}
+		_ = writer.Close()
+	}()
+	req, err := http.NewRequest(http.MethodPost, agent.URL+"/deployment/app-ingress/"+appIngressHost+"/upload", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range fx.samHeaders(fx.token, appIngressNodeID) {
+		req.Header.Set(name, value)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || len(fx.bodies) != 1 || fx.bodies[0] != strings.Repeat("chunk-", 5) {
+		t.Fatalf("status=%d bodies=%q", resp.StatusCode, fx.bodies)
+	}
+}

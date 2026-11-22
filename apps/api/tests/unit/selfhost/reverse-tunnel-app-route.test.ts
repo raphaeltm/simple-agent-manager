@@ -91,7 +91,7 @@ async function seedTenant(tag: 'A' | 'B', envId: string) {
     node
   );
   run(
-    `INSERT INTO deployment_releases (id, environment_id, version, manifest) VALUES (?, ?, 1, ?)`,
+    `INSERT INTO deployment_releases (id, environment_id, version, status, manifest) VALUES (?, ?, 1, 'applied', ?)`,
     `rel-${tag}`,
     envId,
     manifest(3000)
@@ -264,6 +264,27 @@ describe('app-route decision', () => {
     const first = await tokenFor(HOST_A);
     expect(new Set([...burst.slice(1), first]).size).toBe(1);
     expect(await tokenFor(HOST_B)).not.toBe(first);
+  });
+
+  it('serves the applied release while a newer one applies or after it failed, never an older one', async () => {
+    const hostFor = (port: number) => HOST_A.replace('-web-3000-', `-web-${port}-`);
+    run(
+      `INSERT INTO deployment_releases (id, environment_id, version, status, manifest) VALUES ('rel-A2', ?, 2, 'failed', ?)`,
+      ENV_A,
+      manifest(8080)
+    );
+    // Applied v1 keeps serving; failed-but-latest v2 is what the node may be applying.
+    expect((await decide(HOST_A)).status).toBe(200);
+    expect((await decide(hostFor(8080))).status).toBe(200);
+    run(
+      `INSERT INTO deployment_releases (id, environment_id, version, status, manifest) VALUES ('rel-A3', ?, 3, 'created', ?)`,
+      ENV_A,
+      manifest(9090)
+    );
+    // v2 is now neither the latest nor applied: its route is gone.
+    expect((await decide(hostFor(8080))).status).toBe(404);
+    expect((await decide(hostFor(9090))).status).toBe(200);
+    expect((await decide(HOST_A)).status).toBe(200);
   });
 
   it('a release with an unparseable manifest serves nothing (404, not 500)', async () => {
