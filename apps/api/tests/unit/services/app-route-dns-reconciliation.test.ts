@@ -11,6 +11,7 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { installBoxDns } from '../../../src/selfhost/dns';
 import {
+  APP_ROUTE_DNS_FAILURE_BACKOFF_PREFIX,
   APP_ROUTE_DNS_SWEEP_CURSOR_KEY,
   judgeAppRouteRecord,
   releaseNodeAppRouteDnsRecords,
@@ -166,6 +167,16 @@ describe('parseAppRouteHostname', () => {
     expect(
       parseAppRouteHostname(`r0-web-80-${ENV_LIVE.toLowerCase()}.apps.${BASE}`, BASE)
     ).toBeNull();
+    // No SAM route number exceeds the port range (`assignRouteTargets`); the limit itself parses.
+    expect(
+      parseAppRouteHostname(`r65536-web-80-${ENV_LIVE.toLowerCase()}.apps.${BASE}`, BASE)
+    ).toBeNull();
+    expect(
+      parseAppRouteHostname(`r999999-web-80-${ENV_LIVE.toLowerCase()}.apps.${BASE}`, BASE)
+    ).toBeNull();
+    expect(
+      parseAppRouteHostname(`r65535-web-80-${ENV_LIVE.toLowerCase()}.apps.${BASE}`, BASE)
+    ).toEqual({ environmentId: ENV_LIVE });
     expect(
       parseAppRouteHostname(`r1-web-x80-${ENV_LIVE.toLowerCase()}.apps.${BASE}`, BASE)
     ).toBeNull();
@@ -1018,6 +1029,37 @@ describe('Codex review round 5', () => {
     const result = await runAppRouteDnsReconciliation(noApi);
     expect(result.stoppedBy).toBe('no_dns_api');
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('adversarial pass 4', () => {
+  it('still reaches later records when the failure backoff cannot be written', async () => {
+    settings.values.set('appRouteDns.sweepMaxDeletes', 2);
+    const zone = createFakeCloudflareDns({ zoneId: ZONE, token: TOKEN, seed: await seedWorld() });
+    const stuck = new Set(['dangling-stopped', 'dangling-missing']);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+        init?.method === 'DELETE' && [...stuck].some((id) => String(input).endsWith(`/${id}`))
+          ? new Response(JSON.stringify({ errors: [{ code: 10000, message: 'stuck' }] }), {
+              status: 500,
+            })
+          : zone.fetch(input, init)
+      )
+    );
+    const put = env.KV.put.bind(env.KV);
+    env.KV.put = (async (key: string, ...rest: unknown[]) => {
+      if (key.startsWith(APP_ROUTE_DNS_FAILURE_BACKOFF_PREFIX)) throw new Error('KV quota');
+      return (put as (...a: unknown[]) => Promise<void>)(key, ...rest);
+    }) as typeof env.KV.put;
+
+    for (let i = 0; i < 10 && (zone.records.has('dangling-released') || !isRepointed(zone)); i++) {
+      await runAppRouteDnsReconciliation(env).catch(() => undefined);
+    }
+
+    expect(zone.records.has('dangling-released')).toBe(false);
+    expect(isRepointed(zone)).toBe(true);
+    for (const id of KEPT_IDS) expect(zone.records.has(id), id).toBe(true);
   });
 });
 

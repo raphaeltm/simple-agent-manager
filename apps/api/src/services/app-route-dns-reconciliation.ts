@@ -220,11 +220,9 @@ export async function runAppRouteDnsReconciliation(env: Env): Promise<AppRouteDn
   const signal = AbortSignal.timeout(budgetMs);
   const dnsEnv = dnsRequestEnv(env, budgetMs);
   const startPage = await readCursor(env);
-  // Failed mutations spend the cap too, so a fast-failing DNS API cannot turn one sweep into a
-  // burst over every record; the failure backoff keeps them off later sweeps, so the records
-  // behind them are reached on those.
-  const attemptsUsed = () =>
-    totals.deleted + totals.changed + totals.absent + totals.repointed + totals.failed;
+  // Failed mutations spend the cap too once their backoff is recorded (`cleanupRecords`), so a
+  // fast-failing DNS API cannot turn one sweep into a burst over every record.
+  const attemptsUsed = () => totals.attempts;
   let page = startPage;
   let pagesRead = 0;
   let cycleComplete = false;

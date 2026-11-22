@@ -20,6 +20,7 @@ import { AppError } from '../../../src/middleware/error';
 import { deployReleaseCallbackRoute } from '../../../src/routes/deploy-release-callback';
 import { registerDeploymentEnvironmentLifecycleRoutes } from '../../../src/routes/deployment-environment-lifecycle';
 import { runDeploymentNodeCleanup } from '../../../src/scheduled/deployment-node-cleanup';
+import { upsertReleaseRouteRecords } from '../../../src/services/app-route-dns-target';
 import { provisionDeploymentNode } from '../../../src/services/deployment-provisioning';
 import { deleteNodeResources } from '../../../src/services/node-resource-deletion';
 import { exactProviderCredentialBindingFromPlacementSnapshot } from '../../../src/services/provider-credential-exact';
@@ -350,6 +351,35 @@ describe('a release fetch that lands during the provider deletion', () => {
     expect(nodeRow('node')).toMatchObject({ status: 'deleted', ip_address: null });
     expect(zone.byName(routeHost(ENV_ID))).toEqual([]);
     expect(zone.records.has('other-route')).toBe(true);
+  });
+});
+
+describe('the release fetch re-checks its node right before writing route records', () => {
+  const routes = () => [{ hostname: routeHost('01KVJDV913S8W7KK32HTZTK0HZ') }];
+  const node = { transport: null, ipAddress: OLD_IP };
+
+  it('writes the records while the node is live', async () => {
+    await upsertReleaseRouteRecords(routes(), node, env, 'node');
+    expect(zone.byName(routes()[0]!.hostname).map((r) => r.content)).toEqual([OLD_IP]);
+  });
+
+  it('refuses once the node started teardown after the fetch was admitted', async () => {
+    sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = 'node'").run();
+    const before = zone.requests.length;
+    await expect(upsertReleaseRouteRecords(routes(), node, env, 'node')).rejects.toMatchObject({
+      statusCode: 410,
+    });
+    expect(zone.requests.length).toBe(before);
+  });
+
+  it('refuses once the node carries a termination proof', async () => {
+    sqlite
+      .prepare("UPDATE nodes SET runtime_termination_confirmed_at = 'now' WHERE id = 'node'")
+      .run();
+    await expect(upsertReleaseRouteRecords(routes(), node, env, 'node')).rejects.toMatchObject({
+      statusCode: 410,
+    });
+    expect(zone.byName(routes()[0]!.hostname)).toEqual([]);
   });
 });
 

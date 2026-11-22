@@ -142,7 +142,11 @@ const mockMintProjectRegistryCredential = vi.fn();
 const mockLoadResolvedSecrets = vi.fn();
 const mockLoadDeploymentInterpolationEnv = vi.fn();
 const mockD1Run = vi.fn();
-const mockD1Bind = vi.fn(() => ({ run: mockD1Run }));
+// The route-write fence reads the node's status (`upsertReleaseRouteRecords`).
+const mockD1Bind = vi.fn(() => ({
+  run: mockD1Run,
+  first: vi.fn(async () => ({ status: 'running', runtime_termination_confirmed_at: null })),
+}));
 const mockD1Prepare = vi.fn(() => ({ bind: mockD1Bind }));
 
 let envRows: EnvironmentRow[] = [];

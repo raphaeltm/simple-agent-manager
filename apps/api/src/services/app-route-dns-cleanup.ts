@@ -168,6 +168,8 @@ export interface AppRouteCleanupCounts {
   deferred: number;
   /** A delete of this record failed recently; skipped until its backoff expires (sweep only). */
   backedOff: number;
+  /** Mutation attempts that spent the per-sweep cap (see `cleanupRecords`). */
+  attempts: number;
 }
 
 export function emptyCounts(): AppRouteCleanupCounts {
@@ -183,6 +185,7 @@ export function emptyCounts(): AppRouteCleanupCounts {
     failed: 0,
     deferred: 0,
     backedOff: 0,
+    attempts: 0,
   };
 }
 
@@ -207,10 +210,9 @@ export async function cleanupRecords(
 ): Promise<AppRouteCleanupCounts> {
   const counts = emptyCounts();
   const targets = await loadRouteTargets(env, [...new Set(records.map((r) => r.environmentId))]);
-  // Every mutation attempt spends the cap, failed ones included, so a fast-failing DNS API
-  // cannot burst over every record. The sweep's failure backoff keeps a failed record off later
-  // sweeps, so the records behind it are still reached.
-  let attempts = 0;
+  // Every mutation attempt spends the cap, including a failed one whose backoff was recorded, so
+  // a fast-failing DNS API cannot burst over every record; the backoff keeps that record off
+  // later sweeps, so the records behind it are still reached. The deadline bounds the rest.
   for (const record of records) {
     counts.examined++;
     const verdict = judgeAppRouteRecord(record, targets.get(record.environmentId));
@@ -233,7 +235,7 @@ export async function cleanupRecords(
       counts.kept++;
       continue;
     }
-    if (attempts >= input.maxDeletes || Date.now() >= input.deadline) {
+    if (counts.attempts >= input.maxDeletes || Date.now() >= input.deadline) {
       counts.deferred++;
       continue;
     }
@@ -252,7 +254,7 @@ export async function cleanupRecords(
       const current = judgeAppRouteRecord(record, fresh.get(record.environmentId));
       if (!current || current.live) {
         counts.changed++;
-        attempts++;
+        counts.attempts++;
         continue;
       }
       const target = fresh.get(record.environmentId);
@@ -271,7 +273,7 @@ export async function cleanupRecords(
         if (await hasAppRouteSiblingAt(env, record, liveAddress, input.signal)) {
           const outcome = await deleteObservedAppRouteDnsRecord(env, record, input.signal);
           counts[outcome]++;
-          attempts++;
+          counts.attempts++;
           if (outcome === 'deleted') {
             log.info('dns.app_route_dangling_deleted', {
               trigger: input.trigger,
@@ -297,7 +299,7 @@ export async function cleanupRecords(
         if (afterVerdict && !afterVerdict.live && afterVerdict.reason !== 'ip_mismatch') {
           const outcome = await deleteObservedAppRouteDnsRecord(env, repointed, input.signal);
           counts[outcome]++;
-          attempts++;
+          counts.attempts++;
           log.info('dns.app_route_repoint_target_released', {
             trigger: input.trigger,
             hostname: record.name,
@@ -310,7 +312,7 @@ export async function cleanupRecords(
           continue;
         }
         counts.repointed++;
-        attempts++;
+        counts.attempts++;
         log.info('dns.app_route_dangling_repointed', {
           trigger: input.trigger,
           nodeId: input.nodeId ?? null,
@@ -325,7 +327,7 @@ export async function cleanupRecords(
       }
       const outcome = await deleteObservedAppRouteDnsRecord(env, record, input.signal);
       counts[outcome]++;
-      attempts++;
+      counts.attempts++;
       if (outcome === 'deleted') {
         log.info('dns.app_route_dangling_deleted', {
           trigger: input.trigger,
@@ -344,11 +346,17 @@ export async function cleanupRecords(
         continue;
       }
       counts.failed++;
-      attempts++;
+      // A failure spends the cap only once its backoff is recorded: the backoff is what lets a
+      // later sweep pass the record. Without it (a KV write failure) the record would be retried
+      // first next time, and records that always fail would hold the sweep on this page forever.
       if (input.failureBackoffSeconds) {
-        await env.KV.put(backoffKey, new Date().toISOString(), {
+        const backedOff = await env.KV.put(backoffKey, new Date().toISOString(), {
           expirationTtl: input.failureBackoffSeconds,
-        }).catch(() => undefined);
+        }).then(
+          () => true,
+          () => false
+        );
+        if (backedOff) counts.attempts++;
       }
       log.error('dns.app_route_dangling_delete_failed', {
         trigger: input.trigger,

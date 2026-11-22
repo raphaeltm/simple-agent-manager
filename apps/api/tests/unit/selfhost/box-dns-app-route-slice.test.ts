@@ -121,7 +121,17 @@ function boxDatabase(): D1Database {
     prepare: (sql: string) =>
       sql.includes('selfhost_dns')
         ? real.prepare(sql)
-        : { bind: () => ({ run: mockD1Run }), run: mockD1Run },
+        : {
+            bind: () => ({
+              run: mockD1Run,
+              // The route-write fence reads the node's status (`upsertReleaseRouteRecords`).
+              first: vi.fn(async () => ({
+                status: 'running',
+                runtime_termination_confirmed_at: null,
+              })),
+            }),
+            run: mockD1Run,
+          },
     batch: (statements: D1PreparedStatement[]) => real.batch(statements),
   } as unknown as D1Database;
 }

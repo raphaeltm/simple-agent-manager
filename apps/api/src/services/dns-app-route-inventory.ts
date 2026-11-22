@@ -31,7 +31,13 @@ import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
  * characters (no i, l, o, u), the first at most 7.
  */
 const ENVIRONMENT_ID_LABEL_RE = /^[0-7][0-9a-hjkmnp-tv-z]{25}$/;
-const ROUTE_INDEX_RE = /^r[1-9]\d*$/;
+/**
+ * A route number as `buildRouteHostname` writes it: canonical, at most MAX_ROUTE_NUMBER. Route
+ * numbers are 1 + an index into the routes `assignRouteTargets` gives a host port each, so no
+ * SAM name carries a number above the port range; a larger one is not SAM's to delete.
+ */
+const ROUTE_INDEX_RE = /^r[1-9]\d{0,4}$/;
+const MAX_ROUTE_NUMBER = 65535;
 /** A port as `buildRouteHostname` writes it: canonical decimal (no leading zero), 1-65535. */
 const PORT_RE = /^[1-9]\d{0,4}$/;
 const MAX_PORT = 65535;
@@ -94,7 +100,9 @@ export function parseAppRouteHostname(
   const envPart = parts[parts.length - 1] ?? '';
   const port = parts[parts.length - 2] ?? '';
   const serviceParts = parts.slice(1, -2);
-  if (!ROUTE_INDEX_RE.test(routeIndex)) return null;
+  if (!ROUTE_INDEX_RE.test(routeIndex) || Number(routeIndex.slice(1)) > MAX_ROUTE_NUMBER) {
+    return null;
+  }
   if (!PORT_RE.test(port) || Number(port) > MAX_PORT) return null;
   if (!ENVIRONMENT_ID_LABEL_RE.test(envPart)) return null;
   const service = serviceParts.join('-');

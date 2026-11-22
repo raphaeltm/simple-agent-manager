@@ -18,6 +18,7 @@ import {
 import type { Env } from '../env';
 import { errors } from '../middleware/error';
 import { upsertAppRouteDNSRecord } from './dns-app-routes';
+import { nodeStatusTerminatesCallbacks } from './node-callback-auth';
 import { nodeTransportExtension } from './node-transport-extension';
 
 export interface AppRouteDnsNode {
@@ -44,11 +45,26 @@ export function appRouteRecordAddress(
   return { covered: false, address: address ?? node.ipAddress };
 }
 
-/** Writes (or, when covered, skips) the A record of every route a release fetch returns. */
+async function assertNodeStillServesRoutes(env: Env, nodeId: string): Promise<void> {
+  const row = await env.DATABASE.prepare(
+    'SELECT status, runtime_termination_confirmed_at FROM nodes WHERE id = ?'
+  )
+    .bind(nodeId)
+    .first<{ status: string; runtime_termination_confirmed_at: string | null }>();
+  if (!row || nodeStatusTerminatesCallbacks(row.status) || row.runtime_termination_confirmed_at) {
+    throw errors.gone(`Node ${nodeId} is being released; its route records are not written`);
+  }
+}
+
+/**
+ * Writes (or, when covered, skips) the A record of every route a release fetch returns. With
+ * `nodeId`, refuses (410) once that node's teardown has started.
+ */
 export async function upsertReleaseRouteRecords(
   routes: Pick<DeploymentRouteTarget, 'hostname'>[],
   node: AppRouteDnsNode,
-  env: Env
+  env: Env,
+  nodeId?: string
 ): Promise<void> {
   if (routes.length === 0) return;
   const resolved = appRouteRecordAddress(node, env);
@@ -59,6 +75,10 @@ export async function upsertReleaseRouteRecords(
       'Deployment node does not have an IP address yet; retry after provisioning completes'
     );
   }
+  // Fence: the fetch checked the node on entry, but its teardown may have started since. Its
+  // release cleanup lists records before and after the provider deletion, so a write landing
+  // after both would point at an IP the provider has freed. Re-read just before writing.
+  if (nodeId) await assertNodeStillServesRoutes(env, nodeId);
   await Promise.all(routes.map((route) => upsertAppRouteDNSRecord(route.hostname, target, env)));
 }
 
