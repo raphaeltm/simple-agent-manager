@@ -23,8 +23,10 @@ Found 2026-11-22 during self-host multi-box step 3 (registry evidence,
 - [ ] Confirm with a search of every vm-agent release still supported by rollout compatibility
       (rule 54) that no shipped agent calls the route; if an old agent can, keep the route until
       that agent ages out and record why
-- [ ] Remove the route, its mount, its tests, and the unused Go constant and types
+- [ ] Remove the route, its mount, its tests, the unused Go constant and types, and
+      `targetRef` (`orchestrator.go`, used only by `orchestrator_test.go`) with its tests
 - [ ] `mintProjectRegistryCredential` keeps only the pull callers (`deploy-release-callback.ts`,
-      `deployment-release-image-resolver.ts`); decide separately whether the legacy pull path is
-      still needed
+      `deployment-release-image-resolver.ts`); decide whether the legacy pull path is still
+      needed: on a box it never has credentials, and nothing pushes to SAM's Cloudflare namespace
+      any more; remove `REGISTRY_HOST` pull minting if hosted production has no such images
 - [ ] Docs and API reference no longer mention registry push credentials
