@@ -90,7 +90,7 @@ Self-hosting only. Hosted SAM (Cloudflare) must not change.
   environment id is in the hostname and joined to its own node). The vm-agent checks the routed
   node id against its own id and the hostname against its own applied routes, so a
   decision for node X cannot be replayed through node Y's lease. Custom domains are not served on a
-  box (the Worker only authorizes `*.apps.` names); recorded as a follow-up.
+  box (the Worker only authorizes `*.apps.` names); follow-up idea 01M81E6FQQ4EFQJR4Y2J7BX4Y3.
 - **Compromised deployment node.** It holds the same per-node frp credential and node callback JWT
   as a workspace node today, and frps limits it to its one leased port (plugin plus `allowPorts`,
   `maxPortsPerClient = 1`). It can answer its own app hostnames with anything, which it can already
@@ -112,18 +112,19 @@ Self-hosting only. Hosted SAM (Cloudflare) must not change.
 
 ## Implementation checklist
 
-- [ ] `transport.ts`: select deployment role; extension `appRouteAddress`
-- [ ] Release callback: route DNS target from the extension (box IP) for tunnel nodes; no node-IP requirement there
-- [ ] `boxDnsWorkerVars` passes `SAM_DNS_PUBLIC_IPV4`; Env type + docs
-- [ ] Provider label `app-ingress=tunnel` for reverse-tunnel deployment nodes; GCP skips app-route tag
-- [ ] Cloud-init reverse mode: drop 80/443, loopback bootstrap Caddyfile, `DEPLOY_APP_INGRESS=tunnel` env; hosted output byte-identical (test)
-- [ ] Worker app-route decision module + gateway endpoint
-- [ ] Box Caddy `*.apps.` site + `sam.d` app-route fragment
-- [ ] vm-agent config, Caddy tunnel mode, app-ingress handler, applied-route accessor
-- [ ] Tests: rule 74 divergence/convergence through the real resolver; cloud-init byte-identity; release-on-box provisions tunnel without Origin CA; route authorization through the real decision with foreign-node / foreign-project attack + owner control, each shown discriminating; Go handler tests
-- [ ] Docs: `deploy/selfhost/README.md`, `self-hosting.mdx` (remove the caveat once proven)
-- [ ] Live proof on a disposable box; staging hosted app deployment proof
-- [ ] Follow-up ideas: custom domains on a box
+- [x] `transport.ts`: select deployment role; extension `appRouteAddress`
+- [x] Release callback: route DNS target from the extension (box IP) for tunnel nodes; no node-IP requirement there
+- [x] `boxDnsWorkerVars` passes `SAM_DNS_PUBLIC_IPV4`; Env type + docs
+- [x] Provider label `app-ingress=tunnel` for reverse-tunnel deployment nodes; GCP skips app-route tag
+- [x] Cloud-init reverse mode: drop 80/443, loopback bootstrap Caddyfile, `DEPLOY_APP_INGRESS=tunnel` env; hosted output byte-identical (test)
+- [x] Worker app-route decision module + gateway endpoint
+- [x] Box Caddy `*.apps.` site + `sam.d` app-route fragment
+- [x] vm-agent config, Caddy tunnel mode, app-ingress handler, applied-route accessor
+- [x] Tests: rule 74 divergence/convergence through the real resolver; cloud-init byte-identity; release-on-box provisions tunnel without Origin CA; route authorization through the real decision with foreign-node / foreign-project attack + owner control, each shown discriminating; Go handler tests
+- [x] Docs: `deploy/selfhost/README.md`, `self-hosting.mdx` (remove the caveat once proven)
+- [ ] Live proof on a disposable box (PENDING, in progress)
+- [ ] Staging: hosted app deployment proof on "Deployment Test 1" (PENDING)
+- [x] Follow-up ideas: custom domains on a box (idea 01M81E6FQQ4EFQJR4Y2J7BX4Y3)
 
 ## Acceptance criteria
 
@@ -131,3 +132,14 @@ Self-hosting only. Hosted SAM (Cloudflare) must not change.
 - The app URL resolves to the box and serves over HTTPS; the node has no public ingress; an unregistered
   hostname or another node's hostname is refused.
 - Hosted: deployment nodes still select today's transport and the same cloud-init.
+
+## Evidence
+
+- Unit/integration: api 470 (selfhost, reverse-tunnel lifecycle, release callback, rule 74 pair), cloud-init 290
+  (Cloudflare byte-identity snapshot unchanged), vm-agent deploy/config/server (`-race` on app ingress).
+- Real box Caddy image: `pnpm selfhost:live-test caddy-fragments` 182 passed (3 new app-route cases).
+- Discrimination: see the PR table (5 guards deleted, each reddened exactly its attack test).
+- `SAM_DNS_PUBLIC_IPV4` is a box-only Worker var, read through `BoxDnsSettingsEnv` like `SAM_DNS_PROVIDER`
+  (not in `apps/api/src/env.ts`: the Cloudflare Worker never has it).
+- Live box proof: pending.
+- Staging (hosted) proof: pending.
