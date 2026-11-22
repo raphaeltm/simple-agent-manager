@@ -227,7 +227,8 @@ export async function complete(
         tool_choice: 'auto',
         max_tokens: maxTokens,
         stream: false,
-        ...debugAgentModelControls(config.model),
+        // Key on the model actually called: an admin OpenAI-compatible endpoint can substitute it.
+        ...debugAgentModelControls(target.model),
       }),
     });
     if (!response.ok) {

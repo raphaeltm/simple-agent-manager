@@ -20,7 +20,7 @@ import type { Env } from '../../../src/env';
 import { resolveDebugAgentConfig } from '../../../src/services/debug-agent';
 
 describe('resolveDebugAgentConfig', () => {
-  it('uses the registered GLM default and bounded shared defaults', () => {
+  it('uses the registered default model and bounded shared defaults', () => {
     expect(resolveDebugAgentConfig({} as Env)).toEqual({
       model: DEFAULT_DEBUG_AGENT_MODEL,
       maxTurns: DEFAULT_DEBUG_AGENT_MAX_TURNS,

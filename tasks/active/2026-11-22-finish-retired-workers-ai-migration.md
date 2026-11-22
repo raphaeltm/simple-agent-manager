@@ -39,6 +39,7 @@ Idea 01M77CKWZAGYYQF6AZCW1GS07P. Supersedes `tasks/backlog/2026-11-20-staging-de
 - [x] `DEFAULT_DEBUG_AGENT_MODEL` -> DeepSeek V4.1 Flash; explicit `reasoning_effort: 'low'` via `debugAgentModelControls()`
 - [x] `DEFAULT_AI_PROXY_MODEL` -> Gemma 4 26B (registry `isDefault` moved with it); remove the `[vars]` entry; record in `OMITTED_WORKER_VAR_DEFAULTS` with a read-path probe
 - [x] One resolver `resolveEnvDefaultAIProxyModel()` for all var readers
+- [x] Review fix: model controls key on `target.model` (an admin OpenAI-compatible endpoint can substitute the model); test in `llm-endpoint.test.ts`
 - [x] Prune qwen3-30b, glm-5.3-flash, glm-5.2 from `PLATFORM_AI_MODELS`; full 2026-11-20 list in the retired-model regression test; debug default added to the cross-file default test
 - [x] Remove dead `glm-5.3-flash` operator branch and `glm-5.2` task-title branch (+ its test)
 - [x] Update `.env.example`, `env.ts` comment, configuration + reporting-issues docs
@@ -50,5 +51,5 @@ Idea 01M77CKWZAGYYQF6AZCW1GS07P. Supersedes `tasks/backlog/2026-11-20-staging-de
 
 - [ ] Staging `POST /api/admin/observability/feedback-triage` produces a diagnosis (no HTTP 410)
 - [ ] A sam-mode AI proxy request using the default model succeeds on staging
-- [ ] Unit: retired IDs cannot return; debug request carries model + `reasoning_effort: low`; override model gets no effort; omitted-var proof covers `AI_PROXY_DEFAULT_MODEL`
+- [x] Unit: retired IDs cannot return; debug request carries model + `reasoning_effort: low`; override model gets no effort; omitted-var proof covers `AI_PROXY_DEFAULT_MODEL`
 - [ ] Production: no "HTTP 410" `lastFailureReason` on incident rows updated after the deploy
