@@ -4,8 +4,6 @@ import {
   SAM_APP_INGRESS_TUNNEL,
 } from '@simple-agent-manager/providers';
 
-import { nodeTransportExtension } from './node-transport-extension';
-
 /**
  * Provider-side labels applied to every SAM-created cloud server.
  *
@@ -102,8 +100,12 @@ export function buildNodeProviderLabels(params: {
   environmentLabel: string | null;
   installationId: string | null;
   runtimeIncarnationId?: string;
-  /** The node's transport; one that carries app ingress itself marks a deployment node. */
-  transport?: string | null;
+  /**
+   * True when the node's transport carries its app ingress (the box's reverse tunnel), so the
+   * provider opens no public app ports. The caller decides it from the installed transport
+   * extension; this module stays free of Worker imports (box scripts import it).
+   */
+  appIngressThroughTransport?: boolean;
 }): Record<string, string> {
   const labels: Record<string, string> = {
     [SAM_NODE_LABEL_KEY]: params.nodeId.toLowerCase(),
@@ -121,13 +123,7 @@ export function buildNodeProviderLabels(params: {
   if (params.runtimeIncarnationId) {
     labels[SAM_RUNTIME_INCARNATION_LABEL_KEY] = params.runtimeIncarnationId;
   }
-  // Only a transport that carries app ingress itself (the box's reverse tunnel) sets this.
-  // Cloudflare installs no extension, so its labels are unchanged.
-  if (
-    params.isDeploymentNode &&
-    params.transport &&
-    nodeTransportExtension(params.transport)?.appRouteAddress
-  ) {
+  if (params.isDeploymentNode && params.appIngressThroughTransport) {
     labels[SAM_APP_INGRESS_LABEL_KEY] = SAM_APP_INGRESS_TUNNEL;
   }
   return labels;

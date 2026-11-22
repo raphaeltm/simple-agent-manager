@@ -4,9 +4,10 @@
  * extension plus a node's stored transport. They diverge on a Cloudflare install, where a
  * deployment node must keep today's transport and its public app ingress, whatever the role.
  *
- * Every value goes through the real resolver (`resolveManagedNodeTransport`), the real label
- * builder and the real release-record writer (`upsertReleaseRouteRecords`); only the DNS write
- * itself is recorded.
+ * Every value goes through the real resolver (`resolveManagedNodeTransport`) and the real
+ * release-record writer (`upsertReleaseRouteRecords`); only the DNS write itself is recorded. The
+ * provider label (`app-ingress=tunnel`) is asserted through the real `provisionNode` in
+ * node-reverse-tunnel-lifecycle.test.ts, on both sides.
  */
 import { generateCloudInit } from '@simple-agent-manager/cloud-init';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -24,23 +25,12 @@ vi.mock('../../../src/services/dns-app-routes', () => ({
 const { installReverseTunnelTransport } =
   await import('../../../src/selfhost/reverse-tunnel/transport');
 const { upsertReleaseRouteRecords } = await import('../../../src/services/app-route-dns-target');
-const { buildNodeProviderLabels } = await import('../../../src/services/node-provider-labels');
 const { resolveManagedNodeTransport } = await import('../../../src/services/node-tunnel-config');
 
 const DEPLOYMENT = { runtime: 'vm', nodeClass: 'managed', nodeRole: 'deployment' } as const;
 const ROUTES = [{ hostname: 'r1-web-80-env1.apps.example.test' }];
 const NODE_IP = '198.51.100.7';
 const BOX_IP = '203.0.113.5';
-
-function labels(transport: string | null) {
-  return buildNodeProviderLabels({
-    nodeId: 'NODE1',
-    isDeploymentNode: true,
-    environmentLabel: 'production',
-    installationId: null,
-    transport,
-  });
-}
 
 beforeEach(() => {
   upserts.length = 0;
@@ -65,9 +55,8 @@ describe('Cloudflare-shaped installation (no extension installed): divergence', 
   });
 
   it.each([null, 'cloudflare-tunnel', 'reverse-tunnel'])(
-    'keeps the app-route provider labels and points route records at the node (transport %j)',
+    'points route records at the node (transport %j)',
     async (transport) => {
-      expect(labels(transport)['app-ingress']).toBeUndefined();
       await upsertReleaseRouteRecords(ROUTES, { transport, ipAddress: NODE_IP }, {} as Env);
       expect(upserts).toEqual([{ hostname: ROUTES[0]!.hostname, ip: NODE_IP }]);
     }
@@ -88,12 +77,6 @@ describe('box installation (reverse-tunnel extension installed): convergence', (
     // Not every node: Instant containers and user-owned machines stay off the tunnel.
     expect(resolveManagedNodeTransport(env, { ...DEPLOYMENT, runtime: 'cf-container' })).toBeNull();
     expect(resolveManagedNodeTransport(env, { ...DEPLOYMENT, nodeClass: 'user-owned' })).toBeNull();
-  });
-
-  it('marks the node so the provider opens no public app ports', () => {
-    expect(labels('reverse-tunnel')['app-ingress']).toBe('tunnel');
-    // Control on the same installation: a node stored on another transport keeps its labels.
-    expect(labels('vm-public-dns')['app-ingress']).toBeUndefined();
   });
 
   it('points route records at the box with DNS on the box, even with no node IP', async () => {
