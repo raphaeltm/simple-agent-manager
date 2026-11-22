@@ -28,7 +28,9 @@ DNS of their own. The fleet bucket (`CELLD_BUCKET`) is the durable copy of every
   `apt-get install build-essential`: `pnpm install` compiles `better-sqlite3`), and a checkout of
   this repository.
 - A domain with a wildcard record `*.SAM_DOMAIN` pointing at the VM. SAM serves `api.`, `app.`,
-  `ws-<id>.` and `ws-<id>--<port>.` under it; the apex is unused. Or delegate `SAM_DOMAIN` to the
+  `ws-<id>.` and `ws-<id>--<port>.` under it; the apex is unused. For app deployments, add
+  `*.apps.SAM_DOMAIN` pointing at the VM as well (see step 1 of
+  [App deployments on a box](#app-deployments-on-a-box)). Or delegate `SAM_DOMAIN` to the
   box once and let it answer for itself ([DNS on the box](#dns-on-the-box)): then no wildcard
   record, no Cloud DNS and no DNS API token are needed for the box, its certificate or its records.
   App deployments run on the box too ([App deployments on a box](#app-deployments-on-a-box)):
@@ -439,8 +441,12 @@ route callbacks reach the box through frp, so they need no Cloudflare Origin CA 
 public agent port. Their app traffic goes through the box as well:
 
 1. An app hostname (`r<n>-<service>-<port>-<env>.apps.SAM_DOMAIN`) resolves to the box: by the
-   record the Worker writes per route with [DNS on the box](#dns-on-the-box), or by your
-   `*.SAM_DOMAIN` wildcard record without it.
+   record the Worker writes per route with [DNS on the box](#dns-on-the-box), or, without it, by a
+   second wildcard record `*.apps.SAM_DOMAIN` pointing at the box. `*.SAM_DOMAIN` alone is not
+   enough: while Caddy's DNS-01 challenge for the `*.apps` certificate has
+   `_acme-challenge.apps.SAM_DOMAIN` in the zone, `apps.SAM_DOMAIN` exists, so `*.SAM_DOMAIN` no
+   longer answers for names under it (RFC 4592) and every app returns NXDOMAIN until the challenge
+   record is removed and negative caches expire.
 2. The box's Caddy terminates TLS with a `*.apps.SAM_DOMAIN` wildcard certificate, obtained the
    same way as the `*.SAM_DOMAIN` one (`SAM_TLS_MODE=dns-rfc2136` or `dns-googleclouddns`). On a
    fresh install with DNS on the box it arrives a few minutes after the first `pnpm selfhost:deploy`:

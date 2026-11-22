@@ -243,8 +243,10 @@ transfers). A deployment node's `<node-id>.vm.` record resolves to the node.
 
 **App deployments on a box.** Deployment nodes use the box's reverse tunnel, like workspace nodes, so
 they need no Cloudflare Origin CA certificate and open no public port: their firewall drops 80 and
-443 too. App routes resolve to the box (with DNS on the box, one record per route pointing at
-`SAM_DNS_PUBLIC_IPV4`). The box's Caddy serves them with its own `*.apps.<BASE_DOMAIN>` wildcard
+443 too. App routes resolve to the box: with DNS on the box, one record per route pointing at
+`SAM_DNS_PUBLIC_IPV4`; with your own DNS, a `*.apps.<BASE_DOMAIN>` wildcard record pointing at the
+box. `*.<BASE_DOMAIN>` alone stops matching app names while the `*.apps` certificate's DNS-01
+challenge record exists. The box's Caddy serves them with its own `*.apps.<BASE_DOMAIN>` wildcard
 certificate. For each request it asks SAM which node may answer
 (`authorizeAppRouteRequest()` in `apps/api/src/selfhost/reverse-tunnel/app-route.ts`): the hostname
 must be a route of its environment's latest release, on that environment's live node. The request
