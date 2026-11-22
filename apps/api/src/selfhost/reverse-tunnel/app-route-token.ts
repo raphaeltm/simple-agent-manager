@@ -8,8 +8,9 @@
  * no more than send app requests the box would have sent anyway, for a few minutes.
  *
  * Tokens are reused until shortly before they expire, so an app's page load (dozens of
- * requests, one decision each) signs once per hostname, not once per request. An expired entry is
- * replaced on its next read, so the cache holds at most one entry per live app hostname.
+ * requests, one decision each) signs once per hostname, not once per request. After a JWT key
+ * rotation a cached token keeps the previous key id until it is renewed (at most 80% of its
+ * lifetime), which the agent accepts while its JWKS still lists that key.
  */
 import { importPKCS8, SignJWT } from 'jose';
 
@@ -60,6 +61,9 @@ export async function appIngressToken(
     .setIssuedAt(issuedAt)
     .setExpirationTime(issuedAt + ttlSeconds)
     .sign(privateKey);
+  // Entries of hostnames nobody asks for again (a stopped app) are swept here, so the map holds
+  // only hostnames requested within one token lifetime.
+  for (const [cachedKey, entry] of cache) if (entry.renewAtMs <= now) cache.delete(cachedKey);
   cache.set(key, { token, renewAtMs: now + ttlSeconds * 1000 * (1 - RENEW_REMAINING_FRACTION) });
   return token;
 }

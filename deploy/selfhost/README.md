@@ -460,6 +460,8 @@ app hostname, for a few minutes (`SELF_HOST_APP_INGRESS_TOKEN_TTL_SECONDS`, 300 
 own `Authorization` and `Cookie` headers reach it unchanged.
 
 Not served on a box yet: custom domains on app deployments (the box has no certificate for them).
+Request paths with dot segments, backslashes, control characters or invalid percent-encoding get
+404 before they reach the app.
 
 Verify after a release reaches `applied` (the app URL is on the environment's page):
 
