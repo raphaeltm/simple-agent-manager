@@ -918,10 +918,32 @@ describe('Codex review round 4', () => {
     expect(parseAppRouteHostname(name('80'), BASE)).toEqual({ environmentId: ENV_LIVE });
   });
 
-  it('repoints the stale record itself when a live sibling shares its name', async () => {
+  it('repoints each stale sibling by id, then deletes any that would duplicate a live one', async () => {
     await seedNode('live-node', 'running', LIVE_IP);
     await seedEnvironment(ENV_LIVE, 'live-node');
-    // Two A records for one name; the live one sorts first, as an upsert would pick it.
+    // Two stale A records for one name (a node migration can leave this): the first is moved to
+    // the live address by id, the second would then duplicate it, so it is deleted.
+    const zone = createFakeCloudflareDns({
+      zoneId: ZONE,
+      token: TOKEN,
+      seed: [
+        rec('a-stale', host(ENV_LIVE), '10.0.0.8'),
+        rec('b-stale', host(ENV_LIVE), RELEASED_IP),
+      ],
+    });
+    vi.stubGlobal('fetch', vi.fn(zone.fetch));
+
+    const result = await runAppRouteDnsReconciliation(env);
+
+    expect([...zone.records.values()].map((r) => [r.id, r.content])).toEqual([
+      ['a-stale', LIVE_IP],
+    ]);
+    expect(result).toMatchObject({ repointed: 1, deleted: 1, failed: 0 });
+  });
+
+  it('deletes a stale sibling instead of updating it into a duplicate of a live one', async () => {
+    await seedNode('live-node', 'running', LIVE_IP);
+    await seedEnvironment(ENV_LIVE, 'live-node');
     const zone = createFakeCloudflareDns({
       zoneId: ZONE,
       token: TOKEN,
@@ -929,11 +951,11 @@ describe('Codex review round 4', () => {
     });
     vi.stubGlobal('fetch', vi.fn(zone.fetch));
 
-    const result = await runAppRouteDnsReconciliation(env);
+    await runAppRouteDnsReconciliation(env);
 
-    expect(zone.records.get('b-stale')?.content).toBe(LIVE_IP);
+    expect(zone.records.has('b-stale')).toBe(false);
     expect(zone.records.get('a-live')?.content).toBe(LIVE_IP);
-    expect(result.repointed).toBe(1);
+    expect(zone.requests.some((r) => r.method === 'PATCH')).toBe(false);
   });
 
   it('backs off a record whose delete keeps failing, but keeps reporting it', async () => {
@@ -1018,5 +1040,64 @@ describe('Codex review round 6', () => {
 
     expect(zone.records.has('stale')).toBe(false);
     expect(result).toMatchObject({ repointed: 0, deleted: 1 });
+  });
+});
+
+describe('adversarial re-verification round 2', () => {
+  it('keeps a moved record when the environment moved on again during the repoint', async () => {
+    await seedNode('live-node', 'running', LIVE_IP);
+    await seedNode('next-node', 'running', '10.0.0.4');
+    await seedEnvironment(ENV_LIVE, 'live-node');
+    const zone = createFakeCloudflareDns({
+      zoneId: ZONE,
+      token: TOKEN,
+      seed: [rec('stale', host(ENV_LIVE), RELEASED_IP)],
+      beforeRequest: (method) => {
+        if (method === 'PATCH') {
+          // The environment moves to another live node; its release fetch will write the record.
+          sqlite
+            .prepare("UPDATE deployment_environments SET node_id = 'next-node' WHERE id = ?")
+            .run(ENV_LIVE);
+        }
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn(zone.fetch));
+
+    await runAppRouteDnsReconciliation(env);
+
+    expect(zone.records.has('stale')).toBe(true);
+  });
+
+  it('releases every record even when a write in flight moves one off the content filter', async () => {
+    settings.values.set('appRouteDns.sweepPageSize', 1);
+    await seedNode('releasing', 'destroying', RELEASED_IP);
+    await seedEnvironment(ENV_RELEASED, 'releasing', 'stopping');
+    const zone = createFakeCloudflareDns({
+      zoneId: ZONE,
+      token: TOKEN,
+      seed: [
+        rec('first', host(ENV_RELEASED, 1), RELEASED_IP),
+        rec('second', host(ENV_RELEASED, 2), RELEASED_IP),
+      ],
+      beforeRequest: (method, url) => {
+        // The guarded delete's re-read of the first record finds it rewritten elsewhere: it is
+        // `changed`, and it no longer matches the release's `content` filter.
+        if (method === 'GET' && url.searchParams.get('name') === host(ENV_RELEASED, 1)) {
+          const first = zone.records.get('first');
+          if (first) first.content = '10.0.0.9';
+        }
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn(zone.fetch));
+
+    const counts = await releaseNodeAppRouteDnsRecords(env, {
+      id: 'releasing',
+      nodeRole: 'deployment',
+      ipAddress: RELEASED_IP,
+    });
+
+    // The second record shifted onto page 1 when the first left the filter; it is still reached.
+    expect(zone.records.has('second')).toBe(false);
+    expect(counts).toMatchObject({ changed: 1, deleted: 1 });
   });
 });

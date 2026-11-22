@@ -164,4 +164,14 @@ describe('dangling app-route sweep on reverse-tunnel deployment nodes', () => {
     expect(zone.records.has('left-over')).toBe(false);
     expect(result.deleted).toBe(1);
   });
+
+  it('contains a transport that cannot resolve its address to that environment', async () => {
+    // Box DNS on but no public address: reverseTunnelAppRouteAddress throws for tunnel nodes.
+    const misconfigured = { ...env, SAM_DNS_PUBLIC_IPV4: undefined } as unknown as Env;
+
+    await expect(runAppRouteDnsReconciliation(misconfigured)).rejects.toThrow(/could not judge 2/);
+
+    // The tunnel environment's records are kept; the unrelated stopped one is still deleted.
+    expect(rows().map((r) => r.id)).toEqual(['live-at-box', 'live-at-node']);
+  });
 });
