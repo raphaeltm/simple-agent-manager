@@ -105,11 +105,16 @@ export async function releaseNodeAppRouteDnsRecords(
   // address that cannot be resolved (a misconfigured reverse-tunnel install) is not a reason to
   // keep the VM: such records point at the box, not at this IP. Clean up by IP anyway.
   let covered = false;
+  // The node's own IP, plus the address its records point at when that differs (a reverse-tunnel
+  // node's records point at the box): stop must remove those too, not leave them to the sweep.
+  const addresses = new Set<string>([node.ipAddress]);
   try {
-    covered = appRouteRecordAddress(
+    const resolved = appRouteRecordAddress(
       { transport: node.transport ?? null, ipAddress: node.ipAddress },
       env
-    ).covered;
+    );
+    covered = resolved.covered;
+    if (!resolved.covered && resolved.address) addresses.add(resolved.address);
   } catch (error) {
     log.error('dns.app_route_release_address_unresolved', {
       nodeId: node.id,
@@ -139,26 +144,8 @@ export async function releaseNodeAppRouteDnsRecords(
   // Page by page, so a large inventory still makes progress within one budget. Deleted, absent
   // and repointed records leave the `content` filter, shifting later records onto this page, so
   // the page is read again after any of them; every re-read follows a removal.
-  for (let page = 1; ;) {
-    const result = await listAppRouteDnsRecordsPage(
-      dnsEnv,
-      { page, perPage, content: node.ipAddress },
-      effectiveSignal
-    );
-    unparsed += result.providerCount - result.records.length;
-    const pageCounts = await cleanupRecords(dnsEnv, result.records, {
-      trigger: 'node_release',
-      nodeId: node.id,
-      maxDeletes: Number.POSITIVE_INFINITY,
-      deadline: Number.POSITIVE_INFINITY,
-      signal: effectiveSignal,
-    });
-    addCounts(counts, pageCounts);
-    if (result.providerCount < perPage || pageCounts.deferred > 0) break;
-    // `changed` records may also have been rewritten off the filter by a release fetch in flight.
-    if (pageCounts.deleted + pageCounts.absent + pageCounts.repointed + pageCounts.changed === 0) {
-      page++;
-    }
+  for (const content of addresses) {
+    unparsed += await releaseRecordsAt(dnsEnv, node.id, content, perPage, counts, effectiveSignal);
   }
   counts.unparsed = unparsed;
   if (counts.unknown > 0) {
@@ -174,6 +161,36 @@ export async function releaseNodeAppRouteDnsRecords(
     );
   }
   return counts;
+}
+
+/** Release cleanup of the records at one address, page by page; returns the unparsed count. */
+async function releaseRecordsAt(
+  dnsEnv: Env,
+  nodeId: string,
+  content: string,
+  perPage: number,
+  counts: AppRouteCleanupCounts,
+  signal: AbortSignal
+): Promise<number> {
+  let unparsed = 0;
+  for (let page = 1; ;) {
+    const result = await listAppRouteDnsRecordsPage(dnsEnv, { page, perPage, content }, signal);
+    unparsed += result.providerCount - result.records.length;
+    const pageCounts = await cleanupRecords(dnsEnv, result.records, {
+      trigger: 'node_release',
+      nodeId,
+      maxDeletes: Number.POSITIVE_INFINITY,
+      deadline: Number.POSITIVE_INFINITY,
+      signal,
+    });
+    addCounts(counts, pageCounts);
+    if (result.providerCount < perPage || pageCounts.deferred > 0) break;
+    // `changed` records may also have been rewritten off the filter by a release fetch in flight.
+    if (pageCounts.deleted + pageCounts.absent + pageCounts.repointed + pageCounts.changed === 0) {
+      page++;
+    }
+  }
+  return unparsed;
 }
 
 async function readCursor(env: Env): Promise<number> {

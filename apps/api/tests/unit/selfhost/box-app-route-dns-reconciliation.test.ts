@@ -175,6 +175,49 @@ describe('dangling app-route sweep on reverse-tunnel deployment nodes', () => {
     expect(rows().map((r) => r.id)).toEqual(['live-at-box', 'live-at-node']);
   });
 
+  it("release removes the released node's box-addressed records and keeps another live node's", async () => {
+    const OTHER_ENV = '01KVJDV913S8W7KK32HTZTK0HA';
+    await drizzle(env.DATABASE)
+      .insert(schema.nodes)
+      .values({
+        id: 'other-tunnel-node',
+        userId: 'user',
+        name: 'other-tunnel-node',
+        status: 'running',
+        runtime: 'vm',
+        nodeClass: 'managed',
+        nodeRole: 'deployment',
+        transport: 'reverse-tunnel',
+        ipAddress: '10.8.0.6',
+      } as schema.NewNode);
+    await drizzle(env.DATABASE)
+      .insert(schema.deploymentEnvironments)
+      .values({
+        id: OTHER_ENV,
+        projectId: 'project',
+        name: OTHER_ENV,
+        nodeId: 'other-tunnel-node',
+        status: 'active',
+      } as schema.NewDeploymentEnvironmentRow);
+    sqlite
+      .prepare(
+        "INSERT INTO selfhost_dns_records (id, name, type, content, created_at, updated_at) VALUES ('other-live', ?, 'A', ?, 'now', 'now')"
+      )
+      .run(host(OTHER_ENV), BOX_IP);
+    sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = 'tunnel-node'").run();
+
+    const counts = await releaseNodeAppRouteDnsRecords(env, {
+      id: 'tunnel-node',
+      nodeRole: 'deployment',
+      ipAddress: NODE_IP,
+      transport: 'reverse-tunnel',
+    });
+
+    // The released node's records go, at the box address and at its own; the other node's stays.
+    expect(rows().map((r) => r.id)).toEqual(['other-live']);
+    expect(counts).toMatchObject({ failed: 0, unknown: 0 });
+  });
+
   it('does not hold a teardown when the tunnel address cannot be resolved', async () => {
     const misconfigured = { ...env, SAM_DNS_PUBLIC_IPV4: undefined } as unknown as Env;
     sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = 'tunnel-node'").run();
