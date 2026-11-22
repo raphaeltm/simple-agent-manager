@@ -101,9 +101,7 @@ Self-hosting only. Hosted SAM (Cloudflare) must not change.
   `maxPortsPerClient = 1`). It can answer its own app hostnames with anything, which it can already
   do when hosted. It cannot bind another node's port, reach the box's loopback services (frp is
   reverse-only; it gets no visitor), or obtain TSIG material (DNS-01 runs only on the box). The
-  management token minted per request is bound to that node (`node` claim, routed node-id check),
-  uses the existing management-token expiry, and is stripped before the
-  app sees the request. New trust boundary: none beyond "deployment nodes use the same tunnel trust
+  app-ingress token is bound to that node and hostname and stripped before the app sees the request. New trust boundary: none beyond "deployment nodes use the same tunnel trust
   as workspace nodes".
 - **Callback auth (rule 34).** Deploy-release, route and event callbacks keep the node callback JWT
   and the existing routes; only their transport moves to the tunnel. The new gateway endpoint is
