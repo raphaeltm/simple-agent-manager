@@ -45,6 +45,7 @@ const SECRET = randomBytes(32).toString('hex');
 const WORKSPACE = '01krrtliveaaaaaaaaaaaaaaaa';
 const WS_HOST = `ws-${WORKSPACE}.${DOMAIN}`;
 const PORT_HOST = `ws-${WORKSPACE}--3000.${DOMAIN}`;
+const APP_HOST = `r1-web-80-01krrtenvaaaaaaaaaaaaaaaaaa.apps.${DOMAIN}`;
 /** frp connections one address may open per minute in this run (the box default is 60). */
 const FRP_LOGIN_LIMIT = 3;
 
@@ -91,7 +92,10 @@ describe.skipIf(skipWithoutDocker)('the box Caddy routes (live)', () => {
     };
     celld = createServer((req, res) => {
       celldSeen.push(record(req));
-      if (req.url?.startsWith('/api/self-host/gateway/node-websocket')) {
+      if (
+        req.url?.startsWith('/api/self-host/gateway/node-websocket') ||
+        req.url?.startsWith('/api/self-host/gateway/app-route')
+      ) {
         const { status, headers } = decide(req);
         res.writeHead(status, headers);
         res.end();
@@ -425,6 +429,82 @@ describe.skipIf(skipWithoutDocker)('the box Caddy routes (live)', () => {
       ]) {
         expect(upstream?.headers[name], name).toBeUndefined();
       }
+    });
+  });
+
+  describe('forward_auth for deployment app routes', () => {
+    const appForwardAuth = () =>
+      celldSeen.filter((seen) => seen.url.startsWith('/api/self-host/gateway/app-route'));
+
+    it('asks the Worker for every request, stripping client X-SAM-* headers, and passes a refusal through', async () => {
+      decide = () => ({ status: 404, headers: { 'Content-Type': 'application/json' } });
+      const reply = await send(APP_HOST, '/index.html?q=1', FORGED);
+      expect(reply.status).toBe(404);
+      const [auth, ...more] = appForwardAuth();
+      expect(more).toEqual([]);
+      expect(auth?.headers['x-sam-gateway-secret']).toBe(SECRET);
+      expect(auth?.headers['x-sam-gateway-original-host']).toBe(APP_HOST);
+      expect(auth?.headers['x-forwarded-uri']).toBe('/index.html?q=1');
+      for (const name of ['x-sam-upstream', 'x-sam-upstream-uri', 'x-sam-node-id']) {
+        expect(auth?.headers[name], name).toBeUndefined();
+      }
+      // Nothing reaches a node, and the catch-all celld route is never used for app hosts.
+      expect(nodeSeen).toEqual([]);
+      expect(celldSeen.filter((seen) => !seen.url.startsWith('/api/self-host/gateway/'))).toEqual([]);
+    });
+
+    it('proxies an authorized request with the Worker-decided upstream, keeping the app credentials', async () => {
+      decide = () => ({
+        status: 200,
+        headers: {
+          'X-SAM-Upstream': `127.0.0.1:${ports.node}`,
+          'X-SAM-Upstream-Uri': `/deployment/app-ingress/${APP_HOST}/index.html?q=1`,
+          'X-SAM-Upstream-Node-Authorization': 'Bearer worker-decided',
+          'X-SAM-Node-Id': 'NODE-REAL',
+        },
+      });
+      const reply = await send(APP_HOST, '/index.html?q=1', {
+        ...FORGED,
+        'X-SAM-Node-Authorization': 'Bearer forged',
+        Authorization: 'Basic app-user',
+        Cookie: 'app_session=1',
+      });
+      expect(reply.status).toBe(200);
+      const [upstream] = nodeSeen;
+      expect(upstream?.url).toBe(`/deployment/app-ingress/${APP_HOST}/index.html?q=1`);
+      expect(upstream?.headers['x-sam-node-authorization']).toBe('Bearer worker-decided');
+      expect(upstream?.headers['x-sam-node-id']).toBe('NODE-REAL');
+      expect(upstream?.headers.authorization).toBe('Basic app-user');
+      expect(upstream?.headers.cookie).toBe('app_session=1');
+      expect(upstream?.headers['x-forwarded-host']).toBe(APP_HOST);
+      for (const name of [
+        'x-sam-gateway-secret',
+        'x-sam-gateway-original-host',
+        'x-sam-upstream',
+        'x-sam-upstream-uri',
+        'x-sam-upstream-node-authorization',
+        'x-sam-upstream-authorization',
+        'x-sam-upstream-cookie',
+        'x-sam-workspace-id',
+      ]) {
+        expect(upstream?.headers[name], name).toBeUndefined();
+      }
+    });
+
+    it('carries an authorized app WebSocket the same way', async () => {
+      decide = () => ({
+        status: 200,
+        headers: {
+          'X-SAM-Upstream': `127.0.0.1:${ports.node}`,
+          'X-SAM-Upstream-Uri': `/deployment/app-ingress/${APP_HOST}/socket`,
+          'X-SAM-Upstream-Node-Authorization': 'Bearer worker-decided',
+          'X-SAM-Node-Id': 'NODE-REAL',
+        },
+      });
+      const reply = await send(APP_HOST, '/socket', {}, true);
+      expect(reply.status).toBe(101);
+      expect(nodeSeen[0]?.url).toBe(`/deployment/app-ingress/${APP_HOST}/socket`);
+      expect(nodeSeen[0]?.headers['x-sam-node-authorization']).toBe('Bearer worker-decided');
     });
   });
 

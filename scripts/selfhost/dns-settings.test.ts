@@ -40,10 +40,14 @@ describe('Worker vars for DNS on the box', () => {
     expect(boxDnsWorkerVars(box)).toEqual({});
   });
 
-  it('switches the Worker to the box zone with the profile on', () => {
-    expect(boxDnsWorkerVars(ON)).toEqual({ SAM_DNS_PROVIDER: 'box' });
+  it('switches the Worker to the box zone, with the box address app routes point at', () => {
+    expect(boxDnsWorkerVars(ON)).toEqual({
+      SAM_DNS_PROVIDER: 'box',
+      SAM_DNS_PUBLIC_IPV4: ON.SAM_DNS_PUBLIC_IPV4,
+    });
     expect(boxDnsWorkerVars({ ...ON, SAM_TLS_MODE: 'internal' })).toEqual({
       SAM_DNS_PROVIDER: 'box',
+      SAM_DNS_PUBLIC_IPV4: ON.SAM_DNS_PUBLIC_IPV4,
     });
   });
 
