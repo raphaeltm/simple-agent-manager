@@ -19,7 +19,7 @@ func TestGenerateRootCaddyfile_LoopbackIngressDisablesACMEAndBindsLoopback(t *te
 		ACMECA:           "https://acme.example.test/directory",
 		LoopbackHTTPPort: 8446,
 	})
-	for _, want := range []string{"\tauto_https off\n", "\tdefault_bind 127.0.0.1\n", "\thttp_port 8446\n", "import sites/*", "\nhttp:// {\n\trespond 404\n}\n"} {
+	for _, want := range []string{"\tauto_https off\n", "\tdefault_bind 127.0.0.1\n", "\thttp_port 8446\n", "\t\ttrusted_proxies static 127.0.0.1/32 ::1/128\n", "import sites/*", "\nhttp:// {\n\trespond 404\n}\n"} {
 		if !strings.Contains(root, want) {
 			t.Fatalf("root Caddyfile missing %q:\n%s", want, root)
 		}

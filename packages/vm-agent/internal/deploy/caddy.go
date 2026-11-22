@@ -108,7 +108,11 @@ func SafeEnvironmentFilePart(environmentID string) string {
 // keep the generated config well-formed.
 func buildGlobalOptionsBlock(opts CaddyfileOptions) string {
 	if opts.LoopbackHTTPPort > 0 {
-		return fmt.Sprintf("{\n\tauto_https off\n\tdefault_bind 127.0.0.1\n\thttp_port %d\n}\n", opts.LoopbackHTTPPort)
+		// trusted_proxies: the only client of this loopback listener is the vm-agent's app-ingress
+		// route, which sets X-Forwarded-Proto https (the box terminated TLS) and extends the box's
+		// X-Forwarded-For. Without it Caddy discards both and tells the app the request was plain
+		// HTTP from 127.0.0.1, which breaks HTTPS redirects, secure cookies and OAuth callbacks.
+		return fmt.Sprintf("{\n\tauto_https off\n\tdefault_bind 127.0.0.1\n\thttp_port %d\n\tservers {\n\t\ttrusted_proxies static 127.0.0.1/32 ::1/128\n\t}\n}\n", opts.LoopbackHTTPPort)
 	}
 	email := strings.Join(strings.Fields(opts.ACMEEmail), "")
 	ca := strings.Join(strings.Fields(opts.ACMECA), "")
