@@ -59,7 +59,7 @@ The self-host entry wraps the shared Worker with `withReverseTunnel(worker, rend
 the gateway endpoints under `/api/self-host/gateway/` before the shared app sees the request,
 and runs the lease backstop after the shared handler on the five-minute sweep cron. The
 backstop logs `cron.reverse_tunnel_lease_sweep` with its release count, or why it skipped, and
-it honours the operational cron switch. The gateway has two endpoints:
+it honours the operational cron switch. Its node-transport endpoints:
 
 - `POST /api/self-host/gateway/frps-plugin`: the frps server plugin. frps authenticates with
   HTTP basic auth, user `frps`, password `REVERSE_TUNNEL_GATEWAY_SECRET`. A Login allow is
@@ -70,8 +70,13 @@ it honours the operational cron switch. The gateway has two endpoints:
   normal ws-* or node log-stream authentication. The answer is either that handler's refusal or
   `X-SAM-Upstream`/`X-SAM-Upstream-*` headers naming the loopback lease port and the credentials
   Caddy forwards.
+- `GET /api/self-host/gateway/app-route`: Caddy `forward_auth` for every request to a deployment
+  app hostname (`*.apps.<BASE_DOMAIN>`), same header. It answers 404 (or 503 while the node's
+  tunnel is down) or the node's lease upstream, the agent's `/deployment/app-ingress/<host>/...`
+  URI and a short-lived token for that node and hostname, which Caddy sends as `X-SAM-Node-Authorization`
+  (`authorizeAppRouteRequest` in `apps/api/src/selfhost/reverse-tunnel/app-route.ts`).
 
-Without a gateway secret of at least 32 characters, both endpoints answer 404; a wrong secret
+Without a gateway secret of at least 32 characters, every endpoint answers 404; a wrong secret
 gets 401. The Cloudflare Worker never imports this entry.
 
 Control-plane requests, the task liveness probe and WebSocket decisions reach a reverse-tunnel
@@ -210,7 +215,7 @@ backend (`installBoxDns()` in `apps/api/src/selfhost/dns/`), active only when th
 `SAM_DNS_PROVIDER=box`. The box deploy sets it when its `dns` compose profile is on. Then:
 
 - the records SAM writes, such as app deployment routes
-  (`r<n>-<service>-<port>-<env>.apps.<BASE_DOMAIN>`), go to a table in the box's own database
+  (`r<n>-<service>-<port>-<env>.apps.<BASE_DOMAIN>`, pointing at the box), go to a table in the box's own database
   instead of the Cloudflare API (`upsertBoxARecord()` in `apps/api/src/selfhost/dns/records.ts`);
 - the box's DNS server, `sam-dns` (`deploy/selfhost/sam-dns`), syncs them over a loopback-only,
   secret-checked route (`GET /api/self-host/gateway/dns-records`), and answers for the whole domain:
@@ -236,9 +241,18 @@ the A record instead. The step-by-step guide, the settings and the switch from C
 example.org` is `REFUSED` (no recursion); `dig @203.0.113.5 sam.example.com AXFR` fails (no zone
 transfers). A deployment node's `<node-id>.vm.` record resolves to the node.
 
-App deployments do not run on a single box yet. Deployment nodes still need a Cloudflare Origin CA
-certificate for their agent, so without `CF_API_TOKEN` a release fails at node boot
-(`origin_ca_bootstrap`).
+**App deployments on a box.** Deployment nodes use the box's reverse tunnel, like workspace nodes, so
+they need no Cloudflare Origin CA certificate and open no public port: their firewall drops 80 and
+443 too. App routes resolve to the box: with DNS on the box, one record per route pointing at
+`SAM_DNS_PUBLIC_IPV4`; with your own DNS, a `*.apps.<BASE_DOMAIN>` wildcard record pointing at the
+box. `*.<BASE_DOMAIN>` alone stops matching app names while the `*.apps` certificate's DNS-01
+challenge record exists. The box's Caddy serves them with its own `*.apps.<BASE_DOMAIN>` wildcard
+certificate. For each request it asks SAM which node may answer
+(`authorizeAppRouteRequest()` in `apps/api/src/selfhost/reverse-tunnel/app-route.ts`): the hostname
+must be a route of its environment's latest release, on that environment's live node. The request
+then travels through the tunnel to the node, whose agent re-checks the route and passes it to the
+node's loopback-only Caddy. Custom domains on app deployments are not served on a box yet.
+`deploy/selfhost/README.md` ("App deployments on a box") has the checks.
 
 **What the box accepts.** `sam-dns` is authoritative only: it answers for its domain and refuses
 every other name, never recurses, refuses zone transfers, NOTIFY and UPDATE on port 53, gives ANY

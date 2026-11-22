@@ -8,6 +8,8 @@ export interface ReverseTunnelEnv extends Env {
   REVERSE_TUNNEL_PORT_RANGE_END?: string;
   REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS?: string;
   REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS?: string;
+  /** Lifetime of the app-ingress credential box Caddy sends to a node (`app-route-token.ts`). */
+  SELF_HOST_APP_INGRESS_TOKEN_TTL_SECONDS?: string;
 }
 export function isReverseTunnelInstallation(env: Pick<Env, 'VM_AGENT_TRANSPORT'>): boolean {
   return env.VM_AGENT_TRANSPORT?.trim() === 'reverse-tunnel';

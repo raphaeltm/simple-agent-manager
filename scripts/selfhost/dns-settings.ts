@@ -84,7 +84,11 @@ export function assertBoxDnsSettings(box: Box): void {
 /** Worker vars for DNS on the box ({} when the profile is off: the Worker keeps calling Cloudflare). */
 export function boxDnsWorkerVars(box: Box): Record<string, string> {
   assertBoxDnsSettings(box);
-  return boxDnsEnabled(box) ? { SAM_DNS_PROVIDER: 'box' } : {};
+  // SAM_DNS_PUBLIC_IPV4 (validated above): deployment nodes' app-route records point at the box,
+  // whose Caddy carries their app traffic through the reverse tunnel.
+  return boxDnsEnabled(box)
+    ? { SAM_DNS_PROVIDER: 'box', SAM_DNS_PUBLIC_IPV4: box.SAM_DNS_PUBLIC_IPV4?.trim() ?? '' }
+    : {};
 }
 
 /** The dotenv docker compose passes to sam-dns and Caddy (`env_file`). */

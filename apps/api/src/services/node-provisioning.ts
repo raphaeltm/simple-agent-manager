@@ -47,6 +47,7 @@ import {
 export { resolveHetznerBaseImageOverride } from './node-provisioning-image';
 import { prepareNodeTunnelIngress } from './node-provisioning-ingress';
 import { recordRejectedAllocationAbsence } from './node-rejection-proof';
+import { nodeTransportExtension } from './node-transport-extension';
 import { resolveManagedNodeTransport, type TunnelEnv } from './node-tunnel-config';
 import type { NodeTunnelProvisioningPhase } from './node-tunnel-provisioning';
 import {
@@ -319,6 +320,8 @@ export async function provisionNode(
           environmentLabel: resolveEnvironmentLabel(env),
           installationId: resolveInstallationId(env),
           runtimeIncarnationId: provisioningRuntimeIncarnationId ?? undefined,
+          // Only the box's reverse tunnel carries app ingress; Cloudflare installs no extension.
+          appIngressThroughTransport: !!nodeTransportExtension(transport)?.appRouteAddress,
         }),
       },
       node

@@ -109,15 +109,12 @@ func (e *Engine) Teardown(ctx context.Context) error {
 		errs = append(errs, fmt.Sprintf("teardown volume mounts: %v", err))
 	}
 
-	snippetPath := filepath.Join(filepath.Dir(e.cfg.CaddyfilePath), "sites", SafeEnvironmentFilePart(e.cfg.EnvironmentID)+".caddy")
+	snippetPath := e.activeSnippetPath()
 	if err := os.Remove(snippetPath); err != nil && !os.IsNotExist(err) {
 		errs = append(errs, fmt.Sprintf("remove Caddy snippet: %v", err))
 	}
 
-	root := GenerateRootCaddyfile(CaddyfileOptions{
-		ACMEEmail: e.cfg.ACMEEmail,
-		ACMECA:    e.cfg.ACMECA,
-	})
+	root := GenerateRootCaddyfile(e.rootCaddyfileOptions())
 	if err := writeFileAtomic(e.cfg.CaddyfilePath, root, 0644); err != nil {
 		errs = append(errs, fmt.Sprintf("write root Caddyfile: %v", err))
 	} else if err := e.reloadActiveCaddyConfig(ctx); err != nil {
@@ -244,7 +241,7 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	})
 
 	// Write release to disk
-	caddyfile, err := GenerateCaddySnippet(payload.Routes)
+	caddyfile, err := GenerateCaddySnippet(payload.Routes, e.cfg.AppIngressLoopbackPort > 0)
 	if err != nil {
 		return fmt.Errorf("generate Caddyfile: %w", err)
 	}
@@ -651,10 +648,7 @@ func (e *Engine) reloadCaddy(ctx context.Context, releaseCaddyfile string) error
 	if err := os.MkdirAll(sitesDir, 0755); err != nil {
 		return fmt.Errorf("create caddy sites dir: %w", err)
 	}
-	root := GenerateRootCaddyfile(CaddyfileOptions{
-		ACMEEmail: e.cfg.ACMEEmail,
-		ACMECA:    e.cfg.ACMECA,
-	})
+	root := GenerateRootCaddyfile(e.rootCaddyfileOptions())
 	if err := writeFileAtomic(e.cfg.CaddyfilePath, root, 0644); err != nil {
 		return fmt.Errorf("write root Caddyfile: %w", err)
 	}
@@ -667,15 +661,12 @@ func (e *Engine) reloadCaddy(ctx context.Context, releaseCaddyfile string) error
 }
 
 func (e *Engine) clearActiveCaddySnippet(ctx context.Context) error {
-	snippetPath := filepath.Join(filepath.Dir(e.cfg.CaddyfilePath), "sites", SafeEnvironmentFilePart(e.cfg.EnvironmentID)+".caddy")
+	snippetPath := e.activeSnippetPath()
 	if err := os.Remove(snippetPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove active Caddy snippet: %w", err)
 	}
 
-	root := GenerateRootCaddyfile(CaddyfileOptions{
-		ACMEEmail: e.cfg.ACMEEmail,
-		ACMECA:    e.cfg.ACMECA,
-	})
+	root := GenerateRootCaddyfile(e.rootCaddyfileOptions())
 	if err := writeFileAtomic(e.cfg.CaddyfilePath, root, 0644); err != nil {
 		return fmt.Errorf("write root Caddyfile: %w", err)
 	}

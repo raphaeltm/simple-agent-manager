@@ -51,7 +51,7 @@ func (e *Engine) ApplyRoutes(ctx context.Context, payload *RouteConfigPayload) e
 		RoutingStatus:   "applying",
 	})
 
-	caddyfile, err := GenerateCaddySnippet(payload.Routes)
+	caddyfile, err := GenerateCaddySnippet(payload.Routes, e.cfg.AppIngressLoopbackPort > 0)
 	if err != nil {
 		return fmt.Errorf("generate Caddyfile: %w", err)
 	}

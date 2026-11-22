@@ -27,6 +27,13 @@ export interface NodeTransportExtension {
    * node has no current route, so a node without DNS is never sent to the public hostname.
    */
   resolveAgentOrigin(env: Env, nodeId: string): Promise<string>;
+  /**
+   * Set only by a transport that carries deployment app ingress itself (the box's reverse
+   * tunnel). The address a deployment node's app-route records point at instead of the node, or
+   * null when the installation's own wildcard record covers them and no record is written. Throws
+   * when the installation cannot name it. Absent: records point at the node (public ingress).
+   */
+  appRouteAddress?(env: Env): string | null;
 }
 let extension: NodeTransportExtension | undefined;
 

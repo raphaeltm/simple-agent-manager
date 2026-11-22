@@ -369,6 +369,7 @@ func Load() (*Config, error) {
 		DeployACMEEmail:       getEnv("DEPLOY_ACME_EMAIL", ""),
 		DeployACMECA:          getEnv("DEPLOY_ACME_CA", ""),
 		DeployTeardownTimeout: getEnvDuration("DEPLOY_TEARDOWN_TIMEOUT", DefaultDeployTeardownTimeout),
+		DeployAppIngress:      strings.TrimSpace(getEnv("DEPLOY_APP_INGRESS", "")),
 
 		DeployArtifactDialTimeout:           getEnvDuration("DEPLOY_ARTIFACT_DIAL_TIMEOUT", DefaultDeployArtifactDialTimeout),
 		DeployArtifactTLSHandshakeTimeout:   getEnvDuration("DEPLOY_ARTIFACT_TLS_HANDSHAKE_TIMEOUT", DefaultDeployArtifactTLSHandshakeTimeout),
@@ -400,6 +401,25 @@ func Load() (*Config, error) {
 		}
 		if _, err := os.Stat(cfg.TLSKeyPath); err != nil {
 			return nil, fmt.Errorf("TLS_KEY_PATH %q: %w", cfg.TLSKeyPath, err)
+		}
+	}
+
+	// Strict: a typo must not silently move Caddy to the default port.
+	appIngressPort, err := getEnvInt64Strict("DEPLOY_APP_INGRESS_PORT", DefaultDeployAppIngressPort)
+	if err != nil {
+		return nil, err
+	}
+	cfg.DeployAppIngressPort = int(appIngressPort)
+	// A typo must not fall back to public automatic HTTPS on a node that has no public ingress.
+	if cfg.DeployAppIngress != "" && cfg.DeployAppIngress != DeployAppIngressTunnel {
+		return nil, fmt.Errorf("DEPLOY_APP_INGRESS must be empty or %q (got %q)", DeployAppIngressTunnel, cfg.DeployAppIngress)
+	}
+	if cfg.DeployAppIngress == DeployAppIngressTunnel {
+		if cfg.DeployAppIngressPort < 1 || cfg.DeployAppIngressPort > 65535 {
+			return nil, fmt.Errorf("DEPLOY_APP_INGRESS_PORT must be 1-65535 (got %d)", cfg.DeployAppIngressPort)
+		}
+		if cfg.DeployAppIngressPort == cfg.Port {
+			return nil, fmt.Errorf("DEPLOY_APP_INGRESS_PORT must differ from VM_AGENT_PORT (%d)", cfg.Port)
 		}
 	}
 

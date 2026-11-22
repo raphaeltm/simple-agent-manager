@@ -130,6 +130,7 @@ export {
 } from './gcp-boot-disk';
 export { GCP_MACHINE_TYPE_NAME_PATTERN } from './gcp-catalog';
 export { SIZE_MAP as GCP_SIZE_CONFIGS } from './gcp-metadata';
+export { SAM_APP_INGRESS_LABEL_KEY, SAM_APP_INGRESS_TUNNEL } from './gcp-metadata';
 export {
   fetchGcpComputePriceTable,
   type GcpPriceTable,

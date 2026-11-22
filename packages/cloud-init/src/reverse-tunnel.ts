@@ -115,6 +115,13 @@ export function reverseTunnelServerAddress(
   }
 }
 
+/**
+ * Loopback port of a reverse-tunnel deployment node's Caddy, which serves its app routes as plain
+ * HTTP. App traffic reaches it only through the vm-agent's app-ingress route (the box's Caddy
+ * terminates TLS); it must match the vm-agent's DefaultDeployAppIngressPort.
+ */
+export const DEFAULT_DEPLOY_APP_INGRESS_PORT = '8446';
+
 /** Template replacements for reverse-tunnel mode; other nodes get inert values. */
 export function reverseTunnelReplacements(variables: CloudInitVariables): Record<string, string> {
   const reverse = isReverseTunnelMode(variables);
@@ -137,5 +144,13 @@ export function reverseTunnelReplacements(variables: CloudInitVariables): Record
     '{{ frpc_url }}': `${FRPC_DOWNLOAD_BASE_URL}/v${DEFAULT_FRPC_VERSION}`,
     '{{ frpc_sha256_amd64 }}': release?.amd64 ?? '',
     '{{ frpc_sha256_arm64 }}': release?.arm64 ?? '',
+    // App ingress through the box: the deployment node's Caddy binds loopback only and does no
+    // ACME (the vm-agent reads DEPLOY_APP_INGRESS). Other nodes render exactly what they did
+    // before this mode existed: no extra unit lines and the public :80 bootstrap site.
+    '{{ deploy_app_ingress_env }}': reverse
+      ? `\n      Environment=DEPLOY_APP_INGRESS=tunnel\n      Environment=DEPLOY_APP_INGRESS_PORT=${DEFAULT_DEPLOY_APP_INGRESS_PORT}`
+      : '',
+    '{{ deploy_bootstrap_caddy_bind }}': reverse ? '\n        default_bind 127.0.0.1' : '',
+    '{{ deploy_bootstrap_caddy_port }}': reverse ? DEFAULT_DEPLOY_APP_INGRESS_PORT : '80',
   };
 }

@@ -167,6 +167,35 @@ describe('rendered reverse-tunnel user-data', () => {
     expect(output).not.toContain('/usr/local/bin/cloudflared');
   });
 
+  it('a deployment node serves app routes on loopback only, with no ACME and no :80 site', () => {
+    const vars = reverse({ role: 'deployment', environmentId: 'env-1' });
+    const parsed = parse(vars);
+    const unit = file(parsed, '/etc/systemd/system/vm-agent.service').content;
+    expect(unit).toContain('Environment=DEPLOY_APP_INGRESS=tunnel\n');
+    expect(unit).toContain('Environment=DEPLOY_APP_INGRESS_PORT=8446\n');
+    const caddy = file(parsed, '/etc/caddy/Caddyfile').content;
+    expect(caddy).toContain('auto_https off\n  default_bind 127.0.0.1\n');
+    expect(caddy).toContain(':8446 {');
+    expect(caddy).not.toContain(':80 {');
+    const output = generateCloudInit(vars);
+    expect(output).not.toContain('origin-ca');
+    expect(output).not.toContain('origin_ca_bootstrap');
+  });
+
+  it('control: a direct deployment node keeps its public :80 bootstrap and no ingress mode', () => {
+    const parsed = parse(
+      variables({
+        role: 'deployment',
+        environmentId: 'env-1',
+        originCaCertificateUrl: 'https://api.box.example.org/cert',
+      })
+    );
+    expect(file(parsed, '/etc/caddy/Caddyfile').content).toContain(':80 {');
+    expect(file(parsed, '/etc/systemd/system/vm-agent.service').content).not.toContain(
+      'DEPLOY_APP_INGRESS'
+    );
+  });
+
   it('writes an frpc config that dials the control plane over verified wss with one proxy', () => {
     const toml = file(parse(reverse()), '/etc/sam/frpc/frpc.toml');
     // Pre-opened work connections keep the NewWorkConn plugin round trip off the data path.
