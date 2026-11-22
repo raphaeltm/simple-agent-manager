@@ -126,7 +126,7 @@ Self-hosting only. Hosted SAM (Cloudflare) must not change.
 - [x] Tests: rule 74 divergence/convergence through the real resolver; cloud-init byte-identity; release-on-box provisions tunnel without Origin CA; route authorization through the real decision with foreign-node / foreign-project attack + owner control, each shown discriminating; Go handler tests
 - [x] Docs: `deploy/selfhost/README.md`, `self-hosting.mdx` (remove the caveat once proven)
 - [x] Live proof on a disposable box (2026-11-22, below)
-- [ ] Staging: hosted app deployment proof on "Deployment Test 1" (PENDING)
+- [x] Staging: hosted app deployment proof on primary staging (the volume-backed environment is in "Test Project 1"): release v15 applied, route serves 200, Postgres on the Hetzner `pgdata` volume; evidence in PR #2974
 - [x] Follow-up ideas: custom domains on a box (idea 01M81E6FQQ4EFQJR4Y2J7BX4Y3)
 
 ## Acceptance criteria
@@ -166,4 +166,4 @@ Self-hosting only. Hosted SAM (Cloudflare) must not change.
   - Node 35.195.145.22: direct TCP to 22, 80, 443, 8080, 8443, 8444, 8446 and the app host port 41200
     all time out. Port 22 is admitted by the project's `default-allow-ssh` at the GCP layer, so the
     drop is the node's tunnel firewall.
-- Staging (hosted) proof: pending.
+- Staging (hosted) proof: done 2026-11-22 on primary staging (PR #2974 evidence). Found a pre-existing 500 for named volumes on GCP, filed as `tasks/backlog/2026-11-22-release-volume-unsupported-provider-500.md`.
