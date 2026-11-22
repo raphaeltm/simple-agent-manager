@@ -212,6 +212,9 @@ backend (`installBoxDns()` in `apps/api/src/selfhost/dns/`), active only when th
 - the records SAM writes, such as app deployment routes
   (`r<n>-<service>-<port>-<env>.apps.<BASE_DOMAIN>`), go to a table in the box's own database
   instead of the Cloudflare API (`upsertBoxARecord()` in `apps/api/src/selfhost/dns/records.ts`);
+- the cleanup that deletes app-route records left pointing at a deleted deployment server reads and
+  deletes them in that table too (`listBoxARecords()` in the same file), so stopping an
+  environment leaves no record behind on a box either;
 - the box's DNS server, `sam-dns` (`deploy/selfhost/sam-dns`), syncs them over a loopback-only,
   secret-checked route (`GET /api/self-host/gateway/dns-records`), and answers for the whole domain:
   every other name points at the box;
