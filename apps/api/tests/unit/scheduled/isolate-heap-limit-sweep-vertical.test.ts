@@ -27,28 +27,27 @@ const CELLD_REFUSAL =
 /** The sweeps that read KV first on every tick, as on the box. */
 const KV_SWEEPS = new Set(['deployment_release_retention', 'gcp_price_table']);
 
-vi.mock('../../../src/services/operational-kill-switch', () => ({
-  isOperationalLoopEnabled: vi.fn(async () => true),
-}));
-vi.mock('../../../src/scheduled/platform-feedback-hourly', () => ({
-  isHourlyPlatformMaintenanceCron: vi.fn(() => false),
-  scheduleHourlyPlatformMaintenance: vi.fn(() => false),
-}));
+// The real handler, real isolator and real sweeps; only the gates in front of the sweep chain and
+// every sweep other than the two KV readers are held still.
 vi.mock('../../../src/scheduled/sweep-isolation', async (importOriginal) => {
-  const real = await importOriginal<typeof import('../../../src/scheduled/sweep-isolation')>();
-  return {
-    createSweepIsolator: vi.fn((env: Parameters<typeof real.createSweepIsolator>[0]) => {
-      const isolator = real.createSweepIsolator(env);
-      return {
-        ...isolator,
-        // Only the two KV-reading sweeps run; every other sweep reports "no data this tick".
-        isolate: (name: string, fn: () => Promise<unknown>) =>
-          KV_SWEEPS.has(name) ? isolator.isolate(name, fn) : Promise.resolve(undefined),
-      };
-    }),
+  type IsolatorModule = typeof import('../../../src/scheduled/sweep-isolation');
+  const { createSweepIsolator: realIsolator } = await importOriginal<IsolatorModule>();
+  const onlyKvSweeps: IsolatorModule['createSweepIsolator'] = (env) => {
+    const real = realIsolator(env);
+    const isolate: typeof real.isolate = (name, fn) =>
+      KV_SWEEPS.has(name) ? real.isolate(name, fn) : Promise.resolve(undefined);
+    return { ...real, isolate };
   };
+  return { createSweepIsolator: vi.fn(onlyKvSweeps) };
 });
 vi.mock('../../../src/services/observability', () => ({ persistError: vi.fn() }));
+vi.mock('../../../src/scheduled/platform-feedback-hourly', () => ({
+  scheduleHourlyPlatformMaintenance: () => false,
+  isHourlyPlatformMaintenanceCron: () => false,
+}));
+vi.mock('../../../src/services/operational-kill-switch', () => ({
+  isOperationalLoopEnabled: async () => true,
+}));
 
 const { scheduled } = await import('../../../src/scheduled/handler');
 
