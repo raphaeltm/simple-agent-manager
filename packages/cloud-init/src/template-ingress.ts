@@ -375,6 +375,7 @@ export const REVERSE_TUNNEL_FIREWALL_WRITE_FILE = (() => {
     loop,
     '        for port in "$VM_AGENT_PORT" "$TUNNEL_PORT" 80 443; do\n'
   );
-  if (reverse === TUNNEL_FIREWALL_WRITE_FILE) throw new Error('tunnel firewall port loop not found');
+  if (reverse === TUNNEL_FIREWALL_WRITE_FILE)
+    throw new Error('tunnel firewall port loop not found');
   return reverse;
 })();

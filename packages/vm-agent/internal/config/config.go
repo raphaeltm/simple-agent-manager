@@ -191,11 +191,11 @@ const (
 const (
 	RoleWorkspace  = "workspace"
 	RoleDeployment = "deployment"
-
-	// DeployAppIngressTunnel is the DEPLOY_APP_INGRESS value for app ingress through the tunnel.
-	DeployAppIngressTunnel = "tunnel"
 	RoleStandalone = "standalone"
 )
+
+// DeployAppIngressTunnel is the DEPLOY_APP_INGRESS value for app ingress through the tunnel.
+const DeployAppIngressTunnel = "tunnel"
 
 // Config holds all configuration values for the VM Agent.
 type Config struct {

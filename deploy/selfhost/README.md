@@ -448,12 +448,15 @@ public agent port. Their app traffic goes through the box as well:
    environment's latest release. The environment's node must be a live reverse-tunnel deployment
    node with an active lease and the same owner. Anything else gets 404 (503 while the node's
    tunnel is down).
-4. Caddy proxies through frp to the node's agent, which checks the route against the release it
-   applied and hands the request to the node's own Caddy. That Caddy listens on loopback only
+4. Caddy proxies through frp to the node's agent, which checks the credential and the route against
+   the release it applied, and hands the request to the node's own Caddy. That Caddy listens on loopback only
    (`DEPLOY_APP_INGRESS_PORT`, default 8446) and does no ACME.
 
 The node opens no public port: its firewall drops the agent port, 22, 80 and 443, and on GCE it
-gets no `sam-deployment-app-routes` tag. Nothing to configure beyond the TLS mode above. The app's
+gets no `sam-deployment-app-routes` tag. SAM binds every routed service to loopback (compose
+`ports:` are rewritten); a service using host networking could still listen on another port, which
+your cloud firewall decides. The credential the box sends to the node is good only for that node's
+app hostname, for a few minutes (`SELF_HOST_APP_INGRESS_TOKEN_TTL_SECONDS`, 300 by default). Nothing to configure beyond the TLS mode above. The app's
 own `Authorization` and `Cookie` headers reach it unchanged.
 
 Not served on a box yet: custom domains on app deployments (the box has no certificate for them).

@@ -123,7 +123,11 @@ export function buildNodeProviderLabels(params: {
   }
   // Only a transport that carries app ingress itself (the box's reverse tunnel) sets this.
   // Cloudflare installs no extension, so its labels are unchanged.
-  if (params.isDeploymentNode && params.transport && nodeTransportExtension(params.transport)?.appRouteAddress) {
+  if (
+    params.isDeploymentNode &&
+    params.transport &&
+    nodeTransportExtension(params.transport)?.appRouteAddress
+  ) {
     labels[SAM_APP_INGRESS_LABEL_KEY] = SAM_APP_INGRESS_TUNNEL;
   }
   return labels;

@@ -6,9 +6,9 @@
  * TLS with its own `*.apps.` wildcard and asks this decision (forward_auth,
  * `GET /api/self-host/gateway/app-route`) where to send each request. The answer names the node's
  * lease upstream (`127.0.0.1:<leasePort>`, frps) and the vm-agent URI
- * `/deployment/app-ingress/<hostname>/<path>`. It also carries a node-management token for that
- * node, which Caddy sends in `X-SAM-Node-Authorization` so the app's own Authorization header
- * reaches the app untouched. The vm-agent re-checks the hostname against the routes it applied and
+ * `/deployment/app-ingress/<hostname>/<path>`. It also carries a short-lived app-ingress token for
+ * that node and hostname (`app-route-token.ts`), which Caddy sends in `X-SAM-Node-Authorization` so
+ * the app's own Authorization header reaches the app untouched. The vm-agent re-checks the hostname against the routes it applied and
  * hands the request to its loopback-only Caddy (`packages/vm-agent/internal/server/app_ingress.go`).
  *
  * A hostname reaches a node only when ALL of these hold, read from D1 on every request:
@@ -27,13 +27,14 @@ import * as v from 'valibot';
 
 import * as schema from '../../db/schema';
 import { log } from '../../lib/logger';
-import { signNodeManagementToken } from '../../services/jwt';
 import { NodeAgentRouteError } from '../../services/node-agent-route';
 import { boxPublicIPv4, isBoxDnsEnabled } from '../dns';
+import { appIngressToken } from './app-route-token';
+import { NODE_TEARDOWN_STATUSES } from './authz';
 import type { ReverseTunnelEnv as Env } from './env';
 import { resolveReverseTunnelAgentOrigin } from './route';
 
-/** Response headers the box's Caddy copies into the upstream request (caddy/sam.d/app-routes.caddy). */
+/** Response headers the box's Caddy copies into the upstream request (Caddyfile, `*.apps` site). */
 export const APP_ROUTE_HEADER = {
   upstream: 'X-SAM-Upstream',
   upstreamUri: 'X-SAM-Upstream-Uri',
@@ -49,7 +50,6 @@ const APP_ROUTE_LABEL_RE = /^r[1-9][0-9]{0,3}-[a-z0-9-]+-[1-9][0-9]{0,4}-([a-z0-
 
 /** Environments whose routes the node has removed or is removing. */
 const ENVIRONMENT_ROUTES_GONE = new Set(['stopping', 'stopped']);
-const NODE_TEARDOWN_STATUSES = new Set(['deleted', 'stopped', 'destroying']);
 
 const BindingSchema = v.object({
   environmentId: v.string(),
@@ -105,6 +105,32 @@ export function parseAppRouteHostname(env: Pick<Env, 'BASE_DOMAIN'>, host: strin
   return match?.[1] ? match[1].toUpperCase() : null;
 }
 
+/**
+ * True when the request path is one a browser sends: no dot segment, backslash or control
+ * character in any encoding. The decision hands the path to Caddy's rewrite, and a path Caddy or
+ * the agent could normalize must never be able to climb out of `/deployment/app-ingress/<host>`.
+ */
+export function isPlainAppPath(uri: string): boolean {
+  if (!uri.startsWith('/')) return false;
+  const path = uri.split(/[?#]/, 1)[0] ?? '';
+  let decoded = path;
+  for (let depth = 0; depth < 3; depth++) {
+    let next: string;
+    try {
+      next = decodeURIComponent(decoded);
+    } catch {
+      return false;
+    }
+    if (next === decoded) break;
+    decoded = next;
+  }
+  for (const char of decoded) {
+    const code = char.charCodeAt(0);
+    if (char === '\\' || code < 0x20 || code === 0x7f) return false;
+  }
+  return !decoded.split('/').some((segment) => segment === '.' || segment === '..');
+}
+
 async function readBinding(env: Env, environmentId: string): Promise<Binding | null> {
   const row = await env.DATABASE.prepare(
     `SELECT e.id AS environmentId, e.status AS environmentStatus, e.node_id AS nodeId,
@@ -157,7 +183,7 @@ export async function authorizeAppRouteRequest(
   uri: string
 ): Promise<AppRouteDecision> {
   const environmentId = parseAppRouteHostname(env, host);
-  if (!environmentId || !uri.startsWith('/')) return refuse(host, 'not_an_app_route');
+  if (!environmentId || !isPlainAppPath(uri)) return refuse(host, 'not_an_app_route');
   const binding = await readBinding(env, environmentId);
   if (!binding) return refuse(host, 'no_environment_binding');
   const refusal = bindingRefusal(binding);
@@ -174,7 +200,11 @@ export async function authorizeAppRouteRequest(
     if (err instanceof NodeAgentRouteError) return refuse(host, 'node_unreachable', 503);
     throw err;
   }
-  const { token } = await signNodeManagementToken(binding.nodeUser, binding.nodeId, null, env);
+  const token = await appIngressToken(env, {
+    userId: binding.nodeUser,
+    nodeId: binding.nodeId,
+    host,
+  });
   return {
     allow: true,
     nodeId: binding.nodeId,

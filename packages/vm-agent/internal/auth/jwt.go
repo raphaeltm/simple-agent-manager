@@ -16,6 +16,11 @@ import (
 const nodeManagementAudience = "node-management"
 const workspaceCallbackAudience = "workspace-callback"
 const localForwardAudience = "local-forward"
+
+// appIngressAudience is the credential the control plane's Caddy presents for app traffic through
+// the tunnel (apps/api/src/selfhost/reverse-tunnel/app-route-token.ts). It is accepted only by
+// ValidateAppIngressToken, never as a management token.
+const appIngressAudience = "node-app-ingress"
 const nodeIDMismatchFormat = "node ID mismatch: expected %s, got %s"
 
 // Claims represents JWT claims accepted by the node agent.
@@ -29,6 +34,7 @@ type Claims struct {
 	RemotePort     int    `json:"remotePort,omitempty"`
 	Mode           string `json:"mode,omitempty"`
 	LocalAuthority string `json:"localAuthority,omitempty"`
+	AppHost        string `json:"appHost,omitempty"`
 	// CallbackGeneration ("cgen") is the control plane's opaque per-workspace
 	// callback credential generation embedded in workspace callback tokens. The
 	// control plane rotates it when the same workspace ID is reactivated so the
@@ -271,6 +277,32 @@ func (v *JWTValidator) ValidateNodeManagementToken(tokenString, workspaceID stri
 		return nil, fmt.Errorf("workspace ID mismatch: expected %s, got %s", workspaceID, claims.Workspace)
 	}
 
+	return claims, nil
+}
+
+// ValidateAppIngressToken validates the app-ingress credential for one request to host: the
+// node-app-ingress audience and type, this node, exactly this app hostname, and an expiry. A
+// node-management token is refused here, and an app-ingress token is refused everywhere else.
+func (v *JWTValidator) ValidateAppIngressToken(tokenString, host string) (*Claims, error) {
+	claims, err := v.parse(tokenString)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateAudience(claims, appIngressAudience); err != nil {
+		return nil, err
+	}
+	if claims.Type != "app-ingress" {
+		return nil, fmt.Errorf("app ingress token type is required")
+	}
+	if claims.ExpiresAt == nil {
+		return nil, fmt.Errorf("expiration claim is required")
+	}
+	if claims.Node != v.nodeID {
+		return nil, fmt.Errorf(nodeIDMismatchFormat, v.nodeID, claims.Node)
+	}
+	if host == "" || claims.AppHost != host {
+		return nil, fmt.Errorf("app host mismatch: expected %s, got %s", host, claims.AppHost)
+	}
 	return claims, nil
 }
 

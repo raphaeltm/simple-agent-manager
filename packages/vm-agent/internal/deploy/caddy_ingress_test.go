@@ -19,7 +19,7 @@ func TestGenerateRootCaddyfile_LoopbackIngressDisablesACMEAndBindsLoopback(t *te
 		ACMECA:           "https://acme.example.test/directory",
 		LoopbackHTTPPort: 8446,
 	})
-	for _, want := range []string{"\tauto_https off\n", "\tdefault_bind 127.0.0.1\n", "\thttp_port 8446\n", "import sites/*"} {
+	for _, want := range []string{"\tauto_https off\n", "\tdefault_bind 127.0.0.1\n", "\thttp_port 8446\n", "import sites/*", "\nhttp:// {\n\trespond 404\n}\n"} {
 		if !strings.Contains(root, want) {
 			t.Fatalf("root Caddyfile missing %q:\n%s", want, root)
 		}
@@ -89,5 +89,59 @@ func TestEngineServesHostname_ReadsTheActiveSnippet(t *testing.T) {
 		if served, err := engine.ServesHostname(host); err != nil || served {
 			t.Fatalf("%s: served=%v err=%v", host, served, err)
 		}
+	}
+}
+
+// Through the engine's real writers: every root Caddyfile write keeps the loopback options in
+// tunnel mode (apply/route reload and teardown), and none of them in public mode.
+func TestEngineRootCaddyfileWritesFollowTheIngressMode(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		port     int
+		loopback bool
+	}{{"tunnel ingress", 8446, true}, {"public ingress", 0, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			disk, err := NewDiskState(filepath.Join(dir, "state"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			snippet, err := GenerateCaddySnippet(ingressRoutes, tc.loopback)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := disk.WriteRelease(&ReleaseState{Seq: 1, EnvironmentID: "env", NodeID: "node", Status: StatusApplying}, "compose", snippet); err != nil {
+				t.Fatal(err)
+			}
+			engine := NewEngine(disk, nil, EngineConfig{
+				EnvironmentID: "env", CaddyfilePath: filepath.Join(dir, "active", "Caddyfile"),
+				CaddyReloadCmd: "true", ACMEEmail: "ops@example.test", AppIngressLoopbackPort: tc.port,
+			})
+			check := func(step string) {
+				root, err := os.ReadFile(engine.cfg.CaddyfilePath)
+				if err != nil {
+					t.Fatalf("%s: %v", step, err)
+				}
+				hasLoopback := strings.Contains(string(root), "default_bind 127.0.0.1") && strings.Contains(string(root), "auto_https off")
+				hasACME := strings.Contains(string(root), "email ops@example.test")
+				if hasLoopback != tc.loopback || hasACME == tc.loopback {
+					t.Fatalf("%s root Caddyfile:\n%s", step, root)
+				}
+			}
+			if err := engine.reloadCaddy(t.Context(), disk.CaddyfilePath(1)); err != nil {
+				t.Fatalf("reloadCaddy: %v", err)
+			}
+			check("reload")
+			if served, _ := engine.ServesHostname(ingressRoutes[0].Hostname); !served {
+				t.Fatalf("applied route not served")
+			}
+			if err := engine.clearActiveCaddySnippet(t.Context()); err != nil {
+				t.Fatalf("clearActiveCaddySnippet: %v", err)
+			}
+			check("clear")
+			if served, _ := engine.ServesHostname(ingressRoutes[0].Hostname); served {
+				t.Fatalf("cleared route still served")
+			}
+		})
 	}
 }

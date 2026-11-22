@@ -438,13 +438,20 @@ describe.skipIf(skipWithoutDocker)('the box Caddy routes (live)', () => {
 
     it('asks the Worker for every request, stripping client X-SAM-* headers, and passes a refusal through', async () => {
       decide = () => ({ status: 404, headers: { 'Content-Type': 'application/json' } });
-      const reply = await send(APP_HOST, '/index.html?q=1', FORGED);
+      const reply = await send(APP_HOST, '/index.html?q=1', {
+        ...FORGED,
+        Authorization: 'Basic app-user',
+        Cookie: 'app_session=1',
+      });
       expect(reply.status).toBe(404);
       const [auth, ...more] = appForwardAuth();
       expect(more).toEqual([]);
       expect(auth?.headers['x-sam-gateway-secret']).toBe(SECRET);
       expect(auth?.headers['x-sam-gateway-original-host']).toBe(APP_HOST);
       expect(auth?.headers['x-forwarded-uri']).toBe('/index.html?q=1');
+      // The visitor's app credentials never reach celld.
+      expect(auth?.headers.authorization).toBeUndefined();
+      expect(auth?.headers.cookie).toBeUndefined();
       for (const name of ['x-sam-upstream', 'x-sam-upstream-uri', 'x-sam-node-id']) {
         expect(auth?.headers[name], name).toBeUndefined();
       }

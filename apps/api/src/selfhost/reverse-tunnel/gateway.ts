@@ -223,7 +223,9 @@ export function createSelfHostGatewayRoutes(
       log.warn('self_host_gateway.app_route_unauthenticated', { action: 'rejected' });
       return unauthorized();
     }
-    const host = (c.req.header(GATEWAY_ORIGINAL_HOST_HEADER) ?? '').toLowerCase().replace(/:\d+$/, '');
+    const host = (c.req.header(GATEWAY_ORIGINAL_HOST_HEADER) ?? '')
+      .toLowerCase()
+      .replace(/:\d+$/, '');
     const uri = c.req.header('X-Forwarded-Uri') ?? '';
     // As for WebSockets: the host must survive URL parsing unchanged, or it is refused.
     let parsedHost: string | null = null;

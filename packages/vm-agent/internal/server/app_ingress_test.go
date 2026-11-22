@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/rsa"
 	"io"
 	"net"
 	"net/http"
@@ -10,8 +11,11 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
+	"github.com/workspace/vm-agent/internal/auth"
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/deploy"
 )
@@ -22,13 +26,38 @@ const (
 	appIngressForeign = "r1-web-80-env2.apps.box.example.test"
 )
 
+// signAppIngressTestToken signs the credential box Caddy presents (app-route-token.ts shape).
+func signAppIngressTestToken(t *testing.T, key *rsa.PrivateKey, nodeID, host string) string {
+	t.Helper()
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, auth.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "test-issuer",
+			Subject:   "user-alpha",
+			Audience:  jwt.ClaimStrings{"node-app-ingress"},
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(5 * time.Minute)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+		Node:    nodeID,
+		Type:    "app-ingress",
+		AppHost: host,
+	})
+	token.Header["kid"] = "diagnostic-test-key"
+	signed, err := token.SignedString(key)
+	if err != nil {
+		t.Fatalf("sign app ingress token: %v", err)
+	}
+	return signed
+}
+
 type appIngressFixture struct {
-	server   *Server
-	handler  http.Handler
-	token    string
-	foreign  string
-	upstream []*http.Request
-	bodies   []string
+	mgmt      string
+	otherHost string
+	server    *Server
+	handler   http.Handler
+	token     string
+	foreign   string
+	upstream  []*http.Request
+	bodies    []string
 }
 
 // newAppIngressFixture builds a deployment node in tunnel app ingress with one active environment
@@ -76,11 +105,15 @@ func newAppIngressFixture(t *testing.T, ingress string) *appIngressFixture {
 		deployEngines: map[string]*deploy.Engine{"env-1": engine},
 	}
 	srv.config.AllowedOrigins = []string{"https://*.box.example.test"}
-	srv.buildHTTPServers(http.NewServeMux())
+	mux := http.NewServeMux()
+	srv.setupRoutes(mux)
+	srv.buildHTTPServers(mux)
 	fx.handler = srv.httpServer.Handler
 	fx.server = srv
-	fx.token = signServerTestToken(t, key, appIngressNodeID, "")
-	fx.foreign = signServerTestToken(t, key, "node-other", "")
+	fx.token = signAppIngressTestToken(t, key, appIngressNodeID, appIngressHost)
+	fx.foreign = signAppIngressTestToken(t, key, "node-other", appIngressHost)
+	fx.otherHost = signAppIngressTestToken(t, key, appIngressNodeID, appIngressForeign)
+	fx.mgmt = signServerTestToken(t, key, appIngressNodeID, "")
 	return fx
 }
 
@@ -108,6 +141,8 @@ func TestAppIngress_ProxiesAnAppliedRouteToLoopbackCaddyKeepingAppCredentials(t 
 	headers["Authorization"] = "Basic app-user"
 	headers["Cookie"] = "app_session=1"
 	headers["X-SAM-Upstream-Uri"] = "/forged"
+	headers["Forwarded"] = "for=forged"
+	headers["Connection"] = "X-Forwarded-Host"
 	rec := fx.do(appIngressHost, "/api/items%2Fraw?q=1&token=app", headers)
 	if rec.Code != http.StatusOK || rec.Body.String() != "app:"+appIngressHost {
 		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
@@ -127,9 +162,12 @@ func TestAppIngress_ProxiesAnAppliedRouteToLoopbackCaddyKeepingAppCredentials(t 
 	}
 	for name := range got.Header {
 		lower := strings.ToLower(name)
-		if strings.HasPrefix(lower, "x-sam-") && lower != strings.ToLower(proxiedRequestHeader) {
+		if strings.HasPrefix(lower, "x-sam-") {
 			t.Fatalf("SAM header %s reached the app", name)
 		}
+	}
+	if got.Header.Get("Forwarded") != "" {
+		t.Fatalf("client Forwarded header reached the app")
 	}
 	if got.Header.Get("X-Forwarded-Proto") != "https" || got.Header.Get("X-Forwarded-Host") != appIngressHost {
 		t.Fatalf("forwarded headers: %v", got.Header)
@@ -154,6 +192,14 @@ func TestAppIngress_Refusals(t *testing.T) {
 		{"token for another node", config.DeployAppIngressTunnel, appIngressHost, func(fx *appIngressFixture) map[string]string {
 			return fx.samHeaders(fx.foreign, appIngressNodeID)
 		}, http.StatusUnauthorized},
+		// A node-wide management token is not an app-ingress credential.
+		{"management token", config.DeployAppIngressTunnel, appIngressHost, func(fx *appIngressFixture) map[string]string {
+			return fx.samHeaders(fx.mgmt, appIngressNodeID)
+		}, http.StatusUnauthorized},
+		// A credential minted for another hostname (another environment's app) does not transfer.
+		{"token for another hostname", config.DeployAppIngressTunnel, appIngressHost, func(fx *appIngressFixture) map[string]string {
+			return fx.samHeaders(fx.otherHost, appIngressNodeID)
+		}, http.StatusUnauthorized},
 		{"routed to another node", config.DeployAppIngressTunnel, appIngressHost, func(fx *appIngressFixture) map[string]string {
 			return fx.samHeaders(fx.token, "node-other")
 		}, http.StatusForbidden},
@@ -162,7 +208,7 @@ func TestAppIngress_Refusals(t *testing.T) {
 		}, http.StatusForbidden},
 		// Another environment's hostname (another project's app, or a route this node never applied).
 		{"hostname not applied on this node", config.DeployAppIngressTunnel, appIngressForeign, func(fx *appIngressFixture) map[string]string {
-			return fx.samHeaders(fx.token, appIngressNodeID)
+			return fx.samHeaders(fx.otherHost, appIngressNodeID)
 		}, http.StatusNotFound},
 		{"uppercase hostname", config.DeployAppIngressTunnel, strings.ToUpper(appIngressHost), func(fx *appIngressFixture) map[string]string {
 			return fx.samHeaders(fx.token, appIngressNodeID)
@@ -252,5 +298,35 @@ func TestAppIngress_WebSocketUpgradeReachesTheApp(t *testing.T) {
 	_, message, err := conn.ReadMessage()
 	if err != nil || string(message) != "hello from "+appIngressHost {
 		t.Fatalf("message=%q err=%v", message, err)
+	}
+}
+
+// A loopback Caddy that is not listening (stopped, restarting) is a 502, not a hang or a 200.
+func TestAppIngress_UpstreamDownIs502(t *testing.T) {
+	fx := newAppIngressFixture(t, config.DeployAppIngressTunnel)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fx.server.config.DeployAppIngressPort = listener.Addr().(*net.TCPAddr).Port
+	_ = listener.Close()
+	rec := fx.do(appIngressHost, "/", fx.samHeaders(fx.token, appIngressNodeID))
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// The app-ingress credential opens nothing but app ingress: the management API refuses it.
+func TestAppIngressTokenIsNotAManagementToken(t *testing.T) {
+	fx := newAppIngressFixture(t, config.DeployAppIngressTunnel)
+	for _, header := range []string{"Authorization", "X-SAM-Node-Authorization"} {
+		req := httptest.NewRequest(http.MethodGet, "/workspaces", nil)
+		req.Header.Set(header, "Bearer "+fx.token)
+		req.Header.Set("X-SAM-Node-Id", appIngressNodeID)
+		rec := httptest.NewRecorder()
+		fx.handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s: status=%d", header, rec.Code)
+		}
 	}
 }

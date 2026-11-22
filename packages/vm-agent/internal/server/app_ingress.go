@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -16,7 +18,7 @@ import (
 // (apps/api/src/selfhost/reverse-tunnel/app-route.ts, APP_INGRESS_PATH_PREFIX).
 const appIngressPathPrefix = "/deployment/app-ingress/"
 
-// appIngressAuthorizationHeader carries SAM's node-management token, so the app's own
+// appIngressAuthorizationHeader carries SAM's app-ingress token, so the app's own
 // Authorization header reaches the app untouched (deploy/selfhost/caddy/Caddyfile, *.apps site).
 const appIngressAuthorizationHeader = "X-SAM-Node-Authorization"
 
@@ -41,7 +43,7 @@ var appIngressHostnamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9]
 // in tunnel app ingress (DEPLOY_APP_INGRESS=tunnel); every other node answers 404.
 //
 // The control plane already decided the request may reach this node. The agent still checks, on
-// its own state: the management token is for this node, the routed node id is this node, and the
+// its own state: the app-ingress token is for this node and this hostname, the routed node id is this node, and the
 // hostname is a site of an active environment's applied Caddy snippet. Node Caddy then routes the
 // exact hostname to that route's loopback port, so no other port on the node is reachable.
 func (s *Server) handleDeploymentAppIngress(w http.ResponseWriter, r *http.Request) {
@@ -54,20 +56,24 @@ func (s *Server) handleDeploymentAppIngress(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Authenticate a copy carrying SAM's token, leaving the app's Authorization on the request.
-	authRequest := r.Clone(r.Context())
-	authRequest.Header.Set("Authorization", r.Header.Get(appIngressAuthorizationHeader))
-	if !s.requireNodeManagementAuth(w, authRequest, "") {
+	host, path, rawPath := appIngressTarget(r)
+	if host != strings.ToLower(host) || !appIngressHostnamePattern.MatchString(host) {
+		writeError(w, http.StatusBadRequest, "invalid app hostname")
+		return
+	}
+	// SAM's credential for exactly this node and hostname; the app's own Authorization stays on
+	// the request for the app.
+	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get(appIngressAuthorizationHeader), "Bearer "))
+	if token == "" || s.jwtValidator == nil {
+		writeError(w, http.StatusUnauthorized, "missing app ingress token")
+		return
+	}
+	if _, err := s.jwtValidator.ValidateAppIngressToken(token, host); err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid app ingress token")
 		return
 	}
 	if s.routedNodeID(r) != s.config.NodeID {
 		writeError(w, http.StatusForbidden, "node route mismatch")
-		return
-	}
-
-	host, path, rawPath := appIngressTarget(r)
-	if host != strings.ToLower(host) || !appIngressHostnamePattern.MatchString(host) {
-		writeError(w, http.StatusBadRequest, "invalid app hostname")
 		return
 	}
 	served, err := s.appIngressServesHostname(host)
@@ -133,17 +139,26 @@ func (s *Server) serveAppIngress(w http.ResponseWriter, r *http.Request, host st
 		req.URL.Path = path
 		req.URL.RawPath = rawPath
 		req.Host = host
-		// SAM's routing and credential headers never reach the app.
+		// Keeps only the Upgrade token of a client Connection header, so a client cannot name
+		// X-Forwarded-Host there to have the proxy strip it. Its relay marker is removed below.
+		markProxiedRequest(req.Header)
+		// SAM's routing and credential headers never reach the app. The box's Caddy sets
+		// X-Forwarded-For and X-Real-IP from the connection; a client's Forwarded is dropped.
 		for name := range req.Header {
 			if strings.HasPrefix(strings.ToLower(name), "x-sam-") {
 				req.Header.Del(name)
 			}
 		}
-		markProxiedRequest(req.Header)
+		req.Header.Del("Forwarded")
 		req.Header.Set("X-Forwarded-Host", host)
 		req.Header.Set("X-Forwarded-Proto", "https")
 	}
 	proxy.ErrorHandler = func(rw http.ResponseWriter, _ *http.Request, proxyErr error) {
+		if errors.Is(proxyErr, context.Canceled) {
+			// The client went away (a closed tab, an aborted request): nothing to report.
+			slog.Debug("app ingress: client cancelled", "hostname", host)
+			return
+		}
 		slog.Error("app ingress: upstream error", "hostname", host, "error", proxyErr)
 		writeError(rw, http.StatusBadGateway, "app is not responding")
 	}

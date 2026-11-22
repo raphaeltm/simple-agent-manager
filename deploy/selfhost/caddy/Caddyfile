@@ -80,7 +80,7 @@
 # route of its environment's latest release, and the environment's bound node must be a live
 # reverse-tunnel deployment node with an active lease. It refuses (404/503, sent to the client
 # unchanged) or names the upstream (127.0.0.1:<leasePort>, frps), the vm-agent app-ingress URI and
-# a node-management token. The client chooses none of these. The app's own Authorization and
+# a short-lived token for that node and hostname. The client chooses none of these. The app's own Authorization and
 # Cookie headers pass through to the app untouched: SAM's token travels in X-SAM-Node-Authorization.
 *.apps.{$SAM_DOMAIN} {
 	import tls/{$SAM_TLS_MODE:internal}.caddy
@@ -104,6 +104,11 @@
 			header_up X-Forwarded-Host api.{$SAM_DOMAIN}
 			header_up X-SAM-Gateway-Original-Host {vars.sam_app_host}
 			header_up X-SAM-Gateway-Secret {$REVERSE_TUNNEL_GATEWAY_SECRET}
+			# The decision needs only the host and URI: the visitor's app credentials stay out of
+			# celld. The proxied request below still carries them to the app.
+			header_up -Authorization
+			header_up -Cookie
+			header_up -Proxy-Authorization
 			import sam_client_ip
 			copy_headers X-SAM-Upstream X-SAM-Upstream-Uri X-SAM-Upstream-Node-Authorization X-SAM-Node-Id
 		}

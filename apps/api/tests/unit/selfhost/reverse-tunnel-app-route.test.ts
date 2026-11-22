@@ -2,8 +2,8 @@
  * Route authorization for deployment app ingress on the box, through the real entry point Caddy
  * calls (GET /api/self-host/gateway/app-route, gateway secret header) on a real SQL engine. The
  * schema comes from the drizzle definitions, the lease table from its shipped migration, and the
- * leases from the real lease writer. Only the token signer is replaced (it needs an RSA key), with
- * one that names the node it signs for, so the binding is visible.
+ * leases from the real lease writer, and the app-ingress token is signed with a real key and
+ * verified here.
  *
  * Attack cases sit beside an owner control and each guard was deleted once to see its attack go
  * red (recorded in the PR).
@@ -11,17 +11,15 @@
 import { buildDeploymentRouteTargets } from '@simple-agent-manager/app-deployment';
 import { generateCloudInit } from '@simple-agent-manager/cloud-init';
 import Database from 'better-sqlite3';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { exportPKCS8, generateKeyPair, jwtVerify } from 'jose';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 
-vi.mock('../../../src/services/jwt', () => ({
-  signNodeManagementToken: vi.fn(async (userId: string, nodeId: string) => ({
-    token: `mgmt:${userId}:${nodeId}`,
-    expiresAt: '2026-12-01T00:00:00.000Z',
-  })),
-}));
+// A real RS256 key: the decision's token is signed and verified for real.
+const keys = await generateKeyPair('RS256', { extractable: true });
+const JWT_PRIVATE_KEY = await exportPKCS8(keys.privateKey);
 
 const { createSelfHostGatewayRoutes } =
   await import('../../../src/selfhost/reverse-tunnel/gateway');
@@ -29,6 +27,8 @@ const { installReverseTunnelTransport } =
   await import('../../../src/selfhost/reverse-tunnel/transport');
 const { ensureReverseTunnelLease, releaseUnallocatedReverseTunnelLease } =
   await import('../../../src/selfhost/reverse-tunnel/leases');
+const { resetAppIngressTokenCacheForTests } =
+  await import('../../../src/selfhost/reverse-tunnel/app-route-token');
 const { applySqliteMigration, createSchemaTables, createSqliteD1 } =
   await import('../../helpers/sqlite-d1');
 
@@ -138,7 +138,9 @@ beforeEach(async () => {
     VM_AGENT_TRANSPORT: 'reverse-tunnel',
     REVERSE_TUNNEL_GATEWAY_SECRET: SECRET,
     ENCRYPTION_KEY: 'test-encryption-key-for-app-route-leases',
+    JWT_PRIVATE_KEY,
   } as unknown as Env;
+  resetAppIngressTokenCacheForTests();
   HOST_A = routeHost(ENV_A);
   HOST_B = routeHost(ENV_B);
   await seedTenant('A', ENV_A);
@@ -154,9 +156,19 @@ describe('app-route decision', () => {
       `/deployment/app-ingress/${HOST_A}/index.html?x=1`
     );
     expect(response.headers.get('X-SAM-Node-Id')).toBe('NODEA');
-    expect(response.headers.get('X-SAM-Upstream-Node-Authorization')).toBe(
-      'Bearer mgmt:user-A:NODEA'
+    const token = (response.headers.get('X-SAM-Upstream-Node-Authorization') ?? '').replace(
+      /^Bearer /,
+      ''
     );
+    const { payload } = await jwtVerify(token, keys.publicKey, { audience: 'node-app-ingress' });
+    // Purpose-limited: this node, this hostname, minutes not hours, never a management token.
+    expect(payload).toMatchObject({
+      type: 'app-ingress',
+      node: 'NODEA',
+      appHost: HOST_A,
+      sub: 'user-A',
+    });
+    expect((payload.exp ?? 0) - (payload.iat ?? 0)).toBe(300);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
 
@@ -216,6 +228,47 @@ describe('app-route decision', () => {
     ['userinfo smuggling', () => `${HOST_A}@evil.example`],
   ])('refuses a host that is %s', async (_name, host) => {
     expect((await decide(host())).status).toBe(404);
+  });
+
+  it.each([
+    '/a/../b',
+    '/a/./b',
+    '/..',
+    '/%2e%2e/workspaces',
+    '/%252e%252e/%252e%252e/health',
+    '/a%2F..%2Fb',
+    '/a\\b',
+    '/a%5Cb',
+    '/a%00b',
+  ])('refuses a path a rewrite could normalize out of the app (%s)', async (uri) => {
+    const response = await decide(HOST_A, uri);
+    expect(response.status).toBe(404);
+    expect(response.headers.get('X-SAM-Upstream')).toBeNull();
+  });
+
+  it.each(['/', '/a.b/..c/.d', '/search?q=../x', '/%E2%9C%93'])(
+    'control: an ordinary app path is allowed (%s)',
+    async (uri) => {
+      const response = await decide(HOST_A, uri);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('X-SAM-Upstream-Uri')).toBe(
+        `/deployment/app-ingress/${HOST_A}${uri}`
+      );
+    }
+  );
+
+  it('reuses one token per hostname for a burst of requests, and mints another per hostname', async () => {
+    const tokenFor = async (host: string) =>
+      (await decide(host)).headers.get('X-SAM-Upstream-Node-Authorization');
+    const burst = await Promise.all(Array.from({ length: 5 }, () => tokenFor(HOST_A)));
+    const first = await tokenFor(HOST_A);
+    expect(new Set([...burst.slice(1), first]).size).toBe(1);
+    expect(await tokenFor(HOST_B)).not.toBe(first);
+  });
+
+  it('a release with an unparseable manifest serves nothing (404, not 500)', async () => {
+    run(`UPDATE deployment_releases SET manifest = 'not json' WHERE id = 'rel-A'`);
+    expect((await decide(HOST_A)).status).toBe(404);
   });
 
   it('refuses a request without the gateway secret', async () => {

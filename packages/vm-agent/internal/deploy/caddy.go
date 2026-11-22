@@ -54,6 +54,11 @@ func GenerateRootCaddyfile(opts CaddyfileOptions) string {
 		builder.WriteString(global)
 	}
 	builder.WriteString("\nimport sites/*\n")
+	if opts.LoopbackHTTPPort > 0 {
+		// Any host no site claims gets a 404 rather than Caddy's empty 200, so a route that is
+		// not (or no longer) loaded is reported as missing through the tunnel, not as an empty app.
+		builder.WriteString("\nhttp:// {\n\trespond 404\n}\n")
+	}
 	return builder.String()
 }
 
