@@ -10,8 +10,9 @@
  *   (`deleteNodeResourcesStrict`, which stop, failed start, environment delete, node delete and
  *   every cleanup sweep go through) deletes the records still pointing at the node's IP. Keyed on
  *   the IP rather than on environment links, so an environment unlinked before teardown is still
- *   covered. It runs last in each proof branch, and a failed delete throws: the caller then
- *   cannot retire the node (which clears its IP), so the next attempt repeats it (fail closed).
+ *   covered. On a VM it runs before the provider deletion (while SAM still holds the IP) and
+ *   again after it (for a release fetch that landed in between); a failed delete throws, so the
+ *   node is not retired (which clears its IP) and the next attempt repeats it (fail closed).
  * - {@link runAppRouteDnsReconciliation}: the 5-minute cron backstop for records that already
  *   dangle (left by older code, or by a path that skipped the release).
  *
@@ -77,8 +78,9 @@ async function settingValue(
 }
 
 /**
- * Delete every app-route record still pointing at a node SAM is releasing. Called last in each
- * termination-proof branch of `deleteNodeResourcesStrict`, so every release path runs it.
+ * Delete every app-route record still pointing at a node SAM is releasing. Called from every
+ * branch of `deleteNodeResourcesStrict` (on a VM, before and after the provider deletion), so
+ * every release path runs it.
  * Throws when a record could not be deleted in time, so the node stays in its retryable teardown
  * state instead of being retired with a record pointing at an IP the provider may reassign.
  * A record whose environment row cannot be read is logged and left to the sweep rather than
@@ -99,19 +101,30 @@ export async function releaseNodeAppRouteDnsRecords(
   if (node.nodeRole !== 'deployment' || !node.ipAddress) return null;
   // No BASE_DOMAIN: no app-route name can exist (every one is built under `.apps.<BASE_DOMAIN>`).
   if (!appRouteNameSuffix(env.BASE_DOMAIN)) return null;
-  // Wildcard-covered routes never had per-route records (`upsertReleaseRouteRecords`).
-  if (
-    appRouteRecordAddress({ transport: node.transport ?? null, ipAddress: node.ipAddress }, env)
-      .covered
-  ) {
-    return null;
+  // Wildcard-covered routes never had per-route records (`upsertReleaseRouteRecords`). An
+  // address that cannot be resolved (a misconfigured reverse-tunnel install) is not a reason to
+  // keep the VM: such records point at the box, not at this IP. Clean up by IP anyway.
+  let covered = false;
+  try {
+    covered = appRouteRecordAddress(
+      { transport: node.transport ?? null, ipAddress: node.ipAddress },
+      env
+    ).covered;
+  } catch (error) {
+    log.error('dns.app_route_release_address_unresolved', {
+      nodeId: node.id,
+      transport: node.transport ?? null,
+      error: error instanceof Error ? error.message : String(error),
+      action: 'cleanup_by_ip',
+    });
   }
-  // Any other node's routes are explicit records. Without a way to delete them, fail closed: the
-  // teardown stops (before the provider deletion) rather than release an IP records still name.
+  if (covered) return null;
+  // Without a DNS API the release fetch cannot write a route record either, so there is
+  // nothing this teardown could protect by refusing; refusing would only keep the VM billed.
+  // Logged loudly, and the sweep reports `no_dns_api` on every run.
   if (!hasAppRouteDnsApi(env)) {
-    throw new Error(
-      `Cannot clean up app-route DNS records of node ${node.id}: no DNS API is configured (a box zone, or a Cloudflare zone and token)`
-    );
+    log.error('dns.app_route_release_no_dns_api', { nodeId: node.id, action: 'skipped' });
+    return null;
   }
   const [perPage, budgetMs] = await Promise.all([
     settingValue(env, 'sweepPageSize'),
@@ -207,7 +220,11 @@ export async function runAppRouteDnsReconciliation(env: Env): Promise<AppRouteDn
   const signal = AbortSignal.timeout(budgetMs);
   const dnsEnv = dnsRequestEnv(env, budgetMs);
   const startPage = await readCursor(env);
-  const attemptsUsed = () => totals.deleted + totals.changed + totals.absent + totals.repointed;
+  // Failed mutations spend the cap too, so a fast-failing DNS API cannot turn one sweep into a
+  // burst over every record; the failure backoff keeps them off later sweeps, so the records
+  // behind them are reached on those.
+  const attemptsUsed = () =>
+    totals.deleted + totals.changed + totals.absent + totals.repointed + totals.failed;
   let page = startPage;
   let pagesRead = 0;
   let cycleComplete = false;

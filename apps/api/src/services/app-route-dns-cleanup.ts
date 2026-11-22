@@ -207,9 +207,9 @@ export async function cleanupRecords(
 ): Promise<AppRouteCleanupCounts> {
   const counts = emptyCounts();
   const targets = await loadRouteTargets(env, [...new Set(records.map((r) => r.environmentId))]);
-  // Completed attempts (deleted, absent, changed). A failed delete does not spend the cap, so
-  // records that always fail cannot keep later records from being reached; the deadline still
-  // bounds the time failures can take.
+  // Every mutation attempt spends the cap, failed ones included, so a fast-failing DNS API
+  // cannot burst over every record. The sweep's failure backoff keeps a failed record off later
+  // sweeps, so the records behind it are still reached.
   let attempts = 0;
   for (const record of records) {
     counts.examined++;
@@ -344,6 +344,7 @@ export async function cleanupRecords(
         continue;
       }
       counts.failed++;
+      attempts++;
       if (input.failureBackoffSeconds) {
         await env.KV.put(backoffKey, new Date().toISOString(), {
           expirationTtl: input.failureBackoffSeconds,

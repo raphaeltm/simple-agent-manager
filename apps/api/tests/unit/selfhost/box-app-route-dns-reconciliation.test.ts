@@ -174,4 +174,25 @@ describe('dangling app-route sweep on reverse-tunnel deployment nodes', () => {
     // The tunnel environment's records are kept; the unrelated stopped one is still deleted.
     expect(rows().map((r) => r.id)).toEqual(['live-at-box', 'live-at-node']);
   });
+
+  it('does not hold a teardown when the tunnel address cannot be resolved', async () => {
+    const misconfigured = { ...env, SAM_DNS_PUBLIC_IPV4: undefined } as unknown as Env;
+    sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = 'tunnel-node'").run();
+    sqlite
+      .prepare(
+        "INSERT INTO selfhost_dns_records (id, name, type, content, created_at, updated_at) VALUES ('stopped-at-node', ?, 'A', ?, 'now', 'now')"
+      )
+      .run(host(ENV_STOPPED, 2), NODE_IP);
+
+    const counts = await releaseNodeAppRouteDnsRecords(misconfigured, {
+      id: 'tunnel-node',
+      nodeRole: 'deployment',
+      ipAddress: NODE_IP,
+      transport: 'reverse-tunnel',
+    });
+
+    // Cleanup by IP still runs: the stopped environment's record goes; the one it cannot judge stays.
+    expect(counts).toMatchObject({ deleted: 1, unknown: 1 });
+    expect(rows().map((r) => r.id)).toEqual(['live-at-box', 'live-at-node', 'stopped']);
+  });
 });

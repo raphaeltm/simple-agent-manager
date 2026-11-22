@@ -1001,23 +1001,47 @@ describe('Codex review round 5', () => {
     });
   });
 
-  it('fails release closed for explicit-route nodes when no DNS API is configured', async () => {
+  it('does not hold teardown when no DNS API is configured, since no record can be written', async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
     const noApi = { ...env, CF_ZONE_ID: undefined, CF_API_TOKEN: undefined } as unknown as Env;
     await seedNode('releasing', 'destroying', RELEASED_IP);
-    // A public-transport node's routes are explicit records: teardown must stop, not succeed.
-    await expect(
-      releaseNodeAppRouteDnsRecords(noApi, {
+    // Refusing would protect nothing (the release fetch cannot write either) and keep the VM.
+    expect(
+      await releaseNodeAppRouteDnsRecords(noApi, {
         id: 'releasing',
         nodeRole: 'deployment',
         ipAddress: RELEASED_IP,
       })
-    ).rejects.toThrow(/no DNS API is configured/);
+    ).toBeNull();
     // The sweep has nothing it can do there and says so.
     const result = await runAppRouteDnsReconciliation(noApi);
     expect(result.stoppedBy).toBe('no_dns_api');
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('Codex review round 10', () => {
+  it('counts failed mutations against the per-sweep cap', async () => {
+    settings.values.set('appRouteDns.sweepMaxDeletes', 1);
+    const zone = createFakeCloudflareDns({ zoneId: ZONE, token: TOKEN, seed: await seedWorld() });
+    const mutations: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const method = init?.method ?? 'GET';
+        if (method === 'DELETE' || method === 'PATCH' || method === 'PUT') {
+          mutations.push(`${method} ${String(input)}`);
+          return new Response(JSON.stringify({ errors: [{ code: 10000, message: 'down' }] }), {
+            status: 500,
+          });
+        }
+        return zone.fetch(input, init);
+      })
+    );
+    await expect(runAppRouteDnsReconciliation(env)).rejects.toThrow(/failed to delete 1/);
+    // One attempt, not one per dangling record, although every one failed fast.
+    expect(mutations).toHaveLength(1);
   });
 });
 

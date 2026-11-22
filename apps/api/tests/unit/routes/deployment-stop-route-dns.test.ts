@@ -329,6 +329,30 @@ describe('stopping a deployment environment releases its app-route DNS', () => {
   });
 });
 
+describe('a release fetch that lands during the provider deletion', () => {
+  it('cannot leave a route record pointing at the released IP', async () => {
+    // A fetch admitted before the claim upserts the record after the pre-deletion pass listed.
+    provider.deleteVM.mockImplementation(async () => {
+      await zone.fetch(`https://api.cloudflare.com/client/v4/zones/${ZONE}/dns_records`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'A',
+          name: routeHost(ENV_ID),
+          content: OLD_IP,
+          proxied: false,
+        }),
+      });
+    });
+    const stopped = await stop();
+    expect(stopped.status, await stopped.clone().text()).toBe(200);
+    expect(provider.deleteVM).toHaveBeenCalledTimes(1);
+    expect(nodeRow('node')).toMatchObject({ status: 'deleted', ip_address: null });
+    expect(zone.byName(routeHost(ENV_ID))).toEqual([]);
+    expect(zone.records.has('other-route')).toBe(true);
+  });
+});
+
 describe('every other deployment-node release path reaches the same cleanup', () => {
   it('a failed start removes the record its replacement node served', async () => {
     sqlite

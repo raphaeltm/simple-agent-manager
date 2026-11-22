@@ -407,6 +407,10 @@ export async function deleteNodeResourcesStrict(
       options.providerRequestContext?.signal
     );
   }
+  // Again after the provider deletion: a release fetch admitted before the claim can still
+  // upsert a route record after the pass above listed. A failure throws with the proof
+  // already written, so the retry takes the existing-proof branch, which repeats this pass.
+  await releaseNodeAppRouteDnsRecords(env, node, options.providerRequestContext?.signal);
   return {
     providerVm,
     runtimeTerminationConfirmedAt,
