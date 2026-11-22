@@ -28,5 +28,5 @@ override; check `DEBUG_AGENT_MODEL` in the staging Worker vars and the GitHub En
 
 Root cause: `DEFAULT_DEBUG_AGENT_MODEL` was `@cf/zai-org/glm-5.2`, which Cloudflare retired on
 2026-11-20. Production failed the same way from 2026-11-22. Fixed by
-`tasks/active/2026-11-22-finish-retired-workers-ai-migration.md` (debug agent moved to DeepSeek
+`tasks/archive/2026-11-22-finish-retired-workers-ai-migration.md` (debug agent moved to DeepSeek
 V4.1 Flash, retired IDs pruned under rule 52).

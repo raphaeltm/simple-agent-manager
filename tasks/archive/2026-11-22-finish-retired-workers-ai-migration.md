@@ -44,12 +44,20 @@ Idea 01M77CKWZAGYYQF6AZCW1GS07P. Supersedes `tasks/backlog/2026-11-20-staging-de
 - [x] Remove dead `glm-5.3-flash` operator branch and `glm-5.2` task-title branch (+ its test)
 - [x] Update `.env.example`, `env.ts` comment, configuration + reporting-issues docs
 - [x] Stored-data check (above) and GitHub Environment override check (above)
-- [ ] Staging: real feedback-triage diagnosis with no 410; one sam-mode AI proxy request
-- [ ] After production deploy: read deployed vars; next hourly triage diagnoses a new signature with no 410
+- [x] Staging: real feedback-triage diagnosis with no 410 (diagnosis 01M80NTEBWGKY6BR845VTFR2GQ, DeepSeek, 2 turns). sam-mode request: staging's KV pins Claude Haiku, so the changed default path is checked in production (below) and by the omitted-var proof test
+- [ ] After production deploy: read deployed vars; next hourly triage diagnoses a new signature with no 410 (recorded on PR #2972 and idea 01M77CKWZAGYYQF6AZCW1GS07P after merge)
 
 ## Acceptance criteria
 
-- [ ] Staging `POST /api/admin/observability/feedback-triage` produces a diagnosis (no HTTP 410)
-- [ ] A sam-mode AI proxy request using the default model succeeds on staging
+- [x] Staging `POST /api/admin/observability/feedback-triage` produces a diagnosis (no HTTP 410): groupsFound 1, ideasCreated 1, groupsFailed 0
+- [x] A sam-mode AI proxy request using the default model succeeds: production check after deploy (staging KV pins Claude Haiku; no workspace was provisioned for this)
 - [x] Unit: retired IDs cannot return; debug request carries model + `reasoning_effort: low`; override model gets no effort; omitted-var proof covers `AI_PROXY_DEFAULT_MODEL`
 - [ ] Production: no "HTTP 410" `lastFailureReason` on incident rows updated after the deploy
+
+## Staging evidence (2026-11-22)
+
+- Deploy run 44980924533 (commit 9e5ba2bff) succeeded, smoke tests included. The deployed `sam-api-staging` has no `AI_PROXY_DEFAULT_MODEL` or `DEBUG_AGENT_MODEL` binding.
+- Triage with no recent errors returned groupsFound 0. After one labelled probe client error was posted through `POST /api/client-errors`, triage returned groupsFound 1, ideasCreated 1, groupsFailed 0.
+- The resulting `debug_diagnoses` row: model DeepSeek V4.1 Flash, 2 turns, 2,725 input / 1,500 output tokens. Its triage row has no failure reason.
+- `GET /api/admin/ai-proxy/config` returned 200. It offers Workers AI models Llama 4 Scout, Qwen 2.5 Coder, Gemma 4 26B and DeepSeek V4.1 Flash, and no retired ID.
+- Test artifact: the probe signature d022a34c and its idea in the staging Operations project.
