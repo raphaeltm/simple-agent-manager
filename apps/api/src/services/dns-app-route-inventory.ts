@@ -13,6 +13,7 @@
 import * as v from 'valibot';
 
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { readResponseJson } from '../lib/runtime-validation';
 import {
   CLOUDFLARE_API_BASE,
@@ -24,9 +25,11 @@ import {
 import { boxDnsBackendFor } from './dns-provider';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 
-/** ULIDs are 26 characters; `buildRouteHostname` lowercases them. */
-const ENVIRONMENT_ID_LENGTH = 26;
-const ENVIRONMENT_ID_LABEL_RE = /^[0-9a-z]+$/;
+/**
+ * A lower-cased ULID, as `buildRouteHostname` writes environment ids: 26 Crockford base32
+ * characters (no i, l, o, u), the first at most 7.
+ */
+const ENVIRONMENT_ID_LABEL_RE = /^[0-7][0-9a-hjkmnp-tv-z]{25}$/;
 const ROUTE_INDEX_RE = /^r[1-9]\d*$/;
 const PORT_RE = /^\d{1,5}$/;
 // `buildRouteHostname` truncates the sanitized service, which can leave a trailing hyphen.
@@ -78,9 +81,7 @@ export function parseAppRouteHostname(
   const serviceParts = parts.slice(1, -2);
   if (!ROUTE_INDEX_RE.test(routeIndex)) return null;
   if (!PORT_RE.test(port)) return null;
-  if (envPart.length !== ENVIRONMENT_ID_LENGTH || !ENVIRONMENT_ID_LABEL_RE.test(envPart)) {
-    return null;
-  }
+  if (!ENVIRONMENT_ID_LABEL_RE.test(envPart)) return null;
   if (!SERVICE_RE.test(serviceParts.join('-'))) return null;
   return { environmentId: envPart.toUpperCase() };
 }
@@ -91,14 +92,23 @@ const listedRecordSchema = v.object({
   type: v.string(),
   content: v.optional(v.string()),
 });
-const listResponseSchema = v.object({ result: v.array(listedRecordSchema) });
+/** The envelope only: each row is validated on its own (`.claude/rules/50`). */
+const listResponseSchema = v.object({ result: v.array(v.unknown()) });
 
-function toAppRouteRecords(
-  rows: readonly v.InferOutput<typeof listedRecordSchema>[],
-  env: Env
-): AppRouteDnsRecord[] {
+function toAppRouteRecords(rows: readonly unknown[], env: Env): AppRouteDnsRecord[] {
   const records: AppRouteDnsRecord[] = [];
-  for (const row of rows) {
+  for (const [index, raw] of rows.entries()) {
+    const checked = v.safeParse(listedRecordSchema, raw);
+    if (!checked.success) {
+      // One malformed row must not hide the rest of the page. Never logs the row's values.
+      log.warn('dns.app_route_list_row_skipped', {
+        index,
+        invalidFields: checked.issues.map((issue) => v.getDotPath(issue) ?? '(row)'),
+        action: 'skipped',
+      });
+      continue;
+    }
+    const row = checked.output;
     if (row.type !== 'A' || !row.content) continue;
     const parsed = parseAppRouteHostname(row.name, env.BASE_DOMAIN);
     if (!parsed) continue;

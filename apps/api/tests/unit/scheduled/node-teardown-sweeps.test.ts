@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   terminalRepair: vi.fn(),
   tunnelCleanup: vi.fn(),
   appRouteDns: vi.fn(),
+  notify: vi.fn(async () => ({ notifiedSweeps: 1, notificationsSent: 1 })),
 }));
 vi.mock('../../../src/scheduled/node-cleanup', () => ({ runNodeCleanupSweep: mocks.nodeCleanup }));
 vi.mock('../../../src/scheduled/deployment-node-cleanup', () => ({
@@ -29,6 +30,9 @@ vi.mock('../../../src/services/app-route-dns-reconciliation', () => ({
   runAppRouteDnsReconciliation: mocks.appRouteDns,
 }));
 vi.mock('../../../src/services/observability', () => ({ persistError: vi.fn() }));
+vi.mock('../../../src/scheduled/failed-sweep-notifications', () => ({
+  notifyFailedSweeps: mocks.notify,
+}));
 
 const { runNodeTeardownSweeps } = await import('../../../src/scheduled/node-teardown-sweeps');
 const { createSweepIsolator } = await import('../../../src/scheduled/sweep-isolation');
@@ -66,6 +70,7 @@ describe('runNodeTeardownSweeps', () => {
     ]);
     expect(mocks.appRouteDns).toHaveBeenCalledWith(env);
     expect(sweeps.failedSweeps()).toEqual([]);
+    expect(mocks.notify).not.toHaveBeenCalled();
   });
 
   it('still sweeps DNS when an earlier step throws, and names a DNS sweep failure', async () => {
@@ -77,6 +82,9 @@ describe('runNodeTeardownSweeps', () => {
     expect(mocks.appRouteDns).toHaveBeenCalledTimes(1);
     // A failed sweep is undefined, never a zero-valued result.
     expect(await (waitUntil.mock.calls.at(-1)?.[0] as Promise<unknown>)).toBeUndefined();
-    expect(sweeps.failedSweeps()).toEqual(['node_tunnel_cleanup', 'app_route_dns_reconciliation']);
+    // The foreground isolator reports its own failure; the out-of-band sweep reports through
+    // its own isolator and notifies operators once it settles.
+    expect(sweeps.failedSweeps()).toEqual(['node_tunnel_cleanup']);
+    expect(mocks.notify).toHaveBeenCalledWith(env, ['app_route_dns_reconciliation']);
   });
 });

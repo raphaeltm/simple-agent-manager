@@ -689,3 +689,144 @@ describe('records of an environment that moved to a live node', () => {
     expect(zone.byName(host(ENV_LIVE))).toEqual([]);
   });
 });
+
+describe('CodeRabbit review cases', () => {
+  it('accepts only canonical lower-case ULIDs as the environment label', () => {
+    const name = (envLabel: string) => `r1-web-80-${envLabel}.apps.${BASE}`;
+    expect(parseAppRouteHostname(name('i'.repeat(26)), BASE)).toBeNull();
+    expect(parseAppRouteHostname(name(`01kvjdv913s8w7kk32htztk0u${'0'}`), BASE)).toBeNull();
+    expect(parseAppRouteHostname(name(`8${'0'.repeat(25)}`), BASE)).toBeNull();
+    // Control: a real ULID label still parses.
+    expect(parseAppRouteHostname(name(ENV_LIVE.toLowerCase()), BASE)).toEqual({
+      environmentId: ENV_LIVE,
+    });
+  });
+
+  it('skips one malformed list row and still cleans the rest of the page', async () => {
+    const zone = createFakeCloudflareDns({ zoneId: ZONE, token: TOKEN, seed: await seedWorld() });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const response = await zone.fetch(input, init);
+        if (!String(input).includes('name.endswith')) return response;
+        const body = (await response.json()) as { result: unknown[] };
+        body.result.unshift({
+          id: 42,
+          name: host(ENV_MISSING, 7),
+          type: 'A',
+          content: RELEASED_IP,
+        });
+        return new Response(JSON.stringify(body), { status: 200 });
+      })
+    );
+
+    const result = await runAppRouteDnsReconciliation(env);
+
+    for (const id of DELETED_IDS) expect(zone.records.has(id), id).toBe(false);
+    expect(isRepointed(zone)).toBe(true);
+    expect(result.failed).toBe(0);
+  });
+
+  it('releases a node with more records than one page holds', async () => {
+    settings.values.set('appRouteDns.sweepPageSize', 1);
+    await seedNode('releasing', 'destroying', RELEASED_IP);
+    await seedEnvironment(ENV_RELEASED, 'releasing', 'stopping');
+    const zone = createFakeCloudflareDns({
+      zoneId: ZONE,
+      token: TOKEN,
+      seed: [1, 2, 3].map((i) =>
+        rec(`route-${i}`, host(ENV_RELEASED, i, 'web', 3000 + i), RELEASED_IP)
+      ),
+    });
+    vi.stubGlobal('fetch', vi.fn(zone.fetch));
+
+    const counts = await releaseNodeAppRouteDnsRecords(env, {
+      id: 'releasing',
+      nodeRole: 'deployment',
+      ipAddress: RELEASED_IP,
+    });
+
+    expect(counts?.deleted).toBe(3);
+    expect(zone.records.size).toBe(0);
+  });
+
+  it('bounds release cleanup by its own budget even when the caller passes a longer deadline', async () => {
+    settings.values.set('appRouteDns.sweepBudgetMs', 1000);
+    await seedNode('releasing', 'destroying', RELEASED_IP);
+    await seedEnvironment(ENV_RELEASED, 'releasing', 'stopping');
+    const zone = createFakeCloudflareDns({
+      zoneId: ZONE,
+      token: TOKEN,
+      seed: [1, 2, 3, 4, 5, 6].map((i) =>
+        rec(`route-${i}`, host(ENV_RELEASED, i, 'web', 3000 + i), RELEASED_IP)
+      ),
+    });
+    // Each delete is slow but succeeds, so only a whole-run budget can stop the loop.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'DELETE') await new Promise((r) => setTimeout(r, 300));
+        return zone.fetch(input, init);
+      })
+    );
+    const callerDeadline = new AbortController().signal; // never aborts
+
+    await expect(
+      releaseNodeAppRouteDnsRecords(
+        env,
+        { id: 'releasing', nodeRole: 'deployment', ipAddress: RELEASED_IP },
+        callerDeadline
+      )
+    ).rejects.toThrow(/Could not delete/);
+    expect(zone.records.size).toBeGreaterThan(0);
+  });
+
+  it('still reaches later records in the same sweep when one record hangs on every attempt', async () => {
+    settings.values.set('appRouteDns.sweepBudgetMs', 4000);
+    const zone = createFakeCloudflareDns({ zoneId: ZONE, token: TOKEN, seed: await seedWorld() });
+    // The first dangling record in name order never answers its DELETE.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'DELETE' && String(input).endsWith('/dangling-stopped')) {
+          return new Promise<Response>((_, reject) =>
+            init.signal?.addEventListener('abort', () => reject(init.signal?.reason))
+          );
+        }
+        return zone.fetch(input, init);
+      })
+    );
+
+    await runAppRouteDnsReconciliation(env).catch(() => undefined);
+
+    expect(zone.records.has('dangling-stopped')).toBe(true);
+    for (const id of ['dangling-missing', 'dangling-released']) {
+      expect(zone.records.has(id), id).toBe(false);
+    }
+  });
+});
+
+describe('records the sweep cannot judge', () => {
+  it('keeps them but fails the sweep on every run until the row is repaired', async () => {
+    await seedEnvironment(ENV_STOPPED, null, 'stopped');
+    await seedEnvironment(ENV_LIVE, null, 'stopped');
+    // An environment row whose node link cannot be read (a BLOB where TEXT belongs).
+    sqlite.prepare("UPDATE deployment_environments SET node_id = X'00' WHERE id = ?").run(ENV_LIVE);
+    const zone = createFakeCloudflareDns({
+      zoneId: ZONE,
+      token: TOKEN,
+      seed: [
+        rec('unreadable', host(ENV_LIVE), RELEASED_IP),
+        rec('dangling', host(ENV_STOPPED), RELEASED_IP),
+      ],
+    });
+    vi.stubGlobal('fetch', vi.fn(zone.fetch));
+
+    for (let run = 0; run < 2; run++) {
+      await expect(runAppRouteDnsReconciliation(env)).rejects.toThrow(/could not judge 1/);
+    }
+    expect(zone.records.has('unreadable')).toBe(true);
+    // Liveness: the readable dangling record on the same page was still deleted.
+    expect(zone.records.has('dangling')).toBe(false);
+  });
+});

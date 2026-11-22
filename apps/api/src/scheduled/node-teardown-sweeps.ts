@@ -3,11 +3,13 @@
  * (`.claude/rules/53`). Split from `handler.ts` (file size limit).
  */
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { runAppRouteDnsReconciliation } from '../services/app-route-dns-reconciliation';
 import { runNodeTunnelCleanupSweep } from '../services/node-tunnel-cleanup';
 import { runDeploymentNodeCleanup } from './deployment-node-cleanup';
+import { notifyFailedSweeps } from './failed-sweep-notifications';
 import { runNodeCleanupSweep } from './node-cleanup';
-import type { SweepIsolator } from './sweep-isolation';
+import { createSweepIsolator, type SweepIsolator } from './sweep-isolation';
 import { runTerminalNodeLifecycleRepair } from './terminal-node-lifecycle-repair';
 
 export async function runNodeTeardownSweeps(
@@ -27,11 +29,34 @@ export async function runNodeTeardownSweeps(
   );
   // After node teardown: deletes app-route A records left pointing at released node IPs (the
   // subdomain-takeover backstop, services/app-route-dns-reconciliation.ts). Its DNS API calls run
-  // out of band (`.claude/rules/47`), so a slow Cloudflare API cannot delay the later sweeps; it
-  // is bounded by appRouteDns.sweepBudgetMs, and a failure is still recorded by the isolator
-  // (`cron.sweep_failed`, /admin/errors) though not in this tick's `cron.completed`.
+  // out of band (`.claude/rules/47`), so a slow Cloudflare API cannot delay the later sweeps.
   waitUntil(
-    sweeps.isolate('app_route_dns_reconciliation', () => runAppRouteDnsReconciliation(env))
+    runOutOfBand(env, 'app_route_dns_reconciliation', () => runAppRouteDnsReconciliation(env))
   );
   return { nodeCleanup, terminalNodeLifecycleRepair, nodeTunnelCleanup };
+}
+
+/**
+ * Run a sweep after the cron's foreground chain, with the same isolation and failure reporting:
+ * its own isolator records the failure (`cron.sweep_failed`, /admin/errors), and the operator
+ * notification is sent once it settles, since the foreground `cron.completed` snapshot is taken
+ * before it finishes.
+ */
+async function runOutOfBand<T>(
+  env: Env,
+  name: string,
+  fn: () => Promise<T>
+): Promise<T | undefined> {
+  const isolated = createSweepIsolator(env);
+  const result = await isolated.isolate(name, fn);
+  const failed = isolated.failedSweeps();
+  if (failed.length > 0) {
+    await notifyFailedSweeps(env, failed).catch((err) => {
+      log.error('cron.sweep_failure_notification_failed', {
+        sweeps: failed,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+  return result;
 }

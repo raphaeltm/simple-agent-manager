@@ -51,6 +51,8 @@ import {
   listAppRouteDnsRecordsPage,
 } from './dns-app-route-inventory';
 import { upsertAppRouteDNSRecord } from './dns-app-routes';
+import { DEFAULT_CF_API_TIMEOUT_MS } from './dns-core';
+import { getTimeoutMs } from './fetch-timeout';
 
 /** KV key holding the next page the sweep reads (1-based). */
 export const APP_ROUTE_DNS_SWEEP_CURSOR_KEY = 'dns:app-route-sweep:next-page';
@@ -207,6 +209,17 @@ async function cleanupRecords(
     const verdict = judgeAppRouteRecord(record, targets.get(record.environmentId));
     if (verdict === null) {
       counts.unknown++;
+      // Never deleted on an unreadable row (`.claude/rules/50`), so it must stay loud instead:
+      // the run that saw it fails (see the callers) until the row is repaired.
+      log.error('dns.app_route_record_unjudged', {
+        trigger: input.trigger,
+        nodeId: input.nodeId ?? null,
+        hostname: record.name,
+        recordId: record.id,
+        content: record.content,
+        environmentId: record.environmentId,
+        action: 'kept_needs_operator',
+      });
       continue;
     }
     if (verdict.live) {
@@ -284,6 +297,24 @@ async function cleanupRecords(
   return counts;
 }
 
+/** Shortest per-request DNS timeout, so a slow but working API is not cut off. */
+const MIN_DNS_REQUEST_TIMEOUT_MS = 1000;
+
+/**
+ * The env DNS calls run with during cleanup: each request may take at most a quarter of the
+ * budget (never more than `CF_API_TIMEOUT_MS`). A request that hangs then fails on its own,
+ * counts as a failure (which does not spend the delete cap), and the records after it are still
+ * reached in the same run, instead of the hang using up the whole budget every run.
+ */
+function dnsRequestEnv(env: Env, budgetMs: number): Env {
+  const configured = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
+  const perRequest = Math.min(
+    configured,
+    Math.max(MIN_DNS_REQUEST_TIMEOUT_MS, Math.floor(budgetMs / 4))
+  );
+  return { ...env, CF_API_TIMEOUT_MS: String(perRequest) };
+}
+
 async function settingValue(
   env: Env,
   key: keyof typeof APP_ROUTE_DNS_RUNTIME_DEFAULTS
@@ -314,28 +345,33 @@ export async function releaseNodeAppRouteDnsRecords(
     settingValue(env, 'sweepPageSize'),
     settingValue(env, 'sweepBudgetMs'),
   ]);
-  // Bounded even when the caller passes no deadline of its own.
-  const effectiveSignal = signal ?? AbortSignal.timeout(budgetMs);
-  const records: AppRouteDnsRecord[] = [];
+  // Bounded by the cleanup budget, and by the caller's deadline when it passes one.
+  const budget = AbortSignal.timeout(budgetMs);
+  const effectiveSignal = signal ? AbortSignal.any([signal, budget]) : budget;
+  const dnsEnv = dnsRequestEnv(env, budgetMs);
+  const counts = emptyCounts();
   let unparsed = 0;
-  // Read every page before deleting, so deletions cannot shift a later page.
-  for (let page = 1; ; page++) {
+  // Page by page, so a large inventory still makes progress within one budget. Deleted, absent
+  // and repointed records leave the `content` filter, shifting later records onto this page, so
+  // the page is read again after any of them; every re-read follows a removal.
+  for (let page = 1; ;) {
     const result = await listAppRouteDnsRecordsPage(
-      env,
+      dnsEnv,
       { page, perPage, content: node.ipAddress },
       effectiveSignal
     );
-    records.push(...result.records);
     unparsed += result.providerCount - result.records.length;
-    if (result.providerCount < perPage) break;
+    const pageCounts = await cleanupRecords(dnsEnv, result.records, {
+      trigger: 'node_release',
+      nodeId: node.id,
+      maxDeletes: Number.POSITIVE_INFINITY,
+      deadline: Number.POSITIVE_INFINITY,
+      signal: effectiveSignal,
+    });
+    addCounts(counts, pageCounts);
+    if (result.providerCount < perPage || pageCounts.deferred > 0) break;
+    if (pageCounts.deleted + pageCounts.absent + pageCounts.repointed === 0) page++;
   }
-  const counts = await cleanupRecords(env, records, {
-    trigger: 'node_release',
-    nodeId: node.id,
-    maxDeletes: Number.POSITIVE_INFINITY,
-    deadline: Number.POSITIVE_INFINITY,
-    signal: effectiveSignal,
-  });
   counts.unparsed = unparsed;
   if (counts.unknown > 0) {
     log.error('dns.app_route_release_unjudged', {
@@ -388,6 +424,7 @@ export async function runAppRouteDnsReconciliation(env: Env): Promise<AppRouteDn
   ]);
   const deadline = Date.now() + budgetMs;
   const signal = AbortSignal.timeout(budgetMs);
+  const dnsEnv = dnsRequestEnv(env, budgetMs);
   const startPage = await readCursor(env);
   const attemptsUsed = () => totals.deleted + totals.changed + totals.absent + totals.repointed;
   let page = startPage;
@@ -401,10 +438,10 @@ export async function runAppRouteDnsReconciliation(env: Env): Promise<AppRouteDn
         stoppedBy = 'delete_limit';
         break;
       }
-      const listed = await listAppRouteDnsRecordsPage(env, { page, perPage }, signal);
+      const listed = await listAppRouteDnsRecordsPage(dnsEnv, { page, perPage }, signal);
       pagesRead++;
       totals.unparsed += listed.providerCount - listed.records.length;
-      const counts = await cleanupRecords(env, listed.records, {
+      const counts = await cleanupRecords(dnsEnv, listed.records, {
         trigger: 'sweep',
         maxDeletes: maxDeletes - attemptsUsed(),
         deadline,
@@ -442,8 +479,12 @@ export async function runAppRouteDnsReconciliation(env: Env): Promise<AppRouteDn
     stoppedBy,
   };
   log.info('dns.app_route_sweep_completed', { ...result });
-  if (totals.failed > 0) {
-    throw new Error(`App-route DNS sweep failed to delete ${totals.failed} dangling record(s)`);
+  // A record that could not be judged is reported as a failure on every run until its
+  // environment row is repaired, so it can never dangle behind a sweep that reports success.
+  if (totals.failed > 0 || totals.unknown > 0) {
+    throw new Error(
+      `App-route DNS sweep failed to delete ${totals.failed} dangling record(s) and could not judge ${totals.unknown}`
+    );
   }
   return result;
 }
