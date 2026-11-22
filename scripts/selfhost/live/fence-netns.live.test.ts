@@ -6,13 +6,18 @@
  * Every forbidden target has a listener (in the peer namespace, or on this namespace's own
  * addresses), so the control uid reaches it and only the fence can explain a refusal.
  */
+import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
+  closeSync,
+  constants,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   writeFileSync,
+  writeSync,
 } from 'node:fs';
 import { join, resolve } from 'node:path';
 
@@ -375,6 +380,41 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
       expect(existsSync(run.pidFile)).toBe(false);
       expect(run.output()).toContain(name);
       lab.nft(lab.fenced, ['-f', rulesFile]);
+    });
+
+    it('does not start on a fresh ok read after the fence latched lost', async () => {
+      // Own the ordering: the attestation is a FIFO, so start.sh blocks inside its read. The
+      // latch is created only once it is blocked there (after any earlier latch check), then a
+      // fresh ok is written. start.sh must check the latch after the read and refuse.
+      const state = mkdtempSync(join(dir, 'latched-'));
+      chmodSync(state, 0o755);
+      const file = join(state, 'attestation');
+      execFileSync('mkfifo', ['-m', '0644', file]);
+      const run = startCelld(file);
+      let running = true;
+      void run.exited.then(() => {
+        running = false;
+      });
+      let served = 0;
+      while (running) {
+        let fd: number;
+        try {
+          fd = openSync(file, constants.O_WRONLY | constants.O_NONBLOCK);
+        } catch {
+          // ENXIO: start.sh has not opened the FIFO for its read yet.
+          await new Promise((done) => setTimeout(done, 10));
+          continue;
+        }
+        if (served === 0) writeFileSync(join(state, 'lost'), 'lost\n');
+        writeSync(fd, `ok ${Math.floor(Date.now() / 1000)}\n`);
+        closeSync(fd);
+        served += 1;
+        await new Promise((done) => setTimeout(done, 10));
+      }
+      expect(served).toBeGreaterThan(0);
+      expect(await run.exited).toBe(1);
+      expect(existsSync(run.pidFile)).toBe(false);
+      expect(run.output()).toContain('fence loss latched');
     });
 
     it('cannot change the firewall as the workload uid', () => {

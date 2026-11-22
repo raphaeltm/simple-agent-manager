@@ -59,9 +59,10 @@ if(a[0]==='rm')out('');
 if(a.includes('run'))out('fake-probe-id');
 if(a.includes('ps'))out(mode==='unreadable-fallback'||mode==='stopped-fallback'?'':'running-celld-id');
 if(a.includes('getent'))out('1.1.1.1 example.com');
-if(a.includes('check')){if(mode==='latched')fail();out('');}
+const latch=${JSON.stringify(join(dir, 'latched-after-read'))};
+if(a.includes('check')){if(mode==='latched'||fs.existsSync(latch))fail();out('');}
 if(a.includes('list')&&a.includes('chain'))out(${JSON.stringify(listing)});
-if(a.includes('/run/sam-egress-fence/attestation'))out('ok '+Math.floor(Date.now()/1000)+'\\n');
+if(a.includes('/run/sam-egress-fence/attestation')){if(mode==='latch-after-read')fs.writeFileSync(latch,'');out('ok '+Math.floor(Date.now()/1000)+'\\n');}
 if(a.includes('/etc/resolv.conf')){if(mode==='unreadable-running'||mode==='unreadable-fallback'||mode==='stopped-fallback'){if(a.includes('compose')||mode!=='stopped-fallback')fail();}out(${JSON.stringify(resolvConf)});}
 if(a.includes('bash')){
  const control=a.includes('--user');if(mode==='control-exec'&&control||mode==='workload-exec'&&!control)fail();
@@ -118,6 +119,16 @@ describe('verify-fence CLI evidence gates', () => {
     expect(run.status).toBe(1);
     expect(run.text).not.toContain('[selfhost] egress fence in effect');
     expect(run.calls).toContain('"rm","-f"');
+  });
+  it('refuses an ok read just before the fence latched lost', async () => {
+    // The fence latches right after the attestation read returns a fresh ok: only a latch
+    // check made after the read can see that this ok no longer holds.
+    const run = await runCli('latch-after-read');
+    expect(run.status).toBe(1);
+    expect(run.text).toContain('fence loss is latched');
+    expect(run.calls.indexOf('/run/sam-egress-fence/attestation')).toBeLessThan(
+      run.calls.indexOf('"check"')
+    );
   });
   it('uses the probe resolver only after confirming celld is not running', async () => {
     const run = await runCli('stopped-fallback');
