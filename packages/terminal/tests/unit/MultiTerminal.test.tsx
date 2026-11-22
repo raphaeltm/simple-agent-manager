@@ -1,7 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MultiTerminal } from '../../src/MultiTerminal';
+import type { MultiTerminalHandle } from '../../src/types/multi-terminal';
 
 // Mock xterm.js
 const mockTerminalWrite = vi.fn();
@@ -84,8 +86,13 @@ class MockWebSocket {
     lastActivityAt?: string;
   }> = [];
 
+  /** Start in CONNECTING until onopen fires (a real socket's handshake). */
+  static startConnecting = false;
+  /** Delay before the session_list reply, to hold the list in flight. */
+  static listDelayMs = 10;
+
   url: string;
-  readyState: number = MockWebSocket.OPEN;
+  readyState: number = MockWebSocket.startConnecting ? MockWebSocket.CONNECTING : MockWebSocket.OPEN;
   onopen?: (event: Event) => void;
   onclose?: (event: CloseEvent) => void;
   onmessage?: (event: MessageEvent) => void;
@@ -95,6 +102,7 @@ class MockWebSocket {
     this.url = url;
     MockWebSocket.instances.push(this);
     setTimeout(() => {
+      this.readyState = MockWebSocket.OPEN;
       if (this.onopen) {
         this.onopen(new Event('open'));
       }
@@ -128,7 +136,7 @@ class MockWebSocket {
             }),
           })
         );
-      }, 10);
+      }, MockWebSocket.listDelayMs);
     } else if (msg.type === 'reattach_session' && this.onmessage) {
       setTimeout(() => {
         this.onmessage!(
@@ -192,6 +200,8 @@ describe('MultiTerminal', () => {
     sessionStorage.clear();
     MockWebSocket.sessionListResponse = [];
     MockWebSocket.instances = [];
+    MockWebSocket.startConnecting = false;
+    MockWebSocket.listDelayMs = 10;
   });
 
   afterEach(() => {
@@ -257,6 +267,37 @@ describe('MultiTerminal', () => {
 
     expect(handled).toBe(false);
     expect(mockTerminalInput).toHaveBeenCalledWith('\x1b[1;5D', true);
+  });
+
+  it('resends the current size once the server creates a session it sized before it existed', async () => {
+    // Staging order: a tab created before the socket opened is laid out and its size is sent
+    // while list_sessions is in flight; create_session (24x80) follows, and the agent drops a
+    // resize for a session it does not have yet. The PTY must still end at the grid size.
+    layOutElements();
+    MockWebSocket.startConnecting = true;
+    MockWebSocket.listDelayMs = 300;
+    mockTerminalDimensions.rows = 30;
+    mockTerminalDimensions.cols = 100;
+    const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
+    const ref = React.createRef<MultiTerminalHandle>();
+    render(<MultiTerminal ref={ref} {...defaultProps} />);
+    let localId: string | null = null;
+    act(() => {
+      localId = ref.current!.createSession();
+    });
+    await waitFor(() =>
+      expect(sendSpy.mock.calls.some(([d]) => JSON.parse(d as string).type === 'list_sessions')).toBe(true)
+    );
+    await notifyContainerResize(); // the size goes out while the list is in flight
+    const sent = () => sendSpy.mock.calls.map(([d]) => JSON.parse(d as string));
+    expect(resizesFor(sendSpy, localId!), 'size sent before the session exists').toHaveLength(1);
+    await waitFor(() => expect(sent().some((m) => m.type === 'create_session')).toBe(true));
+    await waitFor(() => {
+      const messages = sent();
+      const createdAt = messages.findIndex((m) => m.type === 'create_session');
+      const after = messages.slice(createdAt + 1).filter((m) => m.type === 'resize' && m.sessionId === localId);
+      expect(after).toEqual([{ type: 'resize', sessionId: localId, data: { rows: 30, cols: 100 } }]);
+    });
   });
 
   it('refits after a window resize settles, never synchronously', async () => {

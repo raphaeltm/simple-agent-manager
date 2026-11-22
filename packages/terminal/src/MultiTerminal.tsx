@@ -184,6 +184,26 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       [getOutboundSessionId]
     );
 
+    // A resize sent before the server has the session (a restored tab fits while the socket
+    // is still listing sessions) is dropped by the VM agent, which then creates or reattaches
+    // the PTY at the size in that message. Once the server acknowledges the session, forget
+    // what was sent and send the current size, so the PTY matches the visible grid.
+    const resendSizeAfterServerAck = useCallback(
+      (localSessionId: string) => {
+        const instance = terminalsRef.current.get(localSessionId);
+        if (!instance) return;
+        instance.lastSentResize = undefined;
+        if (!hasLayout(instance.containerEl)) return; // the ResizeObserver sends on reveal
+        try {
+          instance.fitAddon.fit();
+        } catch {
+          return; // terminal disposed
+        }
+        sendTerminalResize(localSessionId);
+      },
+      [sendTerminalResize]
+    );
+
     // Create xterm.js instance for a session (stable — only depends on scrollback config)
     const createTerminalInstance = useCallback(
       (sessionId: string): TerminalInstance => {
@@ -482,6 +502,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
                     msg.data.workingDirectory
                   );
                 }
+                resendSizeAfterServerAck(localId);
               }
             } else if (isScrollbackMessage(msg) && msg.sessionId && msg.data) {
               // Find the local session mapped to this server session ID and write scrollback
@@ -500,6 +521,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
               if (msg.data.workingDirectory) {
                 latestRef.current.updateSessionWorkingDirectory(localId, msg.data.workingDirectory);
               }
+              resendSizeAfterServerAck(localId);
             } else if (isSessionClosedMessage(msg) && msg.data) {
               const localId = resolveLocalSessionId(msg.data.sessionId) ?? msg.data.sessionId;
               destroyTerminalInstance(localId);
@@ -561,7 +583,13 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
         }
         terminalsMap.clear();
       };
-    }, [wsUrl, createTerminalInstance, destroyTerminalInstance, resolveLocalSessionId]);
+    }, [
+      wsUrl,
+      createTerminalInstance,
+      destroyTerminalInstance,
+      resolveLocalSessionId,
+      resendSizeAfterServerAck,
+    ]);
 
     // Attach/fit xterm.js to DOM container via ref callback
     const attachTerminal = useCallback(
