@@ -158,9 +158,6 @@ export function createFakeCloudflareDns(options: {
     },
     records,
     requests,
-    names(): string[] {
-      return [...records.values()].map((r) => r.name).sort();
-    },
     byName(name: string): FakeDnsRecord[] {
       return [...records.values()].filter((r) => r.name === name);
     },
