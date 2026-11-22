@@ -49,7 +49,8 @@ describe('Caddy logging and keep-warm wiring', () => {
   });
 
   it('applies the one redaction filter to the access log and to Caddy own log', () => {
-    expect(caddyfile.match(/import log-redaction\.caddy/g)).toHaveLength(2);
+    // Caddy's own log, the SAM sites' access log and the deployment app sites' access log.
+    expect(caddyfile.match(/import log-redaction\.caddy/g)).toHaveLength(3);
     expect(caddyfile).toMatch(/log default \{\s*output stderr\s*import log-redaction\.caddy/);
     expect(caddyfile).toMatch(/\tlog \{\s*output stdout\s*import log-redaction\.caddy/);
   });
@@ -69,6 +70,14 @@ describe('Caddy logging and keep-warm wiring', () => {
     const strip = site.indexOf('\n\trequest_header -X-SAM-*\n');
     expect(strip).toBeGreaterThan(0);
     expect(strip).toBeLessThan(site.indexOf('import sam.d/*.caddy'));
+  });
+
+  it('strips client X-SAM-* headers on the deployment app site, before its forward_auth', () => {
+    const site = caddyfile.slice(caddyfile.indexOf('*.apps.{$SAM_DOMAIN} {'));
+    const strip = site.indexOf('\n\trequest_header -X-SAM-*\n');
+    expect(strip).toBeGreaterThan(0);
+    expect(strip).toBeLessThan(site.indexOf('forward_auth'));
+    expect(site).toContain('uri /api/self-host/gateway/app-route');
   });
 
   it('keeps the keep-warm check on a route that never serves a request', () => {

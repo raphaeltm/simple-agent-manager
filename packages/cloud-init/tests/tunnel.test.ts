@@ -432,6 +432,36 @@ describe('executed tunnel firewall script', () => {
     expect(calls).not.toContain('curl');
   });
 
+  it('reverse-tunnel mode also drops 80 and 443 (app traffic arrives through the box)', () => {
+    const reverse = variables({
+      controlPlaneUrl: 'https://api.box.example.org',
+      nodeRuntimeIncarnationId: '0f6c0a8e-2a4b-4c55-9d6e-1b2c3d4e5f60',
+      reverseTunnelCredential: 'Rt_credential-fixture_0123456789abcdefABCDEF',
+      reverseTunnelRemotePort: '20007',
+    });
+    const { result, restored } = runFirewall(reverse);
+    expect(result.status).toBe(0);
+    for (const family of ['v4', 'v6'] as const) {
+      expect(restored(family)).toBe(
+        [
+          '*filter',
+          ':SAM-TUNNEL-INGRESS - [0:0]',
+          '-I INPUT 1 -j SAM-TUNNEL-INGRESS',
+          ...TUNNEL_CHAIN_RULES.slice(0, -1),
+          '-A SAM-TUNNEL-INGRESS -p tcp --dport 80 -j DROP',
+          '-A SAM-TUNNEL-INGRESS -p udp --dport 80 -j DROP',
+          '-A SAM-TUNNEL-INGRESS -p tcp --dport 443 -j DROP',
+          '-A SAM-TUNNEL-INGRESS -p udp --dport 443 -j DROP',
+          TUNNEL_CHAIN_RULES.at(-1),
+          'COMMIT',
+          '',
+        ].join('\n')
+      );
+    }
+    // Control: Cloudflare-tunnel deployment nodes serve their own app routes on 80/443.
+    expect(runFirewall(tunnel()).restored('v4')).not.toContain('--dport 80 ');
+  });
+
   it('re-applies idempotently: an existing INPUT jump is not duplicated', () => {
     const { result, restored } = runFirewall(tunnel(), { JUMP_EXIT: '0' });
     expect(result.status).toBe(0);

@@ -3,6 +3,7 @@ import type { CloudInitVariables } from '@simple-agent-manager/cloud-init';
 
 import { installNodeTransportExtension } from '../../services/node-transport-extension';
 import { nodeTunnelBootVariables } from '../../services/node-tunnel-config';
+import { reverseTunnelAppRouteAddress } from './app-route';
 import { releaseNodeReverseTunnelLeases, releaseUnallocatedReverseTunnelLease } from './leases';
 import { ensureNodeReverseTunnelForProvisioning } from './provisioning';
 import { resolveReverseTunnelAgentOrigin } from './route';
@@ -19,8 +20,12 @@ export function installReverseTunnelTransport(
     throw new Error('Reverse tunnel requires its self-host boot renderer');
   installNodeTransportExtension({
     transport: 'reverse-tunnel',
+    // Workspace and deployment nodes alike: the tunnel carries a deployment node's control
+    // channel and callbacks, and its app traffic too (`app-route.ts`), so it needs no public port.
     select: (node) =>
-      node.runtime === 'vm' && node.nodeClass === 'managed' && node.nodeRole === 'workspace'
+      node.runtime === 'vm' &&
+      node.nodeClass === 'managed' &&
+      (node.nodeRole === 'workspace' || node.nodeRole === 'deployment')
         ? 'reverse-tunnel'
         : null,
     prepare: async (env, owner) => {
@@ -40,5 +45,6 @@ export function installReverseTunnelTransport(
     releaseUnallocated: releaseUnallocatedReverseTunnelLease,
     releaseNonLive: releaseNodeReverseTunnelLeases,
     resolveAgentOrigin: resolveReverseTunnelAgentOrigin,
+    appRouteAddress: reverseTunnelAppRouteAddress,
   });
 }

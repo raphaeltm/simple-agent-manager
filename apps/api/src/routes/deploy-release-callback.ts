@@ -18,6 +18,10 @@ import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { AppError, errors } from '../middleware/error';
 import {
+  routeHostnamesHeldDuringApply,
+  upsertReleaseRouteRecords,
+} from '../services/app-route-dns-target';
+import {
   type ComposeImageArtifactDownload,
   createComposeImageArtifactDownloads,
 } from '../services/compose-image-artifacts';
@@ -37,7 +41,7 @@ import {
   type DeploymentRouteTarget,
 } from '../services/deployment-routing';
 import { buildVolumeMountDescriptors } from '../services/deployment-volumes';
-import { cleanupAppRouteDNSRecords, upsertAppRouteDNSRecord } from '../services/dns';
+import { cleanupAppRouteDNSRecords } from '../services/dns';
 import { verifyCallbackToken } from '../services/jwt';
 import { nodeStatusTerminatesCallbacks } from '../services/node-callback-auth';
 import { recordDeploymentReleaseLifecycleEventBestEffort } from '../services/project-lifecycle-events';
@@ -168,6 +172,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       userId: schema.nodes.userId,
       status: schema.nodes.status,
       ipAddress: schema.nodes.ipAddress,
+      transport: schema.nodes.transport,
       providerInstanceId: schema.nodes.providerInstanceId,
     })
     .from(schema.nodes)
@@ -320,17 +325,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       });
     }
 
-    if (routes.length > 0) {
-      const nodeIp = node.ipAddress;
-      if (!nodeIp) {
-        throw errors.conflict(
-          'Deployment node does not have an IP address yet; retry after provisioning completes'
-        );
-      }
-      await Promise.all(
-        routes.map((route) => upsertAppRouteDNSRecord(route.hostname, nodeIp, c.env))
-      );
-    }
+    await upsertReleaseRouteRecords(routes, node, c.env);
   } else {
     const manifest = JSON.parse(release.manifest);
 
@@ -341,18 +336,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
     });
 
-    if (routes.length > 0) {
-      const nodeIp = node.ipAddress;
-      if (!nodeIp) {
-        throw errors.conflict(
-          'Deployment node does not have an IP address yet; retry after provisioning completes'
-        );
-      }
-
-      await Promise.all(
-        routes.map((route) => upsertAppRouteDNSRecord(route.hostname, nodeIp, c.env))
-      );
-    }
+    await upsertReleaseRouteRecords(routes, node, c.env);
 
     // Resolve secret references — inject decrypted values for the node
     const secretNames = collectSecretNames(manifest);
@@ -391,7 +375,11 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
 
   const cleanupStaleRoutes = async () => {
     const priorReleaseRows = await db
-      .select({ manifest: schema.deploymentReleases.manifest })
+      .select({
+        manifest: schema.deploymentReleases.manifest,
+        status: schema.deploymentReleases.status,
+        version: schema.deploymentReleases.version,
+      })
       .from(schema.deploymentReleases)
       .where(
         and(
@@ -399,16 +387,20 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
           lt(schema.deploymentReleases.version, seq)
         )
       );
+    const routeOptions = {
+      environmentId,
+      baseDomain: c.env.BASE_DOMAIN,
+      routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
+      routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
+    };
     const previousHostnames = collectEnvironmentRouteHostnames(
       priorReleaseRows.map((row) => row.manifest),
-      {
-        environmentId,
-        baseDomain: c.env.BASE_DOMAIN,
-        routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
-        routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
-      }
+      routeOptions
     );
-    const currentHostnames = new Set(routes.map((route) => route.hostname));
+    const currentHostnames = new Set([
+      ...routes.map((route) => route.hostname),
+      ...routeHostnamesHeldDuringApply(node, priorReleaseRows, routeOptions),
+    ]);
     const staleHostnames = previousHostnames.filter((hostname) => !currentHostnames.has(hostname));
     if (staleHostnames.length === 0) {
       return;

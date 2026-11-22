@@ -26,6 +26,20 @@ import {
 export interface BoxDnsSettingsEnv extends Env {
   /** "box": records go to the box's own zone. Unset or anything else: Cloudflare DNS. */
   SAM_DNS_PROVIDER?: string;
+  /**
+   * The box's public IPv4 address (the parent zone's glue record), the same value sam-dns serves
+   * for the box's own names. App-route records for deployment nodes on the reverse tunnel point
+   * at it: their app traffic enters through the box (`reverse-tunnel/app-route.ts`).
+   */
+  SAM_DNS_PUBLIC_IPV4?: string;
+}
+
+const IPV4_RE = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+
+/** The box's public IPv4 address, or null when it is unset or not an IPv4 address. Pure. */
+export function boxPublicIPv4(env: Env): string | null {
+  const value = (env as BoxDnsSettingsEnv).SAM_DNS_PUBLIC_IPV4?.trim() ?? '';
+  return IPV4_RE.test(value) ? value : null;
 }
 
 /** Whether this box serves its own DNS zone. Pure: no I/O. */

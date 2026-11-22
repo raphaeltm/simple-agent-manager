@@ -160,6 +160,15 @@ export const SAM_AGENT_FIREWALL_RULE_NAME = 'sam-allow-agent';
 export const SAM_APP_ROUTE_FIREWALL_RULE_NAME = 'sam-allow-app-routes';
 export const SAM_NETWORK_TAG = 'sam-agent';
 export const SAM_DEPLOYMENT_APP_ROUTE_NETWORK_TAG = 'sam-deployment-app-routes';
+
+/**
+ * Provider label set on a deployment node whose app traffic arrives through the control plane's
+ * tunnel instead of its own public 80/443 (the self-host box's reverse tunnel). Such a node gets no
+ * app-route network tag, so the 80/443 firewall rule never applies to it. Absent on every other
+ * node, which keeps today's tag.
+ */
+export const SAM_APP_INGRESS_LABEL_KEY = 'app-ingress';
+export const SAM_APP_INGRESS_TUNNEL = 'tunnel';
 /** Default ports the VM agent may listen on (8443 with TLS, 8080 without). */
 export const DEFAULT_GCP_AGENT_PORTS = ['8080', '8443'] as const;
 /** Default public ports served directly by deployment-node Caddy app routes. */

@@ -7,19 +7,25 @@ import (
 	"github.com/workspace/vm-agent/internal/config"
 )
 
+// DefaultCaddyfilePath is the node Caddy's root Caddyfile; site snippets live in sites/ beside it.
+const DefaultCaddyfilePath = "/etc/caddy/Caddyfile"
+
 // EngineConfig holds the configuration for the deploy engine.
 type EngineConfig struct {
-	EnvironmentID           string
-	NodeID                  string
-	ControlPlaneURL         string
-	CallbackToken           string
-	ComposeCmd              string // e.g., "docker compose"
-	ComposeProjectName      string
-	CaddyfilePath           string
-	CaddyReloadCmd          string
-	CaddyRestartCmd         string
-	ACMEEmail               string // Contact email for the ACME global options block (optional)
-	ACMECA                  string // ACME CA directory URL override, e.g. LE staging (optional)
+	EnvironmentID      string
+	NodeID             string
+	ControlPlaneURL    string
+	CallbackToken      string
+	ComposeCmd         string // e.g., "docker compose"
+	ComposeProjectName string
+	CaddyfilePath      string
+	CaddyReloadCmd     string
+	CaddyRestartCmd    string
+	ACMEEmail          string // Contact email for the ACME global options block (optional)
+	ACMECA             string // ACME CA directory URL override, e.g. LE staging (optional)
+	// AppIngressLoopbackPort > 0: app traffic arrives through the control plane's tunnel, so Caddy
+	// serves plain HTTP on this loopback port and does no ACME (CaddyfileOptions.LoopbackHTTPPort).
+	AppIngressLoopbackPort  int
 	CaddyReadyTimeout       time.Duration
 	CaddyReadyInterval      time.Duration
 	HealthTimeout           time.Duration
@@ -46,7 +52,7 @@ func NewEngine(disk *DiskState, verifier *Verifier, cfg EngineConfig) *Engine {
 		cfg.ComposeProjectName = "sam-env-" + SafeEnvironmentFilePart(cfg.EnvironmentID)
 	}
 	if cfg.CaddyfilePath == "" {
-		cfg.CaddyfilePath = "/etc/caddy/Caddyfile"
+		cfg.CaddyfilePath = DefaultCaddyfilePath
 	}
 	if cfg.CaddyReloadCmd == "" {
 		cfg.CaddyReloadCmd = "caddy reload --config {config} --adapter caddyfile"

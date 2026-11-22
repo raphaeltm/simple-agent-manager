@@ -148,7 +148,7 @@ write_files:
       Environment=DEPLOY_ACME_EMAIL={{ deploy_acme_email }}
       Environment=DEPLOY_ACME_CA={{ deploy_acme_ca }}
       Environment="DEPLOY_COMPOSE_CMD={{ deploy_compose_cmd }}"
-      Environment=DEPLOY_HEALTH_TIMEOUT={{ deploy_health_timeout }}
+      Environment=DEPLOY_HEALTH_TIMEOUT={{ deploy_health_timeout }}{{ deploy_app_ingress_env }}
       Environment=SESSION_SNAPSHOT_OPERATION_TIMEOUT={{ session_snapshot_operation_timeout }}
       Environment=SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL={{ session_snapshot_progress_report_interval }}
       Environment=SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT={{ session_snapshot_progress_report_timeout }}
@@ -198,10 +198,10 @@ ${RESOURCE_HEADROOM_WRITE_FILES}
       # Managed by SAM deployment agent.
       # Release applies replace this file and run caddy reload.
       {
-        auto_https off
+        auto_https off{{ deploy_bootstrap_caddy_bind }}
       }
 
-      :80 {
+      :{{ deploy_bootstrap_caddy_port }} {
         respond "SAM deployment node awaiting release" 200
       }
 

@@ -157,10 +157,13 @@ type Server struct {
 	inFlightJobs   map[string]struct{}
 
 	// Deployment mode — one Engine per placed deployment environment.
-	deployMu       sync.Mutex
-	deployEngines  map[string]*deploy.Engine
-	deployRetiring map[string]bool
-	deployVerifier *deploy.Verifier
+	deployMu      sync.Mutex
+	deployEngines map[string]*deploy.Engine
+	// deployCaddyfilePath overrides the node Caddy's root Caddyfile (tests); empty means
+	// deploy.DefaultCaddyfilePath, the path every engine writes.
+	deployCaddyfilePath string
+	deployRetiring      map[string]bool
+	deployVerifier      *deploy.Verifier
 
 	// Trusted interaction config from an authenticated manual session create.
 	sessionManualInteractionConfig map[string]acp.AcpInteractionRuntimeConfig
@@ -737,6 +740,7 @@ func (s *Server) ensureDeployEngine(environmentID string) *deploy.Engine {
 		ComposeOutputRetentionBytes: s.config.ComposeOutputRetentionBytes,
 		ACMEEmail:                   s.config.DeployACMEEmail,
 		ACMECA:                      s.config.DeployACMECA,
+		AppIngressLoopbackPort:      s.config.AppIngressLoopbackPort(),
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

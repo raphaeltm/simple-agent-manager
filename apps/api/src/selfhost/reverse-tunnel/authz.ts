@@ -59,7 +59,8 @@ const LeaseAuthoritySchema = v.object({
   nodeTransport: v.nullable(v.string()), nodeIncarnation: v.nullable(v.string()),
   nodeTerminatedAt: v.nullable(v.string()), nodeUser: v.nullable(v.string()), leaseUser: v.string(),
 });
-const NODE_TEARDOWN_STATUSES = new Set(['deleted', 'stopped', 'destroying']);
+/** Node statuses in which a node's tunnel identity is no longer honoured (also `app-route.ts`). */
+export const NODE_TEARDOWN_STATUSES: ReadonlySet<string> = new Set(['deleted', 'stopped', 'destroying']);
 
 function refuse(code: string, reason: string): FrpsPluginDecision {
   return { allow: false, code, reason };
