@@ -99,24 +99,15 @@ func (s *Server) handleDeploymentAppIngress(w http.ResponseWriter, r *http.Reque
 	s.serveAppIngress(w, r, host, port, path, rawPath)
 }
 
-// appIngressServesHostname reports whether any environment active on this node applied host.
+// appIngressServesHostname reports whether an environment active on this node applied host. It
+// reads Caddy's active site files rather than the in-memory engines, which are rebuilt only after
+// the first heartbeat following an agent restart: the app keeps serving through that window.
 func (s *Server) appIngressServesHostname(host string) (bool, error) {
-	s.deployMu.Lock()
-	engines := make([]*deploy.Engine, 0, len(s.deployEngines))
-	for _, engine := range s.deployEngines {
-		engines = append(engines, engine)
+	path := s.deployCaddyfilePath
+	if path == "" {
+		path = deploy.DefaultCaddyfilePath
 	}
-	s.deployMu.Unlock()
-	for _, engine := range engines {
-		served, err := engine.ServesHostname(host)
-		if err != nil {
-			return false, err
-		}
-		if served {
-			return true, nil
-		}
-	}
-	return false, nil
+	return deploy.ActiveSitesServeHostname(path, host)
 }
 
 // appIngressTarget splits /deployment/app-ingress/<host>[/<path>] into the hostname and the

@@ -7,6 +7,9 @@ import (
 	"github.com/workspace/vm-agent/internal/config"
 )
 
+// DefaultCaddyfilePath is the node Caddy's root Caddyfile; site snippets live in sites/ beside it.
+const DefaultCaddyfilePath = "/etc/caddy/Caddyfile"
+
 // EngineConfig holds the configuration for the deploy engine.
 type EngineConfig struct {
 	EnvironmentID      string
@@ -49,7 +52,7 @@ func NewEngine(disk *DiskState, verifier *Verifier, cfg EngineConfig) *Engine {
 		cfg.ComposeProjectName = "sam-env-" + SafeEnvironmentFilePart(cfg.EnvironmentID)
 	}
 	if cfg.CaddyfilePath == "" {
-		cfg.CaddyfilePath = "/etc/caddy/Caddyfile"
+		cfg.CaddyfilePath = DefaultCaddyfilePath
 	}
 	if cfg.CaddyReloadCmd == "" {
 		cfg.CaddyReloadCmd = "caddy reload --config {config} --adapter caddyfile"

@@ -139,7 +139,7 @@ const ManifestRowSchema = v.object({ manifest: v.string() });
  * Hostnames the environment may be serving: the routes of its latest release (what the node is
  * applying, or will apply) and of its latest applied release (what it runs while a newer release
  * applies, or after a failed apply fell back). The node's own applied routes are the final word
- * (`Engine.ServesHostname` in the agent), so admitting both never admits more than the node serves.
+ * (`deploy.ActiveSitesServeHostname` in the agent), so admitting both never admits more than the node serves.
  * One read; a malformed manifest contributes no routes.
  */
 async function readServableRouteHostnames(env: Env, environmentId: string): Promise<Set<string>> {

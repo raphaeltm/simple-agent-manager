@@ -21,21 +21,28 @@ func (e *Engine) activeSnippetPath() string {
 	return filepath.Join(filepath.Dir(e.cfg.CaddyfilePath), "sites", SafeEnvironmentFilePart(e.cfg.EnvironmentID)+".caddy")
 }
 
-// ServesHostname reports whether this environment's active Caddy snippet (the routes the last
-// apply or route update gave Caddy) has a site for host. It reads the file each time, so it
-// agrees with Caddy across agent restarts and is false once teardown removes the snippet.
-func (e *Engine) ServesHostname(host string) (bool, error) {
-	content, err := os.ReadFile(e.activeSnippetPath())
-	if os.IsNotExist(err) {
-		return false, nil
-	}
+// ActiveSitesServeHostname reports whether any environment's active Caddy snippet (the files the
+// root Caddyfile at caddyfilePath imports from sites/) has a site for host. It reads the files each
+// time, so it agrees with what Caddy was last given from the moment the agent starts, before any
+// engine is rebuilt from the control plane, and is false once teardown removes a snippet.
+func ActiveSitesServeHostname(caddyfilePath, host string) (bool, error) {
+	paths, err := filepath.Glob(filepath.Join(filepath.Dir(caddyfilePath), "sites", "*.caddy"))
 	if err != nil {
-		return false, fmt.Errorf("read active Caddy snippet: %w", err)
+		return false, fmt.Errorf("list active Caddy snippets: %w", err)
 	}
 	host = strings.ToLower(host)
-	for _, served := range SnippetHostnames(string(content)) {
-		if served == host {
-			return true, nil
+	for _, path := range paths {
+		content, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			continue // removed by a teardown between the listing and the read
+		}
+		if err != nil {
+			return false, fmt.Errorf("read active Caddy snippet: %w", err)
+		}
+		for _, served := range SnippetHostnames(string(content)) {
+			if served == host {
+				return true, nil
+			}
 		}
 	}
 	return false, nil

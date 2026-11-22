@@ -101,8 +101,9 @@ func newAppIngressFixture(t *testing.T, ingress string) *appIngressFixture {
 			NodeID: appIngressNodeID, Role: config.RoleDeployment,
 			DeployAppIngress: ingress, DeployAppIngressPort: port,
 		},
-		jwtValidator:  validator,
-		deployEngines: map[string]*deploy.Engine{"env-1": engine},
+		jwtValidator:        validator,
+		deployEngines:       map[string]*deploy.Engine{"env-1": engine},
+		deployCaddyfilePath: caddyfile,
 	}
 	srv.config.AllowedOrigins = []string{"https://*.box.example.test"}
 	mux := http.NewServeMux()
@@ -362,5 +363,18 @@ func TestAppIngress_SlowUploadOutlivesTheAgentReadTimeout(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || len(fx.bodies) != 1 || fx.bodies[0] != strings.Repeat("chunk-", 5) {
 		t.Fatalf("status=%d bodies=%q", resp.StatusCode, fx.bodies)
+	}
+}
+
+// After an agent restart the engines are rebuilt only on the next heartbeat; the app, whose Caddy
+// snippet and containers are still running, keeps being served in between.
+func TestAppIngress_ServesAppliedRoutesBeforeEnginesAreRebuilt(t *testing.T) {
+	fx := newAppIngressFixture(t, config.DeployAppIngressTunnel)
+	fx.server.deployMu.Lock()
+	fx.server.deployEngines = map[string]*deploy.Engine{}
+	fx.server.deployMu.Unlock()
+	rec := fx.do(appIngressHost, "/", fx.samHeaders(fx.token, appIngressNodeID))
+	if rec.Code != http.StatusOK || len(fx.upstream) != 1 {
+		t.Fatalf("status=%d upstream=%d body=%s", rec.Code, len(fx.upstream), rec.Body.String())
 	}
 }

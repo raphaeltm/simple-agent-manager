@@ -63,12 +63,12 @@ func TestGenerateCaddySnippet_LoopbackSitesArePlainHTTPAndParseBack(t *testing.T
 	}
 }
 
-func TestEngineServesHostname_ReadsTheActiveSnippet(t *testing.T) {
+func TestActiveSitesServeHostname_ReadsTheActiveSnippets(t *testing.T) {
 	dir := t.TempDir()
 	engine := &Engine{cfg: EngineConfig{EnvironmentID: "env-1", CaddyfilePath: filepath.Join(dir, "Caddyfile"), AppIngressLoopbackPort: 8446}}
 
 	// No snippet yet (or after teardown): nothing is served.
-	if served, err := engine.ServesHostname(ingressRoutes[0].Hostname); err != nil || served {
+	if served, err := ActiveSitesServeHostname(engine.cfg.CaddyfilePath, ingressRoutes[0].Hostname); err != nil || served {
 		t.Fatalf("before apply: served=%v err=%v", served, err)
 	}
 	snippet, err := GenerateCaddySnippet(ingressRoutes[:1], true)
@@ -81,12 +81,12 @@ func TestEngineServesHostname_ReadsTheActiveSnippet(t *testing.T) {
 	if err := os.WriteFile(engine.activeSnippetPath(), []byte(snippet), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if served, err := engine.ServesHostname("R1-WEB-80-ENV1.apps.box.example.test"); err != nil || !served {
+	if served, err := ActiveSitesServeHostname(engine.cfg.CaddyfilePath, "R1-WEB-80-ENV1.apps.box.example.test"); err != nil || !served {
 		t.Fatalf("applied route: served=%v err=%v", served, err)
 	}
 	// A route of the same environment that is not applied, and a suffix trick.
 	for _, host := range []string{ingressRoutes[1].Hostname, "apps.box.example.test", "x" + ingressRoutes[0].Hostname} {
-		if served, err := engine.ServesHostname(host); err != nil || served {
+		if served, err := ActiveSitesServeHostname(engine.cfg.CaddyfilePath, host); err != nil || served {
 			t.Fatalf("%s: served=%v err=%v", host, served, err)
 		}
 	}
@@ -132,14 +132,14 @@ func TestEngineRootCaddyfileWritesFollowTheIngressMode(t *testing.T) {
 				t.Fatalf("reloadCaddy: %v", err)
 			}
 			check("reload")
-			if served, _ := engine.ServesHostname(ingressRoutes[0].Hostname); !served {
+			if served, _ := ActiveSitesServeHostname(engine.cfg.CaddyfilePath, ingressRoutes[0].Hostname); !served {
 				t.Fatalf("applied route not served")
 			}
 			if err := engine.clearActiveCaddySnippet(t.Context()); err != nil {
 				t.Fatalf("clearActiveCaddySnippet: %v", err)
 			}
 			check("clear")
-			if served, _ := engine.ServesHostname(ingressRoutes[0].Hostname); served {
+			if served, _ := ActiveSitesServeHostname(engine.cfg.CaddyfilePath, ingressRoutes[0].Hostname); served {
 				t.Fatalf("cleared route still served")
 			}
 		})

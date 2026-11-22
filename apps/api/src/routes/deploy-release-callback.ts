@@ -17,7 +17,10 @@ import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { AppError, errors } from '../middleware/error';
-import { upsertReleaseRouteRecords } from '../services/app-route-dns-target';
+import {
+  routeHostnamesHeldDuringApply,
+  upsertReleaseRouteRecords,
+} from '../services/app-route-dns-target';
 import {
   type ComposeImageArtifactDownload,
   createComposeImageArtifactDownloads,
@@ -372,7 +375,11 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
 
   const cleanupStaleRoutes = async () => {
     const priorReleaseRows = await db
-      .select({ manifest: schema.deploymentReleases.manifest })
+      .select({
+        manifest: schema.deploymentReleases.manifest,
+        status: schema.deploymentReleases.status,
+        version: schema.deploymentReleases.version,
+      })
       .from(schema.deploymentReleases)
       .where(
         and(
@@ -380,16 +387,20 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
           lt(schema.deploymentReleases.version, seq)
         )
       );
+    const routeOptions = {
+      environmentId,
+      baseDomain: c.env.BASE_DOMAIN,
+      routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
+      routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
+    };
     const previousHostnames = collectEnvironmentRouteHostnames(
       priorReleaseRows.map((row) => row.manifest),
-      {
-        environmentId,
-        baseDomain: c.env.BASE_DOMAIN,
-        routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
-        routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
-      }
+      routeOptions
     );
-    const currentHostnames = new Set(routes.map((route) => route.hostname));
+    const currentHostnames = new Set([
+      ...routes.map((route) => route.hostname),
+      ...routeHostnamesHeldDuringApply(node, priorReleaseRows, routeOptions),
+    ]);
     const staleHostnames = previousHostnames.filter((hostname) => !currentHostnames.has(hostname));
     if (staleHostnames.length === 0) {
       return;

@@ -9,7 +9,11 @@
  * `appRouteAddress` then names the address the records point at (the box), or null when the
  * installation's own wildcard record already covers the names and nothing must be written.
  */
-import type { DeploymentRouteTarget } from '@simple-agent-manager/app-deployment';
+import {
+  collectEnvironmentRouteHostnames,
+  type DeploymentRouteTarget,
+  type DeploymentRouteTargetOptions,
+} from '@simple-agent-manager/app-deployment';
 
 import type { Env } from '../env';
 import { errors } from '../middleware/error';
@@ -40,4 +44,29 @@ export async function upsertReleaseRouteRecords(
     );
   }
   await Promise.all(routes.map((route) => upsertAppRouteDNSRecord(route.hostname, target, env)));
+}
+
+/**
+ * Route hostnames whose records a release fetch must keep although the new release drops them.
+ *
+ * On a transport that carries app ingress itself (the box), the box keeps serving the latest
+ * applied release while the new one applies, and after a failed apply
+ * (`selfhost/reverse-tunnel/app-route.ts` authorizes both), so that release's records stay until
+ * a later fetch no longer finds it applied. Every other node keeps today's cleanup: nothing is
+ * held. A held record that outlives its route resolves to the box, whose decision answers 404,
+ * and environment teardown deletes every route record the environment ever had.
+ */
+export function routeHostnamesHeldDuringApply(
+  node: AppRouteDnsNode,
+  priorReleases: Array<{ manifest: string; status: string; version: number }>,
+  opts: DeploymentRouteTargetOptions
+): string[] {
+  if (!nodeTransportExtension(node.transport ?? null)?.appRouteAddress) return [];
+  let applied: { manifest: string; version: number } | null = null;
+  for (const release of priorReleases) {
+    if (release.status === 'applied' && (!applied || release.version > applied.version)) {
+      applied = release;
+    }
+  }
+  return applied ? collectEnvironmentRouteHostnames([applied.manifest], opts) : [];
 }
