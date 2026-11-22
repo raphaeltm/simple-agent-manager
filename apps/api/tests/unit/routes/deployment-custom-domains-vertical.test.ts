@@ -438,7 +438,10 @@ function createApp() {
 
 function env(): Env {
   return {
-    DATABASE: { prepare: mockD1Prepare } as unknown as D1Database,
+    DATABASE: {
+      prepare: mockD1Prepare,
+      withSession: () => ({ prepare: mockD1Prepare }),
+    } as unknown as D1Database,
     BASE_DOMAIN: 'sammy.party',
     CF_API_TOKEN: 'cf-token',
     CF_ZONE_ID: 'zone-1',

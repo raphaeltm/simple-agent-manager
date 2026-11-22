@@ -48,9 +48,10 @@ export function appRouteRecordAddress(
 
 /** True once the node's teardown has started (claimed, or carrying a termination proof). */
 async function nodeReleaseStarted(env: Env, nodeId: string): Promise<boolean> {
-  const row = await env.DATABASE.prepare(
-    'SELECT status, runtime_termination_confirmed_at FROM nodes WHERE id = ?'
-  )
+  // On the primary: a replica need not have the teardown's claim yet, and this read is what
+  // decides whether the records just written must go (see `upsertReleaseRouteRecords`).
+  const row = await env.DATABASE.withSession('first-primary')
+    .prepare('SELECT status, runtime_termination_confirmed_at FROM nodes WHERE id = ?')
     .bind(nodeId)
     .first<{ status: string; runtime_termination_confirmed_at: string | null }>();
   return (
@@ -82,25 +83,26 @@ export async function upsertReleaseRouteRecords(
     errors.gone(`Node ${nodeId} is being released; its route records are not written`);
   // The fetch checked the node on entry, but its teardown may have started since; don't write.
   if (nodeId && (await nodeReleaseStarted(env, nodeId))) throw refuse();
-  try {
-    await Promise.all(routes.map((route) => upsertAppRouteDNSRecord(route.hostname, target, env)));
-  } finally {
-    // Handshake with teardown, which claims the node (`destroying`) and only then lists records
-    // to delete: read the node again once the writes have returned. Still live means the claim
-    // comes later, so its listing sees these records. Released means the claim (and perhaps both
-    // cleanup passes) ran while the writes were in flight, so delete them here. A write SAM gave
-    // up on that the provider commits even later is left to the sweep.
-    if (nodeId && (await nodeReleaseStarted(env, nodeId))) {
-      await releaseNodeAppRouteDnsRecords(env, {
-        id: nodeId,
-        nodeRole: 'deployment',
-        ipAddress: node.ipAddress,
-        transport: node.transport ?? null,
-      });
-      // eslint-disable-next-line no-unsafe-finally -- the refusal replaces any write error
-      throw refuse();
-    }
+  // allSettled, not all: the re-read below must follow every write, not the first failure.
+  const settled = await Promise.allSettled(
+    routes.map((route) => upsertAppRouteDNSRecord(route.hostname, target, env))
+  );
+  // Handshake with teardown, which claims the node (`destroying`) and only then lists records to
+  // delete: read the node again once every write has settled. Still live means the claim comes
+  // later, so its listing sees these records. Released means the claim (and perhaps both cleanup
+  // passes) ran while the writes were in flight, so delete them here. A write SAM gave up on that
+  // the provider commits even later is left to the sweep.
+  if (nodeId && (await nodeReleaseStarted(env, nodeId))) {
+    await releaseNodeAppRouteDnsRecords(env, {
+      id: nodeId,
+      nodeRole: 'deployment',
+      ipAddress: node.ipAddress,
+      transport: node.transport ?? null,
+    });
+    throw refuse();
   }
+  const failed = settled.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+  if (failed) throw failed.reason;
 }
 
 /**

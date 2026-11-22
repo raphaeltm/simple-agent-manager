@@ -404,6 +404,48 @@ describe('the release fetch re-checks its node right before writing route record
     expect(zone.records.has('other-route')).toBe(true);
   });
 
+  it('waits for every write, not the first failure, before the post-write check', async () => {
+    const failing = routeHost('01KVJDV913S8W7KK32HTZTK0HY');
+    const hostname = routes()[0]!.hostname;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let holding = true;
+    let reachedWrite!: () => void;
+    const writeStarted = new Promise<void>((resolve) => (reachedWrite = resolve));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const name = new URL(String(input)).searchParams.get('name');
+        if (name === failing) {
+          return new Response(JSON.stringify({ errors: [{ code: 10000, message: 'down' }] }), {
+            status: 500,
+          });
+        }
+        if (holding && name === hostname) {
+          holding = false;
+          reachedWrite();
+          await held;
+        }
+        return zone.fetch(input, init);
+      })
+    );
+    const write = upsertReleaseRouteRecords(
+      [{ hostname: failing }, { hostname }],
+      node,
+      env,
+      'node'
+    );
+    await writeStarted;
+    // Let the failing sibling settle first, then run the whole teardown before releasing.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const stopped = await stop();
+    expect(stopped.status, await stopped.clone().text()).toBe(200);
+    release();
+
+    await expect(write).rejects.toMatchObject({ statusCode: 410 });
+    expect(zone.byName(hostname)).toEqual([]);
+  });
+
   it('refuses once the node carries a termination proof', async () => {
     sqlite
       .prepare("UPDATE nodes SET runtime_termination_confirmed_at = 'now' WHERE id = 'node'")
