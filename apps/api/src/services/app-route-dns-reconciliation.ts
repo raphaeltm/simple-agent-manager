@@ -22,11 +22,11 @@
  * exists for deployment nodes (idea 01M81Z9P6QFX4M9Q83K2XKGZVR). A release fetch already in flight when
  * a node is released can also re-create a record after the release cleanup listed; the next
  * sweep removes it once retirement unlinks the environment. Anything else
- * is deleted, after the record is judged again against fresh D1 state and re-read from DNS with
- * its content unchanged (a release fetch may have repointed it, or a replacement node may have
- * been given the same recycled IP). Cloudflare has no conditional delete, so a repoint landing in
- * the milliseconds between that re-read and the DELETE remains possible; the next release fetch
- * recreates such a record.
+ * is judged again against fresh D1 state first (a replacement node may have been given the same
+ * recycled IP). A record whose environment now runs on a live node at another address is
+ * repointed there, because that node's release fetch may be upserting it concurrently and
+ * Cloudflare has no conditional delete. Any other dangling record is deleted after a DNS re-read
+ * shows it unchanged; with no live node, no release fetch can be writing it.
  *
  * Throughput at the defaults (`appRouteDns.*`: 500 records per page, 20 s budget, 50 deletes): a
  * list call is ~0.3 s, so one sweep can read ~30,000 records; a delete is one D1 read and two DNS
@@ -50,6 +50,7 @@ import {
   deleteObservedAppRouteDnsRecord,
   listAppRouteDnsRecordsPage,
 } from './dns-app-route-inventory';
+import { upsertAppRouteDNSRecord } from './dns-app-routes';
 
 /** KV key holding the next page the sweep reads (1-based). */
 export const APP_ROUTE_DNS_SWEEP_CURSOR_KEY = 'dns:app-route-sweep:next-page';
@@ -156,6 +157,8 @@ export interface AppRouteCleanupCounts {
   changed: number;
   /** Listed under the app-route suffix but not a SAM app-route name; never touched. */
   unparsed: number;
+  /** Pointed at the stale IP of an environment that now runs on a live node: moved to its IP. */
+  repointed: number;
   absent: number;
   failed: number;
   deferred: number;
@@ -169,6 +172,7 @@ function emptyCounts(): AppRouteCleanupCounts {
     deleted: 0,
     changed: 0,
     unparsed: 0,
+    repointed: 0,
     absent: 0,
     failed: 0,
     deferred: 0,
@@ -222,6 +226,27 @@ async function cleanupRecords(
       if (!current || current.live) {
         counts.changed++;
         attempts++;
+        continue;
+      }
+      const target = fresh.get(record.environmentId);
+      if (current.reason === 'ip_mismatch' && target && target !== 'unknown' && target.ipAddress) {
+        // The environment runs on a live node at another address, so its release fetch may be
+        // upserting this very record right now. Repointing converges with that upsert, where a
+        // delete could race it and remove the new route (Cloudflare has no conditional delete).
+        // Either way the record stops pointing at the released IP.
+        await upsertAppRouteDNSRecord(record.name, target.ipAddress, env);
+        counts.repointed++;
+        attempts++;
+        log.info('dns.app_route_dangling_repointed', {
+          trigger: input.trigger,
+          nodeId: input.nodeId ?? null,
+          hostname: record.name,
+          recordId: record.id,
+          fromContent: record.content,
+          toContent: target.ipAddress,
+          environmentId: record.environmentId,
+          liveNodeId: target.nodeId,
+        });
         continue;
       }
       const outcome = await deleteObservedAppRouteDnsRecord(env, record, input.signal);
@@ -364,7 +389,7 @@ export async function runAppRouteDnsReconciliation(env: Env): Promise<AppRouteDn
   const deadline = Date.now() + budgetMs;
   const signal = AbortSignal.timeout(budgetMs);
   const startPage = await readCursor(env);
-  const attemptsUsed = () => totals.deleted + totals.changed + totals.absent;
+  const attemptsUsed = () => totals.deleted + totals.changed + totals.absent + totals.repointed;
   let page = startPage;
   let pagesRead = 0;
   let cycleComplete = false;

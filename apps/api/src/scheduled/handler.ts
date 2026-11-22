@@ -143,7 +143,7 @@ export async function scheduled(
   const deadWakeClaims = await sweeps.isolate('dead_wake_claim_reconciliation', () =>
     runDeadWakeClaimReconciliation(env, ctx.waitUntil.bind(ctx))
   );
-  const { nodeCleanup, terminalNodeLifecycleRepair, nodeTunnelCleanup, appRouteDns } =
+  const { nodeCleanup, terminalNodeLifecycleRepair, nodeTunnelCleanup } =
     await runNodeTeardownSweeps(sweeps, env, ctx.waitUntil.bind(ctx));
   let providerOrphans: Awaited<ReturnType<typeof runProviderOrphanReconciliation>> | undefined;
   await sweeps.isolate('provider_orphan_reconciliation', async () => {
@@ -300,7 +300,6 @@ export async function scheduled(
     nodeTunnelsReleased: nodeTunnelCleanup?.released,
     nodeTunnelCleanupsAttempted: nodeTunnelCleanup?.attempted,
     nodeTunnelsCleaned: nodeTunnelCleanup?.cleaned,
-    appRouteDnsDeleted: appRouteDns?.deleted,
     orphanedWorkspacesFlagged: nodeCleanup?.orphanedWorkspacesFlagged,
     orphanedNodesDestroyed: nodeCleanup?.orphanedNodesDestroyed,
     orphanedNodesSkipped: nodeCleanup?.orphanedNodesSkipped,

@@ -52,7 +52,11 @@ beforeEach(() => {
 describe('runNodeTeardownSweeps', () => {
   it('runs the app-route DNS sweep last, after every node teardown step', async () => {
     const sweeps = createSweepIsolator(env);
-    const result = await runNodeTeardownSweeps(sweeps, env, vi.fn());
+    const waitUntil = vi.fn();
+    await runNodeTeardownSweeps(sweeps, env, waitUntil);
+    // The DNS sweep runs out of band: handed to waitUntil, not awaited inline.
+    const outOfBand = waitUntil.mock.calls.at(-1)?.[0] as Promise<unknown>;
+    expect(await outOfBand).toEqual({ deleted: 2 });
     expect(calls).toEqual([
       'node_cleanup',
       'deployment_node_cleanup',
@@ -61,7 +65,6 @@ describe('runNodeTeardownSweeps', () => {
       'app_route_dns_reconciliation',
     ]);
     expect(mocks.appRouteDns).toHaveBeenCalledWith(env);
-    expect(result.appRouteDns).toEqual({ deleted: 2 });
     expect(sweeps.failedSweeps()).toEqual([]);
   });
 
@@ -69,10 +72,11 @@ describe('runNodeTeardownSweeps', () => {
     mocks.tunnelCleanup.mockRejectedValue(new Error('tunnel API down'));
     mocks.appRouteDns.mockRejectedValue(new Error('dns API down'));
     const sweeps = createSweepIsolator(env);
-    const result = await runNodeTeardownSweeps(sweeps, env, vi.fn());
+    const waitUntil = vi.fn();
+    await runNodeTeardownSweeps(sweeps, env, waitUntil);
     expect(mocks.appRouteDns).toHaveBeenCalledTimes(1);
     // A failed sweep is undefined, never a zero-valued result.
-    expect(result.appRouteDns).toBeUndefined();
+    expect(await (waitUntil.mock.calls.at(-1)?.[0] as Promise<unknown>)).toBeUndefined();
     expect(sweeps.failedSweeps()).toEqual(['node_tunnel_cleanup', 'app_route_dns_reconciliation']);
   });
 });

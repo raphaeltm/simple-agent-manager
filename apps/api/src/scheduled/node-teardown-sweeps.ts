@@ -26,10 +26,12 @@ export async function runNodeTeardownSweeps(
     runNodeTunnelCleanupSweep(env)
   );
   // After node teardown: deletes app-route A records left pointing at released node IPs (the
-  // subdomain-takeover backstop). Deadline-bounded by appRouteDns.sweepBudgetMs and resumed
-  // from a KV page cursor (services/app-route-dns-reconciliation.ts).
-  const appRouteDns = await sweeps.isolate('app_route_dns_reconciliation', () =>
-    runAppRouteDnsReconciliation(env)
+  // subdomain-takeover backstop, services/app-route-dns-reconciliation.ts). Its DNS API calls run
+  // out of band (`.claude/rules/47`), so a slow Cloudflare API cannot delay the later sweeps; it
+  // is bounded by appRouteDns.sweepBudgetMs, and a failure is still recorded by the isolator
+  // (`cron.sweep_failed`, /admin/errors) though not in this tick's `cron.completed`.
+  waitUntil(
+    sweeps.isolate('app_route_dns_reconciliation', () => runAppRouteDnsReconciliation(env))
   );
-  return { nodeCleanup, terminalNodeLifecycleRepair, nodeTunnelCleanup, appRouteDns };
+  return { nodeCleanup, terminalNodeLifecycleRepair, nodeTunnelCleanup };
 }

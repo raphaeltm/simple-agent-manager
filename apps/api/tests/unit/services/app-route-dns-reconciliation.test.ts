@@ -117,12 +117,12 @@ async function seedWorld() {
   ];
 }
 
-const DANGLING_IDS = [
-  'dangling-stopped',
-  'dangling-missing',
-  'dangling-released',
-  'dangling-mismatch',
-];
+/** Dangling with no live node behind them: deleted. */
+const DELETED_IDS = ['dangling-stopped', 'dangling-missing', 'dangling-released'];
+/** Its environment runs on a live node at another address: repointed there, not deleted. */
+const REPOINTED_ID = 'dangling-mismatch';
+const isRepointed = (zone: ReturnType<typeof createFakeCloudflareDns>) =>
+  zone.records.get(REPOINTED_ID)?.content === LIVE_IP;
 const KEPT_IDS = ['live', 'live-2', ...FOREIGN_RECORDS.map((r) => r.id)];
 
 beforeEach(() => {
@@ -232,10 +232,12 @@ describe('runAppRouteDnsReconciliation against Cloudflare', () => {
 
     const result = await runAppRouteDnsReconciliation(env);
 
-    for (const id of DANGLING_IDS) expect(zone.records.has(id), id).toBe(false);
+    for (const id of DELETED_IDS) expect(zone.records.has(id), id).toBe(false);
+    expect(isRepointed(zone)).toBe(true);
     for (const id of KEPT_IDS) expect(zone.records.has(id), id).toBe(true);
     expect(result).toMatchObject({
-      deleted: 4,
+      deleted: 3,
+      repointed: 1,
       kept: 2,
       failed: 0,
       cycleComplete: true,
@@ -260,7 +262,8 @@ describe('runAppRouteDnsReconciliation against Cloudflare', () => {
 
     const result = await runAppRouteDnsReconciliation(env);
 
-    for (const id of DANGLING_IDS) expect(zone.records.has(id), id).toBe(false);
+    for (const id of DELETED_IDS) expect(zone.records.has(id), id).toBe(false);
+    expect(isRepointed(zone)).toBe(true);
     for (const id of KEPT_IDS) expect(zone.records.has(id), id).toBe(true);
     expect(result.cycleComplete).toBe(true);
     expect(await env.KV.get(APP_ROUTE_DNS_SWEEP_CURSOR_KEY)).toBeNull();
@@ -273,11 +276,15 @@ describe('runAppRouteDnsReconciliation against Cloudflare', () => {
     vi.stubGlobal('fetch', vi.fn(zone.fetch));
 
     const runs = [];
-    for (let i = 0; i < 10 && DANGLING_IDS.some((id) => zone.records.has(id)); i++) {
+    for (
+      let i = 0;
+      i < 10 && (DELETED_IDS.some((id) => zone.records.has(id)) || !isRepointed(zone));
+      i++
+    ) {
       runs.push(await runAppRouteDnsReconciliation(env));
     }
     expect(runs.length).toBe(4);
-    expect(runs.map((r) => r.deleted)).toEqual([1, 1, 1, 1]);
+    expect(runs.map((r) => r.deleted + r.repointed)).toEqual([1, 1, 1, 1]);
     expect(runs.slice(0, 3).every((r) => r.stoppedBy === 'delete_limit')).toBe(true);
     for (const id of KEPT_IDS) expect(zone.records.has(id), id).toBe(true);
   });
@@ -322,7 +329,8 @@ describe('runAppRouteDnsReconciliation against Cloudflare', () => {
 
     expect(zone.records.get('dangling-stopped')?.content).toBe('10.0.0.77');
     expect(result.changed).toBe(1);
-    expect(result.deleted).toBe(3);
+    expect(result.deleted).toBe(2);
+    expect(result.repointed).toBe(1);
   });
 
   it('reports a failed delete as a sweep failure without touching other records', async () => {
@@ -340,9 +348,10 @@ describe('runAppRouteDnsReconciliation against Cloudflare', () => {
 
     await expect(runAppRouteDnsReconciliation(env)).rejects.toThrow(/failed to delete 1/);
     expect(zone.records.has('dangling-missing')).toBe(true);
-    for (const id of ['dangling-stopped', 'dangling-released', 'dangling-mismatch']) {
+    for (const id of ['dangling-stopped', 'dangling-released']) {
       expect(zone.records.has(id), id).toBe(false);
     }
+    expect(isRepointed(zone)).toBe(true);
     for (const id of KEPT_IDS) expect(zone.records.has(id), id).toBe(true);
   });
 
@@ -358,7 +367,8 @@ describe('runAppRouteDnsReconciliation against Cloudflare', () => {
     );
     await runAppRouteDnsReconciliation(env);
     expect(zone.records.has('foreign-txt')).toBe(true);
-    for (const id of DANGLING_IDS) expect(zone.records.has(id), id).toBe(false);
+    for (const id of DELETED_IDS) expect(zone.records.has(id), id).toBe(false);
+    expect(isRepointed(zone)).toBe(true);
   });
 
   it('does nothing without a BASE_DOMAIN', async () => {
@@ -481,8 +491,9 @@ describe('on a self-host box that serves its own DNS', () => {
     const remaining = boxRows()
       .map((r) => r.id)
       .sort();
-    expect(result).toMatchObject({ deleted: 4, failed: 0, cycleComplete: true });
-    for (const id of DANGLING_IDS) expect(remaining).not.toContain(id);
+    expect(result).toMatchObject({ deleted: 3, repointed: 1, failed: 0, cycleComplete: true });
+    for (const id of DELETED_IDS) expect(remaining).not.toContain(id);
+    expect(boxRows().find((r) => r.id === REPOINTED_ID)?.content).toBe(LIVE_IP);
     for (const id of KEPT_IDS.filter((id) => id !== 'foreign-txt')) {
       expect(remaining).toContain(id);
     }
@@ -494,7 +505,8 @@ describe('on a self-host box that serves its own DNS', () => {
       nodeRole: 'deployment',
       ipAddress: LIVE_IP,
     });
-    expect(counts?.deleted).toBe(2);
+    // live, live-2 and the record repointed above all sit on the node being released.
+    expect(counts?.deleted).toBe(3);
     expect(boxRows().some((r) => r.content === LIVE_IP)).toBe(false);
   });
 });
@@ -621,17 +633,59 @@ describe('sweep progress past records that always fail to delete', () => {
       )
     );
 
-    for (
-      let i = 0;
-      i < 10 && (zone.records.has('dangling-released') || zone.records.has('dangling-mismatch'));
-      i++
-    ) {
+    for (let i = 0; i < 10 && (zone.records.has('dangling-released') || !isRepointed(zone)); i++) {
       await runAppRouteDnsReconciliation(env).catch(() => undefined);
     }
 
     expect(zone.records.has('dangling-released')).toBe(false);
-    expect(zone.records.has('dangling-mismatch')).toBe(false);
+    expect(isRepointed(zone)).toBe(true);
     for (const id of stuck) expect(zone.records.has(id)).toBe(true);
     for (const id of KEPT_IDS) expect(zone.records.has(id), id).toBe(true);
+  });
+});
+
+describe('records of an environment that moved to a live node', () => {
+  it('are repointed, not deleted, when the old node is released', async () => {
+    await seedNode('releasing', 'destroying', RELEASED_IP);
+    await seedNode('replacement', 'running', LIVE_IP);
+    // Started again on a replacement before the old node's teardown finished.
+    await seedEnvironment(ENV_LIVE, 'replacement');
+    const zone = createFakeCloudflareDns({
+      zoneId: ZONE,
+      token: TOKEN,
+      seed: [rec('moved', host(ENV_LIVE), RELEASED_IP)],
+    });
+    vi.stubGlobal('fetch', vi.fn(zone.fetch));
+
+    const counts = await releaseNodeAppRouteDnsRecords(env, {
+      id: 'releasing',
+      nodeRole: 'deployment',
+      ipAddress: RELEASED_IP,
+    });
+
+    expect(counts).toMatchObject({ repointed: 1, deleted: 0 });
+    expect(zone.byName(host(ENV_LIVE)).map((r) => r.content)).toEqual([LIVE_IP]);
+    expect(zone.requests.some((r) => r.method === 'DELETE')).toBe(false);
+  });
+
+  it('are deleted when the environment has no address to move to yet', async () => {
+    await seedNode('releasing', 'destroying', RELEASED_IP);
+    await seedNode('booting', 'creating', null);
+    await seedEnvironment(ENV_LIVE, 'booting', 'starting');
+    const zone = createFakeCloudflareDns({
+      zoneId: ZONE,
+      token: TOKEN,
+      seed: [rec('moved', host(ENV_LIVE), RELEASED_IP)],
+    });
+    vi.stubGlobal('fetch', vi.fn(zone.fetch));
+
+    const counts = await releaseNodeAppRouteDnsRecords(env, {
+      id: 'releasing',
+      nodeRole: 'deployment',
+      ipAddress: RELEASED_IP,
+    });
+
+    expect(counts).toMatchObject({ repointed: 0, deleted: 1 });
+    expect(zone.byName(host(ENV_LIVE))).toEqual([]);
   });
 });
