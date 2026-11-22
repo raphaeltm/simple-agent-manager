@@ -1,7 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MultiTerminal } from '../../src/MultiTerminal';
+import type { MultiTerminalHandle } from '../../src/types/multi-terminal';
 
 // Mock xterm.js
 const mockTerminalWrite = vi.fn();
@@ -11,6 +13,8 @@ const mockTerminalDispose = vi.fn();
 const mockTerminalFocus = vi.fn();
 const mockTerminalLoadAddon = vi.fn();
 const mockTerminalOnData = vi.fn();
+const mockAttachKeyHandler = vi.fn();
+const mockTerminalInput = vi.fn();
 const mockTerminalDimensions = { rows: 24, cols: 80 };
 
 vi.mock('@xterm/xterm', () => {
@@ -22,6 +26,8 @@ vi.mock('@xterm/xterm', () => {
     focus = mockTerminalFocus;
     loadAddon = mockTerminalLoadAddon;
     onData = mockTerminalOnData;
+    attachCustomKeyEventHandler = mockAttachKeyHandler;
+    input = mockTerminalInput;
     get rows() {
       return mockTerminalDimensions.rows;
     }
@@ -80,8 +86,13 @@ class MockWebSocket {
     lastActivityAt?: string;
   }> = [];
 
+  /** Start in CONNECTING until onopen fires (a real socket's handshake). */
+  static startConnecting = false;
+  /** Delay before the session_list reply, to hold the list in flight. */
+  static listDelayMs = 10;
+
   url: string;
-  readyState: number = MockWebSocket.OPEN;
+  readyState: number = MockWebSocket.startConnecting ? MockWebSocket.CONNECTING : MockWebSocket.OPEN;
   onopen?: (event: Event) => void;
   onclose?: (event: CloseEvent) => void;
   onmessage?: (event: MessageEvent) => void;
@@ -91,6 +102,8 @@ class MockWebSocket {
     this.url = url;
     MockWebSocket.instances.push(this);
     setTimeout(() => {
+      if (this.readyState === MockWebSocket.CLOSED) return;
+      this.readyState = MockWebSocket.OPEN;
       if (this.onopen) {
         this.onopen(new Event('open'));
       }
@@ -124,7 +137,7 @@ class MockWebSocket {
             }),
           })
         );
-      }, 10);
+      }, MockWebSocket.listDelayMs);
     } else if (msg.type === 'reattach_session' && this.onmessage) {
       setTimeout(() => {
         this.onmessage!(
@@ -158,11 +171,17 @@ Object.defineProperty(globalThis, 'WebSocket', {
 });
 
 // Mock ResizeObserver (not available in jsdom)
+const resizeObserverCallbacks = new Set<() => void>();
 Object.defineProperty(globalThis, 'ResizeObserver', {
   value: class MockResizeObserver {
-    observe() {}
+    constructor(private readonly callback: () => void) {}
+    observe() {
+      resizeObserverCallbacks.add(this.callback);
+    }
     unobserve() {}
-    disconnect() {}
+    disconnect() {
+      resizeObserverCallbacks.delete(this.callback);
+    }
   },
   writable: true,
   configurable: true,
@@ -176,19 +195,198 @@ describe('MultiTerminal', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    resizeObserverCallbacks.clear();
     mockTerminalDimensions.rows = 24;
     mockTerminalDimensions.cols = 80;
     sessionStorage.clear();
     MockWebSocket.sessionListResponse = [];
     MockWebSocket.instances = [];
+    MockWebSocket.startConnecting = false;
+    MockWebSocket.listDelayMs = 10;
   });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  /** Notify every observed terminal container of a size change, then let the debounce run. */
+  const notifyContainerResize = async () => {
+    resizeObserverCallbacks.forEach((callback) => callback());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+  };
+
+  /** jsdom has no layout; give every element a real box, as a visible terminal tab has. */
+  const layOutElements = () => {
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(480);
+  };
+
+  const resizesFor = (sendSpy: { mock: { calls: unknown[][] } }, sessionId: string) =>
+    sendSpy.mock.calls
+      .map(([data]) => JSON.parse(data as string))
+      .filter((message) => message.type === 'resize' && message.sessionId === sessionId);
+
+  it('does not fit or resize terminals that are not laid out (hidden tab or hidden view)', async () => {
+    const createdAt = new Date().toISOString();
+    MockWebSocket.sessionListResponse = [
+      { sessionId: 'srv-tab-a', name: 'Tab A', status: 'running', createdAt },
+      { sessionId: 'srv-tab-b', name: 'Tab B', status: 'running', createdAt },
+    ];
+    const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
+    render(<MultiTerminal {...defaultProps} />);
+    // Liveness: both tabs reattached and opened into the DOM.
+    await waitFor(() =>
+      expect(
+        sendSpy.mock.calls.filter(([data]) => JSON.parse(data as string).type === 'reattach_session')
+      ).toHaveLength(2)
+    );
+    await waitFor(() => expect(mockTerminalOpen).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+    // jsdom gives every element a zero box, as display:none does: the inactive tab, and the
+    // active one while the workspace shows a chat tab. Neither may be fitted (a hidden fit
+    // measures 100px and shrinks the PTY to 10x5); the ResizeObserver fits on reveal.
+    await notifyContainerResize();
+    expect(resizesFor(sendSpy, 'srv-tab-b'), 'hidden active tab untouched').toEqual([]);
+    expect(resizesFor(sendSpy, 'srv-tab-a'), 'hidden inactive tab untouched').toEqual([]);
+  });
+
+  it('registers the xterm 5 Alt+Arrow word motion on each terminal it creates', async () => {
+    MockWebSocket.sessionListResponse = [
+      { sessionId: 'srv-keys', name: 'Keys', status: 'running', createdAt: new Date().toISOString() },
+    ];
+    render(<MultiTerminal {...defaultProps} />);
+    await waitFor(() => expect(mockAttachKeyHandler).toHaveBeenCalledTimes(1));
+
+    const handler = mockAttachKeyHandler.mock.calls[0]![0] as (event: KeyboardEvent) => boolean;
+    const handled = handler(new KeyboardEvent('keydown', { key: 'ArrowLeft', altKey: true, cancelable: true }));
+
+    expect(handled).toBe(false);
+    expect(mockTerminalInput).toHaveBeenCalledWith('\x1b[1;5D', true);
+  });
+
+  it('resends the current size once the server creates a session it sized before it existed', async () => {
+    // Staging order: a tab created before the socket opened is laid out and its size is sent
+    // while list_sessions is in flight; create_session (24x80) follows, and the agent drops a
+    // resize for a session it does not have yet. The PTY must still end at the grid size.
+    layOutElements();
+    MockWebSocket.startConnecting = true;
+    MockWebSocket.listDelayMs = 300;
+    mockTerminalDimensions.rows = 30;
+    mockTerminalDimensions.cols = 100;
+    const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
+    const ref = React.createRef<MultiTerminalHandle>();
+    render(<MultiTerminal ref={ref} {...defaultProps} />);
+    let localId: string | null = null;
+    act(() => {
+      localId = ref.current!.createSession();
+    });
+    await waitFor(() =>
+      expect(sendSpy.mock.calls.some(([d]) => JSON.parse(d as string).type === 'list_sessions')).toBe(true)
+    );
+    await notifyContainerResize(); // the size goes out while the list is in flight
+    const sent = () => sendSpy.mock.calls.map(([d]) => JSON.parse(d as string));
+    expect(resizesFor(sendSpy, localId!), 'size sent before the session exists').toHaveLength(1);
+    await waitFor(() => expect(sent().some((m) => m.type === 'create_session')).toBe(true));
+    await waitFor(() => {
+      const messages = sent();
+      const createdAt = messages.findIndex((m) => m.type === 'create_session');
+      const after = messages.slice(createdAt + 1).filter((m) => m.type === 'resize' && m.sessionId === localId);
+      expect(after).toEqual([{ type: 'resize', sessionId: localId, data: { rows: 30, cols: 100 } }]);
+    });
+  });
+
+  it('refits after a window resize settles, never synchronously', async () => {
+    layOutElements();
+    MockWebSocket.sessionListResponse = [
+      { sessionId: 'srv-window', name: 'Window', status: 'running', createdAt: new Date().toISOString() },
+    ];
+    const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
+    render(<MultiTerminal {...defaultProps} />);
+    await waitFor(() => expect(resizesFor(sendSpy, 'srv-window')).not.toEqual([]));
+    await notifyContainerResize();
+    sendSpy.mockClear();
+
+    // Cell metrics change (e.g. devicePixelRatio) with no container size change.
+    mockTerminalDimensions.rows = 26;
+    mockTerminalDimensions.cols = 90;
+    fireEvent.resize(window);
+    expect(resizesFor(sendSpy, 'srv-window'), 'no synchronous fit').toEqual([]);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+    expect(resizesFor(sendSpy, 'srv-window')).toEqual([
+      { type: 'resize', sessionId: 'srv-window', data: { rows: 26, cols: 90 } },
+    ]);
+  });
+
+  it('does not refit on window resize while the terminal view is hidden', async () => {
+    MockWebSocket.sessionListResponse = [
+      { sessionId: 'srv-hidden-window', name: 'Hidden', status: 'running', createdAt: new Date().toISOString() },
+    ];
+    const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
+    render(<MultiTerminal {...defaultProps} />);
+    await waitFor(() => expect(mockTerminalOpen).toHaveBeenCalled());
+    await notifyContainerResize();
+
+    // A chat tab is showing (zero box): a window resize must not measure the hidden view.
+    fireEvent.resize(window);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+    expect(resizesFor(sendSpy, 'srv-hidden-window'), 'hidden view not fitted').toEqual([]);
+
+    // Liveness: the same window resize fits once the view has a box.
+    layOutElements();
+    fireEvent.resize(window);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+    expect(resizesFor(sendSpy, 'srv-hidden-window')).not.toEqual([]);
+  });
+
+  it('fits a terminal mounted while hidden once it is revealed', async () => {
+    MockWebSocket.sessionListResponse = [
+      { sessionId: 'srv-revealed', name: 'Revealed', status: 'running', createdAt: new Date().toISOString() },
+    ];
+    const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
+    render(<MultiTerminal {...defaultProps} />);
+    await waitFor(() => expect(mockTerminalOpen).toHaveBeenCalled());
+    await notifyContainerResize();
+    expect(resizesFor(sendSpy, 'srv-revealed'), 'not fitted while hidden').toEqual([]);
+
+    // The workspace switches from a chat tab to the terminal: the container gets a box.
+    layOutElements();
+    mockTerminalDimensions.rows = 33;
+    mockTerminalDimensions.cols = 101;
+    await notifyContainerResize();
+    expect(resizesFor(sendSpy, 'srv-revealed')).toEqual([
+      { type: 'resize', sessionId: 'srv-revealed', data: { rows: 33, cols: 101 } },
+    ]);
+  });
+
+  it('fits and sends its size from attach when the tab has a real box', async () => {
+    // Same two tabs as the hidden case, but laid out: the inactive tab (A) is only reached by
+    // the attach path, so its resize proves attach fits a terminal that is actually visible.
+    layOutElements();
+    const createdAt = new Date().toISOString();
+    MockWebSocket.sessionListResponse = [
+      { sessionId: 'srv-tab-a', name: 'Tab A', status: 'running', createdAt },
+      { sessionId: 'srv-tab-b', name: 'Tab B', status: 'running', createdAt },
+    ];
+    const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
+    render(<MultiTerminal {...defaultProps} />);
+    await waitFor(() => expect(resizesFor(sendSpy, 'srv-tab-a')).not.toEqual([]));
+    expect(resizesFor(sendSpy, 'srv-tab-b')).not.toEqual([]);
   });
 
   it('does not resend unchanged dimensions during rerender bursts but sends actual changes', async () => {
+    layOutElements();
     MockWebSocket.sessionListResponse = [
       {
         sessionId: 'srv-resize',
@@ -206,8 +404,9 @@ describe('MultiTerminal', () => {
     sendSpy.mockClear();
     for (let index = 0; index < 70; index += 1) {
       rerender(<MultiTerminal {...defaultProps} className={`layout-${index}`} />);
-      fireEvent.resize(window);
+      resizeObserverCallbacks.forEach((callback) => callback());
     }
+    await notifyContainerResize();
     const resizeMessages = () =>
       sendSpy.mock.calls
         .map(([data]) => JSON.parse(data as string))
@@ -215,13 +414,14 @@ describe('MultiTerminal', () => {
     expect(resizeMessages()).toHaveLength(0);
     mockTerminalDimensions.rows = 32;
     mockTerminalDimensions.cols = 100;
-    fireEvent.resize(window);
+    await notifyContainerResize();
     expect(resizeMessages()).toEqual([
       { type: 'resize', sessionId: 'srv-resize', data: { rows: 32, cols: 100 } },
     ]);
   });
 
   it('sends the same dimensions again when the terminal reconnects on a new socket', async () => {
+    layOutElements();
     MockWebSocket.sessionListResponse = [
       {
         sessionId: 'srv-reconnect-size',

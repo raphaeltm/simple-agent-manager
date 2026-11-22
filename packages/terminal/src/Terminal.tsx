@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { preserveAltArrowWordNavigation } from './alt-arrow-keys';
 import { ConnectionOverlay } from './ConnectionOverlay';
 import {
   encodeTerminalWsInput,
@@ -100,6 +101,7 @@ export function Terminal({
 
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
+    preserveAltArrowWordNavigation(terminal);
 
     terminal.open(containerRef.current);
     fitAddon.fit();

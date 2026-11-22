@@ -1,0 +1,507 @@
+/**
+ * Terminal geometry audit (xterm 6 + @xterm/addon-fit 0.11).
+ *
+ * Renders the real workspace page with the real MultiTerminal and a WebSocket routed to a
+ * fake VM agent that keeps a PTY size from the client's create/resize/reattach messages,
+ * the same way the agent does. Typing `size` makes the agent print its PTY size and a line
+ * of `#` exactly as wide as the PTY. If the PTY size and the rendered grid disagree, that
+ * line wraps (PTY too wide), stops short of the pane (PTY too narrow), or the pane shows a
+ * different number of rows than the PTY has. Screenshots alone cannot show this.
+ */
+import { expect, type Page, test, type WebSocketRoute } from '@playwright/test';
+
+import { assertNoClippedOverflow, assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
+
+const WS_ID = 'ws-geometry-1';
+const USER_ID = 'user-geometry-1';
+
+const MOCK_USER = makeMockUser({
+  email: 'geometry@example.com',
+  name: 'Geometry User',
+  sessionId: 'session-geometry-1',
+  userId: USER_ID,
+});
+
+const MOCK_WORKSPACE = {
+  id: WS_ID,
+  name: 'workspace-geometry',
+  displayName: 'Geometry Workspace',
+  status: 'running',
+  nodeId: 'node-geometry-1',
+  projectId: null,
+  userId: USER_ID,
+  vmSize: 'medium',
+  vmLocation: 'nbg1',
+  workspaceProfile: 'full',
+  url: 'http://localhost:4173',
+  portsPublic: false,
+  chatSessionId: null,
+  createdAt: '2026-11-22T10:00:00.000Z',
+  updatedAt: '2026-11-22T10:05:00.000Z',
+};
+
+const MOCK_NODE = {
+  id: 'node-geometry-1',
+  name: 'geometry-node-1',
+  status: 'running',
+  healthStatus: 'healthy',
+  vmSize: 'medium',
+  vmLocation: 'nbg1',
+  cloudProvider: 'hetzner',
+  lastHeartbeatAt: '2026-11-22T10:05:00.000Z',
+  createdAt: '2026-11-22T10:00:00.000Z',
+  updatedAt: '2026-11-22T10:05:00.000Z',
+};
+
+const MOCK_SYSTEM_INFO = {
+  cpu: { loadAvg1: 0.3, loadAvg5: 0.4, loadAvg15: 0.5, numCpu: 4 },
+  memory: { usedBytes: 2e9, totalBytes: 8e9, availableBytes: 6e9, usedPercent: 25 },
+  disk: { usedBytes: 4e10, totalBytes: 1.2e11, availableBytes: 8e10, usedPercent: 33, mountPath: '/' },
+  network: { interface: 'eth0', rxBytes: 1024, txBytes: 2048 },
+  uptime: { seconds: 3600, humanFormat: '1h' },
+  docker: { version: '27.0.0', containers: 1, containerList: [], error: null },
+  software: { goVersion: 'go1.26', nodeVersion: '24', dockerVersion: '27', devcontainerCliVersion: '0.75' },
+  agent: { version: '0.1.0', buildDate: '2026-11-22', goRuntime: 'go1.26', goroutines: 12, heapBytes: 2.4e7 },
+};
+
+interface PtySession {
+  serverId: string;
+  rows: number;
+  cols: number;
+  line: string;
+  history: string;
+}
+
+/** Fake VM agent: one PTY per session, sized only by what the client sends. */
+class FakeAgent {
+  sessions = new Map<string, PtySession>();
+  inputs: string[] = [];
+  resizes: Array<{ sessionId: string; rows: number; cols: number }> = [];
+  reattaches: Array<{ sessionId: string; rows: number; cols: number }> = [];
+  socket: WebSocketRoute | null = null;
+  /** PTY that ran the most recent command (the visible tab's, since input goes there). */
+  lastCommandSession: PtySession | null = null;
+
+  attach(ws: WebSocketRoute) {
+    this.socket = ws;
+    ws.onMessage((raw) => this.handle(ws, String(raw)));
+  }
+
+  private send(ws: WebSocketRoute, msg: unknown) {
+    ws.send(JSON.stringify(msg));
+  }
+
+  private output(ws: WebSocketRoute, s: PtySession, data: string) {
+    s.history += data;
+    this.send(ws, { type: 'output', sessionId: s.serverId, data: { data } });
+  }
+
+  private handle(ws: WebSocketRoute, raw: string) {
+    const msg = JSON.parse(raw) as { type: string; sessionId?: string; data?: Record<string, unknown> };
+    switch (msg.type) {
+      case 'list_sessions':
+        this.send(ws, {
+          type: 'session_list',
+          data: {
+            sessions: [...this.sessions.values()].map((s) => ({
+              sessionId: s.serverId,
+              status: 'running',
+              createdAt: '2026-11-22T10:00:00.000Z',
+            })),
+          },
+        });
+        return;
+      case 'create_session': {
+        const d = msg.data as { sessionId: string; rows: number; cols: number };
+        // The VM agent keys the PTY by the client's session ID (websocket.go create_session).
+        const s: PtySession = { serverId: d.sessionId, rows: d.rows, cols: d.cols, line: '', history: '' };
+        this.sessions.set(s.serverId, s);
+        this.send(ws, { type: 'session_created', data: { sessionId: s.serverId, workingDirectory: '/workspaces/app' } });
+        this.output(ws, s, '$ ');
+        return;
+      }
+      case 'reattach_session': {
+        const d = msg.data as { sessionId: string; rows: number; cols: number };
+        const s = this.sessions.get(d.sessionId);
+        if (!s) return;
+        s.rows = d.rows;
+        s.cols = d.cols;
+        this.reattaches.push({ ...d });
+        this.send(ws, { type: 'session_reattached', data: { sessionId: s.serverId } });
+        this.send(ws, { type: 'scrollback', sessionId: s.serverId, data: { data: s.history } });
+        return;
+      }
+      case 'resize': {
+        const s = msg.sessionId ? this.sessions.get(msg.sessionId) : undefined;
+        const d = msg.data as { rows: number; cols: number };
+        if (!s) return;
+        s.rows = d.rows;
+        s.cols = d.cols;
+        this.resizes.push({ sessionId: s.serverId, ...d });
+        return;
+      }
+      case 'input': {
+        const s = msg.sessionId ? this.sessions.get(msg.sessionId) : undefined;
+        const data = (msg.data as { data: string }).data;
+        this.inputs.push(data);
+        // Escape sequences (arrows, Alt+Arrow) are cursor motion, not command text.
+        if (!s || data.startsWith('\x1b')) return;
+        for (const ch of data) {
+          if (ch === '\r') {
+            this.output(ws, s, '\r\n');
+            this.run(ws, s, s.line.trim());
+            s.line = '';
+          } else if (ch >= ' ' && ch !== '\x7f') {
+            s.line += ch;
+            this.output(ws, s, ch);
+          }
+        }
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  private run(ws: WebSocketRoute, s: PtySession, command: string) {
+    this.lastCommandSession = s;
+    if (command === 'size') {
+      // Like `stty size; printf '%*s\n' "$(tput cols)" | tr ' ' '#'`
+      this.output(ws, s, `${s.rows} ${s.cols}\r\n${'#'.repeat(s.cols)}\r\n$ `);
+    } else if (command === 'seq') {
+      const lines = Array.from({ length: 150 }, (_, i) => `line-${i + 1}`).join('\r\n');
+      this.output(ws, s, `${lines}\r\n$ `);
+    } else {
+      this.output(ws, s, '$ ');
+    }
+  }
+
+  /** Most recently created PTY. */
+  latest(): PtySession {
+    const all = [...this.sessions.values()];
+    return all[all.length - 1]!;
+  }
+
+  /** PTY output produced while no client is attached; only the reattach replay can show it. */
+  outputWhileDetached(text: string) {
+    this.first().history += text;
+  }
+
+  /** PTY created first (terminal tab 1). */
+  first(): PtySession {
+    return [...this.sessions.values()][0]!;
+  }
+}
+
+async function setupMocks(page: Page, agent: FakeAgent) {
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, USER_ID);
+
+  await page.routeWebSocket(/\/terminal\/ws/, (ws) => agent.attach(ws));
+  // Any other socket (notifications etc.) is accepted and left silent.
+  await page.routeWebSocket((url) => !url.pathname.includes('/terminal/ws'), () => undefined);
+
+  await page.route('**/api/**', async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const json = (body: unknown) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+
+    if (path.includes('/api/auth/')) return json(MOCK_USER);
+    if (path.startsWith('/api/notifications')) return json({ notifications: [], unreadCount: 0 });
+    if (path === '/api/terminal/token') {
+      return json({
+        token: 'geometry-token',
+        expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+        workspaceUrl: MOCK_WORKSPACE.url,
+      });
+    }
+    if (path === `/api/workspaces/${WS_ID}`) return json(MOCK_WORKSPACE);
+    if (path === `/api/workspaces/${WS_ID}/agent-sessions`) return json([]);
+    if (path === '/api/workspaces') return json([MOCK_WORKSPACE]);
+    if (path === `/api/nodes/${MOCK_NODE.id}`) return json(MOCK_NODE);
+    if (path === `/api/nodes/${MOCK_NODE.id}/system-info`) return json(MOCK_SYSTEM_INFO);
+    if (path.startsWith(`/api/nodes/${MOCK_NODE.id}/`)) return json({ events: [], entries: [], nextCursor: null });
+    if (path === '/api/projects') return json({ projects: [], nextCursor: null });
+    if (path === '/api/agents') return json({ agents: [] });
+    if (path === '/api/credentials') return json([]);
+    if (path === '/api/credentials/agent') return json({ credentials: [] });
+    if (path === '/api/github/installations') return json([]);
+    return json({});
+  });
+
+  await page.route(`**/workspaces/${WS_ID}/**`, async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.startsWith('/api/')) return route.fallback();
+    const json = (body: unknown) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    if (path.endsWith('/agent-sessions')) return json({ sessions: [] });
+    if (path.endsWith('/events')) return json({ events: [], nextCursor: null });
+    if (path.endsWith('/ports')) return json({ ports: [] });
+    if (path.endsWith('/worktrees')) return json({ worktrees: [] });
+    return json({});
+  });
+}
+
+interface Geometry {
+  hostWidth: number;
+  hostHeight: number;
+  hostLeft: number;
+  hostRight: number;
+  /** xterm 6's overlay scrollbar, which addon-fit 0.11 reserves room for on the right. */
+  scrollbarLeft: number;
+  scrollbarRight: number;
+  scrollbarWidth: number;
+  screenWidth: number;
+  screenHeight: number;
+  domRows: number;
+  cellWidth: number;
+  cellHeight: number;
+  /** The last full-width `#` line, as rendered. */
+  hashLength: number;
+  hashRight: number;
+  /** Row after the `#` line: a wrapped PTY line would continue with `#` here. */
+  rowAfterHash: string;
+}
+
+/** Measure the visible terminal: the host element, the xterm grid and the last `#` line. */
+async function measure(page: Page): Promise<Geometry> {
+  return page.evaluate(() => {
+    const term = [...document.querySelectorAll<HTMLElement>('.xterm')].find((el) => el.offsetParent !== null);
+    if (!term) throw new Error('no visible .xterm');
+    const host = term.parentElement!.getBoundingClientRect();
+    const screen = term.querySelector('.xterm-screen')!.getBoundingClientRect();
+    const scrollbar = term.querySelector('.xterm-scrollable-element > .scrollbar.vertical');
+    if (!scrollbar) throw new Error('no xterm vertical scrollbar');
+    const bar = scrollbar.getBoundingClientRect();
+    const rows = [...term.querySelectorAll<HTMLElement>('.xterm-rows > div')];
+    const index = rows.map((r) => r.textContent ?? '').findLastIndex((t) => /^#+\s*$/.test(t));
+    if (index < 0) throw new Error('no # line rendered');
+    const hashRow = rows[index]!;
+    const range = document.createRange();
+    range.selectNodeContents(hashRow);
+    const textRect = range.getBoundingClientRect();
+    const hashLength = (hashRow.textContent ?? '').trimEnd().length;
+    return {
+      hostWidth: host.width,
+      hostHeight: host.height,
+      hostLeft: host.left,
+      hostRight: host.right,
+      scrollbarLeft: bar.left,
+      scrollbarRight: bar.right,
+      scrollbarWidth: bar.width,
+      screenWidth: screen.width,
+      screenHeight: screen.height,
+      domRows: rows.length,
+      cellWidth: textRect.width / hashLength,
+      cellHeight: screen.height / rows.length,
+      hashLength,
+      hashRight: textRect.right,
+      rowAfterHash: rows[index + 1]?.textContent ?? '',
+    };
+  });
+}
+
+/** Text of each rendered row of the visible terminal. */
+async function rowTexts(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const term = [...document.querySelectorAll<HTMLElement>('.xterm')].find((el) => el.offsetParent !== null);
+    return [...(term?.querySelectorAll<HTMLElement>('.xterm-rows > div') ?? [])].map((r) => (r.textContent ?? '').trimEnd());
+  });
+}
+
+async function typeInTerminal(page: Page, text: string) {
+  await page.keyboard.type(text);
+  await page.keyboard.press('Enter');
+}
+
+/**
+ * Ask the fake PTY for its size and assert it equals what is on screen: the full-width line
+ * fits one row, reaches the right edge of the usable area, and the PTY row count equals the
+ * rendered rows.
+ */
+async function expectPtyMatchesScreen(page: Page, agent: FakeAgent, label: string) {
+  // Let debounced ResizeObserver/rAF fits land first (MultiTerminal debounces by 100ms).
+  let seen = -1;
+  await expect
+    .poll(async () => {
+      const settled = agent.resizes.length === seen;
+      seen = agent.resizes.length;
+      return settled;
+    }, { intervals: [300] })
+    .toBe(true);
+  const resizesBefore = agent.resizes.length;
+  agent.lastCommandSession = null;
+  await typeInTerminal(page, 'size');
+  await expect.poll(() => agent.lastCommandSession, { message: `${label}: size ran` }).not.toBeNull();
+  const pty = agent.lastCommandSession!;
+  await expect
+    .poll(async () => (await measure(page).catch(() => null))?.hashLength, { message: `${label}: # line` })
+    .toBe(pty.cols);
+  const g = await measure(page);
+
+  // No wrap: the PTY-wide line is one rendered row.
+  expect(g.rowAfterHash.startsWith('#'), `${label}: # line wrapped`).toBe(false);
+  // The scrollbar is inside the pane, at its right edge, and covers no text.
+  expect(g.scrollbarWidth, `${label}: scrollbar width`).toBeGreaterThan(0);
+  expect(g.scrollbarRight, `${label}: scrollbar outside pane`).toBeLessThanOrEqual(g.hostRight + 0.5);
+  expect(g.hostRight - g.scrollbarRight, `${label}: scrollbar not at the right edge`).toBeLessThan(1);
+  // Rightmost column visible: the line ends inside the pane, left of the scrollbar.
+  expect(g.hashRight, `${label}: last column under scrollbar or clipped`).toBeLessThanOrEqual(g.scrollbarLeft + 0.5);
+  expect(g.screenWidth, `${label}: grid wider than pane`).toBeLessThanOrEqual(g.hostWidth + 0.5);
+  // Fills the pane: less than one spare column between the grid and the scrollbar.
+  const spare = g.scrollbarLeft - g.hostLeft - pty.cols * g.cellWidth;
+  expect(spare, `${label}: unused width ${spare}px`).toBeGreaterThanOrEqual(-0.5);
+  expect(spare, `${label}: unused width ${spare}px`).toBeLessThan(g.cellWidth);
+  // Rows: PTY rows are exactly the rendered rows, which fill the pane height.
+  expect(g.domRows, `${label}: rendered rows`).toBe(pty.rows);
+  expect(g.screenHeight, `${label}: grid taller than pane`).toBeLessThanOrEqual(g.hostHeight + 0.5);
+  expect(g.hostHeight - g.screenHeight, `${label}: unused height`).toBeLessThan(g.cellHeight);
+  // Typing `size` must not itself have resized anything.
+  expect(agent.resizes).toHaveLength(resizesBefore);
+  return { pty: { rows: pty.rows, cols: pty.cols }, g };
+}
+
+async function openTerminal(page: Page, agent: FakeAgent) {
+  await setupMocks(page, agent);
+  await page.goto(`/workspaces/${WS_ID}`);
+  // The preview must be built with VITE_FEATURE_MULTI_TERMINAL=true (playwright.config.ts), as
+  // deployed builds are; a reused preview server built without it renders the legacy terminal.
+  await expect(page.getByRole('button', { name: 'Create terminal or chat session' })).toBeVisible();
+  await expect.poll(() => agent.sessions.size, { message: 'session created' }).toBe(1);
+  await expect(page.locator('.xterm-rows')).toContainText('$');
+  await page.locator('.xterm').first().click();
+}
+
+test.describe('Terminal geometry (xterm 6)', () => {
+  // The reconnect case waits out MultiTerminal's 3s RECONNECT_DELAY_MS.
+  test.describe.configure({ timeout: 45_000 });
+
+  test('PTY size matches the rendered grid on load, resize, rotation and panel resize', async ({ page }) => {
+    const agent = new FakeAgent();
+    await openTerminal(page, agent);
+    const viewport = page.viewportSize()!;
+
+    const initial = await expectPtyMatchesScreen(page, agent, 'initial');
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, 'terminal-geometry-full-width-line', { scopeToProject: true });
+
+    // Window resize (mobile rotation when the viewport is a phone). Only the settled size may
+    // reach the PTY: on iPhone 14 the rotation crosses the 768px breakpoint, and a fit before
+    // the layout re-render used to send a transient 6-column size first.
+    const sentSize = (from: number) => agent.resizes.slice(from).map((r) => `${r.rows}x${r.cols}`);
+    let mark = agent.resizes.length;
+    await page.setViewportSize({ width: viewport.height, height: viewport.width });
+    await expect.poll(() => agent.latest().cols, { message: 'resize after rotation' }).not.toBe(initial.pty.cols);
+    const rotated = await expectPtyMatchesScreen(page, agent, 'rotated');
+    expect(sentSize(mark), 'rotation sends only the settled size').toEqual([`${rotated.pty.rows}x${rotated.pty.cols}`]);
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, 'terminal-geometry-rotated', { scopeToProject: true });
+
+    mark = agent.resizes.length;
+    await page.setViewportSize(viewport);
+    await expect.poll(() => agent.latest().cols).toBe(initial.pty.cols);
+    const back = await expectPtyMatchesScreen(page, agent, 'rotated back');
+    expect(sentSize(mark), 'rotating back sends only the settled size').toEqual([`${back.pty.rows}x${back.pty.cols}`]);
+    expect(rotated.pty.cols).not.toBe(initial.pty.cols);
+
+    // Panel resize: the terminal pane narrows with no window resize event, so only the
+    // ResizeObserver path can catch it.
+    await page.evaluate(() => {
+      const term = [...document.querySelectorAll<HTMLElement>('.xterm')].find((el) => el.offsetParent !== null)!;
+      term.closest<HTMLElement>('.multi-terminal-container')!.style.width = '70%';
+    });
+    await expect.poll(() => agent.latest().cols, { message: 'resize after panel resize' }).toBeLessThan(initial.pty.cols);
+    await expectPtyMatchesScreen(page, agent, 'panel resized');
+  });
+
+  test('hidden terminal tab re-fits when activated after a resize', async ({ page }) => {
+    const agent = new FakeAgent();
+    await openTerminal(page, agent);
+    const viewport = page.viewportSize()!;
+    const first = await expectPtyMatchesScreen(page, agent, 'tab 1');
+
+    await page.getByRole('button', { name: 'Create terminal or chat session' }).click();
+    await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+    await expect.poll(() => agent.sessions.size).toBe(2);
+    await expect(page.getByRole('tab', { name: /Terminal tab:/ })).toHaveCount(2);
+    await page.locator('.xterm').filter({ visible: true }).click();
+    await expectPtyMatchesScreen(page, agent, 'tab 2');
+
+    // Resize while tab 1 is display:none, then activate it.
+    await page.setViewportSize({ width: viewport.height, height: viewport.width });
+    await expectPtyMatchesScreen(page, agent, 'tab 2 rotated');
+    const tab1 = agent.first();
+    expect(tab1.cols, 'hidden tab is still at its old size').toBe(first.pty.cols);
+
+    await page.getByRole('tab', { name: /Terminal tab:/ }).first().click();
+    await expect.poll(() => agent.first().cols, { message: 'tab 1 refit' }).not.toBe(first.pty.cols);
+    await page.locator('.xterm').filter({ visible: true }).click();
+    const reactivated = await expectPtyMatchesScreen(page, agent, 'tab 1 reactivated');
+    // The size check ran in tab 1's own PTY, not tab 2's.
+    expect(agent.lastCommandSession?.serverId).toBe(agent.first().serverId);
+    expect(reactivated.pty.cols).toBe(agent.first().cols);
+    // A fit while display:none measures the specified 100%-as-100px box, which sent 5 rows x 10
+    // cols to the hidden tab's PTY. No real pane here is 5 rows tall.
+    expect(agent.resizes.filter((r) => r.rows <= 5), 'no hidden-measurement resize').toEqual([]);
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, 'terminal-geometry-reactivated-tab', { scopeToProject: true });
+  });
+
+  test('input, Alt+Arrow word motion, scrollback and reconnect replay', async ({ page }) => {
+    const agent = new FakeAgent();
+    await openTerminal(page, agent);
+
+    // Output and scrollback: 150 lines scroll; the viewport can scroll back to line 1.
+    await typeInTerminal(page, 'seq');
+    await expect.poll(() => rowTexts(page)).toContain('line-150');
+    expect(await rowTexts(page)).not.toContain('line-1');
+    await page.locator('.xterm').first().hover();
+    await expect
+      .poll(
+        async () => {
+          await page.mouse.wheel(0, -1000);
+          return rowTexts(page);
+        },
+        { message: 'scrolled back to the first line', intervals: [20], timeout: 15_000 }
+      )
+      .toContain('line-1');
+    await screenshot(page, 'terminal-geometry-scrollback', { scopeToProject: true });
+
+    await page.locator('.xterm').first().click();
+    agent.inputs = [];
+    await page.keyboard.press('Alt+ArrowLeft');
+    await page.keyboard.press('Alt+ArrowRight');
+    // The bytes xterm 5.5 sent: readline word motions on macOS, Ctrl+Arrow elsewhere.
+    const isMac = await page.evaluate(() =>
+      ['Macintosh', 'MacIntel', 'MacPPC', 'Mac68K'].includes(navigator.platform)
+    );
+    await expect.poll(() => agent.inputs).toEqual(isMac ? ['\x1bb', '\x1bf'] : ['\x1b[1;5D', '\x1b[1;5C']);
+    // Control: other modifier combinations keep xterm's own encoding.
+    await page.keyboard.press('Alt+Shift+ArrowLeft');
+    await expect.poll(() => agent.inputs.at(-1)).toBe('\x1b[1;4D');
+
+    // Reconnect: the agent drops the socket; the client reattaches at its current size and
+    // the scrollback replay renders.
+    const before = await expectPtyMatchesScreen(page, agent, 'before reconnect');
+    await agent.socket!.close();
+    agent.outputWhileDetached('built-while-detached\r\n$ ');
+    await expect.poll(() => agent.reattaches.length, { timeout: 15_000, message: 'reattach' }).toBe(1);
+    expect(agent.reattaches[0]).toEqual({ sessionId: agent.first().serverId, ...before.pty });
+    await expect(page.getByText('Reconnecting...')).toHaveCount(0);
+    // The replayed scrollback is rendered: output the PTY produced while detached appears.
+    await expect
+      .poll(async () => (await rowTexts(page)).some((row) => row.includes('built-while-detached')), {
+        message: 'replayed scrollback',
+      })
+      .toBe(true);
+    await page.locator('.xterm').first().click();
+    await expectPtyMatchesScreen(page, agent, 'after reconnect');
+    expect(agent.reattaches, 'exactly one reattach per reconnect').toHaveLength(1);
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+  });
+});
