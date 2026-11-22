@@ -33,7 +33,7 @@ latch() {
 lost() { ( flock 9 || true; latch ) 9>>"$LOCK" || latch; }
 publish() {
   (
-    flock 9 || exit 0
+    flock 9 || exit 1
     [ ! -f "$LOST" ] || exit 0
     echo "ok $(date +%s)" >"$ATTESTATION.tmp"
     chmod 0644 "$ATTESTATION.tmp"

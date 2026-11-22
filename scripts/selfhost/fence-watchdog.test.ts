@@ -26,7 +26,7 @@ afterEach(async () => {
  *   (old fence: no lock) or reached the lock (fixed fence), so the latch lands between the
  *   publication's latch check and its mv.
  */
-function startFence(race: boolean, { unopenableLock = false } = {}) {
+function startFence(race: boolean, { unopenableLock = false, failingFlock = false } = {}) {
   mkdirSync(resolve('.tmp'), { recursive: true });
   const dir = mkdtempSync(resolve('.tmp/fence-publication-'));
   const bin = join(dir, 'bin');
@@ -56,7 +56,9 @@ if [ "$1" = -s ]; then echo "table inet sam_celld_egress {}"; fi
   if (!realFlock) throw new Error('flock is required (util-linux or busybox)');
   writeFileSync(
     join(bin, 'flock'),
-    `#!/bin/sh\necho "$$" >>"$SAM_TEST_DIR/lock-attempts"\nexec ${realFlock} "$@"\n`,
+    failingFlock
+      ? '#!/bin/sh\nexit 1\n'
+      : `#!/bin/sh\necho "$$" >>"$SAM_TEST_DIR/lock-attempts"\nexec ${realFlock} "$@"\n`,
     { mode: 0o755 }
   );
   writeFileSync(
@@ -156,8 +158,11 @@ it('control: a healthy fence keeps publishing fresh ok', async () => {
   expect(fence.events()).not.toContain('egress_fence.lost');
 });
 
-it('latches and stops when the lock cannot be opened, publishing nothing', async () => {
-  const fence = startFence(false, { unopenableLock: true });
+it.each([
+  ['the lock cannot be opened', { unopenableLock: true }],
+  ['flock fails on an open lock', { failingFlock: true }],
+])('latches and stops when %s, publishing nothing', async (_name, failure) => {
+  const fence = startFence(false, failure);
   expect(await fence.exited).toBe(1);
   expect(fence.events()).toContain('egress_fence.verified');
   expect(fence.events()).toContain('egress_fence.lost');
