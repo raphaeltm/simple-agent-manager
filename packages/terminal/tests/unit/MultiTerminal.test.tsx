@@ -259,6 +259,26 @@ describe('MultiTerminal', () => {
     expect(mockTerminalInput).toHaveBeenCalledWith('\x1b[1;5D', true);
   });
 
+  it('fits a terminal mounted while hidden once it is revealed', async () => {
+    MockWebSocket.sessionListResponse = [
+      { sessionId: 'srv-revealed', name: 'Revealed', status: 'running', createdAt: new Date().toISOString() },
+    ];
+    const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
+    render(<MultiTerminal {...defaultProps} />);
+    await waitFor(() => expect(mockTerminalOpen).toHaveBeenCalled());
+    await notifyContainerResize();
+    expect(resizesFor(sendSpy, 'srv-revealed'), 'not fitted while hidden').toEqual([]);
+
+    // The workspace switches from a chat tab to the terminal: the container gets a box.
+    layOutElements();
+    mockTerminalDimensions.rows = 33;
+    mockTerminalDimensions.cols = 101;
+    await notifyContainerResize();
+    expect(resizesFor(sendSpy, 'srv-revealed')).toEqual([
+      { type: 'resize', sessionId: 'srv-revealed', data: { rows: 33, cols: 101 } },
+    ]);
+  });
+
   it('fits and sends its size from attach when the tab has a real box', async () => {
     // Same two tabs as the hidden case, but laid out: the inactive tab (A) is only reached by
     // the attach path, so its resize proves attach fits a terminal that is actually visible.
