@@ -9,6 +9,9 @@ STATE="${SAM_EGRESS_FENCE_STATE:-/tmp/egress-fence.applied}"
 ATTESTATION="${SAM_EGRESS_FENCE_ATTESTATION:-/run/sam-egress-fence/attestation}"
 LOST="$(dirname "$ATTESTATION")/lost"
 HISTORY="$(dirname "$ATTESTATION")/events.jsonl"
+# Serializes the latch with ok publication (both processes write the attestation). Kept on the
+# fence's private tmpfs, beside STATE, so no consumer can hold it.
+LOCK="${STATE}.lock"
 applied() { nft -s list table inet "$TABLE" 2>/dev/null; }
 current() { sha256sum "$RULES"; applied; }
 event() {
@@ -16,12 +19,25 @@ event() {
   echo "$line" >&2
   echo "$line" >>"$HISTORY"
 }
-lost() {
+# Lost is sticky: lost() and publish() hold LOCK, so once $LOST exists no ok is ever written.
+# The latch never depends on the lock: if it cannot be opened or taken, lost() still latches
+# (fail closed), while publish() publishes nothing and the attestation goes stale.
+latch() {
   if [ ! -f "$LOST" ]; then
     echo lost >"$LOST"
     echo lost >"$ATTESTATION"
     event error lost
   fi
+}
+lost() { ( flock 9 || true; latch ) 9>>"$LOCK" || latch; }
+publish() {
+  (
+    flock 9 || exit 0
+    [ ! -f "$LOST" ] || exit 0
+    echo "ok $(date +%s)" >"$ATTESTATION.tmp"
+    chmod 0644 "$ATTESTATION.tmp"
+    mv -f "$ATTESTATION.tmp" "$ATTESTATION"
+  ) 9>>"$LOCK"
 }
 check() {
   [ ! -f "$LOST" ] && [ -s "$STATE" ] &&
@@ -59,14 +75,7 @@ case "${1:-run}" in
       if ! kill -0 "$monitor" 2>/dev/null || ! kill -0 "$reader" 2>/dev/null || ! check; then
         lost
       fi
-      if [ ! -f "$LOST" ]; then
-        echo "ok $(date +%s)" >"$ATTESTATION.tmp"
-        chmod 0644 "$ATTESTATION.tmp"
-        mv -f "$ATTESTATION.tmp" "$ATTESTATION"
-      else
-        # The reader can latch between the check above and mv. Converge any stale ok.
-        echo lost >"$ATTESTATION"
-      fi
+      publish
       sleep "$RECHECK"
     done
     ;;

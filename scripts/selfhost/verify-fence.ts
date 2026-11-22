@@ -145,6 +145,10 @@ function celldNameservers(envFile: string, probeContainer: string): string[] {
 }
 
 function checkService(envFile: string, probeContainer: string, failures: string[]): void {
+  // Read before the latch-aware check: the latch is never cleared while the fence runs, so a
+  // passing check afterwards proves this ok was not published after a loss.
+  const attestation = compose(envFile, ['exec', '-T', 'egress-fence', 'cat', ATTESTATION_PATH]);
+  const readAt = Math.floor(Date.now() / 1000);
   const checked = compose(envFile, [
     'exec',
     '-T',
@@ -172,10 +176,9 @@ function checkService(envFile: string, probeContainer: string, failures: string[
         'open; run pnpm selfhost:deploy --init to regenerate and reconcile the fence, then rerun verification'
     );
   }
-  const attestation = compose(envFile, ['exec', '-T', 'egress-fence', 'cat', ATTESTATION_PATH]);
   const problem = boxAttestationProblem(
     attestation.output,
-    Math.floor(Date.now() / 1000),
+    readAt,
     loadBoxEnv(envFile, SELFHOST_DIR)
   );
   if (problem) failures.push(`${problem}; celld stops serving without it`);
