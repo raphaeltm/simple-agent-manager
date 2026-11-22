@@ -40,9 +40,9 @@ worse path, and the test was not ordering-deterministic.
 - [x] verify-fence CLI test: latch right after the read is refused; red on old order
 - [x] Live netns test: FIFO attestation owns the ordering; red on old start.sh
 - [x] README section updated
-- [ ] 200x stress run under CPU load
-- [ ] security-auditor, go-specialist, task-completion-validator reviews
-- [ ] Self-host Live CI job green on PR
+- [x] 200x stress run under CPU load (result posted on PR #2978)
+- [x] security-auditor (PASS, MEDIUM fixed: failed publish now latches), go-specialist (PASS, LOW comment fixed), task-completion-validator (PASS)
+- [x] Live fence-netns suite 68/68 locally in the privileged lab; Self-host Live CI job on PR
 
 ## Acceptance criteria
 
