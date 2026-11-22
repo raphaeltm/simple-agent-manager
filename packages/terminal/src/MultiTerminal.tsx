@@ -43,6 +43,16 @@ import type {
 const PING_INTERVAL_MS = 30_000;
 const RECONNECT_DELAY_MS = 3000;
 
+/**
+ * Whether a terminal container is rendered. A `display:none` container (an inactive tab, or
+ * the whole terminal view while a chat tab is shown) reports its specified `width: 100%` as
+ * 100px to FitAddon, which would shrink the PTY to ~10x5. Never fit one; the ResizeObserver
+ * fits it when it becomes visible.
+ */
+function hasLayout(el: HTMLElement | null): el is HTMLElement {
+  return !!el && el.offsetWidth > 0 && el.offsetHeight > 0;
+}
+
 /** xterm.js instance + FitAddon pair for a session */
 interface TerminalInstance {
   terminal: XTerm;
@@ -572,17 +582,15 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
           if (!containerEl.querySelector('.xterm')) {
             instance.terminal.open(containerEl);
           }
-          // A hidden tab (display:none) reports its specified `width: 100%` as 100px, so a
-          // fit here would shrink its PTY to ~10 columns. Activation re-fits it.
-          if (containerEl.offsetWidth > 0 && containerEl.offsetHeight > 0) {
+          if (hasLayout(containerEl)) {
             instance.fitAddon.fit();
             sendTerminalResize(sessionId);
           }
 
-          // Add ResizeObserver to handle container size changes (including
-          // display:none → display:block transitions on tab switch).
-          // Also covers window resize, so acts as safety net alongside the
-          // explicit window resize listener.
+          // The ResizeObserver handles every container size change: window resize and
+          // rotation, panel resize, and display:none → display:block on tab switch. It is
+          // debounced so it reads the settled layout; a synchronous window `resize` fit ran
+          // before the breakpoint re-render and sent the PTY a transient size (e.g. 6 cols).
           if (instance.resizeObserver) {
             instance.resizeObserver.disconnect();
           }
@@ -592,7 +600,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
             resizeDebounce = setTimeout(() => {
               // Guard: instance may have been destroyed while resize was queued
               if (!terminalsRef.current.has(sessionId)) return;
-              if (containerEl.offsetWidth > 0 && containerEl.offsetHeight > 0) {
+              if (hasLayout(containerEl)) {
                 try {
                   instance.fitAddon.fit();
                 } catch {
@@ -607,20 +615,6 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       },
       [sendTerminalResize]
     );
-
-    // Fit active terminal on window resize
-    useEffect(() => {
-      const handleResize = () => {
-        if (!activeSessionId) return;
-        const instance = terminalsRef.current.get(activeSessionId);
-        if (instance && instance.containerEl) {
-          instance.fitAddon.fit();
-          sendTerminalResize(activeSessionId);
-        }
-      };
-      window.addEventListener('resize', handleResize);
-      return () => window.removeEventListener('resize', handleResize);
-    }, [activeSessionId, sendTerminalResize]);
 
     // When active tab changes, fit the terminal.
     // Use double-rAF to ensure the browser has fully recalculated layout after
@@ -637,12 +631,15 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
         innerRaf = requestAnimationFrame(() => {
           // Guard: terminal may have been disposed during the two frames
           if (!terminalsRef.current.has(activeSessionId)) return;
+          instance.terminal.focus();
+          // Hidden (e.g. the workspace is showing a chat tab): the ResizeObserver fits it
+          // when it becomes visible.
+          if (!hasLayout(instance.containerEl)) return;
           try {
             instance.fitAddon.fit();
           } catch {
             return; // terminal disposed
           }
-          instance.terminal.focus();
           sendTerminalResize(activeSessionId);
         });
       });

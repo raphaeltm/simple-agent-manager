@@ -381,16 +381,23 @@ test.describe('Terminal geometry (xterm 6)', () => {
     await assertNoOverflow(page);
     await screenshot(page, 'terminal-geometry-full-width-line', { scopeToProject: true });
 
-    // Window resize (mobile rotation when the viewport is a phone).
+    // Window resize (mobile rotation when the viewport is a phone). Only the settled size may
+    // reach the PTY: on iPhone 14 the rotation crosses the 768px breakpoint, and a fit before
+    // the layout re-render used to send a transient 6-column size first.
+    const sentSize = (from: number) => agent.resizes.slice(from).map((r) => `${r.rows}x${r.cols}`);
+    let mark = agent.resizes.length;
     await page.setViewportSize({ width: viewport.height, height: viewport.width });
     await expect.poll(() => agent.latest().cols, { message: 'resize after rotation' }).not.toBe(initial.pty.cols);
     const rotated = await expectPtyMatchesScreen(page, agent, 'rotated');
+    expect(sentSize(mark), 'rotation sends only the settled size').toEqual([`${rotated.pty.rows}x${rotated.pty.cols}`]);
     await assertNoOverflow(page);
     await screenshot(page, 'terminal-geometry-rotated', { scopeToProject: true });
 
+    mark = agent.resizes.length;
     await page.setViewportSize(viewport);
     await expect.poll(() => agent.latest().cols).toBe(initial.pty.cols);
-    await expectPtyMatchesScreen(page, agent, 'rotated back');
+    const back = await expectPtyMatchesScreen(page, agent, 'rotated back');
+    expect(sentSize(mark), 'rotating back sends only the settled size').toEqual([`${back.pty.rows}x${back.pty.cols}`]);
     expect(rotated.pty.cols).not.toBe(initial.pty.cols);
 
     // Panel resize: the terminal pane narrows with no window resize event, so only the
@@ -429,6 +436,9 @@ test.describe('Terminal geometry (xterm 6)', () => {
     // The size check ran in tab 1's own PTY, not tab 2's.
     expect(agent.lastCommandSession?.serverId).toBe(agent.first().serverId);
     expect(reactivated.pty.cols).toBe(agent.first().cols);
+    // A fit while display:none measures the specified 100%-as-100px box, which sent 5 rows x 10
+    // cols to the hidden tab's PTY. No real pane here is 5 rows tall.
+    expect(agent.resizes.filter((r) => r.rows <= 5), 'no hidden-measurement resize').toEqual([]);
     await assertNoOverflow(page);
     await screenshot(page, 'terminal-geometry-reactivated-tab', { scopeToProject: true });
   });

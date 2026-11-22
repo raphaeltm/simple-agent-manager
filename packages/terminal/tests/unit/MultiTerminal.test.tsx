@@ -162,11 +162,17 @@ Object.defineProperty(globalThis, 'WebSocket', {
 });
 
 // Mock ResizeObserver (not available in jsdom)
+const resizeObserverCallbacks = new Set<() => void>();
 Object.defineProperty(globalThis, 'ResizeObserver', {
   value: class MockResizeObserver {
-    observe() {}
+    constructor(private readonly callback: () => void) {}
+    observe() {
+      resizeObserverCallbacks.add(this.callback);
+    }
     unobserve() {}
-    disconnect() {}
+    disconnect() {
+      resizeObserverCallbacks.delete(this.callback);
+    }
   },
   writable: true,
   configurable: true,
@@ -180,6 +186,7 @@ describe('MultiTerminal', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    resizeObserverCallbacks.clear();
     mockTerminalDimensions.rows = 24;
     mockTerminalDimensions.cols = 80;
     sessionStorage.clear();
@@ -193,6 +200,14 @@ describe('MultiTerminal', () => {
     vi.restoreAllMocks();
   });
 
+  /** Notify every observed terminal container of a size change, then let the debounce run. */
+  const notifyContainerResize = async () => {
+    resizeObserverCallbacks.forEach((callback) => callback());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+  };
+
   /** jsdom has no layout; give every element a real box, as a visible terminal tab has. */
   const layOutElements = () => {
     vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(800);
@@ -204,7 +219,7 @@ describe('MultiTerminal', () => {
       .map(([data]) => JSON.parse(data as string))
       .filter((message) => message.type === 'resize' && message.sessionId === sessionId);
 
-  it('does not fit or resize an inactive (hidden) tab when it attaches', async () => {
+  it('does not fit or resize terminals that are not laid out (hidden tab or hidden view)', async () => {
     const createdAt = new Date().toISOString();
     MockWebSocket.sessionListResponse = [
       { sessionId: 'srv-tab-a', name: 'Tab A', status: 'running', createdAt },
@@ -222,10 +237,12 @@ describe('MultiTerminal', () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 150));
     });
-    // jsdom gives every element a zero box, as a display:none tab has. Only the active tab is
-    // fitted (by the activation effect); the inactive one keeps its size until activated.
-    expect(resizesFor(sendSpy, 'srv-tab-b'), 'active tab fitted').not.toEqual([]);
-    expect(resizesFor(sendSpy, 'srv-tab-a'), 'hidden tab untouched').toEqual([]);
+    // jsdom gives every element a zero box, as display:none does: the inactive tab, and the
+    // active one while the workspace shows a chat tab. Neither may be fitted (a hidden fit
+    // measures 100px and shrinks the PTY to 10x5); the ResizeObserver fits on reveal.
+    await notifyContainerResize();
+    expect(resizesFor(sendSpy, 'srv-tab-b'), 'hidden active tab untouched').toEqual([]);
+    expect(resizesFor(sendSpy, 'srv-tab-a'), 'hidden inactive tab untouched').toEqual([]);
   });
 
   it('registers the xterm 5 Alt+Arrow word motion on each terminal it creates', async () => {
@@ -258,6 +275,7 @@ describe('MultiTerminal', () => {
   });
 
   it('does not resend unchanged dimensions during rerender bursts but sends actual changes', async () => {
+    layOutElements();
     MockWebSocket.sessionListResponse = [
       {
         sessionId: 'srv-resize',
@@ -275,8 +293,9 @@ describe('MultiTerminal', () => {
     sendSpy.mockClear();
     for (let index = 0; index < 70; index += 1) {
       rerender(<MultiTerminal {...defaultProps} className={`layout-${index}`} />);
-      fireEvent.resize(window);
+      resizeObserverCallbacks.forEach((callback) => callback());
     }
+    await notifyContainerResize();
     const resizeMessages = () =>
       sendSpy.mock.calls
         .map(([data]) => JSON.parse(data as string))
@@ -284,7 +303,7 @@ describe('MultiTerminal', () => {
     expect(resizeMessages()).toHaveLength(0);
     mockTerminalDimensions.rows = 32;
     mockTerminalDimensions.cols = 100;
-    fireEvent.resize(window);
+    await notifyContainerResize();
     expect(resizeMessages()).toEqual([
       { type: 'resize', sessionId: 'srv-resize', data: { rows: 32, cols: 100 } },
     ]);
