@@ -73,6 +73,14 @@ services:
       # Outbound fetch timeout. celld's default (120 s) cuts Worker-proxied streams mid-body.
       # Worker-proxied node responses (file transfers, port previews) are cut at this cap.
       CELLD_FETCH_TIMEOUT_S: ${CELLD_FETCH_TIMEOUT_S:-3600}
+      # Per-isolate V8 heap limit (celld default 128). One cell isolate holds the cron, KV, D1 and
+      # Durable Objects, and SAM's bundle alone keeps it near 100 MB at idle. celld serves a
+      # condemned isolate again only under 75% of this limit, so at 128 one spike stuck it for good
+      # (idea 01M7W6ZTZETXE75N8NRKR3R0CF). A ceiling, not a reservation.
+      CELLD_V8_HEAP_LIMIT_MB: ${CELLD_V8_HEAP_LIMIT_MB:-384}
+      # start.sh restarts celld after this many consecutive cron ticks report the heap refusal
+      # (scheduled/isolate-heap-limit.ts). 0 disables the restart.
+      SAM_CELLD_HEAP_RESTART_TICKS: ${SAM_CELLD_HEAP_RESTART_TICKS:-2}
       RUST_LOG: ${CELLD_RUST_LOG:-info}
     volumes:
       # A cache on one node: the bucket is the durable copy.

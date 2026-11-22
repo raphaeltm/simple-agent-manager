@@ -209,14 +209,15 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
       );
       return { state, attestation, env, fence, output: () => fenceOutput };
     }
-    function startCelld(attestation: string) {
+    function startCelld(attestation: string, body?: string) {
       const pidDir = mkdtempSync(join(dir, 'pid-'));
       chmodSync(pidDir, 0o777);
       const pidFile = join(pidDir, 'pid');
       const fake = join(pidDir, 'fake-celld.sh');
       writeFileSync(
         fake,
-        '#!/bin/bash\necho $$ > "$1"\nprintf \'native stdout %s\\n\' "$GCE_METADATA_PROXY_SECRET"\nprintf \'native stderr %s\\n\' "$GCE_METADATA_PROXY_SECRET" >&2\nexec sleep 300\n',
+        body ??
+          '#!/bin/bash\necho $$ > "$1"\nprintf \'native stdout %s\\n\' "$GCE_METADATA_PROXY_SECRET"\nprintf \'native stderr %s\\n\' "$GCE_METADATA_PROXY_SECRET" >&2\nexec sleep 300\n',
         { mode: 0o755 }
       );
       const child = lab.spawn(
@@ -305,6 +306,40 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
       normal.child.kill('SIGTERM');
       stopFence();
       console.log(`[fence-netns] flush-to-stop ${elapsed}ms`);
+    });
+
+    /** celld's console line for SAM's heap event (scheduled/isolate-heap-limit.ts). */
+    function heapLine(ticks: number): string {
+      return `2026-11-22T00:00:00.000000Z  INFO cell_console: ERROR {"timestamp":"2026-11-22T00:00:00.000Z","level":"error","event":"cron.isolate_heap_limit","consecutiveTicks":${ticks},"sweepCount":2,"sweeps":["gcp_price_table"]}`;
+    }
+    /** A fake celld that prints `lines`, records a graceful stop, and otherwise stays up. */
+    function heapFake(lines: string[]): string {
+      const printed = lines.map((line) => `printf '%s\\n' '${line}'`).join('\n');
+      // Short sleeps: bash runs a trap only after the foreground command returns.
+      return `#!/bin/bash\necho $$ > "$1"\ntrap 'echo term > "$1.term"; exit 0' TERM\n${printed}\nwhile true; do sleep 0.1; done\n`;
+    }
+
+    it('restarts celld gracefully once the cron reports the heap refusal on enough consecutive ticks', async () => {
+      const pair = await startPair();
+      // Below the threshold, then a JSON value that only quotes the event: neither may restart.
+      const spoof = `2026-11-22T00:00:00Z  INFO cell_console: {"event":"x","note":"\\"event\\":\\"cron.isolate_heap_limit\\",\\"consecutiveTicks\\":9}"}`;
+      const below = startCelld(pair.attestation, heapFake([heapLine(1), spoof]));
+      await waitFor(() => existsSync(below.pidFile));
+      await waitFor(() => below.output().includes('"consecutiveTicks":1'));
+      await new Promise((done) => setTimeout(done, 1500));
+      expect(existsSync(`${below.pidFile}.term`)).toBe(false);
+      expect(below.child.exitCode).toBeNull();
+      below.child.kill('SIGTERM');
+      await below.exited;
+
+      const run = startCelld(pair.attestation, heapFake([heapLine(1), heapLine(2)]));
+      await waitFor(() => existsSync(run.pidFile));
+      expect(await run.exited).toBe(75);
+      // SIGTERM, not SIGKILL: the fence is intact, so celld drains.
+      expect(readFileSync(`${run.pidFile}.term`, 'utf8').trim()).toBe('term');
+      expect(run.output()).toContain('"event":"celld.heap_limit_restart"');
+      expect(run.output()).not.toContain('egress_fence.celld_killed');
+      stopFence();
     });
 
     it('keeps serving past the two-second healthy interval, then stops when attestations expire with rules intact', async () => {

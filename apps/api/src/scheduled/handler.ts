@@ -32,6 +32,7 @@ import { runDeploymentNodeCleanup } from './deployment-node-cleanup';
 import { runDeploymentPublishJobSweep } from './deployment-publish-jobs';
 import { notifyFailedSweeps } from './failed-sweep-notifications';
 import { runIncidentTriggerSweep } from './incident-triggers';
+import { reportIsolateHeapLimitFailures } from './isolate-heap-limit';
 import { runNodeCleanupSweep } from './node-cleanup';
 import { runObservabilityPurge } from './observability-purge';
 import {
@@ -251,6 +252,8 @@ export async function scheduled(
   );
 
   const failedSweeps = sweeps.failedSweeps();
+  // Uses no KV: a stuck isolate's KV reads fail too (scheduled/isolate-heap-limit.ts).
+  const heapLimit = await reportIsolateHeapLimitFailures(env, sweeps.failures());
   const failureNotifications = await notifyFailedSweeps(env, failedSweeps).catch((err) => {
     log.error('cron.failed_sweep_notifications_failed', {
       error: err instanceof Error ? err.message : String(err),
@@ -262,6 +265,7 @@ export async function scheduled(
     type: 'sweep',
     failedSweeps,
     failedSweepCount: failedSweeps.length,
+    isolateHeapLimitTicks: heapLimit.consecutiveTicks,
     failedSweepNotifications: failureNotifications.notificationsSent,
     failedSweepNamesNotified: failureNotifications.notifiedSweeps,
     diagnosisRunsRestarted: diagnosisRecovery?.restarted,
