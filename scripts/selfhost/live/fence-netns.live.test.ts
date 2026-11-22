@@ -24,10 +24,10 @@ import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
+  countIsolateHeapLimitTick,
   ISOLATE_HEAP_LIMIT_MARKER,
-  reportIsolateHeapLimitFailures,
   resetIsolateHeapLimitStateForTest,
-} from '../../../apps/api/src/scheduled/isolate-heap-limit';
+} from '../../../apps/api/src/scheduled/isolate-heap-limit-core';
 import {
   buildFencePlan,
   FORBIDDEN_IPV4,
@@ -321,10 +321,10 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
     const CELLD_CONSOLE_ERROR_PREFIX = '2026-11-22T18:05:00.796266Z  INFO cell_console: ERROR ';
     /**
      * The lines the real detector logs on `count` consecutive refused ticks, as celld prints them.
-     * Produced by `reportIsolateHeapLimitFailures` and the real logger, not typed here, so a
+     * Produced by `countIsolateHeapLimitTick` and the real logger, not typed here, so a
      * change to either that breaks start.sh's matcher fails this test.
      */
-    async function realHeapLines(count: number): Promise<string[]> {
+    function realHeapLines(count: number): string[] {
       resetIsolateHeapLimitStateForTest();
       const lines: string[] = [];
       const spy = vi.spyOn(console, 'error').mockImplementation((line: unknown) => {
@@ -332,7 +332,7 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
       });
       try {
         for (let tick = 0; tick < count; tick += 1) {
-          await reportIsolateHeapLimitFailures({ OBSERVABILITY_DATABASE: undefined } as never, [
+          countIsolateHeapLimitTick([
             {
               sweep: 'gcp_price_table',
               error: `the isolate is ${ISOLATE_HEAP_LIMIT_MARKER}, so it stopped materializing a result set (see CELLD_V8_HEAP_LIMIT_MB)`,
@@ -369,7 +369,7 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
 
     it('restarts celld gracefully once the cron reports the heap refusal on enough consecutive ticks', async () => {
       const pair = await startPair();
-      const [first, second] = await realHeapLines(2);
+      const [first, second] = realHeapLines(2);
       // Below the threshold, then a JSON value that only quotes the event: neither may restart.
       const spoof = `${CELLD_CONSOLE_ERROR_PREFIX}{"event":"x","note":"\\"event\\":\\"cron.isolate_heap_limit\\",\\"consecutiveTicks\\":9}"}`;
       await expectStillServing(

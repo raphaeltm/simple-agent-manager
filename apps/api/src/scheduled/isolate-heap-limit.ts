@@ -9,11 +9,9 @@
  * KV read from the cron failed for 33 hours (idea 01M7W6ZTZETXE75N8NRKR3R0CF). Failed-sweep
  * notifications read KV too, so nothing told anyone.
  *
- * This module therefore uses no KV. Each operational tick it counts sweeps that failed with
- * celld's refusal, keeps a count of consecutive ticks with such a failure, and records every
- * affected tick in log + platform_errors (D1, which still answers). The count lives in module
- * scope on purpose: it is the state of the isolate that runs the cron, which is exactly what is
- * being measured, and it resets on the first clean tick (`.claude/rules/61`).
+ * This module therefore uses no KV. Each operational tick `isolate-heap-limit-core.ts` counts
+ * sweeps that failed with celld's refusal and the consecutive ticks with such a failure, and logs
+ * the line start.sh reads; this file adds the platform_errors record (D1, which still answers).
  *
  * Recovery is the box's: `deploy/selfhost/celld/start.sh` reads celld's output and restarts celld
  * once `consecutiveTicks` reaches SAM_CELLD_HEAP_RESTART_TICKS. On Cloudflare the refusal text
@@ -22,22 +20,15 @@
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { persistError } from '../services/observability';
+import { countIsolateHeapLimitTick, type IsolateHeapLimitReport } from './isolate-heap-limit-core';
 import type { SweepFailure } from './sweep-isolation';
 
-/** celld's refusal (js/harness.js `toArray`): the condition itself, not a proxy for it. */
-export const ISOLATE_HEAP_LIMIT_MARKER = 'over its V8 heap limit';
-
-/** The event start.sh restarts celld on. Changing it breaks the box's recovery. */
-export const ISOLATE_HEAP_LIMIT_EVENT = 'cron.isolate_heap_limit';
-
-let consecutiveTicks = 0;
-
-export interface IsolateHeapLimitReport {
-  /** Sweeps that failed this tick with the heap refusal. */
-  sweeps: string[];
-  /** Consecutive operational ticks with at least one such failure, this one included. */
-  consecutiveTicks: number;
-}
+export {
+  ISOLATE_HEAP_LIMIT_EVENT,
+  ISOLATE_HEAP_LIMIT_MARKER,
+  type IsolateHeapLimitReport,
+  resetIsolateHeapLimitStateForTest,
+} from './isolate-heap-limit-core';
 
 type HeapLimitEnv = Pick<
   Env,
@@ -52,16 +43,9 @@ export async function reportIsolateHeapLimitFailures(
   env: HeapLimitEnv,
   failures: readonly SweepFailure[]
 ): Promise<IsolateHeapLimitReport> {
-  const sweeps = failures
-    .filter((failure) => failure.error.includes(ISOLATE_HEAP_LIMIT_MARKER))
-    .map((failure) => failure.sweep);
-  if (sweeps.length === 0) {
-    consecutiveTicks = 0;
-    return { sweeps, consecutiveTicks };
-  }
-  consecutiveTicks += 1;
-  // One line, flat fields: start.sh matches the event name and reads consecutiveTicks from it.
-  log.error(ISOLATE_HEAP_LIMIT_EVENT, { consecutiveTicks, sweepCount: sweeps.length, sweeps });
+  const report = countIsolateHeapLimitTick(failures);
+  if (report.sweeps.length === 0) return report;
+  const { sweeps, consecutiveTicks } = report;
   try {
     await persistError(
       env.OBSERVABILITY_DATABASE,
@@ -81,10 +65,5 @@ export async function reportIsolateHeapLimitFailures(
       error: err instanceof Error ? err.message : String(err),
     });
   }
-  return { sweeps, consecutiveTicks };
-}
-
-/** Test seam: a fresh isolate starts at zero. */
-export function resetIsolateHeapLimitStateForTest(): void {
-  consecutiveTicks = 0;
+  return report;
 }

@@ -28,7 +28,7 @@
 # 3. Heap restart: celld cannot recycle a cell isolate stuck over its V8 heap limit, and every KV
 #    and SQL read in it fails until the process restarts. SAM's cron logs
 #    `"event":"cron.isolate_heap_limit"` with `consecutiveTicks` when its sweeps hit that refusal
-#    (apps/api/src/scheduled/isolate-heap-limit.ts). Once consecutiveTicks reaches
+#    (apps/api/src/scheduled/isolate-heap-limit-core.ts). Once consecutiveTicks reaches
 #    SAM_CELLD_HEAP_RESTART_TICKS (0 disables), stop celld gracefully (SIGTERM: the fence is intact,
 #    so the drain is safe) and exit 75; Docker restarts the container. There is no health check to
 #    lean on: Docker does not restart an unhealthy container.
