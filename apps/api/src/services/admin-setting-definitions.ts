@@ -13,6 +13,7 @@ import { type GcpCatalogSettingName } from './admin-settings-gcp-catalog-definit
 import { type InfomaniakSettingName } from './admin-settings-infomaniak-definitions';
 import { type InstructionBudgetSettingName } from './admin-settings-instructions-definitions';
 import type { LibraryMultipartSettingName } from './admin-settings-library-definitions';
+import type { AppRouteDnsSettingName } from './admin-settings-app-route-dns-definitions';
 import type { NodeTunnelSettingName } from './admin-settings-node-tunnel-definitions';
 import type { OrchestratorSettingName } from './admin-settings-orchestrator-definitions';
 import { type OutboundSettingName } from './admin-settings-outbound-definitions';
@@ -70,6 +71,7 @@ export type AdminSettingName =
   | AgentEmailSettingName
   | FleetOpsSettingName
   | NodeTunnelSettingName
+  | AppRouteDnsSettingName
   | OrchestratorSettingName
   | GcpCatalogSettingName
   | InfomaniakSettingName

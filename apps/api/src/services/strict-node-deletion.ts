@@ -8,6 +8,7 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { releaseNodeAppRouteDnsRecords } from './app-route-dns-reconciliation';
 import { recoverLegacyDeploymentBinding } from './deployment-legacy-binding';
 import { captureNodeLogsBeforeTeardown } from './node-log-capture';
 import { isNeverRequestedVmPlaceholder } from './node-never-requested-placeholder';
@@ -297,6 +298,7 @@ export async function deleteNodeResourcesStrict(
       throw new Error(`Providerless VM termination proof lacks managed placement: node=${nodeId}`);
     }
     await requireSameNodeIncarnation(db, node, 'existing termination proof use');
+    await releaseNodeAppRouteDnsRecords(env, node, options.providerRequestContext?.signal);
     if (options.cleanupDns !== false) {
       await deleteStrictNodeDnsRecord(
         node,
@@ -321,6 +323,8 @@ export async function deleteNodeResourcesStrict(
     await beforeDestroy?.();
     await destroyVmAgentContainer(env, node.id);
     const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
+    // No-op today (only VM deployment nodes serve app routes); kept so every proof branch runs it.
+    await releaseNodeAppRouteDnsRecords(env, node, options.providerRequestContext?.signal);
     if (options.cleanupDns !== false) {
       await deleteStrictNodeDnsRecord(
         node,
@@ -388,6 +392,10 @@ export async function deleteNodeResourcesStrict(
   // The proof makes this incarnation non-live, which releases its Cloudflare tunnel (if it
   // had one). Never throws: the tunnel journal keeps the identity for the cron sweep.
   await releaseTerminatedNodeIngress(env, node);
+  // The provider may now reassign this IP, so no app-route record may keep pointing at it.
+  // Throws on failure: the proof is written, so the retry takes the existing-proof branch
+  // above and runs this again before any caller retires the node (and clears its IP).
+  await releaseNodeAppRouteDnsRecords(env, node, options.providerRequestContext?.signal);
   if (options.cleanupDns !== false) {
     await deleteStrictNodeDnsRecord(
       node,

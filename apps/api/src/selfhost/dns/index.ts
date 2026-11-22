@@ -17,6 +17,7 @@ import {
   deleteBoxRecordsByName,
   findBoxARecordsByName,
   insertBoxARecordIfAbsent,
+  listBoxARecords,
   updateBoxRecordContent,
   upsertBoxARecord,
 } from './records';
@@ -41,6 +42,7 @@ export const boxDnsBackend: BoxDnsBackend = {
   deleteRecord: (id, env) => deleteBoxRecord(id, env),
   findARecordsByName: (name, env) => findBoxARecordsByName(name, env),
   deleteRecordsByName: (name, env) => deleteBoxRecordsByName(name, env),
+  listARecords: (filter, env) => listBoxARecords(filter, env),
 };
 
 /** Registers the box DNS backend. Idempotent; call before any request. */
