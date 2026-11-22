@@ -46,6 +46,53 @@ function rows(): Array<{ id: string; content: string }> {
   }>;
 }
 
+/** Another tunnel node with one environment whose route record points at the box. */
+async function seedTunnelEnvironment(o: {
+  nodeId: string;
+  nodeStatus: string;
+  ipAddress: string | null;
+  environmentId: string;
+  environmentStatus: string;
+  recordId: string;
+}) {
+  await drizzle(env.DATABASE)
+    .insert(schema.nodes)
+    .values({
+      id: o.nodeId,
+      userId: 'user',
+      name: o.nodeId,
+      status: o.nodeStatus,
+      runtime: 'vm',
+      nodeClass: 'managed',
+      nodeRole: 'deployment',
+      transport: 'reverse-tunnel',
+      ipAddress: o.ipAddress,
+    } as schema.NewNode);
+  await drizzle(env.DATABASE)
+    .insert(schema.deploymentEnvironments)
+    .values({
+      id: o.environmentId,
+      projectId: 'project',
+      name: o.environmentId,
+      nodeId: o.nodeId,
+      status: o.environmentStatus,
+    } as schema.NewDeploymentEnvironmentRow);
+  sqlite
+    .prepare(
+      "INSERT INTO selfhost_dns_records (id, name, type, content, created_at, updated_at) VALUES (?, ?, 'A', ?, 'now', 'now')"
+    )
+    .run(o.recordId, host(o.environmentId), BOX_IP);
+}
+
+function releaseTunnelNode(e: Env, ipAddress: string | null = NODE_IP) {
+  return releaseNodeAppRouteDnsRecords(e, {
+    id: 'tunnel-node',
+    nodeRole: 'deployment',
+    ipAddress,
+    transport: 'reverse-tunnel',
+  });
+}
+
 beforeEach(async () => {
   sqlite = new Database(':memory:');
   createAllSchemaTables(sqlite, schema);
@@ -176,42 +223,17 @@ describe('dangling app-route sweep on reverse-tunnel deployment nodes', () => {
   });
 
   it("release removes only its own environments' box-addressed records (owner + attack)", async () => {
-    const OTHER_ENV = '01KVJDV913S8W7KK32HTZTK0HA';
-    await drizzle(env.DATABASE)
-      .insert(schema.nodes)
-      .values({
-        id: 'other-tunnel-node',
-        userId: 'user',
-        name: 'other-tunnel-node',
-        status: 'running',
-        runtime: 'vm',
-        nodeClass: 'managed',
-        nodeRole: 'deployment',
-        transport: 'reverse-tunnel',
-        ipAddress: '10.8.0.6',
-      } as schema.NewNode);
-    await drizzle(env.DATABASE)
-      .insert(schema.deploymentEnvironments)
-      .values({
-        id: OTHER_ENV,
-        projectId: 'project',
-        name: OTHER_ENV,
-        nodeId: 'other-tunnel-node',
-        status: 'active',
-      } as schema.NewDeploymentEnvironmentRow);
-    sqlite
-      .prepare(
-        "INSERT INTO selfhost_dns_records (id, name, type, content, created_at, updated_at) VALUES ('other-live', ?, 'A', ?, 'now', 'now')"
-      )
-      .run(host(OTHER_ENV), BOX_IP);
+    await seedTunnelEnvironment({
+      nodeId: 'other-tunnel-node',
+      nodeStatus: 'running',
+      ipAddress: '10.8.0.6',
+      environmentId: '01KVJDV913S8W7KK32HTZTK0HA',
+      environmentStatus: 'active',
+      recordId: 'other-live',
+    });
     sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = 'tunnel-node'").run();
 
-    const counts = await releaseNodeAppRouteDnsRecords(env, {
-      id: 'tunnel-node',
-      nodeRole: 'deployment',
-      ipAddress: NODE_IP,
-      transport: 'reverse-tunnel',
-    });
+    const counts = await releaseTunnelNode(env);
 
     // Owner: the released node's environment's records go, at the box address and at its own IP.
     // Attack: content equal to the box address is not ownership. Another live node's record and
@@ -222,42 +244,17 @@ describe('dangling app-route sweep on reverse-tunnel deployment nodes', () => {
   });
 
   it('release leaves a box-addressed record of an environment on another released node', async () => {
-    const OTHER_ENV = '01KVJDV913S8W7KK32HTZTK0HB';
-    await drizzle(env.DATABASE)
-      .insert(schema.nodes)
-      .values({
-        id: 'other-released-node',
-        userId: 'user',
-        name: 'other-released-node',
-        status: 'destroying',
-        runtime: 'vm',
-        nodeClass: 'managed',
-        nodeRole: 'deployment',
-        transport: 'reverse-tunnel',
-        ipAddress: '10.8.0.7',
-      } as schema.NewNode);
-    await drizzle(env.DATABASE)
-      .insert(schema.deploymentEnvironments)
-      .values({
-        id: OTHER_ENV,
-        projectId: 'project',
-        name: OTHER_ENV,
-        nodeId: 'other-released-node',
-        status: 'stopping',
-      } as schema.NewDeploymentEnvironmentRow);
-    sqlite
-      .prepare(
-        "INSERT INTO selfhost_dns_records (id, name, type, content, created_at, updated_at) VALUES ('other-released', ?, 'A', ?, 'now', 'now')"
-      )
-      .run(host(OTHER_ENV), BOX_IP);
+    await seedTunnelEnvironment({
+      nodeId: 'other-released-node',
+      nodeStatus: 'destroying',
+      ipAddress: '10.8.0.7',
+      environmentId: '01KVJDV913S8W7KK32HTZTK0HB',
+      environmentStatus: 'stopping',
+      recordId: 'other-released',
+    });
     sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = 'tunnel-node'").run();
 
-    await releaseNodeAppRouteDnsRecords(env, {
-      id: 'tunnel-node',
-      nodeRole: 'deployment',
-      ipAddress: NODE_IP,
-      transport: 'reverse-tunnel',
-    });
+    await releaseTunnelNode(env);
 
     // Dangling by the predicate, but that node's own release owns it, not this one.
     expect(rows().map((r) => r.id)).toContain('other-released');
@@ -271,12 +268,7 @@ describe('dangling app-route sweep on reverse-tunnel deployment nodes', () => {
       "CREATE TRIGGER keep_box BEFORE DELETE ON selfhost_dns_records WHEN OLD.id = 'live-at-box' BEGIN SELECT RAISE(ABORT, 'stuck'); END"
     );
 
-    const counts = await releaseNodeAppRouteDnsRecords(env, {
-      id: 'tunnel-node',
-      nodeRole: 'deployment',
-      ipAddress: NODE_IP,
-      transport: 'reverse-tunnel',
-    });
+    const counts = await releaseTunnelNode(env);
 
     // The record at the node's own IP is gone; the stuck box record is left to the sweep.
     expect(rows().map((r) => r.id)).toEqual(['live-at-box', 'stopped']);
@@ -289,14 +281,18 @@ describe('dangling app-route sweep on reverse-tunnel deployment nodes', () => {
       "CREATE TRIGGER keep_own BEFORE DELETE ON selfhost_dns_records WHEN OLD.id = 'live-at-node' BEGIN SELECT RAISE(ABORT, 'stuck'); END"
     );
 
-    await expect(
-      releaseNodeAppRouteDnsRecords(env, {
-        id: 'tunnel-node',
-        nodeRole: 'deployment',
-        ipAddress: NODE_IP,
-        transport: 'reverse-tunnel',
-      })
-    ).rejects.toThrow(/Could not delete/);
+    await expect(releaseTunnelNode(env)).rejects.toThrow(/Could not delete/);
+  });
+
+  it('release cleans the box-addressed records of a tunnel node with no IP of its own', async () => {
+    sqlite
+      .prepare("UPDATE nodes SET status = 'destroying', ip_address = NULL WHERE id = 'tunnel-node'")
+      .run();
+
+    await releaseTunnelNode(env, null);
+
+    // Its environment's record at the box goes; the unlinked environment's is the sweep's.
+    expect(rows().map((r) => r.id)).toEqual(['live-at-node', 'stopped']);
   });
 
   it('does not hold a teardown when the tunnel address cannot be resolved', async () => {

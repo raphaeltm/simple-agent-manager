@@ -78,6 +78,38 @@ async function settingValue(
 }
 
 /**
+ * The addresses a releasing node's records can point at: its own IP, plus the address its
+ * records point at when that differs (a reverse-tunnel node's records point at the box, written
+ * even when the node has no IP of its own). Null when there is nothing to clean: wildcard-covered
+ * routes never had per-route records (`upsertReleaseRouteRecords`), and a node with neither an
+ * IP nor a transport address never had any. An address that cannot be resolved (a misconfigured
+ * reverse-tunnel install) is not a reason to keep the VM: cleanup proceeds by IP.
+ */
+function releaseAddresses(
+  env: Env,
+  node: { id: string; ipAddress: string | null; transport?: string | null }
+): Set<string> | null {
+  const addresses = new Set<string>();
+  if (node.ipAddress) addresses.add(node.ipAddress);
+  try {
+    const resolved = appRouteRecordAddress(
+      { transport: node.transport ?? null, ipAddress: node.ipAddress },
+      env
+    );
+    if (resolved.covered) return null;
+    if (resolved.address) addresses.add(resolved.address);
+  } catch (error) {
+    log.error('dns.app_route_release_address_unresolved', {
+      nodeId: node.id,
+      transport: node.transport ?? null,
+      error: error instanceof Error ? error.message : String(error),
+      action: 'cleanup_by_ip',
+    });
+  }
+  return addresses.size > 0 ? addresses : null;
+}
+
+/**
  * Delete every app-route record still pointing at a node SAM is releasing. Called from every
  * branch of `deleteNodeResourcesStrict` (on a VM, before and after the provider deletion), so
  * every release path runs it.
@@ -98,32 +130,11 @@ export async function releaseNodeAppRouteDnsRecords(
 ): Promise<AppRouteCleanupCounts | null> {
   // Only deployment nodes serve app routes; any other node's IP is left to the sweep, so a
   // DNS outage cannot block workspace teardown.
-  if (node.nodeRole !== 'deployment' || !node.ipAddress) return null;
+  if (node.nodeRole !== 'deployment') return null;
   // No BASE_DOMAIN: no app-route name can exist (every one is built under `.apps.<BASE_DOMAIN>`).
   if (!appRouteNameSuffix(env.BASE_DOMAIN)) return null;
-  // Wildcard-covered routes never had per-route records (`upsertReleaseRouteRecords`). An
-  // address that cannot be resolved (a misconfigured reverse-tunnel install) is not a reason to
-  // keep the VM: such records point at the box, not at this IP. Clean up by IP anyway.
-  let covered = false;
-  // The node's own IP, plus the address its records point at when that differs (a reverse-tunnel
-  // node's records point at the box): stop must remove those too, not leave them to the sweep.
-  const addresses = new Set<string>([node.ipAddress]);
-  try {
-    const resolved = appRouteRecordAddress(
-      { transport: node.transport ?? null, ipAddress: node.ipAddress },
-      env
-    );
-    covered = resolved.covered;
-    if (!resolved.covered && resolved.address) addresses.add(resolved.address);
-  } catch (error) {
-    log.error('dns.app_route_release_address_unresolved', {
-      nodeId: node.id,
-      transport: node.transport ?? null,
-      error: error instanceof Error ? error.message : String(error),
-      action: 'cleanup_by_ip',
-    });
-  }
-  if (covered) return null;
+  const addresses = releaseAddresses(env, node);
+  if (!addresses) return null;
   // Without a DNS API the release fetch cannot write a route record either, so there is
   // nothing this teardown could protect by refusing; refusing would only keep the VM billed.
   // Logged loudly, and the sweep reports `no_dns_api` on every run.

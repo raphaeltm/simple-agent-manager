@@ -369,7 +369,7 @@ describe('the release fetch re-checks its node right before writing route record
     await expect(upsertReleaseRouteRecords(routes(), node, env, 'node')).rejects.toMatchObject({
       statusCode: 410,
     });
-    expect(zone.requests.length).toBe(before);
+    expect(zone.requests).toHaveLength(before);
   });
 
   it('cleans up after itself when the teardown ran while its write was in flight', async () => {
