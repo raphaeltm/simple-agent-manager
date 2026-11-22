@@ -31,6 +31,29 @@ func TestGenerateRootCaddyfile_LoopbackIngressDisablesACMEAndBindsLoopback(t *te
 	}
 }
 
+// Header trust is loopback only. Node Caddy may believe X-Forwarded-For/-Proto solely from the
+// vm-agent's app-ingress route on this host. A docker bridge, the node's private subnet or any
+// wider range would let an app container forge the client address or scheme for other routes.
+func TestGenerateRootCaddyfile_LoopbackIngressTrustsOnlyLoopbackProxies(t *testing.T) {
+	root := GenerateRootCaddyfile(CaddyfileOptions{LoopbackHTTPPort: 8446})
+	var trustLines []string
+	for _, line := range strings.Split(root, "\n") {
+		if strings.Contains(line, "trusted_proxies") || strings.Contains(line, "client_ip_headers") {
+			trustLines = append(trustLines, strings.TrimSpace(line))
+		}
+	}
+	if len(trustLines) != 1 || trustLines[0] != "trusted_proxies static 127.0.0.1/32 ::1/128" {
+		t.Fatalf("node Caddy must trust exactly loopback (127.0.0.1/32, ::1/128), got %q:\n%s", trustLines, root)
+	}
+	if !strings.Contains(root, "\tdefault_bind 127.0.0.1\n") {
+		t.Fatalf("loopback ingress must bind loopback only, so no non-loopback peer can connect:\n%s", root)
+	}
+	public := GenerateRootCaddyfile(CaddyfileOptions{ACMEEmail: "ops@example.test"})
+	if strings.Contains(public, "trusted_proxies") {
+		t.Fatalf("public (hosted) ingress must not trust any proxy:\n%s", public)
+	}
+}
+
 // Control: public ingress (every hosted node) keeps its ACME options and automatic HTTPS.
 func TestGenerateRootCaddyfile_PublicIngressUnchanged(t *testing.T) {
 	root := GenerateRootCaddyfile(CaddyfileOptions{ACMEEmail: "ops@example.test"})
