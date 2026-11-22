@@ -59,7 +59,7 @@ The self-host entry wraps the shared Worker with `withReverseTunnel(worker, rend
 the gateway endpoints under `/api/self-host/gateway/` before the shared app sees the request,
 and runs the lease backstop after the shared handler on the five-minute sweep cron. The
 backstop logs `cron.reverse_tunnel_lease_sweep` with its release count, or why it skipped, and
-it honours the operational cron switch. The gateway has three endpoints:
+it honours the operational cron switch. Its node-transport endpoints:
 
 - `POST /api/self-host/gateway/frps-plugin`: the frps server plugin. frps authenticates with
   HTTP basic auth, user `frps`, password `REVERSE_TUNNEL_GATEWAY_SECRET`. A Login allow is
