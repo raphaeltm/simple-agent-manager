@@ -14,7 +14,8 @@
 #   (it has NET_ADMIN; this uid has nothing) and writes `ok <epoch>` to
 #   SAM_EGRESS_FENCE_ATTESTATION after every match. It must be newer than
 #   SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS: a partial edit the probes cannot see, or a
-#   fence service that has stopped watching, stops celld too.
+#   fence service that has stopped watching, stops celld too. The fence's `lost` latch beside
+#   it is checked after the attestation is read, so a stale ok cannot pass.
 #
 # 1. Before starting: wait up to SAM_EGRESS_FENCE_WAIT_SECONDS for both, else exit 1. After a
 #    reboot Docker restarts containers without compose ordering; this is what keeps celld from
@@ -50,7 +51,6 @@ send_error() {
 # Sets $result to why the fence is not in effect, or empty when it is.
 fence_problem() {
   result=""
-  [[ ! -f "$(dirname "$attestation")/lost" ]] || { result="fence loss latched"; return; }
   local entry name host port out now stamp state
   for entry in $probes; do
     IFS=, read -r name host port <<<"$entry"
@@ -64,6 +64,9 @@ fence_problem() {
     esac
   done
   read -r state stamp <"$attestation" 2>/dev/null || { result="no attestation at $attestation"; return; }
+  # After the read, not before: the latch is never cleared while the fence runs, so its absence
+  # now proves the ok just read was not published after a loss.
+  [[ ! -f "$(dirname "$attestation")/lost" ]] || { result="fence loss latched"; return; }
   now="$(date +%s)"
   if [[ "$state" != "ok" ]] || ! [[ "$stamp" =~ ^[0-9]+$ ]] || ((stamp > now || now - stamp > max_age)); then
     result="attestation '${state:-} ${stamp:-}' is not a recent ok (max age ${max_age}s)"
