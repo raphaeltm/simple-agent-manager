@@ -1,3 +1,4 @@
+import { DEFAULT_AI_PROXY_MODEL } from '@simple-agent-manager/shared';
 import type { Context } from 'hono';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -121,6 +122,32 @@ describe('admin AI proxy config routes — GET /config', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { models: Array<{ id: string }> };
     expect(body.models.map((model) => model.id)).not.toContain('gpt-6.1-sol');
+  });
+
+  it('reports the effective default, not an admin default whose model was retired', async () => {
+    const env = bindings();
+    await env.KV.put(
+      'platform:ai-proxy:default-model',
+      JSON.stringify({ defaultModel: '@cf/zai-org/glm-5.2', updatedAt: '2026-10-01T00:00:00Z' })
+    );
+
+    const res = await app().request('/api/admin/ai-proxy/config', {}, env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { defaultModel: string; source: string; updatedAt: unknown };
+    expect(body).toMatchObject({
+      defaultModel: DEFAULT_AI_PROXY_MODEL,
+      source: 'default',
+      updatedAt: null,
+    });
+  });
+
+  it('round-trips an admin default saved through PUT', async () => {
+    const env = bindings();
+    expect((await putDefaultModel(app(), WORKERS_AI_MODEL_ID, env)).status).toBe(200);
+
+    const res = await app().request('/api/admin/ai-proxy/config', {}, env);
+    const body = (await res.json()) as { defaultModel: string; source: string };
+    expect(body).toMatchObject({ defaultModel: WORKERS_AI_MODEL_ID, source: 'admin' });
   });
 });
 

@@ -10,6 +10,10 @@
  * - Claude/Codex explicit SAM provider or OpenCode explicit platform provider
  *   with no user credential → platform proxy
  */
+import {
+  AI_PROXY_DEFAULT_MODEL_KV_KEY,
+  DEFAULT_AI_PROXY_MODEL,
+} from '@simple-agent-manager/shared';
 import type Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -587,6 +591,44 @@ describe('runtime.ts always-proxy', () => {
         },
       }
     `);
+  });
+
+  it.each([
+    [
+      'a retired admin default falls back to the shared default',
+      '@cf/qwen/qwen3-30b-a3b-fp8',
+      DEFAULT_AI_PROXY_MODEL,
+    ],
+    [
+      'a registry admin default is handed to the agent',
+      '@cf/meta/llama-4-scout-17b-16e-instruct',
+      '@cf/meta/llama-4-scout-17b-16e-instruct',
+    ],
+  ])('opencode passthrough: %s', async (_name, storedModel, expectedModel) => {
+    mockKvGet.mockImplementation(async (key: unknown) =>
+      key === AI_PROXY_DEFAULT_MODEL_KV_KEY
+        ? JSON.stringify({ defaultModel: storedModel, updatedAt: '2026-10-01T00:00:00Z' })
+        : null
+    );
+    mockDbLimit.mockImplementation(() => {
+      queryCount++;
+      if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }];
+      return [];
+    });
+    // The generic AI proxy default reaches OpenCode only through passthrough: a user credential
+    // with a base URL and an OpenAI-compatible dialect (OpenCode has no platform-proxy fallback).
+    mockGetDecryptedAgentKey.mockResolvedValueOnce({
+      credential: 'user-openai-compatible-key',
+      credentialKind: 'api-key',
+      credentialSource: 'user',
+      baseUrl: 'https://llm.example.com/v1',
+      providerDialect: 'openai-compatible',
+    });
+
+    const response = await postAgentKey('opencode');
+    expect(response.status).toBe(200);
+    const json = (await response.json()) as { inferenceConfig?: { model?: string } };
+    expect(json.inferenceConfig?.model).toBe(expectedModel);
   });
 
   it('returns passthrough proxy config when user has claude-code credential and proxy enabled', async () => {

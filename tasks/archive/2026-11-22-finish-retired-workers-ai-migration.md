@@ -45,14 +45,24 @@ Idea 01M77CKWZAGYYQF6AZCW1GS07P. Supersedes `tasks/backlog/2026-11-20-staging-de
 - [x] Update `.env.example`, `env.ts` comment, configuration + reporting-issues docs
 - [x] Stored-data check (above) and GitHub Environment override check (above)
 - [x] Staging: real feedback-triage diagnosis with no 410 (diagnosis 01M80NTEBWGKY6BR845VTFR2GQ, DeepSeek, 2 turns). sam-mode request: staging's KV pins Claude Haiku, so the changed default path is checked in production (below) and by the omitted-var proof test
-- [ ] After production deploy: read deployed vars; next hourly triage diagnoses a new signature with no 410 (recorded on PR #2972 and idea 01M77CKWZAGYYQF6AZCW1GS07P after merge)
+- [x] Review fix (Codex P2): an admin KV default whose model is no longer in `PLATFORM_AI_MODELS` is ignored by one reader, `readAdminDefaultAIProxyModel()`, used by the proxy, the agent-key route and the admin GET; route tests through the real proxy prove the retired row falls back and a registry row still wins. Prod KV (Gemma) and staging KV (Haiku) hold live models today, so this protects self-hosted installs that saved Qwen 3 30B or GLM
+- [x] Review fix: `ai-proxy-model-tiers.test.ts` read the default from the retired constant value (Llama 4 Scout); it now reads `DEFAULT_AI_PROXY_MODEL`
+- [ ] After production deploy: next hourly triage diagnoses a signature with no 410, and one sam-mode request succeeds
 
 ## Acceptance criteria
 
 - [x] Staging `POST /api/admin/observability/feedback-triage` produces a diagnosis (no HTTP 410): groupsFound 1, ideasCreated 1, groupsFailed 0
-- [x] A sam-mode AI proxy request using the default model succeeds: production check after deploy (staging KV pins Claude Haiku; no workspace was provisioned for this)
+- [ ] A sam-mode AI proxy request succeeds in production after the deploy (staging KV pins Claude Haiku; no workspace was provisioned for this)
 - [x] Unit: retired IDs cannot return; debug request carries model + `reasoning_effort: low`; override model gets no effort; omitted-var proof covers `AI_PROXY_DEFAULT_MODEL`
 - [ ] Production: no "HTTP 410" `lastFailureReason` on incident rows updated after the deploy
+
+## Post-merge verification ownership
+
+The two unchecked production items are verified after the merge by the finishing task
+01M80YTZ92X6WJYN772D9PTWH9, which reports the result to its parent and records it on PR #2972 and
+on idea 01M77CKWZAGYYQF6AZCW1GS07P. The idea stays open until both are confirmed, so archiving
+this file does not drop the tracking. If production still shows HTTP 410, that task files a new
+backlog task rather than editing this archive.
 
 ## Staging evidence (2026-11-22)
 

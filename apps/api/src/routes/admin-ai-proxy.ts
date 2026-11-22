@@ -29,7 +29,10 @@ import { errors } from '../middleware/error';
 import { jsonValidator } from '../schemas';
 import { resolveBillingMode, resolveUnifiedBillingToken } from '../services/ai-billing';
 import { getPlatformAgentCredential } from '../services/platform-credentials';
-import { resolveEnvDefaultAIProxyModel } from './ai-proxy-model-resolution';
+import {
+  readAdminDefaultAIProxyModel,
+  resolveEnvDefaultAIProxyModel,
+} from './ai-proxy-model-resolution';
 
 // Fields are validated loosely (v.unknown()) so the handler's existing manual
 // checks below — which produce specific error messages — remain in control of
@@ -89,18 +92,17 @@ function isModelAvailable(
  * - Credential status for each provider
  */
 adminAIProxyRoutes.get('/config', async (c) => {
-  const [kvConfig, hasAnthropic, hasOpenAI, billingMode] = await Promise.all([
-    c.env.KV.get(AI_PROXY_DEFAULT_MODEL_KV_KEY),
+  const [adminDefault, hasAnthropic, hasOpenAI, billingMode] = await Promise.all([
+    readAdminDefaultAIProxyModel(c.env),
     hasPlatformCredential(c.env, 'claude-code'),
     hasPlatformCredential(c.env, 'codex'),
     resolveBillingMode(c.env),
   ]);
-  const parsed: AIProxyConfig | null = kvConfig ? JSON.parse(kvConfig) : null;
   const hasUnifiedBilling = !!resolveUnifiedBillingToken(c.env);
 
-  // Effective default: KV override > env var > shared constant
+  // Effective default: KV override (still in the registry) > env var > shared constant
   const envDefault = resolveEnvDefaultAIProxyModel(c.env);
-  const effectiveDefault = parsed?.defaultModel ?? envDefault.model;
+  const effectiveDefault = adminDefault?.model ?? envDefault.model;
 
   const models = PLATFORM_AI_MODELS.filter((m) => m.supportsChatCompletionsToolCalls !== false).map(
     (m) => ({
@@ -111,8 +113,8 @@ adminAIProxyRoutes.get('/config', async (c) => {
 
   return c.json({
     defaultModel: effectiveDefault,
-    source: parsed ? ('admin' as const) : envDefault.source,
-    updatedAt: parsed?.updatedAt ?? null,
+    source: adminDefault ? ('admin' as const) : envDefault.source,
+    updatedAt: adminDefault?.updatedAt ?? null,
     hasAnthropicCredential: hasAnthropic,
     hasOpenAICredential: hasOpenAI,
     hasUnifiedBilling,

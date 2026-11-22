@@ -1,6 +1,4 @@
 import {
-  AI_PROXY_DEFAULT_MODEL_KV_KEY,
-  type AIProxyConfig,
   DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
   DEFAULT_AI_PROXY_OPENAI_MODEL,
   getAgentDefinition,
@@ -26,7 +24,10 @@ import {
   PROXY_ELIGIBLE_AGENTS,
   requiresExplicitSamProvider,
 } from '../../services/sam-ai-proxy-fallback';
-import { resolveEnvDefaultAIProxyModel } from '../ai-proxy-model-resolution';
+import {
+  readAdminDefaultAIProxyModel,
+  resolveEnvDefaultAIProxyModel,
+} from '../ai-proxy-model-resolution';
 import { getDecryptedAgentKey, getDecryptedCredentialRecord } from '../credentials';
 import {
   assertWorkspaceCallbackIdentityCurrent,
@@ -273,13 +274,10 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     } else {
       defaultModel = resolveEnvDefaultAIProxyModel(c.env).model;
       try {
-        const kvConfig = await c.env.KV.get(AI_PROXY_DEFAULT_MODEL_KV_KEY);
-        if (kvConfig) {
-          const parsed: AIProxyConfig = JSON.parse(kvConfig);
-          if (parsed.defaultModel) defaultModel = parsed.defaultModel;
-        }
+        const adminDefault = await readAdminDefaultAIProxyModel(c.env);
+        if (adminDefault) defaultModel = adminDefault.model;
       } catch {
-        /* KV unavailable or corrupt data — use env/default */
+        /* KV unavailable — use env/default */
       }
     }
 
