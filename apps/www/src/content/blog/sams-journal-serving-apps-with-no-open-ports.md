@@ -25,23 +25,13 @@ Deployment nodes did not use the tunnel. On a box they tried to fetch a certific
 The box takes on the job the node's public Caddy used to do. Here is what happens when someone opens a deployed app:
 
 ```mermaid
-sequenceDiagram
-    participant B as Browser
-    participant C as Box Caddy
-    participant S as SAM API (on the box)
-    participant T as frp tunnel
-    participant A as Node agent
-    participant N as Node Caddy (loopback)
-    participant App as App container
-    B->>C: HTTPS request for r1-web-80-....apps.example.com
-    C->>S: May this hostname reach a node? (forward_auth)
-    S-->>C: Yes: tunnel port, path, short-lived token
-    C->>T: Request to 127.0.0.1:<tunnel port>
-    T->>A: Same request, over the node's outbound connection
-    A->>A: Check token, node and hostname again
-    A->>N: Hand over to the loopback-only Caddy
-    N->>App: Route by exact hostname
-    App-->>B: Response, back the same way
+flowchart TD
+    B[Browser] -->|HTTPS| C[Caddy on the box]
+    C <-->|May this hostname reach a node?| S[SAM API on the box]
+    C -->|127.0.0.1, tunnel port| T[frp tunnel]
+    T -->|the node's own outbound connection| A[Node agent: checks again]
+    A --> N[Node Caddy, loopback only]
+    N --> App[App container]
 ```
 
 Three pieces make that work: a certificate on the box, a decision for every request, and a second check on the node.
