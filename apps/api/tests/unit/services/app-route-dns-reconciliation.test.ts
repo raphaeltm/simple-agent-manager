@@ -357,7 +357,7 @@ describe('runAppRouteDnsReconciliation against Cloudflare', () => {
       seed,
       beforeRequest: (method, url) => {
         // The re-read before delete: a concurrent upsertAppRouteDNSRecord has just repointed it.
-        if (method === 'GET' && url.searchParams.get('name') === host(ENV_STOPPED)) {
+        if (method === 'GET' && url.pathname.endsWith('/dangling-stopped')) {
           const record = zone.records.get('dangling-stopped');
           if (record) record.content = '10.0.0.77';
         }
@@ -589,7 +589,7 @@ describe('released-IP judgement edges', () => {
         // While the sweep is deleting the first dangling record, a start links ENV_RELEASED to a
         // new node that the provider gave the same recycled IP; its release fetch re-upserts the
         // record with unchanged content, so only D1 can tell the record is live again.
-        if (method === 'GET' && url.searchParams.get('name') === host(ENV_STOPPED)) {
+        if (method === 'GET' && url.pathname.endsWith('/dangling-stopped')) {
           sqlite
             .prepare(
               "INSERT INTO nodes (id, user_id, name, status, runtime, node_class, node_role, ip_address) VALUES ('reused', 'user', 'reused', 'running', 'vm', 'managed', 'deployment', ?)"
@@ -1082,7 +1082,7 @@ describe('adversarial re-verification round 2', () => {
       beforeRequest: (method, url) => {
         // The guarded delete's re-read of the first record finds it rewritten elsewhere: it is
         // `changed`, and it no longer matches the release's `content` filter.
-        if (method === 'GET' && url.searchParams.get('name') === host(ENV_RELEASED, 1)) {
+        if (method === 'GET' && url.pathname.endsWith('/first')) {
           const first = zone.records.get('first');
           if (first) first.content = '10.0.0.9';
         }
@@ -1099,5 +1099,33 @@ describe('adversarial re-verification round 2', () => {
     // The second record shifted onto page 1 when the first left the filter; it is still reached.
     expect(zone.records.has('second')).toBe(false);
     expect(counts).toMatchObject({ changed: 1, deleted: 1 });
+  });
+});
+
+describe('Codex review round 7', () => {
+  it('finds the observed record by id even when its name has more records than one list page', async () => {
+    const zone = createFakeCloudflareDns({
+      zoneId: ZONE,
+      token: TOKEN,
+      seed: [rec('dangling', host(ENV_MISSING), RELEASED_IP)],
+    });
+    // The exact-name lookup returns only one page, which does not include the observed record.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (url.searchParams.get('name') === host(ENV_MISSING)) {
+          return new Response(JSON.stringify({ success: true, errors: [], result: [] }), {
+            status: 200,
+          });
+        }
+        return zone.fetch(input, init);
+      })
+    );
+
+    const result = await runAppRouteDnsReconciliation(env);
+
+    expect(zone.records.has('dangling')).toBe(false);
+    expect(result).toMatchObject({ deleted: 1, absent: 0 });
   });
 });

@@ -136,6 +136,14 @@ export function createFakeCloudflareDns(options: {
     const id = rest.replace(/^\//, '');
     if (!id || id.includes('/')) return cfError(7003, 'Could not route', 404);
     const existing = records.get(id);
+    if (method === 'GET') {
+      if (!existing) return cfError(81044, 'Record does not exist.', 404);
+      return json({
+        success: true,
+        errors: [],
+        result: { ...existing, proxied: existing.proxied ?? false },
+      });
+    }
     if (method === 'DELETE') {
       if (!existing) return cfError(81044, 'Record does not exist.', 404);
       records.delete(id);

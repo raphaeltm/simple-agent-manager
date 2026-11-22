@@ -193,6 +193,45 @@ export async function listAppRouteDnsRecordsPage(
   return { records: toAppRouteRecords(data.result, env), providerCount: data.result.length };
 }
 
+const recordByIdResponseSchema = v.object({ result: listedRecordSchema });
+
+/**
+ * The current state of one observed record, or null when it no longer exists. Cloudflare is read
+ * by record id: a name can hold more records than one list response returns. The box zone holds
+ * one record per name and type, so its lookup by name is exact.
+ */
+async function readAppRouteDnsRecord(
+  env: Env,
+  record: Pick<AppRouteDnsRecord, 'id' | 'name'>,
+  signal?: AbortSignal
+): Promise<{ type: string; content?: string } | null> {
+  if (boxDnsBackendFor(env)) {
+    return (
+      (await findDNSRecordMatchesByName(record.name, env, signal)).find(
+        (match) => match.id === record.id
+      ) ?? null
+    );
+  }
+  const response = await fetchWithTimeout(
+    `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records/${record.id}`,
+    { headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` } },
+    getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS),
+    signal
+  );
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(
+      await readCloudflareError(response, `Failed to read app-route DNS record: ${response.status}`)
+    );
+  }
+  const data = await readResponseJson(
+    response,
+    recordByIdResponseSchema,
+    'cloudflare.dns.read_app_route_record'
+  );
+  return data.result;
+}
+
 /**
  * Point one observed app-route record at `address`. On Cloudflare by record id: several A records
  * may share the name, and an upsert by name updates the first match, which may be a live sibling.
@@ -229,9 +268,7 @@ export async function deleteObservedAppRouteDnsRecord(
     // Unreachable through the listers above; kept so no caller can delete outside the namespace.
     throw new Error(`Refusing to delete a DNS record outside the app-route namespace`);
   }
-  const current = (await findDNSRecordMatchesByName(record.name, env, signal)).find(
-    (match) => match.id === record.id
-  );
+  const current = await readAppRouteDnsRecord(env, record, signal);
   if (!current) return 'absent';
   if (current.type !== 'A' || current.content !== record.content) return 'changed';
   await deleteDNSRecord(record.id, env, signal);
