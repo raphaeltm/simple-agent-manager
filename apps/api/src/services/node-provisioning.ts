@@ -47,8 +47,8 @@ import {
 export { resolveHetznerBaseImageOverride } from './node-provisioning-image';
 import { prepareNodeTunnelIngress } from './node-provisioning-ingress';
 import { recordRejectedAllocationAbsence } from './node-rejection-proof';
-import { resolveManagedNodeTransport, type TunnelEnv } from './node-tunnel-config';
 import { nodeTransportExtension } from './node-transport-extension';
+import { resolveManagedNodeTransport, type TunnelEnv } from './node-tunnel-config';
 import type { NodeTunnelProvisioningPhase } from './node-tunnel-provisioning';
 import {
   createProviderForUser,
