@@ -28,5 +28,7 @@ Found 2026-11-22 during self-host multi-box step 3 (registry evidence,
 - [ ] `mintProjectRegistryCredential` keeps only the pull callers (`deploy-release-callback.ts`,
       `deployment-release-image-resolver.ts`); decide whether the legacy pull path is still
       needed: on a box it never has credentials, and nothing pushes to SAM's Cloudflare namespace
-      any more; remove `REGISTRY_HOST` pull minting if hosted production has no such images
+      anymore. Remove `REGISTRY_HOST` pull minting only if neither hosted production nor any
+      self-host installation that sets `CF_ACCOUNT_ID` and `CF_API_TOKEN` relies on private
+      images through it; otherwise keep it, or document the removal as a breaking change
 - [ ] Docs and API reference no longer mention registry push credentials

@@ -66,11 +66,12 @@ by DNS-01 through Cloud DNS right after the upgrade.
 
 ## Follow-ups filed
 
-- [x] Idea `01M828EKSVADDDZF7VXA5HPKK5`: presigned uploads on a GCS box without HMAC keys (blocks build-backed publish).
+- [x] Idea `01M828EKSVADDDZF7VXA5HPKK5` and backlog `tasks/backlog/2026-11-22-selfhost-gcs-presign-without-hmac.md`: presigned uploads on a GCS box without HMAC keys (blocks build-backed publish).
 - [x] Backlog `tasks/backlog/2026-11-22-remove-dead-registry-push-credentials.md`: remove the dead push route and vm-agent types.
 - [x] Legacy private-pull decision (keep or remove `REGISTRY_HOST` pull credentials) recorded as an
       acceptance item in the same backlog task.
-- [x] Heap idea `01M7W6ZTZETXE75N8NRKR3R0CF`: note on the 33 h sweep failure window.
+- [x] Heap idea `01M7W6ZTZETXE75N8NRKR3R0CF` (note on the 33 h window) and backlog
+      `tasks/backlog/2026-11-22-selfhost-celld-sticky-heap-limit.md`.
 
 ## Cleanup
 
