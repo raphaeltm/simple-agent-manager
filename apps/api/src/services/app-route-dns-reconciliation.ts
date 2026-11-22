@@ -145,7 +145,48 @@ export async function releaseNodeAppRouteDnsRecords(
   // and repointed records leave the `content` filter, shifting later records onto this page, so
   // the page is read again after any of them; every re-read follows a removal.
   for (const content of addresses) {
-    unparsed += await releaseRecordsAt(dnsEnv, node.id, content, perPage, counts, effectiveSignal);
+    if (content === node.ipAddress) {
+      unparsed += await releaseRecordsAt(
+        dnsEnv,
+        node.id,
+        content,
+        perPage,
+        counts,
+        effectiveSignal
+      );
+      continue;
+    }
+    // A shared ingress address (the box) is never released with this node, so its records are
+    // no takeover risk and other environments' records share it: clean up best-effort and leave
+    // what could not be done to the sweep, rather than hold this node's teardown on them.
+    const shared = emptyCounts();
+    try {
+      unparsed += await releaseRecordsAt(
+        dnsEnv,
+        node.id,
+        content,
+        perPage,
+        shared,
+        effectiveSignal
+      );
+    } catch (error) {
+      log.error('dns.app_route_release_shared_address_failed', {
+        nodeId: node.id,
+        content,
+        error: error instanceof Error ? error.message : String(error),
+        action: 'left_to_sweep',
+      });
+    }
+    if (shared.failed + shared.deferred > 0) {
+      log.error('dns.app_route_release_shared_address_incomplete', {
+        nodeId: node.id,
+        content,
+        failed: shared.failed,
+        deferred: shared.deferred,
+        action: 'left_to_sweep',
+      });
+    }
+    addCounts(counts, { ...shared, failed: 0, deferred: 0 });
   }
   counts.unparsed = unparsed;
   if (counts.unknown > 0) {

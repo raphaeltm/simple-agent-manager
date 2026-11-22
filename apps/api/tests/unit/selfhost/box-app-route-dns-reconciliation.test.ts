@@ -218,6 +218,41 @@ describe('dangling app-route sweep on reverse-tunnel deployment nodes', () => {
     expect(counts).toMatchObject({ failed: 0, unknown: 0 });
   });
 
+  it('does not hold the teardown on a record at the shared box address it cannot delete', async () => {
+    sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = 'tunnel-node'").run();
+    // Another environment's dangling record at the box address that can never be deleted.
+    sqlite.exec(
+      "CREATE TRIGGER keep_stopped BEFORE DELETE ON selfhost_dns_records WHEN OLD.id = 'stopped' BEGIN SELECT RAISE(ABORT, 'stuck'); END"
+    );
+
+    const counts = await releaseNodeAppRouteDnsRecords(env, {
+      id: 'tunnel-node',
+      nodeRole: 'deployment',
+      ipAddress: NODE_IP,
+      transport: 'reverse-tunnel',
+    });
+
+    // The node's own records are gone; the stuck one is left to the sweep.
+    expect(rows().map((r) => r.id)).toEqual(['stopped']);
+    expect(counts).toMatchObject({ failed: 0, deferred: 0 });
+  });
+
+  it("still fails the teardown when a record at the node's own IP cannot be deleted", async () => {
+    sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = 'tunnel-node'").run();
+    sqlite.exec(
+      "CREATE TRIGGER keep_own BEFORE DELETE ON selfhost_dns_records WHEN OLD.id = 'live-at-node' BEGIN SELECT RAISE(ABORT, 'stuck'); END"
+    );
+
+    await expect(
+      releaseNodeAppRouteDnsRecords(env, {
+        id: 'tunnel-node',
+        nodeRole: 'deployment',
+        ipAddress: NODE_IP,
+        transport: 'reverse-tunnel',
+      })
+    ).rejects.toThrow(/Could not delete/);
+  });
+
   it('does not hold a teardown when the tunnel address cannot be resolved', async () => {
     const misconfigured = { ...env, SAM_DNS_PUBLIC_IPV4: undefined } as unknown as Env;
     sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = 'tunnel-node'").run();
