@@ -19,7 +19,7 @@
  * started releasing (status, or the termination proof), and that node's current IP is the
  * record's content. SAM can only judge what it recorded: a VM deleted at the provider behind
  * SAM's back keeps a `running` row, and its records with it, until a provider-existence check
- * exists for deployment nodes (idea filed with PR #2976). A release fetch already in flight when
+ * exists for deployment nodes (idea 01M81Z9P6QFX4M9Q83K2XKGZVR). A release fetch already in flight when
  * a node is released can also re-create a record after the release cleanup listed; the next
  * sweep removes it once retirement unlinks the environment. Anything else
  * is deleted, after the record is judged again against fresh D1 state and re-read from DNS with
