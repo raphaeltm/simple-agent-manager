@@ -50,13 +50,15 @@ import {
   appRouteNameSuffix,
   deleteObservedAppRouteDnsRecord,
   listAppRouteDnsRecordsPage,
+  repointObservedAppRouteDnsRecord,
 } from './dns-app-route-inventory';
-import { upsertAppRouteDNSRecord } from './dns-app-routes';
 import { DEFAULT_CF_API_TIMEOUT_MS } from './dns-core';
 import { getTimeoutMs } from './fetch-timeout';
 
 /** KV key holding the next page the sweep reads (1-based). */
 export const APP_ROUTE_DNS_SWEEP_CURSOR_KEY = 'dns:app-route-sweep:next-page';
+/** KV key prefix of a record whose delete failed: the sweep skips it until the key expires. */
+export const APP_ROUTE_DNS_FAILURE_BACKOFF_PREFIX = 'dns:app-route-sweep:backoff:';
 
 /**
  * Node statuses whose IP SAM has given up or is giving up. Not the callback-terminal set
@@ -184,6 +186,8 @@ export interface AppRouteCleanupCounts {
   absent: number;
   failed: number;
   deferred: number;
+  /** A delete of this record failed recently; skipped until its backoff expires (sweep only). */
+  backedOff: number;
 }
 
 function emptyCounts(): AppRouteCleanupCounts {
@@ -198,6 +202,7 @@ function emptyCounts(): AppRouteCleanupCounts {
     absent: 0,
     failed: 0,
     deferred: 0,
+    backedOff: 0,
   };
 }
 
@@ -216,6 +221,8 @@ async function cleanupRecords(
     maxDeletes: number;
     deadline: number;
     signal?: AbortSignal;
+    /** Sweep only: skip records whose delete failed within this many seconds. */
+    failureBackoffSeconds?: number;
   }
 ): Promise<AppRouteCleanupCounts> {
   const counts = emptyCounts();
@@ -250,6 +257,13 @@ async function cleanupRecords(
       counts.deferred++;
       continue;
     }
+    const backoffKey = `${APP_ROUTE_DNS_FAILURE_BACKOFF_PREFIX}${record.id}`;
+    if (input.failureBackoffSeconds && (await env.KV.get(backoffKey))) {
+      // A record that keeps failing costs no DNS calls while it waits, but stays loud: the
+      // sweep reports it as a failure on every run (see runAppRouteDnsReconciliation).
+      counts.backedOff++;
+      continue;
+    }
     try {
       // Judge again on fresh D1 state: a start may have linked this environment to a node since
       // the page was judged, possibly one given the same recycled IP (the release fetch then
@@ -271,7 +285,8 @@ async function cleanupRecords(
         // upserting this very record right now. Repointing converges with that upsert, where a
         // delete could race it and remove the new route (Cloudflare has no conditional delete).
         // Either way the record stops pointing at the released IP.
-        await upsertAppRouteDNSRecord(record.name, liveAddress, env);
+        // This record itself, not the first record of its name (a live sibling may share it).
+        await repointObservedAppRouteDnsRecord(env, record, liveAddress);
         counts.repointed++;
         attempts++;
         log.info('dns.app_route_dangling_repointed', {
@@ -307,6 +322,11 @@ async function cleanupRecords(
         continue;
       }
       counts.failed++;
+      if (input.failureBackoffSeconds) {
+        await env.KV.put(backoffKey, new Date().toISOString(), {
+          expirationTtl: input.failureBackoffSeconds,
+        }).catch(() => undefined);
+      }
       log.error('dns.app_route_dangling_delete_failed', {
         trigger: input.trigger,
         nodeId: input.nodeId ?? null,
@@ -441,10 +461,11 @@ export async function runAppRouteDnsReconciliation(env: Env): Promise<AppRouteDn
     log.info('dns.app_route_sweep_completed', { ...result });
     return result;
   }
-  const [budgetMs, perPage, maxDeletes] = await Promise.all([
+  const [budgetMs, perPage, maxDeletes, failureBackoffSeconds] = await Promise.all([
     settingValue(env, 'sweepBudgetMs'),
     settingValue(env, 'sweepPageSize'),
     settingValue(env, 'sweepMaxDeletes'),
+    settingValue(env, 'failureBackoffSeconds'),
   ]);
   const deadline = Date.now() + budgetMs;
   const signal = AbortSignal.timeout(budgetMs);
@@ -470,6 +491,7 @@ export async function runAppRouteDnsReconciliation(env: Env): Promise<AppRouteDn
         maxDeletes: maxDeletes - attemptsUsed(),
         deadline,
         signal,
+        failureBackoffSeconds,
       });
       addCounts(totals, counts);
       if (counts.deferred > 0) {
@@ -505,9 +527,9 @@ export async function runAppRouteDnsReconciliation(env: Env): Promise<AppRouteDn
   log.info('dns.app_route_sweep_completed', { ...result });
   // A record that could not be judged is reported as a failure on every run until its
   // environment row is repaired, so it can never dangle behind a sweep that reports success.
-  if (totals.failed > 0 || totals.unknown > 0) {
+  if (totals.failed > 0 || totals.unknown > 0 || totals.backedOff > 0) {
     throw new Error(
-      `App-route DNS sweep failed to delete ${totals.failed} dangling record(s) and could not judge ${totals.unknown}`
+      `App-route DNS sweep failed to delete ${totals.failed + totals.backedOff} dangling record(s) and could not judge ${totals.unknown}`
     );
   }
   return result;

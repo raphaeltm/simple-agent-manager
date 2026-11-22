@@ -21,6 +21,7 @@ import {
   deleteDNSRecord,
   findDNSRecordMatchesByName,
   readCloudflareError,
+  updateDNSRecord,
 } from './dns-core';
 import { boxDnsBackendFor } from './dns-provider';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
@@ -31,7 +32,9 @@ import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
  */
 const ENVIRONMENT_ID_LABEL_RE = /^[0-7][0-9a-hjkmnp-tv-z]{25}$/;
 const ROUTE_INDEX_RE = /^r[1-9]\d*$/;
-const PORT_RE = /^\d{1,5}$/;
+/** A port as `buildRouteHostname` writes it: canonical decimal (no leading zero), 1-65535. */
+const PORT_RE = /^[1-9]\d{0,4}$/;
+const MAX_PORT = 65535;
 // `buildRouteHostname` truncates the sanitized service, which can leave a trailing hyphen.
 const SERVICE_RE = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -80,7 +83,7 @@ export function parseAppRouteHostname(
   const port = parts[parts.length - 2] ?? '';
   const serviceParts = parts.slice(1, -2);
   if (!ROUTE_INDEX_RE.test(routeIndex)) return null;
-  if (!PORT_RE.test(port)) return null;
+  if (!PORT_RE.test(port) || Number(port) > MAX_PORT) return null;
   if (!ENVIRONMENT_ID_LABEL_RE.test(envPart)) return null;
   if (!SERVICE_RE.test(serviceParts.join('-'))) return null;
   return { environmentId: envPart.toUpperCase() };
@@ -172,6 +175,27 @@ export async function listAppRouteDnsRecordsPage(
     'cloudflare.dns.list_app_route_records'
   );
   return { records: toAppRouteRecords(data.result, env), providerCount: data.result.length };
+}
+
+/**
+ * Point one observed app-route record at `address`. On Cloudflare by record id: several A records
+ * may share the name, and an upsert by name updates the first match, which may be a live sibling.
+ * The box zone holds one record per name and type, so its upsert by name is that same record.
+ */
+export async function repointObservedAppRouteDnsRecord(
+  env: Env,
+  record: Pick<AppRouteDnsRecord, 'id' | 'name'>,
+  address: string
+): Promise<void> {
+  if (!parseAppRouteHostname(record.name, env.BASE_DOMAIN)) {
+    throw new Error(`Refusing to repoint a DNS record outside the app-route namespace`);
+  }
+  const box = boxDnsBackendFor(env);
+  if (box) {
+    await box.upsertARecord(record.name, address, env);
+    return;
+  }
+  await updateDNSRecord(record.id, address, env);
 }
 
 /**

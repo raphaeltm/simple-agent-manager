@@ -901,3 +901,59 @@ describe('box zone paging with a malformed stored row', () => {
     expect(result.cycleComplete).toBe(true);
   });
 });
+
+describe('Codex review round 4', () => {
+  it('accepts only ports buildRouteHostname can write', () => {
+    const name = (port: string) => `r1-web-${port}-${ENV_LIVE.toLowerCase()}.apps.${BASE}`;
+    expect(parseAppRouteHostname(name('00080'), BASE)).toBeNull();
+    expect(parseAppRouteHostname(name('0'), BASE)).toBeNull();
+    expect(parseAppRouteHostname(name('70000'), BASE)).toBeNull();
+    expect(parseAppRouteHostname(name('65535'), BASE)).toEqual({ environmentId: ENV_LIVE });
+    expect(parseAppRouteHostname(name('80'), BASE)).toEqual({ environmentId: ENV_LIVE });
+  });
+
+  it('repoints the stale record itself when a live sibling shares its name', async () => {
+    await seedNode('live-node', 'running', LIVE_IP);
+    await seedEnvironment(ENV_LIVE, 'live-node');
+    // Two A records for one name; the live one sorts first, as an upsert would pick it.
+    const zone = createFakeCloudflareDns({
+      zoneId: ZONE,
+      token: TOKEN,
+      seed: [rec('a-live', host(ENV_LIVE), LIVE_IP), rec('b-stale', host(ENV_LIVE), RELEASED_IP)],
+    });
+    vi.stubGlobal('fetch', vi.fn(zone.fetch));
+
+    const result = await runAppRouteDnsReconciliation(env);
+
+    expect(zone.records.get('b-stale')?.content).toBe(LIVE_IP);
+    expect(zone.records.get('a-live')?.content).toBe(LIVE_IP);
+    expect(result.repointed).toBe(1);
+  });
+
+  it('backs off a record whose delete keeps failing, but keeps reporting it', async () => {
+    const zone = createFakeCloudflareDns({ zoneId: ZONE, token: TOKEN, seed: await seedWorld() });
+    const deletes: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'DELETE') deletes.push(String(input).split('/').pop() ?? '');
+        if (init?.method === 'DELETE' && String(input).endsWith('/dangling-missing')) {
+          return new Response(JSON.stringify({ errors: [{ code: 10000, message: 'boom' }] }), {
+            status: 500,
+          });
+        }
+        return zone.fetch(input, init);
+      })
+    );
+
+    await expect(runAppRouteDnsReconciliation(env)).rejects.toThrow(/failed to delete 1/);
+    // Second run: no DNS call for the backed-off record, still a failed sweep.
+    await expect(runAppRouteDnsReconciliation(env)).rejects.toThrow(/failed to delete 1/);
+    expect(deletes.filter((id) => id === 'dangling-missing')).toHaveLength(1);
+    // Once the backoff expires it is tried again.
+    await env.KV.delete(`dns:app-route-sweep:backoff:dangling-missing`);
+    await expect(runAppRouteDnsReconciliation(env)).rejects.toThrow(/failed to delete 1/);
+    expect(deletes.filter((id) => id === 'dangling-missing')).toHaveLength(2);
+    expect(zone.records.has('dangling-missing')).toBe(true);
+  });
+});
