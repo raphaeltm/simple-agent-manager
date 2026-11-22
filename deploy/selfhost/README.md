@@ -31,9 +31,9 @@ DNS of their own. The fleet bucket (`CELLD_BUCKET`) is the durable copy of every
   `ws-<id>.` and `ws-<id>--<port>.` under it; the apex is unused. Or delegate `SAM_DOMAIN` to the
   box once and let it answer for itself ([DNS on the box](#dns-on-the-box)): then no wildcard
   record, no Cloud DNS and no DNS API token are needed for the box, its certificate or its records.
-  App deployments do not work on a box yet: deployment nodes still need a Cloudflare Origin CA
-  certificate for their agent, so a release fails at node boot (`origin_ca_bootstrap`) without
-  `CF_API_TOKEN`. This is tracked separately.
+  App deployments run on the box too ([App deployments on a box](#app-deployments-on-a-box)):
+  their app hostnames (`*.apps.SAM_DOMAIN`) also resolve to the box, which needs its own wildcard
+  certificate for them, so use a `dns-*` TLS mode.
 - Inbound TCP 80 and 443 to the VM (and 25 for inbound agent email).
 - A fleet bucket: `gs://` (the VM's service account needs `roles/storage.objectAdmin` on it),
   any `s3://` store, or the bundled store for a trial (`local-store` profile).
@@ -432,14 +432,50 @@ docker compose restart celld
 Tracked in idea `01M7W6ZTZETXE75N8NRKR3R0CF`. Note that the upgrade's own health check reads
 `/health`, which does not use KV, so it does not catch this.
 
+## App deployments on a box
+
+Deployment nodes use the same reverse tunnel as workspace nodes: their agent, release fetches and
+route callbacks reach the box through frp, so they need no Cloudflare Origin CA certificate and no
+public agent port. Their app traffic goes through the box as well:
+
+1. An app hostname (`r<n>-<service>-<port>-<env>.apps.SAM_DOMAIN`) resolves to the box: by the
+   record the Worker writes per route with [DNS on the box](#dns-on-the-box), or by your
+   `*.SAM_DOMAIN` wildcard record without it.
+2. The box's Caddy terminates TLS with a `*.apps.SAM_DOMAIN` wildcard certificate, obtained the
+   same way as the `*.SAM_DOMAIN` one (`SAM_TLS_MODE=dns-rfc2136` or `dns-googleclouddns`).
+3. For every request, HTTP or WebSocket, Caddy asks the Worker which node may answer
+   (`apps/api/src/selfhost/reverse-tunnel/app-route.ts`). The hostname must be a route of its
+   environment's latest release. The environment's node must be a live reverse-tunnel deployment
+   node with an active lease and the same owner. Anything else gets 404 (503 while the node's
+   tunnel is down).
+4. Caddy proxies through frp to the node's agent, which checks the route against the release it
+   applied and hands the request to the node's own Caddy. That Caddy listens on loopback only
+   (`DEPLOY_APP_INGRESS_PORT`, default 8446) and does no ACME.
+
+The node opens no public port: its firewall drops the agent port, 22, 80 and 443, and on GCE it
+gets no `sam-deployment-app-routes` tag. Nothing to configure beyond the TLS mode above. The app's
+own `Authorization` and `Cookie` headers reach it unchanged.
+
+Not served on a box yet: custom domains on app deployments (the box has no certificate for them).
+
+Verify after a release reaches `applied` (the app URL is on the environment's page):
+
+```sh
+dig +short r1-web-80-<env>.apps.sam.example.com     # the box address
+curl -sS https://r1-web-80-<env>.apps.sam.example.com/   # served by the app
+curl -sS -o /dev/null -w '%{http_code}\n' https://r1-nope-1-<env>.apps.sam.example.com/   # 404
+nc -vz -w 5 <node IP> 443                           # times out: no public ingress on the node
+```
+
 ## DNS on the box
 
 With the `dns` profile the box answers DNS for `SAM_DOMAIN` itself (`sam-dns`, `./sam-dns`). The
 operator delegates the name once; after that SAM needs no DNS account anywhere:
 
 - `api.`, `app.`, `ws-*` and every other name resolve to the box (`*.SAM_DOMAIN`);
-- app deployment routes (`r<n>-<service>-<port>-<env>.apps.SAM_DOMAIN`) resolve to the node that
-  runs them. The Worker keeps these records in D1 (`apps/api/src/selfhost/dns/`, active with
+- app deployment routes (`r<n>-<service>-<port>-<env>.apps.SAM_DOMAIN`) resolve to the box, whose
+  Caddy carries their traffic to the node ([App deployments on a box](#app-deployments-on-a-box)).
+  The Worker writes one record per route, pointing at `SAM_DNS_PUBLIC_IPV4`, and keeps them in D1 (`apps/api/src/selfhost/dns/`, active with
   `SAM_DNS_PROVIDER=box`, which the deploy sets for this profile) and sam-dns syncs them over
   loopback; it never asks the Worker per query;
 - Caddy gets the wildcard certificate by DNS-01 against sam-dns over RFC 2136
@@ -488,11 +524,9 @@ dig @203.0.113.5 sam.example.com AXFR         # Transfer failed / REFUSED (no zo
 dig @203.0.113.5 sam.example.com ANY          # one HINFO "RFC8482" answer
 ```
 
-Records the Worker writes resolve the same way. For example, a deployment node's
-`<node-id>.vm.sam.example.com` returns the node's address. App routes
-(`r1-<service>-<port>-<env>.apps.sam.example.com`) will too, once deployment nodes can boot on a box
-(see the note under requirements). A route name that is not in the zone is NXDOMAIN, never the box's
-address.
+Records the Worker writes resolve the same way. An app route
+(`r1-<service>-<port>-<env>.apps.sam.example.com`) returns the box's address once its release has
+been fetched. A route name that is not in the zone is NXDOMAIN, never the box's address.
 
 ### What it accepts, and from whom
 
