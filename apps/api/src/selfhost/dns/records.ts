@@ -203,7 +203,7 @@ export async function findBoxARecordsByName(
 export async function listBoxARecords(
   filter: { nameSuffix: string; content?: string; page: number; perPage: number },
   env: BoxDnsEnv
-): Promise<BoxDnsRecordMatch[]> {
+): Promise<{ records: BoxDnsRecordMatch[]; rowCount: number }> {
   const suffix = filter.nameSuffix.trim().toLowerCase();
   if (!suffix) throw new BoxDnsRecordError('A record list needs a name suffix');
   const perPage = Math.max(1, Math.floor(filter.perPage));
@@ -225,12 +225,14 @@ export async function listBoxARecords(
       offset
     )
     .all();
-  const matches: BoxDnsRecordMatch[] = [];
-  for (const row of result.results ?? []) {
+  const rows = result.results ?? [];
+  const records: BoxDnsRecordMatch[] = [];
+  for (const row of rows) {
     const record = parseRecordRow(row, 'list_by_suffix');
-    if (record) matches.push({ ...record, proxied: false });
+    if (record) records.push({ ...record, proxied: false });
   }
-  return matches;
+  // The raw row count: a malformed row dropped above must not make a full page look like the last.
+  return { records, rowCount: rows.length };
 }
 
 export interface BoxDnsRecord {

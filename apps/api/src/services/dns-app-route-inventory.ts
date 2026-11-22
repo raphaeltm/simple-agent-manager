@@ -136,11 +136,11 @@ export async function listAppRouteDnsRecordsPage(
   if (signal?.aborted) throw signal.reason;
   const box = boxDnsBackendFor(env);
   if (box) {
-    const rows = await box.listARecords(
+    const { records: rows, rowCount } = await box.listARecords(
       { nameSuffix: suffix, content: input.content, page: input.page, perPage: input.perPage },
       env
     );
-    return { records: toAppRouteRecords(rows, env), providerCount: rows.length };
+    return { records: toAppRouteRecords(rows, env), providerCount: rowCount };
   }
   const query = new URLSearchParams({
     type: 'A',

@@ -830,3 +830,40 @@ describe('records the sweep cannot judge', () => {
     expect(zone.records.has('dangling')).toBe(false);
   });
 });
+
+describe('box zone paging with a malformed stored row', () => {
+  it('keeps paging past a full page that held a row it had to drop', async () => {
+    applySqliteMigration(
+      sqlite,
+      new URL('../../../src/selfhost/migrations/0267_selfhost_dns_records.sql', import.meta.url)
+    );
+    installBoxDns();
+    env = { ...env, SAM_DNS_PROVIDER: 'box' } as unknown as Env;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('no external request may be made on a box with its own DNS');
+      })
+    );
+    settings.values.set('appRouteDns.sweepPageSize', 2);
+    await seedNode('live-node', 'running', LIVE_IP);
+    await seedEnvironment(ENV_LIVE, 'live-node');
+    const insert = sqlite.prepare(
+      "INSERT INTO selfhost_dns_records (id, name, type, content, created_at, updated_at) VALUES (?, ?, 'A', ?, 'now', 'now')"
+    );
+    // Page 1 (by name): a row whose content is not an IPv4 address, then a live route.
+    insert.run('garbled', `a-garbled.apps.${BASE}`, 'not-an-ip');
+    insert.run('live', `b-${host(ENV_LIVE).replace(/^r1-/, 'x')}`, LIVE_IP);
+    // Page 2: a dangling route.
+    insert.run('dangling', `r9-web-80-${ENV_MISSING.toLowerCase()}.apps.${BASE}`, RELEASED_IP);
+
+    const result = await runAppRouteDnsReconciliation(env);
+
+    const ids = (
+      sqlite.prepare('SELECT id FROM selfhost_dns_records').all() as Array<{ id: string }>
+    ).map((r) => r.id);
+    expect(ids).not.toContain('dangling');
+    expect(ids).toEqual(expect.arrayContaining(['garbled', 'live']));
+    expect(result.cycleComplete).toBe(true);
+  });
+});
