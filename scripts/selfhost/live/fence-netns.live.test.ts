@@ -21,8 +21,13 @@ import {
 } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import {
+  countIsolateHeapLimitTick,
+  ISOLATE_HEAP_LIMIT_MARKER,
+  resetIsolateHeapLimitStateForTest,
+} from '../../../apps/api/src/scheduled/isolate-heap-limit-core';
 import {
   buildFencePlan,
   FORBIDDEN_IPV4,
@@ -209,14 +214,15 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
       );
       return { state, attestation, env, fence, output: () => fenceOutput };
     }
-    function startCelld(attestation: string) {
+    function startCelld(attestation: string, body?: string, extraEnv: Record<string, string> = {}) {
       const pidDir = mkdtempSync(join(dir, 'pid-'));
       chmodSync(pidDir, 0o777);
       const pidFile = join(pidDir, 'pid');
       const fake = join(pidDir, 'fake-celld.sh');
       writeFileSync(
         fake,
-        '#!/bin/bash\necho $$ > "$1"\nprintf \'native stdout %s\\n\' "$GCE_METADATA_PROXY_SECRET"\nprintf \'native stderr %s\\n\' "$GCE_METADATA_PROXY_SECRET" >&2\nexec sleep 300\n',
+        body ??
+          '#!/bin/bash\necho $$ > "$1"\nprintf \'native stdout %s\\n\' "$GCE_METADATA_PROXY_SECRET"\nprintf \'native stderr %s\\n\' "$GCE_METADATA_PROXY_SECRET" >&2\nexec sleep 300\n',
         { mode: 0o755 }
       );
       const child = lab.spawn(
@@ -239,6 +245,7 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
           SAM_EGRESS_FENCE_CHECK_SECONDS: '0.1',
           SAM_EGRESS_FENCE_WAIT_SECONDS: '2',
           SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS: '2',
+          ...extraEnv,
         }
       );
       let output = '';
@@ -305,6 +312,90 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
       normal.child.kill('SIGTERM');
       stopFence();
       console.log(`[fence-netns] flush-to-stop ${elapsed}ms`);
+    });
+
+    /**
+     * celld's prefix for a Worker `console.error`, copied from the shared box's celld 0.6.3 log
+     * (2026-11-22, a `cron.sweep_failed` line): two spaces, `INFO cell_console: ERROR `.
+     */
+    const CELLD_CONSOLE_ERROR_PREFIX = '2026-11-22T18:05:00.796266Z  INFO cell_console: ERROR ';
+    /**
+     * The lines the real detector logs on `count` consecutive refused ticks, as celld prints them.
+     * Produced by `countIsolateHeapLimitTick` and the real logger, not typed here, so a
+     * change to either that breaks start.sh's matcher fails this test.
+     */
+    function realHeapLines(count: number): string[] {
+      resetIsolateHeapLimitStateForTest();
+      const lines: string[] = [];
+      const spy = vi.spyOn(console, 'error').mockImplementation((line: unknown) => {
+        lines.push(String(line));
+      });
+      try {
+        for (let tick = 0; tick < count; tick += 1) {
+          countIsolateHeapLimitTick([
+            {
+              sweep: 'gcp_price_table',
+              error: `the isolate is ${ISOLATE_HEAP_LIMIT_MARKER}, so it stopped materializing a result set (see CELLD_V8_HEAP_LIMIT_MB)`,
+            },
+          ]);
+        }
+      } finally {
+        spy.mockRestore();
+      }
+      const heap = lines.filter((line) => line.includes('cron.isolate_heap_limit"'));
+      expect(heap).toHaveLength(count);
+      return heap.map((line) => `${CELLD_CONSOLE_ERROR_PREFIX}${line}`);
+    }
+    /** A fake celld that prints each line (stdout, or stderr when `err`), records a graceful stop. */
+    function heapFake(lines: { line: string; err?: boolean }[]): string {
+      const printed = lines
+        .map(
+          ({ line, err }) => `printf '%s\\n' '${line.replaceAll("'", "'\\''")}'${err ? ' >&2' : ''}`
+        )
+        .join('\n');
+      // Short sleeps: bash runs a trap only after the foreground command returns.
+      return `#!/bin/bash\necho $$ > "$1"\ntrap 'echo term > "$1.term"; exit 0' TERM\n${printed}\nwhile true; do sleep 0.1; done\n`;
+    }
+    async function expectStillServing(run: ReturnType<typeof startCelld>, seen: string) {
+      await waitFor(() => existsSync(run.pidFile));
+      await waitFor(() => run.output().includes(seen));
+      // Settle window for the absence assertion: the matcher runs as each line is printed.
+      await new Promise((done) => setTimeout(done, 1500));
+      expect(existsSync(`${run.pidFile}.term`)).toBe(false);
+      expect(run.child.exitCode).toBeNull();
+      run.child.kill('SIGTERM');
+      await run.exited;
+    }
+
+    it('restarts celld gracefully once the cron reports the heap refusal on enough consecutive ticks', async () => {
+      const pair = await startPair();
+      const [first, second] = realHeapLines(2);
+      // Below the threshold, then a JSON value that only quotes the event: neither may restart.
+      const spoof = `${CELLD_CONSOLE_ERROR_PREFIX}{"event":"x","note":"\\"event\\":\\"cron.isolate_heap_limit\\",\\"consecutiveTicks\\":9}"}`;
+      await expectStillServing(
+        startCelld(pair.attestation, heapFake([{ line: first! }, { line: spoof }])),
+        '"note":'
+      );
+      // The restart can be switched off.
+      await expectStillServing(
+        startCelld(pair.attestation, heapFake([{ line: first! }, { line: second! }]), {
+          SAM_CELLD_HEAP_RESTART_TICKS: '0',
+        }),
+        '"consecutiveTicks":2'
+      );
+
+      // The threshold is start.sh's own default (2); the second tick arrives on stderr.
+      const run = startCelld(
+        pair.attestation,
+        heapFake([{ line: first! }, { line: second!, err: true }])
+      );
+      await waitFor(() => existsSync(run.pidFile));
+      expect(await run.exited).toBe(75);
+      // SIGTERM, not SIGKILL: the fence is intact, so celld drains.
+      expect(readFileSync(`${run.pidFile}.term`, 'utf8').trim()).toBe('term');
+      expect(run.output()).toContain('"event":"celld.heap_limit_restart"');
+      expect(run.output()).not.toContain('egress_fence.celld_killed');
+      stopFence();
     });
 
     it('keeps serving past the two-second healthy interval, then stops when attestations expire with rules intact', async () => {

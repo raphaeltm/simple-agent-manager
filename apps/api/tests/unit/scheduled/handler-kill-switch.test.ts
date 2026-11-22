@@ -32,7 +32,11 @@ vi.mock('../../../src/scheduled/platform-feedback-hourly', () => ({
   scheduleHourlyPlatformMaintenance: vi.fn(() => false),
 }));
 vi.mock('../../../src/scheduled/sweep-isolation', () => ({
-  createSweepIsolator: vi.fn(() => ({ isolate: isolateMock, failedSweeps: () => [] })),
+  createSweepIsolator: vi.fn(() => ({
+    isolate: isolateMock,
+    failedSweeps: () => [],
+    failures: () => [],
+  })),
 }));
 vi.mock('../../../src/scheduled/session-sleep', () => ({
   runSessionSleepSweep: sessionSleepMock,

@@ -8,6 +8,8 @@ import {
   runComposeImageArtifactCleanup,
 } from '../../../src/scheduled/compose-image-artifact-cleanup';
 import {
+  DEFAULT_DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE,
+  DEFAULT_DEPLOYMENT_RELEASE_RETENTION_COUNT,
   DEFAULT_DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY,
   runDeploymentReleaseRetention,
   runScheduledDeploymentReleaseRetention,
@@ -562,6 +564,65 @@ describe('D1 retention sweeps', () => {
 
     expect(skipped).toMatchObject({ skipped: true, skipReason: 'interval-not-elapsed' });
     expect(ran.deletedReleases).toBe(2);
+  });
+
+  it('drains a backlog larger than one batch at the default bounds without materialising it', async () => {
+    // Rule 81: more prunable rows than one batch (2 batches + a remainder), default settings,
+    // through the scheduled entry point with its interval gate. The sweep is the first KV
+    // reader the stuck celld isolate refused (idea 01M7W6ZTZETXE75N8NRKR3R0CF); this pins that
+    // its own reads stay small however large the table grows, so it is not the heap's spike.
+    const batch = DEFAULT_DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE;
+    const prunable = batch * 2 + 1;
+    addEnvironment('env-backlog');
+    for (
+      let version = 1;
+      version <= prunable + DEFAULT_DEPLOYMENT_RELEASE_RETENTION_COUNT;
+      version += 1
+    ) {
+      addRelease('env-backlog', version, 'applied');
+    }
+    let largestResultSet = 0;
+    let executed = 0;
+    const database = env.DATABASE;
+    env.DATABASE = {
+      ...database,
+      prepare: (sql: string) => {
+        const statement = database.prepare(sql);
+        const bind = statement.bind.bind(statement);
+        const record = <T extends { results?: unknown[] }>(result: T): T => {
+          executed += 1;
+          largestResultSet = Math.max(largestResultSet, result.results?.length ?? 0);
+          return result;
+        };
+        const wrap = (bound: D1PreparedStatement): D1PreparedStatement =>
+          Object.assign(Object.create(bound) as D1PreparedStatement, {
+            all: async () => record(await bound.all()),
+            run: async () => record(await bound.run()),
+          });
+        return Object.assign(wrap(statement), {
+          bind: (...values: unknown[]) => wrap(bind(...values)),
+        });
+      },
+    } as D1Database;
+
+    const day = (n: number) => new Date(Date.UTC(2026, 10, 1 + n));
+    const deleted: number[] = [];
+    for (let tick = 0; tick < 4; tick += 1) {
+      const result = await runScheduledDeploymentReleaseRetention(env, day(tick));
+      deleted.push(result.deletedReleases);
+      // A second tick inside the interval does nothing.
+      const gated = await runScheduledDeploymentReleaseRetention(
+        env,
+        new Date(day(tick).getTime() + 60_000)
+      );
+      expect(gated).toMatchObject({ skipped: true, skipReason: 'interval-not-elapsed' });
+    }
+
+    expect(deleted).toEqual([batch, batch, 1, 0]);
+    expect(releaseIds('env-backlog')).toHaveLength(DEFAULT_DEPLOYMENT_RELEASE_RETENTION_COUNT);
+    // Deletions run as bounded UPDATE/DELETE statements; no statement hands rows to JS.
+    expect(executed).toBeGreaterThan(0);
+    expect(largestResultSet).toBe(0);
   });
 
   it('runs bounded snapshot expiry on every scheduled tick', async () => {
