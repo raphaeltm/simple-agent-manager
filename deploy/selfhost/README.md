@@ -421,18 +421,26 @@ cannot go back to plaintext deploy vars once `platform-keys.json` is gone
 hold a key provider's credential; workspace nodes get neither, and the Worker never sees one
 (`scripts/selfhost/agent-vm-credentials.test.ts`).
 
-**Troubleshooting: sign-in or rate-limited routes return 500 after an upgrade.** If `/health`
-answers 200 but email sign-in (and other routes that read KV) answer `500 INTERNAL_ERROR`, look in
-the admin error list (Admin → Errors; celld's own log redacts the message) for `the isolate is over its V8 heap limit, so it stopped materializing a
-result set`. This was seen once on the test box, for about 10 minutes after a stack restart; the
-failing read was in celld's KV store, not in the Worker or the key agent. Restart celld to clear it:
+**Troubleshooting: KV reads and scheduled sweeps fail with "over its V8 heap limit".** One celld
+cell isolate holds SAM's cron, the KV namespace, both D1 databases and the Durable Objects, and
+celld never retires it while it holds a cell. If its heap passes `CELLD_V8_HEAP_LIMIT_MB`, celld
+refuses to materialise SQL result sets in it until used heap falls under 75% of the limit. Every
+KV read then fails (`500` on email sign-in, `cron.sweep_failed` for `deployment_release_retention`
+and `gcp_price_table` every five minutes), and failed-sweep notifications fail too, because they
+read KV. SAM's unminified bundle is stored two-byte in that heap and keeps it near 100 MB at idle,
+so at celld's default of 128 MB one spike stuck it for 33 hours on the test box.
 
-```bash
-docker compose restart celld
-```
+- `docker-compose.yml` therefore sets `CELLD_V8_HEAP_LIMIT_MB` to 384 by default (a ceiling, not
+  a reservation). Override it in `.env` if a box needs more.
+- The cron records each affected tick without KV: a `cron.isolate_heap_limit` log line with
+  `consecutiveTicks`, and an Admin → Errors row (`scheduled/isolate-heap-limit.ts`).
+- `celld/start.sh` restarts celld gracefully once `consecutiveTicks` reaches
+  `SAM_CELLD_HEAP_RESTART_TICKS` (default 2, so about ten minutes; `0` disables). The container log
+  shows `celld.heap_limit_restart` and Docker brings celld back.
 
-Tracked in idea `01M7W6ZTZETXE75N8NRKR3R0CF`. Note that the upgrade's own health check reads
-`/health`, which does not use KV, so it does not catch this.
+The upgrade's own health check reads `/health`, which does not use KV, so it does not catch this.
+A manual `docker compose restart celld` also clears it. Tracked in idea
+`01M7W6ZTZETXE75N8NRKR3R0CF`.
 
 ## App deployments on a box
 
