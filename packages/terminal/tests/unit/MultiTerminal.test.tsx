@@ -102,6 +102,7 @@ class MockWebSocket {
     this.url = url;
     MockWebSocket.instances.push(this);
     setTimeout(() => {
+      if (this.readyState === MockWebSocket.CLOSED) return;
       this.readyState = MockWebSocket.OPEN;
       if (this.onopen) {
         this.onopen(new Event('open'));
@@ -322,6 +323,31 @@ describe('MultiTerminal', () => {
     expect(resizesFor(sendSpy, 'srv-window')).toEqual([
       { type: 'resize', sessionId: 'srv-window', data: { rows: 26, cols: 90 } },
     ]);
+  });
+
+  it('does not refit on window resize while the terminal view is hidden', async () => {
+    MockWebSocket.sessionListResponse = [
+      { sessionId: 'srv-hidden-window', name: 'Hidden', status: 'running', createdAt: new Date().toISOString() },
+    ];
+    const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
+    render(<MultiTerminal {...defaultProps} />);
+    await waitFor(() => expect(mockTerminalOpen).toHaveBeenCalled());
+    await notifyContainerResize();
+
+    // A chat tab is showing (zero box): a window resize must not measure the hidden view.
+    fireEvent.resize(window);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+    expect(resizesFor(sendSpy, 'srv-hidden-window'), 'hidden view not fitted').toEqual([]);
+
+    // Liveness: the same window resize fits once the view has a box.
+    layOutElements();
+    fireEvent.resize(window);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+    expect(resizesFor(sendSpy, 'srv-hidden-window')).not.toEqual([]);
   });
 
   it('fits a terminal mounted while hidden once it is revealed', async () => {
