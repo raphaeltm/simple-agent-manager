@@ -157,8 +157,8 @@ export async function releaseNodeAppRouteDnsRecords(
       continue;
     }
     // A shared ingress address (the box) is never released with this node, so its records are
-    // no takeover risk and other environments' records share it: clean up best-effort and leave
-    // what could not be done to the sweep, rather than hold this node's teardown on them.
+    // no takeover risk, and other environments' records share it: only records of environments
+    // linked to this node are touched (`ownedByNodeId`), best-effort, the rest left to the sweep.
     const shared = emptyCounts();
     try {
       unparsed += await releaseRecordsAt(
@@ -167,7 +167,8 @@ export async function releaseNodeAppRouteDnsRecords(
         content,
         perPage,
         shared,
-        effectiveSignal
+        effectiveSignal,
+        { ownedOnly: true }
       );
     } catch (error) {
       log.error('dns.app_route_release_shared_address_failed', {
@@ -211,7 +212,8 @@ async function releaseRecordsAt(
   content: string,
   perPage: number,
   counts: AppRouteCleanupCounts,
-  signal: AbortSignal
+  signal: AbortSignal,
+  options: { ownedOnly?: boolean } = {}
 ): Promise<number> {
   let unparsed = 0;
   for (let page = 1; ;) {
@@ -223,6 +225,7 @@ async function releaseRecordsAt(
       maxDeletes: Number.POSITIVE_INFINITY,
       deadline: Number.POSITIVE_INFINITY,
       signal,
+      ownedByNodeId: options.ownedOnly ? nodeId : undefined,
     });
     addCounts(counts, pageCounts);
     if (result.providerCount < perPage || pageCounts.deferred > 0) break;

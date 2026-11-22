@@ -206,8 +206,17 @@ export async function cleanupRecords(
     signal?: AbortSignal;
     /** Sweep only: skip records whose delete failed within this many seconds. */
     failureBackoffSeconds?: number;
+    /**
+     * Touch only records whose environment is linked to this node (on the page and on the fresh
+     * re-check). For an address other environments share (the box): matching content there says
+     * nothing about ownership, so other environments' records are left to the sweep.
+     */
+    ownedByNodeId?: string;
   }
 ): Promise<AppRouteCleanupCounts> {
+  const owned = (target: RouteTarget | 'unknown' | undefined) =>
+    !input.ownedByNodeId ||
+    (!!target && target !== 'unknown' && target.nodeId === input.ownedByNodeId);
   const counts = emptyCounts();
   const targets = await loadRouteTargets(env, [...new Set(records.map((r) => r.environmentId))]);
   // Every mutation attempt spends the cap, including a failed one whose backoff was recorded, so
@@ -215,6 +224,10 @@ export async function cleanupRecords(
   // later sweeps, so the records behind it are still reached. The deadline bounds the rest.
   for (const record of records) {
     counts.examined++;
+    if (!owned(targets.get(record.environmentId))) {
+      counts.kept++;
+      continue;
+    }
     const verdict = judgeAppRouteRecord(record, targets.get(record.environmentId));
     if (verdict === null) {
       counts.unknown++;
@@ -252,7 +265,7 @@ export async function cleanupRecords(
       // re-upserts the same content, which the DNS re-read below cannot tell apart).
       const fresh = await loadRouteTargets(env, [record.environmentId]);
       const current = judgeAppRouteRecord(record, fresh.get(record.environmentId));
-      if (!current || current.live) {
+      if (!current || current.live || !owned(fresh.get(record.environmentId))) {
         counts.changed++;
         counts.attempts++;
         continue;

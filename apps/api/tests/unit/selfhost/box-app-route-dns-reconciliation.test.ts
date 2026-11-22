@@ -175,7 +175,7 @@ describe('dangling app-route sweep on reverse-tunnel deployment nodes', () => {
     expect(rows().map((r) => r.id)).toEqual(['live-at-box', 'live-at-node']);
   });
 
-  it("release removes the released node's box-addressed records and keeps another live node's", async () => {
+  it("release removes only its own environments' box-addressed records (owner + attack)", async () => {
     const OTHER_ENV = '01KVJDV913S8W7KK32HTZTK0HA';
     await drizzle(env.DATABASE)
       .insert(schema.nodes)
@@ -213,16 +213,62 @@ describe('dangling app-route sweep on reverse-tunnel deployment nodes', () => {
       transport: 'reverse-tunnel',
     });
 
-    // The released node's records go, at the box address and at its own; the other node's stays.
-    expect(rows().map((r) => r.id)).toEqual(['other-live']);
+    // Owner: the released node's environment's records go, at the box address and at its own IP.
+    // Attack: content equal to the box address is not ownership. Another live node's record and
+    // a dangling record of an environment not linked to this node both stay (the latter is the
+    // sweep's to judge).
+    expect(rows().map((r) => r.id)).toEqual(['other-live', 'stopped']);
     expect(counts).toMatchObject({ failed: 0, unknown: 0 });
+  });
+
+  it('release leaves a box-addressed record of an environment on another released node', async () => {
+    const OTHER_ENV = '01KVJDV913S8W7KK32HTZTK0HB';
+    await drizzle(env.DATABASE)
+      .insert(schema.nodes)
+      .values({
+        id: 'other-released-node',
+        userId: 'user',
+        name: 'other-released-node',
+        status: 'destroying',
+        runtime: 'vm',
+        nodeClass: 'managed',
+        nodeRole: 'deployment',
+        transport: 'reverse-tunnel',
+        ipAddress: '10.8.0.7',
+      } as schema.NewNode);
+    await drizzle(env.DATABASE)
+      .insert(schema.deploymentEnvironments)
+      .values({
+        id: OTHER_ENV,
+        projectId: 'project',
+        name: OTHER_ENV,
+        nodeId: 'other-released-node',
+        status: 'stopping',
+      } as schema.NewDeploymentEnvironmentRow);
+    sqlite
+      .prepare(
+        "INSERT INTO selfhost_dns_records (id, name, type, content, created_at, updated_at) VALUES ('other-released', ?, 'A', ?, 'now', 'now')"
+      )
+      .run(host(OTHER_ENV), BOX_IP);
+    sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = 'tunnel-node'").run();
+
+    await releaseNodeAppRouteDnsRecords(env, {
+      id: 'tunnel-node',
+      nodeRole: 'deployment',
+      ipAddress: NODE_IP,
+      transport: 'reverse-tunnel',
+    });
+
+    // Dangling by the predicate, but that node's own release owns it, not this one.
+    expect(rows().map((r) => r.id)).toContain('other-released');
+    expect(rows().map((r) => r.id)).not.toContain('live-at-box');
   });
 
   it('does not hold the teardown on a record at the shared box address it cannot delete', async () => {
     sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = 'tunnel-node'").run();
-    // Another environment's dangling record at the box address that can never be deleted.
+    // Its own environment's record at the box address can never be deleted.
     sqlite.exec(
-      "CREATE TRIGGER keep_stopped BEFORE DELETE ON selfhost_dns_records WHEN OLD.id = 'stopped' BEGIN SELECT RAISE(ABORT, 'stuck'); END"
+      "CREATE TRIGGER keep_box BEFORE DELETE ON selfhost_dns_records WHEN OLD.id = 'live-at-box' BEGIN SELECT RAISE(ABORT, 'stuck'); END"
     );
 
     const counts = await releaseNodeAppRouteDnsRecords(env, {
@@ -232,8 +278,8 @@ describe('dangling app-route sweep on reverse-tunnel deployment nodes', () => {
       transport: 'reverse-tunnel',
     });
 
-    // The node's own records are gone; the stuck one is left to the sweep.
-    expect(rows().map((r) => r.id)).toEqual(['stopped']);
+    // The record at the node's own IP is gone; the stuck box record is left to the sweep.
+    expect(rows().map((r) => r.id)).toEqual(['live-at-box', 'stopped']);
     expect(counts).toMatchObject({ failed: 0, deferred: 0 });
   });
 
