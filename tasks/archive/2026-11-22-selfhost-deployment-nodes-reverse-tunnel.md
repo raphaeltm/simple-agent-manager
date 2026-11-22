@@ -125,7 +125,7 @@ Self-hosting only. Hosted SAM (Cloudflare) must not change.
 - [x] vm-agent config, Caddy tunnel mode, app-ingress handler, applied-route accessor
 - [x] Tests: rule 74 divergence/convergence through the real resolver; cloud-init byte-identity; release-on-box provisions tunnel without Origin CA; route authorization through the real decision with foreign-node / foreign-project attack + owner control, each shown discriminating; Go handler tests
 - [x] Docs: `deploy/selfhost/README.md`, `self-hosting.mdx` (remove the caveat once proven)
-- [ ] Live proof on a disposable box (PENDING, in progress)
+- [x] Live proof on a disposable box (2026-11-22, below)
 - [ ] Staging: hosted app deployment proof on "Deployment Test 1" (PENDING)
 - [x] Follow-up ideas: custom domains on a box (idea 01M81E6FQQ4EFQJR4Y2J7BX4Y3)
 
@@ -144,5 +144,26 @@ Self-hosting only. Hosted SAM (Cloudflare) must not change.
 - Discrimination: see the PR table (5 guards deleted, each reddened exactly its attack test).
 - `SAM_DNS_PUBLIC_IPV4` is a box-only Worker var, read through `BoxDnsSettingsEnv` like `SAM_DNS_PROVIDER`
   (not in `apps/api/src/env.ts`: the Cloudflare Worker never has it).
-- Live box proof: pending.
+- Live box proof (2026-11-22, GCP `sam-vm-control-plane-test`), shared box and the
+  `vmtest.sam2.party` delegation untouched:
+  - Box `sam-depbox` (e2-standard-4, europe-west1-b, 104.199.58.147), `SAM_DOMAIN=depbox.vmtest.sam2.party`,
+    profiles `tunnel,local-store,mail-collector,dns`, built from this branch (edfe68014).
+  - Delegation in Cloud DNS zone `vmtest-sam2-party`: `depbox NS ns1.depbox.vmtest.sam2.party.` + glue.
+  - Caddy got production Let's Encrypt wildcards `*.depbox…` and `*.apps.depbox…` (issuer YE2) by DNS-01
+    against sam-dns. The first `*.apps` order failed with SERVFAIL until sam-dns's first zone sync and the
+    retry 5 minutes later succeeded (README note added).
+  - `gcp-bootstrap` (pool `sam-015e0275`, SA `sam-depbox-nodes`), platform credential, installation pool
+    with `e2-medium`/`e2-standard-2` in europe-west1-b.
+  - Two-service compose (nginx web route proxying `/api/` to `hashicorp/http-echo`). Release 1 went
+    `created` → `applying` → `applied` in about 5 minutes on node `01M81FXMJSJ7S2SX7Q8X965W7Q`
+    (`transport=reverse-tunnel`, healthy, no Origin CA). The GCP VM carries `app-ingress=tunnel` and only
+    the `sam-agent` tag (no `sam-deployment-app-routes`).
+  - `r1-web-80-01m81fsshvzxyhrktnsxz6atec.apps.depbox.vmtest.sam2.party` resolves through Google and
+    Cloudflare DoH to the box (104.199.58.147). `curl` with no `-k` gets `depbox web ok` (200,
+    verify 0) and `/api/` gets `depbox backend ok` (200).
+  - Refused with 404: an unregistered port (`r1-web-81-…`), an unregistered route index (`r2-…`), an
+    unknown environment, the backend service's own port, a dot-segment path, an encoded traversal.
+  - Node 35.195.145.22: direct TCP to 22, 80, 443, 8080, 8443, 8444, 8446 and the app host port 41200
+    all time out. Port 22 is admitted by the project's `default-allow-ssh` at the GCP layer, so the
+    drop is the node's tunnel firewall.
 - Staging (hosted) proof: pending.

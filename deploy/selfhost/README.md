@@ -442,7 +442,10 @@ public agent port. Their app traffic goes through the box as well:
    record the Worker writes per route with [DNS on the box](#dns-on-the-box), or by your
    `*.SAM_DOMAIN` wildcard record without it.
 2. The box's Caddy terminates TLS with a `*.apps.SAM_DOMAIN` wildcard certificate, obtained the
-   same way as the `*.SAM_DOMAIN` one (`SAM_TLS_MODE=dns-rfc2136` or `dns-googleclouddns`).
+   same way as the `*.SAM_DOMAIN` one (`SAM_TLS_MODE=dns-rfc2136` or `dns-googleclouddns`). On a
+   fresh install with DNS on the box it arrives a few minutes after the first `pnpm selfhost:deploy`:
+   sam-dns answers SERVFAIL under `apps.` until its first sync from the Worker, so Caddy's first
+   order fails and its retry (`docker compose logs caddy`, about 5 minutes later) succeeds.
 3. For every request, HTTP or WebSocket, Caddy asks the Worker which node may answer
    (`apps/api/src/selfhost/reverse-tunnel/app-route.ts`). The hostname must be a route of its
    environment's latest release. The environment's node must be a live reverse-tunnel deployment
