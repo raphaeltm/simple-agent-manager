@@ -9,7 +9,11 @@
  * records what would have been spent. The vertical case writes the restriction through the real
  * admin route, so the admin write format and the proxy read are tested together.
  */
-import { getPlatformAIModelTier } from '@simple-agent-manager/shared';
+import {
+  AI_PROXY_DEFAULT_MODEL_KV_KEY,
+  DEFAULT_AI_PROXY_MODEL,
+  getPlatformAIModelTier,
+} from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import type { Context, Next } from 'hono';
 import { Hono } from 'hono';
@@ -374,7 +378,9 @@ describe('the default model is gated like a requested one', () => {
   it('chat completions without a model resolves the default first, then applies the restriction', async () => {
     // Omitting `model` must not be a way around the restriction: the proxy resolves the default
     // (`resolveModelId`) before the gate, and the default Workers AI model is low-cost.
-    expect(getPlatformAIModelTier(LOW_COST_MODEL)).toBe('low-cost');
+    // Read the default from the shared constant so a default change cannot leave this test pinned
+    // to a model that is no longer the default (or no longer served).
+    expect(getPlatformAIModelTier(DEFAULT_AI_PROXY_MODEL)).toBe('low-cost');
     const withoutModel = (env: Env) =>
       makeApp().request(
         '/ai/v1/chat/completions',
@@ -389,13 +395,13 @@ describe('the default model is gated like a requested one', () => {
     const restricted = makeEnv();
     await restrict(restricted, ['standard']);
     const error = await denial(await withoutModel(restricted));
-    expect(error.message).toContain(`Model '${LOW_COST_MODEL}' is in the low-cost tier`);
+    expect(error.message).toContain(`Model '${DEFAULT_AI_PROXY_MODEL}' is in the low-cost tier`);
     expect(upstreamCalls).toEqual([]);
 
     const allowed = makeEnv();
     await restrict(allowed, ['low-cost']);
     expect((await withoutModel(allowed)).status).toBe(200);
-    expect(upstreamCalls).toEqual([expect.objectContaining({ model: LOW_COST_MODEL })]);
+    expect(upstreamCalls).toEqual([expect.objectContaining({ model: DEFAULT_AI_PROXY_MODEL })]);
   });
 });
 
@@ -422,5 +428,49 @@ describe('restriction written through the real admin route', () => {
     expect((await setTiers(null)).status).toBe(200);
     expect((await proxy(app, env, 'chat/completions', 'claude-sonnet-5')).status).toBe(200);
     expect(upstreamCalls.map((call) => call.model)).toEqual([LOW_COST_MODEL, 'claude-sonnet-5']);
+  });
+});
+
+describe('an admin default saved before its model was retired', () => {
+  const chatWithoutModel = (env: Env) =>
+    makeApp().request(
+      '/ai/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ws-token' },
+        body: JSON.stringify({ messages: [{ role: 'user', content: 'hello' }] }),
+      },
+      env
+    );
+
+  it('falls back to the current default instead of sending the retired model upstream', async () => {
+    // Qwen 3 30B was a selectable admin default until Cloudflare retired it on 2026-11-20.
+    // PUT /api/admin/ai-proxy/config only stores registry models, so this row predates the removal.
+    const env = makeEnv();
+    await env.KV.put(
+      AI_PROXY_DEFAULT_MODEL_KV_KEY,
+      JSON.stringify({
+        defaultModel: '@cf/qwen/qwen3-30b-a3b-fp8',
+        updatedAt: '2026-10-01T00:00:00Z',
+      })
+    );
+
+    expect((await chatWithoutModel(env)).status).toBe(200);
+    expect(upstreamCalls).toEqual([expect.objectContaining({ model: DEFAULT_AI_PROXY_MODEL })]);
+    expect(warnLines.some((line) => line.includes('ai_proxy.admin_default_model_ignored'))).toBe(
+      true
+    );
+  });
+
+  it('still honours an admin default that is in the registry', async () => {
+    const env = makeEnv();
+    await env.KV.put(
+      AI_PROXY_DEFAULT_MODEL_KV_KEY,
+      JSON.stringify({ defaultModel: LOW_COST_MODEL, updatedAt: '2026-11-21T00:00:00Z' })
+    );
+
+    expect((await chatWithoutModel(env)).status).toBe(200);
+    expect(upstreamCalls).toEqual([expect.objectContaining({ model: LOW_COST_MODEL })]);
+    expect(LOW_COST_MODEL).not.toBe(DEFAULT_AI_PROXY_MODEL);
   });
 });

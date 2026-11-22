@@ -494,7 +494,7 @@ Task workspaces are checked out on the generated output branch. Commits, pushes 
 
 | Variable                          | Default               | Description                                            |
 | --------------------------------- | --------------------- | ------------------------------------------------------ |
-| `DEBUG_AGENT_MODEL`               | `@cf/zai-org/glm-5.2` | Workers AI model for superadmin deployment diagnosis   |
+| `DEBUG_AGENT_MODEL`               | `@cf/deepseek-ai/deepseek-v4.1-flash-1017` | Workers AI model for superadmin deployment diagnosis   |
 | `DEBUG_AGENT_MAX_TURNS`           | `6`                   | Maximum model/tool turns per diagnosis                 |
 | `DEBUG_AGENT_RUN_TOKEN_LIMIT`     | `96000`               | Combined token ceiling per diagnosis                   |
 | `DEBUG_AGENT_MODEL_OUTPUT_TOKENS` | `4096`                | Maximum output tokens requested per model turn         |
@@ -1647,6 +1647,7 @@ Safe operator sequence for ProjectData storage relief:
 | `CREDENTIAL_LIMIT_SUPPORTED_SOURCES`                        | built-in sources            | Comma-separated allowlist of VM-agent and AI-proxy telemetry source identifiers accepted by credential-limit telemetry                                                                                                                                                               |
 | `CREDENTIAL_LIMIT_SUPPORTED_WINDOW_TYPES`                   | built-in windows            | Comma-separated allowlist of provider quota window identifiers accepted by credential-limit telemetry                                                                                                                                                                                |
 | `AI_PROXY_REQUEST_BODY_MAX_BYTES`                           | `1048576`                   | Maximum raw JSON bytes accepted by OpenAI-compatible, Anthropic-native, and passthrough AI proxy request endpoints before request validation                                                                                                                                         |
+| `AI_PROXY_DEFAULT_MODEL` | `@cf/google/gemma-4-26b-a4b-it` | Model the AI proxy uses when a `sam`-mode request names no model and no usable admin default is saved on the AI Proxy admin page (KV). A saved admin default whose model is no longer in the platform catalog (for example one Cloudflare retired) is ignored and this value applies; resolved in `routes/ai-proxy-model-resolution.ts` (`readAdminDefaultAIProxyModel`, `resolveModelId`) |
 | `AI_PROXY_ALLOWED_MODELS`                                   | platform catalog            | Comma-separated models the AI proxy serves on every route that spends platform credentials, the native Anthropic endpoint included; any other model returns `400`                                                                                                                    |
 
 Ordinary ProjectData storage alarms record O(1) `databaseSize` telemetry and

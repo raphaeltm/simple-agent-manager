@@ -136,7 +136,6 @@ export function assertOperatorModelSupportsTools(
 export function operatorProviderOptions(modelId: string) {
   switch (modelId) {
     case '@cf/deepseek-ai/deepseek-v4.1-flash-1017':
-    case '@cf/zai-org/glm-5.3-flash':
       // Low effort keeps tool turns responsive (DeepSeek otherwise defaults to high).
       return { [WORKERS_AI_PROVIDER_ID]: { reasoningEffort: 'low' } };
     default:

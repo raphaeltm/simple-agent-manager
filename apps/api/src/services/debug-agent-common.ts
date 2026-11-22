@@ -138,6 +138,23 @@ Rules:
 - Do not emit user IDs, IP addresses, user agents, credentials, tokens, authorization material, or raw secret-like strings.
 - Do not claim you executed commands or changed state; all tools are read-only.`;
 
+/**
+ * Request-body controls for models with reasoning quirks, kept in one explicit capability boundary
+ * (compare `getTaskTitleModelControls` and `operatorProviderOptions`). A model not listed here,
+ * for example a `DEBUG_AGENT_MODEL` override, gets the provider's defaults.
+ */
+export function debugAgentModelControls(model: string): { reasoning_effort?: string } {
+  switch (model) {
+    case '@cf/deepseek-ai/deepseek-v4.1-flash-1017':
+      // DeepSeek defaults to `high`. Reasoning tokens count against the per-turn
+      // DEBUG_AGENT_MODEL_OUTPUT_TOKENS cap, and diagnosis is evidence correlation over tool
+      // results rather than long derivation, so `low` keeps every turn inside that cap.
+      return { reasoning_effort: 'low' };
+    default:
+      return {};
+  }
+}
+
 export function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? '', 10);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;

@@ -1073,7 +1073,7 @@ describe('Admin Observability Routes', () => {
         startTime: '2026-07-29T10:00:00Z',
         endTime: '2026-07-29T10:30:00Z',
         diagnosis: 'Actionable result',
-        model: '@cf/zai-org/glm-5.2',
+        model: '@cf/deepseek-ai/deepseek-v4.1-flash-1017',
         ideaId: null,
         createdBy: 'user-superadmin',
         createdAt: '2026-07-29T10:31:00Z',

@@ -13,9 +13,11 @@ import {
   type AIProxyConfig,
   DEFAULT_AI_PROXY_ALLOWED_MODELS,
   DEFAULT_AI_PROXY_MODEL,
+  PLATFORM_AI_MODELS,
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { isAnthropicModel } from '../services/ai-proxy-shared';
 
 // =============================================================================
@@ -69,22 +71,70 @@ export function normalizeModelId(model: string): string {
   return resolved;
 }
 
+/**
+ * The AI proxy default below the admin KV override: the `AI_PROXY_DEFAULT_MODEL` var when set,
+ * else `DEFAULT_AI_PROXY_MODEL`. Every reader goes through here so an empty var means unset
+ * everywhere and the omitted-var proof (`omitted-worker-var-defaults.test.ts`) covers one site.
+ */
+export function resolveEnvDefaultAIProxyModel(env: Pick<Env, 'AI_PROXY_DEFAULT_MODEL'>): {
+  model: string;
+  source: 'env' | 'default';
+} {
+  return env.AI_PROXY_DEFAULT_MODEL
+    ? { model: env.AI_PROXY_DEFAULT_MODEL, source: 'env' }
+    : { model: DEFAULT_AI_PROXY_MODEL, source: 'default' };
+}
+
+/**
+ * The admin-set default model stored in KV, or `null` when none is usable.
+ *
+ * `PUT /api/admin/ai-proxy/config` only accepts `PLATFORM_AI_MODELS` entries that support
+ * chat-completions tool calls, so a stored value that fails that same test was saved before the model
+ * was removed or re-flagged, usually because the
+ * provider retired it (Cloudflare retired Qwen 3 30B and GLM 5.2/5.3 Flash on 2026-11-20, and
+ * requests to them return HTTP 410). Such a value is ignored so model-less requests fall through
+ * to the env/shared default instead of failing until an admin resets the setting. The KV entry is
+ * left in place; the admin page reports the effective default and saving a new one replaces it.
+ * Corrupt JSON is ignored the same way.
+ */
+export async function readAdminDefaultAIProxyModel(
+  env: Pick<Env, 'KV'>
+): Promise<{ model: string; updatedAt: string | null } | null> {
+  const kvConfig = await env.KV.get(AI_PROXY_DEFAULT_MODEL_KV_KEY);
+  if (!kvConfig) return null;
+  let parsed: AIProxyConfig;
+  try {
+    parsed = JSON.parse(kvConfig);
+  } catch {
+    log.warn('ai_proxy.admin_default_model_ignored', { reason: 'corrupt_json' });
+    return null;
+  }
+  if (!parsed?.defaultModel) return null;
+  const model = normalizeModelId(parsed.defaultModel);
+  if (
+    !PLATFORM_AI_MODELS.some(
+      (m) => m.id === model && m.supportsChatCompletionsToolCalls !== false
+    )
+  ) {
+    log.warn('ai_proxy.admin_default_model_ignored', {
+      reason: 'not_a_selectable_default',
+      storedModel: parsed.defaultModel,
+      action: 'fell_back_to_env_or_shared_default',
+    });
+    return null;
+  }
+  return { model, updatedAt: parsed.updatedAt ?? null };
+}
+
 /** Resolve model from request, falling back to admin KV override > env var > shared constant. */
 export async function resolveModelId(model: string | undefined, env: Env): Promise<string> {
   if (model) return normalizeModelId(model);
 
-  // Priority: KV (admin-set) > env var > shared constant
-  const kvConfig = await env.KV.get(AI_PROXY_DEFAULT_MODEL_KV_KEY);
-  if (kvConfig) {
-    try {
-      const parsed: AIProxyConfig = JSON.parse(kvConfig);
-      if (parsed.defaultModel) return normalizeModelId(parsed.defaultModel);
-    } catch {
-      /* ignore corrupt KV data, fall through */
-    }
-  }
+  // Priority: KV (admin-set, still in the registry) > env var > shared constant
+  const adminDefault = await readAdminDefaultAIProxyModel(env);
+  if (adminDefault) return adminDefault.model;
 
-  return normalizeModelId(env.AI_PROXY_DEFAULT_MODEL || DEFAULT_AI_PROXY_MODEL);
+  return normalizeModelId(resolveEnvDefaultAIProxyModel(env).model);
 }
 
 // =============================================================================

@@ -195,7 +195,7 @@ The diagnosis agent gets only the bounded redacted preview through its read-only
 
 | Variable                          | Default               | Description                                                                                      |
 | --------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------ |
-| `DEBUG_AGENT_MODEL`               | `@cf/zai-org/glm-5.2` | Workers AI model used for diagnosis                                                              |
+| `DEBUG_AGENT_MODEL`               | `@cf/deepseek-ai/deepseek-v4.1-flash-1017` | Workers AI model used for diagnosis                                                              |
 | `DEBUG_AGENT_MAX_TURNS`           | `6`                   | Max model/tool turns per diagnosis                                                               |
 | `DEBUG_AGENT_RUN_TOKEN_LIMIT`     | `96000`               | Combined token ceiling per diagnosis                                                             |
 | `DEBUG_AGENT_MODEL_OUTPUT_TOKENS` | `4096`                | Max output tokens per model turn                                                                 |

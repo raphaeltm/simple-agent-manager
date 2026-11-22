@@ -11,6 +11,7 @@ import {
 } from '../../../src/services/admin-settings';
 import { isAiProxyEnabled } from '../../../src/services/ai-proxy-availability';
 import { fetchWorkersAIChatCompletion } from '../../../src/services/ai-proxy-shared';
+import { resolveDebugAgentConfig } from '../../../src/services/debug-agent-common';
 import { complete } from '../../../src/services/debug-agent-tools';
 import { resolveOpenAICompatibleTarget } from '../../../src/services/llm-chat-target';
 import * as capabilities from '../../../src/services/platform-capabilities';
@@ -334,6 +335,25 @@ describe('L12 endpoint routing through real settings storage/cache', () => {
       await vi.advanceTimersByTimeAsync(5000);
     }
   );
+});
+
+describe('debug agent model controls follow the model actually called', () => {
+  it('drops the DeepSeek reasoning effort when an admin endpoint substitutes its own model', async () => {
+    await configure();
+    const config = resolveDebugAgentConfig(env);
+    expect(config.model).toBe('@cf/deepseek-ai/deepseek-v4.1-flash-1017');
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: 'done' } }] }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    await complete(env, config, 'diagnosis', [{ role: 'user', content: 'hello' }], 32);
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(body.model).toBe('operator-model');
+    expect(body).not.toHaveProperty('reasoning_effort');
+  });
 });
 
 describe('L11 gateway condition vs ambient gateway ID', () => {

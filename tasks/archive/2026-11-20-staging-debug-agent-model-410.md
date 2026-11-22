@@ -19,7 +19,14 @@ override; check `DEBUG_AGENT_MODEL` in the staging Worker vars and the GitHub En
 
 ## Acceptance Criteria
 
-- [ ] Root cause of the 410 identified (model retired, override, or gateway).
-- [ ] Staging triage creates an idea for a new signature again.
-- [ ] Production confirmed unaffected, or fixed in the same change.
-- [ ] If the model was retired, the catalog lifecycle rule (52) is followed.
+- [x] Root cause of the 410 identified (model retired, override, or gateway).
+- [ ] Staging triage creates an idea for a new signature again. (Verified under the superseding task; see its acceptance criteria.)
+- [x] Production confirmed unaffected, or fixed in the same change. (Production was affected from 2026-11-22; fixed in the same change.)
+- [x] If the model was retired, the catalog lifecycle rule (52) is followed.
+
+## Resolution (2026-11-22)
+
+Root cause: `DEFAULT_DEBUG_AGENT_MODEL` was `@cf/zai-org/glm-5.2`, which Cloudflare retired on
+2026-11-20. Production failed the same way from 2026-11-22. Fixed by
+`tasks/archive/2026-11-22-finish-retired-workers-ai-migration.md` (debug agent moved to DeepSeek
+V4.1 Flash, retired IDs pruned under rule 52).

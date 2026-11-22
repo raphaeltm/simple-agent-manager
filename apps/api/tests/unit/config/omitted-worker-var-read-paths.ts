@@ -48,6 +48,7 @@ import { resolveOrchestratorConfig, resolveSamConfig } from '@simple-agent-manag
 import { resolveD1SessionMode } from '../../../src/lib/d1-session';
 import { resolveSearchQueryLimits } from '../../../src/lib/search-query-limits';
 import { getRateLimit } from '../../../src/middleware/rate-limit';
+import { resolveModelId } from '../../../src/routes/ai-proxy-model-resolution';
 import { getMcpLimits } from '../../../src/routes/mcp/_helpers';
 import { resolveMaxMessageBytes } from '../../../src/routes/workspaces/runtime';
 import { throttleKey } from '../../../src/scheduled/failed-sweep-notifications';
@@ -104,6 +105,11 @@ export const READ_PATHS: readonly ReadPath[] = [
     label: 'SAM assistant model default',
     sources: ['packages/shared/src/constants/sam.ts'],
     read: (env) => resolveSamConfig(env),
+  },
+  {
+    label: 'AI proxy default model when a request names none and no admin KV default is saved',
+    sources: [`${API}/routes/ai-proxy-model-resolution.ts`],
+    read: (env) => resolveModelId(undefined, asEnv({ ...env, KV: { get: async () => null } })),
   },
   {
     label: 'managed VM tunnel transport and connector boot configuration',

@@ -243,8 +243,6 @@ interface TaskTitleModelControls {
 /** Keep provider/model quirks inside an explicit capability boundary. */
 export function getTaskTitleModelControls(modelId: string): TaskTitleModelControls {
   switch (modelId) {
-    case '@cf/zai-org/glm-5.2':
-      return { chatTemplateKwargs: { enable_thinking: false } };
     case '@cf/zai-org/glm-4.7-flash':
     case '@cf/google/gemma-4-26b-a4b-it':
       return { reasoningEffort: null, chatTemplateKwargs: { enable_thinking: false } };
