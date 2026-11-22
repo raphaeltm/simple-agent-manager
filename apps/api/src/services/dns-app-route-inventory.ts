@@ -22,7 +22,6 @@ import {
   deleteDNSRecord,
   findDNSRecordMatchesByName,
   readCloudflareError,
-  updateDNSRecord,
 } from './dns-core';
 import { boxDnsBackendFor } from './dns-provider';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
@@ -287,7 +286,8 @@ async function readAppRouteDnsRecord(
 export async function repointObservedAppRouteDnsRecord(
   env: Env,
   record: Pick<AppRouteDnsRecord, 'id' | 'name'>,
-  address: string
+  address: string,
+  signal?: AbortSignal
 ): Promise<void> {
   if (!parseAppRouteHostname(record.name, env.BASE_DOMAIN)) {
     throw new Error(`Refusing to repoint a DNS record outside the app-route namespace`);
@@ -297,7 +297,26 @@ export async function repointObservedAppRouteDnsRecord(
     await box.upsertARecord(record.name, address, env);
     return;
   }
-  await updateDNSRecord(record.id, address, env);
+  if (signal?.aborted) throw signal.reason;
+  // The caller's deadline bounds the request and its error body (fetchWithTimeout).
+  const response = await fetchWithTimeout(
+    `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records/${record.id}`,
+    {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${env.CF_API_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: address }),
+    },
+    getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS),
+    signal
+  );
+  if (!response.ok) {
+    throw new Error(
+      await readCloudflareError(
+        response,
+        `Failed to repoint app-route DNS record: ${response.status}`
+      )
+    );
+  }
 }
 
 /**

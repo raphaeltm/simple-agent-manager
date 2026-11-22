@@ -285,7 +285,7 @@ export async function cleanupRecords(
           }
           continue;
         }
-        await repointObservedAppRouteDnsRecord(env, record, liveAddress);
+        await repointObservedAppRouteDnsRecord(env, record, liveAddress, input.signal);
         // The live node may have started teardown between the read above and the update, its
         // own release cleanup listing before the record pointed at it. Judge once more and, if
         // the address is no longer live, delete the record now rather than at the next sweep.

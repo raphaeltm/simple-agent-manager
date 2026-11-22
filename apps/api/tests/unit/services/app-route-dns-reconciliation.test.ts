@@ -1163,3 +1163,41 @@ describe('Codex review round 8', () => {
     expect(zone.requests.some((r) => r.method === 'PATCH')).toBe(false);
   });
 });
+
+describe('Codex review round 9', () => {
+  it('ends a hung repoint as soon as the caller deadline fires', async () => {
+    await seedNode('releasing', 'destroying', RELEASED_IP);
+    await seedNode('live-node', 'running', LIVE_IP);
+    await seedEnvironment(ENV_LIVE, 'live-node');
+    const zone = createFakeCloudflareDns({
+      zoneId: ZONE,
+      token: TOKEN,
+      seed: [rec('moved', host(ENV_LIVE), RELEASED_IP)],
+    });
+    const deadline = new AbortController();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          // The PATCH stalls; the node teardown's deadline fires meanwhile.
+          setTimeout(() => deadline.abort(new Error('teardown deadline')), 50);
+          return new Promise<Response>((_, reject) =>
+            init.signal?.addEventListener('abort', () => reject(init.signal?.reason))
+          );
+        }
+        return zone.fetch(input, init);
+      })
+    );
+
+    const started = Date.now();
+    await expect(
+      releaseNodeAppRouteDnsRecords(
+        env,
+        { id: 'releasing', nodeRole: 'deployment', ipAddress: RELEASED_IP },
+        deadline.signal
+      )
+    ).rejects.toThrow(/Could not delete 1/);
+    // Bounded by the caller's deadline, not the 5 s per-request timeout.
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+});
