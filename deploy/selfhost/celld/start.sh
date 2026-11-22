@@ -43,6 +43,8 @@ case "$check_seconds" in 0.1|0.05|0.01) ;; *) echo "invalid fence check interval
 celld="${SAM_CELLD_BIN:-/usr/local/bin/celld}"
 heap_restart_ticks="${SAM_CELLD_HEAP_RESTART_TICKS:-2}"
 case "$heap_restart_ticks" in '' | *[!0-9]*) echo "invalid SAM_CELLD_HEAP_RESTART_TICKS" >&2; exit 64;; esac
+# Base 10, so `08` is eight and not an octal error that would silently disable the restart.
+heap_restart_ticks=$((10#$heap_restart_ticks))
 
 log() { echo "[celld-start] $*" >&2; }
 
@@ -115,9 +117,12 @@ redact_logs() {
 }
 heap_restart=0
 pid=""
-trap 'heap_restart=1; [[ -n "$pid" ]] && kill -TERM "$pid" 2>/dev/null || true' USR1
+# One-shot: a second SIGTERM could cut celld's graceful drain short.
+trap '((heap_restart)) || { heap_restart=1; [[ -n "$pid" ]] && kill -TERM "$pid" 2>/dev/null; } || true' USR1
 "$celld" "$@" > >(redact_logs) 2> >(redact_logs >&2) &
 pid=$!
+# A request that arrived before $pid was known.
+((heap_restart)) && kill -TERM "$pid" 2>/dev/null || true
 trap 'kill -TERM "$pid" 2>/dev/null || true' TERM INT
 
 while kill -0 "$pid" 2>/dev/null; do

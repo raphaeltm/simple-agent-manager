@@ -61,13 +61,20 @@ observability `platform_errors` table. Only the restart cleared it; nothing aler
       the reset removed and with the call removed
 - [x] Fence-lab test of the real `start.sh` (restart, below-threshold and spoofed-line controls) —
       proven red with the restart disabled
-- [x] Rule-81 test: retention backlog of 2 batches + 1 at default bounds through the scheduled
-      entry point; no statement returns rows to JS
+- [x] Rule-81 test: retention backlog of 2 batches + 1 at default bounds through the sweep's own
+      scheduled entry point (`runScheduledDeploymentReleaseRetention`, with its interval gate); no
+      statement returns rows to JS
 - [x] README troubleshooting section updated
-- [ ] Live: deploy branch to the box, verify `CELLD_V8_HEAP_LIMIT_MB` applied (`/state`
-      `limit_bytes`/heap) and sweeps clean; leave box on main afterwards
-- [ ] Follow-ups: idea for shrinking the celld bundle (minified / one-byte source); upstream note
-      for celld in the idea
+- [x] Review fixes: threshold parsed base 10, one-shot restart, pre-`pid` request honoured; the
+      fence-lab test now feeds start.sh lines produced by the real detector + logger behind celld's
+      recorded console prefix (stdout and stderr, `0` disables); `celld-heap-marker.live.test.ts`
+      pins the marker against the pinned celld binary
+- [x] Live: box upgraded to the branch 2026-11-22 19:19:58Z (`selfhost:upgrade`, encrypted
+      pre-upgrade backup); celld's process env has `CELLD_V8_HEAP_LIMIT_MB=384` and
+      `SAM_CELLD_HEAP_RESTART_TICKS=2`; sweeps after it: 0 failed, `isolateHeapLimitTicks:0`
+- [ ] Return the box to main after merge
+- [x] Follow-ups: idea 01M82BATKM4PS4Z0GGR27QCY1N (shrink the celld bundle); upstream celld note
+      on idea 01M7W6ZTZETXE75N8NRKR3R0CF
 
 ## Acceptance Criteria
 

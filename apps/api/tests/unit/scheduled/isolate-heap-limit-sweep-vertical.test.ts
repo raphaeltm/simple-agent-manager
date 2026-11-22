@@ -87,6 +87,7 @@ describe('scheduled handler: isolate stuck over its V8 heap limit', () => {
   });
 
   afterEach(() => {
+    vi.mocked(persistError).mockReset();
     vi.restoreAllMocks();
     sqlite.close();
   });
@@ -140,10 +141,51 @@ describe('scheduled handler: isolate stuck over its V8 heap limit', () => {
     expect(events(ISOLATE_HEAP_LIMIT_EVENT).map((event) => event.consecutiveTicks)).toEqual([
       1, 2, 1,
     ]);
+    // Liveness: all four ticks ran both sweeps; only the three refused ticks failed them.
+    expect(events('cron.sweep_failed')).toHaveLength(6);
     // The clean tick really ran the sweeps (they wrote their KV markers) and reported zero.
     expect(events('cron.completed').map((event) => event.isolateHeapLimitTicks)).toEqual([
       1, 2, 0, 1,
     ]);
+  });
+
+  it('counts only the refused sweeps on a tick that also has an unrelated failure', async () => {
+    const kv = env.KV;
+    env = {
+      ...env,
+      KV: {
+        ...kv,
+        get: async (key: string, ...rest: never[]) => {
+          if (key.includes('gcp')) throw new Error('KV GET failed: 503 Service Unavailable');
+          return (kv.get as (...args: unknown[]) => unknown)(key, ...rest);
+        },
+      },
+    } as unknown as Env;
+
+    await scheduled(controller, env, context);
+
+    expect(events('cron.sweep_failed')).toHaveLength(2);
+    expect(events(ISOLATE_HEAP_LIMIT_EVENT)).toMatchObject([
+      { consecutiveTicks: 1, sweepCount: 1, sweeps: ['deployment_release_retention'] },
+    ]);
+  });
+
+  it('keeps counting when recording the failure itself fails', async () => {
+    vi.mocked(persistError).mockImplementation(async (_db, error) => {
+      if (
+        (error.context as { recoveryType?: string } | undefined)?.recoveryType ===
+        'isolate_heap_limit'
+      ) {
+        throw new Error('observability D1 unavailable');
+      }
+    });
+
+    await scheduled(controller, env, context);
+    await scheduled(controller, env, context);
+
+    expect(events(ISOLATE_HEAP_LIMIT_EVENT).map((event) => event.consecutiveTicks)).toEqual([1, 2]);
+    expect(events('cron.isolate_heap_limit_persist_failed')).toHaveLength(2);
+    expect(events('cron.completed').map((event) => event.isolateHeapLimitTicks)).toEqual([1, 2]);
   });
 
   it('ignores sweep failures that are not the heap refusal', async () => {
