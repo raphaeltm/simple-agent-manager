@@ -10,7 +10,7 @@
  */
 import { expect, type Page, test, type WebSocketRoute } from '@playwright/test';
 
-import { assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
+import { assertNoClippedOverflow, assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
 
 const WS_ID = 'ws-geometry-1';
 const USER_ID = 'user-geometry-1';
@@ -180,6 +180,11 @@ class FakeAgent {
   latest(): PtySession {
     const all = [...this.sessions.values()];
     return all[all.length - 1]!;
+  }
+
+  /** PTY output produced while no client is attached; only the reattach replay can show it. */
+  outputWhileDetached(text: string) {
+    this.first().history += text;
   }
 
   /** PTY created first (terminal tab 1). */
@@ -379,6 +384,7 @@ test.describe('Terminal geometry (xterm 6)', () => {
 
     const initial = await expectPtyMatchesScreen(page, agent, 'initial');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'terminal-geometry-full-width-line', { scopeToProject: true });
 
     // Window resize (mobile rotation when the viewport is a phone). Only the settled size may
@@ -391,6 +397,7 @@ test.describe('Terminal geometry (xterm 6)', () => {
     const rotated = await expectPtyMatchesScreen(page, agent, 'rotated');
     expect(sentSize(mark), 'rotation sends only the settled size').toEqual([`${rotated.pty.rows}x${rotated.pty.cols}`]);
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'terminal-geometry-rotated', { scopeToProject: true });
 
     mark = agent.resizes.length;
@@ -440,6 +447,7 @@ test.describe('Terminal geometry (xterm 6)', () => {
     // cols to the hidden tab's PTY. No real pane here is 5 rows tall.
     expect(agent.resizes.filter((r) => r.rows <= 5), 'no hidden-measurement resize').toEqual([]);
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'terminal-geometry-reactivated-tab', { scopeToProject: true });
   });
 
@@ -480,13 +488,20 @@ test.describe('Terminal geometry (xterm 6)', () => {
     // the scrollback replay renders.
     const before = await expectPtyMatchesScreen(page, agent, 'before reconnect');
     await agent.socket!.close();
+    agent.outputWhileDetached('built-while-detached\r\n$ ');
     await expect.poll(() => agent.reattaches.length, { timeout: 15_000, message: 'reattach' }).toBe(1);
     expect(agent.reattaches[0]).toEqual({ sessionId: agent.first().serverId, ...before.pty });
     await expect(page.getByText('Reconnecting...')).toHaveCount(0);
-    await expect(page.locator('.xterm-rows')).toContainText('$');
+    // The replayed scrollback is rendered: output the PTY produced while detached appears.
+    await expect
+      .poll(async () => (await rowTexts(page)).some((row) => row.includes('built-while-detached')), {
+        message: 'replayed scrollback',
+      })
+      .toBe(true);
     await page.locator('.xterm').first().click();
     await expectPtyMatchesScreen(page, agent, 'after reconnect');
     expect(agent.reattaches, 'exactly one reattach per reconnect').toHaveLength(1);
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 });

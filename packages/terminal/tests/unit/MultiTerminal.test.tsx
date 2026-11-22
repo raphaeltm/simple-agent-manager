@@ -259,6 +259,30 @@ describe('MultiTerminal', () => {
     expect(mockTerminalInput).toHaveBeenCalledWith('\x1b[1;5D', true);
   });
 
+  it('refits after a window resize settles, never synchronously', async () => {
+    layOutElements();
+    MockWebSocket.sessionListResponse = [
+      { sessionId: 'srv-window', name: 'Window', status: 'running', createdAt: new Date().toISOString() },
+    ];
+    const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
+    render(<MultiTerminal {...defaultProps} />);
+    await waitFor(() => expect(resizesFor(sendSpy, 'srv-window')).not.toEqual([]));
+    await notifyContainerResize();
+    sendSpy.mockClear();
+
+    // Cell metrics change (e.g. devicePixelRatio) with no container size change.
+    mockTerminalDimensions.rows = 26;
+    mockTerminalDimensions.cols = 90;
+    fireEvent.resize(window);
+    expect(resizesFor(sendSpy, 'srv-window'), 'no synchronous fit').toEqual([]);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+    expect(resizesFor(sendSpy, 'srv-window')).toEqual([
+      { type: 'resize', sessionId: 'srv-window', data: { rows: 26, cols: 90 } },
+    ]);
+  });
+
   it('fits a terminal mounted while hidden once it is revealed', async () => {
     MockWebSocket.sessionListResponse = [
       { sessionId: 'srv-revealed', name: 'Revealed', status: 'running', createdAt: new Date().toISOString() },

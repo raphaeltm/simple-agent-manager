@@ -42,6 +42,8 @@ import type {
 
 const PING_INTERVAL_MS = 30_000;
 const RECONNECT_DELAY_MS = 3000;
+/** Fit after a resize burst settles, so the measurement reads the final layout. */
+const RESIZE_DEBOUNCE_MS = 100;
 
 /**
  * Whether a terminal container is rendered. A `display:none` container (an inactive tab, or
@@ -589,8 +591,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
 
           // The ResizeObserver handles every container size change: window resize and
           // rotation, panel resize, and display:none → display:block on tab switch. It is
-          // debounced so it reads the settled layout; a synchronous window `resize` fit ran
-          // before the breakpoint re-render and sent the PTY a transient size (e.g. 6 cols).
+          // debounced so it reads the settled layout.
           if (instance.resizeObserver) {
             instance.resizeObserver.disconnect();
           }
@@ -608,13 +609,40 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
                 }
                 sendTerminalResize(sessionId);
               }
-            }, 100);
+            }, RESIZE_DEBOUNCE_MS);
           });
           instance.resizeObserver.observe(containerEl);
         }
       },
       [sendTerminalResize]
     );
+
+    // Window resizes that leave the container box unchanged can still change cell metrics
+    // (devicePixelRatio, zoom), which the ResizeObserver does not see. Fit after the resize
+    // settles, never synchronously: a synchronous fit ran before the breakpoint re-render and
+    // sent the PTY a transient size. Duplicate sizes are dropped by sendTerminalResize.
+    useEffect(() => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const handleResize = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          if (!activeSessionId) return;
+          const instance = terminalsRef.current.get(activeSessionId);
+          if (!instance || !hasLayout(instance.containerEl)) return;
+          try {
+            instance.fitAddon.fit();
+          } catch {
+            return; // terminal disposed
+          }
+          sendTerminalResize(activeSessionId);
+        }, RESIZE_DEBOUNCE_MS);
+      };
+      window.addEventListener('resize', handleResize);
+      return () => {
+        clearTimeout(timer);
+        window.removeEventListener('resize', handleResize);
+      };
+    }, [activeSessionId, sendTerminalResize]);
 
     // When active tab changes, fit the terminal.
     // Use double-rAF to ensure the browser has fully recalculated layout after
