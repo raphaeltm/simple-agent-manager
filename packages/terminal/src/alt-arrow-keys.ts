@@ -29,7 +29,11 @@ export function altArrowSequence(key: string, isMac: boolean): string | null {
   }
 }
 
-/** Keep the xterm 5 Alt+Arrow word-navigation behavior on an xterm 6 terminal. */
+/**
+ * Keep the xterm 5 Alt+Arrow word-navigation behavior on an xterm 6 terminal.
+ * xterm allows one custom key handler per terminal and a second call replaces this one, so
+ * any future key handling must be added here rather than attached separately.
+ */
 export function preserveAltArrowWordNavigation(terminal: XTerm, isMac = detectMac()): void {
   terminal.attachCustomKeyEventHandler((event) => {
     if (event.type !== 'keydown') return true;

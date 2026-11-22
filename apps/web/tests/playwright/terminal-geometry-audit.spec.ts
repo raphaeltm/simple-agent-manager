@@ -14,8 +14,6 @@ import { assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
 
 const WS_ID = 'ws-geometry-1';
 const USER_ID = 'user-geometry-1';
-/** xterm 6's overlay scrollbar width, which addon-fit 0.11 reserves on the right. */
-const SCROLLBAR_RESERVE_PX = 14;
 
 const MOCK_USER = makeMockUser({
   email: 'geometry@example.com',
@@ -81,6 +79,8 @@ class FakeAgent {
   resizes: Array<{ sessionId: string; rows: number; cols: number }> = [];
   reattaches: Array<{ sessionId: string; rows: number; cols: number }> = [];
   socket: WebSocketRoute | null = null;
+  /** PTY that ran the most recent command (the visible tab's, since input goes there). */
+  lastCommandSession: PtySession | null = null;
 
   attach(ws: WebSocketRoute) {
     this.socket = ws;
@@ -164,6 +164,7 @@ class FakeAgent {
   }
 
   private run(ws: WebSocketRoute, s: PtySession, command: string) {
+    this.lastCommandSession = s;
     if (command === 'size') {
       // Like `stty size; printf '%*s\n' "$(tput cols)" | tr ' ' '#'`
       this.output(ws, s, `${s.rows} ${s.cols}\r\n${'#'.repeat(s.cols)}\r\n$ `);
@@ -240,7 +241,12 @@ async function setupMocks(page: Page, agent: FakeAgent) {
 interface Geometry {
   hostWidth: number;
   hostHeight: number;
+  hostLeft: number;
   hostRight: number;
+  /** xterm 6's overlay scrollbar, which addon-fit 0.11 reserves room for on the right. */
+  scrollbarLeft: number;
+  scrollbarRight: number;
+  scrollbarWidth: number;
   screenWidth: number;
   screenHeight: number;
   domRows: number;
@@ -260,6 +266,9 @@ async function measure(page: Page): Promise<Geometry> {
     if (!term) throw new Error('no visible .xterm');
     const host = term.parentElement!.getBoundingClientRect();
     const screen = term.querySelector('.xterm-screen')!.getBoundingClientRect();
+    const scrollbar = term.querySelector('.xterm-scrollable-element > .scrollbar.vertical');
+    if (!scrollbar) throw new Error('no xterm vertical scrollbar');
+    const bar = scrollbar.getBoundingClientRect();
     const rows = [...term.querySelectorAll<HTMLElement>('.xterm-rows > div')];
     const index = rows.map((r) => r.textContent ?? '').findLastIndex((t) => /^#+\s*$/.test(t));
     if (index < 0) throw new Error('no # line rendered');
@@ -271,7 +280,11 @@ async function measure(page: Page): Promise<Geometry> {
     return {
       hostWidth: host.width,
       hostHeight: host.height,
+      hostLeft: host.left,
       hostRight: host.right,
+      scrollbarLeft: bar.left,
+      scrollbarRight: bar.right,
+      scrollbarWidth: bar.width,
       screenWidth: screen.width,
       screenHeight: screen.height,
       domRows: rows.length,
@@ -313,8 +326,10 @@ async function expectPtyMatchesScreen(page: Page, agent: FakeAgent, label: strin
     }, { intervals: [300] })
     .toBe(true);
   const resizesBefore = agent.resizes.length;
+  agent.lastCommandSession = null;
   await typeInTerminal(page, 'size');
-  const pty = agent.latest();
+  await expect.poll(() => agent.lastCommandSession, { message: `${label}: size ran` }).not.toBeNull();
+  const pty = agent.lastCommandSession!;
   await expect
     .poll(async () => (await measure(page).catch(() => null))?.hashLength, { message: `${label}: # line` })
     .toBe(pty.cols);
@@ -322,11 +337,15 @@ async function expectPtyMatchesScreen(page: Page, agent: FakeAgent, label: strin
 
   // No wrap: the PTY-wide line is one rendered row.
   expect(g.rowAfterHash.startsWith('#'), `${label}: # line wrapped`).toBe(false);
+  // The scrollbar is inside the pane, at its right edge, and covers no text.
+  expect(g.scrollbarWidth, `${label}: scrollbar width`).toBeGreaterThan(0);
+  expect(g.scrollbarRight, `${label}: scrollbar outside pane`).toBeLessThanOrEqual(g.hostRight + 0.5);
+  expect(g.hostRight - g.scrollbarRight, `${label}: scrollbar not at the right edge`).toBeLessThan(1);
   // Rightmost column visible: the line ends inside the pane, left of the scrollbar.
-  expect(g.hashRight, `${label}: last column clipped`).toBeLessThanOrEqual(g.hostRight - SCROLLBAR_RESERVE_PX + 0.5);
+  expect(g.hashRight, `${label}: last column under scrollbar or clipped`).toBeLessThanOrEqual(g.scrollbarLeft + 0.5);
   expect(g.screenWidth, `${label}: grid wider than pane`).toBeLessThanOrEqual(g.hostWidth + 0.5);
-  // Fills the pane: less than one spare column beyond the scrollbar reserve.
-  const spare = g.hostWidth - SCROLLBAR_RESERVE_PX - pty.cols * g.cellWidth;
+  // Fills the pane: less than one spare column between the grid and the scrollbar.
+  const spare = g.scrollbarLeft - g.hostLeft - pty.cols * g.cellWidth;
   expect(spare, `${label}: unused width ${spare}px`).toBeGreaterThanOrEqual(-0.5);
   expect(spare, `${label}: unused width ${spare}px`).toBeLessThan(g.cellWidth);
   // Rows: PTY rows are exactly the rendered rows, which fill the pane height.
@@ -334,13 +353,16 @@ async function expectPtyMatchesScreen(page: Page, agent: FakeAgent, label: strin
   expect(g.screenHeight, `${label}: grid taller than pane`).toBeLessThanOrEqual(g.hostHeight + 0.5);
   expect(g.hostHeight - g.screenHeight, `${label}: unused height`).toBeLessThan(g.cellHeight);
   // Typing `size` must not itself have resized anything.
-  expect(agent.resizes.length).toBe(resizesBefore);
+  expect(agent.resizes).toHaveLength(resizesBefore);
   return { pty: { rows: pty.rows, cols: pty.cols }, g };
 }
 
 async function openTerminal(page: Page, agent: FakeAgent) {
   await setupMocks(page, agent);
   await page.goto(`/workspaces/${WS_ID}`);
+  // The preview must be built with VITE_FEATURE_MULTI_TERMINAL=true (playwright.config.ts), as
+  // deployed builds are; a reused preview server built without it renders the legacy terminal.
+  await expect(page.getByRole('button', { name: 'Create terminal or chat session' })).toBeVisible();
   await expect.poll(() => agent.sessions.size, { message: 'session created' }).toBe(1);
   await expect(page.locator('.xterm-rows')).toContainText('$');
   await page.locator('.xterm').first().click();
@@ -404,7 +426,8 @@ test.describe('Terminal geometry (xterm 6)', () => {
     await expect.poll(() => agent.first().cols, { message: 'tab 1 refit' }).not.toBe(first.pty.cols);
     await page.locator('.xterm').filter({ visible: true }).click();
     const reactivated = await expectPtyMatchesScreen(page, agent, 'tab 1 reactivated');
-    expect(agent.latest().serverId).not.toBe(agent.first().serverId);
+    // The size check ran in tab 1's own PTY, not tab 2's.
+    expect(agent.lastCommandSession?.serverId).toBe(agent.first().serverId);
     expect(reactivated.pty.cols).toBe(agent.first().cols);
     await assertNoOverflow(page);
     await screenshot(page, 'terminal-geometry-reactivated-tab', { scopeToProject: true });
@@ -419,20 +442,29 @@ test.describe('Terminal geometry (xterm 6)', () => {
     await expect.poll(() => rowTexts(page)).toContain('line-150');
     expect(await rowTexts(page)).not.toContain('line-1');
     await page.locator('.xterm').first().hover();
-    for (let i = 0; i < 200 && !(await rowTexts(page)).includes('line-1'); i++) {
-      await page.mouse.wheel(0, -1000);
-      await page.waitForTimeout(20);
-    }
-    expect(await rowTexts(page), 'scrolled back to the first line').toContain('line-1');
+    await expect
+      .poll(
+        async () => {
+          await page.mouse.wheel(0, -1000);
+          return rowTexts(page);
+        },
+        { message: 'scrolled back to the first line', intervals: [20], timeout: 15_000 }
+      )
+      .toContain('line-1');
     await screenshot(page, 'terminal-geometry-scrollback', { scopeToProject: true });
 
-    // Typing returns the viewport to the prompt.
     await page.locator('.xterm').first().click();
     agent.inputs = [];
     await page.keyboard.press('Alt+ArrowLeft');
     await page.keyboard.press('Alt+ArrowRight');
-    // Chromium on Linux: xterm 5.5 sent Ctrl+Arrow sequences for Alt+Arrow.
-    await expect.poll(() => agent.inputs).toEqual(['\x1b[1;5D', '\x1b[1;5C']);
+    // The bytes xterm 5.5 sent: readline word motions on macOS, Ctrl+Arrow elsewhere.
+    const isMac = await page.evaluate(() =>
+      ['Macintosh', 'MacIntel', 'MacPPC', 'Mac68K'].includes(navigator.platform)
+    );
+    await expect.poll(() => agent.inputs).toEqual(isMac ? ['\x1bb', '\x1bf'] : ['\x1b[1;5D', '\x1b[1;5C']);
+    // Control: other modifier combinations keep xterm's own encoding.
+    await page.keyboard.press('Alt+Shift+ArrowLeft');
+    await expect.poll(() => agent.inputs.at(-1)).toBe('\x1b[1;4D');
 
     // Reconnect: the agent drops the socket; the client reattaches at its current size and
     // the scrollback replay renders.
@@ -444,6 +476,7 @@ test.describe('Terminal geometry (xterm 6)', () => {
     await expect(page.locator('.xterm-rows')).toContainText('$');
     await page.locator('.xterm').first().click();
     await expectPtyMatchesScreen(page, agent, 'after reconnect');
+    expect(agent.reattaches, 'exactly one reattach per reconnect').toHaveLength(1);
     await assertNoOverflow(page);
   });
 });

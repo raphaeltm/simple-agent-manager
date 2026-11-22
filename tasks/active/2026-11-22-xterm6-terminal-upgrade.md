@@ -15,15 +15,19 @@ SAM task 01M81BDBB06P0THXYZMKKYF4EW, idea 01M7ZNTMP0S9HKJ4047HHEB48K. Branch `sa
 - Options used by SAM (`cursorBlink`, `scrollback`, `theme`, `fontFamily`, `fontSize`, `lineHeight`) are unchanged in 6.0. `@xterm/xterm/css/xterm.css` must still exist (verify after install).
 - No app CSS targets xterm internals (`.xterm*` selectors only in xterm.css). `apps/web/vite.config.ts` groups `@xterm` into `vendor-terminal`; package-name based, unaffected.
 - Consumers: `apps/web/src/pages/workspace/index.tsx` (`MultiTerminal`, `Terminal`).
+- Found by the new geometry test (pre-existing on 5.5 too): `MultiTerminal.attachTerminal` fitted `display:none` tabs. A non-rendered element's computed `width: 100%` parses as 100px, so the hidden tab's PTY was resized to 10x5 until reactivated. Fix with the same `offsetWidth/offsetHeight > 0` guard the ResizeObserver path uses.
+- Deployed builds set `VITE_FEATURE_MULTI_TERMINAL=true`; the Playwright preview build did not, so browser audits exercised the legacy single terminal.
 
 ## Checklist
 
-- [ ] Bump catalog `@xterm/xterm` 6.0.0 and `@xterm/addon-fit` 0.11.0; remove unused `@xterm/addon-attach`; update lockfile
-- [ ] Restore Alt+Arrow word navigation with a shared key handler in both terminals, with unit tests
-- [ ] Update terminal unit-test xterm mocks for the new handler
-- [ ] Update `packages/terminal/AGENTS.md` (addon list)
-- [ ] Automated browser geometry test with real xterm 6: fills pane, last column visible, cols/rows match container, resize / rotation / panel resize / hidden-tab activation re-fit and send resize, 375x667 and 1280x800
-- [ ] Terminal/web lint, typecheck, test, build
+- [x] Bump catalog `@xterm/xterm` 6.0.0 and `@xterm/addon-fit` 0.11.0; remove unused `@xterm/addon-attach`; update lockfile
+- [x] Restore Alt+Arrow word navigation with a shared key handler in both terminals, with unit tests
+- [x] Update terminal unit-test xterm mocks for the new handler
+- [x] Update `packages/terminal/AGENTS.md` (addon list)
+- [x] Automated browser geometry test with real xterm 6: fills pane, last column visible, cols/rows match container, resize / rotation / panel resize / hidden-tab activation re-fit and send resize, 375x667 and 1280x800
+- [x] Terminal/web lint, typecheck, test, build
+- [x] Guard hidden-tab fit in `attachTerminal`, with unit tests proven discriminating
+- [x] Build the Playwright preview with `VITE_FEATURE_MULTI_TERMINAL=true`
 - [ ] Staging: real VM workspace, `stty size`/`tput cols` vs visible capacity, full-width line, input/output, scrollback replay, reconnect; desktop and mobile
 - [ ] Cleanup staging resources
 
@@ -33,4 +37,5 @@ SAM task 01M81BDBB06P0THXYZMKKYF4EW, idea 01M7ZNTMP0S9HKJ4047HHEB48K. Branch `sa
 - PTY size reported to the VM equals the rendered grid; full-width line neither wraps nor clips at 375px and 1280px
 - Resize, rotation, panel resize and tab switch re-fit and resend size
 - Alt+Arrow sends the same bytes as on 5.5
+- A hidden terminal tab keeps its PTY size until activated (no 10x5 shrink)
 - Scrollback replay, input/output and reconnect work on staging
