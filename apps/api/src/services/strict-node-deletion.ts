@@ -343,6 +343,11 @@ export async function deleteNodeResourcesStrict(
     };
   }
 
+  // Before the provider deletion: once the VM is gone the provider may reassign its IP, so the
+  // app-route records pointing at it must go while SAM still holds it. The claim above has made
+  // the node `destroying`, so they judge as released. A failure throws here, leaving the VM (and
+  // its IP) in place and the node retryable; nothing has been deleted at the provider yet.
+  await releaseNodeAppRouteDnsRecords(env, node, options.providerRequestContext?.signal);
   let providerVm: StrictNodeDeletionResult['providerVm'];
   try {
     providerVm =
@@ -402,10 +407,6 @@ export async function deleteNodeResourcesStrict(
       options.providerRequestContext?.signal
     );
   }
-  // The provider may now reassign this IP, so no app-route record may keep pointing at it.
-  // Last, and throws on failure: the proof is written, so the retry takes the existing-proof
-  // branch above and runs this again before any caller retires the node (and clears its IP).
-  await releaseNodeAppRouteDnsRecords(env, node, options.providerRequestContext?.signal);
   return {
     providerVm,
     runtimeTerminationConfirmedAt,

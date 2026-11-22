@@ -97,13 +97,21 @@ export async function releaseNodeAppRouteDnsRecords(
   // Only deployment nodes serve app routes; any other node's IP is left to the sweep, so a
   // DNS outage cannot block workspace teardown.
   if (node.nodeRole !== 'deployment' || !node.ipAddress) return null;
-  if (!appRouteNameSuffix(env.BASE_DOMAIN) || !hasAppRouteDnsApi(env)) return null;
+  // No BASE_DOMAIN: no app-route name can exist (every one is built under `.apps.<BASE_DOMAIN>`).
+  if (!appRouteNameSuffix(env.BASE_DOMAIN)) return null;
   // Wildcard-covered routes never had per-route records (`upsertReleaseRouteRecords`).
   if (
     appRouteRecordAddress({ transport: node.transport ?? null, ipAddress: node.ipAddress }, env)
       .covered
   ) {
     return null;
+  }
+  // Any other node's routes are explicit records. Without a way to delete them, fail closed: the
+  // teardown stops (before the provider deletion) rather than release an IP records still name.
+  if (!hasAppRouteDnsApi(env)) {
+    throw new Error(
+      `Cannot clean up app-route DNS records of node ${node.id}: no DNS API is configured (a box zone, or a Cloudflare zone and token)`
+    );
   }
   const [perPage, budgetMs] = await Promise.all([
     settingValue(env, 'sweepPageSize'),

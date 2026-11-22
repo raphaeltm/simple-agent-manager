@@ -312,9 +312,10 @@ describe('stopping a deployment environment releases its app-route DNS', () => {
       )
     );
     expect((await stop()).status).toBe(409);
-    // Not retired: the IP the retry needs is still recorded.
+    // The records go before the VM: with DNS down, the VM (and the IP its records name) is kept.
+    expect(provider.deleteVM).not.toHaveBeenCalled();
     expect(nodeRow('node')).toMatchObject({ status: 'destroying', ip_address: OLD_IP });
-    expect(nodeRow('node').runtime_termination_confirmed_at).toEqual(expect.any(String));
+    expect(nodeRow('node').runtime_termination_confirmed_at).toBeNull();
     expect(zone.byName(routeHost(ENV_ID))).toHaveLength(1);
 
     expect(environmentRow()).toMatchObject({ status: 'error', node_id: 'node' });

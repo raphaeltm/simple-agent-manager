@@ -1001,18 +1001,20 @@ describe('Codex review round 5', () => {
     });
   });
 
-  it('does nothing on an installation with no DNS API (operator-managed wildcard DNS)', async () => {
+  it('fails release closed for explicit-route nodes when no DNS API is configured', async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
     const noApi = { ...env, CF_ZONE_ID: undefined, CF_API_TOKEN: undefined } as unknown as Env;
     await seedNode('releasing', 'destroying', RELEASED_IP);
-    expect(
-      await releaseNodeAppRouteDnsRecords(noApi, {
+    // A public-transport node's routes are explicit records: teardown must stop, not succeed.
+    await expect(
+      releaseNodeAppRouteDnsRecords(noApi, {
         id: 'releasing',
         nodeRole: 'deployment',
         ipAddress: RELEASED_IP,
       })
-    ).toBeNull();
+    ).rejects.toThrow(/no DNS API is configured/);
+    // The sweep has nothing it can do there and says so.
     const result = await runAppRouteDnsReconciliation(noApi);
     expect(result.stoppedBy).toBe('no_dns_api');
     expect(fetchSpy).not.toHaveBeenCalled();
