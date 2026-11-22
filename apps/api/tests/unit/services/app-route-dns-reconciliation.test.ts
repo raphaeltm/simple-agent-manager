@@ -1129,3 +1129,37 @@ describe('Codex review round 7', () => {
     expect(result).toMatchObject({ deleted: 1, absent: 0 });
   });
 });
+
+describe('Codex review round 8', () => {
+  it('sees a live sibling the exact-name page would have left out, and deletes the stale one', async () => {
+    await seedNode('live-node', 'running', LIVE_IP);
+    await seedEnvironment(ENV_LIVE, 'live-node');
+    const zone = createFakeCloudflareDns({
+      zoneId: ZONE,
+      token: TOKEN,
+      seed: [rec('a-live', host(ENV_LIVE), LIVE_IP), rec('b-stale', host(ENV_LIVE), RELEASED_IP)],
+    });
+    // A by-name lookup without an address filter returns only a page without the live sibling.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (
+          url.searchParams.get('name') === host(ENV_LIVE) &&
+          !url.searchParams.get('content.exact')
+        ) {
+          return new Response(JSON.stringify({ success: true, errors: [], result: [] }), {
+            status: 200,
+          });
+        }
+        return zone.fetch(input, init);
+      })
+    );
+
+    await runAppRouteDnsReconciliation(env);
+
+    expect(zone.records.has('b-stale')).toBe(false);
+    expect(zone.records.get('a-live')?.content).toBe(LIVE_IP);
+    expect(zone.requests.some((r) => r.method === 'PATCH')).toBe(false);
+  });
+});

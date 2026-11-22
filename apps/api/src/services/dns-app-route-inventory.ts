@@ -196,6 +196,53 @@ export async function listAppRouteDnsRecordsPage(
 const recordByIdResponseSchema = v.object({ result: listedRecordSchema });
 
 /**
+ * Whether another A record of the same name already points at `address`. Asked of Cloudflare
+ * with the address as a filter, so the answer does not depend on how many records share the
+ * name; the box zone holds one record per name and type, so its by-name lookup is exact.
+ */
+export async function hasAppRouteSiblingAt(
+  env: Env,
+  record: Pick<AppRouteDnsRecord, 'id' | 'name'>,
+  address: string,
+  signal?: AbortSignal
+): Promise<boolean> {
+  if (boxDnsBackendFor(env)) {
+    return (await findDNSRecordMatchesByName(record.name, env, signal)).some(
+      (match) => match.id !== record.id && match.type === 'A' && match.content === address
+    );
+  }
+  const query = new URLSearchParams({
+    type: 'A',
+    name: record.name,
+    'content.exact': address,
+    per_page: '5',
+  });
+  const response = await fetchWithTimeout(
+    `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records?${query.toString()}`,
+    { headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` } },
+    getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS),
+    signal
+  );
+  if (!response.ok) {
+    throw new Error(
+      await readCloudflareError(
+        response,
+        `Failed to look up app-route DNS siblings: ${response.status}`
+      )
+    );
+  }
+  const data = await readResponseJson(
+    response,
+    listResponseSchema,
+    'cloudflare.dns.find_app_route_sibling'
+  );
+  return data.result.some((raw) => {
+    const row = v.safeParse(listedRecordSchema, raw);
+    return row.success && row.output.id !== record.id && row.output.content === address;
+  });
+}
+
+/**
  * The current state of one observed record, or null when it no longer exists. Cloudflare is read
  * by record id: a name can hold more records than one list response returns. The box zone holds
  * one record per name and type, so its lookup by name is exact.

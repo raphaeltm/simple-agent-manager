@@ -10,9 +10,10 @@ import { appRouteRecordAddress } from './app-route-dns-target';
 import {
   type AppRouteDnsRecord,
   deleteObservedAppRouteDnsRecord,
+  hasAppRouteSiblingAt,
   repointObservedAppRouteDnsRecord,
 } from './dns-app-route-inventory';
-import { DEFAULT_CF_API_TIMEOUT_MS, findDNSRecordMatchesByName } from './dns-core';
+import { DEFAULT_CF_API_TIMEOUT_MS } from './dns-core';
 import { getTimeoutMs } from './fetch-timeout';
 
 /** KV key prefix of a record whose delete failed: the sweep skips it until the key expires. */
@@ -267,10 +268,7 @@ export async function cleanupRecords(
         // This record itself, not the first record of its name (a live sibling may share it).
         // A sibling of the same name already at the live address makes this record redundant:
         // delete it rather than updating it into a duplicate (which the provider can refuse).
-        const siblings = await findDNSRecordMatchesByName(record.name, env, input.signal);
-        if (
-          siblings.some((s) => s.id !== record.id && s.type === 'A' && s.content === liveAddress)
-        ) {
+        if (await hasAppRouteSiblingAt(env, record, liveAddress, input.signal)) {
           const outcome = await deleteObservedAppRouteDnsRecord(env, record, input.signal);
           counts[outcome]++;
           attempts++;
