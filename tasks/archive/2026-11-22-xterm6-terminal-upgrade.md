@@ -28,8 +28,11 @@ SAM task 01M81BDBB06P0THXYZMKKYF4EW, idea 01M7ZNTMP0S9HKJ4047HHEB48K. Branch `sa
 - [x] Terminal/web lint, typecheck, test, build
 - [x] Guard hidden-tab fit in `attachTerminal`, with unit tests proven discriminating
 - [x] Build the Playwright preview with `VITE_FEATURE_MULTI_TERMINAL=true`
-- [ ] Staging: real VM workspace, `stty size`/`tput cols` vs visible capacity, full-width line, input/output, scrollback replay, reconnect; desktop and mobile
-- [ ] Cleanup staging resources
+- [x] Guard every fit path with `hasLayout` (the active-tab effect fitted a hidden view, which sent 5x10 on every staging load)
+- [x] Refit after window resizes settle (debounced); no synchronous fit before the breakpoint re-render (transient 6 cols on rotation)
+- [x] Resend the PTY size on session_created/session_reattached (a resize sent before create left the shell at 80 cols on staging)
+- [x] Staging: real VM workspace, `stty size`/`tput cols` vs visible capacity, full-width line, input/output, scrollback, reconnect/reattach; desktop and mobile. Scrollback replay renders after reattach, with one known pre-existing defect: replay is written before the terminal is fitted, so a readline redraw can hide the last output line (`seq 1 300` showed `299` then the prompt). Deferred to `tasks/backlog/2026-11-22-terminal-replay-before-fit-overwrites-line.md`
+- [x] Cleanup staging resources
 
 ## Acceptance criteria
 
@@ -38,4 +41,8 @@ SAM task 01M81BDBB06P0THXYZMKKYF4EW, idea 01M7ZNTMP0S9HKJ4047HHEB48K. Branch `sa
 - Resize, rotation, panel resize and tab switch re-fit and resend size
 - Alt+Arrow sends the same bytes as on 5.5
 - A hidden terminal tab keeps its PTY size until activated (no 10x5 shrink)
-- Scrollback replay, input/output and reconnect work on staging
+- Input/output and reconnect work on staging; scrollback replay renders after reattach (the replay-before-fit line overwrite is pre-existing and deferred to `tasks/backlog/2026-11-22-terminal-replay-before-fit-overwrites-line.md`)
+
+## Outcome
+
+PR #2973. Local geometry audit 12/12 on 4 viewports. Staging real-VM geometry checks pass at 375x667 and 1280x800 (see PR evidence comment); the replay-before-fit line overwrite is a known pre-existing defect, deferred. Follow-up filed: `tasks/backlog/2026-11-22-terminal-replay-before-fit-overwrites-line.md`. Upstream behaviour change documented in the PR: xterm 6 mouse-wheel scroll step.
