@@ -143,7 +143,11 @@ that only grows (`scripts/selfhost/bundle-head.ts`). The deploy, rotation, switc
 run with the bundle the head names, never the newest by date, so a host clock that moved backwards
 cannot bring back an older bundle. A head that does not open under the box's key, was edited, belongs
 to another installation or names a missing bundle stops the deploy. A box from before the head
-deploys the newest bundle by date once (what it always did) and records the head then.
+deploys the newest bundle by date once (what it always did) and records the head then. Going back
+to an older SAM version by hand (not `pnpm selfhost:upgrade --rollback-from`, which restores the
+state snapshot with its head): older versions ignore the head, so delete `.state/key-agent/head.json`
+(and `sam-box/head.json` on a replaceable box) first; the next deploy of this version records it
+again.
 
 **A bundle that cannot be read stops the deploy.** It might be the current one, so deploying from
 another could bring back a changed or removed secret. Restore it from a backup, or remove it if you
@@ -707,7 +711,7 @@ repositories are as they were.
 **Rollback.** Whoever can write the bucket can delete the newest bundles and replace the head with
 an older genuine copy (a head cannot be forged, but an old one can be replayed; the same holds for
 whoever can write `.state`). A rebuild restores what that head names, so compare its write number
-with the one you noted: an older head restores older keys, values rotated since come back, and data written
+with the one you noted, or pass it as `--expected-head-write <n>` so rebuild refuses an older one: an older head restores older keys, values rotated since come back, and data written
 under a newer `ENCRYPTION_KEY` cannot be read. The fleet credential can already roll celld's own
 data back the same way. Keep it to the box, and turn on object versioning or retention on the
 bucket if that matters to you.

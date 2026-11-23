@@ -55,6 +55,11 @@ export interface RebuildInput {
    * what a bucket writer who deleted it would leave, and the date can pick an older bundle.
    */
   allowNoHead?: boolean;
+  /**
+   * `--expected-head-write <n>`: the head write number `secrets status` showed on the dead box.
+   * A bucket head with a lower one is an older genuine head put back: refused.
+   */
+  expectedHeadWrite?: number;
 }
 
 export interface RebuildResult {
@@ -141,6 +146,11 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
   // before the head, the newest createdAt. The head names its bundle in plaintext only so the
   // right key can be found; it counts once it opens under that key.
   const headText = bucketHead(bucket);
+  if (input.expectedHeadWrite !== undefined && (input.allowNoHead || headText === null)) {
+    throw new Error(
+      `--expected-head-write needs the bucket's ${HEAD_KEY}, and cannot go with --allow-no-head`
+    );
+  }
   if (headText === null && !input.allowNoHead) {
     throw new Error(
       `the fleet bucket holds sealed bundles but no ${HEAD_KEY}, which names the current one. ` +
@@ -158,6 +168,13 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
     `${HEAD_KEY} in the fleet bucket`
   );
   if (!current) throw new Error('the fleet bucket holds no current bundle');
+  if (head && input.expectedHeadWrite !== undefined && head.seq < input.expectedHeadWrite) {
+    throw new Error(
+      `${HEAD_KEY} in the fleet bucket is head write ${head.seq}, older than the ` +
+        `${input.expectedHeadWrite} you expected: an older genuine head was put back. Refusing ` +
+        'to restore older secrets'
+    );
+  }
   // The head proves who sealed it, not that it is the latest: a bucket writer could put back an
   // older genuine one. The operator compares the write number with the dead box's last one
   // (pnpm selfhost:secrets status printed it).

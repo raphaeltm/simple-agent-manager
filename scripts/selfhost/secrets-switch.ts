@@ -208,6 +208,12 @@ export async function runSwitch(input: SwitchInput, deps: SwitchDeps): Promise<K
     // if this fails, the head and the recorded choice still agree. The deploy may have sealed a
     // later bundle under the new key (a secrets.env edit), so chain from the head as it is now.
     const { head: nowHead } = await currentBundle(newSettings.bundles, newProvider);
+    // That deploy's prune keeps the bundles it ranks first, which need not include the one from
+    // before the switch: put it back from memory (it is the same ciphertext).
+    if ((await newSettings.bundles.read(newest.bundleId)) === null) {
+      await newSettings.bundles.write(newest);
+      log(`put back bundle ${newest.bundleId}, pruned during the switch`);
+    }
     await commitHead(newSettings.bundles, newest, oldProvider, nowHead ?? switchedHead);
     writePrivateFile(keyChoicePath(stateDir), savedChoice);
     writePrivateFile(agentEnvPath, savedAgentEnv);

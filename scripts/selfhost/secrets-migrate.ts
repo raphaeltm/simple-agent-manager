@@ -124,16 +124,29 @@ export async function runMigration(
     : bundleStoreFor(stateDir);
   const bundlesBefore = new Set(await store.listIds());
   const headBefore = await store.readHead();
+  // Each step on its own: a bucket that fails (often what failed the attempt) must not stop the
+  // box's own copy from being undone, or a retry would start from this attempt's bundle. A bucket
+  // left ahead of the box stops the next deploy (reconcile) until it is repaired; never stale.
+  const undo = async (what: string, step: () => Promise<void>) => {
+    try {
+      await step();
+    } catch (error) {
+      log(`    could not undo ${what}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
   const forgetNewBundles = async () => {
     // The head as it was first (bundle-head.ts): it must never name a bundle removed below.
     if ((await store.readHead()) !== headBefore) {
-      if (headBefore === null) await store.removeHead();
-      else await store.writeHead(headBefore);
+      await undo('the bundle head', () =>
+        headBefore === null ? store.removeHead() : store.writeHead(headBefore)
+      );
     }
     for (const id of await store.listIds()) {
       if (bundlesBefore.has(id)) continue;
-      await store.remove(id);
-      log(`    removed bundle ${id}, sealed by this failed attempt`);
+      await undo(`bundle ${id}`, async () => {
+        await store.remove(id);
+        log(`    removed bundle ${id}, sealed by this failed attempt`);
+      });
     }
   };
 

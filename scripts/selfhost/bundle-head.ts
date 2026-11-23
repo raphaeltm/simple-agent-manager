@@ -256,6 +256,10 @@ export async function commitHead(
   // Compare before replacing: another seal (a deploy racing a rotation or a switch) that made
   // its own bundle current since `previous` was read must not be overwritten by this one, whose
   // secrets were derived from the older state. Not atomic, but the window is this one read.
+  // A head never names a bundle the store does not hold: every later deploy would refuse it.
+  if ((await store.read(bundle.bundleId)) === null) {
+    throw new Error(`bundle ${bundle.bundleId} is not in ${store.location}; not making it current`);
+  }
   const now = headHint(await store.readHead());
   if (
     (previous === null) !== (now === null) ||

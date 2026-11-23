@@ -180,6 +180,7 @@ describe('a host clock that moved backwards between two seals', () => {
     expect(await namedBundle(envA)).toBe(unset.bundleId);
     const out = await deploy(envA, []);
     expect(out).not.toMatch(/sealed \d+ secrets into bundle/);
+    expect(out).toContain(`note: bundle ${withValue.bundleId} is dated after the current one`);
     expect(
       bundlesOn(stateA)
         .map((b) => b.bundleId)
@@ -374,9 +375,32 @@ describe('a head that is not genuine fails closed', () => {
     writeFileSync(bucketHeadPath(), foreign);
     await expect(rebuild()).rejects.toThrow(/the head belongs to b{32}/);
     expect(existsSync(headPath(stateB))).toBe(false);
-    // Control: the box's genuine head (after the rotation's write) rebuilds.
-    writeFileSync(bucketHeadPath(), readFileSync(headPath(stateA), 'utf8'));
-    expect((await rebuild()).bundleIds[0]).toBe(next.bundleId);
+    // An older genuine head put back (a replay) passes every check except the write number the
+    // operator noted: --expected-head-write refuses it.
+    const latest = readFileSync(headPath(stateA), 'utf8');
+    const latestWrite = headHint(latest)?.seq ?? 0;
+    writeFileSync(bucketHeadPath(), genuine);
+    await expect(
+      runRebuild({
+        box: boxOf(envB),
+        stateDir: stateB,
+        bucket: bucket(boxOf(envB)),
+        detect: async () => ({ platform: null, candidates: [] }),
+        log: () => undefined,
+        expectedHeadWrite: latestWrite,
+      })
+    ).rejects.toThrow(/older genuine head was put back/);
+    // Control: the box's genuine head (after the rotation's write) rebuilds, with the check too.
+    writeFileSync(bucketHeadPath(), latest);
+    const rebuilt = await runRebuild({
+      box: boxOf(envB),
+      stateDir: stateB,
+      bucket: bucket(boxOf(envB)),
+      detect: async () => ({ platform: null, candidates: [] }),
+      log: () => undefined,
+      expectedHeadWrite: latestWrite,
+    });
+    expect(rebuilt.bundleIds[0]).toBe(next.bundleId);
   });
 });
 

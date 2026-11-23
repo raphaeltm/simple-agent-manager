@@ -21,6 +21,8 @@ import {
 /** The real deploy entry; a second `--init` on the same state sees no running stack. */
 const runDeploy = (envFile: string, args: string[], env: NodeJS.ProcessEnv = {}) =>
   harnessRunDeploy(envFile, args, { ...noStackDocker(dirname(envFile)), ...env });
+import { openBundle, parseBundle, sealSecrets } from '../../deploy/selfhost/key-agent/bundle.ts';
+import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
 import { type FakeKeyService, startFakeKeyServices } from './fixtures/key-provider-fakes.js';
 import { applyKeyChoice, type PlatformCandidates, readKeyChoice } from './key-choice.js';
 import { resolveSealedSecrets } from './key-seal.js';
@@ -170,41 +172,66 @@ describe('secrets switch', () => {
     expect(dry.out).toContain(`"SAM_SECRET_BUNDLE_ID": "${before.head.bundleId}"`);
   });
 
-  it('rolls back when its own deploy sealed a secrets.env edit under the new key', async () => {
-    const before = JSON.parse(read('head.json')) as { bundleId: string; seq: number };
-    let check = 0;
-    const sealing: SwitchDeps = {
-      ...deps(),
-      // What `pnpm selfhost:deploy` does when secrets.env holds an edit not deployed yet: it
-      // seals a further bundle under the key the box is configured for at that moment.
-      deploy: async () => {
-        const choice = readKeyChoice(state);
-        const settings = choice && keyServiceSettings(applyKeyChoice(box(), choice), state);
-        if (!settings) throw new Error('not sealed');
-        await resolveSealedSecrets({
-          settings,
-          stateDir: state,
-          mode: 'deploy',
-          platformKeysFile: null,
-          operatorSecrets: { OPERATOR_TOKEN: `edited-${check}` },
-        });
-      },
-      adoptAndCheck: async () => {
-        const ok = check++ > 0;
-        return { healthy: ok, detail: ok ? 'HTTP 200' : 'HTTP 503' };
-      },
-    };
-    await expect(
-      runSwitch({ box: box(), stateDir: state, to: 'gcp-kms' }, sealing)
-    ).rejects.toThrow(/switch rolled back: the new version is not healthy: HTTP 503/);
-    // The box is back on the key file and the head agrees with it: the next deploy runs.
-    expect(JSON.parse(read('choice.json'))).toMatchObject({ provider: 'file' });
-    const head = JSON.parse(read('head.json')) as { seq: number; seal: { provider: string } };
-    expect(head.seal.provider).toBe('file');
-    expect(head.seq).toBeGreaterThan(before.seq);
-    const dry = await runDeploy(envFile, ['--dry-run', '--skip-vm-agent']);
-    expect(dry.status, dry.out).toBe(0);
-  });
+  it.each([
+    ['', 0],
+    [', and pruned the bundle from before the switch', 2],
+  ])(
+    'rolls back when its own deploy sealed a secrets.env edit under the new key%s',
+    async (_, leftovers) => {
+      const before = JSON.parse(read('head.json')) as { bundleId: string; seq: number };
+      // Bundles dated after the current one that the head does not name (sealed while the clock ran
+      // ahead, or by a seal that stopped before its head): the switch's prune ranks them first.
+      const fileChoice = readKeyChoice(state);
+      const fileSettings =
+        fileChoice && keyServiceSettings(applyKeyChoice(box(), fileChoice), state);
+      if (!fileSettings) throw new Error('not sealed');
+      const fileKey = createKeyProvider(fileSettings.hostEnv);
+      const sealedBefore = await openBundle(
+        parseBundle(read(`bundles/${before.bundleId}.json`)),
+        fileKey
+      );
+      for (let i = 0; i < leftovers; i += 1) {
+        await fileSettings.bundles.write(
+          await sealSecrets(sealedBefore, fileKey, {
+            installationId: sealedBefore.SAM_INSTALLATION_ID ?? '',
+            now: () => new Date(`${2030 + i}-01-01T00:00:00Z`),
+          })
+        );
+      }
+      let check = 0;
+      const sealing: SwitchDeps = {
+        ...deps(),
+        // What `pnpm selfhost:deploy` does when secrets.env holds an edit not deployed yet: it
+        // seals a further bundle under the key the box is configured for at that moment.
+        deploy: async () => {
+          const choice = readKeyChoice(state);
+          const settings = choice && keyServiceSettings(applyKeyChoice(box(), choice), state);
+          if (!settings) throw new Error('not sealed');
+          await resolveSealedSecrets({
+            settings,
+            stateDir: state,
+            mode: 'deploy',
+            platformKeysFile: null,
+            operatorSecrets: { OPERATOR_TOKEN: `edited-${check}` },
+          });
+        },
+        adoptAndCheck: async () => {
+          const ok = check++ > 0;
+          return { healthy: ok, detail: ok ? 'HTTP 200' : 'HTTP 503' };
+        },
+      };
+      await expect(
+        runSwitch({ box: box(), stateDir: state, to: 'gcp-kms' }, sealing)
+      ).rejects.toThrow(/switch rolled back: the new version is not healthy: HTTP 503/);
+      // The box is back on the key file and the head agrees with it: the next deploy runs.
+      expect(JSON.parse(read('choice.json'))).toMatchObject({ provider: 'file' });
+      const head = JSON.parse(read('head.json')) as { seq: number; seal: { provider: string } };
+      expect(head.seal.provider).toBe('file');
+      expect(head.seq).toBeGreaterThan(before.seq);
+      const dry = await runDeploy(envFile, ['--dry-run', '--skip-vm-agent']);
+      expect(dry.status, dry.out).toBe(0);
+    }
+  );
 
   it('refuses a target that cannot unwrap, and changes nothing', async () => {
     fake.setDenied(true);

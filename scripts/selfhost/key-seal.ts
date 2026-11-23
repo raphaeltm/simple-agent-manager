@@ -193,6 +193,15 @@ export async function resolveSealedSecrets(input: ResolveSecretsInput): Promise<
     provider,
     `the bundle head beside ${settings.bundles.location}`
   );
+  // Not an error (a seal that stopped before its head, or a clock that moved back, leaves one),
+  // but worth saying: an older SAM version run by hand seals without moving the head.
+  for (const later of head && latest ? bundles.filter((b) => b.createdAt > latest.createdAt) : []) {
+    log(
+      `note: bundle ${later.bundleId} is dated after the current one (${latest?.bundleId}) but ` +
+        'the head does not name it: a seal that stopped part way, a clock that moved back, or ' +
+        'an older SAM version that does not keep the head. This deploy runs the current one.'
+    );
+  }
   const current = latest ? await openBundle(latest, provider()) : {};
   assertSecretsMatchHead(head, current);
   const record = readRestoredIdentity(input.stateDir, latest, current);
