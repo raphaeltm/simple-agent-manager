@@ -62,7 +62,7 @@ Raphaël decided 2026-11-20 to restart automated incident triage and accept its 
 - [x] Tests on real SQLite: self-blocking regression, promoted/edited/linked still block, titles, one idea
       per signature, cleanup never touches edited/linked ideas, stall anomaly, decline log
 - [x] Docs updated
-- [x] Post-deploy: update live trigger template, verify trigger fires, run completes, queue drains
+- [ ] Post-deploy: update live trigger template, verify trigger fires, run completes, queue drains
 
 ## Acceptance criteria
 
@@ -76,5 +76,5 @@ Raphaël decided 2026-11-20 to restart automated incident triage and accept its 
 
 ## Reconciliation (2026-11-23, weekly queue reconciliation)
 
-- Shipped in [#2938](https://github.com/raphaeltm/simple-agent-manager/pull/2938), followed by #2954, #2957 and #2958. Line 65 is ticked because the trigger fires and its runs complete: triage tasks 01M81S6T8FX36JY529HN7J409X and 01M814KQD60ZCE0JXQV8M1WCQ3 completed on 2026-11-22.
+- Shipped in [#2938](https://github.com/raphaeltm/simple-agent-manager/pull/2938), followed by #2954, #2957 and #2958. Line 65 is partly evidenced: the trigger fires (32 runs, last 2026-11-22T14:05Z) and runs complete (triage tasks 01M81S6T8FX36JY529HN7J409X and 01M814KQD60ZCE0JXQV8M1WCQ3 on 2026-11-22). The template update and queue drain were not re-checked, so it stays unticked.
 - Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).

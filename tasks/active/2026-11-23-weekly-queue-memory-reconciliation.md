@@ -48,11 +48,12 @@ guide to what is genuinely open.
 - [ ] Every deleted backlog file has a verdict and evidence in the PR description
 - [ ] No backlog file deleted without a cited merged PR, commit or code check
 - [ ] Each PR older than 7 days has one comment from this run
-- [ ] The change touches only files under `tasks/`: no staging deploy (task-file-only exemption)
+- [ ] Outside `tasks/`, the change touches only comments and one non-functional manifest string (`baselineBacklogLink`, read by nothing else): no staging deploy (docs-only exemption)
 
 ## Backlog audit results
 
 - 348 files. KEEP 276, PARTIAL 64, SHIPPED 7, SUPERSEDED 1, OBSOLETE 0, DUPLICATE 0.
+- The task-completion validator challenged the SUPERSEDED verdict on `2026-02-23-suppress-background-subagents-in-acp.md`: #1845 leases background work, but nothing shows the interleaved-output symptom is fixed. The file was restored and kept, with a note. Final: 7 deleted.
 - I checked the merged PR and the code path for all 8 deletions myself (listed in the PR description).
 - 61 of the 64 PARTIAL files already carry earlier reconciliation notes. A dated note was added only
   to the 7 whose evidence cites a PR the file did not mention yet.

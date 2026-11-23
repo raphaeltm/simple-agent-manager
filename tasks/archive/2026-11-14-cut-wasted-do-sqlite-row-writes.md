@@ -76,11 +76,11 @@ read a day, and its object has grown to 1.04 GB.
 
 ## Acceptance criteria
 
-- [ ] With default settings the unscoped sweep selects no session from a project whose latest fresh
+- [x] With default settings the unscoped sweep selects no session from a project whose latest fresh
       telemetry is below the threshold, and still selects from a pressured project in the same tick.
-- [ ] A project with no telemetry row, or a stale one, is still archived.
-- [ ] Operator-scoped runs, in-flight migrations and pending reclaim are unchanged.
-- [ ] A GitHub webhook for a repository with a system-owned project and a user-owned project admits
+- [x] A project with no telemetry row, or a stale one, is still archived.
+- [x] Operator-scoped runs, in-flight migrations and pending reclaim are unchanged.
+- [x] A GitHub webhook for a repository with a system-owned project and a user-owned project admits
       one event, into the user-owned project.
 - [ ] Staging: a sweep tick on the deployed branch reports the gate in `cron.completed`, and a
       low-pressure project's eligible session stays in root while the tick runs.
@@ -116,4 +116,5 @@ ingest per-batch overhead, the retention scan. All are listed in the idea.
 
 - Shipped in [#2727](https://github.com/raphaeltm/simple-agent-manager/pull/2727).
 - Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
+- The first four acceptance criteria are ticked because they are the behaviours tested in checklist items A5 and B2 above. The staging criterion was not re-checked. The production row-count measurement was never recorded; it is now tracked as an open measurement on idea `01M7CX61WVX72T7CFQNRTX0DVM` (note dated 2026-11-23).
 - 7 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.

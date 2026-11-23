@@ -45,6 +45,6 @@ Previous agent ran out of usage. Head 62ab30db had all checks green (CI 44267154
 
 ## Reconciliation (2026-11-23, weekly queue reconciliation)
 
-- Shipped in [#2883](https://github.com/raphaeltm/simple-agent-manager/pull/2883) (merged 2026-11-19). The production row_usage measurement (line 23) was never done. It was evidence-gathering, not a deliverable, and is not tracked anywhere else.
+- Shipped in [#2883](https://github.com/raphaeltm/simple-agent-manager/pull/2883) (merged 2026-11-19). The production row_usage measurement (line 23) was never done. It was evidence-gathering, not a deliverable. It is now tracked as an open measurement on idea `01M7CX61WVX72T7CFQNRTX0DVM` (note dated 2026-11-23).
 - Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
 - 1 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.
