@@ -65,8 +65,8 @@ Found 2026-11-22 during hosted staging verification of PR #2974 (primary staging
       failed start, scheduled cleanup and node delete paths; sweep deletes dangling, keeps live,
       never touches non-app records; box backend path; each guard deleted once
 - [x] Docs: deployment/self-hosting docs mention the sweep and its config
-- [ ] Staging: stop/start on Test Project 1 `staging` env; sweep removes the dangling record (pending: deploy after adversarial review)
-- [ ] Production: report swept counts + hostnames (read-only token) (pending: after merge)
+- [x] Staging: stop/start on Test Project 1 `staging` env; sweep removed the dangling record (16:30Z); re-verified on 191ca380b (start recreated, stop and node delete removed, deletion before provider teardown)
+- [x] Production: merged as 7d40cfb2 (PR #2976), Deploy Production run 45098100530 succeeded; first sweep 2026-11-23T02:15:35Z examined 11, deleted 9 (`no_linked_node`), kept 2, failed 0, unjudged 0, full cycle (read-only token, Workers Observability)
 
 ## Acceptance Criteria
 
@@ -88,3 +88,10 @@ Found 2026-11-22 during hosted staging verification of PR #2974 (primary staging
   the PR body). The type check and the re-read type check back each other up; removing both
   turns "never deletes a non-A record" red.
 - Workspace shell `CF_TOKEN` is a placeholder; real values only via `exec_with_secrets`.
+
+## Disposition
+
+Residual (VM deleted at the provider outside SAM keeps a `running` row and its records): merge
+approved by Raphaël on inbox `ask:01M81WSGNWTXAX5BNDNAYR25RM` (2026-11-23); tracked as idea
+`01M81Z9P6QFX4M9Q83K2XKGZVR`. Deferred LOWs: idea `01M82CP3VN3K74J01MVEANW16X`; staging start/stop
+blockers on recycled IPs: idea `01M822HR6XW0QG3QX5SSYR05V8`.
