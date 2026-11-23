@@ -14,7 +14,7 @@ import {
   createComposeImageArtifactUploads,
 } from '../../src/compose-image-artifacts';
 import type { AppDeploymentEnv } from '../../src/env';
-import { type S3PresignTarget, s3ObjectUrlSigner } from '../../src/object-url-signer';
+import { s3ObjectUrlSigner,type S3PresignTarget } from '../../src/object-url-signer';
 
 const secret = 'fake-secret';
 // The worker's shared R2 client (apps/api/src/services/r2-s3-client.ts) as it is configured on

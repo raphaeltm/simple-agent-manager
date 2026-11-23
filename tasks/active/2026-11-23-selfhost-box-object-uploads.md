@@ -16,18 +16,18 @@ R2 interface).
 
 ## Phase 1 proof (done 2026-11-23, local celld v0.6.3 + MinIO, `CELLD_V8_HEAP_LIMIT_MB=128`)
 
-| case                                          | result                                          | celld RSS peak (idle 43 MB) | MB/s |
-| --------------------------------------------- | ----------------------------------------------- | --------------------------- | ---- |
-| `R2.put(request.body)` 256 MB                 | 200, sha matches on download                    | 145 MB                      | 101  |
-| `R2.put(request.body)` 1023 MB                | 200, sha matches                                | 220 MB                      | 132  |
-| R2 multipart, 16 MB parts, 1023 MB            | 200                                             | 308 MB                      | 169  |
-| put 1000 MB through the box Caddy image       | 200 (Caddy 22 MiB)                              | 237 MB                      | 143  |
-| 1000 MB at 5 MB/s (200 s); via Caddy 10 MB/s  | 200; no handler-budget cut                      | -                           | -    |
-| client aborts after 3 s                       | no partial object (GET 404)                     | -                           | -    |
-| body over 1 GiB                               | 413 `request body too large` (celld)            | -                           | -    |
-| `CELLD_MAX_REQUEST_BODY_BYTES` above 1 GiB    | celld refuses to start (`cannot exceed 1073741824`) | -                       | -    |
-| put with `onlyIf: {etagDoesNotMatch: '*'}` x2 | first writes, second returns null (write-once)  | -                           | -    |
-| put with a wrong `sha256`                     | rejected                                        | -                           | -    |
+| case                                          | result                                              | celld RSS peak (idle 43 MB) | MB/s |
+| --------------------------------------------- | --------------------------------------------------- | --------------------------- | ---- |
+| `R2.put(request.body)` 256 MB                 | 200, sha matches on download                        | 145 MB                      | 101  |
+| `R2.put(request.body)` 1023 MB                | 200, sha matches                                    | 220 MB                      | 132  |
+| R2 multipart, 16 MB parts, 1023 MB            | 200                                                 | 308 MB                      | 169  |
+| put 1000 MB through the box Caddy image       | 200 (Caddy 22 MiB)                                  | 237 MB                      | 143  |
+| 1000 MB at 5 MB/s (200 s); via Caddy 10 MB/s  | 200; no handler-budget cut                          | -                           | -    |
+| client aborts after 3 s                       | no partial object (GET 404)                         | -                           | -    |
+| body over 1 GiB                               | 413 `request body too large` (celld)                | -                           | -    |
+| `CELLD_MAX_REQUEST_BODY_BYTES` above 1 GiB    | celld refuses to start (`cannot exceed 1073741824`) | -                           | -    |
+| put with `onlyIf: {etagDoesNotMatch: '*'}` x2 | first writes, second returns null (write-once)      | -                           | -    |
+| put with a wrong `sha256`                     | rejected                                            | -                           | -    |
 
 The body never sits in the isolate heap and RSS stays far below the body size, so streaming works.
 **Hard limit:** one request through celld carries at most 1 GiB. Larger compose artifacts need a
@@ -53,17 +53,17 @@ parted upload, which changes the vm-agent client. Deferred to PR B (idea filed i
 
 ## Threat model
 
-| Threat | Control | Test |
-| --- | --- | --- |
-| Forged token | HMAC-SHA256 over prefix+payload, constant-time verify, purpose-labelled HKDF key (a hosted-git token is not an object token) | tampered payload, wrong label, wrong key → 403, nothing written |
-| Replay of an upload token | TTL = caller's existing presign TTL (≤ 15 min default); write-once put (`etagDoesNotMatch: '*'`); a retry after success answers 200 only when the stored object matches the token's size (and sha256 when bound) | second PUT with different bytes → 412, object unchanged; same bytes → 200 |
-| Scope escape (other key/prefix, traversal) | the key lives only inside the signed payload; no path or query parameter names a key; key validated with the same unsafe-segment check as presign | extra `key=` param ignored; `..` key refused at mint |
-| Method confusion | `op` claim: a GET token cannot PUT and vice versa | cross-op → 403 |
-| Size DoS | `Content-Length` required and ≤ token `max` ≤ 1 GiB (celld cap); body wrapped in `FixedLengthStream`; celld refuses > 1 GiB before the Worker runs | over-max → 413 without a write; short body → no object |
-| Integrity | build-context sha256 bound into the token and checked by `R2.put({sha256})`; compose artifacts keep size validation at completion | wrong bytes → 400/412 |
-| Cross-user / cross-project writes | the token is minted only by the existing authenticated init routes (session auth for attachments, callback JWT + project policy for compose/build-context), which derive the key from the caller's verified identity; claims carry the user/project/workspace for audit logs | attack: user A's token cannot write user B's key; owner control writes its own key |
-| Token leakage in logs | query string; Caddy logs no query; request log is pathname-only; tokens are never logged by the route | log assertion in route test |
-| Egress fence / celld isolation | the route runs inside celld's Worker and talks only to the R2 binding (celld's bucket): no outbound fetch, nothing the egress fence must allow | n/a |
+| Threat                                     | Control                                                                                                                                                                                                                                                                      | Test                                                                               |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Forged token                               | HMAC-SHA256 over prefix+payload, constant-time verify, purpose-labelled HKDF key (a hosted-git token is not an object token)                                                                                                                                                 | tampered payload, wrong label, wrong key → 403, nothing written                    |
+| Replay of an upload token                  | TTL = caller's existing presign TTL (≤ 15 min default); write-once put (`etagDoesNotMatch: '*'`); a retry after success answers 200 only when the stored object matches the token's size (and sha256 when bound)                                                             | second PUT with different bytes → 412, object unchanged; same bytes → 200          |
+| Scope escape (other key/prefix, traversal) | the key lives only inside the signed payload; no path or query parameter names a key; key validated with the same unsafe-segment check as presign                                                                                                                            | extra `key=` param ignored; `..` key refused at mint                               |
+| Method confusion                           | `op` claim: a GET token cannot PUT and vice versa                                                                                                                                                                                                                            | cross-op → 403                                                                     |
+| Size DoS                                   | `Content-Length` required and ≤ token `max` ≤ 1 GiB (celld cap); body wrapped in `FixedLengthStream`; celld refuses > 1 GiB before the Worker runs                                                                                                                           | over-max → 413 without a write; short body → no object                             |
+| Integrity                                  | build-context sha256 bound into the token and checked by `R2.put({sha256})`; compose artifacts keep size validation at completion                                                                                                                                            | wrong bytes → 400/412                                                              |
+| Cross-user / cross-project writes          | the token is minted only by the existing authenticated init routes (session auth for attachments, callback JWT + project policy for compose/build-context), which derive the key from the caller's verified identity; claims carry the user/project/workspace for audit logs | attack: user A's token cannot write user B's key; owner control writes its own key |
+| Token leakage in logs                      | query string; Caddy logs no query; request log is pathname-only; tokens are never logged by the route                                                                                                                                                                        | log assertion in route test                                                        |
+| Egress fence / celld isolation             | the route runs inside celld's Worker and talks only to the R2 binding (celld's bucket): no outbound fetch, nothing the egress fence must allow                                                                                                                               | n/a                                                                                |
 
 ## Checklist
 

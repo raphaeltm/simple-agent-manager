@@ -5,23 +5,22 @@
  * suite proves on the real runtime (scripts/selfhost/live/box-object-urls.live.test.ts):
  * create-only puts and sha256 verification. The gate is the real Durable Object class over SQLite.
  */
+import {
+  composeImageArtifactMaxBytesFor,
+  createBuildContextUpload,
+  createComposeImageArtifactDownloads,
+  createComposeImageArtifactUploads,
+} from '@simple-agent-manager/app-deployment';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import {
-  composeImageArtifactMaxBytesFor,
-  createComposeImageArtifactDownloads,
-  createComposeImageArtifactUploads,
-  createBuildContextUpload,
-} from '@simple-agent-manager/app-deployment';
-
 import type { Env } from '../../../src/env';
 import { requestLoggingMiddleware } from '../../../src/middleware/request-logging';
 import { mintHostedGitToken } from '../../../src/selfhost/hosted-git/tokens';
+import { installBoxObjectUrls, mountBoxObjectRoute } from '../../../src/selfhost/object-urls';
 import { BoxUploadGate } from '../../../src/selfhost/object-urls/gate';
 import { CELLD_CONDITIONAL_PUT_MAX_BYTES } from '../../../src/selfhost/object-urls/route';
-import { installBoxObjectUrls, mountBoxObjectRoute } from '../../../src/selfhost/object-urls';
 import {
   BOX_OBJECT_ROUTE,
   CELLD_MAX_REQUEST_BODY_BYTES,
@@ -36,8 +35,8 @@ import { generatePresignedUploadUrl } from '../../../src/services/attachment-upl
 import {
   getR2ObjectUrlSigner,
   installBoxObjectUrlSigner,
-  resolveR2ObjectUrlSigner,
   resetR2S3ClientsForTests,
+  resolveR2ObjectUrlSigner,
 } from '../../../src/services/r2-s3-client';
 
 const KEY = 'box-test-encryption-key-0123456789';
@@ -134,7 +133,9 @@ function sqliteStorage() {
   return {
     exec(query: string, ...params: unknown[]) {
       const statement = db.prepare(query);
-      const rows = statement.reader ? (statement.all(...params) as unknown[]) : (statement.run(...params), []);
+      const rows = statement.reader
+        ? (statement.all(...params) as unknown[])
+        : (statement.run(...params), []);
       return { one: () => rows[0], toArray: () => rows };
     },
   };
@@ -144,7 +145,8 @@ function gateNamespace(gate: BoxUploadGate) {
   return {
     idFromName: (name: string) => name,
     get: () => ({
-      acquire: async (id: string, limit: number, leaseMs: number) => gate.acquire(id, limit, leaseMs),
+      acquire: async (id: string, limit: number, leaseMs: number) =>
+        gate.acquire(id, limit, leaseMs),
       release: async (id: string) => gate.release(id),
     }),
   };
@@ -174,7 +176,13 @@ function bytes(text: string): Uint8Array {
   return new TextEncoder().encode(text);
 }
 
-async function putUrl(app: Hono<{ Bindings: Env }>, env: Env, url: string, body: Uint8Array, headers: Record<string, string> = {}) {
+async function putUrl(
+  app: Hono<{ Bindings: Env }>,
+  env: Env,
+  url: string,
+  body: Uint8Array,
+  headers: Record<string, string> = {}
+) {
   const target = new URL(url);
   return app.request(
     `${target.pathname}${target.search}`,
@@ -218,8 +226,12 @@ describe('box object tokens', () => {
       .replaceAll('/', '_')
       .replace(/=+$/, '');
     expect(await verifyBoxObjectToken(env, `${prefix}.${forged}.${signature}`)).toBeNull();
-    expect(await verifyBoxObjectToken(env, `${prefix}.${payload}.${signature.slice(0, -2)}AA`)).toBeNull();
-    expect(await verifyBoxObjectToken({ ENCRYPTION_KEY: 'another-installation-key' }, token)).toBeNull();
+    expect(
+      await verifyBoxObjectToken(env, `${prefix}.${payload}.${signature.slice(0, -2)}AA`)
+    ).toBeNull();
+    expect(
+      await verifyBoxObjectToken({ ENCRYPTION_KEY: 'another-installation-key' }, token)
+    ).toBeNull();
     // Control: the untouched token verifies.
     expect(await verifyBoxObjectToken(env, token)).not.toBeNull();
   });
@@ -231,9 +243,14 @@ describe('box object tokens', () => {
 
   it('keeps tokens minted before a rotation valid through ENCRYPTION_KEY_PREVIOUS only', async () => {
     const token = await mintBoxObjectToken({ ENCRYPTION_KEY: 'old-key-0123456789abcdef' }, put);
-    const rotated = { ENCRYPTION_KEY: 'new-key-0123456789abcdef', ENCRYPTION_KEY_PREVIOUS: 'old-key-0123456789abcdef' };
+    const rotated = {
+      ENCRYPTION_KEY: 'new-key-0123456789abcdef',
+      ENCRYPTION_KEY_PREVIOUS: 'old-key-0123456789abcdef',
+    };
     expect(await verifyBoxObjectToken(rotated, token)).not.toBeNull();
-    expect(await verifyBoxObjectToken({ ENCRYPTION_KEY: rotated.ENCRYPTION_KEY }, token)).toBeNull();
+    expect(
+      await verifyBoxObjectToken({ ENCRYPTION_KEY: rotated.ENCRYPTION_KEY }, token)
+    ).toBeNull();
   });
 
   it('refuses unsafe keys, unbounded PUTs and GET tokens carrying upload fields', async () => {
@@ -262,9 +279,15 @@ describe('which URL a caller gets', () => {
   };
 
   it('Cloudflare (no box signer installed) presigns, even without a key it cannot box', async () => {
-    const signer = getR2ObjectUrlSigner({ ...cloudflare, BASE_DOMAIN: DOMAIN, ENCRYPTION_KEY: KEY } as Env);
+    const signer = getR2ObjectUrlSigner({
+      ...cloudflare,
+      BASE_DOMAIN: DOMAIN,
+      ENCRYPTION_KEY: KEY,
+    } as Env);
     expect(signer.kind).toBe('presign');
-    expect(new URL(await signer.putUrl('k', { expiresIn: 60 })).host).toMatch(/acct\.r2\.cloudflarestorage\.com$/);
+    expect(new URL(await signer.putUrl('k', { expiresIn: 60 })).host).toMatch(
+      /acct\.r2\.cloudflarestorage\.com$/
+    );
     // Divergence: a keyless Env on Cloudflare has no signer; it does not fall through to a box URL.
     expect(resolveR2ObjectUrlSigner(boxEnv().env)).toBeNull();
   });
@@ -304,18 +327,45 @@ describe('callers on a keyless box', () => {
     expect(composeImageArtifactMaxBytesFor(env, signer)).toBe(CELLD_MAX_REQUEST_BODY_BYTES);
     const [upload] = await createComposeImageArtifactUploads(
       env,
-      { projectId: 'p1', workspaceId: 'w1', environmentId: 'e1', uploadId: 'u1', services: [{ serviceName: 'web', sourceRef: 'web' }] },
+      {
+        projectId: 'p1',
+        workspaceId: 'w1',
+        environmentId: 'e1',
+        uploadId: 'u1',
+        services: [{ serviceName: 'web', sourceRef: 'web' }],
+      },
       signer
     );
     expect(upload!.maxBytes).toBe(CELLD_MAX_REQUEST_BODY_BYTES);
-    const claims = await verifyBoxObjectToken(env, new URL(upload!.uploadUrl).searchParams.get('token')!);
-    expect(claims).toMatchObject({ op: 'put', key: upload!.r2Key, max: CELLD_MAX_REQUEST_BODY_BYTES, sub: { p: 'p1', w: 'w1' } });
+    const claims = await verifyBoxObjectToken(
+      env,
+      new URL(upload!.uploadUrl).searchParams.get('token')!
+    );
+    expect(claims).toMatchObject({
+      op: 'put',
+      key: upload!.r2Key,
+      max: CELLD_MAX_REQUEST_BODY_BYTES,
+      sub: { p: 'p1', w: 'w1' },
+    });
     const [download] = await createComposeImageArtifactDownloads(
       env,
-      [{ serviceName: 'web', sourceRef: 'web', localImageRef: 'web', r2Key: upload!.r2Key, sizeBytes: 3, archiveType: 'docker-save', mediaType: 'x' } as never],
+      [
+        {
+          serviceName: 'web',
+          sourceRef: 'web',
+          localImageRef: 'web',
+          r2Key: upload!.r2Key,
+          sizeBytes: 3,
+          archiveType: 'docker-save',
+          mediaType: 'x',
+        } as never,
+      ],
       signer
     );
-    const getClaims = await verifyBoxObjectToken(env, new URL(download!.downloadUrl).searchParams.get('token')!);
+    const getClaims = await verifyBoxObjectToken(
+      env,
+      new URL(download!.downloadUrl).searchParams.get('token')!
+    );
     expect(getClaims).toMatchObject({ op: 'get', key: upload!.r2Key });
   });
 
@@ -323,12 +373,22 @@ describe('callers on a keyless box', () => {
     const { env } = boxEnv();
     const sha = 'a'.repeat(64);
     const slot = await createBuildContextUpload(
-      { id: 'job', projectId: 'p1', workspaceId: 'w1', requestedBy: 'u1', environmentId: 'e1', attempt: 1 },
+      {
+        id: 'job',
+        projectId: 'p1',
+        workspaceId: 'w1',
+        requestedBy: 'u1',
+        environmentId: 'e1',
+        attempt: 1,
+      },
       { sizeBytes: 9, sha256: sha },
       60,
       createBoxObjectUrlSigner(env)!
     );
-    const claims = await verifyBoxObjectToken(env, new URL(slot.uploadUrl).searchParams.get('token')!);
+    const claims = await verifyBoxObjectToken(
+      env,
+      new URL(slot.uploadUrl).searchParams.get('token')!
+    );
     expect(claims).toMatchObject({ key: slot.r2Key, len: 9, sha, md: { sha256: sha } });
   });
 
@@ -345,7 +405,10 @@ describe('callers on a keyless box', () => {
     const options = { uploadId: 'up1', filename: 'a.txt', size: 5, contentType: 'text/plain' };
     const a = await generatePresignedUploadUrl(env, { ...options, userId: 'user-a' });
     const b = await generatePresignedUploadUrl(env, { ...options, userId: 'user-b' });
-    const claimsB = await verifyBoxObjectToken(env, new URL(b.uploadUrl).searchParams.get('token')!);
+    const claimsB = await verifyBoxObjectToken(
+      env,
+      new URL(b.uploadUrl).searchParams.get('token')!
+    );
     expect(claimsB!.key).toBe(b.r2Key);
     expect(claimsB!.key.startsWith('temp-uploads/user-b/')).toBe(true);
     expect(a.r2Key.startsWith('temp-uploads/user-a/')).toBe(true);
@@ -355,7 +418,11 @@ describe('callers on a keyless box', () => {
 // ── the route ──────────────────────────────────────────────────────────────────────────────────
 
 describe('PUT/GET /api/box-objects', () => {
-  async function upload(env: Env, key: string, extra: Partial<Parameters<typeof mintBoxObjectToken>[1]> = {}) {
+  async function upload(
+    env: Env,
+    key: string,
+    extra: Partial<Parameters<typeof mintBoxObjectToken>[1]> = {}
+  ) {
     const signer = createBoxObjectUrlSigner(env)!;
     return signer.putUrl(key, { expiresIn: 60, contentType: 'text/plain', ...extra });
   }
@@ -365,10 +432,14 @@ describe('PUT/GET /api/box-objects', () => {
     const app = routeApp();
     const url = await upload(env, 'temp-uploads/u1/up/a.txt', { contentLength: 5 });
     expect((await putUrl(app, env, url, bytes('hello'))).status).toBe(200);
-    expect(new TextDecoder().decode(R2.objects.get('temp-uploads/u1/up/a.txt')!.bytes)).toBe('hello');
+    expect(new TextDecoder().decode(R2.objects.get('temp-uploads/u1/up/a.txt')!.bytes)).toBe(
+      'hello'
+    );
     expect(R2.objects.get('temp-uploads/u1/up/a.txt')!.contentType).toBe('text/plain');
 
-    const getUrl = new URL(await createBoxObjectUrlSigner(env)!.getUrl('temp-uploads/u1/up/a.txt', { expiresIn: 60 }));
+    const getUrl = new URL(
+      await createBoxObjectUrlSigner(env)!.getUrl('temp-uploads/u1/up/a.txt', { expiresIn: 60 })
+    );
     const response = await app.request(`${getUrl.pathname}${getUrl.search}`, {}, env);
     expect(response.status).toBe(200);
     expect(await response.text()).toBe('hello');
@@ -388,10 +459,22 @@ describe('PUT/GET /api/box-objects', () => {
     const { env, R2 } = boxEnv();
     const app = routeApp();
     const getToken = await mintBoxObjectToken(env, { op: 'get', key: 'k', expiresIn: 60 });
-    const expired = await mintBoxObjectToken(env, { op: 'put', key: 'k', len: 1, expiresIn: 1 }, Date.now() - 10_000);
-    const forged = await mintBoxObjectToken({ ENCRYPTION_KEY: 'another-installation-key' }, { op: 'put', key: 'k', len: 1, expiresIn: 60 });
+    const expired = await mintBoxObjectToken(
+      env,
+      { op: 'put', key: 'k', len: 1, expiresIn: 1 },
+      Date.now() - 10_000
+    );
+    const forged = await mintBoxObjectToken(
+      { ENCRYPTION_KEY: 'another-installation-key' },
+      { op: 'put', key: 'k', len: 1, expiresIn: 60 }
+    );
     for (const token of [getToken, expired, forged, '']) {
-      const response = await putUrl(app, env, `https://x${BOX_OBJECT_ROUTE}?token=${encodeURIComponent(token)}`, bytes('x'));
+      const response = await putUrl(
+        app,
+        env,
+        `https://x${BOX_OBJECT_ROUTE}?token=${encodeURIComponent(token)}`,
+        bytes('x')
+      );
       expect(response.status).toBe(403);
     }
     expect(R2.objects.size).toBe(0);
@@ -405,7 +488,11 @@ describe('PUT/GET /api/box-objects', () => {
     const exact = await upload(env, 'k2', { contentLength: 4 });
     expect((await putUrl(app, env, exact, bytes('123'))).status).toBe(400);
     const target = new URL(exact);
-    const noLength = await app.request(`${target.pathname}${target.search}`, { method: 'PUT' }, env);
+    const noLength = await app.request(
+      `${target.pathname}${target.search}`,
+      { method: 'PUT' },
+      env
+    );
     expect(noLength.status).toBe(411);
     expect(R2.objects.size).toBe(0);
     // Control: within bounds is written.
@@ -453,7 +540,10 @@ describe('PUT/GET /api/box-objects', () => {
     const { env, R2 } = boxEnv();
     const app = routeApp();
     const body = bytes('context');
-    const url = await upload(env, 'ctx', { contentLength: body.byteLength, sha256: await sha256Hex(body) });
+    const url = await upload(env, 'ctx', {
+      contentLength: body.byteLength,
+      sha256: await sha256Hex(body),
+    });
     expect((await putUrl(app, env, url, bytes('CONTEXT'))).status).toBe(400);
     expect(R2.objects.has('ctx')).toBe(false);
     expect((await putUrl(app, env, url, body)).status).toBe(200);
@@ -488,7 +578,9 @@ describe('PUT/GET /api/box-objects', () => {
     const lines: string[] = [];
     for (const method of ['log', 'info', 'warn', 'error'] as const) {
       vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
-        lines.push(args.map((arg) => (typeof arg === 'string' ? arg : JSON.stringify(arg))).join(' '));
+        lines.push(
+          args.map((arg) => (typeof arg === 'string' ? arg : JSON.stringify(arg))).join(' ')
+        );
       });
     }
     const url = await upload(env, 'logged', { contentLength: 2 });
@@ -496,7 +588,9 @@ describe('PUT/GET /api/box-objects', () => {
     expect((await putUrl(app, env, url, bytes('ok'))).status).toBe(200);
     await putUrl(app, env, `https://x${BOX_OBJECT_ROUTE}?token=${token}x`, bytes('ok'));
     // Liveness: the request log and the route's own events were written.
-    expect(lines.some((line) => line.includes('http.request') && line.includes(BOX_OBJECT_ROUTE))).toBe(true);
+    expect(
+      lines.some((line) => line.includes('http.request') && line.includes(BOX_OBJECT_ROUTE))
+    ).toBe(true);
     expect(lines.some((line) => line.includes('box_objects.uploaded'))).toBe(true);
     expect(lines.some((line) => line.includes('box_objects.token_refused'))).toBe(true);
     const signature = token.split('.')[2]!;

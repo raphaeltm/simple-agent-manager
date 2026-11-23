@@ -38,10 +38,13 @@ type BoxObjectEnv = Env & BoxUploadGateEnv;
 export const CELLD_CONDITIONAL_PUT_MAX_BYTES = 8 * 1024 * 1024;
 
 function plain(status: number, message: string, headers: Record<string, string> = {}): Response {
-  return Response.json({ error: status === 503 ? 'BUSY' : 'BOX_OBJECT_REFUSED', message }, {
-    status,
-    headers,
-  });
+  return Response.json(
+    { error: status === 503 ? 'BUSY' : 'BOX_OBJECT_REFUSED', message },
+    {
+      status,
+      headers,
+    }
+  );
 }
 
 /** Log fields that identify the request without the token. */
@@ -112,7 +115,11 @@ async function put(c: Context<{ Bindings: BoxObjectEnv }>, claims: BoxObjectToke
   const leaseId = crypto.randomUUID();
   const lease = await gate.acquire(leaseId, limit, leaseMs);
   if (!lease.granted) {
-    log.warn('box_objects.upload_refused_busy', { ...logFields(claims), active: lease.active, limit });
+    log.warn('box_objects.upload_refused_busy', {
+      ...logFields(claims),
+      active: lease.active,
+      limit,
+    });
     return plain(503, `The box is already receiving ${lease.active} uploads; retry shortly`, {
       'Retry-After': String(lease.retryAfterSeconds),
     });
@@ -155,7 +162,8 @@ async function get(c: Context<{ Bindings: BoxObjectEnv }>, claims: BoxObjectToke
   const object = await c.env.R2.get(claims.key);
   if (!object) return plain(404, 'Object not found');
   const headers = new Headers({ 'Content-Length': String(object.size), ETag: object.httpEtag });
-  if (object.httpMetadata?.contentType) headers.set('Content-Type', object.httpMetadata.contentType);
+  if (object.httpMetadata?.contentType)
+    headers.set('Content-Type', object.httpMetadata.contentType);
   log.info('box_objects.downloaded', { ...logFields(claims), length: object.size });
   return new Response(object.body, { status: 200, headers });
 }

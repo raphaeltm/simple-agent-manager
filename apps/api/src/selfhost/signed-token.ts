@@ -77,7 +77,8 @@ async function signingKey(label: string, secret: string): Promise<CryptoKey> {
 }
 
 function requireKey(env: Pick<SignedTokenEnv, 'ENCRYPTION_KEY'>, purpose: SignedTokenPurpose) {
-  if (!env.ENCRYPTION_KEY) throw new Error(`ENCRYPTION_KEY is required for ${purpose.prefix} tokens`);
+  if (!env.ENCRYPTION_KEY)
+    throw new Error(`ENCRYPTION_KEY is required for ${purpose.prefix} tokens`);
   return env.ENCRYPTION_KEY;
 }
 

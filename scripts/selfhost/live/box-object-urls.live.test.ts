@@ -70,10 +70,14 @@ function put(
   write: (req: ReturnType<typeof request>) => void
 ): Promise<{ status: number; headers: Record<string, string | string[] | undefined> }> {
   return new Promise((done, fail) => {
-    const req = request(url, { method: 'PUT', headers: { 'content-length': String(length) } }, (res) => {
-      res.resume();
-      res.on('end', () => done({ status: res.statusCode ?? 0, headers: res.headers }));
-    });
+    const req = request(
+      url,
+      { method: 'PUT', headers: { 'content-length': String(length) } },
+      (res) => {
+        res.resume();
+        res.on('end', () => done({ status: res.statusCode ?? 0, headers: res.headers }));
+      }
+    );
     req.on('error', fail);
     write(req);
   });
@@ -103,7 +107,14 @@ describe.skipIf(skipWithoutDocker)('box object URLs on celld', () => {
   });
 
   afterAll(async () => {
-    if (process.env.BOX_DEBUG) console.log(celld?.output().split('\n').filter((l) => l.includes('box_objects')).join('\n'));
+    if (process.env.BOX_DEBUG)
+      console.log(
+        celld
+          ?.output()
+          .split('\n')
+          .filter((l) => l.includes('box_objects'))
+          .join('\n')
+      );
     await celld?.stop();
     store?.stop();
   });
@@ -149,7 +160,9 @@ describe.skipIf(skipWithoutDocker)('box object URLs on celld', () => {
     const url = await mint('put', 'artifacts/web.tar', { maxBytes: 64 * 1024 * 1024 });
     expect((await putBytes(url, body)).status).toBe(200);
     expect((await putBytes(url, randomBytes(body.length))).status).toBe(412);
-    const got = Buffer.from(await (await fetch(await mint('get', 'artifacts/web.tar'))).arrayBuffer());
+    const got = Buffer.from(
+      await (await fetch(await mint('get', 'artifacts/web.tar'))).arrayBuffer()
+    );
     expect(got.equals(body)).toBe(true);
   }, 60_000);
 
@@ -167,9 +180,9 @@ describe.skipIf(skipWithoutDocker)('box object URLs on celld', () => {
     const small = await mint('put', 'attach/big.bin', { maxBytes: 10 });
     expect((await putBytes(small, Buffer.alloc(11))).status).toBe(413);
     const huge = await mint('put', 'attach/huge.bin', { maxBytes: 1024 * 1024 * 1024 });
-    const refused = await put(huge, 1024 * 1024 * 1024 + 1, (req) => req.write(Buffer.alloc(1))).catch(
-      () => ({ status: 413, headers: {} })
-    );
+    const refused = await put(huge, 1024 * 1024 * 1024 + 1, (req) =>
+      req.write(Buffer.alloc(1))
+    ).catch(() => ({ status: 413, headers: {} }));
     expect(refused.status).toBe(413);
   });
 
@@ -188,13 +201,19 @@ describe.skipIf(skipWithoutDocker)('box object URLs on celld', () => {
     }
     // Let the four reach the gate.
     await new Promise((resolve) => setTimeout(resolve, 1500));
-    const fifth = await putBytes(await mint('put', 'busy/5', { contentLength: 4 }), Buffer.from('five'));
+    const fifth = await putBytes(
+      await mint('put', 'busy/5', { contentLength: 4 }),
+      Buffer.from('five')
+    );
     expect(fifth.status).toBe(503);
     expect(Number(fifth.headers['retry-after'])).toBeGreaterThan(0);
     for (const req of held) req.end(Buffer.alloc(length - 1024));
     expect((await Promise.all(pending)).map((r) => r.status)).toEqual([200, 200, 200, 200]);
     // Every lease was released: a new upload is admitted.
-    const after = await putBytes(await mint('put', 'busy/6', { contentLength: 3 }), Buffer.from('six'));
+    const after = await putBytes(
+      await mint('put', 'busy/6', { contentLength: 3 }),
+      Buffer.from('six')
+    );
     expect(after.status).toBe(200);
   }, 60_000);
 });

@@ -20,7 +20,11 @@ export async function createBuildContextUpload(
     contentType: 'application/zstd',
     metadata: { sha256: descriptor.sha256 },
     sha256: descriptor.sha256,
-    owner: { userId: owner.requestedBy, projectId: owner.projectId, workspaceId: owner.workspaceId },
+    owner: {
+      userId: owner.requestedBy,
+      projectId: owner.projectId,
+      workspaceId: owner.workspaceId,
+    },
   });
   return { r2Key, uploadUrl, expiresIn };
 }

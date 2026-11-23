@@ -21,8 +21,7 @@ export interface BoxUploadGateEnv {
 }
 
 export type BoxUploadLease =
-  | { granted: true }
-  | { granted: false; active: number; retryAfterSeconds: number };
+  { granted: true } | { granted: false; active: number; retryAfterSeconds: number };
 
 /** Shortest and longest Retry-After hint (seconds) a refusal suggests. */
 const MIN_RETRY_AFTER_SECONDS = 5;
@@ -40,9 +39,11 @@ export class BoxUploadGate extends DurableObject {
   acquire(id: string, limit: number, leaseMs: number, now: number = Date.now()): BoxUploadLease {
     const sql = this.ctx.storage.sql;
     sql.exec('DELETE FROM upload_leases WHERE expires_at <= ?', now);
-    const row = sql.exec<{ active: number; next: number | null }>(
-      'SELECT COUNT(*) AS active, MIN(expires_at) AS next FROM upload_leases'
-    ).one();
+    const row = sql
+      .exec<{ active: number; next: number | null }>(
+        'SELECT COUNT(*) AS active, MIN(expires_at) AS next FROM upload_leases'
+      )
+      .one();
     if (row.active >= limit) {
       // A hint, not a promise: most leases end when their upload finishes, long before expiry.
       const untilExpiry = Math.ceil(((row.next ?? now) - now) / 1000);

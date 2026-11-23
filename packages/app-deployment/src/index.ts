@@ -36,20 +36,14 @@ export type {
 export {
   buildComposeImageArtifactKey,
   COMPOSE_IMAGE_ARTIFACT_ARCHIVE_TYPE,
-  composeImageArtifactMaxBytesFor,
   COMPOSE_IMAGE_ARTIFACT_MEDIA_TYPE,
+  composeImageArtifactMaxBytesFor,
   createComposeImageArtifactDownloads,
   createComposeImageArtifactUploads,
   getComposeImageArtifactMaxBytes,
   validateCompletedComposeImageArtifacts,
   validateComposeImageArtifactDescriptor,
 } from './compose-image-artifacts';
-export type {
-  ObjectPutUrlOptions,
-  ObjectUrlSigner,
-  S3PresignTarget,
-} from './object-url-signer';
-export { s3ObjectUrlSigner } from './object-url-signer';
 export type {
   ComposePublishApplyOptions,
   ComposePublishApplyResult,
@@ -214,6 +208,12 @@ export type {
 export { createImageResolver, ImageResolveError } from './image-resolver';
 export type { ResolverRuntimeOptions } from './image-resolver-outbound';
 export { getImageResolverConfig } from './image-resolver-outbound';
+export type {
+  ObjectPutUrlOptions,
+  ObjectUrlSigner,
+  S3PresignTarget,
+} from './object-url-signer';
+export { s3ObjectUrlSigner } from './object-url-signer';
 export type {
   DeploymentLifecyclePort,
   DeploymentProviderPort,
