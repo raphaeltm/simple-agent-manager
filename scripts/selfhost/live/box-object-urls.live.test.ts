@@ -41,6 +41,17 @@ app.post('/mint', async (c) => {
     : await signer.putUrl(body.key, { expiresIn: 300, ...body.options });
   return c.json({ url });
 });
+// The real gate over celld's Durable Object SQL: renew must see its own row (cursor.rowsWritten).
+app.post('/gate-probe', async (c) => {
+  const gate = c.env.BOX_UPLOAD_GATE.get(c.env.BOX_UPLOAD_GATE.idFromName('box'));
+  const limits = { total: 4, perUploader: 2, leaseMs: 60000 };
+  const acquired = await gate.acquire('probe-lease', 'u:probe', 'temp-uploads/probe/k', limits);
+  const sameKey = await gate.acquire('probe-other', 'u:other', 'temp-uploads/probe/k', limits);
+  const held = await gate.renew('probe-lease', 60000);
+  await gate.release('probe-lease');
+  const afterRelease = await gate.renew('probe-lease', 60000);
+  return c.json({ acquired, sameKey, held, afterRelease });
+});
 mountBoxObjectRoute(app);
 export default app;
 `;
@@ -86,6 +97,12 @@ function put(
 }
 
 const putBytes = (url: string, body: Buffer) => put(url, body.length, (req) => req.end(body));
+
+/** celld still serves after a refusal (a crash or reset would otherwise pass as a refusal). */
+async function expectCelldResponsive(): Promise<void> {
+  const response = await fetch(`http://127.0.0.1:${port}/`);
+  expect(response.status).toBe(200);
+}
 
 describe.skipIf(skipWithoutDocker)('box object URLs on celld', () => {
   beforeAll(async () => {
@@ -172,6 +189,16 @@ describe.skipIf(skipWithoutDocker)('box object URLs on celld', () => {
     expect(got.equals(body)).toBe(true);
   }, 60_000);
 
+  it('the gate on celld: same-key claims refuse, renew reports a held and a released lease', async () => {
+    const response = await fetch(`http://127.0.0.1:${port}/gate-probe`, { method: 'POST' });
+    expect(await response.json()).toEqual({
+      acquired: { granted: true },
+      sameKey: { granted: false, reason: 'key-in-use' },
+      held: true,
+      afterRelease: false,
+    });
+  });
+
   it('a body shorter than declared leaves no object', async () => {
     const url = await mint('put', 'temp-uploads/live/short.bin', { maxBytes: 1024 });
     // Declares 100 bytes, sends 10, then closes: FixedLengthStream fails the put.
@@ -186,10 +213,16 @@ describe.skipIf(skipWithoutDocker)('box object URLs on celld', () => {
     const small = await mint('put', 'temp-uploads/live/big.bin', { maxBytes: 10 });
     expect((await putBytes(small, Buffer.alloc(11))).status).toBe(413);
     const huge = await mint('put', 'temp-uploads/live/huge.bin', { maxBytes: 1024 * 1024 * 1024 });
-    const refused = await put(huge, 1024 * 1024 * 1024 + 1, (req) =>
-      req.write(Buffer.alloc(1))
-    ).catch(() => ({ status: 413, headers: {} }));
+    // celld answers from the declared length alone, while the client has sent one byte; any other
+    // transport outcome fails the test rather than counting as a refusal.
+    let open: ReturnType<typeof request> | undefined;
+    const refused = await put(huge, 1024 * 1024 * 1024 + 1, (req) => {
+      open = req;
+      req.write(Buffer.alloc(1));
+    });
+    open?.destroy();
     expect(refused.status).toBe(413);
+    await expectCelldResponsive();
   });
 
   it('a bad token is refused before the body is read: a large unauthenticated body is not buffered', async () => {
@@ -215,7 +248,11 @@ describe.skipIf(skipWithoutDocker)('box object URLs on celld', () => {
         res.resume();
         done(res.statusCode ?? 0);
       });
-      req.on('error', () => done(-1));
+      // Only the early-close outcomes count; anything else fails the test.
+      req.on('error', (error: NodeJS.ErrnoException) => {
+        if (error.code === 'ECONNRESET' || error.code === 'EPIPE') done(-1);
+        else throw error;
+      });
       const write = () => {
         while (sent < length) {
           sent += chunk.length;
@@ -230,6 +267,7 @@ describe.skipIf(skipWithoutDocker)('box object URLs on celld', () => {
     // Refused without reading the body: the connection ended long before 512 MiB was sent, and
     // celld held none of it.
     expect(sent).toBeLessThan(length / 4);
+    await expectCelldResponsive();
     expect(Date.now() - started).toBeLessThan(10_000);
     expect(peak - before).toBeLessThan(100);
   }, 60_000);

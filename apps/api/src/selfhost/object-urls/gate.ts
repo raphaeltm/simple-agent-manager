@@ -24,7 +24,11 @@ export interface BoxUploadGateEnv {
 }
 
 export type BoxUploadLease =
-  { granted: true } | { granted: false; active: number; retryAfterSeconds: number };
+  | { granted: true }
+  /** The box (or this uploader) is at its limit. */
+  | { granted: false; reason: 'busy'; active: number; retryAfterSeconds: number }
+  /** Another live upload is writing the same object key. */
+  | { granted: false; reason: 'key-in-use' };
 
 /** Shortest and longest Retry-After hint (seconds) a refusal suggests. */
 const MIN_RETRY_AFTER_SECONDS = 5;
@@ -34,33 +38,39 @@ export class BoxUploadGate extends DurableObject {
   constructor(ctx: DurableObjectState, env: unknown) {
     super(ctx, env as never);
     ctx.storage.sql.exec(
-      'CREATE TABLE IF NOT EXISTS upload_leases (id TEXT PRIMARY KEY, uploader TEXT NOT NULL, expires_at INTEGER NOT NULL)'
+      'CREATE TABLE IF NOT EXISTS upload_slots (id TEXT PRIMARY KEY, uploader TEXT NOT NULL, object_key TEXT NOT NULL, expires_at INTEGER NOT NULL)'
     );
   }
 
-  /**
-   * Grants a lease to `id` while fewer than `limits.total` unexpired leases exist on the box and
-   * fewer than `limits.perUploader` belong to `uploader`, so one uploader cannot hold every slot.
-   */
   /** The gate's clock (a method, not an RPC argument, so no caller can move it). */
   protected now(): number {
     return Date.now();
   }
 
+  /**
+   * Grants a lease to `id` while fewer than `limits.total` unexpired leases exist on the box,
+   * fewer than `limits.perUploader` belong to `uploader` (so one uploader cannot hold every slot),
+   * and no live lease is writing `objectKey`. The key claim makes create-only hold for streams
+   * celld cannot write conditionally (route.ts): from the existence check through the write, only
+   * one upload may create a given object.
+   */
   acquire(
     id: string,
     uploader: string,
+    objectKey: string,
     limits: { total: number; perUploader: number; leaseMs: number }
   ): BoxUploadLease {
     const now = this.now();
     const sql = this.ctx.storage.sql;
-    sql.exec('DELETE FROM upload_leases WHERE expires_at <= ?', now);
+    sql.exec('DELETE FROM upload_slots WHERE expires_at <= ?', now);
     const row = sql
-      .exec<{ active: number; mine: number; next: number | null }>(
-        'SELECT COUNT(*) AS active, COALESCE(SUM(uploader = ?), 0) AS mine, MIN(expires_at) AS next FROM upload_leases',
-        uploader
+      .exec<{ active: number; mine: number; sameKey: number; next: number | null }>(
+        'SELECT COUNT(*) AS active, COALESCE(SUM(uploader = ?), 0) AS mine, COALESCE(SUM(object_key = ?), 0) AS sameKey, MIN(expires_at) AS next FROM upload_slots',
+        uploader,
+        objectKey
       )
       .one();
+    if (row.sameKey > 0) return { granted: false, reason: 'key-in-use' };
     if (row.active >= limits.total || row.mine >= limits.perUploader) {
       // A hint, not a promise: most leases end when their upload finishes, long before expiry.
       const untilExpiry = Math.ceil(((row.next ?? now) - now) / 1000);
@@ -68,28 +78,35 @@ export class BoxUploadGate extends DurableObject {
         MAX_RETRY_AFTER_SECONDS,
         Math.max(MIN_RETRY_AFTER_SECONDS, untilExpiry)
       );
-      return { granted: false, active: row.active, retryAfterSeconds };
+      return { granted: false, reason: 'busy', active: row.active, retryAfterSeconds };
     }
     sql.exec(
-      'INSERT OR REPLACE INTO upload_leases (id, uploader, expires_at) VALUES (?, ?, ?)',
+      'INSERT OR REPLACE INTO upload_slots (id, uploader, object_key, expires_at) VALUES (?, ?, ?, ?)',
       id,
       uploader,
+      objectKey,
       now + limits.leaseMs
     );
     return { granted: true };
   }
 
-  /** Extends a held lease while its upload is still receiving bytes (route.ts). */
-  renew(id: string, leaseMs: number): void {
-    this.ctx.storage.sql.exec(
-      'UPDATE upload_leases SET expires_at = ? WHERE id = ?',
-      this.now() + leaseMs,
-      id
+  /**
+   * Extends a held, unexpired lease while its upload is still receiving bytes (route.ts). False when
+   * the lease is gone: the route then stops the upload rather than let it run uncounted.
+   */
+  renew(id: string, leaseMs: number): boolean {
+    const now = this.now();
+    const cursor = this.ctx.storage.sql.exec(
+      'UPDATE upload_slots SET expires_at = ? WHERE id = ? AND expires_at > ?',
+      now + leaseMs,
+      id,
+      now
     );
+    return cursor.rowsWritten > 0;
   }
 
   release(id: string): void {
-    this.ctx.storage.sql.exec('DELETE FROM upload_leases WHERE id = ?', id);
+    this.ctx.storage.sql.exec('DELETE FROM upload_slots WHERE id = ?', id);
   }
 }
 
@@ -100,9 +117,10 @@ interface BoxUploadGateStub {
   acquire(
     id: string,
     uploader: string,
+    objectKey: string,
     limits: { total: number; perUploader: number; leaseMs: number }
   ): Promise<BoxUploadLease>;
-  renew(id: string, leaseMs: number): Promise<void>;
+  renew(id: string, leaseMs: number): Promise<boolean>;
   release(id: string): Promise<void>;
 }
 

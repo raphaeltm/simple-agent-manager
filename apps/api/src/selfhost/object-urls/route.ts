@@ -107,8 +107,10 @@ function uploader(claims: BoxObjectTokenClaims): string {
 
 interface Watchdog {
   stream: TransformStream<Uint8Array, Uint8Array>;
-  /** True once the watchdog dropped the upload for going idle. */
-  idled: () => boolean;
+  /** Why the watchdog stopped the upload, if it did. */
+  stopped: () => 'idle' | 'lease-lost' | null;
+  /** Stops the upload because it no longer holds its slot. */
+  loseLease: () => void;
   dispose: () => void;
 }
 
@@ -118,16 +120,19 @@ interface Watchdog {
  */
 function uploadWatchdog(idleMs: number, progressEveryMs: number, onProgress: () => void): Watchdog {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let idled = false;
+  let stopped: 'idle' | 'lease-lost' | null = null;
   let lastProgress = Date.now();
   let fail: (error: Error) => void = () => undefined;
   const dispose = () => clearTimeout(timer);
+  const stop = (reason: 'idle' | 'lease-lost') => {
+    if (stopped) return;
+    stopped = reason;
+    dispose();
+    fail(new Error(`box upload stopped: ${reason}`));
+  };
   const arm = () => {
     dispose();
-    timer = setTimeout(() => {
-      idled = true;
-      fail(new Error('box upload received no bytes within its idle limit'));
-    }, idleMs);
+    timer = setTimeout(() => stop('idle'), idleMs);
   };
   const stream = new TransformStream<Uint8Array, Uint8Array>({
     start(controller) {
@@ -145,7 +150,7 @@ function uploadWatchdog(idleMs: number, progressEveryMs: number, onProgress: () 
     flush: dispose,
     cancel: dispose,
   });
-  return { stream, idled: () => idled, dispose };
+  return { stream, stopped: () => stopped, loseLease: () => stop('lease-lost'), dispose };
 }
 
 /**
@@ -193,9 +198,18 @@ async function put(c: Context<{ Bindings: BoxObjectEnv }>, claims: BoxObjectToke
   if (!gate) {
     return plain(503, 'Box uploads are unavailable (no upload gate binding)', {}, 'UNAVAILABLE');
   }
-  const limits = await uploadLimits(env);
+  const configured = await uploadLimits(env);
+  // A slot must outlive the longest pause the idle limit tolerates plus one renewal interval, or a
+  // paused-but-live upload would lose it and run uncounted. Renewals come every leaseMs / 3, so a
+  // lease of at least twice the idle limit always covers the gap (the settings allow any pair).
+  const limits = { ...configured, leaseMs: Math.max(configured.leaseMs, 2 * configured.idleMs) };
   const leaseId = crypto.randomUUID();
-  const lease = await gate.acquire(leaseId, uploader(claims), limits);
+  const lease = await gate.acquire(leaseId, uploader(claims), claims.key, limits);
+  if (!lease.granted && lease.reason === 'key-in-use') {
+    // Another upload is creating this object right now: create-only, so this one cannot.
+    log.warn('box_objects.upload_conflict', { ...logFields(claims), length, action: 'in_flight' });
+    return plain(412, 'Another upload is writing this object');
+  }
   if (!lease.granted) {
     log.warn('box_objects.upload_refused_busy', {
       ...logFields(claims),
@@ -208,8 +222,15 @@ async function put(c: Context<{ Bindings: BoxObjectEnv }>, claims: BoxObjectToke
     });
   }
   const watchdog = uploadWatchdog(limits.idleMs, Math.max(1000, limits.leaseMs / 3), () => {
-    // Keep the slot while bytes arrive; a failed renewal only shortens it to the lease.
-    gate.renew(leaseId, limits.leaseMs).catch(() => undefined);
+    // Keep the slot while bytes arrive. A renewal that finds no lease means the slot was given up:
+    // stop the upload rather than let it run uncounted. A failed RPC only shortens the slot to the
+    // lease; the next renewal tries again.
+    gate
+      .renew(leaseId, limits.leaseMs)
+      .then((held) => {
+        if (!held) watchdog.loseLease();
+      })
+      .catch(() => undefined);
   });
   try {
     const atomic = length <= CELLD_CONDITIONAL_PUT_MAX_BYTES;
@@ -229,8 +250,12 @@ async function put(c: Context<{ Bindings: BoxObjectEnv }>, claims: BoxObjectToke
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log.warn('box_objects.upload_failed', { ...logFields(claims), length, error: message });
-      if (watchdog.idled()) {
+      if (watchdog.stopped() === 'idle') {
         return plain(408, 'The upload stopped sending data', {}, 'UPLOAD_TIMEOUT');
+      }
+      if (watchdog.stopped() === 'lease-lost') {
+        log.warn('box_objects.upload_lease_lost', { ...logFields(claims), length });
+        return plain(503, 'The upload lost its slot; retry it', { 'Retry-After': '5' });
       }
       if (claims.sha && /sha-?256/i.test(message)) {
         return plain(400, 'Upload body does not match the declared sha256');

@@ -99,10 +99,17 @@ export function isSafeObjectKey(
   prefixes: readonly string[] = BOX_OBJECT_KEY_PREFIXES
 ): boolean {
   if (!key || key.length > MAX_KEY_LENGTH) return false;
-  if (!prefixes.some((prefix) => key.startsWith(prefix))) return false;
   // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
   if (key.startsWith('/') || key.includes('\\') || /[\u0000-\u001f\u007f]/.test(key)) return false;
-  return key.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..');
+  // The matched prefix is configuration (an operator's SESSION_SNAPSHOT_R2_PREFIX may legitimately
+  // hold an empty segment); only the part SAM appended is checked segment by segment.
+  const prefix = prefixes.find((candidate) => key.startsWith(candidate));
+  if (prefix === undefined) return false;
+  const suffix = key.slice(prefix.length);
+  return (
+    suffix !== '' &&
+    suffix.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..')
+  );
 }
 
 function isStringRecord(value: unknown): value is Record<string, string> {

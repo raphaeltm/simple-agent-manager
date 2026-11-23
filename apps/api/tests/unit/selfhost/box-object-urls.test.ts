@@ -12,6 +12,7 @@ import {
   createBuildContextUpload,
   createComposeImageArtifactDownloads,
   createComposeImageArtifactUploads,
+  type ObjectPutUrlOptions,
 } from '@simple-agent-manager/app-deployment';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
@@ -155,10 +156,12 @@ function sqliteStorage() {
   return {
     exec(query: string, ...params: unknown[]) {
       const statement = db.prepare(query);
-      const rows = statement.reader
-        ? (statement.all(...params) as unknown[])
-        : (statement.run(...params), []);
-      return { one: () => rows[0], toArray: () => rows };
+      if (statement.reader) {
+        const rows = statement.all(...params) as unknown[];
+        return { one: () => rows[0], toArray: () => rows, rowsWritten: 0 };
+      }
+      const { changes } = statement.run(...params);
+      return { one: () => undefined, toArray: () => [], rowsWritten: changes };
     },
   };
 }
@@ -170,8 +173,9 @@ function gateNamespace(gate: BoxUploadGate) {
       acquire: async (
         id: string,
         uploader: string,
+        objectKey: string,
         limits: { total: number; perUploader: number; leaseMs: number }
-      ) => gate.acquire(id, uploader, limits),
+      ) => gate.acquire(id, uploader, objectKey, limits),
       renew: async (id: string, leaseMs: number) => gate.renew(id, leaseMs),
       release: async (id: string) => gate.release(id),
     }),
@@ -325,11 +329,7 @@ describe('box object token scope', () => {
   });
 
   it('refuses keys outside the upload prefixes at mint, and at verify even when correctly signed', async () => {
-    for (const key of [
-      'agents/vm-agent-linux-amd64',
-      'library/p1/f1',
-      'temp-uploadsX/a',
-    ]) {
+    for (const key of ['agents/vm-agent-linux-amd64', 'library/p1/f1', 'temp-uploadsX/a']) {
       expect(isSafeObjectKey(key)).toBe(false);
       await expect(
         mintBoxObjectToken(env, { op: 'put', key, len: 1, expiresIn: 60 })
@@ -549,6 +549,20 @@ describe('callers on a keyless box', () => {
     ).resolves.toMatch(/^samobj1\./);
   });
 
+  it('accepts keys under a configured prefix that has an empty segment; still checks the suffix', async () => {
+    const env = { ENCRYPTION_KEY: KEY, SESSION_SNAPSHOT_R2_PREFIX: 'snapshots//daily' };
+    const key = buildSessionSnapshotR2Key(env as Env, 'chat-1', 'gen-1', 'home');
+    expect(key.startsWith('snapshots//daily/')).toBe(true);
+    await expect(
+      mintBoxObjectToken(env, { op: 'put', key, len: 1, expiresIn: 60 })
+    ).resolves.toMatch(/^samobj1\./);
+    for (const bad of ['snapshots//daily/../x', 'snapshots//daily/a//b', 'snapshots//daily/']) {
+      await expect(
+        mintBoxObjectToken(env, { op: 'put', key: bad, len: 1, expiresIn: 60 })
+      ).rejects.toThrow();
+    }
+  });
+
   it('a single upload over 1 GiB is refused when the URL is requested', async () => {
     const signer = createBoxObjectUrlSigner(boxEnv().env)!;
     await expect(
@@ -578,11 +592,7 @@ describe('callers on a keyless box', () => {
 // ── the route ──────────────────────────────────────────────────────────────────────────────────
 
 describe('PUT/GET /api/box-objects', () => {
-  async function upload(
-    env: Env,
-    key: string,
-    extra: Partial<Parameters<typeof mintBoxObjectToken>[1]> = {}
-  ) {
+  async function upload(env: Env, key: string, extra: Partial<ObjectPutUrlOptions> = {}) {
     const signer = createBoxObjectUrlSigner(env)!;
     return signer.putUrl(key, { expiresIn: 60, contentType: 'text/plain', ...extra });
   }
@@ -720,7 +730,8 @@ describe('PUT/GET /api/box-objects', () => {
     const { env, R2, gate } = boxEnv();
     const app = routeApp();
     // Settings storage is unavailable in this env, so the default limit (4) applies.
-    for (let i = 0; i < 4; i++) gate.acquire(`held-${i}`, `u:other-${i}`, LIMITS);
+    for (let i = 0; i < 4; i++)
+      gate.acquire(`held-${i}`, `u:other-${i}`, `temp-uploads/held/${`held-${i}`}`, LIMITS);
     const url = await upload(env, 'temp-uploads/t/busy', { contentLength: 4 });
     const refused = await putUrl(app, env, url, bytes('busy'));
     expect(refused.status).toBe(503);
@@ -729,32 +740,135 @@ describe('PUT/GET /api/box-objects', () => {
     gate.release('held-0');
     expect((await putUrl(app, env, url, bytes('busy'))).status).toBe(200);
     // The upload released its own lease: three held, one free.
-    expect(gate.acquire('probe', 'u:probe', LIMITS)).toEqual({ granted: true });
+    expect(gate.acquire('probe', 'u:probe', `temp-uploads/held/${'probe'}`, LIMITS)).toEqual({
+      granted: true,
+    });
   });
 
   it('an expired lease frees its slot (a handler that died without releasing)', () => {
     const { gate } = boxEnv();
     const one = { total: 1, perUploader: 1, leaseMs: 1_000 };
     gate.clock = 0;
-    gate.acquire('dead', 'u:a', one);
+    gate.acquire('dead', 'u:a', `temp-uploads/held/${'dead'}`, one);
     gate.clock = 500;
-    expect(gate.acquire('next', 'u:b', one).granted).toBe(false);
+    expect(gate.acquire('next', 'u:b', `temp-uploads/held/${'next'}`, one).granted).toBe(false);
     gate.clock = 1_000;
-    expect(gate.acquire('next', 'u:b', one).granted).toBe(true);
+    expect(gate.acquire('next', 'u:b', `temp-uploads/held/${'next'}`, one).granted).toBe(true);
   });
 
   it('renewing a lease keeps a slow but moving upload in its slot', () => {
     const { gate } = boxEnv();
     const one = { total: 1, perUploader: 1, leaseMs: 1_000 };
     gate.clock = 0;
-    gate.acquire('slow', 'u:a', one);
+    gate.acquire('slow', 'u:a', `temp-uploads/held/${'slow'}`, one);
     gate.clock = 900;
     gate.renew('slow', 1_000);
     gate.clock = 1_500;
-    expect(gate.acquire('next', 'u:b', one).granted).toBe(false);
+    expect(gate.acquire('next', 'u:b', `temp-uploads/held/${'next'}`, one).granted).toBe(false);
     // Control: without further renewal it expires.
     gate.clock = 1_900;
-    expect(gate.acquire('next', 'u:b', one).granted).toBe(true);
+    expect(gate.acquire('next', 'u:b', `temp-uploads/held/${'next'}`, one).granted).toBe(true);
+  });
+
+  it('only one upload may create a key at a time: a concurrent same-key PUT is 412, other keys proceed', async () => {
+    const { env, R2, gate } = boxEnv();
+    const app = routeApp();
+    // An upload of K is in flight (holds K's claim), as when a large stream is still writing.
+    gate.acquire('writer', 'u:writer', 'temp-uploads/t/K', LIMITS);
+    const same = await upload(env, 'temp-uploads/t/K', { contentLength: 2 });
+    expect((await putUrl(app, env, same, bytes('k2'))).status).toBe(412);
+    expect(R2.objects.has('temp-uploads/t/K')).toBe(false);
+    // Control: another key is not serialized behind K.
+    const other = await upload(env, 'temp-uploads/t/other', { contentLength: 2 });
+    expect((await putUrl(app, env, other, bytes('ok'))).status).toBe(200);
+    // Once the writer is done, the key can be created.
+    gate.release('writer');
+    expect((await putUrl(app, env, same, bytes('k2'))).status).toBe(200);
+  });
+
+  it('renew reports a lost lease; a live one is extended', () => {
+    const { gate } = boxEnv();
+    const one = { total: 2, perUploader: 2, leaseMs: 1_000 };
+    gate.clock = 0;
+    gate.acquire('live', 'u:a', 'temp-uploads/t/a', one);
+    gate.acquire('gone', 'u:a', 'temp-uploads/t/b', one);
+    gate.release('gone');
+    gate.clock = 500;
+    expect(gate.renew('live', 1_000)).toBe(true);
+    expect(gate.renew('gone', 1_000)).toBe(false);
+    // An expired lease cannot be revived by a late renewal.
+    gate.clock = 5_000;
+    expect(gate.renew('live', 1_000)).toBe(false);
+  });
+
+  it('stops an upload whose renewal finds no lease (503), instead of letting it run uncounted', async () => {
+    vi.mocked(resolveAdminSettingDetailsMany).mockResolvedValueOnce([
+      { value: 4 },
+      { value: 1 }, // lease seconds (below the idle limit, so raised to 2 x idle = 4 s)
+      { value: 2 },
+      { value: 2 }, // idle seconds: renewals every ~1.3 s while bytes arrive
+    ] as never);
+    const { env, R2 } = boxEnv();
+    const ns = env.BOX_UPLOAD_GATE as unknown as { get: () => Record<string, unknown> };
+    const stub = ns.get();
+    // The gate gave the slot away (e.g. a celld restart lost the row).
+    (env as unknown as { BOX_UPLOAD_GATE: unknown }).BOX_UPLOAD_GATE = {
+      idFromName: (name: string) => name,
+      get: () => ({ ...stub, renew: async () => false }),
+    };
+    const app = routeApp();
+    const url = new URL(await upload(env, 'temp-uploads/t/slow', { contentLength: 8 }));
+    let sent = 0;
+    const slow = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        if (sent >= 8) return controller.close();
+        sent += 1;
+        controller.enqueue(bytes('x'));
+      },
+    });
+    const response = await app.request(
+      `${url.pathname}${url.search}`,
+      {
+        method: 'PUT',
+        body: slow,
+        headers: { 'content-length': '8' },
+        duplex: 'half',
+      } as RequestInit,
+      env
+    );
+    expect(response.status).toBe(503);
+    expect(sent).toBeLessThan(8);
+    expect(R2.objects.has('temp-uploads/t/slow')).toBe(false);
+  }, 15_000);
+
+  it('a lease shorter than the idle limit is raised so a paused upload keeps its slot', async () => {
+    vi.mocked(resolveAdminSettingDetailsMany).mockResolvedValueOnce([
+      { value: 4 },
+      { value: 60 }, // lease 60 s
+      { value: 2 },
+      { value: 120 }, // idle 120 s
+    ] as never);
+    const { env } = boxEnv();
+    const ns = env.BOX_UPLOAD_GATE as unknown as {
+      get: () => Record<string, (...a: unknown[]) => unknown>;
+    };
+    const stub = ns.get();
+    const seen: number[] = [];
+    (env as unknown as { BOX_UPLOAD_GATE: unknown }).BOX_UPLOAD_GATE = {
+      idFromName: (name: string) => name,
+      get: () => ({
+        ...stub,
+        acquire: async (...args: unknown[]) => {
+          seen.push((args[3] as { leaseMs: number }).leaseMs);
+          return stub.acquire!(...args);
+        },
+      }),
+    };
+    const app = routeApp();
+    const url = await upload(env, 'temp-uploads/t/clamp', { contentLength: 1 });
+    expect((await putUrl(app, env, url, bytes('c'))).status).toBe(200);
+    expect(seen).toEqual([240_000]);
   });
 
   it('one uploader cannot take every slot: a second uploader is still admitted', async () => {
@@ -762,8 +876,8 @@ describe('PUT/GET /api/box-objects', () => {
     const app = routeApp();
     const signer = createBoxObjectUrlSigner(env)!;
     // The attacker already holds its share (2 of 4).
-    gate.acquire('held-1', 'u:attacker', LIMITS);
-    gate.acquire('held-2', 'u:attacker', LIMITS);
+    gate.acquire('held-1', 'u:attacker', `temp-uploads/held/${'held-1'}`, LIMITS);
+    gate.acquire('held-2', 'u:attacker', `temp-uploads/held/${'held-2'}`, LIMITS);
     const attacker = await signer.putUrl('temp-uploads/attacker/up/a', {
       expiresIn: 60,
       contentLength: 1,
@@ -806,11 +920,15 @@ describe('PUT/GET /api/box-objects', () => {
     expect(response.status).toBe(408);
     expect(R2.objects.has('temp-uploads/t/stall')).toBe(false);
     // Its slot was released.
-    expect(gate.acquire('probe', 'u:probe', { total: 1, perUploader: 1, leaseMs: 60_000 })).toEqual(
-      {
-        granted: true,
-      }
-    );
+    expect(
+      gate.acquire('probe', 'u:probe', `temp-uploads/held/${'probe'}`, {
+        total: 1,
+        perUploader: 1,
+        leaseMs: 60_000,
+      })
+    ).toEqual({
+      granted: true,
+    });
   }, 10_000);
 
   it('a setting that resolves to nothing keeps its default bound (never disables the gate)', async () => {
@@ -822,7 +940,8 @@ describe('PUT/GET /api/box-objects', () => {
     ] as never);
     const { env, gate } = boxEnv();
     const app = routeApp();
-    for (let i = 0; i < 4; i++) gate.acquire(`held-${i}`, `u:other-${i}`, LIMITS);
+    for (let i = 0; i < 4; i++)
+      gate.acquire(`held-${i}`, `u:other-${i}`, `temp-uploads/held/${`held-${i}`}`, LIMITS);
     const url = await upload(env, 'temp-uploads/t/nan', { contentLength: 1 });
     expect((await putUrl(app, env, url, bytes('n'))).status).toBe(503);
   });
