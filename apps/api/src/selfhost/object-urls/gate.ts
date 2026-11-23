@@ -6,7 +6,7 @@
  * (task tasks/active/2026-11-23-selfhost-box-object-uploads.md): peak RSS 220 MB for one upload,
  * 284 / 427 / 896 MB for 2 / 4 / 8 at once, so roughly 85 MB per upload over a ~150 MB base, while
  * aggregate throughput stops growing after two (~180 MB/s). The default of 4 keeps the peak near
- * 430 MB. An upload over the limit is refused with 503 and Retry-After rather than queued. One
+ * 430 MB. An upload over the limit waits briefly in the route (`uploadAdmissionWaitSeconds`), then is refused with 503 and Retry-After. One
  * uploader (a workspace, else a user) may hold only part of the slots, and the route drops an
  * upload that stops sending bytes (`route.ts`), so a slow or stalled client cannot keep the box's
  * uploads blocked.

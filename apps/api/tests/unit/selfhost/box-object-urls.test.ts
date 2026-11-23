@@ -61,6 +61,17 @@ vi.mock('../../../src/services/admin-settings-resolution', () => ({
 }));
 
 const KEY = 'box-test-encryption-key-0123456789';
+
+/** Default limits, but refuse at once instead of waiting for a slot (tests that assert a 503). */
+function settingsWithoutAdmissionWait() {
+  vi.mocked(resolveAdminSettingDetailsMany).mockResolvedValueOnce([
+    { value: 4 },
+    { value: 300 },
+    { value: 2 },
+    { value: 60 },
+    { value: 0 },
+  ] as never);
+}
 /** Every box upload URL names who it is for (the per-uploader slot key). */
 const OWNER = { userId: 'u-test' };
 /** The defaults the route uses when settings storage is unavailable. */
@@ -757,6 +768,7 @@ describe('PUT/GET /api/box-objects', () => {
   });
 
   it('refuses with 503 and Retry-After while the box limit is in use, then admits once a slot frees', async () => {
+    settingsWithoutAdmissionWait();
     const { env, R2, gate } = boxEnv();
     const app = routeApp();
     // Settings storage is unavailable in this env, so the default limit (4) applies.
@@ -837,6 +849,7 @@ describe('PUT/GET /api/box-objects', () => {
       { value: 1 }, // lease seconds (below the idle limit, so raised to 2 x idle = 4 s)
       { value: 2 },
       { value: 2 }, // idle seconds: renewals every ~1.3 s while bytes arrive
+      { value: 0 },
     ] as never);
     const { env, R2 } = boxEnv();
     const ns = env.BOX_UPLOAD_GATE as unknown as { get: () => Record<string, unknown> };
@@ -878,6 +891,7 @@ describe('PUT/GET /api/box-objects', () => {
       { value: 60 }, // lease 60 s
       { value: 2 },
       { value: 120 }, // idle 120 s
+      { value: 0 },
     ] as never);
     const { env } = boxEnv();
     const ns = env.BOX_UPLOAD_GATE as unknown as {
@@ -902,6 +916,7 @@ describe('PUT/GET /api/box-objects', () => {
   });
 
   it('one uploader cannot take every slot: a second uploader is still admitted', async () => {
+    settingsWithoutAdmissionWait();
     const { env, gate } = boxEnv();
     const app = routeApp();
     const signer = createBoxObjectUrlSigner(env)!;
@@ -928,6 +943,7 @@ describe('PUT/GET /api/box-objects', () => {
       { value: 1800 },
       { value: 2 },
       { value: 1 }, // idle seconds
+      { value: 0 },
     ] as never);
     const { env, R2, gate } = boxEnv();
     const app = routeApp();
@@ -961,12 +977,45 @@ describe('PUT/GET /api/box-objects', () => {
     });
   }, 10_000);
 
+  it('waits a bounded time for a slot instead of refusing: admitted when one frees, 503 when none does', async () => {
+    vi.mocked(resolveAdminSettingDetailsMany).mockResolvedValueOnce([
+      { value: 4 },
+      { value: 300 },
+      { value: 2 },
+      { value: 60 },
+      { value: 3 }, // wait up to 3 s for a slot
+    ] as never);
+    const { env, R2, gate } = boxEnv();
+    const app = routeApp();
+    // A third concurrent attachment from the same user (two already uploading).
+    gate.acquire('first', 'u:u-test', 'temp-uploads/t/1', LIMITS);
+    gate.acquire('second', 'u:u-test', 'temp-uploads/t/2', LIMITS);
+    const url = await upload(env, 'temp-uploads/t/3', { contentLength: 1 });
+    setTimeout(() => gate.release('first'), 1_200);
+    const started = Date.now();
+    expect((await putUrl(app, env, url, bytes('3'))).status).toBe(200);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1_000);
+    expect(R2.objects.has('temp-uploads/t/3')).toBe(true);
+    // Control: when no slot frees within the wait, the answer is still 503.
+    vi.mocked(resolveAdminSettingDetailsMany).mockResolvedValueOnce([
+      { value: 4 },
+      { value: 300 },
+      { value: 2 },
+      { value: 60 },
+      { value: 1 },
+    ] as never);
+    gate.acquire('third', 'u:u-test', 'temp-uploads/t/4', LIMITS);
+    const blocked = await upload(env, 'temp-uploads/t/5', { contentLength: 1 });
+    expect((await putUrl(app, env, blocked, bytes('5'))).status).toBe(503);
+  }, 15_000);
+
   it('a setting that resolves to nothing keeps its default bound (never disables the gate)', async () => {
     vi.mocked(resolveAdminSettingDetailsMany).mockResolvedValueOnce([
       { value: undefined },
       { value: undefined },
       { value: undefined },
       { value: undefined },
+      { value: 0 },
     ] as never);
     const { env, gate } = boxEnv();
     const app = routeApp();

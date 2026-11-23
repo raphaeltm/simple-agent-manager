@@ -1124,8 +1124,9 @@ that the box's Caddy strips from every client request (`X-SAM-*`), so it cannot 
   arrive, and never shorter than twice the idle limit). One object key is written by one upload at a
   time: a second upload of the same key while the first runs gets 412. Each in-flight upload costs celld about 85 MB of
   memory (measured on celld 0.6.3: peak RSS 220 MB for one 1 GB upload, 427 MB for four, 896 MB for
-  eight; throughput stops growing after two at about 180 MB/s). Further uploads get 503 with
-  `Retry-After`.
+  eight; throughput stops growing after two at about 180 MB/s). An upload over the cap waits up to
+  `boxObjects.uploadAdmissionWaitSeconds` (default 30) for a slot before it is sent; if none frees
+  in time it gets 503 with `Retry-After`.
 - Tokens travel in the query string. Caddy's log drops every query string
   (`caddy/log-redaction.caddy`), SAM's request log records only the path, and celld does not log
   request URLs at its default level.

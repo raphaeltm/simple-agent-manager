@@ -272,7 +272,7 @@ describe.skipIf(skipWithoutDocker)('box object URLs on celld', () => {
     expect(peak - before).toBeLessThan(100);
   }, 60_000);
 
-  it('holds at most four uploads at once (four uploaders): the fifth gets 503 with Retry-After', async () => {
+  it('holds at most four uploads at once (four uploaders): the fifth waits for a slot, then completes', async () => {
     const length = 1024 * 1024;
     const held: Array<ReturnType<typeof request>> = [];
     const pending = [];
@@ -290,19 +290,20 @@ describe.skipIf(skipWithoutDocker)('box object URLs on celld', () => {
     }
     // Let the four reach the gate.
     await new Promise((resolve) => setTimeout(resolve, 1500));
-    const fifth = await putBytes(
+    let fifthDone = false;
+    const fifth = putBytes(
       await mint('put', 'temp-uploads/busy/5', { contentLength: 4, owner: { userId: 'user-5' } }),
       Buffer.from('five')
-    );
-    expect(fifth.status).toBe(503);
-    expect(Number(fifth.headers['retry-after'])).toBeGreaterThan(0);
+    ).finally(() => {
+      fifthDone = true;
+    });
+    // The box is full: the fifth is held in the admission wait (default 30 s), not answered.
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    expect(fifthDone).toBe(false);
     for (const req of held) req.end(Buffer.alloc(length - 1024));
     expect((await Promise.all(pending)).map((r) => r.status)).toEqual([200, 200, 200, 200]);
-    // Every lease was released: a new upload is admitted.
-    const after = await putBytes(
-      await mint('put', 'temp-uploads/busy/6', { contentLength: 3, owner: { userId: 'user-6' } }),
-      Buffer.from('six')
-    );
-    expect(after.status).toBe(200);
+    // A slot freed within the wait: the fifth is admitted and stored.
+    expect((await fifth).status).toBe(200);
+    expect(await (await fetch(await mint('get', 'temp-uploads/busy/5'))).text()).toBe('five');
   }, 60_000);
 });

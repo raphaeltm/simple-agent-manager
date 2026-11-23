@@ -32,6 +32,14 @@ export const DEFAULT_BOX_OBJECT_MAX_UPLOADS_PER_UPLOADER = 2;
  */
 export const DEFAULT_BOX_OBJECT_UPLOAD_IDLE_SECONDS = 60;
 
+/**
+ * Seconds an upload over the limit waits for a slot before the box answers 503. Clients (browser
+ * attachment uploads, the VM agent's publisher) start several uploads at once and treat a 503 as
+ * final, so a short queue turns "over the limit" into "a little later" instead of a failed upload.
+ * 0 refuses at once.
+ */
+export const DEFAULT_BOX_OBJECT_UPLOAD_ADMISSION_WAIT_SECONDS = 30;
+
 /** These names exist only in the self-host build, so they are not in the shared name union. */
 export const BOX_OBJECT_MAX_CONCURRENT_UPLOADS =
   'boxObjects.maxConcurrentUploads' as AdminSettingName;
@@ -39,6 +47,8 @@ export const BOX_OBJECT_UPLOAD_LEASE_SECONDS = 'boxObjects.uploadLeaseSeconds' a
 export const BOX_OBJECT_MAX_UPLOADS_PER_UPLOADER =
   'boxObjects.maxUploadsPerUploader' as AdminSettingName;
 export const BOX_OBJECT_UPLOAD_IDLE_SECONDS = 'boxObjects.uploadIdleSeconds' as AdminSettingName;
+export const BOX_OBJECT_UPLOAD_ADMISSION_WAIT_SECONDS =
+  'boxObjects.uploadAdmissionWaitSeconds' as AdminSettingName;
 
 export const BOX_OBJECT_SETTINGS: readonly AdminSettingDefinition[] = [
   integerDefinition(
@@ -68,5 +78,12 @@ export const BOX_OBJECT_SETTINGS: readonly AdminSettingDefinition[] = [
     'Operations',
     'Seconds an upload may receive no bytes before the box drops it and frees its slot.',
     { min: 5, max: 3_600 }
+  ),
+  integerDefinition(
+    BOX_OBJECT_UPLOAD_ADMISSION_WAIT_SECONDS,
+    DEFAULT_BOX_OBJECT_UPLOAD_ADMISSION_WAIT_SECONDS,
+    'Operations',
+    'Seconds an upload over the concurrent-upload limit waits for a free slot before the box answers 503. 0 refuses at once.',
+    { min: 0, max: 600 }
   ),
 ];

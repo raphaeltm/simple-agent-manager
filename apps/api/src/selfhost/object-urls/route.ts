@@ -23,10 +23,12 @@ import { boxUploadGate, type BoxUploadGateEnv } from './gate';
 import {
   BOX_OBJECT_MAX_CONCURRENT_UPLOADS,
   BOX_OBJECT_MAX_UPLOADS_PER_UPLOADER,
+  BOX_OBJECT_UPLOAD_ADMISSION_WAIT_SECONDS,
   BOX_OBJECT_UPLOAD_IDLE_SECONDS,
   BOX_OBJECT_UPLOAD_LEASE_SECONDS,
   DEFAULT_BOX_OBJECT_MAX_CONCURRENT_UPLOADS,
   DEFAULT_BOX_OBJECT_MAX_UPLOADS_PER_UPLOADER,
+  DEFAULT_BOX_OBJECT_UPLOAD_ADMISSION_WAIT_SECONDS,
   DEFAULT_BOX_OBJECT_UPLOAD_IDLE_SECONDS,
   DEFAULT_BOX_OBJECT_UPLOAD_LEASE_SECONDS,
 } from './settings';
@@ -62,14 +64,26 @@ interface UploadLimits {
   perUploader: number;
   leaseMs: number;
   idleMs: number;
+  /** How long an upload over the limit waits for a slot (0: refuse at once). */
+  admissionWaitMs: number;
 }
+
+/** How often a waiting upload asks the gate again (one cheap DO call each). */
+const ADMISSION_POLL_MS = 1_000;
 
 const DEFAULT_LIMITS: UploadLimits = {
   total: DEFAULT_BOX_OBJECT_MAX_CONCURRENT_UPLOADS,
   perUploader: DEFAULT_BOX_OBJECT_MAX_UPLOADS_PER_UPLOADER,
   leaseMs: DEFAULT_BOX_OBJECT_UPLOAD_LEASE_SECONDS * 1000,
   idleMs: DEFAULT_BOX_OBJECT_UPLOAD_IDLE_SECONDS * 1000,
+  admissionWaitMs: DEFAULT_BOX_OBJECT_UPLOAD_ADMISSION_WAIT_SECONDS * 1000,
 };
+
+/** A non-negative integer setting (0 is meaningful), else its default. */
+function nonNegativeSetting(value: unknown, fallback: number, scale = 1): number {
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= 0 ? number * scale : fallback;
+}
 
 /** A positive integer setting, else its default: a missing value must never disable a bound. */
 function setting(value: unknown, fallback: number, scale = 1): number {
@@ -79,17 +93,26 @@ function setting(value: unknown, fallback: number, scale = 1): number {
 
 async function uploadLimits(env: Env): Promise<UploadLimits> {
   try {
-    const [total, lease, perUploader, idle] = await resolveAdminSettingDetailsMany(env, [
-      BOX_OBJECT_MAX_CONCURRENT_UPLOADS,
-      BOX_OBJECT_UPLOAD_LEASE_SECONDS,
-      BOX_OBJECT_MAX_UPLOADS_PER_UPLOADER,
-      BOX_OBJECT_UPLOAD_IDLE_SECONDS,
-    ]);
+    const [total, lease, perUploader, idle, admissionWait] = await resolveAdminSettingDetailsMany(
+      env,
+      [
+        BOX_OBJECT_MAX_CONCURRENT_UPLOADS,
+        BOX_OBJECT_UPLOAD_LEASE_SECONDS,
+        BOX_OBJECT_MAX_UPLOADS_PER_UPLOADER,
+        BOX_OBJECT_UPLOAD_IDLE_SECONDS,
+        BOX_OBJECT_UPLOAD_ADMISSION_WAIT_SECONDS,
+      ]
+    );
     return {
       total: setting(total?.value, DEFAULT_LIMITS.total),
       leaseMs: setting(lease?.value, DEFAULT_LIMITS.leaseMs, 1000),
       perUploader: setting(perUploader?.value, DEFAULT_LIMITS.perUploader),
       idleMs: setting(idle?.value, DEFAULT_LIMITS.idleMs, 1000),
+      admissionWaitMs: nonNegativeSetting(
+        admissionWait?.value,
+        DEFAULT_LIMITS.admissionWaitMs,
+        1000
+      ),
     };
   } catch (error) {
     // Settings storage unavailable: the defaults still bound memory.
@@ -204,7 +227,14 @@ async function put(c: Context<{ Bindings: BoxObjectEnv }>, claims: BoxObjectToke
   // lease of at least twice the idle limit always covers the gap (the settings allow any pair).
   const limits = { ...configured, leaseMs: Math.max(configured.leaseMs, 2 * configured.idleMs) };
   const leaseId = crypto.randomUUID();
-  const lease = await gate.acquire(leaseId, uploader(claims), claims.key, limits);
+  // Over the limit: wait (bounded) for a slot rather than fail an upload a moment too early.
+  const admissionDeadline = Date.now() + limits.admissionWaitMs;
+  let lease = await gate.acquire(leaseId, uploader(claims), claims.key, limits);
+  while (!lease.granted && lease.reason === 'busy' && Date.now() < admissionDeadline) {
+    const wait = Math.min(ADMISSION_POLL_MS, admissionDeadline - Date.now());
+    await new Promise((resolve) => setTimeout(resolve, wait));
+    lease = await gate.acquire(leaseId, uploader(claims), claims.key, limits);
+  }
   if (!lease.granted && lease.reason === 'key-in-use') {
     // Another upload is creating this object right now: create-only, so this one cannot.
     log.warn('box_objects.upload_conflict', { ...logFields(claims), length, action: 'in_flight' });
