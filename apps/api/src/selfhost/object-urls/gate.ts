@@ -1,0 +1,81 @@
+/**
+ * The box-wide limit on concurrent object uploads (`BoxUploadGate`, one instance per box).
+ *
+ * Why a limit: celld streams an upload into the R2 binding without holding it in the isolate, but
+ * every in-flight upload still costs process memory. Measured on celld v0.6.3 with 1 GB bodies
+ * (task tasks/active/2026-11-23-selfhost-box-object-uploads.md): peak RSS 220 MB for one upload,
+ * 284 / 427 / 896 MB for 2 / 4 / 8 at once, so roughly 85 MB per upload over a ~150 MB base, while
+ * aggregate throughput stops growing after two (~180 MB/s). The default of 4 keeps the peak near
+ * 430 MB. An upload over the limit is refused with 503 and Retry-After rather than queued.
+ *
+ * Why a Durable Object: the limit must hold across every Worker isolate celld runs, and a single
+ * object is the box's one serialization point. Each acquire is a lease with an expiry, so a handler
+ * that dies without releasing (celld restart, a killed isolate) frees its slot when the lease ends
+ * instead of holding it forever. `acquire` and `release` do all their work in synchronous SQL with
+ * no `await`, so two calls cannot interleave inside one (rule 45).
+ */
+import { DurableObject } from 'cloudflare:workers';
+
+export interface BoxUploadGateEnv {
+  BOX_UPLOAD_GATE?: DurableObjectNamespace;
+}
+
+export type BoxUploadLease =
+  | { granted: true }
+  | { granted: false; active: number; retryAfterSeconds: number };
+
+/** Shortest and longest Retry-After hint (seconds) a refusal suggests. */
+const MIN_RETRY_AFTER_SECONDS = 5;
+const MAX_RETRY_AFTER_SECONDS = 60;
+
+export class BoxUploadGate extends DurableObject {
+  constructor(ctx: DurableObjectState, env: unknown) {
+    super(ctx, env as never);
+    ctx.storage.sql.exec(
+      'CREATE TABLE IF NOT EXISTS upload_leases (id TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)'
+    );
+  }
+
+  /** Grants a lease to `id` while fewer than `limit` unexpired leases exist. */
+  acquire(id: string, limit: number, leaseMs: number, now: number = Date.now()): BoxUploadLease {
+    const sql = this.ctx.storage.sql;
+    sql.exec('DELETE FROM upload_leases WHERE expires_at <= ?', now);
+    const row = sql.exec<{ active: number; next: number | null }>(
+      'SELECT COUNT(*) AS active, MIN(expires_at) AS next FROM upload_leases'
+    ).one();
+    if (row.active >= limit) {
+      // A hint, not a promise: most leases end when their upload finishes, long before expiry.
+      const untilExpiry = Math.ceil(((row.next ?? now) - now) / 1000);
+      const retryAfterSeconds = Math.min(
+        MAX_RETRY_AFTER_SECONDS,
+        Math.max(MIN_RETRY_AFTER_SECONDS, untilExpiry)
+      );
+      return { granted: false, active: row.active, retryAfterSeconds };
+    }
+    sql.exec(
+      'INSERT OR REPLACE INTO upload_leases (id, expires_at) VALUES (?, ?)',
+      id,
+      now + leaseMs
+    );
+    return { granted: true };
+  }
+
+  release(id: string): void {
+    this.ctx.storage.sql.exec('DELETE FROM upload_leases WHERE id = ?', id);
+  }
+}
+
+/** The box's one gate instance. */
+export const BOX_UPLOAD_GATE_NAME = 'box';
+
+interface BoxUploadGateStub {
+  acquire(id: string, limit: number, leaseMs: number): Promise<BoxUploadLease>;
+  release(id: string): Promise<void>;
+}
+
+export function boxUploadGate(env: BoxUploadGateEnv): BoxUploadGateStub | null {
+  const namespace = env.BOX_UPLOAD_GATE;
+  if (!namespace) return null;
+  // Typed RPC stub: Cloudflare's generated stub type cannot express this class's methods.
+  return namespace.get(namespace.idFromName(BOX_UPLOAD_GATE_NAME)) as unknown as BoxUploadGateStub;
+}

@@ -12,6 +12,7 @@
  * project, that the user is still an active member, and that a workspace-bound token's workspace
  * is still active on its current runtime (callback generation).
  */
+import { mintSignedToken, type SignedTokenPurpose, verifySignedToken } from '../signed-token';
 import type { HostedGitEnv as Env } from './env';
 
 export type HostedGitScope = 'read' | 'write';
@@ -40,54 +41,10 @@ export const MAX_HOSTED_GIT_TOKEN_TTL_SECONDS = 86_400;
 /** Repository names SAM generates (toArtifactsRepoName): lowercase, digits, dashes. */
 const REPO_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,127}$/;
 
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
+const PURPOSE: SignedTokenPurpose = { prefix: TOKEN_PREFIX, label: KEY_LABEL };
 
 export function isHostedGitRepoName(name: string): boolean {
   return REPO_NAME_PATTERN.test(name);
-}
-
-function base64UrlEncode(bytes: Uint8Array): string {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
-}
-
-function base64UrlDecode(value: string): Uint8Array | null {
-  if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
-  try {
-    const padded =
-      value.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - (value.length % 4)) % 4);
-    return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The derived key, cached once derived. Only a finished key is shared: a request never waits on a
- * derivation another request started, which on the self-hosted celld runtime could be dropped
- * with that request (lib/shared-flight.ts). Concurrent cold callers each derive once (one HKDF).
- */
-let cachedKey: { secret: string; key: CryptoKey } | null = null;
-
-/** HKDF-SHA256 from ENCRYPTION_KEY with a purpose label; no other use shares this key. */
-async function signingKey(env: Pick<Env, 'ENCRYPTION_KEY'>): Promise<CryptoKey> {
-  const secret = env.ENCRYPTION_KEY;
-  if (!secret) throw new Error('ENCRYPTION_KEY is required for SAM-hosted repositories');
-  if (cachedKey?.secret === secret) return cachedKey.key;
-  const root = await crypto.subtle.importKey('raw', encoder.encode(secret), 'HKDF', false, [
-    'deriveKey',
-  ]);
-  const key = await crypto.subtle.deriveKey(
-    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: encoder.encode(KEY_LABEL) },
-    root,
-    { name: 'HMAC', hash: 'SHA-256', length: 256 },
-    false,
-    ['sign', 'verify']
-  );
-  cachedKey = { secret, key };
-  return key;
 }
 
 export function clampHostedGitTokenTtl(ttlSeconds: number | undefined): number {
@@ -117,15 +74,8 @@ export async function mintHostedGitToken(
     claims.callbackGeneration = input.callbackGeneration ?? null;
   }
   if (input.userId) claims.userId = input.userId;
-  const payload = base64UrlEncode(encoder.encode(JSON.stringify(claims)));
-  const unsigned = `${TOKEN_PREFIX}.${payload}`;
-  const signature = await crypto.subtle.sign(
-    'HMAC',
-    await signingKey(env),
-    encoder.encode(unsigned)
-  );
   return {
-    token: `${unsigned}.${base64UrlEncode(new Uint8Array(signature))}`,
+    token: await mintSignedToken(env, PURPOSE, claims),
     expiresAt: new Date(exp * 1000).toISOString(),
   };
 }
@@ -136,28 +86,8 @@ export async function verifyHostedGitToken(
   token: string,
   now: number = Date.now()
 ): Promise<HostedGitTokenClaims | null> {
-  if (token.length > 2048) return null;
-  const parts = token.split('.');
-  if (parts.length !== 3 || parts[0] !== TOKEN_PREFIX) return null;
-  const [prefix, payload, signaturePart] = parts as [string, string, string];
-  const signature = base64UrlDecode(signaturePart);
-  const payloadBytes = base64UrlDecode(payload);
-  if (!signature || !payloadBytes) return null;
-  const valid = await crypto.subtle.verify(
-    'HMAC',
-    await signingKey(env),
-    signature,
-    encoder.encode(`${prefix}.${payload}`)
-  );
-  if (!valid) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(decoder.decode(payloadBytes));
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== 'object') return null;
-  const claims = parsed as Record<string, unknown>;
+  const claims = await verifySignedToken(env, PURPOSE, token);
+  if (!claims) return null;
   if (typeof claims.repo !== 'string' || !isHostedGitRepoName(claims.repo)) return null;
   if (claims.scope !== 'read' && claims.scope !== 'write') return null;
   if (typeof claims.exp !== 'number' || claims.exp * 1000 <= now) return null;

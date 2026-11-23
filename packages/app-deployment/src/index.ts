@@ -30,13 +30,13 @@ export type {
   ComposeImageArtifactDescriptor,
   ComposeImageArtifactDownload,
   ComposeImageArtifactPlatform,
-  ComposeImageArtifactPresignTarget,
   ComposeImageArtifactRequest,
   ComposeImageArtifactUpload,
 } from './compose-image-artifacts';
 export {
   buildComposeImageArtifactKey,
   COMPOSE_IMAGE_ARTIFACT_ARCHIVE_TYPE,
+  composeImageArtifactMaxBytesFor,
   COMPOSE_IMAGE_ARTIFACT_MEDIA_TYPE,
   createComposeImageArtifactDownloads,
   createComposeImageArtifactUploads,
@@ -44,6 +44,12 @@ export {
   validateCompletedComposeImageArtifacts,
   validateComposeImageArtifactDescriptor,
 } from './compose-image-artifacts';
+export type {
+  ObjectPutUrlOptions,
+  ObjectUrlSigner,
+  S3PresignTarget,
+} from './object-url-signer';
+export { s3ObjectUrlSigner } from './object-url-signer';
 export type {
   ComposePublishApplyOptions,
   ComposePublishApplyResult,
