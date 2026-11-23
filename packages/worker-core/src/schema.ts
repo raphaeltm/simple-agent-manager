@@ -2150,6 +2150,16 @@ export const nodes = sqliteTable(
     providerDeletionRequestedAt: text('provider_deletion_requested_at'),
     /** `{ ticket, providerInstanceId, runtimeIncarnationId }`; see `node-provider-deletion.ts`. */
     providerDeletionJson: text('provider_deletion_json'),
+    /**
+     * Provider-existence reconciliation of running deployment nodes (migration 0267,
+     * `apps/api/src/services/deployment-node-provider-existence.ts`). `providerExistenceCheckedAt`
+     * schedules the next probe and has one writer, that sweep. `providerAbsenceObservedAt` is the
+     * first definitive provider "not found" for `providerAbsenceInstanceId` through the pinned
+     * placement credential; a second one a confirmation interval later releases the node.
+     */
+    providerExistenceCheckedAt: text('provider_existence_checked_at'),
+    providerAbsenceObservedAt: text('provider_absence_observed_at'),
+    providerAbsenceInstanceId: text('provider_absence_instance_id'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
