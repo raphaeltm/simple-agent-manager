@@ -8,7 +8,7 @@
  * over celld's 1 GiB ingress cap never reaches the Worker.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
@@ -122,7 +122,7 @@ describe.skipIf(skipWithoutDocker)('box object URLs on celld', () => {
   it('streams a 64 MiB upload into R2 and back, sha256-verified', async () => {
     const body = randomBytes(64 * 1024 * 1024);
     const sha = createHash('sha256').update(body).digest('hex');
-    const url = await mint('put', 'build/ctx.tar.zst', {
+    const url = await mint('put', 'compose-build-contexts/live/ctx.tar.zst', {
       contentLength: body.length,
       contentType: 'application/zstd',
       sha256: sha,
@@ -131,7 +131,7 @@ describe.skipIf(skipWithoutDocker)('box object URLs on celld', () => {
     expect((await putBytes(url, body)).status).toBe(200);
     // Retry of a finished upload with the bound digest: 200, nothing replaced.
     expect((await putBytes(url, body)).status).toBe(200);
-    const download = await fetch(await mint('get', 'build/ctx.tar.zst'));
+    const download = await fetch(await mint('get', 'compose-build-contexts/live/ctx.tar.zst'));
     expect(download.status).toBe(200);
     expect(download.headers.get('content-type')).toBe('application/zstd');
     const got = Buffer.from(await download.arrayBuffer());
@@ -140,58 +140,107 @@ describe.skipIf(skipWithoutDocker)('box object URLs on celld', () => {
 
   it('refuses bytes that do not match the bound sha256, and stores nothing', async () => {
     const body = randomBytes(1024);
-    const url = await mint('put', 'build/bad.tar.zst', {
+    const url = await mint('put', 'compose-build-contexts/live/bad.tar.zst', {
       contentLength: body.length,
       sha256: createHash('sha256').update('something else').digest('hex'),
     });
     expect((await putBytes(url, body)).status).toBe(400);
-    expect((await fetch(await mint('get', 'build/bad.tar.zst'))).status).toBe(404);
+    expect((await fetch(await mint('get', 'compose-build-contexts/live/bad.tar.zst'))).status).toBe(
+      404
+    );
   });
 
   it('is create-only without a digest: the second write is 412 and the first stays', async () => {
-    const url = await mint('put', 'attach/a.txt', { contentLength: 5 });
+    const url = await mint('put', 'temp-uploads/live/a.txt', { contentLength: 5 });
     expect((await putBytes(url, Buffer.from('first'))).status).toBe(200);
     expect((await putBytes(url, Buffer.from('other'))).status).toBe(412);
-    expect(await (await fetch(await mint('get', 'attach/a.txt'))).text()).toBe('first');
+    expect(await (await fetch(await mint('get', 'temp-uploads/live/a.txt'))).text()).toBe('first');
   });
 
   it('is create-only above celld 8 MiB conditional-put size too (multipart writes)', async () => {
     const body = randomBytes(9 * 1024 * 1024);
-    const url = await mint('put', 'artifacts/web.tar', { maxBytes: 64 * 1024 * 1024 });
+    const url = await mint('put', 'compose-image-artifacts/live/web.tar', {
+      maxBytes: 64 * 1024 * 1024,
+    });
     expect((await putBytes(url, body)).status).toBe(200);
     expect((await putBytes(url, randomBytes(body.length))).status).toBe(412);
     const got = Buffer.from(
-      await (await fetch(await mint('get', 'artifacts/web.tar'))).arrayBuffer()
+      await (await fetch(await mint('get', 'compose-image-artifacts/live/web.tar'))).arrayBuffer()
     );
     expect(got.equals(body)).toBe(true);
   }, 60_000);
 
   it('a body shorter than declared leaves no object', async () => {
-    const url = await mint('put', 'attach/short.bin', { maxBytes: 1024 });
+    const url = await mint('put', 'temp-uploads/live/short.bin', { maxBytes: 1024 });
     // Declares 100 bytes, sends 10, then closes: FixedLengthStream fails the put.
     await put(url, 100, (req) => {
       req.write(Buffer.alloc(10));
       setTimeout(() => req.destroy(), 300);
     }).catch(() => undefined);
-    expect((await fetch(await mint('get', 'attach/short.bin'))).status).toBe(404);
+    expect((await fetch(await mint('get', 'temp-uploads/live/short.bin'))).status).toBe(404);
   });
 
   it('over the token maximum is 413; over celld 1 GiB is refused before the Worker', async () => {
-    const small = await mint('put', 'attach/big.bin', { maxBytes: 10 });
+    const small = await mint('put', 'temp-uploads/live/big.bin', { maxBytes: 10 });
     expect((await putBytes(small, Buffer.alloc(11))).status).toBe(413);
-    const huge = await mint('put', 'attach/huge.bin', { maxBytes: 1024 * 1024 * 1024 });
+    const huge = await mint('put', 'temp-uploads/live/huge.bin', { maxBytes: 1024 * 1024 * 1024 });
     const refused = await put(huge, 1024 * 1024 * 1024 + 1, (req) =>
       req.write(Buffer.alloc(1))
     ).catch(() => ({ status: 413, headers: {} }));
     expect(refused.status).toBe(413);
   });
 
-  it('holds at most four uploads at once: the fifth gets 503 with Retry-After', async () => {
+  it('a bad token is refused before the body is read: a large unauthenticated body is not buffered', async () => {
+    const pid = celld!.child.pid!;
+    const rss = () =>
+      Number(/VmRSS:\s+(\d+)/.exec(readFileSync(`/proc/${pid}/status`, 'utf8'))![1]) / 1024;
+    const before = rss();
+    let peak = before;
+    const sampler = setInterval(() => (peak = Math.max(peak, rss())), 100);
+    const length = 512 * 1024 * 1024;
+    const chunk = Buffer.alloc(1024 * 1024);
+    let sent = 0;
+    const started = Date.now();
+    // celld answers 403 and closes while a client that sends at once is still writing, so Node
+    // usually reports a socket error instead of the response. (A client sending
+    // `Expect: 100-continue`, as curl does for large bodies, gets the 403 and sends nothing.)
+    const status = await new Promise<number>((done) => {
+      const req = request(`http://127.0.0.1:${port}/api/box-objects?token=samobj1.forged.forged`, {
+        method: 'PUT',
+        headers: { 'content-length': String(length) },
+      });
+      req.on('response', (res) => {
+        res.resume();
+        done(res.statusCode ?? 0);
+      });
+      req.on('error', () => done(-1));
+      const write = () => {
+        while (sent < length) {
+          sent += chunk.length;
+          if (!req.write(chunk)) return void req.once('drain', write);
+        }
+        req.end();
+      };
+      write();
+    });
+    clearInterval(sampler);
+    expect([403, -1]).toContain(status);
+    // Refused without reading the body: the connection ended long before 512 MiB was sent, and
+    // celld held none of it.
+    expect(sent).toBeLessThan(length / 4);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(peak - before).toBeLessThan(100);
+  }, 60_000);
+
+  it('holds at most four uploads at once (four uploaders): the fifth gets 503 with Retry-After', async () => {
     const length = 1024 * 1024;
     const held: Array<ReturnType<typeof request>> = [];
     const pending = [];
     for (let i = 0; i < 4; i++) {
-      const url = await mint('put', `busy/${i}`, { contentLength: length });
+      const url = await mint('put', `temp-uploads/busy/${i}`, {
+        contentLength: length,
+        owner: { userId: `user-${i}` },
+      });
       pending.push(
         put(url, length, (req) => {
           req.write(Buffer.alloc(1024));
@@ -202,7 +251,7 @@ describe.skipIf(skipWithoutDocker)('box object URLs on celld', () => {
     // Let the four reach the gate.
     await new Promise((resolve) => setTimeout(resolve, 1500));
     const fifth = await putBytes(
-      await mint('put', 'busy/5', { contentLength: 4 }),
+      await mint('put', 'temp-uploads/busy/5', { contentLength: 4, owner: { userId: 'user-5' } }),
       Buffer.from('five')
     );
     expect(fifth.status).toBe(503);
@@ -211,7 +260,7 @@ describe.skipIf(skipWithoutDocker)('box object URLs on celld', () => {
     expect((await Promise.all(pending)).map((r) => r.status)).toEqual([200, 200, 200, 200]);
     // Every lease was released: a new upload is admitted.
     const after = await putBytes(
-      await mint('put', 'busy/6', { contentLength: 3 }),
+      await mint('put', 'temp-uploads/busy/6', { contentLength: 3, owner: { userId: 'user-6' } }),
       Buffer.from('six')
     );
     expect(after.status).toBe(200);
