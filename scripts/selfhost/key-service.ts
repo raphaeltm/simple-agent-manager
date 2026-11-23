@@ -84,6 +84,7 @@ export const KEY_SERVICE_BACKUP_EXCLUDES = [
   `${KEY_AGENT_DIR}/credentials`,
   // The head lock (bundle-store.ts withLockFile) names a pid of this box, meaningless anywhere else.
   `${KEY_AGENT_DIR}/head.json.lock`,
+  `${KEY_AGENT_DIR}/head.json.lock.break`,
 ];
 
 type Box = Readonly<Record<string, string | undefined>>;

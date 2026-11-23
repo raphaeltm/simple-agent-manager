@@ -15,7 +15,9 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
+  statSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
@@ -30,7 +32,11 @@ import {
   type SealedBundle,
   sealSecrets,
 } from '../../deploy/selfhost/key-agent/bundle.ts';
-import { type BundleStore, withLockFile } from '../../deploy/selfhost/key-agent/bundle-store.ts';
+import {
+  breakStaleLock,
+  type BundleStore,
+  withLockFile,
+} from '../../deploy/selfhost/key-agent/bundle-store.ts';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
 import { runCommand } from './backup-cli.js';
 import { loadBoxEnv } from './box-settings.js';
@@ -579,6 +585,22 @@ describe('the head lock', () => {
     const old = new Date(Date.now() - 60_000);
     utimesSync(lock, old, old);
     await expect(withLockFile(lock, async () => 'ran', 200)).resolves.toBe('ran');
+    // Two waiters saw the same dead holder; the first broke it and took a new lock. The second
+    // breaks only the file it judged stale (same inode), so the new owner's lock survives.
+    writeFileSync(lock, '4194399\n');
+    const staleIno = statSync(lock).ino;
+    writeFileSync(`${lock}.new`, `${process.pid}\n`);
+    renameSync(`${lock}.new`, lock); // a distinct inode: both files existed at once
+    breakStaleLock(lock, staleIno);
+    expect(readFileSync(lock, 'utf8')).toBe(`${process.pid}\n`);
+    // Control: the file judged stale is removed; a breaker already held leaves it to its holder.
+    writeFileSync(`${lock}.break`, '');
+    breakStaleLock(lock, statSync(lock).ino);
+    expect(existsSync(lock)).toBe(true);
+    rmSync(`${lock}.break`);
+    breakStaleLock(lock, statSync(lock).ino);
+    expect(existsSync(lock)).toBe(false);
+    expect(existsSync(`${lock}.break`)).toBe(false);
     // A live holder (this process) is waited for, then refused with the holder named.
     writeFileSync(lock, `${process.pid}\n`);
     await expect(withLockFile(lock, async () => 'ran', 200)).rejects.toThrow(

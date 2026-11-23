@@ -71,13 +71,57 @@ function pidAlive(pid: number): boolean {
   }
 }
 
+/** The lock file's holder pid (NaN when none is recorded), age and inode; null when it is gone. */
+function readLock(lockPath: string): { holder: number; ageMs: number; ino: number } | null {
+  try {
+    const before = lstatSync(lockPath);
+    const text = readFileSync(lockPath, 'utf8').trim();
+    // The same file throughout: a lock replaced between the stat and the read is read again.
+    if (lstatSync(lockPath).ino !== before.ino) return null;
+    return {
+      holder: /^\d+$/.test(text) ? Number(text) : Number.NaN,
+      ageMs: Date.now() - before.mtimeMs,
+      ino: before.ino,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Removes a stale lock, but only the very file judged stale (same inode) and only while holding a
+ * short breaker lock: two waiters that both saw the dead holder cannot both break it, because
+ * the second, once it holds the breaker, finds a different file (the first one's new lock) and
+ * leaves it. A breaker left by a crash (it is held for one stat and one unlink) expires.
+ */
+export function breakStaleLock(lockPath: string, staleIno: number): void {
+  const breaker = `${lockPath}.break`;
+  let fd: number;
+  try {
+    fd = openSync(breaker, 'wx', 0o600);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    const age = Date.now() - (lstatSync(breaker, { throwIfNoEntry: false })?.mtimeMs ?? Date.now());
+    if (age > EMPTY_LOCK_STALE_MS) rmSync(breaker, { force: true });
+    return;
+  }
+  closeSync(fd);
+  try {
+    if (lstatSync(lockPath, { throwIfNoEntry: false })?.ino === staleIno) {
+      rmSync(lockPath, { force: true });
+    }
+  } finally {
+    rmSync(breaker, { force: true });
+  }
+}
+
 /**
  * An exclusive lock file holding the owner's pid (O_EXCL create). A lock whose pid is no longer
  * running is broken (a process that died while holding it), as is one left with no pid for
  * EMPTY_LOCK_STALE_MS; a live holder is waited for, up to `waitMs`. Same host and pid namespace
- * only: the head, like the bundles, belongs to one box. Known limits (all need a crash first): a
- * dead holder's pid reused by an unrelated process keeps the lock until it is removed by hand
- * (the error says how), and two waiters breaking the same stale lock at once can both proceed.
+ * only: the head, like the bundles, belongs to one box. A stale lock is broken by breakStaleLock,
+ * one waiter at a time. Known limit (needs a crash first): a dead holder's pid reused by an
+ * unrelated process keeps the lock until it is removed by hand (the error says how).
  */
 export async function withLockFile<T>(
   lockPath: string,
@@ -105,18 +149,12 @@ export async function withLockFile<T>(
         rmSync(lockPath, { force: true });
       }
     }
-    let holder = Number.NaN;
-    let ageMs = 0;
-    try {
-      const text = readFileSync(lockPath, 'utf8').trim();
-      holder = /^\d+$/.test(text) ? Number(text) : Number.NaN;
-      ageMs = Date.now() - lstatSync(lockPath).mtimeMs;
-    } catch {
-      continue; // released between our attempt and this read
-    }
-    const valid = Number.isInteger(holder) && holder > 0;
-    if ((valid && !pidAlive(holder)) || (!valid && ageMs > EMPTY_LOCK_STALE_MS)) {
-      rmSync(lockPath, { force: true });
+    const seen = readLock(lockPath);
+    if (!seen) continue; // released between our attempt and this read
+    const valid = Number.isInteger(seen.holder) && seen.holder > 0;
+    const holder = seen.holder;
+    if ((valid && !pidAlive(holder)) || (!valid && seen.ageMs > EMPTY_LOCK_STALE_MS)) {
+      breakStaleLock(lockPath, seen.ino);
       continue;
     }
     if (Date.now() > deadline) {
