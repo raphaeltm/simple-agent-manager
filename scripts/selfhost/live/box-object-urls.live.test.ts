@@ -46,6 +46,8 @@ export default app;
 `;
 
 const KEY = 'objectadmin';
+/** A token that cannot verify: a well-formed prefix with an unsigned payload. */
+const FORGED_TOKEN_PATH = `/api/box-objects?${new URLSearchParams({ token: ['samobj1', 'x', 'y'].join('.') })}`;
 const SECRET = randomBytes(16).toString('hex');
 let store: ObjectStore;
 let celld: Running | undefined;
@@ -205,7 +207,7 @@ describe.skipIf(skipWithoutDocker)('box object URLs on celld', () => {
     // usually reports a socket error instead of the response. (A client sending
     // `Expect: 100-continue`, as curl does for large bodies, gets the 403 and sends nothing.)
     const status = await new Promise<number>((done) => {
-      const req = request(`http://127.0.0.1:${port}/api/box-objects?token=samobj1.forged.forged`, {
+      const req = request(`http://127.0.0.1:${port}${FORGED_TOKEN_PATH}`, {
         method: 'PUT',
         headers: { 'content-length': String(length) },
       });
