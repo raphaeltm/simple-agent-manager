@@ -175,7 +175,7 @@ Six local reviewers ran on commit `9fd7914`. No CRITICAL findings.
   something a release cannot rewrite is a security design change: SAM idea
   `01M85020CSFDKQ7MP0XZRZJ515`.
 - **An installer that changes address reused the old client (found while adding the requested test):**
-  `originChanged` in `deploy.mjs` now gives it a client for the new address, after publish.
+  first handled by giving it a new client, then replaced by refusing the move (see "External review").
 - **Docs (doc-sync):** "stops before publishing anything" corrected; existing-client requirements, the
   leftover-route note for `remove`, the permission vocabulary (Edit in the dashboard, Write in the
   API) and the Cloudflare source for the private-client rule added; three more "hosted installer"
@@ -189,6 +189,20 @@ Six local reviewers ran on commit `9fd7914`. No CRITICAL findings.
 - Not changed: the inline "Verify deployed version" step of the existing staging/production deploy
   keeps its own 60 s default; replacing it with `check-live` is left for Phase 2, when the production
   path is touched anyway.
+
+## External review (Codex, CodeRabbit) and what changed
+
+- **In-place moves removed.** The review-driven `originChanged` handling (give a moved installer a new
+  client) had a failure case either way: keep the old secrets and a failed move looks ready, delete
+  them first and a failed publish breaks the old address. An installer is short-lived and has a
+  `remove` command, so `deploy.mjs` now refuses to deploy an existing installer at a different address
+  and says to remove and redeploy it. Nothing is published or deleted on that path.
+- Timing settings are read before the first request and intervals are capped at what a timer can wait;
+  every wait goes through `sleepWithin`, so a poll interval cannot outlast its timeout.
+- A refusal with an empty or non-JSON body keeps its HTTP status, so it is not retried.
+- An explicit OAuth client that belongs to another installer is refused before publishing.
+- `git-head.mjs` follows any ref name Git allows and keeps the resolved path under `refs/`.
+- The guide's "Remove an installation" lists Container applications.
 
 ## Effect on the production installer deploy
 
