@@ -54,8 +54,9 @@ export function useProjectChatState() {
   const [listLoaded, setListLoaded] = useState(false);
   // The read in flight when the page mounted, for handlers that need the selected session.
   const initialLoadRef = useRef<Promise<ChatSessionResponse[]>>(Promise.resolve([]));
-  // The first list came from the route prefetch; see the first-socket-open refresh below.
-  const listFromPrefetchRef = useRef(false);
+  const subscriptionScope = `${queryScope}:${projectId}`;
+  const currentSubscriptionScope = useRef(subscriptionScope);
+  currentSubscriptionScope.current = subscriptionScope;
   // The new-chat composer and its start path, shared with the Project Overview's task box.
   const composer = useNewChatComposer();
   const {
@@ -156,54 +157,59 @@ export function useProjectChatState() {
   // on the server before the agent runs rather than from a query parameter afterwards.
   useComposerPrefill(sessionId, setMessage);
 
-  const loadSessions = useCallback(async () => {
-    if (hasLoadedRef.current) setIsRefreshing(true);
-    try {
-      const scope = multiplayerActive ? sessionScope : 'all';
-      let sessions: ChatSessionResponse[];
-      if (!hasLoadedRef.current && scope === 'all') {
-        const initial = await readInitialSessionList(queryClient, queryScope, projectId);
-        sessions = initial.sessions;
-        listFromPrefetchRef.current = initial.prefetched;
-      } else {
-        sessions = (
-          await listChatSessions(projectId, {
-            limit: CHAT_SESSION_LIST_LIMIT,
-            scope,
-            includeLive: true,
+  const loadSessions = useCallback(
+    async (options?: { fresh?: boolean }) => {
+      if (hasLoadedRef.current) setIsRefreshing(true);
+      try {
+        const scope = multiplayerActive ? sessionScope : 'all';
+        let sessions: ChatSessionResponse[];
+        if (!options?.fresh && !hasLoadedRef.current && scope === 'all') {
+          const initial = await readInitialSessionList(queryClient, queryScope, projectId);
+          sessions = initial.sessions;
+        } else {
+          sessions = (
+            await listChatSessions(projectId, {
+              limit: CHAT_SESSION_LIST_LIMIT,
+              scope,
+              includeLive: true,
+            })
+          ).sessions;
+        }
+        if (currentSubscriptionScope.current !== subscriptionScope) return [];
+        resetSessions(sessions);
+        hasLoadedRef.current = true;
+        setListLoaded(true);
+
+        listProjectTasks(projectId, { limit: CHAT_TASK_LIST_LIMIT })
+          .then((tasksResult) => {
+            if (currentSubscriptionScope.current !== subscriptionScope) return;
+            const titleMap = new Map<string, string>();
+            for (const t of tasksResult.tasks) titleMap.set(t.id, t.title);
+            setTaskTitleMap(titleMap);
+            replaceTaskInfoMap(tasksResult.tasks as Task[]);
           })
-        ).sessions;
+          .catch(() => {
+            /* task titles are cosmetic */
+          });
+
+        return sessions;
+      } catch {
+        return [];
+      } finally {
+        setIsRefreshing(false);
       }
-      resetSessions(sessions);
-      hasLoadedRef.current = true;
-      setListLoaded(true);
-
-      listProjectTasks(projectId, { limit: CHAT_TASK_LIST_LIMIT })
-        .then((tasksResult) => {
-          const titleMap = new Map<string, string>();
-          for (const t of tasksResult.tasks) titleMap.set(t.id, t.title);
-          setTaskTitleMap(titleMap);
-          replaceTaskInfoMap(tasksResult.tasks as Task[]);
-        })
-        .catch(() => {
-          /* task titles are cosmetic */
-        });
-
-      return sessions;
-    } catch {
-      return [];
-    } finally {
-      setIsRefreshing(false);
-    }
-  }, [
-    projectId,
-    sessionScope,
-    multiplayerActive,
-    resetSessions,
-    replaceTaskInfoMap,
-    queryClient,
-    queryScope,
-  ]);
+    },
+    [
+      projectId,
+      sessionScope,
+      multiplayerActive,
+      resetSessions,
+      replaceTaskInfoMap,
+      queryClient,
+      queryScope,
+      subscriptionScope,
+    ]
+  );
 
   const handleSessionEvent = useCallback(
     (raw: RawSessionEvent) => {
@@ -228,11 +234,18 @@ export function useProjectChatState() {
     [queryClient, queryScope]
   );
 
+  const refreshAfterSubscription = useCallback(async () => {
+    // Finish the mount/prefetch read first so its stale result cannot overwrite catch-up.
+    await initialLoadRef.current;
+    if (currentSubscriptionScope.current !== subscriptionScope) return;
+    await loadSessions({ fresh: true });
+  }, [loadSessions, subscriptionScope]);
+
   const { connectionState } = useProjectWebSocket({
     projectId,
     onSessionEvent: handleSessionEvent,
     onCommentEvent: handleCommentEvent,
-    onReconnected: loadSessions,
+    onReconnected: refreshAfterSubscription,
   });
 
   const realtimeDegraded = connectionState === 'disconnected';
@@ -271,13 +284,6 @@ export function useProjectChatState() {
   // tabs. Reconnect catch-up is handled by `onReconnected` above; disconnect and
   // tab-return catch-up come from the hook's elapsed-gated refresh.
   const wsConnected = connectionState === 'connected';
-  // The route prefetch read the list before this socket subscribed, and the server replays
-  // nothing on subscribe: read it once more when the socket first opens.
-  useEffect(() => {
-    if (!wsConnected || !listLoaded || !listFromPrefetchRef.current) return;
-    listFromPrefetchRef.current = false;
-    void loadSessions();
-  }, [wsConnected, listLoaded, loadSessions]);
   useVisibilityAwarePoll(loadSessions, SESSION_SYNC_INTERVAL_MS, {
     enabled: !loading,
     paused: wsConnected,

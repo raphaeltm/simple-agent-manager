@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   broadcastToBrowserSockets,
+  closeIfAccessRevoked,
   closeQuietly,
   countLegacySockets,
 } from '../../src/do/session-sockets';
@@ -22,12 +23,14 @@ interface FakeSocket {
   tags: string[] | 'throws';
   send: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
+  deserializeAttachment: () => unknown;
 }
 
 function socket(tags: string[] | 'throws', opts: { sendThrows?: boolean } = {}): FakeSocket {
   const ws: FakeSocket = {
     readyState: WebSocket.OPEN,
     tags,
+    deserializeAttachment: () => null,
     send: vi.fn(() => {
       if (opts.sendThrows) throw new Error('socket closed');
     }),
@@ -114,5 +117,90 @@ describe('countLegacySockets', () => {
         SESSION
       )
     ).toEqual({ session: 1, project: 1 });
+  });
+});
+
+describe('post-admission access verification', () => {
+  function pendingSocket() {
+    const ws = socket([`session:${SESSION}`, 'actor:member']);
+    let attachment: unknown = { accessPending: true };
+    return Object.assign(ws, {
+      deserializeAttachment: () => attachment,
+      serializeAttachment: (value: unknown) => {
+        attachment = value;
+      },
+    });
+  }
+  function database(read: () => Promise<unknown>) {
+    return { prepare: () => ({ bind: () => ({ first: read }) }) } as unknown as D1Database;
+  }
+  it('withholds every broadcast while the read is pending and resumes only after proof', async () => {
+    const pending = pendingSocket();
+    const current = socket([`session:${SESSION}`]);
+    const ctx = context([pending, current]);
+    let release!: (value: unknown) => void;
+    const read = new Promise((resolve) => {
+      release = resolve;
+    });
+    const check = closeIfAccessRevoked(
+      database(() => read),
+      'project',
+      'member',
+      pending as unknown as WebSocket
+    );
+    for (const [type, scope] of [
+      ['message.new', SESSION],
+      ['session.updated', SESSION],
+      ['project.updated', undefined],
+    ] as const) {
+      broadcastToBrowserSockets(ctx, type, {}, scope);
+    }
+    expect(current.send).toHaveBeenCalledTimes(3);
+    expect(pending.send).not.toHaveBeenCalled();
+    release({ ok: 1 });
+    await check;
+    broadcastToBrowserSockets(ctx, 'message.new', {}, SESSION);
+    expect(pending.send).toHaveBeenCalledOnce();
+  });
+  it('closes a failed lookup with a retryable code and a denied lookup with4403', async () => {
+    const failed = pendingSocket();
+    await closeIfAccessRevoked(
+      database(async () => {
+        throw new Error('D1 unavailable');
+      }),
+      'p',
+      'u',
+      failed as unknown as WebSocket
+    );
+    expect(failed.close).toHaveBeenCalledWith(1013, expect.any(String));
+    const denied = pendingSocket();
+    await closeIfAccessRevoked(
+      database(async () => null),
+      'p',
+      'u',
+      denied as unknown as WebSocket
+    );
+    expect(denied.close).toHaveBeenCalledWith(4403, expect.any(String));
+  });
+  it('a revocation close during the read wins over later positive proof', async () => {
+    const pending = pendingSocket();
+    let release!: (value: unknown) => void;
+    const check = closeIfAccessRevoked(
+      database(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          })
+      ),
+      'p',
+      'u',
+      pending as unknown as WebSocket
+    );
+    pending.close();
+    release({ ok: 1 });
+    await check;
+    expect(pending.deserializeAttachment()).toEqual({ accessPending: true });
+    broadcastToBrowserSockets(context([pending]), 'message.new', {}, SESSION);
+    expect(pending.send).not.toHaveBeenCalled();
   });
 });

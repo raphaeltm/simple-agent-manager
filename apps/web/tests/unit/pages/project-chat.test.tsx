@@ -629,6 +629,11 @@ describe('ProjectChat new chat button', () => {
     // Joined, not duplicated, while the route read is in flight.
     expect(mocks.listChatSessions).toHaveBeenCalledTimes(1);
 
+    act(() => {
+      mocks.capturedOnReconnected?.();
+    });
+    expect(mocks.listChatSessions).toHaveBeenCalledTimes(1);
+
     const created = { ...SESSION_1, id: 'session-created-before-socket', topic: 'Late arrival' };
     mocks.listChatSessions.mockResolvedValue({
       sessions: [created, SESSION_1, SESSION_2],
@@ -646,7 +651,7 @@ describe('ProjectChat new chat button', () => {
     });
   });
 
-  it('does not re-read the list on socket open when the page read it itself', async () => {
+  it('refreshes a page-owned initial list after the first socket open', async () => {
     mocks.listChatSessions.mockResolvedValue({ sessions: [SESSION_1, SESSION_2], total: 2 });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
@@ -655,8 +660,41 @@ describe('ProjectChat new chat button', () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
-    expect(mocks.listChatSessions).toHaveBeenCalledTimes(1);
+    act(() => {
+      mocks.capturedOnReconnected?.();
+    });
+    await waitFor(() => expect(mocks.listChatSessions).toHaveBeenCalledTimes(2));
   });
+
+  it.each(['success', 'failure'] as const)(
+    'first subscription waits for a pending initial %s before a fresh read',
+    async (outcome) => {
+      let release!: () => void;
+      mocks.listChatSessions.mockImplementationOnce(
+        () =>
+          new Promise((resolve, reject) => {
+            release = () =>
+              outcome === 'failure'
+                ? reject(new Error('initial unavailable'))
+                : resolve({ sessions: [SESSION_1], total: 1 });
+          })
+      );
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      renderWithClient(client, `/projects/${PROJECT_ID}/chat/session-1`);
+      await waitFor(() => expect(mocks.listChatSessions).toHaveBeenCalledTimes(1));
+      act(() => {
+        mocks.capturedOnReconnected?.();
+      });
+      expect(mocks.listChatSessions).toHaveBeenCalledTimes(1);
+      const created = { ...SESSION_1, id: 'after-admission', topic: 'Visible after admission' };
+      mocks.listChatSessions.mockResolvedValue({ sessions: [created, SESSION_1], total: 2 });
+      await act(async () => {
+        release();
+      });
+      expect(await screen.findAllByText('Visible after admission')).not.toHaveLength(0);
+      expect(mocks.listChatSessions).toHaveBeenCalledTimes(2);
+    }
+  );
 
   it('keeps a deep-linked conversation when the first list read fails', async () => {
     mocks.listChatSessions.mockRejectedValue(new Error('list unavailable'));

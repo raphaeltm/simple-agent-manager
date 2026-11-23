@@ -243,9 +243,29 @@ describe('project sockets close when project access is revoked', () => {
   it('an upgrade that reaches the object after the revocation closed everything is closed too', async () => {
     // The upgrade route checked membership before the offboarding committed; the forwarded
     // upgrade arrives at the object after the close ran, so there was nothing to close yet.
+    const lateMember = `sock-late-${crypto.randomUUID()}`;
+    await seedUser(lateMember);
+    await addMember(PROJECT_A, lateMember, 'maintainer');
+    const preview = await call(
+      OWNER,
+      'POST',
+      `/api/projects/${PROJECT_A}/members/${lateMember}/offboarding-preview`
+    );
+    const plan = (await preview.json()) as { offboardingPlanId: string };
+    const removed = await call(
+      OWNER,
+      'POST',
+      `/api/projects/${PROJECT_A}/members/${lateMember}/offboarding-apply`,
+      {
+        planId: plan.offboardingPlanId,
+        actions: [],
+        finalMemberStatus: 'removed',
+      }
+    );
+    expect(removed.status).toBe(200);
     const stub = testEnv.PROJECT_DATA.get(testEnv.PROJECT_DATA.idFromName(PROJECT_A));
     const lateUpgrade = await stub.fetch('https://project-data/ws', {
-      headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': REMOVED },
+      headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': lateMember },
     });
     expect(lateUpgrade.status).toBe(101);
     const late = adopt(lateUpgrade.webSocket!);

@@ -48,6 +48,9 @@ vi.mock('@simple-agent-manager/shared', async (importOriginal) => ({
 const { ProjectData } = await import('../../src/do/index');
 
 interface MockWebSocket {
+  readyState: number;
+  deserializeAttachment: () => unknown;
+  serializeAttachment: (value: unknown) => void;
   send: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
   tags: string[];
@@ -57,6 +60,9 @@ interface MockWebSocket {
 function createMockWebSocket(tags: string[] = []): MockWebSocket {
   const sent: string[] = [];
   return {
+    readyState: WebSocket.OPEN,
+    deserializeAttachment: () => null,
+    serializeAttachment: vi.fn(),
     send: vi.fn((data: string) => sent.push(data)),
     close: vi.fn(),
     tags,

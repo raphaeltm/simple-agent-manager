@@ -306,15 +306,15 @@ describe('useProjectWebSocket', () => {
     expect(wsInstances).toHaveLength(2);
 
     act(() => simulateOpen());
-    expect(onReconnected).toHaveBeenCalledTimes(1);
+    expect(onReconnected).toHaveBeenCalledTimes(2);
   });
 
-  it('does not call onReconnected on initial connect', () => {
+  it('refreshes the snapshot on initial connect after admission', () => {
     const onReconnected = vi.fn();
     renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID, onReconnected }));
 
     act(() => simulateOpen());
-    expect(onReconnected).not.toHaveBeenCalled();
+    expect(onReconnected).toHaveBeenCalledTimes(1);
   });
 
   it('reconnects with exponential backoff on abnormal close', async () => {

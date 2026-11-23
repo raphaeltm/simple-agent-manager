@@ -3929,7 +3929,8 @@ export class ProjectData extends DurableObject<Env> {
         return new Response('Expected WebSocket upgrade', { status: 426 });
       const actorId = request.headers.get(BROWSER_SOCKET_ACTOR_HEADER);
       const projectId = this.getProjectId();
-      return admitBrowserSocket(
+      let verification: Promise<void> | undefined;
+      const response = admitBrowserSocket(
         this.ctx,
         this.sql,
         url,
@@ -3941,12 +3942,19 @@ export class ProjectData extends DurableObject<Env> {
         },
         (ws, admittedActor) => {
           if (!projectId) {
-            log.warn('websocket.admission_recheck_skipped_no_project', { action: 'kept_open' });
+            log.warn('websocket.admission_recheck_skipped_no_project', {
+              action: 'closed_retryable',
+            });
+            ws.close(1013, 'project identity unavailable');
             return;
           }
-          this.ctx.waitUntil(closeIfAccessRevoked(this.env.DATABASE, projectId, admittedActor, ws));
+          verification = closeIfAccessRevoked(this.env.DATABASE, projectId, admittedActor, ws);
         }
       );
+      // The browser starts its catch-up read on open. Complete proof before the upgrade
+      // becomes visible, so that read includes frames withheld during verification.
+      await verification;
+      return response;
     }
     return new Response('Not found', { status: 404 });
   }

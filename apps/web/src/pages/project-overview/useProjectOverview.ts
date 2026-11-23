@@ -96,10 +96,31 @@ export function useProjectOverview(projectId: string) {
     };
   }, [refresh]);
 
+  const subscriptionScope = `${queryScope}:${projectId}`;
+  const currentSubscriptionScope = useRef(subscriptionScope);
+  currentSubscriptionScope.current = subscriptionScope;
+  const refreshAfterSubscription = useCallback(async () => {
+    const queryKey = projectOverviewQueryKeys.detail(queryScope, projectId);
+    // An invalidation during the first fetch can join that same pre-subscription read.
+    // Join it first, then ask for a fresh snapshot after the socket is authorized.
+    if (queryClient.getQueryState(queryKey)?.fetchStatus === 'fetching') {
+      try {
+        await queryClient.fetchQuery({
+          ...projectOverviewQueryOptions(queryScope, projectId),
+          staleTime: 0,
+        });
+      } catch {
+        /* The fresh read below retries a failed initial snapshot. */
+      }
+    }
+    if (currentSubscriptionScope.current !== subscriptionScope) return;
+    await queryClient.invalidateQueries({ queryKey, exact: true });
+  }, [queryClient, queryScope, projectId, subscriptionScope]);
+
   useProjectWebSocket({
     projectId,
     onSessionEvent: scheduleRefresh,
-    onReconnected: refresh,
+    onReconnected: refreshAfterSubscription,
   });
 
   const [pending, setPending] = useState<PendingStart[]>([]);
