@@ -1,35 +1,31 @@
-import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-
 import type { BuildContextDescriptor, BuildContextOwner } from './build-context-state';
 import { buildContextKey } from './build-context-state';
-import type { ComposeImageArtifactPresignTarget as PresignTarget } from './compose-image-artifacts';
 import type { AppDeploymentEnv as Env } from './env';
+import type { ObjectUrlSigner } from './object-url-signer';
 
 /** Only job-derived keys are signed. Metadata binds the uploaded object to the
  * digest declared before upload; builders must still hash bytes after download.
- * The URL is signed through the worker's shared R2 S3 client (`target`, bound with the
- * `WHEN_REQUIRED` checksum mode), as compose artifacts are, so an operator store works too. */
+ * The URL comes from the worker's object URL signer (`signer`): a presigned URL through the shared
+ * R2 S3 client (`WHEN_REQUIRED` checksums), or a box upload URL that also verifies the digest. */
 export async function createBuildContextUpload(
   owner: BuildContextOwner,
   descriptor: BuildContextDescriptor,
   expiresIn: number,
-  target: PresignTarget
+  signer: ObjectUrlSigner
 ) {
   const r2Key = buildContextKey(owner);
-  const uploadUrl = await getSignedUrl(
-    target.client,
-    new PutObjectCommand({
-      Bucket: target.bucket,
-      Key: target.objectKey(r2Key),
-      ContentLength: descriptor.sizeBytes,
-      ContentType: 'application/zstd',
-      Metadata: { sha256: descriptor.sha256 },
-    }),
-    // The source sends this as a header. Keep it in SignedHeaders instead of
-    // hoisting it into the query, so changing the digest invalidates the PUT.
-    { expiresIn, unhoistableHeaders: new Set(['x-amz-meta-sha256']) }
-  );
+  const uploadUrl = await signer.putUrl(r2Key, {
+    expiresIn,
+    contentLength: descriptor.sizeBytes,
+    contentType: 'application/zstd',
+    metadata: { sha256: descriptor.sha256 },
+    sha256: descriptor.sha256,
+    owner: {
+      userId: owner.requestedBy,
+      projectId: owner.projectId,
+      workspaceId: owner.workspaceId,
+    },
+  });
   return { r2Key, uploadUrl, expiresIn };
 }
 export async function verifyBuildContextObject(
@@ -48,11 +44,7 @@ export async function verifyBuildContextObject(
 export async function createBuildContextDownload(
   r2Key: string,
   expiresIn: number,
-  target: PresignTarget
+  signer: ObjectUrlSigner
 ) {
-  return getSignedUrl(
-    target.client,
-    new GetObjectCommand({ Bucket: target.bucket, Key: target.objectKey(r2Key) }),
-    { expiresIn }
-  );
+  return signer.getUrl(r2Key, { expiresIn });
 }

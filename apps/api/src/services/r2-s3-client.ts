@@ -1,6 +1,8 @@
 import { S3Client } from '@aws-sdk/client-s3';
+import { type ObjectUrlSigner, s3ObjectUrlSigner } from '@simple-agent-manager/app-deployment';
 
 import type { Env } from '../env';
+import { errors } from '../middleware/error';
 import {
   type R2PresignConfig,
   r2PresignObjectKey,
@@ -25,10 +27,6 @@ export interface R2PresignTarget {
 /** One client per configuration and checksum mode; a rotation adds at most a few entries. */
 const MAX_CACHED_CLIENTS = 4;
 const clients = new Map<string, S3Client>();
-
-export function hasR2S3Credentials(env: Env): boolean {
-  return resolveR2PresignConfig(env) !== null;
-}
 
 function clientFor(config: R2PresignConfig, checksum: R2ChecksumMode): S3Client {
   const cacheKey = JSON.stringify([
@@ -75,6 +73,54 @@ export function getR2PresignTarget(
     bucket: config.bucket,
     objectKey: (r2Key) => r2PresignObjectKey(config, r2Key),
   };
+}
+
+/**
+ * The self-host build's box URL signer (`selfhost/object-urls/`), or null. Only the celld entry
+ * installs it, so on Cloudflare this stays null and every URL is an R2 presigned URL.
+ */
+type BoxObjectUrlSignerFactory = (env: Env) => ObjectUrlSigner | null;
+let boxSignerFactory: BoxObjectUrlSignerFactory | null = null;
+
+/** Called once by the self-host build; `null` uninstalls (tests). */
+export function installBoxObjectUrlSigner(factory: BoxObjectUrlSignerFactory | null): void {
+  boxSignerFactory = factory;
+}
+
+/**
+ * Where object URLs for compose image artifacts, build contexts and task attachments point:
+ *
+ * 1. a configured presign credential (Cloudflare R2, or an operator store with a static key) signs
+ *    S3 presigned URLs, exactly as before;
+ * 2. otherwise, on a self-hosted box, SAM-signed URLs to the box's own upload route;
+ * 3. otherwise null: nothing can mint a URL.
+ *
+ * The one resolver every caller uses (rule 24), so availability checks and URL minting agree.
+ */
+export function resolveR2ObjectUrlSigner(
+  env: Env,
+  checksum: R2ChecksumMode = 'WHEN_REQUIRED'
+): ObjectUrlSigner | null {
+  if (resolveR2PresignConfig(env)) return s3ObjectUrlSigner(getR2PresignTarget(env, checksum));
+  return boxSignerFactory?.(env) ?? null;
+}
+
+export function r2ObjectUrlsAvailable(env: Env): boolean {
+  return resolveR2ObjectUrlSigner(env) !== null;
+}
+
+/** The signer, or a 503 naming what to configure (never a plain error that surfaces as a 500). */
+export function getR2ObjectUrlSigner(
+  env: Env,
+  checksum: R2ChecksumMode = 'WHEN_REQUIRED'
+): ObjectUrlSigner {
+  const signer = resolveR2ObjectUrlSigner(env, checksum);
+  if (!signer) {
+    throw errors.serviceUnavailable(
+      'Object uploads are not configured: set R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY (plus CF_ACCOUNT_ID and R2_BUCKET_NAME on Cloudflare, or R2_S3_ENDPOINT, R2_S3_BUCKET and R2_S3_KEY_PREFIX for an operator store), or run the self-host build, which uploads through the box'
+    );
+  }
+  return signer;
 }
 
 /** Test seam: forget cached clients. */

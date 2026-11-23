@@ -1124,15 +1124,50 @@ repository, so it never notices an `.env` edit.
 port is what the deploy publishes and checks, and each one is logged by name. Shell variables no
 compose file uses are ignored. Set the box in `.env`, not the shell.
 
-**Object store and presigned uploads.** Uploads (attachments, snapshots) go from the browser
-straight to the fleet bucket when `R2_S3_ENDPOINT` is set and `.state/secrets.env` holds a
+**Object store and uploads through the box.** Task attachments, build contexts, app image
+artifacts and session snapshots are uploaded through the box by default: no store credential is
+needed. The Worker hands
+the uploader (browser or agent) a URL to `https://api.SAM_DOMAIN/api/box-objects?token=...`, signed
+by SAM itself with a key derived from `ENCRYPTION_KEY`. It rotates with `selfhost:secrets rotate`:
+while a rotation overlaps, URLs signed with the previous key stay valid (`ENCRYPTION_KEY_PREVIOUS`),
+and once that key is dropped an unused URL fails with 403 like an expired one; the client asks again.
+The token names one object, one operation, a size limit and an expiry of minutes; the box streams the
+body into the bucket through celld's R2 binding without holding it in memory, and the write is
+create-only. Downloads (image artifacts on deployment nodes, build contexts) work the same way.
+Session snapshot artifacts take this route too: their older Worker upload route needs a header
+that the box's Caddy strips from every client request (`X-SAM-*`), so it cannot work on a box.
+
+- **One request carries at most 1 GiB.** celld refuses a larger body (413) and cannot be configured
+  above it, so on a box without a store key an app's image artifact is limited to 1 GiB (the agent
+  is told the limit and stops before uploading). Parted uploads are tracked in idea
+  `01M83WWQTNTBD4SY1530G3XWH7`.
+- **Concurrent uploads are capped** (Admin settings `boxObjects.maxConcurrentUploads`, default 4,
+  of which one uploader may hold `boxObjects.maxUploadsPerUploader`, default 2). An upload that
+  receives no bytes for `boxObjects.uploadIdleSeconds` (default 60) is dropped with 408, and a slot
+  whose handler died frees within `boxObjects.uploadLeaseSeconds` (default 300; renewed while bytes
+  arrive, and never shorter than twice the idle limit). One object key is written by one upload at a
+  time: a second upload of the same key while the first runs gets 412. Each in-flight upload costs celld about 85 MB of
+  memory (measured on celld 0.6.3: peak RSS 220 MB for one 1 GB upload, 427 MB for four, 896 MB for
+  eight; throughput stops growing after two at about 180 MB/s). An upload over the cap waits up to
+  `boxObjects.uploadAdmissionWaitSeconds` (default 30) for a slot before it is sent; if none frees
+  in time it gets 503 with `Retry-After`.
+- Tokens travel in the query string. Caddy's log drops every query string
+  (`caddy/log-redaction.caddy`), SAM's request log records only the path, and celld does not log
+  request URLs at its default level.
+
+**Direct uploads with a static key (optional).** A box can still send uploads straight to the
+fleet bucket, bypassing the Worker, when `R2_S3_ENDPOINT` is set and `.state/secrets.env` holds a
 credential scoped to the R2 prefix (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`; never the fleet
-credential, which the deploy refuses). **For an `s3://` bucket `R2_S3_REGION` is required** (the
-store's SigV4 signing region, for MinIO usually `us-east-1`): the deploy refuses `R2_S3_ENDPOINT`
-without it. A `gs://` bucket defaults to `auto`. The bundled store is a community MinIO build that
-celld does not qualify for production. It refuses to start unless `AWS_ACCESS_KEY_ID` and
-`AWS_SECRET_ACCESS_KEY` are set, are not `minioadmin`, and the secret has at least 24 characters
-(`openssl rand -hex 24`): that credential reads every Worker secret in the bucket.
+credential, which the deploy refuses). When that credential is configured it wins over uploads
+through the box. Google Cloud organisations that refuse HMAC keys cannot use this; they do not need
+to. **For an `s3://` bucket `R2_S3_REGION` is required** (the store's SigV4 signing region, for
+MinIO usually `us-east-1`): the deploy refuses `R2_S3_ENDPOINT` without it. A `gs://` bucket
+defaults to `auto`.
+
+**Bundled store.** The bundled store is a community MinIO build that celld does not qualify for
+production. It refuses to start unless `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are set, are
+not `minioadmin`, and the secret has at least 24 characters (`openssl rand -hex 24`): that
+credential reads every Worker secret in the bucket.
 
 **Reverse-tunnel ports and the gateway secret.** frps binds one loopback port per node from
 `REVERSE_TUNNEL_PORT_RANGE_START`..`_END` (default 20000-29999). The deploy writes the resolved

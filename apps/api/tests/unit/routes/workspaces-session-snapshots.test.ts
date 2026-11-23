@@ -446,6 +446,8 @@ describe('workspaces session snapshot callback routes', () => {
       sha256: HOME_SHA256,
       contentType: 'application/x-tar',
       checksumHeader: true,
+      // The box's per-uploader slot limit keys on the snapshot's workspace.
+      owner: { workspaceId: 'WS_1', userId: 'user-1', projectId: 'project-1' },
     });
     expect(mocks.recordSessionSnapshotArtifactAuthorization).toHaveBeenCalledWith(
       expect.anything(),

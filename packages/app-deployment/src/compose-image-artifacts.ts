@@ -1,22 +1,7 @@
-import type { S3Client } from '@aws-sdk/client-s3';
-import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { parsePositiveInt } from '@simple-agent-manager/worker-core';
 
 import type { AppDeploymentEnv } from './env';
-
-/**
- * Where compose artifact URLs are signed: the worker's shared R2 S3 client
- * (`apps/api/src/services/r2-s3-client.ts`, `getR2PresignTarget(env, 'SDK_DEFAULT')`), passed in
- * by the worker so this package does not resolve storage credentials itself.
- */
-export interface ComposeImageArtifactPresignTarget {
-  client: S3Client;
-  /** S3 bucket the URL addresses. */
-  bucket: string;
-  /** S3 object key for an R2 key (prefix applied for operator stores). */
-  objectKey(r2Key: string): string;
-}
+import type { ObjectUrlSigner } from './object-url-signer';
 
 const DEFAULT_UPLOAD_EXPIRY_SECONDS = 900;
 const DEFAULT_DOWNLOAD_EXPIRY_SECONDS = 900;
@@ -72,6 +57,19 @@ export function getComposeImageArtifactMaxBytes(env: AppDeploymentEnv): number {
     env.COMPOSE_IMAGE_ARTIFACT_MAX_BYTES,
     DEFAULT_COMPOSE_IMAGE_ARTIFACT_MAX_BYTES
   );
+}
+
+/**
+ * The artifact size limit for uploads through `signer`: the configured maximum, lowered to the
+ * signer's own per-request bound (a self-hosted box carries at most 1 GiB per request). The init
+ * response reports it, so the VM agent refuses a larger archive before uploading it.
+ */
+export function composeImageArtifactMaxBytesFor(
+  env: AppDeploymentEnv,
+  signer: Pick<ObjectUrlSigner, 'maxPutBytes'>
+): number {
+  const configured = getComposeImageArtifactMaxBytes(env);
+  return signer.maxPutBytes === undefined ? configured : Math.min(configured, signer.maxPutBytes);
 }
 
 function getUploadExpiry(env: AppDeploymentEnv): number {
@@ -192,10 +190,10 @@ export async function createComposeImageArtifactUploads(
     uploadId: string;
     services: ComposeImageArtifactRequest[];
   },
-  target: ComposeImageArtifactPresignTarget
+  signer: ObjectUrlSigner
 ): Promise<ComposeImageArtifactUpload[]> {
   const expiresIn = getUploadExpiry(env);
-  const maxBytes = getComposeImageArtifactMaxBytes(env);
+  const maxBytes = composeImageArtifactMaxBytesFor(env, signer);
 
   return Promise.all(
     input.services.map(async (service) => {
@@ -211,17 +209,17 @@ export async function createComposeImageArtifactUploads(
         input.uploadId,
         serviceName
       );
-      const command = new PutObjectCommand({
-        Bucket: target.bucket,
-        Key: target.objectKey(r2Key),
-        ContentType: COMPOSE_IMAGE_ARTIFACT_MEDIA_TYPE,
-      });
       return {
         serviceName,
         sourceRef,
         localImageRef: cleanString(service.localImageRef) || sourceRef,
         r2Key,
-        uploadUrl: await getSignedUrl(target.client, command, { expiresIn }),
+        uploadUrl: await signer.putUrl(r2Key, {
+          expiresIn,
+          contentType: COMPOSE_IMAGE_ARTIFACT_MEDIA_TYPE,
+          maxBytes,
+          owner: { projectId: input.projectId, workspaceId: input.workspaceId },
+        }),
         expiresIn,
         maxBytes,
         archiveType: COMPOSE_IMAGE_ARTIFACT_ARCHIVE_TYPE,
@@ -254,18 +252,14 @@ export async function validateCompletedComposeImageArtifacts(
 export async function createComposeImageArtifactDownloads(
   env: AppDeploymentEnv,
   artifacts: ComposeImageArtifactDescriptor[],
-  target: ComposeImageArtifactPresignTarget
+  signer: ObjectUrlSigner
 ): Promise<ComposeImageArtifactDownload[]> {
   const downloadExpiresIn = getDownloadExpiry(env);
 
   return Promise.all(
     artifacts.map(async (artifact) => ({
       ...artifact,
-      downloadUrl: await getSignedUrl(
-        target.client,
-        new GetObjectCommand({ Bucket: target.bucket, Key: target.objectKey(artifact.r2Key) }),
-        { expiresIn: downloadExpiresIn }
-      ),
+      downloadUrl: await signer.getUrl(artifact.r2Key, { expiresIn: downloadExpiresIn }),
       downloadExpiresIn,
     }))
   );

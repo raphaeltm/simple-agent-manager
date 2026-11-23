@@ -1,14 +1,14 @@
 // Canonical implementation lives in the app-deployment package.
-// The upload keeps its original `(env, …)` signature here and binds the worker's shared R2 S3
-// client (`WHEN_REQUIRED`, so the VM need not send a checksum header), which also serves compose
-// artifacts, attachments and session snapshots, and works against an operator store.
+// The upload keeps its original `(env, …)` signature here and binds the worker's object URL signer
+// (r2-s3-client.ts): the shared R2 S3 client (`WHEN_REQUIRED`, so the VM need not send a checksum
+// header), or on a self-hosted box without a store key, the box's own upload route.
 import {
   createBuildContextDownload as createDownload,
   createBuildContextUpload as createUpload,
 } from '@simple-agent-manager/app-deployment';
 
 import type { Env } from '../env';
-import { getR2PresignTarget } from './r2-s3-client';
+import { getR2ObjectUrlSigner } from './r2-s3-client';
 
 export { verifyBuildContextObject } from '@simple-agent-manager/app-deployment';
 
@@ -21,9 +21,9 @@ export async function createBuildContextUpload(
   descriptor: BuildContextUploadArgs[1],
   expiresIn: BuildContextUploadArgs[2]
 ): ReturnType<typeof createUpload> {
-  return createUpload(owner, descriptor, expiresIn, getR2PresignTarget(env, 'WHEN_REQUIRED'));
+  return createUpload(owner, descriptor, expiresIn, getR2ObjectUrlSigner(env, 'WHEN_REQUIRED'));
 }
 
 export async function createBuildContextDownload(env: Env, r2Key: string, expiresIn: number) {
-  return createDownload(r2Key, expiresIn, getR2PresignTarget(env, 'WHEN_REQUIRED'));
+  return createDownload(r2Key, expiresIn, getR2ObjectUrlSigner(env, 'WHEN_REQUIRED'));
 }

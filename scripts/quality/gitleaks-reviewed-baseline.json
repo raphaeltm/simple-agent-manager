@@ -274,6 +274,14 @@
     },
     {
       "classification": "synthetic-test-fixture",
+      "reason": "PR #2987 commit 4fc3f59e0 only: scripts/selfhost/live/box-object-urls.live.test.ts line 208 held the literal box-object token `samobj1.forged.forged`, an unsigned placeholder that cannot verify (no key material; the live test asserts it is refused). The next commit replaced it with a built string. Exact rule/path/line/bytes of that historical commit only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-23T11:30:00.000Z",
+      "expiresAt": "2026-12-23T11:30:00.000Z",
+      "digests": ["f0ab4cc7c363ddebbe09343c7edcd324a9452b23845ea42579402888d7795332"]
+    },
+    {
+      "classification": "synthetic-test-fixture",
       "reason": "PR #2989 history only: commit c914f7c7b used readable placeholder values ('rotated-...', 'second-...') for an operator secret named OPERATOR_TOKEN in scripts/selfhost/bundle-head.test.ts (rotation tests against a fake Cloud KMS; never real credentials). The tree now uses OPERATOR_SETTING with plain words; these digests cover only that historical commit, which cannot be rewritten (no force push). Exact rule/path/line/bytes only.",
       "owner": "security",
       "reviewedAt": "2026-11-23T12:05:00.000Z",

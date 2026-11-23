@@ -1,0 +1,132 @@
+/**
+ * The box-wide limit on concurrent object uploads (`BoxUploadGate`, one instance per box).
+ *
+ * Why a limit: celld streams an upload into the R2 binding without holding it in the isolate, but
+ * every in-flight upload still costs process memory. Measured on celld v0.6.3 with 1 GB bodies
+ * (task tasks/active/2026-11-23-selfhost-box-object-uploads.md): peak RSS 220 MB for one upload,
+ * 284 / 427 / 896 MB for 2 / 4 / 8 at once, so roughly 85 MB per upload over a ~150 MB base, while
+ * aggregate throughput stops growing after two (~180 MB/s). The default of 4 keeps the peak near
+ * 430 MB. An upload over the limit waits briefly in the route (`uploadAdmissionWaitSeconds`), then is refused with 503 and Retry-After. One
+ * uploader (a workspace, else a user) may hold only part of the slots, and the route drops an
+ * upload that stops sending bytes (`route.ts`), so a slow or stalled client cannot keep the box's
+ * uploads blocked.
+ *
+ * Why a Durable Object: the limit must hold across every Worker isolate celld runs, and a single
+ * object is the box's one serialization point. Each acquire is a lease with a short expiry that the
+ * route renews while bytes keep arriving, so a handler that dies without releasing (celld restart,
+ * a killed isolate) frees its slot within one lease instead of holding it forever. `acquire` and `release` do all their work in synchronous SQL with
+ * no `await`, so two calls cannot interleave inside one (rule 45).
+ */
+import { DurableObject } from 'cloudflare:workers';
+
+export interface BoxUploadGateEnv {
+  BOX_UPLOAD_GATE?: DurableObjectNamespace;
+}
+
+export type BoxUploadLease =
+  | { granted: true }
+  /** The box (or this uploader) is at its limit. */
+  | { granted: false; reason: 'busy'; active: number; retryAfterSeconds: number }
+  /** Another live upload is writing the same object key. */
+  | { granted: false; reason: 'key-in-use' };
+
+/** Shortest and longest Retry-After hint (seconds) a refusal suggests. */
+const MIN_RETRY_AFTER_SECONDS = 5;
+const MAX_RETRY_AFTER_SECONDS = 60;
+
+export class BoxUploadGate extends DurableObject {
+  constructor(ctx: DurableObjectState, env: unknown) {
+    super(ctx, env as never);
+    ctx.storage.sql.exec(
+      'CREATE TABLE IF NOT EXISTS upload_slots (id TEXT PRIMARY KEY, uploader TEXT NOT NULL, object_key TEXT NOT NULL, expires_at INTEGER NOT NULL)'
+    );
+  }
+
+  /** The gate's clock (a method, not an RPC argument, so no caller can move it). */
+  protected now(): number {
+    return Date.now();
+  }
+
+  /**
+   * Grants a lease to `id` while fewer than `limits.total` unexpired leases exist on the box,
+   * fewer than `limits.perUploader` belong to `uploader` (so one uploader cannot hold every slot),
+   * and no live lease is writing `objectKey`. The key claim makes create-only hold for streams
+   * celld cannot write conditionally (route.ts): from the existence check through the write, only
+   * one upload may create a given object.
+   */
+  acquire(
+    id: string,
+    uploader: string,
+    objectKey: string,
+    limits: { total: number; perUploader: number; leaseMs: number }
+  ): BoxUploadLease {
+    const now = this.now();
+    const sql = this.ctx.storage.sql;
+    sql.exec('DELETE FROM upload_slots WHERE expires_at <= ?', now);
+    const row = sql
+      .exec<{ active: number; mine: number; sameKey: number; next: number | null }>(
+        'SELECT COUNT(*) AS active, COALESCE(SUM(uploader = ?), 0) AS mine, COALESCE(SUM(object_key = ?), 0) AS sameKey, MIN(expires_at) AS next FROM upload_slots',
+        uploader,
+        objectKey
+      )
+      .one();
+    if (row.sameKey > 0) return { granted: false, reason: 'key-in-use' };
+    if (row.active >= limits.total || row.mine >= limits.perUploader) {
+      // A hint, not a promise: most leases end when their upload finishes, long before expiry.
+      const untilExpiry = Math.ceil(((row.next ?? now) - now) / 1000);
+      const retryAfterSeconds = Math.min(
+        MAX_RETRY_AFTER_SECONDS,
+        Math.max(MIN_RETRY_AFTER_SECONDS, untilExpiry)
+      );
+      return { granted: false, reason: 'busy', active: row.active, retryAfterSeconds };
+    }
+    sql.exec(
+      'INSERT OR REPLACE INTO upload_slots (id, uploader, object_key, expires_at) VALUES (?, ?, ?, ?)',
+      id,
+      uploader,
+      objectKey,
+      now + limits.leaseMs
+    );
+    return { granted: true };
+  }
+
+  /**
+   * Extends a held, unexpired lease while its upload is still receiving bytes (route.ts). False when
+   * the lease is gone: the route then stops the upload rather than let it run uncounted.
+   */
+  renew(id: string, leaseMs: number): boolean {
+    const now = this.now();
+    const cursor = this.ctx.storage.sql.exec(
+      'UPDATE upload_slots SET expires_at = ? WHERE id = ? AND expires_at > ?',
+      now + leaseMs,
+      id,
+      now
+    );
+    return cursor.rowsWritten > 0;
+  }
+
+  release(id: string): void {
+    this.ctx.storage.sql.exec('DELETE FROM upload_slots WHERE id = ?', id);
+  }
+}
+
+/** The box's one gate instance. */
+export const BOX_UPLOAD_GATE_NAME = 'box';
+
+interface BoxUploadGateStub {
+  acquire(
+    id: string,
+    uploader: string,
+    objectKey: string,
+    limits: { total: number; perUploader: number; leaseMs: number }
+  ): Promise<BoxUploadLease>;
+  renew(id: string, leaseMs: number): Promise<boolean>;
+  release(id: string): Promise<void>;
+}
+
+export function boxUploadGate(env: BoxUploadGateEnv): BoxUploadGateStub | null {
+  const namespace = env.BOX_UPLOAD_GATE;
+  if (!namespace) return null;
+  // Typed RPC stub: Cloudflare's generated stub type cannot express this class's methods.
+  return namespace.get(namespace.idFromName(BOX_UPLOAD_GATE_NAME)) as unknown as BoxUploadGateStub;
+}

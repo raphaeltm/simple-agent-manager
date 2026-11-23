@@ -25,6 +25,7 @@ import {
   renderCelldMain,
   writeCelldConfig,
 } from './celld-project.js';
+import { SELFHOST_DURABLE_OBJECTS } from './selfhost-durable-objects.js';
 
 const API_DIR = resolve(import.meta.dirname, '../../apps/api');
 
@@ -63,8 +64,9 @@ describe('prepareCelldProject', () => {
     for (const specifier of specifiers) {
       expect(existsSync(join(API_DIR, 'src', specifier)), specifier).toBe(true);
     }
-    // Shared exports, the self-host-only DO, and the default.
-    expect(main.match(/^export /gm)).toHaveLength(3);
+    // Shared exports, each self-host-only DO, and the default.
+    expect(main.match(/^export /gm)).toHaveLength(2 + SELFHOST_DURABLE_OBJECTS.length);
+    expect(main).toContain('export { BoxUploadGate } from');
     expect(statSync(join(projectDir, CELLD_MAIN)).mode & 0o777).toBe(0o600);
   });
 

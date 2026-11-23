@@ -1,18 +1,18 @@
 /**
- * Attachment Upload Service — R2 presigned URL generation and validation.
+ * Attachment Upload Service — upload URL generation and validation.
  *
- * Generates S3-compatible presigned PUT URLs for direct browser → R2 uploads,
+ * Generates the URL the browser PUTs a file to: an S3-compatible presigned URL straight to R2, or
+ * on a self-hosted box without a store key, the box's own upload route (r2-s3-client.ts).
  * Validates attachment existence/integrity on task submission via HEAD checks.
  */
-import { PutObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { TaskAttachment } from '@simple-agent-manager/shared';
 import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { getR2PresignTarget } from './r2-s3-client';
+import { errors } from '../middleware/error';
+import { getR2ObjectUrlSigner } from './r2-s3-client';
 
 function getMaxBytes(env: Env): number {
   return parsePositiveInt(env.ATTACHMENT_UPLOAD_MAX_BYTES, ATTACHMENT_DEFAULTS.UPLOAD_MAX_BYTES);
@@ -83,18 +83,19 @@ export async function generatePresignedUploadUrl(
   }
 
   const r2Key = buildAttachmentR2Key(userId, uploadId, filename);
-  // r2Key stays the R2 binding key; only the presigned URL addresses the store object.
-  const target = getR2PresignTarget(env);
+  // r2Key stays the R2 binding key; only the URL addresses the store object.
+  const signer = getR2ObjectUrlSigner(env);
   const expiresIn = getPresignExpiry(env);
+  if (signer.maxPutBytes !== undefined && size > signer.maxPutBytes) {
+    throw errors.badRequest(`File size ${size} exceeds maximum ${signer.maxPutBytes} bytes`);
+  }
 
-  const command = new PutObjectCommand({
-    Bucket: target.bucket,
-    Key: target.objectKey(r2Key),
-    ContentLength: size,
-    ContentType: contentType,
+  const uploadUrl = await signer.putUrl(r2Key, {
+    expiresIn,
+    contentLength: size,
+    contentType,
+    owner: { userId },
   });
-
-  const uploadUrl = await getSignedUrl(target.client, command, { expiresIn });
 
   log.info('attachment_upload.presigned_url_generated', {
     userId,
