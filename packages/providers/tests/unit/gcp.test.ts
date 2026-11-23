@@ -946,6 +946,22 @@ describe('GcpProvider', () => {
       );
     });
 
+    it('treats a response-level unreachables list as an incomplete inventory', async () => {
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/aggregated/instances')) {
+          return new Response(
+            JSON.stringify({
+              items: { 'zones/us-central1-a': { instances: [gcpInstance({ id: 'other' })] } },
+              unreachables: ['zones/asia-east2-c'],
+            })
+          );
+        }
+        return new Response(JSON.stringify({ error: { message: 'Not found' } }), { status: 404 });
+      });
+      await expect(provider.getVM('missing-id')).rejects.toThrow(/unreachable zones\/asia-east2-c/);
+      await expect(provider.listVMs()).rejects.toThrow(/unreachable/);
+    });
+
     it('still finds an instance in a reachable scope when another scope is unreachable', async () => {
       globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
         if (url.includes('/aggregated/instances')) {

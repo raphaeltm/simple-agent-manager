@@ -110,6 +110,18 @@ export function validateGcpAggregatedInstances(
   context: string
 ): { items?: Record<string, GcpAggregatedScope>; nextPageToken?: string } {
   const root = expectObject(payload, 'gcp', context);
+  // aggregatedList can also name scopes it could not read in a response-level `unreachables`
+  // array. Such a page is a partial inventory: every caller reads "not in the list" as "does not
+  // exist" (orphan reconciliation, allocation recovery, instance lookup), so it fails closed, like
+  // a per-scope UNREACHABLE warning.
+  const unreachables = optionalArray(root, 'unreachables', 'gcp', context);
+  if (unreachables && unreachables.length > 0) {
+    throw validationError(
+      'gcp',
+      `${context}.unreachables`,
+      `incomplete: unreachable ${unreachables.map(String).join(', ')}`
+    );
+  }
   const items = optionalObject(root, 'items', 'gcp', context);
   const nextPageToken = optionalString(root, 'nextPageToken', 'gcp', context);
   if (nextPageToken !== undefined && nextPageToken.length === 0) {
