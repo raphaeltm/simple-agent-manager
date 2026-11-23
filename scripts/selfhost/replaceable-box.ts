@@ -118,19 +118,48 @@ export function readBucketBundle(bucket: BoxBucket, bundleId: string): SealedBun
   return bundle;
 }
 
+/** A bucket bundle by id, naming the object when it cannot be read. */
+function bucketBundleNamed(bucket: BoxBucket, bundleId: string): SealedBundle {
+  try {
+    return readBucketBundle(bucket, bundleId);
+  } catch (error) {
+    throw new Error(
+      `${bundleKey(bundleId)} in the fleet bucket is not a readable sealed bundle ` +
+        `(${error instanceof Error ? error.message : String(error)}); restore or remove it`
+    );
+  }
+}
+
 /**
- * An empty box whose bucket holds bundles is a replacement that has not been rebuilt: sealing
- * here would make new platform keys and leave every stored credential unreadable.
+ * Sealing must never start from a box that is behind its bucket: an empty box there is a
+ * replacement that has not been rebuilt (sealing would make new platform keys and leave every
+ * stored credential unreadable), and a box missing a bucket bundle at least as new as its own
+ * newest runs from an older copy of its state (sealing would roll secrets back, and the next
+ * reconcile would prune the genuine newest bundle).
  */
-async function assertNotUnrebuiltReplacement(local: BundleStore, bucket: BoxBucket): Promise<void> {
-  if ((await local.listIds()).length > 0) return;
-  const remote = bucketBundleIds(bucket);
-  if (remote.length === 0) return;
-  throw new Error(
-    `the fleet bucket holds ${remote.length} sealed bundle(s) but ${local.location} has none: ` +
-      'this is a replacement box. Run pnpm selfhost:rebuild first (README "Replace a dead box"); ' +
-      'sealing here would make new platform keys and leave every stored credential unreadable'
-  );
+async function assertBoxNotBehindBucket(local: BundleStore, bucket: BoxBucket): Promise<void> {
+  const localIds = await local.listIds();
+  const onlyRemote = bucketBundleIds(bucket).filter((id) => !localIds.includes(id));
+  if (onlyRemote.length === 0) return;
+  if (localIds.length === 0) {
+    throw new Error(
+      `the fleet bucket holds ${onlyRemote.length} sealed bundle(s) but ${local.location} has none: ` +
+        'this is a replacement box. Run pnpm selfhost:rebuild first (README "Replace a dead box"); ' +
+        'sealing here would make new platform keys and leave every stored credential unreadable'
+    );
+  }
+  const newest = await newestLocalBundle(local);
+  for (const id of onlyRemote) {
+    const bundle = bucketBundleNamed(bucket, id);
+    if (newest && bundle.createdAt >= newest.createdAt) {
+      throw new Error(
+        `the fleet bucket holds sealed bundle ${id} (${bundle.createdAt}), newer than any on this ` +
+          'box: another box sealed it, or this box runs from an older copy of its state. ' +
+          'Refusing to seal over it; finish the rebuild (pnpm selfhost:rebuild) or remove the ' +
+          'other box'
+      );
+    }
+  }
 }
 
 /**
@@ -146,7 +175,7 @@ export function mirroredBundleStore(local: BundleStore, bucket: BoxBucket): Bund
     listIds: () => local.listIds(),
     read: (bundleId) => local.read(bundleId),
     async write(bundle) {
-      await assertNotUnrebuiltReplacement(local, bucket);
+      await assertBoxNotBehindBucket(local, bucket);
       await local.write(bundle);
       const text = await local.read(bundle.bundleId);
       if (text === null) throw new Error(`bundle ${bundle.bundleId} vanished after it was written`);
@@ -184,14 +213,14 @@ export async function reconcileBundleMirror(
   bucket: BoxBucket,
   log: (message: string) => void
 ): Promise<void> {
-  await assertNotUnrebuiltReplacement(local, bucket);
+  await assertBoxNotBehindBucket(local, bucket);
   const localIds = new Set(await local.listIds());
   const newest = await newestLocalBundle(local);
   if (!newest) return;
   const remoteIds = bucketBundleIds(bucket);
   const stale: string[] = [];
   for (const id of remoteIds) {
-    const bundle = readBucketBundle(bucket, id);
+    const bundle = bucketBundleNamed(bucket, id);
     if (bundle.installationId !== newest.installationId) {
       throw new Error(
         `the fleet bucket holds sealed bundle ${id} of installation ${bundle.installationId}, ` +
@@ -199,16 +228,8 @@ export async function reconcileBundleMirror(
           'installation; refusing to touch it'
       );
     }
-    if (localIds.has(id)) continue;
-    if (bundle.createdAt >= newest.createdAt) {
-      throw new Error(
-        `the fleet bucket holds sealed bundle ${id} (${bundle.createdAt}), newer than any on this ` +
-          'box: another box sealed it, or this box runs from an older copy of its state. ' +
-          'Refusing to seal over it; rebuild this box from the bucket (pnpm selfhost:rebuild ' +
-          'on an empty state directory) or remove the other box'
-      );
-    }
-    stale.push(bundleKey(id));
+    // Not on the box and older than its newest (assertBoxNotBehindBucket): a bundle it pruned.
+    if (!localIds.has(id)) stale.push(bundleKey(id));
   }
   if (stale.length > 0) {
     bucket.remove(stale);
@@ -228,7 +249,11 @@ export function ledgerEntries(stateDir: string): CreatedResource[] {
   return readInstallRecord(stateDir).filter((r) => r.cloud !== 'box' && !r.removedAt);
 }
 
-/** Seals the cloud entries with the box's key and replaces `sam-box/ledger.json`. */
+/**
+ * Seals the cloud entries with the box's key and replaces `sam-box/ledger.json`. Called after
+ * reconcile, which refuses a bucket holding another installation's bundles; a ledger of another
+ * installation with no bundles left (a restored clone's copy of its source) is stale and replaced.
+ */
 export async function publishLedger(
   bucket: BoxBucket,
   provider: KeyProvider,

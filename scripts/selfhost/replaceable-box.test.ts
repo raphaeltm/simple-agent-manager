@@ -245,6 +245,23 @@ describe('the bucket copy of the bundles', () => {
     const empty = openBundleStore({ dir: join(dir, 'empty-bundles') });
     await expect(mirroredBundleStore(empty, remote).write(ours)).rejects.toThrow(/replacement box/);
     expect(await empty.listIds()).toEqual([]);
+    // A box behind its bucket (an interrupted rebuild holding only an older bundle): sealing
+    // there would roll secrets back and let the next reconcile prune the genuine newest.
+    const older = await sealed(provider, '2026-11-01T00:00:00Z');
+    const behind = openBundleStore({ dir: join(dir, 'behind-bundles') });
+    await behind.write(older);
+    const bucketAhead = memoryBucket();
+    bucketAhead.write(`sam-box/bundles/${older.bundleId}.json`, JSON.stringify(older));
+    bucketAhead.write(`sam-box/bundles/${ours.bundleId}.json`, JSON.stringify(ours));
+    const fresh = await sealed(provider, '2026-11-06T00:00:00Z');
+    await expect(mirroredBundleStore(behind, bucketAhead).write(fresh)).rejects.toThrow(
+      /newer than any on this box/
+    );
+    await expect(reconcileBundleMirror(behind, bucketAhead, () => undefined)).rejects.toThrow(
+      /newer than any on this box/
+    );
+    expect(bucketAhead.objects.has(`sam-box/bundles/${ours.bundleId}.json`)).toBe(true);
+    expect(await behind.listIds()).toEqual([older.bundleId]);
   });
 });
 

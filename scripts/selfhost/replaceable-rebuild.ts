@@ -8,6 +8,8 @@
  * same automatic candidates `--init` uses) AND it opens under that key. A bundle written by anyone
  * else, a bundle of another installation, or a ledger that does not open stops the rebuild.
  */
+import { existsSync } from 'node:fs';
+
 import { addResource } from '../../deploy/selfhost/created-resources.mjs';
 import { openBundle, type SealedBundle } from '../../deploy/selfhost/key-agent/bundle.ts';
 import type { KeyProvider } from '../../deploy/selfhost/key-agent/provider.ts';
@@ -87,7 +89,11 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
   // part way) is completed; anything else is another install, which rebuild never touches.
   const local = bundleStoreFor(stateDir);
   const present = await local.listIds();
-  if (present.some((id) => !ids.includes(id))) {
+  // Bundles are written before the record, so a record with no bundle is another install's.
+  if (
+    present.some((id) => !ids.includes(id)) ||
+    (present.length === 0 && existsSync(recordPath(stateDir)))
+  ) {
     throw new Error(
       `${stateDir} already holds an install: rebuild only fills an empty state directory`
     );
@@ -142,8 +148,23 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
     );
   }
   ensurePrivateDir(stateDir);
-  // The record first and the bundles last, newest last: a rebuild that stops part way is
-  // completed by running it again (addResource is idempotent, present bundles are skipped).
+  // The newest bundle first, then older ones, then the record: a rebuild that stops part way
+  // leaves the newest on the box (sealing never starts from an older one) and is completed by
+  // running it again. A bundle already present must be the bucket's, byte for byte.
+  for (const bundle of accepted) {
+    if (present.includes(bundle.bundleId)) {
+      if (
+        (await local.read(bundle.bundleId)) !==
+        bucket.read(`sam-box/bundles/${bundle.bundleId}.json`)
+      ) {
+        throw new Error(
+          `${stateDir} holds a bundle ${bundle.bundleId} that differs from the bucket's`
+        );
+      }
+      continue;
+    }
+    await local.write(bundle);
+  }
   for (const entry of entries ?? []) {
     addResource(recordPath(stateDir), {
       cloud: entry.cloud,
@@ -153,9 +174,6 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
       createdBy: entry.createdBy,
       ...(entry.attributes ? { attributes: entry.attributes } : {}),
     });
-  }
-  for (const bundle of [...accepted].reverse()) {
-    if (!present.includes(bundle.bundleId)) await local.write(bundle);
   }
   log(
     `restored ${accepted.length} sealed bundle(s) of installation ${installationId}, the newest ` +

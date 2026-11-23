@@ -672,8 +672,8 @@ with them. It stays openable for as long as the key is enabled.
    `SAM_KEY_AGENT_UID` if the operator user's uid changed. With a transit or AWS key, restore its
    credential file into `.state/key-agent/credentials/` from your own copy.
 3. `pnpm selfhost:rebuild --installation-id <id>`. It copies the newest sealed bundles and the cloud
-   record back into the empty `.state`, after checking that each bundle opens under the key `.env`
-   resolves to and that all belong to one installation. It never takes the key from the bucket.
+   record back into the empty `.state`, after checking that every bundle it restores opens under the
+   key `.env` resolves to and belongs to one installation. It never takes the key from the bucket.
    The installation id is public: `pnpm selfhost:secrets status` prints it (note it when you set
    the box up), and every node VM carries it as its `installation` label. Pass it so that a bucket holding
    another installation's bundles is refused. Without it, rebuild uses the id the bundles carry.
