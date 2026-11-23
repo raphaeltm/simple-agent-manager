@@ -155,7 +155,7 @@ export function keyServiceSettings(box: Box, stateDir: string): KeyServiceSettin
     port: keyAgentPort(box),
     dir,
     bundles: replaceableBox(box)
-      ? mirroredBundleStore(bundleStoreFor(stateDir), fleetBucket(box))
+      ? mirroredBundleStore(bundleStoreFor(stateDir), fleetBucket(box), stateDir)
       : bundleStoreFor(stateDir),
     hostEnv,
     containerEnv,

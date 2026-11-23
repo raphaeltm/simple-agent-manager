@@ -16,6 +16,9 @@
  * into the bucket would make the bucket alone enough to open every secret. So `file`,
  * `legacy-plaintext` and the bundled store (the bucket lives on the box) are refused.
  */
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
 import type { CreatedResource } from '../../deploy/selfhost/created-resources.mjs';
 import {
   BUNDLE_ID,
@@ -43,6 +46,23 @@ export const LEDGER_SECRET = 'SAM_BOX_LEDGER';
  * here until someone decides where its key lives.
  */
 export const OFF_BOX_PROVIDERS: readonly string[] = ['gcp-kms', 'aws-kms', 'azure-kv', 'transit'];
+
+/**
+ * Written by rebuild before it restores anything and removed once the record is complete, so a
+ * rebuild that stopped part way is never deployed or sealed over: that would prune the bucket's
+ * older bundles and replace its ledger with a partial one.
+ */
+export const REBUILD_MARKER = join('key-agent', 'rebuild-pending');
+
+/** Refuses while a rebuild of this state directory has not finished. */
+export function assertNoPendingRebuild(stateDir: string): void {
+  if (existsSync(join(stateDir, REBUILD_MARKER))) {
+    throw new Error(
+      `a rebuild of ${stateDir} has not finished: run pnpm selfhost:rebuild again (it completes ` +
+        'it) before deploying or sealing'
+    );
+  }
+}
 
 /** `SAM_REPLACEABLE_BOX` in `.env`: off unless set to true. */
 export function replaceableBox(box: Box): boolean {
@@ -169,12 +189,17 @@ async function assertBoxNotBehindBucket(local: BundleStore, bucket: BoxBucket): 
  * replacement check runs here too, so `secrets switch` and `rotate` cannot seal on an empty
  * replacement either.
  */
-export function mirroredBundleStore(local: BundleStore, bucket: BoxBucket): BundleStore {
+export function mirroredBundleStore(
+  local: BundleStore,
+  bucket: BoxBucket,
+  stateDir?: string
+): BundleStore {
   return {
     location: `${local.location} (copied to the fleet bucket's ${BUNDLES_PREFIX})`,
     listIds: () => local.listIds(),
     read: (bundleId) => local.read(bundleId),
     async write(bundle) {
+      if (stateDir) assertNoPendingRebuild(stateDir);
       await assertBoxNotBehindBucket(local, bucket);
       await local.write(bundle);
       const text = await local.read(bundle.bundleId);

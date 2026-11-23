@@ -7,6 +7,7 @@
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
 import { bundleStoreFor, keyServiceSettings } from './key-service.js';
 import {
+  assertNoPendingRebuild,
   assertReplaceableSetup,
   type BoxBucket,
   fleetBucket,
@@ -26,6 +27,7 @@ export async function reconcileReplaceableBox(
 ): Promise<void> {
   if (!replaceableBox(box)) return;
   assertReplaceableSetup(box, box.SAM_KEY_PROVIDER?.trim() ?? '');
+  assertNoPendingRebuild(stateDir);
   await reconcileBundleMirror(bundleStoreFor(stateDir), bucket, log);
 }
 

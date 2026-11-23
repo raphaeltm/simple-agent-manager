@@ -455,6 +455,38 @@ describe('replace a dead box (real deploy --init, fake Cloud KMS and bucket)', (
     expect(logs.join('\n')).toMatch(/WARNING: the fleet bucket holds no sam-box\/ledger\.json/);
   });
 
+  it('never deploys or seals a rebuild that stopped part way; running it again completes it', async () => {
+    const stateA = join(dir, 'box-a/.state');
+    const init = await runDeploy(boxEnv(stateA), ['--init'], env);
+    expect(init.status, init.out).toBe(0);
+    const stateB = join(dir, 'box-b/.state');
+    const envB = boxEnv(stateB);
+    const boxB = boxOf(envB);
+    const input = {
+      box: boxB,
+      stateDir: stateB,
+      bucket: bucket(boxB),
+      detect: async () => ({ platform: null, candidates: [] }),
+      log: () => undefined,
+    };
+    // A rebuild killed after writing the bundles, before the record: the state it leaves.
+    await runRebuild(input);
+    writeFileSync(join(stateB, 'key-agent/rebuild-pending'), 'interrupted\n', { mode: 0o600 });
+    rmSync(join(stateB, 'created-resources.json'), { force: true });
+    expect(existsSync(join(stateB, 'key-agent/rebuild-pending'))).toBe(true);
+    // Deploying now would prune the bucket's older bundles and replace its ledger: refused.
+    const premature = await runDeploy(envB, ['--init'], existingInstallEnv(envB));
+    expect(premature.status).not.toBe(0);
+    expect(premature.out).toMatch(/a rebuild of .* has not finished/);
+    expect(bucketFiles('sam-box')).toContain('ledger.json');
+    // Running rebuild again completes it; then deploy works and keeps the installation.
+    await runRebuild(input);
+    expect(existsSync(join(stateB, 'key-agent/rebuild-pending'))).toBe(false);
+    const done = await runDeploy(envB, ['--init'], existingInstallEnv(envB));
+    expect(done.status, done.out).toBe(0);
+    expect(stateInstallationId(stateB)).toBe(stateInstallationId(stateA));
+  });
+
   it('rotates on a box whose key provider is set only in .env (never recorded)', async () => {
     const stateA = join(dir, 'box-a/.state');
     const envA = boxEnv(stateA);

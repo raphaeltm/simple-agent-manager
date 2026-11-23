@@ -8,7 +8,8 @@
  * same automatic candidates `--init` uses) AND it opens under that key. A bundle written by anyone
  * else, a bundle of another installation, or a ledger that does not open stops the rebuild.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { addResource } from '../../deploy/selfhost/created-resources.mjs';
 import { openBundle, type SealedBundle } from '../../deploy/selfhost/key-agent/bundle.ts';
@@ -20,6 +21,7 @@ import {
   assertNotRootForSealing,
   bundleStoreFor,
   DEFAULT_KEPT_BUNDLES,
+  KEY_AGENT_DIR,
   keyServiceSettings,
 } from './key-service.js';
 import {
@@ -28,9 +30,10 @@ import {
   fetchLedger,
   LEDGER_SECRET,
   readBucketBundle,
+  REBUILD_MARKER,
   replaceableBox,
 } from './replaceable-box.js';
-import { ensurePrivateDir } from './secret-files.js';
+import { ensurePrivateDir, writePrivateFile } from './secret-files.js';
 
 type Box = Readonly<Record<string, string>>;
 
@@ -92,7 +95,9 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
   // Bundles are written before the record, so a record with no bundle is another install's.
   if (
     present.some((id) => !ids.includes(id)) ||
-    (present.length === 0 && existsSync(recordPath(stateDir)))
+    (present.length === 0 &&
+      existsSync(recordPath(stateDir)) &&
+      !existsSync(join(stateDir, REBUILD_MARKER)))
   ) {
     throw new Error(
       `${stateDir} already holds an install: rebuild only fills an empty state directory`
@@ -148,6 +153,9 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
     );
   }
   ensurePrivateDir(stateDir);
+  // Until the record is complete, deploy and every seal refuse this state (assertNoPendingRebuild).
+  ensurePrivateDir(join(stateDir, KEY_AGENT_DIR));
+  writePrivateFile(join(stateDir, REBUILD_MARKER), `${installationId}\n`);
   // The newest bundle first, then older ones, then the record: a rebuild that stops part way
   // leaves the newest on the box (sealing never starts from an older one) and is completed by
   // running it again. A bundle already present must be the bucket's, byte for byte.
@@ -175,6 +183,7 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
       ...(entry.attributes ? { attributes: entry.attributes } : {}),
     });
   }
+  rmSync(join(stateDir, REBUILD_MARKER));
   log(
     `restored ${accepted.length} sealed bundle(s) of installation ${installationId}, the newest ` +
       `${newest.bundleId} sealed ${newest.createdAt} (check it is the dead box's latest seal), ` +
