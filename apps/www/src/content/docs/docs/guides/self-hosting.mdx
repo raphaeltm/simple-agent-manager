@@ -67,8 +67,8 @@ it honours the operational cron switch. Its node-transport endpoints:
   `run_id`. Every other allow is `{reject:false, unchange:true}`.
 - `GET /api/self-host/gateway/node-websocket`: Caddy `forward_auth` for node WebSockets,
   authenticated with the `X-SAM-Gateway-Secret` header. The original request runs through the
-  normal ws-* or node log-stream authentication. The answer is either that handler's refusal or
-  `X-SAM-Upstream`/`X-SAM-Upstream-*` headers naming the loopback lease port and the credentials
+  normal ws-_ or node log-stream authentication. The answer is either that handler's refusal or
+  `X-SAM-Upstream`/`X-SAM-Upstream-_` headers naming the loopback lease port and the credentials
   Caddy forwards.
 - `GET /api/self-host/gateway/app-route`: Caddy `forward_auth` for every request to a deployment
   app hostname (`*.apps.<BASE_DOMAIN>`), same header. It answers 404 (or 503 while the node's
@@ -268,6 +268,29 @@ network (/24 for IPv4, /56 for IPv6). Updates are accepted only on `127.0.0.1`, 
 key, and only for `_acme-challenge` TXT records, which live in memory. The egress fence keeps
 Worker code away from that port. Answers carry a one-hour TTL, so names resolvers recently looked
 up keep resolving through a short box outage; a second name server is planned.
+
+## Replacing a single-box build
+
+This applies only to the single-box build; a Cloudflare deployment is not affected. A box keeps its
+data (database, Durable Objects, files, SAM-hosted repositories) in its fleet bucket, but its
+sealed secrets, the platform keys that data is encrypted under, were on its own disk. With
+`SAM_REPLACEABLE_BOX=true` the box also copies them to the bucket, as ciphertext sealed by its
+cloud key (`scripts/selfhost/replaceable-box.ts`), so a dead box can be rebuilt on a new VM from the
+bucket and the key alone.
+
+- **It needs a key held off the box:** Cloud KMS, AWS KMS, Azure Key Vault or a Vault/OpenBao
+  transit key. A key file on the box, plaintext secrets and the bundled object store are refused,
+  because they would die with the box.
+- **Replacing a dead box:** create a VM with the same identity (allowed to use the key) and,
+  ideally, the same static IP address; put the old `.env` in place; run `pnpm selfhost:rebuild`,
+  then `pnpm selfhost:deploy --init`, start Docker Compose and deploy. Users, sign-in, stored
+  credentials and repositories come back as they were, and nodes reconnect by themselves.
+- **What it trusts:** your `.env` (bucket, domain, which key) and the VM's access to that key. The
+  rebuild never takes the key from the bucket, and refuses anything in the bucket that does not
+  open under that key.
+
+The full runbook, including what a rebuild loses, is in `deploy/selfhost/README.md` ("Replaceable
+box").
 
 ## Prerequisites
 
@@ -1216,7 +1239,6 @@ statement metadata; restrict access to observability data as you would for produ
 Instant sessions publish applications through a dedicated Cloudflare Container build executor. Cloudflare Containers are already part of SAM's supported setup, so this adds no separate cloud account or manual secret prerequisite. Deployment targets remain VMs. VM sessions retain the node executor by default; keep `deployments.buildExecutor=node` in **Admin → Settings** until a staging VM trial verifies a served release with unchanged source build/save counters. VM publishing through Cloudflare remains unverified. `DEPLOY_BUILDER_INSTANCE_TYPE` and `DEPLOY_BUILDER_MAX_INSTANCES` are deployment-time sizing controls; see the [configuration reference](/docs/reference/configuration/#cloudflare-application-build-executor).
 
 The builder runs one job per ephemeral container and can execute arbitrary Dockerfile steps as root inside DinD with host build networking and unrestricted internet access, just like VM workspaces. Context and image transfers use direct presigned URLs; no outbound proxy or HTTPS interception CA is installed. It receives no user or installation credentials, runtime secret values or workspace token. Its callback token stays in the Go supervisor's memory and authorizes only one job and attempt until that job's deadline or terminal state. Treat arbitrary root code as having that job's authority. The bootstrap listener closes before build steps run, and a durable alarm attempts to destroy the microVM at the hard deadline, independent of source-session liveness. If shutdown cannot be confirmed, cron force-releases the reservation after the stored deadline plus `deployments.builderReservationGraceMs` (five minutes by default), marks unfinished jobs `unknown` and records an alert. This permits deletion and new admissions without claiming physical shutdown; Cloudflare capacity can remain occupied until reclaimed. See the [build trust model](/docs/architecture/security/#application-build-executor) for the enforcing code paths.
-
 
 ### Connect a repository sign-in to an email account
 

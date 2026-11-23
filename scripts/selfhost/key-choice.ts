@@ -37,6 +37,7 @@ import {
   LEGACY_KEY_PROVIDER,
   listBundles,
 } from './key-service.js';
+import { assertReplaceableSetup, replaceableBox } from './replaceable-box.js';
 import { ensurePrivateDir, writePrivateFile } from './secret-files.js';
 
 export const KEY_CHOICE_FILE = 'choice.json';
@@ -284,6 +285,14 @@ export async function chooseKeyProvider(input: ChooseInput): Promise<KeyChoice> 
   }
   const refusal = sealingFloorRefusal('file', floors, input.rerun);
   if (refusal) throw new Error(`${found.platform ?? 'this host'}: ${refusal}`);
+  if (replaceableBox(box)) {
+    // Never the key file: it would die with the box (replaceable-box.ts).
+    throw new Error(
+      `${found.platform ?? 'this host'}: SAM_REPLACEABLE_BOX=true needs a key held off this box, ` +
+        `and none is usable${failures.length > 0 ? ` (${failures.join('; ')})` : ` (${found.note ?? 'no cloud key is configured'})`}. ` +
+        'Set one up (README "Cloud key, one-time setup") or set SAM_KEY_PROVIDER and its settings in .env'
+    );
+  }
   const why =
     failures.length > 0
       ? `on ${found.platform}, but ${failures.join('; ')}`
@@ -346,6 +355,7 @@ export async function resolveKeyProviderBox(input: {
     };
   } else if (init) {
     choice = await chooseKeyProvider({ box, stateDir, detect: input.detect });
+    assertReplaceableSetup(box, choice.provider);
     writeKeyChoice(stateDir, choice);
   } else {
     throw new Error(
@@ -354,6 +364,8 @@ export async function resolveKeyProviderBox(input: {
         'plaintext deploy vars)'
     );
   }
+  // Explicit, recorded and chosen alike; a dry run with nothing chosen yet only shows a placeholder.
+  if (explicit || recorded || !input.dryRun) assertReplaceableSetup(box, choice.provider);
   if (choice.provider === LEGACY_KEY_PROVIDER) {
     log(
       `key provider: ${LEGACY_KEY_PROVIDER} (${choice.reason}). Every Worker secret is stored in ` +

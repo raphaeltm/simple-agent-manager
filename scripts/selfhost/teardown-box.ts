@@ -341,7 +341,7 @@ export function bucketItems(ctx: TeardownContext): Item[] {
     {
       id: 'bucket:contents',
       place: 'in the object store',
-      what: `every object under ${url} (celld state, deploy versions, vm-agent releases, hosted git)`,
+      what: `every object under ${url} (celld state, deploy versions, vm-agent releases, hosted git, the replaceable box's sealed copy in sam-box/)`,
       provenance: entry ? 'recorded' : 'discovered, not recorded',
       how: 'after verifying that no other installation uses these objects, remove this installation prefix in your object store console',
       step: STEPS.bucket,
