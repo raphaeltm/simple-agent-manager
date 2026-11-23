@@ -33,9 +33,9 @@ SAM has many ways to release a deployment node: a user stops an environment, a s
 Two choices there matter:
 
 - **It looks records up by IP, not by environment.** It asks Cloudflare's DNS API for A records under `.apps.<domain>` whose content is the node's IP. An environment that was unlinked from the node before teardown still gets its records found.
-- **It fails closed.** If a record cannot be deleted, the function throws and the node stays in its retryable teardown state. SAM does not retire a node (and forget its IP) while a record still points at that IP.
+- **It fails closed.** If SAM tries to delete a record and the delete fails, the cleanup throws and the node stays in its retryable teardown state. SAM does not retire the node (and forget its IP) while a record it could not delete still points at that IP.
 
-A five-minute cron sweep backs this up. It pages through every app record in the zone and deletes the ones no live node owns, which also cleans up records left by older code. Both paths ask the same question, using one shared function:
+A five-minute cron sweep backs this up. It pages through every app record in the zone and deletes the ones whose node is gone (or repoints one whose environment now runs on a different live node), which also cleans up records left by older code. Names that do not look like SAM app routes are never touched. Both paths ask the same question, using one shared function (source comments trimmed):
 
 ```typescript title="apps/api/src/services/app-route-dns-cleanup.ts"
 export function judgeAppRouteRecord(
@@ -57,13 +57,13 @@ export function judgeAppRouteRecord(
 }
 ```
 
-A record is live only when its environment exists, is linked to a node SAM has not released, and that node's current address is exactly what the record points at. When the environment row cannot be read at all (`'unknown'`), the function returns no verdict and the record is left alone. The sweep is bounded: 20 seconds and at most 50 deletions per run, with its page cursor saved in Workers KV so the next run continues where this one stopped.
+A record is live only when its environment exists, is linked to a node SAM has not released, and that node's current address is exactly what the record points at. A node counts as released as soon as SAM has proof its VM is terminated, whatever its status says. The `wildcard_covered` branch handles setups where app names resolve through a wildcard record, so a per-app record there can only be a leftover. When an environment's row is malformed or its address cannot be resolved (`'unknown'`), the function returns no verdict and the record is left alone; the sweep logs an error for it on every run until it is fixed. The sweep is bounded: 20 seconds and at most 50 changes per run, with its page cursor saved in Workers KV so the next run continues where this one stopped.
 
-We checked it on staging against the live zone: the first sweep after deploy deleted the record that had been dangling, starting the environment again created a fresh record that served HTTPS, and stopping it removed the record within seconds.
+We checked it on staging: a sweep soon after the deploy deleted the record that had been dangling, starting the environment again created a fresh record that served HTTPS, and stopping it removed the record within seconds.
 
 ## Part two: a server deleted behind SAM's back
 
-Part one only helps when SAM releases the node. A VM can also vanish at the provider: someone deletes it in the Hetzner console, or the account is suspended. SAM's database, Cloudflare D1, still says the node is `running`, so `judgeAppRouteRecord()` still calls its records live. The same IP-recycling risk is back.
+Part one only helps when SAM releases the node. A VM can also vanish at the provider: someone deletes it in the Hetzner console, or the provider expires it. SAM's database, Cloudflare D1, still says the node is `running`, so `judgeAppRouteRecord()` still calls its records live. The same IP-recycling risk is back.
 
 The obvious fix is "ask the provider whether the VM exists, and release the node if it says no". The trouble is that **"not found" is an easy answer to get for the wrong reason**:
 
@@ -85,21 +85,21 @@ flowchart TD
     D -->|at least 10 minutes later| E{Look up again, then read<br/>the account's full VM list}
     E -->|Found anywhere| P
     E -->|List fails| I
-    E -->|Not found, list complete| R[Release through the normal teardown,<br/>which deletes the DNS records]
+    E -->|Not found, list complete| R[Claim the node, then run the normal<br/>teardown, which deletes the DNS records]
 ```
 
 In plain terms:
 
-- **Only the owning account may answer.** Every node records which exact credential created its VM. If that credential was since rotated or re-saved, a "not found" through a newer one could come from another account, so the result is inconclusive and the node is never released by this check.
+- **Only the owning account may answer.** Nodes record the exact credential that created their VM. If a node has no such record (an older node), or that credential was since rotated or re-saved, a "not found" through another one could come from a different account, so the result is inconclusive and the node is never released by this check.
 - **Only a definite "not found" counts.** A refused token, a rate limit, a timeout or a server error proves nothing about the VM.
 - **It has to happen twice.** The second "not found" must come at least ten minutes after the first and no more than three intervals later. A "present" answer in between resets the count.
-- **The second answer needs a second source.** The confirming check also reads the account's complete instance list. If a broken base URL made every lookup return 404, that list read fails too, so one bad configuration cannot release every node at once.
+- **The second answer needs a second source.** The confirming check also reads the account's complete instance list. If a broken base URL made every lookup return 404, that list read fails too, so a single bad base URL or proxy should not be able to release every node at once.
 
-Some providers cannot clear that bar yet. Scaleway's API reads a 404 from any zone as "nothing there", so a systemic 404 would look like absence in both sources. SAM never releases Scaleway nodes on this evidence, and the gaps are tracked rather than papered over.
+Some nodes cannot clear that bar yet. SAM's Scaleway lookups read a 404 from any zone as "nothing there", so a systemic 404 would look like absence in both sources, and an Infomaniak node outside the region SAM's client reads cannot be looked up at all. SAM never releases those nodes, or the unpinned ones above, on this evidence. Those gaps are tracked rather than papered over. One more honest note: the full release path is tested against provider fakes; on staging we have so far only seen the check leave a live VM alone.
 
 When a node does pass, SAM does not delete it in some new way. It claims the node and its environments in one atomic D1 batch, then hands them to the same teardown as part one, which removes the DNS records and retires the row. Verdicts, including "inconclusive, and why", are written to the node's decision log, so a stuck node shows its reason instead of failing silently.
 
-The check is bounded too: at most 50 provider lookups and 20 seconds per five-minute run, about 0.2 seconds per lookup on Hetzner. With modest node counts that keeps each node on a 15-minute check, so a VM deleted at the provider loses its records within about 30 minutes. All of these numbers are admin settings, not code changes.
+The check is bounded too: at most 50 provider lookups and 20 seconds per five-minute run. I estimate a Hetzner lookup at about 0.2 seconds, so with default settings and up to a hundred or so deployment nodes, each node keeps its 15-minute check. The worst case for a node the check can prove gone is then roughly 30 minutes: up to 15 until the first lookup, 10 until the confirming one, and 5 for the next run. The budgets and intervals are admin settings; the three-interval window is fixed in code.
 
 ## What this taught us
 
