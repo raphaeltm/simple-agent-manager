@@ -1,5 +1,11 @@
 import { checkedOutCommit } from './git-head.mjs';
-import { createApi, delayFromEnv, intFromEnv, readTarget } from './installer-target.mjs';
+import {
+  createApi,
+  delayFromEnv,
+  intFromEnv,
+  readTarget,
+  sleepWithin,
+} from './installer-target.mjs';
 
 // Checks a deployed installer the way a visitor reaches it: it answers on its own
 // address, runs the expected commit in full mode, and "Sign in with Cloudflare"
@@ -14,7 +20,6 @@ const origin = (Array.isArray(settings?.bindings) ? settings.bindings : []).find
 )?.text;
 if (typeof origin !== 'string' || !/^https:\/\/[a-z0-9.-]+$/.test(origin))
   throw new Error(`Installer ${name} has no deployed address.`);
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function read(path, init = {}) {
   return fetch(`${origin}${path}`, {
     cache: 'no-store',
@@ -39,7 +44,7 @@ for (;;) {
     last = `request failed: ${error instanceof Error ? error.name : 'unknown'}`;
   }
   if (Date.now() >= deadline) throw new Error(`Installer at ${origin} is not ready; ${last}`);
-  await sleep(pollMs);
+  await sleepWithin(deadline, pollMs);
 }
 const start = await read('/oauth/start', { method: 'POST', headers: { Origin: origin } });
 const location = start.headers.get('Location') || '';

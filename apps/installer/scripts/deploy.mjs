@@ -9,6 +9,7 @@ import {
   intFromEnv,
   readTarget,
   SECRET_NAMES,
+  sleepWithin,
   wrangler,
 } from './installer-target.mjs';
 
@@ -58,7 +59,6 @@ if (domain && !/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(domain))
   throw new Error('BASE_DOMAIN is not a valid domain.');
 if (!['preserve', 'bootstrap', 'full'].includes(mode)) throw new Error('Invalid installer mode');
 const api = createApi({ token, base, registrationToken: process.env.OAUTH_REGISTRATION_TOKEN });
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // Read every timing setting first, so a mistyped one stops the command before it changes
 // anything in the account.
 const timing = {
@@ -281,8 +281,7 @@ async function createOAuthClient(desired) {
       failure = error;
     }
     // Never wait past the deadline, and decide on it again after the wait and the lookup.
-    const remaining = deadline - Date.now();
-    if (remaining > 0) await sleep(Math.min(timing.clientCreateRetryMs, remaining));
+    await sleepWithin(deadline, timing.clientCreateRetryMs);
     if (await findOAuthClient()) throw new Error(OAUTH_SECRET_MISSING);
     if (Date.now() >= deadline) throw failure;
   }
@@ -364,7 +363,7 @@ async function waitUntilServed() {
       // Not answering yet.
     }
     if (Date.now() >= deadline) return;
-    await sleep(timing.livePollMs);
+    await sleepWithin(deadline, timing.livePollMs);
   }
 }
 const generated = '.wrangler-deploy.json';
@@ -386,7 +385,7 @@ try {
     if (SECRET_NAMES.every((key) => secrets.some((entry) => entry.name === key))) break;
     if (Date.now() >= visibleBy)
       throw new Error('OAuth secret missing after deployment; readiness was not established');
-    await sleep(timing.secretsPollMs);
+    await sleepWithin(visibleBy, timing.secretsPollMs);
   }
   console.log(`Installer ready: ${origin}`);
   console.log(

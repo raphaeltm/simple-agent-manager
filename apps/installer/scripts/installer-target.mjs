@@ -62,6 +62,13 @@ export function intFromEnv(name, fallback, minimum = 0, maximum = Number.MAX_SAF
   return value;
 }
 
+/** Waits `ms`, but never past `deadline` (epoch ms): an interval cannot outlast its budget. */
+export function sleepWithin(deadline, ms) {
+  return new Promise((resolve) =>
+    setTimeout(resolve, Math.max(0, Math.min(ms, deadline - Date.now())))
+  );
+}
+
 /** A poll or retry interval: at least 1 ms and within what a timer can wait. */
 export const delayFromEnv = (name, fallback) => intFromEnv(name, fallback, 1, MAX_TIMER_DELAY_MS);
 

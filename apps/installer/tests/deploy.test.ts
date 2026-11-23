@@ -943,6 +943,26 @@ describe('waiting for a freshly published installer', () => {
     await deploy({ ...selfHosted, unservedHealthChecks: 1e6, liveTimeoutMs: '20' });
     expect(logged()).toContain(`Installer ready: ${SELF_ORIGIN}`);
   });
+  it('a poll interval longer than the timeout cannot outlast it', async () => {
+    await deploy({
+      ...selfHosted,
+      unservedHealthChecks: 1e6,
+      liveTimeoutMs: '30',
+      env: { INSTALLER_LIVE_POLL_MS: '2147483647' },
+    });
+    expect(logged()).toContain(`Installer ready: ${SELF_ORIGIN}`);
+  });
+  it('the secrets check gives up at its timeout whatever the poll interval', async () => {
+    await expect(
+      deploy({
+        existing: 'bootstrap',
+        mode: 'full',
+        secretsNeverVisible: true,
+        env: { OAUTH_SECRETS_VISIBLE_TIMEOUT_MS: '30', OAUTH_SECRETS_POLL_MS: '2147483647' },
+      })
+    ).rejects.toThrow('readiness was not established');
+    expect(published()).toBe(true);
+  });
   it('does not wait when the client was settled before publishing', async () => {
     await deploy({ existing: 'bootstrap', mode: 'full' });
     expect(capture.events.some((entry) => entry.startsWith('served '))).toBe(false);

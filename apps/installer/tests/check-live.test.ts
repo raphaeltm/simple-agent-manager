@@ -20,6 +20,7 @@ interface Options {
   /** Health responses that still report the previous commit. */
   staleHealthChecks?: number;
   timeoutMs?: string;
+  pollMs?: string;
   origin?: string;
   /** Where the installer sends the sign-in; null sends no Location. */
   startLocation?: string | null;
@@ -34,7 +35,7 @@ async function check(options: Options = {}) {
   vi.stubEnv('INSTALLER_ENVIRONMENT', '');
   vi.stubEnv('GITHUB_SHA', '');
   vi.stubEnv('INSTALLER_READY_TIMEOUT_MS', options.timeoutMs ?? '0');
-  vi.stubEnv('INSTALLER_READY_POLL_MS', '1');
+  vi.stubEnv('INSTALLER_READY_POLL_MS', options.pollMs ?? '1');
   let staleHealthChecks = options.staleHealthChecks ?? 0;
   const deployedOrigin = options.origin ?? ORIGIN;
   const authorize = new URL('https://dash.cloudflare.com/oauth2/auth');
@@ -117,6 +118,11 @@ describe('live check of a deployed installer', () => {
   });
   it('keeps polling until the new version is being served', async () => {
     expect(await check({ staleHealthChecks: 2, timeoutMs: '5000' })).toContain('Installer live');
+  });
+  it('gives up at its timeout even when the poll interval is far longer', async () => {
+    await expect(
+      check({ sha: 'c'.repeat(40), timeoutMs: '30', pollMs: '2147483647' })
+    ).rejects.toThrow('is not ready');
   });
   it('reports what it last saw when the installer never converges', async () => {
     await expect(check({ sha: 'c'.repeat(40) })).rejects.toThrow(
