@@ -199,6 +199,27 @@ describe('the bucket copy of the bundles', () => {
     expect(await local.read(bundle.bundleId)).toBeNull();
   });
 
+  it('fails the seal when the bucket write fails, and the next reconcile uploads it', async () => {
+    const remote = memoryBucket();
+    const failing: BoxBucket = {
+      ...remote,
+      write: () => {
+        throw new Error('gcloud storage cp failed');
+      },
+    };
+    const local = openBundleStore({ dir: join(dir, 'bundles') });
+    const bundle = await sealed(fileProvider(), '2026-11-01T00:00:00Z');
+    // The caller (key-seal) sees the failure before it deploys the bundle.
+    await expect(mirroredBundleStore(local, failing).write(bundle)).rejects.toThrow(/cp failed/);
+    expect(remote.list('sam-box/bundles/')).toEqual([]);
+    const logs: string[] = [];
+    await reconcileBundleMirror(local, remote, (m) => logs.push(m));
+    expect(remote.objects.get(`sam-box/bundles/${bundle.bundleId}.json`)).toBe(
+      await local.read(bundle.bundleId)
+    );
+    expect(logs.join('\n')).toMatch(/copied bundle/);
+  });
+
   it('uploads what is missing, drops what the box pruned, and stops on what it never had', async () => {
     const provider = fileProvider();
     const remote = memoryBucket();

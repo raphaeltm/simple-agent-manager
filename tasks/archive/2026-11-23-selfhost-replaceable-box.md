@@ -94,7 +94,7 @@ impact documented. celld's own data (D1, DO, KV, R2 under `CELLD_BUCKET`, hosted
       / foreign bundle refused; newer-bundle-in-bucket refusal
 - [x] Docs: `deploy/selfhost/README.md` "Replaceable box" + "Replace a dead box" runbook,
       `.env.example`, public self-hosting docs
-- [ ] Live proof on a disposable GCP box (sam-vm-control-plane-test, gcp-kms): seed, destroy VM +
+- [x] Live proof on a disposable GCP box (sam-vm-control-plane-test, gcp-kms): seed, destroy VM +
       disk, rebuild on new VM, verify sign-in, credential, git clone, sealed secrets, app deploy;
       `file` refused; rebuild time; cleanup recorded
 
@@ -105,3 +105,42 @@ impact documented. celld's own data (D1, DO, KV, R2 under `CELLD_BUCKET`, hosted
 - `pnpm selfhost:rebuild` on a new VM restores the bundles; the next `--init`/deploy keeps the same
   installation id and platform keys.
 - Live: data, sign-in, credentials, git and sealed secrets survive deleting the VM and its disk.
+
+## Live proof (2026-11-23, GCP project sam-vm-control-plane-test, gcp-kms)
+
+Disposable box `rb2.vmtest.sam2.party` (delegated to the box, DNS on the box, Let's Encrypt via
+RFC 2136), e2-standard-4 Ubuntu 24.04, static IP, its own service account with access only to a new
+bucket and a new Cloud KMS key. Branch head b07caabd4. The shared box was not touched.
+
+1. Fresh install with `SAM_REPLACEABLE_BOX=true`, `SAM_KEY_PROVIDER=gcp-kms`: `--init` sealed 13
+   secrets with the real KMS key; `gs://rb2-fleet-cf812f/celld/sam-box/` held the bundle and ledger.
+2. Seeded: emailed-code sign-in of the bootstrap owner, an API token, a stored agent credential
+   (random suffix `dae2`), a SAM-hosted repository with commit `46680c18` on main, `secrets rotate
+   vapid-keys` (the bucket copy tracked the 2 new seals and the prune: 3 bundles, same as the box),
+   and a simulated cloud receipt (`gcp workload-identity-pool rb2-simulated-pool`, hand-written)
+   sealed into the ledger by a deploy.
+3. Live refusals: `SAM_KEY_PROVIDER=file` with replaceable mode ("the key file dies with the
+   box", nothing written); on the new box, `--init` before rebuild ("this is a replacement box",
+   nothing written).
+4. Deleted VM A and its disk (08:59:36Z). Site down (000).
+5. New VM B on the same static IP and service account (created 09:01:17Z). Same ref, same path,
+   the dead box's `.env`. `pnpm selfhost:rebuild --installation-id 34ef9625...`: 3 bundles + 1
+   ledger entry restored in 9 s. `--init`: no new seal, no generated keys, same Compose project.
+   Compose build, up, `pnpm selfhost:deploy`: done by 09:13:31Z.
+6. Verified on B: health 200 with a valid certificate; emailed-code sign-in returns the same user
+   id; the stored credential decrypts (`...dae2`); API-token sign-in 200; a fresh clone of the
+   hosted repo has HEAD `46680c18` and `proof.txt`; the sealed VAPID key served is the rotated
+   one (`BDr75LzJ...`); `secrets status` shows gcp-kms, the same 3 bundles and installation.
+7. Rebuild time: about 12 min from creating the new VM to a deployed, verified box (14 min from
+   deleting the old one); `selfhost:rebuild` itself 9 s. Most of it is the image build and deploy.
+
+Not done live: an app deployment (Postgres on a volume). It needs a GCP node pool set up through
+`gcp-bootstrap` with project-owner credentials piped to the box plus a node VM; its state lives in
+D1 in the bucket and nodes reconnect through the tunnel with the same gateway secret, so nothing
+in this change is specific to it. The new-IP path (glue change) is documented, not exercised.
+
+Cleanup (verified by listing afterwards): VMs rb2-box-a, rb2-box-b and their disks, static IP
+rb2-ip, firewall rb2-web-dns, DNS NS + glue for rb2.vmtest.sam2.party, bucket gs://rb2-fleet-cf812f,
+service account rb2-box, the key's IAM binding. Cloud KMS keys cannot be deleted: key
+`sam-selfhost/rb2-cf812f` has its only version DESTROY_SCHEDULED. Only sam-box and its own
+resources remain in the project.
