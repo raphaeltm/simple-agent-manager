@@ -193,6 +193,41 @@ export async function assertNotBehindBucket(
   );
 }
 
+/** The heads' half of assertBoxNotBehindBucket: the bucket's head is no later than the box's. */
+async function assertHeadNotBehind(
+  local: BundleStore,
+  localText: string | null,
+  remoteText: string | null,
+  provider: KeyProvider | undefined
+): Promise<void> {
+  const read = async (text: string, where: string) =>
+    provider ? await openHead(text, provider, where) : (headHint(text, where) as BundleHead);
+  if (localText === null) {
+    throw new Error(
+      `the fleet bucket has a bundle head (${HEAD_KEY}) but ${local.location} has none: this ` +
+        'box runs from an older copy of its state. Refusing to seal over it; finish the ' +
+        'rebuild (pnpm selfhost:rebuild) or remove the other box'
+    );
+  }
+  const mine = await read(localText, 'the bundle head on this box');
+  if (remoteText === null) return;
+  const theirs = await read(remoteText, `${HEAD_KEY} in the fleet bucket`);
+  if (theirs.installationId !== mine.installationId) {
+    throw new Error(
+      `${HEAD_KEY} in the fleet bucket belongs to installation ${theirs.installationId}, not ` +
+        `this box's ${mine.installationId}: one bucket (or CELLD_BUCKET prefix) per installation`
+    );
+  }
+  if (theirs.seq > mine.seq || (theirs.seq === mine.seq && theirs.bundleId !== mine.bundleId)) {
+    throw new Error(
+      `the fleet bucket's head names bundle ${theirs.bundleId} (write ${theirs.seq}), a later ` +
+        `seal than this box's ${mine.bundleId} (write ${mine.seq}): another box sealed it, or ` +
+        'this box runs from an older copy of its state. Refusing to seal over it; finish the ' +
+        'rebuild (pnpm selfhost:rebuild) or remove the other box'
+    );
+  }
+}
+
 async function assertBoxNotBehindBucket(
   local: BundleStore,
   bucket: BoxBucket,
@@ -210,32 +245,7 @@ async function assertBoxNotBehindBucket(
   const localText = await local.readHead();
   const remoteText = bucketHead(bucket);
   if (localText !== null || remoteText !== null) {
-    const read = async (text: string, where: string) =>
-      provider ? await openHead(text, provider, where) : (headHint(text, where) as BundleHead);
-    if (localText === null) {
-      throw new Error(
-        `the fleet bucket has a bundle head (${HEAD_KEY}) but ${local.location} has none: this ` +
-          'box runs from an older copy of its state. Refusing to seal over it; finish the ' +
-          'rebuild (pnpm selfhost:rebuild) or remove the other box'
-      );
-    }
-    const mine = await read(localText, 'the bundle head on this box');
-    if (remoteText === null) return;
-    const theirs = await read(remoteText, `${HEAD_KEY} in the fleet bucket`);
-    if (theirs.installationId !== mine.installationId) {
-      throw new Error(
-        `${HEAD_KEY} in the fleet bucket belongs to installation ${theirs.installationId}, not ` +
-          `this box's ${mine.installationId}: one bucket (or CELLD_BUCKET prefix) per installation`
-      );
-    }
-    if (theirs.seq > mine.seq || (theirs.seq === mine.seq && theirs.bundleId !== mine.bundleId)) {
-      throw new Error(
-        `the fleet bucket's head names bundle ${theirs.bundleId} (write ${theirs.seq}), a later ` +
-          `seal than this box's ${mine.bundleId} (write ${mine.seq}): another box sealed it, or ` +
-          'this box runs from an older copy of its state. Refusing to seal over it; finish the ' +
-          'rebuild (pnpm selfhost:rebuild) or remove the other box'
-      );
-    }
+    await assertHeadNotBehind(local, localText, remoteText, provider);
     // Not behind: a bundle only the bucket has is one this box superseded and pruned.
     return;
   }

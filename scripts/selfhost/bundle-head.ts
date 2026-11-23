@@ -187,8 +187,8 @@ export async function sealHead(head: BundleHead, provider: KeyProvider): Promise
 
 /** Bundles newest `createdAt` first: the order of the fallback and of the older bundles kept. */
 export function byCreatedAt<T extends Pick<SealedBundle, 'createdAt'>>(bundles: readonly T[]): T[] {
-  return [...bundles].sort((a, b) =>
-    a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0
+  return [...bundles].sort(
+    (a, b) => Number(a.createdAt < b.createdAt) - Number(a.createdAt > b.createdAt)
   );
 }
 
@@ -272,10 +272,10 @@ export async function commitHead(
     (previous === null) !== (now === null) ||
     (previous && now && (now.seq !== previous.seq || now.bundleId !== previous.bundleId))
   ) {
+    const moved = now ? `${now.bundleId}, write ${now.seq}` : 'none';
     throw new Error(
       `the current sealed bundle changed while bundle ${bundle.bundleId} was being sealed ` +
-        `(now ${now ? `${now.bundleId}, write ${now.seq}` : 'none'}); another deploy, rotation ` +
-        'or switch ran at the same time. Run again.'
+        `(now ${moved}); another deploy, rotation or switch ran at the same time. Run again.`
     );
   }
   await store.writeHead(text);

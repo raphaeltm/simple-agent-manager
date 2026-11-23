@@ -44,7 +44,23 @@ export interface KnownSecrets {
   values: string[];
 }
 
-/** The Worker's secrets as this box knows them: the newest bundle and any plaintext files left. */
+/** The current sealed bundle's secrets (bundle-head.ts), or none on a box that seals nothing. */
+async function currentSealedSecrets(
+  box: Readonly<Record<string, string>>,
+  stateDir: string
+): Promise<Record<string, string>> {
+  const store = bundleStoreFor(stateDir);
+  if ((await store.listIds()).length === 0) return {};
+  const choice = readKeyChoice(stateDir);
+  const effective = !explicitKeyProvider(box) && choice ? applyKeyChoice(box, choice) : box;
+  const settings = keyServiceSettings(effective, stateDir);
+  if (!settings) return {};
+  const provider = createKeyProvider(settings.hostEnv);
+  const { bundle } = await currentBundle(store, provider, () => undefined);
+  return bundle ? await openBundle(bundle, provider) : {};
+}
+
+/** The Worker's secrets as this box knows them: the current bundle and any plaintext files left. */
 export async function knownSecrets(
   box: Readonly<Record<string, string>>,
   stateDir: string
@@ -57,17 +73,7 @@ export async function knownSecrets(
   const secretsFile = join(stateDir, 'secrets.env');
   if (existsSync(secretsFile))
     Object.assign(all, parseDotenv(readFileSync(secretsFile, 'utf8'), secretsFile));
-  const store = bundleStoreFor(stateDir);
-  if ((await store.listIds()).length > 0) {
-    const choice = readKeyChoice(stateDir);
-    const effective = !explicitKeyProvider(box) && choice ? applyKeyChoice(box, choice) : box;
-    const settings = keyServiceSettings(effective, stateDir);
-    if (settings) {
-      const provider = createKeyProvider(settings.hostEnv);
-      const { bundle } = await currentBundle(store, provider, () => undefined);
-      if (bundle) Object.assign(all, await openBundle(bundle, provider));
-    }
-  }
+  Object.assign(all, await currentSealedSecrets(box, stateDir));
   const names = new Set<string>(PLATFORM_KEY_NAMES.filter((n) => !NOT_SECRET.has(n)));
   const values: string[] = [];
   for (const [name, value] of Object.entries(all)) {

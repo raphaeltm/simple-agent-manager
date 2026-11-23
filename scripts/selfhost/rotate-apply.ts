@@ -71,6 +71,46 @@ export function patched(base: Secrets, patch: Patch): Secrets {
   return next;
 }
 
+/** A recorded staged bundle is current again (or made current), or the step stops. */
+async function resumeStaged(ctx: StepContext, bundleId: string): Promise<void> {
+  const { step, store, deps } = ctx;
+  let head = await store.head();
+  // Stopped after writing the staged bundle but before making it current: the bundle it was
+  // sealed over is still current, so finish that step.
+  if (head.bundle.bundleId !== bundleId && step.stagedOver === head.bundle.bundleId) {
+    await store.makeCurrent(bundleId);
+    head = await store.head();
+  }
+  if (head.bundle.bundleId !== bundleId) {
+    throw new ApplyFailedError(
+      `the bundle this step recorded (${bundleId}) is no longer the current one (${head.bundle.bundleId}); something else sealed a bundle meanwhile`
+    );
+  }
+  deps.log(`  resuming: deploying the recorded bundle ${bundleId} again`);
+}
+
+/** Seals the patch, records it in the journal, then writes it and makes it current. */
+async function stageAndMakeCurrent(ctx: StepContext, patch: Patch, then: Phase): Promise<string> {
+  const { step, store } = ctx;
+  const current = await store.head();
+  const bundle = await store.seal(patched(current.secrets, patch));
+  step.stagedFrom = step.phase === 'staging' ? step.stagedFrom : step.phase;
+  step.stagedBundleId = bundle.bundleId;
+  step.stagedFor = then;
+  step.stagedOver = current.bundle.bundleId;
+  step.phase = 'staging';
+  ctx.save();
+  // Writes it and makes it current (bundle-head.ts): the deploy runs with it whatever the clock.
+  await store.write(bundle);
+  const nowCurrent = (await store.head()).bundle.bundleId;
+  if (nowCurrent !== bundle.bundleId) {
+    throw new ApplyFailedError(
+      `the bundle just sealed (${bundle.bundleId}) is not the current one (${nowCurrent}); something else sealed a bundle meanwhile`
+    );
+  }
+  return bundle.bundleId;
+}
+
 /** Applies `patch`, or resumes the one already recorded; on success the step is in `then`. */
 export async function applyPatch(ctx: StepContext, patch: Patch, then: Phase): Promise<void> {
   const { step, store, deps } = ctx;
@@ -78,37 +118,9 @@ export async function applyPatch(ctx: StepContext, patch: Patch, then: Phase): P
     step.phase === 'staging' && step.stagedFor === then ? step.stagedBundleId : undefined;
   if (bundleId && !(await store.hasBundle(bundleId))) bundleId = undefined;
   if (bundleId) {
-    let head = await store.head();
-    // Stopped after writing the staged bundle but before making it current: the bundle it was
-    // sealed over is still current, so finish that step.
-    if (head.bundle.bundleId !== bundleId && step.stagedOver === head.bundle.bundleId) {
-      await store.makeCurrent(bundleId);
-      head = await store.head();
-    }
-    if (head.bundle.bundleId !== bundleId) {
-      throw new ApplyFailedError(
-        `the bundle this step recorded (${bundleId}) is no longer the current one (${head.bundle.bundleId}); something else sealed a bundle meanwhile`
-      );
-    }
-    deps.log(`  resuming: deploying the recorded bundle ${bundleId} again`);
+    await resumeStaged(ctx, bundleId);
   } else {
-    const current = await store.head();
-    const bundle = await store.seal(patched(current.secrets, patch));
-    step.stagedFrom = step.phase === 'staging' ? step.stagedFrom : step.phase;
-    step.stagedBundleId = bundle.bundleId;
-    step.stagedFor = then;
-    step.stagedOver = current.bundle.bundleId;
-    step.phase = 'staging';
-    ctx.save();
-    // Writes it and makes it current (bundle-head.ts): the deploy runs with it whatever the clock.
-    await store.write(bundle);
-    bundleId = bundle.bundleId;
-    const nowCurrent = (await store.head()).bundle.bundleId;
-    if (nowCurrent !== bundleId) {
-      throw new ApplyFailedError(
-        `the bundle just sealed (${bundleId}) is not the current one (${nowCurrent}); something else sealed a bundle meanwhile`
-      );
-    }
+    bundleId = await stageAndMakeCurrent(ctx, patch, then);
   }
   await deps.deploy();
   const check = await deps.adoptAndCheck();
