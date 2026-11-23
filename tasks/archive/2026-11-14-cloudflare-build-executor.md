@@ -20,11 +20,11 @@ Spike: standard-4 only demonstrated, overlayfs, root dockerd/cgroupfs, /tmp moun
 - [x] Runtime admin executor selection, Instant cloudflare, VM node default, old-agent compatibility.
 - [x] Guide/config/self-host docs and contract updates.
 - [x] Local meaningful regression/contract/admission tests, lint/type/build gates (new fix exact-head CI pending).
-- [ ] Independent security/domain/completion reviews resolved.
-- [ ] Explicit staging slot;100% rollout plus node AND builder version proof.
+- [x] Independent security/domain/completion reviews resolved.
+- [x] Explicit staging slot;100% rollout plus node AND builder version proof.
 - [ ] Real Instant publish then source sleep/app serving; VM cloudflare source no build/save; >100MiB presigned GET and PUT.
 - [ ] Clean tasks/chats/nodes; immediate and >5min D1 audits.
-- [ ] Draft PR needs-human-review, CI, CodeRabbit request/wait; send URL/full SHA/gates to coordinator then STOP.
+- [x] Draft PR needs-human-review, CI, CodeRabbit request/wait; send URL/full SHA/gates to coordinator then STOP.
 
 Never commit to main. Preserve .codex/config.toml environment change. Staging Claude VMs0.2CPU/0.5GB. Known archive flake retry at most once. No merge absent coordinator exact-SHA approval.
 
@@ -152,3 +152,9 @@ Deletion audit: owner node DELETE preflights reservations before provider destru
 Independent security/correctness review and config/docs/constitution review PASS. Existing staging proof/cleanup stands; new correction requires full new-head CI and exactSHA coordinator handoff, then STOP. Coordinator will approve and merge; PR remains DRAFT with needs-human-review.
 
 Local correction validation: real-FK deletion suite23/23; queue suite11/11; node-cleanup14/14 (48 total, last extra isolation case run in deletion suite). API typecheck passes after rebuilding stale dependency dist from main. App-deployment build/lint, changed API lint, docs build291pages, source-contract tests, runtime-tunable ratchet, migration ordering and DO migration safety all PASS. No Go executable changes in this unit.
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2721](https://github.com/raphaeltm/simple-agent-manager/pull/2721) (merged 2026-11-16); phases 0-2 in #2605. The review PASS, the 100% builder/source rollout and the draft-PR handoff are recorded in the notes above (lines 23, 24 and 27 ticked on that evidence). The source sleep 500 seen during staging is tracked in idea 01M7H8B03VCYXQ9DGYC4BPY1QX.
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
+- 2 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.

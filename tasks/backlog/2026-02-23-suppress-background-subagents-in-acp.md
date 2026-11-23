@@ -148,3 +148,7 @@ This is a low-priority enhancement since the system prompt instruction should be
 - This task was identified through direct user testing of the ACP client
 - Related to the broader ACP protocol gap around sub-agent awareness
 - If the ACP protocol adds sub-agent support in the future, this workaround can be revisited
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+Still open, partly superseded. [#1845](https://github.com/raphaeltm/simple-agent-manager/pull/1845) tracks and leases background harness work (`packages/vm-agent/internal/acp/session_host_harness_work.go`), so the planned `run_in_background` ban will not happen. Nothing shows the original symptom is fixed: interleaved, garbled output when the user prompts while background sub-agents are still emitting after `session_prompt_done`. Close this only with a test or PR that covers that symptom.

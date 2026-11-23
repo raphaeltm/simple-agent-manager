@@ -30,3 +30,9 @@ The existing queued threshold resolves through production parseMs(legacy Worker 
 Sleeping investigation: idea note01M7JQB48DDNJM3MVRY2CHA7EE. No provider-limit continuation schedule was present; VM classifier omits observed5-hour wording and only classifies terminal errors. Typed ACP outcome remains unverified. Separate follow-up, no VM change. UNIQUE workspace-chat wake conflict remains separately tracked.
 
 Final local validation: root lint22 tasks, typecheck36 tasks, test39 tasks and build18 tasks all exit0. API1054 files passed/3 skipped,15940 tests passed/4 skipped; web420 files/5302 tests passed. Final new worker10/10 and existing watchdog21 cases passed. All five local reviewers PASS implementation gate. Release lifecycle remains pending below and in PR2815/.do-state.md.
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2815](https://github.com/raphaeltm/simple-agent-manager/pull/2815).
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
+- 2 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.

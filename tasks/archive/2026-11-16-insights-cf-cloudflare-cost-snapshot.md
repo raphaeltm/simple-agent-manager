@@ -103,3 +103,9 @@ a daily, stored, usage-derived estimate with a month projection, on the page the
 - doc-sync-validator: installer change reverted (OAuth scope), doc wording fixed, api-reference skill
   and quality README updated.
 - task-completion-validator: writer→reader chain test, 30-day full-window bind test.
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2823](https://github.com/raphaeltm/simple-agent-manager/pull/2823).
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
+- 1 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.

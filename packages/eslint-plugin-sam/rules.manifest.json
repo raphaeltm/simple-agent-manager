@@ -58,7 +58,7 @@
       "advisoryStage": "ratchet",
       "gateOwner": "quality-program",
       "evidenceIncident": "Landing-plan finding F6: the integration branch inventoried outbound fetch sites with a regex/AST test that (0,fetch), Reflect.apply and SDK baseURLs evaded, and that did not cover cloudflare:sockets or packages/*.",
-      "baselineBacklogLink": "tasks/active/2026-11-15-l5-outbound-fetch-guard.md",
+      "baselineBacklogLink": "tasks/archive/2026-11-15-l5-outbound-fetch-guard.md",
       "baselineFile": "packages/eslint-plugin-sam/outbound-fetch-baseline.json",
       "addedDate": "2026-11-15",
       "reviewDate": "2026-12-15",

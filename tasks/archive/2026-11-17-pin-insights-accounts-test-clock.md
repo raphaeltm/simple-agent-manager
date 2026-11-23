@@ -11,7 +11,7 @@ On 2026-11-17 after noon UTC, main and PR #2836 API shard2 failed `projectAccoun
 - [x] Add a control advancing only wall-clock beyond reset and assert utilization becomes0.
 - [x] Run focused suite, lint and formatting.22/22PASS; targeted eslint and Prettier PASS; API dependency build12/12PASS.
 - [x] Independent test/completion review. PASS/no findings; A-C covered, D-F not applicable to test-only scope.
-- [ ] Green exact-head CI and CodeRabbit request/wait, then merge.
+- [x] Green exact-head CI and CodeRabbit request/wait, then merge.
 
 ## Acceptance
 
@@ -20,3 +20,8 @@ All22 Insights Accounts tests pass on later calendar dates; the account meter ex
 ## Process fix
 
 The fixture's shared setup now pins every real Date.now consumer to its fixed dates. The reset control deliberately advances the clock to ensure expiry remains covered. This prevents the test from becoming calendar-dependent without changing the application's meter behavior.
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2861](https://github.com/raphaeltm/simple-agent-manager/pull/2861).
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).

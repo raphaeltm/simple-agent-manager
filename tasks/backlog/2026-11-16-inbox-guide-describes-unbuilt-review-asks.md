@@ -26,3 +26,7 @@ Found on 2026-11-16 during content-accuracy review of the journal post
 - [ ] The Inbox guide describes only kinds of ask that can reach a user, or marks review/task asks as upcoming
 - [ ] Docs screenshots show only reachable kinds, or are labelled as such
 - [ ] Client/server stacking across tiers is confirmed as intended or fixed
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+Still open, partly shipped. Review/task asks now reachable; remainder: confirm or fix cross-tier stacking (inbox-model.ts buildRows vs server PARTITION BY tier). Evidence: #2792 (agent review/result asks, packages/operations/src/inbox-agent-core.ts AgentFiledKind) and #2818 (tasks).

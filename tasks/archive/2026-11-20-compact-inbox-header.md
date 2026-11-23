@@ -43,3 +43,9 @@ do here taking too much space?"
 - Desktop inbox header is one row: title, `?`, chips, ⋯ (Playwright coordinate assertions)
 - "What your agents need from you…" is not shown until `?` is pressed (unit + Playwright)
 - Mobile header is unchanged (mobile audit screenshots)
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2942](https://github.com/raphaeltm/simple-agent-manager/pull/2942).
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
+- 1 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.

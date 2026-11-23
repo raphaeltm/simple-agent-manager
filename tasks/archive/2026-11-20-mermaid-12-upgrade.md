@@ -61,3 +61,9 @@ roughly 500 kB gzipped because Mermaid 12 bundles ELK.
 - https://github.com/mermaid-js/mermaid/releases/tag/mermaid%4012.0.0
 - https://github.com/mermaid-js/mermaid/releases/tag/mermaid%4012.2.0
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md`
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2946](https://github.com/raphaeltm/simple-agent-manager/pull/2946) (merged 2026-11-20, deployed as `35fd2e05a`).
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
+- 1 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.

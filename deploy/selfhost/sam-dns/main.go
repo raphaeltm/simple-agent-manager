@@ -8,7 +8,7 @@
 //   - ACME DNS-01 TXT records, written by Caddy over RFC 2136 with TSIG on a loopback listener.
 //
 // Authoritative only: no recursion, no zone transfers, minimal ANY answers, response rate limiting
-// on the public listener. Threat model: tasks/active/2026-11-21-selfhost-box-dns.md.
+// on the public listener. Threat model: tasks/archive/2026-11-21-selfhost-box-dns.md.
 package main
 
 import (

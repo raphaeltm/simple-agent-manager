@@ -4,7 +4,7 @@
  * (apps/api/src/durable-objects/credential-setup-session/index.ts).
  *
  * Incident (found on the self-host branch, applies on Cloudflare too; task
- * tasks/active/2026-11-17-l19-credential-setup-teardown-robustness.md): teardown
+ * tasks/archive/2026-11-17-l19-credential-setup-teardown-robustness.md): teardown
  * claimed the terminal status in DO SQLite, then awaited the sandbox scrub and destroy,
  * and only then wrote D1. A process death in between left D1 active, so
  * `POST /api/agent-credential-setup-sessions` kept returning the dead session for ~19

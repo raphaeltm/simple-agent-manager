@@ -72,3 +72,9 @@ All remaining legacy draft ideas were adopted, including the 86 window-rule rows
 pre-run snapshot of those 86 (Library /engineering/incident-idea-adoption-snapshot-2026-11-21.json)
 found no evidence of a user edit: every body, normalized (ids, timestamps, numbers, evidence lines), matches the generated template and embeds its own signature ref, with no user status
 events. Edits that change only those normalized values are not ruled out. 100 ended incidents' ideas were closed in that run.
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2957](https://github.com/raphaeltm/simple-agent-manager/pull/2957) and [#2958](https://github.com/raphaeltm/simple-agent-manager/pull/2958) (merged 2026-11-21). Private incident triage has been running since then: triage tasks completed on 2026-11-22.
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
+- 1 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.
