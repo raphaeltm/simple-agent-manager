@@ -253,10 +253,6 @@ export async function commitHead(
   provider: KeyProvider,
   previous: BundleHead | null
 ): Promise<BundleHead> {
-  // A head never names a bundle the store does not hold: every later deploy would refuse it.
-  if ((await store.read(bundle.bundleId)) === null) {
-    throw new Error(`bundle ${bundle.bundleId} is not in ${store.location}; not making it current`);
-  }
   const head: BundleHead = {
     seq: (previous?.seq ?? 0) + 1,
     bundleId: bundle.bundleId,
@@ -268,6 +264,13 @@ export async function commitHead(
   // whose secrets came from the older state.
   const text = await sealHead(head, provider);
   await store.withHeadLock(async () => {
+    // A head never names a bundle the store does not hold (checked under the lock pruneBundles
+    // also takes): every later deploy would refuse it.
+    if ((await store.read(bundle.bundleId)) === null) {
+      throw new Error(
+        `bundle ${bundle.bundleId} is not in ${store.location}; not making it current`
+      );
+    }
     const now = headHint(await store.readHead());
     if (
       (previous === null) !== (now === null) ||

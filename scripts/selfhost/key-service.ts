@@ -344,14 +344,19 @@ export async function pruneBundles(
   store: BundleStore,
   keepIds: readonly string[]
 ): Promise<string[]> {
-  const removed: string[] = [];
-  const named = headHint(await store.readHead())?.bundleId;
-  for (const bundle of await listBundles(store)) {
-    if (keepIds.includes(bundle.bundleId) || bundle.bundleId === named) continue;
-    await store.remove(bundle.bundleId);
-    removed.push(bundle.bundleId);
-  }
-  return removed;
+  // Under the head lock: a seal that commits its head between this read and the removals would
+  // otherwise have its newly current bundle removed. commitHead checks its bundle is still there
+  // under the same lock, so a seal racing this prune fails instead of naming a missing bundle.
+  return await store.withHeadLock(async () => {
+    const removed: string[] = [];
+    const named = headHint(await store.readHead())?.bundleId;
+    for (const bundle of await listBundles(store)) {
+      if (keepIds.includes(bundle.bundleId) || bundle.bundleId === named) continue;
+      await store.remove(bundle.bundleId);
+      removed.push(bundle.bundleId);
+    }
+    return removed;
+  });
 }
 
 /** A Worker without its key agent answers 503 to everything; say why before deploying. */

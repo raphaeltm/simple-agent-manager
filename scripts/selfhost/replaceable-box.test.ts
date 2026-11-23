@@ -29,6 +29,7 @@ import { openBundleStore } from '../../deploy/selfhost/key-agent/bundle-store.ts
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
 import { runCommand } from './backup-cli.js';
 import { loadBoxEnv } from './box-settings.js';
+import { sealHead } from './bundle-head.js';
 import {
   CHILD_TEST_TIMEOUT_MS,
   CLOSED_HOST,
@@ -38,7 +39,7 @@ import {
 } from './deploy-harness.js';
 import { type FakeKeyService, startFakeKeyServices } from './fixtures/key-provider-fakes.js';
 import { readInstallRecord, recordPath } from './install-record.js';
-import { keyServiceSettings } from './key-service.js';
+import { keyServiceSettings, pruneBundles } from './key-service.js';
 import {
   assertReplaceableSetup,
   type BoxBucket,
@@ -265,6 +266,54 @@ describe('the bucket copy of the bundles', () => {
     });
     await vi.waitFor(() => expect(reconciled).toBe(true), { timeout: 5000 });
     expect(remote.list('sam-box/bundles/')).toHaveLength(1);
+  });
+
+  it('moves the head only when both copies are written', async () => {
+    const remote = memoryBucket();
+    const failing: BoxBucket = {
+      ...remote,
+      write: (key, text) => {
+        if (key === 'sam-box/head.json') throw new Error('gcloud storage cp failed');
+        remote.write(key, text);
+      },
+    };
+    const local = openBundleStore({ dir: join(dir, 'both/bundles') });
+    await local.writeHead('first\n');
+    await expect(mirroredBundleStore(local, failing).writeHead('second\n')).rejects.toThrow(
+      /cp failed/
+    );
+    expect(await local.readHead()).toBe('first\n');
+    // Control: a working bucket takes the new head on both sides.
+    await mirroredBundleStore(local, remote).writeHead('second\n');
+    expect(await local.readHead()).toBe('second\n');
+    expect(remote.objects.get('sam-box/head.json')).toBe('second\n');
+  });
+
+  it('prunes only while no head commit is in progress (head lock)', async () => {
+    const provider = fileProvider();
+    const local = openBundleStore({ dir: join(dir, 'prune/bundles') });
+    const kept = await sealed(provider, '2026-11-01T00:00:00Z');
+    const fresh = await sealed(provider, '2026-11-02T00:00:00Z');
+    await local.write(kept);
+    let pruned: string[] | null = null;
+    await local.withHeadLock(async () => {
+      // A seal has written its bundle and is committing its head: the prune waits for it.
+      await local.write(fresh);
+      const pending = pruneBundles(local, [kept.bundleId]).then((ids) => {
+        pruned = ids;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(pruned).toBeNull();
+      await local.writeHead(
+        await sealHead(
+          { seq: 1, bundleId: fresh.bundleId, installationId: 'a'.repeat(32) },
+          provider
+        )
+      );
+      void pending;
+    });
+    await vi.waitFor(() => expect(pruned).toEqual([]), { timeout: 5000 });
+    expect((await local.listIds()).sort()).toEqual([kept.bundleId, fresh.bundleId].sort());
   });
 
   it('never prunes or seals over another installation, on every sealing path', async () => {

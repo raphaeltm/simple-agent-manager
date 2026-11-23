@@ -508,6 +508,25 @@ describe('a failed secrets migrate on a replaceable box', () => {
         ? readdirSync(join(gcsRoot, 'fleet/celld/sam-box/bundles'))
         : []
     ).toEqual([]);
+    // Another seal moved the head while the attempt was failing: cleanup leaves its head and
+    // bundle alone instead of rolling them back.
+    let other = '';
+    const racing = {
+      ...deps,
+      preflight: async () => {
+        const mine = headHint(readFileSync(headPath(stateA), 'utf8'));
+        const theirs = await sealSecrets({ SAM_INSTALLATION_ID: 'a'.repeat(32) }, provider, {
+          installationId: 'a'.repeat(32),
+        });
+        await settings.bundles.write(theirs);
+        await commitHead(settings.bundles, theirs, provider, mine);
+        other = theirs.bundleId;
+        throw new Error('the Worker would not get these secrets unchanged');
+      },
+    } as unknown as MigrateDeps;
+    await expect(runMigration({ box, stateDir: stateA }, racing)).rejects.toThrow(/unchanged/);
+    expect(headHint(readFileSync(headPath(stateA), 'utf8'))?.bundleId).toBe(other);
+    expect(bundlesOn(stateA).map((b) => b.bundleId)).toContain(other);
   });
 });
 

@@ -20,6 +20,7 @@
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { headHint } from './bundle-head';
 import { explicitKeyProvider, keyChoicePath, readKeyChoice } from './key-choice';
 import { bundleStoreFor, LEGACY_KEY_PROVIDER } from './key-service';
 import { fleetBucket, mirroredBundleStore, replaceableBox } from './replaceable-box';
@@ -138,22 +139,37 @@ export async function runMigration(
       );
     }
   };
+  // The head this attempt's --init wrote (undefined until it returns): cleanup undoes only that.
+  let ownHead: string | null | undefined;
   const forgetNewBundles = async () => {
-    // The head as it was first (bundle-head.ts): it must never name a bundle removed below.
-    if ((await store.readHead()) !== headBefore) {
-      await undo('the bundle head', () =>
-        store.withHeadLock(() =>
-          headBefore === null ? store.removeHead() : store.writeHead(headBefore)
-        )
-      );
-    }
-    for (const id of await store.listIds()) {
-      if (bundlesBefore.has(id)) continue;
-      await undo(`bundle ${id}`, async () => {
-        await store.remove(id);
-        log(`    removed bundle ${id}, sealed by this failed attempt`);
-      });
-    }
+    await undo('the sealed state of this attempt', () =>
+      // Under the head lock, compared there: a deploy, rotation or switch that moved the head
+      // meanwhile is not rolled back, and its bundle is not removed.
+      store.withHeadLock(async () => {
+        const now = await store.readHead();
+        const ours =
+          ownHead !== undefined
+            ? now === ownHead
+            : !bundlesBefore.has(headHint(now)?.bundleId ?? '');
+        if (now !== headBefore && !ours) {
+          log('    the bundle head moved since this attempt; leaving the sealed state as it is');
+          return;
+        }
+        // The head as it was first (bundle-head.ts): it must never name a bundle removed below.
+        if (now !== headBefore) {
+          await undo('the bundle head', () =>
+            headBefore === null ? store.removeHead() : store.writeHead(headBefore)
+          );
+        }
+        for (const id of await store.listIds()) {
+          if (bundlesBefore.has(id)) continue;
+          await undo(`bundle ${id}`, async () => {
+            await store.remove(id);
+            log(`    removed bundle ${id}, sealed by this failed attempt`);
+          });
+        }
+      })
+    );
   };
 
   let alreadySealed = false;
@@ -161,6 +177,7 @@ export async function runMigration(
   try {
     log('1/6 choosing the key provider and sealing the existing secrets (selfhost:deploy --init)');
     await deps.init();
+    ownHead = await store.readHead();
     log('2/6 contract check: key agent -> Worker loader, every secret unchanged');
     const checked = await deps.preflight({ box: input.box, stateDir, expected });
     bundleId = checked.bundleId;
@@ -200,7 +217,11 @@ export async function runMigration(
   try {
     log('4/6 deploying the Worker without secret vars (selfhost:deploy)');
     switched = true;
+    // This deploy may seal again (and move the head): until it returns, a head naming a bundle
+    // this attempt sealed counts as this attempt's.
+    ownHead = undefined;
     await deps.deploy(false);
+    ownHead = await store.readHead();
     log('5/6 adopting the new version now and checking it');
     const check = await deps.adoptAndCheck();
     if (!check.healthy) throw new Error(`the new version is not healthy: ${check.detail}`);

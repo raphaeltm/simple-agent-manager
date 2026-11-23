@@ -295,8 +295,18 @@ export function mirroredBundleStore(
     withHeadLock: (fn) => local.withHeadLock(fn),
     async writeHead(text) {
       if (stateDir) assertNoPendingRebuild(stateDir);
+      // Both copies or neither: a bucket that fails leaves the box's previous head in place, so
+      // the box is never configured for one head while holding another (a switch sealed with
+      // the new key but still recorded on the old one), and the bucket is never behind it.
+      const before = await local.readHead();
       await local.writeHead(text);
-      bucket.write(HEAD_KEY, text);
+      try {
+        bucket.write(HEAD_KEY, text);
+      } catch (error) {
+        if (before === null) await local.removeHead();
+        else await local.writeHead(before);
+        throw error;
+      }
     },
     async removeHead() {
       await local.removeHead();
