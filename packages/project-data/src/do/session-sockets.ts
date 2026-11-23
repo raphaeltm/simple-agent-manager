@@ -150,7 +150,7 @@ export function countLegacySockets(
 /**
  * A socket still awaiting its post-admission access check. Attachments survive hibernation.
  * Legacy sockets have no admission attachment; they keep their existing behavior and are still
- * closed by actor revocation. An unreadable attachment is treated as not pending, as before.
+ * closed by actor revocation. An unreadable attachment fails closed: the socket gets no frames.
  */
 function isAccessPending(ws: WebSocket): boolean {
   try {
@@ -162,7 +162,7 @@ function isAccessPending(ws: WebSocket): boolean {
       attachment.accessPending === true
     );
   } catch {
-    return false;
+    return true;
   }
 }
 

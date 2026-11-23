@@ -189,6 +189,17 @@ describe('post-admission access verification', () => {
     broadcastToBrowserSockets(ctx, 'message.append', {}, SESSION);
     expect(pending.close).toHaveBeenCalledWith(CHAT_MESSAGE_RESYNC_CLOSE_CODE, expect.any(String));
   });
+  it('an unreadable attachment fails closed', () => {
+    const broken = Object.assign(socket(capable), {
+      deserializeAttachment: () => {
+        throw new Error('attachment unreadable');
+      },
+    });
+    const healthy = socket(capable);
+    broadcastToBrowserSockets(context([broken, healthy]), 'message.new', {}, SESSION);
+    expect(broken.send).not.toHaveBeenCalled();
+    expect(healthy.send).toHaveBeenCalledOnce();
+  });
   it('closes a failed lookup with a retryable code and a denied lookup with4403', async () => {
     const failed = pendingSocket();
     await closeIfAccessRevoked(
