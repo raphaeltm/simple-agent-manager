@@ -4,7 +4,7 @@
  * the agent's files during and after the switch, the rollback, a reseal, and a real
  * `deploy --dry-run` afterwards that runs on the new bundle.
  */
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -232,6 +232,31 @@ describe('secrets switch', () => {
       expect(dry.status, dry.out).toBe(0);
     }
   );
+
+  it('stays on the new key, head included, when the rollback cannot restore its files', async () => {
+    let check = 0;
+    const agentEnvPath = join(state, 'key-agent/agent.env');
+    const failing: SwitchDeps = {
+      ...deps(),
+      adoptAndCheck: async () => {
+        // The new version is unhealthy, and agent.env can no longer be replaced (a directory
+        // stands in for an unwritable file).
+        if (check++ === 0) {
+          rmSync(agentEnvPath);
+          mkdirSync(agentEnvPath);
+        }
+        return { healthy: false, detail: 'HTTP 503' };
+      },
+    };
+    await expect(
+      runSwitch({ box: box(), stateDir: state, to: 'gcp-kms' }, failing)
+    ).rejects.toThrow(/could not restore file .*the box stays on gcp-kms/s);
+    // The recorded choice and the head agree on the new key: nothing is left half rolled back.
+    expect(JSON.parse(read('choice.json'))).toMatchObject({ provider: 'gcp-kms' });
+    const head = JSON.parse(read('head.json')) as { seal: { provider: string } };
+    expect(head.seal.provider).toBe('gcp-kms');
+    rmSync(agentEnvPath, { recursive: true });
+  });
 
   it('refuses a target that cannot unwrap, and changes nothing', async () => {
     fake.setDenied(true);

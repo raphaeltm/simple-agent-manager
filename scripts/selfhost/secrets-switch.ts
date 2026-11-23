@@ -219,7 +219,10 @@ async function runSwitchLocked(input: SwitchInput, deps: SwitchDeps): Promise<Ke
     // later bundle under the new key (a secrets.env edit), so chain from the head as it is now.
     // Only this switch and its own deploys can have moved the head since: the whole switch holds
     // the box's sealing lock (sealing-lock.ts), so no other deploy or rotation is rolled back.
-    const { head: nowHead } = await currentBundle(newSettings.bundles, newProvider);
+    const { head: nowHead, bundle: nowBundle } = await currentBundle(
+      newSettings.bundles,
+      newProvider
+    );
     if (nowHead && nowHead.seq < switchedHead.seq) {
       throw new Error(
         `switch rolled back nothing: the bundle head moved to ${nowHead.bundleId} (write ` +
@@ -232,9 +235,36 @@ async function runSwitchLocked(input: SwitchInput, deps: SwitchDeps): Promise<Ke
       await newSettings.bundles.write(newest);
       log(`put back bundle ${newest.bundleId}, pruned during the switch`);
     }
-    await commitHead(newSettings.bundles, newest, oldProvider, nowHead ?? switchedHead);
-    writePrivateFile(keyChoicePath(stateDir), savedChoice);
-    writePrivateFile(agentEnvPath, savedAgentEnv);
+    const rolledBack = await commitHead(
+      newSettings.bundles,
+      newest,
+      oldProvider,
+      nowHead ?? switchedHead
+    );
+    try {
+      writePrivateFile(keyChoicePath(stateDir), savedChoice);
+      writePrivateFile(agentEnvPath, savedAgentEnv);
+    } catch (restoreError) {
+      // The configuration could not be put back (an unwritable file): put everything back on the
+      // new key instead, head included, so the head and the recorded choice never disagree.
+      // Each write is best effort: the file that refused its restore still holds the new value.
+      for (const write of [
+        () => writeKeyChoice(stateDir, target),
+        () => writePrivateFile(agentEnvPath, renderKeyAgentEnv(newSettings)),
+      ]) {
+        try {
+          write();
+        } catch {
+          // left as the switch wrote it (the new key)
+        }
+      }
+      if (nowBundle) await commitHead(newSettings.bundles, nowBundle, newProvider, rolledBack);
+      throw new Error(
+        `switch failed (${reason}) and could not restore ${current.provider} ` +
+          `(${restoreError instanceof Error ? restoreError.message : String(restoreError)}); ` +
+          `the box stays on ${target.provider}: fix the file, then run the switch again`
+      );
+    }
     rmSync(previousPath, { force: true });
     await newSettings.bundles.remove(bundle.bundleId);
     await deps.restartAgent();
