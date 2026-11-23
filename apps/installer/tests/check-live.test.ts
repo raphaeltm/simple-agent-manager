@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const run = vi.hoisted(() => vi.fn(() => ({ status: 0, stdout: `${'d'.repeat(40)}\n` })));
-vi.mock('node:child_process', () => ({ spawnSync: run }));
+vi.mock('../scripts/git-head.mjs', () => ({ checkedOutCommit: () => 'd'.repeat(40) }));
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();

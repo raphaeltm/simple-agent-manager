@@ -44,7 +44,7 @@ export class ApiFailure extends Error {
 
 /** OAuth client endpoints use `registrationToken` when one is supplied. */
 export function createApi({ token, base, registrationToken }) {
-  return async function api(path, method = 'GET', body) {
+  return async function api(path, method = 'GET', body = undefined) {
     const oauthApi = path === '/oauth/scopes' || path.startsWith(`${base}/oauth_clients`);
     const authorization = oauthApi ? registrationToken || token : token;
     let response, data;

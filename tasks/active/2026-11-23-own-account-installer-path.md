@@ -75,46 +75,47 @@ tests it.
 
 ### A. Deploy script defaults (`apps/installer/scripts/deploy.mjs`)
 
-- [ ] A1. A fresh installer deploys in full mode when `INSTALLER_MODE` is unset or `preserve`; an
+- [x] A1. A fresh installer deploys in full mode when `INSTALLER_MODE` is unset or `preserve`; an
       existing installer keeps its mode.
-- [ ] A2. Source commit: `GITHUB_SHA` when set (still rejected if not 40 hex), else `git rev-parse HEAD`.
+- [x] A2. Source commit: `GITHUB_SHA` when set (still rejected if not 40 hex), else the checked-out
+      commit read from Git's files (`scripts/git-head.mjs`; no `git` process, SonarCloud S4036).
       Stop with a clear message when the commit is not on the upstream repository.
-- [ ] A3. `ARTIFACT_BASE_URL`: explicit value, else the deployed value, else the canonical releases URL;
+- [x] A3. `ARTIFACT_BASE_URL`: explicit value, else the deployed value, else the canonical releases URL;
       `none` opts out.
-- [ ] A4. End by printing the address to open and the next step.
-- [ ] A5. Name the missing token permission on a refused Cloudflare call, and check account, Workers and
+- [x] A4. End by printing the address to open and the next step.
+- [x] A5. Name the missing token permission on a refused Cloudflare call, and check account, Workers and
       OAuth access before anything is published.
 
 ### B. `workers.dev` origin
 
-- [ ] B1. `BASE_DOMAIN` optional: set → `install.<domain>` as today; unset → the deployed origin when an
+- [x] B1. `BASE_DOMAIN` optional: set → `install.<domain>` as today; unset → the deployed origin when an
       installer exists, else `https://<worker>.<account subdomain>.workers.dev`.
-- [ ] B2. Clear stop when the account has no `workers.dev` address.
-- [ ] B3. Wait briefly for the freshly published installer to answer before creating its OAuth client.
-- [ ] B4. Tests for both origins, including preserving an existing custom-domain origin.
+- [x] B2. Clear stop when the account has no `workers.dev` address.
+- [x] B3. Wait briefly for the freshly published installer to answer before creating its OAuth client.
+- [x] B4. Tests for both origins, including preserving an existing custom-domain origin.
 
 ### C. Remove command
 
-- [ ] C1. `pnpm --filter @simple-agent-manager/installer run remove`: deletes the installer Worker;
+- [x] C1. `pnpm --filter @simple-agent-manager/installer run remove`: deletes the installer Worker;
       deletes its OAuth client only with `REMOVE_OAUTH_CLIENT=true`; idempotent; never touches
       `sam-maintenance-…` services. Tests.
 
 ### D. Docs and copy
 
-- [ ] D1. `guides/installer.mdx`: lead with running the installer in your own account; drop hosted
+- [x] D1. `guides/installer.mdx`: lead with running the installer in your own account; drop hosted
       sections; add removal.
-- [ ] D2. Token link plus the three permissions by name.
-- [ ] D3. `quickstart.md`, `overview.mdx`, `index.mdx`, `guides/self-hosting.mdx` intro.
-- [ ] D4. `guides/recent-product-changes.md`.
-- [ ] D5. `architecture/security.md` installer section.
-- [ ] D6. `FactoryQuestions.astro`, `enterprise/compliance.astro`.
-- [ ] D7. Installer `index.astro`, `privacy.astro` wording.
-- [ ] D8. Installer `self-host.astro` recipe.
-- [ ] D9. `apps/installer/README.md`.
+- [x] D2. Token link plus the three permissions by name.
+- [x] D3. `quickstart.md`, `overview.mdx`, `index.mdx`, `guides/self-hosting.mdx` intro.
+- [x] D4. `guides/recent-product-changes.md`.
+- [x] D5. `architecture/security.md` installer section.
+- [x] D6. `FactoryQuestions.astro`, `enterprise/compliance.astro`.
+- [x] D7. Installer `index.astro`, `privacy.astro` wording.
+- [x] D8. Installer `self-host.astro` recipe.
+- [x] D9. `apps/installer/README.md`.
 
 ### E. Tested documented path
 
-- [ ] E1. `deploy-installer.yml` (staging only): run the documented command with no `BASE_DOMAIN`, mode
+- [x] E1. `deploy-installer.yml` (staging only): run the documented command with no `BASE_DOMAIN`, mode
       or `GITHUB_SHA`, after `remove`, and verify health, pinned commit and the OAuth start redirect.
 
 ### F. Live proof (needs a signed-in Cloudflare account member)
@@ -123,6 +124,32 @@ tests it.
 - [ ] F2. Sign-in, choose, review and handoff work on the staging `workers.dev` installer.
 - [ ] F3. After a completed install, removing the installer with its OAuth client leaves the
       installation's tokens working.
+
+## Implementation notes
+
+- **Pushing the task file to `main` is rejected by repository rules**, so it started on the branch.
+- **Cloudflare validates an OAuth client and callback before login.** A known client with a registered
+  callback is sent to `/login`; a wrong callback or client goes to `/oauth/error` (probed against
+  `install.sammy.party` on 2026-11-23). `scripts/check-live.mjs` uses this, so the staging workflow
+  proves a `workers.dev` registration is accepted without a signed-in person. This narrows F2 to what
+  happens after login.
+- **Staging run 45251499394 (first):** the recipe published a fresh installer on `workers.dev`, then
+  `POST /oauth_clients` returned 500 five seconds after publish although the runner already got a 200
+  from `/health`. The cleanup step's `remove` deleted the Worker and found no client, so a failed
+  creation leaves none. Added `createOAuthClient` (bounded retry on 5xx, never a second client) and
+  Cloudflare's numeric error codes in `ApiFailure`.
+- **Staging run 45253061086 (third, commit fe1e52c): all green.** Recipe: remove (nothing there) →
+  fresh deploy with no domain, mode or commit → `Installer ready:
+https://sam-installer-recipe-check.simple-agent-manager-staging.workers.dev` 8 s after publish →
+  `check-live`: commit pinned, full mode, Cloudflare accepts its sign-in client and callback →
+  `remove` deleted the Worker and its OAuth client. The existing `sam-installer-staging` deploy and
+  its version check passed unchanged afterwards.
+- **Real negative check:** running the deploy script locally on an unpushed commit stopped with
+  "Commit … is not in raphaeltm/simple-agent-manager" before any Cloudflare write.
+- `remove` then `deploy` with a kept OAuth client stops with an actionable "OAuth secret missing"
+  message (the secret existed only on the deleted Worker). Documented in the README.
+- The security advisory post's link to the renamed guide section was repointed (anchor only).
+- `ci.yml` needs no change: `apps/installer/**` and `deploy-installer.yml` are already in its filters.
 
 ## Acceptance criteria
 

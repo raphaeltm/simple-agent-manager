@@ -1,7 +1,7 @@
-import { spawnSync } from 'node:child_process';
 import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
+import { checkedOutCommit } from './git-head.mjs';
 import { ApiFailure, createApi, readTarget, SECRET_NAMES, wrangler } from './installer-target.mjs';
 
 // Verified against Cloudflare GET /oauth/scopes on 2026-10-28; the email scopes on
@@ -127,10 +127,6 @@ const workersDev = host.endsWith('.workers.dev');
 if (!workersDev && !host.startsWith('install.'))
   throw new Error('The deployed installer address is not supported; set BASE_DOMAIN.');
 const zone = host.slice('install.'.length);
-function checkedOutCommit() {
-  const result = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' });
-  return result.status === 0 ? String(result.stdout || '').trim() : '';
-}
 const revision = process.env.GITHUB_SHA || checkedOutCommit();
 // The installation service builds exactly this commit from the upstream repository.
 async function resolveSourceCommit() {

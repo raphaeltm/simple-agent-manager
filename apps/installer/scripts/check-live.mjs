@@ -1,5 +1,4 @@
-import { spawnSync } from 'node:child_process';
-
+import { checkedOutCommit } from './git-head.mjs';
 import { createApi, readTarget } from './installer-target.mjs';
 
 // Checks a deployed installer the way a visitor reaches it: it answers on its own
@@ -7,9 +6,7 @@ import { createApi, readTarget } from './installer-target.mjs';
 // redirects to Cloudflare with this installer's client and callback.
 const { token, name, base, worker } = readTarget();
 const api = createApi({ token, base });
-const expected =
-  process.env.GITHUB_SHA ||
-  String(spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout || '').trim();
+const expected = process.env.GITHUB_SHA || checkedOutCommit();
 if (!/^[a-f0-9]{40}$/.test(expected)) throw new Error('Could not read the expected commit.');
 const settings = await api(`${worker}/settings`);
 const origin = (Array.isArray(settings?.bindings) ? settings.bindings : []).find(

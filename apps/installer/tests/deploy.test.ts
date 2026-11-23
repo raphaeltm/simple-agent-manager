@@ -11,9 +11,12 @@ const capture = vi.hoisted(() => ({
     authorization: string | null;
   }[],
   run: vi.fn(() => ({ status: 0 })),
+  gitHead: '',
   events: [] as string[],
 }));
 vi.mock('node:child_process', () => ({ spawnSync: capture.run }));
+// The real resolver is covered by git-head.test.ts and by the staging recipe run.
+vi.mock('../scripts/git-head.mjs', () => ({ checkedOutCommit: () => capture.gitHead }));
 vi.mock('node:fs/promises', async (importOriginal) => ({
   ...(await importOriginal<typeof import('node:fs/promises')>()),
   writeFile: vi.fn(async (_path: string, data: string) => {
@@ -85,7 +88,7 @@ interface Options {
   existingOrigin?: string;
   existingArtifactBaseUrl?: string;
   artifactBaseUrl?: string;
-  /** Commit `git rev-parse HEAD` prints; null makes git fail. */
+  /** The checked-out commit; null means there is no checkout. */
   gitHead?: string | null;
   /** Status of the upstream commit check; 'offline' rejects the request. */
   upstream?: number | 'offline';
@@ -100,7 +103,7 @@ interface Options {
   unservedHealthChecks?: number;
 }
 const ACCOUNT = 'a'.repeat(32);
-const wranglerRuns = () => capture.run.mock.calls.filter((call) => call[0] === process.execPath);
+const wranglerRuns = () => capture.run.mock.calls;
 const existingScopes = (existing: Options['existing']) =>
   existing === 'legacy-full'
     ? fullScopes.filter((scope) => scope !== 'teams-connector-cloudflared.write')
@@ -116,12 +119,7 @@ async function deploy(options: Options = {}) {
   vi.spyOn(console, 'log').mockImplementation((line: string) => {
     capture.events.push(`log ${line}`);
   });
-  capture.run.mockImplementation(((command: string) =>
-    command === 'git'
-      ? options.gitHead === null
-        ? { status: 128, stdout: '' }
-        : { status: 0, stdout: `${options.gitHead ?? 'd'.repeat(40)}\n` }
-      : { status: 0 }) as never);
+  capture.gitHead = options.gitHead === null ? '' : (options.gitHead ?? 'd'.repeat(40));
   vi.stubEnv('BASE_DOMAIN', options.domain ?? 'sammy.party');
   vi.stubEnv('INSTALLER_ENVIRONMENT', options.environment ?? 'staging');
   vi.stubEnv('ARTIFACT_BASE_URL', options.artifactBaseUrl ?? '');
@@ -513,7 +511,7 @@ describe('own-account installer deployment (the documented command)', () => {
   it('an explicit GITHUB_SHA wins over the checkout', async () => {
     await deploy({ ...selfHosted, sha: 'e'.repeat(40) });
     expect(config().vars.INSTALL_SOURCE_COMMIT).toBe('e'.repeat(40));
-    expect(capture.run.mock.calls.some((call) => call[0] === 'git')).toBe(false);
+    expect(config().vars.BUILD_SHA).toBe('e'.repeat(40));
   });
   it('stops with instructions when the account has no workers.dev address', async () => {
     await expect(deploy({ ...selfHosted, subdomain: null })).rejects.toThrow(
