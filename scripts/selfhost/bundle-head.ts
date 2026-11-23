@@ -262,23 +262,25 @@ export async function commitHead(
     bundleId: bundle.bundleId,
     installationId: bundle.installationId,
   };
-  // Sealed first (a key-service call), then compared, then written with nothing awaited between
-  // the compare and the write: another seal (a deploy racing a rotation or a switch) that made
-  // its own bundle current since `previous` was read is not overwritten by this one, whose
-  // secrets came from the older state. Not atomic; the window is one file read.
+  // Sealed first (a key-service call, outside the lock), then compared and written under the
+  // state's head lock, across processes: another seal (a deploy racing a rotation or a switch)
+  // that made its own bundle current since `previous` was read is never overwritten by this one,
+  // whose secrets came from the older state.
   const text = await sealHead(head, provider);
-  const now = headHint(await store.readHead());
-  if (
-    (previous === null) !== (now === null) ||
-    (previous && now && (now.seq !== previous.seq || now.bundleId !== previous.bundleId))
-  ) {
-    const moved = now ? `${now.bundleId}, write ${now.seq}` : 'none';
-    throw new Error(
-      `the current sealed bundle changed while bundle ${bundle.bundleId} was being sealed ` +
-        `(now ${moved}); another deploy, rotation or switch ran at the same time. Run again.`
-    );
-  }
-  await store.writeHead(text);
+  await store.withHeadLock(async () => {
+    const now = headHint(await store.readHead());
+    if (
+      (previous === null) !== (now === null) ||
+      (previous && now && (now.seq !== previous.seq || now.bundleId !== previous.bundleId))
+    ) {
+      const moved = now ? `${now.bundleId}, write ${now.seq}` : 'none';
+      throw new Error(
+        `the current sealed bundle changed while bundle ${bundle.bundleId} was being sealed ` +
+          `(now ${moved}); another deploy, rotation or switch ran at the same time. Run again.`
+      );
+    }
+    await store.writeHead(text);
+  });
   return head;
 }
 

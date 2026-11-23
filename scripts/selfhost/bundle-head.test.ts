@@ -29,6 +29,7 @@ import {
   type SealedBundle,
   sealSecrets,
 } from '../../deploy/selfhost/key-agent/bundle.ts';
+import { type BundleStore, withLockFile } from '../../deploy/selfhost/key-agent/bundle-store.ts';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
 import { runCommand } from './backup-cli.js';
 import { loadBoxEnv } from './box-settings.js';
@@ -216,6 +217,16 @@ describe('a host clock that moved backwards between two seals', () => {
     vi.stubEnv('FAKE_GCS_ROOT', gcsRoot);
     const store = openRotationStore(boxOf(envA), stateA);
     const before = await store.head();
+    // Two leftovers dated after the current bundle that the head does not name (sealed while the
+    // clock ran ahead): ranked by date they would push the replaced bundle out of the prune.
+    for (const year of [2030, 2031]) {
+      await store.settings.bundles.write(
+        await sealSecrets(before.secrets, store.provider, {
+          installationId: before.bundle.installationId,
+          now: () => new Date(`${year}-01-01T00:00:00Z`),
+        })
+      );
+    }
     const journal: Journal = {
       format: 'sam-key-rotation/1',
       id: 'r1',
@@ -249,6 +260,8 @@ describe('a host clock that moved backwards between two seals', () => {
     expect(rotated.bundle.createdAt < before.bundle.createdAt).toBe(true);
     expect(rotated.secrets.OPERATOR_SETTING).toBe('rotated-value');
     expect(deployed).toEqual([rotated.bundle.bundleId]);
+    // The bundle the rotation replaced is kept by name: the previous Worker version asks for it.
+    expect(bundlesOn(stateA).map((b) => b.bundleId)).toContain(before.bundle.bundleId);
 
     // Stopped after writing the next bundle but before making it current: resuming makes it
     // current and deploys it, instead of refusing or deploying the one before.
@@ -481,5 +494,82 @@ describe('a failed secrets migrate on a replaceable box', () => {
         ? readdirSync(join(gcsRoot, 'fleet/celld/sam-box/bundles'))
         : []
     ).toEqual([]);
+  });
+});
+
+describe('the head bundle lost on the box but kept in the bucket', () => {
+  it('reconcile restores it from the bucket instead of pruning it, and the deploy runs', async () => {
+    const stateA = join(dir, 'box-a/.state');
+    const envA = boxEnv(stateA);
+    const { unset } = await sealThenRollClockBack(stateA, envA);
+    // The box lost the current bundle (disk damage, a mistaken rm); the bucket still has it.
+    rmSync(join(bundleDir(stateA), `${unset.bundleId}.json`));
+    const out = await deploy(envA, []);
+    expect(out).toContain(`restored bundle ${unset.bundleId}, which the head names`);
+    expect(bundlesOn(stateA).map((b) => b.bundleId)).toContain(unset.bundleId);
+    expect(existsSync(join(gcsRoot, 'fleet/celld/sam-box/bundles', `${unset.bundleId}.json`))).toBe(
+      true
+    );
+    expect(await namedBundle(envA)).toBe(unset.bundleId);
+    // Neither holds it: the deploy stops and the bucket is left as it was.
+    rmSync(join(bundleDir(stateA), `${unset.bundleId}.json`));
+    rmSync(join(gcsRoot, 'fleet/celld/sam-box/bundles', `${unset.bundleId}.json`));
+    const before = readdirSync(join(gcsRoot, 'fleet/celld/sam-box/bundles')).sort();
+    const refused = await runDeploy(envA, ['--init', '--skip-vm-agent'], deployEnv(envA));
+    expect(refused.status).not.toBe(0);
+    expect(refused.out).toMatch(/which neither .* nor the fleet bucket holds/);
+    expect(readdirSync(join(gcsRoot, 'fleet/celld/sam-box/bundles')).sort()).toEqual(before);
+  });
+});
+
+describe('the head lock', () => {
+  it('lets only one of two seals that read the same head make its bundle current', async () => {
+    const stateA = join(dir, 'box-a/.state');
+    const envA = boxEnv(stateA);
+    writeSecrets(stateA, []);
+    await deploy(envA, ['--init']);
+    vi.stubEnv('PATH', env.PATH);
+    vi.stubEnv('FAKE_GCS_ROOT', gcsRoot);
+    const store = openRotationStore(boxOf(envA), stateA);
+    const current = await store.head();
+    const previous = headHint(readFileSync(headPath(stateA), 'utf8'));
+    const [a, b] = [await store.seal(current.secrets), await store.seal(current.secrets)];
+    await store.settings.bundles.write(a);
+    await store.settings.bundles.write(b);
+    // Both read the head before either writes, unless the lock serializes them: each read waits
+    // (bounded) until the other has read too.
+    let reads = 0;
+    const raced: BundleStore = {
+      ...store.settings.bundles,
+      async readHead() {
+        const text = await store.settings.bundles.readHead();
+        reads += 1;
+        const deadline = Date.now() + 500;
+        while (reads < 2 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+        return text;
+      },
+    };
+    const results = await Promise.allSettled([
+      commitHead(raced, a, store.provider, previous),
+      commitHead(raced, b, store.provider, previous),
+    ]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const lost = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+    expect(String(lost.reason)).toMatch(/the current sealed bundle changed while/);
+    expect(existsSync(`${headPath(stateA)}.lock`)).toBe(false);
+  });
+
+  it('breaks a lock left by a process that died, and waits for a live one', async () => {
+    const lock = join(dir, 'state/key-agent/head.json.lock');
+    mkdirSync(dirname(lock), { recursive: true });
+    // A pid that is not running (beyond the kernel's default pid range).
+    writeFileSync(lock, '4194399\n');
+    await expect(withLockFile(lock, async () => 'ran')).resolves.toBe('ran');
+    expect(existsSync(lock)).toBe(false);
+    // A live holder (this process) is waited for, then refused with the holder named.
+    writeFileSync(lock, `${process.pid}\n`);
+    await expect(withLockFile(lock, async () => 'ran', 200)).rejects.toThrow(
+      new RegExp(`held by process ${process.pid}`)
+    );
   });
 });

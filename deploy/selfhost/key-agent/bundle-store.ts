@@ -48,6 +48,76 @@ export interface BundleStore {
   /** Replaces the head whole (atomic): a crash leaves the old head or the new one. */
   writeHead(text: string): Promise<void>;
   removeHead(): Promise<void>;
+  /**
+   * Runs `fn` holding this state's head lock: one read-compare-write of the head at a time, across
+   * processes (a deploy and a rotation or switch on the same box). See withHeadLock below.
+   */
+  withHeadLock<T>(fn: () => Promise<T>): Promise<T>;
+}
+
+/** How long to wait for another process's head lock before giving up. */
+export const DEFAULT_HEAD_LOCK_WAIT_MS = 30_000;
+const HEAD_LOCK_POLL_MS = 50;
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: alive but another user's process; only ESRCH means gone.
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/**
+ * An exclusive lock file holding the owner's pid (O_EXCL create). A lock whose pid is no longer
+ * running is broken (a process that died while holding it); a live holder is waited for, up to
+ * `waitMs`. Same host only: the head, like the bundles, belongs to one box.
+ */
+export async function withLockFile<T>(
+  lockPath: string,
+  fn: () => Promise<T>,
+  waitMs = DEFAULT_HEAD_LOCK_WAIT_MS
+): Promise<T> {
+  const deadline = Date.now() + waitMs;
+  mkdirSync(dirname(lockPath), { recursive: true, mode: 0o700 });
+  for (;;) {
+    let fd: number | undefined;
+    try {
+      fd = openSync(lockPath, 'wx', 0o600);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
+    if (fd !== undefined) {
+      try {
+        writeSync(fd, `${process.pid}\n`);
+      } finally {
+        closeSync(fd);
+      }
+      try {
+        return await fn();
+      } finally {
+        rmSync(lockPath, { force: true });
+      }
+    }
+    let holder = Number.NaN;
+    try {
+      holder = Number(readFileSync(lockPath, 'utf8').trim());
+    } catch {
+      continue; // released between our attempt and this read
+    }
+    if (Number.isInteger(holder) && holder > 0 && !pidAlive(holder)) {
+      rmSync(lockPath, { force: true });
+      continue;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `${lockPath} is held by process ${Number.isNaN(holder) ? '(unreadable)' : holder}: ` +
+          'another deploy, rotation or switch is changing the sealed secrets. Wait for it, then run again'
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, HEAD_LOCK_POLL_MS));
+  }
 }
 
 export interface BundleStoreConfig {
@@ -150,5 +220,6 @@ function localBundleStore(dir: string): BundleStore {
       rmSync(headPath, { force: true });
       syncDirectory(dirname(headPath));
     },
+    withHeadLock: (fn) => withLockFile(`${headPath}.lock`, fn),
   };
 }

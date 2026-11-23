@@ -125,13 +125,16 @@ export async function applyPatch(ctx: StepContext, patch: Patch, then: Phase): P
   await deps.deploy();
   const check = await deps.adoptAndCheck();
   if (!check.healthy) throw new ApplyFailedError(`the new version is not healthy: ${check.detail}`);
+  // The bundle this step replaced: the previous Worker version may still ask for it, and a clock
+  // that moved back can rank it below older bundles, so it is kept by name (not by date).
+  const replaced = step.stagedOver;
   step.phase = then;
   delete step.stagedBundleId;
   delete step.stagedFor;
   delete step.stagedFrom;
   delete step.stagedOver;
   ctx.save();
-  const removed = await store.prune([bundleId]);
+  const removed = await store.prune(replaced ? [bundleId, replaced] : [bundleId]);
   if (removed.length === 0) return;
   for (const id of removed) {
     deps.log(`  removed old bundle ${id} (the box keeps the newest ${DEFAULT_KEPT_BUNDLES})`);

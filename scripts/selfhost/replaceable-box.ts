@@ -292,6 +292,7 @@ export function mirroredBundleStore(
       if (bucketBundleIds(bucket).includes(bundleId)) bucket.remove([bundleKey(bundleId)]);
     },
     readHead: () => local.readHead(),
+    withHeadLock: (fn) => local.withHeadLock(fn),
     async writeHead(text) {
       if (stateDir) assertNoPendingRebuild(stateDir);
       await local.writeHead(text);
@@ -325,6 +326,38 @@ async function newestLocalBundle(local: BundleStore): Promise<SealedBundle | nul
  * installation stops it too: one bucket (prefix) belongs to one installation, and this box must
  * never prune another's copy.
  */
+/**
+ * The box's head names a bundle the box lost but the bucket still holds: copy it back (the
+ * selector verifies it opens before any deploy uses it). Neither holds it: stop, touching nothing.
+ */
+async function restoreHeadBundle(
+  local: BundleStore,
+  bucket: BoxBucket,
+  localHead: string | null,
+  localIds: Set<string>,
+  remoteIds: readonly string[],
+  log: (message: string) => void
+): Promise<void> {
+  const head = headHint(localHead);
+  if (!head || localIds.has(head.bundleId)) return;
+  if (!remoteIds.includes(head.bundleId)) {
+    throw new Error(
+      `the bundle head on this box names bundle ${head.bundleId}, which neither ${local.location} ` +
+        'nor the fleet bucket holds. Restore it from backup (pnpm selfhost:restore)'
+    );
+  }
+  const bundle = bucketBundleNamed(bucket, head.bundleId);
+  if (bundle.installationId !== head.installationId) {
+    throw new Error(
+      `the fleet bucket's bundle ${head.bundleId} is of installation ${bundle.installationId}, ` +
+        `not ${head.installationId}; refusing it`
+    );
+  }
+  await local.write(bundle);
+  localIds.add(head.bundleId);
+  log(`restored bundle ${head.bundleId}, which the head names, from the fleet bucket`);
+}
+
 export async function reconcileBundleMirror(
   local: BundleStore,
   bucket: BoxBucket,
@@ -339,6 +372,7 @@ export async function reconcileBundleMirror(
     : (await newestLocalBundle(local))?.installationId;
   if (!installationId) return;
   const remoteIds = bucketBundleIds(bucket);
+  await restoreHeadBundle(local, bucket, localHead, localIds, remoteIds, log);
   const stale: string[] = [];
   for (const id of remoteIds) {
     const bundle = bucketBundleNamed(bucket, id);

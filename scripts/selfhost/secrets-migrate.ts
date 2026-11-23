@@ -142,7 +142,9 @@ export async function runMigration(
     // The head as it was first (bundle-head.ts): it must never name a bundle removed below.
     if ((await store.readHead()) !== headBefore) {
       await undo('the bundle head', () =>
-        headBefore === null ? store.removeHead() : store.writeHead(headBefore)
+        store.withHeadLock(() =>
+          headBefore === null ? store.removeHead() : store.writeHead(headBefore)
+        )
       );
     }
     for (const id of await store.listIds()) {

@@ -79,7 +79,12 @@ const AGENT_SETTINGS = [
   'SAM_KEY_AGENT_MAX_CONNECTIONS',
 ] as const;
 /** Box files that can unlock the bundle; backups leave them out (backup-lib.ts). */
-export const KEY_SERVICE_BACKUP_EXCLUDES = [`${KEY_AGENT_DIR}/kek`, `${KEY_AGENT_DIR}/credentials`];
+export const KEY_SERVICE_BACKUP_EXCLUDES = [
+  `${KEY_AGENT_DIR}/kek`,
+  `${KEY_AGENT_DIR}/credentials`,
+  // The head lock (bundle-store.ts withLockFile) names a pid of this box, meaningless anywhere else.
+  `${KEY_AGENT_DIR}/head.json.lock`,
+];
 
 type Box = Readonly<Record<string, string | undefined>>;
 
