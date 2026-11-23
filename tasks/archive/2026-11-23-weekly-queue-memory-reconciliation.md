@@ -38,17 +38,17 @@ guide to what is genuinely open.
 - [x] Audit all 348 backlog files (4 read-only slices); spot-check evidence for every non-KEEP verdict
 - [x] Delete shipped, obsolete, superseded and duplicate backlog files; annotate PARTIAL ones
 - [x] Comment a weekly status/park note on #2265 and #1788
-- [ ] PR description lists a one-line rationale for each deletion
+- [x] PR description lists a one-line rationale for each deletion
 - [x] Part 2: SAM knowledge/idea/policy hygiene (outside the repo)
-- [ ] Digest via `update_task_status`
+- [x] Digest via `update_task_status` (plus one inbox result and one inbox decision on the two parked PRs)
 
 ## Acceptance criteria
 
-- [ ] `tasks/active/` contains only this file until merge (then nothing)
-- [ ] Every deleted backlog file has a verdict and evidence in the PR description
-- [ ] No backlog file deleted without a cited merged PR, commit or code check
-- [ ] Each PR older than 7 days has one comment from this run
-- [ ] Outside `tasks/`, the change touches only comments and one non-functional manifest string (`baselineBacklogLink`, read by nothing else): no staging deploy (docs-only exemption)
+- [x] `tasks/active/` contains only this file until merge (then nothing)
+- [x] Every deleted backlog file has a verdict and evidence in the PR description
+- [x] No backlog file deleted without a cited merged PR, commit or code check
+- [x] Each PR older than 7 days has one comment from this run
+- [x] Outside `tasks/`, the change touches only comments and one non-functional manifest string (`baselineBacklogLink`, read by nothing else): no staging deploy (docs-only exemption)
 
 ## Backlog audit results
 
@@ -60,3 +60,15 @@ guide to what is genuinely open.
 - Noted, not fixed (pre-existing drift): about 11 code and config comments still name older
   `tasks/active/` paths from earlier PRs, among them applied D1 migration headers, which must not be
   edited. Only the four pointers this PR's moves broke were repointed.
+
+## Outcome
+
+- Cleanup shipped in [#2983](https://github.com/raphaeltm/simple-agent-manager/pull/2983), merged as `a1de24b4` on 2026-11-23 06:44Z. Main CI passed, and Deploy Production run 45127605791 succeeded at 07:04Z.
+- Reviews:
+  - task-completion-validator: ADDRESSED (4 MEDIUM fixed in `932cdf34e`).
+  - CodeRabbit: "Review skipped" (auto reviews disabled).
+  - Codex: two inline P2s raised on the first head; both were already fixed in `932cdf34e` and are answered on the PR.
+- Process note: the merge happened before those inline threads were read. Read `pulls/<n>/comments` before merging, because a Codex "Completed" summary does not mean it found nothing.
+- Memory hygiene:
+  - Knowledge: added SecurityPolicy and ResponseStyle observations; updated 3 (two InboxDesign, one SelfDebuggingSystem); confirmed 4.
+  - Ideas: completed 01M7VTNAG1HMCE18GCNPS052X3 (#2952); narrowed 01M7W6ZTZETXE75N8NRKR3R0CF; added two tracking notes on 01M7CX61WVX72T7CFQNRTX0DVM.
