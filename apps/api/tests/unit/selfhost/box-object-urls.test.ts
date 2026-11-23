@@ -61,6 +61,8 @@ vi.mock('../../../src/services/admin-settings-resolution', () => ({
 }));
 
 const KEY = 'box-test-encryption-key-0123456789';
+/** Every box upload URL names who it is for (the per-uploader slot key). */
+const OWNER = { userId: 'u-test' };
 /** The defaults the route uses when settings storage is unavailable. */
 const LIMITS = { total: 4, perUploader: 2, leaseMs: 60_000 };
 const DOMAIN = 'box.example.test';
@@ -392,9 +394,9 @@ describe('which URL a caller gets', () => {
       ENCRYPTION_KEY: KEY,
     } as Env);
     expect(signer.kind).toBe('presign');
-    expect(new URL(await signer.putUrl('temp-uploads/t/k', { expiresIn: 60 })).host).toMatch(
-      /acct\.r2\.cloudflarestorage\.com$/
-    );
+    expect(
+      new URL(await signer.putUrl('temp-uploads/t/k', { expiresIn: 60, owner: OWNER })).host
+    ).toMatch(/acct\.r2\.cloudflarestorage\.com$/);
     // Divergence: a keyless Env on Cloudflare has no signer; it does not fall through to a box URL.
     expect(resolveR2ObjectUrlSigner(boxEnv().env)).toBeNull();
   });
@@ -404,7 +406,7 @@ describe('which URL a caller gets', () => {
     const signer = getR2ObjectUrlSigner(boxEnv().env);
     expect(signer.kind).toBe('box');
     const url = new URL(
-      await signer.putUrl('temp-uploads/t/k', { expiresIn: 60, contentLength: 3 })
+      await signer.putUrl('temp-uploads/t/k', { expiresIn: 60, contentLength: 3, owner: OWNER })
     );
     expect(`${url.origin}${url.pathname}`).toBe(`https://api.${DOMAIN}${BOX_OBJECT_ROUTE}`);
     expect(url.searchParams.get('token')).toMatch(/^samobj1\./);
@@ -509,6 +511,15 @@ describe('callers on a keyless box', () => {
     expect(sessionSnapshotDirectUploadAvailable(env)).toBe(true);
     const key = buildSessionSnapshotR2Key(env, 'chat-1', 'gen-1', 'home');
     const sha256 = 'b'.repeat(64);
+    // No owner: refused, since the URL would share one per-uploader bucket with every other one.
+    await expect(
+      generateSessionSnapshotDirectUploadUrl(env, {
+        key,
+        sizeBytes: 1234,
+        sha256,
+        contentType: 'application/x-tar',
+      })
+    ).rejects.toThrow('no owner');
     const url = new URL(
       await generateSessionSnapshotDirectUploadUrl(env, {
         key,
@@ -516,6 +527,7 @@ describe('callers on a keyless box', () => {
         sha256,
         contentType: 'application/x-tar',
         checksumHeader: true,
+        owner: { workspaceId: 'ws-1', userId: 'u-1', projectId: 'p-1' },
       })
     );
     expect(url.pathname).toBe(BOX_OBJECT_ROUTE);
@@ -526,7 +538,24 @@ describe('callers on a keyless box', () => {
       len: 1234,
       sha: sha256,
       ct: 'application/x-tar',
+      sub: { u: 'u-1', p: 'p-1', w: 'ws-1' },
     });
+  });
+
+  it('an empty snapshot artifact gets a zero-length URL that stores an empty object', async () => {
+    installBoxObjectUrls();
+    const { env, R2 } = boxEnv();
+    const key = buildSessionSnapshotR2Key(env, 'chat-1', 'gen-1', 'wip');
+    const empty = new Uint8Array(0);
+    const url = await generateSessionSnapshotDirectUploadUrl(env, {
+      key,
+      sizeBytes: 0,
+      sha256: await sha256Hex(empty),
+      contentType: 'application/octet-stream',
+      owner: { workspaceId: 'ws-1' },
+    });
+    expect((await putUrl(routeApp(), env, url, empty)).status).toBe(200);
+    expect(R2.objects.get(key)?.bytes.byteLength).toBe(0);
   });
 
   it('snapshot keys are allowed under the configured prefix only', async () => {
@@ -568,6 +597,7 @@ describe('callers on a keyless box', () => {
     await expect(
       signer.putUrl('temp-uploads/t/k', {
         expiresIn: 60,
+        owner: OWNER,
         contentLength: CELLD_MAX_REQUEST_BODY_BYTES + 1,
       })
     ).rejects.toMatchObject({ statusCode: 400 });
@@ -594,7 +624,7 @@ describe('callers on a keyless box', () => {
 describe('PUT/GET /api/box-objects', () => {
   async function upload(env: Env, key: string, extra: Partial<ObjectPutUrlOptions> = {}) {
     const signer = createBoxObjectUrlSigner(env)!;
-    return signer.putUrl(key, { expiresIn: 60, contentType: 'text/plain', ...extra });
+    return signer.putUrl(key, { expiresIn: 60, contentType: 'text/plain', owner: OWNER, ...extra });
   }
 
   it('streams the body into R2 and serves it back with a GET token', async () => {

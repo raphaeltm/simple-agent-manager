@@ -35,6 +35,8 @@ export async function generateSessionSnapshotDirectUploadUrl(
     sha256: string;
     contentType: string;
     checksumHeader?: boolean;
+    /** Who the snapshot belongs to: the box's per-uploader slot limit keys on it. */
+    owner?: { workspaceId: string; userId?: string; projectId?: string | null };
   }
 ): Promise<string> {
   const expiresIn = parsePositiveInt(
@@ -49,6 +51,15 @@ export async function generateSessionSnapshotDirectUploadUrl(
       contentLength: input.sizeBytes,
       contentType: input.contentType,
       sha256: input.sha256,
+      ...(input.owner
+        ? {
+            owner: {
+              workspaceId: input.owner.workspaceId,
+              ...(input.owner.userId ? { userId: input.owner.userId } : {}),
+              ...(input.owner.projectId ? { projectId: input.owner.projectId } : {}),
+            },
+          }
+        : {}),
     });
   }
   // Presign: unchanged (pinned by r2-presign-cloudflare-equivalence.test.ts).

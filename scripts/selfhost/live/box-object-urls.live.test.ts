@@ -38,7 +38,7 @@ app.post('/mint', async (c) => {
   const signer = createBoxObjectUrlSigner(c.env);
   const url = body.op === 'get'
     ? await signer.getUrl(body.key, { expiresIn: 300 })
-    : await signer.putUrl(body.key, { expiresIn: 300, ...body.options });
+    : await signer.putUrl(body.key, { expiresIn: 300, owner: { userId: 'live' }, ...body.options });
   return c.json({ url });
 });
 // The real gate over celld's Durable Object SQL: renew must see its own row (cursor.rowsWritten).

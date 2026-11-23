@@ -42,6 +42,9 @@ export function createBoxObjectUrlSigner(env: Env): ObjectUrlSigner | null {
     kind: 'box',
     maxPutBytes: max,
     putUrl: async (r2Key, options) => {
+      // The per-uploader slot limit keys on the owner (route.ts): without one, every such upload
+      // would share a single bucket and starve the others. Every caller passes one.
+      if (!owner(options)) throw new Error(`Box upload URL for ${r2Key} has no owner`);
       if (options.contentLength !== undefined && options.contentLength > max) {
         throw errors.badRequest(
           `Uploads through this self-hosted box are limited to ${max} bytes; this one is ${options.contentLength}`

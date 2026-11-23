@@ -36,7 +36,7 @@ export interface BoxObjectTokenClaims {
   key: string;
   /** Expiry, unix seconds. */
   exp: number;
-  /** PUT: the exact body length the uploader declared, when it declared one. */
+  /** PUT: the exact body length the uploader declared, when it declared one (may be 0). */
   len?: number;
   /** PUT: largest body accepted. */
   max?: number;
@@ -126,6 +126,10 @@ function isStringRecord(value: unknown): value is Record<string, string> {
   );
 }
 
+function nonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
 function positiveInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 }
@@ -142,7 +146,8 @@ function parseClaims(
   if (raw.v !== 1 || (raw.op !== 'put' && raw.op !== 'get')) return null;
   if (typeof raw.key !== 'string' || !isSafeObjectKey(raw.key, prefixes)) return null;
   if (!positiveInteger(raw.exp)) return null;
-  if (raw.len !== undefined && !positiveInteger(raw.len)) return null;
+  // An exact length may be zero (an empty snapshot artifact); a maximum and an expiry may not.
+  if (raw.len !== undefined && !nonNegativeInteger(raw.len)) return null;
   if (raw.max !== undefined && !positiveInteger(raw.max)) return null;
   if (raw.ct !== undefined && (typeof raw.ct !== 'string' || raw.ct.length > 255)) return null;
   if (raw.sha !== undefined && (typeof raw.sha !== 'string' || !SHA256_HEX.test(raw.sha)))
