@@ -509,11 +509,42 @@ describe('a failed secrets migrate on a replaceable box', () => {
         ? readdirSync(join(gcsRoot, 'fleet/celld/sam-box/bundles'))
         : []
     ).toEqual([]);
+    // The bucket is down while the attempt fails: the head cannot be put back, so the attempt's
+    // bundle stays (the box's head still names it) instead of leaving a head naming nothing.
+    const sealOnTop = async () => {
+      const bundle = await sealSecrets({ SAM_INSTALLATION_ID: 'a'.repeat(32) }, provider, {
+        installationId: 'a'.repeat(32),
+      });
+      await settings.bundles.write(bundle);
+      const current = existsSync(headPath(stateA))
+        ? headHint(readFileSync(headPath(stateA), 'utf8'))
+        : null;
+      await commitHead(settings.bundles, bundle, provider, current);
+    };
+    await sealOnTop(); // the box already had a head before this attempt
+    let initHead = '';
+    const unreachable = {
+      ...deps,
+      init: async () => {
+        await sealOnTop();
+        initHead = readFileSync(headPath(stateA), 'utf8');
+      },
+      preflight: async () => {
+        vi.stubEnv('PATH', '/nonexistent'); // gcloud is gone: every bucket call fails
+        throw new Error('the Worker would not get these secrets unchanged');
+      },
+    } as unknown as MigrateDeps;
+    await expect(runMigration({ box, stateDir: stateA }, unreachable)).rejects.toThrow(/unchanged/);
+    vi.stubEnv('PATH', env.PATH);
+    const left = headHint(readFileSync(headPath(stateA), 'utf8'))?.bundleId;
+    expect(readFileSync(headPath(stateA), 'utf8')).toBe(initHead);
+    expect(bundlesOn(stateA).map((b) => b.bundleId)).toContain(left);
     // Another seal moved the head while the attempt was failing: cleanup leaves its head and
     // bundle alone instead of rolling them back.
     let other = '';
     const racing = {
       ...deps,
+      init: sealOnTop,
       preflight: async () => {
         const mine = headHint(readFileSync(headPath(stateA), 'utf8'));
         const theirs = await sealSecrets({ SAM_INSTALLATION_ID: 'a'.repeat(32) }, provider, {
@@ -621,6 +652,12 @@ describe('the head lock', () => {
     breakStaleLock(lock, statSync(lock).ino);
     expect(existsSync(lock)).toBe(false);
     expect(existsSync(`${lock}.break`)).toBe(false);
+    // A lock whose owner died but which a still-running child joined is held, not broken.
+    writeFileSync(lock, `4194399\n${process.pid}\n`);
+    await expect(withLockFile(lock, async () => 'ran', 200)).rejects.toThrow(/held by process/);
+    // Control: once every process in it is gone, it is broken.
+    writeFileSync(lock, '4194399\n4194398\n');
+    await expect(withLockFile(lock, async () => 'ran', 200)).resolves.toBe('ran');
     // A live holder (this process) is waited for, then refused with the holder named.
     writeFileSync(lock, `${process.pid}\n`);
     await expect(withLockFile(lock, async () => 'ran', 200)).rejects.toThrow(

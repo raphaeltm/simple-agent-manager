@@ -9,21 +9,22 @@
  *
  * A rotation, switch or migration runs its own deploys as child processes. They inherit the lock
  * through SAM_SELFHOST_SEALING_LOCK, which names the holder's pid, and re-enter it only while the
- * lock file still names that same live holder: a stray variable alone never skips the lock.
+ * lock file still names that same holder: a stray variable alone never skips the lock. A child
+ * that re-enters adds its own pid to the file, so the lock is held while either process lives.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { acquireLockFile } from '../../deploy/selfhost/key-agent/bundle-store.ts';
+import { acquireLockFile, joinLockFile } from '../../deploy/selfhost/key-agent/bundle-store.ts';
 import { KEY_AGENT_DIR } from './key-service.js';
 
 export const SEALING_LOCK_FILE = join(KEY_AGENT_DIR, 'sealing.lock');
 export const SEALING_LOCK_ENV = 'SAM_SELFHOST_SEALING_LOCK';
 
-/** The pid in the lock file, or null when there is none. */
+/** The owner's pid in the lock file (its first line), or null when there is none. */
 function lockHolder(path: string): string | null {
   try {
-    return readFileSync(path, 'utf8').trim() || null;
+    return readFileSync(path, 'utf8').trim().split(/\s+/)[0] || null;
   } catch {
     return null;
   }
@@ -41,7 +42,12 @@ function inherited(path: string): boolean {
  */
 export async function acquireSealingLock(stateDir: string): Promise<() => void> {
   const path = join(stateDir, SEALING_LOCK_FILE);
-  if (inherited(path)) return () => undefined;
+  if (inherited(path)) {
+    // Joined, not just skipped: should the parent die while this child deploy still runs, the
+    // lock stays held until the child ends too (bundle-store.ts acquireLockFile).
+    joinLockFile(path);
+    return () => undefined;
+  }
   const release = await acquireLockFile(path);
   const before = process.env[SEALING_LOCK_ENV];
   process.env[SEALING_LOCK_ENV] = String(process.pid);

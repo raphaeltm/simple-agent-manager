@@ -9,6 +9,7 @@
  * `openBundleStore`; no caller changes. The interface is asynchronous for that reason.
  */
 import {
+  appendFileSync,
   closeSync,
   existsSync,
   fsyncSync,
@@ -72,14 +73,23 @@ function pidAlive(pid: number): boolean {
 }
 
 /** The lock file's holder pid (NaN when none is recorded), age and inode; null when it is gone. */
-function readLock(lockPath: string): { holder: number; ageMs: number; ino: number } | null {
+function readLock(
+  lockPath: string
+): { holder: number; holders: number[]; ageMs: number; ino: number } | null {
   try {
     const before = lstatSync(lockPath);
     const text = readFileSync(lockPath, 'utf8').trim();
     // The same file throughout: a lock replaced between the stat and the read is read again.
     if (lstatSync(lockPath).ino !== before.ino) return null;
+    // The owner's pid first, then any process that joined it (joinLockFile).
+    const holders = text
+      .split(/\s+/)
+      .filter((field) => /^\d+$/.test(field))
+      .map(Number)
+      .filter((pid) => pid > 0);
     return {
-      holder: /^\d+$/.test(text) ? Number(text) : Number.NaN,
+      holder: holders[0] ?? Number.NaN,
+      holders,
       ageMs: Date.now() - before.mtimeMs,
       ino: before.ino,
     };
@@ -146,9 +156,11 @@ export async function acquireLockFile(
     }
     const seen = readLock(lockPath);
     if (!seen) continue; // released between our attempt and this read
-    const valid = Number.isInteger(seen.holder) && seen.holder > 0;
+    const valid = seen.holders.length > 0;
     const holder = seen.holder;
-    if ((valid && !pidAlive(holder)) || (!valid && seen.ageMs > EMPTY_LOCK_STALE_MS)) {
+    // Stale only once every process in it is gone: a child that joined its parent's lock keeps
+    // it held after the parent dies, until the child ends too.
+    if ((valid && !seen.holders.some(pidAlive)) || (!valid && seen.ageMs > EMPTY_LOCK_STALE_MS)) {
       breakStaleLock(lockPath, seen.ino);
       continue;
     }
@@ -161,6 +173,14 @@ export async function acquireLockFile(
     }
     await new Promise((resolve) => setTimeout(resolve, HEAD_LOCK_POLL_MS));
   }
+}
+
+/**
+ * Adds this process to a lock another process holds (a child operation run by the holder), so the
+ * lock stays held while this process runs even if the holder dies first. Never removes the file.
+ */
+export function joinLockFile(lockPath: string): void {
+  appendFileSync(lockPath, `${process.pid}\n`);
 }
 
 /** Runs `fn` holding the lock file (acquireLockFile), released however `fn` ends. */

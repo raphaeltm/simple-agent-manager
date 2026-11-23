@@ -161,11 +161,18 @@ async function runMigrationLocked(input: MigrateInput, deps: MigrateDeps): Promi
           log('    the bundle head moved since this attempt; leaving the sealed state as it is');
           return;
         }
-        // The head as it was first (bundle-head.ts): it must never name a bundle removed below.
+        // The head as it was first (bundle-head.ts): it must never name a bundle removed below,
+        // so if it cannot be put back (the bucket is down), nothing is removed.
         if (now !== headBefore) {
-          await undo('the bundle head', () =>
-            headBefore === null ? store.removeHead() : store.writeHead(headBefore)
-          );
+          let restored = false;
+          await undo('the bundle head', async () => {
+            await (headBefore === null ? store.removeHead() : store.writeHead(headBefore));
+            restored = true;
+          });
+          if (!restored) {
+            log("    kept this attempt's bundles: the head that names them could not be put back");
+            return;
+          }
         }
         for (const id of await store.listIds()) {
           if (bundlesBefore.has(id)) continue;
