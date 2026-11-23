@@ -105,3 +105,28 @@ parted upload, which changes the vm-agent client. Deferred to PR B (idea filed i
   snapshot all work.
 - `compose-image-artifacts/init` returns 503 with the missing setting named, never 500.
 - The hosted Cloudflare presign URLs are byte-identical (existing equivalence test).
+
+## Disposable GCS box proof (2026-11-23, GCP `sam-vm-control-plane-test`)
+
+Box `sam-upbox` (e2-standard-4, europe-west1-b), `SAM_DOMAIN=upbox.vmtest.sam2.party`,
+`CELLD_BUCKET=gs://sam-upbox-fleet-90he14/celld`, TLS `dns-googleclouddns`, key provider `file`,
+built from this branch. **No `R2_S3_ENDPOINT`, no HMAC or static store key.** Nodes through
+`gcp-bootstrap` (pool `sam-upbox-90he14`), OpenCode agent with a free model.
+
+- **Task attachment, browser → box → GCS:** `request-upload` returned
+  `https://api.upbox…/api/box-objects?token=samobj1…`; the XHR PUT from the app origin got 200;
+  `gs://…/celld/r2/workspaces-dev-assets/temp-uploads/<user>/<upload>/proof.txt` (46 B). Task
+  submit validated it; the agent printed the file's contents from its workspace (download).
+- **Session snapshot:** before the fix every `PUT …/session-snapshot/artifacts/*` got 400 (Caddy
+  strips `X-SAM-Content-SHA256`). After 8bedbfb29: `upload-url` 200, `box_objects.uploaded`
+  `session-snapshots/…/wip.bundle` (978 B) and `home.tar` (27.9 MB), `complete` 200.
+- **Build-backed publish:** `compose-image-artifacts/init` 200 (was a 500), `box_objects.uploaded`
+  `compose-image-artifacts/…/web.docker-save.tar`, `complete` 200, `compose-publish-release` 200
+  (release v1). The deployment node downloaded the artifact (`box_objects.downloaded`), applied the
+  release, and `https://r1-web-8080-01m83zgpc4sf9jqxq879093f20.apps.upbox.vmtest.sam2.party/` answered
+  **200 `upbox build ok`** with a verified certificate.
+- Logs: Caddy recorded `uri: /api/box-objects?<redacted>`; `samobj1` occurs 0 times in the Caddy
+  and celld logs.
+- Side findings (not this change): OpenCode Zen returned "Workspace usage limit reached" for the
+  default paid model (a free model worked); a build-backed publish needs the task to run under an
+  agent profile (`publish: empty agentProfileID` otherwise); node boot on e2-standard-2 took ~12 min.
