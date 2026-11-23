@@ -21,8 +21,10 @@ import {
   openBundleStore,
 } from '../../deploy/selfhost/key-agent/bundle-store.ts';
 import { pingKeyAgent } from '../../deploy/selfhost/key-agent/healthcheck.ts';
+import type { KeyProvider } from '../../deploy/selfhost/key-agent/provider.ts';
 import { generateFileKek } from '../../deploy/selfhost/key-agent/provider-file.ts';
 import { KEY_PROVIDERS, LEGACY_KEY_PROVIDER } from '../../deploy/selfhost/key-agent/providers.ts';
+import { byCreatedAt, type CurrentBundle, headHint, selectCurrentBundle } from './bundle-head.js';
 import {
   assertReplaceableSetup,
   fleetBucket,
@@ -286,7 +288,10 @@ export async function ensureKeyServiceFiles(
   return written;
 }
 
-/** Bundles in the store, newest first; unreadable ones are reported and skipped. */
+/**
+ * Bundles in the store, newest `createdAt` first; unreadable ones are reported and skipped. The
+ * order is NOT which bundle is current: that is currentBundle (bundle-head.ts).
+ */
 export async function listBundles(
   store: BundleStore,
   warn: (message: string) => void = console.warn
@@ -305,18 +310,38 @@ export async function listBundles(
       );
     }
   }
-  return bundles.sort((a, b) =>
-    a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0
-  );
+  return byCreatedAt(bundles);
 }
 
+/**
+ * The store's current bundle (bundle-head.ts selectCurrentBundle, the one selector) and every
+ * readable bundle. `provider` opens the head; it is called only when there is one.
+ */
+export async function currentBundle(
+  store: BundleStore,
+  provider: KeyProvider | (() => KeyProvider),
+  warn: (message: string) => void = console.warn
+): Promise<CurrentBundle & { bundles: SealedBundle[] }> {
+  const bundles = await listBundles(store, warn);
+  const where = `the bundle head beside ${store.location}`;
+  return {
+    ...(await selectCurrentBundle(bundles, await store.readHead(), provider, where)),
+    bundles,
+  };
+}
+
+/**
+ * Removes every bundle not in `keepIds`. Never the one the head names, whatever the caller asked:
+ * a head naming a missing bundle stops every later deploy.
+ */
 export async function pruneBundles(
   store: BundleStore,
   keepIds: readonly string[]
 ): Promise<string[]> {
   const removed: string[] = [];
+  const named = headHint(await store.readHead())?.bundleId;
   for (const bundle of await listBundles(store)) {
-    if (keepIds.includes(bundle.bundleId)) continue;
+    if (keepIds.includes(bundle.bundleId) || bundle.bundleId === named) continue;
     await store.remove(bundle.bundleId);
     removed.push(bundle.bundleId);
   }

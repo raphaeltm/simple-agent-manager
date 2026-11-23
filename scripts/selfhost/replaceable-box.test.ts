@@ -208,12 +208,13 @@ describe('the bucket copy of the bundles', () => {
       },
     };
     const local = openBundleStore({ dir: join(dir, 'bundles') });
-    const bundle = await sealed(fileProvider(), '2026-11-01T00:00:00Z');
+    const provider = fileProvider();
+    const bundle = await sealed(provider, '2026-11-01T00:00:00Z');
     // The caller (key-seal) sees the failure before it deploys the bundle.
     await expect(mirroredBundleStore(local, failing).write(bundle)).rejects.toThrow(/cp failed/);
     expect(remote.list('sam-box/bundles/')).toEqual([]);
     const logs: string[] = [];
-    await reconcileBundleMirror(local, remote, (m) => logs.push(m));
+    await reconcileBundleMirror(local, remote, (m) => logs.push(m), provider);
     expect(remote.objects.get(`sam-box/bundles/${bundle.bundleId}.json`)).toBe(
       await local.read(bundle.bundleId)
     );
@@ -231,16 +232,16 @@ describe('the bucket copy of the bundles', () => {
     ];
     // An empty box and a bucket with bundles: a replacement that skipped rebuild.
     remote.write(`sam-box/bundles/${old!.bundleId}.json`, JSON.stringify(old));
-    await expect(reconcileBundleMirror(local, remote, () => undefined)).rejects.toThrow(
+    await expect(reconcileBundleMirror(local, remote, () => undefined, provider)).rejects.toThrow(
       /replacement box\. Run pnpm selfhost:rebuild/
     );
     // The box has a newer bundle: the older remote one was pruned, the local one goes up.
     await local.write(current!);
-    await reconcileBundleMirror(local, remote, () => undefined);
+    await reconcileBundleMirror(local, remote, () => undefined, provider);
     expect(remote.list('sam-box/bundles/')).toEqual([`sam-box/bundles/${current!.bundleId}.json`]);
     // A newer bundle only the bucket has: another box, or a stale copy of this one.
     remote.write(`sam-box/bundles/${newer!.bundleId}.json`, JSON.stringify(newer));
-    await expect(reconcileBundleMirror(local, remote, () => undefined)).rejects.toThrow(
+    await expect(reconcileBundleMirror(local, remote, () => undefined, provider)).rejects.toThrow(
       /newer than any on this box/
     );
     expect(remote.objects.has(`sam-box/bundles/${newer!.bundleId}.json`)).toBe(true);
@@ -258,7 +259,7 @@ describe('the bucket copy of the bundles', () => {
       now: () => new Date('2026-11-01T00:00:00Z'),
     });
     remote.write(`sam-box/bundles/${theirs.bundleId}.json`, JSON.stringify(theirs));
-    await expect(reconcileBundleMirror(local, remote, () => undefined)).rejects.toThrow(
+    await expect(reconcileBundleMirror(local, remote, () => undefined, provider)).rejects.toThrow(
       /of installation b{32}, not this box's a{32}/
     );
     expect(remote.objects.has(`sam-box/bundles/${theirs.bundleId}.json`)).toBe(true);
@@ -279,9 +280,9 @@ describe('the bucket copy of the bundles', () => {
     await expect(mirroredBundleStore(behind, bucketAhead).write(fresh)).rejects.toThrow(
       /newer than any on this box/
     );
-    await expect(reconcileBundleMirror(behind, bucketAhead, () => undefined)).rejects.toThrow(
-      /newer than any on this box/
-    );
+    await expect(
+      reconcileBundleMirror(behind, bucketAhead, () => undefined, provider)
+    ).rejects.toThrow(/newer than any on this box/);
     expect(bucketAhead.objects.has(`sam-box/bundles/${ours.bundleId}.json`)).toBe(true);
     expect(await behind.listIds()).toEqual([older.bundleId]);
   });

@@ -21,12 +21,14 @@ import {
   rmSync,
   writeSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { BUNDLE_ID, type SealedBundle } from './bundle.ts';
 
 /** The state-directory location, relative to the state dir (platform-keys.ts reads it too). */
 export const LOCAL_BUNDLE_SUBDIR = join('key-agent', 'bundles');
+/** The head beside the bundles (scripts/selfhost/bundle-head.ts), relative to the state dir. */
+export const LOCAL_HEAD_FILE = join('key-agent', 'head.json');
 
 export interface BundleStore {
   /** Where the bundles are, for messages. Never a credential. */
@@ -38,6 +40,14 @@ export interface BundleStore {
   /** Stores a new bundle; refuses to replace an existing one (ids are never reused). */
   write(bundle: SealedBundle): Promise<void>;
   remove(bundleId: string): Promise<void>;
+  /**
+   * The head (scripts/selfhost/bundle-head.ts): which bundle is current. Its text, or null when
+   * there is none. Never parsed or trusted here; the deploy verifies it under the key.
+   */
+  readHead(): Promise<string | null>;
+  /** Replaces the head whole (atomic): a crash leaves the old head or the new one. */
+  writeHead(text: string): Promise<void>;
+  removeHead(): Promise<void>;
 }
 
 export interface BundleStoreConfig {
@@ -64,7 +74,31 @@ function assertId(bundleId: string): void {
   if (!BUNDLE_ID.test(bundleId)) throw new Error('not a bundle id');
 }
 
+/** Writes `text` to `target` through an fsynced temp file and a rename, then syncs the directory. */
+function writeAtomically(target: string, text: string, exclusive: boolean): void {
+  const dir = dirname(target);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (exclusive && lstatSync(target, { throwIfNoEntry: false })) {
+    throw new Error(`${target} already exists`);
+  }
+  const temp = join(dir, `.${target.slice(dir.length + 1)}.${process.pid}.tmp`);
+  rmSync(temp, { force: true });
+  const fd = openSync(temp, 'wx', 0o600);
+  try {
+    writeSync(fd, text);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  renameSync(temp, target);
+  // The rename is durable only once the directory is: until then a power loss can drop the
+  // new name, after the deploy published this id and migrate removed the plaintext files.
+  syncDirectory(dir);
+}
+
 function localBundleStore(dir: string): BundleStore {
+  // Beside the bundles directory (LOCAL_HEAD_FILE), not in it: the agent never reads the head.
+  const headPath = join(dirname(dir), 'head.json');
   const pathOf = (bundleId: string): string => {
     assertId(bundleId);
     return join(dir, `${bundleId}.json`);
@@ -88,30 +122,33 @@ function localBundleStore(dir: string): BundleStore {
       }
     },
     async write(bundle) {
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
       const target = pathOf(bundle.bundleId);
       if (lstatSync(target, { throwIfNoEntry: false })) {
         throw new Error(`bundle ${bundle.bundleId} already exists in ${dir}`);
       }
       // Temp file in the same directory, fsynced, then renamed: a crash leaves the old set or
       // the new bundle whole, never a torn file the agent would refuse.
-      const temp = join(dir, `.${bundle.bundleId}.${process.pid}.tmp`);
-      rmSync(temp, { force: true });
-      const fd = openSync(temp, 'wx', 0o600);
-      try {
-        writeSync(fd, `${JSON.stringify(bundle, null, 2)}\n`);
-        fsyncSync(fd);
-      } finally {
-        closeSync(fd);
-      }
-      renameSync(temp, target);
-      // The rename is durable only once the directory is: until then a power loss can drop the
-      // new name, after the deploy published this id and migrate removed the plaintext files.
-      syncDirectory(dir);
+      writeAtomically(target, `${JSON.stringify(bundle, null, 2)}\n`, true);
     },
     async remove(bundleId) {
       rmSync(pathOf(bundleId), { force: true });
       syncDirectory(dir);
+    },
+    async readHead() {
+      try {
+        return readFileSync(headPath, 'utf8');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw error;
+      }
+    },
+    async writeHead(text) {
+      writeAtomically(headPath, text, false);
+    },
+    async removeHead() {
+      if (!existsSync(headPath)) return;
+      rmSync(headPath, { force: true });
+      syncDirectory(dirname(headPath));
     },
   };
 }

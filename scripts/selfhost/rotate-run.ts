@@ -14,7 +14,7 @@
 import { closeSync, existsSync, openSync, readFileSync, rmSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { listBundles } from './key-service';
+import { currentBundle } from './key-service';
 import { applyPatch, type RotateDeps, type StepContext } from './rotate-apply';
 import { ROTATABLE_KEYS, type RotatableKey, rotatableKey } from './rotate-catalog';
 import { formatPlan, formatSummary, RESEAL_STEP, transitionalNames } from './rotate-report';
@@ -180,7 +180,8 @@ const DRAIN_MARGIN_MINUTES = 1;
  */
 export function drainMinutes(box: Readonly<Record<string, string | undefined>>): number {
   const configured = Number.parseInt(box.CELLD_HANDLER_BUDGET_S ?? '', 10);
-  const seconds = Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_CELLD_HANDLER_BUDGET_S;
+  const seconds =
+    Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_CELLD_HANDLER_BUDGET_S;
   return Math.ceil(seconds / 60) + DRAIN_MARGIN_MINUTES;
 }
 
@@ -255,7 +256,15 @@ async function startJournal(
   const head = await store.head();
   const keys = selectKeys(input, head.secrets);
   assertNothingOverrides(input.stateDir, keys);
-  const existingBundles = await listBundles(store.settings.bundles, deps.log);
+  // The current bundle first (bundle-head.ts), then the others newest first: the prune order.
+  const { bundle: current, bundles } = await currentBundle(
+    store.settings.bundles,
+    store.provider,
+    deps.log
+  );
+  const existingBundles = current
+    ? [current, ...bundles.filter((b) => b.bundleId !== current.bundleId)]
+    : bundles;
   for (const line of formatPlan(keys, head.secrets, { ...input, existingBundles })) deps.log(line);
   if (input.dryRun) {
     deps.log('dry run: nothing was changed');
@@ -409,7 +418,8 @@ async function runRotateLocked(input: RotateInput, deps: RotateDeps): Promise<Jo
   // still reports it, so the exit status never says a compromised key was retired when it was not.
   const rolledBackEarlier = journal.keys.filter(
     (name) =>
-      journal.steps[name]?.phase === 'rolled-back' && !failures.some((f) => f.startsWith(`${name}:`))
+      journal.steps[name]?.phase === 'rolled-back' &&
+      !failures.some((f) => f.startsWith(`${name}:`))
   );
   const carried = rolledBackEarlier.map(
     (name) => `${name}: rolled back, not replaced (${journal.steps[name]?.error ?? ''})`

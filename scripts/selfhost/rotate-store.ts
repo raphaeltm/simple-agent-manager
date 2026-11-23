@@ -23,6 +23,7 @@ import {
 } from '../../deploy/selfhost/key-agent/bundle.ts';
 import type { KeyProvider } from '../../deploy/selfhost/key-agent/provider.ts';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
+import { assertSecretsMatchHead, commitHead, keptBundleIds } from './bundle-head';
 import {
   applyKeyChoice,
   explicitKeyProvider,
@@ -31,12 +32,12 @@ import {
   readKeyChoice,
 } from './key-choice';
 import {
+  currentBundle,
   DEFAULT_KEPT_BUNDLES,
   KEY_AGENT_DIR,
   type KeyServiceSettings,
   keyServiceSettings,
   LEGACY_KEY_PROVIDER,
-  listBundles,
   pruneBundles,
 } from './key-service';
 import { ensurePrivateDir, replacePrivateFile } from './secret-files';
@@ -104,6 +105,11 @@ export interface StepState {
   resumePhase?: Phase;
   /** The phase before the staged transition, for a resumed rollback. */
   stagedFrom?: Phase;
+  /**
+   * The bundle that was current when the staged one was sealed. A run stopped between writing
+   * the staged bundle and making it current resumes only while this one is still current.
+   */
+  stagedOver?: string;
   error?: string;
 }
 
@@ -179,13 +185,15 @@ export function archiveJournal(stateDir: string, journal: Journal): string {
 export interface RotationStore {
   provider: KeyProvider;
   settings: KeyServiceSettings;
-  /** The newest bundle and its contents: what the next deploy runs with. */
+  /** The current bundle (bundle-head.ts) and its contents: what the next deploy runs with. */
   head(): Promise<{ bundle: SealedBundle; secrets: Secrets }>;
   hasBundle(bundleId: string): Promise<boolean>;
   /** Seals in memory and proves the result opens to the same secrets. Writes nothing. */
   seal(secrets: Secrets): Promise<SealedBundle>;
+  /** Writes a sealed bundle and makes it current: the next deploy runs with it. */
   write(bundle: SealedBundle): Promise<void>;
-  remove(bundleId: string): Promise<void>;
+  /** Makes a bundle already in the store current (a resumed write that stopped in between). */
+  makeCurrent(bundleId: string): Promise<void>;
   prune(keepIds: readonly string[]): Promise<string[]>;
   writeSnapshot(rotationId: string, name: string, secrets: Secrets): Promise<void>;
   readSnapshot(rotationId: string, name: string): Promise<Secrets>;
@@ -230,9 +238,11 @@ export function openRotationStore(
     provider: keyProvider,
     settings,
     async head() {
-      const bundle = (await listBundles(settings.bundles))[0];
+      const { bundle, head } = await currentBundle(settings.bundles, keyProvider);
       if (!bundle) throw new Error(`no sealed bundle in ${settings.bundles.location}`);
-      return { bundle, secrets: await openBundle(bundle, keyProvider) };
+      const secrets = await openBundle(bundle, keyProvider);
+      assertSecretsMatchHead(head, secrets);
+      return { bundle, secrets };
     },
     hasBundle: async (bundleId) => (await settings.bundles.read(bundleId)) !== null,
     async seal(secrets) {
@@ -244,13 +254,28 @@ export function openRotationStore(
       }
       return bundle;
     },
-    write: (bundle) => settings.bundles.write(bundle),
-    remove: (bundleId) => settings.bundles.remove(bundleId),
+    async write(bundle) {
+      const { head } = await currentBundle(settings.bundles, keyProvider);
+      await settings.bundles.write(bundle);
+      // The head, not the bundle's date, makes it current (bundle-head.ts).
+      await commitHead(settings.bundles, bundle, keyProvider, head);
+    },
+    async makeCurrent(bundleId) {
+      const { head, bundles } = await currentBundle(settings.bundles, keyProvider);
+      const bundle = bundles.find((b) => b.bundleId === bundleId);
+      if (!bundle) throw new Error(`no sealed bundle ${bundleId} in ${settings.bundles.location}`);
+      // Opens under this key and carries its own installation, as any bundle made current must.
+      if ((await openBundle(bundle, keyProvider)).SAM_INSTALLATION_ID !== bundle.installationId) {
+        throw new Error(`bundle ${bundleId} is not a sealed bundle of ${bundle.installationId}`);
+      }
+      await commitHead(settings.bundles, bundle, keyProvider, head);
+    },
     async prune(keepIds) {
-      const newest = (await listBundles(settings.bundles))
-        .slice(0, DEFAULT_KEPT_BUNDLES)
-        .map((b) => b.bundleId);
-      return await pruneBundles(settings.bundles, [...new Set([...newest, ...keepIds])]);
+      const { bundle, bundles } = await currentBundle(settings.bundles, keyProvider);
+      const kept = bundle
+        ? keptBundleIds(bundles, bundle.bundleId, undefined, DEFAULT_KEPT_BUNDLES)
+        : [];
+      return await pruneBundles(settings.bundles, [...new Set([...kept, ...keepIds])]);
     },
     async writeSnapshot(rotationId, name, secrets) {
       const path = snapshotPath(rotationId, name);

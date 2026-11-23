@@ -6,13 +6,20 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { LOCAL_BUNDLE_SUBDIR } from '../../deploy/selfhost/key-agent/bundle-store.ts';
+import {
+  LOCAL_BUNDLE_SUBDIR,
+  LOCAL_HEAD_FILE,
+} from '../../deploy/selfhost/key-agent/bundle-store.ts';
+import { currentByHint } from './bundle-head';
 
-/** The installation id in the newest sealed bundle's header (not encrypted), or null. */
+/**
+ * The installation id in the current sealed bundle's header (not encrypted), or null: the bundle
+ * the head names (bundle-head.ts, by its hint: this reads no key), else the newest.
+ */
 export function sealedInstallationId(state: string): string | null {
   const dir = join(state, LOCAL_BUNDLE_SUBDIR);
   if (!existsSync(dir)) return null;
-  let newest: { createdAt: string; installationId: string } | null = null;
+  const headers: { bundleId: string; createdAt: string; installationId: string }[] = [];
   for (const name of readdirSync(dir)) {
     if (!/^[0-9a-f]{32}\.json$/.test(name)) continue;
     let header: unknown;
@@ -24,9 +31,11 @@ export function sealedInstallationId(state: string): string | null {
     const { createdAt, installationId } = (header ?? {}) as Record<string, unknown>;
     if (typeof createdAt !== 'string' || typeof installationId !== 'string')
       throw new Error('Invalid sealed bundle');
-    if (!newest || createdAt > newest.createdAt) newest = { createdAt, installationId };
+    headers.push({ bundleId: name.slice(0, -'.json'.length), createdAt, installationId });
   }
-  return newest?.installationId ?? null;
+  const headPath = join(state, LOCAL_HEAD_FILE);
+  const head = existsSync(headPath) ? readFileSync(headPath, 'utf8') : null;
+  return currentByHint(headers, head)?.installationId ?? null;
 }
 
 /** platform-keys.json when present, else the newest sealed bundle; throws when neither names one. */

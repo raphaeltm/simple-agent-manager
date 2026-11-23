@@ -118,7 +118,13 @@ export async function runMigration(
   // bundle this attempt created (it never switched, or it was rolled back first).
   const store = bundleStoreFor(stateDir);
   const bundlesBefore = new Set(await store.listIds());
+  const headBefore = await store.readHead();
   const forgetNewBundles = async () => {
+    // The head as it was first (bundle-head.ts): it must never name a bundle removed below.
+    if ((await store.readHead()) !== headBefore) {
+      if (headBefore === null) await store.removeHead();
+      else await store.writeHead(headBefore);
+    }
     for (const id of await store.listIds()) {
       if (bundlesBefore.has(id)) continue;
       await store.remove(id);

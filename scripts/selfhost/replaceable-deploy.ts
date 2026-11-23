@@ -28,7 +28,15 @@ export async function reconcileReplaceableBox(
   if (!replaceableBox(box)) return;
   assertReplaceableSetup(box, box.SAM_KEY_PROVIDER?.trim() ?? '');
   assertNoPendingRebuild(stateDir);
-  await reconcileBundleMirror(bundleStoreFor(stateDir), bucket, log);
+  const settings = keyServiceSettings(box, stateDir);
+  if (!settings) return;
+  // The key verifies both heads (bundle-head.ts) before anything in the bucket is pruned.
+  await reconcileBundleMirror(
+    bundleStoreFor(stateDir),
+    bucket,
+    log,
+    createKeyProvider(settings.hostEnv)
+  );
 }
 
 export async function publishReplaceableLedger(

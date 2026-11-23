@@ -15,6 +15,7 @@ import { addResource } from '../../deploy/selfhost/created-resources.mjs';
 import { openBundle, type SealedBundle } from '../../deploy/selfhost/key-agent/bundle.ts';
 import type { KeyProvider } from '../../deploy/selfhost/key-agent/provider.ts';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
+import { byCreatedAt, currentByHint, selectCurrentBundle } from './bundle-head.js';
 import { recordPath } from './install-record.js';
 import { explicitKeyProvider, type PlatformCandidates } from './key-choice.js';
 import {
@@ -27,7 +28,9 @@ import {
 import {
   type BoxBucket,
   bucketBundleIds,
+  bucketHead,
   fetchLedger,
+  HEAD_KEY,
   LEDGER_SECRET,
   readBucketBundle,
   REBUILD_MARKER,
@@ -70,7 +73,7 @@ async function providerFor(input: RebuildInput, bundle: SealedBundle): Promise<K
     if (provider.name === bundle.provider && provider.keyRef === bundle.keyRef) return provider;
   }
   throw new Error(
-    `the newest bundle in the bucket (${bundle.bundleId}) was sealed with ${bundle.provider} key ` +
+    `the current bundle in the bucket (${bundle.bundleId}) was sealed with ${bundle.provider} key ` +
       `${bundle.keyRef}, which this box's .env does not resolve to. Set SAM_KEY_PROVIDER and its ` +
       "key in .env to the dead box's key, and give this VM's identity access to it"
   );
@@ -104,8 +107,8 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
     );
   }
   // A corrupt object stops the rebuild, naming it: skipping it could restore an older bundle.
-  const bundles = ids
-    .map((id) => {
+  const bundles = byCreatedAt(
+    ids.map((id) => {
       try {
         return readBucketBundle(bucket, id);
       } catch (error) {
@@ -115,9 +118,8 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
         );
       }
     })
-    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
-  const newest = bundles[0] as SealedBundle;
-  const installationId = newest.installationId;
+  );
+  const installationId = (bundles[0] as SealedBundle).installationId;
   if (bundles.some((b) => b.installationId !== installationId)) {
     throw new Error('the bucket holds bundles of more than one installation; refusing to choose');
   }
@@ -128,12 +130,27 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
     );
   }
   assertNotRootForSealing(stateDir);
-  const provider = await providerFor(input, newest);
+  // The bundle the dead box would have deployed next, by the same selector its deploy used
+  // (bundle-head.ts): the bucket's head, verified under the key .env resolves to; a bucket from
+  // before the head, the newest createdAt. The head names its bundle in plaintext only so the
+  // right key can be found; it counts once it opens under that key.
+  const headText = bucketHead(bucket);
+  const hinted = currentByHint(bundles, headText) as SealedBundle;
+  const provider = await providerFor(input, hinted);
+  const { bundle: current, head } = await selectCurrentBundle(
+    bundles,
+    headText,
+    provider,
+    `${HEAD_KEY} in the fleet bucket`
+  );
+  if (!current) throw new Error('the fleet bucket holds no current bundle');
+  if (head) log(`the bucket's head names bundle ${current.bundleId} (write ${head.seq})`);
   const accepted: SealedBundle[] = [];
-  for (const bundle of bundles) {
+  // The current bundle first, then the newest others.
+  for (const bundle of [current, ...bundles.filter((b) => b !== current)]) {
     if (accepted.length >= DEFAULT_KEPT_BUNDLES) break;
     if (bundle.provider !== provider.name || bundle.keyRef !== provider.keyRef) {
-      // An older bundle from before a provider switch: the newest decides, this one stays out.
+      // An older bundle from before a provider switch: the current one decides, this stays out.
       log(`skipping bundle ${bundle.bundleId}: sealed with ${bundle.provider} ${bundle.keyRef}`);
       continue;
     }
@@ -156,8 +173,8 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
   // Until the record is complete, deploy and every seal refuse this state (assertNoPendingRebuild).
   ensurePrivateDir(join(stateDir, KEY_AGENT_DIR));
   writePrivateFile(join(stateDir, REBUILD_MARKER), `${installationId}\n`);
-  // The newest bundle first, then older ones, then the record: a rebuild that stops part way
-  // leaves the newest on the box (sealing never starts from an older one) and is completed by
+  // The current bundle first, then older ones, then the record: a rebuild that stops part way
+  // leaves the current one on the box (and the marker stops every seal) and is completed by
   // running it again. A bundle already present must be the bucket's, byte for byte.
   for (const bundle of accepted) {
     if (present.includes(bundle.bundleId)) {
@@ -173,6 +190,9 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
     }
     await local.write(bundle);
   }
+  // The bucket's head, byte for byte: the rebuilt box's deploy picks what the dead box would have,
+  // and its next reconcile sees the same write on both sides.
+  if (headText !== null) await local.writeHead(headText);
   for (const entry of entries ?? []) {
     addResource(recordPath(stateDir), {
       cloud: entry.cloud,
@@ -185,8 +205,8 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
   }
   rmSync(join(stateDir, REBUILD_MARKER));
   log(
-    `restored ${accepted.length} sealed bundle(s) of installation ${installationId}, the newest ` +
-      `${newest.bundleId} sealed ${newest.createdAt} (check it is the dead box's latest seal), ` +
+    `restored ${accepted.length} sealed bundle(s) of installation ${installationId}, the current ` +
+      `${current.bundleId} sealed ${current.createdAt} (check it is the dead box's latest seal), ` +
       `and ${entries?.length ?? 0} cloud record entries into ${stateDir}`
   );
   return {

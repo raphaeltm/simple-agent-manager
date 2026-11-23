@@ -28,7 +28,7 @@ import { SIGNING_KEY_NAME } from '../../deploy/selfhost/key-agent/server.ts';
 import { type BoxContext, readManifest } from './backup-lib';
 import { listObjects, readObject } from './bucket-objects';
 import { applyKeyChoice, explicitKeyProvider, readKeyChoice } from './key-choice';
-import { bundleStoreFor, KEY_AGENT_DIR, keyServiceSettings, listBundles } from './key-service';
+import { bundleStoreFor, currentBundle, KEY_AGENT_DIR, keyServiceSettings } from './key-service';
 import { PLATFORM_KEY_NAMES } from './platform-keys';
 import { parseDotenv, readPrivateJson } from './secret-files';
 
@@ -57,12 +57,16 @@ export async function knownSecrets(
   const secretsFile = join(stateDir, 'secrets.env');
   if (existsSync(secretsFile))
     Object.assign(all, parseDotenv(readFileSync(secretsFile, 'utf8'), secretsFile));
-  const newest = (await listBundles(bundleStoreFor(stateDir), () => undefined))[0];
-  if (newest) {
+  const store = bundleStoreFor(stateDir);
+  if ((await store.listIds()).length > 0) {
     const choice = readKeyChoice(stateDir);
     const effective = !explicitKeyProvider(box) && choice ? applyKeyChoice(box, choice) : box;
     const settings = keyServiceSettings(effective, stateDir);
-    if (settings) Object.assign(all, await openBundle(newest, createKeyProvider(settings.hostEnv)));
+    if (settings) {
+      const provider = createKeyProvider(settings.hostEnv);
+      const { bundle } = await currentBundle(store, provider, () => undefined);
+      if (bundle) Object.assign(all, await openBundle(bundle, provider));
+    }
   }
   const names = new Set<string>(PLATFORM_KEY_NAMES.filter((n) => !NOT_SECRET.has(n)));
   const values: string[] = [];

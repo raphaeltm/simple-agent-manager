@@ -25,6 +25,7 @@ import { openBundle, sealSecrets } from '../../deploy/selfhost/key-agent/bundle.
 import type { KeyProvider } from '../../deploy/selfhost/key-agent/provider.ts';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
 import { PREVIOUS_PROVIDER_ENV } from '../../deploy/selfhost/key-agent/server.ts';
+import { assertSecretsMatchHead, commitHead } from './bundle-head';
 import {
   applyKeyChoice,
   type ChooseInput,
@@ -38,11 +39,11 @@ import {
   writeKeyChoice,
 } from './key-choice';
 import {
+  currentBundle,
   ensureKeyServiceFiles,
   type KeyServiceSettings,
   keyServiceSettings,
   LEGACY_KEY_PROVIDER,
-  listBundles,
   renderKeyAgentEnv,
 } from './key-service';
 import { writePrivateFile } from './secret-files';
@@ -130,9 +131,10 @@ export async function runSwitch(input: SwitchInput, deps: SwitchDeps): Promise<K
   }
   const oldSettings = settingsFor(box, stateDir, current.provider, applyKeyChoice({}, current));
   const oldProvider = createKeyProvider(oldSettings.hostEnv);
-  const newest = (await listBundles(oldSettings.bundles))[0];
+  const { bundle: newest, head } = await currentBundle(oldSettings.bundles, oldProvider);
   if (!newest) throw new Error(`no sealed bundle in ${oldSettings.bundles.location}`);
   const secrets = await openBundle(newest, oldProvider);
+  assertSecretsMatchHead(head, secrets);
 
   const target = await targetChoice(input, current, deps);
   const newSettings = settingsFor(box, stateDir, target.provider, target.settings);
@@ -184,6 +186,8 @@ export async function runSwitch(input: SwitchInput, deps: SwitchDeps): Promise<K
   const savedChoice = readFileSync(keyChoicePath(stateDir), 'utf8');
   const savedAgentEnv = readFileSync(agentEnvPath, 'utf8');
   await newSettings.bundles.write(bundle);
+  // Current by the head (bundle-head.ts), sealed with the new key like the bundle it names.
+  const switchedHead = await commitHead(newSettings.bundles, bundle, newProvider, head);
   if (!same) writePrivateFile(previousPath, renderKeyAgentEnv(oldSettings));
   writeKeyChoice(stateDir, target);
   writePrivateFile(agentEnvPath, renderKeyAgentEnv(newSettings));
@@ -200,6 +204,8 @@ export async function runSwitch(input: SwitchInput, deps: SwitchDeps): Promise<K
     writePrivateFile(keyChoicePath(stateDir), savedChoice);
     writePrivateFile(agentEnvPath, savedAgentEnv);
     rmSync(previousPath, { force: true });
+    // The old bundle current again before the new one goes: a head never names a missing bundle.
+    await commitHead(newSettings.bundles, newest, oldProvider, switchedHead);
     await newSettings.bundles.remove(bundle.bundleId);
     await deps.restartAgent();
     await deps.deploy();

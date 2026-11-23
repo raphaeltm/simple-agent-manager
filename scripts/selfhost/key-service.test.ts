@@ -385,11 +385,20 @@ describe('removing a sealed value (pnpm selfhost:deploy --unset NAME)', () => {
     const removed = await seal({ ...OPERATOR }, ['PROVIDER_ORPHAN_MIN_AGE_MS']);
     // The newest bundle (the one without the retired value) is truncated on disk.
     const path = join(state, 'key-agent', 'bundles', `${removed.bundleId}.json`);
-    writeFileSync(path, readFileSync(path, 'utf8').slice(0, 40));
+    const intact = readFileSync(path, 'utf8');
+    writeFileSync(path, intact.slice(0, 40));
     await expect(seal({ ...OPERATOR })).rejects.toThrow(/cannot be read.*refusing to deploy/s);
-    // Control: once the damaged file is dealt with, the deploy runs again.
+    // Removing it does not help: the head names it, and deploying from the older bundle would
+    // bring the unset value back (bundle-head.ts).
     rmSync(path);
-    await expect(seal({ ...OPERATOR })).resolves.toMatchObject({ bundleId: expect.any(String) });
+    await expect(seal({ ...OPERATOR })).rejects.toThrow(
+      new RegExp(`names bundle ${removed.bundleId}, which is not there`)
+    );
+    // Control: once it is restored (from backup), the deploy runs again, without the value.
+    writeFileSync(path, intact);
+    const after = await seal({ ...OPERATOR });
+    expect(after.bundleId).toBe(removed.bundleId);
+    expect(after.secrets).not.toHaveProperty('PROVIDER_ORPHAN_MIN_AGE_MS');
   });
 
   it('refuses when the newest bundle exists but the file system cannot read it (Codex P2)', async () => {

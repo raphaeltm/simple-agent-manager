@@ -16,10 +16,11 @@ import { pathToFileURL } from 'node:url';
 import { openBundle } from '../../deploy/selfhost/key-agent/bundle.ts';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
 import { createKeyAgent, SIGNING_KEY_NAME } from '../../deploy/selfhost/key-agent/server.ts';
+import { assertSecretsMatchHead } from './bundle-head';
 import { nodeKeyAgentSocket } from './key-agent-node-socket';
 import { applyKeyChoice, explicitKeyProvider, readKeyChoice } from './key-choice';
 import { agentVerifyKey } from './key-seal';
-import { keyAgentAddress, keyServiceSettings, listBundles } from './key-service';
+import { currentBundle, keyAgentAddress, keyServiceSettings } from './key-service';
 
 /** The Worker loader's surface used here (apps/api/src/selfhost/runtime-secrets.ts). */
 interface WorkerLoader {
@@ -46,10 +47,11 @@ export async function preflightSealedSecrets(input: {
   const settings = keyServiceSettings(box, input.stateDir);
   if (!settings) throw new Error('this box does not seal its secrets (legacy-plaintext)');
   const provider = createKeyProvider(settings.hostEnv);
-  const bundle = (await listBundles(settings.bundles))[0];
+  const { bundle, head } = await currentBundle(settings.bundles, provider);
   if (!bundle)
     throw new Error(`no sealed bundle in ${settings.bundles.location}: run --init first`);
   const sealed = await openBundle(bundle, provider);
+  assertSecretsMatchHead(head, sealed);
   // The real peer check (/proc/net/tcp), allowing only this process's uid: the Worker loader
   // below runs in this process, so nothing else on the box can read the answer meanwhile.
   const self = process.getuid?.();
