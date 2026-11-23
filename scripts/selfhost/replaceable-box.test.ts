@@ -49,6 +49,7 @@ import {
   replaceableBox,
 } from './replaceable-box.js';
 import { runRebuild } from './replaceable-rebuild.js';
+import { openRotationStore } from './rotate-store.js';
 import { stateInstallationId } from './state-installation.js';
 
 vi.setConfig({ testTimeout: CHILD_TEST_TIMEOUT_MS });
@@ -426,6 +427,18 @@ describe('replace a dead box (real deploy --init, fake Cloud KMS and bucket)', (
     });
     expect(localBundles(stateB)).toEqual(localBundles(stateA));
     expect(logs.join('\n')).toMatch(/WARNING: the fleet bucket holds no sam-box\/ledger\.json/);
+  });
+
+  it('rotates on a box whose key provider is set only in .env (never recorded)', async () => {
+    const stateA = join(dir, 'box-a/.state');
+    const envA = boxEnv(stateA);
+    const init = await runDeploy(envA, ['--init'], env);
+    expect(init.status, init.out).toBe(0);
+    // Explicit SAM_KEY_PROVIDER is its own record: no choice.json is written.
+    expect(existsSync(join(stateA, 'key-agent/choice.json'))).toBe(false);
+    const store = openRotationStore(boxOf(envA), stateA);
+    expect(store.provider.name).toBe('gcp-kms');
+    expect(store.provider.keyRef).toBe(GCP_KEY);
   });
 
   it('refuses replaceable mode with the key file, explicit or automatic', async () => {
