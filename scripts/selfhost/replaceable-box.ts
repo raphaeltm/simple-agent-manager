@@ -295,6 +295,14 @@ export function mirroredBundleStore(
     withHeadLock: (fn) => local.withHeadLock(fn),
     async writeHead(text) {
       if (stateDir) assertNoPendingRebuild(stateDir);
+      // The bucket's head never names a bundle the bucket lacks (a rebuild could not restore it):
+      // a bundle whose upload failed earlier (a resumed rotation) is uploaded first.
+      const named = headHint(text)?.bundleId;
+      if (named && !bucketBundleIds(bucket).includes(named)) {
+        const bundleText = await local.read(named);
+        if (bundleText === null) throw new Error(`bundle ${named} is not in ${local.location}`);
+        bucket.write(bundleKey(named), bundleText);
+      }
       // Both copies or neither: a bucket that fails leaves the box's previous head in place, so
       // the box is never configured for one head while holding another (a switch sealed with
       // the new key but still recorded on the old one), and the bucket is never behind it.

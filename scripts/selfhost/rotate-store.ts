@@ -275,8 +275,9 @@ export function openRotationStore(
     },
     async makeCurrent(bundleId, over) {
       await assertNotBehindBucket(effectiveBox, stateDir, keyProvider);
-      const { head, bundles } = await currentBundle(settings.bundles, keyProvider);
-      if (head?.bundleId !== over) {
+      const { bundle: current, head, bundles } = await currentBundle(settings.bundles, keyProvider);
+      // A box without a head yet selects by date (bundle-head.ts): that choice counts the same.
+      if ((head?.bundleId ?? current?.bundleId) !== over) {
         throw new Error(
           `bundle ${bundleId} was sealed over ${over}, which is no longer current; not making it current`
         );

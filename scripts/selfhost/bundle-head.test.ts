@@ -652,3 +652,30 @@ describe('the sealing lock (one sealing operation per box)', () => {
     await deploy(envA, ['--init']);
   });
 });
+
+describe('a rotation resumed on a box without a head yet', () => {
+  it('makes the staged bundle current when the date fallback still picks the one it replaced', async () => {
+    const stateA = join(dir, 'box-a/.state');
+    const envA = boxEnv(stateA);
+    writeSecrets(stateA, []);
+    await deploy(envA, ['--init']);
+    // An upgraded box that has not recorded its head yet.
+    rmSync(headPath(stateA));
+    rmSync(bucketHeadPath());
+    vi.stubEnv('PATH', env.PATH);
+    vi.stubEnv('FAKE_GCS_ROOT', gcsRoot);
+    const store = openRotationStore(boxOf(envA), stateA);
+    const over = await store.head();
+    expect(over.basis).toBeNull();
+    // The staged bundle, written before a stop, sealed while the clock was an hour behind.
+    const staged = await sealSecrets(over.secrets, store.provider, {
+      installationId: over.bundle.installationId,
+      now: () => new Date(Date.parse(over.bundle.createdAt) - HOUR_MS),
+    });
+    await store.settings.bundles.write(staged);
+    expect((await store.head()).bundle.bundleId).toBe(over.bundle.bundleId);
+    await store.makeCurrent(staged.bundleId, over.bundle.bundleId);
+    expect((await store.head()).bundle.bundleId).toBe(staged.bundleId);
+    expect(headHint(readFileSync(headPath(stateA), 'utf8'))?.seq).toBe(1);
+  });
+});

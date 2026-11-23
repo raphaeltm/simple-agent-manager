@@ -269,6 +269,7 @@ describe('the bucket copy of the bundles', () => {
   });
 
   it('moves the head only when both copies are written', async () => {
+    const provider = fileProvider();
     const remote = memoryBucket();
     const failing: BoxBucket = {
       ...remote,
@@ -278,15 +279,43 @@ describe('the bucket copy of the bundles', () => {
       },
     };
     const local = openBundleStore({ dir: join(dir, 'both/bundles') });
-    await local.writeHead('first\n');
-    await expect(mirroredBundleStore(local, failing).writeHead('second\n')).rejects.toThrow(
+    const [a, b] = [
+      await sealed(provider, '2026-11-01T00:00:00Z'),
+      await sealed(provider, '2026-11-02T00:00:00Z'),
+    ];
+    await local.write(a);
+    await local.write(b);
+    const head = (bundleId: string, seq: number) =>
+      sealHead({ seq, bundleId, installationId: 'a'.repeat(32) }, provider);
+    const first = await head(a.bundleId, 1);
+    const second = await head(b.bundleId, 2);
+    await local.writeHead(first);
+    await expect(mirroredBundleStore(local, failing).writeHead(second)).rejects.toThrow(
       /cp failed/
     );
-    expect(await local.readHead()).toBe('first\n');
+    expect(await local.readHead()).toBe(first);
     // Control: a working bucket takes the new head on both sides.
-    await mirroredBundleStore(local, remote).writeHead('second\n');
-    expect(await local.readHead()).toBe('second\n');
-    expect(remote.objects.get('sam-box/head.json')).toBe('second\n');
+    await mirroredBundleStore(local, remote).writeHead(second);
+    expect(await local.readHead()).toBe(second);
+    expect(remote.objects.get('sam-box/head.json')).toBe(second);
+  });
+
+  it('uploads the bundle a new head names before the head, if the bucket lacks it', async () => {
+    const provider = fileProvider();
+    const remote = memoryBucket();
+    const local = openBundleStore({ dir: join(dir, 'upload/bundles') });
+    // Written on the box only (its upload failed, as in a rotation that stopped there).
+    const staged = await sealed(provider, '2026-11-01T00:00:00Z');
+    await local.write(staged);
+    const head = await sealHead(
+      { seq: 1, bundleId: staged.bundleId, installationId: 'a'.repeat(32) },
+      provider
+    );
+    await mirroredBundleStore(local, remote).writeHead(head);
+    expect(remote.objects.get(`sam-box/bundles/${staged.bundleId}.json`)).toBe(
+      await local.read(staged.bundleId)
+    );
+    expect(remote.objects.get('sam-box/head.json')).toBe(head);
   });
 
   it('prunes only while no head commit is in progress (head lock)', async () => {
