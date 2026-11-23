@@ -48,6 +48,9 @@ export async function recordExistenceDecision(
   });
 }
 
+/** A repeated deferral for the same reason is recorded at most once an hour. */
+const DEFERRED_DECISION_DEDUPE_MS = 60 * 60 * 1000;
+
 export type ReleaseOutcome = 'released' | 'release_failed' | 'deferred' | 'superseded';
 
 /**
@@ -110,9 +113,15 @@ export async function releaseConfirmedAbsentNode(
   if (busy.length > 0) {
     // Another owner is starting or stopping an environment here; its own path tears the node
     // down. The absence record is kept, so this node is reconsidered next confirmation interval.
-    await recordExistenceDecision(env, node, 'provider_release_deferred', 'lifecycle_in_progress', {
-      environmentStatuses: busy.map((e) => e.status).join(','),
-    });
+    // Recorded at most once an hour: a long stop would otherwise add a row every interval.
+    await recordExistenceDecision(
+      env,
+      node,
+      'provider_release_deferred',
+      'lifecycle_in_progress',
+      { environmentStatuses: busy.map((e) => e.status).join(',') },
+      DEFERRED_DECISION_DEDUPE_MS
+    );
     return 'deferred';
   }
   const stamp = confirmedAt.toISOString();
