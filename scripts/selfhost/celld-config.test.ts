@@ -10,6 +10,7 @@ import {
   buildCelldConfig,
   SELFHOST_VAR_OVERRIDES,
 } from './celld-config.js';
+import { SELFHOST_DURABLE_OBJECTS } from './selfhost-durable-objects.js';
 
 const WRANGLER_TOML = resolve(import.meta.dirname, '../../apps/api/wrangler.toml');
 
@@ -85,8 +86,10 @@ describe('buildCelldConfig against the real apps/api/wrangler.toml', () => {
     // Keep shared tags in order, then append the celld-only tag.
     expect(config.migrations.map((m) => m.tag)).toEqual([
       ...sourceMigrations.map((m) => m.tag),
-      'selfhost-hosted-git-v1',
+      ...SELFHOST_DURABLE_OBJECTS.map((o) => o.migrationTag),
     ]);
+    expect(config.migrations.map((m) => m.tag)).toContain('selfhost-hosted-git-v1');
+    expect(config.migrations.map((m) => m.tag)).toContain('selfhost-box-upload-gate-v1');
     for (const migration of config.migrations) {
       expect(Object.keys(migration).sort()).toEqual(['new_sqlite_classes', 'tag']);
     }
@@ -95,14 +98,17 @@ describe('buildCelldConfig against the real apps/api/wrangler.toml', () => {
       ...(m.new_sqlite_classes ?? []),
       ...(m.new_classes ?? []),
     ]);
-    expect(new Set(created)).toEqual(new Set([...expected, 'HostedGitRepo']));
+    expect(new Set(created)).toEqual(
+      new Set([...expected, ...SELFHOST_DURABLE_OBJECTS.map((o) => o.className)])
+    );
   });
 
-  it('adds only HostedGitRepo to the shared Durable Object bindings', () => {
+  it('adds only the self-host classes to the shared Durable Object bindings', () => {
     expect(config.durable_objects.bindings).toEqual([
       ...(source.durable_objects as { bindings: Array<{ name: string; class_name: string }> })
         .bindings,
       { name: 'HOSTED_GIT', class_name: 'HostedGitRepo' },
+      { name: 'BOX_UPLOAD_GATE', class_name: 'BoxUploadGate' },
     ]);
   });
 

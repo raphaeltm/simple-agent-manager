@@ -172,6 +172,22 @@ describe('compose-image-artifacts callback (vertical slice)', () => {
       services: [{ serviceName: 'web', sourceRef: 'workspace-web' }],
     };
 
+    it('answers 503 naming the missing settings when nothing can sign URLs (never 500)', async () => {
+      // The real wrapper and resolver: no presign credential and no box signer installed.
+      const actual = await vi.importActual<
+        typeof import('../../../src/services/compose-image-artifacts')
+      >('../../../src/services/compose-image-artifacts');
+      createUploadsMock.mockImplementationOnce((env, input) =>
+        actual.createComposeImageArtifactUploads(env as never, input as never)
+      );
+      const app = await buildApp();
+      const res = await request(app, 'proj-1', 'init', validInit);
+      expect(res.status).toBe(503);
+      const body = (await res.json()) as { message: string };
+      expect(body.message).toContain('R2_ACCESS_KEY_ID');
+      expect(body.message).toContain('self-host build');
+    });
+
     it('creates upload targets for a valid init request', async () => {
       const app = await buildApp();
       const res = await request(app, 'proj-1', 'init', validInit);

@@ -93,14 +93,14 @@ describe('generatePresignedUploadUrl', () => {
     const env = makePresignEnv({ R2_ACCESS_KEY_ID: undefined });
     await expect(
       generatePresignedUploadUrl(env, validOptions),
-    ).rejects.toThrow('R2 S3 credentials not configured');
+    ).rejects.toThrow('Object uploads are not configured');
   });
 
   it('rejects when CF_ACCOUNT_ID is missing', async () => {
     const env = makePresignEnv({ CF_ACCOUNT_ID: undefined });
     await expect(
       generatePresignedUploadUrl(env, validOptions),
-    ).rejects.toThrow('R2 S3 credentials not configured');
+    ).rejects.toThrow('Object uploads are not configured');
   });
 
   it('uses configurable presign expiry from env', async () => {

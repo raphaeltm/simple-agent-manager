@@ -6,8 +6,8 @@
  * must not carry their code. The celld config (`buildCelldConfig`) appends each one's binding
  * and migration after wrangler.toml's, and the generated celld entry (`celld-project.ts`) exports
  * the class from `SELFHOST_ENTRY_MODULE`, which the shared entry `apps/api/src/index.ts` never
- * imports. Today that module is hosted git's; a second self-host-only class must be exported from
- * the same module (tests/unit/selfhost/selfhost-only-modules.test.ts checks every class is).
+ * imports. Hosted git's class and the box upload gate are exported from it; every self-host-only class
+ * must be exported from that module (tests/unit/selfhost/selfhost-only-modules.test.ts checks every class is).
  *
  * celld 0.6.3 validates migrations declaratively (a tag or a class may appear once; a class with
  * storage must be declared in `new_sqlite_classes`). Observed with `celld dev`, which keeps state
@@ -32,6 +32,13 @@ export const SELFHOST_DURABLE_OBJECTS: readonly SelfhostDurableObject[] = [
   // SAM-hosted git repositories (one per repository); selfhost/hosted-git/local-backend.ts selects it
   // with HOSTED_GIT_BACKEND=durable-object (SELFHOST_VAR_OVERRIDES).
   { binding: 'HOSTED_GIT', className: 'HostedGitRepo', migrationTag: 'selfhost-hosted-git-v1' },
+  // The box-wide concurrent-upload limit for box object URLs (one instance):
+  // apps/api/src/selfhost/object-urls/gate.ts.
+  {
+    binding: 'BOX_UPLOAD_GATE',
+    className: 'BoxUploadGate',
+    migrationTag: 'selfhost-box-upload-gate-v1',
+  },
 ];
 
 interface DurableObjectConfig {

@@ -30,7 +30,6 @@ export type {
   ComposeImageArtifactDescriptor,
   ComposeImageArtifactDownload,
   ComposeImageArtifactPlatform,
-  ComposeImageArtifactPresignTarget,
   ComposeImageArtifactRequest,
   ComposeImageArtifactUpload,
 } from './compose-image-artifacts';
@@ -38,6 +37,7 @@ export {
   buildComposeImageArtifactKey,
   COMPOSE_IMAGE_ARTIFACT_ARCHIVE_TYPE,
   COMPOSE_IMAGE_ARTIFACT_MEDIA_TYPE,
+  composeImageArtifactMaxBytesFor,
   createComposeImageArtifactDownloads,
   createComposeImageArtifactUploads,
   getComposeImageArtifactMaxBytes,
@@ -208,6 +208,12 @@ export type {
 export { createImageResolver, ImageResolveError } from './image-resolver';
 export type { ResolverRuntimeOptions } from './image-resolver-outbound';
 export { getImageResolverConfig } from './image-resolver-outbound';
+export type {
+  ObjectPutUrlOptions,
+  ObjectUrlSigner,
+  S3PresignTarget,
+} from './object-url-signer';
+export { s3ObjectUrlSigner } from './object-url-signer';
 export type {
   DeploymentLifecyclePort,
   DeploymentProviderPort,

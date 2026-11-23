@@ -168,7 +168,9 @@ composeImageArtifactsCallbackRoute.post('/:id/compose-image-artifacts/init', asy
 
   return c.json({
     uploadId,
-    maxBytes: getComposeImageArtifactMaxBytes(c.env),
+    // Every slot carries the same bound: the configured maximum, lowered on a self-hosted box to
+    // what one request through it can carry (composeImageArtifactMaxBytesFor).
+    maxBytes: uploads[0]?.maxBytes ?? getComposeImageArtifactMaxBytes(c.env),
     uploads,
   });
 });

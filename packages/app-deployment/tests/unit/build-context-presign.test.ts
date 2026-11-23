@@ -10,16 +10,16 @@ import {
 } from '../../src/build-context-upload';
 import {
   COMPOSE_IMAGE_ARTIFACT_MEDIA_TYPE,
-  type ComposeImageArtifactPresignTarget,
   createComposeImageArtifactDownloads,
   createComposeImageArtifactUploads,
 } from '../../src/compose-image-artifacts';
 import type { AppDeploymentEnv } from '../../src/env';
+import { s3ObjectUrlSigner,type S3PresignTarget } from '../../src/object-url-signer';
 
 const secret = 'fake-secret';
 // The worker's shared R2 client (apps/api/src/services/r2-s3-client.ts) as it is configured on
 // Cloudflare for build contexts: WHEN_REQUIRED checksums, the account endpoint, unprefixed keys.
-const target: ComposeImageArtifactPresignTarget = {
+const target: S3PresignTarget = {
   client: new S3Client({
     region: 'auto',
     endpoint: 'https://fake-account.r2.cloudflarestorage.com',
@@ -101,7 +101,7 @@ describe('real SDK context presigner', () => {
       },
       { sizeBytes: body.length, sha256 },
       300,
-      target
+      s3ObjectUrlSigner(target)
     );
     const url = new URL(slot.uploadUrl);
     expect(url.pathname).toContain('/compose-build-contexts/project/env/job/3.tar.zst');
@@ -185,7 +185,7 @@ describe('real SDK download and artifact presigners', () => {
       objectKey: (key: string) => `installation/${key}`,
     };
     const key = 'compose-build-contexts/project/env/job/3.tar.zst';
-    const url = new URL(await createBuildContextDownload(key, 123, prefixed));
+    const url = new URL(await createBuildContextDownload(key, 123, s3ObjectUrlSigner(prefixed)));
     expect(url.pathname).toBe(`/fake-bucket/installation/${key}`);
     expect(url.searchParams.get('X-Amz-Expires')).toBe('123');
     expect(verifySignature(url, { host: url.host }, 'GET')).toBe(true);
@@ -197,7 +197,7 @@ describe('real SDK download and artifact presigners', () => {
   it('independently verifies upload and download signatures for distinct artifact services', async () => {
     // Match the worker compose-artifact boundary: SDK_DEFAULT, an operator prefix,
     // and dummy credentials only. No network call or real credential is needed to sign.
-    const artifactsTarget: ComposeImageArtifactPresignTarget = {
+    const artifactsTarget: S3PresignTarget = {
       client: new S3Client({
         region: 'auto',
         endpoint: 'https://operator-store.example',
@@ -224,7 +224,7 @@ describe('real SDK download and artifact presigners', () => {
           { serviceName: 'worker', sourceRef: 'worker:latest' },
         ],
       },
-      artifactsTarget
+      s3ObjectUrlSigner(artifactsTarget)
     );
     expect(uploads).toHaveLength(2);
     expect(new Set(uploads.map((upload) => upload.r2Key)).size).toBe(2);
@@ -247,7 +247,7 @@ describe('real SDK download and artifact presigners', () => {
         sizeBytes: 42,
         archiveSha256: `sha256:${'a'.repeat(64)}`,
       })),
-      artifactsTarget
+      s3ObjectUrlSigner(artifactsTarget)
     );
     expect(downloads.map((download) => download.r2Key)).toEqual(
       uploads.map((upload) => upload.r2Key)

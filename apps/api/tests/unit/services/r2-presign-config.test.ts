@@ -7,7 +7,7 @@ import { generatePresignedUploadUrl } from '../../../src/services/attachment-upl
 import { resolveR2PresignConfig } from '../../../src/services/r2-presign-config';
 import {
   getR2PresignTarget,
-  hasR2S3Credentials,
+  r2ObjectUrlsAvailable,
   resetR2S3ClientsForTests,
 } from '../../../src/services/r2-s3-client';
 
@@ -82,7 +82,7 @@ describe('resolveR2PresignConfig', () => {
     // CF_ACCOUNT_ID is present: a fallback would sign store keys for Cloudflare R2.
     const env = operatorStoreEnv({ CF_ACCOUNT_ID: 'acct123', ...change });
     expect(resolveR2PresignConfig(env)).toBeNull();
-    expect(hasR2S3Credentials(env)).toBe(false);
+    expect(r2ObjectUrlsAvailable(env)).toBe(false);
   });
 
   it.each(['R2_S3_BUCKET', 'R2_S3_KEY_PREFIX', 'R2_S3_REGION', 'R2_S3_FORCE_PATH_STYLE'] as const)(
@@ -90,7 +90,7 @@ describe('resolveR2PresignConfig', () => {
     (name) => {
       const env = cloudflareEnv({ [name]: 'celld-fleet' });
       expect(resolveR2PresignConfig(env)).toBeNull();
-      expect(hasR2S3Credentials(cloudflareEnv())).toBe(true);
+      expect(r2ObjectUrlsAvailable(cloudflareEnv())).toBe(true);
     }
   );
 
