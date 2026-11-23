@@ -2430,6 +2430,7 @@ export const workspaceResourceSummaries = sqliteTable(
     updatedAt: integer('updated_at').notNull(),
   },
   (table) => ({
+    taskIdx: index('idx_workspace_resource_summaries_task').on(table.taskId),
     projectSessionIdx: index('idx_workspace_resource_summaries_project_session').on(
       table.projectId,
       table.sessionId,
@@ -2487,6 +2488,7 @@ export const workspaceResourceChunks = sqliteTable(
     uploadedByNodeId: text('uploaded_by_node_id'),
   },
   (table) => ({
+    taskIdx: index('idx_workspace_resource_chunks_task').on(table.taskId),
     identityIdx: index('idx_workspace_resource_chunks_identity').on(
       table.projectId,
       table.workspaceId,
@@ -5181,6 +5183,7 @@ export const debugDiagnoses = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
+    ideaIdx: index('idx_debug_diagnoses_idea').on(table.ideaId),
     errorCreatedIdx: index('idx_debug_diagnoses_error_created').on(table.errorId, table.createdAt),
     windowIdx: index('idx_debug_diagnoses_window').on(table.startTime, table.endTime),
   })
@@ -5349,6 +5352,15 @@ export const platformFeedbackTriages = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
+    dispatchedTaskIdx: index('idx_platform_feedback_triages_dispatched_task').on(
+      table.dispatchedTaskId
+    ),
+    claimedTaskIdx: index('idx_platform_feedback_triages_claimed_task').on(
+      table.incidentClaimedByTaskId
+    ),
+    resolvedTaskIdx: index('idx_platform_feedback_triages_resolved_task').on(
+      table.resolvedByTaskId
+    ),
     ideaIdx: index('idx_platform_feedback_triages_idea').on(table.ideaId),
     canonicalSignatureIdx: uniqueIndex('idx_platform_feedback_triages_canonical_signature')
       .on(table.canonicalSignature)
@@ -5447,6 +5459,9 @@ export const deploymentEnvironments = sqliteTable(
     projectNameUnique: uniqueIndex('idx_deployment_environments_project_name').on(
       table.projectId,
       table.name
+    ),
+    createdByTaskIdx: index('idx_deployment_environments_created_by_task').on(
+      table.createdByTaskId
     ),
     projectIdIdx: index('idx_deployment_environments_project_id').on(table.projectId),
     nodeIdIdx: index('idx_deployment_environments_node_id').on(table.nodeId),
