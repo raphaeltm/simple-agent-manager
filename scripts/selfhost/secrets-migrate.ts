@@ -24,6 +24,7 @@ import { headHint } from './bundle-head';
 import { explicitKeyProvider, keyChoicePath, readKeyChoice } from './key-choice';
 import { bundleStoreFor, LEGACY_KEY_PROVIDER } from './key-service';
 import { fleetBucket, mirroredBundleStore, replaceableBox } from './replaceable-box';
+import { withSealingLock } from './sealing-lock';
 import { readPrivateJson, readSecretsFile } from './secret-files';
 import { keyFileNotice, keyFilePath, verifyKeyCopy } from './secrets-keyfile';
 import { type preflightSealedSecrets } from './secrets-preflight';
@@ -74,6 +75,11 @@ export async function runMigration(
   input: MigrateInput,
   deps: MigrateDeps
 ): Promise<MigrateOutcome> {
+  // One sealing operation, its deploys included (sealing-lock.ts).
+  return await withSealingLock(input.stateDir, () => runMigrationLocked(input, deps));
+}
+
+async function runMigrationLocked(input: MigrateInput, deps: MigrateDeps): Promise<MigrateOutcome> {
   const { stateDir } = input;
   const { log } = deps;
   if (explicitKeyProvider(input.box) === LEGACY_KEY_PROVIDER) {

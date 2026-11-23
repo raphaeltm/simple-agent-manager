@@ -44,6 +44,7 @@ import {
   type PlatformKeysMode,
 } from './platform-keys.js';
 import { LEDGER_SECRET } from './replaceable-box.js';
+import { acquireSealingLock } from './sealing-lock.js';
 import { readPrivateJson, readSecretsFile } from './secret-files.js';
 import { keyFileNotice } from './secrets-keyfile.js';
 
@@ -428,6 +429,10 @@ export async function resolveDeployKeys(input: {
       }
     }
   }
+  // Held until this deploy process exits, after its Worker is published (sealing-lock.ts): two
+  // overlapping deploys cannot publish in the opposite order to their seals. Taken after every
+  // refusal above, so a refused deploy writes nothing; a dry run only reads.
+  if (!dryRun) await acquireSealingLock(stateDir);
   const sealed = await resolveSealedSecrets({
     settings: keyService,
     stateDir,

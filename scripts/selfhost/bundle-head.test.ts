@@ -54,6 +54,7 @@ import { type BoxBucket, fleetBucket, HEAD_KEY } from './replaceable-box.js';
 import { runRebuild } from './replaceable-rebuild.js';
 import { applyPatch, type RotateDeps, type StepContext } from './rotate-apply.js';
 import { type Journal, openRotationStore } from './rotate-store.js';
+import { SEALING_LOCK_ENV, withSealingLock } from './sealing-lock.js';
 import { type MigrateDeps, runMigration } from './secrets-migrate.js';
 
 vi.setConfig({ testTimeout: CHILD_TEST_TIMEOUT_MS * 2 });
@@ -625,5 +626,29 @@ describe('the head lock', () => {
     await expect(withLockFile(lock, async () => 'ran', 200)).rejects.toThrow(
       new RegExp(`held by process ${process.pid}`)
     );
+  });
+});
+
+describe('the sealing lock (one sealing operation per box)', () => {
+  it('a deploy waits for another operation, and that operation’s own deploys re-enter it', async () => {
+    const stateA = join(dir, 'box-a/.state');
+    const envA = boxEnv(stateA);
+    writeSecrets(stateA, []);
+    await deploy(envA, ['--init']);
+    await withSealingLock(stateA, async () => {
+      // A child deploy of the operation holding the lock (it inherits SAM_SELFHOST_SEALING_LOCK).
+      const own = await runDeploy(envA, ['--init', '--skip-vm-agent'], deployEnv(envA));
+      expect(own.status, own.out).toBe(0);
+      // Any other deploy (no inherited holder) is refused, naming the holder.
+      const other = await runDeploy(envA, ['--init', '--skip-vm-agent'], {
+        ...deployEnv(envA),
+        [SEALING_LOCK_ENV]: '',
+      });
+      expect(other.status).not.toBe(0);
+      expect(other.out).toMatch(new RegExp(`sealing\\.lock is held by process ${process.pid}`));
+    });
+    expect(existsSync(join(stateA, 'key-agent/sealing.lock'))).toBe(false);
+    // Control: once released, a deploy runs.
+    await deploy(envA, ['--init']);
   });
 });

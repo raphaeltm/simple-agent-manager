@@ -38,6 +38,7 @@ import {
   type StepState,
   writeJournal,
 } from './rotate-store';
+import { withSealingLock } from './sealing-lock';
 import { ensurePrivateDir, readSecretsFile } from './secret-files';
 
 export type { RotateDeps };
@@ -368,7 +369,8 @@ export async function runRotate(input: RotateInput, deps: RotateDeps): Promise<J
   if (input.dryRun) return await runRotateLocked(input, deps);
   const release = acquireLock(input.stateDir);
   try {
-    return await runRotateLocked(input, deps);
+    // Also one sealing operation with every deploy it runs (sealing-lock.ts).
+    return await withSealingLock(input.stateDir, () => runRotateLocked(input, deps));
   } finally {
     release();
   }

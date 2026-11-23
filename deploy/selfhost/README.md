@@ -143,7 +143,10 @@ that only grows (`scripts/selfhost/bundle-head.ts`). The deploy, rotation, switc
 run with the bundle the head names, never the newest by date, so a host clock that moved backwards
 cannot bring back an older bundle. A head that does not open under the box's key, was edited, belongs
 to another installation or names a missing bundle stops the deploy. A box from before the head
-deploys the newest bundle by date once (what it always did) and records the head then. Going back
+deploys the newest bundle by date once (what it always did) and records the head then. One sealing
+operation runs at a time per box: a deploy, `secrets rotate`, `switch` or `migrate` holds
+`.state/key-agent/sealing.lock` until its Worker is published, and another waits up to 30 s, then
+stops naming the holder (if none is running, remove the file). Going back
 to an older SAM version by hand (not `pnpm selfhost:upgrade --rollback-from`, which restores the
 state snapshot with its head): older versions ignore the head, so delete `.state/key-agent/head.json`
 (and `sam-box/head.json` on a replaceable box) first; the next deploy of this version records it

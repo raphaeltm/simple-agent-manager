@@ -123,11 +123,10 @@ export function breakStaleLock(lockPath: string, staleIno: number): void {
  * one waiter at a time. Known limit (needs a crash first): a dead holder's pid reused by an
  * unrelated process keeps the lock until it is removed by hand (the error says how).
  */
-export async function withLockFile<T>(
+export async function acquireLockFile(
   lockPath: string,
-  fn: () => Promise<T>,
   waitMs = DEFAULT_HEAD_LOCK_WAIT_MS
-): Promise<T> {
+): Promise<() => void> {
   const deadline = Date.now() + waitMs;
   mkdirSync(dirname(lockPath), { recursive: true, mode: 0o700 });
   for (;;) {
@@ -143,11 +142,7 @@ export async function withLockFile<T>(
       } finally {
         closeSync(fd);
       }
-      try {
-        return await fn();
-      } finally {
-        rmSync(lockPath, { force: true });
-      }
+      return () => rmSync(lockPath, { force: true });
     }
     const seen = readLock(lockPath);
     if (!seen) continue; // released between our attempt and this read
@@ -165,6 +160,20 @@ export async function withLockFile<T>(
       );
     }
     await new Promise((resolve) => setTimeout(resolve, HEAD_LOCK_POLL_MS));
+  }
+}
+
+/** Runs `fn` holding the lock file (acquireLockFile), released however `fn` ends. */
+export async function withLockFile<T>(
+  lockPath: string,
+  fn: () => Promise<T>,
+  waitMs = DEFAULT_HEAD_LOCK_WAIT_MS
+): Promise<T> {
+  const release = await acquireLockFile(lockPath, waitMs);
+  try {
+    return await fn();
+  } finally {
+    release();
   }
 }
 
