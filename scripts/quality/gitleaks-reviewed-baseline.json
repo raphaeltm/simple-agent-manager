@@ -271,6 +271,14 @@
       "reviewedAt": "2026-11-21T12:15:00.000Z",
       "expiresAt": "2026-12-21T12:15:00.000Z",
       "digests": ["3a21e85ace0487849684219c304ea50f026912329b377658c85ba2caba14b8dc"]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "PR #2987 commit 4fc3f59e0 only: scripts/selfhost/live/box-object-urls.live.test.ts line 208 held the literal box-object token `samobj1.forged.forged`, an unsigned placeholder that cannot verify (no key material; the live test asserts it is refused). The next commit replaced it with a built string. Exact rule/path/line/bytes of that historical commit only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-23T11:30:00.000Z",
+      "expiresAt": "2026-12-23T11:30:00.000Z",
+      "digests": ["f0ab4cc7c363ddebbe09343c7edcd324a9452b23845ea42579402888d7795332"]
     }
   ]
 }
