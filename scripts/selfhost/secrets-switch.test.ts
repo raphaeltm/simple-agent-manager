@@ -22,7 +22,9 @@ import {
 const runDeploy = (envFile: string, args: string[], env: NodeJS.ProcessEnv = {}) =>
   harnessRunDeploy(envFile, args, { ...noStackDocker(dirname(envFile)), ...env });
 import { type FakeKeyService, startFakeKeyServices } from './fixtures/key-provider-fakes.js';
-import type { PlatformCandidates } from './key-choice.js';
+import { applyKeyChoice, type PlatformCandidates, readKeyChoice } from './key-choice.js';
+import { resolveSealedSecrets } from './key-seal.js';
+import { keyServiceSettings } from './key-service.js';
 import { parseDotenv } from './secret-files.js';
 import { runSwitch, type SwitchDeps } from './secrets-switch.js';
 
@@ -138,7 +140,11 @@ describe('secrets switch', () => {
   });
 
   it('rolls back to the old provider when the first request after the switch fails', async () => {
-    const before = { choice: read('choice.json'), agentEnv: read('agent.env') };
+    const before = {
+      choice: read('choice.json'),
+      agentEnv: read('agent.env'),
+      head: JSON.parse(read('head.json')) as { bundleId: string; seq: number },
+    };
     await expect(
       runSwitch({ box: box(), stateDir: state, to: 'gcp-kms' }, deps([false, true]))
     ).rejects.toThrow(/switch rolled back: the new version is not healthy: HTTP 503/);
@@ -154,6 +160,50 @@ describe('secrets switch', () => {
       'deploy',
       'reload+health',
     ]);
+    // The head names the old bundle again (a later write, sealed with the old key) before the new
+    // bundle went: the real deploy runs with it instead of refusing a head naming a missing bundle.
+    const head = JSON.parse(read('head.json')) as { bundleId: string; seq: number };
+    expect(head.bundleId).toBe(before.head.bundleId);
+    expect(head.seq).toBeGreaterThan(before.head.seq);
+    const dry = await runDeploy(envFile, ['--dry-run', '--skip-vm-agent']);
+    expect(dry.status, dry.out).toBe(0);
+    expect(dry.out).toContain(`"SAM_SECRET_BUNDLE_ID": "${before.head.bundleId}"`);
+  });
+
+  it('rolls back when its own deploy sealed a secrets.env edit under the new key', async () => {
+    const before = JSON.parse(read('head.json')) as { bundleId: string; seq: number };
+    let check = 0;
+    const sealing: SwitchDeps = {
+      ...deps(),
+      // What `pnpm selfhost:deploy` does when secrets.env holds an edit not deployed yet: it
+      // seals a further bundle under the key the box is configured for at that moment.
+      deploy: async () => {
+        const choice = readKeyChoice(state);
+        const settings = choice && keyServiceSettings(applyKeyChoice(box(), choice), state);
+        if (!settings) throw new Error('not sealed');
+        await resolveSealedSecrets({
+          settings,
+          stateDir: state,
+          mode: 'deploy',
+          platformKeysFile: null,
+          operatorSecrets: { OPERATOR_TOKEN: `edited-${check}` },
+        });
+      },
+      adoptAndCheck: async () => {
+        const ok = check++ > 0;
+        return { healthy: ok, detail: ok ? 'HTTP 200' : 'HTTP 503' };
+      },
+    };
+    await expect(
+      runSwitch({ box: box(), stateDir: state, to: 'gcp-kms' }, sealing)
+    ).rejects.toThrow(/switch rolled back: the new version is not healthy: HTTP 503/);
+    // The box is back on the key file and the head agrees with it: the next deploy runs.
+    expect(JSON.parse(read('choice.json'))).toMatchObject({ provider: 'file' });
+    const head = JSON.parse(read('head.json')) as { seq: number; seal: { provider: string } };
+    expect(head.seal.provider).toBe('file');
+    expect(head.seq).toBeGreaterThan(before.seq);
+    const dry = await runDeploy(envFile, ['--dry-run', '--skip-vm-agent']);
+    expect(dry.status, dry.out).toBe(0);
   });
 
   it('refuses a target that cannot unwrap, and changes nothing', async () => {

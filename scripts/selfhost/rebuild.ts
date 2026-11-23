@@ -1,5 +1,5 @@
 /**
- * `pnpm selfhost:rebuild [--installation-id <id>] [--env-file <path>] [--state-dir <dir>]`
+ * `pnpm selfhost:rebuild [--installation-id <id>] [--allow-no-head] [--env-file <path>] [--state-dir <dir>]`
  *
  * Replaces a dead replaceable box (README "Replace a dead box"): on a new VM with this checkout,
  * the dead box's `.env` and an EMPTY state directory, it copies the box's sealed bundles and
@@ -23,6 +23,7 @@ const { values } = parseArgs({
     'env-file': { type: 'string' },
     'state-dir': { type: 'string' },
     'installation-id': { type: 'string' },
+    'allow-no-head': { type: 'boolean' },
   },
 });
 assertOperatorExecution();
@@ -42,6 +43,7 @@ const result = await runRebuild({
   detect: detectKeyCandidates,
   log,
   expectedInstallationId: values['installation-id'],
+  allowNoHead: values['allow-no-head'] === true,
 });
 log(
   `rebuilt the sealed state of installation ${result.installationId} in ${Math.round((Date.now() - started) / 1000)} s. Next:`

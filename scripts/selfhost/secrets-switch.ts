@@ -46,6 +46,7 @@ import {
   LEGACY_KEY_PROVIDER,
   renderKeyAgentEnv,
 } from './key-service';
+import { assertNotBehindBucket } from './replaceable-box';
 import { writePrivateFile } from './secret-files';
 
 export interface SwitchDeps {
@@ -171,6 +172,8 @@ export async function runSwitch(input: SwitchInput, deps: SwitchDeps): Promise<K
     return target;
   }
 
+  // A replaceable box: never seal over a later seal the bucket records (verified heads).
+  await assertNotBehindBucket(box, stateDir, oldProvider);
   const installationId = secrets.SAM_INSTALLATION_ID ?? '';
   const bundle = await sealSecrets(secrets, newProvider, { installationId });
   const reopened = await openBundle(bundle, newProvider);
@@ -201,11 +204,14 @@ export async function runSwitch(input: SwitchInput, deps: SwitchDeps): Promise<K
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     log(`switch FAILED: ${reason}; restoring ${current.provider}`);
+    // The old bundle current again first, while the box is still configured for the new key:
+    // if this fails, the head and the recorded choice still agree. The deploy may have sealed a
+    // later bundle under the new key (a secrets.env edit), so chain from the head as it is now.
+    const { head: nowHead } = await currentBundle(newSettings.bundles, newProvider);
+    await commitHead(newSettings.bundles, newest, oldProvider, nowHead ?? switchedHead);
     writePrivateFile(keyChoicePath(stateDir), savedChoice);
     writePrivateFile(agentEnvPath, savedAgentEnv);
     rmSync(previousPath, { force: true });
-    // The old bundle current again before the new one goes: a head never names a missing bundle.
-    await commitHead(newSettings.bundles, newest, oldProvider, switchedHead);
     await newSettings.bundles.remove(bundle.bundleId);
     await deps.restartAgent();
     await deps.deploy();

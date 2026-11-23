@@ -8,7 +8,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
-import { currentByHint } from './bundle-head';
+import { currentByHint, headHint } from './bundle-head';
 import {
   applyKeyChoice,
   type ChooseInput,
@@ -105,7 +105,11 @@ export async function describeKeyStatus(box: Box, stateDir: string): Promise<str
   // every deploy, rotation, switch and rebuild verifies the head before acting on it.
   let current: (typeof bundles)[number] | undefined = bundles[0];
   try {
-    current = currentByHint(bundles, await store.readHead());
+    const headText = await store.readHead();
+    current = currentByHint(bundles, headText);
+    // The write number a rebuild prints for the bucket's head: note it (README "Replace a dead box").
+    const head = headHint(headText);
+    if (head) lines.push(`bundle head: ${head.bundleId}, write ${head.seq} (not verified here)`);
   } catch (error) {
     lines.push(`bundle head: unreadable (${error instanceof Error ? error.message : error})`);
   }

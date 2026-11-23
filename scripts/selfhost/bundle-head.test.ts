@@ -27,11 +27,12 @@ import {
   openBundle,
   parseBundle,
   type SealedBundle,
+  sealSecrets,
 } from '../../deploy/selfhost/key-agent/bundle.ts';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
 import { runCommand } from './backup-cli.js';
 import { loadBoxEnv } from './box-settings.js';
-import { headHint, sealHead } from './bundle-head.js';
+import { commitHead, headHint, sealHead } from './bundle-head.js';
 import {
   CHILD_TEST_TIMEOUT_MS,
   CLOSED_HOST,
@@ -45,6 +46,7 @@ import { type BoxBucket, fleetBucket, HEAD_KEY } from './replaceable-box.js';
 import { runRebuild } from './replaceable-rebuild.js';
 import { applyPatch, type RotateDeps, type StepContext } from './rotate-apply.js';
 import { type Journal, openRotationStore } from './rotate-store.js';
+import { type MigrateDeps, runMigration } from './secrets-migrate.js';
 
 vi.setConfig({ testTimeout: CHILD_TEST_TIMEOUT_MS * 2 });
 
@@ -326,8 +328,38 @@ describe('a head that is not genuine fails closed', () => {
     await refused(/a later seal than this box's/, []);
     writeFileSync(bucketHeadPath(), foreign);
     await refused(/belongs to installation b{32}/, []);
-    writeFileSync(bucketHeadPath(), JSON.stringify({ ...edited, bundleId: withValue.bundleId }));
+    const remoteTampered = JSON.stringify({ ...edited, bundleId: withValue.bundleId });
+    writeFileSync(bucketHeadPath(), remoteTampered);
     await refused(/edited after it was sealed/, []);
+    // Rotation (and switch) seal without the deploy's reconcile: they verify the bucket head
+    // themselves, so neither an edited hint nor a genuine later head lets them seal over it.
+    vi.stubEnv('PATH', env.PATH);
+    vi.stubEnv('FAKE_GCS_ROOT', gcsRoot);
+    const store = openRotationStore(boxOf(envA), stateA);
+    const next = await store.seal((await store.head()).secrets);
+    await expect(store.write(next)).rejects.toThrow(/edited after it was sealed/);
+    writeFileSync(
+      bucketHeadPath(),
+      await sealHead(
+        {
+          seq: (local?.seq ?? 0) + 1,
+          bundleId: withValue.bundleId,
+          installationId: local?.installationId ?? '',
+        },
+        provider
+      )
+    );
+    await expect(store.write(next)).rejects.toThrow(/a later seal than this box's/);
+    expect(bundlesOn(stateA).map((b) => b.bundleId)).not.toContain(next.bundleId);
+    // A seal that read the head before another one moved it does not overwrite it.
+    writeFileSync(bucketHeadPath(), genuine);
+    const stale = headHint(genuine);
+    await store.write(next);
+    await expect(commitHead(store.settings.bundles, withValue, provider, stale)).rejects.toThrow(
+      /the current sealed bundle changed while/
+    );
+    expect(headHint(readFileSync(headPath(stateA), 'utf8'))?.bundleId).toBe(next.bundleId);
+    writeFileSync(bucketHeadPath(), remoteTampered);
     const stateB = join(dir, 'box-b/.state');
     const envB = boxEnv(stateB);
     const rebuild = () =>
@@ -342,9 +374,9 @@ describe('a head that is not genuine fails closed', () => {
     writeFileSync(bucketHeadPath(), foreign);
     await expect(rebuild()).rejects.toThrow(/the head belongs to b{32}/);
     expect(existsSync(headPath(stateB))).toBe(false);
-    // Control: the genuine head rebuilds.
-    writeFileSync(bucketHeadPath(), genuine);
-    expect((await rebuild()).bundleIds[0]).toBe(unset.bundleId);
+    // Control: the box's genuine head (after the rotation's write) rebuilds.
+    writeFileSync(bucketHeadPath(), readFileSync(headPath(stateA), 'utf8'));
+    expect((await rebuild()).bundleIds[0]).toBe(next.bundleId);
   });
 });
 
@@ -356,6 +388,22 @@ describe('a box from before the head', () => {
     // Without a head (the box and its bucket before this change) the date decides.
     rmSync(headPath(stateA));
     rmSync(bucketHeadPath());
+    // A rebuild from a bucket without a head refuses (a deleted head looks the same) unless told
+    // the dead box predates it; then the date decides, as the dead box's own deploy would have.
+    const stateB = join(dir, 'box-b/.state');
+    const envB = boxEnv(stateB);
+    const rebuild = (allowNoHead: boolean) =>
+      runRebuild({
+        box: boxOf(envB),
+        stateDir: stateB,
+        bucket: bucket(boxOf(envB)),
+        detect: async () => ({ platform: null, candidates: [] }),
+        log: () => undefined,
+        allowNoHead,
+      });
+    await expect(rebuild(false)).rejects.toThrow(/no sam-box\/head\.json.*--allow-no-head/s);
+    expect(existsSync(bundleDir(stateB))).toBe(false);
+    expect((await rebuild(true)).bundleIds[0]).toBe(withValue.bundleId);
     expect(await namedBundle(envA)).toBe(withValue.bundleId);
     expect(existsSync(headPath(stateA))).toBe(false); // a dry run writes nothing
     const out = await deploy(envA, []);
@@ -367,5 +415,47 @@ describe('a box from before the head', () => {
     // From now on the head decides: the same bundle, and nothing is written again.
     expect(await namedBundle(envA)).toBe(withValue.bundleId);
     expect(await deploy(envA, [])).not.toContain('recorded bundle');
+  });
+});
+
+describe('a failed secrets migrate on a replaceable box', () => {
+  it('undoes its head and bundles in the bucket too, so the next deploy is not stopped', async () => {
+    const stateA = join(dir, 'box-a/.state');
+    const envA = boxEnv(stateA);
+    mkdirSync(join(stateA, 'key-agent'), { recursive: true });
+    // A box still on plaintext files (what migrate seals), with replaceable mode configured.
+    writeFileSync(
+      join(stateA, 'platform-keys.json'),
+      JSON.stringify({ SAM_INSTALLATION_ID: 'a'.repeat(32) }),
+      { mode: 0o600 }
+    );
+    vi.stubEnv('PATH', env.PATH);
+    vi.stubEnv('FAKE_GCS_ROOT', gcsRoot);
+    const box = boxOf(envA);
+    const settings = keyServiceSettings(box, stateA);
+    if (!settings) throw new Error('not sealed');
+    const provider = createKeyProvider(settings.hostEnv);
+    const deps = {
+      log: () => undefined,
+      // The --init writes through the store the deploy uses (mirrored to the bucket).
+      init: async () => {
+        const bundle = await sealSecrets({ SAM_INSTALLATION_ID: 'a'.repeat(32) }, provider, {
+          installationId: 'a'.repeat(32),
+        });
+        await settings.bundles.write(bundle);
+        await commitHead(settings.bundles, bundle, provider, null);
+      },
+      preflight: async () => {
+        throw new Error('the Worker would not get these secrets unchanged');
+      },
+    } as unknown as MigrateDeps;
+    await expect(runMigration({ box, stateDir: stateA }, deps)).rejects.toThrow(/unchanged/);
+    expect(existsSync(headPath(stateA))).toBe(false);
+    expect(existsSync(bucketHeadPath())).toBe(false);
+    expect(
+      existsSync(join(gcsRoot, 'fleet/celld/sam-box/bundles'))
+        ? readdirSync(join(gcsRoot, 'fleet/celld/sam-box/bundles'))
+        : []
+    ).toEqual([]);
   });
 });

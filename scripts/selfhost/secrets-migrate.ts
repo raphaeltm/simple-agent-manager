@@ -22,6 +22,7 @@ import { join } from 'node:path';
 
 import { explicitKeyProvider, keyChoicePath, readKeyChoice } from './key-choice';
 import { bundleStoreFor, LEGACY_KEY_PROVIDER } from './key-service';
+import { fleetBucket, mirroredBundleStore, replaceableBox } from './replaceable-box';
 import { readPrivateJson, readSecretsFile } from './secret-files';
 import { keyFileNotice, keyFilePath, verifyKeyCopy } from './secrets-keyfile';
 import { type preflightSealedSecrets } from './secrets-preflight';
@@ -116,7 +117,11 @@ export async function runMigration(
   // files as they are then: a leftover bundle would be its base, and a secret the operator deleted
   // from secrets.env in between would survive into the sealed set. No running version names a
   // bundle this attempt created (it never switched, or it was rolled back first).
-  const store = bundleStoreFor(stateDir);
+  // On a replaceable box the attempt's --init wrote through the bucket copy too: undo it there
+  // as well, or the bucket keeps a head (and bundles) later than the box and every deploy stops.
+  const store = replaceableBox(input.box)
+    ? mirroredBundleStore(bundleStoreFor(stateDir), fleetBucket(input.box), stateDir)
+    : bundleStoreFor(stateDir);
   const bundlesBefore = new Set(await store.listIds());
   const headBefore = await store.readHead();
   const forgetNewBundles = async () => {

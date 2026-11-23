@@ -253,6 +253,20 @@ export async function commitHead(
   provider: KeyProvider,
   previous: BundleHead | null
 ): Promise<BundleHead> {
+  // Compare before replacing: another seal (a deploy racing a rotation or a switch) that made
+  // its own bundle current since `previous` was read must not be overwritten by this one, whose
+  // secrets were derived from the older state. Not atomic, but the window is this one read.
+  const now = headHint(await store.readHead());
+  if (
+    (previous === null) !== (now === null) ||
+    (previous && now && (now.seq !== previous.seq || now.bundleId !== previous.bundleId))
+  ) {
+    throw new Error(
+      `the current sealed bundle changed while bundle ${bundle.bundleId} was being sealed ` +
+        `(now ${now ? `${now.bundleId}, write ${now.seq}` : 'none'}); another deploy, rotation ` +
+        'or switch ran at the same time. Run again.'
+    );
+  }
   const head: BundleHead = {
     seq: (previous?.seq ?? 0) + 1,
     bundleId: bundle.bundleId,

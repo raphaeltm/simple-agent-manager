@@ -29,7 +29,11 @@ import {
   type SealedBundle,
   sealSecrets,
 } from '../../deploy/selfhost/key-agent/bundle.ts';
-import type { BundleStore } from '../../deploy/selfhost/key-agent/bundle-store.ts';
+import {
+  type BundleStore,
+  LOCAL_BUNDLE_SUBDIR,
+  openBundleStore,
+} from '../../deploy/selfhost/key-agent/bundle-store.ts';
 import type { KeyProvider } from '../../deploy/selfhost/key-agent/provider.ts';
 import { runCommand } from './backup-cli';
 import type { BoxContext, Runner } from './backup-lib';
@@ -168,11 +172,27 @@ export function bucketHead(bucket: BoxBucket): string | null {
  * genuine current bundle).
  *
  * "Later" is the heads' write sequence (bundle-head.ts), never a bundle's date: a clock that
- * moved backwards must not hide a later seal nor invent one. `provider` verifies both heads
- * (reconcile, before every deploy); without it (the mirrored store's own write check, later in
- * the same deploy) their hints decide, which can only refuse more. Boxes and buckets from before
- * the head keep the date rule until the first deploy writes heads on both sides.
+ * moved backwards must not hide a later seal nor invent one. Every path that seals checks it with
+ * `provider` first, which verifies both heads: the deploy (reconcileBundleMirror), rotation and
+ * switch (assertNotBehindBucket). The mirrored store's own write check runs without a key and
+ * reads the heads' hints: it is a backstop behind those verified checks and never the only one,
+ * because a bucket writer could edit a hint's seq either way. Boxes and buckets from before the
+ * head keep the date rule until the first deploy writes heads on both sides.
  */
+export async function assertNotBehindBucket(
+  box: Box,
+  stateDir: string,
+  provider: KeyProvider,
+  bucket: BoxBucket = fleetBucket(box)
+): Promise<void> {
+  if (!replaceableBox(box)) return;
+  await assertBoxNotBehindBucket(
+    openBundleStore({ dir: join(stateDir, LOCAL_BUNDLE_SUBDIR) }),
+    bucket,
+    provider
+  );
+}
+
 async function assertBoxNotBehindBucket(
   local: BundleStore,
   bucket: BoxBucket,
@@ -322,10 +342,8 @@ export async function reconcileBundleMirror(
     // Not on the box and not a later seal (assertBoxNotBehindBucket): a bundle it pruned.
     if (!localIds.has(id)) stale.push(bundleKey(id));
   }
-  if (stale.length > 0) {
-    bucket.remove(stale);
-    log(`removed ${stale.length} pruned bundle(s) from the fleet bucket copy`);
-  }
+  // Missing bundles first, then the head, then the stale ones: at every step the bucket's head
+  // names a bundle the bucket holds, so a box that dies part way through can still be rebuilt.
   for (const id of localIds) {
     if (remoteIds.includes(id)) continue;
     const text = await local.read(id);
@@ -337,6 +355,10 @@ export async function reconcileBundleMirror(
   if (localHead !== null && bucketHead(bucket) !== localHead) {
     bucket.write(HEAD_KEY, localHead);
     log(`copied the bundle head to the fleet bucket (${HEAD_KEY})`);
+  }
+  if (stale.length > 0) {
+    bucket.remove(stale);
+    log(`removed ${stale.length} pruned bundle(s) from the fleet bucket copy`);
   }
 }
 

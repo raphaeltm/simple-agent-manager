@@ -49,6 +49,12 @@ export interface RebuildInput {
   log: (message: string) => void;
   /** `--installation-id`: the id the operator knows the dead box by; refuses any other. */
   expectedInstallationId?: string;
+  /**
+   * `--allow-no-head`: rebuild from a bucket with bundles but no `sam-box/head.json` by the
+   * newest date. Only for a bucket last written before the head existed: a missing head is also
+   * what a bucket writer who deleted it would leave, and the date can pick an older bundle.
+   */
+  allowNoHead?: boolean;
 }
 
 export interface RebuildResult {
@@ -135,6 +141,14 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
   // before the head, the newest createdAt. The head names its bundle in plaintext only so the
   // right key can be found; it counts once it opens under that key.
   const headText = bucketHead(bucket);
+  if (headText === null && !input.allowNoHead) {
+    throw new Error(
+      `the fleet bucket holds sealed bundles but no ${HEAD_KEY}, which names the current one. ` +
+        'A box that deployed with this SAM version always writes it, so it was deleted, or the ' +
+        'dead box last deployed with an older version. Only in that second case, run again with ' +
+        '--allow-no-head (the newest bundle by date is restored; check its date below)'
+    );
+  }
   const hinted = currentByHint(bundles, headText) as SealedBundle;
   const provider = await providerFor(input, hinted);
   const { bundle: current, head } = await selectCurrentBundle(
@@ -144,7 +158,15 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
     `${HEAD_KEY} in the fleet bucket`
   );
   if (!current) throw new Error('the fleet bucket holds no current bundle');
-  if (head) log(`the bucket's head names bundle ${current.bundleId} (write ${head.seq})`);
+  // The head proves who sealed it, not that it is the latest: a bucket writer could put back an
+  // older genuine one. The operator compares the write number with the dead box's last one
+  // (pnpm selfhost:secrets status printed it).
+  if (head) {
+    log(
+      `the bucket's head names bundle ${current.bundleId}, head write ${head.seq}: check it is ` +
+        "the dead box's last (pnpm selfhost:secrets status showed it)"
+    );
+  }
   const accepted: SealedBundle[] = [];
   // The current bundle first, then the newest others.
   for (const bundle of [current, ...bundles.filter((b) => b !== current)]) {

@@ -103,6 +103,12 @@ export async function applyPatch(ctx: StepContext, patch: Patch, then: Phase): P
     // Writes it and makes it current (bundle-head.ts): the deploy runs with it whatever the clock.
     await store.write(bundle);
     bundleId = bundle.bundleId;
+    const nowCurrent = (await store.head()).bundle.bundleId;
+    if (nowCurrent !== bundleId) {
+      throw new ApplyFailedError(
+        `the bundle just sealed (${bundleId}) is not the current one (${nowCurrent}); something else sealed a bundle meanwhile`
+      );
+    }
   }
   await deps.deploy();
   const check = await deps.adoptAndCheck();

@@ -40,6 +40,7 @@ import {
   LEGACY_KEY_PROVIDER,
   pruneBundles,
 } from './key-service';
+import { assertNotBehindBucket } from './replaceable-box';
 import { ensurePrivateDir, replacePrivateFile } from './secret-files';
 
 export const JOURNAL_FORMAT = 'sam-key-rotation/1';
@@ -228,7 +229,8 @@ export function openRotationStore(
       'this box keeps its secrets as plaintext deploy vars: seal them first (pnpm selfhost:secrets migrate); rotating into plaintext would expose the new keys the same way'
     );
   }
-  const settings = keyServiceSettings(applyKeyChoice(box, choice), stateDir);
+  const effectiveBox = applyKeyChoice(box, choice);
+  const settings = keyServiceSettings(effectiveBox, stateDir);
   if (!settings) throw new Error('this box does not seal its secrets');
   const keyProvider = provider ?? createKeyProvider(settings.hostEnv);
   const snapshotPath = (rotationId: string, name: string) =>
@@ -255,12 +257,15 @@ export function openRotationStore(
       return bundle;
     },
     async write(bundle) {
+      // A replaceable box: never seal over a later seal the bucket records (verified heads).
+      await assertNotBehindBucket(effectiveBox, stateDir, keyProvider);
       const { head } = await currentBundle(settings.bundles, keyProvider);
       await settings.bundles.write(bundle);
       // The head, not the bundle's date, makes it current (bundle-head.ts).
       await commitHead(settings.bundles, bundle, keyProvider, head);
     },
     async makeCurrent(bundleId) {
+      await assertNotBehindBucket(effectiveBox, stateDir, keyProvider);
       const { head, bundles } = await currentBundle(settings.bundles, keyProvider);
       const bundle = bundles.find((b) => b.bundleId === bundleId);
       if (!bundle) throw new Error(`no sealed bundle ${bundleId} in ${settings.bundles.location}`);
