@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-// Shared by deploy.mjs and remove.mjs: which installer Worker a command acts on,
-// the Cloudflare API client, and the Wrangler runner.
+// Shared by deploy.mjs, remove.mjs and check-live.mjs: which installer Worker a command
+// acts on, the Cloudflare API client, numeric settings, and the Wrangler runner.
 export const SECRET_NAMES = ['OAUTH_CLIENT_ID', 'OAUTH_CLIENT_SECRET'];
 
 /** The installer Worker this command acts on, from the environment. */
@@ -18,7 +18,11 @@ export function readTarget(env = process.env) {
   return { token, account, environment, name, base, worker: `${base}/workers/scripts/${name}` };
 }
 
-// Account API token permission-group names (Cloudflare catalog vocabulary).
+// What the token form calls a permission, and its name in Cloudflare's API catalog.
+const PERMISSION_LABELS = {
+  'OAuth Client Write': 'Account → OAuth Client → Edit',
+  'Workers Scripts Write': 'Account → Workers Scripts → Edit',
+};
 function permissionFor(path, base) {
   if (path === '/oauth/scopes' || path.startsWith(`${base}/oauth_clients`))
     return 'OAuth Client Write';
@@ -33,13 +37,26 @@ export class ApiFailure extends Error {
     const detail = codes.length ? `${status}, Cloudflare code ${codes.join(', ')}` : `${status}`;
     super(
       (status === 401 || status === 403) && permission
-        ? `Cloudflare refused ${method} (${detail}). Check the API token's permissions: it needs "${permission}" on this account. Private response omitted.`
+        ? `Cloudflare refused ${method} (${detail}). Check the API token's permissions: it needs ${PERMISSION_LABELS[permission]} ("${permission}" in Cloudflare's API) on this account. Private response omitted.`
         : `Cloudflare ${method} failed (${detail}). Verify the required API permissions. Private response omitted.`
     );
     this.status = status;
     this.permission = permission;
     this.codes = codes;
   }
+}
+
+/**
+ * A whole number of at least `minimum` from the environment; unset or empty gives `fallback`.
+ * Anything else stops the command: a NaN deadline or attempt count would never be reached.
+ */
+export function intFromEnv(name, fallback, minimum = 0) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < minimum)
+    throw new Error(`${name} must be a whole number of at least ${minimum}.`);
+  return value;
 }
 
 /** OAuth client endpoints use `registrationToken` when one is supplied. */
@@ -72,7 +89,10 @@ export function createApi({ token, base, registrationToken }) {
   };
 }
 
-/** Runs this package's Wrangler without OAuth credentials in its environment. */
+/**
+ * Runs this package's Wrangler, through the running Node binary rather than PATH, without
+ * OAuth credentials in its environment.
+ */
 export function wrangler(args) {
   const childEnvironment = { ...process.env };
   for (const key of ['OAUTH_REGISTRATION_TOKEN', ...SECRET_NAMES]) delete childEnvironment[key];

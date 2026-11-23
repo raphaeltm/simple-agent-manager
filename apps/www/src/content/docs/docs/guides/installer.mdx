@@ -71,11 +71,15 @@ keep your projects' code itself; otherwise you connect GitHub after setup.
 The command creates two things in your account (`apps/installer/scripts/deploy.mjs`): a Worker
 named `sam-installer-self-hosted` on your account's `workers.dev` address, and a private Cloudflare
 OAuth client for its **Sign in with Cloudflare** button, whose credentials are stored as secrets on
-that Worker. Cloudflare lets only members of your account authorize a private client. Running the
-command again updates the installer and keeps both.
+that Worker. Cloudflare lets only members of your account
+[authorize a private client](https://developers.cloudflare.com/fundamentals/oauth/create-an-oauth-client/).
+Running the command again updates the installer and keeps both.
 
-If a Cloudflare call is refused, the command stops before publishing anything and names the
-permission the token is missing (`ApiFailure`, `apps/installer/scripts/installer-target.mjs`). If
+If a Cloudflare call is refused, the command stops and names the permission the token is missing
+(`ApiFailure`, `apps/installer/scripts/installer-target.mjs`). It checks that the token can read
+Workers and OAuth clients before it publishes anything; a token that can read OAuth clients but not
+create them fails after the installer Worker is published, and running the command again with a
+corrected token finishes the job. If
 your account has no `workers.dev` address yet, open **Workers & Pages** in the dashboard once to
 create it, or [use your own domain](#use-your-own-domain-for-the-installer).
 
@@ -193,9 +197,12 @@ export CLOUDFLARE_ACCOUNT_ID
 pnpm --filter @simple-agent-manager/installer run remove
 ```
 
-This deletes the `sam-installer-self-hosted` Worker and its session storage, and nothing else
-(`apps/installer/scripts/remove.mjs`). Your SAM and its `sam-maintenance-…` installation service
-are not touched. Then delete the API token you created for the installer.
+This deletes the `sam-installer-self-hosted` Worker (`wrangler delete`, run by
+`apps/installer/scripts/remove.mjs`); Cloudflare deletes a Worker's Durable Object storage, here
+the installer's sessions, with it. Your SAM and its `sam-maintenance-…` installation service are
+not touched. Then delete the API token you created for the installer. If you served the installer
+on your own domain, check the domain's **Workers Routes** in the dashboard for a leftover
+`install.` route.
 
 The command leaves the installer's OAuth client in place. Without the installer Worker, which held
 its only secret, the client can't be used. Setting `REMOVE_OAUTH_CLIENT=true` deletes it as well,
@@ -222,10 +229,10 @@ installation service, and drops its own copies. Deployment permissions can cover
 in the account, not only SAM's. The installation service stores a hash of your recovery
 credential, not the credential itself.
 
-The permissions the sign-in asks for are the ones an installation needs: Workers, KV, R2, D1,
-Containers, DNS, certificates, Workers routes, AI Gateway, API tokens, email sending and routing,
-Cloudflare Tunnel, and Cloudflare Artifacts (the full list is `FULL_SCOPES` in
-`apps/installer/scripts/deploy.mjs`).
+The permissions the sign-in asks for are the ones an installation needs, including Workers, KV,
+R2, D1, Containers, Pages, DNS, certificates, Workers routes, Workers AI, AI Gateway, API tokens,
+email sending and routing, Cloudflare Tunnel, and Cloudflare Artifacts (the full list is
+`FULL_SCOPES` in `apps/installer/scripts/deploy.mjs`).
 
 ## Installer options
 
@@ -236,21 +243,31 @@ Set these before running the deploy command.
 `BASE_DOMAIN=example.com` serves the installer at `https://install.example.com` instead of
 `workers.dev`. The API token then also needs the zone permissions for Workers Custom Domains and
 Workers Routes on that domain. An installer that already exists keeps its address when you deploy
-again without `BASE_DOMAIN`.
+again without `BASE_DOMAIN`. Setting `BASE_DOMAIN` on an existing `workers.dev` installer moves it
+and creates a new OAuth client for the new address (`originChanged`,
+`apps/installer/scripts/deploy.mjs`); the old client is left behind and can be deleted in the
+dashboard.
 
 ### Build everything from source
 
 By default the installation service downloads the prebuilt parts of SAM's latest release when they
-match the version being installed, checks their size and SHA-256, and builds anything that is
-missing or different (`scripts/deploy/installer-engine-prebuilt.ts`). `ARTIFACT_BASE_URL=none`
-turns that off, so every installation builds everything from the source you checked out.
+match the version being installed, checks each against the size and SHA-256 in that release's
+manifest, and builds anything that is missing or different
+(`scripts/deploy/installer-engine-prebuilt.ts`). The manifest comes from the same release, so this
+trusts the files attached to SAM's GitHub releases in addition to the source commit you checked out.
+
+`ARTIFACT_BASE_URL=none` turns that off, so every installation builds everything from the pinned
+source. The choice is stored on the installer and stays in force when you deploy it again without
+the variable; `ARTIFACT_BASE_URL=default` goes back to SAM's latest release, and
 `ARTIFACT_BASE_URL=https://…` reads prebuilt parts from another location.
 
 ### Use an existing OAuth client
 
-Set `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET`. The client must use Authorization Code with
+Set `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET`. The client's name must be
+`sam-installer-self-hosted` and its client URL the installer's address, or the command stops
+(`prepareOAuth`, `apps/installer/scripts/deploy.mjs`). It uses Authorization Code with
 `client_secret_post`, the callback `<installer address>/oauth/callback`, and every scope in
-`FULL_SCOPES`. Do not use `workers-scripts.edit`: it is the Workers Editor role, which cannot
+`FULL_SCOPES`; the command updates an existing client's scopes and callback to match. Do not use `workers-scripts.edit`: it is the Workers Editor role, which cannot
 create the installation service Worker. Refresh tokens are not requested.
 
 If client creation succeeds but saving its secret fails, rotate the secret in Cloudflare and supply

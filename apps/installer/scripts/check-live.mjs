@@ -1,5 +1,5 @@
 import { checkedOutCommit } from './git-head.mjs';
-import { createApi, readTarget } from './installer-target.mjs';
+import { createApi, intFromEnv, readTarget } from './installer-target.mjs';
 
 // Checks a deployed installer the way a visitor reaches it: it answers on its own
 // address, runs the expected commit in full mode, and "Sign in with Cloudflare"
@@ -12,7 +12,7 @@ const settings = await api(`${worker}/settings`);
 const origin = (Array.isArray(settings?.bindings) ? settings.bindings : []).find(
   (binding) => binding.name === 'APP_ORIGIN' && binding.type === 'plain_text'
 )?.text;
-if (typeof origin !== 'string' || !origin.startsWith('https://'))
+if (typeof origin !== 'string' || !/^https:\/\/[a-z0-9.-]+$/.test(origin))
   throw new Error(`Installer ${name} has no deployed address.`);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function read(path, init = {}) {
@@ -24,7 +24,9 @@ async function read(path, init = {}) {
   });
 }
 // A freshly written Worker secret or version can take a few seconds to reach every edge.
-const deadline = Date.now() + Number(process.env.INSTALLER_READY_TIMEOUT_MS || 90000);
+const CLOUDFLARE_DASHBOARD = 'https://dash.cloudflare.com';
+const deadline = Date.now() + intFromEnv('INSTALLER_READY_TIMEOUT_MS', 90000);
+const pollMs = intFromEnv('INSTALLER_READY_POLL_MS', 3000, 1);
 let last = 'no response';
 for (;;) {
   try {
@@ -37,7 +39,7 @@ for (;;) {
     last = `request failed: ${error instanceof Error ? error.name : 'unknown'}`;
   }
   if (Date.now() >= deadline) throw new Error(`Installer at ${origin} is not ready; ${last}`);
-  await sleep(Number(process.env.INSTALLER_READY_POLL_MS || 3000));
+  await sleep(pollMs);
 }
 const start = await read('/oauth/start', { method: 'POST', headers: { Origin: origin } });
 const location = start.headers.get('Location') || '';
@@ -49,7 +51,7 @@ try {
 }
 if (
   start.status !== 303 ||
-  target.origin !== 'https://dash.cloudflare.com' ||
+  target.origin !== CLOUDFLARE_DASHBOARD ||
   !target.searchParams.get('client_id') ||
   target.searchParams.get('redirect_uri') !== `${origin}/oauth/callback`
 )
@@ -64,10 +66,14 @@ try {
 } catch {
   throw new Error(`Cloudflare did not answer the sign-in request (status ${authorize.status}).`);
 }
-if (next.origin !== 'https://dash.cloudflare.com' || next.pathname !== '/login')
+if (next.origin !== CLOUDFLARE_DASHBOARD || next.pathname !== '/login') {
+  const refusal = next.searchParams.get('error');
   throw new Error(
-    `Cloudflare did not accept this installer’s sign-in request (${next.searchParams.get('error') || next.pathname}).`
+    refusal
+      ? `Cloudflare did not accept this installer’s sign-in request (${refusal}).`
+      : `Cloudflare sent the sign-in request to ${next.origin}${next.pathname} instead of its login page. If Cloudflare changed its sign-in flow, update check-live.mjs.`
   );
+}
 console.log(
   `Installer live at ${origin}: commit ${expected}, full mode, Cloudflare accepts its sign-in client and callback.`
 );

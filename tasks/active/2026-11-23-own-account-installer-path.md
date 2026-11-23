@@ -5,7 +5,9 @@ Phase 1 of SAM idea `01M84SB68PWK40K6HNB0KX5HRX` (retire the hosted installer). 
 route (keep the browser installer, make self-deploy one command) plus one paid test install.
 
 **Out of scope:** retiring `install.simple-agent-manager.org` (Phase 2) and removing bootstrap mode
-(Phase 3). This PR must not change what the production installer deploy does.
+(Phase 3). This PR must not change what the production installer serves or how it is configured;
+the three ways its deploy step itself changes are listed under "Effect on the production installer
+deploy" below.
 
 ## Problem
 
@@ -136,7 +138,7 @@ tests it.
 - **Staging run 45251499394 (first):** the recipe published a fresh installer on `workers.dev`, then
   `POST /oauth_clients` returned 500 five seconds after publish although the runner already got a 200
   from `/health`. The cleanup step's `remove` deleted the Worker and found no client, so a failed
-  creation leaves none. Added `createOAuthClient` (bounded retry on 5xx, never a second client) and
+  creation leaves none. Added `createOAuthClient` (time-bounded retry on 5xx, never a second client) and
   Cloudflare's numeric error codes in `ApiFailure`.
 - **Staging run 45253061086 (third, commit fe1e52c): all green.** Recipe: remove (nothing there) →
   fresh deploy with no domain, mode or commit → `Installer ready:
@@ -151,19 +153,81 @@ https://sam-installer-recipe-check.simple-agent-manager-staging.workers.dev` 8 s
 - The security advisory post's link to the renamed guide section was repointed (anchor only).
 - `ci.yml` needs no change: `apps/installer/**` and `deploy-installer.yml` are already in its filters.
 
+## Review findings (2026-11-23) and what was done
+
+Six local reviewers ran on commit `9fd7914`. No CRITICAL findings.
+
+- **Unvalidated numeric settings (constitution, HIGH):** a non-numeric timeout made a deadline `NaN`
+  and a loop endless. All numeric settings now go through `intFromEnv`
+  (`scripts/installer-target.mjs`), which stops the command on anything but a whole number in range.
+- **Client-creation bound (constitution, rule 81):** the retry was a count whose stated worst case
+  ignored request time. It is now a deadline (`OAUTH_CLIENT_CREATE_TIMEOUT_MS`, default 90 s), and the
+  README states the worst case of every wait.
+- **Lost client secret (security, LOW):** the client list is re-read before every retry and before
+  giving up, including after a dropped connection, so a client whose creation response was lost is
+  reported and never duplicated.
+- **`ARTIFACT_BASE_URL=none` reverted on the next deploy (security, MEDIUM):** the choice is now stored
+  and survives redeploys; `default` goes back. `tests/builder.test.ts` pins that the builder ignores
+  the stored value.
+- **Default prebuilt artifacts trust mutable release assets (security, MEDIUM): deferred.** The default
+  follows Raphaël's 2026-11-07 direction and matches what the production installer already did; the
+  guide now states the trust plainly and the opt-out is durable. Verifying the manifest against
+  something a release cannot rewrite is a security design change: SAM idea
+  `01M85020CSFDKQ7MP0XZRZJ515`.
+- **An installer that changes address reused the old client (found while adding the requested test):**
+  `originChanged` in `deploy.mjs` now gives it a client for the new address, after publish.
+- **Docs (doc-sync):** "stops before publishing anything" corrected; existing-client requirements, the
+  leftover-route note for `remove`, the permission vocabulary (Edit in the dashboard, Write in the
+  API) and the Cloudflare source for the private-client rule added; three more "hosted installer"
+  phrases in `self-hosting.mdx` fixed. The security advisory post keeps its wording while the hosted
+  installer still exists; Phase 2 updates it.
+- **Tests (test-engineer):** added secret-write bodies, absent-secret, address change, failed publish,
+  refusal-not-retried, lost-response, input validation, live-check polling and redirect failures, the
+  `git-head` traversal case with a planted file, and the command runner. Thirteen guards were deleted
+  one at a time and each reddened its test.
+- **README:** every variable the scripts read is documented (env-validator).
+- Not changed: the inline "Verify deployed version" step of the existing staging/production deploy
+  keeps its own 60 s default; replacing it with `check-live` is left for Phase 2, when the production
+  path is touched anyway.
+
+## Effect on the production installer deploy
+
+Production keeps `BASE_DOMAIN`, its existing full mode and its existing OAuth client, so origin, mode,
+scopes and client are unchanged (`preserve` tests in `apps/installer/tests/deploy.test.ts`). Three
+things in its deploy step do change:
+
+1. **Upstream commit check.** Every full-mode deploy now sends one HEAD request to
+   `raw.githubusercontent.com` for the pinned commit and stops if it is not there. Production deploys
+   run on `main` pushes, whose commit is in the upstream repository by definition. A GitHub outage
+   would fail the deploy step; the workflow already depends on GitHub for checkout.
+2. **`preview_urls: false`** is now written explicitly. Wrangler's default for `preview_urls` follows
+   `workers_dev`, which the script already set to `false` for a custom-domain installer, so nothing
+   changes.
+3. **`ARTIFACT_BASE_URL` default.** Production already sets it through the GitHub Environment variable
+   `INSTALLER_ARTIFACT_BASE_URL` to the same releases URL the default uses (read from the GitHub API on
+   2026-11-23), and an existing value is preserved anyway. Staging does not set it, so the staging
+   installer gains the default: intended.
+
+## HELD before merge
+
+F1–F3 need a signed-in member of the Cloudflare account and cannot be done by an agent. The automated
+proof stops at Cloudflare's login page. **Do not merge until F1 and F2 are recorded here with evidence,
+or Raphaël explicitly waives them.** F3 does not block: `remove` keeps the OAuth client by default, and
+the question is tracked in SAM idea `01M84YHD4FZP1C6PXK6AQZMEMM`.
+
 ## Acceptance criteria
 
-- [ ] On a clean checkout of a commit that is on upstream, the documented command with only
+- [x] On a clean checkout of a commit that is on upstream, the documented command with only
       `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` deploys a full-mode installer pinned to that
       commit, with prebuilt artifacts enabled, and prints its address (unit tests; staging workflow).
-- [ ] A commit that is not on upstream stops before anything is published (unit test).
-- [ ] A refused Cloudflare call names the permission to add (unit tests per permission).
-- [ ] An existing installer keeps its origin and mode on redeploy (unit tests).
-- [ ] `remove` deletes only the installer, and the OAuth client only when asked (unit tests; staging
+- [x] A commit that is not on upstream stops before anything is published (unit test).
+- [x] A refused Cloudflare call names the permission to add (unit tests per permission).
+- [x] An existing installer keeps its origin and mode on redeploy (unit tests).
+- [x] `remove` deletes only the installer, and the OAuth client only when asked (unit tests; staging
       workflow runs it before each documented-path deploy).
-- [ ] Production installer deploys behave as before (existing tests with explicit environment values
-      still pass).
-- [ ] Docs describe only what the code does; no page tells people to use a hosted installer.
+- [x] The production installer keeps its origin, mode, scopes and client (existing tests with explicit
+      environment values still pass; deltas listed above).
+- [x] Docs describe only what the code does; no page tells people to use a hosted installer.
 - [ ] F1–F3 recorded with evidence, or the PR is held with the reason.
 
 ## References

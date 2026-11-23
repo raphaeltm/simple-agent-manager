@@ -57,6 +57,11 @@ describe('reading the checked-out commit without running git', () => {
   ])('returns nothing for %s', (_label, files) => {
     expect(checkedOutCommit(from(repository(files)))).toBe('');
   });
+  it('refuses a ref that resolves to a real file outside the git directory', () => {
+    // refs/../../secret resolves to <root>/secret, which holds a valid-looking commit.
+    const root = repository({ '.git/HEAD': 'ref: refs/../../secret\n', secret: `${A}\n` });
+    expect(checkedOutCommit(from(root))).toBe('');
+  });
   it('agrees with this checkout', () => {
     expect(checkedOutCommit()).toMatch(/^[a-f0-9]{40}$/);
   });

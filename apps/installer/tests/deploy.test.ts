@@ -12,6 +12,7 @@ const capture = vi.hoisted(() => ({
   }[],
   run: vi.fn(() => ({ status: 0 })),
   gitHead: '',
+  unlinks: 0,
   events: [] as string[],
 }));
 vi.mock('node:child_process', () => ({ spawnSync: capture.run }));
@@ -23,7 +24,9 @@ vi.mock('node:fs/promises', async (importOriginal) => ({
     capture.writes.push(data);
     capture.events.push('write-config');
   }),
-  unlink: vi.fn(async () => {}),
+  unlink: vi.fn(async () => {
+    capture.unlinks++;
+  }),
 }));
 // Fixture IDs verified against live GET /oauth/scopes on 2026-10-28 (the three email
 // scopes on 2026-11-08; cloudflared Write on 2026-11-10). In
@@ -67,7 +70,9 @@ afterEach(() => {
   capture.writes = [];
   capture.calls = [];
   capture.events = [];
-  capture.run.mockClear();
+  capture.unlinks = 0;
+  capture.run.mockReset();
+  capture.run.mockImplementation(() => ({ status: 0 }));
 });
 interface Options {
   existing?: 'bootstrap' | 'full' | 'legacy-full' | 'editor-bootstrap';
@@ -99,6 +104,16 @@ interface Options {
   failedClientCreations?: number;
   /** A failed creation that nevertheless left a client behind. */
   failedCreationLeavesClient?: boolean;
+  /** How a failed creation fails: an HTTP status (default 500) or a dropped connection. */
+  creationFailure?: number | 'offline';
+  createTimeoutMs?: string;
+  /** Supply OAUTH_CLIENT_ID without its secret. */
+  clientIdOnly?: boolean;
+  /** Extra bindings on the deployed installer. */
+  extraBindings?: { name: string; type: string; text?: string }[];
+  wranglerStatus?: number;
+  liveTimeoutMs?: string;
+  env?: Record<string, string>;
   /** Health responses that fail before the published installer answers. */
   unservedHealthChecks?: number;
 }
@@ -126,7 +141,13 @@ async function deploy(options: Options = {}) {
   vi.stubEnv('INSTALLER_LIVE_POLL_MS', '1');
   vi.stubEnv('INSTALLER_MODE', options.mode || 'preserve');
   vi.stubEnv('OAUTH_CLIENT_ID', options.orphanClient ? 'existing' : '');
-  vi.stubEnv('OAUTH_CLIENT_SECRET', options.orphanClient ? 'OPERATOR_SECRET' : '');
+  vi.stubEnv(
+    'OAUTH_CLIENT_SECRET',
+    options.orphanClient && !options.clientIdOnly ? 'OPERATOR_SECRET' : ''
+  );
+  vi.stubEnv('OAUTH_CLIENT_CREATE_TIMEOUT_MS', options.createTimeoutMs ?? '');
+  vi.stubEnv('INSTALLER_LIVE_TIMEOUT_MS', options.liveTimeoutMs ?? '');
+  capture.run.mockImplementation(() => ({ status: options.wranglerStatus ?? 0 }));
   vi.stubEnv('OAUTH_REGISTRATION_TOKEN', options.registrationToken || '');
   vi.stubEnv('GITHUB_SHA', options.sha ?? 'b'.repeat(40));
   vi.stubEnv('OAUTH_SECRETS_POLL_MS', '1');
@@ -170,7 +191,11 @@ async function deploy(options: Options = {}) {
         return Response.json({ success: false }, { status: 500 });
       else if (failedClientCreations-- > 0) {
         if (options.failedCreationLeavesClient) client = { ...body, client_id: 'half-made' };
-        return Response.json({ success: false, errors: [{ code: 1001 }] }, { status: 500 });
+        if (options.creationFailure === 'offline') throw new Error('socket hang up');
+        return Response.json(
+          { success: false, errors: [{ code: 1001 }] },
+          { status: options.creationFailure ?? 500 }
+        );
       } else {
         client = { ...body, client_id: 'new', client_secret: 'SECRET' };
         result = client;
@@ -204,6 +229,7 @@ async function deploy(options: Options = {}) {
           ? [{ name: 'INSTALL_SOURCE_COMMIT', type: 'plain_text', text: 'c'.repeat(40) }]
           : []),
         ...secretNames.map((name) => ({ name, type: 'secret_text' })),
+        ...(options.extraBindings ?? []),
       ],
     };
   };
@@ -212,7 +238,7 @@ async function deploy(options: Options = {}) {
     vi.fn(async (url: string, init: RequestInit) => {
       const { hostname, pathname: path } = new URL(url);
       if (hostname === 'raw.githubusercontent.com') {
-        capture.events.push(`upstream ${path}`);
+        capture.events.push(`upstream ${init.method} ${path}`);
         if (options.upstream === 'offline') throw new Error('offline');
         return new Response(null, { status: options.upstream ?? 200 });
       }
@@ -220,6 +246,11 @@ async function deploy(options: Options = {}) {
         capture.events.push(`served ${hostname}${path}`);
         return new Response('{}', { status: unservedHealthChecks-- > 0 ? 503 : 200 });
       }
+      // The real API serves these only under this account, with a bearer token.
+      if (path !== '/client/v4/oauth/scopes' && !path.startsWith(`/client/v4/accounts/${ACCOUNT}/`))
+        return Response.json({ success: false }, { status: 404 });
+      if (!/^Bearer \S+$/.test(new Headers(init.headers).get('Authorization') ?? ''))
+        return Response.json({ success: false }, { status: 401 });
       const method = init.method || 'GET',
         body = init.body ? JSON.parse(String(init.body)) : {};
       const authorization = new Headers(init.headers).get('Authorization');
@@ -237,6 +268,7 @@ async function deploy(options: Options = {}) {
         return Response.json({ success: false }, { status: 403 });
       let result: unknown;
       if (path.endsWith('/workers/subdomain')) {
+        if (method !== 'GET') return Response.json({ success: false }, { status: 405 });
         if (options.subdomain === null) return Response.json({ success: false }, { status: 404 });
         result = { subdomain: options.subdomain ?? 'acme' };
       } else if (path.endsWith('/settings')) {
@@ -248,6 +280,8 @@ async function deploy(options: Options = {}) {
         if (result instanceof Response) return result;
       } else if (path.endsWith('/secrets')) {
         if (method === 'PUT') {
+          if (body.type !== 'secret_text' || typeof body.text !== 'string' || !body.text)
+            return Response.json({ success: false }, { status: 400 });
           if (!secretNames.includes(String(body.name))) secretNames.push(String(body.name));
           result = {};
         } else if (options.secretsNeverVisible || laggingSecretReads-- > 0) result = [];
@@ -256,6 +290,8 @@ async function deploy(options: Options = {}) {
       return Response.json({ success: true, result });
     })
   );
+  // Last, so a test can override anything the harness sets above.
+  for (const [key, value] of Object.entries(options.env ?? {})) vi.stubEnv(key, value);
   await import('../scripts/deploy.mjs');
 }
 const config = () => JSON.parse(capture.writes[0] ?? '{}');
@@ -445,6 +481,7 @@ describe('publisher-controlled installer deployment', () => {
   it('requires an immutable publisher commit for full mode', async () => {
     await expect(deploy({ mode: 'full', sha: 'main' })).rejects.toThrow('immutable');
     expect(capture.run).not.toHaveBeenCalled();
+    expect(capture.events.some((entry) => entry.startsWith('upstream '))).toBe(false);
   });
 });
 const selfHosted = { environment: '', domain: '', sha: '' } as const;
@@ -481,7 +518,7 @@ describe('own-account installer deployment (the documented command)', () => {
   it('checks the pinned commit against the upstream repository before publishing', async () => {
     await deploy(selfHosted);
     const checked = capture.events.indexOf(
-      `upstream /raphaeltm/simple-agent-manager/${'d'.repeat(40)}/scripts/deploy/installer-protocol.json`
+      `upstream HEAD /raphaeltm/simple-agent-manager/${'d'.repeat(40)}/scripts/deploy/installer-protocol.json`
     );
     expect(checked).toBeGreaterThanOrEqual(0);
     expect(checked).toBeLessThan(capture.events.indexOf('write-config'));
@@ -590,13 +627,24 @@ describe('prebuilt artifact location', () => {
       'https://github.com/raphaeltm/simple-agent-manager/releases/latest/download'
     );
   });
-  it('"none" removes it so every installation builds from source', async () => {
+  // builder.test.ts proves the builder hands only an https value to the build.
+  it('"none" is stored so every installation builds from source', async () => {
     await deploy({
       existing: 'full',
       existingArtifactBaseUrl: 'https://old.example/artifacts',
       artifactBaseUrl: 'none',
     });
-    expect(config().vars).not.toHaveProperty('ARTIFACT_BASE_URL');
+    expect(config().vars.ARTIFACT_BASE_URL).toBe('none');
+  });
+  it('a later deploy without the variable keeps the build-from-source choice', async () => {
+    await deploy({ existing: 'full', existingArtifactBaseUrl: 'none' });
+    expect(config().vars.ARTIFACT_BASE_URL).toBe('none');
+  });
+  it('"default" returns to SAM’s latest release', async () => {
+    await deploy({ existing: 'full', existingArtifactBaseUrl: 'none', artifactBaseUrl: 'default' });
+    expect(config().vars.ARTIFACT_BASE_URL).toBe(
+      'https://github.com/raphaeltm/simple-agent-manager/releases/latest/download'
+    );
   });
   it('rejects a URL carrying credentials or a query', async () => {
     await expect(
@@ -624,6 +672,8 @@ describe('refused Cloudflare calls name the permission to add', () => {
     const failure = await deploy({ ...selfHosted, managementDenied: true }).catch(
       (error: Error) => error
     );
+    expect(failure).toBeInstanceOf(Error);
+    expect(String(failure)).toContain('Account → OAuth Client → Edit');
     expect(String(failure)).not.toContain('PRIVATE UPSTREAM');
   });
 });
@@ -636,12 +686,51 @@ describe('creating the OAuth client after a first publish', () => {
     expect(capture.calls.filter((call) => call.method === 'PUT')).toHaveLength(2);
     expect(logged()).toContain(`Installer ready: ${SELF_ORIGIN}`);
   });
-  it('gives up after the configured attempts and reports Cloudflare’s error code', async () => {
-    await expect(deploy({ ...selfHosted, failedClientCreations: 99 })).rejects.toThrow(
-      'Cloudflare POST failed (500, Cloudflare code 1001)'
-    );
-    expect(creations()).toHaveLength(6);
+  it('gives up once the configured time has passed and reports Cloudflare’s error code', async () => {
+    await expect(
+      deploy({ ...selfHosted, failedClientCreations: 99, createTimeoutMs: '0' })
+    ).rejects.toThrow('Cloudflare POST failed (500, Cloudflare code 1001)');
+    expect(creations()).toHaveLength(1);
     expect(logged()).not.toContain('Installer ready');
+  });
+  it('keeps retrying inside the time allowed, then stops', async () => {
+    await expect(
+      deploy({ ...selfHosted, failedClientCreations: 99, createTimeoutMs: '40' })
+    ).rejects.toThrow('Cloudflare POST failed (500');
+    expect(creations().length).toBeGreaterThan(1);
+  });
+  it('reports a client left behind by the last failed attempt instead of losing it', async () => {
+    await expect(
+      deploy({
+        ...selfHosted,
+        failedClientCreations: 1,
+        failedCreationLeavesClient: true,
+        createTimeoutMs: '0',
+      })
+    ).rejects.toThrow('OAuth secret missing');
+    expect(creations()).toHaveLength(1);
+  });
+  it('retries a dropped connection after confirming no client was created', async () => {
+    await deploy({ ...selfHosted, failedClientCreations: 1, creationFailure: 'offline' });
+    expect(creations()).toHaveLength(2);
+    expect(logged()).toContain(`Installer ready: ${SELF_ORIGIN}`);
+  });
+  it('reports a client created by a request whose response was lost', async () => {
+    await expect(
+      deploy({
+        ...selfHosted,
+        failedClientCreations: 1,
+        creationFailure: 'offline',
+        failedCreationLeavesClient: true,
+      })
+    ).rejects.toThrow('OAuth secret missing');
+    expect(creations()).toHaveLength(1);
+  });
+  it('does not retry a creation Cloudflare refuses', async () => {
+    await expect(
+      deploy({ ...selfHosted, failedClientCreations: 99, creationFailure: 403 })
+    ).rejects.toThrow('"OAuth Client Write"');
+    expect(creations()).toHaveLength(1);
   });
   it('never creates a second client when a failed creation left one behind', async () => {
     await expect(
@@ -649,10 +738,183 @@ describe('creating the OAuth client after a first publish', () => {
     ).rejects.toThrow('OAuth secret missing');
     expect(creations()).toHaveLength(1);
   });
-  it('does not retry a refusal', async () => {
-    await expect(deploy({ mode: 'bootstrap', managementDenied: true })).rejects.toThrow(
-      '"OAuth Client Write"'
+});
+describe('what the deploy writes', () => {
+  const secretWrites = () =>
+    capture.calls
+      .filter((call) => call.method === 'PUT' && call.path.endsWith('/secrets'))
+      .map((call) => call.body);
+  it('stores the new client’s id and secret as Worker secrets', async () => {
+    await deploy(selfHosted);
+    expect(secretWrites()).toEqual([
+      { name: 'OAUTH_CLIENT_ID', text: 'new', type: 'secret_text' },
+      { name: 'OAUTH_CLIENT_SECRET', text: 'SECRET', type: 'secret_text' },
+    ]);
+  });
+  it('stores an operator-supplied client’s secret', async () => {
+    await deploy({ mode: 'full', orphanClient: true });
+    expect(secretWrites()).toEqual([
+      { name: 'OAUTH_CLIENT_ID', text: 'existing', type: 'secret_text' },
+      { name: 'OAUTH_CLIENT_SECRET', text: 'OPERATOR_SECRET', type: 'secret_text' },
+    ]);
+  });
+  it('keeps the stored secret when only an existing client’s scopes change', async () => {
+    await deploy({ existing: 'bootstrap', mode: 'full' });
+    expect(capture.calls.some((call) => call.method === 'PATCH')).toBe(true);
+    expect(secretWrites()).toEqual([
+      { name: 'OAUTH_CLIENT_ID', text: 'existing', type: 'secret_text' },
+    ]);
+  });
+  it('never hands OAuth credentials to Wrangler', async () => {
+    await deploy({ mode: 'full', orphanClient: true, registrationToken: 'REGISTRATION_PRIVATE' });
+    const environment = (wranglerRuns()[0] as unknown as [string, string[], { env: object }])[2]
+      .env;
+    expect(environment).toHaveProperty('CLOUDFLARE_API_TOKEN', 'DEPLOY_TOKEN');
+    for (const name of ['OAUTH_CLIENT_ID', 'OAUTH_CLIENT_SECRET', 'OAUTH_REGISTRATION_TOKEN'])
+      expect(environment).not.toHaveProperty(name);
+  });
+  it('carries over deployed settings but never a secret-named plain binding', async () => {
+    await deploy({
+      existing: 'full',
+      extraBindings: [
+        { name: 'SESSION_TTL_SECONDS', type: 'plain_text', text: '600' },
+        { name: 'OAUTH_CLIENT_SECRET', type: 'plain_text', text: 'LEAKED_PLAIN' },
+        { name: 'OAUTH_REGISTRATION_TOKEN', type: 'plain_text', text: 'LEAKED_REGISTRATION' },
+      ],
+    });
+    expect(config().vars.SESSION_TTL_SECONDS).toBe('600');
+    expect(capture.writes.join('')).not.toMatch(/LEAKED/);
+  });
+  it('a failed publish creates no client, writes no secrets, and removes its config file', async () => {
+    await expect(deploy({ ...selfHosted, wranglerStatus: 1 })).rejects.toThrow(
+      'Wrangler command failed'
     );
-    expect(creations()).toHaveLength(0);
+    expect(capture.calls.some((call) => call.method !== 'GET')).toBe(false);
+    expect(capture.writes).toHaveLength(1);
+    expect(capture.unlinks).toBe(1);
+  });
+  it('bootstrap mode pins no commit and asks upstream nothing', async () => {
+    await deploy({ ...selfHosted, mode: 'bootstrap', gitHead: null });
+    expect(config().vars.BUILD_SHA).toBe('self-hosted');
+    expect(config().vars).not.toHaveProperty('INSTALL_SOURCE_COMMIT');
+    expect(capture.events.some((entry) => entry.startsWith('upstream '))).toBe(false);
+    expect(published()).toBe(true);
+  });
+});
+describe('an installer that changes address', () => {
+  it('BASE_DOMAIN moves a workers.dev installer and gives it a client for the new address', async () => {
+    await deploy({
+      ...selfHosted,
+      existing: 'full',
+      existingOrigin: SELF_ORIGIN,
+      domain: 'example.com',
+    });
+    expect(config().vars.APP_ORIGIN).toBe('https://install.example.com');
+    expect(config().workers_dev).toBe(false);
+    const created = capture.calls.find(
+      (call) => call.path.endsWith('/oauth_clients') && call.method === 'POST'
+    );
+    expect(created?.body).toMatchObject({
+      client_uri: 'https://install.example.com',
+      redirect_uris: ['https://install.example.com/oauth/callback'],
+    });
+    expect(
+      capture.events.indexOf(`POST /client/v4/accounts/${ACCOUNT}/oauth_clients`)
+    ).toBeGreaterThan(capture.events.indexOf('write-config'));
+    expect(
+      capture.calls.filter((call) => call.method === 'PUT').map((call) => call.body.text)
+    ).toEqual(['new', 'SECRET']);
+  });
+  it('control: the same address keeps the client untouched', async () => {
+    await deploy({ ...selfHosted, existing: 'full', existingOrigin: SELF_ORIGIN });
+    expect(capture.calls.some((call) => call.path.includes('/oauth_clients'))).toBe(false);
+  });
+  it('stops when the deployed address is not one this command can serve', async () => {
+    await expect(
+      deploy({ ...selfHosted, existing: 'full', existingOrigin: 'https://app.example.com' })
+    ).rejects.toThrow('not supported');
+    expect(published()).toBe(false);
+  });
+});
+describe('OAuth client problems are reported before anything is written', () => {
+  it('an existing client whose secret is not on the Worker', async () => {
+    await expect(deploy({ existing: 'bootstrap', ready: false, mode: 'full' })).rejects.toThrow(
+      'OAuth secret missing'
+    );
+    expect(capture.calls.some((call) => call.method === 'PUT')).toBe(false);
+    expect(published()).toBe(false);
+  });
+  it('an explicit client id without its secret', async () => {
+    await expect(
+      deploy({ existing: 'bootstrap', mode: 'full', orphanClient: true, clientIdOnly: true })
+    ).rejects.toThrow('requires its private secret');
+    expect(capture.calls.some((call) => call.method === 'PUT')).toBe(false);
+  });
+  it('an explicit client that belongs to another address', async () => {
+    await expect(
+      deploy({
+        existing: 'bootstrap',
+        mode: 'full',
+        orphanClient: true,
+        existingOrigin: 'https://install.other.example',
+      })
+    ).rejects.toThrow('does not belong');
+    expect(capture.calls.some((call) => call.method === 'PUT')).toBe(false);
+  });
+});
+describe('input validation', () => {
+  it.each([
+    ['a domain with a path', { domain: 'example.com/x' }, 'not a valid domain'],
+    ['an unknown mode', { mode: 'sideways' }, 'Invalid installer mode'],
+    [
+      'an environment with unsafe characters',
+      { environment: 'a/../b' },
+      'Invalid installer environment',
+    ],
+    [
+      'a non-numeric timeout',
+      { env: { INSTALLER_LIVE_TIMEOUT_MS: 'soon' } },
+      'INSTALLER_LIVE_TIMEOUT_MS must be',
+    ],
+    [
+      'a zero poll interval',
+      { env: { OAUTH_SECRETS_POLL_MS: '0' } },
+      'OAUTH_SECRETS_POLL_MS must be',
+    ],
+    [
+      'a negative retry interval',
+      { env: { OAUTH_CLIENT_CREATE_RETRY_MS: '-5' } },
+      'OAUTH_CLIENT_CREATE_RETRY_MS must be',
+    ],
+    [
+      'a fractional create timeout',
+      { env: { OAUTH_CLIENT_CREATE_TIMEOUT_MS: '1.5' } },
+      'OAUTH_CLIENT_CREATE_TIMEOUT_MS must be',
+    ],
+  ] as const)('rejects %s', async (_label, options, message) => {
+    await expect(deploy({ ...selfHosted, failedClientCreations: 1, ...options })).rejects.toThrow(
+      message
+    );
+    expect(logged()).not.toContain('Installer ready');
+  });
+  it('rejects a malformed account id before any request', async () => {
+    vi.spyOn(process, 'chdir').mockImplementation(() => {});
+    vi.stubEnv('CLOUDFLARE_API_TOKEN', 'DEPLOY_TOKEN');
+    vi.stubEnv('CLOUDFLARE_ACCOUNT_ID', 'not-an-account');
+    const fetched = vi.fn();
+    vi.stubGlobal('fetch', fetched);
+    await expect(import('../scripts/deploy.mjs')).rejects.toThrow('CLOUDFLARE_ACCOUNT_ID');
+    expect(fetched).not.toHaveBeenCalled();
+  });
+});
+describe('waiting for a freshly published installer', () => {
+  it('proceeds once INSTALLER_LIVE_TIMEOUT_MS has passed, and still finishes', async () => {
+    await deploy({ ...selfHosted, unservedHealthChecks: 1e6, liveTimeoutMs: '20' });
+    expect(logged()).toContain(`Installer ready: ${SELF_ORIGIN}`);
+  });
+  it('does not wait when the client was settled before publishing', async () => {
+    await deploy({ existing: 'bootstrap', mode: 'full' });
+    expect(capture.events.some((entry) => entry.startsWith('served '))).toBe(false);
+    expect(published()).toBe(true);
   });
 });

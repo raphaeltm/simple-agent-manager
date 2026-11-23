@@ -13,7 +13,8 @@ afterEach(() => {
   vi.resetModules();
   capture.calls = [];
   capture.logs = [];
-  capture.run.mockClear();
+  capture.run.mockReset();
+  capture.run.mockImplementation(() => ({ status: 0 }));
 });
 const ACCOUNT = 'a'.repeat(32);
 const ORIGIN = 'https://sam-installer-self-hosted.acme.workers.dev';
@@ -29,6 +30,7 @@ interface Options {
   removeClient?: string;
   environment?: string;
   oauthDenied?: boolean;
+  wranglerStatus?: number;
 }
 const ours: Client = {
   client_id: 'ours',
@@ -45,12 +47,18 @@ async function remove(options: Options = {}) {
   vi.stubEnv('INSTALLER_ENVIRONMENT', options.environment ?? '');
   vi.stubEnv('REMOVE_OAUTH_CLIENT', options.removeClient ?? '');
   vi.stubEnv('OAUTH_REGISTRATION_TOKEN', '');
+  capture.run.mockImplementation(() => ({ status: options.wranglerStatus ?? 0 }));
   let clients = options.clients ?? [ours];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init: RequestInit) => {
       const path = new URL(url).pathname;
       const method = init.method || 'GET';
+      // The real API serves these only under this account, with a bearer token.
+      if (!path.startsWith(`/client/v4/accounts/${ACCOUNT}/`))
+        return Response.json({ success: false }, { status: 404 });
+      if (new Headers(init.headers).get('Authorization') !== 'Bearer DEPLOY_TOKEN')
+        return Response.json({ success: false }, { status: 401 });
       capture.calls.push({
         path,
         method,
@@ -120,6 +128,7 @@ describe('removing an own-account installer', () => {
     'does not treat %s as a request to delete the client',
     async (value) => {
       await remove({ removeClient: value });
+      expect(capture.run).toHaveBeenCalledOnce();
       expect(deleted()).toEqual([]);
     }
   );
@@ -163,6 +172,13 @@ describe('removing an own-account installer', () => {
     expect(capture.logs.join('\n')).toContain(
       'Installations made with this installer were not changed'
     );
+  });
+  it('a failed Worker deletion leaves the OAuth client alone', async () => {
+    await expect(remove({ removeClient: 'true', wranglerStatus: 1 })).rejects.toThrow(
+      'Wrangler command failed'
+    );
+    expect(capture.run).toHaveBeenCalledOnce();
+    expect(deleted()).toEqual([]);
   });
   it('requires a token and account ID', async () => {
     vi.spyOn(process, 'chdir').mockImplementation(() => {});
