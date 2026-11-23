@@ -16,7 +16,7 @@ presigned uploads") cannot be done there.
 ## Context
 
 Found 2026-11-22 on the shared box during multi-box step 3
-(`tasks/active/2026-11-22-selfhost-registry-evidence.md`, task 01M8265E185QAYMQJH7VESFK19).
+(`tasks/archive/2026-11-22-selfhost-registry-evidence.md`, task 01M8265E185QAYMQJH7VESFK19).
 
 ## Acceptance Criteria
 

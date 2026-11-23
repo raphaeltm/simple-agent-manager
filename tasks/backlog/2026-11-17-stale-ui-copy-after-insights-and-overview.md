@@ -16,3 +16,7 @@ Found 2026-11-17 during the weekly docs update; `guides/insights.md` was correct
 
 - [x] Accounts tab footer no longer says tokens are not recorded: the tab now shows tokens and API-key spend itself (#2828)
 - [ ] NavSidebar comment describes the Overview as the landing page
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+Still open, partly shipped. Remainder: NavSidebar.tsx:70 PROJECT_NAV_ITEMS comment still says project opens in Chat. Evidence: AccountsTab footer fixed (#2828, file box checked).

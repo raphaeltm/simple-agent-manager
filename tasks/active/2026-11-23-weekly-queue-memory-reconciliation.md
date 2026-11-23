@@ -30,14 +30,16 @@ guide to what is genuinely open.
 
 ## Checklist
 
+- [x] Repoint the four code/config pointers that named the moved `tasks/active/` paths (comments, plus the `baselineBacklogLink` string in `packages/eslint-plugin-sam/rules.manifest.json`). No logic changes
+
 - [x] Audit every `tasks/active/` file against merged PRs and deploys
 - [x] Archive the 24 shipped files: tick evidenced gate lines and append a dated reconciliation note
 - [x] Move `2026-11-14-merge-streamed-chunks.md` back to backlog with its open remainder
-- [ ] Audit all 348 backlog files (4 read-only slices); spot-check evidence for every non-KEEP verdict
-- [ ] Delete shipped, obsolete, superseded and duplicate backlog files; annotate PARTIAL ones
-- [ ] Comment a weekly status/park note on #2265 and #1788
+- [x] Audit all 348 backlog files (4 read-only slices); spot-check evidence for every non-KEEP verdict
+- [x] Delete shipped, obsolete, superseded and duplicate backlog files; annotate PARTIAL ones
+- [x] Comment a weekly status/park note on #2265 and #1788
 - [ ] PR description lists a one-line rationale for each deletion
-- [ ] Part 2: SAM knowledge/idea/policy hygiene (outside the repo)
+- [x] Part 2: SAM knowledge/idea/policy hygiene (outside the repo)
 - [ ] Digest via `update_task_status`
 
 ## Acceptance criteria
@@ -47,3 +49,13 @@ guide to what is genuinely open.
 - [ ] No backlog file deleted without a cited merged PR, commit or code check
 - [ ] Each PR older than 7 days has one comment from this run
 - [ ] The change touches only files under `tasks/`: no staging deploy (task-file-only exemption)
+
+## Backlog audit results
+
+- 348 files. KEEP 276, PARTIAL 64, SHIPPED 7, SUPERSEDED 1, OBSOLETE 0, DUPLICATE 0.
+- I checked the merged PR and the code path for all 8 deletions myself (listed in the PR description).
+- 61 of the 64 PARTIAL files already carry earlier reconciliation notes. A dated note was added only
+  to the 7 whose evidence cites a PR the file did not mention yet.
+- Noted, not fixed (pre-existing drift): about 11 code and config comments still name older
+  `tasks/active/` paths from earlier PRs, among them applied D1 migration headers, which must not be
+  edited. Only the four pointers this PR's moves broke were repointed.

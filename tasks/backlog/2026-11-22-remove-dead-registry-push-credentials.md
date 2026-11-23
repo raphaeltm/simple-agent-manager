@@ -16,7 +16,7 @@ Affects hosted SAM code (the Worker route), so it needs its own PR with the usua
 ## Context
 
 Found 2026-11-22 during self-host multi-box step 3 (registry evidence,
-`tasks/active/2026-11-22-selfhost-registry-evidence.md`, task 01M8265E185QAYMQJH7VESFK19).
+`tasks/archive/2026-11-22-selfhost-registry-evidence.md`, task 01M8265E185QAYMQJH7VESFK19).
 
 ## Acceptance Criteria
 

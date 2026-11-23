@@ -43,3 +43,7 @@ create.
 - [ ] An inventory that shows a matching server keeps the current fence (no regression).
 - [ ] An alert fires when the bound is reached, naming the node and the provider.
 - [ ] Test through the real cleanup sweep with a fake provider inventory: empty, then matching.
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+Still open, partly shipped. Operator removal for stranded nodes shipped; the automatic time-bounded retire as runtime_terminated plus alert is not implemented. Evidence: #2900 (6e1c998e5) operator-attested removal path; apps/api/src/services/strict-node-providerless-reconcile.ts:186-189 still throws teardown_allocation_unresolved with no bounded automatic retirement.

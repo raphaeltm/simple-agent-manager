@@ -125,3 +125,7 @@ From `2026-03-17-port-proxy-ownership-verification` (removed from the backlog 20
       (`packages/vm-agent/internal/server/ports_proxy.go`).
 - [ ] Add a comment explaining the `SameSite=Lax` downgrade for cross-subdomain cookies
       (`packages/vm-agent/internal/auth/session.go:184-187`).
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+Still open, partly shipped. Own-listener proxy refusal shipped; port-range guard, subdomain ownership and other items open. Evidence: #2550; packages/vm-agent/internal/server/proxy_guard.go isOwnListenerTarget.

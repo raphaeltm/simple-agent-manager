@@ -18,7 +18,7 @@ sending `message.append`, and the client's reconnect re-reads the newest window.
 ## Context
 
 Found while fixing the stale project-socket merge gate (task
-`tasks/active/2026-11-16-stale-socket-merge-gate.md`, SAM task `01M7GY0BKP1WESE5Y82PZNN42S`). The
+`tasks/archive/2026-11-16-stale-socket-merge-gate.md`, SAM task `01M7GY0BKP1WESE5Y82PZNN42S`). The
 brief scoped the guarantee to text arriving after the legacy socket appears. Affects only tabs
 still running a pre-#2760 bundle; the number falls as tabs reload.
 
