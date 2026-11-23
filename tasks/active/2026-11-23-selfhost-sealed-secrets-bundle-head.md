@@ -45,20 +45,20 @@ Call sites that choose the current bundle by `createdAt` (verified in code):
 
 ## Checklist
 
-- [ ] `bundle-head.ts`: format, seal/open, selector, keep list, commit helper
-- [ ] BundleStore `readHead`/`writeHead`/`removeHead` (local + mirrored to `sam-box/head.json`)
-- [ ] Deploy (`resolveSealedSecrets`) selects by head, writes head after a seal and on migration
-- [ ] Prune keeps the new head and the previous head
-- [ ] Rotation: head(), write advances head, prune, resume across a crash between bundle and head
+- [x] `bundle-head.ts`: format, seal/open, selector, keep list, commit helper
+- [x] BundleStore `readHead`/`writeHead`/`removeHead` (local + mirrored to `sam-box/head.json`)
+- [x] Deploy (`resolveSealedSecrets`) selects by head, writes head after a seal and on migration
+- [x] Prune keeps the new head and the previous head
+- [x] Rotation: head(), write advances head, prune, resume across a crash between bundle and head
       (`stagedOver`), drop `afterInstant`
-- [ ] Secrets switch: advance head, rollback restores the previous head
-- [ ] Migrate failure cleanup removes a head naming a removed bundle
-- [ ] Preflight, plaintext scan, key choice, state-installation, status use the selector / hint
-- [ ] Reconcile: verified heads, seq comparison, uploads the local head
-- [ ] Rebuild: selects the bucket head, copies it verbatim, createdAt fallback without one
-- [ ] Tests through the real deploy: clock rollback, rebuild after rollback, tampered head, foreign
+- [x] Secrets switch: advance head, rollback restores the previous head
+- [x] Migrate failure cleanup removes a head naming a removed bundle
+- [x] Preflight, plaintext scan, key choice, state-installation, status use the selector / hint
+- [x] Reconcile: verified heads, seq comparison, uploads the local head
+- [x] Rebuild: selects the bucket head, copies it verbatim, createdAt fallback without one
+- [x] Tests through the real deploy: clock rollback, rebuild after rollback, tampered head, foreign
       head, no-head migration; each guard deleted once
-- [ ] README (deploy/selfhost) updated
+- [x] README (deploy/selfhost) updated
 - [ ] Live: sealed-secret live suite on celld; shared box head migration keeps the same bundle
 
 ## Acceptance criteria
@@ -67,3 +67,17 @@ Call sites that choose the current bundle by `createdAt` (verified in code):
 - A rebuild from the bucket after that picks the same bundle.
 - A tampered head and a foreign-installation head stop deploy and rebuild.
 - A box with no head deploys the createdAt choice and then has a head naming it.
+
+## Implementation notes
+
+- Mutation proof (each guard deleted once, `bundle-head.test.ts`):
+  selector ignores the head -> all 4 red; inner/outer field check -> tamper test red; installation
+  match in the selector -> tamper test red; reconcile seq comparison -> tamper test red; rebuild
+  ignores the bucket head -> rollback and tamper tests red; rotation `stagedOver` resume -> rotation
+  test red; migration head write -> before-head test red; head commit after a seal -> rollback test red.
+- `key-service.test.ts` "refuses to deploy from an older bundle when the newest cannot be read":
+  its control removed the current bundle and expected a deploy from the older one, which is the
+  rollback this change prevents. It now asserts that removal is refused and that restoring the file
+  deploys without the unset value.
+- Residual (documented in README "Rollback"): a bucket writer can replay an older genuine head and
+  delete newer bundles; the same capability already existed over celld's data and the bundles.
