@@ -688,6 +688,10 @@ describe('the head lock', () => {
     // A dead owner's lock is not joined (it is stale; the joiner takes the lock instead).
     writeFileSync(lock, '4194390\n');
     expect(joinLockFile(lock, '4194390')).toBe(false);
+    // The failed join leaves the file as it was (no pid of ours to wait on), so the joiner
+    // then takes the stale lock at once.
+    expect(readFileSync(lock, 'utf8')).toBe('4194390\n');
+    await expect(withLockFile(lock, async () => 'ran', 200)).resolves.toBe('ran');
     // A live owner's lock is joined.
     writeFileSync(lock, `${process.ppid}\n`);
     expect(joinLockFile(lock, String(process.ppid))).toBe(true);

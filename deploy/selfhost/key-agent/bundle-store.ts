@@ -191,6 +191,15 @@ export function joinLockFile(
   /** Test seam: runs between the append and the checks (where a replacement can land). */
   afterAppend: () => void = () => undefined
 ): boolean {
+  // Checked before appending too, so a join that cannot succeed leaves the file as it was.
+  const firstHolder = (): string | undefined => {
+    try {
+      return readFileSync(lockPath, 'utf8').trim().split(/\s+/)[0];
+    } catch {
+      return undefined;
+    }
+  };
+  if (firstHolder() !== owner || !pidAlive(Number(owner))) return false;
   let fd: number;
   try {
     // No O_CREAT: joining never creates a lock (it would name only this process).
@@ -205,8 +214,7 @@ export function joinLockFile(
     const joined = fstatSync(fd).ino;
     if (lstatSync(lockPath, { throwIfNoEntry: false })?.ino !== joined) return false;
     // The owner must still be running: a dead owner's lock is stale, and is taken, not joined.
-    const first = readFileSync(lockPath, 'utf8').trim().split(/\s+/)[0];
-    return first === owner && pidAlive(Number(owner));
+    return firstHolder() === owner && pidAlive(Number(owner));
   } finally {
     closeSync(fd);
   }
