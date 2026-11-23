@@ -786,6 +786,45 @@ describe('ProjectChat new chat button', () => {
     expect(screen.getAllByText('My authoritative session')).not.toHaveLength(0);
   });
 
+  it('re-reads My sessions authoritatively when a session is created', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [SESSION_1], total: 1 });
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/session-1`, true);
+    await screen.findAllByText('First chat');
+    fireEvent.click(screen.getAllByRole('button', { name: /^My sessions/ })[0]!);
+    await waitFor(() =>
+      expect(mocks.listChatSessions).toHaveBeenLastCalledWith(
+        PROJECT_ID,
+        expect.objectContaining({ scope: 'my' })
+      )
+    );
+    const callsBefore = mocks.listChatSessions.mock.calls.length;
+    // The scope switch is an ordinary read and may use the index.
+    expect(mocks.listChatSessions.mock.calls[callsBefore - 1]?.[1]).not.toHaveProperty(
+      'authoritative'
+    );
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [{ ...SESSION_2, topic: 'Mine, just created', status: 'active' }, SESSION_1],
+      total: 2,
+    });
+
+    await act(async () => {
+      mocks.capturedOnSessionEvent?.({
+        type: 'session.created',
+        payload: { ...SESSION_2, topic: 'Mine, just created', status: 'active' },
+      });
+    });
+
+    await waitFor(() => expect(mocks.listChatSessions.mock.calls.length).toBe(callsBefore + 1));
+    // The index has not synced a session created a moment ago, so this read skips it.
+    expect(mocks.listChatSessions).toHaveBeenLastCalledWith(PROJECT_ID, {
+      limit: expect.any(Number),
+      scope: 'my',
+      includeLive: true,
+      authoritative: true,
+    });
+    expect(await screen.findAllByText('Mine, just created')).not.toHaveLength(0);
+  });
+
   it('keeps a deep-linked conversation when the first list read fails', async () => {
     mocks.listChatSessions.mockRejectedValue(new Error('list unavailable'));
 

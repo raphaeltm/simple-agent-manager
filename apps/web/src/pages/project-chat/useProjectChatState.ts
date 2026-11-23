@@ -220,9 +220,10 @@ export function useProjectChatState() {
     (raw: RawSessionEvent) => {
       // session.created deltas cannot be scope-filtered client-side (we don't
       // know isMine from the wire payload), so fall back to a full refetch when
-      // the user is viewing "My sessions" to let the server apply the filter.
+      // the user is viewing "My sessions" to let the server apply the filter. The read
+      // must be authoritative: the D1 index has not synced a session created just now.
       if (raw.type === 'session.created' && multiplayerActive && sessionScope === 'my') {
-        void loadSessions();
+        void loadSessions({ fresh: true });
         return;
       }
       const event = rawToSessionEvent(raw);
