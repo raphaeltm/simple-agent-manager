@@ -79,20 +79,20 @@ impact documented. celld's own data (D1, DO, KV, R2 under `CELLD_BUCKET`, hosted
 
 ## Checklist
 
-- [ ] `bucket-objects.ts`: `writeObject` (exact key, from a private temp file)
-- [ ] `box-mirror.ts`: mirrored `BundleStore` (local first, then bucket), reconcile (upload missing,
+- [x] `bucket-objects.ts`: `writeObject` (exact key, from a private temp file)
+- [x] `replaceable-box.ts` / `replaceable-deploy.ts`: mirrored `BundleStore` (local first, then bucket), reconcile (upload missing,
       prune older extras, refuse when the bucket has a newer bundle the box lacks), sealed ledger
-- [ ] `key-service.ts`: replaceable settings use the mirror; refuse `file`/`legacy-plaintext`,
+- [x] `key-service.ts`: replaceable settings use the mirror; refuse `file`/`legacy-plaintext`,
       bundled store
-- [ ] `key-choice.ts`: automatic `--init` choice never falls back to `file` in replaceable mode
-- [ ] `--init`/deploy in replaceable mode on an empty state with bundles in the bucket: refuse,
+- [x] `key-choice.ts`: automatic `--init` choice never falls back to `file` in replaceable mode
+- [x] `--init`/deploy in replaceable mode on an empty state with bundles in the bucket: refuse,
       point to `selfhost:rebuild`
-- [ ] `rebuild.ts` + `pnpm selfhost:rebuild`: empty state, provider checks, pull + verify bundles,
+- [x] `rebuild.ts` + `pnpm selfhost:rebuild`: empty state, provider checks, pull + verify bundles,
       restore ledger cloud entries, print next steps
-- [ ] Tests: refusal with file key; mirror writes/prunes; capability test: real `deploy --init`
+- [x] Tests: refusal with file key; mirror writes/prunes; capability test: real `deploy --init`
       (fake KMS + fake bucket) -> wipe state -> rebuild -> deploy dry run with same identity; forged
       / foreign bundle refused; newer-bundle-in-bucket refusal
-- [ ] Docs: `deploy/selfhost/README.md` "Replaceable box" + "Replace a dead box" runbook,
+- [x] Docs: `deploy/selfhost/README.md` "Replaceable box" + "Replace a dead box" runbook,
       `.env.example`, public self-hosting docs
 - [ ] Live proof on a disposable GCP box (sam-vm-control-plane-test, gcp-kms): seed, destroy VM +
       disk, rebuild on new VM, verify sign-in, credential, git clone, sealed secrets, app deploy;

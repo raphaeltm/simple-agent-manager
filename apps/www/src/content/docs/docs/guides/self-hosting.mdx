@@ -67,8 +67,8 @@ it honours the operational cron switch. Its node-transport endpoints:
   `run_id`. Every other allow is `{reject:false, unchange:true}`.
 - `GET /api/self-host/gateway/node-websocket`: Caddy `forward_auth` for node WebSockets,
   authenticated with the `X-SAM-Gateway-Secret` header. The original request runs through the
-  normal ws-* or node log-stream authentication. The answer is either that handler's refusal or
-  `X-SAM-Upstream`/`X-SAM-Upstream-*` headers naming the loopback lease port and the credentials
+  normal ws-_ or node log-stream authentication. The answer is either that handler's refusal or
+  `X-SAM-Upstream`/`X-SAM-Upstream-_` headers naming the loopback lease port and the credentials
   Caddy forwards.
 - `GET /api/self-host/gateway/app-route`: Caddy `forward_auth` for every request to a deployment
   app hostname (`*.apps.<BASE_DOMAIN>`), same header. It answers 404 (or 503 while the node's
@@ -1239,7 +1239,6 @@ statement metadata; restrict access to observability data as you would for produ
 Instant sessions publish applications through a dedicated Cloudflare Container build executor. Cloudflare Containers are already part of SAM's supported setup, so this adds no separate cloud account or manual secret prerequisite. Deployment targets remain VMs. VM sessions retain the node executor by default; keep `deployments.buildExecutor=node` in **Admin → Settings** until a staging VM trial verifies a served release with unchanged source build/save counters. VM publishing through Cloudflare remains unverified. `DEPLOY_BUILDER_INSTANCE_TYPE` and `DEPLOY_BUILDER_MAX_INSTANCES` are deployment-time sizing controls; see the [configuration reference](/docs/reference/configuration/#cloudflare-application-build-executor).
 
 The builder runs one job per ephemeral container and can execute arbitrary Dockerfile steps as root inside DinD with host build networking and unrestricted internet access, just like VM workspaces. Context and image transfers use direct presigned URLs; no outbound proxy or HTTPS interception CA is installed. It receives no user or installation credentials, runtime secret values or workspace token. Its callback token stays in the Go supervisor's memory and authorizes only one job and attempt until that job's deadline or terminal state. Treat arbitrary root code as having that job's authority. The bootstrap listener closes before build steps run, and a durable alarm attempts to destroy the microVM at the hard deadline, independent of source-session liveness. If shutdown cannot be confirmed, cron force-releases the reservation after the stored deadline plus `deployments.builderReservationGraceMs` (five minutes by default), marks unfinished jobs `unknown` and records an alert. This permits deletion and new admissions without claiming physical shutdown; Cloudflare capacity can remain occupied until reclaimed. See the [build trust model](/docs/architecture/security/#application-build-executor) for the enforcing code paths.
-
 
 ### Connect a repository sign-in to an email account
 
