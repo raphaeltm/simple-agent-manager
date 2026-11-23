@@ -983,27 +983,51 @@ describe('GcpProvider', () => {
       expect(await provider.getVM('missing-id')).toBeNull();
     });
 
-    it('getVMInLocation reads exactly the given zone, unfiltered, and returns null only on its 404', async () => {
+    it('getVMInLocation lists exactly the given zone, filtered on id or name only (no label filter)', async () => {
       const urls: string[] = [];
       globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
         urls.push(url);
-        if (url.endsWith('/zones/us-east4-c/instances/vm-unlabelled')) {
-          return new Response(JSON.stringify(gcpInstance({ id: '77', name: 'vm-unlabelled' })));
+        const parsed = new URL(url);
+        if (parsed.pathname.endsWith('/zones/us-east4-c/instances')) {
+          // An unlabelled instance, found by its numeric ID.
+          return new Response(
+            JSON.stringify({
+              items: [{ ...gcpInstance({ id: '9001', name: 'node-01box' }), labels: {} }],
+            })
+          );
         }
-        return new Response(JSON.stringify({ error: { message: 'Not found' } }), { status: 404 });
+        if (parsed.pathname.endsWith('/zones/us-east4-b/instances')) {
+          return new Response(JSON.stringify({}));
+        }
+        return new Response(JSON.stringify({ error: { message: 'unexpected' } }), { status: 500 });
       });
-      expect((await provider.getVMInLocation('vm-unlabelled', 'us-east4-c'))?.name).toBe(
-        'vm-unlabelled'
-      );
-      expect(await provider.getVMInLocation('vm-unlabelled', 'us-east4-b')).toBeNull();
+      expect((await provider.getVMInLocation('9001', 'us-east4-c'))?.name).toBe('node-01box');
+      expect(await provider.getVMInLocation('9001', 'us-east4-b')).toBeNull();
+      const filter = new URL(urls[0]!).searchParams.get('filter');
+      expect(filter).toBe('(id = 9001)');
+      expect(filter).not.toContain('labels.');
       expect(urls.every((url) => !url.includes('/aggregated/'))).toBe(true);
+    });
+
+    it('getVMInLocation follows pages and throws on any failed page', async () => {
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        const parsed = new URL(url);
+        if (!parsed.searchParams.has('pageToken')) {
+          return new Response(JSON.stringify({ items: [], nextPageToken: 'p2' }));
+        }
+        return new Response(JSON.stringify({ error: { message: 'boom' } }), { status: 503 });
+      });
+      await expect(provider.getVMInLocation('node-01box', 'us-east4-c')).rejects.toThrow();
       globalThis.fetch = vi
         .fn()
         .mockImplementation(
           async () =>
             new Response(JSON.stringify({ error: { message: 'denied' } }), { status: 403 })
         );
-      await expect(provider.getVMInLocation('vm-unlabelled', 'us-east4-c')).rejects.toThrow();
+      await expect(provider.getVMInLocation('9001', 'us-east4-c')).rejects.toThrow();
+      await expect(provider.getVMInLocation('a b"', 'us-east4-c')).rejects.toMatchObject({
+        category: 'invalid_config',
+      });
     });
 
     it('follows aggregated nextPageToken for numeric-ID lookup', async () => {

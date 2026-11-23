@@ -20,6 +20,7 @@ import {
 import { ensureGcpFirewallRules } from './gcp-firewall';
 import {
   findGcpInstanceByIdOrName,
+  findGcpInstanceInZoneByIdOrName,
   getGcpInstanceInZone,
   listGcpInstances,
 } from './gcp-instance-lookup';
@@ -343,8 +344,8 @@ export class GcpProvider implements Provider {
     context?: ProviderRequestContext
   ): Promise<VMInstance | null> {
     throwIfProviderRequestAborted(context);
-    // One zonal GET (accepts the instance name or numeric ID); a 404 there is the only null.
-    const instance = await getGcpInstanceInZone(this.api, location, id, context);
+    // A zonal list filtered on the instance's ID or name, with no label filter.
+    const instance = await findGcpInstanceInZoneByIdOrName(this.api, location, id, context);
     return instance ? gcpInstanceToVM(instance) : null;
   }
 

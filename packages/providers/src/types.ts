@@ -327,7 +327,7 @@ export interface Provider extends ProviderVmDeletionRequests {
    * Get VM by ID by reading exactly one location (a GCP zone), with no label filter. Optional:
    * for providers whose `getVM` searches a fixed location list and a label-filtered project-wide
    * list, so an instance outside that list whose labels changed would read as missing. Returns
-   * null only when that location answers "not found"; throws on everything else.
+   * null only when that location's complete answer holds no such instance; throws otherwise.
    */
   getVMInLocation?(
     id: string,

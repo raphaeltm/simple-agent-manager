@@ -185,9 +185,9 @@ function createFakeGcp(project: string, defaultZone: string) {
     }
     const base = `/compute/v1/projects/${project}`;
     if (url.pathname === `${base}/aggregated/instances`) {
-      // Honour the documented `labels.<key>=<value>` filter SAM sends.
+      // Honour the label filters SAM sends: `labels.k=v` and `(labels.k = "v")`.
       const filter = url.searchParams.get('filter') ?? '';
-      const wanted = [...filter.matchAll(/labels\.([a-z0-9_-]+)=([a-z0-9_-]+)/g)];
+      const wanted = [...filter.matchAll(/labels\.([a-z0-9_-]+)\s*=\s*"?([a-z0-9_-]+)"?/g)];
       const items: Record<string, { instances: Record<string, unknown>[] } | object> = {};
       for (const instance of instances.values()) {
         const labels = (instance.labels ?? {}) as Record<string, string>;
@@ -205,6 +205,21 @@ function createFakeGcp(project: string, defaultZone: string) {
       }
       return json({ items });
     }
+    const zonalList = new RegExp(`^${base}/zones/([^/]+)/instances$`).exec(url.pathname);
+    if (zonalList && method === 'GET') {
+      // Documented filter fields: `(id = <n>)` and `(name = "<s>")`, joined with OR.
+      const filter = url.searchParams.get('filter') ?? '';
+      const ids = [...filter.matchAll(/\(id = (\d+)\)/g)].map((m) => m[1]);
+      const names = [...filter.matchAll(/\(name = "([^"]+)"\)/g)].map((m) => m[1]);
+      if (ids.length + names.length === 0) throw new Error(`GCP fake: unfiltered zonal list`);
+      const items = [...instances.values()].filter(
+        (i) =>
+          zoneOf(i) === zonalList[1] &&
+          (ids.includes(String(i.id)) || names.includes(String(i.name)))
+      );
+      return json(items.length ? { items } : {});
+    }
+    // `instances.get` takes the instance NAME (documented); a numeric ID is not a name.
     const zonal = new RegExp(`^${base}/zones/([^/]+)/instances/([^/]+)$`).exec(url.pathname);
     if (zonal) {
       const candidate = instances.get(zonal[2]!);
@@ -223,10 +238,13 @@ function createFakeGcp(project: string, defaultZone: string) {
     instances,
     state,
     handle,
-    add(name: string, options: { zone?: string; labels?: Record<string, string> } = {}) {
+    add(
+      name: string,
+      options: { zone?: string; labels?: Record<string, string>; id?: string } = {}
+    ) {
       const zone = options.zone ?? defaultZone;
       instances.set(name, {
-        id: '9001',
+        id: options.id ?? '9001',
         name,
         zone: `zones/${zone}`,
         status: 'RUNNING',
@@ -710,6 +728,9 @@ describe('bounded and resumable', () => {
 
 describe('self-host box: a GCP deployment node behind the reverse tunnel', () => {
   const BOX_NODE = 'sam-box-node-1';
+  // Production stores a GCP instance by its numeric ID; its name is `node-<nodeId>`.
+  const BOX_INSTANCE_ID = '9001';
+  const BOX_INSTANCE_NAME = 'node-sam-box-node-1';
   beforeEach(async () => {
     sqlite.prepare('DELETE FROM deployment_environments').run();
     sqlite.prepare('DELETE FROM nodes').run();
@@ -717,13 +738,13 @@ describe('self-host box: a GCP deployment node behind the reverse tunnel', () =>
       cloudProvider: 'gcp',
       vmLocation: 'us-central1-a',
       transport: 'reverse-tunnel',
-      providerInstanceId: BOX_NODE,
+      providerInstanceId: BOX_INSTANCE_ID,
     });
     await seedEnvironment(ENV_ID, BOX_NODE);
   });
 
   it('leaves a present instance alone', async () => {
-    gcp.add(BOX_NODE);
+    gcp.add(BOX_INSTANCE_NAME, { id: BOX_INSTANCE_ID });
     await sweepAt(0);
     await sweepAt(15);
     expect(nodeRow(BOX_NODE)).toMatchObject({
@@ -737,7 +758,7 @@ describe('self-host box: a GCP deployment node behind the reverse tunnel', () =>
     // The box runs in us-east4-c; someone stripped the sam-managed label. The fixed zone list
     // and the label-filtered project-wide list both miss it; its own zone does not.
     sqlite.prepare("UPDATE nodes SET vm_location = 'us-east4-c' WHERE id = ?").run(BOX_NODE);
-    gcp.add(BOX_NODE, { zone: 'us-east4-c', labels: {} });
+    gcp.add(BOX_INSTANCE_NAME, { id: BOX_INSTANCE_ID, zone: 'us-east4-c', labels: {} });
     for (let minute = 0; minute <= 60; minute += 10) await sweepAt(minute);
     expect(nodeRow(BOX_NODE)).toMatchObject({
       status: 'running',

@@ -13,6 +13,7 @@ import {
 import type { ProviderRequestContext, VMInstance } from './types';
 import { ProviderError } from './types';
 import { parseProviderJson } from './validation';
+import { expectObject, optionalArray, optionalString } from './validation-core';
 import { type GcpInstancePayload, validateGcpInstance } from './validation-gcp';
 
 /**
@@ -30,6 +31,64 @@ export async function findGcpInstanceByIdOrName(
   const namedInstance = await findNamedInstance(scope, zones, idOrName, headers, context);
   if (namedInstance) return namedInstance;
   return await findAggregatedInstance(scope, idOrName, headers, context);
+}
+
+const GCP_ZONE_PATTERN = /^[a-z][a-z0-9-]{1,62}$/;
+const GCP_INSTANCE_NAME_PATTERN = /^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$/;
+const GCP_INSTANCE_ID_PATTERN = /^\d{1,20}$/;
+const GCP_ZONAL_LIST_MAX_PAGES = 20;
+
+/**
+ * Find an instance in exactly one zone by numeric ID or name, with no label filter. A zonal
+ * `instances.list` filtered on the documented `id` and `name` fields: `instances.get` documents
+ * its path parameter as the instance name only, and SAM stores GCP instances by numeric ID.
+ * Returns null only when every page of that zone's listing answered and none matched; any failed
+ * page throws.
+ */
+export async function findGcpInstanceInZoneByIdOrName(
+  scope: GcpApiScope,
+  zone: string,
+  idOrName: string,
+  context?: ProviderRequestContext
+): Promise<GcpInstancePayload | null> {
+  throwIfProviderRequestAborted(context);
+  const clauses: string[] = [];
+  if (GCP_INSTANCE_ID_PATTERN.test(idOrName)) clauses.push(`(id = ${idOrName})`);
+  if (GCP_INSTANCE_NAME_PATTERN.test(idOrName)) clauses.push(`(name = "${idOrName}")`);
+  if (clauses.length === 0 || !GCP_ZONE_PATTERN.test(zone)) {
+    throw new ProviderError('gcp', undefined, `Invalid GCP zonal lookup ${zone}/${idOrName}`, {
+      category: 'invalid_config',
+    });
+  }
+  const headers = await scope.authHeaders(context);
+  const seen = new Set<string>();
+  let pageToken: string | undefined;
+  for (let page = 0; page < GCP_ZONAL_LIST_MAX_PAGES; page++) {
+    const params = new URLSearchParams({ filter: clauses.join(' OR ') });
+    if (pageToken) params.set('pageToken', pageToken);
+    const operation = `findInstanceInZone.${zone}`;
+    const res = await providerFetch(
+      'gcp',
+      `${scope.projectUrl}/zones/${zone}/instances?${params.toString()}`,
+      { headers },
+      scope.timeoutMs,
+      undefined,
+      context
+    );
+    throwIfProviderRequestAborted(context);
+    const root = expectObject(await parseProviderJson(res, 'gcp', operation), 'gcp', operation);
+    for (const [index, item] of (optionalArray(root, 'items', 'gcp', operation) ?? []).entries()) {
+      const instance = validateGcpInstance(item, `${operation}.items[${index}]`);
+      if (instance.id === idOrName || instance.name === idOrName) return instance;
+    }
+    pageToken = optionalString(root, 'nextPageToken', 'gcp', operation) || undefined;
+    if (!pageToken) return null;
+    if (seen.has(pageToken)) {
+      throw new ProviderError('gcp', undefined, `${operation}: repeated nextPageToken`);
+    }
+    seen.add(pageToken);
+  }
+  throw new ProviderError('gcp', undefined, `GCP zonal lookup in ${zone} exceeded its page limit`);
 }
 
 /**
