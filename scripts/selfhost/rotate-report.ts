@@ -81,7 +81,7 @@ export function formatPlan(
     jwtOverlapHours?: number;
     storedLifetimeMinutes?: number;
     skipBackup?: boolean;
-    /** The bundles on the box now, newest first (listBundles). */
+    /** The bundles on the box now, the current one first, then newest first (currentBundle). */
     existingBundles?: readonly Pick<SealedBundle, 'bundleId' | 'createdAt' | 'provider'>[];
   }
 ): string[] {

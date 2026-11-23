@@ -1,5 +1,5 @@
 /**
- * `pnpm selfhost:rebuild [--installation-id <id>] [--env-file <path>] [--state-dir <dir>]`
+ * `pnpm selfhost:rebuild [--installation-id <id>] [--allow-no-head | --expected-head-write <n>] [--env-file <path>] [--state-dir <dir>]`
  *
  * Replaces a dead replaceable box (README "Replace a dead box"): on a new VM with this checkout,
  * the dead box's `.env` and an EMPTY state directory, it copies the box's sealed bundles and
@@ -23,6 +23,8 @@ const { values } = parseArgs({
     'env-file': { type: 'string' },
     'state-dir': { type: 'string' },
     'installation-id': { type: 'string' },
+    'allow-no-head': { type: 'boolean' },
+    'expected-head-write': { type: 'string' },
   },
 });
 assertOperatorExecution();
@@ -34,6 +36,13 @@ const stateDir = resolve(
   dirname(envFile),
   values['state-dir'] ?? box.SAM_SELFHOST_STATE_DIR ?? '.state'
 );
+function expectedHeadWrite(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  if (!Number.isSafeInteger(n) || n < 1)
+    throw new Error('--expected-head-write must be a positive integer');
+  return n;
+}
 const started = Date.now();
 const result = await runRebuild({
   box,
@@ -42,6 +51,8 @@ const result = await runRebuild({
   detect: detectKeyCandidates,
   log,
   expectedInstallationId: values['installation-id'],
+  allowNoHead: values['allow-no-head'] === true,
+  expectedHeadWrite: expectedHeadWrite(values['expected-head-write']),
 });
 log(
   `rebuilt the sealed state of installation ${result.installationId} in ${Math.round((Date.now() - started) / 1000)} s. Next:`

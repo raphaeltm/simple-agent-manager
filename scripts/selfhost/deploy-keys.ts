@@ -3,6 +3,9 @@
  * its platform keys and sealed bundle, and the Worker vars that point the Worker at the key
  * agent. Split from deploy.ts, which keeps the order of the steps.
  */
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { readKeyChoice, resolveKeyProviderBox } from './key-choice.js';
 import { detectKeyCandidates } from './key-platforms.js';
 import { agentVerifyKey, resolveDeployKeys, type ResolvedSecrets } from './key-seal.js';
@@ -10,12 +13,14 @@ import {
   assertKeyAgentUid,
   assertNotRootForSealing,
   bundleStoreFor,
+  KEY_AGENT_DIR,
   keyAgentAddress,
   keyAgentUidLine,
   type KeyServiceSettings,
   LEGACY_KEY_PROVIDER,
 } from './key-service.js';
 import type { PlatformKeysMode } from './platform-keys.js';
+import { acquireSealingLock } from './sealing-lock.js';
 import { holdOnPlaintext } from './upgrade-sealing.js';
 
 type Box = Record<string, string>;
@@ -35,6 +40,13 @@ export async function resolveDeployBox(input: {
   seal?: boolean;
   log: (message: string) => void;
 }): Promise<Box> {
+  // On a box that already has sealed state, the sealing lock (sealing-lock.ts) comes first:
+  // before this deploy reads the recorded key choice or rewrites agent.env, a `secrets switch`
+  // or rotation in progress must finish. A fresh box (nothing sealed, nothing to switch) takes
+  // it later, after its refusals, so a refused first deploy writes nothing (key-seal.ts).
+  if (!input.dryRun && existsSync(join(input.stateDir, KEY_AGENT_DIR))) {
+    await acquireSealingLock(input.stateDir);
+  }
   const provider = input.keyProvider ?? (holdsPlaintext(input) ? LEGACY_KEY_PROVIDER : undefined);
   if (!input.keyProvider && provider) {
     input.log(

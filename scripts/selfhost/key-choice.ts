@@ -24,6 +24,7 @@ import { join } from 'node:path';
 
 import type { KeyProvider } from '../../deploy/selfhost/key-agent/provider.ts';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
+import { currentByHint } from './bundle-head.js';
 import {
   candidateFloor,
   configuredKeyFloors,
@@ -236,7 +237,10 @@ export async function chooseKeyProvider(input: ChooseInput): Promise<KeyChoice> 
   const chosenAt = (input.now?.() ?? new Date()).toISOString();
   const found = await input.detect(box);
   const candidates = [...found.candidates, FILE_CANDIDATE];
-  const existing = (await listBundles(bundleStoreFor(stateDir)))[0];
+  // Which key sealed the current bundle: a hint, enough to pick the provider. The deploy then
+  // verifies the head under that key (bundle-head.ts) and refuses it if it does not open.
+  const store = bundleStoreFor(stateDir);
+  const existing = currentByHint(await listBundles(store), await store.readHead());
   if (existing) {
     for (const candidate of candidates) {
       let provider: KeyProvider;
@@ -257,7 +261,7 @@ export async function chooseKeyProvider(input: ChooseInput): Promise<KeyChoice> 
       }
     }
     throw new Error(
-      `the newest sealed bundle (${existing.bundleId}) was made with ${existing.provider} key ` +
+      `the current sealed bundle (${existing.bundleId}) was made with ${existing.provider} key ` +
         `${existing.keyRef}, which no automatic candidate matches; set SAM_KEY_PROVIDER and its ` +
         'settings in .env to that provider'
     );

@@ -29,6 +29,7 @@ import { openBundleStore } from '../../deploy/selfhost/key-agent/bundle-store.ts
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
 import { runCommand } from './backup-cli.js';
 import { loadBoxEnv } from './box-settings.js';
+import { sealHead } from './bundle-head.js';
 import {
   CHILD_TEST_TIMEOUT_MS,
   CLOSED_HOST,
@@ -38,7 +39,7 @@ import {
 } from './deploy-harness.js';
 import { type FakeKeyService, startFakeKeyServices } from './fixtures/key-provider-fakes.js';
 import { readInstallRecord, recordPath } from './install-record.js';
-import { keyServiceSettings } from './key-service.js';
+import { keyServiceSettings, pruneBundles } from './key-service.js';
 import {
   assertReplaceableSetup,
   type BoxBucket,
@@ -208,12 +209,13 @@ describe('the bucket copy of the bundles', () => {
       },
     };
     const local = openBundleStore({ dir: join(dir, 'bundles') });
-    const bundle = await sealed(fileProvider(), '2026-11-01T00:00:00Z');
+    const provider = fileProvider();
+    const bundle = await sealed(provider, '2026-11-01T00:00:00Z');
     // The caller (key-seal) sees the failure before it deploys the bundle.
     await expect(mirroredBundleStore(local, failing).write(bundle)).rejects.toThrow(/cp failed/);
     expect(remote.list('sam-box/bundles/')).toEqual([]);
     const logs: string[] = [];
-    await reconcileBundleMirror(local, remote, (m) => logs.push(m));
+    await reconcileBundleMirror(local, remote, (m) => logs.push(m), provider);
     expect(remote.objects.get(`sam-box/bundles/${bundle.bundleId}.json`)).toBe(
       await local.read(bundle.bundleId)
     );
@@ -231,19 +233,116 @@ describe('the bucket copy of the bundles', () => {
     ];
     // An empty box and a bucket with bundles: a replacement that skipped rebuild.
     remote.write(`sam-box/bundles/${old!.bundleId}.json`, JSON.stringify(old));
-    await expect(reconcileBundleMirror(local, remote, () => undefined)).rejects.toThrow(
+    await expect(reconcileBundleMirror(local, remote, () => undefined, provider)).rejects.toThrow(
       /replacement box\. Run pnpm selfhost:rebuild/
     );
     // The box has a newer bundle: the older remote one was pruned, the local one goes up.
     await local.write(current!);
-    await reconcileBundleMirror(local, remote, () => undefined);
+    await reconcileBundleMirror(local, remote, () => undefined, provider);
     expect(remote.list('sam-box/bundles/')).toEqual([`sam-box/bundles/${current!.bundleId}.json`]);
     // A newer bundle only the bucket has: another box, or a stale copy of this one.
     remote.write(`sam-box/bundles/${newer!.bundleId}.json`, JSON.stringify(newer));
-    await expect(reconcileBundleMirror(local, remote, () => undefined)).rejects.toThrow(
+    await expect(reconcileBundleMirror(local, remote, () => undefined, provider)).rejects.toThrow(
       /newer than any on this box/
     );
     expect(remote.objects.has(`sam-box/bundles/${newer!.bundleId}.json`)).toBe(true);
+  });
+
+  it('waits for a head commit in progress before reconciling (head lock)', async () => {
+    const provider = fileProvider();
+    const remote = memoryBucket();
+    const local = openBundleStore({ dir: join(dir, 'locked/bundles') });
+    await local.write(await sealed(provider, '2026-11-01T00:00:00Z'));
+    let reconciled = false;
+    await local.withHeadLock(async () => {
+      // Another operation (a rotation committing its head) holds the lock: reconcile must not
+      // read the box's head and mutate the bucket until it is done.
+      const pending = reconcileBundleMirror(local, remote, () => undefined, provider).then(() => {
+        reconciled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(reconciled).toBe(false);
+      void pending;
+    });
+    await vi.waitFor(() => expect(reconciled).toBe(true), { timeout: 5000 });
+    expect(remote.list('sam-box/bundles/')).toHaveLength(1);
+  });
+
+  it('moves the head only when both copies are written', async () => {
+    const provider = fileProvider();
+    const remote = memoryBucket();
+    const failing: BoxBucket = {
+      ...remote,
+      write: (key, text) => {
+        if (key === 'sam-box/head.json') throw new Error('gcloud storage cp failed');
+        remote.write(key, text);
+      },
+    };
+    const local = openBundleStore({ dir: join(dir, 'both/bundles') });
+    const [a, b] = [
+      await sealed(provider, '2026-11-01T00:00:00Z'),
+      await sealed(provider, '2026-11-02T00:00:00Z'),
+    ];
+    await local.write(a);
+    await local.write(b);
+    const head = (bundleId: string, seq: number) =>
+      sealHead({ seq, bundleId, installationId: 'a'.repeat(32) }, provider);
+    const first = await head(a.bundleId, 1);
+    const second = await head(b.bundleId, 2);
+    await local.writeHead(first);
+    await expect(mirroredBundleStore(local, failing).writeHead(second)).rejects.toThrow(
+      /cp failed/
+    );
+    expect(await local.readHead()).toBe(first);
+    // Control: a working bucket takes the new head on both sides.
+    await mirroredBundleStore(local, remote).writeHead(second);
+    expect(await local.readHead()).toBe(second);
+    expect(remote.objects.get('sam-box/head.json')).toBe(second);
+  });
+
+  it('uploads the bundle a new head names before the head, if the bucket lacks it', async () => {
+    const provider = fileProvider();
+    const remote = memoryBucket();
+    const local = openBundleStore({ dir: join(dir, 'upload/bundles') });
+    // Written on the box only (its upload failed, as in a rotation that stopped there).
+    const staged = await sealed(provider, '2026-11-01T00:00:00Z');
+    await local.write(staged);
+    const head = await sealHead(
+      { seq: 1, bundleId: staged.bundleId, installationId: 'a'.repeat(32) },
+      provider
+    );
+    await mirroredBundleStore(local, remote).writeHead(head);
+    expect(remote.objects.get(`sam-box/bundles/${staged.bundleId}.json`)).toBe(
+      await local.read(staged.bundleId)
+    );
+    expect(remote.objects.get('sam-box/head.json')).toBe(head);
+  });
+
+  it('prunes only while no head commit is in progress (head lock)', async () => {
+    const provider = fileProvider();
+    const local = openBundleStore({ dir: join(dir, 'prune/bundles') });
+    const kept = await sealed(provider, '2026-11-01T00:00:00Z');
+    const fresh = await sealed(provider, '2026-11-02T00:00:00Z');
+    await local.write(kept);
+    let pruned: string[] | null = null;
+    await local.withHeadLock(async () => {
+      // A seal has written its bundle and is committing its head: the prune waits for it.
+      await local.write(fresh);
+      const pending = pruneBundles(local, [kept.bundleId]).then((ids) => {
+        pruned = ids;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(pruned).toBeNull();
+      await local.writeHead(
+        await sealHead(
+          { seq: 1, bundleId: fresh.bundleId, installationId: 'a'.repeat(32) },
+          provider
+        )
+      );
+      void pending;
+    });
+    await vi.waitFor(() => expect(pruned).toEqual([]), { timeout: 5000 });
+    expect((await local.listIds()).sort()).toEqual([kept.bundleId, fresh.bundleId].sort());
   });
 
   it('never prunes or seals over another installation, on every sealing path', async () => {
@@ -258,7 +357,7 @@ describe('the bucket copy of the bundles', () => {
       now: () => new Date('2026-11-01T00:00:00Z'),
     });
     remote.write(`sam-box/bundles/${theirs.bundleId}.json`, JSON.stringify(theirs));
-    await expect(reconcileBundleMirror(local, remote, () => undefined)).rejects.toThrow(
+    await expect(reconcileBundleMirror(local, remote, () => undefined, provider)).rejects.toThrow(
       /of installation b{32}, not this box's a{32}/
     );
     expect(remote.objects.has(`sam-box/bundles/${theirs.bundleId}.json`)).toBe(true);
@@ -279,9 +378,9 @@ describe('the bucket copy of the bundles', () => {
     await expect(mirroredBundleStore(behind, bucketAhead).write(fresh)).rejects.toThrow(
       /newer than any on this box/
     );
-    await expect(reconcileBundleMirror(behind, bucketAhead, () => undefined)).rejects.toThrow(
-      /newer than any on this box/
-    );
+    await expect(
+      reconcileBundleMirror(behind, bucketAhead, () => undefined, provider)
+    ).rejects.toThrow(/newer than any on this box/);
     expect(bucketAhead.objects.has(`sam-box/bundles/${ours.bundleId}.json`)).toBe(true);
     expect(await behind.listIds()).toEqual([older.bundleId]);
   });

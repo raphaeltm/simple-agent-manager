@@ -25,6 +25,7 @@ import { openBundle, sealSecrets } from '../../deploy/selfhost/key-agent/bundle.
 import type { KeyProvider } from '../../deploy/selfhost/key-agent/provider.ts';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
 import { PREVIOUS_PROVIDER_ENV } from '../../deploy/selfhost/key-agent/server.ts';
+import { assertSecretsMatchHead, commitHead } from './bundle-head';
 import {
   applyKeyChoice,
   type ChooseInput,
@@ -38,13 +39,15 @@ import {
   writeKeyChoice,
 } from './key-choice';
 import {
+  currentBundle,
   ensureKeyServiceFiles,
   type KeyServiceSettings,
   keyServiceSettings,
   LEGACY_KEY_PROVIDER,
-  listBundles,
   renderKeyAgentEnv,
 } from './key-service';
+import { assertNotBehindBucket } from './replaceable-box';
+import { withSealingLock } from './sealing-lock';
 import { writePrivateFile } from './secret-files';
 
 export interface SwitchDeps {
@@ -116,6 +119,13 @@ async function targetChoice(
 }
 
 export async function runSwitch(input: SwitchInput, deps: SwitchDeps): Promise<KeyChoice> {
+  // The whole switch, its deploys included, is one sealing operation (sealing-lock.ts): no deploy
+  // or rotation changes the head between this switch's commit and its rollback.
+  if (input.dryRun) return await runSwitchLocked(input, deps);
+  return await withSealingLock(input.stateDir, () => runSwitchLocked(input, deps));
+}
+
+async function runSwitchLocked(input: SwitchInput, deps: SwitchDeps): Promise<KeyChoice> {
   const { box, stateDir, log } = { ...input, log: deps.log };
   if (explicitKeyProvider(box)) {
     throw new Error(
@@ -130,9 +140,10 @@ export async function runSwitch(input: SwitchInput, deps: SwitchDeps): Promise<K
   }
   const oldSettings = settingsFor(box, stateDir, current.provider, applyKeyChoice({}, current));
   const oldProvider = createKeyProvider(oldSettings.hostEnv);
-  const newest = (await listBundles(oldSettings.bundles))[0];
+  const { bundle: newest, head } = await currentBundle(oldSettings.bundles, oldProvider);
   if (!newest) throw new Error(`no sealed bundle in ${oldSettings.bundles.location}`);
   const secrets = await openBundle(newest, oldProvider);
+  assertSecretsMatchHead(head, secrets);
 
   const target = await targetChoice(input, current, deps);
   const newSettings = settingsFor(box, stateDir, target.provider, target.settings);
@@ -169,6 +180,8 @@ export async function runSwitch(input: SwitchInput, deps: SwitchDeps): Promise<K
     return target;
   }
 
+  // A replaceable box: never seal over a later seal the bucket records (verified heads).
+  await assertNotBehindBucket(box, stateDir, oldProvider);
   const installationId = secrets.SAM_INSTALLATION_ID ?? '';
   const bundle = await sealSecrets(secrets, newProvider, { installationId });
   const reopened = await openBundle(bundle, newProvider);
@@ -184,12 +197,16 @@ export async function runSwitch(input: SwitchInput, deps: SwitchDeps): Promise<K
   const savedChoice = readFileSync(keyChoicePath(stateDir), 'utf8');
   const savedAgentEnv = readFileSync(agentEnvPath, 'utf8');
   await newSettings.bundles.write(bundle);
-  if (!same) writePrivateFile(previousPath, renderKeyAgentEnv(oldSettings));
-  writeKeyChoice(stateDir, target);
-  writePrivateFile(agentEnvPath, renderKeyAgentEnv(newSettings));
+  // Current by the head (bundle-head.ts), sealed with the new key like the bundle it names.
+  const switchedHead = await commitHead(newSettings.bundles, bundle, newProvider, head);
   log(`sealed bundle ${bundle.bundleId} with ${newProvider.name} ${newProvider.keyRef}`);
 
   try {
+    // Inside the rollback: a failed write here (a full disk) must not leave the head sealed with
+    // the new key while the recorded choice or the agent still names the old one.
+    if (!same) writePrivateFile(previousPath, renderKeyAgentEnv(oldSettings));
+    writeKeyChoice(stateDir, target);
+    writePrivateFile(agentEnvPath, renderKeyAgentEnv(newSettings));
     await deps.restartAgent();
     await deps.deploy();
     const check = await deps.adoptAndCheck();
@@ -197,8 +214,57 @@ export async function runSwitch(input: SwitchInput, deps: SwitchDeps): Promise<K
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     log(`switch FAILED: ${reason}; restoring ${current.provider}`);
-    writePrivateFile(keyChoicePath(stateDir), savedChoice);
-    writePrivateFile(agentEnvPath, savedAgentEnv);
+    // The old bundle current again first, while the box is still configured for the new key:
+    // if this fails, the head and the recorded choice still agree. The deploy may have sealed a
+    // later bundle under the new key (a secrets.env edit), so chain from the head as it is now.
+    // Only this switch and its own deploys can have moved the head since: the whole switch holds
+    // the box's sealing lock (sealing-lock.ts), so no other deploy or rotation is rolled back.
+    const { head: nowHead, bundle: nowBundle } = await currentBundle(
+      newSettings.bundles,
+      newProvider
+    );
+    if (nowHead && nowHead.seq < switchedHead.seq) {
+      throw new Error(
+        `switch rolled back nothing: the bundle head moved to ${nowHead.bundleId} (write ` +
+          `${nowHead.seq}), older than this switch's; restore from backup. Cause: ${reason}`
+      );
+    }
+    // That deploy's prune keeps the bundles it ranks first, which need not include the one from
+    // before the switch: put it back from memory (it is the same ciphertext).
+    if ((await newSettings.bundles.read(newest.bundleId)) === null) {
+      await newSettings.bundles.write(newest);
+      log(`put back bundle ${newest.bundleId}, pruned during the switch`);
+    }
+    const rolledBack = await commitHead(
+      newSettings.bundles,
+      newest,
+      oldProvider,
+      nowHead ?? switchedHead
+    );
+    try {
+      writePrivateFile(keyChoicePath(stateDir), savedChoice);
+      writePrivateFile(agentEnvPath, savedAgentEnv);
+    } catch (restoreError) {
+      // The configuration could not be put back (an unwritable file): put everything back on the
+      // new key instead, head included, so the head and the recorded choice never disagree.
+      // Each write is best effort: the file that refused its restore still holds the new value.
+      for (const write of [
+        () => writeKeyChoice(stateDir, target),
+        () => writePrivateFile(agentEnvPath, renderKeyAgentEnv(newSettings)),
+      ]) {
+        try {
+          write();
+        } catch {
+          // left as the switch wrote it (the new key)
+        }
+      }
+      if (nowBundle) await commitHead(newSettings.bundles, nowBundle, newProvider, rolledBack);
+      throw new Error(
+        `switch failed (${reason}) and could not restore ${current.provider} ` +
+          `(${restoreError instanceof Error ? restoreError.message : String(restoreError)}); ` +
+          `the box stays on ${target.provider}: fix the file, then run the switch again`
+      );
+    }
     rmSync(previousPath, { force: true });
     await newSettings.bundles.remove(bundle.bundleId);
     await deps.restartAgent();

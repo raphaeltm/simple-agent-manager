@@ -20,8 +20,11 @@
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { headHint } from './bundle-head';
 import { explicitKeyProvider, keyChoicePath, readKeyChoice } from './key-choice';
 import { bundleStoreFor, LEGACY_KEY_PROVIDER } from './key-service';
+import { fleetBucket, mirroredBundleStore, replaceableBox } from './replaceable-box';
+import { withSealingLock } from './sealing-lock';
 import { readPrivateJson, readSecretsFile } from './secret-files';
 import { keyFileNotice, keyFilePath, verifyKeyCopy } from './secrets-keyfile';
 import { type preflightSealedSecrets } from './secrets-preflight';
@@ -72,6 +75,11 @@ export async function runMigration(
   input: MigrateInput,
   deps: MigrateDeps
 ): Promise<MigrateOutcome> {
+  // One sealing operation, its deploys included (sealing-lock.ts).
+  return await withSealingLock(input.stateDir, () => runMigrationLocked(input, deps));
+}
+
+async function runMigrationLocked(input: MigrateInput, deps: MigrateDeps): Promise<MigrateOutcome> {
   const { stateDir } = input;
   const { log } = deps;
   if (explicitKeyProvider(input.box) === LEGACY_KEY_PROVIDER) {
@@ -116,14 +124,65 @@ export async function runMigration(
   // files as they are then: a leftover bundle would be its base, and a secret the operator deleted
   // from secrets.env in between would survive into the sealed set. No running version names a
   // bundle this attempt created (it never switched, or it was rolled back first).
-  const store = bundleStoreFor(stateDir);
+  // On a replaceable box the attempt's --init wrote through the bucket copy too: undo it there
+  // as well, or the bucket keeps a head (and bundles) later than the box and every deploy stops.
+  const store = replaceableBox(input.box)
+    ? mirroredBundleStore(bundleStoreFor(stateDir), fleetBucket(input.box), stateDir)
+    : bundleStoreFor(stateDir);
   const bundlesBefore = new Set(await store.listIds());
-  const forgetNewBundles = async () => {
-    for (const id of await store.listIds()) {
-      if (bundlesBefore.has(id)) continue;
-      await store.remove(id);
-      log(`    removed bundle ${id}, sealed by this failed attempt`);
+  const headBefore = await store.readHead();
+  // Each step on its own: a bucket that fails (often what failed the attempt) must not stop the
+  // box's own copy from being undone, or a retry would start from this attempt's bundle. A bucket
+  // left ahead of the box stops the next deploy (reconcile) until it is repaired; never stale.
+  const undo = async (what: string, step: () => Promise<void>) => {
+    try {
+      await step();
+    } catch (error) {
+      log(
+        `    could not undo ${what}: ${error instanceof Error ? error.message : String(error)}. ` +
+          'If that was the fleet bucket, remove the copy under sam-box/ by hand once it is ' +
+          'reachable (match the box: pnpm selfhost:secrets status), or the next deploy refuses'
+      );
     }
+  };
+  // The head this attempt's --init wrote (undefined until it returns): cleanup undoes only that.
+  let ownHead: string | null | undefined;
+  const forgetNewBundles = async () => {
+    await undo('the sealed state of this attempt', () =>
+      // Under the head lock, compared there: a deploy, rotation or switch that moved the head
+      // meanwhile is not rolled back, and its bundle is not removed.
+      store.withHeadLock(async () => {
+        const now = await store.readHead();
+        const ours =
+          ownHead !== undefined
+            ? now === ownHead
+            : !bundlesBefore.has(headHint(now)?.bundleId ?? '');
+        if (now !== headBefore && !ours) {
+          log('    the bundle head moved since this attempt; leaving the sealed state as it is');
+          return;
+        }
+        // The head as it was first (bundle-head.ts): it must never name a bundle removed below,
+        // so if it cannot be put back (the bucket is down), nothing is removed.
+        if (now !== headBefore) {
+          let restored = false;
+          await undo('the bundle head', async () => {
+            await (headBefore === null ? store.removeHead() : store.writeHead(headBefore));
+            restored = true;
+          });
+          if (!restored) {
+            log("    kept this attempt's bundles: the head that names them could not be put back");
+            return;
+          }
+        }
+        for (const id of await store.listIds()) {
+          if (bundlesBefore.has(id)) continue;
+          await undo(`bundle ${id}`, async () => {
+            await store.remove(id);
+            log(`    removed bundle ${id}, sealed by this failed attempt`);
+          });
+        }
+      })
+    );
   };
 
   let alreadySealed = false;
@@ -131,6 +190,7 @@ export async function runMigration(
   try {
     log('1/6 choosing the key provider and sealing the existing secrets (selfhost:deploy --init)');
     await deps.init();
+    ownHead = await store.readHead();
     log('2/6 contract check: key agent -> Worker loader, every secret unchanged');
     const checked = await deps.preflight({ box: input.box, stateDir, expected });
     bundleId = checked.bundleId;
@@ -170,7 +230,11 @@ export async function runMigration(
   try {
     log('4/6 deploying the Worker without secret vars (selfhost:deploy)');
     switched = true;
+    // This deploy may seal again (and move the head): until it returns, a head naming a bundle
+    // this attempt sealed counts as this attempt's.
+    ownHead = undefined;
     await deps.deploy(false);
+    ownHead = await store.readHead();
     log('5/6 adopting the new version now and checking it');
     const check = await deps.adoptAndCheck();
     if (!check.healthy) throw new Error(`the new version is not healthy: ${check.detail}`);

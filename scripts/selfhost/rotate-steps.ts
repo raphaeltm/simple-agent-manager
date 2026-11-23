@@ -266,7 +266,12 @@ async function reanchorStagedOverlap(
 ): Promise<boolean> {
   const { step, store, deps } = ctx;
   if (!step.stagedBundleId || !(await store.hasBundle(step.stagedBundleId))) return false;
-  const head = await store.head();
+  let head = await store.head();
+  // Stopped between writing the staged bundle and making it current (rotate-apply.ts).
+  if (head.bundle.bundleId !== step.stagedBundleId && head.bundle.bundleId === step.stagedOver) {
+    await store.makeCurrent(step.stagedBundleId, head.bundle.bundleId);
+    head = await store.head();
+  }
   // Another bundle sealed meanwhile: applyPatch refuses that, as before.
   if (head.bundle.bundleId !== step.stagedBundleId) return false;
   const until = deps.now() + overlapHours * 3_600_000;

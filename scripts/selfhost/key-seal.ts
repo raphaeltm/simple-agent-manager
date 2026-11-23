@@ -18,6 +18,12 @@ import type { KeyProvider } from '../../deploy/selfhost/key-agent/provider.ts';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
 import { SIGNING_KEY_NAME } from '../../deploy/selfhost/key-agent/server.ts';
 import {
+  assertSecretsMatchHead,
+  commitHead,
+  keptBundleIds,
+  selectCurrentBundle,
+} from './bundle-head.js';
+import {
   assertNotRootForSealing,
   DEFAULT_KEPT_BUNDLES,
   ensureKeyServiceFiles,
@@ -38,6 +44,7 @@ import {
   type PlatformKeysMode,
 } from './platform-keys.js';
 import { LEDGER_SECRET } from './replaceable-box.js';
+import { acquireSealingLock } from './sealing-lock.js';
 import { readPrivateJson, readSecretsFile } from './secret-files.js';
 import { keyFileNotice } from './secrets-keyfile.js';
 
@@ -75,7 +82,7 @@ export interface ResolveSecretsInput {
   secretsSource?: string;
   /**
    * Names to drop from the sealed secrets (`pnpm selfhost:deploy --unset NAME`). Bundles merge
-   * secrets.env over the newest bundle, so deleting a line never removed a sealed value (box
+   * secrets.env over the current bundle, so deleting a line never removed a sealed value (box
    * round R16). See assertUnsettable for what may be removed.
    */
   unset?: readonly string[];
@@ -155,7 +162,8 @@ export function unsetForThisRun(
 }
 
 /**
- * The secrets this deploy runs with, and the bundle that holds them. Opens the newest bundle,
+ * The secrets this deploy runs with, and the bundle that holds them. Opens the current bundle
+ * (bundle-head.ts),
  * lays the plaintext migration files over it, completes the platform keys under the same rules as
  * platform-keys.json (platform-keys.ts completeSealedPlatformKeys: only `--init` generates, a lost
  * identity key is never regenerated), and seals a new bundle only when the result differs. A
@@ -168,19 +176,35 @@ export async function resolveSealedSecrets(input: ResolveSecretsInput): Promise<
   // Created only when needed: a dry run on a fresh box has no key file to read yet.
   let created: KeyProvider | undefined = input.provider;
   const provider = (): KeyProvider => (created ??= createKeyProvider(settings.hostEnv));
-  // An unreadable bundle has no trustworthy date, so it may be the newest: deploying from the next
-  // readable one could roll back a changed credential or bring back an unset one. Refuse instead.
+  // An unreadable bundle may be the current one (or, without a head yet, the newest): deploying
+  // from another could roll back a changed credential or bring back an unset one. Refuse instead.
   const unreadable: string[] = [];
-  const latest = (await listBundles(settings.bundles, (message) => unreadable.push(message)))[0];
+  const bundles = await listBundles(settings.bundles, (message) => unreadable.push(message));
   if (unreadable.length > 0) {
     throw new Error(
-      `${settings.bundles.location} holds a sealed bundle that cannot be read, so the newest ` +
-        `secrets are unknown; refusing to deploy from an older one.\n${unreadable.join('\n')}\n` +
+      `${settings.bundles.location} holds a sealed bundle that cannot be read, so the current ` +
+        `secrets are unknown; refusing to deploy from another one.\n${unreadable.join('\n')}\n` +
         'Restore that bundle from backup (pnpm selfhost:restore), or remove it if you know it is ' +
-        'not the newest.'
+        'not the current one.'
+    );
+  }
+  const { bundle: latest, head } = await selectCurrentBundle(
+    bundles,
+    await settings.bundles.readHead(),
+    provider,
+    `the bundle head beside ${settings.bundles.location}`
+  );
+  // Not an error (a seal that stopped before its head, or a clock that moved back, leaves one),
+  // but worth saying: an older SAM version run by hand seals without moving the head.
+  for (const later of head && latest ? bundles.filter((b) => b.createdAt > latest.createdAt) : []) {
+    log(
+      `note: bundle ${later.bundleId} is dated after the current one (${latest?.bundleId}) but ` +
+        'the head does not name it: a seal that stopped part way, a clock that moved back, or ' +
+        'an older SAM version that does not keep the head. This deploy runs the current one.'
     );
   }
   const current = latest ? await openBundle(latest, provider()) : {};
+  assertSecretsMatchHead(head, current);
   const record = readRestoredIdentity(input.stateDir, latest, current);
   if (record === 'done' && input.mode !== 'dry-run') {
     rmSync(join(input.stateDir, RESTORED_IDENTITY_FILE));
@@ -243,6 +267,12 @@ export async function resolveSealedSecrets(input: ResolveSecretsInput): Promise<
     generated.push(SIGNING_KEY_NAME);
   }
   if (latest && !restored && sameSecrets(secrets, current)) {
+    // A box from before the head deploys what it always did (the newest createdAt) and records
+    // it now, so its next deploy no longer depends on the clock.
+    if (!head && input.mode !== 'dry-run') {
+      await commitHead(settings.bundles, latest, provider(), null);
+      log(`recorded bundle ${latest.bundleId} as the current sealed bundle (bundle head)`);
+    }
     return { bundleId: latest.bundleId, secrets, sealed: false, generated };
   }
   if (input.mode === 'dry-run') {
@@ -257,18 +287,23 @@ export async function resolveSealedSecrets(input: ResolveSecretsInput): Promise<
     throw new Error(`bundle ${bundle.bundleId} did not open to the secrets it sealed`);
   }
   await settings.bundles.write(bundle);
+  // The head, not the bundle's date, makes it current (bundle-head.ts): a host clock that moved
+  // backwards since the last seal cannot make the next deploy pick an older bundle.
+  await commitHead(settings.bundles, bundle, provider(), head);
   log(
     `sealed ${Object.keys(secrets).length} secrets into bundle ${bundle.bundleId} (${provider().name} ${provider().keyRef})`
   );
-  // After a restore, every older bundle carries the source install's identity: none is kept. The
-  // bundle just written is always kept, whatever its timestamp says: a host clock that moved
-  // backwards must not prune the bundle this deploy is about to name (the Worker would 503).
-  const older = (await listBundles(settings.bundles))
-    .map((b) => b.bundleId)
-    .filter((id) => id !== bundle.bundleId);
+  // After a restore, every older bundle carries the source install's identity: none is kept.
+  // Otherwise the bundle just made current, the one it replaced (the running Worker version asks
+  // for it until the deploy finishes), then the newest others.
   const keepIds = restored
     ? [bundle.bundleId]
-    : [bundle.bundleId, ...older].slice(0, input.keep ?? DEFAULT_KEPT_BUNDLES);
+    : keptBundleIds(
+        await listBundles(settings.bundles),
+        bundle.bundleId,
+        latest?.bundleId,
+        input.keep ?? DEFAULT_KEPT_BUNDLES
+      );
   for (const id of await pruneBundles(settings.bundles, keepIds)) log(`removed old bundle ${id}`);
   if (restored) {
     rmSync(join(input.stateDir, RESTORED_IDENTITY_FILE));
@@ -304,7 +339,7 @@ function readRestoredIdentity(
   }
   if (!latest || latest.installationId !== from || current.SAM_INSTALLATION_ID !== from) {
     throw new Error(
-      `${path} names source install ${from}, but the newest sealed bundle is not that install's; restore again`
+      `${path} names source install ${from}, but the current sealed bundle is not that install's; restore again`
     );
   }
   return { from, installationId };
@@ -394,6 +429,10 @@ export async function resolveDeployKeys(input: {
       }
     }
   }
+  // Held until this deploy process exits, after its Worker is published (sealing-lock.ts): two
+  // overlapping deploys cannot publish in the opposite order to their seals. Taken after every
+  // refusal above, so a refused deploy writes nothing; a dry run only reads.
+  if (!dryRun) await acquireSealingLock(stateDir);
   const sealed = await resolveSealedSecrets({
     settings: keyService,
     stateDir,

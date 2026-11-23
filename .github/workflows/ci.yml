@@ -142,6 +142,10 @@ jobs:
               - 'scripts/selfhost/**'
               # The sealed-secrets key agent: scripts/selfhost imports its bundle store and providers.
               - 'deploy/selfhost/key-agent/**'
+              # Rotation verifies the replaceable box's bucket copy (rotate-store.ts ->
+              # replaceable-box.ts), which reaches the install record and the backup modules.
+              - 'deploy/selfhost/created-resources.mjs'
+              - 'deploy/selfhost/docker-compose.yml'
               # selfhost-inbound-email.test.ts builds this receiver (Self-host Email job only).
               - 'deploy/selfhost/sam-mx/**'
               # selfhost-dns-sidecar.test.ts builds this server (Self-host DNS job only).

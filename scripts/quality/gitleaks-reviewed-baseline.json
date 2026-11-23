@@ -279,6 +279,18 @@
       "reviewedAt": "2026-11-23T11:30:00.000Z",
       "expiresAt": "2026-12-23T11:30:00.000Z",
       "digests": ["f0ab4cc7c363ddebbe09343c7edcd324a9452b23845ea42579402888d7795332"]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "PR #2989 history only: commit c914f7c7b used readable placeholder values ('rotated-...', 'second-...') for an operator secret named OPERATOR_TOKEN in scripts/selfhost/bundle-head.test.ts (rotation tests against a fake Cloud KMS; never real credentials). The tree now uses OPERATOR_SETTING with plain words; these digests cover only that historical commit, which cannot be rewritten (no force push). Exact rule/path/line/bytes only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-23T12:05:00.000Z",
+      "expiresAt": "2026-12-23T12:05:00.000Z",
+      "digests": [
+        "b0dda46d8a0e9e74cd1f29976c2f68701ad395de5df55e004c3b22ba765afc62",
+        "70b8ebe21dea95ac7b4c8879f6e8c21b7b72e4253dfcfb4fb5b498b110dcfc26",
+        "284ac3fa36b74a594b12879564cfad0c4bbac7e64993fd9aac55b9ddda450bac"
+      ]
     }
   ]
 }

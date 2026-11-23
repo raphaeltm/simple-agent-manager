@@ -71,19 +71,51 @@ export function patched(base: Secrets, patch: Patch): Secrets {
   return next;
 }
 
-/** Longest wait for the clock to pass the newest bundle's createdAt (two seals in one ms). */
-const MAX_CLOCK_WAIT_MS = 2000;
-
-async function afterInstant(instantMs: number): Promise<void> {
-  const deadline = Date.now() + MAX_CLOCK_WAIT_MS;
-  while (Date.now() <= instantMs) {
-    if (Date.now() > deadline) {
-      throw new ApplyFailedError(
-        'the newest bundle is dated in the future; is the clock behind? Fix the clock and resume'
-      );
-    }
-    await new Promise((resolve) => setTimeout(resolve, 2));
+/** A recorded staged bundle is current again (or made current), or the step stops. */
+async function resumeStaged(ctx: StepContext, bundleId: string): Promise<void> {
+  const { step, store, deps } = ctx;
+  let head = await store.head();
+  // Stopped after writing the staged bundle but before making it current: the bundle it was
+  // sealed over is still current, so finish that step.
+  if (head.bundle.bundleId !== bundleId && step.stagedOver === head.bundle.bundleId) {
+    await store.makeCurrent(bundleId, head.bundle.bundleId);
+    head = await store.head();
   }
+  if (head.bundle.bundleId !== bundleId) {
+    throw new ApplyFailedError(
+      `the bundle this step recorded (${bundleId}) is no longer the current one (${head.bundle.bundleId}); something else sealed a bundle meanwhile`
+    );
+  }
+  deps.log(`  resuming: deploying the recorded bundle ${bundleId} again`);
+}
+
+/** Seals the patch, records it in the journal, then writes it and makes it current. */
+async function stageAndMakeCurrent(ctx: StepContext, patch: Patch, then: Phase): Promise<string> {
+  const { step, store } = ctx;
+  let current = await store.head();
+  // A box without a head yet (bundle-head.ts) records one naming the current bundle first, so a
+  // staged bundle written below can never become the date fallback's choice before it is made
+  // current, and a resume always has a head to compare with.
+  if (!current.basis) {
+    await store.makeCurrent(current.bundle.bundleId, current.bundle.bundleId);
+    current = await store.head();
+  }
+  const bundle = await store.seal(patched(current.secrets, patch));
+  step.stagedFrom = step.phase === 'staging' ? step.stagedFrom : step.phase;
+  step.stagedBundleId = bundle.bundleId;
+  step.stagedFor = then;
+  step.stagedOver = current.bundle.bundleId;
+  step.phase = 'staging';
+  ctx.save();
+  // Writes it and makes it current (bundle-head.ts): the deploy runs with it whatever the clock.
+  await store.write(bundle, current.basis);
+  const nowCurrent = (await store.head()).bundle.bundleId;
+  if (nowCurrent !== bundle.bundleId) {
+    throw new ApplyFailedError(
+      `the bundle just sealed (${bundle.bundleId}) is not the current one (${nowCurrent}); something else sealed a bundle meanwhile`
+    );
+  }
+  return bundle.bundleId;
 }
 
 /** Applies `patch`, or resumes the one already recorded; on success the step is in `then`. */
@@ -93,42 +125,23 @@ export async function applyPatch(ctx: StepContext, patch: Patch, then: Phase): P
     step.phase === 'staging' && step.stagedFor === then ? step.stagedBundleId : undefined;
   if (bundleId && !(await store.hasBundle(bundleId))) bundleId = undefined;
   if (bundleId) {
-    const head = await store.head();
-    if (head.bundle.bundleId !== bundleId) {
-      throw new ApplyFailedError(
-        `the bundle this step recorded (${bundleId}) is no longer the newest (${head.bundle.bundleId}); something else sealed a bundle meanwhile`
-      );
-    }
-    deps.log(`  resuming: deploying the recorded bundle ${bundleId} again`);
+    await resumeStaged(ctx, bundleId);
   } else {
-    const current = await store.head();
-    await afterInstant(Date.parse(current.bundle.createdAt));
-    const bundle = await store.seal(patched(current.secrets, patch));
-    step.stagedFrom = step.phase === 'staging' ? step.stagedFrom : step.phase;
-    step.stagedBundleId = bundle.bundleId;
-    step.stagedFor = then;
-    step.phase = 'staging';
-    ctx.save();
-    await store.write(bundle);
-    bundleId = bundle.bundleId;
-    // The deploy runs with the newest bundle by createdAt: a clock that stepped back would
-    // make it pick another one, so never deploy unless this one is the newest.
-    const newest = (await store.head()).bundle.bundleId;
-    if (newest !== bundleId) {
-      throw new ApplyFailedError(
-        `the bundle just sealed (${bundleId}) is not the newest (${newest}); is the clock behind?`
-      );
-    }
+    bundleId = await stageAndMakeCurrent(ctx, patch, then);
   }
   await deps.deploy();
   const check = await deps.adoptAndCheck();
   if (!check.healthy) throw new ApplyFailedError(`the new version is not healthy: ${check.detail}`);
+  // The bundle this step replaced: the previous Worker version may still ask for it, and a clock
+  // that moved back can rank it below older bundles, so it is kept by name (not by date).
+  const replaced = step.stagedOver;
   step.phase = then;
   delete step.stagedBundleId;
   delete step.stagedFor;
   delete step.stagedFrom;
+  delete step.stagedOver;
   ctx.save();
-  const removed = await store.prune([bundleId]);
+  const removed = await store.prune(replaced);
   if (removed.length === 0) return;
   for (const id of removed) {
     deps.log(`  removed old bundle ${id} (the box keeps the newest ${DEFAULT_KEPT_BUNDLES})`);
