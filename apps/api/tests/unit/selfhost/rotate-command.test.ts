@@ -327,7 +327,7 @@ describe('rotate --dry-run', () => {
       ...current.secrets,
       CALLBACK_TOKEN_EXPIRY_MS: String(48 * HOUR),
     });
-    await store().write(bundle);
+    await store().write(bundle, current.basis);
     await runRotate(input({ names: ['jwt-keys'] }), deps());
     // A 48 h token renewed as late as 90% of its life: 43.2 h, rounded up, plus 1 h.
     expect(readJournal(stateDir)?.options?.jwtOverlapHours).toBe(45);
@@ -1000,7 +1000,8 @@ describe('rotate encryption-key with a purpose key of the same value (Codex P1)'
       await store().seal({
         ...current.secrets,
         CREDENTIAL_ENCRYPTION_KEY: current.secrets.ENCRYPTION_KEY!,
-      })
+      }),
+      current.basis
     );
   }
 
@@ -1019,7 +1020,8 @@ describe('rotate encryption-key with a purpose key of the same value (Codex P1)'
         ...current.secrets,
         CREDENTIAL_ENCRYPTION_KEY: 'c'.repeat(43) + '=',
         LIBRARY_ENCRYPTION_KEY: 'c'.repeat(43) + '=',
-      })
+      }),
+      current.basis
     );
     await expect(
       runRotate(input({ names: ['credential-encryption-key'], dryRun: true }), deps())
@@ -1033,7 +1035,8 @@ describe('rotate encryption-key with a purpose key of the same value (Codex P1)'
         ...current.secrets,
         CREDENTIAL_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64'),
         LIBRARY_ENCRYPTION_KEY: Buffer.alloc(32, 2).toString('base64'),
-      })
+      }),
+      current.basis
     );
     await runRotate(input({ names: ['encryption-key'] }), deps());
     // No stored row resolves through ENCRYPTION_KEY: an expiry-only rotation, not a stuck one.
