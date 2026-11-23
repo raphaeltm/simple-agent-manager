@@ -131,7 +131,11 @@ export async function runMigration(
     try {
       await step();
     } catch (error) {
-      log(`    could not undo ${what}: ${error instanceof Error ? error.message : String(error)}`);
+      log(
+        `    could not undo ${what}: ${error instanceof Error ? error.message : String(error)}. ` +
+          'If that was the fleet bucket, remove the copy under sam-box/ by hand once it is ' +
+          'reachable (match the box: pnpm selfhost:secrets status), or the next deploy refuses'
+      );
     }
   };
   const forgetNewBundles = async () => {

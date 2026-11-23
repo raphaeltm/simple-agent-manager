@@ -253,13 +253,20 @@ export async function commitHead(
   provider: KeyProvider,
   previous: BundleHead | null
 ): Promise<BundleHead> {
-  // Compare before replacing: another seal (a deploy racing a rotation or a switch) that made
-  // its own bundle current since `previous` was read must not be overwritten by this one, whose
-  // secrets were derived from the older state. Not atomic, but the window is this one read.
   // A head never names a bundle the store does not hold: every later deploy would refuse it.
   if ((await store.read(bundle.bundleId)) === null) {
     throw new Error(`bundle ${bundle.bundleId} is not in ${store.location}; not making it current`);
   }
+  const head: BundleHead = {
+    seq: (previous?.seq ?? 0) + 1,
+    bundleId: bundle.bundleId,
+    installationId: bundle.installationId,
+  };
+  // Sealed first (a key-service call), then compared, then written with nothing awaited between
+  // the compare and the write: another seal (a deploy racing a rotation or a switch) that made
+  // its own bundle current since `previous` was read is not overwritten by this one, whose
+  // secrets came from the older state. Not atomic; the window is one file read.
+  const text = await sealHead(head, provider);
   const now = headHint(await store.readHead());
   if (
     (previous === null) !== (now === null) ||
@@ -271,12 +278,7 @@ export async function commitHead(
         'or switch ran at the same time. Run again.'
     );
   }
-  const head: BundleHead = {
-    seq: (previous?.seq ?? 0) + 1,
-    bundleId: bundle.bundleId,
-    installationId: bundle.installationId,
-  };
-  await store.writeHead(await sealHead(head, provider));
+  await store.writeHead(text);
   return head;
 }
 
