@@ -43,21 +43,41 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
   if (!ready) throw new Error(`Bootstrap propagation timed out; ${lastStatus}`);
-  const claim = await fetch(`${url}/claim`, {
-    signal: AbortSignal.timeout(10000),
-    method: 'POST',
-    headers: { Origin: origin },
-    body: new URLSearchParams({ key, recovery: await digest(randomSecret()) }),
-    redirect: 'manual',
-  });
+  // The readiness loop above saw one edge location answer. The requests below can reach
+  // another that does not serve the new Worker yet (404, 503), so those two statuses are
+  // retried inside the same window. Anything else, such as a refused claim, fails at once
+  // and reports its status: an auth regression is never retried away.
+  const settled = async (label: string, request: () => Promise<Response>) => {
+    for (;;) {
+      const response = await request();
+      if (![404, 503].includes(response.status) || Date.now() >= readinessDeadline)
+        return response;
+      lastStatus = `${label}=${response.status}; cf-ray=${response.headers.get('cf-ray')}`;
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  };
+  const recovery = await digest(randomSecret());
+  const claim = await settled('claim', () =>
+    fetch(`${url}/claim`, {
+      signal: AbortSignal.timeout(10000),
+      method: 'POST',
+      headers: { Origin: origin },
+      body: new URLSearchParams({ key, recovery }),
+      redirect: 'manual',
+    })
+  );
   if (claim.status !== 200 || !claim.headers.get('set-cookie'))
-    throw new Error('Owner handoff failed');
-  const landing = await fetch(url, {
-    signal: AbortSignal.timeout(10000),
-    headers: { Cookie: claim.headers.get('set-cookie')!.split(';')[0]! },
-  });
+    throw new Error(
+      `Owner handoff failed; claim=${claim.status}, cookie=${claim.headers.has('set-cookie')}; cf-ray=${claim.headers.get('cf-ray')}`
+    );
+  const cookie = claim.headers.get('set-cookie')!.split(';')[0]!;
+  const landing = await settled('landing', () =>
+    fetch(url, { signal: AbortSignal.timeout(10000), headers: { Cookie: cookie } })
+  );
   if (!landing.ok || !(await landing.text()).includes('Ownership handoff verified.'))
-    throw new Error('Authenticated bootstrap landing failed');
+    throw new Error(
+      `Authenticated bootstrap landing failed; landing=${landing.status}; cf-ray=${landing.headers.get('cf-ray')}`
+    );
   console.log(
     'Staging bootstrap upload, health, unauthenticated rejection and owner handoff verified. OAuth consent is a separate browser check.'
   );
