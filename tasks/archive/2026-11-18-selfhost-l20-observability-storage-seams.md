@@ -102,3 +102,9 @@ lands them on `main` without changing any Cloudflare behaviour. Plan row: idea
 - [ ] Staging2 verification (admin analytics, attachment upload via presigned PUT, session snapshot)
 - [ ] Screenshot evidence for `admin-logs-notice-audit.spec.ts`
 - [ ] CodeRabbit request and wait
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2889](https://github.com/raphaeltm/simple-agent-manager/pull/2889) (merged 2026-11-18).
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
+- 4 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.

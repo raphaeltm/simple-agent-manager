@@ -43,3 +43,7 @@ Nodes that fail provisioning (e.g., capacity exhaustion 422) remain in `status='
 - [ ] Nodes in `status='error'` are automatically cleaned up after a configurable timeout
 - [ ] Provider-side cleanup is attempted (idempotent delete)
 - [ ] Existing running-node cleanup behavior is unchanged
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+Still open, partly shipped. Backstops exist; dedicated 30-min status=error sweep for all nodes not built. Evidence: node-phases.ts max-lifetime covers error nodes; #2472 deployment-node-cleanup.ts; #2937.

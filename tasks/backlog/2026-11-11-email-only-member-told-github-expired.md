@@ -23,3 +23,7 @@ GitHub" is advisory only), and there is no "Connect GitHub" control for an email
 - [ ] Decide (human) whether approving a member who cannot run work should warn the owner, and
       whether email accounts get a "Connect GitHub" path.
 - [ ] The GitHub sign-in required dialog has an opaque surface at mobile and desktop.
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+Still open, partly shipped. Remainder: owner warning/decision on approving member who cannot run work; dialog opacity unverified. Evidence: #2830 ca03b8167: GITHUB_NOT_CONNECTED code + Connect GitHub dialog in apps/web/src/components/AuthProvider.tsx:213,303.

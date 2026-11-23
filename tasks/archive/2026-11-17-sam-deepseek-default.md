@@ -52,3 +52,9 @@ Final doc review: corrected the remaining current-default statement in the publi
 CI follow-up: Validate Deploy Scripts caught the missing optional SAM_MODEL mapping in the mirrored installer-engine-ci-env.json manifest. Added the same mapping as the workflow; the existing exact-manifest parity test now passes. Full installer-engine deployment suite: 11 files, 199 tests passed locally. Fresh CI required after pushing this correction; no staging or production actions.
 
 CI API shard 2 exposed an unrelated expired wall-clock fixture in insights-accounts.test.ts: its NOW + DAY reset passed at Nov 17 noon. Reproduced locally (1 failed, 21 passed), then pinned Date.now to the test's existing operation clock for that one meter-reading scenario with cleanup after each case. All 22 tests and ESLint pass; local reviewer PASS. Production logic and assertions unchanged; fresh CI required.
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2860](https://github.com/raphaeltm/simple-agent-manager/pull/2860) (merged 2026-11-17).
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
+- 1 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.

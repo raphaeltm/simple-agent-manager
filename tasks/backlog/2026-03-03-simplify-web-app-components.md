@@ -88,3 +88,7 @@ The web application (`apps/web/src/`) has several monolithic components that are
 2. Extract inline subcomponents next — pure extraction, no behavior change
 3. Decompose large page components last — requires more careful testing
 4. Run `pnpm typecheck && pnpm lint && pnpm test` after each extraction
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+Still open, partly shipped. Workspace page and api.ts split shipped; command palette dedupe, WS hook dedupe, inline subcomponents remain. Evidence: apps/web/src/pages/workspace/ dir (Workspace.tsx split), apps/web/src/lib/api/ dir (api.ts split), #2746.

@@ -123,7 +123,7 @@ and trimmed. Nothing in L22 may change Cloudflare behaviour.
 - [x] gcp-bootstrap security: the delta review, its confirmation and an adversarial review all
       PASS (0 CRITICAL/HIGH). The deferred MEDIUMs (project-level grants, existing consumers,
       extra roles) are bounded by the dedicated-project requirement (idea item 8).
-- [ ] Merge #2906 (Raphaël: merge now), then Deploy Production
+- [x] Merge #2906 (Raphaël: merge now), then Deploy Production
 
 Not fixed here (accepted as tracked by the coordinator):
 
@@ -145,3 +145,8 @@ Not fixed here (accepted as tracked by the coordinator):
   agent session and heartbeats a reverse-tunnel node. (The agent session was proven on #2906 plus
   hosted git #2907, head e7ac643b. On main it arrives with #2907; Raphaël approved merging #2906
   first. Every other part was proven in BOX round R18.)
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in #2901, #2902 and [#2906](https://github.com/raphaeltm/simple-agent-manager/pull/2906) (merged 2026-11-19).
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).

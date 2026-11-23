@@ -501,7 +501,7 @@ export default defineConfig([
   },
   {
     // Outbound requests from Worker source must go through guardedFetch (F6, landing slice L5a,
-    // tasks/active/2026-11-15-l5-outbound-fetch-guard.md). Stage: ratchet. Every pre-existing
+    // tasks/archive/2026-11-15-l5-outbound-fetch-guard.md). Stage: ratchet. Every pre-existing
     // global-fetch site is held by the per-file baseline; any new unacknowledged site fails lint,
     // and a file whose count drops must lower its baseline. See
     // packages/eslint-plugin-sam/docs/rules/no-unguarded-outbound-fetch.md.

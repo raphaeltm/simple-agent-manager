@@ -134,3 +134,9 @@ everywhere". Follow-up branch `sam/operator-node-deletion-allow-agents`:
       audited with `agentSignIn`), and the explicit OFF state refuses with 403 before any provider
       call or audit write.
 - [x] Docs updated (admin-settings, configuration, api).
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2900](https://github.com/raphaeltm/simple-agent-manager/pull/2900) and [#2904](https://github.com/raphaeltm/simple-agent-manager/pull/2904) (merged 2026-11-19).
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
+- 1 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.

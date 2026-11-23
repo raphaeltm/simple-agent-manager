@@ -19,7 +19,7 @@ Sources: https://docs.github.com/en/rest/guides/using-the-rest-api-to-interact-w
 - [x] Update instructions, MCP descriptions, recovery guide, rule09, do/workflow skills/commands, public agent docs/examples. Audit all check_run.completed occurrences; historical evidence/tests remain valid.
 - [x] Document app/workflow scope, failures, fallback gaps and natural expiry/no migration.
 - [x] Relevant tests/lint/typecheck/build/context budget, specialist review, ready CI and CodeRabbit request/wait.
-- [ ] Merge/deploy after gates; guidance-only staging exemption authorized by dispatch.
+- [x] Merge/deploy after gates; guidance-only staging exemption authorized by dispatch.
 - [ ] Measure covered production row_usage windows using Library rpc-split.mjs via exec_with_secrets. Compare check_run/h and admission/wake/prompt writes/h; disclose coverage, new-session ramp and sibling confounding; durable wait while accumulating hours.
 
 ## Candidate validation and review
@@ -42,3 +42,9 @@ Current-head Sonar check134669719389 blocked on11.9% duplication. Public duplica
 ## Takeover (task 01M7RHQG0DNQ3BXDB0DWSRP5CE, 2026-11-19)
 
 Previous agent ran out of usage. Head 62ab30db had all checks green (CI 44267154993, Durable Object Workers pass). main had moved 173 commits; merged origin/main (no conflicts) and re-ran full CI before merge. Task stays active until the coordinator's production measurement completes.
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2883](https://github.com/raphaeltm/simple-agent-manager/pull/2883) (merged 2026-11-19). The production row_usage measurement (line 23) was never done. It was evidence-gathering, not a deliverable. It is now tracked as an open measurement on idea `01M7CX61WVX72T7CFQNRTX0DVM` (note dated 2026-11-23).
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
+- 1 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.
