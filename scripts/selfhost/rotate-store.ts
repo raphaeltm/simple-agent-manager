@@ -204,7 +204,11 @@ export interface RotationStore {
    * if the bundle `over` it was sealed over is still current.
    */
   makeCurrent(bundleId: string, over: string): Promise<void>;
-  prune(keepIds: readonly string[]): Promise<string[]>;
+  /**
+   * Keeps DEFAULT_KEPT_BUNDLES bundles: the current one, `previous` (the one it replaced, which
+   * the previous Worker version may still ask for), then the newest others (keptBundleIds).
+   */
+  prune(previous: string | undefined): Promise<string[]>;
   writeSnapshot(rotationId: string, name: string, secrets: Secrets): Promise<void>;
   readSnapshot(rotationId: string, name: string): Promise<Secrets>;
 }
@@ -290,12 +294,12 @@ export function openRotationStore(
       }
       await commitHead(settings.bundles, bundle, keyProvider, head);
     },
-    async prune(keepIds) {
+    async prune(previous) {
       const { bundle, bundles } = await currentBundle(settings.bundles, keyProvider);
       const kept = bundle
-        ? keptBundleIds(bundles, bundle.bundleId, undefined, DEFAULT_KEPT_BUNDLES)
+        ? keptBundleIds(bundles, bundle.bundleId, previous, DEFAULT_KEPT_BUNDLES)
         : [];
-      return await pruneBundles(settings.bundles, [...new Set([...kept, ...keepIds])]);
+      return await pruneBundles(settings.bundles, kept);
     },
     async writeSnapshot(rotationId, name, secrets) {
       const path = snapshotPath(rotationId, name);

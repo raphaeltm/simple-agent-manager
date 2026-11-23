@@ -271,6 +271,8 @@ describe('a host clock that moved backwards between two seals', () => {
     expect(deployed).toEqual([rotated.bundle.bundleId]);
     // The bundle the rotation replaced is kept by name: the previous Worker version asks for it.
     expect(bundlesOn(stateA).map((b) => b.bundleId)).toContain(before.bundle.bundleId);
+    // ...within the box's limit: it takes one of the three places, not a fourth.
+    expect(bundlesOn(stateA)).toHaveLength(3);
 
     // Stopped after writing the next bundle but before making it current: resuming makes it
     // current and deploys it, instead of refusing or deploying the one before.

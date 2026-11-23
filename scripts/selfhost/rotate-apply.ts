@@ -141,7 +141,7 @@ export async function applyPatch(ctx: StepContext, patch: Patch, then: Phase): P
   delete step.stagedFrom;
   delete step.stagedOver;
   ctx.save();
-  const removed = await store.prune(replaced ? [bundleId, replaced] : [bundleId]);
+  const removed = await store.prune(replaced);
   if (removed.length === 0) return;
   for (const id of removed) {
     deps.log(`  removed old bundle ${id} (the box keeps the newest ${DEFAULT_KEPT_BUNDLES})`);
