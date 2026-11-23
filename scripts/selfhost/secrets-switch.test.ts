@@ -212,7 +212,7 @@ describe('secrets switch', () => {
             stateDir: state,
             mode: 'deploy',
             platformKeysFile: null,
-            operatorSecrets: { OPERATOR_TOKEN: `edited-${check}` },
+            operatorSecrets: { OPERATOR_SETTING: `edited-${check}` },
           });
         },
         adoptAndCheck: async () => {

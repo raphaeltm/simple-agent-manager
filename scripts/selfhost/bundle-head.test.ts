@@ -153,15 +153,15 @@ function writeSecrets(state: string, lines: string[]): void {
 }
 
 /**
- * Seal at T with OPERATOR_TOKEN, then remove it with `--unset` while the clock is an hour behind:
+ * Seal at T with OPERATOR_SETTING, then remove it with `--unset` while the clock is an hour behind:
  * the bundle without the value is dated BEFORE the one with it.
  */
 async function sealThenRollClockBack(state: string, envFile: string) {
-  writeSecrets(state, ['OPERATOR_TOKEN=operator-token-0123456789']);
+  writeSecrets(state, ['OPERATOR_SETTING=operator-value-one']);
   await deploy(envFile, ['--init']);
   const [withValue] = bundlesOn(state);
   writeSecrets(state, []);
-  await deploy(envFile, ['--unset', 'OPERATOR_TOKEN'], -HOUR_MS);
+  await deploy(envFile, ['--unset', 'OPERATOR_SETTING'], -HOUR_MS);
   const unset = bundlesOn(state).find((b) => b.bundleId !== withValue?.bundleId);
   if (!withValue || !unset) throw new Error('expected two bundles');
   // The clock really went backwards: by date, the bundle WITH the value is the newest.
@@ -187,7 +187,7 @@ describe('a host clock that moved backwards between two seals', () => {
         .sort()
     ).toEqual([withValue.bundleId, unset.bundleId].sort());
     expect(headHint(readFileSync(headPath(stateA), 'utf8'))?.bundleId).toBe(unset.bundleId);
-    expect(await openBundle(unset, provider)).not.toHaveProperty('OPERATOR_TOKEN');
+    expect(await openBundle(unset, provider)).not.toHaveProperty('OPERATOR_SETTING');
     // The bucket holds the same head the box does.
     expect(readFileSync(bucketHeadPath(), 'utf8')).toBe(readFileSync(headPath(stateA), 'utf8'));
 
@@ -243,11 +243,11 @@ describe('a host clock that moved backwards between two seals', () => {
     // Sealed an hour in the past: by date it is older than the bundle it replaces.
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(Date.parse(before.bundle.createdAt) - HOUR_MS);
-    await applyPatch(ctx(store), { set: { OPERATOR_TOKEN: 'rotated-0123456789' } }, 'switched');
+    await applyPatch(ctx(store), { set: { OPERATOR_SETTING: 'rotated-value' } }, 'switched');
     vi.useRealTimers();
     const rotated = await store.head();
     expect(rotated.bundle.createdAt < before.bundle.createdAt).toBe(true);
-    expect(rotated.secrets.OPERATOR_TOKEN).toBe('rotated-0123456789');
+    expect(rotated.secrets.OPERATOR_SETTING).toBe('rotated-value');
     expect(deployed).toEqual([rotated.bundle.bundleId]);
 
     // Stopped after writing the next bundle but before making it current: resuming makes it
@@ -260,11 +260,11 @@ describe('a host clock that moved backwards between two seals', () => {
       },
     };
     await expect(
-      applyPatch(ctx(crashing), { set: { OPERATOR_TOKEN: 'second-0123456789' } }, 'done')
+      applyPatch(ctx(crashing), { set: { OPERATOR_SETTING: 'second-value' } }, 'done')
     ).rejects.toThrow(/stopped/);
     const staged = journal.steps.test?.stagedBundleId as string;
     expect((await store.head()).bundle.bundleId).toBe(rotated.bundle.bundleId);
-    await applyPatch(ctx(store), { set: { OPERATOR_TOKEN: 'second-0123456789' } }, 'done');
+    await applyPatch(ctx(store), { set: { OPERATOR_SETTING: 'second-value' } }, 'done');
     expect((await store.head()).bundle.bundleId).toBe(staged);
     expect(deployed.at(-1)).toBe(staged);
   });
