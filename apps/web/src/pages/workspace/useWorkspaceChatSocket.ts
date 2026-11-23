@@ -41,6 +41,11 @@ const IDLE_TIMEOUT_MS = 3000;
  */
 const AGENT_OUTPUT_ROLES = new Set(['assistant', 'thinking', 'tool']);
 
+/** The only rows this surface changes its activity for (see `onMessage` below). */
+function isAgentOutput(msg: ChatMessageResponse): boolean {
+  return AGENT_OUTPUT_ROLES.has(msg.role);
+}
+
 interface UseWorkspaceChatSocketOptions {
   projectId: string;
   sessionId: string;
@@ -164,13 +169,15 @@ export function useWorkspaceChatSocket({
          * Still arms the SHARED verify-before-decay timer rather than a blind
          * decay, so a long tool call cannot flip the UI to idle underneath it.
          */
-        if (AGENT_OUTPUT_ROLES.has(msg.role)) {
+        if (isAgentOutput(msg)) {
           setAgentActivity('responding');
           startVerifyDecayTimer();
         }
       },
       [startVerifyDecayTimer]
     ),
+    // A `system` row must not fence the activity of an in-flight catch-up snapshot.
+    isActivityMessage: isAgentOutput,
     onSessionStopped: useCallback(() => {
       setSession((prev) => (prev ? { ...prev, status: 'stopped' } : prev));
       setAgentActivity('idle');

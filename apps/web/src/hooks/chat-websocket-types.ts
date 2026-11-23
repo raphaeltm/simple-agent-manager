@@ -21,6 +21,11 @@ export interface UseChatWebSocketOptions {
   enabled: boolean;
   /** Called when a new message arrives via WebSocket (single or from batch). */
   onMessage: (msg: ChatMessageResponse) => void;
+  /**
+   * Whether this consumer changes its activity state for the row. A live row that does fences
+   * the activity field of an in-flight catch-up snapshot. Default: every non-user row.
+   */
+  isActivityMessage?: (msg: ChatMessageResponse) => boolean;
   /** False requests recovery of a missing canonical base or revision gap. */
   onMessageAppend?: (append: ChatMessageAppend) => boolean;
   /** Called when the session is stopped server-side. */

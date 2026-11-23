@@ -814,7 +814,7 @@ describe('ProjectChat new chat button', () => {
       });
     });
 
-    await waitFor(() => expect(mocks.listChatSessions.mock.calls.length).toBe(callsBefore + 1));
+    await waitFor(() => expect(mocks.listChatSessions.mock.calls).toHaveLength(callsBefore + 1));
     // The index has not synced a session created a moment ago, so this read skips it.
     expect(mocks.listChatSessions).toHaveBeenLastCalledWith(PROJECT_ID, {
       limit: expect.any(Number),

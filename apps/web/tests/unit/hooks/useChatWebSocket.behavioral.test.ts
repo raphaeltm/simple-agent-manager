@@ -121,133 +121,151 @@ describe('useChatWebSocket (behavioral)', () => {
   });
 
   for (const surface of ['project', 'workspace'] as const) {
-    it.each(['none', 'stop', 'output', 'batch', 'access', 'other-session', 'invalid-activity'])(
-      `${surface}: fresh subscription snapshot preserves newer live %s`,
-      async (liveEvent) => {
-        const liveStop = liveEvent === 'stop';
-        const template = await vi.mocked(getChatSession)('proj-1', 'sess-1');
-        let release!: (value: typeof template) => void;
-        const pending = new Promise<typeof template>((done) => {
-          release = done;
-        });
-        vi.mocked(getChatSession).mockClear();
-        vi.mocked(getChatSession).mockReturnValueOnce(pending);
-        const plan = [{ content: 'Recovered admission plan', status: 'pending' }];
-        const snapshot = {
-          ...template,
-          state: { activity: 'prompting', currentPlan: plan },
-        } as typeof template;
-        const hook = renderHook(() => {
-          const [session, setSession] = useState<typeof template.session | null>(template.session);
-          const [state, setState] = useState<unknown>(null);
-          const [messages, setMessages] = useState<ChatMessageResponse[]>([
-            { ...template.messages[0]!, sequence: 1 },
-          ]);
-          const onCatchUp = useSessionCatchUp(
-            setSession,
-            async () => {},
-            (next, current = () => true) =>
-              setState((previous: unknown) => ({
-                ...next,
-                ...(current('activity')
-                  ? {}
-                  : { activity: (previous as { activity?: string })?.activity }),
-              }))
-          );
-          const workspaceSocket = useWorkspaceChatSocket({
-            projectId: 'proj-1',
-            sessionId: 'sess-1',
-            sessionStatus: surface === 'workspace' ? session?.status : undefined,
-            access: undefined,
-            messages,
-            setMessages,
-            setSession,
-          });
-          useChatWebSocket({
-            ...defaultProps,
-            enabled: surface === 'project',
-            onMessage: () =>
-              setState((previous: unknown) => ({
-                ...(previous as object),
-                activity: 'responding',
-              })),
-            onCatchUp,
-            onSessionStopped: () => {
-              setSession((previous) => previous && { ...previous, status: 'stopped' });
-              setState({ activity: 'idle' });
-            },
-          });
-          return {
-            session,
-            plan: (state as { currentPlan?: unknown } | null)?.currentPlan,
-            activity:
-              surface === 'workspace'
-                ? workspaceSocket.agentActivity
-                : (state as { activity?: string } | null)?.activity,
-          };
-        });
-        await act(async () => {
-          MockWebSocket.instances[0]!.simulateOpen();
-          await Promise.resolve();
-          await Promise.resolve();
-        });
-        expect(getChatSession).toHaveBeenCalledTimes(1);
-        if (liveStop)
-          act(() =>
-            MockWebSocket.instances[0]!.simulateMessage({
-              type: 'session.stopped',
-              payload: { sessionId: 'sess-1' },
-            })
-          );
-        const socket = MockWebSocket.instances[0]!;
-        const output = {
-          sessionId: 'sess-1',
-          id: 'live-output',
-          role: 'assistant',
-          content: 'fresh output',
-          sequence: 2,
-        };
-        if (liveEvent === 'output')
-          act(() => socket.simulateMessage({ type: 'message.new', payload: output }));
-        if (liveEvent === 'batch')
-          act(() =>
-            socket.simulateMessage({
-              type: 'messages.batch',
-              payload: { sessionId: 'sess-1', messages: [output] },
-            })
-          );
-        if (liveEvent === 'access')
-          act(() =>
-            socket.simulateMessage({
-              type: 'session.access.changed',
-              payload: { sessionId: 'sess-1' },
-            })
-          );
-        if (liveEvent === 'other-session')
-          act(() =>
-            socket.simulateMessage({ type: 'session.stopped', payload: { sessionId: 'other' } })
-          );
-        if (liveEvent === 'invalid-activity')
-          act(() =>
-            socket.simulateMessage({
-              type: 'session.activity',
-              payload: { sessionId: 'sess-1', activity: 'invalid' },
-            })
-          );
-        if (liveEvent === 'output' || liveEvent === 'batch')
-          expect(hook.result.current.activity).toBe('responding');
-        await act(async () => {
-          release(snapshot);
-          await pending;
-        });
-        expect(hook.result.current.session?.status).toBe(liveStop ? 'stopped' : 'active');
-        expect(hook.result.current.activity).toBe(
-          liveStop ? 'idle' : ['output', 'batch'].includes(liveEvent) ? 'responding' : 'prompting'
+    it.each([
+      'none',
+      'stop',
+      'output',
+      'batch',
+      'system',
+      'access',
+      'other-session',
+      'invalid-activity',
+    ])(`${surface}: fresh subscription snapshot preserves newer live %s`, async (liveEvent) => {
+      const liveStop = liveEvent === 'stop';
+      const template = await vi.mocked(getChatSession)('proj-1', 'sess-1');
+      let release!: (value: typeof template) => void;
+      const pending = new Promise<typeof template>((done) => {
+        release = done;
+      });
+      vi.mocked(getChatSession).mockClear();
+      vi.mocked(getChatSession).mockReturnValueOnce(pending);
+      const plan = [{ content: 'Recovered admission plan', status: 'pending' }];
+      const snapshot = {
+        ...template,
+        state: { activity: 'prompting', currentPlan: plan },
+      } as typeof template;
+      const hook = renderHook(() => {
+        const [session, setSession] = useState<typeof template.session | null>(template.session);
+        const [state, setState] = useState<unknown>(null);
+        const [messages, setMessages] = useState<ChatMessageResponse[]>([
+          { ...template.messages[0]!, sequence: 1 },
+        ]);
+        const onCatchUp = useSessionCatchUp(
+          setSession,
+          async () => {},
+          (next, current = () => true) =>
+            setState((previous: unknown) => ({
+              ...next,
+              ...(current('activity')
+                ? {}
+                : { activity: (previous as { activity?: string })?.activity }),
+            }))
         );
-        if (surface === 'project') expect(hook.result.current.plan).toEqual(plan);
-        hook.unmount();
-      }
-    );
+        const workspaceSocket = useWorkspaceChatSocket({
+          projectId: 'proj-1',
+          sessionId: 'sess-1',
+          sessionStatus: surface === 'workspace' ? session?.status : undefined,
+          access: undefined,
+          messages,
+          setMessages,
+          setSession,
+        });
+        useChatWebSocket({
+          ...defaultProps,
+          enabled: surface === 'project',
+          onMessage: () =>
+            setState((previous: unknown) => ({
+              ...(previous as object),
+              activity: 'responding',
+            })),
+          onCatchUp,
+          onSessionStopped: () => {
+            setSession((previous) => previous && { ...previous, status: 'stopped' });
+            setState({ activity: 'idle' });
+          },
+        });
+        return {
+          session,
+          plan: (state as { currentPlan?: unknown } | null)?.currentPlan,
+          activity:
+            surface === 'workspace'
+              ? workspaceSocket.agentActivity
+              : (state as { activity?: string } | null)?.activity,
+        };
+      });
+      await act(async () => {
+        MockWebSocket.instances[0]!.simulateOpen();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(getChatSession).toHaveBeenCalledTimes(1);
+      if (liveStop)
+        act(() =>
+          MockWebSocket.instances[0]!.simulateMessage({
+            type: 'session.stopped',
+            payload: { sessionId: 'sess-1' },
+          })
+        );
+      const socket = MockWebSocket.instances[0]!;
+      const output = {
+        sessionId: 'sess-1',
+        id: 'live-output',
+        role: 'assistant',
+        content: 'fresh output',
+        sequence: 2,
+      };
+      if (liveEvent === 'output')
+        act(() => socket.simulateMessage({ type: 'message.new', payload: output }));
+      if (liveEvent === 'batch')
+        act(() =>
+          socket.simulateMessage({
+            type: 'messages.batch',
+            payload: { sessionId: 'sess-1', messages: [output] },
+          })
+        );
+      // Project chat counts a `system` row as activity; the workspace view does not, so its
+      // snapshot activity must survive one.
+      if (liveEvent === 'system')
+        act(() =>
+          socket.simulateMessage({
+            type: 'message.new',
+            payload: { ...output, id: 'live-system', role: 'system', content: 'build log' },
+          })
+        );
+      if (liveEvent === 'access')
+        act(() =>
+          socket.simulateMessage({
+            type: 'session.access.changed',
+            payload: { sessionId: 'sess-1' },
+          })
+        );
+      if (liveEvent === 'other-session')
+        act(() =>
+          socket.simulateMessage({ type: 'session.stopped', payload: { sessionId: 'other' } })
+        );
+      if (liveEvent === 'invalid-activity')
+        act(() =>
+          socket.simulateMessage({
+            type: 'session.activity',
+            payload: { sessionId: 'sess-1', activity: 'invalid' },
+          })
+        );
+      if (liveEvent === 'output' || liveEvent === 'batch')
+        expect(hook.result.current.activity).toBe('responding');
+      await act(async () => {
+        release(snapshot);
+        await pending;
+      });
+      expect(hook.result.current.session?.status).toBe(liveStop ? 'stopped' : 'active');
+      const liveActivity =
+        ['output', 'batch'].includes(liveEvent) ||
+        (liveEvent === 'system' && surface === 'project');
+      expect(hook.result.current.activity).toBe(
+        liveStop ? 'idle' : liveActivity ? 'responding' : 'prompting'
+      );
+      if (surface === 'project') expect(hook.result.current.plan).toEqual(plan);
+      hook.unmount();
+    });
   }
 
   it('workspace: a held first-open tool reset preserves output arriving during its fetch', async () => {

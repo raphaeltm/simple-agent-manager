@@ -1,4 +1,11 @@
 import { BASE_RECONNECT_DELAY, MAX_RECONNECT_DELAY, MAX_RETRIES } from './chat-websocket-config';
+import {
+  isNonUserMessage,
+  parseMessageAppendFrame,
+  parseMessageNewFrame,
+  parseMessagesBatchFrame,
+  snapshotFence,
+} from './chat-websocket-frames';
 import type {
   ChatConnectionState,
   SessionUpdatedFields,
@@ -32,7 +39,6 @@ import { mergeMessages } from '../lib/merge-messages';
 import { fetchHistoryUntil } from '../lib/message-paging';
 import { parsePlanContent } from '../lib/plan-content';
 import { parsePromptDeliveryUpdate } from '../lib/prompt-delivery-update';
-import { maybeJsonRecord } from '../lib/runtime-validation';
 
 /**
  * The statuses the DO pushes in `session.updated` (`applySessionSleep`, `wakeSession`).
@@ -45,6 +51,7 @@ export function useChatWebSocket({
   sessionId,
   enabled,
   onMessage,
+  isActivityMessage = isNonUserMessage,
   onMessageAppend,
   onSessionStopped,
   onSubscribed,
@@ -73,6 +80,8 @@ export function useChatWebSocket({
   const appendRecoveryPageRef = useRef<ChatMessageResponse[] | null>(null);
   const catchUpFlightRef = useRef<Promise<void> | null>(null);
   const stateGenerationRef = useRef<Record<string, number>>({});
+  const isActivityMessageRef = useRef(isActivityMessage);
+  isActivityMessageRef.current = isActivityMessage;
   const markLive = (...fields: string[]) => {
     for (const field of fields)
       stateGenerationRef.current[field] = (stateGenerationRef.current[field] ?? 0) + 1;
@@ -196,22 +205,8 @@ export function useChatWebSocket({
 
           if (data.type === 'message.append') {
             if (payload.sessionId !== sessionId) return;
-            if (
-              typeof payload.id !== 'string' ||
-              typeof payload.content !== 'string' ||
-              !Number.isSafeInteger(payload.offset) ||
-              !Number.isSafeInteger(payload.revision) ||
-              payload.offset < 0 ||
-              payload.revision !== payload.offset + payload.content.length
-            )
-              return;
-            const append: ChatMessageAppend = {
-              id: payload.id,
-              sessionId,
-              content: payload.content,
-              offset: payload.offset,
-              revision: payload.revision,
-            };
+            const append = parseMessageAppendFrame(payload, sessionId);
+            if (!append) return;
             const applied = onMessageAppendRef.current?.(append);
             if (applied) markLive('activity');
             if (!applied) {
@@ -225,38 +220,16 @@ export function useChatWebSocket({
               void catchUpMessages();
             }
           } else if (data.type === 'message.new') {
-            const p = payload;
-            if (p.sessionId !== sessionId) return;
-            // Only deliver if content is present (broadcast now includes it)
-            if (!p.content) return;
-            const newMsg: ChatMessageResponse = {
-              id: p.messageId || p.id || crypto.randomUUID(),
-              sessionId: p.sessionId,
-              role: p.role,
-              content: p.content,
-              toolMetadata: p.toolMetadata || null,
-              createdAt: p.createdAt || Date.now(),
-              sequence: p.sequence ?? null,
-            };
-            if (newMsg.role !== 'user') markLive('activity');
+            if (payload.sessionId !== sessionId) return;
+            const newMsg = parseMessageNewFrame(payload);
+            if (!newMsg) return;
+            if (isActivityMessageRef.current(newMsg)) markLive('activity');
             if (newMsg.role === 'plan' && parsePlanContent(newMsg.content)) markLive('plan');
             onMessageRef.current(newMsg);
           } else if (data.type === 'messages.batch') {
-            const p = payload;
-            if (p.sessionId !== sessionId) return;
-            const msgs: ChatMessageResponse[] = (p.messages ?? [])
-              .filter((m: Record<string, unknown>) => m.content)
-              .map((m: Record<string, unknown>) => ({
-                id: (m.id as string) || crypto.randomUUID(),
-                sessionId: sessionId,
-                role: (m.role as string) || 'assistant',
-                content: m.content as string,
-                toolMetadata: maybeJsonRecord(m.toolMetadata),
-                createdAt: (m.createdAt as number) || Date.now(),
-                sequence: (m.sequence as number) ?? null,
-              }));
-            for (const msg of msgs) {
-              if (msg.role !== 'user') markLive('activity');
+            if (payload.sessionId !== sessionId) return;
+            for (const msg of parseMessagesBatchFrame(payload, sessionId)) {
+              if (isActivityMessageRef.current(msg)) markLive('activity');
               if (msg.role === 'plan' && parsePlanContent(msg.content)) markLive('plan');
               onMessageRef.current(msg);
             }
@@ -399,14 +372,10 @@ export function useChatWebSocket({
   const catchUpMessages = useCallback((): Promise<void> => {
     if (catchUpFlightRef.current) return catchUpFlightRef.current;
     const socket = wsRef.current;
-    const generation = { ...stateGenerationRef.current };
-    const isSnapshotCurrent = (field?: string) =>
-      wsRef.current === socket &&
-      (field
-        ? (stateGenerationRef.current[field] ?? 0) === (generation[field] ?? 0)
-        : Object.keys(stateGenerationRef.current).every(
-            (key) => (stateGenerationRef.current[key] ?? 0) === (generation[key] ?? 0)
-          ));
+    const isSnapshotCurrent = snapshotFence(
+      stateGenerationRef.current,
+      () => wsRef.current === socket
+    );
     const flight = (async () => {
       try {
         // Reconnect catch-up fetches only the recent window (like the poll), not the
