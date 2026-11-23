@@ -59,7 +59,7 @@ Call sites that choose the current bundle by `createdAt` (verified in code):
 - [x] Tests through the real deploy: clock rollback, rebuild after rollback, tampered head, foreign
       head, no-head migration; each guard deleted once
 - [x] README (deploy/selfhost) updated
-- [ ] Live: sealed-secret live suite on celld; shared box head migration keeps the same bundle
+- [x] Live: sealed-secret live suite on celld; shared box head migration keeps the same bundle
 
 ## Acceptance criteria
 
@@ -81,3 +81,31 @@ Call sites that choose the current bundle by `createdAt` (verified in code):
   deploys without the unset value.
 - Residual (documented in README "Rollback"): a bucket writer can replay an older genuine head and
   delete newer bundles; the same capability already existed over celld's data and the bundles.
+
+## Review outcomes
+
+- security-auditor: 2 MEDIUM fixed (rebuild refuses a headless bucket unless `--allow-no-head`,
+  `--expected-head-write`; rotate/switch verify bucket heads before sealing). Re-verify: resolved.
+- go-specialist: 2 MEDIUM fixed (compare-before-replace in `commitHead`, reconcile order). Re-verify:
+  resolved; LOW tightening applied (seal before the compare).
+- adversarial: 1 HIGH (switch rollback after the compare-and-set) and 1 MEDIUM (pre-switch bundle
+  pruned) fixed with regression tests; final pass: nothing CRITICAL/HIGH/MEDIUM remains.
+- task-completion-validator: switch and migrate head tests added.
+
+## Live evidence (2026-11-23)
+
+- Live sealed-secret suite (celld, 5 files): 39/39.
+- Shared box app.vmtest.sam2.party: encrypted backup first; deploy of the branch recorded the head as
+  `0242de8c` (the bundle the running version already named), sealed nothing; second deploy no-op;
+  scratch rebuild from the real bucket and KMS key restored `0242de8c` with a byte-identical head.
+  Box returned to main with both heads deleted (README downgrade rule); healthy.
+
+## Codex review (b3941ccf)
+
+- P1 head compare-and-write not atomic across processes: fixed with a per-state lock file
+  (`withLockFile` in `bundle-store.ts`; dead holder broken; excluded from backups). Test forces
+  both reads before either write; red without the lock.
+- P2 rotation prune dropped the replaced bundle under a clock rollback: prune keeps `stagedOver`
+  by name. Test seeds future-dated leftovers; red without the fix.
+- P1 reconcile pruned the bucket copy of a head-named bundle the box lost: reconcile now restores
+  it to the box (or stops, touching nothing). Real-deploy test; red without the fix.
