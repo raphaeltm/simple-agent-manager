@@ -1,5 +1,5 @@
 import { checkedOutCommit } from './git-head.mjs';
-import { createApi, intFromEnv, readTarget } from './installer-target.mjs';
+import { createApi, delayFromEnv, intFromEnv, readTarget } from './installer-target.mjs';
 
 // Checks a deployed installer the way a visitor reaches it: it answers on its own
 // address, runs the expected commit in full mode, and "Sign in with Cloudflare"
@@ -26,7 +26,7 @@ async function read(path, init = {}) {
 // A freshly written Worker secret or version can take a few seconds to reach every edge.
 const CLOUDFLARE_DASHBOARD = 'https://dash.cloudflare.com';
 const deadline = Date.now() + intFromEnv('INSTALLER_READY_TIMEOUT_MS', 90000);
-const pollMs = intFromEnv('INSTALLER_READY_POLL_MS', 3000, 1);
+const pollMs = delayFromEnv('INSTALLER_READY_POLL_MS', 3000);
 let last = 'no response';
 for (;;) {
   try {

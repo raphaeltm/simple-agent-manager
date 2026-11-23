@@ -30,6 +30,13 @@ describe('reading the checked-out commit without running git', () => {
     });
     expect(checkedOutCommit(from(root))).toBe(A);
   });
+  it('follows a branch whose name uses characters Git allows, such as +', () => {
+    const root = repository({
+      '.git/HEAD': 'ref: refs/heads/release+test@1\n',
+      '.git/refs/heads/release+test@1': `${A}\n`,
+    });
+    expect(checkedOutCommit(from(root))).toBe(A);
+  });
   it('falls back to a packed ref', () => {
     const root = repository({
       '.git/HEAD': 'ref: refs/heads/main\n',

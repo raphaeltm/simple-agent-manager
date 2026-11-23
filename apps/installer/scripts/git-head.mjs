@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const read = (path) => {
@@ -37,15 +37,19 @@ export function checkedOutCommit(from = fileURLToPath(new URL('.', import.meta.u
   }
   const head = read(join(gitDirectory, 'HEAD')).trim();
   if (/^[a-f0-9]{40}$/.test(head)) return head;
-  const reference = /^ref: (refs\/[A-Za-z0-9._/-]+)$/.exec(head)?.[1];
-  if (!reference || reference.includes('..')) return '';
+  // Git allows many characters in a ref name (git check-ref-format), so the name is not
+  // matched against a character list. It must stay under refs/ and may not climb out.
+  const reference = /^ref: (refs\/\S+)$/.exec(head)?.[1];
+  if (!reference || reference.includes('..') || reference.includes('\\')) return '';
   // Refs of a linked worktree live in the main repository's directory.
   const common = read(join(gitDirectory, 'commondir')).trim();
   const directories = common
     ? [gitDirectory, isAbsolute(common) ? common : resolve(gitDirectory, common)]
     : [gitDirectory];
   for (const candidate of directories) {
-    const loose = read(join(candidate, reference)).trim();
+    const path = resolve(candidate, reference);
+    if (!path.startsWith(join(candidate, 'refs') + sep)) return '';
+    const loose = read(path).trim();
     if (/^[a-f0-9]{40}$/.test(loose)) return loose;
   }
   for (const candidate of directories)

@@ -46,18 +46,24 @@ export class ApiFailure extends Error {
   }
 }
 
+// Node treats a larger timer delay as 1 ms, which would turn a poll into a tight loop.
+export const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 /**
- * A whole number of at least `minimum` from the environment; unset or empty gives `fallback`.
- * Anything else stops the command: a NaN deadline or attempt count would never be reached.
+ * A whole number from `minimum` to `maximum` from the environment; unset or empty gives
+ * `fallback`. Anything else stops the command: a NaN deadline would never be reached.
  */
-export function intFromEnv(name, fallback, minimum = 0) {
+export function intFromEnv(name, fallback, minimum = 0, maximum = Number.MAX_SAFE_INTEGER) {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return fallback;
   const value = Number(raw);
-  if (!Number.isInteger(value) || value < minimum)
-    throw new Error(`${name} must be a whole number of at least ${minimum}.`);
+  if (!Number.isInteger(value) || value < minimum || value > maximum)
+    throw new Error(`${name} must be a whole number from ${minimum} to ${maximum}.`);
   return value;
 }
+
+/** A poll or retry interval: at least 1 ms and within what a timer can wait. */
+export const delayFromEnv = (name, fallback) => intFromEnv(name, fallback, 1, MAX_TIMER_DELAY_MS);
 
 /** OAuth client endpoints use `registrationToken` when one is supplied. */
 export function createApi({ token, base, registrationToken }) {
@@ -72,16 +78,17 @@ export function createApi({ token, base, registrationToken }) {
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(30_000),
       });
-      data = await response.json();
     } catch {
       throw new Error('Cloudflare request could not complete. Private response omitted.');
     }
-    if (!response.ok || data.success === false)
+    // A refusal can arrive with an empty or non-JSON body; its status still decides.
+    data = await response.json().catch(() => undefined);
+    if (!response.ok || !data || data.success === false)
       throw new ApiFailure(
         response.status,
         method,
         permissionFor(path, base),
-        (Array.isArray(data.errors) ? data.errors : [])
+        (Array.isArray(data?.errors) ? data.errors : [])
           .map((error) => error?.code)
           .filter((code) => Number.isInteger(code))
       );

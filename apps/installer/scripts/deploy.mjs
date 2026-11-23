@@ -5,6 +5,7 @@ import { checkedOutCommit } from './git-head.mjs';
 import {
   ApiFailure,
   createApi,
+  delayFromEnv,
   intFromEnv,
   readTarget,
   SECRET_NAMES,
@@ -58,6 +59,16 @@ if (domain && !/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(domain))
 if (!['preserve', 'bootstrap', 'full'].includes(mode)) throw new Error('Invalid installer mode');
 const api = createApi({ token, base, registrationToken: process.env.OAUTH_REGISTRATION_TOKEN });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// Read every timing setting first, so a mistyped one stops the command before it changes
+// anything in the account.
+const timing = {
+  liveTimeoutMs: intFromEnv('INSTALLER_LIVE_TIMEOUT_MS', 60000),
+  livePollMs: delayFromEnv('INSTALLER_LIVE_POLL_MS', 2000),
+  clientCreateTimeoutMs: intFromEnv('OAUTH_CLIENT_CREATE_TIMEOUT_MS', 90000),
+  clientCreateRetryMs: delayFromEnv('OAUTH_CLIENT_CREATE_RETRY_MS', 15000),
+  secretsVisibleTimeoutMs: intFromEnv('OAUTH_SECRETS_VISIBLE_TIMEOUT_MS', 30000),
+  secretsPollMs: delayFromEnv('OAUTH_SECRETS_POLL_MS', 2000),
+};
 // A client's secret is shown once, at creation, and otherwise lives only on the installer Worker.
 const OAUTH_SECRET_MISSING = `OAuth secret missing. An OAuth client named ${name} already exists, but its secret is not available. Delete that client (run remove with REMOVE_OAUTH_CLIENT=true), or rotate its secret in Cloudflare and supply OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET.`;
 const template = JSON.parse(await readFile('wrangler.json', 'utf8'));
@@ -129,6 +140,13 @@ async function resolveOrigin() {
   return `https://${name}.${subdomain}.workers.dev`;
 }
 const origin = await resolveOrigin();
+// An installer's OAuth client is registered for its address, and the client's secret
+// cannot be read back, so an installer is never moved in place: a half-finished move would
+// leave sign-in broken at one address or the other. It is short-lived by design; replace it.
+if (existing && currentVars.APP_ORIGIN && currentVars.APP_ORIGIN !== origin)
+  throw new Error(
+    `This installer is already deployed at ${currentVars.APP_ORIGIN}. To serve it at ${origin}, remove it first (pnpm --filter @simple-agent-manager/installer run remove, with REMOVE_OAUTH_CLIENT=true) and deploy again.`
+  );
 const host = new URL(origin).hostname;
 const workersDev = host.endsWith('.workers.dev');
 if (!workersDev && !host.startsWith('install.'))
@@ -216,11 +234,7 @@ else if (artifactBaseUrl) {
 } else if (!config.vars.ARTIFACT_BASE_URL)
   config.vars.ARTIFACT_BASE_URL = DEFAULT_ARTIFACT_BASE_URL;
 const explicitCredentials = !!(process.env.OAUTH_CLIENT_ID || process.env.OAUTH_CLIENT_SECRET);
-// The OAuth client is tied to the installer's address (its callback is on it), so an
-// installer that moves needs its own client, created once the new address is served.
-const originChanged = !!existing && currentVars.APP_ORIGIN !== origin;
-const reuseReadyConfiguration =
-  !!existing && ready && !scopesChanged && !explicitCredentials && !originChanged;
+const reuseReadyConfiguration = !!existing && ready && !scopesChanged && !explicitCredentials;
 async function findOAuthClient(clientId) {
   let client;
   if (clientId) client = await api(`${base}/oauth_clients/${encodeURIComponent(clientId)}`);
@@ -253,11 +267,11 @@ function matchesOAuthClient(client, desired) {
 // retried until OAUTH_CLIENT_CREATE_TIMEOUT_MS has passed. Before every retry, and before
 // giving up, the client list is read again: a client that did appear is reported, never
 // duplicated, because its secret was in the response that was lost. A refusal (4xx) is not
-// retried. Worst case with the defaults: 90 s of retries, plus one last request and lookup,
-// each bounded by the 30 s API timeout.
+// retried. A wait never runs past the deadline. Worst case with the defaults: 90 s, plus a
+// request in flight when the time ran out and one last lookup, each bounded by the 30 s API
+// timeout.
 async function createOAuthClient(desired) {
-  const deadline = Date.now() + intFromEnv('OAUTH_CLIENT_CREATE_TIMEOUT_MS', 90000);
-  const retryMs = intFromEnv('OAUTH_CLIENT_CREATE_RETRY_MS', 15000, 1);
+  const deadline = Date.now() + timing.clientCreateTimeoutMs;
   for (;;) {
     let failure;
     try {
@@ -266,10 +280,11 @@ async function createOAuthClient(desired) {
       if (error instanceof ApiFailure && error.status < 500) throw error;
       failure = error;
     }
-    const expired = Date.now() >= deadline;
-    if (!expired) await sleep(retryMs);
+    // Never wait past the deadline, and decide on it again after the wait and the lookup.
+    const remaining = deadline - Date.now();
+    if (remaining > 0) await sleep(Math.min(timing.clientCreateRetryMs, remaining));
     if (await findOAuthClient()) throw new Error(OAUTH_SECRET_MISSING);
-    if (expired) throw failure;
+    if (Date.now() >= deadline) throw failure;
   }
 }
 // Cloudflare rejected client creation (observed 2026-11-08 in production: POST
@@ -303,6 +318,10 @@ async function prepareOAuth({ deferMutation = false } = {}) {
     scopes,
     token_endpoint_auth_method: 'client_secret_post',
   };
+  // A client that belongs to another installer is refused before anything is published;
+  // only changes that need this installer's address to be live are deferred.
+  if (client && (client.client_uri !== origin || client.client_name !== name))
+    throw new Error('OAuth client does not belong to this installer origin');
   if (deferMutation && (!client || !matchesOAuthClient(client, desired))) return undefined;
   if (!client) {
     client = await createOAuthClient(desired);
@@ -311,8 +330,6 @@ async function prepareOAuth({ deferMutation = false } = {}) {
     if (typeof clientSecret !== 'string' || !clientSecret)
       throw new Error('Cloudflare did not return a private client secret');
   } else {
-    if (client.client_uri !== origin || client.client_name !== name)
-      throw new Error('OAuth client does not belong to this installer origin');
     const matches = matchesOAuthClient(client, desired);
     if (!matches) {
       await api(`${base}/oauth_clients/${encodeURIComponent(clientId)}`, 'PATCH', desired);
@@ -321,8 +338,7 @@ async function prepareOAuth({ deferMutation = false } = {}) {
   }
   if (!clientId || !matchesOAuthClient(client, desired))
     throw new Error('OAuth client scope/callback configuration was not confirmed');
-  // Secrets already on the Worker belong to the client of its previous address.
-  if (!clientSecret && (!ready || originChanged)) throw new Error(OAUTH_SECRET_MISSING);
+  if (!clientSecret && !ready) throw new Error(OAUTH_SECRET_MISSING);
   if (process.env.OAUTH_CLIENT_ID && !clientSecret)
     throw new Error('An explicit OAuth client override also requires its private secret');
   return { OAUTH_CLIENT_ID: clientId, OAUTH_CLIENT_SECRET: clientSecret };
@@ -330,15 +346,13 @@ async function prepareOAuth({ deferMutation = false } = {}) {
 // Full enablement and requested scope changes on an existing service must pass
 // OAuth management preflight before publishing a Worker that requests them.
 // A fresh bootstrap still ships approved static assets before OAuth readiness.
-const preflight =
-  !reuseReadyConfiguration && (full || (!!existing && (scopesChanged || originChanged)));
+const preflight = !reuseReadyConfiguration && (full || (!!existing && scopesChanged));
 let credentials;
-if (preflight) credentials = await prepareOAuth({ deferMutation: !existing || originChanged });
+if (preflight) credentials = await prepareOAuth({ deferMutation: !existing });
 // Cloudflare fetches the client's logo and policy URLs when a client is created, and a
 // first publish can take a moment to answer. Best effort: registration reports its own failure.
 async function waitUntilServed() {
-  const deadline = Date.now() + intFromEnv('INSTALLER_LIVE_TIMEOUT_MS', 60000);
-  const pollMs = intFromEnv('INSTALLER_LIVE_POLL_MS', 2000, 1);
+  const deadline = Date.now() + timing.liveTimeoutMs;
   for (;;) {
     try {
       const response = await fetch(`${origin}/health`, {
@@ -350,16 +364,9 @@ async function waitUntilServed() {
       // Not answering yet.
     }
     if (Date.now() >= deadline) return;
-    await sleep(pollMs);
+    await sleep(timing.livePollMs);
   }
 }
-// An installer that moves keeps its Worker, and with it the secrets of the client registered
-// for the old address. They are removed before the move is published: if creating the new
-// client then fails, the next run sees an installer without OAuth secrets and finishes the
-// job, instead of finding the old ones and reporting a sign-in that cannot work.
-if (originChanged)
-  for (const key of SECRET_NAMES)
-    if (existingSecrets.includes(key)) await api(`${worker}/secrets/${key}`, 'DELETE');
 const generated = '.wrangler-deploy.json';
 await writeFile(generated, JSON.stringify(config, null, 2), { mode: 0o600 });
 try {
@@ -373,14 +380,13 @@ try {
   }
   // The secrets list can lag a just-published version or secret write by a
   // few seconds (observed 2026-11-06), so poll briefly before failing.
-  const visibleBy = Date.now() + intFromEnv('OAUTH_SECRETS_VISIBLE_TIMEOUT_MS', 30000);
-  const secretsPollMs = intFromEnv('OAUTH_SECRETS_POLL_MS', 2000, 1);
+  const visibleBy = Date.now() + timing.secretsVisibleTimeoutMs;
   for (;;) {
     const secrets = await api(`${worker}/secrets`);
     if (SECRET_NAMES.every((key) => secrets.some((entry) => entry.name === key))) break;
     if (Date.now() >= visibleBy)
       throw new Error('OAuth secret missing after deployment; readiness was not established');
-    await sleep(secretsPollMs);
+    await sleep(timing.secretsPollMs);
   }
   console.log(`Installer ready: ${origin}`);
   console.log(

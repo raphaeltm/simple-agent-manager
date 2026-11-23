@@ -217,6 +217,16 @@ Cloudflare dashboard, then the `sam-maintenance-…` installation service and it
 you want first. Leftover Workers routes block a new installation on the same domain until you
 remove them.
 
+SAM and the installation service also own Cloudflare Container applications: the installation
+service's builder is one (`provision`, `apps/installer/src/provision.ts`), and SAM's own containers
+are others. Check that none are left, because we have not confirmed that Cloudflare removes a
+Worker's Container application together with the Worker:
+
+```sh
+npx wrangler containers list
+npx wrangler containers delete <APPLICATION_ID>
+```
+
 ## What the installer can access
 
 The installer runs in your Cloudflare account, and no service operated by the SAM project is
@@ -243,10 +253,11 @@ Set these before running the deploy command.
 `BASE_DOMAIN=example.com` serves the installer at `https://install.example.com` instead of
 `workers.dev`. The API token then also needs the zone permissions for Workers Custom Domains and
 Workers Routes on that domain. An installer that already exists keeps its address when you deploy
-again without `BASE_DOMAIN`. Setting `BASE_DOMAIN` on an existing `workers.dev` installer moves it
-and creates a new OAuth client for the new address (`originChanged`,
-`apps/installer/scripts/deploy.mjs`); the old client is left behind and can be deleted in the
-dashboard.
+again without `BASE_DOMAIN`.
+
+An installer is not moved in place: deploying an existing one with a different address stops and
+says so (`apps/installer/scripts/deploy.mjs`). To change its address, [remove it](#remove-the-installer)
+with `REMOVE_OAUTH_CLIENT=true` and deploy again.
 
 ### Build everything from source
 

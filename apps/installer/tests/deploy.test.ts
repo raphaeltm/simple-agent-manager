@@ -104,11 +104,12 @@ interface Options {
   failedClientCreations?: number;
   /** A failed creation that nevertheless left a client behind. */
   failedCreationLeavesClient?: boolean;
-  /** How a failed creation fails: an HTTP status (default 500) or a dropped connection. */
-  creationFailure?: number | 'offline';
+  /** How a failed creation fails: an HTTP status (default 500), a dropped connection, or a
+   * refusal with no JSON body. */
+  creationFailure?: number | 'offline' | 'empty-403';
+  /** Freeze the clock and advance it by this much on each failed creation. */
+  clockStepMs?: number;
   createTimeoutMs?: string;
-  /** The deployed installer has no OAuth client registered for its address. */
-  noClient?: boolean;
   /** Supply OAUTH_CLIENT_ID without its secret. */
   clientIdOnly?: boolean;
   /** Extra bindings on the deployed installer. */
@@ -157,12 +158,14 @@ async function deploy(options: Options = {}) {
   let laggingSecretReads = options.laggingSecretReads ?? 0;
   let unservedHealthChecks = options.unservedHealthChecks ?? 0;
   let failedClientCreations = options.failedClientCreations ?? 0;
+  let clock = 1_700_000_000_000;
+  if (options.clockStepMs) vi.spyOn(Date, 'now').mockImplementation(() => clock);
   vi.stubEnv('OAUTH_CLIENT_CREATE_RETRY_MS', '1');
   const workerName = `sam-installer-${(options.environment ?? 'staging') || 'self-hosted'}`;
   const deployedOrigin = options.existingOrigin ?? 'https://install.sammy.party';
   const ready = options.ready ?? !!options.existing;
   let client: Record<string, unknown> | undefined =
-    (options.existing || options.orphanClient) && !options.noClient
+    options.existing || options.orphanClient
       ? {
           client_id: 'existing',
           client_name: workerName,
@@ -189,15 +192,13 @@ async function deploy(options: Options = {}) {
       if (method === 'GET') result = client ? [client] : [];
       // Cloudflare refused creation while the logo/policy URLs on a not yet
       // published installer origin were unreachable (production, 2026-11-08).
-      // ...unless an installer is already being served at the client's address.
-      else if (
-        wranglerRuns().length === 0 &&
-        !(options.existing && body.client_uri === deployedOrigin)
-      )
+      else if (wranglerRuns().length === 0)
         return Response.json({ success: false }, { status: 500 });
       else if (failedClientCreations-- > 0) {
         if (options.failedCreationLeavesClient) client = { ...body, client_id: 'half-made' };
+        clock += options.clockStepMs ?? 0;
         if (options.creationFailure === 'offline') throw new Error('socket hang up');
+        if (options.creationFailure === 'empty-403') return new Response('', { status: 403 });
         return Response.json(
           { success: false, errors: [{ code: 1001 }] },
           { status: options.creationFailure ?? 500 }
@@ -284,12 +285,6 @@ async function deploy(options: Options = {}) {
       } else if (path.includes('/oauth_clients') || path === '/client/v4/oauth/scopes') {
         result = oauthResult(path, method, body);
         if (result instanceof Response) return result;
-      } else if (path.includes('/secrets/')) {
-        if (method !== 'DELETE') return Response.json({ success: false }, { status: 405 });
-        const name = path.slice(path.lastIndexOf('/') + 1);
-        if (!secretNames.includes(name)) return Response.json({ success: false }, { status: 404 });
-        secretNames.splice(secretNames.indexOf(name), 1);
-        result = {};
       } else if (path.endsWith('/secrets')) {
         if (method === 'PUT') {
           if (body.type !== 'secret_text' || typeof body.text !== 'string' || !body.text)
@@ -705,11 +700,25 @@ describe('creating the OAuth client after a first publish', () => {
     expect(creations()).toHaveLength(1);
     expect(logged()).not.toContain('Installer ready');
   });
-  it('keeps retrying inside the time allowed, then stops', async () => {
+  it('retries while time remains and stops at the deadline', async () => {
+    // Each failure takes 10 s of a 25 s budget: attempts at 0, 10 and 20 s, none at 30 s.
     await expect(
-      deploy({ ...selfHosted, failedClientCreations: 99, createTimeoutMs: '40' })
+      deploy({
+        ...selfHosted,
+        failedClientCreations: 99,
+        createTimeoutMs: '25000',
+        clockStepMs: 10_000,
+      })
     ).rejects.toThrow('Cloudflare POST failed (500');
-    expect(creations().length).toBeGreaterThan(1);
+    expect(creations()).toHaveLength(3);
+  });
+  it('does not retry a refusal that arrives without a JSON body', async () => {
+    await expect(
+      deploy({ ...selfHosted, failedClientCreations: 99, creationFailure: 'empty-403' })
+    ).rejects.toThrow(
+      'Cloudflare refused POST (403). Check the API token’s permissions'.replace('’', "'")
+    );
+    expect(creations()).toHaveLength(1);
   });
   it('reports a client left behind by the last failed attempt instead of losing it', async () => {
     await expect(
@@ -813,86 +822,38 @@ describe('what the deploy writes', () => {
     expect(published()).toBe(true);
   });
 });
-describe('an installer that changes address', () => {
-  it('BASE_DOMAIN moves a workers.dev installer and gives it a client for the new address', async () => {
-    await deploy({
-      ...selfHosted,
-      existing: 'full',
-      existingOrigin: SELF_ORIGIN,
-      domain: 'example.com',
-    });
-    expect(config().vars.APP_ORIGIN).toBe('https://install.example.com');
-    expect(config().workers_dev).toBe(false);
-    const created = capture.calls.find(
-      (call) => call.path.endsWith('/oauth_clients') && call.method === 'POST'
+describe('an installer is never moved in place', () => {
+  it.each([
+    ['a workers.dev installer to a domain', { existingOrigin: SELF_ORIGIN, domain: 'example.com' }],
+    [
+      'one domain to another',
+      { existingOrigin: 'https://install.old.example', domain: 'example.com' },
+    ],
+  ] as const)('refuses to move %s, and changes nothing', async (_label, options) => {
+    await expect(deploy({ ...selfHosted, existing: 'full', ...options })).rejects.toThrow(
+      `This installer is already deployed at ${options.existingOrigin}. To serve it at https://install.example.com, remove it first`
     );
-    expect(created?.body).toMatchObject({
-      client_uri: 'https://install.example.com',
-      redirect_uris: ['https://install.example.com/oauth/callback'],
-    });
-    expect(
-      capture.events.indexOf(`POST /client/v4/accounts/${ACCOUNT}/oauth_clients`)
-    ).toBeGreaterThan(capture.events.indexOf('write-config'));
-    expect(
-      capture.calls.filter((call) => call.method === 'PUT').map((call) => call.body.text)
-    ).toEqual(['new', 'SECRET']);
+    expect(published()).toBe(false);
+    expect(capture.writes).toHaveLength(0);
+    expect(capture.calls.some((call) => call.method !== 'GET')).toBe(false);
+    expect(capture.calls.some((call) => call.path.includes('/oauth_clients'))).toBe(false);
   });
-  it('removes the old address’s secrets before publishing the move', async () => {
-    await deploy({
-      ...selfHosted,
-      existing: 'full',
-      existingOrigin: SELF_ORIGIN,
-      domain: 'example.com',
-    });
-    const removed = ['OAUTH_CLIENT_ID', 'OAUTH_CLIENT_SECRET'].map((name) =>
-      capture.events.indexOf(
-        `DELETE /client/v4/accounts/${ACCOUNT}/workers/scripts/sam-installer-self-hosted/secrets/${name}`
-      )
-    );
-    for (const index of removed) {
-      expect(index).toBeGreaterThanOrEqual(0);
-      expect(index).toBeLessThan(capture.events.indexOf('write-config'));
-    }
+  it('control: the same address deploys and keeps the client and its secrets', async () => {
+    await deploy({ ...selfHosted, existing: 'full', existingOrigin: SELF_ORIGIN });
+    expect(published()).toBe(true);
+    expect(config().vars.APP_ORIGIN).toBe(SELF_ORIGIN);
+    expect(capture.calls.some((call) => call.path.includes('/oauth_clients'))).toBe(false);
+    expect(capture.calls.some((call) => call.method !== 'GET')).toBe(false);
   });
-  it('a move whose client creation fails leaves no secrets for the next run to mistake as ready', async () => {
-    await expect(
-      deploy({
-        ...selfHosted,
-        existing: 'full',
-        existingOrigin: SELF_ORIGIN,
-        domain: 'example.com',
-        failedClientCreations: 99,
-        createTimeoutMs: '0',
-      })
-    ).rejects.toThrow('Cloudflare POST failed (500');
-    expect(capture.calls.filter((call) => call.method === 'DELETE')).toHaveLength(2);
-    expect(capture.calls.some((call) => call.method === 'PUT')).toBe(false);
-    expect(logged()).not.toContain('Installer ready');
-  });
-  it('the next run after a failed move creates the client for the new address', async () => {
-    // State the failed move leaves: already at the new address, no secrets, no client for it.
+  it('control: naming the installer’s current domain again is not a move', async () => {
     await deploy({
       ...selfHosted,
       existing: 'full',
       existingOrigin: 'https://install.example.com',
-      ready: false,
-      noClient: true,
+      domain: 'example.com',
     });
-    const created = capture.calls.find(
-      (call) => call.path.endsWith('/oauth_clients') && call.method === 'POST'
-    );
-    expect(created?.body).toMatchObject({
-      redirect_uris: ['https://install.example.com/oauth/callback'],
-    });
-    expect(
-      capture.calls.filter((call) => call.method === 'PUT').map((call) => call.body.text)
-    ).toEqual(['new', 'SECRET']);
-    expect(logged()).toContain('Installer ready: https://install.example.com');
-  });
-  it('control: the same address keeps the client and its secrets untouched', async () => {
-    await deploy({ ...selfHosted, existing: 'full', existingOrigin: SELF_ORIGIN });
-    expect(capture.calls.some((call) => call.path.includes('/oauth_clients'))).toBe(false);
-    expect(capture.calls.some((call) => call.method === 'DELETE')).toBe(false);
+    expect(published()).toBe(true);
+    expect(config().vars.APP_ORIGIN).toBe('https://install.example.com');
   });
   it('stops when the deployed address is not one this command can serve', async () => {
     await expect(
@@ -917,14 +878,10 @@ describe('OAuth client problems are reported before anything is written', () => 
   });
   it('an explicit client that belongs to another address', async () => {
     await expect(
-      deploy({
-        existing: 'bootstrap',
-        mode: 'full',
-        orphanClient: true,
-        existingOrigin: 'https://install.other.example',
-      })
+      deploy({ mode: 'full', orphanClient: true, existingOrigin: 'https://install.other.example' })
     ).rejects.toThrow('does not belong');
-    expect(capture.calls.some((call) => call.method === 'PUT')).toBe(false);
+    expect(published()).toBe(false);
+    expect(capture.calls.some((call) => call.method !== 'GET')).toBe(false);
   });
 });
 describe('input validation', () => {
@@ -956,11 +913,20 @@ describe('input validation', () => {
       { env: { OAUTH_CLIENT_CREATE_TIMEOUT_MS: '1.5' } },
       'OAUTH_CLIENT_CREATE_TIMEOUT_MS must be',
     ],
-  ] as const)('rejects %s', async (_label, options, message) => {
-    await expect(deploy({ ...selfHosted, failedClientCreations: 1, ...options })).rejects.toThrow(
-      message
-    );
-    expect(logged()).not.toContain('Installer ready');
+    [
+      'an interval longer than a timer can wait',
+      { env: { INSTALLER_LIVE_POLL_MS: '2147483648' } },
+      'INSTALLER_LIVE_POLL_MS must be',
+    ],
+  ] as const)('rejects %s before changing anything', async (_label, options, message) => {
+    await expect(deploy({ ...selfHosted, ...options })).rejects.toThrow(message);
+    expect(published()).toBe(false);
+    expect(capture.writes).toHaveLength(0);
+    expect(capture.calls.some((call) => call.method !== 'GET')).toBe(false);
+  });
+  it('control: the largest interval a timer can wait is accepted', async () => {
+    await deploy({ ...selfHosted, env: { INSTALLER_LIVE_POLL_MS: '2147483647' } });
+    expect(published()).toBe(true);
   });
   it('rejects a malformed account id before any request', async () => {
     vi.spyOn(process, 'chdir').mockImplementation(() => {});
