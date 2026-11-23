@@ -223,6 +223,10 @@ describe('project sockets close when project access is revoked', () => {
       call(ADMIN, 'PATCH', `/api/admin/users/${retryUser}`, { action: 'suspend' });
     try {
       expect((await suspend()).status).toBe(503);
+      const pinned = await testEnv.DATABASE.prepare('SELECT suspended_at FROM users WHERE id = ?')
+        .bind(retryUser)
+        .first<{ suspended_at: number | null }>();
+      expect(pinned?.suspended_at).toEqual(expect.any(Number));
       await settle(() => onC.closeCode() !== null, 'project C socket close');
       expect(onD.closeCode()).toBeNull();
 
@@ -259,6 +263,42 @@ describe('project sockets close when project access is revoked', () => {
     ).toBe(200);
     const row = await testEnv.DATABASE.prepare('SELECT suspended_at FROM users WHERE id = ?')
       .bind(retryUser)
+      .first<{ suspended_at: number | null }>();
+    expect(row?.suspended_at).toBeNull();
+  });
+
+  it('a retry for an account suspended before suspended_at existed covers every removal', async () => {
+    const legacyUser = `sock-legacy-${suffix}`;
+    const projectE = `sock-project-e-${suffix}`;
+    await seedUser(legacyUser);
+    cookies[legacyUser] = await seedSignedInUser(legacyUser);
+    await seedProject(projectE, OWNER, INSTALLATION);
+    await addMember(projectE, legacyUser, 'maintainer');
+    const onE = await connect(projectE, legacyUser);
+
+    // Suspended before migration 0270 (no recorded start), removed from project E long ago, and
+    // edited since (so `updated_at` is later than the removal). The socket is still open.
+    await testEnv.DATABASE.prepare(
+      `UPDATE project_members SET status = 'removed', removed_at = '2026-01-01T00:00:00.000Z'
+       WHERE project_id = ? AND user_id = ?`
+    )
+      .bind(projectE, legacyUser)
+      .run();
+    await testEnv.DATABASE.prepare(
+      `UPDATE users SET status = 'suspended', suspended_at = NULL, updated_at = ? WHERE id = ?`
+    )
+      .bind(Date.now(), legacyUser)
+      .run();
+
+    const retry = await call(ADMIN, 'PATCH', `/api/admin/users/${legacyUser}`, {
+      action: 'suspend',
+    });
+    expect(retry.status).toBe(200);
+    await settle(() => onE.closeCode() !== null, 'project E socket close');
+    expect(onE.closeCode()).toBe(ACCESS_REVOKED_CLOSE_CODE);
+    // Still no recorded start: nothing is invented for it.
+    const row = await testEnv.DATABASE.prepare('SELECT suspended_at FROM users WHERE id = ?')
+      .bind(legacyUser)
       .first<{ suspended_at: number | null }>();
     expect(row?.suspended_at).toBeNull();
   });
