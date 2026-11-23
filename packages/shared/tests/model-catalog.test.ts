@@ -41,15 +41,14 @@ describe('model-catalog', () => {
       const groups = getModelGroupsForAgent('openai-codex');
       expect(groups.length).toBeGreaterThanOrEqual(2);
       const latestModels = groups[0]?.models.map((model) => model.id) ?? [];
-      expect(groups[0]?.label).toBe('GPT-6.2 / 6.1 (Latest)');
-      expect(latestModels).toEqual(['gpt-6.2-astra', 'gpt-6.2-sol', 'gpt-6.1-terra', 'gpt-6-luna']);
-      expect(groups[1]?.label).toBe('GPT-6 / 6.1 (Previous)');
-      expect(groups[1]?.models.map((model) => model.id)).toEqual([
+      expect(latestModels).toEqual([
         'gpt-6-astra',
         'gpt-6.1-sol',
+        'gpt-6.1-terra',
         'gpt-6-sol',
+        'gpt-6-luna',
       ]);
-      expect(groups[2]?.models.map((model) => model.id)).toEqual([
+      expect(groups[1]?.models.map((model) => model.id)).toEqual([
         'gpt-5.6-sol',
         'gpt-5.6-terra',
         'gpt-5.6-luna',
@@ -72,6 +71,9 @@ describe('model-catalog', () => {
       expect(namesById.get('gpt-5.5')).toBe('GPT-5.5 (API key only)');
       expect(namesById.get('gpt-5.2')).toContain('Deprecated for ChatGPT sign-in');
       expect(namesById.get('gpt-5.4-mini')).toContain('API key only');
+      // GPT-6.2 requires a newer runtime than SAM's pinned patched Codex CLI.
+      expect(namesById.has('gpt-6.2-astra')).toBe(false);
+      expect(namesById.has('gpt-6.2-sol')).toBe(false);
       expect(namesById.has('gpt-5.4-pro')).toBe(false);
       expect(namesById.has('gpt-5.4-nano')).toBe(false);
       expect(namesById.has('gpt-5.3-codex')).toBe(false);
@@ -382,8 +384,6 @@ describe('model-catalog', () => {
     });
 
     it('returns true for a codex model under openai-codex', () => {
-      expect(isKnownModel('openai-codex', 'gpt-6.2-astra')).toBe(true);
-      expect(isKnownModel('openai-codex', 'gpt-6.2-sol')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-6-astra')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-6.1-sol')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-6.1-terra')).toBe(true);

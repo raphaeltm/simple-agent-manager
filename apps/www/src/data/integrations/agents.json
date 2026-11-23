@@ -145,7 +145,7 @@
       },
       {
         "question": "Which models can I choose?",
-        "answer": "GPT-6.2 Astra, GPT-6.2 Sol, GPT-6.1 Terra and GPT-6 Luna, plus previous GPT-6 and GPT-5.6 models. A few older models work only with an API key."
+        "answer": "GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra, GPT-6 Sol, GPT-6 Luna and the GPT-5.6 models. A few older models work only with an API key."
       },
       {
         "question": "Where does Codex run?",
@@ -156,7 +156,7 @@
     "externalUrl": "https://developers.openai.com/codex",
     "externalLabel": "Codex docs",
     "docsPath": "/docs/guides/agents/",
-    "models": ["GPT-6.2 Astra", "GPT-6.2 Sol", "GPT-6.1 Terra", "GPT-6 Luna"]
+    "models": ["GPT-6 Astra", "GPT-6.1 Sol", "GPT-6.1 Terra", "GPT-6 Luna"]
   },
   {
     "slug": "gemini-cli",
