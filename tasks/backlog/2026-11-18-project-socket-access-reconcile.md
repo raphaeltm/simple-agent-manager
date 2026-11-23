@@ -8,8 +8,8 @@ close is one RPC made after the revocation commits. Gaps that remain:
 
 1. **Failed close.** If the DO RPC fails, offboarding only logs `project_sockets.close_failed`
    (it cannot be re-applied once the member is removed). Suspension answers 503 so the admin can
-   retry, but nothing retries on its own. The suspension retry reaches every membership row,
-   including memberships removed after its first attempt (`closeSuspendedUserSockets`, task
+   retry, but nothing retries on its own. The suspension retry also reaches memberships removed
+   after the suspension began (`closeSuspendedUserSockets`, task
    `2026-11-23-suspension-retry-removed-memberships.md`).
 2. **Sign-out and session revocation** do not close sockets (stolen-cookie scenario only; no
    cross-user boundary). A membership/status reconcile would not catch this: the user is still an

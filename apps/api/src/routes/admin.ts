@@ -111,7 +111,12 @@ adminRoutes.patch('/users/:userId', jsonValidator(AdminUserActionSchema), async 
   }
 
   const target = await db
-    .select({ id: schema.users.id, role: schema.users.role })
+    .select({
+      id: schema.users.id,
+      role: schema.users.role,
+      status: schema.users.status,
+      updatedAt: schema.users.updatedAt,
+    })
     .from(schema.users)
     .where(eq(schema.users.id, userId))
     .get();
@@ -126,17 +131,22 @@ adminRoutes.patch('/users/:userId', jsonValidator(AdminUserActionSchema), async 
   }
 
   const newStatus: UserStatus = body.action === 'approve' ? 'active' : 'suspended';
+  const now = new Date();
+  // Suspending an already suspended account is a retry: keep the original start, read before
+  // this write moves `updatedAt`, so memberships removed since then are still closed.
+  const suspendedSince =
+    target.status === 'suspended' && target.updatedAt instanceof Date ? target.updatedAt : now;
 
   await db
     .update(schema.users)
     .set({
       status: newStatus,
-      updatedAt: new Date(),
+      updatedAt: now,
     })
     .where(eq(schema.users.id, userId));
 
   // Requests stop at the account-status check; open project sockets must be closed too.
-  if (newStatus === 'suspended') await closeSuspendedUserSockets(c.env, userId);
+  if (newStatus === 'suspended') await closeSuspendedUserSockets(c.env, userId, suspendedSince);
 
   return c.json({ id: userId, status: newStatus });
 });

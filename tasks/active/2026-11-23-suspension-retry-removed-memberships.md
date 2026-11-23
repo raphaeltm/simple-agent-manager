@@ -11,16 +11,23 @@ that project stayed open.
 
 ## Plan and acceptance
 
-- [x] Read close targets from every membership row of the user, whatever its status. Rows are
-      never deleted (removal sets `status = 'removed'`), and a close where no socket is open is a
-      no-op. Paging, user scoping and the bounded close concurrency are unchanged.
-- [x] Real-SQLite regression: a failed first attempt, then removal, then a retry that must close
-      the removed project; a scoping control (another user's membership is never targeted); and
-      paging past the page size across all four statuses. Both fail on the old predicate.
+- [x] Close targets: active memberships plus memberships removed since the suspension began
+      (`removed_at >= since`). The admin route passes the original start on a retry: it reads the
+      account before updating it and keeps the previous `updated_at` when the account is already
+      suspended. Paging, user scoping and the bounded close concurrency are unchanged.
+- [x] First version widened to every membership row; Codex (PR #2994, r4672460906) noted that
+      historical rows grow without bound and a retry restarts from the beginning, so one request
+      could exhaust its subrequest budget before reaching a later project. Bounding by the
+      suspension start keeps the fan-out at the active rows plus the removals made while the
+      account was suspended.
+- [x] Real-SQLite unit regressions: retry after removal; only active and since-suspension removals
+      are targeted (removed-before, invited and project-suspended rows are not; another user never);
+      paging past the page size. Real Workers test through the admin route: injected close failure
+      on one project (503), removal, retry (200) closes the remaining socket with 4403. The Workers
+      test fails on the old predicate and when the route uses "now" as the retry epoch.
 - [x] Docs: security architecture paragraph and the socket-reconcile backlog item.
 - [ ] Review, exact-head CI, staging, merge, production deploy.
 
-Work bound: one suspension (rare, admin-triggered) reads the user's membership rows 100 per page
-and makes one close RPC per row, 10 at a time. At a large outer limit of 1,000 rows (current plus
-former memberships) that is 10 page reads and 100 waves of 10 RPCs, a few seconds in one request.
-The previous query already paged through every active row the same way. No new tunable.
+Work bound: one suspension reads the user's active memberships plus removals since the suspension
+began, 100 per page, one close RPC per row, 10 at a time: the same fan-out the active-only query had,
+plus the (normally zero to a few) memberships removed while suspended. No new tunable or migration.
