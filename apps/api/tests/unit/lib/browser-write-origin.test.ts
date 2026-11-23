@@ -2,7 +2,10 @@ import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
-import { requireTrustedWriteOrigin } from '../../../src/lib/browser-write-origin';
+import {
+  requireExactBrowserOrigin,
+  requireTrustedWriteOrigin,
+} from '../../../src/lib/browser-write-origin';
 
 const env = { BASE_DOMAIN: 'example.test' } as Env;
 const rejectedBrowserWrites: Array<{ label: string; headers: Record<string, string> }> = [
@@ -119,6 +122,10 @@ describe('trusted write origin', () => {
     ['look-alike suffix', 'http://localhost.evil.example:5173'],
     ['https loopback', 'https://localhost:5173'],
     ['workspace host under a local base', 'http://ws-attacker--3000.localhost:8787'],
+    // Ports do not separate sites: another local app is same-site with the Vite app.
+    ['another app on a different localhost port', 'http://localhost:3000'],
+    ['another app on a different 127.0.0.1 port', 'http://127.0.0.1:8080'],
+    ['loopback without the app port', 'http://localhost'],
   ])('refuses a %s origin even when BASE_DOMAIN is local', async (_label, origin) => {
     const next = vi.fn();
     const response = await makeApp(next).request(
@@ -139,5 +146,16 @@ describe('trusted write origin', () => {
     );
     expect(response.status).toBe(200);
     expect(next).toHaveBeenCalledOnce();
+  });
+
+  it('applies the same exact local origin to the strict interaction guard', () => {
+    const localEnv = { BASE_DOMAIN: 'localhost:8787' } as Env;
+    const call = (origin: string) => () =>
+      requireExactBrowserOrigin({
+        req: { header: (name) => (name === 'Origin' ? origin : undefined) },
+        env: localEnv,
+      });
+    expect(call('http://localhost:5173')).not.toThrow();
+    expect(call('http://localhost:3000')).toThrow();
   });
 });

@@ -8,7 +8,11 @@ import type { MiddlewareHandler } from 'hono';
 
 import type { Env } from '../env';
 import { errors } from '../middleware/error';
-import { isLocalDevelopmentBaseDomain, LOCAL_DEVELOPMENT_HOSTS } from './cors-origin';
+import {
+  isLocalDevelopmentBaseDomain,
+  LOCAL_DEVELOPMENT_APP_PORT,
+  LOCAL_DEVELOPMENT_HOSTS,
+} from './cors-origin';
 import { getTrustedApiOrigin } from './trusted-origins';
 
 /** `https://app.<BASE_DOMAIN>`, derived from the trusted API origin. */
@@ -20,17 +24,23 @@ export function exactAppOrigin(env: Pick<Env, 'BASE_DOMAIN'>): string {
 }
 
 /**
- * Local development serves the app from a loopback port (Vite, `:5173`) while the API runs on
- * another (`BASE_DOMAIN=localhost:8787`), so the derived app origin cannot match there. Loopback
- * origins are admitted only when BASE_DOMAIN itself is local, the rule `appFrameAncestors` and
- * credentialed CORS already use.
+ * Local development serves the app from the Vite port (`LOCAL_DEVELOPMENT_APP_PORT`) while the API
+ * runs on another (`BASE_DOMAIN=localhost:8787`), so the derived app origin cannot match there. Only
+ * that exact loopback app origin is admitted, and only when BASE_DOMAIN itself is local. Any other
+ * port on the same host is a different local app: ports do not separate sites, so Fetch Metadata
+ * would call it same-site, and only the exact origin keeps it out.
  */
 function isAppOrigin(origin: string, env: Pick<Env, 'BASE_DOMAIN'>): boolean {
   if (origin === exactAppOrigin(env)) return true;
   if (!isLocalDevelopmentBaseDomain(env.BASE_DOMAIN)) return false;
   try {
     const url = new URL(origin);
-    return url.protocol === 'http:' && LOCAL_DEVELOPMENT_HOSTS.includes(url.hostname);
+    return (
+      url.protocol === 'http:' &&
+      LOCAL_DEVELOPMENT_HOSTS.includes(url.hostname) &&
+      url.port === LOCAL_DEVELOPMENT_APP_PORT &&
+      url.origin === origin
+    );
   } catch {
     return false;
   }

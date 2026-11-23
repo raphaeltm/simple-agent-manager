@@ -7,6 +7,9 @@ function normalizeHostname(value: string): string {
 /** Hosts the app and the API run on during local development (`pnpm dev`). */
 export const LOCAL_DEVELOPMENT_HOSTS: readonly string[] = ['localhost', '127.0.0.1'];
 
+/** The port the local app is served from (`server.port` in `apps/web/vite.config.ts`). */
+export const LOCAL_DEVELOPMENT_APP_PORT = '5173';
+
 /**
  * Local development leaves BASE_DOMAIN empty or points it at a loopback host, such
  * as `localhost:8787`. The host must match exactly: a real domain that merely
