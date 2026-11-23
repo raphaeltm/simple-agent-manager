@@ -54,10 +54,14 @@ const PARTIAL_SUSPENSION_MESSAGE =
   'The account is suspended, but some open project connections could not be closed. Suspend it again to retry.';
 
 /**
- * Close a suspended user's sockets on every project they are an active member of. Memberships are
- * read a page at a time (seeking by `project_id`) and closed a bounded batch at a time; every page
- * is processed even when a close fails, then any failure answers a retryable 503. Suspending again
- * is idempotent and re-runs the closes.
+ * Close a suspended user's sockets on every project they have a membership row for, whatever its
+ * status. A retry must still reach a project whose membership was removed after an earlier close
+ * failed: offboarding only logs its own close failure, so nothing else would close that socket.
+ * Closing where no socket is open is a no-op. Rows are never deleted (removal sets
+ * `status = 'removed'`), so former memberships stay reachable. Memberships are read a page at a
+ * time (seeking by `project_id`) and closed a bounded batch at a time; every page is processed even
+ * when a close fails, then any failure answers a retryable 503. Suspending again is idempotent and
+ * re-runs the closes.
  */
 export async function closeSuspendedUserSockets(env: Env, userId: string): Promise<void> {
   let failed = false;
@@ -67,7 +71,7 @@ export async function closeSuspendedUserSockets(env: Env, userId: string): Promi
     try {
       const rows = await env.DATABASE.prepare(
         `SELECT project_id FROM project_members
-          WHERE user_id = ? AND status = 'active' AND project_id > ?
+          WHERE user_id = ? AND project_id > ?
           ORDER BY project_id LIMIT ?`
       )
         .bind(userId, after, SUSPENSION_MEMBERSHIP_PAGE_SIZE)
