@@ -137,9 +137,17 @@ copy passes `SAM_RUNTIME_SECRETS_MAX_STALE_MS`, reading a secret throws and the 
 fails (`apps/api/src/selfhost/runtime-secrets-durable-object.ts`). A clock that moves backwards
 counts a copy as expired, on both sides. The other limits are in `.env.example`.
 
-**A bundle that cannot be read stops the deploy.** It might be the newest, so deploying from the
-next readable one could bring back a changed or removed secret. Restore it from a backup, or
-remove it if you know it is not the newest.
+**Which bundle is current.** Every seal (deploy, rotation, `secrets switch`) records the bundle it
+makes current in `.state/key-agent/head.json`, sealed under the same key and with a write sequence
+that only grows (`scripts/selfhost/bundle-head.ts`). The deploy, rotation, switch and rebuild all
+run with the bundle the head names, never the newest by date, so a host clock that moved backwards
+cannot bring back an older bundle. A head that does not open under the box's key, was edited, belongs
+to another installation or names a missing bundle stops the deploy. A box from before the head
+deploys the newest bundle by date once (what it always did) and records the head then.
+
+**A bundle that cannot be read stops the deploy.** It might be the current one, so deploying from
+another could bring back a changed or removed secret. Restore it from a backup, or remove it if you
+know it is not the current one (`pnpm selfhost:secrets status` marks the current one).
 
 **The agent runs as the owner of `.state`**, from the start: never root, no capabilities, a
 read-only root file system. Docker Compose takes the uid from `SAM_KEY_AGENT_UID` in `.env`;
@@ -178,7 +186,7 @@ it (a cloud key or Vault): `pnpm selfhost:secrets switch --to auto` after the on
 then turn on [Replaceable box](#replaceable-box).
 `pnpm selfhost:secrets status` says the same on a file-key box.
 
-**Removing a sealed value.** Each deploy lays `secrets.env` over the newest bundle, so deleting a
+**Removing a sealed value.** Each deploy lays `secrets.env` over the current bundle, so deleting a
 line does not remove a value sealed before. Delete the line, then deploy once with
 `pnpm selfhost:deploy --unset NAME` (repeat `--unset` for more). It refuses a name still in
 `secrets.env` and SAM's own generated keys. The two older bundles kept for rollback, and any
@@ -269,8 +277,9 @@ value. Before a key's first change its old values are sealed again to
 `.state/key-agent/rotation/<id>/<key>.before.json`: the rollback source, kept until you delete it.
 A dry run only reads: it creates no file or directory and takes no lock.
 
-Each step seals a new bundle, and every seal on the box keeps only the newest 3 bundles
-(`DEFAULT_KEPT_BUNDLES`, `scripts/selfhost/key-service.ts`), the same rule as every deploy. So a
+Each step seals a new bundle, and every seal on the box keeps only 3 bundles: the current one, the
+one it replaced, then the newest others (`DEFAULT_KEPT_BUNDLES`, `keptBundleIds` in
+`scripts/selfhost/bundle-head.ts`), the same rule as every deploy. So a
 rotation removes the bundles that existed before it, including one sealed by another key provider
 before a `switch`. That is intended: the old values stay in the `*.before.json` snapshots and in
 backups, not in bundles the key agent would still open. The plan lists the bundles that will go and
@@ -611,6 +620,7 @@ What only the box's disk held is copied there too, as ciphertext sealed by the b
 | In the bucket, under `CELLD_BUCKET` | What                                                                                                                       |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `sam-box/bundles/<id>.json`         | every sealed bundle (platform keys, `secrets.env` values), written and pruned together with `.state/key-agent/bundles/`    |
+| `sam-box/head.json`                 | which bundle is current (the box's `.state/key-agent/head.json`), sealed, written with it                                  |
 | `sam-box/ledger.json`               | the install record's cloud entries (what `gcp-bootstrap` created, for teardown), sealed under the same key at every deploy |
 
 **It needs a key held off the box**: `gcp-kms`, `aws-kms`, `azure-kv` or `transit`
@@ -626,9 +636,10 @@ first (`pnpm selfhost:secrets switch --to auto`). Run `pnpm selfhost:deploy` onc
 `pnpm selfhost:gcp-bootstrap`, so the ledger holds what it created.
 
 Every deploy first compares the bucket copy with the box. A bundle the bucket has and the box does
-not stops the deploy: on an empty box it means this is a replacement that has not been rebuilt
-(an `--init` there would make new keys and leave every stored credential unreadable); if it is
-newer than the box's newest bundle, another box or an older copy of this box's state sealed it.
+not stops the deploy on an empty box: this is a replacement that has not been rebuilt (an `--init`
+there would make new keys and leave every stored credential unreadable). A bucket head that records
+a later seal than the box's own head (by write sequence, not date) also stops it: another box or an
+older copy of this box's state sealed it. Buckets from before the head compare bundle dates once.
 
 **What a bucket holder can do.** The fleet credential already reads and writes celld's data
 directly; this adds only ciphertext. Without the key, the bundles and ledger cannot be opened, and
@@ -671,13 +682,14 @@ with them. It stays openable for as long as the key is enabled.
    state directory's path), and put the dead box's `.env` there (`chmod 600`). Update
    `SAM_KEY_AGENT_UID` if the operator user's uid changed. With a transit or AWS key, restore its
    credential file into `.state/key-agent/credentials/` from your own copy.
-3. `pnpm selfhost:rebuild --installation-id <id>`. It copies the newest sealed bundles and the cloud
-   record back into the empty `.state`, after checking that every bundle it restores opens under the
+3. `pnpm selfhost:rebuild --installation-id <id>`. It copies the current sealed bundle (the one
+   `sam-box/head.json` names, after verifying the head under the key), up to two older ones, the head
+   and the cloud record back into the empty `.state`, after checking that every bundle it restores opens under the
    key `.env` resolves to and belongs to one installation. It never takes the key from the bucket.
    The installation id is public: `pnpm selfhost:secrets status` prints it (note it when you set
    the box up), and every node VM carries it as its `installation` label. Pass it so that a bucket holding
    another installation's bundles is refused. Without it, rebuild uses the id the bundles carry.
-   It prints the newest bundle's seal date: check that it matches the dead box's last deploy or
+   It prints the current bundle's seal date: check that it matches the dead box's last deploy or
    rotation. A rebuild that stops part way can be run again.
 4. `pnpm selfhost:deploy --init` (keeps the installation and its keys), then
    `(cd deploy/selfhost && docker compose build && docker compose up -d)` and `pnpm selfhost:deploy`.
@@ -689,8 +701,9 @@ Workspace and deployment nodes reconnect through the tunnel by themselves (same 
 once `api.SAM_DOMAIN` resolves to the box again. Sign-in, stored credentials and SAM-hosted
 repositories are as they were.
 
-**Rollback.** Whoever can write the bucket can delete the newest bundles and leave older genuine
-ones. A rebuild then restores those older keys: values rotated since come back, and data written
+**Rollback.** Whoever can write the bucket can delete the newest bundles and replace the head with
+an older genuine copy (a head cannot be forged, but an old one can be replayed). A rebuild then
+restores those older keys: values rotated since come back, and data written
 under a newer `ENCRYPTION_KEY` cannot be read. The fleet credential can already roll celld's own
 data back the same way. Keep it to the box, and turn on object versioning or retention on the
 bucket if that matters to you.
