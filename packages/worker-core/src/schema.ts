@@ -2186,7 +2186,7 @@ export const nodes = sqliteTable(
     capacityPoolProjectIdx: index('idx_nodes_capacity_pool_project')
       .on(table.capacityPoolProjectId)
       .where(sql`capacity_pool_project_id IS NOT NULL`),
-    /** Provider-existence sweep candidates (migration 0267). */
+    /** Provider-existence sweep candidates (migration 0268). */
     deploymentExistenceDueIdx: index('idx_nodes_deployment_existence_due')
       .on(table.providerExistenceCheckedAt)
       .where(
