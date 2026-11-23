@@ -6,10 +6,14 @@
  * The only "absent" verdict is `getVM` returning null for the node's exact instance ID through
  * its PINNED placement credential: the exact encrypted credential generation the VM was created
  * with (`resolveStrictNodeTeardownAuthority`), so the "not found" comes from the account that owns
- * the VM. Every provider's `getVM` returns null only for its API's "not found" (Hetzner, Vultr,
+ * the VM (`resolvePinnedNodeProvider`; no other credential is ever resolved, so no fallback
+ * decryption happens either). Every provider's `getVM` returns null only for its API's "not found" (Hetzner, Vultr,
  * DigitalOcean and Infomaniak a 404 on the instance; Scaleway a 404 in every zone; UpCloud its
- * not-found code; GCP a 404 in every zone and no match in the project-wide list) and throws on
- * everything else.
+ * not-found code; GCP a 404 in every zone and no match in a project-wide list whose every zone
+ * answered) and throws on everything else. GCP and Scaleway search a fixed zone list, so a node
+ * recorded outside it is never proven absent.
+ *
+ * The confirming probe also reads the account's full instance list (`confirmAbsentFromInventory`).
  *
  * Everything else is inconclusive and can never release a node:
  * - no pinned credential (rotated, re-saved, legacy unbound node): a 404 through some other
@@ -23,18 +27,17 @@
  * second, later confirmation covers the first, and every SAM provider's lookup covers the zones
  * SAM creates VMs in.
  */
-import { ProviderError } from '@simple-agent-manager/providers';
+import { type Provider, ProviderError } from '@simple-agent-manager/providers';
 
 import type { Env } from '../env';
-import {
-  isCredentialRejection,
-  resolveStrictNodeTeardownAuthority,
-} from './node-teardown-authority';
+import { isCredentialRejection, resolvePinnedNodeProvider } from './node-teardown-authority';
 import type { NodeDb, NodeRow } from './strict-node-deletion-shared';
 
 export type ProviderExistenceInconclusiveReason =
   | 'credential_unresolved'
   | 'credential_not_pinned'
+  | 'location_not_covered'
+  | 'inventory_unavailable'
   | 'credential_rejected'
   | 'rate_limited'
   | 'timeout'
@@ -48,6 +51,21 @@ export type ProviderExistenceVerdict =
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Where a provider's `getVM` can see an instance, for providers whose client reads only some
+ * locations. Infomaniak's client is bound to one region (OpenStack servers are regional; a server
+ * in another region is a 404 there, and `createVM` refuses any other region). Scaleway reads its
+ * configured zone plus `SCALEWAY_LOCATIONS`. GCP is absent on purpose: after the per-zone GETs it
+ * reads the project-wide list, which fails closed when any zone is unreachable, so every zone is
+ * covered for SAM-labelled VMs (box nodes run in whatever zone the box is configured for). Hetzner,
+ * DigitalOcean, Vultr and UpCloud look an instance up by ID account-wide.
+ */
+function lookupCoveredLocations(provider: Provider): readonly string[] | null {
+  if (provider.name === 'infomaniak') return [provider.defaultLocation];
+  if (provider.name === 'scaleway') return [provider.defaultLocation, ...provider.locations];
+  return null;
 }
 
 const RATE_LIMIT_CODE = /rate_?limit|too_?many_?requests|quota|resource_?exhausted/i;
@@ -78,14 +96,15 @@ export function classifyProviderLookupFailure(
 }
 
 /**
- * Ask the node's own provider account whether its exact instance still exists.
- * `signal` bounds the whole probe, credential resolution included.
+ * Ask the node's own provider account whether its exact instance still exists. `signal` bounds
+ * the provider lookup; credential resolution before it is local D1 reads and decryption.
  */
 export async function probeDeploymentNodeInstance(
   env: Env,
   db: NodeDb,
   node: NodeRow,
-  signal: AbortSignal
+  signal: AbortSignal,
+  options: { confirming?: boolean } = {}
 ): Promise<ProviderExistenceVerdict> {
   const instanceId = node.providerInstanceId;
   if (!instanceId) {
@@ -95,13 +114,13 @@ export async function probeDeploymentNodeInstance(
       message: 'node has no provider instance ID',
     };
   }
-  let authority;
+  let pinned;
   try {
-    authority = await resolveStrictNodeTeardownAuthority(db, node, node.userId, env);
+    pinned = await resolvePinnedNodeProvider(db, node, env);
   } catch (error) {
     return { kind: 'inconclusive', reason: 'credential_unresolved', message: errorMessage(error) };
   }
-  if (authority.kind !== 'pinned') {
+  if (!pinned) {
     return {
       kind: 'inconclusive',
       reason: 'credential_not_pinned',
@@ -110,9 +129,20 @@ export async function probeDeploymentNodeInstance(
         'could come from a different account',
     };
   }
+  const provider = pinned.provider;
+  // A VM in a location the lookup does not read is a "not found" there (an Infomaniak region
+  // changed in configuration would otherwise read every node as gone).
+  const covered = lookupCoveredLocations(provider);
+  if (covered && (!node.vmLocation || !covered.includes(node.vmLocation))) {
+    return {
+      kind: 'inconclusive',
+      reason: 'location_not_covered',
+      message: `instance location ${node.vmLocation ?? '(none)'} is outside the locations the lookup reads`,
+    };
+  }
   let instance;
   try {
-    instance = await authority.providerResult.provider.getVM(instanceId, { signal });
+    instance = await provider.getVM(instanceId, { signal });
   } catch (error) {
     return {
       kind: 'inconclusive',
@@ -127,5 +157,41 @@ export async function probeDeploymentNodeInstance(
   }
   // Anything visible under this ID, even an instance that does not look like ours, is "not
   // absent": this check only ever releases on a definitive not-found.
-  return instance === null ? { kind: 'absent' } : { kind: 'present' };
+  if (instance !== null) return { kind: 'present' };
+  if (!options.confirming) return { kind: 'absent' };
+  return await confirmAbsentFromInventory(provider, instanceId, signal);
+}
+
+/**
+ * The confirming answer needs a second, independent source: the same account's instance list,
+ * read in full, must succeed and must not contain the instance. A fault that turns every lookup
+ * into a 404 (a wrong API base URL, a proxy, a path change) fails the list too, so it can never
+ * release every node of a provider at once.
+ */
+async function confirmAbsentFromInventory(
+  provider: Provider,
+  instanceId: string,
+  signal: AbortSignal
+): Promise<ProviderExistenceVerdict> {
+  let instances;
+  try {
+    instances = await provider.listVMs(undefined, { signal });
+  } catch (error) {
+    const reason = classifyProviderLookupFailure(error, signal);
+    return {
+      kind: 'inconclusive',
+      reason: reason === 'provider_error' ? 'inventory_unavailable' : reason,
+      message: errorMessage(error),
+    };
+  }
+  if (signal.aborted) {
+    return {
+      kind: 'inconclusive',
+      reason: 'timeout',
+      message: 'inventory finished after deadline',
+    };
+  }
+  return instances.some((vm) => String(vm.id) === instanceId)
+    ? { kind: 'present' }
+    : { kind: 'absent' };
 }

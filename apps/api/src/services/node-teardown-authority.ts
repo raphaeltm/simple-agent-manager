@@ -119,6 +119,21 @@ async function resolvePinnedCredential(
 }
 
 /**
+ * The node's pinned placement credential only: the exact encrypted generation it was created
+ * with, for its own provider, or null. Never falls back to another credential, so a "not found"
+ * through it comes from the account that owns the instance (provider-existence reconciliation).
+ */
+export async function resolvePinnedNodeProvider(
+  db: NodeDb,
+  node: NodeRow,
+  env: Env
+): Promise<ProviderForUserResult | null> {
+  const pinned = await resolvePinnedCredential(db, node, node.userId, env);
+  if (!pinned || !node.cloudProvider || pinned.providerName !== node.cloudProvider) return null;
+  return pinned;
+}
+
+/**
  * The node owner's current credentials for the node's provider, in provisioning order. Scope is
  * the node's own credential attribution (user, plus project when the node was project-attributed),
  * resolved by `createProviderForUser` exactly as provisioning resolves it (project, then user,

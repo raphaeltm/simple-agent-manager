@@ -18,3 +18,10 @@
 ALTER TABLE nodes ADD COLUMN provider_existence_checked_at TEXT;
 ALTER TABLE nodes ADD COLUMN provider_absence_observed_at TEXT;
 ALTER TABLE nodes ADD COLUMN provider_absence_instance_id TEXT;
+
+-- The sweep's candidate set: running managed deployment VMs only, so each selection reads live
+-- deployment nodes rather than every node row ever created.
+CREATE INDEX IF NOT EXISTS idx_nodes_deployment_existence_due
+  ON nodes (provider_existence_checked_at)
+  WHERE node_role = 'deployment' AND node_class = 'managed' AND runtime = 'vm'
+    AND status = 'running' AND provider_instance_id IS NOT NULL;

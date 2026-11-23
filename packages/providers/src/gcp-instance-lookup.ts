@@ -81,6 +81,10 @@ async function findAggregatedInstance(
   headers: Record<string, string>,
   context?: ProviderRequestContext
 ): Promise<GcpInstancePayload | null> {
+  // A scope the list could not read may hold the instance, so "not in the list" is only an
+  // answer when every scope was read (as in `listGcpInstances`). Callers read a null as "this
+  // instance does not exist" (strict deletion, provider-existence reconciliation).
+  const unreachable: string[] = [];
   try {
     const filterStr = `labels.sam-managed=true`;
     let found: GcpInstancePayload | null = null;
@@ -92,7 +96,8 @@ async function findAggregatedInstance(
       'findInstanceByIdOrName.aggregated',
       (data) => {
         if (found || !data.items) return;
-        for (const scopeData of Object.values(data.items)) {
+        for (const [scopeKey, scopeData] of Object.entries(data.items)) {
+          if (scopeData.warning?.code === GCP_UNREACHABLE_WARNING) unreachable.push(scopeKey);
           for (const instance of scopeData.instances || []) {
             if (instance.id === idOrName || instance.name === idOrName) {
               found = instance;
@@ -114,6 +119,13 @@ async function findAggregatedInstance(
     );
   }
 
+  if (unreachable.length > 0) {
+    throw new ProviderError(
+      'gcp',
+      undefined,
+      `GCP instance lookup for ${idOrName} is incomplete: unreachable ${unreachable.join(', ')}`
+    );
+  }
   return null;
 }
 

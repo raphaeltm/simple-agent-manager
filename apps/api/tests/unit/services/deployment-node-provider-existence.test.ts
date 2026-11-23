@@ -90,6 +90,8 @@ function createFakeHetzner() {
   ]);
   /** Per server id: answer every request for it with this status instead (outage modelling). */
   const forced = new Map<string, number>();
+  /** Status forced on the server list (`GET /v1/servers`), e.g. a wrong base URL's 404. */
+  const list = { forcedStatus: undefined as number | undefined, perPage: 2 };
   const requests: Array<{ method: string; path: string; token: string }> = [];
   const err = (status: number, code: string, message: string) =>
     new Response(JSON.stringify({ error: { code, message } }), {
@@ -103,6 +105,19 @@ function createFakeHetzner() {
     requests.push({ method, path: url.pathname, token });
     const project = projects.get(token);
     if (!project) return err(401, 'unauthorized', 'unable to authenticate');
+    if (url.pathname === '/v1/servers' && method === 'GET') {
+      if (list.forcedStatus === 404) return err(404, 'not_found', 'not found');
+      if (list.forcedStatus) return err(list.forcedStatus, 'unavailable', 'service unavailable');
+      // Documented pagination: `page`/`per_page` in, `meta.pagination.next_page` out.
+      const page = Number(url.searchParams.get('page') ?? '1');
+      const all = [...project.values()];
+      const servers = all.slice((page - 1) * list.perPage, page * list.perPage);
+      const next = page * list.perPage < all.length ? page + 1 : null;
+      return new Response(
+        JSON.stringify({ servers, meta: { pagination: { page, next_page: next } } }),
+        { status: 200 }
+      );
+    }
     const match = /^\/v1\/servers\/(\d+)$/.exec(url.pathname);
     if (!match) throw new Error(`Hetzner fake: unmodelled request ${method} ${url.pathname}`);
     const id = match[1]!;
@@ -133,6 +148,7 @@ function createFakeHetzner() {
   return {
     projects,
     forced,
+    list,
     requests,
     handle,
     addServer(token: string, id: string, ip = IP) {
@@ -152,12 +168,30 @@ function createFakeHetzner() {
 /** GCP Compute fake for the self-host box path: zonal GET plus the aggregated list. */
 function createFakeGcp(project: string, zone: string) {
   const instances = new Map<string, Record<string, unknown>>();
+  const state = {
+    unreachableZone: undefined as string | undefined,
+    forcedStatus: undefined as number | undefined,
+  };
   async function handle(url: URL, init?: RequestInit): Promise<Response> {
     const method = (init?.method ?? 'GET').toUpperCase();
     const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+    if (state.forcedStatus) {
+      return json(
+        { error: { code: state.forcedStatus, message: 'refused', status: 'PERMISSION_DENIED' } },
+        state.forcedStatus
+      );
+    }
     const base = `/compute/v1/projects/${project}`;
     if (url.pathname === `${base}/aggregated/instances`) {
-      return json({ items: { [`zones/${zone}`]: { instances: [...instances.values()] } } });
+      const items: Record<string, unknown> = {
+        [`zones/${zone}`]: { instances: [...instances.values()] },
+      };
+      if (state.unreachableZone) {
+        items[`zones/${state.unreachableZone}`] = {
+          warning: { code: 'UNREACHABLE', message: 'zone unavailable' },
+        };
+      }
+      return json({ items });
     }
     const zonal = new RegExp(`^${base}/zones/([^/]+)/instances/([^/]+)$`).exec(url.pathname);
     if (zonal) {
@@ -174,6 +208,7 @@ function createFakeGcp(project: string, zone: string) {
   }
   return {
     instances,
+    state,
     handle,
     add(name: string) {
       instances.set(name, {
@@ -387,6 +422,15 @@ describe('a deployment VM deleted at the provider outside SAM', () => {
     ]);
   });
 
+  it('releases every environment on the node together', async () => {
+    const THIRD_ENV_ID = '01KVJDV913S8W7KK32HTZTK0HA';
+    await seedEnvironment(THIRD_ENV_ID, NODE, 'error');
+    await sweepAt(0);
+    expect((await sweepAt(10)).released).toBe(1);
+    expect(envRow()).toMatchObject({ status: 'stopped', node_id: null });
+    expect(envRow(THIRD_ENV_ID)).toMatchObject({ status: 'stopped', node_id: null });
+  });
+
   it('keeps a node after a single not-found', async () => {
     await sweepAt(0);
     expect(nodeRow(NODE)).toMatchObject({ status: 'running', ip_address: IP });
@@ -458,6 +502,69 @@ describe('absence is never inferred from a failed lookup', () => {
       decision: 'provider_check_inconclusive',
       reason: 'credential_not_pinned',
     });
+  });
+
+  it('a list that fails at confirmation (a wrong API base URL 404s everything) keeps the node', async () => {
+    await sweepAt(0);
+    hetzner.list.forcedStatus = 404;
+    for (let minute = 10; minute <= 60; minute += 10) await sweepAt(minute);
+    expect(nodeRow(NODE)).toMatchObject({ status: 'running', ip_address: IP });
+    expect(zone.byName(routeHost(ENV_ID))).toHaveLength(1);
+    expect(decisions(NODE)).toContainEqual({
+      decision: 'provider_check_inconclusive',
+      reason: 'inventory_unavailable',
+    });
+  });
+
+  it('an instance the account list still shows is present, even if the direct lookup 404s', async () => {
+    await sweepAt(0);
+    // The by-ID lookup answers 404 while the list (another endpoint) still holds the server.
+    hetzner.addServer(ACCOUNT_A, NODE);
+    const getStatus = hetzner.handle;
+    hetzner.handle = async (url, init) =>
+      url.pathname === `/v1/servers/${NODE}` && (init?.method ?? 'GET') === 'GET'
+        ? new Response(JSON.stringify({ error: { code: 'not_found', message: 'x' } }), {
+            status: 404,
+          })
+        : getStatus(url, init);
+    const result = await sweepAt(10);
+    expect(result).toMatchObject({ released: 0, present: 1 });
+    expect(nodeRow(NODE)).toMatchObject({ status: 'running', provider_absence_observed_at: null });
+  });
+
+  it('a first not-found too old to pair with a new one starts over instead of confirming', async () => {
+    await sweepAt(0);
+    hetzner.forced.set(NODE, 503);
+    for (let minute = 10; minute <= 40; minute += 10) await sweepAt(minute);
+    hetzner.forced.delete(NODE);
+    // 50 minutes after the first not-found: more than three 10-minute intervals.
+    const late = await sweepAt(50);
+    expect(late).toMatchObject({ absentObserved: 1, released: 0 });
+    expect(nodeRow(NODE)).toMatchObject({
+      status: 'running',
+      provider_absence_observed_at: new Date(T0.getTime() + 50 * MINUTE).toISOString(),
+    });
+    expect(decisions(NODE)).toContainEqual({
+      decision: 'provider_instance_absent_observed',
+      reason: 'first_not_found_restarted',
+    });
+    expect((await sweepAt(60)).released).toBe(1);
+  });
+
+  it('records nothing when the node is replaced while its lookup is in flight', async () => {
+    const original = hetzner.handle;
+    hetzner.handle = async (url, init) => {
+      if (url.pathname === `/v1/servers/${NODE}`) {
+        // A redeploy lands mid-lookup: the row now names a new runtime incarnation.
+        sqlite
+          .prepare("UPDATE nodes SET runtime_incarnation_id = 'incarnation-new' WHERE id = ?")
+          .run(NODE);
+      }
+      return original(url, init);
+    };
+    await sweepAt(0);
+    expect(nodeRow(NODE)).toMatchObject({ status: 'running', provider_absence_observed_at: null });
+    expect(decisions(NODE)).toEqual([]);
   });
 
   it('a 429 stops lookups to that provider for the rest of the sweep', async () => {
@@ -612,6 +719,27 @@ describe('self-host box: a GCP deployment node behind the reverse tunnel', () =>
     expect(envRow()).toMatchObject({ status: 'active', node_id: BOX_NODE });
   });
 
+  it('keeps the node when a zone of the project-wide list is unreachable', async () => {
+    gcp.state.unreachableZone = 'us-central1-b';
+    for (let minute = 0; minute <= 60; minute += 10) await sweepAt(minute);
+    expect(nodeRow(BOX_NODE)).toMatchObject({
+      status: 'running',
+      provider_absence_observed_at: null,
+    });
+    expect(envRow()).toMatchObject({ status: 'active', node_id: BOX_NODE });
+  });
+
+  it('keeps the node when GCP refuses the credential', async () => {
+    await sweepAt(0);
+    gcp.state.forcedStatus = 403;
+    for (let minute = 10; minute <= 60; minute += 10) await sweepAt(minute);
+    expect(nodeRow(BOX_NODE).status).toBe('running');
+    expect(decisions(BOX_NODE)).toContainEqual({
+      decision: 'provider_check_inconclusive',
+      reason: 'credential_rejected',
+    });
+  });
+
   it('releases an instance GCP confirms absent twice', async () => {
     await sweepAt(0);
     expect(nodeRow(BOX_NODE).status).toBe('running');
@@ -619,5 +747,56 @@ describe('self-host box: a GCP deployment node behind the reverse tunnel', () =>
     expect(result.released, JSON.stringify(result)).toBe(1);
     expect(nodeRow(BOX_NODE).status).toBe('deleted');
     expect(envRow()).toMatchObject({ status: 'stopped', node_id: null });
+  });
+});
+
+describe('a region-bound provider client (Infomaniak)', () => {
+  const INF_NODE = 'inf-server-1';
+  // Infomaniak's client reads one region: a server in another region is a 404 there. This stub
+  // keeps that contract: it sees only servers in its own region.
+  function regionBoundProvider(region: string, servers: Map<string, string>) {
+    return {
+      name: 'infomaniak',
+      defaultLocation: region,
+      locations: ['dc3-a', 'dc4-a'],
+      getVM: vi.fn(async (id: string) =>
+        servers.get(id) === region ? { id, name: id, status: 'running', ip: IP } : null
+      ),
+      listVMs: vi.fn(async () =>
+        [...servers].filter(([, r]) => r === region).map(([id]) => ({ id }))
+      ),
+      deleteVM: vi.fn(async () => undefined),
+    };
+  }
+  beforeEach(async () => {
+    sqlite.prepare('DELETE FROM deployment_environments').run();
+    sqlite.prepare('DELETE FROM nodes').run();
+    await seedNode(INF_NODE, { cloudProvider: 'infomaniak', vmLocation: 'dc3-a' });
+    await seedEnvironment(ENV_ID, INF_NODE);
+  });
+
+  it("never calls a server absent when the configured region is not the server's region", async () => {
+    // The server is alive in dc3-a; the installation's region setting now says dc4-a.
+    const provider = regionBoundProvider('dc4-a', new Map([[INF_NODE, 'dc3-a']]));
+    accounts.build = () => provider;
+    for (let minute = 0; minute <= 60; minute += 10) await sweepAt(minute);
+    expect(nodeRow(INF_NODE)).toMatchObject({
+      status: 'running',
+      provider_absence_observed_at: null,
+    });
+    expect(provider.getVM).not.toHaveBeenCalled();
+    expect(decisions(INF_NODE)).toContainEqual({
+      decision: 'provider_check_inconclusive',
+      reason: 'location_not_covered',
+    });
+  });
+
+  it('releases a server gone from its own region', async () => {
+    const provider = regionBoundProvider('dc3-a', new Map());
+    accounts.build = () => provider;
+    await sweepAt(0);
+    expect((await sweepAt(10)).released).toBe(1);
+    expect(nodeRow(INF_NODE).status).toBe('deleted');
+    expect(provider.listVMs).toHaveBeenCalled();
   });
 });

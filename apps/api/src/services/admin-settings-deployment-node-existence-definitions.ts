@@ -13,7 +13,7 @@ export const DEPLOYMENT_NODE_EXISTENCE_RUNTIME_DEFAULTS = {
   enabled: true,
   checkIntervalSeconds: 900,
   confirmIntervalSeconds: 600,
-  sweepBudgetMs: 30000,
+  sweepBudgetMs: 20000,
   maxProbesPerSweep: 100,
   requestTimeoutMs: 5000,
 } as const;
@@ -41,8 +41,8 @@ export const DEPLOYMENT_NODE_EXISTENCE_SETTINGS: readonly AdminSettingDefinition
     'deploymentNodeExistence.confirmIntervalSeconds',
     DEPLOYMENT_NODE_EXISTENCE_RUNTIME_DEFAULTS.confirmIntervalSeconds,
     'Operations',
-    'Minimum seconds between the first provider "not found" for a deployment server and the second one that releases it.',
-    { min: 60, max: 86400 }
+    'Minimum seconds between the first provider "not found" for a deployment server and the second one that releases it. A first "not found" more than three intervals old starts over.',
+    { min: 300, max: 86400 }
   ),
   integerDefinition(
     'deploymentNodeExistence.sweepBudgetMs',

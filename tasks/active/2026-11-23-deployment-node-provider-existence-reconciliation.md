@@ -45,13 +45,24 @@ No reconciler moved a running deployment node out of `running`.
 - [x] Each guard deleted once; intended test red (PR body)
 - [x] Docs: app-deployments guide, admin-settings guide, self-hosting
 - [ ] Staging verification
+- [x] Review fixes: GCP aggregated lookup fails closed on an unreachable zone; region guard for
+      region-bound clients (Infomaniak, Scaleway); confirming probe cross-checks the account's full
+      instance list; stale first observation (> 3 intervals) restarts; checked first-observation
+      write; partial index; independent waitUntil for the DNS backstop; pinned-only resolution
+- [x] Residual risk tracked: `tasks/backlog/2026-11-23-unpinned-deployment-nodes-provider-existence.md`
 - [ ] Specialist reviews (security-auditor, cloudflare-specialist, adversarial re-verify,
       task-completion-validator)
 
 ## Acceptance criteria
 
-- [ ] A running deployment node whose provider VM is positively absent is released within the
+- [x] A running deployment node whose provider VM is positively absent is released within the
       stated bound, and its app-route records are deleted by the #2976 path
-- [ ] 401/403/429/timeout/5xx/unpinned credential never release a node
-- [ ] A present instance and a single not-found leave the node untouched
-- [ ] GCP / reverse-tunnel box node behaves the same
+      (test "is released after two not-found answers…"; staging: see PR)
+- [x] 401/403/429/timeout/5xx/unpinned credential never release a node ("absence is never
+      inferred from a failed lookup" group)
+- [x] A present instance and a single not-found leave the node untouched
+- [x] GCP / reverse-tunnel box node behaves the same ("self-host box" group)
+
+## Guard-deletion evidence
+
+See the PR body table (each guard removed once with `.tmp/mutate.py`; every one turns its test red).

@@ -2186,6 +2186,12 @@ export const nodes = sqliteTable(
     capacityPoolProjectIdx: index('idx_nodes_capacity_pool_project')
       .on(table.capacityPoolProjectId)
       .where(sql`capacity_pool_project_id IS NOT NULL`),
+    /** Provider-existence sweep candidates (migration 0267). */
+    deploymentExistenceDueIdx: index('idx_nodes_deployment_existence_due')
+      .on(table.providerExistenceCheckedAt)
+      .where(
+        sql`node_role = 'deployment' AND node_class = 'managed' AND runtime = 'vm' AND status = 'running' AND provider_instance_id IS NOT NULL`
+      ),
   })
 );
 

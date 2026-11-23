@@ -398,22 +398,32 @@ describe('GcpProvider', () => {
 
     it('explicitly requests no attached VM service account', async () => {
       let capturedBody: string | undefined;
-      globalThis.fetch = vi.fn()
-        .mockImplementationOnce(async () => new Response(JSON.stringify({ error: { code: 409 } }), { status: 409 }))
-        .mockImplementationOnce(async () => new Response(JSON.stringify({ error: { code: 409 } }), { status: 409 }))
+      globalThis.fetch = vi
+        .fn()
+        .mockImplementationOnce(
+          async () => new Response(JSON.stringify({ error: { code: 409 } }), { status: 409 })
+        )
+        .mockImplementationOnce(
+          async () => new Response(JSON.stringify({ error: { code: 409 } }), { status: 409 })
+        )
         .mockImplementationOnce(async (_url: string, init: RequestInit) => {
           capturedBody = init.body as string;
           return new Response(JSON.stringify({ name: 'op-123', status: 'DONE' }));
         })
         .mockImplementationOnce(async () => new Response(JSON.stringify({ status: 'DONE' })))
-        .mockImplementationOnce(async () => new Response(JSON.stringify({
-          id: '1',
-          name: 'vm',
-          status: 'RUNNING',
-          machineType: 'zones/us-central1-a/machineTypes/e2-medium',
-          creationTimestamp: '2026-03-18T00:00:00Z',
-          networkInterfaces: [{ accessConfigs: [{ natIP: testIpv4(1, 2, 3, 4) }] }],
-        })));
+        .mockImplementationOnce(
+          async () =>
+            new Response(
+              JSON.stringify({
+                id: '1',
+                name: 'vm',
+                status: 'RUNNING',
+                machineType: 'zones/us-central1-a/machineTypes/e2-medium',
+                creationTimestamp: '2026-03-18T00:00:00Z',
+                networkInterfaces: [{ accessConfigs: [{ natIP: testIpv4(1, 2, 3, 4) }] }],
+              })
+            )
+        );
 
       await provider.createVM({
         name: 'vm-without-sa',
@@ -910,6 +920,67 @@ describe('GcpProvider', () => {
       const result = await provider.getVM('match-id');
       expect(result?.name).toBe('found');
       expect(callCount).toBe(1);
+    });
+
+    it('refuses to call an instance absent when a zone of the project-wide list was unreachable', async () => {
+      // Every zonal GET is a 404 and the instance is in no reachable scope, but one scope could
+      // not be read: the instance may be there, so this is not a "not found".
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/aggregated/instances')) {
+          return new Response(
+            JSON.stringify({
+              items: {
+                'zones/us-central1-a': { instances: [gcpInstance({ id: 'other' })] },
+                'zones/asia-east2-c': {
+                  warning: { code: 'UNREACHABLE', message: 'zone unavailable' },
+                },
+              },
+            })
+          );
+        }
+        return new Response(JSON.stringify({ error: { message: 'Not found' } }), { status: 404 });
+      });
+
+      await expect(provider.getVM('missing-id')).rejects.toThrow(
+        /incomplete: unreachable zones\/asia-east2-c/
+      );
+    });
+
+    it('still finds an instance in a reachable scope when another scope is unreachable', async () => {
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/aggregated/instances')) {
+          return new Response(
+            JSON.stringify({
+              items: {
+                'zones/asia-east2-c': {
+                  warning: { code: 'UNREACHABLE', message: 'zone unavailable' },
+                },
+                'zones/us-central1-a': {
+                  instances: [gcpInstance({ id: 'present-id', name: 'vm-present' })],
+                },
+              },
+            })
+          );
+        }
+        return new Response(JSON.stringify({ error: { message: 'Not found' } }), { status: 404 });
+      });
+
+      expect((await provider.getVM('present-id'))?.name).toBe('vm-present');
+    });
+
+    it('returns null when every zone answered and the instance is nowhere', async () => {
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/aggregated/instances')) {
+          return new Response(
+            JSON.stringify({
+              items: { 'zones/us-central1-a': { instances: [gcpInstance({ id: 'other' })] } },
+            })
+          );
+        }
+        return new Response(JSON.stringify({ error: { message: 'Not found' } }), { status: 404 });
+      });
+
+      expect(await provider.getVM('missing-id')).toBeNull();
     });
 
     it('follows aggregated nextPageToken for numeric-ID lookup', async () => {

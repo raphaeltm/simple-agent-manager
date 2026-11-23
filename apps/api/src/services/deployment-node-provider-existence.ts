@@ -25,18 +25,20 @@
  * Every verdict is recorded in `node_lifecycle_decisions` (source `provider_existence`, reason =
  * the exact verdict), so verdicts can be aggregated per reason later.
  *
- * Throughput at the defaults (`deploymentNodeExistence.*`: 100 lookups and 30 s per sweep, 5 s per
- * lookup, a node re-checked every 15 min, confirmation after 10 min) on the 5-minute cron: a lookup
- * is one provider GET (~0.2-1 s; GCP up to one GET per configured zone plus one list), so a sweep
- * makes at most 100 lookups, 1,200 an hour. Up to 300 deployment nodes keep their 15-minute
- * cadence; then detection-to-release worst case is 15 + 10 + 5 = ~30 min. At an outer limit of
- * 10,000 deployment nodes a full pass takes ~8.3 hours; nodes with a pending absence are probed
- * first, so release follows ~8.3 h + 10 min + one tick after the VM disappears. If every lookup
- * times out a sweep reaches 6 nodes; each probed node is stamped before its lookup, so the next
+ * Throughput at the defaults (`deploymentNodeExistence.*`: at most 100 lookups and 20 s per sweep,
+ * 5 s per lookup, a node re-checked every 15 min, confirmation after 10 min) on the 5-minute cron:
+ * a lookup is one provider GET (Hetzner ~0.2 s; GCP up to one GET per configured zone plus one
+ * list, ~1 s), so a sweep makes 20-100 lookups, 240-1,200 an hour. 60-300 deployment nodes keep
+ * their 15-minute cadence; then detection-to-release worst case is 15 + 10 + 5 = ~30 min. At an
+ * outer limit of 10,000 deployment nodes a full pass takes 8-42 hours; nodes with a pending
+ * absence are probed first, so release follows one pass + 10 min + one tick after the VM
+ * disappears (raise `maxProbesPerSweep` / `sweepBudgetMs` for such an install). If every lookup
+ * times out a sweep reaches 4 nodes; each probed node is stamped before its lookup, so the next
  * sweep moves on. Provider rate limits: Hetzner allows 3,600 requests an hour per project; this
- * adds at most 1,200, only with 300+ deployment nodes in one project, and a 429 stops lookups
- * to that provider for the rest of the sweep. One release can overrun the sweep budget by its
- * teardown timeout; the sweep runs out of band, after the cron's foreground chain.
+ * adds at most 1,200, and a 429 stops lookups to that provider for the rest of the sweep. One
+ * release can overrun the sweep budget by its teardown timeout. The sweep runs out of band, in
+ * its own `waitUntil`, after the cron's foreground chain; the selection uses the partial index
+ * `idx_nodes_deployment_existence_due`, so it reads running deployment nodes only.
  */
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -61,6 +63,11 @@ import {
 } from './deployment-node-provider-existence-release';
 import type { NodeRow } from './strict-node-deletion-shared';
 
+/**
+ * A first not-found older than this many confirmation intervals cannot confirm a new one: the
+ * pair must be about one disappearance, not days apart with failed lookups in between.
+ */
+const STALE_OBSERVATION_FACTOR = 3;
 /** Rows read per selection query; the sweep keeps selecting until its deadline or probe cap. */
 const SELECTION_PAGE_SIZE = 25;
 /** A present node is recorded at most once a day; an unchanged inconclusive reason once an hour. */
@@ -75,6 +82,8 @@ export interface DeploymentNodeExistenceSweepResult {
   absentAwaitingConfirmation: number;
   released: number;
   releaseFailed: number;
+  /** A node whose check threw (D1 fault, teardown throw); stamped, so retried next interval. */
+  nodeErrors: number;
   deferred: number;
   superseded: number;
   inconclusive: Partial<Record<ProviderExistenceInconclusiveReason, number>>;
@@ -129,6 +138,7 @@ function emptyResult(): DeploymentNodeExistenceSweepResult {
     absentAwaitingConfirmation: 0,
     released: 0,
     releaseFailed: 0,
+    nodeErrors: 0,
     deferred: 0,
     superseded: 0,
     inconclusive: {},
@@ -216,10 +226,25 @@ async function checkNode(
   }
   const probeStartedAt = new Date();
   if (!(await claimProbe(env, node, probeStartedAt))) return { kind: 'skipped' };
+  // An observation about another instance, none yet, or one too old to pair with this
+  // answer (inconclusive lookups in between, `STALE_OBSERVATION_FACTOR`) starts a new
+  // confirmation. It is stamped with this lookup's start, equal to the probe stamp, so the
+  // selector makes the confirming lookup exactly one confirmation interval later.
+  const observedAt = node.providerAbsenceObservedAt;
+  const observationAgeMs = observedAt
+    ? probeStartedAt.getTime() - Date.parse(observedAt)
+    : Number.NaN;
+  const stale =
+    !Number.isFinite(observationAgeMs) ||
+    observationAgeMs > settings.confirmIntervalMs * STALE_OBSERVATION_FACTOR;
+  const startsNewObservation =
+    !observedAt || node.providerAbsenceInstanceId !== node.providerInstanceId || stale;
+  // A not-found now would be the second one: the probe then also checks the account inventory.
+  const confirming = !startsNewObservation && observationAgeMs >= settings.confirmIntervalMs;
   const signal = AbortSignal.timeout(
     Math.max(1, Math.min(settings.requestTimeoutMs, deadline - Date.now()))
   );
-  const verdict = await probeDeploymentNodeInstance(env, db, node, signal);
+  const verdict = await probeDeploymentNodeInstance(env, db, node, signal, { confirming });
 
   if (verdict.kind === 'inconclusive') {
     log.warn('deployment_node_existence.inconclusive', {
@@ -260,13 +285,10 @@ async function checkNode(
     return { kind: 'present' };
   }
 
-  // Absent. An observation about another instance (or none yet) starts a new confirmation. It
-  // is stamped with this lookup's start, equal to the probe stamp, so the selector makes the
-  // confirming lookup exactly one confirmation interval later.
-  const observedAt = node.providerAbsenceObservedAt;
-  if (!observedAt || node.providerAbsenceInstanceId !== node.providerInstanceId) {
+  // Absent: start a new confirmation, or wait for or complete the pending one (see above).
+  if (startsNewObservation) {
     const firstAt = probeStartedAt.toISOString();
-    await env.DATABASE.prepare(
+    const write = await env.DATABASE.prepare(
       `UPDATE nodes SET provider_absence_observed_at = ?, provider_absence_instance_id = ?
        WHERE id = ? AND ${sameIncarnationSql()}`
     )
@@ -278,11 +300,13 @@ async function checkNode(
         node.runtimeIncarnationId
       )
       .run();
+    // The node changed during the lookup (stopped, replaced): this answer is about nothing.
+    if ((write.meta.changes ?? 0) !== 1) return { kind: 'skipped' };
     await recordExistenceDecision(
       env,
       node,
       'provider_instance_absent_observed',
-      'first_not_found',
+      observedAt ? 'first_not_found_restarted' : 'first_not_found',
       {
         firstObservedAt: firstAt,
       }
@@ -290,7 +314,7 @@ async function checkNode(
     return { kind: 'absent_observed' };
   }
   // The confirming lookup must start a full interval after the first one started.
-  if (probeStartedAt.getTime() - Date.parse(observedAt) < settings.confirmIntervalMs) {
+  if (!confirming) {
     await recordExistenceDecision(
       env,
       node,
@@ -352,7 +376,7 @@ export async function runDeploymentNodeProviderExistenceSweep(
       } catch (error) {
         // Per-node isolation: one node's failure (a D1 fault, a teardown throw) never stops the
         // sweep. The node was stamped, so it is retried on its next interval.
-        result.releaseFailed++;
+        result.nodeErrors++;
         log.error('deployment_node_existence.node_failed', {
           nodeId: row.id,
           error: error instanceof Error ? error.message : String(error),
