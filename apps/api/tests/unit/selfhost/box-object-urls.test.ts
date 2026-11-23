@@ -46,6 +46,11 @@ import {
   resetR2S3ClientsForTests,
   resolveR2ObjectUrlSigner,
 } from '../../../src/services/r2-s3-client';
+import { buildSessionSnapshotR2Key } from '../../../src/services/session-snapshot-artifacts';
+import {
+  generateSessionSnapshotDirectUploadUrl,
+  sessionSnapshotDirectUploadAvailable,
+} from '../../../src/services/session-snapshot-direct-upload';
 
 // Settings storage: unavailable by default (the route then uses its defaults); tests override it.
 vi.mock('../../../src/services/admin-settings-resolution', () => ({
@@ -322,7 +327,7 @@ describe('box object token scope', () => {
   it('refuses keys outside the upload prefixes at mint, and at verify even when correctly signed', async () => {
     for (const key of [
       'agents/vm-agent-linux-amd64',
-      'session-snapshots/s1/a.tar',
+      'library/p1/f1',
       'temp-uploadsX/a',
     ]) {
       expect(isSafeObjectKey(key)).toBe(false);
@@ -494,6 +499,54 @@ describe('callers on a keyless box', () => {
       new URL(slot.uploadUrl).searchParams.get('token')!
     );
     expect(claims).toMatchObject({ key: slot.r2Key, len: 9, sha, md: { sha256: sha } });
+  });
+
+  it('session snapshots get a box URL binding the length and sha256 (the fallback route cannot work behind Caddy)', async () => {
+    const { env } = boxEnv();
+    // Cloudflare without a key: no direct uploads. A keyless box: direct uploads through the box.
+    expect(sessionSnapshotDirectUploadAvailable(env)).toBe(false);
+    installBoxObjectUrls();
+    expect(sessionSnapshotDirectUploadAvailable(env)).toBe(true);
+    const key = buildSessionSnapshotR2Key(env, 'chat-1', 'gen-1', 'home');
+    const sha256 = 'b'.repeat(64);
+    const url = new URL(
+      await generateSessionSnapshotDirectUploadUrl(env, {
+        key,
+        sizeBytes: 1234,
+        sha256,
+        contentType: 'application/x-tar',
+        checksumHeader: true,
+      })
+    );
+    expect(url.pathname).toBe(BOX_OBJECT_ROUTE);
+    const claims = await verifyBoxObjectToken(env, url.searchParams.get('token')!);
+    expect(claims).toMatchObject({
+      op: 'put',
+      key,
+      len: 1234,
+      sha: sha256,
+      ct: 'application/x-tar',
+    });
+  });
+
+  it('snapshot keys are allowed under the configured prefix only', async () => {
+    const custom = { ENCRYPTION_KEY: KEY, SESSION_SNAPSHOT_R2_PREFIX: 'box-snaps' };
+    const key = buildSessionSnapshotR2Key(custom as Env, 'chat-1', 'gen-1', 'wip');
+    expect(key.startsWith('box-snaps/')).toBe(true);
+    await expect(
+      mintBoxObjectToken(custom, { op: 'put', key, len: 1, expiresIn: 60 })
+    ).resolves.toMatch(/^samobj1\./);
+    // The same key is outside the allowlist of an install using the default prefix.
+    await expect(
+      mintBoxObjectToken({ ENCRYPTION_KEY: KEY }, { op: 'put', key, len: 1, expiresIn: 60 })
+    ).rejects.toThrow();
+    const defaultKey = buildSessionSnapshotR2Key({} as Env, 'chat-1', 'gen-1', 'wip');
+    await expect(
+      mintBoxObjectToken(
+        { ENCRYPTION_KEY: KEY },
+        { op: 'put', key: defaultKey, len: 1, expiresIn: 60 }
+      )
+    ).resolves.toMatch(/^samobj1\./);
   });
 
   it('a single upload over 1 GiB is refused when the URL is requested', async () => {

@@ -1004,8 +1004,9 @@ repository, so it never notices an `.env` edit.
 port is what the deploy publishes and checks, and each one is logged by name. Shell variables no
 compose file uses are ignored. Set the box in `.env`, not the shell.
 
-**Object store and uploads through the box.** Task attachments, build contexts and app image
-artifacts are uploaded through the box by default: no store credential is needed. The Worker hands
+**Object store and uploads through the box.** Task attachments, build contexts, app image
+artifacts and session snapshots are uploaded through the box by default: no store credential is
+needed. The Worker hands
 the uploader (browser or agent) a URL to `https://api.SAM_DOMAIN/api/box-objects?token=...`, signed
 by SAM itself with a key derived from `ENCRYPTION_KEY`. It rotates with `selfhost:secrets rotate`:
 while a rotation overlaps, URLs signed with the previous key stay valid (`ENCRYPTION_KEY_PREVIOUS`),
@@ -1013,7 +1014,8 @@ and once that key is dropped an unused URL fails with 403 like an expired one; t
 The token names one object, one operation, a size limit and an expiry of minutes; the box streams the
 body into the bucket through celld's R2 binding without holding it in memory, and the write is
 create-only. Downloads (image artifacts on deployment nodes, build contexts) work the same way.
-Session snapshots keep their own upload route, which also streams through the box.
+Session snapshot artifacts take this route too: their older Worker upload route needs a header
+that the box's Caddy strips from every client request (`X-SAM-*`), so it cannot work on a box.
 
 - **One request carries at most 1 GiB.** celld refuses a larger body (413) and cannot be configured
   above it, so on a box without a store key an app's image artifact is limited to 1 GiB (the agent

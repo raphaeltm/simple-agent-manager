@@ -17,6 +17,8 @@
  */
 import { BUILD_CONTEXT_PREFIX } from '@simple-agent-manager/app-deployment';
 
+import type { Env } from '../../env';
+import { getSessionSnapshotConfig } from '../../services/session-snapshot-artifacts';
 import {
   MAX_SIGNED_TOKEN_LENGTH,
   mintSignedToken,
@@ -56,15 +58,27 @@ const PURPOSE = {
 
 /**
  * The only key prefixes a token may name: task attachments (`attachment-upload.ts`
- * buildAttachmentR2Key), compose image artifacts (`buildComposeImageArtifactKey`) and build
- * contexts (`buildContextKey`). The R2 binding also holds vm-agent binaries and session snapshots,
- * so a minting bug must not be able to reach them. Enforced at mint and at verify.
+ * buildAttachmentR2Key), compose image artifacts (`buildComposeImageArtifactKey`), build contexts
+ * (`buildContextKey`) and session snapshot artifacts (`buildSessionSnapshotR2Key`, under the
+ * configured SESSION_SNAPSHOT_R2_PREFIX). The R2 binding also holds vm-agent binaries and other
+ * Worker state, so a minting bug must not be able to reach them. Enforced at mint and at verify.
  */
 export const BOX_OBJECT_KEY_PREFIXES: readonly string[] = [
   'temp-uploads/',
   'compose-image-artifacts/',
   BUILD_CONTEXT_PREFIX,
 ];
+
+/** What the token functions read from the Worker env. */
+export type BoxObjectTokenEnv = Pick<SignedTokenEnv, 'ENCRYPTION_KEY'> &
+  Partial<Pick<SignedTokenEnv, 'ENCRYPTION_KEY_PREVIOUS'>> &
+  Pick<Env, 'SESSION_SNAPSHOT_R2_PREFIX'>;
+
+/** The fixed prefixes plus this install's session snapshot prefix. */
+export function boxObjectKeyPrefixes(env: Pick<Env, 'SESSION_SNAPSHOT_R2_PREFIX'>): string[] {
+  const { r2Prefix } = getSessionSnapshotConfig(env as Env);
+  return [...BOX_OBJECT_KEY_PREFIXES, `${r2Prefix}/`];
+}
 
 /** Longest lifetime a token may have, whatever the minting route asked for. */
 export const MAX_BOX_OBJECT_TOKEN_SECONDS = 24 * 60 * 60;
@@ -80,9 +94,12 @@ const MAX_METADATA_VALUE_LENGTH = 256;
  * `..` segment, no backslash or control character. Keys SAM builds always pass; anything else is
  * refused at mint and at verify.
  */
-export function isSafeObjectKey(key: string): boolean {
+export function isSafeObjectKey(
+  key: string,
+  prefixes: readonly string[] = BOX_OBJECT_KEY_PREFIXES
+): boolean {
   if (!key || key.length > MAX_KEY_LENGTH) return false;
-  if (!BOX_OBJECT_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))) return false;
+  if (!prefixes.some((prefix) => key.startsWith(prefix))) return false;
   // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
   if (key.startsWith('/') || key.includes('\\') || /[\u0000-\u001f\u007f]/.test(key)) return false;
   return key.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..');
@@ -111,9 +128,12 @@ function optionalId(value: unknown): value is string | undefined {
 }
 
 /** The claims if they are well formed; null otherwise. */
-function parseClaims(raw: Record<string, unknown>): BoxObjectTokenClaims | null {
+function parseClaims(
+  raw: Record<string, unknown>,
+  prefixes: readonly string[]
+): BoxObjectTokenClaims | null {
   if (raw.v !== 1 || (raw.op !== 'put' && raw.op !== 'get')) return null;
-  if (typeof raw.key !== 'string' || !isSafeObjectKey(raw.key)) return null;
+  if (typeof raw.key !== 'string' || !isSafeObjectKey(raw.key, prefixes)) return null;
   if (!positiveInteger(raw.exp)) return null;
   if (raw.len !== undefined && !positiveInteger(raw.len)) return null;
   if (raw.max !== undefined && !positiveInteger(raw.max)) return null;
@@ -152,7 +172,7 @@ export type BoxObjectTokenInput = Omit<BoxObjectTokenClaims, 'v' | 'exp'> & {
 };
 
 export async function mintBoxObjectToken(
-  env: Pick<SignedTokenEnv, 'ENCRYPTION_KEY'>,
+  env: BoxObjectTokenEnv,
   input: BoxObjectTokenInput,
   now: number = Date.now()
 ): Promise<string> {
@@ -160,7 +180,10 @@ export async function mintBoxObjectToken(
   if (!positiveInteger(expiresIn) || expiresIn > MAX_BOX_OBJECT_TOKEN_SECONDS) {
     throw new Error(`Box object token lifetime must be 1..${MAX_BOX_OBJECT_TOKEN_SECONDS} seconds`);
   }
-  const claims = parseClaims({ ...rest, v: 1, exp: Math.floor(now / 1000) + expiresIn });
+  const claims = parseClaims(
+    { ...rest, v: 1, exp: Math.floor(now / 1000) + expiresIn },
+    boxObjectKeyPrefixes(env)
+  );
   if (!claims) throw new Error('Box object token claims are invalid');
   const token = await mintSignedToken(env, PURPOSE, claims);
   // Verification refuses longer tokens; fail here instead of handing out a URL that cannot work.
@@ -170,12 +193,12 @@ export async function mintBoxObjectToken(
 
 /** Signature, shape and expiry. Null for any token that is not valid now. */
 export async function verifyBoxObjectToken(
-  env: SignedTokenEnv,
+  env: BoxObjectTokenEnv,
   token: string,
   now: number = Date.now()
 ): Promise<BoxObjectTokenClaims | null> {
   const raw = await verifySignedToken(env, PURPOSE, token);
-  const claims = raw ? parseClaims(raw) : null;
+  const claims = raw ? parseClaims(raw, boxObjectKeyPrefixes(env)) : null;
   if (!claims || claims.exp * 1000 <= now) return null;
   // A token valid for longer than any minter may issue is not one SAM minted correctly.
   if (claims.exp * 1000 - now > MAX_BOX_OBJECT_TOKEN_SECONDS * 1000) return null;

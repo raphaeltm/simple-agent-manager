@@ -28,10 +28,6 @@ export interface R2PresignTarget {
 const MAX_CACHED_CLIENTS = 4;
 const clients = new Map<string, S3Client>();
 
-export function hasR2S3Credentials(env: Env): boolean {
-  return resolveR2PresignConfig(env) !== null;
-}
-
 function clientFor(config: R2PresignConfig, checksum: R2ChecksumMode): S3Client {
   const cacheKey = JSON.stringify([
     config.endpoint,
