@@ -15,6 +15,7 @@ import {
   throwIfProviderRequestAborted,
 } from './provider-fetch';
 import type {
+  ListVMsOptions,
   LocationMeta,
   Provider,
   ProviderLogger,
@@ -189,10 +190,11 @@ export class VultrProvider implements Provider {
 
   async listVMs(
     labels?: Record<string, string>,
-    context?: ProviderRequestContext
+    context?: ProviderRequestContext,
+    options?: ListVMsOptions
   ): Promise<VMInstance[]> {
     throwIfProviderRequestAborted(context);
-    const instances = await this.fetchAllInstances(context);
+    const instances = await this.fetchAllInstances(context, options?.requireComplete === true);
     throwIfProviderRequestAborted(context);
     let result = instances.map((instance) => this.mapInstance(instance));
     if (labels && Object.keys(labels).length > 0) {
@@ -302,7 +304,9 @@ export class VultrProvider implements Provider {
     const numericOsId =
       image && /^\d+$/.test(image.trim()) ? Number.parseInt(image.trim(), 10) : undefined;
     const match =
-      numericOsId === undefined ? findVultrOs(list, targetName) : list.find((os) => os.id === numericOsId);
+      numericOsId === undefined
+        ? findVultrOs(list, targetName)
+        : list.find((os) => os.id === numericOsId);
     if (!match) {
       throw new ProviderError(this.name, undefined, `No Vultr OS found matching "${targetName}"`, {
         category: 'invalid_config',
@@ -348,7 +352,8 @@ export class VultrProvider implements Provider {
   }
 
   private async fetchAllInstances(
-    context?: ProviderRequestContext
+    context?: ProviderRequestContext,
+    requireComplete = false
   ): Promise<VultrInstancePayload[]> {
     throwIfProviderRequestAborted(context);
     const all: VultrInstancePayload[] = [];
@@ -371,6 +376,13 @@ export class VultrProvider implements Provider {
       all.push(...data.instances);
       if (!data.nextCursor) return all;
       cursor = data.nextCursor;
+    }
+    if (requireComplete) {
+      throw new ProviderError(
+        this.name,
+        undefined,
+        `Instance list exceeds ${VULTR_MAX_LIST_PAGES} pages; it is incomplete`
+      );
     }
     this.logger.warn('vultr.list_truncated', {
       resource: 'instances',

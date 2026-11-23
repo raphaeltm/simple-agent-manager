@@ -344,9 +344,12 @@ export class GcpProvider implements Provider {
     context?: ProviderRequestContext
   ): Promise<VMInstance | null> {
     throwIfProviderRequestAborted(context);
-    // A zonal list filtered on the instance's ID or name, with no label filter.
-    const instance = await findGcpInstanceInZoneByIdOrName(this.api, location, id, context);
-    return instance ? gcpInstanceToVM(instance) : null;
+    // Two reads of exactly this zone, neither label-filtered: the instance GET (the API accepts a
+    // name or numeric ID) and the instance list filtered on that ID or name. "Not found" needs both.
+    const got = await getGcpInstanceInZone(this.api, location, id, context);
+    if (got) return gcpInstanceToVM(got);
+    const listed = await findGcpInstanceInZoneByIdOrName(this.api, location, id, context);
+    return listed ? gcpInstanceToVM(listed) : null;
   }
 
   async getObservedVM(id: string, context?: ProviderRequestContext): Promise<VMInstance | null> {

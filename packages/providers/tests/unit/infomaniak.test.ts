@@ -125,6 +125,19 @@ describe('InfomaniakProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('listVMs with requireComplete throws when Nova reports a next page', async () => {
+    const page = () =>
+      json({
+        servers: [],
+        servers_links: [{ rel: 'next', href: `${COMPUTE}/servers/detail?marker=x` }],
+      });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(auth()).mockResolvedValueOnce(page());
+    const provider = new InfomaniakProvider('id', 'secret', { authUrl: AUTH_URL });
+    await expect(provider.listVMs(undefined, undefined, { requireComplete: true })).rejects.toThrow(
+      /incomplete/
+    );
+  });
+
   it('requires detach before grow-only resize', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(auth())

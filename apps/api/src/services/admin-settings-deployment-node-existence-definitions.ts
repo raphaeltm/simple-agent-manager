@@ -14,7 +14,7 @@ export const DEPLOYMENT_NODE_EXISTENCE_RUNTIME_DEFAULTS = {
   checkIntervalSeconds: 900,
   confirmIntervalSeconds: 600,
   sweepBudgetMs: 20000,
-  maxProbesPerSweep: 100,
+  maxProbesPerSweep: 50,
   requestTimeoutMs: 5000,
 } as const;
 
@@ -55,8 +55,8 @@ export const DEPLOYMENT_NODE_EXISTENCE_SETTINGS: readonly AdminSettingDefinition
     'deploymentNodeExistence.maxProbesPerSweep',
     DEPLOYMENT_NODE_EXISTENCE_RUNTIME_DEFAULTS.maxProbesPerSweep,
     'Operations',
-    'Maximum provider lookups one provider-existence sweep makes. Bounds provider API use per 5-minute cron tick.',
-    { min: 1, max: 1000 }
+    "Maximum deployment servers one provider-existence sweep looks up. Bounds provider API use per 5-minute cron tick; each one also costs about two database queries, inside the cron invocation's query limit.",
+    { min: 1, max: 200 }
   ),
   integerDefinition(
     'deploymentNodeExistence.requestTimeoutMs',

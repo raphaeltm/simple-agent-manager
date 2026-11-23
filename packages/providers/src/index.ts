@@ -25,6 +25,7 @@ export type {
   GcpProviderConfig,
   HetznerProviderConfig,
   InfomaniakProviderConfig,
+  ListVMsOptions,
   LocationMeta,
   NativeVMConfig,
   Provider,

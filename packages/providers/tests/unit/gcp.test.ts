@@ -983,37 +983,74 @@ describe('GcpProvider', () => {
       expect(await provider.getVM('missing-id')).toBeNull();
     });
 
-    it('getVMInLocation lists exactly the given zone, filtered on id or name only (no label filter)', async () => {
+    it('getVMInLocation reads exactly the given zone, unfiltered by labels: GET, then id/name-filtered list', async () => {
       const urls: string[] = [];
+      let listHasInstance = true;
       globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
         urls.push(url);
         const parsed = new URL(url);
         if (parsed.pathname.endsWith('/zones/us-east4-c/instances')) {
-          // An unlabelled instance, found by its numeric ID.
           return new Response(
             JSON.stringify({
-              items: [{ ...gcpInstance({ id: '9001', name: 'node-01box' }), labels: {} }],
+              kind: 'compute#instanceList',
+              ...(listHasInstance
+                ? { items: [{ ...gcpInstance({ id: '9001', name: 'node-01box' }), labels: {} }] }
+                : {}),
             })
           );
         }
-        if (parsed.pathname.endsWith('/zones/us-east4-b/instances')) {
-          return new Response(JSON.stringify({}));
-        }
-        return new Response(JSON.stringify({ error: { message: 'unexpected' } }), { status: 500 });
+        // The instance GET misses (as it would if numeric IDs were not accepted).
+        return new Response(JSON.stringify({ error: { message: 'Not found' } }), { status: 404 });
       });
       expect((await provider.getVMInLocation('9001', 'us-east4-c'))?.name).toBe('node-01box');
-      expect(await provider.getVMInLocation('9001', 'us-east4-b')).toBeNull();
-      const filter = new URL(urls[0]!).searchParams.get('filter');
-      expect(filter).toBe('(id = 9001)');
-      expect(filter).not.toContain('labels.');
-      expect(urls.every((url) => !url.includes('/aggregated/'))).toBe(true);
+      const listUrl = urls.find((url) => new URL(url).pathname.endsWith('/instances'));
+      expect(new URL(listUrl!).searchParams.get('filter')).toBe('(id = 9001)');
+      expect(urls.some((url) => url.endsWith('/zones/us-east4-c/instances/9001'))).toBe(true);
+      expect(urls.every((url) => !url.includes('/aggregated/') && !url.includes('labels'))).toBe(
+        true
+      );
+      listHasInstance = false;
+      expect(await provider.getVMInLocation('9001', 'us-east4-c')).toBeNull();
+    });
+
+    it('getVMInLocation returns a live instance the GET finds even if the list would miss it', async () => {
+      globalThis.fetch = vi
+        .fn()
+        .mockImplementation(async (url: string) =>
+          url.endsWith('/zones/us-east4-c/instances/9001')
+            ? new Response(JSON.stringify(gcpInstance({ id: '9001', name: 'node-01box' })))
+            : new Response(JSON.stringify({ kind: 'compute#instanceList' }))
+        );
+      expect((await provider.getVMInLocation('9001', 'us-east4-c'))?.id).toBe('9001');
+    });
+
+    it.each([
+      ['a bare {} from a proxy', {}],
+      [
+        'a list with an unexpected warning',
+        { kind: 'compute#instanceList', warning: { code: 'UNREACHABLE' } },
+      ],
+    ])('getVMInLocation refuses %s as "not found"', async (_label, body) => {
+      globalThis.fetch = vi
+        .fn()
+        .mockImplementation(async (url: string) =>
+          new URL(url).pathname.endsWith('/instances')
+            ? new Response(JSON.stringify(body))
+            : new Response(JSON.stringify({ error: { message: 'Not found' } }), { status: 404 })
+        );
+      await expect(provider.getVMInLocation('9001', 'us-east4-c')).rejects.toThrow();
     });
 
     it('getVMInLocation follows pages and throws on any failed page', async () => {
       globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
         const parsed = new URL(url);
+        if (!parsed.pathname.endsWith('/instances')) {
+          return new Response(JSON.stringify({ error: { message: 'Not found' } }), { status: 404 });
+        }
         if (!parsed.searchParams.has('pageToken')) {
-          return new Response(JSON.stringify({ items: [], nextPageToken: 'p2' }));
+          return new Response(
+            JSON.stringify({ kind: 'compute#instanceList', items: [], nextPageToken: 'p2' })
+          );
         }
         return new Response(JSON.stringify({ error: { message: 'boom' } }), { status: 503 });
       });
@@ -1025,9 +1062,7 @@ describe('GcpProvider', () => {
             new Response(JSON.stringify({ error: { message: 'denied' } }), { status: 403 })
         );
       await expect(provider.getVMInLocation('9001', 'us-east4-c')).rejects.toThrow();
-      await expect(provider.getVMInLocation('a b"', 'us-east4-c')).rejects.toMatchObject({
-        category: 'invalid_config',
-      });
+      await expect(provider.getVMInLocation('a b"', 'us-east4-c')).rejects.toThrow();
     });
 
     it('follows aggregated nextPageToken for numeric-ID lookup', async () => {

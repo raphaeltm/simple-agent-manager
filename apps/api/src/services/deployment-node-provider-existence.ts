@@ -25,22 +25,25 @@
  * Every verdict is recorded in `node_lifecycle_decisions` (source `provider_existence`, reason =
  * the exact verdict), so verdicts can be aggregated per reason later.
  *
- * Throughput at the defaults (`deploymentNodeExistence.*`: at most 100 lookups and 20 s per sweep,
- * 5 s per lookup, a node re-checked every 15 min, confirmation after 10 min) on the 5-minute cron:
- * a lookup is one provider GET (Hetzner ~0.2 s; GCP up to one GET per configured zone plus one
- * list, ~1 s), so a sweep makes 20-100 lookups, 240-1,200 an hour. 60-300 deployment nodes keep
- * their 15-minute cadence; then detection-to-release worst case is 15 + 10 + 5 = ~30 min. At an
- * outer limit of 10,000 deployment nodes a full pass takes 8-42 hours; nodes with a pending
- * absence are probed first, so release follows one pass + 10 min + one tick after the VM
- * disappears (raise `maxProbesPerSweep` / `sweepBudgetMs` for such an install). If every lookup
- * times out a sweep reaches 4 nodes; each probed node is stamped before its lookup, so the next
- * sweep moves on. Provider rate limits: Hetzner allows 3,600 requests an hour per project; this
- * adds at most 1,200, and a 429 stops lookups to that provider for the rest of the sweep. One
- * release can overrun the sweep budget by its teardown timeout. The sweep runs out of band, in
- * its own `waitUntil`, after the cron's foreground chain; the selection uses the partial index
- * `idx_nodes_deployment_existence_due`, so it reads running deployment nodes only.
+ * Throughput at the defaults (`deploymentNodeExistence.*`: at most 50 lookups and 20 s per sweep,
+ * 5 s per lookup, a node re-checked every 15 min, confirmation after 10 min) on the 5-minute cron.
+ * The sweep is sequential, so its reach depends on provider latency: a Hetzner lookup is one GET
+ * (~0.2 s), a GCP one up to one GET per configured zone plus one list (~1 s). A sweep therefore
+ * makes 20-50 lookups, 240-600 an hour, and 60-150 deployment nodes keep their 15-minute cadence;
+ * then detection-to-release worst case is 15 + 10 + 5 = ~30 min. At an outer limit of 10,000
+ * deployment nodes a full pass takes 17-42 hours; fresh pending absences are probed first, so
+ * release follows one pass + 10 min + one tick after the VM disappears. A larger install raises both
+ * `maxProbesPerSweep` (up to 200; each lookup costs about two D1 queries, inside the cron
+ * invocation's query limit) and `sweepBudgetMs`. If every lookup times out a sweep reaches 4
+ * nodes; each probed node is stamped before its lookup, so the next sweep moves on. Provider rate
+ * limits: Hetzner allows 3,600 requests an hour per project; this adds at most 600, and a 429 stops
+ * lookups to that provider for the rest of the sweep. A pending absence whose lookups keep failing
+ * goes stale after three confirmation intervals and is dropped, so it cannot hold the slots. One
+ * release can overrun the sweep budget by its teardown timeout. The sweep runs out of band, in its
+ * own `waitUntil`, after the cron's foreground chain; the selection uses the partial index
+ * `idx_nodes_deployment_existence_due` (migration 0268), so it reads running deployment nodes only.
  */
-import { eq } from 'drizzle-orm';
+import { and, eq, type SQL, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -61,7 +64,7 @@ import {
   type ReleaseOutcome,
   sameIncarnationSql,
 } from './deployment-node-provider-existence-release';
-import type { NodeRow } from './strict-node-deletion-shared';
+import type { NodeDb, NodeRow } from './strict-node-deletion-shared';
 
 /**
  * A first not-found older than this many confirmation intervals cannot confirm a new one: the
@@ -148,52 +151,86 @@ function emptyResult(): DeploymentNodeExistenceSweepResult {
   };
 }
 
-/**
- * Running managed deployment VMs due a probe: never probed, last probed a check interval ago, or
- * (with a pending absence) a confirmation interval ago. Pending absences first, then the
- * longest-unchecked. Every predicate carries the managed-class guard (`.claude/rules/51`): a
- * user-owned machine is never probed or released here.
- */
-async function selectDueNodes(
-  env: Env,
-  now: Date,
-  settings: SweepSettings,
-  limit: number,
-  excludedProviders: readonly string[]
-): Promise<Array<{ id: string; cloudProvider: string | null }>> {
-  const checkCutoff = new Date(now.getTime() - settings.checkIntervalMs).toISOString();
-  const confirmCutoff = new Date(now.getTime() - settings.confirmIntervalMs).toISOString();
-  // At most one bind per provider SAM supports, far below the D1 bind ceiling.
-  const exclusion = excludedProviders.length
-    ? `AND (cloud_provider IS NULL OR cloud_provider NOT IN (${excludedProviders.map(() => '?').join(', ')}))`
-    : '';
-  const rows = await env.DATABASE.prepare(
-    `SELECT id, cloud_provider AS cloudProvider FROM nodes
-     WHERE node_role = 'deployment' AND node_class = 'managed' AND runtime = 'vm'
-       AND status = 'running' AND provider_instance_id IS NOT NULL
-       AND (provider_existence_checked_at IS NULL OR provider_existence_checked_at <=
-         CASE WHEN provider_absence_observed_at IS NULL THEN ? ELSE ? END)
-       ${exclusion}
-     ORDER BY CASE WHEN provider_absence_observed_at IS NULL THEN 1 ELSE 0 END,
-       COALESCE(provider_existence_checked_at, ''), id
-     LIMIT ?`
-  )
-    .bind(checkCutoff, confirmCutoff, ...excludedProviders, limit)
-    .all<{ id: string; cloudProvider: string | null }>();
-  return rows.results;
+interface DueCutoffs {
+  checkCutoff: string;
+  confirmCutoff: string;
+  /** A first not-found older than this no longer counts as pending (`STALE_OBSERVATION_FACTOR`). */
+  staleCutoff: string;
+}
+
+function dueCutoffs(now: Date, settings: SweepSettings): DueCutoffs {
+  const at = (ms: number) => new Date(now.getTime() - ms).toISOString();
+  return {
+    checkCutoff: at(settings.checkIntervalMs),
+    confirmCutoff: at(settings.confirmIntervalMs),
+    staleCutoff: at(settings.confirmIntervalMs * STALE_OBSERVATION_FACTOR),
+  };
+}
+
+/** A first not-found recent enough to be confirmed. */
+function freshPendingSql(cutoffs: DueCutoffs): SQL {
+  return sql`(${schema.nodes.providerAbsenceObservedAt} IS NOT NULL AND ${schema.nodes.providerAbsenceObservedAt} >= ${cutoffs.staleCutoff})`;
 }
 
 /**
- * Stamp the probe before any network I/O, compare-and-set on the stamp read, so the node leaves
- * the candidate set even if the lookup hangs or the isolate dies (`.claude/rules/47`), and two
- * overlapping sweeps never probe the same node twice. Only this sweep writes the column.
+ * The one "is this node due a probe" predicate, shared by the selection and the probe claim
+ * (`.claude/rules/47`): a running managed deployment VM (the class guard, `.claude/rules/51`), never
+ * probed, last probed a check interval ago, or, with a fresh pending absence, a confirmation
+ * interval ago. A stale pending absence is due like any other node, so failed lookups cannot keep
+ * it ahead of everything else.
  */
-async function claimProbe(env: Env, node: NodeRow, now: Date): Promise<boolean> {
-  const result = await env.DATABASE.prepare(
-    `UPDATE nodes SET provider_existence_checked_at = ?
-     WHERE id = ? AND status = 'running' AND provider_existence_checked_at IS ?`
-  )
-    .bind(now.toISOString(), node.id, node.providerExistenceCheckedAt)
+function dueSql(cutoffs: DueCutoffs): SQL {
+  const checkedAt = schema.nodes.providerExistenceCheckedAt;
+  return sql`${schema.nodes.nodeRole} = 'deployment' AND ${schema.nodes.nodeClass} = 'managed'
+    AND ${schema.nodes.runtime} = 'vm' AND ${schema.nodes.status} = 'running'
+    AND ${schema.nodes.providerInstanceId} IS NOT NULL
+    AND (${checkedAt} IS NULL OR ${checkedAt} <= CASE WHEN ${freshPendingSql(cutoffs)}
+      THEN ${cutoffs.confirmCutoff} ELSE ${cutoffs.checkCutoff} END)`;
+}
+
+/** Due nodes, fresh pending absences first, then the longest-unchecked. */
+async function selectDueNodes(
+  db: NodeDb,
+  cutoffs: DueCutoffs,
+  limit: number,
+  excludedProviders: readonly string[]
+): Promise<NodeRow[]> {
+  // At most one bind per provider SAM supports, far below the D1 bind ceiling.
+  const exclusion = excludedProviders.length
+    ? sql` AND (${schema.nodes.cloudProvider} IS NULL OR ${schema.nodes.cloudProvider} NOT IN (${sql.join(
+        excludedProviders.map((p) => sql`${p}`),
+        sql`, `
+      )}))`
+    : sql``;
+  return await db
+    .select()
+    .from(schema.nodes)
+    .where(sql`${dueSql(cutoffs)}${exclusion}`)
+    .orderBy(
+      sql`CASE WHEN ${freshPendingSql(cutoffs)} THEN 0 ELSE 1 END`,
+      sql`COALESCE(${schema.nodes.providerExistenceCheckedAt}, '')`,
+      schema.nodes.id
+    )
+    .limit(limit);
+}
+
+/**
+ * Stamp the probe before any network I/O, compare-and-set on the stamp read and on the node still
+ * being due, so the node leaves the candidate set even if the lookup hangs or the isolate dies
+ * (`.claude/rules/47`), and two overlapping sweeps never probe the same node within an interval.
+ * Only this sweep writes the column.
+ */
+async function claimProbe(db: NodeDb, node: NodeRow, now: Date, cutoffs: DueCutoffs) {
+  const result = await db
+    .update(schema.nodes)
+    .set({ providerExistenceCheckedAt: now.toISOString() })
+    .where(
+      and(
+        eq(schema.nodes.id, node.id),
+        sql`${schema.nodes.providerExistenceCheckedAt} IS ${node.providerExistenceCheckedAt}`,
+        dueSql(cutoffs)
+      )
+    )
     .run();
   return (result.meta.changes ?? 0) === 1;
 }
@@ -208,14 +245,14 @@ type NodeOutcome =
 
 async function checkNode(
   env: Env,
-  nodeId: string,
+  db: NodeDb,
+  node: NodeRow,
   settings: SweepSettings,
-  deadline: number
+  deadline: number,
+  onProbeStarted: () => void
 ): Promise<NodeOutcome> {
-  const db = drizzle(env.DATABASE, { schema });
-  const [node] = await db.select().from(schema.nodes).where(eq(schema.nodes.id, nodeId)).limit(1);
+  // Defence in depth behind the selection's class guard (`.claude/rules/51`).
   if (
-    !node ||
     node.status !== 'running' ||
     node.nodeRole !== 'deployment' ||
     node.nodeClass !== 'managed' ||
@@ -225,7 +262,12 @@ async function checkNode(
     return { kind: 'skipped' };
   }
   const probeStartedAt = new Date();
-  if (!(await claimProbe(env, node, probeStartedAt))) return { kind: 'skipped' };
+  if (!(await claimProbe(db, node, probeStartedAt, dueCutoffs(probeStartedAt, settings)))) {
+    return { kind: 'skipped' };
+  }
+  // The provider lookups are about to be sent: charge the sweep's lookup budget now, whatever
+  // happens after (`deploymentNodeExistence.maxProbesPerSweep` bounds provider API use).
+  onProbeStarted();
   // An observation about another instance, none yet, or one too old to pair with this
   // answer (inconclusive lookups in between, `STALE_OBSERVATION_FACTOR`) starts a new
   // confirmation. It is stamped with this lookup's start, equal to the probe stamp, so the
@@ -247,6 +289,17 @@ async function checkNode(
   const verdict = await probeDeploymentNodeInstance(env, db, node, signal, { confirming });
 
   if (verdict.kind === 'inconclusive') {
+    // A first not-found too old to be confirmed any more is dropped, so the node is ranked and
+    // scheduled like any other instead of holding a pending slot while lookups keep failing.
+    if (observedAt && stale) {
+      await db
+        .update(schema.nodes)
+        .set({ providerAbsenceObservedAt: null, providerAbsenceInstanceId: null })
+        .where(
+          and(eq(schema.nodes.id, node.id), eq(schema.nodes.providerAbsenceObservedAt, observedAt))
+        )
+        .run();
+    }
     log.warn('deployment_node_existence.inconclusive', {
       nodeId: node.id,
       provider: node.cloudProvider,
@@ -341,6 +394,7 @@ export async function runDeploymentNodeProviderExistenceSweep(
     return result;
   }
   const deadline = Date.now() + settings.sweepBudgetMs;
+  const db = drizzle(env.DATABASE, { schema });
   const rateLimited = new Set<string>();
   const visited = new Set<string>();
   sweep: for (;;) {
@@ -355,7 +409,9 @@ export async function runDeploymentNodeProviderExistenceSweep(
     // Probed nodes are stamped and drop out of the selection; `visited` only guards against a
     // node the claim skipped (another sweep stamped it first) being selected again.
     const page = (
-      await selectDueNodes(env, new Date(), settings, SELECTION_PAGE_SIZE, [...rateLimited])
+      await selectDueNodes(db, dueCutoffs(new Date(), settings), SELECTION_PAGE_SIZE, [
+        ...rateLimited,
+      ])
     ).filter((row) => !visited.has(row.id));
     if (page.length === 0) break;
     for (const row of page) {
@@ -372,7 +428,9 @@ export async function runDeploymentNodeProviderExistenceSweep(
       if (row.cloudProvider && rateLimited.has(row.cloudProvider)) continue;
       let outcome: NodeOutcome;
       try {
-        outcome = await checkNode(env, row.id, settings, deadline);
+        outcome = await checkNode(env, db, row, settings, deadline, () => {
+          result.probed++;
+        });
       } catch (error) {
         // Per-node isolation: one node's failure (a D1 fault, a teardown throw) never stops the
         // sweep. The node was stamped, so it is retried on its next interval.
@@ -384,7 +442,6 @@ export async function runDeploymentNodeProviderExistenceSweep(
         continue;
       }
       if (outcome.kind === 'skipped') continue;
-      result.probed++;
       switch (outcome.kind) {
         case 'present':
           result.present++;

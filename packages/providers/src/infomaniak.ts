@@ -53,6 +53,7 @@ import {
   throwIfProviderRequestAborted,
 } from './provider-fetch';
 import {
+  type ListVMsOptions,
   noopProviderLogger,
   type Provider,
   ProviderError,
@@ -430,7 +431,8 @@ export class InfomaniakProvider implements Provider {
   }
   async listVMs(
     filter?: Record<string, string>,
-    context?: ProviderRequestContext
+    context?: ProviderRequestContext,
+    options?: ListVMsOptions
   ): Promise<VMInstance[]> {
     throwIfProviderRequestAborted(context);
     const s = await this.authenticate(false, context);
@@ -440,9 +442,17 @@ export class InfomaniakProvider implements Provider {
       false,
       context
     );
-    const values = asArray(asRecord(await r?.json(), 'root').servers, 'servers').map((value) =>
-      this.vm(value)
+    const root = asRecord(await r?.json(), 'root');
+    // Nova pages with `servers_links` (rel "next"); this reads the first page only.
+    const links = Array.isArray(root.servers_links) ? root.servers_links : [];
+    const hasNext = links.some(
+      (link) =>
+        typeof link === 'object' && link !== null && (link as { rel?: unknown }).rel === 'next'
     );
+    if (hasNext && options?.requireComplete) {
+      throw new ProviderError(this.name, undefined, 'Server list has more pages; it is incomplete');
+    }
+    const values = asArray(root.servers, 'servers').map((value) => this.vm(value));
     return filter
       ? values.filter((vm) =>
           Object.entries(filter).every(([key, value]) => vm.labels[key] === value)

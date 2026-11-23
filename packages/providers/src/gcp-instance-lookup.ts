@@ -77,6 +77,19 @@ export async function findGcpInstanceInZoneByIdOrName(
     );
     throwIfProviderRequestAborted(context);
     const root = expectObject(await parseProviderJson(res, 'gcp', operation), 'gcp', operation);
+    // Only a real InstanceList counts as an answer: a proxy's `{}` or a list carrying a warning
+    // (other than "this page is empty") is not proof the instance is missing.
+    if (root.kind !== 'compute#instanceList') {
+      throw new ProviderError('gcp', undefined, `${operation}: response is not an instance list`);
+    }
+    const warning = root.warning as { code?: unknown } | undefined;
+    if (warning && warning.code !== 'NO_RESULTS_ON_PAGE') {
+      throw new ProviderError(
+        'gcp',
+        undefined,
+        `${operation}: instance list warning ${String(warning.code)}`
+      );
+    }
     for (const [index, item] of (optionalArray(root, 'items', 'gcp', operation) ?? []).entries()) {
       const instance = validateGcpInstance(item, `${operation}.items[${index}]`);
       if (instance.id === idOrName || instance.name === idOrName) return instance;

@@ -20,8 +20,10 @@ import type { NodeRow } from './strict-node-deletion-shared';
 export const PROVIDER_INSTANCE_ABSENT_MESSAGE_PREFIX = 'Provider instance not found';
 export const PROVIDER_EXISTENCE_RELEASE_SOURCE = 'deployment_node.provider_instance_absent';
 
+/** The node is still this running managed deployment VM incarnation (`.claude/rules/51`). */
 export function sameIncarnationSql(): string {
-  return `status = 'running' AND provider_instance_id = ? AND runtime_incarnation_id IS ?`;
+  return `node_role = 'deployment' AND node_class = 'managed' AND runtime = 'vm'
+    AND status = 'running' AND provider_instance_id = ? AND runtime_incarnation_id IS ?`;
 }
 
 export async function recordExistenceDecision(
@@ -121,11 +123,16 @@ export async function releaseConfirmedAbsentNode(
     await recordExistenceDecision(env, node, 'provider_release_deferred', 'superseded');
     return 'superseded';
   }
-  await recordExistenceDecision(env, node, 'provider_instance_absent_confirmed', 'released', {
-    firstObservedAt: observedAt,
-    confirmedAt: stamp,
-  });
-  log.warn('deployment_node_existence.released', {
+  // The claim is recorded now; the teardown records its own outcome (`deployment_teardown`
+  // destroyed / destroy_failed in `cleanupDeploymentNode`).
+  await recordExistenceDecision(
+    env,
+    node,
+    'provider_instance_absent_confirmed',
+    'teardown_claimed',
+    { firstObservedAt: observedAt, confirmedAt: stamp }
+  );
+  log.warn('deployment_node_existence.teardown_claimed', {
     nodeId: node.id,
     provider: node.cloudProvider,
     providerInstanceId: node.providerInstanceId,
@@ -147,6 +154,11 @@ export async function releaseConfirmedAbsentNode(
     });
     return 'release_failed';
   }
+  log.warn('deployment_node_existence.released', {
+    nodeId: node.id,
+    provider: node.cloudProvider,
+    providerInstanceId: node.providerInstanceId,
+  });
   for (const environment of environments.results) {
     await recordDeploymentEnvironmentLifecycleEventBestEffort(env, {
       projectId: environment.projectId,

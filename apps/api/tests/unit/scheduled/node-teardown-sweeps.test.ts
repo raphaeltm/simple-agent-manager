@@ -98,13 +98,25 @@ describe('runNodeTeardownSweeps', () => {
     expect(mocks.notify).toHaveBeenCalledWith(env, ['app_route_dns_reconciliation']);
   });
 
-  it('still sweeps DNS when the provider-existence sweep throws, and names that failure', async () => {
-    mocks.providerExistence.mockRejectedValue(new Error('provider API down'));
+  it('runs the DNS sweep to completion while the provider-existence sweep is still pending', async () => {
+    let rejectProvider: (error: Error) => void = () => undefined;
+    mocks.providerExistence.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectProvider = reject;
+        })
+    );
     const sweeps = createSweepIsolator(env);
     const waitUntil = vi.fn();
     await runNodeTeardownSweeps(sweeps, env, waitUntil);
-    expect(await (waitUntil.mock.calls.at(-1)?.[0] as Promise<unknown>)).toEqual({ deleted: 2 });
+    const [providerWork, dnsWork] = waitUntil.mock.calls
+      .slice(-2)
+      .map(([p]) => p as Promise<unknown>);
+    // The provider sweep has not settled; the DNS backstop finishes anyway.
+    expect(await dnsWork).toEqual({ deleted: 2 });
     expect(mocks.appRouteDns).toHaveBeenCalledTimes(1);
+    rejectProvider(new Error('provider API down'));
+    expect(await providerWork).toBeUndefined();
     expect(mocks.notify).toHaveBeenCalledWith(env, ['deployment_node_provider_existence']);
   });
 });

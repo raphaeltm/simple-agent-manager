@@ -217,7 +217,7 @@ function createFakeGcp(project: string, defaultZone: string) {
           zoneOf(i) === zonalList[1] &&
           (ids.includes(String(i.id)) || names.includes(String(i.name)))
       );
-      return json(items.length ? { items } : {});
+      return json({ kind: 'compute#instanceList', ...(items.length ? { items } : {}) });
     }
     // `instances.get` takes the instance NAME (documented); a numeric ID is not a name.
     const zonal = new RegExp(`^${base}/zones/([^/]+)/instances/([^/]+)$`).exec(url.pathname);
@@ -450,7 +450,7 @@ describe('a deployment VM deleted at the provider outside SAM', () => {
     expect(hetzner.requests.every((r) => r.token === ACCOUNT_A)).toBe(true);
     expect(decisions(NODE)).toEqual([
       { decision: 'provider_instance_absent_observed', reason: 'first_not_found' },
-      { decision: 'provider_instance_absent_confirmed', reason: 'released' },
+      { decision: 'provider_instance_absent_confirmed', reason: 'teardown_claimed' },
     ]);
   });
 
@@ -685,6 +685,16 @@ describe('what the reconciliation leaves alone', () => {
     expect(nodeRow(NODE)).toMatchObject({ status: 'running', ip_address: IP });
   });
 
+  it('loses the claim when the node stops being a managed deployment VM inside it', async () => {
+    await sweepAt(0);
+    beforeNextBatch = () =>
+      sqlite.prepare("UPDATE nodes SET node_class = 'user-owned' WHERE id = ?").run(NODE);
+    const result = await sweepAt(10);
+    expect(result.superseded).toBe(1);
+    expect(nodeRow(NODE)).toMatchObject({ status: 'running', node_class: 'user-owned' });
+    expect(envRow()).toMatchObject({ status: 'active', node_id: NODE });
+  });
+
   it('never probes a user-owned node, a workspace node, or a node not running', async () => {
     sqlite.prepare("UPDATE nodes SET node_class = 'user-owned' WHERE id = ?").run(NODE);
     await seedNode('5151', { nodeRole: 'workspace', workloadRole: 'workspace' });
@@ -703,7 +713,58 @@ describe('what the reconciliation leaves alone', () => {
 });
 
 describe('bounded and resumable', () => {
+  it('reaches valid work behind a batch of pending absences whose lookups keep failing', async () => {
+    // Two nodes hold a first not-found and then answer 503 forever; a third VM is deleted.
+    // With one lookup per sweep, the failing pair must not keep the deleted one waiting.
+    settings.values.set('deploymentNodeExistence.maxProbesPerSweep', 1);
+    const STUCK = '4444';
+    const DELETED = '4545';
+    await seedNode(STUCK);
+    await seedNode(DELETED);
+    hetzner.addServer(ACCOUNT_A, OTHER_NODE, OTHER_IP);
+    // Each failing node is due on alternate sweeps, so together they fill every slot.
+    const at = (minutes: number) => new Date(T0.getTime() + minutes * MINUTE).toISOString();
+    for (const [id, checkedAt] of [
+      [NODE, at(-10)],
+      [STUCK, at(-5)],
+    ] as const) {
+      sqlite
+        .prepare(
+          'UPDATE nodes SET provider_absence_observed_at = ?, provider_absence_instance_id = ?, provider_existence_checked_at = ? WHERE id = ?'
+        )
+        .run(at(-10), id, checkedAt, id);
+      hetzner.forced.set(id, 503);
+    }
+    sqlite
+      .prepare('UPDATE nodes SET provider_existence_checked_at = ? WHERE id = ?')
+      .run(at(0), OTHER_NODE);
+    let releasedAt: number | undefined;
+    for (let minute = 0; minute <= 120 && releasedAt === undefined; minute += 5) {
+      if ((await sweepAt(minute)).released === 1) releasedAt = minute;
+    }
+    expect(releasedAt, 'the deleted VM was never reached').toBeDefined();
+    expect(releasedAt!).toBeLessThanOrEqual(60);
+    expect(nodeRow(DELETED).status).toBe('deleted');
+    for (const id of [NODE, STUCK]) expect(nodeRow(id).status).toBe('running');
+    // Failing nodes respect their retry interval: never two lookups less than 10 min apart.
+    const lookups = (id: string) =>
+      hetzner.requests.filter((r) => r.path === `/v1/servers/${id}` && r.method === 'GET').length;
+    expect(lookups(NODE)).toBeLessThanOrEqual(releasedAt! / 10 + 1);
+  });
+
+  it('two overlapping sweeps look each node up once', async () => {
+    hetzner.addServer(ACCOUNT_A, NODE);
+    await Promise.all([sweepAt(0), runDeploymentNodeProviderExistenceSweep(env)]);
+    for (const id of [NODE, OTHER_NODE]) {
+      expect(
+        hetzner.requests.filter((r) => r.path === `/v1/servers/${id}`).length,
+        `lookups of ${id}`
+      ).toBe(1);
+    }
+  });
+
   it('probes more nodes than one selection page in a single sweep', async () => {
+    settings.values.set('deploymentNodeExistence.maxProbesPerSweep', 100);
     hetzner.addServer(ACCOUNT_A, NODE);
     for (let i = 0; i < 59; i++) {
       const id = String(6000 + i);
@@ -878,6 +939,38 @@ describe('providers whose lookups cannot prove absence', () => {
     expect(decisions(SCW_NODE)).toContainEqual({
       decision: 'provider_check_inconclusive',
       reason: 'provider_unsupported',
+    });
+  });
+});
+
+describe('the confirming inventory must be complete', () => {
+  it('keeps a node whose account list would be cut short at its page limit', async () => {
+    const DO_NODE = '777001';
+    sqlite.prepare('DELETE FROM deployment_environments').run();
+    sqlite.prepare('DELETE FROM nodes').run();
+    await seedNode(DO_NODE, { cloudProvider: 'digitalocean', vmLocation: 'fra1' });
+    await seedEnvironment(ENV_ID, DO_NODE);
+    // A large account: the by-ID lookup (wrongly) 404s, and the first pages of the list do not
+    // reach the droplet. Like DigitalOcean, the list returns that partial page set unless the
+    // caller requires a complete one, in which case it throws.
+    const provider = {
+      name: 'digitalocean',
+      defaultLocation: 'fra1',
+      locations: ['fra1'],
+      getVM: vi.fn(async () => null),
+      listVMs: vi.fn(async (_l: unknown, _c: unknown, options?: { requireComplete?: boolean }) => {
+        if (options?.requireComplete)
+          throw new Error('Droplet list exceeds 20 pages; it is incomplete');
+        return [{ id: '1' }];
+      }),
+    };
+    accounts.build = () => provider;
+    for (let minute = 0; minute <= 60; minute += 10) await sweepAt(minute);
+    expect(nodeRow(DO_NODE).status).toBe('running');
+    expect(provider.listVMs).toHaveBeenCalled();
+    expect(decisions(DO_NODE)).toContainEqual({
+      decision: 'provider_check_inconclusive',
+      reason: 'inventory_unavailable',
     });
   });
 });

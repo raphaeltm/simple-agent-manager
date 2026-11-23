@@ -271,6 +271,16 @@ export interface VolumeInstance {
   labels: Record<string, string>;
 }
 
+/** Options for `Provider.listVMs`. */
+export interface ListVMsOptions {
+  /**
+   * Throw instead of returning a list cut short at a page limit, so the caller can treat "not in
+   * the list" as proof that an instance does not exist. Providers whose listing already fails at
+   * its page limit (Hetzner, GCP) ignore it.
+   */
+  readonly requireComplete?: boolean;
+}
+
 /** Optional caller-owned lifecycle context for a provider operation. */
 export interface ProviderRequestContext {
   /** Cancels pending HTTP, retry, polling, and follow-up work for this operation. */
@@ -336,7 +346,11 @@ export interface Provider extends ProviderVmDeletionRequests {
   ): Promise<VMInstance | null>;
 
   /** List VMs with optional label-based filtering */
-  listVMs(labels?: Record<string, string>, context?: ProviderRequestContext): Promise<VMInstance[]>;
+  listVMs(
+    labels?: Record<string, string>,
+    context?: ProviderRequestContext,
+    options?: ListVMsOptions
+  ): Promise<VMInstance[]>;
 
   /** Power off a VM */
   powerOff(id: string, context?: ProviderRequestContext): Promise<void>;

@@ -10,7 +10,8 @@
  * decryption happens either). Every provider's `getVM` returns null only for its API's "not found" (Hetzner, Vultr,
  * DigitalOcean and Infomaniak a 404 on the instance; Scaleway a 404 in every zone; UpCloud its
  * not-found code; GCP a 404 in every zone and no match in a project-wide list whose every zone
- * answered, plus an unfiltered GET in the node's own zone) and throws on everything else.
+ * answered, plus two unfiltered reads of the node's own zone: the instance GET and an ID/name-filtered
+ * list) and throws on everything else.
  * Scaleway is never proven absent (`ABSENCE_UNPROVABLE_PROVIDERS`); an Infomaniak node outside its
  * client's region is never proven absent (`lookupCoveredLocations`).
  *
@@ -225,7 +226,8 @@ async function confirmAbsentFromInventory(
 ): Promise<ProviderExistenceVerdict> {
   let instances;
   try {
-    instances = await provider.listVMs(undefined, { signal });
+    // Complete or nothing: a list cut short at a page limit is not proof (`requireComplete`).
+    instances = await provider.listVMs(undefined, { signal }, { requireComplete: true });
   } catch (error) {
     const reason = classifyProviderLookupFailure(error, signal);
     return {
