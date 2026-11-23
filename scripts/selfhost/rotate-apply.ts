@@ -78,7 +78,7 @@ async function resumeStaged(ctx: StepContext, bundleId: string): Promise<void> {
   // Stopped after writing the staged bundle but before making it current: the bundle it was
   // sealed over is still current, so finish that step.
   if (head.bundle.bundleId !== bundleId && step.stagedOver === head.bundle.bundleId) {
-    await store.makeCurrent(bundleId);
+    await store.makeCurrent(bundleId, head.bundle.bundleId);
     head = await store.head();
   }
   if (head.bundle.bundleId !== bundleId) {
@@ -101,7 +101,7 @@ async function stageAndMakeCurrent(ctx: StepContext, patch: Patch, then: Phase):
   step.phase = 'staging';
   ctx.save();
   // Writes it and makes it current (bundle-head.ts): the deploy runs with it whatever the clock.
-  await store.write(bundle);
+  await store.write(bundle, current.basis);
   const nowCurrent = (await store.head()).bundle.bundleId;
   if (nowCurrent !== bundle.bundleId) {
     throw new ApplyFailedError(

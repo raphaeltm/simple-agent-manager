@@ -247,6 +247,26 @@ describe('the bucket copy of the bundles', () => {
     expect(remote.objects.has(`sam-box/bundles/${newer!.bundleId}.json`)).toBe(true);
   });
 
+  it('waits for a head commit in progress before reconciling (head lock)', async () => {
+    const provider = fileProvider();
+    const remote = memoryBucket();
+    const local = openBundleStore({ dir: join(dir, 'locked/bundles') });
+    await local.write(await sealed(provider, '2026-11-01T00:00:00Z'));
+    let reconciled = false;
+    await local.withHeadLock(async () => {
+      // Another operation (a rotation committing its head) holds the lock: reconcile must not
+      // read the box's head and mutate the bucket until it is done.
+      const pending = reconcileBundleMirror(local, remote, () => undefined, provider).then(() => {
+        reconciled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(reconciled).toBe(false);
+      void pending;
+    });
+    await vi.waitFor(() => expect(reconciled).toBe(true), { timeout: 5000 });
+    expect(remote.list('sam-box/bundles/')).toHaveLength(1);
+  });
+
   it('never prunes or seals over another installation, on every sealing path', async () => {
     const provider = fileProvider();
     const remote = memoryBucket();

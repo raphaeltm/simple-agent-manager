@@ -364,6 +364,18 @@ export async function reconcileBundleMirror(
   log: (message: string) => void,
   provider: KeyProvider
 ): Promise<void> {
+  // Under the head lock: a rotation or switch committing a newer head meanwhile (locally and to
+  // the bucket) must not have it overwritten with this snapshot's older head, nor its new bundle
+  // pruned from the bucket. Nothing below takes the lock again.
+  await local.withHeadLock(() => reconcileLocked(local, bucket, log, provider));
+}
+
+async function reconcileLocked(
+  local: BundleStore,
+  bucket: BoxBucket,
+  log: (message: string) => void,
+  provider: KeyProvider
+): Promise<void> {
   await assertBoxNotBehindBucket(local, bucket, provider);
   const localIds = new Set(await local.listIds());
   const localHead = await local.readHead();

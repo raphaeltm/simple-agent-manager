@@ -23,7 +23,7 @@ import {
 } from '../../deploy/selfhost/key-agent/bundle.ts';
 import type { KeyProvider } from '../../deploy/selfhost/key-agent/provider.ts';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
-import { assertSecretsMatchHead, commitHead, keptBundleIds } from './bundle-head';
+import { assertSecretsMatchHead, type BundleHead, commitHead, keptBundleIds } from './bundle-head';
 import {
   applyKeyChoice,
   explicitKeyProvider,
@@ -186,15 +186,24 @@ export function archiveJournal(stateDir: string, journal: Journal): string {
 export interface RotationStore {
   provider: KeyProvider;
   settings: KeyServiceSettings;
-  /** The current bundle (bundle-head.ts) and its contents: what the next deploy runs with. */
-  head(): Promise<{ bundle: SealedBundle; secrets: Secrets }>;
+  /**
+   * The current bundle (bundle-head.ts) and its contents: what the next deploy runs with.
+   * `basis` is the head that named it (null on a box without one): pass it to write().
+   */
+  head(): Promise<{ bundle: SealedBundle; secrets: Secrets; basis: BundleHead | null }>;
   hasBundle(bundleId: string): Promise<boolean>;
   /** Seals in memory and proves the result opens to the same secrets. Writes nothing. */
   seal(secrets: Secrets): Promise<SealedBundle>;
-  /** Writes a sealed bundle and makes it current: the next deploy runs with it. */
-  write(bundle: SealedBundle): Promise<void>;
-  /** Makes a bundle already in the store current (a resumed write that stopped in between). */
-  makeCurrent(bundleId: string): Promise<void>;
+  /**
+   * Writes a sealed bundle and makes it current, only if the head is still `basis` (the head its
+   * secrets were derived from): a deploy that moved the head meanwhile is never undone.
+   */
+  write(bundle: SealedBundle, basis: BundleHead | null): Promise<void>;
+  /**
+   * Makes a bundle already in the store current (a resumed write that stopped in between), only
+   * if the bundle `over` it was sealed over is still current.
+   */
+  makeCurrent(bundleId: string, over: string): Promise<void>;
   prune(keepIds: readonly string[]): Promise<string[]>;
   writeSnapshot(rotationId: string, name: string, secrets: Secrets): Promise<void>;
   readSnapshot(rotationId: string, name: string): Promise<Secrets>;
@@ -244,7 +253,7 @@ export function openRotationStore(
       if (!bundle) throw new Error(`no sealed bundle in ${settings.bundles.location}`);
       const secrets = await openBundle(bundle, keyProvider);
       assertSecretsMatchHead(head, secrets);
-      return { bundle, secrets };
+      return { bundle, secrets, basis: head };
     },
     hasBundle: async (bundleId) => (await settings.bundles.read(bundleId)) !== null,
     async seal(secrets) {
@@ -256,17 +265,22 @@ export function openRotationStore(
       }
       return bundle;
     },
-    async write(bundle) {
+    async write(bundle, basis) {
       // A replaceable box: never seal over a later seal the bucket records (verified heads).
       await assertNotBehindBucket(effectiveBox, stateDir, keyProvider);
-      const { head } = await currentBundle(settings.bundles, keyProvider);
       await settings.bundles.write(bundle);
-      // The head, not the bundle's date, makes it current (bundle-head.ts).
-      await commitHead(settings.bundles, bundle, keyProvider, head);
+      // The head, not the bundle's date, makes it current (bundle-head.ts); commitHead refuses
+      // if the head moved away from `basis` since the secrets were read.
+      await commitHead(settings.bundles, bundle, keyProvider, basis);
     },
-    async makeCurrent(bundleId) {
+    async makeCurrent(bundleId, over) {
       await assertNotBehindBucket(effectiveBox, stateDir, keyProvider);
       const { head, bundles } = await currentBundle(settings.bundles, keyProvider);
+      if (head?.bundleId !== over) {
+        throw new Error(
+          `bundle ${bundleId} was sealed over ${over}, which is no longer current; not making it current`
+        );
+      }
       const bundle = bundles.find((b) => b.bundleId === bundleId);
       if (!bundle) throw new Error(`no sealed bundle ${bundleId} in ${settings.bundles.location}`);
       // Opens under this key and carries its own installation, as any bundle made current must.

@@ -16,6 +16,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -350,8 +351,9 @@ describe('a head that is not genuine fails closed', () => {
     vi.stubEnv('PATH', env.PATH);
     vi.stubEnv('FAKE_GCS_ROOT', gcsRoot);
     const store = openRotationStore(boxOf(envA), stateA);
-    const next = await store.seal((await store.head()).secrets);
-    await expect(store.write(next)).rejects.toThrow(/edited after it was sealed/);
+    const base = await store.head();
+    const next = await store.seal(base.secrets);
+    await expect(store.write(next, base.basis)).rejects.toThrow(/edited after it was sealed/);
     writeFileSync(
       bucketHeadPath(),
       await sealHead(
@@ -363,12 +365,18 @@ describe('a head that is not genuine fails closed', () => {
         provider
       )
     );
-    await expect(store.write(next)).rejects.toThrow(/a later seal than this box's/);
+    await expect(store.write(next, base.basis)).rejects.toThrow(/a later seal than this box's/);
     expect(bundlesOn(stateA).map((b) => b.bundleId)).not.toContain(next.bundleId);
     // A seal that read the head before another one moved it does not overwrite it.
     writeFileSync(bucketHeadPath(), genuine);
     const stale = headHint(genuine);
-    await store.write(next);
+    await store.write(next, base.basis);
+    // A rotation whose secrets were read before that write (a deploy moved the head meanwhile)
+    // is refused instead of undoing it.
+    const derivedEarlier = await store.seal(base.secrets);
+    await expect(store.write(derivedEarlier, base.basis)).rejects.toThrow(
+      /the current sealed bundle changed while/
+    );
     await expect(commitHead(store.settings.bundles, withValue, provider, stale)).rejects.toThrow(
       /the current sealed bundle changed while/
     );
@@ -566,6 +574,11 @@ describe('the head lock', () => {
     writeFileSync(lock, '4194399\n');
     await expect(withLockFile(lock, async () => 'ran')).resolves.toBe('ran');
     expect(existsSync(lock)).toBe(false);
+    // A lock left empty by a crash between create and write is broken once it is a few seconds old.
+    writeFileSync(lock, '');
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(lock, old, old);
+    await expect(withLockFile(lock, async () => 'ran', 200)).resolves.toBe('ran');
     // A live holder (this process) is waited for, then refused with the holder named.
     writeFileSync(lock, `${process.pid}\n`);
     await expect(withLockFile(lock, async () => 'ran', 200)).rejects.toThrow(

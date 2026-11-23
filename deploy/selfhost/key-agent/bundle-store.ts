@@ -57,6 +57,8 @@ export interface BundleStore {
 
 /** How long to wait for another process's head lock before giving up. */
 export const DEFAULT_HEAD_LOCK_WAIT_MS = 30_000;
+/** A lock file with no pid in it this long after it was made is a crash between create and write. */
+const EMPTY_LOCK_STALE_MS = 5_000;
 const HEAD_LOCK_POLL_MS = 50;
 
 function pidAlive(pid: number): boolean {
@@ -71,8 +73,11 @@ function pidAlive(pid: number): boolean {
 
 /**
  * An exclusive lock file holding the owner's pid (O_EXCL create). A lock whose pid is no longer
- * running is broken (a process that died while holding it); a live holder is waited for, up to
- * `waitMs`. Same host only: the head, like the bundles, belongs to one box.
+ * running is broken (a process that died while holding it), as is one left with no pid for
+ * EMPTY_LOCK_STALE_MS; a live holder is waited for, up to `waitMs`. Same host and pid namespace
+ * only: the head, like the bundles, belongs to one box. Known limits (all need a crash first): a
+ * dead holder's pid reused by an unrelated process keeps the lock until it is removed by hand
+ * (the error says how), and two waiters breaking the same stale lock at once can both proceed.
  */
 export async function withLockFile<T>(
   lockPath: string,
@@ -101,19 +106,24 @@ export async function withLockFile<T>(
       }
     }
     let holder = Number.NaN;
+    let ageMs = 0;
     try {
-      holder = Number(readFileSync(lockPath, 'utf8').trim());
+      const text = readFileSync(lockPath, 'utf8').trim();
+      holder = /^\d+$/.test(text) ? Number(text) : Number.NaN;
+      ageMs = Date.now() - lstatSync(lockPath).mtimeMs;
     } catch {
       continue; // released between our attempt and this read
     }
-    if (Number.isInteger(holder) && holder > 0 && !pidAlive(holder)) {
+    const valid = Number.isInteger(holder) && holder > 0;
+    if ((valid && !pidAlive(holder)) || (!valid && ageMs > EMPTY_LOCK_STALE_MS)) {
       rmSync(lockPath, { force: true });
       continue;
     }
     if (Date.now() > deadline) {
       throw new Error(
-        `${lockPath} is held by process ${Number.isNaN(holder) ? '(unreadable)' : holder}: ` +
-          'another deploy, rotation or switch is changing the sealed secrets. Wait for it, then run again'
+        `${lockPath} is held by process ${valid ? holder : '(none recorded)'}: another deploy, ` +
+          'rotation or switch is changing the sealed secrets. Wait for it, then run again. If ' +
+          'none is running, remove that file.'
       );
     }
     await new Promise((resolve) => setTimeout(resolve, HEAD_LOCK_POLL_MS));
