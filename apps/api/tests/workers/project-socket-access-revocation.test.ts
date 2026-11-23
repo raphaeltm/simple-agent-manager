@@ -204,7 +204,7 @@ describe('project sockets close when project access is revoked', () => {
     const onC = await connect(projectC, retryUser);
     const onD = await connect(projectD, retryUser);
 
-    // The first attempt cannot close project D's sockets: the real RPC method throws for that
+    // Closing project D's sockets fails until released: the real RPC method throws for that
     // object only (a per-instance flag read by a prototype wrapper, so RPC still dispatches).
     const stubD = testEnv.PROJECT_DATA.get(testEnv.PROJECT_DATA.idFromName(projectD));
     type Closer = { closeBrowserSocketsForActor: (...args: unknown[]) => number };
@@ -219,31 +219,48 @@ describe('project sockets close when project access is revoked', () => {
       };
       (instance as unknown as { failClose: boolean }).failClose = true;
     });
-    const first = await call(ADMIN, 'PATCH', `/api/admin/users/${retryUser}`, {
-      action: 'suspend',
-    });
-    expect(first.status).toBe(503);
-    await settle(() => onC.closeCode() !== null, 'project C socket close');
-    expect(onD.closeCode()).toBeNull();
+    const suspend = () =>
+      call(ADMIN, 'PATCH', `/api/admin/users/${retryUser}`, { action: 'suspend' });
+    try {
+      expect((await suspend()).status).toBe(503);
+      await settle(() => onC.closeCode() !== null, 'project C socket close');
+      expect(onD.closeCode()).toBeNull();
 
-    // Offboarding then removes the user from project D; its own close failed as well.
-    await testEnv.DATABASE.prepare(
-      `UPDATE project_members SET status = 'removed', removed_at = ?, updated_at = ?
-       WHERE project_id = ? AND user_id = ?`
-    )
-      .bind(new Date().toISOString(), new Date().toISOString(), projectD, retryUser)
-      .run();
-    await runInDurableObject(stubD, (instance) => {
-      (instance as unknown as { failClose: boolean }).failClose = false;
-      (Object.getPrototypeOf(instance) as Closer).closeBrowserSocketsForActor = originalClose!;
-    });
+      // Offboarding then removes the user from project D; its own close failed as well.
+      await testEnv.DATABASE.prepare(
+        `UPDATE project_members SET status = 'removed', removed_at = ?, updated_at = ?
+         WHERE project_id = ? AND user_id = ?`
+      )
+        .bind(new Date().toISOString(), new Date().toISOString(), projectD, retryUser)
+        .run();
+      // Other account writes between retries must not move the suspension start.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(
+        (await call(ADMIN, 'PATCH', `/api/admin/users/${retryUser}/role`, { role: 'admin' })).status
+      ).toBe(200);
+      // A retry that fails again, then one that succeeds.
+      expect((await suspend()).status).toBe(503);
+      expect(onD.closeCode()).toBeNull();
+    } finally {
+      await runInDurableObject(stubD, (instance) => {
+        (instance as unknown as { failClose: boolean }).failClose = false;
+        if (originalClose)
+          (Object.getPrototypeOf(instance) as Closer).closeBrowserSocketsForActor = originalClose;
+      });
+    }
 
-    const retry = await call(ADMIN, 'PATCH', `/api/admin/users/${retryUser}`, {
-      action: 'suspend',
-    });
-    expect(retry.status).toBe(200);
+    expect((await suspend()).status).toBe(200);
     await settle(() => onD.closeCode() !== null, 'project D socket close on retry');
     expect(onD.closeCode()).toBe(ACCESS_REVOKED_CLOSE_CODE);
+
+    // Approving clears the suspension start.
+    expect(
+      (await call(ADMIN, 'PATCH', `/api/admin/users/${retryUser}`, { action: 'approve' })).status
+    ).toBe(200);
+    const row = await testEnv.DATABASE.prepare('SELECT suspended_at FROM users WHERE id = ?')
+      .bind(retryUser)
+      .first<{ suspended_at: number | null }>();
+    expect(row?.suspended_at).toBeNull();
   });
 
   it('the object refuses a socket the API did not attribute to a user', async () => {

@@ -20,6 +20,12 @@ that project stayed open.
       could exhaust its subrequest budget before reaching a later project. Bounding by the
       suspension start keeps the fan-out at the active rows plus the removals made while the
       account was suspended.
+- [x] Security review of 29e4c1dce (HIGH): the epoch was the account's previous `updated_at`, but
+      every retry and role change rewrites it, so a second failed retry lost the removal. Migration
+      0270 adds nullable `users.suspended_at`, set only on the transition into suspension, kept on
+      retries and cleared on approval; an account suspended before the column falls back to
+      `updated_at` once and is then pinned. The Workers test now fails twice, changes the role in
+      between, and succeeds on the third attempt; it fails if the route uses `updated_at`.
 - [x] Real-SQLite unit regressions: retry after removal; only active and since-suspension removals
       are targeted (removed-before, invited and project-suspended rows are not; another user never);
       paging past the page size. Real Workers test through the admin route: injected close failure

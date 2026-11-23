@@ -115,6 +115,7 @@ adminRoutes.patch('/users/:userId', jsonValidator(AdminUserActionSchema), async 
       id: schema.users.id,
       role: schema.users.role,
       status: schema.users.status,
+      suspendedAt: schema.users.suspendedAt,
       updatedAt: schema.users.updatedAt,
     })
     .from(schema.users)
@@ -132,15 +133,23 @@ adminRoutes.patch('/users/:userId', jsonValidator(AdminUserActionSchema), async 
 
   const newStatus: UserStatus = body.action === 'approve' ? 'active' : 'suspended';
   const now = new Date();
-  // Suspending an already suspended account is a retry: keep the original start, read before
-  // this write moves `updatedAt`, so memberships removed since then are still closed.
+  // Suspending an already suspended account is a retry: keep the original start, so memberships
+  // removed since then are still closed however many retries or other account edits came between.
+  // An account suspended before `suspended_at` existed falls back to `updated_at` once.
   const suspendedSince =
-    target.status === 'suspended' && target.updatedAt instanceof Date ? target.updatedAt : now;
+    target.status !== 'suspended'
+      ? now
+      : target.suspendedAt instanceof Date
+        ? target.suspendedAt
+        : target.updatedAt instanceof Date
+          ? target.updatedAt
+          : now;
 
   await db
     .update(schema.users)
     .set({
       status: newStatus,
+      suspendedAt: newStatus === 'suspended' ? suspendedSince : null,
       updatedAt: now,
     })
     .where(eq(schema.users.id, userId));
