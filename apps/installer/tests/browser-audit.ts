@@ -453,7 +453,7 @@ async function auditViewport(
   await page.screenshot({ path: `${output}/installer-privacy-${label}.png`, fullPage: true });
   screenshots++;
   await page.goto(baseUrl + '/self-host.html');
-  await expect(page.getByRole('heading', { name: '1. Get the source' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '2. Get the source' })).toBeVisible();
   if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth))
     throw new Error(`Self-host guide overflow ${label}`);
   await page.screenshot({

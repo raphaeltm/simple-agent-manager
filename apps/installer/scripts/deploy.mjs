@@ -51,6 +51,8 @@ if (domain && !/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(domain))
 if (!['preserve', 'bootstrap', 'full'].includes(mode)) throw new Error('Invalid installer mode');
 const api = createApi({ token, base, registrationToken: process.env.OAUTH_REGISTRATION_TOKEN });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// A client's secret is shown once, at creation, and otherwise lives only on the installer Worker.
+const OAUTH_SECRET_MISSING = `OAuth secret missing. An OAuth client named ${name} already exists, but its secret is not available. Delete that client (run remove with REMOVE_OAUTH_CLIENT=true), or rotate its secret in Cloudflare and supply OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET.`;
 const template = JSON.parse(await readFile('wrangler.json', 'utf8'));
 let existing;
 try {
@@ -244,10 +246,7 @@ async function createOAuthClient(desired) {
       if (!(error instanceof ApiFailure) || error.status < 500 || attempt >= attempts) throw error;
     }
     await sleep(Number(process.env.OAUTH_CLIENT_CREATE_RETRY_MS || 15000));
-    if (await findOAuthClient())
-      throw new Error(
-        'OAuth secret missing. Supply the existing private client secret or rotate it in Cloudflare.'
-      );
+    if (await findOAuthClient()) throw new Error(OAUTH_SECRET_MISSING);
   }
 }
 // Cloudflare rejected client creation (observed 2026-11-08 in production: POST
@@ -299,10 +298,7 @@ async function prepareOAuth({ deferMutation = false } = {}) {
   }
   if (!clientId || !matchesOAuthClient(client, desired))
     throw new Error('OAuth client scope/callback configuration was not confirmed');
-  if (!clientSecret && !ready)
-    throw new Error(
-      'OAuth secret missing. Supply the existing private client secret or rotate it in Cloudflare.'
-    );
+  if (!clientSecret && !ready) throw new Error(OAUTH_SECRET_MISSING);
   if (process.env.OAUTH_CLIENT_ID && !clientSecret)
     throw new Error('An explicit OAuth client override also requires its private secret');
   return { OAUTH_CLIENT_ID: clientId, OAUTH_CLIENT_SECRET: clientSecret };
