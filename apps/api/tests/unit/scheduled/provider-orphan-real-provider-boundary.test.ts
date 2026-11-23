@@ -386,7 +386,7 @@ describe('provider orphan reconciliation — real provider delete boundaries', (
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       const method = (init?.method ?? 'GET').toUpperCase();
-      if (method === 'GET' && url.endsWith('/server'))
+      if (method === 'GET' && new URL(url).pathname.endsWith('/server'))
         return json({
           servers: {
             server: [

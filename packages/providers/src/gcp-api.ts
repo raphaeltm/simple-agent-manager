@@ -75,6 +75,8 @@ export async function pollGcpOperation(
 type GcpAggregatedInstancesPage = {
   items?: Record<string, GcpAggregatedScope>;
   nextPageToken?: string;
+  /** Scopes the response says it could not read; the page is then incomplete. */
+  unreachables?: string[];
 };
 
 /**

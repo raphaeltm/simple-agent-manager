@@ -160,3 +160,44 @@ describe('UpCloud lifecycle edge cases', () => {
     ).resolves.toEqual([]);
   });
 });
+
+describe('UpCloud server listing pages', () => {
+  const page = (offset: number, count: number) =>
+    Array.from({ length: count }, (_, i) => server({ uuid: `srv-${offset + i}` }));
+
+  it('reads every page with limit and offset', async () => {
+    const urls: string[] = [];
+    useFetch((url) => {
+      urls.push(String(url));
+      const offset = Number(new URL(String(url)).searchParams.get('offset'));
+      return json({ servers: { server: offset < 200 ? page(offset, 100) : page(offset, 7) } });
+    });
+    const vms = await new UpCloudProvider('u', 'p').listVMs();
+    expect(vms).toHaveLength(207);
+    expect(urls.map((u) => new URL(u).search)).toEqual([
+      '?limit=100&offset=0',
+      '?limit=100&offset=100',
+      '?limit=100&offset=200',
+    ]);
+  });
+
+  it('stops when a page adds no new server (parameters ignored)', async () => {
+    let calls = 0;
+    useFetch(() => {
+      calls += 1;
+      return json({ servers: { server: page(0, 150) } });
+    });
+    expect(await new UpCloudProvider('u', 'p').listVMs()).toHaveLength(150);
+    expect(calls).toBe(2);
+  });
+
+  it('with requireComplete throws at the page limit instead of returning a partial list', async () => {
+    useFetch((url) => {
+      const offset = Number(new URL(String(url)).searchParams.get('offset'));
+      return json({ servers: { server: page(offset, 100) } });
+    });
+    await expect(
+      new UpCloudProvider('u', 'p').listVMs(undefined, undefined, { requireComplete: true })
+    ).rejects.toThrow(/incomplete/);
+  });
+});

@@ -56,7 +56,8 @@ beforeEach(() => {
       );
     if (url.endsWith('/account'))
       return new Response(JSON.stringify({ account: { username: 'u' } }));
-    if (url.endsWith('/server') && method === 'GET')
+    // List servers is paged with `limit`/`offset` (https://developers.upcloud.com/1.3/8-servers/).
+    if (new URL(url).pathname.endsWith('/server') && method === 'GET')
       return new Response(JSON.stringify({ servers: { server: [] } }));
     if (url.endsWith('/server') && method === 'POST')
       return new Response(JSON.stringify({ server: server() }));

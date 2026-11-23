@@ -167,7 +167,9 @@ async function findAggregatedInstance(
       headers,
       'findInstanceByIdOrName.aggregated',
       (data) => {
-        if (found || !data.items) return;
+        if (found) return;
+        unreachable.push(...(data.unreachables ?? []));
+        if (!data.items) return;
         for (const [scopeKey, scopeData] of Object.entries(data.items)) {
           if (scopeData.warning?.code === GCP_UNREACHABLE_WARNING) unreachable.push(scopeKey);
           for (const instance of scopeData.instances || []) {
@@ -225,6 +227,7 @@ export async function listGcpInstances(
       headers,
       'listVMs.aggregated',
       (data) => {
+        unreachable.push(...(data.unreachables ?? []));
         for (const [scopeKey, scopeData] of Object.entries(data.items ?? {})) {
           if (scopeData.warning?.code === GCP_UNREACHABLE_WARNING) unreachable.push(scopeKey);
           results.push(...(scopeData.instances ?? []).map((i) => gcpInstanceToVM(i)));

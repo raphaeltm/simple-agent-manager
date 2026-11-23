@@ -10,6 +10,7 @@ import {
   throwIfProviderRequestAborted,
 } from './provider-fetch';
 import type {
+  ListVMsOptions,
   Provider,
   ProviderLogger,
   ProviderOfferingListOptions,
@@ -128,6 +129,10 @@ export interface UpCloudProviderRuntimeOptions {
   stopTimeoutSeconds?: number;
   logger?: ProviderLogger;
 }
+/** Servers read per `GET /server` page, and the page limit of one listing. */
+const UPCLOUD_LIST_PAGE_SIZE = 100;
+const UPCLOUD_LIST_MAX_PAGES = 50;
+
 export class UpCloudProvider implements Provider {
   readonly name = 'upcloud';
   readonly locations = UPCLOUD_LOCATIONS;
@@ -246,15 +251,40 @@ export class UpCloudProvider implements Provider {
   }
   async listVMs(
     labels?: Record<string, string>,
-    context?: ProviderRequestContext
+    context?: ProviderRequestContext,
+    options?: ListVMsOptions
   ): Promise<VMInstance[]> {
     throwIfProviderRequestAborted(context);
-    const response = await this.request('/server', {}, context);
-    const servers = validateUpCloudServersResponse(
-      await parseProviderJson(response, 'upcloud', 'listVMs'),
-      'listVMs'
-    );
-    return servers.filter((server) => matchesUpCloudLabels(server.labels, labels)).map(toUpCloudVM);
+    // `GET /server` is paged with `limit` and `offset`
+    // (https://developers.upcloud.com/1.3/8-servers/), so read every page. Servers are keyed by
+    // UUID: a page that adds none (an API that ignored the parameters) ends the walk.
+    const byUuid = new Map<string, ReturnType<typeof validateUpCloudServersResponse>[number]>();
+    for (let page = 0; page < UPCLOUD_LIST_MAX_PAGES; page += 1) {
+      const query = `?limit=${UPCLOUD_LIST_PAGE_SIZE}&offset=${page * UPCLOUD_LIST_PAGE_SIZE}`;
+      const response = await this.request(`/server${query}`, {}, context);
+      const servers = validateUpCloudServersResponse(
+        await parseProviderJson(response, 'upcloud', 'listVMs'),
+        'listVMs'
+      );
+      const before = byUuid.size;
+      for (const server of servers) byUuid.set(server.uuid, server);
+      if (servers.length < UPCLOUD_LIST_PAGE_SIZE || byUuid.size === before) {
+        return [...byUuid.values()]
+          .filter((server) => matchesUpCloudLabels(server.labels, labels))
+          .map(toUpCloudVM);
+      }
+    }
+    if (options?.requireComplete) {
+      throw new ProviderError(
+        'upcloud',
+        undefined,
+        `Server list exceeds ${UPCLOUD_LIST_MAX_PAGES} pages; it is incomplete`
+      );
+    }
+    this.logger.warn('upcloud.list_truncated', { maxPages: UPCLOUD_LIST_MAX_PAGES });
+    return [...byUuid.values()]
+      .filter((server) => matchesUpCloudLabels(server.labels, labels))
+      .map(toUpCloudVM);
   }
   async powerOff(id: string, context?: ProviderRequestContext): Promise<void> {
     throwIfProviderRequestAborted(context);

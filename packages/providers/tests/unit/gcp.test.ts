@@ -962,6 +962,21 @@ describe('GcpProvider', () => {
       await expect(provider.listVMs()).rejects.toThrow(/unreachable/);
     });
 
+    it('still finds a live instance in a reachable scope when the response lists unreachables', async () => {
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/aggregated/instances')) {
+          return new Response(
+            JSON.stringify({
+              items: { 'zones/us-central1-a': { instances: [gcpInstance({ id: '4242' })] } },
+              unreachables: ['zones/asia-east2-c'],
+            })
+          );
+        }
+        return new Response(JSON.stringify({ error: { message: 'Not found' } }), { status: 404 });
+      });
+      expect((await provider.getVM('4242'))?.id).toBe('4242');
+    });
+
     it('still finds an instance in a reachable scope when another scope is unreachable', async () => {
       globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
         if (url.includes('/aggregated/instances')) {

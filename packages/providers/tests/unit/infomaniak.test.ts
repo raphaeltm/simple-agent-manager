@@ -138,6 +138,27 @@ describe('InfomaniakProvider', () => {
     );
   });
 
+  it.each([
+    ['not an array', { href: 'x' }],
+    ['an entry without rel', [{ href: 'x' }]],
+  ])('listVMs with requireComplete rejects servers_links that is %s', async (_label, links) => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(auth())
+      .mockResolvedValueOnce(json({ servers: [], servers_links: links }));
+    const provider = new InfomaniakProvider('id', 'secret', { authUrl: AUTH_URL });
+    await expect(provider.listVMs(undefined, undefined, { requireComplete: true })).rejects.toThrow(
+      /malformed/
+    );
+  });
+
+  it('listVMs with requireComplete accepts a single complete page', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(auth())
+      .mockResolvedValueOnce(json({ servers: [], servers_links: [] }));
+    const provider = new InfomaniakProvider('id', 'secret', { authUrl: AUTH_URL });
+    expect(await provider.listVMs(undefined, undefined, { requireComplete: true })).toEqual([]);
+  });
+
   it('requires detach before grow-only resize', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(auth())
