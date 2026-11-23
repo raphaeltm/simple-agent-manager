@@ -17,6 +17,10 @@ on:
         type: choice
         options: [staging, production]
         default: staging
+      keep_recipe_installer:
+        description: 'Staging only: leave the installer the documented recipe deploys in place for a manual check (the next run removes it)'
+        type: boolean
+        default: false
       mode:
         description: 'Installer capability mode (preserve keeps the currently deployed mode and consent scopes)'
         type: choice
@@ -76,6 +80,36 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
           INSTALLER_ENVIRONMENT: staging
+      # The recipe in the public installer guide, run as written: no domain, mode or commit
+      # is supplied, so the defaults a self-hoster gets are what is tested. It uses its own
+      # installer name so the staging installer below is untouched. Removing first clears
+      # anything a failed run left behind and makes every deploy a first deploy.
+      - name: Documented own-account recipe (remove, deploy, check)
+        if: (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging') || (github.event_name != 'workflow_dispatch' && github.ref != 'refs/heads/main')
+        run: |
+          unset GITHUB_SHA
+          pnpm --filter @simple-agent-manager/installer run remove
+          pnpm --filter @simple-agent-manager/installer run deploy
+          pnpm --filter @simple-agent-manager/installer run check-live
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          INSTALLER_ENVIRONMENT: recipe-check
+          REMOVE_OAUTH_CLIENT: 'true'
+          # The staging deployment token cannot manage OAuth clients; a self-hoster's
+          # single token can, and then this variable is not needed.
+          OAUTH_REGISTRATION_TOKEN: ${{ secrets.OAUTH_REGISTRATION_TOKEN }}
+      - name: Remove the recipe installer
+        if: >-
+          always() && !inputs.keep_recipe_installer &&
+          ((github.event_name == 'workflow_dispatch' && inputs.environment == 'staging') || (github.event_name != 'workflow_dispatch' && github.ref != 'refs/heads/main'))
+        run: pnpm --filter @simple-agent-manager/installer run remove
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          INSTALLER_ENVIRONMENT: recipe-check
+          REMOVE_OAUTH_CLIENT: 'true'
+          OAUTH_REGISTRATION_TOKEN: ${{ secrets.OAUTH_REGISTRATION_TOKEN }}
       - name: Deploy isolated installer and configure OAuth
         run: pnpm --filter @simple-agent-manager/installer run deploy
         env:
