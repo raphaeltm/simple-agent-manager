@@ -41,6 +41,7 @@ import {
   throwIfProviderRequestAborted,
 } from './provider-fetch';
 import type {
+  ListVMsOptions,
   LocationMeta,
   Provider,
   ProviderLogger,
@@ -212,10 +213,11 @@ export class DigitalOceanProvider implements Provider {
 
   async listVMs(
     labels?: Record<string, string>,
-    context?: ProviderRequestContext
+    context?: ProviderRequestContext,
+    options?: ListVMsOptions
   ): Promise<VMInstance[]> {
     throwIfProviderRequestAborted(context);
-    const droplets = await this.fetchAllDroplets(context);
+    const droplets = await this.fetchAllDroplets(context, options?.requireComplete === true);
     throwIfProviderRequestAborted(context);
     let result = droplets.map((droplet) => this.mapDroplet(droplet));
     if (labels && Object.keys(labels).length > 0) {
@@ -306,7 +308,8 @@ export class DigitalOceanProvider implements Provider {
   }
 
   private async fetchAllDroplets(
-    context?: ProviderRequestContext
+    context?: ProviderRequestContext,
+    requireComplete = false
   ): Promise<DigitalOceanDropletPayload[]> {
     throwIfProviderRequestAborted(context);
     const all: DigitalOceanDropletPayload[] = [];
@@ -329,6 +332,13 @@ export class DigitalOceanProvider implements Provider {
       );
       all.push(...data.droplets);
       if (!data.hasNextPage) return all;
+    }
+    if (requireComplete) {
+      throw new ProviderError(
+        this.name,
+        undefined,
+        `Droplet list exceeds ${this.maxListPages} pages; it is incomplete`
+      );
     }
     this.logger.warn('digitalocean.list_truncated', {
       resource: 'droplets',

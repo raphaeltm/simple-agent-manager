@@ -383,6 +383,21 @@ describe('VultrProvider lifecycle', () => {
   // H1: listVMs must walk the cursor pagination — page 1 carries a non-empty cursor,
   // page 2 an empty one — concatenating BOTH pages' instances, and the 2nd request
   // must carry the `?cursor=` echoed from page 1's meta.links.next.
+  it('listVMs with requireComplete throws when the cursor never ends within the page limit', async () => {
+    const pages = Array.from({ length: 60 }, (_, i) => ({
+      items: [createMockVultrInstance({ id: `i-${i}` })],
+      next: `cursor-${i + 1}`,
+    }));
+    await expect(
+      newProvider(createVultrFetchMock({ instancesPages: pages })).listVMs(undefined, undefined, {
+        requireComplete: true,
+      })
+    ).rejects.toThrow(/incomplete/);
+    expect(
+      (await newProvider(createVultrFetchMock({ instancesPages: pages })).listVMs()).length
+    ).toBe(50);
+  });
+
   it('listVMs concatenates all instances across paginated responses', async () => {
     const fetchMock = createVultrFetchMock({
       instancesPages: [

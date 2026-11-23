@@ -108,14 +108,30 @@ export interface GcpAggregatedScope {
 export function validateGcpAggregatedInstances(
   payload: unknown,
   context: string
-): { items?: Record<string, GcpAggregatedScope>; nextPageToken?: string } {
+): {
+  items?: Record<string, GcpAggregatedScope>;
+  nextPageToken?: string;
+  unreachables?: string[];
+} {
   const root = expectObject(payload, 'gcp', context);
+  // aggregatedList can also name scopes it could not read in a response-level `unreachables`
+  // array. That makes the page a partial inventory, like a per-scope UNREACHABLE warning: callers
+  // that read "not in the list" as "does not exist" must fail closed on it, while an instance
+  // found in a reachable scope is still found.
+  const unreachableValues = optionalArray(root, 'unreachables', 'gcp', context) ?? [];
+  const unreachables = unreachableValues.map((value, index) => {
+    if (typeof value !== 'string' || value.length === 0) {
+      throw validationError('gcp', `${context}.unreachables[${index}]`, 'expected string');
+    }
+    return value;
+  });
   const items = optionalObject(root, 'items', 'gcp', context);
   const nextPageToken = optionalString(root, 'nextPageToken', 'gcp', context);
   if (nextPageToken !== undefined && nextPageToken.length === 0) {
     throw validationError('gcp', `${context}.nextPageToken`, 'expected non-empty string');
   }
-  if (!items) return { ...(nextPageToken ? { nextPageToken } : {}) };
+  const extra = unreachables.length > 0 ? { unreachables } : {};
+  if (!items) return { ...(nextPageToken ? { nextPageToken } : {}), ...extra };
 
   const scopes: Record<string, GcpAggregatedScope> = {};
   for (const [scope, scopePayload] of Object.entries(items)) {
@@ -149,6 +165,7 @@ export function validateGcpAggregatedInstances(
   return {
     items: scopes,
     ...(nextPageToken ? { nextPageToken } : {}),
+    ...extra,
   };
 }
 

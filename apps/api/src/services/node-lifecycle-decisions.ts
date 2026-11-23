@@ -19,7 +19,8 @@ export type NodeLifecycleDecisionSource =
   | 'warm_handoff'
   | 'operations_action'
   | 'session_sleep'
-  | 'deployment_teardown';
+  | 'deployment_teardown'
+  | 'provider_existence';
 
 export type NodeLifecycleDecision =
   // NodeLifecycle DO
@@ -47,7 +48,14 @@ export type NodeLifecycleDecision =
   | 'handoff_failed'
   // Operations action (an approved or auto-safe `rerun_node_cleanup`)
   | 'cleanup_rerun_requested'
-  | 'sleep_eligible';
+  | 'sleep_eligible'
+  // Provider-existence reconciliation of running deployment nodes
+  // (`deployment-node-provider-existence.ts`); `reason` names the exact verdict.
+  | 'provider_instance_present'
+  | 'provider_instance_absent_observed'
+  | 'provider_instance_absent_confirmed'
+  | 'provider_check_inconclusive'
+  | 'provider_release_deferred';
 
 export type NodeLifecycleDecisionDetail = Record<
   string,

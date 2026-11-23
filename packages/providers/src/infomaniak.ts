@@ -53,6 +53,7 @@ import {
   throwIfProviderRequestAborted,
 } from './provider-fetch';
 import {
+  type ListVMsOptions,
   noopProviderLogger,
   type Provider,
   ProviderError,
@@ -430,7 +431,8 @@ export class InfomaniakProvider implements Provider {
   }
   async listVMs(
     filter?: Record<string, string>,
-    context?: ProviderRequestContext
+    context?: ProviderRequestContext,
+    options?: ListVMsOptions
   ): Promise<VMInstance[]> {
     throwIfProviderRequestAborted(context);
     const s = await this.authenticate(false, context);
@@ -440,9 +442,34 @@ export class InfomaniakProvider implements Provider {
       false,
       context
     );
-    const values = asArray(asRecord(await r?.json(), 'root').servers, 'servers').map((value) =>
-      this.vm(value)
-    );
+    const root = asRecord(await r?.json(), 'root');
+    // Nova pages with `servers_links` (rel "next"); this reads the first page only. A caller that
+    // needs the complete list gets an error for a next page, and for paging metadata it cannot
+    // read, rather than a first page that may be partial.
+    if (options?.requireComplete && root.servers_links !== undefined) {
+      const links = root.servers_links;
+      const readable =
+        Array.isArray(links) &&
+        links.every(
+          (link) =>
+            typeof link === 'object' &&
+            link !== null &&
+            typeof (link as { rel?: unknown }).rel === 'string'
+        );
+      if (!readable) {
+        throw new ProviderError(this.name, undefined, 'Server list paging metadata is malformed');
+      }
+      if (
+        (links as Array<{ rel: string }>).some((link) => link.rel.trim().toLowerCase() === 'next')
+      ) {
+        throw new ProviderError(
+          this.name,
+          undefined,
+          'Server list has more pages; it is incomplete'
+        );
+      }
+    }
+    const values = asArray(root.servers, 'servers').map((value) => this.vm(value));
     return filter
       ? values.filter((vm) =>
           Object.entries(filter).every(([key, value]) => vm.labels[key] === value)

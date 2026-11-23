@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   terminalRepair: vi.fn(),
   tunnelCleanup: vi.fn(),
   appRouteDns: vi.fn(),
+  providerExistence: vi.fn(),
   notify: vi.fn(async () => ({ notifiedSweeps: 1, notificationsSent: 1 })),
 }));
 vi.mock('../../../src/scheduled/node-cleanup', () => ({ runNodeCleanupSweep: mocks.nodeCleanup }));
@@ -28,6 +29,9 @@ vi.mock('../../../src/services/node-tunnel-cleanup', () => ({
 }));
 vi.mock('../../../src/services/app-route-dns-reconciliation', () => ({
   runAppRouteDnsReconciliation: mocks.appRouteDns,
+}));
+vi.mock('../../../src/services/deployment-node-provider-existence', () => ({
+  runDeploymentNodeProviderExistenceSweep: mocks.providerExistence,
 }));
 vi.mock('../../../src/services/observability', () => ({ persistError: vi.fn() }));
 vi.mock('../../../src/scheduled/failed-sweep-notifications', () => ({
@@ -51,6 +55,9 @@ beforeEach(() => {
   mocks.terminalRepair.mockImplementation(record('terminal_node_lifecycle_repair', {}));
   mocks.tunnelCleanup.mockImplementation(record('node_tunnel_cleanup', { cleaned: 0 }));
   mocks.appRouteDns.mockImplementation(record('app_route_dns_reconciliation', { deleted: 2 }));
+  mocks.providerExistence.mockImplementation(
+    record('deployment_node_provider_existence', { released: 1 })
+  );
 });
 
 describe('runNodeTeardownSweeps', () => {
@@ -66,8 +73,11 @@ describe('runNodeTeardownSweeps', () => {
       'deployment_node_cleanup',
       'terminal_node_lifecycle_repair',
       'node_tunnel_cleanup',
+      // Releases nodes whose VM is gone first, so their records leave through the release path.
+      'deployment_node_provider_existence',
       'app_route_dns_reconciliation',
     ]);
+    expect(mocks.providerExistence).toHaveBeenCalledWith(env);
     expect(mocks.appRouteDns).toHaveBeenCalledWith(env);
     expect(sweeps.failedSweeps()).toEqual([]);
     expect(mocks.notify).not.toHaveBeenCalled();
@@ -79,12 +89,34 @@ describe('runNodeTeardownSweeps', () => {
     const sweeps = createSweepIsolator(env);
     const waitUntil = vi.fn();
     await runNodeTeardownSweeps(sweeps, env, waitUntil);
-    expect(mocks.appRouteDns).toHaveBeenCalledTimes(1);
     // A failed sweep is undefined, never a zero-valued result.
     expect(await (waitUntil.mock.calls.at(-1)?.[0] as Promise<unknown>)).toBeUndefined();
+    expect(mocks.appRouteDns).toHaveBeenCalledTimes(1);
     // The foreground isolator reports its own failure; the out-of-band sweep reports through
     // its own isolator and notifies operators once it settles.
     expect(sweeps.failedSweeps()).toEqual(['node_tunnel_cleanup']);
     expect(mocks.notify).toHaveBeenCalledWith(env, ['app_route_dns_reconciliation']);
+  });
+
+  it('runs the DNS sweep to completion while the provider-existence sweep is still pending', async () => {
+    let rejectProvider: (error: Error) => void = () => undefined;
+    mocks.providerExistence.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectProvider = reject;
+        })
+    );
+    const sweeps = createSweepIsolator(env);
+    const waitUntil = vi.fn();
+    await runNodeTeardownSweeps(sweeps, env, waitUntil);
+    const [providerWork, dnsWork] = waitUntil.mock.calls
+      .slice(-2)
+      .map(([p]) => p as Promise<unknown>);
+    // The provider sweep has not settled; the DNS backstop finishes anyway.
+    expect(await dnsWork).toEqual({ deleted: 2 });
+    expect(mocks.appRouteDns).toHaveBeenCalledTimes(1);
+    rejectProvider(new Error('provider API down'));
+    expect(await providerWork).toBeUndefined();
+    expect(mocks.notify).toHaveBeenCalledWith(env, ['deployment_node_provider_existence']);
   });
 });

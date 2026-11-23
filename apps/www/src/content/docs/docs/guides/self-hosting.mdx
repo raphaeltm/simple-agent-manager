@@ -220,6 +220,10 @@ backend (`installBoxDns()` in `apps/api/src/selfhost/dns/`), active only when th
 - the cleanup that deletes app-route records left pointing at a deleted deployment server reads and
   deletes them in that table too (`listBoxARecords()` in the same file), so stopping an
   environment leaves no record behind on a box either;
+- a deployment server deleted in the box's GCP project outside SAM is found by the same
+  provider-existence check as on any install (`runDeploymentNodeProviderExistenceSweep()` in
+  `apps/api/src/services/deployment-node-provider-existence.ts`): two "not found" answers through
+  the box's own GCP credential, 10 minutes apart, release the server and its records here too;
 - the box's DNS server, `sam-dns` (`deploy/selfhost/sam-dns`), syncs them over a loopback-only,
   secret-checked route (`GET /api/self-host/gateway/dns-records`), and answers for the whole domain:
   every other name points at the box;

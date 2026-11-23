@@ -160,6 +160,26 @@ describe('DigitalOceanProvider droplets', () => {
     );
   });
 
+  it('listVMs with requireComplete throws instead of returning a list cut at the page limit', async () => {
+    const pages = () => ({
+      dropletPages: [
+        { items: [createMockDigitalOceanDroplet({ id: 1 })], hasNext: true },
+        { items: [createMockDigitalOceanDroplet({ id: 2 })], hasNext: true },
+      ],
+    });
+    // Without the option the partial list is returned (existing behaviour, logged).
+    expect(
+      (await provider(createDigitalOceanFetchMock(pages()), { maxListPages: 2 }).listVMs()).length
+    ).toBe(2);
+    await expect(
+      provider(createDigitalOceanFetchMock(pages()), { maxListPages: 2 }).listVMs(
+        undefined,
+        undefined,
+        { requireComplete: true }
+      )
+    ).rejects.toThrow(/incomplete/);
+  });
+
   it('validates token, powers droplets, and handles missing resources idempotently', async () => {
     const mock = createDigitalOceanFetchMock();
     const p = provider(mock);

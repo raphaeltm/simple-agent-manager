@@ -5,6 +5,7 @@
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { runAppRouteDnsReconciliation } from '../services/app-route-dns-reconciliation';
+import { runDeploymentNodeProviderExistenceSweep } from '../services/deployment-node-provider-existence';
 import { runNodeTunnelCleanupSweep } from '../services/node-tunnel-cleanup';
 import { runDeploymentNodeCleanup } from './deployment-node-cleanup';
 import { notifyFailedSweeps } from './failed-sweep-notifications';
@@ -27,9 +28,21 @@ export async function runNodeTeardownSweeps(
   const nodeTunnelCleanup = await sweeps.isolate('node_tunnel_cleanup', () =>
     runNodeTunnelCleanupSweep(env)
   );
+  // After node teardown: releases running deployment nodes whose VM the provider has twice
+  // confirmed deleted, so their app-route records go through the node release choke point
+  // (services/deployment-node-provider-existence.ts). Provider I/O, so out of band
+  // (`.claude/rules/47`).
+  waitUntil(
+    runOutOfBand(env, 'deployment_node_provider_existence', () =>
+      runDeploymentNodeProviderExistenceSweep(env)
+    )
+  );
   // After node teardown: deletes app-route A records left pointing at released node IPs (the
   // subdomain-takeover backstop, services/app-route-dns-reconciliation.ts). Its DNS API calls run
-  // out of band (`.claude/rules/47`), so a slow Cloudflare API cannot delay the later sweeps.
+  // out of band, so a slow Cloudflare API cannot delay the later sweeps. It has its own
+  // `waitUntil`, so a slow provider sweep above can never use up its time. The two may delete the
+  // same record concurrently; both paths re-read it first and a DNS delete tolerates a 404
+  // (`deleteObservedAppRouteDnsRecord`, `deleteDNSRecord`).
   waitUntil(
     runOutOfBand(env, 'app_route_dns_reconciliation', () => runAppRouteDnsReconciliation(env))
   );

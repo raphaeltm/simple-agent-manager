@@ -125,6 +125,53 @@ describe('InfomaniakProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('listVMs with requireComplete throws when Nova reports a next page', async () => {
+    const page = () =>
+      json({
+        servers: [],
+        servers_links: [{ rel: 'next', href: `${COMPUTE}/servers/detail?marker=x` }],
+      });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(auth()).mockResolvedValueOnce(page());
+    const provider = new InfomaniakProvider('id', 'secret', { authUrl: AUTH_URL });
+    await expect(provider.listVMs(undefined, undefined, { requireComplete: true })).rejects.toThrow(
+      /incomplete/
+    );
+  });
+
+  it.each([
+    ['not an array', { href: 'x' }],
+    ['an entry without rel', [{ href: 'x' }]],
+  ])('listVMs with requireComplete rejects servers_links that is %s', async (_label, links) => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(auth())
+      .mockResolvedValueOnce(json({ servers: [], servers_links: links }));
+    const provider = new InfomaniakProvider('id', 'secret', { authUrl: AUTH_URL });
+    await expect(provider.listVMs(undefined, undefined, { requireComplete: true })).rejects.toThrow(
+      /malformed/
+    );
+  });
+
+  it.each(['NEXT', ' next'])(
+    'listVMs with requireComplete treats rel %j as a next page',
+    async (rel) => {
+      vi.spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(auth())
+        .mockResolvedValueOnce(json({ servers: [], servers_links: [{ rel, href: 'x' }] }));
+      const provider = new InfomaniakProvider('id', 'secret', { authUrl: AUTH_URL });
+      await expect(
+        provider.listVMs(undefined, undefined, { requireComplete: true })
+      ).rejects.toThrow(/more pages/);
+    }
+  );
+
+  it('listVMs with requireComplete accepts a single complete page', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(auth())
+      .mockResolvedValueOnce(json({ servers: [], servers_links: [] }));
+    const provider = new InfomaniakProvider('id', 'secret', { authUrl: AUTH_URL });
+    expect(await provider.listVMs(undefined, undefined, { requireComplete: true })).toEqual([]);
+  });
+
   it('requires detach before grow-only resize', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(auth())

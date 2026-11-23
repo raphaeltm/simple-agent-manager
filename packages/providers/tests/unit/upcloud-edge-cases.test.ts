@@ -160,3 +160,77 @@ describe('UpCloud lifecycle edge cases', () => {
     ).resolves.toEqual([]);
   });
 });
+
+describe('UpCloud server listing pages', () => {
+  const page = (offset: number, count: number) =>
+    Array.from({ length: count }, (_, i) => server({ uuid: `srv-${offset + i}` }));
+
+  it('reads every page with limit and offset', async () => {
+    const urls: string[] = [];
+    useFetch((url) => {
+      urls.push(String(url));
+      const offset = Number(new URL(String(url)).searchParams.get('offset'));
+      return json({ servers: { server: offset < 200 ? page(offset, 100) : page(offset, 7) } });
+    });
+    const vms = await new UpCloudProvider('u', 'p').listVMs();
+    expect(vms).toHaveLength(207);
+    expect(urls.map((u) => new URL(u).search)).toEqual([
+      '?limit=100&offset=0',
+      '?limit=100&offset=100',
+      '?limit=100&offset=200',
+    ]);
+  });
+
+  it('stops when a page adds no new server (parameters ignored)', async () => {
+    let calls = 0;
+    useFetch(() => {
+      calls += 1;
+      return json({ servers: { server: page(0, 150) } });
+    });
+    expect(await new UpCloudProvider('u', 'p').listVMs()).toHaveLength(150);
+    expect(calls).toBe(2);
+  });
+
+  it('with requireComplete throws at the page limit instead of returning a partial list', async () => {
+    useFetch((url) => {
+      const offset = Number(new URL(String(url)).searchParams.get('offset'));
+      return json({ servers: { server: page(offset, 100) } });
+    });
+    await expect(
+      new UpCloudProvider('u', 'p').listVMs(undefined, undefined, { requireComplete: true })
+    ).rejects.toThrow(/incomplete/);
+  });
+
+  it('with requireComplete throws when a server is deleted between pages', async () => {
+    let all = page(0, 150);
+    let served = 0;
+    useFetch((url) => {
+      const offset = Number(new URL(String(url)).searchParams.get('offset'));
+      const body = json({ servers: { server: all.slice(offset, offset + 100) } });
+      served += 1;
+      // A deletion lands after the first page of the first pass.
+      if (served === 1) all = all.filter((s) => s.uuid !== 'srv-5');
+      return body;
+    });
+    await expect(
+      new UpCloudProvider('u', 'p').listVMs(undefined, undefined, { requireComplete: true })
+    ).rejects.toThrow(/changed while paging/);
+  });
+
+  it('with requireComplete throws when offset is ignored (a full page repeats)', async () => {
+    useFetch(() => json({ servers: { server: page(0, 100) } }));
+    await expect(
+      new UpCloudProvider('u', 'p').listVMs(undefined, undefined, { requireComplete: true })
+    ).rejects.toThrow(/repeated page/);
+  });
+
+  it('with requireComplete returns a stable multi-page list', async () => {
+    useFetch((url) => {
+      const offset = Number(new URL(String(url)).searchParams.get('offset'));
+      return json({ servers: { server: page(0, 150).slice(offset, offset + 100) } });
+    });
+    expect(
+      await new UpCloudProvider('u', 'p').listVMs(undefined, undefined, { requireComplete: true })
+    ).toHaveLength(150);
+  });
+});

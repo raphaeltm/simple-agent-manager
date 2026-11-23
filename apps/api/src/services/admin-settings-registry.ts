@@ -3,6 +3,7 @@ import { ACCOUNT_LINKING_SETTINGS } from './admin-settings-account-linking-defin
 import { APP_ROUTE_DNS_SETTINGS } from './admin-settings-app-route-dns-definitions';
 import { CORE_SETTINGS } from './admin-settings-core-definitions';
 import { CREDENTIAL_SETUP_SETTINGS } from './admin-settings-credential-setup-definitions';
+import { DEPLOYMENT_NODE_EXISTENCE_SETTINGS } from './admin-settings-deployment-node-existence-definitions';
 import { DEPLOYMENT_PUBLISH_SETTINGS } from './admin-settings-deployment-publish-definitions';
 import { FEATURE_SETTINGS } from './admin-settings-features-definitions';
 import { GCP_CATALOG_SETTINGS } from './admin-settings-gcp-catalog-definitions';
@@ -49,6 +50,7 @@ const definitions = [
   ...CREDENTIAL_SETUP_SETTINGS,
   ...NODE_TUNNEL_SETTINGS,
   ...APP_ROUTE_DNS_SETTINGS,
+  ...DEPLOYMENT_NODE_EXISTENCE_SETTINGS,
   ...FEATURE_SETTINGS,
   ...GCP_CATALOG_SETTINGS,
   ...INFOMANIAK_SETTINGS,

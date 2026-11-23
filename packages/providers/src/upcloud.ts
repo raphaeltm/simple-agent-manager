@@ -10,6 +10,7 @@ import {
   throwIfProviderRequestAborted,
 } from './provider-fetch';
 import type {
+  ListVMsOptions,
   Provider,
   ProviderLogger,
   ProviderOfferingListOptions,
@@ -128,6 +129,10 @@ export interface UpCloudProviderRuntimeOptions {
   stopTimeoutSeconds?: number;
   logger?: ProviderLogger;
 }
+/** Servers read per `GET /server` page, and the page limit of one listing. */
+const UPCLOUD_LIST_PAGE_SIZE = 100;
+const UPCLOUD_LIST_MAX_PAGES = 50;
+
 export class UpCloudProvider implements Provider {
   readonly name = 'upcloud';
   readonly locations = UPCLOUD_LOCATIONS;
@@ -246,16 +251,79 @@ export class UpCloudProvider implements Provider {
   }
   async listVMs(
     labels?: Record<string, string>,
-    context?: ProviderRequestContext
+    context?: ProviderRequestContext,
+    options?: ListVMsOptions
   ): Promise<VMInstance[]> {
     throwIfProviderRequestAborted(context);
-    const response = await this.request('/server', {}, context);
-    const servers = validateUpCloudServersResponse(
-      await parseProviderJson(response, 'upcloud', 'listVMs'),
-      'listVMs'
-    );
-    return servers.filter((server) => matchesUpCloudLabels(server.labels, labels)).map(toUpCloudVM);
+    const requireComplete = options?.requireComplete === true;
+    let walk = await this.walkServerPages(requireComplete, context);
+    if (requireComplete && walk.pages > 1) {
+      // Offset paging is not a snapshot: a server deleted or created between pages shifts every
+      // later offset and can hide a live server. A complete list must read the same set twice.
+      const again = await this.walkServerPages(true, context);
+      const same =
+        again.servers.size === walk.servers.size &&
+        [...again.servers.keys()].every((uuid) => walk.servers.has(uuid));
+      if (!same) {
+        throw new ProviderError(
+          'upcloud',
+          undefined,
+          'Server list changed while paging; it is incomplete'
+        );
+      }
+      walk = again;
+    }
+    return [...walk.servers.values()]
+      .filter((server) => matchesUpCloudLabels(server.labels, labels))
+      .map(toUpCloudVM);
   }
+
+  /**
+   * Every `GET /server` page (`limit`/`offset`, https://developers.upcloud.com/1.3/8-servers/),
+   * keyed by UUID. A short page ends the walk. A full page that adds no new server means the
+   * paging parameters were not honoured: the walk ends, and under `requireComplete` that is an
+   * error rather than an answer.
+   */
+  private async walkServerPages(
+    requireComplete: boolean,
+    context?: ProviderRequestContext
+  ): Promise<{
+    servers: Map<string, ReturnType<typeof validateUpCloudServersResponse>[number]>;
+    pages: number;
+  }> {
+    const servers = new Map<string, ReturnType<typeof validateUpCloudServersResponse>[number]>();
+    for (let page = 0; page < UPCLOUD_LIST_MAX_PAGES; page += 1) {
+      const query = `?limit=${UPCLOUD_LIST_PAGE_SIZE}&offset=${page * UPCLOUD_LIST_PAGE_SIZE}`;
+      const response = await this.request(`/server${query}`, {}, context);
+      const batch = validateUpCloudServersResponse(
+        await parseProviderJson(response, 'upcloud', 'listVMs'),
+        'listVMs'
+      );
+      const before = servers.size;
+      for (const server of batch) servers.set(server.uuid, server);
+      if (batch.length < UPCLOUD_LIST_PAGE_SIZE) return { servers, pages: page + 1 };
+      if (servers.size === before) {
+        if (requireComplete) {
+          throw new ProviderError(
+            'upcloud',
+            undefined,
+            'Server list paging returned a repeated page; it is incomplete'
+          );
+        }
+        return { servers, pages: page + 1 };
+      }
+    }
+    if (requireComplete) {
+      throw new ProviderError(
+        'upcloud',
+        undefined,
+        `Server list exceeds ${UPCLOUD_LIST_MAX_PAGES} pages; it is incomplete`
+      );
+    }
+    this.logger.warn('upcloud.list_truncated', { maxPages: UPCLOUD_LIST_MAX_PAGES });
+    return { servers, pages: UPCLOUD_LIST_MAX_PAGES };
+  }
+
   async powerOff(id: string, context?: ProviderRequestContext): Promise<void> {
     throwIfProviderRequestAborted(context);
     await this.request(
@@ -639,7 +707,9 @@ export class UpCloudProvider implements Provider {
   }
 }
 
-function resolveUpCloudBootDiskSize(config: ReturnType<typeof resolveVMConfigWithLegacySizeAdapter>): number {
+function resolveUpCloudBootDiskSize(
+  config: ReturnType<typeof resolveVMConfigWithLegacySizeAdapter>
+): number {
   if (config.bootDiskSizeGb !== undefined) return config.bootDiskSizeGb;
   if (config.resources?.diskGb !== undefined) return config.resources.diskGb;
 
