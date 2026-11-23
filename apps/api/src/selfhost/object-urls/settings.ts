@@ -15,11 +15,10 @@ import {
 export const DEFAULT_BOX_OBJECT_MAX_CONCURRENT_UPLOADS = 4;
 
 /**
- * Seconds one upload holds its slot at most. It frees the slot of a handler that died without
- * releasing it. An upload that runs longer is not cut; the box may then admit one upload over the
- * limit until it ends. 1800 s covers 1 GiB at 0.6 MB/s.
+ * Seconds a slot stays held without renewal. The route renews it while bytes keep arriving, so a
+ * slow upload keeps its slot; a handler that died without releasing frees it within this time.
  */
-export const DEFAULT_BOX_OBJECT_UPLOAD_LEASE_SECONDS = 1800;
+export const DEFAULT_BOX_OBJECT_UPLOAD_LEASE_SECONDS = 300;
 
 /**
  * Of those, how many one uploader (a workspace, else a user) may hold at once, so one uploader
@@ -53,7 +52,7 @@ export const BOX_OBJECT_SETTINGS: readonly AdminSettingDefinition[] = [
     BOX_OBJECT_UPLOAD_LEASE_SECONDS,
     DEFAULT_BOX_OBJECT_UPLOAD_LEASE_SECONDS,
     'Operations',
-    'Seconds one upload counts against the concurrent-upload limit at most, so an upload whose handler died frees its slot.',
+    'Seconds an upload slot stays held without progress. Renewed while bytes arrive; frees the slot of an upload whose handler died.',
     { min: 60, max: 86_400 }
   ),
   integerDefinition(

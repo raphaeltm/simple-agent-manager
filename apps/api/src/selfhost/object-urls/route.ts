@@ -41,14 +41,15 @@ type BoxObjectEnv = Env & BoxUploadGateEnv;
  */
 export const CELLD_CONDITIONAL_PUT_MAX_BYTES = 8 * 1024 * 1024;
 
-function plain(status: number, message: string, headers: Record<string, string> = {}): Response {
-  return Response.json(
-    { error: status === 503 ? 'BUSY' : 'BOX_OBJECT_REFUSED', message },
-    {
-      status,
-      headers,
-    }
-  );
+type ErrorCode = 'REFUSED' | 'BUSY' | 'UNAVAILABLE' | 'UPLOAD_TIMEOUT' | 'UPLOAD_FAILED';
+
+function plain(
+  status: number,
+  message: string,
+  headers: Record<string, string> = {},
+  error: ErrorCode = status === 503 ? 'BUSY' : 'REFUSED'
+): Response {
+  return Response.json({ error, message }, { status, headers });
 }
 
 /** Log fields that identify the request without the token. */
@@ -90,8 +91,11 @@ async function uploadLimits(env: Env): Promise<UploadLimits> {
       perUploader: setting(perUploader?.value, DEFAULT_LIMITS.perUploader),
       idleMs: setting(idle?.value, DEFAULT_LIMITS.idleMs, 1000),
     };
-  } catch {
+  } catch (error) {
     // Settings storage unavailable: the defaults still bound memory.
+    log.warn('box_objects.limits_fallback', {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return DEFAULT_LIMITS;
   }
 }
@@ -101,29 +105,47 @@ function uploader(claims: BoxObjectTokenClaims): string {
   return claims.sub?.w ? `w:${claims.sub.w}` : claims.sub?.u ? `u:${claims.sub.u}` : 'unknown';
 }
 
-const IDLE_ERROR = 'box upload received no bytes within its idle limit';
+interface Watchdog {
+  stream: TransformStream<Uint8Array, Uint8Array>;
+  /** True once the watchdog dropped the upload for going idle. */
+  idled: () => boolean;
+  dispose: () => void;
+}
 
-/** Passes bytes through; errors the stream if none arrive for `idleMs`, freeing the slot. */
-function idleWatchdog(idleMs: number): TransformStream<Uint8Array, Uint8Array> {
+/**
+ * Passes bytes through. Errors the stream if none arrive for `idleMs` (the slot is then freed),
+ * and calls `onProgress` at most every `progressEveryMs` while bytes keep arriving.
+ */
+function uploadWatchdog(idleMs: number, progressEveryMs: number, onProgress: () => void): Watchdog {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let idled = false;
+  let lastProgress = Date.now();
   let fail: (error: Error) => void = () => undefined;
+  const dispose = () => clearTimeout(timer);
   const arm = () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fail(new Error(IDLE_ERROR)), idleMs);
+    dispose();
+    timer = setTimeout(() => {
+      idled = true;
+      fail(new Error('box upload received no bytes within its idle limit'));
+    }, idleMs);
   };
-  return new TransformStream({
+  const stream = new TransformStream<Uint8Array, Uint8Array>({
     start(controller) {
       fail = (error) => controller.error(error);
       arm();
     },
     transform(chunk, controller) {
       arm();
+      if (Date.now() - lastProgress >= progressEveryMs) {
+        lastProgress = Date.now();
+        onProgress();
+      }
       controller.enqueue(chunk);
     },
-    flush() {
-      clearTimeout(timer);
-    },
+    flush: dispose,
+    cancel: dispose,
   });
+  return { stream, idled: () => idled, dispose };
 }
 
 /**
@@ -168,7 +190,9 @@ async function put(c: Context<{ Bindings: BoxObjectEnv }>, claims: BoxObjectToke
   if (!body && length > 0) return plain(400, 'Upload body is missing');
 
   const gate = boxUploadGate(env);
-  if (!gate) return plain(503, 'Box uploads are unavailable (no upload gate binding)');
+  if (!gate) {
+    return plain(503, 'Box uploads are unavailable (no upload gate binding)', {}, 'UNAVAILABLE');
+  }
   const limits = await uploadLimits(env);
   const leaseId = crypto.randomUUID();
   const lease = await gate.acquire(leaseId, uploader(claims), limits);
@@ -183,12 +207,16 @@ async function put(c: Context<{ Bindings: BoxObjectEnv }>, claims: BoxObjectToke
       'Retry-After': String(lease.retryAfterSeconds),
     });
   }
+  const watchdog = uploadWatchdog(limits.idleMs, Math.max(1000, limits.leaseMs / 3), () => {
+    // Keep the slot while bytes arrive; a failed renewal only shortens it to the lease.
+    gate.renew(leaseId, limits.leaseMs).catch(() => undefined);
+  });
   try {
     const atomic = length <= CELLD_CONDITIONAL_PUT_MAX_BYTES;
-    if (!atomic && (await env.R2.head(claims.key))) return conflict(env, claims, length);
+    if (!atomic && (await env.R2.head(claims.key))) return await conflict(env, claims, length);
     // FixedLengthStream makes a short or long body an error instead of a truncated object.
     const stream = body
-      ? body.pipeThrough(idleWatchdog(limits.idleMs)).pipeThrough(new FixedLengthStream(length))
+      ? body.pipeThrough(watchdog.stream).pipeThrough(new FixedLengthStream(length))
       : new Uint8Array(0);
     let written: R2Object | null;
     try {
@@ -201,15 +229,22 @@ async function put(c: Context<{ Bindings: BoxObjectEnv }>, claims: BoxObjectToke
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log.warn('box_objects.upload_failed', { ...logFields(claims), length, error: message });
-      if (message.includes(IDLE_ERROR)) return plain(408, 'The upload stopped sending data');
-      return claims.sha && /sha-?256/i.test(message)
-        ? plain(400, 'Upload body does not match the declared sha256')
-        : plain(502, 'The upload did not complete; retry it');
+      if (watchdog.idled()) {
+        return plain(408, 'The upload stopped sending data', {}, 'UPLOAD_TIMEOUT');
+      }
+      if (claims.sha && /sha-?256/i.test(message)) {
+        return plain(400, 'Upload body does not match the declared sha256');
+      }
+      if (/FixedLengthStream|too (many|few) bytes|length/i.test(message)) {
+        return plain(400, `Upload body did not match its Content-Length of ${length} bytes`);
+      }
+      return plain(502, 'The upload did not complete; retry it', {}, 'UPLOAD_FAILED');
     }
-    if (!written) return conflict(env, claims, length);
+    if (!written) return await conflict(env, claims, length);
     log.info('box_objects.uploaded', { ...logFields(claims), length });
     return new Response(null, { status: 200, headers: { ETag: written.httpEtag } });
   } finally {
+    watchdog.dispose();
     await gate.release(leaseId).catch((error: unknown) => {
       // The lease expires on its own; a failed release only delays the slot.
       log.warn('box_objects.lease_release_failed', {
@@ -223,7 +258,12 @@ async function put(c: Context<{ Bindings: BoxObjectEnv }>, claims: BoxObjectToke
 async function get(c: Context<{ Bindings: BoxObjectEnv }>, claims: BoxObjectTokenClaims) {
   const object = await c.env.R2.get(claims.key);
   if (!object) return plain(404, 'Object not found');
-  const headers = new Headers({ 'Content-Length': String(object.size), ETag: object.httpEtag });
+  const headers = new Headers({
+    'Content-Length': String(object.size),
+    ETag: object.httpEtag,
+    // The URL carries a bearer token: nothing in between may keep the response.
+    'Cache-Control': 'private, no-store',
+  });
   if (object.httpMetadata?.contentType)
     headers.set('Content-Type', object.httpMetadata.contentType);
   log.info('box_objects.downloaded', { ...logFields(claims), length: object.size });

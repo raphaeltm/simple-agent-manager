@@ -1019,8 +1019,11 @@ Session snapshots keep their own upload route, which also streams through the bo
   above it, so on a box without a store key an app's image artifact is limited to 1 GiB (the agent
   is told the limit and stops before uploading). Parted uploads are tracked in idea
   `01M83WWQTNTBD4SY1530G3XWH7`.
-- **Concurrent uploads are capped** (Admin settings `boxObjects.maxConcurrentUploads`, default 4;
-  `boxObjects.uploadLeaseSeconds`, default 1800). Each in-flight upload costs celld about 85 MB of
+- **Concurrent uploads are capped** (Admin settings `boxObjects.maxConcurrentUploads`, default 4,
+  of which one uploader may hold `boxObjects.maxUploadsPerUploader`, default 2). An upload that
+  receives no bytes for `boxObjects.uploadIdleSeconds` (default 60) is dropped with 408, and a slot
+  whose handler died frees within `boxObjects.uploadLeaseSeconds` (default 300; renewed while bytes
+  arrive). Each in-flight upload costs celld about 85 MB of
   memory (measured on celld 0.6.3: peak RSS 220 MB for one 1 GB upload, 427 MB for four, 896 MB for
   eight; throughput stops growing after two at about 180 MB/s). Further uploads get 503 with
   `Retry-After`.

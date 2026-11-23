@@ -167,14 +167,23 @@ function gateNamespace(gate: BoxUploadGate) {
         uploader: string,
         limits: { total: number; perUploader: number; leaseMs: number }
       ) => gate.acquire(id, uploader, limits),
+      renew: async (id: string, leaseMs: number) => gate.renew(id, leaseMs),
       release: async (id: string) => gate.release(id),
     }),
   };
 }
 
+/** The real gate with a clock the test moves. */
+class TestGate extends BoxUploadGate {
+  clock = Date.now();
+  protected override now(): number {
+    return this.clock;
+  }
+}
+
 function boxEnv(overrides: Partial<Record<string, unknown>> = {}) {
   const R2 = fakeR2();
-  const gate = new BoxUploadGate({ storage: { sql: sqliteStorage() } } as never, {});
+  const gate = new TestGate({ storage: { sql: sqliteStorage() } } as never, {});
   const env = {
     BASE_DOMAIN: DOMAIN,
     ENCRYPTION_KEY: KEY,
@@ -673,9 +682,26 @@ describe('PUT/GET /api/box-objects', () => {
   it('an expired lease frees its slot (a handler that died without releasing)', () => {
     const { gate } = boxEnv();
     const one = { total: 1, perUploader: 1, leaseMs: 1_000 };
-    gate.acquire('dead', 'u:a', one, 0);
-    expect(gate.acquire('next', 'u:b', one, 500).granted).toBe(false);
-    expect(gate.acquire('next', 'u:b', one, 1_000).granted).toBe(true);
+    gate.clock = 0;
+    gate.acquire('dead', 'u:a', one);
+    gate.clock = 500;
+    expect(gate.acquire('next', 'u:b', one).granted).toBe(false);
+    gate.clock = 1_000;
+    expect(gate.acquire('next', 'u:b', one).granted).toBe(true);
+  });
+
+  it('renewing a lease keeps a slow but moving upload in its slot', () => {
+    const { gate } = boxEnv();
+    const one = { total: 1, perUploader: 1, leaseMs: 1_000 };
+    gate.clock = 0;
+    gate.acquire('slow', 'u:a', one);
+    gate.clock = 900;
+    gate.renew('slow', 1_000);
+    gate.clock = 1_500;
+    expect(gate.acquire('next', 'u:b', one).granted).toBe(false);
+    // Control: without further renewal it expires.
+    gate.clock = 1_900;
+    expect(gate.acquire('next', 'u:b', one).granted).toBe(true);
   });
 
   it('one uploader cannot take every slot: a second uploader is still admitted', async () => {

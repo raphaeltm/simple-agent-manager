@@ -11,6 +11,7 @@ import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { errors } from '../middleware/error';
 import { getR2ObjectUrlSigner } from './r2-s3-client';
 
 function getMaxBytes(env: Env): number {
@@ -86,7 +87,7 @@ export async function generatePresignedUploadUrl(
   const signer = getR2ObjectUrlSigner(env);
   const expiresIn = getPresignExpiry(env);
   if (signer.maxPutBytes !== undefined && size > signer.maxPutBytes) {
-    throw new Error(`File size ${size} exceeds maximum ${signer.maxPutBytes} bytes`);
+    throw errors.badRequest(`File size ${size} exceeds maximum ${signer.maxPutBytes} bytes`);
   }
 
   const uploadUrl = await signer.putUrl(r2Key, {

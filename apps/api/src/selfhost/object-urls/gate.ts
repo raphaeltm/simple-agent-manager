@@ -12,9 +12,9 @@
  * uploads blocked.
  *
  * Why a Durable Object: the limit must hold across every Worker isolate celld runs, and a single
- * object is the box's one serialization point. Each acquire is a lease with an expiry, so a handler
- * that dies without releasing (celld restart, a killed isolate) frees its slot when the lease ends
- * instead of holding it forever. `acquire` and `release` do all their work in synchronous SQL with
+ * object is the box's one serialization point. Each acquire is a lease with a short expiry that the
+ * route renews while bytes keep arriving, so a handler that dies without releasing (celld restart,
+ * a killed isolate) frees its slot within one lease instead of holding it forever. `acquire` and `release` do all their work in synchronous SQL with
  * no `await`, so two calls cannot interleave inside one (rule 45).
  */
 import { DurableObject } from 'cloudflare:workers';
@@ -42,12 +42,17 @@ export class BoxUploadGate extends DurableObject {
    * Grants a lease to `id` while fewer than `limits.total` unexpired leases exist on the box and
    * fewer than `limits.perUploader` belong to `uploader`, so one uploader cannot hold every slot.
    */
+  /** The gate's clock (a method, not an RPC argument, so no caller can move it). */
+  protected now(): number {
+    return Date.now();
+  }
+
   acquire(
     id: string,
     uploader: string,
-    limits: { total: number; perUploader: number; leaseMs: number },
-    now: number = Date.now()
+    limits: { total: number; perUploader: number; leaseMs: number }
   ): BoxUploadLease {
+    const now = this.now();
     const sql = this.ctx.storage.sql;
     sql.exec('DELETE FROM upload_leases WHERE expires_at <= ?', now);
     const row = sql
@@ -74,6 +79,15 @@ export class BoxUploadGate extends DurableObject {
     return { granted: true };
   }
 
+  /** Extends a held lease while its upload is still receiving bytes (route.ts). */
+  renew(id: string, leaseMs: number): void {
+    this.ctx.storage.sql.exec(
+      'UPDATE upload_leases SET expires_at = ? WHERE id = ?',
+      this.now() + leaseMs,
+      id
+    );
+  }
+
   release(id: string): void {
     this.ctx.storage.sql.exec('DELETE FROM upload_leases WHERE id = ?', id);
   }
@@ -88,6 +102,7 @@ interface BoxUploadGateStub {
     uploader: string,
     limits: { total: number; perUploader: number; leaseMs: number }
   ): Promise<BoxUploadLease>;
+  renew(id: string, leaseMs: number): Promise<void>;
   release(id: string): Promise<void>;
 }
 
