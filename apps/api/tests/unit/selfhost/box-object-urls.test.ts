@@ -6,6 +6,8 @@
  * create-only puts and sha256 verification. The gate is the real Durable Object class over SQLite.
  */
 import {
+  buildComposeImageArtifactKey,
+  buildContextKey,
   composeImageArtifactMaxBytesFor,
   createBuildContextUpload,
   createComposeImageArtifactDownloads,
@@ -28,10 +30,16 @@ import {
 } from '../../../src/selfhost/object-urls/signer';
 import {
   isSafeObjectKey,
+  MAX_BOX_OBJECT_TOKEN_SECONDS,
   mintBoxObjectToken,
   verifyBoxObjectToken,
 } from '../../../src/selfhost/object-urls/tokens';
-import { generatePresignedUploadUrl } from '../../../src/services/attachment-upload';
+import { mintSignedToken } from '../../../src/selfhost/signed-token';
+import { resolveAdminSettingDetailsMany } from '../../../src/services/admin-settings-resolution';
+import {
+  buildAttachmentR2Key,
+  generatePresignedUploadUrl,
+} from '../../../src/services/attachment-upload';
 import {
   getR2ObjectUrlSigner,
   installBoxObjectUrlSigner,
@@ -39,7 +47,16 @@ import {
   resolveR2ObjectUrlSigner,
 } from '../../../src/services/r2-s3-client';
 
+// Settings storage: unavailable by default (the route then uses its defaults); tests override it.
+vi.mock('../../../src/services/admin-settings-resolution', () => ({
+  resolveAdminSettingDetailsMany: vi.fn(async () => {
+    throw new Error('settings storage unavailable');
+  }),
+}));
+
 const KEY = 'box-test-encryption-key-0123456789';
+/** The defaults the route uses when settings storage is unavailable. */
+const LIMITS = { total: 4, perUploader: 2, leaseMs: 60_000 };
 const DOMAIN = 'box.example.test';
 
 // ── celld-faithful fakes ───────────────────────────────────────────────────────────────────────
@@ -145,8 +162,11 @@ function gateNamespace(gate: BoxUploadGate) {
   return {
     idFromName: (name: string) => name,
     get: () => ({
-      acquire: async (id: string, limit: number, leaseMs: number) =>
-        gate.acquire(id, limit, leaseMs),
+      acquire: async (
+        id: string,
+        uploader: string,
+        limits: { total: number; perUploader: number; leaseMs: number }
+      ) => gate.acquire(id, uploader, limits),
       release: async (id: string) => gate.release(id),
     }),
   };
@@ -268,6 +288,79 @@ describe('box object tokens', () => {
   });
 });
 
+describe('box object token scope', () => {
+  const env = { ENCRYPTION_KEY: KEY };
+  // The purpose a minter bug would sign with: same prefix and label as tokens.ts.
+  const purpose = { prefix: 'samobj1', label: 'sam-box-object-url/v1' };
+
+  it('every key SAM builds for these uploads is inside the allowlist', () => {
+    expect(isSafeObjectKey(buildAttachmentR2Key('u1', 'up1', 'a.txt'))).toBe(true);
+    expect(isSafeObjectKey(buildComposeImageArtifactKey('p1', 'w1', 'e1', 'u1', 'web'))).toBe(true);
+    expect(
+      isSafeObjectKey(
+        buildContextKey({
+          id: 'job',
+          projectId: 'p1',
+          workspaceId: 'w1',
+          requestedBy: 'u1',
+          environmentId: 'e1',
+          attempt: 1,
+        })
+      )
+    ).toBe(true);
+  });
+
+  it('refuses keys outside the upload prefixes at mint, and at verify even when correctly signed', async () => {
+    for (const key of [
+      'agents/vm-agent-linux-amd64',
+      'session-snapshots/s1/a.tar',
+      'temp-uploadsX/a',
+    ]) {
+      expect(isSafeObjectKey(key)).toBe(false);
+      await expect(
+        mintBoxObjectToken(env, { op: 'put', key, len: 1, expiresIn: 60 })
+      ).rejects.toThrow();
+      const forged = await mintSignedToken(env, purpose, {
+        v: 1,
+        op: 'put',
+        key,
+        len: 1,
+        exp: Math.floor(Date.now() / 1000) + 60,
+      });
+      expect(await verifyBoxObjectToken(env, forged)).toBeNull();
+    }
+  });
+
+  it('caps lifetime at mint and refuses an over-long signed lifetime at verify', async () => {
+    const key = 'temp-uploads/u/up/a.txt';
+    await expect(
+      mintBoxObjectToken(env, { op: 'get', key, expiresIn: MAX_BOX_OBJECT_TOKEN_SECONDS + 1 })
+    ).rejects.toThrow('lifetime');
+    const longLived = await mintSignedToken(env, purpose, {
+      v: 1,
+      op: 'get',
+      key,
+      exp: Math.floor(Date.now() / 1000) + MAX_BOX_OBJECT_TOKEN_SECONDS + 60,
+    });
+    expect(await verifyBoxObjectToken(env, longLived)).toBeNull();
+    // Control: the longest allowed lifetime verifies.
+    const longest = await mintBoxObjectToken(env, {
+      op: 'get',
+      key,
+      expiresIn: MAX_BOX_OBJECT_TOKEN_SECONDS,
+    });
+    expect(await verifyBoxObjectToken(env, longest)).not.toBeNull();
+  });
+
+  it('fails at mint, not at upload, when the token would exceed the verifiable length', async () => {
+    const key = `temp-uploads/${'a'.repeat(1000)}`;
+    const md = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`m${i}`, 'v'.repeat(250)]));
+    await expect(
+      mintBoxObjectToken(env, { op: 'put', key, len: 1, md, expiresIn: 60 })
+    ).rejects.toThrow('too long');
+  });
+});
+
 // ── the resolver's choice (rule 74) ────────────────────────────────────────────────────────────
 
 describe('which URL a caller gets', () => {
@@ -285,7 +378,7 @@ describe('which URL a caller gets', () => {
       ENCRYPTION_KEY: KEY,
     } as Env);
     expect(signer.kind).toBe('presign');
-    expect(new URL(await signer.putUrl('k', { expiresIn: 60 })).host).toMatch(
+    expect(new URL(await signer.putUrl('temp-uploads/t/k', { expiresIn: 60 })).host).toMatch(
       /acct\.r2\.cloudflarestorage\.com$/
     );
     // Divergence: a keyless Env on Cloudflare has no signer; it does not fall through to a box URL.
@@ -296,7 +389,9 @@ describe('which URL a caller gets', () => {
     installBoxObjectUrls();
     const signer = getR2ObjectUrlSigner(boxEnv().env);
     expect(signer.kind).toBe('box');
-    const url = new URL(await signer.putUrl('k', { expiresIn: 60, contentLength: 3 }));
+    const url = new URL(
+      await signer.putUrl('temp-uploads/t/k', { expiresIn: 60, contentLength: 3 })
+    );
     expect(`${url.origin}${url.pathname}`).toBe(`https://api.${DOMAIN}${BOX_OBJECT_ROUTE}`);
     expect(url.searchParams.get('token')).toMatch(/^samobj1\./);
   });
@@ -395,7 +490,10 @@ describe('callers on a keyless box', () => {
   it('a single upload over 1 GiB is refused when the URL is requested', async () => {
     const signer = createBoxObjectUrlSigner(boxEnv().env)!;
     await expect(
-      signer.putUrl('k', { expiresIn: 60, contentLength: CELLD_MAX_REQUEST_BODY_BYTES + 1 })
+      signer.putUrl('temp-uploads/t/k', {
+        expiresIn: 60,
+        contentLength: CELLD_MAX_REQUEST_BODY_BYTES + 1,
+      })
     ).rejects.toMatchObject({ statusCode: 400 });
   });
 
@@ -458,15 +556,19 @@ describe('PUT/GET /api/box-objects', () => {
   it('refuses forged, expired, wrong-operation and missing tokens without writing', async () => {
     const { env, R2 } = boxEnv();
     const app = routeApp();
-    const getToken = await mintBoxObjectToken(env, { op: 'get', key: 'k', expiresIn: 60 });
+    const getToken = await mintBoxObjectToken(env, {
+      op: 'get',
+      key: 'temp-uploads/t/k',
+      expiresIn: 60,
+    });
     const expired = await mintBoxObjectToken(
       env,
-      { op: 'put', key: 'k', len: 1, expiresIn: 1 },
+      { op: 'put', key: 'temp-uploads/t/k', len: 1, expiresIn: 1 },
       Date.now() - 10_000
     );
     const forged = await mintBoxObjectToken(
       { ENCRYPTION_KEY: 'another-installation-key' },
-      { op: 'put', key: 'k', len: 1, expiresIn: 60 }
+      { op: 'put', key: 'temp-uploads/t/k', len: 1, expiresIn: 60 }
     );
     for (const token of [getToken, expired, forged, '']) {
       const response = await putUrl(
@@ -483,9 +585,9 @@ describe('PUT/GET /api/box-objects', () => {
   it('bounds size: over the maximum is 413, a length other than the issued one 400, none 411', async () => {
     const { env, R2 } = boxEnv();
     const app = routeApp();
-    const bounded = await upload(env, 'k1', { maxBytes: 4 });
+    const bounded = await upload(env, 'temp-uploads/t/k1', { maxBytes: 4 });
     expect((await putUrl(app, env, bounded, bytes('12345'))).status).toBe(413);
-    const exact = await upload(env, 'k2', { contentLength: 4 });
+    const exact = await upload(env, 'temp-uploads/t/k2', { contentLength: 4 });
     expect((await putUrl(app, env, exact, bytes('123'))).status).toBe(400);
     const target = new URL(exact);
     const noLength = await app.request(
@@ -502,12 +604,12 @@ describe('PUT/GET /api/box-objects', () => {
   it('is create-only: a second write is 412 and the object stays', async () => {
     const { env, R2 } = boxEnv();
     const app = routeApp();
-    const url = await upload(env, 'k', { contentLength: 5 });
+    const url = await upload(env, 'temp-uploads/t/k', { contentLength: 5 });
     expect((await putUrl(app, env, url, bytes('first'))).status).toBe(200);
     // Same length, other bytes: without a bound digest the route cannot tell, so it refuses.
     expect((await putUrl(app, env, url, bytes('other'))).status).toBe(412);
     expect((await putUrl(app, env, url, bytes('first'))).status).toBe(412);
-    expect(new TextDecoder().decode(R2.objects.get('k')!.bytes)).toBe('first');
+    expect(new TextDecoder().decode(R2.objects.get('temp-uploads/t/k')!.bytes)).toBe('first');
   });
 
   it('above celld conditional-put size it checks for an existing object instead of onlyIf', async () => {
@@ -515,37 +617,40 @@ describe('PUT/GET /api/box-objects', () => {
     const app = routeApp();
     const putSpy = vi.spyOn(R2, 'put');
     const big = new Uint8Array(CELLD_CONDITIONAL_PUT_MAX_BYTES + 1).fill(7);
-    const url = await upload(env, 'big', { contentLength: big.byteLength });
+    const url = await upload(env, 'temp-uploads/t/big', { contentLength: big.byteLength });
     expect((await putUrl(app, env, url, big)).status).toBe(200);
     expect(putSpy.mock.calls[0]![2]).not.toHaveProperty('onlyIf');
     expect((await putUrl(app, env, url, big.fill(8))).status).toBe(412);
     expect(putSpy).toHaveBeenCalledTimes(1);
-    expect(R2.objects.get('big')!.bytes[0]).toBe(7);
+    expect(R2.objects.get('temp-uploads/t/big')!.bytes[0]).toBe(7);
   });
 
   it('a retried PUT with a bound sha256 that already succeeded is 200 and replaces nothing', async () => {
     const { env, R2 } = boxEnv();
     const app = routeApp();
     const body = bytes('first');
-    const url = await upload(env, 'k', { contentLength: 5, sha256: await sha256Hex(body) });
+    const url = await upload(env, 'temp-uploads/t/k', {
+      contentLength: 5,
+      sha256: await sha256Hex(body),
+    });
     expect((await putUrl(app, env, url, body)).status).toBe(200);
     expect((await putUrl(app, env, url, body)).status).toBe(200);
     // Other bytes: 400 if the digest is checked first, 200 if the create-only check is (the stored
     // object is exactly what the token describes). Either way nothing is replaced.
     expect([200, 400]).toContain((await putUrl(app, env, url, bytes('other'))).status);
-    expect(new TextDecoder().decode(R2.objects.get('k')!.bytes)).toBe('first');
+    expect(new TextDecoder().decode(R2.objects.get('temp-uploads/t/k')!.bytes)).toBe('first');
   });
 
   it('verifies a bound sha256: wrong bytes are 400 and nothing is stored', async () => {
     const { env, R2 } = boxEnv();
     const app = routeApp();
     const body = bytes('context');
-    const url = await upload(env, 'ctx', {
+    const url = await upload(env, 'temp-uploads/t/ctx', {
       contentLength: body.byteLength,
       sha256: await sha256Hex(body),
     });
     expect((await putUrl(app, env, url, bytes('CONTEXT'))).status).toBe(400);
-    expect(R2.objects.has('ctx')).toBe(false);
+    expect(R2.objects.has('temp-uploads/t/ctx')).toBe(false);
     expect((await putUrl(app, env, url, body)).status).toBe(200);
   });
 
@@ -553,23 +658,109 @@ describe('PUT/GET /api/box-objects', () => {
     const { env, R2, gate } = boxEnv();
     const app = routeApp();
     // Settings storage is unavailable in this env, so the default limit (4) applies.
-    for (let i = 0; i < 4; i++) gate.acquire(`held-${i}`, 4, 60_000);
-    const url = await upload(env, 'busy', { contentLength: 4 });
+    for (let i = 0; i < 4; i++) gate.acquire(`held-${i}`, `u:other-${i}`, LIMITS);
+    const url = await upload(env, 'temp-uploads/t/busy', { contentLength: 4 });
     const refused = await putUrl(app, env, url, bytes('busy'));
     expect(refused.status).toBe(503);
     expect(Number(refused.headers.get('Retry-After'))).toBeGreaterThan(0);
-    expect(R2.objects.has('busy')).toBe(false);
+    expect(R2.objects.has('temp-uploads/t/busy')).toBe(false);
     gate.release('held-0');
     expect((await putUrl(app, env, url, bytes('busy'))).status).toBe(200);
     // The upload released its own lease: three held, one free.
-    expect(gate.acquire('probe', 4, 60_000)).toEqual({ granted: true });
+    expect(gate.acquire('probe', 'u:probe', LIMITS)).toEqual({ granted: true });
   });
 
   it('an expired lease frees its slot (a handler that died without releasing)', () => {
     const { gate } = boxEnv();
-    gate.acquire('dead', 1, 1_000, 0);
-    expect(gate.acquire('next', 1, 1_000, 500).granted).toBe(false);
-    expect(gate.acquire('next', 1, 1_000, 1_000).granted).toBe(true);
+    const one = { total: 1, perUploader: 1, leaseMs: 1_000 };
+    gate.acquire('dead', 'u:a', one, 0);
+    expect(gate.acquire('next', 'u:b', one, 500).granted).toBe(false);
+    expect(gate.acquire('next', 'u:b', one, 1_000).granted).toBe(true);
+  });
+
+  it('one uploader cannot take every slot: a second uploader is still admitted', async () => {
+    const { env, gate } = boxEnv();
+    const app = routeApp();
+    const signer = createBoxObjectUrlSigner(env)!;
+    // The attacker already holds its share (2 of 4).
+    gate.acquire('held-1', 'u:attacker', LIMITS);
+    gate.acquire('held-2', 'u:attacker', LIMITS);
+    const attacker = await signer.putUrl('temp-uploads/attacker/up/a', {
+      expiresIn: 60,
+      contentLength: 1,
+      owner: { userId: 'attacker' },
+    });
+    expect((await putUrl(app, env, attacker, bytes('a'))).status).toBe(503);
+    const other = await signer.putUrl('temp-uploads/other/up/a', {
+      expiresIn: 60,
+      contentLength: 1,
+      owner: { userId: 'other' },
+    });
+    expect((await putUrl(app, env, other, bytes('o'))).status).toBe(200);
+  });
+
+  it('drops an upload that stops sending bytes (408) and frees its slot', async () => {
+    vi.mocked(resolveAdminSettingDetailsMany).mockResolvedValueOnce([
+      { value: 4 },
+      { value: 1800 },
+      { value: 2 },
+      { value: 1 }, // idle seconds
+    ] as never);
+    const { env, R2, gate } = boxEnv();
+    const app = routeApp();
+    const url = new URL(await upload(env, 'temp-uploads/t/stall', { contentLength: 10 }));
+    const stalled = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes('12345'));
+      },
+    });
+    const response = await app.request(
+      `${url.pathname}${url.search}`,
+      {
+        method: 'PUT',
+        body: stalled,
+        headers: { 'content-length': '10' },
+        duplex: 'half',
+      } as RequestInit,
+      env
+    );
+    expect(response.status).toBe(408);
+    expect(R2.objects.has('temp-uploads/t/stall')).toBe(false);
+    // Its slot was released.
+    expect(gate.acquire('probe', 'u:probe', { total: 1, perUploader: 1, leaseMs: 60_000 })).toEqual(
+      {
+        granted: true,
+      }
+    );
+  }, 10_000);
+
+  it('a setting that resolves to nothing keeps its default bound (never disables the gate)', async () => {
+    vi.mocked(resolveAdminSettingDetailsMany).mockResolvedValueOnce([
+      { value: undefined },
+      { value: undefined },
+      { value: undefined },
+      { value: undefined },
+    ] as never);
+    const { env, gate } = boxEnv();
+    const app = routeApp();
+    for (let i = 0; i < 4; i++) gate.acquire(`held-${i}`, `u:other-${i}`, LIMITS);
+    const url = await upload(env, 'temp-uploads/t/nan', { contentLength: 1 });
+    expect((await putUrl(app, env, url, bytes('n'))).status).toBe(503);
+  });
+
+  it('accepts only a plain decimal Content-Length', async () => {
+    const { env, R2 } = boxEnv();
+    const app = routeApp();
+    const url = new URL(await upload(env, 'temp-uploads/t/cl', { maxBytes: 100 }));
+    for (const declared of ['1e1', '0x0a', '10.0', '+10']) {
+      const response = await app.request(
+        `${url.pathname}${url.search}`,
+        { method: 'PUT', body: bytes('1234567890'), headers: { 'content-length': declared } },
+        env
+      );
+      expect(response.status, declared).not.toBe(200);
+    }
+    expect(R2.objects.has('temp-uploads/t/cl')).toBe(false);
   });
 
   it('never logs the token: the request log and the route log carry the path only', async () => {
@@ -583,7 +774,7 @@ describe('PUT/GET /api/box-objects', () => {
         );
       });
     }
-    const url = await upload(env, 'logged', { contentLength: 2 });
+    const url = await upload(env, 'temp-uploads/t/logged', { contentLength: 2 });
     const token = new URL(url).searchParams.get('token')!;
     expect((await putUrl(app, env, url, bytes('ok'))).status).toBe(200);
     await putUrl(app, env, `https://x${BOX_OBJECT_ROUTE}?token=${token}x`, bytes('ok'));

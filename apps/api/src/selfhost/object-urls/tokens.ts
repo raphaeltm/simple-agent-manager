@@ -15,7 +15,14 @@
  * rotation overlaps. Once the previous key is dropped, such a token fails with 403 and the uploader
  * asks for a new one, exactly as an expired presigned URL would.
  */
-import { mintSignedToken, type SignedTokenEnv, verifySignedToken } from '../signed-token';
+import { BUILD_CONTEXT_PREFIX } from '@simple-agent-manager/app-deployment';
+
+import {
+  MAX_SIGNED_TOKEN_LENGTH,
+  mintSignedToken,
+  type SignedTokenEnv,
+  verifySignedToken,
+} from '../signed-token';
 
 export type BoxObjectOperation = 'put' | 'get';
 
@@ -47,6 +54,21 @@ const PURPOSE = {
   acceptPreviousKey: true,
 } as const;
 
+/**
+ * The only key prefixes a token may name: task attachments (`attachment-upload.ts`
+ * buildAttachmentR2Key), compose image artifacts (`buildComposeImageArtifactKey`) and build
+ * contexts (`buildContextKey`). The R2 binding also holds vm-agent binaries and session snapshots,
+ * so a minting bug must not be able to reach them. Enforced at mint and at verify.
+ */
+export const BOX_OBJECT_KEY_PREFIXES: readonly string[] = [
+  'temp-uploads/',
+  'compose-image-artifacts/',
+  BUILD_CONTEXT_PREFIX,
+];
+
+/** Longest lifetime a token may have, whatever the minting route asked for. */
+export const MAX_BOX_OBJECT_TOKEN_SECONDS = 24 * 60 * 60;
+
 /** Longest key accepted; R2 allows 1024 bytes. */
 const MAX_KEY_LENGTH = 1024;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
@@ -54,11 +76,13 @@ const MAX_METADATA_ENTRIES = 8;
 const MAX_METADATA_VALUE_LENGTH = 256;
 
 /**
- * An R2 key a token may name: relative, no empty, `.` or `..` segment, no backslash or control
- * character. Keys SAM builds always pass; anything else is refused at mint and at verify.
+ * An R2 key a token may name: under one of BOX_OBJECT_KEY_PREFIXES, relative, no empty, `.` or
+ * `..` segment, no backslash or control character. Keys SAM builds always pass; anything else is
+ * refused at mint and at verify.
  */
 export function isSafeObjectKey(key: string): boolean {
   if (!key || key.length > MAX_KEY_LENGTH) return false;
+  if (!BOX_OBJECT_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))) return false;
   // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
   if (key.startsWith('/') || key.includes('\\') || /[\u0000-\u001f\u007f]/.test(key)) return false;
   return key.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..');
@@ -133,10 +157,15 @@ export async function mintBoxObjectToken(
   now: number = Date.now()
 ): Promise<string> {
   const { expiresIn, ...rest } = input;
-  if (!positiveInteger(expiresIn)) throw new Error('Box object token needs a positive lifetime');
+  if (!positiveInteger(expiresIn) || expiresIn > MAX_BOX_OBJECT_TOKEN_SECONDS) {
+    throw new Error(`Box object token lifetime must be 1..${MAX_BOX_OBJECT_TOKEN_SECONDS} seconds`);
+  }
   const claims = parseClaims({ ...rest, v: 1, exp: Math.floor(now / 1000) + expiresIn });
   if (!claims) throw new Error('Box object token claims are invalid');
-  return mintSignedToken(env, PURPOSE, claims);
+  const token = await mintSignedToken(env, PURPOSE, claims);
+  // Verification refuses longer tokens; fail here instead of handing out a URL that cannot work.
+  if (token.length > MAX_SIGNED_TOKEN_LENGTH) throw new Error('Box object token is too long');
+  return token;
 }
 
 /** Signature, shape and expiry. Null for any token that is not valid now. */
@@ -148,5 +177,7 @@ export async function verifyBoxObjectToken(
   const raw = await verifySignedToken(env, PURPOSE, token);
   const claims = raw ? parseClaims(raw) : null;
   if (!claims || claims.exp * 1000 <= now) return null;
+  // A token valid for longer than any minter may issue is not one SAM minted correctly.
+  if (claims.exp * 1000 - now > MAX_BOX_OBJECT_TOKEN_SECONDS * 1000) return null;
   return claims;
 }

@@ -21,10 +21,25 @@ export const DEFAULT_BOX_OBJECT_MAX_CONCURRENT_UPLOADS = 4;
  */
 export const DEFAULT_BOX_OBJECT_UPLOAD_LEASE_SECONDS = 1800;
 
+/**
+ * Of those, how many one uploader (a workspace, else a user) may hold at once, so one uploader
+ * cannot take every slot from everyone else.
+ */
+export const DEFAULT_BOX_OBJECT_MAX_UPLOADS_PER_UPLOADER = 2;
+
+/**
+ * Seconds an upload may go without receiving a byte before the box drops it (408) and frees its
+ * slot. A slow but moving upload is never cut.
+ */
+export const DEFAULT_BOX_OBJECT_UPLOAD_IDLE_SECONDS = 60;
+
 /** These names exist only in the self-host build, so they are not in the shared name union. */
 export const BOX_OBJECT_MAX_CONCURRENT_UPLOADS =
   'boxObjects.maxConcurrentUploads' as AdminSettingName;
 export const BOX_OBJECT_UPLOAD_LEASE_SECONDS = 'boxObjects.uploadLeaseSeconds' as AdminSettingName;
+export const BOX_OBJECT_MAX_UPLOADS_PER_UPLOADER =
+  'boxObjects.maxUploadsPerUploader' as AdminSettingName;
+export const BOX_OBJECT_UPLOAD_IDLE_SECONDS = 'boxObjects.uploadIdleSeconds' as AdminSettingName;
 
 export const BOX_OBJECT_SETTINGS: readonly AdminSettingDefinition[] = [
   integerDefinition(
@@ -40,5 +55,19 @@ export const BOX_OBJECT_SETTINGS: readonly AdminSettingDefinition[] = [
     'Operations',
     'Seconds one upload counts against the concurrent-upload limit at most, so an upload whose handler died frees its slot.',
     { min: 60, max: 86_400 }
+  ),
+  integerDefinition(
+    BOX_OBJECT_MAX_UPLOADS_PER_UPLOADER,
+    DEFAULT_BOX_OBJECT_MAX_UPLOADS_PER_UPLOADER,
+    'Operations',
+    'Of the concurrent uploads, how many one uploader (a workspace, else a user) may hold at once.',
+    { min: 1, max: 64 }
+  ),
+  integerDefinition(
+    BOX_OBJECT_UPLOAD_IDLE_SECONDS,
+    DEFAULT_BOX_OBJECT_UPLOAD_IDLE_SECONDS,
+    'Operations',
+    'Seconds an upload may receive no bytes before the box drops it and frees its slot.',
+    { min: 5, max: 3_600 }
   ),
 ];

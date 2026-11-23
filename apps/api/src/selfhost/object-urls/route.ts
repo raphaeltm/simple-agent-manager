@@ -22,8 +22,12 @@ import { resolveAdminSettingDetailsMany } from '../../services/admin-settings-re
 import { boxUploadGate, type BoxUploadGateEnv } from './gate';
 import {
   BOX_OBJECT_MAX_CONCURRENT_UPLOADS,
+  BOX_OBJECT_MAX_UPLOADS_PER_UPLOADER,
+  BOX_OBJECT_UPLOAD_IDLE_SECONDS,
   BOX_OBJECT_UPLOAD_LEASE_SECONDS,
   DEFAULT_BOX_OBJECT_MAX_CONCURRENT_UPLOADS,
+  DEFAULT_BOX_OBJECT_MAX_UPLOADS_PER_UPLOADER,
+  DEFAULT_BOX_OBJECT_UPLOAD_IDLE_SECONDS,
   DEFAULT_BOX_OBJECT_UPLOAD_LEASE_SECONDS,
 } from './settings';
 import { type BoxObjectTokenClaims, verifyBoxObjectToken } from './tokens';
@@ -52,20 +56,74 @@ function logFields(claims: BoxObjectTokenClaims) {
   return { op: claims.op, key: claims.key, ...claims.sub };
 }
 
-async function uploadLimits(env: Env): Promise<{ limit: number; leaseMs: number }> {
+interface UploadLimits {
+  total: number;
+  perUploader: number;
+  leaseMs: number;
+  idleMs: number;
+}
+
+const DEFAULT_LIMITS: UploadLimits = {
+  total: DEFAULT_BOX_OBJECT_MAX_CONCURRENT_UPLOADS,
+  perUploader: DEFAULT_BOX_OBJECT_MAX_UPLOADS_PER_UPLOADER,
+  leaseMs: DEFAULT_BOX_OBJECT_UPLOAD_LEASE_SECONDS * 1000,
+  idleMs: DEFAULT_BOX_OBJECT_UPLOAD_IDLE_SECONDS * 1000,
+};
+
+/** A positive integer setting, else its default: a missing value must never disable a bound. */
+function setting(value: unknown, fallback: number, scale = 1): number {
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number > 0 ? number * scale : fallback;
+}
+
+async function uploadLimits(env: Env): Promise<UploadLimits> {
   try {
-    const [limit, lease] = await resolveAdminSettingDetailsMany(env, [
+    const [total, lease, perUploader, idle] = await resolveAdminSettingDetailsMany(env, [
       BOX_OBJECT_MAX_CONCURRENT_UPLOADS,
       BOX_OBJECT_UPLOAD_LEASE_SECONDS,
+      BOX_OBJECT_MAX_UPLOADS_PER_UPLOADER,
+      BOX_OBJECT_UPLOAD_IDLE_SECONDS,
     ]);
-    return { limit: Number(limit?.value), leaseMs: Number(lease?.value) * 1000 };
+    return {
+      total: setting(total?.value, DEFAULT_LIMITS.total),
+      leaseMs: setting(lease?.value, DEFAULT_LIMITS.leaseMs, 1000),
+      perUploader: setting(perUploader?.value, DEFAULT_LIMITS.perUploader),
+      idleMs: setting(idle?.value, DEFAULT_LIMITS.idleMs, 1000),
+    };
   } catch {
     // Settings storage unavailable: the defaults still bound memory.
-    return {
-      limit: DEFAULT_BOX_OBJECT_MAX_CONCURRENT_UPLOADS,
-      leaseMs: DEFAULT_BOX_OBJECT_UPLOAD_LEASE_SECONDS * 1000,
-    };
+    return DEFAULT_LIMITS;
   }
+}
+
+/** Who holds a slot: the workspace an upload is for, else the user who asked for the URL. */
+function uploader(claims: BoxObjectTokenClaims): string {
+  return claims.sub?.w ? `w:${claims.sub.w}` : claims.sub?.u ? `u:${claims.sub.u}` : 'unknown';
+}
+
+const IDLE_ERROR = 'box upload received no bytes within its idle limit';
+
+/** Passes bytes through; errors the stream if none arrive for `idleMs`, freeing the slot. */
+function idleWatchdog(idleMs: number): TransformStream<Uint8Array, Uint8Array> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let fail: (error: Error) => void = () => undefined;
+  const arm = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fail(new Error(IDLE_ERROR)), idleMs);
+  };
+  return new TransformStream({
+    start(controller) {
+      fail = (error) => controller.error(error);
+      arm();
+    },
+    transform(chunk, controller) {
+      arm();
+      controller.enqueue(chunk);
+    },
+    flush() {
+      clearTimeout(timer);
+    },
+  });
 }
 
 /**
@@ -96,11 +154,11 @@ async function conflict(env: Env, claims: BoxObjectTokenClaims, length: number) 
 
 async function put(c: Context<{ Bindings: BoxObjectEnv }>, claims: BoxObjectTokenClaims) {
   const env = c.env;
-  const length = Number(c.req.header('content-length'));
+  const declared = c.req.header('content-length') ?? '';
+  // Digits only: Number() would also accept "1e3", "0x10" or " 12".
+  if (!/^\d{1,16}$/.test(declared)) return plain(411, 'Content-Length is required');
+  const length = Number(declared);
   const body = c.req.raw.body;
-  if (!c.req.header('content-length') || !Number.isSafeInteger(length) || length < 0) {
-    return plain(411, 'Content-Length is required');
-  }
   if (claims.max !== undefined && length > claims.max) {
     return plain(413, `Upload is ${length} bytes; this URL accepts at most ${claims.max}`);
   }
@@ -111,16 +169,17 @@ async function put(c: Context<{ Bindings: BoxObjectEnv }>, claims: BoxObjectToke
 
   const gate = boxUploadGate(env);
   if (!gate) return plain(503, 'Box uploads are unavailable (no upload gate binding)');
-  const { limit, leaseMs } = await uploadLimits(env);
+  const limits = await uploadLimits(env);
   const leaseId = crypto.randomUUID();
-  const lease = await gate.acquire(leaseId, limit, leaseMs);
+  const lease = await gate.acquire(leaseId, uploader(claims), limits);
   if (!lease.granted) {
     log.warn('box_objects.upload_refused_busy', {
       ...logFields(claims),
       active: lease.active,
-      limit,
+      limit: limits.total,
+      perUploader: limits.perUploader,
     });
-    return plain(503, `The box is already receiving ${lease.active} uploads; retry shortly`, {
+    return plain(503, 'The box is receiving as many uploads as it allows; retry shortly', {
       'Retry-After': String(lease.retryAfterSeconds),
     });
   }
@@ -128,7 +187,9 @@ async function put(c: Context<{ Bindings: BoxObjectEnv }>, claims: BoxObjectToke
     const atomic = length <= CELLD_CONDITIONAL_PUT_MAX_BYTES;
     if (!atomic && (await env.R2.head(claims.key))) return conflict(env, claims, length);
     // FixedLengthStream makes a short or long body an error instead of a truncated object.
-    const stream = body ? body.pipeThrough(new FixedLengthStream(length)) : new Uint8Array(0);
+    const stream = body
+      ? body.pipeThrough(idleWatchdog(limits.idleMs)).pipeThrough(new FixedLengthStream(length))
+      : new Uint8Array(0);
     let written: R2Object | null;
     try {
       written = await env.R2.put(claims.key, stream, {
@@ -140,6 +201,7 @@ async function put(c: Context<{ Bindings: BoxObjectEnv }>, claims: BoxObjectToke
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log.warn('box_objects.upload_failed', { ...logFields(claims), length, error: message });
+      if (message.includes(IDLE_ERROR)) return plain(408, 'The upload stopped sending data');
       return claims.sha && /sha-?256/i.test(message)
         ? plain(400, 'Upload body does not match the declared sha256')
         : plain(502, 'The upload did not complete; retry it');

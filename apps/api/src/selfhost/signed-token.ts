@@ -25,7 +25,7 @@ export interface SignedTokenEnv {
 }
 
 /** Longest token any purpose verifies; longer input is refused before any crypto. */
-const MAX_TOKEN_LENGTH = 2048;
+export const MAX_SIGNED_TOKEN_LENGTH = 2048;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -107,7 +107,7 @@ export async function verifySignedToken(
   purpose: SignedTokenPurpose,
   token: string
 ): Promise<Record<string, unknown> | null> {
-  if (token.length > MAX_TOKEN_LENGTH) return null;
+  if (token.length > MAX_SIGNED_TOKEN_LENGTH) return null;
   const parts = token.split('.');
   if (parts.length !== 3 || parts[0] !== purpose.prefix) return null;
   const [prefix, payload, signaturePart] = parts as [string, string, string];

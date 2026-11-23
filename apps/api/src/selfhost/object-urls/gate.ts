@@ -6,7 +6,10 @@
  * (task tasks/active/2026-11-23-selfhost-box-object-uploads.md): peak RSS 220 MB for one upload,
  * 284 / 427 / 896 MB for 2 / 4 / 8 at once, so roughly 85 MB per upload over a ~150 MB base, while
  * aggregate throughput stops growing after two (~180 MB/s). The default of 4 keeps the peak near
- * 430 MB. An upload over the limit is refused with 503 and Retry-After rather than queued.
+ * 430 MB. An upload over the limit is refused with 503 and Retry-After rather than queued. One
+ * uploader (a workspace, else a user) may hold only part of the slots, and the route drops an
+ * upload that stops sending bytes (`route.ts`), so a slow or stalled client cannot keep the box's
+ * uploads blocked.
  *
  * Why a Durable Object: the limit must hold across every Worker isolate celld runs, and a single
  * object is the box's one serialization point. Each acquire is a lease with an expiry, so a handler
@@ -31,20 +34,29 @@ export class BoxUploadGate extends DurableObject {
   constructor(ctx: DurableObjectState, env: unknown) {
     super(ctx, env as never);
     ctx.storage.sql.exec(
-      'CREATE TABLE IF NOT EXISTS upload_leases (id TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)'
+      'CREATE TABLE IF NOT EXISTS upload_leases (id TEXT PRIMARY KEY, uploader TEXT NOT NULL, expires_at INTEGER NOT NULL)'
     );
   }
 
-  /** Grants a lease to `id` while fewer than `limit` unexpired leases exist. */
-  acquire(id: string, limit: number, leaseMs: number, now: number = Date.now()): BoxUploadLease {
+  /**
+   * Grants a lease to `id` while fewer than `limits.total` unexpired leases exist on the box and
+   * fewer than `limits.perUploader` belong to `uploader`, so one uploader cannot hold every slot.
+   */
+  acquire(
+    id: string,
+    uploader: string,
+    limits: { total: number; perUploader: number; leaseMs: number },
+    now: number = Date.now()
+  ): BoxUploadLease {
     const sql = this.ctx.storage.sql;
     sql.exec('DELETE FROM upload_leases WHERE expires_at <= ?', now);
     const row = sql
-      .exec<{ active: number; next: number | null }>(
-        'SELECT COUNT(*) AS active, MIN(expires_at) AS next FROM upload_leases'
+      .exec<{ active: number; mine: number; next: number | null }>(
+        'SELECT COUNT(*) AS active, COALESCE(SUM(uploader = ?), 0) AS mine, MIN(expires_at) AS next FROM upload_leases',
+        uploader
       )
       .one();
-    if (row.active >= limit) {
+    if (row.active >= limits.total || row.mine >= limits.perUploader) {
       // A hint, not a promise: most leases end when their upload finishes, long before expiry.
       const untilExpiry = Math.ceil(((row.next ?? now) - now) / 1000);
       const retryAfterSeconds = Math.min(
@@ -54,9 +66,10 @@ export class BoxUploadGate extends DurableObject {
       return { granted: false, active: row.active, retryAfterSeconds };
     }
     sql.exec(
-      'INSERT OR REPLACE INTO upload_leases (id, expires_at) VALUES (?, ?)',
+      'INSERT OR REPLACE INTO upload_leases (id, uploader, expires_at) VALUES (?, ?, ?)',
       id,
-      now + leaseMs
+      uploader,
+      now + limits.leaseMs
     );
     return { granted: true };
   }
@@ -70,7 +83,11 @@ export class BoxUploadGate extends DurableObject {
 export const BOX_UPLOAD_GATE_NAME = 'box';
 
 interface BoxUploadGateStub {
-  acquire(id: string, limit: number, leaseMs: number): Promise<BoxUploadLease>;
+  acquire(
+    id: string,
+    uploader: string,
+    limits: { total: number; perUploader: number; leaseMs: number }
+  ): Promise<BoxUploadLease>;
   release(id: string): Promise<void>;
 }
 
