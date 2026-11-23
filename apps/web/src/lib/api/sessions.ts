@@ -38,6 +38,11 @@ export async function listChatSessions(
      * (first page, no status filter). The chat sidebar groups by state, not by age.
      */
     includeLive?: boolean;
+    /**
+     * Read from the ProjectData DO instead of the D1 index, which lags it by the summary
+     * sync debounce. Only for the catch-up read after a project socket subscribes.
+     */
+    authoritative?: boolean;
   } = {}
 ): Promise<ChatSessionListResponse> {
   const searchParams = new URLSearchParams();
@@ -46,6 +51,7 @@ export async function listChatSessions(
   if (params.offset !== undefined) searchParams.set('offset', String(params.offset));
   if (params.scope) searchParams.set('scope', params.scope);
   if (params.includeLive) searchParams.set('include', 'live');
+  if (params.authoritative) searchParams.set('consistency', 'authoritative');
 
   const qs = searchParams.toString();
   const endpoint = qs

@@ -9,6 +9,7 @@
  * (rule 62): the frame arrives the way the ProjectData DO sends it.
  */
 import type { SessionAccessSummary, SessionUndeliveredPrompt } from '@simple-agent-manager/shared';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
@@ -127,9 +128,12 @@ function sessionRead(undelivered: SessionUndeliveredPrompt[]) {
   };
 }
 
+vi.mock('../../../src/hooks/useQueryScope', () => ({ useQueryScope: () => 'test-viewer' }));
+
 function renderView() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const Wrapper = ({ children }: { children: ReactNode }) => (
-    <MemoryRouter>{children}</MemoryRouter>
+    <QueryClientProvider client={client}><MemoryRouter>{children}</MemoryRouter></QueryClientProvider>
   );
   return render(<WorkspaceChatView projectId="proj-1" sessionId={SESSION_ID} />, {
     wrapper: Wrapper,
@@ -177,6 +181,7 @@ describe('WorkspaceChatView — prompts that were never delivered', () => {
     act(() => {
       socket.open();
     });
+    await waitFor(() => expect(mocks.getChatSession).toHaveBeenCalledTimes(2));
     act(() => {
       socket.deliver({
         type: 'session.access.changed',
@@ -187,7 +192,7 @@ describe('WorkspaceChatView — prompts that were never delivered', () => {
     expect(await screen.findByText('Not delivered — access expired')).toBeInTheDocument();
     expect(mocks.getSessionAccess).toHaveBeenCalledWith('proj-1', SESSION_ID);
     // The label came from the access read, not a reload of the transcript.
-    expect(mocks.getChatSession).toHaveBeenCalledTimes(1);
+    expect(mocks.getChatSession).toHaveBeenCalledTimes(2);
   });
 
   it("ignores another session's access change", async () => {

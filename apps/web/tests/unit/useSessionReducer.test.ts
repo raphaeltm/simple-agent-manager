@@ -317,6 +317,204 @@ describe('useSessionReducer hook (batching)', () => {
     expect(result.current.sessions[1].status).toBe('stopped');
   });
 
+  it.each([false, true])(
+    'reconciles only post-capture live fields and pending deltas flushed=%s',
+    async (flushed) => {
+      const { result } = renderHook(() => useSessionReducer());
+      act(() => result.current.resetSessions([makeSession(), makeSession({ id: 'removed' })]));
+      act(() =>
+        result.current.dispatchEvent({
+          type: 'session.updated',
+          payload: { sessionId: 'sess-1', topic: 'Before request' },
+        })
+      );
+      let before!: ReturnType<typeof result.current.captureSnapshot>;
+      act(() => {
+        before = result.current.captureSnapshot();
+      });
+      expect(before.sessions[0]?.topic).toBe('Before request');
+      act(() => {
+        result.current.dispatchEvent({
+          type: 'session.updated',
+          payload: { sessionId: 'sess-1', topic: 'Live during request' },
+        });
+        result.current.dispatchEvent({
+          type: 'session.created',
+          payload: {
+            id: 'live-new',
+            topic: 'Live created',
+            status: 'active',
+            messageCount: 0,
+            createdAt: 2000,
+          },
+        });
+      });
+      if (flushed)
+        await act(async () => {
+          vi.advanceTimersByTime(20);
+        });
+      act(() =>
+        result.current.resetSessions(
+          [makeSession({ topic: 'Server snapshot', workspaceId: 'fresh-workspace' })],
+          before
+        )
+      );
+      expect(result.current.sessions.find((session) => session.id === 'sess-1')).toMatchObject({
+        topic: 'Live during request',
+        workspaceId: 'fresh-workspace',
+      });
+      expect(result.current.sessions.some((session) => session.id === 'live-new')).toBe(true);
+      expect(result.current.sessions.some((session) => session.id === 'removed')).toBe(false);
+    }
+  );
+
+  it.each(
+    [false, true].flatMap((flushed) => [false, true].map((patched) => ({ flushed, patched })))
+  )(
+    'sparse live creation preserves rich server fields flushed=$flushed patched=$patched',
+    async ({ flushed, patched }) => {
+      const { result } = renderHook(() => useSessionReducer());
+      const before = result.current.captureSnapshot();
+      act(() => {
+        result.current.dispatchEvent({
+          type: 'session.created',
+          payload: { id: 'new', status: 'active', messageCount: 0, createdAt: 1000 },
+        });
+        if (patched)
+          result.current.dispatchEvent({
+            type: 'session.updated',
+            payload: { sessionId: 'new', topic: 'Later live topic' },
+          });
+      });
+      if (flushed)
+        await act(async () => {
+          vi.advanceTimersByTime(20);
+        });
+      act(() =>
+        result.current.resetSessions(
+          [
+            makeSession({
+              id: 'new',
+              topic: 'Rich server topic',
+              workspaceId: 'server-workspace',
+              messageCount: 3,
+            }),
+          ],
+          before
+        )
+      );
+      expect(result.current.sessions[0]).toMatchObject({
+        topic: patched ? 'Later live topic' : 'Rich server topic',
+        workspaceId: 'server-workspace',
+        messageCount: 3,
+      });
+    }
+  );
+
+  it('tracks pending events through three overlapping snapshot reads', () => {
+    const { result } = renderHook(() => useSessionReducer());
+    const first = result.current.captureSnapshot();
+    const second = result.current.captureSnapshot();
+    const third = result.current.captureSnapshot();
+    act(() =>
+      result.current.dispatchEvent({
+        type: 'session.created',
+        payload: { id: 'new', status: 'active', messageCount: 0, createdAt: 1000 },
+      })
+    );
+    act(() => result.current.resetSessions([], first));
+    act(() =>
+      result.current.dispatchEvent({
+        type: 'session.updated',
+        payload: { sessionId: 'new', topic: 'Live after first reset' },
+      })
+    );
+    act(() =>
+      result.current.resetSessions(
+        [
+          makeSession({
+            id: 'new',
+            topic: 'Server topic',
+            workspaceId: 'rich-workspace',
+            messageCount: 3,
+          }),
+        ],
+        second
+      )
+    );
+    expect(result.current.sessions[0]).toMatchObject({
+      topic: 'Live after first reset',
+      workspaceId: 'rich-workspace',
+      messageCount: 3,
+    });
+    act(() =>
+      result.current.resetSessions(
+        [
+          makeSession({
+            id: 'new',
+            topic: 'Stale third topic',
+            workspaceId: 'newest-workspace',
+            messageCount: 4,
+          }),
+        ],
+        third
+      )
+    );
+    expect(result.current.sessions[0]).toMatchObject({
+      topic: 'Live after first reset',
+      workspaceId: 'newest-workspace',
+      messageCount: 4,
+    });
+  });
+
+  it.each([false, true])(
+    'keeps live fields that return to their pre-read value newRow=%s',
+    async (newRow) => {
+      const { result } = renderHook(() => useSessionReducer());
+      if (!newRow)
+        act(() =>
+          result.current.resetSessions([makeSession({ id: 'row', topic: 'A', status: 'active' })])
+        );
+      const before = result.current.captureSnapshot();
+      act(() => {
+        if (newRow)
+          result.current.dispatchEvent({
+            type: 'session.created',
+            payload: { id: 'row', topic: 'A', status: 'active', messageCount: 0, createdAt: 1000 },
+          });
+        result.current.dispatchEvent({
+          type: 'session.updated',
+          payload: { sessionId: 'row', topic: 'B', status: 'sleeping' },
+        });
+        result.current.dispatchEvent({
+          type: 'session.updated',
+          payload: { sessionId: 'row', topic: 'A', status: 'active' },
+        });
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(20);
+      });
+      act(() =>
+        result.current.resetSessions(
+          [
+            makeSession({
+              id: 'row',
+              topic: 'B',
+              status: 'sleeping',
+              workspaceId: 'fresh-workspace',
+            }),
+          ],
+          before
+        )
+      );
+      expect(result.current.sessions[0]).toMatchObject({
+        topic: 'A',
+        status: 'active',
+        workspaceId: 'fresh-workspace',
+      });
+    }
+  );
+
   it('resetSessions discards a pending batch', async () => {
     const { result } = renderHook(() => useSessionReducer());
 

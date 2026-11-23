@@ -49,7 +49,7 @@ export interface SessionTranscript {
    * Reads and adds every row persisted after the newest loaded one (the socket subscribed).
    * `afterReadsSettle` runs once no transcript read is in flight, for other state to re-read.
    */
-  catchUpTail: (afterReadsSettle?: () => void) => void;
+  catchUpTail: (afterReadsSettle?: () => void) => Promise<void>;
   /**
    * Merges a newest-window response, draining any gap to the loaded tail first. When
    * `isCurrent` says the read was overtaken while it merged, its rows still land but its
@@ -180,13 +180,16 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
       addedLiveRef.current = addedLive;
       const inFlight = queryClient.getQueryCache().find({ queryKey, exact: true })?.promise;
       // A failed or cancelled read still leaves a transcript to resume from.
-      const readsSettled = Promise.resolve(inFlight).catch(() => undefined);
+      const readsSettled = Promise.resolve(inFlight).then(
+        () => undefined,
+        () => undefined
+      );
       if (afterReadsSettle) {
         void readsSettled.then(afterReadsSettle).catch((err: unknown) => {
           console.warn('Failed to re-read session state after the chat socket opened', err);
         });
       }
-      void readsSettled
+      const repaired = readsSettled
         .then(async () => {
           const loaded = readDetail();
           if (!loaded) return;
@@ -207,7 +210,11 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
                 toolChanges: found.toolChanges,
                 hasMore: found.resetRequired ? (found.hasMore ?? true) : current.hasMore,
                 messages: found.resetRequired
-                  ? found.messages
+                  ? mergeMessages(
+                      found.messages,
+                      current.messages.filter((message) => addedLive.has(message.id)),
+                      'append'
+                    )
                   : mergeMessages(current.messages, found.messages, 'append'),
               }
           );
@@ -219,6 +226,7 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
         .finally(() => {
           if (addedLiveRef.current === addedLive) addedLiveRef.current = null;
         });
+      return repaired;
     },
     [projectId, queryClient, queryKey, readDetail, sessionId]
   );
@@ -239,23 +247,20 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
         signal
       );
       queryClient.setQueryData<ChatSessionDetailResponse>(queryKey, (latest) => {
-        // Rows written while the window merged (a socket row, a send, an older
-        // page) are in neither of its inputs; keep them.
         const merging = new Set(current.messages.map((message) => message.id));
-        if (merged.toolChanges?.resetRequired) return merged;
         const arrived = latest?.messages.filter((message) => !merging.has(message.id)) ?? [];
-        // Checked here, after every await: an overtaken read keeps the newer snapshots.
+        // Live handlers own local lifecycle state. Keep these exact cache references
+        // when overtaken, so the observer cannot rehydrate an older lifecycle over it.
+        // This also applies when a tool reset replaces the message window.
         const overtaken = latest && isCurrent ? !isCurrent() : false;
         return {
           ...(latest ?? merged),
-          ...(overtaken ? { hasMore: merged.hasMore } : merged),
-          messages: mergeMessages(
-            merged.messages,
-            [...(latest?.messages ?? []), ...arrived],
-            'append'
-          ),
-          // A window that carries no state snapshot must not erase the last known one.
-          state: overtaken ? (latest?.state ?? null) : (merged.state ?? latest?.state ?? null),
+          ...merged,
+          session: overtaken && latest ? latest.session : merged.session,
+          messages: merged.toolChanges?.resetRequired
+            ? mergeMessages(merged.messages, arrived, 'append')
+            : mergeMessages(merged.messages, [...(latest?.messages ?? []), ...arrived], 'append'),
+          state: overtaken && latest ? latest.state : (merged.state ?? latest?.state ?? null),
         };
       });
     },

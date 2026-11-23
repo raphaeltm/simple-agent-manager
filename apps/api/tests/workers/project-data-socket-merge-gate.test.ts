@@ -288,6 +288,95 @@ describe('browser sockets and chunk merging', () => {
     expect(await contents(f)).toEqual(['one two three four', 'five ', 'six', 'seven eight']);
   });
 
+  it('a legacy chat socket still awaiting its access check is not resync-closed by an append', async () => {
+    const f = await startup();
+    const cookie = await signedIn(f);
+    await deliver(f, chunks(f, ['one ', 'two ']));
+    const capable = await openSocket(f, cookie, { sessionId: f.session, capable: true });
+    await f.stub.scheduleIdleCleanup(f.session, f.workspace, null);
+    // Two holds, signalled through plain flags (see the mid-batch test): the batch's broadcast
+    // waits in `recalculateAlarm`, and the new socket's admission lookup waits before reading D1.
+    const batch = { reached: false, released: false };
+    const admission = { entered: false, released: false };
+    await runInDurableObject(f.stub, (instance) => {
+      const target = instance as unknown as {
+        recalculateAlarm: () => Promise<void>;
+        env: { DATABASE: D1Database };
+      };
+      const originalAlarm = target.recalculateAlarm.bind(instance);
+      let first = true;
+      target.recalculateAlarm = async () => {
+        if (first) {
+          first = false;
+          batch.reached = true;
+          while (!batch.released) await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        return originalAlarm();
+      };
+      const database = target.env.DATABASE;
+      target.env.DATABASE = new Proxy(database, {
+        get(db, prop) {
+          if (prop !== 'prepare') {
+            const value = Reflect.get(db, prop) as unknown;
+            return typeof value === 'function' ? value.bind(db) : value;
+          }
+          return (sql: string) => {
+            const statement = db.prepare(sql);
+            if (!sql.includes('FROM project_members pm')) return statement;
+            return {
+              bind: (...args: unknown[]) => {
+                const bound = statement.bind(...args);
+                return {
+                  first: async () => {
+                    admission.entered = true;
+                    while (!admission.released) await new Promise((r) => setTimeout(r, 5));
+                    return bound.first();
+                  },
+                };
+              },
+            };
+          };
+        },
+      });
+    });
+
+    const inFlight = deliver(f, chunks(f, ['three ', 'four'], 3, 'b'));
+    let opening!: Promise<BrowserSocket>;
+    try {
+      await settle(() => batch.reached, 'the batch to reach its hold');
+      opening = openSocket(f, cookie, { sessionId: f.session, capable: false });
+      await settle(() => admission.entered, 'the new socket to start its access check');
+      batch.released = true;
+      await inFlight;
+      // The append went out while the legacy socket was still pending.
+      await settle(
+        () => capable.frames.some((frame) => frame.type === 'message.append'),
+        'the capable append'
+      );
+    } finally {
+      batch.released = true;
+      admission.released = true;
+    }
+    const legacy = await opening;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // It was admitted, not closed for resync, and received no append.
+    expect(legacy.closeCode()).toBeNull();
+    expect(legacy.frames.map((frame) => frame.type)).not.toContain('message.append');
+    // Its client's catch-up read already holds the appended text.
+    expect((await storedRows(f)).map((row) => row.content)).toEqual(['one two three four']);
+    // And it streams: the next batch reaches it as rows (merging is off for its session).
+    await deliver(f, chunks(f, ['five ', 'six'], 5, 'c'));
+    await settle(
+      () => transcriptFrames(legacy).length > 0,
+      'a transcript frame on the legacy socket'
+    );
+    expect(await contents(f)).toEqual(['one two three four', 'five ', 'six']);
+    expect(capable.closeCode()).toBeNull();
+    legacy.ws.close(1000);
+    capable.ws.close(1000);
+  });
+
   it('with merging off, every socket keeps individual rows exactly as before', async () => {
     const f = await startup();
     vi.mocked(projectDataPorts().operations.messageMergeConfig!).mockResolvedValue({

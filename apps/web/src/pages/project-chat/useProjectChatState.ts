@@ -46,7 +46,7 @@ export function useProjectChatState() {
   const queryScope = useQueryScope();
   const queryClient = useQueryClient();
 
-  const { sessions, dispatchEvent, resetSessions } = useSessionReducer();
+  const { sessions, dispatchEvent, resetSessions, captureSnapshot } = useSessionReducer();
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const hasLoadedRef = useRef(false);
@@ -54,8 +54,6 @@ export function useProjectChatState() {
   const [listLoaded, setListLoaded] = useState(false);
   // The read in flight when the page mounted, for handlers that need the selected session.
   const initialLoadRef = useRef<Promise<ChatSessionResponse[]>>(Promise.resolve([]));
-  // The first list came from the route prefetch; see the first-socket-open refresh below.
-  const listFromPrefetchRef = useRef(false);
   // The new-chat composer and its start path, shared with the Project Overview's task box.
   const composer = useNewChatComposer();
   const {
@@ -93,6 +91,9 @@ export function useProjectChatState() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sessionScope, setSessionScope] = useState<SessionScope>('all');
   const multiplayerActive = Boolean(project?.multiplayerActive);
+  const subscriptionScope = `${queryScope}:${projectId}:${multiplayerActive ? sessionScope : 'all'}`;
+  const currentSubscriptionScope = useRef(subscriptionScope);
+  currentSubscriptionScope.current = subscriptionScope;
 
   // Track explicit "new chat" intent so auto-select doesn't override it
   const newChatIntentRef = useRef(false);
@@ -137,6 +138,7 @@ export function useProjectChatState() {
 
   // Task/idea title map for session tagging + task info map for grouping
   const [taskTitleMap, setTaskTitleMap] = useState<Map<string, string>>(new Map());
+  const taskLoadGenerationRef = useRef(0);
   const { taskInfoMap, replaceAll: replaceTaskInfoMap } = useStableTaskInfoMap();
 
   const sessionList = useSessionSections(sessions, taskInfoMap, searchQuery);
@@ -156,62 +158,77 @@ export function useProjectChatState() {
   // on the server before the agent runs rather than from a query parameter afterwards.
   useComposerPrefill(sessionId, setMessage);
 
-  const loadSessions = useCallback(async () => {
-    if (hasLoadedRef.current) setIsRefreshing(true);
-    try {
-      const scope = multiplayerActive ? sessionScope : 'all';
-      let sessions: ChatSessionResponse[];
-      if (!hasLoadedRef.current && scope === 'all') {
-        const initial = await readInitialSessionList(queryClient, queryScope, projectId);
-        sessions = initial.sessions;
-        listFromPrefetchRef.current = initial.prefetched;
-      } else {
-        sessions = (
-          await listChatSessions(projectId, {
-            limit: CHAT_SESSION_LIST_LIMIT,
-            scope,
-            includeLive: true,
+  const loadSessions = useCallback(
+    async (options?: { fresh?: boolean }) => {
+      if (hasLoadedRef.current) setIsRefreshing(true);
+      const before = captureSnapshot();
+      try {
+        const scope = multiplayerActive ? sessionScope : 'all';
+        let sessions: ChatSessionResponse[];
+        if (!options?.fresh && !hasLoadedRef.current && scope === 'all') {
+          const initial = await readInitialSessionList(queryClient, queryScope, projectId);
+          sessions = initial.sessions;
+        } else {
+          sessions = (
+            await listChatSessions(projectId, {
+              limit: CHAT_SESSION_LIST_LIMIT,
+              scope,
+              includeLive: true,
+              // The subscription catch-up must see sessions created while the socket was
+              // closed; the D1 index can still be missing them.
+              ...(options?.fresh ? { authoritative: true } : {}),
+            })
+          ).sessions;
+        }
+        if (currentSubscriptionScope.current !== subscriptionScope) return [];
+        resetSessions(sessions, before);
+        hasLoadedRef.current = true;
+        setListLoaded(true);
+
+        // Loads overlap (mount read, then the subscription catch-up), and an older task read can
+        // finish last. Only the newest load's tasks may replace the maps.
+        const taskLoad = ++taskLoadGenerationRef.current;
+        listProjectTasks(projectId, { limit: CHAT_TASK_LIST_LIMIT })
+          .then((tasksResult) => {
+            if (currentSubscriptionScope.current !== subscriptionScope) return;
+            if (taskLoad !== taskLoadGenerationRef.current) return;
+            const titleMap = new Map<string, string>();
+            for (const t of tasksResult.tasks) titleMap.set(t.id, t.title);
+            setTaskTitleMap(titleMap);
+            replaceTaskInfoMap(tasksResult.tasks as Task[]);
           })
-        ).sessions;
+          .catch(() => {
+            /* task titles are cosmetic */
+          });
+
+        return sessions;
+      } catch {
+        return [];
+      } finally {
+        setIsRefreshing(false);
       }
-      resetSessions(sessions);
-      hasLoadedRef.current = true;
-      setListLoaded(true);
-
-      listProjectTasks(projectId, { limit: CHAT_TASK_LIST_LIMIT })
-        .then((tasksResult) => {
-          const titleMap = new Map<string, string>();
-          for (const t of tasksResult.tasks) titleMap.set(t.id, t.title);
-          setTaskTitleMap(titleMap);
-          replaceTaskInfoMap(tasksResult.tasks as Task[]);
-        })
-        .catch(() => {
-          /* task titles are cosmetic */
-        });
-
-      return sessions;
-    } catch {
-      return [];
-    } finally {
-      setIsRefreshing(false);
-    }
-  }, [
-    projectId,
-    sessionScope,
-    multiplayerActive,
-    resetSessions,
-    replaceTaskInfoMap,
-    queryClient,
-    queryScope,
-  ]);
+    },
+    [
+      projectId,
+      sessionScope,
+      multiplayerActive,
+      resetSessions,
+      captureSnapshot,
+      replaceTaskInfoMap,
+      queryClient,
+      queryScope,
+      subscriptionScope,
+    ]
+  );
 
   const handleSessionEvent = useCallback(
     (raw: RawSessionEvent) => {
       // session.created deltas cannot be scope-filtered client-side (we don't
       // know isMine from the wire payload), so fall back to a full refetch when
-      // the user is viewing "My sessions" to let the server apply the filter.
+      // the user is viewing "My sessions" to let the server apply the filter. The read
+      // must be authoritative: the D1 index has not synced a session created just now.
       if (raw.type === 'session.created' && multiplayerActive && sessionScope === 'my') {
-        void loadSessions();
+        void loadSessions({ fresh: true });
         return;
       }
       const event = rawToSessionEvent(raw);
@@ -228,11 +245,18 @@ export function useProjectChatState() {
     [queryClient, queryScope]
   );
 
+  const refreshAfterSubscription = useCallback(async () => {
+    // Finish the mount/prefetch read first so its stale result cannot overwrite catch-up.
+    await initialLoadRef.current;
+    if (currentSubscriptionScope.current !== subscriptionScope) return;
+    await loadSessions({ fresh: true });
+  }, [loadSessions, subscriptionScope]);
+
   const { connectionState } = useProjectWebSocket({
     projectId,
     onSessionEvent: handleSessionEvent,
     onCommentEvent: handleCommentEvent,
-    onReconnected: loadSessions,
+    onReconnected: refreshAfterSubscription,
   });
 
   const realtimeDegraded = connectionState === 'disconnected';
@@ -271,13 +295,6 @@ export function useProjectChatState() {
   // tabs. Reconnect catch-up is handled by `onReconnected` above; disconnect and
   // tab-return catch-up come from the hook's elapsed-gated refresh.
   const wsConnected = connectionState === 'connected';
-  // The route prefetch read the list before this socket subscribed, and the server replays
-  // nothing on subscribe: read it once more when the socket first opens.
-  useEffect(() => {
-    if (!wsConnected || !listLoaded || !listFromPrefetchRef.current) return;
-    listFromPrefetchRef.current = false;
-    void loadSessions();
-  }, [wsConnected, listLoaded, loadSessions]);
   useVisibilityAwarePoll(loadSessions, SESSION_SYNC_INTERVAL_MS, {
     enabled: !loading,
     paused: wsConnected,

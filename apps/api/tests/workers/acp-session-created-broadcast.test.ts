@@ -14,9 +14,12 @@ import { describe, expect, it } from 'vitest';
 
 import { socketMember } from './helpers/socket-member';
 
-function getStub(projectId: string): DurableObjectStub<ProjectData> {
+async function getStub(projectId: string): Promise<DurableObjectStub<ProjectData>> {
   const id = env.PROJECT_DATA.idFromName(projectId);
-  return env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectData>;
+  const stub = env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectData>;
+  // The production service binds identity before any session operation.
+  await stub.ensureProjectId(projectId);
+  return stub;
 }
 
 type Broadcast = { type?: string; payload?: Record<string, unknown> } & Record<string, unknown>;
@@ -47,7 +50,7 @@ async function settle(): Promise<void> {
 
 describe('createAcpSession pushes agentSessionId to the open chat page', () => {
   it('a socket subscribed to the chat session receives session.updated with the ACP id', async () => {
-    const stub = getStub(`proj-acp-broadcast-${crypto.randomUUID()}`);
+    const stub = await getStub(`proj-acp-broadcast-${crypto.randomUUID()}`);
     const chatSessionId = await stub.createSession(null, 'Usage chip reactivity');
     const { ws, messages } = await subscribe(stub, chatSessionId);
 
@@ -66,7 +69,7 @@ describe('createAcpSession pushes agentSessionId to the open chat page', () => {
   });
 
   it('does not leak the ACP id to a socket subscribed to another chat session (scoping control)', async () => {
-    const stub = getStub(`proj-acp-broadcast-${crypto.randomUUID()}`);
+    const stub = await getStub(`proj-acp-broadcast-${crypto.randomUUID()}`);
     const chatSessionId = await stub.createSession(null, 'Target');
     const otherChatSessionId = await stub.createSession(null, 'Bystander');
     const other = await subscribe(stub, otherChatSessionId);

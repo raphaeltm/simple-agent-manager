@@ -183,6 +183,8 @@ describe('server-side sleep pushed to an open chat', () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     const socket = FakeWebSocket.instances[0]!;
     act(() => socket.open());
+    // Finish the independent post-subscription state read before testing the status push.
+    await waitFor(() => expect(mocks.getChatSession).toHaveBeenCalledTimes(2));
 
     // The reconcile read is held open so the pushed state alone can be observed.
     const reconcileRead = deferred<ReturnType<typeof detail>>();

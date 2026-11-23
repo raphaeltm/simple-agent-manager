@@ -183,7 +183,7 @@ describe('rows persisted between the last read and the socket subscription', () 
     createElement(QueryClientProvider, { client: queryClient }, children);
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     FakeWebSocket.instances = [];
     vi.stubGlobal('WebSocket', FakeWebSocket);
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -191,6 +191,135 @@ describe('rows persisted between the last read and the socket subscription', () 
   afterEach(() => {
     vi.unstubAllGlobals();
   });
+
+  it.each(
+    [
+      'none',
+      'stop',
+      'output',
+      'batch',
+      'plan',
+      'invalid-plan',
+      'access',
+      'other-session',
+      'invalid-activity',
+      'wake-restored',
+      'wake-failed',
+    ].flatMap((event) => [false, true].map((reset) => ({ event, reset })))
+  )(
+    'project real cache: first subscription snapshot preserves live $event and recovers unrelated fields reset=$reset',
+    async ({ event, reset }) => {
+      const initial = detail([ownerPrompt]);
+      const fresh = {
+        ...detail([ownerPrompt]),
+        toolChanges: reset ? { revision: 9, resetRequired: true, messages: [] } : undefined,
+      };
+      fresh.session.topic = 'Recovered topic';
+      if (event.startsWith('wake-'))
+        Object.assign(fresh.state, {
+          recoveryStatus: 'waking',
+          wakePhase: 'agent_session',
+          wakeAttemptId: 'wake-1',
+        });
+      fresh.state.currentPlan = [{ content: 'Recovered plan', status: 'pending' }] as never;
+      const held = deferred<typeof fresh>();
+      mocks.getChatSession
+        .mockResolvedValue(fresh)
+        .mockResolvedValueOnce(initial)
+        .mockReturnValueOnce(held.promise);
+      mocks.listChatMessages.mockResolvedValue(messagesPage([]));
+      mocks.getSessionAccess.mockResolvedValue(accessSummary('owner', 2));
+      const { result, unmount } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+        wrapper,
+      });
+      await waitFor(() => expect(result.current.session?.topic).toBe('T'));
+      await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+      const socket = FakeWebSocket.instances[0]!;
+      act(() => socket.open());
+      await waitFor(() => expect(mocks.getChatSession).toHaveBeenCalledTimes(2));
+      if (event === 'stop' || event === 'other-session')
+        act(() =>
+          socket.deliver({
+            type: 'session.stopped',
+            payload: { sessionId: event === 'stop' ? 'sess-1' : 'other' },
+          })
+        );
+      if (event === 'output')
+        act(() =>
+          socket.deliver({
+            type: 'message.new',
+            payload: { ...row('live', 'assistant', 5000), messageId: 'live' },
+          })
+        );
+      if (event === 'batch') act(() => socket.deliver(liveBatch(row('live', 'assistant', 5000))));
+      if (event === 'plan' || event === 'invalid-plan')
+        act(() =>
+          socket.deliver(
+            liveBatch({
+              ...row('live-plan', 'plan', 5000),
+              content:
+                event === 'invalid-plan'
+                  ? 'not json'
+                  : JSON.stringify([{ content: 'Live plan', status: 'in_progress' }]),
+            })
+          )
+        );
+      if (event === 'access')
+        act(() =>
+          socket.deliver({ type: 'session.access.changed', payload: { sessionId: 'sess-1' } })
+        );
+      if (event.startsWith('wake-'))
+        act(() =>
+          socket.deliver({
+            type: 'session.wake_progress',
+            payload: {
+              sessionId: 'sess-1',
+              recoveryStatus: event === 'wake-restored' ? 'restored' : 'failed',
+              wakeAttemptId: 'wake-1',
+              wakePhase: null,
+            },
+          })
+        );
+      if (event === 'invalid-activity')
+        act(() =>
+          socket.deliver({
+            type: 'session.activity',
+            payload: { sessionId: 'sess-1', activity: 'invalid' },
+          })
+        );
+      if (['output', 'batch', 'plan', 'invalid-plan'].includes(event))
+        await waitFor(() => expect(result.current.agentActivity).toBe('responding'));
+      await act(async () => {
+        held.resolve(fresh);
+        await held.promise;
+      });
+      await waitFor(() =>
+        expect(result.current.session?.topic).toBe(event === 'stop' ? 'T' : 'Recovered topic')
+      );
+      expect(result.current.session?.status).toBe(event === 'stop' ? 'stopped' : 'active');
+      if (event.startsWith('wake-')) expect(result.current.isWaking).toBe(false);
+      expect(result.current.agentActivity).toBe(
+        ['output', 'batch', 'plan', 'invalid-plan'].includes(event) ? 'responding' : 'idle'
+      );
+      if (event !== 'stop')
+        expect(result.current.currentPlan).toEqual(
+          event === 'plan'
+            ? [{ content: 'Live plan', status: 'in_progress' }]
+            : fresh.state.currentPlan
+        );
+      if (reset && event !== 'stop') {
+        await waitFor(() => expect(mocks.getChatSession).toHaveBeenCalledTimes(3));
+        await waitFor(() =>
+          expect(
+            queryClient.getQueryData<typeof fresh>(
+              chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1')
+            )?.toolChanges?.resetRequired
+          ).toBe(true)
+        );
+      }
+      unmount();
+    }
+  );
 
   it('project chat: shows the row and keeps it in order with the live row after it', async () => {
     const subscribeRead = deferred<ReturnType<typeof messagesPage>>();
@@ -226,6 +355,8 @@ describe('rows persisted between the last read and the socket subscription', () 
       })
     );
 
+    // The state read must follow the whole tail repair, including a reset response.
+    expect(mocks.getChatSession).toHaveBeenCalledTimes(1);
     await act(async () => {
       subscribeRead.resolve(messagesPage([directive]));
       await subscribeRead.promise;
@@ -239,7 +370,7 @@ describe('rows persisted between the last read and the socket subscription', () 
         'r4',
       ])
     );
-    expect(mocks.getChatSession).toHaveBeenCalledTimes(1);
+    expect(mocks.getChatSession).toHaveBeenCalledTimes(2);
     expect(mocks.listChatMessages).toHaveBeenCalledTimes(1);
   });
 
@@ -303,7 +434,7 @@ describe('rows persisted between the last read and the socket subscription', () 
         'r5',
       ])
     );
-    expect(mocks.getChatSession).toHaveBeenCalledTimes(1);
+    expect(mocks.getChatSession).toHaveBeenCalledTimes(2);
     expect(mocks.listChatMessages).toHaveBeenCalledTimes(1);
   });
 
@@ -311,20 +442,26 @@ describe('rows persisted between the last read and the socket subscription', () 
     const subscribeRead = deferred<ReturnType<typeof messagesPage>>();
     mocks.listChatMessages.mockReturnValueOnce(subscribeRead.promise);
 
-    const { result } = renderHook(() => {
-      const [messages, setMessages] = useState<ChatMessageResponse[]>([ownerPrompt, agentReply]);
-      const [, setSession] = useState<ChatSessionResponse | null>(session('active'));
-      useWorkspaceChatSocket({
-        projectId: 'proj-1',
-        sessionId: 'sess-1',
-        sessionStatus: 'active',
-        access: undefined,
-        messages,
-        setMessages,
-        setSession,
-      });
-      return messages;
-    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children);
+    const { result } = renderHook(
+      () => {
+        const [messages, setMessages] = useState<ChatMessageResponse[]>([ownerPrompt, agentReply]);
+        const [, setSession] = useState<ChatSessionResponse | null>(session('active'));
+        useWorkspaceChatSocket({
+          projectId: 'proj-1',
+          sessionId: 'sess-1',
+          sessionStatus: 'active',
+          access: undefined,
+          messages,
+          setMessages,
+          setSession,
+        });
+        return messages;
+      },
+      { wrapper }
+    );
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     const socket = FakeWebSocket.instances[0]!;
 
@@ -350,7 +487,7 @@ describe('rows persisted between the last read and the socket subscription', () 
     await waitFor(() =>
       expect(result.current.map((m) => m.id)).toEqual(['m1', 'm2', 'comment-directive-t1', 'r4'])
     );
-    expect(mocks.getChatSession).not.toHaveBeenCalled();
+    expect(mocks.getChatSession).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -360,7 +497,7 @@ describe('access changed between the last read and the socket subscription', () 
     createElement(QueryClientProvider, { client: queryClient }, children);
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     FakeWebSocket.instances = [];
     vi.stubGlobal('WebSocket', FakeWebSocket);
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -448,7 +585,7 @@ describe('access changes while the chat sleeps', () => {
     createElement(QueryClientProvider, { client: queryClient }, children);
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     FakeWebSocket.instances = [];
     vi.stubGlobal('WebSocket', FakeWebSocket);
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -497,7 +634,7 @@ describe('one access read per change', () => {
     createElement(QueryClientProvider, { client: queryClient }, children);
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     FakeWebSocket.instances = [];
     vi.stubGlobal('WebSocket', FakeWebSocket);
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

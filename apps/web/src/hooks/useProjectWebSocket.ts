@@ -7,6 +7,7 @@ import {
 } from '../lib/api/comments';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { publishSessionAccessChanged } from '../lib/session-access-events';
+import { useCommentSubscriptionRefresh } from './useCommentSubscriptionRefresh';
 
 export type SessionEventType =
   | 'session.created'
@@ -48,7 +49,7 @@ interface UseProjectWebSocketOptions {
   onSessionEvent?: (event: RawSessionEvent) => void;
   /** Called with server-authoritative comment deltas from the project-wide socket. */
   onCommentEvent?: (event: MessageCommentRealtimeEvent) => void;
-  /** Called on reconnect so the consumer can do a full refetch to re-sync. */
+  /** Called after each successful subscription, including the first, to refresh its snapshot. */
   onReconnected?: () => void;
 }
 
@@ -65,7 +66,7 @@ export interface UseProjectWebSocketReturn {
  * `messages.batch`, `message.append`); see
  * `packages/project-data/src/do/session-sockets.ts`. Session lifecycle
  * events are forwarded as typed deltas via `onSessionEvent` for incremental
- * state updates. On reconnect, `onReconnected` is called so the consumer
+ * state updates. On initial subscription and reconnect, `onReconnected` is called so the consumer
  * can do a full refetch to re-sync.
  */
 export function useProjectWebSocket({
@@ -74,6 +75,9 @@ export function useProjectWebSocket({
   onCommentEvent,
   onReconnected,
 }: UseProjectWebSocketOptions): UseProjectWebSocketReturn {
+  const refreshComments = useCommentSubscriptionRefresh(projectId);
+  const refreshCommentsRef = useRef(refreshComments);
+  refreshCommentsRef.current = refreshComments;
   const [connectionState, setConnectionState] = useState<ProjectConnectionState>('disconnected');
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -138,12 +142,12 @@ export function useProjectWebSocket({
           ws.close(1000);
           return;
         }
-        const wasReconnect = retriesRef.current > 0;
         retriesRef.current = 0;
         setConnectionState('connected');
-        if (wasReconnect) {
-          onReconnectedRef.current?.();
-        }
+        void refreshCommentsRef.current();
+        // Refresh on the first subscription too: the initial snapshot may predate
+        // this socket's access check. The same idempotent refresh closes both gaps.
+        onReconnectedRef.current?.();
       };
 
       ws.onmessage = (event) => {

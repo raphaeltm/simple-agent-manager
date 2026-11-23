@@ -11,6 +11,9 @@ export type SessionUpdatedFields = Partial<
   Pick<ChatSessionResponse, 'topic' | 'workspaceId' | 'agentSessionId' | 'status'>
 >;
 
+/** Each snapshot field is fenced independently by accepted live updates. */
+export type SnapshotCurrent = (field?: string) => boolean;
+
 export interface UseChatWebSocketOptions {
   projectId: string;
   sessionId: string;
@@ -18,6 +21,11 @@ export interface UseChatWebSocketOptions {
   enabled: boolean;
   /** Called when a new message arrives via WebSocket (single or from batch). */
   onMessage: (msg: ChatMessageResponse) => void;
+  /**
+   * Whether this consumer changes its activity state for the row. A live row that does fences
+   * the activity field of an in-flight catch-up snapshot. Default: every non-user row.
+   */
+  isActivityMessage?: (msg: ChatMessageResponse) => boolean;
   /** False requests recovery of a missing canonical base or revision gap. */
   onMessageAppend?: (append: ChatMessageAppend) => boolean;
   /** Called when the session is stopped server-side. */
@@ -28,13 +36,14 @@ export interface UseChatWebSocketOptions {
    * subscription, and a row persisted in between reached no socket, so the consumer reads
    * forward from the newest row it holds and merges what it finds.
    */
-  onSubscribed?: () => void;
+  onSubscribed?: () => void | Promise<void>;
   /** Called when we catch up with missed messages after reconnect. */
   onCatchUp: (
     messages: ChatMessageResponse[],
     session: ChatSessionResponse,
     state?: SessionStateSnapshot | null,
-    toolChanges?: import('../lib/api/session-transcript-types').ToolSnapshotChanges
+    toolChanges?: import('../lib/api/session-transcript-types').ToolSnapshotChanges,
+    isSnapshotCurrent?: SnapshotCurrent
   ) => void | Promise<void>;
   /** Called when the agent completes on the session. */
   onAgentCompleted?: (agentCompletedAt: number) => void;
