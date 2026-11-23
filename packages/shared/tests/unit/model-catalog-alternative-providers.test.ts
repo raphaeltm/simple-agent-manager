@@ -7,14 +7,17 @@ const OPENCODE_CONSUMERS = ['opencode'] as const;
 const EXPECTED_OPENCODE_MODELS = [
   'opencode/hy4-flash-free',
   'opencode/gemini-4-hydrogen',
-  'opencode/longcat-2.5-free',
+  'opencode/gemini-4-neon',
+  'opencode/gpt-6.2-astra',
+  'opencode/gpt-6.2-sol',
+  'opencode/tidepool-alpha-free',
+  'opencode/qwen4-max-free',
   'opencode/gemini-4-carbon',
-  'opencode/minimax-m3.1-flash-free',
   'opencode/claude-fable-5-2',
   'opencode/muse-ember-1.0',
   'opencode-go/hy4-flash-free',
   'opencode-go/qwen4-max',
-  'opencode-go/longcat-2.5-free',
+  'opencode-go/longcat-2.5',
 
   'opencode/claude-fable-5-1',
   'opencode/claude-fable-5',
@@ -25,7 +28,6 @@ const EXPECTED_OPENCODE_MODELS = [
   'opencode/claude-haiku-5-5',
   'opencode/beam-free',
   'opencode/iceman-free',
-  'opencode/inkling-2-small-free',
   'opencode-go/hy4',
   'opencode/muse-wonder-1.0',
   'opencode/flint-40b-free',
@@ -46,9 +48,7 @@ const EXPECTED_OPENCODE_MODELS = [
   'opencode/minimax-m3',
   'opencode/muse-spark-1.3',
   'opencode/gemini-4-argon',
-  'opencode/glm-5.3-flash-free',
   'opencode-go/gemini-4-argon',
-  'opencode-go/glm-5.2',
   'opencode-go/glm-5.3',
   'opencode-go/gpt-6-luna',
   'opencode-go/grok-4.7',
@@ -84,14 +84,12 @@ describe('OpenCode model catalog entries', () => {
 
     expect(namesById.get('opencode/hy4-flash-free')).toBe('Hy4 flash Free');
     expect(namesById.get('opencode/gemini-4-hydrogen')).toBe('Gemini 4 Hydrogen');
-    expect(namesById.get('opencode/longcat-2.5-free')).toBe('LongCat 2.5 Free');
     expect(namesById.get('opencode/gemini-4-carbon')).toBe('Gemini 4 Carbon');
-    expect(namesById.get('opencode/minimax-m3.1-flash-free')).toBe('MiniMax M3.1 Flash Free');
     expect(namesById.get('opencode/claude-fable-5-2')).toBe('Claude Fable 5.2');
     expect(namesById.get('opencode/muse-ember-1.0')).toBe('Muse Ember 1.0');
     expect(namesById.get('opencode-go/hy4-flash-free')).toBe('Hy4 flash Free');
     expect(namesById.get('opencode-go/qwen4-max')).toBe('Qwen4 Max');
-    expect(namesById.get('opencode-go/longcat-2.5-free')).toBe('LongCat 2.5 Free');
+    expect(namesById.get('opencode-go/longcat-2.5')).toBe('LongCat-2.5');
     expect(namesById.get('opencode/deepseek-v4.1-flash')).toBe('DeepSeek V4.1 Flash 1017');
     expect(namesById.get('opencode-go/deepseek-v4.1-flash')).toBe('DeepSeek V4.1 Flash 1017');
     expect(namesById.get('opencode/muse-wonder-1.0')).toBe('Muse Wonder');
@@ -102,7 +100,6 @@ describe('OpenCode model catalog entries', () => {
     expect(namesById.has('opencode/deepseek-v4-flash')).toBe(false);
     expect(namesById.get('opencode/iceman-free')).toBe('Iceman Free');
     expect(namesById.has('opencode/crouton-alpha-free')).toBe(false);
-    expect(namesById.get('opencode/inkling-2-small-free')).toBe('Inkling 2 Small Free');
     expect(namesById.get('opencode-go/hy4')).toBe('Hy4');
     expect(namesById.has('opencode-go/crouton-alpha-free')).toBe(false);
     expect(namesById.get('opencode/claude-sonnet-5-5')).toBe('Claude Sonnet 5.5');
@@ -151,6 +148,18 @@ describe('OpenCode model catalog entries', () => {
 
   it('excludes inactive Models.dev records from the static fallback', () => {
     for (const inactiveModelId of [
+      'opencode/longcat-2.5-free',
+      'opencode/minimax-m3.1-flash-free',
+      'opencode/inkling-2-small-free',
+      'opencode/glm-5.3-flash-free',
+      'opencode-go/glm-5.2',
+      'opencode-go/longcat-2.5-free',
+      'opencode-go/longcat-2.0',
+      'opencode/glm-5',
+      'opencode/glm-5.1',
+      'opencode/glm-5.2',
+      'opencode/gemini-3-flash',
+      'opencode/gemini-3.1-pro',
       'opencode/nemotron-3-ultra-free',
       'opencode/deepseek-v4-flash',
       'opencode/longcat-2.5-preview-free',

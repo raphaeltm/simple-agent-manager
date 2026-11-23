@@ -38,7 +38,7 @@ function modelsDevCatalog() {
     'opencode-go': {
       name: 'OpenCode Go',
       models: {
-        glm: { id: 'glm-5.2', name: 'GLM-5.2' },
+        glm: { id: 'glm-5.3', name: 'GLM-5.3' },
       },
     },
   };
@@ -76,7 +76,7 @@ describe('model catalog service', () => {
     });
     expect(groups[1]).toMatchObject({
       label: 'OpenCode Go',
-      models: [{ id: 'opencode-go/glm-5.2', name: 'GLM-5.2' }],
+      models: [{ id: 'opencode-go/glm-5.3', name: 'GLM-5.3' }],
     });
     expect(groups.flatMap((group) => group.models).some((model) => model.id.includes('old'))).toBe(
       false
@@ -105,7 +105,7 @@ describe('model catalog service', () => {
     expect(catalog.updatedAt).toEqual(expect.any(String));
     expect(catalog.groups.flatMap((group) => group.models).map((model) => model.id)).toEqual([
       'opencode/claude-sonnet-4-6',
-      'opencode-go/glm-5.2',
+      'opencode-go/glm-5.3',
     ]);
     expect(fetchMock).toHaveBeenCalledWith(
       'https://catalog.example.test/api.json',
@@ -113,7 +113,7 @@ describe('model catalog service', () => {
     );
     expect(kv.put).toHaveBeenCalledWith(
       'model-catalog:v1:opencode:active',
-      expect.stringContaining('opencode-go/glm-5.2'),
+      expect.stringContaining('opencode-go/glm-5.3'),
       { expirationTtl: 120 }
     );
   });
@@ -123,7 +123,7 @@ describe('model catalog service', () => {
       groups: [
         {
           label: 'OpenCode Go',
-          models: [{ id: 'opencode-go/glm-5.2', name: 'GLM-5.2', group: 'OpenCode Go' }],
+          models: [{ id: 'opencode-go/glm-5.3', name: 'GLM-5.3', group: 'OpenCode Go' }],
         },
       ],
       updatedAt: '2026-06-27T00:00:00.000Z',
@@ -149,7 +149,7 @@ describe('model catalog service', () => {
     expect(
       catalog.groups
         .flatMap((group) => group.models)
-        .some((model) => model.id === 'opencode-go/glm-5.2')
+        .some((model) => model.id === 'opencode-go/glm-5.3')
     ).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(
       DEFAULT_MODEL_CATALOG_SOURCE_URL,

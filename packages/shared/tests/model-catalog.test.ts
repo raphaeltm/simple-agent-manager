@@ -41,14 +41,15 @@ describe('model-catalog', () => {
       const groups = getModelGroupsForAgent('openai-codex');
       expect(groups.length).toBeGreaterThanOrEqual(2);
       const latestModels = groups[0]?.models.map((model) => model.id) ?? [];
-      expect(latestModels).toEqual([
+      expect(groups[0]?.label).toBe('GPT-6.2 / 6.1 (Latest)');
+      expect(latestModels).toEqual(['gpt-6.2-astra', 'gpt-6.2-sol', 'gpt-6.1-terra', 'gpt-6-luna']);
+      expect(groups[1]?.label).toBe('GPT-6 / 6.1 (Previous)');
+      expect(groups[1]?.models.map((model) => model.id)).toEqual([
         'gpt-6-astra',
         'gpt-6.1-sol',
-        'gpt-6.1-terra',
         'gpt-6-sol',
-        'gpt-6-luna',
       ]);
-      expect(groups[1]?.models.map((model) => model.id)).toEqual([
+      expect(groups[2]?.models.map((model) => model.id)).toEqual([
         'gpt-5.6-sol',
         'gpt-5.6-terra',
         'gpt-5.6-luna',
@@ -86,6 +87,7 @@ describe('model-catalog', () => {
       const allModels = groups.flatMap((g) => g.models);
       expect(allModels.map((model) => model.id)).toEqual(
         expect.arrayContaining([
+          'deepseek-v4-1-flash-1017',
           'mistral-medium-latest',
           'zai-glm-5-3',
           'zai-glm-5-3-flash',
@@ -101,6 +103,10 @@ describe('model-catalog', () => {
       expect(allModels.find((model) => model.id === 'mistral-large-latest')?.name).toBe(
         'Mistral Large (latest)'
       );
+      expect(allModels.find((model) => model.id === 'deepseek-v4-1-flash-1017')).toMatchObject({
+        name: 'DeepSeek V4.1 Flash 1017 (Preview)',
+        group: 'Frontier (Latest)',
+      });
       expect(isKnownModel('mistral-vibe', 'zai-glm-5-2')).toBe(false);
       expect(allModels.find((model) => model.id === 'mistral-medium-latest')).toMatchObject({
         name: 'Mistral Medium 3.5 (Deprecated)',
@@ -121,6 +127,7 @@ describe('model-catalog', () => {
       const allModels = groups.flatMap((g) => g.models);
       expect(groups[0]?.models).toEqual([
         { id: 'gemini-4-carbon', name: 'Gemini 4 Carbon', group: 'Gemini 4 (Latest)' },
+        { id: 'gemini-4-neon', name: 'Gemini 4 Neon', group: 'Gemini 4 (Latest)' },
         { id: 'gemini-4-hydrogen', name: 'Gemini 4 Hydrogen', group: 'Gemini 4 (Latest)' },
         {
           id: 'gemini-4-argon',
@@ -183,6 +190,33 @@ describe('model-catalog', () => {
       const groups = getModelGroupsForAgent('opencode');
       expect(groups.length).toBeGreaterThanOrEqual(2);
       const allModels = groups.flatMap((g) => g.models);
+      expect(allModels).toHaveLength(117);
+      for (const [id, name] of [
+        ['opencode/gemini-4-neon', 'Gemini 4 Neon'],
+        ['opencode/gpt-6.2-astra', 'GPT-6.2 Astra'],
+        ['opencode/gpt-6.2-sol', 'GPT-6.2 Sol'],
+        ['opencode/tidepool-alpha-free', 'Tidepool Alpha Free'],
+        ['opencode/qwen4-max-free', 'Qwen4 Max Free'],
+        ['opencode-go/longcat-2.5', 'LongCat-2.5'],
+      ]) {
+        expect(allModels.find((model) => model.id === id)?.name, id).toBe(name);
+      }
+      for (const id of [
+        'opencode/longcat-2.5-free',
+        'opencode/minimax-m3.1-flash-free',
+        'opencode/glm-5',
+        'opencode/gemini-3-flash',
+        'opencode/glm-5.1',
+        'opencode/gemini-3.1-pro',
+        'opencode/inkling-2-small-free',
+        'opencode-go/longcat-2.5-free',
+        'opencode-go/longcat-2.0',
+      ]) {
+        expect(
+          allModels.some((model) => model.id === id),
+          id
+        ).toBe(false);
+      }
       expect(groups.map((g) => g.label)).toEqual(
         expect.arrayContaining(['OpenCode', 'OpenCode Go'])
       );
@@ -202,7 +236,7 @@ describe('model-catalog', () => {
       expect(allModels.some((m) => m.id === 'opencode-go/claude-haiku-5-5')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/kimi-k3.1-pro')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/space-bunny-free')).toBe(false);
-      expect(allModels.some((m) => m.id === 'opencode/glm-5.3-flash-free')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/glm-5.3-flash-free')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode/longcat-2.5-preview-free')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode/qwen3.8-max')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/muse-spark-1.2-contributor-free')).toBe(
@@ -210,7 +244,7 @@ describe('model-catalog', () => {
       );
       expect(allModels.some((m) => m.id === 'opencode/x-preview-f-free')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode/ling-3.0-tiny-free')).toBe(false);
-      expect(allModels.some((m) => m.id === 'opencode-go/glm-5.2')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode-go/glm-5.2')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode-go/glm-5.3')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/gpt-6-luna')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/grok-4.7')).toBe(true);
@@ -348,6 +382,8 @@ describe('model-catalog', () => {
     });
 
     it('returns true for a codex model under openai-codex', () => {
+      expect(isKnownModel('openai-codex', 'gpt-6.2-astra')).toBe(true);
+      expect(isKnownModel('openai-codex', 'gpt-6.2-sol')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-6-astra')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-6.1-sol')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-6.1-terra')).toBe(true);

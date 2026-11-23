@@ -31,8 +31,8 @@ function dynamicOpenCodeCatalog(): ModelCatalogResponse {
         label: 'OpenCode Go',
         models: [
           {
-            id: 'opencode-go/glm-5.2',
-            name: 'GLM-5.2',
+            id: 'opencode-go/glm-5.3',
+            name: 'GLM-5.3',
             group: 'OpenCode Go',
           },
         ],
@@ -64,8 +64,8 @@ describe('ModelSelect dynamic catalog', () => {
     await waitFor(() => expect(getAgentModelCatalog).toHaveBeenCalledWith('opencode'));
     await user.click(screen.getByTestId('model-input'));
 
-    expect(screen.getByText('GLM-5.2')).toBeInTheDocument();
-    expect(screen.getByText('opencode-go/glm-5.2')).toBeInTheDocument();
+    expect(screen.getByText('GLM-5.3')).toBeInTheDocument();
+    expect(screen.getByText('opencode-go/glm-5.3')).toBeInTheDocument();
     expect(screen.queryByText('Claude Sonnet 4.6')).not.toBeInTheDocument();
   });
 
@@ -87,8 +87,8 @@ describe('ModelSelect dynamic catalog', () => {
     await waitFor(() => expect(getAgentModelCatalog).toHaveBeenCalledWith('opencode'));
     await user.click(screen.getByTestId('model-input'));
 
-    expect(screen.getByText('GLM-5.2')).toBeInTheDocument();
-    expect(screen.getByText('opencode-go/glm-5.2')).toBeInTheDocument();
+    expect(screen.getByText('GLM-5.3')).toBeInTheDocument();
+    expect(screen.getByText('opencode-go/glm-5.3')).toBeInTheDocument();
   });
 
   it('renders a freeform input when static catalog fallback is disabled', async () => {

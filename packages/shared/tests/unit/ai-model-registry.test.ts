@@ -31,6 +31,26 @@ describe('AI Model Registry', () => {
       expect(defaults).toHaveLength(1);
     });
 
+    it.each([
+      ['gpt-6.2-astra', 'GPT-6.2 Astra', 0.008, 0.04],
+      ['gpt-6.2-sol', 'GPT-6.2 Sol', 0.002, 0.01],
+    ])(
+      'registers %s with published pricing and Responses-only tools',
+      (id, label, input, output) => {
+        expect(PLATFORM_AI_MODELS.find((model) => model.id === id)).toMatchObject({
+          label,
+          provider: 'openai',
+          tier: 'premium',
+          costPer1kInputTokens: input,
+          costPer1kOutputTokens: output,
+          contextWindow: 1050000,
+          supportsChatCompletionsToolCalls: false,
+          intendedRole: 'workspace-agent',
+        });
+        expect(DEFAULT_AI_PROXY_ALLOWED_MODELS.split(',')).toContain(id);
+      }
+    );
+
     it('routes GPT-6.1 Terra with published pricing and Responses-only tools', () => {
       const model = PLATFORM_AI_MODELS.find((entry) => entry.id === 'gpt-6.1-terra');
       expect(model).toMatchObject({

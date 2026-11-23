@@ -344,7 +344,10 @@ const OPENAI_GPT56_PREVIEW_PROFILE = {
 
 type OpenAIModelTuple = readonly [string, string, PlatformAIModelTier, number, number, string];
 
+// https://developers.openai.com/api/docs/models/gpt-6.2-astra (and gpt-6.2-sol)
 const OPENAI_GPT6_MODELS = [
+  ['gpt-6.2-astra', 'GPT-6.2 Astra', 'premium', 0.008, 0.04, 'openai-premium'],
+  ['gpt-6.2-sol', 'GPT-6.2 Sol', 'premium', 0.002, 0.01, 'openai-premium'],
   ['gpt-6-astra', 'GPT-6 Astra', 'premium', 0.01, 0.05, 'openai-premium'],
   ['gpt-6.1-sol', 'GPT-6.1 Sol', 'premium', 0.002, 0.01, 'openai-premium'],
   ['gpt-6.1-terra', 'GPT-6.1 Terra', 'premium', 0.001, 0.005, 'openai-premium'],
@@ -565,9 +568,14 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
         contextWindow: 1050000,
         toolCallSupport: 'excellent',
         intendedRole: 'workspace-agent',
-        // GPT-6.1 Sol and Terra require Responses for tool calls.
+        // GPT-6.2 models, GPT-6.1 Sol and Terra require Responses for tool calls.
         supportsChatCompletionsToolCalls:
-          id === 'gpt-6.1-sol' || id === 'gpt-6.1-terra' ? false : undefined,
+          id === 'gpt-6.2-astra' ||
+          id === 'gpt-6.2-sol' ||
+          id === 'gpt-6.1-sol' ||
+          id === 'gpt-6.1-terra'
+            ? false
+            : undefined,
         fallbackGroup,
       })
   ),
