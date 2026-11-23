@@ -459,7 +459,9 @@ export class InfomaniakProvider implements Provider {
       if (!readable) {
         throw new ProviderError(this.name, undefined, 'Server list paging metadata is malformed');
       }
-      if ((links as Array<{ rel: string }>).some((link) => link.rel === 'next')) {
+      if (
+        (links as Array<{ rel: string }>).some((link) => link.rel.trim().toLowerCase() === 'next')
+      ) {
         throw new ProviderError(
           this.name,
           undefined,

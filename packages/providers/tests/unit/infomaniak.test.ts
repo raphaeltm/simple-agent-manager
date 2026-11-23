@@ -151,6 +151,19 @@ describe('InfomaniakProvider', () => {
     );
   });
 
+  it.each(['NEXT', ' next'])(
+    'listVMs with requireComplete treats rel %j as a next page',
+    async (rel) => {
+      vi.spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(auth())
+        .mockResolvedValueOnce(json({ servers: [], servers_links: [{ rel, href: 'x' }] }));
+      const provider = new InfomaniakProvider('id', 'secret', { authUrl: AUTH_URL });
+      await expect(
+        provider.listVMs(undefined, undefined, { requireComplete: true })
+      ).rejects.toThrow(/more pages/);
+    }
+  );
+
   it('listVMs with requireComplete accepts a single complete page', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(auth())
