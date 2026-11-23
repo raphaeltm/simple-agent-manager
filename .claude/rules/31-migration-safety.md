@@ -179,3 +179,11 @@ whenever a deployment gate consumes Wrangler JSON.
 This rule was added after exact-head staging deployment `31558884950` was blocked before migrations:
 Wrangler 4.118 emitted a valid JSON response followed by a diagnostic, while the safety runner treated
 the whole stdout stream as one JSON value.
+
+## Retained Tables Still Participate in Foreign-Key Actions
+
+When retaining a renamed migration archive, keep indexes whose leading columns support its
+parent foreign keys. A parent DELETE checks archived children too; an index moved to the new
+canonical table no longer protects the archive. For deletion-cost regressions, apply the shipped
+migration chain with foreign keys enabled and inspect the real route's DELETE plans at realistic
+cardinality. Schema-only fixtures omit retained tables and can hide repeated child-table scans.
