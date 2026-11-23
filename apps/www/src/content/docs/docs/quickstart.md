@@ -115,10 +115,9 @@ That's the whole loop: **pick a repository → chat → ask for a pull request �
 There are two ways to run your own SAM. Both need a Cloudflare account on the **Workers Paid plan**
 ($5/month, for Durable Objects and Containers) and a domain whose DNS Cloudflare manages.
 
-- **The installer**, from your browser: sign in with Cloudflare, pick a domain, approve, and about
-  half an hour later your SAM is live. No GitHub fork or secrets to copy. For now, though, the
-  hosted installer only works for a few accounts, so most people host the installer themselves
-  first (a terminal and a Cloudflare API token) or use the fork. See
+- **The installer.** One command puts the installer in your Cloudflare account (a terminal and a
+  small Cloudflare API token). Then, in your browser, you sign in with Cloudflare, pick a domain,
+  approve, and about half an hour later your SAM is live. No GitHub fork or secrets to copy. See
   [Install SAM with the installer](/docs/guides/installer/).
 - **A GitHub fork**, deployed by GitHub Actions. More steps, and you control every setting. The
   rest of this section summarizes it; it also needs a GitHub account.

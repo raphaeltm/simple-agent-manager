@@ -92,6 +92,10 @@ interface Options {
   /** Account workers.dev subdomain; null means the account has none. */
   subdomain?: string | null;
   workersDenied?: boolean;
+  /** Client creations Cloudflare answers with 500 after the installer is published. */
+  failedClientCreations?: number;
+  /** A failed creation that nevertheless left a client behind. */
+  failedCreationLeavesClient?: boolean;
   /** Health responses that fail before the published installer answers. */
   unservedHealthChecks?: number;
 }
@@ -131,6 +135,8 @@ async function deploy(options: Options = {}) {
   vi.stubEnv('OAUTH_SECRETS_VISIBLE_TIMEOUT_MS', options.secretsNeverVisible ? '0' : '30000');
   let laggingSecretReads = options.laggingSecretReads ?? 0;
   let unservedHealthChecks = options.unservedHealthChecks ?? 0;
+  let failedClientCreations = options.failedClientCreations ?? 0;
+  vi.stubEnv('OAUTH_CLIENT_CREATE_RETRY_MS', '1');
   const workerName = `sam-installer-${(options.environment ?? 'staging') || 'self-hosted'}`;
   const deployedOrigin = options.existingOrigin ?? 'https://install.sammy.party';
   const ready = options.ready ?? !!options.existing;
@@ -164,7 +170,10 @@ async function deploy(options: Options = {}) {
       // published installer origin were unreachable (production, 2026-11-08).
       else if (wranglerRuns().length === 0)
         return Response.json({ success: false }, { status: 500 });
-      else {
+      else if (failedClientCreations-- > 0) {
+        if (options.failedCreationLeavesClient) client = { ...body, client_id: 'half-made' };
+        return Response.json({ success: false, errors: [{ code: 1001 }] }, { status: 500 });
+      } else {
         client = { ...body, client_id: 'new', client_secret: 'SECRET' };
         result = client;
       }
@@ -618,5 +627,34 @@ describe('refused Cloudflare calls name the permission to add', () => {
       (error: Error) => error
     );
     expect(String(failure)).not.toContain('PRIVATE UPSTREAM');
+  });
+});
+describe('creating the OAuth client after a first publish', () => {
+  const creations = () =>
+    capture.calls.filter((call) => call.path.endsWith('/oauth_clients') && call.method === 'POST');
+  it('retries while Cloudflare cannot yet reach the new installer, and creates one client', async () => {
+    await deploy({ ...selfHosted, failedClientCreations: 3 });
+    expect(creations()).toHaveLength(4);
+    expect(capture.calls.filter((call) => call.method === 'PUT')).toHaveLength(2);
+    expect(logged()).toContain(`Installer ready: ${SELF_ORIGIN}`);
+  });
+  it('gives up after the configured attempts and reports Cloudflare’s error code', async () => {
+    await expect(deploy({ ...selfHosted, failedClientCreations: 99 })).rejects.toThrow(
+      'Cloudflare POST failed (500, Cloudflare code 1001)'
+    );
+    expect(creations()).toHaveLength(6);
+    expect(logged()).not.toContain('Installer ready');
+  });
+  it('never creates a second client when a failed creation left one behind', async () => {
+    await expect(
+      deploy({ ...selfHosted, failedClientCreations: 1, failedCreationLeavesClient: true })
+    ).rejects.toThrow('OAuth secret missing');
+    expect(creations()).toHaveLength(1);
+  });
+  it('does not retry a refusal', async () => {
+    await expect(deploy({ mode: 'bootstrap', managementDenied: true })).rejects.toThrow(
+      '"OAuth Client Write"'
+    );
+    expect(creations()).toHaveLength(0);
   });
 });

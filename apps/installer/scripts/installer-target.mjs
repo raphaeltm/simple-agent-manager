@@ -27,14 +27,18 @@ function permissionFor(path, base) {
 }
 
 export class ApiFailure extends Error {
-  constructor(status, method, permission) {
+  // `codes` are Cloudflare's numeric error codes: diagnostic, never response text,
+  // which can echo request values.
+  constructor(status, method, permission, codes = []) {
+    const detail = codes.length ? `${status}, Cloudflare code ${codes.join(', ')}` : `${status}`;
     super(
       (status === 401 || status === 403) && permission
-        ? `Cloudflare refused ${method} (${status}). Check the API token's permissions: it needs "${permission}" on this account. Private response omitted.`
-        : `Cloudflare ${method} failed (${status}). Verify the required API permissions. Private response omitted.`
+        ? `Cloudflare refused ${method} (${detail}). Check the API token's permissions: it needs "${permission}" on this account. Private response omitted.`
+        : `Cloudflare ${method} failed (${detail}). Verify the required API permissions. Private response omitted.`
     );
     this.status = status;
     this.permission = permission;
+    this.codes = codes;
   }
 }
 
@@ -56,7 +60,14 @@ export function createApi({ token, base, registrationToken }) {
       throw new Error('Cloudflare request could not complete. Private response omitted.');
     }
     if (!response.ok || data.success === false)
-      throw new ApiFailure(response.status, method, permissionFor(path, base));
+      throw new ApiFailure(
+        response.status,
+        method,
+        permissionFor(path, base),
+        (Array.isArray(data.errors) ? data.errors : [])
+          .map((error) => error?.code)
+          .filter((code) => Number.isInteger(code))
+      );
     return data.result;
   };
 }

@@ -229,6 +229,27 @@ function matchesOAuthClient(client, desired) {
     )
   );
 }
+// Cloudflare answers 500 to client creation while it cannot yet fetch the client's logo
+// and policy URLs, which can outlast the publish by more than the health wait below
+// (staging, 2026-11-23: a workers.dev installer answered the runner 5 s after publish and
+// creation still returned 500). A failed creation leaves no client, so it is retried; each
+// retry first confirms that, and a client that did appear is never duplicated. Worst case
+// with the defaults: 6 attempts, 15 s apart, 75 s.
+async function createOAuthClient(desired) {
+  const attempts = Number(process.env.OAUTH_CLIENT_CREATE_ATTEMPTS || 6);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await api(`${base}/oauth_clients`, 'POST', desired);
+    } catch (error) {
+      if (!(error instanceof ApiFailure) || error.status < 500 || attempt >= attempts) throw error;
+    }
+    await sleep(Number(process.env.OAUTH_CLIENT_CREATE_RETRY_MS || 15000));
+    if (await findOAuthClient())
+      throw new Error(
+        'OAuth secret missing. Supply the existing private client secret or rotate it in Cloudflare.'
+      );
+  }
+}
 // Cloudflare rejected client creation (observed 2026-11-08 in production: POST
 // /oauth_clients returned 500) while the client's logo and policy URLs on the
 // installer origin were not served yet. When no installer Worker exists, the
@@ -262,7 +283,7 @@ async function prepareOAuth({ deferMutation = false } = {}) {
   };
   if (deferMutation && (!client || !matchesOAuthClient(client, desired))) return undefined;
   if (!client) {
-    client = await api(`${base}/oauth_clients`, 'POST', desired);
+    client = await createOAuthClient(desired);
     clientId = client.client_id;
     clientSecret = client.client_secret;
     if (typeof clientSecret !== 'string' || !clientSecret)

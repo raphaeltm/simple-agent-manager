@@ -152,8 +152,8 @@ Nothing needs doing when you update: every new permission and setting above is o
   update run a Claude Code version that supports it. → [Agent profiles](/docs/guides/agents/#agent-profiles)
 - **Install your own SAM from the browser.** The installer signs in with Cloudflare, builds a
   complete SAM in your account in about half an hour, then hands you a setup link, and later offers
-  updates. No GitHub fork or secrets to copy. The hosted installer's Cloudflare sign-in isn't open
-  to everyone yet, so check the guide first.
+  updates. No GitHub fork or secrets to copy. You run the installer in your own Cloudflare account:
+  one command puts it there.
   → [Install SAM with the installer](/docs/guides/installer/)
 - **SAM sets you up on your first visit.** It asks only what your instance leaves open (where agents
   should work, where your code should live), connects your agent, creates your first project and

@@ -36,16 +36,17 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
       <div class="privacy-content sam-glass sam-glass-rim">
         <h2>What you authorize</h2>
         <p>
-          Default bootstrap mode requests account read access and permission to deploy Workers.
-          Cloudflare’s permissions may cover existing Workers in the selected account. Only approve
-          accounts you intend to use. Experimental full installation requires broader resource and
-          token-provisioning permissions; it is not enabled or verified for general use.
+          Installing SAM asks for permission to create its resources in the account you choose,
+          and to create the credentials it deploys and runs with. Cloudflare’s permissions may
+          cover existing Workers in that account. Only approve accounts you intend to use. A
+          bootstrap-only installer asks only for account read access and permission to deploy
+          Workers. A full installation is still labelled experimental.
         </p>
         <h2>Temporary access</h2>
         <p>
-          The installer handles OAuth tokens server-side in an isolated session. Hosted access
-          expires after 15 minutes by default, bounded by token expiry. In this preview branch,
-          handoff removes hosted OAuth and deployment-credential copies but retains a bounded claim
+          The installer handles OAuth tokens server-side in an isolated session. Its access
+          expires after 15 minutes by default, bounded by token expiry. Handoff removes the
+          installer’s OAuth and deployment-credential copies but retains a bounded claim
           record until the original expiry so interrupted handoff can be retried. Disconnect and
           expiry attempt cleanup and revocation; provider failures can delay deletion or revocation.
           Use Cloudflare’s authorized-applications screen to revoke access yourself if needed. No
@@ -64,24 +65,23 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
         </p>
         <h2>What stays in your account</h2>
         <p>
-          Default mode creates a maintenance Worker without an ongoing Cloudflare deployment token.
-          This preview branch adds durable recovery: save the browser-generated credential before
-          claiming ownership. Its hash stays in your account; maintenance sessions last 24 hours by
-          default. Recovery login replaces the previous active session. Replacement credentials
-          become active only after you save and confirm them. Earlier hosted revisions may still
-          have temporary owner access; check the displayed source version.
+          Installation creates a maintenance Worker, your installation service, in your account.
+          Save the browser-generated recovery credential before claiming ownership. Its hash stays
+          in your account; maintenance sessions last 24 hours by default. Recovery login replaces
+          the previous active session. Replacement credentials become active only after you save
+          and confirm them.
         </p>
         <p>
-          Experimental full mode temporarily handles installation credentials during bootstrap, then
+          A full installation temporarily handles installation credentials during bootstrap, then
           transfers deployment and storage authority to your maintenance service and narrower
           runtime authority to SAM. This lifecycle still needs live validation, including the effect
-          of OAuth revocation on derived credentials. It is not a claim that credentials never reach
-          our service. Disconnecting does not delete transferred resources. Review resource
+          of OAuth revocation on derived credentials. Those credentials pass through this
+          installer’s server-side session. Disconnecting does not delete transferred resources. Review resource
           identities and backups before removing a test installation; automatic uninstall is not
           provided.
         </p>
         <p>
-          Experimental full-mode builders preserve approved SAM source and Git history, build
+          Builders preserve approved SAM source and Git history, build
           artifacts and deployment checkpoints in your account's R2 storage. Saved source is
           verified against its commit, tree and content digest before reuse. Toolchain and
           dependency downloads can still require network access. The approved code and its build
@@ -90,9 +90,9 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
         </p>
         <h2>Your choice</h2>
         <p>
-          You can deploy this same installer yourself and register your own OAuth client. Source
-          availability helps you review the app; it does not guarantee that a hosted operator cannot
-          modify its deployment.
+          This installer is meant to run in your own Cloudflare account, with its own private
+          OAuth client. Anyone who can deploy Workers in the account that hosts it can change its
+          code, so check the address and the source version in the footer before you sign in.
         </p>
       </div>
     </main>

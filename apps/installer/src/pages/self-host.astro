@@ -12,7 +12,7 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
   <head><ThemeInit external />
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Host the installer yourself · SAM</title>
+    <title>Run the installer in your account · SAM</title>
     <link rel="icon" href="/sam-head.png" />
     
     
@@ -23,67 +23,60 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
     <Header compact icon="/brand-icon.png" />
     <main class="privacy-main">
 
-      <span class="badge">Same source. Your host.</span>
-      <h1>Run the installer<br /><span class="gradient-text">on your terms.</span></h1>
+      <span class="badge">Your account. Your installer.</span>
+      <h1>Run the installer<br /><span class="gradient-text">in your account.</span></h1>
       <p class="intro">
-        Prefer to handle Cloudflare access yourself? Deploy this same open-source installer in your
-        own account.
+        One command puts this open-source installer in your own Cloudflare account. No GitHub
+        account is needed to get SAM running.
       </p>
-<p>No GitHub account is needed to get SAM running in Cloudflare. Signing in afterwards requires GitHub, GitLab or Google; there is no email login.</p>
       <div class="privacy-content sam-glass sam-glass-rim">
-        <h2>1. Get the source</h2>
+        <h2>1. Create a Cloudflare API token</h2>
         <p>
-          You’ll need Node.js 22.23.4+ or 24+, pnpm 9.15.9, a Workers Paid account, and an active domain in
-          Cloudflare.
+          The token needs three account permissions: Workers Scripts Edit, Account Settings Read
+          and OAuth Client Edit. Limit it to the account you are installing into and give it a
+          short lifetime. It only deploys the installer; the permissions SAM needs are approved
+          later, when you sign in with Cloudflare.
+        </p>
+        <h2>2. Get the source</h2>
+        <p>
+          You’ll need Git, Node.js 22.23.4+ or 24+, pnpm 9.15.9, a Workers Paid account, and an
+          active domain in Cloudflare for SAM itself.
           <a id="source" href="https://github.com/raphaeltm/simple-agent-manager"
-            >Inspect the deployed source →</a
+            >Inspect the source →</a
           >
         </p>
         <pre><code>git clone https://github.com/raphaeltm/simple-agent-manager.git
 cd simple-agent-manager
-<span id="revision-command"># For an unmerged preview, check out the revision linked above.
+<span id="revision-command">git checkout "$(git describe --tags --abbrev=0)"
 </span>pnpm install --frozen-lockfile</code></pre>
-        <h2>2. Configure your deployment</h2>
+        <p>
+          The installer installs exactly the version you check out, so it must be a commit that
+          exists in the SAM repository.
+        </p>
+        <h2>3. Deploy</h2>
         <p>
           Set <code>CLOUDFLARE_API_TOKEN</code> and <code>CLOUDFLARE_ACCOUNT_ID</code> through your
           shell’s secret manager. Never commit credentials or paste them into chat.
         </p>
+        <pre><code>pnpm --filter @simple-agent-manager/installer run deploy</code></pre>
         <p>
-          The deployment token needs Account Settings Read, Workers Scripts Edit, OAuth Client
-          Read/Write, and zone permissions for Workers Custom Domains and Workers Routes. Scope it
-          to the account and zone you intend to use.
+          The command prints your installer’s address on your account’s
+          <code>workers.dev</code>. It also registers a private OAuth client, which only members of
+          your Cloudflare account can authorize, and saves its credentials as Worker secrets.
+          Running it again keeps both. Set <code>BASE_DOMAIN=example.com</code> first to serve the
+          installer at <code>install.example.com</code> instead; the token then also needs that
+          domain’s Workers Routes and Custom Domains permissions.
         </p>
-        <pre><code>export BASE_DOMAIN=example.com
-pnpm --filter @simple-agent-manager/installer run deploy</code></pre>
-        <h2>3. Open your installer</h2>
+        <h2>4. Install, then remove the installer</h2>
         <p>
-          The script deploys at <code>https://install.example.com</code>, registers a private OAuth
-          client, and saves its credentials as Worker secrets. Keep those credentials private.
-          Rerunning preserves the existing client and secret.
+          Open the address, sign in with Cloudflare and follow the steps. Once your installation
+          service is yours, the installer has done its job: updates come from the installation
+          service.
         </p>
+        <pre><code>pnpm --filter @simple-agent-manager/installer run remove</code></pre>
         <p>
-          While this prototype is unmerged, check out the revision shown by “Inspect the deployed
-          source” before deploying. The default branch may not include the installer yet.
-        </p>
-        <h2>Before sharing it with others</h2>
-        <p>
-          Private OAuth clients work for members of their parent account. Serving other users
-          requires Cloudflare’s
-          <a href="https://developers.cloudflare.com/fundamentals/oauth/create-an-oauth-client/"
-            >publisher verification and public promotion</a
-          >. Promotion is permanent and is never performed automatically by this script.
-        </p>
-        <h2>What you’re deploying</h2>
-        <p>
-          The standard command deploys bootstrap-only mode, separate from SAM. This preview branch
-          adds durable owner recovery: save the browser-generated credential before claiming your
-          service. The hosted address may still run an earlier revision; check its source version.
-        </p>
-        <p>
-          Experimental full installation and update machinery is under development. It is not
-          enabled by this command and has not completed authenticated OAuth, credential-revocation,
-          and full in-account build validation. Use the established SAM self-hosting guide for a
-          complete installation. No working full-mode enablement recipe is provided yet.
+          Removing the installer never touches your SAM or its installation service. A full
+          installation is still labelled experimental.
         </p>
         <p><a href="/privacy.html">Review permissions & privacy →</a></p>
       </div>
