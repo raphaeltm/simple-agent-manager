@@ -116,6 +116,7 @@ describe('self-host-only code stays out of the Cloudflare Worker', () => {
           'apps/api/src/selfhost/analytics/index.ts',
           'apps/api/src/selfhost/speech/index.ts',
           'apps/api/src/selfhost/reverse-tunnel/entry.ts',
+          'apps/api/src/selfhost/object-urls/index.ts',
         ])
       );
     }

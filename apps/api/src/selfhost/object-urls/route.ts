@@ -5,8 +5,8 @@
  * another. A PUT streams the body into the R2 binding (celld writes it to the fleet bucket without
  * holding it in the isolate), bounded by the token's size and verified against its sha256 when it
  * carries one. The write is create-only (`onlyIf: { etagDoesNotMatch: '*' }`), so a token cannot
- * replace an object once written; a retry of a write that already succeeded answers 200 when the
- * stored object is the one the token describes.
+ * replace an object once written. A retry of a write that already succeeded answers 200 when the
+ * token binds a sha256 the stored object matches (build contexts); otherwise 412.
  *
  * No SAM session or callback credential is involved: the token is the credential, minted only by
  * routes that already authorized the caller for that key.
@@ -55,11 +55,15 @@ async function uploadLimits(env: Env): Promise<{ limit: number; leaseMs: number 
   }
 }
 
-/** True when the stored object is the one `claims` describes (a retried, already-finished PUT). */
+/**
+ * True when the stored object is provably the one `claims` describes, so a retried PUT that
+ * already succeeded can answer 200. Only a token that binds a sha256 can prove it: equal size
+ * alone could be different bytes, and answering 200 would tell the client its bytes were stored.
+ */
 async function sameObject(env: Env, claims: BoxObjectTokenClaims, length: number) {
+  if (!claims.sha) return false;
   const existing = await env.R2.head(claims.key);
   if (!existing || existing.size !== length) return false;
-  if (!claims.sha) return true;
   const stored = existing.checksums?.sha256;
   const storedHex = stored
     ? [...new Uint8Array(stored)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
