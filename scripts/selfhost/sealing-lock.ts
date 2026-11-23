@@ -12,7 +12,6 @@
  * lock file still names that same holder: a stray variable alone never skips the lock. A child
  * that re-enters adds its own pid to the file, so the lock is held while either process lives.
  */
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { acquireLockFile, joinLockFile } from '../../deploy/selfhost/key-agent/bundle-store.ts';
@@ -21,19 +20,15 @@ import { KEY_AGENT_DIR } from './key-service.js';
 export const SEALING_LOCK_FILE = join(KEY_AGENT_DIR, 'sealing.lock');
 export const SEALING_LOCK_ENV = 'SAM_SELFHOST_SEALING_LOCK';
 
-/** The owner's pid in the lock file (its first line), or null when there is none. */
-function lockHolder(path: string): string | null {
-  try {
-    return readFileSync(path, 'utf8').trim().split(/\s+/)[0] || null;
-  } catch {
-    return null;
-  }
-}
-
-/** Whether this process runs inside an operation that already holds the lock (a child deploy). */
-function inherited(path: string): boolean {
-  const holder = process.env[SEALING_LOCK_ENV]?.trim();
-  return Boolean(holder) && lockHolder(path) === holder;
+/**
+ * Joins the lock an ancestor operation holds, when SAM_SELFHOST_SEALING_LOCK names it (a child
+ * deploy). Joined, not just skipped: should the ancestor die while this child still runs, the lock
+ * stays held until the child ends too (bundle-store.ts acquireLockFile). False when there is no
+ * such ancestor lock, or it was replaced meanwhile.
+ */
+function joinInherited(path: string): boolean {
+  const owner = process.env[SEALING_LOCK_ENV]?.trim();
+  return Boolean(owner) && joinLockFile(path, owner as string);
 }
 
 /**
@@ -42,12 +37,7 @@ function inherited(path: string): boolean {
  */
 export async function acquireSealingLock(stateDir: string): Promise<() => void> {
   const path = join(stateDir, SEALING_LOCK_FILE);
-  if (inherited(path)) {
-    // Joined, not just skipped: should the parent die while this child deploy still runs, the
-    // lock stays held until the child ends too (bundle-store.ts acquireLockFile).
-    joinLockFile(path);
-    return () => undefined;
-  }
+  if (joinInherited(path)) return () => undefined;
   const release = await acquireLockFile(path);
   const before = process.env[SEALING_LOCK_ENV];
   process.env[SEALING_LOCK_ENV] = String(process.pid);

@@ -92,7 +92,14 @@ async function resumeStaged(ctx: StepContext, bundleId: string): Promise<void> {
 /** Seals the patch, records it in the journal, then writes it and makes it current. */
 async function stageAndMakeCurrent(ctx: StepContext, patch: Patch, then: Phase): Promise<string> {
   const { step, store } = ctx;
-  const current = await store.head();
+  let current = await store.head();
+  // A box without a head yet (bundle-head.ts) records one naming the current bundle first, so a
+  // staged bundle written below can never become the date fallback's choice before it is made
+  // current, and a resume always has a head to compare with.
+  if (!current.basis) {
+    await store.makeCurrent(current.bundle.bundleId, current.bundle.bundleId);
+    current = await store.head();
+  }
   const bundle = await store.seal(patched(current.secrets, patch));
   step.stagedFrom = step.phase === 'staging' ? step.stagedFrom : step.phase;
   step.stagedBundleId = bundle.bundleId;

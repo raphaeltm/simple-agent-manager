@@ -35,6 +35,7 @@ import {
 import {
   breakStaleLock,
   type BundleStore,
+  joinLockFile,
   withLockFile,
 } from '../../deploy/selfhost/key-agent/bundle-store.ts';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
@@ -658,6 +659,25 @@ describe('the head lock', () => {
     // Control: once every process in it is gone, it is broken.
     writeFileSync(lock, '4194399\n4194398\n');
     await expect(withLockFile(lock, async () => 'ran', 200)).resolves.toBe('ran');
+    // Joining an ancestor's lock checks it is still that lock: a replaced lock is not joined, and
+    // a missing one is never created.
+    writeFileSync(lock, '4194390\n');
+    expect(joinLockFile(lock, '4194390')).toBe(true);
+    expect(readFileSync(lock, 'utf8')).toBe(`4194390\n${process.pid}\n`);
+    writeFileSync(`${lock}.new`, '4194391\n');
+    renameSync(`${lock}.new`, lock);
+    expect(joinLockFile(lock, '4194390')).toBe(false);
+    // Even a replacement naming the same owner (a reused pid) is another file, not joined: the
+    // check is on the file joined, not only its text. (Simulated by swapping the file mid-join.)
+    writeFileSync(lock, '4194390\n');
+    const swap = (): void => {
+      writeFileSync(`${lock}.new`, '4194390\n');
+      renameSync(`${lock}.new`, lock);
+    };
+    expect(joinLockFile(lock, '4194390', swap)).toBe(false);
+    rmSync(lock);
+    expect(joinLockFile(lock, '4194390')).toBe(false);
+    expect(existsSync(lock)).toBe(false);
     // A live holder (this process) is waited for, then refused with the holder named.
     writeFileSync(lock, `${process.pid}\n`);
     await expect(withLockFile(lock, async () => 'ran', 200)).rejects.toThrow(
@@ -714,5 +734,51 @@ describe('a rotation resumed on a box without a head yet', () => {
     await store.makeCurrent(staged.bundleId, over.bundle.bundleId);
     expect((await store.head()).bundle.bundleId).toBe(staged.bundleId);
     expect(headHint(readFileSync(headPath(stateA), 'utf8'))?.seq).toBe(1);
+  });
+});
+
+describe('a rotation on a box without a head yet', () => {
+  it('records the head naming the current bundle before staging the new one', async () => {
+    const stateA = join(dir, 'box-a/.state');
+    const envA = boxEnv(stateA);
+    writeSecrets(stateA, []);
+    await deploy(envA, ['--init']);
+    rmSync(headPath(stateA));
+    rmSync(bucketHeadPath());
+    vi.stubEnv('PATH', env.PATH);
+    vi.stubEnv('FAKE_GCS_ROOT', gcsRoot);
+    const store = openRotationStore(boxOf(envA), stateA);
+    const before = await store.head();
+    const journal: Journal = {
+      format: 'sam-key-rotation/1',
+      id: 'r2',
+      startedAt: new Date().toISOString(),
+      backupDir: null,
+      keys: ['test'],
+      steps: { test: { name: 'test', phase: 'pending' } },
+    };
+    const ctx: StepContext = {
+      journal,
+      step: journal.steps.test as StepContext['step'],
+      key: { name: 'test' } as StepContext['key'],
+      // Stops after writing the staged bundle, before making it current.
+      store: {
+        ...store,
+        write: async (bundle: SealedBundle) => {
+          await store.settings.bundles.write(bundle);
+          throw new Error('stopped');
+        },
+      },
+      deps: { log: () => undefined } as unknown as RotateDeps,
+      stateDir: stateA,
+      save: () => undefined,
+    };
+    await expect(applyPatch(ctx, { set: { OPERATOR_SETTING: 'x-value' } }, 'done')).rejects.toThrow(
+      /stopped/
+    );
+    // The head names the bundle the rotation started from, so the newer-dated staged bundle is
+    // not what the next deploy or the resume picks.
+    expect(headHint(readFileSync(headPath(stateA), 'utf8'))?.bundleId).toBe(before.bundle.bundleId);
+    expect((await store.head()).bundle.bundleId).toBe(before.bundle.bundleId);
   });
 });

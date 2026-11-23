@@ -9,9 +9,10 @@
  * `openBundleStore`; no caller changes. The interface is asynchronous for that reason.
  */
 import {
-  appendFileSync,
   closeSync,
+  constants,
   existsSync,
+  fstatSync,
   fsyncSync,
   lstatSync,
   mkdirSync,
@@ -176,11 +177,34 @@ export async function acquireLockFile(
 }
 
 /**
- * Adds this process to a lock another process holds (a child operation run by the holder), so the
- * lock stays held while this process runs even if the holder dies first. Never removes the file.
+ * Adds this process to a lock that `owner` holds (a child operation run by the owner), so the lock
+ * stays held while this process runs even if the owner dies first. Appends through a descriptor,
+ * then checks that the path still is that same file and still names `owner` first: false (and
+ * nothing joined) when the owner's lock was broken and replaced meanwhile. Never removes the file.
  */
-export function joinLockFile(lockPath: string): void {
-  appendFileSync(lockPath, `${process.pid}\n`);
+export function joinLockFile(
+  lockPath: string,
+  owner: string,
+  /** Test seam: runs between the append and the checks (where a replacement can land). */
+  afterAppend: () => void = () => undefined
+): boolean {
+  let fd: number;
+  try {
+    // No O_CREAT: joining never creates a lock (it would name only this process).
+    fd = openSync(lockPath, constants.O_WRONLY | constants.O_APPEND);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+  try {
+    writeSync(fd, `${process.pid}\n`);
+    afterAppend();
+    const joined = fstatSync(fd).ino;
+    if (lstatSync(lockPath, { throwIfNoEntry: false })?.ino !== joined) return false;
+    return readFileSync(lockPath, 'utf8').trim().split(/\s+/)[0] === owner;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** Runs `fn` holding the lock file (acquireLockFile), released however `fn` ends. */
