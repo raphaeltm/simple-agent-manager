@@ -711,13 +711,17 @@ describe('the sealing lock (one sealing operation per box)', () => {
       // A child deploy of the operation holding the lock (it inherits SAM_SELFHOST_SEALING_LOCK).
       const own = await runDeploy(envA, ['--init', '--skip-vm-agent'], deployEnv(envA));
       expect(own.status, own.out).toBe(0);
-      // Any other deploy (no inherited holder) is refused, naming the holder.
+      // Any other deploy (no inherited holder) is refused, naming the holder, and touches nothing
+      // before it waits: not even agent.env (a switch in progress may be rewriting it).
+      const agentEnv = join(stateA, 'key-agent/agent.env');
+      writeFileSync(agentEnv, 'SAM_KEY_PROVIDER=set-by-the-holder\n', { mode: 0o600 });
       const other = await runDeploy(envA, ['--init', '--skip-vm-agent'], {
         ...deployEnv(envA),
         [SEALING_LOCK_ENV]: '',
       });
       expect(other.status).not.toBe(0);
       expect(other.out).toMatch(new RegExp(`sealing\\.lock is held by process ${process.pid}`));
+      expect(readFileSync(agentEnv, 'utf8')).toBe('SAM_KEY_PROVIDER=set-by-the-holder\n');
     });
     expect(existsSync(join(stateA, 'key-agent/sealing.lock'))).toBe(false);
     // Control: once released, a deploy runs.
