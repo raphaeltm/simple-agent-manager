@@ -419,7 +419,12 @@ describe('replace a dead box (real deploy --init, fake Cloud KMS and bucket)', (
   it('works with the automatic key choice, and warns when the ledger is missing', async () => {
     const stateA = join(dir, 'box-a/.state');
     // No SAM_KEY_PROVIDER: --init chooses the cloud key itself and records the choice.
-    const envA = boxEnv(stateA, ['SAM_KEY_PROVIDER=']);
+    // The real probe trusts a metadata answer only when the machine's DMI names the same cloud
+    // (platform-probe.ts): give it a Google DMI, so the test does not depend on where it runs.
+    const dmi = join(dir, 'dmi');
+    mkdirSync(dmi);
+    writeFileSync(join(dmi, 'product_name'), 'Google Compute Engine\n');
+    const envA = boxEnv(stateA, ['SAM_KEY_PROVIDER=', `SAM_DMI_DIR=${dmi}`]);
     const init = await runDeploy(envA, ['--init'], env);
     expect(init.status, init.out).toBe(0);
     expect(init.out).toMatch(/key provider: gcp-kms/);
