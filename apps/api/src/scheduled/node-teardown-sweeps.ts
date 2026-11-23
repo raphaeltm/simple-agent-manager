@@ -5,6 +5,7 @@
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { runAppRouteDnsReconciliation } from '../services/app-route-dns-reconciliation';
+import { runDeploymentNodeProviderExistenceSweep } from '../services/deployment-node-provider-existence';
 import { runNodeTunnelCleanupSweep } from '../services/node-tunnel-cleanup';
 import { runDeploymentNodeCleanup } from './deployment-node-cleanup';
 import { notifyFailedSweeps } from './failed-sweep-notifications';
@@ -30,8 +31,19 @@ export async function runNodeTeardownSweeps(
   // After node teardown: deletes app-route A records left pointing at released node IPs (the
   // subdomain-takeover backstop, services/app-route-dns-reconciliation.ts). Its DNS API calls run
   // out of band (`.claude/rules/47`), so a slow Cloudflare API cannot delay the later sweeps.
+  // Before the DNS backstop: releases running deployment nodes whose VM the provider has twice
+  // confirmed deleted, so their app-route records go through the node release choke point
+  // (services/deployment-node-provider-existence.ts). Provider I/O, so out of band too. The two
+  // run in sequence so one cron tick never runs both against the same zone at once.
   waitUntil(
-    runOutOfBand(env, 'app_route_dns_reconciliation', () => runAppRouteDnsReconciliation(env))
+    (async () => {
+      await runOutOfBand(env, 'deployment_node_provider_existence', () =>
+        runDeploymentNodeProviderExistenceSweep(env)
+      );
+      return await runOutOfBand(env, 'app_route_dns_reconciliation', () =>
+        runAppRouteDnsReconciliation(env)
+      );
+    })()
   );
   return { nodeCleanup, terminalNodeLifecycleRepair, nodeTunnelCleanup };
 }

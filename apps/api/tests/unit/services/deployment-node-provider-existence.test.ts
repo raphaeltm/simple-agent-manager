@@ -111,12 +111,21 @@ function createFakeHetzner() {
     if (status === 403) return err(403, 'forbidden', 'insufficient permissions');
     if (status === 429) return err(429, 'rate_limit_exceeded', 'limit of 3600 requests per hour');
     if (status === 503) return err(503, 'unavailable', 'service unavailable');
-    if (status === -1) return new Promise<Response>(() => undefined); // never answers
+    if (status === -1) {
+      // Never answers; like real fetch, rejects when the caller aborts.
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (signal?.aborted) reject(signal.reason);
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    }
     const server = project.get(id);
     if (!server) return err(404, 'not_found', `server with ID '${id}' not found`);
     if (method === 'DELETE') {
       project.delete(id);
-      return new Response(JSON.stringify({ action: { id: 1, status: 'running' } }), { status: 200 });
+      return new Response(JSON.stringify({ action: { id: 1, status: 'running' } }), {
+        status: 200,
+      });
     }
     if (method !== 'GET') throw new Error(`Hetzner fake: unmodelled ${method}`);
     return new Response(JSON.stringify({ server }), { status: 200 });
@@ -183,6 +192,8 @@ function createFakeGcp(project: string, zone: string) {
 
 let sqlite: Database.Database;
 let env: Env;
+/** Runs once, immediately before the next D1 batch: models a writer landing inside the claim. */
+let beforeNextBatch: (() => void) | undefined;
 let hetzner: ReturnType<typeof createFakeHetzner>;
 let gcp: ReturnType<typeof createFakeGcp>;
 let zone: ReturnType<typeof createFakeCloudflareDns>;
@@ -243,7 +254,13 @@ async function seedNode(id: string, overrides: Partial<schema.Node> = {}) {
 async function seedEnvironment(id: string, nodeId: string, status = 'active') {
   await drizzle(env.DATABASE)
     .insert(schema.deploymentEnvironments)
-    .values({ id, projectId: 'project', name: id, nodeId, status } as schema.NewDeploymentEnvironmentRow);
+    .values({
+      id,
+      projectId: 'project',
+      name: id,
+      nodeId,
+      status,
+    } as schema.NewDeploymentEnvironmentRow);
 }
 
 /** Run one sweep at `minutesAfterT0`. */
@@ -261,8 +278,26 @@ beforeEach(async () => {
   settings.values.clear();
   sqlite = new Database(':memory:');
   createAllSchemaTables(sqlite, schema);
+  beforeNextBatch = undefined;
+  const d1 = createSqliteD1(sqlite);
+  const database = new Proxy(d1, {
+    get(target, key) {
+      if (key === 'batch') {
+        return async (statements: D1PreparedStatement[]) => {
+          const hook = beforeNextBatch;
+          beforeNextBatch = undefined;
+          hook?.();
+          return target.batch(statements);
+        };
+      }
+      const value = Reflect.get(target, key) as unknown;
+      return typeof value === 'function'
+        ? (value as (...a: unknown[]) => unknown).bind(target)
+        : value;
+    },
+  });
   env = {
-    DATABASE: createSqliteD1(sqlite),
+    DATABASE: database,
     KV: createMemoryKv(),
     ENVIRONMENT: 'production',
     SAM_INSTALLATION_ID: '0123456789abcdef0123456789abcdef',
@@ -278,7 +313,8 @@ beforeEach(async () => {
   hetzner = createFakeHetzner();
   gcp = createFakeGcp('box-project', 'us-central1-a');
   accounts.build = (reference, provider) => {
-    if (provider === 'gcp') return new GcpProvider('box-project', async () => 'gcp-token', 'us-central1-a');
+    if (provider === 'gcp')
+      return new GcpProvider('box-project', async () => 'gcp-token', 'us-central1-a');
     // The pinned account is A; any other credential the owner holds now is project B.
     return new HetznerProvider(reference === 'credentials:account-a' ? ACCOUNT_A : ACCOUNT_B);
   };
@@ -363,7 +399,7 @@ describe('a deployment VM deleted at the provider outside SAM', () => {
     await sweepAt(0);
     hetzner.addServer(ACCOUNT_A, NODE);
     const back = await sweepAt(10);
-    expect(back.present).toBe(2);
+    expect(back).toMatchObject({ probed: 1, present: 1 });
     expect(nodeRow(NODE).provider_absence_observed_at).toBeNull();
     hetzner.projects.get(ACCOUNT_A)!.delete(NODE);
     // Due by the check interval (15 min) again, not the confirmation one.
@@ -390,7 +426,9 @@ describe('absence is never inferred from a failed lookup', () => {
     expect(hetzner.requests.some((r) => r.method === 'DELETE')).toBe(false);
     expect(decisions(NODE)).toContainEqual({ decision: 'provider_check_inconclusive', reason });
     // Liveness: the lookups really ran and failed (not an empty sweep).
-    expect(hetzner.requests.filter((r) => r.path === `/v1/servers/${NODE}`).length).toBeGreaterThan(1);
+    expect(hetzner.requests.filter((r) => r.path === `/v1/servers/${NODE}`).length).toBeGreaterThan(
+      1
+    );
   });
 
   it('a lookup that times out keeps the node', async () => {
@@ -409,7 +447,9 @@ describe('absence is never inferred from a failed lookup', () => {
     // project A's server. That 404 is a wrong-account answer, not proof.
     hetzner.addServer(ACCOUNT_A, NODE);
     sqlite
-      .prepare('UPDATE nodes SET placement_credential_fingerprint = NULL, placement_credential_version = NULL WHERE id = ?')
+      .prepare(
+        'UPDATE nodes SET placement_credential_fingerprint = NULL, placement_credential_version = NULL WHERE id = ?'
+      )
       .run(NODE);
     for (let minute = 0; minute <= 120; minute += 15) await sweepAt(minute);
     expect(nodeRow(NODE)).toMatchObject({ status: 'running', provider_absence_observed_at: null });
@@ -427,7 +467,9 @@ describe('absence is never inferred from a failed lookup', () => {
     expect(result.rateLimitedProviders).toEqual(['hetzner']);
     expect(hetzner.requests).toHaveLength(1);
     // The skipped node was not stamped, so it is first in line next sweep.
-    const skipped = [NODE, OTHER_NODE].find((id) => nodeRow(id).provider_existence_checked_at === null);
+    const skipped = [NODE, OTHER_NODE].find(
+      (id) => nodeRow(id).provider_existence_checked_at === null
+    );
     expect(skipped).toBeDefined();
   });
 });
@@ -446,16 +488,63 @@ describe('what the reconciliation leaves alone', () => {
     'defers a confirmed absence while an environment is %s',
     async (status) => {
       await sweepAt(0);
-      sqlite.prepare('UPDATE deployment_environments SET status = ? WHERE id = ?').run(status, ENV_ID);
+      sqlite
+        .prepare('UPDATE deployment_environments SET status = ? WHERE id = ?')
+        .run(status, ENV_ID);
       const result = await sweepAt(10);
       expect(result.deferred).toBe(1);
       expect(nodeRow(NODE).status).toBe('running');
       expect(envRow().status).toBe(status);
       // The absence is kept: once the other owner is done, the next confirmation releases it.
-      sqlite.prepare("UPDATE deployment_environments SET status = 'active' WHERE id = ?").run(ENV_ID);
+      sqlite
+        .prepare("UPDATE deployment_environments SET status = 'active' WHERE id = ?")
+        .run(ENV_ID);
       expect((await sweepAt(20)).released).toBe(1);
     }
   );
+
+  it('loses the claim to an environment start that lands inside it', async () => {
+    await sweepAt(0);
+    beforeNextBatch = () =>
+      sqlite
+        .prepare("UPDATE deployment_environments SET status = 'starting' WHERE id = ?")
+        .run(ENV_ID);
+    const result = await sweepAt(10);
+    expect(result.superseded).toBe(1);
+    expect(nodeRow(NODE).status).toBe('running');
+    expect(envRow().status).toBe('starting');
+    expect(zone.byName(routeHost(ENV_ID))).toHaveLength(1);
+  });
+
+  it('loses the claim when the absence record changes inside it', async () => {
+    await sweepAt(0);
+    // A concurrent sweep saw the VM again and cleared the record.
+    beforeNextBatch = () =>
+      sqlite
+        .prepare(
+          'UPDATE nodes SET provider_absence_observed_at = NULL, provider_absence_instance_id = NULL WHERE id = ?'
+        )
+        .run(NODE);
+    const result = await sweepAt(10);
+    expect(result.superseded).toBe(1);
+    expect(nodeRow(NODE).status).toBe('running');
+    expect(envRow()).toMatchObject({ status: 'active', node_id: NODE });
+  });
+
+  it('loses the claim on a node with no environments when its VM is seen again inside it', async () => {
+    // With no environment to stamp, the node fence alone stops the release.
+    sqlite.prepare('DELETE FROM deployment_environments WHERE id = ?').run(ENV_ID);
+    await sweepAt(0);
+    beforeNextBatch = () =>
+      sqlite
+        .prepare(
+          'UPDATE nodes SET provider_absence_observed_at = NULL, provider_absence_instance_id = NULL WHERE id = ?'
+        )
+        .run(NODE);
+    const result = await sweepAt(10);
+    expect(result.superseded).toBe(1);
+    expect(nodeRow(NODE)).toMatchObject({ status: 'running', ip_address: IP });
+  });
 
   it('never probes a user-owned node, a workspace node, or a node not running', async () => {
     sqlite.prepare("UPDATE nodes SET node_class = 'user-owned' WHERE id = ?").run(NODE);
@@ -516,7 +605,10 @@ describe('self-host box: a GCP deployment node behind the reverse tunnel', () =>
     gcp.add(BOX_NODE);
     await sweepAt(0);
     await sweepAt(15);
-    expect(nodeRow(BOX_NODE)).toMatchObject({ status: 'running', provider_absence_observed_at: null });
+    expect(nodeRow(BOX_NODE)).toMatchObject({
+      status: 'running',
+      provider_absence_observed_at: null,
+    });
     expect(envRow()).toMatchObject({ status: 'active', node_id: BOX_NODE });
   });
 
