@@ -49,5 +49,8 @@ log(
 log(
   `  pnpm selfhost:deploy --init --env-file '${envFile.replaceAll("'", "'\"'\"'")}'   (keeps these keys; prints COMPOSE_PROJECT_NAME and SAM_KEY_AGENT_UID)`
 );
-log('  (cd deploy/selfhost && docker compose build && docker compose up -d)');
+const composeEnv = `--env-file '${envFile.replaceAll("'", "'\"'\"'")}'`;
+log(
+  `  (cd deploy/selfhost && docker compose ${composeEnv} build && docker compose ${composeEnv} up -d)`
+);
 log(`  pnpm selfhost:deploy --env-file '${envFile.replaceAll("'", "'\"'\"'")}'`);

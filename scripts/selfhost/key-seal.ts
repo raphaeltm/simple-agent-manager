@@ -37,6 +37,7 @@ import {
   PLATFORM_KEYS_FILE,
   type PlatformKeysMode,
 } from './platform-keys.js';
+import { LEDGER_SECRET } from './replaceable-box.js';
 import { readPrivateJson, readSecretsFile } from './secret-files.js';
 import { keyFileNotice } from './secrets-keyfile.js';
 
@@ -210,7 +211,9 @@ export async function resolveSealedSecrets(input: ResolveSecretsInput): Promise<
   // secrets.env is laid over the keys below; it may not replace one (as on a legacy box), nor the
   // agent's signing key or the Worker's channel settings (security review L-4).
   for (const name of Object.keys(input.operatorSecrets)) {
-    if (name === SIGNING_KEY_NAME || CHANNEL_VARS.has(name)) {
+    // SAM_BOX_LEDGER names the replaceable box's sealed ledger (replaceable-box.ts); rebuild
+    // refuses a Worker bundle holding it, so it is never sealed as an operator secret.
+    if (name === SIGNING_KEY_NAME || CHANNEL_VARS.has(name) || name === LEDGER_SECRET) {
       throw new Error(
         `${input.secretsSource ?? 'secrets.env'}: ${name} is set by the sealed deploy; remove it`
       );

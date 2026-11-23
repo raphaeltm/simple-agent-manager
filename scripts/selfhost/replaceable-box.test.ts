@@ -487,6 +487,17 @@ describe('replace a dead box (real deploy --init, fake Cloud KMS and bucket)', (
     expect(stateInstallationId(stateB)).toBe(stateInstallationId(stateA));
   });
 
+  it('refuses SAM_BOX_LEDGER as an operator secret (rebuild would refuse that bundle)', async () => {
+    const stateA = join(dir, 'box-a/.state');
+    const envA = boxEnv(stateA);
+    mkdirSync(stateA, { recursive: true, mode: 0o700 });
+    writeFileSync(join(stateA, 'secrets.env'), 'SAM_BOX_LEDGER=x\n', { mode: 0o600 });
+    const init = await runDeploy(envA, ['--init'], env);
+    expect(init.status).not.toBe(0);
+    expect(init.out).toMatch(/SAM_BOX_LEDGER is set by the sealed deploy; remove it/);
+    expect(bucketFiles('sam-box/bundles')).toEqual([]);
+  });
+
   it('rotates on a box whose key provider is set only in .env (never recorded)', async () => {
     const stateA = join(dir, 'box-a/.state');
     const envA = boxEnv(stateA);
