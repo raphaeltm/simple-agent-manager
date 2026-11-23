@@ -254,10 +254,14 @@ const SESSION_WITH_TASK = {
   },
 };
 
-function renderProjectChat(path = `/projects/${PROJECT_ID}/chat`) {
+function renderProjectChat(path = `/projects/${PROJECT_ID}/chat`, multiplayer = false) {
   const contextValue: ProjectContextValue = {
     projectId: PROJECT_ID,
-    project: null,
+    project: multiplayer
+      ? ({ id: PROJECT_ID, name: 'Project', multiplayerActive: true } as NonNullable<
+          ProjectContextValue['project']
+        >)
+      : null,
     installations: [],
     reload: vi.fn(),
   };
@@ -695,6 +699,81 @@ describe('ProjectChat new chat button', () => {
       expect(mocks.listChatSessions).toHaveBeenCalledTimes(2);
     }
   );
+
+  it.each([false, true])(
+    'subscription list response preserves live deltas alreadyFlushed=%s',
+    async (flushed) => {
+      let release!: (value: { sessions: (typeof SESSION_1)[]; total: number }) => void;
+      const held = new Promise<{ sessions: (typeof SESSION_1)[]; total: number }>((done) => {
+        release = done;
+      });
+      mocks.listChatSessions
+        .mockResolvedValueOnce({ sessions: [SESSION_1, SESSION_2], total: 2 })
+        .mockReturnValueOnce(held);
+      renderProjectChat(`/projects/${PROJECT_ID}/chat/session-1`);
+      await screen.findAllByText('First chat');
+      act(() => {
+        mocks.capturedOnReconnected?.();
+      });
+      await waitFor(() => expect(mocks.listChatSessions).toHaveBeenCalledTimes(2));
+      act(() => {
+        mocks.capturedOnSessionEvent?.({
+          type: 'session.created',
+          payload: { ...SESSION_1, id: 'live-created', topic: 'Live created during refresh' },
+        });
+        mocks.capturedOnSessionEvent?.({
+          type: 'session.updated',
+          payload: { sessionId: 'session-1', topic: 'Live updated during refresh' },
+        });
+      });
+      if (flushed) await screen.findAllByText('Live created during refresh');
+      await act(async () => {
+        release({
+          sessions: [
+            SESSION_1,
+            { ...SESSION_2, status: 'active', topic: 'Fresh server-only title' },
+          ],
+          total: 2,
+        });
+        await held;
+      });
+      expect(await screen.findAllByText('Live created during refresh')).not.toHaveLength(0);
+      expect(await screen.findAllByText('Live updated during refresh')).not.toHaveLength(0);
+      expect(await screen.findAllByText('Fresh server-only title')).not.toHaveLength(0);
+      expect(mocks.listChatSessions).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it('does not apply an older All-sessions refresh after switching to My sessions', async () => {
+    let release!: (value: { sessions: (typeof SESSION_1)[]; total: number }) => void;
+    const held = new Promise<{ sessions: (typeof SESSION_1)[]; total: number }>((done) => {
+      release = done;
+    });
+    mocks.listChatSessions
+      .mockResolvedValueOnce({ sessions: [SESSION_1], total: 1 })
+      .mockReturnValueOnce(held)
+      .mockResolvedValue({
+        sessions: [{ ...SESSION_1, topic: 'My authoritative session' }],
+        total: 1,
+      });
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/session-1`, true);
+    await screen.findAllByText('First chat');
+    act(() => {
+      mocks.capturedOnReconnected?.();
+    });
+    await waitFor(() => expect(mocks.listChatSessions).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getAllByRole('button', { name: /^My sessions/ })[0]!);
+    await screen.findAllByText('My authoritative session');
+    await act(async () => {
+      release({
+        sessions: [{ ...SESSION_2, topic: 'Late All-only row', status: 'active' }],
+        total: 1,
+      });
+      await held;
+    });
+    expect(screen.queryByText('Late All-only row')).not.toBeInTheDocument();
+    expect(screen.getAllByText('My authoritative session')).not.toHaveLength(0);
+  });
 
   it('keeps a deep-linked conversation when the first list read fails', async () => {
     mocks.listChatSessions.mockRejectedValue(new Error('list unavailable'));

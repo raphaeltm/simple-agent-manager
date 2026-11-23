@@ -5,7 +5,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { useChatWebSocket } from '../../../src/hooks/useChatWebSocket';
 import { useProjectWebSocket } from '../../../src/hooks/useProjectWebSocket';
-import { messageCommentQueryKeys } from '../../../src/lib/query-options/comments';
+import {
+  applyMessageCommentRealtimeEventToQueryCache,
+  messageCommentQueryKeys,
+  messageCommentsQueryOptions,
+} from '../../../src/lib/query-options/comments';
+
+const boundary = vi.hoisted(() => ({ listMessageComments: vi.fn() }));
+vi.mock('../../../src/lib/api/comments', async (original) => ({
+  ...(await original<typeof import('../../../src/lib/api/comments')>()),
+  listMessageComments: boundary.listMessageComments,
+}));
 
 vi.mock('../../../src/hooks/useQueryScope', () => ({ useQueryScope: () => 'viewer' }));
 vi.mock('../../../src/lib/api', () => ({ getChatSession: vi.fn() }));
@@ -16,7 +26,7 @@ class Socket {
   readyState = 0;
   onopen?: () => void;
   onclose?: (event: { code: number }) => void;
-  onmessage = null;
+  onmessage: ((event: { data: string }) => void) | null = null;
   onerror = null;
   send = vi.fn();
   close = vi.fn();
@@ -154,5 +164,142 @@ it('does not launch a delayed refresh after its socket unmounts', async () => {
   });
   expect(read).toHaveBeenCalledTimes(1);
   expect(client.getQueryState(key)?.isInvalidated).toBe(false);
+  client.clear();
+});
+
+for (const reason of ['thread_created', 'reply_created', 'resolved'] as const) {
+  it(`preserves a live ${reason} frame that overtakes the post-subscription comment snapshot`, async () => {
+    vi.stubGlobal('WebSocket', Socket);
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    const wire = {
+      id: 'thread-live',
+      sessionId: 'session',
+      anchor: { kind: 'message', messageId: 'message', quote: null },
+      author: { kind: 'human', id: 'viewer', displayName: 'Viewer' },
+      body: 'Live comment',
+      createdAt: 10,
+      updatedAt: 20,
+      status: reason === 'resolved' ? 'resolved' : 'open',
+      replies:
+        reason === 'reply_created'
+          ? [
+              {
+                id: 'reply',
+                author: { kind: 'human', id: 'viewer', displayName: 'Viewer' },
+                body: 'Live reply',
+                createdAt: 20,
+              },
+            ]
+          : [],
+    };
+    const stale = {
+      id: 'thread-live',
+      clientId: null,
+      projectId: 'project',
+      sessionId: 'session',
+      anchor: wire.anchor,
+      author: { id: 'viewer', kind: 'human' as const, name: 'Viewer' },
+      body: 'Old comment',
+      createdAt: 10,
+      updatedAt: 10,
+      status: 'open' as const,
+      replies: [],
+    };
+    const old = reason === 'thread_created' ? [] : [stale];
+    const held = deferred<{ comments: typeof old }>();
+    boundary.listMessageComments
+      .mockReset()
+      .mockResolvedValueOnce({ comments: old })
+      .mockReturnValueOnce(held.promise);
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const hook = renderHook(
+      () => {
+        const query = useQuery(messageCommentsQueryOptions('viewer', 'project', 'session'));
+        useProjectWebSocket({
+          projectId: 'project',
+          onCommentEvent: (event) =>
+            applyMessageCommentRealtimeEventToQueryCache(client, 'viewer', event),
+        });
+        return query.data;
+      },
+      { wrapper }
+    );
+    await waitFor(() => expect(hook.result.current).toEqual(old));
+    act(() => Socket.instances[0]!.open());
+    await waitFor(() => expect(boundary.listMessageComments).toHaveBeenCalledTimes(2));
+    act(() =>
+      Socket.instances[0]!.onmessage?.({
+        data: JSON.stringify({
+          type: 'comment.thread.changed',
+          payload: { sessionId: 'session', reason, thread: wire },
+        }),
+      })
+    );
+    await waitFor(() => expect(hook.result.current?.[0]?.body).toBe('Live comment'));
+    await act(async () => {
+      held.resolve({ comments: old });
+      await held.promise;
+    });
+    await waitFor(() =>
+      expect(
+        client.getQueryState(messageCommentQueryKeys.session('viewer', 'project', 'session'))
+          ?.fetchStatus
+      ).toBe('idle')
+    );
+    expect(
+      client.getQueryData<typeof old>(
+        messageCommentQueryKeys.session('viewer', 'project', 'session')
+      )?.[0]?.body
+    ).toBe('Live comment');
+    expect(hook.result.current?.[0]?.body).toBe('Live comment');
+    expect(hook.result.current?.[0]?.status).toBe(wire.status);
+    expect(hook.result.current?.[0]?.replies).toHaveLength(wire.replies.length);
+    expect(boundary.listMessageComments).toHaveBeenCalledTimes(2);
+    hook.unmount();
+    client.clear();
+  });
+}
+
+it('keeps authoritative unchanged comment rows and removals, and retires optimistic identities', async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const key = messageCommentQueryKeys.session('viewer', 'project', 'session');
+  const thread = (id: string, clientId: string | null = null) => ({
+    id,
+    clientId,
+    projectId: 'project',
+    sessionId: 'session',
+    anchor: { kind: 'message' as const, messageId: 'message', quote: null },
+    author: { id: 'viewer', kind: 'human' as const, name: 'Viewer' },
+    body: id,
+    createdAt: 10,
+    updatedAt: 10,
+    status: 'open' as const,
+    replies: [],
+  });
+  const old = thread('unchanged');
+  client.setQueryData(key, [old, thread('removed')]);
+  const held = deferred<{ comments: ReturnType<typeof thread>[] }>();
+  boundary.listMessageComments.mockReset().mockReturnValueOnce(held.promise);
+  const pending = client.fetchQuery(messageCommentsQueryOptions('viewer', 'project', 'session'));
+  client.setQueryData(key, [old, thread('removed'), thread('optimistic-local', 'mutation')]);
+  held.resolve({
+    comments: [
+      { ...old, body: 'Fresh server body' },
+      thread('canonical', 'mutation'),
+      thread('server-only'),
+    ],
+  });
+  const rows = await pending;
+  expect(rows.find((row) => row.id === 'unchanged')?.body).toBe('Fresh server body');
+  expect(rows.some((row) => row.id === 'removed')).toBe(false);
+  expect(rows.some((row) => row.id === 'server-only')).toBe(true);
+  expect(rows.filter((row) => row.clientId === 'mutation').map((row) => row.id)).toEqual([
+    'canonical',
+  ]);
+  expect(boundary.listMessageComments).toHaveBeenCalledTimes(1);
   client.clear();
 });

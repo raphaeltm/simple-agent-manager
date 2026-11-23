@@ -46,7 +46,7 @@ export function useProjectChatState() {
   const queryScope = useQueryScope();
   const queryClient = useQueryClient();
 
-  const { sessions, dispatchEvent, resetSessions } = useSessionReducer();
+  const { sessions, dispatchEvent, resetSessions, captureSnapshot } = useSessionReducer();
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const hasLoadedRef = useRef(false);
@@ -54,9 +54,6 @@ export function useProjectChatState() {
   const [listLoaded, setListLoaded] = useState(false);
   // The read in flight when the page mounted, for handlers that need the selected session.
   const initialLoadRef = useRef<Promise<ChatSessionResponse[]>>(Promise.resolve([]));
-  const subscriptionScope = `${queryScope}:${projectId}`;
-  const currentSubscriptionScope = useRef(subscriptionScope);
-  currentSubscriptionScope.current = subscriptionScope;
   // The new-chat composer and its start path, shared with the Project Overview's task box.
   const composer = useNewChatComposer();
   const {
@@ -94,6 +91,9 @@ export function useProjectChatState() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sessionScope, setSessionScope] = useState<SessionScope>('all');
   const multiplayerActive = Boolean(project?.multiplayerActive);
+  const subscriptionScope = `${queryScope}:${projectId}:${multiplayerActive ? sessionScope : 'all'}`;
+  const currentSubscriptionScope = useRef(subscriptionScope);
+  currentSubscriptionScope.current = subscriptionScope;
 
   // Track explicit "new chat" intent so auto-select doesn't override it
   const newChatIntentRef = useRef(false);
@@ -160,6 +160,7 @@ export function useProjectChatState() {
   const loadSessions = useCallback(
     async (options?: { fresh?: boolean }) => {
       if (hasLoadedRef.current) setIsRefreshing(true);
+      const before = captureSnapshot();
       try {
         const scope = multiplayerActive ? sessionScope : 'all';
         let sessions: ChatSessionResponse[];
@@ -176,7 +177,7 @@ export function useProjectChatState() {
           ).sessions;
         }
         if (currentSubscriptionScope.current !== subscriptionScope) return [];
-        resetSessions(sessions);
+        resetSessions(sessions, before);
         hasLoadedRef.current = true;
         setListLoaded(true);
 
@@ -204,6 +205,7 @@ export function useProjectChatState() {
       sessionScope,
       multiplayerActive,
       resetSessions,
+      captureSnapshot,
       replaceTaskInfoMap,
       queryClient,
       queryScope,
