@@ -633,7 +633,7 @@ newer than the box's newest bundle, another box or an older copy of this box's s
 **What a bucket holder can do.** The fleet credential already reads and writes celld's data
 directly; this adds only ciphertext. Without the key, the bundles and ledger cannot be opened, and
 a forged one is refused by rebuild (it must open under the key `.env` names). Rolling objects back
-to older genuine copies is possible, as it is for celld's data.
+to older genuine copies is possible, as it is for celld's data (see **Rollback** below).
 
 **What a rebuild loses** (everything else is derived again by `--init` and the deploy):
 
@@ -643,27 +643,57 @@ to older genuine copies is possible, as it is for celld's data.
 - the transit or AWS credential files (`.state/key-agent/credentials/`): restore them from your
   own secure copy before rebuilding;
 - backups stored on the dead disk, and Caddy's certificates (it issues new ones; Let's Encrypt
-  allows 5 duplicate certificates a week).
+  allows 5 duplicate certificates a week);
+- local caches rebuilt on their own: celld's cell cache, sam-dns's zone cache (served again after
+  its first sync from the Worker), Caddy's config and the egress fence's attestation.
+
+A teardown leaves `sam-box/` in an operator bucket, like the rest of the bucket's objects; delete it
+with them. It stays openable for as long as the key is enabled.
 
 ### Replace a dead box
 
 1. Create the new VM with **the same identity** that may use the key (on GCE, the same service
-   account and the `cloud-platform` scope), the same prerequisites, and ideally the **same static
-   IP address**: with [DNS on the box](#dns-on-the-box) the delegation's glue and the stored app
-   route records point at it. With a new address, update the glue record and
-   `SAM_DNS_PUBLIC_IPV4`, and redeploy each app environment.
+   account and the `cloud-platform` scope), the same prerequisites, and ideally **the same static
+   IP address** (reserve it before you need it). With [DNS on the box](#dns-on-the-box) the
+   delegation's glue and the stored app route records point at that address.
+   If the address changes, do this **before step 4**:
+   - set `SAM_DNS_PUBLIC_IPV4` in `.env`;
+   - update the glue record (or the `SAM_DNS_NAMESERVER` name's A record) in the parent zone;
+   - wait until `dig +short NS SAM_DOMAIN` and the glue answer with the new address from outside.
+
+   Caddy lost its certificates with the old disk and issues them again by DNS-01 through the
+   delegation, so starting it before the glue moves only burns Let's Encrypt retries. App route
+   records still holding the old address are repointed by the app-route DNS sweep once the new
+   value is deployed (`apps/api/src/services/app-route-dns-cleanup.ts`); resolvers keep old answers
+   for up to `SAM_DNS_TTL` (1 h).
+
 2. Check out the same SAM ref, at the same path as before (the Compose project name includes the
    state directory's path), and put the dead box's `.env` there (`chmod 600`). Update
-   `SAM_KEY_AGENT_UID` if the operator user's uid changed.
-3. `pnpm selfhost:rebuild`: with an empty `.state`, it copies the sealed bundles and the cloud
-   record back, after checking each bundle opens under the key `.env` resolves to and that they
-   all belong to one installation. It never takes the key from the bucket.
+   `SAM_KEY_AGENT_UID` if the operator user's uid changed. With a transit or AWS key, restore its
+   credential file into `.state/key-agent/credentials/` from your own copy.
+3. `pnpm selfhost:rebuild --installation-id <id>`. It copies the newest sealed bundles and the cloud
+   record back into the empty `.state`, after checking that each bundle opens under the key `.env`
+   resolves to and that all belong to one installation. It never takes the key from the bucket.
+   The installation id is public: `pnpm selfhost:secrets status` prints it (note it when you set
+   the box up), and every node VM carries it as its `installation` label. Pass it so that a bucket holding
+   another installation's bundles is refused. Without it, rebuild uses the id the bundles carry.
+   It prints the newest bundle's seal date: check that it matches the dead box's last deploy or
+   rotation. A rebuild that stops part way can be run again.
 4. `pnpm selfhost:deploy --init` (keeps the installation and its keys), then
    `(cd deploy/selfhost && docker compose build && docker compose up -d)` and `pnpm selfhost:deploy`.
 5. Make sure the old VM is really gone before step 4: two boxes on one bucket are not supported.
+   One bucket (or `CELLD_BUCKET` prefix) and one key belong to one installation; a deploy refuses a
+   bucket holding another installation's bundles.
 
-Workspace and deployment nodes reconnect through the tunnel by themselves (same gateway secret).
-Sign-in, stored credentials and SAM-hosted repositories are as they were.
+Workspace and deployment nodes reconnect through the tunnel by themselves (same gateway secret)
+once `api.SAM_DOMAIN` resolves to the box again. Sign-in, stored credentials and SAM-hosted
+repositories are as they were.
+
+**Rollback.** Whoever can write the bucket can delete the newest bundles and leave older genuine
+ones. A rebuild then restores those older keys: values rotated since come back, and data written
+under a newer `ENCRYPTION_KEY` cannot be read. The fleet credential can already roll celld's own
+data back the same way. Keep it to the box, and turn on object versioning or retention on the
+bucket if that matters to you.
 
 ## Backup and restore
 

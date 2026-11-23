@@ -223,6 +223,29 @@ describe('the bucket copy of the bundles', () => {
     );
     expect(remote.objects.has(`sam-box/bundles/${newer!.bundleId}.json`)).toBe(true);
   });
+
+  it('never prunes or seals over another installation, on every sealing path', async () => {
+    const provider = fileProvider();
+    const remote = memoryBucket();
+    const local = openBundleStore({ dir: join(dir, 'bundles') });
+    const ours = await sealed(provider, '2026-11-05T00:00:00Z');
+    await local.write(ours);
+    // An OLDER bundle of another installation: by date alone it would be "pruned".
+    const theirs = await sealSecrets({ SAM_INSTALLATION_ID: 'b'.repeat(32) }, provider, {
+      installationId: 'b'.repeat(32),
+      now: () => new Date('2026-11-01T00:00:00Z'),
+    });
+    remote.write(`sam-box/bundles/${theirs.bundleId}.json`, JSON.stringify(theirs));
+    await expect(reconcileBundleMirror(local, remote, () => undefined)).rejects.toThrow(
+      /of installation b{32}, not this box's a{32}/
+    );
+    expect(remote.objects.has(`sam-box/bundles/${theirs.bundleId}.json`)).toBe(true);
+    // secrets switch / rotate seal through the mirrored store without reconcile: an empty
+    // replacement box is refused there too, before anything is written.
+    const empty = openBundleStore({ dir: join(dir, 'empty-bundles') });
+    await expect(mirroredBundleStore(empty, remote).write(ours)).rejects.toThrow(/replacement box/);
+    expect(await empty.listIds()).toEqual([]);
+  });
 });
 
 describe('replace a dead box (real deploy --init, fake Cloud KMS and bucket)', () => {
@@ -331,13 +354,61 @@ describe('replace a dead box (real deploy --init, fake Cloud KMS and bucket)', (
       await expect(runRebuild(input(box))).rejects.toThrow();
       expect(localBundles(stateB)).toEqual([]);
       rmSync(join(gcsRoot, 'fleet/celld/sam-box/bundles', `${forged.bundleId}.json`));
-      // Control: without the forgery the same rebuild succeeds; then a second run is refused.
+      // The operator's installation id pins the rebuild: another id is refused.
+      await expect(
+        runRebuild({ ...input(box), expectedInstallationId: 'f'.repeat(32) })
+      ).rejects.toThrow(/not f{32}/);
+      // Control: without the forgery the same rebuild succeeds (pinned to the right id).
+      await runRebuild({ ...input(box), expectedInstallationId: stateInstallationId(stateA) });
+      expect(localBundles(stateB)).toEqual(localBundles(stateA));
+      // Running it again completes or repeats it (a rebuild that stopped part way)...
       await runRebuild(input(box));
       expect(localBundles(stateB)).toEqual(localBundles(stateA));
+      // ...but a state holding a bundle the bucket does not have is another install: refused.
+      const foreign = await sealSecrets(
+        { SAM_INSTALLATION_ID: 'e'.repeat(32) },
+        createKeyProvider(keyServiceSettings(box, stateB)!.hostEnv),
+        { installationId: 'e'.repeat(32) }
+      );
+      await openBundleStore({ dir: join(stateB, 'key-agent/bundles') }).write(foreign);
       await expect(runRebuild(input(box))).rejects.toThrow(/already holds an install/);
     } finally {
       await forger.close();
     }
+  });
+
+  it('works with the automatic key choice, and warns when the ledger is missing', async () => {
+    const stateA = join(dir, 'box-a/.state');
+    // No SAM_KEY_PROVIDER: --init chooses the cloud key itself and records the choice.
+    const envA = boxEnv(stateA, ['SAM_KEY_PROVIDER=']);
+    const init = await runDeploy(envA, ['--init'], env);
+    expect(init.status, init.out).toBe(0);
+    expect(init.out).toMatch(/key provider: gcp-kms/);
+    // A plain deploy reads the recorded choice (not .env) and still reconciles and publishes.
+    rmSync(join(gcsRoot, 'fleet/celld/sam-box/ledger.json'));
+    const again = await runDeploy(envA, ['--init'], existingInstallEnv(envA));
+    expect(again.status, again.out).toBe(0);
+    expect(bucketFiles('sam-box')).toContain('ledger.json');
+    expect(bucketFiles('sam-box/bundles')).toEqual(localBundles(stateA));
+    // Rebuild with the automatic candidates; the ledger deleted: it says so.
+    rmSync(join(gcsRoot, 'fleet/celld/sam-box/ledger.json'));
+    const stateB = join(dir, 'box-b/.state');
+    const boxB = boxOf(boxEnv(stateB, ['SAM_KEY_PROVIDER=']));
+    const logs: string[] = [];
+    await runRebuild({
+      box: boxB,
+      stateDir: stateB,
+      bucket: bucket(boxB),
+      detect: async () => ({
+        platform: 'Google Cloud (project sam-fake-project)',
+        candidates: [
+          { provider: 'gcp-kms', settings: { SAM_GCP_KMS_KEY: GCP_KEY }, label: GCP_KEY },
+        ],
+      }),
+      log: (m) => logs.push(m),
+    });
+    expect(localBundles(stateB)).toEqual(localBundles(stateA));
+    expect(logs.join('\n')).toMatch(/WARNING: the fleet bucket holds no sam-box\/ledger\.json/);
   });
 
   it('refuses replaceable mode with the key file, explicit or automatic', async () => {

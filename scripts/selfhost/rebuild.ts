@@ -1,5 +1,5 @@
 /**
- * `pnpm selfhost:rebuild [--env-file <path>] [--state-dir <dir>]`
+ * `pnpm selfhost:rebuild [--installation-id <id>] [--env-file <path>] [--state-dir <dir>]`
  *
  * Replaces a dead replaceable box (README "Replace a dead box"): on a new VM with this checkout,
  * the dead box's `.env` and an EMPTY state directory, it copies the box's sealed bundles and
@@ -19,7 +19,11 @@ import { runRebuild } from './replaceable-rebuild';
 import { assertPrivateFile } from './secret-files';
 
 const { values } = parseArgs({
-  options: { 'env-file': { type: 'string' }, 'state-dir': { type: 'string' } },
+  options: {
+    'env-file': { type: 'string' },
+    'state-dir': { type: 'string' },
+    'installation-id': { type: 'string' },
+  },
 });
 assertOperatorExecution();
 const envFile = resolve(values['env-file'] ?? join(SELFHOST_DIR, '.env'));
@@ -37,6 +41,7 @@ const result = await runRebuild({
   bucket: fleetBucket(box),
   detect: detectKeyCandidates,
   log,
+  expectedInstallationId: values['installation-id'],
 });
 log(
   `rebuilt the sealed state of installation ${result.installationId} in ${Math.round((Date.now() - started) / 1000)} s. Next:`

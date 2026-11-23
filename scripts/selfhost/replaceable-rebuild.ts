@@ -8,15 +8,18 @@
  * same automatic candidates `--init` uses) AND it opens under that key. A bundle written by anyone
  * else, a bundle of another installation, or a ledger that does not open stops the rebuild.
  */
-import { existsSync } from 'node:fs';
-
 import { addResource } from '../../deploy/selfhost/created-resources.mjs';
 import { openBundle, type SealedBundle } from '../../deploy/selfhost/key-agent/bundle.ts';
 import type { KeyProvider } from '../../deploy/selfhost/key-agent/provider.ts';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
 import { recordPath } from './install-record.js';
 import { explicitKeyProvider, type PlatformCandidates } from './key-choice.js';
-import { assertNotRootForSealing, bundleStoreFor, keyServiceSettings } from './key-service.js';
+import {
+  assertNotRootForSealing,
+  bundleStoreFor,
+  DEFAULT_KEPT_BUNDLES,
+  keyServiceSettings,
+} from './key-service.js';
 import {
   type BoxBucket,
   bucketBundleIds,
@@ -36,6 +39,8 @@ export interface RebuildInput {
   /** The automatic key candidates (key-platforms.ts detectKeyCandidates in production). */
   detect: (box: Box) => Promise<PlatformCandidates>;
   log: (message: string) => void;
+  /** `--installation-id`: the id the operator knows the dead box by; refuses any other. */
+  expectedInstallationId?: string;
 }
 
 export interface RebuildResult {
@@ -71,12 +76,6 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
   if (!replaceableBox(box)) {
     throw new Error('rebuild needs SAM_REPLACEABLE_BOX=true in .env, as on the box it replaces');
   }
-  const local = bundleStoreFor(stateDir);
-  if ((await local.listIds()).length > 0 || existsSync(recordPath(stateDir))) {
-    throw new Error(
-      `${stateDir} already holds an install: rebuild only fills an empty state directory`
-    );
-  }
   const ids = bucketBundleIds(bucket);
   if (ids.length === 0) {
     throw new Error(
@@ -84,18 +83,44 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
         'the box it replaces never deployed with SAM_REPLACEABLE_BOX=true'
     );
   }
+  // Resumable: a state directory holding only bundles this bucket has (a rebuild that stopped
+  // part way) is completed; anything else is another install, which rebuild never touches.
+  const local = bundleStoreFor(stateDir);
+  const present = await local.listIds();
+  if (present.some((id) => !ids.includes(id))) {
+    throw new Error(
+      `${stateDir} already holds an install: rebuild only fills an empty state directory`
+    );
+  }
+  // A corrupt object stops the rebuild, naming it: skipping it could restore an older bundle.
   const bundles = ids
-    .map((id) => readBucketBundle(bucket, id))
+    .map((id) => {
+      try {
+        return readBucketBundle(bucket, id);
+      } catch (error) {
+        throw new Error(
+          `sam-box/bundles/${id}.json in the fleet bucket is not a readable sealed bundle ` +
+            `(${error instanceof Error ? error.message : String(error)}); restore or remove it, then run rebuild again`
+        );
+      }
+    })
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
   const newest = bundles[0] as SealedBundle;
   const installationId = newest.installationId;
   if (bundles.some((b) => b.installationId !== installationId)) {
     throw new Error('the bucket holds bundles of more than one installation; refusing to choose');
   }
+  if (input.expectedInstallationId && input.expectedInstallationId !== installationId) {
+    throw new Error(
+      `the bucket's bundles belong to installation ${installationId}, not ` +
+        `${input.expectedInstallationId} (--installation-id)`
+    );
+  }
   assertNotRootForSealing(stateDir);
   const provider = await providerFor(input, newest);
   const accepted: SealedBundle[] = [];
   for (const bundle of bundles) {
+    if (accepted.length >= DEFAULT_KEPT_BUNDLES) break;
     if (bundle.provider !== provider.name || bundle.keyRef !== provider.keyRef) {
       // An older bundle from before a provider switch: the newest decides, this one stays out.
       log(`skipping bundle ${bundle.bundleId}: sealed with ${bundle.provider} ${bundle.keyRef}`);
@@ -110,9 +135,16 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
     accepted.push(bundle);
   }
   const entries = await fetchLedger(bucket, provider, installationId);
+  if (entries === null) {
+    log(
+      'WARNING: the fleet bucket holds no sam-box/ledger.json: if the dead box ran ' +
+        'pnpm selfhost:gcp-bootstrap, record what it created by hand before a teardown'
+    );
+  }
   ensurePrivateDir(stateDir);
-  for (const bundle of accepted) await local.write(bundle);
-  for (const entry of entries) {
+  // The record first and the bundles last, newest last: a rebuild that stops part way is
+  // completed by running it again (addResource is idempotent, present bundles are skipped).
+  for (const entry of entries ?? []) {
     addResource(recordPath(stateDir), {
       cloud: entry.cloud,
       kind: entry.kind,
@@ -122,13 +154,17 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
       ...(entry.attributes ? { attributes: entry.attributes } : {}),
     });
   }
+  for (const bundle of [...accepted].reverse()) {
+    if (!present.includes(bundle.bundleId)) await local.write(bundle);
+  }
   log(
-    `restored ${accepted.length} sealed bundle(s) of installation ${installationId} and ` +
-      `${entries.length} cloud record entries into ${stateDir}`
+    `restored ${accepted.length} sealed bundle(s) of installation ${installationId}, the newest ` +
+      `${newest.bundleId} sealed ${newest.createdAt} (check it is the dead box's latest seal), ` +
+      `and ${entries?.length ?? 0} cloud record entries into ${stateDir}`
   );
   return {
     installationId,
     bundleIds: accepted.map((b) => b.bundleId),
-    ledgerEntries: entries.length,
+    ledgerEntries: entries?.length ?? 0,
   };
 }
