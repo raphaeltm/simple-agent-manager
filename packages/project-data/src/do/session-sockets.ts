@@ -147,18 +147,28 @@ export function countLegacySockets(
   return { session, project };
 }
 
-function send(ws: WebSocket, message: string): void {
+/**
+ * A socket still awaiting its post-admission access check. Attachments survive hibernation.
+ * Legacy sockets have no admission attachment; they keep their existing behavior and are still
+ * closed by actor revocation. An unreadable attachment is treated as not pending, as before.
+ */
+function isAccessPending(ws: WebSocket): boolean {
   try {
-    // Attachments survive hibernation. Legacy sockets have no admission attachment;
-    // they retain their existing behavior and are still closed by actor revocation.
     const attachment: unknown = ws.deserializeAttachment();
-    if (
+    return (
       attachment !== null &&
       typeof attachment === 'object' &&
       'accessPending' in attachment &&
       attachment.accessPending === true
-    )
-      return;
+    );
+  } catch {
+    return false;
+  }
+}
+
+function send(ws: WebSocket, message: string): void {
+  try {
+    if (isAccessPending(ws)) return;
     if (ws.readyState !== WebSocket.OPEN) return;
     ws.send(message);
   } catch {
@@ -281,6 +291,10 @@ export function broadcastToBrowserSockets(
     return;
   }
   for (const ws of ctx.getWebSockets(sessionTag(sessionId))) {
+    // A pending socket has received nothing, and its client reads the newest messages once it
+    // opens, so it does not need a resync close. Closing it here would also stop the access
+    // check from promoting it, and steady streaming would close every reconnect the same way.
+    if (isAccessPending(ws)) continue;
     const tags = tagsOf(ctx, ws);
     if (!tags) continue;
     if (

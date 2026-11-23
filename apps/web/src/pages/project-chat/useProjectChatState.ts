@@ -138,6 +138,7 @@ export function useProjectChatState() {
 
   // Task/idea title map for session tagging + task info map for grouping
   const [taskTitleMap, setTaskTitleMap] = useState<Map<string, string>>(new Map());
+  const taskLoadGenerationRef = useRef(0);
   const { taskInfoMap, replaceAll: replaceTaskInfoMap } = useStableTaskInfoMap();
 
   const sessionList = useSessionSections(sessions, taskInfoMap, searchQuery);
@@ -184,9 +185,13 @@ export function useProjectChatState() {
         hasLoadedRef.current = true;
         setListLoaded(true);
 
+        // Loads overlap (mount read, then the subscription catch-up), and an older task read can
+        // finish last. Only the newest load's tasks may replace the maps.
+        const taskLoad = ++taskLoadGenerationRef.current;
         listProjectTasks(projectId, { limit: CHAT_TASK_LIST_LIMIT })
           .then((tasksResult) => {
             if (currentSubscriptionScope.current !== subscriptionScope) return;
+            if (taskLoad !== taskLoadGenerationRef.current) return;
             const titleMap = new Map<string, string>();
             for (const t of tasksResult.tasks) titleMap.set(t.id, t.title);
             setTaskTitleMap(titleMap);

@@ -162,6 +162,33 @@ describe('post-admission access verification', () => {
     broadcastToBrowserSockets(ctx, 'message.new', {}, SESSION);
     expect(pending.send).toHaveBeenCalledOnce();
   });
+  it('does not resync-close a pending legacy socket, then resyncs it once admitted', async () => {
+    const pending = pendingSocket(); // no append capability
+    const capableReader = socket(capable);
+    const ctx = context([pending, capableReader]);
+    let release!: (value: unknown) => void;
+    const check = closeIfAccessRevoked(
+      database(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          })
+      ),
+      'project',
+      'member',
+      pending as unknown as WebSocket
+    );
+    broadcastToBrowserSockets(ctx, 'message.append', {}, SESSION);
+    expect(capableReader.send).toHaveBeenCalledOnce();
+    expect(pending.close).not.toHaveBeenCalled();
+    expect(pending.send).not.toHaveBeenCalled();
+    release({ ok: 1 });
+    await check;
+    // Promotion still happened, and the admitted legacy socket is resynced as before.
+    expect(pending.deserializeAttachment()).toEqual({ accessPending: false });
+    broadcastToBrowserSockets(ctx, 'message.append', {}, SESSION);
+    expect(pending.close).toHaveBeenCalledWith(CHAT_MESSAGE_RESYNC_CLOSE_CODE, expect.any(String));
+  });
   it('closes a failed lookup with a retryable code and a denied lookup with4403', async () => {
     const failed = pendingSocket();
     await closeIfAccessRevoked(

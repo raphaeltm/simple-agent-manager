@@ -825,6 +825,43 @@ describe('ProjectChat new chat button', () => {
     expect(await screen.findAllByText('Mine, just created')).not.toHaveLength(0);
   });
 
+  it('keeps the newest task read when an older one finishes last', async () => {
+    const waiting = {
+      ...SESSION_1,
+      id: 'waiting-chat',
+      topic: 'Waits on parent',
+      taskId: 'task-b',
+    };
+    const task = { id: 'task-b', title: 'Waits on parent', status: 'in_progress' };
+    mocks.listChatSessions.mockResolvedValue({ sessions: [waiting], total: 1 });
+    let releaseStale!: () => void;
+    mocks.listProjectTasks
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseStale = () => resolve({ tasks: [{ ...task, blocked: true }], nextCursor: null });
+          })
+      )
+      .mockResolvedValue({ tasks: [{ ...task, blocked: false }], nextCursor: null });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat`);
+    expect(await screen.findAllByText('Waits on parent')).not.toHaveLength(0);
+    await act(async () => {
+      mocks.capturedOnReconnected?.();
+    });
+    await waitFor(() => expect(mocks.listProjectTasks).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    await act(async () => {
+      releaseStale();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(screen.getAllByText('Waits on parent')).not.toHaveLength(0);
+    expect(screen.queryByText('Blocked')).not.toBeInTheDocument();
+  });
+
   it('keeps a deep-linked conversation when the first list read fails', async () => {
     mocks.listChatSessions.mockRejectedValue(new Error('list unavailable'));
 
