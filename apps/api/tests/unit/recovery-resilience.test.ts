@@ -36,6 +36,10 @@ const taskRunnerSource = readFileSync(
   'utf8'
 );
 const scheduledSource = readFileSync(resolve(process.cwd(), 'src/scheduled/handler.ts'), 'utf8');
+const nodeTeardownSweepsSource = readFileSync(
+  resolve(process.cwd(), 'src/scheduled/node-teardown-sweeps.ts'),
+  'utf8'
+);
 const adminSource = readFileSync(resolve(process.cwd(), 'src/routes/admin.ts'), 'utf8');
 
 // =========================================================================
@@ -222,18 +226,31 @@ describe('stuck-tasks DO health checks (TDF-7)', () => {
 
     expect(sweepBody).toContain('const sweeps = createSweepIsolator(env)');
 
+    // Each call must be wrapped in `sweeps.isolate(...)`, i.e. preceded by an
+    // isolate() opener on the same statement rather than a bare `await`.
+    const expectIsolated = (body: string, sweepFn: string) => {
+      const idx = body.indexOf(sweepFn);
+      expect(idx, sweepFn).toBeGreaterThan(-1);
+      const statementStart = body.lastIndexOf('await ', idx);
+      expect(body.slice(statementStart, idx), sweepFn).toContain('sweeps.isolate(');
+    };
     for (const sweepFn of [
       'recoverStuckTasks(env)',
-      'runNodeCleanupSweep(env)',
       'runCronTriggerSweep(env)',
       'runObservabilityPurge(env)',
     ]) {
-      const idx = sweepBody.indexOf(sweepFn);
-      expect(idx).toBeGreaterThan(-1);
-      // Each call must be wrapped in `sweeps.isolate(...)`, i.e. preceded by an
-      // isolate() opener on the same statement rather than a bare `await`.
-      const statementStart = sweepBody.lastIndexOf('await ', idx);
-      expect(sweepBody.slice(statementStart, idx)).toContain('sweeps.isolate(');
+      expectIsolated(sweepBody, sweepFn);
+    }
+    // The node teardown group lives in its own module and receives the same isolator.
+    expect(sweepBody).toContain('await runNodeTeardownSweeps(sweeps, env,');
+    for (const sweepFn of [
+      'runNodeCleanupSweep(env)',
+      'runDeploymentNodeCleanup(env, waitUntil)',
+      'runTerminalNodeLifecycleRepair(env)',
+      'runNodeTunnelCleanupSweep(env)',
+      'runAppRouteDnsReconciliation(env)',
+    ]) {
+      expectIsolated(nodeTeardownSweepsSource, sweepFn);
     }
   });
 

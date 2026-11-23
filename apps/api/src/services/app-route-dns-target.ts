@@ -17,7 +17,9 @@ import {
 
 import type { Env } from '../env';
 import { errors } from '../middleware/error';
+import { releaseNodeAppRouteDnsRecords } from './app-route-dns-reconciliation';
 import { upsertAppRouteDNSRecord } from './dns-app-routes';
+import { nodeStatusTerminatesCallbacks } from './node-callback-auth';
 import { nodeTransportExtension } from './node-transport-extension';
 
 export interface AppRouteDnsNode {
@@ -25,25 +27,82 @@ export interface AppRouteDnsNode {
   ipAddress: string | null;
 }
 
-/** Writes (or, when covered, skips) the A record of every route a release fetch returns. */
-export async function upsertReleaseRouteRecords(
-  routes: Pick<DeploymentRouteTarget, 'hostname'>[],
+/**
+ * The address a node's app-route records point at: `covered` when the installation's wildcard
+ * record already serves them (no records are written), else the transport's ingress address or
+ * the node's own IP (null while the node has none yet). The single answer shared by the release
+ * fetch that writes the records and the cleanup that judges them
+ * (`services/app-route-dns-reconciliation.ts`).
+ */
+export function appRouteRecordAddress(
   node: AppRouteDnsNode,
   env: Env
-): Promise<void> {
-  if (routes.length === 0) return;
+): { covered: true } | { covered: false; address: string | null } {
   // `?? null`: nodeTransportExtension(undefined) means "the installation's transport", which a
   // stored node never is; a node row without the column must take the public path.
   const extension = nodeTransportExtension(node.transport ?? null);
   const address = extension?.appRouteAddress ? extension.appRouteAddress(env) : undefined;
-  if (address === null) return;
-  const target = address ?? node.ipAddress;
+  if (address === null) return { covered: true };
+  return { covered: false, address: address ?? node.ipAddress };
+}
+
+/** True once the node's teardown has started (claimed, or carrying a termination proof). */
+async function nodeReleaseStarted(env: Env, nodeId: string): Promise<boolean> {
+  // On the primary: a replica need not have the teardown's claim yet, and this read is what
+  // decides whether the records just written must go (see `upsertReleaseRouteRecords`).
+  const row = await env.DATABASE.withSession('first-primary')
+    .prepare('SELECT status, runtime_termination_confirmed_at FROM nodes WHERE id = ?')
+    .bind(nodeId)
+    .first<{ status: string; runtime_termination_confirmed_at: string | null }>();
+  return (
+    !row || nodeStatusTerminatesCallbacks(row.status) || !!row.runtime_termination_confirmed_at
+  );
+}
+
+/**
+ * Writes (or, when covered, skips) the A record of every route a release fetch returns. With
+ * `nodeId`, refuses (410) once that node's teardown has started, and cleans up after itself when
+ * the teardown started while it was writing.
+ */
+export async function upsertReleaseRouteRecords(
+  routes: Pick<DeploymentRouteTarget, 'hostname'>[],
+  node: AppRouteDnsNode,
+  env: Env,
+  nodeId?: string
+): Promise<void> {
+  if (routes.length === 0) return;
+  const resolved = appRouteRecordAddress(node, env);
+  if (resolved.covered) return;
+  const target = resolved.address;
   if (!target) {
     throw errors.conflict(
       'Deployment node does not have an IP address yet; retry after provisioning completes'
     );
   }
-  await Promise.all(routes.map((route) => upsertAppRouteDNSRecord(route.hostname, target, env)));
+  const refuse = () =>
+    errors.gone(`Node ${nodeId} is being released; its route records are not written`);
+  // The fetch checked the node on entry, but its teardown may have started since; don't write.
+  if (nodeId && (await nodeReleaseStarted(env, nodeId))) throw refuse();
+  // allSettled, not all: the re-read below must follow every write, not the first failure.
+  const settled = await Promise.allSettled(
+    routes.map((route) => upsertAppRouteDNSRecord(route.hostname, target, env))
+  );
+  // Handshake with teardown, which claims the node (`destroying`) and only then lists records to
+  // delete: read the node again once every write has settled. Still live means the claim comes
+  // later, so its listing sees these records. Released means the claim (and perhaps both cleanup
+  // passes) ran while the writes were in flight, so delete them here. A write SAM gave up on that
+  // the provider commits even later is left to the sweep.
+  if (nodeId && (await nodeReleaseStarted(env, nodeId))) {
+    await releaseNodeAppRouteDnsRecords(env, {
+      id: nodeId,
+      nodeRole: 'deployment',
+      ipAddress: node.ipAddress,
+      transport: node.transport ?? null,
+    });
+    throw refuse();
+  }
+  const failed = settled.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+  if (failed) throw failed.reason;
 }
 
 /**

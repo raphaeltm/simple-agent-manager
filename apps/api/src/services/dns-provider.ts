@@ -43,6 +43,16 @@ export interface BoxDnsBackend {
   findARecordsByName(name: string, env: Env): Promise<BoxDnsRecordMatch[]>;
   /** Deletes every record (any type) with this name; returns how many. */
   deleteRecordsByName(name: string, env: Env): Promise<number>;
+  /**
+   * One page (1-based, ordered by name) of A records whose name ends in `nameSuffix`, optionally
+   * only those whose content is `content` (app-route DNS reconciliation). `rowCount` is the number
+   * of stored rows the page read, before malformed ones were dropped, so a caller can tell a full
+   * page from the end of the zone.
+   */
+  listARecords(
+    filter: { nameSuffix: string; content?: string; page: number; perPage: number },
+    env: Env
+  ): Promise<{ records: BoxDnsRecordMatch[]; rowCount: number }>;
 }
 
 let backend: BoxDnsBackend | undefined;

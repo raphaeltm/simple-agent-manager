@@ -8,6 +8,7 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { releaseNodeAppRouteDnsRecords } from './app-route-dns-reconciliation';
 import { recoverLegacyDeploymentBinding } from './deployment-legacy-binding';
 import { captureNodeLogsBeforeTeardown } from './node-log-capture';
 import { isNeverRequestedVmPlaceholder } from './node-never-requested-placeholder';
@@ -308,6 +309,8 @@ export async function deleteNodeResourcesStrict(
     }
     await markWorkspaceRuntimeTerminationConfirmed(db, node, node.runtimeTerminationConfirmedAt);
     await releaseTerminatedNodeIngress(env, node);
+    // Last, so a DNS failure holds back only the node's retirement (and the IP it clears).
+    await releaseNodeAppRouteDnsRecords(env, node, options.providerRequestContext?.signal);
     return {
       providerVm: node.providerInstanceId ? 'already-absent' : 'no-instance',
       runtimeTerminationConfirmedAt: node.runtimeTerminationConfirmedAt,
@@ -330,6 +333,8 @@ export async function deleteNodeResourcesStrict(
         options.providerRequestContext?.signal
       );
     }
+    // No-op today (only VM deployment nodes serve app routes); kept so every proof branch runs it.
+    await releaseNodeAppRouteDnsRecords(env, node, options.providerRequestContext?.signal);
     return {
       providerVm: 'no-instance',
       runtimeTerminationConfirmedAt,
@@ -338,6 +343,11 @@ export async function deleteNodeResourcesStrict(
     };
   }
 
+  // Before the provider deletion: once the VM is gone the provider may reassign its IP, so the
+  // app-route records pointing at it must go while SAM still holds it. The claim above has made
+  // the node `destroying`, so they judge as released. A failure throws here, leaving the VM (and
+  // its IP) in place and the node retryable; nothing has been deleted at the provider yet.
+  await releaseNodeAppRouteDnsRecords(env, node, options.providerRequestContext?.signal);
   let providerVm: StrictNodeDeletionResult['providerVm'];
   try {
     providerVm =
@@ -397,6 +407,10 @@ export async function deleteNodeResourcesStrict(
       options.providerRequestContext?.signal
     );
   }
+  // Again after the provider deletion: a release fetch admitted before the claim can still
+  // upsert a route record after the pass above listed. A failure throws with the proof
+  // already written, so the retry takes the existing-proof branch, which repeats this pass.
+  await releaseNodeAppRouteDnsRecords(env, node, options.providerRequestContext?.signal);
   return {
     providerVm,
     runtimeTerminationConfirmedAt,

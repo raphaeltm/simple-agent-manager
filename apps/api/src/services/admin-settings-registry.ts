@@ -1,5 +1,6 @@
 import type { AdminSettingDefinition } from './admin-setting-definitions';
 import { ACCOUNT_LINKING_SETTINGS } from './admin-settings-account-linking-definitions';
+import { APP_ROUTE_DNS_SETTINGS } from './admin-settings-app-route-dns-definitions';
 import { CORE_SETTINGS } from './admin-settings-core-definitions';
 import { CREDENTIAL_SETUP_SETTINGS } from './admin-settings-credential-setup-definitions';
 import { DEPLOYMENT_PUBLISH_SETTINGS } from './admin-settings-deployment-publish-definitions';
@@ -47,6 +48,7 @@ const definitions = [
   ...CORE_SETTINGS,
   ...CREDENTIAL_SETUP_SETTINGS,
   ...NODE_TUNNEL_SETTINGS,
+  ...APP_ROUTE_DNS_SETTINGS,
   ...FEATURE_SETTINGS,
   ...GCP_CATALOG_SETTINGS,
   ...INFOMANIAK_SETTINGS,

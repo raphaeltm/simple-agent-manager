@@ -142,7 +142,11 @@ const mockMintProjectRegistryCredential = vi.fn();
 const mockLoadResolvedSecrets = vi.fn();
 const mockLoadDeploymentInterpolationEnv = vi.fn();
 const mockD1Run = vi.fn();
-const mockD1Bind = vi.fn(() => ({ run: mockD1Run }));
+// The route-write fence reads the node's status (`upsertReleaseRouteRecords`).
+const mockD1Bind = vi.fn(() => ({
+  run: mockD1Run,
+  first: vi.fn(async () => ({ status: 'running', runtime_termination_confirmed_at: null })),
+}));
 const mockD1Prepare = vi.fn(() => ({ bind: mockD1Bind }));
 
 let envRows: EnvironmentRow[] = [];
@@ -434,7 +438,10 @@ function createApp() {
 
 function env(): Env {
   return {
-    DATABASE: { prepare: mockD1Prepare } as unknown as D1Database,
+    DATABASE: {
+      prepare: mockD1Prepare,
+      withSession: () => ({ prepare: mockD1Prepare }),
+    } as unknown as D1Database,
     BASE_DOMAIN: 'sammy.party',
     CF_API_TOKEN: 'cf-token',
     CF_ZONE_ID: 'zone-1',
