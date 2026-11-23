@@ -1,5 +1,7 @@
 # Deployment nodes provider-existence reconciliation cannot prove absent
 
+Tracked as idea 01M83MG12J34M49ZVK2Y8RX3N8 (Raphaël, 2026-11-23, inbox ask:01M83790N9K2C3EQQ87REJ61F8: "Merge it now; track the two gaps as an idea").
+
 ## Problem
 
 Provider-existence reconciliation (`apps/api/src/services/deployment-node-provider-existence.ts`,

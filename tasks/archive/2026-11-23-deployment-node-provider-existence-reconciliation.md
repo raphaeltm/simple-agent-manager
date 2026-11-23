@@ -44,14 +44,14 @@ No reconciler moved a running deployment node out of `running`.
 - [x] Tests on a real SQL engine with real Hetzner/GCP adapters against contract fakes
 - [x] Each guard deleted once; intended test red (PR body)
 - [x] Docs: app-deployments guide, admin-settings guide, self-hosting
-- [ ] Staging verification
+- [x] Staging verification (live negative path on a real Hetzner VM; proven-gone path via contract-fake integration tests; see PR)
 - [x] Review fixes: GCP aggregated lookup fails closed on an unreachable zone; region guard for
       region-bound clients (Infomaniak, Scaleway); confirming probe cross-checks the account's full
       instance list; stale first observation (> 3 intervals) restarts; checked first-observation
       write; partial index; independent waitUntil for the DNS backstop; pinned-only resolution
 - [x] Residual risk tracked: `tasks/backlog/2026-11-23-unpinned-deployment-nodes-provider-existence.md`
-- [ ] Specialist reviews (security-auditor, cloudflare-specialist, adversarial re-verify,
-      task-completion-validator)
+- [x] Specialist reviews: security-auditor, cloudflare-specialist, six adversarial passes, task-completion-validator, CodeRabbit/Codex (17 threads), all ADDRESSED/PASS
+- [x] Residual gaps (rotated credentials, Scaleway) accepted for merge by Raphaël (ask:01M83790N9K2C3EQQ87REJ61F8), tracked as idea 01M83MG12J34M49ZVK2Y8RX3N8
 
 ## Acceptance criteria
 
