@@ -353,6 +353,13 @@ async function waitUntilServed() {
     await sleep(pollMs);
   }
 }
+// An installer that moves keeps its Worker, and with it the secrets of the client registered
+// for the old address. They are removed before the move is published: if creating the new
+// client then fails, the next run sees an installer without OAuth secrets and finishes the
+// job, instead of finding the old ones and reporting a sign-in that cannot work.
+if (originChanged)
+  for (const key of SECRET_NAMES)
+    if (existingSecrets.includes(key)) await api(`${worker}/secrets/${key}`, 'DELETE');
 const generated = '.wrangler-deploy.json';
 await writeFile(generated, JSON.stringify(config, null, 2), { mode: 0o600 });
 try {
