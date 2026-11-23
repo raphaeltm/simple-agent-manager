@@ -209,3 +209,9 @@ New attack surface: a public UDP/TCP 53 listener, and a loopback RFC 2136 update
 ## References
 - `.claude/rules/19-external-service-integration.md`, `74`, `81`, `62`, `41`/`50` (row isolation)
 - `deploy/selfhost/sam-mx`, `apps/api/src/selfhost/reverse-tunnel/gateway.ts`
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2959](https://github.com/raphaeltm/simple-agent-manager/pull/2959) and [#2960](https://github.com/raphaeltm/simple-agent-manager/pull/2960) (merged 2026-11-21). Line 166 was explicitly out of scope for step 1. Deployment nodes on a box then shipped in #2974.
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
+- 1 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.

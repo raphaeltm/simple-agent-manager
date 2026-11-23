@@ -111,3 +111,9 @@ read a day, and its object has grown to 1.04 GB.
 
 Per-RPC row accounting (task `01M7CX7ANP9HNSP7PGSBT886WS`), event admission cost on real projects,
 ingest per-batch overhead, the retention scan. All are listed in the idea.
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2727](https://github.com/raphaeltm/simple-agent-manager/pull/2727).
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
+- 7 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.

@@ -75,3 +75,9 @@ Lifecycle review: cancellation now atomically refuses outstanding replies; respo
 Reservation recovery review: canonical absence now resumes the same fixed delivery ID and exact ledger epoch; no age-based deletion or new migration. Both original/resumed writers validate canonical sender/ref/session/fingerprint before202. Reserved rows remain on null or failed lookup, avoiding deletion races with late acceptance. Terminal permission resend reuses validated reject metadata across changed content; null receipt on already-settled permission conflicts. SQL68+agentread8=76 pass, APItypecheck/build/lint/securityPASS. Retained realDO conflicting-ID control also exposed workerd rejected-RPC logging; promise-adoption changes did not remove that diagnostic and were reverted. The negative transaction assertion catches the expected conflict inside the actual DO, then verifies successful replay and one canonical message. Final Worker14/14 exits cleanly with no uncaught logs. Production DO source remains unchanged. Root lint23/23 passes.
 
 System-error response review: source-owned open/unexpired errors now pass respond initial/final eligibility; one SQL kind-list addition only. Existing get already returns canonical error conversation. Error status stays open; update/resolve/cancel still refuse errors. Full round-trip regression failed before fix, then SQL75+agentread8=83/83 pass including foreign/closed/expired controls. Build/focusedlint/securityfinalreview PASS. Public docs explain that responding does not close errors.
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2940](https://github.com/raphaeltm/simple-agent-manager/pull/2940).
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
+- 2 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.

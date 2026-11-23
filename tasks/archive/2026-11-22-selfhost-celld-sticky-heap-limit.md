@@ -84,3 +84,9 @@ observability `platform_errors` table. Only the restart cleared it; nothing aler
       cell reports the heap limit repeatedly
 - [x] A repeated heap-limit failure is visible to the operator (admin errors page or a health
       signal), not only as rows
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2980](https://github.com/raphaeltm/simple-agent-manager/pull/2980) (merged 2026-11-22, deployed as `2e22a317f`). The minified-bundle follow-up is idea 01M82BATKM4PS4Z0GGR27QCY1N.
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
+- 1 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.

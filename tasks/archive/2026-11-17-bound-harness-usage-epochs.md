@@ -65,3 +65,9 @@ Real writer regressions reproduced missing disclosure (2 failures,18 controls pa
 Main5e3f31f7 now owns migration0260 lifecycle indexes. This PR's not-yet-deployed admission-marker migration is renamed0261 before integration; upstream migration/history preserved.
 
 Integration review caught a new main consumer: `insights-agent.ts` explicitly projects the three shared reads for MCP. Receipt keeps token metadata intact; its Accounts and Agent setups projections dropped the new optional flags. Both now pass the flags through without changing the existing read-cap flag or privacy-safe projections. Regressions feed actual writer/SQLite results through both adapters: four assertions failed with32 controls passing before the pass-through. The schema migration comment is corrected to0261. Final integrated-head re-review is mandatory; earlier8cb reviews correctly fail this omission.
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2863](https://github.com/raphaeltm/simple-agent-manager/pull/2863) (merged 2026-11-18).
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
+- 2 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.

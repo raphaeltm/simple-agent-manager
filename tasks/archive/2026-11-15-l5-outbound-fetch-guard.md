@@ -88,7 +88,7 @@ The full row was ~45 source files, above the ~30-file cap. Split approved:
 - [x] Full quality suite (CI green on af6abe1d, 12a5c760 and f2e651e9; local check:fast + typecheck on each merge)
 - [x] Reviewers: security-auditor, cloudflare-specialist, architecture-reviewer, performance-reviewer, test-engineer, task-completion-validator (all PASS/ADDRESSED, see below)
 - [x] Staging, on staging2 (`sammy2.party`) under the environment lease: push subscribe + receive; agent sign-in via workload identity; deployment-release image resolve (public image + refused registries); `check_dns_status`; credential with custom public base URL saved + refused private hosts; cleanup. One partial gap: the made-up-key session never showed the upstream answer (see Staging evidence)
-- [ ] PR ready (not merged), CodeRabbit requested and waited
+- [x] PR ready (not merged), CodeRabbit requested and waited
 
 ## Staging recipe (as planned; superseded, see Staging evidence)
 
@@ -234,3 +234,8 @@ main (v22 / 0241) fails the deploy preflight against. Coordinator moved L5a to s
 - [x] A new unguarded global fetch in Worker source fails lint (RuleTester + probe)
 - [x] Defaults change nothing that works on an existing Cloudflare install (pre-check + reasoning)
 - [x] Nothing self-host-only ships in the Worker
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2751](https://github.com/raphaeltm/simple-agent-manager/pull/2751) (merged 2026-11-16).
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).

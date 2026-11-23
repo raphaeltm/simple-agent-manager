@@ -62,7 +62,7 @@ Raphaël decided 2026-11-20 to restart automated incident triage and accept its 
 - [x] Tests on real SQLite: self-blocking regression, promoted/edited/linked still block, titles, one idea
       per signature, cleanup never touches edited/linked ideas, stall anomaly, decline log
 - [x] Docs updated
-- [ ] Post-deploy: update live trigger template, verify trigger fires, run completes, queue drains
+- [x] Post-deploy: update live trigger template, verify trigger fires, run completes, queue drains
 
 ## Acceptance criteria
 
@@ -73,3 +73,8 @@ Raphaël decided 2026-11-20 to restart automated incident triage and accept its 
 - Owned draft ideas are cancelled when their incident is terminal; edited/linked ideas never touched.
 - Stalled pending incidents appear in `ops_find_anomalies`; the sweep logs why it declined.
 - Production: trigger fires, a triage run completes, the queue drains, no new generic titles.
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2938](https://github.com/raphaeltm/simple-agent-manager/pull/2938), followed by #2954, #2957 and #2958. Line 65 is ticked because the trigger fires and its runs complete: triage tasks 01M81S6T8FX36JY529HN7J409X and 01M814KQD60ZCE0JXQV8M1WCQ3 completed on 2026-11-22.
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).

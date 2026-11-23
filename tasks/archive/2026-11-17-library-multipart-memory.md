@@ -70,3 +70,9 @@ Re-review (fresh security-auditor on c0f23010): PASS, with one MEDIUM. A 64 KiB 
 - Every reservation now adds 256 KiB of fixed overhead (`LIBRARY_MEMORY_TRANSFER_OVERHEAD_BYTES`). That caps concurrency at about 200, and each transfer peaks at no more than twice its reservation.
 - From the LOW findings: the Download route now reserves the stored size, after a `getFile` (+1 D1 read; GET download stays within the 8 round-trip budget).
 - The weak download-reservation test now asserts that the budget stays held.
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2874](https://github.com/raphaeltm/simple-agent-manager/pull/2874) (merged 2026-11-18).
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
+- 3 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.

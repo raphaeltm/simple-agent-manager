@@ -59,3 +59,9 @@ up to a UTF-8 rune boundary while retaining its existing byte width. Regression 
 all3 examples before the guard and passes after it. No transport/JSON behavior changed.
 CodeRabbit review5944517877 requested full release-template sections; populated honestly
 with staging and exact-head CI pending. Its approval5944519326 does not waive those gates.
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2864](https://github.com/raphaeltm/simple-agent-manager/pull/2864) (merged 2026-11-18).
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
+- 5 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.

@@ -131,7 +131,7 @@ Remaining narrower verification, per task author:
 - [ ] Identify the full-list capture failure step and reproduce locally with at least3500 logical chunks/~18k assistant characters plus a tool group, card and system row; fix and review without weakening equality. Measure375/1280 capture duration.
 - [ ] Budget25-second reply stability plus measured UI phase before work stop; begin the last prompt early enough. An ended short Instant first reply should lead promptly to an ordinary long-reply user follow-up while ON.
 - [ ] New coordinated window: VM ON long/full verification, strict VM deletion, Instant ON long/full verification through an immediate ordinary follow-up when needed, then Instant OFF long/stored reload and UI regression proof for the default-OFF path. Only VM OFF need not be repeated; account for the25-second stability wait and measured full UI phase for all three runs before requesting a slot.
-- [ ] After those gates pass, open the PR with merging defaultOFF, complete CI/review/release and read-only production usage monitoring.
+- [x] After those gates pass, open the PR with merging defaultOFF, complete CI/review/release and read-only production usage monitoring.
 
 The task author corrected the narrower plan: Instant OFF remains required because production first runs the new build with merging OFF. Current modes: VM OFF stored reload/streaming/baseline met (window three; full-list harness failures remain recorded); VM ON storage/append/saving met, full UI NOT MET; Instant ON merging observed, complete verification NOT MET; Instant OFF unrun. No new slot request until all three future live runs and their measured tail budgets fit the fixed40-minute allocation window.
 
@@ -236,3 +236,10 @@ The expanded final five-file workerd selection first reported53 passes and one s
 ### PR CI corrections (2026-11-15)
 
 PR #2760 initially failed AST SQL quality validation on a conditional, constant-only query suffix. Replaced it with two fixed parameterized queries, retaining the existing optional-session truthiness and sealing behavior. The secret scan also rejected three already-reviewed synthetic fixtures shifted four lines by the legacy-storage fixture registration; verified their complete matched spans are byte-identical to current main and their prior line-specific fingerprints are already reviewed, then added only the three exact shifted fingerprints with the original expiry. No credential values changed or were exposed. Focused independent storage/security rereview passed; local AST checks, file-size enforcement, package lint, clean committed-tree secret scan (43 reviewed, zero new), and the real-workerd suite (54/54) passed. The unrelated local credential configuration remains uncommitted.
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped switched off by default in [#2760](https://github.com/raphaeltm/simple-agent-manager/pull/2760) (2026-11-15), with telemetry in [#2773](https://github.com/raphaeltm/simple-agent-manager/pull/2773) (2026-11-16). `DEFAULT_MESSAGE_MERGE_CONFIG.enabled` is still `false` (`packages/project-data/src/do/message-stream-ingest.ts`). The owning SAM task (01M7E19YHSJ73896Q84ASSGFDN) was cancelled on 2026-11-23.
+- STILL OPEN and unowned: Raphaël's Admin UI activation in production, a two-hour read-only row-usage observation against the 26.4 rows/call baseline, then a separate default-ON PR. The same switch-on covers `toolUpdatesEnabled` from #2835. Moved back to backlog. Idea 01M7CX61WVX72T7CFQNRTX0DVM.
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
+- 9 line(s) stay unticked. They are verification or reporting steps that were not re-checked here; this record does not claim them.

@@ -110,3 +110,8 @@ This verifies the provisioning mechanism, not the reporter's live disk measureme
   pinned by `infomaniak-boot-volume.test.ts`; M3 static capacity map left as a static default.
 - security-auditor: no CRITICAL/HIGH. L1 read-back bound and L3 non-throwing construction fixed;
   M1/M2/M3 deferred to the backlog file (M1 matches existing GCP behaviour; M3 is pre-existing).
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Shipped in [#2854](https://github.com/raphaeltm/simple-agent-manager/pull/2854) (merged 2026-11-17).
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).

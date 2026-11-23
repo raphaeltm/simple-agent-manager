@@ -79,3 +79,8 @@ by DNS-01 through Cloud DNS right after the upgrade.
 - [x] Temporary GCP objects reverted: `sam-box-presign` service account deleted, its bucket IAM
       binding removed, my temporary `roles/storage.hmacKeyAdmin` removed.
 - [x] Temporary SSH key metadata and firewall rule `sam-smoke-ssh-esfk19` removed; box scratch removed.
+
+## Reconciliation (2026-11-23, weekly queue reconciliation)
+
+- Recorded in [#2979](https://github.com/raphaeltm/simple-agent-manager/pull/2979) (merged 2026-11-22).
+- Production deploys from `main` have succeeded continuously since then (latest `7d40cfb2d`, 2026-11-23).
