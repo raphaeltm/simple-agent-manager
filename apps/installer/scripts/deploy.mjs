@@ -2,6 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
+import { ApiFailure, createApi, readTarget, SECRET_NAMES, wrangler } from './installer-target.mjs';
+
 // Verified against Cloudflare GET /oauth/scopes on 2026-10-28; the email scopes on
 // 2026-11-08 (email sign-in codes and agent email); the Artifacts scopes on
 // 2026-11-09; cloudflared Write on 2026-11-10. Validate the live
@@ -36,64 +38,19 @@ const FULL_SCOPES = [
   'artifacts.write',
   TUNNEL_SCOPE,
 ];
-const SECRET_NAMES = ['OAUTH_CLIENT_ID', 'OAUTH_CLIENT_SECRET'];
+// Installations build SAM from this repository (src/source-policy.ts), so the pinned
+// commit must exist there, and its releases carry the prebuilt artifacts.
+const UPSTREAM_REPOSITORY = 'raphaeltm/simple-agent-manager';
+const DEFAULT_ARTIFACT_BASE_URL = `https://github.com/${UPSTREAM_REPOSITORY}/releases/latest/download`;
 process.chdir(fileURLToPath(new URL('..', import.meta.url)));
-const token = process.env.CLOUDFLARE_API_TOKEN;
-const account = process.env.CLOUDFLARE_ACCOUNT_ID;
-const domain = process.env.BASE_DOMAIN;
-const environment = process.env.INSTALLER_ENVIRONMENT || 'self-hosted';
+const { token, account, name, base, worker } = readTarget();
+const domain = process.env.BASE_DOMAIN || '';
 const mode = process.env.INSTALLER_MODE || 'preserve';
-if (
-  !token ||
-  !/^[a-f0-9]{32}$/.test(account || '') ||
-  !/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(domain || '')
-)
-  throw new Error('Set deployment token, account ID and a valid BASE_DOMAIN.');
-if (!/^[a-z0-9-]+$/.test(environment) || !['preserve', 'bootstrap', 'full'].includes(mode))
-  throw new Error('Invalid installer environment or mode');
-const name = `sam-installer-${environment}`,
-  origin = `https://install.${domain}`;
-const base = `/accounts/${account}`,
-  worker = `${base}/workers/scripts/${name}`;
-class ApiFailure extends Error {
-  constructor(status, method) {
-    super(
-      `Cloudflare ${method} failed (${status}). Verify the required API permissions. Private response omitted.`
-    );
-    this.status = status;
-  }
-}
-async function api(path, method = 'GET', body) {
-  const oauthApi = path === '/oauth/scopes' || path.startsWith(`${base}/oauth_clients`);
-  const authorization = oauthApi ? process.env.OAUTH_REGISTRATION_TOKEN || token : token;
-  let response, data;
-  try {
-    response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
-      method,
-      headers: { Authorization: `Bearer ${authorization}`, 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(30_000),
-    });
-    data = await response.json();
-  } catch {
-    throw new Error('Cloudflare request could not complete. Private response omitted.');
-  }
-  if (!response.ok || data.success === false) throw new ApiFailure(response.status, method);
-  return data.result;
-}
-function wrangler(args) {
-  const childEnvironment = { ...process.env };
-  for (const key of ['OAUTH_REGISTRATION_TOKEN', ...SECRET_NAMES]) delete childEnvironment[key];
-  const result = spawnSync(
-    process.execPath,
-    [fileURLToPath(new URL('../node_modules/wrangler/bin/wrangler.js', import.meta.url)), ...args],
-    {
-      stdio: 'inherit',
-      env: childEnvironment,
-    }
-  );
-  if (result.status !== 0) throw new Error('Wrangler deployment failed');
-}
+if (domain && !/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(domain))
+  throw new Error('BASE_DOMAIN is not a valid domain.');
+if (!['preserve', 'bootstrap', 'full'].includes(mode)) throw new Error('Invalid installer mode');
+const api = createApi({ token, base, registrationToken: process.env.OAUTH_REGISTRATION_TOKEN });
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const template = JSON.parse(await readFile('wrangler.json', 'utf8'));
 let existing;
 try {
@@ -116,7 +73,10 @@ const existingSecrets = bindings
   .filter((binding) => binding.type === 'secret_text')
   .map((binding) => binding.name);
 const ready = SECRET_NAMES.every((key) => existingSecrets.includes(key));
-const full = mode === 'full' || (mode === 'preserve' && !!currentVars.INSTALL_SOURCE_COMMIT);
+// A fresh installer installs SAM. An existing one keeps its mode unless told otherwise.
+const full =
+  mode === 'full' ||
+  (mode === 'preserve' && (existing ? !!currentVars.INSTALL_SOURCE_COMMIT : true));
 const sameScopes = (left, right) =>
   JSON.stringify([...new Set(left)].sort((a, b) => a.localeCompare(b))) ===
   JSON.stringify([...new Set(right)].sort((a, b) => a.localeCompare(b)));
@@ -140,45 +100,108 @@ const scopes =
       ? FULL_SCOPES
       : template.vars.OAUTH_SCOPES.split(/\s+/);
 const scopesChanged = !sameScopes(scopes, deployedScopes);
-if (full && !/^[a-f0-9]{40}$/.test(process.env.GITHUB_SHA || ''))
-  throw new Error('Full installer mode requires the exact immutable GITHUB_SHA');
+// With BASE_DOMAIN the installer is served at install.<domain>. Without it, an existing
+// installer keeps its address and a new one uses the account's workers.dev address, which
+// needs no zone permissions and leaves no DNS record or route behind.
+async function resolveOrigin() {
+  if (domain) return `https://install.${domain}`;
+  if (existing && /^https:\/\/[a-z0-9.-]+$/.test(currentVars.APP_ORIGIN || ''))
+    return currentVars.APP_ORIGIN;
+  let subdomain;
+  try {
+    subdomain = (await api(`${base}/workers/subdomain`))?.subdomain;
+  } catch (error) {
+    if (!(error instanceof ApiFailure) || error.status !== 404) throw error;
+  }
+  if (typeof subdomain !== 'string' || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(subdomain))
+    throw new Error(
+      'This account has no workers.dev address yet. Open Workers & Pages in the Cloudflare dashboard once to create it, or set BASE_DOMAIN to serve the installer at install.<your domain>.'
+    );
+  return `https://${name}.${subdomain}.workers.dev`;
+}
+const origin = await resolveOrigin();
+const host = new URL(origin).hostname;
+const workersDev = host.endsWith('.workers.dev');
+if (!workersDev && !host.startsWith('install.'))
+  throw new Error('The deployed installer address is not supported; set BASE_DOMAIN.');
+const zone = host.slice('install.'.length);
+function checkedOutCommit() {
+  const result = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' });
+  return result.status === 0 ? String(result.stdout || '').trim() : '';
+}
+const revision = process.env.GITHUB_SHA || checkedOutCommit();
+// The installation service builds exactly this commit from the upstream repository.
+async function resolveSourceCommit() {
+  if (!revision)
+    throw new Error(
+      'Could not read the checked-out commit. Run this from a git checkout of SAM, or set GITHUB_SHA to the commit to install.'
+    );
+  if (!/^[a-f0-9]{40}$/.test(revision))
+    throw new Error('Full installer mode requires the exact immutable GITHUB_SHA');
+  let response;
+  try {
+    response = await fetch(
+      `https://raw.githubusercontent.com/${UPSTREAM_REPOSITORY}/${revision}/scripts/deploy/installer-protocol.json`,
+      { method: 'HEAD', signal: AbortSignal.timeout(15_000) }
+    );
+  } catch {
+    throw new Error(`Could not check commit ${revision} against ${UPSTREAM_REPOSITORY}. Retry.`);
+  }
+  if (response.status === 404)
+    throw new Error(
+      `Commit ${revision} is not in ${UPSTREAM_REPOSITORY}. Installations build SAM from that repository, so check out a released version (git checkout <release tag>) and run again.`
+    );
+  if (!response.ok)
+    throw new Error(
+      `Could not check commit ${revision} against ${UPSTREAM_REPOSITORY} (${response.status}). Retry.`
+    );
+  return revision;
+}
+const sourceCommit = full ? await resolveSourceCommit() : undefined;
 const config = {
   ...template,
   name,
   account_id: account,
-  workers_dev: false,
-  routes: [
-    { pattern: `install.${domain}`, custom_domain: true },
-    { pattern: `install.${domain}/*`, zone_name: domain },
-  ],
+  workers_dev: workersDev,
+  preview_urls: false,
+  ...(workersDev
+    ? {}
+    : {
+        routes: [
+          { pattern: `install.${zone}`, custom_domain: true },
+          { pattern: `install.${zone}/*`, zone_name: zone },
+        ],
+      }),
   vars: {
     ...template.vars,
     ...currentVars,
     APP_ORIGIN: origin,
-    BUILD_SHA: process.env.GITHUB_SHA || 'self-hosted',
+    BUILD_SHA: revision || 'self-hosted',
     OAUTH_SCOPES: scopes.join(' '),
   },
 };
-if (full) config.vars.INSTALL_SOURCE_COMMIT = process.env.GITHUB_SHA;
+if (sourceCommit) config.vars.INSTALL_SOURCE_COMMIT = sourceCommit;
 else delete config.vars.INSTALL_SOURCE_COMMIT;
 config.vars.SOURCE_URL =
   process.env.SOURCE_URL ||
   template.vars.SOURCE_URL.replace(
     '/tree/main/',
-    /^[a-f0-9]{40}$/.test(process.env.GITHUB_SHA || '')
-      ? `/tree/${process.env.GITHUB_SHA}/`
-      : '/tree/main/'
+    /^[a-f0-9]{40}$/.test(revision) ? `/tree/${revision}/` : '/tree/main/'
   );
 config.vars.DOCS_URL = process.env.DOCS_URL || template.vars.DOCS_URL;
-// Prebuilt installation artifacts (for example a release download URL). Unset keeps
-// whatever the deployed installer already has; installations build without one.
-if (process.env.ARTIFACT_BASE_URL) {
-  if (!/^https:\/\/[^\s?#@]{1,500}$/.test(process.env.ARTIFACT_BASE_URL))
+// Prebuilt installation artifacts. An explicit URL wins, then whatever the deployed
+// installer already has, then SAM's latest release. "none" always builds from source.
+// Anything missing or mismatched at that URL is built instead (installer-engine-prebuilt.ts).
+const artifactBaseUrl = process.env.ARTIFACT_BASE_URL;
+if (artifactBaseUrl === 'none') delete config.vars.ARTIFACT_BASE_URL;
+else if (artifactBaseUrl) {
+  if (!/^https:\/\/[^\s?#@]{1,500}$/.test(artifactBaseUrl))
     throw new Error(
       'ARTIFACT_BASE_URL must be an https URL without credentials, query or fragment'
     );
-  config.vars.ARTIFACT_BASE_URL = process.env.ARTIFACT_BASE_URL;
-}
+  config.vars.ARTIFACT_BASE_URL = artifactBaseUrl;
+} else if (!config.vars.ARTIFACT_BASE_URL)
+  config.vars.ARTIFACT_BASE_URL = DEFAULT_ARTIFACT_BASE_URL;
 const explicitCredentials = !!(process.env.OAUTH_CLIENT_ID || process.env.OAUTH_CLIENT_SECRET);
 const reuseReadyConfiguration = !!existing && ready && !scopesChanged && !explicitCredentials;
 async function findOAuthClient(clientId) {
@@ -269,11 +292,30 @@ async function prepareOAuth({ deferMutation = false } = {}) {
 const preflight = !reuseReadyConfiguration && (full || (!!existing && scopesChanged));
 let credentials;
 if (preflight) credentials = await prepareOAuth({ deferMutation: !existing });
+// Cloudflare fetches the client's logo and policy URLs when a client is created, and a
+// first publish can take a moment to answer. Best effort: registration reports its own failure.
+async function waitUntilServed() {
+  const deadline = Date.now() + Number(process.env.INSTALLER_LIVE_TIMEOUT_MS || 60000);
+  for (;;) {
+    try {
+      const response = await fetch(`${origin}/health`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(5000),
+      });
+      if (response.ok) return;
+    } catch {
+      // Not answering yet.
+    }
+    if (Date.now() >= deadline) return;
+    await sleep(Number(process.env.INSTALLER_LIVE_POLL_MS || 2000));
+  }
+}
 const generated = '.wrangler-deploy.json';
 await writeFile(generated, JSON.stringify(config, null, 2), { mode: 0o600 });
 try {
   wrangler(['deploy', '--config', generated]);
   if (!reuseReadyConfiguration) {
+    if (!credentials) await waitUntilServed();
     credentials ||= await prepareOAuth();
     for (const [key, value] of Object.entries(credentials))
       if (value)
@@ -287,12 +329,16 @@ try {
     if (SECRET_NAMES.every((key) => secrets.some((entry) => entry.name === key))) break;
     if (Date.now() >= visibleBy)
       throw new Error('OAuth secret missing after deployment; readiness was not established');
-    await new Promise((resolve) =>
-      setTimeout(resolve, Number(process.env.OAUTH_SECRETS_POLL_MS || 2000))
-    );
+    await sleep(Number(process.env.OAUTH_SECRETS_POLL_MS || 2000));
   }
+  console.log(`Installer ready: ${origin}`);
   console.log(
-    `Installer deployed: ${origin}. Mode: ${full ? 'full' : 'bootstrap'}. OAuth visibility was not promoted; public promotion remains a separate owner action.`
+    full
+      ? 'Open that address and select "Sign in with Cloudflare" to install SAM in this account.'
+      : 'This installer is in bootstrap mode and cannot install SAM. Run again with INSTALLER_MODE=full.'
+  );
+  console.log(
+    'Once your installation service is set up, you can remove the installer: pnpm --filter @simple-agent-manager/installer run remove'
   );
 } finally {
   await unlink(generated).catch(() => {});

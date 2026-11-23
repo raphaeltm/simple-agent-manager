@@ -7,6 +7,7 @@
     "dev": "node scripts/build-scene.mjs && wrangler dev",
     "build": "node scripts/build-scene.mjs && wrangler deploy --dry-run --outdir dist",
     "deploy": "node scripts/build-scene.mjs && node scripts/deploy.mjs",
+    "remove": "node scripts/remove.mjs",
     "typecheck": "node scripts/build-scene.mjs && astro check --tsconfig tsconfig.astro.json && tsc --noEmit",
     "lint": "node scripts/build-scene.mjs && eslint 'src/**/*.{ts,astro}' 'tests/**/*.ts'",
     "test": "node scripts/build-scene.mjs && vitest run",
