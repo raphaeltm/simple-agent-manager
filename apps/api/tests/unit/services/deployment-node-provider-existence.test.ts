@@ -166,12 +166,14 @@ function createFakeHetzner() {
 }
 
 /** GCP Compute fake for the self-host box path: zonal GET plus the aggregated list. */
-function createFakeGcp(project: string, zone: string) {
+function createFakeGcp(project: string, defaultZone: string) {
+  /** name -> instance; each instance carries its own zone and labels. */
   const instances = new Map<string, Record<string, unknown>>();
   const state = {
     unreachableZone: undefined as string | undefined,
     forcedStatus: undefined as number | undefined,
   };
+  const zoneOf = (i: Record<string, unknown>) => String(i.zone).replace(/^zones\//, '');
   async function handle(url: URL, init?: RequestInit): Promise<Response> {
     const method = (init?.method ?? 'GET').toUpperCase();
     const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
@@ -183,9 +185,19 @@ function createFakeGcp(project: string, zone: string) {
     }
     const base = `/compute/v1/projects/${project}`;
     if (url.pathname === `${base}/aggregated/instances`) {
-      const items: Record<string, unknown> = {
-        [`zones/${zone}`]: { instances: [...instances.values()] },
-      };
+      // Honour the documented `labels.<key>=<value>` filter SAM sends.
+      const filter = url.searchParams.get('filter') ?? '';
+      const wanted = [...filter.matchAll(/labels\.([a-z0-9_-]+)=([a-z0-9_-]+)/g)];
+      const items: Record<string, { instances: Record<string, unknown>[] } | object> = {};
+      for (const instance of instances.values()) {
+        const labels = (instance.labels ?? {}) as Record<string, string>;
+        if (!wanted.every(([, k, v]) => labels[k!] === v)) continue;
+        const key = `zones/${zoneOf(instance)}`;
+        const scope = (items[key] ?? { instances: [] }) as { instances: Record<string, unknown>[] };
+        scope.instances.push(instance);
+        items[key] = scope;
+      }
+      if (Object.keys(items).length === 0) items[`zones/${defaultZone}`] = { instances: [] };
       if (state.unreachableZone) {
         items[`zones/${state.unreachableZone}`] = {
           warning: { code: 'UNREACHABLE', message: 'zone unavailable' },
@@ -195,11 +207,12 @@ function createFakeGcp(project: string, zone: string) {
     }
     const zonal = new RegExp(`^${base}/zones/([^/]+)/instances/([^/]+)$`).exec(url.pathname);
     if (zonal) {
-      const instance = zonal[1] === zone ? instances.get(zonal[2]!) : undefined;
+      const candidate = instances.get(zonal[2]!);
+      const instance = candidate && zoneOf(candidate) === zonal[1] ? candidate : undefined;
       if (!instance) return json({ error: { code: 404, message: 'not found' } }, 404);
       if (method === 'DELETE') {
         instances.delete(zonal[2]!);
-        return json({ name: 'op-1', status: 'DONE', zone });
+        return json({ name: 'op-1', status: 'DONE', zone: zonal[1] });
       }
       return json(instance);
     }
@@ -210,7 +223,8 @@ function createFakeGcp(project: string, zone: string) {
     instances,
     state,
     handle,
-    add(name: string) {
+    add(name: string, options: { zone?: string; labels?: Record<string, string> } = {}) {
+      const zone = options.zone ?? defaultZone;
       instances.set(name, {
         id: '9001',
         name,
@@ -218,7 +232,7 @@ function createFakeGcp(project: string, zone: string) {
         status: 'RUNNING',
         creationTimestamp: '2026-11-20T00:00:00Z',
         machineType: `zones/${zone}/machineTypes/e2-standard-2`,
-        labels: { 'sam-managed': 'true' },
+        labels: options.labels ?? { 'sam-managed': 'true' },
         networkInterfaces: [{ accessConfigs: [{ natIP: IP }] }],
       });
     },
@@ -719,6 +733,26 @@ describe('self-host box: a GCP deployment node behind the reverse tunnel', () =>
     expect(envRow()).toMatchObject({ status: 'active', node_id: BOX_NODE });
   });
 
+  it("keeps a live VM in a zone outside SAM's list whose SAM label was removed", async () => {
+    // The box runs in us-east4-c; someone stripped the sam-managed label. The fixed zone list
+    // and the label-filtered project-wide list both miss it; its own zone does not.
+    sqlite.prepare("UPDATE nodes SET vm_location = 'us-east4-c' WHERE id = ?").run(BOX_NODE);
+    gcp.add(BOX_NODE, { zone: 'us-east4-c', labels: {} });
+    for (let minute = 0; minute <= 60; minute += 10) await sweepAt(minute);
+    expect(nodeRow(BOX_NODE)).toMatchObject({
+      status: 'running',
+      provider_absence_observed_at: null,
+    });
+    expect(envRow()).toMatchObject({ status: 'active', node_id: BOX_NODE });
+  });
+
+  it("releases a VM in a zone outside SAM's list once its own zone confirms it gone", async () => {
+    sqlite.prepare("UPDATE nodes SET vm_location = 'us-east4-c' WHERE id = ?").run(BOX_NODE);
+    await sweepAt(0);
+    expect((await sweepAt(10)).released).toBe(1);
+    expect(nodeRow(BOX_NODE).status).toBe('deleted');
+  });
+
   it('keeps the node when a zone of the project-wide list is unreachable', async () => {
     gcp.state.unreachableZone = 'us-central1-b';
     for (let minute = 0; minute <= 60; minute += 10) await sweepAt(minute);
@@ -798,5 +832,31 @@ describe('a region-bound provider client (Infomaniak)', () => {
     expect((await sweepAt(10)).released).toBe(1);
     expect(nodeRow(INF_NODE).status).toBe('deleted');
     expect(provider.listVMs).toHaveBeenCalled();
+  });
+});
+
+describe('providers whose lookups cannot prove absence', () => {
+  it('never probes or releases a Scaleway node', async () => {
+    const SCW_NODE = 'scw-server-1';
+    sqlite.prepare('DELETE FROM deployment_environments').run();
+    sqlite.prepare('DELETE FROM nodes').run();
+    await seedNode(SCW_NODE, { cloudProvider: 'scaleway', vmLocation: 'fr-par-1' });
+    await seedEnvironment(ENV_ID, SCW_NODE);
+    // Scaleway's lookups read a 404 from every zone as "nothing there", as this stub does.
+    const provider = {
+      name: 'scaleway',
+      defaultLocation: 'fr-par-1',
+      locations: ['fr-par-1'],
+      getVM: vi.fn(async () => null),
+      listVMs: vi.fn(async () => []),
+    };
+    accounts.build = () => provider;
+    for (let minute = 0; minute <= 60; minute += 10) await sweepAt(minute);
+    expect(nodeRow(SCW_NODE)).toMatchObject({ status: 'running' });
+    expect(provider.getVM).not.toHaveBeenCalled();
+    expect(decisions(SCW_NODE)).toContainEqual({
+      decision: 'provider_check_inconclusive',
+      reason: 'provider_unsupported',
+    });
   });
 });

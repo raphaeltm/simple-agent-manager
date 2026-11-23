@@ -337,6 +337,17 @@ export class GcpProvider implements Provider {
     return gcpInstanceToVM(instance);
   }
 
+  async getVMInLocation(
+    id: string,
+    location: string,
+    context?: ProviderRequestContext
+  ): Promise<VMInstance | null> {
+    throwIfProviderRequestAborted(context);
+    // One zonal GET (accepts the instance name or numeric ID); a 404 there is the only null.
+    const instance = await getGcpInstanceInZone(this.api, location, id, context);
+    return instance ? gcpInstanceToVM(instance) : null;
+  }
+
   async getObservedVM(id: string, context?: ProviderRequestContext): Promise<VMInstance | null> {
     throwIfProviderRequestAborted(context);
     const instance = await this.findInstanceByIdOrName(id, context);

@@ -10,8 +10,9 @@
  * decryption happens either). Every provider's `getVM` returns null only for its API's "not found" (Hetzner, Vultr,
  * DigitalOcean and Infomaniak a 404 on the instance; Scaleway a 404 in every zone; UpCloud its
  * not-found code; GCP a 404 in every zone and no match in a project-wide list whose every zone
- * answered) and throws on everything else. GCP and Scaleway search a fixed zone list, so a node
- * recorded outside it is never proven absent.
+ * answered, plus an unfiltered GET in the node's own zone) and throws on everything else.
+ * Scaleway is never proven absent (`ABSENCE_UNPROVABLE_PROVIDERS`); an Infomaniak node outside its
+ * client's region is never proven absent (`lookupCoveredLocations`).
  *
  * The confirming probe also reads the account's full instance list (`confirmAbsentFromInventory`).
  *
@@ -37,6 +38,7 @@ export type ProviderExistenceInconclusiveReason =
   | 'credential_unresolved'
   | 'credential_not_pinned'
   | 'location_not_covered'
+  | 'provider_unsupported'
   | 'inventory_unavailable'
   | 'credential_rejected'
   | 'rate_limited'
@@ -54,17 +56,21 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * Where a provider's `getVM` can see an instance, for providers whose client reads only some
- * locations. Infomaniak's client is bound to one region (OpenStack servers are regional; a server
- * in another region is a 404 there, and `createVM` refuses any other region). Scaleway reads its
- * configured zone plus `SCALEWAY_LOCATIONS`. GCP is absent on purpose: after the per-zone GETs it
- * reads the project-wide list, which fails closed when any zone is unreachable, so every zone is
- * covered for SAM-labelled VMs (box nodes run in whatever zone the box is configured for). Hetzner,
- * DigitalOcean, Vultr and UpCloud look an instance up by ID account-wide.
+ * Providers whose lookups cannot prove absence. Scaleway's `getVM` and `listVMs` both treat a 404
+ * from any zone as "nothing there", so a fault that makes every request 404 (a wrong base URL, a
+ * proxy) would read every node as gone in both sources at once. Its nodes are never released
+ * here (tracked in tasks/backlog/2026-11-23-unpinned-deployment-nodes-provider-existence.md).
+ */
+const ABSENCE_UNPROVABLE_PROVIDERS: ReadonlySet<string> = new Set(['scaleway']);
+
+/**
+ * Where a region-bound client can see an instance. Infomaniak's client reads one region
+ * (OpenStack servers are regional; a server in another region is a 404 there, and `createVM`
+ * refuses any other region). Hetzner, DigitalOcean, Vultr and UpCloud look an instance up by ID
+ * account-wide. GCP is handled by an exact lookup in the node's own zone (`getVMInLocation`).
  */
 function lookupCoveredLocations(provider: Provider): readonly string[] | null {
   if (provider.name === 'infomaniak') return [provider.defaultLocation];
-  if (provider.name === 'scaleway') return [provider.defaultLocation, ...provider.locations];
   return null;
 }
 
@@ -130,6 +136,13 @@ export async function probeDeploymentNodeInstance(
     };
   }
   const provider = pinned.provider;
+  if (ABSENCE_UNPROVABLE_PROVIDERS.has(provider.name)) {
+    return {
+      kind: 'inconclusive',
+      reason: 'provider_unsupported',
+      message: `${provider.name} lookups cannot prove an instance absent`,
+    };
+  }
   // A VM in a location the lookup does not read is a "not found" there (an Infomaniak region
   // changed in configuration would otherwise read every node as gone).
   const covered = lookupCoveredLocations(provider);
@@ -158,8 +171,45 @@ export async function probeDeploymentNodeInstance(
   // Anything visible under this ID, even an instance that does not look like ours, is "not
   // absent": this check only ever releases on a definitive not-found.
   if (instance !== null) return { kind: 'present' };
+  if (provider.name === 'gcp') {
+    // `getVM` reads a fixed zone list, then a project-wide list filtered on SAM's label. A VM in
+    // another zone (a box's configured zone) whose label was removed is in neither, so the
+    // node's own zone must also answer "not found", unfiltered.
+    const zonal = await lookupInNodeLocation(provider, node, instanceId, signal);
+    if (zonal) return zonal;
+  }
   if (!options.confirming) return { kind: 'absent' };
   return await confirmAbsentFromInventory(provider, instanceId, signal);
+}
+
+/** Present or inconclusive from the node's own location, or null when it too says not found. */
+async function lookupInNodeLocation(
+  provider: Provider,
+  node: NodeRow,
+  instanceId: string,
+  signal: AbortSignal
+): Promise<ProviderExistenceVerdict | null> {
+  if (!provider.getVMInLocation || !node.vmLocation) {
+    return {
+      kind: 'inconclusive',
+      reason: 'location_not_covered',
+      message: 'the node has no recorded location to look the instance up in',
+    };
+  }
+  try {
+    const instance = await provider.getVMInLocation(instanceId, node.vmLocation, { signal });
+    if (instance !== null) return { kind: 'present' };
+  } catch (error) {
+    return {
+      kind: 'inconclusive',
+      reason: classifyProviderLookupFailure(error, signal),
+      message: errorMessage(error),
+    };
+  }
+  if (signal.aborted) {
+    return { kind: 'inconclusive', reason: 'timeout', message: 'lookup finished after deadline' };
+  }
+  return null;
 }
 
 /**

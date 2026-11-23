@@ -983,6 +983,29 @@ describe('GcpProvider', () => {
       expect(await provider.getVM('missing-id')).toBeNull();
     });
 
+    it('getVMInLocation reads exactly the given zone, unfiltered, and returns null only on its 404', async () => {
+      const urls: string[] = [];
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        urls.push(url);
+        if (url.endsWith('/zones/us-east4-c/instances/vm-unlabelled')) {
+          return new Response(JSON.stringify(gcpInstance({ id: '77', name: 'vm-unlabelled' })));
+        }
+        return new Response(JSON.stringify({ error: { message: 'Not found' } }), { status: 404 });
+      });
+      expect((await provider.getVMInLocation('vm-unlabelled', 'us-east4-c'))?.name).toBe(
+        'vm-unlabelled'
+      );
+      expect(await provider.getVMInLocation('vm-unlabelled', 'us-east4-b')).toBeNull();
+      expect(urls.every((url) => !url.includes('/aggregated/'))).toBe(true);
+      globalThis.fetch = vi
+        .fn()
+        .mockImplementation(
+          async () =>
+            new Response(JSON.stringify({ error: { message: 'denied' } }), { status: 403 })
+        );
+      await expect(provider.getVMInLocation('vm-unlabelled', 'us-east4-c')).rejects.toThrow();
+    });
+
     it('follows aggregated nextPageToken for numeric-ID lookup', async () => {
       globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
         if (url.includes('/aggregated/instances')) {
