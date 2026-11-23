@@ -325,7 +325,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       });
     }
 
-    await upsertReleaseRouteRecords(routes, node, c.env);
+    await upsertReleaseRouteRecords(routes, node, c.env, nodeId);
   } else {
     const manifest = JSON.parse(release.manifest);
 
@@ -336,7 +336,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
     });
 
-    await upsertReleaseRouteRecords(routes, node, c.env);
+    await upsertReleaseRouteRecords(routes, node, c.env, nodeId);
 
     // Resolve secret references — inject decrypted values for the node
     const secretNames = collectSecretNames(manifest);

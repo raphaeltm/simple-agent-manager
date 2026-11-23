@@ -194,6 +194,47 @@ export async function findBoxARecordsByName(
   return matches;
 }
 
+/**
+ * One page (1-based, ordered by name) of the A records whose name ends in `nameSuffix`, and
+ * optionally whose content is `content`: the box side of the app-route DNS reconciliation list
+ * (`services/dns-app-route-inventory.ts`). The suffix is compared with `substr`, not `LIKE`, so
+ * no character in it is a wildcard.
+ */
+export async function listBoxARecords(
+  filter: { nameSuffix: string; content?: string; page: number; perPage: number },
+  env: BoxDnsEnv
+): Promise<{ records: BoxDnsRecordMatch[]; rowCount: number }> {
+  const suffix = filter.nameSuffix.trim().toLowerCase();
+  if (!suffix) throw new BoxDnsRecordError('A record list needs a name suffix');
+  const perPage = Math.max(1, Math.floor(filter.perPage));
+  const offset = (Math.max(1, Math.floor(filter.page)) - 1) * perPage;
+  const result = await env.DATABASE.prepare(
+    `SELECT id, name, type, content FROM selfhost_dns_records
+     WHERE type = ? AND length(name) > length(?) AND substr(name, -length(?)) = ?
+       AND (? IS NULL OR content = ?)
+     ORDER BY name, id LIMIT ? OFFSET ?`
+  )
+    .bind(
+      BOX_DNS_RECORD_TYPE,
+      suffix,
+      suffix,
+      suffix,
+      filter.content ?? null,
+      filter.content ?? null,
+      perPage,
+      offset
+    )
+    .all();
+  const rows = result.results ?? [];
+  const records: BoxDnsRecordMatch[] = [];
+  for (const row of rows) {
+    const record = parseRecordRow(row, 'list_by_suffix');
+    if (record) records.push({ ...record, proxied: false });
+  }
+  // The raw row count: a malformed row dropped above must not make a full page look like the last.
+  return { records, rowCount: rows.length };
+}
+
 export interface BoxDnsRecord {
   id: string;
   name: string;

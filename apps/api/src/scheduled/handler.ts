@@ -15,7 +15,6 @@ import { runInboxAutomationErrorSweep } from '../services/inbox/automation-error
 import { runInboxAskSweep } from '../services/inbox/sweep';
 import { runInboxSystemErrorSweep } from '../services/inbox/system-errors';
 import { runLifecycleLatencyWatchdog } from '../services/lifecycle-latency';
-import { runNodeTunnelCleanupSweep } from '../services/node-tunnel-cleanup';
 import { isOperationalLoopEnabled } from '../services/operational-kill-switch';
 import { runRuntimeSecretRequestSweep } from '../services/runtime-secret-request-maintenance';
 import { checkProvisioningTimeouts } from '../services/timeout';
@@ -28,12 +27,11 @@ import { runComputeUsageCleanup } from './compute-usage-cleanup';
 import { runCronTriggerSweep } from './cron-triggers';
 import { runScheduledDeploymentReleaseRetention } from './d1-retention';
 import { DAILY_CRON, scheduleDailyJobs } from './daily-jobs';
-import { runDeploymentNodeCleanup } from './deployment-node-cleanup';
 import { runDeploymentPublishJobSweep } from './deployment-publish-jobs';
 import { notifyFailedSweeps } from './failed-sweep-notifications';
 import { runIncidentTriggerSweep } from './incident-triggers';
 import { reportIsolateHeapLimitFailures } from './isolate-heap-limit';
-import { runNodeCleanupSweep } from './node-cleanup';
+import { runNodeTeardownSweeps } from './node-teardown-sweeps';
 import { runObservabilityPurge } from './observability-purge';
 import {
   isHourlyPlatformMaintenanceCron,
@@ -50,7 +48,6 @@ import { runDeadWakeClaimReconciliation } from './session-wake-claim-reconciliat
 import { runSetupSessionSweep } from './setup-session-sweep';
 import { recoverStuckTasks } from './stuck-tasks';
 import { createSweepIsolator } from './sweep-isolation';
-import { runTerminalNodeLifecycleRepair } from './terminal-node-lifecycle-repair';
 import { runTerminalSessionLedgerReconciliation } from './terminal-session-ledger-reconciliation';
 import { runTriggerExecutionCleanup } from './trigger-execution-cleanup';
 import { runWorkspaceEvictionRecovery } from './workspace-eviction-recovery';
@@ -124,18 +121,8 @@ export async function scheduled(
   const deadWakeClaims = await sweeps.isolate('dead_wake_claim_reconciliation', () =>
     runDeadWakeClaimReconciliation(env, ctx.waitUntil.bind(ctx))
   );
-  const nodeCleanup = await sweeps.isolate('node_cleanup', () => runNodeCleanupSweep(env));
-  await sweeps.isolate('deployment_node_cleanup', () =>
-    runDeploymentNodeCleanup(env, ctx.waitUntil.bind(ctx))
-  );
-  const terminalNodeLifecycleRepair = await sweeps.isolate('terminal_node_lifecycle_repair', () =>
-    runTerminalNodeLifecycleRepair(env)
-  );
-  // After node teardown: releases tunnels of incarnations torn down this tick and retries
-  // any pending Cloudflare tunnel/DNS deletion (services/node-tunnel-cleanup.ts).
-  const nodeTunnelCleanup = await sweeps.isolate('node_tunnel_cleanup', () =>
-    runNodeTunnelCleanupSweep(env)
-  );
+  const { nodeCleanup, terminalNodeLifecycleRepair, nodeTunnelCleanup } =
+    await runNodeTeardownSweeps(sweeps, env, ctx.waitUntil.bind(ctx));
   let providerOrphans: Awaited<ReturnType<typeof runProviderOrphanReconciliation>> | undefined;
   await sweeps.isolate('provider_orphan_reconciliation', async () => {
     const result = await runProviderOrphanReconciliation(env);
