@@ -437,7 +437,8 @@ describe('a box from before the head', () => {
   it('deploys the newest bundle by date, as before, then records the head on both sides', async () => {
     const stateA = join(dir, 'box-a/.state');
     const envA = boxEnv(stateA);
-    const { withValue } = await sealThenRollClockBack(stateA, envA);
+    const { withValue, unset } = await sealThenRollClockBack(stateA, envA);
+    const unsetId = unset.bundleId;
     // Without a head (the box and its bucket before this change) the date decides.
     rmSync(headPath(stateA));
     rmSync(bucketHeadPath());
@@ -456,7 +457,19 @@ describe('a box from before the head', () => {
       });
     await expect(rebuild(false)).rejects.toThrow(/no sam-box\/head\.json.*--allow-no-head/s);
     expect(existsSync(bundleDir(stateB))).toBe(false);
+    // A rebuild that stopped part way after copying an (older) head, resumed without one: the
+    // stale local head is removed, so the next deploy picks what this rebuild restored.
+    mkdirSync(join(stateB, 'key-agent'), { recursive: true });
+    writeFileSync(join(stateB, 'key-agent/rebuild-pending'), 'x\n');
+    writeFileSync(
+      headPath(stateB),
+      await sealHead(
+        { seq: 1, bundleId: unsetId, installationId: withValue.installationId },
+        providerOf(stateA, envA)
+      )
+    );
     expect((await rebuild(true)).bundleIds[0]).toBe(withValue.bundleId);
+    expect(existsSync(headPath(stateB))).toBe(false);
     expect(await namedBundle(envA)).toBe(withValue.bundleId);
     expect(existsSync(headPath(stateA))).toBe(false); // a dry run writes nothing
     const out = await deploy(envA, []);

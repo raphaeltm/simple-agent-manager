@@ -231,7 +231,10 @@ export async function runRebuild(input: RebuildInput): Promise<RebuildResult> {
   }
   // The bucket's head, byte for byte: the rebuilt box's deploy picks what the dead box would have,
   // and its next reconcile sees the same write on both sides.
+  // Without one (--allow-no-head), a head an earlier run of this rebuild copied is removed: the
+  // bundle restored here by date must be what the next deploy picks.
   if (headText !== null) await local.writeHead(headText);
+  else await local.removeHead();
   for (const entry of entries ?? []) {
     addResource(recordPath(stateDir), {
       cloud: entry.cloud,
