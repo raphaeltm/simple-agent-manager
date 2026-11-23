@@ -20,6 +20,7 @@ import type { Env } from '../../../src/env';
 import { requestLoggingMiddleware } from '../../../src/middleware/request-logging';
 import { mintHostedGitToken } from '../../../src/selfhost/hosted-git/tokens';
 import { BoxUploadGate } from '../../../src/selfhost/object-urls/gate';
+import { CELLD_CONDITIONAL_PUT_MAX_BYTES } from '../../../src/selfhost/object-urls/route';
 import { installBoxObjectUrls, mountBoxObjectRoute } from '../../../src/selfhost/object-urls';
 import {
   BOX_OBJECT_ROUTE,
@@ -420,6 +421,19 @@ describe('PUT/GET /api/box-objects', () => {
     expect((await putUrl(app, env, url, bytes('other'))).status).toBe(412);
     expect((await putUrl(app, env, url, bytes('first'))).status).toBe(412);
     expect(new TextDecoder().decode(R2.objects.get('k')!.bytes)).toBe('first');
+  });
+
+  it('above celld conditional-put size it checks for an existing object instead of onlyIf', async () => {
+    const { env, R2 } = boxEnv();
+    const app = routeApp();
+    const putSpy = vi.spyOn(R2, 'put');
+    const big = new Uint8Array(CELLD_CONDITIONAL_PUT_MAX_BYTES + 1).fill(7);
+    const url = await upload(env, 'big', { contentLength: big.byteLength });
+    expect((await putUrl(app, env, url, big)).status).toBe(200);
+    expect(putSpy.mock.calls[0]![2]).not.toHaveProperty('onlyIf');
+    expect((await putUrl(app, env, url, big.fill(8))).status).toBe(412);
+    expect(putSpy).toHaveBeenCalledTimes(1);
+    expect(R2.objects.get('big')!.bytes[0]).toBe(7);
   });
 
   it('a retried PUT with a bound sha256 that already succeeded is 200 and replaces nothing', async () => {

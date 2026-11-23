@@ -4,9 +4,12 @@
  * The token (`tokens.ts`) names one R2 key and one operation; nothing in the request can name
  * another. A PUT streams the body into the R2 binding (celld writes it to the fleet bucket without
  * holding it in the isolate), bounded by the token's size and verified against its sha256 when it
- * carries one. The write is create-only (`onlyIf: { etagDoesNotMatch: '*' }`), so a token cannot
- * replace an object once written. A retry of a write that already succeeded answers 200 when the
- * token binds a sha256 the stored object matches (build contexts); otherwise 412.
+ * carries one. The write is create-only, so a token cannot replace an object once written: atomic
+ * (`onlyIf: { etagDoesNotMatch: '*' }`) up to celld's conditional-put size, and above it a check
+ * that no object exists before the write (celld writes larger streams as multipart uploads, whose
+ * completion takes no precondition). The gap that check leaves is only between two uploads with
+ * the same token, which only its holder has. A retry of a write that already succeeded answers 200
+ * when the token binds a sha256 the stored object matches (build contexts); otherwise 412.
  *
  * No SAM session or callback credential is involved: the token is the credential, minted only by
  * routes that already authorized the caller for that key.
@@ -26,6 +29,13 @@ import {
 import { type BoxObjectTokenClaims, verifyBoxObjectToken } from './tokens';
 
 type BoxObjectEnv = Env & BoxUploadGateEnv;
+
+/**
+ * Largest streamed body celld v0.6.3 can write with an `onlyIf` precondition. It refuses one above
+ * this: "celld cannot apply `onlyIf` to a streamed body larger than 8388608 bytes, because it is
+ * written as a multipart upload and a multipart completion takes no precondition" (live test).
+ */
+export const CELLD_CONDITIONAL_PUT_MAX_BYTES = 8 * 1024 * 1024;
 
 function plain(status: number, message: string, headers: Record<string, string> = {}): Response {
   return Response.json({ error: status === 503 ? 'BUSY' : 'BOX_OBJECT_REFUSED', message }, {
@@ -71,6 +81,16 @@ async function sameObject(env: Env, claims: BoxObjectTokenClaims, length: number
   return storedHex === claims.sha;
 }
 
+/** The object already exists: 200 for a provable retry of the same upload, else 412. */
+async function conflict(env: Env, claims: BoxObjectTokenClaims, length: number) {
+  if (await sameObject(env, claims, length)) {
+    log.info('box_objects.upload_replayed', { ...logFields(claims), length });
+    return new Response(null, { status: 200 });
+  }
+  log.warn('box_objects.upload_conflict', { ...logFields(claims), length, action: 'rejected' });
+  return plain(412, 'An object was already written with this URL');
+}
+
 async function put(c: Context<{ Bindings: BoxObjectEnv }>, claims: BoxObjectTokenClaims) {
   const env = c.env;
   const length = Number(c.req.header('content-length'));
@@ -98,12 +118,14 @@ async function put(c: Context<{ Bindings: BoxObjectEnv }>, claims: BoxObjectToke
     });
   }
   try {
+    const atomic = length <= CELLD_CONDITIONAL_PUT_MAX_BYTES;
+    if (!atomic && (await env.R2.head(claims.key))) return conflict(env, claims, length);
     // FixedLengthStream makes a short or long body an error instead of a truncated object.
     const stream = body ? body.pipeThrough(new FixedLengthStream(length)) : new Uint8Array(0);
     let written: R2Object | null;
     try {
       written = await env.R2.put(claims.key, stream, {
-        onlyIf: { etagDoesNotMatch: '*' },
+        ...(atomic ? { onlyIf: { etagDoesNotMatch: '*' } } : {}),
         ...(claims.ct ? { httpMetadata: { contentType: claims.ct } } : {}),
         ...(claims.md ? { customMetadata: claims.md } : {}),
         ...(claims.sha ? { sha256: claims.sha } : {}),
@@ -115,14 +137,7 @@ async function put(c: Context<{ Bindings: BoxObjectEnv }>, claims: BoxObjectToke
         ? plain(400, 'Upload body does not match the declared sha256')
         : plain(502, 'The upload did not complete; retry it');
     }
-    if (!written) {
-      if (await sameObject(env, claims, length)) {
-        log.info('box_objects.upload_replayed', { ...logFields(claims), length });
-        return new Response(null, { status: 200 });
-      }
-      log.warn('box_objects.upload_conflict', { ...logFields(claims), length, action: 'rejected' });
-      return plain(412, 'An object was already written with this URL');
-    }
+    if (!written) return conflict(env, claims, length);
     log.info('box_objects.uploaded', { ...logFields(claims), length });
     return new Response(null, { status: 200, headers: { ETag: written.httpEtag } });
   } finally {
