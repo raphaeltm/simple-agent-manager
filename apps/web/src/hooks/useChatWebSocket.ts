@@ -29,8 +29,8 @@ import {
   type MessageCommentRealtimeEvent,
 } from '../lib/api/comments';
 import { mergeMessages } from '../lib/merge-messages';
-import { parsePlanContent } from '../lib/plan-content';
 import { fetchHistoryUntil } from '../lib/message-paging';
+import { parsePlanContent } from '../lib/plan-content';
 import { parsePromptDeliveryUpdate } from '../lib/prompt-delivery-update';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 
