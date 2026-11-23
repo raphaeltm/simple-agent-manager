@@ -95,9 +95,9 @@ parted upload, which changes the vm-agent client. Deferred to PR B (idea filed i
 - [x] Self-host-only module test: Cloudflare bundle does not import the box signer
 - [x] Docs: `deploy/selfhost/README.md` "Object store and uploads through the box"; static key optional
 - [x] Idea for PR B (parted uploads > 1 GiB, vm-agent URL redaction, 503 retry): `01M83WWQTNTBD4SY1530G3XWH7`
-- [x] Live celld test of the route (`scripts/selfhost/live/box-object-urls.live.test.ts`, 8 cases)
-- [ ] Disposable GCS box proof, no HMAC key: publish → release → app 200; attachment up/down; snapshot
-- [ ] Staging: hosted attachments + compose publish still work
+- [x] Live celld test of the route (`scripts/selfhost/live/box-object-urls.live.test.ts`, 9 cases)
+- [x] Disposable GCS box proof, no HMAC key: publish → release → app 200; attachment up/down; snapshot
+- [x] Staging: hosted attachments + compose publish still work
 
 ## Acceptance criteria
 
@@ -139,3 +139,12 @@ which their GCP VMs were gone; VM `sam-upbox`; firewall `sam-upbox-allow-web`; C
 (sam-upbox-nodes) and `dns.admin` (sam-upbox); service accounts `sam-upbox` and `sam-upbox-nodes`;
 WIF pool `sam-upbox-90he14` (state DELETED); bucket `gs://sam-upbox-fleet-90he14`. The shared box
 `sam-box`, its firewall and the shared `sam-allow-*` rules were not touched.
+
+## Review round 3 (Codex P1, browser 503)
+
+Browser attachment uploads treat a 503 as fatal, so a user uploading more files than
+`boxObjects.maxUploadsPerUploader` lost the extras. The route now waits up to
+`boxObjects.uploadAdmissionWaitSeconds` (default 30, range 0..600) for a slot, checking the gate
+every second, and only then answers 503 with Retry-After (80143b6b1). Unit test proven
+discriminating; live celld test: the fifth concurrent upload is held, then returns 200 when slots
+free. Memory is unchanged: a waiting request holds no gate slot and its body is not read yet.
