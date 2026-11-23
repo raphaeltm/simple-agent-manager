@@ -111,6 +111,7 @@ import {
   type PlatformKeysMode,
   type PlatformKeysResult,
 } from './platform-keys.js';
+import { publishReplaceableLedger, reconcileReplaceableBox } from './replaceable-deploy.js';
 import { assertPrivateFile, ensurePrivateDir, readSecretsFile } from './secret-files.js';
 import {
   buildVmAgentBinaries,
@@ -231,6 +232,8 @@ interface BoxState {
 /** Platform keys, then the files docker compose hands to frps, Caddy and the mail collector. */
 async function prepareBoxState(inputs: DeployInputs): Promise<BoxState> {
   const { box, stateDir, dryRun, init } = inputs;
+  // A replaceable box: its bucket copy matches the box before anything is sealed.
+  if (!dryRun) await reconcileReplaceableBox(box, stateDir, log);
   // Sealed secrets (key-service.ts): the platform keys and secrets.env go into a bundle only the
   // key agent can open, and no secret is passed to celld. legacy-plaintext: platform-keys.json.
   const deployKeys = await resolveBoxKeys({
@@ -262,6 +265,7 @@ async function prepareBoxState(inputs: DeployInputs): Promise<BoxState> {
     return { keys, deployKeys, tunnelSettings, collectorPasswordPath, collectorPassword: null };
   }
   recordInstall(stateDir, inputs.envFile, box, keys.SAM_INSTALLATION_ID);
+  await publishReplaceableLedger(box, stateDir, keys.SAM_INSTALLATION_ID, log);
   log(
     `Compose project: ${expectedComposeProjectFor(box, stateDir, keys.SAM_INSTALLATION_ID)} (set COMPOSE_PROJECT_NAME to this name before starting Docker Compose)`
   );

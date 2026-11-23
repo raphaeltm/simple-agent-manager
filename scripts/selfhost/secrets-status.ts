@@ -24,6 +24,7 @@ import {
   listBundles,
 } from './key-service.js';
 import { PLATFORM_KEYS_FILE } from './platform-keys.js';
+import { replaceableBox } from './replaceable-box.js';
 
 type Box = Readonly<Record<string, string>>;
 
@@ -101,6 +102,13 @@ export async function describeKeyStatus(box: Box, stateDir: string): Promise<str
   lines.push(`bundles: ${bundles.length}`);
   for (const bundle of bundles) {
     lines.push(`  ${bundle.bundleId}  ${bundle.createdAt}  ${bundle.provider} ${bundle.keyRef}`);
+  }
+  // Public; `pnpm selfhost:rebuild --installation-id` takes it (README "Replace a dead box").
+  if (bundles[0]) {
+    lines.push(
+      `installation: ${bundles[0].installationId}` +
+        (replaceableBox(box) ? ' (replaceable: copied to the fleet bucket)' : '')
+    );
   }
   const plaintext = PLAINTEXT_SECRET_FILES.filter((name) => existsSync(join(stateDir, name)));
   if (plaintext.length > 0 && provider !== LEGACY_KEY_PROVIDER) {

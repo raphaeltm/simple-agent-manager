@@ -23,6 +23,12 @@ import {
 import { pingKeyAgent } from '../../deploy/selfhost/key-agent/healthcheck.ts';
 import { generateFileKek } from '../../deploy/selfhost/key-agent/provider-file.ts';
 import { KEY_PROVIDERS, LEGACY_KEY_PROVIDER } from '../../deploy/selfhost/key-agent/providers.ts';
+import {
+  assertReplaceableSetup,
+  fleetBucket,
+  mirroredBundleStore,
+  replaceableBox,
+} from './replaceable-box.js';
 import { ensurePrivateDir, writePrivateFile } from './secret-files.js';
 
 export { LEGACY_KEY_PROVIDER };
@@ -114,6 +120,9 @@ export function keyServiceSettings(box: Box, stateDir: string): KeyServiceSettin
         Object.keys(KEY_PROVIDERS).join(', ')
     );
   }
+  // A replaceable box (replaceable-box.ts) seals only with a key held off it, and copies every
+  // bundle it writes or prunes to the fleet bucket.
+  assertReplaceableSetup(box, provider);
   const dir = join(stateDir, KEY_AGENT_DIR);
   const hostEnv: Record<string, string> = { SAM_KEY_PROVIDER: provider };
   const containerEnv: Record<string, string> = { SAM_KEY_PROVIDER: provider };
@@ -145,7 +154,9 @@ export function keyServiceSettings(box: Box, stateDir: string): KeyServiceSettin
     provider,
     port: keyAgentPort(box),
     dir,
-    bundles: bundleStoreFor(stateDir),
+    bundles: replaceableBox(box)
+      ? mirroredBundleStore(bundleStoreFor(stateDir), fleetBucket(box), stateDir)
+      : bundleStoreFor(stateDir),
     hostEnv,
     containerEnv,
     agentEnv,
