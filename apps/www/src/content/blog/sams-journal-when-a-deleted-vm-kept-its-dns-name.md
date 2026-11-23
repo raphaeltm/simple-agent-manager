@@ -33,7 +33,7 @@ SAM has many ways to release a deployment node: a user stops an environment, a s
 Two choices there matter:
 
 - **It looks records up by IP, not by environment.** It asks Cloudflare's DNS API for A records under `.apps.<domain>` whose content is the node's IP. An environment that was unlinked from the node before teardown still gets its records found.
-- **It fails closed.** If SAM tries to delete a record and the delete fails, the cleanup throws and the node stays in its retryable teardown state. SAM does not retire the node (and forget its IP) while a record it could not delete still points at that IP.
+- **It fails closed.** If SAM tries to delete a record and the delete fails, the cleanup throws and the node stays in its retryable teardown state. SAM does not retire the node (and forget its IP) while a record it could not delete still points at that IP. The one exception is a record SAM cannot judge because its environment row is malformed: that record is logged and left for the sweep, and the node's teardown carries on.
 
 A five-minute cron sweep backs this up. It pages through every app record in the zone and deletes the ones whose node is gone (or repoints one whose environment now runs on a different live node), which also cleans up records left by older code. Names that do not look like SAM app routes are never touched. Both paths ask the same question, using one shared function (source comments trimmed):
 
@@ -82,7 +82,7 @@ flowchart TD
     C -->|Found| P[Present]
     C -->|401, 403, 429, 5xx, timeout| I
     C -->|Provider says not found| D[First absence recorded]
-    D -->|at least 10 minutes later| E{Look up again, then read<br/>the account's full VM list}
+    D -->|after the confirm interval,<br/>10 minutes by default| E{Look up again, then read<br/>the account's full VM list}
     E -->|Found anywhere| P
     E -->|List fails| I
     E -->|Not found, list complete| R[Claim the node, then run the normal<br/>teardown, which deletes the DNS records]
@@ -92,14 +92,14 @@ In plain terms:
 
 - **Only the owning account may answer.** Nodes record the exact credential that created their VM. If a node has no such record (an older node), or that credential was since rotated or re-saved, a "not found" through another one could come from a different account, so the result is inconclusive and the node is never released by this check.
 - **Only a definite "not found" counts.** A refused token, a rate limit, a timeout or a server error proves nothing about the VM.
-- **It has to happen twice.** The second "not found" must come at least ten minutes after the first and no more than three intervals later. A "present" answer in between resets the count.
+- **It has to happen twice.** The second "not found" must come at least one confirmation interval after the first (ten minutes by default, five at the lowest setting) and no more than three intervals later. A "present" answer in between resets the count.
 - **The second answer needs a second source.** The confirming check also reads the account's complete instance list. If a broken base URL made every lookup return 404, that list read fails too, so a single bad base URL or proxy should not be able to release every node at once.
 
 Some nodes cannot clear that bar yet. SAM's Scaleway lookups read a 404 from any zone as "nothing there", so a systemic 404 would look like absence in both sources, and an Infomaniak node outside the region SAM's client reads cannot be looked up at all. SAM never releases those nodes, or the unpinned ones above, on this evidence. Those gaps are tracked rather than papered over. One more honest note: the full release path is tested against provider fakes; on staging we have so far only seen the check leave a live VM alone.
 
 When a node does pass, SAM does not delete it in some new way. It claims the node and its environments in one atomic D1 batch, then hands them to the same teardown as part one, which removes the DNS records and retires the row. Verdicts, including "inconclusive, and why", are written to the node's decision log, so a stuck node shows its reason instead of failing silently.
 
-The check is bounded too: at most 50 provider lookups and 20 seconds per five-minute run. I estimate a Hetzner lookup at about 0.2 seconds, so with default settings and up to a hundred or so deployment nodes, each node keeps its 15-minute check. The worst case for a node the check can prove gone is then roughly 30 minutes: up to 15 until the first lookup, 10 until the confirming one, and 5 for the next run. The budgets and intervals are admin settings; the three-interval window is fixed in code.
+The check is bounded too: at most 50 provider lookups and 20 seconds per five-minute run. I estimate a Hetzner lookup at about 0.2 seconds, so with default settings and up to a hundred or so deployment nodes, each node keeps its 15-minute check. With default settings, the worst case for a node the check can prove gone is then roughly 30 minutes: up to 15 until the first lookup, 10 until the confirming one, and 5 for the next run. The lookup budget, time budget, check interval and confirmation interval are admin settings; the five-minute schedule and the three-interval window are fixed in code.
 
 ## What this taught us
 
