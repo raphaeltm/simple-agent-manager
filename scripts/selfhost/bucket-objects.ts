@@ -1,9 +1,14 @@
 /**
- * Object-level access to the fleet bucket for the plaintext listing and purge (plaintext-scan.ts):
- * list, read and delete objects under celld's key prefix, with the tool the box already uses for
+ * Object-level access to the fleet bucket for the plaintext listing and purge (plaintext-scan.ts)
+ * and the replaceable box's copy of its sealed state (replaceable-box.ts): list, read, write and
+ * delete objects under celld's key prefix, with the tool the box already uses for
  * each store (backup-lib.ts): `gcloud storage` for gs://, `mc` from the pinned objectstore image
  * for s3://. Credentials travel in the environment, never on a command line.
  */
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { type BoxContext, bucketPath, check, mcArgs, mcEnv, parseBucketUrl } from './backup-lib';
 
 export interface BucketObject {
@@ -94,4 +99,32 @@ export function deleteObjects(ctx: BoxContext, keys: readonly string[]): void {
     return;
   }
   check(ctx.run('docker', mcArgs(ctx, [], ['rm', ...urls]), mcEnv(ctx)), 'mc rm');
+}
+
+/**
+ * Writes `text` to exactly this key, replacing any object there. The text goes through a private
+ * temporary file (the store tools read files, and stdin is not part of the runner); callers write
+ * ciphertext or other non-secret text only.
+ */
+export function writeObject(ctx: BoxContext, key: string, text: string): void {
+  const { scheme, root } = base(ctx);
+  const dir = mkdtempSync(join(tmpdir(), 'sam-bucket-object-'));
+  try {
+    const file = join(dir, 'object');
+    writeFileSync(file, text, { mode: 0o600 });
+    if (scheme === 'gs') {
+      check(ctx.run('gcloud', ['storage', 'cp', file, `${root}/${key}`]), 'gcloud storage cp');
+      return;
+    }
+    check(
+      ctx.run(
+        'docker',
+        mcArgs(ctx, [`${dir}:/in:ro`], ['cp', '/in/object', `${root}/${key}`]),
+        mcEnv(ctx)
+      ),
+      'mc cp'
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
