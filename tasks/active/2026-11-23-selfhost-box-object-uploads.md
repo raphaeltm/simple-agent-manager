@@ -29,6 +29,10 @@ R2 interface).
 | put with `onlyIf: {etagDoesNotMatch: '*'}` x2 | first writes, second returns null (write-once)      | -                           | -    |
 | put with a wrong `sha256`                     | rejected                                            | -                           | -    |
 
+Concurrent 1 GB uploads (same setup): peak RSS 220 / 284 / 427 / 896 MB for 1 / 2 / 4 / 8 uploads,
+about 85 MB per in-flight upload over a ~150 MB base. Aggregate throughput is flat at ~182 MB/s
+from 2 uploads on. Hence the default cap of 4 (~430 MB peak).
+
 The body never sits in the isolate heap and RSS stays far below the body size, so streaming works.
 **Hard limit:** one request through celld carries at most 1 GiB. Larger compose artifacts need a
 parted upload, which changes the vm-agent client. Deferred to PR B (idea filed in this PR).
@@ -37,7 +41,7 @@ parted upload, which changes the vm-agent client. Deferred to PR B (idea filed i
 
 ```
  uploader ─(1) init (existing authenticated route)─► Worker: mint token {op, key, max, ct, sha?, exp}
- uploader ─(2) PUT/GET https://api.<domain>/api/self-host/objects?token=…─► Caddy ─► celld Worker
+ uploader ─(2) PUT/GET https://api.<domain>/api/box-objects?token=…─► Caddy ─► celld Worker
  Worker ─(3) verify token → R2.put(key, body, {onlyIf: write-once, sha256?}) / R2.get(key) stream
 ```
 
@@ -48,8 +52,18 @@ parted upload, which changes the vm-agent client. Deferred to PR B (idea filed i
   client changes and no rollout coupling. Caddy never logs query strings; SAM's request log records
   only the pathname.
 - Key: HKDF-SHA256 from `ENCRYPTION_KEY` with its own label (the hosted-git token pattern, shared
-  helper). It rotates with `selfhost:secrets rotate`; `ENCRYPTION_KEY_PREVIOUS` verifies during the
-  overlap. No operator input, no new secret.
+  helper). It rotates with `selfhost:secrets rotate`. A token is verified once, when its request
+  starts, so a rotation during an upload does not affect it. A token minted before the switch
+  verifies through `ENCRYPTION_KEY_PREVIOUS` during the overlap. Once that key is dropped, an
+  unused URL gets 403 like an expired presigned URL, and the client asks for a new one. No operator
+  input, no new secret.
+- Box-wide concurrency cap (`BoxUploadGate` DO, self-host only): `boxObjects.maxConcurrentUploads`
+  (4), `boxObjects.maxUploadsPerUploader` (2), `boxObjects.uploadIdleSeconds` (60, then 408),
+  `boxObjects.uploadLeaseSeconds` (300, renewed while bytes arrive). Over the cap: 503 + Retry-After.
+- Session snapshots: their Worker-streamed route needs `X-SAM-Content-SHA256`, which the box Caddy
+  strips (`request_header -X-SAM-*`), so every snapshot artifact PUT got 400 on a box (found on the
+  disposable GCS box). Direct snapshot uploads now use the same signer (sha256-bound box URL).
+  Restores read through the Worker's GET route with `Authorization`, which Caddy keeps.
 
 ## Threat model
 
@@ -67,19 +81,21 @@ parted upload, which changes the vm-agent client. Deferred to PR B (idea filed i
 
 ## Checklist
 
-- [ ] Shared signed-token helper extracted from `selfhost/hosted-git/tokens.ts` (rule 59: extend, not fork); hosted-git tests unchanged and green
-- [ ] Object URL token mint/verify (`selfhost/object-urls/tokens.ts`)
-- [ ] Box route `PUT|GET /api/self-host/objects` (write-once put, sha256, size cap, FixedLengthStream, streaming GET)
-- [ ] `ObjectUrlSigner` seam: app-deployment compose + build-context take a signer; attachments use it
-- [ ] `getR2ObjectUrlSigner(env)`: presign when configured, else installed box signer, else `AppError` 503 naming the settings
-- [ ] Attachments `request-upload` availability uses the same resolver (403 → works on box)
-- [ ] Compose `maxBytes` clamped to the box limit so the agent fails before uploading
-- [ ] Rule 74 tests: Cloudflare Env → presign; box Env (no key) → box route; box with key → presign
-- [ ] Cloudflare byte-identity test still green (`r2-presign-cloudflare-equivalence.test.ts`)
-- [ ] Self-host-only module test: Cloudflare bundle does not import the box signer
-- [ ] Docs: `deploy/selfhost/README.md` "Object store and presigned uploads"; static key optional
-- [ ] Idea for PR B (parted uploads > 1 GiB)
-- [ ] Live celld test of the route (`scripts/selfhost/live`), small body + over-cap
+- [x] Shared signed-token helper extracted from `selfhost/hosted-git/tokens.ts` (rule 59: extend, not fork); hosted-git tests unchanged and green
+- [x] Object URL token mint/verify (`selfhost/object-urls/tokens.ts`), key-prefix allowlist incl. the snapshot prefix, 24 h cap
+- [x] Box route `PUT|GET /api/box-objects` (create-only put, sha256, size cap, FixedLengthStream, idle watchdog, streaming GET)
+- [x] `ObjectUrlSigner` seam: app-deployment compose + build-context take a signer; attachments and snapshots use it
+- [x] `getR2ObjectUrlSigner(env)`: presign when configured, else installed box signer, else `AppError` 503 naming the settings (route-level test)
+- [x] Attachments `request-upload` availability uses the same resolver (403 → works on box)
+- [x] Session snapshot direct uploads use the signer on a box (the fallback route cannot pass Caddy)
+- [x] Compose `maxBytes` clamped to the box limit so the agent fails before uploading
+- [x] Concurrency gate DO + settings (coordinator requirement), memory arithmetic stated
+- [x] Rule 74 tests: Cloudflare Env → presign; box Env (no key) → box route; box with key → presign
+- [x] Cloudflare byte-identity test still green (`r2-presign-cloudflare-equivalence.test.ts`)
+- [x] Self-host-only module test: Cloudflare bundle does not import the box signer
+- [x] Docs: `deploy/selfhost/README.md` "Object store and uploads through the box"; static key optional
+- [x] Idea for PR B (parted uploads > 1 GiB, vm-agent URL redaction, 503 retry): `01M83WWQTNTBD4SY1530G3XWH7`
+- [x] Live celld test of the route (`scripts/selfhost/live/box-object-urls.live.test.ts`, 8 cases)
 - [ ] Disposable GCS box proof, no HMAC key: publish → release → app 200; attachment up/down; snapshot
 - [ ] Staging: hosted attachments + compose publish still work
 
