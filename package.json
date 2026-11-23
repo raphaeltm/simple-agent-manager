@@ -44,6 +44,7 @@
     "selfhost:live-test": "vitest run --config scripts/selfhost/live/vitest.config.ts",
     "selfhost:backup": "tsx scripts/selfhost/backup.ts",
     "selfhost:restore": "tsx scripts/selfhost/restore.ts",
+    "selfhost:rebuild": "tsx scripts/selfhost/rebuild.ts",
     "selfhost:teardown": "tsx --tsconfig scripts/selfhost/tsconfig.json scripts/selfhost/teardown.ts",
     "selfhost:upgrade": "tsx scripts/selfhost/upgrade.ts",
     "selfhost:secrets": "tsx scripts/selfhost/secrets.ts",

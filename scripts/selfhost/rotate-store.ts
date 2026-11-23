@@ -23,7 +23,13 @@ import {
 } from '../../deploy/selfhost/key-agent/bundle.ts';
 import type { KeyProvider } from '../../deploy/selfhost/key-agent/provider.ts';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
-import { applyKeyChoice, readKeyChoice } from './key-choice';
+import {
+  applyKeyChoice,
+  explicitKeyProvider,
+  KEY_CHOICE_FORMAT,
+  type KeyChoice,
+  readKeyChoice,
+} from './key-choice';
 import {
   DEFAULT_KEPT_BUNDLES,
   KEY_AGENT_DIR,
@@ -196,7 +202,19 @@ export function openRotationStore(
   stateDir: string,
   provider?: KeyProvider
 ): RotationStore {
-  const choice = readKeyChoice(stateDir);
+  // An explicit SAM_KEY_PROVIDER in .env is never recorded (key-choice.ts resolveKeyProviderBox:
+  // "the .env line is its own record"), so it decides here too, as it does for every deploy.
+  const explicit = explicitKeyProvider(box);
+  const choice: KeyChoice | null = explicit
+    ? {
+        format: KEY_CHOICE_FORMAT,
+        provider: explicit,
+        settings: {},
+        reason: `SAM_KEY_PROVIDER=${explicit} in .env`,
+        source: 'env',
+        chosenAt: new Date().toISOString(),
+      }
+    : readKeyChoice(stateDir);
   if (!choice || choice.provider === LEGACY_KEY_PROVIDER) {
     throw new Error(
       'this box keeps its secrets as plaintext deploy vars: seal them first (pnpm selfhost:secrets migrate); rotating into plaintext would expose the new keys the same way'

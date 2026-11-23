@@ -230,8 +230,13 @@ describe('pnpm selfhost:deploy --init (sealed secrets by default)', () => {
     expect(status.out).toMatch(/bundles: 1\n {2}[0-9a-f]{32} /);
     const kek = readFileSync(join(state, 'key-agent/kek'), 'utf8').trim();
     expect(status.out).not.toContain(kek);
-    for (const value of Object.values(await sealedSecrets())) {
-      if (value.length >= 16) expect(status.out).not.toContain(value);
+    // SAM_INSTALLATION_ID is public (every node VM's label) and printed on purpose for rebuild.
+    const sealed = await sealedSecrets();
+    expect(status.out).toContain(`installation: ${sealed.SAM_INSTALLATION_ID}`);
+    for (const [name, value] of Object.entries(sealed)) {
+      if (name !== 'SAM_INSTALLATION_ID' && value.length >= 16) {
+        expect(status.out).not.toContain(value);
+      }
     }
   });
 
