@@ -173,6 +173,9 @@ export function useProjectChatState() {
               limit: CHAT_SESSION_LIST_LIMIT,
               scope,
               includeLive: true,
+              // The subscription catch-up must see sessions created while the socket was
+              // closed; the D1 index can still be missing them.
+              ...(options?.fresh ? { authoritative: true } : {}),
             })
           ).sessions;
         }

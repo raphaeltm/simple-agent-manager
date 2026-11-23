@@ -648,10 +648,12 @@ describe('ProjectChat new chat button', () => {
     });
     expect(await screen.findAllByText('Late arrival')).not.toHaveLength(0);
     expect(mocks.listChatSessions).toHaveBeenCalledTimes(2);
+    // The catch-up read bypasses the D1 index, which can lag sessions created meanwhile.
     expect(mocks.listChatSessions).toHaveBeenLastCalledWith(PROJECT_ID, {
       limit: expect.any(Number),
       scope: 'all',
       includeLive: true,
+      authoritative: true,
     });
   });
 
@@ -664,10 +666,19 @@ describe('ProjectChat new chat button', () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
+    // The page's own initial read may use the index.
+    expect(mocks.listChatSessions.mock.calls[0]?.[1]).not.toHaveProperty('authoritative');
     act(() => {
       mocks.capturedOnReconnected?.();
     });
     await waitFor(() => expect(mocks.listChatSessions).toHaveBeenCalledTimes(2));
+    // Only the subscription catch-up asks for the authoritative read.
+    expect(mocks.listChatSessions).toHaveBeenNthCalledWith(2, PROJECT_ID, {
+      limit: expect.any(Number),
+      scope: 'all',
+      includeLive: true,
+      authoritative: true,
+    });
   });
 
   it.each(['success', 'failure'] as const)(

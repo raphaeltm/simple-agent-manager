@@ -9,7 +9,9 @@
  * poll timers and on six event-driven refetches, so it is one of the hottest
  * ProjectData DO callers in the product. It is served from the D1
  * `session_summaries` index whenever that index can prove it holds the same
- * answer the DO would give, and from the DO otherwise.
+ * answer the DO would give, and from the DO otherwise. The one exception is
+ * `consistency=authoritative`, the catch-up read after a project socket subscribes,
+ * which always reads the DO (see the route below).
  */
 import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -152,6 +154,12 @@ export function registerChatSessionListRoute(chatRoutes: Hono<{ Bindings: Env }>
     // `include=live`: the sidebar groups by state, so it also needs every awake and
     // sleeping session in scope that falls outside this recency page.
     const includeLive = c.req.query('include') === 'live';
+    // `consistency=authoritative`: the browser's catch-up read right after a project
+    // socket subscribes. Sessions created while the socket was closed or awaiting
+    // admission reached nobody live, and the index lags the DO by at least the summary
+    // sync debounce (`DO_SUMMARY_SYNC_DEBOUNCE_MS`), so only the DO can answer this one
+    // read. Routine loads and polls keep the index.
+    const authoritative = c.req.query('consistency') === 'authoritative';
 
     // Fast path: serve from the D1 session index when it can prove it holds the
     // same answer the DO would give. Each DO call wakes a single-threaded object
@@ -162,17 +170,19 @@ export function registerChatSessionListRoute(chatRoutes: Hono<{ Bindings: Env }>
     //
     // `listSessionsFromIndex` fails closed: anything absent, incomplete or stale
     // falls through to the DO below.
-    const indexRead = await listSessionsFromIndex(c.env, {
-      projectId,
-      status,
-      limit,
-      offset,
-      createdByUserId,
-      includeLive,
-    });
+    const indexRead = authoritative
+      ? null
+      : await listSessionsFromIndex(c.env, {
+          projectId,
+          status,
+          limit,
+          offset,
+          createdByUserId,
+          includeLive,
+        });
 
     let result;
-    if ('result' in indexRead) {
+    if (indexRead && 'result' in indexRead) {
       result = indexRead.result;
     } else {
       result = await projectDataService.listSessions(
@@ -196,8 +206,9 @@ export function registerChatSessionListRoute(chatRoutes: Hono<{ Bindings: Env }>
       // Re-prime off the response path, and ONLY here — this is the one caller
       // that actually observed the index fail. A permanently over-cap project is
       // excluded because its sync short-circuits, so this cannot become a
-      // per-request resync loop for large projects.
-      if (indexRead.missReason !== 'incomplete_coverage') {
+      // per-request resync loop for large projects. An authoritative read never
+      // consulted the index, so it has no failure to repair.
+      if (indexRead && indexRead.missReason !== 'incomplete_coverage') {
         schedulePrimeSessionIndex(c, projectId);
       }
     }
