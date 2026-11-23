@@ -565,6 +565,7 @@ describe('the celld entry and the egress fence', () => {
       'export default wrapWorker(selfhost.withSelfHostBuild(worker, api.app));'
     );
     expect(main.match(/wrapDurableObject\((?:api|selfhost)\.(\w+)\)/g)).toEqual([
+      'wrapDurableObject(selfhost.BoxUploadGate)',
       'wrapDurableObject(selfhost.HostedGitRepo)',
       'wrapDurableObject(api.ProjectData)',
       'wrapDurableObject(api.TaskRunner)',

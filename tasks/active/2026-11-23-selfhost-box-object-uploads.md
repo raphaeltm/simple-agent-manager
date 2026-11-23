@@ -130,3 +130,12 @@ built from this branch. **No `R2_S3_ENDPOINT`, no HMAC or static store key.** No
 - Side findings (not this change): OpenCode Zen returned "Workspace usage limit reached" for the
   default paid model (a free model worked); a build-backed publish needs the task to run under an
   agent profile (`publish: empty agentProfileID` otherwise); node boot on e2-standard-2 took ~12 min.
+
+### Cleanup (2026-11-23 11:47 UTC)
+
+Deleted and verified absent: SAM nodes (3 workspace, 1 deployment) through the box API, after
+which their GCP VMs were gone; VM `sam-upbox`; firewall `sam-upbox-allow-web`; Cloud DNS
+`*.upbox` and `*.apps.upbox`; project bindings `compute.instanceAdmin.v1` and `compute.securityAdmin`
+(sam-upbox-nodes) and `dns.admin` (sam-upbox); service accounts `sam-upbox` and `sam-upbox-nodes`;
+WIF pool `sam-upbox-90he14` (state DELETED); bucket `gs://sam-upbox-fleet-90he14`. The shared box
+`sam-box`, its firewall and the shared `sam-allow-*` rules were not touched.
