@@ -126,7 +126,7 @@ export function useWorkspaceChatSocket({
     // newest row. The view's load has finished before the socket opens (the socket waits for
     // its status), and the cursor is taken now, before this socket delivers anything newer.
     onSubscribed: useCallback(() => {
-      void readMessagesAfter(
+      return readMessagesAfter(
         projectId,
         sessionId,
         messagesRef.current,
@@ -180,10 +180,17 @@ export function useWorkspaceChatSocket({
         catchUpMsgs: ChatMessageResponse[],
         catchUpSession: ChatSessionResponse,
         state?: SessionStateSnapshot | null,
-        toolChanges?: ToolSnapshotChanges
+        toolChanges?: ToolSnapshotChanges,
+        isSnapshotCurrent: (field?: string) => boolean = () => true
       ) => {
-        setSession(catchUpSession);
-        hydrateActivity(state);
+        setSession((latest) => ({
+          ...catchUpSession,
+          ...Object.fromEntries(
+            Object.entries(latest ?? {}).filter(([field]) => !isSnapshotCurrent(field))
+          ),
+        }));
+        if (isSnapshotCurrent('activity')) hydrateActivity(state);
+        const before = new Set(messagesRef.current.map((message) => message.id));
         return mergeRecentWindowOrRefresh(
           projectId,
           sessionId,
@@ -198,7 +205,11 @@ export function useWorkspaceChatSocket({
           toolRevision.current = merged.toolChanges?.revision ?? toolRevision.current;
           setMessages((prev) =>
             merged.toolChanges?.resetRequired
-              ? merged.messages
+              ? mergeMessages(
+                  merged.messages,
+                  prev.filter((message) => !before.has(message.id)),
+                  'append'
+                )
               : mergeMessages(prev, merged.messages, 'replace')
           );
         });

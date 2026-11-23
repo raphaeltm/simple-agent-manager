@@ -7,6 +7,7 @@ import {
 } from '../lib/api/comments';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { publishSessionAccessChanged } from '../lib/session-access-events';
+import { useCommentSubscriptionRefresh } from './useCommentSubscriptionRefresh';
 
 export type SessionEventType =
   | 'session.created'
@@ -74,6 +75,9 @@ export function useProjectWebSocket({
   onCommentEvent,
   onReconnected,
 }: UseProjectWebSocketOptions): UseProjectWebSocketReturn {
+  const refreshComments = useCommentSubscriptionRefresh(projectId);
+  const refreshCommentsRef = useRef(refreshComments);
+  refreshCommentsRef.current = refreshComments;
   const [connectionState, setConnectionState] = useState<ProjectConnectionState>('disconnected');
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -140,6 +144,7 @@ export function useProjectWebSocket({
         }
         retriesRef.current = 0;
         setConnectionState('connected');
+        void refreshCommentsRef.current();
         // Refresh on the first subscription too: the initial snapshot may predate
         // this socket's access check. The same idempotent refresh closes both gaps.
         onReconnectedRef.current?.();

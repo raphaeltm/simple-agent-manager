@@ -6,6 +6,7 @@ import type {
   UseChatWebSocketReturn,
 } from './chat-websocket-types';
 import { useChatSocketKeepAlive } from './useChatSocketKeepAlive';
+import { useCommentSubscriptionRefresh } from './useCommentSubscriptionRefresh';
 export type {
   ChatConnectionState,
   SessionUpdatedFields,
@@ -28,6 +29,7 @@ import {
   type MessageCommentRealtimeEvent,
 } from '../lib/api/comments';
 import { mergeMessages } from '../lib/merge-messages';
+import { parsePlanContent } from '../lib/plan-content';
 import { fetchHistoryUntil } from '../lib/message-paging';
 import { parsePromptDeliveryUpdate } from '../lib/prompt-delivery-update';
 import { maybeJsonRecord } from '../lib/runtime-validation';
@@ -55,6 +57,9 @@ export function useChatWebSocket({
   onCommentEvent,
   onSessionAccessChanged,
 }: UseChatWebSocketOptions): UseChatWebSocketReturn {
+  const refreshComments = useCommentSubscriptionRefresh(projectId, sessionId);
+  const refreshCommentsRef = useRef(refreshComments);
+  refreshCommentsRef.current = refreshComments;
   const [connectionState, setConnectionState] = useState<ChatConnectionState>('disconnected');
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -67,6 +72,11 @@ export function useChatWebSocket({
   const pendingAppendsRef = useRef<ChatMessageAppend[]>([]);
   const appendRecoveryPageRef = useRef<ChatMessageResponse[] | null>(null);
   const catchUpFlightRef = useRef<Promise<void> | null>(null);
+  const stateGenerationRef = useRef<Record<string, number>>({});
+  const markLive = (...fields: string[]) => {
+    for (const field of fields)
+      stateGenerationRef.current[field] = (stateGenerationRef.current[field] ?? 0) + 1;
+  };
 
   // Keep callbacks stable via refs
   const onMessageRef = useRef(onMessage);
@@ -145,6 +155,7 @@ export function useChatWebSocket({
         const wasReconnect = hadConnectionRef.current;
         retriesRef.current = 0;
         setConnectionState('connected');
+        void refreshCommentsRef.current();
         hadConnectionRef.current = true;
 
         // A reconnect re-reads the newest window. Any other open follows a REST read that this
@@ -157,7 +168,14 @@ export function useChatWebSocket({
         if (wasReconnect) {
           void catchUpMessages();
         } else {
-          onSubscribedRef.current?.();
+          // Join the consumer's initial read/tail repair before taking a fresh state snapshot.
+          // Both callbacks merge through the canonical transcript rather than replacing it.
+          const subscribed = onSubscribedRef.current?.();
+          void Promise.resolve(subscribed)
+            .catch(() => undefined)
+            .then(() => {
+              if (mountedRef.current && wsRef.current === ws) return catchUpMessages();
+            });
         }
       };
 
@@ -194,7 +212,9 @@ export function useChatWebSocket({
               offset: payload.offset,
               revision: payload.revision,
             };
-            if (!onMessageAppendRef.current?.(append)) {
+            const applied = onMessageAppendRef.current?.(append);
+            if (applied) markLive('activity');
+            if (!applied) {
               pendingAppendsRef.current.push(append);
               if (pendingAppendsRef.current.length > DEFAULT_CHAT_SESSION_MESSAGE_LIMIT) {
                 // Preserve recovery targets across reconnect; ignore further
@@ -218,6 +238,8 @@ export function useChatWebSocket({
               createdAt: p.createdAt || Date.now(),
               sequence: p.sequence ?? null,
             };
+            if (newMsg.role !== 'user') markLive('activity');
+            if (newMsg.role === 'plan' && parsePlanContent(newMsg.content)) markLive('plan');
             onMessageRef.current(newMsg);
           } else if (data.type === 'messages.batch') {
             const p = payload;
@@ -234,15 +256,19 @@ export function useChatWebSocket({
                 sequence: (m.sequence as number) ?? null,
               }));
             for (const msg of msgs) {
+              if (msg.role !== 'user') markLive('activity');
+              if (msg.role === 'plan' && parsePlanContent(msg.content)) markLive('plan');
               onMessageRef.current(msg);
             }
           } else if (data.type === 'session.stopped' || data.type === 'session.failed') {
             const p = payload;
             if (p.sessionId !== sessionId) return;
+            markLive('status', 'activity');
             onSessionStoppedRef.current();
           } else if (data.type === 'session.agent_completed') {
             const p = payload;
             if (p.sessionId !== sessionId) return;
+            markLive('agentCompletedAt', 'isIdle', 'activity');
             onAgentCompletedRef.current?.(p.agentCompletedAt ?? Date.now());
           } else if (data.type === 'session.updated') {
             const p = payload;
@@ -267,6 +293,8 @@ export function useChatWebSocket({
               updates.agentSessionId = p.agentSessionId;
             }
             if (Object.keys(updates).length > 0) {
+              markLive(...Object.keys(updates));
+              if (updates.status === 'active') markLive('agentCompletedAt', 'isIdle');
               onSessionUpdatedRef.current?.(updates);
             }
           } else if (data.type === 'session.activity') {
@@ -278,6 +306,8 @@ export function useChatWebSocket({
               p.activity === 'recovering' ||
               p.activity === 'error'
             ) {
+              markLive('activity');
+              if (typeof p.steeringSupported === 'boolean') markLive('steering');
               onAgentActivityRef.current?.(
                 p.activity,
                 p.promptStartedAt ?? null,
@@ -295,6 +325,7 @@ export function useChatWebSocket({
               p.recoveryStatus === 'restored' ||
               p.recoveryStatus === 'failed'
             ) {
+              markLive('wake');
               onWakeProgressRef.current?.({
                 recoveryStatus: p.recoveryStatus,
                 // An unknown/absent step is normal early in a wake — the runner has
@@ -306,6 +337,7 @@ export function useChatWebSocket({
           } else if (data.type === 'session.access.changed') {
             const p = payload;
             if (p.sessionId !== sessionId) return;
+            markLive('access', 'viewerAccess');
             onSessionAccessChangedRef.current?.();
           } else if (data.type === 'comment.thread.changed') {
             const p = payload;
@@ -367,6 +399,14 @@ export function useChatWebSocket({
   const catchUpMessages = useCallback((): Promise<void> => {
     if (catchUpFlightRef.current) return catchUpFlightRef.current;
     const socket = wsRef.current;
+    const generation = { ...stateGenerationRef.current };
+    const isSnapshotCurrent = (field?: string) =>
+      wsRef.current === socket &&
+      (field
+        ? (stateGenerationRef.current[field] ?? 0) === (generation[field] ?? 0)
+        : Object.keys(stateGenerationRef.current).every(
+            (key) => (stateGenerationRef.current[key] ?? 0) === (generation[key] ?? 0)
+          ));
     const flight = (async () => {
       try {
         // Reconnect catch-up fetches only the recent window (like the poll), not the
@@ -375,7 +415,13 @@ export function useChatWebSocket({
           limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
         });
         if (!mountedRef.current || wsRef.current !== socket) return;
-        await onCatchUpRef.current(data.messages, data.session, data.state, data.toolChanges);
+        await onCatchUpRef.current(
+          data.messages,
+          data.session,
+          data.state,
+          data.toolChanges,
+          isSnapshotCurrent
+        );
         if (!mountedRef.current || wsRef.current !== socket) return;
         // Keep entries queued until applied: rejected history requests and socket
         // replacement must leave every unprocessed delta available for retry.
@@ -400,7 +446,13 @@ export function useChatWebSocket({
           });
           if (!mountedRef.current || wsRef.current !== socket) return;
           const recovered = mergeMessages(start, older.messages, 'prepend');
-          await onCatchUpRef.current(recovered, data.session, data.state);
+          await onCatchUpRef.current(
+            recovered,
+            data.session,
+            data.state,
+            undefined,
+            isSnapshotCurrent
+          );
           if (!mountedRef.current || wsRef.current !== socket) return;
           if (!onMessageAppendRef.current?.(append)) {
             // Keep only the oldest page as the next pass's cursor; the cache

@@ -444,3 +444,7 @@ describe('useProjectWebSocket', () => {
     expect(onSessionEvent).not.toHaveBeenCalled();
   });
 });
+
+vi.mock('../../../src/hooks/useCommentSubscriptionRefresh', () => ({
+  useCommentSubscriptionRefresh: () => async () => {},
+}));

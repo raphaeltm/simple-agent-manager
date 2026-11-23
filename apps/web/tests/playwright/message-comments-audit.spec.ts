@@ -712,6 +712,10 @@ test.describe('message comments audit — mobile 375x667', () => {
     await bottomComposer.getByRole('button', { name: 'Comment & send' }).click();
 
     await expect(bottomComposer).toBeHidden();
+    // The scroll-behind-overlay check moved the anchor out of the virtual window.
+    // Return to it before asserting its inline thread; creation must not force-scroll readers.
+    await page.getByRole('button', { name: 'Scroll to bottom' }).click();
+    await expect(mobileTarget).toBeVisible();
     const mobilePanel = page.getByRole('region', { name: 'Message comments' }).last();
 
     const thread = await expectCommentThreadVisible(

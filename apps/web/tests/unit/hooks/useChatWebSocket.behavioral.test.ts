@@ -1,10 +1,13 @@
 import { DEFAULT_CHAT_SESSION_MESSAGE_LIMIT } from '@simple-agent-manager/shared';
 import { act, renderHook } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { useSessionCatchUp } from '../../../src/components/project-message-view/useSessionCatchUp';
 import { useChatWebSocket } from '../../../src/hooks/useChatWebSocket';
 import { type ChatMessageResponse, getChatSession } from '../../../src/lib/api';
 import { applyMessageAppend, mergeMessages } from '../../../src/lib/merge-messages';
+import { useWorkspaceChatSocket } from '../../../src/pages/workspace/useWorkspaceChatSocket';
 
 // ---------------------------------------------------------------------------
 // Mock WebSocket
@@ -65,6 +68,7 @@ class MockWebSocket {
 // Mock getChatSession for catch-up
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
+  listChatMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
   getChatSession: vi.fn().mockResolvedValue({
     session: {
       id: 'sess-1',
@@ -114,6 +118,192 @@ describe('useChatWebSocket (behavioral)', () => {
   afterEach(() => {
     globalThis.WebSocket = originalWebSocket;
     vi.useRealTimers();
+  });
+
+  for (const surface of ['project', 'workspace'] as const) {
+    it.each(['none', 'stop', 'output', 'batch', 'access', 'other-session', 'invalid-activity'])(
+      `${surface}: fresh subscription snapshot preserves newer live %s`,
+      async (liveEvent) => {
+        const liveStop = liveEvent === 'stop';
+        const template = await vi.mocked(getChatSession)('proj-1', 'sess-1');
+        let release!: (value: typeof template) => void;
+        const pending = new Promise<typeof template>((done) => {
+          release = done;
+        });
+        vi.mocked(getChatSession).mockClear();
+        vi.mocked(getChatSession).mockReturnValueOnce(pending);
+        const plan = [{ content: 'Recovered admission plan', status: 'pending' }];
+        const snapshot = {
+          ...template,
+          state: { activity: 'prompting', currentPlan: plan },
+        } as typeof template;
+        const hook = renderHook(() => {
+          const [session, setSession] = useState<typeof template.session | null>(template.session);
+          const [state, setState] = useState<unknown>(null);
+          const [messages, setMessages] = useState<ChatMessageResponse[]>([
+            { ...template.messages[0]!, sequence: 1 },
+          ]);
+          const onCatchUp = useSessionCatchUp(
+            setSession,
+            async () => {},
+            (next, current = () => true) =>
+              setState((previous: unknown) => ({
+                ...next,
+                ...(current('activity')
+                  ? {}
+                  : { activity: (previous as { activity?: string })?.activity }),
+              }))
+          );
+          const workspaceSocket = useWorkspaceChatSocket({
+            projectId: 'proj-1',
+            sessionId: 'sess-1',
+            sessionStatus: surface === 'workspace' ? session?.status : undefined,
+            access: undefined,
+            messages,
+            setMessages,
+            setSession,
+          });
+          useChatWebSocket({
+            ...defaultProps,
+            enabled: surface === 'project',
+            onMessage: () =>
+              setState((previous: unknown) => ({
+                ...(previous as object),
+                activity: 'responding',
+              })),
+            onCatchUp,
+            onSessionStopped: () => {
+              setSession((previous) => previous && { ...previous, status: 'stopped' });
+              setState({ activity: 'idle' });
+            },
+          });
+          return {
+            session,
+            plan: (state as { currentPlan?: unknown } | null)?.currentPlan,
+            activity:
+              surface === 'workspace'
+                ? workspaceSocket.agentActivity
+                : (state as { activity?: string } | null)?.activity,
+          };
+        });
+        await act(async () => {
+          MockWebSocket.instances[0]!.simulateOpen();
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+        expect(getChatSession).toHaveBeenCalledTimes(1);
+        if (liveStop)
+          act(() =>
+            MockWebSocket.instances[0]!.simulateMessage({
+              type: 'session.stopped',
+              payload: { sessionId: 'sess-1' },
+            })
+          );
+        const socket = MockWebSocket.instances[0]!;
+        const output = {
+          sessionId: 'sess-1',
+          id: 'live-output',
+          role: 'assistant',
+          content: 'fresh output',
+          sequence: 2,
+        };
+        if (liveEvent === 'output')
+          act(() => socket.simulateMessage({ type: 'message.new', payload: output }));
+        if (liveEvent === 'batch')
+          act(() =>
+            socket.simulateMessage({
+              type: 'messages.batch',
+              payload: { sessionId: 'sess-1', messages: [output] },
+            })
+          );
+        if (liveEvent === 'access')
+          act(() =>
+            socket.simulateMessage({
+              type: 'session.access.changed',
+              payload: { sessionId: 'sess-1' },
+            })
+          );
+        if (liveEvent === 'other-session')
+          act(() =>
+            socket.simulateMessage({ type: 'session.stopped', payload: { sessionId: 'other' } })
+          );
+        if (liveEvent === 'invalid-activity')
+          act(() =>
+            socket.simulateMessage({
+              type: 'session.activity',
+              payload: { sessionId: 'sess-1', activity: 'invalid' },
+            })
+          );
+        if (liveEvent === 'output' || liveEvent === 'batch')
+          expect(hook.result.current.activity).toBe('responding');
+        await act(async () => {
+          release(snapshot);
+          await pending;
+        });
+        expect(hook.result.current.session?.status).toBe(liveStop ? 'stopped' : 'active');
+        expect(hook.result.current.activity).toBe(
+          liveStop ? 'idle' : ['output', 'batch'].includes(liveEvent) ? 'responding' : 'prompting'
+        );
+        if (surface === 'project') expect(hook.result.current.plan).toEqual(plan);
+        hook.unmount();
+      }
+    );
+  }
+
+  it('workspace: a held first-open tool reset preserves output arriving during its fetch', async () => {
+    const template = await vi.mocked(getChatSession)('proj-1', 'sess-1');
+    let release!: (value: typeof template) => void;
+    const held = new Promise<typeof template>((done) => {
+      release = done;
+    });
+    vi.mocked(getChatSession).mockClear();
+    vi.mocked(getChatSession)
+      .mockResolvedValueOnce({
+        ...template,
+        toolChanges: { revision: 9, resetRequired: true, messages: [] },
+      })
+      .mockReturnValueOnce(held);
+    const hook = renderHook(() => {
+      const [messages, setMessages] = useState<ChatMessageResponse[]>([
+        { ...template.messages[0]!, sequence: 1 },
+      ]);
+      const [, setSession] = useState<typeof template.session | null>(template.session);
+      useWorkspaceChatSocket({
+        projectId: 'proj-1',
+        sessionId: 'sess-1',
+        sessionStatus: 'active',
+        access: undefined,
+        messages,
+        setMessages,
+        setSession,
+      });
+      return messages;
+    });
+    await act(async () => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getChatSession).toHaveBeenCalledTimes(2);
+    act(() =>
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'message.new',
+        payload: {
+          sessionId: 'sess-1',
+          messageId: 'during-reset',
+          role: 'assistant',
+          content: 'live during reset',
+          sequence: 2,
+        },
+      })
+    );
+    expect(hook.result.current.some((message) => message.id === 'during-reset')).toBe(true);
+    await act(async () => {
+      release(template);
+      await held;
+    });
+    expect(hook.result.current.some((message) => message.id === 'during-reset')).toBe(true);
+    hook.unmount();
   });
 
   it('creates a WebSocket connection when enabled', () => {
@@ -931,13 +1121,13 @@ describe('useChatWebSocket (behavioral)', () => {
     const onCatchUp = vi.fn();
     renderHook(() => useChatWebSocket({ ...defaultProps, onCatchUp }));
 
-    // First connect — catch-up should NOT fire (loadSession handles initial load)
+    // First connect — catch-up refreshes state after the initial subscription
     await act(async () => {
       MockWebSocket.instances[0]!.simulateOpen();
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(onCatchUp).toHaveBeenCalledTimes(0);
+    expect(onCatchUp).toHaveBeenCalledTimes(1);
 
     // Disconnect
     act(() => {
@@ -957,12 +1147,13 @@ describe('useChatWebSocket (behavioral)', () => {
       await Promise.resolve();
     });
 
-    expect(onCatchUp).toHaveBeenCalledTimes(1);
+    expect(onCatchUp).toHaveBeenCalledTimes(2);
     expect(onCatchUp).toHaveBeenLastCalledWith(
       expect.arrayContaining([expect.objectContaining({ id: 'msg-catchup-1' })]),
       expect.any(Object),
       undefined,
-      undefined
+      undefined,
+      expect.any(Function)
     );
   });
 
@@ -995,14 +1186,16 @@ describe('useChatWebSocket (behavioral)', () => {
 
     expect(callbacks.onSubscribed).toHaveBeenCalledTimes(1);
     // Not the newest-window catch-up: that one is for reconnects.
-    expect(callbacks.onCatchUp).not.toHaveBeenCalled();
+    expect(callbacks.onCatchUp).toHaveBeenCalledTimes(1);
   });
 
   it('asks before delivering any frame of the new socket, so a newer row cannot skip the gap', async () => {
     const order: string[] = [];
     const callbacks = {
       onCatchUp: vi.fn(),
-      onSubscribed: vi.fn(() => order.push('subscribed')),
+      onSubscribed: vi.fn(() => {
+        order.push('subscribed');
+      }),
     };
     renderHook(() =>
       useChatWebSocket({
@@ -1040,7 +1233,7 @@ describe('useChatWebSocket (behavioral)', () => {
     await openSocket(1);
 
     expect(callbacks.onSubscribed).toHaveBeenCalledTimes(2);
-    expect(callbacks.onCatchUp).not.toHaveBeenCalled();
+    expect(callbacks.onCatchUp).toHaveBeenCalledTimes(2);
   });
 
   it('runs the newest-window catch-up on a reconnect, not the subscribe read', async () => {
@@ -1057,7 +1250,7 @@ describe('useChatWebSocket (behavioral)', () => {
     });
     await openSocket(1);
 
-    expect(callbacks.onCatchUp).toHaveBeenCalledTimes(1);
+    expect(callbacks.onCatchUp).toHaveBeenCalledTimes(2);
     expect(callbacks.onSubscribed).toHaveBeenCalledTimes(1);
   });
 
@@ -1130,13 +1323,13 @@ describe('useChatWebSocket (behavioral)', () => {
     const onCatchUp = vi.fn();
     const { result } = renderHook(() => useChatWebSocket({ ...defaultProps, onCatchUp }));
 
-    // First connect — catch-up should NOT fire (initial load handles it)
+    // First connect — catch-up refreshes state after the initial subscription
     await act(async () => {
       MockWebSocket.instances[0]!.simulateOpen();
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(onCatchUp).toHaveBeenCalledTimes(0);
+    expect(onCatchUp).toHaveBeenCalledTimes(1);
 
     // Disconnect
     act(() => {
@@ -1154,7 +1347,7 @@ describe('useChatWebSocket (behavioral)', () => {
       await Promise.resolve();
     });
 
-    expect(onCatchUp).toHaveBeenCalledTimes(1);
+    expect(onCatchUp).toHaveBeenCalledTimes(2);
   });
 
   it('sends ping every 30 seconds when connected', () => {
@@ -1611,33 +1804,57 @@ describe('useChatWebSocket (behavioral)', () => {
   });
 
   // ===========================================================================
-  // No catch-up on first connect — loadSession handles initial message load.
-  // Catch-up on first connect was introduced in c64ee4c7 and caused messages
-  // to briefly appear then disappear due to a race with loadSession's
-  // 'replace' merge strategy.
+  // First-open state recovery must join the initial read and merge, preserving the
+  // disappearing-message regression from c64ee4c7's concurrent replace strategy.
   // ===========================================================================
 
-  it('does NOT trigger catch-up on first connect (only on reconnect)', async () => {
+  it('waits for the initial read before refreshing withheld session and activity state', async () => {
+    let release!: () => void;
+    const initial = new Promise<void>((done) => {
+      release = done;
+    });
+    const snapshot = await vi.mocked(getChatSession)('proj-1', 'sess-1');
+    vi.mocked(getChatSession).mockClear();
+    const authoritative = {
+      ...snapshot,
+      session: {
+        ...snapshot.session,
+        status: 'stopped' as const,
+        topic: 'Changed while admission pending',
+      },
+      state: { activity: 'idle' as const, currentPlan: { title: 'New plan' } },
+    };
+    vi.mocked(getChatSession).mockResolvedValueOnce(authoritative as typeof snapshot);
     const onCatchUp = vi.fn();
-    renderHook(() => useChatWebSocket({ ...defaultProps, onCatchUp }));
-
-    // First connect — catch-up should NOT fire
+    renderHook(() => useChatWebSocket({ ...defaultProps, onSubscribed: () => initial, onCatchUp }));
     await act(async () => {
       MockWebSocket.instances[0]!.simulateOpen();
       await Promise.resolve();
-      await Promise.resolve();
     });
-
     expect(onCatchUp).not.toHaveBeenCalled();
+    expect(getChatSession).not.toHaveBeenCalled();
+    await act(async () => {
+      release();
+      await initial;
+    });
+    expect(getChatSession).toHaveBeenCalledTimes(1);
+    expect(onCatchUp).toHaveBeenCalledTimes(1);
+    expect(onCatchUp).toHaveBeenCalledWith(
+      authoritative.messages,
+      authoritative.session,
+      authoritative.state,
+      undefined,
+      expect.any(Function)
+    );
   });
 
   // ===========================================================================
-  // Regression test: catch-up must not fire on initial connect, only reconnect.
-  // This is the test that would have caught the bug introduced in c64ee4c7.
+  // Initial subscription and reconnect now share the bounded snapshot merge.
+  // The initial-read barrier above prevents c64ee4c7's replacement race.
   // See docs/notes/2026-03-23-disappearing-messages-postmortem.md
   // ===========================================================================
 
-  it('regression: initial connect then reconnect — catch-up fires exactly once (on reconnect only)', async () => {
+  it('regression: initial subscription and reconnect both merge a fresh snapshot', async () => {
     const onCatchUp = vi.fn();
     renderHook(() => useChatWebSocket({ ...defaultProps, onCatchUp }));
 
@@ -1648,7 +1865,7 @@ describe('useChatWebSocket (behavioral)', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(onCatchUp).toHaveBeenCalledTimes(0);
+    expect(onCatchUp).toHaveBeenCalledTimes(1);
 
     // Step 2: Connection drops (e.g., network hiccup)
     act(() => {
@@ -1666,7 +1883,7 @@ describe('useChatWebSocket (behavioral)', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(onCatchUp).toHaveBeenCalledTimes(1);
+    expect(onCatchUp).toHaveBeenCalledTimes(2);
 
     // Step 5: Another disconnect + reconnect — catch-up fires again
     act(() => {
@@ -1680,6 +1897,10 @@ describe('useChatWebSocket (behavioral)', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(onCatchUp).toHaveBeenCalledTimes(2);
+    expect(onCatchUp).toHaveBeenCalledTimes(3);
   });
 });
+
+vi.mock('../../../src/hooks/useCommentSubscriptionRefresh', () => ({
+  useCommentSubscriptionRefresh: () => async () => {},
+}));

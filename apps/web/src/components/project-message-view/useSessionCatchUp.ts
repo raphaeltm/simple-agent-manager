@@ -1,37 +1,47 @@
 import { type Dispatch, type SetStateAction, useCallback } from 'react';
 
-import type {
-  ChatMessageResponse,
-  ChatSessionDetailResponse,
-  ChatSessionResponse,
-  SessionStateSnapshot,
-} from '../../lib/api';
+import type { SnapshotCurrent } from '../../hooks/chat-websocket-types';
+import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api';
 import type { ToolSnapshotChanges } from '../../lib/api/session-transcript-types';
+import type { SessionTranscript } from './useSessionTranscript';
 
 /** Preserve the mutation journal when the socket reconnects behind the newest window. */
 export function useSessionCatchUp(
   setSession: Dispatch<SetStateAction<ChatSessionResponse | null>>,
-  mergeRecentWindow: (recent: ChatSessionDetailResponse) => Promise<void>,
-  hydrateState: (state: SessionStateSnapshot | null | undefined) => void
+  mergeRecentWindow: SessionTranscript['mergeRecentWindow'],
+  hydrateState: (
+    state: SessionStateSnapshot | null | undefined,
+    isCurrent?: SnapshotCurrent
+  ) => void
 ) {
   return useCallback(
     (
       messages: ChatMessageResponse[],
       session: ChatSessionResponse,
       state?: SessionStateSnapshot | null,
-      toolChanges?: ToolSnapshotChanges
+      toolChanges?: ToolSnapshotChanges,
+      isSnapshotCurrent: SnapshotCurrent = () => true
     ) => {
-      setSession(session);
-      const merged = mergeRecentWindow({
-        session,
-        messages,
-        hasMore: true,
-        state: state ?? null,
-        toolChanges,
-      }).catch(() => {
+      setSession((latest) => ({
+        ...session,
+        ...Object.fromEntries(
+          Object.entries(latest ?? {}).filter(([field]) => !isSnapshotCurrent(field))
+        ),
+      }));
+      const merged = mergeRecentWindow(
+        {
+          session,
+          messages,
+          hasMore: true,
+          state: state ?? null,
+          toolChanges,
+        },
+        undefined,
+        isSnapshotCurrent
+      ).catch(() => {
         /* The next poll/reconnect retries; keep the current transcript. */
       });
-      hydrateState(state);
+      hydrateState(state, isSnapshotCurrent);
       return merged;
     },
     [setSession, mergeRecentWindow, hydrateState]

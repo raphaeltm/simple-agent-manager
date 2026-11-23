@@ -264,10 +264,13 @@ async function setupMocks(page: Page) {
     if (path.includes('/api/auth/')) return fulfill(route, MOCK_USER);
     if (path === '/api/client-errors') return fulfill(route, { ok: true });
     if (path === '/api/t') return fulfill(route, { ok: true });
-    if (path.startsWith('/api/notifications')) return fulfill(route, { notifications: [], unreadCount: 0 });
-    if (path === '/api/projects') return fulfill(route, { projects: [MOCK_PROJECT], nextCursor: null });
+    if (path.startsWith('/api/notifications'))
+      return fulfill(route, { notifications: [], unreadCount: 0 });
+    if (path === '/api/projects')
+      return fulfill(route, { projects: [MOCK_PROJECT], nextCursor: null });
     if (path === '/api/projects/proj-theme-1') return fulfill(route, MOCK_PROJECT);
-    if (path === '/api/projects/proj-theme-1/sessions') return fulfill(route, { sessions: [], total: 0, hasMore: false });
+    if (path === '/api/projects/proj-theme-1/sessions')
+      return fulfill(route, { sessions: [], total: 0, hasMore: false });
     if (path === '/api/terminal/token') {
       return fulfill(route, {
         token: 'workspace-token',
@@ -276,7 +279,8 @@ async function setupMocks(page: Page) {
       });
     }
     if (path === '/api/workspaces/ws-theme-1') return fulfill(route, MOCK_WORKSPACE);
-    if (path === '/api/workspaces/ws-theme-1/agent-sessions') return fulfill(route, MOCK_AGENT_SESSIONS);
+    if (path === '/api/workspaces/ws-theme-1/agent-sessions')
+      return fulfill(route, MOCK_AGENT_SESSIONS);
     if (path === '/api/workspaces') return fulfill(route, [MOCK_WORKSPACE]);
     if (path === '/api/nodes/node-theme-1') return fulfill(route, MOCK_NODE);
     if (path === '/api/nodes/node-theme-1/logs') return fulfill(route, MOCK_NODE_LOGS);
@@ -298,9 +302,13 @@ async function setupMocks(page: Page) {
     if (path.startsWith('/api/')) return route.fallback();
     if (path.endsWith('/agent-sessions')) return fulfill(route, { sessions: MOCK_AGENT_SESSIONS });
     if (path.endsWith('/events')) return fulfill(route, MOCK_WORKSPACE_EVENTS);
-    if (path.endsWith('/ports')) return fulfill(route, { ports: [{ port: 5173, protocol: 'http', processName: 'vite' }] });
+    if (path.endsWith('/ports'))
+      return fulfill(route, { ports: [{ port: 5173, protocol: 'http', processName: 'vite' }] });
     if (path.endsWith('/worktrees')) return fulfill(route, MOCK_WORKTREES);
-    if (path.endsWith('/git/branches')) return fulfill(route, { branches: [{ name: 'main' }, { name: 'sam/light-mode-slice-c-01ktev' }] });
+    if (path.endsWith('/git/branches'))
+      return fulfill(route, {
+        branches: [{ name: 'main' }, { name: 'sam/light-mode-slice-c-01ktev' }],
+      });
     if (path.endsWith('/git/status')) return fulfill(route, MOCK_GIT_STATUS);
     if (path.endsWith('/git/diff')) return fulfill(route, MOCK_DIFF);
     if (path.endsWith('/git/file')) return fulfill(route, MOCK_FILE);
@@ -331,21 +339,108 @@ async function assertNoOverflow(page: Page) {
     bodyWidth: document.body.scrollWidth,
     viewportWidth: window.innerWidth,
   }));
-  expect(overflow.docOverflow, `Document scrollWidth (${overflow.docWidth}) exceeds viewport (${overflow.viewportWidth})`).toBe(false);
-  expect(overflow.bodyOverflow, `Body scrollWidth (${overflow.bodyWidth}) exceeds viewport (${overflow.viewportWidth})`).toBe(false);
+  expect(
+    overflow.docOverflow,
+    `Document scrollWidth (${overflow.docWidth}) exceeds viewport (${overflow.viewportWidth})`
+  ).toBe(false);
+  expect(
+    overflow.bodyOverflow,
+    `Body scrollWidth (${overflow.bodyWidth}) exceeds viewport (${overflow.viewportWidth})`
+  ).toBe(false);
 }
 
 async function gotoAuditedPage(page: Page, theme: 'dark' | 'light', path: string) {
   await seedTheme(page, theme);
   await setupMocks(page);
   await page.goto(path);
-  await expect(page.locator('html')).toHaveAttribute('data-ui-theme', theme === 'dark' ? 'sam' : 'sam-light');
+  await expect(page.locator('html')).toHaveAttribute(
+    'data-ui-theme',
+    theme === 'dark' ? 'sam' : 'sam-light'
+  );
 }
 
 for (const theme of ['dark', 'light'] as const) {
   test.describe(`Workspace and node chrome - ${theme}`, () => {
+    test(`workspace conversation preserves streamed output with ${theme} chrome`, async ({
+      page,
+    }) => {
+      await seedTheme(page, theme);
+      await setupMocks(page);
+      let working = false;
+      const chat = {
+        id: 'chat-theme-1',
+        workspaceId: 'ws-theme-1',
+        topic: 'Workspace conversation audit',
+        status: 'active',
+        viewerAccess: 'owner',
+        messageCount: 30,
+        startedAt: 0,
+        endedAt: null,
+        createdAt: 0,
+      };
+      const messages = Array.from({ length: 30 }, (_, index) => ({
+        id: `chat-row-${index}`,
+        sessionId: chat.id,
+        role: index % 2 ? 'assistant' : 'user',
+        content: `Message ${index}: Wrapped workspace transcript with a long context and Unicode ✓.`,
+        createdAt: index + 1,
+        sequence: index + 1,
+        toolMetadata: null,
+      }));
+      await page.route('**/api/workspaces/ws-theme-1', (route) =>
+        fulfill(route, { ...MOCK_WORKSPACE, chatSessionId: chat.id })
+      );
+      await page.route('**/api/projects/proj-theme-1/sessions/chat-theme-1**', (route) => {
+        const path = new URL(route.request().url()).pathname;
+        return fulfill(
+          route,
+          path.endsWith('/messages')
+            ? { messages: [], hasMore: false }
+            : {
+                session: chat,
+                messages,
+                hasMore: false,
+                state: { activity: working ? 'prompting' : 'idle', currentPlan: null },
+              }
+        );
+      });
+      let stream: ((value: string) => void) | undefined;
+      await page.routeWebSocket('**/api/projects/proj-theme-1/sessions/ws**', (socket) => {
+        stream = (value) => socket.send(value);
+        socket.onMessage((value) => {
+          if (String(value).includes('ping')) socket.send(JSON.stringify({ type: 'pong' }));
+        });
+      });
+      await page.goto('/workspaces/ws-theme-1?view=conversation&sessionId=chat-theme-1');
+      await expect(page.getByText('Theme Audit Workspace')).toBeVisible({ timeout: 5000 });
+      await expect.poll(() => Boolean(stream)).toBe(true);
+      if (!stream) throw new Error('Workspace stream did not open');
+      working = true;
+      stream(
+        JSON.stringify({
+          type: 'message.new',
+          payload: {
+            sessionId: chat.id,
+            messageId: 'live-proof',
+            role: 'assistant',
+            content: 'Fresh workspace output after subscription',
+            createdAt: 100,
+            sequence: 100,
+          },
+        })
+      );
+      await expect(page.getByText('Fresh workspace output after subscription')).toBeVisible();
+      await expect(page.getByText('Agent is working...', { exact: true })).toBeVisible();
+      await assertNoOverflow(page);
+      await screenshot(page, `workspace-conversation-${theme}`);
+    });
+
     test(`workspace file viewer uses ${theme} chrome tokens`, async ({ page }) => {
-      await gotoAuditedPage(page, theme, '/workspaces/ws-theme-1?files=view&path=apps/web/src/pages/workspace/index.tsx');
+      await gotoAuditedPage(
+        page,
+        theme,
+        '/workspaces/ws-theme-1?files=view&path=apps/web/src/pages/workspace/index.tsx'
+      );
       await expect(page.getByText('Theme Audit Workspace')).toBeVisible({ timeout: 5000 });
       await expect(page.getByText('index.tsx').first()).toBeVisible({ timeout: 5000 });
       await expect(page.getByText('theme-tokenized')).toBeVisible({ timeout: 5000 });
@@ -354,9 +449,15 @@ for (const theme of ['dark', 'light'] as const) {
     });
 
     test(`workspace diff view uses ${theme} chrome tokens`, async ({ page }) => {
-      await gotoAuditedPage(page, theme, '/workspaces/ws-theme-1?git=diff&file=apps/web/src/components/GitDiffView.tsx&staged=false');
+      await gotoAuditedPage(
+        page,
+        theme,
+        '/workspaces/ws-theme-1?git=diff&file=apps/web/src/components/GitDiffView.tsx&staged=false'
+      );
       await expect(page.getByText('GitDiffView.tsx').first()).toBeVisible({ timeout: 5000 });
-      await expect(page.getByText('Tokyo Night diff island stays dark')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText('Tokyo Night diff island stays dark')).toBeVisible({
+        timeout: 5000,
+      });
       await assertNoOverflow(page);
       await screenshot(page, `workspace-diff-${theme}`);
     });
