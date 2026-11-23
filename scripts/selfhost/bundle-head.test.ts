@@ -660,7 +660,16 @@ describe('the head lock', () => {
     renameSync(`${lock}.new`, lock); // a distinct inode: both files existed at once
     breakStaleLock(lock, staleIno);
     expect(readFileSync(lock, 'utf8')).toBe(`${process.pid}\n`);
+    // A child joined (appended a live pid to the same file) after a waiter judged it stale: the
+    // breaker judges again and leaves it.
+    writeFileSync(lock, '4194399\n');
+    const joinedIno = statSync(lock).ino;
+    writeFileSync(lock, `4194399\n${process.pid}\n`);
+    expect(statSync(lock).ino).toBe(joinedIno);
+    breakStaleLock(lock, joinedIno);
+    expect(existsSync(lock)).toBe(true);
     // Control: the file judged stale is removed; a breaker already held leaves it to its holder.
+    writeFileSync(lock, '4194399\n');
     writeFileSync(`${lock}.break`, '');
     breakStaleLock(lock, statSync(lock).ino);
     expect(existsSync(lock)).toBe(true);
@@ -676,20 +685,26 @@ describe('the head lock', () => {
     await expect(withLockFile(lock, async () => 'ran', 200)).resolves.toBe('ran');
     // Joining an ancestor's lock checks it is still that lock: a replaced lock is not joined, and
     // a missing one is never created.
+    // A dead owner's lock is not joined (it is stale; the joiner takes the lock instead).
     writeFileSync(lock, '4194390\n');
-    expect(joinLockFile(lock, '4194390')).toBe(true);
-    expect(readFileSync(lock, 'utf8')).toBe(`4194390\n${process.pid}\n`);
+    expect(joinLockFile(lock, '4194390')).toBe(false);
+    // A live owner's lock is joined.
+    writeFileSync(lock, `${process.ppid}\n`);
+    expect(joinLockFile(lock, String(process.ppid))).toBe(true);
+    expect(readFileSync(lock, 'utf8')).toBe(`${process.ppid}\n${process.pid}\n`);
+    writeFileSync(lock, '4194390\n');
     writeFileSync(`${lock}.new`, '4194391\n');
     renameSync(`${lock}.new`, lock);
     expect(joinLockFile(lock, '4194390')).toBe(false);
     // Even a replacement naming the same owner (a reused pid) is another file, not joined: the
     // check is on the file joined, not only its text. (Simulated by swapping the file mid-join.)
-    writeFileSync(lock, '4194390\n');
+    const live = String(process.ppid);
+    writeFileSync(lock, `${live}\n`);
     const swap = (): void => {
-      writeFileSync(`${lock}.new`, '4194390\n');
+      writeFileSync(`${lock}.new`, `${live}\n`);
       renameSync(`${lock}.new`, lock);
     };
-    expect(joinLockFile(lock, '4194390', swap)).toBe(false);
+    expect(joinLockFile(lock, live, swap)).toBe(false);
     rmSync(lock);
     expect(joinLockFile(lock, '4194390')).toBe(false);
     expect(existsSync(lock)).toBe(false);

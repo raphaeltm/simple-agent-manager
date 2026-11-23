@@ -118,7 +118,10 @@ export function breakStaleLock(lockPath: string, staleIno: number): void {
   }
   closeSync(fd);
   try {
-    if (lstatSync(lockPath, { throwIfNoEntry: false })?.ino === staleIno) {
+    // Judged again under the breaker: a child may have joined (appended a live pid to this same
+    // file) since the waiter read it.
+    const now = readLock(lockPath);
+    if (now?.ino === staleIno && !now.holders.some(pidAlive)) {
       rmSync(lockPath, { force: true });
     }
   } finally {
@@ -201,7 +204,9 @@ export function joinLockFile(
     afterAppend();
     const joined = fstatSync(fd).ino;
     if (lstatSync(lockPath, { throwIfNoEntry: false })?.ino !== joined) return false;
-    return readFileSync(lockPath, 'utf8').trim().split(/\s+/)[0] === owner;
+    // The owner must still be running: a dead owner's lock is stale, and is taken, not joined.
+    const first = readFileSync(lockPath, 'utf8').trim().split(/\s+/)[0];
+    return first === owner && pidAlive(Number(owner));
   } finally {
     closeSync(fd);
   }
