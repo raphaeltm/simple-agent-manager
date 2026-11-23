@@ -7,6 +7,7 @@ import {
   createApi,
   delayFromEnv,
   intFromEnv,
+  probeTimeoutMs,
   readTarget,
   SECRET_NAMES,
   sleepWithin,
@@ -68,6 +69,7 @@ const timing = {
   clientCreateRetryMs: delayFromEnv('OAUTH_CLIENT_CREATE_RETRY_MS', 15000),
   secretsVisibleTimeoutMs: intFromEnv('OAUTH_SECRETS_VISIBLE_TIMEOUT_MS', 30000),
   secretsPollMs: delayFromEnv('OAUTH_SECRETS_POLL_MS', 2000),
+  probeTimeoutMs: probeTimeoutMs(),
 };
 // A client's secret is shown once, at creation, and otherwise lives only on the installer Worker.
 const OAUTH_SECRET_MISSING = `OAuth secret missing. An OAuth client named ${name} already exists, but its secret is not available. Delete that client (run remove with REMOVE_OAUTH_CLIENT=true), or rotate its secret in Cloudflare and supply OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET.`;
@@ -170,7 +172,7 @@ async function resolveSourceCommit() {
   try {
     response = await fetch(
       `https://raw.githubusercontent.com/${UPSTREAM_REPOSITORY}/${revision}/scripts/deploy/installer-protocol.json`,
-      { method: 'HEAD', signal: AbortSignal.timeout(15_000) }
+      { method: 'HEAD', signal: AbortSignal.timeout(timing.probeTimeoutMs) }
     );
   } catch {
     throw new Error(`Could not check commit ${revision} against ${UPSTREAM_REPOSITORY}. Retry.`);
@@ -356,7 +358,7 @@ async function waitUntilServed() {
     try {
       const response = await fetch(`${origin}/health`, {
         cache: 'no-store',
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(timing.probeTimeoutMs),
       });
       if (response.ok) return;
     } catch {

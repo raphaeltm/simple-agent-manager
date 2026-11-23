@@ -95,8 +95,10 @@ interface Options {
   artifactBaseUrl?: string;
   /** The checked-out commit; null means there is no checkout. */
   gitHead?: string | null;
-  /** Status of the upstream commit check; 'offline' rejects the request. */
-  upstream?: number | 'offline';
+  /** Status of the upstream commit check; 'offline' rejects the request; 'hang' never answers. */
+  upstream?: number | 'offline' | 'hang';
+  /** Cloudflare API calls never answer. */
+  hangingApi?: boolean;
   /** Account workers.dev subdomain; null means the account has none. */
   subdomain?: string | null;
   workersDenied?: boolean;
@@ -121,6 +123,11 @@ interface Options {
   unservedHealthChecks?: number;
 }
 const ACCOUNT = 'a'.repeat(32);
+/** A request that never answers: it ends only when the caller's own timeout aborts it. */
+const untilAborted = (init: RequestInit) =>
+  new Promise<Response>((_resolve, reject) => {
+    init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+  });
 const wranglerRuns = () => capture.run.mock.calls;
 const existingScopes = (existing: Options['existing']) =>
   existing === 'legacy-full'
@@ -247,12 +254,14 @@ async function deploy(options: Options = {}) {
       if (hostname === 'raw.githubusercontent.com') {
         capture.events.push(`upstream ${init.method} ${path}`);
         if (options.upstream === 'offline') throw new Error('offline');
+        if (options.upstream === 'hang') return untilAborted(init);
         return new Response(null, { status: options.upstream ?? 200 });
       }
       if (hostname !== 'api.cloudflare.com') {
         capture.events.push(`served ${hostname}${path}`);
         return new Response('{}', { status: unservedHealthChecks-- > 0 ? 503 : 200 });
       }
+      if (options.hangingApi) return untilAborted(init);
       // The real API serves these only under this account, with a bearer token.
       if (path !== '/client/v4/oauth/scopes' && !path.startsWith(`/client/v4/accounts/${ACCOUNT}/`))
         return Response.json({ success: false }, { status: 404 });
@@ -914,6 +923,16 @@ describe('input validation', () => {
       'OAUTH_CLIENT_CREATE_TIMEOUT_MS must be',
     ],
     [
+      'a non-numeric API timeout',
+      { env: { INSTALLER_API_TIMEOUT_MS: 'slow' } },
+      'INSTALLER_API_TIMEOUT_MS must be',
+    ],
+    [
+      'a zero probe timeout',
+      { env: { INSTALLER_PROBE_TIMEOUT_MS: '0' } },
+      'INSTALLER_PROBE_TIMEOUT_MS must be',
+    ],
+    [
       'an interval longer than a timer can wait',
       { env: { INSTALLER_LIVE_POLL_MS: '2147483648' } },
       'INSTALLER_LIVE_POLL_MS must be',
@@ -936,6 +955,20 @@ describe('input validation', () => {
     vi.stubGlobal('fetch', fetched);
     await expect(import('../scripts/deploy.mjs')).rejects.toThrow('CLOUDFLARE_ACCOUNT_ID');
     expect(fetched).not.toHaveBeenCalled();
+  });
+});
+describe('request timeouts are settings', () => {
+  it('gives up on a Cloudflare API call after INSTALLER_API_TIMEOUT_MS', async () => {
+    await expect(
+      deploy({ ...selfHosted, hangingApi: true, env: { INSTALLER_API_TIMEOUT_MS: '20' } })
+    ).rejects.toThrow('Cloudflare request could not complete');
+    expect(published()).toBe(false);
+  });
+  it('gives up on the upstream check after INSTALLER_PROBE_TIMEOUT_MS', async () => {
+    await expect(
+      deploy({ ...selfHosted, upstream: 'hang', env: { INSTALLER_PROBE_TIMEOUT_MS: '20' } })
+    ).rejects.toThrow('Could not check commit');
+    expect(published()).toBe(false);
   });
 });
 describe('waiting for a freshly published installer', () => {

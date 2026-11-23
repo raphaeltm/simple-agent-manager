@@ -3,6 +3,7 @@ import {
   createApi,
   delayFromEnv,
   intFromEnv,
+  probeTimeoutMs,
   readTarget,
   sleepWithin,
 } from './installer-target.mjs';
@@ -12,6 +13,7 @@ import {
 // redirects to Cloudflare with this installer's client and callback.
 const { token, name, base, worker } = readTarget();
 const api = createApi({ token, base });
+const requestTimeoutMs = probeTimeoutMs();
 const expected = process.env.GITHUB_SHA || checkedOutCommit();
 if (!/^[a-f0-9]{40}$/.test(expected)) throw new Error('Could not read the expected commit.');
 const settings = await api(`${worker}/settings`);
@@ -24,7 +26,7 @@ async function read(path, init = {}) {
   return fetch(`${origin}${path}`, {
     cache: 'no-store',
     redirect: 'manual',
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(requestTimeoutMs),
     ...init,
   });
 }
@@ -64,7 +66,10 @@ if (
 // Cloudflare validates the client and callback before it asks anyone to log in: a known
 // client with a registered callback goes to the login page, anything else to an error page
 // (observed 2026-11-23). This proves the registration without a signed-in person.
-const authorize = await fetch(target, { redirect: 'manual', signal: AbortSignal.timeout(15_000) });
+const authorize = await fetch(target, {
+  redirect: 'manual',
+  signal: AbortSignal.timeout(requestTimeoutMs),
+});
 let next;
 try {
   next = new URL(authorize.headers.get('Location') || '');

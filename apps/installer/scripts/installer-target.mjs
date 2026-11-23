@@ -72,8 +72,17 @@ export function sleepWithin(deadline, ms) {
 /** A poll or retry interval: at least 1 ms and within what a timer can wait. */
 export const delayFromEnv = (name, fallback) => intFromEnv(name, fallback, 1, MAX_TIMER_DELAY_MS);
 
+const DEFAULT_API_TIMEOUT_MS = 30_000;
+const DEFAULT_PROBE_TIMEOUT_MS = 10_000;
+/** How long one Cloudflare API call may take. */
+export const apiTimeoutMs = () => delayFromEnv('INSTALLER_API_TIMEOUT_MS', DEFAULT_API_TIMEOUT_MS);
+/** How long one request to the installer itself, to GitHub or to Cloudflare's sign-in may take. */
+export const probeTimeoutMs = () =>
+  delayFromEnv('INSTALLER_PROBE_TIMEOUT_MS', DEFAULT_PROBE_TIMEOUT_MS);
+
 /** OAuth client endpoints use `registrationToken` when one is supplied. */
 export function createApi({ token, base, registrationToken }) {
+  const timeoutMs = apiTimeoutMs();
   return async function api(path, method = 'GET', body = undefined) {
     const oauthApi = path === '/oauth/scopes' || path.startsWith(`${base}/oauth_clients`);
     const authorization = oauthApi ? registrationToken || token : token;
@@ -83,7 +92,7 @@ export function createApi({ token, base, registrationToken }) {
         method,
         headers: { Authorization: `Bearer ${authorization}`, 'Content-Type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(30_000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {
       throw new Error('Cloudflare request could not complete. Private response omitted.');
