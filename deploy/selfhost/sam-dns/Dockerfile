@@ -1,7 +1,7 @@
 # sam-dns: the box's authoritative DNS server (compose profile `dns`). Both images are pinned by
 # digest; Go modules are pinned by go.sum.
 # Go 1.26.11-alpine. The tag keeps dependency updates on the declared toolchain; the digest pins it.
-FROM golang:1.26.11-alpine@sha256:ecb67f987aa1a57794c91d19ade7ae0209f2f0f5496aaef9e6ae85ddf92d02ab AS build
+FROM golang:1.27.4-alpine@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
