@@ -16,7 +16,7 @@ catalog:
   eslint-plugin-astro: 1.7.0
   globals: 17.14.0
   oxlint: 1.77.0
-  jsdom: 29.1.1
+  jsdom: 31.0.1
 
   # === Vitest Ecosystem ===
   '@vitest/coverage-v8': 4.1.7
