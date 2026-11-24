@@ -259,8 +259,8 @@ importers:
         specifier: 0.6.2
         version: 0.6.2(hono@4.13.4)(valibot@1.5.0(typescript@5.9.3))
       '@mastra/core':
-        specifier: 1.84.0
-        version: 1.84.0(@grpc/grpc-js@1.14.6)(@opentelemetry/api@1.10.0)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(ai@7.0.173(zod@4.5.4))(express@5.3.0)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)
+        specifier: 1.85.0
+        version: 1.85.0(@grpc/grpc-js@1.14.6)(@opentelemetry/api@1.10.0)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(ai@7.0.173(zod@4.5.4))(express@5.3.0)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)
       '@modelcontextprotocol/server':
         specifier: 2.3.1
         version: 2.3.1
@@ -1968,8 +1968,8 @@ packages:
     resolution: {integrity: sha512-CuNiSqg7+e1cO/GjffyMOm5Tt2jUF9CWHHnvQ/UkqvtkGfHdgwEC0wpmq7fkN3gxwpRnrAN0WzO3vREKmNolMQ==}
     engines: {node: '>=18'}
 
-  '@chat-adapter/catalog@4.44.0':
-    resolution: {integrity: sha512-UtpW5mMgIjYBRDIgxJKh+tfnlFe0GjLsFG5MPPUDA5b/PggSOAt00TFr0xF6UIXXh1SaK3V1u3FiXyM2sdnaJQ==}
+  '@chat-adapter/catalog@4.45.0':
+    resolution: {integrity: sha512-oP8ySvXTYRVRIusTehLTvpwynMLkEcaFZBASZRDDfNFZzSO02xQX1kVgMAz4VbtiMTMU6k01tjZE4KEDbrmonA==}
     engines: {node: '>=20'}
 
   '@chevrotain/cst-dts-gen@13.2.0':
@@ -3548,8 +3548,8 @@ packages:
     resolution: {integrity: sha512-qC72D4+CDdjGqJvkFMMEAtancHUQ7/d/tAiHf64z8MopFDmcrtbcJuerDtFceuAfQJ2pDSfCKCtbqoGBNnwg0w==}
     engines: {node: '>=8'}
 
-  '@mastra/core@1.84.0':
-    resolution: {integrity: sha512-0Ko51xP2R5BN5QBSzdMX5b2IKthElMzgKYfmTzumPqnHYcP1I5PoSRuHj/u8wx9m5UKl0ECc6dHpkjiOYO3OxQ==}
+  '@mastra/core@1.85.0':
+    resolution: {integrity: sha512-7HZojXQJKrLkgKBM8lLDur6bH82Mt1VGeZLj0KqLPBYEvNYLN6nzy4YBqu3uN+gKgjL4l2exSnb9BpamHdM/pA==}
     engines: {node: '>=22.13.0'}
     peerDependencies:
       '@json-render/chat': ^0.22.0
@@ -4213,11 +4213,11 @@ packages:
   '@poppinss/exception@1.2.3':
     resolution: {integrity: sha512-dCED+QRChTVatE9ibtoaxc+WkdzOSjYTKi/+uacHWIsfodVfpsueo3+DKpgU5Px8qXjgmXkSvhXvSCz3fnP9lw==}
 
-  '@posthog/core@1.63.1':
-    resolution: {integrity: sha512-LcUSRUM8zoTdwQFH1kWDQDMOFwiFjJ2lVxOOtpOwp6ezcHdr94KjO84YcoEeYtMuIFVMjasDFWyrOuuMAAg52g==}
+  '@posthog/core@1.69.2':
+    resolution: {integrity: sha512-toMfPKklwLW+a4ZY3/EzM3GNMVXmk2ylGb8NPJXRH4igXMoI8wgNL2jqXOiglWAXqFBLZGYFN1oQx6LVmUTxTg==}
 
-  '@posthog/types@1.419.0':
-    resolution: {integrity: sha512-XX7zRYt/vK8AzaD6V+oDquAzacZf5exJv971dja9En8Qf6g84Qvc3rpT0w6hDYYLWrjaSSkdjFfvvoXI0ouJDg==}
+  '@posthog/types@1.427.1':
+    resolution: {integrity: sha512-Kx9hWf6Au64CrBLafscANAeswkRFUMs4zlU9/gwB2Hf/9ggU9YNjbw/MQA5tt7cbzTCkh+4fNIPjQeJz7/j63w==}
 
   '@protobufjs/aspromise@1.1.2':
     resolution: {integrity: sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ==}
@@ -4704,15 +4704,15 @@ packages:
   '@speed-highlight/core@1.2.15':
     resolution: {integrity: sha512-BMq1K3DsElxDWawkX6eLg9+CKJrTVGCBAWVuHXVUV2u0s2711qiChLSId6ikYPfxhdYocLNt3wWwSvDiTvFabw==}
 
-  '@standard-community/standard-json@0.3.7':
-    resolution: {integrity: sha512-9reHaeW6k99yMHCgqMnLZgrKGT/fxfwYCdzd8nM4gHL4ez8MO0AlC9seGXoJNVEaO5LiE7DVCKl46wNE4wVFRA==}
+  '@standard-community/standard-json@0.4.1':
+    resolution: {integrity: sha512-WU3elfzw8C8oTEAGcMhY9Fl86jI+0At/oLRjruQaUBPqX1JYRUwtrxzNGu5fIpUvFHXl7jze7HhuxxOf36h3Wg==}
     peerDependencies:
       '@standard-schema/spec': ^1.0.0
       '@types/json-schema': ^7.0.15
       '@valibot/to-json-schema': ^1.3.0
       arktype: ^2.1.20
-      effect: ^3.20.0
-      sury: ^10.0.0
+      effect: ^3.20.0 || ^4.0.0
+      sury: ^10.0.0 || ^11.0.0
       typebox: ^1.0.17
       valibot: ^1.4.2
       zod: ^3.25.0 || ^4.0.0
@@ -4735,10 +4735,10 @@ packages:
       zod-to-json-schema:
         optional: true
 
-  '@standard-community/standard-openapi@0.2.11':
-    resolution: {integrity: sha512-Fz+2K6JMJZwf4QoyZrq1smK+YeEwDGXqz2j8Y77rOHgmrk9StcEyTKkMf3n/4xOmEup5WZ2eOp0xiC7Slxx9gg==}
+  '@standard-community/standard-openapi@0.2.12':
+    resolution: {integrity: sha512-8yz8lRRSovh4RgRx3kUAB3Y3hyaEKposhaNeEyQPlLFAniP1QLVVvhSomBW1twdOjaXCH45f8BqAHKCWTdTYCQ==}
     peerDependencies:
-      '@standard-community/standard-json': ^0.3.5
+      '@standard-community/standard-json': ^0.4.1
       '@standard-schema/spec': ^1.0.0
       arktype: ^2.1.20
       effect: ^3.20.0
@@ -5936,8 +5936,8 @@ packages:
   character-reference-invalid@2.0.1:
     resolution: {integrity: sha512-iBZ4F4wRbyORVsu0jPV7gXkOsGYjGHPmAyv+HiHG8gi5PtC9KI2j1+v8/tlibRvjoWX027ypmG/n0HtO5t7unw==}
 
-  chat@4.44.0:
-    resolution: {integrity: sha512-DGVc9yV1ifOJFpe8Pz6BAoOBVT7/iI/7kkMuB+ZUrpyQ1iw1ElibxyvYBx7tEo1qPl6w510+Acvt1XSVPSgKjA==}
+  chat@4.45.0:
+    resolution: {integrity: sha512-7p1fkEupHEqYhXmSxLnHcK4hWEg93182/F2YxHSwqc7xtF4mekmG9EuJjRYX3aNEJJa2Rvu48A1f3ulOxxHIrA==}
     engines: {node: '>=20'}
     peerDependencies:
       ai: ^6.0.182 || ^7.0.0
@@ -7266,8 +7266,8 @@ packages:
     resolution: {integrity: sha512-Ox1pJVrDCyGHMG9CFg1tmrRUMRPRsAWYc/PinY0XzJU4K7y7vjNoLKIQ7BR5UJMCxNN8EM1MNDmHWA/B3aZUuw==}
     engines: {node: '>=6'}
 
-  hono-openapi@1.5.0:
-    resolution: {integrity: sha512-7pRGQbFLBSy+SmCKHIZB3a8pzalnsYflvGRXyS1P7vucEGlkL23QitQ++wNCuMT25Q3TbGH2JUuTdYnWMY/GIw==}
+  hono-openapi@1.6.0:
+    resolution: {integrity: sha512-KeJlG8IcpLk0jDFFbHUBrTs4v4fom1dCYpD5O3gPwJ1Sga63e6NOtT5Gmm0oVfNOLtwwHXcHBpk91MksLm0qZw==}
     peerDependencies:
       hono: ^4.11.2
 
@@ -7275,8 +7275,8 @@ packages:
     resolution: {integrity: sha512-/SMX/RQNJn7oNmFwH6DtwDqcrzZU2otm1FD6OJe2cWF6cfy/F8hq0XVBv7xW3FTJshRQwuBnXHDq2kNsdZnshg==}
     engines: {node: '>=16.9.0'}
 
-  hono@4.13.16:
-    resolution: {integrity: sha512-AOLOEhvrV+iH92xXCnFr/5+3KjPKcI3xP63XJtX5spAnkznPdHijlIsUTpi7/9EhWqrTCekw5c5zh1K+YsVw7A==}
+  hono@4.13.21:
+    resolution: {integrity: sha512-h9UsguqfVk4kjUwLvQpHOmOaJpW10jz9lp8bvKUUa04wJG/fabKFBqXZ06D6LFaeKQZtUZRVeg0gfkTTEsX7Mw==}
     engines: {node: '>=16.9.0'}
 
   hono@4.13.4:
@@ -7367,6 +7367,10 @@ packages:
 
   ignore@7.0.14:
     resolution: {integrity: sha512-wCBiZ77u1tuWde6G/nfOtLaCTYcFDU5yCzARzK10y+rLhzYoL7a7yEemcopcc2Mzow7gZOIjnV2ym1NYmdiJOQ==}
+    engines: {node: '>= 4'}
+
+  ignore@7.0.16:
+    resolution: {integrity: sha512-52N+Y4HRMOJmbLmr+DqO4iSRyyB7N52gm7PWCT6h0p978+oKbqHCB7gIJIwZvBUsjlSdWbrBFqUSmIFNZMpn0A==}
     engines: {node: '>= 4'}
 
   immer@11.1.15:
@@ -8710,14 +8714,17 @@ packages:
     resolution: {integrity: sha512-RVHEU9/Pp1Fnjr/MpAJsZoADukCKhfIi15OunEYiGktIkYLkPVvC1sioWolGDS7XByMTx9m/IGbro0Js13zhnQ==}
     engines: {node: ^10 || ^12 || >=14}
 
-  posthog-node@5.61.2:
-    resolution: {integrity: sha512-6pMhzR+APW+CBreUlHce3qrxwU7l90gYp1A5eN0kf/o3rVf++Zz2KPtZQC63ct+hWkzCwi3Arm+GT8EjUBrUag==}
+  posthog-node@5.74.0:
+    resolution: {integrity: sha512-lAnGzPVobruQ7rZe45kzcXKZAcCK3J+1dMNS3WOOdx9mnM4ECRc2WRxBdS1ncBO/h/vDtHIEmcuIr/LUxxze5w==}
     engines: {node: ^20.20.0 || >=22.22.0}
     peerDependencies:
       '@opentelemetry/api': ^1.2.0
+      '@react-email/render': ^2.1.0
       rxjs: ^7.0.0
     peerDependenciesMeta:
       '@opentelemetry/api':
+        optional: true
+      '@react-email/render':
         optional: true
       rxjs:
         optional: true
@@ -8815,8 +8822,8 @@ packages:
     resolution: {integrity: sha512-K5zQjDllxWkf7Z5xJdV0/B0WTNqx6vxG70zJE4N0kBs4LovmEYWJzQGxC9bS9RAKu3bgM40lrd5zoLJ12MQ5BA==}
     engines: {node: '>= 0.10'}
 
-  re2js@2.9.1:
-    resolution: {integrity: sha512-JIT3bEEUZTOR2YS1walNEIfH4cF/cQeZcBUFq7ldqO6lR6g0X5CBq/S8rsa9omzZcsNf8qc36jCkWpKKtncrZg==}
+  re2js@2.10.0:
+    resolution: {integrity: sha512-/P6FNnLbHjXJMRF1dPoZoVTyHvFcuVhbDpzml9DPMlbeErYlZ18GueAaG9GhYhAm/9AN7i7Y6crmDrLX0DeJ4Q==}
     engines: {node: '>=20.0.0'}
 
   react-docgen-typescript@2.4.0:
@@ -8954,8 +8961,8 @@ packages:
   remark-stringify@11.0.0:
     resolution: {integrity: sha512-1OSmLd3awB/t8qdoEOMazZkNsfVTeY4fTsgzcQFdXNq8ToTN4ZGwrMnlda4K6smTFKD+GRV6O48i6Z4iKgPPpw==}
 
-  remend@1.4.0:
-    resolution: {integrity: sha512-mHiYhhwphs1IgIZmkToKLwJn0U99IjPXuutkA2acrNcG0vlEq2G4TGnd2eT0saIHwh2KjaCpvleHcsd5SAz96A==}
+  remend@1.5.1:
+    resolution: {integrity: sha512-Mvum2BFoAlLukpqIb5bCzzvjdNQk4w9OasdKEUuVkXTEPlWpiN3pRCbbSgOXWZIxbQFB16YL/s4D7PMnQ3oU5Q==}
 
   request-light@0.5.8:
     resolution: {integrity: sha512-3Zjgh+8b5fhRJBQZoy+zbVKpAQGLyka0MPgW3zruTF4dFFJ8Fqcfu9YsAvi/rvdcaTeWG3MkbZv4WKxAn/84Lg==}
@@ -10163,6 +10170,18 @@ packages:
       utf-8-validate:
         optional: true
 
+  ws@8.23.0:
+    resolution: {integrity: sha512-wCkmX8QMOrKjgO8HW2WyDbTSGeqkocxgDzS9iR79rEAexty6/2qzilx3Ag8Tqf9ykop3irLKle0MtVn5qjVnoQ==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   wsl-utils@0.1.0:
     resolution: {integrity: sha512-h3Fbisa2nKGPxCpm89Hk33lBLsnaGBvctQopaBSOW/uIs6FTe1ATyAnKFJrzVs9vpGdsTe73WF3V4lIsk4Gacw==}
     engines: {node: '>=18'}
@@ -11082,7 +11101,7 @@ snapshots:
     dependencies:
       fontkitten: 1.0.3
 
-  '@chat-adapter/catalog@4.44.0': {}
+  '@chat-adapter/catalog@4.45.0': {}
 
   '@chevrotain/cst-dts-gen@13.2.0':
     dependencies:
@@ -11961,10 +11980,10 @@ snapshots:
     dependencies:
       hono: 4.13.4
 
-  '@hono/standard-validator@0.4.1(@standard-schema/spec@1.1.0)(hono@4.13.16)':
+  '@hono/standard-validator@0.4.1(@standard-schema/spec@1.1.0)(hono@4.13.21)':
     dependencies:
       '@standard-schema/spec': 1.1.0
-      hono: 4.13.16
+      hono: 4.13.21
 
   '@hono/valibot-validator@0.6.2(hono@4.13.4)(valibot@1.5.0(typescript@5.9.3))':
     dependencies:
@@ -12257,7 +12276,7 @@ snapshots:
     dependencies:
       '@lukeed/csprng': 1.1.0
 
-  '@mastra/core@1.84.0(@grpc/grpc-js@1.14.6)(@opentelemetry/api@1.10.0)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(ai@7.0.173(zod@4.5.4))(express@5.3.0)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)':
+  '@mastra/core@1.85.0(@grpc/grpc-js@1.14.6)(@opentelemetry/api@1.10.0)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(ai@7.0.173(zod@4.5.4))(express@5.3.0)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(@grpc/grpc-js@1.14.6)(express@5.3.0)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(@grpc/grpc-js@1.14.6)(express@5.3.0)'
@@ -12270,23 +12289,23 @@ snapshots:
       '@lukeed/uuid': 2.0.1
       '@mastra/schema-compat': 1.4.0(zod@4.5.4)
       '@standard-schema/spec': 1.1.0
-      chat: 4.44.0(ai@7.0.173(zod@4.5.4))(zod@4.5.4)
+      chat: 4.45.0(ai@7.0.173(zod@4.5.4))(zod@4.5.4)
       croner: 10.0.1
       dotenv: 17.4.2
       execa: 9.6.1
       fastq: 1.20.3
-      hono: 4.13.16
-      hono-openapi: 1.5.0(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(hono@4.13.16)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)
-      ignore: 7.0.14
+      hono: 4.13.21
+      hono-openapi: 1.6.0(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(hono@4.13.21)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)
+      ignore: 7.0.16
       jpeg-js: 0.4.4
       json-schema: 0.4.0
       lru-cache: 11.5.3
       p-map: 7.1.1
       p-retry: 7.1.1
       picomatch: 4.0.7
-      posthog-node: 5.61.2(@opentelemetry/api@1.10.0)
-      re2js: 2.9.1
-      ws: 8.22.1
+      posthog-node: 5.74.0(@opentelemetry/api@1.10.0)
+      re2js: 2.10.0
+      ws: 8.23.0
       xxhash-wasm: 1.1.0
       yaml: 2.9.1
       zod: 4.5.4
@@ -12294,6 +12313,7 @@ snapshots:
       - '@bufbuild/protobuf'
       - '@grpc/grpc-js'
       - '@opentelemetry/api'
+      - '@react-email/render'
       - '@valibot/to-json-schema'
       - ai
       - arktype
@@ -12904,11 +12924,11 @@ snapshots:
 
   '@poppinss/exception@1.2.3': {}
 
-  '@posthog/core@1.63.1':
+  '@posthog/core@1.69.2':
     dependencies:
-      '@posthog/types': 1.419.0
+      '@posthog/types': 1.427.1
 
-  '@posthog/types@1.419.0': {}
+  '@posthog/types@1.427.1': {}
 
   '@protobufjs/aspromise@1.1.2': {}
 
@@ -13320,7 +13340,7 @@ snapshots:
 
   '@speed-highlight/core@1.2.15': {}
 
-  '@standard-community/standard-json@0.3.7(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)':
+  '@standard-community/standard-json@0.4.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)':
     dependencies:
       '@standard-schema/spec': 1.1.0
       '@types/json-schema': 7.0.15
@@ -13331,9 +13351,9 @@ snapshots:
       zod: 4.5.4
       zod-to-json-schema: 3.25.2(zod@4.5.4)
 
-  '@standard-community/standard-openapi@0.2.11(@standard-community/standard-json@0.3.7(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(valibot@1.5.0(typescript@5.9.3))(zod@4.5.4)':
+  '@standard-community/standard-openapi@0.2.12(@standard-community/standard-json@0.4.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(valibot@1.5.0(typescript@5.9.3))(zod@4.5.4)':
     dependencies:
-      '@standard-community/standard-json': 0.3.7(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)
+      '@standard-community/standard-json': 0.4.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)
       '@standard-schema/spec': 1.1.0
       openapi-types: 12.1.3
     optionalDependencies:
@@ -14775,15 +14795,15 @@ snapshots:
 
   character-reference-invalid@2.0.1: {}
 
-  chat@4.44.0(ai@7.0.173(zod@4.5.4))(zod@4.5.4):
+  chat@4.45.0(ai@7.0.173(zod@4.5.4))(zod@4.5.4):
     dependencies:
-      '@chat-adapter/catalog': 4.44.0
+      '@chat-adapter/catalog': 4.45.0
       '@workflow/serde': 4.1.0-beta.2
       mdast-util-to-string: 4.0.0
       remark-gfm: 4.0.1
       remark-parse: 11.0.0
       remark-stringify: 11.0.0
-      remend: 1.4.0
+      remend: 1.5.1
       unified: 11.0.5
     optionalDependencies:
       ai: 7.0.173(zod@4.5.4)
@@ -16353,14 +16373,14 @@ snapshots:
 
   hex-rgb@4.3.0: {}
 
-  hono-openapi@1.5.0(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(hono@4.13.16)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4):
+  hono-openapi@1.6.0(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(hono@4.13.21)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4):
     dependencies:
-      '@hono/standard-validator': 0.4.1(@standard-schema/spec@1.1.0)(hono@4.13.16)
-      '@standard-community/standard-json': 0.3.7(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)
-      '@standard-community/standard-openapi': 0.2.11(@standard-community/standard-json@0.3.7(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(valibot@1.5.0(typescript@5.9.3))(zod@4.5.4)
+      '@hono/standard-validator': 0.4.1(@standard-schema/spec@1.1.0)(hono@4.13.21)
+      '@standard-community/standard-json': 0.4.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)
+      '@standard-community/standard-openapi': 0.2.12(@standard-community/standard-json@0.4.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(valibot@1.5.0(typescript@5.9.3))(zod@4.5.4)
       '@standard-schema/spec': 1.1.0
       '@types/json-schema': 7.0.15
-      hono: 4.13.16
+      hono: 4.13.21
       openapi-types: 12.1.3
     transitivePeerDependencies:
       - '@valibot/to-json-schema'
@@ -16375,7 +16395,7 @@ snapshots:
 
   hono@4.13.11: {}
 
-  hono@4.13.16: {}
+  hono@4.13.21: {}
 
   hono@4.13.4: {}
 
@@ -16459,6 +16479,8 @@ snapshots:
   ignore@5.3.2: {}
 
   ignore@7.0.14: {}
+
+  ignore@7.0.16: {}
 
   immer@11.1.15: {}
 
@@ -18032,9 +18054,9 @@ snapshots:
       picocolors: 1.1.1
       source-map-js: 1.2.4
 
-  posthog-node@5.61.2(@opentelemetry/api@1.10.0):
+  posthog-node@5.74.0(@opentelemetry/api@1.10.0):
     dependencies:
-      '@posthog/core': 1.63.1
+      '@posthog/core': 1.69.2
     optionalDependencies:
       '@opentelemetry/api': 1.10.0
 
@@ -18125,7 +18147,7 @@ snapshots:
       iconv-lite: 0.7.3
       unpipe: 1.0.0
 
-  re2js@2.9.1: {}
+  re2js@2.10.0: {}
 
   react-docgen-typescript@2.4.0(typescript@5.9.3):
     dependencies:
@@ -18321,7 +18343,7 @@ snapshots:
       mdast-util-to-markdown: 2.1.2
       unified: 11.0.5
 
-  remend@1.4.0: {}
+  remend@1.5.1: {}
 
   request-light@0.5.8: {}
 
@@ -19875,6 +19897,8 @@ snapshots:
   ws@8.21.0: {}
 
   ws@8.22.1: {}
+
+  ws@8.23.0: {}
 
   wsl-utils@0.1.0:
     dependencies:
