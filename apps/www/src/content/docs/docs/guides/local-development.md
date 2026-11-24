@@ -25,6 +25,8 @@ This starts:
 - **API** at `http://localhost:8787` (Wrangler with Miniflare)
 - **Web UI** at `http://localhost:5173` (Vite dev server)
 
+Keep the web UI on port 5173. The local API accepts uploads, transcription, agent answers and secret requests only from that exact origin (`localhost` or `127.0.0.1`), so if Vite falls back to another port because 5173 is busy, those requests are refused with 403.
+
 ### Limitations
 
 | Feature         | Local                     | Staging |

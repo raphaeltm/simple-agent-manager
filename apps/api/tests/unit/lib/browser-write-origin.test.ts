@@ -126,6 +126,8 @@ describe('trusted write origin', () => {
     ['another app on a different localhost port', 'http://localhost:3000'],
     ['another app on a different 127.0.0.1 port', 'http://127.0.0.1:8080'],
     ['loopback without the app port', 'http://localhost'],
+    ['app origin with a trailing slash', 'http://localhost:5173/'],
+    ['app port with a leading zero', 'http://localhost:05173'],
   ])('refuses a %s origin even when BASE_DOMAIN is local', async (_label, origin) => {
     const next = vi.fn();
     const response = await makeApp(next).request(
