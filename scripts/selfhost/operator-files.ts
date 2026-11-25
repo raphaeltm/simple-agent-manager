@@ -19,12 +19,21 @@
 import { chmodSync, lstatSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, sep } from 'node:path';
 
-/** The umask operator commands run with: owner-writable, readable by everyone. */
+/**
+ * The most restrictive umask operator commands run with (owner-writable, readable by everyone).
+ * The operator's umask is only loosened down to this, never past it: 077 becomes 022, and a
+ * looser 002 stays 002.
+ */
 export const OPERATOR_UMASK = 0o022;
 
-/** Sets the process umask that every child command inherits. Returns the previous one. */
+/**
+ * Clears from the process umask every bit that would hide new files from group or others, so
+ * every child command creates readable files. Returns the previous umask.
+ */
 export function useOperatorUmask(): number {
-  return process.umask(OPERATOR_UMASK);
+  const previous = process.umask();
+  process.umask(previous & OPERATOR_UMASK);
+  return previous;
 }
 
 interface RunResult {

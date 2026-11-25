@@ -197,6 +197,12 @@ describe('useOperatorUmask', () => {
     process.umask(before);
   });
 
+  it('only loosens: an operator umask looser than 022 is kept', () => {
+    process.umask(0o002);
+    expect(useOperatorUmask()).toBe(0o002);
+    expect(process.umask()).toBe(0o002);
+  });
+
   it('children inherit 022 even when the operator shell had 077', () => {
     expect(useOperatorUmask()).toBe(0o077);
     expect(process.umask()).toBe(OPERATOR_UMASK);

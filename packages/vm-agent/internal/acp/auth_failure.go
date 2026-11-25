@@ -69,20 +69,20 @@ func ClassifyPromptFailure(message string) string {
 			text = text[:at]
 		}
 	}
-	if (strings.HasPrefix(text, "provider ") || strings.HasPrefix(text, "api error: ") || strings.HasPrefix(text, "internal error: api error: ")) &&
+	if hasProviderErrorPrefix(text) &&
 		(strings.Contains(text, "unsupported_model") || strings.Contains(text, "model_not_supported") ||
 			(strings.Contains(text, "model") && (strings.Contains(text, "not supported") || strings.Contains(text, "not available for")))) {
 		return "model_unavailable"
 	}
-	if (strings.HasPrefix(text, "provider ") && (strings.Contains(text, "http 401") || strings.Contains(text, "invalid_api_key") || strings.Contains(text, "invalid authentication"))) ||
-		(strings.HasPrefix(text, "api error: 401") || strings.HasPrefix(text, "internal error: api error: 401")) {
+	if (strings.HasPrefix(text, providerPrefix) && (strings.Contains(text, "http 401") || strings.Contains(text, "invalid_api_key") || strings.Contains(text, "invalid authentication"))) ||
+		(strings.HasPrefix(text, apiErrorPrefix+"401") || strings.HasPrefix(text, internalAPIErrorPrefix+"401")) {
 		return "model_provider_credential_rejected"
 	}
 	// SAM's own proxy limit is a 429 too; it must not read as a provider overload.
-	if (strings.HasPrefix(text, "provider ") || strings.HasPrefix(text, "api error: ") || strings.HasPrefix(text, "internal error: api error: ")) && isSAMUsageLimitText(text) {
+	if hasProviderErrorPrefix(text) && isSAMUsageLimitText(text) {
 		return samUsageLimitReason
 	}
-	if (strings.HasPrefix(text, "provider ") || strings.HasPrefix(text, "api error: ") || strings.HasPrefix(text, "internal error: api error: ")) &&
+	if hasProviderErrorPrefix(text) &&
 		(strings.Contains(text, "http 429") || strings.Contains(text, "http 529") || strings.Contains(text, "http 503") || strings.Contains(text, "rate limit") || strings.Contains(text, "overloaded")) {
 		return "provider_overloaded"
 	}
@@ -93,4 +93,16 @@ func ClassifyPromptFailure(message string) string {
 		return "network_error"
 	}
 	return ""
+}
+
+// The source prefixes a provider failure's first line carries (lowercased). Arbitrary MCP or
+// tool text without one of them never classifies as a provider failure.
+const (
+	providerPrefix         = "provider "
+	apiErrorPrefix         = "api error: "
+	internalAPIErrorPrefix = "internal error: " + apiErrorPrefix
+)
+
+func hasProviderErrorPrefix(text string) bool {
+	return strings.HasPrefix(text, providerPrefix) || strings.HasPrefix(text, apiErrorPrefix) || strings.HasPrefix(text, internalAPIErrorPrefix)
 }

@@ -35,65 +35,8 @@ func TestLiveClaudeAdapterSAMUsageLimit(t *testing.T) {
 		{"control: provider rate limit", providerRateBody, "provider_overloaded"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var calls atomic.Int32
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				calls.Add(1)
-				w.Header().Set("Content-Type", "application/json")
-				w.Header().Set("retry-after", "0")
-				w.Header().Set("x-should-retry", "false")
-				w.WriteHeader(http.StatusTooManyRequests)
-				_, _ = io.WriteString(w, tc.body)
-			}))
-			defer server.Close()
-
-			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
-			defer cancel()
-			cmd := exec.CommandContext(ctx, adapter)
-			cmd.Env = append(os.Environ(),
-				"ANTHROPIC_BASE_URL="+server.URL,
-				"ANTHROPIC_API_KEY=sk-test-not-a-real-key",
-				"HOME="+t.TempDir(),
-				"CLAUDE_CODE_MAX_RETRIES=0",
-				"DISABLE_TELEMETRY=1",
-				"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
-			)
-			stdin, err := cmd.StdinPipe()
-			if err != nil {
-				t.Fatal(err)
-			}
-			stdout, err := cmd.StdoutPipe()
-			if err != nil {
-				t.Fatal(err)
-			}
-			cmd.Stderr = io.Discard
-			if err := cmd.Start(); err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
-
-			host := newTestSessionHost(t)
-			defer host.Stop()
-			conn := acpsdk.NewClientSideConnection(&sessionHostClient{host: host}, stdin, stdout)
-			if _, err := conn.Initialize(ctx, acpsdk.InitializeRequest{ProtocolVersion: acpsdk.ProtocolVersionNumber}); err != nil {
-				t.Fatalf("initialize: %v", err)
-			}
-			session, err := conn.NewSession(ctx, acpsdk.NewSessionRequest{Cwd: t.TempDir(), McpServers: []acpsdk.McpServer{}})
-			if err != nil {
-				t.Fatalf("new session: %v", err)
-			}
-			_, promptErr := conn.Prompt(ctx, acpsdk.PromptRequest{
-				SessionId: session.SessionId,
-				Prompt:    []acpsdk.ContentBlock{acpsdk.TextBlock("Reply with PONG.")},
-			})
-			if promptErr == nil {
-				t.Fatal("prompt succeeded against a server that only answers 429")
-			}
-			var request *acpsdk.RequestError
-			if errors.As(promptErr, &request) {
-				data, _ := json.Marshal(request.Data)
-				t.Logf("adapter error: code=%d message=%.160q data=%.240s (model calls: %d)", request.Code, request.Message, data, calls.Load())
-			}
-			if calls.Load() == 0 {
+			promptErr, calls := promptLiveClaudeAdapter(t, adapter, tc.body)
+			if calls == 0 {
 				t.Fatal("the adapter never reached the local model server")
 			}
 			if got := ClassifyPromptError(promptErr); got != tc.want {
@@ -101,4 +44,69 @@ func TestLiveClaudeAdapterSAMUsageLimit(t *testing.T) {
 			}
 		})
 	}
+}
+
+// promptLiveClaudeAdapter runs one prompt through the real adapter against a local server that
+// answers every model call with a 429 carrying body. Returns the prompt error and the call count.
+func promptLiveClaudeAdapter(t *testing.T, adapter, body string) (error, int32) {
+	t.Helper()
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("retry-after", "0")
+		w.Header().Set("x-should-retry", "false")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, body)
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, adapter)
+	cmd.Env = append(os.Environ(),
+		"ANTHROPIC_BASE_URL="+server.URL,
+		"ANTHROPIC_API_KEY=sk-test-not-a-real-key",
+		"HOME="+t.TempDir(),
+		"CLAUDE_CODE_MAX_RETRIES=0",
+		"DISABLE_TELEMETRY=1",
+		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
+	)
+	cmd.Stderr = io.Discard
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+	conn := acpsdk.NewClientSideConnection(&sessionHostClient{host: host}, stdin, stdout)
+	if _, err := conn.Initialize(ctx, acpsdk.InitializeRequest{ProtocolVersion: acpsdk.ProtocolVersionNumber}); err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	session, err := conn.NewSession(ctx, acpsdk.NewSessionRequest{Cwd: t.TempDir(), McpServers: []acpsdk.McpServer{}})
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	_, promptErr := conn.Prompt(ctx, acpsdk.PromptRequest{
+		SessionId: session.SessionId,
+		Prompt:    []acpsdk.ContentBlock{acpsdk.TextBlock("Reply with PONG.")},
+	})
+	if promptErr == nil {
+		t.Fatal("prompt succeeded against a server that only answers 429")
+	}
+	var request *acpsdk.RequestError
+	if errors.As(promptErr, &request) {
+		data, _ := json.Marshal(request.Data)
+		t.Logf("adapter error: code=%d message=%.160q data=%.240s (model calls: %d)", request.Code, request.Message, data, calls.Load())
+	}
+	return promptErr, calls.Load()
 }
