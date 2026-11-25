@@ -161,12 +161,16 @@ your fork's workflows are no longer needed.
 The takeover deploys the installer's approved source over your deployment, and it is careful to
 change nothing else (`scripts/deploy/installer-engine-adoption.ts`):
 
-- **It stops before changing your deployment** when your SAM is newer than the approved source (its
-  database has migrations the source lacks), because deploying would roll it back. Update your SAM
-  the way it was deployed first, or wait for the next SAM release.
+- **It stops before changing your deployment** when your SAM's database is newer than the approved
+  source (it has migrations the source lacks, `refuseRollback`), because the older code could not
+  run on it. Update your SAM the way it was deployed first, or wait for the next SAM release. This
+  check is on the database, not on the code: a SAM that runs newer code on the same database is
+  replaced by the approved source you reviewed.
 - **It stops before changing your deployment or its deploy state** when a preview (with a
-  read-only refresh) would create, replace or delete any resource, and lists them under
-  **Technical details**.
+  read-only refresh) would create, replace or delete any resource, or change one in place, and
+  lists them under **Technical details** (`refusedTakeoverSteps`). The one in-place change it
+  allows is to the Pages project, which Cloudflare's provider rewrites on every deploy. The same
+  check runs again immediately before the change is applied.
 - **It never creates** a deploy-state bucket or stack: a missing one stops the takeover.
 - **Your keys stay**: key secrets the API Worker already holds (`ENCRYPTION_KEY`, the JWT, signing
   and VAPID keys and the like) are left as they are, on the takeover and on every later update. A

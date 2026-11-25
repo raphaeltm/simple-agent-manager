@@ -182,6 +182,27 @@ describe('taking over an existing SAM', () => {
     ]);
   });
 
+  it('does not take over a `dev` stack, which no deploy can publish, but does a `development` one', async () => {
+    account({
+      routes: [{ pattern: 'api.example.com/*', script: 'sam-api-dev' }],
+      buckets: ['sam-pulumi-state', 'sam-dev-assets'],
+    });
+    const dev = await previewAdoption('private', config);
+    expect(dev.adoption).toBeUndefined();
+    expect(dev.conflicts).toEqual([
+      { name: 'api.example.com is not served by a SAM API Worker', type: 'adoption' },
+    ]);
+    account({
+      routes: [{ pattern: 'api.example.com/*', script: 'sam-api-development' }],
+      buckets: ['sam-pulumi-state', 'sam-development-assets'],
+    });
+    expect((await previewAdoption('private', config)).adoption).toEqual({
+      prefix: 'sam',
+      environment: 'development',
+      stateBucket: 'sam-pulumi-state',
+    });
+  });
+
   it.each([
     [
       'a stack that itself contains -api-',

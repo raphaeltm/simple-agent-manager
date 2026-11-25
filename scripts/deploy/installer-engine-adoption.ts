@@ -13,11 +13,19 @@ import { OMITTED_WORKER_VAR_DEFAULTS } from './worker-var-defaults.js';
 import { WORKER_VAR_OVERRIDE_NAMES } from './worker-var-override-names.js';
 
 /**
- * Pulumi operations a takeover may perform. Anything else (create, delete, replace, import,
- * discard and their variants) means the stack is not the deployment the owner described, or the
- * approved source would reshape it, so the takeover stops before `pulumi up`.
+ * Pulumi operations that change nothing. Anything else (create, delete, replace, import, discard
+ * and their variants) means the stack is not the deployment the owner described, or the approved
+ * source would reshape it, so the takeover stops before `pulumi up`.
  */
-const TAKEOVER_ALLOWED_OPERATIONS = new Set(['same', 'update', 'read', 'refresh']);
+const TAKEOVER_UNCHANGING_OPERATIONS = new Set(['same', 'read', 'refresh']);
+/**
+ * Resource types a takeover may update in place. Cloudflare's provider rewrites the Pages project
+ * on every deploy: a routine deploy of an unchanged SAM reports it as its one in-place update, so
+ * refusing it would refuse every takeover. It holds no data, and every deploy republishes it. An
+ * in-place update of anything else (a database, bucket, lifecycle rule, DNS record, route, key or
+ * certificate) would reconfigure the existing deployment and is refused like a replacement.
+ */
+const TAKEOVER_UPDATABLE_TYPES = new Set(['cloudflare:index/pagesProject:PagesProject']);
 const MAX_REFUSAL_LINES = 30;
 
 /**
@@ -68,11 +76,16 @@ export class AdoptionRefused extends EngineCommandFailure {
   }
 }
 
-function urnLabel(urn: unknown): string {
-  // urn:pulumi:<stack>::<project>::<type>::<name>
-  if (typeof urn !== 'string') return 'unknown resource';
+/** `urn:pulumi:<stack>::<project>::<type>::<name>` as its type and name. */
+function urnParts(urn: unknown): { type: string; name: string } | undefined {
+  if (typeof urn !== 'string') return undefined;
   const parts = urn.split('::');
-  return parts.length >= 4 ? `${parts[2]} ${parts.slice(3).join('::')}` : 'unknown resource';
+  return parts.length >= 4 ? { type: parts[2], name: parts.slice(3).join('::') } : undefined;
+}
+
+function urnLabel(urn: unknown): string {
+  const parts = urnParts(urn);
+  return parts ? `${parts.type} ${parts.name}` : 'unknown resource';
 }
 
 /**
@@ -91,8 +104,11 @@ export function refusedTakeoverSteps(preview: unknown): string[] {
   for (const step of (preview as { steps: unknown[] }).steps) {
     const op = (step as { op?: unknown } | null)?.op;
     if (typeof op !== 'string') throw new Error('Invalid infrastructure preview');
-    if (!TAKEOVER_ALLOWED_OPERATIONS.has(op))
-      refused.push(`${op} ${urnLabel((step as { urn?: unknown }).urn)}`);
+    const urn = (step as { urn?: unknown }).urn;
+    const allowed =
+      TAKEOVER_UNCHANGING_OPERATIONS.has(op) ||
+      (op === 'update' && TAKEOVER_UPDATABLE_TYPES.has(urnParts(urn)?.type ?? ''));
+    if (!allowed) refused.push(`${op} ${urnLabel(urn)}`);
   }
   return refused;
 }
@@ -230,13 +246,12 @@ export async function refuseRollback(
 }
 
 /** Takeover step 2, before the state refresh and `pulumi up`: no resource may change shape. */
-export async function refuseResourceChanges(preview: () => Promise<string>): Promise<void> {
+export async function refuseResourceChanges(
+  preview: () => Promise<string>,
+  reason = 'The approved source would change these resources, so nothing was changed:'
+): Promise<void> {
   const refused = refusedTakeoverSteps(JSON.parse(await preview()));
-  if (refused.length)
-    throw new AdoptionRefused([
-      'The approved source would change these resources, so nothing was changed:',
-      ...refused,
-    ]);
+  if (refused.length) throw new AdoptionRefused([reason, ...refused]);
 }
 
 /**

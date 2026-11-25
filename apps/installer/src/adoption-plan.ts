@@ -89,11 +89,15 @@ function deploymentReadings(script: string): Deployment[] {
     const stack = script.slice(at + WORKER_SEPARATOR.length);
     const environment = stack === 'prod' ? 'production' : stack;
     // The engine deploys the stack of this environment, so a stack literally named
-    // `production` (which it would deploy as `prod`) is not this Worker.
+    // `production` (which it would deploy as `prod`) is not this Worker. Nor is a `dev` stack
+    // deployable: its Wrangler environment is generated as `development`
+    // (DEPLOYMENT_CONFIG.stackMapping, scripts/deploy/config.ts) while every deploy passes the
+    // environment name, and a `development` environment uses the `development` stack.
     if (
       DEPLOYMENT_PREFIX.test(prefix) &&
       DEPLOYMENT_STACK.test(stack) &&
-      stackForEnvironment(environment) === stack
+      stackForEnvironment(environment) === stack &&
+      stack !== 'dev'
     )
       readings.push({ prefix, environment });
   }

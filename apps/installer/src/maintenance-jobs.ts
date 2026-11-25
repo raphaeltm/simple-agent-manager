@@ -66,7 +66,7 @@ async function maintenanceDeploymentPanel(service){
  let bodyText='';
  if(!active){
   if(retry)bodyText='Your installation and what has been built so far are kept.';
-  else if(adopted)bodyText='Take over the SAM already running here. The build first checks that nothing would change: if the approved source is older than your SAM, or would create, replace or delete any of its resources, it stops before changing your deployment. Workers Paid and usage charges apply.';
+  else if(adopted)bodyText='Take over the SAM already running here: the build deploys the approved source over it. First it checks that nothing else would change. If the database of your SAM is newer than that source, or any of its resources would be created, replaced, deleted or reconfigured, it stops before changing your deployment. Workers Paid and usage charges apply.';
   else bodyText='Build SAM in your account, then open your own instance. This creates databases, storage, application images and the DNS records you reviewed. Workers Paid and usage charges apply.';
  }
  // The first-install checkbox is pre-checked: the installer's own Review

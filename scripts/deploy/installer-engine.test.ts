@@ -1176,10 +1176,18 @@ describe('installation engine: adopting an existing deployment', () => {
     urn: 'urn:pulumi:prod::sam::cloudflare:index/d1Database:D1Database::sam-db',
   };
 
+  // What a routine deploy of an unchanged SAM reports: the provider rewrites the Pages project.
+  const pagesUpdate = {
+    op: 'update',
+    urn: 'urn:pulumi:prod::sam::cloudflare:index/pagesProject:PagesProject::sam-pages-project',
+  };
+
   interface AdoptionWorld {
     bucketStatus?: number;
     stacks?: string;
     preview?: unknown;
+    /** The preview immediately before `pulumi up`, when it differs from the first. */
+    previewBeforeUp?: unknown;
     applied?: string[];
   }
   /** fixture() with an existing deployment behind it: state, stack, database, Worker settings. */
@@ -1205,8 +1213,9 @@ describe('installation engine: adopting an existing deployment', () => {
         }
         if (command.executable === 'pulumi' && command.args[0] === 'preview') {
           await f.runner.run(command, options);
+          const first = world.preview ?? { steps: [sameStep, pagesUpdate] };
           return JSON.stringify(
-            world.preview ?? { steps: [sameStep, { ...sameStep, op: 'update' }] }
+            command.args.includes('--refresh') ? first : (world.previewBeforeUp ?? first)
           );
         }
         const output = await f.runner.run(command, options);
@@ -1293,11 +1302,14 @@ describe('installation engine: adopting an existing deployment', () => {
     expect(calls.some((line) => line.includes('stack init'))).toBe(false);
     const preview = calls.findIndex((line) => line.startsWith('pulumi preview --refresh --json'));
     const refresh = calls.findIndex((line) => line.includes('pulumi-refresh-safe.sh'));
+    const recheck = calls.findIndex((line) => line === 'pulumi preview --json');
     const up = calls.findIndex((line) => line.startsWith('pulumi up'));
     expect(preview).toBeGreaterThan(-1);
-    // The gate reads without writing state; the refresh that rewrites it comes after.
+    // The gate reads without writing state; the refresh that rewrites it comes after, and the
+    // gate runs once more right before the update is applied.
     expect(preview).toBeLessThan(refresh);
-    expect(refresh).toBeLessThan(up);
+    expect(refresh).toBeLessThan(recheck);
+    expect(recheck).toBe(up - 1);
     const syncs = f.commands.filter((entry) =>
       entry.args.includes('scripts/deploy/sync-wrangler-config.ts')
     );
@@ -1324,6 +1336,59 @@ describe('installation engine: adopting an existing deployment', () => {
     expect(f.requests.some((line) => line.includes(`/d1/database/${databaseId}/query`))).toBe(true);
   });
 
+  it('refuses an in-place update of anything but the Pages project', async () => {
+    const f = adoptionFixture({
+      preview: {
+        steps: [
+          sameStep,
+          pagesUpdate,
+          { ...sameStep, op: 'update' },
+          {
+            op: 'update',
+            urn: 'urn:pulumi:prod::sam::cloudflare:index/record:Record::sam-dns-api',
+          },
+          // A different resource that merely has the allowed type in its name.
+          {
+            op: 'update',
+            urn: 'urn:pulumi:prod::sam::cloudflare:index/r2Bucket:R2Bucket::PagesProject',
+          },
+        ],
+      },
+    });
+    const { error, events } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase infrastructure failed');
+    expect(f.lines().some((line) => line.startsWith('pulumi up'))).toBe(false);
+    expect(f.lines().some((line) => line.includes('pulumi-refresh-safe.sh'))).toBe(false);
+    expect(events.find((event) => event.status === 'failed')?.tail).toEqual([
+      'The approved source would change these resources, so nothing was changed:',
+      'update cloudflare:index/d1Database:D1Database sam-db',
+      'update cloudflare:index/record:Record sam-dns-api',
+      'update cloudflare:index/r2Bucket:R2Bucket PagesProject',
+    ]);
+  });
+
+  it('refuses, right before pulumi up, a change that appeared after the takeover was checked', async () => {
+    const f = adoptionFixture({
+      previewBeforeUp: {
+        steps: [
+          sameStep,
+          { op: 'delete', urn: 'urn:pulumi:prod::sam::cloudflare:index/r2Bucket:R2Bucket::sam-r2' },
+        ],
+      },
+    });
+    const { error, events } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase infrastructure failed');
+    const calls = f.lines();
+    // The first check passed, so the refresh ran; the update itself never did.
+    expect(calls.some((line) => line.includes('pulumi-refresh-safe.sh'))).toBe(true);
+    expect(calls.some((line) => line.startsWith('pulumi up'))).toBe(false);
+    expect(calls.some((line) => line.includes('wrangler'))).toBe(false);
+    expect(events.find((event) => event.status === 'failed')?.tail).toEqual([
+      'These resources changed after the takeover was checked, so none was changed:',
+      'delete cloudflare:index/r2Bucket:R2Bucket sam-r2',
+    ]);
+  });
+
   it('refuses, before pulumi up, a takeover whose preview creates, replaces or deletes', async () => {
     const f = adoptionFixture({
       preview: {
@@ -1348,6 +1413,12 @@ describe('installation engine: adopting an existing deployment', () => {
     expect(failed?.phase).toBe('infrastructure');
     // Refused before the refresh too: a refused takeover leaves the state as it was.
     expect(f.lines().some((line) => line.includes('pulumi-refresh-safe.sh'))).toBe(false);
+    // Nor did anything before the gate write to Cloudflare: the state phase only reads the
+    // bucket and the workers.dev address, and the rollback check only queries the database.
+    expect(f.requests.length).toBeGreaterThan(0);
+    expect(
+      f.requests.filter((line) => !line.startsWith('GET ') && !line.endsWith('/query'))
+    ).toEqual([]);
     expect(failed?.tail).toEqual([
       'The approved source would change these resources, so nothing was changed:',
       'create cloudflare:index/r2Bucket:R2Bucket new-bucket',

@@ -208,3 +208,36 @@ No CRITICAL or HIGH. Fixed:
 - MEDIUM-to-LOW: the review screen now says the service gets access to the whole state bucket.
 - Guards verified discriminating by deletion; tests added for each, including a named bucket
   that disappears between review and install.
+
+## Review fixes, round 3 (2026-11-25, Codex reviews of 6adc28fd5 and 6cbd3d882)
+
+Evidence first: production deploy run 45661601817 (a routine deploy) reports `pulumi up` as
+"~ 1 updated, 23 unchanged", and its refresh names `cloudflare:index/pagesProject:PagesProject`
+as the resource updated in place. The provider rewrites the Pages project on every deploy.
+
+- P1 "Reject in-place updates during takeover": refusing every `update` would therefore refuse
+  every takeover. The gate now allows `update` only for the Pages project type and refuses an
+  in-place update of anything else (`TAKEOVER_UPDATABLE_TYPES`, `refusedTakeoverSteps`).
+- P2 "Bind the takeover update to the approved preview": the gate runs a second time against the
+  refreshed state, immediately before `pulumi up`. Not atomic: `pulumi up --expect-no-changes`
+  checks only after applying (Pulumi CLI docs), and `--plan` is marked experimental. The docs say
+  the gap is narrowed, not closed.
+- P1 "Verify source ancestry before declaring rollback safety": the takeover deploys the source
+  the owner reviewed and approved by commit, so replacing newer code is the approved outcome, not
+  damage; damage is older code on a newer schema, which `refuseRollback` (D1) and the Durable
+  Object migration-tag check in `sync-wrangler-config.ts` refuse. The fault was the promise ("if
+  the approved source is older than your SAM"). Panel, installer and docs now say the check is on
+  the database and that the approved source is deployed over the existing code. The builder has
+  no git history (publisher archive), so commit ordering cannot be computed locally. Not done:
+  showing the deployed commit next to the approved one at review (fork deploys do record it, as
+  the Worker version message `commit:<sha>`).
+- P2 "Defer adopted stack writes until takeover gates pass": nothing remote is written before
+  the gates. `pulumi config set` writes the job's local `infra/Pulumi.<stack>.yaml`, and for the
+  installation profile `configureWorkersDev` only reads (its creating request is reachable for
+  `legacy-ci` alone). A test now asserts a refused takeover sent no write to Cloudflare.
+- P2 "Normalize the dev stack": a `development` environment uses the `development` stack
+  (`stackNameForEnvironment`); a stack literally named `dev` gets a Wrangler environment named
+  `development` while deploys pass `--env dev`, so it cannot be published. The review now refuses
+  it instead of failing after the infrastructure phase.
+- Browser audit gained a takeover-panel scenario (real service code, longest names, in-card
+  clipping check), replacing the one-off render script lost with the first workspace.

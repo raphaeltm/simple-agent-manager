@@ -414,6 +414,54 @@ async function auditViewport(
   await page.close();
   return screenshots;
 }
+/**
+ * The idle panel of a service that takes over an existing SAM: the real service code with a
+ * takeover manifest and the longest names a deployment may have. Leaves the service as it found
+ * it, with no manifest stored, so the new-installation flow that follows starts clean.
+ */
+async function auditTakeoverPanel(
+  page: Page,
+  target: string,
+  env: Record<string, unknown>,
+  storage: Map<unknown, unknown>
+) {
+  const installation = env.INSTALLATION_CONFIG as string;
+  env.INSTALLATION_CONFIG = JSON.stringify({
+    ...JSON.parse(installation),
+    baseDomain: `${'very-long-subdomain-label-'.repeat(2)}sam.example.com`,
+    ownerEmail: `${'owner.with.a.very.long.mailbox.name.'.repeat(3)}admin@example.com`,
+    adoption: {
+      prefix: `sam-${'prefix-'.repeat(5)}x`,
+      environment: `production-${'environment-'.repeat(4)}x`,
+      stateBucket: `team-${'deploy-state-'.repeat(4)}bucket`,
+    },
+  });
+  await page.goto(target);
+  await expect(page.locator('.deployment-status strong')).toHaveText('Ready to take over');
+  await expect(page.getByText('the build deploys the approved source over it')).toBeVisible();
+  // The takeover is approved here and nowhere else: never pre-checked, disabled until ticked.
+  const confirm = page.locator('input[name="confirmed"]');
+  const takeOver = page.getByRole('button', { name: 'Take over SAM', exact: true });
+  await expect(confirm).not.toBeChecked();
+  await expect(takeOver).toBeDisabled();
+  await confirm.check();
+  await expect(takeOver).toBeEnabled();
+  await confirm.uncheck();
+  await page.locator('summary', { hasText: 'Installation details' }).click();
+  // Long names must wrap inside the card, which a page-level overflow check cannot see.
+  const inside = await page.locator('section.deployment').evaluate((card) => {
+    const box = card.getBoundingClientRect();
+    return [...card.querySelectorAll('h1, p, code, label')].every((el) => {
+      const r = el.getBoundingClientRect();
+      return r.left >= box.left - 1 && r.right <= box.right + 1;
+    });
+  });
+  expect(inside).toBe(true);
+  const count = await captureState(page, 'maintenance-takeover-ready');
+  env.INSTALLATION_CONFIG = installation;
+  storage.delete('installation');
+  return count;
+}
 async function auditMaintenance(browser: Browser) {
   let screenshots = 0;
   const temp = await mkdtemp(join(tmpdir(), 'sam-installer-browser-'));
@@ -577,6 +625,7 @@ async function auditMaintenance(browser: Browser) {
       }),
     },
   });
+  screenshots += await auditTakeoverPanel(page, target, env, values);
   screenshots += await captureMaintenanceControls(page, target);
   await page.setViewportSize({ width: 375, height: 667 });
   await page.goto(target);

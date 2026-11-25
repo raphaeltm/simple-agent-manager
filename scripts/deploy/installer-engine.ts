@@ -401,6 +401,14 @@ export async function runInstallerEngine(
       [join(root, 'scripts/deploy/pulumi-refresh-safe.sh')],
       join(root, 'infra')
     );
+    // Checked again against the refreshed state, immediately before the update that applies it.
+    // `pulumi up` cannot refuse operations itself: --expect-no-changes reports only after
+    // applying, and update plans (--plan) are experimental.
+    if (c.adoption?.takeover)
+      await refuseResourceChanges(
+        () => pulumi('preview', '--json'),
+        'These resources changed after the takeover was checked, so none was changed:'
+      );
     await pulumi('up', '--yes', '--skip-preview');
   });
   let outputs: Record<string, unknown> = {};
