@@ -153,12 +153,10 @@ export function carryDeployedVars(
   deployed: Record<string, string>,
   defaults: { checkedIn: Record<string, unknown>; code: Readonly<Record<string, string>> }
 ): string[] {
-  const sourceDefault = (name: string) =>
-    Object.prototype.hasOwnProperty.call(defaults.checkedIn, name)
-      ? String(defaults.checkedIn[name])
-      : Object.prototype.hasOwnProperty.call(defaults.code, name)
-        ? defaults.code[name]
-        : undefined;
+  const sourceDefault = (name: string) => {
+    if (Object.hasOwn(defaults.checkedIn, name)) return String(defaults.checkedIn[name]);
+    return Object.hasOwn(defaults.code, name) ? defaults.code[name] : undefined;
+  };
   const carried: string[] = [];
   for (const [name, value] of Object.entries(deployed)) {
     if (env[name] !== undefined || sourceDefault(name) === value) continue;

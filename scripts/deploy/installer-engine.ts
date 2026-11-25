@@ -33,13 +33,12 @@ import { verifyEngineReadiness } from './installer-engine-readiness.js';
 import { readContainerArtifact, verifyPublisherRuntime } from './installer-engine-runtime.js';
 import { prepareStateBackend } from './installer-engine-state.js';
 export * from './installer-engine-contract.js';
-export async function runInstallerEngine(
-  input: unknown,
-  options: EngineOptions
-): Promise<EngineCheckpoint> {
-  const c = validateEngineConfig(input);
-  const fingerprint = engineFingerprint(c);
-  const state = options.checkpoint ?? {
+/** The checkpoint to resume from, or a new one; a checkpoint for other inputs is refused. */
+function startingCheckpoint(
+  checkpoint: EngineCheckpoint | undefined,
+  fingerprint: string
+): EngineCheckpoint {
+  const state = checkpoint ?? {
     schemaVersion: 1,
     fingerprint,
     completed: [],
@@ -52,6 +51,14 @@ export async function runInstallerEngine(
   ) {
     throw new Error('Checkpoint does not match approved installation inputs');
   }
+  return state;
+}
+export async function runInstallerEngine(
+  input: unknown,
+  options: EngineOptions
+): Promise<EngineCheckpoint> {
+  const c = validateEngineConfig(input);
+  const state = startingCheckpoint(options.checkpoint, engineFingerprint(c));
   const baseRunner = options.runner ?? processRunner;
   const timings = (state.timings ??= { phases: {}, commands: [] });
   const runner: EngineRunner = {
