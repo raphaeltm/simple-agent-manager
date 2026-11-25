@@ -1,4 +1,4 @@
-import { previewAdoption } from './adoption-plan';
+import { previewAdoption, validStateBucketName } from './adoption-plan';
 import type { BootstrapCleanup } from './cleanup';
 import { createInstallationCredentials } from './credentials';
 import { type InstallationPlan, previewInstallation } from './installation-plan';
@@ -47,14 +47,22 @@ export class SessionInstallation {
       )
     )
       return json({ error: 'Select an authorized account and zone first' }, 400);
-    const { adopt, statePassphrase, ...settings } = input;
+    const { adopt, statePassphrase, stateBucket, ...settings } = input;
     if (adopt === true && !validPassphrase(statePassphrase))
       return json(
         { error: 'Enter the deploy-state passphrase your existing SAM deployment uses.' },
         400
       );
+    if (adopt === true && !validStateBucketName(stateBucket))
+      return json(
+        {
+          error: 'Enter the name of the R2 bucket that holds your deploy state, or leave it empty.',
+        },
+        400
+      );
     const plan = await (adopt === true ? previewAdoption : previewInstallation)(session.token, {
       ...settings,
+      ...(adopt === true ? { stateBucket } : {}),
       sourceCommit: this.env.INSTALL_SOURCE_COMMIT,
     });
     session.plan = plan;
@@ -195,7 +203,10 @@ export class SessionInstallation {
 
 /** Re-reviews an approved plan the same way it was first reviewed. */
 function planAgain(token: string, plan: InstallationPlan): Promise<InstallationPlan> {
-  return plan.adoption ? previewAdoption(token, plan) : previewInstallation(token, plan);
+  // A takeover names the state bucket it found, so a bucket the owner named is checked again.
+  return plan.adoption
+    ? previewAdoption(token, { ...plan, stateBucket: plan.adoption.stateBucket })
+    : previewInstallation(token, plan);
 }
 
 /** A deploy-state passphrase as the owner saved it; bounded, never inspected further. */

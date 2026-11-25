@@ -20,7 +20,7 @@ afterEach(() => vi.unstubAllGlobals());
  * A real installer session in full mode, against a fake Cloudflare account that already runs SAM.
  * Everything the installer sends to Cloudflare is recorded.
  */
-function world() {
+function world(buckets = ['sam-pulumi-state', 'sam-prod-assets']) {
   const values = new Map<string, unknown>();
   const ctx = {
     storage: {
@@ -87,7 +87,11 @@ function world() {
       if (url.endsWith('/workers/routes'))
         return ok([{ pattern: 'api.example.com/*', script: 'sam-api-prod' }]);
       if (url.endsWith('/workers/subdomain')) return ok({ subdomain: 'existing' });
-      if (url.endsWith('/r2/buckets/sam-pulumi-state')) return ok({ name: 'sam-pulumi-state' });
+      const bucket = /\/r2\/buckets\/([^/?]+)$/.exec(url)?.[1];
+      if (bucket)
+        return buckets.includes(bucket)
+          ? ok({ name: bucket })
+          : Response.json({ success: false, errors: [{ code: 10006 }] }, { status: 404 });
       if (url.endsWith('/r2/buckets')) return ok({ buckets: [] });
       if (url.endsWith('/settings'))
         return Response.json({ success: false, errors: [{ code: 10007 }] }, { status: 404 });
@@ -173,4 +177,38 @@ it('control: an ordinary review of a domain that already runs SAM is blocked, wi
   expect(plan.adoption).toBeUndefined();
   expect(plan.conflicts.length).toBeGreaterThan(0);
   expect((w.values.get('session') as Session).adoptionPassphrase).toBeUndefined();
+});
+
+it('takes over a deployment with its own state bucket name, re-checked at install', async () => {
+  const w = world(['team-deploy-state', 'sam-prod-assets']);
+  const request = { ...settings, adopt: true, statePassphrase: passphrase };
+  // Control: without the name the takeover cannot be approved.
+  const unnamed = (await (await w.call('/preview', request)).json()) as {
+    plan: { conflicts: unknown[] };
+  };
+  expect(unnamed.plan.conflicts).toHaveLength(1);
+  expect((await w.call('/preview', { ...request, stateBucket: '../zones' })).status).toBe(400);
+
+  const preview = await w.call('/preview', { ...request, stateBucket: 'team-deploy-state' });
+  expect(preview.status).toBe(200);
+  const { plan } = (await preview.json()) as {
+    plan: { fingerprint: string; conflicts: unknown[]; adoption: { stateBucket: string } };
+  };
+  expect(plan.conflicts).toEqual([]);
+  expect(plan.adoption.stateBucket).toBe('team-deploy-state');
+  // Install reviews the approved plan again; the named bucket must still be the one it checks.
+  const install = await w.call('/install', {
+    accountId,
+    confirmed: true,
+    fingerprint: plan.fingerprint,
+  });
+  expect(install.status).toBe(200);
+  const bindings = (w.upload()?.bindings ?? []) as Array<{ name: string; text?: string }>;
+  const config = JSON.parse(
+    String(bindings.find((entry) => entry.name === 'INSTALLATION_CONFIG')?.text)
+  );
+  expect(config.adoption.stateBucket).toBe('team-deploy-state');
+  const storage = JSON.stringify(w.tokens.find((token) => token.name.endsWith('-state')));
+  expect(storage).toContain('_default_team-deploy-state');
+  expect(storage).not.toContain('_default_sam-pulumi-state');
 });

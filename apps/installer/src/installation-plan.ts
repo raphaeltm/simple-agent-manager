@@ -52,17 +52,21 @@ export function validateInstallationConfig(value: unknown): InstallationConfig {
     ...(adoption ? { adoption } : {}),
   };
 }
+/** Name shapes a fork deployment may have (workflow-resource-names.mjs). */
+export const DEPLOYMENT_PREFIX = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
+export const DEPLOYMENT_STACK = /^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/;
+export const BUCKET_NAME = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/;
 export function validateAdoptionTarget(value: unknown): AdoptionTarget {
   const t = value as AdoptionTarget | null;
   if (
     !t ||
     typeof t !== 'object' ||
     typeof t.prefix !== 'string' ||
-    !/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/.test(t.prefix) ||
+    !DEPLOYMENT_PREFIX.test(t.prefix) ||
     typeof t.environment !== 'string' ||
-    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/.test(t.environment) ||
+    !DEPLOYMENT_STACK.test(t.environment) ||
     typeof t.stateBucket !== 'string' ||
-    !/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(t.stateBucket)
+    !BUCKET_NAME.test(t.stateBucket)
   )
     throw new Error('Invalid takeover target');
   return { prefix: t.prefix, environment: t.environment, stateBucket: t.stateBucket };

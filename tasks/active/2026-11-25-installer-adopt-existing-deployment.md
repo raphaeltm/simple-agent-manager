@@ -167,3 +167,30 @@ Proof target, because staging2 shares staging's state and passphrase (finding 10
 - SonarQube: fixed S7744 (empty object spread) and S3776 (engine complexity; takeover steps now
   `refuseRollback`, `refuseResourceChanges`, `keepAdoptedDeployment` in the adoption module) in
   f3f23adb0. S9382 (sequential `pulumi config set` in a loop) is in moved code and intentional.
+
+## Review fixes, round 2 (2026-11-25, Codex review of 7e6d18fea)
+
+- P2 "Disambiguate prefixes from stack names": `sam-api-blue-api-prod` reads as prefix `sam` +
+  stack `blue-api-prod` or prefix `sam-api-blue` + stack `prod`, and the old pattern always took
+  the last `-api-`. `findDeployment` (`apps/installer/src/adoption-plan.ts`) now tries every
+  reading and keeps the one whose assets bucket `<prefix>-<stack>-assets` exists
+  (`infra/resources/storage.ts`). No reading or more than one is a conflict.
+- P2 "Accept configured deploy-state bucket names": a fork that set `PULUMI_STATE_BUCKET` keeps
+  its state under any valid bucket name. The takeover form has an optional "Its deploy-state
+  bucket" field; a named bucket is validated before it reaches a request path, never falls back to
+  the conventional names, and is checked again when install re-reviews the plan (`planAgain`).
+  Builder, maintenance and engine already accepted any valid bucket name.
+- Consequence recorded in the docs: a named bucket shared with another deployment gives the
+  service that deployment's state too. That was already true for two environments of one prefix,
+  which share `<prefix>-pulumi-state` by convention. The security notes no longer claim a service
+  can never hold another installation's state.
+- Guards verified discriminating by deletion: assets discriminator, ambiguity conflict, no
+  fallback for a named bucket, name validation (plan and session), named bucket forwarded and
+  re-checked at install, browser sends the bucket (audit run against a rebuilt static site).
+- Browser audit: new `full-adopt-form` scenario (takeover block open, 63-character bucket name, an
+  in-card clipping check); 150 screenshots, no overflow.
+- SonarQube, redone after the first attempt was lost with its workspace: S3776 in
+  `installer-engine.ts` (`startingCheckpoint`) and `browser-audit.ts` (`fillTakeover`,
+  `auditFullAdopt`), S3358/S6653 in `carryDeployedVars`, S7737 in `browser-audit-routes.ts`.
+- `deploy` check (staging installer deploy) fails only at its health poll from GitHub's runners,
+  which Cloudflare blocks; the installer answers 200 with the pushed commit from elsewhere.

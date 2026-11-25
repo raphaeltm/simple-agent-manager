@@ -162,7 +162,11 @@ export async function runPreview() {
       baseDomain,
       ownerEmail: $('owner-email').value.trim(),
       ...($('adopt-existing').checked
-        ? { adopt: true, statePassphrase: $('state-passphrase').value }
+        ? {
+            adopt: true,
+            statePassphrase: $('state-passphrase').value,
+            stateBucket: $('state-bucket').value.trim().toLowerCase(),
+          }
         : {}),
     });
     if (revision !== state.formRevision) return;

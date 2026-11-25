@@ -14,7 +14,7 @@ const config = {
 };
 afterEach(() => vi.unstubAllGlobals());
 
-/** A Cloudflare account that already runs SAM: its API route, state bucket and zone. */
+/** A Cloudflare account that already runs SAM: its API route, state and assets buckets, zone. */
 function account(
   options: {
     routes?: Array<{ pattern: string; script?: string }>;
@@ -25,7 +25,7 @@ function account(
     { pattern: 'api.example.com/*', script: 'sam-api-prod' },
     { pattern: '*.example.com/*', script: 'sam-api-prod' },
   ];
-  const buckets = new Set(options.buckets ?? ['sam-pulumi-state']);
+  const buckets = new Set(options.buckets ?? ['sam-pulumi-state', 'sam-prod-assets']);
   const fetch = vi.fn(async (url: string, _init?: RequestInit) => {
     const bucket = /\/r2\/buckets\/([^/?]+)$/.exec(url)?.[1];
     if (bucket)
@@ -69,7 +69,7 @@ describe('taking over an existing SAM', () => {
   it('falls back to an installer-style state bucket and keeps a non-production stack name', async () => {
     account({
       routes: [{ pattern: 'api.example.com/*', script: 'sam-api-staging' }],
-      buckets: ['sam-pulumi-state-staging'],
+      buckets: ['sam-pulumi-state-staging', 'sam-staging-assets'],
     });
     const plan = await previewAdoption('private', config);
     expect(plan.adoption).toEqual({
@@ -105,11 +105,99 @@ describe('taking over an existing SAM', () => {
     // staging2 keeps its state in staging's bucket; it must not be adoptable by name guessing.
     account({
       routes: [{ pattern: 'api.example.com/*', script: 'sam2-api-staging2' }],
-      buckets: ['sam-pulumi-state'],
+      buckets: ['sam-pulumi-state', 'sam2-staging2-assets'],
     });
     const plan = await previewAdoption('private', config);
     expect(plan.adoption).toBeUndefined();
-    expect(plan.conflicts[0]?.type).toBe('adoption');
+    expect(plan.conflicts).toEqual([
+      {
+        name: 'no deploy state bucket named sam2-pulumi-state or sam2-pulumi-state-staging2',
+        type: 'adoption',
+      },
+    ]);
+  });
+
+  it('uses the state bucket the owner names, for a deployment that set PULUMI_STATE_BUCKET', async () => {
+    account({ buckets: ['team-deploy-state', 'sam-prod-assets'] });
+    // Control: without the name, neither conventional bucket exists.
+    expect((await previewAdoption('private', config)).adoption).toBeUndefined();
+    const plan = await previewAdoption('private', { ...config, stateBucket: 'team-deploy-state' });
+    expect(plan.conflicts).toEqual([]);
+    expect(plan.adoption).toEqual({
+      prefix: 'sam',
+      environment: 'production',
+      stateBucket: 'team-deploy-state',
+    });
+  });
+
+  it('never falls back to a conventional bucket when the named one is missing', async () => {
+    account({ buckets: ['sam-pulumi-state', 'sam-prod-assets'] });
+    const plan = await previewAdoption('private', { ...config, stateBucket: 'team-deploy-state' });
+    expect(plan.adoption).toBeUndefined();
+    expect(plan.conflicts).toEqual([
+      { name: 'no deploy state bucket named team-deploy-state', type: 'adoption' },
+    ]);
+  });
+
+  it('refuses a malformed bucket name before asking Cloudflare anything', async () => {
+    const fetch = account();
+    for (const stateBucket of ['../zones', 'Bad_Bucket', 'ab', 7])
+      await expect(previewAdoption('private', { ...config, stateBucket })).rejects.toThrow(
+        'bucket name'
+      );
+    expect(fetch).not.toHaveBeenCalled();
+    // Control: an empty name means "find it by its usual name".
+    expect((await previewAdoption('private', { ...config, stateBucket: '' })).adoption).toEqual(
+      expect.objectContaining({ stateBucket: 'sam-pulumi-state' })
+    );
+  });
+
+  it.each([
+    [
+      'a stack that itself contains -api-',
+      ['sam-pulumi-state', 'sam-blue-api-prod-assets'],
+      { prefix: 'sam', environment: 'blue-api-prod', stateBucket: 'sam-pulumi-state' },
+    ],
+    [
+      'a prefix that itself contains -api-',
+      ['sam-api-blue-pulumi-state', 'sam-api-blue-prod-assets'],
+      {
+        prefix: 'sam-api-blue',
+        environment: 'production',
+        stateBucket: 'sam-api-blue-pulumi-state',
+      },
+    ],
+  ])('reads an ambiguous Worker name by its assets bucket: %s', async (_name, buckets, target) => {
+    account({
+      routes: [{ pattern: 'api.example.com/*', script: 'sam-api-blue-api-prod' }],
+      buckets,
+    });
+    const plan = await previewAdoption('private', config);
+    expect(plan.conflicts).toEqual([]);
+    expect(plan.adoption).toEqual(target);
+  });
+
+  it('reports a Worker name that fits two existing deployments, and one that fits none', async () => {
+    const routes = [{ pattern: 'api.example.com/*', script: 'sam-api-blue-api-prod' }];
+    account({
+      routes,
+      buckets: ['sam-pulumi-state', 'sam-blue-api-prod-assets', 'sam-api-blue-prod-assets'],
+    });
+    expect((await previewAdoption('private', config)).conflicts).toEqual([
+      {
+        name: 'the Worker sam-api-blue-api-prod could be more than one SAM deployment',
+        type: 'adoption',
+      },
+    ]);
+    account({ routes, buckets: ['sam-pulumi-state'] });
+    const none = await previewAdoption('private', config);
+    expect(none.adoption).toBeUndefined();
+    expect(none.conflicts).toEqual([
+      {
+        name: 'no SAM assets bucket named sam-blue-api-prod-assets or sam-api-blue-prod-assets',
+        type: 'adoption',
+      },
+    ]);
   });
 
   it('scopes storage credentials to the adopted deployment’s buckets, not installer names', async () => {
@@ -152,7 +240,7 @@ it('accepts every name length a fork deployment may have (prefix up to 40, envir
   const environment = `e${'n'.repeat(61)}v`; // 63
   account({
     routes: [{ pattern: 'api.example.com/*', script: `${prefix}-api-${environment}` }],
-    buckets: [`${prefix}-pulumi-state`],
+    buckets: [`${prefix}-pulumi-state`, `${prefix}-${environment}-assets`],
   });
   const plan = await previewAdoption('private', config);
   expect(plan.adoption).toEqual({ prefix, environment, stateBucket: `${prefix}-pulumi-state` });

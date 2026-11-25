@@ -5,11 +5,8 @@ export async function installFixtureRoutes(
   page: Page,
   getState: () => string,
   setState: (value: string) => void,
-  previewState: { attempts: number } = { attempts: 0 },
-  installGate: { release: () => void; hold: Promise<void> } = {
-    release: () => {},
-    hold: Promise.resolve(),
-  }
+  previewState: { attempts: number },
+  installGate: { release: () => void; hold: Promise<void> }
 ) {
   await page.route('**/api/config', (r) =>
     r.fulfill({
@@ -52,7 +49,11 @@ export async function installFixtureRoutes(
     if (getState() === 'full-adopt') {
       // The browser must send the takeover request and passphrase exactly as typed.
       const body = r.request().postDataJSON() as Record<string, unknown>;
-      if (body.adopt !== true || body.statePassphrase !== 'existing state passphrase')
+      if (
+        body.adopt !== true ||
+        body.statePassphrase !== 'existing state passphrase' ||
+        body.stateBucket !== 'team-deploy-state'
+      )
         return r.fulfill({ status: 400, json: { error: 'takeover inputs were not sent' } });
       return r.fulfill({
         json: {
@@ -62,7 +63,11 @@ export async function installFixtureRoutes(
             workersDev: { action: 'preserve', subdomain: 'sam-account' },
             hostnames: ['api.sam.example.com', 'app.sam.example.com'],
             conflicts: [],
-            adoption: { prefix: 'sam', environment: 'production', stateBucket: 'sam-pulumi-state' },
+            adoption: {
+              prefix: 'sam',
+              environment: 'production',
+              stateBucket: 'team-deploy-state',
+            },
           },
         },
       });

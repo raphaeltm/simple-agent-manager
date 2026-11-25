@@ -146,10 +146,14 @@ your fork's workflows are no longer needed.
    passes through the installer, which drops its copy at handoff, and is then kept only as a secret
    of the installation service in your account. A wrong passphrase stops the takeover at its first
    step, before it changes anything.
-3. **Review** finds the deployment from its API Worker route and its deploy-state bucket
-   (`<prefix>-pulumi-state`, or `<prefix>-pulumi-state-<environment>`) and shows what it will take
-   over. If it can't identify exactly one deployment, it stops there.
-4. Create the installation service, open it, then tick **Check and take over this existing
+3. Only if your deployment sets `PULUMI_STATE_BUCKET`: enter that bucket's name under **Its
+   deploy-state bucket**. Otherwise leave it empty.
+4. **Review** finds the deployment from its API Worker route (`<prefix>-api-<stack>`) and its assets
+   bucket (`<prefix>-<stack>-assets`), and its deploy state in the bucket you named or else in
+   `<prefix>-pulumi-state` or `<prefix>-pulumi-state-<environment>`
+   (`previewAdoption`, `apps/installer/src/adoption-plan.ts`). It shows what it will take over. If
+   it can't identify exactly one deployment, or the bucket you named does not exist, it stops there.
+5. Create the installation service, open it, then tick **Check and take over this existing
    installation** and select **Take over SAM**.
 
 The takeover deploys the installer's approved source over your deployment, and it is careful to
@@ -179,9 +183,11 @@ approved source, so changes you made to the code in a fork are not kept.
 
 Takeover needs a SAM release that supports it: the service refuses a source whose installer
 protocol does not declare `adoption`, so an older engine can never install a second SAM over yours.
-A deployment whose deploy state lives in another installation's bucket (such as a secondary staging
-installation) is not found under the bucket names the takeover looks for, so it can't be taken
-over: its service would otherwise receive the key to the other installation's state.
+The installation service's storage credential covers the whole deploy-state bucket. A deployment
+whose deploy state lives in another installation's bucket (such as a secondary staging
+installation) is not found under the bucket names the takeover looks for, so it is not taken over
+by default. Naming that shared bucket yourself does allow it, and the service then holds the key
+to the other installation's state as well: give each deployment its own bucket first.
 
 ## Remove an installation
 

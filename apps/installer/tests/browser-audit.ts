@@ -100,6 +100,47 @@ async function auditFullChoose(page: Page) {
   await expect(page.locator('#mode-note')).toBeHidden();
   await expect(page.locator('#trust')).toBeHidden();
 }
+/** Opens the takeover opt-in and fills it: optional inputs, collapsed and unchecked by default. */
+async function fillTakeover(page: Page, bucket: string) {
+  await auditFullChoose(page);
+  await expect(page.locator('#adopt-details')).not.toHaveAttribute('open', '');
+  await page.locator('#adopt-details summary').click();
+  await expect(page.locator('#adopt-existing')).not.toBeChecked();
+  for (const id of ['#adopt-existing', '#state-passphrase', '#state-bucket'])
+    expect(await page.locator(id).evaluate((el) => (el as HTMLInputElement).required)).toBe(false);
+  await page.locator('#adopt-existing').check();
+  await page.locator('#state-passphrase').fill('existing state passphrase');
+  await page.locator('#state-bucket').fill(bucket);
+  // Nothing in the block may be clipped by the card: the page-level overflow check cannot see it.
+  const inside = await page.locator('#adopt-details').evaluate((details) => {
+    const box = details.getBoundingClientRect();
+    return [...details.querySelectorAll('input, label, p, code')].every((el) => {
+      const r = el.getBoundingClientRect();
+      return r.left >= box.left - 1 && r.right <= box.right + 1;
+    });
+  });
+  expect(inside).toBe(true);
+}
+/** The takeover review: inputs sent exactly, and an approval that is never pre-checked. */
+async function auditFullAdopt(page: Page) {
+  // Typed with stray capitals and spaces; the browser sends the bucket name normalized.
+  await fillTakeover(page, ' Team-Deploy-State ');
+  await page.locator('#preview').click();
+  await expect(page.locator('#review')).toBeVisible();
+  await expect(page.locator('#plan-summary-line')).toContainText(
+    'Your installation service will take over the SAM at app.sam.example.com in Account 1.'
+  );
+  await expect(page.locator('#confirm-full-copy')).toContainText(
+    'I approve the takeover itself there'
+  );
+  await expect(page.locator('#install')).toHaveText('Create my installation service\u00a0→');
+  await expect(page.locator('#plan-details summary')).toHaveText('What it will take over');
+  await page.locator('#plan-details summary').click();
+  await expect(page.locator('#plan-summary')).toContainText('Takes over');
+  await expect(page.locator('#plan-summary')).toContainText('team-deploy-state');
+  await expect(page.locator('#confirm-full')).not.toBeChecked();
+  await expect(page.locator('#install')).toBeDisabled();
+}
 async function auditScenario(page: Page, scenario: string, baseUrl: string) {
   if (scenario === 'cleanup')
     await page.evaluate(() =>
@@ -163,36 +204,10 @@ async function auditScenario(page: Page, scenario: string, baseUrl: string) {
     await expect(page.locator('#step-review')).toHaveAttribute('aria-current', 'step');
     await expect(page.locator('#step-review')).not.toHaveClass(/skipped/);
   }
-  if (scenario === 'full-adopt') {
-    await auditFullChoose(page);
-    // The takeover is an optional opt-in, collapsed by default and never required.
-    await expect(page.locator('#adopt-details')).not.toHaveAttribute('open', '');
-    await page.locator('#adopt-details summary').click();
-    await expect(page.locator('#adopt-existing')).not.toBeChecked();
-    expect(
-      await page.locator('#adopt-existing').evaluate((el) => (el as HTMLInputElement).required)
-    ).toBe(false);
-    expect(
-      await page.locator('#state-passphrase').evaluate((el) => (el as HTMLInputElement).required)
-    ).toBe(false);
-    await page.locator('#adopt-existing').check();
-    await page.locator('#state-passphrase').fill('existing state passphrase');
-    await page.locator('#preview').click();
-    await expect(page.locator('#review')).toBeVisible();
-    await expect(page.locator('#plan-summary-line')).toContainText(
-      'Your installation service will take over the SAM at app.sam.example.com in Account 1.'
-    );
-    await expect(page.locator('#confirm-full-copy')).toContainText(
-      'I approve the takeover itself there'
-    );
-    await expect(page.locator('#install')).toHaveText('Create my installation service\u00a0→');
-    await expect(page.locator('#plan-details summary')).toHaveText('What it will take over');
-    await page.locator('#plan-details summary').click();
-    await expect(page.locator('#plan-summary')).toContainText('Takes over');
-    await expect(page.locator('#plan-summary')).toContainText('sam-pulumi-state');
-    await expect(page.locator('#confirm-full')).not.toBeChecked();
-    await expect(page.locator('#install')).toBeDisabled();
-  }
+  // The longest bucket name R2 allows, to stress the takeover form at every width.
+  if (scenario === 'full-adopt-form')
+    await fillTakeover(page, `team-${'deploy-state-'.repeat(4)}bucket`);
+  if (scenario === 'full-adopt') await auditFullAdopt(page);
   if (scenario === 'full-conflict') {
     await auditFullChoose(page);
     await page.locator('#preview').click();
@@ -288,6 +303,7 @@ async function auditViewport(
     'choose',
     'full-choose',
     'full-review',
+    'full-adopt-form',
     'full-adopt',
     'full-conflict',
     'empty',

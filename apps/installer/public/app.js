@@ -108,7 +108,14 @@ $('confirm-full').addEventListener('change', () => {
 $('account-id').addEventListener('change', () => {
   if (state.fullInstaller) loadZones().catch((error) => message(error.message, 'error'));
 });
-['zone-id', 'base-domain', 'owner-email', 'adopt-existing', 'state-passphrase'].forEach((id) =>
+[
+  'zone-id',
+  'base-domain',
+  'owner-email',
+  'adopt-existing',
+  'state-passphrase',
+  'state-bucket',
+].forEach((id) =>
   $(id).addEventListener('input', () => {
     if (id === 'base-domain') $('base-domain-shown').textContent = $('base-domain').value;
     invalidatePlan();

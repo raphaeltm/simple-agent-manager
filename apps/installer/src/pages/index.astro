@@ -168,6 +168,18 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
                         kept only as a secret of the installation service in your account. Nothing
                         about your SAM changes until you approve the takeover there.
                       </p>
+                      <label for="state-bucket">Its deploy-state bucket (optional)</label
+                      ><input
+                        id="state-bucket"
+                        type="text"
+                        autocomplete="off"
+                        autocapitalize="none"
+                        spellcheck="false"
+                      />
+                      <p class="small">
+                        Only if your deployment sets <code>PULUMI_STATE_BUCKET</code>; otherwise
+                        leave it empty. Your installation service gets access to this whole bucket.
+                      </p>
                     </details>
                     <label for="owner-email">Your administrator email</label
                     ><input id="owner-email" type="email" autocomplete="email" />
