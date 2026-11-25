@@ -69,6 +69,7 @@ func TestSAMUsageLimitTextPath(t *testing.T) {
 		{"API error text", "API Error: 429 " + samAdminCapBody, samUsageLimitReason},
 		{"provider text", "Provider HTTP 429 Monthly cost cap exceeded. Adjust your cap in Settings > Usage.", samUsageLimitReason},
 		{"round-trip of the code", samUsageLimitReason, samUsageLimitReason},
+		{"adapter wire shape without errorKind", "Internal error: API Error: Request rejected (429) · Monthly cost cap exceeded. Adjust your cap in Settings > Usage.", samUsageLimitReason},
 		{"control: provider 429", "API Error: 429 " + providerRateBody, "provider_overloaded"},
 		{"control: provider 503", "API Error: HTTP 503 overloaded", "provider_overloaded"},
 		{"control: marker in a URL", "Provider HTTP 429 rate limit url=https://evil.example/monthly cost cap exceeded", "provider_overloaded"},

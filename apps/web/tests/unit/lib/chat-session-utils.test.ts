@@ -291,6 +291,12 @@ describe('getAttentionState', () => {
 
   it.each([
     ['task failed', { task: { id: 't-1', status: 'failed' } }, 'failed'],
+    // SAM's AI usage limit ended the task: a failure the owner must see, not a normal stop.
+    [
+      'task failed on the SAM AI usage limit',
+      { task: { id: 't-1', status: 'failed', errorMessage: 'sam_ai_usage_limit_reached' } },
+      'failed',
+    ],
     ['task completed', { task: { id: 't-1', status: 'completed' } }, 'completed'],
     ['task cancelled', { task: { id: 't-1', status: 'cancelled' } }, 'stopped'],
     ['session failed', { status: 'failed' }, 'error'],

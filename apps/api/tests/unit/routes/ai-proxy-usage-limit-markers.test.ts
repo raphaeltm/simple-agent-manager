@@ -2,8 +2,11 @@
  * The VM agent tells a SAM AI usage-limit refusal from a provider overload by the refusal's
  * message (packages/vm-agent/internal/acp/sam_usage_limit.go, samUsageLimitMarkers). Both are
  * 429s, so if a message here drifts away from those markers, users see "Provider overloaded"
- * again (idea 01M89JXTFHW4W3PQ65GTED6D0K). Keep this list identical to the Go one.
+ * again (idea 01M89JXTFHW4W3PQ65GTED6D0K). The markers are read from the Go source itself.
  */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { monthlyCostCapMessage } from '@simple-agent-manager/ai-proxy';
 import { describe, expect, it } from 'vitest';
 
@@ -13,11 +16,21 @@ import {
   openaiUsageGateError,
 } from '../../../src/routes/ai-proxy-passthrough-errors';
 
-const GO_MARKERS = [
-  'monthly ai spending limit reached',
-  'monthly cost cap exceeded',
-  'daily token budget exceeded',
-];
+/** The marker list as the VM agent compiles it, read from its source rather than copied. */
+function goMarkers(): string[] {
+  const source = readFileSync(
+    resolve(__dirname, '../../../../../packages/vm-agent/internal/acp/sam_usage_limit.go'),
+    'utf8'
+  );
+  const block = /var samUsageLimitMarkers = \[\]string\{([^}]*)\}/.exec(source)?.[1] ?? '';
+  return [...block.matchAll(/"([^"]+)"/g)].map((m) => m[1]!);
+}
+const GO_MARKERS = goMarkers();
+
+it('reads the VM agent marker list (a broken parse cannot pass as an empty list)', () => {
+  expect(GO_MARKERS).toHaveLength(3);
+  expect(GO_MARKERS.every((m) => m === m.toLowerCase())).toBe(true);
+});
 
 const administrator = { allowed: false, limitSource: 'administrator' } as Parameters<
   typeof monthlyCostCapMessage

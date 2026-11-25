@@ -47,7 +47,8 @@ func isSAMUsageLimitText(message string) bool {
 // apiError429 is the terminal API error prefix the pinned adapters give an HTTP 429.
 func apiError429(message string) bool {
 	text := strings.ToLower(message)
-	for _, prefix := range []string{internalAPIErrorPrefix + "429", apiErrorPrefix + "429"} {
+	// "request rejected (429)" is how claude-agent-acp 0.102.0 words it (sam_usage_limit_live_test.go).
+	for _, prefix := range []string{internalAPIErrorPrefix + "429", apiErrorPrefix + "429", internalAPIErrorPrefix + "request rejected (429)", apiErrorPrefix + "request rejected (429)"} {
 		if strings.HasPrefix(text, prefix) {
 			return true
 		}

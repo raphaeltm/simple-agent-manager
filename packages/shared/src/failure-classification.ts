@@ -175,7 +175,9 @@ const FAILURE_RULES: FailureRule[] = [
     guidance:
       'Retrying will not help until the limit resets. Check Settings > Usage, or ask an administrator to raise the limit.',
     retryable: false,
-    diagnosable: false,
+    // A task that stops on its usage limit has failed: the inbox system-error item and the
+    // failed-session grouping both read `diagnosable` (inbox/system-errors.ts, chat-session-utils.ts).
+    diagnosable: true,
     patterns: [/^sam_ai_usage_limit_reached$/],
   },
   {

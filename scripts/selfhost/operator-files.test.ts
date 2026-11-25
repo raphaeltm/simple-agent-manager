@@ -159,6 +159,12 @@ describe('checkoutWithTrackedModes under umask 077', () => {
     expect(mode(path)).toBe(0o664);
   });
 
+  it('keeps setgid on a shared checkout directory while making it traversable', () => {
+    chmodSync(join(repo, KEY_AGENT_DIR), 0o2700);
+    restoreTrackedModes(gitUnderUmask077);
+    expect(statSync(join(repo, KEY_AGENT_DIR)).mode & 0o7777).toBe(0o2755);
+  });
+
   it('leaves untracked files alone (operator state and keys keep their own modes)', () => {
     writeFileSync(join(repo, 'untracked-secret'), 'x', { mode: 0o600 });
     checkoutWithTrackedModes(gitUnderUmask077, newRef, (m) => logs.push(m));

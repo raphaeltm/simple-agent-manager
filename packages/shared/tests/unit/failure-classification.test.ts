@@ -173,7 +173,7 @@ describe('SAM AI usage limit', () => {
       explanation: expect.stringContaining('monthly spending limit'),
       guidance: expect.stringContaining('Settings > Usage'),
       retryable: false,
-      diagnosable: false,
+      diagnosable: true,
     });
   });
 

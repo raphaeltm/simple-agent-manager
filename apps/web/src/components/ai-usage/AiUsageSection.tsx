@@ -87,8 +87,8 @@ export function AiUsageSection() {
           <Bot className="w-10 h-10 mx-auto mb-3 text-fg-muted" aria-hidden="true" />
           <Body className="text-fg-muted font-medium">No LLM usage yet</Body>
           <Body className="text-fg-muted text-sm mt-1">
-            Usage from model calls made through SAM will appear here. Calls with your own API keys
-            or subscriptions are not tracked here.
+            Usage from model calls made through SAM will appear here. Calls made directly to a
+            provider, outside SAM, are not tracked.
           </Body>
         </Card>
       )}

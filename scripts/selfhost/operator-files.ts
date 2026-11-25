@@ -88,9 +88,12 @@ export function restoreTrackedModes(run: Runner): ModeRepair {
     try {
       const stat = lstatSync(path, { throwIfNoEntry: false });
       if (!stat || !(kind === 'file' ? stat.isFile() : stat.isDirectory())) return;
-      if (want(stat.mode & 0o777) === (stat.mode & 0o777)) return;
+      // 0o7777 keeps setuid/setgid/sticky: a shared checkout's setgid directories must keep
+      // passing their group to later checkouts.
+      const mode = stat.mode & 0o7777;
+      if (want(mode) === mode) return;
       if (!inside(path)) throw new Error('outside the repository');
-      chmodSync(path, want(stat.mode & 0o777));
+      chmodSync(path, want(mode));
       repair.changed++;
     } catch {
       repair.failed.push(relative);
