@@ -1107,6 +1107,12 @@ export function getApiWorkerVars(
     WWW_PAGES_PROJECT_NAME: `${DEPLOYMENT_CONFIG.prefix}-www`,
     // Deployment environment name (staging | production); used for diagnostics and node labels
     ENVIRONMENT: DEPLOYMENT_CONFIG.getEnvironmentFromStack(stack),
+    // Test-only fake AI upstream (apps/api/src/services/ai-test-upstream.ts), so staging can prove
+    // AI metering through its gateway with no AI key. Staging stacks only: never emitted for any
+    // other stack, and the Worker also refuses it outside its ENVIRONMENT allow-list.
+    ...(DEPLOYMENT_CONFIG.getEnvironmentFromStack(stack) === 'staging'
+      ? { AI_TEST_UPSTREAM_ENABLED: 'true' }
+      : {}),
     // Artifacts is disabled by default and enabled only with the generated binding.
     ARTIFACTS_ENABLED: includeArtifactsBinding ? 'true' : 'false',
     // Plaintext by design: first-run admins read this once from the CF dashboard. Inside

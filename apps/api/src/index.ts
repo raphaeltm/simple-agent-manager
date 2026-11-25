@@ -80,6 +80,7 @@ import { agentsCatalogRoutes } from './routes/agents-catalog';
 import { aiProxyRoutes } from './routes/ai-proxy';
 import { aiProxyAnthropicRoutes } from './routes/ai-proxy-anthropic';
 import { aiProxyPassthroughRoutes } from './routes/ai-proxy-passthrough';
+import { AI_TEST_UPSTREAM_MOUNT_PATH, aiTestUpstreamRoutes } from './routes/ai-test-upstream-route';
 import { analyticsIngestRoutes } from './routes/analytics-ingest';
 import { apiTokenRoutes } from './routes/api-tokens';
 import { artifactsConfigRoutes } from './routes/artifacts-config';
@@ -516,6 +517,8 @@ app.route('/api/gcp', gcpRoutes);
 app.route('/ai/v1', aiProxyRoutes);
 app.route('/ai/anthropic/v1', aiProxyAnthropicRoutes);
 app.route('/ai/proxy', aiProxyPassthroughRoutes);
+// Test-only fake upstream for AI Gateway custom-provider tests; 404 unless the deploy locks open.
+app.route(AI_TEST_UPSTREAM_MOUNT_PATH, aiTestUpstreamRoutes);
 app.route('/auth/google', googleAuthRoutes);
 // MCP endpoint CORS override — MCP uses Bearer token auth (not cookies/sessions),
 // so it needs credentials: false + origin: '*' to allow VM agent requests from any origin.

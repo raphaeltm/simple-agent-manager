@@ -211,6 +211,30 @@ describe('sync wrangler config', () => {
     }
   );
 
+  it('emits AI_TEST_UPSTREAM_ENABLED for staging stacks only, never production', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 'sam-test');
+    expect(getApiWorkerVars({}, outputs, 'staging', 'analytics-dataset', true)).toMatchObject({
+      AI_TEST_UPSTREAM_ENABLED: 'true',
+      ENVIRONMENT: 'staging',
+    });
+    for (const stack of ['prod', 'dev', 'main', 'live']) {
+      expect(getApiWorkerVars({}, outputs, stack, 'analytics-dataset', true)).not.toHaveProperty(
+        'AI_TEST_UPSTREAM_ENABLED'
+      );
+    }
+    // A checked-in wrangler.toml value cannot turn it on for production either: the generated
+    // value is staging-only and the Worker refuses it outside its ENVIRONMENT allow-list.
+    expect(
+      getApiWorkerVars(
+        { vars: { AI_TEST_UPSTREAM_ENABLED: 'true' } } as never,
+        outputs,
+        'prod',
+        'analytics-dataset',
+        true
+      ).ENVIRONMENT
+    ).toBe('production');
+  });
+
   it('omits the default SAM model binding and forwards a logged explicit override', () => {
     vi.stubEnv('RESOURCE_PREFIX', 'sam-test');
     vi.stubEnv('SAM_MODEL', 'claude-sonnet-5');

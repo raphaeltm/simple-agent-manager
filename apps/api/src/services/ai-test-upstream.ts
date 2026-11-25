@@ -101,6 +101,13 @@ function costPerCallUsd(raw: unknown): number {
   return cents / 100;
 }
 
+/** The configured list-price cost of one fake call, in USD (`aiProxy.testUpstreamCostPerCallCents`). */
+export async function resolveAiTestUpstreamCostPerCallUsd(env: Env): Promise<number> {
+  return costPerCallUsd(
+    await resolveAdminSetting(env, AI_TEST_UPSTREAM_COST_PER_CALL_CENTS_SETTING)
+  );
+}
+
 /**
  * The fake upstream for this caller, or null when the real upstream must be used. A failed
  * settings read resolves to the default (an empty list), so it falls back to the real upstream.
@@ -119,9 +126,7 @@ export async function resolveAiTestUpstream(
     log.info('ai_proxy.test_upstream_not_selected', { userId, reason: 'user_not_listed' });
     return null;
   }
-  const cost = costPerCallUsd(
-    await resolveAdminSetting(env, AI_TEST_UPSTREAM_COST_PER_CALL_CENTS_SETTING)
-  );
+  const cost = await resolveAiTestUpstreamCostPerCallUsd(env);
   log.info('ai_proxy.test_upstream_selected', {
     userId,
     environment: env.ENVIRONMENT,
