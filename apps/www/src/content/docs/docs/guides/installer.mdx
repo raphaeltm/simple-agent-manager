@@ -152,7 +152,9 @@ your fork's workflows are no longer needed.
    bucket (`<prefix>-<stack>-assets`), and its deploy state in the bucket you named or else in
    `<prefix>-pulumi-state` or `<prefix>-pulumi-state-<environment>`
    (`previewAdoption`, `apps/installer/src/adoption-plan.ts`). It shows what it will take over. If
-   it can't identify exactly one deployment, or the bucket you named does not exist, it stops there.
+   it can't identify exactly one deployment and one deploy-state bucket, it stops there: for
+   example when the bucket you named does not exist, or when both usual names exist and you named
+   neither.
 5. Create the installation service, open it, then tick **Check and take over this existing
    installation** and select **Take over SAM**.
 

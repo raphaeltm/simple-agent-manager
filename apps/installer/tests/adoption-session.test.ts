@@ -212,3 +212,36 @@ it('takes over a deployment with its own state bucket name, re-checked at instal
   expect(storage).toContain('_default_team-deploy-state');
   expect(storage).not.toContain('_default_sam-pulumi-state');
 });
+
+it.each([
+  ['the named state bucket is gone', 'team-deploy-state', () => ['sam-prod-assets']],
+  [
+    'a second conventional state bucket appeared',
+    undefined,
+    () => ['sam-pulumi-state', 'sam-pulumi-state-production', 'sam-prod-assets'],
+  ],
+])('refuses to install when, since the review, %s', async (_name, stateBucket, after) => {
+  const buckets = stateBucket
+    ? [stateBucket, 'sam-prod-assets']
+    : ['sam-pulumi-state', 'sam-prod-assets'];
+  const w = world(buckets);
+  const preview = await w.call('/preview', {
+    ...settings,
+    adopt: true,
+    statePassphrase: passphrase,
+    ...(stateBucket ? { stateBucket } : {}),
+  });
+  const { plan } = (await preview.json()) as {
+    plan: { fingerprint: string; conflicts: unknown[] };
+  };
+  expect(plan.conflicts).toEqual([]);
+  buckets.splice(0, buckets.length, ...after());
+  const install = await w.call('/install', {
+    accountId,
+    confirmed: true,
+    fingerprint: plan.fingerprint,
+  });
+  expect(install.status).toBe(409);
+  expect(w.upload()).toBeUndefined();
+  expect(w.tokens).toEqual([]);
+});

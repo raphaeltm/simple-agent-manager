@@ -138,6 +138,9 @@ async function auditFullAdopt(page: Page) {
   await page.locator('#plan-details summary').click();
   await expect(page.locator('#plan-summary')).toContainText('Takes over');
   await expect(page.locator('#plan-summary')).toContainText('team-deploy-state');
+  await expect(page.locator('#plan-summary')).toContainText(
+    "Your installation service gets access to that whole bucket. The deployment's data"
+  );
   await expect(page.locator('#confirm-full')).not.toBeChecked();
   await expect(page.locator('#install')).toBeDisabled();
 }

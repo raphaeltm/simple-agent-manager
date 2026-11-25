@@ -194,3 +194,17 @@ Proof target, because staging2 shares staging's state and passphrase (finding 10
   `auditFullAdopt`), S3358/S6653 in `carryDeployedVars`, S7737 in `browser-audit-routes.ts`.
 - `deploy` check (staging installer deploy) fails only at its health poll from GitHub's runners,
   which Cloudflare blocks; the installer answers 200 with the pushed commit from elsewhere.
+
+## Security review, round 2 (2026-11-25, of 7e6d18fea..6adc28fd5)
+
+No CRITICAL or HIGH. Fixed:
+- LOW: a Worker literally named `<prefix>-api-production` read as the `prod` stack's deployment;
+  a reading must now name the Worker the engine would deploy (`deploymentReadings`).
+- LOW: bucket names with dots passed review and failed late at credential minting; `BUCKET_NAME`
+  now matches `installationCredentialBuckets`.
+- LOW: install re-review pinned the bucket found at review, so a second conventional bucket
+  appearing in between went unnoticed. The session remembers only a bucket the owner named
+  (`adoptionStateBucket`), and two conventional buckets are now a conflict that naming one resolves.
+- MEDIUM-to-LOW: the review screen now says the service gets access to the whole state bucket.
+- Guards verified discriminating by deletion; tests added for each, including a named bucket
+  that disappears between review and install.

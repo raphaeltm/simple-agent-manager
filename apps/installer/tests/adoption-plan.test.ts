@@ -141,7 +141,7 @@ describe('taking over an existing SAM', () => {
 
   it('refuses a malformed bucket name before asking Cloudflare anything', async () => {
     const fetch = account();
-    for (const stateBucket of ['../zones', 'Bad_Bucket', 'ab', 7])
+    for (const stateBucket of ['../zones', 'Bad_Bucket', 'my.state', 'ab', 7])
       await expect(previewAdoption('private', { ...config, stateBucket })).rejects.toThrow(
         'bucket name'
       );
@@ -150,6 +150,36 @@ describe('taking over an existing SAM', () => {
     expect((await previewAdoption('private', { ...config, stateBucket: '' })).adoption).toEqual(
       expect.objectContaining({ stateBucket: 'sam-pulumi-state' })
     );
+  });
+
+  it('asks which bucket when both conventional state buckets exist, and takes the named one', async () => {
+    const buckets = ['sam-pulumi-state', 'sam-pulumi-state-production', 'sam-prod-assets'];
+    account({ buckets });
+    const unnamed = await previewAdoption('private', config);
+    expect(unnamed.adoption).toBeUndefined();
+    expect(unnamed.conflicts).toEqual([
+      {
+        name: 'two deploy state buckets, sam-pulumi-state and sam-pulumi-state-production: enter the one your deployment uses',
+        type: 'adoption',
+      },
+    ]);
+    const named = await previewAdoption('private', {
+      ...config,
+      stateBucket: 'sam-pulumi-state-production',
+    });
+    expect(named.conflicts).toEqual([]);
+    expect(named.adoption?.stateBucket).toBe('sam-pulumi-state-production');
+  });
+
+  it('does not read a Worker named for a stack the engine would deploy under another name', async () => {
+    // `production` deploys as the `prod` stack, so sam-api-production is not that deployment's
+    // Worker even though the deployment's buckets exist.
+    account({ routes: [{ pattern: 'api.example.com/*', script: 'sam-api-production' }] });
+    const plan = await previewAdoption('private', config);
+    expect(plan.adoption).toBeUndefined();
+    expect(plan.conflicts).toEqual([
+      { name: 'api.example.com is not served by a SAM API Worker', type: 'adoption' },
+    ]);
   });
 
   it.each([
@@ -230,6 +260,7 @@ describe('taking over an existing SAM', () => {
       { prefix: 'Bad Prefix', environment: 'production', stateBucket: 'sam-pulumi-state' },
       { prefix: 'sam', environment: 'prod;rm', stateBucket: 'sam-pulumi-state' },
       { prefix: 'sam', environment: 'production', stateBucket: 'Bad_Bucket' },
+      { prefix: 'sam', environment: 'production', stateBucket: 'my.state' },
     ])
       expect(() => validateInstallationConfig({ ...config, adoption })).toThrow('takeover');
   });

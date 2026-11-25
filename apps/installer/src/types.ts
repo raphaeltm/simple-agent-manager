@@ -31,6 +31,8 @@ export interface Session {
   plan?: import('./installation-plan').InstallationPlan;
   /** A takeover's existing deploy-state passphrase, kept only in this session's private storage. */
   adoptionPassphrase?: string;
+  /** The deploy-state bucket the owner named for a takeover, when they named one. */
+  adoptionStateBucket?: string;
   credentials?: import('./credentials').InstallationCredentials;
   credentialTokenIds?: string[];
   job?: {

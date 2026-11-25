@@ -60,15 +60,19 @@ export class SessionInstallation {
         },
         400
       );
+    // Only a takeover has a state bucket to name; empty means "find it by its usual name".
+    const named = adopt === true && typeof stateBucket === 'string' && stateBucket !== '';
     const plan = await (adopt === true ? previewAdoption : previewInstallation)(session.token, {
       ...settings,
-      ...(adopt === true ? { stateBucket } : {}),
+      ...(named ? { stateBucket } : {}),
       sourceCommit: this.env.INSTALL_SOURCE_COMMIT,
     });
     session.plan = plan;
     // Never part of the plan: the plan is returned to the browser and becomes INSTALLATION_CONFIG.
     if (adopt === true) session.adoptionPassphrase = statePassphrase as string;
     else delete session.adoptionPassphrase;
+    if (named) session.adoptionStateBucket = stateBucket;
+    else delete session.adoptionStateBucket;
     await this.ctx.storage.put('session', session);
     return json({ plan });
   }
@@ -191,7 +195,7 @@ export class SessionInstallation {
       );
     if (session.plan.adoption && !validPassphrase(session.adoptionPassphrase))
       return json({ error: 'Review the takeover again.' }, 409);
-    const fresh = await planAgain(session.token, session.plan);
+    const fresh = await planAgain(session.token, session.plan, session.adoptionStateBucket);
     if (fresh.fingerprint !== fingerprint || fresh.conflicts.length)
       return json({ error: 'The installation plan changed. Review it again.' }, 409);
     if (session.job && session.job.fingerprint !== session.plan.fingerprint)
@@ -202,10 +206,13 @@ export class SessionInstallation {
 }
 
 /** Re-reviews an approved plan the same way it was first reviewed. */
-function planAgain(token: string, plan: InstallationPlan): Promise<InstallationPlan> {
-  // A takeover names the state bucket it found, so a bucket the owner named is checked again.
+function planAgain(
+  token: string,
+  plan: InstallationPlan,
+  namedStateBucket?: string
+): Promise<InstallationPlan> {
   return plan.adoption
-    ? previewAdoption(token, { ...plan, stateBucket: plan.adoption.stateBucket })
+    ? previewAdoption(token, { ...plan, stateBucket: namedStateBucket })
     : previewInstallation(token, plan);
 }
 

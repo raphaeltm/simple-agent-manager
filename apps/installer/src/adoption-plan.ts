@@ -43,12 +43,17 @@ export async function previewAdoption(token: string, input: unknown): Promise<In
   else {
     const candidates = named
       ? [named]
-      : // The fork workflow's default first (workflow-resource-names.mjs), then the installer's.
+      : // The fork workflow's default (workflow-resource-names.mjs) and the installer's.
         [`${found.prefix}-pulumi-state`, `${found.prefix}-pulumi-state-${found.environment}`];
-    const stateBucket = await firstBucket(token, requested.accountId, candidates);
+    const [stateBucket, another] = await existingBuckets(token, requested.accountId, candidates);
     if (!stateBucket)
       conflicts.push({
         name: `no deploy state bucket named ${candidates.join(' or ')}`,
+        type: 'adoption',
+      });
+    else if (another)
+      conflicts.push({
+        name: `two deploy state buckets, ${stateBucket} and ${another}: enter the one your deployment uses`,
         type: 'adoption',
       });
     else adoption = { ...found, stateBucket };
@@ -82,8 +87,15 @@ function deploymentReadings(script: string): Deployment[] {
   ) {
     const prefix = script.slice(0, at);
     const stack = script.slice(at + WORKER_SEPARATOR.length);
-    if (DEPLOYMENT_PREFIX.test(prefix) && DEPLOYMENT_STACK.test(stack))
-      readings.push({ prefix, environment: stack === 'prod' ? 'production' : stack });
+    const environment = stack === 'prod' ? 'production' : stack;
+    // The engine deploys the stack of this environment, so a stack literally named
+    // `production` (which it would deploy as `prod`) is not this Worker.
+    if (
+      DEPLOYMENT_PREFIX.test(prefix) &&
+      DEPLOYMENT_STACK.test(stack) &&
+      stackForEnvironment(environment) === stack
+    )
+      readings.push({ prefix, environment });
   }
   return readings;
 }
@@ -113,26 +125,28 @@ async function findDeployment(
   // reading whose assets bucket exists is the deployment; the name alone cannot say.
   const real: Deployment[] = [];
   for (const reading of readings)
-    if (await firstBucket(token, accountId, [assetsBucket(reading)])) real.push(reading);
+    if ((await existingBuckets(token, accountId, [assetsBucket(reading)])).length)
+      real.push(reading);
   if (real.length > 1) return `the Worker ${script} could be more than one SAM deployment`;
   return real[0] ?? `no SAM assets bucket named ${readings.map(assetsBucket).join(' or ')}`;
 }
 
-/** The first of these R2 buckets that exists in the account. */
-async function firstBucket(
+/** Which of these R2 buckets exist in the account, in the order given. */
+async function existingBuckets(
   token: string,
   accountId: string,
   names: string[]
-): Promise<string | undefined> {
+): Promise<string[]> {
+  const existing: string[] = [];
   for (const name of names) {
     try {
       await cloudflare(token, `/accounts/${accountId}/r2/buckets/${name}`);
-      return name;
+      existing.push(name);
     } catch (error) {
       if (!(error instanceof CloudflareError) || error.status !== 404) throw error;
     }
   }
-  return undefined;
+  return existing;
 }
 
 /** Buckets a takeover's storage credential needs: its state, its assets and the build cache. */

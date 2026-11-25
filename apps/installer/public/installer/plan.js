@@ -79,7 +79,7 @@ function renderCreatedDetails(plan) {
     appendDetailRow(
       list,
       'Takes over',
-      `The existing deployment named ${plan.adoption.prefix} (${plan.adoption.environment}), with its deploy state in ${plan.adoption.stateBucket}. Its data, keys, settings and users stay as they are.`
+      `The existing deployment named ${plan.adoption.prefix} (${plan.adoption.environment}), with its deploy state in ${plan.adoption.stateBucket}. Your installation service gets access to that whole bucket. The deployment's data, keys, settings and users stay as they are.`
     );
   appendDetailRow(
     list,
