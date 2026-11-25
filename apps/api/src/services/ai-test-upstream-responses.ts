@@ -162,21 +162,22 @@ function openAIChat(model: string, stream: boolean, usage: FakeUsage): Response 
 }
 
 function openAIResponses(model: string, stream: boolean, usage: FakeUsage): Response {
+  const itemId = 'msg_sam_test_upstream';
+  const textPart = { type: 'output_text', text: FAKE_UPSTREAM_TEXT, annotations: [] };
+  const message = {
+    id: itemId,
+    type: 'message',
+    role: 'assistant',
+    status: 'completed',
+    content: [textPart],
+  };
   const response = {
     id: 'resp_sam_test_upstream',
     object: 'response',
     created_at: Math.floor(Date.now() / 1000),
     status: 'completed',
     model,
-    output: [
-      {
-        id: 'msg_sam_test_upstream',
-        type: 'message',
-        role: 'assistant',
-        status: 'completed',
-        content: [{ type: 'output_text', text: FAKE_UPSTREAM_TEXT, annotations: [] }],
-      },
-    ],
+    output: [message],
     usage: {
       input_tokens: usage.inputTokens,
       output_tokens: usage.outputTokens,
@@ -184,17 +185,43 @@ function openAIResponses(model: string, stream: boolean, usage: FakeUsage): Resp
     },
   };
   if (!stream) return json(response);
+  // The full item lifecycle a real Responses stream sends. Clients such as Codex take the
+  // assistant message from `response.output_item.done`, not from the text deltas.
+  const part = { item_id: itemId, output_index: 0, content_index: 0 };
   return sse([
     event('response.created', {
       type: 'response.created',
       response: { ...response, status: 'in_progress', output: [], usage: null },
     }),
+    event('response.output_item.added', {
+      type: 'response.output_item.added',
+      output_index: 0,
+      item: { ...message, status: 'in_progress', content: [] },
+    }),
+    event('response.content_part.added', {
+      type: 'response.content_part.added',
+      ...part,
+      part: { ...textPart, text: '' },
+    }),
     event('response.output_text.delta', {
       type: 'response.output_text.delta',
-      item_id: 'msg_sam_test_upstream',
-      output_index: 0,
-      content_index: 0,
+      ...part,
       delta: FAKE_UPSTREAM_TEXT,
+    }),
+    event('response.output_text.done', {
+      type: 'response.output_text.done',
+      ...part,
+      text: FAKE_UPSTREAM_TEXT,
+    }),
+    event('response.content_part.done', {
+      type: 'response.content_part.done',
+      ...part,
+      part: textPart,
+    }),
+    event('response.output_item.done', {
+      type: 'response.output_item.done',
+      output_index: 0,
+      item: message,
     }),
     event('response.completed', { type: 'response.completed', response }),
   ]);

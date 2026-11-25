@@ -91,6 +91,36 @@ describe('buildFakeUpstreamResponse', () => {
     expect(await response.text()).toContain(FAKE_UPSTREAM_TEXT);
   });
 
+  it('streams the full Responses item lifecycle Codex consumes (output_item.done carries the message)', async () => {
+    const response = buildFakeUpstreamResponse('/v1/responses', body(true), 0.4);
+    const events = (await response.text())
+      .split('\n\n')
+      .filter(Boolean)
+      .map((frame) => JSON.parse(frame.split('\ndata: ')[1]!) as Record<string, unknown>);
+    expect(events.map((e) => e.type)).toEqual([
+      'response.created',
+      'response.output_item.added',
+      'response.content_part.added',
+      'response.output_text.delta',
+      'response.output_text.done',
+      'response.content_part.done',
+      'response.output_item.done',
+      'response.completed',
+    ]);
+    // Same contract as the pinned-Codex fixture (vm-agent session_host_adapter_process_helpers_test.go).
+    expect(events[6]).toMatchObject({
+      item: {
+        type: 'message',
+        role: 'assistant',
+        status: 'completed',
+        content: [{ type: 'output_text', text: FAKE_UPSTREAM_TEXT }],
+      },
+    });
+    expect(events[7]).toMatchObject({
+      response: { status: 'completed', usage: { input_tokens: 10 } },
+    });
+  });
+
   it('answers count_tokens with a fixed count', async () => {
     const response = buildFakeUpstreamResponse('/v1/messages/count_tokens', body(false), 0.4);
     expect(await response.json()).toEqual({ input_tokens: 10 });
