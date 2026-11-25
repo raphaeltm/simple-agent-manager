@@ -3,7 +3,7 @@
 exports[`profiles a full compact archive through the coordinator in real workerd 1`] = `
 {
   "phases": {
-    "D1:coordinator": 103,
+    "D1:coordinator": 104,
     "source:archiveSourceFlip": 8,
     "source:archiveSourceMarkRecoveryManifestPersisted": 2,
     "source:archiveSourceMarkTargetSealed": 2,
@@ -34,7 +34,7 @@ exports[`profiles a full compact archive through the coordinator in real workerd
     },
     "D1:coordinator:INSERT INTO project_data_session_locations ( project_id, session_id, location_state, owner_kind, owner_name, generation, migration_id, source_owner_name, target_owner_name, routing_schema_version, updated_at ) SELECT ?, ?, 'migrating', 'archive_shard', ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS ( SELECT 1 FROM project_data_session_locations WHERE project_id = ? AND session_id = ? AND location_state != 'root' ) ON CONFLICT(project_id, session_id) DO UPDATE SET location_state = CASE WHEN project_data_session_locations.location_state = 'root' THEN 'migrating' ELSE project_data_session_locations.location_state END, owner_kind = CASE WHEN project_data_session_locations.location_state = 'root' THEN 'archive_shard' ELSE project_data_session_locations.owner_kind END, owner_name = CASE WHEN project_data_session_locations.location_state = 'root' THEN excluded.owner_name ELSE project_data_session_locations.owner_name END, generation = CASE WHEN project_data_session_locations.location_state = 'root' THEN excluded.generation ELSE project_data_session_locations.generation END, migration_id = CASE WHEN project_data_session_locations.location_state = 'root' THEN excluded.migration_id ELSE project_data_session_locations.migration_id END, source_owner_name = CASE WHEN project_data_session_locations.location_state = 'root' THEN excluded.source_owner_name ELSE project_data_session_locations.source_owner_name END, target_owner_name = CASE WHEN project_data_session_locations.location_state = 'root' THEN excluded.target_owner_name ELSE project_data_session_locations.target_owner_name END, updated_at = CASE WHEN project_data_session_locations.location_state = 'root' THEN excluded.updated_at ELSE project_data_session_locations.updated_at END": {
       "calls": 1,
-      "rowsWritten": 4,
+      "rowsWritten": 5,
     },
     "D1:coordinator:INSERT OR IGNORE INTO project_data_archive_copy_checkpoints ( migration_id, table_name, storage_format, chunk_rows, chunk_bytes, next_ordinal, source_cursor, complete, copied_rows, copied_bytes, lease_epoch, updated_at ) VALUES (?, ?, ?, ?, ?, 0, NULL, 0, 0, 0, ?, ?)": {
       "calls": 3,
