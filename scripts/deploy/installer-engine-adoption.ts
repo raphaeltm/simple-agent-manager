@@ -39,13 +39,28 @@ export const PRESERVED_KEY_SECRETS = [
   'DEPLOY_SIGNING_PUBLIC_KEY',
 ] as const;
 
+/**
+ * Halves of one key. Keeping one half while writing Pulumi's other half would leave a pair that
+ * does not match, so if the Worker holds either half both are kept.
+ */
+const KEY_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ['JWT_PRIVATE_KEY', 'JWT_PUBLIC_KEY'],
+  ['VAPID_PRIVATE_KEY', 'VAPID_PUBLIC_KEY'],
+  ['DEPLOY_SIGNING_PRIVATE_KEY', 'DEPLOY_SIGNING_PUBLIC_KEY'],
+];
+const MAX_REFUSAL_LINE_CHARS = 300;
+
 /** Worker vars the engine computes for every deploy; a deployed value must never replace them. */
 const ENGINE_OWNED_VARS = new Set(['VM_AGENT_REQUIRED_VERSION']);
 
 /** A takeover refusal. Its tail names what would change; it never carries secret values. */
 export class AdoptionRefused extends EngineCommandFailure {
   constructor(lines: string[]) {
-    super(null, null, lines.slice(0, MAX_REFUSAL_LINES));
+    super(
+      null,
+      null,
+      lines.slice(0, MAX_REFUSAL_LINES).map((line) => line.slice(0, MAX_REFUSAL_LINE_CHARS))
+    );
     this.message = 'Takeover refused';
   }
 }
@@ -124,14 +139,26 @@ export async function deployedWorkerOverrideVars(
   return vars;
 }
 
-/** Copies deployed overrides into the deploy environment without replacing a value already set. */
+/**
+ * Copies deployed overrides into the deploy environment without replacing a value already set.
+ * A deployed value equal to the approved source's own default (its `[vars]` entry, or the code
+ * default recorded for a var it omits) is not an override: carrying it would pin that default,
+ * so the installation would never receive a later release's new default.
+ */
 export function carryDeployedVars(
   env: NodeJS.ProcessEnv,
-  deployed: Record<string, string>
+  deployed: Record<string, string>,
+  defaults: { checkedIn: Record<string, unknown>; code: Readonly<Record<string, string>> }
 ): string[] {
+  const sourceDefault = (name: string) =>
+    Object.prototype.hasOwnProperty.call(defaults.checkedIn, name)
+      ? String(defaults.checkedIn[name])
+      : Object.prototype.hasOwnProperty.call(defaults.code, name)
+        ? defaults.code[name]
+        : undefined;
   const carried: string[] = [];
   for (const [name, value] of Object.entries(deployed)) {
-    if (env[name] !== undefined) continue;
+    if (env[name] !== undefined || sourceDefault(name) === value) continue;
     env[name] = value;
     carried.push(name);
   }
@@ -150,6 +177,8 @@ export async function existingPreservedKeySecrets(
       .map((entry) => entry?.name)
       .filter((name): name is string => typeof name === 'string')
   );
+  for (const pair of KEY_PAIRS)
+    if (pair.some((name) => present.has(name))) for (const name of pair) present.add(name);
   return PRESERVED_KEY_SECRETS.filter((name) => present.has(name));
 }
 

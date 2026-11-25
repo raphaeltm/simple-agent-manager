@@ -158,6 +158,12 @@ it('takes over an existing SAM: the passphrase reaches only the service’s secr
   expect(storage).toContain('_default_sam-pulumi-state');
   expect(storage).toContain('_default_sam-prod-assets');
   expect(storage).not.toMatch(/_default_s[a-f0-9]{6}-pulumi-state/);
+  // Handing off to the service drops the installer's own copy of the passphrase.
+  expect((w.values.get('session') as Session).adoptionPassphrase).toBe(passphrase);
+  expect((await w.call('/handoff', {})).status).toBe(200);
+  const after = w.values.get('session') as Session;
+  expect(after.adoptionPassphrase).toBeUndefined();
+  expect(JSON.stringify(after)).not.toContain(passphrase);
 });
 
 it('control: an ordinary review of a domain that already runs SAM is blocked, with no passphrase kept', async () => {

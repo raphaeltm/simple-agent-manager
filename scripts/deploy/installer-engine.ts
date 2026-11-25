@@ -35,6 +35,7 @@ import { prebuiltSteps } from './installer-engine-prebuilt-steps.js';
 import { verifyEngineReadiness } from './installer-engine-readiness.js';
 import { readContainerArtifact, verifyPublisherRuntime } from './installer-engine-runtime.js';
 import { prepareStateBackend } from './installer-engine-state.js';
+import { OMITTED_WORKER_VAR_DEFAULTS } from './worker-var-defaults.js';
 export * from './installer-engine-contract.js';
 export async function runInstallerEngine(
   input: unknown,
@@ -395,19 +396,23 @@ export async function runInstallerEngine(
     )
   );
   await phase('infrastructure', async () => {
-    await execute(
-      'bash',
-      [join(root, 'scripts/deploy/pulumi-refresh-safe.sh')],
-      join(root, 'infra')
-    );
+    // The takeover gate comes first: preview --refresh reads the live resources without writing
+    // the state, while the refresh below rewrites it.
     if (c.adoption?.takeover) {
-      const refused = refusedTakeoverSteps(JSON.parse(await pulumi('preview', '--json')));
+      const refused = refusedTakeoverSteps(
+        JSON.parse(await pulumi('preview', '--refresh', '--json'))
+      );
       if (refused.length)
         throw new AdoptionRefused([
           'The approved source would change these resources, so nothing was changed:',
           ...refused,
         ]);
     }
+    await execute(
+      'bash',
+      [join(root, 'scripts/deploy/pulumi-refresh-safe.sh')],
+      join(root, 'infra')
+    );
     await pulumi('up', '--yes', '--skip-preview');
   });
   let outputs: Record<string, unknown> = {};
@@ -430,7 +435,15 @@ export async function runInstallerEngine(
       // Keep what the deployment already runs with: its override vars, and its key secrets
       // (configure-secrets.sh leaves the names in PRESERVE_EXISTING_WORKER_SECRETS alone).
       const worker = { ...cloudflareAccess, worker: `${prefix}-api-${stack}` };
-      carryDeployedVars(env, await deployedWorkerOverrideVars(worker));
+      const checkedIn = (
+        TOML.parse(readFileSync(join(root, 'apps/api/wrangler.toml'), 'utf8')) as {
+          vars?: Record<string, unknown>;
+        }
+      ).vars;
+      carryDeployedVars(env, await deployedWorkerOverrideVars(worker), {
+        checkedIn: checkedIn ?? {},
+        code: OMITTED_WORKER_VAR_DEFAULTS,
+      });
       env.PRESERVE_EXISTING_WORKER_SECRETS = (await existingPreservedKeySecrets(worker)).join(',');
     }
     Object.assign(env, {
@@ -527,6 +540,8 @@ export async function runInstallerEngine(
           // An adopted deployment already has its administrators; an owner binding would lock
           // out every user but one (bootstrap-owner.ts). Empty leaves any existing value alone.
           BOOTSTRAP_OWNER_EMAIL: c.adoption ? '' : c.ownerEmail,
+          // An unset agent sign-in trust deletes the Worker's: an adopted deployment keeps its own.
+          ...(c.adoption ? { AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET: 'true' } : {}),
         },
       }
     );

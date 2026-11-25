@@ -60,6 +60,24 @@ async function installFixtureRoutes(
     r.fulfill({ json: { zones: [{ id: 'b'.repeat(32), name: 'example.com' }] } })
   );
   await page.route('**/api/session/preview', (r) => {
+    if (getState() === 'full-adopt') {
+      // The browser must send the takeover request and passphrase exactly as typed.
+      const body = r.request().postDataJSON() as Record<string, unknown>;
+      if (body.adopt !== true || body.statePassphrase !== 'existing state passphrase')
+        return r.fulfill({ status: 400, json: { error: 'takeover inputs were not sent' } });
+      return r.fulfill({
+        json: {
+          plan: {
+            sourceCommit: 'c'.repeat(40),
+            fingerprint: 'd'.repeat(64),
+            workersDev: { action: 'preserve', subdomain: 'sam-account' },
+            hostnames: ['api.sam.example.com', 'app.sam.example.com'],
+            conflicts: [],
+            adoption: { prefix: 'sam', environment: 'production', stateBucket: 'sam-pulumi-state' },
+          },
+        },
+      });
+    }
     if (getState() === 'full-expired')
       return r.fulfill({
         status: 401,
@@ -252,6 +270,8 @@ async function auditScenario(page: Page, scenario: string, baseUrl: string) {
     );
     await expect(page.locator('#plan-details')).toBeVisible();
     await expect(page.locator('#plan-summary')).toBeHidden();
+    await expect(page.locator('#install')).toHaveText('Install SAM in my account\u00a0→');
+    await expect(page.locator('#plan-details summary')).toHaveText('What will be created');
     await page.locator('#plan-details summary').click();
     await expect(page.locator('#plan-summary')).toContainText('sam-account.workers.dev (new)');
     await expect(page.locator('#plan-summary')).not.toContainText('Initialize account address');
@@ -263,6 +283,36 @@ async function auditScenario(page: Page, scenario: string, baseUrl: string) {
     await expect(page.locator('#install')).toBeEnabled();
     await expect(page.locator('#step-review')).toHaveAttribute('aria-current', 'step');
     await expect(page.locator('#step-review')).not.toHaveClass(/skipped/);
+  }
+  if (scenario === 'full-adopt') {
+    await auditFullChoose(page);
+    // The takeover is an optional opt-in, collapsed by default and never required.
+    await expect(page.locator('#adopt-details')).not.toHaveAttribute('open', '');
+    await page.locator('#adopt-details summary').click();
+    await expect(page.locator('#adopt-existing')).not.toBeChecked();
+    expect(
+      await page.locator('#adopt-existing').evaluate((el) => (el as HTMLInputElement).required)
+    ).toBe(false);
+    expect(
+      await page.locator('#state-passphrase').evaluate((el) => (el as HTMLInputElement).required)
+    ).toBe(false);
+    await page.locator('#adopt-existing').check();
+    await page.locator('#state-passphrase').fill('existing state passphrase');
+    await page.locator('#preview').click();
+    await expect(page.locator('#review')).toBeVisible();
+    await expect(page.locator('#plan-summary-line')).toContainText(
+      'Your installation service will take over the SAM at app.sam.example.com in Account 1.'
+    );
+    await expect(page.locator('#confirm-full-copy')).toContainText(
+      'I approve the takeover itself there'
+    );
+    await expect(page.locator('#install')).toHaveText('Create my installation service\u00a0→');
+    await expect(page.locator('#plan-details summary')).toHaveText('What it will take over');
+    await page.locator('#plan-details summary').click();
+    await expect(page.locator('#plan-summary')).toContainText('Takes over');
+    await expect(page.locator('#plan-summary')).toContainText('sam-pulumi-state');
+    await expect(page.locator('#confirm-full')).not.toBeChecked();
+    await expect(page.locator('#install')).toBeDisabled();
   }
   if (scenario === 'full-conflict') {
     await auditFullChoose(page);
@@ -359,6 +409,7 @@ async function auditViewport(
     'choose',
     'full-choose',
     'full-review',
+    'full-adopt',
     'full-conflict',
     'empty',
     'ready',

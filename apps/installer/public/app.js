@@ -170,9 +170,8 @@ void (async () => {
       $('full-permissions').hidden = false;
       $('installer-mode-note').textContent =
         'Experimental full installation: your maintenance service builds and deploys the approved SAM source in your account. Review the domain, permissions and usage charges before continuing.';
-      ['zone-id', 'base-domain', 'owner-email', 'adopt-existing', 'state-passphrase'].forEach(
-        (id) => ($(id).required = true)
-      );
+      // The takeover inputs are an optional opt-in, so they are not required.
+      ['zone-id', 'base-domain', 'owner-email'].forEach((id) => ($(id).required = true));
     }
     $('source').href = config.sourceUrl;
     $('docs').href = config.docsUrl;

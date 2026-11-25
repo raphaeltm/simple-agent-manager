@@ -68,9 +68,9 @@ Adoption is a mode of the existing installation flow, not a parallel implementat
 - **Plan.** On the installer's review step, a domain that already runs SAM is detected from its
   API Worker route (`api.<domain>/*` → script `<prefix>-api-<stack>`). The owner chooses "Take over
   this installation" and enters the deploy-state passphrase they saved. The plan records the
-  prefix, environment, state bucket, and the deployed source commit (from the Pages deployment's
-  commit hash). It refuses when the state bucket or stack does not exist, or when the deployed
-  commit is not an upstream commit (source policy).
+  prefix, environment and state bucket. (Superseded: fork deploys record no deployed commit, so the
+  plan cannot name one; the takeover deploys the installer's approved source, protected by the
+  rollback guard and the preview gate. See Implementation notes.)
 - **Credentials.** Minted as for an install, with R2 access scoped to the existing state and assets
   buckets. The passphrase is stored only as a secret of the owner's maintenance Worker.
 - **Job.** The maintenance service stores `adoption` in its config. "Take over" starts a builder
@@ -82,8 +82,9 @@ Adoption is a mode of the existing installation flow, not a parallel implementat
   4. leave existing key-material Worker secrets in place (only set ones that are absent), for this
      job and every later update of an adopted installation;
   5. do not set `BOOTSTRAP_OWNER_EMAIL`, and skip the setup-token handoff;
-  6. deploy the same source commit that is already deployed, so the takeover changes nothing; the
-     owner updates through the normal update flow afterwards.
+  6. (Superseded) deploy the installer's approved source; the rollback guard refuses when the
+     deployment is newer, and the preview gate refuses any resource change. The owner updates
+     through the normal update flow afterwards.
 
 ## Implementation checklist
 
@@ -107,13 +108,13 @@ Adoption is a mode of the existing installation flow, not a parallel implementat
 
 ## Acceptance criteria
 
-- [ ] An adoption whose preview shows any create, replace or delete stops before `pulumi up`, and
+- [x] An adoption whose preview shows any create, replace or delete stops before `pulumi up`, and
       the owner sees which resources
-- [ ] A missing state bucket or stack stops the adoption without creating either
-- [ ] Existing `ENCRYPTION_KEY`/JWT/signing/VAPID Worker secrets are unchanged after adoption and
+- [x] A missing state bucket or stack stops the adoption without creating either
+- [x] Existing `ENCRYPTION_KEY`/JWT/signing/VAPID Worker secrets are unchanged after adoption and
       after a later update
-- [ ] Deployed override vars are unchanged after adoption
-- [ ] Existing users can still sign in after adoption (no owner-email lockout)
+- [x] Deployed override vars are unchanged after adoption
+- [x] Existing users can still sign in after adoption (no owner-email lockout) — unit-covered; live proof pending
 - [ ] A real existing deployment is adopted, then updated, through the installation service
 
 ## Open decision (Raphaël)
@@ -144,3 +145,22 @@ Proof target, because staging2 shares staging's state and passphrase (finding 10
   maintenance → builder job (`maintenance-jobs.test.ts`), builder → engine config
   (`builder.test.ts`), engine phases (`installer-engine.test.ts`), configure-secrets harness.
   Every engine guard verified discriminating by deletion.
+
+## Review fixes (2026-11-25)
+
+- Validator HIGH: adoption would delete `AGENT_SIGN_IN_TRUST` (configure-secrets deletes it when
+  unset) → engine sets `AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET=true` for adoption; tested + proven red.
+- Security: `pulumi refresh --yes` ran before the gate → gate now uses `pulumi preview --refresh
+  --json` before the refresh; refused takeover asserts no refresh ran.
+- Security: key pairs preserved together (JWT, VAPID, deploy signing).
+- Security: deployed vars equal to the source's `[vars]`/code default are not carried (would pin
+  old defaults).
+- Security: installer session drops the passphrase at handoff; page copy and docs say it passes
+  through the installer.
+- Security: refusal lines capped at 300 chars.
+- Not changed (security finding 5): adoption replaces the Worker's `R2_*`/`CF_API_TOKEN` with the
+  installation's own scoped credentials, exactly as a fresh install does; the fork's deploy R2 key
+  already had state-bucket access, so this is not wider than before.
+- Validator MEDIUM: optional takeover inputs were wrongly marked `required` (a second occurrence
+  of the field list) → fixed; browser audit `full-adopt` scenario asserts they are optional and
+  that the browser sends `adopt` + passphrase.

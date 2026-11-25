@@ -163,8 +163,9 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
                       <label for="state-passphrase">Its deploy-state passphrase</label
                       ><input id="state-passphrase" type="password" autocomplete="off" />
                       <p class="small">
-                        The <code>PULUMI_CONFIG_PASSPHRASE</code> your deployment was set up with. It is
-                        stored only as a secret of the installation service in your account. Nothing
+                        The <code>PULUMI_CONFIG_PASSPHRASE</code> your deployment was set up with. It
+                        passes through this installer, which drops its copy at handoff, and is then
+                        kept only as a secret of the installation service in your account. Nothing
                         about your SAM changes until you approve the takeover there.
                       </p>
                     </details>

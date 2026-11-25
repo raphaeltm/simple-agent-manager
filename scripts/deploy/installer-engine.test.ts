@@ -1188,6 +1188,9 @@ describe('installation engine: adopting an existing deployment', () => {
     mkdirSync(join(f.root, 'apps/api/src/db/migrations'), { recursive: true });
     writeFileSync(join(f.root, 'apps/api/src/db/migrations/0001_init.sql'), '');
     writeFileSync(join(f.root, 'apps/api/src/db/migrations/0002_next.sql'), '');
+    // The approved source's own defaults: CONNECTOR_ENABLED in [vars], VM_AGENT_TRANSPORT as a
+    // recorded code default (worker-var-defaults.ts).
+    writeFileSync(join(f.root, 'apps/api/wrangler.toml'), '[vars]\nCONNECTOR_ENABLED = "false"\n');
     const requests: string[] = [];
     const runner: EngineRunner = {
       ...f.runner,
@@ -1223,6 +1226,9 @@ describe('installation engine: adopting an existing deployment', () => {
                 { type: 'plain_text', name: 'REQUIRE_APPROVAL', text: 'false' },
                 { type: 'plain_text', name: 'VM_AGENT_REQUIRED_VERSION', text: 'f'.repeat(40) },
                 { type: 'plain_text', name: 'NOT_AN_OVERRIDE', text: 'ignored' },
+                // Equal to the source's defaults: not overrides, so not pinned.
+                { type: 'plain_text', name: 'CONNECTOR_ENABLED', text: 'false' },
+                { type: 'plain_text', name: 'VM_AGENT_TRANSPORT', text: 'vm-public-dns' },
                 { type: 'secret_text', name: 'CF_CONTAINER_ENABLED' },
               ],
             },
@@ -1285,10 +1291,13 @@ describe('installation engine: adopting an existing deployment', () => {
     const calls = f.lines();
     expect(calls.some((line) => line.includes('r2 bucket create'))).toBe(false);
     expect(calls.some((line) => line.includes('stack init'))).toBe(false);
-    const preview = calls.findIndex((line) => line.startsWith('pulumi preview --json'));
+    const preview = calls.findIndex((line) => line.startsWith('pulumi preview --refresh --json'));
+    const refresh = calls.findIndex((line) => line.includes('pulumi-refresh-safe.sh'));
     const up = calls.findIndex((line) => line.startsWith('pulumi up'));
     expect(preview).toBeGreaterThan(-1);
-    expect(preview).toBeLessThan(up);
+    // The gate reads without writing state; the refresh that rewrites it comes after.
+    expect(preview).toBeLessThan(refresh);
+    expect(refresh).toBeLessThan(up);
     const syncs = f.commands.filter((entry) =>
       entry.args.includes('scripts/deploy/sync-wrangler-config.ts')
     );
@@ -1298,12 +1307,18 @@ describe('installation engine: adopting an existing deployment', () => {
       expect(sync.env.REQUIRE_APPROVAL).toBe('false');
       expect(sync.env.VM_AGENT_REQUIRED_VERSION).toBe('d'.repeat(40));
       expect(sync.env.NOT_AN_OVERRIDE).toBeUndefined();
+      expect(sync.env.CONNECTOR_ENABLED).toBeUndefined();
+      expect(sync.env.VM_AGENT_TRANSPORT).toBeUndefined();
     }
     const secrets = f.commands.find((entry) =>
       entry.args.includes('scripts/deploy/configure-secrets.sh')
     );
-    expect(secrets?.env.PRESERVE_EXISTING_WORKER_SECRETS).toBe('ENCRYPTION_KEY,JWT_PRIVATE_KEY');
+    expect(secrets?.env.PRESERVE_EXISTING_WORKER_SECRETS).toBe(
+      'ENCRYPTION_KEY,JWT_PRIVATE_KEY,JWT_PUBLIC_KEY'
+    );
     expect(secrets?.env.BOOTSTRAP_OWNER_EMAIL).toBe('');
+    // configure-secrets.sh would otherwise delete the deployment's agent sign-in trust.
+    expect(secrets?.env.AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET).toBe('true');
     // No setup token: the adopted deployment already has an owner.
     expect(results).toEqual([]);
     expect(f.requests.some((line) => line.includes(`/d1/database/${databaseId}/query`))).toBe(true);
@@ -1331,6 +1346,8 @@ describe('installation engine: adopting an existing deployment', () => {
     expect(f.lines().some((line) => line.startsWith('pulumi up'))).toBe(false);
     const failed = events.find((event) => event.status === 'failed');
     expect(failed?.phase).toBe('infrastructure');
+    // Refused before the refresh too: a refused takeover leaves the state as it was.
+    expect(f.lines().some((line) => line.includes('pulumi-refresh-safe.sh'))).toBe(false);
     expect(failed?.tail).toEqual([
       'The approved source would change these resources, so nothing was changed:',
       'create cloudflare:index/r2Bucket:R2Bucket new-bucket',
@@ -1388,7 +1405,9 @@ describe('installation engine: adopting an existing deployment', () => {
     const secrets = f.commands.find((entry) =>
       entry.args.includes('scripts/deploy/configure-secrets.sh')
     );
-    expect(secrets?.env.PRESERVE_EXISTING_WORKER_SECRETS).toBe('ENCRYPTION_KEY,JWT_PRIVATE_KEY');
+    expect(secrets?.env.PRESERVE_EXISTING_WORKER_SECRETS).toBe(
+      'ENCRYPTION_KEY,JWT_PRIVATE_KEY,JWT_PUBLIC_KEY'
+    );
     expect(secrets?.env.BOOTSTRAP_OWNER_EMAIL).toBe('');
   });
 
@@ -1406,6 +1425,7 @@ describe('installation engine: adopting an existing deployment', () => {
     );
     expect(secrets?.env.PRESERVE_EXISTING_WORKER_SECRETS).toBeUndefined();
     expect(secrets?.env.BOOTSTRAP_OWNER_EMAIL).toBe(config.ownerEmail);
+    expect(secrets?.env.AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET).toBeUndefined();
   });
 
   it('accepts adoption settings only with an explicit prefix, a valid bucket and an installation', () => {
@@ -1429,4 +1449,14 @@ describe('installation engine: adopting an existing deployment', () => {
       } as never)
     ).toThrow();
   });
+});
+
+it('caps each takeover refusal line, whatever the deployment names its resources', async () => {
+  const { refusedTakeoverSteps, AdoptionRefused } = await import('./installer-engine-adoption.js');
+  const lines = refusedTakeoverSteps({
+    steps: [{ op: 'create', urn: `urn:pulumi:prod::sam::type::${'x'.repeat(1000)}` }],
+  });
+  const refusal = new AdoptionRefused(['header', ...lines]);
+  expect(refusal.tail.every((line) => line.length <= 300)).toBe(true);
+  expect(refusal.message).toBe('Takeover refused');
 });

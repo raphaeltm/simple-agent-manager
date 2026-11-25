@@ -123,6 +123,16 @@ export function renderPlanSummary(plan, context) {
   $('confirm-full-copy').textContent = plan.adoption
     ? 'Create an installation service in my account for this SAM. I approve the takeover itself there, after it checks that nothing would change.'
     : 'Build and deploy this approved installation in my account. Workers Paid and usage charges apply.';
+  const arrow = document.createElement('span');
+  arrow.setAttribute('aria-hidden', 'true');
+  arrow.textContent = '→';
+  $('install').replaceChildren(
+    `${plan.adoption ? 'Create my installation service' : 'Install SAM in my account'}\u00a0`,
+    arrow
+  );
+  $('plan-details').querySelector('summary').textContent = plan.adoption
+    ? 'What it will take over'
+    : 'What will be created';
   details.replaceChildren(renderCreatedDetails(plan));
   state.approvedPlan = plan;
   blocked.hidden = true;
