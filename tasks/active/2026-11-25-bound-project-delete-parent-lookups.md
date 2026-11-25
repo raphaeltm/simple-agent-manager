@@ -26,3 +26,5 @@ Rules 02, 31, 35, 62 and 69. Existing project-delete-cascade-cost route test. Cl
 ## Validation so far
 
 Four route tests pass on the full shipped chain. Omitting migration 0271 makes the expanded real-route regression fail on profile child scans. The fixture includes 650 target tasks, 1,000 sibling tasks, 40 profiles, 40 triggers, 1,000 executions, 5,000 summaries and 30,000 chunks, with profile and skill SET NULL controls. A populated upgrade preserves all table row counts and FK definitions. Independent review finds 81 cascade-parent plans without scans; dropping any one new index independently restores a scan. Root lint and typecheck pass. Staging, remaining quality checks, CI/review and production gates remain pending.
+
+Full-suite validation found a historical catalog fixture applying every later migration while deliberately omitting the catalog-table creation migration. Defer the new dependent index migration alongside that omitted migration, then apply both in dependency order. The three catalog-chain tests pass after the fixture correction, which independent test review also passed. Application code and migration semantics did not change.
