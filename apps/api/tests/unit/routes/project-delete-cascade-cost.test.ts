@@ -78,6 +78,12 @@ function seed() {
         status: 'running',
       });
     }
+    insert('skills', {
+      id: 'skill',
+      project_id: 'owner',
+      user_id: 'owner',
+      name: 'Synthetic skill',
+    });
     for (let i = 0; i < 40; i++) {
       insert('agent_profiles', {
         id: `profile-${i}`,
@@ -112,6 +118,7 @@ function seed() {
       source_type: 'cron',
       prompt_template: 'Synthetic task',
       agent_profile_id: 'profile-0',
+      skill_id: 'skill',
     });
     for (let i = 0; i < TASKS + OTHER_TASKS; i++) {
       const owner = i < TASKS ? 'owner' : 'other';
@@ -120,6 +127,7 @@ function seed() {
         project_id: owner,
         user_id: owner,
         title: `Task ${i}`,
+        skill_id: i === TASKS ? 'skill' : null,
         created_by: owner,
         status: 'completed',
       });
@@ -159,6 +167,7 @@ function seed() {
         project_id: 'other',
         workspace_id: 'other',
         agent_profile_id: i === 0 ? 'profile-0' : null,
+        skill_id: i === 0 ? 'skill' : null,
         task_id: i === 0 ? 'task-0' : `task-${TASKS}`,
         source_version: 1,
         started_at: 1,
@@ -315,6 +324,15 @@ describe('project deletion cascade work on the shipped schema', { timeout: 30_00
     expect(count('tasks')).toBe(OTHER_TASKS);
     expect(count('triggers')).toBe(1);
     expect(count('trigger_executions')).toBe(0);
+    expect(sqlite.prepare(`SELECT skill_id FROM tasks WHERE id='task-${TASKS}'`).get()).toEqual({
+      skill_id: null,
+    });
+    expect(sqlite.prepare("SELECT skill_id FROM triggers WHERE id='other-trigger'").get()).toEqual({
+      skill_id: null,
+    });
+    expect(
+      sqlite.prepare("SELECT skill_id FROM workspace_resource_summaries WHERE id='summary-0'").get()
+    ).toEqual({ skill_id: null });
     expect(
       sqlite.prepare("SELECT agent_profile_id FROM triggers WHERE id='other-trigger'").get()
     ).toEqual({ agent_profile_id: null });
