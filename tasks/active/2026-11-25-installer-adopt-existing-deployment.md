@@ -164,3 +164,6 @@ Proof target, because staging2 shares staging's state and passphrase (finding 10
 - Validator MEDIUM: optional takeover inputs were wrongly marked `required` (a second occurrence
   of the field list) → fixed; browser audit `full-adopt` scenario asserts they are optional and
   that the browser sends `adopt` + passphrase.
+- SonarQube: fixed S7744 (empty object spread) and S3776 (engine complexity; takeover steps now
+  `refuseRollback`, `refuseResourceChanges`, `keepAdoptedDeployment` in the adoption module) in
+  f3f23adb0. S9382 (sequential `pulumi config set` in a loop) is in moved code and intentional.
