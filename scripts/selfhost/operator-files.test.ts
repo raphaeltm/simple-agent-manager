@@ -6,7 +6,16 @@
  * files its real Dockerfile copies.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -104,7 +113,7 @@ describe('checkoutWithTrackedModes under umask 077', () => {
     expect(git('rev-parse', 'HEAD')).toBe(newRef);
     for (const path of inputs) expect(mode(path)).toBe(0o644);
     expect(mode('run.sh')).toBe(0o755);
-    expect(logs).toEqual([`restored git file modes on ${inputs.length + 1} tracked files`]);
+    expect(logs).toEqual([`restored git file modes on ${inputs.length + 1} tracked paths`]);
   });
 
   it('rollback checkout: returning to the old ref repairs files a bad upgrade left 0600', () => {
@@ -113,6 +122,32 @@ describe('checkoutWithTrackedModes under umask 077', () => {
     expect(git('rev-parse', 'HEAD')).toBe(oldRef);
     for (const path of inputs) expect(mode(path)).toBe(0o644);
     expect(mode('run.sh')).toBe(0o755);
+  });
+
+  it('makes a directory the target ref adds traversable (git records no directory modes)', () => {
+    git('checkout', '-q', '--detach', newRef);
+    mkdirSync(join(repo, KEY_AGENT_DIR, 'providers'));
+    writeFileSync(join(repo, KEY_AGENT_DIR, 'providers', 'extra.ts'), 'x\n');
+    git('add', '-A');
+    git('commit', '-qm', 'adds a directory');
+    const withDir = git('rev-parse', 'HEAD');
+    git('checkout', '-q', '--detach', oldRef);
+    expect(checkoutWithTrackedModes(gitUnderUmask077, withDir, (m) => logs.push(m)).status).toBe(0);
+    // Control: git under umask 077 created the directory 0700.
+    expect(statSync(join(repo, KEY_AGENT_DIR, 'providers')).mode & 0o777).toBe(0o755);
+    expect(mode(`${KEY_AGENT_DIR}/providers/extra.ts`)).toBe(0o644);
+  });
+
+  it('control: without the repair, the new directory is 0700', () => {
+    git('checkout', '-q', '--detach', newRef);
+    mkdirSync(join(repo, KEY_AGENT_DIR, 'providers'));
+    writeFileSync(join(repo, KEY_AGENT_DIR, 'providers', 'extra.ts'), 'x\n');
+    git('add', '-A');
+    git('commit', '-qm', 'adds a directory');
+    const withDir = git('rev-parse', 'HEAD');
+    git('checkout', '-q', '--detach', oldRef);
+    git('checkout', '-q', '--detach', withDir);
+    expect(statSync(join(repo, KEY_AGENT_DIR, 'providers')).mode & 0o777).toBe(0o700);
   });
 
   it('leaves untracked files alone (operator state and keys keep their own modes)', () => {
@@ -125,6 +160,17 @@ describe('checkoutWithTrackedModes under umask 077', () => {
     const result = checkoutWithTrackedModes(gitUnderUmask077, 'f'.repeat(40), (m) => logs.push(m));
     expect(result.status).not.toBe(0);
     expect(logs).toEqual([]);
+  });
+
+  it('never follows a symlinked directory out of the repository', () => {
+    const outside = join(root, 'outside');
+    mkdirSync(outside);
+    writeFileSync(join(outside, 'bundle-store.ts'), 'secret\n', { mode: 0o600 });
+    rmSync(join(repo, KEY_AGENT_DIR), { recursive: true });
+    symlinkSync(outside, join(repo, KEY_AGENT_DIR));
+    const repair = restoreTrackedModes(gitUnderUmask077);
+    expect(statSync(join(outside, 'bundle-store.ts')).mode & 0o777).toBe(0o600);
+    expect(repair.failed).toContain(`${KEY_AGENT_DIR}/bundle-store.ts`);
   });
 
   it('refuses to report a clean repair when git cannot list the index', () => {
@@ -198,11 +244,69 @@ describe('private writers under the operator umask', () => {
   });
 });
 
-// Static structure (rule 61's enumeration): every operator command that checks out, installs,
-// builds or restores sets the umask its children inherit before doing any work.
+// The real entry points, started from a shell with umask 077 the way the 2026-11-25 operator ran
+// them. A preload records the process umask when the command exits; each command is given
+// arguments that make it stop early, after its entry checks and before it touches anything.
 describe('operator entry points', () => {
-  it.each(['upgrade.ts', 'deploy.ts', 'rebuild.ts', 'restore.ts'])('%s sets the umask', (file) => {
-    const source = readFileSync(resolve('scripts/selfhost', file), 'utf8');
-    expect(source).toMatch(/^\s*useOperatorUmask\(\);/m);
+  const tsx = resolve('node_modules/.bin/tsx');
+  const umaskAtExit = (args: string[]) => {
+    const record = join(root, 'umask-at-exit');
+    const preload = join(root, 'record-umask.cjs');
+    // tsx runs the script in a child process: record every process, then pick the script's.
+    writeFileSync(
+      preload,
+      `process.on('exit', () => require('node:fs').appendFileSync(${JSON.stringify(record)}, ` +
+        `JSON.stringify({ argv: process.argv.slice(1), umask: process.umask().toString(8) }) + '\\n'));\n`
+    );
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(
+        ([name]) => name !== 'CI' && name !== 'GITHUB_ACTIONS' && !name.startsWith('RUNNER_')
+      )
+    );
+    spawnSync('sh', ['-c', 'umask 077; exec "$0" "$@"', tsx, ...args], {
+      encoding: 'utf8',
+      env: { ...env, NODE_OPTIONS: `--require=${preload}` },
+    });
+    const lines = readFileSync(record, 'utf8').trim().split('\n');
+    const runs = lines.map((l) => JSON.parse(l) as { argv: string[]; umask: string });
+    const script = runs.find((r) => r.argv[0] === args[0]) ?? runs[0];
+    return script?.umask;
+  };
+  // An existing env file readable by others: tsx hands `--env-file` to node too (which loads it),
+  // and the command then refuses it as not private, right after its entry checks.
+  const publicEnv = () => {
+    const path = join(root, 'public.env');
+    writeFileSync(path, '', { mode: 0o644 });
+    return path;
+  };
+
+  it('control: the harness observes an inherited umask 077', () => {
+    const script = join(root, 'noop.ts');
+    writeFileSync(script, 'export {};\n');
+    expect(umaskAtExit([script])).toBe('77');
+  });
+
+  it.each([
+    ['upgrade.ts', () => []],
+    ['deploy.ts', () => ['--env-file', publicEnv(), '--dry-run']],
+    ['rebuild.ts', () => ['--env-file', publicEnv()]],
+    ['restore.ts', () => []],
+  ] as const)('%s runs its children with umask 022', (file, args) => {
+    expect(umaskAtExit([resolve('scripts/selfhost', file), ...args()])).toBe('22');
+  });
+
+  // Rule 61's enumeration: no operator code checks out a ref except through the helper that
+  // re-applies git's modes.
+  it('every checkout in the operator scripts goes through checkoutWithTrackedModes', () => {
+    const sources = readdirSync(resolve('scripts/selfhost')).filter(
+      (f) => f.endsWith('.ts') && !f.endsWith('.test.ts')
+    );
+    expect(sources.length).toBeGreaterThan(50);
+    const offenders = sources.filter(
+      (f) =>
+        f !== 'operator-files.ts' &&
+        /['"]checkout['"]/.test(readFileSync(resolve('scripts/selfhost', f), 'utf8'))
+    );
+    expect(offenders).toEqual([]);
   });
 });

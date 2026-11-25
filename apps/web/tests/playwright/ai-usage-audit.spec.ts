@@ -358,7 +358,7 @@ test.describe('AI Usage — Mobile (375x667)', () => {
     await setupMocks(page);
     await goToUsage(page);
     await expect(
-      page.getByText('Model calls made through SAM only (not your own API keys or subscriptions)')
+      page.getByText('Model calls made through SAM only', { exact: true })
     ).toBeVisible();
     await expect(page.getByText('AI Gateway', { exact: false })).toHaveCount(0);
     await screenshot(page, 'ai-usage-disclaimer-mobile');

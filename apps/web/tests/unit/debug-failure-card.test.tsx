@@ -208,6 +208,7 @@ describe('FailureCard', () => {
     fireEvent.click(screen.getByRole('button', { expanded: false }));
     expect(await screen.findByText(/Settings > Usage/)).toBeInTheDocument();
     expect(screen.queryByText(/Send another message to retry/)).not.toBeInTheDocument();
+    expect(screen.getByText(/This session is still open. Fix the cause above/)).toBeInTheDocument();
   });
 
   it('control: a real provider overload still reads as recoverable', async () => {

@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +46,11 @@ func TestSAMUsageLimitRefusalIsNotAProviderOverload(t *testing.T) {
 		{"control: provider rate limit", `{"code":-32603,"message":` + jsonString("Internal error: API Error: 429 "+providerRateBody) + `,"data":{"errorKind":"rate_limit"}}`, "provider_overloaded"},
 		{"control: provider overloaded", `{"code":-32603,"message":"Internal error: API Error: 529 overloaded_error","data":{"errorKind":"overloaded"}}`, "provider_overloaded"},
 		{"control: marker only in wrapper metadata", `{"code":-32603,"message":"Internal error","data":{"errorKind":"rate_limit","message":"API Error: 429 slow down","url":"https://evil.example/monthly ai spending limit reached 429"}}`, "provider_overloaded"},
+		{"control: untyped top-level message echoing the marker", `{"code":-32603,"message":"tool said: daily token budget exceeded (429)","data":{}}`, ""},
+		{"control: overloaded kind with the marker in echoed text", `{"code":-32603,"message":"Internal error","data":{"errorKind":"overloaded","message":"note: monthly cost cap exceeded, see 429 docs"}}`, "provider_overloaded"},
+		{"control: marker in data.message under a specific top-level message", `{"code":-32603,"message":"Prompt failed","data":{"errorKind":"rate_limit","message":"API Error: 429 Monthly cost cap exceeded."}}`, "provider_overloaded"},
+		{"control: request id containing 429", `{"code":-32603,"message":"Internal error","data":{"codexErrorInfo":"other","message":"request req_14290 failed: monthly cost cap exceeded"}}`, ""},
+		{"control: not an internal error", `{"code":-32602,"message":` + jsonString("API Error: 429 "+samAdminCapBody) + `}`, ""},
 		{"control: auth failure stays auth", `{"code":-32603,"message":"Internal error","data":{"errorKind":"authentication_failed","message":` + jsonString("API Error: 429 "+samAdminCapBody) + `}}`, "model_provider_credential_rejected"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -76,6 +82,13 @@ func TestSAMUsageLimitTextPath(t *testing.T) {
 // A Codex usageLimitExceeded normally means the provider plan limit and parks the task for
 // its reset; SAM's own limit has no provider reset to wait for.
 func TestSAMUsageLimitIsNotParkedAsAProviderPlanLimit(t *testing.T) {
+	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	if limit := ClassifyProviderLimit(errors.New("API Error: 429 Monthly cost cap exceeded. "+future), time.Now()); limit != nil {
+		t.Fatalf("SAM's limit text with a timestamp parked as a provider limit: %+v", limit)
+	}
+	if ClassifyProviderLimit(errors.New("API Error: 429 rate limited until "+future), time.Now()) == nil {
+		t.Fatal("control: a provider 429 with a reset time must still park")
+	}
 	sam := wireRequestError(t, `{"code":-32603,"message":"Internal error","data":{"codexErrorInfo":"usageLimitExceeded","message":`+jsonString("last status: 429, "+samAdminCapBody)+`}}`)
 	if limit := ClassifyProviderLimit(sam, time.Now()); limit != nil {
 		t.Fatalf("SAM's limit classified as provider limit: %+v", limit)

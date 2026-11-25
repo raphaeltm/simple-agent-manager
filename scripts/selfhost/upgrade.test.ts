@@ -646,7 +646,7 @@ describe('runUpgrade under a restrictive operator umask', () => {
     await upgrade();
     expect(head).toBe(TO);
     expect(modes()).toEqual(GIT_MODES);
-    expect(logs).toContain('restored git file modes on 3 tracked files');
+    expect(logs).toContain('restored git file modes on 3 tracked paths');
   });
 
   it('restores git modes when a failed deploy rolls back to the previous ref', async () => {

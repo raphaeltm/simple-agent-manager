@@ -2,6 +2,7 @@ package acp
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 
 	acpsdk "github.com/coder/acp-go-sdk"
@@ -33,11 +34,25 @@ func hasSAMUsageLimitMarker(message string) bool {
 	return false
 }
 
+// status429 is a standalone 429 (not part of a longer number such as a request id).
+var status429 = regexp.MustCompile(`(^|[^0-9])429([^0-9]|$)`)
+
 // isSAMUsageLimitText reports a 429 whose message is a SAM AI proxy limit refusal.
 // A provider's own 429 (rate limit, overload) never carries these sentences, so a
 // real overload keeps classifying as provider_overloaded.
 func isSAMUsageLimitText(message string) bool {
-	return strings.Contains(message, "429") && hasSAMUsageLimitMarker(message)
+	return status429.MatchString(message) && hasSAMUsageLimitMarker(message)
+}
+
+// apiError429 is the terminal API error prefix the pinned adapters give an HTTP 429.
+func apiError429(message string) bool {
+	text := strings.ToLower(message)
+	for _, prefix := range []string{"internal error: api error: 429", "api error: 429"} {
+		if strings.HasPrefix(text, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // isSAMUsageLimitRequestError reads only the terminal error message fields the
@@ -56,6 +71,13 @@ func isSAMUsageLimitRequestError(err error) bool {
 	if message == "Internal error" {
 		message, _ = data["message"].(string)
 	}
-	// Claude's typed rate_limit already says the status was 429.
-	return isSAMUsageLimitText(message) || (data["errorKind"] == "rate_limit" && hasSAMUsageLimitMarker(message))
+	if !hasSAMUsageLimitMarker(message) {
+		return false
+	}
+	// Structured evidence that this was an HTTP 429 from the model endpoint, as the
+	// provider-limit classifier requires: Claude's typed rate_limit, a Codex turn
+	// error, or the adapter's own "API Error: 429" prefix. A marker in arbitrary
+	// echoed text is not enough.
+	_, codex := data["codexErrorInfo"].(string)
+	return data["errorKind"] == "rate_limit" || (codex && isSAMUsageLimitText(message)) || apiError429(message)
 }

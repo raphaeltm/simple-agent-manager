@@ -336,6 +336,12 @@ export function FailureCard({
               preserved.
             </p>
           )}
+          {recoverable && !classification.retryable && (
+            <p className="text-[11px] m-0 leading-snug text-fg-muted italic">
+              This session is still open. Fix the cause above, then send a message — your workspace
+              is preserved.
+            </p>
+          )}
         </div>
       )}
     </div>

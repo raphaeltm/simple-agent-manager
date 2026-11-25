@@ -23,17 +23,29 @@
   `apps/api/src/routes/ai-proxy-admission.ts`.
 
 ## Checklist
-- [ ] `operator-files.ts`: `useOperatorUmask()` (0o022) + `checkoutWithTrackedModes()` re-applying git modes
-- [ ] Call umask at entry of upgrade/deploy/rebuild/restore; use the checkout helper at every checkout
-- [ ] Tests: real git checkout under umask 077 (upgrade + rollback paths) leaves key-agent inputs world-readable; private writers stay 0600/0700 under umask 000/022; guard deletion goes red
-- [ ] README note updated
-- [ ] VM agent: `sam_ai_usage_limit_reached` reason when the rate-limit error carries SAM's proxy limit text; real overload unchanged (tests)
-- [ ] Shared classifier: structural rule "SAM AI usage limit reached", not retryable; provider-overload unchanged (tests)
-- [ ] Usage page: subtitle/empty-state wording; selected button + bars use defined `bg-accent`
-- [ ] Playwright audit 375/1280
-- [ ] Live: self-host live suite + upgrade/rollback live tests on celld; box end-to-end of the banner
+- [x] `operator-files.ts`: `useOperatorUmask()` (0o022) + `checkoutWithTrackedModes()` re-applying git modes
+- [x] Call umask at entry of upgrade/deploy/rebuild/restore; use the checkout helper at every checkout
+- [x] Tests: real git checkout under umask 077 (upgrade + rollback paths) leaves key-agent inputs world-readable; private writers stay 0600/0700 under umask 000/022; guard deletion goes red
+- [x] README note updated
+- [x] VM agent: `sam_ai_usage_limit_reached` reason when the rate-limit error carries SAM's proxy limit text; real overload unchanged (tests)
+- [x] Shared classifier: structural rule "SAM AI usage limit reached", not retryable; provider-overload unchanged (tests)
+- [x] Usage page: subtitle/empty-state wording; selected button + bars use defined `bg-accent`
+- [x] Playwright audit 375/1280
+- [ ] Live (pending): self-host live suite + upgrade/rollback live tests on celld; box end-to-end of the banner
 
 ## Acceptance
 - Upgrade and rollback under umask 077 leave tracked files at git modes; key agent starts.
 - `.state/*`, backups, keys remain 0600/0700.
 - Spending-limit refusal shows the spending-limit label; real provider overloads still show "Provider overloaded".
+
+## Review notes
+- Local reviewers: task-completion-validator, go-specialist, security-auditor, ui-ux-specialist. No CRITICAL/HIGH.
+  Addressed: directory modes repaired too; chmod never follows a symlinked parent out of the repo and
+  never throws; entry points proven by spawning them under umask 077; real-git manual rollback test;
+  legacy adoption uses an explicit checkout helper plus an enumeration test; Go detector requires
+  typed 429 evidence (rate_limit kind, Codex turn error, or `API Error: 429` prefix) and a standalone 429.
+- Guard deletion: mode repair off -> 7 mode tests red; restore.ts umask call removed -> its entry test red;
+  Go ClassifyPromptError check off -> 6 cases red; ClassifyProviderLimit guard off -> parking test red;
+  FailureCard gate off -> usage-limit card test red.
+- Found while testing (pre-existing, not changed): `tsx script.ts --env-file X` also hands `--env-file` to
+  node, which loads X into process.env (and fails if X is missing).

@@ -89,7 +89,7 @@ func ClassifyProviderLimit(err error, now time.Time) *ProviderLimitError {
 	if isPlanLimitMessage(text) {
 		return &ProviderLimitError{ResetsAt: clockReset(text, now)}
 	}
-	if strings.HasPrefix(text, "Provider HTTP 429") || strings.HasPrefix(text, "API Error: 429") {
+	if (strings.HasPrefix(text, "Provider HTTP 429") || strings.HasPrefix(text, "API Error: 429")) && !hasSAMUsageLimitMarker(text) {
 		// Reset-bearing API failures are also allowed to use an ISO timestamp.
 		for _, word := range strings.Fields(text) {
 			if parsed, e := time.Parse(time.RFC3339, strings.Trim(word, `",;`)); e == nil && parsed.After(now) {

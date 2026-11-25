@@ -171,7 +171,7 @@ const FAILURE_RULES: FailureRule[] = [
     code: 'sam-ai-usage-limit',
     label: 'AI usage limit reached',
     explanation:
-      "SAM refused the model call because this account's or this installation's AI usage limit was reached (monthly spending limit or daily token budget).",
+      'SAM refused the model call because your AI usage limit was reached (a monthly spending limit or the daily token budget).',
     guidance:
       'Retrying will not help until the limit resets. Check Settings > Usage, or ask an administrator to raise the limit.',
     retryable: false,

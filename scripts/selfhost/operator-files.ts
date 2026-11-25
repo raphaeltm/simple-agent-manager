@@ -15,8 +15,8 @@
  * Files that must stay private do not rely on the umask: their writers set 0600/0700 explicitly
  * (secret-files.ts, backup-encryption.ts, backup-destination.ts), which a umask can only narrow.
  */
-import { chmodSync, lstatSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { chmodSync, lstatSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, sep } from 'node:path';
 
 /** The umask operator commands run with: owner-writable, readable by everyone. */
 export const OPERATOR_UMASK = 0o022;
@@ -42,15 +42,17 @@ function permissionsFor(gitMode: string): number | null {
 
 export interface ModeRepair {
   changed: number;
-  /** Tracked files whose mode could not be set (not owned by this user); never their contents. */
+  /** Tracked paths whose mode could not be set (not owned by this user); never their contents. */
   failed: string[];
 }
 
 /**
  * Re-applies git's recorded mode to every tracked regular file whose permission bits differ
- * (100644 -> 0644, 100755 -> 0755). Throws when git cannot list the index, so a broken repair is
- * never mistaken for a clean tree. A file it cannot chmod is reported, not fatal: a rollback must
- * not stop at a file the checkout itself could still write.
+ * (100644 -> 0644, 100755 -> 0755), and makes every directory holding a tracked file
+ * traversable by everyone (git records no directory modes; a checkout under umask 077 creates
+ * new directories 0700, which the non-root key agent cannot enter). Throws when git cannot list
+ * the index, so a broken repair is never mistaken for a clean tree. A path it cannot chmod is
+ * reported, not fatal: a rollback must not stop at a file the checkout itself could still write.
  */
 export function restoreTrackedModes(run: Runner): ModeRepair {
   const top = run('git', ['rev-parse', '--show-toplevel']);
@@ -59,22 +61,40 @@ export function restoreTrackedModes(run: Runner): ModeRepair {
   if (top.status !== 0 || listed.status !== 0 || !isAbsolute(root))
     throw new Error('restore tracked file modes failed: cannot list the git index');
   const repair: ModeRepair = { changed: 0, failed: [] };
+  const realRoot = realpathSync(root);
+  /** True when `path` resolves inside the repository (no symlinked parent leads out of it). */
+  const inside = (path: string) => {
+    const real = realpathSync(dirname(path));
+    return real === realRoot || real.startsWith(realRoot + sep);
+  };
+  // Any error (EACCES, ENOTDIR, a path leaving the repo) is reported, never thrown: the
+  // rollback that calls this must not stop at one path.
+  const fix = (relative: string, kind: 'file' | 'dir', want: (mode: number) => number) => {
+    const path = join(root, relative);
+    try {
+      const stat = lstatSync(path, { throwIfNoEntry: false });
+      if (!stat || !(kind === 'file' ? stat.isFile() : stat.isDirectory())) return;
+      if (want(stat.mode & 0o777) === (stat.mode & 0o777)) return;
+      if (!inside(path)) throw new Error('outside the repository');
+      chmodSync(path, want(stat.mode & 0o777));
+      repair.changed++;
+    } catch {
+      repair.failed.push(relative);
+    }
+  };
+  const directories = new Set<string>();
   for (const entry of listed.stdout.split('\0')) {
     // `<mode> <object> <stage>\t<path>`
     const tab = entry.indexOf('\t');
     if (tab < 0) continue;
     const want = permissionsFor(entry.slice(0, entry.indexOf(' ')));
     if (want === null) continue;
-    const path = join(root, entry.slice(tab + 1));
-    const stat = lstatSync(path, { throwIfNoEntry: false });
-    if (!stat?.isFile() || (stat.mode & 0o777) === want) continue;
-    try {
-      chmodSync(path, want);
-      repair.changed++;
-    } catch {
-      repair.failed.push(entry.slice(tab + 1));
-    }
+    const relative = entry.slice(tab + 1);
+    fix(relative, 'file', () => want);
+    for (let dir = dirname(relative); dir !== '.'; dir = dirname(dir)) directories.add(dir);
   }
+  // Only add group/other read+search; never narrow a directory an operator widened.
+  for (const dir of directories) fix(dir, 'dir', (mode) => mode | 0o055);
   return repair;
 }
 
@@ -87,10 +107,10 @@ export function checkoutWithTrackedModes(
   const checkout = run('git', ['checkout', '--detach', ref]);
   if (checkout.status !== 0) return checkout;
   const { changed, failed } = restoreTrackedModes(run);
-  if (changed > 0) log(`restored git file modes on ${changed} tracked files`);
+  if (changed > 0) log(`restored git file modes on ${changed} tracked paths`);
   if (failed.length > 0)
     log(
-      `could not restore the git mode of ${failed.length} tracked files (first: ${failed[0]}); ` +
+      `could not restore the git mode of ${failed.length} tracked paths (first: ${failed[0]}); ` +
         'run the command as the checkout owner'
     );
   return checkout;

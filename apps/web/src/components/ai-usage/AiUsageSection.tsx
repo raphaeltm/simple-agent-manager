@@ -49,9 +49,7 @@ export function AiUsageSection() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <SectionHeading>LLM Usage</SectionHeading>
-          <Body className="text-fg-muted text-sm">
-            Model calls made through SAM only (not your own API keys or subscriptions)
-          </Body>
+          <Body className="text-fg-muted text-sm">Model calls made through SAM only</Body>
         </div>
         <div className="flex gap-1 flex-wrap">
           {AI_PERIODS.map((opt) => (

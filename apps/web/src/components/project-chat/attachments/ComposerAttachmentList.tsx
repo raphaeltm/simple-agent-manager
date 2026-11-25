@@ -175,7 +175,7 @@ function AttachmentItem({ attachment: a, onOpen, onRemove, disabled }: ItemProps
         </span>
         {(a.status === 'uploading' || a.status === 'pending') && (
           <span
-            className="absolute bottom-0 left-0 h-0.5 bg-accent-emphasis transition-all"
+            className="absolute bottom-0 left-0 h-0.5 bg-accent transition-all"
             style={{ width: `${a.progress}%` }}
           />
         )}
