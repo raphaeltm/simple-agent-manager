@@ -1,0 +1,89 @@
+---
+/**
+ * Homepage security warning: one amber line at the top of the hero that sends self-hosters to the
+ * pinned advisory. Remove it (and the advisory's `pinned` flag) once the advisory is no longer news.
+ */
+const ADVISORY_HREF = '/blog/security-advisory-setup-takeover/';
+---
+
+<a class="fh-notice" href={ADVISORY_HREF} role="note" aria-label="Security advisory for people who self-host SAM">
+  <svg class="fh-notice-icon" viewBox="0 0 16 16" aria-hidden="true">
+    <path d="M8 1.5 15 14H1L8 1.5Z" />
+    <path class="fh-notice-mark" d="M8 6v3.5M8 11.6v.1" />
+  </svg>
+  <span class="fh-notice-tag">Security advisory</span>
+  <span class="fh-notice-text">Self-hosting SAM? Check that your setup wizard is closed.</span>
+  <span class="fh-notice-cta">Check now <span aria-hidden="true">→</span></span>
+</a>
+
+<style>
+  .fh-notice {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 6px 10px;
+    max-width: 100%;
+    padding: 8px 16px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--color-warning) 60%, transparent);
+    background: color-mix(in srgb, var(--color-warning) 14%, var(--color-bg-body));
+    color: var(--color-fg-primary);
+    font-size: 0.875rem;
+    line-height: 1.35;
+    text-align: left;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-warning) 8%, transparent);
+    transition: border-color 0.2s, background-color 0.2s;
+  }
+
+  .fh-notice:hover {
+    color: var(--color-fg-primary);
+    border-color: var(--color-warning);
+    background: color-mix(in srgb, var(--color-warning) 22%, var(--color-bg-body));
+  }
+
+  .fh-notice:focus-visible {
+    outline: 2px solid var(--color-warning);
+    outline-offset: 3px;
+  }
+
+  .fh-notice-icon {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    fill: var(--color-warning);
+  }
+
+  .fh-notice-mark {
+    fill: none;
+    stroke: var(--color-bg-body);
+    stroke-width: 1.8;
+    stroke-linecap: round;
+  }
+
+  .fh-notice-tag {
+    font-weight: 700;
+    font-size: 0.75rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-warning);
+  }
+
+  .fh-notice-cta {
+    font-weight: 600;
+    color: var(--color-warning);
+    white-space: nowrap;
+  }
+
+  @media (max-width: 640px) {
+    .fh-notice {
+      border-radius: var(--radius-lg);
+      padding: 10px 14px;
+      justify-content: flex-start;
+    }
+
+    .fh-notice-text {
+      flex-basis: 100%;
+    }
+  }
+</style>
