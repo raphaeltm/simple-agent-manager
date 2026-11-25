@@ -19,7 +19,7 @@ async function maintenanceManifest(service){
 
 // An adopted installation took over a deployment it did not create and keeps that deployment's
 // names. Its first job is the takeover; later ones are ordinary updates (installer-engine-adoption.ts).
-function maintenanceValidAdoption(value){return !!value&&typeof value==='object'&&typeof value.prefix==='string'&&/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(value.prefix)&&typeof value.environment==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/.test(value.environment)&&typeof value.stateBucket==='string'&&/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(value.stateBucket);}
+function maintenanceValidAdoption(value){return !!value&&typeof value==='object'&&typeof value.prefix==='string'&&/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/.test(value.prefix)&&typeof value.environment==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/.test(value.environment)&&typeof value.stateBucket==='string'&&/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(value.stateBucket);}
 function maintenanceRequiredCapabilities(manifest){return manifest.config.adoption?['adoption']:[];}
 function maintenanceMatches(manifest,job){return !!manifest.requestedJob&&job.jobId===manifest.requestedJob.id&&job.sourceCommit===manifest.requestedJob.config.sourceCommit;}
 async function maintenanceReconcile(service,manifest){

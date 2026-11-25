@@ -10,7 +10,7 @@ import {
 import { digest } from './security';
 
 /** A deployment's API Worker is `<prefix>-api-<stack>` (sync-wrangler-config.ts). */
-const API_WORKER = /^([a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?)-api-([A-Za-z0-9][A-Za-z0-9_-]{0,31})$/;
+const API_WORKER = /^([a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?)-api-([A-Za-z0-9][A-Za-z0-9_-]{0,62})$/;
 
 /**
  * Plans taking over the SAM already running at the chosen domain. The deployment is found by

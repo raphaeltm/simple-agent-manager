@@ -58,9 +58,9 @@ export function validateAdoptionTarget(value: unknown): AdoptionTarget {
     !t ||
     typeof t !== 'object' ||
     typeof t.prefix !== 'string' ||
-    !/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(t.prefix) ||
+    !/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/.test(t.prefix) ||
     typeof t.environment !== 'string' ||
-    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/.test(t.environment) ||
+    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/.test(t.environment) ||
     typeof t.stateBucket !== 'string' ||
     !/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(t.stateBucket)
   )

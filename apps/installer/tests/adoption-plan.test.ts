@@ -146,3 +146,20 @@ describe('taking over an existing SAM', () => {
       expect(() => validateInstallationConfig({ ...config, adoption })).toThrow('takeover');
   });
 });
+
+it('accepts every name length a fork deployment may have (prefix up to 40, environment up to 63)', async () => {
+  const prefix = `a${'b'.repeat(38)}c`; // 40, the fork workflow's maximum
+  const environment = `e${'n'.repeat(61)}v`; // 63
+  account({
+    routes: [{ pattern: 'api.example.com/*', script: `${prefix}-api-${environment}` }],
+    buckets: [`${prefix}-pulumi-state`],
+  });
+  const plan = await previewAdoption('private', config);
+  expect(plan.adoption).toEqual({ prefix, environment, stateBucket: `${prefix}-pulumi-state` });
+  expect(() =>
+    validateInstallationConfig({
+      ...config,
+      adoption: { prefix: `${prefix}d`, environment, stateBucket: `${prefix}-pulumi-state` },
+    })
+  ).toThrow('takeover');
+});
