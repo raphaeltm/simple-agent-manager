@@ -35,7 +35,7 @@ the front page, reviewed the screenshots, and said "Ship it" (chat task 01M8973S
 - The advisory is the first post on `/blog/`, above newer posts, in a visually distinct pinned card.
 - The homepage shows an amber security warning above the hero badge that links to the advisory.
 - No horizontal overflow at 375px and 1280px; no serious/critical axe violations.
-- Removing `pinned: true` returns the advisory to date order (covered by the schema default).
+- Removing `pinned: true` returns the advisory to date order (covered by the schema default and the grid date-order assertion).
 
 ## Implementation notes
 

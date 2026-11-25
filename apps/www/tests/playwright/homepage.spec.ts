@@ -174,7 +174,7 @@ test.describe('homepage', () => {
     await page.setViewportSize({ width: 320, height: 640 });
     await page.goto('/');
     const outside = await page.evaluate(() =>
-      [...document.querySelectorAll('.fh-hero h1, .fh-hero p, .fh-hero .sam-btn, .fh-hero li')]
+      [...document.querySelectorAll('.fh-hero h1, .fh-hero p, .fh-hero .sam-btn, .fh-hero li, .fh-hero .fh-notice')]
         .map((el) => el.getBoundingClientRect())
         .filter((box) => box.left < -0.5 || box.right > window.innerWidth + 0.5).length,
     );

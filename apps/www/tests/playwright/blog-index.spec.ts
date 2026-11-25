@@ -18,9 +18,9 @@ test.describe('blog index', () => {
 
     // Pinning, not the date, put it there: the grid below starts with a newer post.
     const pinnedDate = await firstPost.locator('time').getAttribute('datetime');
-    const gridDates = await main.locator('.post-grid time').evaluateAll((els) =>
-      els.map((el) => el.getAttribute('datetime') ?? ''),
-    );
+    const gridDates = await main
+      .locator('.post-grid time')
+      .evaluateAll((els) => els.map((el) => el.getAttribute('datetime') ?? ''));
     expect(gridDates.length).toBeGreaterThan(0);
     expect(gridDates[0] > (pinnedDate ?? '')).toBe(true);
     expect([...gridDates].sort().reverse()).toEqual(gridDates);
@@ -28,14 +28,22 @@ test.describe('blog index', () => {
     await expect(main.locator(`.post-grid a[href="${ADVISORY}"]`)).toHaveCount(0);
   });
 
-  test('has no overflow or serious accessibility violations', async ({ page }) => {
-    await page.goto('/blog/');
-    await expect(page.locator('main a[href^="/blog/"]').first()).toBeVisible();
-    // Cards fade in on scroll; axe would sample blended mid-transition colours (see marketing-pages.spec.ts).
-    await page.addStyleTag({
-      content: '.animate-on-scroll{opacity:1 !important;transform:none !important;transition:none !important}',
+  for (const theme of ['dark', 'light'] as const) {
+    test(`has no overflow or serious accessibility violations (${theme})`, async ({ page }) => {
+      await page.addInitScript(
+        (value) => window.localStorage.setItem('starlight-theme', value),
+        theme
+      );
+      await page.goto('/blog/');
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      await expect(page.locator('main a[href^="/blog/"]').first()).toBeVisible();
+      // Cards fade in on scroll; axe would sample blended mid-transition colours (see marketing-pages.spec.ts).
+      await page.addStyleTag({
+        content:
+          '.animate-on-scroll{opacity:1 !important;transform:none !important;transition:none !important}',
+      });
+      await page.waitForTimeout(300);
+      await expectNoOverflowOrSeriousAxeViolations(page);
     });
-    await page.waitForTimeout(300);
-    await expectNoOverflowOrSeriousAxeViolations(page);
-  });
+  }
 });

@@ -100,13 +100,14 @@ const isSecurity = (tags: string[]) => tags.includes('security');
 
   .pinned-card {
     --pin: var(--color-accent);
+    --pin-ink: var(--color-accent);
     display: grid;
     gap: 14px;
     margin-bottom: 32px;
     padding: 28px;
     border-radius: var(--radius-lg);
     border: 1px solid color-mix(in srgb, var(--pin) 55%, transparent);
-    border-left-width: 4px;
+    border-left: 4px solid var(--pin);
     background:
       linear-gradient(100deg, color-mix(in srgb, var(--pin) 14%, transparent), transparent 70%),
       var(--color-bg-surface);
@@ -116,12 +117,24 @@ const isSecurity = (tags: string[]) => tags.includes('security');
 
   .pinned-card--security {
     --pin: var(--color-warning);
+    --pin-ink: var(--color-warning-ink);
   }
 
   .pinned-card:hover {
     border-color: var(--pin);
     transform: translateY(-2px);
     color: inherit;
+  }
+
+  .pinned-card:focus-visible {
+    outline: 2px solid var(--pin);
+    outline-offset: 3px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pinned-card:hover {
+      transform: none;
+    }
   }
 
   .pinned-label {
@@ -132,7 +145,7 @@ const isSecurity = (tags: string[]) => tags.includes('security');
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: var(--pin);
+    color: var(--pin-ink);
   }
 
   .pinned-label svg {
@@ -174,7 +187,7 @@ const isSecurity = (tags: string[]) => tags.includes('security');
   .pinned-cta {
     flex: none;
     font-weight: 600;
-    color: var(--pin);
+    color: var(--pin-ink);
     white-space: nowrap;
   }
 
