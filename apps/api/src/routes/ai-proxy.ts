@@ -23,6 +23,7 @@ import { proxyRunUsageRecorder } from '../services/agent-run-usage';
 import type { UpstreamAuth } from '../services/ai-billing';
 import { resolveUpstreamAuth } from '../services/ai-billing';
 import { isAnthropicModel } from '../services/ai-proxy-shared';
+import { resolveAiTestUpstream, testUpstreamAnthropicAuth } from '../services/ai-test-upstream';
 import {
   aiProxyBodyParseError,
   aiProxyRequestBodyMaxBytes,
@@ -129,9 +130,16 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   const aigMetadata = buildProxyMetadata(prepared, body, modelId);
   const provider = getModelProvider(modelId);
 
+  // Test-only fake upstream for allowlisted users (ai-test-upstream.ts). It replaces only the
+  // upstream call: every gate above already ran, and accounting below still prices the response.
+  const testUpstream =
+    provider === 'workers-ai' ? null : await resolveAiTestUpstream(c.env, prepared.userId);
+
   // For Anthropic models, resolve upstream auth (Unified Billing or platform key).
   let anthropicAuth: UpstreamAuth | undefined;
-  if (provider === 'anthropic') {
+  if (provider === 'anthropic' && testUpstream) {
+    anthropicAuth = testUpstreamAnthropicAuth();
+  } else if (provider === 'anthropic') {
     try {
       anthropicAuth = await resolveUpstreamAuth(c.env, prepared.db);
     } catch (err) {
@@ -154,7 +162,9 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
 
   // For OpenAI models, resolve the API key from platform credentials or Unified Billing.
   const openaiCredential =
-    provider === 'openai' ? await resolveOpenAIProxyCredential(c, prepared.db) : undefined;
+    provider === 'openai'
+      ? await resolveOpenAIProxyCredential(c, prepared.db, testUpstream)
+      : undefined;
   if (openaiCredential instanceof Response) return openaiCredential;
 
   log.info('ai_proxy.forward', {
@@ -176,12 +186,26 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
         // (the function already returned on failure) — should never happen.
         throw new Error('Internal error: missing Anthropic upstream auth for anthropic provider');
       }
-      response = await forwardToAnthropic(c.env, body, modelId, aigMetadata, anthropicAuth);
+      response = await forwardToAnthropic(
+        c.env,
+        body,
+        modelId,
+        aigMetadata,
+        anthropicAuth,
+        testUpstream?.fetch
+      );
     } else if (provider === 'openai') {
       if (!openaiCredential) {
         throw new Error('Internal error: missing OpenAI upstream auth for openai provider');
       }
-      response = await forwardToOpenAI(c.env, body, modelId, aigMetadata, openaiCredential.apiKey);
+      response = await forwardToOpenAI(
+        c.env,
+        body,
+        modelId,
+        aigMetadata,
+        openaiCredential.apiKey,
+        testUpstream?.fetch
+      );
     } else {
       response = await forwardToWorkersAI(c.env, body, modelId, aigMetadata);
     }
@@ -194,7 +218,9 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       status: response.status,
     });
 
-    if (provider === 'anthropic' && anthropicAuth) {
+    if (testUpstream) {
+      // No real credential was used, so there is no limit telemetry or attribution to record.
+    } else if (provider === 'anthropic' && anthropicAuth) {
       schedulePlatformProxyLimitHeaders(c, {
         env: c.env,
         response,
@@ -308,7 +334,8 @@ aiProxyRoutes.post('/responses', async (c) => {
   if (inputLimitError) return inputLimitError;
 
   const aigMetadata = buildProxyMetadata(prepared, body, modelId);
-  const openaiCredential = await resolveOpenAIProxyCredential(c, prepared.db);
+  const testUpstream = await resolveAiTestUpstream(c.env, prepared.userId);
+  const openaiCredential = await resolveOpenAIProxyCredential(c, prepared.db, testUpstream);
   if (openaiCredential instanceof Response) return openaiCredential;
 
   log.info('ai_proxy.responses.forward', {
@@ -325,7 +352,8 @@ aiProxyRoutes.post('/responses', async (c) => {
       body,
       modelId,
       aigMetadata,
-      openaiCredential.apiKey
+      openaiCredential.apiKey,
+      testUpstream?.fetch
     );
 
     log.info('ai_proxy.responses.response', {
@@ -335,14 +363,16 @@ aiProxyRoutes.post('/responses', async (c) => {
       status: response.status,
     });
 
-    schedulePlatformProxyLimitHeaders(c, {
-      env: c.env,
-      response,
-      prepared,
-      provider: 'openai',
-      attribution: openaiCredential,
-      source: 'ai-proxy.openai.responses',
-    });
+    if (!testUpstream) {
+      schedulePlatformProxyLimitHeaders(c, {
+        env: c.env,
+        response,
+        prepared,
+        provider: 'openai',
+        attribution: openaiCredential,
+        source: 'ai-proxy.openai.responses',
+      });
+    }
 
     return accountingResponse(
       c,

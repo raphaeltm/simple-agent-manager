@@ -2294,3 +2294,30 @@ tool history) and generated output. Provider-reported usage takes precedence ove
 estimates. User- and project-owned credentials remain usable after
 platform-funded monthly spend reaches its limit; daily token budgets still apply to all calls.
 An administrator ceiling denial directs the user to their administrator or the next month.
+
+### Test-only fake AI upstream
+
+A test installation can prove platform-funded metering and spending limits with no AI key. For
+allowlisted users, SAM-managed (`sam` mode) calls to `/ai/v1/chat/completions`, `/ai/v1/responses`
+and `/ai/anthropic/v1/messages` (and `count_tokens`) are answered in-process by a fake model instead
+of Anthropic or OpenAI (`services/ai-test-upstream.ts`). Every gate still runs: auth, model
+allowlist, tier, daily token budget and the monthly cap. The fake's response goes through the
+normal accounting path: it is priced from the catalog, recorded in the per-user counter and counted
+against the cap. Nothing leaves the Worker, and no platform key or Cloudflare token is resolved
+or sent. Passthrough routes and Workers AI (`@cf/*`) models are not faked.
+
+It needs all three of these, and it is off if any one is missing:
+
+| Lock                                   | Where             | Meaning                                                                                               |
+| -------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------- |
+| `AI_TEST_UPSTREAM_ENABLED=true`        | Worker var        | Deploy-time lock, absent by default. Only the exact value `true` counts.                               |
+| `ENVIRONMENT` not `production`/`prod`  | Worker var        | Always ignored on production deployments, and when `ENVIRONMENT` is unset.                             |
+| `aiProxy.testUpstreamUserIds`          | Admin setting     | User ids whose calls are faked (default empty = off). Every other user keeps the real model.           |
+| `aiProxy.testUpstreamCostPerCallCents` | Admin setting     | List-price cost each fake call reports, in US cents (default `40`).                                    |
+
+The fake only answers where SAM meters spend itself, which means an installation without an AI
+Gateway (such as the self-host box). Where a gateway exists, spend is read from the gateway's
+logs, so an in-process answer would be metered nowhere; there the fake is not used. The fake
+sizes its reported output tokens so the requested model's catalog price comes to the configured
+cost, so pick a catalog model whose output price keeps your test under the daily token budget
+(for example an Opus model: $0.40 is about 16,000 output tokens).

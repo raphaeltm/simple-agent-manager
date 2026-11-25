@@ -469,6 +469,32 @@ If the feature genuinely cannot be tested on staging (e.g., requires credentials
 
 On 2026-04-26, PR #823 (SAM Agent Phase A) was merged after the agent rationalized: "End-to-end chat requires a configured Anthropic platform credential... the chat would return a graceful error." The agent verified page loads and API responses but never sent a chat message. The feature was completely broken in production (TransformStream deadlock, zero bytes streaming). The correct action was to stop and ask the human to configure the credential.
 
+### Testing Platform-Funded AI Without a Real AI Key
+
+A missing platform AI key is not a reason to skip verifying AI metering, daily token budgets or
+monthly spending limits. On an installation without an AI Gateway (the self-host box), turn on the
+test-only fake upstream (`apps/api/src/services/ai-test-upstream.ts`; reference:
+`apps/www/src/content/docs/docs/reference/configuration.md`, "Test-only fake AI upstream"):
+
+1. Deploy with the Worker var `AI_TEST_UPSTREAM_ENABLED=true` (on the box: a line in the
+   operator's `secrets.env`, then redeploy). Production ignores it.
+2. In Admin settings, set `aiProxy.directUpstreamEnabled=true`, add your **test user's id** to
+   `aiProxy.testUpstreamUserIds`, and set `aiProxy.testUpstreamCostPerCallCents` (default 40).
+   Only listed users are faked; everyone else keeps the real model.
+3. Drive real `sam`-mode calls from a workspace of that user (or with its callback token against
+   `/ai/v1/chat/completions`, `/ai/v1/responses`, `/ai/anthropic/v1/messages`). Use a catalog model
+   whose output price keeps the test under the daily output budget (an Opus model: $0.40 is about
+   16k output tokens). Replies contain `SAM test upstream: canned reply`.
+4. The check runs before each call against spend so far: with a $1 cap, $0.40 calls make the 4th
+   call return 429 `rate_limit_error` ("Administrator monthly AI spending limit reached" when the
+   admin ceiling binds). $0.30 calls make the 5th the refused one.
+5. Read the spend from `GET /api/usage/ai/budget` or Settings > Usage (`monthCostUsd`).
+6. Clean up: clear `aiProxy.testUpstreamUserIds` and the ceiling, and remove the deploy var on a
+   shared box when done.
+
+An installation with an AI Gateway (staging, production) does not use the in-process fake: its
+spend comes from gateway logs, which an in-process answer never reaches.
+
 ## Zero Errors During Feature Verification (ABSOLUTE)
 
 When you exercise the feature on staging, **any error is a merge blocker**. This includes:
