@@ -54,12 +54,23 @@ const PARTIAL_SUSPENSION_MESSAGE =
   'The account is suspended, but some open project connections could not be closed. Suspend it again to retry.';
 
 /**
- * Close a suspended user's sockets on every project they are an active member of. Memberships are
- * read a page at a time (seeking by `project_id`) and closed a bounded batch at a time; every page
- * is processed even when a close fails, then any failure answers a retryable 503. Suspending again
- * is idempotent and re-runs the closes.
+ * Close a suspended user's sockets on every project they are an active member of, and on every
+ * project they were removed from since `removedSince` (the start of this suspension). A retry must
+ * still reach a project whose membership was removed after an earlier close failed: offboarding
+ * only logs its own close failure, so nothing else would close that socket. Bounding the former
+ * memberships by the suspension start keeps the fan-out at the active rows plus the few removals
+ * made while the account was suspended, rather than every membership the user ever had.
+ *
+ * Rows are read a page at a time (seeking by `project_id`) and closed a bounded batch at a time;
+ * every page is processed even when a close fails, then any failure answers a retryable 503.
+ * Suspending again is idempotent and re-runs the closes.
  */
-export async function closeSuspendedUserSockets(env: Env, userId: string): Promise<void> {
+export async function closeSuspendedUserSockets(
+  env: Env,
+  userId: string,
+  removedSince: Date
+): Promise<void> {
+  const since = removedSince.toISOString();
   let failed = false;
   let after = '';
   for (;;) {
@@ -67,10 +78,12 @@ export async function closeSuspendedUserSockets(env: Env, userId: string): Promi
     try {
       const rows = await env.DATABASE.prepare(
         `SELECT project_id FROM project_members
-          WHERE user_id = ? AND status = 'active' AND project_id > ?
+          WHERE user_id = ?
+            AND (status = 'active' OR (status = 'removed' AND removed_at >= ?))
+            AND project_id > ?
           ORDER BY project_id LIMIT ?`
       )
-        .bind(userId, after, SUSPENSION_MEMBERSHIP_PAGE_SIZE)
+        .bind(userId, since, after, SUSPENSION_MEMBERSHIP_PAGE_SIZE)
         .all<{ project_id: unknown }>();
       projectIds = (rows.results ?? []).flatMap((row) =>
         typeof row.project_id === 'string' ? [row.project_id] : []
