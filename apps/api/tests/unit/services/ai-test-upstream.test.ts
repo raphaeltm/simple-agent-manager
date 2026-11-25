@@ -13,6 +13,11 @@ describe('isAiTestUpstreamDeployable (deploy-time locks)', () => {
   it.each([
     ['selfhost', 'true', true],
     ['staging', 'true', true],
+    ['staging2', 'true', true],
+    [' Development ', 'true', true],
+    // A fork production stack with an unmapped name deploys its raw name: refused.
+    ['main', 'true', false],
+    ['live', 'true', false],
     ['production', 'true', false],
     ['PRODUCTION', 'true', false],
     [' prod ', 'true', false],

@@ -199,6 +199,13 @@ line does not remove a value sealed before. Delete the line, then deploy once wi
 `secrets.env` and SAM's own generated keys. The two older bundles kept for rollback, and any
 backup, still hold the value until later seals replace them.
 
+**Testing AI spending limits without an AI key** (test boxes only). `AI_TEST_UPSTREAM_ENABLED=true`
+in `secrets.env` plus the admin settings `aiProxy.testUpstreamUserIds` and
+`aiProxy.directUpstreamEnabled` make the listed users' SAM-managed model calls get a metered fake
+reply (configuration reference, "Test-only fake AI upstream"). Remove it with `--unset` as above.
+Create `secrets.env` with a normal umask in its own shell: a restrictive umask inherited by
+`pnpm selfhost:upgrade` makes the checked-out files unreadable to the key agent.
+
 **Switching providers** is never a silent change at a deploy:
 
 ```bash

@@ -218,9 +218,8 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       status: response.status,
     });
 
-    if (testUpstream) {
-      // No real credential was used, so there is no limit telemetry or attribution to record.
-    } else if (provider === 'anthropic' && anthropicAuth) {
+    // A faked call (testUpstream) used no real credential: no limit telemetry to record.
+    if (!testUpstream && provider === 'anthropic' && anthropicAuth) {
       schedulePlatformProxyLimitHeaders(c, {
         env: c.env,
         response,
@@ -229,7 +228,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
         attribution: anthropicAuth,
         source: 'ai-proxy.anthropic.chat_completions',
       });
-    } else if (provider === 'openai' && openaiCredential) {
+    } else if (!testUpstream && provider === 'openai' && openaiCredential) {
       schedulePlatformProxyLimitHeaders(c, {
         env: c.env,
         response,

@@ -226,8 +226,49 @@ describe('fake AI upstream: metering and the administrator ceiling on a no-gatew
     expect(await real.text()).toContain('AI proxy is not configured');
   });
 
+  it('fakes /ai/v1/responses (JSON and SSE) and count_tokens for a listed user only', async () => {
+    const listed = await seedCaller('routes');
+    const other = await seedCaller('routes-other');
+    await setSettings([
+      { name: 'aiProxy.directUpstreamEnabled', value: true },
+      { name: 'aiProxy.perUserMonthlyCostCeilingUsd', value: 0 },
+      { name: 'aiProxy.testUpstreamUserIds', value: [listed.userId] },
+    ]);
+
+    for (const stream of [false, true]) {
+      const response = await call('/ai/v1/responses', listed.token, {
+        model: OPENAI_MODEL.id,
+        input: 'hello',
+        stream,
+      });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain(FAKE_UPSTREAM_TEXT);
+    }
+
+    const counted = await call('/ai/anthropic/v1/messages/count_tokens', listed.token, {
+      model: CLAUDE_MODEL.id,
+      messages: [{ role: 'user', content: 'hello' }],
+    });
+    expect(counted.status).toBe(200);
+    expect(await counted.json()).toEqual({ input_tokens: 10 });
+
+    // Control: the same routes for a user who is not listed take the real path (no key: 503).
+    const realResponses = await call('/ai/v1/responses', other.token, {
+      model: OPENAI_MODEL.id,
+      input: 'hello',
+    });
+    expect(realResponses.status).toBe(503);
+    const realCount = await call('/ai/anthropic/v1/messages/count_tokens', other.token, {
+      model: CLAUDE_MODEL.id,
+      messages: [{ role: 'user', content: 'hello' }],
+    });
+    expect(realCount.status).toBe(503);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['a production deployment', { ...BOX_ENV, ENVIRONMENT: 'production' }],
+    ['a fork production stack with an unmapped name', { ...BOX_ENV, ENVIRONMENT: 'main' }],
     ['a deployment with no environment label', { ...BOX_ENV, ENVIRONMENT: '' }],
     ['a deployment without the deploy flag', { ...BOX_ENV, AI_TEST_UPSTREAM_ENABLED: undefined }],
     ['a deploy flag other than "true"', { ...BOX_ENV, AI_TEST_UPSTREAM_ENABLED: '1' }],
@@ -269,8 +310,10 @@ describe('fake AI upstream: metering and the administrator ceiling on a no-gatew
       AI_GATEWAY_ID: 'sam',
       CF_ACCOUNT_ID: 'acct',
     });
-    // The real gateway path ran (and was refused or failed here): never the fake's 200.
-    expect(response.status).not.toBe(200);
-    expect(await response.text()).not.toContain(FAKE_UPSTREAM_TEXT);
+    // The real gateway path ran: no platform key or gateway token here, so it is not configured.
+    expect(response.status).toBe(503);
+    const text = await response.text();
+    expect(text).toContain('AI proxy is not configured');
+    expect(text).not.toContain(FAKE_UPSTREAM_TEXT);
   });
 });

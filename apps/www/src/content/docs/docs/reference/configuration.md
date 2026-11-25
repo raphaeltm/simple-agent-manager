@@ -2303,21 +2303,27 @@ and `/ai/anthropic/v1/messages` (and `count_tokens`) are answered in-process by 
 of Anthropic or OpenAI (`services/ai-test-upstream.ts`). Every gate still runs: auth, model
 allowlist, tier, daily token budget and the monthly cap. The fake's response goes through the
 normal accounting path: it is priced from the catalog, recorded in the per-user counter and counted
-against the cap. Nothing leaves the Worker, and no platform key or Cloudflare token is resolved
-or sent. Passthrough routes and Workers AI (`@cf/*`) models are not faked.
+against the cap. Nothing leaves the Worker, and no platform key or Cloudflare token is sent.
+Passthrough routes (`/ai/proxy/:wstoken/*`) and Workers AI (`@cf/*`) models are not faked: an
+allowlisted user's passthrough calls still spend the real key.
 
-It needs all three of these, and it is off if any one is missing:
+It is off unless all of these hold:
 
-| Lock                                   | Where             | Meaning                                                                                               |
-| -------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------- |
-| `AI_TEST_UPSTREAM_ENABLED=true`        | Worker var        | Deploy-time lock, absent by default. Only the exact value `true` counts.                               |
-| `ENVIRONMENT` not `production`/`prod`  | Worker var        | Always ignored on production deployments, and when `ENVIRONMENT` is unset.                             |
-| `aiProxy.testUpstreamUserIds`          | Admin setting     | User ids whose calls are faked (default empty = off). Every other user keeps the real model.           |
-| `aiProxy.testUpstreamCostPerCallCents` | Admin setting     | List-price cost each fake call reports, in US cents (default `40`).                                    |
+| Lock                            | Where         | Meaning                                                                                                   |
+| ------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------- |
+| `AI_TEST_UPSTREAM_ENABLED=true` | Worker var    | Deploy-time lock, absent by default. Only the exact value `true` counts.                                   |
+| `ENVIRONMENT`                   | Worker var    | Must be `staging`, `staging2`, `selfhost`, `development` or `test`. Production, unset and anything else are refused. |
+| No AI Gateway                   | Worker vars   | Only where SAM meters spend itself (no addressable gateway). With a gateway, spend comes from the gateway's logs, which an in-process answer never reaches. |
+| `aiProxy.testUpstreamUserIds`   | Admin setting | User ids whose calls are faked (at most 50; default empty = off). Every other user keeps the real model.   |
 
-The fake only answers where SAM meters spend itself, which means an installation without an AI
-Gateway (such as the self-host box). Where a gateway exists, spend is read from the gateway's
-logs, so an in-process answer would be metered nowhere; there the fake is not used. The fake
-sizes its reported output tokens so the requested model's catalog price comes to the configured
-cost, so pick a catalog model whose output price keeps your test under the daily token budget
-(for example an Opus model: $0.40 is about 16,000 output tokens).
+`aiProxy.testUpstreamCostPerCallCents` (admin setting, default `40`) is the list-price cost each fake
+call reports. The fake sizes its reported output tokens so the requested model's catalog price comes
+to that cost, so pick a catalog model whose output price keeps your test under the daily token budget
+(for example an Opus model: $0.40 is about 16,000 output tokens). The fake spend is recorded in the
+listed users' real counters for the month.
+
+In practice this means a self-host box. Put `AI_TEST_UPSTREAM_ENABLED=true` in
+`deploy/selfhost/.state/secrets.env` (mode 0600) and run `pnpm selfhost:deploy`. To turn it off,
+delete the line and run `pnpm selfhost:deploy --unset AI_TEST_UPSTREAM_ENABLED`: on a sealed box,
+deleting the line alone keeps the sealed value. The Cloudflare deploy pipeline does not forward this
+variable, and Cloudflare installations have an AI Gateway anyway.

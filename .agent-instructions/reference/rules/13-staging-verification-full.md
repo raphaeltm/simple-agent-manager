@@ -476,8 +476,10 @@ monthly spending limits. On an installation without an AI Gateway (the self-host
 test-only fake upstream (`apps/api/src/services/ai-test-upstream.ts`; reference:
 `apps/www/src/content/docs/docs/reference/configuration.md`, "Test-only fake AI upstream"):
 
-1. Deploy with the Worker var `AI_TEST_UPSTREAM_ENABLED=true` (on the box: a line in the
-   operator's `secrets.env`, then redeploy). Production ignores it.
+1. Deploy with the Worker var `AI_TEST_UPSTREAM_ENABLED=true`: on the box, a line in
+   `deploy/selfhost/.state/secrets.env` (mode 0600, created with a NORMAL umask in a separate
+   shell from any upgrade: a restrictive umask leaks into `selfhost:upgrade`'s checkout and breaks
+   the key agent), then `pnpm selfhost:deploy`. Only staging/test/self-host `ENVIRONMENT`s honour it.
 2. In Admin settings, set `aiProxy.directUpstreamEnabled=true`, add your **test user's id** to
    `aiProxy.testUpstreamUserIds`, and set `aiProxy.testUpstreamCostPerCallCents` (default 40).
    Only listed users are faked; everyone else keeps the real model.
@@ -489,11 +491,15 @@ test-only fake upstream (`apps/api/src/services/ai-test-upstream.ts`; reference:
    call return 429 `rate_limit_error` ("Administrator monthly AI spending limit reached" when the
    admin ceiling binds). $0.30 calls make the 5th the refused one.
 5. Read the spend from `GET /api/usage/ai/budget` or Settings > Usage (`monthCostUsd`).
-6. Clean up: clear `aiProxy.testUpstreamUserIds` and the ceiling, and remove the deploy var on a
-   shared box when done.
+6. Clean up: reset `aiProxy.testUpstreamUserIds` and the ceiling, then delete the `secrets.env`
+   line and run `pnpm selfhost:deploy --unset AI_TEST_UPSTREAM_ENABLED` (on a sealed box, deleting
+   the line alone keeps the sealed value). The listed user's fake spend stays in their counters for
+   the month.
 
 An installation with an AI Gateway (staging, production) does not use the in-process fake: its
-spend comes from gateway logs, which an in-process answer never reaches.
+spend comes from gateway logs, which an in-process answer never reaches. Real agents make several
+calls per turn, some concurrently; concurrent calls admitted before earlier spend is recorded can
+each overshoot the cap by their own cost (documented behaviour), so count by spend, not by turns.
 
 ## Zero Errors During Feature Verification (ABSOLUTE)
 

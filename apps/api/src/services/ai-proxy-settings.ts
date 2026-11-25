@@ -14,6 +14,10 @@ export const AI_TEST_UPSTREAM_COST_PER_CALL_CENTS_SETTING =
   'aiProxy.testUpstreamCostPerCallCents' as const;
 /** Default fake cost: $0.40, so a $1 cap admits three calls and refuses the fourth. */
 export const DEFAULT_AI_TEST_UPSTREAM_COST_PER_CALL_CENTS = 40;
+/** Most user ids the fake-upstream allowlist holds; it is read on every proxy call of a test install. */
+const MAX_AI_TEST_UPSTREAM_USER_IDS = 50;
+/** Longest accepted user id in that allowlist. */
+const MAX_AI_TEST_UPSTREAM_USER_ID_LENGTH = 128;
 /** Representation bound for the fake cost: $100 per call. */
 const MAX_AI_TEST_UPSTREAM_COST_PER_CALL_CENTS = 10_000;
 export type AiProxySettingName =
@@ -58,13 +62,19 @@ export const AI_PROXY_SETTINGS: readonly AdminSettingDefinition[] = [
     defaultValue: [],
     category: 'AI models',
     description:
-      'TEST INSTALLATIONS ONLY. User ids whose SAM-managed ("sam" mode) model calls are answered by a built-in fake model instead of Anthropic or OpenAI, so AI metering and spending limits can be tested with no AI key. Each fake call reports the usage that costs aiProxy.testUpstreamCostPerCallCents at the model\'s list price, and is metered and capped like a real call. Empty (the default) means off. Ignored unless the deployment sets AI_TEST_UPSTREAM_ENABLED=true, which a production deployment never honours. Every other user keeps the real model.',
+      'TEST INSTALLATIONS ONLY. User ids whose SAM-managed ("sam" mode) model calls are answered by a built-in fake model instead of Anthropic or OpenAI, so AI metering and spending limits can be tested with no AI key. Each fake call reports the usage that costs aiProxy.testUpstreamCostPerCallCents at the model\'s list price, and is metered and capped like a real call. Empty (the default) means off. Ignored unless the deployment sets AI_TEST_UPSTREAM_ENABLED=true on a staging, test or self-host installation (never production) without an AI Gateway. Every other user keeps the real model. Fake spend is recorded in the listed users\' real daily and monthly counters. Passthrough (custom endpoint) calls are not faked and still spend the real key.',
     secret: false,
     // Redirects the listed users' agents to a fake model.
     risky: true,
     validate: (value) =>
       Array.isArray(value) &&
-      value.every((entry) => typeof entry === 'string' && entry.trim().length > 0),
+      value.length <= MAX_AI_TEST_UPSTREAM_USER_IDS &&
+      value.every(
+        (entry) =>
+          typeof entry === 'string' &&
+          entry.trim().length > 0 &&
+          entry.length <= MAX_AI_TEST_UPSTREAM_USER_ID_LENGTH
+      ),
   },
   {
     name: AI_TEST_UPSTREAM_COST_PER_CALL_CENTS_SETTING,

@@ -48,48 +48,51 @@ Other findings:
   (developers.cloudflare.com/ai-gateway/configuration/custom-costs/). Docs do NOT say the logs API
   returns cost/tokens for a custom provider, or parses Anthropic-shaped usage there: needs a spike.
 
-## Design (sent to coordinator for go/no-go)
+## Design as built (coordinator-approved, with changes)
 
-1. **Fake upstream = a gated route inside the API Worker**, `/ai/_test-upstream/*`, serving
-   Anthropic `/v1/messages` and OpenAI `/chat/completions` (+ `/responses` if cheap), JSON and SSE,
-   canned text, and a `usage` block sized so the catalog price of the requested model gives a
-   configured USD per call (setting `aiProxy.testUpstreamCostPerCallUsd`). No new Worker, sidecar or
-   deploy step: the box reaches it through its own public hostname, the staging gateway reaches it as
-   a custom provider. Returns 404 unless the gate below is open.
-2. **Routing**: when the gate is open, the upstream URL builders point at the fake:
-   - no gateway (box): `https://api.${BASE_DOMAIN}/ai/_test-upstream/...` directly; the call then runs
-     the real local pricing, `AiTokenBudgetCounter` write and `checkMonthlyCostCap`.
-   - gateway (staging): `gateway.ai.cloudflare.com/.../{gw}/custom-sam-test-upstream/...` with
-     `cf-aig-metadata` (as today) and `cf-aig-custom-cost` set from the model's catalog price, so the
-     gateway logs real tokens and cost, and the real hourly cron and KV cap check run.
-   - Upstream auth is never resolved or forwarded in test mode: no platform key or CF token leaves SAM
-     towards the fake, and no provider is billed.
-3. **Gate (fail closed, three locks)**:
-   - deploy-time env `AI_TEST_UPSTREAM_ENABLED=true`, absent by default;
-   - ignored whenever `ENVIRONMENT === 'production'` (canonical and fork production deploys both set
-     it), and `sync-wrangler-config` refuses to emit it for a production stack;
-   - runtime superadmin setting `aiProxy.testUpstreamEnabled` (default off), honoured only with the env
-     flag; while on it applies to the whole installation, which on staging/the test box has only test
-     users. Rule 74 tests: production-shaped Env + setting on -> real upstream and fake route 404.
-4. **Scenarios**: box: admin ceiling $1, fake $0.40/call, calls 1-3 succeed, 4th -> 429 "Administrator
-   monthly AI spending limit reached", spend visible in Settings > Usage. Staging: user cap $1 (admin
-   ceiling does not apply with a gateway), 3 calls, wait for the hourly cron (no on-demand trigger
-   exists), 4th -> 429 "Monthly cost cap exceeded", spend visible in admin AI usage.
+Coordinator answers (events d1e67baa, 876ce0f0, 585186e9): (b) NO installation-wide redirect: an explicit
+allowlist of test user ids, empty = off; (a) hosted gaps reported, not fixed (idea
+01M89FVN8N54G0676JXHZW2JQY); (c) the staging (AI Gateway custom provider) half is SPLIT into a follow-up
+PR in this same task: `tasks/backlog/2026-11-25-fake-ai-upstream-staging-gateway.md`.
 
-## Implementation checklist
+1. **In-process fake, no public route.** `services/ai-test-upstream.ts` `resolveAiTestUpstream` returns an
+   `AiUpstreamFetch` (`fakeUpstreamFetch` -> `ai-test-upstream-responses.ts:buildFakeUpstreamResponse`)
+   that the proxy routes call instead of `globalUpstreamFetch`. Anthropic Messages, OpenAI Chat and
+   Responses, JSON and SSE, count_tokens; usage sized so the catalog price equals the configured cost.
+   No platform key or CF token is sent (`testUpstreamAnthropicAuth`, `resolveOpenAIProxyCredential(..., testUpstream)`).
+2. **Locks:** `AI_TEST_UPSTREAM_ENABLED === 'true'`; `ENVIRONMENT` in the allow-list
+   staging/staging2/selfhost/development/test; no AI Gateway (`hasLocalAiCostMetering`); caller in
+   `aiProxy.testUpstreamUserIds` (<= 50 ids). Cost: `aiProxy.testUpstreamCostPerCallCents` (default 40).
+3. The production refusal is the runtime ENVIRONMENT allow-list, not a sync-wrangler-config guard: the
+   Cloudflare pipeline never forwards the var (`getOptionalProcessEnvVars` does not list it).
 
-- [ ] Spike on staging: custom provider `custom-sam-test-upstream` + `cf-aig-custom-cost` -> logs API returns tokens and cost with userId metadata, for both Anthropic and OpenAI shapes (else fall back per design note)
-- [ ] Gate helper + env/setting wiring + production refusal in sync-wrangler-config
-- [ ] Fake upstream route (Anthropic + OpenAI, JSON + SSE, usage sized from catalog price)
-- [ ] Upstream URL builders honour the gate; upstream auth skipped in test mode
-- [ ] Staging custom provider created by the deploy pipeline (staging only), not by hand
-- [ ] Tests: rule 74 divergence/convergence, real-route metering -> 429 on the 4th call (local), gateway URL/header shape
-- [ ] Docs: staging verification reference + configuration reference
-- [ ] Live proof: box and staging, evidence in PR
+## Implementation checklist (box half, PR #3009)
+
+- [x] Gate helper + env (`Env.AI_TEST_UPSTREAM_ENABLED`, runtime-tunables bootstrap exception) + admin settings
+- [x] Fake responses (Anthropic + OpenAI chat + Responses, JSON + SSE, count_tokens)
+- [x] Proxy routes use the fake for allowlisted users; upstream auth not resolved/sent; limit telemetry skipped
+- [x] Tests: Workers-runtime vertical slice (`tests/workers/ai-test-upstream-ceiling.test.ts`, 9 cases incl. non-listed user, production/unset/unmapped-env/flag locks, gateway); unit truth table + price round trip; every guard proven discriminating
+- [x] Docs: configuration.md "Test-only fake AI upstream", agent testing reference, self-host README, .env.example
+- [x] Live box proof on app.vmtest.sam2.party (below)
+- [x] Hosted gaps filed as idea 01M89FVN8N54G0676JXHZW2JQY; UX findings idea 01M89JXTFHW4W3PQ65GTED6D0K; upgrader umask idea 01M89H1MQHJH432BFT2N43GHJJ
+- [ ] Staging half: deferred to `tasks/backlog/2026-11-25-fake-ai-upstream-staging-gateway.md` (coordinator-approved split)
 
 ## Acceptance criteria
 
-- [ ] A production-shaped Env cannot reach the fake (route 404, real upstream used) even with the setting on
-- [ ] Box: 4th $0.40 call refused with 429 by the admin ceiling; spend shown in Settings > Usage
-- [ ] Staging: after the cron, 4th call refused with 429 by the user cap; spend shown in admin AI usage
-- [ ] No platform key or CF token sent to the fake
+- [x] A production-shaped Env cannot reach the fake (production, unset, unmapped stack name, wrong flag) even for an allowlisted user
+- [x] Box: metering per call and refusal by the admin ceiling (429 "Administrator monthly AI spending limit reached"); spend in Settings > Usage
+- [x] A non-listed user on the same installation keeps the real upstream
+- [x] No platform key or CF token sent (global fetch never called in the slice test)
+- [ ] Staging: deferred (see backlog file)
+
+## Box live proof (2026-11-25, channel feature.selfhost-landing seq 511)
+
+Box upgraded to e4030e959 (after a self-inflicted umask incident, recovered by the documented path, see
+seq 510/511), `AI_TEST_UPSTREAM_ENABLED` via `.state/secrets.env`, admin ceiling $1, agent-test listed at
+40 cents, a real GCP node running a Claude Code chat in sam mode (model claude-opus-4-6):
+reply "SAM test upstream: canned reply"; 4 calls in the first turn metered $0.40 each = $1.60 (calls 3
+and 4 were concurrent, documented overshoot); the next prompt was refused with
+"API Error: Request rejected (429) · Administrator monthly AI spending limit reached"; Settings > Usage
+showed $1.60 / 4 requests / claude-opus-4-6. Cleanup: settings reset, node/profile/agent settings
+deleted, flag `--unset`, box back on main bff4b944d, sealed, healthy, access removed. The exact
+sequential "4th call refused" case is proven in the Workers-runtime test.
