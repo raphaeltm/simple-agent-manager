@@ -31,11 +31,19 @@ export function fakeUsageForCost(modelId: string, costUsd: number): FakeUsage {
   if (!model || model.costPer1kOutputTokens <= 0) {
     return { inputTokens: FAKE_UPSTREAM_INPUT_TOKENS, outputTokens: UNPRICED_OUTPUT_TOKENS };
   }
+  const target = Math.max(0, costUsd);
   const inputCostUsd = (FAKE_UPSTREAM_INPUT_TOKENS * model.costPer1kInputTokens) / 1000;
-  const outputCostUsd = Math.max(0, costUsd - inputCostUsd);
+  if (target <= inputCostUsd) {
+    // A cost at or below the fixed input's price (including 0) is all input: never overcharge it.
+    const inputTokens =
+      model.costPer1kInputTokens > 0
+        ? Math.floor((target * 1000) / model.costPer1kInputTokens)
+        : FAKE_UPSTREAM_INPUT_TOKENS;
+    return { inputTokens: Math.min(inputTokens, FAKE_UPSTREAM_INPUT_TOKENS), outputTokens: 0 };
+  }
   return {
     inputTokens: FAKE_UPSTREAM_INPUT_TOKENS,
-    outputTokens: Math.round((outputCostUsd * 1000) / model.costPer1kOutputTokens),
+    outputTokens: Math.round(((target - inputCostUsd) * 1000) / model.costPer1kOutputTokens),
   };
 }
 

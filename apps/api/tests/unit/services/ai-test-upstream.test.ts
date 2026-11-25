@@ -51,6 +51,21 @@ describe('fakeUsageForCost', () => {
     }
   );
 
+  it.each(priced.map((model) => [model.id]))(
+    '%s: a configured cost of 0 is priced at exactly $0',
+    (modelId) => {
+      const model = findPricedModel(modelId)!;
+      const usage = fakeUsageForCost(modelId, 0);
+      expect(priceModelUsageUsd(model, usage)).toBe(0);
+    }
+  );
+
+  it('never prices a tiny cost above the configured cost', () => {
+    const model = findPricedModel('claude-opus-4-6')!;
+    const usage = fakeUsageForCost('claude-opus-4-6', 0.00001);
+    expect(priceModelUsageUsd(model, usage)).toBeLessThanOrEqual(0.00001);
+  });
+
   it('reports a small fixed usage for a model with no catalog price', () => {
     expect(fakeUsageForCost('not-a-catalog-model', 0.4)).toEqual({
       inputTokens: 10,
