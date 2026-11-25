@@ -3,10 +3,13 @@
  * fork's GitHub Actions deploy, or SAM's own staging and production). Every rule here keeps the
  * existing deployment exactly as it is: its state, keys, settings and data.
  */
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import * as TOML from '@iarna/toml';
+
 import { EngineCommandFailure } from './installer-engine-contract.js';
+import { OMITTED_WORKER_VAR_DEFAULTS } from './worker-var-defaults.js';
 import { WORKER_VAR_OVERRIDE_NAMES } from './worker-var-override-names.js';
 
 /**
@@ -104,7 +107,7 @@ interface CloudflareAccess {
 async function cloudflareResult(access: CloudflareAccess, path: string, init?: RequestInit) {
   const response = await access.request(`${access.apiBase}/accounts/${access.accountId}/${path}`, {
     ...init,
-    headers: { Authorization: `Bearer ${access.token}`, ...(init?.headers ?? {}) },
+    headers: { Authorization: `Bearer ${access.token}`, ...init?.headers },
   });
   if (response.status === 404) return { found: false as const };
   if (!response.ok) throw new Error('Cloudflare inspection failed');
@@ -207,4 +210,53 @@ export async function migrationsNewerThanSource(
   return (rows as Array<{ name?: unknown }>)
     .map((row) => row?.name)
     .filter((name): name is string => typeof name === 'string' && !local.has(name));
+}
+
+/**
+ * Takeover step 1, before anything changes: the deployed database must not be newer than the
+ * approved source, or this deploy would roll it back.
+ */
+export async function refuseRollback(
+  access: CloudflareAccess & { root: string; stackOutputs(): Promise<string> }
+): Promise<void> {
+  const outputs: unknown = JSON.parse(await access.stackOutputs());
+  const databaseId = (outputs as { d1DatabaseId?: unknown } | null)?.d1DatabaseId;
+  if (typeof databaseId !== 'string' || !/^[0-9a-f-]{36}$/.test(databaseId))
+    throw new Error('Adopted stack has no database');
+  const newer = await migrationsNewerThanSource({ ...access, databaseId });
+  if (newer.length)
+    throw new AdoptionRefused([
+      'This SAM runs a newer version than the approved source. Its database has migrations the source does not contain:',
+      ...newer,
+    ]);
+}
+
+/** Takeover step 2, before the state refresh and `pulumi up`: no resource may change shape. */
+export async function refuseResourceChanges(preview: () => Promise<string>): Promise<void> {
+  const refused = refusedTakeoverSteps(JSON.parse(await preview()));
+  if (refused.length)
+    throw new AdoptionRefused([
+      'The approved source would change these resources, so nothing was changed:',
+      ...refused,
+    ]);
+}
+
+/**
+ * Every adopted deploy keeps what the deployment already runs with: its override vars, and its
+ * key secrets (configure-secrets.sh leaves the names in PRESERVE_EXISTING_WORKER_SECRETS alone).
+ */
+export async function keepAdoptedDeployment(
+  env: NodeJS.ProcessEnv,
+  access: CloudflareAccess & { worker: string; root: string }
+): Promise<void> {
+  const checkedIn = (
+    TOML.parse(readFileSync(join(access.root, 'apps/api/wrangler.toml'), 'utf8')) as {
+      vars?: Record<string, unknown>;
+    }
+  ).vars;
+  carryDeployedVars(env, await deployedWorkerOverrideVars(access), {
+    checkedIn: checkedIn ?? {},
+    code: OMITTED_WORKER_VAR_DEFAULTS,
+  });
+  env.PRESERVE_EXISTING_WORKER_SECRETS = (await existingPreservedKeySecrets(access)).join(',');
 }

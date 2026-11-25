@@ -5,12 +5,9 @@ import * as TOML from '@iarna/toml';
 
 import { AGENT_EMAIL_MARKER_FILE } from './configure-agent-email.js';
 import {
-  AdoptionRefused,
-  carryDeployedVars,
-  deployedWorkerOverrideVars,
-  existingPreservedKeySecrets,
-  migrationsNewerThanSource,
-  refusedTakeoverSteps,
+  keepAdoptedDeployment,
+  refuseResourceChanges,
+  refuseRollback,
 } from './installer-engine-adoption.js';
 import { CLI_OUTPUTS, openEngineBuildCache, VM_AGENT_OUTPUTS } from './installer-engine-cache.js';
 import {
@@ -35,7 +32,6 @@ import { prebuiltSteps } from './installer-engine-prebuilt-steps.js';
 import { verifyEngineReadiness } from './installer-engine-readiness.js';
 import { readContainerArtifact, verifyPublisherRuntime } from './installer-engine-runtime.js';
 import { prepareStateBackend } from './installer-engine-state.js';
-import { OMITTED_WORKER_VAR_DEFAULTS } from './worker-var-defaults.js';
 export * from './installer-engine-contract.js';
 export async function runInstallerEngine(
   input: unknown,
@@ -311,20 +307,13 @@ export async function runInstallerEngine(
     token: String(env.CF_API_TOKEN),
   };
   if (c.adoption?.takeover)
-    await phase('adoption-preflight', async () => {
-      // Before anything changes: the deployed database must not be newer than the approved
-      // source, or this deploy would roll it back.
-      const outputs: unknown = JSON.parse(await pulumi('stack', 'output', '--json'));
-      const databaseId = (outputs as { d1DatabaseId?: unknown } | null)?.d1DatabaseId;
-      if (typeof databaseId !== 'string' || !/^[0-9a-f-]{36}$/.test(databaseId))
-        throw new Error('Adopted stack has no database');
-      const newer = await migrationsNewerThanSource({ ...cloudflareAccess, databaseId, root });
-      if (newer.length)
-        throw new AdoptionRefused([
-          'This SAM runs a newer version than the approved source. Its database has migrations the source does not contain:',
-          ...newer,
-        ]);
-    });
+    await phase('adoption-preflight', () =>
+      refuseRollback({
+        ...cloudflareAccess,
+        root,
+        stackOutputs: () => pulumi('stack', 'output', '--json'),
+      })
+    );
   // Installation outputs outlive the container through the state bucket, which exists
   // from here on and persists across installations of this account and domain.
   const cached = await openEngineBuildCache({
@@ -398,16 +387,8 @@ export async function runInstallerEngine(
   await phase('infrastructure', async () => {
     // The takeover gate comes first: preview --refresh reads the live resources without writing
     // the state, while the refresh below rewrites it.
-    if (c.adoption?.takeover) {
-      const refused = refusedTakeoverSteps(
-        JSON.parse(await pulumi('preview', '--refresh', '--json'))
-      );
-      if (refused.length)
-        throw new AdoptionRefused([
-          'The approved source would change these resources, so nothing was changed:',
-          ...refused,
-        ]);
-    }
+    if (c.adoption?.takeover)
+      await refuseResourceChanges(() => pulumi('preview', '--refresh', '--json'));
     await execute(
       'bash',
       [join(root, 'scripts/deploy/pulumi-refresh-safe.sh')],
@@ -431,21 +412,12 @@ export async function runInstallerEngine(
   if (output('r2Name') !== bucket || output('cloudflareAccountId') !== c.accountId)
     throw new Error('Infrastructure identity mismatch');
   await phase('configure-services', async () => {
-    if (c.adoption) {
-      // Keep what the deployment already runs with: its override vars, and its key secrets
-      // (configure-secrets.sh leaves the names in PRESERVE_EXISTING_WORKER_SECRETS alone).
-      const worker = { ...cloudflareAccess, worker: `${prefix}-api-${stack}` };
-      const checkedIn = (
-        TOML.parse(readFileSync(join(root, 'apps/api/wrangler.toml'), 'utf8')) as {
-          vars?: Record<string, unknown>;
-        }
-      ).vars;
-      carryDeployedVars(env, await deployedWorkerOverrideVars(worker), {
-        checkedIn: checkedIn ?? {},
-        code: OMITTED_WORKER_VAR_DEFAULTS,
+    if (c.adoption)
+      await keepAdoptedDeployment(env, {
+        ...cloudflareAccess,
+        worker: `${prefix}-api-${stack}`,
+        root,
       });
-      env.PRESERVE_EXISTING_WORKER_SECRETS = (await existingPreservedKeySecrets(worker)).join(',');
-    }
     Object.assign(env, {
       D1_DATABASE_IDS: `${output('d1DatabaseId')} ${output('observabilityD1DatabaseId')}`,
       PAGES_PROJECT: output('pagesName'),
