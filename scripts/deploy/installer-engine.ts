@@ -4,6 +4,14 @@ import { join, resolve } from 'node:path';
 import * as TOML from '@iarna/toml';
 
 import { AGENT_EMAIL_MARKER_FILE } from './configure-agent-email.js';
+import {
+  AdoptionRefused,
+  carryDeployedVars,
+  deployedWorkerOverrideVars,
+  existingPreservedKeySecrets,
+  migrationsNewerThanSource,
+  refusedTakeoverSteps,
+} from './installer-engine-adoption.js';
 import { CLI_OUTPUTS, openEngineBuildCache, VM_AGENT_OUTPUTS } from './installer-engine-cache.js';
 import {
   commandLabel,
@@ -71,7 +79,8 @@ export async function runInstallerEngine(
   const prefix = c.prefix;
   if (!prefix) throw new Error('Resolved installation prefix missing');
   const bucket = `${prefix}-${stack}-assets`;
-  const stateBucket = c.stateBucket ?? `${prefix}-pulumi-state-${c.environment}`;
+  const stateBucket =
+    c.stateBucket ?? c.adoption?.stateBucket ?? `${prefix}-pulumi-state-${c.environment}`;
   const env: NodeJS.ProcessEnv = {
     ...options.environment,
     BASE_DOMAIN: c.baseDomain,
@@ -278,6 +287,7 @@ export async function runInstallerEngine(
       stack,
       prefix,
       token: String(env.CF_API_TOKEN),
+      adopt: !!c.adoption,
       request,
       createBucket: () => wrangler('api', 'r2', 'bucket', 'create', stateBucket),
       prepareLegacyCiBackend: () => pnpm('exec', 'tsx', 'scripts/deploy/installer-engine-ci-s3.ts'),
@@ -293,6 +303,27 @@ export async function runInstallerEngine(
     await options.save(state);
     return state;
   }
+  const cloudflareAccess = {
+    request,
+    apiBase: c.cloudflareApiUrl ?? DEFAULT_CLOUDFLARE_API_URL,
+    accountId: c.accountId,
+    token: String(env.CF_API_TOKEN),
+  };
+  if (c.adoption?.takeover)
+    await phase('adoption-preflight', async () => {
+      // Before anything changes: the deployed database must not be newer than the approved
+      // source, or this deploy would roll it back.
+      const outputs: unknown = JSON.parse(await pulumi('stack', 'output', '--json'));
+      const databaseId = (outputs as { d1DatabaseId?: unknown } | null)?.d1DatabaseId;
+      if (typeof databaseId !== 'string' || !/^[0-9a-f-]{36}$/.test(databaseId))
+        throw new Error('Adopted stack has no database');
+      const newer = await migrationsNewerThanSource({ ...cloudflareAccess, databaseId, root });
+      if (newer.length)
+        throw new AdoptionRefused([
+          'This SAM runs a newer version than the approved source. Its database has migrations the source does not contain:',
+          ...newer,
+        ]);
+    });
   // Installation outputs outlive the container through the state bucket, which exists
   // from here on and persists across installations of this account and domain.
   const cached = await openEngineBuildCache({
@@ -369,6 +400,14 @@ export async function runInstallerEngine(
       [join(root, 'scripts/deploy/pulumi-refresh-safe.sh')],
       join(root, 'infra')
     );
+    if (c.adoption?.takeover) {
+      const refused = refusedTakeoverSteps(JSON.parse(await pulumi('preview', '--json')));
+      if (refused.length)
+        throw new AdoptionRefused([
+          'The approved source would change these resources, so nothing was changed:',
+          ...refused,
+        ]);
+    }
     await pulumi('up', '--yes', '--skip-preview');
   });
   let outputs: Record<string, unknown> = {};
@@ -387,6 +426,13 @@ export async function runInstallerEngine(
   if (output('r2Name') !== bucket || output('cloudflareAccountId') !== c.accountId)
     throw new Error('Infrastructure identity mismatch');
   await phase('configure-services', async () => {
+    if (c.adoption) {
+      // Keep what the deployment already runs with: its override vars, and its key secrets
+      // (configure-secrets.sh leaves the names in PRESERVE_EXISTING_WORKER_SECRETS alone).
+      const worker = { ...cloudflareAccess, worker: `${prefix}-api-${stack}` };
+      carryDeployedVars(env, await deployedWorkerOverrideVars(worker));
+      env.PRESERVE_EXISTING_WORKER_SECRETS = (await existingPreservedKeySecrets(worker)).join(',');
+    }
     Object.assign(env, {
       D1_DATABASE_IDS: `${output('d1DatabaseId')} ${output('observabilityD1DatabaseId')}`,
       PAGES_PROJECT: output('pagesName'),
@@ -478,7 +524,9 @@ export async function runInstallerEngine(
             c.profile === 'legacy-ci'
               ? options.environment.CF_API_TOKEN
               : options.environment.CF_RUNTIME_API_TOKEN,
-          BOOTSTRAP_OWNER_EMAIL: c.ownerEmail,
+          // An adopted deployment already has its administrators; an owner binding would lock
+          // out every user but one (bootstrap-owner.ts). Empty leaves any existing value alone.
+          BOOTSTRAP_OWNER_EMAIL: c.adoption ? '' : c.ownerEmail,
         },
       }
     );
@@ -527,7 +575,8 @@ export async function runInstallerEngine(
     }
     throw new Error('Health verification failed');
   });
-  if (options.saveResult && c.profile !== 'legacy-ci')
+  // An adopted deployment has an owner and closed setup: there is no setup token to hand over.
+  if (options.saveResult && c.profile !== 'legacy-ci' && !c.adoption)
     await phase('owner-handoff', async () => {
       const generated = TOML.parse(
         readFileSync(join(root, 'apps/api/wrangler.toml'), 'utf8')

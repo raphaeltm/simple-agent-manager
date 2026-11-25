@@ -38,6 +38,8 @@ export type InstallerEngineConfig = EngineConfigBase &
         profile?: 'installation';
         ownerEmail: string;
         workersDev: { action: 'create' | 'preserve'; subdomain: string };
+        /** Present when this installation took over a deployment it did not create. */
+        adoption?: EngineAdoption;
         dryRun?: never;
         skipAgent?: never;
         stateBucket?: never;
@@ -45,11 +47,26 @@ export type InstallerEngineConfig = EngineConfigBase &
     | {
         profile: 'legacy-ci';
         ownerEmail?: never;
+        adoption?: never;
         dryRun?: boolean;
         skipAgent?: boolean;
         stateBucket?: string;
       }
   );
+/**
+ * An installation that took over an existing deployment (`installer-engine-adoption.ts`). Its
+ * names come from that deployment, so `prefix` must be explicit, and its state is never created.
+ */
+export interface EngineAdoption {
+  /** The existing Pulumi state bucket. */
+  stateBucket: string;
+  /**
+   * The takeover job itself: it stops before changing anything if the approved source is older
+   * than the deployment or would create, replace or delete a resource. Later updates of an
+   * adopted installation set it false, because new releases may legitimately add resources.
+   */
+  takeover: boolean;
+}
 export interface EngineEvent {
   phase: string;
   status: 'started' | 'completed' | 'failed';
@@ -165,6 +182,23 @@ function validateLegacyCiSettings(c: InstallerEngineConfig): void {
     throw new Error('Invalid legacy CI settings');
 }
 
+function validateAdoption(c: InstallerEngineConfig): void {
+  if (c.adoption === undefined) return;
+  const adoption = c.adoption as unknown;
+  if (
+    // Typed out for legacy-ci; checked here because the input is untrusted JSON.
+    (c as { profile?: unknown }).profile === 'legacy-ci' ||
+    !adoption ||
+    typeof adoption !== 'object' ||
+    Object.keys(adoption).some((key) => key !== 'stateBucket' && key !== 'takeover') ||
+    typeof (adoption as EngineAdoption).stateBucket !== 'string' ||
+    typeof (adoption as EngineAdoption).takeover !== 'boolean' ||
+    typeof c.prefix !== 'string'
+  )
+    throw new Error('Invalid adoption settings');
+  validateBucketName((adoption as EngineAdoption).stateBucket);
+}
+
 function validateRunnerProfile(c: InstallerEngineConfig): void {
   if (c.profile !== undefined && c.profile !== 'installation' && c.profile !== 'legacy-ci')
     throw new Error('Unsupported runner profile');
@@ -178,6 +212,7 @@ function validateRunnerProfile(c: InstallerEngineConfig): void {
   if (c.profile !== 'legacy-ci' && ('dryRun' in c || 'skipAgent' in c || 'stateBucket' in c))
     throw new Error('Legacy CI options cannot change installation safety');
   validateLegacyCiSettings(c);
+  validateAdoption(c);
   if (
     c.profile !== 'legacy-ci' &&
     (!c.workersDev ||
@@ -229,7 +264,9 @@ export function validateEngineConfig(input: unknown): InstallerEngineConfig {
   const prefix =
     c.prefix ?? `s${createHash('sha256').update(c.baseDomain).digest('hex').slice(0, 6)}`;
   validateResourcePrefix(prefix);
-  validateBucketName(c.stateBucket ?? `${prefix}-pulumi-state-${c.environment}`);
+  validateBucketName(
+    c.stateBucket ?? c.adoption?.stateBucket ?? `${prefix}-pulumi-state-${c.environment}`
+  );
   validateBucketName(`${prefix}-${stack}-assets`);
   validateExecutionSettings(c);
   const api = new URL(c.cloudflareApiUrl ?? DEFAULT_CLOUDFLARE_API_URL);

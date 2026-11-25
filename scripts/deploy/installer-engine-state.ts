@@ -8,6 +8,8 @@ export interface StateBackendSteps {
   stack: string;
   prefix: string;
   token: string;
+  /** An adoption never creates state: a missing bucket or stack is not the described deployment. */
+  adopt: boolean;
   request(url: string, init?: RequestInit): Promise<Response>;
   createBucket(): Promise<unknown>;
   prepareLegacyCiBackend(): Promise<unknown>;
@@ -23,6 +25,8 @@ export async function prepareStateBackend(steps: StateBackendSteps): Promise<voi
     `${steps.apiBase}/accounts/${c.accountId}/r2/buckets/${stateBucket}`,
     { headers: { Authorization: `Bearer ${steps.token}` } }
   );
+  if (bucketResponse.status === 404 && steps.adopt)
+    throw new Error('Adopted state bucket not found');
   if (bucketResponse.status === 404) await steps.createBucket();
   else if (!bucketResponse.ok) throw new Error('State bucket inspection failed');
   if (c.profile === 'legacy-ci') await steps.prepareLegacyCiBackend();
@@ -43,6 +47,7 @@ export async function prepareStateBackend(steps: StateBackendSteps): Promise<voi
   const stacks = stackData as Array<{ name: string }>;
   if (stacks.some((entry) => entry.name === stack || entry.name.endsWith(`/${stack}`)))
     await steps.pulumi('stack', 'select', stack);
+  else if (steps.adopt) throw new Error('Adopted stack not found');
   else await steps.pulumi('stack', 'init', stack);
   await steps.configureWorkersDev();
   for (const [key, value] of Object.entries({
