@@ -104,6 +104,9 @@ export function FailureCard({
   );
 
   const style = useMemo(() => getClassificationStyle(classification), [classification]);
+  // The session can continue, but "send another message to retry" is wrong when retrying
+  // cannot help (for example SAM's AI usage limit).
+  const retryInSession = recoverable && classification.retryable;
   const settingsAction = isSessionCreator ? authSettingsAction(classification.code) : null;
 
   const handleCopyReport = useCallback(async () => {
@@ -165,7 +168,7 @@ export function FailureCard({
             <span className="text-xs font-semibold" style={{ color: style.label }}>
               {classification.label}
             </span>
-            {recoverable && (
+            {retryInSession && (
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-warning-tint text-warning-fg font-medium">
                 Recoverable
               </span>
@@ -327,7 +330,7 @@ export function FailureCard({
           )}
 
           {/* Recoverable guidance */}
-          {recoverable && (
+          {retryInSession && (
             <p className="text-[11px] m-0 leading-snug text-fg-muted italic">
               This session is still active. Send another message to retry — your workspace is
               preserved.

@@ -49,7 +49,9 @@ export function AiUsageSection() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <SectionHeading>LLM Usage</SectionHeading>
-          <Body className="text-fg-muted text-sm">SAM-managed AI Gateway traffic only</Body>
+          <Body className="text-fg-muted text-sm">
+            Model calls made through SAM only (not your own API keys or subscriptions)
+          </Body>
         </div>
         <div className="flex gap-1 flex-wrap">
           {AI_PERIODS.map((opt) => (
@@ -60,7 +62,7 @@ export function AiUsageSection() {
               onClick={() => handlePeriodChange(opt.value)}
               className={`px-3 py-2.5 rounded-md text-sm font-medium transition-colors min-h-[44px] ${
                 period === opt.value
-                  ? 'bg-accent-emphasis text-fg-on-accent'
+                  ? 'bg-accent text-fg-on-accent'
                   : 'bg-surface text-fg-muted hover:bg-surface-hover border border-border-default'
               }`}
             >
@@ -87,8 +89,8 @@ export function AiUsageSection() {
           <Bot className="w-10 h-10 mx-auto mb-3 text-fg-muted" aria-hidden="true" />
           <Body className="text-fg-muted font-medium">No LLM usage yet</Body>
           <Body className="text-fg-muted text-sm mt-1">
-            Usage from SAM-managed AI Gateway requests will appear here. Direct BYOK or non-Gateway
-            usage is not tracked.
+            Usage from model calls made through SAM will appear here. Calls with your own API keys
+            or subscriptions are not tracked here.
           </Body>
         </Card>
       )}
@@ -176,7 +178,7 @@ export function AiUsageSection() {
                         role="presentation"
                       >
                         <div
-                          className="h-full bg-accent-emphasis rounded"
+                          className="h-full bg-accent rounded"
                           style={{ width: `${Math.max(1, (d.costUsd / maxCost) * 100)}%` }}
                         />
                       </div>

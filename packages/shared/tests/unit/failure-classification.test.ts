@@ -162,3 +162,44 @@ describe('classifyFailure', () => {
     }
   );
 });
+
+// Idea 01M89JXTFHW4W3PQ65GTED6D0K: a refusal by SAM's own AI usage limit (a 429 from the SAM
+// AI proxy) read as "Provider overloaded · Recoverable". The VM agent now reports it as its own code.
+describe('SAM AI usage limit', () => {
+  it('shows the usage-limit outcome, not a provider overload, and does not suggest a retry', () => {
+    expect(classifyFailure('sam_ai_usage_limit_reached', 'sam_ai_usage_limit_reached')).toEqual({
+      code: 'sam-ai-usage-limit',
+      label: 'AI usage limit reached',
+      explanation: expect.stringContaining('monthly spending limit'),
+      guidance: expect.stringContaining('Settings > Usage'),
+      retryable: false,
+      diagnosable: false,
+    });
+  });
+
+  it.each([
+    ['provider_overloaded', undefined],
+    ['provider_overloaded', 'provider_overloaded'],
+    ['Provider returned 529 overloaded', undefined],
+    ['Rate limit exceeded (429 Too Many Requests)', undefined],
+  ])('control: a real provider overload is unchanged (%s)', (message, step) => {
+    expect(classifyFailure(message, step)).toEqual({
+      code: 'provider-overload',
+      label: 'Provider overloaded',
+      explanation: 'The LLM provider was temporarily overloaded or rate-limited the request.',
+      guidance: 'This is usually transient. Wait a few minutes and retry.',
+      retryable: true,
+      diagnosable: true,
+    });
+  });
+
+  it.each([
+    ['provider_overloaded', 'sam_ai_usage_limit_reached'],
+    ['Assistant said sam_ai_usage_limit_reached after a 429', undefined],
+  ])(
+    'is only taken from the exact callback code, never from steps or text (%s)',
+    (message, step) => {
+      expect(classifyFailure(message, step).code).toBe('provider-overload');
+    }
+  );
+});

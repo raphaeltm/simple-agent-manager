@@ -13,6 +13,10 @@ import (
 // would either miss provider failures or let untrusted metadata spoof one.
 // MCP tool errors without explicit source evidence stay generic.
 func ClassifyPromptError(err error) string {
+	// Before the provider-limit and overload checks: SAM's own limit is also a 429.
+	if isSAMUsageLimitRequestError(err) {
+		return samUsageLimitReason
+	}
 	if limit := ClassifyProviderLimit(err, time.Now()); limit != nil {
 		return limit.Error()
 	}
@@ -57,7 +61,7 @@ func ClassifyPromptError(err error) string {
 func ClassifyPromptFailure(message string) string {
 	text := strings.ToLower(strings.TrimSpace(strings.SplitN(message, "\n", 2)[0]))
 	switch text {
-	case "model_provider_credential_missing", "model_provider_credential_rejected", "model_unavailable", "provider_overloaded", "provider_limit_reached", "agent_crash", "network_error":
+	case "model_provider_credential_missing", "model_provider_credential_rejected", "model_unavailable", "provider_overloaded", "provider_limit_reached", samUsageLimitReason, "agent_crash", "network_error":
 		return text
 	}
 	for _, marker := range []string{" url=", " schema=", " https://", " http://"} {
@@ -73,6 +77,10 @@ func ClassifyPromptFailure(message string) string {
 	if (strings.HasPrefix(text, "provider ") && (strings.Contains(text, "http 401") || strings.Contains(text, "invalid_api_key") || strings.Contains(text, "invalid authentication"))) ||
 		(strings.HasPrefix(text, "api error: 401") || strings.HasPrefix(text, "internal error: api error: 401")) {
 		return "model_provider_credential_rejected"
+	}
+	// SAM's own proxy limit is a 429 too; it must not read as a provider overload.
+	if (strings.HasPrefix(text, "provider ") || strings.HasPrefix(text, "api error: ") || strings.HasPrefix(text, "internal error: api error: ")) && isSAMUsageLimitText(text) {
+		return samUsageLimitReason
 	}
 	if (strings.HasPrefix(text, "provider ") || strings.HasPrefix(text, "api error: ") || strings.HasPrefix(text, "internal error: api error: ")) &&
 		(strings.Contains(text, "http 429") || strings.Contains(text, "http 529") || strings.Contains(text, "http 503") || strings.Contains(text, "rate limit") || strings.Contains(text, "overloaded")) {

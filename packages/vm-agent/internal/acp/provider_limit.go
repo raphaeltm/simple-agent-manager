@@ -35,6 +35,10 @@ func ClassifyProviderLimit(err error, now time.Time) *ProviderLimitError {
 	if errors.As(err, &safe) {
 		return safe
 	}
+	// SAM's own proxy limit is not the provider's plan limit: never park it for a reset.
+	if isSAMUsageLimitRequestError(err) {
+		return nil
+	}
 	var request *acpsdk.RequestError
 	if errors.As(err, &request) {
 		if request.Code != -32603 {

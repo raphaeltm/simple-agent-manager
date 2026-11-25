@@ -1,5 +1,7 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
+import { assertNoOverflow as assertNoClippedOrDocumentOverflow, seedTheme } from './audit-helpers';
+
 // ---------------------------------------------------------------------------
 // Mock Data
 // ---------------------------------------------------------------------------
@@ -138,6 +140,10 @@ type MockOptions = {
 
 async function setupMocks(page: Page, options: MockOptions = {}) {
   const aiUsageData = options.aiUsage ?? makeAiUsageResponse();
+  // Without this the first-run setup dialog covers the page and screenshots show the dialog.
+  await page.addInitScript(() => {
+    localStorage.setItem('sam-onboarding-wizard-dismissed-user-test-1', 'true');
+  });
 
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
@@ -155,6 +161,25 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     if (path.startsWith('/api/nodes')) return respond(200, { nodes: [] });
     if (path === '/api/projects') return respond(200, { projects: [] });
     if (path.endsWith('/health')) return respond(200, { status: 'ok' });
+
+    // Budget settings (AiBudgetSettingsSection), the shape GET /api/usage/ai/budget returns.
+    if (path === '/api/usage/ai/budget') {
+      return respond(200, {
+        settings: {
+          dailyInputTokenLimit: null,
+          dailyOutputTokenLimit: null,
+          monthlyCostCapUsd: 10,
+          alertThresholdPercent: 80,
+        },
+        isCustom: true,
+        dailyUsage: { inputTokens: 120_000, outputTokens: 40_000 },
+        effectiveLimits: { dailyInputTokenLimit: 500_000, dailyOutputTokenLimit: 200_000 },
+        monthCostUsd: 4.2,
+        monthlyCostCap: { available: true, ceilingUsd: null, effectiveCapUsd: 10 },
+        utilization: { dailyInputPercent: 24, dailyOutputPercent: 20, monthlyCostPercent: 42 },
+        exceeded: false,
+      });
+    }
 
     // AI usage endpoint
     if (path === '/api/usage/ai') {
@@ -332,7 +357,10 @@ test.describe('AI Usage — Mobile (375x667)', () => {
   test('disclaimer text visible', async ({ page }) => {
     await setupMocks(page);
     await goToUsage(page);
-    await expect(page.locator('text=SAM-managed AI Gateway traffic only')).toBeVisible();
+    await expect(
+      page.getByText('Model calls made through SAM only (not your own API keys or subscriptions)')
+    ).toBeVisible();
+    await expect(page.getByText('AI Gateway', { exact: false })).toHaveCount(0);
     await screenshot(page, 'ai-usage-disclaimer-mobile');
     await assertNoOverflow(page);
   });
@@ -350,8 +378,8 @@ test.describe('AI Usage — Desktop (1280x800)', () => {
     await goToUsage(page);
     await expect(page.locator('text=LLM Usage')).toBeVisible();
     await expect(page.locator('text=Total Cost')).toBeVisible();
-    await expect(page.locator('text=Input Tokens')).toBeVisible();
-    await expect(page.locator('text=Output Tokens')).toBeVisible();
+    await expect(page.getByText('Input Tokens', { exact: true })).toBeVisible();
+    await expect(page.getByText('Output Tokens', { exact: true })).toBeVisible();
     await screenshot(page, 'ai-usage-normal-desktop');
     await assertNoOverflow(page);
   });
@@ -384,3 +412,27 @@ test.describe('AI Usage — Desktop (1280x800)', () => {
     await assertNoOverflow(page);
   });
 });
+
+// Idea 01M89JXTFHW4W3PQ65GTED6D0K: the selected period button used `bg-accent-emphasis`, which is
+// not a defined token, so its white label sat on no background (invisible in the light theme).
+for (const theme of ['light', 'dark'] as const) {
+  test(`selected period button is readable (${theme} theme)`, async ({ page }, testInfo) => {
+    await seedTheme(page, theme);
+    await setupMocks(page);
+    await goToUsage(page);
+    const selected = page.getByRole('button', { name: 'This Month', pressed: true });
+    await expect(selected).toBeVisible();
+    const colors = await selected.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { bg: style.backgroundColor, fg: style.color };
+    });
+    // A painted background, distinct from the label colour.
+    expect(colors.bg).not.toBe('rgba(0, 0, 0, 0)');
+    expect(colors.bg).not.toBe(colors.fg);
+    await page.getByRole('button', { name: '7 Days' }).click();
+    await expect(page.getByRole('button', { name: '7 Days', pressed: true })).toBeVisible();
+    await assertNoClippedOrDocumentOverflow(page);
+    const viewport = testInfo.project.name.includes('Desktop') ? 'desktop' : 'mobile';
+    await screenshot(page, `ai-usage-period-${theme}-${viewport}`);
+  });
+}
