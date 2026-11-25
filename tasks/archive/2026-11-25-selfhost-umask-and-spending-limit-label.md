@@ -31,7 +31,7 @@
 - [x] Shared classifier: structural rule "SAM AI usage limit reached", not retryable; provider-overload unchanged (tests)
 - [x] Usage page: subtitle/empty-state wording; selected button + bars use defined `bg-accent`
 - [x] Playwright audit 375/1280
-- [ ] Live (pending): self-host live suite + upgrade/rollback live tests on celld; box end-to-end of the banner
+- [x] Live: self-host live suite + upgrade/rollback live tests on celld; box end-to-end of the banner
 
 ## Acceptance
 - Upgrade and rollback under umask 077 leave tracked files at git modes; key agent starts.
@@ -49,3 +49,14 @@
   FailureCard gate off -> usage-limit card test red.
 - Found while testing (pre-existing, not changed): `tsx script.ts --env-file X` also hands `--env-file` to
   node, which loads X into process.env (and fails if X is missing).
+
+## Live results
+- Local self-host Docker live suite: 19/19 files, 289 tests.
+- Box, item 1:
+  - a real upgrade and a `--rollback-from` rollback, both under `umask 077`, repaired 13 and 14 paths, and the box stayed healthy;
+  - found and fixed that the repair narrowed 0664 files, so it now only adds bits.
+- Box, item 2: a real Claude Code chat in `sam` mode on a GCP node, refused by the administrator's monthly ceiling through the #3009 fake upstream:
+  - the task's `errorMessage` is `sam_ai_usage_limit_reached`;
+  - the chat card reads "AI usage limit reached", with no Recoverable badge.
+- Staging (hosted) regression: two chats on fresh nodes running the branch's VM agent completed normally, and the Usage page wording is correct.
+- Flaky test found, unrelated: `tasks/backlog/2026-11-25-flaky-selfhost-runtime-secrets-rotation-fallback.md`.
