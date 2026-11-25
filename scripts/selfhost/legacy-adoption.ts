@@ -46,6 +46,7 @@ import {
   removeVolume,
   returnHelperName,
 } from './legacy-adoption-volumes';
+import { checkoutWithTrackedModes } from './operator-files';
 import { assertOperatorExecution } from './operator-only';
 import { readPrivateJson, replacePrivateFile } from './secret-files';
 import { readPendingFrom, UPGRADE_PENDING_FILE, upgradeCompletedTo } from './upgrade-journal';
@@ -94,8 +95,12 @@ function compose(ctx: BoxContext, args: string[], what: string): string {
   return check(ctx.run('docker', composeArgs(ctx, args), composeRunEnv(ctx)), what).stdout;
 }
 
+/** Every `checkout --detach` re-applies git's file modes (operator-files.ts). */
 function git(ctx: BoxContext, args: string[], what: string): string {
-  return check(ctx.run('git', args), what).stdout.trim();
+  const [command, flag, ref] = args;
+  const detach = command === 'checkout' && flag === '--detach' && ref && args.length === 3;
+  const result = detach ? checkoutWithTrackedModes(ctx.run, ref, ctx.log) : ctx.run('git', args);
+  return check(result, what).stdout.trim();
 }
 
 function installationIdOf(stateDir: string): string {

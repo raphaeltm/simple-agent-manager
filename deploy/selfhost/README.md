@@ -203,8 +203,12 @@ backup, still hold the value until later seals replace them.
 in `secrets.env` plus the admin settings `aiProxy.testUpstreamUserIds` and
 `aiProxy.directUpstreamEnabled` make the listed users' SAM-managed model calls get a metered fake
 reply (configuration reference, "Test-only fake AI upstream"). Remove it with `--unset` as above.
-Create `secrets.env` with a normal umask in its own shell: a restrictive umask inherited by
-`pnpm selfhost:upgrade` makes the checked-out files unreadable to the key agent.
+The operator commands (`selfhost:upgrade`, its rollback, `selfhost:deploy`, `selfhost:rebuild`,
+`selfhost:restore`) run with `umask 022` whatever your shell sets, and every checkout they make
+re-applies git's file modes, so a restrictive umask (for example `umask 077` while creating
+`secrets.env`) cannot leave checked-out files unreadable to the key agent
+(`scripts/selfhost/operator-files.ts`). Private files (`.state/`, backups, keys) are written 0600
+in 0700 directories by their writers, not by the umask.
 
 **Switching providers** is never a silent change at a deploy:
 

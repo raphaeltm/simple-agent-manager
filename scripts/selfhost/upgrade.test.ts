@@ -7,7 +7,16 @@
  * the printed rollback selects the same box and matches whether the upgrade carried a D1 migration.
  */
 import * as fs from 'node:fs';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -88,6 +97,15 @@ const FILES_AT_TO: Record<string, string> = {
 
 /** SAM_SELFHOST_STATE_DIR in each docker command's environment (undefined: not set). */
 let dockerStateEnv: (string | undefined)[];
+/** Tracked files of the fake checkout (under <root>/repo) and their git index modes. */
+let trackedModes: Record<string, '100644' | '100755'>;
+/** `pnpm install` fails while the target ref is checked out (before any deploy). */
+let failTargetInstall: boolean;
+
+/** A checkout under the operator's `umask 077`: git rewrites every checked-out file as 0600. */
+function checkoutUnderUmask077(): void {
+  for (const path of Object.keys(trackedModes)) chmodSync(join(root, 'repo', path), 0o600);
+}
 
 function run(command: string, args: string[], env?: NodeJS.ProcessEnv): RunResult {
   if (command === 'docker') dockerStateEnv.push(env?.SAM_SELFHOST_STATE_DIR);
@@ -96,7 +114,17 @@ function run(command: string, args: string[], env?: NodeJS.ProcessEnv): RunResul
   if (command === 'git') {
     if (args[0] === 'status') return ok(dirty ? ' M apps/api/src/index.ts' : '');
     if (args[0] === 'rev-parse' && args[1] === 'HEAD') return ok(head);
-    if (args[0] === 'checkout') head = args[2] ?? head;
+    if (args[0] === 'checkout') {
+      head = args[2] ?? head;
+      checkoutUnderUmask077();
+    }
+    if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') return ok(join(root, 'repo'));
+    if (args[0] === 'ls-files')
+      return ok(
+        Object.entries(trackedModes)
+          .map(([path, mode]) => `${mode} ${'c'.repeat(40)} 0\t${path}\0`)
+          .join('')
+      );
     if (args[0] === 'rev-parse') return ok(TO);
     if (args[0] === 'diff') return ok(diff.join('\n'));
     if (args[0] === 'show') {
@@ -124,6 +152,9 @@ function run(command: string, args: string[], env?: NodeJS.ProcessEnv): RunResul
   }
   if (command === 'docker' && args.includes('config'))
     return ok((head === FROM ? (previousServices ?? activeServices) : activeServices).join('\n'));
+  if (command === 'pnpm' && args[0] === 'install' && failTargetInstall && head === TO) {
+    return { status: 1, stdout: '', stderr: 'EACCES' };
+  }
   if (deploy && !args.includes('--init') && failDeploy) {
     return { status: 1, stdout: '', stderr: 'migration 0219 failed' };
   }
@@ -173,6 +204,17 @@ beforeEach(() => {
   composeAt = { [FROM]: COMPOSE(), [TO]: COMPOSE() };
   trackedAt = {};
   dockerStateEnv = [];
+  failTargetInstall = false;
+  // The key agent image copies these; it runs as a non-root uid (deploy/selfhost/key-agent).
+  trackedModes = {
+    'deploy/selfhost/key-agent/bundle-store.ts': '100644',
+    'deploy/selfhost/key-agent/server.ts': '100644',
+    'scripts/selfhost/hosted-git-smoke.sh': '100755',
+  };
+  for (const path of Object.keys(trackedModes)) {
+    mkdirSync(join(root, 'repo', path, '..'), { recursive: true });
+    writeFileSync(join(root, 'repo', path), 'tracked\n', { mode: 0o600 });
+  }
   activeServices = ['celld', 'caddy'];
   previousServices = undefined;
 });
@@ -584,6 +626,51 @@ describe('runUpgrade', () => {
 // without what the override added.
 // S4: the box's ports are checked against the lease range when the upgrade loads the box, before it
 // fetches, checks out or runs docker compose (not only inside Caddy's start.sh once it is up).
+// Idea 01M89H1MQHJH432BFT2N43GHJJ: under `umask 077` every checkout rewrote tracked files 0600,
+// the non-root key agent failed with EACCES, and the automatic rollback failed the same way.
+describe('runUpgrade under a restrictive operator umask', () => {
+  const modes = () =>
+    Object.fromEntries(
+      Object.keys(trackedModes).map((path) => [
+        path,
+        (statSync(join(root, 'repo', path)).mode & 0o777).toString(8),
+      ])
+    );
+  const GIT_MODES = {
+    'deploy/selfhost/key-agent/bundle-store.ts': '644',
+    'deploy/selfhost/key-agent/server.ts': '644',
+    'scripts/selfhost/hosted-git-smoke.sh': '755',
+  };
+
+  it('leaves the target checkout at git modes, so the key agent can read its sources', async () => {
+    await upgrade();
+    expect(head).toBe(TO);
+    expect(modes()).toEqual(GIT_MODES);
+    expect(logs).toContain('restored git file modes on 3 tracked files');
+  });
+
+  it('restores git modes when a failed deploy rolls back to the previous ref', async () => {
+    failDeploy = true;
+    await expect(upgrade()).rejects.toThrow(/command output withheld/);
+    expect(logs.join('\n')).toContain('automatic rollback completed');
+    expect(head).toBe(FROM);
+    expect(modes()).toEqual(GIT_MODES);
+  });
+
+  it('restores git modes when the rollback runs before any deploy (failed install)', async () => {
+    failTargetInstall = true;
+    await expect(upgrade()).rejects.toThrow(/pnpm install --frozen-lockfile failed/);
+    expect(logs.join('\n')).toContain('automatic rollback completed');
+    expect(head).toBe(FROM);
+    expect(modes()).toEqual(GIT_MODES);
+  });
+
+  it('control: the fake checkout does leave files 0600 until the repair runs', () => {
+    checkoutUnderUmask077();
+    expect(new Set(Object.values(modes()))).toEqual(new Set(['600']));
+  });
+});
+
 describe('loadBox refuses a box port inside the lease range', () => {
   const envWith = (line: string) => {
     const envFile = join(root, 'ports.env');

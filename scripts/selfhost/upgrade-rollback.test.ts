@@ -58,6 +58,9 @@ beforeEach(() => {
     encryptionKeyFile: join(root, 'backup key'),
     log: vi.fn(),
     run: (command, args, env) => {
+      // The mode repair after each checkout (operator-files.ts): an empty index changes nothing.
+      if (args[1] === '--show-toplevel') return { status: 0, stdout: root, stderr: '' };
+      if (args[0] === 'ls-files') return { status: 0, stdout: '', stderr: '' };
       if (args[0] === 'status') return { status: 0, stdout: dirty ? ' M tracked' : '', stderr: '' };
       if (args[0] === 'rev-parse') return { status: 0, stdout: OPERATOR_REF, stderr: '' };
       steps.push(`${command} ${args.join(' ')}`);
