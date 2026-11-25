@@ -6,8 +6,6 @@
   "apps/api/src/durable-objects/sam-session/tools/get-file-content.ts": 1,
   "apps/api/src/durable-objects/sam-session/tools/search-code.ts": 1,
   "apps/api/src/index.ts": 1,
-  "apps/api/src/routes/ai-proxy-anthropic.ts": 2,
-  "apps/api/src/routes/ai-proxy-upstream.ts": 3,
   "apps/api/src/routes/google-auth.ts": 1,
   "apps/api/src/routes/project-deployment.ts": 1,
   "apps/api/src/routes/projects/devcontainer-configs.ts": 3,

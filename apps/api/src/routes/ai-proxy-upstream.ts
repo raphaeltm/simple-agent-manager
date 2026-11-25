@@ -21,6 +21,7 @@ import {
 import type { UpstreamAuth } from '../services/ai-billing';
 import { resolveUnifiedBillingToken } from '../services/ai-billing';
 import { buildAnthropicGatewayUrl } from '../services/ai-proxy-shared';
+import { type AiUpstreamFetch, globalUpstreamFetch } from '../services/ai-test-upstream';
 import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
 import {
   chatTargetHeaders,
@@ -155,13 +156,14 @@ export async function forwardToAnthropic(
   body: Record<string, unknown>,
   modelId: string,
   aigMetadata: string,
-  upstreamAuth: UpstreamAuth
+  upstreamAuth: UpstreamAuth,
+  upstreamFetch: AiUpstreamFetch = globalUpstreamFetch
 ): Promise<Response> {
   // Translate OpenAI format → Anthropic Messages format
   const anthropicRequest = translateRequestToAnthropic(body, modelId);
   const gatewayUrl = buildAnthropicGatewayUrl(env);
 
-  const response = await fetch(gatewayUrl, {
+  const response = await upstreamFetch(gatewayUrl, {
     method: 'POST',
     headers: {
       ...upstreamAuth.headers,
@@ -236,7 +238,8 @@ export async function forwardToOpenAI(
   body: Record<string, unknown>,
   modelId: string,
   aigMetadata: string,
-  openaiApiKey: string
+  openaiApiKey: string,
+  upstreamFetch: AiUpstreamFetch = globalUpstreamFetch
 ): Promise<Response> {
   const gatewayUrl = buildOpenAIUrl(env);
   const gatewayBody = { ...body, model: modelId };
@@ -254,7 +257,7 @@ export async function forwardToOpenAI(
     headers['Authorization'] = `Bearer ${openaiApiKey}`;
   }
 
-  const response = await fetch(gatewayUrl, {
+  const response = await upstreamFetch(gatewayUrl, {
     method: 'POST',
     headers,
     body: JSON.stringify(gatewayBody),
@@ -299,7 +302,8 @@ export async function forwardToOpenAIResponses(
   body: Record<string, unknown>,
   modelId: string,
   aigMetadata: string,
-  openaiApiKey: string
+  openaiApiKey: string,
+  upstreamFetch: AiUpstreamFetch = globalUpstreamFetch
 ): Promise<Response> {
   const gatewayUrl = buildOpenAIResponsesUrl(env);
   const gatewayBody = { ...body, model: modelId };
@@ -315,7 +319,7 @@ export async function forwardToOpenAIResponses(
     headers['Authorization'] = `Bearer ${openaiApiKey}`;
   }
 
-  const response = await fetch(gatewayUrl, {
+  const response = await upstreamFetch(gatewayUrl, {
     method: 'POST',
     headers,
     body: JSON.stringify(gatewayBody),
