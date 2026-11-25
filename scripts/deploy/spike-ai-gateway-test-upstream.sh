@@ -44,8 +44,10 @@ route=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "${BASE_URL}/v1/messages
   -H 'content-type: application/json' --data '{"model":"claude-opus-4-6","max_tokens":8,"messages":[{"role":"user","content":"spike"}]}' || echo 000)
 echo "fake route on this deployment: HTTP ${route}"
 if [ "$route" != "200" ]; then
-  echo "SPIKE RESULT: fake route not reachable (HTTP ${route}); nothing else tried"
-  exit 0
+  # The runner may be challenged by the zone's security rules (inbox
+  # ask:01M86G5HPXQFHMAVENVXWPBACV) while the gateway, calling from Cloudflare's network, is not.
+  # Record it and keep going: the gateway logs below are the real answer.
+  echo "warning: fake route not reachable from this runner (HTTP ${route}); continuing through the gateway"
 fi
 
 code=$(authed Authorization "${CF_API}/ai-gateway/custom-providers?per_page=50")
