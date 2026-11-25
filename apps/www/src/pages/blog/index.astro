@@ -5,8 +5,12 @@ import Header from '../../components/Header.astro';
 import CtaFooter from '../../components/CtaFooter.astro';
 import { categoryColors } from '../../lib/blog-utils';
 
-const posts = (await getCollection('blog', ({ data }) => !data.draft))
+const byDate = (await getCollection('blog', ({ data }) => !data.draft))
   .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+// Pinned posts lead the page; everything else stays in date order below them.
+const pinned = byDate.filter((post) => post.data.pinned);
+const posts = byDate.filter((post) => !post.data.pinned);
+const isSecurity = (tags: string[]) => tags.includes('security');
 ---
 
 <Base
@@ -21,7 +25,33 @@ const posts = (await getCollection('blog', ({ data }) => !data.draft))
         <h1 class="section-title">Engineering updates, tutorials, and announcements</h1>
       </div>
 
-      {posts.length === 0 && (
+      {pinned.map((post) => (
+        <a
+          href={`/blog/${post.id}/`}
+          class:list={['pinned-card', 'animate-on-scroll', { 'pinned-card--security': isSecurity(post.data.tags) }]}
+        >
+          <div class="pinned-label">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1L8 1.5Z" /><path class="mark" d="M8 6v3.5M8 11.6v.1" /></svg>
+            <span>{isSecurity(post.data.tags) ? 'Pinned · Security advisory' : 'Pinned'}</span>
+          </div>
+          <div class="pinned-body">
+            <div>
+              <div class="card-meta">
+                <time datetime={post.data.date.toISOString().split('T')[0]}>
+                  {post.data.date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+                </time>
+              </div>
+              <h2 class="pinned-title">{post.data.title}</h2>
+              <p class="pinned-excerpt">{post.data.excerpt}</p>
+            </div>
+            <span class="pinned-cta">
+              {isSecurity(post.data.tags) ? 'Read the advisory' : 'Read the post'} <span aria-hidden="true">→</span>
+            </span>
+          </div>
+        </a>
+      ))}
+
+      {posts.length === 0 && pinned.length === 0 && (
         <p class="empty">No posts yet. Check back soon!</p>
       )}
 
@@ -66,6 +96,111 @@ const posts = (await getCollection('blog', ({ data }) => !data.draft))
     text-align: center;
     color: var(--color-fg-muted);
     padding: 80px 0;
+  }
+
+  .pinned-card {
+    --pin: var(--color-accent);
+    --pin-ink: var(--color-accent);
+    display: grid;
+    gap: 14px;
+    margin-bottom: 32px;
+    padding: 28px;
+    border-radius: var(--radius-lg);
+    border: 1px solid color-mix(in srgb, var(--pin) 55%, transparent);
+    border-left: 4px solid var(--pin);
+    background:
+      linear-gradient(100deg, color-mix(in srgb, var(--pin) 14%, transparent), transparent 70%),
+      var(--color-bg-surface);
+    color: inherit;
+    transition: border-color 0.2s, transform 0.2s;
+  }
+
+  .pinned-card--security {
+    --pin: var(--color-warning);
+    --pin-ink: var(--color-warning-ink);
+  }
+
+  .pinned-card:hover {
+    border-color: var(--pin);
+    transform: translateY(-2px);
+    color: inherit;
+  }
+
+  .pinned-card:focus-visible {
+    outline: 2px solid var(--pin);
+    outline-offset: 3px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pinned-card:hover {
+      transform: none;
+    }
+  }
+
+  .pinned-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--pin-ink);
+  }
+
+  .pinned-label svg {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+  }
+
+  .pinned-label .mark {
+    fill: none;
+    stroke: var(--color-bg-body);
+    stroke-width: 1.8;
+    stroke-linecap: round;
+  }
+
+  .pinned-body {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+  }
+
+  .pinned-title {
+    font-family: var(--font-display);
+    font-size: clamp(1.375rem, 2.4vw, 1.75rem);
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--color-fg-primary);
+    margin-bottom: 8px;
+  }
+
+  .pinned-excerpt {
+    max-width: 68ch;
+    font-size: 1rem;
+    line-height: 1.55;
+    color: var(--color-fg-muted);
+  }
+
+  .pinned-cta {
+    flex: none;
+    font-weight: 600;
+    color: var(--pin-ink);
+    white-space: nowrap;
+  }
+
+  @media (max-width: 640px) {
+    .pinned-card {
+      padding: 22px 20px;
+    }
+
+    .pinned-body {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 14px;
+    }
   }
 
   .post-grid {

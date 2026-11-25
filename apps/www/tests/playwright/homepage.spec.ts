@@ -40,6 +40,18 @@ test.describe('homepage', () => {
     await expect(page.getByRole('link', { name: 'See how work moves' })).toHaveAttribute('href', '#how-work-moves');
   });
 
+  test('warns self-hosters about the security advisory above the promise', async ({ page }) => {
+    await page.goto('/');
+    const notice = page.getByRole('link', { name: /Security advisory.*setup wizard is closed/ });
+    await expect(notice).toBeVisible();
+    await expect(notice).toHaveAttribute('href', '/blog/security-advisory-setup-takeover/');
+    const noticeBox = await notice.boundingBox();
+    const titleBox = await page.getByRole('heading', { level: 1 }).boundingBox();
+    expect(noticeBox && titleBox && noticeBox.y < titleBox.y).toBe(true);
+    await notice.click();
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Check That Your SAM Setup Is Closed');
+  });
+
   for (const theme of ['dark', 'light'] as const) {
     test(`downloads only the ${theme} theme's screens`, async ({ page }) => {
       await useTheme(page, theme);
@@ -162,7 +174,7 @@ test.describe('homepage', () => {
     await page.setViewportSize({ width: 320, height: 640 });
     await page.goto('/');
     const outside = await page.evaluate(() =>
-      [...document.querySelectorAll('.fh-hero h1, .fh-hero p, .fh-hero .sam-btn, .fh-hero li')]
+      [...document.querySelectorAll('.fh-hero h1, .fh-hero p, .fh-hero .sam-btn, .fh-hero li, .fh-hero .fh-notice')]
         .map((el) => el.getBoundingClientRect())
         .filter((box) => box.left < -0.5 || box.right > window.innerWidth + 0.5).length,
     );
