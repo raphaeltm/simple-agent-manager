@@ -254,3 +254,13 @@ as the resource updated in place. The provider rewrites the Pages project on eve
   current file when the source carries that file.
 - Guards verified discriminating by deletion (primary-only, aliases ignored, legacy name always
   accepted, missing optional output an error).
+
+## Review fixes, round 5 (2026-11-25, Codex review of 1e867fdeb)
+
+- P2 "Accept existing short Pulumi passphrases": fixed. The takeover accepted only passphrases
+  of 8 or more characters, but the fork workflow requires only a non-empty one and a takeover
+  cannot strengthen an encrypted stack. Any non-empty passphrase up to 1024 characters is accepted.
+- P2 "Accept dotted deploy-state bucket names": not changed. R2 bucket names allow only lowercase
+  letters, digits and hyphens (Cloudflare R2 "Create buckets" documentation), so a dotted state
+  bucket cannot exist; the fork workflow's looser pattern is an S3-style check that R2 itself
+  narrows. The credential check, which predates this work, already refuses dots.

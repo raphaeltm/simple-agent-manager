@@ -217,6 +217,10 @@ function planAgain(
 }
 
 /** A deploy-state passphrase as the owner saved it; bounded, never inspected further. */
+/**
+ * An existing deployment's passphrase is whatever its owner chose: the fork workflow requires
+ * only that it is not empty, and a takeover cannot strengthen a stack that is already encrypted.
+ */
 function validPassphrase(value: unknown): value is string {
-  return typeof value === 'string' && value.length >= 8 && value.length <= 1024;
+  return typeof value === 'string' && value.length >= 1 && value.length <= 1024;
 }

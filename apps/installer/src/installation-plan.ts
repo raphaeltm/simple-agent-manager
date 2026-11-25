@@ -55,7 +55,10 @@ export function validateInstallationConfig(value: unknown): InstallationConfig {
 /** Name shapes a fork deployment may have (workflow-resource-names.mjs). */
 export const DEPLOYMENT_PREFIX = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
 export const DEPLOYMENT_STACK = /^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/;
-/** An R2 bucket name, as `installationCredentialBuckets` accepts it (credentials.ts). */
+/**
+ * An R2 bucket name, as `installationCredentialBuckets` accepts it (credentials.ts). R2 allows
+ * only lowercase letters, digits and hyphens, so unlike an S3 name it never contains a dot.
+ */
 export const BUCKET_NAME = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
 export function validateAdoptionTarget(value: unknown): AdoptionTarget {
   const t = value as AdoptionTarget | null;

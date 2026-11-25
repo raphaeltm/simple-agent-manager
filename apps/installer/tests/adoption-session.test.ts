@@ -245,3 +245,17 @@ it.each([
   expect(w.upload()).toBeUndefined();
   expect(w.tokens).toEqual([]);
 });
+
+it('accepts whatever non-empty passphrase the existing deployment uses, and nothing else', async () => {
+  const w = world();
+  const request = { ...settings, adopt: true };
+  // A takeover cannot strengthen a stack that is already encrypted with a short passphrase.
+  const short = await w.call('/preview', { ...request, statePassphrase: 'p' });
+  expect(short.status).toBe(200);
+  const { plan } = (await short.json()) as { plan: { conflicts: unknown[]; adoption?: unknown } };
+  expect(plan.conflicts).toEqual([]);
+  expect(plan.adoption).toBeDefined();
+  expect((w.values.get('session') as Session).adoptionPassphrase).toBe('p');
+  for (const statePassphrase of ['', 'x'.repeat(1025), 7, undefined])
+    expect((await w.call('/preview', { ...request, statePassphrase })).status).toBe(400);
+});
