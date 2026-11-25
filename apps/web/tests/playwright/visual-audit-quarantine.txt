@@ -19,7 +19,6 @@ admin-users-signup-approval-audit.spec.ts
 agent-context-audit.spec.ts
 agent-crash-report-audit.spec.ts
 agent-guided-connect-audit.spec.ts
-ai-usage-audit.spec.ts
 auth-flows-audit.spec.ts
 chat-dom-bound-audit.spec.ts
 chat-file-viewer-audit.spec.ts

@@ -2273,6 +2273,10 @@ logged as `ai_proxy.monthly_cost_ceiling_unreadable`. The same protection applie
 isolate; no extra last-known ceiling is reused during an outage (`services/ai-proxy-ports.ts`).
 Gateway calls and locally own-funded calls do not read this ceiling. A failed monthly-spend read
 also refuses inference with a retryable 503, without reporting that the cap has been reached.
+A call refused by the monthly cap or the daily token budget is a 429 whose message names that
+limit. The VM agent reports it as `sam_ai_usage_limit_reached`, not `provider_overloaded`, so the
+chat shows "AI usage limit reached" without a retry suggestion
+(`packages/vm-agent/internal/acp/sam_usage_limit.go`, `packages/shared/src/failure-classification.ts`).
 Once a ceiling is set, every gated call on such an installation reads the month's
 priced total (one Durable Object call), not only calls by users with their own cap. Passthrough
 calls served by a platform-owned credential are priced too; a user's or project's own credential

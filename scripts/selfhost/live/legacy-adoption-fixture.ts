@@ -7,6 +7,7 @@
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { parseDotenv } from '../secret-files.js';
@@ -162,6 +163,9 @@ export class FakeGit {
       const ref = (args[2] ?? '').replace(/\^\{commit\}$/, '');
       return ref === TO || ref === FROM ? ok(`${ref}\n`) : { status: 128, stdout: '', stderr: '' };
     }
+    // The mode repair after each checkout (operator-files.ts): an empty index changes nothing.
+    if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') return ok(`${tmpdir()}\n`);
+    if (args[0] === 'ls-files') return ok('');
     if (args[0] === 'checkout') {
       this.head = args[2] ?? this.head;
       this.checkouts.push(this.head);

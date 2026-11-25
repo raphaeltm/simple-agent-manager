@@ -14,11 +14,14 @@ import { parseArgs } from 'node:util';
 
 import { celldPort, SELFHOST_DIR, waitForHealth } from './deploy-steps.js';
 import { runLegacyAdoption } from './legacy-adoption.js';
+import { useOperatorUmask } from './operator-files.js';
 import { assertOperatorExecution } from './operator-only.js';
 import { loadBox, runUpgrade } from './upgrade-lib.js';
 import { runManualRollback } from './upgrade-rollback.js';
 
 assertOperatorExecution();
+// Operator commands never inherit a restrictive umask (operator-files.ts).
+useOperatorUmask();
 
 const { values } = parseArgs({
   options: {

@@ -24,6 +24,11 @@ func (h *SessionHost) shouldRetryPromptError(promptCtx context.Context, err erro
 	if h.promptProviderLimit(err, accepted...) != nil {
 		return false
 	}
+	// SAM's own AI usage limit is a 429 too, but no retry can succeed until the limit resets
+	// or an administrator changes it (sam_usage_limit.go).
+	if ClassifyPromptError(err) == samUsageLimitReason {
+		return false
+	}
 	return isTransientProviderPromptError(err)
 }
 

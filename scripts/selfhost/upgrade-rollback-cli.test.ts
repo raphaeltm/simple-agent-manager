@@ -165,7 +165,7 @@ cp.spawnSync = (command, args, options) => {
   if (!['git', 'pnpm', 'docker', 'gcloud'].includes(command)) return original(command,args,options);
   fs.appendFileSync(${JSON.stringify(join(root, 'calls'))}, command+' '+args.join(' ')+'\\n');
   let stdout = '';
-  if(command === 'git' && args[0] === 'rev-parse') stdout = 'b'.repeat(40);
+  if(command === 'git' && args[0] === 'rev-parse') stdout = args[1] === '--show-toplevel' ? ${JSON.stringify(root)} : 'b'.repeat(40);
   if (command === 'docker') {
     if(args[0]==='container' && args[1]==='rm') container='';
     if(args[0]==='volume' && args[1]==='rm') volume=false;
