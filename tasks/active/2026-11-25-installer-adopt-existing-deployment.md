@@ -87,21 +87,21 @@ Adoption is a mode of the existing installation flow, not a parallel implementat
 
 ## Implementation checklist
 
-- [ ] Engine: `adoption` settings on the installation profile (explicit prefix, environment,
+- [x] Engine: `adoption` settings on the installation profile (explicit prefix, environment,
       state bucket); validation; fingerprint
-- [ ] Engine: state-backend refuses a missing bucket/stack in adoption
-- [ ] Engine: preview gate (`pulumi preview --json`, classify `changeSummary`/steps; refuse
+- [x] Engine: state-backend refuses a missing bucket/stack in adoption
+- [x] Engine: preview gate (`pulumi preview --json`, classify `changeSummary`/steps; refuse
       create/replace/delete), with tests on real preview JSON shapes
-- [ ] Engine: carry deployed override vars (exported optional-var list from sync-wrangler-config)
-- [ ] configure-secrets: preserve existing key-material secrets when asked; tests
-- [ ] Engine: no `BOOTSTRAP_OWNER_EMAIL`, no owner-handoff in adoption
-- [ ] Builder: accept and validate adoption job fields; pass passphrase as before
-- [ ] Maintenance: adoption manifest, "Take over" action and panel text; updates keep adoption
-- [ ] Installer: detect an existing SAM in preview; adoption plan + passphrase input; credentials
+- [x] Engine: carry deployed override vars (exported optional-var list from sync-wrangler-config)
+- [x] configure-secrets: preserve existing key-material secrets when asked; tests
+- [x] Engine: no `BOOTSTRAP_OWNER_EMAIL`, no owner-handoff in adoption
+- [x] Builder: accept and validate adoption job fields; pass passphrase as before
+- [x] Maintenance: adoption manifest, "Take over" action and panel text; updates keep adoption
+- [x] Installer: detect an existing SAM in preview; adoption plan + passphrase input; credentials
       scoped to existing buckets
-- [ ] Tests: vertical slice through installer preview → provision → maintenance → builder config
+- [x] Tests: vertical slice through installer preview → provision → maintenance → builder config
       → engine (fake runner) for adoption, plus refusal cases
-- [ ] Docs: installer guide section "Move an existing SAM to the installer"; self-hosting guide
+- [x] Docs: installer guide section "Move an existing SAM to the installer"; self-hosting guide
       pointer; security architecture notes (passphrase custody, preserved keys)
 - [ ] Proof on the agreed target (see Open decision); record evidence
 
@@ -129,3 +129,18 @@ Proof target, because staging2 shares staging's state and passphrase (finding 10
 
 - Idea 01M88S2Z10WS855DM0937QVCY2; idea 01M84SB68PWK40K6HNB0KX5HRX; PR #2993
 - Rules 31, 42, 62, 70, 73, 83; `.claude/rules/19-external-service-integration.md`
+
+## Implementation notes (2026-11-25)
+
+- Rollback guard added (not in the original design): the takeover refuses when the deployed D1
+  database has migrations the approved source lacks (`migrationsNewerThanSource`). SAM's own
+  staging/production run `main`, which is usually ahead of the latest release.
+- Fork deployments record no deployed commit, so a takeover deploys the installer's approved source
+  rather than "the same version"; the rollback guard plus the preview gate keep that safe.
+- New protocol capability `adoption`: builder and maintenance refuse an adoption job whose source
+  does not declare it (an older engine would drop the settings and install a second SAM).
+- Takeover confirmation is never pre-checked (friction at the decision point, per policy).
+- Vertical slice split by boundary: installer session → upload (`tests/adoption-session.test.ts`),
+  maintenance → builder job (`maintenance-jobs.test.ts`), builder → engine config
+  (`builder.test.ts`), engine phases (`installer-engine.test.ts`), configure-secrets harness.
+  Every engine guard verified discriminating by deletion.
