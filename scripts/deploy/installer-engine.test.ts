@@ -291,6 +291,8 @@ describe('installation engine', () => {
     });
     const calls = f.commands.map((entry) => [entry.executable, ...entry.args].join(' '));
     const index = (part: string) => calls.findIndex((line) => line.includes(part));
+    // A new installation sets D1 read replication; only an adopted one leaves it as it is.
+    expect(index('configure-d1-read-replication.sh')).toBeGreaterThan(-1);
     expect(index('d1-migration-safety.ts')).toBeLessThan(index('publish-vm-agent-artifacts.sh'));
     expect(index('publish-local-codex')).toBeLessThan(index('wrangler deploy'));
     expect(index('build-local-codex')).toBeLessThan(index('prepare-container'));
@@ -1345,6 +1347,9 @@ describe('installation engine: adopting an existing deployment', () => {
     expect(secrets?.env.AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET).toBe('true');
     // No setup token: the adopted deployment already has an owner.
     expect(results).toEqual([]);
+    // The databases keep their read-replication mode; the other service steps still run.
+    expect(calls.some((line) => line.includes('configure-d1-read-replication.sh'))).toBe(false);
+    expect(calls.some((line) => line.includes('configure-r2-cors.sh'))).toBe(true);
     expect(f.requests.some((line) => line.includes(`/d1/database/${databaseId}/query`))).toBe(true);
   });
 
@@ -1529,6 +1534,8 @@ describe('installation engine: adopting an existing deployment', () => {
     const calls = f.lines();
     expect(calls.some((line) => line.startsWith('pulumi preview'))).toBe(false);
     expect(calls.some((line) => line.includes('stack init'))).toBe(false);
+    // Later updates of an adopted installation leave the read-replication mode alone too.
+    expect(calls.some((line) => line.includes('configure-d1-read-replication.sh'))).toBe(false);
     const secrets = f.commands.find((entry) =>
       entry.args.includes('scripts/deploy/configure-secrets.sh')
     );

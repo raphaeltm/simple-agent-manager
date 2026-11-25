@@ -444,7 +444,10 @@ export async function runInstallerEngine(
     await sync();
     await script('configure-r2-cors.sh');
     await script('configure-ai-gateway.sh');
-    await script('configure-d1-read-replication.sh');
+    // An adopted deployment keeps the read-replication mode it runs with. Its owner may have set
+    // D1_READ_REPLICATION_MODE=disabled in the fork's GitHub Environment, which this job cannot
+    // see, and the script's default (auto) would change both databases.
+    if (!c.adoption) await script('configure-d1-read-replication.sh');
     await script('verify-pages-domain.sh');
   });
   await phase('build', async () => {

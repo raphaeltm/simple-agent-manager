@@ -180,7 +180,9 @@ change nothing else (`scripts/deploy/installer-engine-adoption.ts`):
   such as `REQUIRE_APPROVAL=false`, are read back from the deployed Worker and kept, on the takeover
   and on every update. A setting equal to the default is not kept, so later releases can still
   change that default. Agent sign-in trust and other Worker secrets, such as your GitHub App
-  credentials, are left untouched.
+  credentials, are left untouched. The databases keep their read-replication mode, on the
+  takeover and on every update, because a fork that set `D1_READ_REPLICATION_MODE` did so in a
+  GitHub Environment the service cannot see.
 - **Your users stay**: no owner email is set and no setup token is handed out, because the
   deployment already has its administrators.
 

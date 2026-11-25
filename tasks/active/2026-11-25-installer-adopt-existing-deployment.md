@@ -264,3 +264,16 @@ as the resource updated in place. The provider rewrites the Pages project on eve
   letters, digits and hyphens (Cloudflare R2 "Create buckets" documentation), so a dotted state
   bucket cannot exist; the fork workflow's looser pattern is an S3-style check that R2 itself
   narrows. The credential check, which predates this work, already refuses dots.
+
+## Review fixes, round 6 (2026-11-25, Codex review of 3b71ef6ee)
+
+- P2 "Preserve the adopted D1 replication mode": an adopted installation no longer runs
+  `configure-d1-read-replication.sh`, on the takeover or on later updates, so both databases keep
+  the mode they have. Its default (`auto`) would have changed a deployment whose owner set
+  `D1_READ_REPLICATION_MODE=disabled` in a GitHub Environment the job cannot see.
+- Audit of the same phase for other settings applied from defaults outside the Pulumi gate:
+  `configure-r2-cors.sh` (derived from the domain and bucket, no owner choice);
+  `configure-ai-gateway.sh` (ensures the gateway named after the prefix exists, which is the id
+  `sync-wrangler-config.ts` gives the Worker on every path); agent email (the fork workflow also
+  deploys with `AGENT_EMAIL_ENABLED: 'true'`, and the takeover review shows the email row). None
+  changed.
