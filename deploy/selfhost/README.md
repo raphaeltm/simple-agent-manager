@@ -208,7 +208,8 @@ The operator commands (`selfhost:upgrade`, its rollback, `selfhost:deploy`, `sel
 re-applies git's file modes, so a restrictive umask (for example `umask 077` while creating
 `secrets.env`) cannot leave checked-out files unreadable to the key agent
 (`scripts/selfhost/operator-files.ts`). Private files (`.state/`, backups, keys) are written 0600
-in 0700 directories by their writers, not by the umask.
+in 0700 directories by their writers, not by the umask. An upgrade runs the upgrader already checked out, so the
+first upgrade *from* a version without this protection still needs a normal umask (`umask 022`).
 
 **Switching providers** is never a silent change at a deploy:
 
