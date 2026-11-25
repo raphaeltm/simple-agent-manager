@@ -13,7 +13,7 @@ Business-logic-change and docs-sync-change. Trace: authenticated project delete 
 - [x] Add the smallest supported additive indexes, matching canonical schema where applicable.
 - [x] Verify clean install and populated upgrade preserve data and FK actions.
 - [x] Verify unrelated access, ownership, secret expiry and scheduler completion/fairness.
-- [ ] Run quality checks and independent local specialist reviews.
+- [x] Run quality checks and independent local specialist reviews.
 - [ ] Deploy to staging and perform bounded reproduction with concurrent session verification; clean fixtures.
 - [ ] Complete CI and CodeRabbit review, merge, production deploy and read-only health/version smoke.
 
@@ -28,3 +28,5 @@ Rules 02, 31, 35, 62 and 69. Existing project-delete-cascade-cost route test. Cl
 Four route tests pass on the full shipped chain. Omitting migration 0271 makes the expanded real-route regression fail on profile child scans. The fixture includes 650 target tasks, 1,000 sibling tasks, 40 profiles, 40 triggers, 1,000 executions, 5,000 summaries and 30,000 chunks, with profile and skill SET NULL controls. A populated upgrade preserves all table row counts and FK definitions. Independent review finds 81 cascade-parent plans without scans; dropping any one new index independently restores a scan. Root lint and typecheck pass. Staging, remaining quality checks, CI/review and production gates remain pending.
 
 Full-suite validation found a historical catalog fixture applying every later migration while deliberately omitting the catalog-table creation migration. Defer the new dependent index migration alongside that omitted migration, then apply both in dependency order. The three catalog-chain tests pass after the fixture correction, which independent test review also passed. Application code and migration semantics did not change.
+
+Local validation completed: root lint (23 packages), typecheck (38 packages), build (19 packages); full tests had one historical-fixture failure, corrected and its three-case rerun passed. The other 18,726 API tests and all other package tests passed. Focused deletion/cron/isolation/secret-expiry tests: 52 passed. Both independent specialist reviews pass. Live/release evidence is maintained in the PR body as those gates finish.
