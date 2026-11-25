@@ -11,6 +11,7 @@ import { crudRoutes } from '../../../src/routes/projects/crud';
 import { createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
 const MIGRATION = '0269_task_deletion_foreign_key_indexes.sql';
+const PROJECT_MIGRATION = '0271_project_deletion_foreign_key_indexes.sql';
 const DIRECTORY = join(process.cwd(), 'src/db/migrations');
 const TASKS = 650;
 const OTHER_TASKS = 1_000;
@@ -23,11 +24,12 @@ const ARCHIVES = [
 let sqlite: Database.Database;
 afterEach(() => sqlite?.close());
 
-function migrate(includeFix: boolean) {
+function migrate(includeFix: boolean, includeProjectFix: boolean) {
   for (const name of readdirSync(DIRECTORY)
     .filter((name) => name.endsWith('.sql'))
     .sort()) {
     if (!includeFix && name === MIGRATION) continue;
+    if (!includeProjectFix && name === PROJECT_MIGRATION) continue;
     sqlite.exec(readFileSync(join(DIRECTORY, name), 'utf8'));
   }
 }
@@ -76,6 +78,41 @@ function seed() {
         status: 'running',
       });
     }
+    for (let i = 0; i < 40; i++) {
+      insert('agent_profiles', {
+        id: `profile-${i}`,
+        project_id: 'owner',
+        user_id: 'owner',
+        name: `Profile ${i}`,
+      });
+      insert('triggers', {
+        id: `trigger-${i}`,
+        project_id: 'owner',
+        user_id: 'owner',
+        name: `Trigger ${i}`,
+        source_type: 'cron',
+        prompt_template: 'Synthetic task',
+        agent_profile_id: `profile-${i}`,
+      });
+      for (let j = 0; j < 25; j++) {
+        insert('trigger_executions', {
+          id: `execution-${i}-${j}`,
+          trigger_id: `trigger-${i}`,
+          project_id: 'owner',
+          status: 'completed',
+          event_type: 'cron',
+        });
+      }
+    }
+    insert('triggers', {
+      id: 'other-trigger',
+      project_id: 'other',
+      user_id: 'other',
+      name: 'Other trigger',
+      source_type: 'cron',
+      prompt_template: 'Synthetic task',
+      agent_profile_id: 'profile-0',
+    });
     for (let i = 0; i < TASKS + OTHER_TASKS; i++) {
       const owner = i < TASKS ? 'owner' : 'other';
       insert('tasks', {
@@ -121,6 +158,7 @@ function seed() {
         id: `summary-${i}`,
         project_id: 'other',
         workspace_id: 'other',
+        agent_profile_id: i === 0 ? 'profile-0' : null,
         task_id: i === 0 ? 'task-0' : `task-${TASKS}`,
         source_version: 1,
         started_at: 1,
@@ -163,10 +201,10 @@ function seed() {
   })();
 }
 
-function setup(includeFix = true) {
+function setup(includeFix = true, includeProjectFix = true) {
   sqlite = new Database(':memory:');
   sqlite.pragma('foreign_keys=ON');
-  migrate(includeFix);
+  migrate(includeFix, includeProjectFix);
   seed();
   const prepared: string[] = [];
   const database = createSqliteD1WithBindLimit(sqlite, 100);
@@ -227,13 +265,11 @@ function plan(query: string) {
 // SQLite does not enforce D1's CPU ceiling. Guard the actual issued SQL's FK plans,
 // using the shipped migration chain (including retained archives), without ANALYZE.
 describe('project deletion cascade work on the shipped schema', { timeout: 30_000 }, () => {
-  it('seeks every task/event child instead of scanning unrelated history per parent', async () => {
+  it('seeks every issued delete and its cascading children instead of scanning unrelated history per parent', async () => {
     const { app, env, prepared } = setup();
     const response = await app.request('/api/projects/owner', { method: 'DELETE' }, env);
     expect(response.status, await response.text()).toBe(200);
-    const deletes = prepared.filter((query) =>
-      /^delete from "(tasks|task_status_events)"/.test(query)
-    );
+    const deletes = prepared.filter((query) => /^delete from /.test(query));
     expect(deletes.length).toBeGreaterThan(2);
     for (const query of deletes) {
       const details = plan(query);
@@ -242,8 +278,51 @@ describe('project deletion cascade work on the shipped schema', { timeout: 30_00
         details.join('\n')
       ).toEqual([]);
     }
+    // The final project DELETE also executes FK subprograms. EXPLAIN QUERY PLAN
+    // only shows one level, so follow CASCADE edges; SET NULL children are checked
+    // by the parent plan but do not themselves delete rows.
+    const pending = ['projects'];
+    const visited = new Set<string>();
+    const tables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as {
+      name: string;
+    }[];
+    while (pending.length > 0) {
+      const parent = pending.shift()!;
+      if (visited.has(parent)) continue;
+      visited.add(parent);
+      const columns = sqlite.prepare(`PRAGMA table_info(${parent})`).all() as {
+        name: string;
+        pk: number;
+      }[];
+      const keys = columns.filter((column) => column.pk > 0);
+      const details = plan(
+        `DELETE FROM ${parent} WHERE ${keys.map((key) => `${key.name}=?`).join(' AND ')}`
+      );
+      expect(
+        details.filter((detail) => /^SCAN /.test(detail)),
+        `${parent}: ${details.join('\n')}`
+      ).toEqual([]);
+      for (const { name } of tables) {
+        const fks = sqlite.prepare(`PRAGMA foreign_key_list(${name})`).all() as {
+          table: string;
+          on_delete: string;
+        }[];
+        if (fks.some((fk) => fk.table === parent && fk.on_delete === 'CASCADE')) pending.push(name);
+      }
+    }
+    expect(visited.size).toBeGreaterThan(30);
     expect(count('projects', "id='owner'")).toBe(0);
     expect(count('tasks')).toBe(OTHER_TASKS);
+    expect(count('triggers')).toBe(1);
+    expect(count('trigger_executions')).toBe(0);
+    expect(
+      sqlite.prepare("SELECT agent_profile_id FROM triggers WHERE id='other-trigger'").get()
+    ).toEqual({ agent_profile_id: null });
+    expect(
+      sqlite
+        .prepare("SELECT agent_profile_id FROM workspace_resource_summaries WHERE id='summary-0'")
+        .get()
+    ).toEqual({ agent_profile_id: null });
     expect(count('task_status_events')).toBe(OTHER_TASKS * 4);
     for (const table of [...ARCHIVES, 'task_submission_checkpoints'])
       expect(count(table)).toBe(OTHER_TASKS);
@@ -305,5 +384,40 @@ describe('project deletion cascade work on the shipped schema', { timeout: 30_00
         details.join('\n')
       ).toEqual([]);
     }
+  });
+  it('adds parent lookup indexes to a populated database without changing rows or FK actions', () => {
+    setup(true, false);
+    const tables = sqlite
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+      .all() as { name: string }[];
+    const snapshot = () =>
+      tables.map(({ name }) => ({
+        name,
+        rows: count(name),
+        fks: sqlite.prepare(`PRAGMA foreign_key_list(${name})`).all(),
+      }));
+    const before = snapshot();
+    expect(plan('DELETE FROM projects WHERE id=?').some((detail) => /^SCAN /.test(detail))).toBe(
+      true
+    );
+    expect(
+      plan('DELETE FROM agent_profiles WHERE id=?').some((detail) => /^SCAN /.test(detail))
+    ).toBe(true);
+    sqlite.exec(readFileSync(join(DIRECTORY, PROJECT_MIGRATION), 'utf8'));
+    expect(snapshot()).toEqual(before);
+    for (const table of [
+      'projects',
+      'agent_profiles',
+      'triggers',
+      'trigger_executions',
+      'skills',
+    ]) {
+      const details = plan(`DELETE FROM ${table} WHERE id=?`);
+      expect(
+        details.filter((detail) => /^SCAN /.test(detail)),
+        details.join('\n')
+      ).toEqual([]);
+    }
+    expect(sqlite.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
   });
 });
