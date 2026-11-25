@@ -37,6 +37,9 @@ func TestSAMUsageLimitRefusalIsNotAProviderOverload(t *testing.T) {
 	for _, tc := range []struct {
 		name, wire, want string
 	}{
+		// The exact shape the pinned claude-agent-acp 0.102.0 returns (sam_usage_limit_live_test.go).
+		{"Claude 0.102.0 wire shape", `{"code":-32603,"message":"Internal error: API Error: Request rejected (429) · Administrator monthly AI spending limit reached. Contact your administrator or wait until next month.","data":{"errorKind":"rate_limit"}}`, samUsageLimitReason},
+		{"control: Claude 0.102.0 wire shape for a provider 429", `{"code":-32603,"message":"Internal error: API Error: Request rejected (429) · Number of request tokens has exceeded your per-minute rate limit","data":{"errorKind":"rate_limit"}}`, "provider_overloaded"},
 		{"Claude admin monthly ceiling", `{"code":-32603,"message":` + jsonString("Internal error: API Error: 429 "+samAdminCapBody) + `,"data":{"errorKind":"rate_limit"}}`, samUsageLimitReason},
 		{"Claude user monthly cap, nested", `{"code":-32603,"message":"Internal error","data":{"errorKind":"rate_limit","message":` + jsonString("API Error: 429 "+samUserCapBody) + `}}`, samUsageLimitReason},
 		{"Claude daily token budget", `{"code":-32603,"message":` + jsonString("Internal error: API Error: 429 "+samDailyBody) + `,"data":{"errorKind":"rate_limit"}}`, samUsageLimitReason},
