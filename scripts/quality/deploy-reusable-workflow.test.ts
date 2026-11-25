@@ -16,6 +16,7 @@ import * as TOML from '@iarna/toml';
 import { describe, expect, it } from 'vitest';
 
 import { OMITTED_WORKER_VAR_DEFAULTS } from '../deploy/worker-var-defaults.js';
+import { WORKER_VAR_OVERRIDE_NAMES } from '../deploy/worker-var-override-names.js';
 
 const workflow = readFileSync(
   new URL('../../.github/workflows/deploy-reusable.yml', import.meta.url),
@@ -211,17 +212,10 @@ function checkedInDefault(name: string): string | undefined {
 
 function extractOptionalWorkerEnvVars(): string[] {
   // The checked-in `[vars]` argument precedes the list so differing overrides can be logged.
-  const match = syncWranglerConfig.match(
-    /getOptionalProcessEnvVars\((?:[A-Za-z_.]+,\s*)?\[\s*([\s\S]*?)\s*\]\)/
+  expect(syncWranglerConfig).toContain(
+    'getOptionalProcessEnvVars(topLevel.vars, WORKER_VAR_OVERRIDE_NAMES)'
   );
-  const optionalEnvBlock = match?.[1];
-
-  expect(optionalEnvBlock).toBeDefined();
-  if (!optionalEnvBlock) {
-    throw new Error('Unable to find sync-wrangler optional Worker env var list');
-  }
-
-  const vars = Array.from(optionalEnvBlock.matchAll(/'([A-Z0-9_]+)'/g), (varMatch) => varMatch[1]);
+  const vars = [...WORKER_VAR_OVERRIDE_NAMES];
   expect(vars).toContain('CF_CONTAINER_ENABLED');
   expect(vars).toContain('SANDBOX_ENABLED');
   expect(vars).toContain('MAX_CONCURRENT_SETUP_SESSIONS');

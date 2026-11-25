@@ -26,6 +26,7 @@ import { vmAgentPrebuiltKey } from './installer-engine-prebuilt.js';
 import { prebuiltSteps } from './installer-engine-prebuilt-steps.js';
 import { verifyEngineReadiness } from './installer-engine-readiness.js';
 import { readContainerArtifact, verifyPublisherRuntime } from './installer-engine-runtime.js';
+import { prepareStateBackend } from './installer-engine-state.js';
 export * from './installer-engine-contract.js';
 export async function runInstallerEngine(
   input: unknown,
@@ -269,47 +270,22 @@ export async function runInstallerEngine(
     }
     await pulumi('config', 'set', 'workersDevSubdomain', workersDevSubdomain);
   };
-  await phase('state-backend', async () => {
-    const bucketResponse = await request(
-      `${c.cloudflareApiUrl ?? DEFAULT_CLOUDFLARE_API_URL}/accounts/${c.accountId}/r2/buckets/${stateBucket}`,
-      {
-        headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` },
-      }
-    );
-    if (bucketResponse.status === 404) await wrangler('api', 'r2', 'bucket', 'create', stateBucket);
-    else if (!bucketResponse.ok) throw new Error('State bucket inspection failed');
-    if (c.profile === 'legacy-ci')
-      await pnpm('exec', 'tsx', 'scripts/deploy/installer-engine-ci-s3.ts');
-    await execute('pulumi', [
-      'login',
-      `s3://${stateBucket}?endpoint=https://${c.accountId}.r2.cloudflarestorage.com&region=auto`,
-    ]);
-    const stackData: unknown = JSON.parse(await pulumi('stack', 'ls', '--json'));
-    if (
-      !Array.isArray(stackData) ||
-      stackData.some(
-        (entry: unknown) =>
-          !entry ||
-          typeof entry !== 'object' ||
-          typeof (entry as { name?: unknown }).name !== 'string'
-      )
-    )
-      throw new Error('Invalid Pulumi stack listing');
-    const stacks = stackData as Array<{ name: string }>;
-    if (stacks.some((entry) => entry.name === stack || entry.name.endsWith(`/${stack}`)))
-      await pulumi('stack', 'select', stack);
-    else await pulumi('stack', 'init', stack);
-    await configureWorkersDev();
-    for (const [key, value] of Object.entries({
-      cloudflareAccountId: c.accountId,
-      cloudflareZoneId: c.zoneId,
-      baseDomain: c.baseDomain,
-      zoneName: c.zoneName,
-      resourcePrefix: prefix,
-    })) {
-      await pulumi('config', 'set', key, value);
-    }
-  });
+  await phase('state-backend', () =>
+    prepareStateBackend({
+      config: c,
+      apiBase: c.cloudflareApiUrl ?? DEFAULT_CLOUDFLARE_API_URL,
+      stateBucket,
+      stack,
+      prefix,
+      token: String(env.CF_API_TOKEN),
+      request,
+      createBucket: () => wrangler('api', 'r2', 'bucket', 'create', stateBucket),
+      prepareLegacyCiBackend: () => pnpm('exec', 'tsx', 'scripts/deploy/installer-engine-ci-s3.ts'),
+      login: (url) => execute('pulumi', ['login', url]),
+      pulumi,
+      configureWorkersDev,
+    })
+  );
   if (c.dryRun) {
     await phase('infrastructure-preview', () => pulumi('preview', '--diff'));
     state.status = 'completed';
