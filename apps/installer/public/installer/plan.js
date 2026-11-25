@@ -27,7 +27,7 @@ export async function loadZones() {
 
 function conflictText(plan) {
   const kind = (record) =>
-    record.type === 'certificate' ? 'certificate' : record.type === 'route' ? 'route' : 'dns';
+    ['certificate', 'route', 'adoption'].includes(record.type) ? record.type : 'dns';
   const names = (group) =>
     plan.conflicts
       .filter((record) => kind(record) === group)
@@ -36,6 +36,8 @@ function conflictText(plan) {
   const parts = [];
   if (names('dns')) parts.push(`Existing DNS records block installation: ${names('dns')}.`);
   if (names('route')) parts.push(`Existing Workers routes block installation: ${names('route')}.`);
+  if (names('adoption'))
+    parts.push(`There is no SAM here that this installer can take over: ${names('adoption')}.`);
   if (names('certificate'))
     parts.push(`No active Cloudflare certificate covers ${names('certificate')}.`);
   return parts.join(' ');
@@ -73,6 +75,12 @@ function renderCreatedDetails(plan) {
       'Email',
       `Sign-in codes come from ${agentsHost}. Its sending records are added under that name only.`
     );
+  if (plan.adoption)
+    appendDetailRow(
+      list,
+      'Takes over',
+      `The existing deployment named ${plan.adoption.prefix} (${plan.adoption.environment}), with its deploy state in ${plan.adoption.stateBucket}. Its data, keys, settings and users stay as they are.`
+    );
   appendDetailRow(
     list,
     'workers.dev address',
@@ -108,7 +116,13 @@ export function renderPlanSummary(plan, context) {
   // server's own normalization).
   const appHost =
     plan.hostnames.find((host) => host.startsWith('app.')) ?? `app.${context.baseDomain}`;
-  line.textContent = `SAM will live at ${appHost}${context.accountName ? ` in ${context.accountName}` : ''}. Cloudflare usage charges apply.`;
+  const where = context.accountName ? ` in ${context.accountName}` : '';
+  line.textContent = plan.adoption
+    ? `Your installation service will take over the SAM at ${appHost}${where}. Nothing changes until you approve the takeover there.`
+    : `SAM will live at ${appHost}${where}. Cloudflare usage charges apply.`;
+  $('confirm-full-copy').textContent = plan.adoption
+    ? 'Create an installation service in my account for this SAM. I approve the takeover itself there, after it checks that nothing would change.'
+    : 'Build and deploy this approved installation in my account. Workers Paid and usage charges apply.';
   details.replaceChildren(renderCreatedDetails(plan));
   state.approvedPlan = plan;
   blocked.hidden = true;
@@ -137,6 +151,9 @@ export async function runPreview() {
       zoneName: $('zone-id').selectedOptions[0]?.textContent,
       baseDomain,
       ownerEmail: $('owner-email').value.trim(),
+      ...($('adopt-existing').checked
+        ? { adopt: true, statePassphrase: $('state-passphrase').value }
+        : {}),
     });
     if (revision !== state.formRevision) return;
     renderPlanSummary(plan, { baseDomain, accountName });

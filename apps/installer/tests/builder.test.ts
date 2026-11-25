@@ -448,3 +448,54 @@ it('keeps a bounded engine output tail in the failure report', async () => {
   expect(failure.code).toBe(1);
   expect(failure.tail).toEqual(['error: route already exists', 'x'.repeat(400)]);
 });
+it('starts a takeover with the deployment’s own names and state bucket, only from an adoption-capable source', async () => {
+  const adoption = { stateBucket: 'sam-pulumi-state', takeover: true };
+  // A source whose engine predates adoption would drop it and install a second SAM.
+  const old = harness();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: string | URL | Request, init?: RequestInit) =>
+      String(input).endsWith('/installer-protocol.json')
+        ? Response.json({
+            ...supportedProtocol,
+            capabilities: (supportedProtocol.capabilities as string[]).filter(
+              (value) => value !== 'adoption'
+            ),
+          })
+        : supportedSourceFetch(input, init)
+    )
+  );
+  const takeover = { ...old.job, prefix: 'sam', environment: 'staging2', adoption };
+  const refused = await old.call('/start', takeover);
+  expect(refused.status).toBe(409);
+  expect(((await refused.json()) as { reason: string }).reason).toBe('unsupported-source');
+  expect(old.container.start).not.toHaveBeenCalled();
+  // The same old source still serves an ordinary installation.
+  expect((await old.call('/start', old.job)).status).toBe(202);
+
+  const h = harness();
+  expect((await h.call('/start', takeover)).status).toBe(202);
+  const [options] = h.container.start.mock.calls[0] as [{ env: Record<string, string> }];
+  expect(options.env.SAM_BUILD_CACHE_BUCKET).toBe('sam-pulumi-state');
+  expect(JSON.parse(options.env.SAM_ENGINE_CONFIG)).toMatchObject({
+    prefix: 'sam',
+    environment: 'staging2',
+    adoption,
+  });
+});
+it('rejects malformed takeover settings and adopted names on an ordinary installation', async () => {
+  const h = harness();
+  const adoption = { stateBucket: 'sam-pulumi-state', takeover: true };
+  for (const body of [
+    { ...h.job, prefix: 'sam', adoption: { ...adoption, stateBucket: 'Bad_Bucket' } },
+    { ...h.job, prefix: 'sam', adoption: { ...adoption, takeover: 'yes' } },
+    { ...h.job, prefix: 'sam', adoption: { ...adoption, extra: 1 } },
+    { ...h.job, prefix: 'Bad Prefix', adoption },
+    { ...h.job, environment: 'staging;rm', prefix: 'sam', adoption },
+    // Without adoption, only the installer's own derived names are accepted.
+    { ...h.job, prefix: 'sam' },
+    { ...h.job, environment: 'staging2' },
+  ])
+    expect((await h.call('/start', body)).status).toBe(400);
+  expect(h.container.start).not.toHaveBeenCalled();
+});

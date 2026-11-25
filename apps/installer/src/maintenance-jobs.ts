@@ -13,9 +13,14 @@ async function maintenanceManifest(service){
  let manifest=await service.state.storage.get('installation');if(manifest)return manifest;
  const config=JSON.parse(service.env.INSTALLATION_CONFIG||'null');if(!config)return null;
  if(config.accountId!==service.env.CF_ACCOUNT_ID||!/^[a-f0-9]{40}$/.test(config.sourceCommit))throw new Error('Invalid installation manifest');
+ if(config.adoption!==undefined&&!maintenanceValidAdoption(config.adoption))throw new Error('Invalid installation manifest');
  manifest={config,sourceMode:'upstream',createdAt:Date.now()};await service.state.storage.put('installation',manifest);return manifest;
 }
 
+// An adopted installation took over a deployment it did not create and keeps that deployment's
+// names. Its first job is the takeover; later ones are ordinary updates (installer-engine-adoption.ts).
+function maintenanceValidAdoption(value){return !!value&&typeof value==='object'&&typeof value.prefix==='string'&&/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(value.prefix)&&typeof value.environment==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/.test(value.environment)&&typeof value.stateBucket==='string'&&/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(value.stateBucket);}
+function maintenanceRequiredCapabilities(manifest){return manifest.config.adoption?['adoption']:[];}
 function maintenanceMatches(manifest,job){return !!manifest.requestedJob&&job.jobId===manifest.requestedJob.id&&job.sourceCommit===manifest.requestedJob.config.sourceCommit;}
 async function maintenanceReconcile(service,manifest){
  let job=await maintenanceBuilder(service,'/status');const request=manifest.requestedJob;
@@ -42,7 +47,8 @@ async function maintenanceDeploymentPanel(service){
  const steps={tools:'installing build tools',source:'preparing the approved source',bootstrap:'setting up the build'};
  const failed=job.failure&&retry?'Stopped while '+(steps[job.failure.step]||'building')+(job.failure.reason?': '+job.failure.reason:job.failure.code!==undefined?' (exit '+job.failure.code+')':'')+'.':'';
  const detail=failed||(job.checkpoint?.activePhase?(phases[job.checkpoint.activePhase]||'Working on your installation'):'');
- const status={idle:'Ready to install',starting:'Starting your build',running:'Installation in progress',completed:'SAM is ready',failed:'Installation needs attention',interrupted:'Build interrupted',timed_out:'Build reached its time limit',cancelled:'Build cancelled'}[job.status]||'Checking status';
+ const adopted=!!manifest.config.adoption;
+ const status={idle:adopted?'Ready to take over':'Ready to install',starting:'Starting your build',running:'Installation in progress',completed:'SAM is ready',failed:'Installation needs attention',interrupted:'Build interrupted',timed_out:'Build reached its time limit',cancelled:'Build cancelled'}[job.status]||'Checking status';
  // One ordered list of stages, so the owner always sees done, current and next.
  const order=['source',...Object.keys(phases)],labels={source:'Preparing the approved source',...phases};
  const completed=new Set(job.checkpoint?.completed||[]);if(job.checkpoint)completed.add('source');
@@ -53,12 +59,14 @@ async function maintenanceDeploymentPanel(service){
  const lastChecked=new Date().toISOString().slice(11,19)+' UTC';
  const progress=active?'<p data-auto-refresh="'+refresh+'">Step '+(position+1)+' of '+order.length+': <strong>'+escape(labels[current]||'Starting')+'</strong></p><progress class="build-progress" value="'+(position+1)+'" max="'+order.length+'"></progress><p class="muted">'+(started?'Started '+started+'. ':'')+'Usually takes about '+estimate+' minutes. Last checked '+lastChecked+' &middot; updates every '+refresh+'s.</p>':'';
  const attention=job.status==='failed';
- const details='<details><summary>Installation details</summary><p>Administrator: '+escape(config.ownerEmail)+'</p><p>Approved source</p><code>'+escape(config.sourceCommit)+'</code><p>Account: '+escape(config.accountId)+'<br>Zone: '+escape(config.zoneName)+'</p></details>';
+ const details='<details><summary>Installation details</summary><p>'+(adopted?'Service owner: ':'Administrator: ')+escape(config.ownerEmail)+'</p><p>Approved source</p><code>'+escape(config.sourceCommit)+'</code><p>Account: '+escape(config.accountId)+'<br>Zone: '+escape(config.zoneName)+'</p></details>';
  // The finished install gets its own celebratory panel: one action, details tucked away.
+ if(!active&&!retry&&manifest.lastSuccessfulCommit&&adopted)return '<section class="deployment ready"><p class="ready-kicker">'+escape(config.baseDomain)+'</p><h1 class="ready-title">Takeover complete</h1><p class="ready-lede">This service now builds and updates the SAM that was already running here. Its data, keys, settings and users are as they were.</p><p><a class="primary-link" href="https://app.'+escape(config.baseDomain)+'" rel="noreferrer">Open SAM →</a></p><div class="quiet-actions"><form method="post" action="/update-preview"><button class="quiet">Check for an update</button></form></div>'+details+'</section>';
  if(!active&&!retry&&manifest.lastSuccessfulCommit)return '<section class="deployment ready"><div class="ready-orb" aria-hidden="true"><span class="ready-ring"></span><span class="ready-ring ready-ring--late"></span>'+'<i class="spark"></i>'.repeat(8)+'<span class="ready-check">✓</span></div><p class="ready-kicker">'+escape(config.baseDomain)+'</p><h1 class="ready-title">SAM is live</h1><p class="ready-lede">Built and running in your own Cloudflare account. One last step and it’s yours.</p><form method="post" action="/setup"><button>Finish setting up SAM →</button></form><div class="quiet-actions"><form method="post" action="/update-preview"><button class="quiet">Check for an update</button></form></div>'+details+'</section>';
  let bodyText='';
  if(!active){
   if(retry)bodyText='Your installation and what has been built so far are kept.';
+  else if(adopted)bodyText='Take over the SAM already running here. The build first checks that nothing would change: if the approved source is older than your SAM, or would create, replace or delete any of its resources, it stops before changing anything. Workers Paid and usage charges apply.';
   else bodyText='Build SAM in your account, then open your own instance. This creates databases, storage, application images and the DNS records you reviewed. Workers Paid and usage charges apply.';
  }
  // The first-install checkbox is pre-checked: the installer's own Review
@@ -68,6 +76,8 @@ async function maintenanceDeploymentPanel(service){
  let actionsHtml='';
  if(active)actionsHtml='<details class="secondary-actions"><summary>Stop this build</summary><p>Stopping keeps your installation and what has been built so far. You can start the build again.</p><form method="post" action="/cancel"><label><input name="confirmed" type="checkbox" value="yes" required> Stop the running build</label><button class="secondary">Stop build</button></form></details>';
  else if(retry)actionsHtml='<form method="post" action="/resume"><button>Retry deployment</button></form>';
+ // A takeover is never pre-checked: the owner confirms it here, on purpose.
+ else if(adopted)actionsHtml='<form method="post" action="/deploy"><label><input name="confirmed" type="checkbox" value="yes" required> Check and take over this existing installation.</label><button>Take over SAM</button></form>';
  else actionsHtml='<form method="post" action="/deploy"><label><input name="confirmed" type="checkbox" value="yes" checked required> Build and deploy this approved installation.</label><button>Install SAM</button></form>';
  return '<section class="deployment"><span class="badge">Your installation</span><h1>'+escape(config.baseDomain)+'</h1><div class="deployment-status'+(attention?' deployment-status--attention':'')+'"><strong>'+(attention?'⚠ ':'')+escape(status)+'</strong>'+(detail&&!active&&job.status!=='completed'?'<p>'+escape(detail)+'</p>':'')+progress+(bodyText?'<p>'+escape(bodyText)+'</p>':'')+'</div>'+stepList+actionsHtml+(retry&&job.failure?.tail?.length?'<details><summary>Technical details</summary><pre class="build-log">'+escape(job.failure.tail.join('\n'))+'</pre></details>':'')+details+'</section>';
 
@@ -92,6 +102,7 @@ async function maintenanceJobAction(service,path,body){
  }
  let job=await maintenanceReconcile(service,manifest);
  if(path==='/setup'){
+  if(manifest.config.adoption)return page('<h1>Nothing to set up</h1><p>This installation already had its administrators when this service took it over. Sign in to SAM as usual.</p><p><a href="/">Return to maintenance</a></p>',409);
   if(job.status!=='completed'||!maintenanceMatches(manifest,job))return page('<h1>Finish the approved deployment first</h1>',409);
   const result=await maintenanceBuilder(service,'/result');
   if(typeof result.setupToken!=='string'||result.appUrl!=='https://app.'+manifest.config.baseDomain)return page('<h1>Setup handoff unavailable</h1>',409);
@@ -110,7 +121,7 @@ async function maintenanceJobAction(service,path,body){
   const response=await fetch('https://api.github.com/repos/raphaeltm/simple-agent-manager/commits/'+encodeURIComponent(release.tag_name),{headers,signal:AbortSignal.timeout(10000)});
   if(!response.ok)throw new Error('Release source unavailable');const commit=await response.json();if(!/^[a-f0-9]{40}$/.test(commit.sha))throw new Error('Invalid release source');
   if(commit.sha===manifest.lastSuccessfulCommit)return page('<h1>You are up to date</h1><p><a href="/">Return to maintenance</a></p>');
-  const verified=await maintenanceSourcePolicy.verify(commit.sha,manifest.lastSuccessfulCommit);
+  const verified=await maintenanceSourcePolicy.verify(commit.sha,manifest.lastSuccessfulCommit,maintenanceRequiredCapabilities(manifest));
   if(!verified.ok)return page('<h1>Update unavailable</h1><p>'+(verified.reason==='not-forward'?'This release is older than or diverges from your installed source. Your installation is unchanged.':verified.reason==='unsupported-source'?'This release does not support this installer protocol. Your installation is unchanged.':'Source compatibility could not be checked. Retry later; your installation is unchanged.')+'</p><p><a href="/">Return to maintenance</a></p>',verified.reason==='source-unavailable'?502:409);
   const approval=random();manifest.pendingUpdate={sourceCommit:commit.sha,approvalHash:await hash(approval),expires:Date.now()+900000};await service.state.storage.put('installation',manifest);
   return page('<h1>Review your update</h1><p>Release '+escape(release.tag_name)+'<code>'+escape(commit.sha)+'</code> will be built in your account. Databases pass the same migration safety checks. This is a code update, not a database rollback.</p><form method="post" action="/update"><input type="hidden" name="approval" value="'+approval+'"><button>Approve and deploy this version</button></form><p><a href="/">Keep current version</a></p>');
@@ -121,12 +132,16 @@ async function maintenanceJobAction(service,path,body){
   if(path==='/deploy'&&(body.get('confirmed')!=='yes'||manifest.lastSuccessfulCommit))return page('<h1>Confirm the first installation</h1>',409);
   if(path==='/update'){
    const pending=manifest.pendingUpdate;if(!pending||pending.expires<=Date.now()||await hash(body.get('approval')||'')!==pending.approvalHash||manifest.sourceMode!=='upstream'||manifest.customSource)return page('<h1>Review the update again</h1>',409);
-   const verified=await maintenanceSourcePolicy.verify(pending.sourceCommit,manifest.lastSuccessfulCommit);
+   const verified=await maintenanceSourcePolicy.verify(pending.sourceCommit,manifest.lastSuccessfulCommit,maintenanceRequiredCapabilities(manifest));
    if(!verified.ok)return page('<h1>Update validation failed</h1><p>The release must be newer than your installation and support this installer protocol. Retry when source verification is available. Your approval and installation are unchanged.</p>',verified.reason==='source-unavailable'?502:409);
    source=pending.sourceCommit;delete manifest.pendingUpdate;
   }
-  const prefix='s'+(await hash(manifest.config.baseDomain)).slice(0,6),jobId=random().slice(0,32);
-  const config={...manifest.config,sourceCommit:source,prefix,environment:'production',jobId,...(manifest.lastSuccessfulCommit?{previousSourceCommit:manifest.lastSuccessfulCommit}:{})};
+  const adopted=manifest.config.adoption,jobId=random().slice(0,32);
+  const prefix=adopted?adopted.prefix:'s'+(await hash(manifest.config.baseDomain)).slice(0,6);
+  const {adoption:_adoption,...base}=manifest.config;
+  // The first job of an adopted installation is the takeover, which refuses any change to the
+  // deployment's resources or a rollback of its database; later updates may add resources.
+  const config={...base,sourceCommit:source,prefix,environment:adopted?adopted.environment:'production',jobId,...(manifest.lastSuccessfulCommit?{previousSourceCommit:manifest.lastSuccessfulCommit}:{}),...(adopted?{adoption:{stateBucket:adopted.stateBucket,takeover:!manifest.lastSuccessfulCommit}}:{})};
   manifest.config.sourceCommit=source;manifest.requestedJobId=jobId;manifest.requestedJob={id:jobId,config,accepted:false};await service.state.storage.put('installation',manifest);
   await maintenanceReconcile(service,manifest);
   return new Response(null,{status:303,headers:{Location:'/'}});

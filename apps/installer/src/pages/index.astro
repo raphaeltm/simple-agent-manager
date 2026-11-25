@@ -153,6 +153,21 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
                         itself is already covered automatically.
                       </p>
                     </details>
+                    <details id="adopt-details">
+                      <summary>This domain already runs SAM</summary>
+                      <label class="check"
+                        ><input id="adopt-existing" type="checkbox" /><span
+                          >Take over the SAM already running here instead of installing a new one</span
+                        ></label
+                      >
+                      <label for="state-passphrase">Its deploy-state passphrase</label
+                      ><input id="state-passphrase" type="password" autocomplete="off" />
+                      <p class="small">
+                        The <code>PULUMI_CONFIG_PASSPHRASE</code> your deployment was set up with. It is
+                        stored only as a secret of the installation service in your account. Nothing
+                        about your SAM changes until you approve the takeover there.
+                      </p>
+                    </details>
                     <label for="owner-email">Your administrator email</label
                     ><input id="owner-email" type="email" autocomplete="email" />
                     <p class="small">
@@ -196,7 +211,7 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
                 </div>
                 <form id="review-form" hidden>
                   <label class="check"
-                    ><input id="confirm-full" type="checkbox" required /><span
+                    ><input id="confirm-full" type="checkbox" required /><span id="confirm-full-copy"
                       >Build and deploy this approved installation in my account. Workers Paid and
                       usage charges apply.</span
                     ></label

@@ -29,6 +29,8 @@ export interface Session {
   accounts?: Account[];
   zones?: { id: string; name: string; account: { id: string } }[];
   plan?: import('./installation-plan').InstallationPlan;
+  /** A takeover's existing deploy-state passphrase, kept only in this session's private storage. */
+  adoptionPassphrase?: string;
   credentials?: import('./credentials').InstallationCredentials;
   credentialTokenIds?: string[];
   job?: {

@@ -108,7 +108,7 @@ $('confirm-full').addEventListener('change', () => {
 $('account-id').addEventListener('change', () => {
   if (state.fullInstaller) loadZones().catch((error) => message(error.message, 'error'));
 });
-['zone-id', 'base-domain', 'owner-email'].forEach((id) =>
+['zone-id', 'base-domain', 'owner-email', 'adopt-existing', 'state-passphrase'].forEach((id) =>
   $(id).addEventListener('input', () => {
     if (id === 'base-domain') $('base-domain-shown').textContent = $('base-domain').value;
     invalidatePlan();
@@ -170,7 +170,9 @@ void (async () => {
       $('full-permissions').hidden = false;
       $('installer-mode-note').textContent =
         'Experimental full installation: your maintenance service builds and deploys the approved SAM source in your account. Review the domain, permissions and usage charges before continuing.';
-      ['zone-id', 'base-domain', 'owner-email'].forEach((id) => ($(id).required = true));
+      ['zone-id', 'base-domain', 'owner-email', 'adopt-existing', 'state-passphrase'].forEach(
+        (id) => ($(id).required = true)
+      );
     }
     $('source').href = config.sourceUrl;
     $('docs').href = config.docsUrl;

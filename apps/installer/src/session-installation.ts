@@ -1,6 +1,7 @@
+import { previewAdoption } from './adoption-plan';
 import type { BootstrapCleanup } from './cleanup';
 import { createInstallationCredentials } from './credentials';
-import { previewInstallation } from './installation-plan';
+import { type InstallationPlan, previewInstallation } from './installation-plan';
 import { provision } from './provision';
 import { json, randomSecret } from './security';
 import type { Env, Session } from './types';
@@ -46,11 +47,20 @@ export class SessionInstallation {
       )
     )
       return json({ error: 'Select an authorized account and zone first' }, 400);
-    const plan = await previewInstallation(session.token, {
-      ...input,
+    const { adopt, statePassphrase, ...settings } = input;
+    if (adopt === true && !validPassphrase(statePassphrase))
+      return json(
+        { error: 'Enter the deploy-state passphrase your existing SAM deployment uses.' },
+        400
+      );
+    const plan = await (adopt === true ? previewAdoption : previewInstallation)(session.token, {
+      ...settings,
       sourceCommit: this.env.INSTALL_SOURCE_COMMIT,
     });
     session.plan = plan;
+    // Never part of the plan: the plan is returned to the browser and becomes INSTALLATION_CONFIG.
+    if (adopt === true) session.adoptionPassphrase = statePassphrase as string;
+    else delete session.adoptionPassphrase;
     await this.ctx.storage.put('session', session);
     return json({ plan });
   }
@@ -105,6 +115,7 @@ export class SessionInstallation {
           signal: workSignal,
           cleanupTimeoutMs: limits.reserve,
           authorityExpiresAt: session.tokenExpires,
+          ...(session.plan.adoption ? { pulumiPassphrase: session.adoptionPassphrase } : {}),
           journal: async (tokenIds) => {
             session.credentialTokenIds = tokenIds;
             await this.ctx.storage.put('session', session);
@@ -170,7 +181,9 @@ export class SessionInstallation {
         { error: 'Preview and approve an installation without DNS conflicts first.' },
         409
       );
-    const fresh = await previewInstallation(session.token, session.plan);
+    if (session.plan.adoption && !validPassphrase(session.adoptionPassphrase))
+      return json({ error: 'Review the takeover again.' }, 409);
+    const fresh = await planAgain(session.token, session.plan);
     if (fresh.fingerprint !== fingerprint || fresh.conflicts.length)
       return json({ error: 'The installation plan changed. Review it again.' }, 409);
     if (session.job && session.job.fingerprint !== session.plan.fingerprint)
@@ -178,4 +191,14 @@ export class SessionInstallation {
 
     return undefined;
   }
+}
+
+/** Re-reviews an approved plan the same way it was first reviewed. */
+function planAgain(token: string, plan: InstallationPlan): Promise<InstallationPlan> {
+  return plan.adoption ? previewAdoption(token, plan) : previewInstallation(token, plan);
+}
+
+/** A deploy-state passphrase as the owner saved it; bounded, never inspected further. */
+function validPassphrase(value: unknown): value is string {
+  return typeof value === 'string' && value.length >= 8 && value.length <= 1024;
 }
