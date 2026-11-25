@@ -7,6 +7,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -148,6 +149,14 @@ describe('checkoutWithTrackedModes under umask 077', () => {
     git('checkout', '-q', '--detach', oldRef);
     git('checkout', '-q', '--detach', withDir);
     expect(statSync(join(repo, KEY_AGENT_DIR, 'providers')).mode & 0o777).toBe(0o700);
+  });
+
+  it('only adds bits: a tracked file a looser umask made 0664 is left as it is', () => {
+    git('checkout', '-q', '--detach', newRef);
+    const path = `${KEY_AGENT_DIR}/server.ts`;
+    chmodSync(join(repo, path), 0o664);
+    restoreTrackedModes(gitUnderUmask077);
+    expect(mode(path)).toBe(0o664);
   });
 
   it('leaves untracked files alone (operator state and keys keep their own modes)', () => {

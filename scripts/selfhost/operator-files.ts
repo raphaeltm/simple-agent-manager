@@ -9,8 +9,9 @@
  * Two guards, each sufficient for tracked files on its own:
  * - `useOperatorUmask()` at every operator entry point, so git, pnpm and docker children create
  *   files group/world-readable, as on a stock install.
- * - `checkoutWithTrackedModes()` re-applies git's recorded modes after every checkout, so a file
- *   already rewritten 0600 (or a caller that bypassed the entry point) is repaired too.
+ * - `checkoutWithTrackedModes()` makes tracked files world-readable (and 100755 files
+ *   world-executable) after every checkout, so a file already rewritten 0600 (or a caller that
+ *   bypassed the entry point) is repaired too.
  *
  * Files that must stay private do not rely on the umask: their writers set 0600/0700 explicitly
  * (secret-files.ts, backup-encryption.ts, backup-destination.ts), which a umask can only narrow.
@@ -33,10 +34,13 @@ interface RunResult {
 }
 type Runner = (command: string, args: string[], env?: NodeJS.ProcessEnv) => RunResult;
 
-/** File permission bits for a git index mode; null for symlinks and submodules (no mode). */
-function permissionsFor(gitMode: string): number | null {
-  if (gitMode === '100644') return 0o644;
-  if (gitMode === '100755') return 0o755;
+/**
+ * The bits everyone needs on a tracked file of this git index mode: read, plus execute for
+ * 100755. Null for symlinks and submodules (no mode).
+ */
+function requiredBitsFor(gitMode: string): number | null {
+  if (gitMode === '100644') return 0o444;
+  if (gitMode === '100755') return 0o555;
   return null;
 }
 
@@ -47,12 +51,13 @@ export interface ModeRepair {
 }
 
 /**
- * Re-applies git's recorded mode to every tracked regular file whose permission bits differ
- * (100644 -> 0644, 100755 -> 0755), and makes every directory holding a tracked file
- * traversable by everyone (git records no directory modes; a checkout under umask 077 creates
- * new directories 0700, which the non-root key agent cannot enter). Throws when git cannot list
- * the index, so a broken repair is never mistaken for a clean tree. A path it cannot chmod is
- * reported, not fatal: a rollback must not stop at a file the checkout itself could still write.
+ * Makes every tracked regular file readable by everyone (and executable by everyone when git
+ * records 100755), and every directory holding a tracked file traversable by everyone. Bits are
+ * only added, never removed: a file a looser umask made 0664 is left alone, one a umask 077
+ * checkout made 0600 becomes 0644. Git records no directory modes, and a checkout under umask
+ * 077 creates new directories 0700, which the non-root key agent cannot enter. Throws when git
+ * cannot list the index, so a broken repair is never mistaken for a clean tree. A path it cannot
+ * chmod is reported, not fatal: a rollback must not stop at a file the checkout could write.
  */
 export function restoreTrackedModes(run: Runner): ModeRepair {
   const top = run('git', ['rev-parse', '--show-toplevel']);
@@ -87,10 +92,10 @@ export function restoreTrackedModes(run: Runner): ModeRepair {
     // `<mode> <object> <stage>\t<path>`
     const tab = entry.indexOf('\t');
     if (tab < 0) continue;
-    const want = permissionsFor(entry.slice(0, entry.indexOf(' ')));
-    if (want === null) continue;
+    const required = requiredBitsFor(entry.slice(0, entry.indexOf(' ')));
+    if (required === null) continue;
     const relative = entry.slice(tab + 1);
-    fix(relative, 'file', () => want);
+    fix(relative, 'file', (mode) => mode | required);
     for (let dir = dirname(relative); dir !== '.'; dir = dirname(dir)) directories.add(dir);
   }
   // Only add group/other read+search; never narrow a directory an operator widened.

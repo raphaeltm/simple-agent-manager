@@ -99,7 +99,7 @@ function git(ctx: BoxContext, args: string[], what: string): string {
   return check(ctx.run('git', args), what).stdout.trim();
 }
 
-/** `git checkout --detach`, re-applying git's file modes (operator-files.ts). */
+/** `git checkout --detach`, making tracked files readable again (operator-files.ts). */
 function checkout(ctx: BoxContext, ref: string, what: string): void {
   check(checkoutWithTrackedModes(ctx.run, ref, ctx.log), what);
 }
