@@ -111,7 +111,9 @@ function anthropicMessages(model: string, stream: boolean, usage: FakeUsage): Re
     event('message_delta', {
       type: 'message_delta',
       delta: { stop_reason: 'end_turn', stop_sequence: null },
-      usage: { output_tokens: usage.outputTokens },
+      // Input too, as the real API reports it: the Anthropic-to-OpenAI stream translator drops
+      // `message_start` usage, so this is the only usage a translated stream keeps.
+      usage: { input_tokens: usage.inputTokens, output_tokens: usage.outputTokens },
     }),
     event('message_stop', { type: 'message_stop' }),
   ]);

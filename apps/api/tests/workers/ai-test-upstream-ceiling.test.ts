@@ -266,6 +266,26 @@ describe('fake AI upstream: metering and the administrator ceiling on a no-gatew
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it('meters exactly the configured cost for a streamed Claude chat completion with a large prompt', async () => {
+    const caller = await seedCaller('translated-stream');
+    await setSettings([
+      { name: 'aiProxy.directUpstreamEnabled', value: true },
+      { name: 'aiProxy.perUserMonthlyCostCeilingUsd', value: 0 },
+      { name: 'aiProxy.testUpstreamUserIds', value: [caller.userId] },
+      { name: 'aiProxy.testUpstreamCostPerCallCents', value: 40 },
+    ]);
+    // A prompt far larger than the fake's 10 input tokens: an estimate would price it higher.
+    const response = await call('/ai/v1/chat/completions', caller.token, {
+      model: CLAUDE_MODEL.id,
+      stream: true,
+      messages: [{ role: 'user', content: 'x'.repeat(40_000) }],
+    });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain(FAKE_UPSTREAM_TEXT);
+    const budget = (await usageBudget(caller.userId)) as { monthCostUsd: number };
+    expect(budget.monthCostUsd).toBeCloseTo(0.4, 3);
+  });
+
   it.each([
     ['a production deployment', { ...BOX_ENV, ENVIRONMENT: 'production' }],
     ['a fork production stack with an unmapped name', { ...BOX_ENV, ENVIRONMENT: 'main' }],
