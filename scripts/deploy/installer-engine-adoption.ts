@@ -3,11 +3,12 @@
  * fork's GitHub Actions deploy, or SAM's own staging and production). Every rule here keeps the
  * existing deployment exactly as it is: its state, keys, settings and data.
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import * as TOML from '@iarna/toml';
 
+import { D1_MIGRATION_ALIAS_REPAIRS } from './d1-migration-aliases.js';
 import { EngineCommandFailure } from './installer-engine-contract.js';
 import { OMITTED_WORKER_VAR_DEFAULTS } from './worker-var-defaults.js';
 import { WORKER_VAR_OVERRIDE_NAMES } from './worker-var-override-names.js';
@@ -200,17 +201,48 @@ export async function existingPreservedKeySecrets(
 }
 
 /**
- * Migrations the deployed database has applied that the approved source does not contain. Any
+ * The D1 databases of a deployment, each with its own migration ledger and directory
+ * (apps/api/wrangler.toml). The observability database is newer than the primary one, so a
+ * deployment from before it existed has no output for it; the preview gate then refuses its
+ * creation.
+ */
+const MIGRATION_LEDGERS = [
+  {
+    binding: 'DATABASE',
+    output: 'd1DatabaseId',
+    directory: 'apps/api/src/db/migrations',
+    label: '',
+    required: true,
+  },
+  {
+    binding: 'OBSERVABILITY_DATABASE',
+    output: 'observabilityD1DatabaseId',
+    directory: 'apps/api/src/db/migrations/observability',
+    label: 'observability/',
+    required: false,
+  },
+] as const;
+
+/**
+ * Migrations a deployed database has applied that the approved source does not contain. Any
  * entry means the running SAM is newer than the source, and deploying it would be a rollback.
+ * A migration applied under a legacy file name counts as its current file.
  */
 export async function migrationsNewerThanSource(
-  access: CloudflareAccess & { databaseId: string; root: string }
+  access: CloudflareAccess & {
+    databaseId: string;
+    root: string;
+    binding: string;
+    directory: string;
+  }
 ): Promise<string[]> {
+  const directory = join(access.root, access.directory);
   const local = new Set(
-    readdirSync(join(access.root, 'apps/api/src/db/migrations')).filter((name) =>
-      name.endsWith('.sql')
-    )
+    existsSync(directory) ? readdirSync(directory).filter((name) => name.endsWith('.sql')) : []
   );
+  for (const alias of D1_MIGRATION_ALIAS_REPAIRS)
+    if (alias.binding === access.binding && local.has(alias.currentName))
+      local.add(alias.legacyName);
   const query = await cloudflareResult(access, `d1/database/${access.databaseId}/query`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -227,17 +259,25 @@ export async function migrationsNewerThanSource(
 }
 
 /**
- * Takeover step 1, before anything changes: the deployed database must not be newer than the
- * approved source, or this deploy would roll it back.
+ * Takeover step 1, before anything changes: no deployed database may be newer than the approved
+ * source, or this deploy would run older code on a newer schema.
  */
 export async function refuseRollback(
   access: CloudflareAccess & { root: string; stackOutputs(): Promise<string> }
 ): Promise<void> {
-  const outputs: unknown = JSON.parse(await access.stackOutputs());
-  const databaseId = (outputs as { d1DatabaseId?: unknown } | null)?.d1DatabaseId;
-  if (typeof databaseId !== 'string' || !/^[0-9a-f-]{36}$/.test(databaseId))
-    throw new Error('Adopted stack has no database');
-  const newer = await migrationsNewerThanSource({ ...access, databaseId });
+  const parsed: unknown = JSON.parse(await access.stackOutputs());
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+    throw new Error('Invalid infrastructure outputs');
+  const outputs = parsed as Record<string, unknown>;
+  const newer: string[] = [];
+  for (const ledger of MIGRATION_LEDGERS) {
+    const databaseId = outputs[ledger.output];
+    if (databaseId === undefined && !ledger.required) continue;
+    if (typeof databaseId !== 'string' || !/^[0-9a-f-]{36}$/.test(databaseId))
+      throw new Error('Adopted stack has no database');
+    const names = await migrationsNewerThanSource({ ...access, ...ledger, databaseId });
+    newer.push(...names.map((name) => ledger.label + name));
+  }
   if (newer.length)
     throw new AdoptionRefused([
       'This SAM runs a newer version than the approved source. Its database has migrations the source does not contain:',

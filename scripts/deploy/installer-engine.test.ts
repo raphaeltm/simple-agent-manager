@@ -1171,6 +1171,7 @@ describe('installation engine: adopting an existing deployment', () => {
   const adoption = { stateBucket: 'install-test-pulumi-state', takeover: true };
   const adopted: InstallerEngineConfig = { ...config, adoption };
   const databaseId = '0123abcd-0123-4abc-8abc-0123456789ab';
+  const observabilityId = 'fedc4321-fedc-4cba-9cba-ba9876543210';
   const sameStep = {
     op: 'same',
     urn: 'urn:pulumi:prod::sam::cloudflare:index/d1Database:D1Database::sam-db',
@@ -1189,6 +1190,12 @@ describe('installation engine: adopting an existing deployment', () => {
     /** The preview immediately before `pulumi up`, when it differs from the first. */
     previewBeforeUp?: unknown;
     applied?: string[];
+    /** Migrations the observability database has applied. */
+    observabilityApplied?: string[];
+    /** Extra migration files in the approved source's primary directory. */
+    sourceMigrations?: string[];
+    /** A deployment from before the observability database existed has no output for it. */
+    noObservabilityOutput?: boolean;
   }
   /** fixture() with an existing deployment behind it: state, stack, database, Worker settings. */
   function adoptionFixture(world: AdoptionWorld = {}) {
@@ -1196,6 +1203,10 @@ describe('installation engine: adopting an existing deployment', () => {
     mkdirSync(join(f.root, 'apps/api/src/db/migrations'), { recursive: true });
     writeFileSync(join(f.root, 'apps/api/src/db/migrations/0001_init.sql'), '');
     writeFileSync(join(f.root, 'apps/api/src/db/migrations/0002_next.sql'), '');
+    for (const name of world.sourceMigrations ?? [])
+      writeFileSync(join(f.root, 'apps/api/src/db/migrations', name), '');
+    mkdirSync(join(f.root, 'apps/api/src/db/migrations/observability'), { recursive: true });
+    writeFileSync(join(f.root, 'apps/api/src/db/migrations/observability/0000_init.sql'), '');
     // The approved source's own defaults: CONNECTOR_ENABLED in [vars], VM_AGENT_TRANSPORT as a
     // recorded code default (worker-var-defaults.ts).
     writeFileSync(join(f.root, 'apps/api/wrangler.toml'), '[vars]\nCONNECTOR_ENABLED = "false"\n');
@@ -1220,7 +1231,11 @@ describe('installation engine: adopting an existing deployment', () => {
         }
         const output = await f.runner.run(command, options);
         if (command.executable === 'pulumi' && command.args.includes('output'))
-          return JSON.stringify({ ...JSON.parse(output), d1DatabaseId: databaseId });
+          return JSON.stringify({
+            ...JSON.parse(output),
+            d1DatabaseId: databaseId,
+            observabilityD1DatabaseId: world.noObservabilityOutput ? undefined : observabilityId,
+          });
         return output;
       },
       async request(url, init) {
@@ -1251,15 +1266,12 @@ describe('installation engine: adopting an existing deployment', () => {
               { name: 'GITHUB_CLIENT_SECRET', type: 'secret_text' },
             ],
           });
+        const ledger = (names: string[]) =>
+          Response.json({ success: true, result: [{ results: names.map((name) => ({ name })) }] });
         if (url.endsWith(`/d1/database/${databaseId}/query`))
-          return Response.json({
-            success: true,
-            result: [
-              {
-                results: (world.applied ?? ['0001_init.sql']).map((name) => ({ name })),
-              },
-            ],
-          });
+          return ledger(world.applied ?? ['0001_init.sql']);
+        if (url.endsWith(`/d1/database/${observabilityId}/query`))
+          return ledger(world.observabilityApplied ?? ['0000_init.sql']);
         return f.runner.request(url, init);
       },
     };
@@ -1445,6 +1457,50 @@ describe('installation engine: adopting an existing deployment', () => {
     const calls = f.lines();
     for (const step of ['pulumi-refresh-safe.sh', 'pulumi preview', 'pulumi up', 'wrangler'])
       expect(calls.some((line) => line.includes(step))).toBe(false);
+  });
+
+  it('refuses a takeover when only the observability database is newer than the source', async () => {
+    const f = adoptionFixture({ observabilityApplied: ['0000_init.sql', '0001_newer.sql'] });
+    const { error, events } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase adoption-preflight failed');
+    expect(events.find((event) => event.status === 'failed')?.tail).toEqual([
+      'This SAM runs a newer version than the approved source. Its database has migrations the source does not contain:',
+      'observability/0001_newer.sql',
+    ]);
+    const calls = f.lines();
+    for (const step of ['pulumi-refresh-safe.sh', 'pulumi preview', 'pulumi up', 'wrangler'])
+      expect(calls.some((line) => line.includes(step))).toBe(false);
+    // Both ledgers were read, so the primary one passing is what let this one decide.
+    expect(f.requests.filter((line) => line.endsWith('/query'))).toHaveLength(2);
+  });
+
+  it('reads no observability ledger for a deployment that never had that database', async () => {
+    const f = adoptionFixture({ noObservabilityOutput: true });
+    const { events } = await run(adopted, f);
+    // The rollback check passes on the primary ledger alone and the takeover moves on to the
+    // preview gate, which is what refuses creating the missing database on a real stack.
+    expect(
+      events.some((event) => event.phase === 'adoption-preflight' && event.status === 'failed')
+    ).toBe(false);
+    expect(f.lines().some((line) => line.startsWith('pulumi preview --refresh --json'))).toBe(true);
+    expect(f.requests.filter((line) => line.endsWith('/query'))).toEqual([
+      expect.stringContaining(`/d1/database/${databaseId}/query`),
+    ]);
+  });
+
+  it('treats a migration applied under its legacy file name as the current file', async () => {
+    const legacy = '0157_workspace_eviction_fencing.sql';
+    const applied = ['0001_init.sql', '0002_next.sql', legacy];
+    const renamed = adoptionFixture({
+      applied,
+      sourceMigrations: ['0164_workspace_eviction_fencing.sql'],
+    });
+    expect((await run(adopted, renamed)).error).toBeUndefined();
+    // Control: a source that does not carry the migration under either name is older.
+    const older = adoptionFixture({ applied });
+    const { error, events } = await run(adopted, older);
+    expect(error?.message).toContain('Installation phase adoption-preflight failed');
+    expect(events.find((event) => event.status === 'failed')?.tail?.[1]).toBe(legacy);
   });
 
   it.each([

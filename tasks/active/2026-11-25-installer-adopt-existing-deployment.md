@@ -241,3 +241,16 @@ as the resource updated in place. The provider rewrites the Pages project on eve
   it instead of failing after the infrastructure phase.
 - Browser audit gained a takeover-panel scenario (real service code, longest names, in-card
   clipping check), replacing the one-off render script lost with the first workspace.
+
+## Review fixes, round 4 (2026-11-25, Codex review of f97f0fe1a)
+
+- P1 "Include observability D1 in rollback checks": `refuseRollback` now reads both migration
+  ledgers (`MIGRATION_LEDGERS`: `d1DatabaseId` with `src/db/migrations`, and
+  `observabilityD1DatabaseId` with `src/db/migrations/observability`). A stack with no
+  observability output (older than that database) is checked on the primary ledger only; the
+  preview gate refuses creating the missing database.
+- P2 "Honor known D1 migration aliases": the alias table moved from `d1-migration-safety.ts` to
+  `d1-migration-aliases.ts` and both use it; a ledger entry under a legacy name counts as the
+  current file when the source carries that file.
+- Guards verified discriminating by deletion (primary-only, aliases ignored, legacy name always
+  accepted, missing optional output an error).

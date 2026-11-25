@@ -161,9 +161,9 @@ your fork's workflows are no longer needed.
 The takeover deploys the installer's approved source over your deployment, and it is careful to
 change nothing else (`scripts/deploy/installer-engine-adoption.ts`):
 
-- **It stops before changing your deployment** when your SAM's database is newer than the approved
-  source (it has migrations the source lacks, `refuseRollback`), because the older code could not
-  run on it. Update your SAM the way it was deployed first, or wait for the next SAM release. This
+- **It stops before changing your deployment** when one of your SAM's two databases (the main one
+  or the observability one) is newer than the approved source (it has migrations the source lacks,
+  `refuseRollback`), because the older code could not run on it. Update your SAM the way it was deployed first, or wait for the next SAM release. This
   check is on the database, not on the code: a SAM that runs newer code on the same database is
   replaced by the approved source you reviewed.
 - **It stops before changing your deployment or its deploy state** when a preview (with a
