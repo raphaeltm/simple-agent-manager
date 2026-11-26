@@ -1,8 +1,8 @@
-# Hosted SAM AI spending limits: admin ceiling on the gateway path, close the hour-long overspend
+# Self-hosted Cloudflare AI spending limits: admin ceiling on the gateway path, close the hour-long overspend
 
 Task 01M8BMCD0B9HPZKMJ3VD1WN62Y. Idea 01M89FVN8N54G0676JXHZW2JQY. Decision: Raphaël, 2026-11-26
 (ask:01M89KSK5FSSEH923XYSS8A3BQ): "Fix both: apply the admin limit on hosted, and stop the
-up-to-an-hour overspend". Affects hosted SAM and every install with Cloudflare AI Gateway. The
+up-to-an-hour overspend". Affects every self-hosted Cloudflare install with AI Gateway (Raphaël's own instance is one). The
 self-host box path (no gateway) must not change behaviour.
 
 ## Problem
@@ -89,7 +89,11 @@ self-host box path (no gateway) must not change behaviour.
 - [x] Config: lag margin as admin setting `aiProxy.costEstimateGatewayLagSeconds` (runtime-tunables rule)
 - [x] Setting descriptions + `reference/configuration.md` (web UI reads ceilingUsd from the API; no copy change needed)
 - [x] Tests, each guard deleted once to show red (results below)
-- [ ] Staging verification with a sam-mode user, < $0.50 spend
+- [ ] Staging verification on the final head: user-cap refusal within seconds, and a live refusal at the admin ceiling (coordinator: up to $1.50 real spend, restore every setting)
+- [x] Unpriced platform passthrough refused on Cloudflare installs too (Raphaël approved, ask 01M8BX5PJ0DHA63T19N5RCM950): cherry-picked c8f3eefa8 as 68c82f260
+- [x] Codex P1 r4708394293 (rolling window under the cron page cap): fixed in fa0a3fe22 + 619b7fc2d (settled-part chain, 1-hour settle margin, de-dup by log id)
+- [x] CI Durable Object Workers shard 1/7: real failure (`sam-live-stream.test.ts` asserted operator cost in display rows on a gateway runtime); test now checks cached pricing without a gateway
+- [x] Security re-review of 4f8b2886c..HEAD for double counting: none found; 2 MEDIUM fixed in 619b7fc2d
 - [x] Backlog task: luna price (`tasks/backlog/2026-11-26-gpt-5-6-luna-catalog-price.md`)
 
 ## Guard-deletion evidence
@@ -120,3 +124,16 @@ The DO-failure path (snapshot RPC throws → gate throws) is asserted directly; 
 - Estimate below, KV ≥ cap → refused.
 - Box path behaviour unchanged (existing tests green).
 - Staging: refusal immediately after crossing a few-cent cap, and ceiling refusal.
+
+## Takeover notes (task 01M8CGQ0BTRA5YERCQE12AFP5Q, 2026-11-26)
+
+- Cron chain: each KV total carries `settledUsd`/`settledBeforeMs` (logs older than asOf - 1h). A
+  truncated read reaching strictly before the previous boundary is exact (settled + logs from the
+  boundary on); otherwise `truncated: true` (lower bound, month-estimate floor). Guard deletions
+  (strict boundary, no-move-back, NaN time, lower-bound inheritance, de-dup, settle margin) each
+  turned a test red; the P1 test is red on the old max-merge.
+- Staging (`sammy.party`) deploys of main-based branches fail at Pulumi Up: protected
+  `installation-keys-retired` RandomId left in state by open PR #3018. Used staging2.
+- Security LOW findings left as is: estimate/gateway overlap beyond the lag margin (fails safe),
+  budget page ignores a truncated live read (display only, pre-existing), pre-existing zero-count
+  cases (mid-stream failure, failed counter write, no counter binding, zero-token responses).
