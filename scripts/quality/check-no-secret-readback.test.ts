@@ -50,7 +50,20 @@ function rulesOf(text: string, file = 'x.sh'): RuleId[] {
 /** Lines each rule must catch; every RULES entry must be the only match for at least one. */
 const POSITIVE: Array<[string, RuleId]> = [
   ['value="$(pulumi stack output --stack "$1" "$2" --show-secrets)"', 'show-secrets'],
-  ['pulumi stack export --show-secrets > state.json', 'show-secrets'],
+  ['pulumi stack output jwtPrivateKey --show-secrets > key.pem', 'show-secrets'],
+  ['URNS=$(pulumi stack export | jq -r ".deployment.resources[].urn")', 'state-export'],
+  ['pulumi -s prod stack export > state.json', 'state-export'],
+  ['pulumi --non-interactive stack export --file x', 'state-export'],
+  ['pulumi stack --stack prod export', 'state-export'],
+  ['pulumi -C infra stack -s prod export', 'state-export'],
+  ['run: pulumi preview --diff', 'state-export'],
+  ['pulumi destroy --yes --diff', 'state-export'],
+  ["await phase('infrastructure-preview', () => pulumi('preview', '--diff'));", 'state-export'],
+  ['"$PULUMI" stack export', 'state-export'],
+  ["const state = await pulumi('stack', 'export');", 'state-export'],
+  ["run(['stack', '-s', name, 'export']);", 'state-export'],
+  ['          pulumi stack --show-ids', 'state-export'],
+  ['const deployment = await stack.exportStack();', 'state-export'],
   ['const outputs = await stack.outputs({ showSecrets: true });', 'show-secrets'],
   ['const plaintext = await crypto.subtle.decrypt(params, key, data);', 'decryption'],
   ["const decipher = createDecipheriv('aes-256-gcm', key, iv);", 'decryption'],
@@ -128,6 +141,18 @@ const POSITIVE: Array<[string, RuleId]> = [
 const NEGATIVE = [
   'R2_BUCKET=$(pulumi stack output r2Name)',
   'pulumi stack output --json > outputs.json',
+  'URNS=$(bash ../scripts/deploy/pulumi-stack-urns.sh)',
+  'listing="$(pulumi stack --show-urns)"',
+  'pulumi stack import --file state.json',
+  'const exported = exportStackName(name);',
+  'pulumi stack select prod && export STACK=prod',
+  'pulumi stack output r2Name --stack prod',
+  'pulumi preview',
+  'git diff --stat',
+  'pulumi up --yes --skip-preview',
+  "await pulumi('stack', 'output', '--json');",
+  "const args = ['stack', '--show-urns'];",
+  'PULUMI_STACK=prod; export PULUMI_STACK',
   'set -euo pipefail',
   'set -e',
   "bash -c 'echo hi'",
@@ -232,6 +257,19 @@ describe('check-no-secret-readback rules', () => {
 
 describe('statements split across lines', () => {
   it.each<[string, string, RuleId, number]>([
+    [
+      'x.ts',
+      "const state = await execute('pulumi', [\n  'stack',\n  'export',\n]);",
+      'state-export',
+      1,
+    ],
+    ['x.ts', "await pulumi(\n  'preview',\n  '--diff'\n);", 'state-export', 1],
+    [
+      'x.ts',
+      "const x = 1;\nawait run(\n  ['stack', '-s', name,\n   'export']\n);",
+      'state-export',
+      2,
+    ],
     ['x.ts', 'const plain = await crypto.subtle\n  .decrypt(params, key, data);', 'decryption', 1],
     ['x.ts', 'const plain = await crypto.subtle.\n  decrypt(params, key, data);', 'decryption', 1],
     [
