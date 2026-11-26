@@ -50,7 +50,10 @@ function rulesOf(text: string, file = 'x.sh'): RuleId[] {
 /** Lines each rule must catch; every RULES entry must be the only match for at least one. */
 const POSITIVE: Array<[string, RuleId]> = [
   ['value="$(pulumi stack output --stack "$1" "$2" --show-secrets)"', 'show-secrets'],
-  ['pulumi stack export --show-secrets > state.json', 'show-secrets'],
+  ['pulumi stack output jwtPrivateKey --show-secrets > key.pem', 'show-secrets'],
+  ['URNS=$(pulumi stack export | jq -r ".deployment.resources[].urn")', 'state-export'],
+  ['          pulumi stack --show-ids', 'state-export'],
+  ['const deployment = await stack.exportStack();', 'state-export'],
   ['const outputs = await stack.outputs({ showSecrets: true });', 'show-secrets'],
   ['const plaintext = await crypto.subtle.decrypt(params, key, data);', 'decryption'],
   ["const decipher = createDecipheriv('aes-256-gcm', key, iv);", 'decryption'],
@@ -128,6 +131,10 @@ const POSITIVE: Array<[string, RuleId]> = [
 const NEGATIVE = [
   'R2_BUCKET=$(pulumi stack output r2Name)',
   'pulumi stack output --json > outputs.json',
+  'URNS=$(bash ../scripts/deploy/pulumi-stack-urns.sh)',
+  'listing="$(pulumi stack --show-urns)"',
+  'pulumi stack import --file state.json',
+  'const exported = exportStackName(name);',
   'set -euo pipefail',
   'set -e',
   "bash -c 'echo hi'",

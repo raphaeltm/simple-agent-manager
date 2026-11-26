@@ -494,7 +494,9 @@ jobs:
       - name: Pulumi Preview
         if: ${{ !inputs.use_shared_engine && (inputs.dry_run == true) }}
         working-directory: infra
-        run: pulumi preview --diff
+        # No --diff: while generated keys are random.RandomId resources in state, a diff that deletes
+        # or replaces one prints its raw id, which is the key (policy 795e72a6).
+        run: pulumi preview
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

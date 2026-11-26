@@ -17,12 +17,12 @@ on:
         type: choice
         options:
           - secret-metadata-preview
-          - export-state
+          - list-resources
           - remove-broken-resources
           - refresh-and-preview
           - full-repair
           - import-and-up
-        default: export-state
+        default: list-resources
       dry_run:
         description: 'Show what would happen without making changes'
         required: false
@@ -155,32 +155,30 @@ jobs:
           BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
           RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}
 
-      # ---- Action: Export State ----
-      - name: 'Export current state'
-        if: inputs.action == 'export-state' || inputs.action == 'full-repair'
+      # ---- Action: List Resources ----
+      - name: 'List current resources'
+        if: inputs.action == 'list-resources' || inputs.action == 'full-repair'
         working-directory: infra
         run: |
-          # Security note: do not print raw `pulumi stack export` in logs or
-          # GitHub summaries because deployment state may contain plaintext
-          # resource outputs for sensitive infrastructure resources.
-          STATE_FILE=$(mktemp)
-          pulumi stack export > "$STATE_FILE"
+          # URNs only. Never `pulumi stack export`: a random.RandomId's id is its raw generated
+          # bytes, so the full state holds key material GitHub cannot mask (policy 795e72a6).
+          URNS="$(bash ../scripts/deploy/pulumi-stack-urns.sh)"
 
-          echo "## Current Pulumi State (sanitized)" >> $GITHUB_STEP_SUMMARY
-          echo "Raw stack export captured to a temporary file for this job only." >> $GITHUB_STEP_SUMMARY
+          echo "## Current Pulumi Resources" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Resource Counts by Type" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          jq -r '.deployment.resources | group_by(.type) | map({type: .[0].type, count: length}) | .[] | "\(.count)\t\(.type)"' "$STATE_FILE" | sort -nr >> $GITHUB_STEP_SUMMARY
+          # urn:pulumi:<stack>::<project>::<type>::<name>
+          printf '%s\n' "$URNS" | awk -F'::' 'NF >= 4 { print $3 }' | sort | uniq -c | sort -nr >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
           echo ""
           echo "=== Resource URNs ==="
-          jq -r '.deployment.resources[].urn' "$STATE_FILE" 2>/dev/null || echo "Failed to list URNs"
+          printf '%s\n' "$URNS"
 
           echo ""
           echo "=== Broken resources (D1 + PagesDomain) ==="
-          jq '.deployment.resources[] | select(.type | test("D1Database|PagesDomain")) | {urn: .urn, type: .type}' "$STATE_FILE" 2>/dev/null || echo "Failed to extract"
+          printf '%s\n' "$URNS" | grep -E 'D1Database|PagesDomain' || echo "None"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -194,9 +192,7 @@ jobs:
         run: |
           echo "## Removing broken resources from Pulumi state" >> $GITHUB_STEP_SUMMARY
 
-          # Export state, remove broken resources, re-import
-          pulumi stack export > /tmp/state-backup.json
-          echo "State backed up to /tmp/state-backup.json ($(wc -c < /tmp/state-backup.json) bytes)"
+          # The state backend keeps its own checkpoint backups; no export is taken here.
 
           # List the resources we're removing
           RESOURCES_TO_REMOVE=(
@@ -252,7 +248,8 @@ jobs:
         working-directory: infra
         run: |
           echo "## Pulumi Preview" >> $GITHUB_STEP_SUMMARY
-          pulumi preview --diff 2>&1 | tee /tmp/preview-output.txt || true
+          # No --diff: a diff of a deleted or replaced random.RandomId prints its raw id (the key).
+          pulumi preview 2>&1 | tee /tmp/preview-output.txt || true
           echo '```' >> $GITHUB_STEP_SUMMARY
           tail -50 /tmp/preview-output.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -318,7 +315,14 @@ jobs:
 
           echo "VM Route Exclusion (*.vm.${BASE_DOMAIN}/*): $VM_ROUTE_ID"
 
-          # 3. Import each resource
+          # 3. Import each resource. State checks read URNs only, never the full state export, and
+          # re-read them each time because the steps below remove resources from state.
+          in_state() { bash ../scripts/deploy/pulumi-stack-urns.sh | grep -qxF "$1"; }
+          name_in_state() {
+            bash ../scripts/deploy/pulumi-stack-urns.sh |
+              awk -v suffix="::$1" 'substr($0, length($0) - length(suffix) + 1) == suffix { found = 1 } END { exit !found }'
+          }
+
           import_resource() {
             local TYPE="$1" NAME="$2" ID="$3"
             if [ -z "$ID" ] || [ "$ID" = "null" ]; then
@@ -328,7 +332,7 @@ jobs:
             fi
 
             # Check if already in state
-            if pulumi stack export 2>/dev/null | jq -e ".deployment.resources[] | select(.urn | endswith(\"::${NAME}\"))" > /dev/null 2>&1; then
+            if name_in_state "$NAME"; then
               echo "SKIP: $NAME — already in state"
               echo "- \`$NAME\` — already in state" >> $GITHUB_STEP_SUMMARY
               return 0
@@ -347,7 +351,7 @@ jobs:
 
           # Remove old v5-typed WorkerRoute if it still exists in state (v6 uses WorkersRoute)
           OLD_WORKER_ROUTE_URN="urn:pulumi:${STACK}::sam-infra::cloudflare:index/workerRoute:WorkerRoute::${PREFIX}-route-vm-exclusion"
-          if pulumi stack export 2>/dev/null | jq -e ".deployment.resources[] | select(.urn == \"${OLD_WORKER_ROUTE_URN}\")" > /dev/null 2>&1; then
+          if in_state "$OLD_WORKER_ROUTE_URN"; then
             echo "Removing old v5 WorkerRoute from state..."
             pulumi state delete "${OLD_WORKER_ROUTE_URN}" --yes 2>&1 || echo "  Failed to remove (continuing)"
             echo "- Old v5 WorkerRoute removed from state" >> $GITHUB_STEP_SUMMARY
@@ -355,7 +359,7 @@ jobs:
 
           # Remove old v5 provider if it exists
           OLD_PROVIDER_URN="urn:pulumi:${STACK}::sam-infra::pulumi:providers:cloudflare::default_5_49_1"
-          if pulumi stack export 2>/dev/null | jq -e ".deployment.resources[] | select(.urn == \"${OLD_PROVIDER_URN}\")" > /dev/null 2>&1; then
+          if in_state "$OLD_PROVIDER_URN"; then
             echo "Removing old v5 provider from state..."
             pulumi state delete "${OLD_PROVIDER_URN}" --yes --force 2>&1 || echo "  Failed to remove (continuing)"
             echo "- Old v5 provider removed from state" >> $GITHUB_STEP_SUMMARY
@@ -420,7 +424,7 @@ jobs:
         run: |
           echo "## Post-Repair State" >> $GITHUB_STEP_SUMMARY
           echo "### Resource Count" >> $GITHUB_STEP_SUMMARY
-          RESOURCE_COUNT=$(pulumi stack export 2>/dev/null | jq '.deployment.resources | length')
+          RESOURCE_COUNT=$(bash ../scripts/deploy/pulumi-stack-urns.sh | wc -l)
           echo "Total resources: $RESOURCE_COUNT" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Stack Outputs" >> $GITHUB_STEP_SUMMARY
