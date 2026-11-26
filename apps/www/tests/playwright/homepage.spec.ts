@@ -1,3 +1,4 @@
+import { ADVISORY, advisoryPinnedNow, nearPinBoundary } from './advisory-pin';
 import { expect, expectNoOverflowOrSeriousAxeViolations, type Page, test } from './fixtures';
 
 /**
@@ -40,11 +41,20 @@ test.describe('homepage', () => {
     await expect(page.getByRole('link', { name: 'See how work moves' })).toHaveAttribute('href', '#how-work-moves');
   });
 
-  test('warns self-hosters about the security advisory above the promise', async ({ page }) => {
+  test('warns self-hosters about the security advisory above the promise while it is pinned', async ({ page }) => {
+    test.skip(nearPinBoundary, 'the build and this test may straddle the advisory pin end date');
     await page.goto('/');
     const notice = page.getByRole('link', { name: /Security advisory.*setup wizard is closed/ });
+    if (!advisoryPinnedNow) {
+      await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+      await expect(notice).toHaveCount(0);
+      // By class and by target too, so an edit to the notice copy cannot make this pass vacuously.
+      await expect(page.locator('.fh-notice')).toHaveCount(0);
+      await expect(page.locator(`.fh-hero a[href="${ADVISORY}"]`)).toHaveCount(0);
+      return;
+    }
     await expect(notice).toBeVisible();
-    await expect(notice).toHaveAttribute('href', '/blog/security-advisory-setup-takeover/');
+    await expect(notice).toHaveAttribute('href', ADVISORY);
     const noticeBox = await notice.boundingBox();
     const titleBox = await page.getByRole('heading', { level: 1 }).boundingBox();
     expect(noticeBox && titleBox && noticeBox.y < titleBox.y).toBe(true);

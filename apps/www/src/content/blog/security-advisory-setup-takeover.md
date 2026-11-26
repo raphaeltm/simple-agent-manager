@@ -5,6 +5,7 @@ author: Raphaël Titsworth-Morin
 category: announcement
 tags: ['security', 'open-source', 'cloudflare-workers', 'd1']
 pinned: true
+pinnedUntil: 2026-12-09
 excerpt: 'Someone signed in to my production SAM as its owner through a setup wizard that never closed. If you self-host SAM, check your instance today.'
 ---
 

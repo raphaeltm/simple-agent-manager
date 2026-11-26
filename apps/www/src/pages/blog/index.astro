@@ -3,14 +3,15 @@ import { getCollection } from 'astro:content';
 import Base from '../../layouts/Base.astro';
 import Header from '../../components/Header.astro';
 import CtaFooter from '../../components/CtaFooter.astro';
-import { categoryColors } from '../../lib/blog-utils';
+import { categoryColors, isPinnedAt, isSecurityPost } from '../../lib/blog-utils';
 
 const byDate = (await getCollection('blog', ({ data }) => !data.draft))
   .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
-// Pinned posts lead the page; everything else stays in date order below them.
-const pinned = byDate.filter((post) => post.data.pinned);
-const posts = byDate.filter((post) => !post.data.pinned);
-const isSecurity = (tags: string[]) => tags.includes('security');
+// Pinned posts lead the page; everything else stays in date order below them. A pin with a
+// `pinnedUntil` date stops at that date (checked at build time; deploy-www.yml rebuilds daily).
+const builtAt = new Date();
+const pinned = byDate.filter((post) => isPinnedAt(post.data, builtAt));
+const posts = byDate.filter((post) => !isPinnedAt(post.data, builtAt));
 ---
 
 <Base
@@ -28,11 +29,11 @@ const isSecurity = (tags: string[]) => tags.includes('security');
       {pinned.map((post) => (
         <a
           href={`/blog/${post.id}/`}
-          class:list={['pinned-card', 'animate-on-scroll', { 'pinned-card--security': isSecurity(post.data.tags) }]}
+          class:list={['pinned-card', 'animate-on-scroll', { 'pinned-card--security': isSecurityPost(post.data.tags) }]}
         >
           <div class="pinned-label">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1L8 1.5Z" /><path class="mark" d="M8 6v3.5M8 11.6v.1" /></svg>
-            <span>{isSecurity(post.data.tags) ? 'Pinned · Security advisory' : 'Pinned'}</span>
+            <span>{isSecurityPost(post.data.tags) ? 'Pinned · Security advisory' : 'Pinned'}</span>
           </div>
           <div class="pinned-body">
             <div>
@@ -45,7 +46,7 @@ const isSecurity = (tags: string[]) => tags.includes('security');
               <p class="pinned-excerpt">{post.data.excerpt}</p>
             </div>
             <span class="pinned-cta">
-              {isSecurity(post.data.tags) ? 'Read the advisory' : 'Read the post'} <span aria-hidden="true">→</span>
+              {isSecurityPost(post.data.tags) ? 'Read the advisory' : 'Read the post'} <span aria-hidden="true">→</span>
             </span>
           </div>
         </a>
