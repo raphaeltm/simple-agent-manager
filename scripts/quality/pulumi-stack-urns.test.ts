@@ -84,6 +84,23 @@ describe('pulumi-stack-urns.sh', () => {
     expect(result.stderr).toContain('no stack selected');
   });
 
+  it('fails when the URNs it found do not match the resource count Pulumi states', () => {
+    const { dir } = fakePulumi('sed "/encryption-key$/d" "$FIXTURE"');
+    const result = run(dir);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('stated: 4, URNs found: 3');
+  });
+
+  it('fails on a listing without the resource count header', () => {
+    const { dir } = fakePulumi('grep "URN:" "$FIXTURE"');
+    const result = run(dir);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
   it('prints nothing for a stack with no resources', () => {
     const { dir } = fakePulumi(
       "printf 'Current stack resources (0):\\n    No resources currently in this stack\\n'"
@@ -106,6 +123,5 @@ describe('workflows list Pulumi resources by URN, never by exporting state', () 
     expect(code).toContain('bash ../scripts/deploy/pulumi-stack-urns.sh');
     expect(code).not.toMatch(/\bpulumi\s+stack\s+export\b/);
     expect(code).not.toMatch(/--show-ids\b/);
-    expect(code).not.toMatch(/\bpulumi\s+(?:preview|destroy|up)\b[^\n]*--diff\b/);
   });
 });

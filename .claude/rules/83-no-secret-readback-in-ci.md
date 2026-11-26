@@ -65,10 +65,14 @@ masked, and one stray `echo`, `set -x` or error message prints it.
 - **Mechanical, blocking in CI:** `pnpm quality:no-secret-readback`
   (`scripts/quality/check-no-secret-readback.ts`) reports Pulumi readback (`--show-secrets`,
   `showSecrets`, `pulumi config get`), state dumps (`pulumi stack export`, `--show-ids`,
-  `exportStack(`), credential decryption and decrypt-helper imports, shell
+  `exportStack(`, a Pulumi `--diff`), credential decryption and decrypt-helper imports, shell
   tracing and environment dumps in `.github/`, `scripts/` and `infra/`. It accepts a marked line
   only when the file and task are pinned in its `ALLOWED_LEGACY_READS` and the task is still
   open. Coverage and noise measurements are in `scripts/quality/README.md`.
+- **Known remaining exception:** `scripts/deploy/configure-secrets.sh` still reads the generated
+  keys back from Pulumi on every deploy (masked, marked, tracked by
+  `tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md`). Until that task lands, keys do
+  reach runner memory on deploys.
 - **The check catches ordinary shapes, not deliberate evasion.** It is a tripwire for the
   forms people write by habit; an obfuscated read (indirection, `eval`, encoded commands) is
   a review finding, not a gap to chase with more patterns.
