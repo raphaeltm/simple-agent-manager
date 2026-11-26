@@ -69,11 +69,15 @@ function renderCreatedDetails(plan) {
   const agentsHost = plan.hostnames
     .find((host) => host.startsWith('app.'))
     ?.replace(/^app\./, 'agents.');
+  // A takeover sets up no email: the deploy keeps a sending setup the SAM has and adds none
+  // (deployedAgentEmail, scripts/deploy/installer-engine-adoption.ts).
   if (agentsHost)
     appendDetailRow(
       list,
       'Email',
-      `Sign-in codes come from ${agentsHost}. Its sending records are added under that name only.`
+      plan.adoption
+        ? `Stays as it is. If your SAM sends sign-in codes from ${agentsHost}, it keeps doing so. If it does not, the takeover does not set that up.`
+        : `Sign-in codes come from ${agentsHost}. Its sending records are added under that name only.`
     );
   if (plan.adoption)
     appendDetailRow(
