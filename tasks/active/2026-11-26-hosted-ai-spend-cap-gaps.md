@@ -79,17 +79,38 @@ self-host box path (no gateway) must not change behaviour.
 
 ## Checklist
 
-- [ ] Coordinator go on design
-- [ ] Ceiling on gateway path (`resolveMonthlyCostCeilingUsd`, `checkMonthlyCostCap`)
-- [ ] Estimate storage in `AiTokenBudgetCounter` (new table, bucketed + month row, pruning)
-- [ ] Pricing on gateway path writes the estimate, not display rows
-- [ ] Combined admission read RPC (daily budget + estimate)
-- [ ] Cron writes `{costUsd, asOf}`; reader parses both formats
-- [ ] Config: lag margin env var with default
-- [ ] Setting description + `reference/configuration.md` + admin copy
-- [ ] Tests (listed in the task description), each guard deleted once to show red
+- [x] Coordinator go on design (approved 2026-11-26, including the windowed deviation)
+- [x] Classify unattributed gateway traffic (coordinator ask): all SAM-internal (platform-feedback-triage, task-title, project-brief); no attribution bug; documented in configuration.md
+- [x] Ceiling on gateway path (`resolveMonthlyCostCeilingUsd`, `checkGatewayCostAdmission`)
+- [x] Estimate storage in `AiTokenBudgetCounter` (bucket + month tables, pruning)
+- [x] Pricing on gateway path writes the estimate, not display rows (proxy accounting + SAM operator)
+- [x] Combined admission read RPC (`getGatewayAdmissionSnapshot` replaces the daily `get`)
+- [x] Cron writes `{costUsd, asOfMs}`; reader parses both formats
+- [x] Config: lag margin as admin setting `aiProxy.costEstimateGatewayLagSeconds` (runtime-tunables rule)
+- [x] Setting descriptions + `reference/configuration.md` (web UI reads ceilingUsd from the API; no copy change needed)
+- [x] Tests, each guard deleted once to show red (results below)
 - [ ] Staging verification with a sam-mode user, < $0.50 spend
-- [ ] Backlog task: gateway logs without `metadata.userId`, uncatalogued Workers AI models, luna price
+- [x] Backlog task: luna price (`tasks/backlog/2026-11-26-gpt-5-6-luna-catalog-price.md`)
+
+## Guard-deletion evidence
+
+`.tmp/mutate.py` deleted each guard and ran the two DO test files:
+
+| Guard removed | Tests that went red |
+| --- | --- |
+| G1 ceiling on gateway path | refuses at the ceiling…, applies to a user who never set a cap…, reads the ceiling… one counter RPC |
+| G2 month estimate when no KV total | refuses on the month estimate…, concurrent responses…, KV unreadable…, malformed total… |
+| G3 estimate since asOf | stale total…, lag margin…, legacy total… |
+| G4 sum with month estimate (instead of window) | gateway total alone over cap…, does not count calls the gateway total includes…, lag margin… |
+| G4b max(gateway, month) | stale total…, does not count calls…, lag margin…, legacy total… |
+| G5 lag margin | keeps counting calls inside the lag margin |
+| G6 display cost 0 on gateway | leaves provider rows unpriced… |
+| G7 operator display | routes the SAM operator price to the backstop… |
+| G8 bucket prune | prunes buckets past retention… |
+| G9 estimate written in increment txn | 10 estimate tests |
+| G10 legacy asOf age | reads a legacy plain-number total… |
+
+The DO-failure path (snapshot RPC throws → gate throws) is asserted directly; the box path is covered unchanged by `ai-token-budget-counter-model-usage.test.ts`, `ai-test-upstream-ceiling.test.ts` (workers runtime) and the package tests.
 
 ## Acceptance criteria
 
