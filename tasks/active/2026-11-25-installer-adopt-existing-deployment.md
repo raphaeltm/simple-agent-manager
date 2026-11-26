@@ -277,3 +277,17 @@ as the resource updated in place. The provider rewrites the Pages project on eve
   `sync-wrangler-config.ts` gives the Worker on every path); agent email (the fork workflow also
   deploys with `AGENT_EMAIL_ENABLED: 'true'`, and the takeover review shows the email row). None
   changed.
+
+## 2026-11-26
+
+- All twelve Codex review threads resolved after verifying each fix in f7d87a446.
+- Wording: Raphaël's direction of 2026-11-26 is that there is no "hosted SAM"; installs are
+  self-hosted Cloudflare or self-hosted VM, and his own instance is self-hosted Cloudflare. The PR
+  description and the inbox question were reworded. The branch had not used "hosted".
+- Docs: the takeover guide now tells the owner to disable the fork's deploy workflows once the
+  takeover has finished, because a later run would deploy the fork's code and settings over the SAM.
+- Out of scope here: moving installation keys out of Pulumi state and CI (task
+  01M8C74NYMDP2YYPAG17VXJB78, designed on sam/self-hosted-cloudflare-installs-vxjb78). Agreed with
+  that task: it stacks on this branch; its key-resource retirement must run only after both takeover
+  gates pass, because retiring them before a refused takeover would let the fork's old workflow
+  generate new keys over the Worker's.

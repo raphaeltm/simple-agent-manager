@@ -137,8 +137,11 @@ a database rollback, so rolling back to an older version isn't offered.
 ## Move an existing SAM to the installer
 
 If your SAM was deployed some other way, for example from a GitHub fork by its **Deploy Production**
-workflow, an installation service can take it over. From then on you update it from the service, and
-your fork's workflows are no longer needed.
+workflow, an installation service can take it over. From then on you update it from the service.
+Your fork's workflows are no longer needed, and they must not run again: a later **Deploy
+Production** or **Update Self-Hosted Instance** run would deploy the fork's code and its GitHub
+Environment settings over your SAM (`.github/workflows/deploy-reusable.yml`), undoing updates made
+through the service.
 
 1. In the installer, choose the account and the domain your SAM runs on.
 2. Open **This domain already runs SAM**, tick **Take over the SAM already running here** and enter
@@ -157,6 +160,8 @@ your fork's workflows are no longer needed.
    neither.
 5. Create the installation service, open it, then tick **Check and take over this existing
    installation** and select **Take over SAM**.
+6. When the takeover has finished, disable both workflows in the fork (**Actions**, select the
+   workflow, **Disable workflow**), or archive the fork.
 
 The takeover deploys the installer's approved source over your deployment, and it is careful to
 change nothing else (`scripts/deploy/installer-engine-adoption.ts`):
