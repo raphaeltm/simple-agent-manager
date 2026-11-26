@@ -2297,7 +2297,8 @@ after its cache expires, platform-funded inference is refused with a retryable
 `503 SERVICE_UNAVAILABLE`, logged as `ai_proxy.monthly_cost_ceiling_unreadable`. The same
 protection applies on a cold isolate; no extra last-known ceiling is reused during an outage
 (`services/ai-proxy-ports.ts`). Calls on a user's or project's own credential are not held to the
-ceiling. A failed monthly-spend read without a gateway also refuses inference with a retryable 503,
+ceiling. A gateway installation without the Cloudflare account API (`CF_API_TOKEN`) cannot price
+spend, so neither the ceiling nor user caps are enforced there (`isMonthlyCostCapAvailable`). A failed monthly-spend read without a gateway also refuses inference with a retryable 503,
 without reporting that the cap has been reached.
 A call refused by the monthly cap or the daily token budget is a 429 whose message names that
 limit. The VM agent reports it as `sam_ai_usage_limit_reached`, not `provider_overloaded`, so the

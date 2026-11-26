@@ -241,6 +241,25 @@ describe('the estimate closes the gap before and between gateway refreshes', () 
   });
 });
 
+describe('concurrent admission (rules 45/69): bounded in-flight overshoot, no reservation', () => {
+  it('admits every call that arrives below the cap, then refuses once their spend is recorded', async () => {
+    setUserCap(CALL_USD * 2.5);
+    await spendAt(NOW - 5 * MINUTE, 2);
+    // Five calls arrive together while recorded spend (2 calls) is below the cap: all pass the gate.
+    const gates = await Promise.all(Array.from({ length: 5 }, () => gate()));
+    expect(gates).toEqual(Array.from({ length: 5 }, () => ({ allowed: true })));
+    // Their responses all complete: overshoot is the sum of the in-flight calls' costs, as documented.
+    await Promise.all(Array.from({ length: 5 }, () => pricedResponse()));
+    const refused = await gate();
+    expect(refused).toMatchObject({ allowed: false, reason: 'monthly-cost-cap' });
+    expect(
+      refused.allowed === false &&
+        refused.reason === 'monthly-cost-cap' &&
+        refused.monthlyCap.costUsd
+    ).toBeCloseTo(CALL_USD * 7, 9);
+  });
+});
+
 describe('failure behaviour', () => {
   it('refuses with a retryable 503 when the counter read fails, rather than admitting it', async () => {
     setUserCap(1);
