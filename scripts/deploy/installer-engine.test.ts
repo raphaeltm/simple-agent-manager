@@ -2078,18 +2078,16 @@ describe('installation engine: installation keys', () => {
     expect(f.workerSecrets.get('ENCRYPTION_KEY')).toBe('existing');
   });
 
-  it('an installation from before a key group existed gets that group, and keeps the rest', async () => {
+  it('never recreates a whole key group an installation lost, and names it', async () => {
     const f = fixture();
     for (const name of INSTALLATION_KEY_NAMES)
       if (!name.startsWith('VAPID_')) f.workerSecrets.set(name, 'existing');
     const { error } = await install(f);
-    expect(error).toBeUndefined();
-    expect(f.keyWrites).toHaveLength(1);
-    expect(Object.keys(JSON.parse(f.keyWrites[0]).secrets).sort()).toEqual([
-      'VAPID_PRIVATE_KEY',
-      'VAPID_PUBLIC_KEY',
-    ]);
-    expect(f.workerSecrets.get('ENCRYPTION_KEY')).toBe('existing');
+    expect(error?.message).toContain('failed');
+    // No rotation: nothing was written, and the keys it has are untouched.
+    expect(f.keyWrites).toEqual([]);
+    expect(f.workerSecrets.has('VAPID_PRIVATE_KEY')).toBe(false);
+    expect(f.workerSecrets.get('JWT_PRIVATE_KEY')).toBe('existing');
   });
 
   it('refuses to complete a key pair the Worker holds only half of, and writes nothing', async () => {

@@ -11,6 +11,7 @@
  */
 import {
   createInstallationKeys,
+  inspectInstallationKeys,
   requireInstallationKeys,
   type WorkerAccess,
   workerSecretNames,
@@ -56,9 +57,15 @@ export async function applyInfrastructure(steps: InfrastructureSteps): Promise<v
 }
 
 /**
- * Installer runs (not CI) create the keys the Worker lacks: every key for a brand-new installation,
- * or a whole group an older installation never had. Never ENCRYPTION_KEY for an adoption or an
- * installation that already has users or stored credentials, never a replacement. CI deploys only require them, by name.
+ * Installer runs (not CI) create the installation keys of a brand-new installation, whose Worker
+ * holds none of them, and never anything else. A Worker missing only some keys is not "an older
+ * installation that never had them": every installation from before this change holds all of
+ * them (its deploys set them), so a missing group means a lost one, and replacing it would rotate
+ * live keys without notice (new JWT signer, dead push subscriptions). That case fails, naming the
+ * missing keys; the operator decides, with `installation-keys.ts create` on their own machine.
+ * ENCRYPTION_KEY is never created for an adoption or an installation with users or stored
+ * credentials. CI
+ * deploys only require the keys, by name.
  */
 export async function ensureInstallationKeys(options: {
   mayCreate: boolean;
@@ -66,7 +73,7 @@ export async function ensureInstallationKeys(options: {
   worker: WorkerAccess;
   databaseId: string;
 }): Promise<void> {
-  if (options.mayCreate)
+  if (options.mayCreate && (await inspectInstallationKeys(options.worker)).state === 'absent')
     await createInstallationKeys(
       { ...options.worker, databaseId: options.databaseId },
       { freshInstallation: options.freshInstallation }

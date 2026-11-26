@@ -206,8 +206,8 @@ change nothing else (`scripts/deploy/installer-engine-adoption.ts`):
 - **Your keys stay**: no deploy reads or writes the installation keys (`ENCRYPTION_KEY`, the JWT,
   signing and VAPID keys), on the takeover or on any later update; they stay exactly as the API
   Worker holds them. The takeover removes the old copies from the deploy state, by name, only after
-  checking that the Worker holds each one (`scripts/deploy/retire-key-resources.ts`). A key group
-  your SAM never had is created on the Worker; `ENCRYPTION_KEY` never is.
+  checking that the Worker holds each one (`scripts/deploy/retire-key-resources.ts`). No key is
+  ever created for a SAM that is taken over or updated: one missing a key stops with its name.
 - **Your settings stay**: Worker settings your deployment runs with that differ from SAM's defaults,
   such as `REQUIRE_APPROVAL=false`, are read back from the deployed Worker and kept, on the takeover
   and on every update (`carryDeployedVars`). A setting equal to the default is not kept. One limit:
