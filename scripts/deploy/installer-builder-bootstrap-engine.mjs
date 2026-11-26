@@ -13,6 +13,7 @@ export function builderEngineConfig(supplied, approvedCommit) {
     prefix,
     ownerEmail,
     workersDev,
+    adoption,
   } = supplied;
   if (sourceCommit !== approvedCommit) throw new Error('Source approval mismatch');
   return {
@@ -26,6 +27,8 @@ export function builderEngineConfig(supplied, approvedCommit) {
     baseDomain,
     environment,
     prefix,
+    // A takeover of an existing deployment (installer-engine-adoption.ts); the engine validates it.
+    ...(adoption === undefined ? {} : { adoption }),
     // Same checksum- and size-pinned publisher archive as SAM's own CI deploys.
     codexBuild: {
       executable: 'bash',

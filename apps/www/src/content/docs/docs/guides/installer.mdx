@@ -134,6 +134,75 @@ your update** shows which version it would install; select **Approve and deploy 
 Updates only move forward to newer releases. An update changes SAM's code, not its data: it is not
 a database rollback, so rolling back to an older version isn't offered.
 
+## Move an existing SAM to the installer
+
+If your SAM was deployed some other way, for example from a GitHub fork by its **Deploy Production**
+workflow, an installation service can take it over. From then on you update it from the service.
+Your fork's workflows are no longer needed, and they must not run again: a later **Deploy
+Production** or **Update Self-Hosted Instance** run would deploy the fork's code and its GitHub
+Environment settings over your SAM (`.github/workflows/deploy-reusable.yml`), undoing updates made
+through the service.
+
+1. In the installer, choose the account and the domain your SAM runs on.
+2. Open **This domain already runs SAM**, tick **Take over the SAM already running here** and enter
+   its deploy-state passphrase: the `PULUMI_CONFIG_PASSPHRASE` the deployment was set up with. It
+   passes through the installer, which drops its copy at handoff, and is then kept only as a secret
+   of the installation service in your account. A wrong passphrase stops the takeover at its first
+   step, before it changes anything.
+3. Only if your deployment sets `PULUMI_STATE_BUCKET`: enter that bucket's name under **Its
+   deploy-state bucket**. Otherwise leave it empty.
+4. **Review** finds the deployment from its API Worker route (`<prefix>-api-<stack>`) and its assets
+   bucket (`<prefix>-<stack>-assets`), and its deploy state in the bucket you named or else in
+   `<prefix>-pulumi-state` or `<prefix>-pulumi-state-<environment>`
+   (`previewAdoption`, `apps/installer/src/adoption-plan.ts`). It shows what it will take over. If
+   it can't identify exactly one deployment and one deploy-state bucket, it stops there: for
+   example when the bucket you named does not exist, or when both usual names exist and you named
+   neither.
+5. Create the installation service, open it, then tick **Check and take over this existing
+   installation** and select **Take over SAM**.
+6. When the takeover has finished, disable both workflows in the fork (**Actions**, select the
+   workflow, **Disable workflow**), or archive the fork.
+
+The takeover deploys the installer's approved source over your deployment, and it is careful to
+change nothing else (`scripts/deploy/installer-engine-adoption.ts`):
+
+- **It stops before changing your deployment** when one of your SAM's two databases (the main one
+  or the observability one) is newer than the approved source (it has migrations the source lacks,
+  `refuseRollback`), because the older code could not run on it. Update your SAM the way it was deployed first, or wait for the next SAM release. This
+  check is on the database, not on the code: a SAM that runs newer code on the same database is
+  replaced by the approved source you reviewed.
+- **It stops before changing your deployment or its deploy state** when a preview (with a
+  read-only refresh) would create, replace or delete any resource, or change one in place, and
+  lists them under **Technical details** (`refusedTakeoverSteps`). The one in-place change it
+  allows is to the Pages project, which Cloudflare's provider rewrites on every deploy. The same
+  check runs again immediately before the change is applied.
+- **It never creates** a deploy-state bucket or stack: a missing one stops the takeover.
+- **Your keys stay**: key secrets the API Worker already holds (`ENCRYPTION_KEY`, the JWT, signing
+  and VAPID keys and the like) are left as they are, on the takeover and on every later update. A
+  key set from a GitHub secret would otherwise be replaced by a different one, making every stored
+  credential unreadable.
+- **Your settings stay**: Worker settings your deployment runs with that differ from SAM's defaults,
+  such as `REQUIRE_APPROVAL=false`, are read back from the deployed Worker and kept, on the takeover
+  and on every update (`carryDeployedVars`). A setting equal to the default is not kept. One limit:
+  the service cannot tell a setting you chose from a default that a later release has since
+  changed, so a setting whose default changes keeps its old value on your SAM. Agent sign-in trust
+  and other Worker secrets, such as your GitHub App credentials, are left untouched. The databases
+  keep their read-replication mode, on the takeover and on every update, because a fork that set
+  `D1_READ_REPLICATION_MODE` did so in a GitHub Environment the service cannot see.
+- **Your users stay**: no owner email is set and no setup token is handed out, because the
+  deployment already has its administrators.
+
+The check covers your infrastructure and your database, not your code: the takeover deploys SAM's
+approved source, so changes you made to the code in a fork are not kept.
+
+Takeover needs a SAM release that supports it: the service refuses a source whose installer
+protocol does not declare `adoption`, so an older engine can never install a second SAM over yours.
+The installation service's storage credential covers the whole deploy-state bucket. A deployment
+whose deploy state lives in another installation's bucket (such as a secondary staging
+installation) is not found under the bucket names the takeover looks for, so it is not taken over
+by default. Naming that shared bucket yourself does allow it, and the service then holds the key
+to the other installation's state as well: give each deployment its own bucket first.
+
 ## Remove an installation
 
 There is no automatic uninstall. To remove SAM, delete its Workers, storage and DNS records in the

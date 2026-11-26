@@ -932,6 +932,42 @@ describe('deployment workflow hardening', () => {
     CONFIGURE_SECRETS_TIMEOUT_MS
   );
 
+  // An adopted installation (installer-engine-adoption.ts) may run on a key a fork supplied as a
+  // GitHub-secret override; writing Pulumi's value instead would make every stored credential
+  // unreadable, so the named key secrets already on the Worker are left alone.
+  it(
+    'worker secret configuration keeps the key secrets an adopted installation names',
+    () => {
+      const preserved = runConfigureSecrets({
+        PULUMI_STACK: 'self-host-stack',
+        SECRET_ENCRYPTION_KEY: '',
+        PRESERVE_EXISTING_WORKER_SECRETS: 'ENCRYPTION_KEY,JWT_PRIVATE_KEY,JWT_PUBLIC_KEY',
+      });
+      const control = runConfigureSecrets({
+        PULUMI_STACK: 'self-host-stack',
+        SECRET_ENCRYPTION_KEY: '',
+      });
+      try {
+        expect(preserved.status).toBe(0);
+        expect(control.status).toBe(0);
+        const kept = JSON.parse(preserved.bulkPayload ?? '{}') as Record<string, unknown>;
+        const written = JSON.parse(control.bulkPayload ?? '{}') as Record<string, unknown>;
+        for (const name of ['ENCRYPTION_KEY', 'JWT_PRIVATE_KEY', 'JWT_PUBLIC_KEY']) {
+          expect(kept).not.toHaveProperty(name);
+          expect(written).toHaveProperty(name);
+          expect(preserved.stdout).toContain(`Keeping existing ${name}`);
+        }
+        // Liveness: the rest of the bulk upload still happens.
+        expect(kept.CF_API_TOKEN).toBe(written.CF_API_TOKEN);
+        expect(kept).toHaveProperty('DEPLOY_SIGNING_PRIVATE_KEY');
+      } finally {
+        preserved.cleanup();
+        control.cleanup();
+      }
+    },
+    CONFIGURE_SECRETS_TIMEOUT_MS
+  );
+
   it(
     'worker secret configuration never prints a mask command outside GitHub Actions',
     () => {

@@ -291,6 +291,8 @@ describe('installation engine', () => {
     });
     const calls = f.commands.map((entry) => [entry.executable, ...entry.args].join(' '));
     const index = (part: string) => calls.findIndex((line) => line.includes(part));
+    // A new installation sets D1 read replication; only an adopted one leaves it as it is.
+    expect(index('configure-d1-read-replication.sh')).toBeGreaterThan(-1);
     expect(index('d1-migration-safety.ts')).toBeLessThan(index('publish-vm-agent-artifacts.sh'));
     expect(index('publish-local-codex')).toBeLessThan(index('wrangler deploy'));
     expect(index('build-local-codex')).toBeLessThan(index('prepare-container'));
@@ -1165,4 +1167,495 @@ describe('installation engine', () => {
     expect(opened).toBe(false);
     expect(makeCalls(legacy.commands)).toBe(3);
   });
+});
+
+describe('installation engine: adopting an existing deployment', () => {
+  const adoption = { stateBucket: 'install-test-pulumi-state', takeover: true };
+  const adopted: InstallerEngineConfig = { ...config, adoption };
+  const databaseId = '0123abcd-0123-4abc-8abc-0123456789ab';
+  const observabilityId = 'fedc4321-fedc-4cba-9cba-ba9876543210';
+  const sameStep = {
+    op: 'same',
+    urn: 'urn:pulumi:prod::sam::cloudflare:index/d1Database:D1Database::sam-db',
+  };
+
+  // The shape `pulumi preview --refresh --json` really emits for a key resource (Pulumi 3.278):
+  // a refresh step whose old and new state carry the RandomId's `id`, which is the raw key.
+  const rawKeyInState = 'CANARY-raw-encryption-key-in-preview-state';
+  const keyState = {
+    custom: true,
+    id: rawKeyInState,
+    inputs: { byteLength: 32 },
+    outputs: { b64Std: rawKeyInState, b64Url: rawKeyInState, id: rawKeyInState },
+    protect: true,
+    type: 'random:index/randomId:RandomId',
+    urn: 'urn:pulumi:prod::sam::random:index/randomId:RandomId::encryption-key',
+  };
+  const keyRefresh = {
+    op: 'refresh',
+    urn: keyState.urn,
+    provider: 'urn:pulumi:prod::sam::pulumi:providers:random::default::id',
+    oldState: keyState,
+    newState: keyState,
+    detailedDiff: null,
+  };
+  const keySame = { op: 'same', urn: keyState.urn, oldState: keyState, newState: keyState };
+  // What a routine deploy of an unchanged SAM reports: the provider rewrites the Pages project.
+  const pagesUpdate = {
+    op: 'update',
+    urn: 'urn:pulumi:prod::sam::cloudflare:index/pagesProject:PagesProject::sam-pages-project',
+  };
+
+  interface AdoptionWorld {
+    bucketStatus?: number;
+    stacks?: string;
+    preview?: unknown;
+    /** The preview immediately before `pulumi up`, when it differs from the first. */
+    previewBeforeUp?: unknown;
+    applied?: string[];
+    /** Migrations the observability database has applied. */
+    observabilityApplied?: string[];
+    /** Extra migration files in the approved source's primary directory. */
+    sourceMigrations?: string[];
+    /** A deployment from before the observability database existed has no output for it. */
+    noObservabilityOutput?: boolean;
+    /** The preview command exits non-zero, with this as the runner's failure tail. */
+    previewFailureTail?: string[];
+  }
+  /** fixture() with an existing deployment behind it: state, stack, database, Worker settings. */
+  function adoptionFixture(world: AdoptionWorld = {}) {
+    const f = fixture();
+    mkdirSync(join(f.root, 'apps/api/src/db/migrations'), { recursive: true });
+    writeFileSync(join(f.root, 'apps/api/src/db/migrations/0001_init.sql'), '');
+    writeFileSync(join(f.root, 'apps/api/src/db/migrations/0002_next.sql'), '');
+    for (const name of world.sourceMigrations ?? [])
+      writeFileSync(join(f.root, 'apps/api/src/db/migrations', name), '');
+    mkdirSync(join(f.root, 'apps/api/src/db/migrations/observability'), { recursive: true });
+    writeFileSync(join(f.root, 'apps/api/src/db/migrations/observability/0000_init.sql'), '');
+    // The approved source's own defaults: CONNECTOR_ENABLED in [vars], VM_AGENT_TRANSPORT as a
+    // recorded code default (worker-var-defaults.ts).
+    writeFileSync(join(f.root, 'apps/api/wrangler.toml'), '[vars]\nCONNECTOR_ENABLED = "false"\n');
+    const requests: string[] = [];
+    const previewOptions: Array<{ privateOutput?: boolean }> = [];
+    const runner: EngineRunner = {
+      ...f.runner,
+      async run(command, options) {
+        if (
+          command.executable === 'pulumi' &&
+          command.args[0] === 'stack' &&
+          command.args[1] === 'ls'
+        ) {
+          await f.runner.run(command, options);
+          return world.stacks ?? '[{"name":"prod"}]';
+        }
+        if (command.executable === 'pulumi' && command.args[0] === 'preview') {
+          await f.runner.run(command, options);
+          previewOptions.push({ privateOutput: options.privateOutput });
+          if (world.previewFailureTail)
+            throw new EngineCommandFailure(1, null, world.previewFailureTail);
+          const first = world.preview ?? {
+            changeSummary: { same: 2, update: 1 },
+            duration: 1,
+            steps: [keyRefresh, keySame, sameStep, pagesUpdate],
+          };
+          return JSON.stringify(
+            command.args.includes('--refresh') ? first : (world.previewBeforeUp ?? first)
+          );
+        }
+        const output = await f.runner.run(command, options);
+        if (command.executable === 'pulumi' && command.args.includes('output'))
+          return JSON.stringify({
+            ...JSON.parse(output),
+            d1DatabaseId: databaseId,
+            observabilityD1DatabaseId: world.noObservabilityOutput ? undefined : observabilityId,
+          });
+        return output;
+      },
+      async request(url, init) {
+        requests.push(`${init?.method ?? 'GET'} ${url}`);
+        if (/\/r2\/buckets\/[a-z0-9-]+-pulumi-state(?:-production)?$/.test(url))
+          return new Response('{}', { status: world.bucketStatus ?? 200 });
+        if (url.endsWith('/workers/scripts/install-test-api-prod/settings'))
+          return Response.json({
+            success: true,
+            result: {
+              bindings: [
+                { type: 'plain_text', name: 'REQUIRE_APPROVAL', text: 'false' },
+                { type: 'plain_text', name: 'VM_AGENT_REQUIRED_VERSION', text: 'f'.repeat(40) },
+                { type: 'plain_text', name: 'NOT_AN_OVERRIDE', text: 'ignored' },
+                // Equal to the source's defaults: not overrides, so not pinned.
+                { type: 'plain_text', name: 'CONNECTOR_ENABLED', text: 'false' },
+                { type: 'plain_text', name: 'VM_AGENT_TRANSPORT', text: 'vm-public-dns' },
+                { type: 'secret_text', name: 'CF_CONTAINER_ENABLED' },
+              ],
+            },
+          });
+        if (url.endsWith('/workers/scripts/install-test-api-prod/secrets'))
+          return Response.json({
+            success: true,
+            result: [
+              { name: 'ENCRYPTION_KEY', type: 'secret_text' },
+              { name: 'JWT_PRIVATE_KEY', type: 'secret_text' },
+              { name: 'GITHUB_CLIENT_SECRET', type: 'secret_text' },
+            ],
+          });
+        const ledger = (names: string[]) =>
+          Response.json({ success: true, result: [{ results: names.map((name) => ({ name })) }] });
+        if (url.endsWith(`/d1/database/${databaseId}/query`))
+          return ledger(world.applied ?? ['0001_init.sql']);
+        if (url.endsWith(`/d1/database/${observabilityId}/query`))
+          return ledger(world.observabilityApplied ?? ['0000_init.sql']);
+        return f.runner.request(url, init);
+      },
+    };
+    const lines = () => f.commands.map((entry) => [entry.executable, ...entry.args].join(' '));
+    return { ...f, runner, requests, lines, previewOptions };
+  }
+  async function run(
+    input: InstallerEngineConfig,
+    f: ReturnType<typeof adoptionFixture>,
+    withResult = true
+  ) {
+    const events: EngineEvent[] = [];
+    const results: unknown[] = [];
+    const outcome = await runInstallerEngine(input, {
+      ...f,
+      environment: privateEnv,
+      emit: (event) => events.push(event),
+      save() {},
+      ...(withResult
+        ? {
+            saveResult: (result) => {
+              results.push(result);
+            },
+          }
+        : {}),
+    }).then(
+      (state) => ({ state, error: undefined }),
+      (error: Error) => ({ state: undefined, error })
+    );
+    return { ...outcome, events, results };
+  }
+
+  it('takes over without creating state, after a clean preview, keeping keys, settings and users', async () => {
+    const f = adoptionFixture();
+    const { state, error, results, events } = await run(adopted, f);
+    expect(error).toBeUndefined();
+    expect(state?.status).toBe('completed');
+    const calls = f.lines();
+    expect(calls.some((line) => line.includes('r2 bucket create'))).toBe(false);
+    expect(calls.some((line) => line.includes('stack init'))).toBe(false);
+    const preview = calls.findIndex((line) => line.startsWith('pulumi preview --refresh --json'));
+    const refresh = calls.findIndex((line) => line.includes('pulumi-refresh-safe.sh'));
+    const recheck = calls.findIndex((line) => line === 'pulumi preview --json');
+    const up = calls.findIndex((line) => line.startsWith('pulumi up'));
+    expect(preview).toBeGreaterThan(-1);
+    // The gate reads without writing state; the refresh that rewrites it comes after, and the
+    // gate runs once more right before the update is applied.
+    expect(preview).toBeLessThan(refresh);
+    expect(refresh).toBeLessThan(recheck);
+    expect(recheck).toBe(up - 1);
+    const syncs = f.commands.filter((entry) =>
+      entry.args.includes('scripts/deploy/sync-wrangler-config.ts')
+    );
+    expect(syncs.length).toBeGreaterThan(0);
+    for (const sync of syncs) {
+      // The deployed override survives; an engine-owned var is never replaced by the old value.
+      expect(sync.env.REQUIRE_APPROVAL).toBe('false');
+      expect(sync.env.VM_AGENT_REQUIRED_VERSION).toBe('d'.repeat(40));
+      expect(sync.env.NOT_AN_OVERRIDE).toBeUndefined();
+      expect(sync.env.CONNECTOR_ENABLED).toBeUndefined();
+      expect(sync.env.VM_AGENT_TRANSPORT).toBeUndefined();
+    }
+    const secrets = f.commands.find((entry) =>
+      entry.args.includes('scripts/deploy/configure-secrets.sh')
+    );
+    expect(secrets?.env.PRESERVE_EXISTING_WORKER_SECRETS).toBe(
+      'ENCRYPTION_KEY,JWT_PRIVATE_KEY,JWT_PUBLIC_KEY'
+    );
+    expect(secrets?.env.BOOTSTRAP_OWNER_EMAIL).toBe('');
+    // configure-secrets.sh would otherwise delete the deployment's agent sign-in trust.
+    expect(secrets?.env.AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET).toBe('true');
+    // No setup token: the adopted deployment already has an owner.
+    expect(results).toEqual([]);
+    // The previews carried a raw key in their state; none of it left the gate.
+    expect(JSON.stringify(events)).not.toContain(rawKeyInState);
+    expect(JSON.stringify(results)).not.toContain(rawKeyInState);
+    expect(JSON.stringify(f.commands.map((entry) => [entry.args, entry.env]))).not.toContain(
+      rawKeyInState
+    );
+    // The databases keep their read-replication mode; the other service steps still run.
+    expect(calls.some((line) => line.includes('configure-d1-read-replication.sh'))).toBe(false);
+    expect(calls.some((line) => line.includes('configure-r2-cors.sh'))).toBe(true);
+    expect(f.requests.some((line) => line.includes(`/d1/database/${databaseId}/query`))).toBe(true);
+  });
+
+  it('refuses an in-place update of anything but the Pages project', async () => {
+    const f = adoptionFixture({
+      preview: {
+        steps: [
+          sameStep,
+          pagesUpdate,
+          { ...sameStep, op: 'update' },
+          {
+            op: 'update',
+            urn: 'urn:pulumi:prod::sam::cloudflare:index/record:Record::sam-dns-api',
+          },
+          // A different resource that merely has the allowed type in its name.
+          {
+            op: 'update',
+            urn: 'urn:pulumi:prod::sam::cloudflare:index/r2Bucket:R2Bucket::PagesProject',
+          },
+        ],
+      },
+    });
+    const { error, events } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase infrastructure failed');
+    expect(f.lines().some((line) => line.startsWith('pulumi up'))).toBe(false);
+    expect(f.lines().some((line) => line.includes('pulumi-refresh-safe.sh'))).toBe(false);
+    expect(events.find((event) => event.status === 'failed')?.tail).toEqual([
+      'The approved source would change these resources, so nothing was changed:',
+      'update cloudflare:index/d1Database:D1Database sam-db',
+      'update cloudflare:index/record:Record sam-dns-api',
+      'update cloudflare:index/r2Bucket:R2Bucket PagesProject',
+    ]);
+  });
+
+  it('refuses, right before pulumi up, a change that appeared after the takeover was checked', async () => {
+    const f = adoptionFixture({
+      previewBeforeUp: {
+        steps: [
+          sameStep,
+          { op: 'delete', urn: 'urn:pulumi:prod::sam::cloudflare:index/r2Bucket:R2Bucket::sam-r2' },
+        ],
+      },
+    });
+    const { error, events } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase infrastructure failed');
+    const calls = f.lines();
+    // The first check passed, so the refresh ran; the update itself never did.
+    expect(calls.some((line) => line.includes('pulumi-refresh-safe.sh'))).toBe(true);
+    expect(calls.some((line) => line.startsWith('pulumi up'))).toBe(false);
+    expect(calls.some((line) => line.includes('wrangler'))).toBe(false);
+    expect(events.find((event) => event.status === 'failed')?.tail).toEqual([
+      'These resources changed after the takeover was checked, so none was changed:',
+      'delete cloudflare:index/r2Bucket:R2Bucket sam-r2',
+    ]);
+  });
+
+  it('never reports the output of a failed preview, which can hold raw key values', async () => {
+    // A preview that cannot delete a protected key resource exits non-zero after printing that
+    // resource's state, where a RandomId's `id` is the key itself.
+    const rawKey = 'CANARY-raw-encryption-key-from-pulumi-state';
+    const f = adoptionFixture({
+      previewFailureTail: [
+        `        "id": "${rawKey}",`,
+        'error: cannot be deleted because it is protected',
+      ],
+    });
+    const { error, events } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase infrastructure failed');
+    const failed = events.find((event) => event.status === 'failed');
+    expect(failed?.tail).toEqual([
+      'The takeover check could not finish, so nothing was changed: the infrastructure preview failed. Its output is withheld because it can contain key values.',
+    ]);
+    expect(JSON.stringify(events)).not.toContain(rawKey);
+    expect(f.lines().some((line) => line.includes('pulumi-refresh-safe.sh'))).toBe(false);
+    expect(f.lines().some((line) => line.startsWith('pulumi up'))).toBe(false);
+  });
+
+  it('runs both takeover previews with their output marked private', async () => {
+    const f = adoptionFixture();
+    expect((await run(adopted, f)).error).toBeUndefined();
+    // The runner then withholds the output of a failure too (installer-engine-failure-tail.test.ts).
+    expect(f.previewOptions).toEqual([{ privateOutput: true }, { privateOutput: true }]);
+  });
+
+  it('refuses, before pulumi up, a takeover whose preview creates, replaces or deletes', async () => {
+    const f = adoptionFixture({
+      preview: {
+        steps: [
+          sameStep,
+          {
+            op: 'create',
+            urn: 'urn:pulumi:prod::sam::cloudflare:index/r2Bucket:R2Bucket::new-bucket',
+          },
+          {
+            op: 'replace',
+            urn: 'urn:pulumi:prod::sam::cloudflare:index/d1Database:D1Database::sam-db',
+          },
+          { op: 'delete', urn: 'urn:pulumi:prod::sam::cloudflare:index/dnsRecord:DnsRecord::api' },
+        ],
+      },
+    });
+    const { error, events } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase infrastructure failed');
+    expect(f.lines().some((line) => line.startsWith('pulumi up'))).toBe(false);
+    const failed = events.find((event) => event.status === 'failed');
+    expect(failed?.phase).toBe('infrastructure');
+    // Refused before the refresh too: a refused takeover leaves the state as it was.
+    expect(f.lines().some((line) => line.includes('pulumi-refresh-safe.sh'))).toBe(false);
+    // Nor did anything before the gate write to Cloudflare: the state phase only reads the
+    // bucket and the workers.dev address, and the rollback check only queries the database.
+    expect(f.requests.length).toBeGreaterThan(0);
+    expect(
+      f.requests.filter((line) => !line.startsWith('GET ') && !line.endsWith('/query'))
+    ).toEqual([]);
+    expect(failed?.tail).toEqual([
+      'The approved source would change these resources, so nothing was changed:',
+      'create cloudflare:index/r2Bucket:R2Bucket new-bucket',
+      'replace cloudflare:index/d1Database:D1Database sam-db',
+      'delete cloudflare:index/dnsRecord:DnsRecord api',
+    ]);
+  });
+
+  it('refuses a takeover when the preview cannot be read, instead of treating it as empty', async () => {
+    const f = adoptionFixture({ preview: { diagnostics: [] } });
+    const { error } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase infrastructure failed');
+    expect(f.lines().some((line) => line.startsWith('pulumi up'))).toBe(false);
+  });
+
+  it('refuses a takeover that would roll a newer deployment back, before any change', async () => {
+    const f = adoptionFixture({ applied: ['0001_init.sql', '0002_next.sql', '0003_newer.sql'] });
+    const { error, events } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase adoption-preflight failed');
+    expect(events.find((event) => event.status === 'failed')?.tail).toEqual([
+      'This SAM runs a newer version than the approved source. Its database has migrations the source does not contain:',
+      '0003_newer.sql',
+    ]);
+    const calls = f.lines();
+    for (const step of ['pulumi-refresh-safe.sh', 'pulumi preview', 'pulumi up', 'wrangler'])
+      expect(calls.some((line) => line.includes(step))).toBe(false);
+  });
+
+  it('refuses a takeover when only the observability database is newer than the source', async () => {
+    const f = adoptionFixture({ observabilityApplied: ['0000_init.sql', '0001_newer.sql'] });
+    const { error, events } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase adoption-preflight failed');
+    expect(events.find((event) => event.status === 'failed')?.tail).toEqual([
+      'This SAM runs a newer version than the approved source. Its database has migrations the source does not contain:',
+      'observability/0001_newer.sql',
+    ]);
+    const calls = f.lines();
+    for (const step of ['pulumi-refresh-safe.sh', 'pulumi preview', 'pulumi up', 'wrangler'])
+      expect(calls.some((line) => line.includes(step))).toBe(false);
+    // Both ledgers were read, so the primary one passing is what let this one decide.
+    expect(f.requests.filter((line) => line.endsWith('/query'))).toHaveLength(2);
+  });
+
+  it('reads no observability ledger for a deployment that never had that database', async () => {
+    const f = adoptionFixture({ noObservabilityOutput: true });
+    const { events } = await run(adopted, f);
+    // The rollback check passes on the primary ledger alone and the takeover moves on to the
+    // preview gate, which is what refuses creating the missing database on a real stack.
+    expect(
+      events.some((event) => event.phase === 'adoption-preflight' && event.status === 'failed')
+    ).toBe(false);
+    expect(f.lines().some((line) => line.startsWith('pulumi preview --refresh --json'))).toBe(true);
+    expect(f.requests.filter((line) => line.endsWith('/query'))).toEqual([
+      expect.stringContaining(`/d1/database/${databaseId}/query`),
+    ]);
+  });
+
+  it('treats a migration applied under its legacy file name as the current file', async () => {
+    const legacy = '0157_workspace_eviction_fencing.sql';
+    const applied = ['0001_init.sql', '0002_next.sql', legacy];
+    const renamed = adoptionFixture({
+      applied,
+      sourceMigrations: ['0164_workspace_eviction_fencing.sql'],
+    });
+    expect((await run(adopted, renamed)).error).toBeUndefined();
+    // Control: a source that does not carry the migration under either name is older.
+    const older = adoptionFixture({ applied });
+    const { error, events } = await run(adopted, older);
+    expect(error?.message).toContain('Installation phase adoption-preflight failed');
+    expect(events.find((event) => event.status === 'failed')?.tail?.[1]).toBe(legacy);
+  });
+
+  it.each([
+    ['state bucket', { bucketStatus: 404 }, 'r2 bucket create'],
+    ['stack', { stacks: '[{"name":"staging"}]' }, 'stack init'],
+  ])('refuses a missing %s and never creates one', async (_name, world, creation) => {
+    const f = adoptionFixture(world);
+    const { error } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase state-backend failed');
+    expect(f.lines().some((line) => line.includes(creation))).toBe(false);
+    expect(f.lines().some((line) => line.startsWith('pulumi up'))).toBe(false);
+  });
+
+  it('updates an adopted installation without the takeover gate, still keeping keys and settings', async () => {
+    const f = adoptionFixture({
+      // A newer release may add resources and migrations; only the takeover itself refuses them.
+      preview: { steps: [{ op: 'create', urn: 'urn:pulumi:prod::sam::t::new' }] },
+      applied: ['0001_init.sql', '0099_unknown.sql'],
+    });
+    const { state, error } = await run(
+      { ...config, adoption: { ...adoption, takeover: false } },
+      f
+    );
+    expect(error).toBeUndefined();
+    expect(state?.status).toBe('completed');
+    const calls = f.lines();
+    expect(calls.some((line) => line.startsWith('pulumi preview'))).toBe(false);
+    expect(calls.some((line) => line.includes('stack init'))).toBe(false);
+    // Later updates of an adopted installation leave the read-replication mode alone too.
+    expect(calls.some((line) => line.includes('configure-d1-read-replication.sh'))).toBe(false);
+    const secrets = f.commands.find((entry) =>
+      entry.args.includes('scripts/deploy/configure-secrets.sh')
+    );
+    expect(secrets?.env.PRESERVE_EXISTING_WORKER_SECRETS).toBe(
+      'ENCRYPTION_KEY,JWT_PRIVATE_KEY,JWT_PUBLIC_KEY'
+    );
+    expect(secrets?.env.BOOTSTRAP_OWNER_EMAIL).toBe('');
+  });
+
+  it('control: an ordinary installation still creates its state and binds the owner', async () => {
+    const f = adoptionFixture({ bucketStatus: 404, stacks: '[]' });
+    // Without a result hook: the fixture has no generated config to read a setup token from.
+    const { error } = await run(config, f, false);
+    expect(error).toBeUndefined();
+    const calls = f.lines();
+    expect(calls.some((line) => line.includes('r2 bucket create'))).toBe(true);
+    expect(calls.some((line) => line.includes('stack init'))).toBe(true);
+    expect(calls.some((line) => line.startsWith('pulumi preview'))).toBe(false);
+    const secrets = f.commands.find((entry) =>
+      entry.args.includes('scripts/deploy/configure-secrets.sh')
+    );
+    expect(secrets?.env.PRESERVE_EXISTING_WORKER_SECRETS).toBeUndefined();
+    expect(secrets?.env.BOOTSTRAP_OWNER_EMAIL).toBe(config.ownerEmail);
+    expect(secrets?.env.AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET).toBeUndefined();
+  });
+
+  it('accepts adoption settings only with an explicit prefix, a valid bucket and an installation', () => {
+    expect(validateEngineConfig(adopted).adoption).toEqual(adoption);
+    expect(() => validateEngineConfig({ ...adopted, prefix: undefined })).toThrow('adoption');
+    expect(() =>
+      validateEngineConfig({ ...adopted, adoption: { ...adoption, stateBucket: 'Bad_Bucket' } })
+    ).toThrow();
+    expect(() =>
+      validateEngineConfig({ ...adopted, adoption: { ...adoption, extra: true } as never })
+    ).toThrow('adoption');
+    expect(() =>
+      validateEngineConfig({ ...adopted, adoption: { stateBucket: adoption.stateBucket } as never })
+    ).toThrow('adoption');
+    expect(() =>
+      validateEngineConfig({
+        ...config,
+        ownerEmail: undefined,
+        profile: 'legacy-ci',
+        adoption,
+      } as never)
+    ).toThrow();
+  });
+});
+
+it('caps each takeover refusal line, whatever the deployment names its resources', async () => {
+  const { refusedTakeoverSteps, AdoptionRefused } = await import('./installer-engine-adoption.js');
+  const lines = refusedTakeoverSteps({
+    steps: [{ op: 'create', urn: `urn:pulumi:prod::sam::type::${'x'.repeat(1000)}` }],
+  });
+  const refusal = new AdoptionRefused(['header', ...lines]);
+  expect(refusal.tail.every((line) => line.length <= 300)).toBe(true);
+  expect(refusal.message).toBe('Takeover refused');
 });
