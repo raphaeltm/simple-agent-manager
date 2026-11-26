@@ -177,12 +177,9 @@ const SHELL_FILE = /\.(?:ya?ml|sh|bash)$/;
  * that removes it. A marker counts only when its file and task match an entry here, so naming an
  * unrelated open task cannot excuse a new read.
  */
-export const ALLOWED_LEGACY_READS: ReadonlyArray<{ file: string; task: string }> = [
-  {
-    file: 'scripts/deploy/configure-secrets.sh',
-    task: 'tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md',
-  },
-];
+// Empty since 2026-11-26: configure-secrets.sh no longer reads installation keys back from Pulumi
+// (task 01M8C74NYMDP2YYPAG17VXJB78). A new entry needs an open task that removes it (rule 42).
+export const ALLOWED_LEGACY_READS: ReadonlyArray<{ file: string; task: string }> = [];
 
 /**
  * Import or re-export statements, which can span lines: one that names a decrypt helper, or pulls

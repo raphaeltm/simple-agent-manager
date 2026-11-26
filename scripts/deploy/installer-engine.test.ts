@@ -823,13 +823,14 @@ describe('installation engine', () => {
     expect(invocation.environment).toMatchObject({
       REQUIRE_APPROVAL: 'true',
       VITE_PROJECT_LIST_LIMIT: '71',
-      SECRET_ENCRYPTION_KEY: 'legacy-key',
       GH_CLIENT_SECRET: 'github-private',
       CLOUDFLARE_API_USER_SERVICE_KEY: 'origin-private',
       ARTIFACTS_BINDING_ENABLED: 'false',
       VITE_FEATURE_MULTI_TERMINAL: 'true',
       AGENT_EMAIL_ENABLED: 'true',
     });
+    // A key supplied as a GitHub secret never reaches the engine: deploys do not handle keys.
+    expect(JSON.stringify(invocation.environment)).not.toContain('legacy-key');
     expect(Object.keys(invocation.environment).length).toBeGreaterThan(550);
     expect(JSON.stringify(invocation.config)).not.toContain('private');
   });

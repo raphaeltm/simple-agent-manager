@@ -66,8 +66,6 @@ jobs:
           HAS_GH_APP_SLUG: ${{ secrets.GH_APP_SLUG != '' }}
           HAS_GH_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET != '' }}
           HAS_CF_ORIGIN_CA_KEY: ${{ secrets.CF_ORIGIN_CA_KEY != '' }}
-          HAS_DEPLOY_SIGNING_PRIVATE_KEY: ${{ secrets.DEPLOY_SIGNING_PRIVATE_KEY != '' }}
-          HAS_DEPLOY_SIGNING_PUBLIC_KEY: ${{ secrets.DEPLOY_SIGNING_PUBLIC_KEY != '' }}
           INPUT_ENVIRONMENT: ${{ inputs.environment }}
         run: |
           MISSING=""
@@ -98,11 +96,6 @@ jobs:
           fi
           if [ "$HAS_CF_ORIGIN_CA_KEY" != "true" ]; then
             echo "::notice::CF_ORIGIN_CA_KEY not set — using CF_API_TOKEN for Origin CA certs. If Pulumi fails with error 1016, ensure your API token has Zone > SSL and Certificates > Edit permission."
-          fi
-          if [[ "$HAS_DEPLOY_SIGNING_PRIVATE_KEY" != "true" ]]; then
-            echo "::notice::DEPLOY_SIGNING_PRIVATE_KEY not set — using Pulumi-managed deploy signing key generated during deployment."
-          elif [[ "$HAS_DEPLOY_SIGNING_PUBLIC_KEY" != "true" ]]; then
-            echo "::notice::DEPLOY_SIGNING_PUBLIC_KEY not set — deriving it from DEPLOY_SIGNING_PRIVATE_KEY during Worker secret configuration."
           fi
 
           if [ -n "$MISSING" ]; then
@@ -270,18 +263,13 @@ jobs:
         env:
           SAM_CI_SECRETS_JSON: |
             {
-              "BETTER_AUTH_SECRET": ${{ toJSON(secrets.BETTER_AUTH_SECRET || '') }},
               "CF_ACCOUNT_ID": ${{ toJSON(secrets.CF_ACCOUNT_ID || '') }},
               "CF_AIG_TOKEN": ${{ toJSON(secrets.CF_AIG_TOKEN || '') }},
               "CF_API_TOKEN": ${{ toJSON(secrets.CF_API_TOKEN || '') }},
               "CF_ORIGIN_CA_KEY": ${{ toJSON(secrets.CF_ORIGIN_CA_KEY || '') }},
               "CF_ZONE_ID": ${{ toJSON(secrets.CF_ZONE_ID || '') }},
-              "CREDENTIAL_ENCRYPTION_KEY": ${{ toJSON(secrets.CREDENTIAL_ENCRYPTION_KEY || '') }},
-              "DEPLOY_SIGNING_PRIVATE_KEY": ${{ toJSON(secrets.DEPLOY_SIGNING_PRIVATE_KEY || '') }},
-              "DEPLOY_SIGNING_PUBLIC_KEY": ${{ toJSON(secrets.DEPLOY_SIGNING_PUBLIC_KEY || '') }},
               "DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID": ${{ toJSON(secrets.DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID || '') }},
               "DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN": ${{ toJSON(secrets.DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN || '') }},
-              "ENCRYPTION_KEY": ${{ toJSON(secrets.ENCRYPTION_KEY || '') }},
               "GA4_API_SECRET": ${{ toJSON(secrets.GA4_API_SECRET || '') }},
               "GA4_MEASUREMENT_ID": ${{ toJSON(secrets.GA4_MEASUREMENT_ID || '') }},
               "GH_APP_ID": ${{ toJSON(secrets.GH_APP_ID || '') }},
@@ -297,16 +285,12 @@ jobs:
               "GOOGLE_CLIENT_SECRET": ${{ toJSON(secrets.GOOGLE_CLIENT_SECRET || '') }},
               "GOOGLE_LOGIN_CLIENT_ID": ${{ toJSON(secrets.GOOGLE_LOGIN_CLIENT_ID || '') }},
               "GOOGLE_LOGIN_CLIENT_SECRET": ${{ toJSON(secrets.GOOGLE_LOGIN_CLIENT_SECRET || '') }},
-              "JWT_PRIVATE_KEY": ${{ toJSON(secrets.JWT_PRIVATE_KEY || '') }},
-              "JWT_PUBLIC_KEY": ${{ toJSON(secrets.JWT_PUBLIC_KEY || '') }},
               "PULUMI_CONFIG_PASSPHRASE": ${{ toJSON(secrets.PULUMI_CONFIG_PASSPHRASE || '') }},
               "R2_ACCESS_KEY_ID": ${{ toJSON(secrets.R2_ACCESS_KEY_ID || '') }},
               "R2_SECRET_ACCESS_KEY": ${{ toJSON(secrets.R2_SECRET_ACCESS_KEY || '') }},
               "SEGMENT_WRITE_KEY": ${{ toJSON(secrets.SEGMENT_WRITE_KEY || '') }},
               "AGENT_SIGN_IN_TRUST": ${{ toJSON(secrets.AGENT_SIGN_IN_TRUST || '') }},
               "SMOKE_TEST_AUTH_ENABLED": ${{ toJSON(secrets.SMOKE_TEST_AUTH_ENABLED || '') }},
-              "VAPID_PRIVATE_KEY": ${{ toJSON(secrets.VAPID_PRIVATE_KEY || '') }},
-              "VAPID_PUBLIC_KEY": ${{ toJSON(secrets.VAPID_PUBLIC_KEY || '') }},
               "VAPID_SUBJECT": ${{ toJSON(secrets.VAPID_SUBJECT || '') }}
             }
           SAM_CI_VARIABLES_JSON: ${{ toJSON(vars) }}
@@ -494,9 +478,12 @@ jobs:
       - name: Pulumi Preview
         if: ${{ !inputs.use_shared_engine && (inputs.dry_run == true) }}
         working-directory: infra
-        # No --diff: while generated keys are random.RandomId resources in state, a diff that deletes
-        # or replaces one prints its raw id, which is the key (policy 795e72a6).
-        run: pulumi preview
+        # No --diff, and installation-key resources still in state are excluded: their planned
+        # deletion would fail the preview, and a deleted RandomId's diff prints its raw id (the key).
+        run: |
+          EXCLUDE_ARGS="$(cd .. && pnpm exec tsx scripts/deploy/retire-key-resources.ts exclude-args)"
+          mapfile -t EXCLUDE <<<"$EXCLUDE_ARGS"
+          pulumi preview "${EXCLUDE[@]}"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -517,6 +504,20 @@ jobs:
           PULUMI_REFRESH_MAX_ATTEMPTS: ${{ vars.PULUMI_REFRESH_MAX_ATTEMPTS }}
           PULUMI_REFRESH_RETRY_DELAY_SECONDS: ${{ vars.PULUMI_REFRESH_RETRY_DELAY_SECONDS }}
           PULUMI_REFRESH_DIAGNOSTIC_TAIL_LINES: ${{ vars.PULUMI_REFRESH_DIAGNOSTIC_TAIL_LINES }}
+
+      # Removes the installation-key resources from Pulumi state, once, after checking by name that
+      # the API Worker holds every key; no key value is read and nothing is regenerated
+      # (scripts/deploy/retire-key-resources.ts). Already-migrated stacks are a no-op.
+      - name: Retire Installation-Key Resources From Pulumi State
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
+        run: pnpm exec tsx scripts/deploy/retire-key-resources.ts retire
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          API_WORKER_NAME: ${{ steps.deploy_resources.outputs.api_worker }}
 
       - name: Pulumi Up
         if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
@@ -1987,7 +1988,9 @@ jobs:
       # configure-secrets.sh as SECONDARY_AGENT_SIGN_IN_TRUST and written in the same bulk secret
       # deployment; unset, the Worker value is left as it is. A new secondary installation needs
       # its own secret name in that expression.
-      # Nothing here reads, derives or copies a secret (.claude/rules/83-no-secret-readback-in-ci.md).
+      # Installation keys are not passed: deploys never read, derive or write them, and the script only
+      # checks their names on the Worker (scripts/deploy/installation-keys.ts). Nothing here reads,
+      # derives or copies a secret (.claude/rules/83-no-secret-readback-in-ci.md).
       - name: Configure Worker Secrets
         if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: bash scripts/deploy/configure-secrets.sh "$DEPLOY_ENV"
@@ -1998,21 +2001,12 @@ jobs:
           CF_ZONE_ID: ${{ steps.deploy_resources.outputs.secondary == 'true' && (steps.installation_zone.outputs.zone_id || 'unresolved-zone') || secrets.CF_ZONE_ID }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
-          VAPID_PRIVATE_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.VAPID_PRIVATE_KEY || '' }}
-          VAPID_PUBLIC_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.VAPID_PUBLIC_KEY || '' }}
           VAPID_SUBJECT: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.VAPID_SUBJECT || '' }}
           GH_CLIENT_ID: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GH_CLIENT_ID || '' }}
           GH_CLIENT_SECRET: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GH_CLIENT_SECRET || '' }}
           GH_APP_ID: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GH_APP_ID || '' }}
           GH_APP_PRIVATE_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GH_APP_PRIVATE_KEY || '' }}
           GH_APP_SLUG: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GH_APP_SLUG || '' }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
-          PULUMI_STACK: ${{ steps.pulumi-select.outputs.stack_name }}
-          SECRET_ENCRYPTION_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.ENCRYPTION_KEY || '' }}
-          SECRET_JWT_PRIVATE_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.JWT_PRIVATE_KEY || '' }}
-          SECRET_JWT_PUBLIC_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.JWT_PUBLIC_KEY || '' }}
           GOOGLE_CLIENT_ID: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GOOGLE_CLIENT_ID || '' }}
           GOOGLE_CLIENT_SECRET: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GOOGLE_CLIENT_SECRET || '' }}
           GOOGLE_LOGIN_CLIENT_ID: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GOOGLE_LOGIN_CLIENT_ID || '' }}
@@ -2020,8 +2014,6 @@ jobs:
           GITLAB_HOST: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GITLAB_HOST || '' }}
           GITLAB_CLIENT_ID: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GITLAB_CLIENT_ID || '' }}
           GITLAB_CLIENT_SECRET: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GITLAB_CLIENT_SECRET || '' }}
-          BETTER_AUTH_SECRET: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.BETTER_AUTH_SECRET || '' }}
-          CREDENTIAL_ENCRYPTION_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.CREDENTIAL_ENCRYPTION_KEY || '' }}
           GH_WEBHOOK_SECRET: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GH_WEBHOOK_SECRET || '' }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -2029,8 +2021,6 @@ jobs:
           # The primary's trust never reaches a secondary, and a secondary's never reaches the primary.
           AGENT_SIGN_IN_TRUST: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.AGENT_SIGN_IN_TRUST || '' }}
           SECONDARY_AGENT_SIGN_IN_TRUST: ${{ steps.deploy_resources.outputs.secondary == 'true' && steps.deploy_resources.outputs.installation == 'staging2' && secrets.AGENT_SIGN_IN_TRUST_STAGING2 || '' }}
-          DEPLOY_SIGNING_PRIVATE_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.DEPLOY_SIGNING_PRIVATE_KEY || '' }}
-          DEPLOY_SIGNING_PUBLIC_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.DEPLOY_SIGNING_PUBLIC_KEY || '' }}
           SEGMENT_WRITE_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.SEGMENT_WRITE_KEY || '' }}
           GA4_API_SECRET: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GA4_API_SECRET || '' }}
           GA4_MEASUREMENT_ID: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GA4_MEASUREMENT_ID || '' }}
@@ -2206,20 +2196,3 @@ jobs:
           API_URL: ${{ steps.deploy_resources.outputs.api_url }}
           APP_URL: ${{ steps.deploy_resources.outputs.app_url }}
 
-      - name: Security Keys Status
-        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
-        env:
-          HAS_ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY != '' }}
-        run: |
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Security Keys" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ "$HAS_ENCRYPTION_KEY" = "true" ]; then
-            echo "Using keys from **GitHub Secrets** (backwards compatibility mode)." >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "To migrate to automatic persistence via Pulumi state:" >> $GITHUB_STEP_SUMMARY
-            echo "1. Delete \`ENCRYPTION_KEY\`, \`JWT_PRIVATE_KEY\`, \`JWT_PUBLIC_KEY\` from GitHub Secrets" >> $GITHUB_STEP_SUMMARY
-            echo "2. Re-deploy to use Pulumi-managed keys" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "Keys managed by **Pulumi state** - no manual persistence needed." >> $GITHUB_STEP_SUMMARY
-          fi
