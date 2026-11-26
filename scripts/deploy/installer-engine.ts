@@ -120,7 +120,13 @@ export async function runInstallerEngine(
   mkdirSync(join(root, '.wrangler', 'installer-engine'), { recursive: true, mode: 0o700 });
   let operation = 'phase-validation';
   let goVersion = '';
-  const execute = (executable: string, args: string[], cwd = root, discardOutput = false) => {
+  const execute = (
+    executable: string,
+    args: string[],
+    cwd = root,
+    discardOutput = false,
+    privateOutput = false
+  ) => {
     operation =
       executable === 'pulumi'
         ? `pulumi.${args[0]}`
@@ -134,6 +140,7 @@ export async function runInstallerEngine(
         env,
         timeoutMs: c.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
         discardOutput,
+        privateOutput,
       }
     );
   };
@@ -143,6 +150,12 @@ export async function runInstallerEngine(
   const script = (name: string, ...args: string[]) =>
     execute('bash', [`scripts/deploy/${name}`, ...args]);
   const pulumi = (...args: string[]) => execute('pulumi', args, join(root, 'infra'));
+  /**
+   * `pulumi preview --json` prints resource state, and a RandomId's `id` in that state is a raw
+   * key. No environment variable holds it, so a failed preview must report no output at all.
+   */
+  const previewJson = (...flags: string[]) =>
+    execute('pulumi', ['preview', ...flags, '--json'], join(root, 'infra'), false, true);
   const wrangler = (app: string, ...args: string[]) =>
     pnpm('--filter', `@simple-agent-manager/${app}`, 'exec', 'wrangler', ...args);
   const request = (url: string, init?: RequestInit) =>
@@ -394,8 +407,7 @@ export async function runInstallerEngine(
   await phase('infrastructure', async () => {
     // The takeover gate comes first: preview --refresh reads the live resources without writing
     // the state, while the refresh below rewrites it.
-    if (c.adoption?.takeover)
-      await refuseResourceChanges(() => pulumi('preview', '--refresh', '--json'));
+    if (c.adoption?.takeover) await refuseResourceChanges(() => previewJson('--refresh'));
     await execute(
       'bash',
       [join(root, 'scripts/deploy/pulumi-refresh-safe.sh')],
@@ -406,7 +418,7 @@ export async function runInstallerEngine(
     // applying, and update plans (--plan) are experimental.
     if (c.adoption?.takeover)
       await refuseResourceChanges(
-        () => pulumi('preview', '--json'),
+        () => previewJson(),
         'These resources changed after the takeover was checked, so none was changed:'
       );
     await pulumi('up', '--yes', '--skip-preview');

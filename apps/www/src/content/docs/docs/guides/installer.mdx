@@ -183,11 +183,12 @@ change nothing else (`scripts/deploy/installer-engine-adoption.ts`):
   credential unreadable.
 - **Your settings stay**: Worker settings your deployment runs with that differ from SAM's defaults,
   such as `REQUIRE_APPROVAL=false`, are read back from the deployed Worker and kept, on the takeover
-  and on every update. A setting equal to the default is not kept, so later releases can still
-  change that default. Agent sign-in trust and other Worker secrets, such as your GitHub App
-  credentials, are left untouched. The databases keep their read-replication mode, on the
-  takeover and on every update, because a fork that set `D1_READ_REPLICATION_MODE` did so in a
-  GitHub Environment the service cannot see.
+  and on every update (`carryDeployedVars`). A setting equal to the default is not kept. One limit:
+  the service cannot tell a setting you chose from a default that a later release has since
+  changed, so a setting whose default changes keeps its old value on your SAM. Agent sign-in trust
+  and other Worker secrets, such as your GitHub App credentials, are left untouched. The databases
+  keep their read-replication mode, on the takeover and on every update, because a fork that set
+  `D1_READ_REPLICATION_MODE` did so in a GitHub Environment the service cannot see.
 - **Your users stay**: no owner email is set and no setup token is handed out, because the
   deployment already has its administrators.
 

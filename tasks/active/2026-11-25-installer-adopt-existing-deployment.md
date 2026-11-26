@@ -291,3 +291,14 @@ as the resource updated in place. The provider rewrites the Pages project on eve
   that task: it stacks on this branch; its key-resource retirement must run only after both takeover
   gates pass, because retiring them before a refused takeover would let the fork's old workflow
   generate new keys over the Worker's.
+- Found through the keys task's local Pulumi tests: `pulumi preview --json` prints resource state,
+  where a RandomId's `id` is a raw key, and it exits non-zero when it cannot delete a protected
+  resource. The engine reports the last output lines of a failed command to the owner, scrubbing
+  only environment-held secrets, so a failed takeover preview could have shown a key. Both takeover
+  previews now run with `privateOutput`, and `refuseResourceChanges` replaces any failure of the
+  preview with a fixed message. Two tests, each proven by removing one layer.
+- Codex round 8 (on 1aa4843b9), P2 "Track adopted Worker overrides instead of inferring them":
+  valid, NOT fixed here. A default changed by a later release makes the previously written value
+  look like an override, and it stays pinned. A fix needs a durable record of override names whose
+  home is a design choice (Worker var, service manifest, or state bucket). Tracked as idea
+  01M8C88CXH9YTBZ4X3TDN1GP7J, cited in the code; the guide's claim was corrected.

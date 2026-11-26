@@ -1198,6 +1198,8 @@ describe('installation engine: adopting an existing deployment', () => {
     sourceMigrations?: string[];
     /** A deployment from before the observability database existed has no output for it. */
     noObservabilityOutput?: boolean;
+    /** The preview command exits non-zero, with this as the runner's failure tail. */
+    previewFailureTail?: string[];
   }
   /** fixture() with an existing deployment behind it: state, stack, database, Worker settings. */
   function adoptionFixture(world: AdoptionWorld = {}) {
@@ -1213,6 +1215,7 @@ describe('installation engine: adopting an existing deployment', () => {
     // recorded code default (worker-var-defaults.ts).
     writeFileSync(join(f.root, 'apps/api/wrangler.toml'), '[vars]\nCONNECTOR_ENABLED = "false"\n');
     const requests: string[] = [];
+    const previewOptions: Array<{ privateOutput?: boolean }> = [];
     const runner: EngineRunner = {
       ...f.runner,
       async run(command, options) {
@@ -1226,6 +1229,9 @@ describe('installation engine: adopting an existing deployment', () => {
         }
         if (command.executable === 'pulumi' && command.args[0] === 'preview') {
           await f.runner.run(command, options);
+          previewOptions.push({ privateOutput: options.privateOutput });
+          if (world.previewFailureTail)
+            throw new EngineCommandFailure(1, null, world.previewFailureTail);
           const first = world.preview ?? { steps: [sameStep, pagesUpdate] };
           return JSON.stringify(
             command.args.includes('--refresh') ? first : (world.previewBeforeUp ?? first)
@@ -1278,7 +1284,7 @@ describe('installation engine: adopting an existing deployment', () => {
       },
     };
     const lines = () => f.commands.map((entry) => [entry.executable, ...entry.args].join(' '));
-    return { ...f, runner, requests, lines };
+    return { ...f, runner, requests, lines, previewOptions };
   }
   async function run(
     input: InstallerEngineConfig,
@@ -1404,6 +1410,34 @@ describe('installation engine: adopting an existing deployment', () => {
       'These resources changed after the takeover was checked, so none was changed:',
       'delete cloudflare:index/r2Bucket:R2Bucket sam-r2',
     ]);
+  });
+
+  it('never reports the output of a failed preview, which can hold raw key values', async () => {
+    // A preview that cannot delete a protected key resource exits non-zero after printing that
+    // resource's state, where a RandomId's `id` is the key itself.
+    const rawKey = 'CANARY-raw-encryption-key-from-pulumi-state';
+    const f = adoptionFixture({
+      previewFailureTail: [
+        `        "id": "${rawKey}",`,
+        'error: cannot be deleted because it is protected',
+      ],
+    });
+    const { error, events } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase infrastructure failed');
+    const failed = events.find((event) => event.status === 'failed');
+    expect(failed?.tail).toEqual([
+      'The takeover check could not finish, so nothing was changed: the infrastructure preview failed. Its output is withheld because it can contain key values.',
+    ]);
+    expect(JSON.stringify(events)).not.toContain(rawKey);
+    expect(f.lines().some((line) => line.includes('pulumi-refresh-safe.sh'))).toBe(false);
+    expect(f.lines().some((line) => line.startsWith('pulumi up'))).toBe(false);
+  });
+
+  it('runs both takeover previews with their output marked private', async () => {
+    const f = adoptionFixture();
+    expect((await run(adopted, f)).error).toBeUndefined();
+    // The runner then withholds the output of a failure too (installer-engine-failure-tail.test.ts).
+    expect(f.previewOptions).toEqual([{ privateOutput: true }, { privateOutput: true }]);
   });
 
   it('refuses, before pulumi up, a takeover whose preview creates, replaces or deletes', async () => {

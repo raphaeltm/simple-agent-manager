@@ -162,8 +162,12 @@ export async function deployedWorkerOverrideVars(
 /**
  * Copies deployed overrides into the deploy environment without replacing a value already set.
  * A deployed value equal to the approved source's own default (its `[vars]` entry, or the code
- * default recorded for a var it omits) is not an override: carrying it would pin that default,
- * so the installation would never receive a later release's new default.
+ * default recorded for a var it omits) is not an override: carrying it would pin that default.
+ *
+ * Known limit (idea 01M8C88CXH9YTBZ4X3TDN1GP7J): overrides are inferred against the source being
+ * deployed, on every deploy. When a release changes a default, the value the previous release
+ * wrote no longer equals it, is taken for an override, and stays pinned. Fixing that needs a
+ * record of the override names made at takeover; where it lives is not decided.
  */
 export function carryDeployedVars(
   env: NodeJS.ProcessEnv,
@@ -290,7 +294,18 @@ export async function refuseResourceChanges(
   preview: () => Promise<string>,
   reason = 'The approved source would change these resources, so nothing was changed:'
 ): Promise<void> {
-  const refused = refusedTakeoverSteps(JSON.parse(await preview()));
+  let document: string;
+  try {
+    document = await preview();
+  } catch (error) {
+    if (!(error instanceof EngineCommandFailure)) throw error;
+    // The preview's output is resource state, where a RandomId's `id` is a raw key, so nothing
+    // the tool printed may reach the failure report, whatever the runner put in its tail.
+    throw new AdoptionRefused([
+      'The takeover check could not finish, so nothing was changed: the infrastructure preview failed. Its output is withheld because it can contain key values.',
+    ]);
+  }
+  const refused = refusedTakeoverSteps(JSON.parse(document));
   if (refused.length) throw new AdoptionRefused([reason, ...refused]);
 }
 
