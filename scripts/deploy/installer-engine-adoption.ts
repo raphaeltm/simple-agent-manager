@@ -20,13 +20,35 @@ import { WORKER_VAR_OVERRIDE_NAMES } from './worker-var-override-names.js';
  */
 const TAKEOVER_UNCHANGING_OPERATIONS = new Set(['same', 'read', 'refresh']);
 /**
- * Resource types a takeover may update in place. Cloudflare's provider rewrites the Pages project
- * on every deploy: a routine deploy of an unchanged SAM reports it as its one in-place update, so
- * refusing it would refuse every takeover. It holds no data, and every deploy republishes it. An
- * in-place update of anything else (a database, bucket, lifecycle rule, DNS record, route, key or
- * certificate) would reconfigure the existing deployment and is refused like a replacement.
+ * The one in-place update a takeover may perform. A routine deploy of an unchanged SAM updates
+ * the Pages project, because the provider tracks its deployment records and each web deploy
+ * replaces them: production deploy run 45661601817 shows `canonicalDeployment` and
+ * `latestDeployment` as the properties that differ. Refusing that would refuse every takeover.
+ * An update of the Pages project that names any other property, such as `productionBranch` (a
+ * stack option this job cannot see), is a real reconfiguration and is refused, as is an in-place
+ * update of anything else (a database, bucket, lifecycle rule, DNS record, route, key or
+ * certificate).
  */
-const TAKEOVER_UPDATABLE_TYPES = new Set(['cloudflare:index/pagesProject:PagesProject']);
+const PAGES_PROJECT_TYPE = 'cloudflare:index/pagesProject:PagesProject';
+const PAGES_DEPLOYMENT_RECORDS = new Set(['canonicalDeployment', 'latestDeployment']);
+const MAX_CHANGED_PROPERTIES = 6;
+
+/** The top-level properties a step's detailed diff names; undefined when it reports none. */
+function changedProperties(step: unknown): string[] | undefined {
+  const diff = (step as { detailedDiff?: unknown } | null)?.detailedDiff;
+  if (!diff || typeof diff !== 'object' || Array.isArray(diff)) return undefined;
+  const roots = new Set(Object.keys(diff).map((path) => path.split(/[.[]/, 1)[0] ?? path));
+  return roots.size ? [...roots].sort() : undefined;
+}
+
+/** Whether an update only replaces the Pages project's deployment records. */
+function isRoutinePagesUpdate(urn: unknown, changed: string[] | undefined): boolean {
+  return (
+    urnParts(urn)?.type === PAGES_PROJECT_TYPE &&
+    changed !== undefined &&
+    changed.every((property) => PAGES_DEPLOYMENT_RECORDS.has(property))
+  );
+}
 const MAX_REFUSAL_LINES = 30;
 
 /**
@@ -64,6 +86,20 @@ const MAX_REFUSAL_LINE_CHARS = 300;
 
 /** Worker vars the engine computes for every deploy; a deployed value must never replace them. */
 const ENGINE_OWNED_VARS = new Set(['VM_AGENT_REQUIRED_VERSION']);
+
+/**
+ * Settings `sync-wrangler-config.ts` takes from the deploy environment that are not in the
+ * override-name list but do reach the Worker as plain-text vars, so the deployed Worker still
+ * says what they were. The key is the Worker var; the value is the environment name that
+ * produces it (`DEPLOY_BUILDER_CLASS_MAX_INSTANCES` is written from `DEPLOY_BUILDER_MAX_INSTANCES`).
+ * The other container limits and the builder's instance type reach only the container
+ * configuration and cannot be read back here (idea 01M8C88CXH9YTBZ4X3TDN1GP7J).
+ */
+const READABLE_SYNC_SETTINGS: Readonly<Record<string, string>> = {
+  PREVIEW_BASE_DOMAIN: 'PREVIEW_BASE_DOMAIN',
+  PREVIEW_URL_TTL_SECONDS: 'PREVIEW_URL_TTL_SECONDS',
+  DEPLOY_BUILDER_CLASS_MAX_INSTANCES: 'DEPLOY_BUILDER_MAX_INSTANCES',
+};
 
 /** A takeover refusal. Its tail names what would change; it never carries secret values. */
 export class AdoptionRefused extends EngineCommandFailure {
@@ -106,10 +142,14 @@ export function refusedTakeoverSteps(preview: unknown): string[] {
     const op = (step as { op?: unknown } | null)?.op;
     if (typeof op !== 'string') throw new Error('Invalid infrastructure preview');
     const urn = (step as { urn?: unknown }).urn;
-    const allowed =
-      TAKEOVER_UNCHANGING_OPERATIONS.has(op) ||
-      (op === 'update' && TAKEOVER_UPDATABLE_TYPES.has(urnParts(urn)?.type ?? ''));
-    if (!allowed) refused.push(`${op} ${urnLabel(urn)}`);
+    if (TAKEOVER_UNCHANGING_OPERATIONS.has(op)) continue;
+    // Property names only: the diff's values can be resource state.
+    const changed = op === 'update' ? changedProperties(step) : undefined;
+    if (op === 'update' && isRoutinePagesUpdate(urn, changed)) continue;
+    const properties = changed
+      ? ` (changes: ${changed.slice(0, MAX_CHANGED_PROPERTIES).join(', ')}${changed.length > MAX_CHANGED_PROPERTIES ? ', …' : ''})`
+      : '';
+    refused.push(`${op} ${urnLabel(urn)}${properties}`);
   }
   return refused;
 }
@@ -149,12 +189,16 @@ export async function deployedWorkerOverrideVars(
   const vars: Record<string, string> = {};
   for (const binding of bindings as Array<{ type?: unknown; name?: unknown; text?: unknown }>) {
     if (
-      binding?.type === 'plain_text' &&
-      typeof binding.name === 'string' &&
-      names.has(binding.name) &&
-      typeof binding.text === 'string'
+      binding?.type !== 'plain_text' ||
+      typeof binding.name !== 'string' ||
+      typeof binding.text !== 'string'
     )
-      vars[binding.name] = binding.text;
+      continue;
+    if (names.has(binding.name)) vars[binding.name] = binding.text;
+    const setting = Object.hasOwn(READABLE_SYNC_SETTINGS, binding.name)
+      ? READABLE_SYNC_SETTINGS[binding.name]
+      : undefined;
+    if (setting) vars[setting] = binding.text;
   }
   return vars;
 }

@@ -174,7 +174,8 @@ change nothing else (`scripts/deploy/installer-engine-adoption.ts`):
 - **It stops before changing your deployment or its deploy state** when a preview (with a
   read-only refresh) would create, replace or delete any resource, or change one in place, and
   lists them under **Technical details** (`refusedTakeoverSteps`). The one in-place change it
-  allows is to the Pages project, which Cloudflare's provider rewrites on every deploy. The same
+  allows is to the Pages project's deployment records, which change with every web deploy; a
+  change to anything else on it, such as its production branch, stops the takeover. The same
   check runs again immediately before the change is applied.
 - **It never creates** a deploy-state bucket or stack: a missing one stops the takeover.
 - **Your keys stay**: key secrets the API Worker already holds (`ENCRYPTION_KEY`, the JWT, signing
@@ -191,6 +192,19 @@ change nothing else (`scripts/deploy/installer-engine-adoption.ts`):
   `D1_READ_REPLICATION_MODE` did so in a GitHub Environment the service cannot see.
 - **Your users stay**: no owner email is set and no setup token is handed out, because the
   deployment already has its administrators.
+
+**What is not carried.** The service reads your settings from the deployed Worker, so it cannot
+see settings that live only in your fork's GitHub Environment and never reach the Worker as a
+readable value. These return to SAM's defaults on the takeover:
+
+- `SANDBOX_CONTAINER_MAX_INSTANCES`, `VM_AGENT_CONTAINER_MAX_INSTANCES` and
+  `DEPLOY_BUILDER_INSTANCE_TYPE` (container limits and the builder's instance type;
+  `DEPLOY_BUILDER_MAX_INSTANCES` is carried);
+- the web app's build-time `VITE_*` variables;
+- an explicit `ARTIFACTS_BINDING_ENABLED`, which goes back to automatic detection.
+
+Pulumi stack options you set, such as storage retention periods or the Pages production branch,
+are not reset: the takeover stops and names the resource instead.
 
 The check covers your infrastructure and your database, not your code: the takeover deploys SAM's
 approved source, so changes you made to the code in a fork are not kept.

@@ -310,3 +310,28 @@ as the resource updated in place. The provider rewrites the Pages project on eve
   reaches no event, result, command argument or command environment (proven by leaking it into the
   environment once). The keys task removes the exposure by excluding the key resources from the
   previews.
+
+## Review fixes, round 9 (2026-11-26, Codex review of 52e839dc6)
+
+The two findings are members of one class: a setting the fork's owner made in the GitHub
+Environment, which a takeover cannot see. Mapped it: the fork workflow passes about 555 variables;
+512 are Worker var overrides (carried from the deployed Worker). Of the rest, most only tune the
+deploy itself. The ones that change a deployment:
+
+- P2 "Restrict the Pages update exception to provider-only drift": fixed. The exception was by
+  resource type. It now requires the step's detailed diff to name only `canonicalDeployment` and
+  `latestDeployment`, the two properties production deploy run 45661601817 shows differing; any
+  other property (such as `productionBranch`) or a missing diff is refused, and refusals name the
+  changed properties (names only).
+- P2 "Preserve container deployment overrides during takeover": partly fixed.
+  `DEPLOY_BUILDER_MAX_INSTANCES` is read back from the Worker var sync derives from it
+  (`DEPLOY_BUILDER_CLASS_MAX_INSTANCES`), and `PREVIEW_BASE_DOMAIN` / `PREVIEW_URL_TTL_SECONDS`
+  are now carried too (`READABLE_SYNC_SETTINGS`). NOT recoverable: the sandbox and VM-agent
+  container limits and the builder instance type reach only the container configuration. The
+  Cloudflare API reference lists `max_instances` and `configuration.instance_type` for scheduled
+  container applications and says they do not apply to Durable Object applications, which is what
+  SAM's are, so I did not build recovery on it. The web app's `VITE_*` build variables and an
+  explicit `ARTIFACTS_BINDING_ENABLED` are in the same position.
+- Because those are reset silently, the takeover panel and the guide now say so at the decision
+  point. The real fix is for the owner to hand the service the fork's GitHub Environment variables
+  (non-secret by definition): idea 01M8C88CXH9YTBZ4X3TDN1GP7J, to be decided by Raphaël.

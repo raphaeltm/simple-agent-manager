@@ -1201,9 +1201,16 @@ describe('installation engine: adopting an existing deployment', () => {
   };
   const keySame = { op: 'same', urn: keyState.urn, oldState: keyState, newState: keyState };
   // What a routine deploy of an unchanged SAM reports: the provider rewrites the Pages project.
+  const pagesUrn =
+    'urn:pulumi:prod::sam::cloudflare:index/pagesProject:PagesProject::sam-pages-project';
+  // Its deployment records are what differ after each web deploy (production run 45661601817).
   const pagesUpdate = {
     op: 'update',
-    urn: 'urn:pulumi:prod::sam::cloudflare:index/pagesProject:PagesProject::sam-pages-project',
+    urn: pagesUrn,
+    detailedDiff: {
+      'canonicalDeployment.id': { kind: 'update', inputDiff: false },
+      'latestDeployment.stages[4].endedOn': { kind: 'update', inputDiff: false },
+    },
   };
 
   interface AdoptionWorld {
@@ -1281,6 +1288,10 @@ describe('installation engine: adopting an existing deployment', () => {
             result: {
               bindings: [
                 { type: 'plain_text', name: 'REQUIRE_APPROVAL', text: 'false' },
+                // Sync settings outside the override list that the Worker still records.
+                { type: 'plain_text', name: 'PREVIEW_BASE_DOMAIN', text: 'previews.example.org' },
+                { type: 'plain_text', name: 'PREVIEW_URL_TTL_SECONDS', text: '600' },
+                { type: 'plain_text', name: 'DEPLOY_BUILDER_CLASS_MAX_INSTANCES', text: '2' },
                 { type: 'plain_text', name: 'VM_AGENT_REQUIRED_VERSION', text: 'f'.repeat(40) },
                 { type: 'plain_text', name: 'NOT_AN_OVERRIDE', text: 'ignored' },
                 // Equal to the source's defaults: not overrides, so not pinned.
@@ -1362,6 +1373,11 @@ describe('installation engine: adopting an existing deployment', () => {
     for (const sync of syncs) {
       // The deployed override survives; an engine-owned var is never replaced by the old value.
       expect(sync.env.REQUIRE_APPROVAL).toBe('false');
+      expect(sync.env.PREVIEW_BASE_DOMAIN).toBe('previews.example.org');
+      expect(sync.env.PREVIEW_URL_TTL_SECONDS).toBe('600');
+      // Read back from the var sync derives from it, under the name sync reads.
+      expect(sync.env.DEPLOY_BUILDER_MAX_INSTANCES).toBe('2');
+      expect(sync.env.DEPLOY_BUILDER_CLASS_MAX_INSTANCES).toBeUndefined();
       expect(sync.env.VM_AGENT_REQUIRED_VERSION).toBe('d'.repeat(40));
       expect(sync.env.NOT_AN_OVERRIDE).toBeUndefined();
       expect(sync.env.CONNECTOR_ENABLED).toBeUndefined();
@@ -1388,6 +1404,35 @@ describe('installation engine: adopting an existing deployment', () => {
     expect(calls.some((line) => line.includes('configure-d1-read-replication.sh'))).toBe(false);
     expect(calls.some((line) => line.includes('configure-r2-cors.sh'))).toBe(true);
     expect(f.requests.some((line) => line.includes(`/d1/database/${databaseId}/query`))).toBe(true);
+  });
+
+  it('refuses a Pages project update that changes more than its deployment records', async () => {
+    const f = adoptionFixture({
+      preview: {
+        steps: [
+          sameStep,
+          {
+            op: 'update',
+            urn: pagesUrn,
+            // The fork set the stack option pagesProductionBranch, which this job cannot see.
+            detailedDiff: {
+              'latestDeployment.id': { kind: 'update', inputDiff: false },
+              productionBranch: { kind: 'update', inputDiff: true },
+            },
+          },
+          // An update that reports no detail cannot be shown to be routine.
+          { op: 'update', urn: pagesUrn.replace('sam-pages-project', 'undetailed') },
+        ],
+      },
+    });
+    const { error, events } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase infrastructure failed');
+    expect(f.lines().some((line) => line.startsWith('pulumi up'))).toBe(false);
+    expect(events.find((event) => event.status === 'failed')?.tail).toEqual([
+      'The approved source would change these resources, so nothing was changed:',
+      'update cloudflare:index/pagesProject:PagesProject sam-pages-project (changes: latestDeployment, productionBranch)',
+      'update cloudflare:index/pagesProject:PagesProject undetailed',
+    ]);
   });
 
   it('refuses an in-place update of anything but the Pages project', async () => {
