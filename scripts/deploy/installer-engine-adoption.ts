@@ -203,16 +203,40 @@ export async function deployedWorkerOverrideVars(
   return vars;
 }
 
-/** Every plain-text var the deployed API Worker runs with. Secrets are never readable here. */
-async function deployedPlainTextVars(
+type WorkerBinding = { type?: unknown; name?: unknown; text?: unknown };
+
+/** The deployed API Worker's bindings. A secret appears by name only, never with its value. */
+async function deployedBindings(
   access: CloudflareAccess & { worker: string }
-): Promise<Array<[string, string]>> {
+): Promise<WorkerBinding[]> {
   const settings = await cloudflareResult(access, `workers/scripts/${access.worker}/settings`);
   if (!settings.found) throw new Error('Adopted API Worker not found');
   const bindings = (settings.result as { bindings?: unknown } | undefined)?.bindings;
   if (!Array.isArray(bindings)) throw new Error('Invalid Worker settings');
+  return bindings as WorkerBinding[];
+}
+
+/**
+ * Whether the deployed API Worker sends email (the `AGENT_EMAIL` binding sync-wrangler-config.ts
+ * emits once Email Sending is prepared). An adopted deploy prepares email only when this holds,
+ * and then only from what already exists (`AGENT_EMAIL_EXISTING_ONLY`), because onboarding a
+ * sending subdomain and writing its DNS records happen outside the takeover's no-change checks.
+ * Matched by name alone: a miss would take a working binding away, which is the worse error.
+ * Known limit, tracked in idea 01M8C88CXH9YTBZ4X3TDN1GP7J: an adopted installation that has no
+ * email cannot get it from the service until its owner can hand over that setting.
+ */
+export async function deployedAgentEmail(
+  access: CloudflareAccess & { worker: string }
+): Promise<boolean> {
+  return (await deployedBindings(access)).some((binding) => binding?.name === 'AGENT_EMAIL');
+}
+
+/** Every plain-text var the deployed API Worker runs with. Secrets are never readable here. */
+async function deployedPlainTextVars(
+  access: CloudflareAccess & { worker: string }
+): Promise<Array<[string, string]>> {
   const vars: Array<[string, string]> = [];
-  for (const binding of bindings as Array<{ type?: unknown; name?: unknown; text?: unknown }>) {
+  for (const binding of await deployedBindings(access)) {
     if (
       binding?.type === 'plain_text' &&
       typeof binding.name === 'string' &&

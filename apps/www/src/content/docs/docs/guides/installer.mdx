@@ -215,6 +215,18 @@ change nothing else (`scripts/deploy/installer-engine-adoption.ts`):
 - **Your users stay**: no owner email is set and no setup token is handed out, because the
   deployment already has its administrators.
 
+- **Your email setup stays**: a SAM that sends email (its API Worker has the `AGENT_EMAIL` binding,
+  `deployedAgentEmail`) keeps it, using the sending subdomain that exists. A SAM without it is not
+  given it: the takeover and later updates never onboard `agents.<your domain>` for sending or
+  write its DNS records, as a new installation would. The service has no way to turn email on for
+  such a SAM yet.
+
+**What the deploy itself applies.** Besides the Worker code, the web app and any new database
+migrations, deploying the approved source applies the service configuration that source needs,
+outside the resource check above: the upload CORS rule on the assets bucket
+(`configure-r2-cors.sh`), the AI Gateway if your account does not have it yet
+(`configure-ai-gateway.sh`), and the tail Worker. A fork's own deploy applies the same.
+
 **What is not carried.** The service reads your settings from the deployed Worker, so it cannot
 see settings that live only in your fork's GitHub Environment and never reach the Worker as a
 readable value. These return to SAM's defaults on the takeover:
