@@ -2276,6 +2276,10 @@ call is never counted by both except inside the lag margin, and each cron run re
 estimate with the gateway's own figure, so a catalog price that differs from what the gateway
 charged only affects the last hour or so. The estimate is not shown as spend: on gateway
 installations it is kept out of the provider rows that `GET /api/usage/ai` adds to gateway totals.
+Passthrough calls (`/ai/proxy/:wstoken/*`) go straight to the provider and never reach gateway
+logs, so for a platform-owned credential SAM's price is their spend record on every installation:
+they are priced in those provider rows and kept as a month total that the cap always adds to the
+gateway figure (`ai_direct_spend_month`).
 The estimate read shares the existing per-call counter read (`checkGatewayCostAdmission`), so a
 call makes one Durable Object round-trip, as before; a failed counter read refuses that user's call
 with a retryable 503 (`ai_proxy.monthly_spend_unreadable`), as the daily-budget read always refused

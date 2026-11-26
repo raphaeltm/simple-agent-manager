@@ -260,6 +260,56 @@ describe('concurrent admission (rules 45/69): bounded in-flight overshoot, no re
   });
 });
 
+describe('calls that bypass the gateway (passthrough)', () => {
+  async function directResponse() {
+    const response = new Response(
+      JSON.stringify({ usage: { prompt_tokens: 1_000, completion_tokens: 1_000 } }),
+      { headers: { 'content-type': 'application/json' } }
+    );
+    await attachTokenUsageAccounting(response, {
+      env,
+      userId: USER,
+      format: 'openai',
+      costModelId: PRICED.id,
+      directUpstream: true,
+      provider: { providerId: 'openai', providerName: 'OpenAI', dialect: 'openai' },
+    });
+  }
+
+  it('stays in the monthly total after the gateway total moves past it', async () => {
+    setUserCap(CALL_USD * 2.5);
+    vi.setSystemTime(NOW - 120 * MINUTE);
+    await directResponse();
+    await directResponse();
+    vi.setSystemTime(NOW);
+    // The cron ran after both calls; no gateway log contains them.
+    setGatewayTotal(CALL_USD, NOW - 5 * MINUTE);
+    await expect(gate()).resolves.toMatchObject({ allowed: false });
+    // Control: the same two calls routed through the gateway are inside its total.
+    db.prepare('DELETE FROM ai_direct_spend_month').run();
+    await expect(gate()).resolves.toEqual({ allowed: true });
+  });
+
+  it('is priced in the provider rows the usage page adds to gateway totals', async () => {
+    await directResponse();
+    const entries = await getProviderUsage(env.KV, USER, new Date(Date.UTC(2026, 10, 1)), env);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.estimatedCostUsd).toBeCloseTo(CALL_USD, 9);
+    const month = await counter.getGatewayAdmissionSnapshot('2026-11-26', '2026-11', null);
+    expect(month.directMonthUsd).toBeCloseTo(CALL_USD, 9);
+    expect(month.estimateMonthUsd).toBe(0);
+  });
+});
+
+describe('gateway without the account API', () => {
+  it('does not read the ceiling, so a settings outage cannot refuse calls', async () => {
+    env = { ...env, CF_API_TOKEN: '' } as unknown as Env;
+    mocks.resolveAdminSettingDetails.mockRejectedValue(new Error('settings down'));
+    await expect(gate()).resolves.toEqual({ allowed: true });
+    expect(mocks.resolveAdminSettingDetails).not.toHaveBeenCalled();
+  });
+});
+
 describe('failure behaviour', () => {
   it('refuses with a retryable 503 when the counter read fails, rather than admitting it', async () => {
     setUserCap(1);

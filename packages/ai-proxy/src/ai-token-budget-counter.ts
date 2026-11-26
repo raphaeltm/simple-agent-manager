@@ -66,6 +66,14 @@ export class AiTokenBudgetCounter extends DurableObject<AiProxyEnv> {
           updated_at         INTEGER NOT NULL
         )`
       );
+      // Gateway installs: priced spend on calls that bypassed the gateway (ai-cost-estimate.ts).
+      this.sql.exec(
+        `CREATE TABLE IF NOT EXISTS ai_direct_spend_month (
+          budget_month       TEXT PRIMARY KEY NOT NULL,
+          estimated_cost_usd REAL NOT NULL DEFAULT 0,
+          updated_at         INTEGER NOT NULL
+        )`
+      );
       this.sql.exec(
         `CREATE TABLE IF NOT EXISTS ai_cost_estimate_month (
           budget_month       TEXT PRIMARY KEY NOT NULL,
@@ -288,16 +296,37 @@ export class AiTokenBudgetCounter extends DurableObject<AiProxyEnv> {
         .toArray()[0];
       estimateSinceUsd = finiteNonNegative(since?.total);
     }
+    const direct = this.sql
+      .exec<{ estimated_cost_usd: number }>(
+        `SELECT estimated_cost_usd FROM ai_direct_spend_month WHERE budget_month = ?`,
+        monthKey
+      )
+      .toArray()[0];
     return {
       budget,
       estimateMonthUsd: finiteNonNegative(month?.estimated_cost_usd),
       estimateSinceUsd,
+      directMonthUsd: finiteNonNegative(direct?.estimated_cost_usd),
     };
   }
 
   private recordCostEstimate(estimate: CostEstimateWrite): void {
     if (!(estimate.costUsd > 0) || !Number.isFinite(estimate.costUsd)) return;
     const now = Date.now();
+    if (estimate.kind === 'direct') {
+      this.sql.exec(
+        `INSERT INTO ai_direct_spend_month (budget_month, estimated_cost_usd, updated_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(budget_month) DO UPDATE SET
+           estimated_cost_usd = ai_direct_spend_month.estimated_cost_usd + excluded.estimated_cost_usd,
+           updated_at = excluded.updated_at`,
+        estimate.monthKey,
+        estimate.costUsd,
+        now
+      );
+      this.sql.exec(`DELETE FROM ai_direct_spend_month WHERE budget_month < ?`, estimate.monthKey);
+      return;
+    }
     this.sql.exec(
       `INSERT INTO ai_cost_estimate_bucket (bucket_start, estimated_cost_usd, updated_at)
        VALUES (?, ?, ?)

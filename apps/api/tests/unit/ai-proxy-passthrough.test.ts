@@ -92,7 +92,7 @@ vi.mock('@simple-agent-manager/ai-proxy/internal/ai-token-budget', () => ({
 }));
 
 vi.mock('../../src/lib/logger', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../../src/lib/logger')>(),
+  ...(await importOriginal<typeof import('../../src/lib/logger')>()),
   log: {
     info: vi.fn(),
     error: (...args: unknown[]) => mockLogError(...args),
@@ -1203,31 +1203,40 @@ describe('L13: platform-owned passthrough credentials count toward the monthly c
     ['https://api.openai.com/v1/alias', false],
     ['https://api.anthropic.com/v1', false],
     ['https://api.anthropic.com', true],
-  ])('refuses catalog price mismatches before forwarding (%s anthropic=%s)', async (baseUrl, anthropic) => {
-    // The configuration claims providerId=openai on OpenAI-compatible calls. That is not proof.
-    const res = await callWithSource('platform', { baseUrl, anthropic });
-    expect(res.status).toBe(400);
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
+  ])(
+    'refuses catalog price mismatches before forwarding (%s anthropic=%s)',
+    async (baseUrl, anthropic) => {
+      // The configuration claims providerId=openai on OpenAI-compatible calls. That is not proof.
+      const res = await callWithSource('platform', { baseUrl, anthropic });
+      expect(res.status).toBe(400);
+      expect(mockFetch).not.toHaveBeenCalled();
+    }
+  );
 
   it('accepts the canonical endpoint with normalized host, default port and trailing slashes', async () => {
-    expect((await callWithSource('platform', { baseUrl: 'https://API.OPENAI.COM:443/v1///' })).status).toBe(200);
+    expect(
+      (await callWithSource('platform', { baseUrl: 'https://API.OPENAI.COM:443/v1///' })).status
+    ).toBe(200);
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('refuses a custom Anthropic endpoint even when its model has an Anthropic price', async () => {
     const model = PLATFORM_AI_MODELS.find((m) => m.provider === 'anthropic')!.id;
     const res = await callWithSource('platform', {
-      model, anthropic: true, baseUrl: 'https://custom-anthropic.example',
+      model,
+      anthropic: true,
+      baseUrl: 'https://custom-anthropic.example',
     });
     expect(res.status).toBe(400);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it.each(['user-attachment', 'project-attachment', 'gateway'])(
-    'keeps custom endpoint behavior for %s', async (source) => {
+    'keeps custom endpoint behavior for %s',
+    async (source) => {
       const res = await callWithSource(source === 'gateway' ? 'platform' : source, {
-        baseUrl: 'https://custom-openai.example/v1', gateway: source === 'gateway',
+        baseUrl: 'https://custom-openai.example/v1',
+        gateway: source === 'gateway',
       });
       expect(res.status).toBe(200);
       expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -1269,37 +1278,90 @@ describe('L13: platform-owned passthrough credentials count toward the monthly c
   });
 
   it.each([
-    [false, false], [false, true], [true, false], [true, true],
-  ])('includes tool schemas and structured history in input fallback, anthropic=%s stream=%s', async (anthropic, stream) => {
-    const description = 'Detailed schema information. '.repeat(200);
-    const argumentsJson = JSON.stringify({ query: 'long historical tool input '.repeat(200) });
-    const requestBody = anthropic
-      ? {
-          system: description,
-          tools: [{ name: 'lookup', description, input_schema: { type: 'object' } }],
-          messages: [{ role: 'assistant', content: [{ type: 'tool_use', id: 'call', name: 'lookup', input: { query: argumentsJson } }] }],
-        }
-      : {
-          tools: [{ type: 'function', function: { name: 'lookup', description, parameters: { type: 'object' } } }],
-          messages: [{ role: 'assistant', content: null, tool_calls: [{ id: 'call', type: 'function', function: { name: 'lookup', arguments: argumentsJson } }] }],
-        };
-    const model = anthropic
-      ? PLATFORM_AI_MODELS.find((m) => m.provider === 'anthropic')!.id
-      : PRICED.id;
-    expect((await callWithSource('platform', { model, anthropic, stream, missingUsage: true, requestBody })).status).toBe(200);
-    const usage = mockIncrementProviderUsage.mock.calls[0]!;
-    expect(usage[3]).toBeGreaterThanOrEqual(Math.ceil(JSON.stringify(requestBody).length / 4));
-  });
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])(
+    'includes tool schemas and structured history in input fallback, anthropic=%s stream=%s',
+    async (anthropic, stream) => {
+      const description = 'Detailed schema information. '.repeat(200);
+      const argumentsJson = JSON.stringify({ query: 'long historical tool input '.repeat(200) });
+      const requestBody = anthropic
+        ? {
+            system: description,
+            tools: [{ name: 'lookup', description, input_schema: { type: 'object' } }],
+            messages: [
+              {
+                role: 'assistant',
+                content: [
+                  { type: 'tool_use', id: 'call', name: 'lookup', input: { query: argumentsJson } },
+                ],
+              },
+            ],
+          }
+        : {
+            tools: [
+              {
+                type: 'function',
+                function: { name: 'lookup', description, parameters: { type: 'object' } },
+              },
+            ],
+            messages: [
+              {
+                role: 'assistant',
+                content: null,
+                tool_calls: [
+                  {
+                    id: 'call',
+                    type: 'function',
+                    function: { name: 'lookup', arguments: argumentsJson },
+                  },
+                ],
+              },
+            ],
+          };
+      const model = anthropic
+        ? PLATFORM_AI_MODELS.find((m) => m.provider === 'anthropic')!.id
+        : PRICED.id;
+      expect(
+        (
+          await callWithSource('platform', {
+            model,
+            anthropic,
+            stream,
+            missingUsage: true,
+            requestBody,
+          })
+        ).status
+      ).toBe(200);
+      const usage = mockIncrementProviderUsage.mock.calls[0]!;
+      expect(usage[3]).toBeGreaterThanOrEqual(Math.ceil(JSON.stringify(requestBody).length / 4));
+    }
+  );
 
-  it.each(['user-attachment', 'project-attachment', 'gateway'])(
-    'preserves previous streaming input estimation for %s', async (source) => {
-      await callWithSource(source === 'gateway' ? 'platform' : source, {
-        gateway: source === 'gateway', stream: true, missingUsage: true,
+  it.each(['user-attachment', 'project-attachment'])(
+    'preserves previous streaming input estimation for %s',
+    async (source) => {
+      await callWithSource(source, {
+        stream: true,
+        missingUsage: true,
         requestBody: { tools: [{ description: 'large tool schema '.repeat(200) }] },
       });
       expect(mockIncrementProviderUsage.mock.calls[0]?.[3]).toBe(1);
     }
   );
+
+  it('estimates a platform-funded passthrough from the whole request on a gateway install too', async () => {
+    // Passthrough never reaches AI Gateway logs, so SAM's estimate is the only spend record there.
+    await callWithSource('platform', {
+      gateway: true,
+      stream: true,
+      missingUsage: true,
+      requestBody: { tools: [{ description: 'large tool schema '.repeat(200) }] },
+    });
+    expect(mockIncrementProviderUsage.mock.calls[0]?.[3]).toBeGreaterThan(100);
+  });
 
   it('keeps measured input authoritative even with a larger tool schema', async () => {
     await callWithSource('platform', {

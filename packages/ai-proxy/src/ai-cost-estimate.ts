@@ -43,8 +43,15 @@ export const COST_ESTIMATE_RETENTION_MS =
   MAX_COST_ESTIMATE_GATEWAY_LAG_SECONDS * 1000 +
   COST_ESTIMATE_BUCKET_MS;
 
-/** One response's estimate, written in the same counter transaction as its daily tokens. */
+/**
+ * One response's cost, written in the same counter transaction as its daily tokens.
+ * - `estimate`: a gateway-routed call. The gateway total will include it, so it only fills the
+ *   window since the total was read (time buckets).
+ * - `direct`: a call that bypassed the gateway (passthrough to the provider's own endpoint). No
+ *   gateway total ever includes it, so SAM's price is its spend record for the whole month.
+ */
 export interface CostEstimateWrite {
+  kind: 'estimate' | 'direct';
   costUsd: number;
   /** Start of the time bucket (epoch ms, multiple of `COST_ESTIMATE_BUCKET_MS`). */
   bucketStartMs: number;
@@ -61,6 +68,8 @@ export interface GatewayAdmissionSnapshot {
   estimateMonthUsd: number;
   /** Estimate for buckets starting at or after the requested time; 0 when none was requested. */
   estimateSinceUsd: number;
+  /** This month's priced spend on calls that bypassed the gateway (`kind: 'direct'`). */
+  directMonthUsd: number;
 }
 
 /** The gateway's month total for a user as the cron recorded it. */
@@ -90,11 +99,13 @@ export function costEstimateBucketStart(ms: number): number {
 /** The write for one priced response, or undefined when it cost nothing. */
 export function buildCostEstimateWrite(
   costUsd: number,
+  kind: CostEstimateWrite['kind'] = 'estimate',
   now = new Date()
 ): CostEstimateWrite | undefined {
   if (!Number.isFinite(costUsd) || costUsd <= 0) return undefined;
   const nowMs = now.getTime();
   return {
+    kind,
     costUsd,
     bucketStartMs: costEstimateBucketStart(nowMs),
     monthKey: utcMonthKey(now),
@@ -178,6 +189,19 @@ export function estimateWindowRetained(windowStartMs: number | null, now: Date):
  * month-long estimate would then refuse users well below their cap.
  */
 export function gatewayMonthlySpendUsd(
+  gateway: GatewayMonthlyCost | null,
+  snapshot: Pick<
+    GatewayAdmissionSnapshot,
+    'estimateMonthUsd' | 'estimateSinceUsd' | 'directMonthUsd'
+  >,
+  windowStartMs: number | null,
+  now: Date
+): number {
+  // Calls that bypassed the gateway are in no gateway total, so they always add (no overlap).
+  return gatewayRoutedSpendUsd(gateway, snapshot, windowStartMs, now) + snapshot.directMonthUsd;
+}
+
+function gatewayRoutedSpendUsd(
   gateway: GatewayMonthlyCost | null,
   snapshot: Pick<GatewayAdmissionSnapshot, 'estimateMonthUsd' | 'estimateSinceUsd'>,
   windowStartMs: number | null,

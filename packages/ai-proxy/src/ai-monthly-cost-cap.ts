@@ -211,8 +211,9 @@ export interface GatewayCostAdmission {
  *
  * Spend = the gateway total the hourly cron wrote, plus SAM's catalog-priced estimate for calls
  * since it (minus the lag margin), or the month estimate when the cron has not written a total
- * yet (`gatewayMonthlySpendUsd`, ai-cost-estimate.ts). The gateway is the authority: the estimate
- * only covers what its total cannot have seen.
+ * yet, plus SAM's priced total for calls that bypassed the gateway (passthrough), which no
+ * gateway total includes (`gatewayMonthlySpendUsd`, ai-cost-estimate.ts). The gateway is the
+ * authority for what it routes: the estimate only covers what its total cannot have seen.
  *
  * Failure behaviour:
  * - Unreadable gateway total (KV error or malformed value): treated as missing, so the month
@@ -231,15 +232,20 @@ export async function checkGatewayCostAdmission(
   ports: MonthlyCostCeilingPort,
   options?: MonthlyCostCapOptions
 ): Promise<GatewayCostAdmission> {
+  // A gateway without the account API cannot price spend: no cap applies, so the ceiling is not
+  // read (a settings outage must not refuse calls the ceiling could not bound anyway).
+  const capAvailable = isMonthlyCostCapAvailable(env);
   const [userSettings, ceilingUsd] = await Promise.all([
     getUserBudgetSettings(kv, userId),
-    options?.platformBilled === false ? null : resolveMonthlyCostCeilingUsd(env, ports),
+    options?.platformBilled === false || !capAvailable
+      ? null
+      : resolveMonthlyCostCeilingUsd(env, ports),
   ]);
   const userCapUsd = userSettings?.monthlyCostCapUsd ?? null;
   const capUsd = effectiveMonthlyCostCapUsd(userCapUsd, ceilingUsd);
   const source =
     ceilingUsd !== null && capUsd === ceilingUsd ? { limitSource: 'administrator' as const } : {};
-  if (capUsd === null || !isMonthlyCostCapAvailable(env)) {
+  if (capUsd === null || !capAvailable) {
     return { usage: null, userSettings, monthlyCap: { allowed: true, costUsd: 0, capUsd } };
   }
 
