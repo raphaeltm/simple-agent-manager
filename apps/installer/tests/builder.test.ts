@@ -111,8 +111,6 @@ it('hands only an https prebuilt-artifact base to the builder process', async ()
     ['https://github.com/raphaeltm/simple-agent-manager/releases/download/v1', true],
     ['http://artifacts.example.com/v1', false],
     ['https://user:pw@artifacts.example.com/v1', false],
-    // deploy.mjs stores this when ARTIFACT_BASE_URL=none: always build from source.
-    ['none', false],
   ] as const) {
     const h = harness();
     (h.env as Record<string, unknown>).ARTIFACT_BASE_URL = value;

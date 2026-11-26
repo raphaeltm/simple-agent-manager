@@ -113,9 +113,8 @@ create it, or [use your own domain](#use-your-own-domain-for-the-installer).
    there to update SAM.
 5. **Start the build.** **Continue to installation controls →**, then **Install SAM**. The page
    shows each stage as it runs (**Step 3 of 13**, with **Show all stages**) and refreshes itself.
-   It usually takes about 30 minutes; when SAM's latest release has prebuilt parts that match the
-   version being installed, the installation service downloads and checks them instead of building
-   them, which is quicker. You can close the tab and come back. **Stop this build** cancels it.
+   It usually takes about 30 minutes, because your account builds every part of SAM from the
+   source you checked out. You can close the tab and come back. **Stop this build** cancels it.
 
    <img
      src="/images/docs/installer-build-progress-mobile.png"
@@ -259,18 +258,21 @@ An installer is not moved in place: deploying an existing one with a different a
 says so (`apps/installer/scripts/deploy.mjs`). To change its address, [remove it](#remove-the-installer)
 with `REMOVE_OAUTH_CLIENT=true` and deploy again.
 
-### Build everything from source
+### Use prebuilt parts
 
-By default the installation service downloads the prebuilt parts of SAM's latest release when they
-match the version being installed, checks each against the size and SHA-256 in that release's
-manifest, and builds anything that is missing or different
-(`scripts/deploy/installer-engine-prebuilt.ts`). The manifest comes from the same release, so this
-trusts the files attached to SAM's GitHub releases in addition to the source commit you checked out.
+By default the installation service builds everything from the source commit you checked out, and
+downloads no prebuilt parts of SAM (`ARTIFACT_BASE_URL`, `apps/installer/scripts/deploy.mjs`).
 
-`ARTIFACT_BASE_URL=none` turns that off, so every installation builds everything from the pinned
-source. The choice is stored on the installer and stays in force when you deploy it again without
-the variable; `ARTIFACT_BASE_URL=default` goes back to SAM's latest release, and
-`ARTIFACT_BASE_URL=https://…` reads prebuilt parts from another location.
+SAM's releases do carry prebuilt parts (the VM agent and container images), and
+`ARTIFACT_BASE_URL=https://…` makes the installation service use the ones that match the version
+being installed, which is quicker. It is off by default because those files are not yet signed: the
+installation service checks each one against the size and SHA-256 in a manifest that comes from the
+same release (`scripts/deploy/installer-engine-prebuilt.ts`), so turning it on trusts whatever is
+attached to that release, in addition to the source commit. Anything missing or different is still
+built from source.
+
+An installer keeps the setting when you deploy it again without the variable.
+`ARTIFACT_BASE_URL=none` turns prebuilt parts off again.
 
 ### Use an existing OAuth client
 

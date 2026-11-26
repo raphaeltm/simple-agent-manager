@@ -515,9 +515,8 @@ describe('own-account installer deployment (the documented command)', () => {
     expect(config().vars.INSTALL_SOURCE_COMMIT).toBe('d'.repeat(40));
     expect(config().vars.BUILD_SHA).toBe('d'.repeat(40));
     expect(config().vars.OAUTH_SCOPES.split(' ')).toEqual(fullScopes);
-    expect(config().vars.ARTIFACT_BASE_URL).toBe(
-      'https://github.com/raphaeltm/simple-agent-manager/releases/latest/download'
-    );
+    // Nothing an installation cannot verify: no prebuilt artifact location by default.
+    expect(config().vars).not.toHaveProperty('ARTIFACT_BASE_URL');
     const created = capture.calls.find(
       (call) => call.path.endsWith('/oauth_clients') && call.method === 'POST'
     );
@@ -624,8 +623,8 @@ describe('own-account installer deployment (the documented command)', () => {
     );
   });
 });
-describe('prebuilt artifact location', () => {
-  it('an explicit URL wins over the deployed one', async () => {
+describe('prebuilt artifacts are opt-in', () => {
+  it('an explicit URL turns them on, replacing the deployed one', async () => {
     await deploy({
       existing: 'full',
       existingArtifactBaseUrl: 'https://old.example/artifacts',
@@ -633,39 +632,38 @@ describe('prebuilt artifact location', () => {
     });
     expect(config().vars.ARTIFACT_BASE_URL).toBe('https://new.example/artifacts');
   });
-  it('an unset URL keeps what the deployed installer has', async () => {
+  it('a new installer can opt in at its first deploy', async () => {
+    await deploy({ ...selfHosted, artifactBaseUrl: 'https://new.example/artifacts' });
+    expect(config().vars.ARTIFACT_BASE_URL).toBe('https://new.example/artifacts');
+  });
+  it('an unset variable keeps what the deployed installer has', async () => {
     await deploy({ existing: 'full', existingArtifactBaseUrl: 'https://old.example/artifacts' });
     expect(config().vars.ARTIFACT_BASE_URL).toBe('https://old.example/artifacts');
   });
-  it('an installer deployed without one gains the release default on redeploy', async () => {
+  it('an installer deployed without one stays without one', async () => {
     await deploy({ existing: 'full' });
-    expect(config().vars.ARTIFACT_BASE_URL).toBe(
-      'https://github.com/raphaeltm/simple-agent-manager/releases/latest/download'
-    );
+    expect(config().vars).not.toHaveProperty('ARTIFACT_BASE_URL');
+    expect(published()).toBe(true);
   });
-  // builder.test.ts proves the builder hands only an https value to the build.
-  it('"none" is stored so every installation builds from source', async () => {
+  it('"none" turns them off, and they stay off on the next deploy', async () => {
     await deploy({
       existing: 'full',
       existingArtifactBaseUrl: 'https://old.example/artifacts',
       artifactBaseUrl: 'none',
     });
-    expect(config().vars.ARTIFACT_BASE_URL).toBe('none');
-  });
-  it('a later deploy without the variable keeps the build-from-source choice', async () => {
-    await deploy({ existing: 'full', existingArtifactBaseUrl: 'none' });
-    expect(config().vars.ARTIFACT_BASE_URL).toBe('none');
-  });
-  it('"default" returns to SAM’s latest release', async () => {
-    await deploy({ existing: 'full', existingArtifactBaseUrl: 'none', artifactBaseUrl: 'default' });
-    expect(config().vars.ARTIFACT_BASE_URL).toBe(
-      'https://github.com/raphaeltm/simple-agent-manager/releases/latest/download'
-    );
+    expect(config().vars).not.toHaveProperty('ARTIFACT_BASE_URL');
+    expect(config().vars.INSTALL_SOURCE_COMMIT).toBe('b'.repeat(40));
   });
   it('rejects a URL carrying credentials or a query', async () => {
     await expect(
       deploy({ existing: 'full', artifactBaseUrl: 'https://user@example.com/a?b' })
     ).rejects.toThrow('ARTIFACT_BASE_URL');
+    expect(published()).toBe(false);
+  });
+  it.each(['default', 'http://plain.example/artifacts'])('rejects %s', async (value) => {
+    await expect(deploy({ existing: 'full', artifactBaseUrl: value })).rejects.toThrow(
+      'ARTIFACT_BASE_URL'
+    );
     expect(published()).toBe(false);
   });
 });

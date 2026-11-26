@@ -82,8 +82,8 @@ tests it.
 - [x] A2. Source commit: `GITHUB_SHA` when set (still rejected if not 40 hex), else the checked-out
       commit read from Git's files (`scripts/git-head.mjs`; no `git` process, SonarCloud S4036).
       Stop with a clear message when the commit is not on the upstream repository.
-- [x] A3. `ARTIFACT_BASE_URL`: explicit value, else the deployed value, else the canonical releases URL;
-      `none` opts out.
+- [x] A3. `ARTIFACT_BASE_URL`: explicit value, else the deployed value, else none (build from source);
+      `none` opts out. (Changed on 2026-11-26: no release default; see "Policy reconciliation".)
 - [x] A4. End by printing the address to open and the next step.
 - [x] A5. Name the missing token permission on a refused Cloudflare call, and check account, Workers and
       OAuth access before anything is published.
@@ -204,6 +204,29 @@ Six local reviewers ran on commit `9fd7914`. No CRITICAL findings.
 - `git-head.mjs` follows any ref name Git allows and keeps the resolved path under `refs/`.
 - The guide's "Remove an installation" lists Container applications.
 
+## Policy reconciliation, 2026-11-26
+
+Project policy `4d205820` (Raphaël, 2026-11-25) requires that installs pull only verifiable code and
+artifacts, never an unauthenticated manifest, and the install-path audit (SAM idea
+`01M88S2Z10WS855DM0937QVCY2`, HIGH-2) says to build from source by default until the artifacts are
+attested. That supersedes the 2026-11-07 direction this PR followed when it made prebuilt artifacts
+the default, and the "deferred" entry under "Review findings" above.
+
+- `deploy.mjs` no longer has a default `ARTIFACT_BASE_URL`. A new installer builds everything from the
+  pinned source; an explicit https URL opts in; `none` opts out; unset keeps the deployed value. The
+  stored `none` marker and the `default` keyword are gone (checklist A3 as first written no longer
+  applies).
+- `deploy-installer.yml` passes `vars.INSTALLER_ARTIFACT_BASE_URL || 'none'`, so the GitHub Environment
+  alone decides for SAM's own installers. Staging does not set it, so the staging installer, which this
+  branch's earlier runs had given the release URL, goes back to source builds. Production sets it and
+  is unchanged; that pre-existing setting is covered by the audit, not by this PR.
+- Guide and README describe prebuilt parts as opt-in and say what turning them on trusts.
+- Attestation remains SAM idea `01M85020CSFDKQ7MP0XZRZJ515`.
+
+Also since the reviews: `scripts/staging-smoke.ts` retries its claim and landing requests on 404 and 503
+inside the readiness window and reports the status it saw. That existing step failed three times on
+this branch (runs 45256673696, 45259366984, 45260693082) without saying what came back.
+
 ## Effect on the production installer deploy
 
 Production keeps `BASE_DOMAIN`, its existing full mode and its existing OAuth client, so origin, mode,
@@ -217,10 +240,9 @@ things in its deploy step do change:
 2. **`preview_urls: false`** is now written explicitly. Wrangler's default for `preview_urls` follows
    `workers_dev`, which the script already set to `false` for a custom-domain installer, so nothing
    changes.
-3. **`ARTIFACT_BASE_URL` default.** Production already sets it through the GitHub Environment variable
-   `INSTALLER_ARTIFACT_BASE_URL` to the same releases URL the default uses (read from the GitHub API on
-   2026-11-23), and an existing value is preserved anyway. Staging does not set it, so the staging
-   installer gains the default: intended.
+3. **`ARTIFACT_BASE_URL`.** Production sets `INSTALLER_ARTIFACT_BASE_URL` in its GitHub Environment
+   (read from the GitHub API on 2026-11-23), and the workflow passes that value as before. Staging does
+   not set it, so the workflow now passes `none` there.
 
 ## HELD before merge
 
@@ -233,7 +255,7 @@ the question is tracked in SAM idea `01M84YHD4FZP1C6PXK6AQZMEMM`.
 
 - [x] On a clean checkout of a commit that is on upstream, the documented command with only
       `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` deploys a full-mode installer pinned to that
-      commit, with prebuilt artifacts enabled, and prints its address (unit tests; staging workflow).
+      commit, with no prebuilt artifact location, and prints its address (unit tests; staging workflow).
 - [x] A commit that is not on upstream stops before anything is published (unit test).
 - [x] A refused Cloudflare call names the permission to add (unit tests per permission).
 - [x] An existing installer keeps its origin and mode on redeploy (unit tests).

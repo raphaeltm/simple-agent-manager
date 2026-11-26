@@ -49,9 +49,8 @@ const FULL_SCOPES = [
   TUNNEL_SCOPE,
 ];
 // Installations build SAM from this repository (src/source-policy.ts), so the pinned
-// commit must exist there, and its releases carry the prebuilt artifacts.
+// commit must exist there.
 const UPSTREAM_REPOSITORY = 'raphaeltm/simple-agent-manager';
-const DEFAULT_ARTIFACT_BASE_URL = `https://github.com/${UPSTREAM_REPOSITORY}/releases/latest/download`;
 process.chdir(fileURLToPath(new URL('..', import.meta.url)));
 const { token, account, name, base, worker } = readTarget();
 const domain = process.env.BASE_DOMAIN || '';
@@ -219,22 +218,20 @@ config.vars.SOURCE_URL =
     /^[a-f0-9]{40}$/.test(revision) ? `/tree/${revision}/` : '/tree/main/'
   );
 config.vars.DOCS_URL = process.env.DOCS_URL || template.vars.DOCS_URL;
-// Prebuilt installation artifacts. An explicit URL wins, then whatever the deployed
-// installer already has, then SAM's latest release. "none" always builds from source and is
-// stored, so a later deploy without the variable keeps that choice (the builder hands only
-// an https URL to the build, src/builder.ts); "default" returns to SAM's latest release.
-// Anything missing or mismatched at that URL is built instead (installer-engine-prebuilt.ts).
+// Prebuilt installation artifacts are opt-in. A new installer has no artifact location, so
+// its installations build everything from the pinned source: the artifact manifest is not
+// yet signed or attested (SAM idea 01M85020CSFDKQ7MP0XZRZJ515), and installs must not pull
+// what they cannot verify. An explicit https URL turns prebuilt artifacts on, an unset
+// variable keeps what the deployed installer has, and "none" turns them off again.
 const artifactBaseUrl = process.env.ARTIFACT_BASE_URL;
-if (artifactBaseUrl === 'none') config.vars.ARTIFACT_BASE_URL = 'none';
-else if (artifactBaseUrl === 'default') config.vars.ARTIFACT_BASE_URL = DEFAULT_ARTIFACT_BASE_URL;
+if (artifactBaseUrl === 'none') delete config.vars.ARTIFACT_BASE_URL;
 else if (artifactBaseUrl) {
   if (!/^https:\/\/[^\s?#@]{1,500}$/.test(artifactBaseUrl))
     throw new Error(
-      'ARTIFACT_BASE_URL must be an https URL without credentials, query or fragment'
+      'ARTIFACT_BASE_URL must be "none" or an https URL without credentials, query or fragment'
     );
   config.vars.ARTIFACT_BASE_URL = artifactBaseUrl;
-} else if (!config.vars.ARTIFACT_BASE_URL)
-  config.vars.ARTIFACT_BASE_URL = DEFAULT_ARTIFACT_BASE_URL;
+}
 const explicitCredentials = !!(process.env.OAUTH_CLIENT_ID || process.env.OAUTH_CLIENT_SECRET);
 const reuseReadyConfiguration = !!existing && ready && !scopesChanged && !explicitCredentials;
 async function findOAuthClient(clientId) {
