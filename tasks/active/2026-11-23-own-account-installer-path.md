@@ -227,11 +227,30 @@ Also since the reviews: `scripts/staging-smoke.ts` retries its claim and landing
 inside the readiness window and reports the status it saw. That existing step failed three times on
 this branch (runs 45256673696, 45259366984, 45260693082) without saying what came back.
 
+## Version check behind Cloudflare's bot protection, 2026-11-26
+
+The workflow's existing "Verify deployed version" step failed four times on 2026-11-26 with a bare
+"SyntaxError". With diagnostics added (run 45825286606) it reported
+`status=403 type=text/html cf-mitigated=challenge`: since 2026-11-24 SAM's zones answer GitHub's
+runners with a bot challenge. That is the situation in the open inbox task "Set up a Cloudflare
+exception for deploy checks" (PR #3014), whose proposed exception covers the `api.` and `app.` hosts
+only, so the installer's address stays challenged. From a non-CI address the installer answered
+correctly throughout, and its routes and custom domain were intact.
+
+- `scripts/check-live.mjs` now recognises the challenge and, for that case only, checks what the
+  Cloudflare API reports for the deployed Worker (commit, full mode, OAuth secrets), and says that
+  sign-in was not exercised. Any other non-JSON answer is still a failure and is reported by status
+  and content type. The recipe installer on `workers.dev` is not challenged and keeps the full check.
+- The workflow's version step now runs `check-live` instead of its own inline script, for staging and
+  production alike, so the production installer deploy on `main` is not left red by the challenge.
+- Also seen in run 45824462650: sign-in answered 503 a moment after health reported it configured (a
+  just-written secret not yet at that edge). `check-live` retries that one status inside its deadline.
+
 ## Effect on the production installer deploy
 
 Production keeps `BASE_DOMAIN`, its existing full mode and its existing OAuth client, so origin, mode,
-scopes and client are unchanged (`preserve` tests in `apps/installer/tests/deploy.test.ts`). Three
-things in its deploy step do change:
+scopes and client are unchanged (`preserve` tests in `apps/installer/tests/deploy.test.ts`). Four
+things in its deploy job do change:
 
 1. **Upstream commit check.** Every full-mode deploy now sends one HEAD request to
    `raw.githubusercontent.com` for the pinned commit and stops if it is not there. Production deploys
@@ -243,6 +262,9 @@ things in its deploy step do change:
 3. **`ARTIFACT_BASE_URL`.** Production sets `INSTALLER_ARTIFACT_BASE_URL` in its GitHub Environment
    (read from the GitHub API on 2026-11-23), and the workflow passes that value as before. Staging does
    not set it, so the workflow now passes `none` there.
+4. **Version check.** The step runs `check-live`, which also follows the sign-in redirect to
+   Cloudflare when the address is reachable, and falls back to the Cloudflare API when the address
+   answers the runner with a challenge.
 
 ## HELD before merge
 

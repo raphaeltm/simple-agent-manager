@@ -22,6 +22,13 @@ interface Options {
   timeoutMs?: string;
   pollMs?: string;
   origin?: string;
+  /** Cloudflare answers the installer's address with a bot challenge. */
+  challenged?: boolean;
+  /** A 403 HTML page that is not a Cloudflare challenge. */
+  forbidden?: boolean;
+  apiBuildSha?: string;
+  apiBootstrap?: boolean;
+  apiMissingSecret?: boolean;
   /** Sign-in attempts answered 503 before the secret has reached that edge. */
   unconfiguredStarts?: number;
   /** Where the installer sends the sign-in; null sends no Location. */
@@ -53,7 +60,23 @@ async function check(options: Options = {}) {
       if (url.hostname === 'api.cloudflare.com')
         return Response.json({
           success: true,
-          result: { bindings: [{ name: 'APP_ORIGIN', type: 'plain_text', text: deployedOrigin }] },
+          result: {
+            bindings: [
+              { name: 'APP_ORIGIN', type: 'plain_text', text: deployedOrigin },
+              {
+                name: 'BUILD_SHA',
+                type: 'plain_text',
+                text: options.apiBuildSha ?? 'd'.repeat(40),
+              },
+              ...(options.apiBootstrap
+                ? []
+                : [{ name: 'INSTALL_SOURCE_COMMIT', type: 'plain_text', text: 'd'.repeat(40) }]),
+              { name: 'OAUTH_CLIENT_ID', type: 'secret_text' },
+              ...(options.apiMissingSecret
+                ? []
+                : [{ name: 'OAUTH_CLIENT_SECRET', type: 'secret_text' }]),
+            ],
+          },
         });
       if (url.hostname === 'dash.cloudflare.com')
         return new Response(null, {
@@ -67,6 +90,14 @@ async function check(options: Options = {}) {
                 },
         });
       if (url.origin !== ORIGIN) throw new Error(`Unexpected request to ${url.origin}`);
+      if (options.challenged || options.forbidden)
+        return new Response('<html>Just a moment...</html>', {
+          status: 403,
+          headers: {
+            'content-type': 'text/html; charset=UTF-8',
+            ...(options.challenged ? { 'cf-mitigated': 'challenge' } : {}),
+          },
+        });
       if (url.pathname === '/health')
         return Response.json({
           sha: staleHealthChecks-- > 0 ? 'c'.repeat(40) : (options.sha ?? 'd'.repeat(40)),
@@ -187,5 +218,34 @@ describe('live check of a deployed installer', () => {
         new URL(String(input)).hostname === 'api.cloudflare.com' ? 'Bearer DEPLOY_TOKEN' : null
       );
     }
+  });
+});
+describe('an installer address that answers this client with a Cloudflare challenge', () => {
+  const publicRequests = () =>
+    vi.mocked(fetch).mock.calls.filter(([input]) => String(input).startsWith(ORIGIN));
+  it('is verified through the Cloudflare API, and says sign-in was not exercised', async () => {
+    const output = await check({ challenged: true });
+    expect(output).toContain('Through the Cloudflare API: commit ' + 'd'.repeat(40));
+    expect(output).toContain('Sign-in was not exercised');
+    expect(output).not.toContain('Installer live');
+    expect(publicRequests()).toHaveLength(1);
+  });
+  it.each([
+    ['another commit', { apiBuildSha: 'c'.repeat(40) }, `BUILD_SHA=${'c'.repeat(40)}`],
+    ['bootstrap mode', { apiBootstrap: true }, 'INSTALL_SOURCE_COMMIT=undefined'],
+    ['a missing OAuth secret', { apiMissingSecret: true }, 'oauthSecrets=false'],
+  ] as const)('fails when the API shows %s', async (_label, options, message) => {
+    await expect(check({ challenged: true, ...options })).rejects.toThrow(message);
+  });
+  it('control: a 403 that is not a challenge is still a failure', async () => {
+    await expect(check({ forbidden: true })).rejects.toThrow(
+      'is not ready; status=403 type=text/html'
+    );
+  });
+  it('control: an installer that answers gets the full check, not the API shortcut', async () => {
+    const output = await check();
+    expect(output).toContain('Cloudflare accepts its sign-in client and callback');
+    expect(output).not.toContain('Through the Cloudflare API');
+    expect(publicRequests().length).toBeGreaterThan(2);
   });
 });
