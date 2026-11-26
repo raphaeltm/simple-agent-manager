@@ -1231,17 +1231,24 @@ describe('L13: platform-owned passthrough credentials count toward the monthly c
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it.each(['user-attachment', 'project-attachment', 'gateway'])(
+  it.each(['user-attachment', 'project-attachment'])(
     'keeps custom endpoint behavior for %s',
     async (source) => {
-      const res = await callWithSource(source === 'gateway' ? 'platform' : source, {
-        baseUrl: 'https://custom-openai.example/v1',
-        gateway: source === 'gateway',
-      });
+      const res = await callWithSource(source, { baseUrl: 'https://custom-openai.example/v1' });
       expect(res.status).toBe(200);
       expect(mockFetch).toHaveBeenCalledTimes(1);
     }
   );
+
+  it('refuses a platform-funded custom endpoint on a gateway install too', async () => {
+    // Its spend reaches no AI Gateway log, so an unpriced endpoint would escape the cap.
+    const res = await callWithSource('platform', {
+      baseUrl: 'https://custom-openai.example/v1',
+      gateway: true,
+    });
+    expect(res.status).toBe(400);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
 
   it.each(['user-attachment', 'project-attachment'])(
     'keeps custom models for own-funded %s',
@@ -1251,13 +1258,12 @@ describe('L13: platform-owned passthrough credentials count toward the monthly c
     }
   );
 
-  it('keeps the gateway platform path unchanged for custom models', async () => {
-    // Known gap, idea 01M8BX1YRVN5JQ8Y2JSQB7F0QM (Codex P1 on #3015, decision pending Raphaël):
-    // unpriced platform-funded passthrough on a gateway install counts $0 against the cap.
+  it('refuses an uncatalogued platform-funded passthrough on a gateway install too', async () => {
+    // Passthrough bypasses AI Gateway, so an unpriced call would escape the cap and the ceiling.
     expect(
       (await callWithSource('platform', { model: 'custom-unpriced-model', gateway: true })).status
-    ).toBe(200);
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    ).toBe(400);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it.each([
