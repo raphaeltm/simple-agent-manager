@@ -3,14 +3,16 @@ import { getCollection } from 'astro:content';
 import Base from '../../layouts/Base.astro';
 import Header from '../../components/Header.astro';
 import CtaFooter from '../../components/CtaFooter.astro';
-import { categoryColors } from '../../lib/blog-utils';
+import { categoryColors, isPinnedAt, isSecurityPost } from '../../lib/blog-utils';
 
 const byDate = (await getCollection('blog', ({ data }) => !data.draft))
   .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
-// Pinned posts lead the page; everything else stays in date order below them.
-const pinned = byDate.filter((post) => post.data.pinned);
-const posts = byDate.filter((post) => !post.data.pinned);
-const isSecurity = (tags: string[]) => tags.includes('security');
+// Pinned posts lead the page; everything else stays in date order below them. A pin with a
+// `pinnedUntil` date stops at that date (checked at build time; deploy-www.yml rebuilds daily).
+const builtAt = new Date();
+const pinned = byDate.filter((post) => isPinnedAt(post.data, builtAt));
+const posts = byDate.filter((post) => !isPinnedAt(post.data, builtAt));
+const isSecurity = isSecurityPost;
 ---
 
 <Base
