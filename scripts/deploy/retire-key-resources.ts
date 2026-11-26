@@ -15,7 +15,9 @@
  *
  * The program also declares a protected, non-secret marker resource. A release from before this
  * change does not declare it, so its `pulumi up` fails on the protected delete and stops before
- * its configure-secrets.sh could overwrite the Worker's keys with new Pulumi-generated ones.
+ * its configure-secrets.sh could overwrite the Worker's keys with new Pulumi-generated ones. The
+ * marker is created (a targeted update) before the first key resource is deleted, so no failure
+ * part-way through leaves a stack an older release could deploy.
  *
  * CLI (repository root, Pulumi stack selected in infra/):
  *   pnpm exec tsx scripts/deploy/retire-key-resources.ts exclude-args   # preview flags, one per line
@@ -77,11 +79,17 @@ export function presentKeyResources(urns: readonly string[]): string[] {
  * `--exclude` flags for a preview of the current program against this state: every key resource
  * still present and the marker. Empty for a stack with no resources (a fresh installation).
  */
-export function previewExcludeArgs(urns: readonly string[]): string[] {
+/** The marker's URN in this stack, derived from its Stack URN; undefined for an empty stack. */
+export function markerUrn(urns: readonly string[]): string | undefined {
   const stackUrn = urns.find((urn) => urn.split('::')[2] === STACK_TYPE);
-  if (!stackUrn) return [];
+  if (!stackUrn) return undefined;
   const [prefix, project] = stackUrn.split('::');
-  const marker = `${prefix}::${project}::${RETIREMENT_MARKER[0]}::${RETIREMENT_MARKER[1]}`;
+  return `${prefix}::${project}::${RETIREMENT_MARKER[0]}::${RETIREMENT_MARKER[1]}`;
+}
+
+export function previewExcludeArgs(urns: readonly string[]): string[] {
+  const marker = markerUrn(urns);
+  if (!marker) return [];
   const excluded = [...presentKeyResources(urns), ...(urns.includes(marker) ? [] : [marker])];
   return excluded.flatMap((urn) => ['--exclude', urn]);
 }
@@ -92,6 +100,8 @@ export interface RetireOptions {
   workerSecretNames(): Promise<ReadonlySet<string>>;
   /** Runs `pulumi <args>` in the project directory; output is never shown. */
   pulumi(args: string[]): Promise<void>;
+  /** Lists the stack's URNs again (scripts/deploy/pulumi-stack-urns.sh), to confirm the marker. */
+  listUrns(): Promise<readonly string[]>;
 }
 
 /** Retires every allowlisted key resource still in state; returns the URNs it removed. */
@@ -109,6 +119,22 @@ export async function retireKeyResources(options: RetireOptions): Promise<string
       `Pulumi state still holds keys the API Worker does not have (${missing.join(', ')}), so ` +
         'nothing was removed from state. Do not create new keys for them: ask the installation owner.'
     );
+  // The marker must be in state BEFORE the first key resource leaves it. Otherwise a failure from
+  // here to the update that would create it leaves a stack with neither keys nor marker, and an
+  // older release's deploy would then create new keys and write them over the Worker's. A targeted
+  // update creates only the marker (verified on Pulumi 3.278: the key resources are untouched).
+  const marker = markerUrn(options.urns);
+  if (!marker)
+    throw new InstallationKeysError(
+      'The stack listing has no Stack resource, so nothing was removed from state'
+    );
+  if (!options.urns.includes(marker)) {
+    await options.pulumi(['up', '--target', marker, '--yes', '--skip-preview']);
+    if (!(await options.listUrns()).includes(marker))
+      throw new InstallationKeysError(
+        'The retirement marker was not created, so nothing was removed from state'
+      );
+  }
   for (const urn of present) {
     await options.pulumi(['state', 'unprotect', urn, '--yes']);
     await options.pulumi(['state', 'delete', urn, '--yes']);
@@ -155,6 +181,7 @@ async function main(): Promise<void> {
     throw new InstallationKeysError('Usage: retire-key-resources.ts exclude-args|retire');
   const retired = await retireKeyResources({
     urns,
+    listUrns: async () => stackUrns(infra, pulumi),
     workerSecretNames: () =>
       workerSecretNames({
         request: (url, init) => fetch(url, init),

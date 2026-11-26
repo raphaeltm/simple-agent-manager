@@ -43,6 +43,12 @@ export function generateVapidKeyPair(): { publicKey: string; privateKey: string 
 }
 
 async function main(): Promise<void> {
+  // This prints key material, which is only acceptable on a developer's own machine.
+  if (process.env.GITHUB_ACTIONS === 'true' || process.env.CI) {
+    console.error('generate-keys prints keys and never runs in CI (policy 795e72a6).');
+    process.exitCode = 1;
+    return;
+  }
   console.log('🔑 Generating security keys for local development\n');
   console.log(
     'NOTE: local development only. A deployed installation creates its keys once, straight into its API Worker.\n'

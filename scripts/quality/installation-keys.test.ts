@@ -11,6 +11,7 @@ import {
   INSTALLATION_KEY_GROUPS,
   INSTALLATION_KEY_NAMES,
   InstallationKeysError,
+  parseSecretListing,
   requireInstallationKeys,
   type WorkerAccess,
 } from '../deploy/installation-keys';
@@ -229,54 +230,127 @@ describe('retiring key resources from Pulumi state', () => {
   });
 
   const allNames = async () => new Set<string>(INSTALLATION_KEY_NAMES);
+  const marker = urn('random:index/randomId:RandomId', 'installation-keys-retired');
 
-  it('checks the Worker holds the keys of each resource before touching state, then unprotects and deletes', async () => {
+  /**
+   * A stack's state as Pulumi would change it: a targeted `up` of the marker adds it, `state
+   * delete` removes a resource. `failOn` makes one command fail, as a killed or erroring run would.
+   */
+  function fakeStack(initial: string[], failOn?: string) {
+    const state = new Set(initial);
     const calls: string[] = [];
+    return {
+      state,
+      calls,
+      listUrns: async () => [...state],
+      pulumi: async (args: string[]) => {
+        const line = args.join(' ');
+        calls.push(line);
+        if (failOn && line === failOn) throw new Error(`pulumi failed: ${line}`);
+        if (args[0] === 'up' && args[1] === '--target') state.add(args[2]);
+        if (args[0] === 'state' && args[1] === 'delete') state.delete(args[2]);
+      },
+    };
+  }
+
+  it('checks the Worker, creates the marker, then unprotects and deletes each key resource', async () => {
+    const f = fakeStack([stack, ...keys, identity]);
+    const order: string[] = [];
     const retired = await retireKeyResources({
-      urns: [stack, ...keys, identity],
+      urns: [...f.state],
+      listUrns: f.listUrns,
       workerSecretNames: async () => {
-        calls.push('require');
+        order.push('require');
         return allNames();
       },
       pulumi: async (args) => {
-        calls.push(args.join(' '));
+        order.push(args.join(' '));
+        await f.pulumi(args);
       },
     });
     expect(retired).toEqual(keys);
-    expect(calls[0]).toBe('require');
-    expect(calls.slice(1)).toEqual(
+    expect(order[0]).toBe('require');
+    expect(order[1]).toBe(`up --target ${marker} --yes --skip-preview`);
+    expect(order.slice(2)).toEqual(
       keys.flatMap((key) => [`state unprotect ${key} --yes`, `state delete ${key} --yes`])
     );
+    expect([...f.state].sort()).toEqual([stack, identity, marker].sort());
   });
 
-  it('leaves state untouched when the Worker lacks a key that state still holds', async () => {
+  it('a run that fails part-way has already left the marker in state', async () => {
+    const third = keys[2]!;
+    const f = fakeStack([stack, ...keys, identity], `state unprotect ${third} --yes`);
+    await expect(
+      retireKeyResources({
+        urns: [...f.state],
+        listUrns: f.listUrns,
+        workerSecretNames: allNames,
+        pulumi: f.pulumi,
+      })
+    ).rejects.toThrow('pulumi failed');
+    // Two resources are gone and the rest remain, but an older release still meets the marker.
+    expect(f.state.has(marker)).toBe(true);
+    expect(f.state.has(keys[0]!)).toBe(false);
+    expect(f.state.has(third)).toBe(true);
+  });
+
+  it('removes nothing when the marker could not be created', async () => {
+    const f = fakeStack([stack, ...keys]);
     const calls: string[] = [];
     await expect(
       retireKeyResources({
-        urns: [stack, ...keys],
-        workerSecretNames: async () =>
-          new Set(INSTALLATION_KEY_NAMES.filter((name) => name !== 'VAPID_PUBLIC_KEY')),
+        urns: [...f.state],
+        listUrns: f.listUrns,
+        workerSecretNames: allNames,
+        // The targeted update "succeeds" but the marker never reaches state.
         pulumi: async (args) => {
           calls.push(args.join(' '));
         },
       })
+    ).rejects.toThrow('marker was not created');
+    expect(calls.filter((line) => line.startsWith('state'))).toEqual([]);
+    expect(f.state.size).toBe(keys.length + 1);
+  });
+
+  it('does not recreate a marker already in state', async () => {
+    const f = fakeStack([stack, marker, ...keys]);
+    await retireKeyResources({
+      urns: [...f.state],
+      listUrns: f.listUrns,
+      workerSecretNames: allNames,
+      pulumi: f.pulumi,
+    });
+    expect(f.calls.some((line) => line.startsWith('up'))).toBe(false);
+    expect([...f.state].sort()).toEqual([stack, marker].sort());
+  });
+
+  it('leaves state untouched when the Worker lacks a key that state still holds', async () => {
+    const f = fakeStack([stack, ...keys]);
+    await expect(
+      retireKeyResources({
+        urns: [...f.state],
+        listUrns: f.listUrns,
+        workerSecretNames: async () =>
+          new Set(INSTALLATION_KEY_NAMES.filter((name) => name !== 'VAPID_PUBLIC_KEY')),
+        pulumi: f.pulumi,
+      })
     ).rejects.toThrow('does not have (VAPID_PUBLIC_KEY)');
-    expect(calls).toEqual([]);
+    expect(f.calls).toEqual([]);
   });
 
   it('retires a resource whose keys are on the Worker even if another group is absent from both', async () => {
-    const calls: string[] = [];
-    const encryption = keys.find((urn) => urn.endsWith('::encryption-key'))!;
+    const encryption = keys.find((key) => key.endsWith('::encryption-key'))!;
+    const f = fakeStack([stack, encryption]);
     await retireKeyResources({
-      urns: [stack, encryption],
+      urns: [...f.state],
+      listUrns: f.listUrns,
       // An older installation that never had VAPID keys anywhere.
       workerSecretNames: async () =>
         new Set(INSTALLATION_KEY_NAMES.filter((name) => !name.startsWith('VAPID_'))),
-      pulumi: async (args) => {
-        calls.push(args.join(' '));
-      },
+      pulumi: f.pulumi,
     });
-    expect(calls).toEqual([
+    expect(f.calls).toEqual([
+      `up --target ${marker} --yes --skip-preview`,
       `state unprotect ${encryption} --yes`,
       `state delete ${encryption} --yes`,
     ]);
@@ -286,6 +360,7 @@ describe('retiring key resources from Pulumi state', () => {
     let checked = false;
     const retired = await retireKeyResources({
       urns: [stack, identity],
+      listUrns: async () => [stack, identity],
       workerSecretNames: async () => {
         checked = true;
         return allNames();
@@ -296,5 +371,20 @@ describe('retiring key resources from Pulumi state', () => {
     });
     expect(retired).toEqual([]);
     expect(checked).toBe(false);
+  });
+});
+
+describe('parseSecretListing', () => {
+  const listing = [{ name: 'ENCRYPTION_KEY', type: 'secret_text' }];
+  it('reads the JSON after notices that contain brackets', () => {
+    const text = `[WARNING] a notice [with brackets]\n${JSON.stringify(listing, null, 2)}\n`;
+    expect(parseSecretListing(text)).toEqual(listing);
+  });
+  it('reads compact and empty listings', () => {
+    expect(parseSecretListing(JSON.stringify(listing))).toEqual(listing);
+    expect(parseSecretListing('[]')).toEqual([]);
+  });
+  it('throws on output with no listing', () => {
+    expect(() => parseSecretListing('[ERROR] not logged in')).toThrow();
   });
 });

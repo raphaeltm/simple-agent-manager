@@ -512,7 +512,9 @@ jobs:
 
       # Removes the installation-key resources from Pulumi state, once, after checking by name that
       # the API Worker holds every key; no key value is read and nothing is regenerated
-      # (scripts/deploy/retire-key-resources.ts). Already-migrated stacks are a no-op.
+      # (scripts/deploy/retire-key-resources.ts). It first creates the retirement marker with a
+      # targeted, output-discarded `pulumi up`, so the Cloudflare provider credentials are needed
+      # here too. Already-migrated stacks are a no-op.
       - name: Retire Installation-Key Resources From Pulumi State
         if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: |
@@ -523,6 +525,8 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_API_USER_SERVICE_KEY: ${{ secrets.CF_ORIGIN_CA_KEY }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           API_WORKER_NAME: ${{ steps.deploy_resources.outputs.api_worker }}

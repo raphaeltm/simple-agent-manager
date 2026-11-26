@@ -2,7 +2,8 @@
  * The engine's two installation-key steps (task 01M8C74NYMDP2YYPAG17VXJB78):
  *
  * - `applyInfrastructure`: retires the old key resources from Pulumi state as the last step before
- *   `pulumi up`, once the API Worker is shown to hold their secrets (retireKeyResources).
+ *   `pulumi up`, once the API Worker is shown to hold their secrets and the retirement marker is in
+ *   state (retireKeyResources).
  * - `ensureInstallationKeys`: a brand-new installer installation gets its keys once, straight into
  *   its API Worker. Every other run only checks they are there, by name.
  */
@@ -29,6 +30,7 @@ export async function applyInfrastructure(steps: InfrastructureSteps): Promise<v
   await steps.refresh();
   await retireKeyResources({
     urns,
+    listUrns: () => steps.listUrns(),
     workerSecretNames: () => workerSecretNames(steps.worker),
     pulumi: async (args) => {
       await steps.pulumiQuiet(args);

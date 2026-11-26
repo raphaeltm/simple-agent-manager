@@ -157,6 +157,7 @@ function fixture(failOn?: string, world: { urns?: string[] } = {}) {
   // The API Worker's secrets as Cloudflare holds them: a fresh installation has none.
   const workerSecrets = new Map<string, string>();
   const keyWrites: string[] = [];
+  let urns = [...(world.urns ?? [])];
   directories.push(root);
   mkdirSync(join(root, 'apps/api/container-artifacts'), { recursive: true });
   mkdirSync(join(root, '.wrangler'), { recursive: true });
@@ -197,7 +198,20 @@ function fixture(failOn?: string, world: { urns?: string[] } = {}) {
       if (command.executable === 'git')
         return command.args.includes('HEAD') ? `${config.sourceCommit}\n` : 'false\n';
       if (command.args.some((arg) => arg.endsWith('scripts/deploy/pulumi-stack-urns.sh')))
-        return (world.urns ?? []).join('\n');
+        return urns.join('\n');
+      // State as Pulumi changes it: a targeted update adds the marker, `state delete` removes.
+      if (
+        command.executable === 'pulumi' &&
+        command.args[0] === 'up' &&
+        command.args[1] === '--target'
+      )
+        urns.push(command.args[2]!);
+      if (
+        command.executable === 'pulumi' &&
+        command.args[0] === 'state' &&
+        command.args[1] === 'delete'
+      )
+        urns = urns.filter((urn) => urn !== command.args[2]);
       if (command.args.includes('scripts/deploy/resolve-vm-agent-release.sh'))
         return `release=${'d'.repeat(40)}\nbuild_date=2026-10-28T00:00:00Z\n`;
       if (command.args.includes('ls')) return '[]';
@@ -1229,8 +1243,11 @@ describe('installation engine: retiring installation-key resources from Pulumi s
     const calls = lines(f);
     const refresh = calls.findIndex((line) => line.includes('pulumi-refresh-safe.sh'));
     const firstState = calls.findIndex((line) => line.startsWith('pulumi state'));
-    const up = calls.findIndex((line) => line.startsWith('pulumi up'));
-    expect(refresh).toBeLessThan(firstState);
+    const markerUp = calls.indexOf(`pulumi up --target ${markerUrn} --yes --skip-preview`);
+    const up = calls.indexOf('pulumi up --yes --skip-preview');
+    expect(refresh).toBeLessThan(markerUp);
+    // The marker is in state before the first key resource leaves it.
+    expect(markerUp).toBeLessThan(firstState);
     expect(stateCommands(calls)).toHaveLength(keyUrns.length * 2);
     const lastState =
       calls.length - 1 - [...calls].reverse().findIndex((line) => line.startsWith('pulumi state'));
