@@ -404,9 +404,28 @@ describe('deploy-staging.yml smoke-token probe', () => {
     expect(probe).toContain('process.env.SMOKE_TEST_TOKEN');
     expect(probe).toContain('process.env.DEPLOY_CHECK_HEADER_VALUE');
     expect(probe).toContain('process.stdout.write(String(res.status))');
+    // A redirect would carry the header and the token body to another origin.
+    expect(probe).toContain('redirect: "error"');
     expect(probe).not.toMatch(/echo[^\n]*SMOKE_TEST_TOKEN/);
     expect(probe).not.toMatch(/\$\{?DEPLOY_CHECK_HEADER_VALUE/);
     expect(probe).not.toMatch(/\$\{?SMOKE_TEST_TOKEN/);
+  });
+});
+
+describe('deploy-staging.yml deploy-check secret scope', () => {
+  const workflow = readFileSync(
+    new URL('../../.github/workflows/deploy-staging.yml', import.meta.url),
+    'utf8'
+  );
+  const job = workflow.match(/\n  smoke-tests:\n[\s\S]*?(?=\n  [a-z][\w-]*:\n)/)?.[0] ?? '';
+  const jobEnv = job.match(/\n    env:\n[\s\S]*?(?=\n    steps:)/)?.[0] ?? '';
+
+  it('exposes the bypass secret only to the steps that send requests', () => {
+    expect(job).not.toBe('');
+    expect(jobEnv).not.toBe('');
+    expect(jobEnv).not.toContain('DEPLOY_CHECK_HEADER_VALUE');
+    const scopedSteps = job.match(/DEPLOY_CHECK_HEADER_VALUE: \$\{\{ secrets\./g) ?? [];
+    expect(scopedSteps).toHaveLength(3);
   });
 });
 
@@ -422,6 +441,7 @@ describe('deploy-reusable.yml health check', () => {
     expect(step).not.toBe('');
     expect(step).toContain('DEPLOY_CHECK_HEADER_VALUE: ${{ secrets.DEPLOY_CHECK_HEADER_VALUE }}');
     expect(step).toContain('process.env.DEPLOY_CHECK_HEADER_VALUE');
+    expect(step).toContain('redirect: "error"');
     expect(step).not.toMatch(/\$\{?DEPLOY_CHECK_HEADER_VALUE/);
     expect(step).not.toMatch(/echo[^\n]*DEPLOY_CHECK_HEADER_VALUE/);
   });

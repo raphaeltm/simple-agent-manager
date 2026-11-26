@@ -35,6 +35,7 @@ export async function loginWithToken(
   const response = await context.request.post(`${apiUrl}/api/auth/token-login`, {
     data: { token },
     headers: { 'Content-Type': 'application/json', ...deployCheckHeaders() },
+    maxRedirects: 0,
   });
 
   expect(response.ok(), `Token login failed: ${response.status()} ${await response.text()}`).toBe(

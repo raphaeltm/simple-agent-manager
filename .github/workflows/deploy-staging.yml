@@ -220,8 +220,6 @@ jobs:
       SMOKE_TEST_TOKEN: ${{ !inputs.github_trigger_audit_send_only && secrets.SMOKE_TEST_TOKEN || '' }}
       SMOKE_TEST_URL: https://app.${{ needs.lease.outputs.base_domain }}
       SMOKE_TEST_API_URL: https://api.${{ needs.lease.outputs.base_domain }}
-      # Optional: header for the zone's "SAM deploy checks" Cloudflare skip rule (tests/smoke/fixtures.ts).
-      DEPLOY_CHECK_HEADER_VALUE: ${{ secrets.DEPLOY_CHECK_HEADER_VALUE }}
       SAM_PERFORMANCE_AUDIT: ${{ inputs.performance_audit && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -267,6 +265,8 @@ jobs:
               method: "POST",
               headers: { "content-type": "application/json", ...(value ? { "x-sam-deploy-check": value } : {}) },
               body: JSON.stringify({ token: process.env.SMOKE_TEST_TOKEN }),
+              // Never follow a redirect: it would carry the header and token to another origin.
+              redirect: "error",
               signal: AbortSignal.timeout(30000),
             })
               .then((res) => process.stdout.write(String(res.status)))
@@ -282,14 +282,21 @@ jobs:
           fi
         env:
           INSTALLATION: ${{ needs.lease.outputs.installation }}
+          # Optional: header for the zone's "SAM deploy checks" Cloudflare skip rule. Step-scoped so
+          # only the steps that send requests to the deployment can read it.
+          DEPLOY_CHECK_HEADER_VALUE: ${{ secrets.DEPLOY_CHECK_HEADER_VALUE }}
 
       - name: Run smoke tests
         if: ${{ !inputs.github_trigger_audit_send_only && !inputs.performance_audit_only && env.SMOKE_TEST_TOKEN != '' && steps.smoke_token.outputs.skip != 'true' }}
         run: node node_modules/@playwright/test/cli.js test --config=tests/smoke/playwright.config.ts
+        env:
+          DEPLOY_CHECK_HEADER_VALUE: ${{ secrets.DEPLOY_CHECK_HEADER_VALUE }}
 
       - name: Run current-deployment performance audit only
         if: ${{ inputs.performance_audit && inputs.performance_audit_only && env.SMOKE_TEST_TOKEN != '' && steps.smoke_token.outputs.skip != 'true' }}
         run: node node_modules/@playwright/test/cli.js test --config=tests/smoke/playwright.config.ts admin-runtime-performance.spec.ts
+        env:
+          DEPLOY_CHECK_HEADER_VALUE: ${{ secrets.DEPLOY_CHECK_HEADER_VALUE }}
 
       - name: Upload bounded performance audit
         if: ${{ always() && inputs.performance_audit && steps.smoke_token.outputs.skip != 'true' }}

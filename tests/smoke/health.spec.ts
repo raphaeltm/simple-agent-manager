@@ -4,7 +4,10 @@ const API_URL = process.env.SMOKE_TEST_API_URL || 'https://api.sammy.party';
 
 test.describe('Health checks', () => {
   test('API health endpoint returns healthy', async ({ request }) => {
-    const response = await request.get(`${API_URL}/health`, { headers: deployCheckHeaders() });
+    const response = await request.get(`${API_URL}/health`, {
+      headers: deployCheckHeaders(),
+      maxRedirects: 0,
+    });
     expect(response.ok()).toBe(true);
     const body = await response.json();
     expect(body.status).toBe('healthy');
@@ -14,6 +17,7 @@ test.describe('Health checks', () => {
     const appUrl = process.env.SMOKE_TEST_URL || 'https://app.sammy.party';
     const response = await request.get(`${API_URL}/health`, {
       headers: { Origin: appUrl, ...deployCheckHeaders() },
+      maxRedirects: 0,
     });
     expect(response.ok()).toBe(true);
   });

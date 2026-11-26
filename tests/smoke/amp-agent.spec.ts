@@ -10,6 +10,7 @@ test.describe('Amp agent', () => {
 
     const catalogResponse = await page.request.get(`${apiUrl}/api/agents`, {
       headers: deployCheckHeaders(),
+      maxRedirects: 0,
     });
     expect(catalogResponse.status()).toBe(200);
 

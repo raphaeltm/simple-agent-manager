@@ -23,6 +23,7 @@ test('bounded admin and Runtime performance audit', async ({ context }, info) =>
   const session = await (
     await page.request.get(`${api}/api/auth/get-session`, {
       headers: deployCheckHeaders(),
+      maxRedirects: 0,
       timeout: auditTimeoutMs,
     })
   ).json();
@@ -36,6 +37,7 @@ test('bounded admin and Runtime performance audit', async ({ context }, info) =>
   const projects = await (
     await page.request.get(`${api}/api/projects?limit=1`, {
       headers: deployCheckHeaders(),
+      maxRedirects: 0,
       timeout: auditTimeoutMs,
     })
   ).json();
@@ -73,6 +75,7 @@ test('bounded admin and Runtime performance audit', async ({ context }, info) =>
           try {
             const response = await page.request.get(`${api}${path}`, {
               headers: deployCheckHeaders(),
+              maxRedirects: 0,
               timeout: auditTimeoutMs,
             });
             await response.body();

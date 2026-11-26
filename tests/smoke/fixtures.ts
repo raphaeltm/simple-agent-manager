@@ -11,8 +11,9 @@ const DEPLOY_CHECK_HEADER = 'x-sam-deploy-check';
 
 /**
  * Headers for one direct API call (APIRequestContext) to the smoke-test app or API, empty when the
- * secret is not configured. Pass it per call, never as context-wide `extraHTTPHeaders`, so the
- * value is only ever sent to the deployment under test.
+ * secret is not configured. Pass it per call, never as context-wide `extraHTTPHeaders`, and with
+ * `maxRedirects: 0`, so the value (and any request body) is only ever sent to the deployment under
+ * test, never carried along a redirect.
  */
 export function deployCheckHeaders(): Record<string, string> {
   const value = process.env.DEPLOY_CHECK_HEADER_VALUE;

@@ -2116,6 +2116,8 @@ jobs:
               const value = process.env.DEPLOY_CHECK_HEADER_VALUE;
               fetch(`${process.env.API_URL}/health`, {
                 headers: value ? { "x-sam-deploy-check": value } : {},
+                // Never follow a redirect: it would carry the header to another origin.
+                redirect: "error",
                 signal: AbortSignal.timeout(15000),
               })
                 .then(async (res) => {
