@@ -1,6 +1,6 @@
 import { type BrowserContext, expect, type Page } from '@playwright/test';
 
-import { deployCheckHeaders } from '../fixtures';
+import { deployCheckFetch } from '../deploy-check';
 
 /**
  * Authenticate a Playwright browser context using a smoke test token.
@@ -32,10 +32,10 @@ export async function loginWithToken(
   }
 
   // Call the token-login endpoint via context.request
-  const response = await context.request.post(`${apiUrl}/api/auth/token-login`, {
+  const response = await deployCheckFetch(context.request, `${apiUrl}/api/auth/token-login`, {
+    method: 'POST',
     data: { token },
-    headers: { 'Content-Type': 'application/json', ...deployCheckHeaders() },
-    maxRedirects: 0,
+    headers: { 'Content-Type': 'application/json' },
   });
 
   expect(response.ok(), `Token login failed: ${response.status()} ${await response.text()}`).toBe(

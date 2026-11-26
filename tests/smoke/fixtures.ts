@@ -1,26 +1,10 @@
 import { test as base } from '@playwright/test';
 
+import { deployCheckHeaders } from './deploy-check';
+
+export { deployCheckConfigured, deployCheckFetch } from './deploy-check';
 export { expect } from '@playwright/test';
 
-/**
- * Header matched by the "SAM deploy checks" Cloudflare skip rule, which lets deploy workflows
- * through stricter zone protections. The workflow sets `DEPLOY_CHECK_HEADER_VALUE` from a GitHub
- * secret; without it nothing is added. Never log the value.
- */
-const DEPLOY_CHECK_HEADER = 'x-sam-deploy-check';
-
-/**
- * Headers for one direct API call (APIRequestContext) to the smoke-test app or API, empty when the
- * secret is not configured. Pass it per call, never as context-wide `extraHTTPHeaders`, and with
- * `maxRedirects: 0`, so the value (and any request body) is only ever sent to the deployment under
- * test, never carried along a redirect.
- */
-export function deployCheckHeaders(): Record<string, string> {
-  const value = process.env.DEPLOY_CHECK_HEADER_VALUE;
-  return value ? { [DEPLOY_CHECK_HEADER]: value } : {};
-}
-
-/** The deployment under test, over HTTPS only: the header is never sent in cleartext. */
 function smokeOrigins(): Set<string> {
   const origins = new Set<string>();
   for (const url of [process.env.SMOKE_TEST_URL, process.env.SMOKE_TEST_API_URL]) {

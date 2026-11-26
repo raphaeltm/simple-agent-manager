@@ -1,4 +1,4 @@
-import { deployCheckHeaders, expect, test } from './fixtures';
+import { deployCheckFetch, expect, test } from './fixtures';
 import { loginWithToken } from './helpers/auth';
 
 test.describe('Amp agent', () => {
@@ -7,10 +7,7 @@ test.describe('Amp agent', () => {
     const appUrl = process.env.SMOKE_TEST_URL || 'https://app.sammy.party';
     const page = await loginWithToken(context, { apiUrl, appUrl });
 
-    const catalogResponse = await page.request.get(`${apiUrl}/api/agents`, {
-      headers: deployCheckHeaders(),
-      maxRedirects: 0,
-    });
+    const catalogResponse = await deployCheckFetch(page.request, `${apiUrl}/api/agents`);
     expect(catalogResponse.status()).toBe(200);
 
     const catalog = await catalogResponse.json();
