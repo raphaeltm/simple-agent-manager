@@ -76,9 +76,10 @@ export async function runMonthlyCostAggregation(
   // Aggregate cost per userId from Gateway logs
   const costByUser = new Map<string, number>();
   let totalEntries = 0;
+  let truncated = false;
 
   try {
-    await iterateGatewayLogs(
+    ({ truncated } = await iterateGatewayLogs(
       env,
       ports,
       gatewayId,
@@ -96,7 +97,7 @@ export async function runMonthlyCostAggregation(
         maxPagesHardCap: MONTHLY_COST_AGGREGATION_MAX_PAGES_HARD_CAP,
         maxPagesEnvValue: env.AI_MONTHLY_COST_AGGREGATION_MAX_PAGES,
       }
-    );
+    ));
   } catch (err) {
     log.error('cron.monthly_cost.gateway_error', {
       error: err instanceof Error ? err.message : String(err),
@@ -111,7 +112,9 @@ export async function runMonthlyCostAggregation(
   for (const [userId, cost] of costByUser.entries()) {
     const key = `${AI_MONTHLY_COST_CACHE_KV_PREFIX}:${userId}:${monthKey}`;
     try {
-      await env.KV.put(key, serializeGatewayMonthlyCost(cost, asOfMs), { expirationTtl: ttl });
+      await env.KV.put(key, serializeGatewayMonthlyCost(cost, asOfMs, truncated), {
+        expirationTtl: ttl,
+      });
       usersUpdated++;
     } catch (err) {
       errors++;

@@ -154,6 +154,7 @@ describe('runMonthlyCostAggregation', () => {
         visitor(makeGatewayEntry({ id: 'entry-2', cost: 0.25, metadata: { userId: 'user-a' } }));
         visitor(makeGatewayEntry({ id: 'entry-3', cost: 0.2, metadata: { userId: 'user-b' } }));
         visitor(makeGatewayEntry({ id: 'entry-4', cost: 9, metadata: null }));
+        return { truncated: false };
       }
     );
 
@@ -170,12 +171,14 @@ describe('runMonthlyCostAggregation', () => {
     ).toEqual({
       costUsd: 0.35,
       asOfMs: expect.any(Number),
+      truncated: false,
     });
     expect(
       parseGatewayMonthlyCost(kv._store.get('ai-monthly-cost:user-b:2026-06') ?? null)
     ).toEqual({
       costUsd: 0.2,
       asOfMs: expect.any(Number),
+      truncated: false,
     });
     expect(kv._ttlByKey.get('ai-monthly-cost:user-a:2026-06')).toBe(3600);
     expect(kv._ttlByKey.get('ai-monthly-cost:user-b:2026-06')).toBe(3600);
@@ -204,6 +207,7 @@ describe('runMonthlyCostAggregation', () => {
         visitor: (entry: AIGatewayLogEntry) => void
       ) => {
         visitor(makeGatewayEntry({ metadata: { userId: 'user-a' } }));
+        return { truncated: false };
       }
     );
 
@@ -231,6 +235,7 @@ describe('runMonthlyCostAggregation', () => {
         visitor: (entry: AIGatewayLogEntry) => void
       ) => {
         visitor(makeGatewayEntry({ metadata: { userId: 'user-a' } }));
+        return { truncated: false };
       }
     );
 
@@ -270,6 +275,7 @@ describe('runMonthlyCostAggregation', () => {
       ) => {
         visitor(makeGatewayEntry({ id: 'entry-1', cost: 0.1, metadata: { userId: 'user-a' } }));
         visitor(makeGatewayEntry({ id: 'entry-2', cost: 0.2, metadata: { userId: 'user-b' } }));
+        return { truncated: false };
       }
     );
 
@@ -282,6 +288,31 @@ describe('runMonthlyCostAggregation', () => {
     ).toEqual({
       costUsd: 0.2,
       asOfMs: expect.any(Number),
+      truncated: false,
+    });
+  });
+
+  it('records a truncated log read so the cap can floor on the estimate', async () => {
+    const kv = createMockKV();
+    mockIterateGatewayLogs.mockImplementation(
+      async (
+        _env: Env,
+        _ports: unknown,
+        _gatewayId: string,
+        _startDate: string,
+        visitor: (entry: AIGatewayLogEntry) => void
+      ) => {
+        visitor(makeGatewayEntry({ id: 'entry-1', cost: 0.1, metadata: { userId: 'user-a' } }));
+        return { truncated: true };
+      }
+    );
+    await runMonthlyCostAggregation(makeEnv({ KV: kv }));
+    const stored = [...kv._store.entries()].find(([key]) =>
+      key.startsWith('ai-monthly-cost:user-a:')
+    );
+    expect(parseGatewayMonthlyCost(stored?.[1] ?? null)).toMatchObject({
+      costUsd: 0.1,
+      truncated: true,
     });
   });
 });

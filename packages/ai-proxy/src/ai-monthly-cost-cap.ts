@@ -2,11 +2,15 @@
  * Monthly AI cost cap enforcement, split out of ai-token-budget.ts (rule 18).
  * ai-token-budget.ts re-exports everything here, so callers keep their imports.
  */
-import { AI_MONTHLY_COST_CACHE_KV_PREFIX } from '@simple-agent-manager/shared';
+import {
+  AI_MONTHLY_COST_CACHE_KV_PREFIX,
+  type UserAiBudgetSettings,
+} from '@simple-agent-manager/shared';
 import { errors, log } from '@simple-agent-manager/worker-core';
 
 import { getUserBudgetSettings } from './ai-budget-settings';
 import {
+  estimateWindowRetained,
   estimateWindowStartMs,
   type GatewayMonthlyCost,
   gatewayMonthlySpendUsd,
@@ -15,6 +19,7 @@ import {
   utcMonthKey,
 } from './ai-cost-estimate';
 import { hasLocalAiCostMetering, isMonthlyCostCapAvailable } from './ai-gateway-availability';
+import { resolveMonthlyCostCacheTtlSeconds } from './ai-monthly-cost-cron';
 // Cycle with ai-token-budget.ts (it re-exports this module); both sides use the other's functions
 // only inside function bodies, so evaluation order does not matter.
 import { getProviderUsage, type TokenBudget } from './ai-token-budget';
@@ -160,7 +165,9 @@ export interface MonthlyCostCapOptions {
  * it later.
  *
  * Spend is known only after a response, so this pre-call check is the last point before money is
- * spent; concurrent calls admitted together can each overshoot by at most their own cost.
+ * spent. There is no reservation: every call admitted while spend is still below the cap runs to
+ * completion, so N calls in flight when the cap is crossed can together overshoot it by up to the
+ * sum of their costs (bounded by the user's concurrency and the proxy rate limit).
  */
 export async function checkMonthlyCostCap(
   kv: KVNamespace,
@@ -193,6 +200,8 @@ export async function checkMonthlyCostCap(
 export interface GatewayCostAdmission {
   /** The day's tokens, read in the same counter RPC; null when the counter was not read. */
   usage: TokenBudget | null;
+  /** The user's budget settings row as read for the cap, reused for the daily budget. */
+  userSettings: UserAiBudgetSettings | null;
   monthlyCap: MonthlyCostCapCheck;
 }
 
@@ -209,8 +218,9 @@ export interface GatewayCostAdmission {
  * - Unreadable gateway total (KV error or malformed value): treated as missing, so the month
  *   estimate applies. Logged.
  * - Unreadable lag setting: the default margin.
- * - Counter read failure: throws, as the daily-budget read on this path always has. The blast
- *   radius is the one user whose counter object is unreachable, for as long as it is.
+ * - Counter read failure: refuses with a retryable 503, logged, as the daily-budget read on this
+ *   path always refused. The blast radius is the one user whose counter object is unreachable,
+ *   for as long as it is.
  * - No counter binding (KV-only local runtimes): the gateway total alone, allowed when absent.
  * - A gateway without the account API cannot be priced: not enforceable, no reads.
  */
@@ -230,7 +240,7 @@ export async function checkGatewayCostAdmission(
   const source =
     ceilingUsd !== null && capUsd === ceilingUsd ? { limitSource: 'administrator' as const } : {};
   if (capUsd === null || !isMonthlyCostCapAvailable(env)) {
-    return { usage: null, monthlyCap: { allowed: true, costUsd: 0, capUsd } };
+    return { usage: null, userSettings, monthlyCap: { allowed: true, costUsd: 0, capUsd } };
   }
 
   const [gateway, lagSeconds] = await Promise.all([
@@ -249,20 +259,37 @@ export async function checkGatewayCostAdmission(
     const costUsd = gateway?.costUsd ?? 0;
     return {
       usage: null,
+      userSettings,
       monthlyCap: { allowed: gateway === null || costUsd < capUsd, costUsd, capUsd, ...source },
     };
   }
 
   const now = new Date();
-  const windowStartMs = estimateWindowStartMs(gateway, lagSeconds, now);
-  const snapshot = await counter.getGatewayAdmissionSnapshot(
-    buildBudgetDateKey(now),
-    utcMonthKey(now),
-    windowStartMs
+  const windowStartMs = estimateWindowStartMs(
+    gateway,
+    lagSeconds,
+    now,
+    resolveMonthlyCostCacheTtlSeconds(env.AI_MONTHLY_COST_CACHE_TTL_SECONDS)
   );
+  let snapshot;
+  try {
+    snapshot = await counter.getGatewayAdmissionSnapshot(
+      buildBudgetDateKey(now),
+      utcMonthKey(now),
+      // A window older than the retained buckets is answered from month figures; skip the scan.
+      estimateWindowRetained(windowStartMs, now) ? windowStartMs : null
+    );
+  } catch (err) {
+    log.error('ai_proxy.monthly_spend_unreadable', {
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw errors.serviceUnavailable('AI spending limits are unavailable. Please try again later.');
+  }
   const costUsd = gatewayMonthlySpendUsd(gateway, snapshot, windowStartMs, now);
   return {
     usage: snapshot.budget,
+    userSettings,
     monthlyCap: { allowed: costUsd < capUsd, costUsd, capUsd, ...source },
   };
 }

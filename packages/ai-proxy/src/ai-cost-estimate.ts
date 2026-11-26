@@ -34,12 +34,6 @@ export const DEFAULT_COST_ESTIMATE_GATEWAY_LAG_SECONDS =
 export const MAX_COST_ESTIMATE_GATEWAY_LAG_SECONDS = MAX_AI_COST_ESTIMATE_GATEWAY_LAG_SECONDS;
 
 /**
- * Cron cadence assumed for a legacy KV total written before totals carried `asOf` (the hourly
- * cron, `30 * * * *`). Only read during the first hours after this change deploys.
- */
-const LEGACY_GATEWAY_TOTAL_AGE_MS = 3_600_000;
-
-/**
  * How long estimate buckets are kept: the longest a gateway total can stay readable (its KV TTL
  * cap) plus the largest lag margin and one bucket. A total older than this falls back to
  * `max(gateway, month estimate)` in `gatewayMonthlySpendUsd`.
@@ -74,6 +68,11 @@ export interface GatewayMonthlyCost {
   costUsd: number;
   /** When the cron started reading logs (epoch ms); null for a legacy plain-number value. */
   asOfMs: number | null;
+  /**
+   * The cron's page cap stopped the read before the month's oldest logs, so `costUsd` is known to
+   * be low. The month estimate is then a floor (`gatewayMonthlySpendUsd`).
+   */
+  truncated: boolean;
 }
 
 export function utcMonthKey(now: Date): string {
@@ -104,8 +103,16 @@ export function buildCostEstimateWrite(
 }
 
 /** KV value the cron writes: the total and when it was read. */
-export function serializeGatewayMonthlyCost(costUsd: number, asOfMs: number): string {
-  return JSON.stringify({ costUsd: Number(costUsd.toFixed(6)), asOfMs });
+export function serializeGatewayMonthlyCost(
+  costUsd: number,
+  asOfMs: number,
+  truncated = false
+): string {
+  return JSON.stringify({
+    costUsd: Number(costUsd.toFixed(6)),
+    asOfMs,
+    ...(truncated ? { truncated: true } : {}),
+  });
 }
 
 /**
@@ -124,35 +131,51 @@ export function parseGatewayMonthlyCost(raw: string | null): GatewayMonthlyCost 
     }
     const record = maybeJsonRecord(parsed);
     if (!record) return null;
-    const { costUsd, asOfMs } = record;
+    const { costUsd, asOfMs, truncated } = record;
     if (typeof costUsd !== 'number' || !Number.isFinite(costUsd) || costUsd < 0) return null;
     if (typeof asOfMs !== 'number' || !Number.isFinite(asOfMs)) return null;
-    return { costUsd, asOfMs };
+    return { costUsd, asOfMs, truncated: truncated === true };
   }
   const legacy = Number(trimmed);
   return trimmed !== '' && Number.isFinite(legacy) && legacy >= 0
-    ? { costUsd: legacy, asOfMs: null }
+    ? { costUsd: legacy, asOfMs: null, truncated: false }
     : null;
 }
 
 /**
  * Start of the estimate window that complements a gateway total: its `asOf` minus the lag margin,
  * clipped to the month start. Null when there is no gateway total (the whole month is estimated).
+ * A legacy total (no `asOf`, written before this format) is assumed as old as its KV TTL allows,
+ * which errs toward counting.
  */
 export function estimateWindowStartMs(
   gateway: GatewayMonthlyCost | null,
   lagSeconds: number,
-  now: Date
+  now: Date,
+  legacyMaxAgeSeconds: number
 ): number | null {
   if (!gateway) return null;
-  const asOfMs = gateway.asOfMs ?? now.getTime() - LEGACY_GATEWAY_TOTAL_AGE_MS;
+  const asOfMs = gateway.asOfMs ?? now.getTime() - legacyMaxAgeSeconds * 1000;
   return Math.max(utcMonthStartMs(now), asOfMs - lagSeconds * 1000);
+}
+
+/** Whether buckets still cover `windowStartMs`; older windows fall back to month figures. */
+export function estimateWindowRetained(windowStartMs: number | null, now: Date): boolean {
+  return (
+    windowStartMs !== null &&
+    windowStartMs >= now.getTime() - COST_ESTIMATE_RETENTION_MS + COST_ESTIMATE_BUCKET_MS
+  );
 }
 
 /**
  * The spend the gateway-path cap compares: gateway total plus the estimate since it, or the month
- * estimate when there is no total. A total older than the bucket retention cannot be complemented
- * exactly, so the larger of the two month figures is used (never their sum).
+ * estimate when there is no total. Two cases where the gateway total is known to be incomplete use
+ * the month estimate as a floor instead of trusting the window:
+ * - a total older than the bucket retention, which cannot be complemented exactly, and
+ * - a truncated cron read, which is missing the month's oldest logs.
+ * The floor is never added to the gateway total, so nothing is counted twice. Otherwise the floor
+ * is deliberately not applied: the catalog overprices some models (measured up to 4x), and a
+ * month-long estimate would then refuse users well below their cap.
  */
 export function gatewayMonthlySpendUsd(
   gateway: GatewayMonthlyCost | null,
@@ -161,10 +184,11 @@ export function gatewayMonthlySpendUsd(
   now: Date
 ): number {
   if (!gateway || windowStartMs === null) return snapshot.estimateMonthUsd;
-  if (windowStartMs < now.getTime() - COST_ESTIMATE_RETENTION_MS + COST_ESTIMATE_BUCKET_MS) {
+  if (!estimateWindowRetained(windowStartMs, now)) {
     return Math.max(gateway.costUsd, snapshot.estimateMonthUsd);
   }
-  return gateway.costUsd + snapshot.estimateSinceUsd;
+  const windowed = gateway.costUsd + snapshot.estimateSinceUsd;
+  return gateway.truncated ? Math.max(windowed, snapshot.estimateMonthUsd) : windowed;
 }
 
 /** Parse the lag-margin setting; out-of-range or unreadable values fall back to the default. */

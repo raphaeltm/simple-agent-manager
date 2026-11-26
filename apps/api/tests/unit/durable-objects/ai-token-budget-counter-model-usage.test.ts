@@ -170,9 +170,10 @@ describe('gateway install: the worker gate reads the ceiling and still makes one
     );
     expect(getProviderUsage).not.toHaveBeenCalled();
     expect(get.mock.calls.length + snapshot.mock.calls.length).toBe(1);
-    // settings (monthly cap), settings (token budget); no cap so no gateway total read.
+    // One settings read, shared by the monthly cap and the token budget; no cap so no gateway
+    // total read.
     expect(
       vi.mocked(gatewayEnv.KV.get).mock.calls.map(([key]) => String(key).split(':')[0])
-    ).toEqual(['ai-budget-settings', 'ai-budget-settings']);
+    ).toEqual(['ai-budget-settings']);
   });
 });

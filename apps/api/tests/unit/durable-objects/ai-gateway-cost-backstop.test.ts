@@ -191,11 +191,42 @@ describe('the estimate closes the gap before and between gateway refreshes', () 
     await expect(gate()).resolves.toEqual({ allowed: true });
   });
 
-  it('reads a legacy plain-number total as about an hour old', async () => {
+  it('reads a legacy plain-number total as old as its KV TTL allows (2 hours by default)', async () => {
     setUserCap(1);
     rows.set(COST_KEY, String(1 - CALL_USD * 1.5));
-    await spendAt(NOW - 30 * MINUTE, 2);
+    await spendAt(NOW - 100 * MINUTE, 2);
     await expect(gate()).resolves.toMatchObject({ allowed: false });
+  });
+
+  it('uses the month estimate as a floor when the cron read was truncated', async () => {
+    // Truncated reads miss the month's oldest logs, so the gateway total is known to be low.
+    setUserCap(CALL_USD * 5);
+    await spendAt(NOW - 180 * MINUTE, 6);
+    rows.set(
+      COST_KEY,
+      JSON.stringify({ costUsd: CALL_USD, asOfMs: NOW - 30 * MINUTE, truncated: true })
+    );
+    await expect(gate()).resolves.toMatchObject({ allowed: false });
+    // Control: the same total from a complete read is trusted (the windowed rule).
+    setGatewayTotal(CALL_USD, NOW - 30 * MINUTE);
+    await expect(gate()).resolves.toEqual({ allowed: true });
+  });
+
+  it('answers a total older than bucket retention from month figures, without scanning buckets', async () => {
+    setUserCap(CALL_USD * 1.5);
+    await spendAt(NOW - 5 * MINUTE, 2);
+    const snapshot = vi.spyOn(counter, 'getGatewayAdmissionSnapshot');
+    setGatewayTotal(0.0001, NOW - 30 * 60 * MINUTE);
+    await expect(gate()).resolves.toMatchObject({ allowed: false });
+    expect(snapshot).toHaveBeenCalledWith(expect.any(String), '2026-11', null);
+  });
+
+  it('reads the user settings row once per admission', async () => {
+    setUserCap(1);
+    setGatewayTotal(0.1, NOW - 10 * MINUTE);
+    await gate();
+    const reads = vi.mocked(env.KV.get).mock.calls.filter(([key]) => key === SETTINGS_KEY);
+    expect(reads).toHaveLength(1);
   });
 
   it('records every concurrent priced response once (rule 45)', async () => {
@@ -211,10 +242,10 @@ describe('the estimate closes the gap before and between gateway refreshes', () 
 });
 
 describe('failure behaviour', () => {
-  it('fails the call when the counter read fails, rather than admitting it', async () => {
+  it('refuses with a retryable 503 when the counter read fails, rather than admitting it', async () => {
     setUserCap(1);
     vi.spyOn(counter, 'getGatewayAdmissionSnapshot').mockRejectedValue(new Error('DO reset'));
-    await expect(gate()).rejects.toThrow('DO reset');
+    await expect(gate()).rejects.toMatchObject({ statusCode: 503 });
   });
 
   it('uses the month estimate when the gateway total cannot be read', async () => {
@@ -288,8 +319,16 @@ describe('the cron total format', () => {
     expect(parseGatewayMonthlyCost('{"costUsd":1.5,"asOfMs":5}')).toEqual({
       costUsd: 1.5,
       asOfMs: 5,
+      truncated: false,
     });
-    expect(parseGatewayMonthlyCost('0.350000')).toEqual({ costUsd: 0.35, asOfMs: null });
+    expect(parseGatewayMonthlyCost('{"costUsd":1.5,"asOfMs":5,"truncated":true}')).toMatchObject({
+      truncated: true,
+    });
+    expect(parseGatewayMonthlyCost('0.350000')).toEqual({
+      costUsd: 0.35,
+      asOfMs: null,
+      truncated: false,
+    });
     expect(parseGatewayMonthlyCost('nope')).toBeNull();
   });
 });

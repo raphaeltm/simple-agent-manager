@@ -2268,14 +2268,20 @@ response with the same catalog code and keeps the estimate in the user's budget 
 5-minute buckets (`ai-cost-estimate.ts`, `ai-token-budget-counter.ts`). The spend compared with the
 cap is the gateway total plus the estimate for calls made since `asOfMs` minus
 `aiProxy.costEstimateGatewayLagSeconds`; when the cron has written no total yet it is the estimate
-for the month (`ai-cost-estimate.ts:gatewayMonthlySpendUsd`). The two windows do not overlap, so a
+for the month (`ai-cost-estimate.ts:gatewayMonthlySpendUsd`). When the cron's log read was cut
+off by its page cap (it reads newest first, so the oldest logs are missing) it records
+`truncated: true`, and the month estimate is then a floor. A total in the older plain-number format
+is treated as old as its KV TTL allows. The two windows do not overlap, so a
 call is never counted by both except inside the lag margin, and each cron run replaces the
 estimate with the gateway's own figure, so a catalog price that differs from what the gateway
 charged only affects the last hour or so. The estimate is not shown as spend: on gateway
 installations it is kept out of the provider rows that `GET /api/usage/ai` adds to gateway totals.
 The estimate read shares the existing per-call counter read (`checkGatewayCostAdmission`), so a
-call makes one Durable Object round-trip, as before; a failed counter read refuses that user's call,
-as the daily-budget read always has. An unreadable gateway total falls back to the month estimate.
+call makes one Durable Object round-trip, as before; a failed counter read refuses that user's call
+with a retryable 503 (`ai_proxy.monthly_spend_unreadable`), as the daily-budget read always refused
+it. An unreadable gateway total falls back to the month estimate. Rolling back to a version older
+than this format reads the new KV value as "no total yet", so the cap is not enforced on gateway
+installations until the older cron rewrites it (at most one hour) or the value expires.
 Models without a catalog price (an operator's own `SAM_MODEL`, `run_ai_model`'s Workers AI models,
 which have their own per-project budget) are counted only by the hourly gateway total.
 
@@ -2300,8 +2306,10 @@ chat shows "AI usage limit reached" without a retry suggestion
 Without a gateway, once a ceiling is set, every gated call reads the month's
 priced total (one Durable Object call), not only calls by users with their own cap. Passthrough
 calls served by a platform-owned credential are priced too; a user's or project's own credential
-is their own spend. Spend is priced after each response, so calls
-admitted together before the total crosses the cap can each overshoot it by their own cost. A
+is their own spend. Spend is priced after each response and nothing is reserved at admission, so
+every call in flight when the total crosses the cap still completes: together they can overshoot
+the cap by up to the sum of their costs, bounded by the user's concurrency and the proxy rate
+limit. This applies with and without a gateway. A
 stored per-user settings row that cannot be parsed is ignored (platform defaults, logged as
 `ai_proxy.budget_settings_row_skipped`) rather than failing the call. Priced calls also record a
 per-model, per-day row in the same counter transaction, which the usage page shows as model and

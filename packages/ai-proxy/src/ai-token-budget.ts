@@ -233,15 +233,15 @@ export async function checkTokenBudget(
   kv: KVNamespace,
   userId: string,
   env: AiProxyEnv,
-  /** The day's usage when the caller already read it from the counter (gateway admission). */
-  preloadedUsage?: TokenBudget | null
+  /** Values the caller already read this request (gateway admission): no second read. */
+  preloaded?: { usage: TokenBudget | null; userSettings: UserAiBudgetSettings | null } | null
 ): Promise<{ allowed: boolean; usage: TokenBudget; inputLimit: number; outputLimit: number }> {
   // Load user budget settings (may be null)
-  const userSettings = await getUserBudgetSettings(kv, userId);
+  const userSettings = preloaded ? preloaded.userSettings : await getUserBudgetSettings(kv, userId);
   const { dailyInputTokenLimit: inputLimit, dailyOutputTokenLimit: outputLimit } =
     resolveEffectiveLimits(userSettings, env);
 
-  const usage = preloadedUsage ?? (await getTokenUsage(kv, userId, env));
+  const usage = preloaded?.usage ?? (await getTokenUsage(kv, userId, env));
   const allowed = usage.inputTokens <= inputLimit && usage.outputTokens <= outputLimit;
 
   return { allowed, usage, inputLimit, outputLimit };
@@ -460,7 +460,7 @@ export async function checkAiUsageGate(
   const gateway = localMetering
     ? null
     : await checkGatewayCostAdmission(kv, userId, env, ports, options);
-  const budget = await checkTokenBudget(kv, userId, env, gateway?.usage);
+  const budget = await checkTokenBudget(kv, userId, env, gateway);
   if (!budget.allowed) {
     return { allowed: false, reason: 'daily-token-budget', budget };
   }
