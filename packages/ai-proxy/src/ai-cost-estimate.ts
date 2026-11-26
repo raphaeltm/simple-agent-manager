@@ -121,19 +121,26 @@ export function buildCostEstimateWrite(
 }
 
 /** KV value the cron writes: the total and when it was read. */
-export function serializeGatewayMonthlyCost(
+/** The cron's record for one user: the KV value (JSON) and, identically, the key's metadata. */
+export function gatewayMonthlyCostRecord(
   costUsd: number,
   asOfMs: number,
   truncated = false,
   settled?: GatewayMonthlyCost['settled']
-): string {
-  return JSON.stringify({
+): Record<string, number | boolean> {
+  return {
     costUsd: Number(costUsd.toFixed(6)),
     asOfMs,
     ...(truncated ? { truncated: true } : {}),
     // Kept unrounded: it is a running sum, and rounding it every hour would drift.
     ...(settled ? { settledUsd: settled.usd, settledBeforeMs: settled.beforeMs } : {}),
-  });
+  };
+}
+
+export function serializeGatewayMonthlyCost(
+  ...args: Parameters<typeof gatewayMonthlyCostRecord>
+): string {
+  return JSON.stringify(gatewayMonthlyCostRecord(...args));
 }
 
 /**

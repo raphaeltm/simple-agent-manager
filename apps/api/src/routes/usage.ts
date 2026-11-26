@@ -125,19 +125,8 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
       totalCostUsd += entry.estimatedCostUsd;
     }
 
-    // Gateway not configured: SAM's own records, not an error. A failed per-model read degrades
-    // to empty breakdowns, never a failed usage page.
-    const breakdown = await getLocalUsageBreakdown(
-      c.env,
-      userId,
-      new Date(periodBounds.startDate)
-    ).catch((err: unknown) => {
-      log.warn('usage.local_breakdown_failed', {
-        userId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return { byModel: [], byDay: [] };
-    });
+    // Gateway not configured: SAM's own records, not an error.
+    const breakdown = await readLocalBreakdown(c.env, userId, new Date(periodBounds.startDate));
     return c.json({
       totalCostUsd,
       totalRequests,
@@ -218,6 +207,11 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
     totalOutputTokens += entry.outputTokens;
     totalCostUsd += entry.estimatedCostUsd;
   }
+  // On a gateway install SAM records per-model rows only for calls that bypassed the gateway
+  // (platform-funded passthrough), so they are in no gateway log and add to the breakdowns.
+  const local = await readLocalBreakdown(c.env, userId, new Date(periodBounds.startDate));
+  for (const row of local.byModel) mergeModelRow(modelMap, row);
+  for (const row of local.byDay) mergeDayRow(dayMap, row);
 
   const response: UserAiUsageResponse = {
     totalCostUsd,
@@ -237,6 +231,42 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
 
   return c.json(response);
 });
+
+/** SAM's per-model rows; a failed read degrades to empty breakdowns, never a failed page. */
+function readLocalBreakdown(
+  env: Env,
+  userId: string,
+  start: Date
+): Promise<{ byModel: UsageByModel[]; byDay: UsageByDay[] }> {
+  return getLocalUsageBreakdown(env, userId, start).catch((err: unknown) => {
+    log.warn('usage.local_breakdown_failed', {
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { byModel: [], byDay: [] };
+  });
+}
+
+function mergeModelRow(map: Map<string, UsageByModel>, row: UsageByModel): void {
+  const existing = map.get(row.model);
+  if (!existing) return void map.set(row.model, { ...row });
+  existing.requests += row.requests;
+  existing.inputTokens += row.inputTokens;
+  existing.outputTokens += row.outputTokens;
+  existing.totalTokens += row.totalTokens;
+  existing.costUsd += row.costUsd;
+  existing.cachedRequests += row.cachedRequests;
+  existing.errorRequests += row.errorRequests;
+}
+
+function mergeDayRow(map: Map<string, UsageByDay>, row: UsageByDay): void {
+  const existing = map.get(row.date);
+  if (!existing) return void map.set(row.date, { ...row });
+  existing.requests += row.requests;
+  existing.inputTokens += row.inputTokens;
+  existing.outputTokens += row.outputTokens;
+  existing.costUsd += row.costUsd;
+}
 
 function mergeLocalProviderUsage(
   map: Map<string, UsageByProvider>,

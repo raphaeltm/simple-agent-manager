@@ -244,6 +244,23 @@ describe('the estimate closes the gap before and between gateway refreshes', () 
     ).toBeCloseTo(CALL_USD * 3, 9);
   });
 
+  it('estimates a priced gateway response that reports no usage (Codex P1 on #3015)', async () => {
+    const response = new Response(
+      JSON.stringify({ choices: [{ message: { content: 'x'.repeat(30_000) } }] }),
+      { headers: { 'content-type': 'application/json' } }
+    );
+    // The /ai/v1 caller leaves estimateMissingUsage off for a priced gateway call.
+    await attachTokenUsageAccounting(response, {
+      env,
+      userId: USER,
+      format: 'openai',
+      costModelId: PRICED.id,
+      fallbackInputTokens: 1_000,
+    });
+    const month = await counter.getGatewayAdmissionSnapshot('2026-11-26', '2026-11', null);
+    expect(month.estimateMonthUsd).toBeGreaterThan(0);
+  });
+
   it('refuses when a stale total is below the cap but the total plus calls since it is not', async () => {
     const asOf = NOW - 50 * MINUTE;
     setUserCap(1);

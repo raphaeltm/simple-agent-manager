@@ -12,10 +12,10 @@ import { log } from '@simple-agent-manager/worker-core';
 
 import {
   type GatewayMonthlyCost,
+  gatewayMonthlyCostRecord,
   MAX_COST_ESTIMATE_GATEWAY_LAG_SECONDS,
   MAX_MONTHLY_COST_CACHE_TTL_SECONDS,
   parseGatewayMonthlyCost,
-  serializeGatewayMonthlyCost,
   utcMonthKey,
   utcMonthStartMs,
 } from './ai-cost-estimate';
@@ -153,11 +153,10 @@ export async function runMonthlyCostAggregation(
     counts[next.kind]++;
     const key = `${AI_MONTHLY_COST_CACHE_KV_PREFIX}:${userId}:${monthKey}`;
     try {
-      await env.KV.put(
-        key,
-        serializeGatewayMonthlyCost(next.costUsd, asOfMs, next.lowerBound, next.settled),
-        { expirationTtl: ttl }
-      );
+      const record = gatewayMonthlyCostRecord(next.costUsd, asOfMs, next.lowerBound, next.settled);
+      // The same record as metadata, so a truncated run reads every total from the key list
+      // (`readPreviousTotals`) instead of one KV get per user.
+      await env.KV.put(key, JSON.stringify(record), { expirationTtl: ttl, metadata: record });
       usersUpdated++;
     } catch (err) {
       errors++;
@@ -266,9 +265,11 @@ function nextUserTotal(
 }
 
 /**
- * This month's stored totals, for a truncated read. One KV list walk over this month's keys (one
- * per user with gateway spend), only on truncated runs. A failure is logged and returns what was
- * read so far: users it missed are then written from this read alone.
+ * This month's stored totals, for a truncated read. One KV list call per 1,000 keys (one key per
+ * user with gateway spend): each total is also the key's metadata, so the walk needs no get per
+ * user and stays far inside Workers KV's 1,000 operations per invocation. A key written before the
+ * metadata existed costs one get, once. A failure is logged and returns what was read so far:
+ * users it missed are then written from this read alone.
  */
 async function readPreviousTotals(
   kv: KVNamespace,
@@ -281,10 +282,12 @@ async function readPreviousTotals(
     let cursor: string | undefined;
     do {
       const page = await kv.list({ prefix, ...(cursor ? { cursor } : {}) });
-      for (const { name } of page.keys) {
+      for (const { name, metadata } of page.keys) {
         if (!name.endsWith(suffix)) continue;
         const userId = name.slice(prefix.length, -suffix.length);
-        const total = parseGatewayMonthlyCost(await kv.get(name));
+        const total =
+          (metadata ? parseGatewayMonthlyCost(JSON.stringify(metadata)) : null) ??
+          parseGatewayMonthlyCost(await kv.get(name));
         if (userId && total) previous.set(userId, total);
       }
       cursor = page.list_complete ? undefined : page.cursor;

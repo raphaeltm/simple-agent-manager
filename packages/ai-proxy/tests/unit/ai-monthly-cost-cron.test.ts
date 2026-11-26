@@ -62,6 +62,7 @@ function createMockKV(failingKeys: Set<string> = new Set()): KVNamespace & {
 } {
   const store = new Map<string, string>();
   const ttlByKey = new Map<string, number | undefined>();
+  const metadataByKey = new Map<string, unknown>();
   return {
     _store: store,
     _ttlByKey: ttlByKey,
@@ -72,6 +73,8 @@ function createMockKV(failingKeys: Set<string> = new Set()): KVNamespace & {
       }
       store.set(key, value);
       ttlByKey.set(key, options?.expirationTtl);
+      if (options?.metadata === undefined) metadataByKey.delete(key);
+      else metadataByKey.set(key, options.metadata);
     }),
     delete: vi.fn(async (key: string) => {
       store.delete(key);
@@ -79,7 +82,7 @@ function createMockKV(failingKeys: Set<string> = new Set()): KVNamespace & {
     list: vi.fn(async (options?: { prefix?: string }) => ({
       keys: [...store.keys()]
         .filter((name) => name.startsWith(options?.prefix ?? ''))
-        .map((name) => ({ name })),
+        .map((name) => ({ name, metadata: metadataByKey.get(name) })),
       list_complete: true,
       cacheStatus: null,
     })),
@@ -497,6 +500,20 @@ describe('runMonthlyCostAggregation', () => {
       );
       await runMonthlyCostAggregation(makeEnv({ KV: kv }));
       expect(read(kv, 'user-a')).toMatchObject({ costUsd: 3, settled: { usd: 1 } });
+    });
+
+    it('reads previous totals from the key list, with no KV get per user', async () => {
+      const kv = createMockKV();
+      vi.setSystemTime(NOW - 60 * MIN);
+      serve([spend('user-a', NOW - 150 * MIN, 5), spend('user-b', NOW - 150 * MIN, 1)], false);
+      await runMonthlyCostAggregation(makeEnv({ KV: kv }));
+      vi.setSystemTime(NOW);
+      serve([spend('user-a', NOW - 30 * MIN, 3), spend('user-c', NOW - 130 * MIN, 0)]);
+      vi.mocked(kv.get).mockClear();
+      await runMonthlyCostAggregation(makeEnv({ KV: kv }));
+      expect(kv.get).not.toHaveBeenCalled();
+      expect(read(kv, 'user-a')).toMatchObject({ costUsd: 8, truncated: false });
+      expect(read(kv, 'user-b')).toMatchObject({ costUsd: 1, truncated: false });
     });
 
     it('counts an entry the paginated read returned twice once', async () => {

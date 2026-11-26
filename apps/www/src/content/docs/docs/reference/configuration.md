@@ -2289,7 +2289,13 @@ Passthrough calls (`/ai/proxy/:wstoken/*`) go straight to the provider and never
 logs, so for a platform-owned credential SAM's price is their spend record on every installation:
 they are priced in those provider rows and kept as a month total that the cap always adds to the
 gateway figure (`ai_direct_spend_month`). `GET /api/usage/ai/budget` adds the same month total to its
-live gateway-log figure. Raise `AI_MONTHLY_COST_AGGREGATION_MAX_PAGES` (hard cap 500) if
+live gateway-log figure, and `GET /api/usage/ai` adds their per-model and per-day rows to the
+gateway-log breakdowns. A platform-priced response that reports no usage (or a stream that ends
+before its usage chunk) is charged from the request estimate and the response size, on every
+installation (`ai-token-usage-accounting.ts:estimatesMissingUsage`). Each cron total is also stored
+as its KV key's metadata, so a truncated run reads every previous total from the key list (one list
+call per 1,000 users) rather than one KV read per user, inside Workers KV's 1,000 operations per
+invocation; the cron's writes remain one per user with gateway spend. Raise `AI_MONTHLY_COST_AGGREGATION_MAX_PAGES` (hard cap 500) if
 `cron.monthly_cost.truncated_read` reports gap totals regularly: the read then covers less than
 two hours of logs.
 The estimate read shares the existing per-call counter read (`checkGatewayCostAdmission`), so a

@@ -52,6 +52,7 @@ export interface TokenUsageAccountingOptions {
   costModelId?: string;
   /** The call bypassed AI Gateway (passthrough), so SAM's price is its only spend record. */
   directUpstream?: boolean;
+  /** Estimate usage the upstream did not report. Always on for a platform-priced call. */
   estimateMissingUsage?: boolean;
   provider?: AiProviderUsageAttribution;
   executionCtx?: Pick<ExecutionContext, 'waitUntil'>;
@@ -66,12 +67,21 @@ export interface UpstreamTokenUsageAccountingOptions extends TokenUsageAccountin
   headers: Headers;
 }
 
+/**
+ * A platform-priced call (`costModelId`) always estimates usage the upstream did not report: on a
+ * gateway install the backstop estimate is the only record of it until the hourly gateway total,
+ * and without a gateway SAM's record is the spend record. Callers opt in for other calls.
+ */
+function estimatesMissingUsage(options: TokenUsageAccountingOptions): boolean {
+  return options.estimateMissingUsage === true || options.costModelId !== undefined;
+}
+
 export async function accountTokenUsageFromJson(
   payload: unknown,
   options: TokenUsageAccountingOptions
 ): Promise<void> {
   const usage = extractJsonTokenUsage(payload, options.format);
-  if (options.estimateMissingUsage && usage.outputTokens === undefined)
+  if (estimatesMissingUsage(options) && usage.outputTokens === undefined)
     usage.outputBytes = jsonOutputByteLength(payload, options.format);
   await incrementExtractedUsage(usage, options);
 }
@@ -81,8 +91,8 @@ export function accountTokenUsageFromStream(
   options: TokenUsageAccountingOptions
 ): void {
   scheduleTokenAccounting(
-    collectStreamTokenUsage(stream, options.format, options.estimateMissingUsage === true).then(
-      (usage) => incrementExtractedUsage(usage, options)
+    collectStreamTokenUsage(stream, options.format, estimatesMissingUsage(options)).then((usage) =>
+      incrementExtractedUsage(usage, options)
     ),
     options
   );
@@ -118,7 +128,7 @@ export async function attachTokenUsageAccounting(
   try {
     await accountTokenUsageFromJson(
       payload,
-      options.estimateMissingUsage ? options : { ...options, fallbackInputTokens: undefined }
+      estimatesMissingUsage(options) ? options : { ...options, fallbackInputTokens: undefined }
     );
   } catch (err) {
     log.warn('ai_proxy.token_usage_increment_failed', {
@@ -243,7 +253,7 @@ async function incrementExtractedUsage(
   const inputTokens = usage.inputTokens ?? options.fallbackInputTokens ?? 0;
   const outputTokens =
     usage.outputTokens ??
-    (options.estimateMissingUsage ? Math.ceil((usage.outputBytes ?? 0) / 3) : 0);
+    (estimatesMissingUsage(options) ? Math.ceil((usage.outputBytes ?? 0) / 3) : 0);
   if (inputTokens <= 0 && outputTokens <= 0) return;
 
   // Priced on every install. It is the spend record (display rows) without a gateway, and for a

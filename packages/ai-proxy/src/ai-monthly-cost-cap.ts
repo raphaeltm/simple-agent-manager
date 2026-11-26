@@ -103,9 +103,12 @@ export function effectiveMonthlyCostCapUsd(
  * settings snapshot can be read again.
  */
 export async function resolveMonthlyCostCeilingUsd(
-  _env: AiProxyEnv,
+  env: AiProxyEnv,
   ports: MonthlyCostCeilingPort
 ): Promise<number | null> {
+  // Where no monthly cap can be enforced (a gateway without the account API), the ceiling has no
+  // effect, so a settings outage must not fail the budget page or a daily-limit update there.
+  if (!isMonthlyCostCapAvailable(env)) return null;
   try {
     const ceiling = await ports.monthlyCostCeilingUsd();
     return Number.isFinite(ceiling) && ceiling > 0 ? ceiling : null;
