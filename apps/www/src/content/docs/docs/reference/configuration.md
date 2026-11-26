@@ -2279,7 +2279,10 @@ installations it is kept out of the provider rows that `GET /api/usage/ai` adds 
 Passthrough calls (`/ai/proxy/:wstoken/*`) go straight to the provider and never reach gateway
 logs, so for a platform-owned credential SAM's price is their spend record on every installation:
 they are priced in those provider rows and kept as a month total that the cap always adds to the
-gateway figure (`ai_direct_spend_month`).
+gateway figure (`ai_direct_spend_month`). `GET /api/usage/ai/budget` adds the same month total to its
+live gateway-log figure. When the cron's log read hits `AI_MONTHLY_COST_AGGREGATION_MAX_PAGES`, it
+keeps each user's previous total if that is higher (logged as `cron.monthly_cost.truncated_merge`);
+raise the page cap if that log appears regularly.
 The estimate read shares the existing per-call counter read (`checkGatewayCostAdmission`), so a
 call makes one Durable Object round-trip, as before; a failed counter read refuses that user's call
 with a retryable 503 (`ai_proxy.monthly_spend_unreadable`), as the daily-budget read always refused

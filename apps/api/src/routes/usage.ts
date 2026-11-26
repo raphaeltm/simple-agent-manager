@@ -1,4 +1,5 @@
 import {
+  getGatewayDirectMonthlySpendUsd,
   getLocalMonthlyAiCostUsd,
   getLocalUsageBreakdown,
   hasLocalAiCostMetering,
@@ -293,6 +294,8 @@ usageRoutes.get('/ai/budget', requireAuth(), requireApproved(), async (c) => {
   const gatewayId = resolveAiGatewayId(c.env);
   if (gatewayId) {
     const periodBounds = getGatewayPeriodBounds('current-month');
+    // Passthrough calls bypass the gateway; the cap adds their priced total, so the page does too.
+    monthCostUsd += await getGatewayDirectMonthlySpendUsd(c.env, userId);
     try {
       await iterateGatewayLogs(c.env, gatewayId, periodBounds.startDate, (entry) => {
         if (entry.metadata?.userId !== userId) return;

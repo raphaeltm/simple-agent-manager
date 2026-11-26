@@ -152,6 +152,34 @@ export interface MonthlyCostCapOptions {
 }
 
 /**
+ * Gateway installs: this month's priced spend on calls that bypassed the gateway (passthrough),
+ * which no gateway log contains. Display only (`GET /api/usage/ai/budget` adds it to the live
+ * gateway-log total, as the gate does); an unreadable counter shows 0 rather than failing the page.
+ */
+export async function getGatewayDirectMonthlySpendUsd(
+  env: AiProxyEnv,
+  userId: string
+): Promise<number> {
+  const counter = getBudgetCounter(env, userId);
+  if (!counter || hasLocalAiCostMetering(env)) return 0;
+  const now = new Date();
+  try {
+    const snapshot = await counter.getGatewayAdmissionSnapshot(
+      buildBudgetDateKey(now),
+      utcMonthKey(now),
+      null
+    );
+    return snapshot.directMonthUsd;
+  } catch (err) {
+    log.warn('usage.direct_spend_unreadable', {
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return 0;
+  }
+}
+
+/**
  * Check whether a user is within their monthly cost cap.
  *
  * The cap is `effectiveMonthlyCostCapUsd(user cap, installation ceiling)` on every install; the

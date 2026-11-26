@@ -5,7 +5,10 @@
  * response accounting and the real `AiTokenBudgetCounter` over SQLite; only the admin settings
  * snapshot is stubbed.
  */
-import { parseGatewayMonthlyCost } from '@simple-agent-manager/ai-proxy';
+import {
+  getGatewayDirectMonthlySpendUsd,
+  parseGatewayMonthlyCost,
+} from '@simple-agent-manager/ai-proxy';
 import { PLATFORM_AI_MODELS } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -288,6 +291,13 @@ describe('calls that bypass the gateway (passthrough)', () => {
     // Control: the same two calls routed through the gateway are inside its total.
     db.prepare('DELETE FROM ai_direct_spend_month').run();
     await expect(gate()).resolves.toEqual({ allowed: true });
+  });
+
+  it('is reported to the budget page, which adds it to the live gateway-log total', async () => {
+    await directResponse();
+    await expect(getGatewayDirectMonthlySpendUsd(env, USER)).resolves.toBeCloseTo(CALL_USD, 9);
+    vi.spyOn(counter, 'getGatewayAdmissionSnapshot').mockRejectedValue(new Error('DO reset'));
+    await expect(getGatewayDirectMonthlySpendUsd(env, USER)).resolves.toBe(0);
   });
 
   it('is priced in the provider rows the usage page adds to gateway totals', async () => {

@@ -155,6 +155,7 @@ async function mergePreviousTotals(
 ): Promise<void> {
   const prefix = `${AI_MONTHLY_COST_CACHE_KV_PREFIX}:`;
   const suffix = `:${monthKey}`;
+  let kept = 0;
   try {
     let cursor: string | undefined;
     do {
@@ -164,10 +165,15 @@ async function mergePreviousTotals(
         const userId = name.slice(prefix.length, -suffix.length);
         const previous = parseGatewayMonthlyCost(await kv.get(name));
         if (!userId || !previous) continue;
-        costByUser.set(userId, Math.max(costByUser.get(userId) ?? 0, previous.costUsd));
+        const scanned = costByUser.get(userId) ?? 0;
+        if (previous.costUsd > scanned) kept++;
+        costByUser.set(userId, Math.max(scanned, previous.costUsd));
       }
       cursor = page.list_complete ? undefined : page.cursor;
     } while (cursor);
+    // A previous total that outweighs this read means the page cap hides recent growth for that
+    // user too; raise AI_MONTHLY_COST_AGGREGATION_MAX_PAGES (hard cap 500) to read the whole month.
+    log.warn('cron.monthly_cost.truncated_merge', { monthKey, previousTotalsKept: kept });
   } catch (err) {
     log.error('cron.monthly_cost.truncated_merge_error', {
       error: err instanceof Error ? err.message : String(err),

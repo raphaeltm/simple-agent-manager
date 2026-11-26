@@ -41,6 +41,7 @@ export {
 export { checkModelTierAllowance, describeModelTierDenial } from './ai-model-tier-gate';
 export { getLocalUsageBreakdown } from './ai-model-usage';
 export {
+  getGatewayDirectMonthlySpendUsd,
   getLocalMonthlyAiCostUsd,
   type MonthlyCostCapCheck,
   monthlyCostCapMessage,
