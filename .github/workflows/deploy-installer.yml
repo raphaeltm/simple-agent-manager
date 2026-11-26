@@ -136,11 +136,14 @@ jobs:
           for (;;) {
             try {
               const response = await fetch(`https://install.${process.env.BASE_DOMAIN}/health`, { cache: 'no-store' });
-              const data = await response.json();
-              last = `status=${response.status} sha=${data.sha} oauthConfigured=${data.oauthConfigured}`;
+              // Recorded before parsing, so a non-JSON answer (an edge error page or a
+              // challenge) is reported by status and type instead of as a bare parse error.
+              last = `status=${response.status} type=${response.headers.get('content-type')} cf-mitigated=${response.headers.get('cf-mitigated')} cf-ray=${response.headers.get('cf-ray')}`;
+              const data = JSON.parse(await response.text());
+              last += ` sha=${data.sha} oauthConfigured=${data.oauthConfigured}`;
               if (response.ok && data.sha === process.env.GITHUB_SHA && data.oauthConfigured) break;
             } catch (error) {
-              last = `request failed: ${error instanceof Error ? error.name : 'unknown'}`;
+              last += ` (${error instanceof Error ? error.name : 'unknown'})`;
             }
             if (Date.now() >= deadline) throw new Error(`Installer readiness check failed; ${last}`);
             await new Promise((resolve) => setTimeout(resolve, 3000));
