@@ -333,7 +333,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
               </button>
               {att.status === 'uploading' && (
                 <div
-                  className="absolute bottom-0 left-0 h-0.5 bg-accent-emphasis rounded-full transition-all"
+                  className="absolute bottom-0 left-0 h-0.5 bg-accent rounded-full transition-all"
                   style={{ width: `${att.progress}%` }}
                 />
               )}

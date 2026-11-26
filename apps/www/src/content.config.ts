@@ -14,6 +14,10 @@ const blog = defineCollection({
     excerpt: z.string(),
     socialImage: z.string().min(1).optional(),
     draft: z.boolean().optional().default(false),
+    /** Show this post first on the blog index, above the date-sorted grid. */
+    pinned: z.boolean().optional().default(false),
+    /** Optional end of the pin (exclusive). A YAML date means midnight UTC on that day. */
+    pinnedUntil: z.date().optional(),
     interactive: z.enum(['scheduler', 'placement']).optional(),
   }),
 });

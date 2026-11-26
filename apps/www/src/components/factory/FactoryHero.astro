@@ -8,6 +8,7 @@
 import Badge from '../../../../../packages/ui/src/brand/Badge.astro';
 import { SINGLE_VM_INSTALL_SHIPPED } from '../../data/factory-shots';
 import HeroStack from './HeroStack.astro';
+import SecurityNotice from './SecurityNotice.astro';
 ---
 
 <section class="fh-hero" aria-labelledby="fh-hero-title" data-fh-hero data-motion="rest">
@@ -16,6 +17,7 @@ import HeroStack from './HeroStack.astro';
   <div class="fh-hero-haze" data-fh-haze aria-hidden="true"></div>
   <div class="fh-hero-alert" aria-hidden="true"></div>
   <div class="container fh-hero-inner">
+    <SecurityNotice />
     <Badge>Open source · Your infrastructure</Badge>
     <h1 class="fh-hero-title" id="fh-hero-title">
       The open-source operating system for scalable <span class="gradient-text">software factories</span>

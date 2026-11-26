@@ -233,6 +233,18 @@ describe('failed tasks file one error item for their owner', () => {
     expect(errorAsks()[0]!.failure_count).toBe(1);
   });
 
+  // Idea 01M89JXTFHW4W3PQ65GTED6D0K: a task that stops on SAM's AI usage limit has failed, and its
+  // owner must hear about it, without being told to retry.
+  it('files a task stopped by the SAM AI usage limit, with the limit sentence', async () => {
+    task('t-limit', { status: 'in_progress', started_at: new Date().toISOString() });
+    await markTaskFailedIfNonTerminal(env.DATABASE, 't-limit', 'sam_ai_usage_limit_reached');
+    expect((await runInboxSystemErrorSweep(env)).filed).toBe(1);
+    const [item] = (await listInbox(ctx('owner'), { projectId: P1 })).items;
+    expect(item?.taskId).toBe('t-limit');
+    expect(item?.body).toMatch(/AI usage limit was reached/);
+    expect(edges.createNotification).toHaveBeenCalledTimes(1);
+  });
+
   it('does not offer Retry to a task owner who cannot run the project owner’s retry', async () => {
     task('t-colleague', { user_id: 'colleague' });
     await markTaskFailedIfNonTerminal(env.DATABASE, 't-colleague', 'Session creation failed');

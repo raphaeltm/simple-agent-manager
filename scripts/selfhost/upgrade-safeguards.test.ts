@@ -41,6 +41,10 @@ let invalidCacheMount: boolean;
 let failureStopStateDirs: (string | undefined)[];
 
 function run(command: string, args: string[], env?: NodeJS.ProcessEnv): RunResult {
+  // The mode repair after each checkout (operator-files.ts): an empty index changes nothing.
+  if (command === 'git' && args[1] === '--show-toplevel')
+    return { status: 0, stdout: root, stderr: '' };
+  if (command === 'git' && args[0] === 'ls-files') return { status: 0, stdout: '', stderr: '' };
   if (command === 'docker' && args.slice(-2).join(' ') === 'stop celld')
     failureStopStateDirs.push(env?.SAM_SELFHOST_STATE_DIR);
   const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });

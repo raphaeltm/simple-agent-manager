@@ -10,6 +10,10 @@ on:
       - 'packages/ui/src/glass/**'
       - 'packages/ui/src/brand/**'
       - 'packages/ui/package.json'
+  # Daily rebuild so build-time dates take effect without a push: a blog post's `pinnedUntil`
+  # (which also hides the homepage security notice) expires within a day of its date.
+  schedule:
+    - cron: '17 4 * * *'
   workflow_dispatch:
 
 concurrency:

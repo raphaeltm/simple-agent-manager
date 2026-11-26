@@ -1250,6 +1250,9 @@ describe('runRollback', () => {
       let inspectFailure = partial === 'replacement';
       const deleted: string[] = [];
       context.run = (command, args, env) => {
+        // The checkout's mode repair (operator-files.ts) reads an empty index under root.
+        if (command === 'git' && args[1] === '--show-toplevel')
+          return { status: 0, stdout: root, stderr: '' };
         if (command === 'git' || command === 'pnpm') return { status: 0, stdout: '', stderr: '' };
         const result = invoke(command, args, env);
         if (command !== 'docker') return result;

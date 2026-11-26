@@ -199,6 +199,27 @@ async function assertNoHorizontalOverflow(page: Page) {
 }
 
 test.describe('Project chat recoverable error banner', () => {
+  // Idea 01M89JXTFHW4W3PQ65GTED6D0K: SAM's own AI usage limit read as "Provider overloaded".
+  for (const [code, label, recoverable] of [
+    ['sam_ai_usage_limit_reached', 'AI usage limit reached', false],
+    ['provider_overloaded', 'Provider overloaded', true],
+  ] as const) {
+    test(`failure card for ${code}`, async ({ page }, testInfo) => {
+      await setupApiMocks(
+        page,
+        { ...MOCK_TASK, errorMessage: code, executionStep: code },
+        true,
+        MOCK_MESSAGES
+      );
+      await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
+      await expect(page.getByText(label, { exact: true })).toBeVisible();
+      await expect(page.getByText('Recoverable', { exact: true })).toHaveCount(recoverable ? 1 : 0);
+      await assertNoHorizontalOverflow(page);
+      const viewport = testInfo.project.name.includes('Desktop') ? 'desktop' : 'mobile';
+      await screenshot(page, `chat-failure-${code}-${viewport}`);
+    });
+  }
+
   test('startup missing credential reaches existing agent connections', async ({ page }, testInfo) => {
     const systemMessage = {
       ...MOCK_MESSAGES[0],

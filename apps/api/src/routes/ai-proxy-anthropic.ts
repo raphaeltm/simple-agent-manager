@@ -14,50 +14,25 @@
  *
  * Mount point: app.route('/ai/anthropic/v1', aiProxyAnthropicRoutes) in index.ts.
  */
-import {
-  DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
-  DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
-} from '@simple-agent-manager/shared';
-import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
-import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { readRequestJsonRecord } from '../lib/runtime-validation';
-import {
-  checkRateLimit,
-  createRateLimitKey,
-  getCurrentWindowStart,
-} from '../middleware/rate-limit';
 import { proxyRunUsageRecorder } from '../services/agent-run-usage';
-import { resolveUpstreamAuth } from '../services/ai-billing';
-import { isAiProxyEnabled } from '../services/ai-proxy-availability';
-import {
-  AIProxyAuthError,
-  buildAIGatewayMetadata,
-  buildAnthropicCountTokensUrl,
-  buildAnthropicGatewayUrl,
-  extractCallbackToken,
-  isAnthropicModel,
-  verifyAIProxyAuth,
-} from '../services/ai-proxy-shared';
-import { checkAiUsageGate } from '../services/ai-token-budget';
+import { buildAIGatewayMetadata, buildAnthropicGatewayUrl } from '../services/ai-proxy-shared';
+import { globalUpstreamFetch } from '../services/ai-test-upstream';
 import {
   attachUpstreamTokenUsageAccounting,
   estimateInputTokensFromMessages,
   optionalExecutionContext,
 } from '../services/ai-token-usage-accounting';
 import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
+import { registerAnthropicCountTokensRoute } from './ai-proxy-anthropic-count-tokens';
+import { admitAnthropicProxyRequest } from './ai-proxy-anthropic-prelude';
 import {
-  anthropicBodyMaxBytes,
-  anthropicBodyParseError,
   anthropicError,
   anthropicProviderErrorHeaders,
-  anthropicUsageGateError,
-  enforceAnthropicModelTier,
   scheduleAnthropicPlatformLimitHeaders,
-  validateAnthropicAllowedModel,
 } from './ai-proxy-anthropic-support';
 
 const aiProxyAnthropicRoutes = new Hono<{ Bindings: Env }>();
@@ -67,112 +42,15 @@ const aiProxyAnthropicRoutes = new Hono<{ Bindings: Env }>();
 // =============================================================================
 
 aiProxyAnthropicRoutes.post('/messages', async (c) => {
-  // --- Auth: extract token from x-api-key or Authorization: Bearer ---
-  const token = extractCallbackToken(c.req.header('Authorization'), c.req.header('x-api-key'));
-  if (!token) {
-    return anthropicError(
-      'Missing authentication. Provide x-api-key or Authorization: Bearer header.',
-      'authentication_error',
-      401
-    );
-  }
-
-  const db = drizzle(c.env.DATABASE, { schema });
-  let auth;
-  try {
-    auth = await verifyAIProxyAuth(token, c.env, db);
-  } catch (err) {
-    if (err instanceof AIProxyAuthError) {
-      const errType = err.statusCode === 403 ? 'permission_error' : 'authentication_error';
-      return anthropicError(err.message, errType, err.statusCode);
-    }
-    return anthropicError('Invalid or expired API key', 'authentication_error', 401);
-  }
-  if (!(await isAiProxyEnabled(c.env)))
-    return anthropicError('AI proxy is disabled', 'api_error', 503);
-
-  const { userId, workspaceId, projectId, chatSessionId } = auth;
-
-  // --- Rate limit: per-user RPM (shared key with OpenAI proxy) ---
-  const rpmLimit =
-    parseInt(c.env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
-  const windowSeconds =
-    parseInt(c.env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) ||
-    DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS;
-  const windowStart = getCurrentWindowStart(windowSeconds);
-  const rateLimitKey = createRateLimitKey('ai-proxy', userId, windowStart);
-
-  const {
-    allowed: rpmAllowed,
-    remaining,
-    resetAt,
-  } = await checkRateLimit(c.env.KV, rateLimitKey, rpmLimit, windowSeconds);
-
-  c.header('X-RateLimit-Limit', rpmLimit.toString());
-  c.header('X-RateLimit-Remaining', remaining.toString());
-  c.header('X-RateLimit-Reset', resetAt.toString());
-
-  if (!rpmAllowed) {
-    const retryAfter = resetAt - Math.floor(Date.now() / 1000);
-    c.header('Retry-After', Math.max(1, retryAfter).toString());
-    return anthropicError('Rate limit exceeded. Please try again later.', 'rate_limit_error', 429);
-  }
-
-  // --- Parse request body ---
-  let body: Record<string, unknown>;
-  try {
-    body = await readRequestJsonRecord(
-      c.req.raw,
-      'ai-proxy-anthropic.messages',
-      anthropicBodyMaxBytes(c)
-    );
-  } catch (error) {
-    return anthropicBodyParseError(error);
-  }
-
-  // --- Validate model (must be an Anthropic model) ---
-  const modelId = typeof body.model === 'string' ? body.model : undefined;
-  if (!modelId) {
-    return anthropicError('model is required', 'invalid_request_error', 400);
-  }
-  if (!isAnthropicModel(modelId)) {
-    return anthropicError(
+  const admission = await admitAnthropicProxyRequest(c, {
+    bodyContext: 'ai-proxy-anthropic.messages',
+    unsupportedModelMessage: (modelId) =>
       `Model '${modelId}' is not supported on this endpoint. Only Anthropic models (claude-*) are accepted.`,
-      'invalid_request_error',
-      400
-    );
-  }
-
-  const modelError = validateAnthropicAllowedModel(c, auth, modelId);
-  if (modelError) return modelError;
-
-  const tierError = await enforceAnthropicModelTier(c, auth, modelId);
-  if (tierError) return tierError;
-
-  const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env);
-  if (!usageGate.allowed) {
-    return anthropicUsageGateError(
-      usageGate.reason,
-      usageGate.reason === 'monthly-cost-cap' ? usageGate.monthlyCap : undefined
-    );
-  }
-
-  // --- Resolve upstream auth (Unified Billing or platform key) ---
-  let upstreamAuth;
-  try {
-    upstreamAuth = await resolveUpstreamAuth(c.env, db);
-  } catch (err) {
-    log.error('ai_proxy_anthropic.upstream_auth_failed', {
-      userId,
-      workspaceId,
-      reason: err instanceof Error ? err.message : String(err),
-    });
-    return anthropicError(
-      'AI proxy is not configured. Contact an administrator.',
-      'api_error',
-      503
-    );
-  }
+    upstreamAuthFailureEvent: 'ai_proxy_anthropic.upstream_auth_failed',
+  });
+  if (admission instanceof Response) return admission;
+  const { auth, body, modelId, testUpstream, upstreamAuth } = admission;
+  const { userId, workspaceId, projectId, chatSessionId } = auth;
 
   // --- Build metadata for AI Gateway analytics ---
   const isStreaming = body.stream === true;
@@ -220,7 +98,8 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
   const gatewayUrl = buildAnthropicGatewayUrl(c.env);
 
   try {
-    const upstreamResponse = await fetch(gatewayUrl, {
+    const upstreamFetch = testUpstream?.fetch ?? globalUpstreamFetch;
+    const upstreamResponse = await upstreamFetch(gatewayUrl, {
       method: 'POST',
       headers: upstreamHeaders,
       body: JSON.stringify(body),
@@ -245,6 +124,7 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
         auth,
         upstreamAuth,
         source: 'ai-proxy-anthropic.messages',
+        testUpstream: testUpstream !== null,
       });
       return anthropicError(
         `AI inference failed (${upstreamResponse.status}). Please try again.`,
@@ -269,6 +149,7 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
       auth,
       upstreamAuth,
       source: 'ai-proxy-anthropic.messages',
+      testUpstream: testUpstream !== null,
     });
 
     return attachUpstreamTokenUsageAccounting(upstreamResponse, {
@@ -296,196 +177,6 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
   }
 });
 
-// =============================================================================
-// POST /messages/count_tokens — Token counting pass-through
-// =============================================================================
-
-aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
-  // --- Auth ---
-  const token = extractCallbackToken(c.req.header('Authorization'), c.req.header('x-api-key'));
-  if (!token) {
-    return anthropicError(
-      'Missing authentication. Provide x-api-key or Authorization: Bearer header.',
-      'authentication_error',
-      401
-    );
-  }
-
-  const db = drizzle(c.env.DATABASE, { schema });
-  let auth;
-  try {
-    auth = await verifyAIProxyAuth(token, c.env, db);
-  } catch (err) {
-    if (err instanceof AIProxyAuthError) {
-      const errType = err.statusCode === 403 ? 'permission_error' : 'authentication_error';
-      return anthropicError(err.message, errType, err.statusCode);
-    }
-    return anthropicError('Invalid or expired API key', 'authentication_error', 401);
-  }
-  if (!(await isAiProxyEnabled(c.env)))
-    return anthropicError('AI proxy is disabled', 'api_error', 503);
-
-  const { userId, workspaceId, projectId, chatSessionId } = auth;
-
-  // --- Rate limit: per-user RPM (shared key with messages endpoint) ---
-  const rpmLimit =
-    parseInt(c.env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
-  const windowSeconds =
-    parseInt(c.env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) ||
-    DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS;
-  const windowStart = getCurrentWindowStart(windowSeconds);
-  const rateLimitKey = createRateLimitKey('ai-proxy', userId, windowStart);
-
-  const {
-    allowed: rpmAllowed,
-    remaining,
-    resetAt,
-  } = await checkRateLimit(c.env.KV, rateLimitKey, rpmLimit, windowSeconds);
-
-  c.header('X-RateLimit-Limit', rpmLimit.toString());
-  c.header('X-RateLimit-Remaining', remaining.toString());
-  c.header('X-RateLimit-Reset', resetAt.toString());
-
-  if (!rpmAllowed) {
-    const retryAfter = resetAt - Math.floor(Date.now() / 1000);
-    c.header('Retry-After', Math.max(1, retryAfter).toString());
-    return anthropicError('Rate limit exceeded. Please try again later.', 'rate_limit_error', 429);
-  }
-
-  // --- Parse and validate request body ---
-  let body: Record<string, unknown>;
-  try {
-    body = await readRequestJsonRecord(
-      c.req.raw,
-      'ai-proxy-anthropic.count_tokens',
-      anthropicBodyMaxBytes(c)
-    );
-  } catch (error) {
-    return anthropicBodyParseError(error);
-  }
-
-  const modelId = typeof body.model === 'string' ? body.model : undefined;
-  if (!modelId) {
-    return anthropicError('model is required', 'invalid_request_error', 400);
-  }
-  if (!isAnthropicModel(modelId)) {
-    return anthropicError(
-      `Model '${modelId}' is not supported. Only Anthropic models (claude-*) are accepted.`,
-      'invalid_request_error',
-      400
-    );
-  }
-
-  const modelError = validateAnthropicAllowedModel(c, auth, modelId);
-  if (modelError) return modelError;
-
-  const tierError = await enforceAnthropicModelTier(c, auth, modelId);
-  if (tierError) return tierError;
-
-  const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env);
-  if (!usageGate.allowed) {
-    return anthropicUsageGateError(
-      usageGate.reason,
-      usageGate.reason === 'monthly-cost-cap' ? usageGate.monthlyCap : undefined
-    );
-  }
-
-  // --- Resolve upstream auth (Unified Billing or platform key) ---
-  let upstreamAuth;
-  try {
-    upstreamAuth = await resolveUpstreamAuth(c.env, db);
-  } catch (err) {
-    log.error('ai_proxy_anthropic.count_tokens_auth_failed', {
-      userId,
-      reason: err instanceof Error ? err.message : String(err),
-    });
-    return anthropicError(
-      'AI proxy is not configured. Contact an administrator.',
-      'api_error',
-      503
-    );
-  }
-
-  // --- Build metadata for AI Gateway analytics ---
-  const aigMetadata = buildAIGatewayMetadata({
-    userId,
-    workspaceId,
-    projectId,
-    sessionId: chatSessionId,
-    modelId,
-    stream: false,
-    hasTools: false,
-  });
-
-  // --- Build upstream headers ---
-  const upstreamHeaders: Record<string, string> = {
-    ...upstreamAuth.headers,
-    'Content-Type': 'application/json',
-    'cf-aig-metadata': aigMetadata,
-  };
-
-  const anthropicVersion = c.req.header('anthropic-version');
-  upstreamHeaders['anthropic-version'] = anthropicVersion || '2023-06-01';
-
-  const anthropicBeta = c.req.header('anthropic-beta');
-  if (anthropicBeta) {
-    upstreamHeaders['anthropic-beta'] = anthropicBeta;
-  }
-
-  const countTokensUrl = buildAnthropicCountTokensUrl(c.env);
-
-  try {
-    const upstreamResponse = await fetch(countTokensUrl, {
-      method: 'POST',
-      headers: upstreamHeaders,
-      body: JSON.stringify(body),
-    });
-
-    if (!upstreamResponse.ok) {
-      const errorText = await upstreamResponse.text();
-      log.error('ai_proxy_anthropic.count_tokens_upstream_error', {
-        userId,
-        status: upstreamResponse.status,
-        body: errorText.slice(0, 500),
-      });
-      scheduleAnthropicPlatformLimitHeaders(c, {
-        env: c.env,
-        response: upstreamResponse,
-        auth,
-        upstreamAuth,
-        source: 'ai-proxy-anthropic.count_tokens',
-      });
-      return anthropicError(
-        `Token counting failed (${upstreamResponse.status}). Please try again.`,
-        'api_error',
-        upstreamResponse.status,
-        anthropicProviderErrorHeaders(upstreamResponse.headers)
-      );
-    }
-
-    const responseText = await upstreamResponse.text();
-    const responseHeaders = new Headers({
-      'Content-Type': upstreamResponse.headers.get('content-type') || 'application/json',
-    });
-    copyCredentialLimitHeaders(upstreamResponse.headers, responseHeaders);
-    scheduleAnthropicPlatformLimitHeaders(c, {
-      env: c.env,
-      response: upstreamResponse,
-      auth,
-      upstreamAuth,
-      source: 'ai-proxy-anthropic.count_tokens',
-    });
-    return new Response(responseText, {
-      status: 200,
-      headers: responseHeaders,
-    });
-  } catch (err) {
-    log.error('ai_proxy_anthropic.count_tokens_error', {
-      userId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return anthropicError('Failed to reach upstream API. Please try again.', 'api_error', 502);
-  }
-});
+registerAnthropicCountTokensRoute(aiProxyAnthropicRoutes);
 
 export { aiProxyAnthropicRoutes };
