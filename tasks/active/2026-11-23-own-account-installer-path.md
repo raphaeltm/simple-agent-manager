@@ -238,8 +238,9 @@ only, so the installer's address stays challenged. From a non-CI address the ins
 correctly throughout, and its routes and custom domain were intact.
 
 - `scripts/check-live.mjs` now recognises the challenge and, for that case only, checks what the
-  Cloudflare API reports for the deployed Worker (commit, full mode, OAuth secrets), and says that
-  sign-in was not exercised. Any other non-JSON answer is still a failure and is reported by status
+  Cloudflare API reports for the deployed Worker (commit, full mode, OAuth secrets) and that the
+  custom domain and hostname route lead to it (added after Codex review: a challenge is answered
+  before any Worker, so it proves nothing about routing), and says that sign-in was not exercised. Any other non-JSON answer is still a failure and is reported by status
   and content type. The recipe installer on `workers.dev` is not challenged and keeps the full check.
 - The workflow's version step now runs `check-live` instead of its own inline script, for staging and
   production alike, so the production installer deploy on `main` is not left red by the challenge.

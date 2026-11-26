@@ -29,6 +29,11 @@ interface Options {
   apiBuildSha?: string;
   apiBootstrap?: boolean;
   apiMissingSecret?: boolean;
+  /** Which Worker the custom domain leads to. */
+  domainService?: string;
+  /** Which Worker the hostname route leads to; null means there is no such route. */
+  routeScript?: string | null;
+  workersDevEnabled?: boolean;
   /** Sign-in attempts answered 503 before the secret has reached that edge. */
   unconfiguredStarts?: number;
   /** Where the installer sends the sign-in; null sends no Location. */
@@ -57,7 +62,30 @@ async function check(options: Options = {}) {
     'fetch',
     vi.fn(async (input: string | URL, init: RequestInit = {}) => {
       const url = new URL(String(input));
-      if (url.hostname === 'api.cloudflare.com')
+      if (url.hostname === 'api.cloudflare.com') {
+        const host = new URL(deployedOrigin).hostname;
+        const result = (value: unknown) => Response.json({ success: true, result: value });
+        if (url.pathname.endsWith('/workers/domains'))
+          return result([
+            { hostname: 'install.unrelated.example', service: 'sam-installer-self-hosted' },
+            { hostname: host, service: options.domainService ?? 'sam-installer-self-hosted' },
+          ]);
+        if (url.pathname === '/client/v4/zones')
+          return result([{ id: 'z'.repeat(32), name: url.searchParams.get('name') }]);
+        if (url.pathname.endsWith('/workers/routes'))
+          return result([
+            { pattern: `*.${host.replace(/^install\./, '')}/*`, script: 'sam-api' },
+            ...(options.routeScript === null
+              ? []
+              : [
+                  {
+                    pattern: `${host}/*`,
+                    script: options.routeScript ?? 'sam-installer-self-hosted',
+                  },
+                ]),
+          ]);
+        if (url.pathname.endsWith('/subdomain'))
+          return result({ enabled: options.workersDevEnabled ?? true });
         return Response.json({
           success: true,
           result: {
@@ -78,6 +106,7 @@ async function check(options: Options = {}) {
             ],
           },
         });
+      }
       if (url.hostname === 'dash.cloudflare.com')
         return new Response(null, {
           status: 302,
@@ -89,7 +118,7 @@ async function check(options: Options = {}) {
                     options.cloudflare ?? 'https://dash.cloudflare.com/login?login_challenge=x',
                 },
         });
-      if (url.origin !== ORIGIN) throw new Error(`Unexpected request to ${url.origin}`);
+      if (url.origin !== deployedOrigin) throw new Error(`Unexpected request to ${url.origin}`);
       if (options.challenged || options.forbidden)
         return new Response('<html>Just a moment...</html>', {
           status: 403,
@@ -106,7 +135,7 @@ async function check(options: Options = {}) {
       if (url.pathname === '/api/config')
         return Response.json({ fullInstaller: options.fullInstaller ?? true });
       if (url.pathname === '/oauth/start' && init.method === 'POST') {
-        if (new Headers(init.headers).get('Origin') !== ORIGIN)
+        if (new Headers(init.headers).get('Origin') !== deployedOrigin)
           return Response.json({ error: 'Forbidden' }, { status: 403 });
         if (unconfiguredStarts-- > 0)
           return Response.json(
@@ -227,6 +256,7 @@ describe('an installer address that answers this client with a Cloudflare challe
     const output = await check({ challenged: true });
     expect(output).toContain('Through the Cloudflare API: commit ' + 'd'.repeat(40));
     expect(output).toContain('Sign-in was not exercised');
+    expect(output).toContain('its workers.dev address is enabled');
     expect(output).not.toContain('Installer live');
     expect(publicRequests()).toHaveLength(1);
   });
@@ -236,6 +266,46 @@ describe('an installer address that answers this client with a Cloudflare challe
     ['a missing OAuth secret', { apiMissingSecret: true }, 'oauthSecrets=false'],
   ] as const)('fails when the API shows %s', async (_label, options, message) => {
     await expect(check({ challenged: true, ...options })).rejects.toThrow(message);
+  });
+  it('checks that a custom domain and its route lead to this installer', async () => {
+    const output = await check({ challenged: true, origin: 'https://install.example.com' });
+    expect(output).toContain('its custom domain and route lead to this Worker');
+    const asked = vi
+      .mocked(fetch)
+      .mock.calls.map(([input]) => new URL(String(input)))
+      .filter((url) => url.hostname === 'api.cloudflare.com')
+      .map((url) => url.pathname + url.search);
+    expect(asked).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/\/workers\/domains\?zone_name=example\.com$/),
+        '/client/v4/zones?name=example.com',
+        `/client/v4/zones/${'z'.repeat(32)}/workers/routes`,
+      ])
+    );
+  });
+  it.each([
+    [
+      'the custom domain leads to another Worker',
+      { domainService: 'sam-api' },
+      'customDomain=false route=true',
+    ],
+    [
+      'the hostname route leads to another Worker',
+      { routeScript: 'sam-api' },
+      'customDomain=true route=false',
+    ],
+    ['the hostname route is missing', { routeScript: null }, 'customDomain=true route=false'],
+  ] as const)('fails when %s', async (_label, options, message) => {
+    await expect(
+      check({ challenged: true, origin: 'https://install.example.com', ...options })
+    ).rejects.toThrow(
+      `install.example.com does not lead to installer sam-installer-self-hosted; ${message}`
+    );
+  });
+  it('fails when a challenged workers.dev installer is not enabled there', async () => {
+    await expect(check({ challenged: true, workersDevEnabled: false })).rejects.toThrow(
+      'is not enabled on workers.dev'
+    );
   });
   it('control: a 403 that is not a challenge is still a failure', async () => {
     await expect(check({ forbidden: true })).rejects.toThrow(

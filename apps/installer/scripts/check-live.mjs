@@ -35,10 +35,10 @@ async function read(path, init = {}) {
 // The zone's bot protection can answer a non-browser client, such as a CI runner, with a
 // challenge instead of the installer (SAM's own domains since 2026-11-24). The public pages
 // cannot be checked from such a client, so what the Cloudflare API reports for the deployed
-// Worker is checked instead: the commit it runs, full mode and its OAuth secrets. That does
-// not exercise sign-in, and the message says so. An installer that is not challenged, such
+// Worker is checked instead: the commit it runs, full mode, its OAuth secrets, and that the
+// address leads to it. That does not exercise sign-in, and the message says so. An installer that is not challenged, such
 // as one on workers.dev, always gets the full check.
-function verifyThroughApi() {
+async function verifyThroughApi() {
   const state = `BUILD_SHA=${deployed('BUILD_SHA')} INSTALL_SOURCE_COMMIT=${deployed('INSTALL_SOURCE_COMMIT')}`;
   const secrets = SECRET_NAMES.every((secret) =>
     bindings.some((binding) => binding.name === secret && binding.type === 'secret_text')
@@ -51,8 +51,35 @@ function verifyThroughApi() {
     throw new Error(
       `Installer ${name} is not the expected deployment; expected=${expected} ${state} oauthSecrets=${secrets} (Cloudflare API; the public address answers this client with a challenge)`
     );
+  // A challenge is answered before the request reaches any Worker, so it says nothing about
+  // which Worker the address leads to. That is read from the API too.
+  const host = new URL(origin).hostname;
+  let routing;
+  if (host.endsWith('.workers.dev')) {
+    const subdomain = await api(`${worker}/subdomain`);
+    if (subdomain?.enabled !== true)
+      throw new Error(`Installer ${name} is not enabled on workers.dev (Cloudflare API).`);
+    routing = 'its workers.dev address is enabled';
+  } else {
+    const zoneName = host.replace(/^install\./, '');
+    const domains = await api(`${base}/workers/domains?zone_name=${encodeURIComponent(zoneName)}`);
+    const customDomain =
+      Array.isArray(domains) &&
+      domains.some((domain) => domain.hostname === host && domain.service === name);
+    const zones = await api(`/zones?name=${encodeURIComponent(zoneName)}`);
+    const zoneId = Array.isArray(zones) ? zones.find((zone) => zone.name === zoneName)?.id : '';
+    const routes = zoneId ? await api(`/zones/${zoneId}/workers/routes`) : [];
+    const route =
+      Array.isArray(routes) &&
+      routes.some((entry) => entry.pattern === `${host}/*` && entry.script === name);
+    if (!customDomain || !route)
+      throw new Error(
+        `${host} does not lead to installer ${name}; customDomain=${customDomain} route=${route} (Cloudflare API)`
+      );
+    routing = 'its custom domain and route lead to this Worker';
+  }
   console.log(
-    `Installer at ${origin}: Cloudflare answers this client with a challenge, so its public pages were not checked. Through the Cloudflare API: commit ${expected}, full mode, OAuth secrets present. Sign-in was not exercised.`
+    `Installer at ${origin}: Cloudflare answers this client with a challenge, so its public pages were not checked. Through the Cloudflare API: commit ${expected}, full mode, OAuth secrets present, ${routing}. Sign-in was not exercised.`
   );
 }
 // A freshly written Worker secret or version can take a few seconds to reach every edge.
@@ -130,5 +157,5 @@ async function checkSignIn() {
     `Installer live at ${origin}: commit ${expected}, full mode, Cloudflare accepts its sign-in client and callback.`
   );
 }
-if (challenged) verifyThroughApi();
+if (challenged) await verifyThroughApi();
 else await checkSignIn();
