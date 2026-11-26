@@ -20,10 +20,11 @@ export function deployCheckHeaders(): Record<string, string> {
   return value ? { [DEPLOY_CHECK_HEADER]: value } : {};
 }
 
+/** The deployment under test, over HTTPS only: the header is never sent in cleartext. */
 function smokeOrigins(): Set<string> {
   const origins = new Set<string>();
   for (const url of [process.env.SMOKE_TEST_URL, process.env.SMOKE_TEST_API_URL]) {
-    if (url) origins.add(new URL(url).origin);
+    if (url && new URL(url).protocol === 'https:') origins.add(new URL(url).origin);
   }
   return origins;
 }
@@ -36,8 +37,12 @@ export const test = base.extend({
   // The request is fetched without following redirects and the browser is handed the response.
   // `route.continue()` would apply the header to every hop of a redirect chain, while the handler
   // only sees the first URL, so a redirect to another host would carry the secret there. Handed a
-  // 3xx, the browser follows it as a new request, and this origin check runs again for the target.
-  // Fetching buffers the response, which is fine for the smoke tests: none of them stream.
+  // 3xx, the browser follows it itself and the route is not invoked again, so the next hop goes out
+  // without the header, even on a smoke origin. That fails closed: a redirecting hop may be
+  // challenged, but the secret never follows it.
+  // A failed fetch aborts the request instead of leaving it pending; never fall back to
+  // `route.continue()` with the header. Fetching buffers the response, which is fine for the smoke
+  // tests: none of them stream.
   context: async ({ context }, use) => {
     const headers = deployCheckHeaders();
     const origins = smokeOrigins();
@@ -45,10 +50,17 @@ export const test = base.extend({
       await context.route(
         (url) => origins.has(url.origin),
         async (route) => {
-          const response = await route.fetch({
-            headers: { ...route.request().headers(), ...headers },
-            maxRedirects: 0,
-          });
+          let response;
+          try {
+            response = await route.fetch({
+              headers: { ...route.request().headers(), ...headers },
+              maxRedirects: 0,
+            });
+          } catch {
+            // The error's call log lists the request headers, the secret included: drop it.
+            await route.abort('failed');
+            return;
+          }
           await route.fulfill({ response });
         }
       );

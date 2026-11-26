@@ -1,4 +1,4 @@
-import { type BrowserContext, type Page, expect } from '@playwright/test';
+import { type BrowserContext, expect, type Page } from '@playwright/test';
 
 import { deployCheckHeaders } from '../fixtures';
 

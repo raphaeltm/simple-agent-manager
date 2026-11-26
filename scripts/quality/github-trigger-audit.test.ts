@@ -39,6 +39,10 @@ const fixture = JSON.parse(process.env.GITHUB_TRIGGER_AUDIT_FIXTURE);
 globalThis.fetch = async (url, options) => {
   assert(options.signal instanceof AbortSignal);
   assert(options.redirect === 'error');
+  const deployCheck = options.headers['x-sam-deploy-check'];
+  // The deploy-check secret goes only to SAM's webhook, never to GitHub.
+  if (String(url).startsWith('https://api.github.com/')) assert(deployCheck === undefined);
+  else assert(deployCheck === (process.env.DEPLOY_CHECK_HEADER_VALUE || undefined));
   if (url === 'https://api.github.com/app') {
     assert(options.headers.Authorization.startsWith('Bearer '));
     assert(options.headers['X-GitHub-Api-Version'] === '2026-03-10');
@@ -133,6 +137,12 @@ describe('bounded GitHub audit signer', () => {
     const output = run();
     expect(output).toContain('githubAppMetadata');
     expect(output).toContain('syntheticSignedDelivery');
+    assertRedacted(output);
+  });
+  it('sends the deploy-check header only to the SAM webhook, without printing it', () => {
+    const output = run({ DEPLOY_CHECK_HEADER_VALUE: 'DEPLOY_CHECK_CANARY' });
+    expect(output.match(/syntheticSignedDelivery/g)).toHaveLength(2);
+    expect(output).not.toContain('DEPLOY_CHECK_CANARY');
     assertRedacted(output);
   });
   it.each(['issues', 'issue_comment', 'pull_request_review', 'pull_request_review_comment'])(
@@ -241,6 +251,11 @@ describe('audit workflow isolation', () => {
       );
       expect(secretSteps).toHaveLength(1);
       expect(secretSteps[0].run).toBe('node scripts/e2e/github-trigger-staging.mjs --phase=send');
+      // The webhook request must carry the deploy-check header through stricter zone protections.
+      expect(secretSteps[0].env.DEPLOY_CHECK_HEADER_VALUE).toBe(
+        '${{ secrets.DEPLOY_CHECK_HEADER_VALUE }}'
+      );
+      expect(job.env?.DEPLOY_CHECK_HEADER_VALUE).toBeUndefined();
       if (path === 'github-trigger-production-audit.yml') {
         expect(job.if).toContain("github.ref == 'refs/heads/main'");
         expect(job.if).toContain("needs.validate-manual-dispatch.result == 'success'");

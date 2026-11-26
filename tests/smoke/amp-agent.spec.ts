@@ -1,5 +1,4 @@
 import { deployCheckHeaders, expect, test } from './fixtures';
-
 import { loginWithToken } from './helpers/auth';
 
 test.describe('Amp agent', () => {

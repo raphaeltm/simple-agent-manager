@@ -385,7 +385,7 @@ describe('deploy-staging.yml smoke-token probe', () => {
   );
   const probe =
     workflow.match(
-      /      - name: Check smoke token on a secondary installation\n[\s\S]*?(?=\n      - name:)/
+      / {6}- name: Check smoke token on a secondary installation\n[\s\S]*?(?=\n {6}- name:)/
     )?.[0] ?? '';
 
   it('runs only for a secondary installation, never the primary', () => {
@@ -417,15 +417,16 @@ describe('deploy-staging.yml deploy-check secret scope', () => {
     new URL('../../.github/workflows/deploy-staging.yml', import.meta.url),
     'utf8'
   );
-  const job = workflow.match(/\n  smoke-tests:\n[\s\S]*?(?=\n  [a-z][\w-]*:\n)/)?.[0] ?? '';
-  const jobEnv = job.match(/\n    env:\n[\s\S]*?(?=\n    steps:)/)?.[0] ?? '';
+  const job = workflow.match(/\n {2}smoke-tests:\n[\s\S]*?(?=\n {2}[a-z][\w-]*:\n)/)?.[0] ?? '';
+  const jobEnv = job.match(/\n {4}env:\n[\s\S]*?(?=\n {4}steps:)/)?.[0] ?? '';
 
   it('exposes the bypass secret only to the steps that send requests', () => {
     expect(job).not.toBe('');
     expect(jobEnv).not.toBe('');
     expect(jobEnv).not.toContain('DEPLOY_CHECK_HEADER_VALUE');
     const scopedSteps = job.match(/DEPLOY_CHECK_HEADER_VALUE: \$\{\{ secrets\./g) ?? [];
-    expect(scopedSteps).toHaveLength(3);
+    // Token probe, smoke tests, performance audit, signed GitHub trigger sender.
+    expect(scopedSteps).toHaveLength(4);
   });
 });
 
@@ -435,7 +436,7 @@ describe('deploy-reusable.yml health check', () => {
     'utf8'
   );
   const step =
-    workflow.match(/      - name: Health Check\n[\s\S]*?(?=\n      - name:|\n      #)/)?.[0] ?? '';
+    workflow.match(/ {6}- name: Health Check\n[\s\S]*?(?=\n {6}- name:|\n {6}#)/)?.[0] ?? '';
 
   it('sends the deploy-check header without the shell touching the secret', () => {
     expect(step).not.toBe('');

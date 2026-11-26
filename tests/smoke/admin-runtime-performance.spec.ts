@@ -1,7 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 
 import { deployCheckHeaders, expect, test } from './fixtures';
-
 import { loginWithToken } from './helpers/auth';
 
 test.describe.configure({ retries: 0 });
@@ -186,7 +185,9 @@ test('bounded admin and Runtime performance audit', async ({ context }, info) =>
     const pattern = `${api}${revisit.apiPath}`;
     await page.route(pattern, async (route) => {
       await gate;
-      await route.continue();
+      // fallback(), not continue(): continue() would skip the context route in fixtures.ts that adds
+      // the deploy-check header, and the gated request would reach Cloudflare without it.
+      await route.fallback();
     });
     try {
       const start = performance.now();
