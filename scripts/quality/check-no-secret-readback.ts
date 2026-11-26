@@ -177,9 +177,25 @@ const SHELL_FILE = /\.(?:ya?ml|sh|bash)$/;
  * that removes it. A marker counts only when its file and task match an entry here, so naming an
  * unrelated open task cannot excuse a new read.
  */
-// Empty since 2026-11-26: configure-secrets.sh no longer reads installation keys back from Pulumi
-// (task 01M8C74NYMDP2YYPAG17VXJB78). A new entry needs an open task that removes it (rule 42).
-export const ALLOWED_LEGACY_READS: ReadonlyArray<{ file: string; task: string }> = [];
+// Kept in `secret-readback-allowlist.json` so an entry is a reviewed data change. Empty since
+// 2026-11-26: configure-secrets.sh no longer reads installation keys back from Pulumi (task
+// 01M8C74NYMDP2YYPAG17VXJB78). A new entry needs an open task that removes it (rule 42).
+function loadAllowedLegacyReads(): ReadonlyArray<{ file: string; task: string }> {
+  const parsed: unknown = JSON.parse(
+    readFileSync(join(import.meta.dirname, 'secret-readback-allowlist.json'), 'utf8')
+  );
+  if (
+    !Array.isArray(parsed) ||
+    !parsed.every(
+      (entry: { file?: unknown; task?: unknown } | null) =>
+        typeof entry?.file === 'string' && typeof entry?.task === 'string'
+    )
+  )
+    throw new Error('secret-readback-allowlist.json must be an array of { file, task }');
+  return parsed as ReadonlyArray<{ file: string; task: string }>;
+}
+
+export const ALLOWED_LEGACY_READS = loadAllowedLegacyReads();
 
 /**
  * Import or re-export statements, which can span lines: one that names a decrypt helper, or pulls
