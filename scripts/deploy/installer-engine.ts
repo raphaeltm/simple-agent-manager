@@ -498,6 +498,8 @@ export async function runInstallerEngine(
   const installationKeys = () =>
     ensureInstallationKeys({
       mayCreate: c.profile !== 'legacy-ci',
+      // Not an assertion that this run is new: createInstallationKeys still creates ENCRYPTION_KEY
+      // only when the Worker holds no key and the database has no users or stored credentials.
       freshInstallation: true,
       worker: { ...cloudflareAccess, worker: apiWorker },
       databaseId: output('d1DatabaseId'),

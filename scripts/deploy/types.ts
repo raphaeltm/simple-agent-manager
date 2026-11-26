@@ -311,14 +311,15 @@ export const REQUIRED_SECRETS = [
   'JWT_PUBLIC_KEY',
   'DEPLOY_SIGNING_PRIVATE_KEY',
   'DEPLOY_SIGNING_PUBLIC_KEY',
+  'PREVIEW_SIGNING_KEY',
+  'VAPID_PRIVATE_KEY',
+  'VAPID_PUBLIC_KEY',
 ] as const;
 
 // Note: HETZNER_TOKEN is NOT a platform secret.
 // Users provide their own tokens via Settings UI, stored encrypted per-user.
 // See docs/architecture/credential-security.md
 export const OPTIONAL_SECRETS = [
-  'VAPID_PRIVATE_KEY',
-  'VAPID_PUBLIC_KEY',
   'VAPID_SUBJECT',
   'GITHUB_CLIENT_ID',
   'GITHUB_CLIENT_SECRET',

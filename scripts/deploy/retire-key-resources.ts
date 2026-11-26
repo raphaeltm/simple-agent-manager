@@ -9,7 +9,7 @@
  * are random/tls resources that exist only in state, so nothing outside Pulumi changes, and the
  * Worker keeps the exact values it runs with: nothing is regenerated or rewritten.
  *
- * Previews that run while key resources may still be in state (dry runs and, later, takeover gates)
+ * Previews that run while key resources may still be in state (dry runs)
  * exclude them with `--exclude`, so they neither plan the deletion nor print or hold the ids. The
  * same allowlist drives both, matched on type AND name.
  *

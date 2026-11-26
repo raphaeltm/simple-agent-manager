@@ -144,8 +144,8 @@ export function assertComplete(inspection: KeyInspection, worker: string): void 
   throw new InstallationKeysError(
     `API Worker ${worker} is missing installation keys: ${missing.join(', ')}. ` +
       'Deploys never create or replace keys. A brand-new installation gets them from the ' +
-      'installer, or from `pnpm exec tsx scripts/deploy/installation-keys.ts create` run on a ' +
-      'machine you own.'
+      'installer, or from `pnpm exec tsx scripts/deploy/installation-keys.ts create ' +
+      '--new-installation` run on a machine you own (see the self-hosting guide).'
   );
 }
 
