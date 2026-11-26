@@ -1,14 +1,16 @@
+import { ADVISORY, advisoryPinnedNow, nearPinBoundary } from './advisory-pin';
 import { expect, expectNoOverflowOrSeriousAxeViolations, test } from './fixtures';
 
 /**
  * Blog index (src/pages/blog/index.astro): a post with `pinned: true` in its frontmatter leads the
- * page, ahead of newer posts, and the rest stay in date order. The security advisory is pinned.
+ * page, ahead of newer posts, until its `pinnedUntil` date; the rest stay in date order. The
+ * security advisory is pinned until 2026-12-09, so these tests branch on today's expected state.
  */
 
-const ADVISORY = '/blog/security-advisory-setup-takeover/';
-
 test.describe('blog index', () => {
-  test('shows the pinned security advisory first, ahead of newer posts', async ({ page }) => {
+  test('shows the pinned security advisory first, ahead of newer posts, while it is pinned', async ({ page }) => {
+    test.skip(nearPinBoundary, 'the build and this test may straddle the advisory pin end date');
+    test.skip(!advisoryPinnedNow, 'the advisory pin has ended; covered by the next test');
     await page.goto('/blog/');
     const main = page.locator('main');
     const firstPost = main.locator('a[href^="/blog/"]').first();
@@ -26,6 +28,20 @@ test.describe('blog index', () => {
     expect([...gridDates].sort().reverse()).toEqual(gridDates);
     // Shown once: the pinned post is not repeated in the grid.
     await expect(main.locator(`.post-grid a[href="${ADVISORY}"]`)).toHaveCount(0);
+  });
+
+  test('lists the advisory in date order once its pin has ended', async ({ page }) => {
+    test.skip(nearPinBoundary, 'the build and this test may straddle the advisory pin end date');
+    test.skip(advisoryPinnedNow, 'the advisory is still pinned; covered by the previous test');
+    await page.goto('/blog/');
+    const main = page.locator('main');
+    await expect(main.locator('.post-grid a').first()).toBeVisible();
+    await expect(main.locator('.pinned-card')).toHaveCount(0);
+    await expect(main.locator(`.post-grid a[href="${ADVISORY}"]`)).toHaveCount(1);
+    const gridDates = await main
+      .locator('.post-grid time')
+      .evaluateAll((els) => els.map((el) => el.getAttribute('datetime') ?? ''));
+    expect([...gridDates].sort().reverse()).toEqual(gridDates);
   });
 
   for (const theme of ['dark', 'light'] as const) {

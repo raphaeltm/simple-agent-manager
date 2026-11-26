@@ -1,20 +1,28 @@
 ---
 /**
  * Homepage security warning: one amber line at the top of the hero that sends self-hosters to the
- * pinned advisory. Remove it (and the advisory's `pinned` flag) once the advisory is no longer news.
+ * setup-takeover advisory. It shows only while that post is pinned on the blog, so the advisory's
+ * `pinned` / `pinnedUntil` frontmatter controls both; the copy below is specific to that advisory.
  */
-const ADVISORY_HREF = '/blog/security-advisory-setup-takeover/';
+import { getEntry } from 'astro:content';
+import { isPinnedAt } from '../../lib/blog-utils';
+
+const ADVISORY_ID = 'security-advisory-setup-takeover';
+const advisory = await getEntry('blog', ADVISORY_ID);
+const show = Boolean(advisory && !advisory.data.draft && isPinnedAt(advisory.data, new Date()));
 ---
 
-<a class="fh-notice" href={ADVISORY_HREF}>
-  <svg class="fh-notice-icon" viewBox="0 0 16 16" aria-hidden="true">
-    <path d="M8 1.5 15 14H1L8 1.5Z" />
-    <path class="fh-notice-mark" d="M8 6v3.5M8 11.6v.1" />
-  </svg>
-  <span class="fh-notice-tag">Security advisory</span>
-  <span class="fh-notice-text">Self-hosting SAM? Check that your setup wizard is closed.</span>
-  <span class="fh-notice-cta">Check now <span aria-hidden="true">→</span></span>
-</a>
+{show && (
+  <a class="fh-notice" href={`/blog/${ADVISORY_ID}/`}>
+    <svg class="fh-notice-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 1.5 15 14H1L8 1.5Z" />
+      <path class="fh-notice-mark" d="M8 6v3.5M8 11.6v.1" />
+    </svg>
+    <span class="fh-notice-tag">Security advisory</span>
+    <span class="fh-notice-text">Self-hosting SAM? Check that your setup wizard is closed.</span>
+    <span class="fh-notice-cta">Check now <span aria-hidden="true">→</span></span>
+  </a>
+)}
 
 <style>
   .fh-notice {
