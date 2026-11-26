@@ -312,11 +312,14 @@ describe('a head that is not genuine fails closed', () => {
     const edited = JSON.parse(genuine) as Record<string, unknown>;
     writeFileSync(headPath(stateA), JSON.stringify({ ...edited, bundleId: withValue.bundleId }));
     await refused(/edited after it was sealed/);
-    // Its seal damaged.
+    // Its seal damaged. The replacement character must differ from the original: a ciphertext
+    // that already starts with "A" would otherwise be left genuine (1 run in 64).
     const seal = edited.seal as Record<string, string>;
+    const damaged = `${seal.ciphertext.startsWith('A') ? 'B' : 'A'}${seal.ciphertext.slice(1)}`;
+    expect(damaged).not.toBe(seal.ciphertext);
     writeFileSync(
       headPath(stateA),
-      JSON.stringify({ ...edited, seal: { ...seal, ciphertext: `A${seal.ciphertext.slice(1)}` } })
+      JSON.stringify({ ...edited, seal: { ...seal, ciphertext: damaged } })
     );
     await refused(/does not open/);
     // A genuine head of another installation under the same key, naming this box's bundle.
