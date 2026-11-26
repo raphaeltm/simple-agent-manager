@@ -76,7 +76,13 @@ function createMockKV(failingKeys: Set<string> = new Set()): KVNamespace & {
     delete: vi.fn(async (key: string) => {
       store.delete(key);
     }),
-    list: vi.fn(async () => ({ keys: [], list_complete: true, cacheStatus: null })),
+    list: vi.fn(async (options?: { prefix?: string }) => ({
+      keys: [...store.keys()]
+        .filter((name) => name.startsWith(options?.prefix ?? ''))
+        .map((name) => ({ name })),
+      list_complete: true,
+      cacheStatus: null,
+    })),
     getWithMetadata: vi.fn(async () => ({ value: null, metadata: null, cacheStatus: null })),
   } as unknown as KVNamespace & {
     _store: Map<string, string>;
@@ -306,13 +312,18 @@ describe('runMonthlyCostAggregation', () => {
         return { truncated: true };
       }
     );
+    const now = new Date();
+    const month = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    // Earlier (complete) totals: user-a higher than this truncated read saw; user-b only in old logs.
+    kv._store.set(`ai-monthly-cost:user-a:${month}`, '{"costUsd":0.5,"asOfMs":1}');
+    kv._store.set(`ai-monthly-cost:user-b:${month}`, '0.300000');
+    kv._store.set('ai-monthly-cost:user-c:1999-01', '9');
     await runMonthlyCostAggregation(makeEnv({ KV: kv }));
-    const stored = [...kv._store.entries()].find(([key]) =>
-      key.startsWith('ai-monthly-cost:user-a:')
-    );
-    expect(parseGatewayMonthlyCost(stored?.[1] ?? null)).toMatchObject({
-      costUsd: 0.1,
-      truncated: true,
-    });
+    const read = (user: string) =>
+      parseGatewayMonthlyCost(kv._store.get(`ai-monthly-cost:${user}:${month}`) ?? null);
+    expect(read('user-a')).toMatchObject({ costUsd: 0.5, truncated: true });
+    expect(read('user-b')).toMatchObject({ costUsd: 0.3, truncated: true });
+    // Another month's total is not touched.
+    expect(kv._store.get('ai-monthly-cost:user-c:1999-01')).toBe('9');
   });
 });

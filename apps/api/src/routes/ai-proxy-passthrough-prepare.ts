@@ -214,6 +214,9 @@ async function enforcePassthroughFunding(
   options: PrepareProxyOptions
 ): Promise<Response | null> {
   const platformBilled = upstream.credentialSource === 'platform';
+  // Gateway installs skip this check, so an unpriced platform-funded passthrough counts $0 against
+  // the monthly cap there (it never reaches gateway logs). Whether to refuse it is Raphaël's call:
+  // idea 01M8BX1YRVN5JQ8Y2JSQB7F0QM (Codex P1 on #3015).
   if (
     platformBilled &&
     hasLocalAiCostMetering(c.env) &&

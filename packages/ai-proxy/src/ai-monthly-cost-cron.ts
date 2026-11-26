@@ -12,6 +12,7 @@ import { log } from '@simple-agent-manager/worker-core';
 
 import {
   MAX_MONTHLY_COST_CACHE_TTL_SECONDS,
+  parseGatewayMonthlyCost,
   serializeGatewayMonthlyCost,
 } from './ai-cost-estimate';
 import { resolveAiGatewayId } from './ai-gateway-availability';
@@ -105,6 +106,11 @@ export async function runMonthlyCostAggregation(
     return { enabled: true, usersUpdated: 0, totalEntries, errors: 1 };
   }
 
+  // A truncated read is missing the month's oldest logs: a user whose spend is all in them is absent
+  // from costByUser, and a present user's total covers only the newest window. Keep the previous
+  // total as a lower bound so neither falls back to an estimate that starts at this deploy.
+  if (truncated) await mergePreviousTotals(env.KV, monthKey, costByUser);
+
   // Write each user's cost to KV
   let usersUpdated = 0;
   let errors = 0;
@@ -133,4 +139,38 @@ export async function runMonthlyCostAggregation(
   });
 
   return { enabled: true, usersUpdated, totalEntries, errors };
+}
+
+/**
+ * After a truncated log read, raise each user's total to at least the previously stored one (both
+ * are lower bounds on the month: the earlier read saw older logs, this one newer). Users with a
+ * stored total and no entry in this read are carried forward. One KV list walk over this month's
+ * totals (one key per user with gateway spend), only on truncated runs. A failure is logged and
+ * leaves the scanned totals as they are.
+ */
+async function mergePreviousTotals(
+  kv: KVNamespace,
+  monthKey: string,
+  costByUser: Map<string, number>
+): Promise<void> {
+  const prefix = `${AI_MONTHLY_COST_CACHE_KV_PREFIX}:`;
+  const suffix = `:${monthKey}`;
+  try {
+    let cursor: string | undefined;
+    do {
+      const page = await kv.list({ prefix, ...(cursor ? { cursor } : {}) });
+      for (const { name } of page.keys) {
+        if (!name.endsWith(suffix)) continue;
+        const userId = name.slice(prefix.length, -suffix.length);
+        const previous = parseGatewayMonthlyCost(await kv.get(name));
+        if (!userId || !previous) continue;
+        costByUser.set(userId, Math.max(costByUser.get(userId) ?? 0, previous.costUsd));
+      }
+      cursor = page.list_complete ? undefined : page.cursor;
+    } while (cursor);
+  } catch (err) {
+    log.error('cron.monthly_cost.truncated_merge_error', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }

@@ -1252,6 +1252,8 @@ describe('L13: platform-owned passthrough credentials count toward the monthly c
   );
 
   it('keeps the gateway platform path unchanged for custom models', async () => {
+    // Known gap, idea 01M8BX1YRVN5JQ8Y2JSQB7F0QM (Codex P1 on #3015, decision pending Raphaël):
+    // unpriced platform-funded passthrough on a gateway install counts $0 against the cap.
     expect(
       (await callWithSource('platform', { model: 'custom-unpriced-model', gateway: true })).status
     ).toBe(200);
