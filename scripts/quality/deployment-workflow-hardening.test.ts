@@ -659,7 +659,8 @@ describe('deployment workflow hardening', () => {
     expect(retire).toBe(up - 1);
     expect(refresh).toBeLessThan(retire);
     const retireStep = namedStep(workflow, 'Retire Installation-Key Resources From Pulumi State');
-    expect(retireStep.run).toBe('pnpm exec tsx scripts/deploy/retire-key-resources.ts retire');
+    expect(retireStep.run).toContain('pnpm exec tsx scripts/deploy/retire-key-resources.ts retire');
+    expect(retireStep.run).toContain('PULUMI_CLI_PATH="$(realpath "$(command -v pulumi)")"');
     expect(retireStep.env).toMatchObject({
       API_WORKER_NAME: '${{ steps.deploy_resources.outputs.api_worker }}',
     });

@@ -23,7 +23,8 @@
  *     pnpm exec tsx scripts/deploy/retire-key-resources.ts retire
  */
 import { spawnSync } from 'node:child_process';
-import { join, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 import { isEntrypoint } from './entrypoint.js';
 import {
@@ -115,19 +116,36 @@ export async function retireKeyResources(options: RetireOptions): Promise<string
   return present;
 }
 
-function stackUrns(infra: string): string[] {
-  const listed = spawnSync('bash', [join(infra, '..', 'scripts/deploy/pulumi-stack-urns.sh')], {
+/** Executables by absolute path, never by a PATH lookup a writable directory could shadow. */
+const BASH = '/bin/bash';
+
+/** The Pulumi CLI the job installed: PULUMI_CLI_PATH must be absolute and outside the checkout. */
+function pulumiCli(root: string): string {
+  const path = process.env.PULUMI_CLI_PATH ?? '';
+  if (!isAbsolute(path) || path.startsWith(`${root}/`) || !existsSync(path))
+    throw new InstallationKeysError(
+      'PULUMI_CLI_PATH must be the absolute path of the installed Pulumi CLI'
+    );
+  return path;
+}
+
+function stackUrns(infra: string, pulumi: string): string[] {
+  const listed = spawnSync(BASH, [join(infra, '..', 'scripts/deploy/pulumi-stack-urns.sh')], {
     cwd: infra,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'inherit'],
+    // The lister runs `pulumi`; it gets this exact CLI's directory first.
+    env: { ...process.env, PATH: `${dirname(pulumi)}:/usr/bin:/bin` },
   });
   if (listed.status !== 0) throw new InstallationKeysError('Could not list the Pulumi stack');
   return listed.stdout.split('\n').filter(Boolean);
 }
 
 async function main(): Promise<void> {
-  const infra = resolve('infra');
-  const urns = stackUrns(infra);
+  const root = resolve('.');
+  const infra = join(root, 'infra');
+  const pulumi = pulumiCli(root);
+  const urns = stackUrns(infra, pulumi);
   const command = process.argv[2];
   if (command === 'exclude-args') {
     for (const arg of previewExcludeArgs(urns)) console.log(arg);
@@ -146,7 +164,7 @@ async function main(): Promise<void> {
         worker: process.env.API_WORKER_NAME ?? '',
       }),
     async pulumi(args) {
-      const run = spawnSync('pulumi', args, { cwd: infra, stdio: 'ignore' });
+      const run = spawnSync(pulumi, args, { cwd: infra, stdio: 'ignore' });
       if (run.status !== 0)
         throw new InstallationKeysError(
           `pulumi ${args.slice(0, 2).join(' ')} ${args[2]} exited ${run.status}`
