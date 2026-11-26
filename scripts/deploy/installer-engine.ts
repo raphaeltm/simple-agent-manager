@@ -4,7 +4,12 @@ import { join, resolve } from 'node:path';
 import * as TOML from '@iarna/toml';
 
 import { AGENT_EMAIL_MARKER_FILE } from './configure-agent-email.js';
-import { keepAdoptedDeployment, refuseRollback } from './installer-engine-adoption.js';
+import {
+  keepAdoptedDeployment,
+  refuseForcedSetup,
+  refuseRollback,
+  refuseUnopenableState,
+} from './installer-engine-adoption.js';
 import { CLI_OUTPUTS, openEngineBuildCache, VM_AGENT_OUTPUTS } from './installer-engine-cache.js';
 import {
   commandLabel,
@@ -341,13 +346,17 @@ export async function runInstallerEngine(
     token: String(env.CF_API_TOKEN),
   };
   if (c.adoption?.takeover)
-    await phase('adoption-preflight', () =>
-      refuseRollback({
+    await phase('adoption-preflight', async () => {
+      await refuseUnopenableState(() =>
+        execute('pulumi', ['stack'], join(root, 'infra'), true, true)
+      );
+      await refuseForcedSetup({ ...cloudflareAccess, worker: `${prefix}-api-${stack}` });
+      await refuseRollback({
         ...cloudflareAccess,
         root,
         stackOutputs: () => pulumi('stack', 'output', '--json'),
-      })
-    );
+      });
+    });
   // Installation outputs outlive the container through the state bucket, which exists
   // from here on and persists across installations of this account and domain.
   const cached = await openEngineBuildCache({

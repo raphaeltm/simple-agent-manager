@@ -310,3 +310,68 @@ as the resource updated in place. The provider rewrites the Pages project on eve
   reaches no event, result, command argument or command environment (proven by leaking it into the
   environment once). The keys task removes the exposure by excluding the key resources from the
   previews.
+
+## Review fixes, round 9 (2026-11-26, Codex review of 52e839dc6)
+
+The two findings are members of one class: a setting the fork's owner made in the GitHub
+Environment, which a takeover cannot see. Mapped it: the fork workflow passes about 555 variables;
+512 are Worker var overrides (carried from the deployed Worker). Of the rest, most only tune the
+deploy itself. The ones that change a deployment:
+
+- P2 "Restrict the Pages update exception to provider-only drift": fixed. The exception was by
+  resource type. It now requires the step's detailed diff to name only `canonicalDeployment` and
+  `latestDeployment`, the two properties production deploy run 45661601817 shows differing; any
+  other property (such as `productionBranch`) or a missing diff is refused, and refusals name the
+  changed properties (names only).
+- P2 "Preserve container deployment overrides during takeover": partly fixed.
+  `DEPLOY_BUILDER_MAX_INSTANCES` is read back from the Worker var sync derives from it
+  (`DEPLOY_BUILDER_CLASS_MAX_INSTANCES`), and `PREVIEW_BASE_DOMAIN` / `PREVIEW_URL_TTL_SECONDS`
+  are now carried too (`READABLE_SYNC_SETTINGS`). NOT recoverable: the sandbox and VM-agent
+  container limits and the builder instance type reach only the container configuration. The
+  Cloudflare API reference lists `max_instances` and `configuration.instance_type` for scheduled
+  container applications and says they do not apply to Durable Object applications, which is what
+  SAM's are, so I did not build recovery on it. The web app's `VITE_*` build variables and an
+  explicit `ARTIFACTS_BINDING_ENABLED` are in the same position.
+- Because those are reset silently, the takeover panel and the guide now say so at the decision
+  point. The real fix is for the owner to hand the service the fork's GitHub Environment variables
+  (non-secret by definition): idea 01M8C88CXH9YTBZ4X3TDN1GP7J, to be decided by Raphaël.
+
+## Review fixes, round 10 (2026-11-26, Codex review of 8327c79ea)
+
+- SonarCloud failed its gate on b27ab319f for a sort without a compare function in the code added
+  in round 9; fixed in 8327c79ea together with two complexity findings (no behaviour change).
+- P2 "Preserve SETUP_FORCE during adoption": not carried, by decision. `SETUP_FORCE=true` reopens
+  the setup page for lockout recovery, the surface used in the 2026-11-12 setup takeover. Carrying
+  it would keep an emergency switch on for good; dropping it silently could close setup under
+  someone mid-recovery. The takeover now refuses in `adoption-preflight` while it is on
+  (`refuseForcedSetup`), before reading the database ledgers or running any Pulumi command.
+
+## Review fixes, round 11 (2026-11-26, Codex review of d2f1c0412)
+
+- P2 "Preserve setup access for incomplete deployments": a deployment whose first-run setup was
+  never finished has no administrator, and its setup page is open behind a token the takeover
+  regenerates and does not hand over, while the service says there is nothing to set up. The
+  takeover now refuses it in `adoption-preflight` (`refuseWithoutOwner`: no active superadmin
+  other than the system row, the same test `isSetupCompleted` uses), which also keeps the install
+  policy that an instance is bound to an owner.
+
+## Attacker review (2026-11-26, after "make sure there's no way this could be used by a malicious actor for a takeover")
+
+Third security-auditor pass, adversarial, questions A–I over `apps/installer/src` and the service; the deploy-engine side of "who gains access" and "posture weakened" was checked separately. Result: 0 CRITICAL, 0 HIGH, 2 MEDIUM, 4 LOW, 4 INFO. No route was found for anyone without Cloudflare authority over the account and zone to plan, approve or run a takeover, claim a service, or gain access to the SAM application.
+
+Engine-side findings (read from code, then pinned):
+
+- `BOOTSTRAP_OWNER_EMAIL=''` on an adopted deploy is skipped by `set_worker_secret`, never deleted; the same holds for every sign-in secret the engine does not have. Pinned by `worker secret configuration leaves ownership and sign-in secrets alone on an adopted installation` (`scripts/quality/deployment-workflow-hardening.test.ts`). Mutation: making an empty optional secret queue a deletion turns it red.
+- Setup stays closed: the preflight requires an active superadmin (`refuseWithoutOwner`, same predicate as `isSetupCompleted`) and refuses `SETUP_FORCE=true`; the regenerated `SETUP_TOKEN` is handed to nobody.
+- `REQUIRE_APPROVAL` is on the override list, so an explicit value is carried and an absent one means approval stays on.
+
+Wrong passphrase (auditor LOW-1), measured offline on Pulumi 3.278 with a file backend and no local `encryptionsalt` (the engine's situation):
+
+- `pulumi stack output --json`, `stack ls`, `stack select`, `config set`, `stack export`, `stack history` all succeed with a wrong passphrase.
+- `pulumi stack`, `preview`, `preview --refresh`, `refresh`, `up` all fail with `incorrect passphrase`, and the state files are byte-identical afterwards.
+- So a wrong passphrase could never change a deployment, but it surfaced only at gate 1 as "the infrastructure preview failed", and the docs' "stops at its first step" was not true.
+- Fix: `refuseUnopenableState` runs bare `pulumi stack` (output private and discarded) as the first step of `adoption-preflight`. Tests: `refuses a takeover whose passphrase does not open the deploy state, before anything else` and `opens the deploy state once on a takeover, privately, before reading the deployment`. Mutations: call removed (both red), failure passed through (first red), output not private (second red).
+
+Addressed in docs and page copy: enter the passphrase only at an installer you trust (MEDIUM-1), retire the fork's Cloudflare token, R2 key and GitHub Environment secrets after a takeover (MEDIUM-2), the administrator email is not used to change administrators (INFO-3).
+
+Deferred, with reasons, to idea 01M8C88CXH9YTBZ4X3TDN1GP7J's sibling (see PR body): taking the passphrase at the service instead of the installer (design change to the handoff), scoping the deployment token to one deployment (applies to every installation, not only takeovers), route-steering consistency check (the no-change gate and the owner's review already stop it), global recovery rate limit and short-secret redaction (existing service behaviour, not introduced here).

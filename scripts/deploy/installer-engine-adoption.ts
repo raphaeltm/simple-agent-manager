@@ -20,13 +20,35 @@ import { WORKER_VAR_OVERRIDE_NAMES } from './worker-var-override-names.js';
  */
 const TAKEOVER_UNCHANGING_OPERATIONS = new Set(['same', 'read', 'refresh']);
 /**
- * Resource types a takeover may update in place. Cloudflare's provider rewrites the Pages project
- * on every deploy: a routine deploy of an unchanged SAM reports it as its one in-place update, so
- * refusing it would refuse every takeover. It holds no data, and every deploy republishes it. An
- * in-place update of anything else (a database, bucket, lifecycle rule, DNS record, route, key or
- * certificate) would reconfigure the existing deployment and is refused like a replacement.
+ * The one in-place update a takeover may perform. A routine deploy of an unchanged SAM updates
+ * the Pages project, because the provider tracks its deployment records and each web deploy
+ * replaces them: production deploy run 45661601817 shows `canonicalDeployment` and
+ * `latestDeployment` as the properties that differ. Refusing that would refuse every takeover.
+ * An update of the Pages project that names any other property, such as `productionBranch` (a
+ * stack option this job cannot see), is a real reconfiguration and is refused, as is an in-place
+ * update of anything else (a database, bucket, lifecycle rule, DNS record, route, key or
+ * certificate).
  */
-const TAKEOVER_UPDATABLE_TYPES = new Set(['cloudflare:index/pagesProject:PagesProject']);
+const PAGES_PROJECT_TYPE = 'cloudflare:index/pagesProject:PagesProject';
+const PAGES_DEPLOYMENT_RECORDS = new Set(['canonicalDeployment', 'latestDeployment']);
+const MAX_CHANGED_PROPERTIES = 6;
+
+/** The top-level properties a step's detailed diff names; undefined when it reports none. */
+function changedProperties(step: unknown): string[] | undefined {
+  const diff = (step as { detailedDiff?: unknown } | null)?.detailedDiff;
+  if (!diff || typeof diff !== 'object' || Array.isArray(diff)) return undefined;
+  const roots = new Set(Object.keys(diff).map((path) => path.split(/[.[]/, 1)[0] ?? path));
+  return roots.size ? [...roots].sort((a, b) => a.localeCompare(b)) : undefined;
+}
+
+/** Whether an update only replaces the Pages project's deployment records. */
+function isRoutinePagesUpdate(urn: unknown, changed: string[] | undefined): boolean {
+  return (
+    urnParts(urn)?.type === PAGES_PROJECT_TYPE &&
+    changed !== undefined &&
+    changed.every((property) => PAGES_DEPLOYMENT_RECORDS.has(property))
+  );
+}
 const MAX_REFUSAL_LINES = 30;
 
 /**
@@ -40,6 +62,20 @@ const MAX_REFUSAL_LINE_CHARS = 300;
 
 /** Worker vars the engine computes for every deploy; a deployed value must never replace them. */
 const ENGINE_OWNED_VARS = new Set(['VM_AGENT_REQUIRED_VERSION']);
+
+/**
+ * Settings `sync-wrangler-config.ts` takes from the deploy environment that are not in the
+ * override-name list but do reach the Worker as plain-text vars, so the deployed Worker still
+ * says what they were. The key is the Worker var; the value is the environment name that
+ * produces it (`DEPLOY_BUILDER_CLASS_MAX_INSTANCES` is written from `DEPLOY_BUILDER_MAX_INSTANCES`).
+ * The other container limits and the builder's instance type reach only the container
+ * configuration and cannot be read back here (idea 01M8C88CXH9YTBZ4X3TDN1GP7J).
+ */
+const READABLE_SYNC_SETTINGS: Readonly<Record<string, string>> = {
+  PREVIEW_BASE_DOMAIN: 'PREVIEW_BASE_DOMAIN',
+  PREVIEW_URL_TTL_SECONDS: 'PREVIEW_URL_TTL_SECONDS',
+  DEPLOY_BUILDER_CLASS_MAX_INSTANCES: 'DEPLOY_BUILDER_MAX_INSTANCES',
+};
 
 /** A takeover refusal. Its tail names what would change; it never carries secret values. */
 export class AdoptionRefused extends EngineCommandFailure {
@@ -79,15 +115,29 @@ export function refusedTakeoverSteps(preview: unknown): string[] {
     throw new Error('Invalid infrastructure preview');
   const refused: string[] = [];
   for (const step of (preview as { steps: unknown[] }).steps) {
-    const op = (step as { op?: unknown } | null)?.op;
-    if (typeof op !== 'string') throw new Error('Invalid infrastructure preview');
-    const urn = (step as { urn?: unknown }).urn;
-    const allowed =
-      TAKEOVER_UNCHANGING_OPERATIONS.has(op) ||
-      (op === 'update' && TAKEOVER_UPDATABLE_TYPES.has(urnParts(urn)?.type ?? ''));
-    if (!allowed) refused.push(`${op} ${urnLabel(urn)}`);
+    const line = refusedTakeoverStep(step);
+    if (line) refused.push(line);
   }
   return refused;
+}
+
+/** The refusal line for one preview step, or undefined when a takeover may perform it. */
+function refusedTakeoverStep(step: unknown): string | undefined {
+  const op = (step as { op?: unknown } | null)?.op;
+  if (typeof op !== 'string') throw new Error('Invalid infrastructure preview');
+  if (TAKEOVER_UNCHANGING_OPERATIONS.has(op)) return undefined;
+  const urn = (step as { urn?: unknown }).urn;
+  if (op !== 'update') return `${op} ${urnLabel(urn)}`;
+  const changed = changedProperties(step);
+  if (isRoutinePagesUpdate(urn, changed)) return undefined;
+  return `${op} ${urnLabel(urn)}${changedSuffix(changed)}`;
+}
+
+/** The properties an update would change, by name only: the diff's values can be resource state. */
+function changedSuffix(changed: string[] | undefined): string {
+  if (!changed) return '';
+  const shown = changed.slice(0, MAX_CHANGED_PROPERTIES).join(', ');
+  return ` (changes: ${shown}${changed.length > MAX_CHANGED_PROPERTIES ? ', …' : ''})`;
 }
 
 interface CloudflareAccess {
@@ -117,22 +167,74 @@ async function cloudflareResult(access: CloudflareAccess, path: string, init?: R
 export async function deployedWorkerOverrideVars(
   access: CloudflareAccess & { worker: string }
 ): Promise<Record<string, string>> {
+  const names = new Set(WORKER_VAR_OVERRIDE_NAMES.filter((name) => !ENGINE_OWNED_VARS.has(name)));
+  const vars: Record<string, string> = {};
+  for (const [name, text] of await deployedPlainTextVars(access)) {
+    if (names.has(name)) vars[name] = text;
+    const setting = Object.hasOwn(READABLE_SYNC_SETTINGS, name)
+      ? READABLE_SYNC_SETTINGS[name]
+      : undefined;
+    if (setting) vars[setting] = text;
+  }
+  return vars;
+}
+
+/** Every plain-text var the deployed API Worker runs with. Secrets are never readable here. */
+async function deployedPlainTextVars(
+  access: CloudflareAccess & { worker: string }
+): Promise<Array<[string, string]>> {
   const settings = await cloudflareResult(access, `workers/scripts/${access.worker}/settings`);
   if (!settings.found) throw new Error('Adopted API Worker not found');
   const bindings = (settings.result as { bindings?: unknown } | undefined)?.bindings;
   if (!Array.isArray(bindings)) throw new Error('Invalid Worker settings');
-  const names = new Set(WORKER_VAR_OVERRIDE_NAMES.filter((name) => !ENGINE_OWNED_VARS.has(name)));
-  const vars: Record<string, string> = {};
+  const vars: Array<[string, string]> = [];
   for (const binding of bindings as Array<{ type?: unknown; name?: unknown; text?: unknown }>) {
     if (
       binding?.type === 'plain_text' &&
       typeof binding.name === 'string' &&
-      names.has(binding.name) &&
       typeof binding.text === 'string'
     )
-      vars[binding.name] = binding.text;
+      vars.push([binding.name, binding.text]);
   }
   return vars;
+}
+
+/**
+ * Takeover step 1a, before the deployment is read or anything changes. `pulumi stack` opens the
+ * state's secrets, so it fails at once on a wrong passphrase, and it neither runs the program
+ * nor calls a provider. `pulumi stack output` cannot stand in: it never decrypts and succeeds
+ * with any passphrase (both measured offline on Pulumi 3.278). A wrong passphrase can change
+ * nothing either way, since preview, refresh and up all refuse it; without this check it would
+ * surface only at the first preview, as an unexplained preview failure. The command's output
+ * lists the stack's resources, so none of it is reported.
+ */
+export async function refuseUnopenableState(openState: () => Promise<unknown>): Promise<void> {
+  try {
+    await openState();
+  } catch (error) {
+    if (!(error instanceof EngineCommandFailure)) throw error;
+    throw new AdoptionRefused([
+      "The deploy state of this SAM could not be opened with the passphrase you entered, so nothing was changed. This is what a wrong passphrase looks like. Start the takeover again from the installer with the deployment's PULUMI_CONFIG_PASSPHRASE.",
+    ]);
+  }
+}
+
+/**
+ * Takeover step 1b, before anything changes. `SETUP_FORCE=true` reopens the deployment's setup
+ * page so a locked-out owner can recover (`isSetupCompleted`, platform-config-core.ts). A
+ * takeover deploys without it, which would close setup under someone in the middle of a
+ * recovery; carrying it instead would leave an emergency switch on for good, with no GitHub
+ * variable left to turn it off. So the takeover refuses until the owner has finished and
+ * removed it.
+ */
+export async function refuseForcedSetup(
+  access: CloudflareAccess & { worker: string }
+): Promise<void> {
+  const vars = await deployedPlainTextVars(access);
+  if (vars.some(([name, text]) => name === 'SETUP_FORCE' && text === 'true'))
+    throw new AdoptionRefused([
+      'This SAM has forced setup switched on (SETUP_FORCE=true), which reopens its setup page for account recovery. A takeover would switch it off. Finish the recovery and remove SETUP_FORCE from the deployment, then take over.',
+    ]);
 }
 
 /**
@@ -221,24 +323,58 @@ export async function migrationsNewerThanSource(
   for (const alias of D1_MIGRATION_ALIAS_REPAIRS)
     if (alias.binding === access.binding && local.has(alias.currentName))
       local.add(alias.legacyName);
-  const query = await cloudflareResult(access, `d1/database/${access.databaseId}/query`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sql: 'SELECT name FROM d1_migrations ORDER BY id' }),
-  });
-  if (!query.found) throw new Error('Adopted database not found');
-  const rows = Array.isArray(query.result)
-    ? (query.result[0] as { results?: unknown } | undefined)?.results
-    : undefined;
-  if (!Array.isArray(rows)) throw new Error('Invalid database migration listing');
+  const rows = await databaseRows(access, 'SELECT name FROM d1_migrations ORDER BY id');
   return (rows as Array<{ name?: unknown }>)
     .map((row) => row?.name)
     .filter((name): name is string => typeof name === 'string' && !local.has(name));
 }
 
+/** The rows of one read-only statement against a deployed D1 database. */
+async function databaseRows(
+  access: CloudflareAccess & { databaseId: string },
+  sql: string
+): Promise<unknown[]> {
+  const query = await cloudflareResult(access, `d1/database/${access.databaseId}/query`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sql }),
+  });
+  if (!query.found) throw new Error('Adopted database not found');
+  const rows = Array.isArray(query.result)
+    ? (query.result[0] as { results?: unknown } | undefined)?.results
+    : undefined;
+  if (!Array.isArray(rows)) throw new Error('Invalid database query result');
+  return rows;
+}
+
+/** `SYSTEM_USER_ID` in packages/shared/src/system-ids.ts: a sentinel row, never an owner. */
+const SYSTEM_USER_ID = 'system_anonymous_trials';
+
 /**
- * Takeover step 1, before anything changes: no deployed database may be newer than the approved
- * source, or this deploy would run older code on a newer schema.
+ * A takeover binds no owner and hands over no setup token, so the deployment must already have
+ * one: an active superadmin, the same test that closes first-run setup (`isSetupCompleted`,
+ * platform-config-core.ts). Without one its setup page is still open behind a token this deploy
+ * regenerates, and the installation service would tell the owner there is nothing to set up.
+ */
+async function refuseWithoutOwner(
+  access: CloudflareAccess & { databaseId: string }
+): Promise<void> {
+  const rows = await databaseRows(
+    access,
+    `SELECT COUNT(*) AS owners FROM users WHERE role = 'superadmin' AND status = 'active' AND id != '${SYSTEM_USER_ID}'`
+  );
+  const owners = (rows[0] as { owners?: unknown } | undefined)?.owners;
+  if (typeof owners !== 'number') throw new Error('Invalid database query result');
+  if (owners === 0)
+    throw new AdoptionRefused([
+      'This SAM has no active administrator, so its first-run setup is not finished. A takeover binds no owner and hands over no setup token. Finish setup on the existing deployment first, or install a new SAM instead.',
+    ]);
+}
+
+/**
+ * Takeover step 1, before anything changes: the deployment must have an owner, and no deployed
+ * database may be newer than the approved source, or this deploy would run older code on a newer
+ * schema.
  */
 export async function refuseRollback(
   access: CloudflareAccess & { root: string; stackOutputs(): Promise<string> }
@@ -253,6 +389,8 @@ export async function refuseRollback(
     if (databaseId === undefined && !ledger.required) continue;
     if (typeof databaseId !== 'string' || !/^[0-9a-f-]{36}$/.test(databaseId))
       throw new Error('Adopted stack has no database');
+    // The primary database holds the users.
+    if (ledger.required) await refuseWithoutOwner({ ...access, databaseId });
     const names = await migrationsNewerThanSource({ ...access, ...ledger, databaseId });
     newer.push(...names.map((name) => ledger.label + name));
   }

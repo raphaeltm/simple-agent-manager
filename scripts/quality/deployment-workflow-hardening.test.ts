@@ -870,6 +870,79 @@ describe('deployment workflow hardening', () => {
     CONFIGURE_SECRETS_TIMEOUT_MS
   );
 
+  // A takeover must not change who can get into the SAM it takes over. The installer engine has
+  // none of the fork's sign-in or ownership secrets, so it passes them empty; each must then be
+  // left exactly as the Worker holds it: not rewritten, and not deleted (a `null` entry deletes).
+  it(
+    'worker secret configuration leaves ownership and sign-in secrets alone on an adopted installation',
+    () => {
+      const accessSecrets = {
+        BOOTSTRAP_OWNER_EMAIL: 'BOOTSTRAP_OWNER_EMAIL',
+        AGENT_SIGN_IN_TRUST: 'AGENT_SIGN_IN_TRUST',
+        GITHUB_CLIENT_ID: 'GH_CLIENT_ID',
+        GITHUB_CLIENT_SECRET: 'GH_CLIENT_SECRET',
+        GITHUB_APP_PRIVATE_KEY: 'GH_APP_PRIVATE_KEY',
+        GITHUB_WEBHOOK_SECRET: 'GH_WEBHOOK_SECRET',
+        SMOKE_TEST_AUTH_ENABLED: 'SMOKE_TEST_AUTH_ENABLED',
+      };
+      const unset = Object.fromEntries(Object.values(accessSecrets).map((name) => [name, '']));
+      // What installer-engine.ts passes for an adopted deploy.
+      const adopted = runConfigureSecrets({
+        ...unset,
+        AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET: 'true',
+      });
+      // A deploy that does supply them: the same names are written.
+      const supplied = runConfigureSecrets({
+        ...Object.fromEntries(Object.values(accessSecrets).map((name) => [name, `${name}-value`])),
+        BETTER_AUTH_SECRET: 'BETTER_AUTH_SECRET-value',
+        SMOKE_TEST_AUTH_ENABLED: 'true',
+      });
+      try {
+        expect(adopted.status).toBe(0);
+        expect(supplied.status).toBe(0);
+        const kept = JSON.parse(adopted.bulkPayload ?? '{}') as Record<string, unknown>;
+        const written = JSON.parse(supplied.bulkPayload ?? '{}') as Record<string, unknown>;
+        for (const name of Object.keys(accessSecrets)) {
+          expect(Object.hasOwn(kept, name), `${name} must not be written or deleted`).toBe(false);
+          expect(written[name], `${name} is written when supplied`).toEqual(expect.any(String));
+        }
+        // BETTER_AUTH_SECRET is an installation key: no deploy writes it, supplied or not.
+        expect(Object.hasOwn(written, 'BETTER_AUTH_SECRET')).toBe(false);
+        // Liveness: the adopted upload still happened, and the only deletions are the retired names.
+        expect(kept.CF_API_TOKEN).toBe('cf-api-token-secret');
+        const deleted = Object.keys(kept).filter((name) => kept[name] === null);
+        expect(deleted.sort((a, b) => a.localeCompare(b))).toEqual([
+          'AI_PROXY_DEFAULT_MODEL',
+          'AI_PROXY_ENABLED',
+          'ANTHROPIC_API_KEY_TRIAL',
+          'TRIAL_CLAIM_TOKEN_SECRET',
+        ]);
+      } finally {
+        adopted.cleanup();
+        supplied.cleanup();
+      }
+    },
+    CONFIGURE_SECRETS_TIMEOUT_MS
+  );
+
+  it(
+    'worker secret configuration never prints a mask command outside GitHub Actions',
+    () => {
+      const result = runConfigureSecrets({
+        PULUMI_STACK: 'self-host-stack',
+        SECRET_ENCRYPTION_KEY: '',
+      });
+      try {
+        expect(result.status).toBe(0);
+        expect(result.stdout).not.toContain('::add-mask::');
+        expect(result.stdout).not.toContain('pulumi-value-');
+      } finally {
+        result.cleanup();
+      }
+    },
+    CONFIGURE_SECRETS_TIMEOUT_MS
+  );
+
   it.each([
     ['deletes the Worker trust when no trust is supplied', undefined, '', null],
     ['keeps a secondary installation trust when its secret is unset', 'true', '', undefined],

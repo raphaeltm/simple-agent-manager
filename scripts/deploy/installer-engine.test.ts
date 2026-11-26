@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -1230,9 +1230,16 @@ describe('installation engine: adopting an existing deployment', () => {
   };
   const keySame = { op: 'same', urn: keyState.urn, oldState: keyState, newState: keyState };
   // What a routine deploy of an unchanged SAM reports: the provider rewrites the Pages project.
+  const pagesUrn =
+    'urn:pulumi:prod::sam::cloudflare:index/pagesProject:PagesProject::sam-pages-project';
+  // Its deployment records are what differ after each web deploy (production run 45661601817).
   const pagesUpdate = {
     op: 'update',
-    urn: 'urn:pulumi:prod::sam::cloudflare:index/pagesProject:PagesProject::sam-pages-project',
+    urn: pagesUrn,
+    detailedDiff: {
+      'canonicalDeployment.id': { kind: 'update', inputDiff: false },
+      'latestDeployment.stages[4].endedOn': { kind: 'update', inputDiff: false },
+    },
   };
 
   interface AdoptionWorld {
@@ -1254,6 +1261,12 @@ describe('installation engine: adopting an existing deployment', () => {
     workerKeys?: readonly string[];
     /** The stack's URNs as `pulumi-stack-urns.sh` lists them; none by default. */
     urns?: string[];
+    /** The deployed Worker's SETUP_FORCE var, when it has one. */
+    setupForce?: string;
+    /** Active superadmins in the deployed database, not counting the system row. */
+    owners?: number;
+    /** `pulumi stack` cannot open the state's secrets: exit 1 with this failure tail. */
+    unopenableStateTail?: string[];
   }
   /** fixture() with an existing deployment behind it: state, stack, database, Worker settings. */
   function adoptionFixture(world: AdoptionWorld = {}) {
@@ -1270,9 +1283,22 @@ describe('installation engine: adopting an existing deployment', () => {
     writeFileSync(join(f.root, 'apps/api/wrangler.toml'), '[vars]\nCONNECTOR_ENABLED = "false"\n');
     const requests: string[] = [];
     const previewOptions: Array<{ privateOutput?: boolean }> = [];
+    const ownerQueries: string[] = [];
+    const stateOpenings: Array<{ privateOutput?: boolean; discardOutput?: boolean }> = [];
     const runner: EngineRunner = {
       ...f.runner,
       async run(command, options) {
+        // Bare `pulumi stack`: the one early command that needs the passphrase.
+        if (command.executable === 'pulumi' && command.args.join(' ') === 'stack') {
+          await f.runner.run(command, options);
+          stateOpenings.push({
+            privateOutput: options.privateOutput,
+            discardOutput: options.discardOutput,
+          });
+          if (world.unopenableStateTail)
+            throw new EngineCommandFailure(1, null, world.unopenableStateTail);
+          return '';
+        }
         if (
           command.executable === 'pulumi' &&
           command.args[0] === 'stack' &&
@@ -1318,6 +1344,13 @@ describe('installation engine: adopting an existing deployment', () => {
             result: {
               bindings: [
                 { type: 'plain_text', name: 'REQUIRE_APPROVAL', text: 'false' },
+                ...(world.setupForce === undefined
+                  ? []
+                  : [{ type: 'plain_text', name: 'SETUP_FORCE', text: world.setupForce }]),
+                // Sync settings outside the override list that the Worker still records.
+                { type: 'plain_text', name: 'PREVIEW_BASE_DOMAIN', text: 'previews.example.org' },
+                { type: 'plain_text', name: 'PREVIEW_URL_TTL_SECONDS', text: '600' },
+                { type: 'plain_text', name: 'DEPLOY_BUILDER_CLASS_MAX_INSTANCES', text: '2' },
                 { type: 'plain_text', name: 'VM_AGENT_REQUIRED_VERSION', text: 'f'.repeat(40) },
                 { type: 'plain_text', name: 'NOT_AN_OVERRIDE', text: 'ignored' },
                 // Equal to the source's defaults: not overrides, so not pinned.
@@ -1341,15 +1374,24 @@ describe('installation engine: adopting an existing deployment', () => {
           });
         const ledger = (names: string[]) =>
           Response.json({ success: true, result: [{ results: names.map((name) => ({ name })) }] });
-        if (url.endsWith(`/d1/database/${databaseId}/query`))
+        if (url.endsWith(`/d1/database/${databaseId}/query`)) {
+          const sql = (JSON.parse(String(init?.body)) as { sql: string }).sql;
+          if (sql.includes('FROM users')) {
+            ownerQueries.push(sql);
+            return Response.json({
+              success: true,
+              result: [{ results: [{ owners: world.owners ?? 1 }] }],
+            });
+          }
           return ledger(world.applied ?? ['0001_init.sql']);
+        }
         if (url.endsWith(`/d1/database/${observabilityId}/query`))
           return ledger(world.observabilityApplied ?? ['0000_init.sql']);
         return f.runner.request(url, init);
       },
     };
     const lines = () => f.commands.map((entry) => [entry.executable, ...entry.args].join(' '));
-    return { ...f, runner, requests, lines, previewOptions };
+    return { ...f, runner, requests, lines, previewOptions, ownerQueries, stateOpenings };
   }
   async function run(
     input: InstallerEngineConfig,
@@ -1402,6 +1444,11 @@ describe('installation engine: adopting an existing deployment', () => {
     for (const sync of syncs) {
       // The deployed override survives; an engine-owned var is never replaced by the old value.
       expect(sync.env.REQUIRE_APPROVAL).toBe('false');
+      expect(sync.env.PREVIEW_BASE_DOMAIN).toBe('previews.example.org');
+      expect(sync.env.PREVIEW_URL_TTL_SECONDS).toBe('600');
+      // Read back from the var sync derives from it, under the name sync reads.
+      expect(sync.env.DEPLOY_BUILDER_MAX_INSTANCES).toBe('2');
+      expect(sync.env.DEPLOY_BUILDER_CLASS_MAX_INSTANCES).toBeUndefined();
       expect(sync.env.VM_AGENT_REQUIRED_VERSION).toBe('d'.repeat(40));
       expect(sync.env.NOT_AN_OVERRIDE).toBeUndefined();
       expect(sync.env.CONNECTOR_ENABLED).toBeUndefined();
@@ -1427,6 +1474,35 @@ describe('installation engine: adopting an existing deployment', () => {
     expect(calls.some((line) => line.includes('configure-d1-read-replication.sh'))).toBe(false);
     expect(calls.some((line) => line.includes('configure-r2-cors.sh'))).toBe(true);
     expect(f.requests.some((line) => line.includes(`/d1/database/${databaseId}/query`))).toBe(true);
+  });
+
+  it('refuses a Pages project update that changes more than its deployment records', async () => {
+    const f = adoptionFixture({
+      preview: {
+        steps: [
+          sameStep,
+          {
+            op: 'update',
+            urn: pagesUrn,
+            // The fork set the stack option pagesProductionBranch, which this job cannot see.
+            detailedDiff: {
+              'latestDeployment.id': { kind: 'update', inputDiff: false },
+              productionBranch: { kind: 'update', inputDiff: true },
+            },
+          },
+          // An update that reports no detail cannot be shown to be routine.
+          { op: 'update', urn: pagesUrn.replace('sam-pages-project', 'undetailed') },
+        ],
+      },
+    });
+    const { error, events } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase infrastructure failed');
+    expect(f.lines().some((line) => line.startsWith('pulumi up'))).toBe(false);
+    expect(events.find((event) => event.status === 'failed')?.tail).toEqual([
+      'The approved source would change these resources, so nothing was changed:',
+      'update cloudflare:index/pagesProject:PagesProject sam-pages-project (changes: latestDeployment, productionBranch)',
+      'update cloudflare:index/pagesProject:PagesProject undetailed',
+    ]);
   });
 
   it('refuses an in-place update of anything but the Pages project', async () => {
@@ -1568,6 +1644,94 @@ describe('installation engine: adopting an existing deployment', () => {
       expect(calls.some((line) => line.includes(step))).toBe(false);
   });
 
+  it('refuses a takeover whose passphrase does not open the deploy state, before anything else', async () => {
+    // What Pulumi 3.278 prints for a wrong passphrase, plus a line no report may repeat.
+    const stateLine = 'CANARY-line-from-the-stack-listing';
+    const f = adoptionFixture({
+      unopenableStateTail: [
+        stateLine,
+        'error: failed to decrypt: incorrect passphrase, please set PULUMI_CONFIG_PASSPHRASE to the correct passphrase',
+      ],
+    });
+    const { error, events } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase adoption-preflight failed');
+    expect(events.find((event) => event.status === 'failed')?.tail).toEqual([
+      "The deploy state of this SAM could not be opened with the passphrase you entered, so nothing was changed. This is what a wrong passphrase looks like. Start the takeover again from the installer with the deployment's PULUMI_CONFIG_PASSPHRASE.",
+    ]);
+    expect(JSON.stringify(events)).not.toContain(stateLine);
+    // Refused before the deployment is read, before the agent and CLI builds, before any change.
+    expect(f.requests.some((line) => line.endsWith('/settings'))).toBe(false);
+    expect(f.requests.some((line) => line.endsWith('/query'))).toBe(false);
+    const calls = f.lines();
+    for (const step of [
+      'pulumi stack output',
+      'pulumi preview',
+      'pulumi-refresh-safe.sh',
+      'pulumi up',
+      'wrangler',
+      'make -C',
+    ])
+      expect(calls.some((line) => line.includes(step))).toBe(false);
+  });
+
+  it('opens the deploy state once on a takeover, privately, before reading the deployment', async () => {
+    const f = adoptionFixture();
+    expect((await run(adopted, f)).error).toBeUndefined();
+    expect(f.stateOpenings).toEqual([{ privateOutput: true, discardOutput: true }]);
+    const calls = f.lines();
+    expect(calls.indexOf('pulumi stack')).toBeGreaterThan(-1);
+    expect(calls.indexOf('pulumi stack')).toBeLessThan(calls.indexOf('pulumi stack output --json'));
+    // Liveness for the refusal test above: a takeover that opens its state does build and deploy.
+    expect(calls.some((line) => line.includes('make -C'))).toBe(true);
+    expect(calls.some((line) => line.startsWith('pulumi up'))).toBe(true);
+  });
+
+  it('refuses a takeover while forced setup is switched on, before reading or changing anything else', async () => {
+    const f = adoptionFixture({ setupForce: 'true' });
+    const { error, events } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase adoption-preflight failed');
+    expect(events.find((event) => event.status === 'failed')?.tail).toEqual([
+      'This SAM has forced setup switched on (SETUP_FORCE=true), which reopens its setup page for account recovery. A takeover would switch it off. Finish the recovery and remove SETUP_FORCE from the deployment, then take over.',
+    ]);
+    const calls = f.lines();
+    for (const step of ['pulumi-refresh-safe.sh', 'pulumi preview', 'pulumi up', 'wrangler'])
+      expect(calls.some((line) => line.includes(step))).toBe(false);
+    // Refused on the Worker's own settings, before the database ledgers are read.
+    expect(f.requests.some((line) => line.endsWith('/settings'))).toBe(true);
+    expect(f.requests.some((line) => line.endsWith('/query'))).toBe(false);
+  });
+
+  it('takes over a deployment whose forced setup is switched off, and never carries the switch', async () => {
+    const f = adoptionFixture({ setupForce: 'false' });
+    expect((await run(adopted, f)).error).toBeUndefined();
+    const syncs = f.commands.filter((entry) =>
+      entry.args.includes('scripts/deploy/sync-wrangler-config.ts')
+    );
+    expect(syncs.length).toBeGreaterThan(0);
+    for (const sync of syncs) expect(sync.env.SETUP_FORCE).toBeUndefined();
+  });
+
+  it('refuses a takeover of a deployment that has no administrator yet', async () => {
+    // First-run setup was never finished: the setup page is open behind a token this deploy
+    // would regenerate, and a takeover binds no owner.
+    const f = adoptionFixture({ owners: 0 });
+    const { error, events } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase adoption-preflight failed');
+    expect(events.find((event) => event.status === 'failed')?.tail).toEqual([
+      'This SAM has no active administrator, so its first-run setup is not finished. A takeover binds no owner and hands over no setup token. Finish setup on the existing deployment first, or install a new SAM instead.',
+    ]);
+    const calls = f.lines();
+    for (const step of ['pulumi-refresh-safe.sh', 'pulumi preview', 'pulumi up', 'wrangler'])
+      expect(calls.some((line) => line.includes(step))).toBe(false);
+    // The check counts active superadmins and leaves out the system row, as the app does.
+    expect(f.ownerQueries).toEqual([
+      "SELECT COUNT(*) AS owners FROM users WHERE role = 'superadmin' AND status = 'active' AND id != 'system_anonymous_trials'",
+    ]);
+    expect(
+      readFileSync(resolve(import.meta.dirname, '../../packages/shared/src/system-ids.ts'), 'utf8')
+    ).toContain("SYSTEM_USER_ID = 'system_anonymous_trials'");
+  });
+
   it('refuses a takeover when only the observability database is newer than the source', async () => {
     const f = adoptionFixture({ observabilityApplied: ['0000_init.sql', '0001_newer.sql'] });
     const { error, events } = await run(adopted, f);
@@ -1579,8 +1743,9 @@ describe('installation engine: adopting an existing deployment', () => {
     const calls = f.lines();
     for (const step of ['pulumi-refresh-safe.sh', 'pulumi preview', 'pulumi up', 'wrangler'])
       expect(calls.some((line) => line.includes(step))).toBe(false);
-    // Both ledgers were read, so the primary one passing is what let this one decide.
-    expect(f.requests.filter((line) => line.endsWith('/query'))).toHaveLength(2);
+    // The owner check and both ledgers were read, so the primary ledger passing is what let
+    // this one decide.
+    expect(f.requests.filter((line) => line.endsWith('/query'))).toHaveLength(3);
   });
 
   it('reads no observability ledger for a deployment that never had that database', async () => {
@@ -1592,7 +1757,9 @@ describe('installation engine: adopting an existing deployment', () => {
       events.some((event) => event.phase === 'adoption-preflight' && event.status === 'failed')
     ).toBe(false);
     expect(f.lines().some((line) => line.startsWith('pulumi preview --refresh --json'))).toBe(true);
+    // The owner check and the primary ledger; nothing against an observability database.
     expect(f.requests.filter((line) => line.endsWith('/query'))).toEqual([
+      expect.stringContaining(`/d1/database/${databaseId}/query`),
       expect.stringContaining(`/d1/database/${databaseId}/query`),
     ]);
   });
